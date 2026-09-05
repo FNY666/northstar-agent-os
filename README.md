@@ -4,29 +4,35 @@
 
 > 中文名：北辰智能体系统
 
-Northstar Agent OS is an independent project for building AI coworkers with explicit model routing, local tool boundaries, auditability, and recoverable execution. The first published component is **Northstar Codex Sidecar**, a restricted Unix-socket adapter for running Codex as a supervised worker.
+[English](README.md) · [简体中文](docs/README.zh-CN.md) · [繁體中文](docs/README.zh-TW.md) · [日本語](docs/README.ja.md) · [Español](docs/README.es.md) · [한국어](docs/README.ko.md) · [Français](docs/README.fr.md) · [Deutsch](docs/README.de.md) · [Português (Brasil)](docs/README.pt-BR.md) · [Italiano](docs/README.it.md) · [Türkçe](docs/README.tr.md) · [Tiếng Việt](docs/README.vi.md)
 
-## Relationship to OpenBot
+**In one sentence:** Northstar is an independently maintained project for assembling governed AI coworkers from explicit routing, local tool boundaries, auditability, and recoverable execution components. **What exists today is the Northstar Codex Sidecar—a restricted local worker adapter—not a finished autonomous-agent operating system.**
 
-Northstar is an independent, OpenBot-compatible project. It is not affiliated with or endorsed by CopilotKit. The sidecar is designed to integrate with OpenBot-style runtimes without claiming to be part of the upstream OpenBot repository.
+> English is the canonical project entry. Translations mirror its scope and security claims; update them when this file changes.
 
-## Repository status
+## What it is
 
-This repository currently contains the first Northstar component:
+Northstar is a component-oriented runtime project for developers who want AI coworkers to operate with visible boundaries instead of an unconstrained prompt-and-tools loop. It focuses on small, testable building blocks: a caller-visible contract, constrained execution, structured outcomes, and operational recovery.
 
-- `components/northstar-codex-sidecar/` — a local Unix-socket service that validates requests, runs Codex in read-only mode, bounds input and output behavior, redacts errors, and returns structured statuses.
+The project is built incrementally. A component can be useful on its own, but a component passing its tests does not prove that a complete agent platform is safe or production-ready.
 
-The broader Northstar Agent OS runtime is intentionally being built incrementally. Do not treat this repository as a finished autonomous-agent platform yet.
+## What is shipped today
 
-## Northstar Codex Sidecar
+This repository currently publishes one component:
 
-The sidecar accepts one JSON request per connection:
+- `components/northstar-codex-sidecar/` — a local Unix-socket service that validates requests, runs Codex in read-only mode, bounds input and output behavior, redacts errors, cleans up timed-out process groups, and returns structured statuses.
+
+The repository also includes its deterministic tests, a systemd hardening template, a conservative installer, and a rollback script.
+
+## How the sidecar works
+
+The sidecar accepts one JSON request per Unix-socket connection:
 
 ```json
 {"request_id":"demo-1","prompt":"Reply with OK","timeout_ms":10000}
 ```
 
-It returns a bounded JSON response such as:
+It returns one bounded JSON response:
 
 ```json
 {"request_id":"demo-1","status":"ok","text":"OK"}
@@ -44,41 +50,54 @@ Important properties:
 - Dedicated service user and systemd hardening template.
 - Codex is disabled until the host administrator explicitly installs and enables the service.
 
-## Requirements
+## Quick start
+
+Requirements:
 
 - Linux with Python 3.10 or newer.
 - A separately installed `codex` executable available to the service user.
 - systemd for the supplied service unit.
 - A dedicated unprivileged service user and workspace.
 
-The default Codex executable is resolved from `PATH`. Set `CODEX_BIN` explicitly when the host uses a non-standard installation path.
-
-## Local tests
-
-Run from the component directory:
-
-```sh
-python3 -m py_compile sidecar.py transport.py service.py sidecar_socket.py
-python3 -m unittest discover -s tests -p 'test_*.py' -v
-```
-
-The process-group cleanup behavior should also be validated on the target native Linux distribution. Signal and PID reaping behavior in mobile Linux environments may not be representative.
-
-## Installation
-
-The installation script is deliberately conservative and accepts only its canonical path. Review the files and adapt the service account and host paths before enabling it:
+Run the local verification from the component directory:
 
 ```sh
 cd components/northstar-codex-sidecar
+python3 -m py_compile sidecar.py transport.py service.py sidecar_socket.py
+python3 -m unittest discover -s tests -p 'test_*.py' -v
+sh -n install.sh rollback.sh
+```
+
+To review and install the deliberately conservative service lifecycle:
+
+```sh
 sudo ./install.sh
 sudo systemctl enable --now northstar-codex-sidecar.service
 ```
 
-Do not expose the Unix socket through a TCP proxy. The socket is intended to be called by a local, authenticated runtime under a dedicated Unix group.
+The default Codex executable is resolved from `PATH`. Set `CODEX_BIN` explicitly when the host uses a non-standard installation path. Review the scripts, service account, paths, and permissions before enabling anything.
+
+## Who it is for
+
+Northstar is for developers and operators building local or self-hosted AI coworker runtimes who need a narrow execution component that can be tested, audited, disabled, and rolled back. It is not a hosted AI product, a drop-in security guarantee, or a replacement for a full identity, policy, workspace, and observability architecture.
+
+## What it is not
+
+- It is not yet a complete multi-agent operating system.
+- It is not a hosted service or a promise of production readiness.
+- It is not a general shell execution API.
+- It does not by itself authorize callers, isolate every run, or propagate parent cancellation.
+- It does not include Codex credentials or provide a Codex account.
+
+## Relationship to OpenBot
+
+Northstar is an independent, OpenBot-compatible project. It is not affiliated with or endorsed by CopilotKit, OpenBot, or their maintainers. The sidecar is designed to integrate with OpenBot-style runtimes without claiming to be part of the upstream OpenBot repository.
+
+Compatibility describes an integration target, not ownership, endorsement, or security equivalence.
 
 ## Security boundary
 
-This component is not a complete security model for an agent platform. A production integration must additionally provide:
+The sidecar authenticates callers through Unix permissions only. A production integration must additionally provide:
 
 - caller authorization and identity binding;
 - workspace isolation per run or actor;
@@ -88,7 +107,17 @@ This component is not a complete security model for an agent platform. A product
 - native Linux concurrency and process-tree verification;
 - a review of Codex's own account, network, and tool configuration.
 
-Never commit API keys, OAuth tokens, Codex login state, private keys, production `.env` files, or user transcripts.
+Do not expose the Unix socket through a TCP proxy. Never commit API keys, OAuth tokens, Codex login state, private keys, production `.env` files, or user transcripts.
+
+## Project status
+
+This is the first public Northstar component. The broader Northstar Agent OS runtime is intentionally being built incrementally. Runtime identity binding, per-run workspace authorization, cancellation propagation, native Linux end-to-end verification, and production deployment integration remain host-level responsibilities or future work. Do not treat this repository as a finished autonomous-agent platform.
+
+Process-group cleanup should be validated on the target native Linux distribution. Signal and PID reaping behavior in mobile Linux environments may not be representative.
+
+## Contributing
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) for the evidence, testing, security, compatibility, and rollback expectations. Security reports belong in [SECURITY.md](SECURITY.md).
 
 ## License
 
