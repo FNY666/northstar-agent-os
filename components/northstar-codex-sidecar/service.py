@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from pathlib import PurePosixPath
 
 SOCKET_ROOT = PurePosixPath("/var/run/northstar-codex")
+STATE_ROOT = PurePosixPath("/var/lib/northstar-codex")
 
 @dataclass(frozen=True)
 class ServiceValidation:
@@ -27,6 +28,12 @@ def service_config() -> dict[str, object]:
         "transport": "unix",
         "socket": str(SOCKET_ROOT / "sidecar.sock"),
         "codex_bin": "codex",
+        # Codex's own config/auth directory. The sidecar passes this to the
+        # child verbatim, so the unit must set CODEX_HOME to the final path.
+        "codex_home": str(STATE_ROOT / "codex-home"),
+        # Run workspace, deliberately not a subdirectory of codex_home so run
+        # inputs and credentials never share a directory.
+        "workspace": str(STATE_ROOT / "workspace"),
         "stop_timeout_seconds": 15,
         "runtime_directory": "northstar-codex",
         "runtime_directory_mode": "0770",
