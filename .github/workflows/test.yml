@@ -21,8 +21,12 @@ jobs:
       - name: Unit tests
         working-directory: components/northstar-codex-sidecar
         run: python -m unittest discover -s tests -p 'test_*.py' -v
-      - name: Documentation structure
-        run: python -m unittest tests.test_documentation -v
+      - name: Compile run contract
+        working-directory: components/northstar-run-contract
+        run: python -m py_compile contract.py tests/test_contract.py
+      - name: Run contract tests
+        working-directory: components/northstar-run-contract
+        run: python -m unittest discover -s tests -p 'test_*.py' -v
       - name: Shell syntax
         working-directory: components/northstar-codex-sidecar
         run: sh -n install.sh rollback.sh
