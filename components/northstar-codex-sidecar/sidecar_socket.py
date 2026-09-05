@@ -4,7 +4,8 @@ import os, socket
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from sidecar import run_one
-from transport import MAX_LINE_CHARS, decode_request, encode_response
+from service import validate_socket_path
+from transport import MAX_LINE_BYTES, decode_request, encode_response
 
 SOCKET_PATH = "/var/run/northstar-codex/sidecar.sock"
 MAX_WORKERS = 8
@@ -14,8 +15,8 @@ def socket_mode() -> int: return 0o660
 
 def read_json_line(conn: socket.socket) -> str | None:
     chunks: list[bytes] = []; total = 0
-    while total <= MAX_LINE_CHARS:
-        chunk = conn.recv(min(8192, MAX_LINE_CHARS + 1 - total))
+    while total <= MAX_LINE_BYTES:
+        chunk = conn.recv(min(8192, MAX_LINE_BYTES + 1 - total))
         if not chunk: break
         newline = chunk.find(b"\n")
         if newline >= 0:
@@ -48,6 +49,11 @@ def handle_connection(conn: socket.socket) -> None:
         except (AttributeError, OSError): pass
 
 def serve(path: str = SOCKET_PATH) -> None:
+    checked = validate_socket_path(path)
+    if not checked.ok:
+        # Fail at startup rather than publishing a socket the service contract
+        # does not permit. systemd reports this as a start failure.
+        raise ValueError("refusing to listen: " + "; ".join(checked.errors))
     socket_path = Path(path); socket_path.parent.mkdir(parents=True, exist_ok=True)
     try: socket_path.unlink()
     except FileNotFoundError: pass

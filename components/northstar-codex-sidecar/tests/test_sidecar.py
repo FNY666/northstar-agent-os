@@ -1,5 +1,12 @@
 import json
+import os
+import socket
+import stat
+import subprocess
+import sys
+import tempfile
 import unittest
+from pathlib import Path, PurePosixPath
 
 from sidecar import classify_request, parse_codex_event, redact_error
 
@@ -267,3 +274,278 @@ class ServiceShutdownTests(unittest.TestCase):
         self.assertEqual(result["status"], "internal_error")
         self.assertNotIn("private detail", conn.sent.decode())
         self.assertTrue(conn.closed)
+
+
+UNIT_FILE = Path(__file__).resolve().parents[1] / "northstar-codex-sidecar.service"
+COMPONENT_DIR = Path(__file__).resolve().parents[1]
+
+FAKE_CODEX_ENV_PROBE = """#!/bin/sh
+cat >/dev/null
+{ printf 'CODEX_HOME=%s\\nHOME=%s\\nCODEX_WORKSPACE_CWD=%s\\n' "$CODEX_HOME" "$HOME" "$(pwd)"; } > __PROBE__
+printf '%s\\n' '{"type":"item.completed","item":{"type":"agent_message","text":"PROBED"}}'
+"""
+
+
+def write_env_probing_fake_codex(directory):
+    """Return a fake codex that records the environment the sidecar gave it."""
+    probe = directory / "child-env.txt"
+    fake = directory / "fake-codex"
+    fake.write_text(FAKE_CODEX_ENV_PROBE.replace("__PROBE__", str(probe)), encoding="utf-8")
+    fake.chmod(fake.stat().st_mode | stat.S_IXUSR)
+    return fake, probe
+
+
+def parse_unit_environment(unit_path):
+    values = {}
+    for line in Path(unit_path).read_text(encoding="utf-8").splitlines():
+        line = line.strip()
+        if line.startswith("Environment="):
+            key, _, value = line[len("Environment="):].partition("=")
+            values[key.strip()] = value.strip()
+    return values
+
+
+class CodexHomeContractTests(unittest.TestCase):
+    """The sidecar must hand Codex the configured CODEX_HOME verbatim."""
+
+    def test_child_receives_codex_home_without_nested_suffix(self):
+        import sidecar
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d)
+            fake, probe = write_env_probing_fake_codex(root)
+            configured = root / "codex-home"
+            old = (sidecar.CODEX_BIN, sidecar.CODEX_HOME, sidecar.CODEX_WORKSPACE)
+            sidecar.CODEX_BIN, sidecar.CODEX_HOME, sidecar.CODEX_WORKSPACE = str(fake), str(configured), str(root)
+            try:
+                result = sidecar.run_one({"request_id": "home", "prompt": "OK", "timeout_ms": 5000})
+            finally:
+                sidecar.CODEX_BIN, sidecar.CODEX_HOME, sidecar.CODEX_WORKSPACE = old
+            self.assertEqual(result["status"], "ok", result)
+            child = dict(line.split("=", 1) for line in probe.read_text(encoding="utf-8").splitlines())
+            self.assertEqual(child["CODEX_HOME"], str(configured))
+            self.assertEqual(child["HOME"], str(configured))
+            self.assertNotIn("codex-home/codex-home", child["CODEX_HOME"])
+
+    def test_systemd_unit_environment_yields_an_unnested_codex_home(self):
+        """Regression: the unit's CODEX_HOME used to gain a second /codex-home."""
+        unit_env = parse_unit_environment(UNIT_FILE)
+        self.assertIn("CODEX_HOME", unit_env)
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d)
+            fake, probe = write_env_probing_fake_codex(root)
+            env = dict(unit_env)
+            env["CODEX_BIN"] = str(fake)
+            env["CODEX_WORKSPACE"] = str(root)
+            env["PATH"] = os.environ.get("PATH", "/usr/bin:/bin")
+            run = subprocess.run(
+                [sys.executable, "sidecar.py"],
+                input='{"request_id":"unit-1","prompt":"OK","timeout_ms":5000}\n',
+                text=True, capture_output=True, env=env, cwd=str(COMPONENT_DIR), check=False,
+            )
+            self.assertEqual(run.returncode, 0, run.stderr)
+            self.assertEqual(json.loads(run.stdout)["status"], "ok")
+            child = dict(line.split("=", 1) for line in probe.read_text(encoding="utf-8").splitlines())
+        self.assertEqual(child["CODEX_HOME"], unit_env["CODEX_HOME"])
+        self.assertNotIn("codex-home/codex-home", child["CODEX_HOME"])
+
+    def test_unit_environment_agrees_with_the_static_service_contract(self):
+        from service import service_config
+        config = service_config()
+        unit_env = parse_unit_environment(UNIT_FILE)
+        self.assertEqual(unit_env["CODEX_HOME"], config["codex_home"])
+        self.assertEqual(unit_env["CODEX_WORKSPACE"], config["workspace"])
+        self.assertEqual(unit_env["CODEX_BIN"], config["codex_bin"])
+
+    def test_workspace_default_is_not_inside_codex_home(self):
+        from service import service_config
+        config = service_config()
+        self.assertFalse(
+            config["workspace"].startswith(config["codex_home"] + "/"),
+            "run inputs must not share a directory with Codex credentials",
+        )
+
+    def test_module_defaults_match_the_service_contract_with_a_clean_environment(self):
+        from service import service_config
+        clean = {k: v for k, v in os.environ.items() if not k.startswith("CODEX_")}
+        run = subprocess.run(
+            [sys.executable, "-c", "import sidecar; print(sidecar.CODEX_HOME); print(sidecar.CODEX_WORKSPACE)"],
+            text=True, capture_output=True, env=clean, cwd=str(COMPONENT_DIR), check=True,
+        )
+        codex_home, workspace = run.stdout.splitlines()[:2]
+        config = service_config()
+        self.assertEqual(codex_home, config["codex_home"])
+        self.assertEqual(workspace, config["workspace"])
+
+
+class TransportBoundTests(unittest.TestCase):
+    """The socket byte cap must never bind before the request validator."""
+
+    def test_any_request_the_validator_accepts_fits_the_wire_cap(self):
+        from sidecar import MAX_PROMPT_CHARS
+        from transport import MAX_LINE_BYTES
+        for char, label in (("a", "ascii"), ("\u6d4b", "cjk-bmp"), ("\U0001F600", "astral")):
+            prompt = char * MAX_PROMPT_CHARS
+            request = {"request_id": "r" * 128, "prompt": prompt, "timeout_ms": 300_000}
+            self.assertTrue(classify_request(request).ok, request and label)
+            for ensure_ascii in (False, True):
+                wire = json.dumps(request, ensure_ascii=ensure_ascii).encode()
+                self.assertLessEqual(
+                    len(wire), MAX_LINE_BYTES,
+                    f"{label} ensure_ascii={ensure_ascii}: {len(wire)} bytes exceeds cap {MAX_LINE_BYTES}",
+                )
+
+    def test_socket_reader_accepts_a_full_size_cjk_prompt(self):
+        from sidecar_socket import read_json_line
+        prompt = "\u6d4b" * 100_000
+        wire = json.dumps({"request_id": "r", "prompt": prompt, "timeout_ms": 10_000}, ensure_ascii=False).encode() + b"\n"
+
+        class ChunkedConn:
+            def __init__(self): self.buffer = wire
+            def recv(self, size):
+                chunk, self.buffer = self.buffer[:size], self.buffer[size:]
+                return chunk
+
+        line = read_json_line(ChunkedConn())
+        self.assertIsNotNone(line, "a documented-maximum CJK prompt must survive framing")
+        self.assertEqual(json.loads(line)["prompt"], prompt)
+
+    def test_socket_reader_still_rejects_input_beyond_the_byte_cap(self):
+        from sidecar_socket import read_json_line
+        from transport import MAX_LINE_BYTES
+
+        class EndlessConn:
+            def recv(self, _): return b"x" * 8192
+
+        conn = EndlessConn()
+        self.assertIsNone(read_json_line(conn))
+        self.assertGreater(MAX_LINE_BYTES, 0)
+
+    def test_full_size_cjk_prompt_survives_a_real_unix_socket_round_trip(self):
+        import service, sidecar_socket, threading, time
+        from service import validate_socket_path
+        with tempfile.TemporaryDirectory() as d:
+            root = PurePosixPath(d)
+            path = str(root / "sidecar.sock")
+            original_root = service.SOCKET_ROOT
+            service.SOCKET_ROOT = root
+            original_bin = sidecar_socket.run_one
+            sidecar_socket.run_one = lambda request: {"request_id": request.get("request_id"), "status": "ok",
+                                                     "chars": len(request.get("prompt", ""))}
+            try:
+                threading.Thread(target=sidecar_socket.serve, args=(path,), daemon=True).start()
+                for _ in range(200):
+                    if os.path.exists(path): break
+                    time.sleep(0.05)
+                self.assertTrue(validate_socket_path(path).ok)
+                prompt = "\u6d4b" * 100_000
+                wire = json.dumps({"request_id": "cjk", "prompt": prompt, "timeout_ms": 10_000}, ensure_ascii=False).encode()
+                client = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+                client.settimeout(30); client.connect(path)
+                buffer = b""
+                try:
+                    client.sendall(wire + b"\n")
+                except OSError:
+                    pass
+                while b"\n" not in buffer:
+                    chunk = client.recv(65536)
+                    if not chunk: break
+                    buffer += chunk
+                client.close()
+            finally:
+                service.SOCKET_ROOT = original_root
+                sidecar_socket.run_one = original_bin
+            self.assertEqual(json.loads(buffer.decode()), {"request_id": "cjk", "status": "ok", "chars": 100_000})
+
+
+class SocketPathEnforcementTests(unittest.TestCase):
+    """service.validate_socket_path must gate the listener, not just the tests."""
+
+    def attempt_serve(self, path, deadline=5.0):
+        """Run serve() off-thread so a missing guard fails fast instead of hanging.
+
+        self.serve resolves sidecar_socket.serve at call time, so removing the
+        guard turns this into a clean assertion failure rather than a test that
+        blocks on accept() forever.
+        """
+        import threading
+        outcome = {}
+
+        def run():
+            try:
+                self.serve(path)
+            except BaseException as exc:  # noqa: BLE001 - the test asserts on the type
+                outcome["error"] = exc
+
+        thread = threading.Thread(target=run, daemon=True)
+        thread.start()
+        thread.join(deadline)
+        return outcome.get("error")
+
+    def serve(self, path):
+        from sidecar_socket import serve
+        return serve(path)
+
+    def test_serve_refuses_a_socket_outside_the_runtime_directory(self):
+        stray = os.path.join(tempfile.gettempdir(), "northstar-stray-sidecar.sock")
+        if os.path.exists(stray): os.unlink(stray)
+        try:
+            error = self.attempt_serve(stray)
+            self.assertIsInstance(
+                error, ValueError,
+                "serve() must refuse an out-of-contract path instead of opening a listener",
+            )
+            self.assertIn("private sidecar runtime directory", str(error))
+            self.assertFalse(os.path.exists(stray), "serve() must refuse before binding")
+        finally:
+            if os.path.exists(stray): os.unlink(stray)
+
+    def test_serve_refuses_a_wrong_socket_filename(self):
+        error = self.attempt_serve("/var/run/northstar-codex/public.sock")
+        self.assertIsInstance(error, ValueError, "serve() must refuse a non-canonical socket filename")
+        self.assertIn("sidecar.sock", str(error))
+
+    def test_default_socket_path_satisfies_the_contract(self):
+        from sidecar_socket import SOCKET_PATH
+        from service import validate_socket_path
+        self.assertTrue(validate_socket_path(SOCKET_PATH).ok, validate_socket_path(SOCKET_PATH).errors)
+
+
+class InstallScriptTests(unittest.TestCase):
+    """install.sh must leave the host able to start the unit."""
+
+    def setUp(self):
+        self.script = (COMPONENT_DIR / "install.sh").read_text(encoding="utf-8")
+        self.rollback = (COMPONENT_DIR / "rollback.sh").read_text(encoding="utf-8")
+        self.unit = parse_unit_environment(UNIT_FILE)
+
+    def test_install_creates_the_service_account_the_unit_runs_as(self):
+        self.assertIn("User=northstar-codex", (COMPONENT_DIR / "northstar-codex-sidecar.service").read_text())
+        self.assertRegex(self.script, r"useradd|adduser")
+        self.assertIn("northstar-codex", self.script)
+
+    def test_install_creates_every_directory_the_unit_marks_writable(self):
+        unit = (COMPONENT_DIR / "northstar-codex-sidecar.service").read_text(encoding="utf-8")
+        readable = [line for line in unit.splitlines() if line.startswith("ReadWritePaths=")]
+        self.assertTrue(readable, "unit declares ReadWritePaths")
+        for path in readable[0][len("ReadWritePaths="):].split():
+            if path.startswith("/var/lib/"):
+                self.assertIn("/var/lib/northstar-codex", self.script)
+
+    def test_install_creates_the_codex_home_and_workspace_the_sidecar_expects(self):
+        from service import service_config
+        config = service_config()
+        for directory in (config["codex_home"], config["workspace"]):
+            self.assertTrue(
+                any(part in self.script for part in (directory, directory.rsplit("/", 1)[-1])),
+                f"install.sh does not create {directory}",
+            )
+
+    def test_install_refuses_to_run_without_root(self):
+        self.assertIn("id -u", self.script)
+
+    def test_install_is_idempotent_for_an_existing_service_account(self):
+        self.assertRegex(self.script, r"id -u \"\$SERVICE_USER\"")
+
+    def test_rollback_preserves_codex_login_state(self):
+        self.assertNotIn("rm -rf /var/lib/northstar-codex", self.rollback)
+        self.assertIn("preserved", self.rollback)
