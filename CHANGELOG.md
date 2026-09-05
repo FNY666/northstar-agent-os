@@ -1,6 +1,15 @@
 # Northstar Agent OS — initial public component
 
-This repository establishes the Northstar Agent OS name and publishes the first independently maintained component: Northstar Codex Sidecar.
+This repository establishes the Northstar Agent OS name and publishes two independently maintained foundations: Northstar Codex Sidecar and the Northstar Run Contract.
+
+## Run Contract foundation
+
+- **Versioned Run Request:** strict schema, bounded IDs and prompt, timeout limits, task-kind allowlist, and requested-capability syntax.
+- **Versioned Run Receipt:** explicit statuses and postcondition verdicts (`verified`, `failed`, `unknown`).
+- **Authenticated Run Binding:** expiring HMAC-SHA256 binding for `run_id`, `actor_id`, and `workspace_id`; host-key possession is kept separate from authorization.
+- **Strict Sidecar adapter:** only `request_id`, `prompt`, and `timeout_ms` cross the legacy Sidecar boundary; unknown fields and unverified bindings are rejected.
+
+The contract is a local foundation, not a production authorization or workspace broker. Native Linux deployment, caller identity, per-run workspace creation, and policy grants remain separate host-level responsibilities.
 
 ## Fixes since the initial component
 

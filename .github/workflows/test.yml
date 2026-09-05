@@ -23,7 +23,7 @@ jobs:
         run: python -m unittest discover -s tests -p 'test_*.py' -v
       - name: Compile run contract
         working-directory: components/northstar-run-contract
-        run: python -m py_compile contract.py tests/test_contract.py
+        run: python -m py_compile contract.py binding.py adapter.py tests/test_contract.py tests/test_integration_contract.py
       - name: Run contract tests
         working-directory: components/northstar-run-contract
         run: python -m unittest discover -s tests -p 'test_*.py' -v

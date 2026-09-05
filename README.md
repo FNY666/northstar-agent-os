@@ -18,9 +18,12 @@ The project is built incrementally. A component can be useful on its own, but a 
 
 ## What is shipped today
 
-This repository currently publishes one component:
+This repository currently publishes two complementary foundations:
 
 - `components/northstar-codex-sidecar/` — a local Unix-socket service that validates requests, runs Codex in read-only mode, bounds input and output behavior, redacts errors, cleans up timed-out process groups, and returns structured statuses.
+- `components/northstar-run-contract/` — a versioned Run Request/Receipt contract, expiring HMAC Run Binding, and strict adapter boundary for passing a verified run to the Sidecar.
+
+The Run Contract separates structural validation, host-key authentication, authorization, execution, and postcondition verification. It does not itself create workspaces, authorize users, or claim production isolation.
 
 The repository also includes its deterministic tests, a systemd hardening template, a conservative installer, and a rollback script.
 
