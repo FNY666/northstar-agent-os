@@ -26,6 +26,8 @@ Receipts use `schema_version: "northstar.receipt.v1"`. Every receipt contains a 
 
 Only `timeout` and `transport_unavailable` are fallback-eligible. `cancelled`, `protocol_error`, `business_error`, and `internal_error` must remain visible to the orchestrator and must not be silently retried as another worker.
 
+The signed binding layer is intentionally separate from structural validation. `sign_binding()` creates an expiring HMAC-SHA256 token from `schema_version`, `run_id`, `actor_id`, `workspace_id`, and `expires_at`. `verify_binding()` proves possession of the host-held secret and detects tampering or expiry; it does not prove user intent and it does not grant capabilities. The host must still authorize the actor, workspace, and requested capabilities before execution.
+
 ## Current scope
 
-This is a pure standard-library contract component. It does not create workspaces, authenticate users, run commands, store secrets, or claim production isolation. The signed binding and Sidecar adapter are separate layers.
+This is a pure standard-library contract component. It does not create workspaces, run commands, store secrets, or claim production isolation. The Sidecar adapter is a separate layer.

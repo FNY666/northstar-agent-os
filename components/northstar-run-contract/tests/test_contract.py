@@ -12,6 +12,7 @@ from contract import (  # noqa: E402
     validate_run_request,
     decode_run_request,
 )
+from binding import sign_binding, verify_binding  # noqa: E402
 
 
 def valid_request():
@@ -111,3 +112,53 @@ class RunReceiptTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class RunBindingTests(unittest.TestCase):
+    SECRET = b"test-only-host-secret"
+
+    def binding(self):
+        return {
+            "schema_version": "northstar.run.v1",
+            "run_id": "run-001",
+            "actor_id": "actor-001",
+            "workspace_id": "workspace-001",
+            "expires_at": 2_000_000_000,
+        }
+
+    def test_binding_round_trip_preserves_claims(self):
+        token = sign_binding(self.binding(), self.SECRET)
+        result = verify_binding(token, self.SECRET, now=1_999_999_999)
+        self.assertTrue(result.ok, result.errors)
+        self.assertEqual(result.binding, self.binding())
+
+    def test_binding_rejects_tampering(self):
+        token = sign_binding(self.binding(), self.SECRET)
+        payload, signature = token.split(".", 1)
+        replacement = ("A" if signature[0] != "A" else "B") + signature[1:]
+        result = verify_binding(payload + "." + replacement, self.SECRET, now=1_999_999_999)
+        self.assertFalse(result.ok)
+        self.assertIsNone(result.binding)
+
+    def test_binding_rejects_expiry_and_wrong_secret(self):
+        token = sign_binding(self.binding(), self.SECRET)
+        expired = verify_binding(token, self.SECRET, now=2_000_000_000)
+        wrong_secret = verify_binding(token, b"different-secret", now=1_999_999_999)
+        self.assertFalse(expired.ok)
+        self.assertTrue(any("expired" in error for error in expired.errors))
+        self.assertFalse(wrong_secret.ok)
+
+    def test_binding_rejects_unknown_fields_and_does_not_embed_secret(self):
+        binding = self.binding()
+        binding["capabilities"] = ["shell"]
+        with self.assertRaises(ValueError):
+            sign_binding(binding, self.SECRET)
+        token = sign_binding(self.binding(), self.SECRET)
+        self.assertNotIn(self.SECRET.decode(), token)
+
+    def test_binding_rejects_malformed_token_and_secret(self):
+        result = verify_binding("not-a-token", self.SECRET, now=1_999_999_999)
+        self.assertFalse(result.ok)
+        self.assertIsNone(result.binding)
+        with self.assertRaises(ValueError):
+            sign_binding(self.binding(), b"")
