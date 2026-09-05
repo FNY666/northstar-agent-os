@@ -13,6 +13,7 @@ from contract import (  # noqa: E402
     decode_run_request,
 )
 from binding import sign_binding, verify_binding  # noqa: E402
+from adapter import to_sidecar_request, receipt_from_sidecar_response  # noqa: E402
 
 
 def valid_request():
@@ -162,3 +163,97 @@ class RunBindingTests(unittest.TestCase):
         self.assertIsNone(result.binding)
         with self.assertRaises(ValueError):
             sign_binding(self.binding(), b"")
+
+
+class SidecarAdapterTests(unittest.TestCase):
+    SECRET = b"adapter-test-secret"
+
+    def run_request(self):
+        return valid_request()
+
+    def verified_binding(self, run=None):
+        run = run or self.run_request()
+        raw = {
+            "schema_version": run["schema_version"],
+            "run_id": run["run_id"],
+            "actor_id": run["actor_id"],
+            "workspace_id": run["workspace_id"],
+            "expires_at": 2_000_000_000,
+        }
+        return verify_binding(
+            sign_binding(raw, self.SECRET), self.SECRET, now=1_999_999_999
+        )
+
+    def test_verified_run_translates_to_strict_sidecar_request(self):
+        from adapter import to_sidecar_request
+
+        self.assertEqual(
+            to_sidecar_request(self.run_request(), self.verified_binding()),
+            {
+                "request_id": "run-001",
+                "prompt": "Collect the verified facts.",
+                "timeout_ms": 10_000,
+            },
+        )
+
+    def test_unverified_or_mismatched_binding_is_rejected(self):
+        from adapter import to_sidecar_request
+
+        with self.assertRaises(ValueError):
+            to_sidecar_request(self.run_request(), self.verified_binding().binding)
+        other = self.run_request()
+        other["run_id"] = "run-002"
+        with self.assertRaises(ValueError):
+            to_sidecar_request(other, self.verified_binding())
+
+    def test_adapter_never_forwards_arbitrary_run_fields(self):
+        from adapter import to_sidecar_request
+
+        run = self.run_request()
+        run["requested_capabilities"] = ["browser"]
+        run["shell"] = "rm -rf /"
+        with self.assertRaises(ValueError):
+            to_sidecar_request(run, self.verified_binding())
+
+    def test_sidecar_success_becomes_ok_receipt(self):
+        from adapter import receipt_from_sidecar_response
+
+        receipt = receipt_from_sidecar_response(
+            "run-001", {"request_id": "run-001", "status": "ok", "text": "OK"}
+        )
+        self.assertEqual(receipt["status"], "ok")
+        self.assertEqual(receipt["text"], "OK")
+        self.assertFalse(receipt["postconditions"])
+
+    def test_sidecar_errors_map_without_expanding_fallback(self):
+        from adapter import receipt_from_sidecar_response
+        from contract import fallback_allowed
+
+        for source_status, expected in (
+            ("timeout", "timeout"),
+            ("internal_error", "internal_error"),
+            ("protocol_error", "protocol_error"),
+            ("codex_error", "business_error"),
+            ("rejected", "rejected"),
+        ):
+            receipt = receipt_from_sidecar_response(
+                "run-001",
+                {"request_id": "run-001", "status": source_status, "error": "safe"},
+            )
+            self.assertEqual(receipt["status"], expected)
+            if expected == "timeout":
+                self.assertTrue(fallback_allowed(receipt["status"]))
+            else:
+                self.assertFalse(fallback_allowed(receipt["status"]))
+
+    def test_response_id_mismatch_and_unknown_status_are_rejected(self):
+        from adapter import receipt_from_sidecar_response
+
+        with self.assertRaises(ValueError):
+            receipt_from_sidecar_response(
+                "run-001", {"request_id": "run-002", "status": "ok", "text": "OK"}
+            )
+        with self.assertRaises(ValueError):
+            receipt_from_sidecar_response(
+                "run-001", {"request_id": "run-001", "status": "made_up"}
+            )
