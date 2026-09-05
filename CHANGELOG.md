@@ -18,6 +18,26 @@ The contract is a local foundation, not a production authorization or workspace 
 - **`serve()` enforces the socket path contract.** `service.validate_socket_path` was previously asserted only in tests; the listener now refuses to bind any path it rejects, and does so before creating a socket file.
 - **`install.sh` produces a startable service.** It now requires root, creates the `northstar-codex` system account and the `/var/lib/northstar-codex` state directories, normalises `PATH` so the sbin account tools are found, warns when `codex` is absent, and is idempotent. Both lifecycle scripts are now mode `0755` so the documented `sudo ./install.sh` works from a fresh clone.
 
+## Host-side local candidates
+
+- **Host authorization and workspace candidate:** `components/northstar-host/`
+  adds explicit actor-to-capability default-deny policy grants and
+  host-derived opaque `0700` workspace allocation. It re-verifies the Run
+  Binding and grant at allocation time and never executes commands.
+- **Durable Run vertical slice:** `components/northstar-durable-run/` adds a
+  local candidate for canonical task/run/step/event identity, append-only
+  replayable history, checkpoints, leases, per-call action gates, independent
+  postcondition verification, minimal trace metrics, and a deterministic
+  10-fixture task-level evaluation harness. Its local suite proves component
+  and fixture behavior only; it is not a production scheduler, sandbox, or
+  deployment.
+
+These candidates are local-only and have not been deployed to 103, 104, a
+dormitory host, or production OpenBot. They are not a complete workspace
+broker, sandbox, identity system, or production safety proof. Native Linux
+concurrency, filesystem race, lifecycle, and deployment validation remain
+outstanding.
+
 ## Scope of this release
 
 - restricted Unix-socket transport;
@@ -30,6 +50,8 @@ The contract is a local foundation, not a production authorization or workspace 
 
 ## Explicit non-goals
 
-This is not yet a complete multi-agent operating system, hosted service, or endorsement of the upstream OpenBot project. Runtime identity binding, per-run workspace authorization, native Linux E2E, and production deployment integration remain host-level responsibilities.
-
-See [README.md](README.md) for installation and security boundaries.
+This is not yet a complete multi-agent operating system, hosted service, or
+endorsement of the upstream OpenBot project. Runtime identity binding, per-run
+workspace authorization, durable execution integration, native Linux E2E, and
+production deployment integration remain host-level responsibilities or future
+work.

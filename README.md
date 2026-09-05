@@ -18,12 +18,15 @@ The project is built incrementally. A component can be useful on its own, but a 
 
 ## What is shipped today
 
-This repository currently publishes two complementary foundations:
+This repository currently publishes two complementary foundations and one
+local-only host candidate:
 
 - `components/northstar-codex-sidecar/` — a local Unix-socket service that validates requests, runs Codex in read-only mode, bounds input and output behavior, redacts errors, cleans up timed-out process groups, and returns structured statuses.
 - `components/northstar-run-contract/` — a versioned Run Request/Receipt contract, expiring HMAC Run Binding, and strict adapter boundary for passing a verified run to the Sidecar.
+- `components/northstar-host/` — a standard-library local candidate for explicit host policy grants and opaque private workspaces; it re-verifies binding and authorization and does not execute commands.
+- `components/northstar-durable-run/` — a local vertical-slice prototype for canonical Run/Step/Event contracts, append-only history, checkpoints, leases, per-call action authorization, independent verification, minimal trace metrics, and a deterministic fixture evaluation harness. It is not a production scheduler or sandbox.
 
-The Run Contract separates structural validation, host-key authentication, authorization, execution, and postcondition verification. It does not itself create workspaces, authorize users, or claim production isolation.
+The Run Contract separates structural validation, host-key authentication, authorization, execution, and postcondition verification. The host and durable-run candidates demonstrate these boundaries locally; neither claims production identity, isolation, or deployment readiness.
 
 The repository also includes its deterministic tests, a systemd hardening template, a conservative installer, and a rollback script.
 
@@ -111,15 +114,22 @@ Compatibility describes an integration target, not ownership, endorsement, or se
 
 ## Security boundary
 
-The sidecar authenticates callers through Unix permissions only. A production integration must additionally provide:
+The sidecar authenticates callers through Unix permissions only. The local
+`northstar-host` candidate adds a separately testable host-side policy grant
+and opaque `0700` workspace allocation, but it is not a sandbox or production
+identity system. A production integration must additionally provide:
 
-- caller authorization and identity binding;
-- workspace isolation per run or actor;
+- caller identity and authorization policy storage/rotation/revocation;
+- workspace lifecycle, cleanup, lease, and native filesystem race handling;
 - cancellation propagation from the parent runtime;
 - structured observability without sensitive prompt logging;
 - health checks and rollback procedures;
 - native Linux concurrency and process-tree verification;
 - a review of Codex's own account, network, and tool configuration.
+
+The host candidate has not been deployed to 103, 104, a dormitory host, or
+production OpenBot. It does not execute commands or connect the workspace to
+the Sidecar by itself.
 
 Do not expose the Unix socket through a TCP proxy. Never commit API keys, OAuth tokens, Codex login state, private keys, production `.env` files, or user transcripts.
 

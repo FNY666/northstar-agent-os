@@ -27,6 +27,18 @@ jobs:
       - name: Run contract tests
         working-directory: components/northstar-run-contract
         run: python -m unittest discover -s tests -p 'test_*.py' -v
+      - name: Compile host component
+        working-directory: components/northstar-host
+        run: PYTHONPATH=../northstar-run-contract python -m py_compile authorization.py workspace.py tests/test_authorization.py tests/test_workspace.py tests/test_integration_host.py
+      - name: Host component tests
+        working-directory: components/northstar-host
+        run: PYTHONPATH=../northstar-run-contract python -m unittest discover -s tests -p 'test_*.py' -v
+      - name: Compile durable run component
+        working-directory: components/northstar-durable-run
+        run: python -m py_compile durable_contract.py event_store.py action_gateway.py runner.py verifier.py trace_metrics.py evaluation.py tests/test_*.py
+      - name: Durable run component tests
+        working-directory: components/northstar-durable-run
+        run: PYTHONPATH=. python -m unittest discover -s tests -p 'test_*.py' -v
       - name: Shell syntax
         working-directory: components/northstar-codex-sidecar
         run: sh -n install.sh rollback.sh
