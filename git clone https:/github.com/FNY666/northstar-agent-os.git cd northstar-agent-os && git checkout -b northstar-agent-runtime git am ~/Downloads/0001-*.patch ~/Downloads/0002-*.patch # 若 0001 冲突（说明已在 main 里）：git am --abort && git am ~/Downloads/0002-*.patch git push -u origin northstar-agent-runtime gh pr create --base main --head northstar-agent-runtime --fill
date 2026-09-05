@@ -1,0 +1,6 @@
+git clone https://github.com/FNY666/northstar-agent-os.git
+cd northstar-agent-os && git checkout -b northstar-agent-runtime
+git am ~/Downloads/0001-*.patch ~/Downloads/0002-*.patch
+# 若 0001 冲突（说明已在 main 里）：git am --abort && git am ~/Downloads/0002-*.patch
+git push -u origin northstar-agent-runtime
+gh pr create --base main --head northstar-agent-runtime --fill
