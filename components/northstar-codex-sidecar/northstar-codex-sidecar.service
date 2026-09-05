@@ -1,0 +1,27 @@
+[Unit]
+Description=Northstar Codex sidecar for OpenBot-compatible runtimes
+After=network-online.target
+
+[Service]
+Type=simple
+User=northstar-codex
+Group=northstar-codex
+RuntimeDirectory=northstar-codex
+RuntimeDirectoryMode=0770
+Environment=HOME=/var/lib/northstar-codex
+Environment=CODEX_HOME=/var/lib/northstar-codex/codex-home
+Environment=CODEX_WORKSPACE=/var/lib/northstar-codex/workspace
+Environment=CODEX_BIN=codex
+ExecStart=/usr/bin/python3 /opt/northstar-codex-sidecar/sidecar_socket.py
+Restart=on-failure
+TimeoutStopSec=15
+KillMode=control-group
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/northstar-codex /var/run/northstar-codex
+RestrictAddressFamilies=AF_UNIX
+
+[Install]
+WantedBy=multi-user.target

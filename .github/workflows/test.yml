@@ -1,0 +1,26 @@
+name: Northstar Codex Sidecar
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Compile
+        working-directory: components/northstar-codex-sidecar
+        run: python -m py_compile sidecar.py transport.py service.py sidecar_socket.py tests/test_sidecar.py
+      - name: Unit tests
+        working-directory: components/northstar-codex-sidecar
+        run: python -m unittest discover -s tests -p 'test_*.py' -v
+      - name: Shell syntax
+        working-directory: components/northstar-codex-sidecar
+        run: sh -n install.sh rollback.sh

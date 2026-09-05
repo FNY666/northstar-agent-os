@@ -1,0 +1,13 @@
+# Python
+__pycache__/
+*.py[cod]
+
+# Local runtime state
+.env
+*.log
+*.sock
+
+# Build and editor artifacts
+.DS_Store
+.vscode/
+.idea/
