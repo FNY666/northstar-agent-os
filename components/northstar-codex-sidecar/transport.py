@@ -3,9 +3,24 @@ from __future__ import annotations
 import json
 from dataclasses import dataclass
 from typing import Any
-from sidecar import classify_request
+from sidecar import MAX_PROMPT_CHARS, classify_request
 
+# Character cap for an already-decoded request line. Any request
+# classify_request accepts stays well below this (a 100,000-character prompt
+# plus a 128-character request_id plus framing is roughly 100,200 characters).
 MAX_LINE_CHARS = 200_000
+
+# Byte cap for the wire, enforced by the socket reader before decoding.
+#
+# This must never be the binding limit for a request classify_request accepts,
+# otherwise a caller gets a misleading "invalid JSON request" instead of the
+# validator's own verdict. Worst-case wire size is driven by JSON escaping, not
+# by UTF-8: json.dumps defaults to ensure_ascii=True, which turns one BMP
+# character into "\uXXXX" (6 bytes) and one astral character into a surrogate
+# pair (12 bytes). Twelve bytes per prompt character therefore covers both the
+# raw-UTF-8 and the fully-escaped encoding of any prompt the validator allows;
+# the remainder is headroom for request_id, timeout_ms, and framing.
+MAX_LINE_BYTES = 12 * MAX_PROMPT_CHARS + 65_536
 
 @dataclass(frozen=True)
 class TransportValidation:

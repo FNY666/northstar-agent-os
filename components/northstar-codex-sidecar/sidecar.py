@@ -9,8 +9,13 @@ MIN_TIMEOUT_MS=1_000
 MAX_TIMEOUT_MS=300_000
 FALLBACK_STATUSES={"transport_unavailable","timeout"}
 CODEX_BIN=os.environ.get("CODEX_BIN","codex")
-CODEX_HOME=os.environ.get("CODEX_HOME","/var/lib/northstar-codex")
-CODEX_WORKSPACE=os.environ.get("CODEX_WORKSPACE",f"{CODEX_HOME}/workspace")
+# CODEX_HOME is Codex's own config/auth directory. It is passed to the child
+# verbatim: the sidecar never appends to it, so a host that sets it explicitly
+# gets exactly the directory it asked for and no double-nested path.
+CODEX_HOME=os.environ.get("CODEX_HOME","/var/lib/northstar-codex/codex-home")
+# Deliberately not derived from CODEX_HOME: the workspace holds run inputs,
+# while CODEX_HOME holds credentials, and they should not share a directory.
+CODEX_WORKSPACE=os.environ.get("CODEX_WORKSPACE","/var/lib/northstar-codex/workspace")
 SENSITIVE_PATTERNS=(
  re.compile(r"(?:sk|rk)-[A-Za-z0-9_-]{16,}",re.I),
  re.compile(r"eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+(?:\.[A-Za-z0-9_-]+)?",re.I),
@@ -85,7 +90,7 @@ def run_one(request:object)->dict:
  if not checked.ok: return {"request_id":request.get("request_id") if isinstance(request,dict) else None,"status":"rejected","errors":list(checked.errors)}
  assert isinstance(request,dict)
  try:
-  proc=subprocess.Popen([CODEX_BIN,"exec","--json","--ephemeral","--sandbox","read-only","--skip-git-repo-check","--cd",CODEX_WORKSPACE,"-"],stdin=subprocess.PIPE,stdout=subprocess.PIPE,stderr=subprocess.PIPE,cwd=CODEX_WORKSPACE,env={"HOME":CODEX_HOME,"CODEX_HOME":f"{CODEX_HOME}/codex-home","PATH":os.environ.get("PATH","/usr/bin:/bin")},text=True,start_new_session=True)
+  proc=subprocess.Popen([CODEX_BIN,"exec","--json","--ephemeral","--sandbox","read-only","--skip-git-repo-check","--cd",CODEX_WORKSPACE,"-"],stdin=subprocess.PIPE,stdout=subprocess.PIPE,stderr=subprocess.PIPE,cwd=CODEX_WORKSPACE,env={"HOME":CODEX_HOME,"CODEX_HOME":CODEX_HOME,"PATH":os.environ.get("PATH","/usr/bin:/bin")},text=True,start_new_session=True)
   out,err=proc.communicate(request["prompt"],timeout=request["timeout_ms"]/1000)
  except subprocess.TimeoutExpired:
   _terminate_process_tree(proc); return {"request_id":request["request_id"],"status":"timeout"}

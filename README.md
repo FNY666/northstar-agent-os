@@ -35,8 +35,9 @@ It returns a bounded JSON response such as:
 Important properties:
 
 - Unix socket only; no TCP listener is provided.
+- The listener refuses to bind unless the socket path satisfies `service.validate_socket_path`.
 - Strict request allowlist: `request_id`, `prompt`, and `timeout_ms`.
-- Prompt and timeout bounds.
+- Prompt and timeout bounds. The 100,000-character prompt limit is a character limit, and the wire cap is derived from it, so a maximum-length prompt survives framing whether the client sends raw UTF-8 or `\uXXXX` escapes.
 - Codex runs with `--sandbox read-only` and `--ephemeral`.
 - Separate process group with TERM-to-KILL cleanup on timeout.
 - Per-connection read deadline and bounded worker pool.
@@ -49,9 +50,11 @@ Important properties:
 - Linux with Python 3.10 or newer.
 - A separately installed `codex` executable available to the service user.
 - systemd for the supplied service unit.
-- A dedicated unprivileged service user and workspace.
+- `useradd`/`groupadd` (or `adduser`/`addgroup`) for `install.sh` to create the service account.
 
-The default Codex executable is resolved from `PATH`. Set `CODEX_BIN` explicitly when the host uses a non-standard installation path.
+`install.sh` creates the dedicated unprivileged service account and the state directories; you do not need to prepare them by hand.
+
+`CODEX_HOME` is Codex's own config/auth directory and is passed to the child process verbatim. The sidecar never appends to it, so the value in the unit file is exactly the directory Codex reads. Set `CODEX_BIN` explicitly when the host uses a non-standard installation path.
 
 ## Local tests
 
@@ -66,13 +69,17 @@ The process-group cleanup behavior should also be validated on the target native
 
 ## Installation
 
-The installation script is deliberately conservative and accepts only its canonical path. Review the files and adapt the service account and host paths before enabling it:
+The installation script is deliberately conservative: it accepts only its canonical prefix and must run as root. Review the files and adapt the service account and host paths before enabling it:
 
 ```sh
 cd components/northstar-codex-sidecar
 sudo ./install.sh
 sudo systemctl enable --now northstar-codex-sidecar.service
 ```
+
+`install.sh` creates the `northstar-codex` system account, `/var/lib/northstar-codex` with its `codex-home` and `workspace` subdirectories, installs the code and unit, and runs `systemctl daemon-reload`. It is idempotent and warns if `codex` is not on `PATH`. It does not enable or start the service.
+
+`rollback.sh --confirm` removes the installed code and unit but deliberately preserves the service account and `/var/lib/northstar-codex`, because those hold Codex login state and run inputs.
 
 Do not expose the Unix socket through a TCP proxy. The socket is intended to be called by a local, authenticated runtime under a dedicated Unix group.
 
