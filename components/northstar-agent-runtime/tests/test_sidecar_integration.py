@@ -79,8 +79,20 @@ class SidecarServedMixin:
 
         thread = threading.Thread(target=sidecar_socket.serve, args=(str(self._socket_path),), daemon=True)
         thread.start()
+        # Wait until the socket actually accepts connections (file existence
+        # alone races the listen() call).
+        import socket as socket_module
+
         deadline = time.time() + 10
-        while not self._socket_path.exists() and time.time() < deadline:
+        while time.time() < deadline:
+            if self._socket_path.exists():
+                try:
+                    with socket_module.socket(socket_module.AF_UNIX, socket_module.SOCK_STREAM) as probe:
+                        probe.settimeout(0.5)
+                        probe.connect(str(self._socket_path))
+                    break
+                except OSError:
+                    pass
             time.sleep(0.02)
         self.assertTrue(self._socket_path.exists(), "sidecar socket never appeared")
         return str(self._socket_path)
@@ -98,6 +110,32 @@ class SidecarServedMixin:
 
 
 class SidecarClientDirectTests(unittest.TestCase, SidecarServedMixin):
+    def test_client_retries_a_socket_that_is_not_listening_yet(self):
+        # The listener binds the socket file before it calls listen(); a
+        # client must survive that startup window instead of reporting
+        # transport_unavailable.
+        import socket as socket_module
+
+        directory = Path(tempfile.mkdtemp(prefix="nsrt-late-"))
+        path = str(directory / "late.sock")
+        done = threading.Event()
+
+        def server_thread():
+            server = socket_module.socket(socket_module.AF_UNIX, socket_module.SOCK_STREAM)
+            server.bind(path)  # file exists, not listening yet
+            time.sleep(0.05)
+            server.listen(1)
+            conn, _ = server.accept()
+            conn.sendall(b'{"request_id":"late","status":"ok","text":"up"}\n')
+            conn.close()
+            server.close()
+            done.set()
+
+        threading.Thread(target=server_thread, daemon=True).start()
+        result = SidecarClient(path, timeout=5).execute("hi", timeout_ms=1000)
+        self.assertEqual(result["status"], "ok", result)
+        self.assertTrue(done.wait(5))
+
     def test_client_round_trip_against_real_serve(self):
         self.start_sidecar(FAKE_CODEX_ECHO)
         self.addCleanup(self.stop_sidecar)
