@@ -39,8 +39,9 @@ concurrency, filesystem race, lifecycle, and deployment validation remain
 outstanding.
 - **Agent interoperability candidate:** `components/northstar-agent-interop/`
   adds a backend-neutral signed attestation, narrowed handoff grant, context
-  envelope, and typed adapter receipt boundary. It does not yet connect real
-  Codex, Claude Code, Hermes, Cursor, or OpenBot backends.
+  envelope, typed adapter receipt boundary, and a local-only
+  `orchestrator → Claude Code → Codex → Hermes` canary. The canary uses fake
+  executors only and does not connect real vendor backends.
 
 ## Scope of this release
 

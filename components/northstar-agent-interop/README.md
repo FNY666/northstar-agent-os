@@ -69,9 +69,10 @@ models, licenses, authentication boundaries and execution environments. Each
 future adapter must be independently reviewed and tested behind this contract;
 connecting a name to the registry is not proof of integration.
 
-The current adapter calls a caller-provided fake/local executor only. No
-network, server, vendor account, browser session or production environment is
-used by the tests.
+The current adapter calls a caller-provided fake/local executor only. The
+canary demonstrates a three-backend handoff chain using fake executors and an
+independent artifact verifier. No network, server, vendor account, browser
+session or production environment is used by the tests.
 
 ## Current ceiling
 
