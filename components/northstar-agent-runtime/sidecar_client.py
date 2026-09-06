@@ -10,10 +10,16 @@ from __future__ import annotations
 
 import json
 import socket
+import time
 import uuid
-from typing import Any
+from typing import Any, Optional
 
 MAX_RESPONSE_BYTES = 8 * 1024 * 1024
+# A listener can have the socket file bound before it calls listen(); the
+# first connect(s) in that window get ECONNREFUSED. Retry briefly so a
+# starting service is not misreported as unavailable.
+CONNECT_ATTEMPTS = 3
+CONNECT_RETRY_DELAY = 0.1
 
 
 class SidecarClient:
@@ -25,23 +31,34 @@ class SidecarClient:
         request_id = uuid.uuid4().hex[:32]
         request = {"request_id": request_id, "prompt": prompt, "timeout_ms": int(timeout_ms)}
         wire = json.dumps(request, ensure_ascii=False, separators=(",", ":")).encode("utf-8") + b"\n"
-        try:
-            with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as sock:
-                sock.settimeout(self.timeout)
-                sock.connect(self.socket_path)
-                sock.sendall(wire)
-                buffer = b""
-                while b"\n" not in buffer and len(buffer) < MAX_RESPONSE_BYTES:
-                    chunk = sock.recv(65536)
-                    if not chunk:
-                        break
-                    buffer += chunk
-        except socket.timeout:
-            return {"request_id": request_id, "status": "timeout"}
-        except OSError:
-            return {"request_id": request_id, "status": "transport_unavailable"}
+        buffer = b""
+        last_error: Optional[OSError] = None
+        for attempt in range(CONNECT_ATTEMPTS):
+            try:
+                with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as sock:
+                    sock.settimeout(self.timeout)
+                    sock.connect(self.socket_path)
+                    sock.sendall(wire)
+                    buffer = b""
+                    while b"\n" not in buffer and len(buffer) < MAX_RESPONSE_BYTES:
+                        chunk = sock.recv(65536)
+                        if not chunk:
+                            break
+                        buffer += chunk
+                break
+            except socket.timeout:
+                return {"request_id": request_id, "status": "timeout"}
+            except (ConnectionRefusedError, FileNotFoundError) as exc:
+                last_error = exc
+                if attempt + 1 < CONNECT_ATTEMPTS:
+                    time.sleep(CONNECT_RETRY_DELAY)
+                    continue
+            except OSError:
+                last_error = None
+                break
         if not buffer:
-            return {"request_id": request_id, "status": "transport_unavailable"}
+            detail = f" ({last_error})" if last_error is not None else ""
+            return {"request_id": request_id, "status": "transport_unavailable", "error": f"no response{detail}"}
         line = buffer.split(b"\n", 1)[0]
         try:
             value = json.loads(line.decode("utf-8", errors="replace"))
