@@ -16,9 +16,11 @@ Northstar は、制限のないプロンプトとツールのループではな�
 
 ## 現在公開されているもの
 
-このリポジトリで現在公開しているコンポーネントは 1 つです。
+このリポジトリで現在公開しているコンポーネントは 3 つです。
 
 - `../components/northstar-codex-sidecar/` — リクエストを検証し、Codex を read-only モードで実行し、入出力を制限し、エラーを秘匿化し、タイムアウトしたプロセスグループを後処理して、構造化された状態を返すローカル Unix socket サービス。
+- `../components/northstar-run-contract/` — バージョン化された Run Request/Receipt 契約、有効期限付き HMAC Run Binding、そして検証済み実行を Sidecar に渡すための厳格なアダプタ境界。
+- `../components/northstar-agent-runtime/` — ガバナンスを効かせたエージェントループ。イベント列、10 個のライフサイクルフック、3 層の権限ゲート、ターン数・ツール呼び出し数・米ドル予算の各上限、サブエージェント、追記のみのセッション、安全な境界でのみ行うコンパクション、スパン単位のトレースを提供します。モデルの認証情報を保持せず、モデル CLI を起動しません。Codex の実行は Unix socket 経由で Sidecar に委譲します。
 - 決定論的テスト、systemd の hardening テンプレート、慎重なインストーラー、rollback スクリプト。
 
 ## Sidecar の仕組み

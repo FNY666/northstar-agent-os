@@ -17,6 +17,8 @@ Dự án được xây dựng từng bước. Một thành phần có thể hữ
 ## Hiện đang phát hành gì?
 
 - `../components/northstar-codex-sidecar/` — dịch vụ Unix socket cục bộ xác thực request, chạy Codex ở chế độ read-only, giới hạn input và output, che lỗi, dọn dẹp nhóm tiến trình hết timeout và trả về trạng thái có cấu trúc.
+- `../components/northstar-run-contract/` — hợp đồng Run Request/Receipt có phiên bản, Run Binding HMAC có thời hạn và ranh giới adapter nghiêm ngặt để chuyển một lượt chạy đã xác minh cho Sidecar.
+- `../components/northstar-agent-runtime/` — vòng lặp agent được kiểm soát: luồng sự kiện, mười hook vòng đời, cổng phân quyền ba lớp, các giới hạn độc lập về số lượt / số lời gọi công cụ / USD, agent con, phiên chỉ ghi thêm, nén chỉ tại ranh giới an toàn và theo dõi theo span. Thành phần này không giữ thông tin đăng nhập mô hình và không khởi chạy CLI mô hình: việc chạy Codex được ủy quyền cho Sidecar qua Unix socket.
 - Bộ kiểm thử xác định, mẫu hardening cho systemd, script cài đặt thận trọng và script rollback.
 
 ## Sidecar hoạt động như thế nào?

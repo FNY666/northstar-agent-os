@@ -18,9 +18,11 @@ Northstar 面向希望 AI 同事在清楚邊界內運作的開發者，而不是
 
 ## 目前發布了什麼
 
-本儲存庫目前發布一個元件：
+本儲存庫目前發布三個元件：
 
 - `../components/northstar-codex-sidecar/` — 本地 Unix socket 服務，負責驗證請求，以 read-only 模式執行 Codex，限制輸入與輸出、脫敏錯誤、清理逾時程序群組，並回傳結構化狀態。
+- `../components/northstar-run-contract/` — 版本化的 Run Request/Receipt 合約、帶有效期的 HMAC Run Binding，以及把已驗證執行交給 Sidecar 的嚴格適配邊界。
+- `../components/northstar-agent-runtime/` — 受治理的智能體迴圈：事件流、十個生命週期鉤子、三層權限閘、輪次／工具呼叫／美元預算三項獨立上限、子智能體、僅追加工作階段、只在安全邊界壓縮、以及 span 級追蹤。它不持有模型憑證，也不啟動模型 CLI：Codex 執行透過 Unix socket 委託給 Sidecar。
 
 儲存庫也提供確定性測試、systemd 強化範本、保守的安裝腳本與回滾腳本。
 

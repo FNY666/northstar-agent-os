@@ -17,6 +17,8 @@ Le projet est construit progressivement. Un composant peut être utile seul, mai
 ## Ce qui est publié aujourd’hui
 
 - `../components/northstar-codex-sidecar/` — service local Unix socket qui valide les requêtes, exécute Codex en mode read-only, limite les entrées et sorties, masque les erreurs, nettoie les groupes de processus arrivés à expiration et renvoie des états structurés.
+- `../components/northstar-run-contract/` — contrat Run Request/Receipt versionné, Run Binding HMAC à expiration et frontière d'adaptateur stricte pour transmettre une exécution vérifiée au Sidecar.
+- `../components/northstar-agent-runtime/` — boucle d'agent gouvernée : flux d'événements, dix hooks de cycle de vie, porte d'autorisation à trois couches, plafonds indépendants de tours, d'appels d'outils et d'USD, sous-agents, sessions en ajout seul, compaction sur frontière sûre uniquement et traçage par spans. Il ne détient aucun identifiant de modèle et ne lance aucune CLI de modèle : l'exécution de Codex est déléguée au Sidecar via son Unix socket.
 - Tests déterministes, modèle de durcissement systemd, installateur prudent et script de rollback.
 
 ## Fonctionnement du Sidecar

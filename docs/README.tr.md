@@ -17,6 +17,8 @@ Proje artımlı olarak geliştirilmektedir. Tek bir bileşen kendi başına yara
 ## Bugün ne yayımlandı?
 
 - `../components/northstar-codex-sidecar/` — istekleri doğrulayan, Codex’i read-only modunda çalıştıran, girdiyi ve çıktıyı sınırlayan, hataları temizleyen, zaman aşımına uğrayan süreç gruplarını sonlandıran ve yapılandırılmış durumlar döndüren yerel Unix socket servisi.
+- `../components/northstar-run-contract/` — sürümlendirilmiş Run Request/Receipt sözleşmesi, zaman aşımına uğrayan HMAC Run Binding ve doğrulanmış bir çalışmayı Sidecar'a aktaran katı adaptör sınırı.
+- `../components/northstar-agent-runtime/` — yönetilen ajan döngüsü: olay akışı, on yaşam döngüsü kancası, üç katmanlı izin kapısı, tur/araç çağrısı/USD üst sınırları, alt ajanlar, yalnızca ekleme oturumları, yalnızca güvenli sınırlarda sıkıştırma ve span izlemesi. Model kimlik bilgilerini tutmaz ve bir model CLI'si başlatmaz: Codex yürütmesi Unix soketi üzerinden Sidecar'a devredilir.
 - Deterministik testler, systemd hardening şablonu, temkinli kurulum betiği ve rollback betiği.
 
 ## Sidecar nasıl çalışır?
