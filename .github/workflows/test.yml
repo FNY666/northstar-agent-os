@@ -39,6 +39,12 @@ jobs:
       - name: Durable run component tests
         working-directory: components/northstar-durable-run
         run: PYTHONPATH=. python -m unittest discover -s tests -p 'test_*.py' -v
+      - name: Compile agent interop component
+        working-directory: components/northstar-agent-interop
+        run: PYTHONPATH=../northstar-run-contract:../northstar-host python -m py_compile interop_contract.py handoff.py interop_adapter.py tests/test_*.py
+      - name: Agent interop component tests
+        working-directory: components/northstar-agent-interop
+        run: PYTHONPATH=.:../northstar-run-contract:../northstar-host python -m unittest discover -s tests -p 'test_*.py' -v
       - name: Shell syntax
         working-directory: components/northstar-codex-sidecar
         run: sh -n install.sh rollback.sh

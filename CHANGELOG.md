@@ -37,6 +37,10 @@ dormitory host, or production OpenBot. They are not a complete workspace
 broker, sandbox, identity system, or production safety proof. Native Linux
 concurrency, filesystem race, lifecycle, and deployment validation remain
 outstanding.
+- **Agent interoperability candidate:** `components/northstar-agent-interop/`
+  adds a backend-neutral signed attestation, narrowed handoff grant, context
+  envelope, and typed adapter receipt boundary. It does not yet connect real
+  Codex, Claude Code, Hermes, Cursor, or OpenBot backends.
 
 ## Scope of this release
 

@@ -18,13 +18,13 @@ The project is built incrementally. A component can be useful on its own, but a 
 
 ## What is shipped today
 
-This repository currently publishes two complementary foundations and one
-local-only host candidate:
+This repository currently publishes two complementary foundations and two
+local-only runtime candidates:
 
 - `components/northstar-codex-sidecar/` — a local Unix-socket service that validates requests, runs Codex in read-only mode, bounds input and output behavior, redacts errors, cleans up timed-out process groups, and returns structured statuses.
 - `components/northstar-run-contract/` — a versioned Run Request/Receipt contract, expiring HMAC Run Binding, and strict adapter boundary for passing a verified run to the Sidecar.
 - `components/northstar-host/` — a standard-library local candidate for explicit host policy grants and opaque private workspaces; it re-verifies binding and authorization and does not execute commands.
-- `components/northstar-durable-run/` — a local vertical-slice prototype for canonical Run/Step/Event contracts, append-only history, checkpoints, leases, per-call action authorization, independent verification, minimal trace metrics, and a deterministic fixture evaluation harness. It is not a production scheduler or sandbox.
+- `components/northstar-agent-interop/` — a backend-neutral local candidate for signed Agent attestations, narrowed handoff grants, opaque context envelopes, and typed adapter receipts. It does not yet connect real Codex, Claude Code, Hermes, Cursor, or OpenBot backends.
 
 The Run Contract separates structural validation, host-key authentication, authorization, execution, and postcondition verification. The host and durable-run candidates demonstrate these boundaries locally; neither claims production identity, isolation, or deployment readiness.
 
