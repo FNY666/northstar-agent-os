@@ -1,0 +1,4 @@
+# Optional tracing extra: real span collection/export for tests and ops.
+# The runtime itself only needs opentelemetry-api (from requirements.txt);
+# without the SDK the tracer degrades to no-op spans.
+opentelemetry-sdk>=1.20
