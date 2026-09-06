@@ -110,3 +110,24 @@ absolute paths. No CLI is installed, authenticated or executed by this
 repository. Before enabling one, pin and audit the actual binary/version,
 verify its documented non-interactive flags, authentication mode, output
 schema, session/resume semantics, cancellation behavior and workspace policy.
+
+## Local deterministic backend router candidate
+
+`backend_router.py` is a local-only selection layer above backend-specific
+adapters. It is not an authorization layer: a `RouteDecision` contains no
+secret or grant and cannot authorize a tool call by itself. The caller must
+still create and verify a narrowed Handoff Grant before execution.
+
+A `RouteRequest` carries only bounded task/run identity, policy revision,
+input digest, capability requirements and routing preferences. The router
+selects among explicitly registered profiles/adapters using capability support,
+enabled state, health, cooldown, priority and stable agent-id ordering.
+Preferences are soft: an unavailable preferred backend falls back to another
+healthy compatible backend. Cooldown expiry is handled consistently by both
+selection and adapter lookup.
+
+The selected backend profile/version and route identity are checked again when
+the adapter is looked up. `assert_route_matches_handoff()` permits only
+further deadline narrowing; all other identity, policy, target, digest and
+capability fields must match exactly. No real backend or network service is
+used by the local tests.
