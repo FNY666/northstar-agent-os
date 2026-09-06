@@ -1,24 +1,21 @@
 # Northstar Agent OS — initial public component
 
-This repository establishes the Northstar Agent OS name and publishes three independently maintained foundations: Northstar Codex Sidecar, the Northstar Run Contract, and the Northstar Agent Runtime.
+This repository establishes the Northstar Agent OS name and publishes five independently maintained components: Northstar Codex Sidecar, the Northstar Run Contract, the Northstar Agent Runtime, host-side candidates, and backend-neutral Agent Interop foundations.
 
-## Agent Runtime foundation
+## Agent Runtime (unreleased)
 
-A governed agent loop modelled on the Claude Agent SDK's capability surface, in `components/northstar-agent-runtime/`. The runtime does reasoning and policy; Codex execution stays in the Sidecar (the `CodexReadOnly` tool, registered only when a socket path is configured). The runtime never spawns a model CLI and holds no model credentials.
-
-- **Typed event stream:** `SystemMessage` (init / compact_boundary / informational), `AssistantMessage`, `UserMessage`, and exactly one `ResultMessage` per run, with subtypes `success`, `error_max_turns`, `error_max_tool_calls`, `error_max_budget_usd`, `error_during_execution`, `error_permission_denied`. Foreseeable failures are events, not exceptions.
-- **Ten governance hooks:** `PreToolUse` (deny or rewrite input), `PostToolUse`, `PostToolUseFailure`, `UserPromptSubmit` (inject context or deny the whole run), `Stop` (refuse the end; the reason is fed back as a new user turn), `SubagentStart`, `SubagentStop`, `PreCompact`, `SessionStart`, `SessionEnd`. The first deny is terminal; a hook that raises is treated as a deny.
-- **Three-tier permissions:** `disallowed_tools` (always wins) → `allowed_tools` (auto-approve) → `permission_mode` (`default` / `acceptEdits` / `plan` / `bypassPermissions`) plus an optional `can_use_tool` callback. In `default` mode, mutating tools are denied unless the host supplies approval — failing safe is refusing, never executing. `Task` is gated per declared subagent tool, never by its own name, so denials name the real offending tool.
-- **Independent limits with real pricing:** `max_turns` / `max_tool_calls` / `max_budget_usd` each end the run with their own subtype. Costs use published per-million-token prices with prompt-cache read discount (0.1x) and write premium (1.25x); unknown models fall back to conservative pricing flagged `pricing_estimated`. A generation that exhausts the budget does not execute its pending tool calls.
-- **Bounded subagents:** independent context, tool subset, own turn/budget limits, optional different provider. Nesting is off by default; `max_subagent_depth` is a structural backstop that applies in every permission mode. `evaluator_agent()` is read-only with default-FAIL acceptance semantics.
-- **Durable sessions:** append-only JSONL with `fsync` per write; a truncated last line is skipped, not an error; a `session_id` is generated even without a store so logs always correlate.
-- **Safe-boundary compaction:** cuts only where no `tool_use` would be orphaned without its `tool_result`.
-- **Privacy-respecting tracing:** OpenTelemetry span tree `run → turn[n] → generation | tool:Name | subagent:Type`; usage/cost attributes are set before each span ends; no prompt text or tool output text is recorded (only `tool.is_error`).
-- **Sandboxed tools:** one uniform `handler(payload, ctx)` signature; paths are resolved (symlinks followed) before the workspace containment check; output caps of 256 KiB (read), 200 matches (grep), 500 entries (list).
-
-The test suite is fully offline and deterministic (scripted provider, no API key) and includes integration tests that start a real Sidecar `serve()` over a real Unix socket, including a 100,000-Chinese-character prompt at the documented maximum. Each core invariant (safe boundary detection, workspace containment, budget enforcement, hook deny terminality, span usage timing) has a dedicated test, verified to fail when the invariant is broken.
-
-**Known limitations:** the real Anthropic API is not verified (no API key in the test environment; the Anthropic provider is tested for request construction and response normalisation against fakes); MCP is not implemented; the sidecar's process-group TERM→KILL cleanup is not re-verified on native Linux by this component.
+- **Governed agent loop with the Claude Agent SDK capability surface:** `SystemMessage` / `AssistantMessage` / `UserMessage` events and exactly one `ResultMessage` per run, whose subtype distinguishes `success` from `error_max_turns`, `error_max_tool_calls`, `error_max_budget_usd`, `error_permission_denied`, and `error_during_execution`. Every foreseeable condition is an event; a foreseeable failure never reaches the caller as an exception.
+- **Reasoning here, execution there:** the runtime holds no Codex credentials and never spawns a model CLI. The `CodexReadOnly` tool is registered only when a sidecar socket path is supplied, and one request travels over one private Unix-socket connection to `components/northstar-codex-sidecar`.
+- **Ten lifecycle hooks** with a uniform handler signature: `PreToolUse` (veto or rewrite input), `PostToolUse`, `PostToolUseFailure`, `UserPromptSubmit`, `Stop` (may refuse to stop and feed its reason back), `SubagentStart`, `SubagentStop`, `PreCompact`, `SessionStart`, `SessionEnd`. A deny is terminal — later hooks cannot overturn it — and a hook that raises on a veto-capable event fails closed.
+- **Three permission layers in a fixed order:** `disallowed_tools` always wins, then `allowed_tools`, then `permission_mode` plus the optional host `can_use_tool` callback. Under `default`, a mutating tool with no approval callback is denied rather than executed.
+- **Three independent ceilings** (`max_turns`, `max_tool_calls`, `max_budget_usd`), priced from real per-million-token rates including cache-read 0.1× and cache-write 1.25×; an unknown model falls back to conservative pricing and marks `pricing_estimated`.
+- **Subagents** with their own context, declared tool subset, ceilings, and optionally a different provider. Delegation is gated per tool the subagent declared, never by the literal name `Task`; nested delegation is off by default with `max_subagent_depth` as a backstop. The built-in `evaluator_agent()` is read-only and default-FAIL.
+- **Append-only JSONL sessions** with an `fsync` per write, `0600` files under a `0700` directory, and a truncated final line skipped rather than treated as corruption. A session id is generated even when nothing is persisted.
+- **Compaction that only cuts at a safe boundary** with no pending tool call, so a summary can never orphan a `tool_use` from its `tool_result` and produce an API 400 the model cannot recover from.
+- **Span tracing** as `run → turn[n] → generation | tool:Name | subagent:Type` with cost attributes, recording usage before the span ends (OpenTelemetry discards a late attribute write silently) and never recording prompt text or tool output bodies.
+- **Sandboxed tools** with symlink-resolution-before-containment-check, plus caps of 256 KB per `Read`, 200 matches per `Grep`, and 500 entries per `LS`, each announced in the tool result itself.
+- **383 offline tests**, including an integration test that starts the real sidecar `serve()` on a temporary Unix socket and pushes a 100,000-Chinese-character prompt through a full agent loop. Each core invariant has been verified to fail when its guard is individually reverted.
+- **Known gaps:** the live Anthropic API is unverified in this repository's sandbox (only an injected fake client is exercised), MCP is not implemented, and process-group `TERM`→`KILL` cleanup is not verified on real Linux here. See `components/northstar-agent-runtime/README.md`.
 
 ## Run Contract foundation
 
@@ -36,6 +33,35 @@ The contract is a local foundation, not a production authorization or workspace 
 - **`serve()` enforces the socket path contract.** `service.validate_socket_path` was previously asserted only in tests; the listener now refuses to bind any path it rejects, and does so before creating a socket file.
 - **`install.sh` produces a startable service.** It now requires root, creates the `northstar-codex` system account and the `/var/lib/northstar-codex` state directories, normalises `PATH` so the sbin account tools are found, warns when `codex` is absent, and is idempotent. Both lifecycle scripts are now mode `0755` so the documented `sudo ./install.sh` works from a fresh clone.
 
+## Host-side local candidates
+
+- **Host authorization and workspace candidate:** `components/northstar-host/`
+  adds explicit actor-to-capability default-deny policy grants and
+  host-derived opaque `0700` workspace allocation. It re-verifies the Run
+  Binding and grant at allocation time and never executes commands.
+- **Durable Run vertical slice:** `components/northstar-durable-run/` adds a
+  local candidate for canonical task/run/step/event identity, append-only
+  replayable history, checkpoints, leases, per-call action gates, independent
+  postcondition verification, minimal trace metrics, and a deterministic
+  10-fixture task-level evaluation harness. Its local suite proves component
+  and fixture behavior only; it is not a production scheduler, sandbox, or
+  deployment.
+
+These candidates are local-only and have not been deployed to 103, 104, a
+dormitory host, or production OpenBot. They are not a complete workspace
+broker, sandbox, identity system, or production safety proof. Native Linux
+concurrency, filesystem race, lifecycle, and deployment validation remain
+outstanding.
+
+- **Agent interoperability candidate:** `components/northstar-agent-interop/`
+  adds a backend-neutral signed attestation, narrowed handoff grant, context
+  envelope, typed adapter receipt boundary, and a local-only
+  `orchestrator → Claude Code → Codex → Hermes` canary. The canary uses fake
+  executors only and does not connect real vendor backends.
+- **CLI process adapter candidate:** the interop component includes a bounded,
+  no-shell process adapter and disabled-by-default specifications for Codex,
+  Claude Code, and Cursor. No vendor CLI is installed or authenticated here.
+
 ## Scope of this release
 
 - restricted Unix-socket transport;
@@ -48,6 +74,10 @@ The contract is a local foundation, not a production authorization or workspace 
 
 ## Explicit non-goals
 
-This is not yet a complete multi-agent operating system, hosted service, or endorsement of the upstream OpenBot project. Runtime identity binding, per-run workspace authorization, native Linux E2E, and production deployment integration remain host-level responsibilities.
+This is not yet a complete multi-agent operating system, hosted service, or
+endorsement of the upstream OpenBot project. Runtime identity binding, per-run
+workspace authorization, durable execution integration, native Linux E2E, and
+production deployment integration remain host-level responsibilities or future
+work.
 
 See [README.md](README.md) for installation and security boundaries.

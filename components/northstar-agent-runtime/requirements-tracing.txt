@@ -1,4 +1,7 @@
-# Optional tracing extra: real span collection/export for tests and ops.
-# The runtime itself only needs opentelemetry-api (from requirements.txt);
-# without the SDK the tracer degrades to no-op spans.
+# Optional extra: real OpenTelemetry export, and the SDK the test suite uses to
+# prove attributes written after span.end() are discarded (they are, silently, so
+# the runtime records usage before it ends every span).
+#
+# Tracing tests that need this are guarded with skipUnless, so a host without it
+# still gets a green run.
 opentelemetry-sdk>=1.20
