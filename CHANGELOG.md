@@ -1,6 +1,24 @@
 # Northstar Agent OS — initial public component
 
-This repository establishes the Northstar Agent OS name and publishes two independently maintained foundations: Northstar Codex Sidecar and the Northstar Run Contract.
+This repository establishes the Northstar Agent OS name and publishes three independently maintained foundations: Northstar Codex Sidecar, the Northstar Run Contract, and the Northstar Agent Runtime.
+
+## Agent Runtime foundation
+
+A governed agent loop modelled on the Claude Agent SDK's capability surface, in `components/northstar-agent-runtime/`. The runtime does reasoning and policy; Codex execution stays in the Sidecar (the `CodexReadOnly` tool, registered only when a socket path is configured). The runtime never spawns a model CLI and holds no model credentials.
+
+- **Typed event stream:** `SystemMessage` (init / compact_boundary / informational), `AssistantMessage`, `UserMessage`, and exactly one `ResultMessage` per run, with subtypes `success`, `error_max_turns`, `error_max_tool_calls`, `error_max_budget_usd`, `error_during_execution`, `error_permission_denied`. Foreseeable failures are events, not exceptions.
+- **Ten governance hooks:** `PreToolUse` (deny or rewrite input), `PostToolUse`, `PostToolUseFailure`, `UserPromptSubmit` (inject context or deny the whole run), `Stop` (refuse the end; the reason is fed back as a new user turn), `SubagentStart`, `SubagentStop`, `PreCompact`, `SessionStart`, `SessionEnd`. The first deny is terminal; a hook that raises is treated as a deny.
+- **Three-tier permissions:** `disallowed_tools` (always wins) → `allowed_tools` (auto-approve) → `permission_mode` (`default` / `acceptEdits` / `plan` / `bypassPermissions`) plus an optional `can_use_tool` callback. In `default` mode, mutating tools are denied unless the host supplies approval — failing safe is refusing, never executing. `Task` is gated per declared subagent tool, never by its own name, so denials name the real offending tool.
+- **Independent limits with real pricing:** `max_turns` / `max_tool_calls` / `max_budget_usd` each end the run with their own subtype. Costs use published per-million-token prices with prompt-cache read discount (0.1x) and write premium (1.25x); unknown models fall back to conservative pricing flagged `pricing_estimated`. A generation that exhausts the budget does not execute its pending tool calls.
+- **Bounded subagents:** independent context, tool subset, own turn/budget limits, optional different provider. Nesting is off by default; `max_subagent_depth` is a structural backstop that applies in every permission mode. `evaluator_agent()` is read-only with default-FAIL acceptance semantics.
+- **Durable sessions:** append-only JSONL with `fsync` per write; a truncated last line is skipped, not an error; a `session_id` is generated even without a store so logs always correlate.
+- **Safe-boundary compaction:** cuts only where no `tool_use` would be orphaned without its `tool_result`.
+- **Privacy-respecting tracing:** OpenTelemetry span tree `run → turn[n] → generation | tool:Name | subagent:Type`; usage/cost attributes are set before each span ends; no prompt text or tool output text is recorded (only `tool.is_error`).
+- **Sandboxed tools:** one uniform `handler(payload, ctx)` signature; paths are resolved (symlinks followed) before the workspace containment check; output caps of 256 KiB (read), 200 matches (grep), 500 entries (list).
+
+The test suite is fully offline and deterministic (scripted provider, no API key) and includes integration tests that start a real Sidecar `serve()` over a real Unix socket, including a 100,000-Chinese-character prompt at the documented maximum. Each core invariant (safe boundary detection, workspace containment, budget enforcement, hook deny terminality, span usage timing) has a dedicated test, verified to fail when the invariant is broken.
+
+**Known limitations:** the real Anthropic API is not verified (no API key in the test environment; the Anthropic provider is tested for request construction and response normalisation against fakes); MCP is not implemented; the sidecar's process-group TERM→KILL cleanup is not re-verified on native Linux by this component.
 
 ## Run Contract foundation
 

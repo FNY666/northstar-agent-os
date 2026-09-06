@@ -18,10 +18,11 @@ The project is built incrementally. A component can be useful on its own, but a 
 
 ## What is shipped today
 
-This repository currently publishes two complementary foundations:
+This repository currently publishes three complementary foundations:
 
 - `components/northstar-codex-sidecar/` — a local Unix-socket service that validates requests, runs Codex in read-only mode, bounds input and output behavior, redacts errors, cleans up timed-out process groups, and returns structured statuses.
 - `components/northstar-run-contract/` — a versioned Run Request/Receipt contract, expiring HMAC Run Binding, and strict adapter boundary for passing a verified run to the Sidecar.
+- `components/northstar-agent-runtime/` — a governed agent loop modelled on the Claude Agent SDK's capability surface: a typed event stream with exactly one result per run, ten governance hooks with terminal denies, a three-tier permission gate, independent turn/tool-call/budget limits, real per-token cost accounting, bounded subagents with a read-only default-FAIL evaluator, append-only fsync'd sessions, safe-boundary compaction, and OpenTelemetry spans. It reasons and enforces policy; it never spawns a model CLI or holds model credentials — Codex execution is delegated to the Sidecar over its Unix socket via the `CodexReadOnly` tool (registered only when a socket path is configured).
 
 The Run Contract separates structural validation, host-key authentication, authorization, execution, and postcondition verification. It does not itself create workspaces, authorize users, or claim production isolation.
 
@@ -54,6 +55,23 @@ Important properties:
 - Dedicated service user and systemd hardening template.
 - Codex is disabled until the host administrator explicitly installs and enables the service.
 
+## How the agent runtime works
+
+The runtime is a governed agent loop: one model generation per turn, tool dispatch through a single uniform `handler(payload, ctx)` signature, and a typed event stream (`SystemMessage` / `AssistantMessage` / `UserMessage` / `ResultMessage`) in which **exactly one `ResultMessage` ends every run**. Every foreseeable failure is an event with a dedicated subtype — `success`, `error_max_turns`, `error_max_tool_calls`, `error_max_budget_usd`, `error_during_execution`, `error_permission_denied` — never an uncaught exception.
+
+Key governance surfaces:
+
+- **Hooks** (10): `PreToolUse` (deny or rewrite input), `PostToolUse`, `PostToolUseFailure`, `UserPromptSubmit` (inject context or deny the whole run), `Stop` (refuse the end; the reason is fed back as a new user turn), `SubagentStart`, `SubagentStop`, `PreCompact`, `SessionStart`, `SessionEnd`. The first deny is terminal: later hooks are not called and cannot overturn it; a hook that raises is treated as a deny.
+- **Permissions** (3 tiers): `disallowed_tools` always wins → `allowed_tools` auto-approve → `permission_mode` (`default` / `acceptEdits` / `plan` / `bypassPermissions`) plus an optional `can_use_tool` callback. In `default` mode, mutating tools are denied unless the host supplies an approval callback — failing safe means refusing, never executing. `Task` is never judged by its own name: the subagent's *declared* tool set is gated one tool at a time, and denials name the offending tool.
+- **Limits** (independent): `max_turns`, `max_tool_calls`, `max_budget_usd` each end the run with their own subtype. Costs use real per-million-token prices with prompt-cache read discount (0.1x) and write premium (1.25x); unknown models fall back to conservative pricing flagged `pricing_estimated`. A generation that exhausts the budget does not get to execute its pending tool calls.
+- **Subagents**: independent context, tool subset, own turn/budget limits, optional different provider. Nesting is off by default; `max_subagent_depth` is the structural backstop that applies in every permission mode. `evaluator_agent()` provides read-only, default-FAIL acceptance semantics.
+- **Sessions**: append-only JSONL with `fsync` per write; a truncated last line is skipped, not an error. A `session_id` is generated even when no session store is configured, so logs always correlate.
+- **Compaction**: only ever cuts at a safe boundary, so no `tool_use` is orphaned without its `tool_result` — the one cut that makes the API reject the whole request.
+- **Tracing**: OpenTelemetry span tree `run → turn[n] → generation | tool:Name | subagent:Type` with usage/cost attributes set before each span ends. No prompt text or tool output text is recorded — only `tool.is_error` and counts/costs.
+- **Tool sandbox**: paths are resolved (symlinks followed) *before* the workspace containment check, so a symlink pointing outside is denied. Output caps: reads 256 KiB, grep 200 matches, listings 500 entries.
+
+The test suite is fully offline and deterministic (a scripted provider stands in for any model), and its integration tests start a real `northstar-codex-sidecar` `serve()` over a real Unix socket — including a 100,000-Chinese-character prompt at the sidecar's documented maximum.
+
 ## Quick start
 
 Requirements:
@@ -74,6 +92,14 @@ cd components/northstar-codex-sidecar
 python3 -m py_compile sidecar.py transport.py service.py sidecar_socket.py
 python3 -m unittest discover -s tests -p 'test_*.py' -v
 sh -n install.sh rollback.sh
+```
+
+The agent runtime verifies offline (no API key, no network):
+
+```sh
+cd components/northstar-agent-runtime
+pip install -r requirements.txt -r requirements-tracing.txt
+python -m unittest discover -s tests -p 'test_*.py' -v
 ```
 
 The process-group cleanup behavior should also be validated on the target native Linux distribution. Signal and PID reaping behavior in mobile Linux environments may not be representative.
