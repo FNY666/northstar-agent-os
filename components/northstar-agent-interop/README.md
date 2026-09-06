@@ -82,3 +82,31 @@ platform. It does not prove cross-process fencing, native Linux isolation,
 provider reliability, prompt-injection resistance of a backend, or task-level
 success across real engines. Those require separate canaries, fixed tasks,
 independent verifiers, rollback plans and explicit deployment authorization.
+
+## Local CLI process adapter candidate
+
+`process_adapter.py` is a backend-neutral process boundary for a future
+version-pinned Codex, Claude Code, or Cursor CLI mapping. It is **not** a
+vendor integration and is disabled until a caller explicitly supplies an
+enabled `ProcessBackendSpec` with an absolute executable and fixed argv
+Template.
+
+The boundary enforces:
+
+- no shell invocation and no arbitrary command/template tokens;
+- host-resolved private `0700` workspace;
+- explicit `supported_capabilities` checked against every Handoff Grant;
+- current policy revision and target Agent verification;
+- opaque context reference resolved by the host, bounded before stdin;
+- environment allowlist that rejects credential-like names;
+- bounded output, timeout and process-group termination;
+- strict one-object JSON execution result;
+- structured failed/unknown Receipt instead of false success;
+- idempotent replay by Handoff idempotency key.
+
+The three helper specs (`codex_cli_spec`, `claude_code_cli_spec`,
+`cursor_cli_spec`) are disabled by default and intentionally use placeholder
+absolute paths. No CLI is installed, authenticated or executed by this
+repository. Before enabling one, pin and audit the actual binary/version,
+verify its documented non-interactive flags, authentication mode, output
+schema, session/resume semantics, cancellation behavior and workspace policy.

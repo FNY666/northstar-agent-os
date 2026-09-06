@@ -107,7 +107,7 @@ def _handoff_token(*, capability="workspace:read", expiry=1_800, deadline=1_700,
                 "agent_id": "orchestrator",
                 "provider": "northstar",
                 "version": "canary-v1",
-                "capabilities": ["workspace:read"],
+                "capabilities": [capability],
             }
         )
     )
