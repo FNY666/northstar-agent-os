@@ -1,4 +1,4 @@
-name: Northstar Agent OS
+name: Northstar tests
 
 on:
   push:
@@ -9,6 +9,7 @@ permissions:
 
 jobs:
   test:
+    name: Sidecar and run contract
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -27,14 +28,60 @@ jobs:
       - name: Run contract tests
         working-directory: components/northstar-run-contract
         run: python -m unittest discover -s tests -p 'test_*.py' -v
-      - name: Compile agent runtime
-        working-directory: components/northstar-agent-runtime
-        run: python -m py_compile loop.py hooks.py permissions.py budget.py tools.py compaction.py sessions.py agents.py tracing.py sidecar_client.py cli.py providers/base.py providers/anthropic.py providers/scripted.py tests/test_scripted_provider.py tests/test_anthropic_provider.py tests/test_budget.py tests/test_events.py tests/test_hooks.py tests/test_permissions.py tests/test_workspace_sandbox.py tests/test_compaction.py tests/test_sessions.py tests/test_subagents.py tests/test_tracing.py tests/test_loop_limits.py tests/test_sidecar_integration.py tests/test_cli.py
-      - name: Install agent runtime requirements
-        run: pip install -r components/northstar-agent-runtime/requirements.txt -r components/northstar-agent-runtime/requirements-tracing.txt
-      - name: Agent runtime tests
-        working-directory: components/northstar-agent-runtime
-        run: python -m unittest discover -s tests -p 'test_*.py' -v
+      - name: Compile host component
+        working-directory: components/northstar-host
+        run: PYTHONPATH=../northstar-run-contract python -m py_compile authorization.py workspace.py tests/test_authorization.py tests/test_workspace.py tests/test_integration_host.py
+      - name: Host component tests
+        working-directory: components/northstar-host
+        run: PYTHONPATH=../northstar-run-contract python -m unittest discover -s tests -p 'test_*.py' -v
+      - name: Compile durable run component
+        working-directory: components/northstar-durable-run
+        run: python -m py_compile durable_contract.py event_store.py action_gateway.py runner.py verifier.py trace_metrics.py evaluation.py tests/test_*.py
+      - name: Durable run component tests
+        working-directory: components/northstar-durable-run
+        run: PYTHONPATH=. python -m unittest discover -s tests -p 'test_*.py' -v
+      - name: Compile agent interop component
+        working-directory: components/northstar-agent-interop
+        run: PYTHONPATH=../northstar-run-contract:../northstar-host python -m py_compile interop_contract.py handoff.py interop_adapter.py canary.py tests/test_*.py
+      - name: Agent interop component tests
+        working-directory: components/northstar-agent-interop
+        run: PYTHONPATH=.:../northstar-run-contract:../northstar-host python -m unittest discover -s tests -p 'test_*.py' -v
       - name: Shell syntax
         working-directory: components/northstar-codex-sidecar
         run: sh -n install.sh rollback.sh
+
+  agent-runtime:
+    name: Agent runtime (offline unit tests)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: components/northstar-agent-runtime
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt -r requirements-tracing.txt
+      - name: Compile
+        run: |
+          python -m py_compile loop.py hooks.py permissions.py budget.py tools.py \
+            compaction.py sessions.py agents.py tracing.py sidecar_client.py cli.py \
+            providers/base.py providers/anthropic.py providers/scripted.py \
+            tests/support.py tests/test_*.py
+      - name: Unit tests
+        # No API key and no network: the scripted provider is the only model, and
+        # the sidecar integration test starts a real listener on a Unix socket.
+        run: python -m unittest discover -s tests -p 'test_*.py' -v
+  documentation:
+    name: Repository documentation
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Unit tests
+        run: python -m unittest discover -s tests -p 'test_*.py' -v

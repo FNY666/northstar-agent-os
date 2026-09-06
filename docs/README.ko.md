@@ -19,6 +19,8 @@ Northstar는 제한 없는 프롬프트와 도구의 반복에 의존하지 않�
 이 저장소는 현재 다음 구성 요소를 공개합니다.
 
 - `../components/northstar-codex-sidecar/` — 요청을 검증하고 Codex를 read-only 모드로 실행하며 입력과 출력을 제한하고 오류를 비식별화하고 timeout 프로세스 그룹을 정리한 뒤 구조화된 상태를 반환하는 로컬 Unix socket 서비스입니다.
+- `../components/northstar-run-contract/` — 버전이 지정된 Run Request/Receipt 계약, 만료되는 HMAC Run Binding, 검증된 실행을 Sidecar에 넘기는 엄격한 어댑터 경계.
+- `../components/northstar-agent-runtime/` — 통치되는 에이전트 루프: 이벤트 스트림, 10개 라이프사이클 훅, 3단 권한 게이트, 턴/도구 호출/USD 상한, 서브에이전트, 추가 전용 세션, 안전한 경계에서만 수행하는 압축, span 단위 추적. 모델 자격 증명을 보관하지 않고 모델 CLI를 실행하지 않으며, Codex 실행은 Unix socket을 통해 Sidecar에 위임합니다.
 - 결정론적 테스트, systemd hardening 템플릿, 보수적인 설치 스크립트, rollback 스크립트.
 
 ## Sidecar 작동 방식

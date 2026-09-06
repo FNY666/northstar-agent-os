@@ -1,169 +1,415 @@
-"""Three-tier permission gate.
+"""Three-layer permission gate: ``disallowed_tools`` → ``allowed_tools`` → mode.
 
-Evaluation order for a tool call:
+The order is not negotiable, and the first layer always wins: a tool listed in
+``disallowed_tools`` is denied even under ``bypassPermissions`` and even if a
+hook would have approved it. The second layer auto-approves. The third layer is
+``permission_mode`` plus, when the host supplied one, the ``can_use_tool``
+approval callback.
 
-1. ``disallowed_tools`` — always wins, even in ``bypassPermissions`` mode.
-2. ``allowed_tools`` — auto-approved, in any mode.
-3. ``permission_mode`` plus an optional ``can_use_tool`` callback:
+Safety direction: whenever the gate cannot reach a decision - unknown tool, no
+host approval callback in ``default`` mode, a callback that raises - the answer
+is **deny**, not "go ahead". Denying work is recoverable; executing work the
+host never approved is not.
 
-   - ``default``          read tools pass; mutating tools (edit/exec) require
-                          the host's ``can_use_tool`` callback; **no callback
-                          means deny** — failing safe is refusing, never
-                          executing.
-   - ``acceptEdits``      read and edit tools pass; other mutating (exec)
-                          tools are handled like ``default``.
-   - ``plan``             mutating tools are denied outright; the callback is
-                          not consulted for them.
-   - ``bypassPermissions`` everything passes (except disallowed).
-
-Delegation is special-cased: the ``Task`` tool is *not* judged by its own
-name. It is approved only if every tool in the declared subagent's tool set
-passes this same gate, and only within ``max_subagent_depth``. The denial
-message names the offending declared tool, never just "Task".
+``Task`` is deliberately not treated as a mutating tool. Blanket-denying it by
+name would mean no subagent is ever created, and the error would blame a tool
+that was never the problem. Delegation is instead gated per tool inside the
+subagent's declared tool set (:meth:`PermissionEngine.check_delegation`).
 """
 from __future__ import annotations
 
-from dataclasses import dataclass
-from typing import Any, Callable, Mapping, Optional, Sequence
+from dataclasses import dataclass, field
+from typing import Any, Callable, Iterable, Literal, Sequence
 
-PERMISSION_MODES: tuple[str, ...] = ("default", "acceptEdits", "plan", "bypassPermissions")
+PermissionMode = Literal["default", "acceptEdits", "plan", "bypassPermissions"]
 
-TOOL_KINDS: tuple[str, ...] = ("read", "edit", "exec", "delegate")
+PERMISSION_MODES: tuple[PermissionMode, ...] = (
+    "default",
+    "acceptEdits",
+    "plan",
+    "bypassPermissions",
+)
 
-# Kinds that mutate the world. "delegate" is governed via the declared
-# subagent tool set, not as a mutating tool of its own.
-MUTATING_KINDS = frozenset({"edit", "exec"})
+ToolKind = Literal["read", "edit", "exec", "task", "network", "other"]
 
-# can_use_tool(tool_name, tool_input, permission_mode) -> bool | {"approved": bool, "reason": str}
-CanUseTool = Callable[[str, dict[str, Any], str], Any]
+#: Kinds that can change state outside the conversation.
+MUTATING_KINDS: frozenset[str] = frozenset({"edit", "exec", "network", "other"})
+
+DecisionSource = Literal[
+    "disallowed_tools",
+    "allowed_tools",
+    "mode",
+    "host_callback",
+    "unknown_tool",
+    "delegation_gate",
+    "invalid_mode",
+]
 
 
 @dataclass(frozen=True)
 class PermissionDecision:
+    """The gate's verdict for one tool call."""
+
     allowed: bool
+    source: DecisionSource = "mode"
     reason: str = ""
+    rule: str = ""
+    tool: str = ""
+
+    @property
+    def text(self) -> str:
+        return self.reason or ("allowed" if self.allowed else "denied")
+
+    def as_dict(self) -> dict[str, Any]:
+        return {
+            "tool": self.tool,
+            "allowed": self.allowed,
+            "source": self.source,
+            "reason": self.reason,
+            "rule": self.rule,
+        }
 
 
-class PermissionGate:
+@dataclass(frozen=True)
+class PermissionRequestContext:
+    """What the host approval callback gets to see."""
+
+    session_id: str = ""
+    agent: str = "main"
+    depth: int = 0
+    turn_index: int = 0
+    workspace: str = ""
+    mode: str = "default"
+    reason_hint: str = ""
+    data: dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass(frozen=True)
+class DelegationVerdict:
+    """Per-tool result of gating a subagent's declared tool set."""
+
+    agent: str = ""
+    allowed: tuple[str, ...] = ()
+    denied: tuple[tuple[str, str], ...] = ()
+    checked: tuple[str, ...] = ()
+
+    @property
+    def ok(self) -> bool:
+        return not self.denied
+
+    @property
+    def summary(self) -> str:
+        if self.ok:
+            return f"delegation approved for {', '.join(self.allowed) or 'no tools'}"
+        parts = [f"{name} ({reason})" for name, reason in self.denied]
+        return "delegation denied for: " + "; ".join(parts)
+
+    def as_dict(self) -> dict[str, Any]:
+        return {
+            "agent": self.agent,
+            "allowed": list(self.allowed),
+            "denied": [{"tool": name, "reason": reason} for name, reason in self.denied],
+            "checked": list(self.checked),
+            "ok": self.ok,
+        }
+
+
+def normalise_names(values: Iterable[str] | None) -> tuple[str, ...]:
+    if values is None:
+        return ()
+    if isinstance(values, str):
+        raise TypeError("tool lists must be sequences of names, not a bare string")
+    seen: list[str] = []
+    for value in values:
+        name = str(value).strip()
+        if name and name not in seen:
+            seen.append(name)
+    return tuple(seen)
+
+
+def subtract(allowed: Iterable[str] | None, denied: Iterable[str] | None) -> tuple[str, ...]:
+    """``--deny-tool`` semantics: subtract, never co-list.
+
+    Keeping a name in both lists would trip the "same tool allowed and
+    disallowed" guard instead of doing what the operator asked, so the CLI
+    computes the allow list this way before the engine ever sees it.
+    """
+    denied_set = set(normalise_names(denied))
+    return tuple(name for name in normalise_names(allowed) if name not in denied_set)
+
+
+@dataclass(frozen=True)
+class PermissionConfig:
+    mode: PermissionMode = "default"
+    allowed_tools: tuple[str, ...] = ()
+    disallowed_tools: tuple[str, ...] = ()
+    can_use_tool: Callable[[str, dict[str, Any], PermissionRequestContext], Any] | None = None
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "mode", validate_mode(self.mode))
+        object.__setattr__(self, "allowed_tools", normalise_names(self.allowed_tools))
+        object.__setattr__(self, "disallowed_tools", normalise_names(self.disallowed_tools))
+        if self.can_use_tool is not None and not callable(self.can_use_tool):
+            raise TypeError("can_use_tool must be callable")
+
+    @property
+    def overlap(self) -> tuple[str, ...]:
+        """Names present in both lists; kept for diagnostics, deny always wins."""
+        both = set(self.allowed_tools) & set(self.disallowed_tools)
+        return tuple(sorted(both))
+
+
+def validate_mode(mode: str) -> PermissionMode:
+    if mode not in PERMISSION_MODES:
+        raise ValueError(f"unknown permission mode {mode!r}; expected one of {', '.join(PERMISSION_MODES)}")
+    return mode  # type: ignore[return-value]
+
+
+class PermissionEngine:
+    """Evaluates one tool call against the three layers."""
+
     def __init__(
         self,
-        allowed_tools: Sequence[str] = (),
-        disallowed_tools: Sequence[str] = (),
-        permission_mode: str = "default",
-        can_use_tool: Optional[CanUseTool] = None,
-        tool_kinds: Optional[Mapping[str, str]] = None,
-        subagents: Optional[Mapping[str, Any]] = None,
-        depth: int = 0,
-        max_subagent_depth: int = 1,
+        config: PermissionConfig | None = None,
+        *,
+        mode: PermissionMode = "default",
+        allowed_tools: Iterable[str] | None = None,
+        disallowed_tools: Iterable[str] | None = None,
+        can_use_tool: Callable[[str, dict[str, Any], PermissionRequestContext], Any] | None = None,
+        tool_kinds: dict[str, str] | None = None,
     ) -> None:
-        if permission_mode not in PERMISSION_MODES:
-            raise ValueError(f"unknown permission_mode: {permission_mode!r}")
-        allowed = frozenset(allowed_tools)
-        disallowed = frozenset(disallowed_tools)
-        overlap = allowed & disallowed
-        if overlap:
-            raise ValueError(f"tools present in both allowed and disallowed lists: {sorted(overlap)}")
-        self.allowed_tools = allowed
-        self.disallowed_tools = disallowed
-        self.permission_mode = permission_mode
-        self.can_use_tool = can_use_tool
-        self._tool_kinds = dict(tool_kinds or {})
-        if subagents is None:
-            self._subagents: dict[str, Any] = {}
-        elif isinstance(subagents, Mapping):
-            self._subagents = dict(subagents)
-        else:  # AgentRegistry or any iterable of definitions
-            self._subagents = {agent.name: agent for agent in subagents}
-        self.depth = int(depth)
-        self.max_subagent_depth = int(max_subagent_depth)
+        if config is None:
+            config = PermissionConfig(
+                mode=mode,
+                allowed_tools=allowed_tools or (),
+                disallowed_tools=disallowed_tools or (),
+                can_use_tool=can_use_tool,
+            )
+        self.config = config
+        # Fallback kind map for callers that evaluate by name only (e.g. the
+        # delegation gate, where no ToolSpec object is in hand).
+        self._kinds: dict[str, str] = dict(tool_kinds or {})
 
-    def check_tool(self, tool_name: str, tool_kind: str, tool_input: Mapping[str, Any]) -> PermissionDecision:
-        tool_input = dict(tool_input or {})
+    # -- layer helpers -----------------------------------------------------
+    @property
+    def mode(self) -> PermissionMode:
+        return self.config.mode
 
-        # Tier 1: disallowed always wins.
-        if tool_name in self.disallowed_tools:
-            return PermissionDecision(False, f"tool '{tool_name}' is disallowed")
+    def knows(self, tool_name: str) -> bool:
+        return tool_name in self._kinds
 
-        # Tier 2: explicit allow auto-approves in every mode.
-        if tool_name in self.allowed_tools:
-            return PermissionDecision(True, f"tool '{tool_name}' is explicitly allowed")
+    def register_kind(self, tool_name: str, kind: str) -> None:
+        self._kinds[tool_name] = kind
 
-        # Delegation is gated by the declared tool set and the depth backstop
-        # in every mode: max_subagent_depth is a structural limit, not a
-        # permission mode, so even bypassPermissions cannot nest deeper.
-        if tool_kind == "delegate":
-            return self._check_delegate(tool_input)
+    def evaluate(
+        self,
+        tool_name: str,
+        *,
+        kind: str | None = None,
+        mutating: bool | None = None,
+        payload: dict[str, Any] | None = None,
+        context: PermissionRequestContext | None = None,
+        known: bool = True,
+    ) -> PermissionDecision:
+        """Run the three layers for one call.
 
-        if self.permission_mode == "bypassPermissions":
-            return PermissionDecision(True)
+        ``kind``/``mutating`` normally come from the tool's own
+        :class:`~tools.ToolSpec`; the delegation gate passes only names, which is
+        why the engine keeps a name→kind map as well.
+        """
+        resolved_kind = kind or self._kinds.get(tool_name) or "other"
+        if resolved_kind not in {"read", "edit", "exec", "task", "network", "other"}:
+            resolved_kind = "other"
+        is_mutating = (resolved_kind in MUTATING_KINDS) if mutating is None else bool(mutating)
 
-        if tool_kind == "read":
-            return PermissionDecision(True)
-
-        # Mutating tool (edit or exec).
-        if self.permission_mode == "acceptEdits" and tool_kind == "edit":
-            return PermissionDecision(True, f"mutating edit auto-approved by acceptEdits mode")
-        if self.permission_mode == "plan":
-            return PermissionDecision(False, f"plan mode does not permit mutating tool '{tool_name}'")
-
-        # default mode (and exec under acceptEdits): host approval required.
-        if self.can_use_tool is None:
+        if tool_name in set(self.config.disallowed_tools):
             return PermissionDecision(
                 False,
-                f"mutating tool '{tool_name}' requires approval; no can_use_tool callback "
-                "provided (fail-safe: deny, never execute)",
+                source="disallowed_tools",
+                reason=f"{tool_name} is listed in disallowed_tools",
+                rule="disallowed_tools",
+                tool=tool_name,
             )
-        try:
-            verdict = self.can_use_tool(tool_name, tool_input, self.permission_mode)
-        except Exception as exc:  # a broken callback must not approve
-            return PermissionDecision(False, f"can_use_tool callback raised {type(exc).__name__}: {exc}")
-        if isinstance(verdict, Mapping):
-            approved = bool(verdict.get("approved", verdict.get("allow", False)))
-            reason = str(verdict.get("reason", "") or "")
-        else:
-            approved = bool(verdict)
-            reason = ""
-        if approved:
-            return PermissionDecision(True, reason or f"host approved '{tool_name}'")
-        return PermissionDecision(False, reason or f"host denied '{tool_name}'")
-
-    def _check_delegate(self, tool_input: dict[str, Any]) -> PermissionDecision:
-        name = tool_input.get("agent")
-        if not isinstance(name, str) or not name.strip():
-            return PermissionDecision(False, "delegation requires a non-empty 'agent' string")
-        definition = self._subagents.get(name)
-        if definition is None:
-            return PermissionDecision(False, f"unknown agent '{name}'")
-
-        # Backstop: the child would run at depth+1.
-        if self.depth + 1 > self.max_subagent_depth:
+        if not known and resolved_kind != "task":
             return PermissionDecision(
                 False,
-                f"delegation not permitted at depth {self.depth} "
-                f"(max_subagent_depth={self.max_subagent_depth})",
+                source="unknown_tool",
+                reason=f"{tool_name} is not a registered tool, so no policy applies to it",
+                rule="registered_tools",
+                tool=tool_name,
             )
-
-        # Gate the subagent's *declared* tool set, one tool at a time.
-        for tool in definition.tools:
-            kind = self._tool_kinds.get(tool)
-            if kind is None:
-                return PermissionDecision(
-                    False, f"subagent '{name}' declares tool '{tool}' which is not available in this context"
-                )
-            if tool == "Task":
-                # The subagent would run at depth+1; its own delegation would
-                # create depth+2. Backstop nesting with max_subagent_depth.
-                if (self.depth + 2) > self.max_subagent_depth:
-                    return PermissionDecision(
-                        False,
-                        f"subagent '{name}' may not delegate further "
-                        f"(max_subagent_depth={self.max_subagent_depth})",
-                    )
-                continue
-            decision = self.check_tool(tool, kind, {})
-            if not decision.allowed:
+        if tool_name in set(self.config.allowed_tools):
+            return PermissionDecision(
+                True,
+                source="allowed_tools",
+                reason=f"{tool_name} is auto-approved by allowed_tools",
+                rule="allowed_tools",
+                tool=tool_name,
+            )
+        if self.config.mode == "bypassPermissions":
+            return PermissionDecision(
+                True,
+                source="mode",
+                reason=f"{tool_name} approved under permission_mode=bypassPermissions",
+                rule="mode:bypassPermissions",
+                tool=tool_name,
+            )
+        if self.config.mode == "plan":
+            if is_mutating:
                 return PermissionDecision(
                     False,
-                    f"subagent '{name}' declares tool '{tool}' which is not approved: {decision.reason}",
+                    source="mode",
+                    reason=f"plan mode is read-only; {tool_name} would change state",
+                    rule="mode:plan",
+                    tool=tool_name,
                 )
-        return PermissionDecision(True, f"subagent '{name}' declares only approved tools")
+            return PermissionDecision(
+                True,
+                source="mode",
+                reason=f"{tool_name} is read-only, permitted in plan mode",
+                rule="mode:plan",
+                tool=tool_name,
+            )
+        if not is_mutating:
+            return PermissionDecision(
+                True,
+                source="mode",
+                reason=f"{tool_name} is read-only, permitted in {self.config.mode} mode",
+                rule=f"mode:{self.config.mode}",
+                tool=tool_name,
+            )
+        if self.config.mode == "acceptEdits" and resolved_kind == "edit":
+            return PermissionDecision(
+                True,
+                source="mode",
+                reason=f"{tool_name} is a workspace edit, auto-approved by acceptEdits",
+                rule="mode:acceptEdits",
+                tool=tool_name,
+            )
+        if self.config.can_use_tool is None:
+            return PermissionDecision(
+                False,
+                source="mode",
+                reason=(
+                    f"{tool_name} changes state and this run has no host approval callback, "
+                    f"so it is denied under permission_mode={self.config.mode}"
+                ),
+                rule=f"mode:{self.config.mode}:no_callback",
+                tool=tool_name,
+            )
+        request = context or PermissionRequestContext(
+            mode=self.config.mode, reason_hint=f"{tool_name} is mutating"
+        )
+        try:
+            verdict = self.config.can_use_tool(tool_name, dict(payload or {}), request)
+        except Exception as error:  # noqa: BLE001 - a broken approver must not grant access
+            return PermissionDecision(
+                False,
+                source="host_callback",
+                reason=f"host approval callback raised {type(error).__name__}; failing closed",
+                rule="host_callback:error",
+                tool=tool_name,
+            )
+        approved, note = _approval_verdict(verdict)
+        if approved:
+            return PermissionDecision(
+                True,
+                source="host_callback",
+                reason=note or f"{tool_name} approved by host approval callback",
+                rule="host_callback:allow",
+                tool=tool_name,
+            )
+        return PermissionDecision(
+            False,
+            source="host_callback",
+            reason=note or f"{tool_name} refused by host approval callback",
+            rule="host_callback:deny",
+            tool=tool_name,
+        )
+
+    def evaluate_spec(
+        self,
+        spec: Any,
+        payload: dict[str, Any] | None = None,
+        *,
+        context: PermissionRequestContext | None = None,
+        known: bool = True,
+    ) -> PermissionDecision:
+        return self.evaluate(
+            spec.name,
+            kind=spec.kind,
+            mutating=spec.is_mutating,
+            payload=payload,
+            context=context,
+            known=known,
+        )
+
+    # -- delegation --------------------------------------------------------
+    def check_delegation(
+        self,
+        agent: str,
+        tool_names: Sequence[str],
+        *,
+        kinds: dict[str, str] | None = None,
+        context: PermissionRequestContext | None = None,
+        disallowed_extra: Iterable[str] = (),
+    ) -> DelegationVerdict:
+        """Gate a subagent by *each tool it declared*, not by the name ``Task``.
+
+        A delegation is approved only when every tool the subagent may reach is
+        approved here. That is what makes "read-only reviewer subagent" a real
+        boundary instead of a prompt-level suggestion.
+        """
+        extra = set(normalise_names(disallowed_extra))
+        allowed: list[str] = []
+        denied: list[tuple[str, str]] = []
+        checked: list[str] = []
+        for name in normalise_names(tool_names):
+            checked.append(name)
+            if name in extra:
+                denied.append((name, "disallowed for subagents by host policy"))
+                continue
+            kind = (kinds or self._kinds).get(name, "other")
+            decision = self.evaluate(name, kind=kind, context=context)
+            if decision.allowed:
+                allowed.append(name)
+            else:
+                denied.append((name, decision.reason))
+        return DelegationVerdict(agent=agent, allowed=tuple(allowed), denied=tuple(denied), checked=tuple(checked))
+
+
+def _approval_verdict(verdict: Any) -> tuple[bool, str]:
+    """Accept bool / "allow" / "deny" / {"allowed": bool, "reason": ...}."""
+    if isinstance(verdict, bool):
+        return verdict, ""
+    if isinstance(verdict, str):
+        text = verdict.strip().lower()
+        if text in {"allow", "approve", "approved", "yes", "true"}:
+            return True, ""
+        if text in {"deny", "denied", "reject", "no", "false"}:
+            return False, ""
+        return False, f"unrecognised approval verdict {verdict!r}"
+    if isinstance(verdict, dict):
+        allowed = bool(verdict.get("allowed", verdict.get("allow", False)))
+        reason = str(verdict.get("reason", "") or "")
+        return allowed, reason
+    allowed = getattr(verdict, "allowed", None)
+    if isinstance(allowed, bool):
+        return allowed, str(getattr(verdict, "reason", "") or "")
+    return False, f"unrecognised approval verdict {type(verdict).__name__}"
+
+
+__all__ = [
+    "DelegationVerdict",
+    "MUTATING_KINDS",
+    "PERMISSION_MODES",
+    "PermissionConfig",
+    "PermissionDecision",
+    "PermissionEngine",
+    "PermissionMode",
+    "PermissionRequestContext",
+    "ToolKind",
+    "normalise_names",
+    "subtract",
+    "validate_mode",
+]
