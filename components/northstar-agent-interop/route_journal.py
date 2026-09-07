@@ -5,6 +5,7 @@ import hashlib
 import json
 import os
 import re
+import fcntl
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Iterator, Literal
@@ -161,6 +162,7 @@ def decision_fingerprint(record: RouteJournalRecord) -> str:
 class RouteDecisionJournal:
     def __init__(self, path: str | Path):
         self.path = Path(path)
+        self.lock_path = self.path.with_name(self.path.name + ".lock")
         self.path.parent.mkdir(parents=True, exist_ok=True)
         os.chmod(self.path.parent, 0o700)
         if self.path.exists():
@@ -188,17 +190,23 @@ class RouteDecisionJournal:
     def append(self, record: RouteJournalRecord) -> RouteJournalRecord:
         if not isinstance(record, RouteJournalRecord):
             raise JournalError("record has invalid type")
-        previous = self.get_by_idempotency(record.idempotency_key)
-        if previous is not None:
-            if previous.canonical_json() != record.canonical_json():
-                raise JournalConflict("idempotency key conflicts with existing decision")
-            return previous
-        with self.path.open("a", encoding="utf-8") as handle:
-            handle.write(record.canonical_json().decode("utf-8") + "\n")
-            handle.flush()
-            os.fsync(handle.fileno())
-        os.chmod(self.path, 0o600)
-        return record
+        with self.lock_path.open("a+") as lock:
+            os.chmod(self.lock_path, 0o600)
+            fcntl.flock(lock.fileno(), fcntl.LOCK_EX)
+            try:
+                previous = self.get_by_idempotency(record.idempotency_key)
+                if previous is not None:
+                    if previous.canonical_json() != record.canonical_json():
+                        raise JournalConflict("idempotency key conflicts with existing decision")
+                    return previous
+                with self.path.open("a", encoding="utf-8") as handle:
+                    handle.write(record.canonical_json().decode("utf-8") + "\n")
+                    handle.flush()
+                    os.fsync(handle.fileno())
+                os.chmod(self.path, 0o600)
+                return record
+            finally:
+                fcntl.flock(lock.fileno(), fcntl.LOCK_UN)
 
 __all__ = ["JournalConflict", "JournalError", "RouteDecisionJournal", "RouteJournalRecord", "SCHEMA_VERSION", "decision_fingerprint"]
 

@@ -49,4 +49,39 @@ class RouteJournalRedTests(unittest.TestCase):
             conflict = RouteJournalRecord.from_dict({**record.to_dict(), "failure_class": "cooldown"})
             with self.assertRaises(ValueError): journal.append(conflict)
 
-if __name__ == "__main__": unittest.main()
+    def test_concurrent_same_idempotency_key_is_written_once(self):
+        import multiprocessing
+        from route_journal import RouteDecisionJournal, RouteJournalRecord
+        record = RouteJournalRecord.from_dict({
+            "schema_version": "northstar.route-journal.v1",
+            "idempotency_key": "idem-concurrent", "request_digest": "sha256:" + "c" * 64,
+            "policy_revision": "p1", "status": "failed", "failure_class": "no_candidate",
+            "selected_agent_id": None, "selected_provider": None, "deadline_at": None,
+            "candidate_snapshot": [],
+        })
+        with tempfile.TemporaryDirectory() as tmp:
+            path = str(Path(tmp) / "route.jsonl")
+            def writer():
+                RouteDecisionJournal(path).append(record)
+            processes = [multiprocessing.Process(target=writer) for _ in range(2)]
+            for process in processes: process.start()
+            for process in processes: process.join(5)
+            self.assertTrue(all(process.exitcode == 0 for process in processes))
+            self.assertEqual(len(list(RouteDecisionJournal(path).read())), 1)
+
+
+    def test_stale_lock_file_is_reusable(self):
+        from route_journal import RouteDecisionJournal, RouteJournalRecord
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "route.jsonl"
+            lock = Path(str(path) + ".lock")
+            lock.write_text("stale", encoding="utf-8")
+            record = RouteJournalRecord.from_dict({
+                "schema_version": "northstar.route-journal.v1",
+                "idempotency_key": "idem-stale-lock", "request_digest": "sha256:" + "d" * 64,
+                "policy_revision": "p1", "status": "failed", "failure_class": "no_candidate",
+                "selected_agent_id": None, "selected_provider": None, "deadline_at": None,
+                "candidate_snapshot": [],
+            })
+            RouteDecisionJournal(path).append(record)
+            self.assertEqual(len(list(RouteDecisionJournal(path).read())), 1)

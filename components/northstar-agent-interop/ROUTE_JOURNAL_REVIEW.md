@@ -13,7 +13,7 @@ existing local-only `BackendRouter` worktree.
   backend output.
 - Selected identity, provider, policy revision, and narrowed deadline are
   canonicalized into a deterministic decision fingerprint.
-- Append-only JSONL writes flush and `fsync` each record.
+- Append-only JSONL writes flush and `fsync` each record, with a sidecar `flock` to serialize local multi-process idempotency checks.
 - A truncated final line is ignored; a complete malformed line fails closed.
 - Reusing an idempotency key with the same canonical record returns the prior
   record without calling the router again.
