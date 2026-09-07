@@ -9,22 +9,24 @@
 
 > **阅读口径（2026-09-07 当前真值）**：本页保留了早期差距基线与实施 ledger，
 > 因而 §0–§8 中的“现状”段落有历史意义，不应覆盖后面的复评。当前 checkout
-> 的权威快照是：`make test` **838 项通过**（runtime 544，含 4 项因可选
+> 的权威快照是：`make test` **855 项通过**（runtime 561，含 4 项因可选
 > OpenTelemetry 依赖缺失而跳过；其余组件与文档测试全绿）；五个可安装组件仍为
-> 对齐的 `0.1.0.dev0`，没有发布 tag。当前 Agent Skills 已支持
+> 对齐的 `0.1.0.dev0`，没有发布 tag。Agent Skills 已支持
 > `.northstar/skills` + portable `.agents/skills`、标准 frontmatter、`skills
-> check/list` 与 fail-closed 路径校验；MCP 仍是最小 stdio 工具客户端，而不是
-> 完整的远程 MCP/插件市场。若只想看“现在还差什么”，直接跳到 **§10.8**。
+> check/list` 与 fail-closed 路径校验；runtime 还新增了 bounded checkpoint、
+> inspect/diff/rewind/fork 和 mutating-tool workspace receipts；MCP 仍是最小
+> stdio 工具客户端，而不是完整的远程 MCP/插件市场。若只想看“现在还差什么”，
+> 直接跳到 **§10.9**。
 
 ## 0. 执行摘要（TL;DR）
 
-**当前结论：Northstar 已从“库 + 手工拼装”追到可安装、可审计的 headless harness，但还不是 Claude Code/Codex/Gemini 那样的完整产品。**本地实测 `make test` 为 **838 项**（runtime 544，4 项可选 OTel 测试因依赖缺失而跳过），权限门、hooks、预算、只追加 transcript、审计导出和离线确定性仍是最强资产。
+**当前结论：Northstar 已从“库 + 手工拼装”追到可安装、可审计、具备局部可逆执行的 headless harness，但还不是 Claude Code/Codex/Gemini 那样的完整产品。**本地实测 `make test` 为 **855 项**（runtime 561，4 项可选 OTel 测试因依赖缺失而跳过），权限门、hooks、预算、只追加 transcript、workspace receipts、checkpoint manifest、审计导出和离线确定性仍是最强资产。
 
 已经补齐的 DX 基础包括：五个可安装组件、console script、`doctor`/`dry-run`、AGENTS.md 与策略即代码、文件化 subagents、MCP stdio 最小客户端、标准 Agent Skills（含 `skills check/list`）、sessions 读回/NDJSON 审计、Python SDK、脚手架、API 文档和 CI recipe。**这些能力要以当前 checkout 的测试为准；本页后面的早期盘点是历史基线。**
 
 与全球头部工具相比，剩余差距集中在产品外围而不是治理内核：
 
-1. **交互恢复**：已有 resume/list/show/export，但没有 checkpoint/rewind 和文件回滚体验。
+1. **交互恢复**：已有 resume/list/show/export，以及 checkpoint/inspect/diff/rewind/fork 的 CLI/API；仍没有交互式回放 UI、自动 turn-level checkpoint 策略和跨进程/远端恢复。
 2. **可嵌入层**：已有 Python SDK 与结构化事件，没有 TypeScript SDK、长期 app-server 或 approval 协议。
 3. **生态深度**：MCP 仍是 stdio 工具发现/调用，没有 HTTP/auth；无 plugins、marketplace、热加载和组织级安装策略。
 4. **后台与远程**：durable-run/remote-worker 有内核和协议/运维文档，但没有网络 transport、调度器或真实远端 canary。
@@ -164,7 +166,7 @@ Northstar 是"运行时组件集合"，不是一个终端产品。因此对标�
 
 **顶级做法**：LangGraph + LangSmith 是行业标杆：checkpoint、任意节点回放、按节点 token 统计[5](https://o-mega.ai/articles/langgraph-vs-crewai-vs-autogen-top-10-agent-frameworks-2026)；Claude Code 会话可 resume/fork，SDK 会话持久化[2](https://www.totalum.app/blog/claude-agent-sdk-totalum-2026)。
 
-**Northstar 现状**：写入侧优秀——append-only JSONL（fsync、0600）、span 树、RunReport、`--resume`；**读取侧空白**——没有"把会话渲染成人可读轨迹"的命令、没有基于会话的统计/审计导出、没有 checkpoint 回放（durable-run 有 checkpoint/lease 概念但只是原型）。补一个 `sessions show/export` 子命令即可把已有资产变成 DX 亮点。
+**Northstar 历史基线**：写入侧优秀——append-only JSONL（fsync、0600）、span 树、RunReport、`--resume`；读取侧后来已补上 `sessions show/export`。本段保留为早期差距记录；当前 checkpoint/rewind/fork 与 workspace receipt 的事实以 §10.9 为准。
 
 ### 3.7 测试与确定性 —— Northstar 5/5（全行业稀缺优势）
 
@@ -290,8 +292,9 @@ Northstar 是"运行时组件集合"，不是一个终端产品。因此对标�
 
 ## 9. 实施进度（changelog of this roadmap）
 
-> 每完成一批实施，在此追加一行，保持路线图与实际仓库同步。所有条目均在分支
-> `arena/01a07b10-northstar-agent-os` 上未提交实施（等待维护者指示提交）。
+> 每完成一批实施，在此追加一行，保持路线图与实际仓库同步。早期条目保留其
+> 历史分支/提交口径；当前增量在固定的 `arena/01a07be4-northstar-agent-os`
+> 分支上推进，分支提交不等同于正式发布。
 
 ### 2026-09-07 — Phase 0 完成 + Phase 1 核心完成（未提交）
 
@@ -567,7 +570,7 @@ checkpoint/rewind、headless/SDK、后台任务和企业级策略下发。Norths
 |---|---|---|---|
 | Zero-to-first-run | `make demo`、`pip install .`、`doctor`、`dry-run`；无公共 index/登录 | 官方安装器、账号/模型即用、交互式首跑 | 发布 wheel，保留零 key demo |
 | 嵌入面 | Python `sdk.run/stream_run`、结构化事件、resume；无 TypeScript/app-server | Codex exec/SDK/app-server、Claude SDK 多语言 | 优先稳定协议/版本化 SDK，不先做 TUI |
-| 交互与恢复 | sessions list/show/export、append-only transcript；无 checkpoint/rewind | checkpoint、rewind、后台任务、任务队列 | T3：先做只读 checkpoint/restore 读回，再做文件回滚 |
+| 交互与恢复 | sessions list/show/export；bounded checkpoint manifest、inspect/diff、强制 rewind/restore、fork；mutating tool 有 workspace_change receipt | checkpoint、rewind、后台任务、任务队列 | T3b：turn-level 自动策略、交互回放 UI、跨进程/远端 checkpoint lineage |
 | 生态格式 | MCP stdio 工具发现/调用；Agent Skills 标准元数据 + `skills check/list`；无 plugins/marketplace、无 MCP HTTP/auth | MCP 多传输/登录、Skills 热加载、插件/marketplace | T4b：HTTP/auth 与插件清单必须先有信任/版本/撤销故事 |
 | 供应链 | 目录/字段/路径/symlink fail-closed；不执行脚本、不做恶意内容判断 | 插件市场/组织策略/托管配置 | 把 validator 接入 CI；内容审查与签名不能伪装成已完成 |
 | 后台/远程 | durable-run 与 remote-worker spec/ops 文档；无网络 transport/调度器/真实远端 canary | Codex cloud/Automations、Claude remote/background | T5：先 transport helper + 真实主机 canary，再谈 hosted control plane |
@@ -587,3 +590,47 @@ checkpoint/rewind、headless/SDK、后台任务和企业级策略下发。Norths
 harness。与头部产品仍差一个产品层：交互恢复、后台/远程、公共发布、TypeScript
 和插件市场。当前最有辨识度的路线不是复制 Claude Code 的 TUI，而是把“标准生态
 可消费 + 默认拒绝 + 可验证 audit feed + 离线可复现”做成 CI/企业嵌入的第一选择。
+
+### 10.9 当前实现复核：T6 可逆执行内核（2026-09-07）
+
+本节 supersede §10.8 中关于“无 checkpoint/rewind”的旧文字。它只描述当前
+checkout 已实现的本地能力，不把 durable-run 原型、文档设想或竞品宣传当作
+Northstar 已上线能力。
+
+- **Manifest**：`components/northstar-agent-runtime/checkpoints.py` 以
+  `northstar.checkpoint.v1` 保存 bounded regular-file snapshot。manifest 记录
+  `session_id`、`session_index`、workspace、timestamp、label、parent checkpoint、
+  每个文件的相对路径/SHA-256/大小/权限模式和确定性 workspace digest。
+- **安全边界**：默认上限为 10,000 文件、单文件 8 MiB、总计 64 MiB；不遍历
+  `.git`、`__pycache__`、`node_modules`、`.venv`，不跟随 symlink；manifest、重复
+  路径、digest、checkpoint tree 和 restore 目标出现异常时 fail-closed。恢复不重放
+  setuid/setgid 位。
+- **动作 receipt**：`loop.py` 在已通过权限门、实际执行的 mutating tool 前后，
+  对 `path`/`paths` 形状的目标记录 `workspace_change` session record，包含
+  before/after 的 exists/kind/hash/bytes/mode；receipt 是元数据，不把文件正文塞进
+  transcript。权限拒绝的工具不会伪造“已执行” receipt。
+- **控制面**：`sessions checkpoint` 创建快照；`sessions inspect`/`checkpoints`
+  列出链；`sessions diff` 只读比较 added/modified/deleted；`sessions rewind`（或
+  `restore`）必须 `--force`，默认不删除新增文件，并先创建 `before-rewind:*`
+  safety checkpoint；`sessions fork` 只向不存在的目标目录原子 materialise，生成
+  child 初始 checkpoint 与 `fork.json` lineage。
+- **验证**：runtime 新增 checkpoint API/CLI 测试和 mutating receipt 测试；当前
+  `make test` 为 **855 项**（runtime 561，4 项可选 OTel 测试 skip）。文档 API
+  生成器已纳入 `checkpoints` 模块，离线 session panel 的 record vocabulary 也已
+  同步 `workspace_change`。
+
+诚实边界仍然重要：这是本地 bounded snapshot，不是 copy-on-write、数据库事务、
+VM/OS sandbox 或远端 worker fork；自定义 mutating tool 若没有在 payload 中声明
+路径，receipt 只能记录动作而不能声称捕获了所有文件；manifest 目前未签名，且
+没有跨进程调度、approval lease、后台任务或 TypeScript/app-server 协议。
+
+**下一步优先级调整：**
+
+1. 将 checkpoint 选择策略提升为 runtime 的 `Run / Turn / Action / Checkpoint /
+   Artifact / Receipt` 合同：可配置 turn boundary、崩溃恢复和 checkpoint retention，
+   但不让自动化绕过 force/approval。
+2. 为 mutating tool 引入声明式影响集（或工具返回的 artifact manifest），让 receipt
+   覆盖不止 `path`/`paths` 的自定义工具，并为 receipt/manifest 增加签名或可信 host
+   receipt 绑定。
+3. 在上述合同稳定后再做 TypeScript SDK、双向 app-server、后台 task queue 和远端
+   worker transport；不先复制一个只服务于 TUI 的状态层。

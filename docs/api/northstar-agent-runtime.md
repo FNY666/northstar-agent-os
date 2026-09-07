@@ -134,6 +134,85 @@ Running cost and usage accumulator with a ceiling check.
 
 Pricing view for the CLI ``--show-pricing`` flag.
 
+### `checkpoints`
+
+Source: `components/northstar-agent-runtime/checkpoints.py`
+
+Content-addressed workspace checkpoints for reversible agent runs.
+
+#### `CheckpointError`
+
+A checkpoint cannot be created, verified, compared or restored safely.
+
+#### `CheckpointFile`
+
+One regular file in a checkpoint manifest.
+
+- `as_dict()`
+#### `Checkpoint`
+
+Validated manifest plus its on-disk snapshot directory.
+
+- `manifest_path()`
+- `snapshot_root()`
+- `as_dict()`
+#### `FileState`
+
+Pre/post metadata for one path touched by a mutating tool.
+
+- `as_dict()`
+#### `FileChange`
+
+One difference between a checkpoint and the current workspace.
+
+- `as_dict()`
+#### `ForkResult`
+
+Result of materialising a new workspace/session from a checkpoint.
+
+- `as_dict()`
+#### `CheckpointDiff`
+
+Digest comparison used by ``sessions diff`` and the rewind guard.
+
+- `clean()`
+- `as_dict()`
+#### `checkpoint_root(session_dir: str | os.PathLike[str], session_id: str)`
+
+Return the private checkpoint directory for one session.
+
+#### `create_checkpoint(workspace: str | os.PathLike[str], session_dir: str | os.PathLike[str], session_id: str, *, label: str='', parent_checkpoint_id: str | None=None, session_index: int | None=None, ignored_directories: Iterable[str]=())`
+
+Atomically snapshot bounded regular files under ``workspace``.
+
+#### `list_checkpoints(session_dir: str | os.PathLike[str], session_id: str)`
+
+Load checkpoints in creation order; malformed entries fail closed.
+
+#### `load_checkpoint(directory: str | os.PathLike[str], *, expected_session_id: str | None=None)`
+
+Load and validate one checkpoint manifest and its snapshot tree.
+
+#### `verify_checkpoint(checkpoint: Checkpoint)`
+
+Verify snapshot bytes and tree shape before they can be restored.
+
+#### `capture_file_states(workspace: str | os.PathLike[str], relative_paths: Iterable[str])`
+
+Hash selected workspace paths for a mutating-action pre/post receipt.
+
+#### `diff_checkpoint(checkpoint: Checkpoint, workspace: str | os.PathLike[str])`
+
+Compare a verified checkpoint with the current workspace.
+
+#### `rewind_checkpoint(checkpoint: Checkpoint, workspace: str | os.PathLike[str], *, force: bool=False, delete_added: bool=False, safety_session_dir: str | os.PathLike[str] | None=None, safety_session_id: str | None=None)`
+
+Restore files from a checkpoint after an explicit ``force`` decision.
+
+#### `fork_checkpoint(checkpoint: Checkpoint, target_workspace: str | os.PathLike[str], session_dir: str | os.PathLike[str], new_session_id: str, *, label: str='fork base')`
+
+Materialise a checkpoint into a new, previously absent workspace.
+
 ### `cli`
 
 Source: `components/northstar-agent-runtime/cli.py`

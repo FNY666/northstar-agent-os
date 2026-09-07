@@ -1,5 +1,25 @@
 # Northstar Agent OS — initial public component
 
+## Unreleased (fourteenth batch) — reversible execution kernel (T6)
+
+- Runtime checkpoints (`northstar.checkpoint.v1`) snapshot bounded regular files
+  with workspace/file hashes, modes, session index, parent checkpoint and
+  atomic manifests under `checkpoints/<session-id>/`.
+- `sessions checkpoint|inspect|diff|rewind|restore|fork` adds the control plane:
+  verified diff, explicit-force rewind with an automatic safety checkpoint,
+  conservative handling of files added after a checkpoint, and atomic child
+  workspace materialisation with `fork.json` lineage.
+- Mutating path-shaped tool calls emit append-only `workspace_change` records
+  with pre/post metadata hashes. These receipts do not claim to capture bytes
+  for custom tools that do not declare their affected paths.
+- Symlink traversal, malformed/tampered manifests, path escape, oversized
+  snapshots and unsafe restore targets fail closed; restore never reproduces
+  setuid/setgid bits.
+- Added offline API/CLI/fork/tamper tests and the reversible-execution concept
+  page. Runtime now has 561 tests (four optional OpenTelemetry tests skipped);
+  full `make test` is 855 with no release or public package publication.
+- Version remains aligned `0.1.0.dev0`; this is unreleased.
+
 ## Unreleased (thirteenth batch) — portable Agent Skills and fail-closed validator (T4)
 
 - Runtime discovery now accepts both `.northstar/skills/*/SKILL.md` and the

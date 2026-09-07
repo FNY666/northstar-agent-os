@@ -45,7 +45,7 @@ class SessionIdTests(unittest.TestCase):
         store = SessionStore(None)
         with self.assertRaises(ValueError):
             store.append("raw_prompt_bytes", {})
-        self.assertEqual(len(RECORD_TYPES), 11)
+        self.assertEqual(len(RECORD_TYPES), 12)
 
 
 class WriteTests(RuntimeTestCase):
@@ -80,6 +80,15 @@ class WriteTests(RuntimeTestCase):
         self.assertEqual(dropped, 0)
         self.assertEqual([record["index"] for record in records], [0, 0])
         self.assertEqual([record["type"] for record in records], ["session_start", "user_prompt"])
+
+    def test_a_new_writer_resumes_the_next_index_from_an_existing_transcript(self):
+        root = self.workspace()
+        first = SessionStore(root, session_id="ns-resume-index")
+        first.append("session_start", {})
+        second = SessionStore(root, session_id="ns-resume-index")
+        second.append("informational", {"message": "continued"})
+        records, _ = load_jsonl(first.path)
+        self.assertEqual([record["index"] for record in records], [0, 1])
 
     def test_transcript_files_are_owner_readable_only(self):
         root = self.workspace()
@@ -247,6 +256,8 @@ class RuntimeSessionTests(RuntimeTestCase):
         self.assertIn("follow-up question", sent)
         self.assertGreaterEqual(len([event for event in report.events if isinstance(event, AssistantMessage)]), 1)
         self.assertGreaterEqual(len(report.transcript), 3)
+        records, _ = store.read()
+        self.assertEqual([record["index"] for record in records], list(range(len(records))))
 
     def test_list_sessions_finds_persisted_ids(self):
         root = self.workspace()

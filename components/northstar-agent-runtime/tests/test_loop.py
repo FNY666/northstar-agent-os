@@ -256,6 +256,29 @@ class PersistenceTests(RuntimeTestCase):
         types = [record["type"] for record in records]
         self.assertEqual(types, ["session_start", "user_prompt", "assistant", "tool_result", "assistant", "result", "session_end"])
 
+    def test_mutating_tools_write_a_pre_and_post_workspace_receipt(self):
+        workspace = self.workspace()
+        store = self.session_store()
+        provider = self.provider([tool_turn("Write", {"path": "x.txt", "content": "created"}), text_turn("ok")])
+        self.drive(
+            self.runtime(
+                provider=provider,
+                workspace=workspace,
+                sessions=store,
+                permission_mode="acceptEdits",
+            )
+        )
+        records, _ = store.read()
+        receipts = [record for record in records if record["type"] == "workspace_change"]
+        self.assertEqual(len(receipts), 1)
+        receipt = receipts[0]
+        self.assertEqual(receipt["paths"], ["x.txt"])
+        self.assertFalse(receipt["before"][0]["exists"])
+        self.assertTrue(receipt["after"][0]["exists"])
+        self.assertEqual(receipt["after"][0]["kind"], "file")
+        self.assertTrue(receipt["changed"])
+        self.assertFalse(receipt["is_error"])
+
     def test_denials_are_written_as_their_own_record(self):
         store = self.session_store()
         provider = self.provider([tool_turn("Write", {"path": "x", "content": "1"}), text_turn("ok")])

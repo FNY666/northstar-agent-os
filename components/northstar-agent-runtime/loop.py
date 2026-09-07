@@ -28,6 +28,7 @@ from typing import Any, Callable, Iterable, Iterator, Mapping, Sequence
 
 from agents import AgentDefinition, AgentRegistry, Verdict, builtin_registry, parse_verdict
 from budget import Budget
+from checkpoints import CheckpointError, capture_file_states
 from compaction import CompactionOutcome, compact, should_compact
 from hooks import HookInput, HookRegistry
 from permissions import (
@@ -918,6 +919,15 @@ class AgentRuntime:
             limits=self.limits,
             services=self._services(),
         )
+        mutation_paths: tuple[str, ...] = ()
+        before_states: tuple[Any, ...] = ()
+        receipt_error: str | None = None
+        if spec.is_mutating:
+            try:
+                mutation_paths = _mutation_relative_paths(payload, context)
+                before_states = capture_file_states(self.sandbox.root_real, mutation_paths)
+            except (CheckpointError, ToolAccessError, ToolInputError, ValueError, TypeError, OSError) as error:
+                receipt_error = f"workspace preimage unavailable: {type(error).__name__}: {error}"
         started = time.monotonic()
         with span.child(f"tool:{spec.name}") as tool_span:
             tool_span.set_attributes(
@@ -931,16 +941,20 @@ class AgentRuntime:
                     "hook.rewrote_input": rewritten,
                 }
             )
-            try:
-                raw = spec.handler(payload, context)
-            except (ToolAccessError, ToolInputError, ValueError, KeyError, TypeError, OSError) as error:
-                result = ToolResult.error(f"{type(error).__name__}: {error}")
-                tool_span.set_attribute("tool.error_class", type(error).__name__)
-            except Exception as error:  # noqa: BLE001 - a broken tool must not kill the run
-                result = ToolResult.error(f"tool {spec.name} failed: {type(error).__name__}")
-                tool_span.set_attribute("tool.error_class", type(error).__name__)
+            if receipt_error is not None:
+                result = ToolResult.error(receipt_error, receipt="preimage_unavailable")
+                tool_span.set_attribute("tool.error_class", "CheckpointError")
             else:
-                result = _coerce_result(raw, spec.name)
+                try:
+                    raw = spec.handler(payload, context)
+                except (ToolAccessError, ToolInputError, ValueError, KeyError, TypeError, OSError) as error:
+                    result = ToolResult.error(f"{type(error).__name__}: {error}")
+                    tool_span.set_attribute("tool.error_class", type(error).__name__)
+                except Exception as error:  # noqa: BLE001 - a broken tool must not kill the run
+                    result = ToolResult.error(f"tool {spec.name} failed: {type(error).__name__}")
+                    tool_span.set_attribute("tool.error_class", type(error).__name__)
+                else:
+                    result = _coerce_result(raw, spec.name)
             duration_ms = int((time.monotonic() - started) * 1000)
             # Cost and outcome metadata only. The output body never reaches a span.
             tool_span.set_attributes(
@@ -950,6 +964,31 @@ class AgentRuntime:
                     "tool.result_chars": min(len(result.text()), 10_000_000),
                     "tool.truncated": bool(result.truncated),
                 }
+            )
+        after_states: tuple[Any, ...] = ()
+        after_error: str | None = None
+        if spec.is_mutating:
+            try:
+                after_states = capture_file_states(self.sandbox.root_real, mutation_paths)
+            except (CheckpointError, ToolAccessError, ToolInputError, ValueError, TypeError, OSError) as error:
+                after_error = f"workspace postimage unavailable: {type(error).__name__}: {error}"
+            before_by_path = {state.path: state for state in before_states}
+            after_by_path = {state.path: state for state in after_states}
+            changed = any(before_by_path.get(path) != after_by_path.get(path) for path in set(before_by_path) | set(after_by_path))
+            self.sessions.append(
+                "workspace_change",
+                {
+                    "agent": self.config.agent,
+                    "tool": spec.name,
+                    "tool_use_id": call.id,
+                    "turn_index": turn_index,
+                    "is_error": bool(result.is_error),
+                    "changed": changed,
+                    "paths": list(mutation_paths),
+                    "before": [state.as_dict() for state in before_states],
+                    "after": [state.as_dict() for state in after_states],
+                    "receipt_error": receipt_error or after_error,
+                },
             )
         tool_text = result.text()
         if result.is_error:
@@ -1549,6 +1588,27 @@ def _assign_tool_use_ids(blocks: Sequence[Any], state: _RunState) -> tuple[Any, 
             used.add(block.id)
         filled.append(block)
     return tuple(filled)
+
+
+def _mutation_relative_paths(payload: Mapping[str, Any], context: ToolContext) -> tuple[str, ...]:
+    """Resolve path-shaped mutating inputs before/after a handler call.
+
+    Built-in Write/Edit use ``path``. A custom mutating tool may expose a
+    ``paths`` array; unknown mutation surfaces still get an action receipt, but
+    without pretending that an unmentioned path was captured.
+    """
+    raw_values: list[Any] = []
+    if "path" in payload:
+        raw_values.append(payload.get("path"))
+    values = payload.get("paths")
+    if isinstance(values, (list, tuple)):
+        raw_values.extend(values)
+    paths: set[str] = set()
+    for raw in raw_values:
+        if not isinstance(raw, str) or not raw.strip():
+            continue
+        paths.add(context.relative(context.resolve(raw, for_write=True)))
+    return tuple(sorted(paths))
 
 
 def _coerce_result(raw: Any, tool_name: str) -> ToolResult:

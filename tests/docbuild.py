@@ -60,6 +60,7 @@ MANIFEST: dict[str, tuple[str, ...]] = {
         "agents",
         "agent_files",
         "budget",
+        "checkpoints",
         "cli",
         "compaction",
         "doctor",

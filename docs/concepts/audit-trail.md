@@ -14,7 +14,10 @@ the run reports success, so a crash still leaves the decision trail behind.
 
 `cli.py` exposes `sessions` subcommands to list and view transcripts
 read-only. Subagent runs nest as spans and are recorded too, so a delegation
-tree is auditable end to end.
+tree is auditable end to end. Mutating path-shaped tool calls add a
+`workspace_change` record with pre/post metadata hashes; the separate
+[reversible execution contract](reversible-execution.md) stores bounded file
+snapshots for recovery rather than putting file bytes in every receipt.
 
 ## 2. Durable-run event store and verification
 

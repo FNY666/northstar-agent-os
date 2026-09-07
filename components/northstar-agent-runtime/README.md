@@ -30,7 +30,8 @@ prompt ──► AgentRuntime ──► provider (Anthropic Messages API, or scr
 ## Concepts, guides and API reference
 
 - Concepts: [governance and the permission gate](../../docs/concepts/governance.md) ·
-  [audit trail: sessions and durable history](../../docs/concepts/audit-trail.md)
+  [audit trail: sessions and durable history](../../docs/concepts/audit-trail.md) ·
+  [reversible execution: checkpoint, inspect, rewind and fork](../../docs/concepts/reversible-execution.md)
 - Guides: [governed-run cookbook](../../docs/guides/governed-run-cookbook.md) ·
   [packaging and CI](../../docs/guides/packaging-and-ci.md)
 - API reference: [generated from docstrings](../../docs/api/northstar-agent-runtime.md)
@@ -121,6 +122,34 @@ python3 -m cli sessions show --session-dir /tmp/northstar-sessions <session-id> 
 turns, result subtype, cost); `--json` exports the raw records. The viewer is
 read-only: it never creates the directory, never writes a file, and reports a
 damaged record instead of "repairing" an audit trail.
+
+A session can also own bounded, content-addressed workspace checkpoints. Review
+the diff before the explicitly destructive rewind; rewind makes a safety
+checkpoint first and keeps files added after the checkpoint unless deletion is
+also requested:
+
+```sh
+python3 -m cli sessions checkpoint --session-dir /tmp/northstar-sessions \
+  --workspace . --label "before refactor" <session-id>
+python3 -m cli sessions checkpoints --session-dir /tmp/northstar-sessions <session-id>
+python3 -m cli sessions diff --session-dir /tmp/northstar-sessions \
+  --workspace . <session-id> <checkpoint-id>
+python3 -m cli sessions rewind --session-dir /tmp/northstar-sessions \
+  --workspace . --force <session-id> <checkpoint-id>
+python3 -m cli sessions fork --session-dir /tmp/northstar-sessions \
+  --workspace ../experiment --new-session-id ns-experiment <session-id> <checkpoint-id>
+```
+
+`checkpoints` (also `inspect`) lists the manifest chain. `fork` refuses to
+overwrite an existing target and atomically materialises a new workspace plus a
+new initial checkpoint; its `fork.json` records the source session and
+checkpoint.
+
+Checkpoint manifests contain file hashes, modes, sizes, a parent checkpoint id and
+an immutable snapshot under `checkpoints/<session-id>/`. Symlinks in the
+checkpointed tree, `.git` escapes, and large or excessive file sets are
+rejected fail-closed; this is a
+local reversible-run contract, not an OS/VM snapshot.
 
 To delegate execution to Codex, point the runtime at the sidecar socket. That is
 the only switch; without it `CodexReadOnly` is not registered at all:
@@ -372,8 +401,9 @@ A passing verdict is an assertion the runtime can audit, not a vibe.
 
 - **Sessions**: append-only JSONL, one `fsync` per write, `0600` under a `0700`
   directory. A torn last line is skipped and counted, not treated as corruption —
-  a crash mid-write must not make the audit trail unreadable. A session id is
-  generated even when nothing is persisted. `sessions export <session-id>` (with
+  a crash mid-write must not make the audit trail unreadable. Mutating tool calls
+  also emit `workspace_change` records with path-level pre/post hashes. A session
+  id is generated even when nothing is persisted. `sessions export <session-id>` (with
   `--session-dir`) replays one transcript to stdout as the canonical NDJSON
   audit feed `audit.ndjson/1` — denials, failed tool results and `error_*`
   results carry `"level":"error"`; see
@@ -412,7 +442,8 @@ size (`result_chars`), so truncation is visible instead of inferred.
 | `budget.py`         | price table, cost computation, budget meter                          |
 | `tools/`            | package: registry, sandbox, caps, built-in tools, `CodexReadOnly` spec (`__init__.py`), plus the guard-verification harness (`verify_invariants.py`) |
 | `compaction.py`     | safe-boundary detection and summarisation                            |
-| `sessions.py`       | append-only JSONL transcripts and recovery                            |
+| `sessions.py`       | append-only JSONL transcripts, recovery, and workspace-change receipts   |
+| `checkpoints.py`    | bounded workspace manifests, diff, verified rewind, and safety snapshots |
 | `agents.py`         | agent definitions, registry, verdict parsing                         |
 | `tracing.py`        | span tree, redaction, optional OpenTelemetry export                  |
 | `sidecar_client.py` | Unix-socket client for the sidecar component                         |
@@ -449,7 +480,7 @@ cd components/northstar-agent-runtime
 python3 -m unittest discover -s tests -p 'test_*.py' -v
 ```
 
-544 tests, fully offline and deterministic (four optional OpenTelemetry tests
+561 tests, fully offline and deterministic (four optional OpenTelemetry tests
 are skipped when the tracing extra is absent): the scripted provider is the
 only model, and `test_integration_sidecar.py` runs the real sidecar `serve()`
 over a real Unix socket with a 100,000-Chinese-character prompt.

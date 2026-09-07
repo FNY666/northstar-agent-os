@@ -95,13 +95,13 @@
 
 /* ---- record vocabulary (mirrors sessions.py RECORD_TYPES) ---- */
 var RECORD_TYPES = [
-  "session_start", "user_prompt", "assistant", "tool_result", "hook",
+  "session_start", "user_prompt", "assistant", "tool_result", "workspace_change", "hook",
   "denial", "compact_boundary", "informational", "subagent", "result",
   "session_end"
 ];
 var TYPE_COLOR = {
   session_start: "ok", session_end: "ok", user_prompt: "warn", assistant: "ok",
-  tool_result: "ok", hook: "warn", denial: "err", compact_boundary: "warn",
+  tool_result: "ok", workspace_change: "warn", hook: "warn", denial: "err", compact_boundary: "warn",
   informational: "warn", subagent: "ok", result: "ok"
 };
 var MAX_PREVIEW = 300;

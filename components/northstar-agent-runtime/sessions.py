@@ -33,6 +33,7 @@ RECORD_TYPES: tuple[str, ...] = (
     "user_prompt",
     "assistant",
     "tool_result",
+    "workspace_change",
     "hook",
     "denial",
     "compact_boundary",
@@ -88,6 +89,12 @@ class SessionStore:
             # Transcripts can contain user content; keep the directory owner-only.
             os.chmod(path, 0o700)
         self.directory = path
+        existing_file = self.path
+        if existing_file is not None and existing_file.exists():
+            records, _dropped = load_jsonl(existing_file)
+            indexes = [record.get("index") for record in records if isinstance(record.get("index"), int)]
+            if indexes:
+                self._index = max(indexes) + 1
 
     # -- shape ------------------------------------------------------------
     @property

@@ -15,6 +15,7 @@ import sys
 from pathlib import Path
 from typing import Any, Iterable
 
+from checkpoints import CheckpointError, create_checkpoint, diff_checkpoint, fork_checkpoint, list_checkpoints, rewind_checkpoint
 from sessions import SESSION_FILE_SUFFIX, load_jsonl, summarise
 
 USAGE_ERROR = 64  # same convention as cli.USAGE_ERROR, kept local to avoid an import cycle
@@ -44,6 +45,53 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
         "the feed is written to stdout, one validated audit record per line",
     )
 
+    checkpointing = sub.add_parser("checkpoint", help="snapshot a workspace for this session")
+    checkpointing.add_argument("--session-dir", required=True, help="directory containing session transcripts")
+    checkpointing.add_argument("--workspace", required=True, help="workspace directory to snapshot")
+    checkpointing.add_argument("--label", default="", help="operator label for the checkpoint")
+    checkpointing.add_argument("--json", action="store_true", help="emit the checkpoint manifest as JSON")
+    checkpointing.add_argument("session_id", help="session id that owns the checkpoint")
+
+    checkpoint_listing = sub.add_parser(
+        "checkpoints", aliases=["inspect"], help="list checkpoints for this session"
+    )
+    checkpoint_listing.add_argument("--session-dir", required=True, help="directory containing session transcripts")
+    checkpoint_listing.add_argument("--json", action="store_true", help="emit checkpoint manifests as JSON")
+    checkpoint_listing.add_argument("session_id", help="session id that owns the checkpoints")
+
+    comparing = sub.add_parser("diff", help="compare a checkpoint with the current workspace")
+    comparing.add_argument("--session-dir", required=True, help="directory containing session transcripts")
+    comparing.add_argument("--workspace", required=True, help="workspace directory to inspect")
+    comparing.add_argument("session_id", help="session id that owns the checkpoint")
+    comparing.add_argument("checkpoint_id", help="checkpoint id from sessions checkpoints")
+    comparing.add_argument("--json", action="store_true", help="emit the diff as JSON")
+
+    rewinding = sub.add_parser(
+        "rewind",
+        aliases=["restore"],
+        help="restore a checkpoint after an explicit force confirmation",
+    )
+    rewinding.add_argument("--session-dir", required=True, help="directory containing session transcripts")
+    rewinding.add_argument("--workspace", required=True, help="workspace directory to restore")
+    rewinding.add_argument("--force", action="store_true", help="confirm the destructive workspace operation")
+    rewinding.add_argument(
+        "--delete-added",
+        action="store_true",
+        help="also delete regular files added after the checkpoint (default keeps them)",
+    )
+    rewinding.add_argument("--json", action="store_true", help="emit the restore report as JSON")
+    rewinding.add_argument("session_id", help="session id that owns the checkpoint")
+    rewinding.add_argument("checkpoint_id", help="checkpoint id to restore")
+
+    forking = sub.add_parser("fork", help="materialise a new workspace/session from a checkpoint")
+    forking.add_argument("--session-dir", required=True, help="directory containing session transcripts")
+    forking.add_argument("--workspace", required=True, help="new workspace path; it must not already exist")
+    forking.add_argument("--new-session-id", required=True, help="session id for the new fork")
+    forking.add_argument("--label", default="fork base", help="label for the fork's initial checkpoint")
+    forking.add_argument("--json", action="store_true", help="emit the fork report as JSON")
+    forking.add_argument("session_id", help="source session that owns the checkpoint")
+    forking.add_argument("checkpoint_id", help="checkpoint id to fork")
+
 
 def run_sessions(args: argparse.Namespace) -> int:
     if args.session_command == "list":
@@ -52,7 +100,37 @@ def run_sessions(args: argparse.Namespace) -> int:
         return _show_session(Path(args.session_dir), args.session_id, json_out=bool(getattr(args, "json", False)))
     if args.session_command == "export":
         return _export_session(Path(args.session_dir), args.session_id)
-    print("sessions: pass a subcommand: list, show or export (--help for flags)", file=sys.stderr)
+    if args.session_command == "checkpoint":
+        return _create_session_checkpoint(
+            Path(args.session_dir), args.session_id, Path(args.workspace), args.label,
+            json_out=bool(getattr(args, "json", False)),
+        )
+    if args.session_command in {"checkpoints", "inspect"}:
+        return _list_session_checkpoints(
+            Path(args.session_dir), args.session_id, json_out=bool(getattr(args, "json", False))
+        )
+    if args.session_command == "diff":
+        return _diff_session_checkpoint(
+            Path(args.session_dir), args.session_id, args.checkpoint_id, Path(args.workspace),
+            json_out=bool(getattr(args, "json", False)),
+        )
+    if args.session_command in {"rewind", "restore"}:
+        return _rewind_session_checkpoint(
+            Path(args.session_dir), args.session_id, args.checkpoint_id, Path(args.workspace),
+            force=bool(getattr(args, "force", False)),
+            delete_added=bool(getattr(args, "delete_added", False)),
+            json_out=bool(getattr(args, "json", False)),
+        )
+    if args.session_command == "fork":
+        return _fork_session_checkpoint(
+            Path(args.session_dir), args.session_id, args.checkpoint_id, Path(args.workspace),
+            args.new_session_id, args.label, json_out=bool(getattr(args, "json", False)),
+        )
+    print(
+        "sessions: pass a subcommand: list, show, export, checkpoint, checkpoints, diff, rewind or fork "
+        "(--help for flags)",
+        file=sys.stderr,
+    )
     return USAGE_ERROR
 
 
@@ -126,6 +204,173 @@ def _export_session(directory: Path, session_id: str) -> int:
     return 0
 
 
+# -- reversible workspace operations ---------------------------------------
+
+
+def _create_session_checkpoint(
+    session_dir: Path,
+    session_id: str,
+    workspace: Path,
+    label: str,
+    *,
+    json_out: bool,
+) -> int:
+    try:
+        checkpoint = create_checkpoint(workspace, session_dir, session_id, label=label)
+    except (CheckpointError, OSError) as error:
+        print(f"sessions checkpoint: {error}", file=sys.stderr)
+        return 1
+    if json_out:
+        print(json.dumps(checkpoint.as_dict(), ensure_ascii=False, sort_keys=True))
+    else:
+        print(
+            f"created {checkpoint.checkpoint_id} for {checkpoint.session_id}: "
+            f"{len(checkpoint.files)} file(s), {sum(item.bytes for item in checkpoint.files)} bytes"
+        )
+        if checkpoint.label:
+            print(f"label: {checkpoint.label}")
+        print(f"manifest: {checkpoint.manifest_path}")
+    return 0
+
+
+def _list_session_checkpoints(session_dir: Path, session_id: str, *, json_out: bool) -> int:
+    try:
+        checkpoints = list_checkpoints(session_dir, session_id)
+    except (CheckpointError, OSError) as error:
+        print(f"sessions checkpoints: {error}", file=sys.stderr)
+        return 1
+    if json_out:
+        for checkpoint in checkpoints:
+            print(json.dumps(checkpoint.as_dict(), ensure_ascii=False, sort_keys=True))
+        return 0
+    if not checkpoints:
+        print(f"no checkpoints for {session_id}")
+        return 0
+    for checkpoint in checkpoints:
+        label = f" label={checkpoint.label!r}" if checkpoint.label else ""
+        print(
+            f"{checkpoint.checkpoint_id:<35} {checkpoint.created_at} "
+            f"files={len(checkpoint.files):<5} bytes={sum(item.bytes for item in checkpoint.files):<10}{label}"
+        )
+    return 0
+
+
+def _find_session_checkpoint(session_dir: Path, session_id: str, checkpoint_id: str):
+    try:
+        checkpoints = list_checkpoints(session_dir, session_id)
+    except (CheckpointError, OSError) as error:
+        print(f"sessions: {error}", file=sys.stderr)
+        return None
+    for checkpoint in checkpoints:
+        if checkpoint.checkpoint_id == checkpoint_id:
+            return checkpoint
+    print(f"sessions: no checkpoint {checkpoint_id!r} for session {session_id!r}", file=sys.stderr)
+    return None
+
+
+def _diff_session_checkpoint(
+    session_dir: Path,
+    session_id: str,
+    checkpoint_id: str,
+    workspace: Path,
+    *,
+    json_out: bool,
+) -> int:
+    checkpoint = _find_session_checkpoint(session_dir, session_id, checkpoint_id)
+    if checkpoint is None:
+        return 1
+    try:
+        comparison = diff_checkpoint(checkpoint, workspace)
+    except (CheckpointError, OSError) as error:
+        print(f"sessions diff: {error}", file=sys.stderr)
+        return 1
+    if json_out:
+        print(json.dumps(comparison.as_dict(), ensure_ascii=False, sort_keys=True))
+    elif comparison.clean:
+        print(f"{checkpoint.checkpoint_id}: clean (workspace matches checkpoint)")
+    else:
+        print(
+            f"{checkpoint.checkpoint_id}: {len(comparison.changes)} change(s) "
+            f"current_digest={comparison.current_digest}"
+        )
+        for change in comparison.changes:
+            marker = {"added": "+", "modified": "M", "deleted": "-"}[change.status]
+            print(f"{marker} {change.path}")
+    return 0
+
+
+def _rewind_session_checkpoint(
+    session_dir: Path,
+    session_id: str,
+    checkpoint_id: str,
+    workspace: Path,
+    *,
+    force: bool,
+    delete_added: bool,
+    json_out: bool,
+) -> int:
+    checkpoint = _find_session_checkpoint(session_dir, session_id, checkpoint_id)
+    if checkpoint is None:
+        return 1
+    try:
+        report = rewind_checkpoint(
+            checkpoint,
+            workspace,
+            force=force,
+            delete_added=delete_added,
+            safety_session_dir=session_dir,
+            safety_session_id=session_id,
+        )
+    except (CheckpointError, OSError) as error:
+        print(f"sessions rewind: {error}", file=sys.stderr)
+        return 1
+    if json_out:
+        print(json.dumps(report, ensure_ascii=False, sort_keys=True))
+    else:
+        print(
+            f"rewound {checkpoint.checkpoint_id}: restored {report['restored_files']} file(s); "
+            f"kept {report['remaining_added_files']} added file(s)"
+        )
+        print(f"safety checkpoint: {report['safety_checkpoint_id']}")
+    return 0
+
+
+def _fork_session_checkpoint(
+    session_dir: Path,
+    session_id: str,
+    checkpoint_id: str,
+    workspace: Path,
+    new_session_id: str,
+    label: str,
+    *,
+    json_out: bool,
+) -> int:
+    checkpoint = _find_session_checkpoint(session_dir, session_id, checkpoint_id)
+    if checkpoint is None:
+        return 1
+    try:
+        report = fork_checkpoint(
+            checkpoint,
+            workspace,
+            session_dir,
+            new_session_id,
+            label=label,
+        )
+    except (CheckpointError, OSError) as error:
+        print(f"sessions fork: {error}", file=sys.stderr)
+        return 1
+    if json_out:
+        print(json.dumps(report.as_dict(), ensure_ascii=False, sort_keys=True))
+    else:
+        print(
+            f"forked {report.source_session_id}/{report.source_checkpoint_id} -> "
+            f"{report.session_id} ({report.copied_files} file(s))"
+        )
+        print(f"workspace: {report.workspace}")
+        print(f"initial checkpoint: {report.checkpoint_id}")
+    return 0
+
+
 def _format_record(record: dict[str, Any]) -> str:
     stamp = str(record.get("ts", ""))
     clock = stamp[11:23] if len(stamp) >= 23 else stamp  # 2026-09-07T09:20:41.123Z -> 09:20:41.123
@@ -159,6 +404,9 @@ def _record_text(record: dict[str, Any], kind: str) -> str:
         return f"{record.get('content') or ''} data={json.dumps(record.get('data') or {}, sort_keys=True)}"
     if kind == "denial":
         return str(record.get("data") or record.get("content") or "")
+    if kind == "workspace_change":
+        paths = ", ".join(str(path) for path in record.get("paths") or ()) or "(undeclared paths)"
+        return f"tool={record.get('tool')} changed={record.get('changed')} paths={paths}"
     # hook, subagent, informational, and anything new: show the payload compactly.
     payload = {key: value for key, value in record.items() if key not in ("index", "ts", "session_id", "type")}
     return json.dumps(payload, ensure_ascii=False, sort_keys=True, default=str)[:CONTENT_PREVIEW]
