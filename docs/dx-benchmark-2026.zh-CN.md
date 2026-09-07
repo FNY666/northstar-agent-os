@@ -503,3 +503,14 @@ Northstar 是"运行时组件集合"，不是一个终端产品。因此对标�
 - 版本仍为对齐 `0.1.0.dev0` **未发布**（守就绪门）。
 
 测试规模：interop **54 项全绿**（+5：test_remote_worker），全仓 791 → 796。
+
+### 2026-09-07（同批追加）— P3-4 完成（可观测进阶）
+
+- **概念页**（`docs/concepts/observability.md`）：双平面读回——实时 OTEL span vs 离线 transcript/audit；span 词汇表逐条对照 `loop.py` 真实属性（`session.id`、`usage.*`、`cost.usd`、`tool.denied` 等）；**ambient seam 明说**（runtime 从不配置 exporter，裸跑不导出，`--trace` 只打印树）；"何时用哪一面"表。
+- **本地追踪栈示例**（`examples/observability/`）：compose 双服务（Jaeger all-in-one 收 OTLP/HTTP `:4318` + Grafana 预置 core Jaeger 数据源；不插 collector——部署是 T5 缺口）+ `otel_bootstrap.py`（CLI 的 provider 接线样板：`OTLPSpanExporter`+`BatchSpanProcessor`，端点可环境变量覆盖，缺依赖给指引码 3）。
+- **离线会话面板**（`examples/session-panel/`）：单文件零外联 HTML（无任何网络引用），拖放渲染 session transcript 或 `audit.ndjson/1` 导出——类型计数/会话/成本/拒绝统计、errors-only 过滤、时间线逐条展开原始 JSON、FNV-1a64 本地指纹（诚实标注非密码学）。`sample-session.jsonl` 为真实 transcript（含 Write 被拒路径），仅掩蔽绝对 workspace 路径且 README 注明。
+- **中文评估**（`docs/dx-observability.zh-CN.md`）；示例索引两行；CHANGELOG eleventh batch。
+- 诚实边界（写进文档与测试）：CI/沙箱无 Docker，compose 仅静态校验、tag 落笔时钉；无 otel 依赖故 bootstrap 仅语法级验证；面板 JS 有 node 则 `--check`、无则跳过。**组件行为零改动**。
+- 路线图 P3-4 行 ✅；版本仍对齐 `0.1.0.dev0` 未发布。
+
+测试规模：仓库文档 12 → **28**（+16：observability 示例 + 面板套件）；全仓 796 → **812 全绿**（runtime 536 含 skip 4 不变）。

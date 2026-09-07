@@ -55,3 +55,9 @@ absolute `workspace` path inside the `session_start` record is shown as
 - It is a local developer tool; nothing here is part of any component and no
   repository test executes the page's JavaScript in a browser (a CI test
   only checks the script parses, when a Node runtime is available).
+
+Full context: the live-trace plane that complements these offline records is
+in `examples/observability`; the concept page is
+[`docs/concepts/observability.md`](../../docs/concepts/observability.md) and
+the Chinese assessment record is
+[`docs/dx-observability.zh-CN.md`](../../docs/dx-observability.zh-CN.md).

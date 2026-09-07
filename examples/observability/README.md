@@ -79,8 +79,11 @@ The endpoint is overridable with `OTEL_EXPORTER_OTLP_ENDPOINT` (default
 - Nothing in this directory changes runtime behaviour: without the bootstrap
   process, `--trace` still prints the span tree and exports nothing.
 
-Full context: the record plane that complements these live traces is
-documented in
+Full context: the concept page is
+[`docs/concepts/observability.md`](../../docs/concepts/observability.md); the
+record plane that complements these live traces is documented in
 [`docs/concepts/audit-trail.md`](../../docs/concepts/audit-trail.md); the
-P3-4 roadmap row lives in
+Chinese assessment record is
+[`docs/dx-observability.zh-CN.md`](../../docs/dx-observability.zh-CN.md) and
+the P3-4 roadmap row lives in
 [`docs/dx-benchmark-2026.zh-CN.md`](../../docs/dx-benchmark-2026.zh-CN.md).
