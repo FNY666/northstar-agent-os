@@ -9,7 +9,7 @@
 
 > **阅读口径（2026-09-07 当前真值）**：本页保留了早期差距基线与实施 ledger，
 > 因而 §0–§8 中的“现状”段落有历史意义，不应覆盖后面的复评。当前 checkout
-> 的权威快照是：`make test` **873 项测试，869 项通过、4 项 skip**（runtime 572，
+> 的权威快照是：`make test` **876 项测试，872 项通过、4 项 skip**（runtime 572，
 > 其中 4 项因可选 OpenTelemetry 依赖缺失而跳过；其余组件与文档测试全绿）；五个可安装组件仍为
 > 对齐的 `0.1.0.dev0`，没有发布 tag。Agent Skills 已支持
 > `.northstar/skills` + portable `.agents/skills`、标准 frontmatter、`skills
@@ -18,11 +18,11 @@
 > capability-first approval lease 与可验证 action receipt，本轮又补上 durable-run
 > 的 pause/resume、显式 retry/cancel 生命周期与 attempt key 语义；MCP 仍是最小
 > stdio 工具客户端，而不是完整的远程 MCP/插件市场。若只想看“现在还差什么”，
-> 直接跳到 **§10.11**。
+> 直接跳到 **§10.12**。
 
 ## 0. 执行摘要（TL;DR）
 
-**当前结论：Northstar 已从“库 + 手工拼装”追到可安装、可审计、具备局部可逆执行的 headless harness，但还不是 Claude Code/Codex/Gemini 那样的完整产品。**本地实测 `make test` 为 **873 项测试（869 通过、4 项可选 OTel skip）**（runtime 572），权限门、hooks、预算、只追加 transcript、workspace receipts、checkpoint manifest、capability lease、可验证 action receipt、durable-run 生命周期与离线确定性仍是最强资产。
+**当前结论：Northstar 已从“库 + 手工拼装”追到可安装、可审计、具备局部可逆执行的 headless harness，但还不是 Claude Code/Codex/Gemini 那样的完整产品。**本地实测 `make test` 为 **876 项测试（872 通过、4 项可选 OTel skip）**（runtime 572），权限门、hooks、预算、只追加 transcript、workspace receipts、checkpoint manifest、capability lease、可验证 action receipt、durable-run 生命周期与离线确定性仍是最强资产。
 
 已经补齐的 DX 基础包括：五个可安装组件、console script、`doctor`/`dry-run`、AGENTS.md 与策略即代码、文件化 subagents、MCP stdio 最小客户端、标准 Agent Skills（含 `skills check/list`）、sessions 读回/NDJSON 审计、Python SDK、脚手架、API 文档和 CI recipe。**这些能力要以当前 checkout 的测试为准；本页后面的早期盘点是历史基线。**
 
@@ -692,12 +692,30 @@ T7 仍是 Unreleased；没有创建 tag、GitHub Release，也没有发布到 Py
   下一层工作。
 - **验证与基准**：durable-run 测试覆盖 pause/resume、paused execute guard、retry
   attempt key、crash recovery key reuse、retry/cancel event replay 和 active-step
-  cancel ordering；本轮 `make test` 为 **873 项测试、869 项通过、4 项可选 OTel skip**，
+  cancel ordering；T8 完成时 `make test` 为 **873 项测试、869 项通过、4 项可选 OTel skip**，
   其中 durable-run 70 项，API 文档由 docbuild freshness 检查。
 
 仍未实现：真正的后台 scheduler、跨进程 task queue、进程组隔离与 signal cancellation、
-远程 worker transport、数据库/分布式 event store，以及将 control plane 暴露为 CLI、
-HTTP 或 app-server。下一步应先稳定 versioned lifecycle/receipt contract，再评估
-transport；不因补上本地 pause/retry 就宣称已经具备云端后台执行。
+远程 worker transport、数据库/分布式 event store，以及 HTTP/app-server 控制面。下一步
+应先稳定 versioned lifecycle/receipt contract，再评估 transport；不因补上本地 pause/retry
+就宣称已经具备云端后台执行。
 
 T8 仍是 Unreleased；没有创建 tag、GitHub Release，也没有发布到 PyPI/npm。
+
+### 10.12 当前实现复核：durable-run 本地控制面（2026-09-07）
+
+T9 在 T8 runner API 之上补齐了一个不带调度器的本地操作面：
+`northstar-durable-run` CLI 直接复用 `EventStore` 的校验与 replay，不维护第二套状态机。
+
+- `status --events ... --run-id ...` 输出当前派生状态、事件计数和最后一个事件；
+  `history` 输出 canonical JSON 事件列表；`audit` 输出现有 audit.ndjson/1 feed。
+- `control pause|resume|cancel` 要求显式 `RunContract` JSON、owner identity 和 event
+  timestamp。命令只调用已有 `DurableRunner` 生命周期方法，不执行 step action，不创建队列，
+  不开启网络端口。
+- `retry` 保持 programmatic-only：它必须接收 `StepPlan` action，才能在新的 attempt
+  key 上执行并保留 crash recovery 语义。CLI 不提供一个会伪造“已重试”的标记命令。
+- 验证：durable-run 现有 **73 项**测试全部通过；本批新增 CLI 的 replay/history/audit、
+  control ordering 和 missing-history fail-closed 测试。当前 `make test` 为 **876 项测试、
+  872 项通过、4 项可选 OTel skip**。
+
+T9 仍是 Unreleased；没有创建 tag、GitHub Release，也没有发布到 PyPI/npm。

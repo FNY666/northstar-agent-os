@@ -1,5 +1,19 @@
 # Northstar Agent OS — initial public component
 
+## Unreleased (sixteenth batch) — local durable-run control surface (T9)
+
+- Added the `northstar-durable-run` CLI with read-only `status`, `history`, and
+  canonical `audit` views over one validated EventStore stream.
+- Added explicit local `control pause|resume|cancel` commands. They require an
+  explicit RunContract and owner identity, never execute a step, and do not
+  pretend to be a scheduler or network control plane.
+- Retry remains programmatic so a worker must supply explicit `StepPlan` actions
+  and preserve the attempt-specific idempotency boundary.
+- Added CLI tests for replay/history/audit output, control ordering and
+  fail-closed missing-history errors. The durable-run suite now has 73 tests;
+  the batch remains unreleased with no tag, GitHub Release, or PyPI/npm
+  publication.
+
 ## Unreleased (fifteenth batch) — capability leases and verifiable action receipts (T7)
 
 - Runtime `receipts.py` adds bounded `ApprovalLease` / `ApprovalLeaseLedger`

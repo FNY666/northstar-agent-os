@@ -24,9 +24,13 @@ classifiers = [
 # this repository first; bare `pip install .` works once they are published.
 dependencies = ["northstar-run-contract", "northstar-host"]
 
+[project.scripts]
+northstar-durable-run = "cli:main"
+
 [tool.setuptools]
 py-modules = [
     "action_gateway",
+    "cli",
     "durable_audit",
     "durable_contract",
     "evaluation",

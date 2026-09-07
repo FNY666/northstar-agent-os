@@ -20,9 +20,9 @@ pip install ../northstar-run-contract ../northstar-host   # declared dependencie
 pip install .                                              # resolves both
 ```
 
-The wheel installs the slice modules (`durable_contract`, `event_store`,
-`action_gateway`, `runner`, `verifier`, `trace_metrics`, `evaluation`) as
-top-level modules; the version (`0.1.0.dev0`, unreleased) is declared in
+The wheel installs the slice modules (`durable_contract`, `event_store`, `action_gateway`,
+`cli`, `runner`, `verifier`, `trace_metrics`, `evaluation`) as top-level
+modules; the version (`0.1.0.dev0`, unreleased) is declared in
 `pyproject.toml`.
 
 ## Boundaries
@@ -81,6 +81,40 @@ These controls preserve the existing lease, checkpoint, replay, verifier, and
 append-only boundaries. They do not yet provide a background scheduler,
 process-isolated signal cancellation, a cross-process task queue, or remote
 worker transport.
+
+## Local control CLI
+
+Installing the component also provides the `northstar-durable-run` command. It
+is a local inspection/control surface, not a scheduler or network service. The
+read-only commands replay the same validated EventStore history used by the
+runner:
+
+```sh
+northstar-durable-run status --events /path/run/events.jsonl --run-id run-001
+northstar-durable-run history --events /path/run/events.jsonl --run-id run-001
+northstar-durable-run audit --events /path/run/events.jsonl --run-id run-001
+```
+
+An operator can apply the local lifecycle controls by supplying the original
+RunContract JSON and an owner identity. The command never executes a step or
+queues a retry:
+
+```sh
+northstar-durable-run control \
+  --events /path/run/events.jsonl \
+  --run-contract /path/run/run.json \
+  --owner-id operator-1 --now 1700000000 \
+  pause --reason "manual hold"
+
+northstar-durable-run control \
+  --events /path/run/events.jsonl \
+  --run-contract /path/run/run.json \
+  --owner-id operator-1 --now 1700000001 resume
+```
+
+`retry()` remains programmatic because a retry must provide the explicit
+`StepPlan` actions and preserve the action idempotency boundary. A future
+scheduler may call this surface, but this component does not create one.
 
 ## Local example
 
