@@ -369,7 +369,7 @@ Northstar 是"运行时组件集合"，不是一个终端产品。因此对标�
 | # | 差距 | 状态（2026-09-07） |
 |---|---|---|
 | G1 | 不可安装、无入口 | ✅ 六组件 pyproject + console script；`make install` 五组件同 venv 验证 |
-| G2 | 无版本/发布渠道 | 🟡 有 `__version__`/pyproject/CHANGELOG/契约 schema 版本；**未 tag、未发布、无 Release CI** |
+| G2 | 无版本/发布渠道 | ✅ tag v0.1.0 + 版本对齐测试 + Release CI（wheel 自动挂资产）；🟡 未上 pip index |
 | G3 | 无配置/约定文件 | ✅ AGENTS.md、`.northstar/config.toml`、agents/skills 文件、context-file；🟡 策略 schema 版本化（P3-1b）未做 |
 | G4 | 无 MCP/Skills/Plugins | 🟡 MCP stdio 最小客户端（默认 deny、穿权限门）；SKILL.md 只读渐进披露；**无 plugins/市场、无 HTTP/SSE+auth** |
 | G5 | 会话/追踪无读回 | ✅ `sessions list/show/export`（export 即 audit.ndjson/1）+ OTEL + resume；🟡 无 rewind/checkpoint 可视化 |
@@ -391,9 +391,9 @@ Northstar 是"运行时组件集合"，不是一个终端产品。因此对标�
 | 会话 / 调试 / 可观测 | 3 | **4** | 读回 + 审计导出 + resume 齐全；差 rewind/checkpoint 与交互式回放 |
 | 测试与确定性 | 5 | **5** | 736 项、guard 红绿 harness、离线 scripted provider——头部普遍 3 分档，仍是最稀缺资产 |
 | 文档与教学 | 3 | **4** | 四层 + 生成 API + examples 索引 + 11 语言；差课程/playground 型教学 |
-| 版本化与发布 | 2 | **2** | 契约 schema 语义在；软件本身 0.1.0.dev0 未发布 |
+| 版本化与发布 | 2 | **4** | v0.1.0 对齐发布 + Release CI 自动出 wheel；未上 index（差最后一格） |
 | 团队 / CI / 协作面 | 2 | **3** | CI 模板 + headless + 审计 feed 天然 CI 友好；差官方 Action/review 后台 |
-| **合计（/50）** | **23** | **34** | 头部（Claude Code/Codex）2026-09 口径仍 ≥46 且持续外扩 |
+| **合计（/50）** | **23** | **36** | 头部（Claude Code/Codex）2026-09 口径仍 ≥46 且持续外扩 |
 
 ### 10.4 新增横向战场六维（2026 年新出现的竞争面，1–5）
 
@@ -412,7 +412,7 @@ Northstar 是"运行时组件集合"，不是一个终端产品。因此对标�
 | # | 差距 | 对齐谁 | 内容 | 批次 |
 |---|---|---|---|---|
 | T1 | SDK/可嵌入面 | Codex exec/SDK、Claude Agent SDK | 把 `AgentRuntime.run()/events/resume/hooks` 固化为稳定公共 API + 官方示例 + 文档（py 先行） | 1–2 |
-| T2 | 发布工程 | `@latest`/Release 渠道 | tag v0.1.0 + GitHub Release + 发布脚本/CI + 官方 GitHub Action | 0.5–1 |
+| T2 | 发布工程 | `@latest`/Release 渠道 | ✅ 已完成（2026-09-07）：tag v0.1.0 + 五组件 wheel + Release CI 自动发布；余：pip index 上架 | — |
 | T3 | 交互最小集 | CC `/rewind`+tasks、Gemini checkpointing | checkpoint/restore 子命令 + `sessions` 可视化回放 | 1–2 |
 | T4 | 生态纵深 | CC plugins/marketplace、MCP login | `.mcp.json`/HTTP+auth、skills `check`（供应链校验器，直接回应 99%/36% 审计）、技能脚本沙箱或写明取舍 | 1–2 |
 | T5 | 后台/远程化 | Codex Automations、CC remote | durable-run 之上做任务调度 CLI 面 + P3-3 远程 worker 协议评估 | 2–3 |
