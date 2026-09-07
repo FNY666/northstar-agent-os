@@ -50,6 +50,25 @@ class LineageGraph:
         return e
     def read(self)->Iterator[RouteLineageEvent]: return iter(self.events.values())
 
+    @classmethod
+    def from_path(cls, path: Path | str) -> "LineageGraph":
+        graph = cls(None)
+        path = Path(path)
+        if not path.exists():
+            graph.path = path
+            return graph
+        with path.open("rb") as handle:
+            for raw in handle:
+                if not raw.endswith(b"\n"):
+                    continue
+                try:
+                    value = json.loads(raw.decode("utf-8"))
+                    graph.append(RouteLineageEvent.from_dict(value))
+                except (UnicodeDecodeError, json.JSONDecodeError, ValueError) as exc:
+                    raise LineageError("lineage history is corrupt") from exc
+        return graph
+
+
 def derive_retry(parent:RouteLineageEvent,*,event_id:str,receipt_id:str,deadline_at:int,capabilities:list[str])->RouteLineageEvent:
     if parent.status!='failed' or not parent.retryable: raise LineageError('parent is not retryable')
     if deadline_at>parent.deadline_at or not set(capabilities).issubset(parent.capabilities): raise LineageError('retry widens deadline/capabilities')
