@@ -9,7 +9,7 @@
 
 > **阅读口径（2026-09-08 当前真值）**：本页保留了早期差距基线与实施 ledger，
 > 因而 §0–§8 中的“现状”段落有历史意义，不应覆盖后面的复评。当前 checkout
-> 的权威快照是：`make test` **880 项测试，876 项通过、4 项 skip**（runtime 572，
+> 的权威快照是：`make test` **881 项测试，877 项通过、4 项 skip**（runtime 572，
 > 其中 4 项因可选 OpenTelemetry 依赖缺失而跳过；其余组件与文档测试全绿）；五个可安装组件仍为
 > 对齐的 `0.1.0.dev0`，没有发布 tag。Agent Skills 已支持
 > `.northstar/skills` + portable `.agents/skills`、标准 frontmatter、`skills
@@ -18,11 +18,11 @@
 > capability-first approval lease 与可验证 action receipt，本轮又补上 durable-run
 > 的 pause/resume、显式 retry/cancel 生命周期与 attempt key 语义；MCP 仍是最小
 > stdio 工具客户端，而不是完整的远程 MCP/插件市场。若只想看“现在还差什么”，
-> 直接跳到 **§10.14**。
+> 直接跳到 **§10.15**。
 
 ## 0. 执行摘要（TL;DR）
 
-**当前结论：Northstar 已从“库 + 手工拼装”追到可安装、可审计、具备局部可逆执行的 headless harness，但还不是 Claude Code/Codex/Gemini 那样的完整产品。**本地实测 `make test` 为 **880 项测试（876 通过、4 项可选 OTel skip）**（runtime 572），权限门、hooks、预算、只追加 transcript、workspace receipts、checkpoint manifest、capability lease、可验证 action receipt、durable-run 生命周期与离线确定性仍是最强资产。
+**当前结论：Northstar 已从“库 + 手工拼装”追到可安装、可审计、具备局部可逆执行的 headless harness，但还不是 Claude Code/Codex/Gemini 那样的完整产品。**本地实测 `make test` 为 **881 项测试（877 通过、4 项可选 OTel skip）**（runtime 572），权限门、hooks、预算、只追加 transcript、workspace receipts、checkpoint manifest、capability lease、可验证 action receipt、durable-run 生命周期与离线确定性仍是最强资产。
 
 已经补齐的 DX 基础包括：五个可安装组件、console script、`doctor`/`dry-run`、AGENTS.md 与策略即代码、文件化 subagents、MCP stdio 最小客户端、标准 Agent Skills（含 `skills check/list`）、sessions 读回/NDJSON 审计、Python SDK、脚手架、API 文档和 CI recipe。**这些能力要以当前 checkout 的测试为准；本页后面的早期盘点是历史基线。**
 
@@ -758,3 +758,21 @@ T11 在 T10 的本地持久化 fencing 之上，为 `control pause|resume|cancel
   876 项通过、4 项可选 OTel skip**；API docbuild freshness 与链接检查通过。
 
 T11 仍是 Unreleased；没有创建 tag、GitHub Release，也没有发布到 PyPI/npm。
+
+### 10.15 当前实现复核：离线 durable-run receipt 验证（2026-09-08）
+
+T12 将 T11 的“可验证”从 schema/digest helper 扩展为一个只读验证路径，仍然
+不引入 command ledger 或第二套状态机。
+
+- `northstar-durable-run verify-receipt --events ... --receipt ...` 重新解析
+  `ControlReceipt`，检查 receipt 引用的 event IDs/sequences 是否精确对应
+  EventStore 的历史片段，并检查 before/after status 与 state digest。
+- EventStore 新增 `replay_at(run_id, sequence)`，使用现有 authoritative reducer
+  回放指定 event prefix。因此 receipt 在后续 `resume`、`cancel` 等事件追加后，
+  仍可验证它当时绑定的历史状态，而不是只能验证当前末状态。
+- 验证命令只读、fail-closed：receipt JSON、事件引用、状态或 digest 任何一项
+  被篡改都会返回 CLI error，不会写事件、checkpoint、lease 或 receipt ledger。
+- 验证：durable-run **78 项测试全部通过**；全仓 `make test` 为 **881 项测试、
+  877 项通过、4 项可选 OTel skip**；API docbuild freshness 与链接检查通过。
+
+T12 仍是 Unreleased；没有创建 tag、GitHub Release，也没有发布到 PyPI/npm。

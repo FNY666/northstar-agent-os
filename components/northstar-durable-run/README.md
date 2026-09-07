@@ -94,7 +94,14 @@ runner:
 northstar-durable-run status --events /path/run/events.jsonl --run-id run-001
 northstar-durable-run history --events /path/run/events.jsonl --run-id run-001
 northstar-durable-run audit --events /path/run/events.jsonl --run-id run-001
+northstar-durable-run verify-receipt \
+  --events /path/run/events.jsonl --receipt /path/run/pause.receipt.json
 ```
+
+`verify-receipt` validates the receipt schema, exact event references, historical
+before/after statuses, and the state digest by replaying the event prefix. It
+can verify an older receipt after later events have been appended; failure is
+reported without modifying the stream.
 
 An operator can apply the local lifecycle controls by supplying the original
 RunContract JSON and an owner identity. Each mutation is fenced by the same

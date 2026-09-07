@@ -41,6 +41,11 @@ def _add_control_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--now", required=True, type=int, help="positive event timestamp")
 
 
+def _add_receipt_verification_arguments(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument("--events", required=True, type=Path, help="append-only event JSONL path")
+    parser.add_argument("--receipt", required=True, type=Path, help="ControlReceipt JSON file")
+
+
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="northstar-durable-run",
@@ -56,6 +61,11 @@ def _parser() -> argparse.ArgumentParser:
 
     audit = commands.add_parser("audit", help="export validated events as audit NDJSON")
     _add_store_arguments(audit)
+
+    verify_receipt = commands.add_parser(
+        "verify-receipt", help="verify a control receipt against event history"
+    )
+    _add_receipt_verification_arguments(verify_receipt)
 
     control = commands.add_parser("control", help="apply one local lifecycle control")
     _add_control_arguments(control)
@@ -142,6 +152,41 @@ def _control(args: argparse.Namespace) -> dict[str, Any]:
     }
 
 
+def _verify_receipt(args: argparse.Namespace) -> dict[str, Any]:
+    receipt = ControlReceipt.from_dict(_read_json(args.receipt))
+    store = EventStore(args.events)
+    history = store.read_history(receipt.run_id)
+    if receipt.after_sequence > len(history):
+        raise ValueError("receipt after_sequence is beyond event history")
+
+    referenced_events = history[receipt.before_sequence : receipt.after_sequence]
+    actual_ids = tuple(event.event_id for event in referenced_events)
+    actual_sequences = tuple(event.sequence for event in referenced_events)
+    if actual_ids != receipt.event_ids or actual_sequences != receipt.event_sequences:
+        raise ValueError("receipt event references do not match event history")
+
+    before_state = (
+        store.replay_at(receipt.run_id, receipt.before_sequence)
+        if receipt.before_sequence
+        else {"status": "planned", "sequence": 0}
+    )
+    after_state = store.replay_at(receipt.run_id, receipt.after_sequence)
+    if before_state["status"] != receipt.before_status:
+        raise ValueError("receipt before_status does not match event history")
+    if after_state["status"] != receipt.after_status:
+        raise ValueError("receipt after_status does not match event history")
+    if not receipt.verify_state(after_state):
+        raise ValueError("receipt state_digest does not match event history")
+    return {
+        "receipt_id": receipt.receipt_id,
+        "run_id": receipt.run_id,
+        "outcome": receipt.outcome,
+        "verified": True,
+        "verified_sequence": receipt.after_sequence,
+        "state": after_state,
+    }
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     """Run the local durable-run CLI and return a process-style exit code."""
     args = _parser().parse_args(argv)
@@ -154,6 +199,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         elif args.command == "audit":
             events = EventStore(args.events).read_history(args.run_id)
             sys.stdout.write(events_to_ndjson(item.to_dict() for item in events))
+        elif args.command == "verify-receipt":
+            _emit_json(_verify_receipt(args))
         else:
             _emit_json(_control(args))
     except (OSError, TypeError, ValueError) as error:

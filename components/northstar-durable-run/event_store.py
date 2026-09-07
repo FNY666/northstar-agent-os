@@ -230,6 +230,26 @@ class EventStore:
     def replay(self, run_id: str) -> dict[str, Any]:
         return self.derive_state(run_id)
 
+    def replay_at(self, run_id: str, sequence: int) -> dict[str, Any]:
+        """Replay the authoritative event prefix ending at ``sequence``.
+
+        This is a read-only historical view. It does not create a second state
+        store; it derives the requested prefix with the same reducer used by
+        :meth:`replay`, which lets callers verify bounded receipts after later
+        lifecycle events have been appended.
+        """
+        if isinstance(sequence, bool) or not isinstance(sequence, int) or sequence <= 0:
+            raise ValueError("sequence must be a positive integer")
+        with file_lock(self._lock_path, exclusive=False):
+            events = self._events_unlocked()
+            if not events:
+                raise ValueError("run has no event history")
+            if events[0].run_id != run_id:
+                raise ValueError("requested run_id does not match event history")
+            if sequence > len(events):
+                raise ValueError("requested sequence is beyond event history")
+            return _derive(events[:sequence])
+
     def create_checkpoint(self, run_id: str) -> dict[str, Any]:
         # Hold the same exclusive stream lock while deriving and publishing the
         # checkpoint, so an append cannot make the sidecar stale between those

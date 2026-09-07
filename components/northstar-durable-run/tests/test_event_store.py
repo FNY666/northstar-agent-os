@@ -180,6 +180,13 @@ class EventStoreTests(unittest.TestCase):
         self.assertEqual(state["steps"]["planner"], {"status": "finished", "sequence": 4})
         replayed = self.store.replay("run-001")
         self.assertEqual(replayed, state)
+        historical = self.store.replay_at("run-001", 2)
+        self.assertEqual(historical["status"], "running")
+        self.assertEqual(historical["sequence"], 2)
+        with self.assertRaises(ValueError):
+            self.store.replay_at("run-001", 0)
+        with self.assertRaises(ValueError):
+            self.store.replay_at("run-001", 5)
 
     def test_derive_state_replays_failed_run_retry_and_new_step_attempt(self):
         events = [

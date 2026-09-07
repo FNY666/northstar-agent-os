@@ -1,5 +1,17 @@
 # Northstar Agent OS — initial public component
 
+## Unreleased (nineteenth batch) — offline durable-run receipt verification (T12)
+
+- Added the read-only `northstar-durable-run verify-receipt` command. It
+  validates a `ControlReceipt` against the authoritative EventStore, including
+  exact event IDs/sequences, before/after statuses, and the final state digest.
+- Added historical prefix replay so an older receipt remains verifiable after
+  later lifecycle events are appended. Verification is fail-closed and never
+  mutates the event stream or introduces a receipt ledger.
+- Added CLI/EventStore tamper and historical-replay tests, API documentation,
+  and local usage guidance. The durable-run suite now has 78 tests; this batch
+  remains unreleased with no tag, GitHub Release, or PyPI/npm publication.
+
 ## Unreleased (eighteenth batch) — attributable durable-run control receipts (T11)
 
 - Added the versioned `ControlReceipt` v1 contract for local `pause`, `resume`,

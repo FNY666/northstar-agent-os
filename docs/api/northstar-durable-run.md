@@ -89,6 +89,8 @@ Persist one durable run's validated, append-only event history.
 - `read_history(run_id: str)`
 - `derive_state(run_id: str)`
 - `replay(run_id: str)`
+- `replay_at(run_id: str, sequence: int)`
+  - Replay the authoritative event prefix ending at ``sequence``.
 - `create_checkpoint(run_id: str)`
 - `restore(run_id: str, *, checkpoint: dict[str, Any] | None=None)`
 ### `action_gateway`

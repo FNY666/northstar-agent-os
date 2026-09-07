@@ -226,6 +226,84 @@ class DurableCliTests(unittest.TestCase):
         self.assertEqual(noop.outcome, "noop")
         self.assertEqual(noop.event_ids, ())
 
+    def test_verify_receipt_replays_historical_prefix_and_rejects_tamper(self):
+        self.create_running_run()
+        code, output, error = self.invoke(
+            "control",
+            "--events",
+            str(self.events),
+            "--run-contract",
+            str(self.contract),
+            "--owner-id",
+            "operator-cli",
+            "--command-id",
+            "pause-command-verify",
+            "--now",
+            "101",
+            "pause",
+        )
+        self.assertEqual((code, error), (0, ""))
+        control_result = json.loads(output)
+        receipt_path = self.root / "pause.receipt.json"
+        receipt_path.write_text(
+            json.dumps(control_result["receipt"]), encoding="utf-8"
+        )
+
+        code, output, error = self.invoke(
+            "control",
+            "--events",
+            str(self.events),
+            "--run-contract",
+            str(self.contract),
+            "--owner-id",
+            "operator-cli",
+            "--now",
+            "102",
+            "resume",
+        )
+        self.assertEqual((code, error), (0, ""))
+
+        code, output, error = self.invoke(
+            "verify-receipt",
+            "--events",
+            str(self.events),
+            "--receipt",
+            str(receipt_path),
+        )
+        self.assertEqual((code, error), (0, ""))
+        verified = json.loads(output)
+        self.assertTrue(verified["verified"])
+        self.assertEqual(verified["verified_sequence"], 7)
+        self.assertEqual(verified["state"]["status"], "waiting")
+
+        tampered = dict(control_result["receipt"])
+        tampered["event_ids"] = ["event-forged"]
+        receipt_path.write_text(json.dumps(tampered), encoding="utf-8")
+        code, output, error = self.invoke(
+            "verify-receipt",
+            "--events",
+            str(self.events),
+            "--receipt",
+            str(receipt_path),
+        )
+        self.assertEqual(code, 2)
+        self.assertEqual(output, "")
+        self.assertIn("event references", error)
+
+        tampered = dict(control_result["receipt"])
+        tampered["state_digest"] = digest_state({"status": "running"})
+        receipt_path.write_text(json.dumps(tampered), encoding="utf-8")
+        code, output, error = self.invoke(
+            "verify-receipt",
+            "--events",
+            str(self.events),
+            "--receipt",
+            str(receipt_path),
+        )
+        self.assertEqual(code, 2)
+        self.assertEqual(output, "")
+        self.assertIn("state_digest", error)
+
     def test_status_reports_missing_history_as_a_cli_error(self):
         code, output, error = self.invoke(
             "status", "--events", str(self.events), "--run-id", RUN.run_id
