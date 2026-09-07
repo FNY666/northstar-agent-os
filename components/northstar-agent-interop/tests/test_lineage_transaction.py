@@ -31,4 +31,15 @@ class TransactionTests(unittest.TestCase):
             with self.assertRaises(RuntimeError): store.append(self.event(),LineageGraph.from_path(root/'lineage.jsonl').cursor(),lease,now=2)
             with self.assertRaises(TransactionError): store.recover()
 
+    def test_duplicate_terminal_receipt_is_rejected(self):
+        event = self.event()
+        succeeded_data = event.to_dict(); succeeded_data["status"] = "succeeded"; succeeded_data.pop("event_digest", None)
+        succeeded = RouteLineageEvent.from_dict(succeeded_data)
+        duplicate_data = succeeded.to_dict(); duplicate_data["event_id"] = "e2"; duplicate_data.pop("event_digest", None)
+        duplicate = RouteLineageEvent.from_dict(duplicate_data)
+        graph = LineageGraph()
+        graph.append(succeeded)
+        with self.assertRaises(Exception):
+            graph.append(duplicate)
+
 if __name__=='__main__': unittest.main()
