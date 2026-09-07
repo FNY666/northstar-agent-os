@@ -1,0 +1,100 @@
+"""Causal, append-only lifecycle evidence for route decisions and receipts."""
+from __future__ import annotations
+import hashlib, json, os
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Any, Iterator, Literal
+
+SCHEMA="northstar.route-lineage.v1"
+STATUSES= ("planned","dispatched","succeeded","failed","replayed","superseded")
+FIELDS={"schema_version","event_id","route_id","parent_event_id","receipt_id","status","target_agent_id","provider","capabilities","deadline_at","payload_digest","decision_fingerprint","retryable"}
+IDS=lambda v:isinstance(v,str) and 1<=len(v)<=256 and all(c.isalnum() or c in '._:-' for c in v)
+_DIGEST=lambda v:isinstance(v,str) and v.startswith('sha256:') and len(v)==71
+
+class LineageError(ValueError): pass
+
+@dataclass(frozen=True)
+class RouteLineageEvent:
+    schema_version:str; event_id:str; route_id:str; parent_event_id:str|None; receipt_id:str
+    status:Literal["planned","dispatched","succeeded","failed","replayed","superseded"]
+    target_agent_id:str; provider:str; capabilities:tuple[str,...]; deadline_at:int
+    payload_digest:str; decision_fingerprint:str; retryable:bool
+    @classmethod
+    def from_dict(cls,v:Any):
+        if not isinstance(v,dict) or set(v)!=FIELDS: raise LineageError('unknown or missing lineage fields')
+        if v['schema_version']!=SCHEMA or v['status'] not in STATUSES: raise LineageError('invalid lineage schema/status')
+        for k in ('event_id','route_id','receipt_id','target_agent_id','provider'):
+            if not IDS(v[k]): raise LineageError(f'invalid {k}')
+        if v['parent_event_id'] is not None and not IDS(v['parent_event_id']): raise LineageError('invalid parent_event_id')
+        if not isinstance(v['capabilities'],list) or len(set(v['capabilities']))!=len(v['capabilities']) or not all(isinstance(x,str) and ':' in x and '*' not in x for x in v['capabilities']): raise LineageError('invalid capabilities')
+        if not isinstance(v['deadline_at'],int) or isinstance(v['deadline_at'],bool) or v['deadline_at']<0: raise LineageError('invalid deadline')
+        if not _DIGEST(v['payload_digest']) or not _DIGEST(v['decision_fingerprint']): raise LineageError('invalid digest')
+        if not isinstance(v['retryable'],bool): raise LineageError('invalid retryable')
+        return cls(SCHEMA,v['event_id'],v['route_id'],v['parent_event_id'],v['receipt_id'],v['status'],v['target_agent_id'],v['provider'],tuple(sorted(v['capabilities'])),v['deadline_at'],v['payload_digest'],v['decision_fingerprint'],v['retryable'])
+    def to_dict(self): return {'schema_version':self.schema_version,'event_id':self.event_id,'route_id':self.route_id,'parent_event_id':self.parent_event_id,'receipt_id':self.receipt_id,'status':self.status,'target_agent_id':self.target_agent_id,'provider':self.provider,'capabilities':list(self.capabilities),'deadline_at':self.deadline_at,'payload_digest':self.payload_digest,'decision_fingerprint':self.decision_fingerprint,'retryable':self.retryable}
+    def canonical(self): return json.dumps(self.to_dict(),ensure_ascii=False,sort_keys=True,separators=(',',':')).encode()
+
+class LineageGraph:
+    def __init__(self,path:Path|str|None=None): self.path=Path(path) if path else None; self.events:dict[str,RouteLineageEvent]={}
+    def append(self,e:RouteLineageEvent):
+        if e.event_id in self.events: raise LineageError('duplicate event_id')
+        if e.parent_event_id:
+            p=self.events.get(e.parent_event_id)
+            if p is None or p.route_id!=e.route_id: raise LineageError('parent lineage mismatch')
+            allowed={'planned':{'dispatched','superseded'},'dispatched':{'succeeded','failed'},'failed':{'replayed','planned'},'succeeded':{'replayed','superseded'},'replayed':set(),'superseded':set()}
+            if e.status not in allowed.get(p.status,set()): raise LineageError('illegal lifecycle transition')
+        self.events[e.event_id]=e
+        if self.path:
+            self.path.parent.mkdir(parents=True,exist_ok=True)
+            with self.path.open('ab') as f: f.write(e.canonical()+b'\n'); f.flush(); os.fsync(f.fileno())
+        return e
+    def read(self)->Iterator[RouteLineageEvent]: return iter(self.events.values())
+
+def derive_retry(parent:RouteLineageEvent,*,event_id:str,receipt_id:str,deadline_at:int,capabilities:list[str])->RouteLineageEvent:
+    if parent.status!='failed' or not parent.retryable: raise LineageError('parent is not retryable')
+    if deadline_at>parent.deadline_at or not set(capabilities).issubset(parent.capabilities): raise LineageError('retry widens deadline/capabilities')
+    return RouteLineageEvent(SCHEMA,event_id,parent.route_id,parent.event_id,receipt_id,'planned',parent.target_agent_id,parent.provider,tuple(sorted(capabilities)),deadline_at,parent.payload_digest,parent.decision_fingerprint,False)
+
+
+def verify_lineage(graph: LineageGraph, *, route_record: dict[str, Any], handoff: dict[str, Any], max_events: int = 256):
+    chain = list(graph.read())
+    if len(chain) > max_events or not chain:
+        return VerificationResult("unknown", ("lineage is missing or too large",))
+    terminal = chain[-1]
+    reasons: list[str] = []
+    for key in ("selected_provider", "decision_fingerprint", "payload_digest"):
+        handoff_key = "provider" if key == "selected_provider" else key
+        if route_record.get(key) != handoff.get(handoff_key):
+            reasons.append(f"handoff mismatches route {key}")
+    if route_record.get("selected_agent_id") != handoff.get("target_agent_id"):
+        reasons.append("handoff mismatches route selected_agent_id")
+    if not isinstance(handoff.get("deadline_at"), int) or handoff["deadline_at"] > route_record.get("deadline_at", -1):
+        reasons.append("handoff deadline is wider than route")
+    if terminal.status == "failed":
+        return VerificationResult("failed", ("terminal backend receipt failed",))
+    if terminal.status != "succeeded":
+        return VerificationResult("unknown", ("lineage has no successful terminal receipt",))
+    if terminal.target_agent_id != handoff.get("target_agent_id") or terminal.provider != handoff.get("provider"):
+        reasons.append("terminal identity mismatch")
+    if terminal.deadline_at > handoff.get("deadline_at", -1):
+        reasons.append("terminal deadline is wider than handoff")
+    if not set(terminal.capabilities).issubset(set(handoff.get("capabilities", []))):
+        reasons.append("terminal capabilities exceed handoff")
+    if reasons:
+        return VerificationResult("unknown", tuple(reasons))
+    return VerificationResult("verified", ())
+
+@dataclass(frozen=True)
+class VerificationResult:
+    verdict: Literal["verified", "failed", "unknown"]
+    reasons: tuple[str, ...]
+
+
+def causal_chain(graph:LineageGraph,terminal_event_id:str)->tuple[RouteLineageEvent,...]:
+    out=[]; seen=set(); current=terminal_event_id
+    while current:
+        if current in seen: raise LineageError('lineage cycle')
+        seen.add(current); e=graph.events.get(current)
+        if e is None: raise LineageError('missing lineage event')
+        out.append(e); current=e.parent_event_id
+    return tuple(reversed(out))
