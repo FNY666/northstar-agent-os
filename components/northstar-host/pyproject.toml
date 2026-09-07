@@ -30,4 +30,4 @@ dependencies = ["northstar-run-contract"]
 # Flat modules, installed as top-level names (authorization, workspace,
 # host_audit) to match every existing `import` in this repository, including
 # the sibling components that consume the host module.
-py-modules = ["authorization", "host_audit", "workspace"]
+py-modules = ["authorization", "host_audit", "host_policy", "workspace"]

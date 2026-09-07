@@ -80,3 +80,21 @@ Canonical NDJSON text for many records (each line ends with a newline).
 #### `iter_ndjson(lines: Iterable[str])`
 
 Parse NDJSON text lines into validated audit records.
+
+### `policy`
+
+Source: `components/northstar-run-contract/policy.py`
+
+Canonical policy-document identity: schema version + revision rules.
+
+#### `validate_schema_version(value: Any)`
+
+Envelope schema errors; empty tuple when the version is supported.
+
+#### `validate_revision(value: Any)`
+
+Revision-id errors; empty tuple when valid.
+
+#### `require_supported_schema(value: Any, *, context: str)`
+
+Raise ``ValueError`` (with ``context`` in the message) when unsupported.

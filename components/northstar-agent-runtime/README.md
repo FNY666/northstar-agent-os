@@ -196,6 +196,9 @@ only ever *tighten* what a run may do:
 
 ```toml
 # .northstar/config.toml — every key is optional; values may only tighten.
+schema_version = "northstar.policy.v1"   # canonical policy schema; an unsupported
+                                         # (future) version is a fail-closed error
+revision = "2026-09-07.r1"       # optional audit correlation key for this file revision
 permission_mode = "plan"        # "default" or "plan" only; acceptEdits/bypassPermissions
                                 # are an operator's per-run CLI decision
 read_only = true                # denies Write/Edit for every run

@@ -54,6 +54,30 @@ signed `northstar.authorization.v1` grant. The grant binds:
 - the policy revision; and
 - an expiry no later than the verified binding expiry.
 
+## Policy as code (`northstar-policy.toml`)
+
+Policies can live in the repository like code: `host_policy.load_host_policy`
+reads a versioned, reviewable document and returns a `HostPolicy`. The
+document is fail-closed — an unsupported `schema_version`, a missing or
+invalid `revision`, an unknown key, or an actor/capability that would not
+parse are all refused at load time:
+
+```toml
+# northstar-policy.toml — policy as code for the host boundary.
+schema_version = "northstar.policy.v1"   # optional; defaults to v1
+revision = "2026-09-07.r1"               # required; flows into every grant and audit record
+
+[actors]
+"actor-001" = ["research", "search"]     # requested capabilities are checked here
+"actor-002" = []                         # listed but empty = deny-all for that actor
+```
+
+The `revision` carried by the document is exactly what `authorize_run()`
+embeds in each signed grant and what the audit feed exports as
+`policy_revision` — a decision can always be traced to the policy revision
+that governed it. Both policy documents speak the canonical
+`northstar.policy.v1` identity from the run contract (`policy.py`).
+
 Authorization verification uses HMAC-SHA256 and constant-time signature
 comparison. It returns no claims when verification fails. Binding and
 authorization secrets are supplied by the host and never placed in tokens.

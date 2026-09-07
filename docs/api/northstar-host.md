@@ -60,3 +60,15 @@ Map one verified authorization grant dict to a canonical audit record.
 #### `authorization_to_ndjson(authorization: dict[str, Any])`
 
 One signed-grant claim dict as a single canonical audit NDJSON line.
+
+### `host_policy`
+
+Source: `components/northstar-host/host_policy.py`
+
+Policy as code for the host: load ``northstar-policy.toml`` documents.
+
+#### `policy_file_path(directory: str | Path)`
+
+#### `load_host_policy(directory: str | Path)`
+
+Load and validate ``northstar-policy.toml`` under ``directory``.

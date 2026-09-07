@@ -41,6 +41,15 @@ POLICY_DIRECTORY = ".northstar"
 POLICY_FILE_NAME = "config.toml"
 DEFAULT_PROJECT_CONTEXT_FILE = "AGENTS.md"
 
+# Canonical policy-document identity, mirrored from the run contract's
+# ``policy`` module (the runtime is deliberately dependency-free; the test
+# suite pins both sides to the same strings).
+POLICY_SCHEMA_VERSION = "northstar.policy.v1"
+SUPPORTED_POLICY_SCHEMA_VERSIONS: tuple[str, ...] = (POLICY_SCHEMA_VERSION,)
+# Revision ids mirror the contract id rule (_valid_id): no whitespace, no
+# slashes, at most 128 chars — they are audit correlation keys.
+MAX_REVISION_CHARS = 128
+
 # Project instructions are developer-authored content appended to the system
 # prompt. Cap it so a workspace file cannot grow a run's context without bound.
 CONTEXT_MAX_CHARS = 64_000
@@ -58,6 +67,8 @@ MUTATING_TOOLS = ("Write", "Edit")
 ALWAYS_KNOWN_TOOLS = ("CodexReadOnly",)
 
 _ALLOWED_KEYS = frozenset({
+    "schema_version",
+    "revision",
     "permission_mode",
     "read_only",
     "deny_tools",
@@ -90,6 +101,8 @@ class PolicyFile:
     """
 
     source: Path
+    schema_version: str = POLICY_SCHEMA_VERSION  # northstar.policy.v1 (canonical identity)
+    revision: str | None = None                 # audit correlation key for this file revision
     permission_mode: str | None = None          # "default" | "plan"
     read_only: bool | None = None               # True only ever; False is a no-op
     deny_tools: tuple[str, ...] = ()
@@ -109,6 +122,8 @@ class PolicyFile:
     def as_dict(self) -> dict[str, Any]:
         return {
             "source": str(self.source),
+            "schema_version": self.schema_version,
+            "revision": self.revision,
             "permission_mode": self.permission_mode,
             "read_only": self.read_only,
             "deny_tools": list(self.deny_tools),
@@ -156,11 +171,30 @@ def load_policy_file(
             f"{path}: unknown key(s) {', '.join(unknown)} - allowed: {', '.join(sorted(_ALLOWED_KEYS))}"
         )
 
-    known_tools_set = set(known_tools or ()) | set(ALWAYS_KNOWN_TOOLS)
-    known_agents_set = set(known_agents or ())
-
     def fail(message: str) -> None:
         raise PolicyFileError(f"{path}: {message}")
+
+    # Document identity: a supported schema_version and an optional revision.
+    # An unsupported (future) schema must fail closed instead of being read
+    # with today's looser semantics.
+    schema_version = raw.get("schema_version")
+    if schema_version is None:
+        schema_version = POLICY_SCHEMA_VERSION
+    if not isinstance(schema_version, str) or schema_version not in SUPPORTED_POLICY_SCHEMA_VERSIONS:
+        supported = ", ".join(SUPPORTED_POLICY_SCHEMA_VERSIONS)
+        fail(f"unsupported policy schema_version {schema_version!r} - this runtime supports: {supported}")
+
+    revision = raw.get("revision")
+    if revision is not None:
+        if not isinstance(revision, str) or not revision:
+            fail("revision must be a non-empty string (e.g. '2026-09-07.r1')")
+        if len(revision) > MAX_REVISION_CHARS:
+            fail("revision is too long")
+        if any(char.isspace() or char in "/\\" for char in revision):
+            fail("revision must not contain whitespace, /, or \\ (it is an audit correlation key)")
+
+    known_tools_set = set(known_tools or ()) | set(ALWAYS_KNOWN_TOOLS)
+    known_agents_set = set(known_agents or ())
 
     mode = raw.get("permission_mode")
     if mode is not None:
@@ -236,6 +270,8 @@ def load_policy_file(
 
     return PolicyFile(
         source=path,
+        schema_version=schema_version,
+        revision=revision,
         permission_mode=mode,
         read_only=read_only,
         deny_tools=tuple(deny),
