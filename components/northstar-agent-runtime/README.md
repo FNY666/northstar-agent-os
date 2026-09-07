@@ -122,6 +122,49 @@ python3 -m cli run --sidecar-socket /var/run/northstar-codex/sidecar.sock \
   --probe-sidecar            # one health-check prompt, then exit
 ```
 
+## Repository policy and project context
+
+A workspace can ship two files that every run inside it honors, and both can
+only ever *tighten* what a run may do:
+
+- **`.northstar/config.toml`** — the run's policy defaults. A repository that
+  ships one is declaring policy for every run in it, so an unreadable file, an
+  unknown key, or a value that would loosen a guardrail is a configuration
+  error (exit 64): policy is never silently ignored.
+
+```toml
+# .northstar/config.toml — every key is optional; values may only tighten.
+permission_mode = "plan"        # "default" or "plan" only; acceptEdits/bypassPermissions
+                                # are an operator's per-run CLI decision
+read_only = true                # denies Write/Edit for every run
+deny_tools = ["Write", "Grep"]  # additive floor; even --allow-tool cannot resurrect one
+max_turns = 10                  # may only lower the built-in ceiling of 25
+max_tool_calls = 50             # may only lower 50
+max_budget_usd = 0.25           # any positive cap (built-in default: unlimited)
+halt_on_denial = true           # end with error_permission_denied on a refusal
+agent = "explorer"              # run as a built-in agent by default (CLI --agent wins)
+compaction_threshold_tokens = 30000   # 0 disables compaction
+project_context = "AGENTS.md"   # file name inside the workspace, or false to disable
+```
+
+  `allow_tools` is not accepted in a policy file: auto-approval is an operator
+  decision made per run (`--allow-tool`). When both the file and the CLI set a
+  ceiling, the lower value wins; file denials add to CLI denials and the
+  permission gate's first layer keeps them terminal. `--no-policy-file` skips
+  the file entirely for one run.
+
+- **`AGENTS.md`** (or the `project_context` file configured above, or an
+  explicit `--context-file`) — developer-authored project instructions. When
+  present it is appended to the system prompt behind a clear delimiter, so the
+  model sees repository conventions without the operator repeating them. It is
+  resolved strictly inside the workspace root: a symlink pointing out of the
+  workspace is refused, never followed, and files larger than 64,000 characters
+  are truncated with a marker. `--no-project-context` disables discovery.
+
+`doctor` and `run --dry-run` both report which files apply, so a run never
+surprises: `policy_file=` / `project_context=` lines show the effective inputs
+before anything is sent.
+
 ## Events, not exceptions
 
 A run yields the event vocabulary the surrounding host already knows:
@@ -252,6 +295,7 @@ size (`result_chars`), so truncation is visible instead of inferred.
 | `cli.py`            | one governed run from a shell, with distinct exit codes              |
 | `doctor.py`         | `cli doctor` environment self-checks (no requests, no file writes)   |
 | `session_view.py`   | `cli sessions list/show` - the read-back half of the transcripts     |
+| `policy_file.py`    | `.northstar/config.toml` parsing + tighten-only validation; AGENTS.md project-context discovery and prompt composition |
 | `_version.py`       | single source of truth for the component version                     |
 
 ## Exit codes

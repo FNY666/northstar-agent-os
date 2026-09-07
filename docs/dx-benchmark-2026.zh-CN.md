@@ -299,6 +299,11 @@ Northstar 是"运行时组件集合"，不是一个终端产品。因此对标�
 - **P1-4（部分）** CONTRIBUTING 增加发布流程（依赖图顺序、tag、不可变 Release）。
 - **P1-5** `cli sessions list/show [--json]`：会话读回（只读、损坏即报错）。
 - **P1-6** `examples/ci-readonly-review/`：只读治理审查的 CI recipe（脚本 + GitHub Actions 模板 + 退出码契约）。
-- **P2-2（预告）** 下一步：`.northstar/config.toml` 策略配置文件（优先级 CLI > 文件 > 内置，只许收紧）。
 
-测试规模：本地 `make test` **621 项全绿**（runtime 413 项含 4 项 SDK 跳过）；不变量 harness 5 guard 全 RED、基线绿；demo 与 review recipe 冒烟通过。
+### 2026-09-07（同批追加）— P2-1 + P2-2 完成（CLI 范围，未提交→随批提交）
+
+- **P2-1** 项目约定注入：`AGENTS.md`（或策略文件 `project_context`、或 `--context-file`）自动注入 system prompt（清晰分隔、64K 截断标记）；发现严格限制在 workspace 根内——指向外部的符号链接拒绝而非跟随；`--no-project-context` 关闭。
+- **P2-2** `.northstar/config.toml` 策略文件：模式仅 `default`/`plan`（acceptEdits/bypassPermissions 只能是 CLI 逐次决定）、`allow_tools` 拒绝、上限只能下调（取 CLI/文件较低者）、deny/read_only 为不可被 `--allow-tool` 复活的硬地板、未知键/未知工具/未知 agent/损坏 TOML/放宽值 = 配置错误退出 64（永不静默忽略）；`--no-policy-file` 一次性跳过。CLI 显式非默认模式 > 文件 > 内置。
+- 可见性：`doctor` 与 `--dry-run` 输出 `policy_file=` / `project_context=` 生效行；demo workspace 附带 `AGENTS.md` 示例。
+
+测试规模：本地 runtime **446 项全绿**（+33 策略/上下文测试，含 4 项 SDK 跳过）；guard harness 5 RED 基线绿；全仓 `make test` 654 项。
