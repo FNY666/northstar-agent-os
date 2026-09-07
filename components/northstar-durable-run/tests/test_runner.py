@@ -172,6 +172,7 @@ class DurableRunnerTests(unittest.TestCase):
         self.assertEqual(state["status"], "running")
         paused = self.runner.pause(owner_id="worker-a", now=101, reason="operator requested pause")
         self.assertEqual(paused["status"], "waiting")
+        self.assertFalse((Path(self.tempdir.name) / "run.lease.json").exists())
         with self.assertRaises(ValueError):
             self.runner.execute([plan], owner_id="worker-b", now=102)
         self.assertEqual(self.runner.pause(owner_id="worker-a", now=102)["status"], "waiting")
@@ -228,6 +229,15 @@ class DurableRunnerTests(unittest.TestCase):
         self.assertEqual(state["status"], "cancelled")
         self.assertEqual(self.calls, [])
         self.assertNotIn("step.started", [item.event_type for item in self.store.read_history("run-001")])
+
+    def test_control_mutations_are_fenced_by_the_owner_bound_lease(self):
+        self.runner.execute([self.plan("edit")], owner_id="worker-a", now=100, finalize=False)
+        self.runner.lease.acquire("worker-b", now=101, ttl_seconds=20)
+        with self.assertRaises(ValueError):
+            self.runner.pause(owner_id="worker-a", now=102)
+        self.assertEqual(self.store.derive_state("run-001")["status"], "running")
+        self.runner.lease.release("worker-b")
+        self.assertEqual(self.runner.pause(owner_id="worker-a", now=103)["status"], "waiting")
 
     def test_expired_lease_blocks_execution_and_does_not_start_a_step(self):
         self.runner.prepare(owner_id="worker-a", now=100)

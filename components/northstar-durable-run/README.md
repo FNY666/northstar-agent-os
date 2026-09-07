@@ -96,7 +96,9 @@ northstar-durable-run audit --events /path/run/events.jsonl --run-id run-001
 ```
 
 An operator can apply the local lifecycle controls by supplying the original
-RunContract JSON and an owner identity. The command never executes a step or
+RunContract JSON and an owner identity. Each mutation is fenced by the same
+owner-bound expiring lease as execution: an active lease held by another owner
+is rejected rather than overwritten. The command never executes a step or
 queues a retry:
 
 ```sh

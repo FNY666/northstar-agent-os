@@ -301,6 +301,18 @@ class DurableRunner:
                 owner_id, now=now, ttl_seconds=self.lease_ttl_seconds
             )
 
+    def _acquire_control_lease(self, owner_id: str, *, now: int) -> bool:
+        """Fence a control mutation; return whether this call created the lease."""
+        if self.lease.path.exists():
+            self.lease.assert_valid(owner_id, now=now)
+            return False
+        self.lease.acquire(owner_id, now=now, ttl_seconds=self.lease_ttl_seconds)
+        return True
+
+    def _release_control_lease(self, owner_id: str, acquired: bool) -> None:
+        if acquired:
+            self.lease.release(owner_id)
+
     def _append_run_started(self, *, now: int) -> None:
         state = self.store.derive_state(self.run.run_id)
         history = self.store.read_history(self.run.run_id)
@@ -365,15 +377,19 @@ class DurableRunner:
             return state
         if state["status"] != "running":
             raise ValueError("only a running task can be paused")
-        self._append(
-            event_type="run.waiting",
-            status="waiting",
-            step_id="__run__",
-            idempotency_key=f"{self.run.run_id}-paused-{state['sequence'] + 1}",
-            now=now,
-            payload={"status": "waiting", "reason": reason.strip()},
-        )
-        return self.store.derive_state(self.run.run_id)
+        acquired = self._acquire_control_lease(owner_id, now=now)
+        try:
+            self._append(
+                event_type="run.waiting",
+                status="waiting",
+                step_id="__run__",
+                idempotency_key=f"{self.run.run_id}-paused-{state['sequence'] + 1}",
+                now=now,
+                payload={"status": "waiting", "reason": reason.strip()},
+            )
+            return self.store.derive_state(self.run.run_id)
+        finally:
+            self._release_control_lease(owner_id, acquired)
 
     def resume(self, *, owner_id: str, now: int) -> dict[str, Any]:
         """Resume a paused run's durable state; execution still reacquires the lease."""
@@ -383,37 +399,45 @@ class DurableRunner:
         state = self.prepare(owner_id=owner_id, now=now)
         if state["status"] != "waiting":
             raise ValueError("only a waiting task can be resumed")
-        self._append_run_started(now=now)
-        return self.store.derive_state(self.run.run_id)
+        acquired = self._acquire_control_lease(owner_id, now=now)
+        try:
+            self._append_run_started(now=now)
+            return self.store.derive_state(self.run.run_id)
+        finally:
+            self._release_control_lease(owner_id, acquired)
 
     def cancel(self, *, owner_id: str, now: int) -> dict[str, Any]:
         """Persist active step cancellation before the terminal run cancellation event."""
         state = self.prepare(owner_id=owner_id, now=now)
         if state["status"] in {"finished", "failed", "cancelled"}:
             return state
-        for step_id, details in state["steps"].items():
-            if details["status"] == "running":
-                attempt = self._step_attempt(step_id)
-                self._append(
-                    event_type="step.cancelled",
-                    status="cancelled",
-                    step_id=step_id,
-                    idempotency_key=self._attempt_key(
-                        f"{self.run.run_id}-{step_id}-cancelled", attempt
-                    ),
-                    now=now,
-                    payload={"status": "cancelled", "attempt": attempt},
-                )
-        state = self.store.derive_state(self.run.run_id)
-        self._append(
-            event_type="run.cancelled",
-            status="cancelled",
-            step_id="__run__",
-            idempotency_key=f"{self.run.run_id}-cancelled-{state['sequence'] + 1}",
-            now=now,
-            payload={"status": "cancelled"},
-        )
-        return self.store.derive_state(self.run.run_id)
+        acquired = self._acquire_control_lease(owner_id, now=now)
+        try:
+            for step_id, details in state["steps"].items():
+                if details["status"] == "running":
+                    attempt = self._step_attempt(step_id)
+                    self._append(
+                        event_type="step.cancelled",
+                        status="cancelled",
+                        step_id=step_id,
+                        idempotency_key=self._attempt_key(
+                            f"{self.run.run_id}-{step_id}-cancelled", attempt
+                        ),
+                        now=now,
+                        payload={"status": "cancelled", "attempt": attempt},
+                    )
+            state = self.store.derive_state(self.run.run_id)
+            self._append(
+                event_type="run.cancelled",
+                status="cancelled",
+                step_id="__run__",
+                idempotency_key=f"{self.run.run_id}-cancelled-{state['sequence'] + 1}",
+                now=now,
+                payload={"status": "cancelled"},
+            )
+            return self.store.derive_state(self.run.run_id)
+        finally:
+            self._release_control_lease(owner_id, acquired)
 
     def retry(
         self,
@@ -453,35 +477,39 @@ class DurableRunner:
         missing = sorted(failed_steps - plan_ids)
         if missing:
             raise ValueError(f"retry plans are missing failed steps: {', '.join(missing)}")
-        if state["status"] == "failed":
-            retry_number = self._run_retry_number()
-            self._append(
-                event_type="run.retry",
-                status="planned",
-                step_id="__run__",
-                idempotency_key=f"{self.run.run_id}-retry-{retry_number}",
-                now=now,
-                payload={
-                    "status": "planned",
-                    "retry": retry_number,
-                    "steps": sorted(failed_steps),
-                },
-            )
-        state = self.store.derive_state(self.run.run_id)
-        for step_id in sorted(failed_steps):
-            current = state["steps"].get(step_id, {}).get("status")
-            if current == "failed":
-                attempt = self._step_attempt(step_id) + 1
+        acquired = self._acquire_control_lease(owner_id, now=now)
+        try:
+            if state["status"] == "failed":
+                retry_number = self._run_retry_number()
                 self._append(
-                    event_type="step.retry",
+                    event_type="run.retry",
                     status="planned",
-                    step_id=step_id,
-                    idempotency_key=f"{self.run.run_id}-{step_id}-retry-attempt-{attempt}",
+                    step_id="__run__",
+                    idempotency_key=f"{self.run.run_id}-retry-{retry_number}",
                     now=now,
-                    payload={"status": "planned", "attempt": attempt},
+                    payload={
+                        "status": "planned",
+                        "retry": retry_number,
+                        "steps": sorted(failed_steps),
+                    },
                 )
-                state = self.store.derive_state(self.run.run_id)
-        return self.execute(plans, owner_id=owner_id, now=now, finalize=finalize)
+            state = self.store.derive_state(self.run.run_id)
+            for step_id in sorted(failed_steps):
+                current = state["steps"].get(step_id, {}).get("status")
+                if current == "failed":
+                    attempt = self._step_attempt(step_id) + 1
+                    self._append(
+                        event_type="step.retry",
+                        status="planned",
+                        step_id=step_id,
+                        idempotency_key=f"{self.run.run_id}-{step_id}-retry-attempt-{attempt}",
+                        now=now,
+                        payload={"status": "planned", "attempt": attempt},
+                    )
+                    state = self.store.derive_state(self.run.run_id)
+            return self.execute(plans, owner_id=owner_id, now=now, finalize=finalize)
+        finally:
+            self._release_control_lease(owner_id, acquired)
 
     def execute(
         self,
