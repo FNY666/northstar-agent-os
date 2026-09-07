@@ -436,3 +436,13 @@ Northstar 是"运行时组件集合"，不是一个终端产品。因此对标�
 - Gemini CLI 官方功能表（checkpointing/rewind/remote subagents/sandboxing/plan mode）：https://geminicli.com/docs/ ；Gemini CLI → Antigravity 迁移：https://codeant.ai/blogs/claude-code-cli-vs-codex-cli-vs-gemini-cli-best-ai-cli-tool-for-developers-in-2026
 - 2026-08 横评（Claude Code vs Codex vs Gemini CLI，Muse Code 入局、SWE-bench 口径）：https://codersera.com/blog/gemini-cli-vs-claude-code-2026/
 - Agent Skills 生态：40+ 平台/71,000+ skills/5,000 万开发者：https://atlan.com/know/ai-agent/ai-agent-skills/what-are-agent-skills/ 、https://enkrateialucca.github.io/lucas-landing-page/blog/2026/01/30/why-agent-skills-are-the-future-of-agents/ ；技能仓库横评（99% smell、36% 安全缺陷为第三方审计口径）：https://rywalker.com/research/agentic-skills-frameworks
+
+### 2026-09-07（同批追加）— T2 完成（发布工程：v0.1.0 发布渠道打通）
+
+- 五组件版本统一 **0.1.0**（此前均为 0.1.0.dev0）：pyproject + runtime `_version.py` 同步；`test_cli` 硬编码断言更新；MCP 握手 `clientInfo.version` 改引 `_version.__version__`（消灭第三处字符串）；组件 README/pyproject 的 "unreleased/next tagged release" 注释改写为发布口径。
+- 新增 repo 级测试 `tests/test_release.py`（3 项）：每个组件版本须为纯 `major.minor.patch`、五组件同版、runtime `_version.py` == pyproject——未来升版漂移会红。
+- 新增 `.github/workflows/release.yml`：推 `v*` tag 触发，五组件 `pip wheel` 出 wheel 并 `gh release create` 挂附件；幂等（已存在则只校验不动）。
+- 新增 `docs/guides/releasing-and-versioning.md`（版本规则/切版步骤/手动兜底/安装/版本策略），packaging-and-ci 指南交叉引用；CHANGELOG 顶部加 0.1.0 发布段。
+- 发布物：tag `v0.1.0` + GitHub Release（含五组件 wheel 资产）。
+
+测试规模：全仓 **739 项全绿**（736 + test_release 3）。

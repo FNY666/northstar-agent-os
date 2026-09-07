@@ -8,9 +8,9 @@ description = "Versioned Run Request/Receipt contract, expiring HMAC Run Binding
 readme = "README.md"
 license = { text = "MIT" }
 requires-python = ">=3.10"
-# The version string is deliberately static here: this component is unreleased,
-# and the value below is the version the next tagged release would carry.
-version = "0.1.0.dev0"
+# The version string is static here; releases bump all five component versions
+# together (tests/test_release.py keeps them aligned).
+version = "0.1.0"
 keywords = ["agent", "contract", "binding", "hmac", "northstar"]
 classifiers = [
     "Development Status :: 3 - Alpha",

@@ -20,7 +20,7 @@ pip install .                                              # resolves both
 
 The wheel installs the boundary modules (`interop_contract`, `handoff`,
 `interop_adapter`, `canary`, `process_adapter`, `process_backend`) as top-level
-modules; the version (`0.1.0.dev0`, unreleased) is declared in `pyproject.toml`.
+modules; the version (`0.1.0`) is declared in `pyproject.toml`.
 
 ## What is standardized
 
