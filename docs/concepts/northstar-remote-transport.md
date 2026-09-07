@@ -122,4 +122,6 @@ execution, at-least-once on evidence**.
       code exists *and* a canary has passed on a real host.
 
 Related: [identity/rotation story](northstar-remote-identity.md),
-[the remote-worker evaluation](northstar-remote-worker.md).
+[the remote-worker evaluation](northstar-remote-worker.md),
+[operations guide](../guides/remote-worker-operations.md),
+[canary recipe](../../examples/remote-canary/README.md).

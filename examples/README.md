@@ -8,6 +8,7 @@ of the product.
 | Example | What it demonstrates | Run it |
 | --- | --- | --- |
 | [demo](demo/README.md) | one full governed agent loop — Read tool call + scripted turn through the same code path as a live run (permission gate, ceilings, event stream, append-only transcript) | `cd demo && sh run_offline.sh` |
+| [remote-canary](remote-canary/README.md) | operator-run channel canary for a hosted worker — SSH-forward the sidecar socket and probe it end to end (needs a real worker host; never run by CI) | `NS_WORKER=user@host sh examples/remote-canary/run_remote_canary.sh` |
 | [session-panel](session-panel/README.md) | offline viewer for session transcripts and audit exports — one self-contained HTML file, drag-and-drop, no server and no network (fingerprint + stats + timeline) | open `examples/session-panel/session-panel.html` in a browser |
 | [observability](observability/README.md) | local trace backend for the runtime — Jaeger + Grafana over docker compose, with the `otel_bootstrap.py` provider seam; model turns stay scripted/offline; needs Docker + one pip extra | `docker compose -f examples/observability/docker-compose.yml up -d` |
 | [sdk](sdk/README.md) | embed one governed run in your own Python via `sdk.run()` — no subprocess, no API key; same gate refuses an unallowed Write | `python3 examples/sdk/run_sdk_demo.py` |
