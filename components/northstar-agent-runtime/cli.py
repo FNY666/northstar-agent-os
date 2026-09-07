@@ -61,6 +61,7 @@ def build_parser() -> argparse.ArgumentParser:
             "  python3 -m cli tools --workspace .\n"
             "  python3 -m cli doctor --workspace .\n"
             "  python3 -m cli sessions list --session-dir /tmp/northstar-sessions\n"
+            "  python3 -m cli new my-project  # scaffold a governed project\n"
             "  python3 -m cli sessions show --session-dir /tmp/northstar-sessions ns-20260907T000000Z-00000000\n"
         ),
     )
@@ -77,6 +78,9 @@ def build_parser() -> argparse.ArgumentParser:
     add_doctor_arguments(doctor)
     sessions = sub.add_parser("sessions", help="inspect persisted session transcripts (read-only)")
     add_session_arguments(sessions)
+    new_proj = sub.add_parser("new", help="scaffold a governed project (config, agents, hooks guide, CI recipe)")
+    new_proj.add_argument("directory", help="directory to create (must not exist, or be empty unless --force)")
+    new_proj.add_argument("--force", action="store_true", help="write the template files into a non-empty directory (never deletes)")
     return parser
 
 
@@ -262,6 +266,18 @@ def main(argv: Sequence[str] | None = None) -> int:
             print(f"{definition.name:<12} tools={','.join(definition.tools)}")
             print(f"{'':<12} mode={definition.permission_mode} turns={definition.max_turns} verdict={definition.require_verdict}")
             print(f"{'':<12} {definition.description}")
+        return 0
+    if args.command == "new":
+        from scaffold import scaffold_project
+
+        try:
+            created = scaffold_project(args.directory, force=args.force)
+        except ValueError as error:
+            print(f"configuration error: {error}", file=sys.stderr)
+            return USAGE_ERROR
+        for path in created:
+            print(f"created {path}")
+        print("governed project scaffolded; start with `northstar-agent-runtime doctor --workspace <dir>`")
         return 0
     if args.command != "run":
         if args.command == "doctor":

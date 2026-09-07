@@ -110,7 +110,7 @@ jobs:
           python -m py_compile loop.py hooks.py permissions.py budget.py tools/__init__.py \
             tools/verify_invariants.py compaction.py sessions.py session_view.py policy_file.py \
             frontmatter.py skills.py agent_files.py mcp_client.py audit_export.py agents.py tracing.py sidecar_client.py \
-            events.py sdk.py \
+            events.py sdk.py scaffold.py \
             cli.py doctor.py _version.py \
             providers/base.py providers/anthropic.py providers/scripted.py \
             tests/support.py tests/fixtures/mcp_echo_server.py tests/test_*.py

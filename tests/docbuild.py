@@ -70,6 +70,7 @@ MANIFEST: dict[str, tuple[str, ...]] = {
         "permissions",
         "policy_file",
         "sdk",
+        "scaffold",
         "sessions",
         "session_view",
         "sidecar_client",

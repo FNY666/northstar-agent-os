@@ -501,6 +501,16 @@ Run one governed loop, yielding each event as a plain dict.
 
 Run one governed loop to completion and return its :class:`RunReport`.
 
+### `scaffold`
+
+Source: `components/northstar-agent-runtime/scaffold.py`
+
+Scaffold a new governed Northstar project (``northstar-agent-runtime new``).
+
+#### `scaffold_project(directory: str | Path, *, force: bool=False)`
+
+Create a governed project under ``directory``; returns created paths.
+
 ### `sessions`
 
 Source: `components/northstar-agent-runtime/sessions.py`

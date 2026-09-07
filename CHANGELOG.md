@@ -1,5 +1,29 @@
 # Northstar Agent OS — initial public component
 
+## Unreleased (ninth batch) — templates and scaffolding (P3-2)
+
+- **`northstar-agent-runtime new <directory>`** (`scaffold.py`) generates a
+  minimal governed project whose defaults are the governance defaults —
+  safe first, loosen deliberately:
+  - `.northstar/config.toml` — `northstar.policy.v1` + date-based `revision`,
+    with `agent = "reviewer"` baked in (every default run is read-only);
+  - `.northstar/agents/reviewer.md` — a read-only, plan-mode reviewer agent;
+  - `AGENTS.md` — project instructions (auto-injected);
+  - `.northstar/hooks/README.md` — hooks are registered in code
+    (`AgentRuntime(hooks=…)`), never auto-executed from workspace files; the
+    guide ships a correct copy-paste example;
+  - `.github/workflows/northstar-review.yml` — governed CI review recipe
+    (template; install source and API key left as TODOs);
+  - `README.md` — what was created and the three commands to try it.
+- Every generated file is validated by the runtime's own loaders: the config
+  parses under `load_policy_file`, the agent registers under `agent_files`,
+  `doctor` is green in the scaffolded workspace, and `--dry-run` reports the
+  policy identity. Refuses a non-empty directory unless `--force` (which
+  never deletes).
+- Runtime README "Creating a governed project (`new`)" section; layout row,
+  `py-modules`, CI compile line and docstring API manifest (51 → 52 modules)
+  updated. Runtime tests 522 → 536.
+
 ## Unreleased (eighth batch) — policy as code: schema versioning + revision (P3-1b)
 
 - **Canonical policy identity** in `northstar-run-contract/policy.py`:
