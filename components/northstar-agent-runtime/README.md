@@ -320,7 +320,11 @@ A passing verdict is an assertion the runtime can audit, not a vibe.
 - **Sessions**: append-only JSONL, one `fsync` per write, `0600` under a `0700`
   directory. A torn last line is skipped and counted, not treated as corruption —
   a crash mid-write must not make the audit trail unreadable. A session id is
-  generated even when nothing is persisted.
+  generated even when nothing is persisted. `sessions export <session-id>` (with
+  `--session-dir`) replays one transcript to stdout as the canonical NDJSON
+  audit feed `audit.ndjson/1` — denials, failed tool results and `error_*`
+  results carry `"level":"error"`; see
+  [audit trail concept](../../docs/concepts/audit-trail.md).
 - **Compaction** may only cut at a boundary with no pending tool call. Cutting
   mid-exchange orphans a `tool_use` from its `tool_result`, and the API answers
   that with a 400 the model cannot recover from. After compaction the runtime
@@ -368,6 +372,7 @@ size (`result_chars`), so truncation is visible instead of inferred.
 | `skills.py`         | `.northstar/skills/*/SKILL.md` discovery + progressive-disclosure listing |
 | `frontmatter.py`    | strict minimal frontmatter reader shared by agents and skills        |
 | `mcp_client.py`     | minimal MCP stdio client: handshake, tool listing, bounded calls, process-group cleanup |
+| `audit_export.py`   | transcript replay as the canonical NDJSON audit feed (`audit.ndjson/1`)      |
 | `_version.py`       | single source of truth for the component version                     |
 
 ## Exit codes

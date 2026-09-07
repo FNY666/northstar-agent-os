@@ -338,3 +338,14 @@ Northstar 是"运行时组件集合"，不是一个终端产品。因此对标�
 - 生成/校验闭环：README 或 docstring 变更导致 API 页过期 = CI 失败，须 `docbuild.py build` 后提交。
 
 测试规模：全仓 **701 项全绿**（repository documentation 3→8，runtime 488 及其余组件不变）。
+
+### 2026-09-07（同批追加）— P3-1a 完成（事件流审计导出 JSON→NDJSON→SIEM）
+
+- **规范单一来源**：`northstar-run-contract/audit.py` 定义审计 feed 信封 `audit.ndjson/1`（`schema_version/component/event/ts/level/payload` 必填 + `seq/session_id/run_id/actor_id` 可选），严格校验、未知信封字段一律拒绝——扩展信封 = schema 修订，不允许静默漂移；带 `now_rfc3339`/epoch 转换与 `iter_ndjson`（坏行点名报错，绝不静默丢记录）。
+- **Runtime 桥**（`audit_export.py` + `cli sessions export <id> --session-dir DIR`）：JSONL 转录回放为 NDJSON 输出到 stdout；denial、失败 tool_result（content 块 `is_error`）、`error_*` result → `"level":"error"`；`ts` 沿用原记录时间戳从不重打。runtime 保持零依赖设计，信封在本地镜像（规范表在概念页，测试双方钉同一版本串）。
+- **Durable-run 桥**（`durable_audit.py`）：EventStore 事件映射进 feed，事件身份（event_id/task_id/run_id/step_id/trace_id/payload_digest）保留在 payload；failed/denied/error 状态升为 error 级；支持 ms 级 occurred_at。
+- **Host 桥**（`durable_audit.py`）：仅导出**已验证**的授权 grant 为 `authorization_grant` 记录（actor/run/workspace/capabilities/policy_revision/expires_at）；被篡改 token 停留在校验错误，永远不会变成审计记录。
+- **SIEM 对接文档**：`docs/concepts/audit-trail.md` 新增"规范信封表 + 三端接入点 + fluent-bit/rsyslog 转发要点（按 component 打标、ts 索引、schema_version 作演进路由键）"；P3-1 拆两批：本批审计导出，P3-1b 策略 schema 化（`northstar-policy.toml` 版本修订）待续。
+- 文档接线：py-modules/CI compile 行补 4 个新模块、docbuild MANIFEST +4 → API 页 43→47 模块、README（runtime sessions 段/durable/host/run-contract）与新模块行。
+
+测试规模：全仓 **736 项全绿**（run-contract 34、host 28、durable 65、runtime 501、root docs 8，sidecar/interop 不变）。

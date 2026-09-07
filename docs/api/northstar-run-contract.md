@@ -46,3 +46,37 @@ Pure adapter between verified Run Contract values and the legacy Sidecar.
 #### `to_sidecar_request(run: dict[str, Any], binding: BindingValidation)`
 
 #### `receipt_from_sidecar_response(run_id: str, response: dict[str, Any])`
+
+### `audit`
+
+Source: `components/northstar-run-contract/audit.py`
+
+Canonical audit feed: NDJSON v1 envelope shared by every Northstar producer.
+
+#### `now_rfc3339(*, now: float | None=None)`
+
+RFC 3339 UTC timestamp with milliseconds, e.g. ``2026-09-07T03:04:05.123Z``.
+
+#### `rfc3339_from_epoch(epoch_seconds: int)`
+
+Convert an integer epoch-seconds timestamp into the feed's RFC 3339 form.
+
+#### `new_record(component: str, event: str, *, seq: int | None=None, ts: str | None=None, level: str='info', payload: dict[str, Any] | None=None, session_id: str | None=None, run_id: str | None=None, actor_id: str | None=None)`
+
+Build one audit record; raises ``ValueError`` on the first validation error.
+
+#### `validate_record(record: Any)`
+
+Envelope validation errors (empty tuple when the record is valid).
+
+#### `dumps_record(record: dict[str, Any])`
+
+One canonical NDJSON line (no trailing newline); validates first.
+
+#### `to_ndjson(records: Iterable[dict[str, Any]])`
+
+Canonical NDJSON text for many records (each line ends with a newline).
+
+#### `iter_ndjson(lines: Iterable[str])`
+
+Parse NDJSON text lines into validated audit records.

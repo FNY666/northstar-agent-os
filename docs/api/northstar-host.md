@@ -47,3 +47,16 @@ Host-side opaque workspace allocation for authorized Northstar runs.
 Re-verify host grants and allocate one opaque private run directory.
 
 - `allocate(run: dict[str, Any], binding_token: str, authorization_token: str, *, current_policy_revision: str, now: int)`
+### `host_audit`
+
+Source: `components/northstar-host/host_audit.py`
+
+Bridge host authorization decisions into the canonical NDJSON audit feed.
+
+#### `authorization_to_audit(authorization: dict[str, Any], *, ts: str | None=None, level: str='info')`
+
+Map one verified authorization grant dict to a canonical audit record.
+
+#### `authorization_to_ndjson(authorization: dict[str, Any])`
+
+One signed-grant claim dict as a single canonical audit NDJSON line.

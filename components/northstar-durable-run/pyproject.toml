@@ -27,6 +27,7 @@ dependencies = ["northstar-run-contract", "northstar-host"]
 [tool.setuptools]
 py-modules = [
     "action_gateway",
+    "durable_audit",
     "durable_contract",
     "evaluation",
     "event_store",

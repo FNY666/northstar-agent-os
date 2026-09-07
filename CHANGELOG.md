@@ -1,5 +1,29 @@
 # Northstar Agent OS — initial public component
 
+## Unreleased (sixth batch) — audit export: JSON → NDJSON → SIEM (P3-1a)
+
+- **Canonical audit feed `audit.ndjson/1`** in `northstar-run-contract`
+  (`audit.py`): a strictly validated NDJSON envelope (`schema_version`,
+  `component`, `event`, `ts`, `level`, `payload` + optional `seq` and
+  correlation ids). Unknown envelope fields are rejected — extending the
+  envelope is a schema revision, never a silent drift.
+- **Runtime bridge** (`audit_export.py` + `cli sessions export`): replays one
+  JSONL transcript to stdout as the audit feed. Denials, failed tool results
+  and `error_*` results carry `"level":"error"`; `ts` is the record's original
+  timestamp, never re-stamped. Mirrors the envelope locally: the runtime stays
+  dependency-free.
+- **Durable-run bridge** (`durable_audit.py`): every `EventStore` event maps
+  into the feed with its identity preserved (`event_id`/`task_id`/`run_id`/
+  `step_id`/`trace_id`/digest); failed/denied/error statuses raise the level to
+  `error`.
+- **Host bridge** (`host_audit.py`): verified authorization grants export as
+  `authorization_grant` records (actor, run, workspace, capabilities, policy
+  revision, expiry); tampered tokens stay verification errors, never records.
+- SIEM shipping guidance and the normative envelope table live in
+  `docs/concepts/audit-trail.md`; API pages regenerated (43 → 47 modules).
+  Tests: run-contract 22→34, host 24→28, durable 59→65, runtime 488→501;
+  repository total 701 → 736.
+
 ## Unreleased (fifth batch) — documentation in four layers (P2-6)
 
 - **Per-component README link targets.** Every component README now opens with
