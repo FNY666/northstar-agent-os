@@ -19,22 +19,23 @@
   modules) all updated. Runtime tests 501 → 515.
 
 
-## 0.1.0 — 2026-09-07
+## 0.1.0 — candidate, NOT yet released
 
-First tagged release of the five pip-installable components
-(`northstar-run-contract`, `northstar-host`, `northstar-durable-run`,
-`northstar-agent-interop`, `northstar-agent-runtime`), one aligned version,
-wheels published as GitHub Release assets. It bundles the groundwork below:
+The components are on aligned `0.1.0.dev0` and **no release has been cut**:
+this repository releases only when it is ready, and the readiness gate
+(`docs/guides/releasing-and-versioning.md` + `tests/test_release.py` +
+`.github/workflows/release.yml`) refuses dev-suffixed or misaligned tags.
+The batch notes below describe everything accumulated towards 0.1.0:
 packaging and CLI engineering (P0/P1), AGENTS.md + policy config + skills +
 subagents + MCP client (P2), four-layer documentation (P2-6), the canonical
 NDJSON audit feed export (P3-1a), release engineering (T2) and the Python SDK
-embedding surface (T1). Full detail in the batch notes that follow; the
-roadmap and scoring live in `docs/dx-benchmark-2026.zh-CN.md`.
+embedding surface (T1). The roadmap and scoring live in
+`docs/dx-benchmark-2026.zh-CN.md`.
 
 > The "Unreleased (first … sixth batch)" sections below are the historical
-> batch notes that shipped inside **0.1.0** (P0/P1 through P3-1a + release
-> engineering); current development is described in the sections above this
-> release entry.
+> batch notes accumulated towards **0.1.0** (P0/P1 through P3-1a + release
+> engineering); none of it has shipped — see the readiness gate above.
+
 
 ## Unreleased (sixth batch) — audit export: JSON → NDJSON → SIEM (P3-1a)
 

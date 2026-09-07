@@ -22,7 +22,7 @@ pip install .                                              # resolves both
 
 The wheel installs the slice modules (`durable_contract`, `event_store`,
 `action_gateway`, `runner`, `verifier`, `trace_metrics`, `evaluation`) as
-top-level modules; the version (`0.1.0`) is declared in
+top-level modules; the version (`0.1.0.dev0`, unreleased) is declared in
 `pyproject.toml`.
 
 ## Boundaries

@@ -1,10 +1,13 @@
 """Release readiness: one version for every packaged component.
 
 The five pip-installable components are released together from a single tag,
-so their ``pyproject.toml`` versions must stay identical and parse as a
-release version (``major.minor.patch``, no dev/local suffix). The runtime's
-``_version.py`` must match as well — it is the single source the CLI prints
-and the MCP handshake advertises.
+so their ``pyproject.toml`` versions must stay identical. Between releases the
+version carries a ``.devN`` suffix (unreleased development state); a *release*
+version is plain ``major.minor.patch`` with no suffix — the release workflow
+refuses to publish a dev-suffixed version, so a tag can only be cut when the
+readiness gate has been passed. The runtime's ``_version.py`` must match as
+well — it is the single source the CLI prints and the MCP handshake
+advertises.
 """
 import re
 import tomllib
@@ -19,7 +22,7 @@ PACKAGED = (
     "northstar-agent-interop",
     "northstar-agent-runtime",
 )
-RELEASE_RE = re.compile(r"^\d+\.\d+\.\d+$")
+VERSION_RE = re.compile(r"^\d+\.\d+\.\d+(\.dev\d+)?$")
 
 
 def component_version(name: str) -> str:
@@ -36,11 +39,11 @@ def runtime_module_version() -> str:
 
 
 class ReleaseVersionTests(unittest.TestCase):
-    def test_every_component_version_is_a_release_version(self):
+    def test_every_component_version_is_a_version(self):
         for name in PACKAGED:
             with self.subTest(component=name):
                 version = component_version(name)
-                self.assertRegex(version, RELEASE_RE, f"{name} must carry a plain release version")
+                self.assertRegex(version, VERSION_RE, f"{name} has a malformed version {version!r}")
 
     def test_all_packaged_components_share_one_version(self):
         versions = {name: component_version(name) for name in PACKAGED}
@@ -52,6 +55,12 @@ class ReleaseVersionTests(unittest.TestCase):
 
     def test_runtime_version_module_matches_the_release_version(self):
         self.assertEqual(runtime_module_version(), component_version("northstar-agent-runtime"))
+
+    def test_dev_suffix_marks_unreleased_state_and_is_opt_in_for_release(self):
+        # Between releases the aligned version must be dev-suffixed so nobody
+        # mistakes the working tree for a shipped release; dropping the suffix
+        # is the explicit "ready to release" step (enforced by release.yml).
+        self.assertIn(".dev", component_version("northstar-agent-runtime"))
 
 
 if __name__ == "__main__":

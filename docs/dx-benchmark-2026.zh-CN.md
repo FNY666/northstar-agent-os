@@ -369,7 +369,7 @@ Northstar 是"运行时组件集合"，不是一个终端产品。因此对标�
 | # | 差距 | 状态（2026-09-07） |
 |---|---|---|
 | G1 | 不可安装、无入口 | ✅ 六组件 pyproject + console script；`make install` 五组件同 venv 验证 |
-| G2 | 无版本/发布渠道 | ✅ tag v0.1.0 + 版本对齐测试 + Release CI（wheel 自动挂资产）；🟡 未上 pip index |
+| G2 | 无版本/发布渠道 | 🟡 版本对齐测试 + Release CI 管道就绪；**未发布**（0.1.0.dev0，发布须过就绪门）；未上 pip index |
 | G3 | 无配置/约定文件 | ✅ AGENTS.md、`.northstar/config.toml`、agents/skills 文件、context-file；🟡 策略 schema 版本化（P3-1b）未做 |
 | G4 | 无 MCP/Skills/Plugins | 🟡 MCP stdio 最小客户端（默认 deny、穿权限门）；SKILL.md 只读渐进披露；**无 plugins/市场、无 HTTP/SSE+auth** |
 | G5 | 会话/追踪无读回 | ✅ `sessions list/show/export`（export 即 audit.ndjson/1）+ OTEL + resume；🟡 无 rewind/checkpoint 可视化 |
@@ -391,9 +391,9 @@ Northstar 是"运行时组件集合"，不是一个终端产品。因此对标�
 | 会话 / 调试 / 可观测 | 3 | **4** | 读回 + 审计导出 + resume 齐全；差 rewind/checkpoint 与交互式回放 |
 | 测试与确定性 | 5 | **5** | 736 项、guard 红绿 harness、离线 scripted provider——头部普遍 3 分档，仍是最稀缺资产 |
 | 文档与教学 | 3 | **4** | 四层 + 生成 API + examples 索引 + 11 语言；差课程/playground 型教学 |
-| 版本化与发布 | 2 | **4** | v0.1.0 对齐发布 + Release CI 自动出 wheel；未上 index（差最后一格） |
+| 版本化与发布 | 2 | **3** | 版本单一源 + 对齐测试 + 就绪门 Release CI；未发出版本（按纪律等"最完美"） |
 | 团队 / CI / 协作面 | 2 | **3** | CI 模板 + headless + 审计 feed 天然 CI 友好；差官方 Action/review 后台 |
-| **合计（/50）** | **23** | **37** | 头部（Claude Code/Codex）2026-09 口径仍 ≥46 且持续外扩 |
+| **合计（/50）** | **23** | **36** | 头部（Claude Code/Codex）2026-09 口径仍 ≥46 且持续外扩 |
 
 ### 10.4 新增横向战场六维（2026 年新出现的竞争面，1–5）
 
@@ -412,7 +412,7 @@ Northstar 是"运行时组件集合"，不是一个终端产品。因此对标�
 | # | 差距 | 对齐谁 | 内容 | 批次 |
 |---|---|---|---|---|
 | T1 | SDK/可嵌入面 | Codex exec/SDK、Claude Agent SDK | ✅ 已完成（2026-09-07）：`sdk.py`（RunOptions/run/stream_run/RunReport）+ `events.py` 公共事件词表 + examples/sdk 示例；TS 面与稳定 API 承诺待续 | — |
-| T2 | 发布工程 | `@latest`/Release 渠道 | ✅ 已完成（2026-09-07）：tag v0.1.0 + 五组件 wheel + Release CI 自动发布；余：pip index 上架 | — |
+| T2 | 发布工程 | `@latest`/Release 渠道 | 🟡 管道已完成并留作待命；**按发布纪律撤回 v0.1.0**（未发布、dev0、须过就绪门）；余：pip index 上架 | — |
 | T3 | 交互最小集 | CC `/rewind`+tasks、Gemini checkpointing | checkpoint/restore 子命令 + `sessions` 可视化回放 | 1–2 |
 | T4 | 生态纵深 | CC plugins/marketplace、MCP login | `.mcp.json`/HTTP+auth、skills `check`（供应链校验器，直接回应 99%/36% 审计）、技能脚本沙箱或写明取舍 | 1–2 |
 | T5 | 后台/远程化 | Codex Automations、CC remote | durable-run 之上做任务调度 CLI 面 + P3-3 远程 worker 协议评估 | 2–3 |
@@ -456,3 +456,14 @@ Northstar 是"运行时组件集合"，不是一个终端产品。因此对标�
 - 接线：py-modules + events/sdk、CI compile 行、docbuild MANIFEST +2 → API 页 49 模块、runtime README 布局表。
 
 测试规模：runtime **515 项全绿**（+14：sdk 14 项），全仓 739 → 753。
+
+### 2026-09-07（同批修正）— 发布纪律：撤回过早的 v0.1.0，改为"最完美才发"就绪门
+
+- **撤销发布**：删除 GitHub Release v0.1.0 与远端/本地 tag v0.1.0（此前为演示 Release CI 而打）；五组件版本与 `_version.py` 全部回到对齐的 **0.1.0.dev0**（未发布态），README 版本注记同步回 unreleased。
+- **就绪门固化**（防止再犯"发太快"）：
+  - `tests/test_release.py`：版本须为 `major.minor.patch[.devN]`、五组件同版、`_version.py` 对齐，且**未发布态必须带 .dev 后缀**（工作树不得伪装成已发布）；
+  - `.github/workflows/release.yml` 新增 **Readiness gate 步骤**：dev 后缀版本直接拒发、tag 必须等于对齐版本（`v<version>`）、文档构建须新鲜——三条任一不满足即 fail，不建 Release；
+  - `docs/guides/releasing-and-versioning.md` 重写：发布就绪清单（全量测试/guard/示例/wheel 冒烟/版本对齐/CHANGELOG/API 面审查/发布说明），全部绿才允许去掉 .dev 打 tag；发布后回到下一 dev 版本。
+- 版本化/发布维度分回调至 3（管道就绪但无发布），合计 36/50；CHANGELOG 0.1.0 段改标 "candidate, NOT yet released"。
+
+> 教训记录：管道本身要提前就位，但**打 tag 发布是产品决定，不是演示 CI 的手段**；此后只由就绪门放行。
