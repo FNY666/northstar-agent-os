@@ -21,8 +21,8 @@ pip install .                                              # resolves both
 ```
 
 The wheel installs the slice modules (`durable_contract`, `event_store`, `action_gateway`,
-`cli`, `runner`, `verifier`, `trace_metrics`, `evaluation`) as top-level
-modules; the version (`0.1.0.dev0`, unreleased) is declared in
+`cli`, `control_receipt`, `runner`, `verifier`, `trace_metrics`, `evaluation`) as
+top-level modules; the version (`0.1.0.dev0`, unreleased) is declared in
 `pyproject.toml`.
 
 ## Boundaries
@@ -99,14 +99,17 @@ northstar-durable-run audit --events /path/run/events.jsonl --run-id run-001
 An operator can apply the local lifecycle controls by supplying the original
 RunContract JSON and an owner identity. Each mutation is fenced by the same
 owner-bound expiring lease as execution: an active lease held by another owner
-is rejected rather than overwritten. The command never executes a step or
-queues a retry:
+is rejected rather than overwritten. Each command returns a versioned control
+receipt containing the actor, command ID, before/after sequence, and exact
+event IDs; an event-producing transition is `applied`, while a terminal repeat
+or already-waiting control is `noop`. The EventStore remains the source of
+truth. The command never executes a step or queues a retry:
 
 ```sh
 northstar-durable-run control \
   --events /path/run/events.jsonl \
   --run-contract /path/run/run.json \
-  --owner-id operator-1 --now 1700000000 \
+  --owner-id operator-1 --command-id hold-001 --now 1700000000 \
   pause --reason "manual hold"
 
 northstar-durable-run control \
@@ -115,8 +118,12 @@ northstar-durable-run control \
   --owner-id operator-1 --now 1700000001 resume
 ```
 
-`retry()` remains programmatic because a retry must provide the explicit
-`StepPlan` actions and preserve the action idempotency boundary. A future
+`--command-id` is optional for this local projection; provide it when an
+upstream operator or API already has a stable command identity. Receipt IDs
+remain per-response identifiers, and receipts are not a persisted command
+ledger or an idempotency mechanism. `retry()` remains programmatic because a
+retry must provide the explicit `StepPlan` actions and preserve the action
+idempotency boundary. A future
 scheduler may call this surface, but this component does not create one.
 
 ## Local example

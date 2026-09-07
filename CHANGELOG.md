@@ -1,5 +1,20 @@
 # Northstar Agent OS — initial public component
 
+## Unreleased (eighteenth batch) — attributable durable-run control receipts (T11)
+
+- Added the versioned `ControlReceipt` v1 contract for local `pause`, `resume`,
+  and `cancel` control responses. It binds `run_id`, `actor_id`, `command_id`,
+  operation, request time, before/after status and sequence, exact newly
+  observed event IDs/sequences, and a canonical final state digest.
+- Receipts distinguish event-producing `applied` transitions from terminal or
+  already-waiting `noop` controls. They are causal projections over the
+  authoritative EventStore, not a second lifecycle state machine or a
+  persisted command ledger.
+- Added the optional CLI `--command-id`, API reference coverage, schema tests,
+  applied/noop CLI assertions, and documentation boundaries. The durable-run
+  suite now has 77 tests; this batch remains unreleased with no tag, GitHub
+  Release, or PyPI/npm publication.
+
 ## Unreleased (seventeenth batch) — local durable persistence fencing (T10)
 
 - EventStore append/read/checkpoint operations now use a POSIX advisory lock

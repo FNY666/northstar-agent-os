@@ -11,9 +11,16 @@ from __future__ import annotations
 import argparse
 import json
 import sys
+import uuid
 from pathlib import Path
 from typing import Any, Sequence
 
+from control_receipt import (
+    CONTROL_RECEIPT_SCHEMA_VERSION,
+    ControlReceipt,
+    digest_state,
+    validate_identity,
+)
 from durable_audit import events_to_ndjson
 from durable_contract import RunContract
 from event_store import EventStore
@@ -30,6 +37,7 @@ def _add_control_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--run-contract", required=True, type=Path, help="JSON RunContract file")
     parser.add_argument("--lease-path", type=Path, help="lease file; defaults beside the event stream")
     parser.add_argument("--owner-id", required=True, help="owner making the local control request")
+    parser.add_argument("--command-id", help="caller-supplied identity for the control request")
     parser.add_argument("--now", required=True, type=int, help="positive event timestamp")
 
 
@@ -85,8 +93,20 @@ def _status(store: EventStore, run_id: str) -> dict[str, Any]:
 
 
 def _control(args: argparse.Namespace) -> dict[str, Any]:
+    if args.command_id is not None:
+        validate_identity(args.command_id, "command_id")
     contract = RunContract.from_dict(_read_json(args.run_contract))
+    command_id = args.command_id or f"{args.action}-{contract.run_id}-{args.now}-{uuid.uuid4().hex[:8]}"
     store = EventStore(args.events)
+    before_events = store.read_history(contract.run_id)
+    before_state = (
+        store.replay(contract.run_id)
+        if before_events
+        else {
+            "status": "planned",
+            "sequence": 0,
+        }
+    )
     lease_path = args.lease_path or args.events.with_name(f"{contract.run_id}.lease.json")
     runner = DurableRunner(contract, store, lease_path=lease_path)
     if args.action == "pause":
@@ -95,7 +115,31 @@ def _control(args: argparse.Namespace) -> dict[str, Any]:
         state = runner.resume(owner_id=args.owner_id, now=args.now)
     else:
         state = runner.cancel(owner_id=args.owner_id, now=args.now)
-    return {"action": args.action, "run_id": contract.run_id, "state": state}
+    after_events = store.read_history(contract.run_id)
+    new_events = after_events[len(before_events):]
+    receipt = ControlReceipt(
+        schema_version=CONTROL_RECEIPT_SCHEMA_VERSION,
+        receipt_id=f"ctl-{uuid.uuid4().hex}",
+        command_id=command_id,
+        run_id=contract.run_id,
+        actor_id=args.owner_id,
+        operation=args.action,
+        requested_at=args.now,
+        outcome="applied" if new_events else "noop",
+        before_status=before_state["status"],
+        after_status=state["status"],
+        before_sequence=before_state["sequence"],
+        after_sequence=state["sequence"],
+        event_ids=tuple(event.event_id for event in new_events),
+        event_sequences=tuple(event.sequence for event in new_events),
+        state_digest=digest_state(state),
+    )
+    return {
+        "action": args.action,
+        "run_id": contract.run_id,
+        "state": state,
+        "receipt": receipt.to_dict(),
+    }
 
 
 def main(argv: Sequence[str] | None = None) -> int:

@@ -1,15 +1,15 @@
 # Northstar Agent OS — 开发者体验（DX）对标分析与改进路线图
 
-> 编制日期：2026-09-07 ｜ 范围：开发者体验（Developer Experience）维度
+> 编制日期：2026-09-08 ｜ 范围：开发者体验（Developer Experience）维度
 > 方法：仓库本地实测（代码阅读 + 全部测试运行）+ 公开资料调研（截至 2026-09-07）
 > 目标：找出 Northstar 与全球顶级 agent 工具在 DX 上的差距，给出可执行的分阶段改进路线图。
 > 说明：本页保留分析基线，同时记录已经落地的批次；代码事实以当前 checkout、测试和后文最新 ledger 为准。
 
 ---
 
-> **阅读口径（2026-09-07 当前真值）**：本页保留了早期差距基线与实施 ledger，
+> **阅读口径（2026-09-08 当前真值）**：本页保留了早期差距基线与实施 ledger，
 > 因而 §0–§8 中的“现状”段落有历史意义，不应覆盖后面的复评。当前 checkout
-> 的权威快照是：`make test` **878 项测试，874 项通过、4 项 skip**（runtime 572，
+> 的权威快照是：`make test` **880 项测试，876 项通过、4 项 skip**（runtime 572，
 > 其中 4 项因可选 OpenTelemetry 依赖缺失而跳过；其余组件与文档测试全绿）；五个可安装组件仍为
 > 对齐的 `0.1.0.dev0`，没有发布 tag。Agent Skills 已支持
 > `.northstar/skills` + portable `.agents/skills`、标准 frontmatter、`skills
@@ -18,11 +18,11 @@
 > capability-first approval lease 与可验证 action receipt，本轮又补上 durable-run
 > 的 pause/resume、显式 retry/cancel 生命周期与 attempt key 语义；MCP 仍是最小
 > stdio 工具客户端，而不是完整的远程 MCP/插件市场。若只想看“现在还差什么”，
-> 直接跳到 **§10.13**。
+> 直接跳到 **§10.14**。
 
 ## 0. 执行摘要（TL;DR）
 
-**当前结论：Northstar 已从“库 + 手工拼装”追到可安装、可审计、具备局部可逆执行的 headless harness，但还不是 Claude Code/Codex/Gemini 那样的完整产品。**本地实测 `make test` 为 **878 项测试（874 通过、4 项可选 OTel skip）**（runtime 572），权限门、hooks、预算、只追加 transcript、workspace receipts、checkpoint manifest、capability lease、可验证 action receipt、durable-run 生命周期与离线确定性仍是最强资产。
+**当前结论：Northstar 已从“库 + 手工拼装”追到可安装、可审计、具备局部可逆执行的 headless harness，但还不是 Claude Code/Codex/Gemini 那样的完整产品。**本地实测 `make test` 为 **880 项测试（876 通过、4 项可选 OTel skip）**（runtime 572），权限门、hooks、预算、只追加 transcript、workspace receipts、checkpoint manifest、capability lease、可验证 action receipt、durable-run 生命周期与离线确定性仍是最强资产。
 
 已经补齐的 DX 基础包括：五个可安装组件、console script、`doctor`/`dry-run`、AGENTS.md 与策略即代码、文件化 subagents、MCP stdio 最小客户端、标准 Agent Skills（含 `skills check/list`）、sessions 读回/NDJSON 审计、Python SDK、脚手架、API 文档和 CI recipe。**这些能力要以当前 checkout 的测试为准；本页后面的早期盘点是历史基线。**
 
@@ -739,3 +739,22 @@ EventStore/lease 文件时的序列竞争，而不是提前实现分布式 sched
 worker claim protocol 或 fencing token；action 进程隔离和远程 transport 仍未实现。
 
 T10 仍是 Unreleased；没有创建 tag、GitHub Release，也没有发布到 PyPI/npm。
+
+### 10.14 当前实现复核：可归因的 durable-run 控制 receipt（2026-09-08）
+
+T11 在 T10 的本地持久化 fencing 之上，为 `control pause|resume|cancel` 输出
+一个版本化、可验证的因果投影；它没有引入第二套 lifecycle 状态机。
+
+- 新增 `northstar.durable-control-receipt.v1`：receipt 绑定 `run_id`、
+  `actor_id`、`command_id`、操作类型和请求时间，并记录 before/after status
+  与 sequence。
+- receipt 精确列出本次观察到的新增 event IDs/sequences，并对最终 replay state
+  计算 canonical `sha256:` digest；有新增事件是 `applied`，终态重复或等待状态
+  无变化是 `noop`。
+- CLI 接受可选 `--command-id` 并在 JSON control response 的 `receipt` 字段输出
+  contract。receipt ID 仍是每次响应的随机标识；receipt 不是持久化 command ledger，
+  也不把自身变成幂等状态源。
+- 验证：durable-run **77 项测试全部通过**；全仓 `make test` 为 **880 项测试、
+  876 项通过、4 项可选 OTel skip**；API docbuild freshness 与链接检查通过。
+
+T11 仍是 Unreleased；没有创建 tag、GitHub Release，也没有发布到 PyPI/npm。

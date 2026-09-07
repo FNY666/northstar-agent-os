@@ -39,6 +39,7 @@ MANIFEST: dict[str, tuple[str, ...]] = {
     "northstar-durable-run": (
         "durable_contract",
         "cli",
+        "control_receipt",
         "event_store",
         "action_gateway",
         "runner",

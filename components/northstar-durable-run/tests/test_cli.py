@@ -12,6 +12,7 @@ sys.path.insert(0, str(COMPONENT_ROOT))
 sys.path.insert(0, str(CONTRACT_ROOT))
 
 from cli import main  # noqa: E402
+from control_receipt import ControlReceipt, digest_state  # noqa: E402
 from durable_contract import RunContract  # noqa: E402
 from event_store import EventStore  # noqa: E402
 from runner import DurableRunner, StepPlan  # noqa: E402
@@ -108,6 +109,27 @@ class DurableCliTests(unittest.TestCase):
             str(self.contract),
             "--owner-id",
             "operator-cli",
+            "--command-id",
+            "bad/id",
+            "--now",
+            "101",
+            "pause",
+        )
+        self.assertEqual(code, 2)
+        self.assertEqual(output, "")
+        self.assertIn("command_id is invalid", error)
+        self.assertEqual(len(self.store.read_history(RUN.run_id)), 6)
+
+        code, output, error = self.invoke(
+            "control",
+            "--events",
+            str(self.events),
+            "--run-contract",
+            str(self.contract),
+            "--owner-id",
+            "operator-cli",
+            "--command-id",
+            "pause-command-1",
             "--now",
             "101",
             "pause",
@@ -115,7 +137,45 @@ class DurableCliTests(unittest.TestCase):
             "manual hold",
         )
         self.assertEqual((code, error), (0, ""))
-        self.assertEqual(json.loads(output)["state"]["status"], "waiting")
+        paused_result = json.loads(output)
+        self.assertEqual(paused_result["state"]["status"], "waiting")
+        paused_receipt = ControlReceipt.from_dict(paused_result["receipt"])
+        self.assertEqual(paused_receipt.command_id, "pause-command-1")
+        self.assertEqual(paused_receipt.run_id, RUN.run_id)
+        self.assertEqual(paused_receipt.actor_id, "operator-cli")
+        self.assertEqual(paused_receipt.operation, "pause")
+        self.assertEqual(paused_receipt.outcome, "applied")
+        self.assertEqual(paused_receipt.before_status, "running")
+        self.assertEqual(paused_receipt.after_status, "waiting")
+        self.assertEqual(paused_receipt.before_sequence, 6)
+        self.assertEqual(paused_receipt.after_sequence, 7)
+        self.assertEqual(len(paused_receipt.event_ids), 1)
+        self.assertEqual(paused_receipt.event_sequences, (7,))
+        self.assertEqual(paused_receipt.state_digest, digest_state(paused_result["state"]))
+
+        code, output, error = self.invoke(
+            "control",
+            "--events",
+            str(self.events),
+            "--run-contract",
+            str(self.contract),
+            "--owner-id",
+            "operator-cli",
+            "--command-id",
+            "pause-command-2",
+            "--now",
+            "101",
+            "pause",
+        )
+        self.assertEqual((code, error), (0, ""))
+        waiting_noop_result = json.loads(output)
+        waiting_noop = ControlReceipt.from_dict(waiting_noop_result["receipt"])
+        self.assertEqual(waiting_noop.outcome, "noop")
+        self.assertEqual(waiting_noop.before_status, "waiting")
+        self.assertEqual(waiting_noop.after_status, "waiting")
+        self.assertEqual(waiting_noop.before_sequence, 7)
+        self.assertEqual(waiting_noop.after_sequence, 7)
+        self.assertEqual(waiting_noop.event_ids, ())
 
         code, output, error = self.invoke(
             "control",
@@ -148,6 +208,23 @@ class DurableCliTests(unittest.TestCase):
         result = json.loads(output)
         self.assertEqual(result["state"]["status"], "cancelled")
         self.assertEqual(result["action"], "cancel")
+
+        code, output, error = self.invoke(
+            "control",
+            "--events",
+            str(self.events),
+            "--run-contract",
+            str(self.contract),
+            "--owner-id",
+            "operator-cli",
+            "--now",
+            "104",
+            "cancel",
+        )
+        self.assertEqual((code, error), (0, ""))
+        noop = ControlReceipt.from_dict(json.loads(output)["receipt"])
+        self.assertEqual(noop.outcome, "noop")
+        self.assertEqual(noop.event_ids, ())
 
     def test_status_reports_missing_history_as_a_cli_error(self):
         code, output, error = self.invoke(

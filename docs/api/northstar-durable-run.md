@@ -51,6 +51,30 @@ Local inspection and control CLI for one durable-run event stream.
 
 Run the local durable-run CLI and return a process-style exit code.
 
+### `control_receipt`
+
+Source: `components/northstar-durable-run/control_receipt.py`
+
+Versioned receipts for local durable-run control operations.
+
+#### `digest_state(value: Any)`
+
+Return the canonical digest used to bind a receipt to derived state.
+
+#### `validate_identity(value: Any, field: str='identity')`
+
+Validate and return an identity usable in a control receipt.
+
+#### `ControlReceipt`
+
+Causal summary of one local lifecycle control projection.
+
+- `from_dict(value: Any)`
+- `to_dict()`
+- `canonical_json()`
+  - Return deterministic receipt bytes for an outer signer or store.
+- `verify_state(state: Any)`
+  - Return whether a replayed state matches this receipt's digest.
 ### `event_store`
 
 Source: `components/northstar-durable-run/event_store.py`

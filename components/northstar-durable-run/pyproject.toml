@@ -32,6 +32,7 @@ py-modules = [
     "_durable_lock",
     "action_gateway",
     "cli",
+    "control_receipt",
     "durable_audit",
     "durable_contract",
     "evaluation",
