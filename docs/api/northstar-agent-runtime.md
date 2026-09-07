@@ -209,6 +209,16 @@ Flags mirroring ``cli run``'s defaults so a doctor verdict predicts a run.
 
 Print the report; return 0 unless a check failed.
 
+### `events`
+
+Source: `components/northstar-agent-runtime/events.py`
+
+Public event vocabulary of a governed run: dict events + result exit codes.
+
+#### `event_to_dict(event: Any)`
+
+Render one run event as a plain dict (the shape ``--json`` emits).
+
 ### `frontmatter`
 
 Source: `components/northstar-agent-runtime/frontmatter.py`
@@ -463,6 +473,33 @@ Find the project-instructions file to inject, or ``None``.
 #### `append_project_context(base_prompt: str, context: ProjectContext)`
 
 Append clearly delimited developer-authored content to a system prompt.
+
+### `sdk`
+
+Source: `components/northstar-agent-runtime/sdk.py`
+
+Python API for one governed Northstar run — embed the loop, don't shell out.
+
+#### `RunOptions`
+
+Everything :func:`run` / :func:`stream_run` need to start one run.
+
+#### `RunReport`
+
+Outcome of one completed run: structured summary + full event list.
+
+- `is_error()`
+- `exit_code()`
+  - Terminal exit code a wrapper should use (``events.EXIT_CODES``).
+- `result_event()`
+  - The trailing ``result`` dict of :attr:`events`.
+#### `stream_run(options: RunOptions, resume: str | None=None)`
+
+Run one governed loop, yielding each event as a plain dict.
+
+#### `run(options: RunOptions, resume: str | None=None)`
+
+Run one governed loop to completion and return its :class:`RunReport`.
 
 ### `sessions`
 
