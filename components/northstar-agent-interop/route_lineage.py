@@ -136,6 +136,30 @@ def causal_chain(graph:LineageGraph,terminal_event_id:str)->tuple[RouteLineageEv
         if e is None: raise LineageError('missing lineage event')
         out.append(e); current=e.parent_event_id
     return tuple(reversed(out))
+def active_attempts(graph:LineageGraph,route_id:str)->tuple[tuple[RouteLineageEvent,...],...]:
+    """Return root-to-active-terminal execution attempts for one route."""
+    events=[event for event in graph.read() if event.route_id==route_id]
+    if not events: return ()
+    children={event.event_id:[] for event in events}
+    for event in events:
+        if event.parent_event_id in children: children[event.parent_event_id].append(event)
+    execution_statuses={'planned','dispatched','succeeded','failed'}
+    terminals=[]
+    for event in events:
+        execution_children=[child for child in children[event.event_id] if child.status in execution_statuses]
+        if event.status in {'succeeded','failed'} and not execution_children: terminals.append(event)
+    attempts=[]
+    for terminal in terminals:
+        try: attempts.append(causal_chain(graph,terminal.event_id))
+        except LineageError: continue
+    return tuple(attempts)
+
+def select_active_terminal(graph:LineageGraph,route_id:str)->RouteLineageEvent|None:
+    attempts=active_attempts(graph,route_id)
+    if len(attempts)!=1: return None
+    terminal=attempts[0][-1]
+    return terminal if terminal.status in {'succeeded','failed'} else None
+
 
 from dataclasses import dataclass as _dataclass
 
