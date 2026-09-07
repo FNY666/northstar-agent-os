@@ -467,3 +467,13 @@ Northstar 是"运行时组件集合"，不是一个终端产品。因此对标�
 - 版本化/发布维度分回调至 3（管道就绪但无发布），合计 36/50；CHANGELOG 0.1.0 段改标 "candidate, NOT yet released"。
 
 > 教训记录：管道本身要提前就位，但**打 tag 发布是产品决定，不是演示 CI 的手段**；此后只由就绪门放行。
+
+### 2026-09-07（同批追加）— P3-1b 完成（策略即代码：schema 版本化 + 修订号）
+
+- **规范身份**（run-contract `policy.py`）：`northstar.policy.v1` + revision 规则（非空、≤128、无空白与斜杠——审计关联键）；runtime 本地镜像常量（零依赖），两侧测试钉同一串（沿用 audit 模式）。
+- **runtime `.northstar/config.toml`**：可选 `schema_version`（缺省 v1）+ 可选 `revision`；不支持的未来 schema 直接 fail-closed（报支持列表）——v2 文件永远不会被按 v1 语义读；`PolicyFile` 携带二者并进 `as_dict`；`--dry-run` 输出 `schema=… revision=…`。
+- **host 策略即代码**：`host_policy.load_host_policy` 读 `northstar-policy.toml`（`schema_version` 可选缺省 v1、`revision` 必填、`[actors]` 表）→ `HostPolicy`；未知键/未来 schema/坏 revision/不可解析 actor 均在装载期拒绝（fail-closed）。文件 `revision` 即 `authorize_run()` 嵌入 grant、审计 feed 导出为 `policy_revision` 的那个值——"决策 → 策略修订"端到端可溯。
+- 文档：runtime README config 示例加两键、host README 新增 "Policy as code" 小节、governance 概念页记录版本化策略面；API 页 49→51 模块（policy、host_policy）。
+- 版本仍为对齐 `0.1.0.dev0` **未发布**（守就绪门）。
+
+测试规模：全仓 **777 项全绿**（run-contract 41、host 37、runtime 522、durable 65、interop 49、sidecar 51、repo docs 12）。

@@ -34,8 +34,8 @@ API_DIR = ROOT / "docs" / "api"
 # consciously exposed in the API reference (and the freshness check then keeps
 # it there).
 MANIFEST: dict[str, tuple[str, ...]] = {
-    "northstar-run-contract": ("contract", "binding", "adapter", "audit"),
-    "northstar-host": ("authorization", "workspace", "host_audit"),
+    "northstar-run-contract": ("contract", "binding", "adapter", "audit", "policy"),
+    "northstar-host": ("authorization", "workspace", "host_audit", "host_policy"),
     "northstar-durable-run": (
         "durable_contract",
         "event_store",

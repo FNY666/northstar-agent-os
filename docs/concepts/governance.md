@@ -41,6 +41,14 @@ bypass.
 - **Configuration is fail-closed**: unknown `deny_tools` names, unknown tool
   references, bad server names and unreachable MCP servers are configuration
   errors (exit 64 in the runtime CLI) — before anything runs.
+- **Policy documents are versioned**: both policy surfaces — the runtime's
+  `.northstar/config.toml` and the host's `northstar-policy.toml` — speak the
+  canonical schema `northstar.policy.v1` (defined in `northstar-run-contract/
+  policy.py`; the runtime mirrors it to stay dependency-free). An unsupported
+  (future) `schema_version` fails closed instead of being read with today's
+  semantics, and an optional/required `revision` id (no whitespace or
+  slashes, ≤128 chars) is what authorization grants and audit records carry
+  as `policy_revision` — every decision traces to the exact policy revision.
 
 ## Where each component sits
 

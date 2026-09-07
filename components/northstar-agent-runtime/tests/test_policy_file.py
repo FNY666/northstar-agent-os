@@ -335,3 +335,70 @@ class PolicyCliIntegrationTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class PolicySchemaIdentityTests(unittest.TestCase):
+    """schema_version + revision: versioned policy documents (P3-1b)."""
+
+    def setUp(self):
+        self.ws = Path(tempfile.mkdtemp(prefix="nsar-policy-schema-"))
+        self.known_tools = ("Read", "Grep", "LS", "Write", "Edit", "DescribeTools", "Task")
+        self.known_agents = ("evaluator", "explorer", "planner", "general")
+
+    def load(self, text: str):
+        write_policy(self.ws, text)
+        return load_policy_file(self.ws, known_tools=self.known_tools, known_agents=self.known_agents)
+
+    def test_schema_version_is_optional_and_defaults_to_v1(self):
+        policy = self.load('deny_tools = ["Write"]\n')
+        self.assertEqual(policy.schema_version, "northstar.policy.v1")
+        self.assertIsNone(policy.revision)
+
+    def test_explicit_v1_and_revision_parse_and_are_carried(self):
+        policy = self.load(
+            'schema_version = "northstar.policy.v1"\nrevision = "2026-09-07.r3"\ndeny_tools = ["Write"]\n'
+        )
+        self.assertEqual(policy.schema_version, "northstar.policy.v1")
+        self.assertEqual(policy.revision, "2026-09-07.r3")
+        exported = policy.as_dict()
+        self.assertEqual(exported["schema_version"], "northstar.policy.v1")
+        self.assertEqual(exported["revision"], "2026-09-07.r3")
+
+    def test_unsupported_future_schema_fails_closed(self):
+        for version in ("northstar.policy.v2", "northstar.policy.v9"):
+            with self.subTest(version=version):
+                with self.assertRaises(PolicyFileError) as caught:
+                    self.load(f'schema_version = "{version}"\n')
+                message = str(caught.exception)
+                self.assertIn("unsupported policy schema_version", message)
+                self.assertIn("northstar.policy.v1", message)
+
+    def test_schema_version_must_be_a_string(self):
+        with self.assertRaises(PolicyFileError):
+            self.load("schema_version = 1\n")
+
+    def test_revision_must_be_an_audit_safe_identifier(self):
+        for bad in ("two words", "has/slash", "x" * 200, ""):
+            with self.subTest(revision=bad):
+                with self.assertRaises(PolicyFileError):
+                    self.load(f'revision = "{bad}"\n')
+        with self.assertRaises(PolicyFileError):
+            self.load("revision = 7\n")
+
+    def test_dry_run_reports_the_policy_identity(self):
+        write_policy(self.ws, 'revision = "ci.r42"\ndeny_tools = ["Write"]\n')
+        code, out, _ = run_cli(
+            "run", "--workspace", str(self.ws), "--prompt", "hi",
+            "--scripted-text", "ok", "--dry-run",
+        )
+        self.assertEqual(code, 0)
+        self.assertIn("schema=northstar.policy.v1", out)
+        self.assertIn("revision=ci.r42", out)
+
+    def test_dry_run_without_a_policy_mentions_none(self):
+        code, out, _ = run_cli(
+            "run", "--workspace", str(self.ws), "--prompt", "hi",
+            "--scripted-text", "ok", "--dry-run",
+        )
+        self.assertEqual(code, 0)
+        self.assertIn("policy_file=none", out)

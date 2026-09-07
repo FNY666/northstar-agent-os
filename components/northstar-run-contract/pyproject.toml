@@ -30,4 +30,4 @@ dependencies = []
 # Flat modules, installed as top-level names (contract, binding, adapter,
 # audit) to match every existing `import` and `python -m` usage in this
 # repository.
-py-modules = ["adapter", "audit", "binding", "contract"]
+py-modules = ["adapter", "audit", "binding", "contract", "policy"]

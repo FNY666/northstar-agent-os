@@ -1,5 +1,28 @@
 # Northstar Agent OS — initial public component
 
+## Unreleased (eighth batch) — policy as code: schema versioning + revision (P3-1b)
+
+- **Canonical policy identity** in `northstar-run-contract/policy.py`:
+  `northstar.policy.v1` + revision rules (id charset, ≤128 chars); the
+  runtime mirrors the constant locally (dependency-free), both pinned by
+  tests.
+- **Runtime `.northstar/config.toml`** accepts optional `schema_version`
+  (absent → v1) and optional `revision`. An unsupported (future) schema is a
+  fail-closed configuration error naming the supported version — a v2 file
+  can never be read with v1 semantics. `PolicyFile` carries both; dry-run
+  prints `schema=… revision=…`.
+- **Host policy as code**: `host_policy.load_host_policy` reads
+  `northstar-policy.toml` (schema_version optional/v1, revision required,
+  `[actors]` table) into a `HostPolicy`; unknown keys, unsupported schemas,
+  bad revisions and unparseable actors are refused at load time. The file's
+  `revision` is exactly what `authorize_run()` embeds in grants and the audit
+  feed exports as `policy_revision` — decision → policy revision traceability
+  end to end.
+- Docs: runtime README config example gains the two keys; host README gains a
+  "Policy as code" section; governance concept documents the versioned
+  policy surfaces. API pages 49 → 51 modules.
+  Tests: run-contract 34→41, host 28→37, runtime 515→522.
+
 ## Unreleased (seventh batch) — Python SDK embedding surface (T1)
 
 - **Public event vocabulary** (`events.py`): `event_to_dict` shapes + result

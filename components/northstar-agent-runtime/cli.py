@@ -500,7 +500,8 @@ def _run(args: argparse.Namespace) -> int:
         policy_note = "none (--no-policy-file)"
     elif policy is not None:
         policy_note = (
-            f"{policy.source} mode={policy.permission_mode or 'default'} "
+            f"{policy.source} schema={policy.schema_version} revision={policy.revision or 'none'} "
+            f"mode={policy.permission_mode or 'default'} "
             f"deny={','.join(policy.deny_tools) or 'none'} "
             f"read_only={bool(policy.read_only)} budget={policy.max_budget_usd or 'none'} "
             f"max_turns={policy.max_turns or 'none'} halt_on_denial={bool(policy.halt_on_denial)}"
