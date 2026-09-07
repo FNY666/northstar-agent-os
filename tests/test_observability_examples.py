@@ -16,13 +16,31 @@ None of these files can be executed here - the CI host has no Docker and the
 component does not ship exporter code - so the tests pin structure and
 intent rather than runtime behaviour.
 """
-import py_compile
+import json
+import re
+import shutil
+import subprocess
+import sys
+import tempfile
 import unittest
 from pathlib import Path
 
+import py_compile
+
 ROOT = Path(__file__).resolve().parents[1]
 EXAMPLE = ROOT / "examples" / "observability"
+PANEL = ROOT / "examples" / "session-panel"
 INDEX = ROOT / "examples" / "README.md"
+
+
+def _record_types_from_source() -> tuple[str, ...]:
+    """Read the runtime's authoritative record vocabulary (sessions.py)."""
+    source = (
+        ROOT / "components" / "northstar-agent-runtime" / "sessions.py"
+    ).read_text(encoding="utf-8")
+    block = re.search(r"RECORD_TYPES: tuple\[str, ...\] = \((.*?)\)\n", source, re.S)
+    assert block, "RECORD_TYPES block not found in sessions.py"
+    return tuple(re.findall(r'"([a-z_]+)"', block.group(1)))
 
 
 class ObservabilityExampleTests(unittest.TestCase):
@@ -95,3 +113,110 @@ class ObservabilityExampleTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+def _panel_text() -> str:
+    return (PANEL / "session-panel.html").read_text(encoding="utf-8")
+
+
+def _panel_script() -> str:
+    """The inline <script> body (syntax-checked against node when present)."""
+    match = re.search(r"<script>\n(.*)\n</script>", _panel_text(), re.S)
+    assert match, "no inline <script> block found"
+    return match.group(1)
+
+
+class SessionPanelTests(unittest.TestCase):
+    def test_examples_index_lists_the_panel(self):
+        text = INDEX.read_text(encoding="utf-8")
+        self.assertIn("session-panel/README.md", text)
+
+    def test_panel_is_one_self_contained_file_with_no_network_reference(self):
+        text = _panel_text()
+        for marker in (
+            "<link ",  # no stylesheets
+            "<img ",  # no images
+            "<script src",  # no external scripts
+            "http://",  # no URLs at all
+            "https://",
+            "fetch(",
+            "XMLHttpRequest",
+            "WebSocket",
+            "@import",
+        ):
+            with self.subTest(marker=marker):
+                self.assertNotIn(marker, text)
+        self.assertEqual(text.count("<script"), 1, "expect exactly one inline script")
+        self.assertIn("FileReader", text)
+        self.assertIn("readAsText", text)
+
+    def test_panel_renders_the_full_record_vocabulary(self):
+        text = _panel_text()
+        for kind in _record_types_from_source():
+            with self.subTest(kind=kind):
+                self.assertIn(kind, text)
+
+    def test_panel_offers_fingerprint_stats_and_filters(self):
+        text = _panel_text()
+        for marker in (
+            "fnv1a64",  # local fingerprint (non-cryptographic, stated)
+            "local fingerprint",  # and its honest label
+            "errors &amp; denials only",  # filter toggle
+            "denials",  # stat
+            "sessions",  # stat
+        ):
+            with self.subTest(marker=marker):
+                self.assertIn(marker, text)
+
+    def test_panel_readme_claims_only_what_the_file_does(self):
+        text = (PANEL / "README.md").read_text(encoding="utf-8")
+        for marker in (
+            "no server",  # file:// usage
+            "No network",  # honest network guarantee
+            "not a validator",  # viewer/validator boundary stated
+            "not a cryptographic hash",  # fingerprint honesty
+            "sample-session.jsonl",  # sample documented
+        ):
+            with self.subTest(marker=marker):
+                self.assertIn(marker, text)
+
+    def test_sample_transcript_is_a_real_shaped_record_stream(self):
+        kinds = _record_types_from_source()
+        path = PANEL / "sample-session.jsonl"
+        records = []
+        for number, line in enumerate(
+            path.read_text(encoding="utf-8").splitlines(), start=1
+        ):
+            with self.subTest(line=number):
+                record = json.loads(line)
+                records.append(record)
+                self.assertIn(record["type"], kinds)
+                for key in ("index", "ts", "session_id", "type"):
+                    self.assertIn(key, record)
+        types = {record["type"] for record in records}
+        # The sample must show the denial path (that is its pedagogical point)
+        # and end with the run's terminal records.
+        self.assertTrue({"session_start", "result", "session_end"} <= types)
+        self.assertIn("denial", types)
+        # Portability edit is documented in the README, never silent.
+        self.assertNotIn("/home/", path.read_text(encoding="utf-8"))
+
+    def test_inline_javascript_parses_when_node_is_available(self):
+        node = shutil.which("node")
+        if node is None:
+            self.skipTest("node not installed on this host")
+        script = _panel_script()
+        with tempfile.NamedTemporaryFile("w", suffix=".js", delete=False) as handle:
+            handle.write(script)
+            tmp = handle.name
+        try:
+            result = subprocess.run(
+                [node, "--check", tmp],
+                capture_output=True,
+                text=True,
+            )
+        finally:
+            Path(tmp).unlink()
+        self.assertEqual(result.returncode, 0, msg=result.stderr)
+        if result.returncode != 0 and sys.version_info:  # pragma: no cover
+            pass
