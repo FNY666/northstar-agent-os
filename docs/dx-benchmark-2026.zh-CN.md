@@ -514,3 +514,14 @@ Northstar 是"运行时组件集合"，不是一个终端产品。因此对标�
 - 路线图 P3-4 行 ✅；版本仍对齐 `0.1.0.dev0` 未发布。
 
 测试规模：仓库文档 12 → **28**（+16：observability 示例 + 面板套件）；全仓 796 → **812 全绿**（runtime 536 含 skip 4 不变）。
+
+### 2026-09-07（同批追加）— T5 完成（remote-worker ops 实质化，docs phase）
+
+- **supersede 说明**：P3-3 完成块记录的 89/100、ops 33%、四项缺口为本批之前的真值；T5 之后 living 口径为 **94/100（34/36）**、ops **67%（4/6）**、剩余两项实现项——见概念页/评估页/README 现文。
+- **交付（纯文档+测试，无传输代码、无真实主机触碰）**：
+  - `docs/concepts/northstar-remote-transport.md` — 传输 spec：Profile A = 复用 systemd sidecar socket 走 SSH forward（runtime 零改动、无远程命令执行）；Profile B = 容器 fleets 复用 DurableRunner/EventStore/LeaseManager/verifier；词汇表只引真实工件；失败分类复用契约 fallback 状态；T5b 清单定义"done"。
+  - `docs/concepts/northstar-remote-identity.md` — 身份/轮换 story：签发（enrollment secret vs run-scoped binding、policy_revision 钉死）与轮换（双密钥宽限、expiry 兜底、revision 紧急开关），全部挂真实符号；明说无 PKI、无吊销表。
+  - `docs/guides/remote-worker-operations.md` — 部署/监控操作指南：Recipe A 步骤 + 轮换演练、Recipe B 明示未建、三路真实监控信号表（audit feed / OTEL spans / trace_metrics）、告警阈值、事件 runbook、首次验证清单、诚实尾注。
+  - `examples/remote-canary/` — 操作者执行的通道 canary：ssh 可达 → socket forward → 确定性探针（server 在 spawn 前拒绝，无需模型/key），`NS_REAL=1` 可选真实 codex run；探针在 CI 对真实 `sidecar_socket.serve` 回路验证；整脚本需真实主机、按设计永不进 CI。
+- **计分器如实重算**：两条"文档性质"缺口（story、guide）翻转为仓库权威工件检查（状态 marker 本身被 repo 测试钉死，空壳文件翻不了分）；两条实现项缺口保持 MISSING 并写明翻转条件（Profile A helper 存在 + 真实主机 canary 通过）。
+- 测试：仓库文档 28 → **43**；全仓 812 → **827 全绿**；docbuild md 48→56。版本仍对齐 `0.1.0.dev0` 未发布。

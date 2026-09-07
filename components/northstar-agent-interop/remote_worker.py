@@ -28,6 +28,7 @@ from pathlib import Path
 from typing import Callable, Iterable
 
 COMPONENTS = Path(__file__).resolve().parents[2] / "components"
+REPO = Path(__file__).resolve().parents[2]
 AREAS = (
     ("contracts", "versioned run request/receipt"),
     ("host", "default-deny auth, opaque workspace, signed grants"),
@@ -44,6 +45,20 @@ def _text(*parts: str) -> str:
 
 def _exists(*parts: str) -> bool:
     return (COMPONENTS / Path(*parts)).is_file()
+
+
+def _repo_doc(needle: str, *parts: str) -> bool:
+    """True when a repository doc exists and carries a required header marker.
+
+    The flipped ops checks below measure *authoritative artifacts in the
+    repo* (a story page, an operator guide). The status markers they look for
+    are the same ones the repo-level docs tests pin, so a stub file cannot
+    flip a score.
+    """
+    path = REPO.joinpath(*parts)
+    if not path.is_file():
+        return False
+    return needle in path.read_text(encoding="utf-8", errors="replace")
 
 
 def _has(needle: str, haystack: str) -> bool:
@@ -65,7 +80,7 @@ def _schema(name: str, module: str) -> bool:
 # (area, check, explanation) — each True counts toward its area's score.
 # Checks target REAL symbols (verified against the tree); checks whose
 # explanation starts with "MISSING" are expected-gap probes: they are False
-# today and are exactly the P3-3/T5 work items.
+# today and are the remaining implementation work items (T5b).
 CHECKS: list[tuple[str, Callable[[], bool], str]] = [
     # -- contracts -----------------------------------------------------------
     ("contracts", lambda: _has("northstar.run.v1", _text("northstar-run-contract", "contract.py")), "run request schema"),
@@ -105,10 +120,10 @@ CHECKS: list[tuple[str, Callable[[], bool], str]] = [
     # -- ops: remote-worker-specific (expected gaps are the T5 work list) ------
     ("ops", lambda: _has("timeout_seconds", _text("northstar-agent-interop", "process_adapter.py")), "bounded timeout"),
     ("ops", lambda: _has("def _terminate", _text("northstar-agent-interop", "process_adapter.py")), "process-group termination"),
-    ("ops", lambda: False, "MISSING: network transport for a hosted worker"),
-    ("ops", lambda: False, "MISSING: host-side credential issuance + rotation story"),
-    ("ops", lambda: False, "MISSING: real (non-fake) end-to-end remote canary"),
-    ("ops", lambda: False, "MISSING: deployment/monitoring guide for a hosted worker"),
+    ("ops", lambda: _repo_doc("Status: a story, not a system", "docs", "concepts", "northstar-remote-identity.md"), "credential issuance + rotation story (docs/concepts/northstar-remote-identity.md)"),
+    ("ops", lambda: _repo_doc("Status: an operator guide, not a product", "docs", "guides", "remote-worker-operations.md"), "deployment/monitoring operator guide (docs/guides/remote-worker-operations.md)"),
+    ("ops", lambda: False, "MISSING: network transport code for a hosted worker (spec: docs/concepts/northstar-remote-transport.md; flips when the Profile A channel helper exists and a real-host canary passed)"),
+    ("ops", lambda: False, "MISSING: real (non-fake) end-to-end remote canary run (recipe: examples/remote-canary; flips only after an operator run passes on a real host)"),
 ]
 
 def score() -> dict[str, tuple[int, int, list[str]]]:

@@ -105,9 +105,12 @@ independent verifiers, rollback plans and explicit deployment authorization.
 `remote_worker.py --score` is the reproducible P3-3 evaluation — how close
 this repository is to wrapping its sidecar execution model into a remote
 worker, measured statically against the tree (36 criteria across contracts,
-host, durable-run, interop, audit, ops; current: 89/100 — kernel areas fully
-present, the four ops gaps are the T5 work list). Protocol map and decision
-record: `docs/concepts/northstar-remote-worker.md`; full assessment:
+host, durable-run, interop, audit, ops; current: 94/100 — kernel areas
+100%, ops 67%). T5 closed two ops gaps with authoritative artifacts (the
+identity/rotation story and the deployment/monitoring guide); the two
+remaining gaps are implementation-shaped (transport code + a real-host
+canary run) and stay MISSING by design. Protocol map and decision record:
+`docs/concepts/northstar-remote-worker.md`; full assessment:
 `docs/dx-remote-worker-assessment.zh-CN.md`. Run it in CI with
 `python3 -m remote_worker --score`.
 
