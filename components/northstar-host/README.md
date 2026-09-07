@@ -3,6 +3,25 @@
 This component is a local, standard-library host candidate for the boundary
 between a verified Northstar run and a host-owned private workspace.
 
+## Concepts, guides and API reference
+
+- Concepts: [governance and the permission gate](../../docs/concepts/governance.md) ·
+  [handoff and contracts](../../docs/concepts/handoff-and-contracts.md)
+- Guides: [packaging and CI](../../docs/guides/packaging-and-ci.md)
+- API reference: [generated from docstrings](../../docs/api/northstar-host.md)
+
+## Install (pip)
+
+```sh
+pip install ../northstar-run-contract   # declared dependency, from this repository
+pip install .                            # resolves northstar-run-contract
+# or, once published:
+pip install northstar-host
+```
+
+The wheel installs `authorization` and `workspace` as top-level modules; the
+version (`0.1.0.dev0`, unreleased) is declared in `pyproject.toml`.
+
 ## Boundary order
 
 The component keeps four decisions separate:
@@ -34,6 +53,30 @@ signed `northstar.authorization.v1` grant. The grant binds:
 - the exact requested capability set;
 - the policy revision; and
 - an expiry no later than the verified binding expiry.
+
+## Policy as code (`northstar-policy.toml`)
+
+Policies can live in the repository like code: `host_policy.load_host_policy`
+reads a versioned, reviewable document and returns a `HostPolicy`. The
+document is fail-closed — an unsupported `schema_version`, a missing or
+invalid `revision`, an unknown key, or an actor/capability that would not
+parse are all refused at load time:
+
+```toml
+# northstar-policy.toml — policy as code for the host boundary.
+schema_version = "northstar.policy.v1"   # optional; defaults to v1
+revision = "2026-09-07.r1"               # required; flows into every grant and audit record
+
+[actors]
+"actor-001" = ["research", "search"]     # requested capabilities are checked here
+"actor-002" = []                         # listed but empty = deny-all for that actor
+```
+
+The `revision` carried by the document is exactly what `authorize_run()`
+embeds in each signed grant and what the audit feed exports as
+`policy_revision` — a decision can always be traced to the policy revision
+that governed it. Both policy documents speak the canonical
+`northstar.policy.v1` identity from the run contract (`policy.py`).
 
 Authorization verification uses HMAC-SHA256 and constant-time signature
 comparison. It returns no claims when verification fails. Binding and
@@ -102,3 +145,8 @@ The host must keep secrets outside the repository and provide rotation,
 revocation, policy storage, audit minimization, lifecycle cleanup, and any
 additional approval or execution boundaries. Never commit API keys, OAuth
 tokens, private keys, production `.env` files, or user transcripts.
+
+Verified authorization grants export into the repository's canonical NDJSON
+audit feed (`host_audit.py`, envelope `audit.ndjson/1` from the run contract)
+as `authorization_grant` records; see the
+[audit trail concept](../../docs/concepts/audit-trail.md).

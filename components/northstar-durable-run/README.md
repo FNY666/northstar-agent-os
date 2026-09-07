@@ -6,6 +6,25 @@ it proves contracts, event history, checkpoints, leases, per-call action gates,
 independent postcondition verification, and minimal trace metrics on a local
 fixture.
 
+## Concepts, guides and API reference
+
+- Concepts: [audit trail: sessions and durable history](../../docs/concepts/audit-trail.md) ·
+  [governance and the permission gate](../../docs/concepts/governance.md)
+- Guides: [packaging and CI](../../docs/guides/packaging-and-ci.md)
+- API reference: [generated from docstrings](../../docs/api/northstar-durable-run.md)
+
+## Install (pip)
+
+```sh
+pip install ../northstar-run-contract ../northstar-host   # declared dependencies
+pip install .                                              # resolves both
+```
+
+The wheel installs the slice modules (`durable_contract`, `event_store`,
+`action_gateway`, `runner`, `verifier`, `trace_metrics`, `evaluation`) as
+top-level modules; the version (`0.1.0.dev0`, unreleased) is declared in
+`pyproject.toml`.
+
 ## Boundaries
 
 The component separates these stages:
@@ -65,6 +84,11 @@ uses local JSONL and JSON files, caller-registered Python functions, and a
 single-process test harness. It does not prove atomic multi-process claims,
 network isolation, process isolation, lease fencing under races, native Linux
 signal behavior, secret rotation, or production deployment safety.
+
+Event history is exportable into the repository's canonical NDJSON audit feed
+(`durable_audit.py`, envelope `audit.ndjson/1` from the run contract), so the
+prototype's store can be shipped to a SIEM pipeline without changing format
+later; see the [audit trail concept](../../docs/concepts/audit-trail.md).
 
 Before any production integration, add native Linux/VM/container canaries,
 crash and replay tests across process boundaries, durable queue semantics,

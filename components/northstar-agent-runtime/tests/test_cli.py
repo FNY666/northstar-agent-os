@@ -484,5 +484,210 @@ class ModuleEntryPointTests(unittest.TestCase):
         self.assertIn("error_permission_denied", result.stdout)
 
 
+class DoctorTests(unittest.TestCase):
+    """`doctor` is the CLI's environment self-check: local, read-only, no requests."""
+
+    def test_doctor_reports_a_healthy_workspace(self):
+        tmp = Path(tempfile.mkdtemp(prefix="nsar-doctor-"))
+        ws = tmp / "ws"
+        ws.mkdir()
+        code, out, err = run_cli("doctor", "--workspace", str(ws))
+        self.assertEqual(code, 0, err)
+        self.assertIn(f"workspace", out)
+        self.assertIn("[ok]", out)
+        self.assertIn("ready to run", out)
+
+    def test_doctor_flags_a_missing_workspace_and_exits_1(self):
+        code, out, _ = run_cli("doctor", "--workspace", "/nonexistent-northstar-doctor")
+        self.assertEqual(code, 1)
+        self.assertIn("[fail] workspace", out)
+        self.assertIn("does not exist", out)
+        self.assertIn("fix the failed checks", out)
+
+    def test_doctor_accepts_a_broken_script_but_fails_on_it(self):
+        tmp = Path(tempfile.mkdtemp(prefix="nsar-doctor-"))
+        script = tmp / "bad.json"
+        script.write_text("{not json", encoding="utf-8")
+        code, out, _ = run_cli("doctor", "--workspace", str(tmp), "--provider", "scripted", "--script", str(script))
+        self.assertEqual(code, 1)
+        self.assertIn("[fail] script", out)
+
+    def test_doctor_reports_missing_optional_sdks_as_warnings(self):
+        code, out, _ = run_cli("doctor")
+        self.assertEqual(code, 0)  # warnings, not failures
+        self.assertIn("anthropic-sdk", out)
+        self.assertIn("[warn]", out)
+        self.assertIn("session-dir", out)
+
+    def test_doctor_sidecar_checks_a_socket_presence(self):
+        code, out, _ = run_cli("doctor", "--sidecar-socket", "/nonexistent-northstar.sock")
+        self.assertEqual(code, 1)
+        self.assertIn("[fail] sidecar", out)
+        self.assertIn("no socket at", out)
+
+
+class VersionFlagTests(unittest.TestCase):
+    def test_version_flag_prints_a_single_line(self):
+        # argparse's --version action prints and raises SystemExit(0), which is
+        # the process-level behaviour a shell sees; exercise it directly.
+        parser = cli.build_parser()
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            with self.assertRaises(SystemExit) as caught:
+                parser.parse_args(["--version"])
+        self.assertEqual(caught.exception.code, 0)
+        printed = out.getvalue()
+        self.assertIn("northstar-agent-runtime", printed)
+        self.assertIn(cli.__version__, printed)  # the printed version is _version's, never a literal
+        self.assertEqual(len(printed.strip().splitlines()), 1)
+
+    def test_version_prints_to_stdout_and_can_be_parsed(self):
+        parser = cli.build_parser()
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            with self.assertRaises(SystemExit) as caught:
+                parser.parse_args(["--version"])
+        self.assertEqual(caught.exception.code, 0)
+        self.assertTrue(out.getvalue().startswith("northstar-agent-runtime "), out.getvalue())
+
+    def test_version_beats_a_missing_prompt(self):
+        # The version action exits before any prompt validation, so it must work
+        # even when the run flags would be incomplete.
+        parser = cli.build_parser()
+        with contextlib.redirect_stdout(io.StringIO()):
+            with self.assertRaises(SystemExit) as caught:
+                parser.parse_args(["--version"])
+        self.assertEqual(caught.exception.code, 0)
+
+
+class DryRunTests(unittest.TestCase):
+    """`run --dry-run` must validate and describe, never send a request."""
+
+    def setUp(self):
+        self.tmp = Path(tempfile.mkdtemp(prefix="nsar-dryrun-"))
+        self.workspace = Path(self.tmp) / "ws"
+        self.workspace.mkdir()
+
+    def test_dry_run_prints_the_plan_and_exits_zero(self):
+        code, out, err = run_cli("run", "--workspace", str(self.workspace), "--prompt", "hi",
+                                 "--scripted-text", "reply", "--dry-run")
+        self.assertEqual(code, 0, err)
+        self.assertIn("provider=scripted model=claude-sonnet-4-5", out)
+        self.assertIn("permission_mode=default", out)
+        self.assertIn("allowed_tools=(none)", out)
+        self.assertIn("max_turns=25", out)
+        self.assertIn("dry-run: configuration is valid; no request was sent", out)
+        # Dry run reports, it never runs: no result line, no session id.
+        self.assertNotIn("[success]", out)
+        self.assertNotIn("session=ns-", out)
+
+    def test_dry_run_respects_policy_flags(self):
+        code, out, _ = run_cli("run", "--workspace", str(self.workspace), "--prompt", "hi",
+                               "--scripted-text", "reply", "--read-only", "--deny-tool", "Grep", "--dry-run")
+        self.assertEqual(code, 0)
+        self.assertIn("disallowed_tools=Grep,Write,Edit", out)
+        self.assertIn("allowed_tools=(none)", out)
+
+    def test_dry_run_shows_the_estimated_cost_line(self):
+        code, out, _ = run_cli("run", "--workspace", str(self.workspace), "--prompt", "hi",
+                               "--scripted-text", "reply", "--dry-run")
+        self.assertEqual(code, 0)
+        self.assertIn("estimated cost:", out)
+
+    def test_dry_run_never_constructs_the_provider(self):
+        # anthropic is not installed here; a dry run must not try to build it.
+        code, out, err = run_cli("run", "--workspace", str(self.workspace), "--prompt", "hi",
+                                 "--provider", "anthropic", "--dry-run")
+        self.assertEqual(code, 0, err)
+        self.assertIn("provider=anthropic", out)
+
+    def test_dry_run_with_an_agent_lists_its_tools_and_ceilings(self):
+        code, out, _ = run_cli("run", "--workspace", str(self.workspace), "--prompt", "hi",
+                               "--scripted-text", "reply", "--agent", "explorer", "--dry-run")
+        self.assertEqual(code, 0)
+        self.assertIn("agent 'explorer'", out)
+        self.assertIn("tools=", out)
+
+    def test_a_missing_prompt_still_fails_before_dry_run(self):
+        code, out, err = run_cli("run", "--workspace", str(self.workspace), "--dry-run")
+        self.assertEqual(code, USAGE_ERROR)
+        self.assertIn("no prompt", err)
+
+
+class SessionViewTests(unittest.TestCase):
+    """`sessions list/show` is the read-back half of the audit transcript."""
+
+    def setUp(self):
+        self.tmp = Path(tempfile.mkdtemp(prefix="nsar-sview-"))
+        self.workspace = Path(self.tmp) / "ws"
+        self.workspace.mkdir()
+        (self.workspace / "a.txt").write_text("alpha\n", encoding="utf-8")
+        self.session_dir = str(self.tmp / "sessions")
+        script = self.workspace / "script.json"
+        script.write_text(
+            json.dumps([{"tool": {"name": "Read", "input": {"path": "a.txt"}, "id": "v1"}}, {"text": "read it"}]),
+            encoding="utf-8",
+        )
+        code, _, err = run_cli("run", "--workspace", str(self.workspace), "--prompt", "read",
+                               "--script", str(script), "--session-dir", self.session_dir, "--quiet")
+        self.assertEqual(code, 0, err)
+
+    def find_session(self) -> str:
+        code, out, _ = run_cli("sessions", "list", "--session-dir", self.session_dir)
+        self.assertEqual(code, 0)
+        line = next(item for item in out.splitlines() if item.strip())
+        return line.split()[0]
+
+    def test_sessions_list_shows_the_transcript(self):
+        session = self.find_session()
+        self.assertTrue(session.startswith("ns-"), session)
+
+    def test_sessions_show_renders_the_timeline(self):
+        session = self.find_session()
+        code, out, err = run_cli("sessions", "show", "--session-dir", self.session_dir, session)
+        self.assertEqual(code, 0, err)
+        self.assertIn("session_start", out)
+        self.assertIn("user_prompt", out)
+        self.assertIn("\u2192 Read", out, "the tool call renders with its input")
+        self.assertIn("tool_result", out)
+        self.assertIn("\u2190 ok: alpha", out, "the tool result renders with its outcome")
+        self.assertIn("result", out)
+        self.assertIn("session_end", out)
+
+    def test_sessions_show_json_exports_raw_records(self):
+        session = self.find_session()
+        code, out, _ = run_cli("sessions", "show", "--session-dir", self.session_dir, session, "--json")
+        self.assertEqual(code, 0)
+        records = json.loads(out)
+        self.assertIsInstance(records, list)
+        self.assertTrue(any(r.get("type") == "result" for r in records))
+
+    def test_sessions_show_missing_session_is_an_error(self):
+        code, out, err = run_cli("sessions", "show", "--session-dir", self.session_dir, "ns-does-not-exist")
+        self.assertEqual(code, 1)
+        self.assertIn("no transcript", err)
+
+    def test_sessions_without_a_subcommand_is_a_usage_error(self):
+        code, _, err = run_cli("sessions")
+        self.assertEqual(code, USAGE_ERROR)
+        self.assertIn("sessions: pass a subcommand", err)
+
+    def test_sessions_list_without_a_directory_is_argparse_business(self):
+        with self.assertRaises(SystemExit) as caught:
+            build_parser().parse_args(["sessions", "list"])
+        self.assertEqual(caught.exception.code, 2)
+
+    def test_sessions_list_missing_directory_is_an_error(self):
+        code, _, err = run_cli("sessions", "list", "--session-dir", "/nonexistent-ns-sessions")
+        self.assertEqual(code, 1)
+        self.assertIn("no such directory", err)
+
+    def test_sessions_list_empty_directory_is_an_error(self):
+        empty = str(Path(tempfile.mkdtemp(prefix="nsar-sview-empty-")))
+        code, _, err = run_cli("sessions", "list", "--session-dir", empty)
+        self.assertEqual(code, 1)
+        self.assertIn("no transcripts", err)
+
+
 if __name__ == "__main__":
     unittest.main()

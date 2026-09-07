@@ -34,7 +34,7 @@ GUARDS: list[tuple[str, str, list[tuple[str, str]], str, str]] = [
     ),
     (
         "tool paths are contained in the workspace after resolving symlinks",
-        "tools.py",
+        "tools/__init__.py",
         [("    def _within(self, resolved: Path) -> bool:\n        try:",
           "    def _within(self, resolved: Path) -> bool:\n        return True\n        try:")],
         "test_tools*",

@@ -1,0 +1,85 @@
+# Build and publish a Northstar Agent OS release.
+
+# Triggered by pushing a tag: git tag v0.1.0 && git push origin v0.1.0
+# The full test suite runs on every push (including tag pushes) in test.yml;
+# this workflow enforces the release readiness gate on top: a dev-suffixed
+# version is refused (no premature releases), the tag must equal the aligned
+# component version, and the documentation build must be fresh. Only then are
+# wheels built and attached to a GitHub Release. Idempotent: if the release
+# already exists (e.g. created manually), this job verifies it and exits
+# without touching it.
+
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    name: Readiness gate, build wheels, create release
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Readiness gate
+        # The "release only when it is ready" bar: refuse pre-release versions,
+        # refuse a tag that does not match the aligned version, and refuse a
+        # stale documentation build. Everything else (unit tests, guards,
+        # packaging smokes) already ran green on this push in test.yml.
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import re, tomllib
+          from pathlib import Path
+          import os
+          tag = os.environ["GITHUB_REF_NAME"]
+          versions = {}
+          for component in ("northstar-run-contract", "northstar-host",
+                            "northstar-durable-run", "northstar-agent-interop",
+                            "northstar-agent-runtime"):
+              pyproject = tomllib.loads((Path("components") / component / "pyproject.toml").read_text())
+              versions[component] = pyproject["project"]["version"]
+          if len(set(versions.values())) != 1:
+              raise SystemExit(f"readiness gate: component versions drifted: {versions}")
+          version = next(iter(set(versions.values())))
+          if re.search(r"\.dev\d*", version):
+              raise SystemExit(
+                  f"readiness gate: refusing to release pre-release version {version!r}; "
+                  "drop the .dev suffix only when the release checklist in "
+                  "docs/guides/releasing-and-versioning.md is fully green"
+              )
+          if tag != "v" + version:
+              raise SystemExit(f"readiness gate: tag {tag!r} does not match the aligned version v{version}")
+          print(f"readiness gate passed: releasing {version}")
+          PY
+      - name: Documentation verify
+        run: python3 tests/docbuild.py verify
+      - name: Build wheels
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+          for component in northstar-run-contract northstar-host northstar-durable-run \
+                            northstar-agent-interop northstar-agent-runtime; do
+            python -m pip wheel --no-deps --wheel-dir dist "components/$component"
+          done
+          ls -1 dist
+      - name: Create or verify the GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          if gh release view "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo "release $GITHUB_REF_NAME already exists; leaving it untouched"
+            exit 0
+          fi
+          gh release create "$GITHUB_REF_NAME" dist/*.whl \
+            --repo "$GITHUB_REPOSITORY" \
+            --title "Northstar Agent OS $GITHUB_REF_NAME" \
+            --generate-notes

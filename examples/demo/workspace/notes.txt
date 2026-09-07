@@ -1,0 +1,4 @@
+# Northstar Agent OS — demo workspace
+
+This directory is the workspace for the offline demo. The agent's `Read` tool is
+confined here, so the file you are reading is the only one it can see.
