@@ -29,6 +29,7 @@ northstar-durable-run = "cli:main"
 
 [tool.setuptools]
 py-modules = [
+    "_durable_lock",
     "action_gateway",
     "cli",
     "durable_audit",

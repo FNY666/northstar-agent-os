@@ -15,6 +15,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable
 
+from _durable_lock import file_lock
 from durable_contract import (
     RunContract,
     assert_transition,
@@ -119,7 +120,11 @@ class LeaseManager:
     def __init__(self, path: str | Path):
         self.path = Path(path).absolute()
 
-    def _read(self) -> dict[str, Any] | None:
+    @property
+    def _lock_path(self) -> Path:
+        return self.path.with_name(self.path.name + ".lock")
+
+    def _read_unlocked(self) -> dict[str, Any] | None:
         if not self.path.exists():
             return None
         try:
@@ -134,7 +139,11 @@ class LeaseManager:
             raise ValueError("lease expires_at is invalid")
         return value
 
-    def _write(self, value: dict[str, Any]) -> None:
+    def _read(self) -> dict[str, Any] | None:
+        with file_lock(self._lock_path, exclusive=False):
+            return self._read_unlocked()
+
+    def _write_unlocked(self, value: dict[str, Any]) -> None:
         self.path.parent.mkdir(parents=True, exist_ok=True)
         fd, temporary = tempfile.mkstemp(
             prefix=self.path.name + ".", dir=str(self.path.parent)
@@ -160,46 +169,60 @@ class LeaseManager:
             raise ValueError("now must be a positive integer")
         if not isinstance(ttl_seconds, int) or isinstance(ttl_seconds, bool) or ttl_seconds <= 0:
             raise ValueError("ttl_seconds must be a positive integer")
-        current = self._read()
-        if current is not None and now < current["expires_at"]:
-            raise ValueError("lease is held by another active owner")
-        lease = {"owner_id": owner_id, "expires_at": now + ttl_seconds}
-        self._write(lease)
-        return lease
+        with file_lock(self._lock_path, exclusive=True):
+            current = self._read_unlocked()
+            if current is not None and now < current["expires_at"]:
+                raise ValueError("lease is held by another active owner")
+            lease = {"owner_id": owner_id, "expires_at": now + ttl_seconds}
+            self._write_unlocked(lease)
+            return lease
 
     def assert_valid(self, owner_id: str, *, now: int) -> dict[str, Any]:
         _require_id(owner_id, "owner_id")
         if not isinstance(now, int) or isinstance(now, bool):
             raise ValueError("now must be an integer")
-        current = self._read()
-        if current is None:
-            raise ValueError("lease does not exist")
-        if current["owner_id"] != owner_id:
-            raise ValueError("lease owner does not match")
-        if now >= current["expires_at"]:
-            raise ValueError("lease has expired")
-        return current
+        with file_lock(self._lock_path, exclusive=False):
+            current = self._read_unlocked()
+            if current is None:
+                raise ValueError("lease does not exist")
+            if current["owner_id"] != owner_id:
+                raise ValueError("lease owner does not match")
+            if now >= current["expires_at"]:
+                raise ValueError("lease has expired")
+            return current
 
     def heartbeat(self, owner_id: str, *, now: int, ttl_seconds: int) -> dict[str, Any]:
-        self.assert_valid(owner_id, now=now)
+        _require_id(owner_id, "owner_id")
+        if not isinstance(now, int) or isinstance(now, bool):
+            raise ValueError("now must be an integer")
         if not isinstance(ttl_seconds, int) or isinstance(ttl_seconds, bool) or ttl_seconds <= 0:
             raise ValueError("ttl_seconds must be a positive integer")
-        lease = {"owner_id": owner_id, "expires_at": now + ttl_seconds}
-        self._write(lease)
-        return lease
+        with file_lock(self._lock_path, exclusive=True):
+            current = self._read_unlocked()
+            if current is None:
+                raise ValueError("lease does not exist")
+            if current["owner_id"] != owner_id:
+                raise ValueError("lease owner does not match")
+            if now >= current["expires_at"]:
+                raise ValueError("lease has expired")
+            lease = {"owner_id": owner_id, "expires_at": now + ttl_seconds}
+            self._write_unlocked(lease)
+            return lease
 
     def release(self, owner_id: str) -> None:
-        current = self._read()
-        if current is None:
-            return
-        if current["owner_id"] != owner_id:
-            raise ValueError("lease owner does not match")
-        try:
-            self.path.unlink()
-        except FileNotFoundError:
-            return
-        except OSError as error:
-            raise ValueError("lease could not be released") from error
+        _require_id(owner_id, "owner_id")
+        with file_lock(self._lock_path, exclusive=True):
+            current = self._read_unlocked()
+            if current is None:
+                return
+            if current["owner_id"] != owner_id:
+                raise ValueError("lease owner does not match")
+            try:
+                self.path.unlink()
+            except FileNotFoundError:
+                return
+            except OSError as error:
+                raise ValueError("lease could not be released") from error
 
 
 class DurableRunner:

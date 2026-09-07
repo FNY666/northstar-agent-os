@@ -8,6 +8,7 @@ import tempfile
 from pathlib import Path
 from typing import Any
 
+from _durable_lock import file_lock
 from durable_contract import (
     EventContract,
     RunContract,
@@ -167,50 +168,60 @@ class EventStore:
             self._path.name + ".checkpoint.json"
         )
 
-    def _events(self) -> list[EventContract]:
+    @property
+    def _lock_path(self) -> Path:
+        return self._path.with_name(self._path.name + ".lock")
+
+    def _events_unlocked(self) -> list[EventContract]:
         events = _read_lines(self._path)
         _derive(events) if events else None
         return events
 
+    def _events(self) -> list[EventContract]:
+        with file_lock(self._lock_path, exclusive=False):
+            return self._events_unlocked()
+
     def append_event(self, event: EventContract) -> EventContract:
         if not isinstance(event, EventContract):
             raise ValueError("event must be an EventContract")
-        events = self._events()
-        identity = _stream_identity(events)
-        if identity is not None:
-            for field, expected in identity.items():
-                if getattr(event, field) != expected:
-                    raise ValueError(f"event {field} does not match event stream")
+        with file_lock(self._lock_path, exclusive=True):
+            events = self._events_unlocked()
+            identity = _stream_identity(events)
+            if identity is not None:
+                for field, expected in identity.items():
+                    if getattr(event, field) != expected:
+                        raise ValueError(f"event {field} does not match event stream")
 
-        for existing in events:
-            if existing.idempotency_key == event.idempotency_key:
-                if existing.canonical_json() == event.canonical_json():
-                    return existing
-                raise ValueError("idempotency key conflicts with existing event")
-            if existing.event_id == event.event_id:
-                raise ValueError("event_id conflicts with existing event")
+            for existing in events:
+                if existing.idempotency_key == event.idempotency_key:
+                    if existing.canonical_json() == event.canonical_json():
+                        return existing
+                    raise ValueError("idempotency key conflicts with existing event")
+                if existing.event_id == event.event_id:
+                    raise ValueError("event_id conflicts with existing event")
 
-        expected_sequence = len(events) + 1
-        if event.sequence != expected_sequence:
-            raise ValueError("event sequence must be the next contiguous sequence")
-        candidate = events + [event]
-        _derive(candidate)
-        self._path.parent.mkdir(parents=True, exist_ok=True)
-        line = _canonical_json(event.to_dict()) + b"\n"
-        try:
-            with self._path.open("ab") as stream:
-                stream.write(line)
-                stream.flush()
-                os.fsync(stream.fileno())
-        except OSError as error:
-            raise ValueError("event could not be appended") from error
-        return event
+            expected_sequence = len(events) + 1
+            if event.sequence != expected_sequence:
+                raise ValueError("event sequence must be the next contiguous sequence")
+            candidate = events + [event]
+            _derive(candidate)
+            self._path.parent.mkdir(parents=True, exist_ok=True)
+            line = _canonical_json(event.to_dict()) + b"\n"
+            try:
+                with self._path.open("ab") as stream:
+                    stream.write(line)
+                    stream.flush()
+                    os.fsync(stream.fileno())
+            except OSError as error:
+                raise ValueError("event could not be appended") from error
+            return event
 
     def read_history(self, run_id: str) -> list[EventContract]:
-        events = self._events()
-        if events and events[0].run_id != run_id:
-            raise ValueError("requested run_id does not match event history")
-        return events
+        with file_lock(self._lock_path, exclusive=False):
+            events = self._events_unlocked()
+            if events and events[0].run_id != run_id:
+                raise ValueError("requested run_id does not match event history")
+            return events
 
     def derive_state(self, run_id: str) -> dict[str, Any]:
         events = self.read_history(run_id)
@@ -220,33 +231,42 @@ class EventStore:
         return self.derive_state(run_id)
 
     def create_checkpoint(self, run_id: str) -> dict[str, Any]:
-        state = self.derive_state(run_id)
-        checkpoint = {
-            "schema_version": CHECKPOINT_SCHEMA_VERSION,
-            "run_id": run_id,
-            "sequence": state["sequence"],
-            "state": state,
-            "state_digest": _digest(state),
-        }
-        self._checkpoint_path.parent.mkdir(parents=True, exist_ok=True)
-        fd, temporary = tempfile.mkstemp(
-            prefix=self._checkpoint_path.name + ".",
-            dir=str(self._checkpoint_path.parent),
-        )
-        try:
-            with os.fdopen(fd, "w", encoding="utf-8") as stream:
-                json.dump(checkpoint, stream, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
-                stream.write("\n")
-                stream.flush()
-                os.fsync(stream.fileno())
-            os.replace(temporary, self._checkpoint_path)
-        except OSError as error:
+        # Hold the same exclusive stream lock while deriving and publishing the
+        # checkpoint, so an append cannot make the sidecar stale between those
+        # two operations.
+        with file_lock(self._lock_path, exclusive=True):
+            events = self._events_unlocked()
+            if not events:
+                raise ValueError("run has no event history")
+            if events[0].run_id != run_id:
+                raise ValueError("requested run_id does not match event history")
+            state = _derive(events)
+            checkpoint = {
+                "schema_version": CHECKPOINT_SCHEMA_VERSION,
+                "run_id": run_id,
+                "sequence": state["sequence"],
+                "state": state,
+                "state_digest": _digest(state),
+            }
+            self._checkpoint_path.parent.mkdir(parents=True, exist_ok=True)
+            fd, temporary = tempfile.mkstemp(
+                prefix=self._checkpoint_path.name + ".",
+                dir=str(self._checkpoint_path.parent),
+            )
             try:
-                os.unlink(temporary)
-            except OSError:
-                pass
-            raise ValueError("checkpoint could not be persisted") from error
-        return checkpoint
+                with os.fdopen(fd, "w", encoding="utf-8") as stream:
+                    json.dump(checkpoint, stream, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+                    stream.write("\n")
+                    stream.flush()
+                    os.fsync(stream.fileno())
+                os.replace(temporary, self._checkpoint_path)
+            except OSError as error:
+                try:
+                    os.unlink(temporary)
+                except OSError:
+                    pass
+                raise ValueError("checkpoint could not be persisted") from error
+            return checkpoint
 
     def _validate_checkpoint(
         self, run_id: str, checkpoint: Any, current: dict[str, Any]

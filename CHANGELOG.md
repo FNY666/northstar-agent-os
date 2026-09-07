@@ -1,5 +1,16 @@
 # Northstar Agent OS — initial public component
 
+## Unreleased (seventeenth batch) — local durable persistence fencing (T10)
+
+- EventStore append/read/checkpoint operations now use a POSIX advisory lock
+  sidecar; concurrent idempotent writers serialize against one validated event
+  stream instead of racing on sequence numbers.
+- LeaseManager acquire/assert/heartbeat/release operations use their own lock
+  sidecar and retain atomic temporary-file replacement for the lease payload.
+- Added a forked-process concurrency test for idempotent event append. This is
+  local filesystem fencing only, not a distributed lock service or remote
+  worker claim protocol; the batch remains unreleased.
+
 ## Unreleased (sixteenth batch) — local durable-run control surface (T9)
 
 - Added the `northstar-durable-run` CLI with read-only `status`, `history`, and

@@ -1,5 +1,6 @@
 import hashlib
 import json
+import multiprocessing
 import sys
 import tempfile
 import unittest
@@ -33,6 +34,12 @@ def event(**changes):
     value = dict(BASE_EVENT)
     value.update(changes)
     return EventContract.from_dict(value)
+
+
+def append_event_in_process(path, barrier):
+    store = EventStore(path)
+    barrier.wait(timeout=10)
+    store.append_event(event())
 
 
 class EventStoreTests(unittest.TestCase):
@@ -72,6 +79,23 @@ class EventStoreTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             self.store.append_event(conflict)
         self.assertEqual(len(self.store.read_history("run-001")), 1)
+
+    def test_concurrent_idempotent_append_is_serialized_by_stream_lock(self):
+        if "fork" not in multiprocessing.get_all_start_methods():
+            self.skipTest("process locking test requires fork")
+        context = multiprocessing.get_context("fork")
+        barrier = context.Barrier(2)
+        processes = [
+            context.Process(target=append_event_in_process, args=(str(self.path), barrier))
+            for _ in range(2)
+        ]
+        for process in processes:
+            process.start()
+        for process in processes:
+            process.join(timeout=10)
+        self.assertTrue(all(process.exitcode == 0 for process in processes))
+        self.assertEqual(self.store.read_history("run-001"), [event()])
+        self.assertTrue(self.path.with_name("events.jsonl.lock").exists())
 
     def test_append_rejects_sequence_gaps_duplicates_and_cross_run_history(self):
         self.store.append_event(event())

@@ -46,9 +46,10 @@ output cannot alter the registry, grant, or scope.
 
 `EventStore` treats the JSONL history as the source of truth. Checkpoints carry
 a state digest and sequence and are accepted only when they match the current
-history. `DurableRunner` uses an owner-bound expiring execution lease and
-attempt-specific action keys so a resumed fixture can avoid repeating an
-idempotent side effect.
+history. Event append and lease mutation use POSIX advisory lock sidecars so
+same-run local processes serialize idempotent writes. `DurableRunner` uses an
+owner-bound expiring execution lease and attempt-specific action keys so a
+resumed fixture can avoid repeating an idempotent side effect.
 
 ## Long-task lifecycle
 
@@ -144,9 +145,10 @@ PYTHONPATH=components/northstar-durable-run \
 This is not a production scheduler, sandbox, VM, container runtime, browser
 profile manager, distributed queue, or complete Agent OS. The first prototype
 uses local JSONL and JSON files, caller-registered Python functions, and a
-single-process test harness. It does not prove atomic multi-process claims,
-network isolation, process isolation, lease fencing under races, native Linux
-signal behavior, secret rotation, or production deployment safety.
+small local test harness. POSIX advisory locks serialize the event/lease files,
+but this does not prove atomic multi-process action claims, network isolation,
+process isolation, lease fencing across hosts, native Linux signal behavior,
+secret rotation, or production deployment safety.
 
 Event history is exportable into the repository's canonical NDJSON audit feed
 (`durable_audit.py`, envelope `audit.ndjson/1` from the run contract), so the

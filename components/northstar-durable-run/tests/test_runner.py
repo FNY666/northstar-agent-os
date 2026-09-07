@@ -39,6 +39,7 @@ class LeaseManagerTests(unittest.TestCase):
     def test_acquire_heartbeat_and_release_are_owner_bound(self):
         lease = self.leases.acquire("worker-a", now=100, ttl_seconds=20)
         self.assertEqual(lease, {"owner_id": "worker-a", "expires_at": 120})
+        self.assertTrue(Path(str(self.path) + ".lock").exists())
         self.assertEqual(
             self.leases.heartbeat("worker-a", now=110, ttl_seconds=20),
             {"owner_id": "worker-a", "expires_at": 130},
