@@ -12,9 +12,10 @@
   audit trail. The manifest remains an observation, not host attestation or a
   permission grant.
 - Added artifact contract and signed runtime integration tests, API coverage,
-  and documentation. Runtime now has 578 tests and the repository has 887 tests
-  (4 optional OTel skips); this batch remains unreleased with no tag, GitHub
-  Release, or PyPI/npm publication.
+  and documentation. Runtime now has 578 tests (574 pass, 4 optional OTel
+  skips) and the repository has 887 tests (883 pass, 4 optional OTel skips);
+  this batch remains unreleased with no tag, GitHub Release, or PyPI/npm
+  publication.
 
 ## Unreleased (twentieth batch) — declared runtime mutation impact sets (T13)
 
@@ -25,9 +26,9 @@
   declaration source and keys. Legacy built-ins remain compatible; undeclared
   hidden side effects are still not claimed as covered.
 - Added registry introspection, validation, and end-to-end custom-tool receipt
-  tests. Runtime now has 574 tests and the repository has 883 tests (4 optional
-  OTel skips); this batch remains unreleased with no tag, GitHub Release, or
-  PyPI/npm publication.
+  tests. Runtime now has 574 tests (570 pass, 4 optional OTel skips) and the
+  repository has 883 tests (879 pass, 4 optional OTel skips); this batch remains
+  unreleased with no tag, GitHub Release, or PyPI/npm publication.
 
 ## Unreleased (nineteenth batch) — offline durable-run receipt verification (T12)
 

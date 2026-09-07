@@ -792,8 +792,9 @@ T13 承接 T6/T7 对 workspace/action receipt 的诚实边界：只要工具声�
 - 这不是影响集权限或 artifact manifest：工具仍须通过 permission gate，声明
   只扩大 receipt 的观测范围；隐藏网络、数据库或未声明文件副作用仍不被声称
   已捕获。
-- 验证：runtime **574 项测试全部通过**；全仓 `make test` 为 **883 项测试、
-  879 项通过、4 项可选 OTel skip**；API docbuild freshness 与链接检查通过。
+- 验证：runtime **574 项测试（570 项通过、4 项可选 OTel skip）**；全仓
+  `make test` 为 **883 项测试、879 项通过、4 项可选 OTel skip**；API docbuild
+  freshness 与链接检查通过。
 
 T13 仍是 Unreleased；没有创建 tag、GitHub Release，也没有发布到 PyPI/npm。
 
@@ -812,7 +813,8 @@ artifact manifest，runtime 会严格验证并把它纳入 action receipt，但�
   不会静默写入审计记录。
 - 该 manifest 不是权限声明，不替代 `ToolSpec.affected_input_keys` 的 workspace
   pre/post capture，也不声称捕获工具隐藏的网络、数据库或未声明文件副作用。
-- 验证：runtime **578 项测试全部通过**；全仓 `make test` 为 **887 项测试、
-  883 项通过、4 项可选 OTel skip**；API docbuild freshness 与链接检查通过。
+- 验证：runtime **578 项测试（574 项通过、4 项可选 OTel skip）**；全仓
+  `make test` 为 **887 项测试、883 项通过、4 项可选 OTel skip**；API docbuild
+  freshness 与链接检查通过。
 
 T14 仍是 Unreleased；没有创建 tag、GitHub Release，也没有发布到 PyPI/npm。
