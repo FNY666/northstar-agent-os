@@ -29,7 +29,7 @@ This repository currently publishes six complementary components:
 
 The Run Contract separates structural validation, host-key authentication, authorization, execution, and postcondition verification. The host and durable-run candidates demonstrate these boundaries locally; neither claims production identity, isolation, or deployment readiness.
 
-The agent runtime is deliberately split from execution in the same way: a `Read`/`Grep`/`LS`/`Write`/`Edit` tool set is confined to a workspace root, and the optional `CodexReadOnly` tool exists only when a sidecar socket path is supplied. Denials, exhausted ceilings, provider failures, and hook vetos are all reported as events in the run's stream, and every run ends with exactly one `ResultMessage` whose subtype says why.
+The agent runtime is deliberately split from execution in the same way: a `Read`/`Grep`/`LS`/`Write`/`Edit` tool set is confined to a workspace root, and the optional `CodexReadOnly` tool exists only when a sidecar socket path is supplied. Denials, exhausted ceilings, provider failures, and hook vetos are all reported as events in the run's stream, and every run ends with exactly one `ResultMessage` whose subtype says why. Repository context (`AGENTS.md`), policy-as-code, file-defined subagents, portable `SKILL.md` packages, and a minimal governed MCP stdio client are available in the runtime; skills are validated and read-only, and no extension can bypass the gate.
 
 The repository also includes its deterministic tests, a systemd hardening template, a conservative installer, and a rollback script.
 
@@ -83,7 +83,8 @@ python3 -m cli run --workspace . --provider anthropic --prompt "summarise README
 ```
 
 `make test` runs every component's suite and the repository documentation tests
-(600+ tests, all offline).
+(838 tests at the current snapshot, all offline; four optional OpenTelemetry
+checks are skipped when that extra is not installed).
 
 ### Sidecar installation
 
@@ -141,7 +142,7 @@ Northstar is for developers and operators building local or self-hosted AI cowor
 - It is not a general shell execution API.
 - It does not by itself authorize callers, isolate every run, or propagate parent cancellation.
 - It does not include Codex credentials or provide a Codex account.
-- The agent runtime does not implement MCP, and its live Anthropic calls are unverified in this repository's sandbox (no credentials): request building and response normalisation are covered against an injected fake client.
+- The agent runtime's MCP support is deliberately a minimal stdio client (tool discovery/calls only; no sampling, roots, prompts, reconnect, or vendor server validation). Its live Anthropic calls are unverified in this repository's sandbox (no credentials): request building and response normalisation are covered against an injected fake client.
 
 ## Relationship to OpenBot
 

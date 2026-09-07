@@ -43,6 +43,14 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--script", default="", help="scripted-provider script to validate (JSON array of turns)")
     parser.add_argument("--sidecar-socket", default="", help="sidecar socket path to check for presence")
     parser.add_argument("--session-dir", default="", help="session transcript directory to check for creatability")
+    parser.add_argument(
+        "--skills-dir",
+        dest="skills_dirs",
+        action="append",
+        default=[],
+        metavar="PATH",
+        help="workspace-relative skill root to inspect (repeatable; default: .northstar/skills and .agents/skills)",
+    )
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -153,7 +161,7 @@ def _checks(args: argparse.Namespace) -> list[Finding]:
                 else:
                     findings.append(Finding("agent-files", "ok", "none (.northstar/agents/*.md absent)"))
             try:
-                skills = discover_skills(workspace)
+                skills = discover_skills(workspace, directories=getattr(args, "skills_dirs", None) or None)
             except SkillError as error:
                 findings.append(Finding("skills", "fail", str(error)))
                 skills = ()

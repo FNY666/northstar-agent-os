@@ -621,7 +621,7 @@ Response framing the runtime cannot trust.
 
 Source: `components/northstar-agent-runtime/skills.py`
 
-Workspace Agent Skills discovery (progressive disclosure, read-only).
+Standards-compatible workspace Agent Skills (progressive disclosure).
 
 #### `SkillError`
 
@@ -629,13 +629,25 @@ A workspace skill is unusable. Message is operator-facing.
 
 #### `Skill`
 
-One discovered skill package: identity plus the path to read.
+Validated skill metadata plus the path to its on-demand instructions.
 
+- `root()`
+  - The skill package directory containing ``SKILL.md``.
 #### `skills_directory(workspace: str | Path)`
 
-#### `discover_skills(workspace: str | Path)`
+Return Northstar's historical skill directory.
 
-Discover skills under the workspace root; errors are operator-facing.
+#### `skill_directories(workspace: str | Path, directories: Sequence[str | Path] | None=None)`
+
+Resolve default or explicit skill directories within ``workspace``.
+
+#### `discover_skills(workspace: str | Path, *, directories: Sequence[str | Path] | None=None)`
+
+Discover and validate skills under the workspace root.
+
+#### `skill_as_dict(skill: Skill, workspace: str | Path)`
+
+Return a stable JSON-ready metadata record for ``skills list/check``.
 
 #### `skill_listing(skills: Iterable[Skill], workspace: str | Path)`
 

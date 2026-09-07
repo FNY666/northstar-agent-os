@@ -3,24 +3,34 @@
 > 编制日期：2026-09-07 ｜ 范围：开发者体验（Developer Experience）维度
 > 方法：仓库本地实测（代码阅读 + 全部测试运行）+ 公开资料调研（截至 2026-09-07）
 > 目标：找出 Northstar 与全球顶级 agent 工具在 DX 上的差距，给出可执行的分阶段改进路线图。
-> 说明：本报告是分析文档，不含代码改动；路线图中的条目均可作为后续实施任务清单。
+> 说明：本页保留分析基线，同时记录已经落地的批次；代码事实以当前 checkout、测试和后文最新 ledger 为准。
 
 ---
 
+> **阅读口径（2026-09-07 当前真值）**：本页保留了早期差距基线与实施 ledger，
+> 因而 §0–§8 中的“现状”段落有历史意义，不应覆盖后面的复评。当前 checkout
+> 的权威快照是：`make test` **838 项通过**（runtime 544，含 4 项因可选
+> OpenTelemetry 依赖缺失而跳过；其余组件与文档测试全绿）；五个可安装组件仍为
+> 对齐的 `0.1.0.dev0`，没有发布 tag。当前 Agent Skills 已支持
+> `.northstar/skills` + portable `.agents/skills`、标准 frontmatter、`skills
+> check/list` 与 fail-closed 路径校验；MCP 仍是最小 stdio 工具客户端，而不是
+> 完整的远程 MCP/插件市场。若只想看“现在还差什么”，直接跳到 **§10.8**。
+
 ## 0. 执行摘要（TL;DR）
 
-**Northstar 的工程内核是认真且超前的**——本地实测全部 **591 项测试通过**（sidecar 51 + run-contract 22 + host 24 + durable-run 59 + agent-interop 49 + 文档 3 + agent-runtime 383，其中 4 项因未装 anthropic 依赖而跳过）。权限门、hooks、预算上限、仅追加会话、可恢复执行的深度，超过多数开源框架。**但它的"开发者体验"停留在"库 + 手工拼装"阶段，与 2026 年顶级 agent 工具存在代差**，差距集中在六个地方：
+**当前结论：Northstar 已从“库 + 手工拼装”追到可安装、可审计的 headless harness，但还不是 Claude Code/Codex/Gemini 那样的完整产品。**本地实测 `make test` 为 **838 项**（runtime 544，4 项可选 OTel 测试因依赖缺失而跳过），权限门、hooks、预算、只追加 transcript、审计导出和离线确定性仍是最强资产。
 
-1. **不可安装**：仓库内 0 个 `pyproject.toml`/`setup.py`；跨组件依赖靠 `PYTHONPATH=../northstar-run-contract` 拼接；运行时模块 `tools.py` 与 `tools/` 目录同名冲突，无法直接 `pip install`。
-2. **上手路径长**：没有一键演示、没有 `--version`/`doctor`/配置文件；Quick Start 需要手工编写 JSON 脚本。
-3. **没有 2026 年 agent 生态的三大件**：MCP（官方自认未实现）、Agent Skills（开放标准，30–40 个平台已采纳）、项目约定文件（AGENTS.md 等价物）——而这恰恰是 Claude Code、Codex、Cursor 在 2026 年 DX 竞争的主战场。
-4. **会话与追踪缺乏"读回"工具**：append-only JSONL 与 OTEL span 已有，但没有会话查看/渲染/导出子命令，没有 checkpoint 式回放。
-5. **没有版本号与发布渠道**：无法 `pip install northstar-*`，没有 tag/Release，版本化 Run Contract 自身却没有软件版本。
-6. **组件 README 贫富不均**：最短 31 行（sidecar 的机制全写在根 README），没有 API 参考与 cookbook。
+已经补齐的 DX 基础包括：五个可安装组件、console script、`doctor`/`dry-run`、AGENTS.md 与策略即代码、文件化 subagents、MCP stdio 最小客户端、标准 Agent Skills（含 `skills check/list`）、sessions 读回/NDJSON 审计、Python SDK、脚手架、API 文档和 CI recipe。**这些能力要以当前 checkout 的测试为准；本页后面的早期盘点是历史基线。**
 
-**Northstar 真正领先的 DX 资产反而没有被讲出来**：离线可跑的 scripted provider、确定性 383 测试、不变量验证 harness、结构化事件 + 唯一 `ResultMessage` + 语义化退出码——这些是 CI/团队场景下比 Claude Code/LangGraph 更稀缺的能力，应作为 DX 叙事的中心。
+与全球头部工具相比，剩余差距集中在产品外围而不是治理内核：
 
-**路线图分四个阶段**（详见 §6）：P0 快速赢（约 1–2 周，纯增量）；P1 打包与 CLI 工程化（2–4 周）；P2 生态对接：AGENTS.md / Skills / MCP（4–8 周）；P3 平台化探索（2–3 月）。**所有条目都有一条红线：不得绕过权限门、hooks、预算与审计——治理内核是护城河。**
+1. **交互恢复**：已有 resume/list/show/export，但没有 checkpoint/rewind 和文件回滚体验。
+2. **可嵌入层**：已有 Python SDK 与结构化事件，没有 TypeScript SDK、长期 app-server 或 approval 协议。
+3. **生态深度**：MCP 仍是 stdio 工具发现/调用，没有 HTTP/auth；无 plugins、marketplace、热加载和组织级安装策略。
+4. **后台与远程**：durable-run/remote-worker 有内核和协议/运维文档，但没有网络 transport、调度器或真实远端 canary。
+5. **发布与隔离**：版本就绪门已在，仍是 `0.1.0.dev0` 未发布；应用层权限不等于 OS/VM sandbox，live Anthropic 与原生 Linux/真实远端验证仍缺。
+
+**路线图红线不变：**接入标准生态不能绕过权限门、hooks、预算、工作区 containment 和审计；Northstar 应把“标准格式可消费 + 默认拒绝 + 可验证结果 + 离线复现”做成面向 CI/企业嵌入的差异化，而不是复制头部产品的 TUI。
 
 ---
 
@@ -379,7 +389,7 @@ Northstar 是"运行时组件集合"，不是一个终端产品。因此对标�
 | G9 | 无 CI/团队 recipe | 🟡 demo + ci-readonly-review 模板 + headless `--json` + 语义退出码；**无官方 GitHub Action/后台任务** |
 | G10 | 优势未叙事化 | ✅ 文档强调确定性内核；🟡 对外叙事仍缺"治理即卖点"的独立页 |
 
-### 10.3 十维复评：Northstar 23 → 34（/50）
+### 10.3 十维复评：Northstar 23 → 36（/50）
 
 | 维度 | Northstar（原） | Northstar（复评） | 一句依据 |
 |---|:-:|:-:|---|
@@ -525,3 +535,55 @@ Northstar 是"运行时组件集合"，不是一个终端产品。因此对标�
   - `examples/remote-canary/` — 操作者执行的通道 canary：ssh 可达 → socket forward → 确定性探针（server 在 spawn 前拒绝，无需模型/key），`NS_REAL=1` 可选真实 codex run；探针在 CI 对真实 `sidecar_socket.serve` 回路验证；整脚本需真实主机、按设计永不进 CI。
 - **计分器如实重算**：两条"文档性质"缺口（story、guide）翻转为仓库权威工件检查（状态 marker 本身被 repo 测试钉死，空壳文件翻不了分）；两条实现项缺口保持 MISSING 并写明翻转条件（Profile A helper 存在 + 真实主机 canary 通过）。
 - 测试：仓库文档 28 → **43**；全仓 812 → **827 全绿**；docbuild md 48→56。版本仍对齐 `0.1.0.dev0` 未发布。
+
+### 2026-09-07（同批追加）— T4 完成（Agent Skills 标准兼容 + 供应链检查入口）
+
+- **标准兼容**：runtime 的 `skills.py` 现在同时发现历史 `.northstar/skills/`
+  与跨工具 `.agents/skills/`，严格校验 Agent Skills 规范的 `name`（≤64、
+  小写 kebab-case、不得首尾/连续连字符、必须匹配目录名）和 `description`
+  （≤1024），并接受 `license`、`compatibility`、`metadata`、`allowed-tools`
+  等标准字段；`metadata` 支持字符串键值映射，兼容性/UTF-8/重复名称错误均
+  fail-closed。规范依据：[Agent Skills specification](https://agentskills.io/specification)。
+- **安全边界**：技能仍然只是文本知识包。`allowed-tools` 只作为声明展示，绝不
+  变成 Northstar 的审批；技能包内脚本、references、assets 从不由 loader 执行，
+  包内及工作区外的 symlink 被拒绝，技能根目录受 `--skills-dir` 的 workspace
+  containment 约束，最多加载 40 个包。
+- **产品入口**：新增 `skills check --workspace .`（人读/`--json` 两种输出）和
+  `skills list`；两者都与真实 run 共享同一个 discovery/validation path，避免
+  “check 通过但 run 失败”。`doctor`、`run --dry-run`、普通 `run` 也支持
+  `.agents/skills` 和重复的 `--skills-dir PATH`。
+- **测试与接线**：新增标准字段、frontmatter map/folded string、跨根重复名、
+  resource symlink、CLI JSON 错误和“绝不执行脚本”断言；runtime **536 → 544**，
+  `make test` 当前实测 **838 项**（4 项可选 OTel 测试在未安装 extra 时跳过）。
+
+### 10.8 当前快照：与全球顶级工具的真实差距（以本 checkout 为准）
+
+下面是给维护者的决策表，不把“已有规范/文档”误写成“已上线产品”。头部工具
+的共同基线是：交互式终端/IDE surface、项目记忆文件、Skills/MCP/插件生态、
+checkpoint/rewind、headless/SDK、后台任务和企业级策略下发。Northstar 的优势
+是可审计、默认拒绝、确定性离线测试；差距主要仍在产品 surface，而不是权限内核。
+
+| 能力面 | Northstar 当前事实 | Claude Code / Codex / Gemini 参照 | 下一步判断 |
+|---|---|---|---|
+| Zero-to-first-run | `make demo`、`pip install .`、`doctor`、`dry-run`；无公共 index/登录 | 官方安装器、账号/模型即用、交互式首跑 | 发布 wheel，保留零 key demo |
+| 嵌入面 | Python `sdk.run/stream_run`、结构化事件、resume；无 TypeScript/app-server | Codex exec/SDK/app-server、Claude SDK 多语言 | 优先稳定协议/版本化 SDK，不先做 TUI |
+| 交互与恢复 | sessions list/show/export、append-only transcript；无 checkpoint/rewind | checkpoint、rewind、后台任务、任务队列 | T3：先做只读 checkpoint/restore 读回，再做文件回滚 |
+| 生态格式 | MCP stdio 工具发现/调用；Agent Skills 标准元数据 + `skills check/list`；无 plugins/marketplace、无 MCP HTTP/auth | MCP 多传输/登录、Skills 热加载、插件/marketplace | T4b：HTTP/auth 与插件清单必须先有信任/版本/撤销故事 |
+| 供应链 | 目录/字段/路径/symlink fail-closed；不执行脚本、不做恶意内容判断 | 插件市场/组织策略/托管配置 | 把 validator 接入 CI；内容审查与签名不能伪装成已完成 |
+| 后台/远程 | durable-run 与 remote-worker spec/ops 文档；无网络 transport/调度器/真实远端 canary | Codex cloud/Automations、Claude remote/background | T5：先 transport helper + 真实主机 canary，再谈 hosted control plane |
+| OS 级隔离 | runtime sandbox + sidecar read-only/Unix 权限；host candidate 非 sandbox | Codex sandbox/gVisor/VM 等产品能力 | 不把应用层权限当 OS 隔离，继续保留红线 |
+
+**建议的下一轮优先级：**
+
+1. **T3 小步**：为现有 append-only transcript 增加 checkpoint 元数据和只读回放，
+   先不宣称自动文件回滚；这能补上 Gemini/Claude/Codex 最可见的恢复体验，同时
+   不破坏 Northstar 的审计不可变性。
+2. **T4b 治理化生态**：把 `skills check` 接入消费者 CI recipe；若做插件/MCP
+   HTTP，先设计来源、版本、权限、撤销和审计字段，禁止“安装即执行”。
+3. **T2 发布**：0.1.0.dev0 的就绪门仍然正确；不要为了追赶头部工具伪造已发布
+   版本。先完成全量 wheel 安装态、文档、原生 Linux 和真实 Anthropic/远端验证。
+
+**结论：** Northstar 已经不是“没有生态”的库，而是一个有治理边界的 headless
+harness。与头部产品仍差一个产品层：交互恢复、后台/远程、公共发布、TypeScript
+和插件市场。当前最有辨识度的路线不是复制 Claude Code 的 TUI，而是把“标准生态
+可消费 + 默认拒绝 + 可验证 audit feed + 离线可复现”做成 CI/企业嵌入的第一选择。

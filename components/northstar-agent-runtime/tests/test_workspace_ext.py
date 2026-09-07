@@ -76,6 +76,20 @@ class FrontmatterTests(unittest.TestCase):
         fields, _ = parse_frontmatter("---\n# a comment\n\nname: demo\n---\n")
         self.assertEqual(fields["name"], "demo")
 
+    def test_maps_and_folded_strings_are_supported(self):
+        fields, _ = parse_frontmatter(
+            "---\n"
+            "description: >\n"
+            "  first line\n"
+            "  second line\n"
+            "metadata:\n"
+            "  author: northstar\n"
+            "  version: '1.0'\n"
+            "---\n"
+        )
+        self.assertEqual(fields["description"], "first line second line")
+        self.assertEqual(fields["metadata"], {"author": "northstar", "version": "1.0"})
+
 
 class SkillTests(unittest.TestCase):
     def setUp(self):
@@ -147,6 +161,72 @@ class SkillTests(unittest.TestCase):
         path.write_text("---\nName: demo\ndescription: x\n---\n", encoding="utf-8")
         with self.assertRaises(SkillError):
             discover_skills(self.ws)
+
+    def test_portable_skill_fields_are_validated_and_preserved(self):
+        portable = self.ws / ".agents" / "skills" / "pdf-processing"
+        portable.mkdir(parents=True)
+        (portable / "SKILL.md").write_text(
+            "---\n"
+            "name: pdf-processing\n"
+            "description: Extracts PDF text when the task mentions a PDF.\n"
+            "license: Apache-2.0\n"
+            "compatibility: Requires Python and a PDF reader.\n"
+            "metadata:\n"
+            "  author: example\n"
+            "  version: '1.0'\n"
+            "allowed-tools: Read Grep\n"
+            "---\n"
+            "Use the Read tool to inspect the PDF.\n",
+            encoding="utf-8",
+        )
+        found = discover_skills(self.ws)
+        self.assertEqual([skill.name for skill in found], ["pdf-processing"])
+        skill = found[0]
+        self.assertEqual(skill.license, "Apache-2.0")
+        self.assertEqual(skill.compatibility, "Requires Python and a PDF reader.")
+        self.assertEqual(skill.metadata, {"author": "example", "version": "1.0"})
+        self.assertEqual(skill.allowed_tools, ("Read", "Grep"))
+
+    def test_skill_name_must_match_portable_spec_and_parent_directory(self):
+        cases = (
+            ("Bad", "uppercase", "Bad"),
+            ("bad--name", "double hyphen", "bad--name"),
+            ("other-dir", "directory mismatch", "bad-name"),
+        )
+        for name, reason, declared in cases:
+            folder = self.skills_dir / name
+            folder.mkdir(parents=True, exist_ok=True)
+            (folder / "SKILL.md").write_text(
+                f"---\nname: {declared}\ndescription: x\n---\nbody\n", encoding="utf-8"
+            )
+            with self.subTest(reason=reason), self.assertRaises(SkillError):
+                discover_skills(self.ws)
+            (folder / "SKILL.md").unlink()
+
+    def test_duplicate_names_across_skill_roots_are_refused(self):
+        portable = self.ws / ".agents" / "skills" / "demo"
+        portable.mkdir(parents=True)
+        (portable / "SKILL.md").write_text(
+            "---\nname: demo\ndescription: portable\n---\nbody\n", encoding="utf-8"
+        )
+        self.write_skill("demo", "---\nname: demo\ndescription: local\n---\nbody\n")
+        with self.assertRaises(SkillError) as caught:
+            discover_skills(self.ws)
+        self.assertIn("duplicate skill name", str(caught.exception))
+
+    def test_resource_symlink_escaping_the_skill_package_is_refused(self):
+        outside = Path(tempfile.mkdtemp(prefix="nsar-skill-resource-")) / "REFERENCE.md"
+        outside.write_text("secret", encoding="utf-8")
+        folder = self.skills_dir / "demo"
+        folder.mkdir(parents=True)
+        (folder / "SKILL.md").write_text(
+            "---\nname: demo\ndescription: x\n---\nbody\n", encoding="utf-8"
+        )
+        (folder / "references").mkdir()
+        (folder / "references" / "REFERENCE.md").symlink_to(outside)
+        with self.assertRaises(SkillError) as caught:
+            discover_skills(self.ws)
+        self.assertIn("skill resource", str(caught.exception))
 
 
 class AgentFileTests(unittest.TestCase):
@@ -289,6 +369,39 @@ class WorkspaceExtensionCliTests(unittest.TestCase):
         code, _, err = self.dry()
         self.assertEqual(code, USAGE_ERROR)
         self.assertIn("may only tighten", err)
+
+    def write_portable_skill(self, name: str = "guide") -> Path:
+        directory = self.ws / ".agents" / "skills" / name
+        directory.mkdir(parents=True, exist_ok=True)
+        (directory / "SKILL.md").write_text(
+            f"---\nname: {name}\ndescription: A portable skill.\nallowed-tools: Read\n---\nBody.\n",
+            encoding="utf-8",
+        )
+        return directory
+
+    def test_skills_check_and_list_are_read_only_cli_surfaces(self):
+        self.write_portable_skill()
+        code, out, err = run_cli("skills", "check", "--workspace", str(self.ws))
+        self.assertEqual((code, err), (0, ""))
+        self.assertIn("skills: valid (1 package(s))", out)
+        self.assertIn("no scripts were executed", out)
+        code, out, err = run_cli("skills", "list", "--workspace", str(self.ws), "--json")
+        self.assertEqual((code, err), (0, ""))
+        self.assertIn('"name": "guide"', out)
+        self.assertIn('"allowed_tools": ["Read"]', out)
+
+    def test_skills_check_fails_closed_and_supports_json_errors(self):
+        self.write_portable_skill("BadName")
+        code, out, err = run_cli("skills", "check", "--workspace", str(self.ws), "--json")
+        self.assertEqual(code, 1)
+        self.assertEqual(err, "")
+        self.assertIn('"valid": false', out)
+        self.assertIn("name", out)
+
+    def test_skills_command_without_a_subcommand_is_usage_error(self):
+        code, _, err = run_cli("skills")
+        self.assertEqual(code, USAGE_ERROR)
+        self.assertIn("pass a subcommand", err)
 
 
 if __name__ == "__main__":

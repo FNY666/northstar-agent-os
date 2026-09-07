@@ -1,5 +1,20 @@
 # Northstar Agent OS — initial public component
 
+## Unreleased (thirteenth batch) — portable Agent Skills and fail-closed validator (T4)
+
+- Runtime discovery now accepts both `.northstar/skills/*/SKILL.md` and the
+  portable `.agents/skills/*/SKILL.md` layout.
+- `SKILL.md` validation follows the open format: bounded lowercase names that
+  match the parent directory, descriptions, `license`, `compatibility`, string
+  `metadata`, and space-separated `allowed-tools`. Invalid UTF-8, duplicate
+  names, escaping symlinks, and oversized collections fail closed.
+- `northstar-agent-runtime skills check` and `skills list --json` provide a
+  read-only CI/inspection surface. The validator never executes scripts or
+  turns `allowed-tools` into an approval; real runs share the same loader.
+- Runtime tests: 536 → 544; current `make test` snapshot: 838 tests with four
+  optional OpenTelemetry tests skipped when the tracing extra is absent.
+- Version remains aligned `0.1.0.dev0`; this is unreleased.
+
 ## Unreleased (twelfth batch) — remote-worker ops substance (T5)
 
 T5 answered the four P3-3 ops gaps with authoritative, code-grounded

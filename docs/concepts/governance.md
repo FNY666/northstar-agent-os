@@ -23,6 +23,13 @@ under the runtime's `default` permission mode they are denied until an operator
 names them with `--allow-tool`. MCP is a tool *transport*, never a policy
 bypass.
 
+The same rule applies to portable Agent Skills. Northstar accepts the standard
+`SKILL.md` metadata (including `allowed-tools`) and loads skill instructions
+progressively, but `allowed-tools` is not an approval grant. `skills check`
+validates names, package identity, metadata, duplicate names and resource
+symlink containment without executing a bundled script; the ordinary tool gate
+still decides every action.
+
 ## Layers and semantics
 
 - **Permission modes** (`default`, `acceptEdits`, `plan`, `bypassPermissions`):

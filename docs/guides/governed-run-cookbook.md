@@ -59,8 +59,17 @@ the scripted provider. Any denial under `--halt-on-denial` ends the run with
   optional, values may only tighten; `deny_tools`, ceilings, `project_context`.
 - **Project instructions**: `AGENTS.md` (auto-injected) or
   `--context-file PATH` (must live inside the workspace).
-- **Skills**: `.northstar/skills/<name>/SKILL.md` — read-only packages listed
-  in the system prompt.
+- **Skills**: `.northstar/skills/<name>/SKILL.md` or portable
+  `.agents/skills/<name>/SKILL.md` — standards-validated, read-only packages
+  listed in the system prompt. Run the same validation used by a real run:
+
+  ```sh
+  northstar-agent-runtime skills check --workspace .
+  northstar-agent-runtime skills list --workspace . --json
+  ```
+
+  `allowed-tools` is descriptive metadata only; it never auto-approves a
+  Northstar call. Use `--skills-dir PATH` for an explicit in-workspace root.
 - **Subagents**: `.northstar/agents/*.md` (workspace) or `--agent <definition>`
   — fixed tool subset and ceilings; combine with `--max-subagent-depth`.
 - **MCP servers** (experimental): `--mcp-server "name=python3 /path/server.py"`

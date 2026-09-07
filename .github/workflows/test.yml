@@ -124,6 +124,7 @@ jobs:
         run: |
           python -m cli --version
           python -m cli doctor --workspace . | grep -q "ready to run"
+          python -m cli skills check --workspace ../../examples/demo/workspace | grep -q "skills: valid"
           python -m cli run --workspace . --prompt smoke --scripted-text ok --dry-run | grep -q "no request was sent"
           sh ../../examples/demo/run_offline.sh >/dev/null
       - name: Packaging smoke

@@ -270,13 +270,17 @@ Summarise what the workspace contains: key files, purposes, and conventions.
   a built-in agent; `read_only` only ever narrows the tool set;
   `--no-workspace-agents` disables discovery for one run.
 
-- **`.northstar/skills/*/SKILL.md`** — Agent Skills, consumed read-only with
-  progressive disclosure: only each skill's `name` and `description` are placed
-  in the system prompt (a few tokens), and the model reads the full file with
-  the ordinary sandboxed `Read` tool when a task matches. A skill file is
-  text - it is never an execution or permission channel - and everything is
-  resolved strictly inside the workspace root (symlinks out are refused).
-  `--no-skills` disables the listing.
+- **Agent Skills (`.northstar/skills/*/SKILL.md` or portable
+  `.agents/skills/*/SKILL.md`)** — the runtime consumes the open `SKILL.md`
+  format read-only with progressive disclosure: only each skill's `name` and
+  `description` enter the system prompt (a few tokens), and the model reads
+  the full file with the ordinary sandboxed `Read` tool when a task matches.
+  Standard `license`, `compatibility`, `metadata`, and `allowed-tools` fields
+  are validated; `allowed-tools` is metadata here and never auto-approves a
+  call. `northstar-agent-runtime skills check --workspace .` is a read-only,
+  CI-friendly validator for names, package roots, duplicates, UTF-8 and
+  symlink escapes. Use `--skills-dir PATH` to select an explicit in-workspace
+  root; `--no-skills` disables discovery for a run.
 
 `doctor` and `run --dry-run` both report which files apply, so a run never
 surprises: `policy_file=`, `project_context=`, `workspace_agents=`, and
@@ -418,7 +422,7 @@ size (`result_chars`), so truncation is visible instead of inferred.
 | `session_view.py`   | `cli sessions list/show` - the read-back half of the transcripts     |
 | `policy_file.py`    | `.northstar/config.toml` parsing + tighten-only validation; AGENTS.md project-context discovery and prompt composition |
 | `agent_files.py`    | `.northstar/agents/*.md` -> governed `AgentDefinition` compilation   |
-| `skills.py`         | `.northstar/skills/*/SKILL.md` discovery + progressive-disclosure listing |
+| `skills.py`         | portable `.northstar/skills`/`.agents/skills` discovery, validation and progressive-disclosure listing |
 | `frontmatter.py`    | strict minimal frontmatter reader shared by agents and skills        |
 | `mcp_client.py`     | minimal MCP stdio client: handshake, tool listing, bounded calls, process-group cleanup |
 | `audit_export.py`   | transcript replay as the canonical NDJSON audit feed (`audit.ndjson/1`)      |
@@ -445,9 +449,10 @@ cd components/northstar-agent-runtime
 python3 -m unittest discover -s tests -p 'test_*.py' -v
 ```
 
-413 tests, fully offline and deterministic: the scripted provider is the only
-model, and `test_integration_sidecar.py` runs the real sidecar `serve()` over a
-real Unix socket with a 100,000-Chinese-character prompt.
+544 tests, fully offline and deterministic (four optional OpenTelemetry tests
+are skipped when the tracing extra is absent): the scripted provider is the
+only model, and `test_integration_sidecar.py` runs the real sidecar `serve()`
+over a real Unix socket with a 100,000-Chinese-character prompt.
 
 To confirm the tests actually cover the guards they claim, revert each one in a
 throwaway copy and check that its test goes red:

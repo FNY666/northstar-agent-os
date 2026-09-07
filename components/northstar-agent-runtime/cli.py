@@ -59,6 +59,7 @@ def build_parser() -> argparse.ArgumentParser:
             "  python3 -m cli run --provider scripted --script plan.json --prompt 'summarise README'\n"
             "  python3 -m cli run --workspace . --read-only --sidecar-socket /var/run/northstar-codex/sidecar.sock\n"
             "  python3 -m cli tools --workspace .\n"
+            "  python3 -m cli skills check --workspace .\n"
             "  python3 -m cli doctor --workspace .\n"
             "  python3 -m cli sessions list --session-dir /tmp/northstar-sessions\n"
             "  python3 -m cli new my-project  # scaffold a governed project\n"
@@ -74,6 +75,23 @@ def build_parser() -> argparse.ArgumentParser:
     sub.add_parser("tools", help="list the built-in tools and their classification")
     agents = sub.add_parser("agents", help="list the built-in subagent definitions")
     agents.add_argument("--workspace", default=".", help="workspace used to describe tool availability")
+    skills = sub.add_parser("skills", help="inspect and validate portable Agent Skills (read-only)")
+    skill_sub = skills.add_subparsers(dest="skills_command")
+    for skill_command, help_text in (
+        ("list", "list validated skills without loading their bodies"),
+        ("check", "validate skill frontmatter, package paths and metadata"),
+    ):
+        skill_parser = skill_sub.add_parser(skill_command, help=help_text)
+        skill_parser.add_argument("--workspace", default=".", help="workspace containing skill packages")
+        skill_parser.add_argument(
+            "--skills-dir",
+            dest="skills_dirs",
+            action="append",
+            default=[],
+            metavar="PATH",
+            help="workspace-relative skill root to inspect (repeatable; default: .northstar/skills and .agents/skills)",
+        )
+        skill_parser.add_argument("--json", action="store_true", help="emit one JSON document for automation")
     doctor = sub.add_parser("doctor", help="self-check the host for one governed run (no requests, no file writes)")
     add_doctor_arguments(doctor)
     sessions = sub.add_parser("sessions", help="inspect persisted session transcripts (read-only)")
@@ -117,7 +135,15 @@ def _add_run_arguments(parser: argparse.ArgumentParser) -> None:
     policy.add_argument("--halt-on-denial", action="store_true", help="end the run with error_permission_denied when a call is refused")
     policy.add_argument("--no-policy-file", action="store_true", help="ignore .northstar/config.toml in the workspace")
     policy.add_argument("--no-workspace-agents", action="store_true", help="ignore .northstar/agents/*.md subagent files")
-    policy.add_argument("--no-skills", action="store_true", help="do not list .northstar/skills/*/SKILL.md packages in the system prompt")
+    policy.add_argument("--no-skills", action="store_true", help="do not list workspace Agent Skills in the system prompt")
+    policy.add_argument(
+        "--skills-dir",
+        dest="skills_dirs",
+        action="append",
+        default=[],
+        metavar="PATH",
+        help="workspace-relative skill root to inspect (repeatable; default: .northstar/skills and .agents/skills)",
+    )
     context_group = policy.add_mutually_exclusive_group()
     context_group.add_argument("--context-file", default="", metavar="PATH", help="inject this project-instructions file into the system prompt (must live inside the workspace)")
     context_group.add_argument("--no-project-context", action="store_true", help="do not auto-inject AGENTS.md (or the policy file's project_context)")
@@ -242,6 +268,48 @@ def _print_dry_run(
     return 0
 
 
+def _run_skills(args: argparse.Namespace) -> int:
+    """List or validate Agent Skills without reading/executing their bodies."""
+    from skills import SkillError, discover_skills, skill_as_dict
+
+    directories = args.skills_dirs or None
+    try:
+        skills = discover_skills(args.workspace, directories=directories)
+    except SkillError as error:
+        if args.skills_command == "check" and args.json:
+            print(json.dumps({"valid": False, "skills": [], "errors": [str(error)]}, ensure_ascii=False, sort_keys=True))
+        else:
+            print(f"skills: invalid - {error}", file=sys.stderr)
+        return 1
+
+    records = [skill_as_dict(skill, args.workspace) for skill in skills]
+    if args.json:
+        print(json.dumps({"valid": True, "count": len(records), "skills": records}, ensure_ascii=False, sort_keys=True))
+        return 0
+
+    if args.skills_command == "check":
+        print(f"skills: valid ({len(records)} package(s)); no scripts were executed")
+        for record in records:
+            print(f"[ok] {record['name']:<24} {record['relative_path']}")
+        return 0
+
+    if not records:
+        print("skills: no packages found")
+        return 0
+    for record in records:
+        extras: list[str] = []
+        if record["license"]:
+            extras.append(f"license={record['license']}")
+        if record["compatibility"]:
+            extras.append(f"compatibility={record['compatibility']}")
+        if record["allowed_tools"]:
+            extras.append("declared-tools=" + ",".join(record["allowed_tools"]))
+        suffix = " [" + "; ".join(extras) + "]" if extras else ""
+        print(f"{record['name']:<24} {record['relative_path']}{suffix}")
+        print(f"{'':<24}{record['description']}")
+    return 0
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(list(argv) if argv is not None else None)
@@ -267,6 +335,11 @@ def main(argv: Sequence[str] | None = None) -> int:
             print(f"{'':<12} mode={definition.permission_mode} turns={definition.max_turns} verdict={definition.require_verdict}")
             print(f"{'':<12} {definition.description}")
         return 0
+    if args.command == "skills":
+        if not args.skills_command:
+            print("skills: pass a subcommand: list or check (see --help)", file=sys.stderr)
+            return USAGE_ERROR
+        return _run_skills(args)
     if args.command == "new":
         from scaffold import scaffold_project
 
@@ -493,7 +566,7 @@ def _run(args: argparse.Namespace) -> int:
     skills: tuple[Any, ...] = ()
     if not args.no_skills:
         try:
-            skills = discover_skills(args.workspace)
+            skills = discover_skills(args.workspace, directories=args.skills_dirs or None)
         except SkillError as error:
             print(f"configuration error: {error}", file=sys.stderr)
             return USAGE_ERROR

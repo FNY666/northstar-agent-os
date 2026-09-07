@@ -18,13 +18,16 @@ Northstar 面向希望 AI 同事在明确边界内运行的开发者，而不是
 
 ## 当前发布了什么
 
-本仓库当前发布三个组件：
+本仓库当前提供六个互补组件：
 
 - `../components/northstar-codex-sidecar/` — 本地 Unix socket 服务，负责校验请求，以 read-only 模式运行 Codex，限制输入和输出，脱敏错误，清理超时进程组，并返回结构化状态。
 - `../components/northstar-run-contract/` — 版本化的 Run Request/Receipt 合同、带有效期的 HMAC Run Binding，以及把已验证运行交给 Sidecar 的严格适配边界。
-- `../components/northstar-agent-runtime/` — 受治理的智能体循环：事件流、十个生命周期钩子、三层权限门、轮次/工具调用/美元预算三项独立上限、子智能体、仅追加会话、只在安全边界处压缩、以及 span 级追踪。它不持有模型凭据，也不启动模型 CLI：Codex 执行通过 Unix socket 委托给 Sidecar。
+- `../components/northstar-agent-runtime/` — 受治理的智能体循环：事件流、十个生命周期钩子、三层权限门、轮次/工具调用/美元预算三项独立上限、子智能体、仅追加会话、安全边界压缩、MCP stdio 工具传输、AGENTS.md、策略文件和可移植 `SKILL.md` 技能包。技能只读、默认拒绝，所有工具仍经过权限门和 hooks。
+- `../components/northstar-host/` — 主机侧默认拒绝授权与 opaque `0700` 工作区候选实现；它重新验证绑定和授权，但不执行命令。
+- `../components/northstar-durable-run/` — Run/Step/Event 合同、追加历史、checkpoint、lease、逐调用授权和独立后置校验的本地纵向切片；不是生产调度器或 sandbox。
+- `../components/northstar-agent-interop/` — 后端中立的 Agent attestation、受限 handoff、opaque context 和 typed receipt 边界；尚未连接真实厂商后端。
 
-仓库同时提供确定性测试、systemd 加固模板、保守的安装脚本和回滚脚本。
+仓库同时提供确定性离线测试、pip 打包、CLI doctor/dry-run、sessions 审计导出、API 文档、systemd 加固模板、保守的安装脚本和回滚脚本。
 
 ## Sidecar 如何工作
 
@@ -53,6 +56,23 @@ Sidecar 为每个 Unix socket 连接接收一个 JSON 请求：
 - 只有主机管理员明确安装并启用服务后，Codex 才会运行。
 
 ## 快速开始
+
+零凭据、零网络的离线演示：
+
+```sh
+make demo
+```
+
+这会运行一个完整的受治理循环（Read、权限门、预算/轮次上限、事件流和
+追加式 transcript）。runtime 也可安装并进行环境自检：
+
+```sh
+cd components/northstar-agent-runtime
+pip install .
+python3 -m cli --version
+python3 -m cli doctor --workspace .
+python3 -m cli skills check --workspace .
+```
 
 要求：
 
@@ -89,6 +109,7 @@ Northstar 适合构建本地或自托管 AI 同事运行时的开发者与运维
 - 它不是托管服务，也不代表已经具备生产就绪性。
 - 它不是通用 shell 执行 API。
 - 它不会单独完成调用方授权、每次运行隔离或父级取消传播。
+- MCP 目前是最小 stdio 工具客户端，不是完整的远程 MCP、插件市场或托管平台。
 - 它不包含 Codex 凭据，也不提供 Codex 账号。
 
 **Not a complete autonomous-agent platform.**
