@@ -1,0 +1,32 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "northstar-run-contract"
+description = "Versioned Run Request/Receipt contract, expiring HMAC Run Binding, and the strict adapter boundary for Northstar Agent OS."
+readme = "README.md"
+license = { text = "MIT" }
+requires-python = ">=3.10"
+# The version string is deliberately static here: this component is unreleased,
+# and the value below is the version the next tagged release would carry.
+version = "0.1.0.dev0"
+keywords = ["agent", "contract", "binding", "hmac", "northstar"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Software Development",
+]
+# The contract is deliberately dependency-free: validation, binding, and the
+# adapter boundary must stay importable on a bare interpreter, because hosts
+# verify receipts in the most constrained environments.
+dependencies = []
+
+[tool.setuptools]
+# Flat modules, installed as top-level names (contract, binding, adapter) to
+# match every existing `import` and `python -m` usage in this repository.
+py-modules = ["adapter", "binding", "contract"]

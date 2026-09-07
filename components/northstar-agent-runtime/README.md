@@ -27,6 +27,32 @@ prompt ──► AgentRuntime ──► provider (Anthropic Messages API, or scr
             exactly one ResultMessage
 ```
 
+## Install (pip)
+
+The component installs as a console script with lazy SDK imports, so the
+offline provider works with no extras at all:
+
+```sh
+pip install .                       # offline scripted provider, doctor, dry-run
+pip install '.[anthropic]'          # + live Anthropic provider
+pip install '.[tracing]'            # + OpenTelemetry span export
+# or, once published:
+pip install 'northstar-agent-runtime[full]'
+```
+
+Then run from any directory:
+
+```sh
+northstar-agent-runtime --version
+northstar-agent-runtime doctor --workspace .
+northstar-agent-runtime run --workspace . --provider anthropic --prompt "summarise README" --dry-run
+```
+
+The installed names mirror the in-tree layout (`python -m cli run ...` works
+identically from a checkout). The version has one source of truth (`_version.py`)
+and the test suite asserts it equals the `pyproject.toml` version, so an
+installed wheel and a source checkout can never disagree.
+
 ## Quick start (offline, no API key)
 
 The scripted provider is the reference provider, so the component is fully
@@ -60,6 +86,33 @@ python3 -m cli run --provider anthropic --model claude-sonnet-4-5 \
   --max-turns 12 --max-budget-usd 0.25 --permission-mode default \
   --session-dir /tmp/northstar-sessions --trace
 ```
+
+`python3 -m cli --version` prints the component version (one source of truth,
+`_version.py`). Two side-effect-free commands help before spending a token:
+
+```sh
+python3 -m cli doctor --workspace .        # self-check: python, SDKs, workspace,
+                                           # session dir, sidecar socket
+python3 -m cli run --workspace . --provider anthropic \
+  --prompt "summarise CHANGELOG.md" --dry-run   # what the run would do, no request
+```
+
+`doctor` exits 0 only when every check passes (missing optional SDKs are
+warnings, not failures); `--dry-run` prints the resolved tools, allow/deny
+lists, ceilings, and pricing, then exits without constructing the provider.
+
+Transcripts are append-only JSONL, but they are meant to be read back:
+
+```sh
+python3 -m cli sessions list --session-dir /tmp/northstar-sessions
+python3 -m cli sessions show --session-dir /tmp/northstar-sessions <session-id>
+python3 -m cli sessions show --session-dir /tmp/northstar-sessions <session-id> --json
+```
+
+`list` summarizes every transcript; `show` renders one as a timeline (records,
+turns, result subtype, cost); `--json` exports the raw records. The viewer is
+read-only: it never creates the directory, never writes a file, and reports a
+damaged record instead of "repairing" an audit trail.
 
 To delegate execution to Codex, point the runtime at the sidecar socket. That is
 the only switch; without it `CodexReadOnly` is not registered at all:
@@ -189,7 +242,7 @@ size (`result_chars`), so truncation is visible instead of inferred.
 | `hooks.py`          | 10 lifecycle events, veto semantics, fail-closed errors              |
 | `permissions.py`    | the three-layer gate and the delegation gate                         |
 | `budget.py`         | price table, cost computation, budget meter                          |
-| `tools.py`          | registry, sandbox, caps, built-in tools, `CodexReadOnly` spec         |
+| `tools/`            | package: registry, sandbox, caps, built-in tools, `CodexReadOnly` spec (`__init__.py`), plus the guard-verification harness (`verify_invariants.py`) |
 | `compaction.py`     | safe-boundary detection and summarisation                            |
 | `sessions.py`       | append-only JSONL transcripts and recovery                            |
 | `agents.py`         | agent definitions, registry, verdict parsing                         |
@@ -197,6 +250,9 @@ size (`result_chars`), so truncation is visible instead of inferred.
 | `sidecar_client.py` | Unix-socket client for the sidecar component                         |
 | `providers/`        | `base` (events + contract), `anthropic`, `scripted`                  |
 | `cli.py`            | one governed run from a shell, with distinct exit codes              |
+| `doctor.py`         | `cli doctor` environment self-checks (no requests, no file writes)   |
+| `session_view.py`   | `cli sessions list/show` - the read-back half of the transcripts     |
+| `_version.py`       | single source of truth for the component version                     |
 
 ## Exit codes
 
@@ -216,7 +272,7 @@ cd components/northstar-agent-runtime
 python3 -m unittest discover -s tests -p 'test_*.py' -v
 ```
 
-383 tests, fully offline and deterministic: the scripted provider is the only
+413 tests, fully offline and deterministic: the scripted provider is the only
 model, and `test_integration_sidecar.py` runs the real sidecar `serve()` over a
 real Unix socket with a 100,000-Chinese-character prompt.
 

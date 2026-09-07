@@ -6,6 +6,18 @@ it proves contracts, event history, checkpoints, leases, per-call action gates,
 independent postcondition verification, and minimal trace metrics on a local
 fixture.
 
+## Install (pip)
+
+```sh
+pip install ../northstar-run-contract ../northstar-host   # declared dependencies
+pip install .                                              # resolves both
+```
+
+The wheel installs the slice modules (`durable_contract`, `event_store`,
+`action_gateway`, `runner`, `verifier`, `trace_metrics`, `evaluation`) as
+top-level modules; the version (`0.1.0.dev0`, unreleased) is declared in
+`pyproject.toml`.
+
 ## Boundaries
 
 The component separates these stages:

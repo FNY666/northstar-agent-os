@@ -5,6 +5,17 @@ multiple Agent engines such as coding agents, browser/workflow agents, and
 future OpenBot-compatible adapters. It does not call or impersonate any
 vendor product.
 
+## Install (pip)
+
+```sh
+pip install ../northstar-run-contract ../northstar-host   # declared dependencies
+pip install .                                              # resolves both
+```
+
+The wheel installs the boundary modules (`interop_contract`, `handoff`,
+`interop_adapter`, `canary`, `process_adapter`, `process_backend`) as top-level
+modules; the version (`0.1.0.dev0`, unreleased) is declared in `pyproject.toml`.
+
 ## What is standardized
 
 The component defines four distinct concepts:

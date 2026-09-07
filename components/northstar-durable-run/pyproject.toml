@@ -1,0 +1,36 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "northstar-durable-run"
+description = "Local vertical-slice prototype for Northstar Agent OS: canonical Run/Step/Event contracts, append-only history, checkpoints, leases, per-call action authorization, and independent verification. Not a production scheduler or sandbox."
+readme = "README.md"
+license = { text = "MIT" }
+requires-python = ">=3.10"
+version = "0.1.0.dev0"
+keywords = ["agent", "durable", "execution", "event-store", "northstar"]
+classifiers = [
+    "Development Status :: 2 - Pre-Alpha",
+    "Intended Audience :: Developers",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Software Development",
+]
+# action_gateway.py re-verifies the host authorization grant (northstar-host)
+# over a contract-validated run (northstar-run-contract). Install both from
+# this repository first; bare `pip install .` works once they are published.
+dependencies = ["northstar-run-contract", "northstar-host"]
+
+[tool.setuptools]
+py-modules = [
+    "action_gateway",
+    "durable_contract",
+    "evaluation",
+    "event_store",
+    "runner",
+    "trace_metrics",
+    "verifier",
+]

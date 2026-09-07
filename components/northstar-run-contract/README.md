@@ -2,6 +2,24 @@
 
 This component defines the versioned structural boundary between an Agent OS orchestrator and a controlled worker such as the Codex Sidecar.
 
+## Install (pip)
+
+The contract is pure standard library, so it installs with no dependencies and
+stays importable in the most constrained verification environments:
+
+```sh
+pip install .          # from a checkout
+# or, once published:
+pip install northstar-run-contract
+```
+
+The three modules are installed under their in-tree names and the version
+(`0.1.0.dev0`, unreleased) is declared in `pyproject.toml`:
+
+```python
+import contract, binding, adapter
+```
+
 ## Trust boundary
 
 `validate_run_request()` checks shape, size, identifiers, task kind, timeout, and requested capability syntax. It does **not** authenticate the caller and it does **not** grant any requested capability. `actor_id` and `workspace_id` are declarations until a host-provided authenticated binding is verified.

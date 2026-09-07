@@ -1,0 +1,61 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "northstar-agent-runtime"
+description = "Governed agent loop: hooks, three-layer permissions, ceilings, append-only sessions, span tracing, sandboxed tools, and subagents - with execution delegated to a sidecar."
+readme = "README.md"
+license = { text = "MIT" }
+requires-python = ">=3.10"
+# The version string is deliberately static here and is asserted equal to
+# _version.__version__ by the test suite, so the two cannot drift.
+version = "0.1.0.dev0"
+keywords = ["agent", "runtime", "governance", "permissions", "hooks", "northstar"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Software Development",
+]
+# No hard dependencies by design: every SDK import is lazy, so the offline
+# scripted provider and the whole deterministic test suite run on a bare
+# interpreter. Install an extra to talk to a live model or export traces:
+#   pip install northstar-agent-runtime[anthropic,tracing]
+dependencies = []
+
+[project.optional-dependencies]
+anthropic = ["anthropic>=1.0"]
+tracing = ["opentelemetry-api>=1.20", "opentelemetry-sdk>=1.20"]
+full = ["anthropic>=1.0", "opentelemetry-api>=1.20", "opentelemetry-sdk>=1.20"]
+
+[project.scripts]
+northstar-agent-runtime = "cli:main"
+
+[tool.setuptools]
+# Flat modules, installed as top-level names to match every existing `import`
+# and `python -m cli` usage in this repository. The transition cost is known:
+# generic top-level names (cli, loop, tools, providers, sessions) live in the
+# site-packages namespace until the component moves to a proper package layout.
+py-modules = [
+    "_version",
+    "agents",
+    "budget",
+    "cli",
+    "compaction",
+    "doctor",
+    "hooks",
+    "loop",
+    "permissions",
+    "sessions",
+    "session_view",
+    "sidecar_client",
+    "tracing",
+]
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["providers*", "tools*"]
