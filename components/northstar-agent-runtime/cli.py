@@ -164,6 +164,7 @@ def _add_run_arguments(parser: argparse.ArgumentParser) -> None:
     output.add_argument("--session-dir", default="", help="append an auditable JSONL transcript here")
     output.add_argument("--resume", default="", help="session id to continue from --session-dir")
     output.add_argument("--redact-tool-output", action="store_true", help="record tool results in the session without output bodies")
+    output.add_argument("--receipt-secret-env", default="", metavar="NAME", help="sign action receipts with the bytes from environment variable NAME; never pass the secret on argv")
     output.add_argument("--show-pricing", action="store_true", help="print the pricing decision and exit")
     output.add_argument("--dry-run", action="store_true", help="validate the configuration and print what a run would do, then exit without sending any request (provider, model, and sidecar are not touched)")
 
@@ -253,7 +254,8 @@ def _print_dry_run(
           f"max_budget_usd={config.max_budget_usd or 'unlimited'}")
     print(f"sidecar={'on' if config.sidecar_socket else 'off'} "
           f"session_dir={args.session_dir or 'off'} "
-          f"halt_on_denial={config.halt_on_denial}")
+          f"halt_on_denial={config.halt_on_denial} "
+          f"signed_receipts={'on' if args.receipt_secret_env else 'off'}")
     print(f"policy_file={policy_note}")
     print(f"project_context={context_note}")
     print(f"workspace_agents={workspace_agents_note}")
@@ -610,8 +612,26 @@ def _run(args: argparse.Namespace) -> int:
     else:
         mcp_note = "off"
 
+    receipt_secret: bytes | None = None
+    if args.receipt_secret_env:
+        raw_secret = os.environ.get(args.receipt_secret_env)
+        if raw_secret is None:
+            print(f"configuration error: receipt secret environment variable {args.receipt_secret_env!r} is not set", file=sys.stderr)
+            return USAGE_ERROR
+        receipt_secret = raw_secret.encode("utf-8")
+        if len(receipt_secret) < 16:
+            print("configuration error: receipt secret must encode to at least 16 bytes", file=sys.stderr)
+            return USAGE_ERROR
+
     provider = _build_provider(args)
-    runtime = AgentRuntime(provider=provider, config=config, tools=registry, sessions=store, agents=agents)
+    runtime = AgentRuntime(
+        provider=provider,
+        config=config,
+        tools=registry,
+        sessions=store,
+        agents=agents,
+        receipt_secret=receipt_secret,
+    )
 
     if args.show_pricing:
         print(json.dumps(runtime.pricing(), indent=2, sort_keys=True))

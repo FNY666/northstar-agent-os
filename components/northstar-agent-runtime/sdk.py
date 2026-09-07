@@ -16,7 +16,8 @@ Minimal usage (offline, deterministic — no API key):
 Everything the CLI governs is available here: permission modes, allow/deny
 lists, read-only, turn/tool/budget ceilings, halt-on-denial, a session
 directory for the append-only transcript, subagent depth and workspace agent
-files. Two entry points share one configuration:
+files. The SDK also exposes the host governance seam for bounded approval
+leases and signed action receipts. Two entry points share one configuration:
 
 * :func:`run` — run to completion, return a :class:`RunReport` with the full
   event list (``report.events`` are the same dicts ``--json`` emits);
@@ -69,6 +70,11 @@ class RunOptions:
     max_output_tokens: int = 4096
     redact_tool_output: bool = False  # omit tool output bodies from the transcript
     workspace_agents: bool = True  # register .northstar/agents/*.md definitions
+    # Host governance seam: leases are ApprovalLease objects or mappings from
+    # ``receipts.py``; the secret is never serialized into the report.
+    approval_leases: Any = None
+    receipt_secret: bytes | None = None
+    clock: Any = None
 
 
 @dataclass
@@ -86,6 +92,7 @@ class RunReport:
     errors: list[str]
     permission_denials: list[dict[str, Any]]
     events: list[dict[str, Any]] = field(default_factory=list)
+    receipts: list[dict[str, Any]] = field(default_factory=list)
 
     @property
     def is_error(self) -> bool:
@@ -180,7 +187,16 @@ def _build(options: RunOptions, resume: str | None = None) -> tuple[Any, Any]:
     provider = _build_provider(options)
     store = SessionStore(options.session_dir or None, session_id=resume or None)
     config_kwargs["session_id"] = store.session_id
-    runtime = AgentRuntime(provider=provider, config=RuntimeConfig(**config_kwargs), tools=registry, sessions=store, agents=agents)
+    runtime = AgentRuntime(
+        provider=provider,
+        config=RuntimeConfig(**config_kwargs),
+        tools=registry,
+        sessions=store,
+        agents=agents,
+        approval_leases=options.approval_leases,
+        receipt_secret=options.receipt_secret,
+        clock=options.clock,
+    )
     return runtime, store
 
 
@@ -227,4 +243,5 @@ def run(options: RunOptions, resume: str | None = None) -> RunReport:
         errors=list(result.get("errors", [])) if result else [],
         permission_denials=list(result.get("permission_denials", [])) if result else [],
         events=events,
+        receipts=[receipt.as_dict() for receipt in report.receipts] if report is not None else [],
     )

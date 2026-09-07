@@ -519,6 +519,64 @@ Evaluates one tool call against the three layers.
 - `evaluate_spec(spec: Any, payload: dict[str, Any] | None=None, *, context: PermissionRequestContext | None=None, known: bool=True)`
 - `check_delegation(agent: str, tool_names: Sequence[str], *, kinds: dict[str, str] | None=None, context: PermissionRequestContext | None=None, disallowed_extra: Iterable[str]=())`
   - Gate a subagent by *each tool it declared*, not by the name ``Task``.
+### `receipts`
+
+Source: `components/northstar-agent-runtime/receipts.py`
+
+Capability leases and tamper-evident action receipts.
+
+#### `ReceiptError`
+
+A lease or receipt is malformed, expired, out of scope or unverifiable.
+
+#### `capability_for(kind: str, tool_name: str='')`
+
+Map a tool class to a stable capability namespace.
+
+#### `digest_value(value: Any)`
+
+Canonical SHA-256 digest for an input/output or structured receipt field.
+
+#### `ApprovalLease`
+
+A bounded approval scoped to one session, workspace and capability set.
+
+- `from_mapping(value: Mapping[str, Any])`
+- `as_dict()`
+- `allows(*, session_id: str, workspace: str, capability: str, now: int)`
+- `consumed()`
+#### `ApprovalLeaseLedger`
+
+In-memory lease store with deterministic selection and use accounting.
+
+- `add(lease: ApprovalLease | Mapping[str, Any])`
+- `get(lease_id: str)`
+- `revoke(lease_id: str)`
+  - Revoke a lease before expiry; return whether it existed.
+- `active(*, now: int)`
+- `consume(*, session_id: str, workspace: str, capability: str, now: int)`
+- `snapshot()`
+#### `ActionReceipt`
+
+Canonical action result with an optional HMAC signature.
+
+- `from_mapping(value: Mapping[str, Any])`
+- `as_dict(*, include_signature: bool=True)`
+- `to_dict()`
+- `canonical_bytes()`
+- `sign(secret: bytes)`
+- `verify(secret: bytes)`
+- `to_contract_receipt()`
+  - Project into the existing ``northstar.receipt.v1`` result shape.
+- `new(*, session_id: str, action_id: str, tool: str, capability: str, status: str, issued_at: int | None=None, completed_at: int | None=None, input_value: Any=None, output_value: Any=None, workspace_before: str | None=None, workspace_after: str | None=None, lease_id: str | None=None, error: str='')`
+#### `sign_receipt(receipt: ActionReceipt | Mapping[str, Any], secret: bytes)`
+
+Sign an existing receipt after validating its canonical shape.
+
+#### `verify_receipt(receipt: ActionReceipt | Mapping[str, Any], secret: bytes)`
+
+Validate and verify a serialized action receipt.
+
 ### `policy_file`
 
 Source: `components/northstar-agent-runtime/policy_file.py`

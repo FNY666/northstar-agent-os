@@ -18,8 +18,11 @@ subagent's declared tool set (:meth:`PermissionEngine.check_delegation`).
 """
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+import time
+from dataclasses import dataclass, field, replace
 from typing import Any, Callable, Iterable, Literal, Sequence
+
+from receipts import ApprovalLease, ApprovalLeaseLedger, ReceiptError, capability_for
 
 PermissionMode = Literal["default", "acceptEdits", "plan", "bypassPermissions"]
 
@@ -40,6 +43,7 @@ DecisionSource = Literal[
     "allowed_tools",
     "mode",
     "host_callback",
+    "approval_lease",
     "unknown_tool",
     "delegation_gate",
     "invalid_mode",
@@ -55,6 +59,8 @@ class PermissionDecision:
     reason: str = ""
     rule: str = ""
     tool: str = ""
+    capability: str = ""
+    lease_id: str | None = None
 
     @property
     def text(self) -> str:
@@ -67,6 +73,8 @@ class PermissionDecision:
             "source": self.source,
             "reason": self.reason,
             "rule": self.rule,
+            "capability": self.capability,
+            "lease_id": self.lease_id,
         }
 
 
@@ -81,6 +89,7 @@ class PermissionRequestContext:
     workspace: str = ""
     mode: str = "default"
     reason_hint: str = ""
+    capability: str = ""
     data: dict[str, Any] = field(default_factory=dict)
 
 
@@ -144,6 +153,8 @@ class PermissionConfig:
     allowed_tools: tuple[str, ...] = ()
     disallowed_tools: tuple[str, ...] = ()
     can_use_tool: Callable[[str, dict[str, Any], PermissionRequestContext], Any] | None = None
+    approval_leases: ApprovalLeaseLedger | None = None
+    clock: Callable[[], int] = lambda: int(time.time())
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "mode", validate_mode(self.mode))
@@ -151,6 +162,10 @@ class PermissionConfig:
         object.__setattr__(self, "disallowed_tools", normalise_names(self.disallowed_tools))
         if self.can_use_tool is not None and not callable(self.can_use_tool):
             raise TypeError("can_use_tool must be callable")
+        if self.approval_leases is not None and not isinstance(self.approval_leases, ApprovalLeaseLedger):
+            raise TypeError("approval_leases must be an ApprovalLeaseLedger")
+        if not callable(self.clock):
+            raise TypeError("clock must be callable")
 
     @property
     def overlap(self) -> tuple[str, ...]:
@@ -177,6 +192,8 @@ class PermissionEngine:
         disallowed_tools: Iterable[str] | None = None,
         can_use_tool: Callable[[str, dict[str, Any], PermissionRequestContext], Any] | None = None,
         tool_kinds: dict[str, str] | None = None,
+        approval_leases: ApprovalLeaseLedger | None = None,
+        clock: Callable[[], int] | None = None,
     ) -> None:
         if config is None:
             config = PermissionConfig(
@@ -184,8 +201,21 @@ class PermissionEngine:
                 allowed_tools=allowed_tools or (),
                 disallowed_tools=disallowed_tools or (),
                 can_use_tool=can_use_tool,
+                approval_leases=approval_leases,
+                clock=clock or (lambda: int(time.time())),
+            )
+        elif approval_leases is not None or clock is not None:
+            config = PermissionConfig(
+                mode=config.mode,
+                allowed_tools=config.allowed_tools,
+                disallowed_tools=config.disallowed_tools,
+                can_use_tool=config.can_use_tool,
+                approval_leases=approval_leases if approval_leases is not None else config.approval_leases,
+                clock=clock or config.clock,
             )
         self.config = config
+        self.approval_leases = config.approval_leases
+        self.clock = config.clock
         # Fallback kind map for callers that evaluate by name only (e.g. the
         # delegation gate, where no ToolSpec object is in hand).
         self._kinds: dict[str, str] = dict(tool_kinds or {})
@@ -221,6 +251,7 @@ class PermissionEngine:
         if resolved_kind not in {"read", "edit", "exec", "task", "network", "other"}:
             resolved_kind = "other"
         is_mutating = (resolved_kind in MUTATING_KINDS) if mutating is None else bool(mutating)
+        capability = capability_for(resolved_kind, tool_name)
 
         if tool_name in set(self.config.disallowed_tools):
             return PermissionDecision(
@@ -262,6 +293,7 @@ class PermissionEngine:
                     reason=f"plan mode is read-only; {tool_name} would change state",
                     rule="mode:plan",
                     tool=tool_name,
+                    capability=capability,
                 )
             return PermissionDecision(
                 True,
@@ -269,7 +301,42 @@ class PermissionEngine:
                 reason=f"{tool_name} is read-only, permitted in plan mode",
                 rule="mode:plan",
                 tool=tool_name,
+                capability=capability,
             )
+
+        # A lease is checked after hard deny/plan boundaries and before the
+        # mode's host callback. It is consumed exactly once here, at the point
+        # of authorization, so replaying a model call cannot reuse it.
+        if is_mutating and self.approval_leases is not None:
+            lease_context = context or PermissionRequestContext(mode=self.config.mode)
+            lease_context = _with_capability(lease_context, capability)
+            try:
+                consumed = self.approval_leases.consume(
+                    session_id=lease_context.session_id,
+                    workspace=lease_context.workspace,
+                    capability=capability,
+                    now=int(self.clock()),
+                )
+            except (ReceiptError, TypeError, ValueError) as error:
+                return PermissionDecision(
+                    False,
+                    source="approval_lease",
+                    reason=f"approval lease validation failed; failing closed ({error})",
+                    rule="approval_lease:invalid",
+                    tool=tool_name,
+                    capability=capability,
+                )
+            if consumed is not None:
+                return PermissionDecision(
+                    True,
+                    source="approval_lease",
+                    reason=f"{tool_name} approved by capability lease {consumed.lease_id}",
+                    rule="approval_lease:consume",
+                    tool=tool_name,
+                    capability=capability,
+                    lease_id=consumed.lease_id,
+                )
+
         if not is_mutating:
             return PermissionDecision(
                 True,
@@ -300,6 +367,7 @@ class PermissionEngine:
         request = context or PermissionRequestContext(
             mode=self.config.mode, reason_hint=f"{tool_name} is mutating"
         )
+        request = _with_capability(request, capability)
         try:
             verdict = self.config.can_use_tool(tool_name, dict(payload or {}), request)
         except Exception as error:  # noqa: BLE001 - a broken approver must not grant access
@@ -309,7 +377,84 @@ class PermissionEngine:
                 reason=f"host approval callback raised {type(error).__name__}; failing closed",
                 rule="host_callback:error",
                 tool=tool_name,
+                capability=capability,
             )
+
+        try:
+            lease = _lease_from_verdict(verdict)
+        except (ReceiptError, TypeError, ValueError) as error:
+            return PermissionDecision(
+                False,
+                source="approval_lease",
+                reason=f"host capability lease is malformed; failing closed ({error})",
+                rule="approval_lease:invalid",
+                tool=tool_name,
+                capability=capability,
+            )
+        if lease is not None:
+            if self.approval_leases is None:
+                return PermissionDecision(
+                    False,
+                    source="approval_lease",
+                    reason="host returned a capability lease but this engine has no lease ledger",
+                    rule="approval_lease:no_ledger",
+                    tool=tool_name,
+                    capability=capability,
+                )
+            approved, note = _approval_verdict(verdict)
+            # A bare ApprovalLease is an approval; a mapping may explicitly
+            # reject it. Never silently turn a denied host response into access.
+            if isinstance(verdict, ApprovalLease):
+                approved = True
+            if not approved:
+                return PermissionDecision(
+                    False,
+                    source="host_callback",
+                    reason=note or f"{tool_name} refused by host approval callback",
+                    rule="host_callback:deny",
+                    tool=tool_name,
+                    capability=capability,
+                )
+            try:
+                existing = self.approval_leases.get(lease.lease_id)
+                if existing is None:
+                    self.approval_leases.add(lease)
+                elif existing != lease:
+                    raise ReceiptError("lease id is already bound to different claims")
+                consumed = self.approval_leases.consume(
+                    session_id=request.session_id,
+                    workspace=request.workspace,
+                    capability=capability,
+                    now=int(self.clock()),
+                )
+            except (ReceiptError, TypeError, ValueError) as error:
+                return PermissionDecision(
+                    False,
+                    source="approval_lease",
+                    reason=f"host capability lease is invalid; failing closed ({error})",
+                    rule="approval_lease:invalid",
+                    tool=tool_name,
+                    capability=capability,
+                )
+            if consumed is None:
+                return PermissionDecision(
+                    False,
+                    source="approval_lease",
+                    reason=f"host capability lease does not cover {capability} in this session/workspace or is expired",
+                    rule="approval_lease:out_of_scope",
+                    tool=tool_name,
+                    capability=capability,
+                )
+            return PermissionDecision(
+                True,
+                source="approval_lease",
+                reason=note or f"{tool_name} approved by capability lease {consumed.lease_id}",
+                rule="approval_lease:consume",
+                tool=tool_name,
+                capability=capability,
+                lease_id=consumed.lease_id,
+            )
+
         approved, note = _approval_verdict(verdict)
         if approved:
             return PermissionDecision(
@@ -318,6 +463,7 @@ class PermissionEngine:
                 reason=note or f"{tool_name} approved by host approval callback",
                 rule="host_callback:allow",
                 tool=tool_name,
+                capability=capability,
             )
         return PermissionDecision(
             False,
@@ -325,6 +471,7 @@ class PermissionEngine:
             reason=note or f"{tool_name} refused by host approval callback",
             rule="host_callback:deny",
             tool=tool_name,
+            capability=capability,
         )
 
     def evaluate_spec(
@@ -376,6 +523,30 @@ class PermissionEngine:
             else:
                 denied.append((name, decision.reason))
         return DelegationVerdict(agent=agent, allowed=tuple(allowed), denied=tuple(denied), checked=tuple(checked))
+
+
+def _with_capability(context: PermissionRequestContext, capability: str) -> PermissionRequestContext:
+    if context.capability == capability:
+        return context
+    return replace(context, capability=capability)
+
+
+def _lease_from_verdict(verdict: Any) -> ApprovalLease | None:
+    """Extract an optional lease without weakening legacy bool callbacks."""
+    if isinstance(verdict, ApprovalLease):
+        return verdict
+    candidate: Any = None
+    if isinstance(verdict, dict):
+        candidate = verdict.get("lease") or verdict.get("approval_lease")
+    else:
+        candidate = getattr(verdict, "lease", None) or getattr(verdict, "approval_lease", None)
+    if candidate is None:
+        return None
+    if isinstance(candidate, ApprovalLease):
+        return candidate
+    if isinstance(candidate, dict):
+        return ApprovalLease.from_mapping(candidate)
+    raise ReceiptError("host approval lease must be an ApprovalLease or object")
 
 
 def _approval_verdict(verdict: Any) -> tuple[bool, str]:

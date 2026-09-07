@@ -10,6 +10,7 @@ sys.path.insert(0, str(CONTRACT_ROOT))
 from authorization import (  # noqa: E402
     HostPolicy,
     authorize_run,
+    issue_approval_lease,
     sign_authorization,
     verify_authorization,
 )
@@ -204,6 +205,49 @@ class HostAuthorizationTests(unittest.TestCase):
                 now=1_000,
                 secret=b"",
             )
+
+    def test_issue_approval_lease_narrows_a_verified_grant_and_bounds_expiry(self):
+        run = valid_request()
+        run["requested_capabilities"] = ["workspace.write", "workspace.read"]
+        policy = HostPolicy.from_mapping(
+            "policy-1", {"actor-001": ["workspace.write", "workspace.read"]}
+        )
+        lease = issue_approval_lease(
+            run,
+            self.verified_binding(run, now=1_000),
+            policy,
+            workspace="/private/workspace",
+            lease_id="lease-001",
+            session_id="session-001",
+            capabilities=["workspace.write"],
+            now=1_000,
+            secret=self.AUTHORIZATION_SECRET,
+            lease_ttl_seconds=120,
+            max_uses=2,
+        )
+        self.assertEqual(lease["schema_version"], "northstar.approval-lease.v1")
+        self.assertEqual(lease["capabilities"], ["workspace.write"])
+        self.assertEqual(lease["expires_at"], 1_120)
+        self.assertEqual(lease["max_uses"], 2)
+        self.assertEqual(lease["uses"], 0)
+
+    def test_issue_approval_lease_rejects_widening_or_unscoped_capabilities(self):
+        run = valid_request()
+        run["requested_capabilities"] = ["workspace.write"]
+        policy = HostPolicy.from_mapping("policy-1", {"actor-001": ["workspace.write"]})
+        kwargs = dict(
+            run=run,
+            binding=self.verified_binding(run),
+            policy=policy,
+            workspace="/private/workspace",
+            lease_id="lease-001",
+            now=1_000,
+            secret=self.AUTHORIZATION_SECRET,
+        )
+        with self.assertRaises(ValueError):
+            issue_approval_lease(capabilities=["process.exec"], **kwargs)
+        with self.assertRaises(ValueError):
+            issue_approval_lease(workspace="/bad\x00path", capabilities=["workspace.write"], **{key: value for key, value in kwargs.items() if key != "workspace"})
 
     def test_authorization_verifier_rejects_wrong_secret_and_malformed_token(self):
         result = verify_authorization(

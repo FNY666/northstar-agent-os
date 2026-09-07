@@ -1,5 +1,27 @@
 # Northstar Agent OS — initial public component
 
+## Unreleased (fifteenth batch) — capability leases and verifiable action receipts (T7)
+
+- Runtime `receipts.py` adds bounded `ApprovalLease` / `ApprovalLeaseLedger`
+  claims scoped to an exact session, resolved workspace, capability namespace,
+  expiry and finite use count. Hard deny lists and plan mode remain stronger
+  than a lease; a lease is consumed before the legacy host callback.
+- Host `authorization.issue_approval_lease` projects a verified
+  `northstar.authorization.v1` grant into the runtime lease shape, narrowing
+  capabilities and expiry rather than widening policy.
+- Every attempted runtime tool call now has an in-memory `ActionReceipt` with
+  canonical input/output and optional workspace-state digests. A host-provided
+  secret signs receipts with HMAC-SHA256; tampering is detected by
+  `ActionReceipt.verify`. `to_contract_receipt()` keeps the existing
+  `northstar.receipt.v1` status/postcondition boundary.
+- Python SDK options expose the lease/receipt seam; signed receipts are mirrored
+  into sessions without writing the signing secret. Existing unsigned session
+  record vocabulary remains compatible.
+- Added offline lifecycle, expiry/scope/consumption, host projection, tamper and
+  runtime integration tests; runtime now has 572 tests and the repository has
+  868 test cases (4 optional OTel skips). This remains unreleased; no tag,
+  GitHub Release, PyPI/npm publication or public package push was made.
+
 ## Unreleased (fourteenth batch) — reversible execution kernel (T6)
 
 - Runtime checkpoints (`northstar.checkpoint.v1`) snapshot bounded regular files

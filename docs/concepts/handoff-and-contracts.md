@@ -19,7 +19,10 @@ carries:
   a loud failure instead of a silent misread.
 
 The contract is pure standard library by design: it must stay importable in
-the most constrained verification environments.
+the most constrained verification environments. The runtime's signed
+`ActionReceipt` projects into the contract's `northstar.receipt.v1` shape without
+adding fields to that legacy boundary; consumers that need tamper verification
+retain the runtime receipt alongside the projection.
 
 ## Host authorization handshake (host <-> verified run)
 
@@ -28,7 +31,10 @@ default-deny `authorization` layer decides whether a proposed run may proceed,
 and an opaque `workspace` allocation hands the verified run a private directory
 whose contents the host controls. The boundary order is fixed — authorization
 checks run before any workspace is revealed — and workspaces are opaque: the
-run sees only what the host decided to mount.
+run sees only what the host decided to mount. `issue_approval_lease()` can
+narrow a verified grant to one runtime session/workspace/capability set with an
+expiry and finite use count; it is not a persistent lease manager or a bypass
+around the signed host grant.
 
 ## Sidecar delegation (runtime <-> Codex)
 

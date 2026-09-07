@@ -47,7 +47,7 @@ Requested capabilities are not permissions. A later authenticated policy layer m
 
 ## Run receipt
 
-Receipts use `schema_version: "northstar.receipt.v1"`. Every receipt contains a status and a list of explicit postcondition verdicts: `verified`, `failed`, or `unknown`. Unknown must not be presented as success.
+Receipts use `schema_version: "northstar.receipt.v1"`. Every receipt contains a status and a list of explicit postcondition verdicts: `verified`, `failed`, or `unknown`. Unknown must not be presented as success. The agent runtime's signed action receipt has a stricter runtime-specific envelope and exposes `to_contract_receipt()` for this exact projection; the legacy contract intentionally remains unaware of runtime signatures and lease fields.
 
 Only `timeout` and `transport_unavailable` are fallback-eligible. `cancelled`, `protocol_error`, `business_error`, and `internal_error` must remain visible to the orchestrator and must not be silently retried as another worker.
 

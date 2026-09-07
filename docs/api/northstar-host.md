@@ -34,6 +34,10 @@ Verify an authorization grant without returning claims on failure.
 
 Authorize one structurally valid run under an explicit host policy.
 
+#### `issue_approval_lease(run: dict[str, Any], binding: BindingValidation, policy: HostPolicy, *, workspace: str, lease_id: str, now: int, secret: bytes, session_id: str | None=None, capabilities: Iterable[str] | None=None, lease_ttl_seconds: int=60, max_uses: int=1)`
+
+Project a verified host grant into a runtime capability lease.
+
 ### `workspace`
 
 Source: `components/northstar-host/workspace.py`

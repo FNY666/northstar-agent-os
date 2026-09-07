@@ -40,6 +40,14 @@ from permissions import (
     PermissionRequestContext,
     normalise_names,
 )
+from receipts import (
+    ActionReceipt,
+    ApprovalLease,
+    ApprovalLeaseLedger,
+    ReceiptError,
+    capability_for,
+    digest_value,
+)
 from providers.base import (
     AssistantMessage,
     Generation,
@@ -220,6 +228,9 @@ class ToolCallReport:
     input_rewritten: bool = False
     turn_index: int = 0
     agent: str = "main"
+    capability: str = ""
+    lease_id: str | None = None
+    receipt_id: str | None = None
 
     def as_dict(self) -> dict[str, Any]:
         return {
@@ -234,6 +245,9 @@ class ToolCallReport:
             "input_rewritten": self.input_rewritten,
             "turn_index": self.turn_index,
             "agent": self.agent,
+            "capability": self.capability,
+            "lease_id": self.lease_id,
+            "receipt_id": self.receipt_id,
         }
 
 
@@ -283,6 +297,7 @@ class RunReport:
     transcript: tuple[Message, ...] = ()
     denials: tuple[Denial, ...] = ()
     tool_calls: tuple[ToolCallReport, ...] = ()
+    receipts: tuple[ActionReceipt, ...] = ()
     subagents: tuple[SubagentReport, ...] = ()
     compactions: tuple[dict[str, Any], ...] = ()
     hook_fires: tuple[dict[str, Any], ...] = ()
@@ -339,6 +354,7 @@ class RunReport:
             "subtype": self.subtype,
             "turns": result.num_turns if result else 0,
             "tool_calls": len(self.tool_calls),
+            "receipts": [receipt.as_dict() for receipt in self.receipts],
             "denials": [denial.as_dict() for denial in self.denials],
             "subagents": [report.as_dict() for report in self.subagents],
             "compactions": list(self.compactions),
@@ -359,6 +375,7 @@ class _RunState:
     turns: int = 0
     tool_calls: int = 0
     denials: list[Denial] = field(default_factory=list)
+    receipts: list[ActionReceipt] = field(default_factory=list)
     errors: list[str] = field(default_factory=list)
     subagents: list[SubagentReport] = field(default_factory=list)
     tool_reports: list[ToolCallReport] = field(default_factory=list)
@@ -385,6 +402,9 @@ class AgentRuntime:
         agents: AgentRegistry | None = None,
         permissions: PermissionEngine | None = None,
         can_use_tool: Callable[[str, dict[str, Any], PermissionRequestContext], Any] | None = None,
+        approval_leases: ApprovalLeaseLedger | Iterable[ApprovalLease | Mapping[str, Any]] | None = None,
+        receipt_secret: bytes | None = None,
+        clock: Callable[[], int] | None = None,
         tracer: Tracer | None = None,
         sessions: SessionStore | None = None,
         providers: Mapping[str, Any] | None = None,
@@ -420,16 +440,46 @@ class AgentRuntime:
             self.tools.register(task_tool_spec(), replace_existing=True)
         else:
             self.tools.unregister(TASK_TOOL_NAME)
-        self.permissions = permissions or PermissionEngine(
-            PermissionConfig(
-                mode=self.config.permission_mode,
-                allowed_tools=self.config.allowed_tools,
-                disallowed_tools=self.config.disallowed_tools,
-                can_use_tool=can_use_tool,
+        self.clock = clock or (lambda: int(time.time()))
+        if not callable(self.clock):
+            raise RuntimeConfigurationError("clock must be callable")
+        if receipt_secret is not None and (not isinstance(receipt_secret, bytes) or len(receipt_secret) < 16):
+            raise RuntimeConfigurationError("receipt_secret must be at least 16 bytes")
+        self.receipt_secret = receipt_secret
+        if approval_leases is None:
+            lease_ledger = ApprovalLeaseLedger()
+        elif isinstance(approval_leases, ApprovalLeaseLedger):
+            lease_ledger = approval_leases
+        else:
+            lease_ledger = ApprovalLeaseLedger()
+            for lease in approval_leases:
+                lease_ledger.add(lease)
+        self.approval_leases = lease_ledger
+        if permissions is None:
+            self.permissions = PermissionEngine(
+                PermissionConfig(
+                    mode=self.config.permission_mode,
+                    allowed_tools=self.config.allowed_tools,
+                    disallowed_tools=self.config.disallowed_tools,
+                    can_use_tool=can_use_tool,
+                    approval_leases=lease_ledger,
+                    clock=self.clock,
+                )
             )
-        )
-        if can_use_tool is not None and self.permissions.config.can_use_tool is None:
-            self.permissions = PermissionEngine(replace(self.permissions.config, can_use_tool=can_use_tool))
+        else:
+            self.permissions = permissions
+            if can_use_tool is not None and self.permissions.config.can_use_tool is None:
+                self.permissions = PermissionEngine(replace(self.permissions.config, can_use_tool=can_use_tool))
+            if self.permissions.approval_leases is None:
+                self.permissions = PermissionEngine(
+                    replace(self.permissions.config, approval_leases=lease_ledger, clock=self.clock)
+                )
+            else:
+                self.approval_leases = self.permissions.approval_leases
+                if clock is not None:
+                    # A deterministic host clock is part of the runtime seam;
+                    # keep an injected PermissionEngine on the same time source.
+                    self.permissions = PermissionEngine(replace(self.permissions.config, clock=self.clock))
         for spec in self.tools.specs():
             if not self.permissions.knows(spec.name):
                 self.permissions.register_kind(spec.name, spec.kind)
@@ -482,6 +532,8 @@ class AgentRuntime:
             "session_id": self.session_id,
             "session_store": "jsonl" if self.sessions.enabled else "none",
             "workspace": str(self.sandbox.root_real),
+            "capability_leases": len(self.approval_leases.active(now=int(self.clock()))),
+            "receipts_signed": self.receipt_secret is not None,
         }
 
     def pricing(self) -> dict[str, Any]:
@@ -575,6 +627,8 @@ class AgentRuntime:
             },
             "depth": config.depth,
             "workspace": str(self.sandbox.root_real),
+            "capability_leases": len(self.approval_leases.active(now=int(self.clock()))),
+            "receipts_signed": self.receipt_secret is not None,
         }
         init = SystemMessage(subtype="init", content=f"runtime ready: {self.provider_name}/{config.model}", data=init_data)
         self.sessions.record_system(init, agent=config.agent)
@@ -781,7 +835,99 @@ class AgentRuntime:
             turn_index=turn_index,
             agent=self.config.agent,
         )
-        return block, report
+        spec = self.tools.get(call.name)
+        capability = capability_for(spec.kind, spec.name) if spec is not None else capability_for("other", call.name)
+        receipt = self._append_action_receipt(
+            state,
+            call,
+            tool_name=call.name,
+            capability=capability,
+            status="denied",
+            output=reason,
+            error=reason,
+        )
+        return block, self._report_receipt(report, receipt, capability=capability)
+
+    # -- action receipts ---------------------------------------------------
+    def _append_action_receipt(
+        self,
+        state: _RunState,
+        call: ToolUseBlock,
+        *,
+        tool_name: str,
+        capability: str,
+        status: str,
+        payload: Mapping[str, Any] | None = None,
+        output: Any = None,
+        before_states: Sequence[Any] = (),
+        after_states: Sequence[Any] = (),
+        lease_id: str | None = None,
+        error: str = "",
+    ) -> ActionReceipt | None:
+        """Record one action claim without turning a missing claim into success.
+
+        Unsigned receipts are still useful for local inspection, but only a host
+        supplied ``receipt_secret`` makes them transport-verifiable. Persistence
+        of the signed form is opt-in so existing transcript consumers that only
+        understand workspace receipts remain compatible.
+        """
+        before = _workspace_states_digest(before_states)
+        after = _workspace_states_digest(after_states)
+        try:
+            issued_at = int(self.clock())
+            completed_at = max(issued_at, int(self.clock()))
+            receipt = ActionReceipt.new(
+                session_id=state.session_id,
+                action_id=call.id or f"turn-{state.turns + 1}-{state.tool_calls + 1}",
+                tool=tool_name,
+                capability=capability,
+                status=status,
+                issued_at=issued_at,
+                completed_at=completed_at,
+                input_value=dict(payload or {}),
+                output_value=output,
+                workspace_before=before,
+                workspace_after=after,
+                lease_id=lease_id,
+                error=error[:2000],
+            )
+            if self.receipt_secret is not None:
+                receipt = receipt.sign(self.receipt_secret)
+        except (ReceiptError, TypeError, ValueError, OSError) as receipt_error:
+            # A receipt failure is observable and never replaced by a fabricated
+            # successful receipt. The tool outcome remains the tool outcome, but
+            # the run report records the governance failure.
+            state.errors.append(
+                f"action receipt unavailable for {tool_name}: {type(receipt_error).__name__}: {receipt_error}"
+            )
+            return None
+        state.receipts.append(receipt)
+        if self.receipt_secret is not None:
+            self.sessions.append(
+                "informational",
+                {
+                    "agent": self.config.agent,
+                    "subtype": "action_receipt",
+                    "receipt": receipt.as_dict(),
+                    "contract_receipt": receipt.to_contract_receipt(),
+                },
+            )
+        return receipt
+
+    @staticmethod
+    def _report_receipt(
+        report: ToolCallReport,
+        receipt: ActionReceipt | None,
+        *,
+        capability: str,
+        lease_id: str | None = None,
+    ) -> ToolCallReport:
+        return replace(
+            report,
+            capability=capability,
+            lease_id=lease_id,
+            receipt_id=receipt.receipt_id if receipt is not None else None,
+        )
 
     # -- tool dispatch -----------------------------------------------------
     def _dispatch(
@@ -827,7 +973,25 @@ class AgentRuntime:
                 ),
             )
             block = ToolResultBlock(tool_use_id=call.id, content=reason, is_error=True)
-            return block, ToolCallReport(name=call.name, call_id=call.id, is_error=True, permission_source="unknown_tool", turn_index=turn_index, agent=self.config.agent), None
+            capability = capability_for("other", call.name)
+            receipt = self._append_action_receipt(
+                state,
+                call,
+                tool_name=call.name,
+                capability=capability,
+                status="denied",
+                output=reason,
+                error=reason,
+            )
+            report = ToolCallReport(
+                name=call.name,
+                call_id=call.id,
+                is_error=True,
+                permission_source="unknown_tool",
+                turn_index=turn_index,
+                agent=self.config.agent,
+            )
+            return block, self._report_receipt(report, receipt, capability=capability), None
 
         payload = dict(call.input) if isinstance(call.input, dict) else {}
         pre = self._fire(
@@ -850,9 +1014,21 @@ class AgentRuntime:
             reason = f"{spec.name} refused by the {pre.denied_by} hook: {pre.deny_reason}"
             state.denials.append(Denial(tool=spec.name, source=f"hook:{pre.denied_by}", reason=reason, agent=self.config.agent, turn_index=turn_index))
             block = ToolResultBlock(tool_use_id=call.id, content=reason, is_error=True)
+            capability = capability_for(spec.kind, spec.name)
+            receipt = self._append_action_receipt(
+                state,
+                call,
+                tool_name=spec.name,
+                capability=capability,
+                status="denied",
+                payload=payload,
+                output=reason,
+                error=reason,
+            )
             report = ToolCallReport(
                 name=spec.name, call_id=call.id, is_error=True, denied=True, permission_source="hook", turn_index=turn_index, agent=self.config.agent
             )
+            report = self._report_receipt(report, receipt, capability=capability)
             fatal = "error_permission_denied" if self.config.halt_on_denial else None
             return block, report, fatal
         if pre.updated_input is not None:
@@ -860,7 +1036,21 @@ class AgentRuntime:
         rewritten = pre.updated_input is not None
 
         if spec.is_delegation:
-            return self._delegate(call, spec, payload, state, turn_index=turn_index, span=span, rewritten=rewritten)
+            block, report, fatal = self._delegate(
+                call, spec, payload, state, turn_index=turn_index, span=span, rewritten=rewritten
+            )
+            capability = capability_for(spec.kind, spec.name)
+            receipt = self._append_action_receipt(
+                state,
+                call,
+                tool_name=spec.name,
+                capability=capability,
+                status="completed" if not block.is_error else "failed",
+                payload=payload,
+                output=block.text(),
+                error=block.text() if block.is_error else "",
+            )
+            return block, self._report_receipt(report, receipt, capability=capability), fatal
 
         decision = self.permissions.evaluate_spec(
             spec,
@@ -898,6 +1088,18 @@ class AgentRuntime:
                 ),
             )
             block = ToolResultBlock(tool_use_id=call.id, content=reason, is_error=True)
+            capability = decision.capability or capability_for(spec.kind, spec.name)
+            receipt = self._append_action_receipt(
+                state,
+                call,
+                tool_name=spec.name,
+                capability=capability,
+                status="denied",
+                payload=payload,
+                output=reason,
+                lease_id=decision.lease_id,
+                error=reason,
+            )
             report = ToolCallReport(
                 name=spec.name,
                 call_id=call.id,
@@ -907,6 +1109,7 @@ class AgentRuntime:
                 turn_index=turn_index,
                 agent=self.config.agent,
             )
+            report = self._report_receipt(report, receipt, capability=capability, lease_id=decision.lease_id)
             fatal = "error_permission_denied" if self.config.halt_on_denial else None
             return block, report, fatal
 
@@ -991,6 +1194,20 @@ class AgentRuntime:
                 },
             )
         tool_text = result.text()
+        capability = decision.capability or capability_for(spec.kind, spec.name)
+        receipt = self._append_action_receipt(
+            state,
+            call,
+            tool_name=spec.name,
+            capability=capability,
+            status="failed" if result.is_error else "completed",
+            payload=payload,
+            output=tool_text,
+            before_states=before_states,
+            after_states=after_states,
+            lease_id=decision.lease_id,
+            error=tool_text if result.is_error else (receipt_error or after_error or ""),
+        )
         if result.is_error:
             self._fire(
                 state,
@@ -1039,6 +1256,12 @@ class AgentRuntime:
             input_rewritten=rewritten,
             turn_index=turn_index,
             agent=self.config.agent,
+        )
+        report = self._report_receipt(
+            report,
+            receipt,
+            capability=capability,
+            lease_id=decision.lease_id,
         )
         return block, report, None
 
@@ -1260,8 +1483,13 @@ class AgentRuntime:
                     allowed_tools=child_allowed,
                     disallowed_tools=child_disallowed,
                     can_use_tool=self.permissions.config.can_use_tool,
+                    approval_leases=self.approval_leases,
+                    clock=self.clock,
                 )
             ),
+            approval_leases=self.approval_leases,
+            receipt_secret=self.receipt_secret,
+            clock=self.clock,
             hooks=self.hooks,
             agents=self.agents,
             tracer=self.tracer,
@@ -1511,6 +1739,7 @@ class AgentRuntime:
             transcript=tuple(state.transcript),
             denials=tuple(state.denials),
             tool_calls=tuple(state.tool_reports),
+            receipts=tuple(state.receipts),
             subagents=tuple(state.subagents),
             compactions=tuple(state.compactions),
             hook_fires=tuple(state.hook_fires),
@@ -1609,6 +1838,16 @@ def _mutation_relative_paths(payload: Mapping[str, Any], context: ToolContext) -
             continue
         paths.add(context.relative(context.resolve(raw, for_write=True)))
     return tuple(sorted(paths))
+
+
+def _workspace_states_digest(states: Sequence[Any]) -> str | None:
+    if not states:
+        return None
+    values = []
+    for state in states:
+        as_dict = getattr(state, "as_dict", None)
+        values.append(as_dict() if callable(as_dict) else str(state))
+    return digest_value(values)
 
 
 def _coerce_result(raw: Any, tool_name: str) -> ToolResult:

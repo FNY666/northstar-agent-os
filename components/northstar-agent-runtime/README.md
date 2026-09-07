@@ -14,7 +14,7 @@ sandbox, process cleanup).
 prompt ──► AgentRuntime ──► provider (Anthropic Messages API, or scripted)
                  │
                  ├─ hooks (10 lifecycle events, veto-capable)
-                 ├─ permission gate (disallowed → allowed → mode + host callback)
+                 ├─ permission gate (disallowed → allowed → plan/lease/mode + host callback)
                  ├─ ceilings (turns / tool calls / USD)
                  ├─ tools (Read, Grep, LS, Write, Edit, DescribeTools, Task)
                  │        └── CodexReadOnly ──Unix socket──► northstar-codex-sidecar ──► codex --sandbox read-only
@@ -30,6 +30,7 @@ prompt ──► AgentRuntime ──► provider (Anthropic Messages API, or scr
 ## Concepts, guides and API reference
 
 - Concepts: [governance and the permission gate](../../docs/concepts/governance.md) ·
+  [capability leases and action receipts](../../docs/concepts/capability-leases.md) ·
   [audit trail: sessions and durable history](../../docs/concepts/audit-trail.md) ·
   [reversible execution: checkpoint, inspect, rewind and fork](../../docs/concepts/reversible-execution.md)
 - Guides: [governed-run cookbook](../../docs/guides/governed-run-cookbook.md) ·
@@ -334,7 +335,7 @@ condition arrives as an event, never as a raised exception:
 The three ceilings are independent, each with its own subtype, so an operator can
 tell "it ran out of money" from "it ran in circles". `RunReport` (from
 `run_collect`) carries the same information structurally: `denials`, `tool_calls`,
-`subagents`, `compactions`, `hook_fires`, `errors`, `trace`.
+`receipts`, `subagents`, `compactions`, `hook_fires`, `errors`, `trace`.
 
 ## Hooks
 
@@ -371,6 +372,32 @@ mutating tool with no host approval callback is **denied, not executed** — the
 fail-safe direction is always "no". A denial is not an exception: the model
 receives an `is_error` `tool_result` naming the rule that refused it, and the run
 records a `Denial` with `tool`, `source`, and `reason`.
+
+### Capability-first approval leases and receipts
+
+Hosts that need approval to survive several turns can pass an
+`ApprovalLeaseLedger` (or lease mappings) to `AgentRuntime` or `sdk.RunOptions`.
+A lease is scoped to the exact runtime session, resolved workspace and stable
+capability such as `workspace.write` or `process.exec`; it has an absolute expiry
+and a finite `max_uses`. The engine checks hard deny/plan boundaries first, then
+consumes one matching lease before falling back to the legacy host callback. A
+scope mismatch, expiry or exhausted lease never opens a tool.
+
+Every attempted tool call produces an `ActionReceipt` in `RunReport.receipts`,
+including denied and failed calls. The receipt hashes canonical input/output
+values and, for path-shaped mutating calls, the existing pre/post workspace
+state metadata. Pass a host-owned `receipt_secret` (at least 16 bytes) to emit a
+HMAC-SHA256 signature (`--receipt-secret-env NAME` is the CLI equivalent; the
+secret stays in the environment); `receipt.verify(secret)` detects tampering after
+serialization. `receipt.to_contract_receipt()` projects the result into the
+existing `northstar.receipt.v1` status/postcondition shape. Signed receipts are
+also written to the session as an `informational` record with subtype
+`action_receipt`; the secret itself is never recorded.
+
+`northstar-host.authorization.issue_approval_lease` is the host-side adapter
+from a verified, policy-authorized run grant to this bounded lease shape. It
+narrows capabilities and caps expiry at the signed binding/grant, but it does
+not execute work or replace the durable-run `ActionGateway`.
 
 ## Cost
 
@@ -438,7 +465,8 @@ size (`result_chars`), so truncation is visible instead of inferred.
 | ------------------- | ------------------------------------------------------------------- |
 | `loop.py`           | the turn loop, ceilings, event stream, `RunReport`                   |
 | `hooks.py`          | 10 lifecycle events, veto semantics, fail-closed errors              |
-| `permissions.py`    | the three-layer gate and the delegation gate                         |
+| `permissions.py`    | the three-layer gate, capability leases, and delegation gate          |
+| `receipts.py`       | bounded approval leases, canonical action receipts, HMAC verification |
 | `budget.py`         | price table, cost computation, budget meter                          |
 | `tools/`            | package: registry, sandbox, caps, built-in tools, `CodexReadOnly` spec (`__init__.py`), plus the guard-verification harness (`verify_invariants.py`) |
 | `compaction.py`     | safe-boundary detection and summarisation                            |
@@ -480,7 +508,7 @@ cd components/northstar-agent-runtime
 python3 -m unittest discover -s tests -p 'test_*.py' -v
 ```
 
-561 tests, fully offline and deterministic (four optional OpenTelemetry tests
+572 tests, fully offline and deterministic (four optional OpenTelemetry tests
 are skipped when the tracing extra is absent): the scripted provider is the
 only model, and `test_integration_sidecar.py` runs the real sidecar `serve()`
 over a real Unix socket with a 100,000-Chinese-character prompt.
@@ -510,8 +538,9 @@ caught by the unit-level compaction tests rather than the loop-level one.
   been exercised here.
 - **Process-group `TERM`→`KILL` cleanup is not verified on real Linux here.** That
   behaviour belongs to the sidecar; the runtime only bounds its own socket read.
-- Session transcripts are a local audit trail, not a compliance store: there is no
-  signing, no retention policy, and no tamper evidence.
+- Session transcripts remain a local audit trail, not a compliance store: signed
+  action receipts are opt-in and tamper-evident individually, but the transcript
+  has no global signature chain or retention policy.
 - Cost accounting is arithmetic on provider-reported usage. It cannot see retries
   the SDK swallowed, and it never predicts a price for a model the table lacks
   without saying so.

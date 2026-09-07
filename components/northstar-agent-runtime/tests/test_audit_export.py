@@ -91,6 +91,24 @@ class RecordMappingTests(unittest.TestCase):
         )
         self.assertEqual(record_to_audit(record)["level"], "info")
 
+    def test_signed_action_receipt_record_uses_status_for_audit_level(self):
+        denied = record_to_audit(
+            sample_record(
+                "informational",
+                subtype="action_receipt",
+                receipt={"status": "denied", "receipt_id": "rcpt-1"},
+            )
+        )
+        completed = record_to_audit(
+            sample_record(
+                "informational",
+                subtype="action_receipt",
+                receipt={"status": "completed", "receipt_id": "rcpt-2"},
+            )
+        )
+        self.assertEqual(denied["level"], "error")
+        self.assertEqual(completed["level"], "info")
+
     def test_result_level_follows_the_error_subtype_prefix(self):
         error = record_to_audit(
             sample_record("result", index=9, subtype="error_permission_denied", agent="general")

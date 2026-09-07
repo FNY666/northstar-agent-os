@@ -50,6 +50,10 @@ def _record_level(record: dict[str, Any]) -> str:
         subtype = record.get("subtype")
         if isinstance(subtype, str) and subtype.startswith("error"):
             return "error"
+    if record.get("subtype") == "action_receipt":
+        receipt = record.get("receipt")
+        if isinstance(receipt, dict) and receipt.get("status") in {"denied", "failed"}:
+            return "error"
     payload = record.get("payload")
     if isinstance(payload, dict) and payload.get("is_error") is True:
         return "error"

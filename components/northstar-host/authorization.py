@@ -11,6 +11,7 @@ import binascii
 import hashlib
 import hmac
 import json
+import re
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 from typing import Any
@@ -26,6 +27,9 @@ from contract import (
 )
 
 AUTHORIZATION_SCHEMA_VERSION = "northstar.authorization.v1"
+APPROVAL_LEASE_SCHEMA_VERSION = "northstar.approval-lease.v1"
+APPROVAL_LEASE_MAX_WORKSPACE_CHARS = 4096
+_LEASE_CAPABILITY_RE = re.compile(r"^[a-z][a-z0-9]*(?:[._:-][a-z0-9]+)*$")
 _AUTHORIZATION_FIELDS = {
     "schema_version",
     "actor_id",
@@ -315,3 +319,85 @@ def authorize_run(
         "expires_at": expires_at,
     }
     return sign_authorization(authorization, secret)
+
+
+def issue_approval_lease(
+    run: dict[str, Any],
+    binding: BindingValidation,
+    policy: HostPolicy,
+    *,
+    workspace: str,
+    lease_id: str,
+    now: int,
+    secret: bytes,
+    session_id: str | None = None,
+    capabilities: Iterable[str] | None = None,
+    lease_ttl_seconds: int = 60,
+    max_uses: int = 1,
+) -> dict[str, Any]:
+    """Project a verified host grant into a runtime capability lease.
+
+    The host authorization grant remains the signed cross-process boundary. This
+    bounded projection is the in-process hand-off consumed by
+    ``northstar-agent-runtime.receipts.ApprovalLeaseLedger``: exact actor/run
+    claims are checked first, requested capabilities can only be narrowed, and
+    expiry can never outlive the binding or the host grant.
+
+    The host deliberately receives the workspace scope as an explicit value;
+    ``workspace_id`` is an opaque contract identifier and must not be confused
+    with a local filesystem path.
+    """
+    if not isinstance(workspace, str) or not workspace or len(workspace) > APPROVAL_LEASE_MAX_WORKSPACE_CHARS or "\x00" in workspace:
+        raise ValueError("workspace lease scope is invalid")
+    _require_id(lease_id, "lease_id")
+    if session_id is None:
+        session_id = run.get("run_id") if isinstance(run, dict) else None
+    _require_id(session_id, "session_id")
+    if not isinstance(lease_ttl_seconds, int) or isinstance(lease_ttl_seconds, bool) or lease_ttl_seconds <= 0:
+        raise ValueError("lease_ttl_seconds must be a positive integer")
+    if not isinstance(max_uses, int) or isinstance(max_uses, bool) or max_uses <= 0:
+        raise ValueError("max_uses must be a positive integer")
+
+    authorization_token = authorize_run(
+        run,
+        binding,
+        policy,
+        now=now,
+        secret=secret,
+        grant_ttl_seconds=lease_ttl_seconds,
+    )
+    verified = verify_authorization(authorization_token, secret, now=now)
+    if not verified.ok or verified.authorization is None:  # pragma: no cover - authorize_run already verified this
+        raise ValueError("host authorization could not be verified")
+    grant = verified.authorization
+    requested = list(run["requested_capabilities"])
+    if capabilities is None:
+        selected = requested
+    else:
+        if isinstance(capabilities, (str, bytes, bytearray)):
+            raise ValueError("lease capabilities must be an iterable of names")
+        selected = list(capabilities)
+    seen: set[str] = set()
+    for capability in selected:
+        _require_capability(capability)
+        if not _LEASE_CAPABILITY_RE.fullmatch(capability):
+            raise ValueError("lease capability must use the lowercase capability namespace")
+        if capability in seen:
+            raise ValueError(f"duplicate lease capability: {capability}")
+        seen.add(capability)
+    if not set(selected).issubset(set(grant["capabilities"])):
+        raise ValueError("lease capability is not covered by the verified host grant")
+    expires_at = min(grant["expires_at"], now + lease_ttl_seconds)
+    if expires_at <= now:
+        raise ValueError("approval lease would be expired")
+    return {
+        "schema_version": APPROVAL_LEASE_SCHEMA_VERSION,
+        "lease_id": lease_id,
+        "session_id": session_id,
+        "workspace": workspace,
+        "capabilities": sorted(seen),
+        "issued_at": now,
+        "expires_at": expires_at,
+        "max_uses": max_uses,
+        "uses": 0,
+    }

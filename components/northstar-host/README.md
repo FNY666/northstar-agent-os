@@ -6,6 +6,7 @@ between a verified Northstar run and a host-owned private workspace.
 ## Concepts, guides and API reference
 
 - Concepts: [governance and the permission gate](../../docs/concepts/governance.md) ·
+  [capability leases and action receipts](../../docs/concepts/capability-leases.md) ·
   [handoff and contracts](../../docs/concepts/handoff-and-contracts.md)
 - Guides: [packaging and CI](../../docs/guides/packaging-and-ci.md)
 - API reference: [generated from docstrings](../../docs/api/northstar-host.md)
@@ -47,7 +48,10 @@ empty capability request. An unlisted capability, wildcard actor, wildcard
 capability, duplicate entry, or invalid policy identifier is rejected.
 
 `requested_capabilities` remains a request until `authorize_run()` issues a
-signed `northstar.authorization.v1` grant. The grant binds:
+signed `northstar.authorization.v1` grant. For an in-process runtime hand-off,
+`issue_approval_lease()` can then project a **narrower** capability set into a
+bounded `northstar.approval-lease.v1` claim. It does not widen the signed grant
+and does not replace per-call durable-run authorization. The grant binds:
 
 - `actor_id`, `run_id`, and `workspace_id`;
 - the exact requested capability set;
@@ -137,8 +141,9 @@ execution.
 
 This is a local implementation candidate only. It has not been deployed to
 103, 104, a dormitory host, or a production OpenBot instance. It is not a
-sandbox, network policy, lease manager, cleanup service, or complete workspace
-broker. Native Linux validation is still required for concurrency, filesystem
+sandbox, network policy, lease lifecycle service, cleanup service, or complete
+workspace broker. `issue_approval_lease()` is only a bounded projection helper;
+it does not persist, revoke, or renew leases. Native Linux validation is still required for concurrency, filesystem
 races, process boundaries, service permissions, and deployment integration.
 
 The host must keep secrets outside the repository and provide rotation,

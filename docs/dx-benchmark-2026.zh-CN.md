@@ -9,18 +9,19 @@
 
 > **阅读口径（2026-09-07 当前真值）**：本页保留了早期差距基线与实施 ledger，
 > 因而 §0–§8 中的“现状”段落有历史意义，不应覆盖后面的复评。当前 checkout
-> 的权威快照是：`make test` **855 项通过**（runtime 561，含 4 项因可选
-> OpenTelemetry 依赖缺失而跳过；其余组件与文档测试全绿）；五个可安装组件仍为
+> 的权威快照是：`make test` **868 项测试，864 项通过、4 项 skip**（runtime 571，
+> 其中 4 项因可选 OpenTelemetry 依赖缺失而跳过；其余组件与文档测试全绿）；五个可安装组件仍为
 > 对齐的 `0.1.0.dev0`，没有发布 tag。Agent Skills 已支持
 > `.northstar/skills` + portable `.agents/skills`、标准 frontmatter、`skills
 > check/list` 与 fail-closed 路径校验；runtime 还新增了 bounded checkpoint、
-> inspect/diff/rewind/fork 和 mutating-tool workspace receipts；MCP 仍是最小
-> stdio 工具客户端，而不是完整的远程 MCP/插件市场。若只想看“现在还差什么”，
-> 直接跳到 **§10.9**。
+> inspect/diff/rewind/fork 和 mutating-tool workspace receipts；当前 T7 还加入
+> capability-first approval lease 与可验证 action receipt；MCP 仍是最小 stdio
+> 工具客户端，而不是完整的远程 MCP/插件市场。若只想看“现在还差什么”，
+> 直接跳到 **§10.10**。
 
 ## 0. 执行摘要（TL;DR）
 
-**当前结论：Northstar 已从“库 + 手工拼装”追到可安装、可审计、具备局部可逆执行的 headless harness，但还不是 Claude Code/Codex/Gemini 那样的完整产品。**本地实测 `make test` 为 **855 项**（runtime 561，4 项可选 OTel 测试因依赖缺失而跳过），权限门、hooks、预算、只追加 transcript、workspace receipts、checkpoint manifest、审计导出和离线确定性仍是最强资产。
+**当前结论：Northstar 已从“库 + 手工拼装”追到可安装、可审计、具备局部可逆执行的 headless harness，但还不是 Claude Code/Codex/Gemini 那样的完整产品。**本地实测 `make test` 为 **867 项测试（863 通过、4 项可选 OTel skip）**（runtime 571），权限门、hooks、预算、只追加 transcript、workspace receipts、checkpoint manifest、capability lease、可验证 action receipt、审计导出和离线确定性仍是最强资产。
 
 已经补齐的 DX 基础包括：五个可安装组件、console script、`doctor`/`dry-run`、AGENTS.md 与策略即代码、文件化 subagents、MCP stdio 最小客户端、标准 Agent Skills（含 `skills check/list`）、sessions 读回/NDJSON 审计、Python SDK、脚手架、API 文档和 CI recipe。**这些能力要以当前 checkout 的测试为准；本页后面的早期盘点是历史基线。**
 
@@ -614,15 +615,16 @@ Northstar 已上线能力。
   `restore`）必须 `--force`，默认不删除新增文件，并先创建 `before-rewind:*`
   safety checkpoint；`sessions fork` 只向不存在的目标目录原子 materialise，生成
   child 初始 checkpoint 与 `fork.json` lineage。
-- **验证**：runtime 新增 checkpoint API/CLI 测试和 mutating receipt 测试；当前
-  `make test` 为 **855 项**（runtime 561，4 项可选 OTel 测试 skip）。文档 API
-  生成器已纳入 `checkpoints` 模块，离线 session panel 的 record vocabulary 也已
-  同步 `workspace_change`。
+- **验证**：runtime 新增 checkpoint API/CLI 测试和 mutating receipt 测试；T6
+  完成时的快照为 `make test` **855 项**（runtime 561，4 项可选 OTel 测试 skip）。
+  T7 的当前统计见 §10.10；文档 API 生成器已纳入 `checkpoints` 模块，离线 session
+  panel 的 record vocabulary 也已同步 `workspace_change`。
 
 诚实边界仍然重要：这是本地 bounded snapshot，不是 copy-on-write、数据库事务、
 VM/OS sandbox 或远端 worker fork；自定义 mutating tool 若没有在 payload 中声明
-路径，receipt 只能记录动作而不能声称捕获了所有文件；manifest 目前未签名，且
-没有跨进程调度、approval lease、后台任务或 TypeScript/app-server 协议。
+路径，receipt 只能记录动作而不能声称捕获了所有文件；manifest 目前未签名。T6
+本身没有跨进程调度、后台任务或 TypeScript/app-server 协议；T7 的 approval lease
+与 action receipt 边界见 §10.10。
 
 **下一步优先级调整：**
 
@@ -630,7 +632,38 @@ VM/OS sandbox 或远端 worker fork；自定义 mutating tool 若没有在 paylo
    Artifact / Receipt` 合同：可配置 turn boundary、崩溃恢复和 checkpoint retention，
    但不让自动化绕过 force/approval。
 2. 为 mutating tool 引入声明式影响集（或工具返回的 artifact manifest），让 receipt
-   覆盖不止 `path`/`paths` 的自定义工具，并为 receipt/manifest 增加签名或可信 host
+   覆盖不止 `path`/`paths` 的自定义工具，并为 receipt/manifest 增加可信 host
    receipt 绑定。
 3. 在上述合同稳定后再做 TypeScript SDK、双向 app-server、后台 task queue 和远端
    worker transport；不先复制一个只服务于 TUI 的状态层。
+
+### 10.10 当前实现复核：T7 capability-first approval lease / receipt（2026-09-07）
+
+本节记录在 T6 之上的真实垂直切片；它不是把 durable-run 原型描述成已托管的平台。
+
+- **Lease**：`components/northstar-agent-runtime/receipts.py` 定义
+  `northstar.approval-lease.v1`，以精确 `session_id`、已解析 workspace、能力名、
+  `issued_at`/`expires_at` 和 `max_uses`/`uses` 约束授权。`ApprovalLeaseLedger.consume`
+  在消费点校验 scope、过期和次数，并按 expiry/lease id 确定性选取；没有通配符。
+- **Permission integration**：`permissions.py` 保留 `disallowed_tools` 和 plan mode 的
+  hard boundary；匹配 lease 在传统 `can_use_tool` callback 之前消费。callback 可以返回
+  `{allowed: true, lease: {...}}`，runtime 会 fail-closed 校验并登记；旧的 bool callback
+  仍兼容但不获得 lease 复用语义。
+- **Receipt**：每个 attempted tool call 产生 `ActionReceipt`（包括 denied/failed），
+  记录 capability、canonical input/output digest、可用的 workspace pre/post metadata
+  digest、消费的 `lease_id` 和显式 status。传入 host secret 后用 HMAC-SHA256 签名，
+  `verify()` 可验证序列化后的 receipt；`to_contract_receipt()` 投影到已有
+  `northstar.receipt.v1` status/postcondition shape。
+- **Host/SDK**：`northstar-host.authorization.issue_approval_lease` 从已验证的
+  `northstar.authorization.v1` grant 生成 bounded lease，并只允许缩窄 capability/expiry；
+  SDK `RunOptions` 可传 lease、receipt secret 和 clock。签名 receipt 以现有 session
+  `informational` record 的 `subtype=action_receipt` 保存，不记录 secret。
+- **边界**：lease 是 runtime 内的 bounded approval cache，不替代 durable-run
+  `ActionGateway` 的 argument digest、resource binding、idempotency 或 high-risk approval；
+  receipt 证明 runtime 规范化并观察到的结果，不是远端 attestation。没有 secret 时 receipt
+  可检查但不可验证；自定义工具未声明影响集时仍不能声称完整可逆。
+- **验证**：本轮 `make test` 为 868 项测试、864 项通过、4 项可选 OTel skip；
+  runtime 为 572 项。`python3 tests/docbuild.py build && verify` 与 `git diff --check`
+  均通过。
+
+T7 仍是 Unreleased；没有创建 tag、GitHub Release，也没有发布到 PyPI/npm。

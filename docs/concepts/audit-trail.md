@@ -15,9 +15,11 @@ the run reports success, so a crash still leaves the decision trail behind.
 `cli.py` exposes `sessions` subcommands to list and view transcripts
 read-only. Subagent runs nest as spans and are recorded too, so a delegation
 tree is auditable end to end. Mutating path-shaped tool calls add a
-`workspace_change` record with pre/post metadata hashes; the separate
-[reversible execution contract](reversible-execution.md) stores bounded file
-snapshots for recovery rather than putting file bytes in every receipt.
+`workspace_change` record with pre/post metadata hashes; when the host supplies a
+receipt secret, the same call also produces a signed `action_receipt` record.
+The separate [reversible execution contract](reversible-execution.md) stores
+bounded file snapshots for recovery rather than putting file bytes in every
+receipt.
 
 ## 2. Durable-run event store and verification
 
@@ -84,9 +86,10 @@ is the record's original timestamp.
 ## Honest ceiling
 
 Transcripts and stores are a **local audit trail, not a compliance store**:
-no signing, no retention policy, no tamper evidence (stated in the runtime
-README's limitations). The roadmap's P3-1 is delivered in two batches: the
-audit feed above (`audit.ndjson/1`, this batch) and policy schema-isation
+individual action receipts can be HMAC-verified when a host supplies a secret,
+but there is no global transcript signature chain or retention policy. The
+roadmap's P3-1 is delivered in two batches: the audit feed above
+(`audit.ndjson/1`, this batch) and policy schema-isation
 (`northstar-policy.toml` versioning, next batch).
 
 ## Reading on
