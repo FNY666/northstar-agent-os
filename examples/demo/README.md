@@ -19,9 +19,11 @@ the demo needs no `ANTHROPIC_API_KEY`, no network, and no `anthropic` package.
 The exit code is `0` on success and meaningful otherwise (see
 `components/northstar-agent-runtime/cli.py` for the mapping).
 
-The workspace also ships an `AGENTS.md`: project-instructions files like it are
-discovered automatically and appended to the system prompt (strictly inside the
-workspace root). `doctor` and `--dry-run` show which files apply:
+The workspace also ships repository extension files that every run honors:
+an `AGENTS.md` (project instructions appended to the system prompt), a
+repository subagent under `.northstar/agents/` (`--agent summariser`), and a
+skill package under `.northstar/skills/` whose name and description are listed
+in the prompt. `doctor` and `--dry-run` show which files apply:
 
 ```sh
 # does this host have what a run needs? (no request, no file writes)

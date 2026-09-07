@@ -128,15 +128,41 @@ def _checks(args: argparse.Namespace) -> list[Finding]:
     else:
         findings.append(Finding("sidecar", "ok", "off - CodexReadOnly tool is not registered (pass --sidecar-socket to enable)"))
 
-    # -- workspace policy file and project context -----------------------------
+    # -- workspace policy file, repository agents, skills, project context ------
     if workspace.is_dir():
         try:
+            from agent_files import AgentFileError, discover_agent_files
             from agents import builtin_registry
             from policy_file import PolicyFileError, discover_project_context, load_policy_file
+            from skills import SkillError, discover_skills
             from tools import build_default_registry
 
             registry = build_default_registry()
             agents = builtin_registry()
+            try:
+                file_agents = discover_agent_files(workspace, known_tools=registry.names())
+                for definition in file_agents:
+                    agents.register(definition, replace_existing=False)
+            except AgentFileError as error:
+                findings.append(Finding("agent-files", "fail", str(error)))
+                file_agents = ()
+            else:
+                if file_agents:
+                    names = ", ".join(definition.name for definition in file_agents)
+                    findings.append(Finding("agent-files", "ok", f"{len(file_agents)} repository agent(s): {names}"))
+                else:
+                    findings.append(Finding("agent-files", "ok", "none (.northstar/agents/*.md absent)"))
+            try:
+                skills = discover_skills(workspace)
+            except SkillError as error:
+                findings.append(Finding("skills", "fail", str(error)))
+                skills = ()
+            else:
+                if skills:
+                    names = ", ".join(skill.name for skill in skills)
+                    findings.append(Finding("skills", "ok", f"{len(skills)} package(s): {names} (listed in the system prompt)"))
+                else:
+                    findings.append(Finding("skills", "ok", "none (.northstar/skills/*/SKILL.md absent)"))
             policy = load_policy_file(workspace, known_tools=registry.names(), known_agents=agents.names())
         except PolicyFileError as error:
             findings.append(Finding("policy-file", "fail", str(error)))
@@ -156,18 +182,17 @@ def _checks(args: argparse.Namespace) -> list[Finding]:
                 if policy.read_only:
                     parts.append("read_only")
                 findings.append(Finding("policy-file", "ok", f"{policy.source} applies: {' '.join(parts)}"))
-            if workspace.exists():
-                try:
-                    configured = policy.project_context_setting if policy is not None else "AGENTS.md"
-                    context = discover_project_context(workspace, configured=configured)
-                except PolicyFileError as error:
-                    findings.append(Finding("project-context", "fail", str(error)))
+            try:
+                configured = policy.project_context_setting if policy is not None else "AGENTS.md"
+                context = discover_project_context(workspace, configured=configured)
+            except PolicyFileError as error:
+                findings.append(Finding("project-context", "fail", str(error)))
+            else:
+                if context is None:
+                    findings.append(Finding("project-context", "ok", f"off (no {configured if isinstance(configured, str) else 'AGENTS.md'} in workspace)"))
                 else:
-                    if context is None:
-                        findings.append(Finding("project-context", "ok", f"off (no {configured if isinstance(configured, str) else 'AGENTS.md'} in workspace)"))
-                    else:
-                        size = f"{len(context.text)} chars" + (" [truncated]" if context.truncated else "")
-                        findings.append(Finding("project-context", "ok", f"{context.name} ({size}) will be appended to the system prompt"))
+                    size = f"{len(context.text)} chars" + (" [truncated]" if context.truncated else "")
+                    findings.append(Finding("project-context", "ok", f"{context.name} ({size}) will be appended to the system prompt"))
     # -- scripted script -------------------------------------------------------
     if args.provider == "scripted" and args.script:
         try:
