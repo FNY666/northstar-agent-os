@@ -1,5 +1,337 @@
 # Northstar Agent OS — initial public component
 
+## Unreleased (twelfth batch) — remote-worker ops substance (T5)
+
+T5 answered the four P3-3 ops gaps with authoritative, code-grounded
+artifacts (docs/tests only by batch scope; no transport code ships and no
+CI run has touched a real host):
+
+- **Transport specification** (`docs/concepts/northstar-remote-transport.md`):
+  Profile A = reuse the existing systemd sidecar socket over an SSH forward
+  (zero runtime changes, no remote command execution); Profile B = container
+  fleets reusing `DurableRunner`/`EventStore`/`LeaseManager`/verifier;
+  vocabulary table cites only real artifacts; failure taxonomy reuses the
+  contract's fallback statuses; T5b checklist defines what "done" means.
+- **Identity/rotation story** (`docs/concepts/northstar-remote-identity.md`):
+  issuance (enrollment secret vs run-scoped binding, policy-revision
+  pinning) and rotation (dual-key grace, expiry backstop, revision kill
+  switch), grounded in the real binding/authorization/handoff/approval
+  machinery; no PKI/no revocation list stated; incidents and open decisions.
+- **Operations guide** (`docs/guides/remote-worker-operations.md`):
+  Recipe A deployment + rotation steps, Recipe B explicitly not built,
+  monitoring table of the three real signals (audit feed / OTEL spans /
+  trace_metrics), alert thresholds, incident runbook, first-run validation
+  checklist, honesty footer.
+- **Operator-run channel canary** (`examples/remote-canary/`): SSH
+  reachability → socket forward → deterministic JSON-lines probe that the
+  real server rejects before spawning anything (no model, no key), optional
+  `NS_REAL=1` real codex run; probe is CI-tested against the real
+  `sidecar_socket.serve` on a loopback socket; the full script needs a real
+  host and is never run by CI, by design.
+- **Scorecard re-scored honestly**: `remote_worker.py --score` 89 → **94/100**
+  (ops 33% → 67%) — the two doc-natured gaps (story, guide) now count real
+  repo artifacts whose status markers are themselves test-pinned; the two
+  implementation gaps (transport code, real canary run) stay MISSING with
+  explicit flip conditions. Living docs (concept page, Chinese assessment,
+  interop README) updated to 94; P3-3 ledger blocks keep their historical
+  numbers, superseded by this batch's record.
+- Repository doc tests 28 → 43; full `make test` 812 → 827 green. Aligned
+  `0.1.0.dev0`, no release.
+
+## Unreleased (eleventh batch) — observability read-back (P3-4)
+
+- **Concept page** (`docs/concepts/observability.md`): two read-back planes —
+  live OTEL spans vs. offline transcripts/audit export — with the real span
+  vocabulary (verified against `loop.py`), the ambient-tracer seam stated
+  plainly (the runtime never configures an exporter; a bare run exports
+  nowhere), and a "which plane when" table.
+- **Local trace backend example** (`examples/observability/`): docker compose
+  (Jaeger all-in-one OTLP/HTTP receiver + Grafana with provisioned core
+  Jaeger data source; no collector — deployment is an open T5 item) plus
+  `otel_bootstrap.py`, the provider seam for the CLI (OTLP/HTTP exporter,
+  `OTEL_EXPORTER_OTLP_ENDPOINT` override, checkout/site-packages fallback,
+  guided exit 3 on missing packages). Honesty pinned by tests: CI never runs
+  Docker, tags pinned at write time, exporter not in the tracing extra.
+- **Offline session panel** (`examples/session-panel/`): one self-contained
+  HTML file (zero network references) rendering session transcripts or
+  `audit.ndjson/1` exports via drag-and-drop — stats, errors/denials filter,
+  timeline with expandable raw JSON, FNV-1a 64 local fingerprint (labelled
+  non-cryptographic). `sample-session.jsonl` is a real transcript including
+  a denial path; only the absolute workspace path was masked (documented).
+- **Chinese assessment record** (`docs/dx-observability.zh-CN.md`), examples
+  index rows, CHANGELOG/batch records.
+- Repository doc tests 12 → 28 (panel + observability example suites; the
+  panel's JS is `node --check`ed when a Node runtime is present). Full
+  `make test` 796 → 812 green. No component behaviour changed and no
+  release (aligned `0.1.0.dev0`).
+
+## Unreleased (tenth batch) — remote/hosted worker evaluation (P3-3)
+
+- **Protocol map + decision record** (`docs/concepts/northstar-remote-worker.md`):
+  a hosted worker is a transport variant of the sidecar, not a new governance
+  surface — same run contract, host-signed short-lived grant, opaque
+  workspace, bounded version-pinned process, event/audit trail, verifiable
+  structured receipt. Transport options evaluated (sidecar-over-SSH lowest
+  cost; durable-run-runner+container for fleets; interop/OpenBot strategic;
+  a bespoke HTTP service rejected). Nothing is built or deployed.
+- **Reproducible scorecard** (`northstar-agent-interop/remote_worker.py`):
+  36 static checks across six areas; every check targets a real symbol in the
+  tree and the four ops gaps are explicit `MISSING` probes — the T5 work
+  list. Current score 89/100: contracts/host/durable-run/interop/audit all
+  100%, ops 33%. `python3 -m remote_worker --score` is CI-runnable and cannot
+  drift from the code it measures. Scorecard quality is itself tested
+  (kernel checks stay green, MISSING probes stay red until deliberately moved).
+- **Chinese assessment** (`docs/dx-remote-worker-assessment.zh-CN.md`):
+  TL;DR, asset inventory, protocol mapping, transport options, scores with
+  evidence, and the concrete next increment (T5).
+- API pages 52 → 53 modules. Interop tests 49 → 54.
+
+## Unreleased (ninth batch) — templates and scaffolding (P3-2)
+
+- **`northstar-agent-runtime new <directory>`** (`scaffold.py`) generates a
+  minimal governed project whose defaults are the governance defaults —
+  safe first, loosen deliberately:
+  - `.northstar/config.toml` — `northstar.policy.v1` + date-based `revision`,
+    with `agent = "reviewer"` baked in (every default run is read-only);
+  - `.northstar/agents/reviewer.md` — a read-only, plan-mode reviewer agent;
+  - `AGENTS.md` — project instructions (auto-injected);
+  - `.northstar/hooks/README.md` — hooks are registered in code
+    (`AgentRuntime(hooks=…)`), never auto-executed from workspace files; the
+    guide ships a correct copy-paste example;
+  - `.github/workflows/northstar-review.yml` — governed CI review recipe
+    (template; install source and API key left as TODOs);
+  - `README.md` — what was created and the three commands to try it.
+- Every generated file is validated by the runtime's own loaders: the config
+  parses under `load_policy_file`, the agent registers under `agent_files`,
+  `doctor` is green in the scaffolded workspace, and `--dry-run` reports the
+  policy identity. Refuses a non-empty directory unless `--force` (which
+  never deletes).
+- Runtime README "Creating a governed project (`new`)" section; layout row,
+  `py-modules`, CI compile line and docstring API manifest (51 → 52 modules)
+  updated. Runtime tests 522 → 536.
+
+## Unreleased (eighth batch) — policy as code: schema versioning + revision (P3-1b)
+
+- **Canonical policy identity** in `northstar-run-contract/policy.py`:
+  `northstar.policy.v1` + revision rules (id charset, ≤128 chars); the
+  runtime mirrors the constant locally (dependency-free), both pinned by
+  tests.
+- **Runtime `.northstar/config.toml`** accepts optional `schema_version`
+  (absent → v1) and optional `revision`. An unsupported (future) schema is a
+  fail-closed configuration error naming the supported version — a v2 file
+  can never be read with v1 semantics. `PolicyFile` carries both; dry-run
+  prints `schema=… revision=…`.
+- **Host policy as code**: `host_policy.load_host_policy` reads
+  `northstar-policy.toml` (schema_version optional/v1, revision required,
+  `[actors]` table) into a `HostPolicy`; unknown keys, unsupported schemas,
+  bad revisions and unparseable actors are refused at load time. The file's
+  `revision` is exactly what `authorize_run()` embeds in grants and the audit
+  feed exports as `policy_revision` — decision → policy revision traceability
+  end to end.
+- Docs: runtime README config example gains the two keys; host README gains a
+  "Policy as code" section; governance concept documents the versioned
+  policy surfaces. API pages 49 → 51 modules.
+  Tests: run-contract 34→41, host 28→37, runtime 515→522.
+
+## Unreleased (seventh batch) — Python SDK embedding surface (T1)
+
+- **Public event vocabulary** (`events.py`): `event_to_dict` shapes + result
+  `EXIT_CODES` moved out of `cli.py` into one module shared by `--json`, the
+  new SDK and anyone embedding the loop (CLI imports it; same output).
+- **`sdk.py` — Python API**: `RunOptions` (governance knobs: permission mode,
+  allow/deny, read-only, ceilings, halt-on-denial, session dir, subagents,
+  provider), `run(options)` → `RunReport` (subtype, exit code, session id,
+  turns, cost, denials, full event list), `stream_run(options)` → event dicts
+  as they happen, and session `resume` with the CLI's same-session-id
+  semantics. Workspace agent files register like the CLI does; `read_only`
+  derives from tool kinds. Scripted provider default keeps it fully offline.
+- **Example**: `examples/sdk/` — one run that gets a `Read` through and an
+  unallowed `Write` refused at the gate (`python3 examples/sdk/run_sdk_demo.py`).
+- Runtime README gains an "Embedding in Python (sdk)" section; layout table,
+  `py-modules`, CI compile line and the docstring API manifest (43 → 49
+  modules) all updated. Runtime tests 501 → 515.
+
+
+## 0.1.0 — candidate, NOT yet released
+
+The components are on aligned `0.1.0.dev0` and **no release has been cut**:
+this repository releases only when it is ready, and the readiness gate
+(`docs/guides/releasing-and-versioning.md` + `tests/test_release.py` +
+`.github/workflows/release.yml`) refuses dev-suffixed or misaligned tags.
+The batch notes below describe everything accumulated towards 0.1.0:
+packaging and CLI engineering (P0/P1), AGENTS.md + policy config + skills +
+subagents + MCP client (P2), four-layer documentation (P2-6), the canonical
+NDJSON audit feed export (P3-1a), release engineering (T2) and the Python SDK
+embedding surface (T1). The roadmap and scoring live in
+`docs/dx-benchmark-2026.zh-CN.md`.
+
+> The "Unreleased (first … sixth batch)" sections below are the historical
+> batch notes accumulated towards **0.1.0** (P0/P1 through P3-1a + release
+> engineering); none of it has shipped — see the readiness gate above.
+
+
+## Unreleased (sixth batch) — audit export: JSON → NDJSON → SIEM (P3-1a)
+
+- **Canonical audit feed `audit.ndjson/1`** in `northstar-run-contract`
+  (`audit.py`): a strictly validated NDJSON envelope (`schema_version`,
+  `component`, `event`, `ts`, `level`, `payload` + optional `seq` and
+  correlation ids). Unknown envelope fields are rejected — extending the
+  envelope is a schema revision, never a silent drift.
+- **Runtime bridge** (`audit_export.py` + `cli sessions export`): replays one
+  JSONL transcript to stdout as the audit feed. Denials, failed tool results
+  and `error_*` results carry `"level":"error"`; `ts` is the record's original
+  timestamp, never re-stamped. Mirrors the envelope locally: the runtime stays
+  dependency-free.
+- **Durable-run bridge** (`durable_audit.py`): every `EventStore` event maps
+  into the feed with its identity preserved (`event_id`/`task_id`/`run_id`/
+  `step_id`/`trace_id`/digest); failed/denied/error statuses raise the level to
+  `error`.
+- **Host bridge** (`host_audit.py`): verified authorization grants export as
+  `authorization_grant` records (actor, run, workspace, capabilities, policy
+  revision, expiry); tampered tokens stay verification errors, never records.
+- SIEM shipping guidance and the normative envelope table live in
+  `docs/concepts/audit-trail.md`; API pages regenerated (43 → 47 modules).
+  Tests: run-contract 22→34, host 24→28, durable 59→65, runtime 488→501;
+  repository total 701 → 736.
+
+## Unreleased (fifth batch) — documentation in four layers (P2-6)
+
+- **Per-component README link targets.** Every component README now opens with
+  a `## Concepts, guides and API reference` section pointing to the
+  cross-component concept pages, the guide pages and its own API page —
+  quick start → concepts → guides → API reference, instead of one flat file.
+- **Concept and guide pages** under `docs/concepts/` (governance, audit trail,
+  handoff and contracts) and `docs/guides/` (governed-run cookbook, packaging
+  and CI), each with accurate cross-links into the READMEs and API pages.
+- **Docstring-generated API reference.** `tests/docbuild.py` (pure `ast`,
+  stdlib-only and offline-safe — it never imports the modules it documents)
+  renders `docs/api/<component>.md` for all six components (43 modules,
+  committed). `python3 tests/docbuild.py build` regenerates; `verify` checks
+  freshness byte-for-byte and that every internal markdown link resolves.
+- **`examples/README.md` index page** covering every example recipe (demo,
+  ci-readonly-review), with a "where to start" decision list.
+- **CI documentation job = structure + build + links** (`test.yml`):
+  structure unit tests plus a dedicated `python3 tests/docbuild.py verify`
+  step. Repository documentation tests 3 → 8.
+
+## Unreleased (fourth batch) — minimal MCP stdio client
+
+- **MCP stdio client** (`northstar-agent-runtime`, experimental). `--mcp-server
+  NAME=COMMAND...` (repeatable) connects one Model Context Protocol server as a
+  child process speaking JSON-RPC 2.0 over stdio; `--mcp-timeout-ms` bounds each
+  request. The handshake (`initialize` → `notifications/initialized` →
+  `tools/list`) runs under the deadline, and a server that stops answering is
+  TERM→KILLed as a process group (client-side line/call caps bound output).
+- **Governed by default:** every remote tool registers as
+  `mcp__<server>__<tool>` with `kind="other"`/mutating-by-default, so under the
+  `default` permission mode it is denied until `--allow-tool` names it; policy
+  files may deny `mcp__*` names ahead of connection (forward-looking, like
+  `CodexReadOnly`); all calls still cross the gate and fire hooks. MCP is a
+  tool transport, never a policy bypass.
+- **Fail-closed CLI:** an unreachable server, a bad `NAME=`, a server that
+  exceeds the tool/schema caps, or `--mcp-server` combined with `--agent` (an
+  agent run's tool subset is fixed) are configuration errors (exit 64).
+  `--dry-run` and `doctor` list configured servers without spawning them.
+- Verified offline against `tests/fixtures/mcp_echo_server.py` (pure stdlib),
+  including timeout, error-result, and process-group cleanup paths. Runtime
+  tests 470 → 488.
+
+## Unreleased (third batch) — repository agents and skills
+
+- **Repository-defined subagents (`.northstar/agents/*.md`)**. A markdown file
+  with strict frontmatter (`name`, `description`, `tools`, optional `read_only`,
+  `permission_mode` limited to `default`/`plan`, ceilings no higher than the
+  runtime's built-in limits, `model`, `allow_delegation`, `require_verdict`)
+  and a prompt body compiles into the same `AgentDefinition` a built-in agent
+  uses: runnable with `--agent`, delegatable through `Task` under the existing
+  delegation gate, listed by `cli agents --workspace`. Names may not shadow a
+  built-in agent or another file; `read_only` only narrows the tool set;
+  unknown keys, unknown tools, loosening modes/ceilings, unparseable
+  frontmatter, and symlinks escaping the workspace are configuration errors
+  (exit 64) — never silently ignored. `--no-workspace-agents` skips discovery.
+- **Agent Skills, read-only (`.northstar/skills/*/SKILL.md`)**. Progressive
+  disclosure: only each skill's `name` and `description` enter the system
+  prompt; the model reads the full file with the ordinary sandboxed `Read`
+  tool when a task matches. Skill files are knowledge, not an execution or
+  permission channel; everything resolves strictly inside the workspace root.
+  `--no-skills` disables the listing.
+- **Strict frontmatter reader** (`frontmatter.py`): a dependency-free subset of
+  YAML frontmatter shared by both file types, with duplicate/malformed/unknown
+  content failing closed.
+- **Visibility:** `doctor` and `run --dry-run` report `workspace_agents=` and
+  `skills=` lines; the demo workspace now ships one repository agent and one
+  skill. Tests: runtime suite grows to 470 offline tests (24 new across
+  frontmatter, skills, agent files, and CLI integration).
+
+## Unreleased (second batch) — repository policy and project context
+
+- **`.northstar/config.toml` workspace policy file** (`northstar-agent-runtime`).
+  A repository that ships one pins the run's defaults; it may only ever
+  *tighten*: `permission_mode` limited to `default`/`plan`, `allow_tools`
+  rejected (approvals stay per-run CLI decisions), ceilings may only lower the
+  built-in values, denials and `read_only` are an additive floor that even
+  `--allow-tool` cannot resurrect, and file denials stay terminal in the
+  permission gate's first layer. Unknown keys, unreadable TOML, unknown tool
+  or agent names, and loosening values are configuration errors (exit 64) —
+  policy is never silently ignored. When both the file and the CLI set a
+  ceiling, the lower wins; `halt_on_denial` is true if either says so;
+  `--no-policy-file` skips the file for one run.
+- **Project context (`AGENTS.md`)**. A `AGENTS.md` in the workspace root (or the
+  file named by the policy's `project_context`, or an explicit `--context-file`)
+  is appended to the system prompt behind a clear delimiter. Discovery resolves
+  strictly inside the workspace root — a symlink pointing out is refused, never
+  followed — and oversized files are truncated with a marker.
+  `--no-project-context` disables discovery.
+- **Visibility:** `cli doctor` and `run --dry-run` report the effective
+  `policy_file=` and `project_context=` inputs before anything is sent; a
+  policy error fails a dry run exactly as it fails a real run.
+- **Demo:** `examples/demo/workspace/` now carries an `AGENTS.md` showing the
+  convention. Tests: 446 offline runtime tests green; the tighten-only limits
+  are asserted to stay in sync with the loop's built-in defaults.
+
+## Unreleased — DX foundations: installable packages, CLI self-checks, session read-back
+
+Phase 0–1 of the DX roadmap (see `docs/dx-benchmark-2026.zh-CN.md` for the full
+analysis and remaining phases). Everything below is additive; no runtime
+semantics changed.
+
+- **All six components are pip-installable.** Each `components/*/pyproject.toml`
+  declares `version = "0.1.0.dev0"`, real dependencies, and flat-module layouts
+  that match the existing in-tree names. The agent runtime additionally ships a
+  `northstar-agent-runtime` console script with lazy SDK imports (`[anthropic]`,
+  `[tracing]`, `[full]` extras; no hard dependency).
+- **The `tools.py` / `tools/` name collision is gone.** The module moved into
+  `tools/__init__.py`, so `import tools` and `import tools.verify_invariants`
+  both resolve; the guard-verification harness now mutates
+  `tools/__init__.py` and runs in CI.
+- **Dependencies are declared, not spliced.** `northstar-host` depends on
+  `northstar-run-contract`; `northstar-durable-run` and `northstar-agent-interop`
+  depend on both. All `PYTHONPATH=` prefixes are gone from CI and the Makefile
+  (the test modules bootstrap sibling paths themselves); CI installs by
+  dependency chain and runs a packaging smoke per component; `make install`
+  builds one virtualenv with every component.
+- **New CLI surface (`python3 -m cli`):** `--version` (single source
+  `_version.py`), `doctor` (side-effect-free environment self-check; fails on
+  broken checks, warns on missing optional SDKs), `run --dry-run` (prints the
+  resolved tools/allow-deny/ceilings/pricing and exits without constructing the
+  provider or sending a request), and `sessions list|show [--json]` (read-only
+  read-back of the append-only audit transcripts). `--probe-sidecar` with the
+  live provider now explains how to install the missing SDK instead of
+  tracebacking.
+- **One-line offline demo:** `make demo` (or `sh examples/demo/run_offline.sh`)
+  runs a full governed loop with a tool call, policy, ceilings, and an audit
+  transcript — no API key, no network, no SDK.
+- **CI-only read-only review recipe:** `examples/ci-readonly-review/` — governed
+  PR review with `--read-only`, turn and dollar ceilings, `--halt-on-denial`,
+  and a session transcript kept outside the reviewed workspace; includes a
+  GitHub Actions template and the exit-code contract.
+- **Releasing guide** added to `CONTRIBUTING.md` (dependency-graph release
+  order, immutable tags, semantic majors for contract components).
+- Tests: 621 offline tests green across the repository (agent runtime 413,
+  including 4 skipped where the SDK is absent); the five-guard invariant
+  harness turns each reverted guard red and keeps the untouched copy green.
+
+
 This repository establishes the Northstar Agent OS name and publishes five independently maintained components: Northstar Codex Sidecar, the Northstar Run Contract, the Northstar Agent Runtime, host-side candidates, and backend-neutral Agent Interop foundations.
 
 ## Agent Runtime (unreleased)
@@ -81,3 +413,4 @@ production deployment integration remain host-level responsibilities or future
 work.
 
 See [README.md](README.md) for installation and security boundaries.
+

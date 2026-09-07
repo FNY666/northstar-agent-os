@@ -28,21 +28,21 @@ would otherwise report as a policy conflict rather than doing what was asked.
 from __future__ import annotations
 
 import argparse
+import importlib.util
 import json
+import os
+import stat
 import sys
 from pathlib import Path
 from typing import Any, Sequence
 
+from _version import __version__
+from events import EXIT_CODES, event_to_dict
+from doctor import add_arguments as add_doctor_arguments
+from doctor import run_doctor
 from providers.base import ResultMessage
+from session_view import add_arguments as add_session_arguments
 
-EXIT_CODES = {
-    "success": 0,
-    "error_during_execution": 1,
-    "error_max_turns": 2,
-    "error_max_tool_calls": 3,
-    "error_max_budget_usd": 4,
-    "error_permission_denied": 5,
-}
 USAGE_ERROR = 64
 
 #: Tools that change state; ``--read-only`` refuses them at the gate.
@@ -59,8 +59,13 @@ def build_parser() -> argparse.ArgumentParser:
             "  python3 -m cli run --provider scripted --script plan.json --prompt 'summarise README'\n"
             "  python3 -m cli run --workspace . --read-only --sidecar-socket /var/run/northstar-codex/sidecar.sock\n"
             "  python3 -m cli tools --workspace .\n"
+            "  python3 -m cli doctor --workspace .\n"
+            "  python3 -m cli sessions list --session-dir /tmp/northstar-sessions\n"
+            "  python3 -m cli new my-project  # scaffold a governed project\n"
+            "  python3 -m cli sessions show --session-dir /tmp/northstar-sessions ns-20260907T000000Z-00000000\n"
         ),
     )
+    parser.add_argument("--version", action="version", version=f"northstar-agent-runtime {__version__}")
     sub = parser.add_subparsers(dest="command")
 
     run = sub.add_parser("run", help="run one agent loop to completion")
@@ -69,6 +74,13 @@ def build_parser() -> argparse.ArgumentParser:
     sub.add_parser("tools", help="list the built-in tools and their classification")
     agents = sub.add_parser("agents", help="list the built-in subagent definitions")
     agents.add_argument("--workspace", default=".", help="workspace used to describe tool availability")
+    doctor = sub.add_parser("doctor", help="self-check the host for one governed run (no requests, no file writes)")
+    add_doctor_arguments(doctor)
+    sessions = sub.add_parser("sessions", help="inspect persisted session transcripts (read-only)")
+    add_session_arguments(sessions)
+    new_proj = sub.add_parser("new", help="scaffold a governed project (config, agents, hooks guide, CI recipe)")
+    new_proj.add_argument("directory", help="directory to create (must not exist, or be empty unless --force)")
+    new_proj.add_argument("--force", action="store_true", help="write the template files into a non-empty directory (never deletes)")
     return parser
 
 
@@ -103,6 +115,16 @@ def _add_run_arguments(parser: argparse.ArgumentParser) -> None:
     policy.add_argument("--max-subagent-depth", type=int, default=1, help="0 disables delegation")
     policy.add_argument("--allow-nested-delegation", action="store_true", help="subagents may delegate one level deeper")
     policy.add_argument("--halt-on-denial", action="store_true", help="end the run with error_permission_denied when a call is refused")
+    policy.add_argument("--no-policy-file", action="store_true", help="ignore .northstar/config.toml in the workspace")
+    policy.add_argument("--no-workspace-agents", action="store_true", help="ignore .northstar/agents/*.md subagent files")
+    policy.add_argument("--no-skills", action="store_true", help="do not list .northstar/skills/*/SKILL.md packages in the system prompt")
+    context_group = policy.add_mutually_exclusive_group()
+    context_group.add_argument("--context-file", default="", metavar="PATH", help="inject this project-instructions file into the system prompt (must live inside the workspace)")
+    context_group.add_argument("--no-project-context", action="store_true", help="do not auto-inject AGENTS.md (or the policy file's project_context)")
+
+    mcp = parser.add_argument_group("mcp servers (experimental)")
+    mcp.add_argument("--mcp-server", dest="mcp_servers", action="append", default=[], metavar="NAME=COMMAND...", help="connect one MCP stdio server; its tools appear as mcp__NAME__tool and are mutating-by-default (denied until --allow-tool names them). Repeatable.")
+    mcp.add_argument("--mcp-timeout-ms", type=int, default=15_000, help="per-request deadline for the MCP handshake and tool calls")
 
     execution = parser.add_argument_group("execution delegation")
     execution.add_argument("--sidecar-socket", default="", help="Unix socket of northstar-codex-sidecar; enables the CodexReadOnly tool")
@@ -117,6 +139,7 @@ def _add_run_arguments(parser: argparse.ArgumentParser) -> None:
     output.add_argument("--resume", default="", help="session id to continue from --session-dir")
     output.add_argument("--redact-tool-output", action="store_true", help="record tool results in the session without output bodies")
     output.add_argument("--show-pricing", action="store_true", help="print the pricing decision and exit")
+    output.add_argument("--dry-run", action="store_true", help="validate the configuration and print what a run would do, then exit without sending any request (provider, model, and sidecar are not touched)")
 
 
 def _load_script(path: str) -> list[Any]:
@@ -159,6 +182,66 @@ def _build_provider(args: argparse.Namespace) -> Any:
     raise ValueError(f"unknown provider {args.provider!r}")
 
 
+def _check_anthropic_sdk() -> tuple[bool, str]:
+    """Whether the ``anthropic`` package is importable, and how to fix it if not.
+
+    Imported on demand (never at module import time) so the rest of the CLI stays
+    usable on hosts that only run the offline scripted provider.
+    """
+    if importlib.util.find_spec("anthropic") is not None:
+        return True, "anthropic SDK is installed"
+    return False, "the 'anthropic' package is not installed; pip install -r requirements.txt, or use --provider scripted"
+
+
+def _print_dry_run(
+    args: argparse.Namespace,
+    runtime: Any,
+    *,
+    policy_note: str = "none",
+    context_note: str = "off",
+    workspace_agents_note: str = "none",
+    skills_note: str = "none",
+    mcp_note: str = "off",
+) -> int:
+    """Print what a run would do and exit, without constructing a provider.
+
+    ``--dry-run`` is the read-only twin of ``--show-pricing``: it validates the
+    configuration the same way a real run would (including the workspace policy
+    file, if any), but never builds a provider and never touches the network,
+    the model SDK, or the sidecar socket.
+    """
+    from budget import price_for
+
+    config = runtime.config
+    pricing, estimated = price_for(config.model)
+    tool_names = runtime.tools.names()
+
+    agent_suffix = "" if config.agent in ("", "main") else f" (agent '{config.agent}')"
+    print(f"provider={args.provider} model={config.model}{agent_suffix}")
+    print(f"permission_mode={config.permission_mode}")
+    print(f"tools={','.join(tool_names) or '(none)'}")
+    print(f"allowed_tools={','.join(config.allowed_tools) or '(none)'}  "
+          f"disallowed_tools={','.join(config.disallowed_tools) or '(none)'}")
+    print(f"max_turns={config.max_turns} "
+          f"max_tool_calls={config.max_tool_calls or 'unlimited'} "
+          f"max_budget_usd={config.max_budget_usd or 'unlimited'}")
+    print(f"sidecar={'on' if config.sidecar_socket else 'off'} "
+          f"session_dir={args.session_dir or 'off'} "
+          f"halt_on_denial={config.halt_on_denial}")
+    print(f"policy_file={policy_note}")
+    print(f"project_context={context_note}")
+    print(f"workspace_agents={workspace_agents_note}")
+    print(f"skills={skills_note}")
+    print(f"mcp_servers={mcp_note}" + (" (not connected in dry-run)" if mcp_note != "off" else ""))
+    print(f"pricing: ${pricing.input_per_mtok}/MTok in, ${pricing.output_per_mtok}/MTok out "
+          f"(cache read x0.1, cache write x1.25)"
+          + (" - estimated" if estimated else ""))
+    print(f"estimated cost: ~${pricing.input_per_mtok / 1000:.3f} per 100K input tokens, "
+          f"~${pricing.output_per_mtok / 1000:.3f} per 100K output tokens")
+    print("dry-run: configuration is valid; no request was sent")
+    return 0
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(list(argv) if argv is not None else None)
@@ -169,14 +252,40 @@ def main(argv: Sequence[str] | None = None) -> int:
             print(f"{spec.name:<14} {spec.kind:<8} {'mutating' if spec.is_mutating else 'read-only':<10} {spec.description[:60]}")
         return 0
     if args.command == "agents":
+        from agent_files import AgentFileError, register_workspace_agents
         from agents import builtin_registry
+        from tools import build_default_registry
 
-        for definition in builtin_registry():
+        registry = builtin_registry()
+        try:
+            register_workspace_agents(registry, args.workspace, known_tools=build_default_registry().names())
+        except AgentFileError as error:
+            print(f"configuration error: {error}", file=sys.stderr)
+            return USAGE_ERROR
+        for definition in registry:
             print(f"{definition.name:<12} tools={','.join(definition.tools)}")
             print(f"{'':<12} mode={definition.permission_mode} turns={definition.max_turns} verdict={definition.require_verdict}")
             print(f"{'':<12} {definition.description}")
         return 0
+    if args.command == "new":
+        from scaffold import scaffold_project
+
+        try:
+            created = scaffold_project(args.directory, force=args.force)
+        except ValueError as error:
+            print(f"configuration error: {error}", file=sys.stderr)
+            return USAGE_ERROR
+        for path in created:
+            print(f"created {path}")
+        print("governed project scaffolded; start with `northstar-agent-runtime doctor --workspace <dir>`")
+        return 0
     if args.command != "run":
+        if args.command == "doctor":
+            return run_doctor(args)
+        if args.command == "sessions":
+            from session_view import run_sessions
+
+            return run_sessions(args)
         parser.print_help()
         return USAGE_ERROR
 
@@ -193,11 +302,50 @@ def main(argv: Sequence[str] | None = None) -> int:
         return USAGE_ERROR
 
 
+def _parse_mcp_servers(args: argparse.Namespace) -> list[tuple[str, list[str]]]:
+    """Parse --mcp-server flags (NAME=COMMAND...) without touching the network."""
+    from mcp_client import parse_mcp_flag
+
+    return [parse_mcp_flag(value) for value in getattr(args, "mcp_servers", []) or []]
+
+
+def _connect_mcp_clients(
+    servers: Sequence[tuple[str, list[str]]], timeout_ms: int, registry: Any
+) -> list[Any]:
+    """Connect each MCP server and register its tools (mcp__<server>__<tool>).
+
+    Every tool is mutating-by-default and needs_workspace=False, so the runtime's
+    permission gate denies it under 'default' until --allow-tool names it. On any
+    failure the servers opened so far are closed before the error propagates.
+    """
+    from mcp_client import McpStdioClient, mcp_tool_specs
+
+    clients: list[Any] = []
+    try:
+        for name, command in servers:
+            client = McpStdioClient(name, command, timeout_ms=timeout_ms)
+            client.connect()
+            try:
+                for spec in mcp_tool_specs(client):
+                    registry.register(spec, replace_existing=False)
+            except ValueError as error:
+                raise ValueError(f"mcp server {name!r}: cannot register tools: {error}") from error
+            clients.append(client)
+    except ValueError as error:
+        for client in clients:
+            client.close()
+        raise ValueError(f"mcp: {error}") from error
+    return clients
+
+
 def _run(args: argparse.Namespace) -> int:
+    from agent_files import AgentFileError, register_workspace_agents
     from agents import builtin_registry
-    from loop import AgentRuntime, RuntimeConfig, RuntimeConfigurationError
-    from permissions import subtract, validate_mode
+    from loop import AgentRuntime, DEFAULT_SYSTEM_PROMPT, RuntimeConfig, RuntimeConfigurationError
+    from permissions import validate_mode
+    from policy_file import PolicyFileError, append_project_context, discover_project_context, load_policy_file
     from sessions import SessionStore
+    from skills import SkillError, discover_skills, skill_listing
     from tools import ToolLimits, build_default_registry
 
     prompt = args.prompt
@@ -212,39 +360,108 @@ def _run(args: argparse.Namespace) -> int:
         print("no prompt: pass --prompt, --prompt-file, or --probe-sidecar", file=sys.stderr)
         return USAGE_ERROR
 
-    mode = "plan" if args.plan else args.permission_mode
-    validate_mode(mode)
     registry = build_default_registry()
-    allowed, denied = _tool_lists(args, base_tools=registry.names())
-
     agents = builtin_registry()
-    definition = None
-    if args.agent:
-        definition = agents.get(args.agent)
-        if definition is None:
-            # A typo on the command line is a usage error, not a traceback.
-            raise ValueError(f"unknown agent {args.agent!r}. Known agents: {', '.join(agents.names()) or '(none)'}")
-        # Running *as* a built-in definition inherits its tool subset and ceilings;
-        # the host's deny list still applies on top.
-        registry = registry.subset(definition.tools)
-        allowed = subtract(allowed, denied)
 
-    threshold = args.compaction_threshold_tokens or None
+    # Repository-defined subagents (.northstar/agents/*.md). Governed like
+    # built-ins: known tools only, tighten-only ceilings, fail-closed parse.
+    workspace_agents: tuple[Any, ...] = ()
+    if not args.no_workspace_agents:
+        try:
+            workspace_agents = register_workspace_agents(agents, args.workspace, known_tools=registry.names())
+        except AgentFileError as error:
+            print(f"configuration error: {error}", file=sys.stderr)
+            return USAGE_ERROR
+
+    # Workspace policy file (.northstar/config.toml). It may only tighten; any
+    # violation is a configuration error (exit 64), never a silent ignore.
+    # Known agents include repository-defined ones, so the file may pick them.
+    policy = None
+    if not args.no_policy_file:
+        try:
+            policy = load_policy_file(args.workspace, known_tools=registry.names(), known_agents=agents.names())
+        except PolicyFileError as error:
+            print(f"configuration error: {error}", file=sys.stderr)
+            return USAGE_ERROR
+
+    cli_mode = "plan" if args.plan else args.permission_mode
+    validate_mode(cli_mode)
+    # The file may pin 'plan' (or keep 'default'); it may never loosen. A CLI
+    # mode other than the built-in default is an explicit operator choice and
+    # wins. --no-policy-file is the escape hatch for an explicit 'default'.
+    mode = (
+        policy.permission_mode
+        if (policy is not None and policy.permission_mode is not None and cli_mode == "default")
+        else cli_mode
+    )
+    validate_mode(mode)
+
+    allowed_cli, denied_cli = _tool_lists(args, base_tools=registry.names())
+    denied_list = list(denied_cli)
+    if policy is not None:
+        # File denials and read_only are a floor: they add to the CLI denials
+        # and the permission gate's first layer keeps them terminal.
+        denied_list.extend(policy.deny_tools)
+        if policy.read_only:
+            denied_list.extend(MUTATING_TOOLS)
+    denied = tuple(dict.fromkeys(denied_list))
+    allowed = tuple(name for name in allowed_cli if name not in denied)
+
+    definition = None
+    agent_name = args.agent or (policy.agent if policy is not None else "")
+    if agent_name:
+        definition = agents.get(agent_name)
+        if definition is None:
+            # A typo (in a flag or in the policy file) is a usage error, not a traceback.
+            raise ValueError(f"unknown agent {agent_name!r}. Known agents: {', '.join(agents.names()) or '(none)'}")
+        # Running *as* a built-in definition inherits its tool subset and ceilings;
+        # the host's and policy file's deny lists still apply on top.
+        registry = registry.subset(definition.tools)
+        allowed = tuple(name for name in allowed if name in registry.names())
+
+    if args.mcp_servers and definition is not None:
+        # An agent-definition run fixes its tool subset by definition; silently
+        # adding MCP tools to that subset would widen the declared policy.
+        raise ValueError(
+            "--mcp-server cannot be combined with an agent-definition run (its tool "
+            "subset is fixed by the agent's definition); run without --agent to expose "
+            "MCP tools on the main loop"
+        )
+    mcp_servers: list[tuple[str, list[str]]] = []
+    if args.mcp_servers:
+        mcp_servers = _parse_mcp_servers(args)
+
+    def tighten(cli_value: int | None, file_value: int | None) -> int | None:
+        """Policy-file ceilings may only lower; when both are set, the lower wins."""
+        candidates = [value for value in (cli_value, file_value) if value is not None]
+        return min(candidates) if candidates else None
+
+    base_turns = definition.max_turns if definition else args.max_turns
+    base_tool_calls = definition.max_tool_calls if definition else args.max_tool_calls
+    max_turns = tighten(base_turns, policy.max_turns if policy is not None else None)
+    max_tool_calls = tighten(base_tool_calls, policy.max_tool_calls if policy is not None else None)
+    max_budget_usd = tighten(args.max_budget_usd, policy.max_budget_usd if policy is not None else None)
+    compaction_threshold = tighten(
+        args.compaction_threshold_tokens,
+        policy.compaction_threshold_tokens if policy is not None else None,
+    )
+    halt_on_denial = bool(args.halt_on_denial or (policy is not None and policy.halt_on_denial))
+
     config_kwargs: dict[str, Any] = {
         "model": (definition.model if definition and definition.model else args.model),
-        "max_turns": definition.max_turns if definition else args.max_turns,
-        "max_tool_calls": definition.max_tool_calls if definition else args.max_tool_calls,
-        "max_budget_usd": args.max_budget_usd,
+        "max_turns": max_turns,
+        "max_tool_calls": max_tool_calls,
+        "max_budget_usd": max_budget_usd,
         "permission_mode": definition.permission_mode if definition else mode,
         "allowed_tools": allowed,
         "disallowed_tools": denied,
         "workspace": args.workspace,
         "max_output_tokens": args.max_output_tokens,
-        "compaction_threshold_tokens": threshold,
+        "compaction_threshold_tokens": compaction_threshold or None,
         "compaction_keep_messages": args.compaction_keep_messages,
         "max_subagent_depth": args.max_subagent_depth,
         "allow_nested_delegation": args.allow_nested_delegation,
-        "halt_on_denial": args.halt_on_denial,
+        "halt_on_denial": halt_on_denial,
         "tool_limits": ToolLimits(),
         "record_tool_output_in_session": not args.redact_tool_output,
     }
@@ -254,6 +471,35 @@ def _run(args: argparse.Namespace) -> int:
         config_kwargs["system_prompt"] = definition.system_prompt(parent_cwd=args.workspace)
         config_kwargs["agent"] = definition.name
         config_kwargs["allow_delegation"] = definition.allow_delegation and args.max_subagent_depth > 0
+
+    # Project instructions (AGENTS.md by default, the policy file's
+    # project_context, or an explicit --context-file) are appended to whichever
+    # system prompt applies, as clearly delimited developer-authored content.
+    context = None
+    if args.context_file or not args.no_project_context:
+        configured = policy.project_context_setting if policy is not None else "AGENTS.md"
+        context = discover_project_context(
+            args.workspace,
+            configured=configured,
+            explicit=args.context_file or None,
+        )
+        if context is not None:
+            base_prompt = config_kwargs.get("system_prompt", DEFAULT_SYSTEM_PROMPT)
+            config_kwargs["system_prompt"] = append_project_context(base_prompt, context)
+
+    # Workspace skills (.northstar/skills/*/SKILL.md): progressive disclosure -
+    # only the name/description listing enters the prompt; the model reads the
+    # full SKILL.md with the ordinary sandboxed Read tool when a task matches.
+    skills: tuple[Any, ...] = ()
+    if not args.no_skills:
+        try:
+            skills = discover_skills(args.workspace)
+        except SkillError as error:
+            print(f"configuration error: {error}", file=sys.stderr)
+            return USAGE_ERROR
+    if skills:
+        base_prompt = config_kwargs.get("system_prompt", DEFAULT_SYSTEM_PROMPT)
+        config_kwargs["system_prompt"] = base_prompt + skill_listing(skills, args.workspace)
     if args.sidecar_socket:
         config_kwargs["sidecar_socket"] = args.sidecar_socket
         config_kwargs["sidecar_timeout_ms"] = args.sidecar_timeout_ms
@@ -266,13 +512,56 @@ def _run(args: argparse.Namespace) -> int:
         print(f"configuration error: {error}", file=sys.stderr)
         return USAGE_ERROR
 
+    if args.no_policy_file:
+        policy_note = "none (--no-policy-file)"
+    elif policy is not None:
+        policy_note = (
+            f"{policy.source} schema={policy.schema_version} revision={policy.revision or 'none'} "
+            f"mode={policy.permission_mode or 'default'} "
+            f"deny={','.join(policy.deny_tools) or 'none'} "
+            f"read_only={bool(policy.read_only)} budget={policy.max_budget_usd or 'none'} "
+            f"max_turns={policy.max_turns or 'none'} halt_on_denial={bool(policy.halt_on_denial)}"
+        )
+    else:
+        policy_note = "none"
+    if context is not None:
+        context_note = f"{context.name} ({len(context.text)} chars from {context.path})" + (" [truncated]" if context.truncated else "")
+    elif args.no_project_context and not args.context_file:
+        context_note = "off (--no-project-context)"
+    else:
+        context_note = "off (no AGENTS.md in the workspace)"
+    workspace_agents_note = ",".join(agent.name for agent in workspace_agents) or "none"
+    skills_note = (f"{len(skills)} package(s): " + ", ".join(skill.name for skill in skills)) if skills else "none"
+    if mcp_servers:
+        mcp_note = ", ".join(f"{name}={' '.join(command)}" for name, command in mcp_servers)
+    else:
+        mcp_note = "off"
+
     provider = _build_provider(args)
     runtime = AgentRuntime(provider=provider, config=config, tools=registry, sessions=store, agents=agents)
 
     if args.show_pricing:
         print(json.dumps(runtime.pricing(), indent=2, sort_keys=True))
         return 0
+    if args.dry_run:
+        # Never constructs the provider and never connects MCP servers:
+        # configuration is validated above, so a healthy configuration prints a
+        # plan and exits 0 before any request or child process.
+        return _print_dry_run(
+            args,
+            runtime,
+            policy_note=policy_note,
+            context_note=context_note,
+            workspace_agents_note=workspace_agents_note,
+            skills_note=skills_note,
+            mcp_note=mcp_note,
+        )
     if args.probe_sidecar:
+        if args.provider == "anthropic":
+            sdk_ok, message = _check_anthropic_sdk()
+            if not sdk_ok:
+                print(message, file=sys.stderr)
+                return USAGE_ERROR
         if runtime.sidecar is None:
             print("--probe-sidecar needs --sidecar-socket", file=sys.stderr)
             return USAGE_ERROR
@@ -280,69 +569,52 @@ def _run(args: argparse.Namespace) -> int:
         print(json.dumps(probe.as_dict(), indent=2, sort_keys=True))
         return 0 if probe.ok else 1
 
-    resume = store.transcript(args.resume) if args.resume else None
-    exit_code = 0
-    result = None
-    for event in runtime.run(prompt, resume=resume):
-        if args.json:
-            print(json.dumps(_event_to_json(event), ensure_ascii=False, sort_keys=True))
-        else:
-            _print_event(event, quiet=args.quiet)
-        if isinstance(event, ResultMessage):
-            result = event
-            exit_code = EXIT_CODES.get(event.subtype, 1)
-    if args.trace:
-        print(runtime.tracer.tree())
-    # --quiet suppresses the narration, not the result: a script wrapping the CLI
-    # still gets exactly one line to parse, including the session id.
-    if result is not None and not args.json:
-        report = runtime.last_report
-        tool_calls = len(report.tool_calls) if report is not None else 0
-        print(
-            f"\n[{result.subtype}] turns={result.num_turns} tool_calls={tool_calls} "
-            f"cost=${result.total_cost_usd:.6f}"
-            + (" (pricing estimated)" if result.pricing_estimated else "")
-            + f" session={result.session_id}"
-        )
-        # A run that ended in error must say why; the summary line alone is a dead
-        # end for whoever is reading a CI log.
-        for message in result.errors:
-            print(f"  ! {message}", file=sys.stderr)
-        for denial in result.permission_denials:
-            name = denial.get("tool", "?") if isinstance(denial, dict) else getattr(denial, "tool", "?")
-            print(f"  ! refused: {name}", file=sys.stderr)
-    return exit_code
-
-
-def _event_to_json(event: Any) -> dict[str, Any]:
-    kind = type(event).__name__
-    if kind == "ResultMessage":
-        return {
-            "type": "result",
-            "subtype": event.subtype,
-            "is_error": event.is_error,
-            "num_turns": event.num_turns,
-            "duration_ms": event.duration_ms,
-            "total_cost_usd": event.total_cost_usd,
-            "total_usage": event.total_usage.as_dict(),
-            "session_id": event.session_id,
-            "pricing_estimated": event.pricing_estimated,
-            "errors": list(event.errors),
-            "permission_denials": list(event.permission_denials),
-        }
-    if kind == "SystemMessage":
-        return {"type": "system", "subtype": event.subtype, "content": event.content, "data": event.data}
-    if kind == "AssistantMessage":
-        return {
-            "type": "assistant",
-            "content": [block.to_api() for block in event.content],
-            "model": event.model,
-            "usage": event.usage.as_dict(),
-            "stop_reason": event.stop_reason,
-        }
-    if kind == "UserMessage":
-        return {"type": "user", "content": [block.to_api() for block in event.content], "is_meta": event.is_meta}
-    return {"type": kind.lower(), "repr": str(event)[:400]}
+    # Connect MCP servers only now (never for --dry-run/--show-pricing/--probe):
+    # each remote tool lands in the run's registry as a mutating-by-default
+    # mcp__<server>__<tool> spec and still crosses the permission gate and hooks.
+    mcp_clients: list[Any] = []
+    if mcp_servers:
+        try:
+            mcp_clients = _connect_mcp_clients(mcp_servers, args.mcp_timeout_ms, registry)
+        except ValueError as error:
+            print(f"configuration error: {error}", file=sys.stderr)
+            return USAGE_ERROR
+    try:
+        resume = store.transcript(args.resume) if args.resume else None
+        exit_code = 0
+        result = None
+        for event in runtime.run(prompt, resume=resume):
+            if args.json:
+                print(json.dumps(event_to_dict(event), ensure_ascii=False, sort_keys=True))
+            else:
+                _print_event(event, quiet=args.quiet)
+            if isinstance(event, ResultMessage):
+                result = event
+                exit_code = EXIT_CODES.get(event.subtype, 1)
+        if args.trace:
+            print(runtime.tracer.tree())
+        # --quiet suppresses the narration, not the result: a script wrapping the
+        # CLI still gets exactly one line to parse, including the session id.
+        if result is not None and not args.json:
+            report = runtime.last_report
+            tool_calls = len(report.tool_calls) if report is not None else 0
+            print(
+                f"\n[{result.subtype}] turns={result.num_turns} tool_calls={tool_calls} "
+                f"cost=${result.total_cost_usd:.6f}"
+                + (" (pricing estimated)" if result.pricing_estimated else "")
+                + f" session={result.session_id}"
+            )
+            # A run that ended in error must say why; the summary line alone is a
+            # dead end for whoever is reading a CI log.
+            for message in result.errors:
+                print(f"  ! {message}", file=sys.stderr)
+            for denial in result.permission_denials:
+                name = denial.get("tool", "?") if isinstance(denial, dict) else getattr(denial, "tool", "?")
+                print(f"  ! refused: {name}", file=sys.stderr)
+        return exit_code
+    finally:
+        for client in mcp_clients:
+            client.close()
 
 
 def _print_event(event: Any, *, quiet: bool = False) -> None:

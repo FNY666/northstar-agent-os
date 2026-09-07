@@ -1,0 +1,493 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Northstar session panel — offline JSONL viewer</title>
+<style>
+  :root {
+    --bg: #0f1115; --panel: #171a21; --line: #262b36; --ink: #dbe2ec;
+    --muted: #8b95a5; --accent: #5aa2ff; --ok: #3fbf6f; --err: #ff6b6b;
+    --warn: #e8b339; --chip: #1f2530;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--ink);
+         font: 14px/1.5 ui-monospace, "SF Mono", Menlo, Consolas, monospace; }
+  header { padding: 14px 20px; border-bottom: 1px solid var(--line);
+           display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap; }
+  header h1 { font-size: 16px; margin: 0; letter-spacing: .4px; }
+  header .sub { color: var(--muted); font-size: 12px; }
+  main { padding: 16px 20px 40px; max-width: 1100px; margin: 0 auto; }
+  #dropzone { border: 1px dashed var(--line); border-radius: 8px; padding: 22px;
+              text-align: center; color: var(--muted); cursor: pointer;
+              background: var(--panel); }
+  #dropzone.drag { border-color: var(--accent); color: var(--accent); }
+  #dropzone button { background: var(--chip); color: var(--ink); border: 1px solid var(--line);
+                     border-radius: 6px; padding: 6px 14px; cursor: pointer; font: inherit; }
+  #dropzone button:hover { border-color: var(--accent); }
+  #file-name { margin: 10px 0 0; color: var(--accent); }
+  .cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+           gap: 10px; margin: 14px 0; }
+  .card { background: var(--panel); border: 1px solid var(--line); border-radius: 8px;
+          padding: 10px 12px; }
+  .card .k { color: var(--muted); font-size: 11px; text-transform: uppercase; }
+  .card .v { font-size: 18px; margin-top: 2px; }
+  .card .v.small { font-size: 13px; }
+  #filters { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin: 10px 0; }
+  .chip { background: var(--chip); border: 1px solid var(--line); border-radius: 20px;
+          padding: 3px 10px; cursor: pointer; user-select: none; color: var(--muted); font-size: 12px; }
+  .chip.on { color: var(--ink); border-color: var(--accent); }
+  .chip .n { color: var(--muted); margin-left: 4px; }
+  label.toggle { color: var(--muted); font-size: 12px; margin-left: auto;
+                 display: flex; align-items: center; gap: 6px; cursor: pointer; }
+  .row { border: 1px solid var(--line); border-left: 3px solid var(--muted);
+         background: var(--panel); border-radius: 6px; padding: 8px 12px; margin: 6px 0; }
+  .row.err { border-left-color: var(--err); }
+  .row.ok { border-left-color: var(--ok); }
+  .row.warn { border-left-color: var(--warn); }
+  .row.audit { border-left-color: var(--accent); }
+  .row .top { display: flex; gap: 10px; align-items: baseline; flex-wrap: wrap; }
+  .badge { font-size: 11px; padding: 1px 8px; border-radius: 10px; border: 1px solid var(--line);
+           color: var(--ink); white-space: nowrap; }
+  .badge.audit { border-color: var(--accent); color: var(--accent); }
+  .badge.error { border-color: var(--err); color: var(--err); }
+  .row .ts { color: var(--muted); font-size: 11px; }
+  .row .agent { color: var(--muted); font-size: 11px; }
+  .row .sum { margin: 4px 0 0; color: var(--ink); white-space: pre-wrap; word-break: break-word; }
+  .row .meta { margin: 4px 0 0; color: var(--muted); font-size: 12px; word-break: break-word; }
+  details { margin-top: 4px; }
+  summary { color: var(--muted); cursor: pointer; font-size: 12px; }
+  pre { background: #0c0e12; border: 1px solid var(--line); border-radius: 6px;
+        padding: 8px; overflow-x: auto; font-size: 12px; max-height: 260px; overflow-y: auto; }
+  #parse-errors { color: var(--err); margin: 8px 0; font-size: 12px; }
+  footer { color: var(--muted); font-size: 11px; text-align: center; padding: 10px; }
+  .hidden { display: none; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Northstar session panel</h1>
+  <span class="sub">offline viewer for session transcripts (*.jsonl) and the audit NDJSON feed — this file never talks to a network</span>
+</header>
+<main>
+  <div id="dropzone">
+    <p>Drop a <strong>session transcript</strong> (<code>*.jsonl</code>, e.g. from
+    <code>python3 -m cli run --session-dir …</code>) or an <strong>audit export</strong>
+    (<code>python3 -m cli sessions export &lt;id&gt; --session-dir … &gt; audit.ndjson</code>) here, or</p>
+    <p><button type="button" id="pick">choose a file…</button>
+    <input type="file" id="file-input" accept=".jsonl,.ndjson,.json,.txt" class="hidden"></p>
+  </div>
+  <p id="file-name"></p>
+  <div id="parse-errors"></div>
+
+  <div class="cards hidden" id="summary-cards"></div>
+
+  <div id="filters" class="hidden"></div>
+  <label class="toggle hidden" id="err-only-toggle"><input type="checkbox" id="err-only">
+    errors &amp; denials only</label>
+
+  <div id="timeline"></div>
+</main>
+<footer>Renders entirely in your browser; no bytes leave your machine. Local fingerprint is FNV-1a 64 over the file text — a convenience integrity marker, not a cryptographic hash.</footer>
+
+<script>
+"use strict";
+
+/* ---- record vocabulary (mirrors sessions.py RECORD_TYPES) ---- */
+var RECORD_TYPES = [
+  "session_start", "user_prompt", "assistant", "tool_result", "hook",
+  "denial", "compact_boundary", "informational", "subagent", "result",
+  "session_end"
+];
+var TYPE_COLOR = {
+  session_start: "ok", session_end: "ok", user_prompt: "warn", assistant: "ok",
+  tool_result: "ok", hook: "warn", denial: "err", compact_boundary: "warn",
+  informational: "warn", subagent: "ok", result: "ok"
+};
+var MAX_PREVIEW = 300;
+var MAX_RAW = 20000;
+var MAX_LINES = 500000;
+
+var els = {
+  dropzone: document.getElementById("dropzone"),
+  pick: document.getElementById("pick"),
+  input: document.getElementById("file-input"),
+  fileName: document.getElementById("file-name"),
+  errors: document.getElementById("parse-errors"),
+  cards: document.getElementById("summary-cards"),
+  filters: document.getElementById("filters"),
+  timeline: document.getElementById("timeline"),
+  errOnly: document.getElementById("err-only"),
+  errToggle: document.getElementById("err-only-toggle")
+};
+
+var state = { records: [], filter: {}, errOnly: false };
+
+/* ---- FNV-1a 64 over the raw file text (non-cryptographic integrity aid) ---- */
+function fnv1a64(text) {
+  var h = 0xcbf29ce484222325n;
+  for (var i = 0; i < text.length; i++) {
+    h ^= BigInt(text.charCodeAt(i));
+    h = BigInt.asUintN(64, h * 0x100000001b3n);
+  }
+  return "0x" + h.toString(16).padStart(16, "0");
+}
+
+/* ---- parsing ---- */
+function parseFile(text) {
+  var records = [];
+  var bad = [];
+  var lines = text.split(/\r?\n/);
+  if (lines.length > MAX_LINES) {
+    return { records: [], bad: [[1, "file too large: " + lines.length + " lines (cap " + MAX_LINES + ")"]] };
+  }
+  for (var i = 0; i < lines.length; i++) {
+    var line = lines[i];
+    if (!line.trim()) { continue; }
+    try {
+      var obj = JSON.parse(line);
+      if (obj && typeof obj === "object") { records.push(obj); }
+      else { bad.push([i + 1, "not a JSON object"]); }
+    } catch (e) { bad.push([i + 1, "invalid JSON: " + e.message]); }
+  }
+  return { records: records, bad: bad };
+}
+
+function isAudit(rec) { return typeof rec.schema_version === "string" || typeof rec.payload === "object" && rec.payload !== null; }
+function textBlocks(rec) { return Array.isArray(rec.content) ? rec.content : []; }
+
+function summarize(rec) {
+  if (rec.type === "session_start" || rec.type === "session_end") {
+    return [String(rec.subtype || ""), rec.content ? String(rec.content) : ""].filter(Boolean).join(" — ");
+  }
+  if (rec.type === "denial") {
+    return "tool=" + String(rec.tool || "?") + " source=" + String(rec.source || "?") +
+      " turn=" + String(rec.turn_index != null ? rec.turn_index : "?") + "\n" + String(rec.reason || "");
+  }
+  if (rec.type === "user_prompt" || rec.type === "assistant" || rec.type === "tool_result" || rec.type === "subagent") {
+    var out = [];
+    var blocks = textBlocks(rec);
+    if (rec.type === "subagent") {
+      var data = rec.data && typeof rec.data === "object" ? rec.data : rec;
+      out.push("agent=" + String(data.agent || rec.agent || "?") + " result=" + String(data.result || ""));
+    }
+    blocks.forEach(function (b) {
+      if (!b || typeof b !== "object") { return; }
+      if (b.type === "text" && typeof b.text === "string") { out.push(b.text); }
+      else if (b.type === "tool_use") {
+        out.push("\u21b3 " + String(b.name || "?") + (b.input ? " " + JSON.stringify(b.input) : "") +
+                 (rec.type === "assistant" && b.id ? "  [id " + b.id + "]" : ""));
+      } else if (b.type === "tool_result") {
+        out.push((b.is_error ? "\u2717" : "\u2713") + " " + String(b.tool_use_id || "tool_result") +
+                 (typeof b.content === "string" ? " " + b.content : ""));
+      } else {
+        out.push(JSON.stringify(b));
+      }
+    });
+    var text = out.join("\n");
+    if (text === "" && typeof rec.content === "string") { text = rec.content; }
+    return text;
+  }
+  if (rec.type === "hook") {
+    return JSON.stringify(rec.data && typeof rec.data === "object" ? rec.data : rec);
+  }
+  if (rec.type === "result") {
+    var parts = ["subtype=" + String(rec.subtype || "?")];
+    parts.push("turns=" + String(rec.num_turns != null ? rec.num_turns : "?"));
+    parts.push("duration_ms=" + String(rec.duration_ms != null ? rec.duration_ms : "?"));
+    parts.push("cost_usd=" + String(rec.total_cost_usd != null ? rec.total_cost_usd : "0"));
+    if (rec.permission_denials && rec.permission_denials.length) {
+      parts.push("denials=" + rec.permission_denials.length);
+    }
+    if (rec.errors && rec.errors.length) { parts.push("errors=" + rec.errors.length); }
+    return parts.join("  ") + (rec.is_error && rec.errors && rec.errors.length ? "\n" + rec.errors.join("\n") : "");
+  }
+  // compact_boundary / informational / anything unknown: show non-envelope fields
+  var rest = {};
+  Object.keys(rec).forEach(function (k) {
+    if (["index", "ts", "session_id", "type", "agent"].indexOf(k) === -1) { rest[k] = rec[k]; }
+  });
+  return JSON.stringify(rest);
+}
+
+function previewOf(text) {
+  if (text.length <= MAX_PREVIEW) { return text; }
+  return text.slice(0, MAX_PREVIEW) + " \u2026 [" + (text.length - MAX_PREVIEW) + " more chars]";
+}
+
+function isErrorRecord(rec) {
+  if (isAudit(rec)) { return rec.level === "error"; }
+  if (rec.type === "denial") { return true; }
+  if (rec.is_error === true) { return true; }
+  if (rec.subtype && String(rec.subtype).indexOf("error") === 0) { return true; }
+  if (rec.type === "tool_result") {
+    return textBlocks(rec).some(function (b) { return b && b.is_error === true; });
+  }
+  return false;
+}
+
+/* ---- stats ---- */
+function stats(records) {
+  var byType = {};
+  var sessions = {};
+  var cost = 0;
+  var resultCount = 0;
+  var denials = 0;
+  var badAudit = 0;
+  records.forEach(function (r) {
+    var kind = isAudit(r) ? "audit" : (RECORD_TYPES.indexOf(r.type) !== -1 ? r.type : "other:" + r.type);
+    byType[kind] = (byType[kind] || 0) + 1;
+    var sid = r.session_id || (r.payload && typeof r.payload === "object" ? r.payload.session_id : null) || "(none)";
+    sessions[sid] = (sessions[sid] || 0) + 1;
+    if (r.type === "result") {
+      resultCount++;
+      var c = parseFloat(r.total_cost_usd);
+      if (!isNaN(c)) { cost += c; }
+    }
+    if (r.type === "denial") { denials++; }
+  });
+  return { byType: byType, sessions: sessions, cost: cost, resultCount: resultCount, denials: denials };
+}
+
+/* ---- rendering ---- */
+function esc(s) {
+  return String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+}
+
+function badge(text, cls) {
+  var b = document.createElement("span");
+  b.className = "badge" + (cls ? " " + cls : "");
+  b.textContent = text;
+  return b;
+}
+
+function sortRecords(records) {
+  return records.slice().sort(function (a, b) {
+    if (a.ts && b.ts && a.ts !== b.ts) { return a.ts < b.ts ? -1 : 1; }
+    return (a.index || 0) - (b.index || 0);
+  });
+}
+
+function appendRaw(row, rec) {
+  var det = document.createElement("details");
+  var sum = document.createElement("summary");
+  sum.textContent = "raw JSON";
+  var pre = document.createElement("pre");
+  var text = JSON.stringify(rec, null, 2);
+  pre.textContent = text.length > MAX_RAW ? text.slice(0, MAX_RAW) + "\n\u2026 [truncated]" : text;
+  det.appendChild(sum);
+  det.appendChild(pre);
+  row.appendChild(det);
+}
+
+function renderAuditRow(rec) {
+  var row = document.createElement("div");
+  row.className = "row audit" + (isErrorRecord(rec) ? " err" : "");
+  var top = document.createElement("div");
+  top.className = "top";
+  top.appendChild(badge("audit:" + esc(rec.event || "record"), "audit"));
+  var level = document.createElement("span");
+  level.className = "badge" + (rec.level === "error" ? " error" : "");
+  level.textContent = String(rec.level || "info");
+  top.appendChild(level);
+  var ts = document.createElement("span");
+  ts.className = "ts";
+  ts.textContent = String(rec.ts || "");
+  top.appendChild(ts);
+  var sum = document.createElement("div");
+  sum.className = "sum";
+  var payload = rec.payload && typeof rec.payload === "object" ? rec.payload : rec;
+  sum.textContent = previewOf(JSON.stringify(payload));
+  row.appendChild(top);
+  row.appendChild(sum);
+  appendRaw(row, rec);
+  return row;
+}
+
+function renderRecord(rec) {
+  var audit = isAudit(rec);
+  if (audit) { return renderAuditRow(rec); }
+  var row = document.createElement("div");
+  var color = TYPE_COLOR[rec.type] || "warn";
+  var error = isErrorRecord(rec);
+  row.className = "row " + (error ? "err" : color);
+  var top = document.createElement("div");
+  top.className = "top";
+  var b = badge(rec.type || "record", error ? "error" : "");
+  top.appendChild(b);
+  var ts = document.createElement("span");
+  ts.className = "ts";
+  ts.textContent = String(rec.ts || "");
+  top.appendChild(ts);
+  if (rec.session_id) {
+    var sid = document.createElement("span");
+    sid.className = "agent";
+    sid.textContent = rec.session_id;
+    top.appendChild(sid);
+  }
+  if (rec.type === "result") {
+    top.appendChild(badge(String(rec.subtype || ""), rec.is_error ? "error" : ""));
+  }
+  if (rec.type === "assistant") {
+    top.appendChild(badge(esc(String(rec.model || ""))));
+    if (rec.usage && typeof rec.usage === "object") {
+      var us = document.createElement("span");
+      us.className = "agent";
+      us.textContent = "in=" + String(rec.usage.input_tokens != null ? rec.usage.input_tokens : 0) +
+        " out=" + String(rec.usage.output_tokens != null ? rec.usage.output_tokens : 0);
+      top.appendChild(us);
+    }
+  }
+  row.appendChild(top);
+  var sum = document.createElement("div");
+  sum.className = "sum";
+  sum.textContent = previewOf(summarize(rec)) || "(no text content)";
+  row.appendChild(sum);
+  if (error && rec.type === "tool_result") {
+    // failed tool results carry the reason inside content; summarize already shows it
+  }
+  appendRaw(row, rec);
+  return row;
+}
+
+function addCard(container, k, v, small) {
+  var card = document.createElement("div");
+  card.className = "card";
+  var key = document.createElement("div");
+  key.className = "k";
+  key.textContent = k;
+  var val = document.createElement("div");
+  val.className = "v" + (small ? " small" : "");
+  val.textContent = v;
+  card.appendChild(key);
+  card.appendChild(val);
+  container.appendChild(card);
+}
+
+function visibleTypes() {
+  var kinds = {};
+  state.records.forEach(function (r) {
+    var kind = isAudit(r) ? "audit" : (RECORD_TYPES.indexOf(r.type) !== -1 ? r.type : "other:" + r.type);
+    kinds[kind] = (kinds[kind] || 0) + 1;
+  });
+  return kinds;
+}
+
+function render() {
+  var kinds = visibleTypes();
+  var keys = Object.keys(kinds).sort();
+
+  // summary cards
+  var s = stats(state.records);
+  els.cards.textContent = "";
+  els.cards.classList.remove("hidden");
+  addCard(els.cards, "records", state.records.length);
+  addCard(els.cards, "sessions", Object.keys(s.sessions).length, true);
+  addCard(els.cards, "cost usd", s.cost.toFixed(6));
+  addCard(els.cards, "denials", s.denials);
+  addCard(els.cards, "result records", s.resultCount, true);
+  var fp = document.createElement("div");
+  fp.className = "card";
+  fp.innerHTML = '<div class="k">local fingerprint (fnv-1a64)</div><div class="v small" id="fp">' + esc(state.fingerprint) + "</div>";
+  els.cards.appendChild(fp);
+
+  // filter chips
+  els.filters.textContent = "";
+  els.filters.classList.remove("hidden");
+  keys.forEach(function (kind) {
+    var chip = document.createElement("span");
+    chip.className = "chip on";
+    chip.dataset.kind = kind;
+    var n = document.createElement("span");
+    n.className = "n";
+    n.textContent = String(kinds[kind]);
+    chip.appendChild(document.createTextNode(kind + " "));
+    chip.appendChild(n);
+    chip.addEventListener("click", function () {
+      var on = chip.classList.toggle("on");
+      state.filter[kind] = on;
+      renderTimeline();
+    });
+    els.filters.appendChild(chip);
+  });
+  els.errToggle.classList.remove("hidden");
+  renderTimeline();
+}
+
+function renderTimeline() {
+  var sorted = sortRecords(state.records);
+  els.timeline.textContent = "";
+  var shown = 0;
+  sorted.forEach(function (r) {
+    var kind = isAudit(r) ? "audit" : (RECORD_TYPES.indexOf(r.type) !== -1 ? r.type : "other:" + r.type);
+    if (state.filter[kind] === false) { return; }
+    if (state.errOnly && !isErrorRecord(r)) { return; }
+    els.timeline.appendChild(renderRecord(r));
+    shown++;
+  });
+  if (shown === 0) {
+    var none = document.createElement("p");
+    none.textContent = state.records.length === 0 ? "No records parsed — drop a *.jsonl / *.ndjson file above." : "Nothing matches the current filters.";
+    none.style.color = "#8b95a5";
+    els.timeline.appendChild(none);
+  }
+}
+
+/* ---- loading ---- */
+function loadText(text, name) {
+  state.records = [];
+  state.filter = {};
+  state.errOnly = false;
+  els.errOnly.checked = false;
+  els.errors.textContent = "";
+  els.fileName.textContent = name + " — " + text.length + " bytes";
+  var parsed = parseFile(text);
+  state.records = parsed.records;
+  state.fingerprint = fnv1a64(text);
+  if (parsed.bad.length) {
+    els.errors.textContent = parsed.bad.length + " unparseable line(s): " +
+      parsed.bad.slice(0, 5).map(function (p) { return "#" + p[0] + " " + p[1]; }).join(" | ");
+  }
+  if (state.records.length === 0) {
+    els.timeline.textContent = "";
+    els.cards.classList.add("hidden");
+    els.filters.classList.add("hidden");
+    els.errToggle.classList.add("hidden");
+    return;
+  }
+  render();
+}
+
+function readFile(file) {
+  if (file.size > 200 * 1024 * 1024) {
+    els.fileName.textContent = file.name + " — too large (cap 200 MB); refusing to read.";
+    return;
+  }
+  var reader = new FileReader();
+  reader.onload = function () { loadText(String(reader.result), file.name); };
+  reader.onerror = function () { els.fileName.textContent = "could not read " + file.name; };
+  reader.readAsText(file, "utf-8");
+}
+
+els.pick.addEventListener("click", function () { els.input.click(); });
+els.input.addEventListener("change", function () {
+  if (els.input.files && els.input.files[0]) { readFile(els.input.files[0]); }
+  els.input.value = "";
+});
+["dragover", "dragenter"].forEach(function (ev) {
+  els.dropzone.addEventListener(ev, function (e) { e.preventDefault(); els.dropzone.classList.add("drag"); });
+});
+["dragleave", "drop"].forEach(function (ev) {
+  els.dropzone.addEventListener(ev, function (e) { e.preventDefault(); els.dropzone.classList.remove("drag"); });
+});
+els.dropzone.addEventListener("drop", function (e) {
+  var file = e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files[0];
+  if (file) { readFile(file); }
+});
+els.errOnly.addEventListener("change", function () {
+  state.errOnly = els.errOnly.checked;
+  renderTimeline();
+});
+</script>
+</body>
+</html>

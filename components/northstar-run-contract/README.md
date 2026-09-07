@@ -2,6 +2,31 @@
 
 This component defines the versioned structural boundary between an Agent OS orchestrator and a controlled worker such as the Codex Sidecar.
 
+## Concepts, guides and API reference
+
+- Concepts: [governance and the permission gate](../../docs/concepts/governance.md) ·
+  [handoff and contracts](../../docs/concepts/handoff-and-contracts.md)
+- Guides: [packaging and CI](../../docs/guides/packaging-and-ci.md)
+- API reference: [generated from docstrings](../../docs/api/northstar-run-contract.md)
+
+## Install (pip)
+
+The contract is pure standard library, so it installs with no dependencies and
+stays importable in the most constrained verification environments:
+
+```sh
+pip install .          # from a checkout
+# or, once published:
+pip install northstar-run-contract
+```
+
+The three modules are installed under their in-tree names and the version
+(`0.1.0.dev0`, unreleased) is declared in `pyproject.toml`:
+
+```python
+import contract, binding, adapter
+```
+
 ## Trust boundary
 
 `validate_run_request()` checks shape, size, identifiers, task kind, timeout, and requested capability syntax. It does **not** authenticate the caller and it does **not** grant any requested capability. `actor_id` and `workspace_id` are declarations until a host-provided authenticated binding is verified.
@@ -31,3 +56,9 @@ The signed binding layer is intentionally separate from structural validation. `
 ## Current scope
 
 This is a pure standard-library contract component. It does not create workspaces, run commands, store secrets, or claim production isolation. The Sidecar adapter is a separate layer.
+
+Besides the run request/receipt, the component owns the canonical **audit
+feed** envelope (`audit.py`, `audit.ndjson/1`): the versioned NDJSON record
+shape that runtime transcripts, durable-run events and host authorization
+grants all export into (see the
+[audit trail concept](../../docs/concepts/audit-trail.md)).

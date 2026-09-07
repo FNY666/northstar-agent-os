@@ -1,0 +1,33 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "northstar-host"
+description = "Host-side local candidate for Northstar Agent OS: explicit default-deny policy grants and opaque 0700 workspace allocation, re-verifying the Run Binding before anything runs."
+readme = "README.md"
+license = { text = "MIT" }
+requires-python = ">=3.10"
+# The version string is static here; releases bump all five component versions
+# together (tests/test_release.py keeps them aligned).
+version = "0.1.0.dev0"
+keywords = ["agent", "host", "authorization", "workspace", "policy", "northstar"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Software Development",
+]
+# workspace.py validates and re-verifies the Run Binding from the contract
+# component at runtime. Install the dependency from this repository first until
+# northstar-run-contract is published; then a bare `pip install .` resolves it.
+dependencies = ["northstar-run-contract"]
+
+[tool.setuptools]
+# Flat modules, installed as top-level names (authorization, workspace,
+# host_audit) to match every existing `import` in this repository, including
+# the sibling components that consume the host module.
+py-modules = ["authorization", "host_audit", "host_policy", "workspace"]
