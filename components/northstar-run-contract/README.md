@@ -21,7 +21,7 @@ pip install northstar-run-contract
 ```
 
 The three modules are installed under their in-tree names and the version
-(`0.1.0.dev0`, unreleased) is declared in `pyproject.toml`:
+(`0.1.0`) is declared in `pyproject.toml`:
 
 ```python
 import contract, binding, adapter

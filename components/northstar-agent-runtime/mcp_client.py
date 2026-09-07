@@ -33,6 +33,7 @@ import time
 from dataclasses import dataclass, field
 from typing import Any
 
+from _version import __version__
 from tools import ToolResult, ToolSpec, ToolContext
 
 MCP_NAME_RE = "mcp__"
@@ -126,7 +127,7 @@ class McpStdioClient:
             result = self._request("initialize", {
                 "protocolVersion": "2024-11-05",
                 "capabilities": {},
-                "clientInfo": {"name": "northstar-agent-runtime", "version": "0.1.0.dev0"},
+                "clientInfo": {"name": "northstar-agent-runtime", "version": __version__},
             })
             if not isinstance(result, dict):
                 raise McpError(f"mcp server {self.name!r}: initialize returned a non-object result")

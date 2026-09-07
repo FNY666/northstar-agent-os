@@ -1,0 +1,48 @@
+# Build and publish a Northstar Agent OS release.
+
+# Triggered by pushing a tag: git tag v0.1.0 && git push origin v0.1.0
+# Builds every pip-installable component into wheels and attaches them to a
+# GitHub Release. Idempotent: if the release already exists (e.g. created
+# manually), this job verifies it and exits without touching it.
+
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    name: Build wheels and create release
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Build wheels
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+          for component in northstar-run-contract northstar-host northstar-durable-run \
+                            northstar-agent-interop northstar-agent-runtime; do
+            python -m pip wheel --no-deps --wheel-dir dist "components/$component"
+          done
+          ls -1 dist
+      - name: Create or verify the GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          if gh release view "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo "release $GITHUB_REF_NAME already exists; leaving it untouched"
+            exit 0
+          fi
+          gh release create "$GITHUB_REF_NAME" dist/*.whl \
+            --repo "$GITHUB_REPOSITORY" \
+            --title "Northstar Agent OS $GITHUB_REF_NAME" \
+            --generate-notes

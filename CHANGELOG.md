@@ -1,5 +1,17 @@
 # Northstar Agent OS — initial public component
 
+## 0.1.0 — 2026-09-07
+
+First tagged release of the five pip-installable components
+(`northstar-run-contract`, `northstar-host`, `northstar-durable-run`,
+`northstar-agent-interop`, `northstar-agent-runtime`), one aligned version,
+wheels published as GitHub Release assets. It bundles the groundwork below:
+packaging and CLI engineering (P0/P1), AGENTS.md + policy config + skills +
+subagents + MCP client (P2), four-layer documentation (P2-6), and the
+canonical NDJSON audit feed export (P3-1a). Full detail in the batch notes
+that follow; the roadmap and scoring live in
+`docs/dx-benchmark-2026.zh-CN.md`.
+
 ## Unreleased (sixth batch) — audit export: JSON → NDJSON → SIEM (P3-1a)
 
 - **Canonical audit feed `audit.ndjson/1`** in `northstar-run-contract`

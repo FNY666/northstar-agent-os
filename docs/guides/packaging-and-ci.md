@@ -71,3 +71,7 @@ stays hermetic and offline-safe.
 - For a governed review loop in your own CI, copy
   [examples/ci-readonly-review](../../examples/ci-readonly-review/README.md),
   not this workflow (it would need your API key).
+- Cutting a release: see
+  [releasing-and-versioning](releasing-and-versioning.md) — one aligned
+  version across all components, one `v*` tag, wheels built and attached by
+  `.github/workflows/release.yml`.
