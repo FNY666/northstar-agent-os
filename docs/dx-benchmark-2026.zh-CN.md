@@ -477,3 +477,18 @@ Northstar 是"运行时组件集合"，不是一个终端产品。因此对标�
 - 版本仍为对齐 `0.1.0.dev0` **未发布**（守就绪门）。
 
 测试规模：全仓 **777 项全绿**（run-contract 41、host 37、runtime 522、durable 65、interop 49、sidecar 51、repo docs 12）。
+
+### 2026-09-07（同批追加）— P3-2 完成（模板与脚手架：`northstar new`）
+
+- **`northstar-agent-runtime new <dir>`**（`scaffold.py`）生成最小治理工程，"治理默认值"直接烙进模板：
+  - `.northstar/config.toml`：`northstar.policy.v1` + 日期 revision，**`agent = "reviewer"` 为默认**——新工程默认每次运行都是只读 reviewer，要放开须显式选择；
+  - `.northstar/agents/reviewer.md`：只读 plan-mode reviewer（tools 均为只读集，经 agent_files 校验）；
+  - `AGENTS.md`：项目指令模板（自动注入）；
+  - `.northstar/hooks/README.md`：hooks 以代码注册（`AgentRuntime(hooks=…)`）、工作区文件永不静默获得代码执行——示例按 hooks.py 真实 API（HookInput.tool_name/tool_input、HookResult.deny）核对过；
+  - `.github/workflows/northstar-review.yml`：受治理的 CI review recipe 模板（安装源与 API key 留 TODO）；
+  - `README.md`：文件表 + 三条上手命令。
+- **自洽性由 runtime 自身校验背书**：模板 config 能过 `load_policy_file`（schema v1/revision/reviewer 已知）、reviewer agent 能注册且只读、`doctor` 绿、`--dry-run` 报策略身份、scripted run 以 reviewer 身份跑通；非空目录拒绝、`--force` 只覆写模板不删文件。
+- 接线：runtime README "Creating a governed project" 小节 + 布局行、py-modules/CI compile/docbuild MANIFEST（51→52 模块）、CHANGELOG ninth batch。
+- 版本仍为对齐 `0.1.0.dev0` **未发布**（守就绪门）。
+
+测试规模：runtime **536 项全绿**（+14：test_scaffold），全仓 777 → 791。

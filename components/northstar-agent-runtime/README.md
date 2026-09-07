@@ -130,6 +130,27 @@ python3 -m cli run --sidecar-socket /var/run/northstar-codex/sidecar.sock \
   --probe-sidecar            # one health-check prompt, then exit
 ```
 
+## Creating a governed project (`new`)
+
+```sh
+northstar-agent-runtime new my-project
+```
+
+Scaffolds a minimal repository that starts **safe by default** and loosens
+deliberately: `.northstar/config.toml` (schema `northstar.policy.v1` + a
+date-based revision) whose default agent is a read-only, plan-mode reviewer
+(`.northstar/agents/reviewer.md`); `AGENTS.md` project instructions;
+`.northstar/hooks/README.md` (hooks are registered in code, never auto-run
+from files); and a `.github/workflows/northstar-review.yml` CI recipe
+template. Everything generated parses under the runtime's own validators —
+`doctor --workspace my-project` is green immediately. Try it:
+
+```sh
+northstar-agent-runtime new my-project
+northstar-agent-runtime doctor --workspace my-project
+northstar-agent-runtime run --workspace my-project --prompt "Summarise this project" --dry-run
+```
+
 ## Embedding in Python (sdk)
 
 The same governed loop is importable — no subprocess, no CLI string, no API
@@ -403,6 +424,7 @@ size (`result_chars`), so truncation is visible instead of inferred.
 | `audit_export.py`   | transcript replay as the canonical NDJSON audit feed (`audit.ndjson/1`)      |
 | `events.py`         | public event vocabulary: `event_to_dict` shapes + result `EXIT_CODES` |
 | `sdk.py`            | Python API: `RunOptions` / `run` / `stream_run` / `RunReport`       |
+| `scaffold.py`       | `new` project generator: governance-default template files   |
 | `_version.py`       | single source of truth for the component version                     |
 
 ## Exit codes
