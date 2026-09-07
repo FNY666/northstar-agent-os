@@ -100,6 +100,17 @@ provider reliability, prompt-injection resistance of a backend, or task-level
 success across real engines. Those require separate canaries, fixed tasks,
 independent verifiers, rollback plans and explicit deployment authorization.
 
+## Remote/hosted worker readiness (P3-3)
+
+`remote_worker.py --score` is the reproducible P3-3 evaluation — how close
+this repository is to wrapping its sidecar execution model into a remote
+worker, measured statically against the tree (36 criteria across contracts,
+host, durable-run, interop, audit, ops; current: 89/100 — kernel areas fully
+present, the four ops gaps are the T5 work list). Protocol map and decision
+record: `docs/concepts/northstar-remote-worker.md`; full assessment:
+`docs/dx-remote-worker-assessment.zh-CN.md`. Run it in CI with
+`python3 -m remote_worker --score`.
+
 ## Local CLI process adapter candidate
 
 `process_adapter.py` is a backend-neutral process boundary for a future
