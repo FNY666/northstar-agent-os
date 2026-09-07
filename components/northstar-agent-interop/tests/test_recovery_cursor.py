@@ -43,4 +43,14 @@ class RecoveryCursorTests(unittest.TestCase):
             self.assertTrue(all(p.exitcode==0 for p in workers))
             self.assertEqual(PersistentLeaseManager(path).read().fencing_token,1)
 
+    def test_persistent_heartbeat_renews_without_changing_fence(self):
+        from recovery_cursor import PersistentLeaseManager
+        with tempfile.TemporaryDirectory() as tmp:
+            manager=PersistentLeaseManager(Path(tmp)/'lease.json')
+            lease=manager.acquire('owner',now=10,ttl=5)
+            renewed=manager.heartbeat(lease,now=12,ttl=20)
+            self.assertEqual(renewed.fencing_token,lease.fencing_token)
+            self.assertEqual(renewed.expires_at,32)
+            manager.validate(renewed,now=31)
+
 if __name__=='__main__': unittest.main()

@@ -60,5 +60,24 @@ class PersistentLeaseManager:
             with open(tmp,'w',encoding='utf-8') as out:
                 json.dump(lease.__dict__,out,separators=(',',':')); out.flush(); os.fsync(out.fileno())
             os.replace(tmp,self.path); fcntl.flock(lock.fileno(),fcntl.LOCK_UN); return lease
+    def heartbeat(self, lease, *, now, ttl):
+        if not isinstance(ttl, int) or isinstance(ttl, bool) or ttl <= 0:
+            raise RecoveryError('lease timing invalid')
+        os.makedirs(os.path.dirname(self.path) or '.', exist_ok=True)
+        with open(self.lock_path, 'a+') as lock:
+            fcntl.flock(lock.fileno(), fcntl.LOCK_EX)
+            current = self._read()
+            if current != lease or lease.expires_at <= now:
+                raise RecoveryError('lease is stale or expired')
+            renewed = Lease(lease.owner_id, lease.fencing_token, now + ttl)
+            tmp = self.path + '.tmp'
+            with open(tmp, 'w', encoding='utf-8') as out:
+                json.dump(renewed.__dict__, out, separators=(',', ':'))
+                out.flush()
+                os.fsync(out.fileno())
+            os.replace(tmp, self.path)
+            fcntl.flock(lock.fileno(), fcntl.LOCK_UN)
+            return renewed
+
     def validate(self,lease,*,now):
         if self.read()!=lease or lease.expires_at<=now: raise RecoveryError('lease is stale or expired')

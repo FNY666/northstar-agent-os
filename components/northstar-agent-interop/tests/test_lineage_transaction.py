@@ -22,6 +22,13 @@ class TransactionTests(unittest.TestCase):
             root=Path(tmp); store=TransactionalLineageStore(root/'lineage.jsonl',root/'checkpoint.json'); lease=PersistentLeaseManager(root/'lease.json').acquire('a',now=1,ttl=10); graph=LineageGraph.from_path(root/'lineage.jsonl'); store.append(self.event(),graph.cursor(),lease,now=2); store.checkpoint.write_text('{"bad":true}')
             with self.assertRaises(TransactionError): store.recover()
 
+    def test_recovery_returns_current_persisted_lease(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root=Path(tmp); store=TransactionalLineageStore(root/'lineage.jsonl',root/'checkpoint.json'); manager=PersistentLeaseManager(root/'lease.json'); lease=manager.acquire('a',now=1,ttl=10); graph=LineageGraph.from_path(root/'lineage.jsonl'); store.append(self.event(),graph.cursor(),lease,now=2)
+            cursor, recovered_lease = store.recover()
+            self.assertEqual(cursor.sequence, 1)
+            self.assertEqual(recovered_lease, lease)
+
 
     def test_fault_after_event_fsync_needs_recovery_evidence(self):
         from lineage_transaction import TransactionError
@@ -41,5 +48,13 @@ class TransactionTests(unittest.TestCase):
         graph.append(succeeded)
         with self.assertRaises(Exception):
             graph.append(duplicate)
+
+    def test_transaction_persists_event_for_restart(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root=Path(tmp); lineage=root/'lineage.jsonl'; store=TransactionalLineageStore(lineage,root/'checkpoint.json')
+            lease=PersistentLeaseManager(root/'lease.json').acquire('a',now=1,ttl=10)
+            store.append(self.event(),LineageGraph.from_path(lineage).cursor(),lease,now=2)
+            restored=LineageGraph.from_path(lineage)
+            self.assertEqual([event.event_id for event in restored.read()],['e1'])
 
 if __name__=='__main__': unittest.main()

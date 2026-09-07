@@ -47,4 +47,11 @@ class TransactionalLineageStore:
         except (json.JSONDecodeError,ValueError) as exc: raise TransactionError('checkpoint corrupt') from exc
         graph=LineageGraph.from_path(self.lineage); cursor=graph.cursor()
         if cp.state!='committed' or cp.sequence!=cursor.sequence or cp.event_digest!=cursor.event_digest or cp.journal_digest!=cursor.journal_digest: raise TransactionError('checkpoint mismatch')
-        return cursor,cp
+        lease_path=self.checkpoint.parent / 'lease.json'
+        try:
+            lease=PersistentLeaseManager(lease_path).read()
+        except RecoveryError as exc:
+            raise TransactionError('persisted lease missing') from exc
+        if lease.fencing_token != cp.fencing_token or lease.owner_id != cp.owner_id:
+            raise TransactionError('checkpoint lease identity mismatch')
+        return cursor,lease
