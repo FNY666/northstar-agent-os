@@ -1,0 +1,9 @@
+# Provisioned core data source: Grafana -> Jaeger (local dev only).
+apiVersion: 1
+datasources:
+  - name: Jaeger
+    type: jaeger
+    access: proxy
+    url: http://jaeger:16686
+    isDefault: true
+    editable: false
