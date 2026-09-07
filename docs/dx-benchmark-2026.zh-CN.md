@@ -492,3 +492,14 @@ Northstar 是"运行时组件集合"，不是一个终端产品。因此对标�
 - 版本仍为对齐 `0.1.0.dev0` **未发布**（守就绪门）。
 
 测试规模：runtime **536 项全绿**（+14：test_scaffold），全仓 777 → 791。
+
+### 2026-09-07（同批追加）— P3-3 完成（托管/远程执行评估）
+
+- **协议图 + 决策记录**（`docs/concepts/northstar-remote-worker.md`）：远程 worker = sidecar 的**传输变体**而非新治理面——同一 run contract、host 签名短期 grant、opaque workspace、有界且版本钉死的进程、事件/审计、可验证结构化收据；六条传输属性从本地路径继承。传输选型：sidecar-socket-over-SSH（单私有 worker 最低成本）/ durable-run runner+容器（托管 fleets）/ interop-OpenBot（战略）/ 自建 HTTP 服务（否）。**零构建零部署**。
+- **可复现评估器**（interop `remote_worker.py`）：36 条静态判据覆盖 6 域，每条对准仓库内真实符号；4 条 ops 缺口为明示 `MISSING` 探针（= T5 工作项：网络传输、身份签发与密钥轮换、真实端到端 canary、部署/监控指南）。**当前 89/100**：contracts/host/durable-run/interop/audit 五域 100%、ops 33%。`python3 -m remote_worker --score` 可进 CI，判据即代码不会漂移；评估器质量本身有测试（内核判据保持绿、MISSING 探针保持红直至刻意移出）。
+- **中文评估**（`docs/dx-remote-worker-assessment.zh-CN.md`）：TL;DR/资产清单/协议映射/选型/分数与证据/下一步（T5）。
+- 编写中抓到的坑：判据初稿 5 处对准了不存在的符号（validate_run_receipt/Verifier/顶层 acquire/audit 版本串正则/超时参数名）→ 逐一核真实符号修正，**数字由代码说了算，文档跟随实算**（初稿写 ~69，实测 89）。
+- 接线：interop README 新增 P3-3 小节、CI compile 行、docbuild MANIFEST（52→53 模块）、CHANGELOG tenth batch。
+- 版本仍为对齐 `0.1.0.dev0` **未发布**（守就绪门）。
+
+测试规模：interop **54 项全绿**（+5：test_remote_worker），全仓 791 → 796。

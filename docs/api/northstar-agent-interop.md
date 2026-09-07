@@ -125,3 +125,15 @@ Versioned configuration for process-backed Agent adapters.
 #### `cursor_cli_spec(executable: str)`
 
 #### `build_process_adapter(spec: ProcessBackendSpec, *, workspace_resolver: Callable[[str], str | Path], context_loader: Callable[[str], str], timeout_seconds: float=60, max_output_bytes: int=1000000)`
+
+### `remote_worker`
+
+Source: `components/northstar-agent-interop/remote_worker.py`
+
+Remote/hosted-worker readiness scorecard (P3-3) — evidence-based, runnable.
+
+#### `score()`
+
+Per-area (met, total, unmet explanations).
+
+#### `total_score()`

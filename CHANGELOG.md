@@ -1,5 +1,26 @@
 # Northstar Agent OS — initial public component
 
+## Unreleased (tenth batch) — remote/hosted worker evaluation (P3-3)
+
+- **Protocol map + decision record** (`docs/concepts/northstar-remote-worker.md`):
+  a hosted worker is a transport variant of the sidecar, not a new governance
+  surface — same run contract, host-signed short-lived grant, opaque
+  workspace, bounded version-pinned process, event/audit trail, verifiable
+  structured receipt. Transport options evaluated (sidecar-over-SSH lowest
+  cost; durable-run-runner+container for fleets; interop/OpenBot strategic;
+  a bespoke HTTP service rejected). Nothing is built or deployed.
+- **Reproducible scorecard** (`northstar-agent-interop/remote_worker.py`):
+  36 static checks across six areas; every check targets a real symbol in the
+  tree and the four ops gaps are explicit `MISSING` probes — the T5 work
+  list. Current score 89/100: contracts/host/durable-run/interop/audit all
+  100%, ops 33%. `python3 -m remote_worker --score` is CI-runnable and cannot
+  drift from the code it measures. Scorecard quality is itself tested
+  (kernel checks stay green, MISSING probes stay red until deliberately moved).
+- **Chinese assessment** (`docs/dx-remote-worker-assessment.zh-CN.md`):
+  TL;DR, asset inventory, protocol mapping, transport options, scores with
+  evidence, and the concrete next increment (T5).
+- API pages 52 → 53 modules. Interop tests 49 → 54.
+
 ## Unreleased (ninth batch) — templates and scaffolding (P3-2)
 
 - **`northstar-agent-runtime new <directory>`** (`scaffold.py`) generates a
