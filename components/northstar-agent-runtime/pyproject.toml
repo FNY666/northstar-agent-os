@@ -42,11 +42,13 @@ northstar-agent-runtime = "cli:main"
 # site-packages namespace until the component moves to a proper package layout.
 py-modules = [
     "_version",
+    "agent_files",
     "agents",
     "budget",
     "cli",
     "compaction",
     "doctor",
+    "frontmatter",
     "hooks",
     "loop",
     "permissions",
@@ -54,6 +56,7 @@ py-modules = [
     "sessions",
     "session_view",
     "sidecar_client",
+    "skills",
     "tracing",
 ]
 

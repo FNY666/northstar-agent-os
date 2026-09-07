@@ -161,9 +161,40 @@ project_context = "AGENTS.md"   # file name inside the workspace, or false to di
   workspace is refused, never followed, and files larger than 64,000 characters
   are truncated with a marker. `--no-project-context` disables discovery.
 
+- **`.northstar/agents/*.md`** — repository-defined subagents. Frontmatter
+  (`name`, `description`, `tools`, optional `read_only`, `permission_mode`
+  limited to `default`/`plan`, ceilings no higher than the built-in limits,
+  `model`, `allow_delegation`, `require_verdict`) plus the markdown body as the
+  agent's prompt:
+
+```markdown
+---
+name: summariser
+description: Summarises files and directories concisely.
+tools: [Read, Grep, LS]
+read_only: true
+max_turns: 4
+---
+Summarise what the workspace contains: key files, purposes, and conventions.
+```
+
+  The compiled agent joins the registry exactly like a built-in: usable with
+  `--agent summariser`, delegatable through `Task` under the existing
+  delegation gate, listed by `cli agents --workspace .`. Names may not shadow
+  a built-in agent; `read_only` only ever narrows the tool set;
+  `--no-workspace-agents` disables discovery for one run.
+
+- **`.northstar/skills/*/SKILL.md`** — Agent Skills, consumed read-only with
+  progressive disclosure: only each skill's `name` and `description` are placed
+  in the system prompt (a few tokens), and the model reads the full file with
+  the ordinary sandboxed `Read` tool when a task matches. A skill file is
+  text - it is never an execution or permission channel - and everything is
+  resolved strictly inside the workspace root (symlinks out are refused).
+  `--no-skills` disables the listing.
+
 `doctor` and `run --dry-run` both report which files apply, so a run never
-surprises: `policy_file=` / `project_context=` lines show the effective inputs
-before anything is sent.
+surprises: `policy_file=`, `project_context=`, `workspace_agents=`, and
+`skills=` lines show the effective inputs before anything is sent.
 
 ## Events, not exceptions
 
@@ -296,6 +327,9 @@ size (`result_chars`), so truncation is visible instead of inferred.
 | `doctor.py`         | `cli doctor` environment self-checks (no requests, no file writes)   |
 | `session_view.py`   | `cli sessions list/show` - the read-back half of the transcripts     |
 | `policy_file.py`    | `.northstar/config.toml` parsing + tighten-only validation; AGENTS.md project-context discovery and prompt composition |
+| `agent_files.py`    | `.northstar/agents/*.md` -> governed `AgentDefinition` compilation   |
+| `skills.py`         | `.northstar/skills/*/SKILL.md` discovery + progressive-disclosure listing |
+| `frontmatter.py`    | strict minimal frontmatter reader shared by agents and skills        |
 | `_version.py`       | single source of truth for the component version                     |
 
 ## Exit codes

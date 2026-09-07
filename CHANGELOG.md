@@ -1,5 +1,32 @@
 # Northstar Agent OS — initial public component
 
+## Unreleased (third batch) — repository agents and skills
+
+- **Repository-defined subagents (`.northstar/agents/*.md`)**. A markdown file
+  with strict frontmatter (`name`, `description`, `tools`, optional `read_only`,
+  `permission_mode` limited to `default`/`plan`, ceilings no higher than the
+  runtime's built-in limits, `model`, `allow_delegation`, `require_verdict`)
+  and a prompt body compiles into the same `AgentDefinition` a built-in agent
+  uses: runnable with `--agent`, delegatable through `Task` under the existing
+  delegation gate, listed by `cli agents --workspace`. Names may not shadow a
+  built-in agent or another file; `read_only` only narrows the tool set;
+  unknown keys, unknown tools, loosening modes/ceilings, unparseable
+  frontmatter, and symlinks escaping the workspace are configuration errors
+  (exit 64) — never silently ignored. `--no-workspace-agents` skips discovery.
+- **Agent Skills, read-only (`.northstar/skills/*/SKILL.md`)**. Progressive
+  disclosure: only each skill's `name` and `description` enter the system
+  prompt; the model reads the full file with the ordinary sandboxed `Read`
+  tool when a task matches. Skill files are knowledge, not an execution or
+  permission channel; everything resolves strictly inside the workspace root.
+  `--no-skills` disables the listing.
+- **Strict frontmatter reader** (`frontmatter.py`): a dependency-free subset of
+  YAML frontmatter shared by both file types, with duplicate/malformed/unknown
+  content failing closed.
+- **Visibility:** `doctor` and `run --dry-run` report `workspace_agents=` and
+  `skills=` lines; the demo workspace now ships one repository agent and one
+  skill. Tests: runtime suite grows to 470 offline tests (24 new across
+  frontmatter, skills, agent files, and CLI integration).
+
 ## Unreleased (second batch) — repository policy and project context
 
 - **`.northstar/config.toml` workspace policy file** (`northstar-agent-runtime`).

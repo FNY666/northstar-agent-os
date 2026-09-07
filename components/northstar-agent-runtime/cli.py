@@ -119,6 +119,8 @@ def _add_run_arguments(parser: argparse.ArgumentParser) -> None:
     policy.add_argument("--allow-nested-delegation", action="store_true", help="subagents may delegate one level deeper")
     policy.add_argument("--halt-on-denial", action="store_true", help="end the run with error_permission_denied when a call is refused")
     policy.add_argument("--no-policy-file", action="store_true", help="ignore .northstar/config.toml in the workspace")
+    policy.add_argument("--no-workspace-agents", action="store_true", help="ignore .northstar/agents/*.md subagent files")
+    policy.add_argument("--no-skills", action="store_true", help="do not list .northstar/skills/*/SKILL.md packages in the system prompt")
     context_group = policy.add_mutually_exclusive_group()
     context_group.add_argument("--context-file", default="", metavar="PATH", help="inject this project-instructions file into the system prompt (must live inside the workspace)")
     context_group.add_argument("--no-project-context", action="store_true", help="do not auto-inject AGENTS.md (or the policy file's project_context)")
@@ -190,7 +192,15 @@ def _check_anthropic_sdk() -> tuple[bool, str]:
     return False, "the 'anthropic' package is not installed; pip install -r requirements.txt, or use --provider scripted"
 
 
-def _print_dry_run(args: argparse.Namespace, runtime: Any, *, policy_note: str = "none", context_note: str = "off") -> int:
+def _print_dry_run(
+    args: argparse.Namespace,
+    runtime: Any,
+    *,
+    policy_note: str = "none",
+    context_note: str = "off",
+    workspace_agents_note: str = "none",
+    skills_note: str = "none",
+) -> int:
     """Print what a run would do and exit, without constructing a provider.
 
     ``--dry-run`` is the read-only twin of ``--show-pricing``: it validates the
@@ -218,6 +228,8 @@ def _print_dry_run(args: argparse.Namespace, runtime: Any, *, policy_note: str =
           f"halt_on_denial={config.halt_on_denial}")
     print(f"policy_file={policy_note}")
     print(f"project_context={context_note}")
+    print(f"workspace_agents={workspace_agents_note}")
+    print(f"skills={skills_note}")
     print(f"pricing: ${pricing.input_per_mtok}/MTok in, ${pricing.output_per_mtok}/MTok out "
           f"(cache read x0.1, cache write x1.25)"
           + (" - estimated" if estimated else ""))
@@ -237,9 +249,17 @@ def main(argv: Sequence[str] | None = None) -> int:
             print(f"{spec.name:<14} {spec.kind:<8} {'mutating' if spec.is_mutating else 'read-only':<10} {spec.description[:60]}")
         return 0
     if args.command == "agents":
+        from agent_files import AgentFileError, register_workspace_agents
         from agents import builtin_registry
+        from tools import build_default_registry
 
-        for definition in builtin_registry():
+        registry = builtin_registry()
+        try:
+            register_workspace_agents(registry, args.workspace, known_tools=build_default_registry().names())
+        except AgentFileError as error:
+            print(f"configuration error: {error}", file=sys.stderr)
+            return USAGE_ERROR
+        for definition in registry:
             print(f"{definition.name:<12} tools={','.join(definition.tools)}")
             print(f"{'':<12} mode={definition.permission_mode} turns={definition.max_turns} verdict={definition.require_verdict}")
             print(f"{'':<12} {definition.description}")
@@ -268,11 +288,13 @@ def main(argv: Sequence[str] | None = None) -> int:
 
 
 def _run(args: argparse.Namespace) -> int:
+    from agent_files import AgentFileError, register_workspace_agents
     from agents import builtin_registry
     from loop import AgentRuntime, DEFAULT_SYSTEM_PROMPT, RuntimeConfig, RuntimeConfigurationError
     from permissions import validate_mode
     from policy_file import PolicyFileError, append_project_context, discover_project_context, load_policy_file
     from sessions import SessionStore
+    from skills import SkillError, discover_skills, skill_listing
     from tools import ToolLimits, build_default_registry
 
     prompt = args.prompt
@@ -290,8 +312,19 @@ def _run(args: argparse.Namespace) -> int:
     registry = build_default_registry()
     agents = builtin_registry()
 
+    # Repository-defined subagents (.northstar/agents/*.md). Governed like
+    # built-ins: known tools only, tighten-only ceilings, fail-closed parse.
+    workspace_agents: tuple[Any, ...] = ()
+    if not args.no_workspace_agents:
+        try:
+            workspace_agents = register_workspace_agents(agents, args.workspace, known_tools=registry.names())
+        except AgentFileError as error:
+            print(f"configuration error: {error}", file=sys.stderr)
+            return USAGE_ERROR
+
     # Workspace policy file (.northstar/config.toml). It may only tighten; any
     # violation is a configuration error (exit 64), never a silent ignore.
+    # Known agents include repository-defined ones, so the file may pick them.
     policy = None
     if not args.no_policy_file:
         try:
@@ -390,6 +423,20 @@ def _run(args: argparse.Namespace) -> int:
         if context is not None:
             base_prompt = config_kwargs.get("system_prompt", DEFAULT_SYSTEM_PROMPT)
             config_kwargs["system_prompt"] = append_project_context(base_prompt, context)
+
+    # Workspace skills (.northstar/skills/*/SKILL.md): progressive disclosure -
+    # only the name/description listing enters the prompt; the model reads the
+    # full SKILL.md with the ordinary sandboxed Read tool when a task matches.
+    skills: tuple[Any, ...] = ()
+    if not args.no_skills:
+        try:
+            skills = discover_skills(args.workspace)
+        except SkillError as error:
+            print(f"configuration error: {error}", file=sys.stderr)
+            return USAGE_ERROR
+    if skills:
+        base_prompt = config_kwargs.get("system_prompt", DEFAULT_SYSTEM_PROMPT)
+        config_kwargs["system_prompt"] = base_prompt + skill_listing(skills, args.workspace)
     if args.sidecar_socket:
         config_kwargs["sidecar_socket"] = args.sidecar_socket
         config_kwargs["sidecar_timeout_ms"] = args.sidecar_timeout_ms
@@ -419,6 +466,8 @@ def _run(args: argparse.Namespace) -> int:
         context_note = "off (--no-project-context)"
     else:
         context_note = "off (no AGENTS.md in the workspace)"
+    workspace_agents_note = ",".join(agent.name for agent in workspace_agents) or "none"
+    skills_note = (f"{len(skills)} package(s): " + ", ".join(skill.name for skill in skills)) if skills else "none"
 
     provider = _build_provider(args)
     runtime = AgentRuntime(provider=provider, config=config, tools=registry, sessions=store, agents=agents)
@@ -429,7 +478,14 @@ def _run(args: argparse.Namespace) -> int:
     if args.dry_run:
         # Never constructs the provider: configuration is validated above, so a
         # healthy configuration prints a plan and exits 0 before any request.
-        return _print_dry_run(args, runtime, policy_note=policy_note, context_note=context_note)
+        return _print_dry_run(
+            args,
+            runtime,
+            policy_note=policy_note,
+            context_note=context_note,
+            workspace_agents_note=workspace_agents_note,
+            skills_note=skills_note,
+        )
     if args.probe_sidecar:
         if args.provider == "anthropic":
             sdk_ok, message = _check_anthropic_sdk()

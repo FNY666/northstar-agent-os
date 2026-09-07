@@ -307,3 +307,12 @@ Northstar 是"运行时组件集合"，不是一个终端产品。因此对标�
 - 可见性：`doctor` 与 `--dry-run` 输出 `policy_file=` / `project_context=` 生效行；demo workspace 附带 `AGENTS.md` 示例。
 
 测试规模：本地 runtime **446 项全绿**（+33 策略/上下文测试，含 4 项 SDK 跳过）；guard harness 5 RED 基线绿；全仓 `make test` 654 项。
+
+### 2026-09-07（同批追加）— P2-3 + P2-5 完成
+
+- **P2-3 Agent Skills 只读消费**（`.northstar/skills/*/SKILL.md`）：渐进式披露——启动仅注入 name+description 列表，全文由模型经既有沙箱 `Read` 工具按需读取；技能=知识包（非执行/权限通道）；严格限定 workspace 内解析（含文件级符号链接拒绝）；`--no-skills` 关闭。
+- **P2-5 subagent 文件化桥**（`.northstar/agents/*.md`）：frontmatter（name/description/tools/read_only/permission_mode 仅 default|plan/上限不高于内置/model/allow_delegation/require_verdict）+ markdown 正文 → 编译为 `AgentDefinition` 进注册表：`--agent` 可用、可经 `Task` 委托、`cli agents --workspace` 列出；不得遮蔽内置 agent；未知键/未知工具/放宽值/解析失败/符号链接逃逸 = 配置错误 64；`--no-workspace-agents` 关闭。
+- 新增共享严格 frontmatter 解析器（`frontmatter.py`，零依赖，重复/畸形/未知内容 fail-closed）。
+- 可见性：`doctor` 与 `--dry-run` 增加 `workspace_agents=` / `skills=` 行；demo workspace 附带 1 个 repository agent + 1 个 skill。
+
+测试规模：runtime **470 项全绿**（+24，frontmatter/skills/agent_files/CLI 集成，含 4 项 SDK 跳过）。
