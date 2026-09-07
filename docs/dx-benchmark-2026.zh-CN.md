@@ -349,3 +349,90 @@ Northstar 是"运行时组件集合"，不是一个终端产品。因此对标�
 - 文档接线：py-modules/CI compile 行补 4 个新模块、docbuild MANIFEST +4 → API 页 43→47 模块、README（runtime sessions 段/durable/host/run-contract）与新模块行。
 
 测试规模：全仓 **736 项全绿**（run-contract 34、host 28、durable 65、runtime 501、root docs 8，sidecar/interop 不变）。
+
+---
+
+## 10. 复评：对标全球顶级 agent 工具还剩多远（2026-09-07，追加于 P3-1a 之后）
+
+> 本节是 §0–§8 正文的**增量复评**：外部口径补到 2026 年 9 月初，Northstar 一侧以仓库实测为准（全仓 736 项测试全绿、guard harness 5/5、demo→`sessions export` 真实链路冒烟、docs 47 模块 API 页 0 断链、五组件同 venv 安装导入通过）。头部各列沿用 §3 口径并注明持续进化，本轮只重评 Northstar 列。
+
+### 10.1 外部格局速览：2026 下半年头部工具在卷什么
+
+**Claude Code（2.1.x，2026-09 初）**：插件体系成型（bundled plugins 14 个：code-review/security-guidance/feature-dev…，含 marketplace 与 `source: 'settings'` 内联声明）；`/skills` 热重载 + skill frontmatter 支持 `agent`/`context: fork`/effort 覆盖；任务管理（2.1.16）、后台 agents（2.0.60）、Agent Teams 多代理协作（实验）、Desktop 应用与 remote sessions；`--permission-prompts none`（无头自动拒绝）、managedMcpServers/managed settings（企业下发）、MCP `login/logout` 与 alwaysLoad、stream-json 嵌套 subagent 转发。**一句话：交互面 + 生态市场 + 企业治理三线并进。**
+
+**OpenAI Codex（2026-08-19 "Codex as a platform"）**：明确 app/CLI/IDE 只是同一开源 harness 的三个 surface，把**可嵌入层**开放为 `codex exec`（一次性、结构化输出、无会话）、Codex SDK（start/resume/stream）与 app-server（threads/turns/approval 全协议）；另有 Automations 定时后台任务、cloud sandbox（网络隔离微VM、PR 直出）、approval 三级（Suggest/Auto Edit/Full Auto）。**一句话：竞争焦点从"终端工具"移到"可嵌入 harness + 后台任务平台"。**
+
+**生态与其余**：Gemini CLI 并入 Antigravity 路线（Skills/Hooks/Subagents/Extensions 以插件形式迁移），其功能面（checkpointing、rewind、remote subagents、gVisor sandbox、plan mode、model routing）成为横评参照；Meta Muse Code 入局（默认 seatbelt/bubblewrap 沙箱）；Agent Skills 开放标准扩到 40+ 平台（VS Code/Copilot/Snowflake…），社区 skills 71,000+，触达 5,000 万开发者——同时第三方审计称 **99% 社区 SKILL.md 带"技能坏味道"、36% 带安全缺陷** → "技能供应链校验"是新空白。MCP 深化到服务器登录/托管/市场层面。
+
+### 10.2 上一轮差距清单（G1–G10）落地状态
+
+| # | 差距 | 状态（2026-09-07） |
+|---|---|---|
+| G1 | 不可安装、无入口 | ✅ 六组件 pyproject + console script；`make install` 五组件同 venv 验证 |
+| G2 | 无版本/发布渠道 | 🟡 有 `__version__`/pyproject/CHANGELOG/契约 schema 版本；**未 tag、未发布、无 Release CI** |
+| G3 | 无配置/约定文件 | ✅ AGENTS.md、`.northstar/config.toml`、agents/skills 文件、context-file；🟡 策略 schema 版本化（P3-1b）未做 |
+| G4 | 无 MCP/Skills/Plugins | 🟡 MCP stdio 最小客户端（默认 deny、穿权限门）；SKILL.md 只读渐进披露；**无 plugins/市场、无 HTTP/SSE+auth** |
+| G5 | 会话/追踪无读回 | ✅ `sessions list/show/export`（export 即 audit.ndjson/1）+ OTEL + resume；🟡 无 rewind/checkpoint 可视化 |
+| G6 | 上手路径长 | ✅ `make demo` 一条命令 + examples 索引 |
+| G7 | 无环境自查 | ✅ `--version`、`doctor`、`--dry-run` 全配置预览 |
+| G8 | 文档无 API 参考 | ✅ 四层文档 + docstring API 页 47 模块 + CI 结构/构建/链接 |
+| G9 | 无 CI/团队 recipe | 🟡 demo + ci-readonly-review 模板 + headless `--json` + 语义退出码；**无官方 GitHub Action/后台任务** |
+| G10 | 优势未叙事化 | ✅ 文档强调确定性内核；🟡 对外叙事仍缺"治理即卖点"的独立页 |
+
+### 10.3 十维复评：Northstar 23 → 34（/50）
+
+| 维度 | Northstar（原） | Northstar（复评） | 一句依据 |
+|---|:-:|:-:|---|
+| 安装与上手 | 2 | **3** | 可 pip 安装 + demo/doctor 一条命令；差官方 index 发布与"账号即用" |
+| CLI / 终端体验 | 3 | **4** | headless、dry-run、语义退出码 0–5/64、json 事件流一流；无交互 TUI/rewind/tasks |
+| 程序化 API / 包管理 | 1 | **2** | `AgentRuntime`+events+resume+scripted provider 已可编程，但无 SDK 化公共 API 面、无 TS、无 exec/app-server 协议 |
+| 配置与项目约定 | 1 | **4** | AGENTS.md/config/agents/skills/context-file 齐全；差策略 schema 版本化与托管下发 |
+| 扩展生态（MCP/Skills/Plugins） | 1 | **3** | 三类都占位且默认 deny/只读（安全侧反而领先）；差 plugins/市场、MCP HTTP+auth、技能脚本执行 |
+| 会话 / 调试 / 可观测 | 3 | **4** | 读回 + 审计导出 + resume 齐全；差 rewind/checkpoint 与交互式回放 |
+| 测试与确定性 | 5 | **5** | 736 项、guard 红绿 harness、离线 scripted provider——头部普遍 3 分档，仍是最稀缺资产 |
+| 文档与教学 | 3 | **4** | 四层 + 生成 API + examples 索引 + 11 语言；差课程/playground 型教学 |
+| 版本化与发布 | 2 | **2** | 契约 schema 语义在；软件本身 0.1.0.dev0 未发布 |
+| 团队 / CI / 协作面 | 2 | **3** | CI 模板 + headless + 审计 feed 天然 CI 友好；差官方 Action/review 后台 |
+| **合计（/50）** | **23** | **34** | 头部（Claude Code/Codex）2026-09 口径仍 ≥46 且持续外扩 |
+
+### 10.4 新增横向战场六维（2026 年新出现的竞争面，1–5）
+
+| 维度 | 头部代表 | Northstar | 说明 |
+|---|:---:|:---:|---|
+| N1 可嵌入 harness（SDK/exec/app-server） | Codex platform、Claude Agent SDK（py/ts） | **2** | 内核（AgentRuntime/events/resume/hooks）在，未产品化为 SDK 面 |
+| N2 后台/并行/任务化 | Codex Automations、CC background agents/task mgmt | **2** | durable-run 内核（event_store/action_gateway/verifier）超前，无 CLI/调度/云端面 |
+| N3 远程/多端 | CC remote sessions/Desktop、Codex cloud、Gemini remote subagents | **1** | 目前只有 sidecar 单向委派 |
+| N4 生态市场接入 | CC plugin marketplace、skills 71k+、.mcp.json | **2** | 格式兼容可读；无市场/安装器/索引 |
+| N5 安全治理纵深 | CC managed settings/enterprise、Codex sandbox 网络隔离、Muse 默认沙箱 | **3** | 权限门/hooks/只读/审计 feed 治理叙事强；无 OS 级沙箱与技能供应链校验（36% 缺陷率=空白机会） |
+| N6 模型层能力 | model routing/steering、多模型 fallback | **3** | providers 抽象 + 记账 + 确定性 scripted；仅两个后端 |
+| **合计（/30）** | ≈24 | **13** | 新战场是当前差距的主要来源 |
+
+### 10.5 还差多远：排序与最短路径（批次粒度估算，主观）
+
+| # | 差距 | 对齐谁 | 内容 | 批次 |
+|---|---|---|---|---|
+| T1 | SDK/可嵌入面 | Codex exec/SDK、Claude Agent SDK | 把 `AgentRuntime.run()/events/resume/hooks` 固化为稳定公共 API + 官方示例 + 文档（py 先行） | 1–2 |
+| T2 | 发布工程 | `@latest`/Release 渠道 | tag v0.1.0 + GitHub Release + 发布脚本/CI + 官方 GitHub Action | 0.5–1 |
+| T3 | 交互最小集 | CC `/rewind`+tasks、Gemini checkpointing | checkpoint/restore 子命令 + `sessions` 可视化回放 | 1–2 |
+| T4 | 生态纵深 | CC plugins/marketplace、MCP login | `.mcp.json`/HTTP+auth、skills `check`（供应链校验器，直接回应 99%/36% 审计）、技能脚本沙箱或写明取舍 | 1–2 |
+| T5 | 后台/远程化 | Codex Automations、CC remote | durable-run 之上做任务调度 CLI 面 + P3-3 远程 worker 协议评估 | 2–3 |
+| T6 | 治理叙事页 | — | "确定性 + 治理默认值"独立页/演示（评审/CI 场景） | 0.5 |
+
+其中 **T2+T1 是把 34 → ~40 的最短路径**（与 §7"只做三件事"呼应：打包已完成，接下来是"包得住 → 嵌得进 → 发得出去"）；T3 增黏性，T4 是差异化杠杆（别的工具都缺的技能安全校验），T5 承接 P3-2/3/4 地图。
+
+### 10.6 结论
+
+- **内核侧差距已经基本收平甚至反超**（测试与确定性 5/5、治理不绕行的架构、审计导出）——这部分不再是对标短板。
+- **外围产品化差距仍然显著**：十维口径 23→34（头部 46 并继续外扩）；把 2026 新战场六维算进来，缺口主要落在"可嵌入 SDK 面、发布工程、交互面、后台/远程、市场接入"——全部在 P3 剩余批次 + 上述 T 清单的可执行范围内，按既有批次节奏约 8–11 个小批可把十维推到 40+ 并在新战场完成占位。
+- **一句话**：已经从"差一个时代"（库 + 手工拼装）追到"差外围成型"（内核领先、外壳未打磨）；下一个里程碑不是再补内核，而是**把治理内核包装成别人能 embed、能发布、能在 CI 里直接用的产品面**。
+
+### 10.7 本节增补参考来源（2026-06 ~ 2026-09）
+
+- Claude Code changelog（2026-04~09，mcp login/alwaysLoad/effort frontmatter/热重载）：https://code.claude.com/docs/en/changelog
+- Claude Code release notes 2.1.219–2.1.260（managed settings/permission-prompts none/嵌套 subagent 转发）：https://updatify.io/releases/claude-code
+- Claude Code 能力时间线与插件清单/沙箱边界（第三方调查）：https://agent-safehouse.dev/docs/agent-investigations/claude-code
+- Codex as a Platform — Open Agent Harness（2026-08-19：exec/SDK/app-server）：https://explainx.ai/blog/codex-as-a-platform-open-agent-harness-august-2026
+- Codex 2026 功能面（cloud sandbox/automations/approval 三级/AGENTS.md）：https://deepstation.ai/blog/what-is-openai-codex-the-guide-to-ai-powered-coding-2026 、https://digitalstrategy-ai.com/2026/04/14/exploring-openai-codex-features/
+- Gemini CLI 官方功能表（checkpointing/rewind/remote subagents/sandboxing/plan mode）：https://geminicli.com/docs/ ；Gemini CLI → Antigravity 迁移：https://codeant.ai/blogs/claude-code-cli-vs-codex-cli-vs-gemini-cli-best-ai-cli-tool-for-developers-in-2026
+- 2026-08 横评（Claude Code vs Codex vs Gemini CLI，Muse Code 入局、SWE-bench 口径）：https://codersera.com/blog/gemini-cli-vs-claude-code-2026/
+- Agent Skills 生态：40+ 平台/71,000+ skills/5,000 万开发者：https://atlan.com/know/ai-agent/ai-agent-skills/what-are-agent-skills/ 、https://enkrateialucca.github.io/lucas-landing-page/blog/2026/01/30/why-agent-skills-are-the-future-of-agents/ ；技能仓库横评（99% smell、36% 安全缺陷为第三方审计口径）：https://rywalker.com/research/agentic-skills-frameworks
