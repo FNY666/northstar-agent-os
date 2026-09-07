@@ -27,6 +27,14 @@ prompt ──► AgentRuntime ──► provider (Anthropic Messages API, or scr
             exactly one ResultMessage
 ```
 
+## Concepts, guides and API reference
+
+- Concepts: [governance and the permission gate](../../docs/concepts/governance.md) ·
+  [audit trail: sessions and durable history](../../docs/concepts/audit-trail.md)
+- Guides: [governed-run cookbook](../../docs/guides/governed-run-cookbook.md) ·
+  [packaging and CI](../../docs/guides/packaging-and-ci.md)
+- API reference: [generated from docstrings](../../docs/api/northstar-agent-runtime.md)
+
 ## Install (pip)
 
 The component installs as a console script with lazy SDK imports, so the

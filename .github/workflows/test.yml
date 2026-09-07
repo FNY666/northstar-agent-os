@@ -139,12 +139,20 @@ jobs:
         # the untouched copy must stay green. ~1-2 minutes.
         run: python3 tools/verify_invariants.py
   documentation:
-    name: Repository documentation
+    name: Repository documentation (structure + build + links)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
-      - name: Unit tests
+      - name: Structure tests
+        # Component README "Concepts, guides and API reference" link targets,
+        # examples index coverage, API page headers/module lists, plus the
+        # pre-existing documentation structure tests.
         run: python -m unittest discover -s tests -p 'test_*.py' -v
+      - name: Build and link check
+        # Docstring API pages must be byte-fresh against the committed ones,
+        # and every internal markdown link must resolve. Pure standard library,
+        # so this runs offline with no dependency install.
+        run: python3 tests/docbuild.py verify

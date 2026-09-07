@@ -2,6 +2,13 @@
 
 This component defines the versioned structural boundary between an Agent OS orchestrator and a controlled worker such as the Codex Sidecar.
 
+## Concepts, guides and API reference
+
+- Concepts: [governance and the permission gate](../../docs/concepts/governance.md) ·
+  [handoff and contracts](../../docs/concepts/handoff-and-contracts.md)
+- Guides: [packaging and CI](../../docs/guides/packaging-and-ci.md)
+- API reference: [generated from docstrings](../../docs/api/northstar-run-contract.md)
+
 ## Install (pip)
 
 The contract is pure standard library, so it installs with no dependencies and

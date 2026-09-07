@@ -1,5 +1,25 @@
 # Northstar Agent OS — initial public component
 
+## Unreleased (fifth batch) — documentation in four layers (P2-6)
+
+- **Per-component README link targets.** Every component README now opens with
+  a `## Concepts, guides and API reference` section pointing to the
+  cross-component concept pages, the guide pages and its own API page —
+  quick start → concepts → guides → API reference, instead of one flat file.
+- **Concept and guide pages** under `docs/concepts/` (governance, audit trail,
+  handoff and contracts) and `docs/guides/` (governed-run cookbook, packaging
+  and CI), each with accurate cross-links into the READMEs and API pages.
+- **Docstring-generated API reference.** `tests/docbuild.py` (pure `ast`,
+  stdlib-only and offline-safe — it never imports the modules it documents)
+  renders `docs/api/<component>.md` for all six components (43 modules,
+  committed). `python3 tests/docbuild.py build` regenerates; `verify` checks
+  freshness byte-for-byte and that every internal markdown link resolves.
+- **`examples/README.md` index page** covering every example recipe (demo,
+  ci-readonly-review), with a "where to start" decision list.
+- **CI documentation job = structure + build + links** (`test.yml`):
+  structure unit tests plus a dedicated `python3 tests/docbuild.py verify`
+  step. Repository documentation tests 3 → 8.
+
 ## Unreleased (fourth batch) — minimal MCP stdio client
 
 - **MCP stdio client** (`northstar-agent-runtime`, experimental). `--mcp-server

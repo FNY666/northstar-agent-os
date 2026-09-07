@@ -3,6 +3,13 @@
 This component is a local, standard-library host candidate for the boundary
 between a verified Northstar run and a host-owned private workspace.
 
+## Concepts, guides and API reference
+
+- Concepts: [governance and the permission gate](../../docs/concepts/governance.md) ·
+  [handoff and contracts](../../docs/concepts/handoff-and-contracts.md)
+- Guides: [packaging and CI](../../docs/guides/packaging-and-ci.md)
+- API reference: [generated from docstrings](../../docs/api/northstar-host.md)
+
 ## Install (pip)
 
 ```sh

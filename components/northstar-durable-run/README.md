@@ -6,6 +6,13 @@ it proves contracts, event history, checkpoints, leases, per-call action gates,
 independent postcondition verification, and minimal trace metrics on a local
 fixture.
 
+## Concepts, guides and API reference
+
+- Concepts: [audit trail: sessions and durable history](../../docs/concepts/audit-trail.md) ·
+  [governance and the permission gate](../../docs/concepts/governance.md)
+- Guides: [packaging and CI](../../docs/guides/packaging-and-ci.md)
+- API reference: [generated from docstrings](../../docs/api/northstar-durable-run.md)
+
 ## Install (pip)
 
 ```sh
