@@ -13,13 +13,19 @@ Three properties are enforced here:
    must exist in it. A doc that cites a renamed or invented symbol fails
    loudly.
 """
+import py_compile
 import re
+import shutil
+import subprocess
+import sys
+import tempfile
 import unittest
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 COMPONENTS = ROOT / "components"
 CONCEPTS = ROOT / "docs" / "concepts"
+GUIDES = ROOT / "docs" / "guides"
 
 DOCS = {
     "transport": CONCEPTS / "northstar-remote-transport.md",
@@ -30,6 +36,7 @@ SYMBOL_TOKEN = re.compile(r"`([A-Za-z_][A-Za-z0-9_]*\.py)::([A-Za-z_][A-Za-z0-9_
 
 
 def _norm(text: str) -> str:
+    text = re.sub(r"(?m)^\s*>\s?", "", text)  # strip blockquote markers
     return re.sub(r"\s+", " ", text)
 
 
@@ -160,3 +167,129 @@ class T5AnchorTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+GUIDE = GUIDES / "remote-worker-operations.md"
+CANARY = ROOT / "examples" / "remote-canary"
+CANARY_INDEX_TEXT = (ROOT / "examples" / "README.md").read_text(encoding="utf-8")
+
+
+class T5OperationsGuideTests(unittest.TestCase):
+    def test_guide_exists_and_stays_an_operator_document(self):
+        text = _norm(GUIDE.read_text(encoding="utf-8"))
+        for marker in (
+            "Status: an operator guide, not a product",
+            "None of this has been exercised by this repository's CI",
+            "First-run validation checklist",
+            "Honesty footer",
+        ):
+            with self.subTest(marker=marker):
+                self.assertIn(marker, text)
+
+    def test_guide_links_the_concept_docs_and_examples(self):
+        text = GUIDE.read_text(encoding="utf-8")
+        for link in (
+            "../concepts/northstar-remote-transport.md",
+            "../concepts/northstar-remote-identity.md",
+            "../concepts/northstar-remote-worker.md",
+            "../concepts/audit-trail.md",
+            "../../examples/remote-canary/README.md",
+        ):
+            with self.subTest(link=link):
+                self.assertIn(link, text)
+
+    def test_guide_monitoring_section_names_only_real_signals(self):
+        text = _norm(GUIDE.read_text(encoding="utf-8"))
+        for marker in (
+            "audit.ndjson/1",
+            "trace_metrics.py",
+            "verifier_verdict",
+            "examples/observability",
+            "transport_unavailable",
+            "CONNECTION_READ_TIMEOUT",
+        ):
+            with self.subTest(marker=marker):
+                self.assertIn(marker, text)
+
+
+class T5CanaryExampleTests(unittest.TestCase):
+    def test_examples_index_lists_the_canary(self):
+        self.assertIn("remote-canary/README.md", CANARY_INDEX_TEXT)
+
+    def test_readme_is_honest_about_what_can_run_where(self):
+        text = _norm((CANARY / "README.md").read_text(encoding="utf-8"))
+        for marker in (
+            "never runs this example",
+            "no model, no API key and no codex binary",
+            "proves the channel",
+            "Exit codes",
+            "canonical filename",
+        ):
+            with self.subTest(marker=marker):
+                self.assertIn(marker, text)
+
+    def test_probe_script_compiles(self):
+        py_compile.compile(str(CANARY / "probe_socket.py"), doraise=True)
+
+    def test_canary_shell_script_parses(self):
+        sh = shutil.which("sh")
+        if sh is None:
+            self.skipTest("no POSIX shell on this host")
+        result = subprocess.run([sh, "-n", str(CANARY / "run_remote_canary.sh")],
+                                capture_output=True, text=True)
+        self.assertEqual(result.returncode, 0, msg=result.stderr)
+
+    def test_probe_round_trips_against_the_real_socket_server(self):
+        """Probe + real sidecar_socket.serve on a loopback socket.
+
+        The server module pins its socket root to /var/run/northstar-codex;
+        the test points that root at a temp directory (same code path -
+        validate -> bind -> chmod 0660 -> accept -> handle -> respond).
+        """
+        import importlib.util
+        import threading
+        import time as _time
+
+        sidecar_dir = COMPONENTS / "northstar-codex-sidecar"
+        sys.path.insert(0, str(sidecar_dir))
+        try:
+            import service
+            import sidecar_socket
+
+            with tempfile.TemporaryDirectory() as tmp:
+                root = Path(tmp)
+                service.SOCKET_ROOT = root  # type: ignore[attr-defined]
+                socket_path = root / "sidecar.sock"
+                thread = threading.Thread(
+                    target=sidecar_socket.serve, args=(str(socket_path),), daemon=True
+                )
+                thread.start()
+                deadline = _time.monotonic() + 10.0
+                while not socket_path.exists():
+                    if _time.monotonic() > deadline:
+                        self.fail("sidecar server never published its socket")
+                    _time.sleep(0.05)
+                self.assertEqual(sidecar_socket.socket_mode(), 0o660)
+
+                spec = importlib.util.spec_from_file_location(
+                    "t5_probe", CANARY / "probe_socket.py"
+                )
+                assert spec and spec.loader
+                probe = importlib.util.module_from_spec(spec)
+                spec.loader.exec_module(probe)
+
+                response = probe.probe_once(
+                    str(socket_path),
+                    {"request_id": "canary-test-1", "prompt": "never runs",
+                     "timeout_ms": 999_999_999},
+                )
+                self.assertEqual(response.get("request_id"), "canary-test-1")
+                self.assertEqual(response.get("status"), "rejected")
+                self.assertTrue(
+                    any("timeout_ms" in str(error) for error in response.get("errors", [])),
+                    f"unexpected rejection text: {response}",
+                )
+                # Probe CLI verdict over the same socket.
+                self.assertEqual(probe.run_probe(str(socket_path)), 0)
+        finally:
+            sys.path.remove(str(sidecar_dir))
