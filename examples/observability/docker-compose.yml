@@ -1,0 +1,27 @@
+# Local dev trace backend for northstar-agent-runtime (P3-4 template).
+#
+# Jaeger receives OTLP/HTTP traces straight from the runtime process
+# (otel_bootstrap.py -> http://localhost:4318/v1/traces); Grafana explores
+# them through the provisioned Jaeger core data source.
+#
+# This is a LOCAL developer stack, not a deployment: Jaeger all-in-one keeps
+# traces in memory (down == history gone) and image tags are pinned samples -
+# verify them on Docker Hub before first pull. This repository's CI never
+# runs Docker, so this file is not CI-exercised.
+services:
+  jaeger:
+    image: jaegertracing/all-in-one:1.65
+    ports:
+      - "16686:16686"   # Jaeger UI
+      - "4318:4318"     # OTLP over HTTP (runtime export endpoint)
+
+  grafana:
+    image: grafana/grafana:11.5.0
+    ports:
+      - "3000:3000"
+    environment:
+      GF_SECURITY_ADMIN_PASSWORD: "admin"   # local only; change before sharing
+    volumes:
+      - ./grafana/provisioning:/etc/grafana/provisioning:ro
+    depends_on:
+      - jaeger
