@@ -77,8 +77,12 @@ fork, not a process, database or remote-worker fork.
 The first slice snapshots workspace state at explicit control-plane boundaries
 and emits `workspace_change` session records with pre/post hashes for built-in
 and path-shaped mutating tool calls. The receipt is metadata, not a copy of the
-file bytes; checkpoint contents remain the recovery mechanism. A custom tool
-that mutates an unmentioned path still needs a richer action declaration.
+file bytes; checkpoint contents remain the recovery mechanism. Built-ins use the
+legacy `path`/`paths` convention. A custom mutating `ToolSpec` may declare
+bounded top-level `affected_input_keys`, for example
+`("output_path",)`, and the session record marks that impact set as declared.
+This covers only the declared input paths; hidden side effects still require a
+richer artifact manifest and are never inferred.
 
 The slice does not sign manifests, enforce OS-level isolation, coordinate remote
 workers, or replace the durable-run event store. Those are subsequent layers:

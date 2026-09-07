@@ -288,6 +288,29 @@ class RegistryTests(unittest.TestCase):
                 spec = ToolSpec(name=f"T{kind}", description="", input_schema={}, handler=lambda payload, ctx: None, kind=kind)
                 self.assertEqual(spec.is_mutating, expected)
 
+    def test_tool_spec_validates_and_exposes_declared_impact_keys(self):
+        spec = ToolSpec(
+            name="ArtifactWriter",
+            description="",
+            input_schema={},
+            handler=lambda payload, ctx: None,
+            kind="edit",
+            affected_input_keys=["output_path"],
+        )
+        self.assertEqual(spec.affected_input_keys, ("output_path",))
+        self.assertEqual(spec.as_dict()["affected_input_keys"], ["output_path"])
+        for invalid in (("path", "path"), ("",), ("   ",), ("x" * 129,)):
+            with self.subTest(invalid=invalid):
+                with self.assertRaises(ValueError):
+                    ToolSpec(
+                        name="BadImpact",
+                        description="",
+                        input_schema={},
+                        handler=lambda payload, ctx: None,
+                        kind="edit",
+                        affected_input_keys=invalid,
+                    )
+
     def test_decorator_registration_reads_the_docstring(self):
         registry = ToolRegistry()
 

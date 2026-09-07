@@ -429,8 +429,11 @@ A passing verdict is an assertion the runtime can audit, not a vibe.
 - **Sessions**: append-only JSONL, one `fsync` per write, `0600` under a `0700`
   directory. A torn last line is skipped and counted, not treated as corruption —
   a crash mid-write must not make the audit trail unreadable. Mutating tool calls
-  also emit `workspace_change` records with path-level pre/post hashes. A session
-  id is generated even when nothing is persisted. `sessions export <session-id>` (with
+  also emit `workspace_change` records with path-level pre/post hashes. Custom
+  mutating tools may declare `affected_input_keys` on `ToolSpec` so a bounded
+  non-standard path field is included in the same receipt; the record marks
+  whether that impact set was declared. A session id is generated even when
+  nothing is persisted. `sessions export <session-id>` (with
   `--session-dir`) replays one transcript to stdout as the canonical NDJSON
   audit feed `audit.ndjson/1` — denials, failed tool results and `error_*`
   results carry `"level":"error"`; see

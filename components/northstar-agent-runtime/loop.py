@@ -1127,7 +1127,7 @@ class AgentRuntime:
         receipt_error: str | None = None
         if spec.is_mutating:
             try:
-                mutation_paths = _mutation_relative_paths(payload, context)
+                mutation_paths = _mutation_relative_paths(payload, context, spec)
                 before_states = capture_file_states(self.sandbox.root_real, mutation_paths)
             except (CheckpointError, ToolAccessError, ToolInputError, ValueError, TypeError, OSError) as error:
                 receipt_error = f"workspace preimage unavailable: {type(error).__name__}: {error}"
@@ -1188,6 +1188,14 @@ class AgentRuntime:
                     "is_error": bool(result.is_error),
                     "changed": changed,
                     "paths": list(mutation_paths),
+                    "impact_source": (
+                        "declared" if spec.affected_input_keys is not None else "legacy_path_keys"
+                    ),
+                    "impact_input_keys": list(
+                        spec.affected_input_keys
+                        if spec.affected_input_keys is not None
+                        else ("path", "paths")
+                    ),
                     "before": [state.as_dict() for state in before_states],
                     "after": [state.as_dict() for state in after_states],
                     "receipt_error": receipt_error or after_error,
@@ -1819,19 +1827,28 @@ def _assign_tool_use_ids(blocks: Sequence[Any], state: _RunState) -> tuple[Any, 
     return tuple(filled)
 
 
-def _mutation_relative_paths(payload: Mapping[str, Any], context: ToolContext) -> tuple[str, ...]:
-    """Resolve path-shaped mutating inputs before/after a handler call.
+def _mutation_relative_paths(
+    payload: Mapping[str, Any], context: ToolContext, spec: ToolSpec
+) -> tuple[str, ...]:
+    """Resolve a mutating tool's declared top-level path inputs.
 
-    Built-in Write/Edit use ``path``. A custom mutating tool may expose a
-    ``paths`` array; unknown mutation surfaces still get an action receipt, but
-    without pretending that an unmentioned path was captured.
+    Built-in Write/Edit retain the legacy ``path``/``paths`` convention. A
+    custom tool can declare ``affected_input_keys`` on its ``ToolSpec`` so a
+    non-standard key such as ``output_path`` is covered by the same pre/post
+    workspace receipt. The declaration is intentionally shallow and bounded;
+    hidden side effects still require an explicit artifact manifest in a future
+    contract.
     """
+    keys = spec.affected_input_keys
+    if keys is None:
+        keys = ("path", "paths")
     raw_values: list[Any] = []
-    if "path" in payload:
-        raw_values.append(payload.get("path"))
-    values = payload.get("paths")
-    if isinstance(values, (list, tuple)):
-        raw_values.extend(values)
+    for key in keys:
+        value = payload.get(key)
+        if isinstance(value, (list, tuple)):
+            raw_values.extend(value)
+        elif value is not None:
+            raw_values.append(value)
     paths: set[str] = set()
     for raw in raw_values:
         if not isinstance(raw, str) or not raw.strip():

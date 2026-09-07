@@ -130,7 +130,7 @@ class ToolResult:
 
 @dataclass(frozen=True)
 class ToolSpec:
-    """One callable capability."""
+    """One callable capability with an optional workspace impact declaration."""
 
     name: str
     description: str
@@ -142,12 +142,25 @@ class ToolSpec:
     is_delegation: bool = False
     #: Tools the model may always call regardless of workspace availability.
     needs_workspace: bool = True
+    #: Top-level payload keys containing affected workspace paths. ``None``
+    #: preserves the legacy ``path``/``paths`` convention; an explicit tuple
+    #: makes a custom tool's impact surface inspectable and receiptable.
+    affected_input_keys: tuple[str, ...] | None = None
 
     def __post_init__(self) -> None:
         if not self.name or not isinstance(self.name, str):
             raise ValueError("tool name must be a non-empty string")
         if self.is_mutating is None:
             object.__setattr__(self, "is_mutating", self.kind in {"edit", "exec", "network", "other"})
+        if self.affected_input_keys is not None:
+            if not isinstance(self.affected_input_keys, (tuple, list)):
+                raise ValueError("affected_input_keys must be a tuple of strings or None")
+            keys = tuple(self.affected_input_keys)
+            if any(not isinstance(key, str) or not key.strip() or len(key) > 128 for key in keys):
+                raise ValueError("affected_input_keys must contain bounded non-empty strings")
+            if len(set(keys)) != len(keys):
+                raise ValueError("affected_input_keys must not contain duplicates")
+            object.__setattr__(self, "affected_input_keys", keys)
         _validate_handler_signature(self.name, self.handler)
 
     @property
@@ -167,6 +180,9 @@ class ToolSpec:
             "description": self.description,
             "kind": self.kind,
             "is_mutating": bool(self.is_mutating),
+            "affected_input_keys": (
+                list(self.affected_input_keys) if self.affected_input_keys is not None else None
+            ),
             "is_delegation": self.is_delegation,
         }
 
@@ -322,6 +338,7 @@ class ToolRegistry:
         input_schema: dict[str, Any] | None = None,
         kind: ToolKind = "read",
         is_mutating: bool | None = None,
+        affected_input_keys: tuple[str, ...] | None = None,
     ) -> Callable[[Callable[[dict[str, Any], ToolContext], Any]], ToolSpec]:
         def decorate(function: Callable[[dict[str, Any], ToolContext], Any]) -> ToolSpec:
             spec = ToolSpec(
@@ -331,6 +348,7 @@ class ToolRegistry:
                 handler=function,
                 kind=kind,
                 is_mutating=is_mutating,
+                affected_input_keys=affected_input_keys,
             )
             self.register(spec)
             return spec

@@ -289,6 +289,43 @@ class PersistenceTests(RuntimeTestCase):
         self.assertEqual(denials[0]["tool"], "Write")
         self.assertEqual(denials[0]["source"], "mode")
 
+    def test_declared_custom_impact_keys_are_included_in_workspace_receipts(self):
+        workspace = self.workspace()
+        store = self.session_store()
+        registry = ToolRegistry()
+
+        def write_artifact(payload, ctx):
+            ctx.resolve(payload["output_path"], for_write=True).write_text("artifact", encoding="utf-8")
+            return ToolResult.ok("written")
+
+        registry.register(
+            ToolSpec(
+                name="WriteArtifact",
+                description="write using a non-standard path key",
+                input_schema={},
+                handler=write_artifact,
+                kind="edit",
+                affected_input_keys=("output_path",),
+            )
+        )
+        provider = self.provider([tool_turn("WriteArtifact", {"output_path": "artifact.txt"}), text_turn("ok")])
+        self.drive(
+            self.runtime(
+                provider=provider,
+                workspace=workspace,
+                sessions=store,
+                tools=registry,
+                permission_mode="acceptEdits",
+            )
+        )
+        records, _ = store.read()
+        receipt = next(record for record in records if record["type"] == "workspace_change")
+        self.assertEqual(receipt["paths"], ["artifact.txt"])
+        self.assertEqual(receipt["impact_source"], "declared")
+        self.assertEqual(receipt["impact_input_keys"], ["output_path"])
+        self.assertFalse(receipt["before"][0]["exists"])
+        self.assertTrue(receipt["after"][0]["exists"])
+
 
 if __name__ == "__main__":
     unittest.main()

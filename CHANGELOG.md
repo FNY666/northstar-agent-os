@@ -1,5 +1,18 @@
 # Northstar Agent OS — initial public component
 
+## Unreleased (twentieth batch) — declared runtime mutation impact sets (T13)
+
+- `ToolSpec` now accepts bounded `affected_input_keys` declarations for custom
+  mutating tools whose workspace path is not named `path` or `paths`.
+- Pre/post workspace receipts resolve those declared top-level string/list path
+  fields through the same sandbox, and `workspace_change` records expose the
+  declaration source and keys. Legacy built-ins remain compatible; undeclared
+  hidden side effects are still not claimed as covered.
+- Added registry introspection, validation, and end-to-end custom-tool receipt
+  tests. Runtime now has 574 tests and the repository has 883 tests (4 optional
+  OTel skips); this batch remains unreleased with no tag, GitHub Release, or
+  PyPI/npm publication.
+
 ## Unreleased (nineteenth batch) — offline durable-run receipt verification (T12)
 
 - Added the read-only `northstar-durable-run verify-receipt` command. It

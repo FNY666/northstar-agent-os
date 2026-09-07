@@ -895,7 +895,7 @@ What a handler returns. ``is_error`` is the only failure signal the loop reads.
 - `as_block(tool_use_id: str, *, max_chars: int=MAX_TOOL_RESULT_CHARS)`
 #### `ToolSpec`
 
-One callable capability.
+One callable capability with an optional workspace impact declaration.
 
 - `read_only()`
 - `to_api()`
@@ -912,7 +912,7 @@ Workspace containment with symlink resolution ahead of the check.
 Name-keyed tool set with deterministic ordering.
 
 - `register(spec: ToolSpec, *, replace_existing: bool=False)`
-- `tool(name: str, *, description: str='', input_schema: dict[str, Any] | None=None, kind: ToolKind='read', is_mutating: bool | None=None)`
+- `tool(name: str, *, description: str='', input_schema: dict[str, Any] | None=None, kind: ToolKind='read', is_mutating: bool | None=None, affected_input_keys: tuple[str, ...] | None=None)`
 - `unregister(name: str)`
 - `get(name: str)`
 - `require(name: str)`
