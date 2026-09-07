@@ -28,6 +28,7 @@ from contract import (
 
 AUTHORIZATION_SCHEMA_VERSION = "northstar.authorization.v1"
 APPROVAL_LEASE_SCHEMA_VERSION = "northstar.approval-lease.v1"
+RECEIPT_BINDING_SCHEMA_VERSION = "northstar.receipt-binding.v1"
 APPROVAL_LEASE_MAX_WORKSPACE_CHARS = 4096
 _LEASE_CAPABILITY_RE = re.compile(r"^[a-z][a-z0-9]*(?:[._:-][a-z0-9]+)*$")
 _AUTHORIZATION_FIELDS = {
@@ -244,6 +245,45 @@ def verify_authorization(
     if now >= authorization["expires_at"]:
         return AuthorizationValidation(False, errors=("authorization is expired",))
     return AuthorizationValidation(True, authorization=authorization)
+
+
+def make_receipt_binding(
+    authorization_token: str,
+    verified: AuthorizationValidation,
+    *,
+    session_id: str | None = None,
+) -> dict[str, Any]:
+    """Project a verified host grant into a runtime receipt binding.
+
+    The caller must pass the successful result of ``verify_authorization``;
+    unverified claims are never accepted. The exact signed token is reduced to
+    a SHA-256 digest, so the runtime can correlate a signed action receipt with
+    the host grant without receiving the authorization token or its secret.
+    """
+    if not isinstance(authorization_token, str) or not authorization_token or any(
+        ord(char) < 0x21 or char.isspace() for char in authorization_token
+    ):
+        raise ValueError("authorization_token is invalid")
+    if not isinstance(verified, AuthorizationValidation) or not verified.ok or verified.authorization is None:
+        raise ValueError("a successful authorization verification is required")
+    authorization = verified.authorization
+    errors = _validate_authorization(authorization)
+    if errors:
+        raise ValueError(errors[0])
+    if session_id is None:
+        session_id = authorization["run_id"]
+    _require_id(session_id, "session_id")
+    return {
+        "schema_version": RECEIPT_BINDING_SCHEMA_VERSION,
+        "authorization_digest": "sha256:" + hashlib.sha256(authorization_token.encode("utf-8")).hexdigest(),
+        "actor_id": authorization["actor_id"],
+        "run_id": authorization["run_id"],
+        "session_id": session_id,
+        "workspace_id": authorization["workspace_id"],
+        "policy_revision": authorization["policy_revision"],
+        "capabilities": list(authorization["capabilities"]),
+        "expires_at": authorization["expires_at"],
+    }
 
 
 def _verified_binding_claims(value: Any) -> dict[str, Any]:

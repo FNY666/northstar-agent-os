@@ -1,5 +1,23 @@
 # Northstar Agent OS — initial public component
 
+## Unreleased (twenty-second batch) — host-bound action receipts (T15)
+
+- Added `northstar.receipt-binding.v1`, a strict runtime projection of a
+  host-verified authorization grant. It carries the exact signed grant-token
+  digest, actor/run/session/workspace/policy identity, narrowed capabilities and
+  expiry, but never carries the grant token or any secret into the runtime.
+- Added `northstar-host.authorization.make_receipt_binding()`, which requires a
+  successful `verify_authorization()` result before producing the projection.
+  Bound non-denied action receipts must use a capability covered by the binding;
+  session mismatches, unknown fields, expiry and scope widening fail closed.
+- Signed action receipts and contract projections now expose the bound
+  authorization context. SDK callers can provide `RunOptions.receipt_binding`;
+  existing unbound receipts remain backward-compatible.
+- Added host, runtime and signed-receipt integration tests. Runtime now has 579
+  tests (575 pass, 4 optional OTel skips) and the repository has 889 tests (885
+  pass, 4 optional OTel skips); this batch remains unreleased with no tag,
+  GitHub Release, or PyPI/npm publication.
+
 ## Unreleased (twenty-first batch) — versioned artifact manifests (T14)
 
 - Added `northstar.artifact-manifest.v1`, a bounded canonical manifest for

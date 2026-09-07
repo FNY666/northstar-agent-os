@@ -27,6 +27,7 @@ from typing import Any, Iterable, Mapping
 from artifacts import ArtifactError, ArtifactManifest
 
 APPROVAL_LEASE_SCHEMA_VERSION = "northstar.approval-lease.v1"
+RECEIPT_BINDING_SCHEMA_VERSION = "northstar.receipt-binding.v1"
 ACTION_RECEIPT_SCHEMA_VERSION = "northstar.action-receipt.v1"
 MAX_ID_CHARS = 128
 MAX_CAPABILITY_CHARS = 128
@@ -258,10 +259,99 @@ class ApprovalLeaseLedger:
             return tuple(lease.as_dict() for lease in sorted(self._leases.values(), key=lambda item: item.lease_id))
 
 
+@dataclass(frozen=True)
+class ReceiptBinding:
+    """Host-verified authorization context carried by a runtime receipt.
+
+    The runtime accepts this as a projection from the host; it does not accept
+    or verify the host authorization token here. The outer action receipt
+    signature makes the projection tamper-evident for a host that owns the
+    receipt secret.
+    """
+
+    authorization_digest: str
+    actor_id: str
+    run_id: str
+    session_id: str
+    workspace_id: str
+    policy_revision: str
+    capabilities: tuple[str, ...]
+    expires_at: int
+    schema_version: str = RECEIPT_BINDING_SCHEMA_VERSION
+
+    def __post_init__(self) -> None:
+        if self.schema_version != RECEIPT_BINDING_SCHEMA_VERSION:
+            raise ReceiptError(f"schema_version must be {RECEIPT_BINDING_SCHEMA_VERSION}")
+        _require_digest(self.authorization_digest, "authorization_digest")
+        for field, value in (
+            ("actor_id", self.actor_id),
+            ("run_id", self.run_id),
+            ("session_id", self.session_id),
+            ("workspace_id", self.workspace_id),
+            ("policy_revision", self.policy_revision),
+        ):
+            _require_id(value, field)
+        object.__setattr__(self, "capabilities", _require_capabilities(self.capabilities))
+        _require_time(self.expires_at, "expires_at")
+
+    @classmethod
+    def from_mapping(cls, value: Mapping[str, Any]) -> "ReceiptBinding":
+        if not isinstance(value, Mapping):
+            raise ReceiptError("receipt binding must be an object")
+        allowed = {
+            "schema_version", "authorization_digest", "actor_id", "run_id",
+            "session_id", "workspace_id", "policy_revision", "capabilities",
+            "expires_at",
+        }
+        unknown = sorted(set(value) - allowed)
+        if unknown:
+            raise ReceiptError(f"receipt binding has unknown fields: {', '.join(unknown)}")
+        required = allowed
+        missing = sorted(required - set(value))
+        if missing:
+            raise ReceiptError(f"receipt binding is missing fields: {', '.join(missing)}")
+        return cls(
+            schema_version=value["schema_version"],
+            authorization_digest=value["authorization_digest"],
+            actor_id=value["actor_id"],
+            run_id=value["run_id"],
+            session_id=value["session_id"],
+            workspace_id=value["workspace_id"],
+            policy_revision=value["policy_revision"],
+            capabilities=tuple(value["capabilities"]),
+            expires_at=value["expires_at"],
+        )
+
+    from_dict = from_mapping
+
+    def as_dict(self) -> dict[str, Any]:
+        return {
+            "schema_version": self.schema_version,
+            "authorization_digest": self.authorization_digest,
+            "actor_id": self.actor_id,
+            "run_id": self.run_id,
+            "session_id": self.session_id,
+            "workspace_id": self.workspace_id,
+            "policy_revision": self.policy_revision,
+            "capabilities": list(self.capabilities),
+            "expires_at": self.expires_at,
+        }
+
+    to_dict = as_dict
+
+    def covers(self, *, capability: str, session_id: str, now: int) -> bool:
+        return (
+            session_id == self.session_id
+            and capability in self.capabilities
+            and now < self.expires_at
+        )
+
+
 _RECEIPT_FIELDS = {
     "schema_version", "receipt_id", "action_id", "session_id", "tool", "capability",
     "status", "issued_at", "completed_at", "input_digest", "output_digest",
-    "workspace_before", "workspace_after", "lease_id", "error", "artifact_manifest", "signature",
+    "workspace_before", "workspace_after", "lease_id", "error", "artifact_manifest",
+    "authorization_binding", "signature",
 }
 _RECEIPT_STATUSES = frozenset({"approved", "denied", "completed", "failed"})
 
@@ -287,6 +377,7 @@ class ActionReceipt:
     signature: str | None = None
     schema_version: str = ACTION_RECEIPT_SCHEMA_VERSION
     artifact_manifest: ArtifactManifest | None = None
+    authorization_binding: ReceiptBinding | None = None
 
     def __post_init__(self) -> None:
         if self.schema_version != ACTION_RECEIPT_SCHEMA_VERSION:
@@ -318,6 +409,22 @@ class ActionReceipt:
             except (ArtifactError, TypeError, ValueError) as error:
                 raise ReceiptError(f"artifact_manifest is invalid: {error}") from error
             object.__setattr__(self, "artifact_manifest", manifest)
+        if self.authorization_binding is not None:
+            try:
+                binding = (
+                    self.authorization_binding
+                    if isinstance(self.authorization_binding, ReceiptBinding)
+                    else ReceiptBinding.from_mapping(self.authorization_binding)
+                )
+            except (ReceiptError, TypeError, ValueError) as error:
+                raise ReceiptError(f"authorization_binding is invalid: {error}") from error
+            if binding.session_id != self.session_id:
+                raise ReceiptError("authorization_binding session_id does not match receipt")
+            if self.status != "denied" and self.capability not in binding.capabilities:
+                raise ReceiptError("authorization_binding does not cover receipt capability")
+            if self.status != "denied" and self.issued_at >= binding.expires_at:
+                raise ReceiptError("authorization_binding expired before action receipt")
+            object.__setattr__(self, "authorization_binding", binding)
         if self.signature is not None:
             _decode_signature(self.signature)
 
@@ -356,6 +463,8 @@ class ActionReceipt:
         }
         if self.artifact_manifest is not None:
             result["artifact_manifest"] = self.artifact_manifest.to_dict()
+        if self.authorization_binding is not None:
+            result["authorization_binding"] = self.authorization_binding.to_dict()
         if include_signature:
             result["signature"] = self.signature
         return result
@@ -416,6 +525,13 @@ class ActionReceipt:
                     "status": "verified" if self.artifact_manifest.artifacts else "unknown",
                 }
             )
+        if self.authorization_binding is not None:
+            postconditions.append(
+                {
+                    "name": "authorization_context_bound",
+                    "status": "verified",
+                }
+            )
         receipt: dict[str, Any] = {
             "schema_version": "northstar.receipt.v1",
             "run_id": self.session_id,
@@ -446,6 +562,7 @@ class ActionReceipt:
         lease_id: str | None = None,
         error: str = "",
         artifact_manifest: ArtifactManifest | Mapping[str, Any] | None = None,
+        authorization_binding: ReceiptBinding | Mapping[str, Any] | None = None,
     ) -> "ActionReceipt":
         now = int(time.time()) if issued_at is None else issued_at
         end = now if completed_at is None else completed_at
@@ -465,6 +582,7 @@ class ActionReceipt:
             lease_id=lease_id,
             error=error,
             artifact_manifest=artifact_manifest,
+            authorization_binding=authorization_binding,
         )
 
 
@@ -483,9 +601,11 @@ def verify_receipt(receipt: ActionReceipt | Mapping[str, Any], secret: bytes) ->
 __all__ = [
     "ACTION_RECEIPT_SCHEMA_VERSION",
     "APPROVAL_LEASE_SCHEMA_VERSION",
+    "RECEIPT_BINDING_SCHEMA_VERSION",
     "ActionReceipt",
     "ApprovalLease",
     "ApprovalLeaseLedger",
+    "ReceiptBinding",
     "ReceiptError",
     "capability_for",
     "digest_value",

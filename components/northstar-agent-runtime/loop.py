@@ -45,6 +45,7 @@ from receipts import (
     ActionReceipt,
     ApprovalLease,
     ApprovalLeaseLedger,
+    ReceiptBinding,
     ReceiptError,
     capability_for,
     digest_value,
@@ -405,6 +406,7 @@ class AgentRuntime:
         can_use_tool: Callable[[str, dict[str, Any], PermissionRequestContext], Any] | None = None,
         approval_leases: ApprovalLeaseLedger | Iterable[ApprovalLease | Mapping[str, Any]] | None = None,
         receipt_secret: bytes | None = None,
+        receipt_binding: ReceiptBinding | Mapping[str, Any] | None = None,
         clock: Callable[[], int] | None = None,
         tracer: Tracer | None = None,
         sessions: SessionStore | None = None,
@@ -487,6 +489,18 @@ class AgentRuntime:
         self.session_id = resolve_session_id(self.config.session_id, self.sessions if self.sessions.enabled else None)
         if self.sessions.session_id != self.session_id:
             self.sessions = replace(self.sessions, session_id=self.session_id)
+        try:
+            self.receipt_binding = (
+                receipt_binding
+                if isinstance(receipt_binding, ReceiptBinding)
+                else ReceiptBinding.from_mapping(receipt_binding)
+                if receipt_binding is not None
+                else None
+            )
+        except (ReceiptError, TypeError, ValueError) as error:
+            raise RuntimeConfigurationError(f"receipt_binding is invalid: {error}") from error
+        if self.receipt_binding is not None and self.receipt_binding.session_id != self.session_id:
+            raise RuntimeConfigurationError("receipt_binding session_id must match runtime session_id")
         #: Last finished run, kept so ``run_collect`` and subagent delegation can
         #: read a full report without re-deriving it from events.
         self._pending_state: _RunState | None = None
@@ -535,6 +549,7 @@ class AgentRuntime:
             "workspace": str(self.sandbox.root_real),
             "capability_leases": len(self.approval_leases.active(now=int(self.clock()))),
             "receipts_signed": self.receipt_secret is not None,
+            "receipts_bound": self.receipt_binding is not None,
         }
 
     def pricing(self) -> dict[str, Any]:
@@ -630,6 +645,7 @@ class AgentRuntime:
             "workspace": str(self.sandbox.root_real),
             "capability_leases": len(self.approval_leases.active(now=int(self.clock()))),
             "receipts_signed": self.receipt_secret is not None,
+            "receipts_bound": self.receipt_binding is not None,
         }
         init = SystemMessage(subtype="init", content=f"runtime ready: {self.provider_name}/{config.model}", data=init_data)
         self.sessions.record_system(init, agent=config.agent)
@@ -893,6 +909,7 @@ class AgentRuntime:
                 lease_id=lease_id,
                 error=error[:2000],
                 artifact_manifest=artifact_manifest,
+                authorization_binding=self.receipt_binding,
             )
             if self.receipt_secret is not None:
                 receipt = receipt.sign(self.receipt_secret)
@@ -1509,6 +1526,7 @@ class AgentRuntime:
             ),
             approval_leases=self.approval_leases,
             receipt_secret=self.receipt_secret,
+            receipt_binding=self.receipt_binding,
             clock=self.clock,
             hooks=self.hooks,
             agents=self.agents,

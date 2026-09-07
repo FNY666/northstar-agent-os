@@ -395,7 +395,13 @@ also written to the session as an `informational` record with subtype
 `action_receipt`; the secret itself is never recorded. A tool may also return a
 bounded `artifact_manifest` in its `ToolResult` data; the runtime validates and
 signs that manifest with the action receipt, while keeping it explicitly an
-observation rather than host attestation.
+observation rather than host attestation. A host may also project a successfully
+verified authorization grant with `northstar-host.authorization.make_receipt_binding`.
+Pass that binding through `AgentRuntime` or `sdk.RunOptions.receipt_binding`; the
+runtime receives neither the grant token nor its secret, but the signed receipt
+carries the exact grant-token digest, actor/run/workspace/policy identity, scope,
+and expiry. Non-denied action receipts must use a capability covered by the
+binding, so a receipt cannot silently widen the host grant.
 
 `northstar-host.authorization.issue_approval_lease` is the host-side adapter
 from a verified, policy-authorized run grant to this bounded lease shape. It
@@ -515,7 +521,7 @@ cd components/northstar-agent-runtime
 python3 -m unittest discover -s tests -p 'test_*.py' -v
 ```
 
-578 tests, fully offline and deterministic (four optional OpenTelemetry tests
+579 tests, fully offline and deterministic (four optional OpenTelemetry tests
 are skipped when the tracing extra is absent): the scripted provider is the
 only model, and `test_integration_sidecar.py` runs the real sidecar `serve()`
 over a real Unix socket with a 100,000-Chinese-character prompt.

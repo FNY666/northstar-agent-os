@@ -8,9 +8,11 @@ sys.path.insert(0, str(HOST_ROOT))
 sys.path.insert(0, str(CONTRACT_ROOT))
 
 from authorization import (  # noqa: E402
+    AuthorizationValidation,
     HostPolicy,
     authorize_run,
     issue_approval_lease,
+    make_receipt_binding,
     sign_authorization,
     verify_authorization,
 )
@@ -102,6 +104,27 @@ class HostAuthorizationTests(unittest.TestCase):
                 "expires_at": 1_120,
             },
         )
+
+    def test_receipt_binding_requires_verified_grant_and_digests_exact_token(self):
+        run = valid_request()
+        run["requested_capabilities"] = ["browser"]
+        policy = HostPolicy.from_mapping("policy-7", {"actor-001": ["browser"]})
+        token = authorize_run(
+            run,
+            self.verified_binding(run),
+            policy,
+            now=1_000,
+            secret=self.AUTHORIZATION_SECRET,
+            grant_ttl_seconds=120,
+        )
+        verified = verify_authorization(token, self.AUTHORIZATION_SECRET, now=1_001)
+        binding = make_receipt_binding(token, verified, session_id="session-001")
+        self.assertEqual(binding["schema_version"], "northstar.receipt-binding.v1")
+        self.assertEqual(binding["session_id"], "session-001")
+        self.assertEqual(binding["capabilities"], ["browser"])
+        self.assertTrue(binding["authorization_digest"].startswith("sha256:"))
+        with self.assertRaises(ValueError):
+            make_receipt_binding(token, AuthorizationValidation(False, errors=("bad",)))
 
     def test_grant_tampering_expiry_and_unknown_fields_fail_closed(self):
         run = valid_request()

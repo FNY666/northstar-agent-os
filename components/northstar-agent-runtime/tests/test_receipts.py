@@ -14,6 +14,7 @@ from receipts import (
     ActionReceipt,
     ApprovalLease,
     ApprovalLeaseLedger,
+    ReceiptBinding,
     ReceiptError,
     capability_for,
 )
@@ -105,6 +106,20 @@ class LeaseLifecycleTests(unittest.TestCase):
 class ReceiptTests(unittest.TestCase):
     SECRET = b"receipt-secret-012345"
 
+    def binding(self, **overrides):
+        values = {
+            "authorization_digest": "sha256:" + "a" * 64,
+            "actor_id": "actor-001",
+            "run_id": "run-001",
+            "session_id": "session-001",
+            "workspace_id": "workspace-001",
+            "policy_revision": "policy-1",
+            "capabilities": ("workspace.write",),
+            "expires_at": 200,
+        }
+        values.update(overrides)
+        return ReceiptBinding(**values)
+
     def receipt(self):
         return ActionReceipt.new(
             session_id="session-001",
@@ -138,6 +153,39 @@ class ReceiptTests(unittest.TestCase):
         self.assertEqual(receipt.to_contract_receipt()["schema_version"], "northstar.receipt.v1")
         self.assertEqual(receipt.to_contract_receipt()["status"], "ok")
 
+    def test_receipt_binding_round_trips_and_cannot_cover_another_capability(self):
+        bound = ActionReceipt.new(
+            session_id="session-001",
+            action_id="call-bound",
+            tool="Write",
+            capability="workspace.write",
+            status="completed",
+            issued_at=100,
+            completed_at=101,
+            input_value={"path": "a"},
+            output_value="written",
+            authorization_binding=self.binding(),
+        )
+        loaded = ActionReceipt.from_dict(bound.to_dict())
+        self.assertEqual(loaded.authorization_binding.run_id, "run-001")
+        self.assertEqual(
+            bound.to_contract_receipt()["postconditions"][-1],
+            {"name": "authorization_context_bound", "status": "verified"},
+        )
+        with self.assertRaises(ReceiptError):
+            ActionReceipt.new(
+                session_id="session-001",
+                action_id="call-outside",
+                tool="Bash",
+                capability="process.exec",
+                status="completed",
+                issued_at=100,
+                completed_at=101,
+                input_value={},
+                output_value="ran",
+                authorization_binding=self.binding(),
+            )
+
     def test_unknown_and_extra_fields_are_rejected(self):
         with self.assertRaises(ReceiptError):
             ActionReceipt.from_dict({**self.receipt().to_dict(), "surprise": True})
@@ -163,6 +211,16 @@ class RuntimeReceiptIntegrationTests(unittest.TestCase):
                 config=RuntimeConfig(workspace=str(workspace), session_id="session-001"),
                 approval_leases=[lease],
                 receipt_secret=b"receipt-secret-012345",
+                receipt_binding=ReceiptBinding(
+                    authorization_digest="sha256:" + "c" * 64,
+                    actor_id="actor-001",
+                    run_id="run-001",
+                    session_id="session-001",
+                    workspace_id="workspace-001",
+                    policy_revision="policy-1",
+                    capabilities=("workspace.write",),
+                    expires_at=200,
+                ),
                 clock=lambda: 101,
                 sessions=__import__("sessions").SessionStore(session_dir, session_id="session-001"),
             )
@@ -171,6 +229,11 @@ class RuntimeReceiptIntegrationTests(unittest.TestCase):
             self.assertEqual(len(report.receipts), 1)
             receipt = report.receipts[0]
             self.assertTrue(receipt.verify(b"receipt-secret-012345"))
+            self.assertEqual(receipt.authorization_binding.actor_id, "actor-001")
+            self.assertEqual(
+                receipt.to_contract_receipt()["postconditions"][-1]["name"],
+                "authorization_context_bound",
+            )
             self.assertEqual(report.tool_calls[0].lease_id, "lease-001")
             records, _ = runtime.sessions.read()
             action_records = [record for record in records if record.get("subtype") == "action_receipt"]

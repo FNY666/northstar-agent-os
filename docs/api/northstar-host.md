@@ -30,6 +30,10 @@ Sign a structurally valid host authorization grant.
 
 Verify an authorization grant without returning claims on failure.
 
+#### `make_receipt_binding(authorization_token: str, verified: AuthorizationValidation, *, session_id: str | None=None)`
+
+Project a verified host grant into a runtime receipt binding.
+
 #### `authorize_run(run: dict[str, Any], binding: BindingValidation, policy: HostPolicy, *, now: int, secret: bytes, grant_ttl_seconds: int=300)`
 
 Authorize one structurally valid run under an explicit host policy.

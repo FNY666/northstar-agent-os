@@ -51,7 +51,11 @@ capability, duplicate entry, or invalid policy identifier is rejected.
 signed `northstar.authorization.v1` grant. For an in-process runtime hand-off,
 `issue_approval_lease()` can then project a **narrower** capability set into a
 bounded `northstar.approval-lease.v1` claim. It does not widen the signed grant
-and does not replace per-call durable-run authorization. The grant binds:
+and does not replace per-call durable-run authorization. `make_receipt_binding()`
+is a separate projection for signed runtime action receipts: it requires a
+successful `verify_authorization()` result and carries only the exact
+grant-token digest, identity, capability scope and expiry. It does not pass the
+token or any secret to the runtime. The grant binds:
 
 - `actor_id`, `run_id`, and `workspace_id`;
 - the exact requested capability set;

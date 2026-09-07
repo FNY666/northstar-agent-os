@@ -9,7 +9,7 @@
 
 > **阅读口径（2026-09-08 当前真值）**：本页保留了早期差距基线与实施 ledger，
 > 因而 §0–§8 中的“现状”段落有历史意义，不应覆盖后面的复评。当前 checkout
-> 的权威快照是：`make test` **887 项测试，883 项通过、4 项 skip**（runtime 578，
+> 的权威快照是：`make test` **889 项测试，885 项通过、4 项 skip**（runtime 579，
 > 其中 4 项因可选 OpenTelemetry 依赖缺失而跳过；其余组件与文档测试全绿）；五个可安装组件仍为
 > 对齐的 `0.1.0.dev0`，没有发布 tag。Agent Skills 已支持
 > `.northstar/skills` + portable `.agents/skills`、标准 frontmatter、`skills
@@ -22,7 +22,7 @@
 
 ## 0. 执行摘要（TL;DR）
 
-**当前结论：Northstar 已从“库 + 手工拼装”追到可安装、可审计、具备局部可逆执行的 headless harness，但还不是 Claude Code/Codex/Gemini 那样的完整产品。**本地实测 `make test` 为 **887 项测试（883 通过、4 项可选 OTel skip）**（runtime 578），权限门、hooks、预算、只追加 transcript、workspace receipts、checkpoint manifest、capability lease、可验证 action receipt、durable-run 生命周期与离线确定性仍是最强资产。
+**当前结论：Northstar 已从“库 + 手工拼装”追到可安装、可审计、具备局部可逆执行的 headless harness，但还不是 Claude Code/Codex/Gemini 那样的完整产品。**本地实测 `make test` 为 **889 项测试（885 通过、4 项可选 OTel skip）**（runtime 579），权限门、hooks、预算、只追加 transcript、workspace receipts、checkpoint manifest、capability lease、可验证 action receipt、durable-run 生命周期与离线确定性仍是最强资产。
 
 已经补齐的 DX 基础包括：五个可安装组件、console script、`doctor`/`dry-run`、AGENTS.md 与策略即代码、文件化 subagents、MCP stdio 最小客户端、标准 Agent Skills（含 `skills check/list`）、sessions 读回/NDJSON 审计、Python SDK、脚手架、API 文档和 CI recipe。**这些能力要以当前 checkout 的测试为准；本页后面的早期盘点是历史基线。**
 
@@ -818,3 +818,27 @@ artifact manifest，runtime 会严格验证并把它纳入 action receipt，但�
   freshness 与链接检查通过。
 
 T14 仍是 Unreleased；没有创建 tag、GitHub Release，也没有发布到 PyPI/npm。
+
+### 10.18 当前实现复核：host-bound action receipt（2026-09-08）
+
+T15 将 T7/T14 的 runtime receipt 从“有 host secret 即可验证”推进到“可关联
+host authorization，但不把 host token 带进 runtime”：
+
+- 新增 `northstar.receipt-binding.v1`。绑定包含 exact signed grant-token
+  digest、actor/run/session/workspace/policy identity、capability scope 与
+  expiry；runtime 只接收 projection，不接收 authorization token 或 secret。
+- `northstar-host.authorization.make_receipt_binding()` 只接受成功的
+  `verify_authorization()` 结果，并对 token 做 SHA-256 digest。runtime 会校验
+  session identity、字段白名单、capability scope 和 expiry；非 denied receipt
+  若声明了 binding，必须落在 binding 的 capability 集内。
+- signed `ActionReceipt` canonical bytes 和 `northstar.receipt.v1` projection
+  都保留 authorization context；SDK 可通过 `RunOptions.receipt_binding`
+  接入，未绑定的既有 receipt 保持兼容。
+- 该 binding 不是新的授权状态机，也不是 runtime 对 host token 的独立验签；
+  它依赖 host 先完成 grant verification，外层 receipt secret 负责防止
+  projection 在传输/存储中被篡改。
+- 验证：runtime **579 项测试（575 项通过、4 项可选 OTel skip）**；全仓
+  `make test` 为 **889 项测试、885 项通过、4 项可选 OTel skip**；API docbuild
+  freshness 与链接检查通过。
+
+T15 仍是 Unreleased；没有创建 tag、GitHub Release，也没有发布到 PyPI/npm。

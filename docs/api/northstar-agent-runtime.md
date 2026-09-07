@@ -582,6 +582,13 @@ In-memory lease store with deterministic selection and use accounting.
 - `active(*, now: int)`
 - `consume(*, session_id: str, workspace: str, capability: str, now: int)`
 - `snapshot()`
+#### `ReceiptBinding`
+
+Host-verified authorization context carried by a runtime receipt.
+
+- `from_mapping(value: Mapping[str, Any])`
+- `as_dict()`
+- `covers(*, capability: str, session_id: str, now: int)`
 #### `ActionReceipt`
 
 Canonical action result with an optional HMAC signature.
@@ -594,7 +601,7 @@ Canonical action result with an optional HMAC signature.
 - `verify(secret: bytes)`
 - `to_contract_receipt()`
   - Project into the existing ``northstar.receipt.v1`` result shape.
-- `new(*, session_id: str, action_id: str, tool: str, capability: str, status: str, issued_at: int | None=None, completed_at: int | None=None, input_value: Any=None, output_value: Any=None, workspace_before: str | None=None, workspace_after: str | None=None, lease_id: str | None=None, error: str='', artifact_manifest: ArtifactManifest | Mapping[str, Any] | None=None)`
+- `new(*, session_id: str, action_id: str, tool: str, capability: str, status: str, issued_at: int | None=None, completed_at: int | None=None, input_value: Any=None, output_value: Any=None, workspace_before: str | None=None, workspace_after: str | None=None, lease_id: str | None=None, error: str='', artifact_manifest: ArtifactManifest | Mapping[str, Any] | None=None, authorization_binding: ReceiptBinding | Mapping[str, Any] | None=None)`
 #### `sign_receipt(receipt: ActionReceipt | Mapping[str, Any], secret: bytes)`
 
 Sign an existing receipt after validating its canonical shape.

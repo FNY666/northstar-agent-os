@@ -17,7 +17,9 @@ Everything the CLI governs is available here: permission modes, allow/deny
 lists, read-only, turn/tool/budget ceilings, halt-on-denial, a session
 directory for the append-only transcript, subagent depth and workspace agent
 files. The SDK also exposes the host governance seam for bounded approval
-leases and signed action receipts. Two entry points share one configuration:
+leases, host-bound receipt context and signed action receipts. A
+`receipt_binding` is the host's already-verified projection; the SDK never
+needs the authorization token or its secret. Two entry points share one configuration:
 
 * :func:`run` — run to completion, return a :class:`RunReport` with the full
   event list (``report.events`` are the same dicts ``--json`` emits);
@@ -74,6 +76,9 @@ class RunOptions:
     # ``receipts.py``; the secret is never serialized into the report.
     approval_leases: Any = None
     receipt_secret: bytes | None = None
+    # Host-produced ReceiptBinding mapping; the runtime never receives the
+    # authorization token or its secret.
+    receipt_binding: Any = None
     clock: Any = None
 
 
@@ -195,6 +200,7 @@ def _build(options: RunOptions, resume: str | None = None) -> tuple[Any, Any]:
         agents=agents,
         approval_leases=options.approval_leases,
         receipt_secret=options.receipt_secret,
+        receipt_binding=options.receipt_binding,
         clock=options.clock,
     )
     return runtime, store

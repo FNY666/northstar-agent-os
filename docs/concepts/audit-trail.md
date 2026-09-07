@@ -19,7 +19,9 @@ tree is auditable end to end. Mutating path-shaped tool calls add a
 receipt secret, the same call also produces a signed `action_receipt` record.
 Tools may attach a validated bounded artifact manifest for non-path outputs;
 that manifest is an observation carried by the receipt, not host attestation.
-The separate [reversible execution contract](reversible-execution.md) stores
+A host can additionally bind the receipt to a verified authorization grant via
+`northstar.receipt-binding.v1`; the runtime records the exact grant-token digest
+without receiving the token or its secret. The separate [reversible execution contract](reversible-execution.md) stores
 bounded file snapshots for recovery rather than putting file bytes in every
 receipt.
 

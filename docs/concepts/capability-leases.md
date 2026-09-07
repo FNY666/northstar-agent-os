@@ -82,6 +82,9 @@ The receipt contains:
 - optional before/after digests of the selected workspace file-state metadata;
 - an optional bounded `northstar.artifact-manifest.v1` for tool-reported
   external or non-path outputs;
+- an optional `northstar.receipt-binding.v1` projection of a host-verified
+  authorization grant, including the exact grant-token digest and narrowed
+  capability scope;
 - the consumed `lease_id`, if a lease authorized the call;
 - issued/completed timestamps and an explicit status;
 - an optional HMAC-SHA256 signature over canonical JSON with the signature
