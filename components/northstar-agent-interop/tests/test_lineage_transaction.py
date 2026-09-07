@@ -22,4 +22,13 @@ class TransactionTests(unittest.TestCase):
             root=Path(tmp); store=TransactionalLineageStore(root/'lineage.jsonl',root/'checkpoint.json'); lease=PersistentLeaseManager(root/'lease.json').acquire('a',now=1,ttl=10); graph=LineageGraph.from_path(root/'lineage.jsonl'); store.append(self.event(),graph.cursor(),lease,now=2); store.checkpoint.write_text('{"bad":true}')
             with self.assertRaises(TransactionError): store.recover()
 
+
+    def test_fault_after_event_fsync_needs_recovery_evidence(self):
+        from lineage_transaction import TransactionError
+        with tempfile.TemporaryDirectory() as tmp:
+            root=Path(tmp); lease=PersistentLeaseManager(root/'lease.json').acquire('a',now=1,ttl=10)
+            store=TransactionalLineageStore(root/'lineage.jsonl',root/'checkpoint.json',fault=lambda point: (_ for _ in ()).throw(RuntimeError(point)) if point=='after_event_fsync' else None)
+            with self.assertRaises(RuntimeError): store.append(self.event(),LineageGraph.from_path(root/'lineage.jsonl').cursor(),lease,now=2)
+            with self.assertRaises(TransactionError): store.recover()
+
 if __name__=='__main__': unittest.main()

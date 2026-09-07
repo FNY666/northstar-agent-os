@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 import fcntl, hashlib, json, os
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 from recovery_cursor import Lease, PersistentLeaseManager, RecoveryCursor, RecoveryError
 from route_lineage import LineageGraph, RouteLineageEvent, LineageError, INTEGRITY_SCHEMA
 class TransactionError(ValueError): pass
@@ -20,8 +20,8 @@ class TransactionCheckpoint:
         return cls(v['sequence'],v['event_digest'],v['journal_digest'],v['fencing_token'],v['owner_id'],v['state'])
     def to_dict(self): return self.__dict__.copy()
 class TransactionalLineageStore:
-    def __init__(self,lineage_path:Path|str,checkpoint_path:Path|str):
-        self.lineage=Path(lineage_path); self.checkpoint=Path(checkpoint_path); self.lock=self.lineage.with_name(self.lineage.name+'.txn.lock')
+    def __init__(self,lineage_path:Path|str,checkpoint_path:Path|str, fault:Callable[[str],None]|None=None):
+        self.lineage=Path(lineage_path); self.checkpoint=Path(checkpoint_path); self.lock=self.lineage.with_name(self.lineage.name+'.txn.lock'); self.fault=fault
     def _journal_digest(self): return 'sha256:'+hashlib.sha256(self.lineage.read_bytes() if self.lineage.exists() else b'').hexdigest()
     def append(self,event:RouteLineageEvent,cursor:RecoveryCursor,lease:Lease,*,now:int)->RecoveryCursor:
         with self.lock.open('a+') as lock:
@@ -31,10 +31,16 @@ class TransactionalLineageStore:
             except RecoveryError as exc: raise TransactionError('lease invalid') from exc
             graph=LineageGraph.from_path(self.lineage); current=graph.cursor()
             if cursor!=current: raise TransactionError('cursor mismatch')
+            if self.fault: self.fault('before_event_append')
             try: graph.append(event)
             except (ValueError,LineageError) as exc: raise TransactionError('event append failed') from exc
             next_cursor=graph.cursor(); cp=TransactionCheckpoint(next_cursor.sequence,next_cursor.event_digest,next_cursor.journal_digest,lease.fencing_token,lease.owner_id,'committed')
-            tmp=self.checkpoint.with_suffix('.tmp'); tmp.write_text(json.dumps(cp.to_dict(),separators=(',',':')),encoding='utf-8'); fd=os.open(tmp,os.O_RDONLY); os.fsync(fd); os.close(fd); os.replace(tmp,self.checkpoint); return next_cursor
+            if self.fault: self.fault('after_event_fsync')
+            tmp=self.checkpoint.with_suffix('.tmp'); tmp.write_text(json.dumps(cp.to_dict(),separators=(',',':')),encoding='utf-8'); fd=os.open(tmp,os.O_RDONLY); os.fsync(fd); os.close(fd)
+            if self.fault: self.fault('before_checkpoint_replace')
+            os.replace(tmp,self.checkpoint)
+            if self.fault: self.fault('after_checkpoint_replace')
+            return next_cursor
     def recover(self):
         if not self.checkpoint.exists(): raise TransactionError('checkpoint missing')
         try: cp=TransactionCheckpoint.from_dict(json.loads(self.checkpoint.read_text()))
