@@ -1,5 +1,32 @@
 # Northstar Agent OS — initial public component
 
+## Unreleased (eleventh batch) — observability read-back (P3-4)
+
+- **Concept page** (`docs/concepts/observability.md`): two read-back planes —
+  live OTEL spans vs. offline transcripts/audit export — with the real span
+  vocabulary (verified against `loop.py`), the ambient-tracer seam stated
+  plainly (the runtime never configures an exporter; a bare run exports
+  nowhere), and a "which plane when" table.
+- **Local trace backend example** (`examples/observability/`): docker compose
+  (Jaeger all-in-one OTLP/HTTP receiver + Grafana with provisioned core
+  Jaeger data source; no collector — deployment is an open T5 item) plus
+  `otel_bootstrap.py`, the provider seam for the CLI (OTLP/HTTP exporter,
+  `OTEL_EXPORTER_OTLP_ENDPOINT` override, checkout/site-packages fallback,
+  guided exit 3 on missing packages). Honesty pinned by tests: CI never runs
+  Docker, tags pinned at write time, exporter not in the tracing extra.
+- **Offline session panel** (`examples/session-panel/`): one self-contained
+  HTML file (zero network references) rendering session transcripts or
+  `audit.ndjson/1` exports via drag-and-drop — stats, errors/denials filter,
+  timeline with expandable raw JSON, FNV-1a 64 local fingerprint (labelled
+  non-cryptographic). `sample-session.jsonl` is a real transcript including
+  a denial path; only the absolute workspace path was masked (documented).
+- **Chinese assessment record** (`docs/dx-observability.zh-CN.md`), examples
+  index rows, CHANGELOG/batch records.
+- Repository doc tests 12 → 28 (panel + observability example suites; the
+  panel's JS is `node --check`ed when a Node runtime is present). Full
+  `make test` 796 → 812 green. No component behaviour changed and no
+  release (aligned `0.1.0.dev0`).
+
 ## Unreleased (tenth batch) — remote/hosted worker evaluation (P3-3)
 
 - **Protocol map + decision record** (`docs/concepts/northstar-remote-worker.md`):
