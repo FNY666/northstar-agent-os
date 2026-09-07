@@ -28,14 +28,21 @@ class ArtifactManifestTests(unittest.TestCase):
     def test_manifest_round_trips_canonically_and_digests(self):
         manifest = ArtifactManifest.from_mapping(self.manifest())
         self.assertEqual(manifest.to_dict(), self.manifest())
-        self.assertEqual(
-            manifest.canonical_json(),
-            ArtifactManifest.from_mapping(
-                {"artifacts": list(reversed(self.manifest()["artifacts"])), "schema_version": manifest.schema_version}
-            ).canonical_json(),
+        second = {
+            "artifact_id": "artifact-2",
+            "kind": "opaque",
+            "locator": "opaque-report-2",
+        }
+        ordered = ArtifactManifest.from_mapping(
+            {"schema_version": manifest.schema_version, "artifacts": [self.manifest()["artifacts"][0], second]}
         )
+        reversed_order = ArtifactManifest.from_mapping(
+            {"schema_version": manifest.schema_version, "artifacts": [second, self.manifest()["artifacts"][0]]}
+        )
+        self.assertEqual(ordered.canonical_json(), reversed_order.canonical_json())
         self.assertTrue(manifest.digest().startswith("sha256:"))
         self.assertEqual(manifest.artifacts[0], Artifact.from_mapping(self.manifest()["artifacts"][0]))
+        self.assertEqual(Artifact.from_mapping(second).digest, None)
 
     def test_workspace_locators_are_relative_and_entries_are_bounded(self):
         for locator in ("/absolute.txt", "../escape.txt", "a//b.txt", "a\\b.txt"):

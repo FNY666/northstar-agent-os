@@ -114,10 +114,9 @@ class Artifact:
     def from_mapping(cls, value: Any) -> "Artifact":
         if not isinstance(value, Mapping):
             raise ArtifactError("artifact must be an object")
-        expected = set(cls._fields)
-        actual = set(value)
-        missing = sorted(expected - actual)
-        unknown = sorted(actual - expected)
+        required = {"artifact_id", "kind", "locator"}
+        unknown = sorted(set(value) - set(cls._fields))
+        missing = sorted(required - set(value))
         if missing:
             raise ArtifactError(f"artifact missing fields: {', '.join(missing)}")
         if unknown:
@@ -126,9 +125,9 @@ class Artifact:
             artifact_id=value["artifact_id"],
             kind=value["kind"],
             locator=value["locator"],
-            digest=value["digest"],
-            bytes=value["bytes"],
-            media_type=value["media_type"],
+            digest=value.get("digest"),
+            bytes=value.get("bytes"),
+            media_type=value.get("media_type"),
         )
 
     def to_dict(self) -> dict[str, Any]:
@@ -162,7 +161,7 @@ class ArtifactManifest:
             raise ArtifactError("artifact_id values must be unique")
         if len({(item.kind, item.locator) for item in normalized}) != len(normalized):
             raise ArtifactError("artifact kind and locator pairs must be unique")
-        object.__setattr__(self, "artifacts", normalized)
+        object.__setattr__(self, "artifacts", tuple(sorted(normalized, key=lambda item: item.artifact_id)))
 
     @classmethod
     def from_mapping(cls, value: Any) -> "ArtifactManifest":
