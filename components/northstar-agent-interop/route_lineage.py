@@ -73,7 +73,10 @@ class LineageGraph:
     def append(self,e:RouteLineageEvent):
         if e.event_id in self.events: raise LineageError('duplicate event_id')
         if e.schema_version==INTEGRITY_SCHEMA:
-            expected=len(self.events)+1; expected_prev=ZERO_DIGEST if expected==1 else self.events[next(reversed(self.events))].event_digest.removeprefix('sha256:')
+            expected=len(self.events)+1
+            if any(existing.schema_version != INTEGRITY_SCHEMA for existing in self.events.values()):
+                raise LineageError('mixed lineage schemas require explicit migration')
+            expected_prev=ZERO_DIGEST if expected==1 else self.events[next(reversed(self.events))].event_digest.removeprefix('sha256:')
             if e.sequence!=expected or e.prev_event_digest!=expected_prev: raise LineageError('sequence or previous digest mismatch')
             if e.supplied_event_digest is not None and e.supplied_event_digest!=e.event_digest: raise LineageError('event digest mismatch')
         if e.parent_event_id:

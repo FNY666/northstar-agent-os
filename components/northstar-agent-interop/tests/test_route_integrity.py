@@ -56,4 +56,18 @@ class IntegrityTests(unittest.TestCase):
             graph.append(second)
             self.assertEqual(len(list(graph.read())),2)
 
+    def test_mixed_v1_v2_history_is_rejected_without_explicit_migration(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path=Path(tmp)/'lineage.jsonl'
+            legacy={
+                'schema_version':'northstar.route-lineage.v1','event_id':'legacy','route_id':'r1',
+                'parent_event_id':None,'receipt_id':'receipt-legacy','status':'planned',
+                'target_agent_id':'codex','provider':'openai','capabilities':['workspace:read'],
+                'deadline_at':90,'payload_digest':'sha256:'+'a'*64,
+                'decision_fingerprint':'sha256:'+'b'*64,'retryable':False,
+            }
+            current=self.event().to_dict()
+            path.write_text(json.dumps(legacy,sort_keys=True,separators=(',',':'))+'\n'+json.dumps(current,sort_keys=True,separators=(',',':'))+'\n',encoding='utf-8')
+            with self.assertRaises(LineageError): LineageGraph.from_path(path)
+
 if __name__=='__main__': unittest.main()
