@@ -20,7 +20,7 @@ pip install northstar-host
 ```
 
 The wheel installs `authorization` and `workspace` as top-level modules; the
-version (`0.1.0`) is declared in `pyproject.toml`.
+version (`0.1.0.dev0`, unreleased) is declared in `pyproject.toml`.
 
 ## Boundary order
 

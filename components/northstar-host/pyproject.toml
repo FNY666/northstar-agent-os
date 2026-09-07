@@ -10,7 +10,7 @@ license = { text = "MIT" }
 requires-python = ">=3.10"
 # The version string is static here; releases bump all five component versions
 # together (tests/test_release.py keeps them aligned).
-version = "0.1.0"
+version = "0.1.0.dev0"
 keywords = ["agent", "host", "authorization", "workspace", "policy", "northstar"]
 classifiers = [
     "Development Status :: 3 - Alpha",

@@ -538,7 +538,7 @@ class VersionFlagTests(unittest.TestCase):
         self.assertEqual(caught.exception.code, 0)
         printed = out.getvalue()
         self.assertIn("northstar-agent-runtime", printed)
-        self.assertIn("0.1.0", printed)
+        self.assertIn(cli.__version__, printed)  # the printed version is _version's, never a literal
         self.assertEqual(len(printed.strip().splitlines()), 1)
 
     def test_version_prints_to_stdout_and_can_be_parsed(self):
