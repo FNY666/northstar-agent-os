@@ -18,4 +18,29 @@ class RecoveryCursorTests(unittest.TestCase):
         self.assertGreater(second.fencing_token,first.fencing_token)
         with self.assertRaises(RecoveryError): manager.validate(first,now=112)
 
+
+    def test_persisted_manager_increments_token_after_restart(self):
+        from recovery_cursor import PersistentLeaseManager
+        with tempfile.TemporaryDirectory() as tmp:
+            path=Path(tmp)/'lease.json'
+            first=PersistentLeaseManager(path).acquire('a',now=1,ttl=1)
+            second=PersistentLeaseManager(path).acquire('b',now=3,ttl=10)
+            self.assertGreater(second.fencing_token,first.fencing_token)
+            with self.assertRaises(RecoveryError): PersistentLeaseManager(path).validate(first,now=3)
+
+    def test_concurrent_acquire_has_unique_monotonic_tokens(self):
+        import multiprocessing
+        from recovery_cursor import PersistentLeaseManager
+        with tempfile.TemporaryDirectory() as tmp:
+            path=str(Path(tmp)/'lease.json')
+            def acquire(owner):
+                manager=PersistentLeaseManager(path)
+                try: manager.acquire(owner,now=100,ttl=1)
+                except RecoveryError: pass
+            workers=[multiprocessing.Process(target=acquire,args=(f'o{i}',)) for i in range(2)]
+            for p in workers:p.start()
+            for p in workers:p.join(5)
+            self.assertTrue(all(p.exitcode==0 for p in workers))
+            self.assertEqual(PersistentLeaseManager(path).read().fencing_token,1)
+
 if __name__=='__main__': unittest.main()
