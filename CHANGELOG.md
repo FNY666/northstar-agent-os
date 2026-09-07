@@ -1,5 +1,31 @@
 # Northstar Agent OS — initial public component
 
+## Unreleased (second batch) — repository policy and project context
+
+- **`.northstar/config.toml` workspace policy file** (`northstar-agent-runtime`).
+  A repository that ships one pins the run's defaults; it may only ever
+  *tighten*: `permission_mode` limited to `default`/`plan`, `allow_tools`
+  rejected (approvals stay per-run CLI decisions), ceilings may only lower the
+  built-in values, denials and `read_only` are an additive floor that even
+  `--allow-tool` cannot resurrect, and file denials stay terminal in the
+  permission gate's first layer. Unknown keys, unreadable TOML, unknown tool
+  or agent names, and loosening values are configuration errors (exit 64) —
+  policy is never silently ignored. When both the file and the CLI set a
+  ceiling, the lower wins; `halt_on_denial` is true if either says so;
+  `--no-policy-file` skips the file for one run.
+- **Project context (`AGENTS.md`)**. A `AGENTS.md` in the workspace root (or the
+  file named by the policy's `project_context`, or an explicit `--context-file`)
+  is appended to the system prompt behind a clear delimiter. Discovery resolves
+  strictly inside the workspace root — a symlink pointing out is refused, never
+  followed — and oversized files are truncated with a marker.
+  `--no-project-context` disables discovery.
+- **Visibility:** `cli doctor` and `run --dry-run` report the effective
+  `policy_file=` and `project_context=` inputs before anything is sent; a
+  policy error fails a dry run exactly as it fails a real run.
+- **Demo:** `examples/demo/workspace/` now carries an `AGENTS.md` showing the
+  convention. Tests: 446 offline runtime tests green; the tighten-only limits
+  are asserted to stay in sync with the loop's built-in defaults.
+
 ## Unreleased — DX foundations: installable packages, CLI self-checks, session read-back
 
 Phase 0–1 of the DX roadmap (see `docs/dx-benchmark-2026.zh-CN.md` for the full

@@ -19,20 +19,31 @@ the demo needs no `ANTHROPIC_API_KEY`, no network, and no `anthropic` package.
 The exit code is `0` on success and meaningful otherwise (see
 `components/northstar-agent-runtime/cli.py` for the mapping).
 
-Try the other views while you are here:
+The workspace also ships an `AGENTS.md`: project-instructions files like it are
+discovered automatically and appended to the system prompt (strictly inside the
+workspace root). `doctor` and `--dry-run` show which files apply:
 
 ```sh
+# does this host have what a run needs? (no request, no file writes)
+python3 -m cli doctor --workspace workspace
+
 # what a live run would do — no request is sent
 python3 -m cli run --workspace workspace --prompt "hi" \
   --provider anthropic --dry-run
+# look at the policy_file= / project_context= lines
+```
 
-# does this host have what a run needs? (also no request, no file writes)
-python3 -m cli doctor --workspace workspace
+Try the other views while you are here:
 
+```sh
 # the read-only twin of the demo, live-model ready when ANTHROPIC_API_KEY is set
 python3 -m cli run --workspace workspace --prompt "summarise notes.txt" \
   --read-only
+
+# workspace policy lives in .northstar/config.toml; see
+# components/northstar-agent-runtime/README.md for the schema
 ```
 
-The `script.json` and `notes.txt` here double as a compact example of the
-scripted-provider format and of a minimal audited workspace layout.
+The `script.json`, `notes.txt`, and `AGENTS.md` here double as a compact
+example of the scripted-provider format, a minimal audited workspace layout,
+and the project-context convention.

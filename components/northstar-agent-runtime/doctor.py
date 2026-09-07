@@ -128,6 +128,46 @@ def _checks(args: argparse.Namespace) -> list[Finding]:
     else:
         findings.append(Finding("sidecar", "ok", "off - CodexReadOnly tool is not registered (pass --sidecar-socket to enable)"))
 
+    # -- workspace policy file and project context -----------------------------
+    if workspace.is_dir():
+        try:
+            from agents import builtin_registry
+            from policy_file import PolicyFileError, discover_project_context, load_policy_file
+            from tools import build_default_registry
+
+            registry = build_default_registry()
+            agents = builtin_registry()
+            policy = load_policy_file(workspace, known_tools=registry.names(), known_agents=agents.names())
+        except PolicyFileError as error:
+            findings.append(Finding("policy-file", "fail", str(error)))
+        except ImportError as error:  # pragma: no cover - Python 3.10 without tomli
+            findings.append(Finding("policy-file", "fail", str(error)))
+        else:
+            if policy is None:
+                findings.append(Finding("policy-file", "ok", "none (.northstar/config.toml absent)"))
+            else:
+                parts = [f"mode={policy.permission_mode or 'default'}"]
+                if policy.deny_tools:
+                    parts.append(f"deny={','.join(policy.deny_tools)}")
+                if policy.max_turns is not None:
+                    parts.append(f"max_turns={policy.max_turns}")
+                if policy.max_budget_usd is not None:
+                    parts.append(f"budget=${policy.max_budget_usd}")
+                if policy.read_only:
+                    parts.append("read_only")
+                findings.append(Finding("policy-file", "ok", f"{policy.source} applies: {' '.join(parts)}"))
+            if workspace.exists():
+                try:
+                    configured = policy.project_context_setting if policy is not None else "AGENTS.md"
+                    context = discover_project_context(workspace, configured=configured)
+                except PolicyFileError as error:
+                    findings.append(Finding("project-context", "fail", str(error)))
+                else:
+                    if context is None:
+                        findings.append(Finding("project-context", "ok", f"off (no {configured if isinstance(configured, str) else 'AGENTS.md'} in workspace)"))
+                    else:
+                        size = f"{len(context.text)} chars" + (" [truncated]" if context.truncated else "")
+                        findings.append(Finding("project-context", "ok", f"{context.name} ({size}) will be appended to the system prompt"))
     # -- scripted script -------------------------------------------------------
     if args.provider == "scripted" and args.script:
         try:

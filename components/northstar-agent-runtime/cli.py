@@ -118,6 +118,10 @@ def _add_run_arguments(parser: argparse.ArgumentParser) -> None:
     policy.add_argument("--max-subagent-depth", type=int, default=1, help="0 disables delegation")
     policy.add_argument("--allow-nested-delegation", action="store_true", help="subagents may delegate one level deeper")
     policy.add_argument("--halt-on-denial", action="store_true", help="end the run with error_permission_denied when a call is refused")
+    policy.add_argument("--no-policy-file", action="store_true", help="ignore .northstar/config.toml in the workspace")
+    context_group = policy.add_mutually_exclusive_group()
+    context_group.add_argument("--context-file", default="", metavar="PATH", help="inject this project-instructions file into the system prompt (must live inside the workspace)")
+    context_group.add_argument("--no-project-context", action="store_true", help="do not auto-inject AGENTS.md (or the policy file's project_context)")
 
     execution = parser.add_argument_group("execution delegation")
     execution.add_argument("--sidecar-socket", default="", help="Unix socket of northstar-codex-sidecar; enables the CodexReadOnly tool")
@@ -186,53 +190,34 @@ def _check_anthropic_sdk() -> tuple[bool, str]:
     return False, "the 'anthropic' package is not installed; pip install -r requirements.txt, or use --provider scripted"
 
 
-def _print_dry_run(args: argparse.Namespace, runtime: Any) -> int:
+def _print_dry_run(args: argparse.Namespace, runtime: Any, *, policy_note: str = "none", context_note: str = "off") -> int:
     """Print what a run would do and exit, without constructing a provider.
 
     ``--dry-run`` is the read-only twin of ``--show-pricing``: it validates the
-    configuration the same way a real run would, but never builds a provider and
-    never touches the network, the model SDK, or the sidecar socket.
+    configuration the same way a real run would (including the workspace policy
+    file, if any), but never builds a provider and never touches the network,
+    the model SDK, or the sidecar socket.
     """
-    from agents import builtin_registry
     from budget import price_for
-    from tools import build_default_registry
 
-    registry = build_default_registry()
-    agents = builtin_registry()
-    definition = agents.get(args.agent) if args.agent else None
+    config = runtime.config
+    pricing, estimated = price_for(config.model)
+    tool_names = runtime.tools.names()
 
-    denied = list(getattr(args, "deny_tool", []) or [])
-    if args.read_only:
-        denied.extend(MUTATING_TOOLS)
-    allowed = list(args.allow_tool)
-    if not allowed and args.permission_mode == "bypassPermissions":
-        allowed = list(registry.names())
-    if definition:
-        # Mirror _run's resolution: the built-in definition's tool subset is
-        # offered to the model, while the host's allow/deny lists still apply.
-        allowed = [name for name in allowed if name in definition.tools] or list(definition.tools)
-    from permissions import subtract
-
-    allowed = subtract(allowed, denied)
-    denied = tuple(dict.fromkeys(denied))
-    denied = tuple(name for name in denied if name in registry.names())
-
-    model = definition.model if definition and definition.model else args.model
-    pricing, estimated = price_for(model)
-    tool_names = registry.subset(definition.tools).names() if definition else registry.names()
-
-    print(f"provider={args.provider} model={model}"
-          + (f" (agent '{definition.name}')" if definition else ""))
-    print(f"permission_mode={definition.permission_mode if definition else args.permission_mode}")
+    agent_suffix = "" if config.agent in ("", "main") else f" (agent '{config.agent}')"
+    print(f"provider={args.provider} model={config.model}{agent_suffix}")
+    print(f"permission_mode={config.permission_mode}")
     print(f"tools={','.join(tool_names) or '(none)'}")
-    print(f"allowed_tools={','.join(allowed) or '(none)'}  "
-          f"disallowed_tools={','.join(denied) or '(none)'}")
-    print(f"max_turns={definition.max_turns if definition else args.max_turns} "
-          f"max_tool_calls={definition.max_tool_calls if definition else args.max_tool_calls} "
-          f"max_budget_usd={args.max_budget_usd or 'unlimited'}")
-    print(f"sidecar={'on' if args.sidecar_socket else 'off'} "
+    print(f"allowed_tools={','.join(config.allowed_tools) or '(none)'}  "
+          f"disallowed_tools={','.join(config.disallowed_tools) or '(none)'}")
+    print(f"max_turns={config.max_turns} "
+          f"max_tool_calls={config.max_tool_calls or 'unlimited'} "
+          f"max_budget_usd={config.max_budget_usd or 'unlimited'}")
+    print(f"sidecar={'on' if config.sidecar_socket else 'off'} "
           f"session_dir={args.session_dir or 'off'} "
-          f"halt_on_denial={args.halt_on_denial}")
+          f"halt_on_denial={config.halt_on_denial}")
+    print(f"policy_file={policy_note}")
+    print(f"project_context={context_note}")
     print(f"pricing: ${pricing.input_per_mtok}/MTok in, ${pricing.output_per_mtok}/MTok out "
           f"(cache read x0.1, cache write x1.25)"
           + (" - estimated" if estimated else ""))
@@ -284,8 +269,9 @@ def main(argv: Sequence[str] | None = None) -> int:
 
 def _run(args: argparse.Namespace) -> int:
     from agents import builtin_registry
-    from loop import AgentRuntime, RuntimeConfig, RuntimeConfigurationError
-    from permissions import subtract, validate_mode
+    from loop import AgentRuntime, DEFAULT_SYSTEM_PROMPT, RuntimeConfig, RuntimeConfigurationError
+    from permissions import validate_mode
+    from policy_file import PolicyFileError, append_project_context, discover_project_context, load_policy_file
     from sessions import SessionStore
     from tools import ToolLimits, build_default_registry
 
@@ -301,39 +287,85 @@ def _run(args: argparse.Namespace) -> int:
         print("no prompt: pass --prompt, --prompt-file, or --probe-sidecar", file=sys.stderr)
         return USAGE_ERROR
 
-    mode = "plan" if args.plan else args.permission_mode
-    validate_mode(mode)
     registry = build_default_registry()
-    allowed, denied = _tool_lists(args, base_tools=registry.names())
-
     agents = builtin_registry()
-    definition = None
-    if args.agent:
-        definition = agents.get(args.agent)
-        if definition is None:
-            # A typo on the command line is a usage error, not a traceback.
-            raise ValueError(f"unknown agent {args.agent!r}. Known agents: {', '.join(agents.names()) or '(none)'}")
-        # Running *as* a built-in definition inherits its tool subset and ceilings;
-        # the host's deny list still applies on top.
-        registry = registry.subset(definition.tools)
-        allowed = subtract(allowed, denied)
 
-    threshold = args.compaction_threshold_tokens or None
+    # Workspace policy file (.northstar/config.toml). It may only tighten; any
+    # violation is a configuration error (exit 64), never a silent ignore.
+    policy = None
+    if not args.no_policy_file:
+        try:
+            policy = load_policy_file(args.workspace, known_tools=registry.names(), known_agents=agents.names())
+        except PolicyFileError as error:
+            print(f"configuration error: {error}", file=sys.stderr)
+            return USAGE_ERROR
+
+    cli_mode = "plan" if args.plan else args.permission_mode
+    validate_mode(cli_mode)
+    # The file may pin 'plan' (or keep 'default'); it may never loosen. A CLI
+    # mode other than the built-in default is an explicit operator choice and
+    # wins. --no-policy-file is the escape hatch for an explicit 'default'.
+    mode = (
+        policy.permission_mode
+        if (policy is not None and policy.permission_mode is not None and cli_mode == "default")
+        else cli_mode
+    )
+    validate_mode(mode)
+
+    allowed_cli, denied_cli = _tool_lists(args, base_tools=registry.names())
+    denied_list = list(denied_cli)
+    if policy is not None:
+        # File denials and read_only are a floor: they add to the CLI denials
+        # and the permission gate's first layer keeps them terminal.
+        denied_list.extend(policy.deny_tools)
+        if policy.read_only:
+            denied_list.extend(MUTATING_TOOLS)
+    denied = tuple(dict.fromkeys(denied_list))
+    allowed = tuple(name for name in allowed_cli if name not in denied)
+
+    definition = None
+    agent_name = args.agent or (policy.agent if policy is not None else "")
+    if agent_name:
+        definition = agents.get(agent_name)
+        if definition is None:
+            # A typo (in a flag or in the policy file) is a usage error, not a traceback.
+            raise ValueError(f"unknown agent {agent_name!r}. Known agents: {', '.join(agents.names()) or '(none)'}")
+        # Running *as* a built-in definition inherits its tool subset and ceilings;
+        # the host's and policy file's deny lists still apply on top.
+        registry = registry.subset(definition.tools)
+        allowed = tuple(name for name in allowed if name in registry.names())
+
+    def tighten(cli_value: int | None, file_value: int | None) -> int | None:
+        """Policy-file ceilings may only lower; when both are set, the lower wins."""
+        candidates = [value for value in (cli_value, file_value) if value is not None]
+        return min(candidates) if candidates else None
+
+    base_turns = definition.max_turns if definition else args.max_turns
+    base_tool_calls = definition.max_tool_calls if definition else args.max_tool_calls
+    max_turns = tighten(base_turns, policy.max_turns if policy is not None else None)
+    max_tool_calls = tighten(base_tool_calls, policy.max_tool_calls if policy is not None else None)
+    max_budget_usd = tighten(args.max_budget_usd, policy.max_budget_usd if policy is not None else None)
+    compaction_threshold = tighten(
+        args.compaction_threshold_tokens,
+        policy.compaction_threshold_tokens if policy is not None else None,
+    )
+    halt_on_denial = bool(args.halt_on_denial or (policy is not None and policy.halt_on_denial))
+
     config_kwargs: dict[str, Any] = {
         "model": (definition.model if definition and definition.model else args.model),
-        "max_turns": definition.max_turns if definition else args.max_turns,
-        "max_tool_calls": definition.max_tool_calls if definition else args.max_tool_calls,
-        "max_budget_usd": args.max_budget_usd,
+        "max_turns": max_turns,
+        "max_tool_calls": max_tool_calls,
+        "max_budget_usd": max_budget_usd,
         "permission_mode": definition.permission_mode if definition else mode,
         "allowed_tools": allowed,
         "disallowed_tools": denied,
         "workspace": args.workspace,
         "max_output_tokens": args.max_output_tokens,
-        "compaction_threshold_tokens": threshold,
+        "compaction_threshold_tokens": compaction_threshold or None,
         "compaction_keep_messages": args.compaction_keep_messages,
         "max_subagent_depth": args.max_subagent_depth,
         "allow_nested_delegation": args.allow_nested_delegation,
-        "halt_on_denial": args.halt_on_denial,
+        "halt_on_denial": halt_on_denial,
         "tool_limits": ToolLimits(),
         "record_tool_output_in_session": not args.redact_tool_output,
     }
@@ -343,6 +375,21 @@ def _run(args: argparse.Namespace) -> int:
         config_kwargs["system_prompt"] = definition.system_prompt(parent_cwd=args.workspace)
         config_kwargs["agent"] = definition.name
         config_kwargs["allow_delegation"] = definition.allow_delegation and args.max_subagent_depth > 0
+
+    # Project instructions (AGENTS.md by default, the policy file's
+    # project_context, or an explicit --context-file) are appended to whichever
+    # system prompt applies, as clearly delimited developer-authored content.
+    context = None
+    if args.context_file or not args.no_project_context:
+        configured = policy.project_context_setting if policy is not None else "AGENTS.md"
+        context = discover_project_context(
+            args.workspace,
+            configured=configured,
+            explicit=args.context_file or None,
+        )
+        if context is not None:
+            base_prompt = config_kwargs.get("system_prompt", DEFAULT_SYSTEM_PROMPT)
+            config_kwargs["system_prompt"] = append_project_context(base_prompt, context)
     if args.sidecar_socket:
         config_kwargs["sidecar_socket"] = args.sidecar_socket
         config_kwargs["sidecar_timeout_ms"] = args.sidecar_timeout_ms
@@ -355,6 +402,24 @@ def _run(args: argparse.Namespace) -> int:
         print(f"configuration error: {error}", file=sys.stderr)
         return USAGE_ERROR
 
+    if args.no_policy_file:
+        policy_note = "none (--no-policy-file)"
+    elif policy is not None:
+        policy_note = (
+            f"{policy.source} mode={policy.permission_mode or 'default'} "
+            f"deny={','.join(policy.deny_tools) or 'none'} "
+            f"read_only={bool(policy.read_only)} budget={policy.max_budget_usd or 'none'} "
+            f"max_turns={policy.max_turns or 'none'} halt_on_denial={bool(policy.halt_on_denial)}"
+        )
+    else:
+        policy_note = "none"
+    if context is not None:
+        context_note = f"{context.name} ({len(context.text)} chars from {context.path})" + (" [truncated]" if context.truncated else "")
+    elif args.no_project_context and not args.context_file:
+        context_note = "off (--no-project-context)"
+    else:
+        context_note = "off (no AGENTS.md in the workspace)"
+
     provider = _build_provider(args)
     runtime = AgentRuntime(provider=provider, config=config, tools=registry, sessions=store, agents=agents)
 
@@ -364,7 +429,7 @@ def _run(args: argparse.Namespace) -> int:
     if args.dry_run:
         # Never constructs the provider: configuration is validated above, so a
         # healthy configuration prints a plan and exits 0 before any request.
-        return _print_dry_run(args, runtime)
+        return _print_dry_run(args, runtime, policy_note=policy_note, context_note=context_note)
     if args.probe_sidecar:
         if args.provider == "anthropic":
             sdk_ok, message = _check_anthropic_sdk()
