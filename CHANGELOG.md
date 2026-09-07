@@ -1,5 +1,43 @@
 # Northstar Agent OS — initial public component
 
+## Unreleased (twelfth batch) — remote-worker ops substance (T5)
+
+T5 answered the four P3-3 ops gaps with authoritative, code-grounded
+artifacts (docs/tests only by batch scope; no transport code ships and no
+CI run has touched a real host):
+
+- **Transport specification** (`docs/concepts/northstar-remote-transport.md`):
+  Profile A = reuse the existing systemd sidecar socket over an SSH forward
+  (zero runtime changes, no remote command execution); Profile B = container
+  fleets reusing `DurableRunner`/`EventStore`/`LeaseManager`/verifier;
+  vocabulary table cites only real artifacts; failure taxonomy reuses the
+  contract's fallback statuses; T5b checklist defines what "done" means.
+- **Identity/rotation story** (`docs/concepts/northstar-remote-identity.md`):
+  issuance (enrollment secret vs run-scoped binding, policy-revision
+  pinning) and rotation (dual-key grace, expiry backstop, revision kill
+  switch), grounded in the real binding/authorization/handoff/approval
+  machinery; no PKI/no revocation list stated; incidents and open decisions.
+- **Operations guide** (`docs/guides/remote-worker-operations.md`):
+  Recipe A deployment + rotation steps, Recipe B explicitly not built,
+  monitoring table of the three real signals (audit feed / OTEL spans /
+  trace_metrics), alert thresholds, incident runbook, first-run validation
+  checklist, honesty footer.
+- **Operator-run channel canary** (`examples/remote-canary/`): SSH
+  reachability → socket forward → deterministic JSON-lines probe that the
+  real server rejects before spawning anything (no model, no key), optional
+  `NS_REAL=1` real codex run; probe is CI-tested against the real
+  `sidecar_socket.serve` on a loopback socket; the full script needs a real
+  host and is never run by CI, by design.
+- **Scorecard re-scored honestly**: `remote_worker.py --score` 89 → **94/100**
+  (ops 33% → 67%) — the two doc-natured gaps (story, guide) now count real
+  repo artifacts whose status markers are themselves test-pinned; the two
+  implementation gaps (transport code, real canary run) stay MISSING with
+  explicit flip conditions. Living docs (concept page, Chinese assessment,
+  interop README) updated to 94; P3-3 ledger blocks keep their historical
+  numbers, superseded by this batch's record.
+- Repository doc tests 28 → 43; full `make test` 812 → 827 green. Aligned
+  `0.1.0.dev0`, no release.
+
 ## Unreleased (eleventh batch) — observability read-back (P3-4)
 
 - **Concept page** (`docs/concepts/observability.md`): two read-back planes —

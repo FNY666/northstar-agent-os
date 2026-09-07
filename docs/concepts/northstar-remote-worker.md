@@ -80,12 +80,22 @@ Properties the transport must keep, carried over from the local path:
 ## Evaluation result (see the accompanying assessment)
 
 The scorecard (36 criteria across contracts, host, durable-run, interop,
-audit, ops; `remote_worker.py --score`, run in CI) lands at **89/100
+audit, ops; `remote_worker.py --score`, run in CI) lands at **94/100
 ready-for-remote, 0/100 shipped**: the governance and contract layers are
-fully present (100% in all five kernel areas), while the four ops gaps are
-real and named — network transport, host-side credential issuance/rotation,
-a real (non-fake) end-to-end canary, and a deployment/monitoring guide.
-The next increment after this batch is **T5 (a transport on the durable-run
-runner + a real SSH/container canary + deployment docs)**, or — if
-OpenBot/remote-worker availability matures — an interop-backed hosted
-adapter instead. No cloud is built by this repository either way.
+fully present (100% in all five kernel areas). T5 (2026-09-07) closed two of
+the four original ops gaps with authoritative artifacts — the credential
+issuance + rotation [story](northstar-remote-identity.md) and the
+[operator guide](../guides/remote-worker-operations.md) for deployment and
+monitoring (ops 4/6 = 67%). What remains is genuinely implementation-shaped:
+
+- **network transport *code*** for a hosted worker — the
+  [specification](northstar-remote-transport.md) (Profile A + B) and its
+  T5b checklist exist; the channel helper does not;
+- **a real (non-fake) end-to-end canary *run*** on a real host — the
+  operator [recipe](../../examples/remote-canary/README.md) exists and its
+  probe is CI-tested against the real socket server, but by design no CI run
+  has ever touched a real worker.
+
+The next increment is that T5b implementation, or — if OpenBot/remote-worker
+availability matures — an interop-backed hosted adapter instead. No cloud is
+built by this repository either way.

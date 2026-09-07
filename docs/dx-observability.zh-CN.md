@@ -58,6 +58,8 @@ session-panel）；docbuild 检查的 md 文件 48→50。
 ## 下一步（T5 的入口）
 
 P3-3 评估留下的 ops 缺口与 P3-4 的边界在此汇合：compose 是"本地开发栈"，
-T5 的 deployment/monitoring 指南可直接在此之上长出来（collector 拓扑、持久存储、
-Grafana 仪表盘、告警）；传输、身份、canary 三项缺口不变。另：`sessions export` +
-面板的"回放/恢复"读法，是 T3 checkpoint/restore 的最小交互雏形。
+T5 已把缺口实质化——deployment/monitoring 操作指南（含本节 Jaeger/Grafana
+的运维用法）与传输 spec/身份 story/真实 canary 配方均已交付（见
+`docs/dx-benchmark-2026.zh-CN.md` T5 记录与三份概念/指南页）；剩两项为
+实现项（传输代码 + 真实主机 canary 实跑）。另：`sessions export` + 面板的
+"回放/恢复"读法，是 T3 checkpoint/restore 的最小交互雏形。

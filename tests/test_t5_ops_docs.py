@@ -293,3 +293,36 @@ class T5CanaryExampleTests(unittest.TestCase):
                 self.assertEqual(probe.run_probe(str(socket_path)), 0)
         finally:
             sys.path.remove(str(sidecar_dir))
+
+
+class T5LivingScoreSyncTests(unittest.TestCase):
+    """The living documents must agree on the re-scored readiness number.
+
+    The score is derived from the scorecard's checks, which flipped when the
+    T5 artifacts landed; these markers force every living doc to be updated
+    together whenever the score legitimately changes again.
+    """
+
+    LIVING_DOCS = (
+        "docs/concepts/northstar-remote-worker.md",
+        "docs/dx-remote-worker-assessment.zh-CN.md",
+        "components/northstar-agent-interop/README.md",
+    )
+
+    def test_living_docs_carry_the_current_score(self):
+        for relative in self.LIVING_DOCS:
+            with self.subTest(doc=relative):
+                self.assertIn("94/100", (ROOT / relative).read_text(encoding="utf-8"))
+
+    def test_ops_percentage_phrasing_is_consistent(self):
+        concept = (ROOT / "docs/concepts/northstar-remote-worker.md").read_text(encoding="utf-8")
+        assessment = (ROOT / "docs/dx-remote-worker-assessment.zh-CN.md").read_text(encoding="utf-8")
+        self.assertIn("ops 4/6 = 67%", concept)
+        self.assertIn("ops **67**", assessment)
+        self.assertIn("ops 67%", (ROOT / "components/northstar-agent-interop/README.md").read_text(encoding="utf-8"))
+
+    def test_remaining_gaps_are_the_two_implementation_items(self):
+        concept = (ROOT / "docs/concepts/northstar-remote-worker.md").read_text(encoding="utf-8")
+        for marker in ("network transport", "real (non-fake) end-to-end canary"):
+            with self.subTest(marker=marker):
+                self.assertIn(marker, concept)
