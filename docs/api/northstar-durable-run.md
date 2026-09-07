@@ -150,3 +150,21 @@ Deterministic local task-level evaluation for the durable-run slice.
 
 - `to_dict()`
 #### `run_fixture_benchmark(root: str | Path, *, case_count: int, fail_case: int | None=None)`
+
+### `durable_audit`
+
+Source: `components/northstar-durable-run/durable_audit.py`
+
+Bridge EventStore events into the canonical NDJSON audit feed (audit v1).
+
+#### `event_to_audit(event: dict[str, Any], *, occurred_at_is_ms: bool=False)`
+
+Map one EventContract dict to a canonical audit record.
+
+#### `events_to_ndjson(events: Iterable[dict[str, Any]])`
+
+Export many events as one canonical NDJSON audit feed text.
+
+#### `iter_events_audit(events: Iterable[dict[str, Any]])`
+
+Lazily map many events into validated audit records.

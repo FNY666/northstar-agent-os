@@ -37,12 +37,54 @@ was authorized — request, mode, ceilings — and the verified runner executes
 against that receipt. The contract is the *structural* part of the audit
 trail: what could not be changed after signing.
 
+## 4. Export: one canonical NDJSON audit feed (audit v1)
+
+The three surfaces above converge into a single machine boundary for SIEM and
+analytics pipelines: an append-style NDJSON **audit feed** whose envelope is
+versioned and validated strictly. The normative envelope lives in
+`northstar-run-contract` (`audit.py`, `audit.ndjson/1`); producers may not add
+envelope fields without a schema revision, and a reader rejects unknown
+fields instead of silently ignoring them.
+
+| Field | Kind | Meaning |
+| --- | --- | --- |
+| `schema_version` | required | `audit.ndjson/1`; readers accept exactly this version |
+| `component` | required | producer, e.g. `northstar-agent-runtime` |
+| `event` | required | producer event name (session record type / store event type / decision) |
+| `ts` | required | RFC 3339 UTC (`Z`), second or millisecond precision |
+| `level` | required | `info` \| `notice` \| `error` |
+| `payload` | required | producer-specific object (open by design) |
+| `seq` | optional | per-producer monotonic sequence |
+| `session_id` / `run_id` / `actor_id` | optional | correlation identifiers |
+
+Producer bridges (each with tests):
+
+- **Runtime** — `sessions export <session-id> --session-dir DIR` replays a
+  JSONL transcript as canonical NDJSON on stdout; `audit_export.py` mirrors
+  the envelope locally because the runtime is deliberately dependency-free.
+  `error` level = denials, failed tool results, `error_*` results.
+- **Durable-run** — `durable_audit.event_to_audit` maps every EventStore event
+  (`EventContract`) into the feed, keeping the event identity
+  (`event_id`/`task_id`/`run_id`/`step_id`/`trace_id`/digest) inside `payload`;
+  failed/denied/error statuses raise the level to `error`.
+- **Host** — `host_audit.authorization_to_audit` maps a *verified*
+  authorization grant (actor, run, workspace, capabilities, policy revision,
+  expiry) into the feed as `authorization_grant`. Tampered tokens are errors
+  at verification time, never audit records.
+
+Shipping to a SIEM is a transport concern: forward the NDJSON stream with
+fluent-bit or rsyslog (file → TCP/TLS), tag by `component`, index on `ts`, and
+keep `schema_version` as the routing key for schema evolution. The feed is
+append-only by construction on the producer side and never re-stamped: `ts`
+is the record's original timestamp.
+
 ## Honest ceiling
 
 Transcripts and stores are a **local audit trail, not a compliance store**:
 no signing, no retention policy, no tamper evidence (stated in the runtime
-README's limitations). P3-1 on the DX benchmark roadmap (policy-as-code plus
-audit export to NDJSON/SIEM) is the planned next step.
+README's limitations). The roadmap's P3-1 is delivered in two batches: the
+audit feed above (`audit.ndjson/1`, this batch) and policy schema-isation
+(`northstar-policy.toml` versioning, next batch).
 
 ## Reading on
 

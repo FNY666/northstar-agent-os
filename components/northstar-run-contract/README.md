@@ -56,3 +56,9 @@ The signed binding layer is intentionally separate from structural validation. `
 ## Current scope
 
 This is a pure standard-library contract component. It does not create workspaces, run commands, store secrets, or claim production isolation. The Sidecar adapter is a separate layer.
+
+Besides the run request/receipt, the component owns the canonical **audit
+feed** envelope (`audit.py`, `audit.ndjson/1`): the versioned NDJSON record
+shape that runtime transcripts, durable-run events and host authorization
+grants all export into (see the
+[audit trail concept](../../docs/concepts/audit-trail.md)).

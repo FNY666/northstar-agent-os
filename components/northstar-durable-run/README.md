@@ -85,6 +85,11 @@ single-process test harness. It does not prove atomic multi-process claims,
 network isolation, process isolation, lease fencing under races, native Linux
 signal behavior, secret rotation, or production deployment safety.
 
+Event history is exportable into the repository's canonical NDJSON audit feed
+(`durable_audit.py`, envelope `audit.ndjson/1` from the run contract), so the
+prototype's store can be shipped to a SIEM pipeline without changing format
+later; see the [audit trail concept](../../docs/concepts/audit-trail.md).
+
 Before any production integration, add native Linux/VM/container canaries,
 crash and replay tests across process boundaries, durable queue semantics,
 stronger filesystem and lease locking, cancellation propagation, tool-specific

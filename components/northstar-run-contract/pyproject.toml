@@ -27,6 +27,7 @@ classifiers = [
 dependencies = []
 
 [tool.setuptools]
-# Flat modules, installed as top-level names (contract, binding, adapter) to
-# match every existing `import` and `python -m` usage in this repository.
-py-modules = ["adapter", "binding", "contract"]
+# Flat modules, installed as top-level names (contract, binding, adapter,
+# audit) to match every existing `import` and `python -m` usage in this
+# repository.
+py-modules = ["adapter", "audit", "binding", "contract"]

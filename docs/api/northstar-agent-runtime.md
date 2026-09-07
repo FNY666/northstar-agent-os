@@ -643,6 +643,28 @@ Owns the span tree and (optionally) mirrors it into OpenTelemetry.
 
 #### `sdk_available()`
 
+### `audit_export`
+
+Source: `components/northstar-agent-runtime/audit_export.py`
+
+Export session transcripts as the canonical NDJSON audit feed (audit v1).
+
+#### `record_to_audit(record: dict[str, Any])`
+
+Map one session transcript record to one canonical audit record.
+
+#### `records_to_ndjson(records: Iterable[dict[str, Any]])`
+
+Canonical NDJSON text for whole transcript records (newline-terminated).
+
+#### `transcript_path_to_ndjson(path: Path)`
+
+Export one transcript file (``*.jsonl``) as canonical NDJSON audit text.
+
+#### `session_path(directory: Path, session_id: str)`
+
+The transcript file for one session id (mirrors the session_view lookup).
+
 ### `tools`
 
 Source: `components/northstar-agent-runtime/tools/__init__.py`

@@ -121,3 +121,8 @@ The host must keep secrets outside the repository and provide rotation,
 revocation, policy storage, audit minimization, lifecycle cleanup, and any
 additional approval or execution boundaries. Never commit API keys, OAuth
 tokens, private keys, production `.env` files, or user transcripts.
+
+Verified authorization grants export into the repository's canonical NDJSON
+audit feed (`host_audit.py`, envelope `audit.ndjson/1` from the run contract)
+as `authorization_grant` records; see the
+[audit trail concept](../../docs/concepts/audit-trail.md).

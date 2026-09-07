@@ -33,13 +33,26 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
     showing.add_argument("--json", action="store_true", help="emit the raw records as a JSON array")
     showing.add_argument("session_id", help="session id (the *.jsonl file name without its suffix)")
 
+    exporting = sub.add_parser(
+        "export",
+        help="emit one transcript as the canonical NDJSON audit feed (audit.ndjson/1)",
+    )
+    exporting.add_argument("--session-dir", required=True, help="directory of *.jsonl transcripts")
+    exporting.add_argument(
+        "session_id",
+        help="session id (the *.jsonl file name without its suffix); "
+        "the feed is written to stdout, one validated audit record per line",
+    )
+
 
 def run_sessions(args: argparse.Namespace) -> int:
     if args.session_command == "list":
         return _list_sessions(Path(args.session_dir), json_out=bool(getattr(args, "json", False)))
     if args.session_command == "show":
         return _show_session(Path(args.session_dir), args.session_id, json_out=bool(getattr(args, "json", False)))
-    print("sessions: pass a subcommand: list or show (--help for flags)", file=sys.stderr)
+    if args.session_command == "export":
+        return _export_session(Path(args.session_dir), args.session_id)
+    print("sessions: pass a subcommand: list, show or export (--help for flags)", file=sys.stderr)
     return USAGE_ERROR
 
 
@@ -95,6 +108,21 @@ def _show_session(directory: Path, session_id: str, *, json_out: bool) -> int:
     summary = summarise(records)
     print(f"# {summary['records']} records, {summary['assistant_turns']} assistant turn(s), "
           f"result={summary['subtype'] or '(none)'}, cost=${summary['total_cost_usd']:.6f}")
+    return 0
+
+
+# -- exporting (JSONL transcript -> canonical NDJSON audit feed) ------------
+
+
+def _export_session(directory: Path, session_id: str) -> int:
+    """Write one transcript as audit NDJSON to stdout, one record per line."""
+    from audit_export import transcript_path_to_ndjson
+
+    path = directory / f"{session_id}{SESSION_FILE_SUFFIX}"
+    if not path.is_file():
+        print(f"sessions: no transcript for session {session_id!r} in {directory}", file=sys.stderr)
+        return 1
+    sys.stdout.write(transcript_path_to_ndjson(path))
     return 0
 
 
