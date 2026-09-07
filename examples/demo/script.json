@@ -1,0 +1,14 @@
+{
+  "turns": [
+    {
+      "tool": {
+        "name": "Read",
+        "input": { "path": "notes.txt" },
+        "id": "demo-read-1"
+      }
+    },
+    {
+      "text": "演示就绪。我把 notes.txt 读出来了，工具调用、权限门、预算与事件流都按真实运行的路径走了一遍——只是模型回复由脚本提供，不需要任何 API key。"
+    }
+  ]
+}

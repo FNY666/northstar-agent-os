@@ -28,24 +28,64 @@ jobs:
       - name: Run contract tests
         working-directory: components/northstar-run-contract
         run: python -m unittest discover -s tests -p 'test_*.py' -v
+      - name: Packaging smoke
+        # The contract is stdlib-only: `pip install .` must yield importable
+        # modules from any directory, with no PYTHONPATH tricks.
+        working-directory: components/northstar-run-contract
+        run: |
+          python -m pip install --quiet .
+          cd /tmp
+          python -c "import contract, binding, adapter; print('northstar-run-contract imports OK')"
+          python -c "import contract; assert contract.SCHEMA_VERSION; print('schema', contract.SCHEMA_VERSION)"
+      - name: Install contract dependency
+        # Every declared dependency is resolved from this repository until the
+        # components are published to an index; pip installs by local path.
+        working-directory: components/northstar-host
+        run: python -m pip install --quiet ../northstar-run-contract
       - name: Compile host component
         working-directory: components/northstar-host
-        run: PYTHONPATH=../northstar-run-contract python -m py_compile authorization.py workspace.py tests/test_authorization.py tests/test_workspace.py tests/test_integration_host.py
+        run: python -m py_compile authorization.py workspace.py tests/test_authorization.py tests/test_workspace.py tests/test_integration_host.py
       - name: Host component tests
         working-directory: components/northstar-host
-        run: PYTHONPATH=../northstar-run-contract python -m unittest discover -s tests -p 'test_*.py' -v
+        run: python -m unittest discover -s tests -p 'test_*.py' -v
+      - name: Host packaging smoke
+        # `pip install .` must resolve the declared northstar-run-contract
+        # dependency (installed above) and import from any directory.
+        working-directory: components/northstar-host
+        run: |
+          python -m pip install --quiet .
+          cd /tmp
+          python -c "import authorization, workspace; print('northstar-host imports OK')"
+      - name: Install durable run dependencies
+        working-directory: components/northstar-durable-run
+        run: python -m pip install --quiet ../northstar-run-contract ../northstar-host
       - name: Compile durable run component
         working-directory: components/northstar-durable-run
         run: python -m py_compile durable_contract.py event_store.py action_gateway.py runner.py verifier.py trace_metrics.py evaluation.py tests/test_*.py
       - name: Durable run component tests
         working-directory: components/northstar-durable-run
-        run: PYTHONPATH=. python -m unittest discover -s tests -p 'test_*.py' -v
+        run: python -m unittest discover -s tests -p 'test_*.py' -v
+      - name: Durable run packaging smoke
+        working-directory: components/northstar-durable-run
+        run: |
+          python -m pip install --quiet .
+          cd /tmp
+          python -c "import durable_contract, action_gateway, event_store, runner, verifier, trace_metrics, evaluation; print('northstar-durable-run imports OK')"
+      - name: Install agent interop dependencies
+        working-directory: components/northstar-agent-interop
+        run: python -m pip install --quiet ../northstar-run-contract ../northstar-host
       - name: Compile agent interop component
         working-directory: components/northstar-agent-interop
-        run: PYTHONPATH=../northstar-run-contract:../northstar-host python -m py_compile interop_contract.py handoff.py interop_adapter.py canary.py tests/test_*.py
+        run: python -m py_compile interop_contract.py handoff.py interop_adapter.py canary.py process_adapter.py process_backend.py tests/test_*.py
       - name: Agent interop component tests
         working-directory: components/northstar-agent-interop
-        run: PYTHONPATH=.:../northstar-run-contract:../northstar-host python -m unittest discover -s tests -p 'test_*.py' -v
+        run: python -m unittest discover -s tests -p 'test_*.py' -v
+      - name: Agent interop packaging smoke
+        working-directory: components/northstar-agent-interop
+        run: |
+          python -m pip install --quiet .
+          cd /tmp
+          python -c "import interop_contract, handoff, interop_adapter, canary, process_adapter, process_backend; print('northstar-agent-interop imports OK')"
       - name: Shell syntax
         working-directory: components/northstar-codex-sidecar
         run: sh -n install.sh rollback.sh
@@ -67,14 +107,36 @@ jobs:
           pip install -r requirements.txt -r requirements-tracing.txt
       - name: Compile
         run: |
-          python -m py_compile loop.py hooks.py permissions.py budget.py tools.py \
-            compaction.py sessions.py agents.py tracing.py sidecar_client.py cli.py \
+          python -m py_compile loop.py hooks.py permissions.py budget.py tools/__init__.py \
+            tools/verify_invariants.py compaction.py sessions.py session_view.py agents.py tracing.py sidecar_client.py \
+            cli.py doctor.py _version.py \
             providers/base.py providers/anthropic.py providers/scripted.py \
             tests/support.py tests/test_*.py
       - name: Unit tests
         # No API key and no network: the scripted provider is the only model, and
         # the sidecar integration test starts a real listener on a Unix socket.
         run: python -m unittest discover -s tests -p 'test_*.py' -v
+      - name: CLI smoke
+        # The public entry points must work from the installed layout: version,
+        # environment self-check, dry-run (no request), and the offline demo.
+        run: |
+          python -m cli --version
+          python -m cli doctor --workspace . | grep -q "ready to run"
+          python -m cli run --workspace . --prompt smoke --scripted-text ok --dry-run | grep -q "no request was sent"
+          sh ../../examples/demo/run_offline.sh >/dev/null
+      - name: Packaging smoke
+        # `pip install .` must yield a working console script and importable
+        # modules from any directory (lazy SDK imports keep this offline-safe).
+        run: |
+          python -m pip install --quiet --no-deps .
+          cd /tmp
+          northstar-agent-runtime --version
+          northstar-agent-runtime doctor --workspace /tmp | grep -q "ready to run"
+          python -c "import cli, loop, tools, tools.verify_invariants; print('northstar-agent-runtime imports OK')"
+      - name: Guard verification
+        # Reverting each core guard in a throwaway copy must turn its test red;
+        # the untouched copy must stay green. ~1-2 minutes.
+        run: python3 tools/verify_invariants.py
   documentation:
     name: Repository documentation
     runs-on: ubuntu-latest

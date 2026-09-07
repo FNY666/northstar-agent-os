@@ -18,7 +18,7 @@ The project is built incrementally. A component can be useful on its own, but a 
 
 ## What is shipped today
 
-This repository currently publishes five complementary components:
+This repository currently publishes six complementary components:
 
 - `components/northstar-codex-sidecar/` — a local Unix-socket service that validates requests, runs Codex in read-only mode, bounds input and output behavior, redacts errors, cleans up timed-out process groups, and returns structured statuses.
 - `components/northstar-run-contract/` — a versioned Run Request/Receipt contract, expiring HMAC Run Binding, and strict adapter boundary for passing a verified run to the Sidecar.
@@ -61,6 +61,31 @@ Important properties:
 - Codex is disabled until the host administrator explicitly installs and enables the service.
 
 ## Quick start
+
+**One-line offline demo (no API key, no network, no model SDK):**
+
+```sh
+make demo        # or: sh examples/demo/run_offline.sh
+```
+
+It runs one full governed agent loop (tool call, permission gate, ceilings,
+event stream) against the scripted provider and writes an audit transcript to
+`/tmp/northstar-demo-sessions/`.
+
+The agent runtime CLI also self-checks and previews a run before it spends a
+token — both commands are side-effect free:
+
+```sh
+cd components/northstar-agent-runtime
+python3 -m cli --version
+python3 -m cli doctor --workspace .       # environment self-check
+python3 -m cli run --workspace . --provider anthropic --prompt "summarise README" --dry-run
+```
+
+`make test` runs every component's suite and the repository documentation tests
+(600+ tests, all offline).
+
+### Sidecar installation
 
 Requirements:
 

@@ -2,6 +2,11 @@
 __pycache__/
 *.py[cod]
 
+# Packaging artifacts
+build/
+dist/
+*.egg-info/
+
 # Local runtime state
 .env
 *.log

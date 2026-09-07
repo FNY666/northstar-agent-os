@@ -1,5 +1,48 @@
 # Northstar Agent OS — initial public component
 
+## Unreleased — DX foundations: installable packages, CLI self-checks, session read-back
+
+Phase 0–1 of the DX roadmap (see `docs/dx-benchmark-2026.zh-CN.md` for the full
+analysis and remaining phases). Everything below is additive; no runtime
+semantics changed.
+
+- **All six components are pip-installable.** Each `components/*/pyproject.toml`
+  declares `version = "0.1.0.dev0"`, real dependencies, and flat-module layouts
+  that match the existing in-tree names. The agent runtime additionally ships a
+  `northstar-agent-runtime` console script with lazy SDK imports (`[anthropic]`,
+  `[tracing]`, `[full]` extras; no hard dependency).
+- **The `tools.py` / `tools/` name collision is gone.** The module moved into
+  `tools/__init__.py`, so `import tools` and `import tools.verify_invariants`
+  both resolve; the guard-verification harness now mutates
+  `tools/__init__.py` and runs in CI.
+- **Dependencies are declared, not spliced.** `northstar-host` depends on
+  `northstar-run-contract`; `northstar-durable-run` and `northstar-agent-interop`
+  depend on both. All `PYTHONPATH=` prefixes are gone from CI and the Makefile
+  (the test modules bootstrap sibling paths themselves); CI installs by
+  dependency chain and runs a packaging smoke per component; `make install`
+  builds one virtualenv with every component.
+- **New CLI surface (`python3 -m cli`):** `--version` (single source
+  `_version.py`), `doctor` (side-effect-free environment self-check; fails on
+  broken checks, warns on missing optional SDKs), `run --dry-run` (prints the
+  resolved tools/allow-deny/ceilings/pricing and exits without constructing the
+  provider or sending a request), and `sessions list|show [--json]` (read-only
+  read-back of the append-only audit transcripts). `--probe-sidecar` with the
+  live provider now explains how to install the missing SDK instead of
+  tracebacking.
+- **One-line offline demo:** `make demo` (or `sh examples/demo/run_offline.sh`)
+  runs a full governed loop with a tool call, policy, ceilings, and an audit
+  transcript — no API key, no network, no SDK.
+- **CI-only read-only review recipe:** `examples/ci-readonly-review/` — governed
+  PR review with `--read-only`, turn and dollar ceilings, `--halt-on-denial`,
+  and a session transcript kept outside the reviewed workspace; includes a
+  GitHub Actions template and the exit-code contract.
+- **Releasing guide** added to `CONTRIBUTING.md` (dependency-graph release
+  order, immutable tags, semantic majors for contract components).
+- Tests: 621 offline tests green across the repository (agent runtime 413,
+  including 4 skipped where the SDK is absent); the five-guard invariant
+  harness turns each reverted guard red and keeps the untouched copy green.
+
+
 This repository establishes the Northstar Agent OS name and publishes five independently maintained components: Northstar Codex Sidecar, the Northstar Run Contract, the Northstar Agent Runtime, host-side candidates, and backend-neutral Agent Interop foundations.
 
 ## Agent Runtime (unreleased)

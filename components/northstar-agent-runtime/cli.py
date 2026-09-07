@@ -28,12 +28,19 @@ would otherwise report as a policy conflict rather than doing what was asked.
 from __future__ import annotations
 
 import argparse
+import importlib.util
 import json
+import os
+import stat
 import sys
 from pathlib import Path
 from typing import Any, Sequence
 
+from _version import __version__
+from doctor import add_arguments as add_doctor_arguments
+from doctor import run_doctor
 from providers.base import ResultMessage
+from session_view import add_arguments as add_session_arguments
 
 EXIT_CODES = {
     "success": 0,
@@ -59,8 +66,12 @@ def build_parser() -> argparse.ArgumentParser:
             "  python3 -m cli run --provider scripted --script plan.json --prompt 'summarise README'\n"
             "  python3 -m cli run --workspace . --read-only --sidecar-socket /var/run/northstar-codex/sidecar.sock\n"
             "  python3 -m cli tools --workspace .\n"
+            "  python3 -m cli doctor --workspace .\n"
+            "  python3 -m cli sessions list --session-dir /tmp/northstar-sessions\n"
+            "  python3 -m cli sessions show --session-dir /tmp/northstar-sessions ns-20260907T000000Z-00000000\n"
         ),
     )
+    parser.add_argument("--version", action="version", version=f"northstar-agent-runtime {__version__}")
     sub = parser.add_subparsers(dest="command")
 
     run = sub.add_parser("run", help="run one agent loop to completion")
@@ -69,6 +80,10 @@ def build_parser() -> argparse.ArgumentParser:
     sub.add_parser("tools", help="list the built-in tools and their classification")
     agents = sub.add_parser("agents", help="list the built-in subagent definitions")
     agents.add_argument("--workspace", default=".", help="workspace used to describe tool availability")
+    doctor = sub.add_parser("doctor", help="self-check the host for one governed run (no requests, no file writes)")
+    add_doctor_arguments(doctor)
+    sessions = sub.add_parser("sessions", help="inspect persisted session transcripts (read-only)")
+    add_session_arguments(sessions)
     return parser
 
 
@@ -117,6 +132,7 @@ def _add_run_arguments(parser: argparse.ArgumentParser) -> None:
     output.add_argument("--resume", default="", help="session id to continue from --session-dir")
     output.add_argument("--redact-tool-output", action="store_true", help="record tool results in the session without output bodies")
     output.add_argument("--show-pricing", action="store_true", help="print the pricing decision and exit")
+    output.add_argument("--dry-run", action="store_true", help="validate the configuration and print what a run would do, then exit without sending any request (provider, model, and sidecar are not touched)")
 
 
 def _load_script(path: str) -> list[Any]:
@@ -159,6 +175,73 @@ def _build_provider(args: argparse.Namespace) -> Any:
     raise ValueError(f"unknown provider {args.provider!r}")
 
 
+def _check_anthropic_sdk() -> tuple[bool, str]:
+    """Whether the ``anthropic`` package is importable, and how to fix it if not.
+
+    Imported on demand (never at module import time) so the rest of the CLI stays
+    usable on hosts that only run the offline scripted provider.
+    """
+    if importlib.util.find_spec("anthropic") is not None:
+        return True, "anthropic SDK is installed"
+    return False, "the 'anthropic' package is not installed; pip install -r requirements.txt, or use --provider scripted"
+
+
+def _print_dry_run(args: argparse.Namespace, runtime: Any) -> int:
+    """Print what a run would do and exit, without constructing a provider.
+
+    ``--dry-run`` is the read-only twin of ``--show-pricing``: it validates the
+    configuration the same way a real run would, but never builds a provider and
+    never touches the network, the model SDK, or the sidecar socket.
+    """
+    from agents import builtin_registry
+    from budget import price_for
+    from tools import build_default_registry
+
+    registry = build_default_registry()
+    agents = builtin_registry()
+    definition = agents.get(args.agent) if args.agent else None
+
+    denied = list(getattr(args, "deny_tool", []) or [])
+    if args.read_only:
+        denied.extend(MUTATING_TOOLS)
+    allowed = list(args.allow_tool)
+    if not allowed and args.permission_mode == "bypassPermissions":
+        allowed = list(registry.names())
+    if definition:
+        # Mirror _run's resolution: the built-in definition's tool subset is
+        # offered to the model, while the host's allow/deny lists still apply.
+        allowed = [name for name in allowed if name in definition.tools] or list(definition.tools)
+    from permissions import subtract
+
+    allowed = subtract(allowed, denied)
+    denied = tuple(dict.fromkeys(denied))
+    denied = tuple(name for name in denied if name in registry.names())
+
+    model = definition.model if definition and definition.model else args.model
+    pricing, estimated = price_for(model)
+    tool_names = registry.subset(definition.tools).names() if definition else registry.names()
+
+    print(f"provider={args.provider} model={model}"
+          + (f" (agent '{definition.name}')" if definition else ""))
+    print(f"permission_mode={definition.permission_mode if definition else args.permission_mode}")
+    print(f"tools={','.join(tool_names) or '(none)'}")
+    print(f"allowed_tools={','.join(allowed) or '(none)'}  "
+          f"disallowed_tools={','.join(denied) or '(none)'}")
+    print(f"max_turns={definition.max_turns if definition else args.max_turns} "
+          f"max_tool_calls={definition.max_tool_calls if definition else args.max_tool_calls} "
+          f"max_budget_usd={args.max_budget_usd or 'unlimited'}")
+    print(f"sidecar={'on' if args.sidecar_socket else 'off'} "
+          f"session_dir={args.session_dir or 'off'} "
+          f"halt_on_denial={args.halt_on_denial}")
+    print(f"pricing: ${pricing.input_per_mtok}/MTok in, ${pricing.output_per_mtok}/MTok out "
+          f"(cache read x0.1, cache write x1.25)"
+          + (" - estimated" if estimated else ""))
+    print(f"estimated cost: ~${pricing.input_per_mtok / 1000:.3f} per 100K input tokens, "
+          f"~${pricing.output_per_mtok / 1000:.3f} per 100K output tokens")
+    print("dry-run: configuration is valid; no request was sent")
+    return 0
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(list(argv) if argv is not None else None)
@@ -177,6 +260,12 @@ def main(argv: Sequence[str] | None = None) -> int:
             print(f"{'':<12} {definition.description}")
         return 0
     if args.command != "run":
+        if args.command == "doctor":
+            return run_doctor(args)
+        if args.command == "sessions":
+            from session_view import run_sessions
+
+            return run_sessions(args)
         parser.print_help()
         return USAGE_ERROR
 
@@ -272,7 +361,16 @@ def _run(args: argparse.Namespace) -> int:
     if args.show_pricing:
         print(json.dumps(runtime.pricing(), indent=2, sort_keys=True))
         return 0
+    if args.dry_run:
+        # Never constructs the provider: configuration is validated above, so a
+        # healthy configuration prints a plan and exits 0 before any request.
+        return _print_dry_run(args, runtime)
     if args.probe_sidecar:
+        if args.provider == "anthropic":
+            sdk_ok, message = _check_anthropic_sdk()
+            if not sdk_ok:
+                print(message, file=sys.stderr)
+                return USAGE_ERROR
         if runtime.sidecar is None:
             print("--probe-sidecar needs --sidecar-socket", file=sys.stderr)
             return USAGE_ERROR

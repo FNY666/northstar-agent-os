@@ -3,6 +3,18 @@
 This component is a local, standard-library host candidate for the boundary
 between a verified Northstar run and a host-owned private workspace.
 
+## Install (pip)
+
+```sh
+pip install ../northstar-run-contract   # declared dependency, from this repository
+pip install .                            # resolves northstar-run-contract
+# or, once published:
+pip install northstar-host
+```
+
+The wheel installs `authorization` and `workspace` as top-level modules; the
+version (`0.1.0.dev0`, unreleased) is declared in `pyproject.toml`.
+
 ## Boundary order
 
 The component keeps four decisions separate:
