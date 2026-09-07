@@ -2,9 +2,9 @@
 
 This component is a local, standard-library prototype for the durable-run
 mechanisms required by a governed Agent Runtime. It is deliberately narrow:
-it proves contracts, event history, checkpoints, leases, per-call action gates,
-independent postcondition verification, and minimal trace metrics on a local
-fixture.
+it proves Run/Step/Event contracts, append-only event history, checkpoints,
+leases, long-task lifecycle controls, per-call action gates, independent
+postcondition verification, and minimal trace metrics on a local fixture.
 
 ## Concepts, guides and API reference
 
@@ -46,14 +46,41 @@ output cannot alter the registry, grant, or scope.
 
 `EventStore` treats the JSONL history as the source of truth. Checkpoints carry
 a state digest and sequence and are accepted only when they match the current
-history. `DurableRunner` uses an owner-bound expiring lease and stable action
-keys so a resumed fixture can avoid repeating an idempotent side effect.
+history. `DurableRunner` uses an owner-bound expiring execution lease and
+attempt-specific action keys so a resumed fixture can avoid repeating an
+idempotent side effect.
 
-`verifier.py` does not trust a step's claimed output or a model's claimed
-status. It checks the actual run state, private workspace, required file
- digests, and an observed test exit code. Only a `verified` result can produce
-an `ok` receipt; missing observations produce `unknown` and failed checks
-produce `failed`.
+## Long-task lifecycle
+
+The runner exposes explicit durable control-plane transitions in addition to
+`execute()`:
+
+| Operation | Durable events | Result |
+|---|---|---|
+| `pause()` | `run.waiting` | `running → waiting` |
+| `resume()` | `run.started` | `waiting → running` |
+| `retry()` after failure | `run.retry`, then one `step.retry` per failed step | `failed → planned`, failed steps become `planned` |
+| `cancel()` | `step.cancelled` for every active step, then `run.cancelled` | active work is recorded before terminal run cancellation |
+
+`execute()` refuses a paused (`waiting`) run until `resume()` has appended its
+new `run.started` event. Pause is a durable scheduling boundary, not a Python
+thread interrupter: an action already inside a caller-registered function is
+not forcibly stopped. If it later completes after cancellation, the runner
+will not append a misleading `step.finished` event for the already-cancelled
+step.
+
+Each step attempt has a stable idempotency key passed to the action:
+`<run_id>:<step_id>:attempt-1`, `attempt-2`, and so on. A process crash that
+leaves `step.started` as the last step event does not create a retry event, so
+recovery reuses the unfinished attempt key. An explicit `step.retry` event
+advances the attempt and therefore receives a new key. The same distinction is
+used for the durable `step.started`, `step.finished`, failure, checkpoint, and
+run-start lifecycle event keys.
+
+These controls preserve the existing lease, checkpoint, replay, verifier, and
+append-only boundaries. They do not yet provide a background scheduler,
+process-isolated signal cancellation, a cross-process task queue, or remote
+worker transport.
 
 ## Local example
 

@@ -254,6 +254,8 @@ class DurableContractTests(unittest.TestCase):
             ("run.finished", "finished"),
             ("run.failed", "failed"),
             ("run.cancelled", "cancelled"),
+            ("run.retry", "planned"),
+            ("step.retry", "planned"),
             ("step.started", "running"),
             ("step.waiting", "waiting"),
             ("step.finished", "finished"),
@@ -270,7 +272,7 @@ class DurableContractTests(unittest.TestCase):
                     status,
                 )
 
-    def test_status_transitions_are_explicit_and_terminal_states_are_sticky(self):
+    def test_status_transitions_are_explicit_and_only_failed_is_retryable(self):
         allowed = {
             ("planned", "running"),
             ("planned", "cancelled"),
@@ -281,6 +283,7 @@ class DurableContractTests(unittest.TestCase):
             ("waiting", "running"),
             ("waiting", "failed"),
             ("waiting", "cancelled"),
+            ("failed", "planned"),
         }
         statuses = ("planned", "running", "waiting", "finished", "failed", "cancelled")
         for current in statuses:

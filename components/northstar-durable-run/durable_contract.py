@@ -42,7 +42,9 @@ _EVENT_STATUS_BY_TYPE = {
     "run.finished": "finished",
     "run.failed": "failed",
     "run.cancelled": "cancelled",
+    "run.retry": "planned",
     "step.planned": "planned",
+    "step.retry": "planned",
     "step.started": "running",
     "step.waiting": "waiting",
     "step.finished": "finished",
@@ -61,6 +63,7 @@ _ALLOWED_TRANSITIONS = frozenset({
     ("waiting", "running"),
     ("waiting", "failed"),
     ("waiting", "cancelled"),
+    ("failed", "planned"),
 })
 
 

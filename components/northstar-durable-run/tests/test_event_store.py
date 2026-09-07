@@ -157,6 +157,79 @@ class EventStoreTests(unittest.TestCase):
         replayed = self.store.replay("run-001")
         self.assertEqual(replayed, state)
 
+    def test_derive_state_replays_failed_run_retry_and_new_step_attempt(self):
+        events = [
+            event(),
+            event(
+                event_id="event-002", sequence=2, event_type="run.started", status="running",
+                idempotency_key="run-001-started-1", payload_digest="sha256:" + "2" * 64,
+            ),
+            event(
+                event_id="event-003", sequence=3, step_id="planner", event_type="step.planned", status="planned",
+                idempotency_key="run-001-planner-planned-attempt-1", payload_digest="sha256:" + "3" * 64,
+            ),
+            event(
+                event_id="event-004", sequence=4, step_id="planner", event_type="step.started", status="running",
+                idempotency_key="run-001-planner-started-attempt-1", payload_digest="sha256:" + "4" * 64,
+            ),
+            event(
+                event_id="event-005", sequence=5, step_id="planner", event_type="step.failed", status="failed",
+                idempotency_key="run-001-planner-failed-attempt-1", payload_digest="sha256:" + "5" * 64,
+            ),
+            event(
+                event_id="event-006", sequence=6, event_type="run.failed", status="failed",
+                idempotency_key="run-001-failed", payload_digest="sha256:" + "6" * 64,
+            ),
+            event(
+                event_id="event-007", sequence=7, event_type="run.retry", status="planned",
+                idempotency_key="run-001-retry-1", payload_digest="sha256:" + "7" * 64,
+            ),
+            event(
+                event_id="event-008", sequence=8, step_id="planner", event_type="step.retry", status="planned",
+                idempotency_key="run-001-planner-retry-attempt-2", payload_digest="sha256:" + "8" * 64,
+            ),
+            event(
+                event_id="event-009", sequence=9, event_type="run.started", status="running",
+                idempotency_key="run-001-started-attempt-2", payload_digest="sha256:" + "9" * 64,
+            ),
+        ]
+        for item in events:
+            self.store.append_event(item)
+        state = self.store.replay("run-001")
+        self.assertEqual(state["status"], "running")
+        self.assertEqual(state["steps"]["planner"]["status"], "planned")
+        self.assertEqual(state["sequence"], 9)
+
+    def test_derive_state_replays_cancelled_active_step_before_run_cancel(self):
+        events = [
+            event(),
+            event(
+                event_id="event-002", sequence=2, event_type="run.started", status="running",
+                idempotency_key="run-001-started-1", payload_digest="sha256:" + "2" * 64,
+            ),
+            event(
+                event_id="event-003", sequence=3, step_id="planner", event_type="step.planned", status="planned",
+                idempotency_key="run-001-planner-planned-attempt-1", payload_digest="sha256:" + "3" * 64,
+            ),
+            event(
+                event_id="event-004", sequence=4, step_id="planner", event_type="step.started", status="running",
+                idempotency_key="run-001-planner-started-attempt-1", payload_digest="sha256:" + "4" * 64,
+            ),
+            event(
+                event_id="event-005", sequence=5, step_id="planner", event_type="step.cancelled", status="cancelled",
+                idempotency_key="run-001-planner-cancelled-attempt-1", payload_digest="sha256:" + "5" * 64,
+            ),
+            event(
+                event_id="event-006", sequence=6, event_type="run.cancelled", status="cancelled",
+                idempotency_key="run-001-cancelled-6", payload_digest="sha256:" + "6" * 64,
+            ),
+        ]
+        for item in events:
+            self.store.append_event(item)
+        state = self.store.replay("run-001")
+        self.assertEqual(state["status"], "cancelled")
+        self.assertEqual(state["steps"]["planner"]["status"], "cancelled")
+
     def test_derive_state_rejects_illegal_run_transition(self):
         self.store.append_event(event())
         illegal = event(

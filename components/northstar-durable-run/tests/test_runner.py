@@ -142,6 +142,7 @@ class DurableRunnerTests(unittest.TestCase):
         with self.assertRaises(KeyboardInterrupt):
             self.runner.execute([plan], owner_id="worker-a", now=100)
         self.assertEqual(len(side_effects), 1)
+        self.assertEqual(side_effects, ["run-001:edit:attempt-1"])
         recovered = DurableRunner(
             RUN,
             self.store,
@@ -164,6 +165,61 @@ class DurableRunnerTests(unittest.TestCase):
         self.assertIn("run.failed", [item.event_type for item in self.store.read_history("run-001")])
         with self.assertRaises(ValueError):
             self.runner.execute([self.plan("test")], owner_id="worker-b", now=101)
+
+    def test_pause_and_resume_are_durable_boundaries(self):
+        plan = self.plan("edit")
+        state = self.runner.execute([plan], owner_id="worker-a", now=100, finalize=False)
+        self.assertEqual(state["status"], "running")
+        paused = self.runner.pause(owner_id="worker-a", now=101, reason="operator requested pause")
+        self.assertEqual(paused["status"], "waiting")
+        with self.assertRaises(ValueError):
+            self.runner.execute([plan], owner_id="worker-b", now=102)
+        self.assertEqual(self.runner.pause(owner_id="worker-a", now=102)["status"], "waiting")
+        resumed = self.runner.resume(owner_id="worker-b", now=103)
+        self.assertEqual(resumed["status"], "running")
+        finished = self.runner.execute([plan], owner_id="worker-b", now=104)
+        self.assertEqual(finished["status"], "finished")
+        self.assertEqual([item[0] for item in self.calls], ["edit"])
+        self.assertEqual(
+            [event.event_type for event in self.store.read_history("run-001") if event.event_type in {"run.waiting", "run.started"}],
+            ["run.started", "run.waiting", "run.started"],
+        )
+
+    def test_failed_run_can_retry_with_a_new_step_attempt(self):
+        attempts: list[str] = []
+
+        def fail_once(key):
+            attempts.append(key)
+            if len(attempts) == 1:
+                raise RuntimeError("transient fixture failure")
+            return {"ok": True}
+
+        plan = self.plan("edit", action=fail_once)
+        first = self.runner.execute([plan], owner_id="worker-a", now=100)
+        self.assertEqual(first["status"], "failed")
+        recovered = self.runner.retry([plan], owner_id="worker-b", now=101)
+        self.assertEqual(recovered["status"], "finished")
+        self.assertEqual(attempts, ["run-001:edit:attempt-1", "run-001:edit:attempt-2"])
+        event_types = [event.event_type for event in self.store.read_history("run-001")]
+        self.assertIn("run.retry", event_types)
+        self.assertIn("step.retry", event_types)
+        self.assertEqual(event_types.count("step.started"), 2)
+
+    def test_cancel_persists_active_step_cancellation_before_run_cancellation(self):
+        def cancel_from_action(_key):
+            self.runner.cancel(owner_id="worker-a", now=101)
+            return {"unreachable": "step is now cancelled"}
+
+        state = self.runner.execute(
+            [self.plan("edit", action=cancel_from_action)], owner_id="worker-a", now=100
+        )
+        self.assertEqual(state["status"], "cancelled")
+        self.assertEqual(state["steps"]["edit"]["status"], "cancelled")
+        self.assertEqual(
+            [event.event_type for event in self.store.read_history("run-001")][-2:],
+            ["step.cancelled", "run.cancelled"],
+        )
+        self.assertNotIn("step.finished", [event.event_type for event in self.store.read_history("run-001")])
 
     def test_cancelled_run_does_not_start_any_step(self):
         self.runner.prepare(owner_id="worker-a", now=100)

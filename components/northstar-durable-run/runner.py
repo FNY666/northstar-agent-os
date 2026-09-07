@@ -303,14 +303,25 @@ class DurableRunner:
 
     def _append_run_started(self, *, now: int) -> None:
         state = self.store.derive_state(self.run.run_id)
+        history = self.store.read_history(self.run.run_id)
         if state["status"] == "planned":
+            starts = sum(event.event_type == "run.started" for event in history)
+            key = (
+                f"{self.run.run_id}-started"
+                if starts == 0
+                else f"{self.run.run_id}-started-attempt-{starts + 1}"
+            )
             self._append(
                 event_type="run.started",
                 status="running",
                 step_id="__run__",
-                idempotency_key=f"{self.run.run_id}-started",
+                idempotency_key=key,
                 now=now,
-                payload={"status": "running"},
+                payload=(
+                    {"status": "running"}
+                    if starts == 0
+                    else {"status": "running", "attempt": starts + 1}
+                ),
             )
         elif state["status"] == "waiting":
             self._append(
@@ -322,10 +333,78 @@ class DurableRunner:
                 payload={"status": "running"},
             )
 
+    def _step_attempt(self, step_id: str) -> int:
+        """Return the current attempt, preserving a crashed in-flight attempt."""
+        history = self.store.read_history(self.run.run_id)
+        retries = sum(
+            event.event_type == "step.retry" and event.step_id == step_id
+            for event in history
+        )
+        return retries + 1
+
+    @staticmethod
+    def _attempt_key(base: str, attempt: int) -> str:
+        """Keep the first-attempt key compatible while separating retries."""
+        return base if attempt == 1 else f"{base}-attempt-{attempt}"
+
+    def _run_retry_number(self) -> int:
+        return 1 + sum(
+            event.event_type == "run.retry"
+            for event in self.store.read_history(self.run.run_id)
+        )
+
+    def pause(self, *, owner_id: str, now: int, reason: str = "operator pause") -> dict[str, Any]:
+        """Pause at a durable run boundary; actions already in a Python call are not interrupted."""
+        _require_id(owner_id, "owner_id")
+        if not isinstance(now, int) or isinstance(now, bool):
+            raise ValueError("now must be an integer")
+        if not isinstance(reason, str) or not reason.strip() or len(reason) > 512:
+            raise ValueError("pause reason is invalid")
+        state = self.prepare(owner_id=owner_id, now=now)
+        if state["status"] == "waiting":
+            return state
+        if state["status"] != "running":
+            raise ValueError("only a running task can be paused")
+        self._append(
+            event_type="run.waiting",
+            status="waiting",
+            step_id="__run__",
+            idempotency_key=f"{self.run.run_id}-paused-{state['sequence'] + 1}",
+            now=now,
+            payload={"status": "waiting", "reason": reason.strip()},
+        )
+        return self.store.derive_state(self.run.run_id)
+
+    def resume(self, *, owner_id: str, now: int) -> dict[str, Any]:
+        """Resume a paused run's durable state; execution still reacquires the lease."""
+        _require_id(owner_id, "owner_id")
+        if not isinstance(now, int) or isinstance(now, bool):
+            raise ValueError("now must be an integer")
+        state = self.prepare(owner_id=owner_id, now=now)
+        if state["status"] != "waiting":
+            raise ValueError("only a waiting task can be resumed")
+        self._append_run_started(now=now)
+        return self.store.derive_state(self.run.run_id)
+
     def cancel(self, *, owner_id: str, now: int) -> dict[str, Any]:
+        """Persist active step cancellation before the terminal run cancellation event."""
         state = self.prepare(owner_id=owner_id, now=now)
         if state["status"] in {"finished", "failed", "cancelled"}:
             return state
+        for step_id, details in state["steps"].items():
+            if details["status"] == "running":
+                attempt = self._step_attempt(step_id)
+                self._append(
+                    event_type="step.cancelled",
+                    status="cancelled",
+                    step_id=step_id,
+                    idempotency_key=self._attempt_key(
+                        f"{self.run.run_id}-{step_id}-cancelled", attempt
+                    ),
+                    now=now,
+                    payload={"status": "cancelled", "attempt": attempt},
+                )
+        state = self.store.derive_state(self.run.run_id)
         self._append(
             event_type="run.cancelled",
             status="cancelled",
@@ -336,6 +415,74 @@ class DurableRunner:
         )
         return self.store.derive_state(self.run.run_id)
 
+    def retry(
+        self,
+        plans: list[StepPlan],
+        *,
+        owner_id: str,
+        now: int,
+        finalize: bool = True,
+    ) -> dict[str, Any]:
+        """Retry a failed run with explicit plans and fresh step idempotency keys."""
+        if not isinstance(plans, list):
+            raise ValueError("plans must be a list")
+        if len({plan.step_id for plan in plans}) != len(plans):
+            raise ValueError("step plans must have unique step IDs")
+        if not isinstance(now, int) or isinstance(now, bool):
+            raise ValueError("now must be an integer")
+        if now >= self.run.deadline_at:
+            raise ValueError("run deadline has expired")
+        state = self.prepare(owner_id=owner_id, now=now)
+        retry_started = any(
+            event.event_type == "run.retry"
+            for event in self.store.read_history(self.run.run_id)
+        )
+        if state["status"] == "failed":
+            pass
+        elif state["status"] in {"planned", "running"} and retry_started:
+            # A caller may resume this method after a crash between retry events.
+            pass
+        else:
+            raise ValueError("run is not retryable")
+        failed_steps = {
+            step_id
+            for step_id, details in state["steps"].items()
+            if details["status"] == "failed"
+        }
+        plan_ids = {plan.step_id for plan in plans}
+        missing = sorted(failed_steps - plan_ids)
+        if missing:
+            raise ValueError(f"retry plans are missing failed steps: {', '.join(missing)}")
+        if state["status"] == "failed":
+            retry_number = self._run_retry_number()
+            self._append(
+                event_type="run.retry",
+                status="planned",
+                step_id="__run__",
+                idempotency_key=f"{self.run.run_id}-retry-{retry_number}",
+                now=now,
+                payload={
+                    "status": "planned",
+                    "retry": retry_number,
+                    "steps": sorted(failed_steps),
+                },
+            )
+        state = self.store.derive_state(self.run.run_id)
+        for step_id in sorted(failed_steps):
+            current = state["steps"].get(step_id, {}).get("status")
+            if current == "failed":
+                attempt = self._step_attempt(step_id) + 1
+                self._append(
+                    event_type="step.retry",
+                    status="planned",
+                    step_id=step_id,
+                    idempotency_key=f"{self.run.run_id}-{step_id}-retry-attempt-{attempt}",
+                    now=now,
+                    payload={"status": "planned", "attempt": attempt},
+                )
+                state = self.store.derive_state(self.run.run_id)
+        return self.execute(plans, owner_id=owner_id, now=now, finalize=finalize)
+
     def execute(
         self,
         plans: list[StepPlan],
@@ -344,6 +491,7 @@ class DurableRunner:
         now: int,
         finalize: bool = True,
     ) -> dict[str, Any]:
+        """Execute steps, reusing an unfinished attempt after process recovery."""
         if not isinstance(plans, list):
             raise ValueError("plans must be a list")
         if len({plan.step_id for plan in plans}) != len(plans):
@@ -359,6 +507,8 @@ class DurableRunner:
             return state
         if state["status"] == "failed":
             raise ValueError("run has already failed")
+        if state["status"] == "waiting":
+            raise ValueError("run is paused; call resume before execute")
 
         self._ensure_execution_lease(owner_id, now=now)
         try:
@@ -368,17 +518,21 @@ class DurableRunner:
                 step_state = state["steps"].get(plan.step_id)
                 if step_state is not None and step_state["status"] == "finished":
                     continue
+                attempt = self._step_attempt(plan.step_id)
                 if step_state is None:
                     self._append(
                         event_type="step.planned",
                         status="planned",
                         step_id=plan.step_id,
-                        idempotency_key=f"{self.run.run_id}-{plan.step_id}-planned",
+                        idempotency_key=self._attempt_key(
+                            f"{self.run.run_id}-{plan.step_id}-planned", attempt
+                        ),
                         now=now,
                         payload={
                             "input_digest": plan.input_digest,
                             "scope_snapshot": list(plan.scope_snapshot),
                             "expected_postconditions": list(plan.expected_postconditions),
+                            **({} if attempt == 1 else {"attempt": attempt}),
                         },
                     )
                     step_state = {"status": "planned"}
@@ -389,11 +543,16 @@ class DurableRunner:
                         event_type="step.started",
                         status="running",
                         step_id=plan.step_id,
-                        idempotency_key=f"{self.run.run_id}-{plan.step_id}-started",
+                        idempotency_key=self._attempt_key(
+                            f"{self.run.run_id}-{plan.step_id}-started", attempt
+                        ),
                         now=now,
-                        payload={"input_digest": plan.input_digest},
+                        payload={
+                            "input_digest": plan.input_digest,
+                            **({} if attempt == 1 else {"attempt": attempt}),
+                        },
                     )
-                action_key = f"{self.run.run_id}:{plan.step_id}:attempt-1"
+                action_key = f"{self.run.run_id}:{plan.step_id}:attempt-{attempt}"
                 try:
                     output = plan.action(action_key)
                     if not isinstance(output, dict):
@@ -406,15 +565,22 @@ class DurableRunner:
                     event_type="step.finished",
                     status="finished",
                     step_id=plan.step_id,
-                    idempotency_key=f"{self.run.run_id}-{plan.step_id}-finished",
+                    idempotency_key=self._attempt_key(
+                        f"{self.run.run_id}-{plan.step_id}-finished", attempt
+                    ),
                     now=now,
-                    payload={"output_digest": _digest(output)},
+                    payload={
+                        "output_digest": _digest(output),
+                        **({} if attempt == 1 else {"attempt": attempt}),
+                    },
                 )
                 self._append(
                     event_type="checkpoint.created",
                     status="running",
                     step_id="__run__",
-                    idempotency_key=f"{self.run.run_id}-checkpoint-{plan.step_id}",
+                    idempotency_key=self._attempt_key(
+                        f"{self.run.run_id}-checkpoint-{plan.step_id}", attempt
+                    ),
                     now=now,
                     payload=self.store.derive_state(self.run.run_id),
                 )
@@ -422,11 +588,20 @@ class DurableRunner:
 
             state = self.store.derive_state(self.run.run_id)
             if finalize and state["status"] == "running":
+                finished_count = sum(
+                    event.event_type == "run.finished"
+                    for event in self.store.read_history(self.run.run_id)
+                )
+                finish_key = (
+                    f"{self.run.run_id}-finished"
+                    if finished_count == 0
+                    else f"{self.run.run_id}-finished-{finished_count + 1}"
+                )
                 self._append(
                     event_type="run.finished",
                     status="finished",
                     step_id="__run__",
-                    idempotency_key=f"{self.run.run_id}-finished",
+                    idempotency_key=finish_key,
                     now=now,
                     payload={"status": "finished"},
                 )
@@ -445,20 +620,35 @@ class DurableRunner:
                 None,
             )
             if active_step is not None:
+                attempt = self._step_attempt(active_step)
                 self._append(
                     event_type="step.failed",
                     status="failed",
                     step_id=active_step,
-                    idempotency_key=f"{self.run.run_id}-{active_step}-failed",
+                    idempotency_key=self._attempt_key(
+                        f"{self.run.run_id}-{active_step}-failed", attempt
+                    ),
                     now=now,
-                    payload={"error_class": error.__class__.__name__},
+                    payload={
+                        "error_class": error.__class__.__name__,
+                        **({} if attempt == 1 else {"attempt": attempt}),
+                    },
                 )
             if self.store.derive_state(self.run.run_id)["status"] == "running":
+                failed_count = sum(
+                    event.event_type == "run.failed"
+                    for event in self.store.read_history(self.run.run_id)
+                )
+                failed_key = (
+                    f"{self.run.run_id}-failed"
+                    if failed_count == 0
+                    else f"{self.run.run_id}-failed-{failed_count + 1}"
+                )
                 self._append(
                     event_type="run.failed",
                     status="failed",
                     step_id="__run__",
-                    idempotency_key=f"{self.run.run_id}-failed",
+                    idempotency_key=failed_key,
                     now=now,
                     payload={"error_class": error.__class__.__name__},
                 )

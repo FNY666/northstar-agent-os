@@ -9,19 +9,20 @@
 
 > **阅读口径（2026-09-07 当前真值）**：本页保留了早期差距基线与实施 ledger，
 > 因而 §0–§8 中的“现状”段落有历史意义，不应覆盖后面的复评。当前 checkout
-> 的权威快照是：`make test` **868 项测试，864 项通过、4 项 skip**（runtime 571，
+> 的权威快照是：`make test` **873 项测试，869 项通过、4 项 skip**（runtime 572，
 > 其中 4 项因可选 OpenTelemetry 依赖缺失而跳过；其余组件与文档测试全绿）；五个可安装组件仍为
 > 对齐的 `0.1.0.dev0`，没有发布 tag。Agent Skills 已支持
 > `.northstar/skills` + portable `.agents/skills`、标准 frontmatter、`skills
 > check/list` 与 fail-closed 路径校验；runtime 还新增了 bounded checkpoint、
-> inspect/diff/rewind/fork 和 mutating-tool workspace receipts；当前 T7 还加入
-> capability-first approval lease 与可验证 action receipt；MCP 仍是最小 stdio
-> 工具客户端，而不是完整的远程 MCP/插件市场。若只想看“现在还差什么”，
-> 直接跳到 **§10.10**。
+> inspect/diff/rewind/fork 和 mutating-tool workspace receipts；T7 加入
+> capability-first approval lease 与可验证 action receipt，本轮又补上 durable-run
+> 的 pause/resume、显式 retry/cancel 生命周期与 attempt key 语义；MCP 仍是最小
+> stdio 工具客户端，而不是完整的远程 MCP/插件市场。若只想看“现在还差什么”，
+> 直接跳到 **§10.11**。
 
 ## 0. 执行摘要（TL;DR）
 
-**当前结论：Northstar 已从“库 + 手工拼装”追到可安装、可审计、具备局部可逆执行的 headless harness，但还不是 Claude Code/Codex/Gemini 那样的完整产品。**本地实测 `make test` 为 **867 项测试（863 通过、4 项可选 OTel skip）**（runtime 571），权限门、hooks、预算、只追加 transcript、workspace receipts、checkpoint manifest、capability lease、可验证 action receipt、审计导出和离线确定性仍是最强资产。
+**当前结论：Northstar 已从“库 + 手工拼装”追到可安装、可审计、具备局部可逆执行的 headless harness，但还不是 Claude Code/Codex/Gemini 那样的完整产品。**本地实测 `make test` 为 **873 项测试（869 通过、4 项可选 OTel skip）**（runtime 572），权限门、hooks、预算、只追加 transcript、workspace receipts、checkpoint manifest、capability lease、可验证 action receipt、durable-run 生命周期与离线确定性仍是最强资产。
 
 已经补齐的 DX 基础包括：五个可安装组件、console script、`doctor`/`dry-run`、AGENTS.md 与策略即代码、文件化 subagents、MCP stdio 最小客户端、标准 Agent Skills（含 `skills check/list`）、sessions 读回/NDJSON 审计、Python SDK、脚手架、API 文档和 CI recipe。**这些能力要以当前 checkout 的测试为准；本页后面的早期盘点是历史基线。**
 
@@ -662,8 +663,41 @@ VM/OS sandbox 或远端 worker fork；自定义 mutating tool 若没有在 paylo
   `ActionGateway` 的 argument digest、resource binding、idempotency 或 high-risk approval；
   receipt 证明 runtime 规范化并观察到的结果，不是远端 attestation。没有 secret 时 receipt
   可检查但不可验证；自定义工具未声明影响集时仍不能声称完整可逆。
-- **验证**：本轮 `make test` 为 868 项测试、864 项通过、4 项可选 OTel skip；
+- **验证**：T7 完成时 `make test` 为 868 项测试、864 项通过、4 项可选 OTel skip；
   runtime 为 572 项。`python3 tests/docbuild.py build && verify` 与 `git diff --check`
   均通过。
 
 T7 仍是 Unreleased；没有创建 tag、GitHub Release，也没有发布到 PyPI/npm。
+
+### 10.11 当前实现复核：durable-run 长任务控制面（2026-09-07）
+
+本节记录在 T7 之上的 durable-run 生命周期垂直切片。它扩展的是已有
+`EventStore`、lease、checkpoint、replay 和 verifier 边界，不把本地 runner 描述成
+后台调度器或云端任务服务。
+
+- **Pause / resume**：`DurableRunner.pause()` 以 `run.waiting` 将运行中的 run
+  持久化为 `waiting`；`resume()` 通过新的 `run.started` 回到 `running`。暂停是
+  durable scheduling boundary，`execute()` 在显式 resume 前拒绝继续执行，因此不会
+  把“暂停”误报成线程/进程中断。
+- **显式 retry**：失败 run 先写 `run.retry`（`failed → planned`），每个失败 step
+  再写 `step.retry`，事件回放能得到同一状态。重试可以在事件追加中途崩溃后继续，
+  不会重复已写入的 retry transition。
+- **Attempt identity**：首次执行使用
+  `<run_id>:<step_id>:attempt-1`；事件历史中出现 `step.retry` 后才进入下一个
+  attempt。崩溃留下 `step.started` 时没有 retry event，恢复继续复用原 key；显式
+  retry 则生成新 key，区分“恢复未完成动作”和“真正的新尝试”。
+- **Cancel ordering**：取消时先为每个 `running` step 写 `step.cancelled`，再写
+  `run.cancelled`；回放不会留下 run 已取消但活动 step 仍是 running 的假状态。已在
+  Python action 内执行的函数不被强行 signal interrupt，后续跨进程 cancellation 仍是
+  下一层工作。
+- **验证与基准**：durable-run 测试覆盖 pause/resume、paused execute guard、retry
+  attempt key、crash recovery key reuse、retry/cancel event replay 和 active-step
+  cancel ordering；本轮 `make test` 为 **873 项测试、869 项通过、4 项可选 OTel skip**，
+  其中 durable-run 70 项，API 文档由 docbuild freshness 检查。
+
+仍未实现：真正的后台 scheduler、跨进程 task queue、进程组隔离与 signal cancellation、
+远程 worker transport、数据库/分布式 event store，以及将 control plane 暴露为 CLI、
+HTTP 或 app-server。下一步应先稳定 versioned lifecycle/receipt contract，再评估
+transport；不因补上本地 pause/retry 就宣称已经具备云端后台执行。
+
+T8 仍是 Unreleased；没有创建 tag、GitHub Release，也没有发布到 PyPI/npm。

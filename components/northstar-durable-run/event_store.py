@@ -96,6 +96,10 @@ def _apply_event(
         if current == "planned" and event.event_type == "run.created":
             if event.sequence != 1:
                 raise ValueError("run.created must be the first event")
+        elif event.event_type == "run.retry":
+            if current != "failed":
+                raise ValueError("run.retry requires a failed run")
+            assert_transition(current, event.status)
         else:
             assert_transition(current, event.status)
         state["status"] = event.status
@@ -108,6 +112,10 @@ def _apply_event(
         if event.event_type == "step.planned":
             if current != "planned":
                 raise ValueError("step.planned may only create a planned step")
+        elif event.event_type == "step.retry":
+            if current != "failed":
+                raise ValueError("step.retry requires a failed step")
+            assert_transition(current, event.status)
         else:
             assert_transition(current, event.status)
         state["steps"][event.step_id] = {
