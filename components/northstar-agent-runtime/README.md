@@ -392,7 +392,10 @@ secret stays in the environment); `receipt.verify(secret)` detects tampering aft
 serialization. `receipt.to_contract_receipt()` projects the result into the
 existing `northstar.receipt.v1` status/postcondition shape. Signed receipts are
 also written to the session as an `informational` record with subtype
-`action_receipt`; the secret itself is never recorded.
+`action_receipt`; the secret itself is never recorded. A tool may also return a
+bounded `artifact_manifest` in its `ToolResult` data; the runtime validates and
+signs that manifest with the action receipt, while keeping it explicitly an
+observation rather than host attestation.
 
 `northstar-host.authorization.issue_approval_lease` is the host-side adapter
 from a verified, policy-authorized run grant to this bounded lease shape. It
@@ -470,6 +473,7 @@ size (`result_chars`), so truncation is visible instead of inferred.
 | `hooks.py`          | 10 lifecycle events, veto semantics, fail-closed errors              |
 | `permissions.py`    | the three-layer gate, capability leases, and delegation gate          |
 | `receipts.py`       | bounded approval leases, canonical action receipts, HMAC verification |
+| `artifacts.py`      | versioned bounded artifact manifests carried by action receipts      |
 | `budget.py`         | price table, cost computation, budget meter                          |
 | `tools/`            | package: registry, sandbox, caps, built-in tools, `CodexReadOnly` spec (`__init__.py`), plus the guard-verification harness (`verify_invariants.py`) |
 | `compaction.py`     | safe-boundary detection and summarisation                            |
@@ -511,7 +515,7 @@ cd components/northstar-agent-runtime
 python3 -m unittest discover -s tests -p 'test_*.py' -v
 ```
 
-572 tests, fully offline and deterministic (four optional OpenTelemetry tests
+578 tests, fully offline and deterministic (four optional OpenTelemetry tests
 are skipped when the tracing extra is absent): the scripted provider is the
 only model, and `test_integration_sidecar.py` runs the real sidecar `serve()`
 over a real Unix socket with a 100,000-Chinese-character prompt.

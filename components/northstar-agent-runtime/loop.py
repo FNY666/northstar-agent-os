@@ -27,6 +27,7 @@ from dataclasses import dataclass, field, replace
 from typing import Any, Callable, Iterable, Iterator, Mapping, Sequence
 
 from agents import AgentDefinition, AgentRegistry, Verdict, builtin_registry, parse_verdict
+from artifacts import ArtifactError, ArtifactManifest
 from budget import Budget
 from checkpoints import CheckpointError, capture_file_states
 from compaction import CompactionOutcome, compact, should_compact
@@ -863,6 +864,7 @@ class AgentRuntime:
         after_states: Sequence[Any] = (),
         lease_id: str | None = None,
         error: str = "",
+        artifact_manifest: ArtifactManifest | None = None,
     ) -> ActionReceipt | None:
         """Record one action claim without turning a missing claim into success.
 
@@ -890,6 +892,7 @@ class AgentRuntime:
                 workspace_after=after,
                 lease_id=lease_id,
                 error=error[:2000],
+                artifact_manifest=artifact_manifest,
             )
             if self.receipt_secret is not None:
                 receipt = receipt.sign(self.receipt_secret)
@@ -1168,6 +1171,13 @@ class AgentRuntime:
                     "tool.truncated": bool(result.truncated),
                 }
             )
+        artifact_manifest: ArtifactManifest | None = None
+        artifact_error: str | None = None
+        try:
+            artifact_manifest = result.artifact_manifest()
+        except (ArtifactError, TypeError, ValueError) as error:
+            artifact_error = f"artifact manifest rejected: {type(error).__name__}: {error}"
+            result = ToolResult.error(artifact_error, artifact_manifest_error=True)
         after_states: tuple[Any, ...] = ()
         after_error: str | None = None
         if spec.is_mutating:
@@ -1198,7 +1208,8 @@ class AgentRuntime:
                     ),
                     "before": [state.as_dict() for state in before_states],
                     "after": [state.as_dict() for state in after_states],
-                    "receipt_error": receipt_error or after_error,
+                    "artifact_manifest": artifact_manifest.to_dict() if artifact_manifest else None,
+                    "receipt_error": receipt_error or after_error or artifact_error,
                 },
             )
         tool_text = result.text()
@@ -1214,7 +1225,8 @@ class AgentRuntime:
             before_states=before_states,
             after_states=after_states,
             lease_id=decision.lease_id,
-            error=tool_text if result.is_error else (receipt_error or after_error or ""),
+            error=tool_text if result.is_error else (receipt_error or after_error or artifact_error or ""),
+            artifact_manifest=artifact_manifest,
         )
         if result.is_error:
             self._fire(

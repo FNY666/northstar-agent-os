@@ -6,6 +6,7 @@ import unittest
 from pathlib import Path
 
 import support  # noqa: F401
+from artifacts import ArtifactManifest
 from loop import AgentRuntime, RuntimeConfig
 from permissions import PermissionConfig, PermissionEngine, PermissionRequestContext
 from providers.scripted import ScriptedProvider
@@ -16,6 +17,7 @@ from receipts import (
     ReceiptError,
     capability_for,
 )
+from tools import ToolRegistry, ToolResult, ToolSpec
 
 
 class LeaseLifecycleTests(unittest.TestCase):
@@ -176,6 +178,70 @@ class RuntimeReceiptIntegrationTests(unittest.TestCase):
             self.assertEqual(action_records[0]["receipt"]["signature"], receipt.signature)
             self.assertEqual((workspace / "note.txt").read_text(), "ok")
 
+    def test_signed_receipt_carries_a_validated_external_artifact_manifest(self):
+        with tempfile.TemporaryDirectory() as directory:
+            workspace = Path(directory) / "workspace"
+            workspace.mkdir()
+            session_dir = Path(directory) / "sessions"
+            registry = ToolRegistry()
+
+            def generate_report(payload, ctx):
+                return ToolResult.ok(
+                    "generated",
+                    artifact_manifest={
+                        "schema_version": "northstar.artifact-manifest.v1",
+                        "artifacts": [
+                            {
+                                "artifact_id": "report-1",
+                                "kind": "uri",
+                                "locator": "s3://bucket/report.json",
+                                "digest": "sha256:" + "b" * 64,
+                                "bytes": 12,
+                                "media_type": "application/json",
+                            }
+                        ],
+                    },
+                )
+
+            registry.register(
+                ToolSpec(
+                    name="GenerateReport",
+                    description="emit a report artifact",
+                    input_schema={},
+                    handler=generate_report,
+                    kind="other",
+                    is_mutating=False,
+                )
+            )
+            provider = ScriptedProvider([
+                {"tool": {"name": "GenerateReport", "input": {}}},
+                {"text": "finished"},
+            ])
+            runtime = AgentRuntime(
+                provider=provider,
+                config=RuntimeConfig(
+                    workspace=str(workspace),
+                    session_id="artifact-session",
+                    permission_mode="acceptEdits",
+                ),
+                tools=registry,
+                receipt_secret=b"receipt-secret-012345",
+                clock=lambda: 101,
+                sessions=__import__("sessions").SessionStore(session_dir, session_id="artifact-session"),
+            )
+            report = runtime.run_collect("generate a report")
+            self.assertEqual(report.subtype, "success")
+            self.assertEqual(len(report.receipts), 1)
+            receipt = report.receipts[0]
+            self.assertIsInstance(receipt.artifact_manifest, ArtifactManifest)
+            self.assertEqual(receipt.artifact_manifest.artifacts[0].artifact_id, "report-1")
+            self.assertTrue(ActionReceipt.from_dict(receipt.to_dict()).verify(b"receipt-secret-012345"))
+            self.assertEqual(
+                receipt.to_contract_receipt()["postconditions"][-1],
+                {"name": "artifacts_observed", "status": "verified"},
+            )
+
 
 if __name__ == "__main__":
+
     unittest.main()

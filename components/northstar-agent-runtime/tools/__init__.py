@@ -24,6 +24,8 @@ from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any, Callable, Iterable, Literal, Mapping, Sequence
 
+from artifacts import ArtifactManifest
+
 MAX_READ_BYTES = 256 * 1024
 MAX_GREP_MATCHES = 200
 MAX_LIST_ENTRIES = 500
@@ -105,6 +107,13 @@ class ToolResult:
     @staticmethod
     def ok(content: Any = "", **data: Any) -> "ToolResult":
         return ToolResult(content=content, data=dict(data))
+
+    def artifact_manifest(self) -> ArtifactManifest | None:
+        """Validate the optional versioned artifact manifest in ``data``."""
+        value = self.data.get("artifact_manifest")
+        if value is None:
+            return None
+        return ArtifactManifest.from_mapping(value)
 
     def text(self) -> str:
         from providers.base import flatten_result_content as _flatten_result_content  # no import cycle

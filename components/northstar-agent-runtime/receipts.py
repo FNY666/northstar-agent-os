@@ -24,6 +24,8 @@ import uuid
 from dataclasses import dataclass, replace
 from typing import Any, Iterable, Mapping
 
+from artifacts import ArtifactError, ArtifactManifest
+
 APPROVAL_LEASE_SCHEMA_VERSION = "northstar.approval-lease.v1"
 ACTION_RECEIPT_SCHEMA_VERSION = "northstar.action-receipt.v1"
 MAX_ID_CHARS = 128
@@ -259,7 +261,7 @@ class ApprovalLeaseLedger:
 _RECEIPT_FIELDS = {
     "schema_version", "receipt_id", "action_id", "session_id", "tool", "capability",
     "status", "issued_at", "completed_at", "input_digest", "output_digest",
-    "workspace_before", "workspace_after", "lease_id", "error", "signature",
+    "workspace_before", "workspace_after", "lease_id", "error", "artifact_manifest", "signature",
 }
 _RECEIPT_STATUSES = frozenset({"approved", "denied", "completed", "failed"})
 
@@ -284,6 +286,7 @@ class ActionReceipt:
     error: str = ""
     signature: str | None = None
     schema_version: str = ACTION_RECEIPT_SCHEMA_VERSION
+    artifact_manifest: ArtifactManifest | None = None
 
     def __post_init__(self) -> None:
         if self.schema_version != ACTION_RECEIPT_SCHEMA_VERSION:
@@ -305,6 +308,16 @@ class ActionReceipt:
             _require_id(self.lease_id, "lease_id")
         if not isinstance(self.error, str) or len(self.error) > MAX_ERROR_CHARS:
             raise ReceiptError("error is invalid")
+        if self.artifact_manifest is not None:
+            try:
+                manifest = (
+                    self.artifact_manifest
+                    if isinstance(self.artifact_manifest, ArtifactManifest)
+                    else ArtifactManifest.from_mapping(self.artifact_manifest)
+                )
+            except (ArtifactError, TypeError, ValueError) as error:
+                raise ReceiptError(f"artifact_manifest is invalid: {error}") from error
+            object.__setattr__(self, "artifact_manifest", manifest)
         if self.signature is not None:
             _decode_signature(self.signature)
 
@@ -341,6 +354,8 @@ class ActionReceipt:
             "lease_id": self.lease_id,
             "error": self.error,
         }
+        if self.artifact_manifest is not None:
+            result["artifact_manifest"] = self.artifact_manifest.to_dict()
         if include_signature:
             result["signature"] = self.signature
         return result
@@ -394,6 +409,13 @@ class ActionReceipt:
                     "status": "verified" if self.workspace_after is not None else "unknown",
                 }
             )
+        if self.artifact_manifest is not None:
+            postconditions.append(
+                {
+                    "name": "artifacts_observed",
+                    "status": "verified" if self.artifact_manifest.artifacts else "unknown",
+                }
+            )
         receipt: dict[str, Any] = {
             "schema_version": "northstar.receipt.v1",
             "run_id": self.session_id,
@@ -423,6 +445,7 @@ class ActionReceipt:
         workspace_after: str | None = None,
         lease_id: str | None = None,
         error: str = "",
+        artifact_manifest: ArtifactManifest | Mapping[str, Any] | None = None,
     ) -> "ActionReceipt":
         now = int(time.time()) if issued_at is None else issued_at
         end = now if completed_at is None else completed_at
@@ -441,6 +464,7 @@ class ActionReceipt:
             workspace_after=workspace_after,
             lease_id=lease_id,
             error=error,
+            artifact_manifest=artifact_manifest,
         )
 
 

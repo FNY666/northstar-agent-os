@@ -81,8 +81,10 @@ file bytes; checkpoint contents remain the recovery mechanism. Built-ins use the
 legacy `path`/`paths` convention. A custom mutating `ToolSpec` may declare
 bounded top-level `affected_input_keys`, for example
 `("output_path",)`, and the session record marks that impact set as declared.
-This covers only the declared input paths; hidden side effects still require a
-richer artifact manifest and are never inferred.
+This covers only the declared input paths; a tool may additionally return a
+versioned bounded `artifact_manifest` for external or non-path outputs, which
+is validated and carried by the signed action receipt. The manifest is an
+observation, not host attestation, and hidden side effects are never inferred.
 
 The slice does not sign manifests, enforce OS-level isolation, coordinate remote
 workers, or replace the durable-run event store. Those are subsequent layers:

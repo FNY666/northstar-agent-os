@@ -80,6 +80,8 @@ The receipt contains:
 - stable session/action/tool identity and the required capability;
 - canonical SHA-256 digests of input and, when available, output;
 - optional before/after digests of the selected workspace file-state metadata;
+- an optional bounded `northstar.artifact-manifest.v1` for tool-reported
+  external or non-path outputs;
 - the consumed `lease_id`, if a lease authorized the call;
 - issued/completed timestamps and an explicit status;
 - an optional HMAC-SHA256 signature over canonical JSON with the signature

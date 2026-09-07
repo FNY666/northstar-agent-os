@@ -9,7 +9,7 @@
 
 > **阅读口径（2026-09-08 当前真值）**：本页保留了早期差距基线与实施 ledger，
 > 因而 §0–§8 中的“现状”段落有历史意义，不应覆盖后面的复评。当前 checkout
-> 的权威快照是：`make test` **883 项测试，879 项通过、4 项 skip**（runtime 574，
+> 的权威快照是：`make test` **887 项测试，883 项通过、4 项 skip**（runtime 578，
 > 其中 4 项因可选 OpenTelemetry 依赖缺失而跳过；其余组件与文档测试全绿）；五个可安装组件仍为
 > 对齐的 `0.1.0.dev0`，没有发布 tag。Agent Skills 已支持
 > `.northstar/skills` + portable `.agents/skills`、标准 frontmatter、`skills
@@ -18,11 +18,11 @@
 > capability-first approval lease 与可验证 action receipt，本轮又补上 durable-run
 > 的 pause/resume、显式 retry/cancel 生命周期与 attempt key 语义；MCP 仍是最小
 > stdio 工具客户端，而不是完整的远程 MCP/插件市场。若只想看“现在还差什么”，
-> 直接跳到 **§10.16**。
+> 直接跳到 **§10.17**。
 
 ## 0. 执行摘要（TL;DR）
 
-**当前结论：Northstar 已从“库 + 手工拼装”追到可安装、可审计、具备局部可逆执行的 headless harness，但还不是 Claude Code/Codex/Gemini 那样的完整产品。**本地实测 `make test` 为 **883 项测试（879 通过、4 项可选 OTel skip）**（runtime 574），权限门、hooks、预算、只追加 transcript、workspace receipts、checkpoint manifest、capability lease、可验证 action receipt、durable-run 生命周期与离线确定性仍是最强资产。
+**当前结论：Northstar 已从“库 + 手工拼装”追到可安装、可审计、具备局部可逆执行的 headless harness，但还不是 Claude Code/Codex/Gemini 那样的完整产品。**本地实测 `make test` 为 **887 项测试（883 通过、4 项可选 OTel skip）**（runtime 578），权限门、hooks、预算、只追加 transcript、workspace receipts、checkpoint manifest、capability lease、可验证 action receipt、durable-run 生命周期与离线确定性仍是最强资产。
 
 已经补齐的 DX 基础包括：五个可安装组件、console script、`doctor`/`dry-run`、AGENTS.md 与策略即代码、文件化 subagents、MCP stdio 最小客户端、标准 Agent Skills（含 `skills check/list`）、sessions 读回/NDJSON 审计、Python SDK、脚手架、API 文档和 CI recipe。**这些能力要以当前 checkout 的测试为准；本页后面的早期盘点是历史基线。**
 
@@ -796,3 +796,23 @@ T13 承接 T6/T7 对 workspace/action receipt 的诚实边界：只要工具声�
   879 项通过、4 项可选 OTel skip**；API docbuild freshness 与链接检查通过。
 
 T13 仍是 Unreleased；没有创建 tag、GitHub Release，也没有发布到 PyPI/npm。
+
+### 10.17 当前实现复核：版本化 artifact manifest（2026-09-08）
+
+T14 为 T13 的影响集声明补上了非路径输出的结构化观察边界：工具可以返回
+artifact manifest，runtime 会严格验证并把它纳入 action receipt，但不会把
+工具自报内容升级为 host attestation。
+
+- 新增 `northstar.artifact-manifest.v1`，限制 artifact 数量、ID、locator、
+  media type、bytes 和 digest；`file`/`directory` locator 必须是规范化的
+  workspace-relative path，URI/opaque artifact 使用独立 locator 语义。
+- `ToolResult.data["artifact_manifest"]` 经过 schema 校验后进入 `ActionReceipt`
+  canonical bytes；签名 receipt 的 contract projection 增加
+  `artifacts_observed` postcondition。非法 manifest 会变成失败 tool result，
+  不会静默写入审计记录。
+- 该 manifest 不是权限声明，不替代 `ToolSpec.affected_input_keys` 的 workspace
+  pre/post capture，也不声称捕获工具隐藏的网络、数据库或未声明文件副作用。
+- 验证：runtime **578 项测试全部通过**；全仓 `make test` 为 **887 项测试、
+  883 项通过、4 项可选 OTel skip**；API docbuild freshness 与链接检查通过。
+
+T14 仍是 Unreleased；没有创建 tag、GitHub Release，也没有发布到 PyPI/npm。

@@ -17,6 +17,8 @@ read-only. Subagent runs nest as spans and are recorded too, so a delegation
 tree is auditable end to end. Mutating path-shaped tool calls add a
 `workspace_change` record with pre/post metadata hashes; when the host supplies a
 receipt secret, the same call also produces a signed `action_receipt` record.
+Tools may attach a validated bounded artifact manifest for non-path outputs;
+that manifest is an observation carried by the receipt, not host attestation.
 The separate [reversible execution contract](reversible-execution.md) stores
 bounded file snapshots for recovery rather than putting file bytes in every
 receipt.

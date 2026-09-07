@@ -91,6 +91,32 @@ Compile every ``.northstar/agents/*.md`` into an AgentDefinition.
 
 Discover repository agents and register them; collisions are errors.
 
+### `artifacts`
+
+Source: `components/northstar-agent-runtime/artifacts.py`
+
+Bounded, versioned artifact manifests for governed tool receipts.
+
+#### `ArtifactError`
+
+An artifact manifest is malformed or exceeds its bounded contract.
+
+#### `Artifact`
+
+One bounded output reference reported by a tool.
+
+- `from_mapping(value: Any)`
+- `to_dict()`
+#### `ArtifactManifest`
+
+Validated bounded collection of tool-reported artifact references.
+
+- `from_mapping(value: Any)`
+- `to_dict()`
+- `canonical_json()`
+  - Return deterministic bytes suitable for an outer receipt signature.
+- `digest()`
+  - Return the canonical digest of the manifest itself.
 ### `budget`
 
 Source: `components/northstar-agent-runtime/budget.py`
@@ -568,7 +594,7 @@ Canonical action result with an optional HMAC signature.
 - `verify(secret: bytes)`
 - `to_contract_receipt()`
   - Project into the existing ``northstar.receipt.v1`` result shape.
-- `new(*, session_id: str, action_id: str, tool: str, capability: str, status: str, issued_at: int | None=None, completed_at: int | None=None, input_value: Any=None, output_value: Any=None, workspace_before: str | None=None, workspace_after: str | None=None, lease_id: str | None=None, error: str='')`
+- `new(*, session_id: str, action_id: str, tool: str, capability: str, status: str, issued_at: int | None=None, completed_at: int | None=None, input_value: Any=None, output_value: Any=None, workspace_before: str | None=None, workspace_after: str | None=None, lease_id: str | None=None, error: str='', artifact_manifest: ArtifactManifest | Mapping[str, Any] | None=None)`
 #### `sign_receipt(receipt: ActionReceipt | Mapping[str, Any], secret: bytes)`
 
 Sign an existing receipt after validating its canonical shape.
@@ -891,6 +917,8 @@ What a handler returns. ``is_error`` is the only failure signal the loop reads.
 
 - `error(message: str, **data: Any)`
 - `ok(content: Any='', **data: Any)`
+- `artifact_manifest()`
+  - Validate the optional versioned artifact manifest in ``data``.
 - `text()`
 - `as_block(tool_use_id: str, *, max_chars: int=MAX_TOOL_RESULT_CHARS)`
 #### `ToolSpec`

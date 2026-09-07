@@ -1,5 +1,21 @@
 # Northstar Agent OS — initial public component
 
+## Unreleased (twenty-first batch) — versioned artifact manifests (T14)
+
+- Added `northstar.artifact-manifest.v1`, a bounded canonical manifest for
+  tool-reported file, directory, URI, and opaque artifact references. Relative
+  workspace locators are normalized and digests/media metadata are validated;
+  duplicate, oversized, malformed, or path-escaping entries fail closed.
+- `ToolResult` can carry an `artifact_manifest`; the runtime validates it and
+  includes it in signed `ActionReceipt` objects and contract postconditions.
+  Invalid manifests become failed tool results rather than silently entering the
+  audit trail. The manifest remains an observation, not host attestation or a
+  permission grant.
+- Added artifact contract and signed runtime integration tests, API coverage,
+  and documentation. Runtime now has 578 tests and the repository has 887 tests
+  (4 optional OTel skips); this batch remains unreleased with no tag, GitHub
+  Release, or PyPI/npm publication.
+
 ## Unreleased (twentieth batch) — declared runtime mutation impact sets (T13)
 
 - `ToolSpec` now accepts bounded `affected_input_keys` declarations for custom
