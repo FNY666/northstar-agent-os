@@ -1,5 +1,27 @@
 # Northstar Agent OS — initial public component
 
+## Unreleased (fourth batch) — minimal MCP stdio client
+
+- **MCP stdio client** (`northstar-agent-runtime`, experimental). `--mcp-server
+  NAME=COMMAND...` (repeatable) connects one Model Context Protocol server as a
+  child process speaking JSON-RPC 2.0 over stdio; `--mcp-timeout-ms` bounds each
+  request. The handshake (`initialize` → `notifications/initialized` →
+  `tools/list`) runs under the deadline, and a server that stops answering is
+  TERM→KILLed as a process group (client-side line/call caps bound output).
+- **Governed by default:** every remote tool registers as
+  `mcp__<server>__<tool>` with `kind="other"`/mutating-by-default, so under the
+  `default` permission mode it is denied until `--allow-tool` names it; policy
+  files may deny `mcp__*` names ahead of connection (forward-looking, like
+  `CodexReadOnly`); all calls still cross the gate and fire hooks. MCP is a
+  tool transport, never a policy bypass.
+- **Fail-closed CLI:** an unreachable server, a bad `NAME=`, a server that
+  exceeds the tool/schema caps, or `--mcp-server` combined with `--agent` (an
+  agent run's tool subset is fixed) are configuration errors (exit 64).
+  `--dry-run` and `doctor` list configured servers without spawning them.
+- Verified offline against `tests/fixtures/mcp_echo_server.py` (pure stdlib),
+  including timeout, error-result, and process-group cleanup paths. Runtime
+  tests 470 → 488.
+
 ## Unreleased (third batch) — repository agents and skills
 
 - **Repository-defined subagents (`.northstar/agents/*.md`)**. A markdown file

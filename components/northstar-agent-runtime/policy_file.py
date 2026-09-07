@@ -177,7 +177,10 @@ def load_policy_file(
     if not isinstance(deny, list) or not all(isinstance(name, str) for name in deny):
         fail("deny_tools must be an array of tool names")
     for name in deny:
-        if known_tools_set and name not in known_tools_set:
+        # mcp__-prefixed names are forward-looking (like CodexReadOnly): MCP
+        # servers connect after policy validation, so their tool names cannot be
+        # known here. A deny of a tool a server never exposes is a harmless no-op.
+        if known_tools_set and name not in known_tools_set and not name.startswith("mcp__"):
             known = ", ".join(sorted(known_tools_set))
             fail(f"deny_tools lists unknown tool {name!r} - known tools: {known}")
 

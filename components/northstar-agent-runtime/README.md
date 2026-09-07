@@ -122,6 +122,35 @@ python3 -m cli run --sidecar-socket /var/run/northstar-codex/sidecar.sock \
   --probe-sidecar            # one health-check prompt, then exit
 ```
 
+## MCP servers (experimental)
+
+A minimal Model Context Protocol **stdio client** connects external tool
+servers without adding a dependency or a policy bypass:
+
+```sh
+python3 -m cli run --workspace . --prompt "summarise the files" \
+  --mcp-server "filesystem=python3 /opt/mcp/filesystem_server.py" \
+  --allow-tool mcp__filesystem__list_directory
+```
+
+- Each server is a child process speaking JSON-RPC 2.0 over stdio; the
+  handshake (`initialize` → `notifications/initialized` → `tools/list`) runs
+  under a per-request deadline (`--mcp-timeout-ms`, default 15 s) and a server
+  that stops answering is TERM→KILLed as a process group.
+- Every remote tool appears as `mcp__<server>__<tool>` and is **mutating by
+  default**: under the runtime's `default` permission mode it is denied until an
+  operator names it with `--allow-tool` (or a policy file denies it, which
+  stays terminal). MCP is a tool *transport*; permission decisions remain in
+  the three-layer gate and every call still fires the hooks.
+- Output is bounded client-side (per-line and per-call caps); image/resource
+  content blocks are replaced with a placeholder rather than rendered.
+- `run --dry-run` and `doctor` list the configured servers without spawning
+  them. Combining `--mcp-server` with `--agent` is a configuration error: an
+  agent-definition run fixes its tool subset by definition, and silently adding
+  MCP tools would widen declared policy.
+- Limits: no sampling/roots/prompts, no reconnection, and only one protocol
+  dialect (`2024-11-05`) is negotiated.
+
 ## Repository policy and project context
 
 A workspace can ship two files that every run inside it honors, and both can
@@ -330,6 +359,7 @@ size (`result_chars`), so truncation is visible instead of inferred.
 | `agent_files.py`    | `.northstar/agents/*.md` -> governed `AgentDefinition` compilation   |
 | `skills.py`         | `.northstar/skills/*/SKILL.md` discovery + progressive-disclosure listing |
 | `frontmatter.py`    | strict minimal frontmatter reader shared by agents and skills        |
+| `mcp_client.py`     | minimal MCP stdio client: handshake, tool listing, bounded calls, process-group cleanup |
 | `_version.py`       | single source of truth for the component version                     |
 
 ## Exit codes
@@ -373,8 +403,10 @@ caught by the unit-level compaction tests rather than the loop-level one.
 - **The live Anthropic API is unverified here.** No credentials exist in the
   development sandbox, so request building and response normalisation are tested
   against an injected fake client, not against the network.
-- **MCP is not implemented.** Tools are in-process; there is no MCP client and no
-  server bridge.
+- **MCP is a minimal stdio client.** Only tool discovery and calls are
+  implemented (protocol `2024-11-05`), verified against an offline fixture
+  server; no sampling/roots/prompts, no reconnect, and no vendor server has
+  been exercised here.
 - **Process-group `TERM`→`KILL` cleanup is not verified on real Linux here.** That
   behaviour belongs to the sidecar; the runtime only bounds its own socket read.
 - Session transcripts are a local audit trail, not a compliance store: there is no
