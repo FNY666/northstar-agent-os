@@ -51,6 +51,7 @@ py-modules = [
     "frontmatter",
     "hooks",
     "loop",
+    "mcp_client",
     "permissions",
     "policy_file",
     "sessions",

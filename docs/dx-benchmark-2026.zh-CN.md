@@ -316,3 +316,13 @@ Northstar 是"运行时组件集合"，不是一个终端产品。因此对标�
 - 可见性：`doctor` 与 `--dry-run` 增加 `workspace_agents=` / `skills=` 行；demo workspace 附带 1 个 repository agent + 1 个 skill。
 
 测试规模：runtime **470 项全绿**（+24，frontmatter/skills/agent_files/CLI 集成，含 4 项 SDK 跳过）。
+
+### 2026-09-07（同批追加）— P2-4 完成（最小 MCP stdio 客户端）
+
+- `--mcp-server NAME=COMMAND...`（可重复）连接 MCP stdio 服务器：子进程 JSON-RPC 2.0；握手（initialize → initialized → tools/list）带每请求截止（`--mcp-timeout-ms` 默认 15s）；超时/停止应答 → 进程组 TERM→KILL；客户端行/调用字节上限兜底。
+- 治理：远端工具注册为 `mcp__<server>__<tool>`、`kind="other"` 默认可变更 → `default` 权限模式下未 `--allow-tool` 即拒绝；策略文件可前瞻 deny `mcp__*` 名（同 CodexReadOnly）；全部调用仍过权限门与 hooks——MCP 只是工具传输，不是策略后门。
+- Fail-closed：不可达服务器/坏 NAME=/超量工具或 schema/与 `--agent` 组合（agent 运行工具子集固定）= 配置错误 64；`--dry-run` 与 `doctor` 只列出服务器不拉起进程。
+- 离线验证：`tests/fixtures/mcp_echo_server.py`（纯 stdlib fixture：echo/fail/silent/slow 模式）覆盖握手、调用、超时、错误结果、进程组清理。
+- 局限（README 同步改写原"MCP 未实现"声明）：仅工具发现与调用、协议 2024-11-05、无 sampling/roots/reconnect、未接真实厂商服务器。
+
+测试规模：runtime **488 项全绿**（+18，含 4 项 SDK 跳过）。

@@ -125,6 +125,10 @@ def _add_run_arguments(parser: argparse.ArgumentParser) -> None:
     context_group.add_argument("--context-file", default="", metavar="PATH", help="inject this project-instructions file into the system prompt (must live inside the workspace)")
     context_group.add_argument("--no-project-context", action="store_true", help="do not auto-inject AGENTS.md (or the policy file's project_context)")
 
+    mcp = parser.add_argument_group("mcp servers (experimental)")
+    mcp.add_argument("--mcp-server", dest="mcp_servers", action="append", default=[], metavar="NAME=COMMAND...", help="connect one MCP stdio server; its tools appear as mcp__NAME__tool and are mutating-by-default (denied until --allow-tool names them). Repeatable.")
+    mcp.add_argument("--mcp-timeout-ms", type=int, default=15_000, help="per-request deadline for the MCP handshake and tool calls")
+
     execution = parser.add_argument_group("execution delegation")
     execution.add_argument("--sidecar-socket", default="", help="Unix socket of northstar-codex-sidecar; enables the CodexReadOnly tool")
     execution.add_argument("--sidecar-timeout-ms", type=int, default=30_000, help="sidecar execution deadline")
@@ -200,6 +204,7 @@ def _print_dry_run(
     context_note: str = "off",
     workspace_agents_note: str = "none",
     skills_note: str = "none",
+    mcp_note: str = "off",
 ) -> int:
     """Print what a run would do and exit, without constructing a provider.
 
@@ -230,6 +235,7 @@ def _print_dry_run(
     print(f"project_context={context_note}")
     print(f"workspace_agents={workspace_agents_note}")
     print(f"skills={skills_note}")
+    print(f"mcp_servers={mcp_note}" + (" (not connected in dry-run)" if mcp_note != "off" else ""))
     print(f"pricing: ${pricing.input_per_mtok}/MTok in, ${pricing.output_per_mtok}/MTok out "
           f"(cache read x0.1, cache write x1.25)"
           + (" - estimated" if estimated else ""))
@@ -285,6 +291,42 @@ def main(argv: Sequence[str] | None = None) -> int:
     except OSError as error:  # pragma: no cover - host-level failure
         print(f"cannot run: {error}", file=sys.stderr)
         return USAGE_ERROR
+
+
+def _parse_mcp_servers(args: argparse.Namespace) -> list[tuple[str, list[str]]]:
+    """Parse --mcp-server flags (NAME=COMMAND...) without touching the network."""
+    from mcp_client import parse_mcp_flag
+
+    return [parse_mcp_flag(value) for value in getattr(args, "mcp_servers", []) or []]
+
+
+def _connect_mcp_clients(
+    servers: Sequence[tuple[str, list[str]]], timeout_ms: int, registry: Any
+) -> list[Any]:
+    """Connect each MCP server and register its tools (mcp__<server>__<tool>).
+
+    Every tool is mutating-by-default and needs_workspace=False, so the runtime's
+    permission gate denies it under 'default' until --allow-tool names it. On any
+    failure the servers opened so far are closed before the error propagates.
+    """
+    from mcp_client import McpStdioClient, mcp_tool_specs
+
+    clients: list[Any] = []
+    try:
+        for name, command in servers:
+            client = McpStdioClient(name, command, timeout_ms=timeout_ms)
+            client.connect()
+            try:
+                for spec in mcp_tool_specs(client):
+                    registry.register(spec, replace_existing=False)
+            except ValueError as error:
+                raise ValueError(f"mcp server {name!r}: cannot register tools: {error}") from error
+            clients.append(client)
+    except ValueError as error:
+        for client in clients:
+            client.close()
+        raise ValueError(f"mcp: {error}") from error
+    return clients
 
 
 def _run(args: argparse.Namespace) -> int:
@@ -367,6 +409,18 @@ def _run(args: argparse.Namespace) -> int:
         # the host's and policy file's deny lists still apply on top.
         registry = registry.subset(definition.tools)
         allowed = tuple(name for name in allowed if name in registry.names())
+
+    if args.mcp_servers and definition is not None:
+        # An agent-definition run fixes its tool subset by definition; silently
+        # adding MCP tools to that subset would widen the declared policy.
+        raise ValueError(
+            "--mcp-server cannot be combined with an agent-definition run (its tool "
+            "subset is fixed by the agent's definition); run without --agent to expose "
+            "MCP tools on the main loop"
+        )
+    mcp_servers: list[tuple[str, list[str]]] = []
+    if args.mcp_servers:
+        mcp_servers = _parse_mcp_servers(args)
 
     def tighten(cli_value: int | None, file_value: int | None) -> int | None:
         """Policy-file ceilings may only lower; when both are set, the lower wins."""
@@ -468,6 +522,10 @@ def _run(args: argparse.Namespace) -> int:
         context_note = "off (no AGENTS.md in the workspace)"
     workspace_agents_note = ",".join(agent.name for agent in workspace_agents) or "none"
     skills_note = (f"{len(skills)} package(s): " + ", ".join(skill.name for skill in skills)) if skills else "none"
+    if mcp_servers:
+        mcp_note = ", ".join(f"{name}={' '.join(command)}" for name, command in mcp_servers)
+    else:
+        mcp_note = "off"
 
     provider = _build_provider(args)
     runtime = AgentRuntime(provider=provider, config=config, tools=registry, sessions=store, agents=agents)
@@ -476,8 +534,9 @@ def _run(args: argparse.Namespace) -> int:
         print(json.dumps(runtime.pricing(), indent=2, sort_keys=True))
         return 0
     if args.dry_run:
-        # Never constructs the provider: configuration is validated above, so a
-        # healthy configuration prints a plan and exits 0 before any request.
+        # Never constructs the provider and never connects MCP servers:
+        # configuration is validated above, so a healthy configuration prints a
+        # plan and exits 0 before any request or child process.
         return _print_dry_run(
             args,
             runtime,
@@ -485,6 +544,7 @@ def _run(args: argparse.Namespace) -> int:
             context_note=context_note,
             workspace_agents_note=workspace_agents_note,
             skills_note=skills_note,
+            mcp_note=mcp_note,
         )
     if args.probe_sidecar:
         if args.provider == "anthropic":
@@ -499,38 +559,52 @@ def _run(args: argparse.Namespace) -> int:
         print(json.dumps(probe.as_dict(), indent=2, sort_keys=True))
         return 0 if probe.ok else 1
 
-    resume = store.transcript(args.resume) if args.resume else None
-    exit_code = 0
-    result = None
-    for event in runtime.run(prompt, resume=resume):
-        if args.json:
-            print(json.dumps(_event_to_json(event), ensure_ascii=False, sort_keys=True))
-        else:
-            _print_event(event, quiet=args.quiet)
-        if isinstance(event, ResultMessage):
-            result = event
-            exit_code = EXIT_CODES.get(event.subtype, 1)
-    if args.trace:
-        print(runtime.tracer.tree())
-    # --quiet suppresses the narration, not the result: a script wrapping the CLI
-    # still gets exactly one line to parse, including the session id.
-    if result is not None and not args.json:
-        report = runtime.last_report
-        tool_calls = len(report.tool_calls) if report is not None else 0
-        print(
-            f"\n[{result.subtype}] turns={result.num_turns} tool_calls={tool_calls} "
-            f"cost=${result.total_cost_usd:.6f}"
-            + (" (pricing estimated)" if result.pricing_estimated else "")
-            + f" session={result.session_id}"
-        )
-        # A run that ended in error must say why; the summary line alone is a dead
-        # end for whoever is reading a CI log.
-        for message in result.errors:
-            print(f"  ! {message}", file=sys.stderr)
-        for denial in result.permission_denials:
-            name = denial.get("tool", "?") if isinstance(denial, dict) else getattr(denial, "tool", "?")
-            print(f"  ! refused: {name}", file=sys.stderr)
-    return exit_code
+    # Connect MCP servers only now (never for --dry-run/--show-pricing/--probe):
+    # each remote tool lands in the run's registry as a mutating-by-default
+    # mcp__<server>__<tool> spec and still crosses the permission gate and hooks.
+    mcp_clients: list[Any] = []
+    if mcp_servers:
+        try:
+            mcp_clients = _connect_mcp_clients(mcp_servers, args.mcp_timeout_ms, registry)
+        except ValueError as error:
+            print(f"configuration error: {error}", file=sys.stderr)
+            return USAGE_ERROR
+    try:
+        resume = store.transcript(args.resume) if args.resume else None
+        exit_code = 0
+        result = None
+        for event in runtime.run(prompt, resume=resume):
+            if args.json:
+                print(json.dumps(_event_to_json(event), ensure_ascii=False, sort_keys=True))
+            else:
+                _print_event(event, quiet=args.quiet)
+            if isinstance(event, ResultMessage):
+                result = event
+                exit_code = EXIT_CODES.get(event.subtype, 1)
+        if args.trace:
+            print(runtime.tracer.tree())
+        # --quiet suppresses the narration, not the result: a script wrapping the
+        # CLI still gets exactly one line to parse, including the session id.
+        if result is not None and not args.json:
+            report = runtime.last_report
+            tool_calls = len(report.tool_calls) if report is not None else 0
+            print(
+                f"\n[{result.subtype}] turns={result.num_turns} tool_calls={tool_calls} "
+                f"cost=${result.total_cost_usd:.6f}"
+                + (" (pricing estimated)" if result.pricing_estimated else "")
+                + f" session={result.session_id}"
+            )
+            # A run that ended in error must say why; the summary line alone is a
+            # dead end for whoever is reading a CI log.
+            for message in result.errors:
+                print(f"  ! {message}", file=sys.stderr)
+            for denial in result.permission_denials:
+                name = denial.get("tool", "?") if isinstance(denial, dict) else getattr(denial, "tool", "?")
+                print(f"  ! refused: {name}", file=sys.stderr)
+        return exit_code
+    finally:
+        for client in mcp_clients:
+            client.close()
 
 
 def _event_to_json(event: Any) -> dict[str, Any]:
