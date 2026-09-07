@@ -37,19 +37,12 @@ from pathlib import Path
 from typing import Any, Sequence
 
 from _version import __version__
+from events import EXIT_CODES, event_to_dict
 from doctor import add_arguments as add_doctor_arguments
 from doctor import run_doctor
 from providers.base import ResultMessage
 from session_view import add_arguments as add_session_arguments
 
-EXIT_CODES = {
-    "success": 0,
-    "error_during_execution": 1,
-    "error_max_turns": 2,
-    "error_max_tool_calls": 3,
-    "error_max_budget_usd": 4,
-    "error_permission_denied": 5,
-}
 USAGE_ERROR = 64
 
 #: Tools that change state; ``--read-only`` refuses them at the gate.
@@ -575,7 +568,7 @@ def _run(args: argparse.Namespace) -> int:
         result = None
         for event in runtime.run(prompt, resume=resume):
             if args.json:
-                print(json.dumps(_event_to_json(event), ensure_ascii=False, sort_keys=True))
+                print(json.dumps(event_to_dict(event), ensure_ascii=False, sort_keys=True))
             else:
                 _print_event(event, quiet=args.quiet)
             if isinstance(event, ResultMessage):
@@ -605,37 +598,6 @@ def _run(args: argparse.Namespace) -> int:
     finally:
         for client in mcp_clients:
             client.close()
-
-
-def _event_to_json(event: Any) -> dict[str, Any]:
-    kind = type(event).__name__
-    if kind == "ResultMessage":
-        return {
-            "type": "result",
-            "subtype": event.subtype,
-            "is_error": event.is_error,
-            "num_turns": event.num_turns,
-            "duration_ms": event.duration_ms,
-            "total_cost_usd": event.total_cost_usd,
-            "total_usage": event.total_usage.as_dict(),
-            "session_id": event.session_id,
-            "pricing_estimated": event.pricing_estimated,
-            "errors": list(event.errors),
-            "permission_denials": list(event.permission_denials),
-        }
-    if kind == "SystemMessage":
-        return {"type": "system", "subtype": event.subtype, "content": event.content, "data": event.data}
-    if kind == "AssistantMessage":
-        return {
-            "type": "assistant",
-            "content": [block.to_api() for block in event.content],
-            "model": event.model,
-            "usage": event.usage.as_dict(),
-            "stop_reason": event.stop_reason,
-        }
-    if kind == "UserMessage":
-        return {"type": "user", "content": [block.to_api() for block in event.content], "is_meta": event.is_meta}
-    return {"type": kind.lower(), "repr": str(event)[:400]}
 
 
 def _print_event(event: Any, *, quiet: bool = False) -> None:

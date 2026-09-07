@@ -385,7 +385,7 @@ Northstar 是"运行时组件集合"，不是一个终端产品。因此对标�
 |---|:-:|:-:|---|
 | 安装与上手 | 2 | **3** | 可 pip 安装 + demo/doctor 一条命令；差官方 index 发布与"账号即用" |
 | CLI / 终端体验 | 3 | **4** | headless、dry-run、语义退出码 0–5/64、json 事件流一流；无交互 TUI/rewind/tasks |
-| 程序化 API / 包管理 | 1 | **2** | `AgentRuntime`+events+resume+scripted provider 已可编程，但无 SDK 化公共 API 面、无 TS、无 exec/app-server 协议 |
+| 程序化 API / 包管理 | 1 | **3** | `sdk.run()/stream_run()` + 事件 dict 词表 + resume + 示例；无 TS 面、无 exec/app-server 协议 |
 | 配置与项目约定 | 1 | **4** | AGENTS.md/config/agents/skills/context-file 齐全；差策略 schema 版本化与托管下发 |
 | 扩展生态（MCP/Skills/Plugins） | 1 | **3** | 三类都占位且默认 deny/只读（安全侧反而领先）；差 plugins/市场、MCP HTTP+auth、技能脚本执行 |
 | 会话 / 调试 / 可观测 | 3 | **4** | 读回 + 审计导出 + resume 齐全；差 rewind/checkpoint 与交互式回放 |
@@ -393,7 +393,7 @@ Northstar 是"运行时组件集合"，不是一个终端产品。因此对标�
 | 文档与教学 | 3 | **4** | 四层 + 生成 API + examples 索引 + 11 语言；差课程/playground 型教学 |
 | 版本化与发布 | 2 | **4** | v0.1.0 对齐发布 + Release CI 自动出 wheel；未上 index（差最后一格） |
 | 团队 / CI / 协作面 | 2 | **3** | CI 模板 + headless + 审计 feed 天然 CI 友好；差官方 Action/review 后台 |
-| **合计（/50）** | **23** | **36** | 头部（Claude Code/Codex）2026-09 口径仍 ≥46 且持续外扩 |
+| **合计（/50）** | **23** | **37** | 头部（Claude Code/Codex）2026-09 口径仍 ≥46 且持续外扩 |
 
 ### 10.4 新增横向战场六维（2026 年新出现的竞争面，1–5）
 
@@ -411,7 +411,7 @@ Northstar 是"运行时组件集合"，不是一个终端产品。因此对标�
 
 | # | 差距 | 对齐谁 | 内容 | 批次 |
 |---|---|---|---|---|
-| T1 | SDK/可嵌入面 | Codex exec/SDK、Claude Agent SDK | 把 `AgentRuntime.run()/events/resume/hooks` 固化为稳定公共 API + 官方示例 + 文档（py 先行） | 1–2 |
+| T1 | SDK/可嵌入面 | Codex exec/SDK、Claude Agent SDK | ✅ 已完成（2026-09-07）：`sdk.py`（RunOptions/run/stream_run/RunReport）+ `events.py` 公共事件词表 + examples/sdk 示例；TS 面与稳定 API 承诺待续 | — |
 | T2 | 发布工程 | `@latest`/Release 渠道 | ✅ 已完成（2026-09-07）：tag v0.1.0 + 五组件 wheel + Release CI 自动发布；余：pip index 上架 | — |
 | T3 | 交互最小集 | CC `/rewind`+tasks、Gemini checkpointing | checkpoint/restore 子命令 + `sessions` 可视化回放 | 1–2 |
 | T4 | 生态纵深 | CC plugins/marketplace、MCP login | `.mcp.json`/HTTP+auth、skills `check`（供应链校验器，直接回应 99%/36% 审计）、技能脚本沙箱或写明取舍 | 1–2 |
@@ -446,3 +446,13 @@ Northstar 是"运行时组件集合"，不是一个终端产品。因此对标�
 - 发布物：tag `v0.1.0` + GitHub Release（含五组件 wheel 资产）。
 
 测试规模：全仓 **739 项全绿**（736 + test_release 3）。
+
+### 2026-09-07（同批追加）— T1 完成（SDK/可嵌入面：sdk.py + events.py + examples/sdk）
+
+- **`events.py` 公共事件词表**：`event_to_dict`（`--json` 同构的事件 dict 形状）+ 结果 `EXIT_CODES` 从 `cli.py` 提升为单源模块，CLI 与 SDK 共用（cli 改为 import，输出不变）。
+- **`sdk.py` Python API**：`RunOptions`（权限模式/allow-deny/read_only/上限/halt_on_denial/session_dir/subagent/自定义 provider）+ `run(options)->RunReport`（subtype、exit_code、session_id、turns、cost、denials、完整事件表）+ `stream_run`（逐事件 dict，尾部 result）+ `resume`（同 CLI 的续写同一 session 语义）；workspace agents 文件注册与 CLI 对齐；`read_only` 按工具 kind 推导；scripted 默认 → 完全离线确定性。
+- **示例** `examples/sdk/`：一次运行展示 Read 放行 + 未授权 Write 在权限门被拒（`python3 examples/sdk/run_sdk_demo.py`），examples 索引与"从哪开始"更新。
+- 深配置（policy 文件/AGENTS.md/skills/MCP）刻意留在 CLI——SDK 是稳定嵌入契约（README 新增 "Embedding in Python (sdk)" 小节说明边界）。
+- 接线：py-modules + events/sdk、CI compile 行、docbuild MANIFEST +2 → API 页 49 模块、runtime README 布局表。
+
+测试规模：runtime **515 项全绿**（+14：sdk 14 项），全仓 739 → 753。

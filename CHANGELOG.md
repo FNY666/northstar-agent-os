@@ -1,5 +1,24 @@
 # Northstar Agent OS — initial public component
 
+## Unreleased (seventh batch) — Python SDK embedding surface (T1)
+
+- **Public event vocabulary** (`events.py`): `event_to_dict` shapes + result
+  `EXIT_CODES` moved out of `cli.py` into one module shared by `--json`, the
+  new SDK and anyone embedding the loop (CLI imports it; same output).
+- **`sdk.py` — Python API**: `RunOptions` (governance knobs: permission mode,
+  allow/deny, read-only, ceilings, halt-on-denial, session dir, subagents,
+  provider), `run(options)` → `RunReport` (subtype, exit code, session id,
+  turns, cost, denials, full event list), `stream_run(options)` → event dicts
+  as they happen, and session `resume` with the CLI's same-session-id
+  semantics. Workspace agent files register like the CLI does; `read_only`
+  derives from tool kinds. Scripted provider default keeps it fully offline.
+- **Example**: `examples/sdk/` — one run that gets a `Read` through and an
+  unallowed `Write` refused at the gate (`python3 examples/sdk/run_sdk_demo.py`).
+- Runtime README gains an "Embedding in Python (sdk)" section; layout table,
+  `py-modules`, CI compile line and the docstring API manifest (43 → 49
+  modules) all updated. Runtime tests 501 → 515.
+
+
 ## 0.1.0 — 2026-09-07
 
 First tagged release of the five pip-installable components
@@ -7,10 +26,15 @@ First tagged release of the five pip-installable components
 `northstar-agent-interop`, `northstar-agent-runtime`), one aligned version,
 wheels published as GitHub Release assets. It bundles the groundwork below:
 packaging and CLI engineering (P0/P1), AGENTS.md + policy config + skills +
-subagents + MCP client (P2), four-layer documentation (P2-6), and the
-canonical NDJSON audit feed export (P3-1a). Full detail in the batch notes
-that follow; the roadmap and scoring live in
-`docs/dx-benchmark-2026.zh-CN.md`.
+subagents + MCP client (P2), four-layer documentation (P2-6), the canonical
+NDJSON audit feed export (P3-1a), release engineering (T2) and the Python SDK
+embedding surface (T1). Full detail in the batch notes that follow; the
+roadmap and scoring live in `docs/dx-benchmark-2026.zh-CN.md`.
+
+> The "Unreleased (first … sixth batch)" sections below are the historical
+> batch notes that shipped inside **0.1.0** (P0/P1 through P3-1a + release
+> engineering); current development is described in the sections above this
+> release entry.
 
 ## Unreleased (sixth batch) — audit export: JSON → NDJSON → SIEM (P3-1a)
 
@@ -255,3 +279,4 @@ production deployment integration remain host-level responsibilities or future
 work.
 
 See [README.md](README.md) for installation and security boundaries.
+

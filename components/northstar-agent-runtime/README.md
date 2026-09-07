@@ -130,6 +130,31 @@ python3 -m cli run --sidecar-socket /var/run/northstar-codex/sidecar.sock \
   --probe-sidecar            # one health-check prompt, then exit
 ```
 
+## Embedding in Python (sdk)
+
+The same governed loop is importable — no subprocess, no CLI string, no API
+key needed for the offline provider:
+
+```python
+import sdk
+
+report = sdk.run(sdk.RunOptions(
+    prompt="Summarise notes.txt", workspace="examples/demo/workspace"))
+print(report.subtype, report.exit_code, report.session_id, report.total_cost_usd)
+```
+
+- `sdk.run(options)` → `RunReport` (subtype, `exit_code`, session id, turns,
+  cost, denials, `events` — the same JSON-ready dicts `--json` emits).
+- `sdk.stream_run(options)` yields each event dict as it happens; the last is
+  the `result`.
+- `RunOptions` carries the governance knobs (`permission_mode`,
+  `allowed_tools`/`disallowed_tools`, `read_only`, ceilings, `halt_on_denial`,
+  `session_dir`, subagent depth) plus provider/model/session resume.
+- Policy files, AGENTS.md/context files, skills and MCP servers stay on the
+  CLI by design — the SDK is the stable embedding contract
+  ([example](../../examples/sdk/README.md), full API in the
+  [reference page](../../docs/api/northstar-agent-runtime.md)).
+
 ## MCP servers (experimental)
 
 A minimal Model Context Protocol **stdio client** connects external tool
@@ -373,6 +398,8 @@ size (`result_chars`), so truncation is visible instead of inferred.
 | `frontmatter.py`    | strict minimal frontmatter reader shared by agents and skills        |
 | `mcp_client.py`     | minimal MCP stdio client: handshake, tool listing, bounded calls, process-group cleanup |
 | `audit_export.py`   | transcript replay as the canonical NDJSON audit feed (`audit.ndjson/1`)      |
+| `events.py`         | public event vocabulary: `event_to_dict` shapes + result `EXIT_CODES` |
+| `sdk.py`            | Python API: `RunOptions` / `run` / `stream_run` / `RunReport`       |
 | `_version.py`       | single source of truth for the component version                     |
 
 ## Exit codes
