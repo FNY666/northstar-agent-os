@@ -147,3 +147,28 @@ def verify_lineage(graph: LineageGraph, *, route_record: dict[str, Any], handoff
     if not set(terminal.capabilities).issubset(set(handoff.get("capabilities", []))):
         reasons.append("terminal capabilities exceed handoff")
     return VerificationResult("unknown" if reasons else "verified", tuple(reasons))
+
+
+def from_migrated_path(cls, path: Path | str, *, target_schema: str = INTEGRITY_SCHEMA,
+                       target_path: Path | str | None = None):
+    """Read old lineage history through migration without overwriting source."""
+    source = Path(path)
+    destination = Path(target_path) if target_path is not None else None
+    graph = cls(destination)
+    if not source.exists():
+        graph.path = destination
+        return graph
+    with source.open('rb') as handle:
+        for raw in handle:
+            if not raw.endswith(b'\n'):
+                continue
+            try:
+                value = json.loads(raw.decode('utf-8'))
+                if value.get('schema_version') != target_schema:
+                    value, _ = cls.migrations().migrate(value, target_version=target_schema)
+                graph.append(RouteLineageEvent.from_dict(value))
+            except (UnicodeDecodeError, json.JSONDecodeError, ValueError) as exc:
+                raise LineageError('lineage migration/recovery failed') from exc
+    return graph
+
+LineageGraph.from_migrated_path = classmethod(from_migrated_path)
