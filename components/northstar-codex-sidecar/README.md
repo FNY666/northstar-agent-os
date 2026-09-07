@@ -2,6 +2,13 @@
 
 A restricted local adapter for running Codex as a supervised worker in an OpenBot-compatible runtime.
 
+## Concepts, guides and API reference
+
+- Concepts: [handoff and contracts](../../docs/concepts/handoff-and-contracts.md) ·
+  [governance and the permission gate](../../docs/concepts/governance.md)
+- Guides: [packaging and CI](../../docs/guides/packaging-and-ci.md)
+- API reference: [generated from docstrings](../../docs/api/northstar-codex-sidecar.md)
+
 ## Protocol
 
 One JSON object is accepted per Unix-socket connection:

@@ -5,6 +5,12 @@ multiple Agent engines such as coding agents, browser/workflow agents, and
 future OpenBot-compatible adapters. It does not call or impersonate any
 vendor product.
 
+## Concepts, guides and API reference
+
+- Concepts: [handoff and contracts](../../docs/concepts/handoff-and-contracts.md)
+- Guides: [packaging and CI](../../docs/guides/packaging-and-ci.md)
+- API reference: [generated from docstrings](../../docs/api/northstar-agent-interop.md)
+
 ## Install (pip)
 
 ```sh

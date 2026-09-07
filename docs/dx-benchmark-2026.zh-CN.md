@@ -326,3 +326,15 @@ Northstar 是"运行时组件集合"，不是一个终端产品。因此对标�
 - 局限（README 同步改写原"MCP 未实现"声明）：仅工具发现与调用、协议 2024-11-05、无 sampling/roots/reconnect、未接真实厂商服务器。
 
 测试规模：runtime **488 项全绿**（+18，含 4 项 SDK 跳过）。
+
+### 2026-09-07（同批追加）— P2-6 完成（文档四层化起步）
+
+- **每组件 README 链接目标**：六个组件 README 开头统一新增 `## Concepts, guides and API reference` 小节，指向概念页、指南页与各自的 API 页——快速开始（README）→ 概念 → 指南 → API 参考，不再平铺单文件。
+- **概念页**（`docs/concepts/`）：`governance.md`（权限门是护城河：四层不变式 + MCP 等传输一律穿门）、`audit-trail.md`（会话 JSONL/事件存储与校验/契约收据三面审计）、`handoff-and-contracts.md`（run contract、host 握手、sidecar 委派、interop 边界四处信任跨越）。
+- **指南页**（`docs/guides/`）：`governed-run-cookbook.md`（dry-run → 收紧 → skills/agents/MCP/审计的端到端 CLI 食谱）、`packaging-and-ci.md`（make test/guard/CI 三 job/doc 工具链与消费者要点）。
+- **API 参考首版 docstring 生成**：`tests/docbuild.py`（纯 stdlib `ast`，不 import 被文档化模块、离线可构建）生成并入库 `docs/api/<component>.md` 六页共 43 模块；`build` 重生成、`verify` 字节级新鲜度 + 全仓 markdown 内链断链检查（零豁免）。
+- **`examples/README.md` 索引页**：覆盖全部示例（demo/ci-readonly-review）并给"从哪开始"决策点；结构测试要求每个含 README 的示例目录都必须出现在索引里。
+- **CI 文档 job = 结构 + 构建 + 链接**（`test.yml`）：结构单测 + 专属 `python3 tests/docbuild.py verify` 步骤，全程零第三方依赖。
+- 生成/校验闭环：README 或 docstring 变更导致 API 页过期 = CI 失败，须 `docbuild.py build` 后提交。
+
+测试规模：全仓 **701 项全绿**（repository documentation 3→8，runtime 488 及其余组件不变）。
