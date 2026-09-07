@@ -5,6 +5,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Iterator, Literal
 from route_replay import MigrationError, MigrationRegistry
+from recovery_cursor import RecoveryCursor, Lease, LeaseManager, RecoveryError
 
 SCHEMA = "northstar.route-lineage.v1"
 INTEGRITY_SCHEMA = "northstar.route-lineage.v2"
@@ -86,6 +87,29 @@ class LineageGraph:
             with self.path.open('ab') as f: f.write(e.canonical()+b'\n'); f.flush(); os.fsync(f.fileno())
         return e
     def read(self)->Iterator[RouteLineageEvent]: return iter(self.events.values())
+    def cursor(self) -> RecoveryCursor:
+        if not self.events:
+            return RecoveryCursor(0, 'sha256:' + '0' * 64, INTEGRITY_SCHEMA, 'sha256:' + '0' * 64)
+        last = self.events[next(reversed(self.events))]
+        if last.schema_version != INTEGRITY_SCHEMA:
+            raise RecoveryError('cursor requires integrity schema')
+        return RecoveryCursor(last.sequence, last.event_digest, last.schema_version,
+                              'sha256:' + hashlib.sha256(b''.join(e.canonical() for e in self.events.values())).hexdigest())
+
+    def append_with_lease(self, event: RouteLineageEvent, cursor: RecoveryCursor,
+                          lease: Lease, *, now: int) -> RecoveryCursor:
+        lease_manager = getattr(self, '_lease_manager', None)
+        if lease_manager is None:
+            lease_manager = self._lease_manager = LeaseManager()
+            lease_manager._lease = lease
+            lease_manager._token = lease.fencing_token
+        lease_manager.validate(lease, now=now)
+        current = self.cursor()
+        if cursor != current:
+            raise RecoveryError('recovery cursor is stale')
+        self.append(event)
+        return self.cursor()
+
     @classmethod
     def from_path(cls,path:Path|str):
         graph=cls(None); path=Path(path)
