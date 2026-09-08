@@ -1150,3 +1150,19 @@ T30 增加的是 consumer negotiation/diagnostics，而不是新的执行权限�
   `make test` 955 项（951 pass、4 项可选 OTel skip）。
 
 T30 仍是 Unreleased；没有创建 tag、GitHub Release，也没有发布到 PyPI/npm。
+
+### 10.35 当前实现复核：context-aware host factory（T31，2026-09-08）
+
+T31 让同一个本地 app-server host 可以按 actor/request 做 host-owned 配置，但不把
+这些配置暴露给 wire client：
+
+- `RunManager` 的 `runtime_factory` 现在支持可选的 `RunContext` 参数，携带
+  `run_id`、`request_id`、`actor_id`、prompt 和创建时间；零参数 factory 保持兼容。
+- host 可以据此选择自己的 workspace、policy、approval lease 或 provider profile；
+  wire 仍只提交 bounded prompt/actor claim，不能传 provider、路径、callable、policy
+  或 serialized action。context 只在 host seam 内流动。
+- 新增 context-aware factory 离线测试；runtime 618 项、全仓 `make test` 956 项
+  （952 pass、4 项可选 OTel skip）。manager 仍为内存态，没有 scheduler、durable
+  reattach、remote worker 或 exactly-once claim。
+
+T31 仍是 Unreleased；没有创建 tag、GitHub Release，也没有发布到 PyPI/npm。

@@ -265,6 +265,11 @@ server = AppServer(
 server.serve_forever()
 ```
 
+A context-aware `runtime_factory(context: RunContext)` may use the host-only
+run/actor/request metadata to choose host-owned workspace, policy or leases; the
+wire client still cannot supply those objects. The legacy zero-argument factory
+shape remains supported.
+
 The host owns `runtime_factory`, provider credentials, workspace, policy and
 session directory. The wire protocol can call `app.describe` and submit a
 bounded prompt through `run.start`, `run.status`, `run.events`, bounded
@@ -630,7 +635,7 @@ cd components/northstar-agent-runtime
 python3 -m unittest discover -s tests -p 'test_*.py' -v
 ```
 
-617 tests, fully offline and deterministic (four optional OpenTelemetry tests
+618 tests, fully offline and deterministic (four optional OpenTelemetry tests
 are skipped when the tracing extra is absent): the scripted provider is the
 only model, and `test_integration_sidecar.py` runs the real sidecar `serve()`
 over a real Unix socket with a 100,000-Chinese-character prompt.

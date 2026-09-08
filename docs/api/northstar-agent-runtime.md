@@ -102,6 +102,10 @@ Host-controlled local app-server for background Northstar runs.
 A protocol, authorization, idempotency, or local app-server failure.
 
 - `as_dict()`
+#### `RunContext`
+
+Host-only context passed to a context-aware runtime factory.
+
 #### `RunManager`
 
 Bounded in-process background run manager.

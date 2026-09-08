@@ -1,5 +1,15 @@
 # Northstar Agent OS — initial public component
 
+## Unreleased (thirty-ninth batch) — context-aware host factory (T31)
+
+- `RunManager` now supports a host-only `RunContext` factory seam containing
+  run/request/actor ids, prompt and creation timestamp. The legacy zero-argument
+  factory remains supported; wire clients still cannot select provider,
+  workspace, policy, lease or callable objects.
+- Added coverage proving actor/request context reaches the host factory without
+  widening the protocol. This enables per-actor host-owned configuration while
+  preserving fail-closed wire scope and the in-memory manager boundary.
+
 ## Unreleased (thirty-eighth batch) — app-server capability discovery (T30)
 
 - Added authenticated `app.describe`, which advertises protocol operations, frame

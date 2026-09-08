@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import hashlib
 import hmac
+import inspect
 import json
 import math
 import os
@@ -66,6 +67,17 @@ class AppServerError(RuntimeError):
         return {"code": self.code, "message": str(self), **self.details}
 
 
+@dataclass(frozen=True)
+class RunContext:
+    """Host-only context passed to a context-aware runtime factory."""
+
+    run_id: str
+    request_id: str
+    actor_id: str
+    prompt: str
+    created_at: float
+
+
 @dataclass
 class _RunRecord:
     run_id: str
@@ -90,18 +102,37 @@ class _RunRecord:
         return self.status in {"success", "failed", "cancelled"}
 
 
+def _factory_accepts_context(factory: Callable[..., Any]) -> bool:
+    """Choose the context-aware seam without invoking the host factory."""
+    try:
+        signature = inspect.signature(factory)
+    except (TypeError, ValueError):
+        return False
+    probe = RunContext(run_id="", request_id="", actor_id="", prompt="", created_at=0.0)
+    try:
+        signature.bind(probe)
+    except TypeError:
+        try:
+            signature.bind()
+        except TypeError as error:
+            raise TypeError("runtime_factory must accept either zero arguments or one RunContext") from error
+        return False
+    return True
+
+
 class RunManager:
     """Bounded in-process background run manager.
 
-    ``runtime_factory`` is a host seam, not a wire-controlled callback. It must
-    return a configured runtime for each run. The manager owns no provider
-    credentials and does not deserialize actions or execution plans from the
-    client.
+    ``runtime_factory`` is a host seam, not a wire-controlled callback. It may
+    accept a host-only :class:`RunContext` (or keep the legacy zero-argument
+    shape) and must return a configured runtime for each run. The manager owns
+    no provider credentials and does not deserialize actions or execution plans
+    from the client.
     """
 
     def __init__(
         self,
-        runtime_factory: Callable[[], Any],
+        runtime_factory: Callable[..., Any],
         *,
         max_active_runs: int = DEFAULT_ACTIVE_RUNS,
         max_event_retention: int = DEFAULT_EVENT_RETENTION,
@@ -114,6 +145,7 @@ class RunManager:
         if isinstance(max_event_retention, bool) or not isinstance(max_event_retention, int) or max_event_retention < 1:
             raise ValueError("max_event_retention must be a positive integer")
         self.runtime_factory = runtime_factory
+        self._factory_accepts_context = _factory_accepts_context(runtime_factory)
         self.max_active_runs = max_active_runs
         self.max_event_retention = max_event_retention
         self.clock = clock or time.time
@@ -297,7 +329,14 @@ class RunManager:
             record.started_at = float(self.clock())
             self._changed.notify_all()
         try:
-            runtime = self.runtime_factory()
+            context = RunContext(
+                run_id=record.run_id,
+                request_id=record.request_id,
+                actor_id=record.actor_id,
+                prompt=record.prompt,
+                created_at=record.created_at,
+            )
+            runtime = self.runtime_factory(context) if self._factory_accepts_context else self.runtime_factory()
             with self._lock:
                 record.runtime = runtime
                 cancel_requested = record.cancel_requested
@@ -860,5 +899,6 @@ __all__ = [
     "MAX_WAIT_MS",
     "MAX_FRAME_BYTES",
     "MAX_PROMPT_CHARS",
+    "RunContext",
     "RunManager",
 ]

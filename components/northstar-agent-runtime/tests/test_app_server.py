@@ -18,6 +18,7 @@ from app_server import (
     AppClient,
     AppServer,
     AppServerError,
+    RunContext,
     RunManager,
     _mac,
 )
@@ -49,6 +50,33 @@ class RunManagerTests(RuntimeTestCase):
             )
 
         return build
+
+    def test_context_aware_factory_receives_host_run_context(self):
+        seen: dict[str, object] = {}
+        workspace = str(self.workspace())
+
+        def factory(context: RunContext):
+            seen.update(
+                run_id=context.run_id,
+                request_id=context.request_id,
+                actor_id=context.actor_id,
+                prompt=context.prompt,
+            )
+            return AgentRuntime(
+                provider=ScriptedProvider([{"text": "context received"}]),
+                config=RuntimeConfig(workspace=workspace),
+            )
+
+        manager = RunManager(factory)
+        started = manager.start(request_id="request-context", actor_id="actor-context", prompt="hello context")
+        final = manager.wait(run_id=started["run_id"], actor_id="actor-context")
+        self.assertEqual(final["status"], "success")
+        self.assertEqual(seen, {
+            "run_id": started["run_id"],
+            "request_id": "request-context",
+            "actor_id": "actor-context",
+            "prompt": "hello context",
+        })
 
     def test_start_is_idempotent_and_events_are_bounded(self):
         workspace = str(self.workspace())
