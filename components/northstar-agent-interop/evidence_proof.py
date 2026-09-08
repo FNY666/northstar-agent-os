@@ -23,3 +23,28 @@ def verify_route_evidence_proof(route_record:Any,lineage:Any,bundle:Any,checkpoi
     if lineage_result.verdict=='failed': return ProofResult('failed',lineage_result.reasons)
     if lineage_result.verdict!='verified': return ProofResult(lineage_result.verdict,lineage_result.reasons)
     return ProofResult('verified',())
+
+
+@dataclass(frozen=True)
+class ProofAttestation:
+    schema_version: str
+    verdict: str
+    route_id: str
+    proof_digest: str
+    lineage_digest: str
+    bundle_root: str
+    checkpoint_root: str
+    def to_dict(self): return self.__dict__.copy()
+
+def _proof_digest(route_record, lineage, bundle, event, proof, handoff):
+    import hashlib, json
+    payload={'route':route_record,'lineage':[x.to_dict() for x in lineage.read()], 'bundle':bundle.to_dict(), 'event':event.to_dict() if hasattr(event,'to_dict') else event, 'proof':proof.__dict__, 'handoff':handoff}
+    return 'sha256:'+hashlib.sha256(json.dumps(payload,sort_keys=True,separators=(',',':'),default=list).encode()).hexdigest()
+
+def make_proof_attestation(route_record,lineage,bundle,checkpoint_chain,event,proof,handoff,*extra):
+    result=verify_route_evidence_proof(route_record,lineage,bundle,checkpoint_chain,event,proof,handoff,*extra)
+    if result.verdict!='verified': raise ProofError('cannot attest unverified evidence')
+    import hashlib
+    lineage_digest='sha256:'+hashlib.sha256(b''.join(x.canonical() for x in lineage.read())).hexdigest()
+    checkpoint_root=list(checkpoint_chain.read())[-1].current_root
+    return ProofAttestation('northstar.proof-attestation.v1','verified',route_record['route_id'],_proof_digest(route_record,lineage,bundle,event,proof,handoff),lineage_digest,bundle.root_digest,checkpoint_root)

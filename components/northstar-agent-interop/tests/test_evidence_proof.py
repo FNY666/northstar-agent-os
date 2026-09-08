@@ -20,4 +20,16 @@ class ProofTests(unittest.TestCase):
     def test_missing_handoff_is_unknown(self):
         data=list(self.setup_data()); data[-1]=None; self.assertEqual(verify_route_evidence_proof(*data).verdict,'unknown')
 
+    def test_verified_result_can_emit_bound_attestation(self):
+        from evidence_proof import make_proof_attestation
+        data=self.setup_data(); attestation=make_proof_attestation(*data)
+        self.assertEqual(attestation.verdict,'verified')
+        self.assertTrue(attestation.proof_digest.startswith('sha256:'))
+        self.assertEqual(attestation.route_id,'r1')
+
+    def test_failed_result_cannot_emit_verified_attestation(self):
+        from evidence_proof import make_proof_attestation, ProofError
+        data=list(self.setup_data()); data[-1]=None
+        with self.assertRaises(ProofError): make_proof_attestation(*data)
+
 if __name__=='__main__': unittest.main()
