@@ -282,6 +282,28 @@ Summarise what the workspace contains: key files, purposes, and conventions.
 surprises: `policy_file=`, `project_context=`, `workspace_agents=`, and
 `skills=` lines show the effective inputs before anything is sent.
 
+## Attribution and the Run Contract bridge
+
+`--run-id` sets one correlation key for the whole run: it appears in the `init`
+event - which the session transcript and the `sessions export` audit feed both
+carry - and as the sidecar `request_id`, so a runtime transcript and a sidecar log
+line can be joined without guessing at timestamps. The policy file's `revision`
+travels with it, and `--dry-run` prints both plus the effective `protected_prefixes`.
+
+`contract_bridge` is the single definition of the runtime-to-sidecar boundary: the
+three wire fields come from the same place the run contract narrows a verified run
+to, and `tests/test_contract_bridge.py` pins runtime, contract adapter, and sidecar
+validator to that one set. When a host injects a Run Binding
+(`NORTHSTAR_RUN_BINDING`, `NORTHSTAR_HOST_KEY`, `NORTHSTAR_RUN_REQUEST`) the client
+re-derives its own request through the contract and **refuses the call** if the two
+disagree or the binding cannot be verified - with no SDK optional-dependency cost
+when they are absent, because the runtime stays importable on a bare interpreter.
+
+The sidecar still authenticates callers through Unix permissions only: it holds no
+host key, so it cannot verify a binding on the wire. Closing that last gap means
+changing the sidecar's request allowlist (the very thing that makes it refuse
+capabilities), which is a protocol decision for maintainers, not a silent edit.
+
 ## Events, not exceptions
 
 A run yields the event vocabulary the surrounding host already knows:
@@ -323,6 +345,38 @@ to stop, feeding its reason back as a new user turn) · `SubagentStart` ·
 - `PreToolUse` runs *before* the permission gate so a hook can rewrite arguments
   that policy then inspects — a rewrite can narrow what is allowed, never bypass
   the gate.
+
+### Hooks a repository may declare
+
+The same events can be wired from `.northstar/config.toml` instead of Python, so a
+policy review in a pull request is the whole change:
+
+```toml
+[[hooks]]
+event = "PreToolUse"
+script = ".northstar/hooks/gate.py"   # workspace-relative; never a shell line
+interpreter = "python3"                # optional; allowlist, no path separators
+tool = "Write"                         # optional matcher: fire for one tool only
+timeout_ms = 2000
+```
+
+The hook receives the event JSON on stdin and may print one verdict JSON on stdout
+(`{"decision": "deny", "reason": "..."}`, coerced by the same rules as a Python
+handler). Exit code 2 denies with stderr as the reason.
+
+What makes this safe enough to enable, and what it deliberately is not:
+
+- **Off by default.** `--enable-workspace-hooks` is required; `doctor` and
+  `--dry-run` both report declared-but-ignored hooks. Cloning a repository must
+  not mean executing it.
+- **Veto-capable events only** (`PreToolUse`, `UserPromptSubmit`, `SessionStart`,
+  `PreCompact`, `SubagentStart`). A repository file may add a veto, never a power:
+  declaring `PostToolUse` is a configuration error, not an ignore.
+- **No shell, no arguments, no environment.** There is no `command` key to inject
+  into; `;`, `|`, `&&` and `$( )` cannot be expressed. The child gets `PATH`/`LANG`
+  only, so model credentials never cross into hook code.
+- **Bounded and reaped.** Output caps, a 100 ms–10 s timeout, and TERM-then-KILL of
+  the whole process group. A hang or a crash is a denial on a veto event.
 
 ## Permissions
 
@@ -389,9 +443,20 @@ A passing verdict is an assertion the runtime can audit, not a vibe.
 
 Every tool path is resolved through `ToolSandbox.resolve`: lexical normalisation,
 then `realpath` of the nearest existing ancestor, then a containment check against
-the workspace root, then (for writes) protection of paths like `.git`. Symlinks are
-followed *before* the check, and a path that does not exist yet is checked through
-its existing parents, so `link/../../etc/passwd` cannot smuggle a write out.
+the workspace root, then (for writes) protection of `.git` and `.northstar`.
+Symlinks are followed *before* the check, and a path that does not exist yet is
+checked through its existing parents, so `link/../../etc/passwd` cannot smuggle a
+write out.
+
+**The agent cannot rewrite its own governance.** `.northstar` holds the policy
+file, the repository subagent definitions, and the skill packages that reach the
+system prompt, so it is write-refused for `Write`/`Edit` by default. A policy file
+may only ever tighten, so a rewrite could not install `bypassPermissions` - what it
+*could* do is drop existing tightenings for every later run, plant a poisoned skill
+or agent file, or corrupt the file so the workspace refuses to start. All three are
+refused here rather than detected later. `--allow-policy-writes` opens the tree for
+one run when a human means it, and the effective set is recorded in the `init`
+event (`protected_prefixes`), so the audit transcript shows which rule applied.
 
 Caps exist because a tool that can read 4 GB can also read 4 GB into a prompt:
 `Read` 256 KB, `Grep` 200 matches, `LS` 500 entries, and a shared per-result

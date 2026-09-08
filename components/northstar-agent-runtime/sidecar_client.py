@@ -24,9 +24,10 @@ import os
 import select
 import socket
 import time
-import uuid
 from dataclasses import dataclass, field
 from typing import Any, Iterable
+
+from contract_bridge import WIRE_FIELDS, BridgeError, build_request, cross_check
 
 SIDECAR_MAX_PROMPT_CHARS = 100_000
 SIDECAR_MIN_TIMEOUT_MS = 1_000
@@ -45,7 +46,9 @@ MAX_RESPONSE_BYTES = 4 * 1024 * 1024
 #: One escaped BMP char is 6 bytes and one astral char is 12; 12 per char covers
 #: the worst case for a prompt the validator accepts, with framing headroom.
 MAX_REQUEST_BYTES = 12 * SIDECAR_MAX_PROMPT_CHARS + 65_536
-REQUEST_FIELDS: frozenset[str] = frozenset({"request_id", "prompt", "timeout_ms"})
+#: Sourced from the contract bridge so there is exactly one definition of the
+#: boundary shared by the runtime, ``northstar-run-contract``, and the sidecar.
+REQUEST_FIELDS: frozenset[str] = WIRE_FIELDS
 CONNECT_ATTEMPTS = 3
 CONNECT_RETRY_DELAY = 0.1
 
@@ -121,6 +124,9 @@ class SidecarResult:
     bytes_read: int = 0
     truncated: bool = False
     raw: dict[str, Any] = field(default_factory=dict)
+    #: ``unchecked`` (no host binding configured) | ``contract-verified`` (the run
+    #: was re-derived through the contract and agreed) | ``unavailable``.
+    wire_mode: str = "unchecked"
 
     @property
     def ok(self) -> bool:
@@ -146,6 +152,8 @@ class SidecarResult:
             payload["errors"] = list(self.errors)
         if self.truncated:
             payload["truncated"] = True
+        if self.wire_mode != "unchecked":
+            payload["wire_mode"] = self.wire_mode
         return payload
 
     @property
@@ -174,6 +182,8 @@ class SidecarClient:
         max_response_bytes: int = MAX_RESPONSE_BYTES,
         require_canonical_name: bool = True,
         transport: Any | None = None,
+        run_id: str | None = None,
+        run_document: dict[str, Any] | None = None,
     ) -> None:
         self.socket_path = socket_path_text(socket_path)
         checked = validate_socket_path(self.socket_path, require_canonical_name=require_canonical_name)
@@ -187,22 +197,45 @@ class SidecarClient:
         self.connect_timeout_s = float(connect_timeout_s)
         self.read_grace_s = float(read_grace_s)
         self.request_id_prefix = request_id_prefix
+        #: Correlation id for every request from this client (see contract_bridge).
+        self.run_id = run_id
+        #: Optional Run Request document, used only when a host binding is present.
+        self.run_document = run_document
         self.max_response_bytes = int(max_response_bytes)
         #: Test seam: an object with connect()/send()/recvall()/close() semantics.
         self._transport = transport
 
     # -- public API --------------------------------------------------------
     def new_request_id(self) -> str:
-        return f"{self.request_id_prefix}-{uuid.uuid4().hex[:16]}"
+        """The run's id when the operator set one, else a generated legacy-form id."""
+        from contract_bridge import derive_request_id
+
+        return derive_request_id(self.run_id, prefix=self.request_id_prefix)
 
     def execute(self, prompt: str, *, timeout_ms: int | None = None, request_id: str | None = None) -> SidecarResult:
         """Run one prompt. Never raises for an expected condition."""
-        rid = request_id or self.new_request_id()
+        try:
+            rid = request_id or self.new_request_id()
+        except BridgeError as error:
+            return SidecarResult(request_id="", status="rejected", errors=(str(error),))
         effective_timeout = self.timeout_ms if timeout_ms is None else int(timeout_ms)
-        request: dict[str, Any] = {"request_id": rid, "prompt": prompt, "timeout_ms": effective_timeout}
+        try:
+            request: dict[str, Any] = build_request(prompt, run_id=rid, timeout_ms=effective_timeout)
+        except BridgeError as error:
+            return SidecarResult(request_id=rid, status="rejected", errors=(str(error),))
         checked = validate_request(request)
         if not checked.ok:
             return SidecarResult(request_id=rid, status="rejected", errors=checked.errors)
+        # Contract cross-check: with a host binding in the environment the request
+        # must be re-derivable from the verified run, or the call does not happen.
+        report = cross_check(request, run=self.run_document)
+        if not report.ok:
+            return SidecarResult(
+                request_id=rid,
+                status="rejected",
+                errors=tuple(f"run contract: {e}" for e in report.errors),
+                wire_mode=report.mode,
+            )
         started = time.monotonic()
         try:
             line, bytes_read, truncated = self._round_trip(request)
@@ -235,6 +268,7 @@ class SidecarClient:
             bytes_read=bytes_read,
             truncated=bool(truncated or result.truncated),
             raw=payload if isinstance(payload, dict) else {},
+            wire_mode=report.mode,
         )
 
     def execute_tool(self, *, prompt: Any, timeout_ms: Any = None) -> Any:

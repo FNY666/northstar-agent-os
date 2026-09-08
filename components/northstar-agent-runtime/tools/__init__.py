@@ -54,7 +54,22 @@ class ToolLimits:
     max_grep_files: int = MAX_GREP_FILES
     max_result_chars: int = MAX_TOOL_RESULT_CHARS
     #: Paths a mutating tool may not write through, relative to the workspace.
-    protected_prefixes: tuple[str, ...] = (".git",)
+    #:
+    #: ``.git`` is repository metadata. ``.northstar`` is the *run's own
+    #: governance*: ``config.toml`` (the policy that gates it), ``agents/*.md``
+    #: (subagent definitions) and ``skills/*/SKILL.md`` (prompt content). A tool
+    #: that could rewrite any of those could rewrite the rules that constrain it,
+    #: which turns repository configuration into a self-service escalation and
+    #: persistence path (an agent edits the deny list, the *next* run obeys the
+    #: edited one). This is the configuration-based sandbox escape the 2026 agent
+    #: hardening guidance calls out ("treat sandbox configuration as immutable").
+    #:
+    #: A policy file may only ever tighten, so a rewrite cannot install
+    #: ``bypassPermissions`` - it can silently drop tightenings, plant poisoned
+    #: instructions, or corrupt the file so every later run refuses to start. All
+    #: three are refused here. A host that genuinely wants the agent to edit
+    #: governance narrows the set explicitly (``--allow-policy-writes``).
+    protected_prefixes: tuple[str, ...] = (".git", ".northstar")
     follow_symlinks: bool = True
 
     def __post_init__(self) -> None:
@@ -275,11 +290,20 @@ class ToolSandbox:
         parts = relative.parts
         for prefix in self.limits.protected_prefixes:
             head = Path(prefix).parts
-            if len(parts) >= len(head) and parts[: len(head)] == head:
+            if len(parts) < len(head) or parts[: len(head)] != head:
+                continue
+            if prefix == ".northstar":
+                # Name the escape hatch here: this denial is the one an operator
+                # will legitimately want to override, per run, from the CLI.
                 raise ToolAccessError(
-                    f"writes under {prefix!r} are refused: that tree holds repository metadata "
-                    "the runtime must not rewrite"
+                    f"writes under {prefix!r} are refused: that tree holds the run's own "
+                    "governance (policy, agents, skills) and an agent must not rewrite the "
+                    "rules that gate it; pass --allow-policy-writes if a human intends this"
                 )
+            raise ToolAccessError(
+                f"writes under {prefix!r} are refused: that tree holds repository metadata "
+                "the runtime must not rewrite"
+            )
 
     def relative(self, path: Path) -> str:
         try:

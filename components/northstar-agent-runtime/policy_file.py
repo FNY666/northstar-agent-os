@@ -24,7 +24,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Iterable
+from typing import Any, Iterable, Mapping
 
 try:  # Python 3.11+
     import tomllib as _toml
@@ -80,6 +80,9 @@ _ALLOWED_KEYS = frozenset({
     "agent",
     "compaction_threshold_tokens",
     "project_context",
+    # Declared lifecycle hooks. The shape is checked against the real guardrails
+    # in command_hooks.parse_hooks; here it must only be a list of tables.
+    "hooks",
 })
 _ALLOWED_MODES = frozenset({"default", "plan"})
 _CONTEXT_MARKERS = (
@@ -114,6 +117,8 @@ class PolicyFile:
     agent: str | None = None                    # a known built-in agent name
     compaction_threshold_tokens: int | None = None  # <= DEFAULT_COMPACTION_THRESHOLD_TOKENS
     project_context: str | bool | None = None   # file name, False to disable, None = default
+    #: Raw ``[[hooks]]`` tables, validated by :mod:`command_hooks` before use.
+    hooks: tuple[Mapping[str, Any], ...] = ()
 
     @property
     def project_context_setting(self) -> str | bool:
@@ -135,6 +140,7 @@ class PolicyFile:
             "agent": self.agent,
             "compaction_threshold_tokens": self.compaction_threshold_tokens,
             "project_context": self.project_context_setting,
+            "hooks": [dict(entry) for entry in self.hooks],
         }
 
 
@@ -268,6 +274,20 @@ def load_policy_file(
     else:
         fail("project_context must be a file name string or a boolean")
 
+    # Declared lifecycle hooks: only the TOML shape is checked here (a list of
+    # tables). Whether each entry is *governable* - veto-only event, script inside
+    # the workspace, allowlisted interpreter - is command_hooks.parse_hooks' job,
+    # and it runs with the workspace and the enabled flag in hand.
+    hooks_raw = raw.get("hooks", ())
+    if hooks_raw is None:
+        hooks_raw = ()
+    if not isinstance(hooks_raw, (list, tuple)):
+        fail("hooks must be an array of tables ([[hooks]])")
+    for position, entry in enumerate(hooks_raw):
+        if not isinstance(entry, Mapping):
+            fail(f"hooks[{position}] must be a table")
+    hooks = tuple(dict(entry) for entry in hooks_raw)
+
     return PolicyFile(
         source=path,
         schema_version=schema_version,
@@ -283,6 +303,7 @@ def load_policy_file(
         agent=agent,
         compaction_threshold_tokens=compaction,
         project_context=context if context is not DEFAULT_PROJECT_CONTEXT_FILE or "project_context" in raw else None,
+        hooks=hooks,
     )
 
 

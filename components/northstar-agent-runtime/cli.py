@@ -118,6 +118,22 @@ def _add_run_arguments(parser: argparse.ArgumentParser) -> None:
     policy.add_argument("--no-policy-file", action="store_true", help="ignore .northstar/config.toml in the workspace")
     policy.add_argument("--no-workspace-agents", action="store_true", help="ignore .northstar/agents/*.md subagent files")
     policy.add_argument("--no-skills", action="store_true", help="do not list .northstar/skills/*/SKILL.md packages in the system prompt")
+    policy.add_argument(
+        "--enable-workspace-hooks",
+        action="store_true",
+        help="run the [[hooks]] declared in .northstar/config.toml (default off: cloning a repository must not mean executing it)",
+    )
+    policy.add_argument(
+        "--allow-policy-writes",
+        action="store_true",
+        help="let mutating tools write under .northstar (default: refused - the agent must not rewrite its own governance)",
+    )
+    policy.add_argument(
+        "--run-id",
+        default="",
+        metavar="ID",
+        help="correlation id for this run; also used as the sidecar request_id (default: generated)",
+    )
     context_group = policy.add_mutually_exclusive_group()
     context_group.add_argument("--context-file", default="", metavar="PATH", help="inject this project-instructions file into the system prompt (must live inside the workspace)")
     context_group.add_argument("--no-project-context", action="store_true", help="do not auto-inject AGENTS.md (or the policy file's project_context)")
@@ -202,6 +218,7 @@ def _print_dry_run(
     workspace_agents_note: str = "none",
     skills_note: str = "none",
     mcp_note: str = "off",
+    hooks_note: str = "none",
 ) -> int:
     """Print what a run would do and exit, without constructing a provider.
 
@@ -229,9 +246,13 @@ def _print_dry_run(
           f"session_dir={args.session_dir or 'off'} "
           f"halt_on_denial={config.halt_on_denial}")
     print(f"policy_file={policy_note}")
+    print(f"run_id={config.run_id or '(generated per sidecar call)'} "
+          f"policy_revision={config.policy_revision or '(none)'} "
+          f"unwritable={','.join(config.tool_limits.protected_prefixes)}")
     print(f"project_context={context_note}")
     print(f"workspace_agents={workspace_agents_note}")
     print(f"skills={skills_note}")
+    print(f"hooks={hooks_note}")
     print(f"mcp_servers={mcp_note}" + (" (not connected in dry-run)" if mcp_note != "off" else ""))
     print(f"pricing: ${pricing.input_per_mtok}/MTok in, ${pricing.output_per_mtok}/MTok out "
           f"(cache read x0.1, cache write x1.25)"
@@ -300,6 +321,23 @@ def main(argv: Sequence[str] | None = None) -> int:
     except OSError as error:  # pragma: no cover - host-level failure
         print(f"cannot run: {error}", file=sys.stderr)
         return USAGE_ERROR
+
+
+def _hooks_note(policy: Any, command_hooks: Sequence[Any], *, enabled: bool) -> str:
+    """One line for ``--dry-run``: what the repository declared, and whether it runs.
+
+    The IGNORED case is spelled out on purpose. A repository that ships hooks
+    and gets silence would assume they fired; a host that forgot the flag should
+    see the gap in the plan, not discover it in an audit diff.
+    """
+    declared = len(tuple(getattr(policy, "hooks", ()) or ())) if policy is not None else 0
+    if declared == 0:
+        return "none"
+    if not enabled:
+        return f"{declared} declared, IGNORED (pass --enable-workspace-hooks)"
+    from command_hooks import summarise
+
+    return summarise(command_hooks, enabled=True)
 
 
 def _parse_mcp_servers(args: argparse.Namespace) -> list[tuple[str, list[str]]]:
@@ -384,6 +422,38 @@ def _run(args: argparse.Namespace) -> int:
             print(f"configuration error: {error}", file=sys.stderr)
             return USAGE_ERROR
 
+    # Repository-declared lifecycle hooks. Off unless a human enables them: cloning
+    # a repository must not mean executing it. Anything the file declares is
+    # validated fail-closed, and an unusable declaration is a configuration error.
+    hook_registry = None
+    command_hooks: tuple[Any, ...] = ()
+    declared_hooks = tuple(getattr(policy, "hooks", ()) or ())
+    if declared_hooks:
+        from command_hooks import CommandHookError, parse_hooks, register_into
+
+        try:
+            if args.enable_workspace_hooks:
+                command_hooks = parse_hooks(
+                    declared_hooks,
+                    workspace=args.workspace,
+                    known_tools=registry.names(),
+                )
+                from hooks import HookRegistry
+
+                hook_registry = HookRegistry()
+                register_into(hook_registry, command_hooks, workspace=args.workspace)
+            else:
+                # Validated lazily, but reported loudly: silently ignoring a
+                # repository's policy is exactly what this project refuses to do.
+                print(
+                    f"note: {len(declared_hooks)} hook(s) declared in {policy.source} are IGNORED "
+                    "(pass --enable-workspace-hooks to run them)",
+                    file=sys.stderr,
+                )
+        except CommandHookError as error:
+            print(f"configuration error: {error}", file=sys.stderr)
+            return USAGE_ERROR
+
     cli_mode = "plan" if args.plan else args.permission_mode
     validate_mode(cli_mode)
     # The file may pin 'plan' (or keep 'default'); it may never loosen. A CLI
@@ -462,9 +532,17 @@ def _run(args: argparse.Namespace) -> int:
         "max_subagent_depth": args.max_subagent_depth,
         "allow_nested_delegation": args.allow_nested_delegation,
         "halt_on_denial": halt_on_denial,
-        "tool_limits": ToolLimits(),
+        "tool_limits": ToolLimits(
+            # The agent's own governance is unwritable unless a human explicitly
+            # says otherwise for this run (see tools.ToolLimits for why).
+            protected_prefixes=(".git",) if args.allow_policy_writes else (".git", ".northstar")
+        ),
         "record_tool_output_in_session": not args.redact_tool_output,
     }
+    if args.run_id:
+        config_kwargs["run_id"] = args.run_id
+    if policy is not None and policy.revision:
+        config_kwargs["policy_revision"] = policy.revision
     if args.system_prompt:
         config_kwargs["system_prompt"] = args.system_prompt
     if definition:
@@ -531,6 +609,7 @@ def _run(args: argparse.Namespace) -> int:
     else:
         context_note = "off (no AGENTS.md in the workspace)"
     workspace_agents_note = ",".join(agent.name for agent in workspace_agents) or "none"
+    hooks_note = _hooks_note(policy, command_hooks, enabled=args.enable_workspace_hooks)
     skills_note = (f"{len(skills)} package(s): " + ", ".join(skill.name for skill in skills)) if skills else "none"
     if mcp_servers:
         mcp_note = ", ".join(f"{name}={' '.join(command)}" for name, command in mcp_servers)
@@ -538,7 +617,14 @@ def _run(args: argparse.Namespace) -> int:
         mcp_note = "off"
 
     provider = _build_provider(args)
-    runtime = AgentRuntime(provider=provider, config=config, tools=registry, sessions=store, agents=agents)
+    runtime = AgentRuntime(
+        provider=provider,
+        config=config,
+        tools=registry,
+        sessions=store,
+        agents=agents,
+        hooks=hook_registry,
+    )
 
     if args.show_pricing:
         print(json.dumps(runtime.pricing(), indent=2, sort_keys=True))
@@ -551,6 +637,7 @@ def _run(args: argparse.Namespace) -> int:
             args,
             runtime,
             policy_note=policy_note,
+            hooks_note=hooks_note,
             context_note=context_note,
             workspace_agents_note=workspace_agents_note,
             skills_note=skills_note,

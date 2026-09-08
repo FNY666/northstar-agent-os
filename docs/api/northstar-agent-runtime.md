@@ -205,6 +205,10 @@ Flags mirroring ``cli run``'s defaults so a doctor verdict predicts a run.
 
 #### `build_parser()`
 
+#### `policy_drift_finding(workspace: Path, policy: Any)`
+
+Compare the workspace policy file with the committed one.
+
 #### `run_doctor(args: argparse.Namespace)`
 
 Print the report; return 0 unless a check failed.
@@ -601,6 +605,7 @@ Structured outcome of one sidecar round trip. Failures are data, not raises.
 One-connection-per-request Unix socket client for the sidecar.
 
 - `new_request_id()`
+  - The run's id when the operator set one, else a generated legacy-form id.
 - `execute(prompt: str, *, timeout_ms: int | None=None, request_id: str | None=None)`
   - Run one prompt. Never raises for an expected condition.
 - `execute_tool(*, prompt: Any, timeout_ms: Any=None)`
