@@ -11,8 +11,10 @@ module.
 
 The transport never accepts Python actions or arbitrary filesystem paths.  Its
 operations are ``status``, ``history``, ``pause``, ``resume`` and ``cancel``.
-Step execution continues to require a local ``StepPlan`` and therefore cannot
-be smuggled through a serialized network payload.
+History is a bounded, sequence-cursor paginated replay so a growing event
+stream cannot turn one response into an unbounded frame. Step execution
+continues to require a local ``StepPlan`` and therefore cannot be smuggled
+through a serialized network payload.
 """
 from __future__ import annotations
 
@@ -31,6 +33,7 @@ from typing import Any
 
 from authorization import verify_authorization
 from binding import verify_binding
+from control_ledger import ControlReceiptLedger, command_fingerprint
 from control_receipt import (
     CONTROL_RECEIPT_SCHEMA_VERSION,
     ControlReceipt,
@@ -43,6 +46,7 @@ from runner import DurableRunner
 TRANSPORT_SCHEMA_VERSION = "northstar.durable-transport.v1"
 MAX_FRAME_BYTES = 1_000_000
 MAX_HISTORY_EVENTS = 10_000
+MAX_HISTORY_PAGE_EVENTS = 256
 MAX_TOKEN_CHARS = 16_384
 MAX_ERROR_CHARS = 512
 MAX_REQUEST_ID_CHARS = 128
@@ -93,6 +97,7 @@ class _AuthorizedRequest:
     actor_id: str
     policy_revision: str
     payload: dict[str, Any]
+    fingerprint: str
 
 
 def _canonical(value: dict[str, Any]) -> bytes:
@@ -141,6 +146,25 @@ def _validate_payload(operation: str, payload: Any) -> dict[str, Any]:
         if not isinstance(reason, str) or not reason.strip() or len(reason) > 512:
             raise _Rejected("pause reason is invalid")
         return {"reason": reason.strip()}
+    if operation == "history":
+        unknown = set(payload) - {"from_sequence", "limit"}
+        if unknown:
+            raise _Rejected("history payload contains unknown fields")
+        from_sequence = payload.get("from_sequence", 1)
+        limit = payload.get("limit", MAX_HISTORY_PAGE_EVENTS)
+        if (
+            isinstance(from_sequence, bool)
+            or not isinstance(from_sequence, int)
+            or not 1 <= from_sequence <= MAX_HISTORY_EVENTS + 1
+        ):
+            raise _Rejected("history from_sequence is invalid")
+        if (
+            isinstance(limit, bool)
+            or not isinstance(limit, int)
+            or not 1 <= limit <= MAX_HISTORY_PAGE_EVENTS
+        ):
+            raise _Rejected("history limit is invalid")
+        return {"from_sequence": from_sequence, "limit": limit}
     if payload:
         raise _Rejected(f"{operation} payload must be empty")
     return {}
@@ -165,6 +189,7 @@ class DurableWorkerServer:
         host: str = "127.0.0.1",
         port: int = 0,
         lease_ttl_seconds: int = 60,
+        control_ledger_path: str | Path | None = None,
     ) -> None:
         if host not in {"127.0.0.1", "::1"}:
             raise ValueError("DurableWorkerServer only permits loopback listeners")
@@ -184,6 +209,11 @@ class DurableWorkerServer:
         self.port = port
         self.lease_ttl_seconds = lease_ttl_seconds
         self.store = EventStore(self.event_path)
+        ledger_path = control_ledger_path or self.event_path.with_name(
+            self.event_path.name + ".control-ledger.jsonl"
+        )
+        self.control_ledger = ControlReceiptLedger(ledger_path)
+        self._control_lock = threading.Lock()
         self._server: socketserver.ThreadingTCPServer | None = None
         self._thread: threading.Thread | None = None
 
@@ -269,7 +299,30 @@ class DurableWorkerServer:
             return self._response(request_id, "rejected", {}, "server time is invalid")
         try:
             request = self._authorize(frame, now=current)
-            data = self._dispatch(request, now=current)
+            if request.operation in {"pause", "resume", "cancel"}:
+                with self._control_lock:
+                    cached = self.control_ledger.lookup(
+                        request.request_id,
+                        request.fingerprint,
+                    )
+                    if cached is not None:
+                        data = self._replay_control_receipt(request, cached)
+                        data["replayed"] = True
+                    else:
+                        data = self._dispatch(request, now=current)
+                        receipt = ControlReceipt.from_dict(data["receipt"])
+                        stored = self.control_ledger.record(
+                            request.request_id,
+                            request.fingerprint,
+                            receipt,
+                        )
+                        if stored.canonical_json() != receipt.canonical_json():
+                            data = self._replay_control_receipt(request, stored)
+                            data["replayed"] = True
+                        else:
+                            data["replayed"] = False
+            else:
+                data = self._dispatch(request, now=current)
             return self._response(request.request_id, "ok", data, None)
         except _Rejected as error:
             return self._response(request_id, "rejected", {}, _error_text(error))
@@ -305,6 +358,35 @@ class DurableWorkerServer:
             "error": "worker response exceeds maximum frame size",
         }
         return _with_mac(fallback, self.channel_secret)
+
+    def _replay_control_receipt(
+        self,
+        request: _AuthorizedRequest,
+        receipt: ControlReceipt,
+    ) -> dict[str, Any]:
+        if (
+            receipt.command_id != request.request_id
+            or receipt.run_id != request.run.run_id
+            or receipt.actor_id != request.actor_id
+            or receipt.operation != request.operation
+        ):
+            raise ValueError("control ledger receipt does not match the request")
+        history = self.store.read_history(receipt.run_id)
+        if receipt.after_sequence > len(history):
+            raise ValueError("control ledger receipt is ahead of event history")
+        referenced = history[receipt.before_sequence : receipt.after_sequence]
+        if tuple(event.event_id for event in referenced) != receipt.event_ids:
+            raise ValueError("control ledger receipt event IDs do not match event history")
+        if tuple(event.sequence for event in referenced) != receipt.event_sequences:
+            raise ValueError("control ledger receipt event sequences do not match event history")
+        state = self.store.replay_at(receipt.run_id, receipt.after_sequence)
+        if not receipt.verify_state(state):
+            raise ValueError("control ledger receipt state digest does not match event history")
+        return {
+            "run_id": receipt.run_id,
+            "state": state,
+            "receipt": receipt.to_dict(),
+        }
 
     def _authorize(self, frame: Any, *, now: int) -> _AuthorizedRequest:
         if not isinstance(frame, dict):
@@ -373,6 +455,21 @@ class DurableWorkerServer:
         if required not in capabilities:
             raise _Rejected(f"authorization lacks {required}")
         payload = _validate_payload(operation, frame.get("payload"))
+        fingerprint = (
+            command_fingerprint(
+                run_id=run.run_id,
+                actor_id=authorization_claims["actor_id"],
+                workspace_id=workspace_id,
+                policy_revision=authorization_claims["policy_revision"],
+                operation=operation,
+                # Fingerprint the authenticated wire payload rather than the
+                # normalized dispatch payload so request IDs cannot silently
+                # change claims through whitespace normalization.
+                payload=frame["payload"],
+            )
+            if operation in {"pause", "resume", "cancel"}
+            else ""
+        )
         return _AuthorizedRequest(
             request_id=request_id,
             operation=operation,
@@ -381,6 +478,7 @@ class DurableWorkerServer:
             actor_id=authorization_claims["actor_id"],
             policy_revision=authorization_claims["policy_revision"],
             payload=payload,
+            fingerprint=fingerprint,
         )
 
     def _dispatch(self, request: _AuthorizedRequest, *, now: int) -> dict[str, Any]:
@@ -398,7 +496,19 @@ class DurableWorkerServer:
             events = self.store.read_history(run_id)
             if len(events) > MAX_HISTORY_EVENTS:
                 raise ValueError("event history exceeds transport response limit")
-            return {"run_id": run_id, "events": [event.to_dict() for event in events]}
+            from_sequence = request.payload["from_sequence"]
+            limit = request.payload["limit"]
+            start = from_sequence - 1
+            page = events[start : start + limit]
+            next_sequence = page[-1].sequence + 1 if start + len(page) < len(events) else None
+            return {
+                "run_id": run_id,
+                "from_sequence": from_sequence,
+                "limit": limit,
+                "events": [event.to_dict() for event in page],
+                "has_more": next_sequence is not None,
+                "next_sequence": next_sequence,
+            }
 
         before_events = self.store.read_history(run_id)
         before_state = self.store.replay(run_id) if before_events else _empty_state(run_id)
@@ -586,5 +696,6 @@ __all__ = [
     "DurableWorkerClient",
     "DurableWorkerServer",
     "MAX_FRAME_BYTES",
+    "MAX_HISTORY_PAGE_EVENTS",
     "TRANSPORT_SCHEMA_VERSION",
 ]

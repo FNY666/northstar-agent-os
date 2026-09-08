@@ -21,8 +21,8 @@ pip install .                                              # resolves both
 ```
 
 The wheel installs the slice modules (`durable_contract`, `event_store`, `action_gateway`,
-`cli`, `control_receipt`, `runner`, `verifier`, `trace_metrics`, `evaluation`,
-`durable_transport`) as top-level modules; the version (`0.1.0.dev0`, unreleased)
+`cli`, `control_ledger`, `control_receipt`, `runner`, `verifier`, `trace_metrics`,
+`evaluation`, `durable_transport`) as top-level modules; the version (`0.1.0.dev0`, unreleased)
 is declared in `pyproject.toml`.
 
 ## Boundaries
@@ -127,15 +127,16 @@ northstar-durable-run control \
   --owner-id operator-1 --now 1700000001 resume
 ```
 
-`--command-id` is optional for this local projection; provide it when an
-upstream operator or API already has a stable command identity. Receipt IDs
-remain per-response identifiers, and receipts are not a persisted command
-ledger or an idempotency mechanism. `retry()` remains programmatic because a
-retry must provide the explicit `StepPlan` actions and preserve the action
-idempotency boundary. A future
-scheduler may call this surface, but this component does not create one.
+`--command-id` is optional for this local CLI projection; provide it when an
+upstream operator or API already has a stable command identity. CLI receipt IDs
+remain per-response identifiers, and this CLI does not maintain a command
+ledger or idempotency mechanism. The separate T22 network transport has the
+bounded receipt replay index described below. `retry()` remains programmatic
+because a retry must provide the explicit `StepPlan` actions and preserve the
+action idempotency boundary. A future scheduler may call this surface, but
+this component does not create one.
 
-## Authenticated loopback transport (T21)
+## Authenticated loopback transport (T21/T22)
 
 `durable_transport.py` provides a deliberately narrow network-shaped surface:
 `DurableWorkerServer` and `DurableWorkerClient` exchange one bounded JSON line
@@ -149,11 +150,20 @@ existing `EventStore`/`DurableRunner`.
 The listener is loopback-only (`127.0.0.1`/`::1`) and does not accept a step
 function, arbitrary path or serialized executor. `pause`/`resume`/`cancel`
 return the existing versioned `ControlReceipt`; `history` is a bounded replay
-of the authoritative event stream. This is a local control/replay transport
-slice, not a remote worker service: it has no TLS/mTLS, workspace materialiser,
-step execution protocol, scheduler, fleet lease service or public listener.
-Use the existing SSH Profile A helper for the private sidecar socket path;
-do not expose this server to a network without a separate deployment review.
+of the authoritative event stream. Callers can page history with
+`from_sequence` and `limit` (at most 256 events per response); the signed
+response returns `next_sequence` when more history remains. Control requests
+with an explicit `request_id` also use a bounded local receipt replay index
+(the default sidecar is `<events>.control-ledger.jsonl`): retrying the same
+signed claims returns the same receipt without appending another lifecycle
+event, while reusing an ID with different claims fails closed. The index is a
+receipt projection, not a lifecycle source or distributed exactly-once ledger;
+a crash between EventStore commit and index commit remains an explicit recovery
+boundary. This is a local control/replay transport slice, not a remote worker
+service: it has no TLS/mTLS, workspace materialiser, step execution protocol,
+scheduler, fleet lease service or public listener. Use the existing SSH Profile
+A helper for the private sidecar socket path; do not expose this server to a
+network without a separate deployment review.
 
 ## Local example
 

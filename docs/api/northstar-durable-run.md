@@ -51,6 +51,24 @@ Local inspection and control CLI for one durable-run event stream.
 
 Run the local durable-run CLI and return a process-style exit code.
 
+### `control_ledger`
+
+Source: `components/northstar-durable-run/control_ledger.py`
+
+Bounded local replay index for authenticated durable control receipts.
+
+#### `command_fingerprint(*, run_id: str, actor_id: str, workspace_id: str, policy_revision: str, operation: str, payload: dict[str, Any])`
+
+Digest the signed command claims that make a request replay-compatible.
+
+#### `ControlReceiptLedger`
+
+Append-only, POSIX-locked replay index for completed control commands.
+
+- `lookup(command_id: str, fingerprint: str)`
+  - Return a matching receipt, or fail closed on command ID reuse.
+- `record(command_id: str, fingerprint: str, receipt: ControlReceipt)`
+  - Persist a receipt, returning the canonical existing receipt on replay.
 ### `control_receipt`
 
 Source: `components/northstar-durable-run/control_receipt.py`

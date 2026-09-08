@@ -1,5 +1,25 @@
 # Northstar Agent OS — initial public component
 
+## Unreleased (twenty-ninth batch) — bounded paginated durable replay transport (T22)
+
+- Extended `northstar-durable-run/durable_transport.py` history replay with a
+  signed `from_sequence` cursor and bounded `limit` (maximum 256 events per
+  response). Responses expose `has_more` and `next_sequence`, so a growing
+  authoritative event stream cannot be forced into one oversized frame.
+- Added `control_ledger.py`, a POSIX-locked bounded receipt replay index. An
+  explicit request ID with the same signed command claims returns the same
+  verified `ControlReceipt` without appending another lifecycle event; claim
+  changes and malformed ledger records fail closed. The EventStore remains the
+  lifecycle authority, and the sidecar does not claim distributed exactly-once
+  semantics across a crash window.
+- Kept the T21 security boundary unchanged: loopback-only listener, channel
+  HMAC, host binding/authorization re-verification, run/workspace/scope/deadline
+  checks, and no serialized action or step-execution payloads. Added pagination,
+  ledger validation and loopback coverage; durable-run now has 93 tests and the
+  repository has 935 tests (931 pass, 4 optional OTel skips). This remains a
+  local control/replay slice, not hosted Profile B execution. No release, tag,
+  GitHub Release, or PyPI/npm publication was made.
+
 ## Unreleased (twenty-eighth batch) — authenticated durable control/replay transport (T21)
 
 - Added `northstar-durable-run/durable_transport.py`, a narrow JSON-lines TCP

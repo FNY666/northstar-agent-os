@@ -1,12 +1,15 @@
 # Remote transport for a hosted worker (T5 specification)
 
-> **Status: specification plus a local-only Profile A lifecycle helper.**
-> `ssh_forward.py` now provides the bounded orchestrator-side SSH process
-> lifecycle and loopback tests, but no complete remote transport ships and
-> nothing on this page has ever run against a real host. It is the T5 answer to
-> the P3-3 ops gap *"network transport for a hosted worker"*; the real-host
-> readiness gate remains open. Readiness measured by `remote_worker.py` stays
-> unchanged: a local helper is not a remote canary.
+> **Status: specification plus a local-only Profile A lifecycle helper; T21/T22
+> add local control/replay slices.**
+> `ssh_forward.py` (T20) provides the bounded orchestrator-side SSH process
+> lifecycle and `durable_transport.py` (T21/T22) provides authenticated local
+> control/replay with cursor pagination. No complete remote execution transport
+> ships; no complete remote transport ships and nothing on this page has ever
+> run against a real host. It is the T5 answer to the P3-3 ops gap *"network
+> transport for a hosted worker"*; the real-host readiness gate remains open.
+> Readiness measured by `remote_worker.py` stays unchanged: a local helper is not
+> a remote canary.
 
 A hosted worker is a **transport variant of the sidecar**, not a new
 governance surface (see [`northstar-remote-worker.md`](northstar-remote-worker.md)).
@@ -108,7 +111,7 @@ profile deliberately reuses the durable layer instead of inventing a new one:
   (Profile A's forward-only socket does not need them; a fleet needs mTLS or
   an equivalent — see the identity page's open decisions).
 
-### 3.1 What T21 implements locally
+### 3.1 What T21/T22 implements locally
 
 `durable_transport.py::DurableWorkerServer` and
 `durable_transport.py::DurableWorkerClient` provide a bounded local
@@ -119,12 +122,19 @@ revision, scope containment and the required `durable:read` or
 `durable:control` capability before calling the existing event store/runner.
 
 The listener is loopback-only and accepts only `status`, `history`, `pause`,
-`resume` and `cancel`. It does not accept serialized Python actions, arbitrary
-paths or a workspace reference that it resolves itself. This proves framing,
-request authentication, grant re-verification and durable control receipt
-projection in a local process pair; it is not Profile B: there is no mTLS,
-workspace materialisation, step-execution protocol, scheduler, fleet lease
-service or public listener. A remote deployment still needs a separately
+`resume` and `cancel`. History uses a signed sequence cursor and a maximum
+256-event page, so replay remains bounded as the event stream grows. Control
+requests with an explicit request ID are also indexed in a local bounded
+receipt replay ledger; an exact retry returns the same verified receipt without
+adding another lifecycle event, while command-ID claim changes fail closed.
+The ledger is only a receipt projection and does not claim distributed
+exactly-once semantics across a crash between the EventStore and ledger writes.
+The transport does not accept serialized Python actions, arbitrary paths or a
+workspace reference that it resolves itself. This proves framing, request
+authentication, grant re-verification, bounded replay and durable control
+receipt projection in a local process pair; it is not Profile B: there is no
+mTLS, workspace materialisation, step-execution protocol, scheduler, fleet
+lease service or public listener. A remote deployment still needs a separately
 reviewed transport and canary.
 
 ## 4. Failure taxonomy (reuse the contract's, don't invent one)
@@ -135,13 +145,15 @@ reviewed transport and canary.
 | Channel slow/stalled | read exceeds `CONNECTION_READ_TIMEOUT` after SSH keepalive fired | receipt status `timeout` |
 | Grant/binding expired mid-flight | `verify_binding`/`verify_authorization` with caller `now` | refused before launch; operator reruns with a fresh grant |
 | Worker process tree hangs | `sidecar.py::_terminate_process_tree` / adapter termination | bounded kill, then `transport_unavailable` |
-| Receipt lost after success | idempotency-keyed replay from the event history | orchestrator re-derives, never double-executes |
+| Receipt lost after success | explicit-command replay index plus event-history verification | transport returns the stored receipt, never double-executes the control in the normal retry path |
 
 Receipts and audit records are produced on the worker and streamed over the
-same JSON-lines channel; a lost response is answered by replaying the event
-store, not by re-running the work — that property comes from the durable
-layer and is preserved by the channel, which must stay **at-most-once on
-execution, at-least-once on evidence**.
+same JSON-lines channel; in the normal retry path the local control ledger
+returns the stored receipt after event-history verification, not a second
+lifecycle transition. The durable layer therefore preserves **at-most-once on
+execution, at-least-once on evidence** for the completed-and-indexed path; the
+crash window between the EventStore and ledger writes remains explicitly
+outside distributed exactly-once claims.
 
 ## 5. What "done" would mean (T5b checklist)
 
@@ -152,8 +164,9 @@ execution, at-least-once on evidence**.
 - [ ] Complete Profile A transport readiness: strict host-key configuration and
       the operator canary must pass against a real SSH worker.
 - [x] Local loopback control/replay slice: bounded JSON-lines framing,
-      channel HMAC, binding/authorization re-verification and durable control
-      receipts (`durable_transport.py`). This is not Profile B completion.
+      channel HMAC, binding/authorization re-verification, cursor-paged replay
+      and durable control receipts (`durable_transport.py`). This is not Profile B
+      completion.
 - [ ] Profile B execution transport: a network transport around
       `DurableRunner` (framing reused), with identity from the rotation story
       below, workspace materialisation and a worker-side execution boundary.

@@ -115,6 +115,9 @@ class DurableTransportTests(unittest.TestCase):
             self.assertEqual(status["event_count"], 0)
             history = client.request_ok("history")
             self.assertEqual(history["events"], [])
+            self.assertEqual(history["from_sequence"], 1)
+            self.assertFalse(history["has_more"])
+            self.assertIsNone(history["next_sequence"])
             self.assertFalse(self.events.exists())
 
     def test_control_round_trip_reuses_existing_runner_and_returns_receipt(self):
@@ -141,11 +144,41 @@ class DurableTransportTests(unittest.TestCase):
             )
             self.assertEqual(paused["state"]["status"], "waiting")
             self.assertEqual(paused["receipt"]["command_id"], "pause-1")
+            self.assertFalse(paused["replayed"])
+            event_count_after_pause = len(self.events.read_text(encoding="utf-8").splitlines())
+            replayed = client.request_ok(
+                "pause",
+                payload={"reason": "remote operator hold"},
+                request_id="pause-1",
+            )
+            self.assertTrue(replayed["replayed"])
+            self.assertEqual(replayed["receipt"], paused["receipt"])
+            self.assertEqual(
+                len(self.events.read_text(encoding="utf-8").splitlines()),
+                event_count_after_pause,
+            )
+            conflict = client.request(
+                "pause",
+                payload={"reason": "different command"},
+                request_id="pause-1",
+            )
+            self.assertEqual(conflict["status"], "business_error")
             resumed = client.request_ok("resume", request_id="resume-1")
             self.assertEqual(resumed["state"]["status"], "running")
             self.assertEqual(resumed["receipt"]["after_status"], "running")
             history = client.request_ok("history")
             self.assertGreaterEqual(len(history["events"]), 6)
+            first_page = client.request_ok("history", payload={"limit": 1})
+            self.assertEqual(first_page["from_sequence"], 1)
+            self.assertEqual(len(first_page["events"]), 1)
+            self.assertTrue(first_page["has_more"])
+            second_page = client.request_ok(
+                "history",
+                payload={"from_sequence": first_page["next_sequence"], "limit": 2},
+            )
+            self.assertEqual(second_page["from_sequence"], 2)
+            self.assertEqual(len(second_page["events"]), 2)
+            self.assertEqual(second_page["events"][0]["sequence"], 2)
 
     def test_tampered_request_is_rejected_without_mutating_history(self):
         with self.server() as server:
@@ -176,6 +209,49 @@ class DurableTransportTests(unittest.TestCase):
             self.assertEqual(response["status"], "rejected")
             self.assertIn("workspace_id", response["error"])
             self.assertEqual(response["data"], {})
+
+    def test_control_receipt_replays_after_server_restart(self):
+        runner = DurableRunner(self.run, EventStore(self.events), lease_path=self.lease)
+        runner.execute(
+            [
+                StepPlan(
+                    step_id="inspect",
+                    input_payload={"path": "README.md"},
+                    scope_snapshot=["workspace:read"],
+                    expected_postconditions=[],
+                    action=lambda _key: {"ok": True},
+                )
+            ],
+            owner_id="actor-1",
+            now=self.now + 1,
+            finalize=False,
+        )
+        with self.server() as server:
+            first = self.client(server).request_ok(
+                "pause", payload={"reason": "restart-safe hold"}, request_id="restart-1"
+            )
+        with self.server() as server:
+            second = self.client(server).request_ok(
+                "pause", payload={"reason": "restart-safe hold"}, request_id="restart-1"
+            )
+        self.assertTrue(second["replayed"])
+        self.assertEqual(second["receipt"], first["receipt"])
+
+    def test_history_pagination_rejects_unbounded_or_unknown_parameters(self):
+        with self.server() as server:
+            client = self.client(server)
+            oversized = server.handle_frame(
+                client.build_frame("history", payload={"limit": 257}),
+                now=self.now,
+            )
+            self.assertEqual(oversized["status"], "rejected")
+            self.assertIn("history limit", oversized["error"])
+            unknown = server.handle_frame(
+                client.build_frame("history", payload={"cursor": 1}),
+                now=self.now,
+            )
+            self.assertEqual(unknown["status"], "rejected")
+            self.assertIn("unknown fields", unknown["error"])
 
     def test_read_capability_cannot_apply_a_control_operation(self):
         read_only_token = authorize_run(

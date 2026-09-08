@@ -965,3 +965,25 @@ T21 在 T20 的 Profile A lifecycle 之上补的是一个更窄的 Profile B 前
   execution transport 或真实远端 canary；`remote_worker --score` 保持 94/100。
 
 T21 仍是 Unreleased；没有创建 tag、GitHub Release，也没有发布到 PyPI/npm。
+
+### 10.25 当前实现复核：bounded paginated durable replay transport（2026-09-08）
+
+T22 没有扩大 T21 的部署边界，而是修复 growing EventStore history 不能安全一次性
+返回的问题：
+
+- `history` 现在接受可选 `from_sequence` 与 `limit`，每页最多 256 个事件；signed
+  response 返回 `has_more` / `next_sequence`，客户端可以在保持 channel HMAC 与
+  request authorization 的前提下继续只读 replay。
+- 带 explicit request ID 的 control request 进入 bounded local receipt replay index；
+  exact signed retry 返回相同 ControlReceipt 且不追加 lifecycle event，claim change
+  fail-closed。它不是跨崩溃窗口的 distributed exactly-once ledger，EventStore 仍是
+  lifecycle authority。
+- 未知 pagination 参数、越界 cursor、超大 page 和 malformed ledger 都 fail-closed；
+  overall event history 仍有 10,000 条 transport 上限，单个 frame 仍受 1 MiB 边界保护。
+- 新增 pagination、receipt replay ledger round-trip、server restart replay 与参数拒绝
+  测试；durable-run 93 项、全仓 `make test` 935 项（931 pass、4 项可选 OTel skip）。
+  T22 仍不是 mTLS、workspace
+  materialisation、fleet scheduler、Profile B execution transport 或真实远端 canary，
+  `remote_worker --score` 保持 94/100。
+
+T22 仍是 Unreleased；没有创建 tag、GitHub Release，也没有发布到 PyPI/npm。
