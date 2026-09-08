@@ -985,12 +985,18 @@ class AppClient:
         return response
 
     def start(self, *, request_id: str, actor_id: str, prompt: str) -> dict[str, Any]:
+        if not isinstance(prompt, str) or not prompt.strip() or len(prompt) > MAX_PROMPT_CHARS:
+            raise ValueError(f"prompt must be non-empty text of at most {MAX_PROMPT_CHARS} characters")
         return self.call("run.start", request_id=request_id, actor_id=actor_id, prompt=prompt)
 
     def status(self, *, request_id: str, actor_id: str, run_id: str) -> dict[str, Any]:
         return self.call("run.status", request_id=request_id, actor_id=actor_id, run_id=run_id)
 
     def events(self, *, request_id: str, actor_id: str, run_id: str, from_sequence: int = 0, limit: int = MAX_EVENT_PAGE) -> dict[str, Any]:
+        if isinstance(from_sequence, bool) or not isinstance(from_sequence, int) or from_sequence < 0:
+            raise ValueError("from_sequence must be a non-negative integer")
+        if isinstance(limit, bool) or not isinstance(limit, int) or limit < 1 or limit > MAX_EVENT_PAGE:
+            raise ValueError(f"limit must be between 1 and {MAX_EVENT_PAGE}")
         return self.call(
             "run.events",
             request_id=request_id,
@@ -1011,6 +1017,8 @@ class AppClient:
         run_id: str,
         timeout_ms: int = DEFAULT_WAIT_MS,
     ) -> dict[str, Any]:
+        if isinstance(timeout_ms, bool) or not isinstance(timeout_ms, int) or timeout_ms < 0 or timeout_ms > MAX_WAIT_MS:
+            raise ValueError(f"timeout_ms must be between 0 and {MAX_WAIT_MS}")
         return self.call(
             "run.wait",
             request_id=request_id,

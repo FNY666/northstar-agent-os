@@ -1,5 +1,14 @@
 # Northstar Agent OS — initial public component
 
+## Unreleased (forty-seventh batch) — consumer-side bounds (T38)
+
+- Python and Node app-server consumers now reject empty/oversized prompts,
+  invalid event cursors/pages and out-of-range wait timeouts before opening a
+  transport. These checks mirror the advertised protocol limits and preserve
+  server-side validation as the authority.
+- Added offline coverage for the Python client boundary; the Node example
+  remains dependency-free and performs the same bounded checks.
+
 ## Unreleased (forty-sixth batch) — five-branch convergence
 
 - Merged the five requested remote branches into the fixed

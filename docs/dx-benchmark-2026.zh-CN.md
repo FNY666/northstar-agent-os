@@ -1277,3 +1277,17 @@ T37 仍是 Unreleased；没有创建 tag、GitHub Release，也没有发布到 P
   69 个 Markdown 文件通过，remote-worker readiness 仍为 94/100。
 
 这次合并没有创建 release/tag，也没有发布 PyPI/npm/GitHub Release。
+
+### 10.43 当前实现复核：consumer-side bounds（T38，2026-09-08）
+
+T38 让 Python/Node consumer 在 transport 前先执行与 capability projection 对齐的
+输入边界检查：
+
+- 拒绝空 prompt、超过 `max_prompt_chars` 的 prompt、负 event cursor、超出 page 上限
+  的 event 请求，以及超过 `max_wait_ms` 的 wait 请求；server 侧校验仍保留并继续是
+  authoritative guard。
+- Python client 增加 offline boundary tests，Node consumer 保持 dependency-free 并
+  使用同一组协议常量；没有改变 wire operation、host ownership 或 remote boundary。
+- 当前 runtime 623 项，全仓 `make test` 1,040 项（1,036 pass、4 项可选 OTel skip）。
+
+T38 仍是 Unreleased；没有创建 tag、GitHub Release，也没有发布到 PyPI/npm。

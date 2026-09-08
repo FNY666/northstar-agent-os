@@ -12,6 +12,8 @@ export const APP_PROTOCOL = "northstar.agent-app.v1";
 export const APP_CAPABILITY_SCHEMA = "northstar.agent-app.capabilities.v1";
 export const APP_OPERATIONS = ["app.describe", "run.start", "run.status", "run.events", "run.wait", "run.cancel"];
 export const MAX_FRAME_BYTES = 1024 * 1024;
+export const MAX_PROMPT_CHARS = 128_000;
+export const MAX_EVENT_PAGE = 256;
 export const DEFAULT_WAIT_MS = 10_000;
 export const MAX_WAIT_MS = 30_000;
 
@@ -184,6 +186,9 @@ export class AppServerClient {
   }
 
   async start({ requestId, actorId, prompt }) {
+    if (typeof prompt !== "string" || prompt.trim().length === 0 || prompt.length > MAX_PROMPT_CHARS) {
+      throw new TypeError(`prompt must be non-empty text of at most ${MAX_PROMPT_CHARS} characters`);
+    }
     return this.call("run.start", { requestId, actorId, prompt });
   }
 
@@ -191,7 +196,13 @@ export class AppServerClient {
     return this.call("run.status", { requestId, actorId, run_id: runId });
   }
 
-  async events({ requestId, actorId, runId, fromSequence = 0, limit = 256 }) {
+  async events({ requestId, actorId, runId, fromSequence = 0, limit = MAX_EVENT_PAGE }) {
+    if (!Number.isInteger(fromSequence) || fromSequence < 0) {
+      throw new TypeError("fromSequence must be a non-negative integer");
+    }
+    if (!Number.isInteger(limit) || limit < 1 || limit > MAX_EVENT_PAGE) {
+      throw new TypeError(`limit must be between 1 and ${MAX_EVENT_PAGE}`);
+    }
     return this.call("run.events", {
       requestId,
       actorId,
@@ -202,6 +213,9 @@ export class AppServerClient {
   }
 
   async wait({ requestId, actorId, runId, timeoutMs = DEFAULT_WAIT_MS }) {
+    if (!Number.isInteger(timeoutMs) || timeoutMs < 0 || timeoutMs > MAX_WAIT_MS) {
+      throw new TypeError(`timeoutMs must be between 0 and ${MAX_WAIT_MS}`);
+    }
     return this.call("run.wait", {
       requestId,
       actorId,

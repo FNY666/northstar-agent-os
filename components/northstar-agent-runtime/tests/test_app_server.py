@@ -15,6 +15,7 @@ from support import RuntimeTestCase
 from app_server import (
     APP_CAPABILITY_SCHEMA,
     APP_PROTOCOL,
+    MAX_EVENT_PAGE,
     MAX_WAIT_MS,
     AppClient,
     AppServer,
@@ -403,6 +404,18 @@ class AppWireTests(RuntimeTestCase):
                     actor_id="owner",
                     op="run.status",
                 )
+
+    def test_clients_reject_out_of_bound_inputs_before_transport(self):
+        with tempfile.TemporaryDirectory() as directory:
+            client = AppClient(Path(directory) / "app.sock", channel_secret=self.SECRET)
+            with self.assertRaises(ValueError):
+                client.start(request_id="client-empty", actor_id="owner", prompt=" ")
+            with self.assertRaises(ValueError):
+                client.events(request_id="client-sequence", actor_id="owner", run_id="missing", from_sequence=-1)
+            with self.assertRaises(ValueError):
+                client.events(request_id="client-page", actor_id="owner", run_id="missing", limit=MAX_EVENT_PAGE + 1)
+            with self.assertRaises(ValueError):
+                client.wait(request_id="client-wait", actor_id="owner", run_id="missing", timeout_ms=MAX_WAIT_MS + 1)
 
     def test_server_never_accepts_wire_selected_provider_or_workspace(self):
         server = AppServer(self.manager(), channel_secret=self.SECRET)
