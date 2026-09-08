@@ -137,3 +137,40 @@ Remote/hosted-worker readiness scorecard (P3-3) — evidence-based, runnable.
 Per-area (met, total, unmet explanations).
 
 #### `total_score()`
+
+### `ssh_forward`
+
+Source: `components/northstar-agent-interop/ssh_forward.py`
+
+Bounded SSH local-socket forwarding for the Profile A worker channel.
+
+#### `SSHForwardConfig`
+
+Immutable inputs for one SSH local Unix-socket forward.
+
+- `command()`
+  - Return the argv that will be passed to ``Popen(shell=False)``.
+#### `build_ssh_command(config: SSHForwardConfig)`
+
+Build a non-shell SSH argv with the channel's safety defaults.
+
+#### `SSHForwardError`
+
+An expected channel failure with a contract-level status.
+
+#### `SSHForward`
+
+Start and supervise one bounded SSH local-socket forward.
+
+- `command()`
+- `pid()`
+- `ready()`
+- `stderr()`
+- `start()`
+  - Spawn SSH and wait until the local socket accepts a connection.
+- `check()`
+  - Raise if the forward exited or its local socket is no longer usable.
+- `stop()`
+  - Stop the SSH process group and clean up only this instance's socket.
+- `wait_for_exit(timeout_s: float | None=None)`
+  - Wait for SSH to exit; a live forward times out rather than hanging.

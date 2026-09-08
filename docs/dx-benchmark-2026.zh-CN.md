@@ -925,3 +925,22 @@ T19 将 T18 的 CLI replay slice 带到现有零依赖 `session-panel`：
   convenience fingerprint；Node syntax/static tests 继续钉住这些边界。
 
 T19 仍是 Unreleased；没有创建 tag、GitHub Release，也没有发布到 PyPI/npm。
+
+### 10.23 当前实现复核：Profile A SSH forward lifecycle helper（2026-09-08）
+
+T20 开始把 T5b 的 Profile A 从纯 spec 推进为一个仍然保守的本地实现：
+
+- `northstar-agent-interop/ssh_forward.py` 只负责 orchestrator 侧 SSH Unix-socket
+  forward lifecycle：argv-only `ssh -N -T`、`BatchMode=yes`、严格 host-key 检查、
+  `ExitOnForwardFailure=yes`、`ForwardAgent=no`、bounded keepalive/connect/startup
+  deadline；它不执行 remote shell、不复制 workspace、不签发 grant，也不改变 runtime
+  的 JSON-lines 协议。
+- local `sidecar.sock` 必须位于当前用户拥有的 0700 目录；已有路径拒绝覆盖；启动时
+  等待 socket 可连接；SSH 提前退出映射为 `transport_unavailable`，启动 deadline 映射
+  为 `timeout`；cleanup 只删除本实例观察到的 socket inode，避免误删 replacement。
+- loopback fake-SSH/Unix-socket tests 覆盖 command hardening、early exit、timeout、
+  process death、private directory 和 inode replacement；interop 64 项、全仓
+  `make test` 920 项（916 pass、4 项可选 OTel skip）。真实 host-key/worker canary
+  仍未执行，Profile B transport 也未实现；`remote_worker --score` 因此仍为 94/100。
+
+T20 仍是 Unreleased；没有创建 tag、GitHub Release，也没有发布到 PyPI/npm。

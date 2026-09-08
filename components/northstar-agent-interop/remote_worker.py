@@ -122,7 +122,7 @@ CHECKS: list[tuple[str, Callable[[], bool], str]] = [
     ("ops", lambda: _has("def _terminate", _text("northstar-agent-interop", "process_adapter.py")), "process-group termination"),
     ("ops", lambda: _repo_doc("Status: a story, not a system", "docs", "concepts", "northstar-remote-identity.md"), "credential issuance + rotation story (docs/concepts/northstar-remote-identity.md)"),
     ("ops", lambda: _repo_doc("Status: an operator guide, not a product", "docs", "guides", "remote-worker-operations.md"), "deployment/monitoring operator guide (docs/guides/remote-worker-operations.md)"),
-    ("ops", lambda: False, "MISSING: network transport code for a hosted worker (spec: docs/concepts/northstar-remote-transport.md; flips when the Profile A channel helper exists and a real-host canary passed)"),
+    ("ops", lambda: False, "MISSING: complete Profile A transport readiness (local ssh_forward.py helper exists; flips only after strict host-key configuration and a real-host canary pass; Profile B remains open)"),
     ("ops", lambda: False, "MISSING: real (non-fake) end-to-end remote canary run (recipe: examples/remote-canary; flips only after an operator run passes on a real host)"),
 ]
 

@@ -46,9 +46,29 @@ beyond what the sidecar component already ships
    no agent forwarding, strict host keys.
    - The local socket **must** be named `sidecar.sock` — the runtime's
      socket validation requires the canonical filename.
-2. Verify the channel with the deterministic probe (no model, no key):
+2. For a programmatic local lifecycle, use the T20 helper after creating the
+   private directory. It performs no remote shell execution and does not mint
+   authorization:
+
+   ```python
+   from ssh_forward import SSHForward, SSHForwardConfig
+
+   config = SSHForwardConfig(
+       destination="user@worker",
+       local_socket="/tmp/northstar-private/sidecar.sock",
+       remote_socket="/var/run/northstar-codex/sidecar.sock",
+       known_hosts="/home/operator/.ssh/known_hosts",
+   )
+   with SSHForward(config):
+       # point the unchanged runtime/sidecar client at config.local_socket
+       ...
+   ```
+
+   The helper is local-only and loopback-tested; it has not been run against a
+   real worker by this repository.
+3. Verify the channel with the deterministic probe (no model, no key):
    `NS_WORKER=user@worker sh examples/remote-canary/run_remote_canary.sh`.
-3. Run governed work as usual, pointing the runtime at the local socket.
+4. Run governed work as usual, pointing the runtime at the local socket.
 
 ### 1.3 Rotation (from the identity story)
 
@@ -119,10 +139,10 @@ wired yet):
 ## 6. Honesty footer
 
 This guide is unexercised end to end: no CI run, no real deployment. Its
-value is that every mechanism it names already exists and is tested locally
-(contracts, host grants, sidecar framing, durable machinery, audit feed);
-the remaining gap is the transport code itself, which stays open in the T5b
-checklist until a canary has passed on a real host.
+value is that every mechanism it names is either an existing tested boundary
+or the local-only T20 `ssh_forward.py` lifecycle helper (contracts, host grants,
+sidecar framing, durable machinery, audit feed); complete transport readiness,
+Profile B and a real-host canary remain open in the T5b checklist.
 
 Related: [transport spec](../concepts/northstar-remote-transport.md),
 [identity story](../concepts/northstar-remote-identity.md),

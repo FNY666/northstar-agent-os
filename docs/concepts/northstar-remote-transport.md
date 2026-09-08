@@ -1,11 +1,12 @@
 # Remote transport for a hosted worker (T5 specification)
 
-> **Status: specification only.** No transport code ships in this repository
-> and nothing on this page has ever run against a real host. It is the T5
-> answer to the P3-3 ops gap *"network transport for a hosted worker"* — the
-> design an implementer (or the T5b increment) builds from. Readiness
-> measured by `remote_worker.py` stays unchanged by this page: a spec is not
-> a transport.
+> **Status: specification plus a local-only Profile A lifecycle helper.**
+> `ssh_forward.py` now provides the bounded orchestrator-side SSH process
+> lifecycle and loopback tests, but no complete remote transport ships and
+> nothing on this page has ever run against a real host. It is the T5 answer to
+> the P3-3 ops gap *"network transport for a hosted worker"*; the real-host
+> readiness gate remains open. Readiness measured by `remote_worker.py` stays
+> unchanged: a local helper is not a remote canary.
 
 A hosted worker is a **transport variant of the sidecar**, not a new
 governance surface (see [`northstar-remote-worker.md`](northstar-remote-worker.md)).
@@ -68,6 +69,24 @@ Open decisions (must be pinned by the implementer, not by this page):
 SSH vs WireGuard for multi-hop sites; keepalive budget per deployment;
 socket path per runtime user; Windows workers are out of scope.
 
+### 2.1 What T20 implements locally
+
+`ssh_forward.py::SSHForward` is the narrow Profile A lifecycle helper. Its
+`SSHForwardConfig` requires absolute canonical `sidecar.sock` paths, an
+owner-only `0700` local parent, a non-option SSH destination and bounded
+startup/keepalive values. `ssh_forward.py::build_ssh_command` produces an
+argv tuple for `Popen(shell=False)` with `-N -T`, strict host-key checking,
+`BatchMode=yes`, `ExitOnForwardFailure=yes` and `ForwardAgent=no`.
+
+`ssh_forward.py::SSHForward.start` refuses to overwrite an existing path,
+waits for a connectable local Unix socket, and reports an early SSH exit as
+`transport_unavailable` or a startup deadline as `timeout`. `stop` terminates
+the SSH process group and removes only the socket inode observed from this
+instance; a replacement inode is left untouched. The tests use a local fake
+executable and Unix socket pair, so they verify lifecycle mechanics without
+contacting a worker. A real host-key verification and `examples/remote-canary`
+run are still required before this becomes a completed transport.
+
 ## 3. Profile B — container fleets (managed workers, sketch)
 
 The P3-3 evaluation's medium-term option: a container that runs the
@@ -111,9 +130,12 @@ execution, at-least-once on evidence**.
 
 ## 5. What "done" would mean (T5b checklist)
 
-- [ ] Profile A channel helper: spawn/monitor the SSH forward, verify socket
-      readiness, surface ssh exits as `transport_unavailable`; local-only
-      tests over a loopback pair.
+- [x] Local Profile A lifecycle helper: spawn/monitor the SSH forward, verify
+      socket readiness, surface SSH exits as `transport_unavailable`; local-only
+      tests use a loopback Unix socket pair. This does not count as a real-host
+      transport readiness pass.
+- [ ] Complete Profile A transport readiness: strict host-key configuration and
+      the operator canary must pass against a real SSH worker.
 - [ ] Profile B: a network transport around `DurableRunner` (framing reused),
       with identity from the rotation story below.
 - [ ] A real (non-fake) end-to-end canary run against a real SSH worker —

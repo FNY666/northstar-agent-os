@@ -3,7 +3,8 @@
 Northstar deliberately does **not** build a cloud. This document is the
 decision record for wrapping the existing execution model into a remote
 worker, together with the protocol a hosted worker would speak. It is a
-*map*, not a claim: nothing here is implemented or deployed.
+*map*, not a deployment claim: the T20 local channel helper is implemented and
+loopback-tested, but no remote worker is deployed or exercised.
 
 ## Scope: what "remote worker" means here
 
@@ -27,8 +28,9 @@ second class of agent.
   hosted worker needs to survive crashes and report *verifiably*.
 - `northstar-agent-interop` — `process_adapter`/`process_backend` give a
   backend-neutral **process boundary** for version-pinned Codex / Claude Code
-  / Cursor CLIs (disabled by default; no vendor integration), and the canary
-  proves a host-authorized multi-backend handoff chain with fake executors.
+  / Cursor CLIs (disabled by default; no vendor integration), the canary proves
+  a host-authorized multi-backend handoff chain with fake executors, and T20's
+  `ssh_forward.py` provides the local-only Profile A socket lifecycle helper.
 - `audit.ndjson/1` — the canonical audit feed that runtime transcripts,
   durable events and host grants all export into.
 
@@ -88,14 +90,16 @@ issuance + rotation [story](northstar-remote-identity.md) and the
 [operator guide](../guides/remote-worker-operations.md) for deployment and
 monitoring (ops 4/6 = 67%). What remains is genuinely implementation-shaped:
 
-- **network transport *code*** for a hosted worker — the
-  [specification](northstar-remote-transport.md) (Profile A + B) and its
-  T5b checklist exist; the channel helper does not;
+- **complete network transport readiness** for a hosted worker — T20 supplies
+  the local `ssh_forward.py` lifecycle helper and loopback coverage, while the
+  Profile A real-host validation and all Profile B transport code remain open;
 - **a real (non-fake) end-to-end canary *run*** on a real host — the
   operator [recipe](../../examples/remote-canary/README.md) exists and its
   probe is CI-tested against the real socket server, but by design no CI run
   has ever touched a real worker.
 
-The next increment is that T5b implementation, or — if OpenBot/remote-worker
-availability matures — an interop-backed hosted adapter instead. No cloud is
-built by this repository either way.
+The next increment is a real-host Profile A canary and operator sign-off,
+followed by a separately scoped Profile B transport if fleet execution is
+actually needed. If OpenBot/remote-worker availability matures, an
+interop-backed hosted adapter remains an alternative. No cloud is built by this
+repository either way.

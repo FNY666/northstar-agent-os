@@ -62,10 +62,16 @@ class T5DocStatusTests(unittest.TestCase):
             with self.subTest(doc=name):
                 self.assertTrue(path.is_file(), f"{name} doc missing: {path}")
 
-    def test_transport_doc_declares_itself_a_specification(self):
+    def test_transport_doc_declares_local_helper_without_claiming_remote_readiness(self):
         text = _norm(DOCS["transport"].read_text(encoding="utf-8"))
-        for marker in ("Status: specification only", "No transport code ships",
-                       "a spec is not", "has ever run against a real host"):
+        for marker in (
+            "Status: specification plus a local-only Profile A lifecycle helper",
+            "no complete remote transport ships",
+            "local helper is not a remote canary",
+            "has ever run against a real host",
+            "SSHForwardConfig",
+            "real-host readiness gate remains open",
+        ):
             with self.subTest(marker=marker):
                 self.assertIn(marker, text)
 
@@ -119,6 +125,9 @@ class T5AnchorTests(unittest.TestCase):
         ("event_store.py", "EventStore"),
         ("verifier.py", "verify_run_completion"),
         ("verifier.py", "make_final_receipt"),
+        ("ssh_forward.py", "SSHForward"),
+        ("ssh_forward.py", "SSHForwardConfig"),
+        ("ssh_forward.py", "build_ssh_command"),
     )
 
     IDENTITY_ANCHORS = (

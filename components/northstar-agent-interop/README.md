@@ -19,8 +19,9 @@ pip install .                                              # resolves both
 ```
 
 The wheel installs the boundary modules (`interop_contract`, `handoff`,
-`interop_adapter`, `canary`, `process_adapter`, `process_backend`) as top-level
-modules; the version (`0.1.0.dev0`, unreleased) is declared in `pyproject.toml`.
+`interop_adapter`, `canary`, `process_adapter`, `process_backend`,
+`ssh_forward`) as top-level modules; the version (`0.1.0.dev0`, unreleased) is
+declared in `pyproject.toml`.
 
 ## What is standardized
 
@@ -107,12 +108,28 @@ this repository is to wrapping its sidecar execution model into a remote
 worker, measured statically against the tree (36 criteria across contracts,
 host, durable-run, interop, audit, ops; current: 94/100 — kernel areas
 100%, ops 67%). T5 closed two ops gaps with authoritative artifacts (the
-identity/rotation story and the deployment/monitoring guide); the two
-remaining gaps are implementation-shaped (transport code + a real-host
-canary run) and stay MISSING by design. Protocol map and decision record:
+identity/rotation story and the deployment/monitoring guide). T20 adds the
+local-only `ssh_forward.py` Profile A lifecycle helper and loopback tests, but
+the complete transport readiness gap remains MISSING until a real-host canary
+passes; no remote host is contacted by CI. Protocol map and decision record:
 `docs/concepts/northstar-remote-worker.md`; full assessment:
 `docs/dx-remote-worker-assessment.zh-CN.md`. Run it in CI with
 `python3 -m remote_worker --score`.
+
+## Profile A channel helper (T20, local-only)
+
+`ssh_forward.py` owns the narrow orchestrator-side channel lifecycle described
+in the transport spec: it builds an argv-only `ssh -N -T` forward with
+`BatchMode=yes`, `ExitOnForwardFailure=yes`, strict host-key checking, disabled
+agent forwarding, bounded keepalives and connect timeout; it waits for the
+canonical local `sidecar.sock`, reports early SSH exits as
+`transport_unavailable`, and terminates the process group on cleanup.
+
+The local socket parent must already be an owner-only `0700` directory, and an
+existing path is never overwritten. The helper does not execute a remote shell,
+copy a workspace, mint authorization, or change the runtime protocol. Tests
+substitute a local fake executable and a Unix socket pair; the helper has not
+been run against a real worker, so the readiness score remains 94/100.
 
 ## Local CLI process adapter candidate
 

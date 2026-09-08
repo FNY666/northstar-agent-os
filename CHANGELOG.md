@@ -1,5 +1,23 @@
 # Northstar Agent OS — initial public component
 
+## Unreleased (twenty-seventh batch) — Profile A SSH forward lifecycle helper (T20)
+
+- Added `northstar-agent-interop/ssh_forward.py`, a standard-library-only,
+  local lifecycle helper for the Profile A sidecar socket channel. It builds a
+  non-shell `ssh -N -T` argv with strict host-key checking, `BatchMode`,
+  `ExitOnForwardFailure`, disabled agent forwarding, bounded keepalives and
+  connect timeout.
+- The helper requires an owner-only `0700` local socket directory, refuses to
+  overwrite existing paths, waits for a connectable canonical `sidecar.sock`,
+  reports early SSH exits as `transport_unavailable`, and cleans only its own
+  socket inode after process-group termination.
+- Added loopback/fake-SSH lifecycle tests, packaging/API/CI wiring and updated
+  the remote-worker spec and operator guide. Interop now has 64 tests and the
+  repository has 920 tests (916 pass, 4 optional OTel skips). This is not a
+  real-host transport validation: the readiness score remains 94/100 until an
+  operator canary passes; no release, tag, GitHub Release, or PyPI/npm
+  publication was made.
+
 ## Unreleased (twenty-sixth batch) — offline interactive session replay panel (T19)
 
 - Extended the self-contained `examples/session-panel/` viewer with read-only

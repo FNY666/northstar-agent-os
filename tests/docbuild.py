@@ -56,6 +56,7 @@ MANIFEST: dict[str, tuple[str, ...]] = {
         "process_adapter",
         "process_backend",
         "remote_worker",
+        "ssh_forward",
     ),
     "northstar-codex-sidecar": ("sidecar", "transport", "service", "sidecar_socket"),
     "northstar-agent-runtime": (

@@ -112,8 +112,9 @@ can be HMAC-verified when a secret is supplied. Local POSIX writer reconciliatio
 exists for one transcript file, but there is no global transcript lineage,
 distributed/remote replication, or retention policy.
 The roadmap's P3-1 is delivered in two batches: the audit feed above
-(`audit.ndjson/1`, this batch) and policy schema-isation
-(`northstar-policy.toml` versioning, next batch).
+(`audit.ndjson/1`) and policy schema-isation (`northstar-policy.toml` versioning,
+`northstar.policy.v1` with revision tracking). Later T20 transport work remains
+outside this local audit boundary.
 
 ## Reading on
 
