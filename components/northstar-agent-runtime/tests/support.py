@@ -124,6 +124,7 @@ class RuntimeTestCase(unittest.TestCase):
         can_use_tool: Any = None,
         provider: Any = None,
         tracer: Tracer | None = None,
+        budget: Any = None,
         **config_kwargs: Any,
     ) -> AgentRuntime:
         if provider is None:
@@ -142,6 +143,7 @@ class RuntimeTestCase(unittest.TestCase):
             sessions=sessions,
             can_use_tool=can_use_tool,
             tracer=tracer if tracer is not None else self.tracer,
+            budget=budget,
         )
 
     def drive(self, runtime: AgentRuntime, prompt: str = "go") -> RunReport:

@@ -97,12 +97,13 @@
 var RECORD_TYPES = [
   "session_start", "user_prompt", "assistant", "tool_result", "hook",
   "denial", "compact_boundary", "informational", "postconditions",
-  "subagent", "result", "session_end"
+  "checkpoint", "subagent", "result", "session_end"
 ];
 var TYPE_COLOR = {
   session_start: "ok", session_end: "ok", user_prompt: "warn", assistant: "ok",
   tool_result: "ok", hook: "warn", denial: "err", compact_boundary: "warn",
-  informational: "warn", subagent: "ok", result: "ok", postconditions: "audit"
+  informational: "warn", subagent: "ok", result: "ok", postconditions: "audit",
+  checkpoint: "audit"
 };
 var MAX_PREVIEW = 300;
 var MAX_RAW = 20000;
@@ -159,6 +160,14 @@ function textBlocks(rec) { return Array.isArray(rec.content) ? rec.content : [];
 function summarize(rec) {
   if (rec.type === "session_start" || rec.type === "session_end") {
     return [String(rec.subtype || ""), rec.content ? String(rec.content) : ""].filter(Boolean).join(" — ");
+  }
+  if (rec.type === "checkpoint") {
+    // A resumable boundary: what a fork would inherit if it started here.
+    var c = rec;
+    return "checkpoint \u2014 " + c.turns + " turn(s), " + c.transcript_len + " message(s), $" +
+      Number(c.cost_usd || 0).toFixed(6) + " spent\ntool_calls=" + c.tool_calls +
+      " denials=" + (c.denials || 0) + " digest=" + String(c.transcript_digest || "").slice(0, 12) +
+      (c.run_id ? " run=" + c.run_id : "");
   }
   if (rec.type === "postconditions") {
     // The independent end-of-run verdict: which workspace claims held, which did not.
@@ -227,6 +236,14 @@ function previewOf(text) {
 
 function isErrorRecord(rec) {
   if (isAudit(rec)) { return rec.level === "error"; }
+  if (rec.type === "checkpoint") {
+    // A resumable boundary: what a fork would inherit if it started here.
+    var c = rec;
+    return "checkpoint \u2014 " + c.turns + " turn(s), " + c.transcript_len + " message(s), $" +
+      Number(c.cost_usd || 0).toFixed(6) + " spent\ntool_calls=" + c.tool_calls +
+      " denials=" + (c.denials || 0) + " digest=" + String(c.transcript_digest || "").slice(0, 12) +
+      (c.run_id ? " run=" + c.run_id : "");
+  }
   if (rec.type === "postconditions") {
     // The independent end-of-run verdict: which workspace claims held, which did not.
     var d = rec.data && typeof rec.data === "object" ? rec.data : {};

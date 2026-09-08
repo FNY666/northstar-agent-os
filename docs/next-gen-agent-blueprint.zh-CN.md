@@ -49,7 +49,7 @@
 |---|---|---|---|
 | 策略即代码（settings 里写权限/钩子/上限） | Claude Code | `.northstar/config.toml` + `[[hooks]]`，收紧型、fail-closed | ✅ 本批补齐 hooks 面 |
 | 契约化的 run↔执行关联 | 无（Northstar 独有零件） | `contract_bridge`：单一 wire 定义 + 绑定交叉校验 | ✅ 本批 |
-| 检查点/可恢复执行 | LangGraph / Temporal / v2 | 复用 durable-run 的 `EventStore`+`Lease`+`verifier` 接到 turn 边界 | ⛔ 未做（下批 T-durable） |
+| 检查点/可恢复执行 | LangGraph / Temporal / v2 | `checkpoints.py`：turn 边界记录（长度+前缀摘要+已消耗计数器），恢复时**继承**而非重置 | ✅ 已落地（第十四批续） |
 | 多模型 | OpenAI 100+ / Cursor | `providers/openai_compat.py`：一个 Chat Completions 适配器覆盖一片模型 | ✅ 已落地（P1-2） |
 | 独立完成判定 | 无人做（各家都把"模型自述"当完成） | `postconditions.py`：`--verify` / `[[verify]]`，运行前后快照比对 | ✅ 已落地 |
 | token 级流式 | 全员 | `StreamDelta` 事件，仍保证唯一 ResultMessage | 🔧 待做 |
@@ -58,7 +58,7 @@
 | elicitation ↔ 审批回合 | MCP 特性 | 把"服务器问用户"映射到权限门（**这是别人没有的角度**） | 🔧 待做，优先级高 |
 | OS 级沙箱 | Claude seatbelt/bubblewrap、Gemini gVisor | 可选 `bwrap` 包装器（只读 bind + no net + cgroup），CI 真跑 | 🔧 待做（P1-4，C1 的前置） |
 | 技能供应链校验 | 无人做（第三方审计：99% 坏味道/36% 缺陷） | `northstar skills check`：frontmatter 白名单、注入模式、来源 digest | 🔧 待做（差异化最高） |
-| 会话 rewind/fork | Claude /rewind、LangGraph time-travel | fork-on-read：从 transcript 任意点分叉新 session，**绝不回写**旧文件 | 🔧 待做（与 append-only 兼容，下一批） |
+| 会话 rewind/fork | Claude /rewind、LangGraph time-travel | `--resume-from`：从任一检查点分叉新 session（摘要校验），**绝不回写**旧文件 | ✅ 已落地（与 append-only 兼容） |
 
 ---
 
@@ -108,6 +108,16 @@
 
 **全仓 890 项测试全绿**（sidecar 51 / run-contract 41 / host 37 / durable-run 65 / interop 54 / runtime 596 / 文档 46），离线、无 key、无网络。
 
+### 6.15 第十四批续（F3：可恢复执行）
+
+| 项 | 内容 | 验证 |
+|---|---|---|
+| F3 | `checkpoints.py` + `--checkpoint-turns` / `--resume-from` / `--resume-record`；恢复时**继承**花费与计数器；fork 写新文件、父文件字节不变；前缀摘要不符即拒跑；SDK 平价 | `tests/test_checkpoints.py` 26 项，其中"预算不能被 resume 洗掉"直接断言 exit 4 |
+
+**这一项的真实动机不是便利，是漏洞**：上限是 per-run 的，而 `--resume` 会新开一次运行——
+所以"恢复"一直是绕过 `max_budget_usd` 的后门。现在它必须把父花费带过来；
+嵌入式调用忘了传 seed 过的 `Budget` 会直接报错，而不是拿到更宽的额度。
+
 ### 6.2 第十四批（多模型 + 独立验证）
 
 | 项 | 内容 | 验证 |
@@ -118,7 +128,7 @@
 
 全仓 954 项测试全绿（runtime 660）。**未做**：流式（`StreamDelta`）、`skills check`、F3。
 
-下一批顺序改为：**T-durable（F3）→ skills check → P1-1 MCP 代际 + elicitation-as-approval → 流式**。理由不变：F3 是"有零件没整机"里最亏的一块；MCP 代际是唯一的"过期风险"；skills check 是差异化收益最高、依赖最少的一条。
+**F3 已完成**（见 §6.15）。下一批顺序改为：**skills check → P1-1 MCP 代际 + elicitation-as-approval → 流式 → durable-run 与本模块检查点的统一（lease/verifier 复用）**。理由：skills check 差异化最高、依赖最少；MCP 代际是唯一会持续变大的"过期风险"；把 runtime 的 checkpoint 与 durable-run 的 `EventStore`/`Lease` 统一是最后的"零件合整机"，需要在两个组件之间定一个接口，值得单独一批。
 
 ---
 

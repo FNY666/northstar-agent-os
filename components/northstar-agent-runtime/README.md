@@ -339,6 +339,47 @@ The key comes from the environment only (`OPENAI_API_KEY`, `OPENAI_BASE_URL`) - 
 flag would put a credential in the process list and in CI logs. A `base_url` with no
 key still works, because local servers ignore it while the SDK demands one.
 
+## Checkpoints and forking a session
+
+`--resume <id>` replays a transcript and keeps writing to the same file. That was
+missing two things, one of which was a governance hole:
+
+- **ceilings were per-run**, so resuming a run that had already spent `$4.90` of a
+  `$5` budget handed it `$5` again. Resume was an escape hatch around the budget.
+- **there was no boundary to resume from**, so "go back to turn 6 and take the other
+  branch" was not expressible.
+
+`--checkpoint-turns N` appends one record per N turn boundaries: transcript length,
+the digest of exactly that prefix, and the consumed turns / tool calls / cost.
+`--resume-from <id>` then cuts the replayed transcript to that length, **verifies the
+digest**, and starts with the parent's counters and spend:
+
+```console
+$ northstar-agent-runtime run --session-dir S --checkpoint-turns 1 ...      # writes boundaries
+$ northstar-agent-runtime run --session-dir S --resume-from <parent-id> \
+    --max-budget-usd 1
+[error_max_budget_usd] turns=1 ...      # exit 4: the parent's spend carried over
+```
+
+Four properties worth having explicitly:
+
+- **A digest mismatch refuses the run.** If the prefix is not byte-identical to what
+  was recorded, the fork point describes a different history, so continuing from it
+  would attribute the wrong numbers to the wrong run.
+- **A fork is a child, not an edit.** The new session gets its own file, and its
+  `session_start` record names the parent and the checkpoint; the parent transcript
+  is never opened for writing. Two forks from one checkpoint are two comparable files.
+- **`max_turns` bounds the lineage**, not the process: a resumed run numbers its
+  turns from where the parent stopped and gets only the remainder.
+- **An embedder who forgets to carry the cost gets an error, not a wider ceiling.**
+  `resume_from` without a seeded `Budget` raises, which is what makes the invariant
+  hold outside this repository.
+
+Checkpoints are off by default: a new record type in every transcript is a format
+change, and a format change should be chosen rather than inherited. Both paths exist
+in the SDK (`RunOptions.checkpoint_turns` / `RunOptions.resume_from`) and the record
+renders in `examples/session-panel`.
+
 ## Postconditions: verifying the work, not the claim
 
 A run ending `success` has always meant only *the model stopped asking for tools*.
@@ -559,6 +600,7 @@ size (`result_chars`), so truncation is visible instead of inferred.
 | `command_hooks.py`  | repository-declared command hooks: vetted scripts, veto events only, never a shell string |
 | `contract_bridge.py`| request-id derivation and the run-document cross-check on the sidecar boundary |
 | `postconditions.py` | independent end-of-run workspace checks (`exists`/`absent`/`changed`/`unchanged`/`contains`) |
+| `checkpoints.py`    | turn-boundary checkpoints: verified resume, inherited ceilings, fork-on-read |
 | `cli.py`            | one governed run from a shell, with distinct exit codes              |
 | `doctor.py`         | `cli doctor` environment self-checks (no requests, no file writes)   |
 | `session_view.py`   | `cli sessions list/show` - the read-back half of the transcripts     |

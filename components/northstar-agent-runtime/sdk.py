@@ -69,6 +69,8 @@ class RunOptions:
     max_output_tokens: int = 4096
     redact_tool_output: bool = False  # omit tool output bodies from the transcript
     workspace_agents: bool = True  # register .northstar/agents/*.md definitions
+    checkpoint_turns: int = 0  # append a resumable boundary record every N turns (0 = off)
+    resume_from: str | None = None  # session id to fork from its latest checkpoint; the parent file is never written
 
 
 @dataclass
@@ -133,7 +135,7 @@ def _apply_read_only(registry: Any, disallowed: list[str]) -> list[str]:
     return list(dict.fromkeys([*disallowed, *names]))
 
 
-def _build(options: RunOptions, resume: str | None = None) -> tuple[Any, Any]:
+def _build(options: RunOptions, resume: str | None = None) -> tuple[Any, Any, list[Any]]:
     """Assemble (runtime, session store) from options; raises ValueError on bad input.
 
     ``resume`` reopens the persisted session under its own id (the transcript is
@@ -178,14 +180,65 @@ def _build(options: RunOptions, resume: str | None = None) -> tuple[Any, Any]:
     if options.system_prompt is not None:
         config_kwargs["system_prompt"] = options.system_prompt
     provider = _build_provider(options)
-    store = SessionStore(options.session_dir or None, session_id=resume or None)
+
+    # A checkpoint resume forks: new session id, new file, counters and cost carried
+    # over from the parent, and the parent transcript never opened for writing.
+    resume_transcript: list[Any] = []
+    budget: Any = None
+    if options.resume_from:
+        from budget import Budget
+        from checkpoints import CheckpointError, select as select_checkpoint
+        from providers.base import Usage
+
+        if not options.session_dir:
+            raise ValueError("resume_from needs session_dir to read the parent transcript from")
+        try:
+            from loop import AgentRuntime as _AR, RuntimeConfigurationError as _RCE  # noqa: F401 - parity of the raised type
+
+            parent_store = SessionStore(options.session_dir, session_id=options.resume_from)
+            records, _dropped = parent_store.read(options.resume_from)
+            checkpoint = select_checkpoint(records)
+        except (CheckpointError, OSError, ValueError) as error:
+            raise ValueError(f"cannot resume from {options.resume_from!r}: {error}") from error
+        if checkpoint is None:
+            raise ValueError(
+                f"session {options.resume_from!r} has no checkpoints: run it with checkpoint_turns=N first"
+            )
+        config_kwargs["resume_from"] = checkpoint
+        config_kwargs["parent_session"] = options.resume_from
+        config_kwargs["max_turns"] = max(int(options.max_turns), checkpoint.turns)
+        data = checkpoint.usage
+        budget = Budget(
+            max_budget_usd=options.max_budget_usd,
+            total_cost_usd=checkpoint.cost_usd,
+            total_usage=Usage(
+                input_tokens=int(data.get("input_tokens", 0) or 0),
+                output_tokens=int(data.get("output_tokens", 0) or 0),
+                cache_read_input_tokens=int(data.get("cache_read_input_tokens", 0) or 0),
+                cache_creation_input_tokens=int(data.get("cache_creation_input_tokens", 0) or 0),
+            ),
+        )
+        store = SessionStore(options.session_dir or None, session_id=None)
+        resume_transcript = store.transcript(options.resume_from)
+    else:
+        store = SessionStore(options.session_dir or None, session_id=resume or None)
+        if resume:
+            resume_transcript = store.transcript(resume)
+    if options.checkpoint_turns:
+        config_kwargs["checkpoint_turns"] = options.checkpoint_turns
     config_kwargs["session_id"] = store.session_id
-    runtime = AgentRuntime(provider=provider, config=RuntimeConfig(**config_kwargs), tools=registry, sessions=store, agents=agents)
-    return runtime, store
+    runtime = AgentRuntime(
+        provider=provider,
+        config=RuntimeConfig(**config_kwargs),
+        tools=registry,
+        sessions=store,
+        agents=agents,
+        budget=budget,
+    )
+    return runtime, store, resume_transcript
 
 
-def _events(runtime: Any, store: Any, prompt: str, resume_id: str | None = None) -> Iterator[dict[str, Any]]:
-    resume = store.transcript(resume_id) if resume_id else None
+def _events(runtime: Any, prompt: str, resume: Sequence[Any] | None = None) -> Iterator[dict[str, Any]]:
     for event in runtime.run(prompt, resume=resume):
         yield event_to_dict(event)
 
@@ -198,8 +251,8 @@ def stream_run(options: RunOptions, resume: str | None = None) -> Iterator[dict[
     a persisted session (``options.session_dir`` must be set) to continue from
     its transcript.
     """
-    runtime, store = _build(options, resume=resume)
-    yield from _events(runtime, store, options.prompt, resume_id=resume)
+    runtime, _store, resume_transcript = _build(options, resume=resume)
+    yield from _events(runtime, options.prompt, resume_transcript)
 
 
 def run(options: RunOptions, resume: str | None = None) -> RunReport:
@@ -207,10 +260,10 @@ def run(options: RunOptions, resume: str | None = None) -> RunReport:
 
     ``resume`` continues a persisted session (see :func:`stream_run`).
     """
-    runtime, store = _build(options, resume=resume)
+    runtime, store, resume_transcript = _build(options, resume=resume)
     events: list[dict[str, Any]] = []
     result: dict[str, Any] | None = None
-    for event_dict in _events(runtime, store, options.prompt, resume_id=resume):
+    for event_dict in _events(runtime, options.prompt, resume_transcript):
         events.append(event_dict)
         if event_dict.get("type") == "result":
             result = event_dict

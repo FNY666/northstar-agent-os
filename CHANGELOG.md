@@ -1,5 +1,29 @@
 # Northstar Agent OS — initial public component
 
+## Unreleased (fourteenth batch, continued) — resumable turn boundaries (F3)
+
+- **`checkpoints.py` + `--checkpoint-turns` / `--resume-from`.** A turn boundary can
+  now be recorded (transcript length, digest of that exact prefix, consumed
+  turns/tool calls/cost) and resumed from. This closed a real hole, not just an
+  inconvenience: ceilings were per-run and `--resume` started a new run, so resuming
+  a session that had spent $4.90 of a $5 budget handed it $5 again — resume was an
+  escape hatch around `max_budget_usd`. A resumed run now *inherits* the spend, the
+  turn number (so `max_turns` bounds the lineage, not the process) and the tool-call
+  count; an embedder who forgets to seed the `Budget` gets a configuration error
+  instead of a wider ceiling.
+- **Fork-on-read, never rewind-in-place.** `--resume-from` writes a new session file
+  whose `session_start` names the parent and the checkpoint; the parent transcript is
+  never modified, and a digest mismatch at the cut refuses the run rather than
+  attributing numbers to the wrong history. `--resume` keeps the old append-in-place
+  behaviour, and the two flags are mutually exclusive because they disagree about the
+  parent file. A `--checkpoint-turns` value that could never fire is refused: a
+  cadence that writes no records would leave the operator believing the run was
+  resumable.
+- Protocol addition: 13th session record type `checkpoint` (panel renders it), still
+  opt-in so no transcript changes shape unless asked. SDK parity via
+  `RunOptions.checkpoint_turns` / `resume_from`. Runtime 660 → 683 tests; repository
+  977, all offline.
+
 ## Unreleased (fourteenth batch) — many models, and a verdict that is not the model's
 
 Continued the blueprint's non-conflicting debt (`docs/next-gen-agent-blueprint.zh-CN.md`

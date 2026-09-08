@@ -132,6 +132,13 @@ def _add_run_arguments(parser: argparse.ArgumentParser) -> None:
     policy.add_argument("--allow-nested-delegation", action="store_true", help="subagents may delegate one level deeper")
     policy.add_argument("--halt-on-denial", action="store_true", help="end the run with error_permission_denied when a call is refused")
     policy.add_argument(
+        "--checkpoint-turns",
+        type=int,
+        default=0,
+        metavar="N",
+        help="append a resumable checkpoint every N turn boundaries (0 = off); a resumed run inherits the consumed turns, tool calls and cost",
+    )
+    policy.add_argument(
         "--verify",
         action="append",
         default=[],
@@ -176,7 +183,20 @@ def _add_run_arguments(parser: argparse.ArgumentParser) -> None:
     output.add_argument("--quiet", action="store_true", help="print only the final result line")
     output.add_argument("--trace", action="store_true", help="print the span tree afterwards")
     output.add_argument("--session-dir", default="", help="append an auditable JSONL transcript here")
-    output.add_argument("--resume", default="", help="session id to continue from --session-dir")
+    output.add_argument("--resume", default="", help="session id to continue from --session-dir (appends to that same transcript)")
+    output.add_argument(
+        "--resume-from",
+        default="",
+        metavar="SESSION_ID",
+        help="fork a new session from a checkpoint in --session-dir: the parent transcript is never modified",
+    )
+    output.add_argument(
+        "--resume-record",
+        type=int,
+        default=None,
+        metavar="INDEX",
+        help="with --resume-from: resume from the checkpoint at this transcript record index (default: the latest)",
+    )
     output.add_argument("--redact-tool-output", action="store_true", help="record tool results in the session without output bodies")
     output.add_argument("--show-pricing", action="store_true", help="print the pricing decision and exit")
     output.add_argument("--dry-run", action="store_true", help="validate the configuration and print what a run would do, then exit without sending any request (provider, model, and sidecar are not touched)")
@@ -234,6 +254,19 @@ def resolve_model(provider: str, model: str = "") -> str:
             "models; use --provider openai for Chat Completions endpoints"
         )
     return chosen
+
+
+def checkpoint_usage(checkpoint: Any) -> Any:
+    """The parent's token totals as a Usage, so a resumed run's cost view is continuous."""
+    from providers.base import Usage
+
+    data = getattr(checkpoint, "usage", None) or {}
+    return Usage(
+        input_tokens=int(data.get("input_tokens", 0) or 0),
+        output_tokens=int(data.get("output_tokens", 0) or 0),
+        cache_read_input_tokens=int(data.get("cache_read_input_tokens", 0) or 0),
+        cache_creation_input_tokens=int(data.get("cache_creation_input_tokens", 0) or 0),
+    )
 
 
 def _build_provider(args: argparse.Namespace) -> Any:
@@ -674,7 +707,69 @@ def _run(args: argparse.Namespace) -> int:
         config_kwargs["sidecar_socket"] = args.sidecar_socket
         config_kwargs["sidecar_timeout_ms"] = args.sidecar_timeout_ms
 
-    store = SessionStore(args.session_dir or None, session_id=args.resume or None)
+    if args.checkpoint_turns < 0:
+        print("configuration error: --checkpoint-turns must be >= 0 (0 disables checkpoints)", file=sys.stderr)
+        return USAGE_ERROR
+    if args.checkpoint_turns and args.checkpoint_turns > args.max_turns:
+        # A cadence that can never fire would leave the operator believing the run
+        # was resumable when no record was ever written.
+        print(
+            f"configuration error: --checkpoint-turns {args.checkpoint_turns} exceeds --max-turns {args.max_turns}, "
+            "so no checkpoint could ever be written",
+            file=sys.stderr,
+        )
+        return USAGE_ERROR
+    if args.resume_record is not None and not args.resume_from:
+        print("configuration error: --resume-record only means something with --resume-from", file=sys.stderr)
+        return USAGE_ERROR
+    if args.resume and args.resume_from:
+        print(
+            "configuration error: choose one of --resume (append to the same transcript) or "
+            "--resume-from (fork a new session from a checkpoint); they disagree about the parent file",
+            file=sys.stderr,
+        )
+        return USAGE_ERROR
+    if args.resume_from and not args.session_dir:
+        print("configuration error: --resume-from needs --session-dir to read the parent transcript from", file=sys.stderr)
+        return USAGE_ERROR
+
+    from budget import Budget as _Budget
+
+    resume_budget: Any = None
+    if args.resume_from:
+        from checkpoints import CheckpointError, select as select_checkpoint
+
+        _parent_store = SessionStore(args.session_dir, session_id=args.resume_from)
+        try:
+            _records, _dropped = _parent_store.read(args.resume_from)
+            checkpoint = select_checkpoint(_records, record_index=args.resume_record)
+        except (CheckpointError, OSError, ValueError) as error:
+            print(f"configuration error: cannot resume from {args.resume_from!r}: {error}", file=sys.stderr)
+            return USAGE_ERROR
+        if checkpoint is None:
+            print(
+                f"configuration error: session {args.resume_from!r} has no checkpoints "
+                f"(run it with --checkpoint-turns N to make boundaries resumable)",
+                file=sys.stderr,
+            )
+            return USAGE_ERROR
+        config_kwargs["resume_from"] = checkpoint
+        # A fork gets its own id and its own file; the parent stays byte-for-byte
+        # what it was. --resume keeps the older append-in-place behaviour.
+        config_kwargs["parent_session"] = args.resume_from
+        config_kwargs["max_turns"] = max(args.max_turns, checkpoint.turns)
+        # The ceiling travels with the lineage: the resumed run starts *at* what the
+        # parent had already spent, so resuming cannot hand out a fresh budget.
+        resume_budget = _Budget(
+            max_budget_usd=args.max_budget_usd,
+            total_cost_usd=checkpoint.cost_usd,
+            total_usage=checkpoint_usage(checkpoint),
+        )
+        store = SessionStore(args.session_dir or None, session_id=None)
+    else:
+        store = SessionStore(args.session_dir or None, session_id=args.resume or None)
+    if args.checkpoint_turns:
+        config_kwargs["checkpoint_turns"] = args.checkpoint_turns
     config_kwargs["session_id"] = store.session_id
     try:
         config = RuntimeConfig(**config_kwargs)
@@ -716,6 +811,7 @@ def _run(args: argparse.Namespace) -> int:
         sessions=store,
         agents=agents,
         hooks=hook_registry,
+        budget=resume_budget,
     )
 
     if args.show_pricing:
@@ -759,7 +855,10 @@ def _run(args: argparse.Namespace) -> int:
             print(f"configuration error: {error}", file=sys.stderr)
             return USAGE_ERROR
     try:
-        resume = store.transcript(args.resume) if args.resume else None
+        if args.resume_from:
+            resume = store.transcript(args.resume_from)
+        else:
+            resume = store.transcript(args.resume) if args.resume else None
         exit_code = 0
         result = None
         for event in runtime.run(prompt, resume=resume):
