@@ -64,3 +64,36 @@ def write_bundle(bundle:EvidenceBundle,path:Path|str)->None:
 def read_bundle(path:Path|str)->EvidenceBundle:
     try: return EvidenceBundle.from_dict(json.loads(Path(path).read_text(encoding='utf-8')))
     except (OSError,json.JSONDecodeError,EvidenceError) as exc: raise EvidenceError('bundle file invalid') from exc
+
+
+def build_lineage_bundle(events):
+    """Commit a sanitized lineage sequence plus its terminal identity."""
+    events=list(events)
+    if not events: raise EvidenceError('empty lineage')
+    first=events[0]; last=events[-1]
+    if not hasattr(first,'to_dict') or not hasattr(last,'to_dict'): raise EvidenceError('lineage events required')
+    payloads=[event.to_dict() for event in events]
+    base=build_bundle(payloads)
+    return LineageEvidenceBundle(base.root_digest,base.leaf_count,base.schema_version,base.leaf_digests,first.route_id,first.sequence,last.sequence,last.event_digest)
+
+@dataclass(frozen=True)
+class LineageEvidenceBundle(EvidenceBundle):
+    route_id: str = ''
+    first_sequence: int = 0
+    last_sequence: int = 0
+    terminal_event_digest: str = ''
+    def to_dict(self):
+        return {**super().to_dict(),'route_id':self.route_id,'first_sequence':self.first_sequence,'last_sequence':self.last_sequence,'terminal_event_digest':self.terminal_event_digest}
+    @classmethod
+    def from_dict(cls,v):
+        required={'route_id','first_sequence','last_sequence','terminal_event_digest'}
+        if not required.issubset(set(v)): raise EvidenceError('lineage bundle fields invalid')
+        base=EvidenceBundle.from_dict({k:v[k] for k in ('schema_version','root_digest','leaf_count','leaf_digests')})
+        if not isinstance(v['route_id'],str) or not v['route_id'] or not isinstance(v['first_sequence'],int) or not isinstance(v['last_sequence'],int) or v['first_sequence']<1 or v['last_sequence']<v['first_sequence'] or not isinstance(v['terminal_event_digest'],str): raise EvidenceError('lineage binding invalid')
+        return cls(base.root_digest,base.leaf_count,base.schema_version,base.leaf_digests,v['route_id'],v['first_sequence'],v['last_sequence'],v['terminal_event_digest'])
+
+def verify_lineage_bundle(bundle,events):
+    if not isinstance(bundle,LineageEvidenceBundle): raise EvidenceError('lineage bundle required')
+    if not events or not hasattr(events[0],'route_id') or not hasattr(events[-1],'event_digest') or bundle.route_id != events[0].route_id or bundle.first_sequence != events[0].sequence or bundle.last_sequence != events[-1].sequence or bundle.terminal_event_digest != events[-1].event_digest: raise EvidenceError('lineage binding mismatch')
+    rebuilt=build_lineage_bundle(events)
+    if rebuilt.root_digest != bundle.root_digest or rebuilt.leaf_digests != bundle.leaf_digests: raise EvidenceError('lineage evidence root mismatch')
