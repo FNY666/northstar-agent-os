@@ -1056,3 +1056,18 @@ T25 开始补“可嵌入 harness / background run”这一产品面，但刻意
   skip）；`remote_worker --score` 仍为 94/100。
 
 T25 仍是 Unreleased；没有创建 tag、GitHub Release，也没有发布到 PyPI/npm。
+
+### 10.29 当前实现复核：app-server consumer path（T25 follow-up，2026-09-08）
+
+本次 follow-up 不扩大部署边界，只把已经存在的本地 app-server 变成可复制的
+consumer path，并收紧客户端的 wire 入口：
+
+- `AppClient.call()` 拒绝通过 `**fields` 覆盖 `protocol`、`op`、request/actor id
+  或 `auth` 等认证字段，避免通用 helper 被调用方不小心变成请求重写器。
+- 新增 `examples/app-server/run_offline.py` 与 README：host 注入 scripted
+  `runtime_factory`，启动 owner-only Unix socket，读取 bounded events，并用同一个
+  request ID 验证 start replay。示例不需要 API key、模型 SDK、网络或远端 worker。
+- English/中文入口和 examples index 已同步；runtime 614 项、全仓 `make test` 952 项
+  （948 pass、4 项可选 OTel skip）。
+
+T25 follow-up 仍是 Unreleased；没有创建 tag、GitHub Release，也没有发布到 PyPI/npm。

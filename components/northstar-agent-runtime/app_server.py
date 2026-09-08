@@ -38,6 +38,7 @@ MAX_FRAME_BYTES = 1_048_576
 MAX_EVENT_PAGE = 256
 DEFAULT_EVENT_RETENTION = 512
 DEFAULT_ACTIVE_RUNS = 8
+_RESERVED_CLIENT_FIELDS = frozenset({"protocol", "op", "request_id", "actor_id", "auth"})
 _ID_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$")
 
 
@@ -611,7 +612,16 @@ def _prepare_socket_parent(parent: Path) -> None:
 
 
 def _json_line(payload: Mapping[str, Any]) -> bytes:
-    return (json.dumps(dict(payload), ensure_ascii=False, sort_keys=True, separators=(",", ":")) + "\n").encode("utf-8")
+    return (
+        json.dumps(
+            dict(payload),
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+            allow_nan=False,
+        )
+        + "\n"
+    ).encode("utf-8")
 
 
 class AppClient:
@@ -625,6 +635,9 @@ class AppClient:
         self.timeout = float(timeout)
 
     def call(self, operation: str, *, request_id: str, actor_id: str, **fields: Any) -> dict[str, Any]:
+        reserved = _RESERVED_CLIENT_FIELDS.intersection(fields)
+        if reserved:
+            raise ValueError(f"client fields cannot override reserved wire fields: {', '.join(sorted(reserved))}")
         request: dict[str, Any] = {
             "protocol": APP_PROTOCOL,
             "op": operation,

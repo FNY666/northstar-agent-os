@@ -22,7 +22,7 @@ Northstar 面向希望 AI 同事在明确边界内运行的开发者，而不是
 
 - `../components/northstar-codex-sidecar/` — 本地 Unix socket 服务，负责校验请求，以 read-only 模式运行 Codex，限制输入和输出，脱敏错误，清理超时进程组，并返回结构化状态。
 - `../components/northstar-run-contract/` — 版本化的 Run Request/Receipt 合同、带有效期的 HMAC Run Binding，以及把已验证运行交给 Sidecar 的严格适配边界。
-- `../components/northstar-agent-runtime/` — 受治理的智能体循环：事件流、十个生命周期钩子、三层权限门、轮次/工具调用/美元预算三项独立上限、子智能体、仅追加会话、路径级 workspace 变更 receipt、有界内容寻址 checkpoint（inspect/diff/rewind/fork）、安全边界压缩、MCP stdio 工具传输、AGENTS.md、策略文件和可移植 `SKILL.md` 技能包。技能只读、默认拒绝，所有工具仍经过权限门和 hooks。
+- `../components/northstar-agent-runtime/` — 受治理的智能体循环：事件流、十个生命周期钩子、三层权限门、轮次/工具调用/美元预算三项独立上限、子智能体、仅追加会话、路径级 workspace 变更 receipt、有界内容寻址 checkpoint（inspect/diff/rewind/fork）、安全边界压缩、MCP stdio 工具传输、AGENTS.md、策略文件、可移植 `SKILL.md` 技能包，以及实验性的 host-controlled 本地 app-server（HMAC Unix JSON-lines 后台运行）。技能只读、默认拒绝，所有工具仍经过权限门和 hooks；该 app-server 不是调度器或远端 worker。
 - `../components/northstar-host/` — 主机侧默认拒绝授权与 opaque `0700` 工作区候选实现；它重新验证绑定和授权，但不执行命令。
 - `../components/northstar-durable-run/` — Run/Step/Event 合同、追加历史、checkpoint、lease、逐调用授权和独立后置校验的本地纵向切片；不是生产调度器或 sandbox。
 - `../components/northstar-agent-interop/` — 后端中立的 Agent attestation、受限 handoff、opaque context 和 typed receipt 边界；尚未连接真实厂商后端。

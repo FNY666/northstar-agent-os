@@ -1,5 +1,18 @@
 # Northstar Agent OS — initial public component
 
+## Unreleased (thirty-third batch) — local app-server consumer path (T25 follow-up)
+
+- Hardened `AppClient.call()` so callers cannot override authenticated reserved
+  fields (`protocol`, `op`, request/actor ids or `auth`) through arbitrary
+  keyword fields.
+- Added an offline `examples/app-server/` recipe that starts the private Unix
+  JSON-lines server, observes a bounded run and demonstrates request-id replay.
+  Updated the English and Chinese entry points and examples index; this remains
+  an embedded local surface, not a scheduler, remote worker or release.
+- Runtime now has 614 tests; repository `make test` has 952 tests (948 pass,
+  4 optional OTel skips). No release tag, GitHub Release, PyPI/npm publication
+  or real remote execution claim was made.
+
 ## Unreleased (thirty-second batch) — host-controlled local app-server (T25)
 
 - Added an experimental standard-library `RunManager` and authenticated Unix

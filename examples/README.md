@@ -12,6 +12,7 @@ of the product.
 | [session-panel](session-panel/README.md) | offline viewer for session transcripts and audit exports — one self-contained HTML file, drag-and-drop, no server and no network (fingerprint + stats + read-only replay timeline) | open `examples/session-panel/session-panel.html` in a browser |
 | [observability](observability/README.md) | local trace backend for the runtime — Jaeger + Grafana over docker compose, with the `otel_bootstrap.py` provider seam; model turns stay scripted/offline; needs Docker + one pip extra | `docker compose -f examples/observability/docker-compose.yml up -d` |
 | [sdk](sdk/README.md) | embed one governed run in your own Python via `sdk.run()` — no subprocess, no API key; same gate refuses an unallowed Write | `python3 examples/sdk/run_sdk_demo.py` |
+| [app-server](app-server/README.md) | host-controlled local background run over an authenticated Unix JSON-lines socket — bounded events and request-id replay, no scheduler or remote worker | `python3 examples/app-server/run_offline.py` |
 | [ci-readonly-review](ci-readonly-review/README.md) | consumer CI recipe: governed, read-only agent review of a pull request, capped and audited; a template for *your* pipeline, not wired into this repository's CI | copy `run_review.sh` into your repo and read its comments |
 
 Picking the right starting point:
@@ -21,6 +22,9 @@ Picking the right starting point:
 - Embedding the loop in your own Python program (not shelling out to the CLI)?
   Start with [sdk](sdk/README.md) — `sdk.run()` returns a `RunReport` with the
   same governance the CLI applies.
+- Embedding a host-owned background run? Start with
+  [app-server](app-server/README.md); it is local-only and intentionally below
+  the scheduler/remote-worker boundary.
 - Wiring a governed review into your own CI? Start with
   [ci-readonly-review](ci-readonly-review/README.md) and read the
   [governed-run-cookbook](../docs/guides/governed-run-cookbook.md) for the

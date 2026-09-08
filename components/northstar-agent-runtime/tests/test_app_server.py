@@ -158,6 +158,17 @@ class AppWireTests(RuntimeTestCase):
         self.assertFalse(response["ok"])
         self.assertEqual(response["error"]["code"], "invalid_request")
 
+    def test_client_cannot_override_authenticated_request_fields(self):
+        with tempfile.TemporaryDirectory() as directory:
+            client = AppClient(Path(directory) / "app.sock", channel_secret=self.SECRET)
+            with self.assertRaises(ValueError):
+                client.call(
+                    "run.start",
+                    request_id="wire-reserved",
+                    actor_id="owner",
+                    op="run.status",
+                )
+
     def test_server_never_accepts_wire_selected_provider_or_workspace(self):
         server = AppServer(self.manager(), channel_secret=self.SECRET)
         request = {

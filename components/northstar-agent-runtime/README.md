@@ -625,7 +625,7 @@ cd components/northstar-agent-runtime
 python3 -m unittest discover -s tests -p 'test_*.py' -v
 ```
 
-613 tests, fully offline and deterministic (four optional OpenTelemetry tests
+614 tests, fully offline and deterministic (four optional OpenTelemetry tests
 are skipped when the tracing extra is absent): the scripted provider is the
 only model, and `test_integration_sidecar.py` runs the real sidecar `serve()`
 over a real Unix socket with a 100,000-Chinese-character prompt.
