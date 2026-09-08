@@ -15,9 +15,12 @@ no server) and **drop a file** onto the page:
   (records carry `schema_version` and are rendered in audit mode).
 
 The viewer shows: record counts by type, sessions seen, total cost and
-denials, an errors/denials-only filter, the full timeline with expandable raw
-JSON per record, and a local fingerprint (FNV-1a 64 over the file text — a
-convenience integrity marker, not a cryptographic hash).
+denials, an errors/denials-only filter, a read-only replay slice by inclusive
+transcript index range, chain metadata (a cue to use the runtime verifier, not
+a browser-side cryptographic claim), the full timeline with expandable raw JSON
+per record,
+and a local fingerprint (FNV-1a 64 over the file text — a convenience
+integrity marker, not a cryptographic hash).
 
 ## Guarantees
 
@@ -27,6 +30,10 @@ convenience integrity marker, not a cryptographic hash).
   your transcripts never leave the browser.
 - Handles torn trailing lines (a crash can leave one) — they are counted as
   unparseable lines, never fatal.
+- The replay controls only filter the already loaded records in the browser;
+  they never re-run a tool, model call or workspace action. For cryptographic
+  chain verification, use `python3 -m cli sessions verify <session-id>
+  --session-dir DIR` with the HMAC secret environment variable when applicable.
 
 ## Try it
 

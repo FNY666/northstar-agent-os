@@ -164,6 +164,27 @@ class SessionPanelTests(unittest.TestCase):
             "errors &amp; denials only",  # filter toggle
             "denials",  # stat
             "sessions",  # stat
+            "from-index",  # read-only replay range control
+            "through-index",  # inclusive upper bound
+            "apply-replay",  # apply control
+            "clear-replay",  # reset control
+            "replay slice",  # explicit non-execution status
+            "chain metadata",  # integrity cue without overclaiming browser verification
+            "read-only",  # replay boundary
+        ):
+            with self.subTest(marker=marker):
+                self.assertIn(marker, text)
+
+    def test_panel_replay_is_bounded_read_only_and_cli_verified(self):
+        text = _panel_text()
+        for marker in (
+            "through index (inclusive)",
+            "state.range",
+            "through < from",
+            "records selected",
+            "no tools/model calls",
+            "verify with CLI",
+            "sessions verify",
         ):
             with self.subTest(marker=marker):
                 self.assertIn(marker, text)

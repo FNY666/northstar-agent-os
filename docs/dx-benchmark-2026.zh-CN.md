@@ -912,3 +912,16 @@ T18 在 T17 的本地 integrity chain 上补了两个重要但仍然保守的能
   没有跨主机/远端复制、分布式 lease、全局 lineage、retention 或 compliance store。
 
 T18 仍是 Unreleased；没有创建 tag、GitHub Release，也没有发布到 PyPI/npm。
+
+### 10.22 当前实现复核：offline interactive replay panel（2026-09-08）
+
+T19 将 T18 的 CLI replay slice 带到现有零依赖 `session-panel`：
+
+- 单文件 `file://` viewer 新增 from/through transcript index controls，按当前
+  type/error filters 渲染 read-only slice，并明确显示 `no tools/model calls`。
+- 对 `chain_version` 只显示 metadata cue（`verify with CLI`），不在浏览器伪造
+  SHA/HMAC 验证；CLI `sessions verify` 仍是 integrity authority。
+- 保留 zero-network、no backend、raw JSON fallback 和非 cryptographic FNV-1a
+  convenience fingerprint；Node syntax/static tests 继续钉住这些边界。
+
+T19 仍是 Unreleased；没有创建 tag、GitHub Release，也没有发布到 PyPI/npm。

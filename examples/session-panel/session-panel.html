@@ -38,6 +38,15 @@
           padding: 3px 10px; cursor: pointer; user-select: none; color: var(--muted); font-size: 12px; }
   .chip.on { color: var(--ink); border-color: var(--accent); }
   .chip .n { color: var(--muted); margin-left: 4px; }
+  #replay-controls { display: flex; flex-wrap: wrap; gap: 8px; align-items: center;
+                     margin: 10px 0; padding: 8px 10px; border: 1px solid var(--line);
+                     border-radius: 6px; background: var(--panel); color: var(--muted); font-size: 12px; }
+  #replay-controls input { width: 90px; background: var(--bg); color: var(--ink);
+                            border: 1px solid var(--line); border-radius: 4px; padding: 3px 5px; font: inherit; }
+  #replay-controls button { background: var(--chip); color: var(--ink); border: 1px solid var(--line);
+                            border-radius: 4px; padding: 3px 9px; cursor: pointer; font: inherit; }
+  #replay-controls button:hover { border-color: var(--accent); }
+  #replay-status { color: var(--accent); }
   label.toggle { color: var(--muted); font-size: 12px; margin-left: auto;
                  display: flex; align-items: center; gap: 6px; cursor: pointer; }
   .row { border: 1px solid var(--line); border-left: 3px solid var(--muted);
@@ -86,9 +95,17 @@
   <label class="toggle hidden" id="err-only-toggle"><input type="checkbox" id="err-only">
     errors &amp; denials only</label>
 
+  <div id="replay-controls" class="hidden" aria-label="read-only replay slice">
+    <label>from index <input id="from-index" type="number" min="0" step="1" placeholder="0"></label>
+    <label>through index (inclusive) <input id="through-index" type="number" min="0" step="1" placeholder="end"></label>
+    <button type="button" id="apply-replay">show slice</button>
+    <button type="button" id="clear-replay">reset</button>
+    <span id="replay-status" aria-live="polite"></span>
+  </div>
+
   <div id="timeline"></div>
 </main>
-<footer>Renders entirely in your browser; no bytes leave your machine. Local fingerprint is FNV-1a 64 over the file text — a convenience integrity marker, not a cryptographic hash.</footer>
+<footer>Renders entirely in your browser; no bytes leave your machine. Replay controls only select a read-only view — they never execute tools or model calls. Local fingerprint is FNV-1a 64 over the file text — a convenience integrity marker, not a cryptographic hash.</footer>
 
 <script>
 "use strict";
@@ -118,10 +135,16 @@ var els = {
   filters: document.getElementById("filters"),
   timeline: document.getElementById("timeline"),
   errOnly: document.getElementById("err-only"),
-  errToggle: document.getElementById("err-only-toggle")
+  errToggle: document.getElementById("err-only-toggle"),
+  replayControls: document.getElementById("replay-controls"),
+  fromIndex: document.getElementById("from-index"),
+  throughIndex: document.getElementById("through-index"),
+  applyReplay: document.getElementById("apply-replay"),
+  clearReplay: document.getElementById("clear-replay"),
+  replayStatus: document.getElementById("replay-status")
 };
 
-var state = { records: [], filter: {}, errOnly: false };
+var state = { records: [], filter: {}, errOnly: false, range: { from: null, through: null } };
 
 /* ---- FNV-1a 64 over the raw file text (non-cryptographic integrity aid) ---- */
 function fnv1a64(text) {
@@ -226,6 +249,26 @@ function isErrorRecord(rec) {
   return false;
 }
 
+function chainMetadata(records) {
+  var chainFields = ["chain_version", "prev_digest", "record_digest", "chain_signature"];
+  var chained = records.filter(function (r) {
+    return r && chainFields.some(function (field) {
+      return Object.prototype.hasOwnProperty.call(r, field);
+    });
+  });
+  if (chained.length === 0) { return "not present"; }
+  if (chained.length !== records.length) { return "mixed — use sessions verify"; }
+  var versions = {};
+  chained.forEach(function (r) { versions[String(r.chain_version || "unspecified")] = true; });
+  var names = Object.keys(versions);
+  return names.length === 1 ? names[0] + " metadata — verify with CLI" : "mixed schemas — use sessions verify";
+}
+
+function recordIndex(rec, fallback) {
+  var value = Number(rec && rec.index);
+  return Number.isInteger(value) ? value : fallback;
+}
+
 /* ---- stats ---- */
 function stats(records) {
   var byType = {};
@@ -319,6 +362,7 @@ function renderRecord(rec) {
   ts.className = "ts";
   ts.textContent = String(rec.ts || "");
   top.appendChild(ts);
+  if (rec.index != null) { top.appendChild(badge("index=" + String(rec.index))); }
   if (rec.session_id) {
     var sid = document.createElement("span");
     sid.className = "agent";
@@ -386,6 +430,7 @@ function render() {
   addCard(els.cards, "cost usd", s.cost.toFixed(6));
   addCard(els.cards, "denials", s.denials);
   addCard(els.cards, "result records", s.resultCount, true);
+  addCard(els.cards, "chain metadata", chainMetadata(state.records), true);
   var fp = document.createElement("div");
   fp.className = "card";
   fp.innerHTML = '<div class="k">local fingerprint (fnv-1a64)</div><div class="v small" id="fp">' + esc(state.fingerprint) + "</div>";
@@ -411,6 +456,7 @@ function render() {
     els.filters.appendChild(chip);
   });
   els.errToggle.classList.remove("hidden");
+  els.replayControls.classList.remove("hidden");
   renderTimeline();
 }
 
@@ -418,13 +464,26 @@ function renderTimeline() {
   var sorted = sortRecords(state.records);
   els.timeline.textContent = "";
   var shown = 0;
-  sorted.forEach(function (r) {
+  var from = state.range.from;
+  var through = state.range.through;
+  var rangeCount = 0;
+  sorted.forEach(function (r, position) {
+    var index = recordIndex(r, position);
     var kind = isAudit(r) ? "audit" : (RECORD_TYPES.indexOf(r.type) !== -1 ? r.type : "other:" + r.type);
+    if (from !== null && index < from) { return; }
+    if (through !== null && index > through) { return; }
+    rangeCount++;
     if (state.filter[kind] === false) { return; }
     if (state.errOnly && !isErrorRecord(r)) { return; }
     els.timeline.appendChild(renderRecord(r));
     shown++;
   });
+  if (els.replayStatus) {
+    var rangeText = from === null && through === null ? "all indexes" :
+      String(from === null ? 0 : from) + ".." + String(through === null ? "end" : through);
+    var filterText = shown === rangeCount ? "" : " (" + shown + " shown after filters)";
+    els.replayStatus.textContent = "read-only replay slice " + rangeText + ": " + rangeCount + "/" + state.records.length + " records selected" + filterText + " — no tools/model calls";
+  }
   if (shown === 0) {
     var none = document.createElement("p");
     none.textContent = state.records.length === 0 ? "No records parsed — drop a *.jsonl / *.ndjson file above." : "Nothing matches the current filters.";
@@ -438,7 +497,10 @@ function loadText(text, name) {
   state.records = [];
   state.filter = {};
   state.errOnly = false;
+  state.range = { from: null, through: null };
   els.errOnly.checked = false;
+  els.fromIndex.value = "";
+  els.throughIndex.value = "";
   els.errors.textContent = "";
   els.fileName.textContent = name + " — " + text.length + " bytes";
   var parsed = parseFile(text);
@@ -453,6 +515,7 @@ function loadText(text, name) {
     els.cards.classList.add("hidden");
     els.filters.classList.add("hidden");
     els.errToggle.classList.add("hidden");
+    els.replayControls.classList.add("hidden");
     return;
   }
   render();
@@ -486,6 +549,31 @@ els.dropzone.addEventListener("drop", function (e) {
 });
 els.errOnly.addEventListener("change", function () {
   state.errOnly = els.errOnly.checked;
+  renderTimeline();
+});
+
+function parseReplayIndex(input) {
+  var text = String(input.value || "").trim();
+  if (text === "") { return null; }
+  var value = Number(text);
+  return Number.isInteger(value) && value >= 0 ? value : NaN;
+}
+
+els.applyReplay.addEventListener("click", function () {
+  var from = parseReplayIndex(els.fromIndex);
+  var through = parseReplayIndex(els.throughIndex);
+  if (Number.isNaN(from) || Number.isNaN(through) || (from !== null && through !== null && through < from)) {
+    els.replayStatus.textContent = "invalid replay range — use non-negative indexes with through >= from";
+    return;
+  }
+  state.range = { from: from, through: through };
+  renderTimeline();
+});
+
+els.clearReplay.addEventListener("click", function () {
+  els.fromIndex.value = "";
+  els.throughIndex.value = "";
+  state.range = { from: null, through: null };
   renderTimeline();
 });
 </script>

@@ -1,5 +1,17 @@
 # Northstar Agent OS — initial public component
 
+## Unreleased (twenty-sixth batch) — offline interactive session replay panel (T19)
+
+- Extended the self-contained `examples/session-panel/` viewer with read-only
+  replay range controls, chain-metadata cues, and an explicit no-execution
+  status. The browser-side controls only filter loaded records; they do not
+  verify HMACs or rerun tools/models, preserving the CLI verifier as the
+  cryptographic authority.
+- Updated the example README, examples index, observability concept and static
+  example tests. The panel remains `file://`-friendly, zero-network and
+  dependency-free; this batch remains unreleased with no tag, GitHub Release,
+  or PyPI/npm publication.
+
 ## Unreleased (twenty-fifth batch) — replay timeline and cross-process session recovery (T18)
 
 - Added read-only `sessions replay` / `sessions timeline` slices with index and

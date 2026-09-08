@@ -79,11 +79,12 @@ back read-only:
 `examples/session-panel/session-panel.html` is the human-scale viewer for
 both formats: one self-contained HTML file (all CSS/JS inline, zero network
 references) that renders any `*.jsonl`/`.ndjson` you drop onto it — by-type
-counts, sessions, total cost, denials, an errors/denials-only filter, the
-annotated timeline with expandable raw JSON per record, and a local
-fingerprint (FNV-1a 64, honestly labelled non-cryptographic). It is a
-viewer, not a validator: records it does not recognise are shown as raw JSON
-rather than rejected.
+counts, sessions, total cost, denials, an errors/denials-only filter, a
+read-only inclusive index-range replay slice, the annotated timeline with
+expandable raw JSON per record, and a local fingerprint (FNV-1a 64, honestly labelled
+non-cryptographic). It is a viewer, not a validator: chain metadata is only a
+cue to use the runtime verifier, and records it does not recognise are shown
+as raw JSON rather than rejected.
 
 ## 3. Which plane when
 
