@@ -1,5 +1,47 @@
 # Northstar Agent OS — initial public component
 
+## Unreleased (fifteenth batch) — the skill supply chain gets a gate
+
+`skills check`, the highest-leverage row left in the blueprint's debt table: the Agent
+Skills standard fixed the file format and left review out, and 2026's surveys of
+third-party skill collections found instruction-override phrasing and
+install-the-world instructions widely.
+
+- **`skill_audit.py`: rules as pure functions of the bytes.** No model call, no
+  network, no classifier - so it cannot be prompted out of existence by the file under
+  review, and the suite proves it. Rule families: instruction override, concealment
+  ("do not tell the user"), role hijack, **policy self-edit / disabling controls**
+  (CBSE), remote script piped to a shell, host privilege, instance-metadata
+  endpoints, credential stores, environment-value exfiltration (both word orders),
+  installers, inline `eval`/`python -c`, tunnelling, outbound POSTs, invisible
+  unicode (zero-width, bidi, tag chars), and the context-bloat limits the spec
+  implies (description length, body lines, body size). `RULES_VERSION` is recorded in
+  every lockfile, because "no findings" under an older rule set is not a pass.
+- **One deliberate demotion.** A command inside a fenced code block is an example,
+  not an instruction, so it is reported one level lower with a note - which is what
+  keeps the tool usable on real documentation instead of drowning in `pip install`.
+  Invisible-character findings never demote: invisibility is identical inside code.
+- **Reviewed means pinned.** `--write-lock` writes `.northstar/skills.lock` (content
+  digest per skill path + name + size + finding count); `check_lock` reports
+  `stale`/`added`/`removed`, and `run --require-skill-lock` refuses to start on any of
+  them (exit 64). Pins bind the path *and* the bytes, so a rename cannot borrow
+  another skill's review. `doctor` gained a `skills-review` check (warn, never fails
+  a host).
+- **The gate is outside the model's reach.** `skills.lock` sits under `.northstar`,
+  which the tool layer already refuses to write, so a run cannot mark its own skills
+  reviewed - tested end to end, including that the refusal is a tool error rather
+  than a permission denial.
+- **Foreign trees are auditable before adoption**: `--root DIR` reads
+  `.northstar/skills`, `.claude/skills` and `.agents/skills`, since the standard does
+  not fix an install path.
+- **Scaffold closes the loop**: `cli new` now writes `.northstar/skills/README.md`
+  (where skills go, what the frontmatter may say, how trust is earned) and the CI
+  recipe runs `skills check` before the reviewer, so a fresh project gates skill
+  drift by default. `[[verify]]` is documented in the generated config too.
+
+Runtime 686 → 734 tests, repository 1028, all offline and credential-free. **No
+release**: version stays `0.1.0.dev0`, no tag, no index upload.
+
 ## Unreleased (fourteenth batch, continued) — resumable turn boundaries (F3)
 
 - **`checkpoints.py` + `--checkpoint-turns` / `--resume-from`.** A turn boundary can

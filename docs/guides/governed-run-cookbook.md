@@ -78,6 +78,58 @@ Transcripts are append-only JSONL; the final summary line prints
 `turns=… tool_calls=… cost=$… session=…` and is the one stable line scripts
 should parse (`--quiet` keeps it).
 
+## 7. Make "it says it finished" not the evidence
+
+```sh
+python3 -m cli run --workspace . --prompt "write the runbook" \
+  --verify exists:docs/runbook.md --verify unchanged:uv.lock
+```
+
+Postconditions are checked by the runtime after the run, against a snapshot taken
+before the first event. A failed check ends the run with
+`error_postconditions_failed` (exit 6) and writes a `postconditions` record into the
+transcript. Declare the durable set in `.northstar/config.toml` so CI inherits it:
+
+```toml
+[[verify]]
+kind = "unchanged"          # exists | absent | changed | unchanged | contains
+path = "uv.lock"
+```
+
+Two things to keep in mind: the conditions are **not** shown to the model (a model
+that knows the check optimises the check), and `contains` is convenience — the
+structural kinds are what a sign-off should rest on. For "the tests actually pass",
+pair it with a `Stop` command hook that runs the suite and vetoes finishing.
+
+## 8. Review Agent Skills, then pin what you reviewed
+
+```sh
+python3 -m cli skills check --workspace .            # findings; exit 1 on errors
+python3 -m cli skills check --workspace . --write-lock   # pin digests in .northstar/skills.lock
+python3 -m cli run --workspace . --require-skill-lock …  # refuse to start on drift
+python3 -m cli skills check --root ../downloaded-bundle  # vet a third-party bundle first
+```
+
+`skill_audit` is deterministic and offline: instruction override, concealment,
+policy self-edit, `curl … | bash`, credential paths, metadata endpoints, invisible
+unicode, and context bloat. Commit `skills.lock`; `doctor` warns when it disagrees
+with the tree. A run cannot rewrite it — `.northstar` is write-protected for the
+agent, so the review record stays outside the reach of what it gates.
+
+## 9. Resume and fork at a turn boundary
+
+```sh
+python3 -m cli run --workspace . --session-dir S --checkpoint-turns 1 …
+python3 -m cli run --workspace . --session-dir S --resume-from <parent-session-id> …
+```
+
+A checkpoint records the transcript length, its digest, and the consumed
+turns/tool calls/cost. `--resume-from` **forks**: a new file, the parent untouched,
+and the new run starting *at* the parent's counters — so resuming cannot hand out a
+fresh `max_budget_usd` or restart `max_turns`. `--resume-record N` picks an earlier
+boundary (rewind), and a digest mismatch refuses the run instead of attributing
+numbers to the wrong history.
+
 ## Consumer CI recipe
 
 `examples/ci-readonly-review/` is a copy-paste template for running a

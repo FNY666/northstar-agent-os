@@ -57,7 +57,7 @@
 | MCP 现行规范 2026-07-28 | 标准 | 无状态请求 + MRTR + `Mcp-Method/Name` 头 + 旧代际 fallback | 🔧 待做（P1-1） |
 | elicitation ↔ 审批回合 | MCP 特性 | 把"服务器问用户"映射到权限门（**这是别人没有的角度**） | 🔧 待做，优先级高 |
 | OS 级沙箱 | Claude seatbelt/bubblewrap、Gemini gVisor | 可选 `bwrap` 包装器（只读 bind + no net + cgroup），CI 真跑 | 🔧 待做（P1-4，C1 的前置） |
-| 技能供应链校验 | 无人做（第三方审计：99% 坏味道/36% 缺陷） | `northstar skills check`：frontmatter 白名单、注入模式、来源 digest | 🔧 待做（差异化最高） |
+| 技能供应链校验 | 无人做（第三方审计：99% 坏味道/36% 缺陷） | `skills check`：规则纯函数 + `skills.lock` 摘要钉定 + 漂移拒跑 | ✅ 已落地（第十五批） |
 | 会话 rewind/fork | Claude /rewind、LangGraph time-travel | `--resume-from`：从任一检查点分叉新 session（摘要校验），**绝不回写**旧文件 | ✅ 已落地（与 append-only 兼容） |
 
 ---
@@ -108,6 +108,14 @@
 
 **全仓 890 项测试全绿**（sidecar 51 / run-contract 41 / host 37 / durable-run 65 / interop 54 / runtime 596 / 文档 46），离线、无 key、无网络。
 
+### 6.20 第十五批（技能供应链）
+
+| 项 | 内容 | 验证 |
+|---|---|---|
+| 技能审查 | `skill_audit.py`：注入/隐藏/自改策略/远程脚本/凭据/元数据端点/不可见字符/上下文膨胀；代码块内降一级 | `tests/test_skill_check.py` 48 项，含"良性技能零告警"与"确定性可重复" |
+| 审完即钉 | `--write-lock` 写 `skills.lock`（按路径+摘要）；`--require-skill-lock` 漂移即 64；`doctor` 加 `skills-review` | 审→钉→篡改→**拒跑**全流程实测；改名不继承他人审查 |
+| 模型无法自证 | `skills.lock` 在 `.northstar` 下，工具层拒绝写 → 运行不能把自己的技能标成"已审" | 端到端断言：工具错误而非权限拒绝 |
+
 ### 6.15 第十四批续（F3：可恢复执行）
 
 | 项 | 内容 | 验证 |
@@ -128,7 +136,7 @@
 
 全仓 954 项测试全绿（runtime 660）。**未做**：流式（`StreamDelta`）、`skills check`、F3。
 
-**F3 已完成**（见 §6.15）。下一批顺序改为：**skills check → P1-1 MCP 代际 + elicitation-as-approval → 流式 → durable-run 与本模块检查点的统一（lease/verifier 复用）**。理由：skills check 差异化最高、依赖最少；MCP 代际是唯一会持续变大的"过期风险"；把 runtime 的 checkpoint 与 durable-run 的 `EventStore`/`Lease` 统一是最后的"零件合整机"，需要在两个组件之间定一个接口，值得单独一批。
+**F3 与 skills check 均已完成**（见 §6.15、§6.20）。下一批顺序改为：**P1-1 MCP 代际 + elicitation-as-approval → 流式 → durable-run 与 runtime 检查点的统一（lease/verifier 复用）**。理由：skills check 差异化最高、依赖最少；MCP 代际是唯一会持续变大的"过期风险"；把 runtime 的 checkpoint 与 durable-run 的 `EventStore`/`Lease` 统一是最后的"零件合整机"，需要在两个组件之间定一个接口，值得单独一批。
 
 ---
 

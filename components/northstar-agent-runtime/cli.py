@@ -43,6 +43,7 @@ from doctor import add_arguments as add_doctor_arguments
 from doctor import run_doctor
 from providers.base import ResultMessage
 from session_view import add_arguments as add_session_arguments
+from skill_check import add_skills_arguments
 
 USAGE_ERROR = 64
 
@@ -79,6 +80,8 @@ def build_parser() -> argparse.ArgumentParser:
     add_doctor_arguments(doctor)
     sessions = sub.add_parser("sessions", help="inspect persisted session transcripts (read-only)")
     add_session_arguments(sessions)
+    skills = sub.add_parser("skills", help="review the workspace's Agent Skills (supply-chain check, read-only)")
+    add_skills_arguments(skills)
     new_proj = sub.add_parser("new", help="scaffold a governed project (config, agents, hooks guide, CI recipe)")
     new_proj.add_argument("directory", help="directory to create (must not exist, or be empty unless --force)")
     new_proj.add_argument("--force", action="store_true", help="write the template files into a non-empty directory (never deletes)")
@@ -131,6 +134,11 @@ def _add_run_arguments(parser: argparse.ArgumentParser) -> None:
     policy.add_argument("--max-subagent-depth", type=int, default=1, help="0 disables delegation")
     policy.add_argument("--allow-nested-delegation", action="store_true", help="subagents may delegate one level deeper")
     policy.add_argument("--halt-on-denial", action="store_true", help="end the run with error_permission_denied when a call is refused")
+    policy.add_argument(
+        "--require-skill-lock",
+        action="store_true",
+        help="refuse to start unless every installed skill matches the digest recorded by `skills check --write-lock`",
+    )
     policy.add_argument(
         "--checkpoint-turns",
         type=int,
@@ -408,6 +416,12 @@ def main(argv: Sequence[str] | None = None) -> int:
             from session_view import run_sessions
 
             return run_sessions(args)
+        if args.command == "skills":
+            handler = getattr(args, "handler", None)
+            if handler is None:
+                parser.parse_args([*(args.command, "check"), "--help"])
+                return 0
+            return handler(args)
         parser.print_help()
         return USAGE_ERROR
 
@@ -492,6 +506,14 @@ def _run(args: argparse.Namespace) -> int:
     except ValueError as error:
         print(f"configuration error: {error}", file=sys.stderr)
         return USAGE_ERROR
+
+    if args.require_skill_lock:
+        from skill_check import run_lock_status
+
+        locked, detail = run_lock_status(args.workspace)
+        if not locked:
+            print(f"configuration error: skill review is required and failed: {detail}", file=sys.stderr)
+            return USAGE_ERROR
 
     prompt = args.prompt
     if args.prompt_file:

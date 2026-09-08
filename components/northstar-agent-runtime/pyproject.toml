@@ -65,6 +65,8 @@ py-modules = [
     "sessions",
     "session_view",
     "sidecar_client",
+    "skill_audit",
+    "skill_check",
     "skills",
     "tracing",
 ]

@@ -265,6 +265,16 @@ def _checks(args: argparse.Namespace) -> list[Finding]:
                 else:
                     size = f"{len(context.text)} chars" + (" [truncated]" if context.truncated else "")
                     findings.append(Finding("project-context", "ok", f"{context.name} ({size}) will be appended to the system prompt"))
+    # -- skill supply chain ----------------------------------------------------
+    if importlib.util.find_spec("skill_check") is not None:
+        from skill_check import run_lock_status
+
+        locked, detail = run_lock_status(workspace)
+        findings.append(
+            Finding("skills-review", "ok" if locked else "warn",
+                    f"{detail}" if locked else f"{detail} - `cli skills check --workspace . --write-lock` after reading them")
+        )
+
     # -- provider/model pair and the OpenAI-compatible endpoint ----------------
     from cli import PROVIDER_DEFAULT_MODELS, resolve_model
 
