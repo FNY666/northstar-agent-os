@@ -150,3 +150,26 @@ overwrite an existing target. The migrated target remains appendable.
 This is evidence and recovery plumbing, not authorization, sandboxing or
 backend execution. It contains no credentials, prompts, raw provider errors,
 network calls or real Codex/Claude Code/Hermes/Cursor/OpenBot integration.
+
+## Independent route state and causal replay
+
+`route_state.py` contains the public, pure `RouteStateMachine` used to validate
+selected/started/failed/retry/succeeded/cancelled transitions. It re-parses
+route events before replay and does not depend on private RouteLedger methods.
+`RouteLineage.replay_verdict()` classifies verified history as `replayable`, a
+head mismatch against a caller cursor as `stale`, and malformed or tampered
+history as `unverifiable`.
+
+`route_causality.py` derives typed `receipt` and retry edges. A graph may be
+built from multiple independently verified route segments; explicit
+`HandoffLink` edges connect a terminal parent route to a child decision while
+requiring shared task/run/workspace/policy identity and correct source/target
+agents. These links are bounded evidence only, not signed authorization; the
+actual Handoff grant remains verified by `handoff.py`.
+
+`CausalGraph.from_events()` is intentionally limited to one route segment:
+its route identity and target agent remain fixed. Cross-agent delegation must
+use `CausalGraph.from_segments()` with separate verified segments and an
+explicit terminal-parent to child-decision `HandoffLink`; the API rejects
+unknown/duplicate event digests, non-terminal parents, wrong agents and
+identity drift.

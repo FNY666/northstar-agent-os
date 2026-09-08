@@ -11,7 +11,9 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from route_ledger import RouteEvent, RouteLedger, RouteReceipt
+from route_ledger import RouteEvent, RouteReceipt
+from route_state import RouteStateMachine
+
 
 _SCHEMA = "northstar.route-lineage.v2"
 _DIGEST_PREFIX = "sha256:"
@@ -178,6 +180,13 @@ class LineageRecovery:
     cursor: LineageCursor | None
 
 
+@dataclass(frozen=True)
+class ReplayVerdict:
+    verdict: str
+    reason: str
+    cursor: LineageCursor | None
+
+
 class RouteLineage:
     def __init__(self, path: str | Path):
         self.path = Path(path).absolute()
@@ -221,16 +230,12 @@ class RouteLineage:
 
     @staticmethod
     def _validate_route_events(route_events: list[RouteEvent]) -> None:
-        for expected, route_event in enumerate(route_events, start=1):
-            if route_event.sequence != expected:
-                raise ValueError("lineage route-event sequence is not contiguous")
-        if route_events:
-            validator = object.__new__(RouteLedger)
-            validator._replay_events(route_events)
+        RouteStateMachine.replay(route_events)
 
     @classmethod
     def _validate_route_history(cls, events: list[LineageEvent]) -> None:
-        cls._validate_route_events([event.route_event for event in events])
+        if events:
+            cls._validate_route_events([event.route_event for event in events])
 
     @staticmethod
     def _verify_chain(events: list[LineageEvent]) -> None:
@@ -279,6 +284,19 @@ class RouteLineage:
         if expected_cursor is not None and expected_cursor != cursor:
             raise ValueError("lineage recovery cursor does not match history")
         return LineageRecovery("verified", tuple(events), cursor)
+    def replay_verdict(self, *, expected_cursor: LineageCursor | None = None) -> ReplayVerdict:
+        try:
+            recovery = self.recover()
+        except (OSError, ValueError) as error:
+            return ReplayVerdict("unverifiable", str(error), None)
+        if expected_cursor is not None and expected_cursor != recovery.cursor:
+            return ReplayVerdict("stale", "lineage recovery cursor does not match history", recovery.cursor)
+        return ReplayVerdict("replayable", "verified", recovery.cursor)
+
+    def causal_graph(self, *, handoffs=()):
+        from route_causality import CausalGraph
+
+        return CausalGraph.from_events(self.recover().events, handoffs=handoffs)
 
 
 def migrate_v1_to_v2(source_path: str | Path, target_path: str | Path) -> LineageRecovery:
