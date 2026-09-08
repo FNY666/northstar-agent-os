@@ -15,8 +15,8 @@ Minimal usage (offline, deterministic — no API key):
 
 Everything the CLI governs is available here: permission modes, allow/deny
 lists, read-only, turn/tool/budget ceilings, halt-on-denial, a session
-directory for the append-only transcript, subagent depth and workspace agent
-files. The SDK also exposes the host governance seam for bounded approval
+directory for the append-only transcript, subagent depth, workspace agent
+files, and an opt-in `CheckpointPolicy` for durable turn boundaries. The SDK also exposes the host governance seam for bounded approval
 leases, host-bound receipt context and signed action receipts. A
 `receipt_binding` is the host's already-verified projection; the SDK never
 needs the authorization token or its secret. Two entry points share one configuration:
@@ -70,6 +70,7 @@ class RunOptions:
     allow_nested_delegation: bool = False
     compaction_threshold_tokens: int | None = 60_000  # None disables compaction
     max_output_tokens: int = 4096
+    checkpoint_policy: Any = None  # CheckpointPolicy or its mapping; requires session_dir when enabled
     redact_tool_output: bool = False  # omit tool output bodies from the transcript
     workspace_agents: bool = True  # register .northstar/agents/*.md definitions
     # Host governance seam: leases are ApprovalLease objects or mappings from
@@ -98,6 +99,7 @@ class RunReport:
     permission_denials: list[dict[str, Any]]
     events: list[dict[str, Any]] = field(default_factory=list)
     receipts: list[dict[str, Any]] = field(default_factory=list)
+    checkpoints: list[dict[str, Any]] = field(default_factory=list)
 
     @property
     def is_error(self) -> bool:
@@ -153,6 +155,7 @@ def _build(options: RunOptions, resume: str | None = None) -> tuple[Any, Any]:
     """
     from agent_files import register_workspace_agents
     from agents import builtin_registry
+    from checkpoints import CheckpointPolicy
     from loop import AgentRuntime, RuntimeConfig
     from permissions import subtract
     from sessions import SessionStore
@@ -181,6 +184,7 @@ def _build(options: RunOptions, resume: str | None = None) -> tuple[Any, Any]:
         "workspace": options.workspace,
         "max_output_tokens": options.max_output_tokens,
         "compaction_threshold_tokens": options.compaction_threshold_tokens,
+        "checkpoint_policy": options.checkpoint_policy if options.checkpoint_policy is not None else CheckpointPolicy(),
         "max_subagent_depth": options.max_subagent_depth,
         "allow_nested_delegation": options.allow_nested_delegation,
         "halt_on_denial": options.halt_on_denial,
@@ -250,4 +254,5 @@ def run(options: RunOptions, resume: str | None = None) -> RunReport:
         permission_denials=list(result.get("permission_denials", [])) if result else [],
         events=events,
         receipts=[receipt.as_dict() for receipt in report.receipts] if report is not None else [],
+        checkpoints=list(report.checkpoints) if report is not None else [],
     )

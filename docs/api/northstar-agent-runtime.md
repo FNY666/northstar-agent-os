@@ -166,6 +166,14 @@ Source: `components/northstar-agent-runtime/checkpoints.py`
 
 Content-addressed workspace checkpoints for reversible agent runs.
 
+#### `CheckpointPolicy`
+
+Opt-in automatic checkpoint boundaries for a governed runtime.
+
+- `should_checkpoint(*, turn_index: int, mutated: bool)`
+  - Return whether the completed turn crosses an automatic boundary.
+- `label(*, turn_index: int, mutated: bool)`
+- `as_dict()`
 #### `CheckpointError`
 
 A checkpoint cannot be created, verified, compared or restored safely.
@@ -214,6 +222,10 @@ Atomically snapshot bounded regular files under ``workspace``.
 #### `list_checkpoints(session_dir: str | os.PathLike[str], session_id: str)`
 
 Load checkpoints in creation order; malformed entries fail closed.
+
+#### `prune_checkpoints(session_dir: str | os.PathLike[str], session_id: str, *, max_checkpoints: int, label_prefix: str='auto')`
+
+Remove old automatic checkpoints while preserving manual checkpoints.
 
 #### `load_checkpoint(directory: str | os.PathLike[str], *, expected_session_id: str | None=None)`
 

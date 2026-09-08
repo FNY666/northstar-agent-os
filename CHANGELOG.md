@@ -1,5 +1,20 @@
 # Northstar Agent OS — initial public component
 
+## Unreleased (twenty-third batch) — automatic checkpoint boundaries (T16)
+
+- Added an opt-in `CheckpointPolicy` for deterministic turn and admitted
+  mutation boundaries. It requires a persisted session directory, writes
+  bounded checkpoint metadata into the append-only transcript, and exposes the
+  same metadata through runtime/SDK `RunReport.checkpoints`.
+- Automatic retention prunes only policy-labelled checkpoints, preserves manual
+  checkpoints, and atomically rebases the retained chain to the nearest
+  manual/retained ancestor. It never enables rewind, deletes newly added files,
+  or replaces the existing permission and checkpoint controls.
+- Added policy validation, retention/rebase, runtime integration and durable
+  session tests. Runtime now has 586 tests (582 pass, 4 optional OTel skips) and
+  the repository has 896 tests (892 pass, 4 optional OTel skips); this batch
+  remains unreleased with no tag, GitHub Release, or PyPI/npm publication.
+
 ## Unreleased (twenty-second batch) — host-bound action receipts (T15)
 
 - Added `northstar.receipt-binding.v1`, a strict runtime projection of a

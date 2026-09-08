@@ -9,7 +9,7 @@
 
 > **阅读口径（2026-09-08 当前真值）**：本页保留了早期差距基线与实施 ledger，
 > 因而 §0–§8 中的“现状”段落有历史意义，不应覆盖后面的复评。当前 checkout
-> 的权威快照是：`make test` **889 项测试，885 项通过、4 项 skip**（runtime 579，
+> 的权威快照是：`make test` **896 项测试，892 项通过、4 项 skip**（runtime 586，
 > 其中 4 项因可选 OpenTelemetry 依赖缺失而跳过；其余组件与文档测试全绿）；五个可安装组件仍为
 > 对齐的 `0.1.0.dev0`，没有发布 tag。Agent Skills 已支持
 > `.northstar/skills` + portable `.agents/skills`、标准 frontmatter、`skills
@@ -18,17 +18,17 @@
 > capability-first approval lease 与可验证 action receipt，本轮又补上 durable-run
 > 的 pause/resume、显式 retry/cancel 生命周期与 attempt key 语义；MCP 仍是最小
 > stdio 工具客户端，而不是完整的远程 MCP/插件市场。若只想看“现在还差什么”，
-> 直接跳到 **§10.17**。
+> 直接跳到 **§10.19**。
 
 ## 0. 执行摘要（TL;DR）
 
-**当前结论：Northstar 已从“库 + 手工拼装”追到可安装、可审计、具备局部可逆执行的 headless harness，但还不是 Claude Code/Codex/Gemini 那样的完整产品。**本地实测 `make test` 为 **889 项测试（885 通过、4 项可选 OTel skip）**（runtime 579），权限门、hooks、预算、只追加 transcript、workspace receipts、checkpoint manifest、capability lease、可验证 action receipt、durable-run 生命周期与离线确定性仍是最强资产。
+**当前结论：Northstar 已从“库 + 手工拼装”追到可安装、可审计、具备局部可逆执行的 headless harness，但还不是 Claude Code/Codex/Gemini 那样的完整产品。**本地实测 `make test` 为 **896 项测试（892 通过、4 项可选 OTel skip）**（runtime 586），权限门、hooks、预算、只追加 transcript、workspace receipts、checkpoint manifest、capability lease、可验证 action receipt、durable-run 生命周期与离线确定性仍是最强资产。
 
 已经补齐的 DX 基础包括：五个可安装组件、console script、`doctor`/`dry-run`、AGENTS.md 与策略即代码、文件化 subagents、MCP stdio 最小客户端、标准 Agent Skills（含 `skills check/list`）、sessions 读回/NDJSON 审计、Python SDK、脚手架、API 文档和 CI recipe。**这些能力要以当前 checkout 的测试为准；本页后面的早期盘点是历史基线。**
 
 与全球头部工具相比，剩余差距集中在产品外围而不是治理内核：
 
-1. **交互恢复**：已有 resume/list/show/export，以及 checkpoint/inspect/diff/rewind/fork 的 CLI/API；仍没有交互式回放 UI、自动 turn-level checkpoint 策略和跨进程/远端恢复。
+1. **交互恢复**：已有 resume/list/show/export，以及 checkpoint/inspect/diff/rewind/fork 的 CLI/API；已有 opt-in、可留痕的 turn/mutation checkpoint policy；仍没有交互式回放 UI 和跨进程/远端恢复。
 2. **可嵌入层**：已有 Python SDK 与结构化事件，没有 TypeScript SDK、长期 app-server 或 approval 协议。
 3. **生态深度**：MCP 仍是 stdio 工具发现/调用，没有 HTTP/auth；无 plugins、marketplace、热加载和组织级安装策略。
 4. **后台与远程**：durable-run/remote-worker 有内核和协议/运维文档，但没有网络 transport、调度器或真实远端 canary。
@@ -572,7 +572,7 @@ checkpoint/rewind、headless/SDK、后台任务和企业级策略下发。Norths
 |---|---|---|---|
 | Zero-to-first-run | `make demo`、`pip install .`、`doctor`、`dry-run`；无公共 index/登录 | 官方安装器、账号/模型即用、交互式首跑 | 发布 wheel，保留零 key demo |
 | 嵌入面 | Python `sdk.run/stream_run`、结构化事件、resume；无 TypeScript/app-server | Codex exec/SDK/app-server、Claude SDK 多语言 | 优先稳定协议/版本化 SDK，不先做 TUI |
-| 交互与恢复 | sessions list/show/export；bounded checkpoint manifest、inspect/diff、强制 rewind/restore、fork；mutating tool 有 workspace_change receipt | checkpoint、rewind、后台任务、任务队列 | T3b：turn-level 自动策略、交互回放 UI、跨进程/远端 checkpoint lineage |
+| 交互与恢复 | sessions list/show/export；bounded checkpoint manifest、inspect/diff、强制 rewind/restore、fork；已有 opt-in turn/mutation policy 与 workspace_change receipt | checkpoint、rewind、后台任务、任务队列 | T3b：交互回放 UI、跨进程/远端 checkpoint lineage |
 | 生态格式 | MCP stdio 工具发现/调用；Agent Skills 标准元数据 + `skills check/list`；无 plugins/marketplace、无 MCP HTTP/auth | MCP 多传输/登录、Skills 热加载、插件/marketplace | T4b：HTTP/auth 与插件清单必须先有信任/版本/撤销故事 |
 | 供应链 | 目录/字段/路径/symlink fail-closed；不执行脚本、不做恶意内容判断 | 插件市场/组织策略/托管配置 | 把 validator 接入 CI；内容审查与签名不能伪装成已完成 |
 | 后台/远程 | durable-run 与 remote-worker spec/ops 文档；无网络 transport/调度器/真实远端 canary | Codex cloud/Automations、Claude remote/background | T5：先 transport helper + 真实主机 canary，再谈 hosted control plane |
@@ -842,3 +842,25 @@ host authorization，但不把 host token 带进 runtime”：
   freshness 与链接检查通过。
 
 T15 仍是 Unreleased；没有创建 tag、GitHub Release，也没有发布到 PyPI/npm。
+
+### 10.19 当前实现复核：自动 checkpoint boundary policy（2026-09-08）
+
+T16 把 §10.9 中“未来应把 checkpoint 纳入 Run / Turn / Action 合同”的下一小步
+落到 runtime：checkpoint 仍是显式可审计的本地快照，但可以由 host 选择确定性的
+turn/mutation boundary 自动创建。
+
+- `CheckpointPolicy` 默认关闭；启用后必须提供持久化 session directory。策略支持
+  `every_turns`、`after_mutation`、automatic label prefix 和 `max_checkpoints`。
+- 自动 checkpoint 在完整 turn 边界创建：mutating tool turn 会记录
+  `trigger=mutation`，周期边界记录 `trigger=turn`；元数据作为 informational
+  transcript record 写入，并同时出现在 runtime/SDK `RunReport.checkpoints`。
+- retention 只删除 policy label prefix 下的自动 checkpoint，不删除 operator/manual
+  checkpoint；若删除的节点位于保留链上，会原子地把链重接到最近的 manual/retained
+  ancestor。没有自动 rewind，也不会删除 checkpoint 之后新增的 workspace 文件。
+- checkpoint 失败会在下一个模型 generation 前 fail-closed 为
+  `error_during_execution`，不会把“应当有 recovery point”静默当成成功。
+- 验证：runtime **586 项测试（582 项通过、4 项可选 OTel skip）**；全仓
+  `make test` 为 **896 项测试、892 项通过、4 项可选 OTel skip**；API docbuild
+  freshness 与链接检查通过。
+
+T16 仍是 Unreleased；没有创建 tag、GitHub Release，也没有发布到 PyPI/npm。

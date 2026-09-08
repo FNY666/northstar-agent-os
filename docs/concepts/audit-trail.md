@@ -23,7 +23,9 @@ A host can additionally bind the receipt to a verified authorization grant via
 `northstar.receipt-binding.v1`; the runtime records the exact grant-token digest
 without receiving the token or its secret. The separate [reversible execution contract](reversible-execution.md) stores
 bounded file snapshots for recovery rather than putting file bytes in every
-receipt.
+receipt. An opt-in runtime `CheckpointPolicy` records each automatic boundary
+as an informational transcript record and exposes its bounded metadata in the
+run report; it does not turn checkpoint creation into an automatic rewind.
 
 ## 2. Durable-run event store and verification
 

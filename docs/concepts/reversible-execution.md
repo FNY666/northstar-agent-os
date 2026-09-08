@@ -87,9 +87,12 @@ is validated and carried by the signed action receipt. The manifest is an
 observation, not host attestation, and hidden side effects are never inferred.
 
 The slice does not sign manifests, enforce OS-level isolation, coordinate remote
-workers, or replace the durable-run event store. Those are subsequent layers:
-a future runtime should make checkpoint creation part of the common `Run / Turn /
-Action / Checkpoint / Artifact / Receipt` event contract.
+workers, or replace the durable-run event store. The runtime now offers an
+explicit `CheckpointPolicy` for opt-in turn/mutation boundaries. It requires a
+persisted session, records checkpoint metadata as an informational transcript
+record and returns it in `RunReport.checkpoints`; retention only prunes the
+policy's automatic labels and rebases their parent chain to a retained/manual
+ancestor. It still never performs an automatic rewind or deletes added files.
 
 See the runtime [API reference](../api/northstar-agent-runtime.md) and the
 [audit trail concept](audit-trail.md) for the relationship between checkpoint

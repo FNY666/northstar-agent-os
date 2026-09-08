@@ -10,10 +10,12 @@ from pathlib import Path
 import support  # noqa: F401
 from checkpoints import (
     CheckpointError,
+    CheckpointPolicy,
     create_checkpoint,
     diff_checkpoint,
     fork_checkpoint,
     list_checkpoints,
+    prune_checkpoints,
     rewind_checkpoint,
 )
 
@@ -32,6 +34,35 @@ class CheckpointTests(unittest.TestCase):
         import shutil
 
         shutil.rmtree(self.tmp, ignore_errors=True)
+
+    def test_policy_is_opt_in_and_has_deterministic_boundaries(self):
+        policy = CheckpointPolicy(enabled=True, every_turns=3, after_mutation=True, max_checkpoints=2)
+        self.assertFalse(policy.should_checkpoint(turn_index=1, mutated=False))
+        self.assertTrue(policy.should_checkpoint(turn_index=1, mutated=True))
+        self.assertFalse(policy.should_checkpoint(turn_index=2, mutated=False))
+        self.assertTrue(policy.should_checkpoint(turn_index=3, mutated=False))
+        self.assertEqual(policy.label(turn_index=3, mutated=False), "auto:turn-3")
+        with self.assertRaises(ValueError):
+            CheckpointPolicy(enabled=True, every_turns=0)
+        with self.assertRaises(ValueError):
+            CheckpointPolicy(enabled=True, label_prefix="bad\nlabel")
+
+    def test_automatic_retention_preserves_manual_checkpoints_and_rebases_chain(self):
+        manual = create_checkpoint(self.workspace, self.sessions, "ns-retain", label="operator baseline")
+        for index in range(1, 4):
+            (self.workspace / "README.md").write_text(f"automatic {index}\\n", encoding="utf-8")
+            create_checkpoint(self.workspace, self.sessions, "ns-retain", label=f"auto:turn-{index}")
+        removed = prune_checkpoints(
+            self.sessions,
+            "ns-retain",
+            max_checkpoints=2,
+            label_prefix="auto",
+        )
+        self.assertEqual(len(removed), 1)
+        remaining = list_checkpoints(self.sessions, "ns-retain")
+        self.assertEqual([item.label for item in remaining], ["operator baseline", "auto:turn-2", "auto:turn-3"])
+        self.assertEqual(remaining[1].parent_checkpoint_id, manual.checkpoint_id)
+        self.assertTrue((remaining[-1].snapshot_root / "README.md").is_file())
 
     def test_manifest_is_bounded_content_addressed_and_reloadable(self):
         checkpoint = create_checkpoint(self.workspace, self.sessions, "ns-check", label="before edit")

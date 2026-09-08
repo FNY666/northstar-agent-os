@@ -83,7 +83,7 @@ python3 -m cli run --workspace . --provider anthropic --prompt "summarise README
 ```
 
 `make test` runs every component's suite and the repository documentation tests
-(889 tests at the current snapshot, 885 pass; four optional OpenTelemetry checks
+(896 tests at the current snapshot, 892 pass; four optional OpenTelemetry checks
 are skipped when that extra is not installed).
 
 ### Sidecar installation

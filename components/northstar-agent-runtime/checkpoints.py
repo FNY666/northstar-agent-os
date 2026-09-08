@@ -42,6 +42,59 @@ _CHECKPOINT_ID_RE = re.compile(r"^cp-[A-Za-z0-9TZ_.-]+$")
 _IGNORED_DIRECTORIES = frozenset({".git", "__pycache__", "node_modules", ".venv"})
 
 
+@dataclass(frozen=True)
+class CheckpointPolicy:
+    """Opt-in automatic checkpoint boundaries for a governed runtime.
+
+    ``every_turns`` creates a snapshot at a deterministic turn interval;
+    ``after_mutation`` also creates one after a successfully admitted mutating
+    tool turn. Automatic snapshots are retained separately from operator/manual
+    checkpoints by ``label_prefix``. The policy never changes workspace
+    permissions or bypasses the explicit rewind/restore controls.
+    """
+
+    enabled: bool = False
+    every_turns: int = 1
+    after_mutation: bool = True
+    max_checkpoints: int = 32
+    label_prefix: str = "auto"
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.enabled, bool):
+            raise ValueError("checkpoint policy enabled must be a boolean")
+        if isinstance(self.every_turns, bool) or not isinstance(self.every_turns, int) or self.every_turns < 1:
+            raise ValueError("checkpoint policy every_turns must be a positive integer")
+        if not isinstance(self.after_mutation, bool):
+            raise ValueError("checkpoint policy after_mutation must be a boolean")
+        if isinstance(self.max_checkpoints, bool) or not isinstance(self.max_checkpoints, int) or self.max_checkpoints < 1:
+            raise ValueError("checkpoint policy max_checkpoints must be a positive integer")
+        if not isinstance(self.label_prefix, str) or not self.label_prefix or len(self.label_prefix) > MAX_LABEL_CHARS:
+            raise ValueError("checkpoint policy label_prefix is invalid")
+        if any(ord(char) < 0x20 for char in self.label_prefix):
+            raise ValueError("checkpoint policy label_prefix contains a control character")
+
+    def should_checkpoint(self, *, turn_index: int, mutated: bool) -> bool:
+        """Return whether the completed turn crosses an automatic boundary."""
+        if not self.enabled:
+            return False
+        if isinstance(turn_index, bool) or not isinstance(turn_index, int) or turn_index < 1:
+            raise ValueError("turn_index must be a positive integer")
+        return (self.after_mutation and mutated) or turn_index % self.every_turns == 0
+
+    def label(self, *, turn_index: int, mutated: bool) -> str:
+        kind = "mutation" if mutated else "turn"
+        return f"{self.label_prefix}:{kind}-{turn_index}"
+
+    def as_dict(self) -> dict[str, Any]:
+        return {
+            "enabled": self.enabled,
+            "every_turns": self.every_turns,
+            "after_mutation": self.after_mutation,
+            "max_checkpoints": self.max_checkpoints,
+            "label_prefix": self.label_prefix,
+        }
+
+
 class CheckpointError(ValueError):
     """A checkpoint cannot be created, verified, compared or restored safely."""
 
@@ -315,6 +368,63 @@ def list_checkpoints(session_dir: str | os.PathLike[str], session_id: str) -> tu
         checkpoints.append(load_checkpoint(manifest.parent, expected_session_id=session_id))
     checkpoints.sort(key=lambda item: (item.created_at, item.checkpoint_id))
     return tuple(checkpoints)
+
+
+def prune_checkpoints(
+    session_dir: str | os.PathLike[str],
+    session_id: str,
+    *,
+    max_checkpoints: int,
+    label_prefix: str = "auto",
+) -> tuple[str, ...]:
+    """Remove old automatic checkpoints while preserving manual checkpoints.
+
+    If a retained checkpoint pointed at an evicted automatic ancestor, its
+    parent pointer is atomically rebased to the nearest retained/manual
+    ancestor. The workspace digest and snapshot bytes are untouched.
+    """
+    if isinstance(max_checkpoints, bool) or not isinstance(max_checkpoints, int) or max_checkpoints < 1:
+        raise CheckpointError("max_checkpoints must be a positive integer")
+    if not isinstance(label_prefix, str) or not label_prefix or len(label_prefix) > MAX_LABEL_CHARS:
+        raise CheckpointError("label_prefix is invalid")
+    checkpoints = list(list_checkpoints(session_dir, session_id))
+    automatic = [item for item in checkpoints if item.label.startswith(label_prefix + ":")]
+    if len(automatic) <= max_checkpoints:
+        return ()
+    retained_automatic = automatic[-max_checkpoints:]
+    removed = automatic[:-max_checkpoints]
+    removed_ids = {item.checkpoint_id for item in removed}
+    by_id = {item.checkpoint_id: item for item in checkpoints}
+    for item in removed:
+        directory = item.directory
+        if directory.parent != _checkpoint_parent(session_dir, session_id) or directory.is_symlink():
+            raise CheckpointError(f"refusing to prune checkpoint outside session root: {directory}")
+        try:
+            shutil.rmtree(directory)
+        except OSError as error:
+            raise CheckpointError(f"cannot prune checkpoint {item.checkpoint_id}: {error}") from error
+
+    first = retained_automatic[0]
+    if first.parent_checkpoint_id in removed_ids:
+        parent_id = first.parent_checkpoint_id
+        visited: set[str] = set()
+        while parent_id in removed_ids:
+            if parent_id in visited:
+                raise CheckpointError("checkpoint parent chain contains a cycle")
+            visited.add(parent_id)
+            ancestor = by_id.get(parent_id)
+            parent_id = ancestor.parent_checkpoint_id if ancestor is not None else None
+        manifest_path = first.manifest_path
+        try:
+            raw = json.loads(manifest_path.read_text(encoding="utf-8"))
+            if not isinstance(raw, dict):
+                raise ValueError("manifest is not an object")
+            raw["parent_checkpoint_id"] = parent_id
+            _atomic_write_json(manifest_path, raw)
+        except (OSError, UnicodeDecodeError, json.JSONDecodeError, ValueError) as error:
+            raise CheckpointError(f"cannot rebase retained checkpoint {first.checkpoint_id}: {error}") from error
+    _fsync_directory(_checkpoint_parent(session_dir, session_id))
+    return tuple(item.checkpoint_id for item in removed)
 
 
 def load_checkpoint(
@@ -883,6 +993,18 @@ def _write_json(path: Path, value: dict[str, Any]) -> None:
         os.fsync(handle.fileno())
 
 
+def _atomic_write_json(path: Path, value: dict[str, Any]) -> None:
+    """Replace one JSON file atomically and fsync its containing directory."""
+    temporary = path.with_name(f".{path.name}.tmp-{uuid.uuid4().hex[:8]}")
+    try:
+        _write_json(temporary, value)
+        os.replace(temporary, path)
+        _fsync_directory(path.parent)
+    finally:
+        if temporary.exists() or temporary.is_symlink():
+            temporary.unlink(missing_ok=True)
+
+
 def _fsync_directory(path: Path) -> None:
     """Make an atomic directory rename durable on POSIX filesystems."""
     flags = os.O_RDONLY
@@ -902,6 +1024,7 @@ __all__ = [
     "CheckpointDiff",
     "CheckpointError",
     "CheckpointFile",
+    "CheckpointPolicy",
     "FileChange",
     "FileState",
     "ForkResult",
@@ -911,6 +1034,7 @@ __all__ = [
     "diff_checkpoint",
     "list_checkpoints",
     "load_checkpoint",
+    "prune_checkpoints",
     "rewind_checkpoint",
     "verify_checkpoint",
 ]

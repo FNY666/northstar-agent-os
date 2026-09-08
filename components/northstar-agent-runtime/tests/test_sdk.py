@@ -6,6 +6,7 @@ import unittest
 from pathlib import Path
 
 import sdk
+from checkpoints import CheckpointPolicy
 from events import EXIT_CODES, event_to_dict
 from sdk import RunOptions, RunReport, run, stream_run
 
@@ -125,6 +126,23 @@ class SessionTests(unittest.TestCase):
             records = [json.loads(line) for line in path.read_text().splitlines()]
             self.assertEqual(records[0]["type"], "session_start")
             self.assertEqual(records[-1]["type"], "session_end")
+
+    def test_sdk_report_exposes_opt_in_checkpoint_metadata(self):
+        with tempfile.TemporaryDirectory() as directory:
+            workspace = Path(directory) / "workspace"
+            workspace.mkdir()
+            report = run(RunOptions(
+                prompt="Write and finish.",
+                workspace=str(workspace),
+                scripted_turns=WRITE_TURNS,
+                allowed_tools=["Write"],
+                session_dir=str(Path(directory) / "sessions"),
+                checkpoint_policy=CheckpointPolicy(enabled=True, every_turns=2, max_checkpoints=2),
+            ))
+            self.assertEqual(report.subtype, "success")
+            self.assertEqual(len(report.checkpoints), 2)
+            self.assertEqual(report.checkpoints[0]["trigger"], "mutation")
+            self.assertEqual(report.checkpoints[1]["trigger"], "turn")
 
     def test_resume_continues_a_persisted_session(self):
         with tempfile.TemporaryDirectory() as directory:

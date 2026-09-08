@@ -152,6 +152,32 @@ checkpointed tree, `.git` escapes, and large or excessive file sets are
 rejected fail-closed; this is a
 local reversible-run contract, not an OS/VM snapshot.
 
+Automatic checkpoints are opt-in and require a persisted session directory. The
+SDK accepts a `CheckpointPolicy` and creates bounded `informational` transcript
+records at deterministic turn or admitted-mutation boundaries; `RunReport.checkpoints`
+contains the same metadata. Retention prunes only checkpoints whose label starts
+with the policy prefix and rebases the retained chain to the nearest manual
+ancestor. It never enables rewind automatically, deletes newly added workspace
+files, or snapshots when no durable session exists.
+
+```python
+from checkpoints import CheckpointPolicy
+from sdk import RunOptions, run
+
+report = run(RunOptions(
+    prompt="update the notes",
+    workspace=".",
+    session_dir=".northstar/sessions",
+    permission_mode="acceptEdits",
+    checkpoint_policy=CheckpointPolicy(
+        enabled=True,
+        every_turns=2,
+        after_mutation=True,
+        max_checkpoints=8,
+    ),
+))
+```
+
 To delegate execution to Codex, point the runtime at the sidecar socket. That is
 the only switch; without it `CodexReadOnly` is not registered at all:
 
@@ -521,7 +547,7 @@ cd components/northstar-agent-runtime
 python3 -m unittest discover -s tests -p 'test_*.py' -v
 ```
 
-579 tests, fully offline and deterministic (four optional OpenTelemetry tests
+586 tests, fully offline and deterministic (four optional OpenTelemetry tests
 are skipped when the tracing extra is absent): the scripted provider is the
 only model, and `test_integration_sidecar.py` runs the real sidecar `serve()`
 over a real Unix socket with a 100,000-Chinese-character prompt.

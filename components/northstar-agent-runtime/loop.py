@@ -29,7 +29,14 @@ from typing import Any, Callable, Iterable, Iterator, Mapping, Sequence
 from agents import AgentDefinition, AgentRegistry, Verdict, builtin_registry, parse_verdict
 from artifacts import ArtifactError, ArtifactManifest
 from budget import Budget
-from checkpoints import CheckpointError, capture_file_states
+from checkpoints import (
+    CheckpointError,
+    CheckpointPolicy,
+    capture_file_states,
+    create_checkpoint,
+    list_checkpoints,
+    prune_checkpoints,
+)
 from compaction import CompactionOutcome, compact, should_compact
 from hooks import HookInput, HookRegistry
 from permissions import (
@@ -131,6 +138,7 @@ class RuntimeConfig:
     sidecar_timeout_ms: int = 30_000
     include_describe_tool: bool = True
     record_tool_output_in_session: bool = True
+    checkpoint_policy: CheckpointPolicy = field(default_factory=CheckpointPolicy)
 
     def __post_init__(self) -> None:
         def fail(message: str) -> None:
@@ -138,6 +146,11 @@ class RuntimeConfig:
 
         if not isinstance(self.model, str) or not self.model.strip():
             fail("model must be a non-empty string")
+        if not isinstance(self.checkpoint_policy, CheckpointPolicy):
+            try:
+                object.__setattr__(self, "checkpoint_policy", CheckpointPolicy(**dict(self.checkpoint_policy)))
+            except (TypeError, ValueError) as error:
+                fail(f"checkpoint_policy is invalid: {error}")
         if isinstance(self.max_turns, bool) or not isinstance(self.max_turns, int) or self.max_turns < 1:
             fail("max_turns must be an integer >= 1")
         if self.max_tool_calls is not None:
@@ -189,6 +202,7 @@ class RuntimeConfig:
             "allow_nested_delegation": self.allow_nested_delegation,
             "halt_on_denial": self.halt_on_denial,
             "compaction_threshold_tokens": self.compaction_threshold_tokens,
+            "checkpoint_policy": self.checkpoint_policy.as_dict(),
             "sidecar": bool(self.sidecar_socket),
         }
 
@@ -302,6 +316,7 @@ class RunReport:
     receipts: tuple[ActionReceipt, ...] = ()
     subagents: tuple[SubagentReport, ...] = ()
     compactions: tuple[dict[str, Any], ...] = ()
+    checkpoints: tuple[dict[str, Any], ...] = ()
     hook_fires: tuple[dict[str, Any], ...] = ()
     errors: tuple[str, ...] = ()
     session_id: str = ""
@@ -360,6 +375,7 @@ class RunReport:
             "denials": [denial.as_dict() for denial in self.denials],
             "subagents": [report.as_dict() for report in self.subagents],
             "compactions": list(self.compactions),
+            "checkpoints": list(self.checkpoints),
             "errors": list(self.errors),
             "cost_usd": result.total_cost_usd if result else 0.0,
             "pricing_estimated": result.pricing_estimated if result else False,
@@ -382,6 +398,7 @@ class _RunState:
     subagents: list[SubagentReport] = field(default_factory=list)
     tool_reports: list[ToolCallReport] = field(default_factory=list)
     compactions: list[dict[str, Any]] = field(default_factory=list)
+    checkpoints: list[dict[str, Any]] = field(default_factory=list)
     hook_fires: list[dict[str, Any]] = field(default_factory=list)
     final_text: str = ""
     started: float = field(default_factory=time.monotonic)
@@ -489,6 +506,8 @@ class AgentRuntime:
         self.session_id = resolve_session_id(self.config.session_id, self.sessions if self.sessions.enabled else None)
         if self.sessions.session_id != self.session_id:
             self.sessions = replace(self.sessions, session_id=self.session_id)
+        if self.config.checkpoint_policy.enabled and not self.sessions.enabled:
+            raise RuntimeConfigurationError("an enabled checkpoint_policy requires a session directory")
         try:
             self.receipt_binding = (
                 receipt_binding
@@ -646,6 +665,7 @@ class AgentRuntime:
             "capability_leases": len(self.approval_leases.active(now=int(self.clock()))),
             "receipts_signed": self.receipt_secret is not None,
             "receipts_bound": self.receipt_binding is not None,
+            "checkpoint_policy": config.checkpoint_policy.as_dict(),
         }
         init = SystemMessage(subtype="init", content=f"runtime ready: {self.provider_name}/{config.model}", data=init_data)
         self.sessions.record_system(init, agent=config.agent)
@@ -703,6 +723,7 @@ class AgentRuntime:
                     yield outcome.boundary
 
             state.cost_at_turn_start = self.budget.total_cost_usd
+            mutated_this_turn = False
             with run_span.child(f"turn[{turn_index}]") as turn_span:
                 turn_span.set_attributes({"turn.index": turn_index, "turn.depth": config.depth, "agent.name": config.agent})
                 request = GenerationRequest(
@@ -782,6 +803,16 @@ class AgentRuntime:
                             {"agent": config.agent, "role": "user", "is_meta": True, "content": [block.to_api() for block in follow_up.content]},
                         )
                         continue
+                    notice, checkpoint_error = self._checkpoint_boundary(
+                        state,
+                        turn_index=turn_index,
+                        mutated=mutated_this_turn,
+                    )
+                    if checkpoint_error is not None:
+                        yield self._finish(state, "error_during_execution")
+                        return
+                    if notice is not None:
+                        yield notice
                     state.final_text = assistant.text
                     yield self._finish(state, "success")
                     return
@@ -816,6 +847,9 @@ class AgentRuntime:
                     results.append(block)
                     state.tool_reports.append(report)
                     state.tool_calls += 1
+                    spec = self.tools.get(call.name)
+                    if spec is not None and spec.is_mutating and not report.denied:
+                        mutated_this_turn = True
                     if fatal is not None:
                         halted = fatal
                 if not results:  # pragma: no cover - defensive: tool_use implies a result
@@ -823,7 +857,17 @@ class AgentRuntime:
                 tool_message = UserMessage(content=tuple(results))
                 state.transcript.append(tool_message)
                 self._record_tool_message(tool_message)
+                notice, checkpoint_error = self._checkpoint_boundary(
+                    state,
+                    turn_index=turn_index,
+                    mutated=mutated_this_turn,
+                )
                 yield tool_message
+                if checkpoint_error is not None:
+                    yield self._finish(state, "error_during_execution")
+                    return
+                if notice is not None:
+                    yield notice
                 if halted is not None:
                     yield self._finish(state, halted)
                     return
@@ -1301,6 +1345,80 @@ class AgentRuntime:
             lease_id=decision.lease_id,
         )
         return block, report, None
+
+    def _checkpoint_boundary(
+        self,
+        state: _RunState,
+        *,
+        turn_index: int,
+        mutated: bool,
+    ) -> tuple[SystemMessage | None, str | None]:
+        """Create one opt-in checkpoint after a completed turn boundary."""
+        policy = self.config.checkpoint_policy
+        if not policy.should_checkpoint(turn_index=turn_index, mutated=mutated):
+            return None, None
+        session_dir = self.sessions.directory
+        if session_dir is None:  # guarded at construction; keep the invariant local
+            message = "automatic checkpoint unavailable: session directory is not enabled"
+            state.errors.append(message)
+            return None, message
+        label = policy.label(turn_index=turn_index, mutated=mutated)
+        try:
+            checkpoint = create_checkpoint(
+                self.sandbox.root_real,
+                session_dir,
+                state.session_id,
+                label=label,
+            )
+            removed = prune_checkpoints(
+                session_dir,
+                state.session_id,
+                max_checkpoints=policy.max_checkpoints,
+                label_prefix=policy.label_prefix,
+            )
+            current = next(
+                (
+                    item
+                    for item in list_checkpoints(session_dir, state.session_id)
+                    if item.checkpoint_id == checkpoint.checkpoint_id
+                ),
+                checkpoint,
+            )
+            data = {
+                "checkpoint_id": current.checkpoint_id,
+                "session_id": current.session_id,
+                "turn_index": turn_index,
+                "trigger": "mutation" if mutated else "turn",
+                "label": current.label,
+                "parent_checkpoint_id": current.parent_checkpoint_id,
+                "session_index": current.session_index,
+                "workspace_digest": current.workspace_digest,
+                "file_count": len(current.files),
+                "total_bytes": sum(item.bytes for item in current.files),
+                "removed_checkpoint_ids": list(removed),
+            }
+        except (CheckpointError, OSError, TypeError, ValueError) as error:
+            message = f"automatic checkpoint failed at turn {turn_index}: {type(error).__name__}: {error}"
+            state.errors.append(message)
+            self.sessions.append(
+                "informational",
+                {
+                    "agent": self.config.agent,
+                    "subtype": "checkpoint_failed",
+                    "turn_index": turn_index,
+                    "error": message,
+                },
+            )
+            return None, message
+        state.checkpoints.append(data)
+        notice = SystemMessage(
+            subtype="informational",
+            content="",
+            data={"subtype": "checkpoint_created", "checkpoint": data},
+        )
+        state.transcript.append(notice)
+        self.sessions.record_system(notice, agent=self.config.agent)
+        return notice, None
 
     def _trace_refusal(self, turn_span: Any, tool_name: str, *, source: str, turn_index: int) -> None:
         """A refusal is a governed outcome, so it belongs in the trace too."""
@@ -1780,6 +1898,7 @@ class AgentRuntime:
             receipts=tuple(state.receipts),
             subagents=tuple(state.subagents),
             compactions=tuple(state.compactions),
+            checkpoints=tuple(state.checkpoints),
             hook_fires=tuple(state.hook_fires),
             errors=tuple(state.errors),
             session_id=state.session_id,
