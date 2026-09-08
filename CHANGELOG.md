@@ -1,5 +1,16 @@
 # Northstar Agent OS — initial public component
 
+## Unreleased (forty-eighth batch) — clean-room packaging namespace fix (T39)
+
+- Fixed the durable-run console entry point collision with the runtime's flat
+  `cli.py` module: the durable component now installs `durable_cli:main` and
+  keeps its source/test module namespace explicit.
+- Updated the API manifest, generated reference and CI compile list; a clean
+  multi-component venv smoke now resolves both `northstar-agent-runtime` and
+  `northstar-durable-run` to their own CLI implementations.
+- This is packaging/integration hardening only; no release or public index
+  publication was made.
+
 ## Unreleased (forty-seventh batch) — consumer-side bounds (T38)
 
 - Python and Node app-server consumers now reject empty/oversized prompts,

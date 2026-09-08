@@ -25,13 +25,13 @@ classifiers = [
 dependencies = ["northstar-run-contract", "northstar-host"]
 
 [project.scripts]
-northstar-durable-run = "cli:main"
+northstar-durable-run = "durable_cli:main"
 
 [tool.setuptools]
 py-modules = [
     "_durable_lock",
     "action_gateway",
-    "cli",
+    "durable_cli",
     "control_ledger",
     "control_receipt",
     "durable_audit",

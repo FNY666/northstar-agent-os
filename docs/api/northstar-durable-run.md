@@ -41,9 +41,9 @@ Assert that a step belongs to the supplied run lineage.
 
 Assert that an event belongs to both its run and step lineage.
 
-### `cli`
+### `durable_cli`
 
-Source: `components/northstar-durable-run/cli.py`
+Source: `components/northstar-durable-run/durable_cli.py`
 
 Local inspection and control CLI for one durable-run event stream.
 

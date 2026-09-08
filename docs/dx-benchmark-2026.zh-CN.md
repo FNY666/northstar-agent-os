@@ -1291,3 +1291,18 @@ T38 让 Python/Node consumer 在 transport 前先执行与 capability projection
 - 当前 runtime 623 项，全仓 `make test` 1,040 项（1,036 pass、4 项可选 OTel skip）。
 
 T38 仍是 Unreleased；没有创建 tag、GitHub Release，也没有发布到 PyPI/npm。
+
+### 10.44 当前实现复核：clean-room packaging namespace fix（T39，2026-09-08）
+
+post-merge clean-room audit 发现并修复了一个真实的打包缺口：durable-run 与
+agent-runtime 都使用 flat `cli.py`，按 `make install` 顺序安装时，后安装的 runtime
+可能覆盖 durable-run console entry point 的 import 目标。
+
+- durable-run 现在使用独立的 `durable_cli.py` 与 `northstar-durable-run = durable_cli:main`；
+  API manifest、测试和 CI compile list 已同步。
+- 使用隔离 venv 安装五个可打包组件后，`northstar-agent-runtime --version` 与
+  `northstar-durable-run --help` 均解析到各自 CLI；不需要 `PYTHONPATH` 或公共发布渠道。
+- runtime 623 项、全仓 `make test` 1,041 项（1,037 pass、4 项可选 OTel skip）；文档
+  构建仍通过 69 个 Markdown 文件。
+
+T39 仍是 Unreleased；没有创建 tag、GitHub Release，也没有发布到 PyPI/npm。

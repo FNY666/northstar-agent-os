@@ -11,7 +11,7 @@ CONTRACT_ROOT = COMPONENT_ROOT.parent / "northstar-run-contract"
 sys.path.insert(0, str(COMPONENT_ROOT))
 sys.path.insert(0, str(CONTRACT_ROOT))
 
-from cli import main  # noqa: E402
+from durable_cli import main  # noqa: E402
 from control_receipt import ControlReceipt, digest_state  # noqa: E402
 from durable_contract import RunContract  # noqa: E402
 from event_store import EventStore  # noqa: E402
@@ -73,6 +73,12 @@ class DurableCliTests(unittest.TestCase):
             now=100,
             finalize=False,
         )
+
+    def test_packaging_uses_a_non_colliding_cli_module(self):
+        metadata = (COMPONENT_ROOT / "pyproject.toml").read_text(encoding="utf-8")
+        self.assertIn('northstar-durable-run = "durable_cli:main"', metadata)
+        self.assertIn('    "durable_cli",', metadata)
+        self.assertNotIn('northstar-durable-run = "cli:main"', metadata)
 
     def test_status_history_and_audit_are_read_only_views(self):
         self.create_running_run()
