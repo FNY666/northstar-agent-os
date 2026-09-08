@@ -1,5 +1,16 @@
 # Northstar Agent OS — initial public component
 
+## Unreleased (fortieth batch) — authenticated request replay hardening (T32)
+
+- App-server now keeps a bounded in-memory cache of successful completed
+  responses keyed by authenticated `request_id` and canonical request
+  fingerprint. Retries receive the same HMAC-protected response; reusing an id
+  for different claims or operation fields fails closed with
+  `idempotency_conflict`.
+- `app.describe` advertises the completed-response replay behavior and bound;
+  no durable replay log, cross-process deduplication or remote exactly-once
+  claim is introduced.
+
 ## Unreleased (thirty-ninth batch) — context-aware host factory (T31)
 
 - `RunManager` now supports a host-only `RunContext` factory seam containing

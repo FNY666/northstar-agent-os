@@ -8,14 +8,15 @@ Python callable, tool, or filesystem path.
 
 The optional Unix-socket server adds a small versioned JSON-lines protocol:
 ``app.describe``, ``run.start``, ``run.status``, ``run.events``, ``run.wait`` and
-``run.cancel``. Every request and response is HMAC-authenticated, request ids
-are idempotent, event pages are
+``run.cancel``. Every request and response is HMAC-authenticated, completed responses can be
+replayed by request id within a bounded in-memory cache, event pages are
 bounded, and the socket is private to the local filesystem. Runtime cancellation
 is cooperative: a provider or tool already in progress is allowed to finish and
 the loop stops at its next governed boundary.
 """
 from __future__ import annotations
 
+import copy
 import hashlib
 import hmac
 import inspect
@@ -47,6 +48,7 @@ APP_OPERATIONS = (
 MAX_PROMPT_CHARS = 128_000
 MAX_FRAME_BYTES = 1_048_576
 MAX_EVENT_PAGE = 256
+DEFAULT_REQUEST_REPLAY_RETENTION = 256
 DEFAULT_EVENT_RETENTION = 512
 DEFAULT_ACTIVE_RUNS = 8
 DEFAULT_WAIT_MS = 10_000
@@ -479,6 +481,10 @@ def _without_auth(payload: Mapping[str, Any]) -> dict[str, Any]:
     return {key: value for key, value in payload.items() if key != "auth"}
 
 
+def _request_fingerprint(payload: Mapping[str, Any]) -> str:
+    return hashlib.sha256(_canonical_payload(_without_auth(payload))).hexdigest()
+
+
 def _strict_object(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
     result: dict[str, Any] = {}
     for key, value in pairs:
@@ -504,15 +510,20 @@ class AppServer:
         channel_secret: bytes,
         socket_path: str | os.PathLike[str] | None = None,
         max_frame_bytes: int = MAX_FRAME_BYTES,
+        max_request_replays: int = DEFAULT_REQUEST_REPLAY_RETENTION,
     ) -> None:
         if not isinstance(manager, RunManager):
             raise TypeError("manager must be a RunManager")
         if isinstance(max_frame_bytes, bool) or not isinstance(max_frame_bytes, int) or max_frame_bytes < 1024:
             raise ValueError("max_frame_bytes must be >= 1024")
+        if isinstance(max_request_replays, bool) or not isinstance(max_request_replays, int) or max_request_replays < 1:
+            raise ValueError("max_request_replays must be a positive integer")
         self.manager = manager
         self.channel_secret = _secret(channel_secret)
         self.socket_path = _socket_path(socket_path) if socket_path is not None else None
         self.max_frame_bytes = max_frame_bytes
+        self.max_request_replays = max_request_replays
+        self._request_replays: OrderedDict[str, tuple[str, dict[str, Any]]] = OrderedDict()
         self._server: socketserver.ThreadingUnixStreamServer | None = None
         self._server_thread: threading.Thread | None = None
         self._owned_socket: Path | None = None
@@ -520,6 +531,28 @@ class AppServer:
         self._stop_requested = threading.Event()
         self._ready = threading.Event()
         self._startup_error: BaseException | None = None
+
+    def _replayed_response(self, *, request_id: str, fingerprint: str) -> dict[str, Any] | None:
+        with self._lifecycle_lock:
+            cached = self._request_replays.get(request_id)
+            if cached is None:
+                return None
+            old_fingerprint, response = cached
+            if not hmac.compare_digest(old_fingerprint, fingerprint):
+                raise AppServerError(
+                    "idempotency_conflict",
+                    "request_id was already used with a different authenticated request",
+                )
+            self._request_replays.move_to_end(request_id)
+            return copy.deepcopy(response)
+
+    def _remember_response(self, *, request_id: str, fingerprint: str, response: dict[str, Any]) -> dict[str, Any]:
+        with self._lifecycle_lock:
+            self._request_replays[request_id] = (fingerprint, copy.deepcopy(response))
+            self._request_replays.move_to_end(request_id)
+            while len(self._request_replays) > self.max_request_replays:
+                self._request_replays.popitem(last=False)
+        return response
 
     def _response(self, *, request_id: str, ok: bool, **fields: Any) -> dict[str, Any]:
         response: dict[str, Any] = {
@@ -532,6 +565,17 @@ class AppServer:
         if len(_json_line(response)) > self.max_frame_bytes:
             raise AppServerError("frame_too_large", "app-server response exceeds the configured bound")
         return response
+
+    def _cached_response(
+        self,
+        *,
+        request_id: str,
+        fingerprint: str,
+        ok: bool,
+        **fields: Any,
+    ) -> dict[str, Any]:
+        response = self._response(request_id=request_id, ok=ok, **fields)
+        return self._remember_response(request_id=request_id, fingerprint=fingerprint, response=response)
 
     def _error(self, request_id: str, error: AppServerError) -> dict[str, Any]:
         return self._response(request_id=request_id, ok=False, error=error.as_dict())
@@ -568,11 +612,17 @@ class AppServer:
             request_id = RunManager._id(raw.get("request_id"), field_name="request_id")
             actor_id = RunManager._id(raw.get("actor_id"), field_name="actor_id")
             operation = raw.get("op")
+            request_fingerprint = _request_fingerprint(raw)
+            if operation in APP_OPERATIONS and operation != "run.start":
+                replayed = self._replayed_response(request_id=request_id, fingerprint=request_fingerprint)
+                if replayed is not None:
+                    return replayed
             if operation == "app.describe":
                 allowed = {"protocol", "auth", "request_id", "actor_id", "op"}
                 _reject_unknown(raw, allowed)
-                return self._response(
+                return self._cached_response(
                     request_id=request_id,
+                    fingerprint=request_fingerprint,
                     ok=True,
                     op=operation,
                     capabilities={
@@ -582,6 +632,8 @@ class AppServer:
                         "max_event_page": MAX_EVENT_PAGE,
                         "max_wait_ms": MAX_WAIT_MS,
                         "event_retention": self.manager.max_event_retention,
+                        "request_replay": "completed_response",
+                        "request_replay_retention": self.max_request_replays,
                         "cancellation": "cooperative",
                         "manager_registry": "in_memory",
                         "remote_execution": False,
@@ -598,7 +650,7 @@ class AppServer:
                 _reject_unknown(raw, allowed)
                 result = self.manager.status(run_id=raw.get("run_id"), actor_id=actor_id)
                 result.pop("request_id", None)
-                return self._response(request_id=request_id, ok=True, op=operation, **result)
+                return self._cached_response(request_id=request_id, fingerprint=request_fingerprint, ok=True, op=operation, **result)
             if operation == "run.events":
                 allowed = {"protocol", "auth", "request_id", "actor_id", "op", "run_id", "from_sequence", "limit"}
                 _reject_unknown(raw, allowed)
@@ -608,13 +660,13 @@ class AppServer:
                     from_sequence=raw.get("from_sequence", 0),
                     limit=raw.get("limit", MAX_EVENT_PAGE),
                 )
-                return self._response(request_id=request_id, ok=True, op=operation, **result)
+                return self._cached_response(request_id=request_id, fingerprint=request_fingerprint, ok=True, op=operation, **result)
             if operation == "run.cancel":
                 allowed = {"protocol", "auth", "request_id", "actor_id", "op", "run_id"}
                 _reject_unknown(raw, allowed)
                 result = self.manager.cancel(run_id=raw.get("run_id"), actor_id=actor_id)
                 result.pop("request_id", None)
-                return self._response(request_id=request_id, ok=True, op=operation, **result)
+                return self._cached_response(request_id=request_id, fingerprint=request_fingerprint, ok=True, op=operation, **result)
             if operation == "run.wait":
                 allowed = {"protocol", "auth", "request_id", "actor_id", "op", "run_id", "timeout_ms"}
                 _reject_unknown(raw, allowed)
@@ -627,7 +679,7 @@ class AppServer:
                     timeout=timeout_ms / 1000,
                 )
                 result.pop("request_id", None)
-                return self._response(request_id=request_id, ok=True, op=operation, **result)
+                return self._cached_response(request_id=request_id, fingerprint=request_fingerprint, ok=True, op=operation, **result)
             raise AppServerError("invalid_request", f"op must be one of {', '.join(APP_OPERATIONS)}")
         except json.JSONDecodeError as error:
             return self._error(request_id, AppServerError("invalid_request", f"invalid JSON: {error.msg}"))

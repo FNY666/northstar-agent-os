@@ -186,6 +186,26 @@ class AppWireTests(RuntimeTestCase):
         self.assertEqual(status["status"], "success")
         self.assertEqual(page["events"][-1]["event"]["subtype"], "success")
 
+    def test_completed_wire_requests_replay_and_conflicting_ids_fail_closed(self):
+        server = AppServer(self.manager(), channel_secret=self.SECRET)
+        request = {
+            "protocol": APP_PROTOCOL,
+            "op": "app.describe",
+            "request_id": "wire-replay",
+            "actor_id": "owner",
+        }
+        request["auth"] = _mac(request, self.SECRET)
+        first = server.handle_wire_line(json.dumps(request))
+        second = server.handle_wire_line(json.dumps(request))
+        self.assertEqual(second, first)
+        self.assertEqual(first["capabilities"]["request_replay"], "completed_response")
+
+        conflict = dict(request, actor_id="other")
+        conflict["auth"] = _mac({key: value for key, value in conflict.items() if key != "auth"}, self.SECRET)
+        response = server.handle_wire_line(json.dumps(conflict))
+        self.assertFalse(response["ok"])
+        self.assertEqual(response["error"]["code"], "idempotency_conflict")
+
     def test_node_consumer_verifies_hmac_and_uses_bounded_wait(self):
         repository = Path(__file__).resolve().parents[3]
         smoke = repository / "examples" / "app-server" / "node_client_smoke.mjs"

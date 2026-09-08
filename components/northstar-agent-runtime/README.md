@@ -273,10 +273,12 @@ shape remains supported.
 The host owns `runtime_factory`, provider credentials, workspace, policy and
 session directory. The wire protocol can call `app.describe` and submit a
 bounded prompt through `run.start`, `run.status`, `run.events`, bounded
-`run.wait` or `run.cancel`; `app.describe` advertises protocol limits and the
-cooperative cancellation boundary. The client cannot select a provider,
-workspace, tool, Python action or arbitrary path. Requests and
-responses use an HMAC channel, start is request-id idempotent, events have a
+`run.wait` or `run.cancel`; `app.describe` advertises protocol limits, the
+bounded completed-response replay window and the cooperative cancellation
+boundary. The client cannot select a provider, workspace, tool, Python action
+or arbitrary path. Requests and responses use an HMAC channel; successful
+completed responses can be replayed by request id within the in-memory replay
+window, while `run.start` also retains manager-level idempotency. Events have a
 bounded cursor/page, and actor binding is re-checked on every operation.
 Cancellation is cooperative at the next generation/tool boundary and never
 force-kills a running provider or tool. When starting the server in a host
@@ -635,7 +637,7 @@ cd components/northstar-agent-runtime
 python3 -m unittest discover -s tests -p 'test_*.py' -v
 ```
 
-618 tests, fully offline and deterministic (four optional OpenTelemetry tests
+619 tests, fully offline and deterministic (four optional OpenTelemetry tests
 are skipped when the tracing extra is absent): the scripted provider is the
 only model, and `test_integration_sidecar.py` runs the real sidecar `serve()`
 over a real Unix socket with a 100,000-Chinese-character prompt.

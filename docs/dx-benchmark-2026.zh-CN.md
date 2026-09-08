@@ -1166,3 +1166,19 @@ T31 让同一个本地 app-server host 可以按 actor/request 做 host-owned �
   reattach、remote worker 或 exactly-once claim。
 
 T31 仍是 Unreleased；没有创建 tag、GitHub Release，也没有发布到 PyPI/npm。
+
+### 10.36 当前实现复核：authenticated request replay hardening（T32，2026-09-08）
+
+T32 收紧 app-server 的重试语义，但不把本地进程内缓存包装成 exactly-once：
+
+- 对已完成的成功 wire response，server 按 canonical authenticated request
+  fingerprint 和 `request_id` 做有限的 in-memory replay；同一 request id 的重试得到
+  同一份 HMAC response，改动 actor、operation 或字段则 fail-closed 为
+  `idempotency_conflict`。
+- `app.describe` 现在公开 replay 模式和 retention bound；错误 response 不进入缓存，
+  缓存不跨进程、不落盘、不提供 crash recovery 或 remote deduplication。
+- 新增 replay/conflicting-id 离线测试；runtime 619 项、全仓预计 `make test` 957 项
+  （953 pass、4 项可选 OTel skip）。manager registry 仍是 in-memory，取消仍为
+  cooperative，未引入 scheduler、remote worker 或 hosted execution。
+
+T32 仍是 Unreleased；没有创建 tag、GitHub Release，也没有发布到 PyPI/npm。
