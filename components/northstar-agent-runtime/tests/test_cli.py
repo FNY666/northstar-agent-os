@@ -516,7 +516,10 @@ class DoctorTests(unittest.TestCase):
         self.assertIn("[fail] script", out)
 
     def test_doctor_reports_missing_optional_sdks_as_warnings(self):
-        code, out, _ = run_cli("doctor")
+        # CI also exercises the optional SDK path, so force the missing-SDK
+        # branch instead of making this regression depend on the host venv.
+        with mock.patch("doctor.importlib.util.find_spec", return_value=None):
+            code, out, _ = run_cli("doctor")
         self.assertEqual(code, 0)  # warnings, not failures
         self.assertIn("anthropic-sdk", out)
         self.assertIn("[warn]", out)

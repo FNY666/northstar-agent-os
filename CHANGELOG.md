@@ -10,8 +10,9 @@
   and CI documentation job execute the same static pre-install gate.
 - Added a clean-checkout CI job that creates a fresh virtualenv, installs all
   five components in dependency order, and checks both console entry points and
-  imports from `/tmp` with `PYTHONPATH` removed. No release, tag, or public
-  package publication is made.
+  imports from `/tmp` with `PYTHONPATH` removed. The optional-SDK doctor test is
+  now deterministic in both bare and dependency-rich CI environments. No
+  release, tag, or public package publication is made.
 
 ## Unreleased (forty-eighth batch) — clean-room packaging namespace fix (T39)
 
