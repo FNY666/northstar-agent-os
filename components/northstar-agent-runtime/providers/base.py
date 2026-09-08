@@ -60,7 +60,27 @@ class ProviderError(RuntimeError):
 
     Providers raise this; the loop converts it into an ``error_during_execution``
     result event. No other exception type may cross a provider boundary.
+
+    The three optional fields exist because *what kind of failure this is* decides
+    whether a retry is allowed to happen, and a runtime that infers it from prose alone
+    inherits whatever wording the SDK happened to use that release. A provider that knows
+    the status code says so; :mod:`provider_retry` prefers the structured claim and falls
+    back to matching the message. ``failure_kind`` is the strongest form: a provider may
+    name the class directly, and an unknown name is refused rather than ignored.
     """
+
+    def __init__(
+        self,
+        message: object = "",
+        *,
+        failure_kind: str | None = None,
+        status_code: int | None = None,
+        retry_after_ms: int | None = None,
+    ) -> None:
+        super().__init__(message)
+        self.failure_kind = failure_kind
+        self.status_code = status_code if isinstance(status_code, int) and not isinstance(status_code, bool) else None
+        self.retry_after_ms = retry_after_ms if isinstance(retry_after_ms, int) and not isinstance(retry_after_ms, bool) else None
 
 
 # --------------------------------------------------------------------------

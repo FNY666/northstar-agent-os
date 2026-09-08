@@ -86,6 +86,12 @@ _ALLOWED_KEYS = frozenset({
     # ``[[verify]]`` adds postconditions. It only ever *adds* an independent check,
     # so a repository declaring one cannot loosen anything.
     "verify",
+    # The provider transport's retry budget. Shape-checked here, like ``hooks``, and
+    # interpreted by provider_retry.RetryPolicy.from_mapping - which is where an unknown key
+    # or an out-of-range delay becomes an error. A retry table can only ever *add* waiting
+    # and requests, so it is a ceiling on cost rather than a grant of capability, and it is
+    # deliberately not a key a plugin bundle may write (see plugin_manifest).
+    "retry",
 })
 _ALLOWED_MODES = frozenset({"default", "plan"})
 _CONTEXT_MARKERS = (
@@ -126,6 +132,11 @@ class PolicyFile:
     #: independently of what the model claims. Like hooks, a repository may *add*
     #: checks; it can never weaken or remove one, and nothing is executed.
     verify: tuple[Mapping[str, Any], ...] = ()
+    #: The raw ``[retry]`` table, validated by :mod:`provider_retry`. Carried as a mapping
+    #: rather than a parsed policy so that the module owning the vocabulary is the one that
+    #: rejects a typo in it; ``load_policy_file`` still checks it is a table, because
+    #: ``retry = 5`` is a mistake worth reporting where the file was read.
+    retry: Mapping[str, Any] | None = None
 
     @property
     def project_context_setting(self) -> str | bool:
@@ -149,6 +160,7 @@ class PolicyFile:
             "project_context": self.project_context_setting,
             "hooks": [dict(entry) for entry in self.hooks],
             "verify": [dict(entry) for entry in self.verify],
+            "retry": dict(self.retry) if self.retry else None,
         }
 
 
@@ -197,6 +209,9 @@ def load_policy_file(
     raw = read_policy_document(workspace)
     if raw is None:
         return None
+    retry_table = raw.get("retry")
+    if retry_table is not None and not isinstance(retry_table, Mapping):
+        raise PolicyFileError(f"{path}: [retry] must be a table of transport knobs, not {type(retry_table).__name__}")
 
     unknown = sorted(set(raw) - _ALLOWED_KEYS)
     if unknown:
@@ -353,6 +368,7 @@ def load_policy_file(
         read_only=read_only,
         deny_tools=tuple(deny),
         allow_tools=(),
+        retry=dict(retry_table) if retry_table else None,
         max_turns=max_turns,
         max_tool_calls=max_tool_calls,
         max_budget_usd=budget,

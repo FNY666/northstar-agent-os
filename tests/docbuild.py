@@ -79,6 +79,7 @@ MANIFEST: dict[str, tuple[str, ...]] = {
         "plugin_manifest",
         "policy_file",
         "postconditions",
+        "provider_retry",
         "sdk",
         "scaffold",
         "sessions",

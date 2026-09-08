@@ -169,6 +169,11 @@ class RuntimeConfig:
     #: displaced, so this is a liveness signal for readers, not an eviction timer.
     session_lease_seconds: int = DEFAULT_LEASE_SECONDS
     compaction_threshold_tokens: int | None = DEFAULT_COMPACTION_THRESHOLD_TOKENS
+    #: The provider transport's retry budget (``provider_retry.RetryPolicy``). ``None`` means
+    #: exactly one request per turn: this runtime adds no waiting nobody asked for, and the
+    #: providers default their SDK's own retries to zero, so "no policy here" really does mean
+    #: no retry rather than "somebody else's default".
+    retry: Any = None
     compaction_keep_messages: int = 4
     tool_limits: ToolLimits = field(default_factory=ToolLimits)
     sidecar_socket: str | None = None
@@ -265,6 +270,7 @@ class RuntimeConfig:
             "halt_on_denial": self.halt_on_denial,
             "compaction_threshold_tokens": self.compaction_threshold_tokens,
             "stream": self.stream,
+            "retry": self.retry.as_dict() if self.retry is not None else None,
             "lock_session": self.lock_session,
             "sidecar": bool(self.sidecar_socket),
         }
@@ -462,6 +468,17 @@ class _RunState:
     #: SessionStart that never happened.
     refused_session: bool = False
     events: list[Any] = field(default_factory=list)
+    #: Provider-transport bookkeeping, kept out of the transcript deliberately: a retry that
+    #: succeeded is not a fact about the work product, so it belongs in the trace and on the
+    #: operator's terminal, not in the digest a reviewer pinned. A retry that ended the run
+    #: does reach the record - through ``errors`` - because then it is the explanation.
+    #: Extra requests this run issued after a provider fault, and the milliseconds the
+    #: policy made it wait for them. Both are trace/terminal facts, not transcript ones.
+    retries: int = 0
+    retry_wait_ms: int = 0
+    turn_retry_wait_ms: int = 0
+    #: Whether this run already spent its single free compaction on an oversized request.
+    overflow_compacted: bool = False
 
 
 class AgentRuntime:
@@ -551,6 +568,23 @@ class AgentRuntime:
         #: read a full report without re-deriving it from events.
         self._pending_state: _RunState | None = None
         self._last_report: RunReport | None = None
+        self.retry = getattr(config, "retry", None)
+        if self.retry is not None:
+            from provider_retry import RetryPolicy
+
+            if not isinstance(self.retry, RetryPolicy):
+                raise RuntimeConfigurationError(
+                    "config.retry must be a provider_retry.RetryPolicy (or None for one request per turn)"
+                )
+            # Seed the jitter from the run id so a rerun of a recorded session reproduces
+            # the same schedule. Without this, "deterministic tests" and "jitter" are
+            # mutually contradictory, and the honest fix is a seeded draw, not dropping
+            # jitter: an unseeded one is exactly the thundering herd a fleet produces.
+            if self.retry.seed is None:
+                from dataclasses import replace as _replace
+                import zlib
+
+                self.retry = _replace(self.retry, seed=zlib.crc32(self.session_id.encode("utf-8")))
 
     # -- capability views --------------------------------------------------
     @property
@@ -602,6 +636,109 @@ class AgentRuntime:
         return {"model": self.config.model, **pricing.as_dict(), "estimated": estimated}
 
     # -- public entry points ----------------------------------------------
+    def _retry_step(self, state: "_RunState", turn_index: int, error: BaseException, *, attempt: int, already_streamed: bool, span: Any):
+        """Decide what a provider fault costs, and whether the turn gets another request.
+
+        Returns ``(should_retry, notes)``. Two things may be reported as notes, and both are
+        yielded as informational events by the caller rather than written to the transcript:
+        the retry itself, and the one free compaction the degradation ladder allows.
+
+        A turn's waiting is bounded by the policy's deadline and nothing else: the ceiling is
+        reset per turn on purpose, because "this turn may not stall for more than a minute"
+        is the promise an operator can actually check, while a run-total budget would let the
+        first turn eat the whole allowance and make the rest silently unforgiving.
+        """
+        policy = self.retry
+        if policy is None or not policy.enabled:
+            return False, ()
+        from provider_retry import classify
+
+        fault = classify(error, already_streamed=already_streamed)
+        # Events to hand back for the caller to yield, in order: a boundary, then the note
+        # that explains it. Built here rather than yielded here because the method is not a
+        # generator - the loop's turn body owns the yielding.
+        notes: list[Any] = []
+        if fault.kind == "context_overflow" and policy.on_context_overflow == "compact_once":
+            if state.overflow_compacted or not state.transcript:
+                # Say it out loud and then stop. Silence here would leave "why did the second
+                # overflow not do what the first one did?" as a code-reading exercise, and a
+                # ladder that could be climbed twice is a way to keep shrinking a context
+                # until nothing is left of the run's own memory.
+                span.set_attribute("retry.degraded_spent", True)
+                return False, (
+                    SystemMessage(
+                        subtype="informational",
+                        content=(
+                            f"turn {turn_index} overflowed again and this run's one compaction is already spent; "
+                            "the run stops here"
+                        ),
+                    ),
+                )
+            state.overflow_compacted = True
+            outcome = self._compact(state, turn_index=turn_index)
+            if outcome.performed:
+                state.transcript = list(outcome.transcript)
+                self.sessions.append(
+                    "compact_boundary",
+                    {"agent": self.config.agent, "subtype": "compact_boundary", "content": outcome.summary, "data": outcome.as_dict()},
+                )
+                if outcome.boundary is not None:
+                    # The boundary event belongs beside the record it describes: a reader of
+                    # the live stream must see the cut, exactly as they do when the loop
+                    # compacts on its own threshold.
+                    notes.append(outcome.boundary)
+                notes.append(
+                    SystemMessage(
+                        subtype="informational",
+                        content=(
+                            f"turn {turn_index} was refused for being too large ({fault.detail[:120]}) - compacted "
+                            "the transcript to "
+                            f"{outcome.tokens_after} tokens and re-issued the request once (this attempt costs no "
+                            "retry budget)"
+                        ),
+                    )
+                )
+                span.set_attribute("retry.degraded", "compact_once")
+                return True, tuple(notes)
+            notes.append(
+                SystemMessage(
+                    subtype="informational",
+                    content=(
+                        f"turn {turn_index} overflowed and compaction was unavailable ({outcome.reason}); the run "
+                        "stops here"
+                    ),
+                )
+            )
+            span.set_attribute("retry.degraded_refused", outcome.reason[:200])
+            return False, tuple(notes)
+        keep, decision = policy.plan(attempt, fault, waited_ms=state.turn_retry_wait_ms)
+        if keep is None:
+            # Record *why* the budget stopped, even when there is nothing to say out loud:
+            # "not_retryable" and "deadline_exceeded" are the difference between a provider
+            # that rejected us and one that was merely slow.
+            span.set_attribute("retry.stop", getattr(decision, "reason", "unknown"))
+            if getattr(decision, "detail", ""):
+                span.set_attribute("retry.stop_detail", decision.detail[:200])
+            return False, ()
+        state.turn_retry_wait_ms += decision.delay_ms
+        state.retry_wait_ms += decision.delay_ms
+        state.retries += 1
+        span.set_attributes({"retry.attempt": attempt, "retry.kind": fault.kind, "retry.delay_ms": decision.delay_ms})
+        self._sleep(decision.delay_ms / 1000.0)
+        return True, (SystemMessage(subtype="informational", content=decision.line()),)
+
+    def _sleep(self, seconds: float) -> None:
+        """The one place a run blocks, so an embedder can hand us a clock it controls."""
+        if seconds <= 0:
+            return
+        sleeper = getattr(self.retry, "sleeper", None)
+        if sleeper is not None:
+            sleeper(seconds)
+            return
+        import time
+
+        time.sleep(seconds)
+
     def _stream_turn(
         self,
         request: GenerationRequest,
@@ -922,6 +1059,9 @@ class AgentRuntime:
                     yield outcome.boundary
 
             state.cost_at_turn_start = self.budget.total_cost_usd
+            # The waiting budget is per turn (see _retry_step): "no turn may stall for more
+            # than the deadline" is a promise an operator can check.
+            state.turn_retry_wait_ms = 0
             with run_span.child(f"turn[{turn_index}]") as turn_span:
                 turn_span.set_attributes({"turn.index": turn_index, "turn.depth": config.depth, "agent.name": config.agent})
                 request = GenerationRequest(
@@ -943,20 +1083,52 @@ class AgentRuntime:
                         {"provider.name": self.provider_name, "model": config.model, "turn.index": turn_index, "stream": config.stream}
                     )
                     try:
-                        if config.stream:
-                            generation, stream_withheld = yield from self._stream_turn(request, streamed, generation_span)
-                        else:
-                            candidate = self.provider.generate(request)
-                            if not isinstance(candidate, Generation):
-                                raise ProviderError(
-                                    f"provider returned {type(candidate).__name__} instead of a Generation"
+                        attempt = 1
+                        while True:
+                            try:
+                                if config.stream:
+                                    generation, stream_withheld = yield from self._stream_turn(request, streamed, generation_span)
+                                else:
+                                    candidate = self.provider.generate(request)
+                                    if not isinstance(candidate, Generation):
+                                        raise ProviderError(
+                                            f"provider returned {type(candidate).__name__} instead of a Generation"
+                                        )
+                                    generation = candidate
+                                break
+                            except ProviderError as error:
+                                # ``streamed`` is the gate: once a character has reached the
+                                # consumer the request may not be re-issued, because the retry
+                                # would show the same text twice and the transcript/terminal
+                                # agreement is worth more than a recovered turn.
+                                retry, notes = self._retry_step(
+                                    state,
+                                    turn_index,
+                                    error,
+                                    attempt=attempt,
+                                    already_streamed=bool(streamed),
+                                    span=generation_span,
                                 )
-                            generation = candidate
+                                for note in notes:
+                                    yield note
+                                if not retry:
+                                    raise
+                                attempt += 1
                     except ProviderError as error:
                         # A provider that breaks its contract is a fault to report, and
                         # the partial text it already streamed must stay unrecorded: the
                         # transcript is only ever written from a complete turn.
-                        state.errors.append(f"provider failure on turn {turn_index}: {error}")
+                        detail = f"provider failure on turn {turn_index}: {error}"
+                        if state.retries:
+                            # Say what the budget did, in the line that explains the failure:
+                            # "it failed" and "it failed after four attempts and 12 s of
+                            # waiting, then stopped on the deadline" are different incidents.
+                            # The turn's first request is counted at the turn head, so the running
+                            # total is already the number of requests this run sent.
+                            detail += (
+                                f" (after {state.retries + 1} request(s), {state.retry_wait_ms} ms of policy waiting)"
+                            )
+                        state.errors.append(detail)
                         generation_span.record_error("ProviderError")
                     except Exception as error:  # noqa: BLE001 - a provider fault is an event
                         state.errors.append(f"provider failure on turn {turn_index}: {type(error).__name__}: {error}")

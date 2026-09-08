@@ -121,7 +121,10 @@ class OpenAICompatProvider(Provider):
         max_tokens: int = 4096,
         temperature: float | None = None,
         token_limit_field: str = "auto",
-        max_retries: int = 2,
+        #: ``0`` by default: the runtime owns the retry budget (provider_retry.py), and a
+        #: second loop inside the SDK would multiply the request count past what any policy
+        #: file approved. Set it only if you are deliberately letting the client retry.
+        max_retries: int = 0,
         timeout: float | None = None,
         extra_headers: dict[str, str] | None = None,
         extra_body: dict[str, Any] | None = None,
@@ -282,7 +285,7 @@ class OpenAICompatProvider(Provider):
         except ProviderError:
             raise
         except Exception as error:  # noqa: BLE001 - must surface as an event
-            raise ProviderError(f"chat completions request failed: {_reason(error)}") from error
+            raise ProviderError(f"chat completions request failed: {_reason(error)}", **_classify(error)) from error
         return self.normalise(response)
 
     def stream(self, request: GenerationRequest):  # type: ignore[override]
@@ -353,7 +356,7 @@ class OpenAICompatProvider(Provider):
         except ProviderError:
             raise
         except Exception as error:  # noqa: BLE001 - must surface as an event
-            raise ProviderError(f"chat completions stream failed: {_reason(error)}") from error
+            raise ProviderError(f"chat completions stream failed: {_reason(error)}", **_classify(error)) from error
         message: dict[str, Any] = {"role": "assistant", "content": "".join(pieces)}
         if calls:
             message["tool_calls"] = [calls[index] for index in sorted(calls)]
@@ -413,6 +416,21 @@ class OpenAICompatProvider(Provider):
         close = getattr(self._client, "close", None)
         if callable(close):
             close()
+
+
+def _classify(error: Exception) -> dict[str, Any]:
+    """Structured fields for the :class:`ProviderError` we are about to raise.
+
+    The retry policy in :mod:`provider_retry` decides "retry or stop" from the fault class,
+    and it reads a status code before it reads prose. A provider that has the number and
+    keeps it to itself hands that decision to string matching, so the classification is done
+    here once and attached - the loop's own classification then agrees with ours by
+    construction rather than by luck.
+    """
+    from provider_retry import classify
+
+    fault = classify(error)
+    return {"failure_kind": fault.kind, "status_code": fault.status_code, "retry_after_ms": fault.retry_after_ms}
 
 
 def _usage(response: Any) -> Usage:

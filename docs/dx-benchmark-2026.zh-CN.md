@@ -389,7 +389,7 @@ Northstar 是"运行时组件集合"，不是一个终端产品。因此对标�
 | 配置与项目约定 | 1 | **4** | AGENTS.md/config/agents/skills/context-file 齐全；差策略 schema 版本化与托管下发 |
 | 扩展生态（MCP/Skills/Plugins） | 1 | **4** | 四类都占位且默认 deny/只读（安全侧反而领先）：plugin bundle 有封闭 schema、digest 钉住、按宿主门禁与 7 目标导出；差在线市场/索引、MCP HTTP+auth、技能脚本执行 |
 | 会话 / 调试 / 可观测 | 3 | **4** | 读回 + 审计导出 + resume 齐全；差 rewind/checkpoint 与交互式回放 |
-| 测试与确定性 | 5 | **5** | 全仓 1320 项（runtime 片 1023）、guard 红绿 harness、离线 scripted provider——头部普遍 3 分档，仍是最稀缺资产 |
+| 测试与确定性 | 5 | **5** | 全仓 1400 项（runtime 片 1103）、guard 红绿 harness、离线 scripted provider（现可彩排 429/529 故障）——头部普遍 3 分档，仍是最稀缺资产 |
 | 文档与教学 | 3 | **4** | 四层 + 生成 API + examples 索引 + 11 语言；差课程/playground 型教学 |
 | 版本化与发布 | 2 | **3** | 版本单一源 + 对齐测试 + 就绪门 Release CI；未发出版本（按纪律等"最完美"） |
 | 团队 / CI / 协作面 | 2 | **3** | CI 模板 + headless + 审计 feed 天然 CI 友好；差官方 Action/review 后台 |
@@ -404,8 +404,8 @@ Northstar 是"运行时组件集合"，不是一个终端产品。因此对标�
 | N3 远程/多端 | CC remote sessions/Desktop、Codex cloud、Gemini remote subagents | **1** | 目前只有 sidecar 单向委派 |
 | N4 生态市场接入 | CC plugin marketplace、skills 71k+、.mcp.json | **3** | 自有 bundle 格式有安装器/锁定/校验与 `plugin export` 七个外家格式；**按裁定不做市场与索引**（市场=供给链，可评审 diff 才是本仓的目的） |
 | N5 安全治理纵深 | CC managed settings/enterprise、Codex sandbox 网络隔离、Muse 默认沙箱 | **3** | 权限门/hooks/只读/审计 feed 治理叙事强；无 OS 级沙箱与技能供应链校验（36% 缺陷率=空白机会） |
-| N6 模型层能力 | model routing/steering、多模型 fallback | **3** | providers 抽象 + 记账 + 确定性 scripted；仅两个后端 |
-| **合计（/30）** | ≈24 | **14** | 新战场是当前差距的主要来源 |
+| N6 模型层能力 | model routing/steering、多模型 fallback | **4** | 故障分类 + 退避 + 有界降级已策略化（封闭 retry_on、per-turn deadline、session 种子化抖动）；仍仅两个后端，且刻意不做 fallback_model/model routing |
+| **合计（/30）** | ≈24 | **15** | 新战场是当前差距的主要来源 |
 
 ### 10.5 还差多远：排序与最短路径（批次粒度估算，主观）
 
@@ -549,4 +549,25 @@ Northstar 是"运行时组件集合"，不是一个终端产品。因此对标�
 测试规模：runtime 942 → **1029 全绿**（+87：`test_plugin_manifest` 42 / `test_plugin_install` 45，
 含"bundle hook 经真实 `parse_hooks` 否决一次 Write"、"bundle 的 SKILL.md 被 `skills check` 规则拒绝安装"
 两项端到端），全仓 **1326 全绿**（51+41+37+65+54+1029+49）；§10.3 表 Northstar 列 36 → **37**，新战场表 13 → **14**。
+版本仍对齐 `0.1.0.dev0` 未发布。
+
+### 2026-09-08（第二十批）— 重试/退避/降级落地：N6 模型层 3→4
+
+契约面（跨组件语义）在此清空。此前"会不会重试"本仓没有答案——两个 provider 都把
+`max_retries` 交给 SDK 客户端，等于把一次运行的请求数交给一个没人评审过的循环。
+
+- **`provider_retry.py`**：十个封闭故障名 + "状态码 → provider 自述 → 文本"三级判据；`unknown`
+  不可重试（"判断不了"不是"临时"）；auth/client_error/stream_interrupted 在 schema 层就禁写。
+- **日程是纯函数**（`plan()` 只回延迟或具名停止），full jitter 种子取自 session id → CI 可钉表、
+  舰队又不齐步走；上限归运行时：8 次 / 120 s / 每轮 30 s 等待预算。
+- **`[retry]` 写进 `.northstar/config.toml`**，CLI 四个旗标只能收紧（`restrict()`），插件碰不到。
+- **降级不换答题人**：`on_context_overflow = "compact_once"`（一次、走 PreCompact hook、不耗重试预算）；
+  明确不做 `fallback_model`——换模型是策略决定。
+- **可见性**：provider 默认 `max_retries=0` 且给 `ProviderError` 附上 `failure_kind/status_code/retry_after_ms`；
+  重试只进事件与跨度，不进 transcript（429 不该移动评审员钉住的摘要），失败时才进解释。
+- **零凭据彩排**：`--script` 轮次可 `{"raises": {"status": 429, "retry_after_ms": 300}}`，74 项新测试全跑在
+  demo 那个 provider 上。CI 的 py_compile 手抄清单换成整目录 glob（它已漏掉数个新模块）。
+
+测试规模：runtime 1029 → **1103 全绿**（+74：`test_provider_retry`），全仓 **1400 全绿**
+（51+41+37+65+54+1103+49）；N6 模型层能力 3 → **4**（合计 15/30），§10.3 表"测试与确定性"行同步。
 版本仍对齐 `0.1.0.dev0` 未发布。

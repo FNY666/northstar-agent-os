@@ -320,6 +320,7 @@ Then the run tells you what it took, in the same lines it tells you everything e
 $ northstar-agent-runtime run --workspace . --prompt "release 1.2" --dry-run --enable-workspace-hooks
 disallowed_tools=Edit,Write
 max_turns=12 max_tool_calls=50 max_budget_usd=unlimited
+retry=2 additional attempt(s) on rate_limited, overloaded, network, timeout, server_error; base 250 ms x2 up to 20000 ms, full jitter, deadline 60000 ms (worst case 750 ms/turn)
 workspace_agents=release-critic
 skills=1 package(s): no-force-push
 plugins=1 bundle(s): release-bundle@1.2.0 (1820482d0d4a)
@@ -363,6 +364,54 @@ There is no marketplace, no index and no dependency resolver, and that is a deci
 rather than a missing feature: everything a bundle can do is already a file in your
 repository, which means the diff is the install, the review is the lock, and `git revert` is
 the uninstall.
+
+## 14. Bound what a flaky provider may cost you
+
+The failure that actually reaches an operator is rarely the model refusing: it is a 429, a
+529, a connection reset at 03:00. What that costs a governed run used to be decided by the SDK
+client's `max_retries`, which the runtime neither saw nor reported. It is decided here now, and
+it is visible before the run in the same dry-run you read for the ceilings.
+
+```toml
+# .northstar/config.toml
+[retry]
+max_attempts = 4
+base_delay_ms = 500
+max_delay_ms = 5000
+deadline_ms = 30_000
+jitter = "full"
+on_context_overflow = "compact_once"
+```
+
+Then rehearse it offline, with no key and no network - a scripted turn may raise a classified
+fault, so the retry path runs on the same provider as the demo:
+
+```console
+$ northstar-agent-runtime run --workspace . --script plan.json --prompt "draft the release notes"
+· attempt 1/4 failed: rate_limited (too many requests) - retrying in 20 ms (waited 20 ms so far)
+· attempt 2/4 failed: overloaded (overloaded_error) - retrying in 10 ms (waited 30 ms so far)
+Release notes drafted: 3 fixes, 1 feature.
+
+[success] turns=1 tool_calls=0 cost=$0.000000 session=ns-20260908T160541Z-148f55aa
+```
+
+Four things to know before you widen it:
+
+- **The flags can only shorten the wait.** `--retry-max-attempts 9` against a workspace that
+  said 4 gets you 4. `--no-retry` is what a CI job wants: the first fault, reported at once,
+  with jitter off so nothing hides behind a sleep.
+- **Four faults are not retryable and saying so is the point.** Auth and bad-request faults do
+  not become true on the second try; an unclassified fault is not evidence of transience; and
+  a stream that broke after characters reached your terminal is never re-issued, because a
+  transcript that repeats a sentence is worse than one that stops.
+- **A retry is not a turn.** It does not consume `max_turns` (the model never answered), and it
+  leaves no transcript record - the digest your reviewer pinned should not move because the
+  transport hiccupped. It is an event, a span attribute, and, when it fails, part of the
+  explanation: `(after 4 request(s), 35 ms of policy waiting)`.
+- **`on_context_overflow = "compact_once"` degrades the request, once.** A 413 gets the
+  transcript compacted through the ordinary `PreCompact` hook path - so a hook may veto it - and
+  the re-issued request costs no retry budget. There is no `fallback_model` on purpose: another
+  model answering is a policy change, not a transport detail.
 
 ## Consumer CI recipe
 

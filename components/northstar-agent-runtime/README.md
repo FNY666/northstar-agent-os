@@ -450,6 +450,122 @@ against injected fakes, not against the network.
 The SDK parity knob is `RunOptions.stream`; `stream_run()` yields `stream_delta`
 dicts and `run()` reports identical numbers either way.
 
+## Provider faults, retries and the wait budget (`--no-retry`)
+
+Until this section existed, retries were somebody else's policy: both providers passed
+`max_retries` to their SDK client, so a run's request count was the product of two loops
+nobody had read together, `Retry-After` was honoured by a library with its own ceiling, and
+no event, span or transcript said that turn 2 had taken four requests and waited eleven
+seconds. A run bounded by `max_turns` and `max_tool_calls` is not bounded the way its policy
+claims if the transport underneath it retries without a reviewed limit. So the providers now
+default `max_retries` to **0**, and the budget lives here, where it can be printed.
+
+`.northstar/config.toml` is where the promise is written, because "how much waiting may a run
+do" is a repository decision:
+
+```toml
+[retry]
+max_attempts = 4              # requests per turn, so 4 means up to 3 retries; 1 means none
+base_delay_ms = 500
+max_delay_ms = 5000           # a longer wait is not automatically a better one
+deadline_ms = 30000           # what ONE turn may spend waiting, in total
+jitter = "none"               # the default is "full", seeded from the session id (see below)
+on_context_overflow = "fail"  # or "compact_once": degrade the request, see below
+```
+
+```console
+$ northstar-agent-runtime run --workspace . --prompt "draft the release notes" --dry-run
+max_turns=25 max_tool_calls=50 max_budget_usd=unlimited
+retry=3 additional attempt(s) on rate_limited, overloaded, network, timeout, server_error; base 500 ms x2 up to 5000 ms, no jitter, deadline 30000 ms (worst case 3500 ms/turn)
+
+$ northstar-agent-runtime run --workspace . --prompt "x" --dry-run   # a workspace with no [retry] table
+retry=2 additional attempt(s) on rate_limited, overloaded, network, timeout, server_error; base 250 ms x2 up to 20000 ms, full jitter, deadline 60000 ms (worst case 750 ms/turn)
+
+$ northstar-agent-runtime run --workspace . --prompt "x" --dry-run --no-retry
+retry=off (max_attempts=1 sends one request per turn)
+```
+
+`--retry-max-attempts`, `--retry-deadline-ms` and `--retry-on` may only **tighten** what the
+file asked for: a flag that could turn "this repository waits at most twice" into "wait eight
+times" would make the file decorative. `--no-retry` is not `--retry-max-attempts 1` in
+disguise - it also turns jitter off, so a CI job that must not stall sees the fault as early as
+possible.
+
+A fault is classified into one closed set of ten names (`rate_limited`, `overloaded`,
+`network`, `timeout`, `server_error`, `context_overflow`, `auth`, `client_error`,
+`stream_interrupted`, `unknown`) and the classification is decided by the status code, then by
+the provider's own claim, then by prose. Four of them cannot be put in `retry_on` at all:
+`auth` and `client_error` are not made true by repetition, `unknown` is not evidence that a
+retry would help (treating "we could not tell" as "transient" is how a bug becomes a request
+storm), and `stream_interrupted` is refused because text already reached the terminal -
+re-issuing the request would show the same sentence twice, and the agreement between the
+transcript and what you watched is the one thing the streaming contract exists to guarantee.
+The stream is retried only when nothing had been forwarded yet.
+
+```console
+$ northstar-agent-runtime run --workspace . --script plan.json --prompt "draft the release notes"
+· session ns-20260908T160858Z-ae2d2b79 provider=scripted model=claude-sonnet-4-5
+· attempt 1/4 failed: rate_limited (too many requests) - retrying in 500 ms (waited 500 ms so far)
+· attempt 2/4 failed: overloaded (overloaded_error) - retrying in 1000 ms (waited 1500 ms so far)
+Release notes drafted: 3 fixes, 1 feature.
+
+[success] turns=1 tool_calls=0 cost=$0.000000 session=ns-20260908T160858Z-ae2d2b79
+
+$ northstar-agent-runtime run --workspace . --script fail.json --prompt "draft the release notes"
+· attempt 1/4 failed: rate_limited (too many requests) - retrying in 500 ms (waited 500 ms so far)
+· attempt 2/4 failed: rate_limited (too many requests) - retrying in 1000 ms (waited 1500 ms so far)
+· attempt 3/4 failed: rate_limited (too many requests) - retrying in 2000 ms (waited 3500 ms so far)
+
+[error_during_execution] turns=0 tool_calls=0 cost=$0.000000 session=ns-20260908T160859Z-4543ebd0
+  ! provider failure on turn 1: too many requests (after 4 request(s), 3500 ms of policy waiting)
+```
+
+The second block is the same run against a provider that never recovers: it spends its four
+requests, stops, and the number in the explanation is the number the policy promised in advance -
+`3500 ms` is exactly the `worst case 3500 ms/turn` printed by the dry-run line above. That is
+what "bounded" means here: the operator could have read the worst case off the config file
+before the run started, instead of discovering it from a hung terminal.
+
+Three details are deliberate:
+
+- **`Retry-After` is a floor, not an instruction to hurry**: the delay is
+  `max(our schedule, its request)`, capped at `max_delay_ms`, and overriding it is announced
+  ("provider asked for 600000 ms, above this policy's max_delay_ms of 1000; we wait the cap
+  instead") - which is also why the first line above waits 500 ms when the provider asked for
+  20. An
+  HTTP-date `Retry-After` is declined rather than parsed, because guessing at a calendar in a
+  retry path is how a run waits an hour for a clock skew.
+- **The deadline is per turn and counts only waiting.** "No turn may stall for more than the
+  deadline" is checkable; a run-total budget would let turn 1 spend it and leave every later
+  turn unforgiving. Request time itself belongs to the provider's own timeout. A wait that
+  would not *fit* is refused before it starts, not cancelled halfway.
+- **A successful retry leaves no transcript record.** It is a fact about the transport, not
+  about the work product, and the digest a reviewer pinned should not move because a 429
+  happened. Retries are informational events on the live stream and span attributes in the
+  trace; a retry that *ended* the run does reach the record, because then it is the
+  explanation (`after 4 request(s), 35 ms of policy waiting`).
+
+`on_context_overflow = "compact_once"` is the degradation half: a 413 / "prompt is too long"
+is not a transient fault and not the model's turn, so the run compacts the transcript once -
+through the same `PreCompact` hook that governs ordinary compaction, so a hook may still veto
+it - and re-issues the request without spending retry budget. Once per run: a ladder that can
+be climbed twice is a way to keep shrinking a context until nothing is left of the run's own
+memory. There is no `fallback_model`, and there will not be one in a retry table: handing the
+request to a *different model* changes who is answering - pricing, capability, audit
+attribution - which is a policy decision, not a transport detail. Degrade the request, never
+the identity of the answerer.
+
+Two things this is not. It is not a circuit breaker: there is no shared state between
+processes, so a fleet of runs will each discover a dead provider on its own, and the seeded
+jitter is what keeps them from doing it in lockstep. And it is not a queue: the budget is
+bounded by `deadline_ms`, so a provider that needs ten minutes to recover is a provider you
+should re-run later, from a shell loop or a CI retry, where that intent is visible.
+
+The offline path is the reason all of this is testable at all: a `--script` JSON turn may
+carry `{"raises": {"status": 429, "retry_after_ms": 300}}`, which builds the same classified
+`ProviderError` a real gateway would produce. Every retry test in this component runs on the
+provider the demo runs on - no key, no network, no monkey-patching.
+
 ## Checkpoints and forking a session
 
 `--resume <id>` replays a transcript and keeps writing to the same file. That was
@@ -665,6 +781,7 @@ $ northstar-agent-runtime run --workspace . --prompt "release 1.2" --dry-run --e
 ...
 disallowed_tools=Edit,Write
 max_turns=12 max_tool_calls=50 max_budget_usd=unlimited
+retry=2 additional attempt(s) on rate_limited, overloaded, network, timeout, server_error; base 250 ms x2 up to 20000 ms, full jitter, deadline 60000 ms (worst case 750 ms/turn)
 workspace_agents=release-critic
 skills=1 package(s): no-force-push
 plugins=1 bundle(s): release-bundle@1.2.0 (1820482d0d4a)
@@ -1005,6 +1122,7 @@ size (`result_chars`), so truncation is visible instead of inferred.
 | `cli.py`            | one governed run from a shell, with distinct exit codes              |
 | `doctor.py`         | `cli doctor` environment self-checks (no requests, no file writes)   |
 | `session_view.py`   | `cli sessions list/show` - the read-back half of the transcripts     |
+| `provider_retry.py` | The transport budget: fault classification, the backoff schedule, the per-turn wait deadline, the `[retry]` table |
 | `policy_file.py`    | `.northstar/config.toml` parsing + tighten-only validation; AGENTS.md project-context discovery and prompt composition |
 | `agent_files.py`    | `.northstar/agents/*.md` -> governed `AgentDefinition` compilation   |
 | `skills.py`         | `.northstar/skills/*/SKILL.md` discovery + progressive-disclosure listing |
@@ -1046,7 +1164,7 @@ cd components/northstar-agent-runtime
 python3 -m unittest discover -s tests -p 'test_*.py' -v
 ```
 
-1029 tests, fully offline and deterministic: the scripted provider is the only
+1103 tests, fully offline and deterministic: the scripted provider is the only
 model, and `test_integration_sidecar.py` runs the real sidecar `serve()` over a
 real Unix socket with a 100,000-Chinese-character prompt.
 
@@ -1079,6 +1197,12 @@ caught by the unit-level compaction tests rather than the loop-level one.
   no reconnect, no HTTP transport and no task extension.
 - **Process-group `TERM`→`KILL` cleanup is not verified on real Linux here.** That
   behaviour belongs to the sidecar; the runtime only bounds its own socket read.
+- **The retry policy is a bound, not a resilience system.** It is verified against a
+  scripted provider and fake SDK clients - no real API endpoint was exercised here, so the
+  taxonomy's mapping from *live* provider behaviour to the ten classes is believed rather than
+  measured. There is no circuit breaker (no state shared between processes), no queue, and no
+  resumption of a broken stream: a run that loses a stream mid-sentence ends, deliberately,
+  because re-issuing it would show you the same text twice.
 - **Plugin portability is a claim about primitives, not a conformance suite.**
   `HOST_PROFILES` describes what this component uses on each host (`flock`, direct
   `execvp`, case sensitivity), and a `windows` verdict is therefore *believed*, not
