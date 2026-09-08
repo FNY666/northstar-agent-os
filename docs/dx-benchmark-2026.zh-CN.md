@@ -9,7 +9,7 @@
 
 > **阅读口径（2026-09-08 当前真值）**：本页保留了早期差距基线与实施 ledger，
 > 因而 §0–§8 中的“现状”段落有历史意义，不应覆盖后面的复评。当前 checkout
-> 的权威快照是：`make test` **904 项测试，900 项通过、4 项 skip**（runtime 594，
+> 的权威快照是：`make test` **909 项测试，905 项通过、4 项 skip**（runtime 599，
 > 其中 4 项因可选 OpenTelemetry 依赖缺失而跳过；其余组件与文档测试全绿）；五个可安装组件仍为
 > 对齐的 `0.1.0.dev0`，没有发布 tag。Agent Skills 已支持
 > `.northstar/skills` + portable `.agents/skills`、标准 frontmatter、`skills
@@ -22,13 +22,13 @@
 
 ## 0. 执行摘要（TL;DR）
 
-**当前结论：Northstar 已从“库 + 手工拼装”追到可安装、可审计、具备局部可逆执行的 headless harness，但还不是 Claude Code/Codex/Gemini 那样的完整产品。**本地实测 `make test` 为 **904 项测试（900 通过、4 项可选 OTel skip）**（runtime 594），权限门、hooks、预算、只追加 transcript、可选 session hash/HMAC integrity、workspace receipts、checkpoint manifest、capability lease、可验证 action receipt、durable-run 生命周期与离线确定性仍是最强资产。
+**当前结论：Northstar 已从“库 + 手工拼装”追到可安装、可审计、具备局部可逆执行的 headless harness，但还不是 Claude Code/Codex/Gemini 那样的完整产品。**本地实测 `make test` 为 **909 项测试（905 通过、4 项可选 OTel skip）**（runtime 599），权限门、hooks、预算、只追加 transcript、可选 session hash/HMAC integrity、read-only replay、同主机 writer recovery、workspace receipts、checkpoint manifest、capability lease、可验证 action receipt、durable-run 生命周期与离线确定性仍是最强资产。
 
 已经补齐的 DX 基础包括：五个可安装组件、console script、`doctor`/`dry-run`、AGENTS.md 与策略即代码、文件化 subagents、MCP stdio 最小客户端、标准 Agent Skills（含 `skills check/list`）、sessions 读回/NDJSON 审计、Python SDK、脚手架、API 文档和 CI recipe。**这些能力要以当前 checkout 的测试为准；本页后面的早期盘点是历史基线。**
 
 与全球头部工具相比，剩余差距集中在产品外围而不是治理内核：
 
-1. **交互恢复**：已有 resume/list/show/export，以及 checkpoint/inspect/diff/rewind/fork 的 CLI/API；已有 opt-in、可留痕的 turn/mutation checkpoint policy；仍没有交互式回放 UI 和跨进程/远端恢复。
+1. **交互恢复**：已有 resume/list/show/export、replay/timeline，以及 checkpoint/inspect/diff/rewind/fork 的 CLI/API；已有 opt-in、可留痕的 turn/mutation checkpoint policy 和同主机 session writer recovery；仍没有交互式回放 UI 和跨主机/远端恢复。
 2. **可嵌入层**：已有 Python SDK 与结构化事件，没有 TypeScript SDK、长期 app-server 或 approval 协议。
 3. **生态深度**：MCP 仍是 stdio 工具发现/调用，没有 HTTP/auth；无 plugins、marketplace、热加载和组织级安装策略。
 4. **后台与远程**：durable-run/remote-worker 有内核和协议/运维文档，但没有网络 transport、调度器或真实远端 canary。
@@ -572,7 +572,7 @@ checkpoint/rewind、headless/SDK、后台任务和企业级策略下发。Norths
 |---|---|---|---|
 | Zero-to-first-run | `make demo`、`pip install .`、`doctor`、`dry-run`；无公共 index/登录 | 官方安装器、账号/模型即用、交互式首跑 | 发布 wheel，保留零 key demo |
 | 嵌入面 | Python `sdk.run/stream_run`、结构化事件、resume；无 TypeScript/app-server | Codex exec/SDK/app-server、Claude SDK 多语言 | 优先稳定协议/版本化 SDK，不先做 TUI |
-| 交互与恢复 | sessions list/show/export；bounded checkpoint manifest、inspect/diff、强制 rewind/restore、fork；已有 opt-in turn/mutation policy 与 workspace_change receipt | checkpoint、rewind、后台任务、任务队列 | T3b：交互回放 UI、跨进程/远端 checkpoint lineage |
+| 交互与恢复 | sessions list/show/export/replay；bounded checkpoint manifest、inspect/diff、强制 rewind/restore、fork；已有 opt-in turn/mutation policy、workspace_change receipt 与同主机 writer recovery | checkpoint、rewind、后台任务、任务队列 | T3b：交互回放 UI、跨主机/远端 checkpoint lineage |
 | 生态格式 | MCP stdio 工具发现/调用；Agent Skills 标准元数据 + `skills check/list`；无 plugins/marketplace、无 MCP HTTP/auth | MCP 多传输/登录、Skills 热加载、插件/marketplace | T4b：HTTP/auth 与插件清单必须先有信任/版本/撤销故事 |
 | 供应链 | 目录/字段/路径/symlink fail-closed；不执行脚本、不做恶意内容判断 | 插件市场/组织策略/托管配置 | 把 validator 接入 CI；内容审查与签名不能伪装成已完成 |
 | 后台/远程 | durable-run 与 remote-worker spec/ops 文档；无网络 transport/调度器/真实远端 canary | Codex cloud/Automations、Claude remote/background | T5：先 transport helper + 真实主机 canary，再谈 hosted control plane |
@@ -880,12 +880,35 @@ T17 将 session 从“可恢复的 append-only JSONL”推进到可选的本地�
 - `sessions verify` 与只读 API 输出 record count、尾部丢弃数、last digest 和
   signed 状态。完整性记录拒绝既有超长 JSON 截断路径；尾部 crash/torn line
   仍可丢弃后验证剩余完整前缀。
-- honest ceiling：当前实现是单个 `SessionStore` writer 的本地 per-session
-  chain，没有文件锁、跨进程 tail reconciliation、远端复制、retention 或
-  compliance store；hash-only 只能说明 accidental corruption resistance，
-  只有 HMAC 才提供 secret-backed authentication。
+- T17 当时的 honest ceiling：integrity chain 仍是单个 `SessionStore` writer 的
+  本地 per-session chain；跨进程 lock/tail reconciliation、远端复制、retention 和
+  compliance store 尚未在该批次声称完成。hash-only 只能说明 accidental corruption
+  resistance，只有 HMAC 才提供 secret-backed authentication；T18 补上了同主机 lock
+  recovery，但没有扩大到分布式 lineage。
 - 验证：runtime **594 项测试（590 项通过、4 项可选 OTel skip）**；全仓
   `make test` 为 **904 项测试、900 项通过、4 项可选 OTel skip**；API docbuild
   freshness 与链接检查通过。
 
 T17 仍是 Unreleased；没有创建 tag、GitHub Release，也没有发布到 PyPI/npm。
+
+### 10.21 当前实现复核：read-only replay 与跨进程 session recovery（2026-09-08）
+
+T18 在 T17 的本地 integrity chain 上补了两个重要但仍然保守的能力：
+
+- `sessions replay`（别名 `timeline`）可以按 transcript index 区间和 record type
+  做只读 timeline slice；JSON 输出包含选择范围、完整记录数、尾部丢弃数和完整性
+  状态。它不重跑 tool、model 或 workspace side effect。
+- session reader/export/viewer 在可能时持有 transcript 的 shared advisory lock，
+  不创建 `.lock` 文件，也不修改 transcript。`verify`/`replay` 对发现的 chain
+  fail-closed；普通 `show/list` 仍可在没有 HMAC secret 时读回 raw records。
+- `SessionStore(cross_process=True)`、SDK `session_cross_process` 和 CLI
+  `--session-cross-process` 为普通 transcript 启用同一 POSIX lock；hash/HMAC
+  chain 自动启用。每次 append 在 exclusive lock 内重新读取磁盘、修复一个 malformed
+  tail、重算 next index/chain tail，再 fsync append，解决独立 writer 的 stale state。
+- 验证：runtime **599 项测试（595 项通过、4 项可选 OTel skip）**；全仓
+  `make test` 为 **909 项测试、905 项通过、4 项可选 OTel skip**；API docbuild
+  freshness 与链接检查通过。
+- honest ceiling：这是同一主机、同一 transcript 文件的 advisory-lock recovery；
+  没有跨主机/远端复制、分布式 lease、全局 lineage、retention 或 compliance store。
+
+T18 仍是 Unreleased；没有创建 tag、GitHub Release，也没有发布到 PyPI/npm。

@@ -23,7 +23,7 @@ import json
 from pathlib import Path
 from typing import Any, Iterable
 
-from sessions import SESSION_FILE_SUFFIX, load_jsonl
+from sessions import SESSION_FILE_SUFFIX, read_session_records
 
 AUDIT_SCHEMA_VERSION = "audit.ndjson/1"
 COMPONENT = "northstar-agent-runtime"
@@ -100,7 +100,7 @@ def transcript_path_to_ndjson(path: Path) -> str:
     Torn trailing lines are skipped exactly like the transcript reader skips
     them (expected after a crash); earlier corruption raises.
     """
-    records, _dropped = load_jsonl(path)
+    records, _dropped = read_session_records(path, lock=True)
     return records_to_ndjson(records)
 
 

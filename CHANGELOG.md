@@ -1,5 +1,23 @@
 # Northstar Agent OS — initial public component
 
+## Unreleased (twenty-fifth batch) — replay timeline and cross-process session recovery (T18)
+
+- Added read-only `sessions replay` / `sessions timeline` slices with index and
+  record-type filters. Replay takes a consistent snapshot, can validate chained
+  transcripts, and never executes tools or model calls.
+- Added POSIX advisory locking and disk-tail reconciliation for session writers.
+  Chained sessions enable it automatically; unsigned sessions can opt in with
+  `SessionStore(cross_process=True)`, `RunOptions.session_cross_process`, or
+  `--session-cross-process`. A resumed writer repairs only a malformed final
+  line before appending, and independent writers recompute the next index and
+  chain digest under the lock.
+- Added SDK/CLI/session tests for concurrent writers, torn-tail recovery,
+  replay filtering, and read-only behavior. Runtime now has 599 tests (595 pass,
+  4 optional OTel skips) and the repository has 909 tests (905 pass, 4 optional
+  OTel skips). This remains same-host local coordination, not distributed or
+  remote lineage, and remains unreleased with no tag, GitHub Release, or
+  PyPI/npm publication.
+
 ## Unreleased (twenty-fourth batch) — transcript integrity chains (T17)
 
 - Added the opt-in `northstar.session-chain.v1` hash chain for runtime session

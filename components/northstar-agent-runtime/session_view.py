@@ -1,4 +1,4 @@
-"""Read-side of the session transcripts: ``cli sessions list``, ``show`` and ``verify``.
+"""Read-side of the session transcripts: ``cli sessions list``, ``show``, ``verify`` and ``replay``.
 
 Writing a transcript has always been append-only and fsynced; this module is the
 missing read-back and integrity-check half. It is deliberately read-only: it
@@ -19,10 +19,27 @@ from pathlib import Path
 from typing import Any, Iterable
 
 from checkpoints import CheckpointError, create_checkpoint, diff_checkpoint, fork_checkpoint, list_checkpoints, rewind_checkpoint
-from sessions import SESSION_FILE_SUFFIX, SessionIntegrityError, load_jsonl, summarise, verify_session_integrity
+from sessions import (
+    SESSION_FILE_SUFFIX,
+    SessionIntegrityError,
+    read_session_records,
+    replay_records,
+    summarise,
+    verify_session_integrity,
+)
 
 USAGE_ERROR = 64  # same convention as cli.USAGE_ERROR, kept local to avoid an import cycle
 CONTENT_PREVIEW = 200
+
+
+def _nonnegative_index(value: str) -> int:
+    try:
+        parsed = int(value)
+    except ValueError as error:
+        raise argparse.ArgumentTypeError("index must be an integer") from error
+    if parsed < 0:
+        raise argparse.ArgumentTypeError("index must be non-negative")
+    return parsed
 
 
 def add_arguments(parser: argparse.ArgumentParser) -> None:
@@ -60,6 +77,26 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
         help="read the optional HMAC secret from environment variable NAME; never pass it on argv",
     )
     verifying.add_argument("session_id", help="session id (the *.jsonl file name without its suffix)")
+
+    replaying = sub.add_parser(
+        "replay",
+        aliases=["timeline"],
+        help="replay a read-only transcript slice; never executes tools or model calls",
+    )
+    replaying.add_argument("--session-dir", required=True, help="directory of *.jsonl transcripts")
+    replaying.add_argument("--json", action="store_true", help="emit replay metadata and records as one JSON object")
+    replaying.add_argument("--from-index", type=_nonnegative_index, default=0, metavar="N", help="first record index, inclusive (default: 0)")
+    replaying.add_argument("--through-index", type=_nonnegative_index, default=None, metavar="N", help="last record index, inclusive")
+    replaying.add_argument("--type", dest="record_types", action="append", default=[], metavar="TYPE", help="include only this record type; repeatable")
+    replaying.add_argument(
+        "--integrity-secret-env",
+        "--session-integrity-secret-env",
+        dest="integrity_secret_env",
+        default="",
+        metavar="NAME",
+        help="read an HMAC secret from environment variable NAME when replaying a chained transcript",
+    )
+    replaying.add_argument("session_id", help="session id (the *.jsonl file name without its suffix)")
 
     checkpointing = sub.add_parser("checkpoint", help="snapshot a workspace for this session")
     checkpointing.add_argument("--session-dir", required=True, help="directory containing session transcripts")
@@ -123,6 +160,16 @@ def run_sessions(args: argparse.Namespace) -> int:
             integrity_secret_env=str(getattr(args, "integrity_secret_env", "") or ""),
             json_out=bool(getattr(args, "json", False)),
         )
+    if args.session_command in {"replay", "timeline"}:
+        return _replay_session(
+            Path(args.session_dir),
+            args.session_id,
+            from_index=int(getattr(args, "from_index", 0)),
+            through_index=getattr(args, "through_index", None),
+            record_types=tuple(getattr(args, "record_types", ()) or ()),
+            integrity_secret_env=str(getattr(args, "integrity_secret_env", "") or ""),
+            json_out=bool(getattr(args, "json", False)),
+        )
     if args.session_command == "checkpoint":
         return _create_session_checkpoint(
             Path(args.session_dir), args.session_id, Path(args.workspace), args.label,
@@ -150,7 +197,7 @@ def run_sessions(args: argparse.Namespace) -> int:
             args.new_session_id, args.label, json_out=bool(getattr(args, "json", False)),
         )
     print(
-        "sessions: pass a subcommand: list, show, export, verify, checkpoint, checkpoints, diff, rewind or fork "
+        "sessions: pass a subcommand: list, show, export, verify, replay/timeline, checkpoint, checkpoints, diff, rewind or fork "
         "(--help for flags)",
         file=sys.stderr,
     )
@@ -201,6 +248,75 @@ def _verify_session(
     return 0
 
 
+def _replay_session(
+    directory: Path,
+    session_id: str,
+    *,
+    from_index: int,
+    through_index: int | None,
+    record_types: tuple[str, ...],
+    integrity_secret_env: str,
+    json_out: bool,
+) -> int:
+    path = directory / f"{session_id}{SESSION_FILE_SUFFIX}"
+    if not path.is_file():
+        print(f"sessions: no transcript for session {session_id!r} in {directory}", file=sys.stderr)
+        return 1
+    secret: bytes | None = None
+    if integrity_secret_env:
+        raw = os.environ.get(integrity_secret_env)
+        if raw is None:
+            print(f"sessions: integrity secret environment variable {integrity_secret_env!r} is not set", file=sys.stderr)
+            return USAGE_ERROR
+        secret = raw.encode("utf-8")
+        if len(secret) < 16:
+            print("sessions: integrity secret must encode to at least 16 bytes", file=sys.stderr)
+            return USAGE_ERROR
+    try:
+        records, dropped = read_session_records(path, lock=True, secret=secret, validate_chain=True)
+        selected = replay_records(
+            records,
+            from_index=from_index,
+            through_index=through_index,
+            record_types=record_types,
+        )
+    except (OSError, SessionIntegrityError, ValueError) as error:
+        if json_out:
+            print(json.dumps({"valid": False, "path": str(path), "error": str(error)}, sort_keys=True))
+        else:
+            print(f"sessions: replay failed: {error}", file=sys.stderr)
+        return 1
+    chained = any("chain_version" in record for record in records)
+    signed = bool(records and "chain_signature" in records[0])
+    report = {
+        "valid": True,
+        "path": str(path),
+        "session_id": session_id,
+        "from_index": from_index,
+        "through_index": through_index,
+        "record_types": list(record_types),
+        "records": selected,
+        "record_count": len(selected),
+        "total_records": len(records),
+        "dropped_trailing_lines": dropped,
+        "integrity_checked": chained,
+        "signed": signed,
+    }
+    if json_out:
+        print(json.dumps(report, ensure_ascii=False, sort_keys=True))
+    else:
+        ending = str(through_index) if through_index is not None else "end"
+        filters = f" types={','.join(record_types)}" if record_types else ""
+        print(
+            f"# replay (read-only; no tools or model calls) session={session_id} "
+            f"indexes={from_index}..{ending} records={len(selected)}/{len(records)} "
+            f"dropped_trailing_lines={dropped} integrity={'checked' if chained else 'off'}{filters}"
+        )
+        for record in selected:
+            print(_format_record(record))
+    return 0
+
+
 # -- listing ---------------------------------------------------------------
 
 
@@ -213,7 +329,7 @@ def _list_sessions(directory: Path, *, json_out: bool) -> int:
         print(f"sessions: no transcripts in {directory}", file=sys.stderr)
         return 1
     for path in sessions:
-        records, _dropped = load_jsonl(path)
+        records, _dropped = read_session_records(path, lock=True)
         summary = summarise(records)
         if json_out:
             print(json.dumps({
@@ -242,7 +358,7 @@ def _show_session(directory: Path, session_id: str, *, json_out: bool) -> int:
     if not path.is_file():
         print(f"sessions: no transcript for session {session_id!r} in {directory}", file=sys.stderr)
         return 1
-    records, dropped = load_jsonl(path)
+    records, dropped = read_session_records(path, lock=True)
     if json_out:
         print(json.dumps(records, ensure_ascii=False, sort_keys=True, default=str))
         return 0

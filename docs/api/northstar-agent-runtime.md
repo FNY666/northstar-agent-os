@@ -722,6 +722,8 @@ Writer/reader for one session's JSONL transcript.
 - `enabled()`
 - `integrity_enabled()`
   - Whether every persisted record carries the v1 chain fields.
+- `cross_process_enabled()`
+  - Whether appends reconcile disk state under a POSIX writer lock.
 - `path()`
 - `written()`
 - `bytes_written()`
@@ -732,11 +734,21 @@ Writer/reader for one session's JSONL transcript.
 - `record_system(message: SystemMessage, *, agent: str='main')`
 - `record_result(message: ResultMessage)`
 - `read(session_id: str | None=None, *, strict: bool=True)`
+- `replay(session_id: str | None=None, *, from_index: int=0, through_index: int | None=None, record_types: Iterable[str]=())`
+  - Return a filtered, read-only record timeline; never executes tools.
 - `transcript(session_id: str | None=None)`
 - `list_sessions()`
 #### `load_jsonl(path: str | os.PathLike[str], *, strict: bool=True)`
 
 Return ``(records, dropped)`` for a session file.
+
+#### `read_session_records(path: str | os.PathLike[str], *, strict: bool=True, lock: bool=False, secret: bytes | None=None, require_integrity: bool=False, validate_chain: bool=False)`
+
+Read one transcript, optionally under a shared lock, and validate chains.
+
+#### `replay_records(records: Sequence[dict[str, Any]], *, from_index: int=0, through_index: int | None=None, record_types: Iterable[str]=())`
+
+Select a deterministic, read-only timeline slice from loaded records.
 
 #### `transcript_from_records(records: Sequence[dict[str, Any]])`
 
@@ -754,7 +766,7 @@ Pitfall guard: a run without a session store still needs a session id.
 
 Source: `components/northstar-agent-runtime/session_view.py`
 
-Read-side of the session transcripts: ``cli sessions list``, ``show`` and ``verify``.
+Read-side of the session transcripts: ``cli sessions list``, ``show``, ``verify`` and ``replay``.
 
 #### `add_arguments(parser: argparse.ArgumentParser)`
 

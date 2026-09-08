@@ -12,11 +12,13 @@ events, tool calls, permission decisions, budget accounting, compaction
 summaries and the final result are all recorded there — including **before**
 the run reports success, so a crash still leaves the decision trail behind.
 
-`cli.py` exposes `sessions` subcommands to list, view and verify transcripts
-read-only. Subagent runs nest as spans and are recorded too, so a delegation
-tree is auditable end to end. Mutating path-shaped tool calls add a
-`workspace_change` record with pre/post metadata hashes; when the host supplies a
-receipt secret, the same call also produces a signed `action_receipt` record.
+`cli.py` exposes `sessions` subcommands to list, view, verify and replay
+transcripts read-only. `replay`/`timeline` selects an index/type slice; it never
+executes tools or model calls. Subagent runs nest as spans and are recorded too,
+so a delegation tree is auditable end to end. Mutating path-shaped tool calls
+add a `workspace_change` record with pre/post metadata hashes; when the host
+supplies a receipt secret, the same call also produces a signed `action_receipt`
+record.
 Tools may attach a validated bounded artifact manifest for non-path outputs;
 that manifest is an observation carried by the receipt, not host attestation.
 A host can additionally bind the receipt to a verified authorization grant via
@@ -35,9 +37,10 @@ HMAC-SHA256 authentication. Hash-only mode detects accidental corruption but
 is not an adversarial tamper guarantee. A torn final JSONL line is still
 skipped and counted before the intact prefix is checked, while an integrity
 record that exceeds the legacy size limit is rejected rather than truncated.
-This is deliberately a local, per-session single-writer mechanism: it does not
-provide cross-process writer coordination, remote lineage, retention, or a
-compliance store.
+Chained writers automatically reconcile the tail and next index under a POSIX
+advisory lock; unsigned transcripts can opt into the same local lock. This is
+same-host per-session recovery, not distributed writer coordination, remote
+lineage, retention, or a compliance store.
 
 ## 2. Durable-run event store and verification
 
@@ -105,8 +108,9 @@ is the record's original timestamp.
 
 Transcripts and stores are a **local audit trail, not a compliance store**:
 individual action receipts and, when enabled, a per-session transcript chain
-can be HMAC-verified when a secret is supplied. There is no global transcript
-lineage, cross-process writer protocol, remote replication, or retention policy.
+can be HMAC-verified when a secret is supplied. Local POSIX writer reconciliation
+exists for one transcript file, but there is no global transcript lineage,
+distributed/remote replication, or retention policy.
 The roadmap's P3-1 is delivered in two batches: the audit feed above
 (`audit.ndjson/1`, this batch) and policy schema-isation
 (`northstar-policy.toml` versioning, next batch).

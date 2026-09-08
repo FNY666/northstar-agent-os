@@ -69,6 +69,9 @@ back read-only:
 
 - `python3 -m cli sessions list --session-dir DIR` — sessions present;
 - `python3 -m cli sessions show <id> --session-dir DIR` — human timeline;
+- `python3 -m cli sessions replay <id> --session-dir DIR --from-index N` —
+  read-only index/type slice, never a tool/model re-execution;
+- `python3 -m cli sessions verify <id> --session-dir DIR` — integrity-chain check;
 - `python3 -m cli sessions export <id> --session-dir DIR > audit.ndjson` —
   the canonical `audit.ndjson/1` feed (envelope in
   `northstar-run-contract/audit.py`), for SIEM-style pipelines.

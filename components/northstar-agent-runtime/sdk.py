@@ -16,8 +16,9 @@ Minimal usage (offline, deterministic — no API key):
 Everything the CLI governs is available here: permission modes, allow/deny
 lists, read-only, turn/tool/budget ceilings, halt-on-denial, a session
 directory for the append-only transcript, optional per-session hash/HMAC
-integrity, subagent depth, workspace agent files, and an opt-in
-`CheckpointPolicy` for durable turn boundaries. The SDK also exposes the host governance seam for bounded approval
+integrity and cross-process writer reconciliation, subagent depth, workspace
+agent files, and an opt-in `CheckpointPolicy` for durable turn boundaries. The
+SDK also exposes the host governance seam for bounded approval
 leases, host-bound receipt context and signed action receipts. A
 `receipt_binding` is the host's already-verified projection; the SDK never
 needs the authorization token or its secret. Two entry points share one configuration:
@@ -86,6 +87,7 @@ class RunOptions:
     # never serialized into a session record.
     session_integrity: bool = False  # hash-chain the transcript; requires session_dir
     session_integrity_secret: bytes | None = field(default=None, repr=False)  # optional HMAC secret
+    session_cross_process: bool = False  # reconcile writers under a POSIX advisory lock
 
 
 @dataclass
@@ -204,6 +206,7 @@ def _build(options: RunOptions, resume: str | None = None) -> tuple[Any, Any]:
         session_id=resume or None,
         integrity_chain=options.session_integrity,
         integrity_secret=options.session_integrity_secret,
+        cross_process=options.session_cross_process,
     )
     config_kwargs["session_id"] = store.session_id
     runtime = AgentRuntime(

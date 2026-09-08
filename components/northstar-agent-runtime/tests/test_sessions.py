@@ -4,10 +4,12 @@ recovery, and a session id even when nothing is persisted.
 from __future__ import annotations
 
 import json
+import multiprocessing
 import os
 import stat
 import unittest
 from pathlib import Path
+from typing import Any
 
 import support  # noqa: F401
 from support import RuntimeTestCase, text_turn, tool_turn
@@ -20,12 +22,20 @@ from sessions import (
     SessionStore,
     load_jsonl,
     new_session_id,
+    read_session_records,
+    replay_records,
     resolve_session_id,
     summarise,
     transcript_from_records,
     verify_integrity_records,
     verify_session_integrity,
 )
+
+
+def _append_integrity_record_in_process(directory: str, session_id: str, barrier: Any) -> None:
+    store = SessionStore(directory, session_id=session_id, integrity_chain=True)
+    barrier.wait(timeout=10)
+    store.append("informational", {"writer_pid": os.getpid()})
 
 
 class SessionIdTests(unittest.TestCase):
@@ -90,6 +100,16 @@ class WriteTests(RuntimeTestCase):
         second = SessionStore(root, session_id="ns-resume-index")
         second.append("informational", {"message": "continued"})
         records, _ = load_jsonl(first.path)
+        self.assertEqual([record["index"] for record in records], [0, 1])
+
+    def test_opt_in_cross_process_mode_reconciles_unsigned_writer_state(self):
+        root = self.workspace()
+        first = SessionStore(root, session_id="ns-cross-plain", cross_process=True)
+        second = SessionStore(root, session_id="ns-cross-plain", cross_process=True)
+        first.append("session_start", {})
+        second.append("informational", {"writer": "second"})
+        records, dropped = load_jsonl(first.path)
+        self.assertEqual(dropped, 0)
         self.assertEqual([record["index"] for record in records], [0, 1])
 
     def test_transcript_files_are_owner_readable_only(self):
@@ -171,6 +191,51 @@ class IntegrityChainTests(RuntimeTestCase):
         report = verify_session_integrity(store.path)
         self.assertEqual(report["records"], 1)
         self.assertEqual(report["dropped_trailing_lines"], 1)
+
+    def test_cross_process_writers_reconcile_the_chain_under_one_lock(self):
+        if "fork" not in multiprocessing.get_all_start_methods():
+            self.skipTest("process locking test requires fork")
+        root = self.workspace()
+        context = multiprocessing.get_context("fork")
+        barrier = context.Barrier(2)
+        processes = [
+            context.Process(target=_append_integrity_record_in_process, args=(str(root), "ns-concurrent", barrier))
+            for _ in range(2)
+        ]
+        for process in processes:
+            process.start()
+        for process in processes:
+            process.join(timeout=10)
+        self.assertTrue(all(process.exitcode == 0 for process in processes))
+        records, dropped = load_jsonl(root / "ns-concurrent.jsonl")
+        self.assertEqual(dropped, 0)
+        self.assertEqual([record["index"] for record in records], [0, 1])
+        self.assertEqual(verify_integrity_records(records), records[-1]["record_digest"])
+        self.assertFalse((root / "ns-concurrent.jsonl.lock").exists())
+
+    def test_reopening_after_a_torn_tail_repairs_it_before_the_next_append(self):
+        root = self.workspace()
+        store = SessionStore(root, session_id="ns-recover", integrity_chain=True)
+        store.append("session_start", {})
+        with open(store.path, "a", encoding="utf-8") as handle:
+            handle.write('{"index":1')
+        resumed = SessionStore(root, session_id="ns-recover", integrity_chain=True)
+        resumed.append("result", {"subtype": "success"})
+        records, dropped = load_jsonl(store.path)
+        self.assertEqual(dropped, 0)
+        self.assertEqual([record["index"] for record in records], [0, 1])
+        self.assertEqual(verify_session_integrity(store.path)["records"], 2)
+
+    def test_replay_records_is_a_deterministic_read_only_slice(self):
+        store = SessionStore(self.workspace(), session_id="ns-replay", integrity_chain=True)
+        store.append("session_start", {})
+        store.append("assistant", {"content": "answer"})
+        store.append("result", {"subtype": "success"})
+        records, dropped = read_session_records(store.path, lock=True, require_integrity=True)
+        self.assertEqual(dropped, 0)
+        selected = replay_records(records, from_index=1, through_index=2, record_types=("result",))
+        self.assertEqual([record["type"] for record in selected], ["result"])
+        self.assertEqual([record["index"] for record in selected], [2])
 
 
 class RecoveryTests(RuntimeTestCase):

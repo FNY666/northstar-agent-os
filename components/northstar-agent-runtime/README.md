@@ -117,12 +117,18 @@ Transcripts are append-only JSONL, but they are meant to be read back:
 python3 -m cli sessions list --session-dir /tmp/northstar-sessions
 python3 -m cli sessions show --session-dir /tmp/northstar-sessions <session-id>
 python3 -m cli sessions show --session-dir /tmp/northstar-sessions <session-id> --json
+python3 -m cli sessions replay --session-dir /tmp/northstar-sessions \
+  --from-index 10 --through-index 20 --type assistant <session-id>
 ```
 
 `list` summarizes every transcript; `show` renders one as a timeline (records,
-turns, result subtype, cost); `--json` exports the raw records. The viewer is
-read-only: it never creates the directory, never writes a file, and reports a
-damaged record instead of "repairing" an audit trail.
+turns, result subtype, cost); `replay` (also `timeline`) selects an index/type
+slice as a read-only JSON or human timeline and never executes tools or model
+calls. `--json` on `show` exports raw records; `--json` on `replay` includes
+selection metadata and the selected records. These readers take a shared
+snapshot when possible: they never create a lock artifact, write a file, or
+repair a transcript, and report a damaged record instead of silently changing
+an audit trail.
 
 A session can also own bounded, content-addressed workspace checkpoints. Review
 the diff before the explicitly destructive rewind; rewind makes a safety
@@ -227,7 +233,8 @@ print(report.subtype, report.exit_code, report.session_id, report.total_cost_usd
 - `RunOptions` carries the governance knobs (`permission_mode`,
   `allowed_tools`/`disallowed_tools`, `read_only`, ceilings, `halt_on_denial`,
   `session_dir`, optional `session_integrity` and in-memory
-  `session_integrity_secret`, subagent depth) plus provider/model/session resume.
+  `session_integrity_secret`, `session_cross_process`, subagent depth) plus
+  provider/model/session resume.
 - Policy files, AGENTS.md/context files, skills and MCP servers stay on the
   CLI by design — the SDK is the stable embedding contract
   ([example](../../examples/sdk/README.md), full API in the
@@ -486,8 +493,12 @@ A passing verdict is an assertion the runtime can audit, not a vibe.
   authentication. Chained records fail closed instead of using the legacy
   oversized-record truncation path, while a torn final line remains droppable
   and is reported. Secrets never enter argv or the transcript. This is a
-  local, per-session chain for one writer, not cross-process or remote lineage;
-  use a coordination protocol before claiming stronger guarantees.
+  local per-session chain. Chained writers automatically reconcile under a
+  POSIX advisory lock; unsigned transcripts can opt into the same behavior with
+  `--session-cross-process` or `RunOptions.session_cross_process`. Reopening
+  after a torn tail repairs only that final malformed line before the next
+  append. This is still not distributed coordination, remote replication or
+  remote lineage.
 - **Compaction** may only cut at a boundary with no pending tool call. Cutting
   mid-exchange orphans a `tool_use` from its `tool_result`, and the API answers
   that with a 400 the model cannot recover from. After compaction the runtime
@@ -524,7 +535,7 @@ size (`result_chars`), so truncation is visible instead of inferred.
 | `budget.py`         | price table, cost computation, budget meter                          |
 | `tools/`            | package: registry, sandbox, caps, built-in tools, `CodexReadOnly` spec (`__init__.py`), plus the guard-verification harness (`verify_invariants.py`) |
 | `compaction.py`     | safe-boundary detection and summarisation                            |
-| `sessions.py`       | append-only JSONL transcripts, recovery, workspace-change receipts, optional hash/HMAC chains |
+| `sessions.py`       | append-only JSONL, replay slices, torn-tail recovery, writer locks and hash/HMAC chains |
 | `checkpoints.py`    | bounded workspace manifests, diff, verified rewind, and safety snapshots |
 | `agents.py`         | agent definitions, registry, verdict parsing                         |
 | `tracing.py`        | span tree, redaction, optional OpenTelemetry export                  |
@@ -532,7 +543,7 @@ size (`result_chars`), so truncation is visible instead of inferred.
 | `providers/`        | `base` (events + contract), `anthropic`, `scripted`                  |
 | `cli.py`            | one governed run from a shell, with distinct exit codes              |
 | `doctor.py`         | `cli doctor` environment self-checks (no requests, no file writes)   |
-| `session_view.py`   | `cli sessions list/show/verify` - the read-back and integrity checks    |
+| `session_view.py`   | `cli sessions list/show/verify/replay` - read-back, integrity and timeline slices |
 | `policy_file.py`    | `.northstar/config.toml` parsing + tighten-only validation; AGENTS.md project-context discovery and prompt composition |
 | `agent_files.py`    | `.northstar/agents/*.md` -> governed `AgentDefinition` compilation   |
 | `skills.py`         | portable `.northstar/skills`/`.agents/skills` discovery, validation and progressive-disclosure listing |
@@ -562,7 +573,7 @@ cd components/northstar-agent-runtime
 python3 -m unittest discover -s tests -p 'test_*.py' -v
 ```
 
-594 tests, fully offline and deterministic (four optional OpenTelemetry tests
+599 tests, fully offline and deterministic (four optional OpenTelemetry tests
 are skipped when the tracing extra is absent): the scripted provider is the
 only model, and `test_integration_sidecar.py` runs the real sidecar `serve()`
 over a real Unix socket with a 100,000-Chinese-character prompt.

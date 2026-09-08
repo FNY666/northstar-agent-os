@@ -682,7 +682,8 @@ class SessionViewTests(unittest.TestCase):
         with mock.patch.dict(os.environ, {"NS_SESSION_SECRET": secret}, clear=False):
             code, _, err = run_cli(
                 "run", "--workspace", str(self.workspace), "--prompt", "signed", "--scripted-text", "done",
-                "--session-dir", self.session_dir, "--session-integrity-secret-env", "NS_SESSION_SECRET", "--quiet",
+                "--session-dir", self.session_dir, "--session-integrity-secret-env", "NS_SESSION_SECRET",
+                "--session-cross-process", "--quiet",
             )
             self.assertEqual(code, 0, err)
             signed_path = next(
@@ -720,6 +721,22 @@ class SessionViewTests(unittest.TestCase):
         self.assertFalse(failure["valid"])
         self.assertIn("secret is required", failure["error"])
         self.assertEqual(err, "")
+
+    def test_sessions_replay_is_read_only_and_filters_a_timeline_slice(self):
+        session = self.find_session()
+        path = Path(self.session_dir) / f"{session}.jsonl"
+        before = path.stat().st_mtime_ns
+        code, out, err = run_cli(
+            "sessions", "timeline", "--session-dir", self.session_dir, session,
+            "--from-index", "1", "--through-index", "3", "--type", "assistant", "--json",
+        )
+        self.assertEqual(code, 0, err)
+        report = json.loads(out)
+        self.assertTrue(report["valid"])
+        self.assertEqual(report["from_index"], 1)
+        self.assertEqual(report["through_index"], 3)
+        self.assertEqual([record["type"] for record in report["records"]], ["assistant"])
+        self.assertEqual(path.stat().st_mtime_ns, before)
 
     def test_sessions_show_missing_session_is_an_error(self):
         code, out, err = run_cli("sessions", "show", "--session-dir", self.session_dir, "ns-does-not-exist")

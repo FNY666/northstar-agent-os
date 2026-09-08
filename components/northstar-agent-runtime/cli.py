@@ -166,6 +166,7 @@ def _add_run_arguments(parser: argparse.ArgumentParser) -> None:
     output.add_argument("--redact-tool-output", action="store_true", help="record tool results in the session without output bodies")
     output.add_argument("--session-integrity", action="store_true", help="hash-chain the persisted transcript; requires --session-dir")
     output.add_argument("--session-integrity-secret-env", default="", metavar="NAME", help="HMAC-sign the transcript chain with bytes from environment variable NAME; never pass the secret on argv")
+    output.add_argument("--session-cross-process", action="store_true", help="reconcile session writers under a POSIX advisory lock")
     output.add_argument("--receipt-secret-env", default="", metavar="NAME", help="sign action receipts with the bytes from environment variable NAME; never pass the secret on argv")
     output.add_argument("--show-pricing", action="store_true", help="print the pricing decision and exit")
     output.add_argument("--dry-run", action="store_true", help="validate the configuration and print what a run would do, then exit without sending any request (provider, model, and sidecar are not touched)")
@@ -258,6 +259,7 @@ def _print_dry_run(
           f"session_dir={args.session_dir or 'off'} "
           f"halt_on_denial={config.halt_on_denial} "
           f"session_integrity={'on' if args.session_integrity or args.session_integrity_secret_env else 'off'} "
+          f"session_cross_process={'on' if args.session_cross_process or args.session_integrity or args.session_integrity_secret_env else 'off'} "
           f"signed_receipts={'on' if args.receipt_secret_env else 'off'}")
     print(f"policy_file={policy_note}")
     print(f"project_context={context_note}")
@@ -602,6 +604,7 @@ def _run(args: argparse.Namespace) -> int:
             session_id=args.resume or None,
             integrity_chain=bool(args.session_integrity),
             integrity_secret=session_integrity_secret,
+            cross_process=bool(args.session_cross_process),
         )
     except SessionIntegrityError as error:
         print(f"configuration error: {error}", file=sys.stderr)
