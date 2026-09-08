@@ -1,5 +1,19 @@
 # Northstar Agent OS — initial public component
 
+## Unreleased (forty-sixth batch) — five-branch convergence
+
+- Merged the five requested remote branches into the fixed
+  `arena/01a07be4-northstar-agent-os` branch. The three `arena/*` branches were
+  already ancestors of the current mainline and therefore required no duplicate
+  tree merge; the older `northstar-agent-runtime` branch was recorded as a
+  merge parent while current mainline implementations won overlapping paths.
+- Merged `research-route-journal` as an experimental interop/evidence surface:
+  35 files and 2,496 lines were added under `components/northstar-agent-interop`
+  and `docs/superpowers/plans`. It does not change the local app-server claim
+  into a scheduler, hosted remote executor or production durable registry.
+- After convergence, `make test` covers 1,039 tests (1,035 pass, four optional
+  OTel skips); no release, tag or public package publication was created.
+
 ## Unreleased (forty-fifth batch) — fail-closed capability validation (T37)
 
 - Added dependency-free capability projection validators to the Python and Node

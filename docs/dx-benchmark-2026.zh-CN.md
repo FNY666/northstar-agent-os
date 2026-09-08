@@ -1259,3 +1259,21 @@ T37 把 capability discovery 从可读 projection 收紧为可验证的 negotiat
   remote execution 或 durable manager registry。
 
 T37 仍是 Unreleased；没有创建 tag、GitHub Release，也没有发布到 PyPI/npm。
+
+### 10.42 当前实现复核：five-branch convergence（2026-09-08）
+
+按请求把五个远端分支收敛到当前固定分支：
+
+- `arena/01a07236-northstar-agent-os`、`arena/01a07526-northstar-agent-os`、
+  `arena/01a07b10-northstar-agent-os` 的 tip 原本已经是当前 mainline 的 ancestor，
+  因此 Git merge 显示 already up to date，没有重复覆盖文件。
+- `northstar-agent-runtime` 是较早的重叠 runtime 实现；冲突路径保留当前
+  T25-T37 mainline，并以 merge parent 记录其历史，不把旧实现强行覆盖到现有
+  app-server seam。
+- `research-route-journal` 已合并 35 个文件、2,496 行，范围限于 interop route/evidence
+  journal 与 research plans；它不是 scheduler、hosted execution 或 durable manager
+  registry。
+- 收敛后 `make test`：1,039 项，1,035 pass，4 项可选 OTel skip；文档构建检查
+  69 个 Markdown 文件通过，remote-worker readiness 仍为 94/100。
+
+这次合并没有创建 release/tag，也没有发布 PyPI/npm/GitHub Release。
