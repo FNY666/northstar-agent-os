@@ -106,6 +106,7 @@ class RunManager:
         self.max_event_retention = max_event_retention
         self.clock = clock or time.time
         self._lock = threading.RLock()
+        self._changed = threading.Condition(self._lock)
         self._records: OrderedDict[str, _RunRecord] = OrderedDict()
         self._request_index: OrderedDict[str, tuple[str, str]] = OrderedDict()
 
@@ -276,11 +277,13 @@ class RunManager:
                 record.first_sequence += 1
             if event.get("type") == "result":
                 record.result = dict(event)
+            self._changed.notify_all()
 
     def _execute(self, record: _RunRecord) -> None:
         with self._lock:
             record.status = "running"
             record.started_at = float(self.clock())
+            self._changed.notify_all()
         try:
             runtime = self.runtime_factory()
             with self._lock:
@@ -308,6 +311,7 @@ class RunManager:
                 subtype = str((record.result or {}).get("subtype", "error_during_execution"))
                 record.status = "cancelled" if subtype == "error_cancelled" else ("success" if subtype == "success" else "failed")
                 self._prune()
+                self._changed.notify_all()
 
     def status(self, *, run_id: str, actor_id: str) -> dict[str, Any]:
         actor_key = self._id(actor_id, field_name="actor_id")
@@ -349,6 +353,7 @@ class RunManager:
                 return self._status_dict(record)
             record.cancel_requested = True
             runtime = record.runtime
+            self._changed.notify_all()
         if runtime is not None:
             request_cancel = getattr(runtime, "request_cancel", None)
             if callable(request_cancel):
@@ -361,14 +366,42 @@ class RunManager:
         if isinstance(timeout, bool) or not isinstance(timeout, (int, float)) or timeout < 0:
             raise AppServerError("invalid_request", "timeout must be a non-negative number")
         deadline = time.monotonic() + float(timeout)
-        while True:
-            with self._lock:
-                if record.terminal:
-                    return self._status_dict(record)
-            remaining = deadline - time.monotonic()
-            if remaining <= 0:
-                return self._status_dict(record)
-            time.sleep(min(0.01, remaining))
+        with self._changed:
+            while not record.terminal:
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    break
+                self._changed.wait(timeout=remaining)
+            return self._status_dict(record)
+
+    def shutdown(self, *, timeout: float = 10.0) -> list[dict[str, Any]]:
+        """Request cooperative cancellation for active runs and wait boundedly.
+
+        This is an explicit host lifecycle operation, not a wire operation. It
+        never force-kills a provider, tool or Python thread. Runs that do not
+        reach a governed cancellation boundary before ``timeout`` are returned
+        with their current non-terminal status.
+        """
+        if isinstance(timeout, bool) or not isinstance(timeout, (int, float)) or timeout < 0:
+            raise AppServerError("invalid_request", "timeout must be a non-negative number")
+        with self._lock:
+            active = [record for record in self._records.values() if not record.terminal]
+            runtimes = [record.runtime for record in active]
+            for record in active:
+                record.cancel_requested = True
+            self._changed.notify_all()
+        for runtime in runtimes:
+            request_cancel = getattr(runtime, "request_cancel", None)
+            if callable(request_cancel):
+                request_cancel()
+        deadline = time.monotonic() + float(timeout)
+        with self._changed:
+            while any(not record.terminal for record in active):
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    break
+                self._changed.wait(timeout=remaining)
+            return [self._status_dict(record) for record in active]
 
 
 # -- authenticated wire protocol ------------------------------------------
@@ -393,6 +426,15 @@ def _mac(payload: Mapping[str, Any], secret: bytes) -> str:
 
 def _without_auth(payload: Mapping[str, Any]) -> dict[str, Any]:
     return {key: value for key, value in payload.items() if key != "auth"}
+
+
+def _strict_object(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
+    result: dict[str, Any] = {}
+    for key, value in pairs:
+        if key in result:
+            raise AppServerError("invalid_request", f"duplicate JSON field: {key}")
+        result[key] = value
+    return result
 
 
 def _secret(value: bytes) -> bytes:
@@ -425,6 +467,8 @@ class AppServer:
         self._owned_socket: Path | None = None
         self._lifecycle_lock = threading.RLock()
         self._stop_requested = threading.Event()
+        self._ready = threading.Event()
+        self._startup_error: BaseException | None = None
 
     def _response(self, *, request_id: str, ok: bool, **fields: Any) -> dict[str, Any]:
         response: dict[str, Any] = {
@@ -457,7 +501,7 @@ class AppServer:
             return self._error("", AppServerError("invalid_request", "request must be bytes or text"))
         request_id = ""
         try:
-            raw = json.loads(text)
+            raw = json.loads(text, object_pairs_hook=_strict_object)
             if not isinstance(raw, dict):
                 raise AppServerError("invalid_request", "request must be a JSON object")
             request_id = str(raw.get("request_id", "")) if isinstance(raw.get("request_id", ""), str) else ""
@@ -511,67 +555,99 @@ class AppServer:
 
     # -- Unix socket lifecycle -------------------------------------------
     def serve_forever(self) -> None:
-        if self.socket_path is None:
-            raise AppServerError("configuration_error", "socket_path is required for serve_forever")
-        if os.name == "nt":
-            raise AppServerError("configuration_error", "the experimental app-server requires Unix domain sockets")
+        server: socketserver.ThreadingUnixStreamServer | None = None
         path = self.socket_path
-        _prepare_socket_parent(path.parent)
-        if path.exists() or path.is_symlink():
-            raise AppServerError("socket_exists", f"refusing to overwrite existing socket path {path}")
-        app = self
-
-        class _Server(socketserver.ThreadingUnixStreamServer):
-            daemon_threads = True
-            allow_reuse_address = False
-
-        class _Handler(socketserver.StreamRequestHandler):
-            def handle(self) -> None:
-                line = self.rfile.readline(app.max_frame_bytes + 1)
-                if len(line) > app.max_frame_bytes:
-                    response = app._error("", AppServerError("frame_too_large", "request frame exceeds the configured bound"))
-                elif not line:
-                    return
-                else:
-                    response = app.handle_wire_line(line)
-                self.wfile.write(_json_line(response))
-                self.wfile.flush()
-
-        server = _Server(str(path), _Handler)
-        os.chmod(path, 0o600)
-        with self._lifecycle_lock:
-            if self._stop_requested.is_set():
-                server.server_close()
-                try:
-                    path.unlink()
-                except FileNotFoundError:
-                    pass
-                return
-            self._server = server
-            self._owned_socket = path
         try:
+            if path is None:
+                raise AppServerError("configuration_error", "socket_path is required for serve_forever")
+            if os.name == "nt":
+                raise AppServerError("configuration_error", "the experimental app-server requires Unix domain sockets")
+            _prepare_socket_parent(path.parent)
+            if path.exists() or path.is_symlink():
+                raise AppServerError("socket_exists", f"refusing to overwrite existing socket path {path}")
+            app = self
+
+            class _Server(socketserver.ThreadingUnixStreamServer):
+                daemon_threads = True
+                allow_reuse_address = False
+
+            class _Handler(socketserver.StreamRequestHandler):
+                def handle(self) -> None:
+                    line = self.rfile.readline(app.max_frame_bytes + 1)
+                    if len(line) > app.max_frame_bytes:
+                        response = app._error("", AppServerError("frame_too_large", "request frame exceeds the configured bound"))
+                    elif not line:
+                        return
+                    else:
+                        response = app.handle_wire_line(line)
+                    self.wfile.write(_json_line(response))
+                    self.wfile.flush()
+
+            server = _Server(str(path), _Handler)
+            with self._lifecycle_lock:
+                self._owned_socket = path
+            os.chmod(path, 0o600)
+            with self._lifecycle_lock:
+                if self._stop_requested.is_set():
+                    self._owned_socket = path
+                    self._ready.set()
+                    return
+                self._server = server
+                self._owned_socket = path
+                self._ready.set()
             server.serve_forever(poll_interval=0.1)
+        except BaseException as error:
+            with self._lifecycle_lock:
+                if not self._ready.is_set():
+                    self._startup_error = error
+                    self._ready.set()
+            raise
         finally:
-            server.server_close()
+            if server is not None:
+                server.server_close()
             with self._lifecycle_lock:
                 if self._server is server:
                     self._server = None
-                if self._owned_socket == path:
+                if path is not None and self._owned_socket == path:
                     try:
                         path.unlink()
                     except FileNotFoundError:
                         pass
                     self._owned_socket = None
 
+    def _serve_background(self) -> None:
+        # ``wait_ready`` exposes startup failures to the host; do not emit an
+        # uncaught background-thread traceback for an expected bind rejection.
+        try:
+            self.serve_forever()
+        except Exception:
+            return
+
     def start(self) -> threading.Thread:
         with self._lifecycle_lock:
             if self._server_thread is not None and self._server_thread.is_alive():
                 return self._server_thread
             self._stop_requested.clear()
-            thread = threading.Thread(target=self.serve_forever, name="northstar-app-server", daemon=True)
+            self._ready.clear()
+            self._startup_error = None
+            thread = threading.Thread(target=self._serve_background, name="northstar-app-server", daemon=True)
             self._server_thread = thread
             thread.start()
             return thread
+
+    def wait_ready(self, *, timeout: float = 5.0) -> None:
+        """Wait for ``start()`` to bind its socket or report startup failure."""
+        if isinstance(timeout, bool) or not isinstance(timeout, (int, float)) or timeout < 0:
+            raise AppServerError("invalid_request", "timeout must be a non-negative number")
+        if not self._ready.wait(timeout=float(timeout)):
+            raise AppServerError("startup_timeout", "app-server did not become ready before the deadline")
+        with self._lifecycle_lock:
+            error = self._startup_error
+        if error is None:
+            return
+        if isinstance(error, AppServerError):
+            raise error
+        raise AppServerError("startup_failed", f"app-server startup failed: {type(error).__name__}: {error}") from error
 
     def close(self) -> None:
         with self._lifecycle_lock:

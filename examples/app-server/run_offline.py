@@ -45,11 +45,9 @@ def main() -> int:
         )
         server_thread = server.start()
         try:
-            deadline = time.monotonic() + 2
-            while not socket_path.exists() and time.monotonic() < deadline:
-                time.sleep(0.01)
+            server.wait_ready(timeout=2)
             if not socket_path.exists():
-                raise RuntimeError("local app-server did not create its socket")
+                raise RuntimeError("local app-server reported ready without its socket")
 
             client = AppClient(socket_path, channel_secret=CHANNEL_SECRET)
             started = client.start(request_id="example-start", actor_id="demo", prompt="say hello")

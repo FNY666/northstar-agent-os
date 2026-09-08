@@ -1,5 +1,18 @@
 # Northstar Agent OS — initial public component
 
+## Unreleased (thirty-fourth batch) — local app-server lifecycle hardening (T26)
+
+- Added `AppServer.wait_ready()` with explicit startup error propagation, so a
+  host can distinguish a bound socket from an owner-only path rejection without
+  polling or an uncaught background-thread traceback.
+- Added `RunManager.shutdown(timeout=...)` and condition-based `wait()`. Shutdown
+  requests cooperative cancellation and returns non-terminal runs after the
+  bounded deadline; it never force-kills a provider, tool or Python thread.
+- Rejected duplicate JSON object fields before dispatch. Added offline coverage
+  for readiness failure, duplicate fields, host shutdown semantics and the
+  cancellation boundary. No scheduler, durable manager registry, remote worker,
+  mTLS transport or release/publication claim was added.
+
 ## Unreleased (thirty-third batch) — local app-server consumer path (T25 follow-up)
 
 - Hardened `AppClient.call()` so callers cannot override authenticated reserved

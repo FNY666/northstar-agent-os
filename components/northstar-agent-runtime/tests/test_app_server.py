@@ -4,7 +4,6 @@ from __future__ import annotations
 import json
 import tempfile
 import threading
-import time
 import unittest
 from pathlib import Path
 
@@ -100,6 +99,25 @@ class RunManagerTests(RuntimeTestCase):
         self.assertEqual(final["status"], "cancelled")
         self.assertEqual(final["result"]["subtype"], "error_cancelled")
 
+    def test_shutdown_requests_cancellation_but_does_not_force_kill(self):
+        provider = BlockingProvider()
+
+        def factory():
+            return AgentRuntime(
+                provider=provider,
+                config=RuntimeConfig(workspace=str(self.workspace())),
+            )
+
+        manager = RunManager(factory)
+        started = manager.start(request_id="request-5", actor_id="owner", prompt="wait")
+        self.assertTrue(provider.started.wait(timeout=2))
+        pending = manager.shutdown(timeout=0)
+        self.assertEqual(pending[0]["status"], "running")
+        self.assertTrue(pending[0]["cancel_requested"])
+        provider.release.set()
+        final = manager.wait(run_id=started["run_id"], actor_id="owner")
+        self.assertEqual(final["status"], "cancelled")
+
 
 class AppWireTests(RuntimeTestCase):
     SECRET = b"app-server-test-channel-secret"
@@ -121,9 +139,7 @@ class AppWireTests(RuntimeTestCase):
             socket_path = Path(directory) / "app.sock"
             server = AppServer(manager, channel_secret=self.SECRET, socket_path=socket_path)
             thread = server.start()
-            deadline = time.monotonic() + 2
-            while not socket_path.exists() and time.monotonic() < deadline:
-                time.sleep(0.01)
+            server.wait_ready(timeout=2)
             self.assertTrue(socket_path.exists())
             client = AppClient(socket_path, channel_secret=self.SECRET)
             started = client.start(request_id="wire-start", actor_id="owner", prompt="hello")
@@ -136,8 +152,26 @@ class AppWireTests(RuntimeTestCase):
         self.assertEqual(status["status"], "success")
         self.assertEqual(page["events"][-1]["event"]["subtype"], "success")
 
+    def test_startup_failure_is_reported_by_wait_ready(self):
+        with tempfile.TemporaryDirectory() as directory:
+            socket_path = Path(directory) / "app.sock"
+            socket_path.write_text("do not replace", encoding="utf-8")
+            server = AppServer(self.manager(), channel_secret=self.SECRET, socket_path=socket_path)
+            thread = server.start()
+            with self.assertRaises(AppServerError) as failure:
+                server.wait_ready(timeout=2)
+            self.assertEqual(failure.exception.code, "socket_exists")
+            thread.join(timeout=2)
+            self.assertFalse(thread.is_alive())
+            self.assertEqual(socket_path.read_text(encoding="utf-8"), "do not replace")
+
     def test_tampered_and_unknown_wire_fields_are_rejected(self):
         server = AppServer(self.manager(), channel_secret=self.SECRET)
+        duplicate = '{"protocol":"%s","protocol":"%s"}' % (APP_PROTOCOL, APP_PROTOCOL)
+        duplicate_response = server.handle_wire_line(duplicate)
+        self.assertFalse(duplicate_response["ok"])
+        self.assertEqual(duplicate_response["error"]["code"], "invalid_request")
+
         tampered = {
             "protocol": APP_PROTOCOL,
             "op": "run.start",

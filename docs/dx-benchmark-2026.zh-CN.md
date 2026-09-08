@@ -1071,3 +1071,21 @@ consumer path，并收紧客户端的 wire 入口：
   （948 pass、4 项可选 OTel skip）。
 
 T25 follow-up 仍是 Unreleased；没有创建 tag、GitHub Release，也没有发布到 PyPI/npm。
+
+### 10.30 当前实现复核：local app-server lifecycle hardening（T26，2026-09-08）
+
+T26 仍然只处理本地 host-controlled surface 的生命周期，不引入调度器或远端
+worker：
+
+- `AppServer.wait_ready()` 提供显式启动屏障。socket 已存在、父目录权限不安全或
+  平台不支持 Unix socket 时，host 收到结构化 startup error；后台线程不再打印未处理
+  traceback。
+- `RunManager.wait()` 改用 condition notification，不再以固定 10ms sleep 轮询。
+  `shutdown(timeout=...)` 会对所有 active run 发出 cooperative cancel，并在 deadline
+  返回当前状态；provider/tool 仍不会被线程强杀。
+- JSON-lines request 使用 duplicate-field rejection，避免 JSON parser 的“最后一个
+  key 获胜”语义绕过严格字段合同。新增 readiness、shutdown、duplicate-field 与现有
+  cancellation 的离线覆盖；runtime 616 项、全仓 `make test` 954 项（950 pass、4 项
+  可选 OTel skip）。
+
+T26 仍是 Unreleased；没有创建 tag、GitHub Release，也没有发布到 PyPI/npm。

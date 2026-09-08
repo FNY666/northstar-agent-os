@@ -111,6 +111,8 @@ Bounded in-process background run manager.
 - `events(*, run_id: str, actor_id: str, from_sequence: int=0, limit: int=MAX_EVENT_PAGE)`
 - `cancel(*, run_id: str, actor_id: str)`
 - `wait(*, run_id: str, actor_id: str, timeout: float=10.0)`
+- `shutdown(*, timeout: float=10.0)`
+  - Request cooperative cancellation for active runs and wait boundedly.
 #### `AppServer`
 
 Authenticated dispatcher plus an optional private Unix socket.
@@ -118,6 +120,8 @@ Authenticated dispatcher plus an optional private Unix socket.
 - `handle_wire_line(line: bytes | str)`
 - `serve_forever()`
 - `start()`
+- `wait_ready(*, timeout: float=5.0)`
+  - Wait for ``start()`` to bind its socket or report startup failure.
 - `close()`
 #### `AppClient`
 
