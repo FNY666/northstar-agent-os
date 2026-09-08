@@ -1,5 +1,14 @@
 # Northstar Agent OS — initial public component
 
+## Unreleased (forty-fourth batch) — app-server failure privacy (T36)
+
+- Background runtime/factory failures now expose only a stable exception type in
+  the app-server result event. Host-owned exception messages, filesystem paths,
+  credentials and upstream response bodies are not echoed to wire consumers.
+- Added a regression test with a secret-bearing factory exception. This is a
+  response projection hardening change; host logging, remote execution and
+  crash recovery remain out of scope.
+
 ## Unreleased (forty-third batch) — capability schema and response binding (T35)
 
 - `app.describe` now includes the versioned capability projection schema

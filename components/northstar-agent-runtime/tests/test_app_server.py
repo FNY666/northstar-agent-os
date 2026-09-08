@@ -79,6 +79,19 @@ class RunManagerTests(RuntimeTestCase):
             "prompt": "hello context",
         })
 
+    def test_factory_failures_do_not_echo_host_exception_text(self):
+        secret = "provider-secret-token:/srv/private/workspace"
+
+        def factory():
+            raise RuntimeError(secret)
+
+        manager = RunManager(factory)
+        started = manager.start(request_id="request-failure", actor_id="owner", prompt="hello")
+        final = manager.wait(run_id=started["run_id"], actor_id="owner")
+        self.assertEqual(final["status"], "failed")
+        self.assertEqual(final["result"]["errors"], ["background runtime failure: RuntimeError"])
+        self.assertNotIn(secret, final["result"]["errors"][0])
+
     def test_start_is_idempotent_and_events_are_bounded(self):
         workspace = str(self.workspace())
         manager = RunManager(self.factory(workspace), max_event_retention=32)

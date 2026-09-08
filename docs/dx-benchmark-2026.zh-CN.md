@@ -1229,3 +1229,18 @@ consumer contract：
   仍为 620 项、全仓 `make test` 仍为 958 项（954 pass、4 项可选 OTel skip）。
 
 T35 仍是 Unreleased；没有创建 tag、GitHub Release，也没有发布到 PyPI/npm。
+
+### 10.40 当前实现复核：app-server failure privacy（T36，2026-09-08）
+
+T36 收紧 host-owned runtime failure 的 wire projection，避免诊断便利意外变成
+secret/path 泄露：
+
+- `RunManager` 捕获 factory/provider 边界异常时，只把 exception type 放进 result
+  error；不回传 host exception message、workspace path、credential、token 或
+  upstream response body。
+- 这只影响 app-server 兜底 failure event；runtime 自己已经产生的受治理事件仍按既有
+  contract 流动。新增 secret-bearing factory exception regression test。
+- runtime 621 项、全仓预计 `make test` 959 项（955 pass、4 项可选 OTel skip）。没有
+  引入 host logging service、remote execution、crash recovery 或 durable registry。
+
+T36 仍是 Unreleased；没有创建 tag、GitHub Release，也没有发布到 PyPI/npm。

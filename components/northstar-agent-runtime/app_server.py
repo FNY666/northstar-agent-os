@@ -358,7 +358,10 @@ class RunManager:
                     record.result = self._failure_result("runtime ended without a terminal result event")
                     self._append_event(record, record.result)
         except Exception as error:  # noqa: BLE001 - app-server must remain an event surface
-            failure = self._failure_result(f"background runtime failure: {type(error).__name__}: {error}")
+            # Factory/provider exception text can contain credentials, paths or
+            # upstream response bodies. Keep the wire-visible failure typed but
+            # do not echo host-owned exception messages to the consumer.
+            failure = self._failure_result(f"background runtime failure: {type(error).__name__}")
             self._append_event(record, failure)
         finally:
             with self._lock:
