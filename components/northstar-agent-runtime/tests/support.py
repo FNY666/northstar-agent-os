@@ -19,6 +19,7 @@ if str(ROOT) not in sys.path:
 
 SIDECAR_DIR = ROOT.parent / "northstar-codex-sidecar"
 CONTRACT_DIR = ROOT.parent / "northstar-run-contract"
+DURABLE_DIR = ROOT.parent / "northstar-durable-run"
 
 
 def load_sidecar(name: str):
@@ -39,6 +40,20 @@ def load_contract(name: str):
     import importlib
 
     text = str(CONTRACT_DIR)
+    if text not in sys.path:
+        sys.path.append(text)
+    return importlib.import_module(name)
+
+
+def load_durable(name: str):
+    """Import a module from the sibling durable-run component (same rule as above).
+
+    Only the drift and bridge tests use this: the runtime must stay importable with no
+    durable checkout present, so nothing in ``loop.py`` reaches for it.
+    """
+    import importlib
+
+    text = str(DURABLE_DIR)
     if text not in sys.path:
         sys.path.append(text)
     return importlib.import_module(name)

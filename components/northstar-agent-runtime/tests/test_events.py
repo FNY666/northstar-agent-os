@@ -9,6 +9,7 @@ import unittest
 import support  # noqa: F401  (installs the sys.path shim)
 from support import RuntimeTestCase, text_turn, tool_turn
 
+from events import EXIT_CODES  # the terminal convention lives with the event feed
 from providers.base import (
     RESULT_SUBTYPES,
     SYSTEM_SUBTYPES,
@@ -45,8 +46,12 @@ class EventTypeTests(unittest.TestCase):
                 "error_during_execution",
                 "error_permission_denied",
                 "error_postconditions_failed",
+                "error_session_busy",
             ),
         )
+        # Pinned against the exit-code table as well: a subtype with no code is a result
+        # the shell cannot read, and a code with no subtype is a number that lies.
+        self.assertEqual(set(RESULT_SUBTYPES), set(EXIT_CODES))
         for subtype in RESULT_SUBTYPES:
             message = ResultMessage(subtype=subtype)
             self.assertEqual(message.is_error, subtype != "success")

@@ -1,5 +1,69 @@
 # Northstar Agent OS — initial public component
 
+## Unreleased (eighteenth batch) — one writer per session, and one boundary two readers can parse
+
+The last row of the roadmap that sat *between* components rather than inside one. The
+runtime could checkpoint, fork and resume; `northstar-durable-run` had an event store, a
+lease and its own checkpoint document; and the two dialects had never been reconciled.
+Nothing was "integrated" by importing one component from the other - the dependency
+direction stays one-way - it was unified by agreeing on artefacts and then proving the
+agreement in tests.
+
+- **A session transcript now has exactly one writer.** `session_lease.py` claims
+  `<session>.lease` with `flock(LOCK_EX)` for the whole run, before the first record is
+  appended, and releases only after the last one (`_close_run`, not `_finish` - releasing
+  before the result record is how a "protected" file grows a torn tail). Contention is a
+  named outcome: `error_session_busy`, **exit 7**, nothing written, no hook fired.
+  A new subtype means a new exit code, and the pinned tables in `test_cli.py` /
+  `test_events.py` had to be updated deliberately rather than allowed to drift.
+- **The lease is held, not counted.** durable-run's `LeaseManager` reclaims once
+  `now >= expires_at`; a runtime process cannot be reasoned about that way, because
+  reclaiming from a *live* holder is exactly the corruption being prevented. So the
+  envelope is shared (`{"owner_id", "expires_at"}`, `0600`, same two keys) and the
+  enforcement diverges on purpose: `expires_at` is a liveness promise renewed at each turn
+  boundary and each checkpoint, and a holder whose promise has expired is still refused.
+  There is no `--steal-lease`; killing the holder is the way to free a session.
+- **The lock is the fact, the JSON is a claim.** The envelope is written *in place on the
+  locked descriptor* - `tempfile` + `os.replace`, which is what durable's writer does, would
+  unlink the inode the lock lives on and silently destroy mutual exclusion. `release()`
+  clears the lock and keeps the file as a trace of the last owner (deleting it races a
+  waiter that already opened the path). A torn or unreadable envelope reads as "owner
+  unknown", never as "free"; `inspect_lease(path, probe=False)` lets `sessions list/show`
+  repeat the holder's claim while labelling it `(unverified)`, because a viewer that takes
+  the lock to answer a question can make an unrelated run refuse to start.
+- **Refusal, not degradation.** Without `fcntl` there is no lease: starting anyway would
+  make a transcript *look* protected. `--no-session-lease` is the explicit opt-out, and
+  `--no-session-lease --session-lease-seconds N` is a usage error (64) rather than an
+  ignored number - the same contradiction `RuntimeConfig` refuses for embedders, so the
+  SDK cannot express it either.
+- **Delegation does not deadlock on it.** A child runtime shares its parent's transcript
+  file, and `flock` is per open file description, not per process: a child that claimed
+  again would be refused by its own parent. Claims happen at depth 0 only, and the child's
+  init record says so (`covered by the parent run's claim`).
+- **One boundary, two schemas.** `durable_bridge.py` translates a runtime checkpoint into
+  a dict satisfying durable-run's *closed* `EventContract` schema (`checkpoint.created` →
+  `running`, one-based contiguous `sequence`, ids under the same charset rule,
+  `payload_digest` over the boundary's facts) and into a `northstar.checkpoint.v1`
+  document digested under durable's canonical rule. `cross_check()` re-derives both through
+  the real modules when they are importable and reports `unchecked` when they are not.
+- **What is *not* unified, in as many words.** The transcript record format:
+  `RECORD_TYPES` stays at 13, because a checkpoint digest certifies a byte range of the
+  transcript and rewriting those bytes would change what every existing checkpoint attests
+  to. And no durable event can authorise a resume: `payload_digest` covers a payload, not a
+  transcript, so `checkpoint_from_event()` sends a foreign boundary through the same
+  `prepare_resume` digest gate - and `EventStore.restore()` correspondingly *refuses* a
+  runtime document, which the tests assert rather than merely describe.
+- **The API reference can no longer shrink in silence.** `docbuild` gained a two-way
+  coverage check: every public module is either documented or recorded in
+  `MANIFEST_EXCLUSIONS` (which is where `_version` lives, with the reason). "Listed
+  explicitly on purpose" was not true while forgetting was invisible.
+
+87 new tests (942 in the runtime, 1239 in the repository), all offline. Honest limits:
+`flock` semantics are exercised on one POSIX host (the cross-process tests spawn real
+children, so at least the refusal path is not simulated), which is exactly the coverage a
+repository without Windows CI can offer; NFS and other network filesystems have their own
+locking rules, and neither component claims to have tested them.
+
 ## Unreleased (seventeenth batch) — streaming that cannot disagree with the record
 
 The blueprint's last user-visible gap. Every serious agent tool streams; Northstar

@@ -72,6 +72,30 @@ class GeneratedApiFreshnessTests(unittest.TestCase):
             f"and commit the regeneration (stale: {', '.join(stale) or 'none'})",
         )
 
+    def test_every_public_module_is_documented_or_deliberately_excluded(self):
+        # The manifest is explicit so that publishing a module is a decision; that only
+        # holds if *omitting* one is an error. Without this test, adding a module and
+        # forgetting the manifest silently shrinks the API reference forever.
+        gaps = docbuild.undocumented_modules()
+        self.assertEqual(
+            gaps,
+            [],
+            "public modules missing from the API reference (add them to docbuild.MANIFEST "
+            "or record an exclusion in MANIFEST_EXCLUSIONS):\n  " + "\n  ".join(gaps),
+        )
+
+    def test_no_api_page_documents_a_module_that_does_not_exist(self):
+        ghosts = docbuild.documented_but_absent()
+        self.assertEqual(ghosts, [], "manifest lists modules with no file:\n  " + "\n  ".join(ghosts))
+
+    def test_exclusions_are_only_for_modules_that_exist(self):
+        # An exclusion that outlives its module is a lie about a decision.
+        for component, excluded in docbuild.MANIFEST_EXCLUSIONS.items():
+            names = docbuild.public_modules(component)
+            for name in sorted(excluded):
+                with self.subTest(component=component, name=name):
+                    self.assertIn(name, names, f"{component}: {name} excluded but not on disk")
+
     def test_api_pages_carry_generated_header_and_module_headings(self):
         # A page that silently lost its provenance header or its module list
         # must fail loudly, not just drift byte-wise against itself.

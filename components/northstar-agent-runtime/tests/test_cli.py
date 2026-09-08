@@ -223,7 +223,11 @@ class CeilingTests(unittest.TestCase):
                 "error_max_tool_calls": 3,
                 "error_max_budget_usd": 4,
                 "error_permission_denied": 5,
-            "error_postconditions_failed": 6,
+                "error_postconditions_failed": 6,
+                # The table is pinned whole, so adding a subtype without an exit code -
+                # or an exit code nothing ever returns - fails here rather than in a
+                # pipeline that reads 1 as "the run failed" and 7 as "try again".
+                "error_session_busy": 7,
             },
         )
 

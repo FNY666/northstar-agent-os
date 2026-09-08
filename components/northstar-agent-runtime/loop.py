@@ -66,6 +66,15 @@ from providers.base import (
     render_transcript,
     transcript_to_api,
 )
+from session_lease import (
+    DEFAULT_LEASE_SECONDS,
+    LeaseError,
+    SessionBusyError,
+    SessionLease,
+    lease_path_for,
+    owner_id_for,
+    validate_ttl,
+)
 from sessions import SessionStore, resolve_session_id
 from sidecar_client import SIDECAR_MAX_TIMEOUT_MS, SIDECAR_MIN_TIMEOUT_MS, SidecarClient
 from tools import (
@@ -151,6 +160,14 @@ class RuntimeConfig:
     #: is being produced. Presentation only: it changes no ceiling, no permission
     #: decision, and no byte of the session transcript (see providers/base.py).
     stream: bool = False
+    #: Refuse to append to a session transcript another process is already writing.
+    #: One :class:`session_lease.SessionLease` per session file, held for the whole run;
+    #: ``False`` means "I know an unprotected transcript is ambiguous and I want it
+    #: anyway" (see session_lease.py).
+    lock_session: bool = True
+    #: How long the current holder promises to stay alive. A live holder is never
+    #: displaced, so this is a liveness signal for readers, not an eviction timer.
+    session_lease_seconds: int = DEFAULT_LEASE_SECONDS
     compaction_threshold_tokens: int | None = DEFAULT_COMPACTION_THRESHOLD_TOKENS
     compaction_keep_messages: int = 4
     tool_limits: ToolLimits = field(default_factory=ToolLimits)
@@ -203,6 +220,18 @@ class RuntimeConfig:
             fail("max_output_tokens must be positive")
         if not isinstance(self.stream, bool):
             fail("stream must be a boolean")
+        if not isinstance(self.lock_session, bool):
+            fail("lock_session must be a boolean")
+        if self.lock_session:
+            try:
+                validate_ttl(self.session_lease_seconds)
+            except LeaseError as error:
+                fail(f"session_lease_seconds rejected: {error}")
+        elif self.session_lease_seconds != DEFAULT_LEASE_SECONDS:
+            # Refused rather than ignored. A caller that sets a lease length while turning
+            # leasing off believes the transcript is protected, and quietly dropping the
+            # number they cared about is how that belief survives to the audit.
+            fail("session_lease_seconds has no meaning when lock_session is False; drop one of the two")
         if self.depth < 0:
             fail("depth must not be negative")
         if self.max_subagent_depth < 0:
@@ -236,6 +265,7 @@ class RuntimeConfig:
             "halt_on_denial": self.halt_on_denial,
             "compaction_threshold_tokens": self.compaction_threshold_tokens,
             "stream": self.stream,
+            "lock_session": self.lock_session,
             "sidecar": bool(self.sidecar_socket),
         }
 
@@ -427,6 +457,10 @@ class _RunState:
     stop_blocks: int = 0
     resumed_from: dict[str, Any] | None = None
     session_end_fired: bool = False
+    #: True when the run ended before it ever owned the session file. Nothing may be
+    #: written to a transcript this run does not hold, and no SessionEnd may fire for a
+    #: SessionStart that never happened.
+    refused_session: bool = False
     events: list[Any] = field(default_factory=list)
 
 
@@ -511,6 +545,8 @@ class AgentRuntime:
         self.session_id = resolve_session_id(self.config.session_id, self.sessions if self.sessions.enabled else None)
         if self.sessions.session_id != self.session_id:
             self.sessions = replace(self.sessions, session_id=self.session_id)
+        self._session_lease: SessionLease | None = None
+        self._lease_beat = 0.0
         #: Last finished run, kept so ``run_collect`` and subagent delegation can
         #: read a full report without re-deriving it from events.
         self._pending_state: _RunState | None = None
@@ -707,7 +743,24 @@ class AgentRuntime:
         )
         state.result = None
         finished = False
+        # Claimed here, before the first record: the whole point is that not one byte of
+        # a transcript is appended by a run that does not own the file.
+        busy = self._claim_session()
         try:
+            if busy is not None:
+                # Not an execution failure and not the operator's typo: a retryable
+                # contention outcome gets its own name for the same reason every ceiling
+                # does, so a caller can tell "wait and retry" from "give up".
+                state.errors.append(busy)
+                state.refused_session = True
+                run_span.record_error(f"SessionBusyError: {busy}")
+                result = self._finish(state, "error_session_busy")
+                # Appended by hand because this event never passes through _events, and
+                # a report whose last event is missing from its own event list would be
+                # a second, subtler way for a refusal to look like a successful run.
+                state.events.append(result)
+                yield result
+                return
             for event in self._events(prompt, state, run_span):
                 state.events.append(event)
                 if isinstance(event, ResultMessage):
@@ -778,6 +831,26 @@ class AgentRuntime:
             init_data["resumed_from"] = {"parent_session": config.parent_session, "checkpoint_record": None, "forked": True}
         if config.checkpoint_turns:
             init_data["checkpoint_turns"] = config.checkpoint_turns
+        lease = self._session_lease
+        if lease is not None:
+            status = lease.status()
+            # Recorded so a transcript can later answer "who else was allowed to write
+            # here?": the lease id, and the fact that the claim was advisory-only on a
+            # platform without flock, are both evidence about the transcript's integrity.
+            # What *this transcript* was written under, and nothing that varies between
+            # two runs of the same prompt: the owner id and the path belong to the lock
+            # file, which is where a reader looks for them. Repeating them here would
+            # break the rule that a record describes the run's audit claim rather than
+            # its process identity (and would make two identical runs differ).
+            init_data["session_lease"] = {
+                "locked": status.locked,
+                "ttl_seconds": lease.ttl_seconds,
+                "kernel_lock_available": status.kernel_lock_available,
+            }
+        elif config.lock_session and config.depth:
+            init_data["session_lease"] = {"held": False, "reason": "covered by the parent run's claim"}
+        elif config.lock_session and not self.sessions.enabled:
+            init_data["session_lease"] = {"held": False, "reason": "no session transcript to protect"}
         if config.stream:
             # Declared in the init record, not implied by the first delta: a consumer
             # that saw no deltas needs to know whether streaming was on and the turn had
@@ -832,6 +905,7 @@ class AgentRuntime:
         # whole lineage rather than restarting at every resume.
         first_turn = state.turns + 1
         for turn_index in range(first_turn, max(first_turn, config.max_turns + 1)):
+            self._heartbeat()
             # Ceilings are checked before spending, never after.
             stop = self._ceiling_stop(state)
             if stop is not None:
@@ -1038,6 +1112,79 @@ class AgentRuntime:
 
         yield self._finish(state, "error_max_turns")
 
+    def _claim_session(self) -> str | None:
+        """Take the per-session lease; return a refusal message, or ``None`` if we own it.
+
+        Contention is reported rather than raised, because a second writer has not made a
+        mistake: it asked for a session that happens to be busy. An exception would surface
+        in ``run_collect`` as an unhandled failure, which is the wrong shape for an outcome
+        a caller should branch on.
+        """
+        if not self.config.lock_session or not self.sessions.enabled or self.config.depth:
+            # Depth > 0 claims nothing because a delegation is not a second writer: a child
+            # runtime shares its parent's SessionStore object, hence the same transcript
+            # file, hence the same claim. Asking for the lock again would be refused by the
+            # kernel (flock is per open file description, not per process), which would
+            # turn every subagent into an error_session_busy run. The parent's claim is what
+            # covers the child's appends, and it is released only when the parent finishes.
+            return None
+        lease = SessionLease(
+            lease_path_for(self.sessions.directory, self.sessions.session_id),
+            owner_id=owner_id_for(self.config.run_id, session_id=self.sessions.session_id),
+            ttl_seconds=self.config.session_lease_seconds,
+        )
+        try:
+            lease.acquire()
+        except SessionBusyError as error:
+            return str(error)
+        except LeaseError as error:
+            # A lease we cannot even attempt is a configuration or platform problem, and
+            # refusing to start is the only honest answer: appending anyway, to a file that
+            # may be shared, would undo exactly the guarantee this exists to provide.
+            raise RuntimeConfigurationError(f"session lease could not be attempted: {error}") from error
+        self._session_lease = lease
+        self._lease_beat = time.monotonic()
+        return None
+
+    def _heartbeat(self) -> None:
+        """Renew while alive, at most a third of the TTL at a time.
+
+        Renewal is what lets a long tool turn outlive the TTL, so ``expires_at`` keeps
+        meaning "someone promised they were alive by here" instead of "a timer that will
+        end the run".
+        """
+        lease = self._session_lease
+        if lease is None:
+            return
+        now = time.monotonic()
+        if now - self._lease_beat < lease.ttl_seconds / 3:
+            return
+        self._lease_beat = now
+        try:
+            lease.heartbeat()
+        except LeaseError as error:
+            # The file vanished or became unwritable: the transcript is still ours to
+            # append to, so keep running - but say so in the audit rather than let the
+            # protection lapse quietly. One record, because the guard is gone.
+            self.sessions.record_system(
+                SystemMessage(
+                    subtype="informational",
+                    content=f"session_lease_lost: {error}",
+                    data={"agent": self.config.agent, "reason": "session_lease_lost"},
+                ),
+                agent=self.config.agent,
+            )
+            self._session_lease = None
+
+    def _release_session(self) -> None:
+        lease, self._session_lease = self._session_lease, None
+        if lease is None:
+            return
+        try:
+            lease.release()
+        except LeaseError as error:  # pragma: no cover - releasing a closed descriptor
+            self.tracer.event("session.lease.release-failed", level="warn", data={"error": str(error)[:200]})
+
     def _checkpoint(self, state: _RunState, *, boundary: str) -> None:
         """Append the resumable boundary record, if checkpoints are enabled.
 
@@ -1066,6 +1213,9 @@ class AgentRuntime:
         )
         payload["boundary"] = boundary
         self.sessions.append("checkpoint", payload)
+        # A boundary is the moment to renew: whoever is reading this file from another
+        # process should see the freshest possible promise about the holder.
+        self._heartbeat()
 
     # -- ceilings ----------------------------------------------------------
     def _ceiling_stop(self, state: _RunState) -> str | None:
@@ -1730,23 +1880,30 @@ class AgentRuntime:
     def _close_run(self, state: _RunState, run_span: Any) -> None:
         if not state.session_end_fired:
             state.session_end_fired = True
-            subtype = state.result.subtype if state.result is not None else "error_during_execution"
-            if state.result is not None and not self.config.depth:
-                self.sessions.record_result(state.result)
-            elif state.result is not None:
-                self.sessions.append("result", {"subtype": subtype, "agent": self.config.agent, "inherited_by_parent": True})
-            self._fire(
-                state,
-                "SessionEnd",
-                HookInput(
-                    event="SessionEnd",
-                    session_id=state.session_id,
-                    agent=self.config.agent,
-                    depth=self.config.depth,
-                    turn_index=state.turns,
-                    data={"subtype": subtype, "total_cost_usd": self.budget.total_cost_usd},
-                ),
-            )
+            if state.refused_session:
+                # A refused claim is the one outcome that writes nothing at all: a result
+                # record appended here would land in a file another process is holding,
+                # which is the exact corruption the claim exists to prevent. That stream
+                # stays authoritative in the event feed and the trace, not the transcript.
+                pass
+            else:
+                subtype = state.result.subtype if state.result is not None else "error_during_execution"
+                if state.result is not None and not self.config.depth:
+                    self.sessions.record_result(state.result)
+                elif state.result is not None:
+                    self.sessions.append("result", {"subtype": subtype, "agent": self.config.agent, "inherited_by_parent": True})
+                self._fire(
+                    state,
+                    "SessionEnd",
+                    HookInput(
+                        event="SessionEnd",
+                        session_id=state.session_id,
+                        agent=self.config.agent,
+                        depth=self.config.depth,
+                        turn_index=state.turns,
+                        data={"subtype": subtype, "total_cost_usd": self.budget.total_cost_usd},
+                    ),
+                )
         # Everything the trace needs is written before the span closes, because a
         # post-end set_attribute is discarded in silence.
         run_span.set_attributes(
@@ -1768,6 +1925,10 @@ class AgentRuntime:
             run_span.set_attribute(key, value)
         run_span.end()
         self._last_report = self._report(state.events, state=state)
+        # Released at the very end, after the result record and the SessionEnd hook are on
+        # disk: releasing before the last write is how a "protected" transcript gets a torn
+        # tail that the next writer then appends to.
+        self._release_session()
 
     def _report(self, events: Sequence[Message], *, state: _RunState) -> RunReport:
         result = state.result

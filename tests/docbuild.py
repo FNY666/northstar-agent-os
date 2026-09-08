@@ -66,6 +66,7 @@ MANIFEST: dict[str, tuple[str, ...]] = {
         "compaction",
         "contract_bridge",
         "doctor",
+        "durable_bridge",
         "events",
         "frontmatter",
         "hooks",
@@ -79,6 +80,7 @@ MANIFEST: dict[str, tuple[str, ...]] = {
         "sdk",
         "scaffold",
         "sessions",
+        "session_lease",
         "session_view",
         "sidecar_client",
         "skill_audit",
@@ -88,6 +90,9 @@ MANIFEST: dict[str, tuple[str, ...]] = {
         "audit_export",
         "tools.__init__",
         "tools.verify_invariants",
+        # The package's own module is the re-export surface embedders import from, so it
+        # is documented rather than assumed.
+        "providers.__init__",
         "providers.base",
         "providers.anthropic",
         "providers.openai_compat",
@@ -218,6 +223,62 @@ def render_page(component: str) -> str:
     while lines and lines[-1] == "":
         lines.pop()
     return "\n".join(lines) + "\n"
+
+
+#: Public modules deliberately left out of the API reference, per component.
+#: "listed explicitly on purpose" is only a true statement if forgetting is loud, so
+#: a module that is neither in MANIFEST nor listed here fails the coverage test. An
+#: exclusion is a recorded decision, not a parking spot: ``_version`` is generated at
+#: build time and has no docstring worth publishing.
+MANIFEST_EXCLUSIONS: dict[str, frozenset[str]] = {
+    "northstar-agent-runtime": frozenset({"_version"}),
+}
+
+
+def public_modules(component: str) -> set[str]:
+    """Every importable module name a component exposes, by filename.
+
+    Pure filesystem inspection, no imports: this file must run on a bare interpreter and
+    must never execute component code just to document it.
+    """
+    root = ROOT / "components" / component
+    found = {path.stem for path in root.glob("*.py")} - {"__init__", "__main__"}
+    for package in sorted(path for path in root.iterdir() if (path / "__init__.py").exists()):
+        # A package's own module is documentable (``tools.__init__`` carries the registry),
+        # so it is part of the public surface; only the *component* root's ``__init__`` is
+        # plumbing.
+        found.add(f"{package.name}.__init__")
+        for path in package.glob("*.py"):
+            if path.name != "__init__.py":
+                found.add(f"{package.name}.{path.stem}")
+    return found
+
+
+def undocumented_modules() -> list[str]:
+    """``component: module`` pairs that are on disk but in neither manifest nor exclusions."""
+    gaps: list[str] = []
+    for component, modules in MANIFEST.items():
+        if not (ROOT / "components" / component).is_dir():
+            continue
+        gaps.extend(
+            f"{component}: {name}"
+            for name in sorted(
+                public_modules(component) - set(modules) - set(MANIFEST_EXCLUSIONS.get(component, frozenset()))
+            )
+        )
+    return gaps
+
+
+def documented_but_absent() -> list[str]:
+    """The other direction: a page that documents a module which no longer exists."""
+    ghosts: list[str] = []
+    for component, modules in MANIFEST.items():
+        root = ROOT / "components" / component
+        if not root.is_dir():
+            continue
+        present = public_modules(component)
+        ghosts.extend(f"{component}: {name}" for name in sorted(set(modules) - present))
+    return ghosts
 
 
 def build_all() -> dict[str, str]:

@@ -328,6 +328,61 @@ Compare the workspace policy file with the committed one.
 
 Print the report; return 0 unless a check failed.
 
+### `durable_bridge`
+
+Source: `components/northstar-agent-runtime/durable_bridge.py`
+
+One run boundary, two readers: the runtime checkpoint in durable-run's vocabulary.
+
+#### `BridgeError`
+
+A checkpoint that cannot be expressed in durable-run's vocabulary.
+
+#### `canonical_json(value: Any)`
+
+durable-run's canonical form: sorted keys, no spaces, non-ASCII preserved.
+
+#### `durable_digest(value: Any)`
+
+``"sha256:" + hex`` - the prefixed form durable-run's ``_DIGEST_RE`` demands.
+
+#### `durable_modules()`
+
+The real durable-run modules, or ``None`` when they are not importable.
+
+#### `durable_available()`
+
+Whether the durable component can be imported here (a test/doc concern only).
+
+#### `checkpoint_payload(checkpoint: Any)`
+
+The runtime facts of one boundary, in a form an event can carry.
+
+#### `checkpoint_event(checkpoint: Any, *, task_id: str | None=None, thread_id: str | None=None, trace_id: str | None=None, occurred_at: int | None=None, sequence: int | None=None)`
+
+One ``northstar.durable-event.v1`` record for one runtime checkpoint.
+
+#### `verify_event_payload(event: Mapping[str, Any], payload: Mapping[str, Any])`
+
+Whether ``payload`` is what ``event``'s ``payload_digest`` was computed over.
+
+#### `checkpoint_document(checkpoint: Any, *, task_id: str | None=None, thread_id: str | None=None, sequence: int | None=None)`
+
+A ``northstar.checkpoint.v1`` document for one boundary, digested durably.
+
+#### `checkpoint_from_event(event: Mapping[str, Any], *, transcript: Sequence[Any], expected_session_id: str | None=None)`
+
+Rebuild a runtime checkpoint from a durable event, verified against the transcript.
+
+#### `BridgeReport`
+
+What the mirror concluded about itself. ``ok`` is the only verdict callers read.
+
+- `as_dict()`
+#### `cross_check(checkpoint: Any | None=None)`
+
+Compare this module's mirror against the durable component, if it is importable.
+
 ### `events`
 
 Source: `components/northstar-agent-runtime/events.py`
@@ -820,6 +875,62 @@ Cheap session statistics for the CLI's ``--inspect-session`` flag.
 
 Pitfall guard: a run without a session store still needs a session id.
 
+### `session_lease`
+
+Source: `components/northstar-agent-runtime/session_lease.py`
+
+One writer per session file, using the durable-run lease envelope.
+
+#### `LeaseError`
+
+The lease could not be used as asked (bad owner id, unusable directory, ...).
+
+#### `SessionBusyError`
+
+Another live process holds this session.
+
+#### `validate_owner_id(value: Any)`
+
+The durable contract's id rule, applied to a lease owner.
+
+#### `validate_ttl(value: Any)`
+
+#### `LeaseStatus`
+
+What can be said about one lease path *right now*, without owning it.
+
+- `free()`
+  - Nothing is *known* to hold it. ``probed=False`` means "unverified", not "free".
+- `expired()`
+  - The holder stopped promising liveness. This never makes it stealable.
+- `as_dict()`
+- `human()`
+#### `inspect_lease(path: str | Path, *, probe: bool=True)`
+
+Read-only report on one lease file (never creates it, never steals anything).
+
+#### `lease_path_for(directory: str | Path, session_id: str)`
+
+``<directory>/<session_id>.lease`` - the sibling of the transcript it guards.
+
+#### `SessionLease`
+
+An exclusive, kernel-enforced claim on one session file's write path.
+
+- `held()`
+- `kernel_lock_available()`
+- `status()`
+- `acquire()`
+- `heartbeat(*, ttl_seconds: int | None=None)`
+  - Extend the promise. A no-op when the lease is not held, so the loop can call it from a boundary that a refused run never reached.
+- `close()`
+  - Alias for :meth:`release`, so the lease works with ``with``.
+- `release()`
+  - Drop the lock. The envelope is left in place as a trace of the last writer.
+#### `owner_id_for(run_id: str | None, *, session_id: str='')`
+
+The lease owner: the run's own correlation id when it has one.
+
 ### `session_view`
 
 Source: `components/northstar-agent-runtime/session_view.py`
@@ -1166,6 +1277,16 @@ Revert each core guard in a throwaway copy of the component and confirm the matc
 #### `run(component: Path, pattern: str)`
 
 #### `main()`
+
+### `providers`
+
+Source: `components/northstar-agent-runtime/providers/__init__.py`
+
+Northstar runtime provider package.
+
+#### `make_provider(kind: str='scripted', **kwargs)`
+
+Factory used by the CLI; keeps ``anthropic`` importable only on demand.
 
 ### `providers.base`
 
