@@ -9,11 +9,13 @@ from __future__ import annotations
 import io
 import json
 import contextlib
+import os
 import tempfile
 import subprocess
 import sys
 import unittest
 from pathlib import Path
+from unittest import mock
 
 import support  # noqa: F401
 from support import text_turn, tool_turn
@@ -615,7 +617,7 @@ class DryRunTests(unittest.TestCase):
 
 
 class SessionViewTests(unittest.TestCase):
-    """`sessions list/show` is the read-back half of the audit transcript."""
+    """`sessions list/show/verify` is the read-back half of the audit transcript."""
 
     def setUp(self):
         self.tmp = Path(tempfile.mkdtemp(prefix="nsar-sview-"))
@@ -661,6 +663,63 @@ class SessionViewTests(unittest.TestCase):
         records = json.loads(out)
         self.assertIsInstance(records, list)
         self.assertTrue(any(r.get("type") == "result" for r in records))
+
+    def test_run_integrity_secret_env_and_sessions_verify(self):
+        hash_dir = str(self.tmp / "hash-sessions")
+        code, _, err = run_cli(
+            "run", "--workspace", str(self.workspace), "--prompt", "hash-only", "--scripted-text", "done",
+            "--session-dir", hash_dir, "--session-integrity", "--quiet",
+        )
+        self.assertEqual(code, 0, err)
+        hash_path = next(Path(hash_dir).glob("*.jsonl"))
+        code, out, err = run_cli("sessions", "verify", "--session-dir", hash_dir, hash_path.stem, "--json")
+        self.assertEqual(code, 0, err)
+        hash_report = json.loads(out)
+        self.assertTrue(hash_report["valid"])
+        self.assertFalse(hash_report["signed"])
+
+        secret = "cli-session-integrity-secret"
+        with mock.patch.dict(os.environ, {"NS_SESSION_SECRET": secret}, clear=False):
+            code, _, err = run_cli(
+                "run", "--workspace", str(self.workspace), "--prompt", "signed", "--scripted-text", "done",
+                "--session-dir", self.session_dir, "--session-integrity-secret-env", "NS_SESSION_SECRET", "--quiet",
+            )
+            self.assertEqual(code, 0, err)
+            signed_path = next(
+                path for path in Path(self.session_dir).glob("*.jsonl")
+                if '"chain_signature"' in path.read_text(encoding="utf-8")
+            )
+            session = signed_path.stem
+            code, out, err = run_cli(
+                "sessions", "verify", "--session-dir", self.session_dir, session,
+                "--integrity-secret-env", "NS_SESSION_SECRET", "--json",
+            )
+        self.assertEqual(code, 0, err)
+        report = json.loads(out)
+        self.assertTrue(report["valid"])
+        self.assertTrue(report["signed"])
+        self.assertGreater(report["records"], 0)
+        self.assertNotIn(secret, Path(self.session_dir, f"{session}.jsonl").read_text(encoding="utf-8"))
+
+    def test_session_integrity_requires_a_session_directory(self):
+        code, _, err = run_cli(
+            "run", "--workspace", str(self.workspace), "--prompt", "signed", "--scripted-text", "done",
+            "--session-integrity",
+        )
+        self.assertEqual(code, USAGE_ERROR)
+        self.assertIn("requires --session-dir", err)
+
+    def test_sessions_verify_missing_secret_fails_closed(self):
+        from sessions import SessionStore
+
+        store = SessionStore(self.session_dir, session_id="ns-signed-cli", integrity_secret=b"cli-session-integrity-secret")
+        store.append("session_start", {})
+        code, out, err = run_cli("sessions", "verify", "--session-dir", self.session_dir, "ns-signed-cli", "--json")
+        self.assertEqual(code, 1)
+        failure = json.loads(out)
+        self.assertFalse(failure["valid"])
+        self.assertIn("secret is required", failure["error"])
+        self.assertEqual(err, "")
 
     def test_sessions_show_missing_session_is_an_error(self):
         code, out, err = run_cli("sessions", "show", "--session-dir", self.session_dir, "ns-does-not-exist")

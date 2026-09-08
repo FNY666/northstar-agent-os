@@ -8,6 +8,7 @@ from pathlib import Path
 import sdk
 from checkpoints import CheckpointPolicy
 from events import EXIT_CODES, event_to_dict
+from sessions import verify_session_integrity
 from sdk import RunOptions, RunReport, run, stream_run
 
 
@@ -113,6 +114,21 @@ class PermissionGatingTests(unittest.TestCase):
 
 
 class SessionTests(unittest.TestCase):
+    def test_sdk_can_emit_a_hmac_chained_transcript_without_recording_the_secret(self):
+        secret = b"sdk-session-integrity-secret"
+        with tempfile.TemporaryDirectory() as directory:
+            report = run(RunOptions(
+                prompt="Read notes.txt.",
+                workspace=DEMO_WORKSPACE,
+                scripted_turns=READ_TURNS,
+                session_dir=directory,
+                session_integrity_secret=secret,
+            ))
+            path = Path(directory) / f"{report.session_id}.jsonl"
+            verification = verify_session_integrity(path, secret=secret)
+            self.assertTrue(verification["signed"])
+            self.assertNotIn(secret.decode("utf-8"), path.read_text(encoding="utf-8"))
+
     def test_session_dir_persists_the_transcript(self):
         with tempfile.TemporaryDirectory() as directory:
             report = run(RunOptions(

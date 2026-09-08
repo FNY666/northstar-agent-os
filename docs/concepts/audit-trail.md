@@ -12,7 +12,7 @@ events, tool calls, permission decisions, budget accounting, compaction
 summaries and the final result are all recorded there — including **before**
 the run reports success, so a crash still leaves the decision trail behind.
 
-`cli.py` exposes `sessions` subcommands to list and view transcripts
+`cli.py` exposes `sessions` subcommands to list, view and verify transcripts
 read-only. Subagent runs nest as spans and are recorded too, so a delegation
 tree is auditable end to end. Mutating path-shaped tool calls add a
 `workspace_change` record with pre/post metadata hashes; when the host supplies a
@@ -26,6 +26,18 @@ bounded file snapshots for recovery rather than putting file bytes in every
 receipt. An opt-in runtime `CheckpointPolicy` records each automatic boundary
 as an informational transcript record and exposes its bounded metadata in the
 run report; it does not turn checkpoint creation into an automatic rewind.
+
+An opt-in `northstar.session-chain.v1` binds each persisted record to the
+previous record digest, starting at an all-zero SHA-256 genesis value. The
+runtime and `sessions verify` command can validate the chain without writing;
+a secret supplied only through SDK memory or an environment variable adds
+HMAC-SHA256 authentication. Hash-only mode detects accidental corruption but
+is not an adversarial tamper guarantee. A torn final JSONL line is still
+skipped and counted before the intact prefix is checked, while an integrity
+record that exceeds the legacy size limit is rejected rather than truncated.
+This is deliberately a local, per-session single-writer mechanism: it does not
+provide cross-process writer coordination, remote lineage, retention, or a
+compliance store.
 
 ## 2. Durable-run event store and verification
 
@@ -92,9 +104,10 @@ is the record's original timestamp.
 ## Honest ceiling
 
 Transcripts and stores are a **local audit trail, not a compliance store**:
-individual action receipts can be HMAC-verified when a host supplies a secret,
-but there is no global transcript signature chain or retention policy. The
-roadmap's P3-1 is delivered in two batches: the audit feed above
+individual action receipts and, when enabled, a per-session transcript chain
+can be HMAC-verified when a secret is supplied. There is no global transcript
+lineage, cross-process writer protocol, remote replication, or retention policy.
+The roadmap's P3-1 is delivered in two batches: the audit feed above
 (`audit.ndjson/1`, this batch) and policy schema-isation
 (`northstar-policy.toml` versioning, next batch).
 

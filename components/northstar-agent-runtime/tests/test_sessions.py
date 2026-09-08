@@ -23,6 +23,8 @@ from sessions import (
     resolve_session_id,
     summarise,
     transcript_from_records,
+    verify_integrity_records,
+    verify_session_integrity,
 )
 
 
@@ -112,6 +114,63 @@ class WriteTests(RuntimeTestCase):
         line = store.path.read_text(encoding="utf-8").splitlines()[0]
         self.assertIn("测试", line, "raw UTF-8 keeps transcripts greppable")
         self.assertNotIn("\\u", line)
+
+
+class IntegrityChainTests(RuntimeTestCase):
+    SECRET = b"session-integrity-secret"
+
+    def test_hash_chain_round_trips_and_exposes_a_read_only_verification_report(self):
+        store = SessionStore(self.workspace(), session_id="ns-chain", integrity_chain=True)
+        first = store.append("session_start", {"model": "scripted"})
+        second = store.append("result", {"subtype": "success"})
+        self.assertEqual(first["prev_digest"], "sha256:" + "0" * 64)
+        self.assertEqual(second["prev_digest"], first["record_digest"])
+        records, dropped = store.read()
+        self.assertEqual(dropped, 0)
+        self.assertEqual(verify_integrity_records(records), second["record_digest"])
+        report = verify_session_integrity(store.path)
+        self.assertEqual(report["records"], 2)
+        self.assertFalse(report["signed"])
+        self.assertEqual(report["last_digest"], second["record_digest"])
+
+    def test_hmac_chain_rejects_wrong_secret_and_tampering(self):
+        root = self.workspace()
+        store = SessionStore(root, session_id="ns-signed", integrity_secret=self.SECRET)
+        store.append("session_start", {})
+        store.append("informational", {"message": "bound"})
+        report = verify_session_integrity(store.path, secret=self.SECRET)
+        self.assertTrue(report["signed"])
+        with self.assertRaises(SessionIntegrityError):
+            verify_session_integrity(store.path, secret=b"wrong-session-secret")
+        with self.assertRaises(SessionIntegrityError):
+            verify_session_integrity(store.path)
+        lines = store.path.read_text(encoding="utf-8").splitlines()
+        tampered = json.loads(lines[1])
+        tampered["message"] = "rewritten"
+        lines[1] = json.dumps(tampered, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+        store.path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+        with self.assertRaises(SessionIntegrityError):
+            verify_session_integrity(store.path, secret=self.SECRET)
+
+    def test_integrity_mode_refuses_to_truncate_and_mixing_modes_is_rejected(self):
+        root = self.workspace()
+        with self.assertRaises(SessionIntegrityError):
+            SessionStore(root, session_id="ns-small", integrity_chain=True, max_record_chars=100).append(
+                "informational", {"content": "x" * 1000}
+            )
+        chained = SessionStore(root, session_id="ns-mixed", integrity_chain=True)
+        chained.append("session_start", {})
+        with self.assertRaises(SessionIntegrityError):
+            SessionStore(root, session_id="ns-mixed")
+
+    def test_a_torn_tail_is_dropped_but_the_intact_chain_still_verifies(self):
+        store = SessionStore(self.workspace(), session_id="ns-tail", integrity_chain=True)
+        store.append("session_start", {})
+        with open(store.path, "a", encoding="utf-8") as handle:
+            handle.write('{"chain_version":"northstar.session-chain.v1"')
+        report = verify_session_integrity(store.path)
+        self.assertEqual(report["records"], 1)
+        self.assertEqual(report["dropped_trailing_lines"], 1)
 
 
 class RecoveryTests(RuntimeTestCase):

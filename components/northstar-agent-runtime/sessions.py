@@ -1,4 +1,4 @@
-"""Append-only JSONL session transcripts.
+"""Append-only JSONL session transcripts with optional local integrity chains.
 
 Every record is written with ``O_APPEND`` and fsynced before the call returns, so
 a run that dies mid-turn leaves a transcript a human can read rather than a
@@ -6,11 +6,18 @@ half-written file. A crash that lands inside a single line can only ever damage
 the *last* line, and a truncated final line is skipped instead of raising: losing
 the tail of a session is survivable, refusing to open the file is not.
 
+The opt-in ``northstar.session-chain.v1`` mode binds records to a SHA-256 hash
+chain and can add HMAC-SHA256 signatures from an in-memory secret. It is a local
+single-writer integrity check, not cross-process coordination or remote lineage;
+chained records also refuse the legacy oversized-record truncation path.
+
 A session id is always issued, even when no store is configured, so tracing and
 host logs can still be correlated to a run that writes nothing to disk.
 """
 from __future__ import annotations
 
+import hashlib
+import hmac
 import json
 import os
 import time
@@ -44,12 +51,111 @@ RECORD_TYPES: tuple[str, ...] = (
 )
 
 SESSION_FILE_SUFFIX = ".jsonl"
+SESSION_CHAIN_SCHEMA_VERSION = "northstar.session-chain.v1"
+SESSION_CHAIN_GENESIS = "sha256:" + "0" * 64
 MAX_RECORD_CHARS = 200_000
 TRUNCATION_NOTE = "[truncated by the session recorder]"
+_CHAIN_RECORD_FIELDS = frozenset({"chain_version", "prev_digest", "record_digest", "chain_signature"})
+
 
 
 class SessionIntegrityError(ValueError):
     """Raised for corruption that is not explainable by a crash at the tail."""
+
+
+def _require_integrity_secret(secret: bytes | None) -> bytes | None:
+    if secret is None:
+        return None
+    if not isinstance(secret, bytes) or len(secret) < 16:
+        raise SessionIntegrityError("session integrity secret must be at least 16 bytes")
+    return secret
+
+
+def _canonical_record(value: dict[str, Any]) -> bytes:
+    try:
+        return json.dumps(
+            value,
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+            default=str,
+        ).encode("utf-8")
+    except (TypeError, ValueError) as error:
+        raise SessionIntegrityError(f"cannot canonicalize session record: {error}") from error
+
+
+def _record_digest(record: dict[str, Any]) -> str:
+    unsigned = {key: value for key, value in record.items() if key not in {"record_digest", "chain_signature"}}
+    return "sha256:" + hashlib.sha256(_canonical_record(unsigned)).hexdigest()
+
+
+def _chain_record(record: dict[str, Any], previous_digest: str, secret: bytes | None) -> dict[str, Any]:
+    chained = {
+        **record,
+        "chain_version": SESSION_CHAIN_SCHEMA_VERSION,
+        "prev_digest": previous_digest,
+    }
+    digest = _record_digest(chained)
+    chained["record_digest"] = digest
+    if secret is not None:
+        chained["chain_signature"] = "hmac-sha256:" + hmac.new(secret, digest.encode("ascii"), hashlib.sha256).hexdigest()
+    return chained
+
+
+def verify_integrity_records(
+    records: Sequence[dict[str, Any]],
+    *,
+    secret: bytes | None = None,
+) -> str:
+    """Verify a complete ``northstar.session-chain.v1`` sequence.
+
+    The returned digest is the last verified record (or the genesis digest for
+    an empty sequence). A secret is required when records carry HMAC signatures;
+    hash-only chains remain useful for accidental corruption detection but do
+    not claim adversarial tamper resistance.
+    """
+    secret = _require_integrity_secret(secret)
+    previous = SESSION_CHAIN_GENESIS
+    for position, record in enumerate(records):
+        if not isinstance(record, dict):
+            raise SessionIntegrityError(f"session chain record {position} is not an object")
+        if record.get("chain_version") != SESSION_CHAIN_SCHEMA_VERSION:
+            raise SessionIntegrityError(f"session chain record {position} has an unsupported chain version")
+        if record.get("prev_digest") != previous:
+            raise SessionIntegrityError(f"session chain link mismatch at record {position}")
+        supplied_digest = record.get("record_digest")
+        if not isinstance(supplied_digest, str) or supplied_digest != _record_digest(record):
+            raise SessionIntegrityError(f"session chain digest mismatch at record {position}")
+        signature = record.get("chain_signature")
+        if signature is not None:
+            if secret is None:
+                raise SessionIntegrityError("session chain secret is required to verify HMAC signatures")
+            expected = "hmac-sha256:" + hmac.new(secret, supplied_digest.encode("ascii"), hashlib.sha256).hexdigest()
+            if not isinstance(signature, str) or not hmac.compare_digest(signature, expected):
+                raise SessionIntegrityError(f"session chain signature mismatch at record {position}")
+        elif secret is not None:
+            raise SessionIntegrityError(f"session chain signature is missing at record {position}")
+        previous = supplied_digest
+    return previous
+
+
+def verify_session_integrity(
+    path: str | os.PathLike[str],
+    *,
+    secret: bytes | None = None,
+) -> dict[str, Any]:
+    """Read-only verification result for one chained transcript."""
+    records, dropped = load_jsonl(path)
+    last_digest = verify_integrity_records(records, secret=secret)
+    signed = bool(records and "chain_signature" in records[0])
+    return {
+        "schema_version": SESSION_CHAIN_SCHEMA_VERSION,
+        "path": str(path),
+        "records": len(records),
+        "dropped_trailing_lines": dropped,
+        "last_digest": last_digest,
+        "signed": signed,
+    }
 
 
 def new_session_id(*, now: float | None = None) -> str:
@@ -77,9 +183,17 @@ class SessionStore:
     on_write: Callable[[dict[str, Any]], None] | None = None
     _index: int = 0
     _written: int = 0
+    integrity_chain: bool = False
+    integrity_secret: bytes | None = field(default=None, repr=False)
+    _chain_prev_digest: str = field(default=SESSION_CHAIN_GENESIS, init=False, repr=False)
 
     def __post_init__(self) -> None:
         self.session_id = self.session_id or new_session_id()
+        self.integrity_secret = _require_integrity_secret(self.integrity_secret)
+        if self.integrity_secret is not None:
+            self.integrity_chain = True
+        if self.integrity_chain and self.directory is None:
+            raise SessionIntegrityError("integrity_chain requires a session directory")
         if self.directory is None:
             return
         path = Path(self.directory)
@@ -92,6 +206,14 @@ class SessionStore:
         existing_file = self.path
         if existing_file is not None and existing_file.exists():
             records, _dropped = load_jsonl(existing_file)
+            chained = any("chain_version" in record for record in records)
+            if self.integrity_chain:
+                if records:
+                    self._chain_prev_digest = verify_integrity_records(records, secret=self.integrity_secret)
+            elif chained:
+                raise SessionIntegrityError(
+                    "transcript has an integrity chain; reopen it with integrity_chain=True and the HMAC secret if signed"
+                )
             indexes = [record.get("index") for record in records if isinstance(record.get("index"), int)]
             if indexes:
                 self._index = max(indexes) + 1
@@ -100,6 +222,11 @@ class SessionStore:
     @property
     def enabled(self) -> bool:
         return self.directory is not None
+
+    @property
+    def integrity_enabled(self) -> bool:
+        """Whether every persisted record carries the v1 chain fields."""
+        return self.integrity_chain
 
     @property
     def path(self) -> Path | None:
@@ -122,6 +249,8 @@ class SessionStore:
         if record_type not in RECORD_TYPES:
             raise ValueError(f"unknown session record type {record_type!r}")
         payload = dict(data or {})
+        if self.integrity_chain and _CHAIN_RECORD_FIELDS.intersection(payload):
+            raise SessionIntegrityError("session record payload cannot override integrity-chain fields")
         record: dict[str, Any] = {
             "index": self._index,
             "ts": _timestamp(),
@@ -129,19 +258,27 @@ class SessionStore:
             "type": record_type,
             **payload,
         }
+        if self.integrity_chain:
+            record = _chain_record(record, self._chain_prev_digest, self.integrity_secret)
         self._index += 1
         if self.on_write is not None:
             try:
-                self.on_write(record)
+                self.on_write(dict(record) if self.integrity_chain else record)
             except Exception:  # noqa: BLE001 - a mirror must never break the run
                 pass
         if self.directory is None:
             return None
         self._write(record)
+        if self.integrity_chain:
+            self._chain_prev_digest = record["record_digest"]
         return record
 
     def _write(self, record: dict[str, Any]) -> None:
         line = json.dumps(record, ensure_ascii=False, sort_keys=True, default=str, separators=(",", ":"))
+        if self.max_record_chars > 0 and len(line) > self.max_record_chars and self.integrity_chain:
+            raise SessionIntegrityError(
+                "integrity-chained session record exceeds max_record_chars; refusing to truncate the signed chain"
+            )
         if self.max_record_chars > 0 and len(line) > self.max_record_chars:
             record = {**record, "truncated": True, "payload": record.get("payload", {})}
             line = json.dumps(record, ensure_ascii=False, sort_keys=True, default=str, separators=(",", ":"))
@@ -216,7 +353,10 @@ class SessionStore:
         path = self.path if session_id is None else Path(self.directory) / f"{session_id}{SESSION_FILE_SUFFIX}"
         if path is None or not path.exists():
             return [], 0
-        return load_jsonl(path, strict=strict)
+        records, dropped = load_jsonl(path, strict=strict)
+        if self.integrity_chain:
+            verify_integrity_records(records, secret=self.integrity_secret)
+        return records, dropped
 
     def transcript(self, session_id: str | None = None) -> list[Any]:
         records, _dropped = self.read(session_id)
@@ -327,6 +467,8 @@ def resolve_session_id(session_id: str | None, store: SessionStore | None) -> st
 
 __all__ = [
     "RECORD_TYPES",
+    "SESSION_CHAIN_GENESIS",
+    "SESSION_CHAIN_SCHEMA_VERSION",
     "SESSION_FILE_SUFFIX",
     "SessionIntegrityError",
     "SessionStore",
@@ -335,4 +477,6 @@ __all__ = [
     "resolve_session_id",
     "summarise",
     "transcript_from_records",
+    "verify_integrity_records",
+    "verify_session_integrity",
 ]

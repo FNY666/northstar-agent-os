@@ -1,5 +1,24 @@
 # Northstar Agent OS — initial public component
 
+## Unreleased (twenty-fourth batch) — transcript integrity chains (T17)
+
+- Added the opt-in `northstar.session-chain.v1` hash chain for runtime session
+  JSONL transcripts. Each record binds the previous digest from an all-zero
+  genesis value; an optional SDK secret or CLI environment variable adds an
+  HMAC-SHA256 signature without writing the secret to argv or the transcript.
+- Added read-only `verify_integrity_records()` / `verify_session_integrity()`
+  APIs and `sessions verify`, including JSON reports, secret-environment input,
+  torn-tail recovery, fail-closed tamper detection, and refusal to apply the
+  legacy record truncation path to chained records.
+- Added SDK `RunOptions.session_integrity` and
+  `RunOptions.session_integrity_secret`, CLI run flags, and coverage for hash,
+  HMAC, tampering, mixed modes, torn tails, and secret handling. Runtime now has
+  594 tests (590 pass, 4 optional OTel skips) and the repository has 904 tests
+  (900 pass, 4 optional OTel skips). This remains a local single-writer
+  transcript feature: it does not claim cross-process or remote lineage, and
+  the batch remains unreleased with no tag, GitHub Release, or PyPI/npm
+  publication.
+
 ## Unreleased (twenty-third batch) — automatic checkpoint boundaries (T16)
 
 - Added an opt-in `CheckpointPolicy` for deterministic turn and admitted

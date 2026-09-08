@@ -164,6 +164,8 @@ def _add_run_arguments(parser: argparse.ArgumentParser) -> None:
     output.add_argument("--session-dir", default="", help="append an auditable JSONL transcript here")
     output.add_argument("--resume", default="", help="session id to continue from --session-dir")
     output.add_argument("--redact-tool-output", action="store_true", help="record tool results in the session without output bodies")
+    output.add_argument("--session-integrity", action="store_true", help="hash-chain the persisted transcript; requires --session-dir")
+    output.add_argument("--session-integrity-secret-env", default="", metavar="NAME", help="HMAC-sign the transcript chain with bytes from environment variable NAME; never pass the secret on argv")
     output.add_argument("--receipt-secret-env", default="", metavar="NAME", help="sign action receipts with the bytes from environment variable NAME; never pass the secret on argv")
     output.add_argument("--show-pricing", action="store_true", help="print the pricing decision and exit")
     output.add_argument("--dry-run", action="store_true", help="validate the configuration and print what a run would do, then exit without sending any request (provider, model, and sidecar are not touched)")
@@ -255,6 +257,7 @@ def _print_dry_run(
     print(f"sidecar={'on' if config.sidecar_socket else 'off'} "
           f"session_dir={args.session_dir or 'off'} "
           f"halt_on_denial={config.halt_on_denial} "
+          f"session_integrity={'on' if args.session_integrity or args.session_integrity_secret_env else 'off'} "
           f"signed_receipts={'on' if args.receipt_secret_env else 'off'}")
     print(f"policy_file={policy_note}")
     print(f"project_context={context_note}")
@@ -419,7 +422,7 @@ def _run(args: argparse.Namespace) -> int:
     from loop import AgentRuntime, DEFAULT_SYSTEM_PROMPT, RuntimeConfig, RuntimeConfigurationError
     from permissions import validate_mode
     from policy_file import PolicyFileError, append_project_context, discover_project_context, load_policy_file
-    from sessions import SessionStore
+    from sessions import SessionIntegrityError, SessionStore
     from skills import SkillError, discover_skills, skill_listing
     from tools import ToolLimits, build_default_registry
 
@@ -579,7 +582,30 @@ def _run(args: argparse.Namespace) -> int:
         config_kwargs["sidecar_socket"] = args.sidecar_socket
         config_kwargs["sidecar_timeout_ms"] = args.sidecar_timeout_ms
 
-    store = SessionStore(args.session_dir or None, session_id=args.resume or None)
+    session_integrity_secret: bytes | None = None
+    if args.session_integrity_secret_env:
+        raw_integrity_secret = os.environ.get(args.session_integrity_secret_env)
+        if raw_integrity_secret is None:
+            print(f"configuration error: session integrity secret environment variable {args.session_integrity_secret_env!r} is not set", file=sys.stderr)
+            return USAGE_ERROR
+        session_integrity_secret = raw_integrity_secret.encode("utf-8")
+        if len(session_integrity_secret) < 16:
+            print("configuration error: session integrity secret must encode to at least 16 bytes", file=sys.stderr)
+            return USAGE_ERROR
+    if (args.session_integrity or session_integrity_secret is not None) and not args.session_dir:
+        print("configuration error: --session-integrity requires --session-dir", file=sys.stderr)
+        return USAGE_ERROR
+
+    try:
+        store = SessionStore(
+            args.session_dir or None,
+            session_id=args.resume or None,
+            integrity_chain=bool(args.session_integrity),
+            integrity_secret=session_integrity_secret,
+        )
+    except SessionIntegrityError as error:
+        print(f"configuration error: {error}", file=sys.stderr)
+        return USAGE_ERROR
     config_kwargs["session_id"] = store.session_id
     try:
         config = RuntimeConfig(**config_kwargs)

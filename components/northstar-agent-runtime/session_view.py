@@ -1,22 +1,25 @@
-"""Read-side of the session transcripts: ``cli sessions list`` and ``show``.
+"""Read-side of the session transcripts: ``cli sessions list``, ``show`` and ``verify``.
 
 Writing a transcript has always been append-only and fsynced; this module is the
-missing read-back half. It is deliberately read-only: it never creates the
-session directory, never opens a file for writing, and never mutates a record.
-A transcript is an audit trail - the viewer reports corruption instead of
-"repairing" it. A torn *trailing* line is skipped the same way the writer's own
-recovery skips it; a damaged line anywhere earlier raises and names the record.
+missing read-back and integrity-check half. It is deliberately read-only: it
+never creates the session directory, never opens a file for writing, and never
+mutates a record. A transcript is an audit trail - the viewer reports
+corruption instead of "repairing" it. A torn *trailing* line is skipped the same
+way the writer's own recovery skips it; a damaged line anywhere earlier raises
+and names the record. Integrity secrets are read only from an explicitly named
+environment variable and are never placed in argv or transcript output.
 """
 from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
 from pathlib import Path
 from typing import Any, Iterable
 
 from checkpoints import CheckpointError, create_checkpoint, diff_checkpoint, fork_checkpoint, list_checkpoints, rewind_checkpoint
-from sessions import SESSION_FILE_SUFFIX, load_jsonl, summarise
+from sessions import SESSION_FILE_SUFFIX, SessionIntegrityError, load_jsonl, summarise, verify_session_integrity
 
 USAGE_ERROR = 64  # same convention as cli.USAGE_ERROR, kept local to avoid an import cycle
 CONTENT_PREVIEW = 200
@@ -44,6 +47,19 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
         help="session id (the *.jsonl file name without its suffix); "
         "the feed is written to stdout, one validated audit record per line",
     )
+
+    verifying = sub.add_parser("verify", help="verify a hash/HMAC-chained session transcript read-only")
+    verifying.add_argument("--session-dir", required=True, help="directory of *.jsonl transcripts")
+    verifying.add_argument("--json", action="store_true", help="emit the verification report as JSON")
+    verifying.add_argument(
+        "--integrity-secret-env",
+        "--session-integrity-secret-env",
+        dest="integrity_secret_env",
+        default="",
+        metavar="NAME",
+        help="read the optional HMAC secret from environment variable NAME; never pass it on argv",
+    )
+    verifying.add_argument("session_id", help="session id (the *.jsonl file name without its suffix)")
 
     checkpointing = sub.add_parser("checkpoint", help="snapshot a workspace for this session")
     checkpointing.add_argument("--session-dir", required=True, help="directory containing session transcripts")
@@ -100,6 +116,13 @@ def run_sessions(args: argparse.Namespace) -> int:
         return _show_session(Path(args.session_dir), args.session_id, json_out=bool(getattr(args, "json", False)))
     if args.session_command == "export":
         return _export_session(Path(args.session_dir), args.session_id)
+    if args.session_command == "verify":
+        return _verify_session(
+            Path(args.session_dir),
+            args.session_id,
+            integrity_secret_env=str(getattr(args, "integrity_secret_env", "") or ""),
+            json_out=bool(getattr(args, "json", False)),
+        )
     if args.session_command == "checkpoint":
         return _create_session_checkpoint(
             Path(args.session_dir), args.session_id, Path(args.workspace), args.label,
@@ -127,11 +150,55 @@ def run_sessions(args: argparse.Namespace) -> int:
             args.new_session_id, args.label, json_out=bool(getattr(args, "json", False)),
         )
     print(
-        "sessions: pass a subcommand: list, show, export, checkpoint, checkpoints, diff, rewind or fork "
+        "sessions: pass a subcommand: list, show, export, verify, checkpoint, checkpoints, diff, rewind or fork "
         "(--help for flags)",
         file=sys.stderr,
     )
     return USAGE_ERROR
+
+
+# -- integrity verification -------------------------------------------------
+
+
+def _verify_session(
+    directory: Path,
+    session_id: str,
+    *,
+    integrity_secret_env: str,
+    json_out: bool,
+) -> int:
+    path = directory / f"{session_id}{SESSION_FILE_SUFFIX}"
+    if not path.is_file():
+        print(f"sessions: no transcript for session {session_id!r} in {directory}", file=sys.stderr)
+        return 1
+    secret: bytes | None = None
+    if integrity_secret_env:
+        raw = os.environ.get(integrity_secret_env)
+        if raw is None:
+            print(f"sessions: integrity secret environment variable {integrity_secret_env!r} is not set", file=sys.stderr)
+            return USAGE_ERROR
+        secret = raw.encode("utf-8")
+        if len(secret) < 16:
+            print("sessions: integrity secret must encode to at least 16 bytes", file=sys.stderr)
+            return USAGE_ERROR
+    try:
+        report = verify_session_integrity(path, secret=secret)
+    except (OSError, SessionIntegrityError) as error:
+        if json_out:
+            print(json.dumps({"valid": False, "path": str(path), "error": str(error)}, sort_keys=True))
+        else:
+            print(f"sessions: integrity verification failed: {error}", file=sys.stderr)
+        return 1
+    report = {"valid": True, **report}
+    if json_out:
+        print(json.dumps(report, ensure_ascii=False, sort_keys=True))
+    else:
+        print(
+            f"session integrity: valid records={report['records']} "
+            f"signed={'yes' if report['signed'] else 'no'} "
+            f"dropped_trailing_lines={report['dropped_trailing_lines']}"
+        )
+    return 0
 
 
 # -- listing ---------------------------------------------------------------

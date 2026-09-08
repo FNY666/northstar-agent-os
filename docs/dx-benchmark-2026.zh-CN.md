@@ -9,7 +9,7 @@
 
 > **阅读口径（2026-09-08 当前真值）**：本页保留了早期差距基线与实施 ledger，
 > 因而 §0–§8 中的“现状”段落有历史意义，不应覆盖后面的复评。当前 checkout
-> 的权威快照是：`make test` **896 项测试，892 项通过、4 项 skip**（runtime 586，
+> 的权威快照是：`make test` **904 项测试，900 项通过、4 项 skip**（runtime 594，
 > 其中 4 项因可选 OpenTelemetry 依赖缺失而跳过；其余组件与文档测试全绿）；五个可安装组件仍为
 > 对齐的 `0.1.0.dev0`，没有发布 tag。Agent Skills 已支持
 > `.northstar/skills` + portable `.agents/skills`、标准 frontmatter、`skills
@@ -22,7 +22,7 @@
 
 ## 0. 执行摘要（TL;DR）
 
-**当前结论：Northstar 已从“库 + 手工拼装”追到可安装、可审计、具备局部可逆执行的 headless harness，但还不是 Claude Code/Codex/Gemini 那样的完整产品。**本地实测 `make test` 为 **896 项测试（892 通过、4 项可选 OTel skip）**（runtime 586），权限门、hooks、预算、只追加 transcript、workspace receipts、checkpoint manifest、capability lease、可验证 action receipt、durable-run 生命周期与离线确定性仍是最强资产。
+**当前结论：Northstar 已从“库 + 手工拼装”追到可安装、可审计、具备局部可逆执行的 headless harness，但还不是 Claude Code/Codex/Gemini 那样的完整产品。**本地实测 `make test` 为 **904 项测试（900 通过、4 项可选 OTel skip）**（runtime 594），权限门、hooks、预算、只追加 transcript、可选 session hash/HMAC integrity、workspace receipts、checkpoint manifest、capability lease、可验证 action receipt、durable-run 生命周期与离线确定性仍是最强资产。
 
 已经补齐的 DX 基础包括：五个可安装组件、console script、`doctor`/`dry-run`、AGENTS.md 与策略即代码、文件化 subagents、MCP stdio 最小客户端、标准 Agent Skills（含 `skills check/list`）、sessions 读回/NDJSON 审计、Python SDK、脚手架、API 文档和 CI recipe。**这些能力要以当前 checkout 的测试为准；本页后面的早期盘点是历史基线。**
 
@@ -864,3 +864,28 @@ turn/mutation boundary 自动创建。
   freshness 与链接检查通过。
 
 T16 仍是 Unreleased；没有创建 tag、GitHub Release，也没有发布到 PyPI/npm。
+
+### 10.20 当前实现复核：session transcript integrity chain（2026-09-08）
+
+T17 将 session 从“可恢复的 append-only JSONL”推进到可选的本地完整性校验，
+但没有把它包装成跨进程或远端 lineage：
+
+- `northstar.session-chain.v1` 默认关闭；启用后每条记录绑定前一条 SHA-256
+  digest，并从全零 genesis 开始。普通 session 的记录形状、尾部 torn-line
+  丢弃和旧 CLI 行为保持不变。
+- SDK `RunOptions.session_integrity` / `session_integrity_secret` 与 CLI
+  `--session-integrity` / `--session-integrity-secret-env NAME` 可启用 hash 或
+  HMAC-SHA256 chain。secret 只来自 SDK 内存或环境变量，不进入 argv/transcript；
+  HMAC secret 缺失、错误或记录被篡改都会 fail-closed。
+- `sessions verify` 与只读 API 输出 record count、尾部丢弃数、last digest 和
+  signed 状态。完整性记录拒绝既有超长 JSON 截断路径；尾部 crash/torn line
+  仍可丢弃后验证剩余完整前缀。
+- honest ceiling：当前实现是单个 `SessionStore` writer 的本地 per-session
+  chain，没有文件锁、跨进程 tail reconciliation、远端复制、retention 或
+  compliance store；hash-only 只能说明 accidental corruption resistance，
+  只有 HMAC 才提供 secret-backed authentication。
+- 验证：runtime **594 项测试（590 项通过、4 项可选 OTel skip）**；全仓
+  `make test` 为 **904 项测试、900 项通过、4 项可选 OTel skip**；API docbuild
+  freshness 与链接检查通过。
+
+T17 仍是 Unreleased；没有创建 tag、GitHub Release，也没有发布到 PyPI/npm。

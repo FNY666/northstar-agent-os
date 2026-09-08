@@ -697,11 +697,19 @@ Create a governed project under ``directory``; returns created paths.
 
 Source: `components/northstar-agent-runtime/sessions.py`
 
-Append-only JSONL session transcripts.
+Append-only JSONL session transcripts with optional local integrity chains.
 
 #### `SessionIntegrityError`
 
 Raised for corruption that is not explainable by a crash at the tail.
+
+#### `verify_integrity_records(records: Sequence[dict[str, Any]], *, secret: bytes | None=None)`
+
+Verify a complete ``northstar.session-chain.v1`` sequence.
+
+#### `verify_session_integrity(path: str | os.PathLike[str], *, secret: bytes | None=None)`
+
+Read-only verification result for one chained transcript.
 
 #### `new_session_id(*, now: float | None=None)`
 
@@ -712,6 +720,8 @@ Sortable, collision-resistant identifier: ``ns-<utc>-<entropy>``.
 Writer/reader for one session's JSONL transcript.
 
 - `enabled()`
+- `integrity_enabled()`
+  - Whether every persisted record carries the v1 chain fields.
 - `path()`
 - `written()`
 - `bytes_written()`
@@ -744,7 +754,7 @@ Pitfall guard: a run without a session store still needs a session id.
 
 Source: `components/northstar-agent-runtime/session_view.py`
 
-Read-side of the session transcripts: ``cli sessions list`` and ``show``.
+Read-side of the session transcripts: ``cli sessions list``, ``show`` and ``verify``.
 
 #### `add_arguments(parser: argparse.ArgumentParser)`
 

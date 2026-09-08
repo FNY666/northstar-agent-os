@@ -226,7 +226,8 @@ print(report.subtype, report.exit_code, report.session_id, report.total_cost_usd
   the `result`.
 - `RunOptions` carries the governance knobs (`permission_mode`,
   `allowed_tools`/`disallowed_tools`, `read_only`, ceilings, `halt_on_denial`,
-  `session_dir`, subagent depth) plus provider/model/session resume.
+  `session_dir`, optional `session_integrity` and in-memory
+  `session_integrity_secret`, subagent depth) plus provider/model/session resume.
 - Policy files, AGENTS.md/context files, skills and MCP servers stay on the
   CLI by design — the SDK is the stable embedding contract
   ([example](../../examples/sdk/README.md), full API in the
@@ -473,6 +474,20 @@ A passing verdict is an assertion the runtime can audit, not a vibe.
   audit feed `audit.ndjson/1` — denials, failed tool results and `error_*`
   results carry `"level":"error"`; see
   [audit trail concept](../../docs/concepts/audit-trail.md).
+- **Optional transcript integrity**: pass `--session-integrity` to add the
+  `northstar.session-chain.v1` hash chain, or
+  `--session-integrity-secret-env NAME` to add HMAC-SHA256 authentication from
+  an environment variable. The SDK equivalents are
+  `RunOptions.session_integrity` and `RunOptions.session_integrity_secret`.
+  Verify without writing via
+  `python3 -m cli sessions verify --session-dir DIR [--integrity-secret-env NAME] SESSION_ID`
+  (use `--json` for automation). A hash-only chain detects accidental edits;
+  only a correctly supplied HMAC secret provides secret-backed tamper
+  authentication. Chained records fail closed instead of using the legacy
+  oversized-record truncation path, while a torn final line remains droppable
+  and is reported. Secrets never enter argv or the transcript. This is a
+  local, per-session chain for one writer, not cross-process or remote lineage;
+  use a coordination protocol before claiming stronger guarantees.
 - **Compaction** may only cut at a boundary with no pending tool call. Cutting
   mid-exchange orphans a `tool_use` from its `tool_result`, and the API answers
   that with a 400 the model cannot recover from. After compaction the runtime
@@ -509,7 +524,7 @@ size (`result_chars`), so truncation is visible instead of inferred.
 | `budget.py`         | price table, cost computation, budget meter                          |
 | `tools/`            | package: registry, sandbox, caps, built-in tools, `CodexReadOnly` spec (`__init__.py`), plus the guard-verification harness (`verify_invariants.py`) |
 | `compaction.py`     | safe-boundary detection and summarisation                            |
-| `sessions.py`       | append-only JSONL transcripts, recovery, and workspace-change receipts   |
+| `sessions.py`       | append-only JSONL transcripts, recovery, workspace-change receipts, optional hash/HMAC chains |
 | `checkpoints.py`    | bounded workspace manifests, diff, verified rewind, and safety snapshots |
 | `agents.py`         | agent definitions, registry, verdict parsing                         |
 | `tracing.py`        | span tree, redaction, optional OpenTelemetry export                  |
@@ -517,7 +532,7 @@ size (`result_chars`), so truncation is visible instead of inferred.
 | `providers/`        | `base` (events + contract), `anthropic`, `scripted`                  |
 | `cli.py`            | one governed run from a shell, with distinct exit codes              |
 | `doctor.py`         | `cli doctor` environment self-checks (no requests, no file writes)   |
-| `session_view.py`   | `cli sessions list/show` - the read-back half of the transcripts     |
+| `session_view.py`   | `cli sessions list/show/verify` - the read-back and integrity checks    |
 | `policy_file.py`    | `.northstar/config.toml` parsing + tighten-only validation; AGENTS.md project-context discovery and prompt composition |
 | `agent_files.py`    | `.northstar/agents/*.md` -> governed `AgentDefinition` compilation   |
 | `skills.py`         | portable `.northstar/skills`/`.agents/skills` discovery, validation and progressive-disclosure listing |
@@ -547,7 +562,7 @@ cd components/northstar-agent-runtime
 python3 -m unittest discover -s tests -p 'test_*.py' -v
 ```
 
-586 tests, fully offline and deterministic (four optional OpenTelemetry tests
+594 tests, fully offline and deterministic (four optional OpenTelemetry tests
 are skipped when the tracing extra is absent): the scripted provider is the
 only model, and `test_integration_sidecar.py` runs the real sidecar `serve()`
 over a real Unix socket with a 100,000-Chinese-character prompt.

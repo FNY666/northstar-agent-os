@@ -22,7 +22,7 @@ This repository currently publishes six complementary components:
 
 - `components/northstar-codex-sidecar/` — a local Unix-socket service that validates requests, runs Codex in read-only mode, bounds input and output behavior, redacts errors, cleans up timed-out process groups, and returns structured statuses.
 - `components/northstar-run-contract/` — a versioned Run Request/Receipt contract, expiring HMAC Run Binding, and strict adapter boundary for passing a verified run to the Sidecar.
-- `components/northstar-agent-runtime/` — a governed agent loop with events, ten lifecycle hooks, a three-layer permission gate, turn/tool-call/USD ceilings, subagents, append-only sessions, path-level workspace-change receipts, bounded content-addressed checkpoints with inspect/diff/rewind/fork, safe-boundary compaction, and span tracing. It holds no model credentials for Codex and never spawns a model CLI: Codex execution is delegated to the sidecar over its Unix socket, so reasoning and policy stay in the runtime while execution and sandboxing stay in the sidecar.
+- `components/northstar-agent-runtime/` — a governed agent loop with events, ten lifecycle hooks, a three-layer permission gate, turn/tool-call/USD ceilings, subagents, append-only sessions with optional per-session hash/HMAC integrity verification, path-level workspace-change receipts, bounded content-addressed checkpoints with inspect/diff/rewind/fork, safe-boundary compaction, and span tracing. It holds no model credentials for Codex and never spawns a model CLI: Codex execution is delegated to the sidecar over its Unix socket, so reasoning and policy stay in the runtime while execution and sandboxing stay in the sidecar.
 - `components/northstar-host/` — a standard-library local candidate for explicit host policy grants and opaque private workspaces; it re-verifies binding and authorization and does not execute commands.
 - `components/northstar-durable-run/` — a local vertical-slice prototype for canonical Run/Step/Event contracts, append-only history, checkpoints, leases, pause/resume/retry/cancel lifecycle controls, a local inspection/control CLI, per-call action authorization, independent verification, minimal trace metrics, and a deterministic fixture evaluation harness. It is not a production scheduler or sandbox.
 - `components/northstar-agent-interop/` — a backend-neutral local candidate for signed Agent attestations, narrowed handoff grants, opaque context envelopes, and typed adapter receipts. It does not yet connect real Codex, Claude Code, Hermes, Cursor, or OpenBot backends.
@@ -83,7 +83,7 @@ python3 -m cli run --workspace . --provider anthropic --prompt "summarise README
 ```
 
 `make test` runs every component's suite and the repository documentation tests
-(896 tests at the current snapshot, 892 pass; four optional OpenTelemetry checks
+(904 tests at the current snapshot, 900 pass; four optional OpenTelemetry checks
 are skipped when that extra is not installed).
 
 ### Sidecar installation
