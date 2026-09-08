@@ -1,6 +1,6 @@
 """Ordered checkpoint chain for Merkle evidence bundles."""
 from __future__ import annotations
-import hashlib,json,os
+import hashlib,json,os,fcntl
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any,Iterator
@@ -38,7 +38,17 @@ class EvidenceChain:
             self.path.parent.mkdir(parents=True,exist_ok=True)
             with self.path.open('ab') as f:f.write(_canon(cp.to_dict())+b'\n');f.flush();os.fsync(f.fileno())
         return cp
-    def read(self)->Iterator[EvidenceCheckpoint]: return iter(self.records)
+    def append_fenced(self,bundle,lease,*,now:int,lease_path):
+        from recovery_cursor import PersistentLeaseManager, RecoveryError
+        try: PersistentLeaseManager(lease_path).validate(lease,now=now)
+        except RecoveryError as exc: raise ChainError('lease invalid') from exc
+        with Path(str(self.path)+'.lock').open('a+') as lock:
+            fcntl.flock(lock.fileno(),fcntl.LOCK_EX)
+            try: return self.append(bundle)
+            finally: fcntl.flock(lock.fileno(),fcntl.LOCK_UN)
+
+    def read(self): return iter(self.records)
+
     @classmethod
     def from_records(cls,records):
         c=cls();
