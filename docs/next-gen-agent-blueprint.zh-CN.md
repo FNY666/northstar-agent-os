@@ -54,8 +54,8 @@
 | 独立完成判定 | 无人做（各家都把"模型自述"当完成） | `postconditions.py`：`--verify` / `[[verify]]`，运行前后快照比对 | ✅ 已落地 |
 | token 级流式 | 全员 | `StreamDelta` 事件，仍保证唯一 ResultMessage | 🔧 待做 |
 | 显式重试/退避/降级 | Claude fallback | provider 层策略化（当前只有 sidecar 重试） | 🔧 待做 |
-| MCP 现行规范 2026-07-28 | 标准 | 无状态请求 + MRTR + `Mcp-Method/Name` 头 + 旧代际 fallback | 🔧 待做（P1-1） |
-| elicitation ↔ 审批回合 | MCP 特性 | 把"服务器问用户"映射到权限门（**这是别人没有的角度**） | 🔧 待做，优先级高 |
+| MCP 现行规范 2026-07-28 | 标准 | `mcp_negotiate.py`：`server/discover` 代际探测 + `params._meta` 逐请求携带 + MRTR 重试 + 旧代际 fallback | ✅ 已落地（第十六批） |
+| elicitation ↔ 审批回合 | MCP 特性 | `mcp_elicitation.py`：把"服务器问用户"映射到权限门，无人应答即拒绝并 `notifications/cancelled`（**这是别人没有的角度**） | ✅ 已落地（第十六批） |
 | OS 级沙箱 | Claude seatbelt/bubblewrap、Gemini gVisor | 可选 `bwrap` 包装器（只读 bind + no net + cgroup），CI 真跑 | 🔧 待做（P1-4，C1 的前置） |
 | 技能供应链校验 | 无人做（第三方审计：99% 坏味道/36% 缺陷） | `skills check`：规则纯函数 + `skills.lock` 摘要钉定 + 漂移拒跑 | ✅ 已落地（第十五批） |
 | 会话 rewind/fork | Claude /rewind、LangGraph time-travel | `--resume-from`：从任一检查点分叉新 session（摘要校验），**绝不回写**旧文件 | ✅ 已落地（与 append-only 兼容） |
@@ -83,9 +83,10 @@
    → 即：**agent 说"我改完了"不再算数**。这比任何"自我批评/反思"式提示技巧都更接近次世代该有的定义。
    → 关键约束：**验证条件绝不进 prompt**——告诉模型要查什么，模型就去写那句话；`contains` 因此被明确标为"便利而非证据"，可依赖的是结构型四种。
 
-5. **把协议的"问用户"变成治理的"要审批"**
+5. **把协议的"问用户"变成治理的"要审批"** ✅ 已落地（第十六批）
    MCP 2026-07-28 的 MRTR/elicitation 让服务器能中途要输入；把它接到权限门上，远端工具的确认请求就走与本地写操作**同一道**门、进**同一条**审计流。
-   → 头部工具把 MCP 当"工具管道"；这里是"带审批的管道"。工程量小（客户端已有，只补一轮），叙事价值大。
+   → 头部工具把 MCP 当"工具管道"；这里是"带审批的管道"。
+   → **原文那句"工程量小（只补一轮）"是错的，留在这里当反面教材**：真正小的是一轮重试的编码。变大的是它旁边的三件事——代际探测必须先于一切请求（否则 modern-only 服务器只会给一个"超时"）、能力宣告必须与"有没有审批人"绑定（否则"没人答就默认答"这条底线从协议层就漏了）、以及拒绝之后要做成**可审计事件**而不是吞掉。总计两个新模块 67 项测试。凡是被文档写成"顺手就能补"的协议改动，都要按"它会牵住握手语义"来估工。
 
 ---
 
@@ -126,6 +127,17 @@
 所以"恢复"一直是绕过 `max_budget_usd` 的后门。现在它必须把父花费带过来；
 嵌入式调用忘了传 seed 过的 `Budget` 会直接报错，而不是拿到更宽的额度。
 
+### 6.21 第十六批（MCP 代际 + elicitation 走审批门）
+
+| 项 | 内容 | 验证 |
+|---|---|---|
+| P1-1 | `mcp_negotiate.py`：`server/discover` 探测→代际判定（`-32022` 即 modern 并采纳服务器点名的版本；method-not-found/垃圾/超时才回落到 `initialize`）；`_meta` 逐请求携带（含探测与通知），legacy 载荷一个多余键都不加；`--mcp-protocol auto\|legacy\|modern` | `tests/test_mcp_negotiate.py` 30 项：断言的是**线上字节**（fixture 把每条入站消息写进 wire log），不是客户端自述 |
+| §4-5 | `mcp_elicitation.py` + `call_tool` 的 MRTR 循环：能力位与"是否挂了审批人"绑定；`sampling` 永远拒绝；`roots` 仅在 `--mcp-allow-roots` 下回答且只给工作区一个根；凭据字段名先拒后问；schema 宽度/深度/体积设界；重试是**新请求**且逐字回显 `requestState`；`--mcp-max-rounds` 设界；整轮皆拒即 `notifications/cancelled` 并回错 | `tests/test_mcp_elicitation.py` 37 项 + CLI 层 10 项：包含"答案值绝不进审计"、"预批集少一个必填字段就是拒绝"、"非 tty 拒绝启动" |
+
+**为什么这行的收益不是"兼容性"**：MCP 更新把 elicitation 从"服务器发起请求"改成"结果里内嵌请求"，各家都当成协议细节跟着改；但对治理系统来说，这是**第一个从网络那头递进来的审批请求**。跟法有三条，全都可测：没人被授权时就答不了（能力位没宣告，问题不会来）、答了也只答预批过的字段（值不猜）、以及答与不答都留在 transcript 里（`[governance]` 注记 + `answered_fields`，永不含值）。
+
+**明确没做**：HTTP/Streamable 传输（代际规则与 MRTR 与传输无关，只差封帧）、`prompts`/`resources` 的 UI 面、tasks 扩展、以及"对着真实厂商服务器验证"——本仓库无网络，fixture 是按规范文本自写的，说"符合规范"就是说"符合已发表的语法"。
+
 ### 6.2 第十四批（多模型 + 独立验证）
 
 | 项 | 内容 | 验证 |
@@ -136,13 +148,13 @@
 
 全仓 954 项测试全绿（runtime 660）。**未做**：流式（`StreamDelta`）、`skills check`、F3。
 
-**F3 与 skills check 均已完成**（见 §6.15、§6.20）。下一批顺序改为：**P1-1 MCP 代际 + elicitation-as-approval → 流式 → durable-run 与 runtime 检查点的统一（lease/verifier 复用）**。理由：skills check 差异化最高、依赖最少；MCP 代际是唯一会持续变大的"过期风险"；把 runtime 的 checkpoint 与 durable-run 的 `EventStore`/`Lease` 统一是最后的"零件合整机"，需要在两个组件之间定一个接口，值得单独一批。
+**F3、skills check、P1-1 均已完成**（见 §6.15、§6.20、§6.21）。下一批顺序：**token 级流式 `StreamDelta` → durable-run 与 runtime 检查点的统一（`EventStore`/`Lease` 复用）→ 显式重试/退避/降级**。理由：MCP 代际这个"会持续变大的过期风险"已经关掉；流式是唯一还缺的用户可感能力，且它受"唯一 `ResultMessage`"这条硬约束牵制，需要单独一批来定形状；durable 统一是最后的"零件合整机"，要在两个组件之间定接口，不宜与流式混做。
 
 ---
 
 **未做且刻意留在后面的**：sidecar 侧真正校验 binding（要动它那个"只允许三字段"的协议——这是安全敏感组件的协议决策，不该在一次功能批次里顺手改）；F3 durable 接线；P1 全组。
 
-下一批建议顺序：**T-durable（F3）→ P1-1 MCP 代际 + elicitation-as-approval → P1-2 多模型与流式 → skills check**。理由：F3 是"有零件没整机"里最亏的一块；MCP 代际是唯一的"过期风险"（会随规范演进持续变大）；skills check 是差异化收益最高、依赖最少的一条。
+（以上是第十四批之前的排序，已被 §6.21 末尾的当前排序取代：F3、P1-1、skills check、P1-2 多模型与 `[[verify]]` 均已落地。）
 
 ---
 

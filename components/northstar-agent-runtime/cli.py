@@ -180,6 +180,12 @@ def _add_run_arguments(parser: argparse.ArgumentParser) -> None:
     mcp = parser.add_argument_group("mcp servers (experimental)")
     mcp.add_argument("--mcp-server", dest="mcp_servers", action="append", default=[], metavar="NAME=COMMAND...", help="connect one MCP stdio server; its tools appear as mcp__NAME__tool and are mutating-by-default (denied until --allow-tool names them). Repeatable.")
     mcp.add_argument("--mcp-timeout-ms", type=int, default=15_000, help="per-request deadline for the MCP handshake and tool calls")
+    mcp.add_argument("--mcp-protocol", choices=("auto", "legacy", "modern"), default="auto", help="which MCP protocol generation to speak: auto probes server/discover and falls back to the legacy initialize handshake only when that probe is refused")
+    mcp.add_argument("--mcp-elicit", action="store_true", help="let MCP servers ask this client for input (the 2026-07-28 input_required path). Off by default: with no approver attached every request is declined, so a remote server never interviews the model instead of the operator. Answers come from --mcp-elicit-answers, else from the terminal")
+    mcp.add_argument("--mcp-elicit-answers", metavar="JSON", default=None, help="pre-approved answers as a JSON object mapping field names to values, for example {\"approved\": true}. A request needing a field the set does not cover is declined rather than guessed")
+    mcp.add_argument("--mcp-allow-sensitive-input", action="store_true", help="allow an MCP elicitation to ask for a password/token/secret field. Off by default: secrets do not travel through a tool transport")
+    mcp.add_argument("--mcp-allow-roots", action="store_true", help="let an MCP server list workspace roots; when allowed it is offered exactly one root, the workspace itself")
+    mcp.add_argument("--mcp-max-rounds", type=int, default=3, help="how many times one tool call may be re-asked for input before the client gives up")
 
     execution = parser.add_argument_group("execution delegation")
     execution.add_argument("--sidecar-socket", default="", help="Unix socket of northstar-codex-sidecar; enables the CodexReadOnly tool")
@@ -462,8 +468,60 @@ def _parse_mcp_servers(args: argparse.Namespace) -> list[tuple[str, list[str]]]:
     return [parse_mcp_flag(value) for value in getattr(args, "mcp_servers", []) or []]
 
 
+def _mcp_stance_note(args: argparse.Namespace) -> str:
+    """How this run will treat a remote server's requests, in one line.
+
+    Printed even when everything is default, because "off" is the interesting fact: an
+    auditor reading a CI log should be able to tell that no MCP server could ask this
+    run for anything.
+    """
+    answers = getattr(args, "mcp_elicit_answers", None)
+    if not getattr(args, "mcp_elicit", False):
+        elicit = "elicit=off→input_required is declined"
+    elif answers:
+        elicit = "elicit=on→pre-approved answers only"
+    else:
+        elicit = "elicit=on→terminal"
+    return ", ".join(
+        [
+            f"protocol={getattr(args, 'mcp_protocol', 'auto')}",
+            elicit,
+            f"roots={'on' if getattr(args, 'mcp_allow_roots', False) else 'off'}",
+            f"sensitive_input={'on' if getattr(args, 'mcp_allow_sensitive_input', False) else 'off'}",
+            f"rounds={getattr(args, 'mcp_max_rounds', 3)}",
+        ]
+    )
+
+
+def _mcp_elicitor(args: argparse.Namespace) -> Any:
+    """Build the approver that answers MCP input requests, if the operator allowed one."""
+    if not getattr(args, "mcp_elicit", False):
+        return None
+    raw = getattr(args, "mcp_elicit_answers", None)
+    if raw:
+        from mcp_elicitation import make_answers_elicitor
+
+        try:
+            answers = json.loads(raw)
+        except json.JSONDecodeError as error:
+            raise ValueError(f"--mcp-elicit-answers is not valid JSON: {error}") from error
+        if not isinstance(answers, dict):
+            raise ValueError("--mcp-elicit-answers must be a JSON object of field names to values")
+        return make_answers_elicitor(answers)
+    import sys
+
+    from mcp_elicitation import make_terminal_elicitor
+
+    if not sys.stdin or not sys.stdin.isatty():
+        # A governed run must never hang waiting for a human who is not there.
+        raise ValueError(
+            "--mcp-elicit needs a terminal or --mcp-elicit-answers: stdin is not interactive"
+        )
+    return make_terminal_elicitor()
+
+
 def _connect_mcp_clients(
-    servers: Sequence[tuple[str, list[str]]], timeout_ms: int, registry: Any
+    servers: Sequence[tuple[str, list[str]]], timeout_ms: int, registry: Any, args: Any = None
 ) -> list[Any]:
     """Connect each MCP server and register its tools (mcp__<server>__<tool>).
 
@@ -473,11 +531,23 @@ def _connect_mcp_clients(
     """
     from mcp_client import McpStdioClient, mcp_tool_specs
 
+    options: dict[str, Any] = {}
+    if args is not None:
+        options = {
+            "protocol": getattr(args, "mcp_protocol", "auto"),
+            "elicitor": _mcp_elicitor(args),
+            "allow_sensitive_input": bool(getattr(args, "mcp_allow_sensitive_input", False)),
+            "allow_roots": bool(getattr(args, "mcp_allow_roots", False)),
+            "max_input_rounds": getattr(args, "mcp_max_rounds", 3),
+            "workspace_root": Path.cwd(),
+        }
     clients: list[Any] = []
     try:
         for name, command in servers:
-            client = McpStdioClient(name, command, timeout_ms=timeout_ms)
+            client = McpStdioClient(name, command, timeout_ms=timeout_ms, **options)
             client.connect()
+            if client.negotiation:
+                print(f"[mcp] {name}: {client.negotiation}", file=sys.stderr)
             try:
                 for spec in mcp_tool_specs(client):
                     registry.register(spec, replace_existing=False)
@@ -821,7 +891,8 @@ def _run(args: argparse.Namespace) -> int:
     hooks_note = _hooks_note(policy, command_hooks, enabled=args.enable_workspace_hooks)
     skills_note = (f"{len(skills)} package(s): " + ", ".join(skill.name for skill in skills)) if skills else "none"
     if mcp_servers:
-        mcp_note = ", ".join(f"{name}={' '.join(command)}" for name, command in mcp_servers)
+        listed = ", ".join(f"{name}={' '.join(command)}" for name, command in mcp_servers)
+        mcp_note = f"{listed} ({_mcp_stance_note(args)})"
     else:
         mcp_note = "off"
 
@@ -872,7 +943,7 @@ def _run(args: argparse.Namespace) -> int:
     mcp_clients: list[Any] = []
     if mcp_servers:
         try:
-            mcp_clients = _connect_mcp_clients(mcp_servers, args.mcp_timeout_ms, registry)
+            mcp_clients = _connect_mcp_clients(mcp_servers, args.mcp_timeout_ms, registry, args)
         except ValueError as error:
             print(f"configuration error: {error}", file=sys.stderr)
             return USAGE_ERROR

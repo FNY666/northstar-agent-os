@@ -187,23 +187,77 @@ python3 -m cli run --workspace . --prompt "summarise the files" \
   --allow-tool mcp__filesystem__list_directory
 ```
 
-- Each server is a child process speaking JSON-RPC 2.0 over stdio; the
-  handshake (`initialize` → `notifications/initialized` → `tools/list`) runs
-  under a per-request deadline (`--mcp-timeout-ms`, default 15 s) and a server
-  that stops answering is TERM→KILLed as a process group.
+- Each server is a child process speaking JSON-RPC 2.0 over stdio, under a
+  per-request deadline (`--mcp-timeout-ms`, default 15 s); a server that stops
+  answering is TERM→KILLed as a process group.
+- **Two protocol generations, one probe.** `--mcp-protocol auto` (the default)
+  opens with `server/discover` — the request the 2026-07-28 revision made
+  mandatory — and only falls back to the older `initialize` handshake when that
+  probe is refused by something that is not a recognizably modern error. A
+  `-32022` refusal is *itself* the modern signal, so it selects the modern
+  generation and adopts the version the server named rather than trying a
+  favourite date. `legacy`/`modern` pin the answer when the operator already
+  knows. The verdict is decided once per server process and printed to stderr,
+  with the reason, so a CI log says which dialect was used.
+- On the modern generation there is **no handshake and no session id**: the
+  version, `clientInfo` and capabilities ride in `params._meta` on every
+  request, including the probe and notifications. On the legacy generation
+  nothing extra is attached, because unknown keys in a 2024 payload is how a
+  strict server ends the conversation.
 - Every remote tool appears as `mcp__<server>__<tool>` and is **mutating by
   default**: under the runtime's `default` permission mode it is denied until an
   operator names it with `--allow-tool` (or a policy file denies it, which
   stays terminal). MCP is a tool *transport*; permission decisions remain in
   the three-layer gate and every call still fires the hooks.
+- **A server that wants something from a human goes through the approval gate,
+  not around it.** The 2026-07-28 revision forbids servers from initiating
+  JSON-RPC requests, so `elicitation/create`, `sampling/createMessage` and
+  `roots/list` arrive embedded in a tool result as `resultType:
+  "input_required"`. How this client answers:
+  - the capability that makes the question possible (`elicitation`) is
+    **advertised only when an approver is attached**, so an unattended run is
+    never asked in the first place;
+  - with `--mcp-elicit` and `--mcp-elicit-answers '{"approved": true}'`, a
+    request is answered **only** from that pre-approved set — a server that adds
+    a required field gets a refusal, not a guess;
+  - `--mcp-elicit` without an answer set asks on the terminal and refuses to run
+    at all when stdin is not a tty: a governed run never blocks on a human who
+    is not there;
+  - `sampling/createMessage` is always declined (a remote tool does not get to
+    run our model on a prompt we did not write);
+  - `roots/list` is declined unless `--mcp-allow-roots`, and even then it is
+    answered with exactly one root — the workspace itself;
+  - a field whose name looks like a credential (`password`, `api_key`, `otp`,
+    …) is refused before any human is shown it, unless `--mcp-allow-sensitive-input`;
+  - the retry is a **new request** carrying the answers and the server's opaque
+    `requestState` verbatim; the client never reads that state, and
+    `--mcp-max-rounds` (default 3, 1–8) bounds how long a server may keep
+    re-asking;
+  - when every request in a round is refused, the in-flight call is cancelled
+    (`notifications/cancelled`) and the tool returns an error the model can see.
+    Declining is final, not a negotiation.
+- Verdicts are audited as field **names**, never values: `client.elicitation_log`
+  and the `audit=` callback (embedders) record
+  `{"kind": "mcp-elicitation", "server", "tool", "method", "action", "reason",
+  "answered_fields"}`, and a short `[governance] …` note is appended to the tool
+  result so the refusal is inside the transcript rather than beside it.
 - Output is bounded client-side (per-line and per-call caps); image/resource
   content blocks are replaced with a placeholder rather than rendered.
-- `run --dry-run` and `doctor` list the configured servers without spawning
-  them. Combining `--mcp-server` with `--agent` is a configuration error: an
-  agent-definition run fixes its tool subset by definition, and silently adding
-  MCP tools would widen declared policy.
-- Limits: no sampling/roots/prompts, no reconnection, and only one protocol
-  dialect (`2024-11-05`) is negotiated.
+- `run --dry-run` lists the configured servers **and the stance**
+  (`protocol=auto, elicit=off→input_required is declined, roots=off,
+  sensitive_input=off, rounds=3`) without spawning them. MCP servers cannot be
+  declared in `.northstar/config.toml` — `--mcp-server` is a per-run flag, so an
+  operator always sees this line before a server is reached; `doctor` has
+  nothing MCP-shaped to verify and says so by staying silent. Combining
+  `--mcp-server` with `--agent` is a configuration error: an agent-definition
+  run fixes its tool subset by definition, and silently adding MCP tools would
+  widen declared policy.
+- Limits: no `prompts`/`resources` UI surfaces, no reconnection, no HTTP
+  transport (the modern Streamable-HTTP generation differs only in framing —
+  the era rules and MRTR in `mcp_negotiate.py` are transport-agnostic), and no
+  task-extension support. `tools/list` answers are capped per server and per
+  schema size, and a tool whose definition would exceed those caps is refused
+  at connect time rather than truncated.
 
 ## Repository policy and project context
 
@@ -657,7 +711,9 @@ size (`result_chars`), so truncation is visible instead of inferred.
 | `skill_audit.py`    | supply-chain rules for skill text: injection, exfiltration, policy self-edit, invisible unicode, context bloat |
 | `skill_check.py`    | `cli skills check`: review, pin by digest (`skills.lock`), report drift; `--require-skill-lock` gate |
 | `frontmatter.py`    | strict minimal frontmatter reader shared by agents and skills        |
-| `mcp_client.py`     | minimal MCP stdio client: handshake, tool listing, bounded calls, process-group cleanup |
+| `mcp_client.py`     | minimal MCP stdio client: era probe, tool listing, bounded calls, MRTR retry loop, process-group cleanup |
+| `mcp_negotiate.py`  | MCP generation rules as pure functions: `server/discover` era detection, version selection, per-request `_meta`, MRTR round planning |
+| `mcp_elicitation.py`| remote input requests decoded, bounded and routed to the approval gate: what may be answered, what is always declined, and what the audit records |
 | `audit_export.py`   | transcript replay as the canonical NDJSON audit feed (`audit.ndjson/1`)      |
 | `events.py`         | public event vocabulary: `event_to_dict` shapes + result `EXIT_CODES` |
 | `sdk.py`            | Python API: `RunOptions` / `run` / `stream_run` / `RunReport`       |
@@ -705,10 +761,14 @@ caught by the unit-level compaction tests rather than the loop-level one.
 - **The live Anthropic API is unverified here.** No credentials exist in the
   development sandbox, so request building and response normalisation are tested
   against an injected fake client, not against the network.
-- **MCP is a minimal stdio client.** Only tool discovery and calls are
-  implemented (protocol `2024-11-05`), verified against an offline fixture
-  server; no sampling/roots/prompts, no reconnect, and no vendor server has
-  been exercised here.
+- **MCP is a minimal stdio client.** Tool discovery, calls and the
+  `input_required` round trip are implemented for both generations
+  (`2026-07-28` per-request metadata, plus the `2025-11-25`/`2024-11-05`
+  handshake as fallback). Both are verified against offline fixture servers that
+  follow the spec text; **no vendor MCP server has been exercised here**, so
+  "conformant" means "matches the published grammar", not "tested against the
+  ecosystem". Sampling is never answered, roots only under a flag, and there is
+  no reconnect, no HTTP transport and no task extension.
 - **Process-group `TERM`→`KILL` cleanup is not verified on real Linux here.** That
   behaviour belongs to the sidecar; the runtime only bounds its own socket read.
 - Session transcripts are a local audit trail, not a compliance store: there is no

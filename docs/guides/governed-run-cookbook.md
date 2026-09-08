@@ -130,6 +130,63 @@ fresh `max_budget_usd` or restart `max_turns`. `--resume-record N` picks an earl
 boundary (rewind), and a digest mismatch refuses the run instead of attributing
 numbers to the wrong history.
 
+## 10. Connect an MCP server, and let it ask only what you pre-approved
+
+```sh
+# 1. See the stance before anything spawns (no child process, no probe):
+python3 -m cli run --workspace . --prompt "hi" --scripted-text x \
+  --mcp-server "fs=python3 /opt/mcp/fs_server.py" --dry-run
+#    mcp_servers=fs=… (protocol=auto, elicit=off→input_required is declined,
+#                     roots=off, sensitive_input=off, rounds=3)
+
+# 2. Allow one remote tool, as with any mutating tool:
+python3 -m cli run --workspace . --prompt "…" \
+  --mcp-server "fs=python3 /opt/mcp/fs_server.py" --allow-tool mcp__fs__list_directory
+
+# 3. If that server uses input_required, answer it from a pre-approved set:
+python3 -m cli run … --mcp-elicit --mcp-elicit-answers '{"approved": true}'
+```
+
+What the client guarantees, and what to check in a log:
+
+- **Which generation it settled on**, printed once per server on stderr with the
+  reason (`server/discover answered: …` or `… answered with a non-modern error
+  (-32601 …): legacy server`). `--mcp-protocol` pins it when you already know; a
+  `-32022` refusal adopts the version the server named instead of falling back,
+  because only a 2026-07-28 server can produce that code.
+- **`elicit=off` is the safe default and it is enforced in the protocol**, not in
+  a handler: without an approver the `elicitation` capability is never advertised,
+  so a conforming server cannot ask at all. Turning it on does not open a prompt —
+  `--mcp-elicit-answers` is a *closed set*, and a server that starts asking for a
+  field outside it gets a refusal, which is exactly the behaviour you want after a
+  dependency update.
+- **Refusals are visible to the model and to you.** A declined round returns a tool
+  error naming each request and why it was refused, and the session transcript keeps
+  the `[governance] …` note. Values are never recorded, only field names.
+- Keep `roots` off unless a server truly needs the tree, and keep
+  `sensitive_input` off full stop — a credential belongs in a secret store, not in
+  a text box that a remote process designs.
+
+For an embedding that needs the decisions in its own audit pipeline, build the
+client directly and pass both hooks:
+
+```python
+from mcp_client import McpStdioClient, mcp_tool_specs
+from mcp_elicitation import make_answers_elicitor
+
+client = McpStdioClient(
+    "fs",
+    ["python3", "/opt/mcp/fs_server.py"],
+    elicitor=make_answers_elicitor({"approved": True}),
+    audit=lambda record: my_audit.append(record),   # {"kind": "mcp-elicitation", …}
+    workspace_root=".",
+)
+client.connect()
+for spec in mcp_tool_specs(client):
+    registry.register(spec, replace_existing=False)
+print(client.negotiation, client.elicitation_log)
+```
+
 ## Consumer CI recipe
 
 `examples/ci-readonly-review/` is a copy-paste template for running a

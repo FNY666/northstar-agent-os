@@ -134,6 +134,40 @@ Running cost and usage accumulator with a ceiling check.
 
 Pricing view for the CLI ``--show-pricing`` flag.
 
+### `checkpoints`
+
+Source: `components/northstar-agent-runtime/checkpoints.py`
+
+Turn-boundary checkpoints: resume without resetting the counters, fork without rewriting.
+
+#### `digest_transcript(transcript: Sequence[Any])`
+
+#### `Checkpoint`
+
+A resumable boundary: how far the transcript had got, and what it cost.
+
+- `as_dict()`
+- `label()`
+#### `CheckpointError`
+
+A checkpoint that cannot be trusted as a fork point.
+
+#### `build(*, session_id: str, record_index: int, transcript: Sequence[Any], turns: int, tool_calls: int, cost_usd: float, usage: Mapping[str, Any], model: str, provider: str, permission_mode: str, run_id: str | None=None, policy_revision: str | None=None, denials: int=0)`
+
+The record payload appended at a boundary. Read-only: nothing here mutates.
+
+#### `from_record(record: Mapping[str, Any])`
+
+Read one checkpoint, or ``None`` when the record is not one.
+
+#### `select(records: Sequence[Mapping[str, Any]], *, record_index: int | None=None)`
+
+The newest checkpoint, or the one at ``record_index``.
+
+#### `prepare_resume(checkpoint: Checkpoint, transcript: Sequence[Any], *, expected_session_id: str | None=None)`
+
+The prefix a resumed run should start from, verified against the digest.
+
 ### `cli`
 
 Source: `components/northstar-agent-runtime/cli.py`
@@ -151,6 +185,40 @@ The model id to use, or a configuration error for an impossible pairing.
 The parent's token totals as a Usage, so a resumed run's cost view is continuous.
 
 #### `main(argv: Sequence[str] | None=None)`
+
+### `command_hooks`
+
+Source: `components/northstar-agent-runtime/command_hooks.py`
+
+Repository-declared lifecycle hooks: the governed subset of a "command hook".
+
+#### `CommandHookError`
+
+A declared hook is unusable. Message is operator-facing; the CLI exits 64.
+
+#### `CommandHook`
+
+One validated ``[[hooks]]`` entry, ready to be registered.
+
+- `as_dict()`
+  - Display form only: the resolved absolute script path is never printed.
+#### `parse_hooks(raw: Sequence[Any], *, workspace: str | Path, known_tools: Sequence[str]=())`
+
+Validate a raw ``hooks`` list from the policy file. Raises on anything suspect.
+
+#### `candidate_name(entry: Mapping[str, Any], index: int)`
+
+#### `build_callback(hook: CommandHook, *, workspace: str | Path, runner: Callable[..., subprocess.CompletedProcess] | None=None)`
+
+Return the in-process hook that runs ``hook`` as a scrubbed subprocess.
+
+#### `register_into(registry: Any, hooks: Sequence[CommandHook], *, workspace: str | Path)`
+
+Attach validated hooks to a :class:`~hooks.HookRegistry`; returns their names.
+
+#### `summarise(hooks: Sequence[CommandHook], *, enabled: bool)`
+
+One-line description for ``doctor``/``--dry-run`` output.
 
 ### `compaction`
 
@@ -196,6 +264,45 @@ Deterministic, provider-free summary.
 Summarise a safe prefix of ``transcript``; keep the tail verbatim.
 
 #### `summary_block(outcome: CompactionOutcome)`
+
+### `contract_bridge`
+
+Source: `components/northstar-agent-runtime/contract_bridge.py`
+
+One source of truth for the runtime → sidecar wire format, checked against the Run Contract.
+
+#### `BridgeError`
+
+A run id or binding that cannot be used. Reported to the operator.
+
+#### `BridgeReport`
+
+What the bridge concluded about one request. ``ok`` is the only verdict loop code reads.
+
+- `as_dict()`
+#### `derive_request_id(run_id: str | None, *, prefix: str=LEGACY_PREFIX)`
+
+Return the sidecar ``request_id`` for one run.
+
+#### `contract_available()`
+
+True when the Run Contract modules are importable *and* recognisable.
+
+#### `binding_from_environment()`
+
+Return ``(token, secret)`` when the host injected both, else ``None``.
+
+#### `run_document_from_environment()`
+
+Load the Run Request document named by ``NORTHSTAR_RUN_REQUEST``.
+
+#### `cross_check(request: Mapping[str, Any], *, run: Mapping[str, Any] | None=None)`
+
+Re-derive ``request`` through the contract and require agreement.
+
+#### `build_request(prompt: str, *, run_id: str | None, timeout_ms: int)`
+
+The one place a sidecar request is constructed.
 
 ### `doctor`
 
@@ -390,20 +497,119 @@ Parse ``--mcp-server NAME=COMMAND ARG...`` (command split with shlex).
 
 #### `McpStdioClient`
 
-One MCP server over stdio, handshaken and ready to call.
+One MCP server over stdio: modern (per-request metadata) or legacy (handshake).
 
 - `connected()`
+- `modern()`
 - `connect()`
-  - Spawn the server, handshake, and list its tools.
+  - Spawn the server, agree a generation, and list its tools.
 - `tool_names()`
 - `tool(name: str)`
 - `call_tool(tool_name: str, arguments: dict[str, Any])`
-  - Invoke one remote tool; flatten its content blocks into a ToolResult.
+  - Invoke one remote tool, resolving MRTR input requests through the gate.
 - `close()`
   - TERM the process group, then KILL after a grace period. Idempotent.
 #### `mcp_tool_specs(client: McpStdioClient)`
 
 Build governed ``ToolSpec``s (mutating by default) for one connected server.
+
+### `mcp_elicitation`
+
+Source: `components/northstar-agent-runtime/mcp_elicitation.py`
+
+Turning a remote server's "ask the user" into a governed approval.
+
+#### `ElicitationError`
+
+A malformed input request the client refuses to render at all.
+
+#### `Field`
+
+One requested value, as it will be shown to the approver.
+
+- `as_dict()`
+#### `ElicitationRequest`
+
+One embedded server request, decoded and bounded.
+
+- `sensitive()`
+- `prompt()`
+  - Human-facing text. Values are never part of it.
+#### `ElicitationVerdict`
+
+What the client decided about one request, in audit shape.
+
+- `as_dict()`
+#### `decode_request(key: str, entry: Mapping[str, Any], *, server: str, tool: str, workspace_root: str='', allow_sensitive: bool=False)`
+
+Validate and bound one ``inputRequests`` entry.
+
+#### `decode_input_requests(input_requests: Mapping[str, Mapping[str, Any]], *, server: str, tool: str, workspace_root: str='', allow_sensitive: bool=False, allow_roots: bool=False)`
+
+Decode every embedded request; ``allow_roots`` gates the one that leaks paths.
+
+#### `resolve_requests(requests: Sequence[ElicitationRequest], *, elicitor: Callable[[ElicitationRequest], Any] | None)`
+
+Produce the ``inputResponses`` map plus the audit trail of how it was decided.
+
+#### `make_answers_elicitor(answers: Mapping[str, Any])`
+
+Pre-approved answers: a mapping of field name to value, applied to any request it covers.
+
+#### `make_terminal_elicitor(read_line: Callable[[str], str]=input, *, echo: Callable[[str], None] | None=None)`
+
+Ask a human on a terminal. ``read_line`` is injectable so the gate is testable offline.
+
+#### `summarize_verdicts(verdicts: Sequence[ElicitationVerdict])`
+
+The record shape written into the session transcript.
+
+### `mcp_negotiate`
+
+Source: `components/northstar-agent-runtime/mcp_negotiate.py`
+
+MCP protocol-generation logic: era detection, per-request metadata, MRTR planning.
+
+#### `request_meta(*, protocol_version: str, client_info: Mapping[str, Any], capabilities: Mapping[str, Any])`
+
+The ``params._meta`` object a modern request must carry.
+
+#### `client_capabilities(*, can_elicit: bool, can_list_roots: bool=False)`
+
+What this client can answer, and therefore what a server may ask.
+
+#### `EraDecision`
+
+The outcome of the stdio probe.
+
+- `modern()`
+#### `select_version(supported: Iterable[Any], *, prefer: Sequence[str]=SUPPORTED_VERSIONS)`
+
+The newest version both sides speak, or ``None`` when there is none.
+
+#### `decide_era(discover_result: Mapping[str, Any] | None, discover_error: Mapping[str, Any] | None=None, *, transport: str='stdio', timed_out: bool=False)`
+
+Map the probe's outcome onto an era, following the spec's fallback rule.
+
+#### `result_type(result: Mapping[str, Any] | None)`
+
+``resultType`` with the legacy-era default spelled out.
+
+#### `input_requests(result: Mapping[str, Any])`
+
+The ``inputRequests`` map of an ``InputRequiredResult``, validated lightly.
+
+#### `request_state(result: Mapping[str, Any])`
+
+The opaque ``requestState`` to echo back, verbatim or not at all.
+
+#### `retry_params(*, tool_name: str, arguments: Mapping[str, Any], input_responses: Mapping[str, Any], state: str | None)`
+
+The ``tools/call`` parameters for an MRTR retry.
+
+#### `discover_summary(result: Mapping[str, Any] | None)`
+
+What ``server/discover`` told us, for the operator-facing ``--json`` init record.
 
 ### `permissions`
 
@@ -485,6 +691,46 @@ Find the project-instructions file to inject, or ``None``.
 #### `append_project_context(base_prompt: str, context: ProjectContext)`
 
 Append clearly delimited developer-authored content to a system prompt.
+
+### `postconditions`
+
+Source: `components/northstar-agent-runtime/postconditions.py`
+
+Postconditions: an independent verdict on whether the work actually happened.
+
+#### `PostConditionError`
+
+Raised for a malformed, unknown, or out-of-bounds postcondition.
+
+#### `PostCondition`
+
+One claim about the workspace, evaluated after the run.
+
+- `structural()`
+- `as_dict()`
+#### `Verdict`
+
+The outcome of evaluating one postcondition.
+
+- `as_dict()`
+#### `parse_postconditions(entries: Iterable[Mapping[str, Any]], *, source: str='config')`
+
+Validate hook-style mappings into postconditions, rejecting anything else.
+
+#### `parse_cli_specs(specs: Sequence[str])`
+
+``--verify KIND:PATH`` (and ``contains:PATH:TEXT``) into postconditions.
+
+#### `PostConditionSet`
+
+A snapshot-and-compare verifier bound to one workspace.
+
+- `snapshot()`
+  - Record pre-run content addresses. Called before the first turn, never after.
+- `evaluate()`
+#### `summarise(verdicts: Sequence[Verdict])`
+
+The audit shape: a pass/fail roll-up with the structural split made visible.
 
 ### `sdk`
 
@@ -629,6 +875,89 @@ The socket path was absent before attempting transport.
 Response framing the runtime cannot trust.
 
 #### `known_statuses()`
+
+### `skill_audit`
+
+Source: `components/northstar-agent-runtime/skill_audit.py`
+
+Skill supply-chain review: read-only, deterministic, and pinned by digest.
+
+#### `SkillAuditError`
+
+Raised for an unusable audit target (unreadable file, bad lockfile).
+
+#### `Finding`
+
+One rule hit at one line.
+
+- `as_dict()`
+#### `SkillAudit`
+
+The review result for one skill file.
+
+- `worst()`
+- `highest_severity()`
+- `as_dict()`
+#### `digest_of(data: bytes)`
+
+#### `scan_text(text: str)`
+
+Apply the line rules to one skill file's text (frontmatter included).
+
+#### `audit_text(name: str, text: str, *, relative_path: str='', raw: bytes | None=None)`
+
+Review one skill's text without touching the filesystem.
+
+#### `audit_file(path: Path | str, *, root: Path | str | None=None)`
+
+Review one ``SKILL.md``. Unreadable files become a finding, not a crash.
+
+#### `skill_files(root: Path | str, *, trees: Sequence[str]=SKILL_TREE_GLOBS)`
+
+Every ``SKILL.md`` under the known skill install paths of one checkout.
+
+#### `audit_tree(root: Path | str, *, trees: Sequence[str]=SKILL_TREE_GLOBS)`
+
+Review a whole checkout, including foreign ``.claude`` / ``.agents`` trees.
+
+#### `summarise(audits: Iterable[SkillAudit])`
+
+The aggregate a CLI or CI job reads.
+
+#### `threshold_met(audits: Sequence[SkillAudit], fail_on: str)`
+
+True when any finding is at or above ``fail_on`` (``never`` disables the gate).
+
+#### `lock_payload(audits: Sequence[SkillAudit], *, source: str='')`
+
+#### `write_lock(path: Path | str, audits: Sequence[SkillAudit], *, source: str='')`
+
+#### `load_lock(path: Path | str)`
+
+#### `LockStatus`
+
+Comparison of a reviewed set against a live one.
+
+- `clean()`
+- `as_dict()`
+- `summary()`
+#### `check_lock(audits: Sequence[SkillAudit], payload: dict[str, Any])`
+
+#### `lock_path_for(workspace: str | Path)`
+
+### `skill_check`
+
+Source: `components/northstar-agent-runtime/skill_check.py`
+
+``cli skills check`` - the operator-facing half of :mod:`skill_audit`.
+
+#### `add_skills_arguments(parser: argparse.ArgumentParser)`
+
+#### `run_skills_command(args: argparse.Namespace)`
+
+#### `run_lock_status(workspace: str | Path)`
+
+The one-liner ``run --require-skill-lock`` and ``doctor`` share.
 
 ### `skills`
 
@@ -822,6 +1151,18 @@ Schema for the sidecar-delegated tool (registered only with a socket).
 
 #### `truncate_text(text: str, limit: int=MAX_TOOL_RESULT_CHARS)`
 
+### `tools.verify_invariants`
+
+Source: `components/northstar-agent-runtime/tools/verify_invariants.py`
+
+Revert each core guard in a throwaway copy of the component and confirm the matching test goes red. A green test that survives removing the guard is not a test of the guard.
+
+#### `prepare(root: Path)`
+
+#### `run(component: Path, pattern: str)`
+
+#### `main()`
+
 ### `providers.base`
 
 Source: `components/northstar-agent-runtime/providers/base.py`
@@ -942,6 +1283,27 @@ Thin, normalising adapter over ``client.messages.create``.
 - `generate(request: GenerationRequest)`
 - `normalise(response: Any)`
   - Convert an SDK response (or a matching fake) into a Generation.
+- `close()`
+### `providers.openai_compat`
+
+Source: `components/northstar-agent-runtime/providers/openai_compat.py`
+
+Any-model provider for endpoints that speak the OpenAI Chat Completions wire.
+
+#### `OpenAICompatProvider`
+
+Normalising adapter over ``client.chat.completions.create``.
+
+- `client()`
+- `resolve_token_limit_field(model: str)`
+- `to_chat_tools(tools: Sequence[dict[str, Any]])`
+  - Anthropic tool definitions -> chat ``function`` wrappers.
+- `to_chat_messages(system: str, messages: Sequence[dict[str, Any]])`
+  - Translate the Anthropic-shaped transcript into chat messages.
+- `build_payload(request: GenerationRequest)`
+  - Translate a :class:`GenerationRequest` into ``chat.completions.create`` kwargs.
+- `generate(request: GenerationRequest)`
+- `normalise(response: Any)`
 - `close()`
 ### `providers.scripted`
 

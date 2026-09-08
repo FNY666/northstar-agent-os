@@ -57,6 +57,8 @@ py-modules = [
     "hooks",
     "loop",
     "mcp_client",
+    "mcp_elicitation",
+    "mcp_negotiate",
     "permissions",
     "postconditions",
     "policy_file",
