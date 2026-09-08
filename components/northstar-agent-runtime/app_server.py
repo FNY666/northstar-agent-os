@@ -37,6 +37,7 @@ from typing import Any, Callable, Mapping
 from events import event_to_dict
 
 APP_PROTOCOL = "northstar.agent-app.v1"
+APP_CAPABILITY_SCHEMA = "northstar.agent-app.capabilities.v1"
 APP_OPERATIONS = (
     "app.describe",
     "run.start",
@@ -635,6 +636,7 @@ class AppServer:
                     ok=True,
                     op=operation,
                     capabilities={
+                        "schema": APP_CAPABILITY_SCHEMA,
                         "operations": list(APP_OPERATIONS),
                         "max_frame_bytes": self.max_frame_bytes,
                         "max_prompt_chars": MAX_PROMPT_CHARS,
@@ -926,6 +928,8 @@ class AppClient:
             if isinstance(error, dict):
                 raise AppServerError(str(error.get("code", "remote_error")), str(error.get("message", "app-server request failed")), details=error)
             raise AppServerError("remote_error", "app-server request failed")
+        if response.get("op") != operation:
+            raise AppServerError("invalid_response", "app-server response operation does not match the request")
         return response
 
     def describe(self, *, request_id: str, actor_id: str) -> dict[str, Any]:
@@ -968,6 +972,7 @@ class AppClient:
 
 
 __all__ = [
+    "APP_CAPABILITY_SCHEMA",
     "APP_OPERATIONS",
     "APP_PROTOCOL",
     "AppClient",

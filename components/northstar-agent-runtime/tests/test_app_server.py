@@ -13,6 +13,7 @@ import support  # noqa: F401
 from support import RuntimeTestCase
 
 from app_server import (
+    APP_CAPABILITY_SCHEMA,
     APP_PROTOCOL,
     MAX_WAIT_MS,
     AppClient,
@@ -174,8 +175,11 @@ class AppWireTests(RuntimeTestCase):
             self.assertTrue(socket_path.exists())
             client = AppClient(socket_path, channel_secret=self.SECRET)
             description = client.describe(request_id="wire-describe", actor_id="owner")
+            self.assertEqual(description["capabilities"]["schema"], APP_CAPABILITY_SCHEMA)
             self.assertIn("run.wait", description["capabilities"]["operations"])
             self.assertEqual(description["capabilities"]["cancellation"], "cooperative")
+            self.assertNotIn("provider", description["capabilities"])
+            self.assertNotIn("workspace", description["capabilities"])
             started = client.start(request_id="wire-start", actor_id="owner", prompt="hello")
             final = client.wait(request_id="wire-wait", actor_id="owner", run_id=started["run_id"], timeout_ms=2000)
             status = client.status(request_id="wire-status", actor_id="owner", run_id=started["run_id"])

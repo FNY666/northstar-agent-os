@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /** Run the Node consumer against a host-started local app-server. */
-import { AppServerClient } from "./node_client.mjs";
+import { APP_CAPABILITY_SCHEMA, AppServerClient } from "./node_client.mjs";
 
 const [socketPath, secretHex] = process.argv.slice(2);
 if (!socketPath || !secretHex) {
@@ -14,6 +14,9 @@ try {
     requestId: "node-example-describe",
     actorId: "node-example",
   });
+  if (description.capabilities.schema !== APP_CAPABILITY_SCHEMA) {
+    throw new Error("host capability schema is unsupported");
+  }
   if (!description.capabilities.operations.includes("run.wait")) {
     throw new Error("host did not advertise run.wait");
   }

@@ -1213,3 +1213,19 @@ T34 修复 T32 replay guard 的一个边界：`run.start` 为了保留 manager �
   958 项（954 pass、4 项可选 OTel skip）。
 
 T34 仍是 Unreleased；没有创建 tag、GitHub Release，也没有发布到 PyPI/npm。
+
+### 10.39 当前实现复核：capability schema and response binding（T35，2026-09-08）
+
+T35 把 T30 capability discovery 从“能读取”进一步收紧为可版本化、可校验的
+consumer contract：
+
+- `app.describe.capabilities.schema` 固定为
+  `northstar.agent-app.capabilities.v1`；Python 与 Node example consumer 在
+  `run.start` 前检查 schema 和所需 operation，仍只读取 negotiation limits。
+- 两个 dependency-free consumer 都验证成功 response 的 `op` 必须与 request operation
+  相同，避免已认证但路由错配的 response 被错误消费。
+- capability projection 仍不返回 provider、workspace、policy、credentials 或 secret
+  material；没有引入 TypeScript/npm SDK、依赖、scheduler 或 remote execution。runtime
+  仍为 620 项、全仓 `make test` 仍为 958 项（954 pass、4 项可选 OTel skip）。
+
+T35 仍是 Unreleased；没有创建 tag、GitHub Release，也没有发布到 PyPI/npm。

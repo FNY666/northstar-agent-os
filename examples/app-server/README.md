@@ -18,8 +18,9 @@ path and channel secret:
 node examples/app-server/node_client_smoke.mjs /absolute/app.sock SECRET_HEX
 ```
 
-The Node client verifies response HMACs and uses bounded `run.wait`; it is an
-experimental source example, not an npm package or publication.
+The Node client verifies response HMACs, response-operation binding and the
+capability schema before using bounded `run.wait`; it is an experimental source
+example, not an npm package or publication.
 
 No API key, model SDK, network listener or remote worker is used. The example
 shows the important ownership boundary:

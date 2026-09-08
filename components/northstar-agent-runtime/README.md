@@ -273,9 +273,11 @@ shape remains supported.
 The host owns `runtime_factory`, provider credentials, workspace, policy and
 session directory. The wire protocol can call `app.describe` and submit a
 bounded prompt through `run.start`, `run.status`, `run.events`, bounded
-`run.wait` or `run.cancel`; `app.describe` advertises protocol limits, the
-bounded completed-response replay window and the cooperative cancellation
-boundary. The client cannot select a provider, workspace, tool, Python action
+`run.wait` or `run.cancel`; `app.describe` advertises its capability schema,
+protocol limits, bounded completed-response replay window and cooperative
+cancellation boundary. Clients must use fresh request ids for polling and
+validate the response operation binding. The client cannot select a provider,
+workspace, tool, Python action
 or arbitrary path. Requests and responses use an HMAC channel; successful
 completed responses can be replayed by request id within the in-memory replay
 window, while `run.start` also retains manager-level idempotency. Events have a

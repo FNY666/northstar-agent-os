@@ -1,5 +1,16 @@
 # Northstar Agent OS — initial public component
 
+## Unreleased (forty-third batch) — capability schema and response binding (T35)
+
+- `app.describe` now includes the versioned capability projection schema
+  `northstar.agent-app.capabilities.v1`; the Python and Node consumers check it
+  before using the advertised operation surface.
+- Python and Node clients now reject authenticated successful responses whose
+  `op` does not match the requested operation. This binds response routing to
+  the request without adding dependencies or changing the host-owned seam.
+- The capability projection remains limited to consumer negotiation data and
+  continues to omit provider, workspace, policy and secret material.
+
 ## Unreleased (forty-second batch) — request-id cross-operation hardening (T34)
 
 - Request-id replay tracking now records the fingerprint of the first successful
