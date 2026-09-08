@@ -572,6 +572,45 @@ One MCP server over stdio: modern (per-request metadata) or legacy (handshake).
 
 Build governed ``ToolSpec``s (mutating by default) for one connected server.
 
+### `mcp_config`
+
+Source: `components/northstar-agent-runtime/mcp_config.py`
+
+Import the MCP config files other hosts already use, and say what was not carried.
+
+#### `McpConfigError`
+
+A config file cannot be imported. Message is operator-facing, names the file.
+
+#### `ImportedServer`
+
+One server declaration, reduced to what this runtime can launch.
+
+- `env_mapping()`
+- `as_dict()`
+#### `McpImport`
+
+What discovery found, what it refused, and what it ignored out loud.
+
+- `ok()`
+- `summary()`
+- `as_dict()`
+#### `add_mcp_arguments(verb: argparse.ArgumentParser)`
+
+Attach the `mcp` verb's actions to the CLI parser.
+
+#### `run_list(args: argparse.Namespace)`
+
+Report what the workspace declares, and exit 1 if any of it had to be refused.
+
+#### `read_document(path: Path, *, workspace: Path)`
+
+One file, as servers, refusals and notes.
+
+#### `discover(workspace: str | Path, *, candidates: Sequence[str] | None=None)`
+
+Read every config file this workspace declares, merged with no silent overrides.
+
 ### `mcp_elicitation`
 
 Source: `components/northstar-agent-runtime/mcp_elicitation.py`

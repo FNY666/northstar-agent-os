@@ -348,7 +348,8 @@ What to expect from the refusals, because they are the feature:
   one. `deny_tools = ["WebFetch"]` in a workspace with no such tool is not caution, it is
   noise, and noise in a governance file is how real lines stop being read.
 - **Secrets do not travel.** A bundle's MCP server may name a command and args; `env` is
-  refused at load with a pointer to the workspace's own `[mcp.servers]`. And a bundle has no
+  refused at load with a pointer to the workspace's own `.mcp.json` (§15), which the operator imports
+  with `--mcp-config` — where `env` comes from their own environment rather than from the bundle. And a bundle has no
   `allow_tools`: auto-approval is something a human types at a command line.
 - **The bundle's skill text is read before it is copied.** `plugin install` runs the same
   versioned rules `skills check` uses over each `SKILL.md` in the bundle and refuses on any
@@ -412,6 +413,74 @@ Four things to know before you widen it:
   transcript compacted through the ordinary `PreCompact` hook path - so a hook may veto it - and
   the re-issued request costs no retry budget. There is no `fallback_model` on purpose: another
   model answering is a policy change, not a transport detail.
+
+## 15. Import the MCP servers a repository already declares
+
+Most projects already carry an MCP config file: Claude Code reads `.mcp.json`,
+Cursor `.cursor/mcp.json`, VS Code `.vscode/mcp.json` (under `servers`), Gemini
+`.gemini/settings.json`. Until this batch the only way in here was to retype that
+list as `--mcp-server` flags — and three of our own docs pointed at a workspace
+`[mcp.servers]` table that has never existed. The file can be read now, with our
+gates rather than theirs:
+
+```sh
+# 1. Look first. Read-only: nothing spawned, nothing contacted, nothing written.
+python3 -m cli mcp list --workspace .
+#    == MCP declarations ==
+#      file: .mcp.json
+#      demo: python3 server.py
+#          env=DEMO_TOKEN cwd=. (.mcp.json)
+#      ! .mcp.json: remote: refused (url/headers); this runtime speaks MCP over stdio only
+#      (declarations are inert until a run passes --mcp-config; approval lists are never honoured)
+
+# 2. Then decide. `auto` searches the four known locations, a PATH reads exactly one.
+python3 -m cli run --workspace . --prompt "summarise the files" \
+  --mcp-config auto --dry-run
+python3 -m cli run --workspace . --prompt "list the files" \
+  --mcp-config .mcp.json --allow-tool mcp__demo__list_directory
+```
+
+What the importer refuses to do, in its three severities:
+
+- **start something nobody asked for.** `--mcp-config` defaults to `off`, so a
+  declaration in a checkout is inert; the dry-run line records what was imported
+  (`config 1 server(s) from .mcp.json: demo`).
+- **skip a refusal quietly, or treat ours as theirs.** A server this runtime cannot
+  start (`url`, `headers`, `type: "http" | "sse"`) is named on stderr and skipped —
+  that is our missing transport, not somebody's typo, and the rest of the file still
+  runs. Anything whose *meaning* would have to be guessed is exit 64 with nothing
+  started: malformed JSON, `mcpServers` and `servers` both in one file, a key this
+  importer does not read, a `command` written as an array, an unresolved `${VAR}`,
+  a `cwd` that resolves outside the workspace, more than 16 servers.
+- **honour an approval written in a repository.** A non-empty `autoApprove` or
+  `alwaysAllow` is fatal: delete the key and pass `--allow-tool`, which is where an
+  operator's consent lives. An empty list is a no-op, and `disabled: true` is a note
+  rather than an alarm — that one is the file working as intended.
+- **rename or deduplicate for you.** `"GitHub"` is refused with instructions, because
+  a tool name nobody read is a tool name nobody reviewed; one name claimed by two
+  files refuses both, as does a name that also arrives via `--mcp-server` — neither
+  source may shadow the other's environment.
+- **hide a secret, or invent one.** `${VAR}` and `${VAR:-fallback}` expand against
+  *your* environment, and a missing variable is an error instead of an empty API key
+  failing with an authentication message three layers from the typo. Reports name the
+  variables, never the values; declared variables are *added* to the child's
+  environment, not a filter over it — trimming what a process may see belongs to the
+  host OS, and pretending a config file does it would be a promise we cannot keep.
+
+`--json` on the listing is the CI-shaped form of the same check: it exits 1 when any
+declaration was refused, so adding a server that no reviewer read - or one that asks
+to approve itself - fails the build instead of appearing in somebody's tool list:
+
+```sh
+python3 -m cli mcp list --workspace . --json
+```
+
+A plugin bundle is deliberately different: it may name a server but not that server's
+environment (a side channel for a plugin's secrets would be a new permission path
+wearing a plugin's clothes), and such a bundle is refused at load with a pointer to
+this section. The workspace file, by contrast, is the operator's own checkout: the
+values it references are theirs, and the digest of a run records which variables were
+named.
 
 ## Consumer CI recipe
 

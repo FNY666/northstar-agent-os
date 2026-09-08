@@ -187,6 +187,36 @@ python3 -m cli run --workspace . --prompt "summarise the files" \
   --allow-tool mcp__filesystem__list_directory
 ```
 
+- **A repository that already declares servers can be read instead of retyped.**
+  `--mcp-config auto` imports the `mcpServers` (or VS Code's `servers`) table from
+  `.mcp.json`, `.cursor/mcp.json`, `.vscode/mcp.json` and `.gemini/settings.json` — the
+  dialects the other 2026 hosts ship — and `--mcp-config PATH` reads exactly one file.
+  It is **off by default and stays off unless the operator asks**: a file inside a
+  repository cannot start a process by itself, which is the same reason a plugin's MCP
+  server needs nothing more than the operator's flag to run. An imported server arrives as
+  `(name, argv)` plus optional `env`/`cwd`, which is what `--mcp-server` produces, so it
+  inherits every rule above — mutating by default, denied until `--allow-tool` names it,
+  closed on SIGTERM. `python3 -m cli mcp list --workspace .` prints the same report without
+  starting anything and **exits 1 if any declaration was refused**, so CI can fail a pull
+  request that adds a server nobody reviewed. `sdk.run()` has no MCP option and never will
+  (its contract is that it does not read the repository), so an embedder that wants the same
+  import calls `mcp_config.discover()` and registers `mcp_tool_specs(client)` itself — the
+  importer is a plain function, which is why nothing here is locked behind the flag.
+- **What the importer refuses, and how loudly.** Three severities, because a config file can
+  be wrong in three ways. It *raises* (exit 64, nothing runs) on anything whose meaning
+  would have to be guessed: malformed JSON, both `mcpServers` and `servers` in one file, a
+  key this importer does not read, an `autoApprove`/`alwaysAllow` list with entries in it (a
+  file cannot buy back an approval an operator withheld), an unresolved `${VAR}`, and a
+  `cwd` that resolves outside the workspace. It *warns on stderr and continues* for one
+  server this runtime cannot start or this reviewer has not read: `url`/`headers`/
+  `type: "http" | "sse"` (no HTTP transport here) and a name that would have to be rewritten
+  to be legal — `"GitHub"` is refused with instructions rather than renamed, because a tool
+  name nobody read is a tool name nobody reviewed. A repository with one remote server still
+  gets its stdio ones. And it *notes* what the file decided deliberately:
+  `disabled: true` is reported as "not started", not as an alarm. `env` values are **added**
+  to the child's environment, never a filter over it — trimming what a process may see is
+  the host OS's job — and `${VAR}` is expanded from the operator's environment, so a secret
+  lives in the environment and a digest of the run records only the variable *names*.
 - Each server is a child process speaking JSON-RPC 2.0 over stdio, under a
   per-request deadline (`--mcp-timeout-ms`, default 15 s); a server that stops
   answering is TERM→KILLed as a process group.
@@ -245,9 +275,11 @@ python3 -m cli run --workspace . --prompt "summarise the files" \
   content blocks are replaced with a placeholder rather than rendered.
 - `run --dry-run` lists the configured servers **and the stance**
   (`protocol=auto, elicit=off→input_required is declined, roots=off,
-  sensitive_input=off, rounds=3`) without spawning them. MCP servers cannot be
-  declared in `.northstar/config.toml` — `--mcp-server` is a per-run flag, so an
-  operator always sees this line before a server is reached; `doctor` has
+  sensitive_input=off, rounds=3`) without spawning them, and appends what an import
+  contributed (`config 1 server(s) from .mcp.json: demo`). MCP servers cannot be declared
+  in `.northstar/config.toml` — that file's tables cap what a run may do, and a server list
+  is not a ceiling — so a server is either a per-run flag or a workspace file the operator
+  opted into, and an operator always sees this line before a server is reached; `doctor` has
   nothing MCP-shaped to verify and says so by staying silent. Combining
   `--mcp-server` with `--agent` is a configuration error: an agent-definition
   run fixes its tool subset by definition, and silently adding MCP tools would
@@ -816,9 +848,11 @@ What a bundle may not do:
   `permission_mode` accepts only `plan` — `acceptEdits` and `bypassPermissions` are
   approvals, and approvals are a human at a command line.
 - **Carry secrets.** An MCP server that declares `env` is refused at load, with a pointer to
-  the workspace's own `[mcp.servers]` block: this runtime starts a server from a command
-  line only, and inventing a side channel for a plugin's environment would be a new
-  permission path wearing a plugin's clothes.
+  the workspace's own `.mcp.json`: this runtime starts a server from a command line or an
+  imported workspace declaration, and inventing a side channel for a plugin's environment
+  would be a new permission path wearing a plugin's clothes. A workspace file may name
+  variables for its own servers, but their values come from the operator's environment at
+  launch, not from the repository.
 - **Leave the directory.** Declared paths are resolved inside the bundle; symlinks are
   refused on the way in and on the way out (`uninstall` will not remove through one).
 - **Vouch for itself.** The content digest deliberately excludes the manifest's
@@ -1132,6 +1166,7 @@ size (`result_chars`), so truncation is visible instead of inferred.
 | `plugin_load.py`    | installing and pinning bundles (`.northstar/plugins`, `plugins.lock`), the `cli plugin` verb, and the four contributions a run receives |
 | `frontmatter.py`    | strict minimal frontmatter reader shared by agents and skills        |
 | `mcp_client.py`     | minimal MCP stdio client: era probe, tool listing, bounded calls, MRTR retry loop, process-group cleanup |
+| `mcp_config.py`     | import the MCP servers a workspace declares in its own config file (`.mcp.json` and the host dialects), and say what was refused |
 | `mcp_negotiate.py`  | MCP generation rules as pure functions: `server/discover` era detection, version selection, per-request `_meta`, MRTR round planning |
 | `mcp_elicitation.py`| remote input requests decoded, bounded and routed to the approval gate: what may be answered, what is always declined, and what the audit records |
 | `audit_export.py`   | transcript replay as the canonical NDJSON audit feed (`audit.ndjson/1`)      |
@@ -1164,7 +1199,7 @@ cd components/northstar-agent-runtime
 python3 -m unittest discover -s tests -p 'test_*.py' -v
 ```
 
-1103 tests, fully offline and deterministic: the scripted provider is the only
+1149 tests, fully offline and deterministic: the scripted provider is the only
 model, and `test_integration_sidecar.py` runs the real sidecar `serve()` over a
 real Unix socket with a 100,000-Chinese-character prompt.
 
@@ -1195,6 +1230,13 @@ caught by the unit-level compaction tests rather than the loop-level one.
   "conformant" means "matches the published grammar", not "tested against the
   ecosystem". Sampling is never answered, roots only under a flag, and there is
   no reconnect, no HTTP transport and no task extension.
+- **The config importer is a reader, not a supervisor.** `.mcp.json` and its dialect
+  neighbours are read once, at launch: a server added mid-run is not picked up, and the
+  file that governs a run is the one under the `--workspace` given that time. Foreign
+  approvals are refused rather than approximated; a remote (HTTP/SSE) declaration is
+  skipped with a warning rather than downgraded into a stdio guess; and the `env` a file
+  names is *added* to the child's environment, because this component does not sandbox
+  processes - a declared variable is a convenience, never an isolation boundary.
 - **Process-group `TERM`→`KILL` cleanup is not verified on real Linux here.** That
   behaviour belongs to the sidecar; the runtime only bounds its own socket read.
 - **The retry policy is a bound, not a resilience system.** It is verified against a
