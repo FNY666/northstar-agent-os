@@ -482,6 +482,60 @@ this section. The workspace file, by contrast, is the operator's own checkout: t
 values it references are theirs, and the digest of a run records which variables were
 named.
 
+## 16. Check a fork point before you pay for a resume
+
+`--checkpoint-turns N` makes a run record resumable boundaries, and `--resume-from`/
+`--resume-record` continue from one. Both halves were write-and-honour: nothing could tell you
+whether a boundary was still *usable*, which matters because a checkpoint's whole value is its
+prefix digest - the thing that makes a resumed run inherit counters instead of laundering them.
+
+```sh
+# Which boundaries exist, and does the file still agree with each one?
+python3 -m cli sessions checkpoints --session-dir .northstar/sessions
+#    ns-2026...-a1b2: 2 checkpoint(s)
+#      #4    turn 1     3 msgs  1 call(s)  $0.000000  digest 73e9f5e4bbc9  [verified]
+#          a run resumed here inherits $0.000000 spent and may still use $1.000000
+#      #6    turn 2     4 msgs  1 call(s)  $0.000250  digest f54ce97a2cce  [verified]
+#    (a verified boundary is one whose transcript prefix still digests to what was recorded)
+
+# What would a run resumed from #4 actually start with?
+python3 -m cli sessions replay --session-dir .northstar/sessions <session-id> --from-checkpoint 4
+```
+
+`checkpoints` exits 1 when any boundary is not `verified`, which is the form a CI job wants: a
+transcript that was truncated, hand-edited, or left half-written by a crash stops being a
+suspicions-and-grep exercise and becomes a red check, without a provider key, without taking the
+session lease, and without spending a run to find out. The four verdicts are `verified`,
+`digest-mismatch`, `prefix-short` and `malformed`, and a recognised checkpoint that is missing
+`turns` is reported rather than defaulted to zero - restoring partial counters is precisely the
+budget leak checkpoints were invented to close.
+
+The recomputation is the writer's own canonical form over the reader's own record filter, so
+**"verified here" and "accepted by `run --resume-from`" are the same code path**, not two
+implementations that happen to agree. When a session ran under `--max-budget-usd`, each boundary
+is priced from the ceiling its own `session_start` recorded: `a run resumed here inherits $0.25
+and may still use $0.75`, or - when the boundary already spent the ceiling - that a resume would
+be refused.
+
+`replay` is the other half of the question, "what did this run do":
+
+- frames are `start`, `prompt`, `turn`, `checkpoint`, `compaction`, `result` and `note`, and a
+  turn frame carries the assistant's prose, its tool calls, its tool-error and denial counts and
+  its token usage, so the listing is diff-able rather than scrollable;
+- `--json` emits the same report for a machine (`counts`, `frames`, `checkpoints`, `lineage`,
+  `sealed`, `verified`), and `--from-checkpoint` cuts the replay at the boundary so you see the
+  inherited prefix and nothing after it;
+- a child's replay names its parent (`forked from session X record #4 (inherits 2 turn(s), ...)`),
+  read from the child's own `session_start` - a fork that cannot name its parent is a fork nobody
+  can audit;
+- `sealed=NO` in the summary means the transcript never wrote its `session_end`: useful on its own
+  after a `kill -9`, and the reason the listing counts torn trailing lines instead of hiding them.
+
+What this is not: it never re-executes a tool and never re-decides a permission (the transcript is
+the record of what was permitted, not a script to re-run); and it is not a signature. Anyone who
+can rewrite the file can recompute a digest for the file they wrote - the check catches the
+accident and the casual edit, and says nothing about a determined forger.
+
 ## Consumer CI recipe
 
 `examples/ci-readonly-review/` is a copy-paste template for running a

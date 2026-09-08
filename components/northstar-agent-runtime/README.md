@@ -122,6 +122,23 @@ turns, result subtype, cost); `--json` exports the raw records. The viewer is
 read-only: it never creates the directory, never writes a file, and reports a
 damaged record instead of "repairing" an audit trail.
 
+Two of its actions are about *fork points* rather than about reading:
+
+```sh
+python3 -m cli sessions checkpoints --session-dir /tmp/northstar-sessions        # exit 1 if any boundary no longer digests
+python3 -m cli sessions replay --session-dir /tmp/northstar-sessions <session-id>   --from-checkpoint 6        # what a run resumed from boundary #6 would inherit, and nothing after it
+```
+
+`checkpoints` recomputes each recorded `transcript_digest` over the transcript prefix it
+covers - the same check `run --resume-from` performs before it spends a request - so an
+operator or a CI job can learn that a transcript was edited or truncated *for free*, and
+`exit 1` makes that a build result rather than a sentence. Each boundary also carries the
+money: with a `max_budget_usd` ceiling in force it prints what a resumed run inherits and
+what it may still spend, which is the refusal checkpoints exist to make impossible to
+sneak past. `replay` folds the transcript into frames (start, prompt, turn, checkpoint,
+compaction, result), so the question "what did this run actually do, and where could it
+have been cut" is answered by a diff-able listing rather than by scrolling raw records.
+
 To delegate execution to Codex, point the runtime at the sidecar socket. That is
 the only switch; without it `CodexReadOnly` is not registered at all:
 
@@ -1097,6 +1114,15 @@ A passing verdict is an assertion the runtime can audit, not a vibe.
   audit feed `audit.ndjson/1` — denials, failed tool results and `error_*`
   results carry `"level":"error"`; see
   [audit trail concept](../../docs/concepts/audit-trail.md).
+- **Fork points are verifiable without spending a run**: `session_replay.py` rebuilds the
+  transcript from a session's own records, recomputes every checkpoint's prefix digest, and
+  reports each boundary as `verified`, `digest-mismatch`, `prefix-short` or `malformed`.
+  `sessions checkpoints` exits 1 when any boundary is not `verified`, and `sessions replay
+  --from-checkpoint N` cuts the replay at that boundary and prints the budget headroom a child
+  would inherit - the same verdict and the same numbers `run --resume-from` uses, because a
+  preview that disagreed with the real resume would be worse than no preview. Lineage is read
+  from the child's own `session_start`: a fork says which session and which record it came
+  from, and so which counters it did *not* get to reset.
 - **Compaction** may only cut at a boundary with no pending tool call. Cutting
   mid-exchange orphans a `tool_use` from its `tool_result`, and the API answers
   that with a 400 the model cannot recover from. After compaction the runtime
@@ -1155,7 +1181,8 @@ size (`result_chars`), so truncation is visible instead of inferred.
 | `checkpoints.py`    | turn-boundary checkpoints: verified resume, inherited ceilings, fork-on-read |
 | `cli.py`            | one governed run from a shell, with distinct exit codes              |
 | `doctor.py`         | `cli doctor` environment self-checks (no requests, no file writes)   |
-| `session_view.py`   | `cli sessions list/show` - the read-back half of the transcripts     |
+| `session_view.py`   | `cli sessions list/show/export/checkpoints/replay` - the read-back half of the transcripts |
+| `session_replay.py` | folding a transcript into frames, and verifying a checkpoint's prefix digest without a resume |
 | `provider_retry.py` | The transport budget: fault classification, the backoff schedule, the per-turn wait deadline, the `[retry]` table |
 | `policy_file.py`    | `.northstar/config.toml` parsing + tighten-only validation; AGENTS.md project-context discovery and prompt composition |
 | `agent_files.py`    | `.northstar/agents/*.md` -> governed `AgentDefinition` compilation   |
@@ -1199,7 +1226,7 @@ cd components/northstar-agent-runtime
 python3 -m unittest discover -s tests -p 'test_*.py' -v
 ```
 
-1149 tests, fully offline and deterministic: the scripted provider is the only
+1188 tests, fully offline and deterministic: the scripted provider is the only
 model, and `test_integration_sidecar.py` runs the real sidecar `serve()` over a
 real Unix socket with a 100,000-Chinese-character prompt.
 
@@ -1254,7 +1281,11 @@ caught by the unit-level compaction tests rather than the loop-level one.
   a signature: there is no key distribution, no revocation and no trust store, which is
   also why the workspace's own pin - not the bundle's word - is what governs loading.
 - Session transcripts are a local audit trail, not a compliance store: there is no
-  signing, no retention policy, and no tamper evidence.
+  signing and no retention policy. The one piece of tamper evidence is a checkpoint's
+  prefix digest, which `sessions checkpoints` recomputes: editing or truncating the messages
+  a boundary covers makes that boundary unusable and visible, and a resume refuses it. It is
+  not a signature - anyone who can write the file can recompute a digest for the file they
+  wrote - so it detects the accident and the casual edit, and stops there.
 - **The session lease is `flock`, so it is POSIX and host-local.** It guards one
   filesystem as seen by one kernel: it refuses a second writer in another shell, and it
   says nothing about a mount on another machine. NFS and other network filesystems define

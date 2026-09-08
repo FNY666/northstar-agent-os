@@ -611,6 +611,64 @@ One file, as servers, refusals and notes.
 
 Read every config file this workspace declares, merged with no silent overrides.
 
+### `session_replay`
+
+Source: `components/northstar-agent-runtime/session_replay.py`
+
+Replay a session transcript as frames, and verify what a checkpoint would give back.
+
+#### `CheckpointReport`
+
+One checkpoint, plus whether the transcript still agrees with it.
+
+- `verified()`
+- `digest_prefix()`
+- `as_dict()`
+- `line()`
+#### `Frame`
+
+One readable step of a run, and the transcript records that produced it.
+
+- `as_dict()`
+- `line()`
+#### `Replay`
+
+A transcript folded into frames, with its fork points verified and its lineage named.
+
+- `verified()`
+- `counts()`
+- `summary()`
+- `render()`
+- `as_dict()`
+- `to_json()`
+#### `describe_checkpoint(record: Mapping[str, Any], records: Sequence[Mapping[str, Any]])`
+
+Verify one checkpoint *record* against the transcript it lives in.
+
+#### `checkpoint_reports(records: Sequence[Mapping[str, Any]])`
+
+Every checkpoint in ``records``, in transcript order, each verified against the prefix.
+
+#### `lineage_of(records: Iterable[Mapping[str, Any]])`
+
+Where this session says it came from, read from its own ``session_start`` record.
+
+#### `build_replay(records: Sequence[Mapping[str, Any]], *, session_id: str='', dropped_trailing_lines: int=0, upto: int | None=None)`
+
+Fold transcript records into frames.
+
+#### `load_replay(directory: str | Path, session_id: str, *, upto: int | None=None)`
+
+Read one transcript and replay it, as ``(replay, error)`` with exactly one set.
+
+#### `budget_headroom(records: Sequence[Mapping[str, Any]], report: CheckpointReport)`
+
+What a run resumed from ``report`` would still be allowed to spend, and the catch.
+
+#### `fork_preview(records: Sequence[Mapping[str, Any]], *, record_index: int, session_id: str='', dropped_trailing_lines: int=0)`
+
+What a run resumed from the checkpoint at ``record_index`` would start with.
+
 ### `mcp_elicitation`
 
 Source: `components/northstar-agent-runtime/mcp_elicitation.py`
