@@ -367,9 +367,9 @@ Three providers, one governed loop. The model is swappable; the gate is not.
 
 | `--provider`  | what it is                                                     |
 | ------------- | -------------------------------------------------------------- |
-| `scripted`    | replays a JSON script of turns - the offline default every test runs on |
-| `anthropic`   | the Messages API (`anthropic` SDK, lazy import, non-streaming) |
-| `openai`      | the Chat Completions wire: OpenAI, Azure, vLLM, SGLang, Ollama, LM Studio, LiteLLM, OpenRouter and any gateway that speaks it |
+| `scripted`    | replays a JSON script of turns - the offline default every test runs on, and it streams deterministically (`{"text": …, "stream": ["chunk", …]}`) |
+| `anthropic`   | the Messages API (`anthropic` SDK, lazy import; `--stream` via `messages.stream`) |
+| `openai`      | the Chat Completions wire: OpenAI, Azure, vLLM, SGLang, Ollama, LM Studio, LiteLLM, OpenRouter and any gateway that speaks it (SSE deltas reassembled, usage requested via `stream_options`) |
 
 `--provider openai` translates both directions on every call: the transcript's
 `tool_use` blocks become `tool_calls` with JSON-encoded `arguments`, `tool_result`
@@ -389,9 +389,66 @@ backends. Four decisions worth knowing:
   conservative tier and the result says `pricing_estimated: true`; a budget cap acts
   on that number, so over-estimating is the safe direction.
 
+All three implement the same two-entry-point contract: `generate()` for one turn, and
+`stream()`, which yields text chunks then exactly one `Generation`. A provider that
+advertises `streams = True` and then shows nothing is caught by the loop's fidelity
+check rather than trusted - see [Streaming assistant text](#streaming-assistant-text).
+On the chat wire, `stream_options.include_usage` is sent so a streamed turn still
+reports cost; a gateway that rejects the field can set `stream_usage=False`, which is a
+decision an operator makes rather than one the client sneaks in, because a run that
+silently costs `$0.000000` looks like a free model.
+
 The key comes from the environment only (`OPENAI_API_KEY`, `OPENAI_BASE_URL`) - a
 flag would put a credential in the process list and in CI logs. A `base_url` with no
 key still works, because local servers ignore it while the SDK demands one.
+
+## Streaming assistant text
+
+`--stream` prints assistant text as it arrives instead of at the end of the turn.
+It is opt-in, and it is **presentation only**: the transcript, the permission gate,
+every ceiling and the single terminating `result` event are exactly what a
+non-streaming run would have produced.
+
+```console
+$ northstar-agent-runtime run --workspace . --prompt "explain this repo" --stream
+$ northstar-agent-runtime run ... --stream --json     # {"type":"stream_delta",...} lines
+```
+
+What the runtime guarantees, each of them tested in
+`tests/test_streaming.py`:
+
+- **What you watched is what got recorded.** A provider's chunks must concatenate to
+  the turn's text. Extra text the record does not contain, or text withheld from the
+  operator, is a provider fault: the turn fails as `error_during_execution` and no
+  `AssistantMessage` is recorded. The comparison is made against the *assembled*
+  message, not against the provider's own object, because the record is what a later
+  digest or checkpoint is verified against.
+- **A fault mid-stream leaves nothing behind.** If the connection dies after the
+  operator has read two-thirds of a sentence, the transcript contains no partial turn.
+  Seeing text that was never recorded is possible; *the audit claiming it happened* is not.
+- **Volume is the client's, not the provider's.** At most 200 000 characters and 4 000
+  events per turn are forwarded; oversized chunks are re-split, never forwarded whole.
+  When the cap bites, the run emits an `informational` event saying so and the live view
+  is a *prefix* of the record — shorter is allowed, different is not.
+- **Only settled text streams.** Partial tool arguments are never shown (a
+  half-received `{"path": "/etc/pass` must not be displayable, executable, or
+  hashable), and a reasoning model's `reasoning_content` or an unsigned Anthropic
+  `thinking` block is not forwarded, though both stay in the record where they belong.
+- **Delegated turns do not stream.** Streaming is a property of the operator's
+  terminal, not of a child run; a subagent whose provider cannot stream must not break
+  the parent.
+- **Resumability is untouched.** Deltas are not transcript records
+  (`RECORD_TYPES` is unchanged), so a resumed run has nothing to replay and a
+  checkpoint digest means what it meant before streaming existed.
+
+A provider that cannot produce incremental output is **refused** when `stream=True`
+is asked of it, rather than quietly degrading to whole-turn delivery: a run advertised
+as streaming that shows nothing is how a demo becomes a lie. `scripted`, `anthropic`
+and `openai` (Chat-Completions SSE) all stream; the live-API adapters are verified
+against injected fakes, not against the network.
+
+The SDK parity knob is `RunOptions.stream`; `stream_run()` yields `stream_delta`
+dicts and `run()` reports identical numbers either way.
 
 ## Checkpoints and forking a session
 
@@ -687,7 +744,7 @@ size (`result_chars`), so truncation is visible instead of inferred.
 
 | Module              | Responsibility                                                      |
 | ------------------- | ------------------------------------------------------------------- |
-| `loop.py`           | the turn loop, ceilings, event stream, `RunReport`                   |
+| `loop.py`           | the turn loop, ceilings, event stream (incl. stream-fidelity enforcement), `RunReport` |
 | `hooks.py`          | 10 lifecycle events, veto semantics, fail-closed errors              |
 | `permissions.py`    | the three-layer gate and the delegation gate                         |
 | `budget.py`         | price table, cost computation, budget meter                          |

@@ -11,6 +11,10 @@ should use. The runtime itself reports *subtypes*, never exit codes; the codes
 are a terminal convention shared with ``cli`` so an embedded run and a
 ``python -m cli run`` wrapper agree.
 
+``stream_delta`` events exist only while a run is in flight: they are part of the
+event vocabulary, not of the session transcript, so a resumed or audited run has no
+deltas to replay and nothing to reconcile.
+
 The ``result`` dict additionally carries ``errors`` and ``permission_denials``
 lists so a programmatic caller never has to re-derive why a run ended.
 """
@@ -57,6 +61,10 @@ def event_to_dict(event: Any) -> dict[str, Any]:
             "usage": event.usage.as_dict(),
             "stop_reason": event.stop_reason,
         }
+    if kind == "StreamDelta":
+        # Provisional output, in the same vocabulary as everything else: a consumer that
+        # iterates ``type`` values must be able to ignore it without guessing.
+        return event.as_dict()
     if kind == "UserMessage":
         return {"type": "user", "content": [block.to_api() for block in event.content], "is_meta": event.is_meta}
     return {"type": kind.lower(), "repr": str(event)[:400]}

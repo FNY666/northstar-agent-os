@@ -24,7 +24,7 @@ from __future__ import annotations
 
 import time
 from dataclasses import dataclass, field, replace
-from typing import Any, Callable, Iterable, Iterator, Mapping, Sequence
+from typing import Any, Callable, Generator, Iterable, Iterator, Mapping, Sequence
 
 from agents import AgentDefinition, AgentRegistry, Verdict, builtin_registry, parse_verdict
 from budget import Budget
@@ -47,7 +47,12 @@ from permissions import (
 )
 from providers.base import (
     AssistantMessage,
+    MAX_STREAM_TURN_CHARS,
+    split_for_stream,
+    stream_comparable_text,
     Generation,
+    ProviderError,
+    StreamDelta,
     GenerationRequest,
     Message,
     SystemMessage,
@@ -57,6 +62,7 @@ from providers.base import (
     Usage,
     UserMessage,
     estimate_transcript_tokens,
+    stream_fidelity,
     render_transcript,
     transcript_to_api,
 )
@@ -91,6 +97,16 @@ DEFAULT_SYSTEM_PROMPT = (
     "prompt rather than reading the repository one file at a time.\n"
     "Finish with a short report: what you did, what you verified, what you did not verify."
 )
+
+
+#: Events per turn a streamed turn may produce. The character ceiling bounds volume;
+#: this bounds chattiness, so a provider cannot make a single turn into 200k events.
+MAX_STREAM_EVENTS_PER_TURN = 4_000
+
+
+def collected_total(parts: Sequence[str]) -> int:
+    """Chars forwarded so far, without rescanning more than once per delta."""
+    return sum(len(part) for part in parts)
 
 
 class RuntimeConfigurationError(ValueError):
@@ -131,6 +147,10 @@ class RuntimeConfig:
     #: Session id this run was forked from, recorded for the audit only.
     parent_session: str = ""
     max_output_tokens: int = 4096
+    #: Forward the top-level run's assistant text as :class:`StreamDelta` events while it
+    #: is being produced. Presentation only: it changes no ceiling, no permission
+    #: decision, and no byte of the session transcript (see providers/base.py).
+    stream: bool = False
     compaction_threshold_tokens: int | None = DEFAULT_COMPACTION_THRESHOLD_TOKENS
     compaction_keep_messages: int = 4
     tool_limits: ToolLimits = field(default_factory=ToolLimits)
@@ -181,6 +201,8 @@ class RuntimeConfig:
                 fail(f"{field_name} must be at most 128 chars with no whitespace or path separators")
         if self.max_output_tokens < 1:
             fail("max_output_tokens must be positive")
+        if not isinstance(self.stream, bool):
+            fail("stream must be a boolean")
         if self.depth < 0:
             fail("depth must not be negative")
         if self.max_subagent_depth < 0:
@@ -213,6 +235,7 @@ class RuntimeConfig:
             "allow_nested_delegation": self.allow_nested_delegation,
             "halt_on_denial": self.halt_on_denial,
             "compaction_threshold_tokens": self.compaction_threshold_tokens,
+            "stream": self.stream,
             "sidecar": bool(self.sidecar_socket),
         }
 
@@ -430,6 +453,13 @@ class AgentRuntime:
         if provider is None:
             raise RuntimeConfigurationError("a provider is required")
         self.config = config or RuntimeConfig()
+        if self.config.stream and not getattr(provider, "streams", False):
+            name = getattr(provider, "name", None) or type(provider).__name__
+            raise RuntimeConfigurationError(
+                f"provider {name!r} cannot stream text incrementally, so stream=True has nothing to show. "
+                "This is refused instead of degrading to end-of-turn output: a run advertised as streaming "
+                "that quietly prints nothing is how a demo becomes a lie."
+            )
         self.provider = provider
         self.providers: dict[str, Any] = dict(providers or {})
         self.hooks = hooks if isinstance(hooks, HookRegistry) else HookRegistry()
@@ -536,6 +566,86 @@ class AgentRuntime:
         return {"model": self.config.model, **pricing.as_dict(), "estimated": estimated}
 
     # -- public entry points ----------------------------------------------
+    def _stream_turn(
+        self,
+        request: GenerationRequest,
+        collected: list[str],
+        span: Any,
+    ) -> "Generator[StreamDelta, None, tuple[Generation, int]]":
+        """Forward one provider stream's text and return ``(turn, withheld_chars)``.
+
+        A stream is a contract - *deltas, then exactly one turn* - and every way to break
+        it becomes a :class:`ProviderError` here rather than a crash deeper in the loop or,
+        far worse, a transcript that quietly differs from what the operator watched. Two
+        client-side ceilings apply: total characters and total events per turn, because
+        "one event per character" is legal at the protocol level and would otherwise let a
+        provider decide how big this process's event stream gets.
+        """
+        generation: Generation | None = None
+        withheld = 0
+        forwarded = 0
+        try:
+            stream = self.provider.stream(request)
+        except AttributeError as error:
+            raise ProviderError(
+                f"provider {self.provider_name!r} claims streams but implements no stream()"
+            ) from error
+        try:
+            for item in stream:
+                if isinstance(item, Generation):
+                    if generation is not None:
+                        raise ProviderError("provider stream yielded more than one Generation")
+                    generation = item
+                    continue
+                if not isinstance(item, StreamDelta):
+                    raise ProviderError(
+                        f"provider stream yielded {type(item).__name__} instead of a StreamDelta or a Generation"
+                    )
+                if generation is not None:
+                    raise ProviderError("provider stream kept yielding text after the turn was complete")
+                if not item.text:
+                    continue  # an empty chunk is noise, not content: spend no event on it
+                if forwarded >= MAX_STREAM_EVENTS_PER_TURN or (
+                    collected_total(collected) + len(item.text) > MAX_STREAM_TURN_CHARS
+                ):
+                    withheld += len(item.text)
+                    continue
+                # A provider that hands back one enormous block gets re-chunked rather
+                # than forwarded whole or dropped: splitting keeps the concatenation
+                # exact (so fidelity still means something) while keeping a single
+                # event's size bounded for whoever has to serialise it.
+                for chunk in split_for_stream(item.text):
+                    if forwarded >= MAX_STREAM_EVENTS_PER_TURN:
+                        withheld += len(chunk)
+                        continue
+                    forwarded += 1
+                    collected.append(chunk)
+                    yield StreamDelta(
+                        text=chunk,
+                        block_index=item.block_index,
+                        turn_index=item.turn_index or request.turn_index,
+                        provider=item.provider or self.provider_name,
+                    )
+        finally:
+            # An interrupted run must not leave the provider's own resources (an HTTP
+            # connection, an SDK stream context) open until the garbage collector gets
+            # round to the generator.
+            closer = getattr(stream, "close", None)
+            if callable(closer):
+                closer()
+        span.set_attributes(
+            {
+                "stream.deltas": forwarded,
+                "stream.chars": collected_total(collected),
+                "stream.withheld_chars": withheld,
+            }
+        )
+        if generation is None:
+            raise ProviderError("provider stream ended without returning the turn")
+        if withheld:
+            span.set_attribute("stream.truncated", True)
+        return generation, withheld
+
     def run(self, prompt: str, *, resume: Sequence[Any] | None = None) -> Iterator[Message]:
         """Stream events for one run. Terminates in exactly one ResultMessage."""
         state = _RunState(session_id=self.session_id)
@@ -668,6 +778,11 @@ class AgentRuntime:
             init_data["resumed_from"] = {"parent_session": config.parent_session, "checkpoint_record": None, "forked": True}
         if config.checkpoint_turns:
             init_data["checkpoint_turns"] = config.checkpoint_turns
+        if config.stream:
+            # Declared in the init record, not implied by the first delta: a consumer
+            # that saw no deltas needs to know whether streaming was on and the turn had
+            # no text, or whether it was never on.
+            init_data["stream"] = True
         try:
             # Taken before the first yield so a hook or a tool cannot be the thing
             # that changes what "before" means.
@@ -747,33 +862,47 @@ class AgentRuntime:
                 )
                 generation: Generation | None = None
                 breakdown = None
+                streamed: list[str] = []
+                stream_withheld = 0
                 with turn_span.child("generation") as generation_span:
-                    generation_span.set_attributes({"provider.name": self.provider_name, "model": config.model, "turn.index": turn_index})
+                    generation_span.set_attributes(
+                        {"provider.name": self.provider_name, "model": config.model, "turn.index": turn_index, "stream": config.stream}
+                    )
                     try:
-                        candidate = self.provider.generate(request)
+                        if config.stream:
+                            generation, stream_withheld = yield from self._stream_turn(request, streamed, generation_span)
+                        else:
+                            candidate = self.provider.generate(request)
+                            if not isinstance(candidate, Generation):
+                                raise ProviderError(
+                                    f"provider returned {type(candidate).__name__} instead of a Generation"
+                                )
+                            generation = candidate
+                    except ProviderError as error:
+                        # A provider that breaks its contract is a fault to report, and
+                        # the partial text it already streamed must stay unrecorded: the
+                        # transcript is only ever written from a complete turn.
+                        state.errors.append(f"provider failure on turn {turn_index}: {error}")
+                        generation_span.record_error("ProviderError")
                     except Exception as error:  # noqa: BLE001 - a provider fault is an event
                         state.errors.append(f"provider failure on turn {turn_index}: {type(error).__name__}: {error}")
                         generation_span.record_error(f"{type(error).__name__}")
                     else:
-                        if not isinstance(candidate, Generation):
-                            state.errors.append(f"provider returned {type(candidate).__name__} instead of a Generation")
-                        else:
-                            generation = candidate
-                            breakdown = self.budget.observe(generation.usage, generation.model or config.model)
-                            # Usage and cost are recorded while the generation span is
-                            # still open. The instant it ends, OpenTelemetry discards
-                            # any further attribute write silently and the cost simply
-                            # goes missing from the trace with no error anywhere.
-                            generation_span.record_usage(
-                                generation.usage,
-                                breakdown.total_usd,
-                                extra={
-                                    "stop_reason": generation.stop_reason,
-                                    "pricing.estimated": breakdown.pricing_estimated,
-                                    "pricing.source": breakdown.pricing_source,
-                                    "tokens.total": generation.usage.total_tokens,
-                                },
-                            )
+                        breakdown = self.budget.observe(generation.usage, generation.model or config.model)
+                        # Usage and cost are recorded while the generation span is
+                        # still open. The instant it ends, OpenTelemetry discards
+                        # any further attribute write silently and the cost simply
+                        # goes missing from the trace with no error anywhere.
+                        generation_span.record_usage(
+                            generation.usage,
+                            breakdown.total_usd,
+                            extra={
+                                "stop_reason": generation.stop_reason,
+                                "pricing.estimated": breakdown.pricing_estimated,
+                                "pricing.source": breakdown.pricing_source,
+                                "tokens.total": generation.usage.total_tokens,
+                            },
+                        )
                 if generation is None or breakdown is None:
                     yield self._finish(state, "error_during_execution")
                     return
@@ -783,6 +912,35 @@ class AgentRuntime:
                     usage=generation.usage,
                     stop_reason=generation.stop_reason,
                 )
+                if config.stream:
+                    problem = None
+                    if stream_withheld:
+                        # Our cap, our choice, our duty to say so: the live view is allowed
+                        # to be shorter than the record, never longer and never different,
+                        # so the check relaxes from equality to prefix. The note is an
+                        # event and not a transcript record, which keeps the digest a run
+                        # would have produced before streaming existed.
+                        if not stream_comparable_text(assistant).startswith("".join(streamed)):
+                            problem = "the forwarded text is not a prefix of the recorded turn"
+                        else:
+                            yield SystemMessage(
+                                subtype="informational",
+                                content=(
+                                    f"streamed text for turn {turn_index} was capped at {MAX_STREAM_TURN_CHARS} chars "
+                                    f"/ {MAX_STREAM_EVENTS_PER_TURN} event(s); {stream_withheld} char(s) reached the "
+                                    "record but not the live view"
+                                ),
+                            )
+                    else:
+                        problem = stream_fidelity(streamed, stream_comparable_text(assistant))
+                    if problem is not None:
+                        # The record and what the operator watched must agree. Either
+                        # direction of disagreement is a provider we cannot vouch for,
+                        # and the run stops: no verdict on a turn we cannot describe.
+                        state.errors.append(f"provider stream mismatch on turn {turn_index}: {problem}")
+                        turn_span.set_attribute("stream.fault", problem[:200])
+                        yield self._finish(state, "error_during_execution")
+                        return
                 state.transcript.append(assistant)
                 state.turns += 1
                 self.sessions.record_assistant(assistant, agent=config.agent)

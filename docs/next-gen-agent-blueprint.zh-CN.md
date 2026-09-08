@@ -52,7 +52,7 @@
 | 检查点/可恢复执行 | LangGraph / Temporal / v2 | `checkpoints.py`：turn 边界记录（长度+前缀摘要+已消耗计数器），恢复时**继承**而非重置 | ✅ 已落地（第十四批续） |
 | 多模型 | OpenAI 100+ / Cursor | `providers/openai_compat.py`：一个 Chat Completions 适配器覆盖一片模型 | ✅ 已落地（P1-2） |
 | 独立完成判定 | 无人做（各家都把"模型自述"当完成） | `postconditions.py`：`--verify` / `[[verify]]`，运行前后快照比对 | ✅ 已落地 |
-| token 级流式 | 全员 | `StreamDelta` 事件，仍保证唯一 ResultMessage | 🔧 待做 |
+| token 级流式 | 全员 | `--stream`：`StreamDelta` 事件 + **流-记录一致性校验**（不一致即判 provider fault，不写 assistant 记录），唯一 `ResultMessage` 不变 | ✅ 已落地（第十七批） |
 | 显式重试/退避/降级 | Claude fallback | provider 层策略化（当前只有 sidecar 重试） | 🔧 待做 |
 | MCP 现行规范 2026-07-28 | 标准 | `mcp_negotiate.py`：`server/discover` 代际探测 + `params._meta` 逐请求携带 + MRTR 重试 + 旧代际 fallback | ✅ 已落地（第十六批） |
 | elicitation ↔ 审批回合 | MCP 特性 | `mcp_elicitation.py`：把"服务器问用户"映射到权限门，无人应答即拒绝并 `notifications/cancelled`（**这是别人没有的角度**） | ✅ 已落地（第十六批） |
@@ -127,6 +127,16 @@
 所以"恢复"一直是绕过 `max_budget_usd` 的后门。现在它必须把父花费带过来；
 嵌入式调用忘了传 seed 过的 `Budget` 会直接报错，而不是拿到更宽的额度。
 
+### 6.22 第十七批（token 级流式，且流不能绕开记录）
+
+| 项 | 内容 | 验证 |
+|---|---|---|
+| 流式 | `providers/base.py`：`StreamDelta` + `Provider.stream()`（"分片→恰好一个 `Generation`"契约）+ `stream_fidelity`；`loop`：转发/重新切片/每轮字符与事件双上限/前缀放宽；`--stream`（CLI）与 `RunOptions.stream`（SDK）；`scripted`/`anthropic`/`openai` 三适配器全接 | `tests/test_streaming.py` 45 项：流与记录不一致即 `error_during_execution` 且**不写 assistant 记录**；中途断流不留残片；transcript 与不流式**逐字节相同**（只差 init 里的 `stream` 声明）；`RECORD_TYPES` 不变、恢复无可回放 |
+
+**这批的难点不是把 token 打出来**，而是三条同时成立：(1) 唯一 `ResultMessage`；(2) 审计不被流式改写（分片不入 transcript，摘要/检查点语义不变）；(3) **"给操作者看的"与"记下来的"必须同源**。第 (3) 条是别人不做的：多数客户端把流式当 provider 的自由文本转发，于是"直播说成功、记录里是失败"成为可能。这里由 loop 强制 `"".join(deltas) == 记录文本`（客户端自己截断时放宽为前缀），不信任 provider 的自述。
+
+**刻意不流的东西**：`tool_use` 的半截 `arguments`（半个 JSON 既不能显示成定论也不能执行）、`thinking`/`reasoning_content`（Anthropic 侧签名未到 ≠ 合法块，chat 侧它根本不进 transcript）、以及子 agent 的运行（流式是操作者终端的属性，不是委派链的语义）。
+
 ### 6.21 第十六批（MCP 代际 + elicitation 走审批门）
 
 | 项 | 内容 | 验证 |
@@ -148,7 +158,7 @@
 
 全仓 954 项测试全绿（runtime 660）。**未做**：流式（`StreamDelta`）、`skills check`、F3。
 
-**F3、skills check、P1-1 均已完成**（见 §6.15、§6.20、§6.21）。下一批顺序：**token 级流式 `StreamDelta` → durable-run 与 runtime 检查点的统一（`EventStore`/`Lease` 复用）→ 显式重试/退避/降级**。理由：MCP 代际这个"会持续变大的过期风险"已经关掉；流式是唯一还缺的用户可感能力，且它受"唯一 `ResultMessage`"这条硬约束牵制，需要单独一批来定形状；durable 统一是最后的"零件合整机"，要在两个组件之间定接口，不宜与流式混做。
+**F3、skills check、P1-1、token 级流式均已完成**（见 §6.15、§6.20、§6.21、§6.22）。下一批顺序：**durable-run 与 runtime 检查点的统一（`EventStore`/`Lease` 复用）→ 显式重试/退避/降级**。理由：durable 统一是最后的"零件合整机"，要在两个组件之间定接口；重试/退避/降级是 provider 层的策略化，可与它并行但不宜混做（一个动契约，一个动故障分类）。
 
 ---
 
