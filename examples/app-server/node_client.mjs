@@ -15,6 +15,32 @@ export const MAX_FRAME_BYTES = 1024 * 1024;
 export const DEFAULT_WAIT_MS = 10_000;
 export const MAX_WAIT_MS = 30_000;
 
+export function validateCapabilities(capabilities) {
+  if (!capabilities || typeof capabilities !== "object" || Array.isArray(capabilities)) {
+    throw new Error("app-server capabilities must be an object");
+  }
+  if (capabilities.schema !== APP_CAPABILITY_SCHEMA) {
+    throw new Error("app-server capability schema is unsupported");
+  }
+  if (!Array.isArray(capabilities.operations) || new Set(capabilities.operations).size !== capabilities.operations.length || capabilities.operations.some((operation) => typeof operation !== "string") || !capabilities.operations.includes("app.describe") || !capabilities.operations.includes("run.start")) {
+    throw new Error("app-server capability operations are invalid");
+  }
+  for (const field of ["max_frame_bytes", "max_prompt_chars", "max_event_page", "max_wait_ms", "event_retention", "request_replay_retention"]) {
+    if (!Number.isInteger(capabilities[field]) || capabilities[field] < 1) {
+      throw new Error(`app-server capability ${field} is invalid`);
+    }
+  }
+  if (capabilities.request_replay !== "completed_response" || capabilities.cancellation !== "cooperative" || capabilities.manager_registry !== "in_memory" || capabilities.remote_execution !== false) {
+    throw new Error("app-server capability boundaries are invalid");
+  }
+  for (const field of ["provider", "workspace", "policy", "credentials", "secret", "secret_material"]) {
+    if (Object.hasOwn(capabilities, field)) {
+      throw new Error(`capability projection exposes forbidden field: ${field}`);
+    }
+  }
+  return capabilities;
+}
+
 const RESERVED_FIELDS = new Set(["protocol", "op", "request_id", "actor_id", "auth"]);
 
 function exponentText(exponent) {
@@ -152,7 +178,9 @@ export class AppServerClient {
   }
 
   async describe({ requestId, actorId }) {
-    return this.call("app.describe", { requestId, actorId });
+    const response = await this.call("app.describe", { requestId, actorId });
+    validateCapabilities(response.capabilities);
+    return response;
   }
 
   async start({ requestId, actorId, prompt }) {

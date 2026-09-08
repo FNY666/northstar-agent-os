@@ -505,6 +505,48 @@ def _secret(value: bytes) -> bytes:
     return value
 
 
+def validate_capabilities(capabilities: Mapping[str, Any]) -> None:
+    """Fail closed when a consumer receives an incompatible capability projection."""
+    if not isinstance(capabilities, Mapping):
+        raise AppServerError("invalid_response", "app-server capabilities must be an object")
+    if capabilities.get("schema") != APP_CAPABILITY_SCHEMA:
+        raise AppServerError("invalid_response", "app-server capability schema is unsupported")
+    operations = capabilities.get("operations")
+    if (
+        not isinstance(operations, list)
+        or not operations
+        or any(not isinstance(operation, str) for operation in operations)
+        or len(set(operations)) != len(operations)
+        or "app.describe" not in operations
+        or "run.start" not in operations
+    ):
+        raise AppServerError("invalid_response", "app-server capability operations are invalid")
+    positive_integer_fields = (
+        "max_frame_bytes",
+        "max_prompt_chars",
+        "max_event_page",
+        "max_wait_ms",
+        "event_retention",
+        "request_replay_retention",
+    )
+    for field_name in positive_integer_fields:
+        value = capabilities.get(field_name)
+        if isinstance(value, bool) or not isinstance(value, int) or value < 1:
+            raise AppServerError("invalid_response", f"app-server capability {field_name} is invalid")
+    if capabilities.get("request_replay") != "completed_response":
+        raise AppServerError("invalid_response", "app-server request replay capability is invalid")
+    if capabilities.get("cancellation") != "cooperative":
+        raise AppServerError("invalid_response", "app-server cancellation capability is invalid")
+    if capabilities.get("manager_registry") != "in_memory":
+        raise AppServerError("invalid_response", "app-server manager registry capability is invalid")
+    if capabilities.get("remote_execution") is not False:
+        raise AppServerError("invalid_response", "app-server remote execution capability is invalid")
+    forbidden = {"provider", "workspace", "policy", "credentials", "secret", "secret_material"}
+    exposed = sorted(forbidden.intersection(capabilities))
+    if exposed:
+        raise AppServerError("invalid_response", f"capability projection exposes forbidden field(s): {', '.join(exposed)}")
+
+
 class AppServer:
     """Authenticated dispatcher plus an optional private Unix socket."""
 
@@ -633,25 +675,27 @@ class AppServer:
             if operation == "app.describe":
                 allowed = {"protocol", "auth", "request_id", "actor_id", "op"}
                 _reject_unknown(raw, allowed)
+                capabilities = {
+                    "schema": APP_CAPABILITY_SCHEMA,
+                    "operations": list(APP_OPERATIONS),
+                    "max_frame_bytes": self.max_frame_bytes,
+                    "max_prompt_chars": MAX_PROMPT_CHARS,
+                    "max_event_page": MAX_EVENT_PAGE,
+                    "max_wait_ms": MAX_WAIT_MS,
+                    "event_retention": self.manager.max_event_retention,
+                    "request_replay": "completed_response",
+                    "request_replay_retention": self.max_request_replays,
+                    "cancellation": "cooperative",
+                    "manager_registry": "in_memory",
+                    "remote_execution": False,
+                }
+                validate_capabilities(capabilities)
                 return self._cached_response(
                     request_id=request_id,
                     fingerprint=request_fingerprint,
                     ok=True,
                     op=operation,
-                    capabilities={
-                        "schema": APP_CAPABILITY_SCHEMA,
-                        "operations": list(APP_OPERATIONS),
-                        "max_frame_bytes": self.max_frame_bytes,
-                        "max_prompt_chars": MAX_PROMPT_CHARS,
-                        "max_event_page": MAX_EVENT_PAGE,
-                        "max_wait_ms": MAX_WAIT_MS,
-                        "event_retention": self.manager.max_event_retention,
-                        "request_replay": "completed_response",
-                        "request_replay_retention": self.max_request_replays,
-                        "cancellation": "cooperative",
-                        "manager_registry": "in_memory",
-                        "remote_execution": False,
-                    },
+                    capabilities=capabilities,
                 )
             if operation == "run.start":
                 allowed = {"protocol", "auth", "request_id", "actor_id", "op", "prompt"}
@@ -936,7 +980,9 @@ class AppClient:
         return response
 
     def describe(self, *, request_id: str, actor_id: str) -> dict[str, Any]:
-        return self.call("app.describe", request_id=request_id, actor_id=actor_id)
+        response = self.call("app.describe", request_id=request_id, actor_id=actor_id)
+        validate_capabilities(response.get("capabilities"))
+        return response
 
     def start(self, *, request_id: str, actor_id: str, prompt: str) -> dict[str, Any]:
         return self.call("run.start", request_id=request_id, actor_id=actor_id, prompt=prompt)
@@ -990,4 +1036,5 @@ __all__ = [
     "MAX_PROMPT_CHARS",
     "RunContext",
     "RunManager",
+    "validate_capabilities",
 ]

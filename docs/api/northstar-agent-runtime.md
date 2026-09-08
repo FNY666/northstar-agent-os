@@ -117,6 +117,10 @@ Bounded in-process background run manager.
 - `wait(*, run_id: str, actor_id: str, timeout: float=10.0)`
 - `shutdown(*, timeout: float=10.0)`
   - Request cooperative cancellation for active runs and wait boundedly.
+#### `validate_capabilities(capabilities: Mapping[str, Any])`
+
+Fail closed when a consumer receives an incompatible capability projection.
+
 #### `AppServer`
 
 Authenticated dispatcher plus an optional private Unix socket.

@@ -1244,3 +1244,18 @@ secret/path 泄露：
   引入 host logging service、remote execution、crash recovery 或 durable registry。
 
 T36 仍是 Unreleased；没有创建 tag、GitHub Release，也没有发布到 PyPI/npm。
+
+### 10.41 当前实现复核：fail-closed capability validation（T37，2026-09-08）
+
+T37 把 capability discovery 从可读 projection 收紧为可验证的 negotiation contract：
+
+- Python `AppClient.describe()` 与 Node consumer 会 fail-closed 校验 schema、operation
+  list、数值 limits、cooperative/in-memory/remote=false 边界，以及 provider、workspace、
+  policy、credentials、secret 等禁止字段。
+- Python server 在签名 `app.describe` response 前也校验自身 projection，避免 host
+  演进时意外发出不符合 v1 的 capability shape。
+- 新增 incompatible/sensitive projection 测试；runtime 622 项、全仓预计 `make test`
+  960 项（956 pass、4 项可选 OTel skip）。没有引入 npm/TypeScript SDK、scheduler、
+  remote execution 或 durable manager registry。
+
+T37 仍是 Unreleased；没有创建 tag、GitHub Release，也没有发布到 PyPI/npm。

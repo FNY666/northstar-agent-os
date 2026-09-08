@@ -1,5 +1,15 @@
 # Northstar Agent OS — initial public component
 
+## Unreleased (forty-fifth batch) — fail-closed capability validation (T37)
+
+- Added dependency-free capability projection validators to the Python and Node
+  consumers. They check the versioned schema, operation list, numeric limits,
+  cancellation/registry boundaries and forbidden provider/workspace/policy/
+  secret fields before a consumer proceeds.
+- The Python server validates its own projection before signing it, while the
+  clients validate received `app.describe` data. No SDK package, remote
+  execution, scheduler or host-owned configuration is exposed.
+
 ## Unreleased (forty-fourth batch) — app-server failure privacy (T36)
 
 - Background runtime/factory failures now expose only a stable exception type in

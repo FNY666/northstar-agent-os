@@ -22,6 +22,7 @@ from app_server import (
     RunContext,
     RunManager,
     _mac,
+    validate_capabilities,
 )
 from loop import AgentRuntime, RuntimeConfig
 from providers.base import Generation, Provider, TextBlock
@@ -252,6 +253,29 @@ class AppWireTests(RuntimeTestCase):
         response = server.handle_wire_line(json.dumps(status_conflict))
         self.assertFalse(response["ok"])
         self.assertEqual(response["error"]["code"], "idempotency_conflict")
+
+    def test_capability_validation_rejects_incompatible_or_sensitive_projection(self):
+        with self.assertRaises(AppServerError) as unsupported:
+            validate_capabilities({"schema": "other.capabilities.v1"})
+        self.assertEqual(unsupported.exception.code, "invalid_response")
+
+        with self.assertRaises(AppServerError) as sensitive:
+            validate_capabilities({
+                "schema": APP_CAPABILITY_SCHEMA,
+                "operations": ["app.describe", "run.start"],
+                "max_frame_bytes": 1024,
+                "max_prompt_chars": 1,
+                "max_event_page": 1,
+                "max_wait_ms": 1,
+                "event_retention": 1,
+                "request_replay": "completed_response",
+                "request_replay_retention": 1,
+                "cancellation": "cooperative",
+                "manager_registry": "in_memory",
+                "remote_execution": False,
+                "workspace": "/secret/workspace",
+            })
+        self.assertEqual(sensitive.exception.code, "invalid_response")
 
     def test_node_consumer_verifies_hmac_and_uses_bounded_wait(self):
         repository = Path(__file__).resolve().parents[3]
