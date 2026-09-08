@@ -44,6 +44,7 @@ from doctor import add_arguments as add_doctor_arguments
 from doctor import run_doctor
 from providers.base import ResultMessage
 from session_view import add_arguments as add_session_arguments
+from plugin_load import add_plugin_arguments
 from skill_check import add_skills_arguments
 
 USAGE_ERROR = 64
@@ -66,6 +67,7 @@ def build_parser() -> argparse.ArgumentParser:
             "  python3 -m cli sessions list --session-dir /tmp/northstar-sessions\n"
             "  python3 -m cli new my-project  # scaffold a governed project\n"
             "  python3 -m cli sessions show --session-dir /tmp/northstar-sessions ns-20260907T000000Z-00000000\n"
+            "  python3 -m cli plugin install ./my-bundle --workspace . && python3 -m cli plugin verify --workspace .\n"
         ),
     )
     parser.add_argument("--version", action="version", version=f"northstar-agent-runtime {__version__}")
@@ -83,6 +85,11 @@ def build_parser() -> argparse.ArgumentParser:
     add_session_arguments(sessions)
     skills = sub.add_parser("skills", help="review the workspace's Agent Skills (supply-chain check, read-only)")
     add_skills_arguments(skills)
+    plugins = sub.add_parser(
+        "plugin",
+        help="install, verify and export plugin bundles (a pinned set of skills/agents/hooks/MCP servers)",
+    )
+    add_plugin_arguments(plugins)
     new_proj = sub.add_parser("new", help="scaffold a governed project (config, agents, hooks guide, CI recipe)")
     new_proj.add_argument("directory", help="directory to create (must not exist, or be empty unless --force)")
     new_proj.add_argument("--force", action="store_true", help="write the template files into a non-empty directory (never deletes)")
@@ -158,6 +165,11 @@ def _add_run_arguments(parser: argparse.ArgumentParser) -> None:
     policy.add_argument("--no-policy-file", action="store_true", help="ignore .northstar/config.toml in the workspace")
     policy.add_argument("--no-workspace-agents", action="store_true", help="ignore .northstar/agents/*.md subagent files")
     policy.add_argument("--no-skills", action="store_true", help="do not list .northstar/skills/*/SKILL.md packages in the system prompt")
+    policy.add_argument(
+        "--no-plugins",
+        action="store_true",
+        help="ignore .northstar/plugins/ entirely (installed bundles contribute skills, agents, hooks, MCP servers and ceilings)",
+    )
     policy.add_argument(
         "--enable-workspace-hooks",
         action="store_true",
@@ -346,6 +358,7 @@ def _print_dry_run(
     context_note: str = "off",
     workspace_agents_note: str = "none",
     skills_note: str = "none",
+    plugin_note: str = "none",
     mcp_note: str = "off",
     hooks_note: str = "none",
 ) -> int:
@@ -382,6 +395,7 @@ def _print_dry_run(
     print(f"project_context={context_note}")
     print(f"workspace_agents={workspace_agents_note}")
     print(f"skills={skills_note}")
+    print(f"plugins={plugin_note}")
     print(f"hooks={hooks_note}")
     print(f"stream={'on' if getattr(args, 'stream', False) else 'off'}"
           + (" (assistant text as it arrives; the transcript stays turn-granular)" if getattr(args, "stream", False) else ""))
@@ -445,6 +459,15 @@ def main(argv: Sequence[str] | None = None) -> int:
                 parser.parse_args([*(args.command, "check"), "--help"])
                 return 0
             return handler(args)
+        if args.command == "plugin":
+            handler = getattr(args, "handler", None)
+            if handler is None:
+                # Bare `plugin` prints the first action's help instead of guessing an
+                # action: install/verify/uninstall all write, and defaulting to one of
+                # them would make "I typed less" mean "I changed the workspace".
+                parser.parse_args([*(args.command, "list"), "--help"])
+                return 0
+            return handler(args)
         parser.print_help()
         return USAGE_ERROR
 
@@ -496,14 +519,15 @@ def _session_lease_note(config: Any, *, session_dir: str = "") -> str:
     return f"session_lease=free; will claim for {ttl}s and renew as the run proceeds"
 
 
-def _hooks_note(policy: Any, command_hooks: Sequence[Any], *, enabled: bool) -> str:
+def _hooks_note(policy: Any, command_hooks: Sequence[Any], *, enabled: bool, plugin_hooks: int = 0) -> str:
     """One line for ``--dry-run``: what the repository declared, and whether it runs.
 
     The IGNORED case is spelled out on purpose. A repository that ships hooks
     and gets silence would assume they fired; a host that forgot the flag should
-    see the gap in the plan, not discover it in an audit diff.
+    see the gap in the plan, not discover it in an audit diff. Hooks contributed by
+    installed bundles are counted in the same number, because the same flag gates them.
     """
-    declared = len(tuple(getattr(policy, "hooks", ()) or ())) if policy is not None else 0
+    declared = (len(tuple(getattr(policy, "hooks", ()) or ())) if policy is not None else 0) + int(plugin_hooks)
     if declared == 0:
         return "none"
     if not enabled:
@@ -652,12 +676,47 @@ def _run(args: argparse.Namespace) -> int:
     registry = build_default_registry()
     agents = builtin_registry()
 
+    # Installed plugin bundles (.northstar/plugins/). A bundle is a *packaging* format, not
+    # a new permission channel: everything it contributes is handed to the seam that already
+    # governs it (skills check rules, agent-file collisions, hook validation, MCP permission
+    # gate, tighten-only ceilings), and a bundle that fails any check blocks the run instead
+    # of loading "partially" - half a reviewed plugin is not a reviewed plugin.
+    plugins: Any = None
+    if not args.no_plugins:
+        from plugin_load import load_contributions
+        from plugin_manifest import PluginError
+
+        try:
+            plugins = load_contributions(args.workspace, known_tools=registry.names())
+        except (PluginError, OSError, ValueError) as error:
+            print(f"configuration error: {error}", file=sys.stderr)
+            return USAGE_ERROR
+        if plugins.blocked:
+            print(
+                "configuration error: installed plugins are not loadable:\n  - "
+                + "\n  - ".join(str(item) for item in plugins.blocked),
+                file=sys.stderr,
+            )
+            print(
+                f"  run `python3 -m cli plugin verify --workspace {args.workspace}` to see the reviewed set, "
+                "and `plugin list` to see what is installed",
+                file=sys.stderr,
+            )
+            return USAGE_ERROR
+        for note in plugins.notes:
+            print(f"note: plugin: {note}", file=sys.stderr)
+
     # Repository-defined subagents (.northstar/agents/*.md). Governed like
     # built-ins: known tools only, tighten-only ceilings, fail-closed parse.
     workspace_agents: tuple[Any, ...] = ()
     if not args.no_workspace_agents:
         try:
-            workspace_agents = register_workspace_agents(agents, args.workspace, known_tools=registry.names())
+            workspace_agents = register_workspace_agents(
+                agents,
+                args.workspace,
+                known_tools=registry.names(),
+                extra_paths=[path for _name, path in (plugins.agent_directories if plugins else ())],
+            )
         except AgentFileError as error:
             print(f"configuration error: {error}", file=sys.stderr)
             return USAGE_ERROR
@@ -678,7 +737,14 @@ def _run(args: argparse.Namespace) -> int:
     # validated fail-closed, and an unusable declaration is a configuration error.
     hook_registry = None
     command_hooks: tuple[Any, ...] = ()
-    declared_hooks = tuple(getattr(policy, "hooks", ()) or ())
+    plugin_hook_tables = tuple(table for _name, table in (plugins.hook_tables if plugins else ()))
+    declared_hooks = tuple(getattr(policy, "hooks", ()) or ()) + plugin_hook_tables
+    hook_source_parts = []
+    if getattr(policy, "hooks", ()):
+        hook_source_parts.append(str(getattr(policy, "source", "the workspace policy")))
+    if plugin_hook_tables:
+        hook_source_parts.append(f"{len(plugin_hook_tables)} from installed plugins")
+    hook_sources = " and ".join(hook_source_parts) or "the workspace policy"
     if declared_hooks:
         from command_hooks import CommandHookError, parse_hooks, register_into
 
@@ -697,7 +763,7 @@ def _run(args: argparse.Namespace) -> int:
                 # Validated lazily, but reported loudly: silently ignoring a
                 # repository's policy is exactly what this project refuses to do.
                 print(
-                    f"note: {len(declared_hooks)} hook(s) declared in {policy.source} are IGNORED "
+                    f"note: {len(declared_hooks)} hook(s) declared in {hook_sources} are IGNORED "
                     "(pass --enable-workspace-hooks to run them)",
                     file=sys.stderr,
                 )
@@ -726,11 +792,13 @@ def _run(args: argparse.Namespace) -> int:
     # The file may pin 'plan' (or keep 'default'); it may never loosen. A CLI
     # mode other than the built-in default is an explicit operator choice and
     # wins. --no-policy-file is the escape hatch for an explicit 'default'.
-    mode = (
-        policy.permission_mode
-        if (policy is not None and policy.permission_mode is not None and cli_mode == "default")
-        else cli_mode
-    )
+    # A plugin may pin 'plan' (a ceiling), never 'default' or 'bypassPermissions': the
+    # policy file's own value wins over a bundle's, and an explicit operator flag wins over
+    # both, because a human typing it is the only thing that can widen a mode here.
+    policy_mode = policy.permission_mode if (policy is not None and policy.permission_mode is not None) else None
+    plugin_mode = str(plugins.policy.get("permission_mode") or "") if plugins is not None else ""
+    pinned_mode = policy_mode or plugin_mode
+    mode = pinned_mode if (cli_mode == "default" and pinned_mode) else cli_mode
     validate_mode(mode)
 
     allowed_cli, denied_cli = _tool_lists(args, base_tools=registry.names())
@@ -741,6 +809,13 @@ def _run(args: argparse.Namespace) -> int:
         denied_list.extend(policy.deny_tools)
         if policy.read_only:
             denied_list.extend(MUTATING_TOOLS)
+    if plugins is not None and plugins.policy.get("deny_tools"):
+        # A bundle may name tools it wants refused - and nothing else. There is no
+        # `allow_tools` here for the same reason there is none in the policy file: an
+        # artefact that arrives from elsewhere cannot grant itself approvals.
+        denied_list.extend(str(name) for name in plugins.policy["deny_tools"])
+    if plugins is not None and plugins.policy.get("read_only"):
+        denied_list.extend(MUTATING_TOOLS)
     denied = tuple(dict.fromkeys(denied_list))
     allowed = tuple(name for name in allowed_cli if name not in denied)
 
@@ -756,7 +831,7 @@ def _run(args: argparse.Namespace) -> int:
         registry = registry.subset(definition.tools)
         allowed = tuple(name for name in allowed if name in registry.names())
 
-    if args.mcp_servers and definition is not None:
+    if (args.mcp_servers or (plugins and plugins.mcp_servers)) and definition is not None:
         # An agent-definition run fixes its tool subset by definition; silently
         # adding MCP tools to that subset would widen the declared policy.
         raise ValueError(
@@ -767,6 +842,11 @@ def _run(args: argparse.Namespace) -> int:
     mcp_servers: list[tuple[str, list[str]]] = []
     if args.mcp_servers:
         mcp_servers = _parse_mcp_servers(args)
+    for server in (plugins.mcp_servers if plugins else ()):
+        # A bundle's server enters the same list as an operator's flag, so it inherits the
+        # whole rule set that comes with it: mutating by default, denied until named, and
+        # closed on SIGTERM. Nothing here lets a plugin register a tool directly.
+        mcp_servers.append((str(server["name"]), [str(server["command"]), *[str(a) for a in server.get("args") or ()]]))
 
     def tighten(cli_value: int | None, file_value: int | None) -> int | None:
         """Policy-file ceilings may only lower; when both are set, the lower wins."""
@@ -775,14 +855,23 @@ def _run(args: argparse.Namespace) -> int:
 
     base_turns = definition.max_turns if definition else args.max_turns
     base_tool_calls = definition.max_tool_calls if definition else args.max_tool_calls
-    max_turns = tighten(base_turns, policy.max_turns if policy is not None else None)
-    max_tool_calls = tighten(base_tool_calls, policy.max_tool_calls if policy is not None else None)
-    max_budget_usd = tighten(args.max_budget_usd, policy.max_budget_usd if policy is not None else None)
+    plugin_policy = plugins.policy if plugins is not None else {}
+    max_turns = tighten(tighten(base_turns, policy.max_turns if policy is not None else None), plugin_policy.get("max_turns"))
+    max_tool_calls = tighten(
+        tighten(base_tool_calls, policy.max_tool_calls if policy is not None else None), plugin_policy.get("max_tool_calls")
+    )
+    max_budget_usd = tighten(
+        tighten(args.max_budget_usd, policy.max_budget_usd if policy is not None else None), plugin_policy.get("max_budget_usd")
+    )
     compaction_threshold = tighten(
         args.compaction_threshold_tokens,
         policy.compaction_threshold_tokens if policy is not None else None,
     )
-    halt_on_denial = bool(args.halt_on_denial or (policy is not None and policy.halt_on_denial))
+    halt_on_denial = bool(
+        args.halt_on_denial
+        or (policy is not None and policy.halt_on_denial)
+        or (plugins is not None and plugins.policy.get("halt_on_denial"))
+    )
 
     config_kwargs: dict[str, Any] = {
         "model": (definition.model if definition and definition.model else args.model),
@@ -841,13 +930,25 @@ def _run(args: argparse.Namespace) -> int:
     skills: tuple[Any, ...] = ()
     if not args.no_skills:
         try:
-            skills = discover_skills(args.workspace)
+            skills = discover_skills(
+                args.workspace,
+                extra_roots=[path for _name, path in (plugins.skill_roots if plugins else ())],
+            )
         except SkillError as error:
             print(f"configuration error: {error}", file=sys.stderr)
             return USAGE_ERROR
     if skills:
         base_prompt = config_kwargs.get("system_prompt", DEFAULT_SYSTEM_PROMPT)
         config_kwargs["system_prompt"] = base_prompt + skill_listing(skills, args.workspace)
+    if plugins is not None and plugins.context_blocks:
+        # A bundle's README-style context is the same kind of content as AGENTS.md: it
+        # informs, it does not authorise. It is therefore appended after the policy and
+        # labelled, so a reader of the transcript can tell whose words these are.
+        base_prompt = config_kwargs.get("system_prompt", DEFAULT_SYSTEM_PROMPT)
+        blocks = "\n\n".join(f"[from plugin '{name}']\n{text}" for name, text in plugins.context_blocks)
+        config_kwargs["system_prompt"] = (
+            base_prompt + "\n\n== Plugin context (developer-authored, from installed bundles) ==\n" + blocks + "\n== End of plugin context =="
+        )
     if args.sidecar_socket:
         config_kwargs["sidecar_socket"] = args.sidecar_socket
         config_kwargs["sidecar_timeout_ms"] = args.sidecar_timeout_ms
@@ -961,8 +1062,19 @@ def _run(args: argparse.Namespace) -> int:
     else:
         context_note = "off (no AGENTS.md in the workspace)"
     workspace_agents_note = ",".join(agent.name for agent in workspace_agents) or "none"
-    hooks_note = _hooks_note(policy, command_hooks, enabled=args.enable_workspace_hooks)
+    hooks_note = _hooks_note(
+        policy, command_hooks, enabled=args.enable_workspace_hooks, plugin_hooks=len(plugin_hook_tables)
+    )
     skills_note = (f"{len(skills)} package(s): " + ", ".join(skill.name for skill in skills)) if skills else "none"
+    if args.no_plugins:
+        plugin_note = "off (--no-plugins)"
+    elif plugins is not None and plugins.audit:
+        plugin_note = (
+            f"{len(plugins.audit)} bundle(s): "
+            + ", ".join(f"{item['name']}@{item['version']} ({item['content_digest'][7:19]})" for item in plugins.audit)
+        )
+    else:
+        plugin_note = "none (.northstar/plugins is empty)"
     if mcp_servers:
         listed = ", ".join(f"{name}={' '.join(command)}" for name, command in mcp_servers)
         mcp_note = f"{listed} ({_mcp_stance_note(args)})"
@@ -995,6 +1107,7 @@ def _run(args: argparse.Namespace) -> int:
             context_note=context_note,
             workspace_agents_note=workspace_agents_note,
             skills_note=skills_note,
+            plugin_note=plugin_note,
             mcp_note=mcp_note,
         )
     if args.probe_sidecar:

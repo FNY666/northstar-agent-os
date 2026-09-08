@@ -83,11 +83,11 @@ A repository agent file is unusable. Message is operator-facing.
 
 #### `agents_directory(workspace: str | Path)`
 
-#### `discover_agent_files(workspace: str | Path, *, known_tools: Iterable[str] | None=None)`
+#### `discover_agent_files(workspace: str | Path, *, known_tools: Iterable[str] | None=None, extra_paths: Iterable[str | Path]=())`
 
 Compile every ``.northstar/agents/*.md`` into an AgentDefinition.
 
-#### `register_workspace_agents(registry: AgentRegistry, workspace: str | Path, *, known_tools: Iterable[str] | None=None)`
+#### `register_workspace_agents(registry: AgentRegistry, workspace: str | Path, *, known_tools: Iterable[str] | None=None, extra_paths: Iterable[str | Path]=())`
 
 Discover repository agents and register them; collisions are errors.
 
@@ -717,6 +717,174 @@ Evaluates one tool call against the three layers.
 - `evaluate_spec(spec: Any, payload: dict[str, Any] | None=None, *, context: PermissionRequestContext | None=None, known: bool=True)`
 - `check_delegation(agent: str, tool_names: Sequence[str], *, kinds: dict[str, str] | None=None, context: PermissionRequestContext | None=None, disallowed_extra: Iterable[str]=())`
   - Gate a subagent by *each tool it declared*, not by the name ``Task``.
+### `plugin_load`
+
+Source: `components/northstar-agent-runtime/plugin_load.py`
+
+Installing, pinning, loading and auditing plugin bundles in one workspace.
+
+#### `review_bundle_skills(plugin: InstalledPlugin)`
+
+Run the workspace's own skill-text rules over one bundle's skills.
+
+#### `describe_findings(audits: Sequence[SkillAudit], *, at_or_above: str | None=None)`
+
+One line per finding, worst first, so a refusal says what to go and read.
+
+#### `skill_bar_met(audits: Sequence[SkillAudit], fail_on: str)`
+
+True when any audited skill carries a finding at or above ``fail_on``.
+
+#### `PluginInstallError`
+
+An install, uninstall or pinning step that cannot be completed safely.
+
+#### `plugins_directory(workspace: str | Path)`
+
+#### `lock_path(workspace: str | Path)`
+
+#### `read_lock(workspace: str | Path)`
+
+The reviewed set, as ``{name: entry}``. Missing file is "nothing reviewed yet".
+
+#### `write_lock(workspace: str | Path, entries: Mapping[str, Mapping[str, Any]])`
+
+Write the lockfile atomically, sorted, with a trailing newline: it is a review artefact.
+
+#### `InstalledPlugin`
+
+A bundle on disk in a workspace, plus what the lock says about it.
+
+- `usable()`
+  - ``drift`` and ``unpinned`` are both refusals, and for the same reason: the content a reviewer agreed to is the unit of trust here, so anything else has to be re-reviewed, not run with a warning.
+- `as_dict()`
+#### `load_installed(workspace: str | Path, *, require_lock: bool=True, workspace_policy: Mapping[str, Any] | None=None)`
+
+Every installed bundle, verified, plus operator-facing problems found on the way.
+
+#### `PluginContributions`
+
+Everything installed bundles add to a run, already gated.
+
+- `enabled()`
+- `merged_policy(workspace_policy: Mapping[str, Any] | None)`
+  - Fold the plugins' ceilings into the workspace policy.
+- `as_dict()`
+#### `load_contributions(workspace: str | Path, *, require_lock: bool=True, known_tools: Iterable[str]=(), workspace_policy: Mapping[str, Any] | None=None)`
+
+Load every usable installed bundle; block on anything that is not usable.
+
+#### `InstallResult`
+
+What landed, and what the operator has to do next.
+
+- `as_dict()`
+#### `install(source: str | Path, workspace: str | Path, *, force: bool=False, pin: bool=True, require_seal: bool=False, fail_on: str='error', environment: Mapping[str, str] | None=None)`
+
+Copy a bundle into the workspace and pin its digest.
+
+#### `uninstall(name: str, workspace: str | Path, *, keep_lock: bool=False)`
+
+Remove one installed bundle, and its lock entry unless ``keep_lock`` says otherwise.
+
+#### `verify_workspace(workspace: str | Path, *, require_lock: bool=True, pin: bool=False, environment: Mapping[str, str] | None=None, workspace_policy: Mapping[str, Any] | None=None, fail_on: str='error')`
+
+The report ``plugin verify`` prints, as data.
+
+#### `add_plugin_arguments(parser: argparse.ArgumentParser)`
+
+The ``plugin`` subcommands, built on one parser so `run` can share the flags.
+
+#### `run_plugin_command(args: argparse.Namespace)`
+
+The whole `plugin` verb: read, verify, install, remove, export.
+
+### `plugin_manifest`
+
+Source: `components/northstar-agent-runtime/plugin_manifest.py`
+
+The plugin bundle format: one directory of capability, five hosts that can read it.
+
+#### `PluginError`
+
+A plugin that cannot be trusted, loaded, or exported. Message is operator-facing.
+
+#### `BundleFile`
+
+One file inside a bundle, with the digest the manifest's integrity claim covers.
+
+- `as_dict()`
+#### `Bundle`
+
+A plugin directory as it exists on disk - which is not the same as what it claims.
+
+- `relative(path: str)`
+  - A declared path, resolved *inside* the bundle or refused.
+- `component_paths(kind: str)`
+- `as_dict()`
+#### `load_bundle(root: str | Path)`
+
+Read a plugin directory: manifest parsed, files digested, nothing else executed.
+
+#### `HookClaim`
+
+One declared lifecycle hook, in exactly the shape ``[[hooks]]`` uses.
+
+- `as_hook_table(*, script_path: str='')`
+  - The raw ``[[hooks]]`` entry, for :func:`command_hooks.parse_hooks` to police.
+#### `PluginManifest`
+
+The parsed, validated claims of one bundle. Every field here was checked to load.
+
+- `as_dict()`
+- `summary_line()`
+#### `parse_manifest(bundle: Bundle, *, workspace_policy: Mapping[str, Any] | None=None)`
+
+Validate a bundle's manifest, resolve its claims, and *refuse* what cannot load.
+
+#### `verify_integrity(manifest: PluginManifest, *, pinned_digest: str='', environment: Mapping[str, str] | None=None)`
+
+Recompute the bundle digest and compare it with what the workspace pinned.
+
+#### `current_host_profile()`
+
+The profile for the machine asking, from the same primitives the table describes.
+
+#### `portability_report(manifest: PluginManifest, files: Sequence[BundleFile]=(), *, host: Mapping[str, Any] | None=None, only_hosts: Sequence[str] | None=None)`
+
+Score one bundle against every host profile this component knows about.
+
+#### `check_host_compatibility(manifest: PluginManifest, *, host: Mapping[str, Any] | None=None)`
+
+Why this bundle cannot load here, or ``""`` when it can.
+
+#### `Export`
+
+Rendered files plus what could not be rendered.
+
+- `as_dict()`
+#### `export_bundle(bundle: Bundle, manifest: PluginManifest, *, target: str)`
+
+Render one bundle as another host's native files, and say what fell out.
+
+#### `declared_components(manifest: PluginManifest)`
+
+Which capabilities this bundle actually uses (not what it merely could).
+
+#### `describe_components(manifest: PluginManifest)`
+
+The capability surface, as data: what a reviewer is being asked to trust.
+
+#### `component_lines(manifest: PluginManifest)`
+
+The declared components as one line each, for a human reading ``plugin show``.
+
+#### `skill_candidates(bundle: Bundle, manifest: PluginManifest)`
+
+``(name, SKILL.md path)`` for every skill the bundle ships, resolved inside it.
+
+#### `agent_files(bundle: Bundle, manifest: PluginManifest)`
+
 ### `policy_file`
 
 Source: `components/northstar-agent-runtime/policy_file.py`
@@ -734,6 +902,10 @@ Validated contents of ``.northstar/config.toml``.
 - `project_context_setting()`
 - `as_dict()`
 #### `policy_file_path(workspace: str | Path)`
+
+#### `read_policy_document(workspace: str | Path)`
+
+The parsed policy file, *unvalidated*: ``None`` when the file is absent.
 
 #### `load_policy_file(workspace: str | Path, *, known_tools: Iterable[str] | None=None, known_agents: Iterable[str] | None=None)`
 
@@ -1090,7 +1262,7 @@ One discovered skill package: identity plus the path to read.
 
 #### `skills_directory(workspace: str | Path)`
 
-#### `discover_skills(workspace: str | Path)`
+#### `discover_skills(workspace: str | Path, *, extra_roots: Iterable[str | Path]=())`
 
 Discover skills under the workspace root; errors are operator-facing.
 

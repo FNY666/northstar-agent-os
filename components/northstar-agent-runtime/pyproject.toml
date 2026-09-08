@@ -62,6 +62,8 @@ py-modules = [
     "mcp_negotiate",
     "permissions",
     "postconditions",
+    "plugin_load",
+    "plugin_manifest",
     "policy_file",
     "sdk",
     "scaffold",

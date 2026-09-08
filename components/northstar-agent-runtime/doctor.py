@@ -275,6 +275,42 @@ def _checks(args: argparse.Namespace) -> list[Finding]:
                     f"{detail}" if locked else f"{detail} - `cli skills check --workspace . --write-lock` after reading them")
         )
 
+    # -- installed plugin bundles ----------------------------------------------
+    # Read-only by construction: `pin=False`, because a self-check that records a review
+    # would be a self-check that grades its own homework.
+    if importlib.util.find_spec("plugin_load") is not None:
+        from plugin_load import PluginInstallError, verify_workspace
+        from plugin_manifest import PluginError
+
+        try:
+            report = verify_workspace(workspace)
+        except (PluginError, PluginInstallError, OSError) as error:
+            # A bundle the loader cannot even read is a finding, not a traceback: the
+            # doctor's whole job is to say what is wrong and stop.
+            findings.append(Finding("plugins", "fail", str(error)))
+        else:
+            if not report["plugins"]:
+                findings.append(
+                    Finding("plugins", "ok", "none (.northstar/plugins/ absent - `cli plugin install <dir>` adds a bundle)")
+                )
+            elif report["ok"]:
+                names = ", ".join(f"{item['name']}@{item['version']}" for item in report["plugins"])
+                findings.append(Finding("plugins", "ok", f"{len(report['plugins'])} bundle(s) pinned and matching {report['lock']}: {names}"))
+            else:
+                findings.append(
+                    Finding(
+                        "plugins",
+                        "fail",
+                        "; ".join(report["problems"])
+                        or "; ".join(
+                            f"{item['name']}: {item['status']}" + (f" - {item['detail']}" if item.get("detail") else "")
+                            for item in report["plugins"]
+                            if item["status"] != "pinned"
+                        )
+                        + f" - a run in this workspace will refuse to start until `plugin verify --workspace . --write-lock` matches",
+                    )
+                )
+
     # -- provider/model pair and the OpenAI-compatible endpoint ----------------
     from cli import PROVIDER_DEFAULT_MODELS, resolve_model
 

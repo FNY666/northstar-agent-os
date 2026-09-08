@@ -50,16 +50,45 @@ def skills_directory(workspace: str | Path) -> Path:
     return Path(workspace) / SKILLS_DIRECTORY
 
 
-def discover_skills(workspace: str | Path) -> tuple[Skill, ...]:
-    """Discover skills under the workspace root; errors are operator-facing."""
+def discover_skills(workspace: str | Path, *, extra_roots: Iterable[str | Path] = ()) -> tuple[Skill, ...]:
+    """Discover skills under the workspace root; errors are operator-facing.
+
+    ``extra_roots`` is the seam an installed plugin bundle uses: each entry is a directory
+    whose children are skill folders, exactly like ``.northstar/skills``. It is checked
+    against the same containment rule - a plugin's skills live inside the workspace, and a
+    root that resolves out of it is refused rather than followed - and a name already
+    claimed by the repository (or by an earlier root) is an error, never a shadow: which
+    instructions the model sees must not depend on discovery order.
+    """
     root = Path(workspace).resolve()
-    directory = root / SKILLS_DIRECTORY
+    skills: list[Skill] = list(_scan(root / SKILLS_DIRECTORY, root))
+    for extra in extra_roots:
+        directory = Path(extra).resolve(strict=False)
+        if not directory.is_relative_to(root):
+            raise SkillError(
+                f"skill root {extra} resolves outside the workspace root {root}; a plugin may not "
+                "contribute skills from somewhere the run is not confined to"
+            )
+        claimed = {skill.name for skill in skills}
+        for skill in _scan(directory, root):
+            if skill.name in claimed:
+                raise SkillError(
+                    f"{skill.name}: two installed skill packages claim the same name "
+                    f"({skill.path}); rename or drop one - the model must not be shown one of them "
+                    "because of a discovery order nobody chose"
+                )
+            skills.append(skill)
+    return tuple(sorted(skills, key=lambda skill: skill.name))
+
+
+def _scan(directory: Path, root: Path) -> list[Skill]:
+    """One directory of skill folders, with the symlink refusal the root check requires."""
     if not directory.is_dir():
-        return ()
+        return []
     skills: list[Skill] = []
     for entry in sorted(directory.iterdir()):
         if not entry.is_dir():
-            continue  # stray files in the skills directory are not skills
+            continue  # stray files in the skill directory are not skills
         resolved = entry.resolve(strict=False)
         if not resolved.is_relative_to(root):
             raise SkillError(
@@ -76,7 +105,7 @@ def discover_skills(workspace: str | Path) -> tuple[Skill, ...]:
                 "refusing to follow the symlink"
             )
         skills.append(_parse_skill(resolved_file))
-    return tuple(sorted(skills, key=lambda skill: skill.name))
+    return skills
 
 
 def _parse_skill(skill_file: Path) -> Skill:

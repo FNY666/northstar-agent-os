@@ -268,6 +268,102 @@ checkpoint attests to), and a durable event never authorises a resume on its own
 `checkpoint_from_event()` re-runs the digest over the transcript through the same
 `prepare_resume` gate a runtime checkpoint passes. Same gate, whoever wrote the boundary.
 
+## 13. Ship an extension as a bundle, and let the lock carry the review
+
+A plugin here is how you hand someone four things at once — a skill, an agent file, a
+lifecycle hook, and an MCP server — without handing them a way around the gate. The format
+is `plugin.toml` next to those files; the install is a visible copy under
+`.northstar/plugins/`; the review is one line in `.northstar/plugins.lock`.
+
+```toml
+# release-bundle/plugin.toml  -  names must match the directory, or install refuses
+schema_version = "northstar.plugin.v1"
+name = "release-bundle"
+version = "1.2.0"
+publisher = "release-team"
+description = "Changelog skill, a release critic, and a veto on editing policy."
+
+[compatibility]
+platforms = ["posix", "linux", "darwin"]   # enforced at install: refused, not half-applied
+requires_flock = true                      # the session lease needs it, and so do we
+
+[components]
+skills = ["skills"]
+agents = ["agents"]
+
+[[components.hooks]]
+event = "PreToolUse"
+script = "hooks/block-force.py"             # a file in the bundle; there is no command key
+interpreter = "python3"                      # an allowlist entry, never a path
+timeout_ms = 1500
+
+[policy]
+max_turns = 12                               # tighten-only, against the workspace's own file
+deny_tools = ["Edit", "Write"]
+```
+
+```console
+$ northstar-agent-runtime plugin install ../bundles/release-bundle --workspace .
+installed release-bundle 1.2.0 at ./.northstar/plugins/release-bundle
+  content digest sha256:1820482d0d4a75eea4cd7242697cb82048b6214f7e1b86f316d794f50c8be283
+  pinned in plugins.lock; review the diff before committing it
+$ northstar-agent-runtime plugin compat --workspace .
+PLUGIN               linux     darwin    windows     portable
+release-bundle       ok        ok        NO          no
+
+  release-bundle on windows: claims darwin, linux, posix, which does not cover this windows host; requires flock, which this platform does not provide (the session lease would be refused)
+```
+
+Then the run tells you what it took, in the same lines it tells you everything else it took:
+
+```console
+$ northstar-agent-runtime run --workspace . --prompt "release 1.2" --dry-run --enable-workspace-hooks
+disallowed_tools=Edit,Write
+max_turns=12 max_tool_calls=50 max_budget_usd=unlimited
+workspace_agents=release-critic
+skills=1 package(s): no-force-push
+plugins=1 bundle(s): release-bundle@1.2.0 (1820482d0d4a)
+hooks=1 command hook(s): PreToolUse<-block-force.py
+```
+
+Nothing in those six lines came from a new mechanism: the ceiling is the policy file's
+min-merge, `workspace_agents` is `register_workspace_agents` refusing a shadow, `skills` is
+`discover_skills` refusing a name collision, and `hooks` is `command_hooks.parse_hooks`
+confining the script to the workspace — which is also why `--enable-workspace-hooks` is
+still what runs them, bundle or not.
+
+What to expect from the refusals, because they are the feature:
+
+- **A changed file stops the run.** Edit `.northstar/plugins/<name>/` by hand after
+  installing and `plugin verify` prints `drift`, `run` exits 64, and nothing loads. Re-pin
+  with `plugin verify --write-lock` once you have read what changed — the report then names
+  the bundles whose pin moved, since pinning *is* the review and should not look like a
+  green light.
+- **A name collision is an error, not an override.** A bundle's skill or agent that shadows
+  one from the repository (or from another bundle) is refused, because which instructions
+  the model sees must not depend on discovery order.
+- **A loosening ceiling is refused at install**, and a `[policy]` that denies a tool this
+  runtime does not have is refused at load: a denial that matches nothing is a false sense of
+  one. `deny_tools = ["WebFetch"]` in a workspace with no such tool is not caution, it is
+  noise, and noise in a governance file is how real lines stop being read.
+- **Secrets do not travel.** A bundle's MCP server may name a command and args; `env` is
+  refused at load with a pointer to the workspace's own `[mcp.servers]`. And a bundle has no
+  `allow_tools`: auto-approval is something a human types at a command line.
+- **The bundle's skill text is read before it is copied.** `plugin install` runs the same
+  versioned rules `skills check` uses over each `SKILL.md` in the bundle and refuses on any
+  finding at or above `--fail-on`; `plugin verify` re-runs them, so a rules update shows up
+  against a pinned bundle instead of only against a fresh install.
+- **Export is a port of the portable half.** `plugin export claude-code` renders the skills,
+  the agent files and the hook there, in that host's shape — and still refuses to write,
+  because `[policy]` has no equivalent anywhere else. `cursor` additionally cannot carry the
+  agents or the hooks. Both messages name the missing pieces; `--allow-drop` is what writes a
+  knowingly downgraded port. Keep the governed half in Northstar rather than exporting it away.
+
+There is no marketplace, no index and no dependency resolver, and that is a decision
+rather than a missing feature: everything a bundle can do is already a file in your
+repository, which means the diff is the install, the review is the lock, and `git revert` is
+the uninstall.
+
 ## Consumer CI recipe
 
 `examples/ci-readonly-review/` is a copy-paste template for running a
