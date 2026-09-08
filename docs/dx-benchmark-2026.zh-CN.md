@@ -1089,3 +1089,16 @@ worker：
   可选 OTel skip）。
 
 T26 仍是 Unreleased；没有创建 tag、GitHub Release，也没有发布到 PyPI/npm。
+
+### 10.31 当前实现复核：bounded app-server wait（T27，2026-09-08）
+
+T27 只改善本地 background-run consumer 的等待语义：
+
+- 新增 wire operation `run.wait`，`timeout_ms` 默认 10 秒、上限 30 秒；它沿用每次
+  request 的 HMAC 与 actor/run binding，在 bounded deadline 内等待 terminal status。
+- `run.status` 与 `run.events` 仍保留给非阻塞/polling consumer；`AppClient.wait()` 与
+  offline example 已切换到 bounded wait。它不是 task queue，也不把连接等待包装成
+  scheduler 或 durable orchestration。
+- runtime 仍为 616 项、全仓 `make test` 954 项（950 pass、4 项可选 OTel skip）。
+
+T27 仍是 Unreleased；没有创建 tag、GitHub Release，也没有发布到 PyPI/npm。

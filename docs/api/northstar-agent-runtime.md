@@ -132,6 +132,7 @@ Small authenticated client for the experimental Unix app-server.
 - `status(*, request_id: str, actor_id: str, run_id: str)`
 - `events(*, request_id: str, actor_id: str, run_id: str, from_sequence: int=0, limit: int=MAX_EVENT_PAGE)`
 - `cancel(*, request_id: str, actor_id: str, run_id: str)`
+- `wait(*, request_id: str, actor_id: str, run_id: str, timeout_ms: int=DEFAULT_WAIT_MS)`
 ### `artifacts`
 
 Source: `components/northstar-agent-runtime/artifacts.py`

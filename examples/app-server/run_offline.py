@@ -9,7 +9,6 @@ from __future__ import annotations
 
 import sys
 import tempfile
-import time
 from pathlib import Path
 
 RUNTIME_DIR = Path(__file__).resolve().parents[2] / "components" / "northstar-agent-runtime"
@@ -52,16 +51,12 @@ def main() -> int:
             client = AppClient(socket_path, channel_secret=CHANNEL_SECRET)
             started = client.start(request_id="example-start", actor_id="demo", prompt="say hello")
             run_id = started["run_id"]
-            status = started
-            poll = 0
-            while status["status"] not in {"success", "failed", "cancelled"}:
-                time.sleep(0.01)
-                poll += 1
-                status = client.status(
-                    request_id=f"example-status-{poll}",
-                    actor_id="demo",
-                    run_id=run_id,
-                )
+            status = client.wait(
+                request_id="example-wait",
+                actor_id="demo",
+                run_id=run_id,
+                timeout_ms=2_000,
+            )
             events = client.events(
                 request_id="example-events",
                 actor_id="demo",

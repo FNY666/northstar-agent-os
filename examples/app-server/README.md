@@ -16,7 +16,7 @@ shows the important ownership boundary:
 - the host constructs `RunManager` and injects `runtime_factory`;
 - the host chooses the provider, workspace, policy and session configuration;
 - the client can submit only a bounded prompt and use `run.start`, `run.status`,
-  `run.events` and `run.cancel`;
+  `run.events`, bounded `run.wait` and `run.cancel`;
 - requests and responses are HMAC-authenticated, and the repeated start is an
   idempotent replay rather than a second run.
 

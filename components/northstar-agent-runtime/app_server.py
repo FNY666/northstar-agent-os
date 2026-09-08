@@ -7,8 +7,9 @@ observe/cancel that host-owned run. It cannot choose a provider, workspace,
 Python callable, tool, or filesystem path.
 
 The optional Unix-socket server adds a small versioned JSON-lines protocol:
-``run.start``, ``run.status``, ``run.events`` and ``run.cancel``. Every request
-and response is HMAC-authenticated, request ids are idempotent, event pages are
+``run.start``, ``run.status``, ``run.events``, ``run.wait`` and ``run.cancel``.
+Every request and response is HMAC-authenticated, request ids are idempotent,
+event pages are
 bounded, and the socket is private to the local filesystem. Runtime cancellation
 is cooperative: a provider or tool already in progress is allowed to finish and
 the loop stops at its next governed boundary.
@@ -38,6 +39,8 @@ MAX_FRAME_BYTES = 1_048_576
 MAX_EVENT_PAGE = 256
 DEFAULT_EVENT_RETENTION = 512
 DEFAULT_ACTIVE_RUNS = 8
+DEFAULT_WAIT_MS = 10_000
+MAX_WAIT_MS = 30_000
 _RESERVED_CLIENT_FIELDS = frozenset({"protocol", "op", "request_id", "actor_id", "auth"})
 _ID_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$")
 
@@ -545,7 +548,20 @@ class AppServer:
                 result = self.manager.cancel(run_id=raw.get("run_id"), actor_id=actor_id)
                 result.pop("request_id", None)
                 return self._response(request_id=request_id, ok=True, op=operation, **result)
-            raise AppServerError("invalid_request", "op must be one of run.start, run.status, run.events, run.cancel")
+            if operation == "run.wait":
+                allowed = {"protocol", "auth", "request_id", "actor_id", "op", "run_id", "timeout_ms"}
+                _reject_unknown(raw, allowed)
+                timeout_ms = raw.get("timeout_ms", DEFAULT_WAIT_MS)
+                if isinstance(timeout_ms, bool) or not isinstance(timeout_ms, int) or timeout_ms < 0 or timeout_ms > MAX_WAIT_MS:
+                    raise AppServerError("invalid_request", f"timeout_ms must be between 0 and {MAX_WAIT_MS}")
+                result = self.manager.wait(
+                    run_id=raw.get("run_id"),
+                    actor_id=actor_id,
+                    timeout=timeout_ms / 1000,
+                )
+                result.pop("request_id", None)
+                return self._response(request_id=request_id, ok=True, op=operation, **result)
+            raise AppServerError("invalid_request", "op must be one of run.start, run.status, run.events, run.cancel, run.wait")
         except json.JSONDecodeError as error:
             return self._error(request_id, AppServerError("invalid_request", f"invalid JSON: {error.msg}"))
         except AppServerError as error:
@@ -770,6 +786,22 @@ class AppClient:
     def cancel(self, *, request_id: str, actor_id: str, run_id: str) -> dict[str, Any]:
         return self.call("run.cancel", request_id=request_id, actor_id=actor_id, run_id=run_id)
 
+    def wait(
+        self,
+        *,
+        request_id: str,
+        actor_id: str,
+        run_id: str,
+        timeout_ms: int = DEFAULT_WAIT_MS,
+    ) -> dict[str, Any]:
+        return self.call(
+            "run.wait",
+            request_id=request_id,
+            actor_id=actor_id,
+            run_id=run_id,
+            timeout_ms=timeout_ms,
+        )
+
 
 __all__ = [
     "APP_PROTOCOL",
@@ -778,7 +810,9 @@ __all__ = [
     "AppServerError",
     "DEFAULT_ACTIVE_RUNS",
     "DEFAULT_EVENT_RETENTION",
+    "DEFAULT_WAIT_MS",
     "MAX_EVENT_PAGE",
+    "MAX_WAIT_MS",
     "MAX_FRAME_BYTES",
     "MAX_PROMPT_CHARS",
     "RunManager",

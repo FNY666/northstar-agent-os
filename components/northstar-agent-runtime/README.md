@@ -267,8 +267,9 @@ server.serve_forever()
 
 The host owns `runtime_factory`, provider credentials, workspace, policy and
 session directory. The wire protocol can only submit a bounded prompt and call
-`run.start`, `run.status`, `run.events` or `run.cancel`; it cannot select a
-provider, workspace, tool, Python action or arbitrary path. Requests and
+`run.start`, `run.status`, `run.events`, bounded `run.wait` or `run.cancel`; it
+cannot select a provider, workspace, tool, Python action or arbitrary path.
+Requests and
 responses use an HMAC channel, start is request-id idempotent, events have a
 bounded cursor/page, and actor binding is re-checked on every operation.
 Cancellation is cooperative at the next generation/tool boundary and never

@@ -12,6 +12,7 @@ from support import RuntimeTestCase
 
 from app_server import (
     APP_PROTOCOL,
+    MAX_WAIT_MS,
     AppClient,
     AppServer,
     AppServerError,
@@ -143,7 +144,7 @@ class AppWireTests(RuntimeTestCase):
             self.assertTrue(socket_path.exists())
             client = AppClient(socket_path, channel_secret=self.SECRET)
             started = client.start(request_id="wire-start", actor_id="owner", prompt="hello")
-            final = manager.wait(run_id=started["run_id"], actor_id="owner")
+            final = client.wait(request_id="wire-wait", actor_id="owner", run_id=started["run_id"], timeout_ms=2000)
             status = client.status(request_id="wire-status", actor_id="owner", run_id=started["run_id"])
             page = client.events(request_id="wire-events", actor_id="owner", run_id=started["run_id"])
             server.close()
@@ -189,6 +190,19 @@ class AppWireTests(RuntimeTestCase):
         unsigned = {key: value for key, value in valid.items() if key != "auth"}
         valid["auth"] = _mac(unsigned, self.SECRET)
         response = server.handle_wire_line(json.dumps(valid))
+        self.assertFalse(response["ok"])
+        self.assertEqual(response["error"]["code"], "invalid_request")
+
+        wait = {
+            "protocol": APP_PROTOCOL,
+            "op": "run.wait",
+            "request_id": "wire-wait-invalid",
+            "actor_id": "owner",
+            "run_id": "missing",
+            "timeout_ms": MAX_WAIT_MS + 1,
+        }
+        wait["auth"] = _mac(wait, self.SECRET)
+        response = server.handle_wire_line(json.dumps(wait))
         self.assertFalse(response["ok"])
         self.assertEqual(response["error"]["code"], "invalid_request")
 

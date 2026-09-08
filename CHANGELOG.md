@@ -1,5 +1,16 @@
 # Northstar Agent OS — initial public component
 
+## Unreleased (thirty-fifth batch) — bounded app-server wait (T27)
+
+- Added `run.wait` to the local authenticated JSON-lines protocol. It waits for
+  a host-owned run to reach a terminal state with a bounded `timeout_ms` (10 s
+  default, 30 s maximum), preserving actor authorization and the no-force-kill
+  cancellation boundary. Python `AppClient.wait()` and the offline example use
+  this operation instead of polling status.
+- Kept `run.status`/`run.events` available for non-blocking consumers. No queue,
+  scheduler, durable manager registry, remote transport or release/publication
+  claim was added.
+
 ## Unreleased (thirty-fourth batch) — local app-server lifecycle hardening (T26)
 
 - Added `AppServer.wait_ready()` with explicit startup error propagation, so a
