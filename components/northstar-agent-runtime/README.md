@@ -19,7 +19,7 @@ prompt ──► AgentRuntime ──► provider (Anthropic Messages API, or scr
                  ├─ tools (Read, Grep, LS, Write, Edit, DescribeTools, Task)
                  │        └── CodexReadOnly ──Unix socket──► northstar-codex-sidecar ──► codex --sandbox read-only
                  ├─ subagents (own context, tool subset, ceilings, provider)
-                 ├─ compaction (safe boundaries only)
+                 ├─ context budget (safe compaction → window rollover → bounded overflow retry)
                  ├─ sessions (append-only JSONL, fsync per write)
                  └─ tracing (run → turn[n] → generation | tool:Name | subagent:Type)
                  │
@@ -231,7 +231,9 @@ print(report.subtype, report.exit_code, report.session_id, report.total_cost_usd
 - `sdk.stream_run(options)` yields each event dict as it happens; the last is
   the `result`.
 - `RunOptions` carries the governance knobs (`permission_mode`,
-  `allowed_tools`/`disallowed_tools`, `read_only`, ceilings, `halt_on_denial`,
+  `allowed_tools`/`disallowed_tools`, `read_only`, ceilings,
+  `compaction_threshold_tokens`, optional `context_window_tokens` (with
+  `max_output_tokens` reserved before generation), `halt_on_denial`,
   `session_dir`, optional `session_integrity` and in-memory
   `session_integrity_secret`, `session_cross_process`, subagent depth) plus
   provider/model/session resume.
@@ -293,7 +295,8 @@ max_tool_calls = 50             # may only lower 50
 max_budget_usd = 0.25           # any positive cap (built-in default: unlimited)
 halt_on_denial = true           # end with error_permission_denied on a refusal
 agent = "explorer"              # run as a built-in agent by default (CLI --agent wins)
-compaction_threshold_tokens = 30000   # 0 disables compaction
+compaction_threshold_tokens = 30000   # 0 disables threshold compaction
+context_window_tokens = 120000          # optional hard provider budget; lower values roll over sooner
 project_context = "AGENTS.md"   # file name inside the workspace, or false to disable
 ```
 
@@ -369,7 +372,8 @@ condition arrives as an event, never as a raised exception:
 The three ceilings are independent, each with its own subtype, so an operator can
 tell "it ran out of money" from "it ran in circles". `RunReport` (from
 `run_collect`) carries the same information structurally: `denials`, `tool_calls`,
-`receipts`, `subagents`, `compactions`, `hook_fires`, `errors`, `trace`.
+`receipts`, `subagents`, `compactions`, `window_rollovers`, `context_windows`,
+`hook_fires`, `errors`, `trace`.
 
 ## Hooks
 
@@ -499,11 +503,21 @@ A passing verdict is an assertion the runtime can audit, not a vibe.
   after a torn tail repairs only that final malformed line before the next
   append. This is still not distributed coordination, remote replication or
   remote lineage.
-- **Compaction** may only cut at a boundary with no pending tool call. Cutting
-  mid-exchange orphans a `tool_use` from its `tool_result`, and the API answers
-  that with a 400 the model cannot recover from. After compaction the runtime
-  asserts (in tests) that no request carries a dangling block and that roles still
-  alternate.
+- **Context budget, compaction and rollover** are one fail-closed pipeline.
+  Before generation, the runtime estimates transcript tokens plus the fixed
+  system/tool overhead and reserves `max_output_tokens`. It first performs the
+  existing safe-boundary compaction (no pending `tool_use` may be cut); if the
+  request still cannot fit `context_window_tokens`, it emits a
+  `compact_boundary` with `mode=window_rollover`, a bounded continuity summary,
+  `window_id`, `sequence` and `lineage`, then sends the next request in a new
+  logical window. The system/project prompt, budget meter, action receipts,
+  hooks, session integrity chain and final report remain on the same run/session.
+  Completed tools are not replayed: the rollover is only accepted after their
+  `tool_result` blocks land. A provider-classified `context_overflow` gets at
+  most one same-turn rollover retry; ordinary provider errors are never retried.
+  The terminal result exposes `context_windows` and
+  `context_overflow_retries`, while `RunReport.window_rollovers` retains the
+  audit projection.
 - **Tracing** records `run → turn[n] → generation | tool:Name | subagent:Type`
   with cost attributes. It never records prompt text or tool output bodies — only
   `tool.is_error`. Attributes are written *before* `span.end()`, because
@@ -534,7 +548,7 @@ size (`result_chars`), so truncation is visible instead of inferred.
 | `artifacts.py`      | versioned bounded artifact manifests carried by action receipts      |
 | `budget.py`         | price table, cost computation, budget meter                          |
 | `tools/`            | package: registry, sandbox, caps, built-in tools, `CodexReadOnly` spec (`__init__.py`), plus the guard-verification harness (`verify_invariants.py`) |
-| `compaction.py`     | safe-boundary detection and summarisation                            |
+| `compaction.py`     | safe-boundary detection, summarisation, and bounded window rollover    |
 | `sessions.py`       | append-only JSONL, replay slices, torn-tail recovery, writer locks and hash/HMAC chains |
 | `checkpoints.py`    | bounded workspace manifests, diff, verified rewind, and safety snapshots |
 | `agents.py`         | agent definitions, registry, verdict parsing                         |
@@ -573,7 +587,7 @@ cd components/northstar-agent-runtime
 python3 -m unittest discover -s tests -p 'test_*.py' -v
 ```
 
-599 tests, fully offline and deterministic (four optional OpenTelemetry tests
+606 tests, fully offline and deterministic (four optional OpenTelemetry tests
 are skipped when the tracing extra is absent): the scripted provider is the
 only model, and `test_integration_sidecar.py` runs the real sidecar `serve()`
 over a real Unix socket with a 100,000-Chinese-character prompt.
@@ -595,8 +609,10 @@ caught by the unit-level compaction tests rather than the loop-level one.
 ## Limitations and scope
 
 - **The live Anthropic API is unverified here.** No credentials exist in the
-  development sandbox, so request building and response normalisation are tested
-  against an injected fake client, not against the network.
+  development sandbox, so request building, context-overflow classification and
+  response normalisation are tested against an injected fake client, not against
+  the network. A host should set `context_window_tokens` from its model/provider
+  catalogue rather than assuming the runtime can discover a universal limit.
 - **MCP is a minimal stdio client.** Only tool discovery and calls are
   implemented (protocol `2024-11-05`), verified against an offline fixture
   server; no sampling/roots/prompts, no reconnect, and no vendor server has

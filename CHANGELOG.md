@@ -1,5 +1,27 @@
 # Northstar Agent OS — initial public component
 
+## Unreleased (thirty-first batch) — automatic context compaction and window rollover (T24)
+
+- Added a provider-aware context preflight to `northstar-agent-runtime`: the
+  runtime estimates transcript, system/tool overhead and reserves
+  `max_output_tokens` before each generation. It keeps the existing
+  tool-use-safe compaction boundary, then starts a new logical context window
+  when the bounded request still cannot fit instead of sending a known oversized
+  request.
+- Window handoffs persist a `compact_boundary` with mode, window id, sequence,
+  previous-window lineage, boundary reason and trusted continuity summary. The
+  same session/run carries system and project context, budget/usage, hooks,
+  receipts, integrity chain and final report; completed tools are never replayed.
+- Added explicit `context_overflow` provider classification and one controlled
+  same-turn recovery retry. Ordinary provider failures remain terminal and are
+  not retried. CLI, SDK, policy-file and report surfaces expose the context
+  budget and rollover audit projection.
+- This is still an offline, provider-adapter-tested capability: no live
+  Anthropic request was made. Runtime has 606 tests; the repository `make test`
+  run has 944 tests (940 pass, 4 optional OTel skips). No release tag, GitHub
+  Release, PyPI/npm publication, hosted worker claim, or remote exactly-once
+  claim was made.
+
 ## Unreleased (thirtieth batch) — crash-recoverable durable control replay (T23)
 
 - Added stable command markers to transport control-event idempotency keys. If

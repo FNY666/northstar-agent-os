@@ -49,7 +49,33 @@ class ProviderError(RuntimeError):
 
     Providers raise this; the loop converts it into an ``error_during_execution``
     result event. No other exception type may cross a provider boundary.
+
+    ``error_code`` is deliberately small and provider-neutral. The loop uses it
+    to distinguish a recoverable context-window overflow from an ordinary
+    outage, authentication failure, or rate limit; it must never retry the
+    latter merely because an exception happened to contain the word "context".
     """
+
+    error_code = "provider_error"
+    retryable = False
+
+
+class ContextOverflowError(ProviderError):
+    """The provider rejected the request because its input context was too large."""
+
+    error_code = "context_overflow"
+    retryable = True
+
+
+def is_context_overflow(error: BaseException) -> bool:
+    """Return whether a provider error is explicitly classified as overflow.
+
+    Provider adapters should raise :class:`ContextOverflowError`, while custom
+    providers may expose the same two attributes on their own ``ProviderError``
+    subclass. This helper keeps the loop independent of a concrete SDK.
+    """
+
+    return getattr(error, "error_code", "") == "context_overflow"
 
 
 # --------------------------------------------------------------------------
@@ -381,10 +407,19 @@ class ResultMessage:
     permission_denials: tuple[dict[str, Any], ...] = ()
     stop_reason: str = ""
     role: Literal["result"] = "result"
+    # Continuity metadata is part of the terminal report, not just an internal
+    # boundary event, so CLI/SDK consumers can account for rollover without
+    # replaying the whole transcript.
+    context_windows: int = 1
+    context_overflow_retries: int = 0
 
     def __post_init__(self) -> None:
         if self.subtype not in RESULT_SUBTYPES:
             raise ValueError(f"ResultMessage.subtype must be one of {RESULT_SUBTYPES}")
+        if isinstance(self.context_windows, bool) or not isinstance(self.context_windows, int) or self.context_windows < 1:
+            raise ValueError("ResultMessage.context_windows must be a positive integer")
+        if isinstance(self.context_overflow_retries, bool) or not isinstance(self.context_overflow_retries, int) or self.context_overflow_retries < 0:
+            raise ValueError("ResultMessage.context_overflow_retries must be a non-negative integer")
 
     @property
     def is_error(self) -> bool:
@@ -491,6 +526,10 @@ class GenerationRequest:
     agent: str = ""
     turn_index: int = 0
     depth: int = 0
+    # Optional host-side limit forwarded for provider diagnostics. The runtime
+    # performs the preflight itself; providers must not rely on this field to
+    # enforce safety.
+    context_window_tokens: int | None = None
 
     def snapshot(self) -> dict[str, Any]:
         """A redaction-safe description of the request for tracing/tests."""
@@ -501,6 +540,7 @@ class GenerationRequest:
             "tool_names": [tool.get("name") for tool in self.tools],
             "turn_index": self.turn_index,
             "depth": self.depth,
+            "context_window_tokens": self.context_window_tokens,
         }
 
 
@@ -522,6 +562,10 @@ class Provider:
     """Base class for providers; subclasses implement :meth:`generate`."""
 
     name: str = "base"
+    # Optional model/provider hint. RuntimeConfig.context_window_tokens takes
+    # precedence; a hint is useful for embedded providers that know their model
+    # limit without making the runtime depend on an SDK's model catalogue.
+    context_window_tokens: int | None = None
 
     def generate(self, request: GenerationRequest) -> Generation:  # pragma: no cover - interface
         raise NotImplementedError("providers must implement generate()")
@@ -597,6 +641,8 @@ __all__ = [
     "Message",
     "Provider",
     "ProviderError",
+    "ContextOverflowError",
+    "is_context_overflow",
     "RESULT_SUBTYPES",
     "SYSTEM_SUBTYPES",
     "ResultMessage",

@@ -79,6 +79,7 @@ _ALLOWED_KEYS = frozenset({
     "halt_on_denial",
     "agent",
     "compaction_threshold_tokens",
+    "context_window_tokens",
     "project_context",
 })
 _ALLOWED_MODES = frozenset({"default", "plan"})
@@ -113,6 +114,7 @@ class PolicyFile:
     halt_on_denial: bool | None = None
     agent: str | None = None                    # a known built-in agent name
     compaction_threshold_tokens: int | None = None  # <= DEFAULT_COMPACTION_THRESHOLD_TOKENS
+    context_window_tokens: int | None = None    # lower context budget, when the host supplies one
     project_context: str | bool | None = None   # file name, False to disable, None = default
 
     @property
@@ -134,6 +136,7 @@ class PolicyFile:
             "halt_on_denial": self.halt_on_denial,
             "agent": self.agent,
             "compaction_threshold_tokens": self.compaction_threshold_tokens,
+            "context_window_tokens": self.context_window_tokens,
             "project_context": self.project_context_setting,
         }
 
@@ -241,6 +244,11 @@ def load_policy_file(
     max_tool_calls = ceiling("max_tool_calls", DEFAULT_MAX_TOOL_CALLS)
     compaction = ceiling("compaction_threshold_tokens", DEFAULT_COMPACTION_THRESHOLD_TOKENS, allow_zero=True)
 
+    context_window = raw.get("context_window_tokens")
+    if context_window is not None:
+        if isinstance(context_window, bool) or not isinstance(context_window, int) or context_window < 512:
+            fail("context_window_tokens must be an integer >= 512")
+
     budget = raw.get("max_budget_usd")
     if budget is not None:
         if isinstance(budget, bool) or not isinstance(budget, (int, float)) or budget <= 0:
@@ -282,6 +290,7 @@ def load_policy_file(
         halt_on_denial=halt,
         agent=agent,
         compaction_threshold_tokens=compaction,
+        context_window_tokens=context_window,
         project_context=context if context is not DEFAULT_PROJECT_CONTEXT_FILE or "project_context" in raw else None,
     )
 

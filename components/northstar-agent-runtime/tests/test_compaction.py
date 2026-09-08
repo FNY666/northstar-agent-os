@@ -16,6 +16,7 @@ from compaction import (
     is_safe_cut,
     latest_safe_cut,
     pending_tool_uses,
+    rollover,
     safe_cuts,
     should_compact,
 )
@@ -188,6 +189,38 @@ class CompactionOutcomeTests(unittest.TestCase):
         outcome = compact(transcript, force=True, keep_messages=2, instructions="keep every path")
         self.assertIn("keep every path", outcome.summary)
 
+    def test_rollover_replaces_the_safe_transcript_and_records_lineage(self):
+        transcript = self.build(6)
+        outcome = rollover(
+            transcript,
+            context_window_tokens=1800,
+            max_output_tokens=200,
+            window_index=3,
+            session_id="session-1",
+            reason="test overflow",
+        )
+        self.assertTrue(outcome.performed, outcome.reason)
+        self.assertEqual(outcome.mode, "window_rollover")
+        self.assertEqual(len(outcome.transcript), 1)
+        self.assertEqual(outcome.boundary.data["window_id"], "session-1:window:3")
+        self.assertEqual(outcome.boundary.data["sequence"], 3)
+        self.assertEqual(outcome.boundary.data["lineage"]["previous_window_id"], "session-1:window:2")
+        self.assertLessEqual(outcome.tokens_after + 200, 1800)
+        self.assertEqual(pending_tool_uses(outcome.transcript), ())
+
+    def test_rollover_never_cuts_a_pending_tool_exchange(self):
+        transcript = [UserMessage.text_block("q"), assistant_with_call("pending")]
+        outcome = rollover(
+            transcript,
+            context_window_tokens=1800,
+            max_output_tokens=200,
+            window_index=1,
+            session_id="session-1",
+        )
+        self.assertFalse(outcome.performed)
+        self.assertIn("mid tool exchange", outcome.reason)
+        self.assertEqual(outcome.transcript, tuple(transcript))
+
     def test_extractive_summary_is_bounded_and_deterministic(self):
         transcript = self.build(10)
         first = extractive_summary(transcript)
@@ -215,6 +248,44 @@ class CompactionOutcomeTests(unittest.TestCase):
 class CompactionAtRuntimeTests(RuntimeTestCase):
     def transcript_after(self, report):
         return report.transcript
+
+    def test_context_preflight_rolls_into_a_new_window_before_generation(self):
+        provider = self.provider([text_turn("done")])
+        report = self.runtime(
+            provider=provider,
+            compaction_threshold_tokens=None,
+            context_window_tokens=4000,
+            max_output_tokens=100,
+        ).run_collect("large context " * 3000)
+        self.assertTrue(report.ok)
+        self.assertEqual(report.context_windows, 2)
+        self.assertEqual(len(report.window_rollovers), 1)
+        boundary = report.window_rollovers[0]
+        self.assertEqual(boundary["mode"], "window_rollover")
+        self.assertEqual(boundary["sequence"], 1)
+        self.assertEqual(len(provider.requests), 1, "preflight rollover must happen before the first provider call")
+        self.assertEqual(report.compact_boundaries[0].data["lineage"]["session_id"], report.session_id)
+
+    def test_rollover_after_tools_does_not_repeat_a_completed_call(self):
+        workspace = self.workspace({"big.txt": "q" * 60_000 + "\n"})
+        provider = self.provider(
+            [
+                tool_turn("Read", {"path": "big.txt"}, usage={"input_tokens": 20, "output_tokens": 10}),
+                text_turn("done"),
+            ]
+        )
+        report = self.runtime(
+            provider=provider,
+            workspace=workspace,
+            compaction_threshold_tokens=None,
+            context_window_tokens=4000,
+            max_output_tokens=100,
+        ).run_collect("read it")
+        self.assertTrue(report.ok)
+        self.assertEqual(len(report.tool_calls), 1)
+        self.assertEqual(len(report.window_rollovers), 1)
+        self.assertEqual(provider.cursor, 2)
+        self.assertIn("tool_result", report.compact_boundaries[0].content)
 
     def test_the_loop_never_sends_a_dangling_tool_use_after_compacting(self):
         workspace = self.workspace({"big.txt": "q" * 60_000 + "\n"})

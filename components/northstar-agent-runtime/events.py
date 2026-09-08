@@ -43,6 +43,8 @@ def event_to_dict(event: Any) -> dict[str, Any]:
             "total_usage": event.total_usage.as_dict(),
             "session_id": event.session_id,
             "pricing_estimated": event.pricing_estimated,
+            "context_windows": event.context_windows,
+            "context_overflow_retries": event.context_overflow_retries,
             "errors": list(event.errors),
             "permission_denials": list(event.permission_denials),
         }

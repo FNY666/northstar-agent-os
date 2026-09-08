@@ -304,6 +304,10 @@ Deterministic, provider-free summary.
 
 Summarise a safe prefix of ``transcript``; keep the tail verbatim.
 
+#### `rollover(transcript: Sequence[Any], *, context_window_tokens: int, max_output_tokens: int, window_index: int, session_id: str='', overhead_tokens: int=0, reason: str='context budget remains above the configured window', summarizer: Callable[[Sequence[Any]], str] | None=None, instructions: str='')`
+
+Start a new logical context window without executing anything again.
+
 #### `summary_block(outcome: CompactionOutcome)`
 
 ### `doctor`
@@ -449,6 +453,8 @@ Everything a caller gets back from :meth:`AgentRuntime.run_collect`.
 - `cost_usd()`
 - `events_of(kind: type)`
 - `compact_boundaries()`
+- `context_windows()`
+  - Number of logical provider windows used by this run.
 - `trace()`
 - `as_dict()`
 #### `AgentRuntime`
@@ -1036,6 +1042,14 @@ Message and provider vocabulary shared by every Northstar runtime module.
 #### `ProviderError`
 
 Raised by a provider for any failure the loop should classify.
+
+#### `ContextOverflowError`
+
+The provider rejected the request because its input context was too large.
+
+#### `is_context_overflow(error: BaseException)`
+
+Return whether a provider error is explicitly classified as overflow.
 
 #### `Usage`
 

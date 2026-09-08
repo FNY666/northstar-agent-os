@@ -121,6 +121,7 @@ def _add_run_arguments(parser: argparse.ArgumentParser) -> None:
     limits.add_argument("--max-budget-usd", type=float, default=None, help="cost ceiling in USD (error_max_budget_usd)")
     limits.add_argument("--compaction-threshold-tokens", type=int, default=60_000, help="compact above this many estimated tokens; 0 disables")
     limits.add_argument("--compaction-keep-messages", type=int, default=4, help="tail size never summarised")
+    limits.add_argument("--context-window-tokens", type=int, default=None, help="provider context budget; reserve max output, then compact or roll over")
 
     policy = parser.add_argument_group("policy")
     policy.add_argument("--workspace", default=".", help="directory the tools are confined to")
@@ -255,6 +256,9 @@ def _print_dry_run(
     print(f"max_turns={config.max_turns} "
           f"max_tool_calls={config.max_tool_calls or 'unlimited'} "
           f"max_budget_usd={config.max_budget_usd or 'unlimited'}")
+    print(f"context_window_tokens={config.context_window_tokens or 'provider/default'} "
+          f"max_output_tokens={config.max_output_tokens} "
+          f"compaction_threshold_tokens={config.compaction_threshold_tokens or 'off'}")
     print(f"sidecar={'on' if config.sidecar_socket else 'off'} "
           f"session_dir={args.session_dir or 'off'} "
           f"halt_on_denial={config.halt_on_denial} "
@@ -525,6 +529,10 @@ def _run(args: argparse.Namespace) -> int:
         args.compaction_threshold_tokens,
         policy.compaction_threshold_tokens if policy is not None else None,
     )
+    context_window = tighten(
+        args.context_window_tokens,
+        policy.context_window_tokens if policy is not None else None,
+    )
     halt_on_denial = bool(args.halt_on_denial or (policy is not None and policy.halt_on_denial))
 
     config_kwargs: dict[str, Any] = {
@@ -539,6 +547,7 @@ def _run(args: argparse.Namespace) -> int:
         "max_output_tokens": args.max_output_tokens,
         "compaction_threshold_tokens": compaction_threshold or None,
         "compaction_keep_messages": args.compaction_keep_messages,
+        "context_window_tokens": context_window,
         "max_subagent_depth": args.max_subagent_depth,
         "allow_nested_delegation": args.allow_nested_delegation,
         "halt_on_denial": halt_on_denial,

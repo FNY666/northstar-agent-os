@@ -37,7 +37,7 @@ from checkpoints import (
     list_checkpoints,
     prune_checkpoints,
 )
-from compaction import CompactionOutcome, compact, should_compact
+from compaction import CompactionOutcome, compact, rollover, should_compact
 from hooks import HookInput, HookRegistry
 from permissions import (
     DelegationVerdict,
@@ -68,6 +68,7 @@ from providers.base import (
     ToolUseBlock,
     Usage,
     UserMessage,
+    is_context_overflow,
     estimate_transcript_tokens,
     render_transcript,
     transcript_to_api,
@@ -133,6 +134,10 @@ class RuntimeConfig:
     max_output_tokens: int = 4096
     compaction_threshold_tokens: int | None = DEFAULT_COMPACTION_THRESHOLD_TOKENS
     compaction_keep_messages: int = 4
+    # Optional total provider context budget. ``None`` keeps the historical
+    # provider-controlled behaviour; when set, input estimate plus output reserve
+    # is fitted before every generation and may roll into a new logical window.
+    context_window_tokens: int | None = None
     tool_limits: ToolLimits = field(default_factory=ToolLimits)
     sidecar_socket: str | None = None
     sidecar_timeout_ms: int = 30_000
@@ -170,6 +175,13 @@ class RuntimeConfig:
             fail("compaction_keep_messages must keep at least one message")
         if self.max_output_tokens < 1:
             fail("max_output_tokens must be positive")
+        if self.context_window_tokens is not None:
+            if isinstance(self.context_window_tokens, bool) or not isinstance(self.context_window_tokens, int):
+                fail("context_window_tokens must be an integer or None")
+            if self.context_window_tokens < 512:
+                fail("context_window_tokens must be >= 512 or None to use the provider default")
+            if self.context_window_tokens <= self.max_output_tokens:
+                fail("context_window_tokens must leave room beyond max_output_tokens")
         if self.depth < 0:
             fail("depth must not be negative")
         if self.max_subagent_depth < 0:
@@ -202,6 +214,8 @@ class RuntimeConfig:
             "allow_nested_delegation": self.allow_nested_delegation,
             "halt_on_denial": self.halt_on_denial,
             "compaction_threshold_tokens": self.compaction_threshold_tokens,
+            "context_window_tokens": self.context_window_tokens,
+            "max_output_tokens": self.max_output_tokens,
             "checkpoint_policy": self.checkpoint_policy.as_dict(),
             "sidecar": bool(self.sidecar_socket),
         }
@@ -316,6 +330,7 @@ class RunReport:
     receipts: tuple[ActionReceipt, ...] = ()
     subagents: tuple[SubagentReport, ...] = ()
     compactions: tuple[dict[str, Any], ...] = ()
+    window_rollovers: tuple[dict[str, Any], ...] = ()
     checkpoints: tuple[dict[str, Any], ...] = ()
     hook_fires: tuple[dict[str, Any], ...] = ()
     errors: tuple[str, ...] = ()
@@ -361,6 +376,11 @@ class RunReport:
         )
 
     @property
+    def context_windows(self) -> int:
+        """Number of logical provider windows used by this run."""
+        return 1 + len(self.window_rollovers)
+
+    @property
     def trace(self) -> str:
         return self._trace
 
@@ -375,6 +395,8 @@ class RunReport:
             "denials": [denial.as_dict() for denial in self.denials],
             "subagents": [report.as_dict() for report in self.subagents],
             "compactions": list(self.compactions),
+            "context_windows": self.context_windows,
+            "window_rollovers": list(self.window_rollovers),
             "checkpoints": list(self.checkpoints),
             "errors": list(self.errors),
             "cost_usd": result.total_cost_usd if result else 0.0,
@@ -398,6 +420,9 @@ class _RunState:
     subagents: list[SubagentReport] = field(default_factory=list)
     tool_reports: list[ToolCallReport] = field(default_factory=list)
     compactions: list[dict[str, Any]] = field(default_factory=list)
+    window_rollovers: list[dict[str, Any]] = field(default_factory=list)
+    context_window_index: int = 0
+    context_overflow_retries: int = 0
     checkpoints: list[dict[str, Any]] = field(default_factory=list)
     hook_fires: list[dict[str, Any]] = field(default_factory=list)
     final_text: str = ""
@@ -583,6 +608,7 @@ class AgentRuntime:
         state = _RunState(session_id=self.session_id)
         if resume:
             state.transcript.extend(resume)
+            state.context_window_index = self._latest_window_index(state.transcript)
         self._pending_state = state
         self._last_report = None
         # A subagent's run hangs off the span its parent opened for it, so the
@@ -659,6 +685,9 @@ class AgentRuntime:
                 # None means compaction is off; a host that passed a threshold on
                 # the command line can confirm the number that took effect.
                 "compaction_threshold_tokens": config.compaction_threshold_tokens,
+                "context_window_tokens": self._context_window_limit(),
+                "context_overhead_tokens": self._context_overhead_tokens(),
+                "max_output_tokens": config.max_output_tokens,
             },
             "depth": config.depth,
             "workspace": str(self.sandbox.root_real),
@@ -712,59 +741,149 @@ class AgentRuntime:
             if stop is not None:
                 yield self._finish(state, stop)
                 return
+            # There are two deliberately separate safeguards: the historical
+            # threshold compaction, then a hard context-budget preflight. The
+            # latter can force one safe compaction even when the configured
+            # threshold is disabled, and can then hand the conversation to a new
+            # logical window instead of sending an oversized request.
+            boundaries: list[CompactionOutcome] = []
+            last_compaction: CompactionOutcome | None = None
             if should_compact(state.transcript, config.compaction_threshold_tokens):
-                outcome = self._compact(state, turn_index=turn_index)
-                if outcome.performed and outcome.boundary is not None:
-                    state.transcript = list(outcome.transcript)
-                    self.sessions.append(
-                        "compact_boundary",
-                        {"agent": config.agent, "subtype": "compact_boundary", "content": outcome.summary, "data": outcome.as_dict()},
+                last_compaction = self._compact(state, turn_index=turn_index)
+                boundaries.append(last_compaction)
+                self._accept_context_boundary(state, last_compaction)
+
+            context_limit = self._context_window_limit()
+            if context_limit is not None and not self._context_fits(state, context_limit):
+                if last_compaction is None:
+                    last_compaction = self._compact(state, turn_index=turn_index)
+                    boundaries.append(last_compaction)
+                    self._accept_context_boundary(state, last_compaction)
+                if not self._context_fits(state, context_limit):
+                    handoff = self._rollover_context(
+                        state,
+                        turn_index=turn_index,
+                        context_limit=context_limit,
+                        reason="preflight estimate plus output reserve exceeds the configured context window",
                     )
+                    boundaries.append(handoff)
+                    self._accept_context_boundary(state, handoff)
+                if not self._context_fits(state, context_limit):
+                    state.errors.append(
+                        f"context preflight could not fit the transcript in {context_limit} tokens "
+                        f"after safe compaction and rollover"
+                    )
+                    for outcome in boundaries:
+                        if outcome.performed and outcome.boundary is not None:
+                            yield outcome.boundary
+                    yield self._finish(state, "error_during_execution")
+                    return
+
+            for outcome in boundaries:
+                if outcome.performed and outcome.boundary is not None:
                     yield outcome.boundary
 
             state.cost_at_turn_start = self.budget.total_cost_usd
             mutated_this_turn = False
             with run_span.child(f"turn[{turn_index}]") as turn_span:
                 turn_span.set_attributes({"turn.index": turn_index, "turn.depth": config.depth, "agent.name": config.agent})
-                request = GenerationRequest(
-                    system=config.system_prompt,
-                    messages=tuple(transcript_to_api(state.transcript)),
-                    tools=self.api_tools(),
-                    model=config.model,
-                    max_tokens=config.max_output_tokens,
-                    agent=config.agent,
-                    turn_index=turn_index,
-                    depth=config.depth,
-                )
                 generation: Generation | None = None
                 breakdown = None
-                with turn_span.child("generation") as generation_span:
-                    generation_span.set_attributes({"provider.name": self.provider_name, "model": config.model, "turn.index": turn_index})
-                    try:
-                        candidate = self.provider.generate(request)
-                    except Exception as error:  # noqa: BLE001 - a provider fault is an event
-                        state.errors.append(f"provider failure on turn {turn_index}: {type(error).__name__}: {error}")
-                        generation_span.record_error(f"{type(error).__name__}")
-                    else:
-                        if not isinstance(candidate, Generation):
-                            state.errors.append(f"provider returned {type(candidate).__name__} instead of a Generation")
+                recovery_boundary: SystemMessage | None = None
+                overflow_recovered = False
+                for attempt in range(2):
+                    request = GenerationRequest(
+                        system=config.system_prompt,
+                        messages=tuple(transcript_to_api(state.transcript)),
+                        tools=self.api_tools(),
+                        model=config.model,
+                        max_tokens=config.max_output_tokens,
+                        agent=config.agent,
+                        turn_index=turn_index,
+                        depth=config.depth,
+                        context_window_tokens=self._context_window_limit(),
+                    )
+                    span_name = "generation" if attempt == 0 else "generation.context_recovery"
+                    retry = False
+                    with turn_span.child(span_name) as generation_span:
+                        generation_span.set_attributes(
+                            {
+                                "provider.name": self.provider_name,
+                                "model": config.model,
+                                "turn.index": turn_index,
+                                "generation.attempt": attempt + 1,
+                            }
+                        )
+                        try:
+                            candidate = self.provider.generate(request)
+                        except Exception as error:  # noqa: BLE001 - a provider fault is an event
+                            if is_context_overflow(error) and not overflow_recovered:
+                                known_limit = self._context_window_limit()
+                                recovery_limit = known_limit
+                                if recovery_limit is None:
+                                    # A provider can classify an overflow even
+                                    # when it did not publish a numeric limit. A
+                                    # conservative derived target gives the one
+                                    # recovery attempt a bounded landing zone.
+                                    estimated = estimate_transcript_tokens(state.transcript)
+                                    recovery_limit = max(
+                                        config.max_output_tokens + self._context_overhead_tokens() + 512,
+                                        estimated // 2,
+                                    )
+                                handoff = self._rollover_context(
+                                    state,
+                                    turn_index=turn_index,
+                                    context_limit=recovery_limit,
+                                    reason="provider classified the request as context_overflow",
+                                )
+                                if handoff.performed and self._context_fits(state, recovery_limit):
+                                    self._accept_context_boundary(state, handoff)
+                                    recovery_boundary = handoff.boundary
+                                    overflow_recovered = True
+                                    state.context_overflow_retries += 1
+                                    generation_span.set_attribute("context.recovered", True)
+                                    retry = True
+                                else:
+                                    state.errors.append(
+                                        f"provider context overflow on turn {turn_index} could not be recovered: "
+                                        f"{handoff.reason}"
+                                    )
+                                    generation_span.record_error("context_overflow_unrecoverable")
+                            else:
+                                state.errors.append(
+                                    f"provider failure on turn {turn_index}: {type(error).__name__}: {error}"
+                                )
+                                generation_span.record_error(f"{type(error).__name__}")
                         else:
-                            generation = candidate
-                            breakdown = self.budget.observe(generation.usage, generation.model or config.model)
-                            # Usage and cost are recorded while the generation span is
-                            # still open. The instant it ends, OpenTelemetry discards
-                            # any further attribute write silently and the cost simply
-                            # goes missing from the trace with no error anywhere.
-                            generation_span.record_usage(
-                                generation.usage,
-                                breakdown.total_usd,
-                                extra={
-                                    "stop_reason": generation.stop_reason,
-                                    "pricing.estimated": breakdown.pricing_estimated,
-                                    "pricing.source": breakdown.pricing_source,
-                                    "tokens.total": generation.usage.total_tokens,
-                                },
-                            )
+                            if not isinstance(candidate, Generation):
+                                state.errors.append(
+                                    f"provider returned {type(candidate).__name__} instead of a Generation"
+                                )
+                            else:
+                                generation = candidate
+                                breakdown = self.budget.observe(generation.usage, generation.model or config.model)
+                                # Usage and cost are recorded while the generation span is
+                                # still open. The instant it ends, OpenTelemetry discards
+                                # any further attribute write silently and the cost simply
+                                # goes missing from the trace with no error anywhere.
+                                generation_span.record_usage(
+                                    generation.usage,
+                                    breakdown.total_usd,
+                                    extra={
+                                        "stop_reason": generation.stop_reason,
+                                        "pricing.estimated": breakdown.pricing_estimated,
+                                        "pricing.source": breakdown.pricing_source,
+                                        "tokens.total": generation.usage.total_tokens,
+                                    },
+                                )
+                    if retry:
+                        continue
+                    break
+                if recovery_boundary is not None:
+                    # The failed request never executed tools. Expose the handoff
+                    # before the successful assistant event so consumers can
+                    # reconstruct the exact window lineage.
+                    yield recovery_boundary
                 if generation is None or breakdown is None:
                     yield self._finish(state, "error_during_execution")
                     return
@@ -1623,6 +1742,7 @@ class AgentRuntime:
             max_output_tokens=self.config.max_output_tokens,
             compaction_threshold_tokens=definition.compaction_threshold_tokens if definition.compaction_threshold_tokens is not None else self.config.compaction_threshold_tokens,
             compaction_keep_messages=self.config.compaction_keep_messages,
+            context_window_tokens=self.config.context_window_tokens,
             tool_limits=self.limits,
             sidecar_socket=self.config.sidecar_socket,
             sidecar_timeout_ms=self.config.sidecar_timeout_ms,
@@ -1767,7 +1887,126 @@ class AgentRuntime:
             return False
         return self._delegation_allowed(self.config.depth + 1)
 
-    # -- compaction --------------------------------------------------------
+    # -- context budget and compaction ------------------------------------
+    def _context_window_limit(self) -> int | None:
+        """Resolve the explicit limit first, then an optional provider hint."""
+        configured = self.config.context_window_tokens
+        if configured is not None:
+            return configured
+        hinted = getattr(self.provider, "context_window_tokens", None)
+        if isinstance(hinted, int) and not isinstance(hinted, bool) and hinted >= 512:
+            return hinted
+        return None
+
+    @staticmethod
+    def _latest_window_index(messages: Sequence[Any]) -> int:
+        latest = 0
+        for message in messages:
+            if not isinstance(message, SystemMessage) or not isinstance(message.data, dict):
+                continue
+            raw = message.data.get("window_index")
+            if isinstance(raw, int) and not isinstance(raw, bool):
+                latest = max(latest, raw)
+        return latest
+
+    def _context_overhead_tokens(self) -> int:
+        """Estimate fixed request content absent from the transcript list."""
+        return estimate_transcript_tokens(
+            [{"system": self.config.system_prompt, "tools": self.api_tools()}]
+        )
+
+    def _context_fits(self, state: _RunState, limit: int) -> bool:
+        # ``max_output_tokens`` is a reserve, not a promise that the provider will
+        # spend it. Reserving the full cap prevents a request that happens to fit
+        # now from overflowing as soon as the model uses its normal output budget.
+        return (
+            estimate_transcript_tokens(state.transcript)
+            + self._context_overhead_tokens()
+            + self.config.max_output_tokens
+            <= limit
+        )
+
+    def _accept_context_boundary(self, state: _RunState, outcome: CompactionOutcome) -> None:
+        """Apply and persist one boundary exactly once before it is yielded."""
+        if not outcome.performed or outcome.boundary is None:
+            return
+        state.transcript = list(outcome.transcript)
+        payload = outcome.as_dict()
+        if outcome.mode == "window_rollover":
+            # Keep the lineage projection alongside the generic compaction
+            # counters; callers should not need to dereference the event object
+            # just to correlate a report entry with a persisted boundary.
+            payload.update(dict(outcome.boundary.data))
+            state.compactions.append(payload)
+            raw_index = outcome.boundary.data.get("window_index")
+            if isinstance(raw_index, int) and not isinstance(raw_index, bool):
+                state.context_window_index = raw_index
+            state.window_rollovers.append(payload)
+        payload["session_id"] = state.session_id
+        payload["window_index"] = state.context_window_index
+        self.sessions.append(
+            "compact_boundary",
+            {
+                "agent": self.config.agent,
+                "subtype": "compact_boundary",
+                "content": outcome.summary,
+                "data": payload,
+            },
+        )
+
+    def _rollover_context(
+        self,
+        state: _RunState,
+        *,
+        turn_index: int,
+        context_limit: int,
+        reason: str,
+    ) -> CompactionOutcome:
+        """Create a bounded continuity summary for the next logical window."""
+        pre = self._fire(
+            state,
+            "PreCompact",
+            HookInput(
+                event="PreCompact",
+                session_id=state.session_id,
+                agent=self.config.agent,
+                depth=self.config.depth,
+                turn_index=turn_index,
+                data={
+                    "mode": "window_rollover",
+                    "messages": len(state.transcript),
+                    "tokens": estimate_transcript_tokens(state.transcript),
+                    "context_window_tokens": context_limit,
+                    "threshold_tokens": self.config.compaction_threshold_tokens,
+                },
+            ),
+        )
+        if pre.denied:
+            outcome = CompactionOutcome(
+                performed=False,
+                reason=f"context-window rollover refused by the {pre.denied_by} hook: {pre.deny_reason}",
+                transcript=tuple(state.transcript),
+                tokens_before=estimate_transcript_tokens(state.transcript),
+                tokens_after=estimate_transcript_tokens(state.transcript),
+                mode="window_rollover",
+            )
+            state.compactions.append(outcome.as_dict())
+            return outcome
+        outcome = rollover(
+            state.transcript,
+            context_window_tokens=context_limit,
+            max_output_tokens=self.config.max_output_tokens,
+            window_index=state.context_window_index + 1,
+            session_id=state.session_id,
+            overhead_tokens=self._context_overhead_tokens(),
+            reason=reason,
+            summarizer=self.summarizer,
+            instructions="\n".join(pre.additional_context),
+        )
+        if not outcome.performed:
+            state.compactions.append(outcome.as_dict())
+        return outcome
+
     def _compact(self, state: _RunState, *, turn_index: int) -> CompactionOutcome:
         pre = self._fire(
             state,
@@ -1782,6 +2021,8 @@ class AgentRuntime:
                     "messages": len(state.transcript),
                     "tokens": estimate_transcript_tokens(state.transcript),
                     "threshold_tokens": self.config.compaction_threshold_tokens,
+                    "context_window_tokens": self._context_window_limit(),
+                    "mode": "compaction",
                 },
             ),
         )
@@ -1833,6 +2074,8 @@ class AgentRuntime:
             errors=tuple(state.errors),
             permission_denials=tuple(denial.as_dict() for denial in state.denials),
             stop_reason=subtype,
+            context_windows=1 + len(state.window_rollovers),
+            context_overflow_retries=state.context_overflow_retries,
         )
 
     def _finish(self, state: _RunState, subtype: str) -> ResultMessage:
@@ -1873,6 +2116,8 @@ class AgentRuntime:
                 "pricing.estimated": self.budget.pricing_estimated,
                 "denial.count": len(state.denials),
                 "compaction.count": len([item for item in state.compactions if item.get("performed")]),
+                "context.window_count": 1 + len(state.window_rollovers),
+                "context.overflow_retries": state.context_overflow_retries,
                 "stop.block_count": state.stop_blocks,
                 "duration_ms": int((time.monotonic() - state.started) * 1000),
             }
@@ -1898,6 +2143,7 @@ class AgentRuntime:
             receipts=tuple(state.receipts),
             subagents=tuple(state.subagents),
             compactions=tuple(state.compactions),
+            window_rollovers=tuple(state.window_rollovers),
             checkpoints=tuple(state.checkpoints),
             hook_fires=tuple(state.hook_fires),
             errors=tuple(state.errors),

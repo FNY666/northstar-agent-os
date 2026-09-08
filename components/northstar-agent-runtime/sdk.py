@@ -70,7 +70,8 @@ class RunOptions:
     session_dir: str | None = None  # persist the append-only JSONL transcript here
     max_subagent_depth: int = 1
     allow_nested_delegation: bool = False
-    compaction_threshold_tokens: int | None = 60_000  # None disables compaction
+    compaction_threshold_tokens: int | None = 60_000  # None disables threshold compaction
+    context_window_tokens: int | None = None  # None uses the provider hint/default
     max_output_tokens: int = 4096
     checkpoint_policy: Any = None  # CheckpointPolicy or its mapping; requires session_dir when enabled
     redact_tool_output: bool = False  # omit tool output bodies from the transcript
@@ -107,6 +108,8 @@ class RunReport:
     events: list[dict[str, Any]] = field(default_factory=list)
     receipts: list[dict[str, Any]] = field(default_factory=list)
     checkpoints: list[dict[str, Any]] = field(default_factory=list)
+    context_windows: int = 1
+    window_rollovers: list[dict[str, Any]] = field(default_factory=list)
 
     @property
     def is_error(self) -> bool:
@@ -191,6 +194,7 @@ def _build(options: RunOptions, resume: str | None = None) -> tuple[Any, Any]:
         "workspace": options.workspace,
         "max_output_tokens": options.max_output_tokens,
         "compaction_threshold_tokens": options.compaction_threshold_tokens,
+        "context_window_tokens": options.context_window_tokens,
         "checkpoint_policy": options.checkpoint_policy if options.checkpoint_policy is not None else CheckpointPolicy(),
         "max_subagent_depth": options.max_subagent_depth,
         "allow_nested_delegation": options.allow_nested_delegation,
@@ -268,4 +272,6 @@ def run(options: RunOptions, resume: str | None = None) -> RunReport:
         events=events,
         receipts=[receipt.as_dict() for receipt in report.receipts] if report is not None else [],
         checkpoints=list(report.checkpoints) if report is not None else [],
+        context_windows=report.context_windows if report is not None else 1,
+        window_rollovers=list(report.window_rollovers) if report is not None else [],
     )

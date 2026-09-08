@@ -3,10 +3,12 @@ from __future__ import annotations
 
 from providers.base import (
     AssistantMessage,
+    ContextOverflowError,
     Generation,
     GenerationRequest,
     Provider,
     ProviderError,
+    is_context_overflow,
     ResultMessage,
     SystemMessage,
     Usage,
@@ -15,10 +17,12 @@ from providers.base import (
 
 __all__ = [
     "AssistantMessage",
+    "ContextOverflowError",
     "Generation",
     "GenerationRequest",
     "Provider",
     "ProviderError",
+    "is_context_overflow",
     "ResultMessage",
     "SystemMessage",
     "Usage",

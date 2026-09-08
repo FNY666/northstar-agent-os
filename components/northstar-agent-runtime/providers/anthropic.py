@@ -14,6 +14,7 @@ from __future__ import annotations
 from typing import Any, Sequence
 
 from providers.base import (
+    ContextOverflowError,
     Generation,
     GenerationRequest,
     Provider,
@@ -41,6 +42,7 @@ class AnthropicProvider(Provider):
         client: Any | None = None,
         api_key: str | None = None,
         max_tokens: int = 4096,
+        context_window_tokens: int | None = None,
         temperature: float | None = None,
         prompt_cache: bool = True,
         max_retries: int = 2,
@@ -49,8 +51,12 @@ class AnthropicProvider(Provider):
     ) -> None:
         if max_tokens <= 0:
             raise ValueError("max_tokens must be positive")
+        if context_window_tokens is not None:
+            if isinstance(context_window_tokens, bool) or not isinstance(context_window_tokens, int) or context_window_tokens < 512:
+                raise ValueError("context_window_tokens must be an integer >= 512 or None")
         self.model = model
         self.max_tokens = max_tokens
+        self.context_window_tokens = context_window_tokens
         self.temperature = temperature
         self.prompt_cache = prompt_cache
         self._client = client
@@ -113,9 +119,17 @@ class AnthropicProvider(Provider):
         payload = self.build_payload(request)
         try:
             response = self.client.messages.create(**payload)
-        except ProviderError:
+        except ProviderError as error:
+            if _is_context_overflow(error):
+                raise ContextOverflowError(
+                    f"anthropic context window overflow: {_reason(error)}"
+                ) from error
             raise
         except Exception as error:  # noqa: BLE001 - must surface as an event
+            if _is_context_overflow(error):
+                raise ContextOverflowError(
+                    f"anthropic context window overflow: {_reason(error)}"
+                ) from error
             raise ProviderError(f"anthropic request failed: {_reason(error)}") from error
         return self.normalise(response)
 
@@ -197,6 +211,25 @@ def _reason(error: Exception) -> str:
     """
     text = str(error) or type(error).__name__
     return text if len(text) <= 300 else text[:297] + "..."
+
+
+def _is_context_overflow(error: Exception) -> bool:
+    """Recognise provider-specific 400s without retrying ordinary failures."""
+    code = str(getattr(error, "code", "") or getattr(error, "error_code", "")).lower()
+    text = str(error).lower()
+    haystack = f"{code} {text}"
+    markers = (
+        "context_length_exceeded",
+        "context window",
+        "context length",
+        "maximum context",
+        "max context",
+        "too many tokens",
+        "prompt is too long",
+        "input is too long",
+        "input tokens exceed",
+    )
+    return any(marker in haystack for marker in markers)
 
 
 def _unused(blocks: Sequence[Any]) -> None:  # pragma: no cover

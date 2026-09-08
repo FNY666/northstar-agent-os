@@ -16,6 +16,7 @@ from support import RuntimeTestCase, text_turn, tool_turn
 
 from providers.anthropic import AnthropicProvider
 from providers.base import (
+    ContextOverflowError,
     Generation,
     GenerationRequest,
     Provider,
@@ -311,6 +312,19 @@ class AnthropicNormaliseTests(unittest.TestCase):
         with self.assertRaises(ProviderError) as caught:
             AnthropicProvider(client=client).generate(GenerationRequest(system="", messages=(), tools=(), model="", max_tokens=10))
         self.assertEqual(str(caught.exception), "already normalised")
+
+    def test_context_length_errors_are_classified_for_one_controlled_recovery(self):
+        client = FakeClient([RuntimeError("Error code: 400 context_length_exceeded")])
+        with self.assertRaises(ContextOverflowError) as caught:
+            AnthropicProvider(client=client).generate(GenerationRequest(system="", messages=(), tools=(), model="", max_tokens=10))
+        self.assertEqual(caught.exception.error_code, "context_overflow")
+        self.assertTrue(caught.exception.retryable)
+
+    def test_unrelated_400_errors_are_not_classified_as_context_overflow(self):
+        client = FakeClient([RuntimeError("Error code: 400 invalid api key")])
+        with self.assertRaises(ProviderError) as caught:
+            AnthropicProvider(client=client).generate(GenerationRequest(system="", messages=(), tools=(), model="", max_tokens=10))
+        self.assertNotIsInstance(caught.exception, ContextOverflowError)
 
     def test_the_request_payload_is_what_the_sdk_received(self):
         client = FakeClient([FakeResponse(content=[{"type": "text", "text": "ok"}])])

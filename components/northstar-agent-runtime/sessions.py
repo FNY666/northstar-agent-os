@@ -444,6 +444,8 @@ class SessionStore:
                 "total_cost_usd": message.total_cost_usd,
                 "total_usage": message.total_usage.as_dict(),
                 "pricing_estimated": message.pricing_estimated,
+                "context_windows": message.context_windows,
+                "context_overflow_retries": message.context_overflow_retries,
                 "errors": list(message.errors),
                 "permission_denials": list(message.permission_denials),
             },

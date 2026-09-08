@@ -10,7 +10,17 @@ import support  # noqa: F401
 from support import RuntimeTestCase, text_turn, tool_turn
 
 from loop import AgentRuntime, RuntimeConfig, RuntimeConfigurationError, run_agent, task_tool_spec
-from providers.base import AssistantMessage, ResultMessage, SystemMessage, ToolResultBlock, UserMessage
+from providers.base import (
+    AssistantMessage,
+    ContextOverflowError,
+    Generation,
+    Provider,
+    ResultMessage,
+    SystemMessage,
+    TextBlock,
+    ToolResultBlock,
+    UserMessage,
+)
 from providers.scripted import ScriptedProvider
 from tools import ToolRegistry, ToolResult, ToolSpec
 
@@ -34,6 +44,35 @@ class InitEventTests(RuntimeTestCase):
         self.assertEqual(data["sidecar"], False)
         self.assertEqual(data["session_id"], runtime.session_id)
         self.assertEqual(sorted(data["hooks"].values()), [0, 0, 0, 0, 0, 0, 0, 0, 0, 0])
+
+    def test_a_classified_context_overflow_gets_one_window_recovery_and_no_tool_replay(self):
+        class OverflowOnce(Provider):
+            name = "overflow-once"
+
+            def __init__(self):
+                self.calls = 0
+                self.requests = []
+
+            def generate(self, request):
+                self.calls += 1
+                self.requests.append(request)
+                if self.calls == 1:
+                    raise ContextOverflowError("context_length_exceeded")
+                return Generation(content=(TextBlock(text="done"),), model=self.name)
+
+        provider = OverflowOnce()
+        report = self.runtime(
+            provider=provider,
+            compaction_threshold_tokens=None,
+            max_output_tokens=100,
+        ).run_collect("go")
+        self.assertTrue(report.ok)
+        self.assertEqual(provider.calls, 2)
+        self.assertEqual(report.context_windows, 2)
+        self.assertEqual(report.result.context_windows, 2)
+        self.assertEqual(report.result.context_overflow_retries, 1)
+        self.assertEqual(report.window_rollovers[0]["boundary_reason"], "provider classified the request as context_overflow")
+        self.assertEqual(report.context_windows, 1 + len(report.window_rollovers))
 
     def test_the_init_event_is_persisted_but_never_sent_to_the_model(self):
         store = self.session_store()

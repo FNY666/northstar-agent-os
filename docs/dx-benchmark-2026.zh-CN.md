@@ -1007,3 +1007,29 @@ T23 针对 T22 明确留下的 EventStore commit 与 receipt ledger commit crash
   仍保持 `remote_worker --score` 94/100。
 
 T23 仍是 Unreleased；没有创建 tag、GitHub Release，也没有发布到 PyPI/npm。
+
+### 10.27 当前实现复核：自动 compaction + context window rollover（T24，2026-09-08）
+
+T24 解决的是长会话的连续性边界，而不是把 provider 的真实容量伪装成一个
+Northstar 自己知道的常数。当前实现采用混合路径：
+
+- generation 前先估算 transcript、system prompt、tool schema 的输入开销，并为
+  `max_output_tokens` 留出 reserve；配置可来自 `RuntimeConfig`/SDK、CLI
+  `--context-window-tokens`、`.northstar/config.toml`，也可由嵌入式 provider
+  提供 hint。没有可靠 limit 时仍保留旧的 provider-controlled 行为。
+- 超限时先走既有 safe-boundary compaction；如果仍放不进窗口，创建连续的新 logical
+  window。新窗口只携带可信的 continuity summary 与 compact boundary，系统/项目提示、
+  session id、预算、usage、hooks、receipts、session integrity 和最终结果继续属于同一
+  run；boundary 持久化 `window_id`、`sequence`、previous-window lineage、reason 与
+  summary。
+- rollover 与 compaction 一样拒绝切断 pending `tool_use`/`tool_result` exchange。
+  已完成的工具不会在新窗口重新 dispatch；provider 明确分类为 `context_overflow` 时
+  最多做一次同轮 recovery retry，普通 400、鉴权、限流或网络错误不会被无限重试。
+- 离线测试覆盖：preflight rollover、工具完成后的不重复执行、pending exchange 拒绝、
+  lineage/session projection、Anthropic context-overflow 分类和一次性 recovery；runtime
+  606 项、全仓 `make test` 944 项（940 pass、4 项可选 OTel skip）。
+  诚实边界仍在：开发环境没有真实 Anthropic credentials，尚未进行 live provider 验证；
+  `remote_worker --score` 仍为 94/100，Profile B、mTLS、真实 worker canary、scheduler
+  与 hosted execution 仍是独立缺口。
+
+T24 仍是 Unreleased；没有创建 tag、GitHub Release，也没有发布到 PyPI/npm。
