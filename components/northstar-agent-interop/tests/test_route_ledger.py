@@ -1,5 +1,7 @@
 import json
 import multiprocessing
+import stat
+import subprocess
 import sys
 import tempfile
 import time
@@ -501,7 +503,79 @@ class RouteLedgerPersistenceTests(RouteLedgerTestCase):
         with self.assertRaises(ValueError):
             self.ledger.replay("run-route-001")
 
+    def test_append_honors_external_flock_before_mutating_history(self):
+        import fcntl
+        import subprocess
+        import time
+
+        self.ledger.append_decision(
+            DECISION,
+            attempt=1,
+            idempotency_key="route-001-selected-1",
+            recorded_at=1_001,
+        )
+        receipt = self.started().to_dict()
+        payload_path = Path(self.tempdir.name) / "receipt.json"
+        payload_path.write_text(json.dumps(receipt), encoding="utf-8")
+        started_path = Path(self.tempdir.name) / "child-started"
+        result_path = Path(self.tempdir.name) / "child-result"
+        script = Path(self.tempdir.name) / "flock-child.py"
+        script.write_text(
+            "import json, sys\n"
+            "from pathlib import Path\n"
+            "sys.path.insert(0, sys.argv[3])\n"
+            "from route_ledger import RouteLedger, RouteReceipt\n"
+            "Path(sys.argv[4]).write_text('started')\n"
+            "ledger = RouteLedger(sys.argv[1])\n"
+            "ledger.append_receipt(RouteReceipt.from_dict(json.loads(Path(sys.argv[2]).read_text())))\n"
+            "Path(sys.argv[5]).write_text('finished')\n",
+            encoding="utf-8",
+        )
+        lock_path = self.path.with_name(self.path.name + ".lock")
+        with lock_path.open("a+b") as lock:
+            fcntl.flock(lock.fileno(), fcntl.LOCK_EX)
+            child = subprocess.Popen(
+                [
+                    sys.executable,
+                    str(script),
+                    str(self.path),
+                    str(payload_path),
+                    str(COMPONENT_ROOT),
+                    str(started_path),
+                    str(result_path),
+                ]
+            )
+            deadline = time.monotonic() + 3
+            while not started_path.exists() and time.monotonic() < deadline:
+                time.sleep(0.01)
+            self.assertTrue(started_path.exists())
+            time.sleep(0.25)
+            self.assertFalse(result_path.exists())
+            fcntl.flock(lock.fileno(), fcntl.LOCK_UN)
+        child.wait(timeout=5)
+        self.assertEqual(child.returncode, 0)
+        self.assertEqual(len(self.ledger.read_history("run-route-001")), 2)
+
+    def test_stale_lock_file_is_reusable_and_normalized(self):
+        lock_path = self.path.with_name(self.path.name + ".lock")
+        lock_path.write_text("stale owner metadata", encoding="utf-8")
+        self.ledger.append_decision(
+            DECISION,
+            attempt=1,
+            idempotency_key="route-001-selected-1",
+            recorded_at=1_001,
+        )
+        self.assertEqual(len(self.ledger.read_history("run-route-001")), 1)
+        self.assertEqual(
+            stat.S_IMODE(lock_path.stat().st_mode),
+            0o600,
+        )
+        self.ledger.append_receipt(self.started())
+        self.assertEqual(len(self.ledger.read_history("run-route-001")), 2)
+
     def test_concurrent_same_idempotency_key_is_written_once(self):
+        import subprocess
+
         result_dir = Path(self.tempdir.name) / "results"
         result_dir.mkdir(mode=0o700)
         self.ledger.append_decision(
@@ -513,34 +587,41 @@ class RouteLedgerPersistenceTests(RouteLedgerTestCase):
         receipt = self.started().to_dict()
         payload_path = Path(self.tempdir.name) / "receipt.json"
         payload_path.write_text(json.dumps(receipt), encoding="utf-8")
-        script = Path(self.tempdir.name) / "append_child.py"
+        script = Path(self.tempdir.name) / "append-child.py"
         script.write_text(
             "import json, sys\n"
             "from pathlib import Path\n"
             "sys.path.insert(0, sys.argv[3])\n"
             "from route_ledger import RouteLedger, RouteReceipt\n"
             "ledger = RouteLedger(sys.argv[1])\n"
-            "value = json.loads(Path(sys.argv[2]).read_text())\n"
             "try:\n"
-            "    ledger.append_receipt(RouteReceipt.from_dict(value))\n"
+            "    ledger.append_receipt(RouteReceipt.from_dict(json.loads(Path(sys.argv[2]).read_text())))\n"
             "    result = 'ok'\n"
             "except Exception as error:\n"
             "    result = type(error).__name__\n"
             "Path(sys.argv[4]).write_text(result)\n",
             encoding="utf-8",
         )
-        import subprocess
         processes = []
-        for index in range(2):
+        for index in range(4):
             result_path = result_dir / f"child-{index}"
+            error_path = result_dir / f"child-{index}.err"
+            error_stream = error_path.open("w")
             process = subprocess.Popen(
-                [sys.executable, str(script), str(self.path), str(payload_path), str(COMPONENT_ROOT), str(result_path)]
+                [sys.executable, str(script), str(self.path), str(payload_path), str(COMPONENT_ROOT), str(result_path)],
+                stdout=subprocess.DEVNULL,
+                stderr=error_stream,
+                text=True,
             )
-            processes.append((process, result_path))
-        for process, _result_path in processes:
+            processes.append((process, result_path, error_path, error_stream))
+        for process, _result_path, _error_path, _error_stream in processes:
             process.wait(timeout=5)
-        results = [result_path.read_text() for _process, result_path in processes]
-        self.assertEqual(sum(result == "ok" for result in results), 2)
+        for _process, _result_path, _error_path, error_stream in processes:
+            error_stream.close()
+        results = [result_path.read_text() for _process, result_path, _error_path, _error_stream in processes]
+        for process, _result_path, error_path, _error_stream in processes:
+            self.assertEqual(process.returncode, 0, error_path.read_text())
+        self.assertEqual(sum(result == "ok" for result in results), 4)
         self.assertEqual(len(self.ledger.read_history("run-route-001")), 2)
 
 

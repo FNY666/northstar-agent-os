@@ -4,7 +4,8 @@ from __future__ import annotations
 import hashlib
 import json
 import os
-import tempfile
+import fcntl
+from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -451,6 +452,21 @@ class RouteReplay:
 class RouteLedger:
     def __init__(self, path: str | Path):
         self.path = Path(path).absolute()
+        self.lock_path = self.path.with_name(self.path.name + ".lock")
+        self.lock_path.parent.mkdir(parents=True, exist_ok=True)
+        self.lock_path.touch(mode=0o600, exist_ok=True)
+        os.chmod(self.lock_path, 0o600)
+
+    @contextmanager
+    def _locked(self):
+        try:
+            with self.lock_path.open("a+b") as lock:
+                os.chmod(self.lock_path, 0o600)
+                fcntl.flock(lock.fileno(), fcntl.LOCK_EX)
+                yield
+                fcntl.flock(lock.fileno(), fcntl.LOCK_UN)
+        except OSError as error:
+            raise ValueError("route ledger lock is unavailable") from error
 
     def _read_with_boundary(self) -> tuple[list[RouteEvent], int]:
         if not self.path.exists():
@@ -464,7 +480,7 @@ class RouteLedger:
             raise ValueError("route ledger cannot be read") from error
         for index, raw_line in enumerate(lines):
             is_last = index == len(lines) - 1
-            has_newline = raw_line.endswith((b"\\n", b"\\r"))
+            has_newline = raw_line.endswith((b"\n", b"\r"))
             try:
                 line = raw_line.decode("utf-8")
                 value = json.loads(line)
@@ -486,6 +502,10 @@ class RouteLedger:
         return events
 
     def _append(self, event: RouteEvent) -> RouteEvent:
+        with self._locked():
+            return self._append_locked(event)
+
+    def _append_locked(self, event: RouteEvent) -> RouteEvent:
         events, valid_bytes = self._read_with_boundary()
         for existing in events:
             if existing.idempotency_key == event.idempotency_key:
@@ -519,6 +539,10 @@ class RouteLedger:
     def append_receipt(self, receipt: RouteReceipt) -> RouteEvent:
         if not isinstance(receipt, RouteReceipt):
             raise ValueError("receipt is invalid")
+        with self._locked():
+            return self._append_receipt_locked(receipt)
+
+    def _append_receipt_locked(self, receipt: RouteReceipt) -> RouteEvent:
         events = self._read()
         if not events or events[0].event_type != "decision.selected":
             raise ValueError("route decision must be persisted first")
@@ -536,7 +560,7 @@ class RouteLedger:
             receipt,
             sequence=existing.sequence if existing is not None else len(events) + 1,
         )
-        return self._append(event)
+        return self._append_locked(event)
 
     def read_history(self, run_id: str) -> list[RouteEvent]:
         events = self._read()

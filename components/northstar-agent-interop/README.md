@@ -131,3 +131,22 @@ the adapter is looked up. `assert_route_matches_handoff()` permits only
 further deadline narrowing; all other identity, policy, target, digest and
 capability fields must match exactly. No real backend or network service is
 used by the local tests.
+
+## Local tamper-evident Route Lineage v2
+
+`route_lineage.py` is a local-only persistence layer above the bounded v1
+`RouteEvent` contract. It wraps each event in a versioned v2 envelope with a
+canonical SHA-256 event digest and a predecessor digest. Recovery verifies
+field schemas, event digests, contiguous sequence numbers and the complete
+predecessor chain before returning a `verified` result.
+
+A hash chain cannot detect deletion of its final row by itself. Callers that
+need rollback detection must retain and pass the returned `LineageCursor`;
+recovery fails closed when the current head differs. The v1-to-v2 migration
+reads the source JSONL without writing it, validates the complete route state
+machine, writes and verifies a separate temporary target, and refuses to
+overwrite an existing target. The migrated target remains appendable.
+
+This is evidence and recovery plumbing, not authorization, sandboxing or
+backend execution. It contains no credentials, prompts, raw provider errors,
+network calls or real Codex/Claude Code/Hermes/Cursor/OpenBot integration.
