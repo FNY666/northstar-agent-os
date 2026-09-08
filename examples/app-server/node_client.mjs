@@ -9,6 +9,7 @@ import crypto from "node:crypto";
 import net from "node:net";
 
 export const APP_PROTOCOL = "northstar.agent-app.v1";
+export const APP_OPERATIONS = ["app.describe", "run.start", "run.status", "run.events", "run.wait", "run.cancel"];
 export const MAX_FRAME_BYTES = 1024 * 1024;
 export const DEFAULT_WAIT_MS = 10_000;
 export const MAX_WAIT_MS = 30_000;
@@ -144,6 +145,10 @@ export class AppServerClient {
       throw remoteError(response.error);
     }
     return response;
+  }
+
+  async describe({ requestId, actorId }) {
+    return this.call("app.describe", { requestId, actorId });
   }
 
   async start({ requestId, actorId, prompt }) {

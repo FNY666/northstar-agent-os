@@ -10,6 +10,13 @@ if (!socketPath || !secretHex) {
 
 try {
   const client = new AppServerClient(socketPath, { secret: Buffer.from(secretHex, "hex") });
+  const description = await client.describe({
+    requestId: "node-example-describe",
+    actorId: "node-example",
+  });
+  if (!description.capabilities.operations.includes("run.wait")) {
+    throw new Error("host did not advertise run.wait");
+  }
   const started = await client.start({
     requestId: "node-example-start",
     actorId: "node-example",

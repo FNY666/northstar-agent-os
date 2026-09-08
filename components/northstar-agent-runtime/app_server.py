@@ -7,9 +7,9 @@ observe/cancel that host-owned run. It cannot choose a provider, workspace,
 Python callable, tool, or filesystem path.
 
 The optional Unix-socket server adds a small versioned JSON-lines protocol:
-``run.start``, ``run.status``, ``run.events``, ``run.wait`` and ``run.cancel``.
-Every request and response is HMAC-authenticated, request ids are idempotent,
-event pages are
+``app.describe``, ``run.start``, ``run.status``, ``run.events``, ``run.wait`` and
+``run.cancel``. Every request and response is HMAC-authenticated, request ids
+are idempotent, event pages are
 bounded, and the socket is private to the local filesystem. Runtime cancellation
 is cooperative: a provider or tool already in progress is allowed to finish and
 the loop stops at its next governed boundary.
@@ -35,6 +35,14 @@ from typing import Any, Callable, Mapping
 from events import event_to_dict
 
 APP_PROTOCOL = "northstar.agent-app.v1"
+APP_OPERATIONS = (
+    "app.describe",
+    "run.start",
+    "run.status",
+    "run.events",
+    "run.wait",
+    "run.cancel",
+)
 MAX_PROMPT_CHARS = 128_000
 MAX_FRAME_BYTES = 1_048_576
 MAX_EVENT_PAGE = 256
@@ -521,6 +529,25 @@ class AppServer:
             request_id = RunManager._id(raw.get("request_id"), field_name="request_id")
             actor_id = RunManager._id(raw.get("actor_id"), field_name="actor_id")
             operation = raw.get("op")
+            if operation == "app.describe":
+                allowed = {"protocol", "auth", "request_id", "actor_id", "op"}
+                _reject_unknown(raw, allowed)
+                return self._response(
+                    request_id=request_id,
+                    ok=True,
+                    op=operation,
+                    capabilities={
+                        "operations": list(APP_OPERATIONS),
+                        "max_frame_bytes": self.max_frame_bytes,
+                        "max_prompt_chars": MAX_PROMPT_CHARS,
+                        "max_event_page": MAX_EVENT_PAGE,
+                        "max_wait_ms": MAX_WAIT_MS,
+                        "event_retention": self.manager.max_event_retention,
+                        "cancellation": "cooperative",
+                        "manager_registry": "in_memory",
+                        "remote_execution": False,
+                    },
+                )
             if operation == "run.start":
                 allowed = {"protocol", "auth", "request_id", "actor_id", "op", "prompt"}
                 _reject_unknown(raw, allowed)
@@ -562,7 +589,7 @@ class AppServer:
                 )
                 result.pop("request_id", None)
                 return self._response(request_id=request_id, ok=True, op=operation, **result)
-            raise AppServerError("invalid_request", "op must be one of run.start, run.status, run.events, run.cancel, run.wait")
+            raise AppServerError("invalid_request", f"op must be one of {', '.join(APP_OPERATIONS)}")
         except json.JSONDecodeError as error:
             return self._error(request_id, AppServerError("invalid_request", f"invalid JSON: {error.msg}"))
         except AppServerError as error:
@@ -781,6 +808,9 @@ class AppClient:
             raise AppServerError("remote_error", "app-server request failed")
         return response
 
+    def describe(self, *, request_id: str, actor_id: str) -> dict[str, Any]:
+        return self.call("app.describe", request_id=request_id, actor_id=actor_id)
+
     def start(self, *, request_id: str, actor_id: str, prompt: str) -> dict[str, Any]:
         return self.call("run.start", request_id=request_id, actor_id=actor_id, prompt=prompt)
 
@@ -818,6 +848,7 @@ class AppClient:
 
 
 __all__ = [
+    "APP_OPERATIONS",
     "APP_PROTOCOL",
     "AppClient",
     "AppServer",

@@ -1134,3 +1134,19 @@ T29 只修复跨 Python/Node HMAC canonical JSON 的一个真实边界，不扩�
   cooperative cancellation 与 local-only 边界不变。
 
 T29 仍是 Unreleased；没有创建 tag、GitHub Release，也没有发布到 PyPI/npm。
+
+### 10.34 当前实现复核：app-server capability discovery（T30，2026-09-08）
+
+T30 增加的是 consumer negotiation/diagnostics，而不是新的执行权限：
+
+- authenticated `app.describe` 返回 operation list、frame/prompt/page/retention/wait
+  limits，以及 `cooperative` cancellation、`in_memory` manager registry 和
+  `remote_execution=false` 的明确边界。它不返回 provider、workspace、policy 或
+  secret material。
+- Python `AppClient.describe()` 与 Node consumer 在 start 前可读取同一份 capability
+  projection；现有 actor binding、HMAC、strict fields 和 host-owned runtime seam 不变。
+- 这为未来 consumer 做版本/限制适配提供稳定入口，但不实现 scheduler、approval
+  bypass、durable manager reattach 或 remote worker。runtime 仍为 617 项、全仓
+  `make test` 955 项（951 pass、4 项可选 OTel skip）。
+
+T30 仍是 Unreleased；没有创建 tag、GitHub Release，也没有发布到 PyPI/npm。

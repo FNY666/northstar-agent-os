@@ -128,6 +128,7 @@ Authenticated dispatcher plus an optional private Unix socket.
 Small authenticated client for the experimental Unix app-server.
 
 - `call(operation: str, *, request_id: str, actor_id: str, **fields: Any)`
+- `describe(*, request_id: str, actor_id: str)`
 - `start(*, request_id: str, actor_id: str, prompt: str)`
 - `status(*, request_id: str, actor_id: str, run_id: str)`
 - `events(*, request_id: str, actor_id: str, run_id: str, from_sequence: int=0, limit: int=MAX_EVENT_PAGE)`

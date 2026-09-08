@@ -1,5 +1,16 @@
 # Northstar Agent OS — initial public component
 
+## Unreleased (thirty-eighth batch) — app-server capability discovery (T30)
+
+- Added authenticated `app.describe`, which advertises protocol operations, frame
+  and prompt limits, event page/retention bounds, wait ceiling, and explicit
+  `cooperative` cancellation / `in_memory` registry boundaries. It never exposes
+  provider, workspace or policy internals.
+- Python and Node consumers can discover the local server contract before
+  starting a run. This is negotiation/diagnostics only: no scheduler, approval
+  bypass, durable manager registry, remote transport or release/publication
+  claim was added.
+
 ## Unreleased (thirty-seventh batch) — cross-runtime numeric wire stability (T29)
 
 - Tightened app-server response projection so finite integral floats are emitted
