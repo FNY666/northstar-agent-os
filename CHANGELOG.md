@@ -1,5 +1,49 @@
 # Northstar Agent OS — initial public component
 
+## Unreleased (twenty-second batch) — a fork point you can check before you pay for it
+
+Checkpoints have been written since the resume-budget fix, and `run --resume-from` has honoured
+them since then. What did not exist was any way to *ask* about one: which boundaries a session
+recorded, whether the transcript still agrees with a given boundary, and what a resumed run
+would start with. That left the component's strongest durability primitive as its least
+inspectable one, and left a README line reading "no tamper evidence" when a prefix digest is
+sitting in every checkpoint record.
+
+- **`session_replay.py` — verification that cannot drift from the real thing.** A checkpoint is
+  checked by rebuilding the transcript with the reader's own filter and recomputing the digest
+  with the writer's own canonical form, so "verified in this listing" means "accepted by
+  `run --resume-from`" by construction rather than by two implementations agreeing by luck. The
+  four verdicts are `verified`, `digest-mismatch`, `prefix-short` and `malformed` - a recognised
+  checkpoint missing `turns` is reported, never defaulted to zero, because restoring partial
+  counters is exactly the budget leak checkpoints were invented to close.
+- **`sessions checkpoints` — the CI-shaped half.** It walks one transcript or a whole directory
+  and exits 1 when any boundary is not verified: an edited or truncated audit trail becomes a
+  build result, without a provider key, without a session lease, and without spending a run to
+  discover it. Each boundary is priced, too - with a `max_budget_usd` ceiling in force the
+  listing says what a resume inherits and what it may still spend, and says plainly that a
+  boundary whose spend already covers the ceiling would be refused.
+- **`sessions replay` — what a run did, and where it could have been cut.** Records fold into
+  frames (`start`, `prompt`, `turn`, `checkpoint`, `compaction`, `result`, `note`): a turn frame
+  carries the assistant's prose, its tool calls, its error and denial counts and its token
+  usage, so a listing is diff-able instead of a scroll. `--from-checkpoint N` cuts the replay at
+  that boundary, which is the fork preview: everything after it is history the child would not
+  see. `--json` gives the same shape to a machine, and the child's `session_start` lineage is
+  rendered ("forked from session X record #N, inherits 2 turns / $0.500000") because a fork that
+  cannot name its parent is a fork nobody can audit.
+- **What it refuses to be.** Not a TUI and not a replayer: no tool is executed a second time, and
+  nothing is re-decided - the transcript is read as the record of what was permitted. Not a
+  signature: a digest detects the accident and the casual edit, and someone who can rewrite the
+  file can recompute one, which is now stated in the limitations instead of being waved at.
+- **Two shapes accepted on purpose**: `transcript_len` governs the cut (a boundary before any
+  message legitimately digests the empty transcript), and lineage is read from the nested
+  `resumed_from` block the loop writes, with the older flat keys still accepted.
+
+Runtime slice 1149 → **1188** (+39 `test_session_replay`, including the test that lists a
+boundary as verified and then *really* resumes from it, and the one that edits a prompt and
+shows both commands refusing), repository `make test` 1446 → **1485**, all offline; `make demo`
+unchanged. Docs: the runtime README's read-back section and its "no tamper evidence" line,
+cookbook §16, blueprint §6.27, and `dx-benchmark` §10.3/§10.5 (T3 closed).
+
 ## Unreleased (twenty-first batch) — reading someone else's `.mcp.json` without inheriting their approvals
 
 Three places in this repository told operators to declare MCP servers in a workspace

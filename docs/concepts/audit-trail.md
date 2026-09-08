@@ -28,6 +28,16 @@ therefore carries what the run claimed (`locked`, `ttl_seconds`,
 `kernel_lock_available`) and no process identity, since a record that differs
 between two identical runs cannot be digested at all.
 
+That trustworthiness is checkable without spending a run. `sessions checkpoints
+--session-dir D` recomputes every boundary's prefix digest from the file as it stands and exits
+1 when any of them no longer matches, through the same code path `run --resume-from` uses to
+decide whether to accept a fork point - so the listing and the resume cannot disagree about
+whether the transcript still describes itself. `sessions replay` renders the run as frames and,
+with `--from-checkpoint`, cuts at a boundary to show exactly what a resumed run inherits.
+Neither command writes, takes the lease, or re-executes a tool. This is detection, not proof:
+a digest is recomputable by anyone who can rewrite the file. It is still worth a CI job, because
+a property nobody can check is not a property.
+
 ## 2. Durable-run event store and verification
 
 `northstar-durable-run` generalises the audit surface for long-lived runs:

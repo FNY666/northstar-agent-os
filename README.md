@@ -84,7 +84,7 @@ python3 -m cli plugin verify --workspace .  # review the installed extension bun
 ```
 
 `make test` runs every component's suite and the repository documentation tests
-(1446 tests, all offline).
+(1485 tests, all offline).
 
 Extensions arrive as `northstar.plugin.v1` bundles: one directory packing the four seams
 this runtime already has — skills, agent files, command hooks, MCP servers — installed as a

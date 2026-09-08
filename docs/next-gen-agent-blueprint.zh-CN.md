@@ -18,7 +18,7 @@
 
 这件事有一个可检验的判据，本仓已经具备而头部工具都没有：
 
-> **零凭据、零网络、1446 项测试跑通同一套语义。** 任何被吸收进来的优点，若不能在没有 API key 的情况下被确定性测试，就不算吸收成功——那只是多了一条无法回归的功能面。
+> **零凭据、零网络、1485 项测试跑通同一套语义。** 任何被吸收进来的优点，若不能在没有 API key 的情况下被确定性测试，就不算吸收成功——那只是多了一条无法回归的功能面。
 
 按这个判据，顶级工具的优点分成三类。
 
@@ -73,7 +73,7 @@
    → 头部工具的权限配置是"行为开关"，这里是**可评审、可归因、可 diff 的策略文档**。CI 场景里这是合规资产，不是 DX 糖。
 
 2. **确定性回归治理（治理本身的 golden test）**
-   scripted provider + 1446 项离线测试 + guard 红绿 harness，意味着"把 deny 改成 allow 会让哪些测试变红"是可计算的。
+   scripted provider + 1485 项离线测试 + guard 红绿 harness，意味着"把 deny 改成 allow 会让哪些测试变红"是可计算的。
    → 别人有 output eval；**没有人在 eval 权限决策**。这条可以直接做成公开基准（denial correctness / 注入抵抗 / 预算命中率），是 Northstar 唯一能自定义考题的赛道。
 
 3. **可归因的委派链（contract → execution → receipt）**
@@ -123,11 +123,45 @@
 
 | 项 | 内容 | 验证 |
 |---|---|---|
-| F3 | `checkpoints.py` + `--checkpoint-turns` / `--resume-from` / `--resume-record`；恢复时**继承**花费与计数器；fork 写新文件、父文件字节不变；前缀摘要不符即拒跑；SDK 平价 | `tests/test_checkpoints.py` 26 项，其中"预算不能被 resume 洗掉"直接断言 exit 4 |
+| F3 | `checkpoints.py` + `--checkpoint-turns` / `--resume-from` / `--resume-record`；恢复时**继承**花费与计数器；fork 写新文件、父文件字节不变；前缀摘要不符即拒跑；SDK 平价。**第 22 批补上只读面**：`sessions checkpoints`（校验每条边界，不符即 exit 1）与 `sessions replay --from-checkpoint`（孩子在花钱之前能看到自己会继承什么） | `tests/test_checkpoints.py` 26 项（"预算不能被 resume 洗掉"断言 exit 4）+ `tests/test_session_replay.py` 39 项（含"listing 说 verified 的边界真能 resume"） |
 
 **这一项的真实动机不是便利，是漏洞**：上限是 per-run 的，而 `--resume` 会新开一次运行——
 所以"恢复"一直是绕过 `max_budget_usd` 的后门。现在它必须把父花费带过来；
 嵌入式调用忘了传 seed 过的 `Budget` 会直接报错，而不是拿到更宽的额度。
+
+### 6.27 第二十二批（fork 点必须能在花钱之前被检查）
+
+checkpoint 自第 14 批起就在写，`run --resume-from` 也一直在按它恢复——但**没有任何办法先问一句**：
+这个 session 有哪些边界？第 6 条记录还作不作数？从那儿恢复的孩子会带着什么起步？于是一个组件里
+最强的持久化原语，恰好是其中最不可检视的一个；README 里"无篡改痕迹"那句话也就此失去了 excuse
+（每个 checkpoint 记录里就躺着前缀摘要）。
+
+- **校验不能靠两份实现"碰巧一致"**：`session_replay.py` 用读方自己的过滤器重建 transcript、用写方
+  自己的规范化形式重算摘要，所以"这里说 verified"与"`run --resume-from` 会接受"是**同一条代码路径**
+  的两个出口，而不是两个近似实现。四种结论：`verified` / `digest-mismatch` / `prefix-short` /
+  `malformed`——被认出是 checkpoint 却缺 `turns` 的记录**只报告不补零**，因为"恢复部分计数器"正是
+  checkpoint 当初要堵的那个预算漏洞。
+- **`sessions checkpoints` 是给 CI 的那一半**：扫一个 transcript 或整个目录，有任何边界不是 verified
+  就 **exit 1**。于是"审计流被改过/被截断"变成一个构建结果，不需要 provider key、不占 session lease、
+  也不为了发现它而花一次运行。每条边界同时报价：文件里记着的 `max_budget_usd` 上限减去已花费，就是
+  孩子还能花的钱；已经花完的边界会直说"resume 会被拒"。
+- **`sessions replay` 回答"这次运行干了什么、能在哪儿切"**：记录折成帧（start/prompt/turn/checkpoint/
+  compaction/result/note），一个 turn 帧同时带上散文、调用清单、错误与拒绝计数、token 用量——可 diff
+  的清单，而不是滚动原始记录。`--from-checkpoint N` 把回放**切在该边界处**：那之后的记录是"孩子看不见
+  的历史"，这一句就是 fork 预览。`--json` 给机器同一形状；孩子的 `session_start` 谱系会被渲染出来
+  （"forked from session X record #N, inherits 2 turns / $0.500000"），因为说不出父亲的 fork 就是没人
+  能审计的 fork。
+- **刻意不做的**：不是 TUI，也不是重放执行器——不二次运行任何工具、不重新裁决任何权限，transcript 是
+  "当时被允许了什么"的记录而不是待重演的脚本；也不是签名——摘要能发现事故与顺手改文件，能改写文件的
+  人就能重算摘要，这句现在写进 limitations 而不是含糊过去。
+
+诚实边界继续写全：`transcript_len` 决定切点（在任何消息之前的边界合法地摘要空 transcript）；谱系优先读
+loop 写的嵌套 `resumed_from`，旧的平铺键仍接受（append-only 的文件不能因为读方洁癖而变成读不出）。
+
+测试量到 **1188**（runtime 片，+39：`test_session_replay`，其中两条是"这里说 verified 的边界，真去
+resume 也被接受"与"改一行 prompt 后两条命令一起拒绝"），仓库 `make test` 全绿（51+41+37+65+54+1188+49）。
+接线：runtime README 的读回小节 + Sessions 条目 + limitations 改写、cookbook §16、`py-modules`/`docbuild`
+MANIFEST，以及 `dx-benchmark` §10.5 的 T3 整项收口。
 
 ### 6.26 第二十一批（外家的 `.mcp.json` 可以读，外家的审批不能读）
 
@@ -305,4 +339,4 @@ workspace 的数字，但不需要在这里第二次判定文件名对不对。
 ## 7. 一句话
 
 **"包含所有顶级 agent 的优点"这条路的正确走法，是把每个优点都过一遍"能不能不绕门"的改写；改不动的就明确拒绝。**
-Northstar 的次世代位置不在功能并集上，在于：**同一个 agent loop，别人要牺牲确定性或牺牲边界来换能力，这里两样都不换——而且每一项能力都能在 CI 里用 1446 个无 key 测试证明它今天和昨天行为一致。**
+Northstar 的次世代位置不在功能并集上，在于：**同一个 agent loop，别人要牺牲确定性或牺牲边界来换能力，这里两样都不换——而且每一项能力都能在 CI 里用 1485 个无 key 测试证明它今天和昨天行为一致。**

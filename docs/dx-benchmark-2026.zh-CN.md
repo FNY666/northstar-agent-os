@@ -388,8 +388,8 @@ Northstar 是"运行时组件集合"，不是一个终端产品。因此对标�
 | 程序化 API / 包管理 | 1 | **3** | `sdk.run()/stream_run()` + 事件 dict 词表 + resume + 示例；无 TS 面、无 exec/app-server 协议 |
 | 配置与项目约定 | 1 | **4** | AGENTS.md/config/agents/skills/context-file 齐全；差策略 schema 版本化与托管下发 |
 | 扩展生态（MCP/Skills/Plugins） | 1 | **4** | 四类都占位且默认 deny/只读（安全侧反而领先）：plugin bundle 有封闭 schema、digest 钉住、按宿主门禁与 7 目标导出；差在线市场/索引、MCP HTTP+auth、技能脚本执行 |
-| 会话 / 调试 / 可观测 | 3 | **4** | 读回 + 审计导出 + resume 齐全；差 rewind/checkpoint 与交互式回放 |
-| 测试与确定性 | 5 | **5** | 全仓 1446 项（runtime 片 1149）、guard 红绿 harness、离线 scripted provider（现可彩排 429/529 故障）——头部普遍 3 分档，仍是最稀缺资产 |
+| 会话 / 调试 / 可观测 | 3 | **4** | 读回 + 审计导出 + resume + **fork 点可校验**（`sessions checkpoints` 重算前缀摘要，不符 exit 1）与**确定性 replay**（帧化 + `--from-checkpoint` 预览继承态）；仍是 4 不是 5，因为差的是交互式 TUI 与产品内 rewind，不是可检视性 |
+| 测试与确定性 | 5 | **5** | 全仓 1485 项（runtime 片 1188）、guard 红绿 harness、离线 scripted provider（现可彩排 429/529 故障）——头部普遍 3 分档，仍是最稀缺资产 |
 | 文档与教学 | 3 | **4** | 四层 + 生成 API + examples 索引 + 11 语言；差课程/playground 型教学 |
 | 版本化与发布 | 2 | **3** | 版本单一源 + 对齐测试 + 就绪门 Release CI；未发出版本（按纪律等"最完美"） |
 | 团队 / CI / 协作面 | 2 | **3** | CI 模板 + headless + 审计 feed 天然 CI 友好；差官方 Action/review 后台 |
@@ -413,7 +413,7 @@ Northstar 是"运行时组件集合"，不是一个终端产品。因此对标�
 |---|---|---|---|---|
 | T1 | SDK/可嵌入面 | Codex exec/SDK、Claude Agent SDK | ✅ 已完成（2026-09-07）：`sdk.py`（RunOptions/run/stream_run/RunReport）+ `events.py` 公共事件词表 + examples/sdk 示例；TS 面与稳定 API 承诺待续 | — |
 | T2 | 发布工程 | `@latest`/Release 渠道 | 🟡 管道已完成并留作待命；**按发布纪律撤回 v0.1.0**（未发布、dev0、须过就绪门）；余：pip index 上架 | — |
-| T3 | 交互最小集 | CC `/rewind`+tasks、Gemini checkpointing | checkpoint/restore 子命令 + `sessions` 可视化回放 | 1–2 |
+| T3 | 交互最小集 | CC `/rewind`+tasks、Gemini checkpointing | ✅ **已完成**（第 22 批）：`sessions checkpoints` 校验/报价每条 fork 边界 + `sessions replay`（帧化时间线、`--from-checkpoint` 继承预览、`--json`、谱系）；restore 侧（`--resume-from/--resume-record`）自第 14 批即在。**不做**交互式 TUI/产品内 rewind——那与"确定性可 diff"是两个产品，本仓选后者 | — |
 | T4 | 生态纵深 | CC plugins/marketplace、MCP login | skills `check` ✅（第 15 批）、plugin bundle 打包格式与安装器 ✅（第 19 批，含按宿主门禁与 `plugin export`）、**读外家 `.mcp.json`** ✅（第 21 批：`--mcp-config` + `mcp list`，审批清单一律拒）；余：MCP HTTP+auth 传输、技能脚本沙箱或写明取舍、市场/索引（按 C5 裁定不做） | 1–2 |
 | T5 | 后台/远程化 | Codex Automations、CC remote | durable-run 之上做任务调度 CLI 面 + P3-3 远程 worker 协议评估 | 2–3 |
 | T6 | 治理叙事页 | — | "确定性 + 治理默认值"独立页/演示（评审/CI 场景） | 0.5 |
@@ -423,7 +423,7 @@ Northstar 是"运行时组件集合"，不是一个终端产品。因此对标�
 ### 10.6 结论
 
 - **内核侧差距已经基本收平甚至反超**（测试与确定性 5/5、治理不绕行的架构、审计导出）——这部分不再是对标短板。
-- **外围产品化差距仍然显著**：十维口径 23→37（头部 46 并继续外扩）；把 2026 新战场六维算进来是 **16/30**（头部 ≈24），缺口集中在"可嵌入 SDK 面、发布工程、交互面、后台/远程"——全部在 P3 剩余批次 + 上述 T 清单的可执行范围内，按既有批次节奏约 **5–8 个小批**可把十维推到 40+ 并在新战场完成占位（第二十一批已把 N4"生态市场接入"补到 4：读外家的 `.mcp.json`，而不是让它变成第二份手抄清单）。
+- **外围产品化差距仍然显著**：十维口径 23→37（头部 46 并继续外扩）；把 2026 新战场六维算进来是 **16/30**（头部 ≈24），缺口集中在"可嵌入 SDK 面、发布工程、交互面、后台/远程"——全部在 P3 剩余批次 + 上述 T 清单的可执行范围内，按既有批次节奏约 **4–7 个小批**可把十维推到 40+（T3 已于第 22 批收口） 并在新战场完成占位（第二十一批已把 N4"生态市场接入"补到 4：读外家的 `.mcp.json`，而不是让它变成第二份手抄清单）。
 - **一句话**：已经从"差一个时代"（库 + 手工拼装）追到"差外围成型"（内核领先、外壳未打磨）；下一个里程碑不是再补内核，而是**把治理内核包装成别人能 embed、能发布、能在 CI 里直接用的产品面**。
 
 ### 10.7 本节增补参考来源（2026-06 ~ 2026-09）
@@ -589,3 +589,20 @@ Northstar 是"运行时组件集合"，不是一个终端产品。因此对标�
 测试规模：runtime 1103 → **1149 全绿**（+46：`test_mcp_config`），全仓 **1446 全绿**
 （51+41+37+65+54+1149+49）；N4 3 → **4**（合计 16/30），§10.3"测试与确定性"行与 §10.5 T4 同步。
 版本仍对齐 `0.1.0.dev0` 未发布。
+
+### 2026-09-09（第二十二批）— fork 点先校验再花钱：T3 收口
+
+- **同一份校验，两个出口**：`session_replay.py` 用写方的规范化形式重算 checkpoint 前缀摘要，
+  `sessions checkpoints` 与 `run --resume-from` 因此不可能"碰巧不一致"；结论四档
+  （verified/digest-mismatch/prefix-short/malformed），缺字段只报告不补零。
+- **CI 形状**：任何边界非 verified → **exit 1**（不联网、不占 lease、不花一次运行才知道审计流被动过）；
+  每条边界按 `session_start` 里记的上限报价："继承 $X、还可用 $Y"，或"这条边界恢复即被拒"。
+- **replay 是帧化时间线**：start/prompt/turn/checkpoint/compaction/result/note；`--from-checkpoint N`
+  给孩子会继承的前缀（切在边界处），孩子的 `session_start` 谱系被渲染出来。`--json` 同一形状给机器。
+- **不做**：二次执行工具、重新裁决权限、交互式 TUI 与产品内 rewind（§10.5 T3 因此整体收口，而非转成"待做"）；
+  也**不是签名**——能改写文件的人就能重算摘要，这句已写进 runtime README 的 limitations。
+
+测试规模：runtime 1149 → **1188 全绿**（+39：`test_session_replay`），全仓 **1485 全绿**
+（51+41+37+65+54+1188+49）；§10.3"会话/调试/可观测"行改写（**维持 4**，差的是交互面而非可检视性），
+§10.5 T3 标为完成；剩余 T 清单为 T1（TS 面）、T2（发布，按纪律待命）、T4（MCP HTTP+auth、技能脚本沙箱取舍）、
+T5（后台/远程）、T6（治理叙事页），合计约 **4–7 个小批**。版本仍对齐 `0.1.0.dev0` 未发布。
