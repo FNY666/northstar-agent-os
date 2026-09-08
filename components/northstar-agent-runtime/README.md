@@ -228,6 +228,9 @@ max_turns = 10                  # may only lower the built-in ceiling of 25
 max_tool_calls = 50             # may only lower 50
 max_budget_usd = 0.25           # any positive cap (built-in default: unlimited)
 halt_on_denial = true           # end with error_permission_denied on a refusal
+[[verify]]                      # checked after the run, by this process, not by the model
+kind = "unchanged"
+path = "uv.lock"
 agent = "explorer"              # run as a built-in agent by default (CLI --agent wins)
 compaction_threshold_tokens = 30000   # 0 disables compaction
 project_context = "AGENTS.md"   # file name inside the workspace, or false to disable
@@ -304,10 +307,84 @@ host key, so it cannot verify a binding on the wire. Closing that last gap means
 changing the sidecar's request allowlist (the very thing that makes it refuse
 capabilities), which is a protocol decision for maintainers, not a silent edit.
 
+## Providers and models
+
+Three providers, one governed loop. The model is swappable; the gate is not.
+
+| `--provider`  | what it is                                                     |
+| ------------- | -------------------------------------------------------------- |
+| `scripted`    | replays a JSON script of turns - the offline default every test runs on |
+| `anthropic`   | the Messages API (`anthropic` SDK, lazy import, non-streaming) |
+| `openai`      | the Chat Completions wire: OpenAI, Azure, vLLM, SGLang, Ollama, LM Studio, LiteLLM, OpenRouter and any gateway that speaks it |
+
+`--provider openai` translates both directions on every call: the transcript's
+`tool_use` blocks become `tool_calls` with JSON-encoded `arguments`, `tool_result`
+blocks become `role: "tool"` messages carrying `tool_call_id`, `finish_reason`
+becomes the runtime's own stop vocabulary, and `prompt_tokens_details.cached_tokens`
+lands on `cache_read_input_tokens` so the cost view stays comparable across
+backends. Four decisions worth knowing:
+
+- **`thinking` blocks are dropped from the request, never from the transcript.**
+  Pasting a chain of thought into `content` would feed it back as user text.
+- **Non-JSON `arguments` fail the turn** (`ProviderError`, reported as an event).
+  Coercing them to `{}` would execute a truncated call as a real write.
+- **`--model` is validated against `--provider` before any request**: a `claude-*`
+  id on the chat wire (or a `gpt-*` id on the Messages API) is a guaranteed 400, so
+  it exits `64` without reading a credential or spending a turn.
+- **Price is never invented.** An unknown model id falls through to the
+  conservative tier and the result says `pricing_estimated: true`; a budget cap acts
+  on that number, so over-estimating is the safe direction.
+
+The key comes from the environment only (`OPENAI_API_KEY`, `OPENAI_BASE_URL`) - a
+flag would put a credential in the process list and in CI logs. A `base_url` with no
+key still works, because local servers ignore it while the SDK demands one.
+
+## Postconditions: verifying the work, not the claim
+
+A run ending `success` has always meant only *the model stopped asking for tools*.
+`--verify KIND:PATH[:TEXT]` (and `[[verify]]` in `.northstar/config.toml`) declares
+a claim about the workspace that **this process** checks after the run:
+
+| kind        | holds when                                                   |
+| ----------- | ------------------------------------------------------------ |
+| `exists`    | the path is a regular file at the end of the run             |
+| `absent`    | the path is gone at the end of the run                       |
+| `changed`   | its bytes differ from the pre-run snapshot (a new file counts)|
+| `unchanged` | its bytes are identical to the pre-run snapshot              |
+| `contains`  | the text appears at least `count` times (default 1)          |
+
+```console
+$ northstar-agent-runtime run --verify exists:report.md --verify unchanged:uv.lock
+· postconditions: 1 of 2 check(s) failed
+[error_postconditions_failed] turns=1 tool_calls=0 cost=$0.000000     # exit 6
+```
+
+The rules that make this governance rather than a linter:
+
+- **The conditions are never injected into the prompt.** A model told that
+  `report.md` must contain "all tests pass" will write exactly that and nothing
+  else. They live in the config and the audit stream; the model is not consulted.
+- **`unchanged` is the enforceable one for a review run**, because it constrains
+  what the run may *not* do - and the tool layer, not the model, decides that.
+- **`contains` is a convenience, not proof.** The structural kinds
+  (`exists`/`absent`/`changed`/`unchanged`) are what a report should be signed off
+  on; for "the tests actually pass", declare a `Stop` command hook that runs the
+  test script - it can veto finishing, and it is a vetted script, not a shell.
+- **Digests are taken before the first event**, so neither a hook nor a tool can
+  redefine "before". A symlink or a path that resolves outside the workspace is
+  refused at configuration time (exit 64): evidence from outside the boundary is
+  not evidence about this run.
+- **A repository may add a check and can never remove one**: `[[verify]]` and
+  `--verify` merge additively, and evaluation only reads.
+
+The verdict is its own audit record (`type: "postconditions"`, 12th `RECORD_TYPES`
+entry, rendered by `examples/session-panel`), so an archive proves what was checked
+and what held - independently of anything the assistant said.
+
 ## Events, not exceptions
 
 A run yields the event vocabulary the surrounding host already knows:
-`SystemMessage` (`init`, `compact_boundary`, `informational`), `AssistantMessage`,
+`SystemMessage` (`init`, `compact_boundary`, `informational`, `postconditions`), `AssistantMessage`,
 `UserMessage`, and exactly one `ResultMessage` per run. Every foreseeable
 condition arrives as an event, never as a raised exception:
 
@@ -318,6 +395,7 @@ condition arrives as an event, never as a raised exception:
 | `error_max_tool_calls`      | `max_tool_calls` reached                            |
 | `error_max_budget_usd`      | `max_budget_usd` reached                            |
 | `error_permission_denied`   | a denial ended the run (`halt_on_denial`)           |
+| `error_postconditions_failed` | the model stopped, but a declared workspace check did not hold |
 | `error_during_execution`    | provider failure, malformed tool input, internal bug |
 
 The three ceilings are independent, each with its own subtype, so an operator can
@@ -477,7 +555,10 @@ size (`result_chars`), so truncation is visible instead of inferred.
 | `agents.py`         | agent definitions, registry, verdict parsing                         |
 | `tracing.py`        | span tree, redaction, optional OpenTelemetry export                  |
 | `sidecar_client.py` | Unix-socket client for the sidecar component                         |
-| `providers/`        | `base` (events + contract), `anthropic`, `scripted`                  |
+| `providers/`        | `base` (events + contract), `anthropic`, `openai_compat`, `scripted` |
+| `command_hooks.py`  | repository-declared command hooks: vetted scripts, veto events only, never a shell string |
+| `contract_bridge.py`| request-id derivation and the run-document cross-check on the sidecar boundary |
+| `postconditions.py` | independent end-of-run workspace checks (`exists`/`absent`/`changed`/`unchanged`/`contains`) |
 | `cli.py`            | one governed run from a shell, with distinct exit codes              |
 | `doctor.py`         | `cli doctor` environment self-checks (no requests, no file writes)   |
 | `session_view.py`   | `cli sessions list/show` - the read-back half of the transcripts     |
@@ -496,7 +577,7 @@ size (`result_chars`), so truncation is visible instead of inferred.
 
 `0` success · `1` error_during_execution · `2` error_max_turns ·
 `3` error_max_tool_calls · `4` error_max_budget_usd · `5` error_permission_denied ·
-`64` usage or configuration error (nothing was run). Result errors and refusals
+`6` error_postconditions_failed · `64` usage or configuration error (nothing was run). Result errors and refusals
 are printed to stderr; `--json` emits one object per event.
 
 `--deny-tool` subtracts from the computed allow list rather than leaving a name in

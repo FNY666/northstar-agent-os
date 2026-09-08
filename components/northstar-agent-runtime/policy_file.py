@@ -83,6 +83,9 @@ _ALLOWED_KEYS = frozenset({
     # Declared lifecycle hooks. The shape is checked against the real guardrails
     # in command_hooks.parse_hooks; here it must only be a list of tables.
     "hooks",
+    # ``[[verify]]`` adds postconditions. It only ever *adds* an independent check,
+    # so a repository declaring one cannot loosen anything.
+    "verify",
 })
 _ALLOWED_MODES = frozenset({"default", "plan"})
 _CONTEXT_MARKERS = (
@@ -119,6 +122,10 @@ class PolicyFile:
     project_context: str | bool | None = None   # file name, False to disable, None = default
     #: Raw ``[[hooks]]`` tables, validated by :mod:`command_hooks` before use.
     hooks: tuple[Mapping[str, Any], ...] = ()
+    #: ``[[verify]]`` tables: workspace claims the runtime checks after the run,
+    #: independently of what the model claims. Like hooks, a repository may *add*
+    #: checks; it can never weaken or remove one, and nothing is executed.
+    verify: tuple[Mapping[str, Any], ...] = ()
 
     @property
     def project_context_setting(self) -> str | bool:
@@ -141,6 +148,7 @@ class PolicyFile:
             "compaction_threshold_tokens": self.compaction_threshold_tokens,
             "project_context": self.project_context_setting,
             "hooks": [dict(entry) for entry in self.hooks],
+            "verify": [dict(entry) for entry in self.verify],
         }
 
 
@@ -288,6 +296,36 @@ def load_policy_file(
             fail(f"hooks[{position}] must be a table")
     hooks = tuple(dict(entry) for entry in hooks_raw)
 
+    # Declared postconditions: the same shape rules as hooks apply (a list of
+    # tables, no extra keys, a recognised kind), because a check that silently does
+    # not run is worse than no check at all.
+    verify_raw = raw.get("verify", ())
+    if verify_raw is None:
+        verify_raw = ()
+    if not isinstance(verify_raw, (list, tuple)):
+        fail("verify must be an array of tables ([[verify]])")
+    from postconditions import KINDS as POSTCONDITION_KINDS
+
+    verify_entries: list[dict[str, Any]] = []
+    for position, entry in enumerate(verify_raw):
+        if not isinstance(entry, Mapping):
+            fail(f"verify[{position}] must be a table")
+        unknown = sorted(set(entry) - {"kind", "path", "text", "count"})
+        if unknown:
+            fail(f"verify[{position}] unknown key(s): {', '.join(unknown)} - allowed: kind, path, text, count")
+        kind = entry.get("kind")
+        if not isinstance(kind, str) or kind not in POSTCONDITION_KINDS:
+            fail(f"verify[{position}] kind must be one of: {', '.join(POSTCONDITION_KINDS)}")
+        path_value = entry.get("path")
+        if not isinstance(path_value, str) or not path_value.strip():
+            fail(f"verify[{position}] path must be a non-empty workspace-relative string")
+        if "count" in entry and (not isinstance(entry["count"], int) or isinstance(entry["count"], bool) or entry["count"] < 1):
+            fail(f"verify[{position}] count must be an integer >= 1")
+        if "text" in entry and not isinstance(entry["text"], str):
+            fail(f"verify[{position}] text must be a string")
+        verify_entries.append(dict(entry))
+    verify = tuple(verify_entries)
+
     return PolicyFile(
         source=path,
         schema_version=schema_version,
@@ -304,6 +342,7 @@ def load_policy_file(
         compaction_threshold_tokens=compaction,
         project_context=context if context is not DEFAULT_PROJECT_CONTEXT_FILE or "project_context" in raw else None,
         hooks=hooks,
+        verify=verify,
     )
 
 

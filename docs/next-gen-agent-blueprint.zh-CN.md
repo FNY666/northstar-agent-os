@@ -50,14 +50,15 @@
 | 策略即代码（settings 里写权限/钩子/上限） | Claude Code | `.northstar/config.toml` + `[[hooks]]`，收紧型、fail-closed | ✅ 本批补齐 hooks 面 |
 | 契约化的 run↔执行关联 | 无（Northstar 独有零件） | `contract_bridge`：单一 wire 定义 + 绑定交叉校验 | ✅ 本批 |
 | 检查点/可恢复执行 | LangGraph / Temporal / v2 | 复用 durable-run 的 `EventStore`+`Lease`+`verifier` 接到 turn 边界 | ⛔ 未做（下批 T-durable） |
-| 多模型 | OpenAI 100+ / Cursor | 新增 OpenAI Chat Completions 兼容 provider（一个后端覆盖一片模型） | 🔧 待做（P1-2） |
+| 多模型 | OpenAI 100+ / Cursor | `providers/openai_compat.py`：一个 Chat Completions 适配器覆盖一片模型 | ✅ 已落地（P1-2） |
+| 独立完成判定 | 无人做（各家都把"模型自述"当完成） | `postconditions.py`：`--verify` / `[[verify]]`，运行前后快照比对 | ✅ 已落地 |
 | token 级流式 | 全员 | `StreamDelta` 事件，仍保证唯一 ResultMessage | 🔧 待做 |
 | 显式重试/退避/降级 | Claude fallback | provider 层策略化（当前只有 sidecar 重试） | 🔧 待做 |
 | MCP 现行规范 2026-07-28 | 标准 | 无状态请求 + MRTR + `Mcp-Method/Name` 头 + 旧代际 fallback | 🔧 待做（P1-1） |
 | elicitation ↔ 审批回合 | MCP 特性 | 把"服务器问用户"映射到权限门（**这是别人没有的角度**） | 🔧 待做，优先级高 |
 | OS 级沙箱 | Claude seatbelt/bubblewrap、Gemini gVisor | 可选 `bwrap` 包装器（只读 bind + no net + cgroup），CI 真跑 | 🔧 待做（P1-4，C1 的前置） |
 | 技能供应链校验 | 无人做（第三方审计：99% 坏味道/36% 缺陷） | `northstar skills check`：frontmatter 白名单、注入模式、来源 digest | 🔧 待做（差异化最高） |
-| 会话 rewind/fork | Claude /rewind、LangGraph time-travel | fork-on-read：从 transcript 任意点分叉新 session，**绝不回写**旧文件 | 🔧 待做（与 append-only 兼容） |
+| 会话 rewind/fork | Claude /rewind、LangGraph time-travel | fork-on-read：从 transcript 任意点分叉新 session，**绝不回写**旧文件 | 🔧 待做（与 append-only 兼容，下一批） |
 
 ---
 
@@ -77,9 +78,10 @@
    本批把 runtime↔contract↔sidecar 三方字段焊成一份（漂移即测试失败），`run_id` 贯穿 runtime transcript 与 sidecar 日志；interop 组件已有签名 attestation + narrowed handoff + typed receipt。
    → 多代理生态现状是"消息能传"，没人能回答"**这一步是谁授权的、结果被谁验证过**"。A2A 不管这个，Claude Agent Teams 不管这个。这是 Northstar 的正面战场。
 
-4. **后置条件验证，独立于模型**
-   `verifier.py` 用文件系统的工件摘要判定 `verified|failed|unknown`，不由模型自述。
-   → 接上 runtime 后即为：**agent 说"我改完了"不再算数**。这比任何"自我批评/反思"式提示技巧都更接近次世代该有的定义。
+4. **后置条件验证，独立于模型** ✅ 本批已接进 runtime
+   durable-run 的 `verifier.py` 用文件系统工件摘要判定 `verified|failed|unknown`；本批在 runtime 侧落为 `postconditions.py`（`exists`/`absent`/`changed`/`unchanged`/`contains`），运行前取摘要、结束后由**本进程**比对，失败即 `error_postconditions_failed`（exit 6）并写入独立审计记录类型 `postconditions`。
+   → 即：**agent 说"我改完了"不再算数**。这比任何"自我批评/反思"式提示技巧都更接近次世代该有的定义。
+   → 关键约束：**验证条件绝不进 prompt**——告诉模型要查什么，模型就去写那句话；`contains` 因此被明确标为"便利而非证据"，可依赖的是结构型四种。
 
 5. **把协议的"问用户"变成治理的"要审批"**
    MCP 2026-07-28 的 MRTR/elicitation 让服务器能中途要输入；把它接到权限门上，远端工具的确认请求就走与本地写操作**同一道**门、进**同一条**审计流。
@@ -105,6 +107,20 @@
 | P0-4 | `doctor` 增加 `policy-drift`（对比 git HEAD 的磁盘策略摘要）与 hooks 声明告警；`--dry-run` 打印 `run_id`/`policy_revision`/`protected_prefixes` | 手工实测篡改策略后 warn 命中；文档测试同步 |
 
 **全仓 890 项测试全绿**（sidecar 51 / run-contract 41 / host 37 / durable-run 65 / interop 54 / runtime 596 / 文档 46），离线、无 key、无网络。
+
+### 6.2 第十四批（多模型 + 独立验证）
+
+| 项 | 内容 | 验证 |
+|---|---|---|
+| P1-2 | `providers/openai_compat.py` + `--provider openai`：双向翻译、`thinking` 只出请求不出 transcript、非 JSON `arguments` 失败闭合、reasoning 代际自动换 `max_completion_tokens`、价格不臆造、`--model`/`--provider` 组合在触网前校验 | `tests/test_provider_openai_compat.py` 28 项，含"聊天形状的工具调用仍过同一道权限门" |
+| §4-4 | `postconditions.py` + `--verify` / `[[verify]]`；协议新增 `error_postconditions_failed`(exit 6) 与 `RECORD_TYPES` 第 12 项 `postconditions`；面板渲染 | `tests/test_postconditions.py` 32 项：条件对模型不可见、符号链接/越界配置期拒绝、仓库只能加不能减、只读评估（mtime 不变） |
+| 漂移防护 | `py-modules` 与磁盘模块集合一致性；面板 record 词表测试如期报警 | 反向验证：从 `pyproject.toml` 删掉一行即失败 |
+
+全仓 954 项测试全绿（runtime 660）。**未做**：流式（`StreamDelta`）、`skills check`、F3。
+
+下一批顺序改为：**T-durable（F3）→ skills check → P1-1 MCP 代际 + elicitation-as-approval → 流式**。理由不变：F3 是"有零件没整机"里最亏的一块；MCP 代际是唯一的"过期风险"；skills check 是差异化收益最高、依赖最少的一条。
+
+---
 
 **未做且刻意留在后面的**：sidecar 侧真正校验 binding（要动它那个"只允许三字段"的协议——这是安全敏感组件的协议决策，不该在一次功能批次里顺手改）；F3 durable 接线；P1 全组。
 

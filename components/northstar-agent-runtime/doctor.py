@@ -38,8 +38,14 @@ class Finding:
 def add_arguments(parser: argparse.ArgumentParser) -> None:
     """Flags mirroring ``cli run``'s defaults so a doctor verdict predicts a run."""
     parser.add_argument("--workspace", default=".", help="workspace the tools are confined to (default: current directory)")
-    parser.add_argument("--provider", choices=("scripted", "anthropic"), default="scripted", help="provider a run would use (default: scripted, offline)")
-    parser.add_argument("--model", default="claude-sonnet-4-5", help="model id to price and check")
+    parser.add_argument(
+        "--provider",
+        choices=("scripted", "anthropic", "openai"),
+        default="scripted",
+        help="provider a run would use (default: scripted, offline)",
+    )
+    parser.add_argument("--model", default="", help="model id to price and check (default per provider)")
+    parser.add_argument("--base-url", default="", help="OpenAI-compatible endpoint to report on (default: $OPENAI_BASE_URL)")
     parser.add_argument("--script", default="", help="scripted-provider script to validate (JSON array of turns)")
     parser.add_argument("--sidecar-socket", default="", help="sidecar socket path to check for presence")
     parser.add_argument("--session-dir", default="", help="session transcript directory to check for creatability")
@@ -84,7 +90,9 @@ def policy_drift_finding(workspace: Path, policy: Any) -> Finding:
         current = Path(policy.source).read_bytes()
     except OSError as error:  # pragma: no cover - the file was just parsed
         return Finding("policy-drift", "fail", f"cannot re-read {relative}: {error}")
-    digest = lambda value: hashlib.sha256(value).hexdigest()[:12]  # noqa: E731 - local formatting helper
+    def digest(value: bytes) -> str:
+        return hashlib.sha256(value).hexdigest()[:12]
+
     if digest(current) == digest(baseline.stdout):
         return Finding("policy-drift", "ok", f"matches git HEAD ({relative} digest {digest(current)})")
     return Finding(
@@ -106,14 +114,22 @@ def _checks(args: argparse.Namespace) -> list[Finding]:
         findings.append(Finding("python", "fail", f"Python {current[0]}.{current[1]}.{current[2]} is too old; {MIN_PYTHON[0]}.{MIN_PYTHON[1]}+ is required"))
 
     # -- optional SDKs -----------------------------------------------------
-    anthropic_present = importlib.util.find_spec("anthropic") is not None
-    if anthropic_present:
-        findings.append(Finding("anthropic-sdk", "ok", "installed - live provider available"))
+    # Report the SDK the *selected* provider needs, not every SDK that exists: a
+    # host running --provider openai does not care about the anthropic package.
+    required = {"anthropic": "anthropic", "openai": "openai"}.get(args.provider, "")
+    if args.provider == "scripted":
+        findings.append(Finding("model-sdk", "ok", "none required - the scripted provider is offline by design"))
     else:
-        findings.append(
-            Finding("anthropic-sdk", "warn",
-                    "not installed - use --provider scripted, or pip install -r requirements.txt for live runs")
-        )
+        present = importlib.util.find_spec(required) is not None
+        install = "-r requirements.txt" if required == "anthropic" else "openai"
+        if present:
+            findings.append(Finding("model-sdk", "ok", f"{required} installed - live provider available"))
+        else:
+            findings.append(
+                Finding("model-sdk", "warn",
+                        f"{required} is not installed, so --provider {args.provider} cannot reach a model; "
+                        f"pip install {install}, or use --provider scripted")
+            )
     if importlib.util.find_spec("opentelemetry") is not None:
         findings.append(Finding("opentelemetry", "ok", "installed - span export available"))
     else:
@@ -249,6 +265,29 @@ def _checks(args: argparse.Namespace) -> list[Finding]:
                 else:
                     size = f"{len(context.text)} chars" + (" [truncated]" if context.truncated else "")
                     findings.append(Finding("project-context", "ok", f"{context.name} ({size}) will be appended to the system prompt"))
+    # -- provider/model pair and the OpenAI-compatible endpoint ----------------
+    from cli import PROVIDER_DEFAULT_MODELS, resolve_model
+
+    try:
+        resolved_model = resolve_model(args.provider, args.model)
+    except ValueError as error:
+        findings.append(Finding("provider", "fail", str(error)))
+        resolved_model = args.model or PROVIDER_DEFAULT_MODELS.get(args.provider, "")
+    if args.provider == "openai":
+        endpoint = (args.base_url or os.environ.get("OPENAI_BASE_URL", "")).strip()
+        key = os.environ.get("OPENAI_API_KEY", "").strip()
+        if endpoint and endpoint.startswith("http://") and "localhost" not in endpoint and "127." not in endpoint:
+            findings.append(Finding("provider", "warn", f"{endpoint} is plain http: a key on the wire to a remote gateway is a credential leak"))
+        findings.append(
+            Finding(
+                "provider",
+                "ok" if key or endpoint else "warn",
+                f"openai-compatible: endpoint={endpoint or '(SDK default)'}, key={'present in $OPENAI_API_KEY' if key else 'absent - set $OPENAI_API_KEY (never a flag)'}",
+            )
+        )
+    else:
+        findings.append(Finding("provider", "ok", f"{args.provider} with model {resolved_model}"))
+
     # -- scripted script -------------------------------------------------------
     if args.provider == "scripted" and args.script:
         try:
@@ -262,16 +301,16 @@ def _checks(args: argparse.Namespace) -> list[Finding]:
             findings.append(Finding("script", "fail", f"{args.script}: {error}"))
 
     # -- model pricing ----------------------------------------------------------
-    pricing, estimated = price_for(args.model)
+    pricing, estimated = price_for(resolved_model)
     if estimated:
         findings.append(
             Finding("pricing", "warn",
-                    f"{args.model}: not in the price table - spending falls back to the conservative tier and is marked pricing_estimated")
+                    f"{resolved_model}: not in the price table - spending falls back to the conservative tier and is marked pricing_estimated")
         )
     else:
         findings.append(
             Finding("pricing", "ok",
-                    f"{args.model}: ${pricing.input_per_mtok}/MTok in, ${pricing.output_per_mtok}/MTok out "
+                    f"{resolved_model}: ${pricing.input_per_mtok}/MTok in, ${pricing.output_per_mtok}/MTok out "
                     "(cache reads x0.1, cache writes x1.25)")
         )
 

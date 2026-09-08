@@ -223,6 +223,7 @@ class CeilingTests(unittest.TestCase):
                 "error_max_tool_calls": 3,
                 "error_max_budget_usd": 4,
                 "error_permission_denied": 5,
+            "error_postconditions_failed": 6,
             },
         )
 
@@ -513,11 +514,30 @@ class DoctorTests(unittest.TestCase):
         self.assertIn("[fail] script", out)
 
     def test_doctor_reports_missing_optional_sdks_as_warnings(self):
+        # The check follows the selected provider: a scripted run needs no model
+        # SDK at all, and only the SDK a live provider actually imports is named.
         code, out, _ = run_cli("doctor")
         self.assertEqual(code, 0)  # warnings, not failures
-        self.assertIn("anthropic-sdk", out)
-        self.assertIn("[warn]", out)
+        self.assertIn("model-sdk", out)
+        self.assertIn("none required", out)
+        self.assertNotIn("anthropic", out, "doctor must not nag about an SDK this provider never imports")
         self.assertIn("session-dir", out)
+        code, out, _ = run_cli("doctor", "--provider", "anthropic")
+        self.assertEqual(code, 0)
+        self.assertIn("anthropic", out)
+
+    def test_doctor_reports_the_openai_compatible_endpoint_without_touching_it(self):
+        tmp = Path(tempfile.mkdtemp(prefix="nsar-doctor-openai-"))
+        code, out, _ = run_cli("doctor", "--workspace", str(tmp), "--provider", "openai", "--model", "gpt-4.1")
+        self.assertEqual(code, 0)
+        self.assertIn("openai-compatible", out)
+        self.assertIn("$OPENAI_API_KEY", out)
+        self.assertIn("gpt-4.1", out)
+
+    def test_doctor_fails_on_a_model_the_provider_cannot_serve(self):
+        code, out, _ = run_cli("doctor", "--provider", "openai", "--model", "claude-sonnet-4-5")
+        self.assertEqual(code, 1)
+        self.assertIn("[fail] provider", out)
 
     def test_doctor_sidecar_checks_a_socket_presence(self):
         code, out, _ = run_cli("doctor", "--sidecar-socket", "/nonexistent-northstar.sock")

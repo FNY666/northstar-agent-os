@@ -12,7 +12,8 @@ tell the outcomes apart:
 2      error_max_turns
 3      error_max_tool_calls
 4      error_max_budget_usd
-5       error_permission_denied
+5      error_permission_denied
+6      error_postconditions_failed (a --verify / [[verify]] check did not hold)
 64     usage or configuration error (nothing was run)
 =====  ==============================================
 
@@ -90,8 +91,23 @@ def _add_run_arguments(parser: argparse.ArgumentParser) -> None:
     prompt.add_argument("--prompt-file", default="", help="read the task from a file, or '-' for stdin")
 
     provider = parser.add_argument_group("provider")
-    provider.add_argument("--provider", choices=("scripted", "anthropic"), default="scripted", help="model provider (default: scripted, offline)")
-    provider.add_argument("--model", default="claude-sonnet-4-5", help="model id used for pricing and requests")
+    provider.add_argument(
+        "--provider",
+        choices=("scripted", "anthropic", "openai"),
+        default="scripted",
+        help="model provider (default: scripted, offline); 'openai' speaks the Chat Completions wire, so it covers OpenAI, Azure, vLLM, SGLang, Ollama, LiteLLM, OpenRouter and similar gateways",
+    )
+    provider.add_argument(
+        "--model",
+        default="",
+        help="model id used for pricing and requests (default per provider: claude-sonnet-4-5, or gpt-4.1 for --provider openai)",
+    )
+    provider.add_argument(
+        "--base-url",
+        default="",
+        metavar="URL",
+        help="OpenAI-compatible endpoint base URL (default: $OPENAI_BASE_URL; the key is read from $OPENAI_API_KEY and is never taken from a flag)",
+    )
     provider.add_argument("--script", default="", help="JSON file of scripted turns (scripted provider only)")
     provider.add_argument("--scripted-text", default="", help="single scripted answer; shorthand for a one-turn script")
     provider.add_argument("--max-output-tokens", type=int, default=4096, help="generation cap")
@@ -115,6 +131,14 @@ def _add_run_arguments(parser: argparse.ArgumentParser) -> None:
     policy.add_argument("--max-subagent-depth", type=int, default=1, help="0 disables delegation")
     policy.add_argument("--allow-nested-delegation", action="store_true", help="subagents may delegate one level deeper")
     policy.add_argument("--halt-on-denial", action="store_true", help="end the run with error_permission_denied when a call is refused")
+    policy.add_argument(
+        "--verify",
+        action="append",
+        default=[],
+        metavar="KIND:PATH[:TEXT]",
+        help="postcondition checked independently of the model after the run: exists, absent, changed, unchanged "
+        "or contains; a failed check ends the run with error_postconditions_failed",
+    )
     policy.add_argument("--no-policy-file", action="store_true", help="ignore .northstar/config.toml in the workspace")
     policy.add_argument("--no-workspace-agents", action="store_true", help="ignore .northstar/agents/*.md subagent files")
     policy.add_argument("--no-skills", action="store_true", help="do not list .northstar/skills/*/SKILL.md packages in the system prompt")
@@ -181,6 +205,37 @@ def _tool_lists(args: argparse.Namespace, *, base_tools: Sequence[str]) -> tuple
     return subtract(allowed, denied), tuple(dict.fromkeys(denied))
 
 
+#: The model each provider prices and requests by default when --model is omitted.
+PROVIDER_DEFAULT_MODELS = {
+    "scripted": "claude-sonnet-4-5",
+    "anthropic": "claude-sonnet-4-5",
+    "openai": "gpt-4.1",
+}
+
+
+def resolve_model(provider: str, model: str = "") -> str:
+    """The model id to use, or a configuration error for an impossible pairing.
+
+    A claude model id against the Chat Completions adapter (or vice versa) is a
+    request that is certain to fail at the server, so it is refused here, before
+    any credential is read and before a turn is spent.
+    """
+    chosen = (model or "").strip() or PROVIDER_DEFAULT_MODELS.get(provider, "")
+    if not chosen:
+        raise ValueError(f"unknown provider {provider!r}; no default model is configured for it")
+    if provider == "openai" and chosen.startswith("claude"):
+        raise ValueError(
+            f"--provider openai cannot serve {chosen!r}: pass a Chat Completions model id "
+            "(e.g. --model gpt-4.1) or use --provider anthropic for Claude models"
+        )
+    if provider == "anthropic" and not chosen.startswith("claude"):
+        raise ValueError(
+            f"--provider anthropic cannot serve {chosen!r}: the Messages API speaks for Claude "
+            "models; use --provider openai for Chat Completions endpoints"
+        )
+    return chosen
+
+
 def _build_provider(args: argparse.Namespace) -> Any:
     if args.provider == "scripted":
         from providers.scripted import ScriptedProvider
@@ -195,6 +250,19 @@ def _build_provider(args: argparse.Namespace) -> Any:
         from providers.anthropic import AnthropicProvider
 
         return AnthropicProvider(model=args.model, max_tokens=args.max_output_tokens)
+    if args.provider == "openai":
+        import os
+
+        from providers.openai_compat import OpenAICompatProvider
+
+        # The key comes from the environment only: a flag would put it in the
+        # process list, the shell history, and any CI log that echoes argv.
+        base_url = (args.base_url or os.environ.get("OPENAI_BASE_URL", "")).strip() or None
+        return OpenAICompatProvider(
+            model=args.model,
+            base_url=base_url,
+            max_tokens=args.max_output_tokens,
+        )
     raise ValueError(f"unknown provider {args.provider!r}")
 
 
@@ -386,6 +454,12 @@ def _run(args: argparse.Namespace) -> int:
     from skills import SkillError, discover_skills, skill_listing
     from tools import ToolLimits, build_default_registry
 
+    try:
+        args.model = resolve_model(args.provider, args.model)
+    except ValueError as error:
+        print(f"configuration error: {error}", file=sys.stderr)
+        return USAGE_ERROR
+
     prompt = args.prompt
     if args.prompt_file:
         if args.prompt_file == "-":
@@ -451,6 +525,22 @@ def _run(args: argparse.Namespace) -> int:
                     file=sys.stderr,
                 )
         except CommandHookError as error:
+            print(f"configuration error: {error}", file=sys.stderr)
+            return USAGE_ERROR
+
+    # Postconditions are checked after the run by this process, not by the model.
+    # CLI and policy file are additive in both directions: a repository can require
+    # a check, an operator can require one more, neither can drop the other's.
+    postconditions: tuple[Any, ...] = ()
+    declared_checks = tuple(args.verify or ()) + tuple(getattr(policy, "verify", ()) or ())
+    if declared_checks:
+        from postconditions import parse_cli_specs, parse_postconditions
+
+        try:
+            postconditions = parse_cli_specs(args.verify or ()) + parse_postconditions(
+                tuple(getattr(policy, "verify", ()) or ()), source=str(getattr(policy, "source", "policy file"))
+            )
+        except ValueError as error:
             print(f"configuration error: {error}", file=sys.stderr)
             return USAGE_ERROR
 
@@ -539,6 +629,8 @@ def _run(args: argparse.Namespace) -> int:
         ),
         "record_tool_output_in_session": not args.redact_tool_output,
     }
+    if postconditions:
+        config_kwargs["postconditions"] = postconditions
     if args.run_id:
         config_kwargs["run_id"] = args.run_id
     if policy is not None and policy.revision:

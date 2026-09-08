@@ -142,6 +142,10 @@ Command-line entry point for one governed run.
 
 #### `build_parser()`
 
+#### `resolve_model(provider: str, model: str='')`
+
+The model id to use, or a configuration error for an impossible pairing.
+
 #### `main(argv: Sequence[str] | None=None)`
 
 ### `compaction`
