@@ -1,5 +1,16 @@
 # Northstar Agent OS — initial public component
 
+## Unreleased (forty-second batch) — request-id cross-operation hardening (T34)
+
+- Request-id replay tracking now records the fingerprint of the first successful
+  `run.start` even before a replayable response exists. Reusing that id for a
+  different operation or authenticated claim therefore fails closed instead of
+  bypassing the replay guard; duplicate `run.start` still flows through the
+  manager so its `replayed` marker remains accurate.
+- Added coverage for app-describe/actor conflicts and the `run.start` marker
+  boundary. This remains bounded in-memory request tracking, not a durable
+  exactly-once or cross-process protocol.
+
 ## Unreleased (forty-first batch) — host lifecycle drain helper (T33)
 
 - Added host-only `AppServer.shutdown(timeout=...)`: stop accepting new Unix

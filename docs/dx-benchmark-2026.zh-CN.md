@@ -1197,3 +1197,19 @@ T33 只补 host lifecycle seam，不把关闭动作暴露给 wire consumer：
   operation、scheduler、crash recovery、durable registry 或 remote execution。
 
 T33 仍是 Unreleased；没有创建 tag、GitHub Release，也没有发布到 PyPI/npm。
+
+### 10.38 当前实现复核：request-id cross-operation hardening（T34，2026-09-08）
+
+T34 修复 T32 replay guard 的一个边界：`run.start` 为了保留 manager 的
+`replayed` 标记而没有立即缓存 response，但现在会先保留其 authenticated fingerprint：
+
+- 同一个 `request_id` 在 `run.start` 首次成功后改换为 `run.status`、`app.describe` 或
+  其他 claims，会统一 fail-closed 为 `idempotency_conflict`，不会因为 start response
+  使用了 manager-level idempotency 而绕过 app-server request-id guard。
+- 重复的同一 `run.start` 仍交给 manager 处理，因此首次 response 的 `replayed=false`
+  与后续 response 的 `replayed=true` 语义保持准确；缓存仍只在本地内存，未引入
+  durable exactly-once、跨进程 deduplication 或 remote execution。
+- 补充 cross-operation marker tests；runtime 仍为 620 项、全仓 `make test` 仍为
+  958 项（954 pass、4 项可选 OTel skip）。
+
+T34 仍是 Unreleased；没有创建 tag、GitHub Release，也没有发布到 PyPI/npm。

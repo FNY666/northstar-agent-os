@@ -206,6 +206,36 @@ class AppWireTests(RuntimeTestCase):
         self.assertFalse(response["ok"])
         self.assertEqual(response["error"]["code"], "idempotency_conflict")
 
+        operation_conflict = dict(request, op="run.start", prompt="hello")
+        operation_conflict["auth"] = _mac(
+            {key: value for key, value in operation_conflict.items() if key != "auth"},
+            self.SECRET,
+        )
+        response = server.handle_wire_line(json.dumps(operation_conflict))
+        self.assertFalse(response["ok"])
+        self.assertEqual(response["error"]["code"], "idempotency_conflict")
+
+        start_request = {
+            "protocol": APP_PROTOCOL,
+            "op": "run.start",
+            "request_id": "wire-start-marker",
+            "actor_id": "owner",
+            "prompt": "hello",
+        }
+        start_request["auth"] = _mac(start_request, self.SECRET)
+        started = server.handle_wire_line(json.dumps(start_request))
+        status_conflict = {
+            "protocol": APP_PROTOCOL,
+            "op": "run.status",
+            "request_id": "wire-start-marker",
+            "actor_id": "owner",
+            "run_id": started["run_id"],
+        }
+        status_conflict["auth"] = _mac(status_conflict, self.SECRET)
+        response = server.handle_wire_line(json.dumps(status_conflict))
+        self.assertFalse(response["ok"])
+        self.assertEqual(response["error"]["code"], "idempotency_conflict")
+
     def test_node_consumer_verifies_hmac_and_uses_bounded_wait(self):
         repository = Path(__file__).resolve().parents[3]
         smoke = repository / "examples" / "app-server" / "node_client_smoke.mjs"

@@ -55,6 +55,7 @@ DEFAULT_WAIT_MS = 10_000
 MAX_WAIT_MS = 30_000
 _RESERVED_CLIENT_FIELDS = frozenset({"protocol", "op", "request_id", "actor_id", "auth"})
 _ID_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$")
+_REPLAY_MISS = object()
 
 
 class AppServerError(RuntimeError):
@@ -523,7 +524,7 @@ class AppServer:
         self.socket_path = _socket_path(socket_path) if socket_path is not None else None
         self.max_frame_bytes = max_frame_bytes
         self.max_request_replays = max_request_replays
-        self._request_replays: OrderedDict[str, tuple[str, dict[str, Any]]] = OrderedDict()
+        self._request_replays: OrderedDict[str, tuple[str, dict[str, Any] | None]] = OrderedDict()
         self._server: socketserver.ThreadingUnixStreamServer | None = None
         self._server_thread: threading.Thread | None = None
         self._owned_socket: Path | None = None
@@ -532,11 +533,11 @@ class AppServer:
         self._ready = threading.Event()
         self._startup_error: BaseException | None = None
 
-    def _replayed_response(self, *, request_id: str, fingerprint: str) -> dict[str, Any] | None:
+    def _replayed_response(self, *, request_id: str, fingerprint: str) -> object:
         with self._lifecycle_lock:
             cached = self._request_replays.get(request_id)
             if cached is None:
-                return None
+                return _REPLAY_MISS
             old_fingerprint, response = cached
             if not hmac.compare_digest(old_fingerprint, fingerprint):
                 raise AppServerError(
@@ -546,7 +547,13 @@ class AppServer:
             self._request_replays.move_to_end(request_id)
             return copy.deepcopy(response)
 
-    def _remember_response(self, *, request_id: str, fingerprint: str, response: dict[str, Any]) -> dict[str, Any]:
+    def _remember_response(
+        self,
+        *,
+        request_id: str,
+        fingerprint: str,
+        response: dict[str, Any] | None,
+    ) -> dict[str, Any] | None:
         with self._lifecycle_lock:
             self._request_replays[request_id] = (fingerprint, copy.deepcopy(response))
             self._request_replays.move_to_end(request_id)
@@ -575,7 +582,8 @@ class AppServer:
         **fields: Any,
     ) -> dict[str, Any]:
         response = self._response(request_id=request_id, ok=ok, **fields)
-        return self._remember_response(request_id=request_id, fingerprint=fingerprint, response=response)
+        self._remember_response(request_id=request_id, fingerprint=fingerprint, response=response)
+        return response
 
     def _error(self, request_id: str, error: AppServerError) -> dict[str, Any]:
         return self._response(request_id=request_id, ok=False, error=error.as_dict())
@@ -613,9 +621,10 @@ class AppServer:
             actor_id = RunManager._id(raw.get("actor_id"), field_name="actor_id")
             operation = raw.get("op")
             request_fingerprint = _request_fingerprint(raw)
-            if operation in APP_OPERATIONS and operation != "run.start":
+            replayed: object = _REPLAY_MISS
+            if operation in APP_OPERATIONS:
                 replayed = self._replayed_response(request_id=request_id, fingerprint=request_fingerprint)
-                if replayed is not None:
+                if replayed is not _REPLAY_MISS and replayed is not None:
                     return replayed
             if operation == "app.describe":
                 allowed = {"protocol", "auth", "request_id", "actor_id", "op"}
@@ -644,7 +653,13 @@ class AppServer:
                 _reject_unknown(raw, allowed)
                 result = self.manager.start(request_id=request_id, actor_id=actor_id, prompt=raw.get("prompt"))
                 result.pop("request_id", None)
-                return self._response(request_id=request_id, ok=True, op=operation, **result)
+                response = self._response(request_id=request_id, ok=True, op=operation, **result)
+                self._remember_response(
+                    request_id=request_id,
+                    fingerprint=request_fingerprint,
+                    response=response if replayed is not _REPLAY_MISS else None,
+                )
+                return response
             if operation == "run.status":
                 allowed = {"protocol", "auth", "request_id", "actor_id", "op", "run_id"}
                 _reject_unknown(raw, allowed)
