@@ -20,6 +20,10 @@ class ProofTests(unittest.TestCase):
     def test_missing_handoff_is_unknown(self):
         data=list(self.setup_data()); data[-1]=None; self.assertEqual(verify_route_evidence_proof(*data).verdict,'unknown')
 
+    def test_checkpoint_root_must_match_bundle_root(self):
+        data=list(self.setup_data()); data[3]=EvidenceChain.from_records([])
+        self.assertEqual(verify_route_evidence_proof(*data).verdict,'unknown')
+
     def test_verified_result_can_emit_bound_attestation(self):
         from evidence_proof import make_proof_attestation
         data=self.setup_data(); attestation=make_proof_attestation(*data)

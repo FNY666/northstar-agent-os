@@ -17,6 +17,9 @@ def verify_route_evidence_proof(route_record:Any,lineage:Any,bundle:Any,checkpoi
         verify_chain(checkpoint_chain)
         verify_lineage_bundle(bundle,list(lineage.read()))
         verify_proof(bundle,event.to_dict() if hasattr(event,'to_dict') else event,proof)
+        checkpoints=list(checkpoint_chain.read())
+        if not checkpoints or checkpoints[-1].current_root != bundle.root_digest:
+            raise ProofError('checkpoint root does not match evidence bundle')
     except (EvidenceError,ChainError,ValueError) as exc:
         return ProofResult('unknown',(str(exc),))
     lineage_result=verify_lineage(lineage,route_record=route_record,handoff=handoff)
