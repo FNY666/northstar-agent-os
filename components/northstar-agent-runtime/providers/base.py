@@ -17,7 +17,10 @@ from typing import Any, Iterable, Literal, Sequence
 # Closed vocabularies
 # --------------------------------------------------------------------------
 
-SystemSubtype = Literal["init", "compact_boundary", "informational"]
+#: ``postconditions`` is the verdict of the independent end-of-run check
+#: (postconditions.py); it is a distinct subtype rather than ``informational`` so a
+#: consumer can require it in a transcript without grepping text.
+SystemSubtype = Literal["init", "compact_boundary", "informational", "postconditions"]
 
 ResultSubtype = Literal[
     "success",
@@ -26,6 +29,9 @@ ResultSubtype = Literal[
     "error_max_budget_usd",
     "error_during_execution",
     "error_permission_denied",
+    # The model stopped asking for tools, but the workspace does not say the work
+    # happened: declared postconditions failed.
+    "error_postconditions_failed",
 ]
 
 RESULT_SUBTYPES: tuple[str, ...] = (
@@ -35,9 +41,10 @@ RESULT_SUBTYPES: tuple[str, ...] = (
     "error_max_budget_usd",
     "error_during_execution",
     "error_permission_denied",
+    "error_postconditions_failed",
 )
 
-SYSTEM_SUBTYPES: tuple[str, ...] = ("init", "compact_boundary", "informational")
+SYSTEM_SUBTYPES: tuple[str, ...] = ("init", "compact_boundary", "informational", "postconditions")
 
 BlockKind = Literal["text", "tool_use", "tool_result", "thinking"]
 

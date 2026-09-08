@@ -30,6 +30,11 @@ from agents import AgentDefinition, AgentRegistry, Verdict, builtin_registry, pa
 from budget import Budget
 from compaction import CompactionOutcome, compact, should_compact
 from hooks import HookInput, HookRegistry
+from postconditions import (
+    PostConditionError,
+    PostConditionSet,
+    summarise as summarise_postconditions,
+)
 from permissions import (
     DelegationVerdict,
     PermissionConfig,
@@ -112,6 +117,9 @@ class RuntimeConfig:
     allow_nested_delegation: bool = False
     default_subagent: str = "explorer"
     halt_on_denial: bool = False
+    #: Workspace claims checked after the run by an independent evaluator, so a
+    #: model saying "done" is not the evidence that it is. See postconditions.py.
+    postconditions: Any = ()
     max_output_tokens: int = 4096
     compaction_threshold_tokens: int | None = DEFAULT_COMPACTION_THRESHOLD_TOKENS
     compaction_keep_messages: int = 4
@@ -419,6 +427,12 @@ class AgentRuntime:
         self.sessions = sessions if isinstance(sessions, SessionStore) else SessionStore(None, session_id=self.config.session_id)
         self.summarizer = summarizer
         self.sandbox = ToolSandbox(self.config.workspace or ".", limits=self.config.tool_limits)
+        # The independent end-of-run check is bound to the same real root the tools
+        # are confined to, so evidence and enforcement share one boundary.
+        try:
+            self.postconditions = PostConditionSet(self.sandbox.root_real, self.config.postconditions)
+        except PostConditionError as error:
+            raise RuntimeConfigurationError(f"postconditions: {error}") from error
         self.limits = self.config.tool_limits
         self.budget = budget if isinstance(budget, Budget) else Budget(max_budget_usd=self.config.max_budget_usd)
         self.tools = tools if isinstance(tools, ToolRegistry) else build_default_registry(include_describe=self.config.include_describe_tool)
@@ -601,6 +615,14 @@ class AgentRuntime:
             "policy_revision": config.policy_revision,
             "protected_prefixes": list(config.tool_limits.protected_prefixes),
         }
+        if self.postconditions:
+            init_data["postconditions"] = [condition.as_dict() for condition in self.postconditions.conditions]
+        try:
+            # Taken before the first yield so a hook or a tool cannot be the thing
+            # that changes what "before" means.
+            self.postconditions.snapshot()
+        except PostConditionError as error:
+            raise RuntimeConfigurationError(f"postconditions: {error}") from error
         init = SystemMessage(subtype="init", content=f"runtime ready: {self.provider_name}/{config.model}", data=init_data)
         self.sessions.record_system(init, agent=config.agent)
         yield init
@@ -737,7 +759,25 @@ class AgentRuntime:
                         )
                         continue
                     state.final_text = assistant.text
-                    yield self._finish(state, "success")
+                    subtype = "success"
+                    if self.postconditions:
+                        summary = summarise_postconditions(self.postconditions.evaluate())
+                        record = SystemMessage(
+                            subtype="postconditions",
+                            content=(
+                                f"postconditions: {summary['passed']}/{summary['checked']} passed"
+                                if summary["ok"]
+                                else f"postconditions: {summary['failed']} of {summary['checked']} check(s) failed"
+                            ),
+                            data=summary,
+                        )
+                        self.sessions.record_system(record, agent=config.agent)
+                        yield record
+                        if not summary["ok"]:
+                            # The model asked to stop and the workspace disagrees.
+                            # "It said it was done" is not the evidence we accept.
+                            subtype = "error_postconditions_failed"
+                    yield self._finish(state, subtype)
                     return
 
                 results: list[ToolResultBlock] = []

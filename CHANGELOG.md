@@ -1,5 +1,56 @@
 # Northstar Agent OS — initial public component
 
+## Unreleased (fourteenth batch) — many models, and a verdict that is not the model's
+
+Continued the blueprint's non-conflicting debt (`docs/next-gen-agent-blueprint.zh-CN.md`
+§6). Three changes, still offline and credential-free; **no release is made**, no tag
+is pushed, the version stays `0.1.0.dev0`.
+
+- **P1-2 multi-model, one door.** New `providers/openai_compat.py` speaks the Chat
+  Completions wire, so a single adapter brings the OpenAI / Azure / vLLM / SGLang /
+  Ollama / LM Studio / LiteLLM / OpenRouter universe into the governed loop instead
+  of requiring a per-vendor harness. It translates both directions per call
+  (`tool_use` -> `tool_calls` with JSON-encoded `arguments`, `tool_result` ->
+  `role: "tool"` + `tool_call_id`, `finish_reason` -> the runtime's stop
+  vocabulary, `prompt_tokens_details.cached_tokens` -> `cache_read_input_tokens`),
+  drops `thinking` from the *request* while keeping it in the transcript, picks
+  `max_completion_tokens` for reasoning-era model ids, fails the turn on
+  non-JSON `arguments` rather than running a truncated call as a real write, and
+  never invents a price: unknown ids stay on the conservative tier with
+  `pricing_estimated: true`. `--provider openai` reads `OPENAI_API_KEY` /
+  `OPENAI_BASE_URL` from the environment only (a flag would leak via `ps` and CI
+  logs), and `--model` is validated against `--provider` before a credential is
+  touched, so an impossible pair exits `64` instead of 400-ing at a server.
+  `doctor` now reports the SDK the *selected* provider needs, not every SDK that
+  exists.
+- **Independent completion verification (blueprint §4 #4).** New
+  `postconditions.py`: `--verify KIND:PATH[:TEXT]` and `[[verify]]` declare claims
+  about the workspace (`exists`, `absent`, `changed`, `unchanged`, `contains`) that
+  the runtime checks after the run, so *the agent saying it finished* stops being
+  the evidence that it did. The design constraints that make it governance: the
+  conditions are **never injected into the prompt** (a model told what is checked
+  optimises the check, and `contains` is the easiest string to write), digests are
+  snapshotted before the first event, evaluation only reads, symlinks and paths
+  that resolve outside the workspace are refused at configuration time, and a
+  repository may add a check but can never remove or weaken the operator's. Two
+  protocol additions, each with its own tests: result subtype
+  `error_postconditions_failed` (exit `6`) and session record type
+  `postconditions`, so the verdict is a first-class audit record that
+  `examples/session-panel` renders rather than a line of prose.
+- **Drift guards.** `tests/test_module_layout.py` now asserts every top-level
+  module is listed in `pyproject.toml`'s `py-modules` (an unpackaged module works in
+  the checkout and vanishes after `pip install .`), and the session-panel record
+  vocabulary test caught the new `RECORD_TYPES` entry the way it is meant to.
+
+Runtime tests 596 -> 660; repository total 890 -> 954, all offline, no API key.
+Verified by hand: the same claim ("全部检查通过") with `report.md` absent exits `6`,
+and exits `0` once a `Write` actually creates it, with `unchanged:keep.txt` still
+holding across the run.
+
+**Not in this batch**: turn-boundary checkpoints and fork-on-read resume (blueprint
+F3) remain open — the transcript is append-only and resumable, but a run still
+restarts from the beginning rather than from a checkpoint.
+
 ## Unreleased (thirteenth batch) — closing the governance seams (P0)
 
 Acted on the 2026-09-08 capability audit (`docs/benchmark-top-agents-2026-09.zh-CN.md`

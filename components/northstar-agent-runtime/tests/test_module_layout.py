@@ -40,6 +40,35 @@ class ToolsPackageLayoutTests(unittest.TestCase):
         self.assertTrue(issubclass(ToolRegistry, object))
 
 
+class PackagingCompletenessTests(unittest.TestCase):
+    """Every top-level module must be listed in pyproject's ``py-modules``.
+
+    A module that exists in the repository but is not packaged works in the checkout
+    and disappears after ``pip install .`` - the failure mode nobody notices until a
+    user hits it, so it is asserted here instead.
+    """
+
+    def test_every_module_is_installed(self):
+        pyproject = tomllib.loads((COMPONENT / "pyproject.toml").read_text(encoding="utf-8"))
+        declared = set(pyproject["tool"]["setuptools"]["py-modules"])
+        present = {
+            path.stem
+            for path in COMPONENT.glob("*.py")
+            if path.is_file() and path.name not in {"setup.py", "conftest.py"} and not path.name.startswith("test_")
+        }
+        self.assertEqual(
+            sorted(present - declared),
+            [],
+            "add the missing module(s) to [tool.setuptools] py-modules in pyproject.toml",
+        )
+
+    def test_no_packaged_module_is_missing_from_disk(self):
+        pyproject = tomllib.loads((COMPONENT / "pyproject.toml").read_text(encoding="utf-8"))
+        declared = set(pyproject["tool"]["setuptools"]["py-modules"])
+        present = {path.stem for path in COMPONENT.glob("*.py")}
+        self.assertEqual(sorted(declared - present - {"_version"}), [])
+
+
 class VersionSingleSourceTests(unittest.TestCase):
     def test_pyproject_version_matches_version_module(self):
         pyproject = tomllib.loads((COMPONENT / "pyproject.toml").read_text(encoding="utf-8"))

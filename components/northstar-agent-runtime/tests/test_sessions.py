@@ -45,7 +45,10 @@ class SessionIdTests(unittest.TestCase):
         store = SessionStore(None)
         with self.assertRaises(ValueError):
             store.append("raw_prompt_bytes", {})
-        self.assertEqual(len(RECORD_TYPES), 11)
+        # 12 since the fourteenth batch: "postconditions" is the independent
+        # end-of-run verdict, and it gets its own record type rather than hiding
+        # inside "informational". Add a type here only with a test for it.
+        self.assertEqual(len(RECORD_TYPES), 12)
 
 
 class WriteTests(RuntimeTestCase):

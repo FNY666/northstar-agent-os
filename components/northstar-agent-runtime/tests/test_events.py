@@ -25,10 +25,10 @@ from providers.base import (
 
 
 class EventTypeTests(unittest.TestCase):
-    def test_system_message_accepts_the_three_documented_subtypes(self):
-        for subtype in ("init", "compact_boundary", "informational"):
+    def test_system_message_accepts_the_documented_subtypes(self):
+        for subtype in ("init", "compact_boundary", "informational", "postconditions"):
             self.assertEqual(SystemMessage(subtype=subtype, content="x").subtype, subtype)
-        self.assertEqual(SYSTEM_SUBTYPES, ("init", "compact_boundary", "informational"))
+        self.assertEqual(SYSTEM_SUBTYPES, ("init", "compact_boundary", "informational", "postconditions"))
 
     def test_system_message_rejects_an_unknown_subtype(self):
         with self.assertRaises(ValueError):
@@ -44,6 +44,7 @@ class EventTypeTests(unittest.TestCase):
                 "error_max_budget_usd",
                 "error_during_execution",
                 "error_permission_denied",
+                "error_postconditions_failed",
             ),
         )
         for subtype in RESULT_SUBTYPES:

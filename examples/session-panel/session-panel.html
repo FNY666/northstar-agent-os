@@ -96,13 +96,13 @@
 /* ---- record vocabulary (mirrors sessions.py RECORD_TYPES) ---- */
 var RECORD_TYPES = [
   "session_start", "user_prompt", "assistant", "tool_result", "hook",
-  "denial", "compact_boundary", "informational", "subagent", "result",
-  "session_end"
+  "denial", "compact_boundary", "informational", "postconditions",
+  "subagent", "result", "session_end"
 ];
 var TYPE_COLOR = {
   session_start: "ok", session_end: "ok", user_prompt: "warn", assistant: "ok",
   tool_result: "ok", hook: "warn", denial: "err", compact_boundary: "warn",
-  informational: "warn", subagent: "ok", result: "ok"
+  informational: "warn", subagent: "ok", result: "ok", postconditions: "audit"
 };
 var MAX_PREVIEW = 300;
 var MAX_RAW = 20000;
@@ -159,6 +159,16 @@ function textBlocks(rec) { return Array.isArray(rec.content) ? rec.content : [];
 function summarize(rec) {
   if (rec.type === "session_start" || rec.type === "session_end") {
     return [String(rec.subtype || ""), rec.content ? String(rec.content) : ""].filter(Boolean).join(" — ");
+  }
+  if (rec.type === "postconditions") {
+    // The independent end-of-run verdict: which workspace claims held, which did not.
+    var d = rec.data && typeof rec.data === "object" ? rec.data : {};
+    var lines = ["postconditions: " + (d.passed || 0) + "/" + (d.checked || 0) + " passed"];
+    (d.results || []).forEach(function (row) {
+      lines.push((row.ok ? "\u2713 " : "\u2717 ") + row.kind + " " + row.path + " \u2014 " + (row.detail || "") +
+        (row.structural ? "" : " (non-structural)"));
+    });
+    return lines.join("\n");
   }
   if (rec.type === "denial") {
     return "tool=" + String(rec.tool || "?") + " source=" + String(rec.source || "?") +
@@ -217,6 +227,16 @@ function previewOf(text) {
 
 function isErrorRecord(rec) {
   if (isAudit(rec)) { return rec.level === "error"; }
+  if (rec.type === "postconditions") {
+    // The independent end-of-run verdict: which workspace claims held, which did not.
+    var d = rec.data && typeof rec.data === "object" ? rec.data : {};
+    var lines = ["postconditions: " + (d.passed || 0) + "/" + (d.checked || 0) + " passed"];
+    (d.results || []).forEach(function (row) {
+      lines.push((row.ok ? "\u2713 " : "\u2717 ") + row.kind + " " + row.path + " \u2014 " + (row.detail || "") +
+        (row.structural ? "" : " (non-structural)"));
+    });
+    return lines.join("\n");
+  }
   if (rec.type === "denial") { return true; }
   if (rec.is_error === true) { return true; }
   if (rec.subtype && String(rec.subtype).indexOf("error") === 0) { return true; }

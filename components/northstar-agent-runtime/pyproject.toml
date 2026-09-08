@@ -57,6 +57,7 @@ py-modules = [
     "loop",
     "mcp_client",
     "permissions",
+    "postconditions",
     "policy_file",
     "sdk",
     "scaffold",
