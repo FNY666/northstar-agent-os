@@ -30,7 +30,9 @@ class EvidenceBundle:
     @classmethod
     def from_dict(cls,v):
         if not isinstance(v,dict) or set(v)!={'schema_version','root_digest','leaf_count','leaf_digests'} or v['schema_version']!=SCHEMA: raise EvidenceError('bundle fields invalid')
-        if not isinstance(v['leaf_count'],int) or v['leaf_count']<1 or not isinstance(v['leaf_digests'],list) or len(v['leaf_digests'])!=v['leaf_count']: raise EvidenceError('bundle count invalid')
+        if not isinstance(v['root_digest'],str) or not v['root_digest'].startswith('sha256:') or len(v['root_digest'])!=71: raise EvidenceError('bundle root invalid')
+        if not isinstance(v['leaf_count'],int) or v['leaf_count']<1 or not isinstance(v['leaf_digests'],list) or len(v['leaf_digests'])!=v['leaf_count'] or not all(isinstance(x,str) and x.startswith('sha256:') and len(x)==71 for x in v['leaf_digests']): raise EvidenceError('bundle count/digests invalid')
+        if cls(v['root_digest'],v['leaf_count'],v['schema_version'],tuple(v['leaf_digests'])).root_digest != _root([bytes.fromhex(x[7:]) for x in v['leaf_digests']]): raise EvidenceError('bundle root mismatch')
         return cls(v['root_digest'],v['leaf_count'],v['schema_version'],tuple(v['leaf_digests']))
 def build_bundle(events):
     events=list(events); leaves=tuple('sha256:'+_leaf(e).hex() for e in events); return EvidenceBundle(_root([bytes.fromhex(x[7:]) for x in leaves]),len(leaves),SCHEMA,leaves)
@@ -43,8 +45,22 @@ def make_proof(bundle,index):
     return MerkleProof(index,bundle.leaf_count,tuple(siblings))
 def verify_proof(bundle,event,proof):
     if proof.leaf_count!=bundle.leaf_count or not 0<=proof.index<bundle.leaf_count: raise EvidenceError('proof metadata mismatch')
+    expected_depth=0; size=bundle.leaf_count
+    while size>1: expected_depth+=1; size=(size+1)//2
+    if len(proof.siblings)!=expected_depth: raise EvidenceError('proof path length mismatch')
     current=_leaf(event); i=proof.index
     for direction,digest in proof.siblings:
+        if direction not in {'left','right'} or not isinstance(digest,str) or not digest.startswith('sha256:') or len(digest)!=71: raise EvidenceError('proof sibling invalid')
         sibling=bytes.fromhex(digest[7:])
         current=hashlib.sha256(b'node\0'+(current+sibling if direction=='right' else sibling+current)).digest(); i//=2
     if 'sha256:'+current.hex()!=bundle.root_digest: raise EvidenceError('proof root mismatch')
+
+def write_bundle(bundle:EvidenceBundle,path:Path|str)->None:
+    if not isinstance(bundle,EvidenceBundle): raise EvidenceError('bundle type invalid')
+    path=Path(path); path.parent.mkdir(parents=True,exist_ok=True)
+    with path.open('wb') as f: f.write(_canonical(bundle.to_dict())); f.flush(); os.fsync(f.fileno())
+    os.chmod(path,0o600)
+
+def read_bundle(path:Path|str)->EvidenceBundle:
+    try: return EvidenceBundle.from_dict(json.loads(Path(path).read_text(encoding='utf-8')))
+    except (OSError,json.JSONDecodeError,EvidenceError) as exc: raise EvidenceError('bundle file invalid') from exc
