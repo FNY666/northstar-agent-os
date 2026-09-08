@@ -1,5 +1,66 @@
 # Northstar Agent OS — initial public component
 
+## Unreleased (twentieth batch) — the retry budget belongs to the runtime, not to the SDK
+
+The last item on the contract roadmap ("explicit retry, backoff, degradation") was deferred on
+purpose: retries have to sit above a defined interface, or they become a second, undocumented
+boundary. That interface is now settled, so the boundary is being defined instead of inherited —
+before this batch, "does it retry?" had no answer in this repository at all: both providers
+passed `max_retries` to their SDK client.
+
+- **`provider_retry.py` — classification first, then a schedule.** Ten named faults
+  (`rate_limited`, `overloaded`, `network`, `timeout`, `server_error`, `context_overflow`,
+  `auth`, `client_error`, `stream_interrupted`, `unknown`); status code, then the provider's own
+  claim, then prose. `unknown` is deliberately not retryable, because "we could not tell" is not
+  evidence that repetition helps. The four unretryable classes may not be put in `retry_on` —
+  `stream_interrupted` least of all, since re-issuing a broken stream shows the terminal the
+  same text twice and the transcript/terminal agreement is what streaming exists to guarantee.
+- **The schedule is a pure function.** `RetryPolicy.plan(attempt, fault, waited)` returns a delay
+  or a named stop (`attempts_exhausted`, `deadline_exceeded`, `not_retryable`), so the whole
+  policy is testable as a table of numbers; `execute()` is the only part that touches time and
+  takes its sleeper as an argument. Full jitter is **seeded from the session id**, which is how
+  "deterministic tests" and "do not synchronise on the same 429 window" stop being
+  contradictory. Caps belong to the runtime, not the operator: 8 attempts, 120 s per delay,
+  15 min per-turn deadline.
+- **`[retry]` is a workspace table and the flags only tighten it.** `.northstar/config.toml`
+  carries the promise (`max_attempts`, `base_delay_ms`, `multiplier`, `max_delay_ms`,
+  `deadline_ms`, `jitter`, `retry_on`, `respect_retry_after`, `on_context_overflow`), the CLI
+  offers `--retry-max-attempts`, `--retry-deadline-ms`, `--retry-on`, `--no-retry`, and every
+  merge goes through `restrict()` so a flag cannot loosen the file. A bundle may not touch it:
+  `retry` is not a `[policy]` key, so a plugin cannot raise the number of requests its own code
+  makes. `Retry-After` is honoured up to `max_delay_ms`, and overriding it is stated in the
+  event; an HTTP-date form is declined rather than guessed at.
+- **Degradation, bounded.** `on_context_overflow = "compact_once"` answers a 413 by compacting
+  through the ordinary `PreCompact` hook path (a hook may veto it) and re-issuing once without
+  consuming retry budget; a second overflow in the same run stops the run and says why. There
+  is no `fallback_model`: changing which model answers is a policy decision, not a transport
+  detail — degrade the request, never the identity of the answerer.
+- **Visibility without a format change.** The providers now default `max_retries=0` and attach
+  `failure_kind`/`status_code`/`retry_after_ms` to the `ProviderError` they raise, so the loop's
+  classification agrees with theirs by construction. Retries are informational events on the
+  live stream and span attributes in the trace, and never transcript records: a run's digest
+  should not move because a 429 happened. A retry that exhausted the budget does reach the
+  record, as the explanation: `provider failure on turn 1: too many requests (after 4
+  request(s), 35 ms of policy waiting)`.
+- **Offline rehearsal is the point.** A `--script` turn may now carry
+  `{"raises": {"status": 429, "retry_after_ms": 300}}`, which builds the same classified
+  `ProviderError` a real gateway produces, so the entire retry path is exercised on the
+  provider the demo uses - no key, no network, no monkey-patching. Unknown fault keys are
+  refused at script build time, because a script that silently failed to produce its fault
+  would test the wrong thing.
+- **Honest limits, stated where the feature is documented.** This is not a circuit breaker
+  (no shared state between processes) and not a queue (`deadline_ms` bounds the wait, so a
+  provider needing ten minutes to recover means re-running later, visibly, from CI); no real
+  provider endpoint was exercised, so the taxonomy is verified against fake clients and a
+  scripted script; a mid-stream recovery is *not* attempted, which is a capability gap relative
+  to hosts that resume generation, taken on purpose.
+
+74 new tests (`tests/test_provider_retry.py`), including a CLI rehearsal that retries a 429 and
+an overloaded turn and lands the answer, and one that shows `--no-retry` failing the same script
+immediately. Runtime slice 1029 → 1103, repository 1326 → 1400, all offline; `make demo`
+unchanged. The contract roadmap in `docs/next-gen-agent-blueprint.zh-CN.md` has no remaining
+items; what is left there is product surface, not semantics.
+
 ## Unreleased (nineteenth batch) — plugins are a packaging format, not a permission channel
 
 Asked directly: do we have plugins, and do they work on every platform? The honest answer

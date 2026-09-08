@@ -107,13 +107,11 @@ jobs:
           pip install -r requirements.txt -r requirements-tracing.txt
       - name: Compile
         run: |
-          python -m py_compile loop.py hooks.py permissions.py budget.py tools/__init__.py \
-            tools/verify_invariants.py compaction.py sessions.py session_view.py policy_file.py \
-            frontmatter.py skills.py agent_files.py mcp_client.py audit_export.py agents.py tracing.py sidecar_client.py \
-            events.py sdk.py scaffold.py \
-            cli.py doctor.py _version.py \
-            providers/base.py providers/anthropic.py providers/scripted.py \
-            tests/support.py tests/fixtures/mcp_echo_server.py tests/test_*.py
+          # Every module the component ships, by glob rather than by hand: a curated list
+          # here silently stopped covering new modules the moment they landed, which is the
+          # opposite of what a compile step is for.
+          python -m py_compile *.py providers/*.py tools/*.py \
+            tests/support.py tests/fixtures/*.py tests/test_*.py
       - name: Unit tests
         # No API key and no network: the scripted provider is the only model, and
         # the sidecar integration test starts a real listener on a Unix socket.

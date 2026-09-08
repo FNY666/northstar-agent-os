@@ -963,6 +963,72 @@ A snapshot-and-compare verifier bound to one workspace.
 
 The audit shape: a pass/fail roll-up with the structural split made visible.
 
+### `provider_retry`
+
+Source: `components/northstar-agent-runtime/provider_retry.py`
+
+The retry budget: what a transient provider fault means, and what it costs.
+
+#### `RetryConfigurationError`
+
+The retry table is unusable. Raised at load, never mid-run.
+
+#### `ProviderFault`
+
+One classified provider failure.
+
+- `retryable_by_default()`
+- `as_dict()`
+#### `AttemptRecord`
+
+What happened between two provider calls: the fault, the wait, the next attempt.
+
+- `as_dict()`
+- `line()`
+  - The operator-facing sentence, used by the loop's informational event.
+#### `RetryPolicy`
+
+How many times, how long apart, and until when.
+
+- `from_mapping(document: Mapping[str, Any] | None, *, seed: int | None=None)`
+  - Parse a ``[retry]`` table, or return ``None`` when the workspace has no opinion.
+- `restrict(other: 'RetryPolicy | None')`
+  - Clamp this policy to no looser than ``other`` (the workspace's own table).
+- `enabled()`
+- `plan(attempt: int, fault: ProviderFault, *, waited_ms: int=0)`
+  - Decide what to do after ``attempt`` calls failed with ``fault``.
+- `planned_wait_ms()`
+  - The most this policy can make a single turn wait, jitter at its ceiling.
+- `describe()`
+  - One line, for ``--dry-run`` and ``doctor``.
+- `as_dict()`
+#### `StopRetry`
+
+The decision not to retry, with the reason a caller can put in an event.
+
+- `as_dict()`
+#### `classify(error: BaseException, *, already_streamed: bool=False)`
+
+Name a provider failure, from whatever the transport could tell us.
+
+#### `execute(call: Callable[[], Any], *, policy: RetryPolicy | None, on_retry: Callable[[AttemptRecord], None] | None=None, classify_error: Callable[[BaseException], ProviderFault] | None=None, sleep: Callable[[float], None] | None=None)`
+
+Call ``call()`` under ``policy``, returning ``(result, summary)``.
+
+#### `RetrySummary`
+
+What a retry policy actually cost this turn.
+
+- `with_fault(attempt: int, fault: ProviderFault)`
+- `with_retry(record: AttemptRecord)`
+- `with_stop(attempt: int, stop: 'StopRetry')`
+- `retried()`
+- `as_dict()`
+- `line()`
+#### `merge_cli(policy: RetryPolicy | None, *, max_attempts: int | None=None, deadline_ms: int | None=None, retry_on: Iterable[str] | None=None, off: bool=False)`
+
+Apply the CLI's knobs on top of the workspace table, never loosening past it.
+
 ### `sdk`
 
 Source: `components/northstar-agent-runtime/sdk.py`

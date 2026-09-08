@@ -15,7 +15,7 @@ are part of the runtime contract:
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any, Iterable, Iterator, Sequence
+from typing import Any, Iterable, Iterator, Mapping, Sequence
 
 from providers.base import (
     Generation,
@@ -82,6 +82,46 @@ class ScriptedTurn:
         return ScriptedTurn(blocks=(text,), chunks=tuple(chunks), **kwargs)
 
 
+#: The keys a JSON fault object may carry. A typo here is refused, because a script that
+#: silently fails to produce the fault it describes would test the wrong thing.
+FAULT_KEYS = frozenset({"message", "status", "kind", "retry_after_ms"})
+
+
+def _fault(spec: Mapping[str, Any]) -> ProviderError:
+    """Build a real :class:`ProviderError` from a JSON object.
+
+    ``{"status": 429, "message": "rate limit", "retry_after_ms": 300}`` is the shape, and it
+    exists so that a retry policy - a thing about transport failures - can be rehearsed with no
+    API key, no network and no monkey-patching. The scripted provider is the reference provider,
+    which makes this the honest place to put it: every test of the retry path in this component
+    is a test of the same provider the demo runs on.
+    """
+    unknown = sorted(set(spec) - FAULT_KEYS)
+    if unknown:
+        raise ProviderError(f"scripted fault: unknown key(s) {', '.join(unknown)} - allowed: {', '.join(sorted(FAULT_KEYS))}")
+    kwargs: dict[str, Any] = {}
+    if "status" in spec:
+        status = spec["status"]
+        if isinstance(status, bool) or not isinstance(status, int):
+            raise ProviderError("scripted fault: status must be an HTTP status code")
+        kwargs["status_code"] = status
+    if "kind" in spec:
+        kwargs["failure_kind"] = str(spec["kind"])
+    elif "status" in spec:
+        # Inherited from the status rather than left blank, because that is what the real
+        # providers do: a scripted fault and a gateway fault then reach the retry policy with
+        # the same shape, and a test of one is a test of the other.
+        from provider_retry import classify
+
+        kwargs["failure_kind"] = classify(ProviderError(str(spec.get("message", "")), status_code=spec["status"])).kind
+    if "retry_after_ms" in spec:
+        value = spec["retry_after_ms"]
+        if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+            raise ProviderError("scripted fault: retry_after_ms must be a non-negative integer")
+        kwargs["retry_after_ms"] = value
+    return ProviderError(str(spec.get("message", "")), **kwargs)
+
+
 def _usage(value: Usage | dict[str, Any] | None) -> Usage:
     if value is None:
         return Usage()
@@ -104,6 +144,11 @@ def _coerce(turn: Any) -> ScriptedTurn:
     if isinstance(turn, dict):
         payload = dict(turn)
         raises = payload.pop("raises", None)
+        if isinstance(raises, Mapping):
+            # A JSON script cannot name an exception, but it can name the fault: the
+            # transport details are what the retry policy reads, so they are what a script
+            # should be able to express.
+            raises = _fault(raises)
         usage = _usage(payload.pop("usage", None))
         stop_reason = str(payload.pop("stop_reason", "") or "")
         also_text = payload.pop("also_text", None)
@@ -282,4 +327,5 @@ def _result_text(block: dict[str, Any]) -> str:
     return str(content)
 
 
-__all__ = ["ScriptedProvider", "ScriptedTurn", "split_for_stream"]
+__all__ = [
+    "FAULT_KEYS","ScriptedProvider", "ScriptedTurn", "split_for_stream"]

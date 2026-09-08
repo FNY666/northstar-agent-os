@@ -131,6 +131,39 @@ def _add_run_arguments(parser: argparse.ArgumentParser) -> None:
     limits.add_argument("--compaction-threshold-tokens", type=int, default=60_000, help="compact above this many estimated tokens; 0 disables")
     limits.add_argument("--compaction-keep-messages", type=int, default=4, help="tail size never summarised")
 
+    transport = parser.add_argument_group("provider transport")
+    transport.add_argument(
+        "--retry-max-attempts",
+        type=int,
+        default=None,
+        metavar="N",
+        help=(
+            "provider requests allowed per turn (1 = none). A workspace [retry] table caps this: "
+            "the flag may ask for fewer, never more"
+        ),
+    )
+    transport.add_argument(
+        "--retry-deadline-ms",
+        type=int,
+        default=None,
+        metavar="MS",
+        help="how long one turn may spend waiting between requests (request time itself is the provider's timeout)",
+    )
+    transport.add_argument(
+        "--retry-on",
+        default=None,
+        metavar="CLASSES",
+        help=(
+            "comma-separated fault classes to retry: rate_limited, overloaded, network, timeout, "
+            "server_error (anything else is refused: an auth or bad-request fault is not made true by repetition)"
+        ),
+    )
+    transport.add_argument(
+        "--no-retry",
+        action="store_true",
+        help="report the first provider fault immediately - what a CI job that must not stall wants",
+    )
+
     policy = parser.add_argument_group("policy")
     policy.add_argument("--workspace", default=".", help="directory the tools are confined to")
     policy.add_argument("--permission-mode", choices=("default", "acceptEdits", "plan", "bypassPermissions"), default="default")
@@ -384,6 +417,7 @@ def _print_dry_run(
     print(f"max_turns={config.max_turns} "
           f"max_tool_calls={config.max_tool_calls or 'unlimited'} "
           f"max_budget_usd={config.max_budget_usd or 'unlimited'}")
+    print(_retry_note(config))
     print(f"sidecar={'on' if config.sidecar_socket else 'off'} "
           f"session_dir={args.session_dir or 'off'} "
           f"halt_on_denial={config.halt_on_denial}")
@@ -482,6 +516,41 @@ def main(argv: Sequence[str] | None = None) -> int:
     except OSError as error:  # pragma: no cover - host-level failure
         print(f"cannot run: {error}", file=sys.stderr)
         return USAGE_ERROR
+
+
+def _retry_policy(args: argparse.Namespace, policy: Any):
+    """The run's transport policy: the workspace table, then the flags, clamped to the table.
+
+    Order matters and is the same as every other ceiling here. The repository's ``[retry]``
+    table is the promise; ``--retry-*`` may shorten it and cannot lengthen it, because a flag
+    that could turn "this repo waits at most twice" into "wait eight times" would make the file
+    decorative. ``--no-retry`` is not ``--retry-max-attempts 1`` in disguise: it also turns
+    jitter off, so the run that wanted to see the first fault sees it as early as possible.
+    """
+    from provider_retry import RetryConfigurationError, RetryPolicy, merge_cli
+
+    workspace_policy = RetryPolicy.from_mapping(getattr(policy, "retry", None))
+    base = workspace_policy or RetryPolicy()
+    retry_on = None
+    if getattr(args, "retry_on", None):
+        retry_on = tuple(item.strip() for item in str(args.retry_on).split(",") if item.strip())
+        if not retry_on:
+            raise RetryConfigurationError("--retry-on needs at least one fault class")
+    return merge_cli(
+        base,
+        max_attempts=getattr(args, "retry_max_attempts", None),
+        deadline_ms=getattr(args, "retry_deadline_ms", None),
+        retry_on=retry_on,
+        off=bool(getattr(args, "no_retry", False)),
+    )
+
+
+def _retry_note(config: Any) -> str:
+    """One dry-run line describing what a provider fault may cost this run."""
+    retry = getattr(config, "retry", None)
+    if retry is None:
+        return "retry=off (one provider request per turn)"
+    return retry.describe()
 
 
 def _session_lease_note(config: Any, *, session_dir: str = "") -> str:
@@ -873,7 +942,15 @@ def _run(args: argparse.Namespace) -> int:
         or (plugins is not None and plugins.policy.get("halt_on_denial"))
     )
 
+    try:
+        from provider_retry import RetryConfigurationError
+
+        retry_policy = _retry_policy(args, policy)
+    except RetryConfigurationError as error:
+        print(f"configuration error: {error}", file=sys.stderr)
+        return USAGE_ERROR
     config_kwargs: dict[str, Any] = {
+        "retry": retry_policy,
         "model": (definition.model if definition and definition.model else args.model),
         "max_turns": max_turns,
         "max_tool_calls": max_tool_calls,

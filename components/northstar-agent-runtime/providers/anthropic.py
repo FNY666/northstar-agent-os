@@ -45,7 +45,12 @@ class AnthropicProvider(Provider):
         max_tokens: int = 4096,
         temperature: float | None = None,
         prompt_cache: bool = True,
-        max_retries: int = 2,
+        #: ``0`` by default, and that is a decision rather than a preference: the runtime owns
+        #: the retry budget (provider_retry.py), and an SDK loop underneath it multiplies the
+        #: request count into something no policy file ever approved. An embedder who really
+        #: wants the SDK's loop can still set it, in which case this component's policy should
+        #: be set to ``max_attempts = 1`` so exactly one loop is in charge.
+        max_retries: int = 0,
         timeout: float | None = None,
         extra_headers: dict[str, str] | None = None,
     ) -> None:
@@ -118,7 +123,7 @@ class AnthropicProvider(Provider):
         except ProviderError:
             raise
         except Exception as error:  # noqa: BLE001 - must surface as an event
-            raise ProviderError(f"anthropic request failed: {_reason(error)}") from error
+            raise ProviderError(f"anthropic request failed: {_reason(error)}", **_classify(error)) from error
         return self.normalise(response)
 
     def stream(self, request: GenerationRequest):  # type: ignore[override]
@@ -144,7 +149,7 @@ class AnthropicProvider(Provider):
         except ProviderError:
             raise
         except Exception as error:  # noqa: BLE001 - must surface as an event
-            raise ProviderError(f"anthropic stream failed: {_reason(error)}") from error
+            raise ProviderError(f"anthropic stream failed: {_reason(error)}", **_classify(error)) from error
         yield self.normalise(response)
 
     @staticmethod
@@ -225,6 +230,21 @@ def _reason(error: Exception) -> str:
     """
     text = str(error) or type(error).__name__
     return text if len(text) <= 300 else text[:297] + "..."
+
+
+def _classify(error: Exception) -> dict[str, Any]:
+    """Structured fields for the :class:`ProviderError` we are about to raise.
+
+    The retry policy in :mod:`provider_retry` decides "retry or stop" from the fault class,
+    and it reads a status code before it reads prose. A provider that has the number and
+    keeps it to itself hands that decision to string matching, so the classification is done
+    here once and attached - the loop's own classification then agrees with ours by
+    construction rather than by luck.
+    """
+    from provider_retry import classify
+
+    fault = classify(error)
+    return {"failure_kind": fault.kind, "status_code": fault.status_code, "retry_after_ms": fault.retry_after_ms}
 
 
 def _unused(blocks: Sequence[Any]) -> None:  # pragma: no cover

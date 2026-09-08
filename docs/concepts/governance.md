@@ -49,6 +49,13 @@ bypass.
   semantics, and an optional/required `revision` id (no whitespace or
   slashes, ≤128 chars) is what authorization grants and audit records carry
   as `policy_revision` — every decision traces to the exact policy revision.
+- **The transport budget is a ceiling too**: a retry cannot widen what a run may
+  *do*, but it multiplies what it *costs* — requests, waiting, and money at
+  per-token prices — so `.northstar/config.toml`'s `[retry]` table (parsed by
+  `provider_retry`) sits in the same file as `max_turns` and `deny_tools`. The
+  same rules apply there: command-line flags may only tighten it, a plugin
+  bundle has no key for it, and an out-of-range or unknown value is a
+  configuration error before the run, never a defaulted guess.
 
 ## Where each component sits
 
