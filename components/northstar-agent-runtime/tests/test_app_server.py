@@ -2,6 +2,8 @@
 from __future__ import annotations
 
 import json
+import shutil
+import subprocess
 import tempfile
 import threading
 import unittest
@@ -152,6 +154,30 @@ class AppWireTests(RuntimeTestCase):
         self.assertEqual(final["status"], "success")
         self.assertEqual(status["status"], "success")
         self.assertEqual(page["events"][-1]["event"]["subtype"], "success")
+
+    def test_node_consumer_verifies_hmac_and_uses_bounded_wait(self):
+        repository = Path(__file__).resolve().parents[3]
+        smoke = repository / "examples" / "app-server" / "node_client_smoke.mjs"
+        if shutil.which("node") is None or not smoke.is_file():
+            self.skipTest("Node.js consumer example is unavailable in this component copy")
+        with tempfile.TemporaryDirectory() as directory:
+            socket_path = Path(directory) / "app.sock"
+            server = AppServer(self.manager(), channel_secret=self.SECRET, socket_path=socket_path)
+            thread = server.start()
+            server.wait_ready(timeout=2)
+            try:
+                completed = subprocess.run(
+                    ["node", str(smoke), str(socket_path), self.SECRET.hex()],
+                    check=False,
+                    capture_output=True,
+                    text=True,
+                    timeout=10,
+                )
+            finally:
+                server.close()
+                thread.join(timeout=2)
+        self.assertEqual(completed.returncode, 0, completed.stderr)
+        self.assertEqual(json.loads(completed.stdout), {"status": "success", "eventCount": 3})
 
     def test_startup_failure_is_reported_by_wait_ready(self):
         with tempfile.TemporaryDirectory() as directory:

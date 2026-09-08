@@ -10,6 +10,17 @@ reported explicitly instead of being hidden behind a socket polling race.
 python3 examples/app-server/run_offline.py
 ```
 
+`node_client.mjs` is a dependency-free Node consumer for the same protocol. A
+host can start the Python server and then run its smoke client with the socket
+path and channel secret:
+
+```sh
+node examples/app-server/node_client_smoke.mjs /absolute/app.sock SECRET_HEX
+```
+
+The Node client verifies response HMACs and uses bounded `run.wait`; it is an
+experimental source example, not an npm package or publication.
+
 No API key, model SDK, network listener or remote worker is used. The example
 shows the important ownership boundary:
 

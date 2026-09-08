@@ -19,6 +19,7 @@ from __future__ import annotations
 import hashlib
 import hmac
 import json
+import math
 import os
 import re
 import socket
@@ -478,7 +479,7 @@ class AppServer:
             "protocol": APP_PROTOCOL,
             "request_id": request_id,
             "ok": ok,
-            **fields,
+            **{key: _wire_value(value) for key, value in fields.items()},
         }
         response["auth"] = _mac(response, self.channel_secret)
         if len(_json_line(response)) > self.max_frame_bytes:
@@ -701,6 +702,19 @@ def _prepare_socket_parent(parent: Path) -> None:
     mode = os.stat(parent).st_mode & 0o777
     if mode & 0o077:
         raise AppServerError("insecure_socket_directory", "socket parent directory must be owner-only")
+
+
+def _wire_value(value: Any) -> Any:
+    """Project response values to JSON numbers that other runtimes can reproduce."""
+    if isinstance(value, float):
+        if not math.isfinite(value):
+            raise AppServerError("invalid_response", "response contains a non-finite number")
+        return int(value) if value.is_integer() else value
+    if isinstance(value, Mapping):
+        return {str(key): _wire_value(item) for key, item in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_wire_value(item) for item in value]
+    return value
 
 
 def _json_line(payload: Mapping[str, Any]) -> bytes:

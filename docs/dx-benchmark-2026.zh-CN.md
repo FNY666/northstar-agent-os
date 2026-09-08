@@ -1102,3 +1102,22 @@ T27 只改善本地 background-run consumer 的等待语义：
 - runtime 仍为 616 项、全仓 `make test` 954 项（950 pass、4 项可选 OTel skip）。
 
 T27 仍是 Unreleased；没有创建 tag、GitHub Release，也没有发布到 PyPI/npm。
+
+### 10.32 当前实现复核：dependency-free Node app-server consumer（T28，2026-09-08）
+
+T28 将 T25 的 protocol surface 暴露给另一个本地 consumer runtime，但不引入 npm
+依赖或改变 host ownership：
+
+- `examples/app-server/node_client.mjs` 使用 Node 内置 `net`/`crypto`，实现 Unix
+  JSON-lines client、HMAC request/response verification、reserved-field rejection，以及
+  `run.start/status/events/wait/cancel`；它是 source example，不是已发布的 TypeScript/npm
+  SDK。
+- Python integration test 启动真实本地 app-server，再由 Node client 完成 start、HMAC
+  验证、bounded wait 和 event replay。response projection 将 integral float 规范化为 JSON
+  integer，使 Python 与 Node 的 canonical JSON 对同一 logical number 达成一致；不改变
+  面向 consumer 的数字语义。
+- Node 不拥有 provider、workspace、policy 或 secret issuance；它仍然只是 host 已启动
+  local socket 的 consumer。runtime 617 项、全仓 `make test` 955 项（951 pass、4 项可选
+  OTel skip）。
+
+T28 仍是 Unreleased；没有创建 tag、GitHub Release，也没有发布到 PyPI/npm。

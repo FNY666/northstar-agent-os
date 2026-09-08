@@ -1,5 +1,19 @@
 # Northstar Agent OS — initial public component
 
+## Unreleased (thirty-sixth batch) — dependency-free Node app-server consumer (T28)
+
+- Added `examples/app-server/node_client.mjs`, a dependency-free Node client for
+  the existing Unix JSON-lines + HMAC protocol. It supports start/status/events/
+  wait/cancel, verifies response authentication and rejects reserved-field
+  overrides; it is source-only and is not published to npm.
+- Added a cross-runtime smoke test: Python starts the host-owned server and Node
+  verifies HMACs while using bounded `run.wait`. Response projection normalizes
+  integral floating values so Python and Node reproduce the same authenticated
+  JSON representation without changing the logical numeric schema.
+- Runtime now has 617 tests; repository `make test` has 955 tests (951 pass,
+  4 optional OTel skips). No release tag, GitHub Release, PyPI/npm publication
+  or remote execution claim was made.
+
 ## Unreleased (thirty-fifth batch) — bounded app-server wait (T27)
 
 - Added `run.wait` to the local authenticated JSON-lines protocol. It waits for
