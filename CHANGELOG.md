@@ -1,5 +1,19 @@
 # Northstar Agent OS — initial public component
 
+## Unreleased (thirtieth batch) — crash-recoverable durable control replay (T23)
+
+- Added stable command markers to transport control-event idempotency keys. If
+  the EventStore transition completed but the local receipt ledger write was
+  interrupted, a later authenticated retry can rebuild and verify the receipt
+  from the contiguous marked event range without appending another lifecycle
+  event.
+- Kept incomplete transitions and cross-process races explicit recovery
+  boundaries; this is not distributed exactly-once execution. Added runner
+  compatibility coverage and a loopback test for ledger-loss recovery. The
+  readiness score remains 94/100, with no real remote worker claim, release tag,
+  GitHub Release, or PyPI/npm publication. Durable-run now has 95 tests and
+  the repository has 937 tests (933 pass, 4 optional OTel skips).
+
 ## Unreleased (twenty-ninth batch) — bounded paginated durable replay transport (T22)
 
 - Extended `northstar-durable-run/durable_transport.py` history replay with a

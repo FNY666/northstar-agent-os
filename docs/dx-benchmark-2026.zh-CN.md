@@ -987,3 +987,23 @@ T22 没有扩大 T21 的部署边界，而是修复 growing EventStore history �
   `remote_worker --score` 保持 94/100。
 
 T22 仍是 Unreleased；没有创建 tag、GitHub Release，也没有发布到 PyPI/npm。
+
+### 10.26 当前实现复核：crash-recoverable durable control replay（2026-09-08）
+
+T23 针对 T22 明确留下的 EventStore commit 与 receipt ledger commit crash window，
+补上了本地可验证的 recovery marker：
+
+- transport control command 的 fingerprint 生成稳定 `command_marker`，并传入
+  `DurableRunner.pause/resume/cancel` 作为 event idempotency-key 前缀；普通本地
+  runner 调用不提供 marker 时保持原有 key 行为与兼容性。
+- server 在 ledger miss 时只接受完整且 contiguous 的 marker event range：pause
+  必须看到 `run.waiting`，resume 必须看到 `run.started`，cancel 必须看到
+  `run.cancelled`；随后用 EventStore historical prefix replay 重建 receipt，并先
+  通过 state/event reference verification 再写入 ledger。
+- 这覆盖“transition 已完成、ledger append 丢失”的本地 retry path，不覆盖未完成
+  transition、跨进程并发抢占或 distributed exactly-once；没有执行 Python action，也
+  没有改变 Profile B readiness gate。新增 recovery marker 与 command-marker tests；
+  durable-run 95 项、全仓 `make test` 937 项（933 pass、4 项可选 OTel skip）。T23
+  仍保持 `remote_worker --score` 94/100。
+
+T23 仍是 Unreleased；没有创建 tag、GitHub Release，也没有发布到 PyPI/npm。

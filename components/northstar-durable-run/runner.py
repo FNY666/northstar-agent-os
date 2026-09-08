@@ -336,15 +336,21 @@ class DurableRunner:
         if acquired:
             self.lease.release(owner_id)
 
-    def _append_run_started(self, *, now: int) -> None:
+    def _append_run_started(self, *, now: int, command_key: str | None = None) -> None:
+        if command_key is not None:
+            _require_id(command_key, "command_key")
         state = self.store.derive_state(self.run.run_id)
         history = self.store.read_history(self.run.run_id)
         if state["status"] == "planned":
             starts = sum(event.event_type == "run.started" for event in history)
             key = (
-                f"{self.run.run_id}-started"
-                if starts == 0
-                else f"{self.run.run_id}-started-attempt-{starts + 1}"
+                f"{command_key}-started"
+                if command_key is not None
+                else (
+                    f"{self.run.run_id}-started"
+                    if starts == 0
+                    else f"{self.run.run_id}-started-attempt-{starts + 1}"
+                )
             )
             self._append(
                 event_type="run.started",
@@ -363,7 +369,11 @@ class DurableRunner:
                 event_type="run.started",
                 status="running",
                 step_id="__run__",
-                idempotency_key=f"{self.run.run_id}-resumed-{state['sequence'] + 1}",
+                idempotency_key=(
+                    f"{command_key}-resumed"
+                    if command_key is not None
+                    else f"{self.run.run_id}-resumed-{state['sequence'] + 1}"
+                ),
                 now=now,
                 payload={"status": "running"},
             )
@@ -388,9 +398,18 @@ class DurableRunner:
             for event in self.store.read_history(self.run.run_id)
         )
 
-    def pause(self, *, owner_id: str, now: int, reason: str = "operator pause") -> dict[str, Any]:
+    def pause(
+        self,
+        *,
+        owner_id: str,
+        now: int,
+        reason: str = "operator pause",
+        command_key: str | None = None,
+    ) -> dict[str, Any]:
         """Pause at a durable run boundary; actions already in a Python call are not interrupted."""
         _require_id(owner_id, "owner_id")
+        if command_key is not None:
+            _require_id(command_key, "command_key")
         if not isinstance(now, int) or isinstance(now, bool):
             raise ValueError("now must be an integer")
         if not isinstance(reason, str) or not reason.strip() or len(reason) > 512:
@@ -406,7 +425,11 @@ class DurableRunner:
                 event_type="run.waiting",
                 status="waiting",
                 step_id="__run__",
-                idempotency_key=f"{self.run.run_id}-paused-{state['sequence'] + 1}",
+                idempotency_key=(
+                    f"{command_key}-paused"
+                    if command_key is not None
+                    else f"{self.run.run_id}-paused-{state['sequence'] + 1}"
+                ),
                 now=now,
                 payload={"status": "waiting", "reason": reason.strip()},
             )
@@ -414,9 +437,17 @@ class DurableRunner:
         finally:
             self._release_control_lease(owner_id, acquired)
 
-    def resume(self, *, owner_id: str, now: int) -> dict[str, Any]:
+    def resume(
+        self,
+        *,
+        owner_id: str,
+        now: int,
+        command_key: str | None = None,
+    ) -> dict[str, Any]:
         """Resume a paused run's durable state; execution still reacquires the lease."""
         _require_id(owner_id, "owner_id")
+        if command_key is not None:
+            _require_id(command_key, "command_key")
         if not isinstance(now, int) or isinstance(now, bool):
             raise ValueError("now must be an integer")
         state = self.prepare(owner_id=owner_id, now=now)
@@ -424,13 +455,21 @@ class DurableRunner:
             raise ValueError("only a waiting task can be resumed")
         acquired = self._acquire_control_lease(owner_id, now=now)
         try:
-            self._append_run_started(now=now)
+            self._append_run_started(now=now, command_key=command_key)
             return self.store.derive_state(self.run.run_id)
         finally:
             self._release_control_lease(owner_id, acquired)
 
-    def cancel(self, *, owner_id: str, now: int) -> dict[str, Any]:
+    def cancel(
+        self,
+        *,
+        owner_id: str,
+        now: int,
+        command_key: str | None = None,
+    ) -> dict[str, Any]:
         """Persist active step cancellation before the terminal run cancellation event."""
+        if command_key is not None:
+            _require_id(command_key, "command_key")
         state = self.prepare(owner_id=owner_id, now=now)
         if state["status"] in {"finished", "failed", "cancelled"}:
             return state
@@ -443,8 +482,12 @@ class DurableRunner:
                         event_type="step.cancelled",
                         status="cancelled",
                         step_id=step_id,
-                        idempotency_key=self._attempt_key(
-                            f"{self.run.run_id}-{step_id}-cancelled", attempt
+                        idempotency_key=(
+                            f"{command_key}-step-{step_id}-cancelled-{attempt}"
+                            if command_key is not None
+                            else self._attempt_key(
+                                f"{self.run.run_id}-{step_id}-cancelled", attempt
+                            )
                         ),
                         now=now,
                         payload={"status": "cancelled", "attempt": attempt},
@@ -454,7 +497,11 @@ class DurableRunner:
                 event_type="run.cancelled",
                 status="cancelled",
                 step_id="__run__",
-                idempotency_key=f"{self.run.run_id}-cancelled-{state['sequence'] + 1}",
+                idempotency_key=(
+                    f"{command_key}-run-cancelled"
+                    if command_key is not None
+                    else f"{self.run.run_id}-cancelled-{state['sequence'] + 1}"
+                ),
                 now=now,
                 payload={"status": "cancelled"},
             )

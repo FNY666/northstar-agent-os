@@ -237,6 +237,49 @@ class DurableTransportTests(unittest.TestCase):
         self.assertTrue(second["replayed"])
         self.assertEqual(second["receipt"], first["receipt"])
 
+    def test_completed_event_marker_recovers_when_ledger_commit_was_lost(self):
+        runner = DurableRunner(self.run, EventStore(self.events), lease_path=self.lease)
+        runner.execute(
+            [
+                StepPlan(
+                    step_id="inspect",
+                    input_payload={"path": "README.md"},
+                    scope_snapshot=["workspace:read"],
+                    expected_postconditions=[],
+                    action=lambda _key: {"ok": True},
+                )
+            ],
+            owner_id="actor-1",
+            now=self.now + 1,
+            finalize=False,
+        )
+        with self.server() as server:
+            client = self.client(server)
+            frame = client.build_frame(
+                "pause",
+                payload={"reason": "recovered hold"},
+                request_id="recover-1",
+            )
+            authorized = server._authorize(frame, now=self.now)
+            runner.pause(
+                owner_id="actor-1",
+                now=self.now,
+                reason="recovered hold",
+                command_key=authorized.command_marker,
+            )
+            before_retry = len(self.events.read_text(encoding="utf-8").splitlines())
+            recovered = client.request_ok(
+                "pause",
+                payload={"reason": "recovered hold"},
+                request_id="recover-1",
+            )
+            self.assertTrue(recovered["replayed"])
+            self.assertEqual(recovered["receipt"]["outcome"], "applied")
+            self.assertEqual(
+                len(self.events.read_text(encoding="utf-8").splitlines()),
+                before_retry,
+            )
+
     def test_history_pagination_rejects_unbounded_or_unknown_parameters(self):
         with self.server() as server:
             client = self.client(server)

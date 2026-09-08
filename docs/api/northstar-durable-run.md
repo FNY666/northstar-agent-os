@@ -61,6 +61,10 @@ Bounded local replay index for authenticated durable control receipts.
 
 Digest the signed command claims that make a request replay-compatible.
 
+#### `command_marker(command_id: str, fingerprint: str)`
+
+Return a stable event-key prefix for crash recovery before ledger commit.
+
 #### `ControlReceiptLedger`
 
 Append-only, POSIX-locked replay index for completed control commands.
@@ -158,11 +162,11 @@ A single-owner, expiring local lease persisted as strict JSON.
 Execute planned local steps with durable event and lease boundaries.
 
 - `prepare(*, owner_id: str, now: int)`
-- `pause(*, owner_id: str, now: int, reason: str='operator pause')`
+- `pause(*, owner_id: str, now: int, reason: str='operator pause', command_key: str | None=None)`
   - Pause at a durable run boundary; actions already in a Python call are not interrupted.
-- `resume(*, owner_id: str, now: int)`
+- `resume(*, owner_id: str, now: int, command_key: str | None=None)`
   - Resume a paused run's durable state; execution still reacquires the lease.
-- `cancel(*, owner_id: str, now: int)`
+- `cancel(*, owner_id: str, now: int, command_key: str | None=None)`
   - Persist active step cancellation before the terminal run cancellation event.
 - `retry(plans: list[StepPlan], *, owner_id: str, now: int, finalize: bool=True)`
   - Retry a failed run with explicit plans and fresh step idempotency keys.

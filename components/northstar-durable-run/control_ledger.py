@@ -68,6 +68,15 @@ def command_fingerprint(
     return "sha256:" + hashlib.sha256(_canonical(value)).hexdigest()
 
 
+def command_marker(command_id: str, fingerprint: str) -> str:
+    """Return a stable event-key prefix for crash recovery before ledger commit."""
+    validate_identity(command_id, "command_id")
+    if not isinstance(fingerprint, str) or not _FINGERPRINT_RE.fullmatch(fingerprint):
+        raise ValueError("control command fingerprint is invalid")
+    material = f"{command_id}\x00{fingerprint}".encode("utf-8")
+    return "control-" + hashlib.sha256(material).hexdigest()
+
+
 def _record_to_dict(command_id: str, fingerprint: str, receipt: ControlReceipt) -> dict[str, Any]:
     return {
         "schema_version": CONTROL_LEDGER_SCHEMA_VERSION,
@@ -212,4 +221,5 @@ __all__ = [
     "MAX_LEDGER_BYTES",
     "MAX_LEDGER_RECORDS",
     "command_fingerprint",
+    "command_marker",
 ]

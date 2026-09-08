@@ -113,7 +113,7 @@ exists for one transcript file, but there is no global transcript lineage,
 distributed/remote replication, or retention policy.
 The roadmap's P3-1 is delivered in two batches: the audit feed above
 (`audit.ndjson/1`) and policy schema-isation (`northstar-policy.toml` versioning,
-`northstar.policy.v1` with revision tracking). T20/T21/T22 transport helpers
+`northstar.policy.v1` with revision tracking). T20/T21/T22/T23 transport helpers
 remain local, bounded control/channel slices; they do not turn this audit trail
 into a remote compliance store.
 

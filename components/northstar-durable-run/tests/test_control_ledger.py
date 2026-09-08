@@ -8,7 +8,11 @@ from pathlib import Path
 COMPONENT_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(COMPONENT_ROOT))
 
-from control_ledger import ControlReceiptLedger, command_fingerprint  # noqa: E402
+from control_ledger import (  # noqa: E402
+    ControlReceiptLedger,
+    command_fingerprint,
+    command_marker,
+)
 from control_receipt import (  # noqa: E402
     CONTROL_RECEIPT_SCHEMA_VERSION,
     ControlReceipt,
@@ -75,6 +79,12 @@ class ControlLedgerTests(unittest.TestCase):
         )
         self.assertEqual(same, self.fingerprint)
         self.assertNotEqual(same, changed)
+
+    def test_command_marker_is_stable_and_claim_bound(self):
+        marker = command_marker("command-1", self.fingerprint)
+        self.assertEqual(marker, command_marker("command-1", self.fingerprint))
+        self.assertTrue(marker.startswith("control-"))
+        self.assertNotEqual(marker, command_marker("command-2", self.fingerprint))
 
     def test_record_and_lookup_round_trip_is_durable(self):
         self.assertIsNone(self.ledger.lookup("command-1", self.fingerprint))

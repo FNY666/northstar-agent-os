@@ -33,7 +33,7 @@ from typing import Any
 
 from authorization import verify_authorization
 from binding import verify_binding
-from control_ledger import ControlReceiptLedger, command_fingerprint
+from control_ledger import ControlReceiptLedger, command_fingerprint, command_marker
 from control_receipt import (
     CONTROL_RECEIPT_SCHEMA_VERSION,
     ControlReceipt,
@@ -98,6 +98,7 @@ class _AuthorizedRequest:
     policy_revision: str
     payload: dict[str, Any]
     fingerprint: str
+    command_marker: str
 
 
 def _canonical(value: dict[str, Any]) -> bytes:
@@ -309,18 +310,29 @@ class DurableWorkerServer:
                         data = self._replay_control_receipt(request, cached)
                         data["replayed"] = True
                     else:
-                        data = self._dispatch(request, now=current)
-                        receipt = ControlReceipt.from_dict(data["receipt"])
-                        stored = self.control_ledger.record(
-                            request.request_id,
-                            request.fingerprint,
-                            receipt,
-                        )
-                        if stored.canonical_json() != receipt.canonical_json():
+                        recovered = self._recover_control_events(request)
+                        if recovered is not None:
+                            receipt = ControlReceipt.from_dict(recovered["receipt"])
+                            stored = self.control_ledger.record(
+                                request.request_id,
+                                request.fingerprint,
+                                receipt,
+                            )
                             data = self._replay_control_receipt(request, stored)
                             data["replayed"] = True
                         else:
-                            data["replayed"] = False
+                            data = self._dispatch(request, now=current)
+                            receipt = ControlReceipt.from_dict(data["receipt"])
+                            stored = self.control_ledger.record(
+                                request.request_id,
+                                request.fingerprint,
+                                receipt,
+                            )
+                            if stored.canonical_json() != receipt.canonical_json():
+                                data = self._replay_control_receipt(request, stored)
+                                data["replayed"] = True
+                            else:
+                                data["replayed"] = False
             else:
                 data = self._dispatch(request, now=current)
             return self._response(request.request_id, "ok", data, None)
@@ -470,6 +482,7 @@ class DurableWorkerServer:
             if operation in {"pause", "resume", "cancel"}
             else ""
         )
+        marker = command_marker(request_id, fingerprint) if fingerprint else ""
         return _AuthorizedRequest(
             request_id=request_id,
             operation=operation,
@@ -479,7 +492,61 @@ class DurableWorkerServer:
             policy_revision=authorization_claims["policy_revision"],
             payload=payload,
             fingerprint=fingerprint,
+            command_marker=marker,
         )
+
+    def _recover_control_events(
+        self,
+        request: _AuthorizedRequest,
+    ) -> dict[str, Any] | None:
+        """Rebuild a completed control receipt when ledger commit was interrupted."""
+        history = self.store.read_history(request.run.run_id)
+        marker = request.command_marker + "-"
+        matched = [event for event in history if event.idempotency_key.startswith(marker)]
+        required_event_type = {
+            "pause": "run.waiting",
+            "resume": "run.started",
+            "cancel": "run.cancelled",
+        }[request.operation]
+        if not matched or not any(event.event_type == required_event_type for event in matched):
+            return None
+        matched.sort(key=lambda event: event.sequence)
+        first = matched[0]
+        last = matched[-1]
+        contiguous = history[first.sequence - 1 : last.sequence]
+        if len(contiguous) != len(matched) or any(
+            left.event_id != right.event_id
+            for left, right in zip(contiguous, matched)
+        ):
+            raise ValueError("control recovery marker is not a contiguous event prefix")
+        before_state = (
+            self.store.replay_at(request.run.run_id, first.sequence - 1)
+            if first.sequence > 1
+            else _empty_state(request.run.run_id)
+        )
+        after_state = self.store.replay_at(request.run.run_id, last.sequence)
+        receipt = ControlReceipt(
+            schema_version=CONTROL_RECEIPT_SCHEMA_VERSION,
+            receipt_id=f"remote-recovered-{request.fingerprint[7:23]}",
+            command_id=request.request_id,
+            run_id=request.run.run_id,
+            actor_id=request.actor_id,
+            operation=request.operation,
+            requested_at=first.occurred_at,
+            outcome="applied",
+            before_status=before_state["status"],
+            after_status=after_state["status"],
+            before_sequence=first.sequence - 1,
+            after_sequence=last.sequence,
+            event_ids=tuple(event.event_id for event in matched),
+            event_sequences=tuple(event.sequence for event in matched),
+            state_digest=digest_state(after_state),
+        )
+        return {
+            "run_id": request.run.run_id,
+            "state": after_state,
+            "receipt": receipt.to_dict(),
+        }
 
     def _dispatch(self, request: _AuthorizedRequest, *, now: int) -> dict[str, Any]:
         run_id = request.run.run_id
@@ -523,11 +590,20 @@ class DurableWorkerServer:
                 owner_id=request.actor_id,
                 now=now,
                 reason=request.payload["reason"],
+                command_key=request.command_marker,
             )
         elif request.operation == "resume":
-            state = runner.resume(owner_id=request.actor_id, now=now)
+            state = runner.resume(
+                owner_id=request.actor_id,
+                now=now,
+                command_key=request.command_marker,
+            )
         else:
-            state = runner.cancel(owner_id=request.actor_id, now=now)
+            state = runner.cancel(
+                owner_id=request.actor_id,
+                now=now,
+                command_key=request.command_marker,
+            )
         after_events = self.store.read_history(run_id)
         new_events = after_events[len(before_events) :]
         receipt = ControlReceipt(

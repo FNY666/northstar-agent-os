@@ -3,7 +3,7 @@
 Northstar deliberately does **not** build a cloud. This document is the
 decision record for wrapping the existing execution model into a remote
 worker, together with the protocol a hosted worker would speak. It is a
-*map*, not a deployment claim: the T20 SSH lifecycle helper and T21/T22 local
+*map*, not a deployment claim: the T20 SSH lifecycle helper and T21/T22/T23 local
 control/replay channel are implemented and loopback-tested, but no remote
 worker is deployed or exercised.
 
@@ -26,8 +26,8 @@ second class of agent.
   is signed, short-lived and carries the policy revision.
 - `northstar-durable-run` — append-only event history, leases, per-call
   action gates and independent postcondition verification: the machinery a
-  hosted worker needs to survive crashes and report *verifiably*. T21/T22 add a
-  loopback-only authenticated, cursor-paged control/replay transport, but not a
+  hosted worker needs to survive crashes and report *verifiably*. T21/T22/T23 add a
+  loopback-only authenticated, cursor-paged, crash-marker-aware control/replay transport, but not a
   fleet scheduler or serialized step execution.
 - `northstar-agent-interop` — `process_adapter`/`process_backend` give a
   backend-neutral **process boundary** for version-pinned Codex / Claude Code
@@ -94,7 +94,7 @@ issuance + rotation [story](northstar-remote-identity.md) and the
 monitoring (ops 4/6 = 67%). What remains is genuinely implementation-shaped:
 
 - **complete network transport readiness** for a hosted worker — T20 supplies
-  the local `ssh_forward.py` lifecycle helper and T21/T22 supply a loopback
+  the local `ssh_forward.py` lifecycle helper and T21/T22/T23 supply a loopback
   control/replay slice, while Profile A real-host validation and all Profile B
   execution transport code remain open;
 - **a real (non-fake) end-to-end canary *run*** on a real host — the

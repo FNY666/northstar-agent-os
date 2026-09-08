@@ -1,9 +1,9 @@
 # Remote transport for a hosted worker (T5 specification)
 
-> **Status: specification plus a local-only Profile A lifecycle helper; T21/T22
+> **Status: specification plus a local-only Profile A lifecycle helper; T21/T22/T23
 > add local control/replay slices.**
 > `ssh_forward.py` (T20) provides the bounded orchestrator-side SSH process
-> lifecycle and `durable_transport.py` (T21/T22) provides authenticated local
+> lifecycle and `durable_transport.py` (T21/T22/T23) provides authenticated local
 > control/replay with cursor pagination. No complete remote execution transport
 > ships; no complete remote transport ships and nothing on this page has ever
 > run against a real host. It is the T5 answer to the P3-3 ops gap *"network
@@ -111,7 +111,7 @@ profile deliberately reuses the durable layer instead of inventing a new one:
   (Profile A's forward-only socket does not need them; a fleet needs mTLS or
   an equivalent — see the identity page's open decisions).
 
-### 3.1 What T21/T22 implements locally
+### 3.1 What T21/T22/T23 implements locally
 
 `durable_transport.py::DurableWorkerServer` and
 `durable_transport.py::DurableWorkerClient` provide a bounded local
@@ -127,9 +127,11 @@ The listener is loopback-only and accepts only `status`, `history`, `pause`,
 requests with an explicit request ID are also indexed in a local bounded
 receipt replay ledger; an exact retry returns the same verified receipt without
 adding another lifecycle event, while command-ID claim changes fail closed.
-The ledger is only a receipt projection and does not claim distributed
-exactly-once semantics across a crash between the EventStore and ledger writes.
-The transport does not accept serialized Python actions, arbitrary paths or a
+T23 adds a stable command marker to control-event idempotency keys, so a
+completed EventStore transition can rebuild its receipt if the ledger write was
+interrupted. The ledger and marker are only receipt projections and do not claim
+distributed exactly-once semantics across an incomplete transition or separate
+processes. The transport does not accept serialized Python actions, arbitrary paths or a
 workspace reference that it resolves itself. This proves framing, request
 authentication, grant re-verification, bounded replay and durable control
 receipt projection in a local process pair; it is not Profile B: there is no

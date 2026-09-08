@@ -86,8 +86,9 @@ beyond what the sidecar component already ships
 The fleet profile (transport spec, Profile B) reuses the durable-run layer:
 `EventStore` on a worker volume, `LeaseManager` for step ownership and crash
 takeover, `DurableRunner` for execution, the independent verifier for
-postconditions. T21/T22 provide only a loopback control/replay slice with
-channel HMAC and bounded history pagination; what does not exist yet is the
+postconditions. T21/T22/T23 provide only a loopback control/replay slice with
+channel HMAC, bounded history pagination and crash-marker receipt recovery; what
+does not exist yet is the
 fleet network execution transport and identity story (mTLS or equivalent — see
 the identity page's open decisions). Do not treat this section as runnable;
 treat it as the shape the T5b implementation must keep.
@@ -141,7 +142,7 @@ wired yet):
 
 This guide is unexercised end to end: no CI run, no real deployment. Its
 value is that every mechanism it names is either an existing tested boundary
-or the local-only T20 `ssh_forward.py` lifecycle helper plus the T21/T22
+or the local-only T20 `ssh_forward.py` lifecycle helper plus the T21/T22/T23
 loopback control/replay slice (contracts, host grants, sidecar framing, durable
 machinery, audit feed); complete transport readiness, Profile B and a real-host
 canary remain open in the T5b checklist.

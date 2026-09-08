@@ -136,7 +136,7 @@ because a retry must provide the explicit `StepPlan` actions and preserve the
 action idempotency boundary. A future scheduler may call this surface, but
 this component does not create one.
 
-## Authenticated loopback transport (T21/T22)
+## Authenticated loopback transport (T21/T22/T23)
 
 `durable_transport.py` provides a deliberately narrow network-shaped surface:
 `DurableWorkerServer` and `DurableWorkerClient` exchange one bounded JSON line
@@ -156,10 +156,13 @@ response returns `next_sequence` when more history remains. Control requests
 with an explicit `request_id` also use a bounded local receipt replay index
 (the default sidecar is `<events>.control-ledger.jsonl`): retrying the same
 signed claims returns the same receipt without appending another lifecycle
-event, while reusing an ID with different claims fails closed. The index is a
-receipt projection, not a lifecycle source or distributed exactly-once ledger;
-a crash between EventStore commit and index commit remains an explicit recovery
-boundary. This is a local control/replay transport slice, not a remote worker
+event, while reusing an ID with different claims fails closed. T23 also puts a
+stable command marker into control-event idempotency keys, allowing a completed
+EventStore transition to rebuild its receipt if the ledger write was interrupted.
+The index and marker are receipt projections, not a lifecycle source or
+distributed exactly-once ledger; a crash before a terminal control event or
+across independent processes remains an explicit recovery boundary. This is a
+local control/replay transport slice, not a remote worker
 service: it has no TLS/mTLS, workspace materialiser, step execution protocol,
 scheduler, fleet lease service or public listener. Use the existing SSH Profile
 A helper for the private sidecar socket path; do not expose this server to a
