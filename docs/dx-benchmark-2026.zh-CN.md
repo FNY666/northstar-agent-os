@@ -1182,3 +1182,18 @@ T32 收紧 app-server 的重试语义，但不把本地进程内缓存包装成 
   cooperative，未引入 scheduler、remote worker 或 hosted execution。
 
 T32 仍是 Unreleased；没有创建 tag、GitHub Release，也没有发布到 PyPI/npm。
+
+### 10.37 当前实现复核：host lifecycle drain helper（T33，2026-09-08）
+
+T33 只补 host lifecycle seam，不把关闭动作暴露给 wire consumer：
+
+- `AppServer.shutdown(timeout=...)` 先停止接受新的 Unix socket 请求，再调用
+  `RunManager.shutdown()` 请求 bounded cooperative cancellation；`AppServer.close()`
+  仍只负责 transport，底层 manager shutdown 也仍可单独使用。
+- shutdown 不 force-kill provider、tool 或 Python thread；deadline 到达时返回仍为
+  non-terminal 的 run projection，便于 host 做后续 drain/diagnostics。
+- 新增真实 socket lifecycle + blocked provider integration test；runtime 620 项、
+  全仓预计 `make test` 958 项（954 pass、4 项可选 OTel skip）。没有新增 wire
+  operation、scheduler、crash recovery、durable registry 或 remote execution。
+
+T33 仍是 Unreleased；没有创建 tag、GitHub Release，也没有发布到 PyPI/npm。

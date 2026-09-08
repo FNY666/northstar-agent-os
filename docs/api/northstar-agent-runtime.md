@@ -127,6 +127,9 @@ Authenticated dispatcher plus an optional private Unix socket.
 - `wait_ready(*, timeout: float=5.0)`
   - Wait for ``start()`` to bind its socket or report startup failure.
 - `close()`
+  - Stop accepting socket traffic without changing run lifecycle.
+- `shutdown(*, timeout: float=10.0)`
+  - Close the transport, then request bounded cooperative run shutdown.
 #### `AppClient`
 
 Small authenticated client for the experimental Unix app-server.

@@ -241,6 +241,34 @@ class AppWireTests(RuntimeTestCase):
         self.assertEqual(completed.returncode, 0, completed.stderr)
         self.assertEqual(json.loads(completed.stdout), {"status": "success", "eventCount": 3})
 
+    def test_server_shutdown_closes_transport_and_requests_cooperative_drain(self):
+        provider = BlockingProvider()
+
+        def factory():
+            return AgentRuntime(
+                provider=provider,
+                config=RuntimeConfig(workspace=str(self.workspace())),
+            )
+
+        manager = RunManager(factory)
+        with tempfile.TemporaryDirectory() as directory:
+            socket_path = Path(directory) / "app.sock"
+            server = AppServer(manager, channel_secret=self.SECRET, socket_path=socket_path)
+            thread = server.start()
+            server.wait_ready(timeout=2)
+            started = manager.start(request_id="server-shutdown", actor_id="owner", prompt="wait")
+            self.assertTrue(provider.started.wait(timeout=2))
+            pending = server.shutdown(timeout=0)
+            thread.join(timeout=2)
+            self.assertFalse(thread.is_alive())
+            self.assertFalse(socket_path.exists())
+        self.assertEqual(pending[0]["run_id"], started["run_id"])
+        self.assertEqual(pending[0]["status"], "running")
+        self.assertTrue(pending[0]["cancel_requested"])
+        provider.release.set()
+        final = manager.wait(run_id=started["run_id"], actor_id="owner")
+        self.assertEqual(final["status"], "cancelled")
+
     def test_startup_failure_is_reported_by_wait_ready(self):
         with tempfile.TemporaryDirectory() as directory:
             socket_path = Path(directory) / "app.sock"

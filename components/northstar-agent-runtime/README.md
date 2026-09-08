@@ -283,10 +283,12 @@ bounded cursor/page, and actor binding is re-checked on every operation.
 Cancellation is cooperative at the next generation/tool boundary and never
 force-kills a running provider or tool. When starting the server in a host
 thread, `server.wait_ready()` reports the bind failure instead of requiring a
-socket-polling race; `manager.shutdown(timeout=...)` is an explicit host
-lifecycle helper that requests cancellation without force-killing work. The
-manager is in-memory; use the runtime's append-only session store for the
-durable transcript. Process crash recovery, fleet scheduling, public listeners,
+socket-polling race. `server.close()` stops transport only, while the host-only
+`server.shutdown(timeout=...)` helper closes transport and then requests
+cooperative cancellation without force-killing work; `manager.shutdown(...)`
+remains available when transport and run lifecycle must be controlled
+separately. The manager is in-memory; use the runtime's append-only session
+store for the durable transcript. Process crash recovery, fleet scheduling, public listeners,
 mTLS and remote execution remain explicitly out of scope.
 
 ## MCP servers (experimental)
@@ -637,7 +639,7 @@ cd components/northstar-agent-runtime
 python3 -m unittest discover -s tests -p 'test_*.py' -v
 ```
 
-619 tests, fully offline and deterministic (four optional OpenTelemetry tests
+620 tests, fully offline and deterministic (four optional OpenTelemetry tests
 are skipped when the tracing extra is absent): the scripted provider is the
 only model, and `test_integration_sidecar.py` runs the real sidecar `serve()`
 over a real Unix socket with a 100,000-Chinese-character prompt.

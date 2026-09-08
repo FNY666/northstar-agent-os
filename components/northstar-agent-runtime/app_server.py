@@ -785,6 +785,7 @@ class AppServer:
         raise AppServerError("startup_failed", f"app-server startup failed: {type(error).__name__}: {error}") from error
 
     def close(self) -> None:
+        """Stop accepting socket traffic without changing run lifecycle."""
         with self._lifecycle_lock:
             self._stop_requested.set()
             server = self._server
@@ -796,6 +797,19 @@ class AppServer:
         with self._lifecycle_lock:
             if self._server_thread is thread and (thread is None or not thread.is_alive()):
                 self._server_thread = None
+
+    def shutdown(self, *, timeout: float = 10.0) -> list[dict[str, Any]]:
+        """Close the transport, then request bounded cooperative run shutdown.
+
+        This is a host-only lifecycle helper, not a wire operation. It first
+        stops new socket requests and then delegates to ``RunManager.shutdown``;
+        it never force-kills a provider, tool or Python thread. The returned
+        projections include active runs that remain non-terminal at the deadline.
+        """
+        if isinstance(timeout, bool) or not isinstance(timeout, (int, float)) or timeout < 0:
+            raise AppServerError("invalid_request", "timeout must be a non-negative number")
+        self.close()
+        return self.manager.shutdown(timeout=timeout)
 
 
 def _reject_unknown(raw: Mapping[str, Any], allowed: set[str]) -> None:

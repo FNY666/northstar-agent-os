@@ -1,5 +1,16 @@
 # Northstar Agent OS — initial public component
 
+## Unreleased (forty-first batch) — host lifecycle drain helper (T33)
+
+- Added host-only `AppServer.shutdown(timeout=...)`: stop accepting new Unix
+  socket traffic, then request bounded cooperative cancellation through the
+  manager. `close()` remains transport-only and `RunManager.shutdown()` remains
+  available as the lower-level lifecycle seam.
+- Added an integration test proving shutdown does not force-kill a blocked
+  provider and reports non-terminal work when the drain deadline is zero.
+  No wire shutdown operation, scheduler, crash recovery or remote execution is
+  introduced.
+
 ## Unreleased (fortieth batch) — authenticated request replay hardening (T32)
 
 - App-server now keeps a bounded in-memory cache of successful completed
