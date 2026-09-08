@@ -82,8 +82,14 @@ python3 -m cli doctor --workspace .       # environment self-check
 python3 -m cli run --workspace . --provider anthropic --prompt "summarise README" --dry-run
 ```
 
+`make compatibility` is the dependency-free pre-install gate for the five
+packaged components: it checks version alignment, console entry points, the
+Python/Node app-server contract, and Makefile coverage. `make install` invokes
+that gate before creating a fresh virtualenv. The full matrix is documented in
+[the compatibility matrix](docs/compatibility-matrix-2026.zh-CN.md).
+
 `make test` runs every component's suite and the repository documentation tests
-(1,041 tests at the current snapshot, 1,037 pass; four optional OpenTelemetry checks
+(1,042 tests at the current snapshot, 1,038 pass; four optional OpenTelemetry checks
 are skipped when that extra is not installed).
 
 ### Sidecar installation

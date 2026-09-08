@@ -1,8 +1,9 @@
-.PHONY: help demo test install
+.PHONY: help demo test compatibility install
 
 help:
 	@echo "northstar-agent-os targets:"
 	@echo "  make demo    run the offline governed-loop demo (no API key needed)"
+	@echo "  make compatibility  check versions, entry points and cross-runtime contracts"
 	@echo "  make test    run every component's test suite + repository doc tests"
 	@echo "  make install install every component into a virtualenv (python3 -m venv .venv)"
 	@echo ""
@@ -18,7 +19,10 @@ help:
 demo:
 	sh examples/demo/run_offline.sh
 
-test:
+compatibility:
+	python3 tests/compatibility.py
+
+test: compatibility
 	@set -e; \
 	for c in northstar-codex-sidecar northstar-run-contract northstar-host \
 	         northstar-durable-run northstar-agent-interop northstar-agent-runtime; do \
@@ -28,7 +32,7 @@ test:
 	echo "== repository documentation =="; \
 	(cd tests && python3 -m unittest discover -s . -p 'test_*.py')
 
-install:
+install: compatibility
 	python3 -m venv .venv
 	./.venv/bin/python -m pip install --upgrade pip
 	./.venv/bin/pip install ./components/northstar-run-contract

@@ -140,6 +140,37 @@ jobs:
         # Reverting each core guard in a throwaway copy must turn its test red;
         # the untouched copy must stay green. ~1-2 minutes.
         run: python3 tools/verify_invariants.py
+  packaging:
+    name: Clean-clone packaging and entry-point gate
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Pre-install compatibility gate
+        # This is intentionally before creating the environment or invoking
+        # pip: metadata, entry points, and the Python/Node app-server contract
+        # must be coherent in a clean checkout without importing components.
+        run: python3 tests/compatibility.py
+      - name: Fresh virtualenv install
+        # Install local dependencies in dependency order. No PYTHONPATH is
+        # exported: the following smoke checks must resolve only site-packages.
+        run: |
+          python3 -m venv .venv
+          .venv/bin/python -m pip install --upgrade pip
+          .venv/bin/pip install ./components/northstar-run-contract
+          .venv/bin/pip install ./components/northstar-host
+          .venv/bin/pip install ./components/northstar-durable-run
+          .venv/bin/pip install ./components/northstar-agent-interop
+          .venv/bin/pip install ./components/northstar-agent-runtime
+      - name: Installed entry points without PYTHONPATH
+        working-directory: /tmp
+        run: |
+          env -u PYTHONPATH "$GITHUB_WORKSPACE/.venv/bin/northstar-agent-runtime" --version
+          env -u PYTHONPATH "$GITHUB_WORKSPACE/.venv/bin/northstar-durable-run" --help >/dev/null
+          env -u PYTHONPATH "$GITHUB_WORKSPACE/.venv/bin/python" -c "import cli, durable_cli, interop_contract, authorization, contract; print('five-component imports OK')"
+
   documentation:
     name: Repository documentation (structure + build + links)
     runs-on: ubuntu-latest
@@ -148,6 +179,8 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
+      - name: Compatibility matrix
+        run: python3 tests/compatibility.py
       - name: Structure tests
         # Component README "Concepts, guides and API reference" link targets,
         # examples index coverage, API page headers/module lists, plus the

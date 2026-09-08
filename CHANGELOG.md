@@ -1,5 +1,18 @@
 # Northstar Agent OS — initial public component
 
+## Unreleased (forty-ninth batch) — unified compatibility matrix and clean-clone gate (T40)
+
+- Added one standard-library compatibility matrix check for the five installable
+  components: version alignment, package names, non-conflicting console entry
+  points, the Python/Node app-server protocol and capability schema, durable-run
+  API source paths, and complete Makefile installation coverage.
+- `make compatibility` now runs before `make install`; the repository test suite
+  and CI documentation job execute the same static pre-install gate.
+- Added a clean-checkout CI job that creates a fresh virtualenv, installs all
+  five components in dependency order, and checks both console entry points and
+  imports from `/tmp` with `PYTHONPATH` removed. No release, tag, or public
+  package publication is made.
+
 ## Unreleased (forty-eighth batch) — clean-room packaging namespace fix (T39)
 
 - Fixed the durable-run console entry point collision with the runtime's flat

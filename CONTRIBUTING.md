@@ -6,9 +6,10 @@ Northstar is built around evidence, explicit security boundaries, and reproducib
 
 1. Explain the threat model and the operational boundary.
 2. Add or update deterministic tests before implementation changes.
-3. Do not include credentials, private prompts, production transcripts, or host-specific secrets.
-4. Keep OpenBot compatibility claims precise; compatibility does not imply affiliation.
-5. Test process, signal, and systemd behavior on native Linux when relevant.
+3. Run `make compatibility` before any clean-install or release-readiness claim; it is the dependency-free pre-install gate.
+4. Do not include credentials, private prompts, production transcripts, or host-specific secrets.
+5. Keep OpenBot compatibility claims precise; compatibility does not imply affiliation.
+6. Test process, signal, and systemd behavior on native Linux when relevant.
 
 ## Pull requests
 

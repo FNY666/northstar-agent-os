@@ -1306,3 +1306,23 @@ agent-runtime 都使用 flat `cli.py`，按 `make install` 顺序安装时，后
   构建仍通过 69 个 Markdown 文件。
 
 T39 仍是 Unreleased；没有创建 tag、GitHub Release，也没有发布到 PyPI/npm。
+
+### 10.45 当前实现复核：统一 compatibility matrix 与 clean-clone gate（T40，2026-09-08）
+
+T40 把打包边界从分散的 smoke command 提升为一个安装前静态门禁和一个可复现的
+clean-clone CI job：
+
+- `tests/compatibility.py` 纯静态读取五个 `pyproject.toml`，检查版本/metadata name
+  对齐、console entry point 不冲突、Python/Node app-server protocol 与 capability schema
+  对齐、Makefile 覆盖五个可安装组件，以及 durable-run API source path 没有回到冲突的
+  `cli.py`。
+- `make compatibility` 接入仓库测试和 CI documentation job；`make install` 先执行该
+  门禁，再创建 fresh venv。CI packaging job 从 clean checkout 安装五个组件，随后在
+  `/tmp` 且移除 `PYTHONPATH` 的环境中验证两个入口和跨组件 imports。
+- 兼容性矩阵见 `docs/compatibility-matrix-2026.zh-CN.md`。它只描述当前本地实验性契约，
+  不把 in-memory registry 说成 scheduler、remote worker 或 hosted platform。
+- 本地 `make test` 现在覆盖 1,042 项（1,038 pass、4 项可选 OTel skip），其中新增
+  compatibility regression test；`python3 tests/docbuild.py verify` 继续作为文档门禁（6 个组件、
+  62 个 API modules、70 个 Markdown files）。
+
+T40 仍是 Unreleased；没有创建 tag、GitHub Release，也没有发布到 PyPI/npm。

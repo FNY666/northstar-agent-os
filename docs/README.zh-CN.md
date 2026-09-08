@@ -27,7 +27,7 @@ Northstar 面向希望 AI 同事在明确边界内运行的开发者，而不是
 - `../components/northstar-durable-run/` — Run/Step/Event 合同、追加历史、checkpoint、lease、逐调用授权和独立后置校验的本地纵向切片；不是生产调度器或 sandbox。
 - `../components/northstar-agent-interop/` — 后端中立的 Agent attestation、受限 handoff、opaque context 和 typed receipt 边界；尚未连接真实厂商后端。
 
-仓库同时提供确定性离线测试、pip 打包、CLI doctor/dry-run、sessions 审计导出、API 文档、systemd 加固模板、保守的安装脚本和回滚脚本。
+仓库同时提供确定性离线测试、pip 打包、CLI doctor/dry-run、sessions 审计导出、API 文档、systemd 加固模板、保守的安装脚本和回滚脚本。当前组件版本、console entry point、Python/Node app-server protocol/schema 对齐矩阵见[兼容性矩阵](compatibility-matrix-2026.zh-CN.md)。
 
 ## Sidecar 如何工作
 
