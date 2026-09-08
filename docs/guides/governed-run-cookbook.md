@@ -217,6 +217,57 @@ the result line only, and `--json --stream` is the shape to use if you do want t
 deltas in a log - each is one more NDJSON line, and the final line is still the single
 `result`.
 
+## 12. Two shells, one session: the lease, and what durable-run shares with it
+
+```sh
+# shell A                                                       # shell B
+python3 -m cli run --session-dir S --resume <id> \              python3 -m cli run --session-dir S --resume <id> \
+  --prompt "refactor the parser"                                  --prompt "and now the tests"
+                                                                  echo $?        # 7
+```
+
+`RECORD_TYPES` is append-only and fsynced, which means two runs pointed at one session id
+produce a file neither of them can explain: valid-looking lines in an order that matches
+no single conversation. The runtime claims the session for the duration of a run, and the
+second claimant is refused **before it writes anything** — no hook fires, no record lands,
+and the failure has its own name (`error_session_busy`, exit 7) so a wrapper can tell
+"wait and retry" from "the command was wrong" (64) and from "the run failed" (1).
+
+What the claim is *not*, and why:
+
+- **not a timeout.** `--session-lease-seconds N` (default 900) is a liveness promise the
+  run renews at every turn boundary and every checkpoint, so a slow tool call never loses
+  its session. A holder whose promise has lapsed is still refused, because that reading
+  means "it forgot to renew", not "it is gone". There is no `--steal-lease` flag: a wedged
+  holder is exactly the case where a second writer must be refused. End the holder, or
+  fork instead (`--resume-from` writes a new file and never touches the parent).
+- **not a record type.** The transcript's `session_start` says `{locked, ttl_seconds,
+  kernel_lock_available}` — what this file was written *under* — and nothing else: no owner
+  id, no path. Those identify a process, and a record that varies between two identical
+  runs is a record a checkpoint digest cannot certify.
+- **not a lease you can read as a fact.** `sessions list` and `sessions show` print the
+  holder's claim labelled `(unverified: the lock was not probed)`. A viewer that took the
+  lock to answer a question could make an unrelated run refuse to start, so it doesn't.
+- **not inherited by subagents.** A delegated turn shares its parent's transcript file, and
+  `flock` is per open file description, so a child that claimed again would be refused by
+  its own parent. The parent's claim covers the child, and releases after the parent's last
+  record.
+
+`--no-session-lease` exists for the one case where it is honest: a host with no `flock`,
+where the runtime would otherwise refuse to start. It is not accepted together with
+`--session-lease-seconds`, because that pairing is a caller who believes they are protected.
+
+If you also run `northstar-durable-run`, a checkpoint needs no translation by hand:
+`durable_bridge.checkpoint_event()` turns the runtime's `checkpoint` record into a dict that
+satisfies durable's closed `EventContract` schema, and `checkpoint_document()` into a
+`northstar.checkpoint.v1` document digested under durable's own canonical rule — so one
+boundary can be indexed in one event stream keyed by the same `run_id`. Two limits are part
+of that design rather than caveats in it: the transcript format stays the runtime's (a
+checkpoint digest certifies bytes, so unifying them would rewrite what every existing
+checkpoint attests to), and a durable event never authorises a resume on its own —
+`checkpoint_from_event()` re-runs the digest over the transcript through the same
+`prepare_resume` gate a runtime checkpoint passes. Same gate, whoever wrote the boundary.
+
 ## Consumer CI recipe
 
 `examples/ci-readonly-review/` is a copy-paste template for running a

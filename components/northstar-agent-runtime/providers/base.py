@@ -32,6 +32,9 @@ ResultSubtype = Literal[
     # The model stopped asking for tools, but the workspace does not say the work
     # happened: declared postconditions failed.
     "error_postconditions_failed",
+    # The run never started: another live process holds the session transcript, and
+    # appending to a file we do not own is the one thing that would make it unreadable.
+    "error_session_busy",
 ]
 
 RESULT_SUBTYPES: tuple[str, ...] = (
@@ -42,6 +45,7 @@ RESULT_SUBTYPES: tuple[str, ...] = (
     "error_during_execution",
     "error_permission_denied",
     "error_postconditions_failed",
+    "error_session_busy",
 )
 
 SYSTEM_SUBTYPES: tuple[str, ...] = ("init", "compact_boundary", "informational", "postconditions")

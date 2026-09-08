@@ -33,7 +33,7 @@
 | C3 | 无限工具/无限技能（no per-server cap、几百个 skill） | Claude Code Tool Search、Skills 生态 71k+ | `MAX_TOOLS_PER_SERVER=25`、`MAX_SKILLS=40`、listing 上限——"仓库文件不得无界撑大上下文" | 🔧 **改造**：数量可有界放宽（如 25→100），但必须配 **deferred definitions**（按需取 schema）；直接去上限 = 放弃边界 |
 | C4 | 模型分类器自动批准（`auto` mode） | Claude Code auto、Cursor auto-review | 三层权限门的确定性；"谁批准了这次调用"必须可复现 | ⛔ **拒绝原样**：分类器只能作为**额外否决**挂在 PreToolUse 上（可 deny、不可 allow），默认关 |
 | C5 | 插件市场 / install 即得能力 | Claude Code marketplace、skills 目录 | "策略只能收紧"（`policy_file` fail-closed）；市场内容未签名 | 🔧 **改造**：只取**打包格式**（plugin = config/agents/skills/hooks 的 bundle），安装 = 一次 git 可见的落地 + `skills check` 校验；不做在线市场 |
-| C6 | 容器快照/恢复（sandbox 丢了能续） | OpenAI Agents SDK v2 snapshot+rehydrate | 需要可变工作区生命周期；本仓 `northstar-host` 只有 0700 分配，无 lease/回收 | 🔧 **改造**：先接 F3（durable-run 的 checkpoint/lease 与 runtime 接线），快照属于 host 层，不进 runtime |
+| C6 | 容器快照/恢复（sandbox 丢了能续） | OpenAI Agents SDK v2 snapshot+rehydrate | 需要可变工作区生命周期；本仓 `northstar-host` 只有 0700 分配，无 lease/回收 | 🔧 **改造**：F3 的 durable 接线已落地（§6.23：lease 与检查点翻译），剩下的快照/回收属于 host 层，不进 runtime |
 | C7 | 全局记忆（跨会话 MEMORY.md、user-scope memory） | Claude Code memory scopes、OpenAI 双层记忆 | 记忆是 ASI06 上下文投毒的持久载体；审计边界"只在工作区内" | ⛔ **拒绝全局**：只做 workspace-scoped、带摘要+摘要 digest、可 `--no-memory`、写入走 Edit 同一道门 |
 | C8 | 后台并行 / 20 并发子代理 | Claude Code background+Agent Teams | 成本上限与"每 run 恰好一个 ResultMessage"要重定义（并发下预算是共享还是分片） | 🔧 **改造**：批内并行工具调用（每次调用独立过门，denial 记账顺序确定）先行；子代理并发必须继承**父预算池**而非各自新开 |
 
@@ -50,6 +50,7 @@
 | 策略即代码（settings 里写权限/钩子/上限） | Claude Code | `.northstar/config.toml` + `[[hooks]]`，收紧型、fail-closed | ✅ 本批补齐 hooks 面 |
 | 契约化的 run↔执行关联 | 无（Northstar 独有零件） | `contract_bridge`：单一 wire 定义 + 绑定交叉校验 | ✅ 本批 |
 | 检查点/可恢复执行 | LangGraph / Temporal / v2 | `checkpoints.py`：turn 边界记录（长度+前缀摘要+已消耗计数器），恢复时**继承**而非重置 | ✅ 已落地（第十四批续） |
+| durable 词汇与会话上锁的统一 | LangGraph/Temporal 的 event sourcing + 本仓 durable-run | `session_lease.py`（一写者）+ `durable_bridge.py`（检查点 ↔ durable 事件/文档双向翻译，跨校验） | ✅ 已落地（第十八批） |
 | 多模型 | OpenAI 100+ / Cursor | `providers/openai_compat.py`：一个 Chat Completions 适配器覆盖一片模型 | ✅ 已落地（P1-2） |
 | 独立完成判定 | 无人做（各家都把"模型自述"当完成） | `postconditions.py`：`--verify` / `[[verify]]`，运行前后快照比对 | ✅ 已落地 |
 | token 级流式 | 全员 | `--stream`：`StreamDelta` 事件 + **流-记录一致性校验**（不一致即判 provider fault，不写 assistant 记录），唯一 `ResultMessage` 不变 | ✅ 已落地（第十七批） |
@@ -127,6 +128,19 @@
 所以"恢复"一直是绕过 `max_budget_usd` 的后门。现在它必须把父花费带过来；
 嵌入式调用忘了传 seed 过的 `Budget` 会直接报错，而不是拿到更宽的额度。
 
+### 6.23 第十八批（durable 统一：会话只有一个写者，运行边界只有一份事实）
+
+| 项 | 内容 | 验证 |
+|---|---|---|
+| 会话上锁 | `session_lease.py`：按会话文件认领（`flock LOCK_EX`，运行期一直持有），认领发生在**第一条记录落盘之前**、释放在**最后一条记录落盘之后**；冲突即 `error_session_busy`（**exit 7**），不写任何字节、不触发任何 hook；`--session-lease-seconds N`（默认 900，每轮与每个检查点续期）/ `--no-session-lease`；`sessions list/show` 只复述持有者的声明并标注"未验证" | `tests/test_session_lease.py` 54 项：真起子进程争同一把锁、子进程被 kill 后锁随描述符消失、"过期但仍持有"不可被夺、无 `fcntl` 即拒启动、退出码表与 `RESULT_SUBTYPES` 双向钉死、委派不会自锁（子 agent 与父共享同一 transcript 文件） |
+| 词汇统一 | `durable_bridge.py`：把 runtime 的 `checkpoint` 记录翻译成通过 durable-run **闭合** `EventContract` schema 的字典（`checkpoint.created → running`、sequence 一对一连续、id 字符集同规则、`payload_digest` 覆盖边界事实），以及 `northstar.checkpoint.v1` 文档（`state_digest` 用 durable 的规范 JSON 规则）；`cross_check()` 在可导入时用真模块复算，不可导入即报 `unchecked` | `tests/test_durable_bridge.py` 33 项：镜像常量与真 schema 逐项对齐（字段集是**有序元组**比对，因为规范 JSON 的键序进摘要）、翻译出的事件真投进 `EventStore` 追加并 replay、同键重放是 no-op 而不同边界撞键即冲突、`EventStore.restore()` 对外来文档**如期拒绝**、无 durable 目录时子进程仍可用 |
+
+**"统一"在这里不是把两个组件并成一个。** 依赖方向仍然单向：runtime 不 import durable。统一的是**工件**——同一份边界既能被 transcript 的摘要规则解释，也能被 durable 的 event schema 接受；以及**词汇**——lease 的信封字段、`checkpoint.created` 这个事件类型、`sha256:` 前缀的摘要写法。跨校验是可选的（`cross_check()` 报 `unchecked` 而不是猜），漂移由测试兜住。
+
+**明确不统一的东西**：transcript 的记录格式（`RECORD_TYPES` 仍是 13 项——检查点摘要认证的是 transcript 的字节区间，改字节就是改所有既有检查点的断言），以及"durable 事件可以授权恢复"这件别人会顺手做的事：事件的 `payload_digest` 认证的是它自己的 payload，不是 transcript，所以 `checkpoint_from_event()` 必须把外来边界送进 `prepare_resume` 的同一道摘要门。**同一个门**是这批唯一真正想守住的抽象：不管边界是谁写的，能恢复的只有摘要对得上的。
+
+**enforcement 分歧是设计而非遗漏**：durable-run 的 `LeaseManager` 按时间戳回收（它的 run 可以活过请求），runtime 不能把锁从一个活着的进程手里夺走（那正是我们要防的损坏）。因此 `expires_at` 在 runtime 侧是"我还活着"的声明而非回收期限，并且信封写在**已加锁的描述符上**（绝不 `os.replace`——那会 unlink 锁所在的 inode，让互斥静默失效）。这两条都写在模块 docstring 里，也各有一条测试守着。
+
 ### 6.22 第十七批（token 级流式，且流不能绕开记录）
 
 | 项 | 内容 | 验证 |
@@ -158,7 +172,7 @@
 
 全仓 954 项测试全绿（runtime 660）。**未做**：流式（`StreamDelta`）、`skills check`、F3。
 
-**F3、skills check、P1-1、token 级流式均已完成**（见 §6.15、§6.20、§6.21、§6.22）。下一批顺序：**durable-run 与 runtime 检查点的统一（`EventStore`/`Lease` 复用）→ 显式重试/退避/降级**。理由：durable 统一是最后的"零件合整机"，要在两个组件之间定接口；重试/退避/降级是 provider 层的策略化，可与它并行但不宜混做（一个动契约，一个动故障分类）。
+**F3、skills check、P1-1、token 级流式、durable 统一均已完成**（见 §6.15、§6.20、§6.21、§6.22、§6.23）。**只剩一项：显式重试/退避/降级**——provider 层的故障分类策略化。它排在最后是有理由的：契约面（跨组件接口）刚定完，重试策略要动的正是这层之上的调用点，先把接口定死再谈"失败后怎么再来一次"，才不会把重试写成第二个未定义的边界。
 
 ---
 

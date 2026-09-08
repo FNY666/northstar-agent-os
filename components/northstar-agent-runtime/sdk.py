@@ -69,6 +69,8 @@ class RunOptions:
     max_output_tokens: int = 4096
     redact_tool_output: bool = False  # omit tool output bodies from the transcript
     stream: bool = False  # yield stream_delta events while assistant text is produced (transcript unchanged)
+    lock_session: bool = True  # claim the session transcript before appending to it; contention ends the run as error_session_busy (exit 7), writing nothing
+    session_lease_seconds: int = 900  # how long the claim promises liveness, renewed while the run lives; a live holder is never displaced
     workspace_agents: bool = True  # register .northstar/agents/*.md definitions
     checkpoint_turns: int = 0  # append a resumable boundary record every N turns (0 = off)
     resume_from: str | None = None  # session id to fork from its latest checkpoint; the parent file is never written
@@ -228,6 +230,8 @@ def _build(options: RunOptions, resume: str | None = None) -> tuple[Any, Any, li
             resume_transcript = store.transcript(resume)
     if options.checkpoint_turns:
         config_kwargs["checkpoint_turns"] = options.checkpoint_turns
+    config_kwargs["lock_session"] = options.lock_session
+    config_kwargs["session_lease_seconds"] = options.session_lease_seconds
     config_kwargs["session_id"] = store.session_id
     runtime = AgentRuntime(
         provider=provider,

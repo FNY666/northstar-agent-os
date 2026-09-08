@@ -491,6 +491,85 @@ change, and a format change should be chosen rather than inherited. Both paths e
 in the SDK (`RunOptions.checkpoint_turns` / `RunOptions.resume_from`) and the record
 renders in `examples/session-panel`.
 
+## One writer per session, and what durable-run shares with it
+
+A transcript is append-only and fsynced, which answers "was this written durably" and
+never answered "who is allowed to write it". Two shells running `--resume <same id>` each
+appended valid-looking lines into one file, and the interleaved result was a transcript
+that neither run could explain — the exact artefact every other guarantee in this
+component (checkpoint digests, resume budget inheritance, `sessions show`) depends on.
+
+`session_lease.py` closes that with one claim per session file:
+
+```console
+$ northstar-agent-runtime run --session-dir S --resume ns-... --prompt "..."   # claims S/ns-....lease
+$ northstar-agent-runtime run --session-dir S --resume ns-... --prompt "..."   # exit 7, writes nothing
+error_session_busy: session 'ns-...' is being written by another run (owner 'run-in-another-shell',
+lease renewed until 1788876920); wait for it to finish, or resume from a copy ...
+```
+
+The claim is held with `flock(LOCK_EX)` for the whole run, so:
+
+- **a live holder is never displaced**. `--session-lease-seconds N` (default 900) is a
+  *liveness promise* the run renews at each turn boundary and each checkpoint, not a lock
+  timeout: a slow tool turn outlives `N` because renewal happens while alive, and a
+  holder whose `expires_at` has passed is still refused. Kill it, or its host, and the
+  kernel drops the lock with the descriptor — no reaper, no window where two live writers
+  both believe they own the file.
+- the JSON beside the lock (`{"owner_id", "expires_at"}`, mode `0600`) is **advisory
+  metadata about a lock the kernel holds**. It is written *in place on the locked
+  descriptor*, never via `tempfile` + `os.replace`: a replace would unlink the inode the
+  lock lives on, which silently destroys mutual exclusion. `release()` clears the lock and
+  leaves the file as a trace of the last writer; deleting it would race a waiter that had
+  already opened the path.
+- there is no `--steal-lease`. A hung holder is precisely the case where a second writer
+  must be refused; the answer is to end the holder, or to fork (`--resume-from`).
+- where `fcntl` does not exist, the runtime **refuses to start** rather than degrading to a
+  timestamp dance, because a lease enforced on one platform and advisory on another makes
+  a transcript *look* protected. `--no-session-lease` is the explicit opt-out (and the
+  escape hatch on such a host); the flag pair `--no-session-lease --session-lease-seconds N`
+  is a usage error rather than a silently ignored number, and `RuntimeConfig` refuses the
+  same contradiction for embedders.
+- `sessions list` and `sessions show` print the holder's claim with the label
+  `(unverified: the lock was not probed)`: a viewer must never be able to authorise a
+  second writer, so it reads what the holder said and does not touch the lock.
+- a subagent claims nothing. A child runtime shares its parent's transcript file, and
+  `flock` is per open file description, not per process — a child that asked again would
+  be refused by its own parent and every delegation would end `error_session_busy`. The
+  parent's claim covers the child's appends and is released only when the parent's last
+  record is on disk.
+
+Lease state is deliberately *not* a record type: it is process coordination, not an audit
+claim. The `session_start` record carries `{locked, ttl_seconds, kernel_lock_available}` —
+what this transcript was written under — and no owner id or path, because a record that
+varies between two identical runs is a record a checkpoint cannot digest. If the renewal
+fails mid-run, one `informational` record says `session_lease_lost` and the run
+continues: the transcript is still ours to append to, and pretending otherwise would turn
+a lost guard into a failed task.
+
+**What is unified with `northstar-durable-run`, and what is not.** The durable component
+already had an `EventStore` (validated append-only events), a `Lease`, and
+`northstar.checkpoint.v1` documents; the runtime had all three ideas in its own dialect.
+`durable_bridge.py` makes one boundary readable both ways: `checkpoint_event()` translates
+a runtime checkpoint into a dict that satisfies durable-run's *closed*
+`EventContract` schema (`checkpoint.created` → `running`, `sequence` contiguous, ids under
+the same charset rule), and `checkpoint_document()` emits the five-field checkpoint
+document with `state_digest` computed under durable's canonical rule. Translation is a
+mirror plus an opt-in `cross_check()`, never a runtime import: dependency direction stays
+one-way, and `tests/test_durable_bridge.py` pins the mirrored constants against the real
+schemas and appends a translated event into a real `EventStore` — including the fact that
+replaying the same boundary is a no-op (`idempotency_key = "<session>:<record_index>"`)
+while a different boundary under that key conflicts.
+
+Two limits, stated rather than hidden. The **transcript record format is not unified**:
+`RECORD_TYPES` stays at thirteen types, because a checkpoint digest certifies a byte range
+of the transcript and changing those bytes would change what every existing checkpoint
+attests to. And a durable event cannot authorise a resume by itself: an event's
+`payload_digest` covers its own payload, not the transcript, so `checkpoint_from_event()`
+recomputes the digest through the same `prepare_resume` gate a runtime checkpoint passes —
+a foreign boundary meets the same gate, and `EventStore.restore()` correspondingly *refuses*
+a runtime document, which the tests assert instead of merely claiming.
+
 ## Reviewing Agent Skills (`skills check`)
 
 The Agent Skills standard fixed the file format and left review out: skills are
@@ -595,6 +674,7 @@ condition arrives as an event, never as a raised exception:
 | `error_max_budget_usd`      | `max_budget_usd` reached                            |
 | `error_permission_denied`   | a denial ended the run (`halt_on_denial`)           |
 | `error_postconditions_failed` | the model stopped, but a declared workspace check did not hold |
+| `error_session_busy` | another live run holds this session's transcript; nothing was written |
 | `error_during_execution`    | provider failure, malformed tool input, internal bug |
 
 The three ceilings are independent, each with its own subtype, so an operator can
@@ -751,12 +831,14 @@ size (`result_chars`), so truncation is visible instead of inferred.
 | `tools/`            | package: registry, sandbox, caps, built-in tools, `CodexReadOnly` spec (`__init__.py`), plus the guard-verification harness (`verify_invariants.py`) |
 | `compaction.py`     | safe-boundary detection and summarisation                            |
 | `sessions.py`       | append-only JSONL transcripts and recovery                            |
+| `session_lease.py`    | one writer per session file: `flock` claim, renewed while alive, never stolen |
 | `agents.py`         | agent definitions, registry, verdict parsing                         |
 | `tracing.py`        | span tree, redaction, optional OpenTelemetry export                  |
 | `sidecar_client.py` | Unix-socket client for the sidecar component                         |
 | `providers/`        | `base` (events + contract), `anthropic`, `openai_compat`, `scripted` |
 | `command_hooks.py`  | repository-declared command hooks: vetted scripts, veto events only, never a shell string |
 | `contract_bridge.py`| request-id derivation and the run-document cross-check on the sidecar boundary |
+| `durable_bridge.py`   | runtime checkpoint ↔ durable-run event/document translation (mirrored schema, opt-in `cross_check`) |
 | `postconditions.py` | independent end-of-run workspace checks (`exists`/`absent`/`changed`/`unchanged`/`contains`) |
 | `checkpoints.py`    | turn-boundary checkpoints: verified resume, inherited ceilings, fork-on-read |
 | `cli.py`            | one governed run from a shell, with distinct exit codes              |
@@ -781,8 +863,14 @@ size (`result_chars`), so truncation is visible instead of inferred.
 
 `0` success · `1` error_during_execution · `2` error_max_turns ·
 `3` error_max_tool_calls · `4` error_max_budget_usd · `5` error_permission_denied ·
-`6` error_postconditions_failed · `64` usage or configuration error (nothing was run). Result errors and refusals
+`6` error_postconditions_failed · `7` error_session_busy ·
+`64` usage or configuration error (nothing was run). Result errors and refusals
 are printed to stderr; `--json` emits one object per event.
+
+`7` is separated from `1` on purpose, and from `64` too: `7` means the command was
+right and the session was occupied (wait, or resume from a copy), while `64` means the
+command was wrong and nothing ran. A wrapper that retries `7` and alerts on `64` is
+reading the same table a human is.
 
 `--deny-tool` subtracts from the computed allow list rather than leaving a name in
 both lists, because a name in both lists is an operator mistake the engine would
@@ -795,7 +883,7 @@ cd components/northstar-agent-runtime
 python3 -m unittest discover -s tests -p 'test_*.py' -v
 ```
 
-413 tests, fully offline and deterministic: the scripted provider is the only
+942 tests, fully offline and deterministic: the scripted provider is the only
 model, and `test_integration_sidecar.py` runs the real sidecar `serve()` over a
 real Unix socket with a 100,000-Chinese-character prompt.
 
@@ -830,6 +918,13 @@ caught by the unit-level compaction tests rather than the loop-level one.
   behaviour belongs to the sidecar; the runtime only bounds its own socket read.
 - Session transcripts are a local audit trail, not a compliance store: there is no
   signing, no retention policy, and no tamper evidence.
+- **The session lease is `flock`, so it is POSIX and host-local.** It guards one
+  filesystem as seen by one kernel: it refuses a second writer in another shell, and it
+  says nothing about a mount on another machine. NFS and other network filesystems define
+  their own (weaker) `flock` behaviour, and neither component has tested them. On a host
+  with no `fcntl` the runtime refuses to start rather than downgrade the claim to a
+  timestamp; `--no-session-lease` is the operator's way of saying the guarantee does not
+  apply here.
 - Cost accounting is arithmetic on provider-reported usage. It cannot see retries
   the SDK swallowed, and it never predicts a price for a model the table lacks
   without saying so.

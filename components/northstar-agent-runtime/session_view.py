@@ -59,6 +59,27 @@ def run_sessions(args: argparse.Namespace) -> int:
 # -- listing ---------------------------------------------------------------
 
 
+def _lease_claim(directory: Path, session_id: str) -> str:
+    """What this session's lease claims right now, without touching the lock.
+
+    This module is read-only by contract, and it stays that way on purpose: momentarily
+    taking ``LOCK_EX`` to answer a question could make an unrelated run refuse to start.
+    So the viewer repeats the holder's claim and labels it as one - enough to answer
+    "is something still writing here?", never enough to authorise a second writer.
+    """
+    from session_lease import LeaseError, inspect_lease, lease_path_for
+
+    try:
+        status = inspect_lease(lease_path_for(directory, session_id), probe=False)
+    except (LeaseError, OSError):
+        # A lease path we cannot even stat is worth a line: it usually means a session id
+        # that predates the lock suffix, or a directory the operator cannot read.
+        return "unreadable"
+    if not status.owner_id:
+        return ""
+    return status.human()
+
+
 def _list_sessions(directory: Path, *, json_out: bool) -> int:
     if not directory.is_dir():
         print(f"sessions: no such directory: {directory}", file=sys.stderr)
@@ -79,13 +100,19 @@ def _list_sessions(directory: Path, *, json_out: bool) -> int:
                 "subtype": summary["subtype"],
                 "total_cost_usd": summary["total_cost_usd"],
                 "bytes": path.stat().st_size,
+                "lease": _lease_claim(directory, path.name[: -len(SESSION_FILE_SUFFIX)]),
             }, sort_keys=True))
         else:
             subtype = summary["subtype"] or "no result"
+            claim = _lease_claim(directory, path.name[: -len(SESSION_FILE_SUFFIX)])
             print(f"{path.name[: -len(SESSION_FILE_SUFFIX)]:<46} "
                   f"records={summary['records']:<3} turns={summary['assistant_turns']:<3} "
                   f"{subtype:<24} ${summary['total_cost_usd']:.6f} "
-                  f"{path.stat().st_size} bytes")
+                  # A trailing claim, not a verdict: the point of showing it in a listing
+                  # is that a session someone is *still writing* is a different shape of
+                  # problem than one that ended badly.
+                  f"{path.stat().st_size} bytes"
+                  + (f"  *{claim}" if claim else ""))
     return 0
 
 
@@ -108,6 +135,9 @@ def _show_session(directory: Path, session_id: str, *, json_out: bool) -> int:
     summary = summarise(records)
     print(f"# {summary['records']} records, {summary['assistant_turns']} assistant turn(s), "
           f"result={summary['subtype'] or '(none)'}, cost=${summary['total_cost_usd']:.6f}")
+    claim = _lease_claim(directory, session_id)
+    if claim:
+        print(f"# session_lease: {claim}")
     return 0
 
 

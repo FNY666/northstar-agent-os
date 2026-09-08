@@ -14,6 +14,7 @@ tell the outcomes apart:
 4      error_max_budget_usd
 5      error_permission_denied
 6      error_postconditions_failed (a --verify / [[verify]] check did not hold)
+7      error_session_busy (another live run holds the session transcript)
 64     usage or configuration error (nothing was run)
 =====  ==============================================
 
@@ -197,6 +198,18 @@ def _add_run_arguments(parser: argparse.ArgumentParser) -> None:
     output.add_argument("--quiet", action="store_true", help="print only the final result line")
     output.add_argument("--trace", action="store_true", help="print the span tree afterwards")
     output.add_argument("--session-dir", default="", help="append an auditable JSONL transcript here")
+    output.add_argument(
+        "--session-lease-seconds",
+        type=int,
+        default=900,
+        metavar="N",
+        help="how long this run promises to be alive while it owns the session transcript (renewed as the run proceeds, so a slow turn is not evicted); a live holder is never displaced, so N is a signal to readers and not a lock timeout",
+    )
+    output.add_argument(
+        "--no-session-lease",
+        action="store_true",
+        help="append to the transcript without claiming it first. Two concurrent runs on one session id otherwise interleave into a file neither of them can replay; use this only where flock is unavailable, and it is reported in the transcript's init record",
+    )
     output.add_argument("--resume", default="", help="session id to continue from --session-dir (appends to that same transcript)")
     output.add_argument(
         "--resume-from",
@@ -361,6 +374,7 @@ def _print_dry_run(
     print(f"sidecar={'on' if config.sidecar_socket else 'off'} "
           f"session_dir={args.session_dir or 'off'} "
           f"halt_on_denial={config.halt_on_denial}")
+    print(_session_lease_note(config, session_dir=args.session_dir))
     print(f"policy_file={policy_note}")
     print(f"run_id={config.run_id or '(generated per sidecar call)'} "
           f"policy_revision={config.policy_revision or '(none)'} "
@@ -445,6 +459,41 @@ def main(argv: Sequence[str] | None = None) -> int:
     except OSError as error:  # pragma: no cover - host-level failure
         print(f"cannot run: {error}", file=sys.stderr)
         return USAGE_ERROR
+
+
+def _session_lease_note(config: Any, *, session_dir: str = "") -> str:
+    """One dry-run line: could this run actually claim the transcript it means to write?
+
+    A dry run probes the lock for the length of one syscall and drops it again, which
+    answers a question no amount of config inspection can: *is another run in that file
+    right now*. It is labelled "as of now" because it is a race, not a reservation - the
+    load-bearing claim is the one the real run makes, and nothing here holds the file for
+    anybody.
+    """
+    if not getattr(config, "lock_session", True):
+        return "session_lease=off (--no-session-lease: the transcript is written unclaimed)"
+    if not session_dir:
+        return "session_lease=n/a (no --session-dir, so there is no transcript to guard)"
+    from session_lease import LeaseError, inspect_lease, lease_path_for
+
+    try:
+        status = inspect_lease(lease_path_for(session_dir, config.session_id))
+    except (LeaseError, OSError) as error:
+        # Reporting "unknown" beats reporting "free": the second is an invitation.
+        return f"session_lease=unknown (cannot read {session_dir}: {error})"
+    ttl = getattr(config, "session_lease_seconds", 900)
+    if status.locked:
+        who = status.owner_id or "an unnamed run"
+        return (
+            f"session_lease=HELD by {who!r} as of now (this run would end with "
+            "error_session_busy, exit 7, and write nothing)"
+        )
+    if status.metadata_readable and status.owner_id:
+        return (
+            f"session_lease=free (last owner {status.owner_id!r}); will claim for {ttl}s "
+            "and renew as the run proceeds"
+        )
+    return f"session_lease=free; will claim for {ttl}s and renew as the run proceeds"
 
 
 def _hooks_note(policy: Any, command_hooks: Sequence[Any], *, enabled: bool) -> str:
@@ -815,6 +864,22 @@ def _run(args: argparse.Namespace) -> int:
             file=sys.stderr,
         )
         return USAGE_ERROR
+    if args.no_session_lease and args.session_lease_seconds != 900:
+        print(
+            "configuration error: --session-lease-seconds has no meaning with --no-session-lease; "
+            "pick one (no lease, or a lease of N seconds)",
+            file=sys.stderr,
+        )
+        return USAGE_ERROR
+    if not args.no_session_lease and args.session_lease_seconds < 0:
+        # 0 is the one value that means something else here: it reads as "lease for no
+        # time", which is a lease that is always up for grabs. Turning it off is what
+        # --no-session-lease is for, and saying so beats inventing a synonym.
+        print(
+            "configuration error: --session-lease-seconds must be > 0; use --no-session-lease to run without a lease",
+            file=sys.stderr,
+        )
+        return USAGE_ERROR
     if args.resume_record is not None and not args.resume_from:
         print("configuration error: --resume-record only means something with --resume-from", file=sys.stderr)
         return USAGE_ERROR
@@ -866,6 +931,10 @@ def _run(args: argparse.Namespace) -> int:
         store = SessionStore(args.session_dir or None, session_id=args.resume or None)
     if args.checkpoint_turns:
         config_kwargs["checkpoint_turns"] = args.checkpoint_turns
+    if args.no_session_lease:
+        config_kwargs["lock_session"] = False
+    elif args.session_lease_seconds != 900:
+        config_kwargs["session_lease_seconds"] = args.session_lease_seconds
     config_kwargs["session_id"] = store.session_id
     try:
         config = RuntimeConfig(**config_kwargs)
