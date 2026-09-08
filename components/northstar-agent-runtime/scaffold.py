@@ -124,13 +124,12 @@ def _hooks_readme() -> str:
 # Hooks in this project
 
 Hooks (SessionStart, PreToolUse, PostToolUse, PostToolUseFailure, SessionEnd,
-...) are the runtime's observation/veto surface. They are **registered in
-code** via `HookRegistry` and handed to `AgentRuntime(hooks=...)` — a file in
-this directory is never silently executed, because a workspace file must never
-gain code execution without an explicit embedding decision.
+...) are the runtime's observation/veto surface. There are two ways to wire one,
+and the difference is a trust decision, not a style preference.
 
-Example (embedding code — hooks are accepted by `loop.AgentRuntime(hooks=…)`;
-the CLI and the SDK build their own registry, see the runtime README "Hooks"):
+## 1. In embedding code (default, always available)
+
+Register them on a `HookRegistry` and hand that to `AgentRuntime(hooks=...)`:
 
     from hooks import HookInput, HookResult, HookRegistry
     from loop import AgentRuntime, RuntimeConfig
@@ -153,8 +152,37 @@ the CLI and the SDK build their own registry, see the runtime README "Hooks"):
     for event in runtime.run("hi"):
         print(type(event).__name__)
 
-Scripts that *must* run on events belong behind your own supervisor (CI,
-host), not inside the workspace.
+## 2. Declared by this repository (off unless a human enables it)
+
+`.northstar/config.toml` may name a hook per lifecycle event, so reviewing the
+policy in a pull request is the whole change:
+
+    [[hooks]]
+    event = "PreToolUse"
+    script = ".northstar/hooks/gate.py"   # workspace-relative; never a shell line
+    interpreter = "python3"               # optional allowlist, no path separators
+    tool = "Write"                        # optional: fire for one tool only
+    timeout_ms = 2000
+
+The script receives the event JSON on stdin and may print one verdict JSON on
+stdout (`{"decision": "deny", "reason": "..."}`). Exit code 2 denies, using stderr
+as the reason; a timeout, a crash, or an unparseable verdict is also a denial - a
+hook that cannot answer is never a green light.
+
+**Nothing in section 2 runs unless you pass `--enable-workspace-hooks`.**
+Cloning a repository must not mean executing it, which is why the surface is
+narrow on purpose: veto-capable events only (`PreToolUse`, `UserPromptSubmit`,
+`SessionStart`, `PreCompact`, `SubagentStart`); no `command` key and no shell
+anywhere in the schema; the script must live inside this workspace (symlinks are
+resolved before the check, never followed); output is capped; and the child sees
+only `PATH` and `LANG`, so no model credential crosses into hook code.
+
+`Write` and `Edit` cannot touch this directory at all: `.northstar` is write-
+protected, so a run can neither plant a hook nor rewrite the policy that gates it.
+
+Scripts that must run regardless of any flag belong behind your own supervisor
+(CI, host automation) - not in `.northstar/hooks/`. A repository file may only
+ever tighten what a run may do, and an ungated executor would not.
 """
 
 
@@ -239,7 +267,7 @@ A governed Northstar workspace, scaffolded by `northstar-agent-runtime new`.
 | `AGENTS.md` | project instructions auto-injected into every run |
 | `.northstar/config.toml` | repository policy (`northstar.policy.v1`, revision `{_revision()}`); default agent is the read-only reviewer |
 | `.northstar/agents/reviewer.md` | read-only, plan-mode reviewer agent |
-| `.northstar/hooks/README.md` | how hooks apply (registered in code, never auto-executed) |
+| `.northstar/hooks/README.md` | how hooks apply (embedding code, or declared + flagged) |
 | `.github/workflows/northstar-review.yml` | governed CI review recipe (template — see TODOs inside) |
 
 ## Try it

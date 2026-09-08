@@ -51,6 +51,50 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
+def policy_drift_finding(workspace: Path, policy: Any) -> Finding:
+    """Compare the workspace policy file with the committed one.
+
+    Governance that lives in the repository is only an audit anchor if the file on
+    disk is the file that was reviewed. This check answers the question an operator
+    actually has before a governed run: *did the policy change without a commit?*
+    (which is also how a hand-edited or tool-written policy shows up).
+
+    It never touches the network and never fails a run: an absent git, a detached
+    HEAD, or an untracked file are reported, not treated as breakage.
+    """
+    import hashlib
+    import subprocess
+
+    try:
+        relative = Path(str(policy.source)).resolve().relative_to(Path(workspace).resolve())
+    except (OSError, ValueError):
+        return Finding("policy-drift", "ok", "policy file is outside the workspace - nothing to compare")
+    arguments = ["git", "-C", str(Path(workspace).resolve()), "show", f"HEAD:{relative.as_posix()}"]
+    try:
+        baseline = subprocess.run(arguments, capture_output=True, timeout=10)
+    except (OSError, subprocess.SubprocessError) as error:
+        return Finding("policy-drift", "ok", f"no git baseline ({type(error).__name__}) - compare manually")
+    if baseline.returncode != 0:
+        return Finding(
+            "policy-drift",
+            "warn",
+            f"{relative} is not in git HEAD: the run's policy has no reviewed ancestor",
+        )
+    try:
+        current = Path(policy.source).read_bytes()
+    except OSError as error:  # pragma: no cover - the file was just parsed
+        return Finding("policy-drift", "fail", f"cannot re-read {relative}: {error}")
+    digest = lambda value: hashlib.sha256(value).hexdigest()[:12]  # noqa: E731 - local formatting helper
+    if digest(current) == digest(baseline.stdout):
+        return Finding("policy-drift", "ok", f"matches git HEAD ({relative} digest {digest(current)})")
+    return Finding(
+        "policy-drift",
+        "warn",
+        f"{relative} differs from git HEAD (disk {digest(current)} vs HEAD {digest(baseline.stdout)}): "
+        "the policy that will gate this run was not the one that was reviewed",
+    )
+
+
 def _checks(args: argparse.Namespace) -> list[Finding]:
     findings: list[Finding] = []
 
@@ -181,7 +225,19 @@ def _checks(args: argparse.Namespace) -> list[Finding]:
                     parts.append(f"budget=${policy.max_budget_usd}")
                 if policy.read_only:
                     parts.append("read_only")
+                if policy.revision:
+                    parts.append(f"revision={policy.revision}")
                 findings.append(Finding("policy-file", "ok", f"{policy.source} applies: {' '.join(parts)}"))
+                if policy.hooks:
+                    findings.append(
+                        Finding(
+                            "hooks",
+                            "warn",
+                            f"{len(policy.hooks)} declared in {policy.source}; they run only with "
+                            "--enable-workspace-hooks (cloning a repository must not mean executing it)",
+                        )
+                    )
+                findings.append(policy_drift_finding(workspace, policy))
             try:
                 configured = policy.project_context_setting if policy is not None else "AGENTS.md"
                 context = discover_project_context(workspace, configured=configured)

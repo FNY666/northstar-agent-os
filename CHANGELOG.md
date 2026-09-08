@@ -1,5 +1,56 @@
 # Northstar Agent OS — initial public component
 
+## Unreleased (thirteenth batch) — closing the governance seams (P0)
+
+Acted on the 2026-09-08 capability audit (`docs/benchmark-top-agents-2026-09.zh-CN.md`
+F1/F2, plus the new `docs/next-gen-agent-blueprint.zh-CN.md` decision on absorbing
+top-tier features only in a governed form). Four changes, all offline-testable,
+none of which loosens a guardrail; **no release is made** and no tag is pushed.
+
+- **P0-1 the Run Contract is now on the execution path.** New
+  `contract_bridge.py` is the single definition of the runtime -> sidecar wire
+  format (the runtime previously kept a second copy), `--run-id` becomes the
+  sidecar `request_id` so the runtime transcript and the sidecar log share one
+  correlation key, and `policy_revision`/`run_id`/`protected_prefixes` are
+  recorded in the `init` event (so the transcript and the `sessions export` audit
+  feed carry them). When a host injects `NORTHSTAR_RUN_BINDING` +
+  `NORTHSTAR_HOST_KEY` + `NORTHSTAR_RUN_REQUEST`, the client re-derives its own
+  request through `validate_run_request -> verify_binding -> to_sidecar_request`
+  and **refuses the call** on any mismatch, expiry, or inability to verify - fail
+  closed, never a silent downgrade. With no binding configured the bridge is
+  inert, so the runtime keeps its zero-dependency, bare-interpreter property.
+  The sidecar itself still authenticates by Unix permissions only: putting the
+  binding on the wire means changing its strict request allowlist, which is left
+  as an explicit protocol decision rather than taken here.
+- **P0-2 an agent can no longer rewrite its own governance.** `ToolLimits.protected_prefixes`
+  defaults to `(".git", ".northstar")`: `Write`/`Edit` refuse the policy file, the
+  repository agent definitions, and the skill packages. Measured before the change:
+  a run under `--permission-mode acceptEdits` replaced its own
+  `.northstar/config.toml` (and the next run inherited it). Escalation was bounded -
+  a policy file may only tighten, so `bypassPermissions` fails closed - so this is
+  about silent policy drift, poisoned instructions, and self-DoS, not privilege gain.
+  `--allow-policy-writes` opens the tree for one run when a human means it, and the
+  effective set is auditable in the `init` event.
+- **P0-3 repository-declared lifecycle hooks** (`[[hooks]]` in the policy file),
+  the governed subset of a "command hook": veto-capable events only, no `command`
+  key and no shell at all, workspace-contained script resolved symlink-first,
+  interpreter allowlist, bounded output and a TERM->KILL process-group cleanup,
+  a scrubbed child environment (model credentials never cross into hook code), and
+  **off unless `--enable-workspace-hooks` is passed** - cloning a repository must
+  not mean executing it. A timeout, crash, or unparseable verdict on a veto event
+  is a denial.
+- **P0-4 drift is visible before the run.** `doctor` gains `policy-drift` (disk
+  policy digest vs `git HEAD`, warn, never blocking) and a warn for declared-but-
+  disabled hooks; `--dry-run` prints `run_id`, `policy_revision`, and the
+  effective `protected_prefixes`.
+
+Tests 830 -> **890** (runtime 536 -> 596: `test_contract_bridge` 18 including the
+three-way runtime/adapter/sidecar field agreement, `test_governance_writes` 12,
+`test_command_hooks` 30). The three real-subprocess hook tests were mutation-checked:
+leaking the API key into the child environment turns one red, removing the timeout
+turns another slow-and-red. `pyproject.toml` ships both new modules; the generated
+API pages were regenerated for the doc-freshness test. `0.1.0.dev0` unchanged.
+
 ## Unreleased (twelfth batch) — remote-worker ops substance (T5)
 
 T5 answered the four P3-3 ops gaps with authoritative, code-grounded

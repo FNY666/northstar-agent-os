@@ -120,6 +120,13 @@ class RuntimeConfig:
     sidecar_timeout_ms: int = 30_000
     include_describe_tool: bool = True
     record_tool_output_in_session: bool = True
+    #: Correlation id for this run. When set, it is also the sidecar ``request_id``,
+    #: so the runtime audit stream and the sidecar log share one key (see
+    #: :mod:`contract_bridge`). ``None`` means "generate one per call".
+    run_id: str | None = None
+    #: ``revision`` of the workspace policy file that gated this run, recorded so a
+    #: transcript proves *which* policy revision approved its tool calls.
+    policy_revision: str | None = None
 
     def __post_init__(self) -> None:
         def fail(message: str) -> None:
@@ -144,6 +151,16 @@ class RuntimeConfig:
                 fail("compaction_threshold_tokens must be >= 512 or None to disable")
         if self.compaction_keep_messages < 1:
             fail("compaction_keep_messages must keep at least one message")
+        for field_name in ("run_id", "policy_revision"):
+            value = getattr(self, field_name)
+            if value is None:
+                continue
+            # Mirrors the run contract's id rule: a correlation key must survive
+            # being embedded in a request_id, a log line, and a filename.
+            if not isinstance(value, str) or not value.strip():
+                fail(f"{field_name} must be a non-empty string or None")
+            elif len(value) > 128 or any(char.isspace() or char in "/\\" for char in value):
+                fail(f"{field_name} must be at most 128 chars with no whitespace or path separators")
         if self.max_output_tokens < 1:
             fail("max_output_tokens must be positive")
         if self.depth < 0:
@@ -412,6 +429,10 @@ class AgentRuntime:
             self.sidecar = SidecarClient(
                 self.config.sidecar_socket,
                 timeout_ms=int(self.config.sidecar_timeout_ms),
+                # One correlation key across both audit planes: the sidecar log
+                # line carries the runtime run_id, so a run can be traced from
+                # policy decision to execution without guessing at timestamps.
+                run_id=self.config.run_id,
             )
         if self.sidecar is not None and "CodexReadOnly" not in self.tools:
             self.tools.register(codex_tool_spec())
@@ -574,6 +595,11 @@ class AgentRuntime:
             },
             "depth": config.depth,
             "workspace": str(self.sandbox.root_real),
+            # Attribution: which policy revision gated this run, and the id that
+            # correlates it with the sidecar and host audit records.
+            "run_id": config.run_id,
+            "policy_revision": config.policy_revision,
+            "protected_prefixes": list(config.tool_limits.protected_prefixes),
         }
         init = SystemMessage(subtype="init", content=f"runtime ready: {self.provider_name}/{config.model}", data=init_data)
         self.sessions.record_system(init, agent=config.agent)
