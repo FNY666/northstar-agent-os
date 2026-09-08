@@ -10,13 +10,14 @@
 
 **内核不必再对标了，外壳要，链路必须补。** 三句话：
 
-1. **机制层已齐平甚至领先**：10 事件 hooks + 三层权限门 + 收紧型仓库策略（`northstar.policy.v1` + 修订号）+ 唯一 `ResultMessage` + 语义退出码 + NDJSON 审计 feed + **830 项离线确定性测试**（无 key、无网络）。后三项在 Claude Code / Codex / LangGraph 里都**没有一手等价物**——这是真实护城河，不是自我安慰。
+1. **机制层已齐平甚至领先**：10 事件 hooks + 三层权限门 + 收紧型仓库策略（`northstar.policy.v1` + 修订号）+ 唯一 `ResultMessage` + 语义退出码 + NDJSON 审计 feed + **1104 项离线确定性测试**（无 key、无网络）。后三项在 Claude Code / Codex / LangGraph 里都**没有一手等价物**——这是真实护城河，不是自我安慰。
 2. **但有三个"未闭合"是本次新发现的，且不在既有差距清单里**：(a) Run Contract 的绑定/回执**没有进入唯一真实执行路径**（runtime 自己实现了 sidecar wire 格式，`adapter.to_sidecar_request` 只在自己测试里被调用）；(b) `.northstar/` 治理目录**不在写保护前缀里**，agent 可改写自己的策略文件（已复现）；(c) `durable-run` 的 checkpoint/lease/verifier 与 runtime **未接线**，可恢复执行是"有零件没整机"。
 3. **标准代际正在拉开**：MCP 现行规范 **2026-07-28** 已改为无状态（移除 `initialize` 握手与会话）并用 MRTR 承载服务器→客户端交互；Northstar 客户端仍是 stdio + 旧握手。Claude Code 的 hook 面已到 **31 事件 × 5 类 handler 且可在 settings 声明**，Northstar 的 hooks **只能 Python 注册、无法写进 config.toml**——这一条对"策略即代码"的叙事比分数更伤。
 
 **结论**：对标顶级工具，Northstar 输的不是深度是**闭合度与代际**。P0 三项（约 1–2 周）把治理链真正焊在执行路径上；P1 四项（4–8 周）追代际；产品面（TUI/IDE/自建云）明确不做。
 
-> **2026-09-08 更新**：P0 四项（含新增的 F3 前置项）已随第十三批落地，全仓 830 → 890 项测试全绿；F1/F2 已闭合、F3 未动。吸收"顶级优点"的取舍判据与冲突清单见 [next-gen-agent-blueprint.zh-CN.md](next-gen-agent-blueprint.zh-CN.md)。
+> **2026-09-08 更新**：P0 四项（含新增的 F3 前置项）已随第十三批落地，全仓 830 → 890 项测试全绿；F1/F2 已闭合、F3 未动。
+> **同日第十四～十六批**：F3（检查点/派生恢复）、P1-2（多模型 + 独立完成判定）、`skills check`（技能供应链门）、**P1-1（MCP 2026-07-28 代际 + elicitation 走审批门）**全部落地，全仓 **1104 项全绿**（runtime 810）。下表与 §4/§5 的"待做"标记已按此同步；仍未做：token 级流式、显式重试/退避/降级、durable-run 与 runtime 检查点的统一。吸收"顶级优点"的取舍判据与冲突清单见 [next-gen-agent-blueprint.zh-CN.md](next-gen-agent-blueprint.zh-CN.md)。
 
 ---
 
@@ -39,7 +40,7 @@
 
 | 项 | 实测 |
 |---|---|
-| 测试 | **830 项全绿**：sidecar 51 + run-contract 41 + host 37 + durable-run 65 + interop 54 + runtime 536（4 skip：未装 `anthropic`）+ 仓库文档 46 ✅ |
+| 测试 | **1104 项全绿**：sidecar 51 + run-contract 41 + host 37 + durable-run 65 + interop 54 + runtime 810（4 skip：未装 `anthropic`）+ 仓库文档 46 ✅ |
 | 代码量 | 非测试 Python 15,493 行；测试 12,724 行（≈0.82:1）；Markdown 6,332 行 ✅ |
 | 打包 | 6 组件均有 `pyproject.toml`，统一 `0.1.0.dev0`，console script `northstar-agent-runtime`；`make install` 同 venv 通过 ✅ |
 | hooks | 10 事件；veto 5 个（`PreToolUse`/`UserPromptSubmit`/`SessionStart`/`PreCompact`/`SubagentStart`）；**handler = Python 可调用对象，无 command/http/mcp_tool 型** ✅ |
@@ -49,7 +50,7 @@
 | MCP | stdio 子进程、`initialize`→`notifications/initialized`→`tools/list`、`mcp__<server>__<tool>`、**默认 deny**、单服务器 25 工具上限、无 sampling/roots/prompts/elicitation、无重连 ✅ |
 | Skills | `.northstar/skills/*/SKILL.md` 只读渐进披露（仅 name+description 入 prompt，上限 40）；**不执行 scripts/**；无供应链校验 ✅ |
 | 策略 | `.northstar/config.toml`，13 个允许键（**不含 `hooks`**），收紧型，未知键/放宽值 fail-closed（实测：写 `permission_mode=bypassPermissions` → 拒绝启动）✅ |
-| Provider | `anthropic`（非流式 `messages.create`，prompt cache 已接）+ `scripted`；**无第二个真实后端、无 token 级流式、无显式重试/降级策略** ✅ |
+| Provider | `anthropic`（非流式 `messages.create`，prompt cache 已接）+ `openai_compat`（第十四批，一个适配器覆盖一片模型）+ `scripted`；**仍无 token 级流式、无显式重试/降级策略** |
 | 互操作 | 有 attestation / handoff grant / context envelope / typed receipt + `remote_worker.py --score`（自评 94/100），但**未连接任何真实后端** ✅ |
 
 ---
@@ -71,7 +72,7 @@
 | 9 | Agent Skills | 只读渐进披露，兼容 SKILL.md 格式 | 40+ 平台标准、脚本执行、插件分发 🟡🟢 | 原生 progressive disclosure 🟢 | 采纳中 | **平**（浅但安全） |
 | 10 | 会话与续跑 | append-only JSONL + fsync + `resume` + `sessions list/show/export` | /rewind + checkpoints + 会话 fork 🟡 | RunState/session/snapshot 三级 🟡 | **time-travel + fork from checkpoint** | **平**（弱于 LangGraph） |
 | 11 | 可观测 | OTEL span 树（run→turn→generation/tool/subagent）+ NDJSON→SIEM + 本地面板 | OTel + `/context` 🟡 | tracing 内建 | **LangSmith 全链路** | **平**（本地一流，无托管 UI） |
-| 12 | 确定性与测试 | **830 项离线测试 + scripted provider + guard 红绿 harness** ✅ | 无"无 key 全流程演示" 🟡 | 无 | 需 mock 自建 | **领** |
+| 12 | 确定性与测试 | **1104 项离线测试 + scripted provider + guard 红绿 harness** ✅ | 无"无 key 全流程演示" 🟡 | 无 | 需 mock 自建 | **领** |
 | 13 | 治理可归因 | 唯一 ResultMessage + 语义退出码 + 审计 feed + 策略修订号 ✅ | 有 hooks 审计但无 SIEM feed/修订号 | 有审计但无策略即代码 | 无 | **领** |
 | 14 | 契约 / 多代理互操作 | 有零件、**不在执行路径上**（见 F1）✅ | Agent Teams（实验）+ MCP 服务器可充当 🟡 | handoffs 内建 🟢 | subgraphs/swarm | **概念领、落地 0** |
 | 15 | 独立验证 / eval | durable-run verifier（后置条件 + 工件摘要）+ 确定性 fixture eval ✅ | **无一手 eval** | 无 | 无 | **领**（但是孤岛） |
@@ -158,14 +159,15 @@
 ### P1 追代际（4–8 周）
 | 项 | 做法 |
 |---|---|
-| P1-1 MCP 2026-07-28 | 逐请求 `_meta` 版本携带 + `Mcp-Method/Mcp-Name` 兼容旧握手 fallback + `ttlMs/cacheScope` 列表缓存；**把 elicitation 映射成一次受治理的权限审批回合**（这是别人没有的角度：MCP 的"问用户"天然对齐 Northstar 的 deny-by-default） |
+| P1-1 MCP 2026-07-28 ✅ 第十六批 | 逐请求 `_meta` 版本/能力携带 + `server/discover` 代际探测（`-32022` 即 modern；其余错误回落 `initialize` 握手）+ MRTR 重试回环；**把 elicitation 映射成一次受治理的权限审批回合**（这是别人没有的角度：MCP 的"问用户"天然对齐 Northstar 的 deny-by-default）。**未做**：`Mcp-Method/Mcp-Name` 与 `ttlMs/cacheScope` 属 HTTP 传输面，stdio 客户端无对应物——原表把两者混进了一行 |
 | P1-2 模型层 | token 级流式事件（新增 `StreamDelta`，仍保证唯一 ResultMessage）；显式重试/退避 + 过载降级；第二 provider 走 OpenAI Chat Completions 兼容面（一次覆盖 100+ 模型）；定价表外置可覆盖 |
 | P1-3 并行/后台 | 同一 tool batch 内并行执行（**每调用独立过权限门 + hooks**，denial 记账顺序确定）；子代理并发上限；`--background` + `jobs list/show` 承接 durable-run |
 | P1-4 沙箱自证 | 显式威胁模型页（"我们不承诺 OS 级隔离，承诺的是 X"）+ 可选 `bwrap` 包装（只读 bind + no net + cgroup 限额），CI 在 ubuntu runner 上跑真隔离冒烟 |
 
 ### P2 产品面（选做）
 - `pip` 上架 + tag/wheel 就绪门（管道已就绪，按"最完美才发"纪律待定）；
-- `skills check` 供应链校验器——正面回应第三方审计"99% 技能有坏味道、36% 有安全缺陷"🔴（当前唯一空白，且与 Northstar 定位最契合，性价比最高的一条）；
+- ~~`skills check` 供应链校验器~~ ✅ 第十五批已落地（`skill_audit.py` + `skills.lock` 摘要钉定 + `--require-skill-lock` 拒跑）；
+- ~~P1-1 MCP 代际 + elicitation 审批门~~ ✅ 第十六批已落地（见上表）；
 - 官方 GitHub Action + **治理基准数字**（denial correctness、注入抵抗、预算命中率）——把"机制领先"变成"可比较的领先"。
 
 ### 明确不做
@@ -184,4 +186,4 @@
 🟢 官方：MCP 2026-07-28 spec 与 changelog（`modelcontextprotocol.io/specification/2026-07-28/…`、`blog.modelcontextprotocol.io/posts/2026-07-28/`）；Claude Agent SDK hooks 表与 overview（`code.claude.com/docs/en/agent-sdk/hooks`、`/overview`）；OpenAI Agents SDK 2026-04-15 公告（`openai.com/index/the-next-evolution-of-the-agents-sdk/`、community.openai.com/t/1379072）。
 🟡 多源印证：OpenAI v2 harness/compute 分离与 7 家沙箱 provider（Help Net Security、idlen.io、junia.ai、agentpatterns.ai、abhs.in）；Claude Code 31 事件与 5 类 handler（ofox.ai、blakecrosley.com）；Codex "as a platform" 2026-08-19（kenhuangus.substack.com）；Agent Skills 40+ 平台（strapi.io、firecrawl.dev、paperclipped.de、rywalker.com）；LangGraph vs Temporal 与 "checkpoints are not durable execution"（cordum.io、aiworkflowlab.dev、reactify-solutions.com、temporal.io/blog/manetu）；沙箱选型 seatbelt/bubblewrap/gVisor/Firecracker（northflank.com、augmentcode.com）；OWASP ASI Top10（dev.to alessandro_pignati）；prompt injection  containment 策略（ecorpit.com、atlan.com）。
 🔴 单一口径：技能仓库审计（99%/36%，rywalker.com）——数字未独立复核，仅作机会点论据。
-✅ 本地实测：830 项测试、`--version`、F1/F2 复现与 fail-closed 验证、`remote_worker.py --score`=94/100（自评）。
+✅ 本地实测：1104 项测试、`--version`、F1/F2 复现与 fail-closed 验证、`remote_worker.py --score`=94/100（自评）。

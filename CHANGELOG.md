@@ -1,5 +1,66 @@
 # Northstar Agent OS — initial public component
 
+## Unreleased (sixteenth batch) — MCP grows a second generation, and a remote question becomes an approval
+
+The blueprint's first P1 row. The 2026-07-28 Model Context Protocol revision deleted the
+handshake: there is no session id any more, version and capabilities ride in
+`params._meta` on every request, servers may no longer initiate JSON-RPC requests, and
+`elicitation/create` / `sampling/createMessage` / `roots/list` became **Multi Round-Trip
+Requests** — a server answers a tool call with `resultType: "input_required"` and waits
+for the client to retry. That last part is the one that matters here: it is a permission
+request arriving over a socket, and every other agent tool on the market treats it as a UI
+detail. Northstar treats it as a gate.
+
+- **`mcp_negotiate.py`: the generation rules as pure functions.** `server/discover` is
+  probed first; a reply means modern, a `-32022` means modern *and* names the versions to
+  adopt (only a modern server can produce that code), and anything else — method-not-found,
+  garbage, a dead process — falls back to the `initialize` handshake. Never a guessed
+  version: with nothing mutual in common the client reports the server's own list instead
+  of trying a favourite date. `auto` is the default; `--mcp-protocol legacy|modern` pins it,
+  and the reason is printed to stderr so a CI log records which dialect was used. Era is a
+  property of the server process, decided once.
+- **`_meta` everywhere on modern, nowhere on legacy.** The probe carries it too — a client
+  that asked "are you modern?" without declaring a version would be asking in a language
+  only modern servers read. Legacy payloads get no extra keys, because unknown keys are how
+  a strict 2024 server ends a conversation.
+- **`mcp_elicitation.py`: what may be answered.** `elicitation` is advertised as a
+  capability **only when an approver is attached**, so an unattended run is never asked
+  (per spec a server must not send what the client did not declare) rather than asked and
+  defaulted. `sampling/createMessage` is always declined — a remote tool does not get to
+  run our model on a prompt we did not write. `roots/list` is declined unless
+  `--mcp-allow-roots`, and then answered with exactly one root, the workspace. A field named
+  like a credential is refused before a human sees it, unless `--mcp-allow-sensitive-input`.
+  Schemas are bounded (16 fields, depth 3, 8 KB), and an answer that includes a field the
+  server never asked for is rejected: volunteering data to a remote process is not a client's
+  job.
+- **The retry is a real retry.** `--mcp-elicit-answers '{"approved": true}'` is an approval
+  granted *in advance*, and coverage is strict: a server that adds a required field gets a
+  refusal, not a guess. `--mcp-elicit` without it prompts on a terminal and refuses to start
+  when stdin is not a tty. The retry is a **new JSON-RPC request** carrying `inputResponses`
+  plus the server's opaque `requestState` verbatim — the client never inspects it — and
+  `--mcp-max-rounds` (default 3) bounds how long a server may re-ask. When a round contains
+  nothing but refusals the in-flight call is cancelled with `notifications/cancelled`:
+  declining is final, not a negotiation.
+- **Audited, values excluded.** Each verdict is
+  `{kind, server, tool, method, action, reason, answered_fields}` in
+  `client.elicitation_log` and the `audit=` callback, and a `[governance] …` line rides
+  inside the tool result so the model and the transcript both see that a server tried to ask
+  and what became of it. Answer *values* are never recorded.
+- **A new fixture speaks only the modern generation** (`mcp_mrtr_server.py`), with
+  switchable modes for the `-32022` retry, method-not-found, an `input_required` with nothing
+  to answer, and a server that re-asks forever — and it logs every inbound byte so tests
+  assert on the wire, not on the client's self-report. 67 new tests; the legacy fixture is
+  unchanged and still passes, which is the point of the fallback.
+- **Docs debt closed**: `docbuild` now covers `checkpoints`, `postconditions`,
+  `contract_bridge`, `command_hooks`, `skill_audit`, `skill_check`, the two new MCP modules,
+  `providers.openai_compat` and `tools.verify_invariants` — modules that shipped in earlier
+  batches without ever reaching the generated API page.
+
+Honest limits: "conformant" here means matching the published grammar, verified against our
+own fixture — **no vendor MCP server has been exercised in this sandbox**. There is no HTTP
+transport (the era rules and MRTR are transport-agnostic; only framing differs), no
+prompts/resources UI, and no task extension.
+
 ## Unreleased (fifteenth batch) — the skill supply chain gets a gate
 
 `skills check`, the highest-leverage row left in the blueprint's debt table: the Agent
