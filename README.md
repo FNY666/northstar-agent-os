@@ -80,10 +80,19 @@ cd components/northstar-agent-runtime
 python3 -m cli --version
 python3 -m cli doctor --workspace .       # environment self-check
 python3 -m cli run --workspace . --provider anthropic --prompt "summarise README" --dry-run
+python3 -m cli plugin verify --workspace .  # review the installed extension bundles
 ```
 
 `make test` runs every component's suite and the repository documentation tests
-(600+ tests, all offline).
+(1326 tests, all offline).
+
+Extensions arrive as `northstar.plugin.v1` bundles: one directory packing the four seams
+this runtime already has — skills, agent files, command hooks, MCP servers — installed as a
+visible copy under `.northstar/plugins/` with its content digest pinned in
+`plugins.lock`. A bundle may tighten a ceiling, never widen one; a bundle whose bytes moved
+since review blocks the run instead of warning. There is no marketplace and no remote fetch,
+deliberately: [Plugin bundles](components/northstar-agent-runtime/README.md#plugin-bundles-plugin-install)
+has the whole rule set.
 
 ### Sidecar installation
 

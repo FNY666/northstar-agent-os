@@ -1,5 +1,76 @@
 # Northstar Agent OS — initial public component
 
+## Unreleased (nineteenth batch) — plugins are a packaging format, not a permission channel
+
+Asked directly: do we have plugins, and do they work on every platform? The honest answer
+before this batch was "four extension seams, no bundle concept" — which is why
+`docs/dx-benchmark-2026.zh-CN.md` scored the extension ecosystem at 1 then 3, with the gap
+written as "no plugins/marketplace, no installer, no index". Blueprint row C5 had already
+ruled on what to take from the marketplace world: the **format**, an install that is one
+visible copy plus a verification, and **no online marketplace** — a marketplace is a supply
+chain, and a reviewable diff is what this repository is for.
+
+- **`plugin_manifest.py` — `northstar.plugin.v1`.** A bundle is `plugin.toml` plus the four
+  things this runtime can already consume: `skills`, `agents`, `context` file paths,
+  `[[components.hooks]]` and `[[components.mcp_servers]]`, and a `[policy]` table of
+  ceilings. Closed schema — an unknown key is refused with *"A key nobody reads is a
+  capability somebody meant"*. The content digest covers the manifest **minus its own
+  `[integrity]` table** and every file, length-prefixed, because a hash of yourself is not a
+  signature and because concatenating file bytes lets `"ab"+"c"` collide with `"a"+"bc"`.
+  `[integrity]` may carry only `seal` + `seal_key_env`: the manifest cannot pin itself.
+- **Skill text is reviewed on the way in**, the other half of what `skills check` was for: `install` audits each bundle's own `SKILL.md` files with the same versioned rules before a byte is copied, refuses on any finding at or above `--fail-on` (default `error`, the same scale as that command's), and `plugin verify` repeats the review so a rules bump surfaces against already-pinned bundles. `run` deliberately does not consult it — a rule change must not turn every workspace's installed plugins into a configuration error by itself; that is a human re-reviewing (`--write-lock`). Lowering the bar is a decision, and the verify report says which bar was in force.
+- **Install is a copy; the pin is the review.** `plugin install DIR` refuses — before
+  writing anything — a bundle that renames itself relative to its directory, that cannot run
+  on this host, that loosens the loaded workspace policy, or whose seal cannot be verified
+  (`--require-seal`). It lands in `.northstar/plugins/<name>/` and writes
+  `{version, publisher, content_digest, source}` into `.northstar/plugins.lock`. `uninstall`
+  removes only what install placed, and refuses to delete *through* a symlink.
+- **Nothing loads that nobody reviewed.** A bundle whose bytes moved since its pin is
+  reported as `drift` by `plugin verify` and **blocks the run** (exit 64) — the same reason
+  an unpinned bundle, a broken manifest, a denial naming a tool this runtime does not have,
+  and an MCP server declaring `env` do. "The skills loaded but not the hooks" is not a state
+  anyone reviewed, so there is no such state. `plugin verify --write-lock` records a review,
+  and says which pins moved (`repinned`) instead of going quiet about it.
+- **Capability never widens.** `[policy]` is compared against the loaded workspace policy
+  and only ever tightens — `min` on ceilings, union on denials, `read_only`/`halt_on_denial`
+  one-way, `permission_mode` accepts only `plan`, because `acceptEdits` and
+  `bypassPermissions` **are** approvals and approvals stay a human at a command line. There
+  is no `allow_tools` key, mirroring the policy file. An MCP server with `env` is refused at
+  load and pointed at the workspace's own `[mcp.servers]`: this runtime starts a server from
+  a command line, and a side channel for a plugin's secrets would be a new permission path.
+- **The four seams are the real ones.** A bundle's skills go through `discover_skills(...,
+  extra_roots=)` (a name already used by the repository is an error, not an override), its
+  agent files through `register_workspace_agents(..., extra_paths=)` (no shadowing a
+  built-in), its hooks are rendered as ordinary `[[hooks]]` tables and policed by
+  `command_hooks.parse_hooks` with the workspace as confinement root — same veto-only event
+  set, same interpreter allowlist, same timeout bounds, same `--enable-workspace-hooks`
+  switch, imported rather than mirrored — and its MCP servers join the operator's own list,
+  so they are mutating-by-default and denied until named.
+- **"Every platform", answered twice.** Per-host gating: `compatibility.{platforms,min_python,
+  requires_flock,requires_network}` is enforced at install (refused, not half-applied), and
+  `plugin compat` prints the matrix across `HOST_PROFILES` including case-insensitive
+  filename collisions, with `only_hosts` filtering the display but never the verdict. To
+  other ecosystems: `plugin export` renders `claude-code`, `codex`, `openai-agents`,
+  `agents-md`, `cursor`, `mcp` and `skills`, and refuses to write a downgrade until
+  `--allow-drop`, printing what stayed behind. The drop list is **computed from one table**
+  (`CARRIED_BY_TARGET`), so a renderer cannot disagree with it.
+- **Publisher identity, named honestly.** No signature verification is possible with the
+  standard library here, so `[integrity].seal` is an **HMAC-SHA256 seal** keyed by
+  `$NORTHSTAR_PLUGIN_KEY`, compared in constant time, and called a seal everywhere it appears.
+  An unverifiable seal is not an absent one.
+
+`policy_file.read_policy_document()` was extracted as the raw-value reader for the
+tighten-only comparison: comparing two numbers must not require the plugin loader to
+re-adjudicate which tool names the workspace's file is allowed to mention — that is the
+run's job, with the registry it will actually have.
+
+87 new tests (1029 in the runtime slice, 1326 in the repository: 51 + 41 + 37 + 65 + 54 +
+1029 + 49), all offline. Honest limits, stated in the same breath as the feature: the host
+profiles are our description of the primitives this runtime uses, not a conformance suite,
+and nothing in this repository runs on Windows; the foreign hosts' file shapes are rendered
+from reading their docs, and no other agent host is exercised here; `MAX_FILES` is 200 and
+`MAX_FILE_BYTES` 1 MiB, so a bundle is a bundle, not a vendored tree.
+
 ## Unreleased (eighteenth batch) — one writer per session, and one boundary two readers can parse
 
 The last row of the roadmap that sat *between* components rather than inside one. The

@@ -61,15 +61,26 @@ def discover_agent_files(
     workspace: str | Path,
     *,
     known_tools: Iterable[str] | None = None,
+    extra_paths: Iterable[str | Path] = (),
 ) -> tuple[AgentDefinition, ...]:
-    """Compile every ``.northstar/agents/*.md`` into an AgentDefinition."""
+    """Compile every ``.northstar/agents/*.md`` into an AgentDefinition.
+
+    ``extra_paths`` accepts directories or single files from an installed plugin bundle.
+    They are parsed by the same function and confined by the same rule, so a plugin's agent
+    file gets exactly the privileges a repository's own agent file has - no more.
+    """
     root = Path(workspace).resolve()
     directory = root / AGENTS_DIRECTORY
-    if not directory.is_dir():
-        return ()
     known = frozenset(known_tools or ())
+    candidates: list[Path] = sorted(directory.glob("*.md")) if directory.is_dir() else []
+    for extra in extra_paths:
+        path = Path(extra)
+        if path.is_dir():
+            candidates.extend(sorted(path.glob("*.md")))
+        elif path.is_file():
+            candidates.append(path)
     definitions: list[AgentDefinition] = []
-    for entry in sorted(directory.glob("*.md")):
+    for entry in candidates:
         resolved = entry.resolve(strict=False)
         if not resolved.is_relative_to(root):
             raise AgentFileError(
@@ -85,9 +96,14 @@ def register_workspace_agents(
     workspace: str | Path,
     *,
     known_tools: Iterable[str] | None = None,
+    extra_paths: Iterable[str | Path] = (),
 ) -> tuple[AgentDefinition, ...]:
-    """Discover repository agents and register them; collisions are errors."""
-    definitions = discover_agent_files(workspace, known_tools=known_tools)
+    """Discover repository agents and register them; collisions are errors.
+
+    The collision rule is what makes ``extra_paths`` safe: a plugin may add a subagent, and
+    may not take over a name a built-in or the repository already uses.
+    """
+    definitions = discover_agent_files(workspace, known_tools=known_tools, extra_paths=extra_paths)
     for definition in definitions:
         try:
             registry.register(definition, replace_existing=False)

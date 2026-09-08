@@ -18,7 +18,7 @@
 
 这件事有一个可检验的判据，本仓已经具备而头部工具都没有：
 
-> **零凭据、零网络、890 项测试跑通同一套语义。** 任何被吸收进来的优点，若不能在没有 API key 的情况下被确定性测试，就不算吸收成功——那只是多了一条无法回归的功能面。
+> **零凭据、零网络、1326 项测试跑通同一套语义。** 任何被吸收进来的优点，若不能在没有 API key 的情况下被确定性测试，就不算吸收成功——那只是多了一条无法回归的功能面。
 
 按这个判据，顶级工具的优点分成三类。
 
@@ -32,7 +32,7 @@
 | C2 | settings 里声明 command hooks | Claude Code（31 事件 × 5 类 handler） | 仓库文件=可执行代码 → 绕过权限门；clone 即执行 | ✅ **改造后收**：本批 P0-3 落地，但只允许否决型事件 + 无 shell + 脚本必须在工作区内 + 默认关 + 子进程环境变量清洗 |
 | C3 | 无限工具/无限技能（no per-server cap、几百个 skill） | Claude Code Tool Search、Skills 生态 71k+ | `MAX_TOOLS_PER_SERVER=25`、`MAX_SKILLS=40`、listing 上限——"仓库文件不得无界撑大上下文" | 🔧 **改造**：数量可有界放宽（如 25→100），但必须配 **deferred definitions**（按需取 schema）；直接去上限 = 放弃边界 |
 | C4 | 模型分类器自动批准（`auto` mode） | Claude Code auto、Cursor auto-review | 三层权限门的确定性；"谁批准了这次调用"必须可复现 | ⛔ **拒绝原样**：分类器只能作为**额外否决**挂在 PreToolUse 上（可 deny、不可 allow），默认关 |
-| C5 | 插件市场 / install 即得能力 | Claude Code marketplace、skills 目录 | "策略只能收紧"（`policy_file` fail-closed）；市场内容未签名 | 🔧 **改造**：只取**打包格式**（plugin = config/agents/skills/hooks 的 bundle），安装 = 一次 git 可见的落地 + `skills check` 校验；不做在线市场 |
+| C5 | 插件市场 / install 即得能力 | Claude Code marketplace、skills 目录 | "策略只能收紧"（`policy_file` fail-closed）；市场内容未签名 | ✅ **改造后收**（第 19 批，§6.24）：落地 `northstar.plugin.v1` bundle = config/agents/skills/hooks/MCP 的打包格式，安装 = `.northstar/plugins/<name>/` 一次 git 可见的拷贝 + `plugins.lock` 按内容 digest 钉住；策略只收紧、hook 走 `command_hooks.parse_hooks`、跨平台用 `compatibility` 装前拒绝而非半装。**不做在线市场/解析器/远程拉取** |
 | C6 | 容器快照/恢复（sandbox 丢了能续） | OpenAI Agents SDK v2 snapshot+rehydrate | 需要可变工作区生命周期；本仓 `northstar-host` 只有 0700 分配，无 lease/回收 | 🔧 **改造**：F3 的 durable 接线已落地（§6.23：lease 与检查点翻译），剩下的快照/回收属于 host 层，不进 runtime |
 | C7 | 全局记忆（跨会话 MEMORY.md、user-scope memory） | Claude Code memory scopes、OpenAI 双层记忆 | 记忆是 ASI06 上下文投毒的持久载体；审计边界"只在工作区内" | ⛔ **拒绝全局**：只做 workspace-scoped、带摘要+摘要 digest、可 `--no-memory`、写入走 Edit 同一道门 |
 | C8 | 后台并行 / 20 并发子代理 | Claude Code background+Agent Teams | 成本上限与"每 run 恰好一个 ResultMessage"要重定义（并发下预算是共享还是分片） | 🔧 **改造**：批内并行工具调用（每次调用独立过门，denial 记账顺序确定）先行；子代理并发必须继承**父预算池**而非各自新开 |
@@ -72,7 +72,7 @@
    → 头部工具的权限配置是"行为开关"，这里是**可评审、可归因、可 diff 的策略文档**。CI 场景里这是合规资产，不是 DX 糖。
 
 2. **确定性回归治理（治理本身的 golden test）**
-   scripted provider + 890 项离线测试 + guard 红绿 harness，意味着"把 deny 改成 allow 会让哪些测试变红"是可计算的。
+   scripted provider + 1326 项离线测试 + guard 红绿 harness，意味着"把 deny 改成 allow 会让哪些测试变红"是可计算的。
    → 别人有 output eval；**没有人在 eval 权限决策**。这条可以直接做成公开基准（denial correctness / 注入抵抗 / 预算命中率），是 Northstar 唯一能自定义考题的赛道。
 
 3. **可归因的委派链（contract → execution → receipt）**
@@ -128,6 +128,49 @@
 所以"恢复"一直是绕过 `max_budget_usd` 的后门。现在它必须把父花费带过来；
 嵌入式调用忘了传 seed 过的 `Budget` 会直接报错，而不是拿到更宽的额度。
 
+### 6.24 第十九批（插件是打包格式，不是权限通道）
+
+用户问的是"我们有插件吗？能不能适配所有平台"。诚实的基线是：这一批之前有**四个扩展缝**
+（skills、agent files、command hooks、MCP），**没有 bundle 概念**——`dx-benchmark-2026` 因此把
+扩展生态记 3/5、N4 记 2/5，缺的就是"无 plugins/市场、无安装器/索引"。这一批只补 C5 裁定允许的
+那一半：**格式**，并把"适配所有平台"拆成两个都能验证的答案。
+
+- **格式与钉住**：`plugin.toml`（`northstar.plugin.v1`）是封闭 schema——未知键直接拒（"A key nobody
+  reads is a capability somebody meant"）。`load_bundle` 计算内容 digest，**故意排除 `[integrity]` 表**：
+  自己哈希自己是自证，能治理加载的那个数字属于 `plugins.lock`（`{name, version, content_digest, source}`）。
+  安装 = `shutil.copytree` 到 `.northstar/plugins/<name>/`，一次 git 可见的落地；卸载只删自己放下的东西，
+  且**拒绝穿过符号链接删**（进去时也不收 symlink）。没有市场、没有解析器、没有远程拉取。
+- **能力只减不增**：`[policy]` 与已加载的 workspace policy 比，放宽即拒；没有 `allow_tools` 键；
+  `permission_mode` 只接受 `plan`——`acceptEdits`/`bypassPermissions` 是**批准**，批准只能由人在命令行给。
+  四个缝全部复用既有门：skill 走 `discover_skills(..., extra_roots=)`（与仓库同名 = 错误，不是覆盖）、
+  agent 走 `register_workspace_agents(..., extra_paths=)`（不得遮蔽内置）、hook 渲染成**真实 `[[hooks]]` 表**
+  交给 `command_hooks.parse_hooks(workspace=<workspace>)`（脚本必须在包内、无 shell、`--enable-workspace-hooks`
+  仍是唯一开关）、MCP server 进操作者自己的 `--mcp-server` 列表（默认 mutating、未点名即拒）。**声明 env 的
+  MCP server 在加载时被拒**并指向 workspace 自己的 `[mcp.servers]`：为插件密钥另开一条通道 = 新的权限路径。
+- **安装即评审**：bundle 自己的 `SKILL.md` 在拷贝**之前**过一遍 `skills check` 的同一套规则，
+  `--fail-on`（默认 `error`）之上有发现即拒绝安装；`plugin verify` 每次重跑该评审（规则随
+  `RULES_VERSION` 进化，"三月干净"不等于"九月干净"），但 `run` 刻意不看它——规则升级本身不该把
+  所有工作区的已装插件变成配置错误，那是一次人工复审（`--write-lock`）的事。
+- **不"半装"**：未钉住、内容漂移、seal 不可验、denial 指向不存在的工具——一律 block 整个 run（exit 64），
+  而不是 warn。理由与 C2 同源：「skills 装上了但 hooks 没装」不是任何人评审过的状态。
+- **发布者**：stdlib 里做不了签名验证，所以 `[integrity]` 是 **HMAC-SHA256 seal**（`seal_key_env`），并如实叫它 seal；
+  `--require-seal` 时"验不了的 seal"不等于"没有 seal"，仍然拒。
+- **跨平台第一义 = 按宿主门禁**：`compatibility.{platforms,min_python,requires_flock,requires_network}` 在**安装时**
+  拒掉跑不起来的 bundle（不是装上再失败）；`plugin compat` 对每个已装 bundle 打印 `HOST_PROFILES` 矩阵，含
+  **大小写不敏感宿主上的同名冲突**（`A1.md`/`a1.md` 在 Windows 是一个文件）。矩阵只改显示、不改结论
+  （`only_hosts` 过滤视图，`portable_everywhere` 仍按全表算），且如实标注：profile 是我们对自己用到的原语的描述，
+  不是一致性测试，本仓没有任何东西在 Windows 上跑过。
+- **跨平台第二义 = 导出到别家原生格式，并列出丢了什么**：`plugin export <target>` 支持 7 个目标
+  （`claude-code/codex/openai-agents/agents-md/cursor/mcp/skills`）。`dropped` **由 `CARRIED_BY_TARGET` 一处算出**，
+  渲染器无权各写一份；目标带不动 hook 与 ceiling 时默认**拒写**，要 `--allow-drop` 才落盘。别家格式是按我们读到的
+  文档渲染的，本仓没跑过任何别的宿主——这句话写进每个导出的 notes 里。
+
+测试量到 **1029**（runtime 片，+87：`test_plugin_manifest` 42 / `test_plugin_install` 45，其余为
+`test_module_layout`/`docbuild` 对新模块的接线），仓库 `make test` 全绿（51+41+37+65+54+1029+49）。
+新增两个公开模块同时进 `pyproject.toml` 的 `py-modules` 与 `tests/docbuild.py` 的 MANIFEST，
+`policy_file.read_policy_document()` 作为"只取值、不重复评审"的原始读入口被抽出来——插件的比较需要
+workspace 的数字，但不需要在这里第二次判定文件名对不对。
+
 ### 6.23 第十八批（durable 统一：会话只有一个写者，运行边界只有一份事实）
 
 | 项 | 内容 | 验证 |
@@ -172,7 +215,7 @@
 
 全仓 954 项测试全绿（runtime 660）。**未做**：流式（`StreamDelta`）、`skills check`、F3。
 
-**F3、skills check、P1-1、token 级流式、durable 统一均已完成**（见 §6.15、§6.20、§6.21、§6.22、§6.23）。**只剩一项：显式重试/退避/降级**——provider 层的故障分类策略化。它排在最后是有理由的：契约面（跨组件接口）刚定完，重试策略要动的正是这层之上的调用点，先把接口定死再谈"失败后怎么再来一次"，才不会把重试写成第二个未定义的边界。
+**F3、skills check、P1-1、token 级流式、durable 统一、plugin bundle（C5）均已完成**（见 §6.15、§6.20、§6.21、§6.22、§6.23、§6.24）。**只剩一项：显式重试/退避/降级**——provider 层的故障分类策略化。它排在最后是有理由的：契约面（跨组件接口）刚定完，重试策略要动的正是这层之上的调用点，先把接口定死再谈"失败后怎么再来一次"，才不会把重试写成第二个未定义的边界。
 
 ---
 
@@ -185,4 +228,4 @@
 ## 7. 一句话
 
 **"包含所有顶级 agent 的优点"这条路的正确走法，是把每个优点都过一遍"能不能不绕门"的改写；改不动的就明确拒绝。**
-Northstar 的次世代位置不在功能并集上，在于：**同一个 agent loop，别人要牺牲确定性或牺牲边界来换能力，这里两样都不换——而且每一项能力都能在 CI 里用 890 个无 key 测试证明它今天和昨天行为一致。**
+Northstar 的次世代位置不在功能并集上，在于：**同一个 agent loop，别人要牺牲确定性或牺牲边界来换能力，这里两样都不换——而且每一项能力都能在 CI 里用 1326 个无 key 测试证明它今天和昨天行为一致。**

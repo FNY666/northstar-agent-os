@@ -146,7 +146,7 @@ Northstar 是"运行时组件集合"，不是一个终端产品。因此对标�
 - **MCP**：Claude Agent SDK 原生 MCP 客户端 + 进程内 `@tool` 服务器[5](https://letsdatascience.com/blog/claude-agent-sdk-tutorial)；Codex 支持 MCP 并可作为 MCP server 被 Agents SDK 调用[1](https://blakecrosley.com/guides/codex)；LangGraph 全面接入[5](https://o-mega.ai/articles/langgraph-vs-crewai-vs-autogen-top-10-agent-frameworks-2026)。Northstar：**README 自认 "MCP is not implemented"**。
 - **Agent Skills（开放标准）**：Anthropic 2025-10 提出、2025-12-18 发布开放标准（agentskills.io），**截至 2026 年中约 40 个平台采纳**：Claude Code、Codex、Gemini CLI、Cursor、Copilot、VS Code、Goose…[11](https://www.paperclipped.de/en/blog/agent-skills-open-standard-interoperability/)[13](https://agentman.ai/blog/agent-skills-ecosystem-report-2026)。SKILL.md（YAML frontmatter + 渐进式披露：先只载入名称/描述，命中后才载全文）已成通用格式[10](https://www.agensi.io/learn/agent-skills-open-standard)[12](https://strapi.io/blog/what-are-agent-skills-and-how-to-use-them)。社区目录 skills.sh 收录技能以十万计（SkillsMP 口径达百万级，第三方）[13](https://agentman.ai/blog/agent-skills-ecosystem-report-2026)。Northstar：完全不支持——意味着**数十万个现成技能与北星无关**。
 - **Subagent 文件化**：Claude Code 的 subagents 是 `.claude/agents/*.md` 文本文件[14](https://www.developersdigest.tech/blog/claude-code-agent-teams-subagents-2026)；Northstar 的 subagent 是 Python 注册表（`agents.py`）——能力更强但门槛更高，两者可以兼容并存（markdown 定义 → 编译进 registry）。
-- **Plugins**：Agent SDK 支持打包 skills/agents/hooks/MCP 的插件按本地路径加载[4](https://code.claude.com/docs/en/agent-sdk/overview)。
+- **Plugins**：Agent SDK 支持打包 skills/agents/hooks/MCP 的插件按本地路径加载[4](https://code.claude.com/docs/en/agent-sdk/overview)。**（第 19 批已补：`northstar.plugin.v1` bundle + `plugin install/verify/list/show/compat/export`，安装即 `.northstar/plugins/` 一次可见拷贝 + `plugins.lock` 按内容 digest 钉住；按 C5 裁定仍不做在线市场/索引。）**
 
 > 安全注记：北星若接入 skills/MCP，必须让其内容与工具仍走既有权限门与 hooks——技能是"文本+可执行引用"，不是权限提升。这也正是北星可宣传的差异点（"消费开放生态，但由治理内核兜底"）。
 
@@ -371,7 +371,7 @@ Northstar 是"运行时组件集合"，不是一个终端产品。因此对标�
 | G1 | 不可安装、无入口 | ✅ 六组件 pyproject + console script；`make install` 五组件同 venv 验证 |
 | G2 | 无版本/发布渠道 | 🟡 版本对齐测试 + Release CI 管道就绪；**未发布**（0.1.0.dev0，发布须过就绪门）；未上 pip index |
 | G3 | 无配置/约定文件 | ✅ AGENTS.md、`.northstar/config.toml`、agents/skills 文件、context-file；🟡 策略 schema 版本化（P3-1b）未做 |
-| G4 | 无 MCP/Skills/Plugins | 🟡 MCP stdio 最小客户端（默认 deny、穿权限门）；SKILL.md 只读渐进披露；**无 plugins/市场、无 HTTP/SSE+auth** |
+| G4 | 无 MCP/Skills/Plugins | 🟡 MCP stdio 最小客户端（默认 deny、穿权限门）；SKILL.md 只读渐进披露；plugin bundle 有安装器/锁定/校验/导出（第 19 批）；**仍无在线市场与索引、无 HTTP/SSE+auth** |
 | G5 | 会话/追踪无读回 | ✅ `sessions list/show/export`（export 即 audit.ndjson/1）+ OTEL + resume；🟡 无 rewind/checkpoint 可视化 |
 | G6 | 上手路径长 | ✅ `make demo` 一条命令 + examples 索引 |
 | G7 | 无环境自查 | ✅ `--version`、`doctor`、`--dry-run` 全配置预览 |
@@ -387,13 +387,13 @@ Northstar 是"运行时组件集合"，不是一个终端产品。因此对标�
 | CLI / 终端体验 | 3 | **4** | headless、dry-run、语义退出码 0–5/64、json 事件流一流；无交互 TUI/rewind/tasks |
 | 程序化 API / 包管理 | 1 | **3** | `sdk.run()/stream_run()` + 事件 dict 词表 + resume + 示例；无 TS 面、无 exec/app-server 协议 |
 | 配置与项目约定 | 1 | **4** | AGENTS.md/config/agents/skills/context-file 齐全；差策略 schema 版本化与托管下发 |
-| 扩展生态（MCP/Skills/Plugins） | 1 | **3** | 三类都占位且默认 deny/只读（安全侧反而领先）；差 plugins/市场、MCP HTTP+auth、技能脚本执行 |
+| 扩展生态（MCP/Skills/Plugins） | 1 | **4** | 四类都占位且默认 deny/只读（安全侧反而领先）：plugin bundle 有封闭 schema、digest 钉住、按宿主门禁与 7 目标导出；差在线市场/索引、MCP HTTP+auth、技能脚本执行 |
 | 会话 / 调试 / 可观测 | 3 | **4** | 读回 + 审计导出 + resume 齐全；差 rewind/checkpoint 与交互式回放 |
-| 测试与确定性 | 5 | **5** | 736 项、guard 红绿 harness、离线 scripted provider——头部普遍 3 分档，仍是最稀缺资产 |
+| 测试与确定性 | 5 | **5** | 全仓 1320 项（runtime 片 1023）、guard 红绿 harness、离线 scripted provider——头部普遍 3 分档，仍是最稀缺资产 |
 | 文档与教学 | 3 | **4** | 四层 + 生成 API + examples 索引 + 11 语言；差课程/playground 型教学 |
 | 版本化与发布 | 2 | **3** | 版本单一源 + 对齐测试 + 就绪门 Release CI；未发出版本（按纪律等"最完美"） |
 | 团队 / CI / 协作面 | 2 | **3** | CI 模板 + headless + 审计 feed 天然 CI 友好；差官方 Action/review 后台 |
-| **合计（/50）** | **23** | **36** | 头部（Claude Code/Codex）2026-09 口径仍 ≥46 且持续外扩 |
+| **合计（/50）** | **23** | **37** | 头部（Claude Code/Codex）2026-09 口径仍 ≥46 且持续外扩 |
 
 ### 10.4 新增横向战场六维（2026 年新出现的竞争面，1–5）
 
@@ -402,10 +402,10 @@ Northstar 是"运行时组件集合"，不是一个终端产品。因此对标�
 | N1 可嵌入 harness（SDK/exec/app-server） | Codex platform、Claude Agent SDK（py/ts） | **2** | 内核（AgentRuntime/events/resume/hooks）在，未产品化为 SDK 面 |
 | N2 后台/并行/任务化 | Codex Automations、CC background agents/task mgmt | **2** | durable-run 内核（event_store/action_gateway/verifier）超前，无 CLI/调度/云端面 |
 | N3 远程/多端 | CC remote sessions/Desktop、Codex cloud、Gemini remote subagents | **1** | 目前只有 sidecar 单向委派 |
-| N4 生态市场接入 | CC plugin marketplace、skills 71k+、.mcp.json | **2** | 格式兼容可读；无市场/安装器/索引 |
+| N4 生态市场接入 | CC plugin marketplace、skills 71k+、.mcp.json | **3** | 自有 bundle 格式有安装器/锁定/校验与 `plugin export` 七个外家格式；**按裁定不做市场与索引**（市场=供给链，可评审 diff 才是本仓的目的） |
 | N5 安全治理纵深 | CC managed settings/enterprise、Codex sandbox 网络隔离、Muse 默认沙箱 | **3** | 权限门/hooks/只读/审计 feed 治理叙事强；无 OS 级沙箱与技能供应链校验（36% 缺陷率=空白机会） |
 | N6 模型层能力 | model routing/steering、多模型 fallback | **3** | providers 抽象 + 记账 + 确定性 scripted；仅两个后端 |
-| **合计（/30）** | ≈24 | **13** | 新战场是当前差距的主要来源 |
+| **合计（/30）** | ≈24 | **14** | 新战场是当前差距的主要来源 |
 
 ### 10.5 还差多远：排序与最短路径（批次粒度估算，主观）
 
@@ -414,7 +414,7 @@ Northstar 是"运行时组件集合"，不是一个终端产品。因此对标�
 | T1 | SDK/可嵌入面 | Codex exec/SDK、Claude Agent SDK | ✅ 已完成（2026-09-07）：`sdk.py`（RunOptions/run/stream_run/RunReport）+ `events.py` 公共事件词表 + examples/sdk 示例；TS 面与稳定 API 承诺待续 | — |
 | T2 | 发布工程 | `@latest`/Release 渠道 | 🟡 管道已完成并留作待命；**按发布纪律撤回 v0.1.0**（未发布、dev0、须过就绪门）；余：pip index 上架 | — |
 | T3 | 交互最小集 | CC `/rewind`+tasks、Gemini checkpointing | checkpoint/restore 子命令 + `sessions` 可视化回放 | 1–2 |
-| T4 | 生态纵深 | CC plugins/marketplace、MCP login | `.mcp.json`/HTTP+auth、skills `check`（供应链校验器，直接回应 99%/36% 审计）、技能脚本沙箱或写明取舍 | 1–2 |
+| T4 | 生态纵深 | CC plugins/marketplace、MCP login | skills `check` ✅（第 15 批）、plugin bundle 打包格式与安装器 ✅（第 19 批，含按宿主门禁与 `plugin export`）；余：`.mcp.json`/HTTP+auth、技能脚本沙箱或写明取舍、市场/索引（按 C5 裁定不做） | 1–2 |
 | T5 | 后台/远程化 | Codex Automations、CC remote | durable-run 之上做任务调度 CLI 面 + P3-3 远程 worker 协议评估 | 2–3 |
 | T6 | 治理叙事页 | — | "确定性 + 治理默认值"独立页/演示（评审/CI 场景） | 0.5 |
 
@@ -525,3 +525,28 @@ Northstar 是"运行时组件集合"，不是一个终端产品。因此对标�
   - `examples/remote-canary/` — 操作者执行的通道 canary：ssh 可达 → socket forward → 确定性探针（server 在 spawn 前拒绝，无需模型/key），`NS_REAL=1` 可选真实 codex run；探针在 CI 对真实 `sidecar_socket.serve` 回路验证；整脚本需真实主机、按设计永不进 CI。
 - **计分器如实重算**：两条"文档性质"缺口（story、guide）翻转为仓库权威工件检查（状态 marker 本身被 repo 测试钉死，空壳文件翻不了分）；两条实现项缺口保持 MISSING 并写明翻转条件（Profile A helper 存在 + 真实主机 canary 通过）。
 - 测试：仓库文档 28 → **43**；全仓 812 → **827 全绿**；docbuild md 48→56。版本仍对齐 `0.1.0.dev0` 未发布。
+
+### 2026-09-08（第十九批）— plugin bundle 落地：扩展生态 3→4、N4 2→3
+
+用户直接问的两件事——"我们有插件吗""能适配所有平台吗"——分别由 C5（打包格式）与
+`plugin compat`/`plugin export` 两个可验证机制回答；市场与索引按裁定继续不做。
+
+- **`northstar.plugin.v1`**：`plugin.toml` + skills/agents/context/hooks/MCP + `[policy]` 收紧表 +
+  `[compatibility]` 宿主声明 + `[integrity]` HMAC seal；封闭 schema，未知键即拒。内容 digest
+  **排除 `[integrity]` 自身**（自哈希不是签名），长度前缀防拼接碰撞。
+- **安装 = 可见拷贝 + `plugins.lock` 钉 digest**，且拷贝前先跑 `skills check` 同一套规则
+  （`--fail-on`，默认 error；`plugin verify` 每次重跑，`run` 刻意不看——规则升级不该自动变成全仓配置错误）；
+  未钉、漂移、坏 manifest、denial 指向不存在的工具、
+  MCP server 带 `env`——一律 block 整个 run（64），不做"装上但部分生效"。
+- **跨平台两义**：装前按 `HOST_PROFILES` 拒跑不起来的 bundle（含大小写同名冲突），装后
+  `plugin compat` 出矩阵；`plugin export` 把包渲染进 7 个外家格式，`dropped` 由
+  `CARRIED_BY_TARGET` 一处算出，带不动就默认拒写（须 `--allow-drop`）。
+- **诚实边界**：本仓没有任何东西在 Windows 上跑过，profile 只是"我们对本组件所用原语的描述"；
+  别家格式按读到的文档渲染，未做任何一家的一致性验证——两句都写进 `plugin show`/导出 notes。
+- 接线：runtime README 新增 "Plugin bundles" 小节 + 布局两行、cookbook §13、blueprint C5 翻 ✅ +
+  §6.24、`py-modules`/`tests/docbuild.py` MANIFEST（66→68 模块）、CHANGELOG nineteenth batch。
+
+测试规模：runtime 942 → **1029 全绿**（+87：`test_plugin_manifest` 42 / `test_plugin_install` 45，
+含"bundle hook 经真实 `parse_hooks` 否决一次 Write"、"bundle 的 SKILL.md 被 `skills check` 规则拒绝安装"
+两项端到端），全仓 **1326 全绿**（51+41+37+65+54+1029+49）；§10.3 表 Northstar 列 36 → **37**，新战场表 13 → **14**。
+版本仍对齐 `0.1.0.dev0` 未发布。

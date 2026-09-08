@@ -156,16 +156,17 @@ def policy_file_path(workspace: str | Path) -> Path:
     return Path(workspace) / POLICY_DIRECTORY / POLICY_FILE_NAME
 
 
-def load_policy_file(
-    workspace: str | Path,
-    *,
-    known_tools: Iterable[str] | None = None,
-    known_agents: Iterable[str] | None = None,
-) -> PolicyFile | None:
-    """Load and validate the workspace policy file; ``None`` when absent.
+def read_policy_document(workspace: str | Path) -> dict[str, Any] | None:
+    """The parsed policy file, *unvalidated*: ``None`` when the file is absent.
 
-    Raises :class:`PolicyFileError` with an operator-facing message on any
-    unreadable, unparseable, unknown-key, type-error, or loosen-only violation.
+    This exists for a reader that needs the workspace's claimed ceilings but must not
+    re-adjudicate the file - notably :mod:`plugin_load`, which compares a bundle's asks
+    against them. Validating names there would produce a second, worse answer to a question
+    the CLI already answers with more context: only ``load_policy_file`` knows the registry
+    and the agent list of the run that is actually starting.
+
+    Read and parse failures still raise, because "I could not read it" must not be reported
+    as "the workspace has no ceilings".
     """
     path = policy_file_path(workspace)
     if not path.is_file():
@@ -178,6 +179,24 @@ def load_policy_file(
         raise PolicyFileError(f"{path}: invalid TOML: {error}") from error
     if not isinstance(raw, dict):
         raise PolicyFileError(f"{path}: the policy file must be a TOML table")
+    return dict(raw)
+
+
+def load_policy_file(
+    workspace: str | Path,
+    *,
+    known_tools: Iterable[str] | None = None,
+    known_agents: Iterable[str] | None = None,
+) -> PolicyFile | None:
+    """Load and validate the workspace policy file; ``None`` when absent.
+
+    Raises :class:`PolicyFileError` with an operator-facing message on any
+    unreadable, unparseable, unknown-key, type-error, or loosen-only violation.
+    """
+    path = policy_file_path(workspace)
+    raw = read_policy_document(workspace)
+    if raw is None:
+        return None
 
     unknown = sorted(set(raw) - _ALLOWED_KEYS)
     if unknown:
