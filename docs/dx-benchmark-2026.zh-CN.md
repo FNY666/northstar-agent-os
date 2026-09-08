@@ -389,7 +389,7 @@ Northstar 是"运行时组件集合"，不是一个终端产品。因此对标�
 | 配置与项目约定 | 1 | **4** | AGENTS.md/config/agents/skills/context-file 齐全；差策略 schema 版本化与托管下发 |
 | 扩展生态（MCP/Skills/Plugins） | 1 | **4** | 四类都占位且默认 deny/只读（安全侧反而领先）：plugin bundle 有封闭 schema、digest 钉住、按宿主门禁与 7 目标导出；差在线市场/索引、MCP HTTP+auth、技能脚本执行 |
 | 会话 / 调试 / 可观测 | 3 | **4** | 读回 + 审计导出 + resume 齐全；差 rewind/checkpoint 与交互式回放 |
-| 测试与确定性 | 5 | **5** | 全仓 1400 项（runtime 片 1103）、guard 红绿 harness、离线 scripted provider（现可彩排 429/529 故障）——头部普遍 3 分档，仍是最稀缺资产 |
+| 测试与确定性 | 5 | **5** | 全仓 1446 项（runtime 片 1149）、guard 红绿 harness、离线 scripted provider（现可彩排 429/529 故障）——头部普遍 3 分档，仍是最稀缺资产 |
 | 文档与教学 | 3 | **4** | 四层 + 生成 API + examples 索引 + 11 语言；差课程/playground 型教学 |
 | 版本化与发布 | 2 | **3** | 版本单一源 + 对齐测试 + 就绪门 Release CI；未发出版本（按纪律等"最完美"） |
 | 团队 / CI / 协作面 | 2 | **3** | CI 模板 + headless + 审计 feed 天然 CI 友好；差官方 Action/review 后台 |
@@ -402,10 +402,10 @@ Northstar 是"运行时组件集合"，不是一个终端产品。因此对标�
 | N1 可嵌入 harness（SDK/exec/app-server） | Codex platform、Claude Agent SDK（py/ts） | **2** | 内核（AgentRuntime/events/resume/hooks）在，未产品化为 SDK 面 |
 | N2 后台/并行/任务化 | Codex Automations、CC background agents/task mgmt | **2** | durable-run 内核（event_store/action_gateway/verifier）超前，无 CLI/调度/云端面 |
 | N3 远程/多端 | CC remote sessions/Desktop、Codex cloud、Gemini remote subagents | **1** | 目前只有 sidecar 单向委派 |
-| N4 生态市场接入 | CC plugin marketplace、skills 71k+、.mcp.json | **3** | 自有 bundle 格式有安装器/锁定/校验与 `plugin export` 七个外家格式；**按裁定不做市场与索引**（市场=供给链，可评审 diff 才是本仓的目的） |
+| N4 生态市场接入 | CC plugin marketplace、skills 71k+、.mcp.json | **4** | 自有 bundle 格式有安装器/锁定/校验与 `plugin export` 七个外家格式；**并直接读外家的 `.mcp.json`**（三档严重度：读不懂=退出 64、起不了=点名跳过、`disabled`=注记；`autoApprove` 一律拒），`mcp list` 是可在 CI 里 gate 的只读面；**按裁定不做市场与索引**（市场=供给链，可评审 diff 才是本仓的目的） |
 | N5 安全治理纵深 | CC managed settings/enterprise、Codex sandbox 网络隔离、Muse 默认沙箱 | **3** | 权限门/hooks/只读/审计 feed 治理叙事强；无 OS 级沙箱与技能供应链校验（36% 缺陷率=空白机会） |
 | N6 模型层能力 | model routing/steering、多模型 fallback | **4** | 故障分类 + 退避 + 有界降级已策略化（封闭 retry_on、per-turn deadline、session 种子化抖动）；仍仅两个后端，且刻意不做 fallback_model/model routing |
-| **合计（/30）** | ≈24 | **15** | 新战场是当前差距的主要来源 |
+| **合计（/30）** | ≈24 | **16** | 新战场是当前差距的主要来源 |
 
 ### 10.5 还差多远：排序与最短路径（批次粒度估算，主观）
 
@@ -414,7 +414,7 @@ Northstar 是"运行时组件集合"，不是一个终端产品。因此对标�
 | T1 | SDK/可嵌入面 | Codex exec/SDK、Claude Agent SDK | ✅ 已完成（2026-09-07）：`sdk.py`（RunOptions/run/stream_run/RunReport）+ `events.py` 公共事件词表 + examples/sdk 示例；TS 面与稳定 API 承诺待续 | — |
 | T2 | 发布工程 | `@latest`/Release 渠道 | 🟡 管道已完成并留作待命；**按发布纪律撤回 v0.1.0**（未发布、dev0、须过就绪门）；余：pip index 上架 | — |
 | T3 | 交互最小集 | CC `/rewind`+tasks、Gemini checkpointing | checkpoint/restore 子命令 + `sessions` 可视化回放 | 1–2 |
-| T4 | 生态纵深 | CC plugins/marketplace、MCP login | skills `check` ✅（第 15 批）、plugin bundle 打包格式与安装器 ✅（第 19 批，含按宿主门禁与 `plugin export`）；余：`.mcp.json`/HTTP+auth、技能脚本沙箱或写明取舍、市场/索引（按 C5 裁定不做） | 1–2 |
+| T4 | 生态纵深 | CC plugins/marketplace、MCP login | skills `check` ✅（第 15 批）、plugin bundle 打包格式与安装器 ✅（第 19 批，含按宿主门禁与 `plugin export`）、**读外家 `.mcp.json`** ✅（第 21 批：`--mcp-config` + `mcp list`，审批清单一律拒）；余：MCP HTTP+auth 传输、技能脚本沙箱或写明取舍、市场/索引（按 C5 裁定不做） | 1–2 |
 | T5 | 后台/远程化 | Codex Automations、CC remote | durable-run 之上做任务调度 CLI 面 + P3-3 远程 worker 协议评估 | 2–3 |
 | T6 | 治理叙事页 | — | "确定性 + 治理默认值"独立页/演示（评审/CI 场景） | 0.5 |
 
@@ -570,4 +570,22 @@ Northstar 是"运行时组件集合"，不是一个终端产品。因此对标�
 
 测试规模：runtime 1029 → **1103 全绿**（+74：`test_provider_retry`），全仓 **1400 全绿**
 （51+41+37+65+54+1103+49）；N6 模型层能力 3 → **4**（合计 15/30），§10.3 表"测试与确定性"行同步。
+版本仍对齐 `0.1.0.dev0` 未发布。
+
+### 2026-09-09（第二十一批）— 读外家的 `.mcp.json`：生态接入 N4 3→4
+
+- **入口是导入器不是注册表**：`.mcp.json` 与 Cursor/VS Code/Gemini 的方言被读成 `--mcp-server` 同形的
+  `(name, argv)`（+ 可选 `env`/`cwd`），于是导入的 server 走**同一套**规则：默认 mutating、未 `--allow-tool`
+  点名即拒、随 run 关闭、transcript 里与旗标无差别。
+- **三档严重度**：含义要猜的 → 致命（exit 64，一个都不启动）；本运行时起不了的（`url`/`headers`/
+  `type: http|sse`）→ stderr 点名跳过，其余照跑；`disabled: true` → 注记。非空的 `autoApprove`/`alwaysAllow`
+  一律致命：仓库文件不能买回操作者撤回的审批。
+- **默认 off + 只读 `mcp list`**：`--mcp-config auto|PATH|off`（默认 off）把"要不要按文件说的跑"留给命令行；
+  `mcp list` 不 spawn、不联网，**有拒绝即 exit 1**，因此可以原样进 CI 当门。
+- **勘误**：batch 19 的"指向 workspace 自己的 `[mcp.servers]`"三处（runtime README 插件节 / cookbook /
+  blueprint）以及插件加载器的错误文案，都指向一张**从未存在**的表；现在它们指向 `.mcp.json` + `--mcp-config`，
+  这句话在本批之后才为真。blueprint 特性表里"显式重试/退避/降级"也停止标"待做"。
+
+测试规模：runtime 1103 → **1149 全绿**（+46：`test_mcp_config`），全仓 **1446 全绿**
+（51+41+37+65+54+1149+49）；N4 3 → **4**（合计 16/30），§10.3"测试与确定性"行与 §10.5 T4 同步。
 版本仍对齐 `0.1.0.dev0` 未发布。

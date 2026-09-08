@@ -1,5 +1,48 @@
 # Northstar Agent OS — initial public component
 
+## Unreleased (twenty-first batch) — reading someone else's `.mcp.json` without inheriting their approvals
+
+Three places in this repository told operators to declare MCP servers in a workspace
+`[mcp.servers]` table. That table has never existed — `policy_file.py` has no `mcp` key, and
+`--mcp-server` was the only way in. The misprint was not a stray sentence, it was the shape of the
+real gap: every other 2026 host reads `.mcp.json`, so an adopting repository kept its server list in
+two files and kept them in sync by hand. This batch closes the gap and corrects the claim together.
+
+- **`mcp_config.py` reads their format and keeps our gates.** `.mcp.json`, `.cursor/mcp.json`,
+  `.vscode/mcp.json` and `.gemini/settings.json` are parsed (`mcpServers`, or VS Code's `servers` —
+  never both in one file), and each declaration becomes exactly what `--mcp-server` produces: a name,
+  an argv, plus optional `env`/`cwd`. So an imported server is mutating by default, denied until
+  `--allow-tool` names it, TERM→KILLed with the run, and indistinguishable from a flag's server in the
+  transcript. There is no second class of tool.
+- **Three severities, because a config file can be wrong in three ways.** A file whose *meaning* would
+  have to be guessed raises (malformed JSON, both table keys, a key this importer does not read, a
+  `command` that is a list, an unresolved `${VAR}`, a `cwd` that escapes the workspace, more than 16
+  servers): exit 64, nothing runs. A server this runtime *cannot start* is skipped with a stderr line
+  naming the reason (`url`, `headers`, `type: "http" | "sse"`), because that is our limitation rather
+  than somebody else's typo — a repository with one remote server still gets its stdio ones. And
+  `disabled: true` is a note: the file decided that, not us, but a review should still see it.
+- **`autoApprove` is a refusal, not an option.** A repository file cannot buy back an approval an
+  operator withheld, so a non-empty `autoApprove`/`alwaysAllow` stops the run and prints the sentence
+  to delete instead; an empty list is a no-op. `env` values are expanded from the operator's own
+  environment (`${VAR}` / `${VAR:-fallback}`, with a missing variable as an error rather than an empty
+  API key three layers away), are *added* to the child's environment and never a filter over it, and
+  are reported as names only — a secret keeps its place in the environment and out of the digest.
+- **Off by default, inert until asked.** `--mcp-config off|auto|PATH` defaults to `off`: a file inside a
+  repository cannot start a process by itself, which is the same rule that keeps a plugin's server
+  behind the operator's flag. `northstar mcp list --workspace .` is the read-only face — it spawns
+  nothing, touches nothing — and exits 1 when anything was refused, so CI can fail a pull request that
+  quietly adds a server.
+- **Names are not rewritten.** `"GitHub"` is refused with instructions, because a tool name nobody
+  read is a tool name nobody reviewed; one name claimed by two files refuses both rather than letting
+  the later file win.
+
+Runtime slice 1103 → **1149** (+46 `test_mcp_config`, including an end-to-end run whose child process
+proves the imported `env`/`cwd` arrived), repository `make test` 1400 → **1446**, all offline;
+`make demo` unchanged. The echo-server fixture grew one switch (`MCP_SPAWN_REPORT`) so that test asserts
+what the *child* was given, not what the test object holds. The MCP section of the runtime README grew
+the import and its three severities, the cookbook gained §15, and the blueprint's retry row stopped
+claiming "待做" after batch 20 shipped it.
+
 ## Unreleased (twentieth batch) — the retry budget belongs to the runtime, not to the SDK
 
 The last item on the contract roadmap ("explicit retry, backoff, degradation") was deferred on

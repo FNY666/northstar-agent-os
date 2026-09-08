@@ -40,7 +40,7 @@ import subprocess
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
+from typing import Any, Mapping
 
 from _version import __version__
 from mcp_elicitation import (
@@ -142,6 +142,8 @@ class McpStdioClient:
         allow_sensitive_input: bool = False,
         allow_roots: bool = False,
         max_input_rounds: int = MAX_INPUT_ROUNDS,
+        env: Mapping[str, str] | None = None,
+        cwd: str | None = None,
     ) -> None:
         if not 100 <= timeout_ms <= MAX_TIMEOUT_MS:
             raise ValueError(f"--mcp-timeout-ms must be between {MIN_TIMEOUT_MS} and {MAX_TIMEOUT_MS}")
@@ -156,6 +158,13 @@ class McpStdioClient:
         self.elicitor = elicitor
         self.audit = audit
         self.workspace_root = str(Path(workspace_root).resolve()) if workspace_root else ""
+        # A server imported from a workspace config file may name extra environment
+        # variables and a working directory. Those variables are *added* to the inherited
+        # environment, never a filter over it: trimming what a child process may see is the
+        # host OS's job (see the component README's limitations), and claiming otherwise
+        # here would be a security promise this function could not keep.
+        self.extra_env = {str(key): str(value) for key, value in dict(env or {}).items()}
+        self.cwd = str(cwd) if cwd else ""
         self.allow_sensitive_input = bool(allow_sensitive_input)
         self.allow_roots = bool(allow_roots)
         self.max_input_rounds = int(max_input_rounds)
@@ -236,6 +245,8 @@ class McpStdioClient:
                 stdout=subprocess.PIPE,
                 stderr=subprocess.DEVNULL,  # server logs never block the client
                 start_new_session=True,      # own process group for TERM->KILL cleanup
+                env=({**os.environ, **self.extra_env} if self.extra_env else None),
+                cwd=self.cwd or None,
             )
         except OSError as error:
             raise McpError(f"mcp server {self.name!r}: cannot start {self.command[0]}: {error}") from error

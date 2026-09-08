@@ -18,7 +18,7 @@
 
 这件事有一个可检验的判据，本仓已经具备而头部工具都没有：
 
-> **零凭据、零网络、1400 项测试跑通同一套语义。** 任何被吸收进来的优点，若不能在没有 API key 的情况下被确定性测试，就不算吸收成功——那只是多了一条无法回归的功能面。
+> **零凭据、零网络、1446 项测试跑通同一套语义。** 任何被吸收进来的优点，若不能在没有 API key 的情况下被确定性测试，就不算吸收成功——那只是多了一条无法回归的功能面。
 
 按这个判据，顶级工具的优点分成三类。
 
@@ -54,7 +54,8 @@
 | 多模型 | OpenAI 100+ / Cursor | `providers/openai_compat.py`：一个 Chat Completions 适配器覆盖一片模型 | ✅ 已落地（P1-2） |
 | 独立完成判定 | 无人做（各家都把"模型自述"当完成） | `postconditions.py`：`--verify` / `[[verify]]`，运行前后快照比对 | ✅ 已落地 |
 | token 级流式 | 全员 | `--stream`：`StreamDelta` 事件 + **流-记录一致性校验**（不一致即判 provider fault，不写 assistant 记录），唯一 `ResultMessage` 不变 | ✅ 已落地（第十七批） |
-| 显式重试/退避/降级 | Claude fallback | provider 层策略化（当前只有 sidecar 重试） | 🔧 待做 |
+| 显式重试/退避/降级 | Claude fallback | `provider_retry.py`：故障分类 + 纯函数退避 + per-turn 等待预算 + `compact_once` | ✅ 已落地（第二十批） |
+| 外家 `.mcp.json` 导入 | Claude Code/Cursor/VS Code 的配置文件 | `mcp_config.py` + `--mcp-config`（默认 off）+ `mcp list`（拒绝即 exit 1，可当 CI 门） | ✅ 已落地（第二十一批） |
 | MCP 现行规范 2026-07-28 | 标准 | `mcp_negotiate.py`：`server/discover` 代际探测 + `params._meta` 逐请求携带 + MRTR 重试 + 旧代际 fallback | ✅ 已落地（第十六批） |
 | elicitation ↔ 审批回合 | MCP 特性 | `mcp_elicitation.py`：把"服务器问用户"映射到权限门，无人应答即拒绝并 `notifications/cancelled`（**这是别人没有的角度**） | ✅ 已落地（第十六批） |
 | OS 级沙箱 | Claude seatbelt/bubblewrap、Gemini gVisor | 可选 `bwrap` 包装器（只读 bind + no net + cgroup），CI 真跑 | 🔧 待做（P1-4，C1 的前置） |
@@ -72,7 +73,7 @@
    → 头部工具的权限配置是"行为开关"，这里是**可评审、可归因、可 diff 的策略文档**。CI 场景里这是合规资产，不是 DX 糖。
 
 2. **确定性回归治理（治理本身的 golden test）**
-   scripted provider + 1400 项离线测试 + guard 红绿 harness，意味着"把 deny 改成 allow 会让哪些测试变红"是可计算的。
+   scripted provider + 1446 项离线测试 + guard 红绿 harness，意味着"把 deny 改成 allow 会让哪些测试变红"是可计算的。
    → 别人有 output eval；**没有人在 eval 权限决策**。这条可以直接做成公开基准（denial correctness / 注入抵抗 / 预算命中率），是 Northstar 唯一能自定义考题的赛道。
 
 3. **可归因的委派链（contract → execution → receipt）**
@@ -127,6 +128,40 @@
 **这一项的真实动机不是便利，是漏洞**：上限是 per-run 的，而 `--resume` 会新开一次运行——
 所以"恢复"一直是绕过 `max_budget_usd` 的后门。现在它必须把父花费带过来；
 嵌入式调用忘了传 seed 过的 `Budget` 会直接报错，而不是拿到更宽的额度。
+
+### 6.26 第二十一批（外家的 `.mcp.json` 可以读，外家的审批不能读）
+
+这一批始于一个勘误：三处文档让操作者"把 MCP server 写进工作区的 `[mcp.servers]` 表"，而那张表从来
+不存在——`policy_file.py` 里没有 `mcp` 键，唯一的入口是 `--mcp-server`。勘误恰好暴露了缺口本身：2026
+年每一家宿主都读 `.mcp.json`，于是采用者的 server 清单被抄在两个文件里，靠人肉同步。补上它，顺手也就
+把那句话变成真的。
+
+- **读他们的格式，留我们的门**：`.mcp.json` / `.cursor/mcp.json` / `.vscode/mcp.json` /
+  `.gemini/settings.json`（`mcpServers`，或 VS Code 的 `servers`——同一文件里两者并存即报错），产出的
+  就是 `--mcp-server` 产出的东西：名字 + argv（+ 可选 `env`/`cwd`）。因此导入的 server 默认 mutating、
+  未点名即拒、随 run 一起 TERM→KILL、在 transcript 里与旗标无差别——**没有第二类工具**。
+- **三档严重度，因为配置文件可能以三种方式出错**：*含义*需要猜的一律 fatal（JSON 坏、两个表键并存、
+  本导入器不读的键、`command` 写成数组、未解析的 `${VAR}`、`cwd` 逃出工作区、超过 16 个 server）→
+  exit 64，什么都不启动；本运行时*起不了*的（`url`/`headers`/`type: http|sse`）是 stderr 上点名跳过，
+  因为这是我们缺的传输而不是别人写错的文件——一个仓库里有一个远程 server 不该连累它的 stdio 伙伴；
+  `disabled: true` 是**注记**，那是文件自己的决定，但评审该看得见。
+- **`autoApprove` 不是配置项，是被拒的申请**：仓库里的文件不能替操作者把撤回的审批买回来，所以非空的
+  `autoApprove`/`alwaysAllow` 直接终止运行并打印"该删的是这句"；空列表是 no-op。`env` 的值从**操作者的
+  环境**展开（`${VAR}` 缺失是错误而不是空 API key），是往子进程环境里**加**而不是**筛**（裁剪进程能看
+  什么归宿主 OS，写在这里就是吹一个兑现不了的承诺），报告里只出现变量名。
+- **默认 off，不问就不动**：`--mcp-config off|auto|PATH` 默认 `off`。仓库里的一个文件不能自己启动进程
+  ——这跟"插件的 server 仍要操作者的旗标"是同一条规则。`northstar mcp list --workspace .` 是只读面
+  （不 spawn、不联网），有任何拒绝就 **exit 1**，于是 CI 能为"某个依赖悄悄加了个 server"这件事红掉。
+- **名字不翻译**：`"GitHub"` 被拒并附改写指引——没人读过的工具名就是没人评审过的工具名；同一个名字被
+  两个文件声明，两边都拒（"哪个赢"不该是评审进程启动器时要做的事）。
+
+诚实边界：没有 HTTP/SSE 传输，也没有那套传输自带的 auth（远程声明因此只是被跳过，不是被降级实现）；
+`mcp list` 只描述不启动，`--mcp-config` 只在命令行里被打开；导入的 `env` 不是隔离机制。
+
+测试量到 **1149**（runtime 片，+46：`test_mcp_config`，含"孩子进程自己报告拿到了什么 env/cwd"的端到端
+一条），仓库 `make test` 全绿（51+41+37+65+54+1149+49）。接线：runtime README 的 MCP 节 + 布局行 +
+Limitations、cookbook §15、`py-modules`/`tests/docbuild.py` MANIFEST，以及把插件加载器那句指向不存在
+的 `[mcp.servers]` 的错误文案改成指向 `.mcp.json` + `--mcp-config`。
 
 ### 6.25 第二十批（重试预算必须属于运行时，不属于 SDK）
 
@@ -187,7 +222,8 @@ max_tool_calls 约束"在这种传输层上是不成立的。
   agent 走 `register_workspace_agents(..., extra_paths=)`（不得遮蔽内置）、hook 渲染成**真实 `[[hooks]]` 表**
   交给 `command_hooks.parse_hooks(workspace=<workspace>)`（脚本必须在包内、无 shell、`--enable-workspace-hooks`
   仍是唯一开关）、MCP server 进操作者自己的 `--mcp-server` 列表（默认 mutating、未点名即拒）。**声明 env 的
-  MCP server 在加载时被拒**并指向 workspace 自己的 `[mcp.servers]`：为插件密钥另开一条通道 = 新的权限路径。
+  MCP server 在加载时被拒**，指向 workspace 自己的 `.mcp.json`（由 `--mcp-config` 导入，第二十批前无处可指）：
+  为插件密钥另开一条通道 = 新的权限路径；而配置文件里那份 `env` 的值来自操作者的环境，不来自仓库。
 - **安装即评审**：bundle 自己的 `SKILL.md` 在拷贝**之前**过一遍 `skills check` 的同一套规则，
   `--fail-on`（默认 `error`）之上有发现即拒绝安装；`plugin verify` 每次重跑该评审（规则随
   `RULES_VERSION` 进化，"三月干净"不等于"九月干净"），但 `run` 刻意不看它——规则升级本身不该把
@@ -269,4 +305,4 @@ workspace 的数字，但不需要在这里第二次判定文件名对不对。
 ## 7. 一句话
 
 **"包含所有顶级 agent 的优点"这条路的正确走法，是把每个优点都过一遍"能不能不绕门"的改写；改不动的就明确拒绝。**
-Northstar 的次世代位置不在功能并集上，在于：**同一个 agent loop，别人要牺牲确定性或牺牲边界来换能力，这里两样都不换——而且每一项能力都能在 CI 里用 1400 个无 key 测试证明它今天和昨天行为一致。**
+Northstar 的次世代位置不在功能并集上，在于：**同一个 agent loop，别人要牺牲确定性或牺牲边界来换能力，这里两样都不换——而且每一项能力都能在 CI 里用 1446 个无 key 测试证明它今天和昨天行为一致。**

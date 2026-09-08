@@ -451,7 +451,8 @@ def load_contributions(
                 # belongs instead.
                 contributions.blocked.append(
                     f"{plugin.name}: MCP server {server.get('name')!r} declares env, which this runtime will not "
-                    "start a server with; move that server into the workspace's own [mcp.servers] block"
+                    "start a server with; move that server into the workspace's own .mcp.json "
+                    "(imported with --mcp-config) or the operator's own --mcp-server flag"
                 )
                 continue
             contributions.mcp_servers.append({**server, "plugin": plugin.name})

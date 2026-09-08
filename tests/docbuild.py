@@ -72,6 +72,7 @@ MANIFEST: dict[str, tuple[str, ...]] = {
         "hooks",
         "loop",
         "mcp_client",
+        "mcp_config",
         "mcp_elicitation",
         "mcp_negotiate",
         "permissions",

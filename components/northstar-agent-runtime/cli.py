@@ -45,6 +45,7 @@ from doctor import run_doctor
 from providers.base import ResultMessage
 from session_view import add_arguments as add_session_arguments
 from plugin_load import add_plugin_arguments
+from mcp_config import add_mcp_arguments
 from skill_check import add_skills_arguments
 
 USAGE_ERROR = 64
@@ -83,6 +84,11 @@ def build_parser() -> argparse.ArgumentParser:
     add_doctor_arguments(doctor)
     sessions = sub.add_parser("sessions", help="inspect persisted session transcripts (read-only)")
     add_session_arguments(sessions)
+    mcp = sub.add_parser(
+        "mcp",
+        help="inspect the MCP servers this workspace declares (read-only; a run needs --mcp-config to start them)",
+    )
+    add_mcp_arguments(mcp)
     skills = sub.add_parser("skills", help="review the workspace's Agent Skills (supply-chain check, read-only)")
     add_skills_arguments(skills)
     plugins = sub.add_parser(
@@ -224,6 +230,17 @@ def _add_run_arguments(parser: argparse.ArgumentParser) -> None:
     context_group.add_argument("--no-project-context", action="store_true", help="do not auto-inject AGENTS.md (or the policy file's project_context)")
 
     mcp = parser.add_argument_group("mcp servers (experimental)")
+    mcp.add_argument(
+        "--mcp-config",
+        default="off",
+        metavar="auto|PATH|off",
+        help=(
+            "also start the servers this workspace declares in its own MCP config file "
+            "(.mcp.json, .cursor/mcp.json, .vscode/mcp.json, .gemini/settings.json). Off by "
+            "default: the operator opts in at the command line, and a repository file never "
+            "opts itself in. HTTP/SSE servers and autoApprove lists are refused, not imported"
+        ),
+    )
     mcp.add_argument("--mcp-server", dest="mcp_servers", action="append", default=[], metavar="NAME=COMMAND...", help="connect one MCP stdio server; its tools appear as mcp__NAME__tool and are mutating-by-default (denied until --allow-tool names them). Repeatable.")
     mcp.add_argument("--mcp-timeout-ms", type=int, default=15_000, help="per-request deadline for the MCP handshake and tool calls")
     mcp.add_argument("--mcp-protocol", choices=("auto", "legacy", "modern"), default="auto", help="which MCP protocol generation to speak: auto probes server/discover and falls back to the legacy initialize handshake only when that probe is refused")
@@ -487,6 +504,15 @@ def main(argv: Sequence[str] | None = None) -> int:
             from session_view import run_sessions
 
             return run_sessions(args)
+        if args.command == "mcp":
+            handler = getattr(args, "handler", None)
+            if handler is None:
+                # Bare `mcp` prints the action list rather than guessing: the one action it
+                # has is read-only, but defaulting to it would teach the shape of a verb whose
+                # siblings write.
+                parser.parse_args([*(args.command, "list"), "--help"])
+                return 0
+            return handler(args)
         if args.command == "skills":
             handler = getattr(args, "handler", None)
             if handler is None:
@@ -613,6 +639,50 @@ def _parse_mcp_servers(args: argparse.Namespace) -> list[tuple[str, list[str]]]:
     return [parse_mcp_flag(value) for value in getattr(args, "mcp_servers", []) or []]
 
 
+def _mcp_launch(args: argparse.Namespace) -> tuple[list[tuple[str, list[str]]], dict[str, Any], Any]:
+    """The servers to start, plus the env/cwd each imported one asked for.
+
+    Returns ``(servers, launch, report)``. ``servers`` keeps the ``(name, argv)`` shape every
+    other caller of the MCP path uses - flags and plugin contributions both produce it - and
+    ``launch`` carries the two per-server extras only a config file can supply. Keeping them
+    apart is deliberate: inventing a parallel field for flag- and plugin-declared servers
+    would suggest the runtime can grow one, and neither source has an environment to talk about.
+
+    Two severities, matching :func:`mcp_config.read_document`. A file that cannot be
+    *understood* is fatal: a run whose tool list differs silently from the one a reviewer
+    approved is worse than no run. A file that describes one server we cannot start (an HTTP
+    transport) is a loud warning instead, because that is a limitation of this runtime rather
+    than a question about trust, and the other servers in the file are still the operator's.
+    """
+    from mcp_config import McpImport, McpConfigError, discover, read_document
+
+    requested = str(getattr(args, "mcp_config", "off") or "off")
+    servers = _parse_mcp_servers(args)
+    if requested == "off":
+        return servers, {}, None
+    workspace = Path(str(getattr(args, "workspace", ".") or ".")).resolve()
+    try:
+        if requested == "auto":
+            report = discover(workspace)
+        else:
+            found, refused, notes = read_document(workspace / requested, workspace=workspace)
+            report = McpImport(servers=found, refused=refused, notes=notes, files=(requested,))
+    except (McpConfigError, OSError, ValueError) as error:
+        raise ValueError(f"mcp config: {error}") from error
+    for why in report.refused:
+        print(f"! mcp config: {why}", file=sys.stderr)
+    for why in report.notes:
+        print(f"- mcp config: {why}", file=sys.stderr)
+    launch = {server.name: {"env": server.env_mapping, "cwd": server.cwd} for server in report.servers}
+    clash = sorted({name for name, _argv in servers} & set(launch))
+    if clash:
+        raise ValueError(
+            "mcp config: " + ", ".join(clash) + " declared by both --mcp-server and the workspace file; "
+            "remove one - neither source may shadow the other's environment"
+        )
+    return [*servers, *[(server.name, list(server.argv)) for server in report.servers]], launch, report
+
+
 def _mcp_stance_note(args: argparse.Namespace) -> str:
     """How this run will treat a remote server's requests, in one line.
 
@@ -666,7 +736,11 @@ def _mcp_elicitor(args: argparse.Namespace) -> Any:
 
 
 def _connect_mcp_clients(
-    servers: Sequence[tuple[str, list[str]]], timeout_ms: int, registry: Any, args: Any = None
+    servers: Sequence[tuple[str, list[str]]],
+    timeout_ms: int,
+    registry: Any,
+    args: Any = None,
+    launch: dict[str, Any] | None = None,
 ) -> list[Any]:
     """Connect each MCP server and register its tools (mcp__<server>__<tool>).
 
@@ -687,9 +761,14 @@ def _connect_mcp_clients(
             "workspace_root": Path.cwd(),
         }
     clients: list[Any] = []
+    extras = dict(launch or {})
     try:
         for name, command in servers:
-            client = McpStdioClient(name, command, timeout_ms=timeout_ms, **options)
+            settings = dict(extras.get(name) or {})
+            unknown = sorted(set(settings) - {"env", "cwd"})
+            if unknown:
+                raise ValueError(f"mcp server {name!r}: unknown launch setting {unknown[0]!r}")
+            client = McpStdioClient(name, command, timeout_ms=timeout_ms, **settings, **options)
             client.connect()
             if client.negotiation:
                 print(f"[mcp] {name}: {client.negotiation}", file=sys.stderr)
@@ -909,8 +988,10 @@ def _run(args: argparse.Namespace) -> int:
             "MCP tools on the main loop"
         )
     mcp_servers: list[tuple[str, list[str]]] = []
-    if args.mcp_servers:
-        mcp_servers = _parse_mcp_servers(args)
+    mcp_launch: dict[str, Any] = {}
+    mcp_report = None
+    if args.mcp_servers or str(getattr(args, "mcp_config", "off") or "off") != "off":
+        mcp_servers, mcp_launch, mcp_report = _mcp_launch(args)
     for server in (plugins.mcp_servers if plugins else ()):
         # A bundle's server enters the same list as an operator's flag, so it inherits the
         # whole rule set that comes with it: mutating by default, denied until named, and
@@ -1154,7 +1235,10 @@ def _run(args: argparse.Namespace) -> int:
         plugin_note = "none (.northstar/plugins is empty)"
     if mcp_servers:
         listed = ", ".join(f"{name}={' '.join(command)}" for name, command in mcp_servers)
-        mcp_note = f"{listed} ({_mcp_stance_note(args)})"
+        note = _mcp_stance_note(args)
+        if mcp_report is not None:
+            note += f"; config {mcp_report.summary()}"
+        mcp_note = f"{listed} ({note})"
     else:
         mcp_note = "off"
 
@@ -1206,7 +1290,7 @@ def _run(args: argparse.Namespace) -> int:
     mcp_clients: list[Any] = []
     if mcp_servers:
         try:
-            mcp_clients = _connect_mcp_clients(mcp_servers, args.mcp_timeout_ms, registry, args)
+            mcp_clients = _connect_mcp_clients(mcp_servers, args.mcp_timeout_ms, registry, args, mcp_launch)
         except ValueError as error:
             print(f"configuration error: {error}", file=sys.stderr)
             return USAGE_ERROR
