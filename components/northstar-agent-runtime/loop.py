@@ -22,6 +22,7 @@ tool, which is registered only when a socket path is supplied.
 """
 from __future__ import annotations
 
+import threading
 import time
 from dataclasses import dataclass, field, replace
 from typing import Any, Callable, Iterable, Iterator, Mapping, Sequence
@@ -461,6 +462,12 @@ class AgentRuntime:
             raise RuntimeConfigurationError("a provider is required")
         self.config = config or RuntimeConfig()
         self.provider = provider
+        # Cooperative cancellation is the only safe cancellation boundary the
+        # runtime can promise: an in-flight provider request or tool is never
+        # force-killed from inside the loop. The local app-server sets this flag;
+        # the loop observes it before the next generation and before dispatching
+        # each tool.
+        self._cancel_requested = threading.Event()
         self.providers: dict[str, Any] = dict(providers or {})
         self.hooks = hooks if isinstance(hooks, HookRegistry) else HookRegistry()
         self.agents = agents if isinstance(agents, AgentRegistry) else builtin_registry()
@@ -602,6 +609,24 @@ class AgentRuntime:
         pricing, estimated = price_for(self.config.model)
         return {"model": self.config.model, **pricing.as_dict(), "estimated": estimated}
 
+    def request_cancel(self) -> None:
+        """Request cooperative cancellation at the next governed boundary.
+
+        This never interrupts a provider or tool in progress. Hosts that need
+        hard process cancellation must place the runtime in a separately
+        supervised process; the app-server deliberately does not pretend that a
+        Python thread can safely kill arbitrary work.
+        """
+        self._cancel_requested.set()
+
+    def clear_cancel(self) -> None:
+        """Clear a prior cancellation request before explicitly reusing a runtime."""
+        self._cancel_requested.clear()
+
+    @property
+    def cancel_requested(self) -> bool:
+        return self._cancel_requested.is_set()
+
     # -- public entry points ----------------------------------------------
     def run(self, prompt: str, *, resume: Sequence[Any] | None = None) -> Iterator[Message]:
         """Stream events for one run. Terminates in exactly one ResultMessage."""
@@ -740,6 +765,10 @@ class AgentRuntime:
             stop = self._ceiling_stop(state)
             if stop is not None:
                 yield self._finish(state, stop)
+                return
+            if self.cancel_requested:
+                state.errors.append("run cancellation requested before the next generation boundary")
+                yield self._finish(state, "error_cancelled")
                 return
             # There are two deliberately separate safeguards: the historical
             # threshold compaction, then a hard context-budget preflight. The
@@ -900,6 +929,10 @@ class AgentRuntime:
 
                 calls = assistant.tool_uses
                 if not calls:
+                    if self.cancel_requested:
+                        state.errors.append("run cancellation requested after the generation boundary")
+                        yield self._finish(state, "error_cancelled")
+                        return
                     stop_verdict = self._fire(
                         state,
                         "Stop",
@@ -955,6 +988,9 @@ class AgentRuntime:
                                 is_error=True,
                             )
                         )
+                        continue
+                    if self.cancel_requested:
+                        halted = "error_cancelled"
                         continue
                     if config.max_tool_calls is not None and state.tool_calls >= config.max_tool_calls:
                         block, report = self._ceiling_refusal(call, state, turn_index)

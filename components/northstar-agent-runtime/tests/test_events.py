@@ -44,6 +44,7 @@ class EventTypeTests(unittest.TestCase):
                 "error_max_budget_usd",
                 "error_during_execution",
                 "error_permission_denied",
+                "error_cancelled",
             ),
         )
         for subtype in RESULT_SUBTYPES:

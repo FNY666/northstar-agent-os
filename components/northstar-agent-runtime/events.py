@@ -18,7 +18,7 @@ from __future__ import annotations
 
 from typing import Any
 
-#: Terminal convention for each result subtype (0 success … 5 permission).
+#: Terminal convention for each result subtype (0 success … 6 cancelled).
 EXIT_CODES: dict[str, int] = {
     "success": 0,
     "error_during_execution": 1,
@@ -26,6 +26,7 @@ EXIT_CODES: dict[str, int] = {
     "error_max_tool_calls": 3,
     "error_max_budget_usd": 4,
     "error_permission_denied": 5,
+    "error_cancelled": 6,
 }
 
 

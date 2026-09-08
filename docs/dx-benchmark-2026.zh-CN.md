@@ -1033,3 +1033,26 @@ Northstar 自己知道的常数。当前实现采用混合路径：
   与 hosted execution 仍是独立缺口。
 
 T24 仍是 Unreleased；没有创建 tag、GitHub Release，也没有发布到 PyPI/npm。
+
+### 10.28 当前实现复核：host-controlled local app-server（T25，2026-09-08）
+
+T25 开始补“可嵌入 harness / background run”这一产品面，但刻意不把本地线程
+包装成 scheduler 或云端执行：
+
+- `app_server.py` 提供 `RunManager` 与 Unix-domain JSON-lines server/client。host
+  显式注入 `runtime_factory`，wire 只能提交 bounded prompt 以及读取/取消自己 actor
+  绑定的 run；provider、workspace、tool、Python action、arbitrary path 都不在协议里。
+- `run.start` 使用 request-id + fingerprint 幂等；同一 request ID 的 claims/prompt
+  变化 fail-closed。每个请求/响应有 HMAC，actor binding 每次重新验证，events 只提供
+  bounded retention 与 cursor page（最大 256），避免把内存 event list 当成无限日志。
+- `run.cancel` 是 cooperative cancellation：正在执行的 provider/tool 不被 Python 线程
+  强杀，runtime 在下一代际/工具边界输出 `error_cancelled`；这保留工具/会话/receipt
+  一致性，也明确说明硬杀需要外部进程 supervisor。
+- 离线测试覆盖 start/replay/conflict、actor denial、cursor expiry、Unix socket
+  round-trip、tampered HMAC、unknown wire fields 和 cooperative cancellation。manager
+  状态仍是内存态；append-only session transcript 才是 durable audit surface。没有真实
+  scheduler、跨进程 crash recovery、public listener、mTLS、远程 worker 或 hosted
+  exactly-once。runtime 613 项、全仓 `make test` 951 项（947 pass、4 项可选 OTel
+  skip）；`remote_worker --score` 仍为 94/100。
+
+T25 仍是 Unreleased；没有创建 tag、GitHub Release，也没有发布到 PyPI/npm。

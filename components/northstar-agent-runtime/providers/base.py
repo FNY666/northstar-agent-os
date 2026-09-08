@@ -26,6 +26,7 @@ ResultSubtype = Literal[
     "error_max_budget_usd",
     "error_during_execution",
     "error_permission_denied",
+    "error_cancelled",
 ]
 
 RESULT_SUBTYPES: tuple[str, ...] = (
@@ -35,6 +36,7 @@ RESULT_SUBTYPES: tuple[str, ...] = (
     "error_max_budget_usd",
     "error_during_execution",
     "error_permission_denied",
+    "error_cancelled",
 )
 
 SYSTEM_SUBTYPES: tuple[str, ...] = ("init", "compact_boundary", "informational")

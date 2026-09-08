@@ -242,6 +242,41 @@ print(report.subtype, report.exit_code, report.session_id, report.total_cost_usd
   ([example](../../examples/sdk/README.md), full API in the
   [reference page](../../docs/api/northstar-agent-runtime.md)).
 
+## Local app-server (experimental)
+
+T25 adds a deliberately narrow host-controlled background surface without
+pretending to be a scheduler or remote worker:
+
+```python
+import os
+
+from app_server import AppServer, RunManager
+from loop import AgentRuntime, RuntimeConfig
+
+# provider_factory is a host-defined, already-configured provider factory.
+manager = RunManager(
+    lambda: AgentRuntime(provider=provider_factory(), config=RuntimeConfig(workspace=".")),
+)
+server = AppServer(
+    manager,
+    channel_secret=bytes.fromhex(os.environ["NORTHSTAR_APP_SECRET"]),
+    socket_path="/run/user/1000/northstar/app.sock",
+)
+server.serve_forever()
+```
+
+The host owns `runtime_factory`, provider credentials, workspace, policy and
+session directory. The wire protocol can only submit a bounded prompt and call
+`run.start`, `run.status`, `run.events` or `run.cancel`; it cannot select a
+provider, workspace, tool, Python action or arbitrary path. Requests and
+responses use an HMAC channel, start is request-id idempotent, events have a
+bounded cursor/page, and actor binding is re-checked on every operation.
+Cancellation is cooperative at the next generation/tool boundary and never
+force-kills a running provider or tool. The manager is in-memory; use the
+runtime's append-only session store for the durable transcript. Process crash
+recovery, fleet scheduling, public listeners, mTLS and remote execution remain
+explicitly out of scope.
+
 ## MCP servers (experimental)
 
 A minimal Model Context Protocol **stdio client** connects external tool
@@ -367,6 +402,7 @@ condition arrives as an event, never as a raised exception:
 | `error_max_tool_calls`      | `max_tool_calls` reached                            |
 | `error_max_budget_usd`      | `max_budget_usd` reached                            |
 | `error_permission_denied`   | a denial ended the run (`halt_on_denial`)           |
+| `error_cancelled`           | host requested cooperative cancellation             |
 | `error_during_execution`    | provider failure, malformed tool input, internal bug |
 
 The three ceilings are independent, each with its own subtype, so an operator can
@@ -542,6 +578,7 @@ size (`result_chars`), so truncation is visible instead of inferred.
 | Module              | Responsibility                                                      |
 | ------------------- | ------------------------------------------------------------------- |
 | `loop.py`           | the turn loop, ceilings, event stream, `RunReport`                   |
+| `app_server.py`     | host-controlled local background runs, HMAC wire protocol, bounded events |
 | `hooks.py`          | 10 lifecycle events, veto semantics, fail-closed errors              |
 | `permissions.py`    | the three-layer gate, capability leases, and delegation gate          |
 | `receipts.py`       | bounded approval leases, canonical action receipts, HMAC verification |
@@ -573,7 +610,8 @@ size (`result_chars`), so truncation is visible instead of inferred.
 
 `0` success · `1` error_during_execution · `2` error_max_turns ·
 `3` error_max_tool_calls · `4` error_max_budget_usd · `5` error_permission_denied ·
-`64` usage or configuration error (nothing was run). Result errors and refusals
+`6` error_cancelled · `64` usage or configuration error (nothing was run).
+Result errors and refusals
 are printed to stderr; `--json` emits one object per event.
 
 `--deny-tool` subtracts from the computed allow list rather than leaving a name in
@@ -587,7 +625,7 @@ cd components/northstar-agent-runtime
 python3 -m unittest discover -s tests -p 'test_*.py' -v
 ```
 
-606 tests, fully offline and deterministic (four optional OpenTelemetry tests
+613 tests, fully offline and deterministic (four optional OpenTelemetry tests
 are skipped when the tracing extra is absent): the scripted provider is the
 only model, and `test_integration_sidecar.py` runs the real sidecar `serve()`
 over a real Unix socket with a 100,000-Chinese-character prompt.

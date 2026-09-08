@@ -225,6 +225,7 @@ class CeilingTests(unittest.TestCase):
                 "error_max_tool_calls": 3,
                 "error_max_budget_usd": 4,
                 "error_permission_denied": 5,
+                "error_cancelled": 6,
             },
         )
 

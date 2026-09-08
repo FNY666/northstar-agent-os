@@ -1,5 +1,22 @@
 # Northstar Agent OS — initial public component
 
+## Unreleased (thirty-second batch) — host-controlled local app-server (T25)
+
+- Added an experimental standard-library `RunManager` and authenticated Unix
+  JSON-lines app-server for `run.start`, `run.status`, `run.events` and
+  `run.cancel`. A host must inject the runtime factory; wire clients cannot
+  select providers, workspaces, tools, Python actions or arbitrary paths.
+- Added request-id idempotency with fingerprint conflict detection, actor-bound
+  access, HMAC request/response authentication, bounded event retention and
+  cursor pagination. Cancellation is explicit and cooperative: the loop stops
+  at a governed boundary and never force-kills an in-flight provider or tool.
+- Kept the boundary honest: manager state is in-memory, session transcripts are
+  the durable audit surface, and this is not a scheduler, public listener,
+  mTLS/remote transport or hosted exactly-once service. Runtime now has 613
+  tests; repository `make test` has 951 tests (947 pass, 4 optional OTel skips).
+  No release tag, GitHub Release, PyPI/npm publication or real remote execution
+  claim was made.
+
 ## Unreleased (thirty-first batch) — automatic context compaction and window rollover (T24)
 
 - Added a provider-aware context preflight to `northstar-agent-runtime`: the

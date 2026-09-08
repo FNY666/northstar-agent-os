@@ -91,6 +91,43 @@ Compile every ``.northstar/agents/*.md`` into an AgentDefinition.
 
 Discover repository agents and register them; collisions are errors.
 
+### `app_server`
+
+Source: `components/northstar-agent-runtime/app_server.py`
+
+Host-controlled local app-server for background Northstar runs.
+
+#### `AppServerError`
+
+A protocol, authorization, idempotency, or local app-server failure.
+
+- `as_dict()`
+#### `RunManager`
+
+Bounded in-process background run manager.
+
+- `start(*, request_id: str, actor_id: str, prompt: str)`
+- `status(*, run_id: str, actor_id: str)`
+- `events(*, run_id: str, actor_id: str, from_sequence: int=0, limit: int=MAX_EVENT_PAGE)`
+- `cancel(*, run_id: str, actor_id: str)`
+- `wait(*, run_id: str, actor_id: str, timeout: float=10.0)`
+#### `AppServer`
+
+Authenticated dispatcher plus an optional private Unix socket.
+
+- `handle_wire_line(line: bytes | str)`
+- `serve_forever()`
+- `start()`
+- `close()`
+#### `AppClient`
+
+Small authenticated client for the experimental Unix app-server.
+
+- `call(operation: str, *, request_id: str, actor_id: str, **fields: Any)`
+- `start(*, request_id: str, actor_id: str, prompt: str)`
+- `status(*, request_id: str, actor_id: str, run_id: str)`
+- `events(*, request_id: str, actor_id: str, run_id: str, from_sequence: int=0, limit: int=MAX_EVENT_PAGE)`
+- `cancel(*, request_id: str, actor_id: str, run_id: str)`
 ### `artifacts`
 
 Source: `components/northstar-agent-runtime/artifacts.py`
@@ -469,6 +506,11 @@ One configured governed loop.
 - `api_tools()`
 - `describe()`
 - `pricing()`
+- `request_cancel()`
+  - Request cooperative cancellation at the next governed boundary.
+- `clear_cancel()`
+  - Clear a prior cancellation request before explicitly reusing a runtime.
+- `cancel_requested()`
 - `run(prompt: str, *, resume: Sequence[Any] | None=None)`
   - Stream events for one run. Terminates in exactly one ResultMessage.
 - `run_collect(prompt: str, *, resume: Sequence[Any] | None=None)`
