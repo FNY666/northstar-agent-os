@@ -160,9 +160,20 @@ class AppWireTests(RuntimeTestCase):
         smoke = repository / "examples" / "app-server" / "node_client_smoke.mjs"
         if shutil.which("node") is None or not smoke.is_file():
             self.skipTest("Node.js consumer example is unavailable in this component copy")
+        workspace = str(self.workspace())
+
+        def factory():
+            return AgentRuntime(
+                provider=ScriptedProvider(
+                    [{"text": "done"}],
+                    default_usage={"input_tokens": 1, "output_tokens": 1},
+                ),
+                config=RuntimeConfig(workspace=workspace),
+            )
+
         with tempfile.TemporaryDirectory() as directory:
             socket_path = Path(directory) / "app.sock"
-            server = AppServer(self.manager(), channel_secret=self.SECRET, socket_path=socket_path)
+            server = AppServer(RunManager(factory), channel_secret=self.SECRET, socket_path=socket_path)
             thread = server.start()
             server.wait_ready(timeout=2)
             try:

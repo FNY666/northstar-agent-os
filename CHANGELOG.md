@@ -1,5 +1,16 @@
 # Northstar Agent OS — initial public component
 
+## Unreleased (thirty-seventh batch) — cross-runtime numeric wire stability (T29)
+
+- Tightened app-server response projection so finite integral floats are emitted
+  as JSON integers before HMAC calculation. Added a Node canonical-number
+  formatter for Python-compatible exponent thresholds and padding; the
+  cross-runtime smoke test now exercises a non-zero fractional cost rather than
+  only `0.0`.
+- This is a wire-compatibility hardening change only: logical numeric values,
+  host ownership, bounded frames, cooperative cancellation and the no-release
+  boundary are unchanged.
+
 ## Unreleased (thirty-sixth batch) — dependency-free Node app-server consumer (T28)
 
 - Added `examples/app-server/node_client.mjs`, a dependency-free Node client for

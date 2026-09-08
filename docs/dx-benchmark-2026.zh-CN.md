@@ -1121,3 +1121,16 @@ T28 将 T25 的 protocol surface 暴露给另一个本地 consumer runtime，但
   OTel skip）。
 
 T28 仍是 Unreleased；没有创建 tag、GitHub Release，也没有发布到 PyPI/npm。
+
+### 10.33 当前实现复核：cross-runtime numeric wire stability（T29，2026-09-08）
+
+T29 只修复跨 Python/Node HMAC canonical JSON 的一个真实边界，不扩大产品部署面：
+
+- app-server response projection 在 HMAC 前把 finite integral float 投影成 JSON integer；
+  Node client 对非整数采用 Python 兼容的 exponent threshold / padding，避免例如
+  `9e-05` 在两种 runtime 中分别写成 `9e-05` 与 `0.00009` 而导致合法 response 被拒绝。
+- cross-runtime smoke test 使用非零 fractional cost，覆盖 response HMAC 而不是只覆盖
+  `0.0`。逻辑数值仍是 JSON number，host/provider/workspace ownership、frame bound、
+  cooperative cancellation 与 local-only 边界不变。
+
+T29 仍是 Unreleased；没有创建 tag、GitHub Release，也没有发布到 PyPI/npm。

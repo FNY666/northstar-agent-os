@@ -15,7 +15,49 @@ export const MAX_WAIT_MS = 30_000;
 
 const RESERVED_FIELDS = new Set(["protocol", "op", "request_id", "actor_id", "auth"]);
 
-/** Sort object keys recursively, matching Python json.dumps(sort_keys=True, ensure_ascii=False). */
+function exponentText(exponent) {
+  return `e${exponent >= 0 ? "+" : "-"}${String(Math.abs(exponent)).padStart(2, "0")}`;
+}
+
+function fixedToPythonExponent(raw) {
+  const negative = raw.startsWith("-");
+  const unsigned = negative || raw.startsWith("+") ? raw.slice(1) : raw;
+  const dot = unsigned.indexOf(".");
+  const integerDigits = dot < 0 ? unsigned.length : dot;
+  const digits = unsigned.replace(".", "");
+  const first = digits.search(/[1-9]/);
+  if (first < 0) return "0";
+  const exponent = integerDigits - first - 1;
+  const mantissa = digits[first] + (digits.slice(first + 1) ? `.${digits.slice(first + 1)}` : "");
+  return `${negative ? "-" : ""}${mantissa}${exponentText(exponent)}`;
+}
+
+function exponentToFixed(raw) {
+  const negative = raw.startsWith("-");
+  const unsigned = negative || raw.startsWith("+") ? raw.slice(1) : raw;
+  const match = unsigned.match(/^(.+)[eE]([+-]?\d+)$/);
+  if (!match) return raw;
+  const mantissa = match[1];
+  const exponent = Number(match[2]);
+  const digits = mantissa.replace(".", "");
+  const decimal = (mantissa.indexOf(".") < 0 ? mantissa.length : mantissa.indexOf(".")) + exponent;
+  let fixed;
+  if (decimal <= 0) fixed = `0.${"0".repeat(-decimal)}${digits}`;
+  else if (decimal >= digits.length) fixed = `${digits}${"0".repeat(decimal - digits.length)}`;
+  else fixed = `${digits.slice(0, decimal)}.${digits.slice(decimal)}`;
+  return `${negative ? "-" : ""}${fixed}`;
+}
+
+function pythonNumber(value) {
+  if (!Number.isFinite(value)) throw new TypeError("non-finite numbers are not canonical JSON");
+  if (Object.is(value, -0) || Number.isInteger(value)) return String(value);
+  const raw = String(value);
+  const needsExponent = Math.abs(value) < 1e-4 || Math.abs(value) >= 1e16;
+  if (needsExponent) return raw.includes("e") || raw.includes("E") ? raw.replace("E", "e").replace(/e([+-]?)(\d+)$/, (_match, sign, exponent) => `${exponentText((sign === "-" ? -1 : 1) * Number(exponent))}`) : fixedToPythonExponent(raw);
+  return raw.includes("e") || raw.includes("E") ? exponentToFixed(raw) : raw;
+}
+
+/** Sort keys and numbers recursively, matching Python's canonical wire JSON. */
 export function canonicalJson(value) {
   if (Array.isArray(value)) {
     return `[${value.map(canonicalJson).join(",")}]`;
@@ -26,6 +68,7 @@ export function canonicalJson(value) {
       .map((key) => `${JSON.stringify(key)}:${canonicalJson(value[key])}`)
       .join(",")}}`;
   }
+  if (typeof value === "number") return pythonNumber(value);
   const encoded = JSON.stringify(value);
   if (encoded === undefined) {
     throw new TypeError("undefined is not canonical JSON");
