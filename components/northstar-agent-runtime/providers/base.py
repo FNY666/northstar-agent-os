@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass, field
-from typing import Any, Iterable, Literal, Sequence
+from typing import Any, Iterable, Iterator, Literal, Sequence
 
 # --------------------------------------------------------------------------
 # Closed vocabularies
@@ -524,14 +524,151 @@ class Generation:
     def tool_uses(self) -> tuple[ToolUseBlock, ...]:
         return tuple(block for block in self.content if isinstance(block, ToolUseBlock))
 
+    def text(self) -> str:
+        """The turn's text as one string, in block order (what a stream must reproduce)."""
+        return stream_comparable_text(self)
+
+
+#: Per-chunk and per-turn ceilings on streamed text, enforced by the runtime rather
+#: than trusted from the provider: a provider that emits one character per callback
+#: must not be able to turn a turn's output into an unbounded event flood, and a
+#: provider that never stops emitting must not be able to grow the event stream past
+#: what a log shipper can carry.
+MAX_STREAM_DELTA_CHARS = 2_000
+MAX_STREAM_TURN_CHARS = 200_000
+
+
+@dataclass(frozen=True)
+class StreamDelta:
+    """One provisional chunk of assistant text, on its way to becoming an :class:`AssistantMessage`.
+
+    A delta is **display and observability only**. It is never written to the session
+    transcript, never enters the model-visible context, and never authorises anything:
+    the recorded fact is the assembled :class:`AssistantMessage` that follows it. That
+    asymmetry is deliberate. A transcript digest or a checkpoint over token-sized chunks
+    would certify a presentation detail, and a "did the run say X" question answered
+    from a stream would be answered from the wrong artifact.
+
+    Only ``text`` blocks are ever streamed. Tool input arrives as incremental JSON, and
+    a half-received ``{"path": "/etc/pass`` is precisely the thing that must not be
+    displayable, executable, or hashable - so partial tool arguments are not exposed as
+    deltas at all, and neither is ``thinking`` (whose signature must be validated before
+    the block is legitimate).
+    """
+
+    text: str
+    block_index: int = 0
+    turn_index: int = 0
+    provider: str = ""
+
+    def as_dict(self) -> dict[str, Any]:
+        return {
+            "type": "stream_delta",
+            "text": self.text,
+            "block_index": self.block_index,
+            "turn_index": self.turn_index,
+            "provider": self.provider,
+        }
+
+
+def split_for_stream(text: str, *, size: int = MAX_STREAM_DELTA_CHARS) -> list[str]:
+    """Slice ``text`` into chunks no longer than ``size`` (the provider-side helper).
+
+    Splitting on character count rather than on words or lines is on purpose: any
+    boundary rule that depends on the *content* makes the chunking part of the model's
+    output, and a provider must not get to decide what a turn's text looks like.
+    """
+    if size < 1:
+        raise ValueError("size must be >= 1")
+    if not text:
+        return []
+    return [text[start : start + size] for start in range(0, len(text), size)]
+
+
+def stream_comparable_text(turn: Any) -> str:
+    """The turn's text, joined **without** separators, for stream comparison.
+
+    Distinct from :attr:`AssistantMessage.text`, which joins text blocks with newlines
+    because a human reading a transcript should see them as paragraphs. A stream is
+    compared block-wise and concatenatively: a provider that yields ``"a"`` then ``"b"``
+    streamed exactly what it returned, and inventing a separator between the chunks to
+    match the display join would make fidelity a function of formatting. Two definitions
+    of "the same text" would guarantee a false alarm on the first multi-block answer.
+
+    ``Generation`` content is not forced through :func:`coerce_blocks` at construction,
+    because doing so would rewrite a provider's payload before the loop has decided to
+    trust it; so anything reading text out of a raw Generation has to meet strings and
+    dicts as well as block objects.
+    """
+    parts: list[str] = []
+    for block in getattr(turn, "content", ()) or ():
+        if isinstance(block, str):
+            parts.append(block)
+        elif isinstance(block, dict):
+            if block.get("type") == "text":
+                parts.append(str(block.get("text", "")))
+        elif isinstance(block, TextBlock):
+            parts.append(block.text)
+    return "".join(parts)
+
+
+def stream_fidelity(parts: Sequence[str], final_text: str) -> str | None:
+    """Compare what a stream showed with what the run is about to record.
+
+    Returns ``None`` when they agree, else a one-line description of the mismatch. The
+    comparison target is the **assembled message**, not the provider's own object,
+    because the artifact a later digest, checkpoint or reader consults is the record: if
+    the two disagree about which text the turn contained, the record wins and the stream
+    is the fault. The rule is strict in both directions - a provider may not show text
+    the record does not contain (an unsupported claim about the model) and may not
+    withhold text within the same turn (a stream that ends early is how a refusal gets
+    hidden from someone watching live). The loop applies its own byte caps first, so a
+    truncation caused by this client is not reported as a provider fault.
+    """
+    streamed = "".join(parts)
+    final = final_text
+    if streamed == final:
+        return None
+    if not streamed:
+        return "the stream carried no text at all while the turn returned text"
+    if final.startswith(streamed):
+        return f"the stream stopped {len(final) - len(streamed)} char(s) short of the turn's text"
+    if streamed.startswith(final):
+        return f"the stream carried {len(streamed) - len(final)} char(s) the turn does not contain"
+    shared = 0
+    for left, right in zip(streamed, final):
+        if left != right:
+            break
+        shared += 1
+    return f"the stream and the turn diverge after {shared} char(s)"
+
 
 class Provider:
     """Base class for providers; subclasses implement :meth:`generate`."""
 
     name: str = "base"
 
+    #: Whether this provider reports text incrementally. It is a *capability claim*,
+    #: checked by the runtime before ``stream=True`` is honoured, so a host that cannot
+    #: stream fails with a configuration error instead of producing a run whose
+    #: "streaming" arrives all at once - the kind of thing a demo quietly turns on and
+    #: nobody re-checks. Setting it to ``True`` without overriding :meth:`stream` is
+    #: caught too: see the loop's stream-fidelity check.
+    streams: bool = False
+
     def generate(self, request: GenerationRequest) -> Generation:  # pragma: no cover - interface
         raise NotImplementedError("providers must implement generate()")
+
+    def stream(self, request: GenerationRequest) -> "Iterator[StreamDelta | Generation]":
+        """Yield :class:`StreamDelta` chunks, then exactly one :class:`Generation`.
+
+        The default offers no chunks and returns the whole turn, which is the safe shape
+        for a *direct* caller: an embedder that always iterates ``stream()`` never has to
+        branch on capability. It is **not** what ``streams = True`` entitles a run to see -
+        the loop treats "a text turn, no chunks" as a broken promise, because a provider
+        could otherwise advertise streaming, show nothing, and still pass every check.
+        """
+        yield self.generate(request)
 
     def close(self) -> None:
         return None
@@ -608,7 +745,10 @@ __all__ = [
     "SYSTEM_SUBTYPES",
     "ResultMessage",
     "ResultSubtype",
+    "MAX_STREAM_DELTA_CHARS",
+    "MAX_STREAM_TURN_CHARS",
     "StopReason",
+    "StreamDelta",
     "SystemMessage",
     "SystemSubtype",
     "ThinkingBlock",
@@ -623,6 +763,9 @@ __all__ = [
     "estimate_transcript_tokens",
     "flatten_result_content",
     "render_transcript",
+    "split_for_stream",
+    "stream_comparable_text",
+    "stream_fidelity",
     "transcript_to_api",
 ]
 

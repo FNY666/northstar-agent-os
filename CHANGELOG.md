@@ -1,5 +1,58 @@
 # Northstar Agent OS — initial public component
 
+## Unreleased (seventeenth batch) — streaming that cannot disagree with the record
+
+The blueprint's last user-visible gap. Every serious agent tool streams; Northstar
+could not have claimed the "governed" position while its output arrived only at the end
+of a turn. The interesting part was never the printing.
+
+- **The provider contract gained a second entry point.** `Provider.stream()` yields text
+  chunks then exactly one `Generation`; `generate()` is unchanged, so every existing
+  adapter, test and embedding keeps working, and the default `stream()` (whole turn, no
+  chunks) is a safe fallback for a *direct* caller - but not for a run: `streams = True`
+  without real chunks is caught, so the flag cannot be a marketing claim.
+- **Fidelity is enforced by the runtime, not promised by the provider.** `"".join(deltas)`
+  must equal the text of the **assembled** message - deliberately compared against the
+  record rather than against the provider's own object, since the record is what a
+  checkpoint digest and a later reader are verified against. Disagreement in either
+  direction (`the stream carried N char(s) the turn does not contain`, `the stream stopped
+  N char(s) short`) fails the turn as `error_during_execution` and writes **no
+  `AssistantMessage`**: a run cannot end with a verdict on a turn nobody can describe.
+- **What the client caps, the client admits.** Per-turn ceilings (200 000 chars, 4 000
+  events - "one event per character" is legal at the protocol level and would otherwise let
+  a provider size this process's event stream), oversized chunks are re-split rather than
+  dropped, and when text is withheld the live view is required to be a *prefix* of the
+  record plus an `informational` event saying how much was held back. Shorter is allowed;
+  different is not.
+- **The transcript is untouched, on purpose.** Deltas are events, not records: `RECORD_TYPES`
+  stays at 13, so checkpoint digests, `--resume-from` and the session panel mean exactly
+  what they meant before streaming existed, and a resumed run has nothing to replay. A test
+  asserts the records are byte-identical with and without `--stream`, with the single
+  tolerated difference being the `stream` declaration in the init record.
+- **What never streams:** partial `tool_use` arguments (a half-received
+  `{"path": "/etc/pass` must not be displayable, executable, or hashable), `thinking` /
+  `reasoning_content` (an unsigned Anthropic block is not yet legitimate text, and chat-side
+  reasoning has no place in the transcript), and delegated turns - streaming is a property of
+  the operator's terminal, not of the delegation chain, so a subagent on a provider that
+  cannot stream still runs.
+- **Adapters**: `anthropic` forwards `messages.stream`'s text deltas and normalises from
+  `get_final_message()`; `openai` reassembles SSE `delta.content` into the *same*
+  `choices[0].message` shape a non-streaming call would have carried and then reuses
+  `normalise()`, so truncated `arguments` still fail closed instead of becoming an empty
+  write, and `stream_options.include_usage` keeps cost attached to the turn (with
+  `stream_usage=False` as the operator's explicit opt-out for gateways that reject the
+  field, because a run reporting `$0.000000` silently is worse than one that says so).
+- `scripted` gained `"stream": ["chunk", …]` so chunking is under test rather than incidental,
+  and `RunOptions.stream` keeps the SDK at parity: `stream_run()` yields the extra
+  `stream_delta` dicts, `run()` reports the same numbers either way.
+
+45 new tests (855 in the runtime, 1149 in the repository), all offline and
+credential-free. Honest limits: both live adapters are verified against injected fakes,
+not against a network; a gateway that accepts `stream` but never sets `finish_reason`, or
+that puts text in a field we do not model, will fail the fidelity check rather than
+silently under-report - that is the intended direction of failure, but it is a direction
+nobody has exercised against a real vendor.
+
 ## Unreleased (sixteenth batch) — MCP grows a second generation, and a remote question becomes an approval
 
 The blueprint's first P1 row. The 2026-07-28 Model Context Protocol revision deleted the

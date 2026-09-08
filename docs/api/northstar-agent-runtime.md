@@ -414,6 +414,10 @@ Source: `components/northstar-agent-runtime/loop.py`
 
 The governed agent loop: reasoning here, policy enforced here, execution delegated.
 
+#### `collected_total(parts: Sequence[str])`
+
+Chars forwarded so far, without rescanning more than once per delta.
+
 #### `RuntimeConfigurationError`
 
 Invalid configuration. Raised at construction, never mid-run.
@@ -1253,11 +1257,32 @@ The wire shape a provider needs to describe a tool.
 One provider turn.
 
 - `tool_uses()`
+- `text()`
+  - The turn's text as one string, in block order (what a stream must reproduce).
+#### `StreamDelta`
+
+One provisional chunk of assistant text, on its way to becoming an :class:`AssistantMessage`.
+
+- `as_dict()`
+#### `split_for_stream(text: str, *, size: int=MAX_STREAM_DELTA_CHARS)`
+
+Slice ``text`` into chunks no longer than ``size`` (the provider-side helper).
+
+#### `stream_comparable_text(turn: Any)`
+
+The turn's text, joined **without** separators, for stream comparison.
+
+#### `stream_fidelity(parts: Sequence[str], final_text: str)`
+
+Compare what a stream showed with what the run is about to record.
+
 #### `Provider`
 
 Base class for providers; subclasses implement :meth:`generate`.
 
 - `generate(request: GenerationRequest)`
+- `stream(request: GenerationRequest)`
+  - Yield :class:`StreamDelta` chunks, then exactly one :class:`Generation`.
 - `close()`
 #### `coerce_blocks(values: Iterable[Any] | None)`
 
@@ -1275,12 +1300,14 @@ Anthropic Messages API provider.
 
 #### `AnthropicProvider`
 
-Thin, normalising adapter over ``client.messages.create``.
+Thin, normalising adapter over ``client.messages.create`` and ``...stream``.
 
 - `client()`
 - `build_payload(request: GenerationRequest)`
   - Translate a GenerationRequest into ``messages.create`` kwargs.
 - `generate(request: GenerationRequest)`
+- `stream(request: GenerationRequest)`
+  - Forward ``text`` deltas, then the turn normalised from the *final* message.
 - `normalise(response: Any)`
   - Convert an SDK response (or a matching fake) into a Generation.
 - `close()`
@@ -1303,6 +1330,8 @@ Normalising adapter over ``client.chat.completions.create``.
 - `build_payload(request: GenerationRequest)`
   - Translate a :class:`GenerationRequest` into ``chat.completions.create`` kwargs.
 - `generate(request: GenerationRequest)`
+- `stream(request: GenerationRequest)`
+  - Reassemble an SSE chat completion into deltas plus one normalised turn.
 - `normalise(response: Any)`
 - `close()`
 ### `providers.scripted`
@@ -1319,11 +1348,15 @@ One scripted model turn.
 - `tool(name: str, payload: dict[str, Any] | None=None, *, call_id: str | None=None, also_text: str='', usage: Usage | dict[str, Any] | None=None)`
 - `tools(calls: Sequence[Any], *, usage: Usage | dict[str, Any] | None=None)`
 - `error(error: Exception)`
+- `streamed(text: str, chunks: Sequence[str], **kwargs: Any)`
+  - A turn whose stream is written out by hand (chunking is then under test, not derived).
 #### `ScriptedProvider`
 
 Plays back a fixed list of turns.
 
 - `generate(request: GenerationRequest)`
+- `stream(request: GenerationRequest)`
+  - Yield this turn's text as deterministic deltas, then the :class:`Generation`.
 - `pending()`
 - `last_request()`
 - `sent_tool_results()`

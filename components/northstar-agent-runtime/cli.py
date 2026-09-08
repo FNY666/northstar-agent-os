@@ -212,6 +212,7 @@ def _add_run_arguments(parser: argparse.ArgumentParser) -> None:
         help="with --resume-from: resume from the checkpoint at this transcript record index (default: the latest)",
     )
     output.add_argument("--redact-tool-output", action="store_true", help="record tool results in the session without output bodies")
+    output.add_argument("--stream", action="store_true", help="print (and, with --json, emit) assistant text as it arrives instead of at end of turn. Presentation only: the transcript, the permission gate, the ceilings and the single result event are unchanged, and a provider that cannot stream is refused rather than silently degraded")
     output.add_argument("--show-pricing", action="store_true", help="print the pricing decision and exit")
     output.add_argument("--dry-run", action="store_true", help="validate the configuration and print what a run would do, then exit without sending any request (provider, model, and sidecar are not touched)")
 
@@ -368,6 +369,8 @@ def _print_dry_run(
     print(f"workspace_agents={workspace_agents_note}")
     print(f"skills={skills_note}")
     print(f"hooks={hooks_note}")
+    print(f"stream={'on' if getattr(args, 'stream', False) else 'off'}"
+          + (" (assistant text as it arrives; the transcript stays turn-granular)" if getattr(args, "stream", False) else ""))
     print(f"mcp_servers={mcp_note}" + (" (not connected in dry-run)" if mcp_note != "off" else ""))
     print(f"pricing: ${pricing.input_per_mtok}/MTok in, ${pricing.output_per_mtok}/MTok out "
           f"(cache read x0.1, cache write x1.25)"
@@ -753,6 +756,7 @@ def _run(args: argparse.Namespace) -> int:
             protected_prefixes=(".git",) if args.allow_policy_writes else (".git", ".northstar")
         ),
         "record_tool_output_in_session": not args.redact_tool_output,
+        "stream": args.stream,
     }
     if postconditions:
         config_kwargs["postconditions"] = postconditions
@@ -954,11 +958,17 @@ def _run(args: argparse.Namespace) -> int:
             resume = store.transcript(args.resume) if args.resume else None
         exit_code = 0
         result = None
+        stream_open = False
         for event in runtime.run(prompt, resume=resume):
             if args.json:
                 print(json.dumps(event_to_dict(event), ensure_ascii=False, sort_keys=True))
             else:
-                _print_event(event, quiet=args.quiet)
+                _print_event(event, quiet=args.quiet, stream_open=stream_open)
+            # The assistant event that follows its own deltas must not print the same
+            # text a second time; the one that does not must print it normally. Tracking
+            # "did the previous event stream" is the whole rule, and it lives here rather
+            # than in the printer so the printer stays a pure function of one event.
+            stream_open = type(event).__name__ == "StreamDelta"
             if isinstance(event, ResultMessage):
                 result = event
                 exit_code = EXIT_CODES.get(event.subtype, 1)
@@ -988,8 +998,19 @@ def _run(args: argparse.Namespace) -> int:
             client.close()
 
 
-def _print_event(event: Any, *, quiet: bool = False) -> None:
+def _print_event(event: Any, *, quiet: bool = False, stream_open: bool = False) -> None:
+    """Render one event for a human terminal.
+
+    ``stream_open`` means "the text of this assistant turn has already been printed as it
+    arrived", so the assembled message closes the line instead of repeating it. It is
+    passed in rather than remembered here so this function stays stateless.
+    """
     kind = type(event).__name__
+    if kind == "StreamDelta":
+        if not quiet:
+            sys.stdout.write(event.text)
+            sys.stdout.flush()
+        return
     if quiet and kind != "ResultMessage":
         return
     if kind == "SystemMessage":
@@ -1006,7 +1027,12 @@ def _print_event(event: Any, *, quiet: bool = False) -> None:
         for block in event.content:
             name = type(block).__name__
             if name == "TextBlock" and block.text:
-                print(block.text)
+                if stream_open:
+                    # End the line the last delta left open; do not re-print the text.
+                    print()
+                    stream_open = False
+                else:
+                    print(block.text)
             elif name == "ToolUseBlock":
                 print(f"→ {block.name} {json.dumps(block.input, ensure_ascii=False, sort_keys=True)[:160]}")
         return

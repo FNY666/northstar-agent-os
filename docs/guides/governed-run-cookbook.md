@@ -187,6 +187,36 @@ for spec in mcp_tool_specs(client):
 print(client.negotiation, client.elicitation_log)
 ```
 
+## 11. Watch it live without trusting the live view
+
+```sh
+python3 -m cli run --workspace . --prompt "…" --stream          # text as it arrives
+python3 -m cli run --workspace . --prompt "…" --stream --json   # {"type":"stream_delta",…}
+python3 -m cli sessions show <id>                                # the transcript, unchanged shape
+```
+
+`--stream` is presentation only, and the runtime enforces that rather than assuming
+it: a provider's chunks must concatenate to the turn's recorded text, or the turn fails
+as `error_during_execution` with **no assistant record written**. So a stream can be
+shorter than the record (the client caps a turn at 200 000 characters / 4 000 events
+and says so in an `informational` event) but never different, and an interrupted run
+leaves the half-spoken text out of the transcript entirely.
+
+Two consequences worth knowing when you build on top of it:
+
+- deltas are **not** transcript records, so `sessions show`, checkpoint digests and
+  `--resume-from` behave exactly as they do without streaming — there is nothing to
+  replay;
+- tool arguments and reasoning content are never streamed, so a live view is not a
+  complete view of a turn. If your UI needs "what the model actually said", read the
+  `assistant` event; if it needs liveness, read the deltas and treat the record as the
+  verdict.
+
+For CI, keep `--stream` off: the value is a human watching. `--quiet --stream` prints
+the result line only, and `--json --stream` is the shape to use if you do want the
+deltas in a log - each is one more NDJSON line, and the final line is still the single
+`result`.
+
 ## Consumer CI recipe
 
 `examples/ci-readonly-review/` is a copy-paste template for running a

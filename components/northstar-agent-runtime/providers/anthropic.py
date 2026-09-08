@@ -18,6 +18,7 @@ from providers.base import (
     GenerationRequest,
     Provider,
     ProviderError,
+    StreamDelta,
     TextBlock,
     ThinkingBlock,
     ToolUseBlock,
@@ -30,9 +31,10 @@ CACHE_CONTROL_EPHEMERAL = {"type": "ephemeral"}
 
 
 class AnthropicProvider(Provider):
-    """Thin, normalising adapter over ``client.messages.create``."""
+    """Thin, normalising adapter over ``client.messages.create`` and ``...stream``."""
 
     name = "anthropic"
+    streams = True
 
     def __init__(
         self,
@@ -118,6 +120,32 @@ class AnthropicProvider(Provider):
         except Exception as error:  # noqa: BLE001 - must surface as an event
             raise ProviderError(f"anthropic request failed: {_reason(error)}") from error
         return self.normalise(response)
+
+    def stream(self, request: GenerationRequest):  # type: ignore[override]
+        """Forward ``text`` deltas, then the turn normalised from the *final* message.
+
+        Two properties matter more than the plumbing:
+
+        - only ``text`` blocks are forwarded. ``input_json_delta`` carries half an
+          argument object, and ``thinking_delta`` is unsigned until the block's
+          signature arrives, so neither may reach a terminal as if it were settled text;
+        - the turn handed back is built from ``get_final_message()``, not from the deltas
+          the client happened to see. If the two ever disagree, the disagreement is
+          reported by the runtime's fidelity check instead of being quietly resolved in
+          favour of what was already printed.
+        """
+        payload = self.build_payload(request)
+        try:
+            with self.client.messages.stream(**payload) as stream:
+                for piece in stream.text_stream:
+                    if piece:
+                        yield StreamDelta(text=str(piece), provider=self.name)
+                response = stream.get_final_message()
+        except ProviderError:
+            raise
+        except Exception as error:  # noqa: BLE001 - must surface as an event
+            raise ProviderError(f"anthropic stream failed: {_reason(error)}") from error
+        yield self.normalise(response)
 
     @staticmethod
     def normalise(response: Any) -> Generation:

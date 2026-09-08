@@ -68,6 +68,7 @@ class RunOptions:
     compaction_threshold_tokens: int | None = 60_000  # None disables compaction
     max_output_tokens: int = 4096
     redact_tool_output: bool = False  # omit tool output bodies from the transcript
+    stream: bool = False  # yield stream_delta events while assistant text is produced (transcript unchanged)
     workspace_agents: bool = True  # register .northstar/agents/*.md definitions
     checkpoint_turns: int = 0  # append a resumable boundary record every N turns (0 = off)
     resume_from: str | None = None  # session id to fork from its latest checkpoint; the parent file is never written
@@ -176,6 +177,7 @@ def _build(options: RunOptions, resume: str | None = None) -> tuple[Any, Any, li
         "halt_on_denial": options.halt_on_denial,
         "tool_limits": ToolLimits(),
         "record_tool_output_in_session": not options.redact_tool_output,
+        "stream": options.stream,
     }
     if options.system_prompt is not None:
         config_kwargs["system_prompt"] = options.system_prompt
@@ -250,6 +252,12 @@ def stream_run(options: RunOptions, resume: str | None = None) -> Iterator[dict[
     ``permission_denials``/``session_id`` ...). Pass ``resume`` with the id of
     a persisted session (``options.session_dir`` must be set) to continue from
     its transcript.
+
+    With ``options.stream`` the assistant text also arrives as ``stream_delta`` dicts
+    before the matching ``assistant`` event, and ``"".join(delta)`` equals that event's
+    text (or is a prefix of it, once the runtime's per-turn cap has been reached). The
+    loop still ends at exactly one ``result``, and ``run()`` reports the same numbers
+    whether or not anything was streamed.
     """
     runtime, _store, resume_transcript = _build(options, resume=resume)
     yield from _events(runtime, options.prompt, resume_transcript)

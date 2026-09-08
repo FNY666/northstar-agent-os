@@ -48,6 +48,7 @@ from providers.base import (
     GenerationRequest,
     Provider,
     ProviderError,
+    StreamDelta,
     TextBlock,
     ToolResultBlock,
     ToolUseBlock,
@@ -105,6 +106,10 @@ class OpenAICompatProvider(Provider):
     """Normalising adapter over ``client.chat.completions.create``."""
 
     name = "openai-compatible"
+    #: The wire supports it (SSE deltas), and the adapter reassembles faithfully enough
+    #: that the runtime's fidelity check passes by construction. A gateway that does not
+    #: implement ``stream`` will raise, which the loop turns into a provider fault.
+    streams = True
 
     def __init__(
         self,
@@ -121,6 +126,7 @@ class OpenAICompatProvider(Provider):
         extra_headers: dict[str, str] | None = None,
         extra_body: dict[str, Any] | None = None,
         supports_tools: bool = True,
+        stream_usage: bool = True,
     ) -> None:
         if max_tokens <= 0:
             raise ValueError("max_tokens must be positive")
@@ -134,6 +140,7 @@ class OpenAICompatProvider(Provider):
         self.token_limit_field = token_limit_field
         self.extra_body = dict(extra_body or {})
         self.supports_tools = bool(supports_tools)
+        self.stream_usage = bool(stream_usage)
         self._client = client
         self._client_kwargs: dict[str, Any] = {"max_retries": max_retries}
         if base_url is not None:
@@ -277,6 +284,86 @@ class OpenAICompatProvider(Provider):
         except Exception as error:  # noqa: BLE001 - must surface as an event
             raise ProviderError(f"chat completions request failed: {_reason(error)}") from error
         return self.normalise(response)
+
+    def stream(self, request: GenerationRequest):  # type: ignore[override]
+        """Reassemble an SSE chat completion into deltas plus one normalised turn.
+
+        The turn is assembled into the same ``choices[0].message`` shape a
+        non-streaming response would have carried and then run through
+        :meth:`normalise`, because the failure rules that matter here are the ones
+        already written there - above all that truncated tool arguments are a
+        ``ProviderError`` and never an empty payload. Deltas carry text only: a
+        half-received ``arguments`` blob is exactly what must not be shown, and a
+        reasoning model's ``reasoning_content`` has no place in the transcript, so
+        neither is forwarded.
+        """
+        payload = self.build_payload(request)
+        payload["stream"] = True
+        if self.stream_usage:
+            # Without this the stream reports no usage at all, and a run whose cost is
+            # silently zero is worse than one that refuses to stream. Older gateways
+            # reject the field, so it can be turned off - but only by an operator who
+            # has decided that free-looking cost is acceptable, which is why the flag
+            # exists instead of a silent fallback.
+            payload["stream_options"] = {"include_usage": True}
+        pieces: list[str] = []
+        calls: dict[int, dict[str, Any]] = {}
+        finish = ""
+        usage: dict[str, Any] = {}
+        model = ""
+        try:
+            for chunk in self.client.chat.completions.create(**payload):
+                if chunk is None:
+                    continue
+                raw_usage = _field(chunk, "usage")
+                if raw_usage:
+                    if isinstance(raw_usage, dict):
+                        usage = dict(raw_usage)
+                    else:
+                        usage = {
+                            key: value
+                            for key in ("prompt_tokens", "completion_tokens", "total_tokens")
+                            if isinstance((value := getattr(raw_usage, key, None)), int) and not isinstance(value, bool)
+                        }
+                if _field(chunk, "model", ""):
+                    model = str(_field(chunk, "model"))
+                choices = _field(chunk, "choices", ()) or ()
+                if not choices:
+                    continue
+                choice = choices[0]
+                if _field(choice, "finish_reason", ""):
+                    finish = str(_field(choice, "finish_reason"))
+                delta = _field(choice, "delta", {}) or {}
+                text = _text_of(_field(delta, "content"))
+                if text:
+                    pieces.append(text)
+                    yield StreamDelta(text=text, provider=self.name)
+                for fragment in _field(delta, "tool_calls", ()) or ():
+                    slot = calls.setdefault(int(_field(fragment, "index", 0) or 0), {"id": "", "function": {"name": "", "arguments": ""}})
+                    call_id = _field(fragment, "id", "")
+                    if call_id:
+                        slot["id"] = str(call_id)
+                    function = _field(fragment, "function", {}) or {}
+                    if _field(function, "name", ""):
+                        slot["function"]["name"] = str(_field(function, "name"))
+                    slot["function"]["arguments"] += str(_field(function, "arguments", "") or "")
+                # ``delta.reasoning_content`` is deliberately unread: it is not part of
+                # the recorded turn, so streaming it would show the operator text that
+                # the transcript cannot vouch for.
+        except ProviderError:
+            raise
+        except Exception as error:  # noqa: BLE001 - must surface as an event
+            raise ProviderError(f"chat completions stream failed: {_reason(error)}") from error
+        message: dict[str, Any] = {"role": "assistant", "content": "".join(pieces)}
+        if calls:
+            message["tool_calls"] = [calls[index] for index in sorted(calls)]
+        yield self.normalise(
+            {
+                "choices": [{"message": message, "finish_reason": finish}],
+                "usage": usage,
+                "model": model,
+            }
+        )
 
     @staticmethod
     def normalise(response: Any) -> Generation:
