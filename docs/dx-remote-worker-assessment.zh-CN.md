@@ -16,7 +16,7 @@
   密钥轮换 story（`docs/concepts/northstar-remote-identity.md`）与部署/监控
   操作指南（`docs/guides/remote-worker-operations.md`）；仍缺的是**完整网络传输就绪**（T20 已加入
   `northstar-agent-interop/ssh_forward.py` 的本地 Profile A lifecycle helper，
-  但真实 host-key/worker 验证与 Profile B transport 仍未完成）与**真实端到端
+  但真实 host-key/worker 验证、Profile B execution transport 仍未完成；T21 仅加入 loopback control/replay slice）与**真实端到端
   canary 实跑**（操作配方：`examples/remote-canary/`，探针在 CI 里对真实 socket
   服务端回路验证，但按设计从未在 CI 触碰真实主机）。
 - **推荐路径不是自建云**：短期 = sidecar socket 走 SSH（成本最低、复用现有
@@ -70,16 +70,17 @@ opaque workspace / 有界且版本钉死 / 可审计 / 可验证。
 - 域得分（/100）：contracts **100**、host **100**、durable-run **100**、
   interop **100**、audit **100**、ops **67**（4/6）。综合 **94**（34/36）。
 - 剩余缺口明细（评估器注释与本文档同步）：**完整网络传输就绪**（T20 的
-  `ssh_forward.py` 只覆盖本地 Profile A lifecycle，真实 host-key/worker 验证与
-  Profile B transport 仍未做）与**真实 canary 实跑**（配方已交付）——需真实主机
-  才能翻转；编排调度、远程 API 面不在当前批范围。
+  `ssh_forward.py` 只覆盖本地 Profile A lifecycle，T21 的
+  `durable_transport.py` 只覆盖 loopback control/replay；真实 host-key/worker
+  验证、Profile B execution transport 仍未做）与**真实 canary 实跑**（配方已交付）——
+  需真实主机才能翻转；编排调度、远程 API 面不在当前批范围。
 
 ## 5. 结论与后续
 
 - P3-3 交付 = **协议文档 + 评估文档 + 可运行评估器（含 CI）**；零部署、
   零网络、零自建云，未引入任何运行时依赖。
 - T5（docs phase）已把四项 ops 缺口实质化两项（story/指南 = 仓库内权威
-  工件，计分器随之 89→94）；T20 补上了本地 Profile A helper 与 loopback 测试，
-  但仍保留真实主机 canary 与完整 Profile B transport 的翻转门槛；或按生态路线
-  走 interop 托管适配器。
+  工件，计分器随之 89→94）；T20/T21 补上了本地 Profile A lifecycle 与 loopback
+  control/replay slices，但仍保留真实主机 canary 与完整 Profile B execution
+  transport 的翻转门槛；或按生态路线走 interop 托管适配器。
 - 版本仍为对齐 `0.1.0.dev0` **未发布**（守就绪门）。

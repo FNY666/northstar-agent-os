@@ -21,9 +21,9 @@ pip install .                                              # resolves both
 ```
 
 The wheel installs the slice modules (`durable_contract`, `event_store`, `action_gateway`,
-`cli`, `control_receipt`, `runner`, `verifier`, `trace_metrics`, `evaluation`) as
-top-level modules; the version (`0.1.0.dev0`, unreleased) is declared in
-`pyproject.toml`.
+`cli`, `control_receipt`, `runner`, `verifier`, `trace_metrics`, `evaluation`,
+`durable_transport`) as top-level modules; the version (`0.1.0.dev0`, unreleased)
+is declared in `pyproject.toml`.
 
 ## Boundaries
 
@@ -80,15 +80,17 @@ run-start lifecycle event keys.
 
 These controls preserve the existing lease, checkpoint, replay, verifier, and
 append-only boundaries. They do not yet provide a background scheduler,
-process-isolated signal cancellation, a cross-process task queue, or remote
-worker transport.
+process-isolated signal cancellation, a cross-process task queue, or hosted
+Profile B execution transport; the loopback control/replay slice is documented
+below.
 
 ## Local control CLI
 
 Installing the component also provides the `northstar-durable-run` command. It
-is a local inspection/control surface, not a scheduler or network service. The
-read-only commands replay the same validated EventStore history used by the
-runner:
+is a local inspection/control surface, not a scheduler or network service; the
+separate T21 `durable_transport.py` module is the explicitly loopback-only
+network-shaped slice documented below. The read-only commands replay the same
+validated EventStore history used by the runner:
 
 ```sh
 northstar-durable-run status --events /path/run/events.jsonl --run-id run-001
@@ -132,6 +134,26 @@ ledger or an idempotency mechanism. `retry()` remains programmatic because a
 retry must provide the explicit `StepPlan` actions and preserve the action
 idempotency boundary. A future
 scheduler may call this surface, but this component does not create one.
+
+## Authenticated loopback transport (T21)
+
+`durable_transport.py` provides a deliberately narrow network-shaped surface:
+`DurableWorkerServer` and `DurableWorkerClient` exchange one bounded JSON line
+per TCP connection for `status`, `history`, `pause`, `resume` and `cancel`.
+Every frame has a channel HMAC, and every request carries the host-issued
+binding and authorization tokens. The server checks run identity, opaque
+workspace identity, policy revision, scope containment, capability
+(`durable:read` or `durable:control`) and the run deadline before touching the
+existing `EventStore`/`DurableRunner`.
+
+The listener is loopback-only (`127.0.0.1`/`::1`) and does not accept a step
+function, arbitrary path or serialized executor. `pause`/`resume`/`cancel`
+return the existing versioned `ControlReceipt`; `history` is a bounded replay
+of the authoritative event stream. This is a local control/replay transport
+slice, not a remote worker service: it has no TLS/mTLS, workspace materialiser,
+step execution protocol, scheduler, fleet lease service or public listener.
+Use the existing SSH Profile A helper for the private sidecar socket path;
+do not expose this server to a network without a separate deployment review.
 
 ## Local example
 

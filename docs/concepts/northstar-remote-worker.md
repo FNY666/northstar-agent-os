@@ -25,7 +25,9 @@ second class of agent.
   is signed, short-lived and carries the policy revision.
 - `northstar-durable-run` — append-only event history, leases, per-call
   action gates and independent postcondition verification: the machinery a
-  hosted worker needs to survive crashes and report *verifiably*.
+  hosted worker needs to survive crashes and report *verifiably*. T21 adds a
+  loopback-only authenticated control/replay transport, but not a fleet
+  scheduler or serialized step execution.
 - `northstar-agent-interop` — `process_adapter`/`process_backend` give a
   backend-neutral **process boundary** for version-pinned Codex / Claude Code
   / Cursor CLIs (disabled by default; no vendor integration), the canary proves

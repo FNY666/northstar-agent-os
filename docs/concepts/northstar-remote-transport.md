@@ -108,9 +108,24 @@ profile deliberately reuses the durable layer instead of inventing a new one:
   (Profile A's forward-only socket does not need them; a fleet needs mTLS or
   an equivalent — see the identity page's open decisions).
 
-Nothing of Profile B runs in this repository today. It is a sketch so the
-next increment knows exactly which mechanisms exist and which one gap —
-transport code — it must write.
+### 3.1 What T21 implements locally
+
+`durable_transport.py::DurableWorkerServer` and
+`durable_transport.py::DurableWorkerClient` provide a bounded local
+control/replay slice over JSON-lines TCP. Each frame carries a channel HMAC;
+each request also carries a host-issued binding and authorization token. The
+server verifies the run identity, opaque workspace identity, current policy
+revision, scope containment and the required `durable:read` or
+`durable:control` capability before calling the existing event store/runner.
+
+The listener is loopback-only and accepts only `status`, `history`, `pause`,
+`resume` and `cancel`. It does not accept serialized Python actions, arbitrary
+paths or a workspace reference that it resolves itself. This proves framing,
+request authentication, grant re-verification and durable control receipt
+projection in a local process pair; it is not Profile B: there is no mTLS,
+workspace materialisation, step-execution protocol, scheduler, fleet lease
+service or public listener. A remote deployment still needs a separately
+reviewed transport and canary.
 
 ## 4. Failure taxonomy (reuse the contract's, don't invent one)
 
@@ -136,8 +151,12 @@ execution, at-least-once on evidence**.
       transport readiness pass.
 - [ ] Complete Profile A transport readiness: strict host-key configuration and
       the operator canary must pass against a real SSH worker.
-- [ ] Profile B: a network transport around `DurableRunner` (framing reused),
-      with identity from the rotation story below.
+- [x] Local loopback control/replay slice: bounded JSON-lines framing,
+      channel HMAC, binding/authorization re-verification and durable control
+      receipts (`durable_transport.py`). This is not Profile B completion.
+- [ ] Profile B execution transport: a network transport around
+      `DurableRunner` (framing reused), with identity from the rotation story
+      below, workspace materialisation and a worker-side execution boundary.
 - [ ] A real (non-fake) end-to-end canary run against a real SSH worker —
       the recipe exists (`examples/remote-canary`) but has not run in CI.
 - [ ] `remote_worker.py` ops probe flips from MISSING only when the above

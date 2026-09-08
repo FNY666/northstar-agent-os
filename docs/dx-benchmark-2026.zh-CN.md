@@ -944,3 +944,24 @@ T20 开始把 T5b 的 Profile A 从纯 spec 推进为一个仍然保守的本地
   仍未执行，Profile B transport 也未实现；`remote_worker --score` 因此仍为 94/100。
 
 T20 仍是 Unreleased；没有创建 tag、GitHub Release，也没有发布到 PyPI/npm。
+
+### 10.24 当前实现复核：authenticated durable control/replay transport（2026-09-08）
+
+T21 在 T20 的 Profile A lifecycle 之上补的是一个更窄的 Profile B 前置切片，
+不是 hosted execution：
+
+- `northstar-durable-run/durable_transport.py` 提供 one-request-per-connection
+  JSON-lines TCP server/client，支持 `status`、`history`、`pause`、`resume`、`cancel`；
+  它复用 EventStore、DurableRunner 和 `northstar.durable-control-receipt.v1`，不接收
+  serialized Python actions、arbitrary paths 或 step executor。
+- 每个 frame 由 channel HMAC 认证；每个 request 还重新验证 host-issued binding /
+  authorization token、run/workspace identity、policy revision、scope containment、
+  deadline 与 `durable:read`/`durable:control` capability。server 只绑定 loopback，
+  不把 auth token 暴露到公网。
+- 8 项 loopback tests 覆盖 signed status/history、control receipt、tampered request /
+  response、workspace claim mismatch、capability denial、public listener rejection 和
+  client transport failure；durable-run 86 项、全仓 `make test` 928 项（924 pass、4 项
+  可选 OTel skip）。这仍不是 mTLS、workspace materialisation、fleet scheduler、Profile B
+  execution transport 或真实远端 canary；`remote_worker --score` 保持 94/100。
+
+T21 仍是 Unreleased；没有创建 tag、GitHub Release，也没有发布到 PyPI/npm。

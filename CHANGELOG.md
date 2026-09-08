@@ -1,5 +1,24 @@
 # Northstar Agent OS — initial public component
 
+## Unreleased (twenty-eighth batch) — authenticated durable control/replay transport (T21)
+
+- Added `northstar-durable-run/durable_transport.py`, a narrow JSON-lines TCP
+  control/replay slice around the existing `EventStore` and `DurableRunner`.
+  Supported operations are `status`, `history`, `pause`, `resume` and `cancel`;
+  serialized Python actions, arbitrary paths and step execution are rejected by
+  design.
+- Every frame carries a channel HMAC, while every request re-verifies the
+  host-issued run binding and authorization grant, policy revision, opaque
+  workspace identity, scope containment, run deadline and
+  `durable:read`/`durable:control` capability. Control responses reuse the
+  existing versioned `ControlReceipt`.
+- The server is loopback-only and one-request-per-connection. It has no TLS/mTLS,
+  workspace materialiser, scheduler, fleet lease service or public listener;
+  T21 is not a claim of hosted remote execution. Added 8 loopback network tests,
+  packaging/API/CI wiring and documentation. Durable-run now has 86 tests and
+  the repository has 928 tests (924 pass, 4 optional OTel skips); no release,
+  tag, GitHub Release, or PyPI/npm publication was made.
+
 ## Unreleased (twenty-seventh batch) — Profile A SSH forward lifecycle helper (T20)
 
 - Added `northstar-agent-interop/ssh_forward.py`, a standard-library-only,

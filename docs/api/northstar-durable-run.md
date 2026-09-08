@@ -212,3 +212,38 @@ Export many events as one canonical NDJSON audit feed text.
 #### `iter_events_audit(events: Iterable[dict[str, Any]])`
 
 Lazily map many events into validated audit records.
+
+### `durable_transport`
+
+Source: `components/northstar-durable-run/durable_transport.py`
+
+Authenticated JSON-lines control/replay transport for durable runs.
+
+#### `DurableTransportError`
+
+Transport or response failure with a bounded status label.
+
+#### `DurableWorkerServer`
+
+Loopback-only authenticated server for durable control and replay.
+
+- `address()`
+  - The bound loopback address, available after :meth:`start`.
+- `start()`
+  - Bind a loopback listener and serve requests in a daemon thread.
+- `stop()`
+  - Stop the listener; no event or lease files are modified by shutdown.
+- `handle_wire_line(line: bytes)`
+  - Decode one bounded JSON line and return one signed JSON response.
+- `handle_frame(frame: Any, *, now: int | None=None)`
+  - Handle one request without opening a socket; always returns a signed response.
+#### `DurableWorkerClient`
+
+One-request-per-connection client for :class:`DurableWorkerServer`.
+
+- `build_frame(operation: str, *, payload: dict[str, Any] | None=None, request_id: str | None=None)`
+  - Build an authenticated request for tests or a custom socket loop.
+- `request(operation: str, *, payload: dict[str, Any] | None=None, request_id: str | None=None)`
+  - Send one request and verify the signed response envelope.
+- `request_ok(operation: str, *, payload: dict[str, Any] | None=None, request_id: str | None=None)`
+  - Send a request and raise for a signed rejected/business/internal response.
