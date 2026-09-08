@@ -30,6 +30,7 @@ from agents import AgentDefinition, AgentRegistry, Verdict, builtin_registry, pa
 from budget import Budget
 from compaction import CompactionOutcome, compact, should_compact
 from hooks import HookInput, HookRegistry
+from checkpoints import CheckpointError, build as build_checkpoint, digest_transcript, prepare_resume
 from postconditions import (
     PostConditionError,
     PostConditionSet,
@@ -120,6 +121,15 @@ class RuntimeConfig:
     #: Workspace claims checked after the run by an independent evaluator, so a
     #: model saying "done" is not the evidence that it is. See postconditions.py.
     postconditions: Any = ()
+    #: Append one checkpoint transcript record every N turn boundaries (0 = off).
+    #: Off by default because a new record type in every transcript is a format
+    #: change, and a format change should be chosen, not inherited.
+    checkpoint_turns: int = 0
+    #: The boundary a resumed run continues from (checkpoints.Checkpoint). Setting
+    #: this without carrying the parent's cost over is refused, not forgiven.
+    resume_from: Any = None
+    #: Session id this run was forked from, recorded for the audit only.
+    parent_session: str = ""
     max_output_tokens: int = 4096
     compaction_threshold_tokens: int | None = DEFAULT_COMPACTION_THRESHOLD_TOKENS
     compaction_keep_messages: int = 4
@@ -392,6 +402,7 @@ class _RunState:
     started: float = field(default_factory=time.monotonic)
     result: ResultMessage | None = None
     stop_blocks: int = 0
+    resumed_from: dict[str, Any] | None = None
     session_end_fired: bool = False
     events: list[Any] = field(default_factory=list)
 
@@ -530,6 +541,40 @@ class AgentRuntime:
         state = _RunState(session_id=self.session_id)
         if resume:
             state.transcript.extend(resume)
+        checkpoint = self.config.resume_from
+        if checkpoint is not None:
+            if not resume:
+                raise RuntimeConfigurationError(
+                    "resume_from needs the parent transcript as run(resume=...): the checkpoint says where to cut, "
+                    "but the messages to cut come from the session store"
+                )
+            try:
+                state.transcript = prepare_resume(
+                    checkpoint, state.transcript, expected_session_id=self.config.parent_session or None
+                )
+            except CheckpointError as error:
+                raise RuntimeConfigurationError(f"resume refused: {error}") from error
+            state.turns = checkpoint.turns
+            state.tool_calls = checkpoint.tool_calls
+            if self.budget.total_cost_usd + 1e-12 < checkpoint.cost_usd:
+                # The whole reason checkpoints exist: a resumed run must not get a
+                # fresh budget on top of the one it already spent. An embedder that
+                # forgets to seed the Budget gets an error, not a wider ceiling.
+                raise RuntimeConfigurationError(
+                    f"resume refused: the checkpoint at turn {checkpoint.turns} had spent "
+                    f"${checkpoint.cost_usd:.6f} but this run starts at ${self.budget.total_cost_usd:.6f}; "
+                    "pass budget=Budget(max_budget_usd=..., total_cost_usd=...) carrying the parent's spend"
+                )
+            state.resumed_from = {
+                "parent_session": checkpoint.session_id,
+                "checkpoint_record": checkpoint.record_index,
+                "turns_inherited": checkpoint.turns,
+                "tool_calls_inherited": checkpoint.tool_calls,
+                "cost_usd_inherited": checkpoint.cost_usd,
+                "transcript_len": checkpoint.transcript_len,
+                "transcript_digest": checkpoint.transcript_digest[:12],
+                "forked": bool(self.config.parent_session),
+            }
         self._pending_state = state
         self._last_report = None
         # A subagent's run hangs off the span its parent opened for it, so the
@@ -617,6 +662,12 @@ class AgentRuntime:
         }
         if self.postconditions:
             init_data["postconditions"] = [condition.as_dict() for condition in self.postconditions.conditions]
+        if state.resumed_from is not None:
+            init_data["resumed_from"] = state.resumed_from
+        if config.parent_session and state.resumed_from is None:
+            init_data["resumed_from"] = {"parent_session": config.parent_session, "checkpoint_record": None, "forked": True}
+        if config.checkpoint_turns:
+            init_data["checkpoint_turns"] = config.checkpoint_turns
         try:
             # Taken before the first yield so a hook or a tool cannot be the thing
             # that changes what "before" means.
@@ -662,7 +713,10 @@ class AgentRuntime:
         state.transcript.append(user)
         self.sessions.append("user_prompt", {"agent": config.agent, "role": "user", "content": [block.to_api() for block in user.content]})
 
-        for turn_index in range(1, config.max_turns + 1):
+        # A resumed run continues the parent's numbering, so max_turns bounds the
+        # whole lineage rather than restarting at every resume.
+        first_turn = state.turns + 1
+        for turn_index in range(first_turn, max(first_turn, config.max_turns + 1)):
             # Ceilings are checked before spending, never after.
             stop = self._ceiling_stop(state)
             if stop is not None:
@@ -759,6 +813,7 @@ class AgentRuntime:
                         )
                         continue
                     state.final_text = assistant.text
+                    self._checkpoint(state, boundary="after_text")
                     subtype = "success"
                     if self.postconditions:
                         summary = summarise_postconditions(self.postconditions.evaluate())
@@ -818,11 +873,41 @@ class AgentRuntime:
                 state.transcript.append(tool_message)
                 self._record_tool_message(tool_message)
                 yield tool_message
+                self._checkpoint(state, boundary="after_tools")
                 if halted is not None:
                     yield self._finish(state, halted)
                     return
 
         yield self._finish(state, "error_max_turns")
+
+    def _checkpoint(self, state: _RunState, *, boundary: str) -> None:
+        """Append the resumable boundary record, if checkpoints are enabled.
+
+        Only ever after a *complete* turn - after the tool results, or after a text
+        turn that ends the run. A transcript ending on an assistant tool_use with no
+        tool_result would be rejected by the next request, so a checkpoint there
+        would be a fork point that cannot be forked from.
+        """
+        every = self.config.checkpoint_turns
+        if every <= 0 or state.turns <= 0 or state.turns % every:
+            return
+        payload = build_checkpoint(
+            session_id=state.session_id,
+            record_index=self.sessions.written,
+            transcript=state.transcript,
+            turns=state.turns,
+            tool_calls=state.tool_calls,
+            cost_usd=self.budget.total_cost_usd,
+            usage=self.budget.total_usage,
+            model=self.config.model,
+            provider=self.provider_name,
+            permission_mode=self.permissions.mode.value if hasattr(self.permissions.mode, "value") else str(self.permissions.mode),
+            run_id=self.config.run_id,
+            policy_revision=self.config.policy_revision,
+            denials=len(state.denials),
+        )
+        payload["boundary"] = boundary
+        self.sessions.append("checkpoint", payload)
 
     # -- ceilings ----------------------------------------------------------
     def _ceiling_stop(self, state: _RunState) -> str | None:

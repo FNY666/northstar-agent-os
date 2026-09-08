@@ -49,6 +49,7 @@ py-modules = [
     "cli",
     "command_hooks",
     "compaction",
+    "checkpoints",
     "contract_bridge",
     "doctor",
     "events",

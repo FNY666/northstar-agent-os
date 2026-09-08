@@ -146,6 +146,10 @@ Command-line entry point for one governed run.
 
 The model id to use, or a configuration error for an impossible pairing.
 
+#### `checkpoint_usage(checkpoint: Any)`
+
+The parent's token totals as a Usage, so a resumed run's cost view is continuous.
+
 #### `main(argv: Sequence[str] | None=None)`
 
 ### `compaction`

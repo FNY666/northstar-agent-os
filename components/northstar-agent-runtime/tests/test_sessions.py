@@ -45,10 +45,11 @@ class SessionIdTests(unittest.TestCase):
         store = SessionStore(None)
         with self.assertRaises(ValueError):
             store.append("raw_prompt_bytes", {})
-        # 12 since the fourteenth batch: "postconditions" is the independent
-        # end-of-run verdict, and it gets its own record type rather than hiding
-        # inside "informational". Add a type here only with a test for it.
-        self.assertEqual(len(RECORD_TYPES), 12)
+        # 13 since the fourteenth batch: "checkpoint" (checkpoints.py) joins: "postconditions" is the independent
+        # "postconditions" (the end-of-run verdict) and "checkpoint" (a resumable
+        # turn boundary), each with its own record type rather than hiding inside
+        # "informational". Add a type here only with a test for it.
+        self.assertEqual(len(RECORD_TYPES), 13)
 
 
 class WriteTests(RuntimeTestCase):
