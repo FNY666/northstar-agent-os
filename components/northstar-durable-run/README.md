@@ -36,7 +36,13 @@ status. It checks the actual run state, private workspace, required file
 an `ok` receipt; missing observations produce `unknown` and failed checks
 produce `failed`.
 
-The governed Agent Loop prototype is also defined in `agent_loop.py`: it admits a
+The provider-neutral `planner_adapter.py` adds the next boundary above the
+loop: a host-owned model caller may return only a bounded planner candidate.
+The adapter rejects command/callable/credential-like fields, permits at most one
+repair attempt by default, and sends the parsed `AgentPlan` through the existing
+admission checks. It never executes an action during planning. This is still an
+adapter boundary, not a bundled model SDK or production planner service.
+
 strict planner-produced `AgentPlan`, persists a bounded plan-step manifest in
 the first admission event, executes only registered actions, and requires an
 independent observer read-back. A manifest binds every evidence `step_id`,
