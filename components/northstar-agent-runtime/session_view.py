@@ -21,31 +21,66 @@ USAGE_ERROR = 64  # same convention as cli.USAGE_ERROR, kept local to avoid an i
 CONTENT_PREVIEW = 200
 
 
+def _add_session_location(parser: argparse.ArgumentParser) -> None:
+    """Where product runs keep transcripts; operator can still point elsewhere."""
+    parser.add_argument(
+        "--workspace",
+        default=".",
+        help="workspace whose <workspace>/.northstar/sessions is the product default (default: .)",
+    )
+    parser.add_argument(
+        "--session-dir",
+        default="",
+        help=(
+            "directory of *.jsonl transcripts (default: <workspace>/.northstar/sessions — "
+            "the same path `northstar agent` writes)"
+        ),
+    )
+
+
+def resolve_view_session_dir(args: argparse.Namespace) -> Path:
+    """Session directory for a sessions subcommand: explicit wins, else product default."""
+    explicit = (getattr(args, "session_dir", None) or "").strip()
+    if explicit:
+        return Path(explicit).expanduser().resolve()
+    from product_path import default_session_dir
+
+    workspace = getattr(args, "workspace", None) or "."
+    return default_session_dir(workspace)
+
+
 def add_arguments(parser: argparse.ArgumentParser) -> None:
     sub = parser.add_subparsers(dest="session_command")
 
     listing = sub.add_parser("list", help="list transcripts in a session directory")
-    listing.add_argument("--session-dir", required=True, help="directory of *.jsonl transcripts")
+    _add_session_location(listing)
     listing.add_argument("--json", action="store_true", help="emit one JSON object per transcript")
 
     showing = sub.add_parser("show", help="print one transcript as a human-readable timeline")
-    showing.add_argument("--session-dir", required=True, help="directory of *.jsonl transcripts")
+    _add_session_location(showing)
     showing.add_argument("--json", action="store_true", help="emit the raw records as a JSON array")
-    showing.add_argument("session_id", help="session id (the *.jsonl file name without its suffix)")
+    showing.add_argument(
+        "session_id",
+        help="session id (the *.jsonl file name without its suffix), or 'latest'",
+    )
 
     checkpoints = sub.add_parser(
         "checkpoints",
         help="list the resumable boundaries a session recorded, and verify each one's prefix digest",
     )
-    checkpoints.add_argument("--session-dir", required=True, help="directory of *.jsonl transcripts")
-    checkpoints.add_argument("--session", default="", help="one session id (default: every transcript in the directory)")
+    _add_session_location(checkpoints)
+    checkpoints.add_argument(
+        "--session",
+        default="",
+        help="one session id or 'latest' (default: every transcript in the directory)",
+    )
     checkpoints.add_argument("--json", action="store_true", help="emit one JSON object per transcript")
 
     replay = sub.add_parser(
         "replay",
         help="render one transcript turn by turn, with its checkpoints and what they hand to a resume",
     )
-    replay.add_argument("--session-dir", required=True, help="directory of *.jsonl transcripts")
+    _add_session_location(replay)
     replay.add_argument("--json", action="store_true", help="emit the frames as one JSON object")
     replay.add_argument(
         "--from-checkpoint",
@@ -54,33 +89,74 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
         metavar="RECORD",
         help="show only the state at the checkpoint stored at transcript record #N - what a run resumed from it inherits",
     )
-    replay.add_argument("session_id", help="session id (the *.jsonl file name without its suffix)")
+    replay.add_argument(
+        "session_id",
+        help="session id (the *.jsonl file name without its suffix), or 'latest'",
+    )
 
     exporting = sub.add_parser(
         "export",
         help="emit one transcript as the canonical NDJSON audit feed (audit.ndjson/1)",
     )
-    exporting.add_argument("--session-dir", required=True, help="directory of *.jsonl transcripts")
+    _add_session_location(exporting)
     exporting.add_argument(
         "session_id",
-        help="session id (the *.jsonl file name without its suffix); "
+        help="session id (the *.jsonl file name without its suffix), or 'latest'; "
         "the feed is written to stdout, one validated audit record per line",
     )
 
 
+def _resolve_session_arg(session_id: str, directory: Path) -> str:
+    """Pass-through id, or resolve product `latest` aliases against ``directory``."""
+    from product_path import LATEST_SESSION_ALIASES, resolve_session_id
+
+    raw = (session_id or "").strip()
+    if not raw or raw not in LATEST_SESSION_ALIASES:
+        return raw
+    return resolve_session_id(raw, directory)
+
+
 def run_sessions(args: argparse.Namespace) -> int:
+    try:
+        directory = resolve_view_session_dir(args)
+    except Exception as error:  # noqa: BLE001 - path math only
+        print(f"sessions: {error}", file=sys.stderr)
+        return USAGE_ERROR
+
     if args.session_command == "list":
-        return _list_sessions(Path(args.session_dir), json_out=bool(getattr(args, "json", False)))
+        return _list_sessions(directory, json_out=bool(getattr(args, "json", False)))
     if args.session_command == "show":
-        return _show_session(Path(args.session_dir), args.session_id, json_out=bool(getattr(args, "json", False)))
+        try:
+            session_id = _resolve_session_arg(args.session_id, directory)
+        except ValueError as error:
+            print(f"sessions: {error}", file=sys.stderr)
+            return USAGE_ERROR
+        return _show_session(directory, session_id, json_out=bool(getattr(args, "json", False)))
     if args.session_command == "export":
-        return _export_session(Path(args.session_dir), args.session_id)
+        try:
+            session_id = _resolve_session_arg(args.session_id, directory)
+        except ValueError as error:
+            print(f"sessions: {error}", file=sys.stderr)
+            return USAGE_ERROR
+        return _export_session(directory, session_id)
     if args.session_command == "checkpoints":
-        return _checkpoints_session(Path(args.session_dir), args.session, json_out=bool(getattr(args, "json", False)))
+        session = getattr(args, "session", "") or ""
+        if session:
+            try:
+                session = _resolve_session_arg(session, directory)
+            except ValueError as error:
+                print(f"sessions: {error}", file=sys.stderr)
+                return USAGE_ERROR
+        return _checkpoints_session(directory, session, json_out=bool(getattr(args, "json", False)))
     if args.session_command == "replay":
+        try:
+            session_id = _resolve_session_arg(args.session_id, directory)
+        except ValueError as error:
+            print(f"sessions: {error}", file=sys.stderr)
+            return USAGE_ERROR
         return _replay_session(
-            Path(args.session_dir),
-            args.session_id,
+            directory,
+            session_id,
             json_out=bool(getattr(args, "json", False)),
             from_checkpoint=getattr(args, "from_checkpoint", None),
         )

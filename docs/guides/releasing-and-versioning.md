@@ -36,9 +36,11 @@ these hold. Work through the checklist; only then drop the `.dev` suffix:
 - [ ] Guard harness green: `python3
       components/northstar-agent-runtime/tools/verify_invariants.py`.
 - [ ] Demo and examples run: `make demo`, `examples/sdk/run_sdk_demo.py`.
-- [ ] Wheel-install smoke passes for every component from a clean venv
-      (import each public module from `/tmp`, run `--version` and one
-      offline `sdk.run()`).
+- [ ] Public governance bench green: `make bench` (or `northstar bench --json`).
+- [ ] Wheel-install smoke passes: `make install-smoke` (clean throwaway venv,
+      `--version` + `tools` + governance bench). Also import each public
+      module from `/tmp` and run one offline `sdk.run()` if you are cutting
+      a tagged release.
 - [ ] Version alignment: all five `pyproject.toml` + `_version.py` carry the
       same **plain** `major.minor.patch` (no `.dev` suffix) — the gate
       refuses dev-suffixed tags outright.

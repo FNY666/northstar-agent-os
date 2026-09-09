@@ -293,12 +293,19 @@ class ToolSandbox:
             if len(parts) < len(head) or parts[: len(head)] != head:
                 continue
             if prefix == ".northstar":
+                # P4 carve-out: workspace memory is the one agent-owned note
+                # store under .northstar. Policy/agents/skills stay locked.
+                from memory import is_memory_write_path
+
+                if is_memory_write_path(parts):
+                    continue
                 # Name the escape hatch here: this denial is the one an operator
                 # will legitimately want to override, per run, from the CLI.
                 raise ToolAccessError(
                     f"writes under {prefix!r} are refused: that tree holds the run's own "
                     "governance (policy, agents, skills) and an agent must not rewrite the "
-                    "rules that gate it; pass --allow-policy-writes if a human intends this"
+                    "rules that gate it; pass --allow-policy-writes if a human intends this "
+                    f"(workspace memory under {parts[0]}/memory/ is the sole carve-out)"
                 )
             raise ToolAccessError(
                 f"writes under {prefix!r} are refused: that tree holds repository metadata "
@@ -649,7 +656,15 @@ def describe_tools(payload: dict[str, Any], ctx: ToolContext) -> ToolResult:
     )
 
 
-BUILTIN_TOOLS: tuple[str, ...] = ("Read", "Write", "Edit", "LS", "Grep", "DescribeTools")
+BUILTIN_TOOLS: tuple[str, ...] = (
+    "Read",
+    "Write",
+    "Edit",
+    "LS",
+    "Grep",
+    "DescribeTools",
+    "Shell",
+)
 
 
 def build_default_registry(include_describe: bool = True) -> ToolRegistry:
@@ -741,6 +756,12 @@ def build_default_registry(include_describe: bool = True) -> ToolRegistry:
                 needs_workspace=False,
             )
         )
+    # Shell is always registered so policy can name it; the permission gate keeps
+    # it denied under `default` until --allow-tool Shell. Execution goes through
+    # tools.os_sandbox (bwrap when usable, else scrubbed process).
+    from tools.shell import shell_tool_spec
+
+    registry.register(shell_tool_spec())
     return registry
 
 
@@ -812,3 +833,7 @@ __all__ = [
     "truncate_text",
     "write_file",
 ]
+
+# Submodules used by doctor / CLI / tests (explicit re-exports keep import paths stable).
+# os_sandbox and shell are part of the public tools surface for the product path.
+

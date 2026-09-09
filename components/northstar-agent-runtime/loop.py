@@ -178,6 +178,16 @@ class RuntimeConfig:
     tool_limits: ToolLimits = field(default_factory=ToolLimits)
     sidecar_socket: str | None = None
     sidecar_timeout_ms: int = 30_000
+    #: Backend for the Shell tool (``auto`` | ``bwrap`` | ``process``). Does not
+    #: grant Shell — the permission gate still denies it under ``default`` until
+    #: ``--allow-tool Shell``. ``bwrap`` is refused at construction if unusable.
+    shell_backend: str = "auto"
+    #: How many **parallel-safe** tool handlers may run at once inside one
+    #: assistant turn. ``1`` (default) is full serial dispatch. Values >1 only
+    #: accelerate a turn whose *every* call is kind=read and non-mutating;
+    #: PreToolUse + the permission gate still run serially and independently
+    #: for each call. See ``tools.parallel``.
+    parallel_tools: int = 1
     include_describe_tool: bool = True
     record_tool_output_in_session: bool = True
     #: Correlation id for this run. When set, it is also the sidecar ``request_id``,
@@ -245,9 +255,27 @@ class RuntimeConfig:
             fail(
                 f"sidecar_timeout_ms must be between {SIDECAR_MIN_TIMEOUT_MS} and {SIDECAR_MAX_TIMEOUT_MS}"
             )
+        backend = (self.shell_backend or "auto").strip().lower()
+        if backend not in {"auto", "bwrap", "process"}:
+            fail(f"shell_backend must be auto, bwrap, or process; got {self.shell_backend!r}")
+        object.__setattr__(self, "shell_backend", backend)
+        if backend == "bwrap":
+            # Fail at construction, not mid-tool-call: a run that promised OS
+            # isolation and then cannot deliver it is a configuration error.
+            from tools.os_sandbox import SandboxError, probe_capabilities, resolve_backend
+
+            try:
+                resolve_backend("bwrap", capabilities=probe_capabilities())
+            except SandboxError as error:
+                fail(str(error))
+        try:
+            from tools.parallel import clamp_parallel_tools
+
+            object.__setattr__(self, "parallel_tools", clamp_parallel_tools(self.parallel_tools))
+        except ValueError as error:
+            fail(str(error))
         object.__setattr__(self, "allowed_tools", normalise_names(self.allowed_tools))
         object.__setattr__(self, "disallowed_tools", normalise_names(self.disallowed_tools))
-
     @property
     def budget_enabled(self) -> bool:
         return self.max_budget_usd is not None
@@ -268,6 +296,8 @@ class RuntimeConfig:
             "max_subagent_depth": self.max_subagent_depth,
             "allow_nested_delegation": self.allow_nested_delegation,
             "halt_on_denial": self.halt_on_denial,
+            "parallel_tools": self.parallel_tools,
+            "shell_backend": self.shell_backend,
             "compaction_threshold_tokens": self.compaction_threshold_tokens,
             "stream": self.stream,
             "retry": self.retry.as_dict() if self.retry is not None else None,
@@ -959,7 +989,23 @@ class AgentRuntime:
             "run_id": config.run_id,
             "policy_revision": config.policy_revision,
             "protected_prefixes": list(config.tool_limits.protected_prefixes),
+            "shell_backend": config.shell_backend,
         }
+        try:
+            from tools.os_sandbox import probe_capabilities, resolve_backend
+
+            caps = probe_capabilities()
+            chosen = resolve_backend(config.shell_backend, capabilities=caps)
+            init_data["sandbox"] = {
+                "backend": chosen,
+                "isolation": "os" if chosen == "bwrap" else "process",
+                "bwrap_usable": caps.bwrap_usable,
+                "detail": caps.bwrap_detail if chosen == "bwrap" else (
+                    "process backend: cwd+env only; host FS reachable without bwrap"
+                ),
+            }
+        except Exception:  # noqa: BLE001 - init must not fail because of a probe
+            init_data["sandbox"] = {"backend": config.shell_backend, "isolation": "unknown"}
         if self.postconditions:
             init_data["postconditions"] = [condition.as_dict() for condition in self.postconditions.conditions]
         if state.resumed_from is not None:
@@ -1239,38 +1285,7 @@ class AgentRuntime:
                     yield self._finish(state, subtype)
                     return
 
-                results: list[ToolResultBlock] = []
-                halted: str | None = None
-                for position, call in enumerate(calls):
-                    if halted is not None:
-                        # The run is stopping, but every tool_use in this assistant
-                        # turn still needs a tool_result: a transcript with an
-                        # orphaned tool_use cannot be sent to the API again, and a
-                        # transcript that cannot be sent cannot be resumed or
-                        # compacted. So the refusal is recorded, not swallowed.
-                        results.append(
-                            ToolResultBlock(
-                                tool_use_id=call.id,
-                                content=(
-                                    f"not executed: this run halted after the current turn "
-                                    f"because a ceiling was reached ({halted})"
-                                ),
-                                is_error=True,
-                            )
-                        )
-                        continue
-                    if config.max_tool_calls is not None and state.tool_calls >= config.max_tool_calls:
-                        block, report = self._ceiling_refusal(call, state, turn_index)
-                        results.append(block)
-                        state.tool_reports.append(report)
-                        halted = "error_max_tool_calls"
-                        continue
-                    block, report, fatal = self._dispatch(call, state, turn_index=turn_index, span=turn_span)
-                    results.append(block)
-                    state.tool_reports.append(report)
-                    state.tool_calls += 1
-                    if fatal is not None:
-                        halted = fatal
+                results, halted = self._run_tool_batch(calls, state, turn_index=turn_index, span=turn_span)
                 if not results:  # pragma: no cover - defensive: tool_use implies a result
                     results.append(ToolResultBlock(tool_use_id=calls[-1].id, content="no result produced", is_error=True))
                 tool_message = UserMessage(content=tuple(results))
@@ -1281,7 +1296,6 @@ class AgentRuntime:
                 if halted is not None:
                     yield self._finish(state, halted)
                     return
-
         yield self._finish(state, "error_max_turns")
 
     def _claim_session(self) -> str | None:
@@ -1414,29 +1428,209 @@ class AgentRuntime:
         return block, report
 
     # -- tool dispatch -----------------------------------------------------
-    def _dispatch(
+    def _run_tool_batch(
         self,
-        call: ToolUseBlock,
+        calls: Sequence[ToolUseBlock],
         state: _RunState,
         *,
         turn_index: int,
         span: Any,
-    ) -> tuple[ToolResultBlock, ToolCallReport, str | None]:
-        """Run one call through hooks, then the gate, then the handler.
+    ) -> tuple[list[ToolResultBlock], str | None]:
+        """Dispatch every tool_use in one assistant turn.
 
-        Hook veto first so a hook can rewrite the input before policy looks at
-        it; permission second so no hook ordering can bypass the gate. Returns a
-        fatal result subtype when the caller must stop the run.
+        Gate + hooks always run **serially and independently** (spine §3). Handler
+        bodies of a pure read-only batch may run concurrently when
+        ``parallel_tools > 1``; mixed or mutating turns stay fully serial.
         """
-        spec = self.tools.get(call.name)
+        from tools.parallel import batch_is_parallel_safe
+
+        results: list[ToolResultBlock] = []
+        halted: str | None = None
+        workers = int(getattr(self.config, "parallel_tools", 1) or 1)
+        specs = [self.tools.get(call.name) for call in calls]
+        can_parallel = workers > 1 and batch_is_parallel_safe(specs)
+
+        if not can_parallel:
+            for call in calls:
+                if halted is not None:
+                    results.append(
+                        ToolResultBlock(
+                            tool_use_id=call.id,
+                            content=(
+                                f"not executed: this run halted after the current turn "
+                                f"because a ceiling was reached ({halted})"
+                            ),
+                            is_error=True,
+                        )
+                    )
+                    continue
+                if self.config.max_tool_calls is not None and state.tool_calls >= self.config.max_tool_calls:
+                    block, report = self._ceiling_refusal(call, state, turn_index)
+                    results.append(block)
+                    state.tool_reports.append(report)
+                    halted = "error_max_tool_calls"
+                    continue
+                block, report, fatal = self._dispatch(call, state, turn_index=turn_index, span=span)
+                results.append(block)
+                state.tool_reports.append(report)
+                state.tool_calls += 1
+                if fatal is not None:
+                    halted = fatal
+            return results, halted
+
+        # Parallel-safe path: authorize each call on the main thread first, then
+        # run only the approved handler bodies concurrently. Order of results
+        # matches the assistant's tool_use order.
+        prepared: list[tuple[ToolUseBlock, Any, dict[str, Any], Any, bool] | None] = []
+        early: list[tuple[ToolResultBlock, ToolCallReport, str | None] | None] = []
+        for call, spec in zip(calls, specs):
+            if halted is not None:
+                early.append(
+                    (
+                        ToolResultBlock(
+                            tool_use_id=call.id,
+                            content=(
+                                f"not executed: this run halted after the current turn "
+                                f"because a ceiling was reached ({halted})"
+                            ),
+                            is_error=True,
+                        ),
+                        ToolCallReport(
+                            name=call.name,
+                            call_id=call.id,
+                            is_error=True,
+                            permission_source="halted",
+                            turn_index=turn_index,
+                            agent=self.config.agent,
+                        ),
+                        None,
+                    )
+                )
+                prepared.append(None)
+                continue
+            if self.config.max_tool_calls is not None and state.tool_calls >= self.config.max_tool_calls:
+                block, report = self._ceiling_refusal(call, state, turn_index)
+                early.append((block, report, "error_max_tool_calls"))
+                prepared.append(None)
+                halted = "error_max_tool_calls"
+                continue
+            outcome = self._authorize_tool(call, spec, state, turn_index=turn_index, span=span)
+            # Authorized shape: (None, spec, payload, decision, rewritten)
+            # Refused shape:    (block, report, fatal, None)
+            if outcome[0] is None:
+                _, auth_spec, payload, decision, rewritten = outcome
+                prepared.append((call, auth_spec, payload, decision, rewritten))
+                early.append(None)
+                state.tool_calls += 1
+            else:
+                block, report, fatal = outcome[0], outcome[1], outcome[2]
+                early.append((block, report, fatal))
+                prepared.append(None)
+                state.tool_calls += 1
+                if fatal is not None:
+                    halted = fatal
+
+        # Execute approved handlers concurrently.
+        from concurrent.futures import ThreadPoolExecutor, as_completed
+
+        handler_results: dict[int, tuple[ToolResult, int, str]] = {}
+        indexed = [(index, item) for index, item in enumerate(prepared) if item is not None]
+        if indexed:
+            def _run_one(
+                item: tuple[ToolUseBlock, Any, dict[str, Any], Any, bool]
+            ) -> tuple[ToolResult, int, str]:
+                call, spec, payload, _decision, _rewritten = item
+                context = ToolContext(
+                    session_id=state.session_id,
+                    agent=self.config.agent,
+                    depth=self.config.depth,
+                    turn_index=turn_index,
+                    sandbox=self.sandbox,
+                    limits=self.limits,
+                    services=self._services(),
+                )
+                started = time.monotonic()
+                err_cls = ""
+                try:
+                    raw = spec.handler(payload, context)
+                    result = _coerce_result(raw, spec.name)
+                except (ToolAccessError, ToolInputError, ValueError, KeyError, TypeError, OSError) as error:
+                    err_cls = type(error).__name__
+                    result = ToolResult.error(f"{err_cls}: {error}")
+                except Exception as error:  # noqa: BLE001
+                    err_cls = type(error).__name__
+                    result = ToolResult.error(f"tool {spec.name} failed: {err_cls}")
+                return result, int((time.monotonic() - started) * 1000), err_cls
+
+            index_by_future_item = {index: item for index, item in indexed}
+            with ThreadPoolExecutor(max_workers=min(workers, len(indexed))) as pool:
+                futures = {pool.submit(_run_one, item): index for index, item in indexed}
+                for future in as_completed(futures):
+                    index = futures[future]
+                    try:
+                        handler_results[index] = future.result()
+                    except Exception as error:  # noqa: BLE001 - pool must not kill the run
+                        failed_call = index_by_future_item[index][0]
+                        err_name = type(error).__name__
+                        handler_results[index] = (
+                            ToolResult.error(f"tool {failed_call.name} failed: {err_name}"),
+                            0,
+                            err_name,
+                        )
+
+        # Assemble in original order; post-hooks stay serial on the main thread.
+        for index, call in enumerate(calls):
+            if early[index] is not None:
+                block, report, fatal = early[index]
+                results.append(block)
+                state.tool_reports.append(report)
+                if fatal is not None and halted is None:
+                    halted = fatal
+                continue
+            item = prepared[index]
+            assert item is not None
+            call_i, spec, payload, decision, rewritten = item
+            result, duration_ms, err_cls = handler_results[index]
+            block, report = self._finish_tool_result(
+                call_i,
+                spec,
+                payload,
+                result,
+                state,
+                turn_index=turn_index,
+                span=span,
+                decision=decision,
+                rewritten=rewritten,
+                duration_ms=duration_ms,
+                parallel=True,
+                error_class=err_cls,
+            )
+            results.append(block)
+            state.tool_reports.append(report)
+        return results, halted
+
+    def _authorize_tool(
+        self,
+        call: ToolUseBlock,
+        spec: Any,
+        state: _RunState,
+        *,
+        turn_index: int,
+        span: Any,
+    ) -> tuple:
+        """PreToolUse + permission gate for one call (always serial, main thread).
+
+        Returns either ``(None, spec, payload, decision, rewritten)`` when the
+        call is approved for handler execution, or
+        ``(block, report, fatal, None)`` shaped as a 4-tuple starting with the
+        ToolResultBlock when the call is refused before the handler.
+        """
         if spec is None:
             reason = (
                 f"unknown tool {call.name!r}. Registered tools for this agent: "
                 f"{', '.join(self.tools.names()) or '(none)'}."
             )
             if call.name == TASK_TOOL_NAME:
-                # The name is absent because the policy took it away, so name the
-                # knob that moved instead of leaving the model to guess.
                 reason += (
                     f" Delegation is not available at depth {self.config.depth} "
                     f"(max_subagent_depth={self.config.max_subagent_depth}, "
@@ -1457,7 +1651,15 @@ class AgentRuntime:
                 ),
             )
             block = ToolResultBlock(tool_use_id=call.id, content=reason, is_error=True)
-            return block, ToolCallReport(name=call.name, call_id=call.id, is_error=True, permission_source="unknown_tool", turn_index=turn_index, agent=self.config.agent), None
+            report = ToolCallReport(
+                name=call.name,
+                call_id=call.id,
+                is_error=True,
+                permission_source="unknown_tool",
+                turn_index=turn_index,
+                agent=self.config.agent,
+            )
+            return (block, report, None, None)
 
         payload = dict(call.input) if isinstance(call.input, dict) else {}
         pre = self._fire(
@@ -1478,19 +1680,35 @@ class AgentRuntime:
         if pre.denied:
             self._trace_refusal(span, spec.name, source=f"hook:{pre.denied_by}", turn_index=turn_index)
             reason = f"{spec.name} refused by the {pre.denied_by} hook: {pre.deny_reason}"
-            state.denials.append(Denial(tool=spec.name, source=f"hook:{pre.denied_by}", reason=reason, agent=self.config.agent, turn_index=turn_index))
+            state.denials.append(
+                Denial(
+                    tool=spec.name,
+                    source=f"hook:{pre.denied_by}",
+                    reason=reason,
+                    agent=self.config.agent,
+                    turn_index=turn_index,
+                )
+            )
             block = ToolResultBlock(tool_use_id=call.id, content=reason, is_error=True)
             report = ToolCallReport(
-                name=spec.name, call_id=call.id, is_error=True, denied=True, permission_source="hook", turn_index=turn_index, agent=self.config.agent
+                name=spec.name,
+                call_id=call.id,
+                is_error=True,
+                denied=True,
+                permission_source="hook",
+                turn_index=turn_index,
+                agent=self.config.agent,
             )
             fatal = "error_permission_denied" if self.config.halt_on_denial else None
-            return block, report, fatal
+            return (block, report, fatal, None)
         if pre.updated_input is not None:
             payload = dict(pre.updated_input)
         rewritten = pre.updated_input is not None
 
         if spec.is_delegation:
-            return self._delegate(call, spec, payload, state, turn_index=turn_index, span=span, rewritten=rewritten)
+            # Delegation is never parallel-batched; caller should not reach here
+            # for Task, but keep the path explicit.
+            return ("delegate", call, spec, payload, rewritten)
 
         decision = self.permissions.evaluate_spec(
             spec,
@@ -1509,9 +1727,27 @@ class AgentRuntime:
             self._trace_refusal(span, spec.name, source=decision.source, turn_index=turn_index)
             reason = f"{spec.name} refused by the permission gate: {decision.reason}"
             state.denials.append(
-                Denial(tool=spec.name, source=decision.source, reason=reason, agent=self.config.agent, turn_index=turn_index)
+                Denial(
+                    tool=spec.name,
+                    source=decision.source,
+                    reason=reason,
+                    agent=self.config.agent,
+                    turn_index=turn_index,
+                )
             )
-            self.sessions.append("denial", {"agent": self.config.agent, **Denial(tool=spec.name, source=decision.source, reason=reason, agent=self.config.agent, turn_index=turn_index).as_dict()})
+            self.sessions.append(
+                "denial",
+                {
+                    "agent": self.config.agent,
+                    **Denial(
+                        tool=spec.name,
+                        source=decision.source,
+                        reason=reason,
+                        agent=self.config.agent,
+                        turn_index=turn_index,
+                    ).as_dict(),
+                },
+            )
             self._fire(
                 state,
                 "PostToolUseFailure",
@@ -1538,51 +1774,46 @@ class AgentRuntime:
                 agent=self.config.agent,
             )
             fatal = "error_permission_denied" if self.config.halt_on_denial else None
-            return block, report, fatal
+            return (block, report, fatal, None)
 
-        context = ToolContext(
-            session_id=state.session_id,
-            agent=self.config.agent,
-            depth=self.config.depth,
-            turn_index=turn_index,
-            sandbox=self.sandbox,
-            limits=self.limits,
-            services=self._services(),
-        )
-        started = time.monotonic()
-        with span.child(f"tool:{spec.name}") as tool_span:
-            tool_span.set_attributes(
-                {
-                    "tool.name": spec.name,
-                    "tool.kind": spec.kind,
-                    "tool.is_delegation": spec.is_delegation,
-                    "tool.input_keys": sorted(str(key) for key in payload)[:32],
-                    "permission.source": decision.source,
-                    "turn.index": turn_index,
-                    "hook.rewrote_input": rewritten,
-                }
-            )
-            try:
-                raw = spec.handler(payload, context)
-            except (ToolAccessError, ToolInputError, ValueError, KeyError, TypeError, OSError) as error:
-                result = ToolResult.error(f"{type(error).__name__}: {error}")
-                tool_span.set_attribute("tool.error_class", type(error).__name__)
-            except Exception as error:  # noqa: BLE001 - a broken tool must not kill the run
-                result = ToolResult.error(f"tool {spec.name} failed: {type(error).__name__}")
-                tool_span.set_attribute("tool.error_class", type(error).__name__)
-            else:
-                result = _coerce_result(raw, spec.name)
-            duration_ms = int((time.monotonic() - started) * 1000)
-            # Cost and outcome metadata only. The output body never reaches a span.
-            tool_span.set_attributes(
-                {
-                    "tool.is_error": bool(result.is_error),
-                    "tool.duration_ms": duration_ms,
-                    "tool.result_chars": min(len(result.text()), 10_000_000),
-                    "tool.truncated": bool(result.truncated),
-                }
-            )
+        return (None, spec, payload, decision, rewritten)
+
+    def _finish_tool_result(
+        self,
+        call: ToolUseBlock,
+        spec: Any,
+        payload: dict[str, Any],
+        result: ToolResult,
+        state: _RunState,
+        *,
+        turn_index: int,
+        span: Any,
+        decision: Any,
+        rewritten: bool,
+        duration_ms: int,
+        parallel: bool = False,
+        error_class: str = "",
+    ) -> tuple[ToolResultBlock, ToolCallReport]:
+        """Post-hooks + ToolCallReport after a handler (or parallel handler) returns."""
         tool_text = result.text()
+        attrs: dict[str, Any] = {
+            "tool.name": spec.name,
+            "tool.kind": spec.kind,
+            "tool.is_delegation": bool(getattr(spec, "is_delegation", False)),
+            "tool.input_keys": sorted(str(key) for key in payload)[:32],
+            "permission.source": getattr(decision, "source", "") or "",
+            "turn.index": turn_index,
+            "hook.rewrote_input": rewritten,
+            "tool.parallel": parallel,
+            "tool.is_error": bool(result.is_error),
+            "tool.duration_ms": duration_ms,
+            "tool.result_chars": min(len(tool_text), 10_000_000),
+            "tool.truncated": bool(result.truncated),
+        }
+        if error_class:
+            attrs["tool.error_class"] = error_class
+        with span.child(f"tool:{spec.name}") as tool_span:
+            tool_span.set_attributes(attrs)
         if result.is_error:
             self._fire(
                 state,
@@ -1599,7 +1830,7 @@ class AgentRuntime:
                     tool_response=tool_text[:500],
                     tool_is_error=True,
                     error=tool_text[:500],
-                    data={"duration_ms": duration_ms},
+                    data={"duration_ms": duration_ms, "parallel": parallel},
                 ),
             )
         else:
@@ -1616,7 +1847,11 @@ class AgentRuntime:
                     tool_use_id=call.id,
                     tool_input=payload,
                     tool_response=tool_text[:500],
-                    data={"duration_ms": duration_ms, "truncated": bool(result.truncated)},
+                    data={
+                        "duration_ms": duration_ms,
+                        "truncated": bool(result.truncated),
+                        "parallel": parallel,
+                    },
                 ),
             )
         block = result.as_block(call.id, max_chars=self.limits.max_result_chars)
@@ -1624,13 +1859,78 @@ class AgentRuntime:
             name=spec.name,
             call_id=call.id,
             is_error=bool(result.is_error),
-            permission_source=decision.source,
+            permission_source=getattr(decision, "source", "") or "",
             duration_ms=duration_ms,
             result_chars=len(tool_text),
             truncated=bool(result.truncated),
             input_rewritten=rewritten,
             turn_index=turn_index,
             agent=self.config.agent,
+        )
+        return block, report
+
+    def _dispatch(
+        self,
+        call: ToolUseBlock,
+        state: _RunState,
+        *,
+        turn_index: int,
+        span: Any,
+    ) -> tuple[ToolResultBlock, ToolCallReport, str | None]:
+        """Run one call through hooks, then the gate, then the handler.
+
+        Hook veto first so a hook can rewrite the input before policy looks at
+        it; permission second so no hook ordering can bypass the gate. Returns a
+        fatal result subtype when the caller must stop the run.
+        """
+        spec = self.tools.get(call.name)
+        outcome = self._authorize_tool(call, spec, state, turn_index=turn_index, span=span)
+        head = outcome[0]
+        if head == "delegate":
+            _, call_d, spec_d, payload, rewritten = outcome
+            return self._delegate(
+                call_d, spec_d, payload, state, turn_index=turn_index, span=span, rewritten=rewritten
+            )
+        if head is not None:
+            # Refused before handler: (block, report, fatal, None)
+            block, report, fatal = head, outcome[1], outcome[2]
+            return block, report, fatal
+
+        _, spec, payload, decision, rewritten = outcome
+        context = ToolContext(
+            session_id=state.session_id,
+            agent=self.config.agent,
+            depth=self.config.depth,
+            turn_index=turn_index,
+            sandbox=self.sandbox,
+            limits=self.limits,
+            services=self._services(),
+        )
+        started = time.monotonic()
+        error_class = ""
+        try:
+            raw = spec.handler(payload, context)
+            result = _coerce_result(raw, spec.name)
+        except (ToolAccessError, ToolInputError, ValueError, KeyError, TypeError, OSError) as error:
+            error_class = type(error).__name__
+            result = ToolResult.error(f"{error_class}: {error}")
+        except Exception as error:  # noqa: BLE001 - a broken tool must not kill the run
+            error_class = type(error).__name__
+            result = ToolResult.error(f"tool {spec.name} failed: {error_class}")
+        duration_ms = int((time.monotonic() - started) * 1000)
+        block, report = self._finish_tool_result(
+            call,
+            spec,
+            payload,
+            result,
+            state,
+            turn_index=turn_index,
+            span=span,
+            decision=decision,
+            rewritten=rewritten,
+            duration_ms=duration_ms,
+            parallel=False,
+            error_class=error_class,
         )
         return block, report, None
 
@@ -1648,7 +1948,13 @@ class AgentRuntime:
             )
 
     def _services(self) -> dict[str, Any]:
-        return {"registry": self.tools, "sidecar": self.sidecar, "config": self.config, "runtime": self}
+        return {
+            "registry": self.tools,
+            "sidecar": self.sidecar,
+            "config": self.config,
+            "runtime": self,
+            "shell_backend": self.config.shell_backend,
+        }
 
     def _record_tool_message(self, message: UserMessage) -> None:
         """Write the tool_result turn, optionally without output bodies.

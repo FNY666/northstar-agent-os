@@ -1,13 +1,20 @@
-.PHONY: help demo test ts-test install
+.PHONY: help demo test ts-test install bench install-smoke
 
 help:
 	@echo "northstar-agent-os targets:"
-	@echo "  make demo    run the offline governed-loop demo (no API key needed)"
+	@echo "  make demo    offline product-path demo: bin/northstar agent (no API key)"
 	@echo "  make test    run every component's test suite + repository doc tests"
 	@echo "  make ts-test run the runtime's TypeScript face suite (needs node >= 22.6;"
 	@echo "               without it the suite is skipped, not failed - the python drift"
 	@echo "               gate in tests/test_typescript_sdk.py covers the same contract)"
 	@echo "  make install install every component into a virtualenv (python3 -m venv .venv)"
+	@echo "  make bench   public governance benchmark (denial / injection / budget)"
+	@echo "  make install-smoke  clean-venv wheel install + northstar --version + bench"
+	@echo ""
+	@echo "product entry (checkout, no pip):"
+	@echo "  bin/northstar --version"
+	@echo "  bin/northstar agent --workspace . --prompt 'hi' --provider scripted --scripted-text ok"
+	@echo "  bin/northstar doctor --workspace ."
 	@echo ""
 	@echo "per-component test suites (py3.10+, no PYTHONPATH needed - the test"
 	@echo "modules bootstrap their sibling-component paths themselves):"
@@ -57,3 +64,20 @@ install:
 	./.venv/bin/pip install ./components/northstar-agent-runtime
 	@echo "installed into .venv:"
 	@./.venv/bin/pip list 2>/dev/null | grep -i northstar
+
+# Public governance scorecard (P5). Offline, deterministic, no API key.
+# Same entry as `bin/northstar bench` / `northstar bench` after install.
+bench:
+	@echo "== governance bench =="
+	@if [ -x bin/northstar ]; then \
+		bin/northstar bench; \
+	else \
+		(cd components/northstar-agent-runtime && python3 -m cli bench); \
+	fi
+
+# Install-from-clean-venv smoke (P5 readiness). Does not publish; does not
+# drop the .dev suffix. Uses a throwaway directory so a developer's .venv is
+# never touched. Implemented as a small shell script for dash/bash portability.
+install-smoke:
+	@sh examples/install_smoke.sh
+

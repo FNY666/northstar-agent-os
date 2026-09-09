@@ -65,7 +65,10 @@ class AgentDefinition:
 
     @property
     def is_read_only(self) -> bool:
-        return set(self.disallowed_tools) >= {"Write", "Edit"} or all(
+        # Shell (kind=exec) is command execution: a "read-only" agent must deny it
+        # the same way it denies Write/Edit, even if the tool is not in `tools`.
+        mutating_floor = {"Write", "Edit", "Shell"}
+        return set(self.disallowed_tools) >= mutating_floor or all(
             tool in READ_ONLY_TOOLS or tool == "CodexReadOnly" for tool in self.tools
         )
 
@@ -273,7 +276,7 @@ def explorer_agent() -> AgentDefinition:
             "references, and state what you could not determine."
         ),
         tools=READ_ONLY_TOOLS,
-        disallowed_tools=("Write", "Edit"),
+        disallowed_tools=("Write", "Edit", "Shell"),
         permission_mode="default",
         max_turns=8,
         max_tool_calls=30,
@@ -292,7 +295,7 @@ def planner_agent() -> AgentDefinition:
             "proves each step. Never attempt a modification: plan mode refuses it."
         ),
         tools=READ_ONLY_TOOLS,
-        disallowed_tools=("Write", "Edit"),
+        disallowed_tools=("Write", "Edit", "Shell"),
         permission_mode="plan",
         max_turns=6,
         max_tool_calls=20,
@@ -314,7 +317,7 @@ def evaluator_agent(criteria: Sequence[str] = ()) -> AgentDefinition:
             "Quote path:line evidence for each criterion. Do not modify anything."
         ),
         tools=READ_ONLY_TOOLS,
-        disallowed_tools=("Write", "Edit", "Task"),
+        disallowed_tools=("Write", "Edit", "Shell", "Task"),
         permission_mode="plan",
         model="",
         max_turns=6,
