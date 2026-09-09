@@ -179,3 +179,21 @@ use `CausalGraph.from_segments()` with separate verified segments and an
 explicit terminal-parent to child-decision `HandoffLink`; the API rejects
 unknown/duplicate event digests, non-terminal parents, wrong agents and
 identity drift.
+
+## Graph admission and atomic evidence index
+
+`graph_store.py` admits only a `CausalGraph` that has passed the independent
+canonical event, route-state, edge, segment-boundary and handoff checks. Its
+v2 record stores the graph commitment, segment lengths, event digests, typed
+edges and typed handoff links, then publishes the complete record list through
+a same-directory temporary file, `fsync`, and atomic replacement. Invalid
+admission leaves the existing index unchanged; recovery verifies record
+sequence, predecessor links, graph commitment, endpoint coverage, handoff-edge
+matching and duplicate prevention.
+
+The index is a compact evidence projection, not a replacement for the source
+`RouteLineage`: it does not duplicate full event payloads, so event semantics
+must still be checked against the source lineage. A graph digest is not a
+signature or authorization, and atomic filesystem publication is not a proof
+of distributed crash consistency. A caller-held graph cursor is still needed
+to detect deletion of the final index record.
