@@ -1,5 +1,52 @@
 # Northstar Agent OS — initial public component
 
+## Unreleased (documentation batch) — third-round audit: the path *behind* the gate
+
+No code changed in this batch. `docs/execution-boundary-audit-2026-09.zh-CN.md` deepens the 2026-09-08
+capability audit by asking what an *approved* action can still do, and answers with reproductions and
+milliseconds.
+
+- **F4 — the governance write protection does not cover the execution path.** `protected_prefixes` is
+  enforced inside `ToolSandbox.resolve(for_write=True)`, i.e. by the file tools only. `Shell` (both the
+  `bwrap` and the `process` backend — the workspace is the single writable bind) and MCP server children
+  never consult it. Reproduced offline: one `result=success`, `permission_denials=[]` run whose `init`
+  event advertised `protected_prefixes=['.git','.northstar']` dropped `deny_tools` from
+  `.northstar/config.toml` (revision string untouched, so the next run inherited the loosened policy
+  silently) and appended a `git alias` to `.git/config` that then executed on the host outside the
+  sandbox. This is the CBSE class with a published analogue (CVE-2026-25725), and `threat-model.md`
+  already *states* the requirement ("shell must not undo that"). The public `bench` scorecard cannot see
+  it — all 13 cases and the 12 `test_governance_writes` tests act through the file tools: the gate's
+  decision is measured, the approved action's effect is not.
+- **F5 — MCP children are a second execution path with weaker containment than hooks.** Same
+  "the repository declares, one operator flag enables" shape as `[[hooks]]`, none of the discipline:
+  `Popen(env={**os.environ, **extra})` hands the full parent environment (secrets included, key names
+  verified locally) to a process the repository names, `command: sh` + `args: ["-c", …]` is expressible
+  where hooks refuse it, timeouts reach 300 s where hooks cap at 10 s, nothing about the spawn is
+  recorded in the transcript (`loop.py`/`sessions.py` contain no `mcp` at all), and a run that aborts
+  with a configuration error has already executed the child. `--mcp-allow-roots` announces
+  `Path.cwd()` as "the workspace" instead of `--workspace`.
+- **F6 — the digest covers the conversation, not the instructions.** No prompt-contributing byte
+  (system prompt, `AGENTS.md`, skills listing, agent definitions, plugin context, memory) reaches the
+  transcript, and `checkpoints.build` digests the transcript alone: after poisoning, both checkpoints of
+  the same run still reported `[verified]`. A maxed-out workspace puts **76,301 characters** in front of
+  the model that no ceiling counts and `should_compact` cannot see.
+- **The governance tax, measured**: `PermissionEngine.evaluate` 0.82 µs, `resolve(write)` 30.9 µs,
+  one `process`-backend `Shell` call 1.02 ms, a durable transcript record 355 µs (24× a non-durable
+  one), end-to-end **1–2 ms per governed turn** against a ~110 ms process startup of which ~50 ms is
+  `cli`'s eager import of `governance_bench`/`plugin_*`/`doctor`. `sessions checkpoints` is quadratic on
+  the *reader* side (25 boundaries 5 ms → 1200 boundaries 10.4 s), which the fix removes without
+  touching the digest format.
+- **Roadmap deltas** (P0-5 bwrap read-only binds + a startup probe, P0-6 drift detection with an audit
+  record and its own error subtype, P0-7 MCP env scrubbing plus an exec opt-in split, P1-5
+  `context.digest` in `init` and in every checkpoint, P1-6 single-pass verification and lazy imports)
+  are written as acceptance criteria, not intentions. `next-gen-agent-os.zh-CN.md` invariant 5 is
+  corrected from "enforced" to "enforced on the file-tool path", and the priority table gains row 6.
+
+Re-measured baseline for the next batch to quote: **1612** repository tests green
+(51+41+37+65+54+1294+70, runtime 5 skips) + **57** TypeScript-face tests, 30,026 non-test and
+23,041 test Python lines, 11,851 markdown lines, `northstar bench` 13/13 in 19 ms,
+`python3 tests/docbuild.py verify` clean. Version stays `0.1.0.dev0`.
+
 ## Unreleased (twenty-fifth batch) — P5: public governance bench + install smoke + minimal agent task
 
 Closes the spine's P5 slice without cutting a release tag (version stays

@@ -18,6 +18,7 @@
 
 > **2026-09-08 更新**：P0 四项（含新增的 F3 前置项）已随第十三批落地，全仓 830 → 890 项测试全绿；F1/F2 已闭合、F3 未动。
 > **同日第十四～十八批**：F3（检查点/派生恢复）、P1-2（多模型 + 独立完成判定）、`skills check`（技能供应链门）、**P1-1（MCP 2026-07-28 代际 + elicitation 走审批门）**、**token 级流式（`--stream`，带流-记录一致性校验）**、**durable 统一（会话一写者 + 检查点↔durable 事件双向翻译）**全部落地，全仓 **1239 项全绿**（runtime 942）。下表与 §4/§5 的"待做"标记已按此同步；仍未做：显式重试/退避/降级、OS 级沙箱、sidecar 侧 binding 校验。吸收"顶级优点"的取舍判据与冲突清单见 [next-gen-agent-blueprint.zh-CN.md](next-gen-agent-blueprint.zh-CN.md)。
+> **2026-09-09 第三轮（执行路径与治理税）**：本轮基线已复测为 **1612 项全绿**（runtime 1294）；**F2 被证实只闭合了一半**——`protected_prefixes` 只拦文件工具，`Shell` 与 MCP 子进程都能改写 `.northstar/` 与 `.git/`（含一条"沙箱内植入、沙箱外 `git` 执行"的复现链），并且中毒之后 `sessions checkpoints` 仍报 `[verified]`，因为摘要只覆盖 transcript。三条新发现（F4/F5/F6）、治理税的毫秒数与修订后的路线见 [execution-boundary-audit-2026-09.zh-CN.md](execution-boundary-audit-2026-09.zh-CN.md)。
 
 ---
 
@@ -121,6 +122,10 @@
 所以真实风险是**三条，不含提权**：① **持久化策略漂移**——删掉仓库声明的 `deny_tools`/降低的 ceilings，之后所有运行静默继承被改写的策略；② **上下文投毒落盘**——植入/修改 `skills/*/SKILL.md`、`agents/*.md`（这些只读但进 prompt，是间接注入的持久载体）；③ **自我 DoS**——写坏 config 让整个 workspace 拒绝运行。2026 年业界共识正是这条："treat sandbox configuration as immutable, never let an agent modify its own approval policy" 🟡。头部工具靠"策略在 `~/.claude/` + managed settings，不在 agent 可写根里"绕开了这个问题；Northstar 把策略放进 workspace 是优点（可评审、可 git 管），但需要补一道写保护。
 
 修法（1 天，含测试）：`ToolLimits.protected_prefixes` 默认改为 `(".git", ".northstar")`，拒绝信息复用现有"that tree holds repository metadata"句式；逃生门 `--allow-policy-writes`（默认关，且在 `--json` 与审计流里落一条 `policy_writes_allowed` 事件）；补测试：写 `.northstar/config.toml`、`.northstar/agents/x.md`、`.northstar/skills/x/SKILL.md`、以及**指向这些路径的符号链接**均被拒。
+
+> **2026-09-09 复核：这只闭合了文件工具。**`Shell`（含 bwrap 后端）与 MCP 子进程不经过 `ToolSandbox.resolve`，
+> 因此同一条不变量在执行路径上是空的，并已复现"沙箱内植入 git alias → 沙箱外执行"。修复分三层
+> （bwrap 只读绑定 / process 后端 drift 检测 / 叙事收口），见 [execution-boundary-audit-2026-09.zh-CN.md](execution-boundary-audit-2026-09.zh-CN.md) §3。
 
 ### F3 — durable 零件与 runtime 未接线
 

@@ -18,7 +18,8 @@ Northstar 面向希望**把活交给 AI 同事**、并要求其在明确边界�
 - **不变量：** 每次工具调用穿过权限门、hooks、预算天花板与审计；策略只能收紧  
 
 产品脊梁与路线图：[next-gen-agent-os.zh-CN.md](next-gen-agent-os.zh-CN.md)。  
-对标全球顶级 agent：[benchmark-top-agents-2026-09.zh-CN.md](benchmark-top-agents-2026-09.zh-CN.md)。
+对标全球顶级 agent：[benchmark-top-agents-2026-09.zh-CN.md](benchmark-top-agents-2026-09.zh-CN.md)。  
+执行路径与治理税深挖（第三轮审计，含毫秒数）：[execution-boundary-audit-2026-09.zh-CN.md](execution-boundary-audit-2026-09.zh-CN.md)。
 
 ## 当前发布了什么
 

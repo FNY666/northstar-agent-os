@@ -45,7 +45,10 @@
 
 附加产品层不变量：
 
-5. **策略不可自改** — `.northstar/` 默认写保护  
+5. **策略不可自改** — `.northstar/` 默认写保护
+   *（当前实现由文件工具路径强制：`Write`/`Edit`/`LS`/`Grep`/`Read` 之外的执行路径——`Shell` 与 MCP
+   子进程——不经过 `ToolSandbox.resolve`，因此这一条在执行路径上是**待补**而非**已成立**；
+   复现与三层修法见 [execution-boundary-audit-2026-09.zh-CN.md](execution-boundary-audit-2026-09.zh-CN.md) §3/§4）*  
 6. **恢复不洗预算** — checkpoint / resume 继承已消耗计数  
 7. **后置条件独立于模型** — agent 说「做完了」不算数  
 8. **无 key 可回归** — 吸收的能力若不能进 scripted 测试，就不算吸收成功  
@@ -85,6 +88,7 @@ northstar agent "…"          ← 唯一推荐入口
 | **3** | 并行工具 + 真多 Agent handoff | **本批落地** | 只读工具可并行（门仍串行）；`interop_bridge` 签名 handoff |
 | **4** | 工作区记忆 + 沙箱内 Skills 脚本 | **本批落地** | `.northstar/memory/`（可写 carve-out + digest）；skill `scripts/` 仅经 Shell |
 | **5** | 安装/发布/最小交互/治理公开基准 | **本批落地** | `northstar bench` + `make bench`/`install-smoke`；`agent TASK` 位置参数；仍 `0.1.0.dev0` |
+| **6** | 闸门之后的路径：执行面写保护、MCP 子进程隔离、指令字节入摘要 | **待做（09-09 审计已给复现与验收）** | F4/F5/F6 → `execution-boundary-audit-2026-09.zh-CN.md` §8 的 P0-5/P0-6/P0-7/P1-5/P1-6 |
 
 ### 明确不做（防漂移）
 
