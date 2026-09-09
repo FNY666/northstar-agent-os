@@ -18,6 +18,8 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 SIDECAR_DIR = ROOT.parent / "northstar-codex-sidecar"
+CONTRACT_DIR = ROOT.parent / "northstar-run-contract"
+DURABLE_DIR = ROOT.parent / "northstar-durable-run"
 
 
 def load_sidecar(name: str):
@@ -32,6 +34,30 @@ def load_sidecar(name: str):
     if text not in sys.path:
         sys.path.append(text)
     return importlib.import_module(name)
+
+def load_contract(name: str):
+    """Import a module from the sibling run-contract component (same rule as above)."""
+    import importlib
+
+    text = str(CONTRACT_DIR)
+    if text not in sys.path:
+        sys.path.append(text)
+    return importlib.import_module(name)
+
+
+def load_durable(name: str):
+    """Import a module from the sibling durable-run component (same rule as above).
+
+    Only the drift and bridge tests use this: the runtime must stay importable with no
+    durable checkout present, so nothing in ``loop.py`` reaches for it.
+    """
+    import importlib
+
+    text = str(DURABLE_DIR)
+    if text not in sys.path:
+        sys.path.append(text)
+    return importlib.import_module(name)
+
 
 from agents import AgentRegistry, builtin_registry  # noqa: E402
 from hooks import HookRegistry  # noqa: E402
@@ -113,6 +139,7 @@ class RuntimeTestCase(unittest.TestCase):
         can_use_tool: Any = None,
         provider: Any = None,
         tracer: Tracer | None = None,
+        budget: Any = None,
         **config_kwargs: Any,
     ) -> AgentRuntime:
         if provider is None:
@@ -131,6 +158,7 @@ class RuntimeTestCase(unittest.TestCase):
             sessions=sessions,
             can_use_tool=can_use_tool,
             tracer=tracer if tracer is not None else self.tracer,
+            budget=budget,
         )
 
     def drive(self, runtime: AgentRuntime, prompt: str = "go") -> RunReport:
@@ -202,6 +230,8 @@ __all__ = [
     "RuntimeConfig",
     "RuntimeTestCase",
     "SIDECAR_DIR",
+    "CONTRACT_DIR",
+    "load_contract",
     "load_sidecar",
     "ScriptedProvider",
     "SessionStore",

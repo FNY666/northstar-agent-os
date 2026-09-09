@@ -18,6 +18,7 @@ from cli import USAGE_ERROR, main
 from mcp_client import McpError, McpStdioClient, mcp_tool_specs, parse_mcp_flag
 
 FIXTURE = Path(__file__).resolve().parent / "fixtures" / "mcp_echo_server.py"
+MRTR_FIXTURE = Path(__file__).resolve().parent / "fixtures" / "mcp_mrtr_server.py"
 FAST_TIMEOUT_MS = 500
 
 
@@ -219,6 +220,120 @@ class CliIntegrationTests(unittest.TestCase):
         code, out, _ = run_cli("tools")
         self.assertEqual(code, 0)
         self.assertNotIn("mcp__", out)
+
+
+class GenerationFlagTests(unittest.TestCase):
+    """The generation and elicitation flags, as the operator meets them."""
+
+    def setUp(self):
+        self.ws = Path(tempfile.mkdtemp(prefix="nsar-mcpgen-"))
+        self.saved_env = dict(os.environ)
+        os.environ["MRTR_SERVER_MODE"] = "discover"
+
+    def tearDown(self):
+        os.environ.clear()
+        os.environ.update(self.saved_env)
+
+    def server(self) -> str:
+        return f"demo=python3 {MRTR_FIXTURE}"
+
+    def script(self, tool_name: str, tool_input: dict[str, object] | None = None) -> Path:
+        path = self.ws / "s.json"
+        path.write_text(
+            json.dumps([{"tool": {"name": tool_name, "input": tool_input or {}, "id": "g1"}}, {"text": "done"}]),
+            encoding="utf-8",
+        )
+        return path
+
+    def run_with(self, *extra: str) -> tuple[int, str, str]:
+        script = self.script("mcp__demo__needs_input")
+        return run_cli(
+            "run",
+            "--workspace",
+            str(self.ws),
+            "--prompt",
+            "call",
+            "--script",
+            str(script),
+            "--mcp-server",
+            self.server(),
+            "--allow-tool",
+            "mcp__demo__needs_input",
+            *extra,
+        )
+
+    def test_the_stance_is_printed_even_in_a_dry_run(self):
+        code, out, _ = run_cli(
+            "run", "--workspace", str(self.ws), "--prompt", "hi", "--scripted-text", "x",
+            "--mcp-server", self.server(), "--dry-run",
+        )
+        self.assertEqual(code, 0)
+        self.assertIn("protocol=auto, elicit=off", out)
+        self.assertIn("roots=off, sensitive_input=off, rounds=3", out)
+
+    def test_unattended_a_remote_question_becomes_a_visible_tool_error(self):
+        code, out, _ = self.run_with("--json")
+        self.assertEqual(code, 0)
+        self.assertIn("declined without calling the tool", out)
+        self.assertIn("no approver attached", out)
+
+    def test_pre_approved_answers_let_the_call_through(self):
+        code, out, _ = self.run_with(
+            "--json", "--mcp-elicit", "--mcp-elicit-answers", json.dumps({"approved": True}), "--quiet"
+        )
+        self.assertEqual(code, 0, out)
+        self.assertIn("answered after 1 ask(s)", out)
+        self.assertIn('"action": "accept"', out.replace("\\", ""))
+
+    def test_eliciting_without_a_terminal_is_a_configuration_error(self):
+        code, _, err = self.run_with("--mcp-elicit")
+        self.assertEqual(code, USAGE_ERROR)
+        self.assertIn("needs a terminal or --mcp-elicit-answers", err)
+
+    def test_malformed_pre_approved_answers_are_rejected_before_any_spawn(self):
+        code, _, err = self.run_with("--mcp-elicit", "--mcp-elicit-answers", "{oops")
+        self.assertEqual(code, 64)
+        self.assertIn("not valid JSON", err)
+        code, _, err = self.run_with("--mcp-elicit", "--mcp-elicit-answers", "[1,2]")
+        self.assertEqual(code, 64)
+        self.assertIn("must be a JSON object", err)
+
+    def test_the_round_cap_is_validated_as_configuration(self):
+        code, _, err = self.run_with("--mcp-max-rounds", "0")
+        self.assertEqual(code, 64)
+        self.assertIn("between 1 and 8", err)
+
+    def test_a_pinned_legacy_generation_still_reaches_the_modern_only_server_error(self):
+        # The operator said "legacy"; the client obeys and reports what the server said
+        # instead of quietly trying something else.
+        code, _, err = self.run_with("--mcp-protocol", "legacy")
+        self.assertEqual(code, 64)
+        self.assertIn("modern-only", err)
+
+    def test_the_probe_result_reaches_the_log(self):
+        code, _, err = self.run_with()
+        self.assertEqual(code, 0, err)
+        self.assertIn("server/discover answered: modern server", err)
+
+    def test_the_older_server_is_unaffected_by_the_new_flags(self):
+        code, out, _ = run_cli(
+            "run",
+            "--workspace",
+            str(self.ws),
+            "--prompt",
+            "call",
+            "--script",
+            str(self.script("mcp__demo__echo", {"text": "still fine"})),
+            "--mcp-server",
+            f"demo=python3 {FIXTURE}",
+            "--allow-tool",
+            "mcp__demo__echo",
+            "--mcp-protocol",
+            "auto",
+            "--json",
+        )
+        self.assertEqual(code, 0, out)
+        self.assertIn("echo:still fine", out)
 
 
 if __name__ == "__main__":

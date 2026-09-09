@@ -9,6 +9,7 @@ import unittest
 import support  # noqa: F401  (installs the sys.path shim)
 from support import RuntimeTestCase, text_turn, tool_turn
 
+from events import EXIT_CODES  # the terminal convention lives with the event feed
 from providers.base import (
     RESULT_SUBTYPES,
     SYSTEM_SUBTYPES,
@@ -25,10 +26,10 @@ from providers.base import (
 
 
 class EventTypeTests(unittest.TestCase):
-    def test_system_message_accepts_the_three_documented_subtypes(self):
-        for subtype in ("init", "compact_boundary", "informational"):
+    def test_system_message_accepts_the_documented_subtypes(self):
+        for subtype in ("init", "compact_boundary", "informational", "postconditions"):
             self.assertEqual(SystemMessage(subtype=subtype, content="x").subtype, subtype)
-        self.assertEqual(SYSTEM_SUBTYPES, ("init", "compact_boundary", "informational"))
+        self.assertEqual(SYSTEM_SUBTYPES, ("init", "compact_boundary", "informational", "postconditions"))
 
     def test_system_message_rejects_an_unknown_subtype(self):
         with self.assertRaises(ValueError):
@@ -44,8 +45,13 @@ class EventTypeTests(unittest.TestCase):
                 "error_max_budget_usd",
                 "error_during_execution",
                 "error_permission_denied",
+                "error_postconditions_failed",
+                "error_session_busy",
             ),
         )
+        # Pinned against the exit-code table as well: a subtype with no code is a result
+        # the shell cannot read, and a code with no subtype is a number that lies.
+        self.assertEqual(set(RESULT_SUBTYPES), set(EXIT_CODES))
         for subtype in RESULT_SUBTYPES:
             message = ResultMessage(subtype=subtype)
             self.assertEqual(message.is_error, subtype != "success")

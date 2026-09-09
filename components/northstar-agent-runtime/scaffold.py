@@ -25,6 +25,7 @@ from pathlib import Path
 
 CONFIG_NAME = ".northstar/config.toml"
 AGENT_NAME = ".northstar/agents/reviewer.md"
+SKILLS_README = ".northstar/skills/README.md"
 HOOKS_README = ".northstar/hooks/README.md"
 WORKFLOW_NAME = ".github/workflows/northstar-review.yml"
 PROJECT_README = "README.md"
@@ -60,6 +61,7 @@ def scaffold_project(directory: str | Path, *, force: bool = False) -> list[Path
         CONFIG_NAME: _config_toml(),
         AGENT_NAME: _reviewer_agent(),
         HOOKS_README: _hooks_readme(),
+        SKILLS_README: _skills_readme(),
         WORKFLOW_NAME: _ci_workflow(),
         AGENTS_MD: _agents_md(name),
         PROJECT_README: _project_readme(name),
@@ -95,6 +97,17 @@ agent = "reviewer"
 # max_tool_calls = 50             # may only lower 50
 # max_budget_usd = 0.25           # any positive cap (built-in default: unlimited)
 # halt_on_denial = true           # end with error_permission_denied on a refusal
+#
+# Postconditions - claims about the workspace that THIS PROCESS checks after the run,
+# so "the agent said it finished" is not the evidence. A repo may add checks here; it
+# can never remove or weaken one passed on the command line.
+# [[verify]]
+# kind = "unchanged"             # exists | absent | changed | unchanged | contains
+# path = "uv.lock"
+# [[verify]]
+# kind = "contains"
+# path = "docs/runbook.md"
+# text = "rollback"
 """
 
 
@@ -119,18 +132,60 @@ You are the read-only reviewer for this repository.
 """
 
 
+def _skills_readme() -> str:
+    return """\
+# Agent Skills in this workspace
+
+A skill is a folder here containing `SKILL.md`:
+
+```
+.northstar/skills/
+  release-notes/
+    SKILL.md
+```
+
+```markdown
+---
+name: release-notes
+description: How this project writes release notes. Use when drafting a changelog entry.
+---
+
+The body is the instruction the model reads *on demand*, with the ordinary
+sandboxed Read tool. Keep it under ~500 lines and put detail in linked files.
+```
+
+Rules that are not negotiable here:
+
+- **Frontmatter is `name`, `description`, `model` only.** The `description` is the
+  trigger text injected into every session's prompt, so it is short by design and
+  capped by the runtime.
+- **A skill is text, never an execution or permission channel.** It cannot register
+  a tool, cannot grant itself one, and cannot write policy: `.northstar` is
+  write-protected for the agent, so a run cannot mark its own skills reviewed or
+  loosen its own gate.
+- **Nothing outside the workspace is followed**, including a symlinked skill folder.
+- `skills check --workspace .` reviews the set (instruction override, concealment,
+  credential reads, `curl … | bash`, policy self-edit, invisible unicode, context
+  bloat) and `--write-lock` pins the reviewed digests in `.northstar/skills.lock`.
+  `run --require-skill-lock` then refuses to start if a skill changed since review.
+- Third-party bundles usually install to `.claude/skills/` or `.agents/skills/`;
+  `skills check --root <checkout>` reads those trees too, so you can review before
+  adopting.
+
+"""
+
+
 def _hooks_readme() -> str:
     return """\
 # Hooks in this project
 
 Hooks (SessionStart, PreToolUse, PostToolUse, PostToolUseFailure, SessionEnd,
-...) are the runtime's observation/veto surface. They are **registered in
-code** via `HookRegistry` and handed to `AgentRuntime(hooks=...)` — a file in
-this directory is never silently executed, because a workspace file must never
-gain code execution without an explicit embedding decision.
+...) are the runtime's observation/veto surface. There are two ways to wire one,
+and the difference is a trust decision, not a style preference.
 
-Example (embedding code — hooks are accepted by `loop.AgentRuntime(hooks=…)`;
-the CLI and the SDK build their own registry, see the runtime README "Hooks"):
+## 1. In embedding code (default, always available)
+
+Register them on a `HookRegistry` and hand that to `AgentRuntime(hooks=...)`:
 
     from hooks import HookInput, HookResult, HookRegistry
     from loop import AgentRuntime, RuntimeConfig
@@ -153,8 +208,37 @@ the CLI and the SDK build their own registry, see the runtime README "Hooks"):
     for event in runtime.run("hi"):
         print(type(event).__name__)
 
-Scripts that *must* run on events belong behind your own supervisor (CI,
-host), not inside the workspace.
+## 2. Declared by this repository (off unless a human enables it)
+
+`.northstar/config.toml` may name a hook per lifecycle event, so reviewing the
+policy in a pull request is the whole change:
+
+    [[hooks]]
+    event = "PreToolUse"
+    script = ".northstar/hooks/gate.py"   # workspace-relative; never a shell line
+    interpreter = "python3"               # optional allowlist, no path separators
+    tool = "Write"                        # optional: fire for one tool only
+    timeout_ms = 2000
+
+The script receives the event JSON on stdin and may print one verdict JSON on
+stdout (`{"decision": "deny", "reason": "..."}`). Exit code 2 denies, using stderr
+as the reason; a timeout, a crash, or an unparseable verdict is also a denial - a
+hook that cannot answer is never a green light.
+
+**Nothing in section 2 runs unless you pass `--enable-workspace-hooks`.**
+Cloning a repository must not mean executing it, which is why the surface is
+narrow on purpose: veto-capable events only (`PreToolUse`, `UserPromptSubmit`,
+`SessionStart`, `PreCompact`, `SubagentStart`); no `command` key and no shell
+anywhere in the schema; the script must live inside this workspace (symlinks are
+resolved before the check, never followed); output is capped; and the child sees
+only `PATH` and `LANG`, so no model credential crosses into hook code.
+
+`Write` and `Edit` cannot touch this directory at all: `.northstar` is write-
+protected, so a run can neither plant a hook nor rewrite the policy that gates it.
+
+Scripts that must run regardless of any flag belong behind your own supervisor
+(CI, host automation) - not in `.northstar/hooks/`. A repository file may only
+ever tighten what a run may do, and an ungated executor would not.
 """
 
 
@@ -188,6 +272,16 @@ jobs:
         run: |
           # TODO: point at your wheel asset / index once published.
           pip install ./components/northstar-agent-runtime
+      - name: Review the Agent Skills supply chain
+        # Fails when a SKILL.md instructs the model to override its instructions,
+        # read a credential store, pipe a remote script to a shell, or edit the
+        # agent's own policy; also fails when a skill changed since it was pinned
+        # with `skills check --write-lock` (commit that lockfile).
+        run: |
+          northstar-agent-runtime skills check --workspace . || {
+            echo "::error::unreviewed or unsafe Agent Skills - run 'skills check' locally and read the findings"
+            exit 1
+          }
       - name: Run the reviewer (read-only, ceiling-capped, audited)
         env:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
@@ -239,7 +333,8 @@ A governed Northstar workspace, scaffolded by `northstar-agent-runtime new`.
 | `AGENTS.md` | project instructions auto-injected into every run |
 | `.northstar/config.toml` | repository policy (`northstar.policy.v1`, revision `{_revision()}`); default agent is the read-only reviewer |
 | `.northstar/agents/reviewer.md` | read-only, plan-mode reviewer agent |
-| `.northstar/hooks/README.md` | how hooks apply (registered in code, never auto-executed) |
+| `.northstar/hooks/README.md` | how hooks apply (embedding code, or declared + flagged) |
+| `.northstar/skills/README.md` | where skills live, and how a skill gets trusted (review, then pin) |
 | `.github/workflows/northstar-review.yml` | governed CI review recipe (template — see TODOs inside) |
 
 ## Try it
@@ -254,6 +349,32 @@ northstar-agent-runtime run --workspace . --agent reviewer \\
 Runs default to the read-only `reviewer` agent because `.northstar/config.toml`
 sets `agent = "reviewer"`. Loosen deliberately: `--agent explorer` for a
 read/write exploration run, or remove the key to run the main loop.
+
+## Adding a skill
+
+Drop `.northstar/skills/<name>/SKILL.md` (frontmatter `name` + `description`; only
+those two lines go into the prompt, the model reads the body on demand). A skill is
+instructions, so it gets reviewed like a dependency before it is trusted:
+
+```sh
+northstar-agent-runtime skills check --workspace .              # findings only
+northstar-agent-runtime skills check --workspace . --write-lock # pin what you read
+northstar-agent-runtime run --workspace . --require-skill-lock … # refuse drift
+```
+
+Commit `.northstar/skills.lock`. A model cannot forge it: writes under `.northstar`
+are refused by the tool layer, so the record stays outside the reach of the run that
+is gated by it. Vet a third-party bundle before adopting it with
+`skills check --root /path/to/checkout`, which reads `.claude/skills` and
+`.agents/skills` too.
+
+## Verification, not vibes
+
+`[[verify]]` (see `.northstar/config.toml`) declares workspace postconditions the
+runtime checks itself after the run — `exists`, `absent`, `changed`, `unchanged`,
+`contains`. A failed check ends the run with `error_postconditions_failed` (exit 6).
+The conditions are deliberately *not* shown to the model: a check the model can see
+becomes a string it can write.
 
 Every run is auditable: `northstar-agent-runtime sessions list --session-dir
 .northstar/sessions` and `sessions export <id> --session-dir …` give you the

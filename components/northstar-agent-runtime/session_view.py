@@ -33,6 +33,29 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
     showing.add_argument("--json", action="store_true", help="emit the raw records as a JSON array")
     showing.add_argument("session_id", help="session id (the *.jsonl file name without its suffix)")
 
+    checkpoints = sub.add_parser(
+        "checkpoints",
+        help="list the resumable boundaries a session recorded, and verify each one's prefix digest",
+    )
+    checkpoints.add_argument("--session-dir", required=True, help="directory of *.jsonl transcripts")
+    checkpoints.add_argument("--session", default="", help="one session id (default: every transcript in the directory)")
+    checkpoints.add_argument("--json", action="store_true", help="emit one JSON object per transcript")
+
+    replay = sub.add_parser(
+        "replay",
+        help="render one transcript turn by turn, with its checkpoints and what they hand to a resume",
+    )
+    replay.add_argument("--session-dir", required=True, help="directory of *.jsonl transcripts")
+    replay.add_argument("--json", action="store_true", help="emit the frames as one JSON object")
+    replay.add_argument(
+        "--from-checkpoint",
+        type=int,
+        default=None,
+        metavar="RECORD",
+        help="show only the state at the checkpoint stored at transcript record #N - what a run resumed from it inherits",
+    )
+    replay.add_argument("session_id", help="session id (the *.jsonl file name without its suffix)")
+
     exporting = sub.add_parser(
         "export",
         help="emit one transcript as the canonical NDJSON audit feed (audit.ndjson/1)",
@@ -52,11 +75,41 @@ def run_sessions(args: argparse.Namespace) -> int:
         return _show_session(Path(args.session_dir), args.session_id, json_out=bool(getattr(args, "json", False)))
     if args.session_command == "export":
         return _export_session(Path(args.session_dir), args.session_id)
-    print("sessions: pass a subcommand: list, show or export (--help for flags)", file=sys.stderr)
+    if args.session_command == "checkpoints":
+        return _checkpoints_session(Path(args.session_dir), args.session, json_out=bool(getattr(args, "json", False)))
+    if args.session_command == "replay":
+        return _replay_session(
+            Path(args.session_dir),
+            args.session_id,
+            json_out=bool(getattr(args, "json", False)),
+            from_checkpoint=getattr(args, "from_checkpoint", None),
+        )
+    print("sessions: pass a subcommand: list, show, export, checkpoints or replay (--help for flags)", file=sys.stderr)
     return USAGE_ERROR
 
 
 # -- listing ---------------------------------------------------------------
+
+
+def _lease_claim(directory: Path, session_id: str) -> str:
+    """What this session's lease claims right now, without touching the lock.
+
+    This module is read-only by contract, and it stays that way on purpose: momentarily
+    taking ``LOCK_EX`` to answer a question could make an unrelated run refuse to start.
+    So the viewer repeats the holder's claim and labels it as one - enough to answer
+    "is something still writing here?", never enough to authorise a second writer.
+    """
+    from session_lease import LeaseError, inspect_lease, lease_path_for
+
+    try:
+        status = inspect_lease(lease_path_for(directory, session_id), probe=False)
+    except (LeaseError, OSError):
+        # A lease path we cannot even stat is worth a line: it usually means a session id
+        # that predates the lock suffix, or a directory the operator cannot read.
+        return "unreadable"
+    if not status.owner_id:
+        return ""
+    return status.human()
 
 
 def _list_sessions(directory: Path, *, json_out: bool) -> int:
@@ -79,13 +132,19 @@ def _list_sessions(directory: Path, *, json_out: bool) -> int:
                 "subtype": summary["subtype"],
                 "total_cost_usd": summary["total_cost_usd"],
                 "bytes": path.stat().st_size,
+                "lease": _lease_claim(directory, path.name[: -len(SESSION_FILE_SUFFIX)]),
             }, sort_keys=True))
         else:
             subtype = summary["subtype"] or "no result"
+            claim = _lease_claim(directory, path.name[: -len(SESSION_FILE_SUFFIX)])
             print(f"{path.name[: -len(SESSION_FILE_SUFFIX)]:<46} "
                   f"records={summary['records']:<3} turns={summary['assistant_turns']:<3} "
                   f"{subtype:<24} ${summary['total_cost_usd']:.6f} "
-                  f"{path.stat().st_size} bytes")
+                  # A trailing claim, not a verdict: the point of showing it in a listing
+                  # is that a session someone is *still writing* is a different shape of
+                  # problem than one that ended badly.
+                  f"{path.stat().st_size} bytes"
+                  + (f"  *{claim}" if claim else ""))
     return 0
 
 
@@ -108,6 +167,9 @@ def _show_session(directory: Path, session_id: str, *, json_out: bool) -> int:
     summary = summarise(records)
     print(f"# {summary['records']} records, {summary['assistant_turns']} assistant turn(s), "
           f"result={summary['subtype'] or '(none)'}, cost=${summary['total_cost_usd']:.6f}")
+    claim = _lease_claim(directory, session_id)
+    if claim:
+        print(f"# session_lease: {claim}")
     return 0
 
 
@@ -185,3 +247,101 @@ def _blocks_preview(content: Iterable[Any]) -> str:
             pieces.append(json.dumps(block, ensure_ascii=False, sort_keys=True, default=str))
     preview = " ".join(" ".join(pieces).split())
     return preview[:CONTENT_PREVIEW] + ("..." if len(preview) > CONTENT_PREVIEW else "")
+
+
+# -- checkpoints and replay (the read-back half of fork points) --------------
+
+
+def _checkpoints_session(directory: Path, session_id: str, *, json_out: bool) -> int:
+    """List every checkpoint in a directory (or one session) and verify it.
+
+    This is the CI-shaped command of the two: it recomputes what ``run --resume-from`` will
+    check, without spending a run, and exits 1 when any boundary no longer matches its own
+    digest. A transcript that can be edited into agreeing with its checkpoints is a
+    transcript that was never append-only, so the exit code is a fact about the artefact.
+    """
+    from session_replay import budget_headroom, checkpoint_reports
+
+    if not directory.is_dir():
+        print(f"sessions: no such directory: {directory}", file=sys.stderr)
+        return 1
+    if session_id:
+        paths = [directory / f"{session_id}{SESSION_FILE_SUFFIX}"]
+        if not paths[0].is_file():
+            print(f"sessions: no transcript for session {session_id!r} in {directory}", file=sys.stderr)
+            return 1
+    else:
+        paths = sorted(directory.glob(f"*{SESSION_FILE_SUFFIX}"))
+        if not paths:
+            print(f"sessions: no transcripts in {directory}", file=sys.stderr)
+            return 1
+    unverified = 0
+    total = 0
+    for path in paths:
+        identity = path.name[: -len(SESSION_FILE_SUFFIX)]
+        records, dropped = load_jsonl(path)
+        reports = checkpoint_reports(records)
+        total += len(reports)
+        unverified += sum(1 for report in reports if not report.verified)
+        if json_out:
+            print(
+                json.dumps(
+                    {
+                        "session_id": identity,
+                        "path": str(path),
+                        "checkpoints": [report.as_dict() for report in reports],
+                        "verified": all(report.verified for report in reports),
+                        "torn_trailing_lines": dropped,
+                    },
+                    sort_keys=True,
+                )
+            )
+            continue
+        if not reports:
+            print(f"{identity}: no checkpoints (a run records them with --checkpoint-turns N)")
+            continue
+        print(f"{identity}: {len(reports)} checkpoint(s)")
+        for report in reports:
+            print("  " + report.line())
+            _remaining, note = budget_headroom(records, report)
+            if note:
+                print(f"        {note}")
+            if not report.verified:
+                print(f"        ! {report.detail}")
+    if not json_out and total:
+        print("  (a verified boundary is one whose transcript prefix still digests to what was recorded)")
+    return 1 if unverified else 0
+
+
+def _replay_session(directory: Path, session_id: str, *, json_out: bool, from_checkpoint: int | None) -> int:
+    """Render one transcript, optionally cut at a checkpoint to show what a resume inherits."""
+    from session_replay import budget_headroom, build_replay, fork_preview
+
+    path = directory / f"{session_id}{SESSION_FILE_SUFFIX}"
+    if not path.is_file():
+        print(f"sessions: no transcript for session {session_id!r} in {directory}", file=sys.stderr)
+        return 1
+    records, dropped = load_jsonl(path)
+    if from_checkpoint is None:
+        replay = build_replay(records, session_id=session_id, dropped_trailing_lines=dropped)
+        report = None
+    else:
+        replay, report, error = fork_preview(
+            records, record_index=from_checkpoint, session_id=session_id, dropped_trailing_lines=dropped
+        )
+        if replay is None:
+            print(f"sessions replay: {error}", file=sys.stderr)
+            return USAGE_ERROR
+    if json_out:
+        print(replay.to_json())
+        return 1 if (report is not None and not report.verified) or not replay.verified else 0
+    print(replay.render())
+    if report is not None:
+        # The boundary is already a frame in the replay, so only what a *resume* would feel is
+        # printed here: the money it inherits, and the refusal it would meet.
+        _remaining, note = budget_headroom(records, report)
+        if note:
+            print(f"      {note}")
+        if not report.verified:
+            print(f"      ! {report.detail} - a run resumed here would refuse this boundary")
+    return 0 if (report is None or report.verified) and replay.verified else 1

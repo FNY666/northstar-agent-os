@@ -44,6 +44,7 @@ class ScaffoldTests(unittest.TestCase):
                 Path(".northstar/config.toml"),
                 Path(".northstar/agents/reviewer.md"),
                 Path(".northstar/hooks/README.md"),
+                Path(".northstar/skills/README.md"),
                 Path(".github/workflows/northstar-review.yml"),
                 Path("AGENTS.md"),
                 Path("README.md"),
@@ -66,7 +67,7 @@ class ScaffoldTests(unittest.TestCase):
     def test_scaffold_into_an_empty_existing_directory_is_allowed(self):
         self.project.mkdir(parents=True)
         created = self.scaffold()
-        self.assertEqual(len(created), 6)
+        self.assertEqual(len(created), 7)
 
     # -- generated files are valid under the runtime's own loaders -------------
 

@@ -45,11 +45,24 @@ print(report.subtype, report.exit_code, report.session_id)
 - `sdk.run(options)` → `RunReport` (subtype, exit code, session id, turns,
   cost, denials, full event list).
 - `sdk.stream_run(options)` → yields each event as a plain JSON-ready dict as
-  it happens; the last one is the `result`.
+  it happens; the last one is the `result`. With `stream=True` the assistant text
+  also arrives as `stream_delta` dicts *before* the matching `assistant` event -
+  presentation only, and the runtime refuses a provider whose chunks disagree
+  with the turn it finally returns.
 - `options` covers the governance knobs: `permission_mode`, `allowed_tools` /
   `disallowed_tools`, `read_only`, turn/tool/budget ceilings,
   `halt_on_denial`, `session_dir` (append-only transcript), subagent depth,
-  and the provider (`"scripted"` by default — deterministic and offline).
+  `stream` (incremental text), `lock_session` / `session_lease_seconds` (the
+  claim on that transcript — see below), and the provider (`"scripted"` by
+  default — deterministic and offline).
+
+Setting `session_dir` also claims the session file, so two embedders aimed at one
+session id cannot interleave into it. A run that loses the claim ends
+`error_session_busy` (the same exit `7` the CLI returns) having written nothing; pass
+`lock_session=False` where `flock` is unavailable and the run will say so rather than
+pretend the transcript was protected. Subagents need no claim of their own: they share
+their parent's transcript file, and the parent's claim covers them until the parent's
+last record is on disk.
 
 Deep repository features (policy files, AGENTS.md/context files, skills, MCP
 servers) stay on the CLI by design; the SDK is the stable embedding contract.

@@ -30,7 +30,14 @@ make test
 The runtime component adds **guard verification**
 (`components/northstar-agent-runtime/tools/verify_invariants.py`): it reverts
 each core guard in a throwaway copy and asserts the corresponding test turns
-red — the RED tests stay honest.
+red — the RED tests stay honest. The copy is the whole `components/` tree, not
+just the runtime: several of the runtime's own tests deliberately import the
+real sibling components (the bridges validate against the definitions they
+mirror), so a runtime-only copy has a red baseline, and a mutation judged
+against a broken baseline proves nothing. `tests/test_tools_verify_invariants.py`
+pins that copy step, and `make ts-test` is guarded the same way the harness is
+honest — the TypeScript face is *skipped* (exit 0, printed reason) where node is
+older than 22.6, never quietly passed.
 
 ## CI: `.github/workflows/test.yml`
 
@@ -40,9 +47,15 @@ Three jobs:
    `py_compile`, unit tests, then a packaging smoke that `pip install`s the
    component, `cd /tmp`s and imports it, proving the wheel carries everything.
 2. **agent-runtime** — installs test requirements, `py_compile` of every
-   module, offline unit tests, CLI smoke (version / doctor / dry-run / demo
-   script) and the guard verification.
-3. **documentation** — repository structure tests, then
+   module (by glob, so a new module cannot escape the compile step), offline
+   unit tests, the **TypeScript face** (`actions/setup-node@v4` with node 22,
+   then `node --test` in `sdk-ts` — no `npm install`, no registry contact), CLI
+   smoke (version / doctor / dry-run / demo script), the packaging smoke, and the
+   guard verification.
+3. **documentation** — repository structure tests (which include the
+   Python-side drift gate for the TypeScript mirror,
+   `tests/test_typescript_sdk.py`, so the contract is checked even in a job that
+   never runs node), then
    `python3 tests/docbuild.py verify`:
    - *structure* (unit tests): component READMEs expose
      "Concepts, guides and API reference" link sections; the examples index

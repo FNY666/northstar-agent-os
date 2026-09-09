@@ -1,0 +1,34 @@
+{
+  "name": "@northstar/agent-runtime",
+  "version": "0.1.0.dev0",
+  "private": true,
+  "description": "TypeScript face on the Northstar governed agent runtime: one run, one child process, the same permission gate, ceilings, transcript and exit codes.",
+  "type": "module",
+  "license": "MIT",
+  "engines": {
+    "node": ">=22.6.0"
+  },
+  "exports": {
+    ".": "./src/index.ts",
+    "./events": "./src/events.ts",
+    "./options": "./src/options.ts"
+  },
+  "files": [
+    "src",
+    "README.md"
+  ],
+  "scripts": {
+    "test": "node --test test/",
+    "typecheck": "tsc --noEmit"
+  },
+  "keywords": [
+    "agent",
+    "governance",
+    "audit",
+    "claude",
+    "openai",
+    "mcp"
+  ],
+  "dependencies": {},
+  "devDependencies": {}
+}

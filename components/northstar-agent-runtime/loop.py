@@ -24,12 +24,18 @@ from __future__ import annotations
 
 import time
 from dataclasses import dataclass, field, replace
-from typing import Any, Callable, Iterable, Iterator, Mapping, Sequence
+from typing import Any, Callable, Generator, Iterable, Iterator, Mapping, Sequence
 
 from agents import AgentDefinition, AgentRegistry, Verdict, builtin_registry, parse_verdict
 from budget import Budget
 from compaction import CompactionOutcome, compact, should_compact
 from hooks import HookInput, HookRegistry
+from checkpoints import CheckpointError, build as build_checkpoint, digest_transcript, prepare_resume
+from postconditions import (
+    PostConditionError,
+    PostConditionSet,
+    summarise as summarise_postconditions,
+)
 from permissions import (
     DelegationVerdict,
     PermissionConfig,
@@ -41,7 +47,12 @@ from permissions import (
 )
 from providers.base import (
     AssistantMessage,
+    MAX_STREAM_TURN_CHARS,
+    split_for_stream,
+    stream_comparable_text,
     Generation,
+    ProviderError,
+    StreamDelta,
     GenerationRequest,
     Message,
     SystemMessage,
@@ -51,8 +62,18 @@ from providers.base import (
     Usage,
     UserMessage,
     estimate_transcript_tokens,
+    stream_fidelity,
     render_transcript,
     transcript_to_api,
+)
+from session_lease import (
+    DEFAULT_LEASE_SECONDS,
+    LeaseError,
+    SessionBusyError,
+    SessionLease,
+    lease_path_for,
+    owner_id_for,
+    validate_ttl,
 )
 from sessions import SessionStore, resolve_session_id
 from sidecar_client import SIDECAR_MAX_TIMEOUT_MS, SIDECAR_MIN_TIMEOUT_MS, SidecarClient
@@ -87,6 +108,16 @@ DEFAULT_SYSTEM_PROMPT = (
 )
 
 
+#: Events per turn a streamed turn may produce. The character ceiling bounds volume;
+#: this bounds chattiness, so a provider cannot make a single turn into 200k events.
+MAX_STREAM_EVENTS_PER_TURN = 4_000
+
+
+def collected_total(parts: Sequence[str]) -> int:
+    """Chars forwarded so far, without rescanning more than once per delta."""
+    return sum(len(part) for part in parts)
+
+
 class RuntimeConfigurationError(ValueError):
     """Invalid configuration. Raised at construction, never mid-run."""
 
@@ -112,14 +143,50 @@ class RuntimeConfig:
     allow_nested_delegation: bool = False
     default_subagent: str = "explorer"
     halt_on_denial: bool = False
+    #: Workspace claims checked after the run by an independent evaluator, so a
+    #: model saying "done" is not the evidence that it is. See postconditions.py.
+    postconditions: Any = ()
+    #: Append one checkpoint transcript record every N turn boundaries (0 = off).
+    #: Off by default because a new record type in every transcript is a format
+    #: change, and a format change should be chosen, not inherited.
+    checkpoint_turns: int = 0
+    #: The boundary a resumed run continues from (checkpoints.Checkpoint). Setting
+    #: this without carrying the parent's cost over is refused, not forgiven.
+    resume_from: Any = None
+    #: Session id this run was forked from, recorded for the audit only.
+    parent_session: str = ""
     max_output_tokens: int = 4096
+    #: Forward the top-level run's assistant text as :class:`StreamDelta` events while it
+    #: is being produced. Presentation only: it changes no ceiling, no permission
+    #: decision, and no byte of the session transcript (see providers/base.py).
+    stream: bool = False
+    #: Refuse to append to a session transcript another process is already writing.
+    #: One :class:`session_lease.SessionLease` per session file, held for the whole run;
+    #: ``False`` means "I know an unprotected transcript is ambiguous and I want it
+    #: anyway" (see session_lease.py).
+    lock_session: bool = True
+    #: How long the current holder promises to stay alive. A live holder is never
+    #: displaced, so this is a liveness signal for readers, not an eviction timer.
+    session_lease_seconds: int = DEFAULT_LEASE_SECONDS
     compaction_threshold_tokens: int | None = DEFAULT_COMPACTION_THRESHOLD_TOKENS
+    #: The provider transport's retry budget (``provider_retry.RetryPolicy``). ``None`` means
+    #: exactly one request per turn: this runtime adds no waiting nobody asked for, and the
+    #: providers default their SDK's own retries to zero, so "no policy here" really does mean
+    #: no retry rather than "somebody else's default".
+    retry: Any = None
     compaction_keep_messages: int = 4
     tool_limits: ToolLimits = field(default_factory=ToolLimits)
     sidecar_socket: str | None = None
     sidecar_timeout_ms: int = 30_000
     include_describe_tool: bool = True
     record_tool_output_in_session: bool = True
+    #: Correlation id for this run. When set, it is also the sidecar ``request_id``,
+    #: so the runtime audit stream and the sidecar log share one key (see
+    #: :mod:`contract_bridge`). ``None`` means "generate one per call".
+    run_id: str | None = None
+    #: ``revision`` of the workspace policy file that gated this run, recorded so a
+    #: transcript proves *which* policy revision approved its tool calls.
+    policy_revision: str | None = None
 
     def __post_init__(self) -> None:
         def fail(message: str) -> None:
@@ -144,8 +211,32 @@ class RuntimeConfig:
                 fail("compaction_threshold_tokens must be >= 512 or None to disable")
         if self.compaction_keep_messages < 1:
             fail("compaction_keep_messages must keep at least one message")
+        for field_name in ("run_id", "policy_revision"):
+            value = getattr(self, field_name)
+            if value is None:
+                continue
+            # Mirrors the run contract's id rule: a correlation key must survive
+            # being embedded in a request_id, a log line, and a filename.
+            if not isinstance(value, str) or not value.strip():
+                fail(f"{field_name} must be a non-empty string or None")
+            elif len(value) > 128 or any(char.isspace() or char in "/\\" for char in value):
+                fail(f"{field_name} must be at most 128 chars with no whitespace or path separators")
         if self.max_output_tokens < 1:
             fail("max_output_tokens must be positive")
+        if not isinstance(self.stream, bool):
+            fail("stream must be a boolean")
+        if not isinstance(self.lock_session, bool):
+            fail("lock_session must be a boolean")
+        if self.lock_session:
+            try:
+                validate_ttl(self.session_lease_seconds)
+            except LeaseError as error:
+                fail(f"session_lease_seconds rejected: {error}")
+        elif self.session_lease_seconds != DEFAULT_LEASE_SECONDS:
+            # Refused rather than ignored. A caller that sets a lease length while turning
+            # leasing off believes the transcript is protected, and quietly dropping the
+            # number they cared about is how that belief survives to the audit.
+            fail("session_lease_seconds has no meaning when lock_session is False; drop one of the two")
         if self.depth < 0:
             fail("depth must not be negative")
         if self.max_subagent_depth < 0:
@@ -178,6 +269,9 @@ class RuntimeConfig:
             "allow_nested_delegation": self.allow_nested_delegation,
             "halt_on_denial": self.halt_on_denial,
             "compaction_threshold_tokens": self.compaction_threshold_tokens,
+            "stream": self.stream,
+            "retry": self.retry.as_dict() if self.retry is not None else None,
+            "lock_session": self.lock_session,
             "sidecar": bool(self.sidecar_socket),
         }
 
@@ -367,8 +461,24 @@ class _RunState:
     started: float = field(default_factory=time.monotonic)
     result: ResultMessage | None = None
     stop_blocks: int = 0
+    resumed_from: dict[str, Any] | None = None
     session_end_fired: bool = False
+    #: True when the run ended before it ever owned the session file. Nothing may be
+    #: written to a transcript this run does not hold, and no SessionEnd may fire for a
+    #: SessionStart that never happened.
+    refused_session: bool = False
     events: list[Any] = field(default_factory=list)
+    #: Provider-transport bookkeeping, kept out of the transcript deliberately: a retry that
+    #: succeeded is not a fact about the work product, so it belongs in the trace and on the
+    #: operator's terminal, not in the digest a reviewer pinned. A retry that ended the run
+    #: does reach the record - through ``errors`` - because then it is the explanation.
+    #: Extra requests this run issued after a provider fault, and the milliseconds the
+    #: policy made it wait for them. Both are trace/terminal facts, not transcript ones.
+    retries: int = 0
+    retry_wait_ms: int = 0
+    turn_retry_wait_ms: int = 0
+    #: Whether this run already spent its single free compaction on an oversized request.
+    overflow_compacted: bool = False
 
 
 class AgentRuntime:
@@ -394,6 +504,13 @@ class AgentRuntime:
         if provider is None:
             raise RuntimeConfigurationError("a provider is required")
         self.config = config or RuntimeConfig()
+        if self.config.stream and not getattr(provider, "streams", False):
+            name = getattr(provider, "name", None) or type(provider).__name__
+            raise RuntimeConfigurationError(
+                f"provider {name!r} cannot stream text incrementally, so stream=True has nothing to show. "
+                "This is refused instead of degrading to end-of-turn output: a run advertised as streaming "
+                "that quietly prints nothing is how a demo becomes a lie."
+            )
         self.provider = provider
         self.providers: dict[str, Any] = dict(providers or {})
         self.hooks = hooks if isinstance(hooks, HookRegistry) else HookRegistry()
@@ -402,6 +519,12 @@ class AgentRuntime:
         self.sessions = sessions if isinstance(sessions, SessionStore) else SessionStore(None, session_id=self.config.session_id)
         self.summarizer = summarizer
         self.sandbox = ToolSandbox(self.config.workspace or ".", limits=self.config.tool_limits)
+        # The independent end-of-run check is bound to the same real root the tools
+        # are confined to, so evidence and enforcement share one boundary.
+        try:
+            self.postconditions = PostConditionSet(self.sandbox.root_real, self.config.postconditions)
+        except PostConditionError as error:
+            raise RuntimeConfigurationError(f"postconditions: {error}") from error
         self.limits = self.config.tool_limits
         self.budget = budget if isinstance(budget, Budget) else Budget(max_budget_usd=self.config.max_budget_usd)
         self.tools = tools if isinstance(tools, ToolRegistry) else build_default_registry(include_describe=self.config.include_describe_tool)
@@ -412,6 +535,10 @@ class AgentRuntime:
             self.sidecar = SidecarClient(
                 self.config.sidecar_socket,
                 timeout_ms=int(self.config.sidecar_timeout_ms),
+                # One correlation key across both audit planes: the sidecar log
+                # line carries the runtime run_id, so a run can be traced from
+                # policy decision to execution without guessing at timestamps.
+                run_id=self.config.run_id,
             )
         if self.sidecar is not None and "CodexReadOnly" not in self.tools:
             self.tools.register(codex_tool_spec())
@@ -435,10 +562,29 @@ class AgentRuntime:
         self.session_id = resolve_session_id(self.config.session_id, self.sessions if self.sessions.enabled else None)
         if self.sessions.session_id != self.session_id:
             self.sessions = replace(self.sessions, session_id=self.session_id)
+        self._session_lease: SessionLease | None = None
+        self._lease_beat = 0.0
         #: Last finished run, kept so ``run_collect`` and subagent delegation can
         #: read a full report without re-deriving it from events.
         self._pending_state: _RunState | None = None
         self._last_report: RunReport | None = None
+        self.retry = getattr(config, "retry", None)
+        if self.retry is not None:
+            from provider_retry import RetryPolicy
+
+            if not isinstance(self.retry, RetryPolicy):
+                raise RuntimeConfigurationError(
+                    "config.retry must be a provider_retry.RetryPolicy (or None for one request per turn)"
+                )
+            # Seed the jitter from the run id so a rerun of a recorded session reproduces
+            # the same schedule. Without this, "deterministic tests" and "jitter" are
+            # mutually contradictory, and the honest fix is a seeded draw, not dropping
+            # jitter: an unseeded one is exactly the thundering herd a fleet produces.
+            if self.retry.seed is None:
+                from dataclasses import replace as _replace
+                import zlib
+
+                self.retry = _replace(self.retry, seed=zlib.crc32(self.session_id.encode("utf-8")))
 
     # -- capability views --------------------------------------------------
     @property
@@ -490,11 +636,228 @@ class AgentRuntime:
         return {"model": self.config.model, **pricing.as_dict(), "estimated": estimated}
 
     # -- public entry points ----------------------------------------------
+    def _retry_step(self, state: "_RunState", turn_index: int, error: BaseException, *, attempt: int, already_streamed: bool, span: Any):
+        """Decide what a provider fault costs, and whether the turn gets another request.
+
+        Returns ``(should_retry, notes)``. Two things may be reported as notes, and both are
+        yielded as informational events by the caller rather than written to the transcript:
+        the retry itself, and the one free compaction the degradation ladder allows.
+
+        A turn's waiting is bounded by the policy's deadline and nothing else: the ceiling is
+        reset per turn on purpose, because "this turn may not stall for more than a minute"
+        is the promise an operator can actually check, while a run-total budget would let the
+        first turn eat the whole allowance and make the rest silently unforgiving.
+        """
+        policy = self.retry
+        if policy is None or not policy.enabled:
+            return False, ()
+        from provider_retry import classify
+
+        fault = classify(error, already_streamed=already_streamed)
+        # Events to hand back for the caller to yield, in order: a boundary, then the note
+        # that explains it. Built here rather than yielded here because the method is not a
+        # generator - the loop's turn body owns the yielding.
+        notes: list[Any] = []
+        if fault.kind == "context_overflow" and policy.on_context_overflow == "compact_once":
+            if state.overflow_compacted or not state.transcript:
+                # Say it out loud and then stop. Silence here would leave "why did the second
+                # overflow not do what the first one did?" as a code-reading exercise, and a
+                # ladder that could be climbed twice is a way to keep shrinking a context
+                # until nothing is left of the run's own memory.
+                span.set_attribute("retry.degraded_spent", True)
+                return False, (
+                    SystemMessage(
+                        subtype="informational",
+                        content=(
+                            f"turn {turn_index} overflowed again and this run's one compaction is already spent; "
+                            "the run stops here"
+                        ),
+                    ),
+                )
+            state.overflow_compacted = True
+            outcome = self._compact(state, turn_index=turn_index)
+            if outcome.performed:
+                state.transcript = list(outcome.transcript)
+                self.sessions.append(
+                    "compact_boundary",
+                    {"agent": self.config.agent, "subtype": "compact_boundary", "content": outcome.summary, "data": outcome.as_dict()},
+                )
+                if outcome.boundary is not None:
+                    # The boundary event belongs beside the record it describes: a reader of
+                    # the live stream must see the cut, exactly as they do when the loop
+                    # compacts on its own threshold.
+                    notes.append(outcome.boundary)
+                notes.append(
+                    SystemMessage(
+                        subtype="informational",
+                        content=(
+                            f"turn {turn_index} was refused for being too large ({fault.detail[:120]}) - compacted "
+                            "the transcript to "
+                            f"{outcome.tokens_after} tokens and re-issued the request once (this attempt costs no "
+                            "retry budget)"
+                        ),
+                    )
+                )
+                span.set_attribute("retry.degraded", "compact_once")
+                return True, tuple(notes)
+            notes.append(
+                SystemMessage(
+                    subtype="informational",
+                    content=(
+                        f"turn {turn_index} overflowed and compaction was unavailable ({outcome.reason}); the run "
+                        "stops here"
+                    ),
+                )
+            )
+            span.set_attribute("retry.degraded_refused", outcome.reason[:200])
+            return False, tuple(notes)
+        keep, decision = policy.plan(attempt, fault, waited_ms=state.turn_retry_wait_ms)
+        if keep is None:
+            # Record *why* the budget stopped, even when there is nothing to say out loud:
+            # "not_retryable" and "deadline_exceeded" are the difference between a provider
+            # that rejected us and one that was merely slow.
+            span.set_attribute("retry.stop", getattr(decision, "reason", "unknown"))
+            if getattr(decision, "detail", ""):
+                span.set_attribute("retry.stop_detail", decision.detail[:200])
+            return False, ()
+        state.turn_retry_wait_ms += decision.delay_ms
+        state.retry_wait_ms += decision.delay_ms
+        state.retries += 1
+        span.set_attributes({"retry.attempt": attempt, "retry.kind": fault.kind, "retry.delay_ms": decision.delay_ms})
+        self._sleep(decision.delay_ms / 1000.0)
+        return True, (SystemMessage(subtype="informational", content=decision.line()),)
+
+    def _sleep(self, seconds: float) -> None:
+        """The one place a run blocks, so an embedder can hand us a clock it controls."""
+        if seconds <= 0:
+            return
+        sleeper = getattr(self.retry, "sleeper", None)
+        if sleeper is not None:
+            sleeper(seconds)
+            return
+        import time
+
+        time.sleep(seconds)
+
+    def _stream_turn(
+        self,
+        request: GenerationRequest,
+        collected: list[str],
+        span: Any,
+    ) -> "Generator[StreamDelta, None, tuple[Generation, int]]":
+        """Forward one provider stream's text and return ``(turn, withheld_chars)``.
+
+        A stream is a contract - *deltas, then exactly one turn* - and every way to break
+        it becomes a :class:`ProviderError` here rather than a crash deeper in the loop or,
+        far worse, a transcript that quietly differs from what the operator watched. Two
+        client-side ceilings apply: total characters and total events per turn, because
+        "one event per character" is legal at the protocol level and would otherwise let a
+        provider decide how big this process's event stream gets.
+        """
+        generation: Generation | None = None
+        withheld = 0
+        forwarded = 0
+        try:
+            stream = self.provider.stream(request)
+        except AttributeError as error:
+            raise ProviderError(
+                f"provider {self.provider_name!r} claims streams but implements no stream()"
+            ) from error
+        try:
+            for item in stream:
+                if isinstance(item, Generation):
+                    if generation is not None:
+                        raise ProviderError("provider stream yielded more than one Generation")
+                    generation = item
+                    continue
+                if not isinstance(item, StreamDelta):
+                    raise ProviderError(
+                        f"provider stream yielded {type(item).__name__} instead of a StreamDelta or a Generation"
+                    )
+                if generation is not None:
+                    raise ProviderError("provider stream kept yielding text after the turn was complete")
+                if not item.text:
+                    continue  # an empty chunk is noise, not content: spend no event on it
+                if forwarded >= MAX_STREAM_EVENTS_PER_TURN or (
+                    collected_total(collected) + len(item.text) > MAX_STREAM_TURN_CHARS
+                ):
+                    withheld += len(item.text)
+                    continue
+                # A provider that hands back one enormous block gets re-chunked rather
+                # than forwarded whole or dropped: splitting keeps the concatenation
+                # exact (so fidelity still means something) while keeping a single
+                # event's size bounded for whoever has to serialise it.
+                for chunk in split_for_stream(item.text):
+                    if forwarded >= MAX_STREAM_EVENTS_PER_TURN:
+                        withheld += len(chunk)
+                        continue
+                    forwarded += 1
+                    collected.append(chunk)
+                    yield StreamDelta(
+                        text=chunk,
+                        block_index=item.block_index,
+                        turn_index=item.turn_index or request.turn_index,
+                        provider=item.provider or self.provider_name,
+                    )
+        finally:
+            # An interrupted run must not leave the provider's own resources (an HTTP
+            # connection, an SDK stream context) open until the garbage collector gets
+            # round to the generator.
+            closer = getattr(stream, "close", None)
+            if callable(closer):
+                closer()
+        span.set_attributes(
+            {
+                "stream.deltas": forwarded,
+                "stream.chars": collected_total(collected),
+                "stream.withheld_chars": withheld,
+            }
+        )
+        if generation is None:
+            raise ProviderError("provider stream ended without returning the turn")
+        if withheld:
+            span.set_attribute("stream.truncated", True)
+        return generation, withheld
+
     def run(self, prompt: str, *, resume: Sequence[Any] | None = None) -> Iterator[Message]:
         """Stream events for one run. Terminates in exactly one ResultMessage."""
         state = _RunState(session_id=self.session_id)
         if resume:
             state.transcript.extend(resume)
+        checkpoint = self.config.resume_from
+        if checkpoint is not None:
+            if not resume:
+                raise RuntimeConfigurationError(
+                    "resume_from needs the parent transcript as run(resume=...): the checkpoint says where to cut, "
+                    "but the messages to cut come from the session store"
+                )
+            try:
+                state.transcript = prepare_resume(
+                    checkpoint, state.transcript, expected_session_id=self.config.parent_session or None
+                )
+            except CheckpointError as error:
+                raise RuntimeConfigurationError(f"resume refused: {error}") from error
+            state.turns = checkpoint.turns
+            state.tool_calls = checkpoint.tool_calls
+            if self.budget.total_cost_usd + 1e-12 < checkpoint.cost_usd:
+                # The whole reason checkpoints exist: a resumed run must not get a
+                # fresh budget on top of the one it already spent. An embedder that
+                # forgets to seed the Budget gets an error, not a wider ceiling.
+                raise RuntimeConfigurationError(
+                    f"resume refused: the checkpoint at turn {checkpoint.turns} had spent "
+                    f"${checkpoint.cost_usd:.6f} but this run starts at ${self.budget.total_cost_usd:.6f}; "
+                    "pass budget=Budget(max_budget_usd=..., total_cost_usd=...) carrying the parent's spend"
+                )
+            state.resumed_from = {
+                "parent_session": checkpoint.session_id,
+                "checkpoint_record": checkpoint.record_index,
+                "turns_inherited": checkpoint.turns,
+                "tool_calls_inherited": checkpoint.tool_calls,
+                "cost_usd_inherited": checkpoint.cost_usd,
+                "transcript_len": checkpoint.transcript_len,
+                "transcript_digest": checkpoint.transcript_digest[:12],
+                "forked": bool(self.config.parent_session),
+            }
         self._pending_state = state
         self._last_report = None
         # A subagent's run hangs off the span its parent opened for it, so the
@@ -517,7 +880,24 @@ class AgentRuntime:
         )
         state.result = None
         finished = False
+        # Claimed here, before the first record: the whole point is that not one byte of
+        # a transcript is appended by a run that does not own the file.
+        busy = self._claim_session()
         try:
+            if busy is not None:
+                # Not an execution failure and not the operator's typo: a retryable
+                # contention outcome gets its own name for the same reason every ceiling
+                # does, so a caller can tell "wait and retry" from "give up".
+                state.errors.append(busy)
+                state.refused_session = True
+                run_span.record_error(f"SessionBusyError: {busy}")
+                result = self._finish(state, "error_session_busy")
+                # Appended by hand because this event never passes through _events, and
+                # a report whose last event is missing from its own event list would be
+                # a second, subtler way for a refusal to look like a successful run.
+                state.events.append(result)
+                yield result
+                return
             for event in self._events(prompt, state, run_span):
                 state.events.append(event)
                 if isinstance(event, ResultMessage):
@@ -574,7 +954,51 @@ class AgentRuntime:
             },
             "depth": config.depth,
             "workspace": str(self.sandbox.root_real),
+            # Attribution: which policy revision gated this run, and the id that
+            # correlates it with the sidecar and host audit records.
+            "run_id": config.run_id,
+            "policy_revision": config.policy_revision,
+            "protected_prefixes": list(config.tool_limits.protected_prefixes),
         }
+        if self.postconditions:
+            init_data["postconditions"] = [condition.as_dict() for condition in self.postconditions.conditions]
+        if state.resumed_from is not None:
+            init_data["resumed_from"] = state.resumed_from
+        if config.parent_session and state.resumed_from is None:
+            init_data["resumed_from"] = {"parent_session": config.parent_session, "checkpoint_record": None, "forked": True}
+        if config.checkpoint_turns:
+            init_data["checkpoint_turns"] = config.checkpoint_turns
+        lease = self._session_lease
+        if lease is not None:
+            status = lease.status()
+            # Recorded so a transcript can later answer "who else was allowed to write
+            # here?": the lease id, and the fact that the claim was advisory-only on a
+            # platform without flock, are both evidence about the transcript's integrity.
+            # What *this transcript* was written under, and nothing that varies between
+            # two runs of the same prompt: the owner id and the path belong to the lock
+            # file, which is where a reader looks for them. Repeating them here would
+            # break the rule that a record describes the run's audit claim rather than
+            # its process identity (and would make two identical runs differ).
+            init_data["session_lease"] = {
+                "locked": status.locked,
+                "ttl_seconds": lease.ttl_seconds,
+                "kernel_lock_available": status.kernel_lock_available,
+            }
+        elif config.lock_session and config.depth:
+            init_data["session_lease"] = {"held": False, "reason": "covered by the parent run's claim"}
+        elif config.lock_session and not self.sessions.enabled:
+            init_data["session_lease"] = {"held": False, "reason": "no session transcript to protect"}
+        if config.stream:
+            # Declared in the init record, not implied by the first delta: a consumer
+            # that saw no deltas needs to know whether streaming was on and the turn had
+            # no text, or whether it was never on.
+            init_data["stream"] = True
+        try:
+            # Taken before the first yield so a hook or a tool cannot be the thing
+            # that changes what "before" means.
+            self.postconditions.snapshot()
+        except PostConditionError as error:
+            raise RuntimeConfigurationError(f"postconditions: {error}") from error
         init = SystemMessage(subtype="init", content=f"runtime ready: {self.provider_name}/{config.model}", data=init_data)
         self.sessions.record_system(init, agent=config.agent)
         yield init
@@ -614,7 +1038,11 @@ class AgentRuntime:
         state.transcript.append(user)
         self.sessions.append("user_prompt", {"agent": config.agent, "role": "user", "content": [block.to_api() for block in user.content]})
 
-        for turn_index in range(1, config.max_turns + 1):
+        # A resumed run continues the parent's numbering, so max_turns bounds the
+        # whole lineage rather than restarting at every resume.
+        first_turn = state.turns + 1
+        for turn_index in range(first_turn, max(first_turn, config.max_turns + 1)):
+            self._heartbeat()
             # Ceilings are checked before spending, never after.
             stop = self._ceiling_stop(state)
             if stop is not None:
@@ -631,6 +1059,9 @@ class AgentRuntime:
                     yield outcome.boundary
 
             state.cost_at_turn_start = self.budget.total_cost_usd
+            # The waiting budget is per turn (see _retry_step): "no turn may stall for more
+            # than the deadline" is a promise an operator can check.
+            state.turn_retry_wait_ms = 0
             with run_span.child(f"turn[{turn_index}]") as turn_span:
                 turn_span.set_attributes({"turn.index": turn_index, "turn.depth": config.depth, "agent.name": config.agent})
                 request = GenerationRequest(
@@ -645,33 +1076,79 @@ class AgentRuntime:
                 )
                 generation: Generation | None = None
                 breakdown = None
+                streamed: list[str] = []
+                stream_withheld = 0
                 with turn_span.child("generation") as generation_span:
-                    generation_span.set_attributes({"provider.name": self.provider_name, "model": config.model, "turn.index": turn_index})
+                    generation_span.set_attributes(
+                        {"provider.name": self.provider_name, "model": config.model, "turn.index": turn_index, "stream": config.stream}
+                    )
                     try:
-                        candidate = self.provider.generate(request)
+                        attempt = 1
+                        while True:
+                            try:
+                                if config.stream:
+                                    generation, stream_withheld = yield from self._stream_turn(request, streamed, generation_span)
+                                else:
+                                    candidate = self.provider.generate(request)
+                                    if not isinstance(candidate, Generation):
+                                        raise ProviderError(
+                                            f"provider returned {type(candidate).__name__} instead of a Generation"
+                                        )
+                                    generation = candidate
+                                break
+                            except ProviderError as error:
+                                # ``streamed`` is the gate: once a character has reached the
+                                # consumer the request may not be re-issued, because the retry
+                                # would show the same text twice and the transcript/terminal
+                                # agreement is worth more than a recovered turn.
+                                retry, notes = self._retry_step(
+                                    state,
+                                    turn_index,
+                                    error,
+                                    attempt=attempt,
+                                    already_streamed=bool(streamed),
+                                    span=generation_span,
+                                )
+                                for note in notes:
+                                    yield note
+                                if not retry:
+                                    raise
+                                attempt += 1
+                    except ProviderError as error:
+                        # A provider that breaks its contract is a fault to report, and
+                        # the partial text it already streamed must stay unrecorded: the
+                        # transcript is only ever written from a complete turn.
+                        detail = f"provider failure on turn {turn_index}: {error}"
+                        if state.retries:
+                            # Say what the budget did, in the line that explains the failure:
+                            # "it failed" and "it failed after four attempts and 12 s of
+                            # waiting, then stopped on the deadline" are different incidents.
+                            # The turn's first request is counted at the turn head, so the running
+                            # total is already the number of requests this run sent.
+                            detail += (
+                                f" (after {state.retries + 1} request(s), {state.retry_wait_ms} ms of policy waiting)"
+                            )
+                        state.errors.append(detail)
+                        generation_span.record_error("ProviderError")
                     except Exception as error:  # noqa: BLE001 - a provider fault is an event
                         state.errors.append(f"provider failure on turn {turn_index}: {type(error).__name__}: {error}")
                         generation_span.record_error(f"{type(error).__name__}")
                     else:
-                        if not isinstance(candidate, Generation):
-                            state.errors.append(f"provider returned {type(candidate).__name__} instead of a Generation")
-                        else:
-                            generation = candidate
-                            breakdown = self.budget.observe(generation.usage, generation.model or config.model)
-                            # Usage and cost are recorded while the generation span is
-                            # still open. The instant it ends, OpenTelemetry discards
-                            # any further attribute write silently and the cost simply
-                            # goes missing from the trace with no error anywhere.
-                            generation_span.record_usage(
-                                generation.usage,
-                                breakdown.total_usd,
-                                extra={
-                                    "stop_reason": generation.stop_reason,
-                                    "pricing.estimated": breakdown.pricing_estimated,
-                                    "pricing.source": breakdown.pricing_source,
-                                    "tokens.total": generation.usage.total_tokens,
-                                },
-                            )
+                        breakdown = self.budget.observe(generation.usage, generation.model or config.model)
+                        # Usage and cost are recorded while the generation span is
+                        # still open. The instant it ends, OpenTelemetry discards
+                        # any further attribute write silently and the cost simply
+                        # goes missing from the trace with no error anywhere.
+                        generation_span.record_usage(
+                            generation.usage,
+                            breakdown.total_usd,
+                            extra={
+                                "stop_reason": generation.stop_reason,
+                                "pricing.estimated": breakdown.pricing_estimated,
+                                "pricing.source": breakdown.pricing_source,
+                                "tokens.total": generation.usage.total_tokens,
+                            },
+                        )
                 if generation is None or breakdown is None:
                     yield self._finish(state, "error_during_execution")
                     return
@@ -681,6 +1158,35 @@ class AgentRuntime:
                     usage=generation.usage,
                     stop_reason=generation.stop_reason,
                 )
+                if config.stream:
+                    problem = None
+                    if stream_withheld:
+                        # Our cap, our choice, our duty to say so: the live view is allowed
+                        # to be shorter than the record, never longer and never different,
+                        # so the check relaxes from equality to prefix. The note is an
+                        # event and not a transcript record, which keeps the digest a run
+                        # would have produced before streaming existed.
+                        if not stream_comparable_text(assistant).startswith("".join(streamed)):
+                            problem = "the forwarded text is not a prefix of the recorded turn"
+                        else:
+                            yield SystemMessage(
+                                subtype="informational",
+                                content=(
+                                    f"streamed text for turn {turn_index} was capped at {MAX_STREAM_TURN_CHARS} chars "
+                                    f"/ {MAX_STREAM_EVENTS_PER_TURN} event(s); {stream_withheld} char(s) reached the "
+                                    "record but not the live view"
+                                ),
+                            )
+                    else:
+                        problem = stream_fidelity(streamed, stream_comparable_text(assistant))
+                    if problem is not None:
+                        # The record and what the operator watched must agree. Either
+                        # direction of disagreement is a provider we cannot vouch for,
+                        # and the run stops: no verdict on a turn we cannot describe.
+                        state.errors.append(f"provider stream mismatch on turn {turn_index}: {problem}")
+                        turn_span.set_attribute("stream.fault", problem[:200])
+                        yield self._finish(state, "error_during_execution")
+                        return
                 state.transcript.append(assistant)
                 state.turns += 1
                 self.sessions.record_assistant(assistant, agent=config.agent)
@@ -711,7 +1217,26 @@ class AgentRuntime:
                         )
                         continue
                     state.final_text = assistant.text
-                    yield self._finish(state, "success")
+                    self._checkpoint(state, boundary="after_text")
+                    subtype = "success"
+                    if self.postconditions:
+                        summary = summarise_postconditions(self.postconditions.evaluate())
+                        record = SystemMessage(
+                            subtype="postconditions",
+                            content=(
+                                f"postconditions: {summary['passed']}/{summary['checked']} passed"
+                                if summary["ok"]
+                                else f"postconditions: {summary['failed']} of {summary['checked']} check(s) failed"
+                            ),
+                            data=summary,
+                        )
+                        self.sessions.record_system(record, agent=config.agent)
+                        yield record
+                        if not summary["ok"]:
+                            # The model asked to stop and the workspace disagrees.
+                            # "It said it was done" is not the evidence we accept.
+                            subtype = "error_postconditions_failed"
+                    yield self._finish(state, subtype)
                     return
 
                 results: list[ToolResultBlock] = []
@@ -752,11 +1277,117 @@ class AgentRuntime:
                 state.transcript.append(tool_message)
                 self._record_tool_message(tool_message)
                 yield tool_message
+                self._checkpoint(state, boundary="after_tools")
                 if halted is not None:
                     yield self._finish(state, halted)
                     return
 
         yield self._finish(state, "error_max_turns")
+
+    def _claim_session(self) -> str | None:
+        """Take the per-session lease; return a refusal message, or ``None`` if we own it.
+
+        Contention is reported rather than raised, because a second writer has not made a
+        mistake: it asked for a session that happens to be busy. An exception would surface
+        in ``run_collect`` as an unhandled failure, which is the wrong shape for an outcome
+        a caller should branch on.
+        """
+        if not self.config.lock_session or not self.sessions.enabled or self.config.depth:
+            # Depth > 0 claims nothing because a delegation is not a second writer: a child
+            # runtime shares its parent's SessionStore object, hence the same transcript
+            # file, hence the same claim. Asking for the lock again would be refused by the
+            # kernel (flock is per open file description, not per process), which would
+            # turn every subagent into an error_session_busy run. The parent's claim is what
+            # covers the child's appends, and it is released only when the parent finishes.
+            return None
+        lease = SessionLease(
+            lease_path_for(self.sessions.directory, self.sessions.session_id),
+            owner_id=owner_id_for(self.config.run_id, session_id=self.sessions.session_id),
+            ttl_seconds=self.config.session_lease_seconds,
+        )
+        try:
+            lease.acquire()
+        except SessionBusyError as error:
+            return str(error)
+        except LeaseError as error:
+            # A lease we cannot even attempt is a configuration or platform problem, and
+            # refusing to start is the only honest answer: appending anyway, to a file that
+            # may be shared, would undo exactly the guarantee this exists to provide.
+            raise RuntimeConfigurationError(f"session lease could not be attempted: {error}") from error
+        self._session_lease = lease
+        self._lease_beat = time.monotonic()
+        return None
+
+    def _heartbeat(self) -> None:
+        """Renew while alive, at most a third of the TTL at a time.
+
+        Renewal is what lets a long tool turn outlive the TTL, so ``expires_at`` keeps
+        meaning "someone promised they were alive by here" instead of "a timer that will
+        end the run".
+        """
+        lease = self._session_lease
+        if lease is None:
+            return
+        now = time.monotonic()
+        if now - self._lease_beat < lease.ttl_seconds / 3:
+            return
+        self._lease_beat = now
+        try:
+            lease.heartbeat()
+        except LeaseError as error:
+            # The file vanished or became unwritable: the transcript is still ours to
+            # append to, so keep running - but say so in the audit rather than let the
+            # protection lapse quietly. One record, because the guard is gone.
+            self.sessions.record_system(
+                SystemMessage(
+                    subtype="informational",
+                    content=f"session_lease_lost: {error}",
+                    data={"agent": self.config.agent, "reason": "session_lease_lost"},
+                ),
+                agent=self.config.agent,
+            )
+            self._session_lease = None
+
+    def _release_session(self) -> None:
+        lease, self._session_lease = self._session_lease, None
+        if lease is None:
+            return
+        try:
+            lease.release()
+        except LeaseError as error:  # pragma: no cover - releasing a closed descriptor
+            self.tracer.event("session.lease.release-failed", level="warn", data={"error": str(error)[:200]})
+
+    def _checkpoint(self, state: _RunState, *, boundary: str) -> None:
+        """Append the resumable boundary record, if checkpoints are enabled.
+
+        Only ever after a *complete* turn - after the tool results, or after a text
+        turn that ends the run. A transcript ending on an assistant tool_use with no
+        tool_result would be rejected by the next request, so a checkpoint there
+        would be a fork point that cannot be forked from.
+        """
+        every = self.config.checkpoint_turns
+        if every <= 0 or state.turns <= 0 or state.turns % every:
+            return
+        payload = build_checkpoint(
+            session_id=state.session_id,
+            record_index=self.sessions.written,
+            transcript=state.transcript,
+            turns=state.turns,
+            tool_calls=state.tool_calls,
+            cost_usd=self.budget.total_cost_usd,
+            usage=self.budget.total_usage,
+            model=self.config.model,
+            provider=self.provider_name,
+            permission_mode=self.permissions.mode.value if hasattr(self.permissions.mode, "value") else str(self.permissions.mode),
+            run_id=self.config.run_id,
+            policy_revision=self.config.policy_revision,
+            denials=len(state.denials),
+        )
+        payload["boundary"] = boundary
+        self.sessions.append("checkpoint", payload)
+        # A boundary is the moment to renew: whoever is reading this file from another
+        # process should see the freshest possible promise about the holder.
+        self._heartbeat()
 
     # -- ceilings ----------------------------------------------------------
     def _ceiling_stop(self, state: _RunState) -> str | None:
@@ -1421,23 +2052,30 @@ class AgentRuntime:
     def _close_run(self, state: _RunState, run_span: Any) -> None:
         if not state.session_end_fired:
             state.session_end_fired = True
-            subtype = state.result.subtype if state.result is not None else "error_during_execution"
-            if state.result is not None and not self.config.depth:
-                self.sessions.record_result(state.result)
-            elif state.result is not None:
-                self.sessions.append("result", {"subtype": subtype, "agent": self.config.agent, "inherited_by_parent": True})
-            self._fire(
-                state,
-                "SessionEnd",
-                HookInput(
-                    event="SessionEnd",
-                    session_id=state.session_id,
-                    agent=self.config.agent,
-                    depth=self.config.depth,
-                    turn_index=state.turns,
-                    data={"subtype": subtype, "total_cost_usd": self.budget.total_cost_usd},
-                ),
-            )
+            if state.refused_session:
+                # A refused claim is the one outcome that writes nothing at all: a result
+                # record appended here would land in a file another process is holding,
+                # which is the exact corruption the claim exists to prevent. That stream
+                # stays authoritative in the event feed and the trace, not the transcript.
+                pass
+            else:
+                subtype = state.result.subtype if state.result is not None else "error_during_execution"
+                if state.result is not None and not self.config.depth:
+                    self.sessions.record_result(state.result)
+                elif state.result is not None:
+                    self.sessions.append("result", {"subtype": subtype, "agent": self.config.agent, "inherited_by_parent": True})
+                self._fire(
+                    state,
+                    "SessionEnd",
+                    HookInput(
+                        event="SessionEnd",
+                        session_id=state.session_id,
+                        agent=self.config.agent,
+                        depth=self.config.depth,
+                        turn_index=state.turns,
+                        data={"subtype": subtype, "total_cost_usd": self.budget.total_cost_usd},
+                    ),
+                )
         # Everything the trace needs is written before the span closes, because a
         # post-end set_attribute is discarded in silence.
         run_span.set_attributes(
@@ -1459,6 +2097,10 @@ class AgentRuntime:
             run_span.set_attribute(key, value)
         run_span.end()
         self._last_report = self._report(state.events, state=state)
+        # Released at the very end, after the result record and the SessionEnd hook are on
+        # disk: releasing before the last write is how a "protected" transcript gets a torn
+        # tail that the next writer then appends to.
+        self._release_session()
 
     def _report(self, events: Sequence[Message], *, state: _RunState) -> RunReport:
         result = state.result

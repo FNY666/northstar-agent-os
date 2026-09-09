@@ -24,7 +24,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Iterable
+from typing import Any, Iterable, Mapping
 
 try:  # Python 3.11+
     import tomllib as _toml
@@ -80,6 +80,18 @@ _ALLOWED_KEYS = frozenset({
     "agent",
     "compaction_threshold_tokens",
     "project_context",
+    # Declared lifecycle hooks. The shape is checked against the real guardrails
+    # in command_hooks.parse_hooks; here it must only be a list of tables.
+    "hooks",
+    # ``[[verify]]`` adds postconditions. It only ever *adds* an independent check,
+    # so a repository declaring one cannot loosen anything.
+    "verify",
+    # The provider transport's retry budget. Shape-checked here, like ``hooks``, and
+    # interpreted by provider_retry.RetryPolicy.from_mapping - which is where an unknown key
+    # or an out-of-range delay becomes an error. A retry table can only ever *add* waiting
+    # and requests, so it is a ceiling on cost rather than a grant of capability, and it is
+    # deliberately not a key a plugin bundle may write (see plugin_manifest).
+    "retry",
 })
 _ALLOWED_MODES = frozenset({"default", "plan"})
 _CONTEXT_MARKERS = (
@@ -114,6 +126,17 @@ class PolicyFile:
     agent: str | None = None                    # a known built-in agent name
     compaction_threshold_tokens: int | None = None  # <= DEFAULT_COMPACTION_THRESHOLD_TOKENS
     project_context: str | bool | None = None   # file name, False to disable, None = default
+    #: Raw ``[[hooks]]`` tables, validated by :mod:`command_hooks` before use.
+    hooks: tuple[Mapping[str, Any], ...] = ()
+    #: ``[[verify]]`` tables: workspace claims the runtime checks after the run,
+    #: independently of what the model claims. Like hooks, a repository may *add*
+    #: checks; it can never weaken or remove one, and nothing is executed.
+    verify: tuple[Mapping[str, Any], ...] = ()
+    #: The raw ``[retry]`` table, validated by :mod:`provider_retry`. Carried as a mapping
+    #: rather than a parsed policy so that the module owning the vocabulary is the one that
+    #: rejects a typo in it; ``load_policy_file`` still checks it is a table, because
+    #: ``retry = 5`` is a mistake worth reporting where the file was read.
+    retry: Mapping[str, Any] | None = None
 
     @property
     def project_context_setting(self) -> str | bool:
@@ -135,11 +158,40 @@ class PolicyFile:
             "agent": self.agent,
             "compaction_threshold_tokens": self.compaction_threshold_tokens,
             "project_context": self.project_context_setting,
+            "hooks": [dict(entry) for entry in self.hooks],
+            "verify": [dict(entry) for entry in self.verify],
+            "retry": dict(self.retry) if self.retry else None,
         }
 
 
 def policy_file_path(workspace: str | Path) -> Path:
     return Path(workspace) / POLICY_DIRECTORY / POLICY_FILE_NAME
+
+
+def read_policy_document(workspace: str | Path) -> dict[str, Any] | None:
+    """The parsed policy file, *unvalidated*: ``None`` when the file is absent.
+
+    This exists for a reader that needs the workspace's claimed ceilings but must not
+    re-adjudicate the file - notably :mod:`plugin_load`, which compares a bundle's asks
+    against them. Validating names there would produce a second, worse answer to a question
+    the CLI already answers with more context: only ``load_policy_file`` knows the registry
+    and the agent list of the run that is actually starting.
+
+    Read and parse failures still raise, because "I could not read it" must not be reported
+    as "the workspace has no ceilings".
+    """
+    path = policy_file_path(workspace)
+    if not path.is_file():
+        return None
+    try:
+        raw = _toml.loads(path.read_text(encoding="utf-8"))
+    except OSError as error:
+        raise PolicyFileError(f"{path}: cannot read policy file: {error}") from error
+    except Exception as error:  # tomllib.TOMLDecodeError / tomli
+        raise PolicyFileError(f"{path}: invalid TOML: {error}") from error
+    if not isinstance(raw, dict):
+        raise PolicyFileError(f"{path}: the policy file must be a TOML table")
+    return dict(raw)
 
 
 def load_policy_file(
@@ -154,16 +206,12 @@ def load_policy_file(
     unreadable, unparseable, unknown-key, type-error, or loosen-only violation.
     """
     path = policy_file_path(workspace)
-    if not path.is_file():
+    raw = read_policy_document(workspace)
+    if raw is None:
         return None
-    try:
-        raw = _toml.loads(path.read_text(encoding="utf-8"))
-    except OSError as error:
-        raise PolicyFileError(f"{path}: cannot read policy file: {error}") from error
-    except Exception as error:  # tomllib.TOMLDecodeError / tomli
-        raise PolicyFileError(f"{path}: invalid TOML: {error}") from error
-    if not isinstance(raw, dict):
-        raise PolicyFileError(f"{path}: the policy file must be a TOML table")
+    retry_table = raw.get("retry")
+    if retry_table is not None and not isinstance(retry_table, Mapping):
+        raise PolicyFileError(f"{path}: [retry] must be a table of transport knobs, not {type(retry_table).__name__}")
 
     unknown = sorted(set(raw) - _ALLOWED_KEYS)
     if unknown:
@@ -268,6 +316,50 @@ def load_policy_file(
     else:
         fail("project_context must be a file name string or a boolean")
 
+    # Declared lifecycle hooks: only the TOML shape is checked here (a list of
+    # tables). Whether each entry is *governable* - veto-only event, script inside
+    # the workspace, allowlisted interpreter - is command_hooks.parse_hooks' job,
+    # and it runs with the workspace and the enabled flag in hand.
+    hooks_raw = raw.get("hooks", ())
+    if hooks_raw is None:
+        hooks_raw = ()
+    if not isinstance(hooks_raw, (list, tuple)):
+        fail("hooks must be an array of tables ([[hooks]])")
+    for position, entry in enumerate(hooks_raw):
+        if not isinstance(entry, Mapping):
+            fail(f"hooks[{position}] must be a table")
+    hooks = tuple(dict(entry) for entry in hooks_raw)
+
+    # Declared postconditions: the same shape rules as hooks apply (a list of
+    # tables, no extra keys, a recognised kind), because a check that silently does
+    # not run is worse than no check at all.
+    verify_raw = raw.get("verify", ())
+    if verify_raw is None:
+        verify_raw = ()
+    if not isinstance(verify_raw, (list, tuple)):
+        fail("verify must be an array of tables ([[verify]])")
+    from postconditions import KINDS as POSTCONDITION_KINDS
+
+    verify_entries: list[dict[str, Any]] = []
+    for position, entry in enumerate(verify_raw):
+        if not isinstance(entry, Mapping):
+            fail(f"verify[{position}] must be a table")
+        unknown = sorted(set(entry) - {"kind", "path", "text", "count"})
+        if unknown:
+            fail(f"verify[{position}] unknown key(s): {', '.join(unknown)} - allowed: kind, path, text, count")
+        kind = entry.get("kind")
+        if not isinstance(kind, str) or kind not in POSTCONDITION_KINDS:
+            fail(f"verify[{position}] kind must be one of: {', '.join(POSTCONDITION_KINDS)}")
+        path_value = entry.get("path")
+        if not isinstance(path_value, str) or not path_value.strip():
+            fail(f"verify[{position}] path must be a non-empty workspace-relative string")
+        if "count" in entry and (not isinstance(entry["count"], int) or isinstance(entry["count"], bool) or entry["count"] < 1):
+            fail(f"verify[{position}] count must be an integer >= 1")
+        if "text" in entry and not isinstance(entry["text"], str):
+            fail(f"verify[{position}] text must be a string")
+        verify_entries.append(dict(entry))
+    verify = tuple(verify_entries)
+
     return PolicyFile(
         source=path,
         schema_version=schema_version,
@@ -276,6 +368,7 @@ def load_policy_file(
         read_only=read_only,
         deny_tools=tuple(deny),
         allow_tools=(),
+        retry=dict(retry_table) if retry_table else None,
         max_turns=max_turns,
         max_tool_calls=max_tool_calls,
         max_budget_usd=budget,
@@ -283,6 +376,8 @@ def load_policy_file(
         agent=agent,
         compaction_threshold_tokens=compaction,
         project_context=context if context is not DEFAULT_PROJECT_CONTEXT_FILE or "project_context" in raw else None,
+        hooks=hooks,
+        verify=verify,
     )
 
 

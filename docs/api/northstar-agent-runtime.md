@@ -83,11 +83,11 @@ A repository agent file is unusable. Message is operator-facing.
 
 #### `agents_directory(workspace: str | Path)`
 
-#### `discover_agent_files(workspace: str | Path, *, known_tools: Iterable[str] | None=None)`
+#### `discover_agent_files(workspace: str | Path, *, known_tools: Iterable[str] | None=None, extra_paths: Iterable[str | Path]=())`
 
 Compile every ``.northstar/agents/*.md`` into an AgentDefinition.
 
-#### `register_workspace_agents(registry: AgentRegistry, workspace: str | Path, *, known_tools: Iterable[str] | None=None)`
+#### `register_workspace_agents(registry: AgentRegistry, workspace: str | Path, *, known_tools: Iterable[str] | None=None, extra_paths: Iterable[str | Path]=())`
 
 Discover repository agents and register them; collisions are errors.
 
@@ -134,6 +134,40 @@ Running cost and usage accumulator with a ceiling check.
 
 Pricing view for the CLI ``--show-pricing`` flag.
 
+### `checkpoints`
+
+Source: `components/northstar-agent-runtime/checkpoints.py`
+
+Turn-boundary checkpoints: resume without resetting the counters, fork without rewriting.
+
+#### `digest_transcript(transcript: Sequence[Any])`
+
+#### `Checkpoint`
+
+A resumable boundary: how far the transcript had got, and what it cost.
+
+- `as_dict()`
+- `label()`
+#### `CheckpointError`
+
+A checkpoint that cannot be trusted as a fork point.
+
+#### `build(*, session_id: str, record_index: int, transcript: Sequence[Any], turns: int, tool_calls: int, cost_usd: float, usage: Mapping[str, Any], model: str, provider: str, permission_mode: str, run_id: str | None=None, policy_revision: str | None=None, denials: int=0)`
+
+The record payload appended at a boundary. Read-only: nothing here mutates.
+
+#### `from_record(record: Mapping[str, Any])`
+
+Read one checkpoint, or ``None`` when the record is not one.
+
+#### `select(records: Sequence[Mapping[str, Any]], *, record_index: int | None=None)`
+
+The newest checkpoint, or the one at ``record_index``.
+
+#### `prepare_resume(checkpoint: Checkpoint, transcript: Sequence[Any], *, expected_session_id: str | None=None)`
+
+The prefix a resumed run should start from, verified against the digest.
+
 ### `cli`
 
 Source: `components/northstar-agent-runtime/cli.py`
@@ -142,7 +176,53 @@ Command-line entry point for one governed run.
 
 #### `build_parser()`
 
+#### `resolve_model(provider: str, model: str='')`
+
+The model id to use, or a configuration error for an impossible pairing.
+
+#### `checkpoint_usage(checkpoint: Any)`
+
+The parent's token totals as a Usage, so a resumed run's cost view is continuous.
+
 #### `main(argv: Sequence[str] | None=None)`
+
+#### `format_tool_call_ceiling(value: 'int | None')`
+
+How the resolved tool-call ceiling reads to a human.
+
+### `command_hooks`
+
+Source: `components/northstar-agent-runtime/command_hooks.py`
+
+Repository-declared lifecycle hooks: the governed subset of a "command hook".
+
+#### `CommandHookError`
+
+A declared hook is unusable. Message is operator-facing; the CLI exits 64.
+
+#### `CommandHook`
+
+One validated ``[[hooks]]`` entry, ready to be registered.
+
+- `as_dict()`
+  - Display form only: the resolved absolute script path is never printed.
+#### `parse_hooks(raw: Sequence[Any], *, workspace: str | Path, known_tools: Sequence[str]=())`
+
+Validate a raw ``hooks`` list from the policy file. Raises on anything suspect.
+
+#### `candidate_name(entry: Mapping[str, Any], index: int)`
+
+#### `build_callback(hook: CommandHook, *, workspace: str | Path, runner: Callable[..., subprocess.CompletedProcess] | None=None)`
+
+Return the in-process hook that runs ``hook`` as a scrubbed subprocess.
+
+#### `register_into(registry: Any, hooks: Sequence[CommandHook], *, workspace: str | Path)`
+
+Attach validated hooks to a :class:`~hooks.HookRegistry`; returns their names.
+
+#### `summarise(hooks: Sequence[CommandHook], *, enabled: bool)`
+
+One-line description for ``doctor``/``--dry-run`` output.
 
 ### `compaction`
 
@@ -189,6 +269,45 @@ Summarise a safe prefix of ``transcript``; keep the tail verbatim.
 
 #### `summary_block(outcome: CompactionOutcome)`
 
+### `contract_bridge`
+
+Source: `components/northstar-agent-runtime/contract_bridge.py`
+
+One source of truth for the runtime → sidecar wire format, checked against the Run Contract.
+
+#### `BridgeError`
+
+A run id or binding that cannot be used. Reported to the operator.
+
+#### `BridgeReport`
+
+What the bridge concluded about one request. ``ok`` is the only verdict loop code reads.
+
+- `as_dict()`
+#### `derive_request_id(run_id: str | None, *, prefix: str=LEGACY_PREFIX)`
+
+Return the sidecar ``request_id`` for one run.
+
+#### `contract_available()`
+
+True when the Run Contract modules are importable *and* recognisable.
+
+#### `binding_from_environment()`
+
+Return ``(token, secret)`` when the host injected both, else ``None``.
+
+#### `run_document_from_environment()`
+
+Load the Run Request document named by ``NORTHSTAR_RUN_REQUEST``.
+
+#### `cross_check(request: Mapping[str, Any], *, run: Mapping[str, Any] | None=None)`
+
+Re-derive ``request`` through the contract and require agreement.
+
+#### `build_request(prompt: str, *, run_id: str | None, timeout_ms: int)`
+
+The one place a sidecar request is constructed.
+
 ### `doctor`
 
 Source: `components/northstar-agent-runtime/doctor.py`
@@ -205,9 +324,68 @@ Flags mirroring ``cli run``'s defaults so a doctor verdict predicts a run.
 
 #### `build_parser()`
 
+#### `policy_drift_finding(workspace: Path, policy: Any)`
+
+Compare the workspace policy file with the committed one.
+
 #### `run_doctor(args: argparse.Namespace)`
 
 Print the report; return 0 unless a check failed.
+
+### `durable_bridge`
+
+Source: `components/northstar-agent-runtime/durable_bridge.py`
+
+One run boundary, two readers: the runtime checkpoint in durable-run's vocabulary.
+
+#### `BridgeError`
+
+A checkpoint that cannot be expressed in durable-run's vocabulary.
+
+#### `canonical_json(value: Any)`
+
+durable-run's canonical form: sorted keys, no spaces, non-ASCII preserved.
+
+#### `durable_digest(value: Any)`
+
+``"sha256:" + hex`` - the prefixed form durable-run's ``_DIGEST_RE`` demands.
+
+#### `durable_modules()`
+
+The real durable-run modules, or ``None`` when they are not importable.
+
+#### `durable_available()`
+
+Whether the durable component can be imported here (a test/doc concern only).
+
+#### `checkpoint_payload(checkpoint: Any)`
+
+The runtime facts of one boundary, in a form an event can carry.
+
+#### `checkpoint_event(checkpoint: Any, *, task_id: str | None=None, thread_id: str | None=None, trace_id: str | None=None, occurred_at: int | None=None, sequence: int | None=None)`
+
+One ``northstar.durable-event.v1`` record for one runtime checkpoint.
+
+#### `verify_event_payload(event: Mapping[str, Any], payload: Mapping[str, Any])`
+
+Whether ``payload`` is what ``event``'s ``payload_digest`` was computed over.
+
+#### `checkpoint_document(checkpoint: Any, *, task_id: str | None=None, thread_id: str | None=None, sequence: int | None=None)`
+
+A ``northstar.checkpoint.v1`` document for one boundary, digested durably.
+
+#### `checkpoint_from_event(event: Mapping[str, Any], *, transcript: Sequence[Any], expected_session_id: str | None=None)`
+
+Rebuild a runtime checkpoint from a durable event, verified against the transcript.
+
+#### `BridgeReport`
+
+What the mirror concluded about itself. ``ok`` is the only verdict callers read.
+
+- `as_dict()`
+#### `cross_check(checkpoint: Any | None=None)`
+
+Compare this module's mirror against the durable component, if it is importable.
 
 ### `events`
 
@@ -295,6 +473,10 @@ Source: `components/northstar-agent-runtime/loop.py`
 
 The governed agent loop: reasoning here, policy enforced here, execution delegated.
 
+#### `collected_total(parts: Sequence[str])`
+
+Chars forwarded so far, without rescanning more than once per delta.
+
 #### `RuntimeConfigurationError`
 
 Invalid configuration. Raised at construction, never mid-run.
@@ -378,20 +560,216 @@ Parse ``--mcp-server NAME=COMMAND ARG...`` (command split with shlex).
 
 #### `McpStdioClient`
 
-One MCP server over stdio, handshaken and ready to call.
+One MCP server over stdio: modern (per-request metadata) or legacy (handshake).
 
 - `connected()`
+- `modern()`
 - `connect()`
-  - Spawn the server, handshake, and list its tools.
+  - Spawn the server, agree a generation, and list its tools.
 - `tool_names()`
 - `tool(name: str)`
 - `call_tool(tool_name: str, arguments: dict[str, Any])`
-  - Invoke one remote tool; flatten its content blocks into a ToolResult.
+  - Invoke one remote tool, resolving MRTR input requests through the gate.
 - `close()`
   - TERM the process group, then KILL after a grace period. Idempotent.
 #### `mcp_tool_specs(client: McpStdioClient)`
 
 Build governed ``ToolSpec``s (mutating by default) for one connected server.
+
+### `mcp_config`
+
+Source: `components/northstar-agent-runtime/mcp_config.py`
+
+Import the MCP config files other hosts already use, and say what was not carried.
+
+#### `McpConfigError`
+
+A config file cannot be imported. Message is operator-facing, names the file.
+
+#### `ImportedServer`
+
+One server declaration, reduced to what this runtime can launch.
+
+- `env_mapping()`
+- `as_dict()`
+#### `McpImport`
+
+What discovery found, what it refused, and what it ignored out loud.
+
+- `ok()`
+- `summary()`
+- `as_dict()`
+#### `add_mcp_arguments(verb: argparse.ArgumentParser)`
+
+Attach the `mcp` verb's actions to the CLI parser.
+
+#### `run_list(args: argparse.Namespace)`
+
+Report what the workspace declares, and exit 1 if any of it had to be refused.
+
+#### `read_document(path: Path, *, workspace: Path)`
+
+One file, as servers, refusals and notes.
+
+#### `discover(workspace: str | Path, *, candidates: Sequence[str] | None=None)`
+
+Read every config file this workspace declares, merged with no silent overrides.
+
+### `session_replay`
+
+Source: `components/northstar-agent-runtime/session_replay.py`
+
+Replay a session transcript as frames, and verify what a checkpoint would give back.
+
+#### `CheckpointReport`
+
+One checkpoint, plus whether the transcript still agrees with it.
+
+- `verified()`
+- `digest_prefix()`
+- `as_dict()`
+- `line()`
+#### `Frame`
+
+One readable step of a run, and the transcript records that produced it.
+
+- `as_dict()`
+- `line()`
+#### `Replay`
+
+A transcript folded into frames, with its fork points verified and its lineage named.
+
+- `verified()`
+- `counts()`
+- `summary()`
+- `render()`
+- `as_dict()`
+- `to_json()`
+#### `describe_checkpoint(record: Mapping[str, Any], records: Sequence[Mapping[str, Any]])`
+
+Verify one checkpoint *record* against the transcript it lives in.
+
+#### `checkpoint_reports(records: Sequence[Mapping[str, Any]])`
+
+Every checkpoint in ``records``, in transcript order, each verified against the prefix.
+
+#### `lineage_of(records: Iterable[Mapping[str, Any]])`
+
+Where this session says it came from, read from its own ``session_start`` record.
+
+#### `build_replay(records: Sequence[Mapping[str, Any]], *, session_id: str='', dropped_trailing_lines: int=0, upto: int | None=None)`
+
+Fold transcript records into frames.
+
+#### `load_replay(directory: str | Path, session_id: str, *, upto: int | None=None)`
+
+Read one transcript and replay it, as ``(replay, error)`` with exactly one set.
+
+#### `budget_headroom(records: Sequence[Mapping[str, Any]], report: CheckpointReport)`
+
+What a run resumed from ``report`` would still be allowed to spend, and the catch.
+
+#### `fork_preview(records: Sequence[Mapping[str, Any]], *, record_index: int, session_id: str='', dropped_trailing_lines: int=0)`
+
+What a run resumed from the checkpoint at ``record_index`` would start with.
+
+### `mcp_elicitation`
+
+Source: `components/northstar-agent-runtime/mcp_elicitation.py`
+
+Turning a remote server's "ask the user" into a governed approval.
+
+#### `ElicitationError`
+
+A malformed input request the client refuses to render at all.
+
+#### `Field`
+
+One requested value, as it will be shown to the approver.
+
+- `as_dict()`
+#### `ElicitationRequest`
+
+One embedded server request, decoded and bounded.
+
+- `sensitive()`
+- `prompt()`
+  - Human-facing text. Values are never part of it.
+#### `ElicitationVerdict`
+
+What the client decided about one request, in audit shape.
+
+- `as_dict()`
+#### `decode_request(key: str, entry: Mapping[str, Any], *, server: str, tool: str, workspace_root: str='', allow_sensitive: bool=False)`
+
+Validate and bound one ``inputRequests`` entry.
+
+#### `decode_input_requests(input_requests: Mapping[str, Mapping[str, Any]], *, server: str, tool: str, workspace_root: str='', allow_sensitive: bool=False, allow_roots: bool=False)`
+
+Decode every embedded request; ``allow_roots`` gates the one that leaks paths.
+
+#### `resolve_requests(requests: Sequence[ElicitationRequest], *, elicitor: Callable[[ElicitationRequest], Any] | None)`
+
+Produce the ``inputResponses`` map plus the audit trail of how it was decided.
+
+#### `make_answers_elicitor(answers: Mapping[str, Any])`
+
+Pre-approved answers: a mapping of field name to value, applied to any request it covers.
+
+#### `make_terminal_elicitor(read_line: Callable[[str], str]=input, *, echo: Callable[[str], None] | None=None)`
+
+Ask a human on a terminal. ``read_line`` is injectable so the gate is testable offline.
+
+#### `summarize_verdicts(verdicts: Sequence[ElicitationVerdict])`
+
+The record shape written into the session transcript.
+
+### `mcp_negotiate`
+
+Source: `components/northstar-agent-runtime/mcp_negotiate.py`
+
+MCP protocol-generation logic: era detection, per-request metadata, MRTR planning.
+
+#### `request_meta(*, protocol_version: str, client_info: Mapping[str, Any], capabilities: Mapping[str, Any])`
+
+The ``params._meta`` object a modern request must carry.
+
+#### `client_capabilities(*, can_elicit: bool, can_list_roots: bool=False)`
+
+What this client can answer, and therefore what a server may ask.
+
+#### `EraDecision`
+
+The outcome of the stdio probe.
+
+- `modern()`
+#### `select_version(supported: Iterable[Any], *, prefer: Sequence[str]=SUPPORTED_VERSIONS)`
+
+The newest version both sides speak, or ``None`` when there is none.
+
+#### `decide_era(discover_result: Mapping[str, Any] | None, discover_error: Mapping[str, Any] | None=None, *, transport: str='stdio', timed_out: bool=False)`
+
+Map the probe's outcome onto an era, following the spec's fallback rule.
+
+#### `result_type(result: Mapping[str, Any] | None)`
+
+``resultType`` with the legacy-era default spelled out.
+
+#### `input_requests(result: Mapping[str, Any])`
+
+The ``inputRequests`` map of an ``InputRequiredResult``, validated lightly.
+
+#### `request_state(result: Mapping[str, Any])`
+
+The opaque ``requestState`` to echo back, verbatim or not at all.
+
+#### `retry_params(*, tool_name: str, arguments: Mapping[str, Any], input_responses: Mapping[str, Any], state: str | None)`
+
+The ``tools/call`` parameters for an MRTR retry.
+
+#### `discover_summary(result: Mapping[str, Any] | None)`
+
+What ``server/discover`` told us, for the operator-facing ``--json`` init record.
 
 ### `permissions`
 
@@ -440,6 +818,174 @@ Evaluates one tool call against the three layers.
 - `evaluate_spec(spec: Any, payload: dict[str, Any] | None=None, *, context: PermissionRequestContext | None=None, known: bool=True)`
 - `check_delegation(agent: str, tool_names: Sequence[str], *, kinds: dict[str, str] | None=None, context: PermissionRequestContext | None=None, disallowed_extra: Iterable[str]=())`
   - Gate a subagent by *each tool it declared*, not by the name ``Task``.
+### `plugin_load`
+
+Source: `components/northstar-agent-runtime/plugin_load.py`
+
+Installing, pinning, loading and auditing plugin bundles in one workspace.
+
+#### `review_bundle_skills(plugin: InstalledPlugin)`
+
+Run the workspace's own skill-text rules over one bundle's skills.
+
+#### `describe_findings(audits: Sequence[SkillAudit], *, at_or_above: str | None=None)`
+
+One line per finding, worst first, so a refusal says what to go and read.
+
+#### `skill_bar_met(audits: Sequence[SkillAudit], fail_on: str)`
+
+True when any audited skill carries a finding at or above ``fail_on``.
+
+#### `PluginInstallError`
+
+An install, uninstall or pinning step that cannot be completed safely.
+
+#### `plugins_directory(workspace: str | Path)`
+
+#### `lock_path(workspace: str | Path)`
+
+#### `read_lock(workspace: str | Path)`
+
+The reviewed set, as ``{name: entry}``. Missing file is "nothing reviewed yet".
+
+#### `write_lock(workspace: str | Path, entries: Mapping[str, Mapping[str, Any]])`
+
+Write the lockfile atomically, sorted, with a trailing newline: it is a review artefact.
+
+#### `InstalledPlugin`
+
+A bundle on disk in a workspace, plus what the lock says about it.
+
+- `usable()`
+  - ``drift`` and ``unpinned`` are both refusals, and for the same reason: the content a reviewer agreed to is the unit of trust here, so anything else has to be re-reviewed, not run with a warning.
+- `as_dict()`
+#### `load_installed(workspace: str | Path, *, require_lock: bool=True, workspace_policy: Mapping[str, Any] | None=None)`
+
+Every installed bundle, verified, plus operator-facing problems found on the way.
+
+#### `PluginContributions`
+
+Everything installed bundles add to a run, already gated.
+
+- `enabled()`
+- `merged_policy(workspace_policy: Mapping[str, Any] | None)`
+  - Fold the plugins' ceilings into the workspace policy.
+- `as_dict()`
+#### `load_contributions(workspace: str | Path, *, require_lock: bool=True, known_tools: Iterable[str]=(), workspace_policy: Mapping[str, Any] | None=None)`
+
+Load every usable installed bundle; block on anything that is not usable.
+
+#### `InstallResult`
+
+What landed, and what the operator has to do next.
+
+- `as_dict()`
+#### `install(source: str | Path, workspace: str | Path, *, force: bool=False, pin: bool=True, require_seal: bool=False, fail_on: str='error', environment: Mapping[str, str] | None=None)`
+
+Copy a bundle into the workspace and pin its digest.
+
+#### `uninstall(name: str, workspace: str | Path, *, keep_lock: bool=False)`
+
+Remove one installed bundle, and its lock entry unless ``keep_lock`` says otherwise.
+
+#### `verify_workspace(workspace: str | Path, *, require_lock: bool=True, pin: bool=False, environment: Mapping[str, str] | None=None, workspace_policy: Mapping[str, Any] | None=None, fail_on: str='error')`
+
+The report ``plugin verify`` prints, as data.
+
+#### `add_plugin_arguments(parser: argparse.ArgumentParser)`
+
+The ``plugin`` subcommands, built on one parser so `run` can share the flags.
+
+#### `run_plugin_command(args: argparse.Namespace)`
+
+The whole `plugin` verb: read, verify, install, remove, export.
+
+### `plugin_manifest`
+
+Source: `components/northstar-agent-runtime/plugin_manifest.py`
+
+The plugin bundle format: one directory of capability, five hosts that can read it.
+
+#### `PluginError`
+
+A plugin that cannot be trusted, loaded, or exported. Message is operator-facing.
+
+#### `BundleFile`
+
+One file inside a bundle, with the digest the manifest's integrity claim covers.
+
+- `as_dict()`
+#### `Bundle`
+
+A plugin directory as it exists on disk - which is not the same as what it claims.
+
+- `relative(path: str)`
+  - A declared path, resolved *inside* the bundle or refused.
+- `component_paths(kind: str)`
+- `as_dict()`
+#### `load_bundle(root: str | Path)`
+
+Read a plugin directory: manifest parsed, files digested, nothing else executed.
+
+#### `HookClaim`
+
+One declared lifecycle hook, in exactly the shape ``[[hooks]]`` uses.
+
+- `as_hook_table(*, script_path: str='')`
+  - The raw ``[[hooks]]`` entry, for :func:`command_hooks.parse_hooks` to police.
+#### `PluginManifest`
+
+The parsed, validated claims of one bundle. Every field here was checked to load.
+
+- `as_dict()`
+- `summary_line()`
+#### `parse_manifest(bundle: Bundle, *, workspace_policy: Mapping[str, Any] | None=None)`
+
+Validate a bundle's manifest, resolve its claims, and *refuse* what cannot load.
+
+#### `verify_integrity(manifest: PluginManifest, *, pinned_digest: str='', environment: Mapping[str, str] | None=None)`
+
+Recompute the bundle digest and compare it with what the workspace pinned.
+
+#### `current_host_profile()`
+
+The profile for the machine asking, from the same primitives the table describes.
+
+#### `portability_report(manifest: PluginManifest, files: Sequence[BundleFile]=(), *, host: Mapping[str, Any] | None=None, only_hosts: Sequence[str] | None=None)`
+
+Score one bundle against every host profile this component knows about.
+
+#### `check_host_compatibility(manifest: PluginManifest, *, host: Mapping[str, Any] | None=None)`
+
+Why this bundle cannot load here, or ``""`` when it can.
+
+#### `Export`
+
+Rendered files plus what could not be rendered.
+
+- `as_dict()`
+#### `export_bundle(bundle: Bundle, manifest: PluginManifest, *, target: str)`
+
+Render one bundle as another host's native files, and say what fell out.
+
+#### `declared_components(manifest: PluginManifest)`
+
+Which capabilities this bundle actually uses (not what it merely could).
+
+#### `describe_components(manifest: PluginManifest)`
+
+The capability surface, as data: what a reviewer is being asked to trust.
+
+#### `component_lines(manifest: PluginManifest)`
+
+The declared components as one line each, for a human reading ``plugin show``.
+
+#### `skill_candidates(bundle: Bundle, manifest: PluginManifest)`
+
+``(name, SKILL.md path)`` for every skill the bundle ships, resolved inside it.
+
+#### `agent_files(bundle: Bundle, manifest: PluginManifest)`
+
 ### `policy_file`
 
 Source: `components/northstar-agent-runtime/policy_file.py`
@@ -458,6 +1004,10 @@ Validated contents of ``.northstar/config.toml``.
 - `as_dict()`
 #### `policy_file_path(workspace: str | Path)`
 
+#### `read_policy_document(workspace: str | Path)`
+
+The parsed policy file, *unvalidated*: ``None`` when the file is absent.
+
 #### `load_policy_file(workspace: str | Path, *, known_tools: Iterable[str] | None=None, known_agents: Iterable[str] | None=None)`
 
 Load and validate the workspace policy file; ``None`` when absent.
@@ -473,6 +1023,112 @@ Find the project-instructions file to inject, or ``None``.
 #### `append_project_context(base_prompt: str, context: ProjectContext)`
 
 Append clearly delimited developer-authored content to a system prompt.
+
+### `postconditions`
+
+Source: `components/northstar-agent-runtime/postconditions.py`
+
+Postconditions: an independent verdict on whether the work actually happened.
+
+#### `PostConditionError`
+
+Raised for a malformed, unknown, or out-of-bounds postcondition.
+
+#### `PostCondition`
+
+One claim about the workspace, evaluated after the run.
+
+- `structural()`
+- `as_dict()`
+#### `Verdict`
+
+The outcome of evaluating one postcondition.
+
+- `as_dict()`
+#### `parse_postconditions(entries: Iterable[Mapping[str, Any]], *, source: str='config')`
+
+Validate hook-style mappings into postconditions, rejecting anything else.
+
+#### `parse_cli_specs(specs: Sequence[str])`
+
+``--verify KIND:PATH`` (and ``contains:PATH:TEXT``) into postconditions.
+
+#### `PostConditionSet`
+
+A snapshot-and-compare verifier bound to one workspace.
+
+- `snapshot()`
+  - Record pre-run content addresses. Called before the first turn, never after.
+- `evaluate()`
+#### `summarise(verdicts: Sequence[Verdict])`
+
+The audit shape: a pass/fail roll-up with the structural split made visible.
+
+### `provider_retry`
+
+Source: `components/northstar-agent-runtime/provider_retry.py`
+
+The retry budget: what a transient provider fault means, and what it costs.
+
+#### `RetryConfigurationError`
+
+The retry table is unusable. Raised at load, never mid-run.
+
+#### `ProviderFault`
+
+One classified provider failure.
+
+- `retryable_by_default()`
+- `as_dict()`
+#### `AttemptRecord`
+
+What happened between two provider calls: the fault, the wait, the next attempt.
+
+- `as_dict()`
+- `line()`
+  - The operator-facing sentence, used by the loop's informational event.
+#### `RetryPolicy`
+
+How many times, how long apart, and until when.
+
+- `from_mapping(document: Mapping[str, Any] | None, *, seed: int | None=None)`
+  - Parse a ``[retry]`` table, or return ``None`` when the workspace has no opinion.
+- `restrict(other: 'RetryPolicy | None')`
+  - Clamp this policy to no looser than ``other`` (the workspace's own table).
+- `enabled()`
+- `plan(attempt: int, fault: ProviderFault, *, waited_ms: int=0)`
+  - Decide what to do after ``attempt`` calls failed with ``fault``.
+- `planned_wait_ms()`
+  - The most this policy can make a single turn wait, jitter at its ceiling.
+- `describe()`
+  - One line, for ``--dry-run`` and ``doctor``.
+- `as_dict()`
+#### `StopRetry`
+
+The decision not to retry, with the reason a caller can put in an event.
+
+- `as_dict()`
+#### `classify(error: BaseException, *, already_streamed: bool=False)`
+
+Name a provider failure, from whatever the transport could tell us.
+
+#### `execute(call: Callable[[], Any], *, policy: RetryPolicy | None, on_retry: Callable[[AttemptRecord], None] | None=None, classify_error: Callable[[BaseException], ProviderFault] | None=None, sleep: Callable[[float], None] | None=None)`
+
+Call ``call()`` under ``policy``, returning ``(result, summary)``.
+
+#### `RetrySummary`
+
+What a retry policy actually cost this turn.
+
+- `with_fault(attempt: int, fault: ProviderFault)`
+- `with_retry(record: AttemptRecord)`
+- `with_stop(attempt: int, stop: 'StopRetry')`
+- `retried()`
+- `as_dict()`
+- `line()`
+#### `merge_cli(policy: RetryPolicy | None, *, max_attempts: int | None=None, deadline_ms: int | None=None, retry_on: Iterable[str] | None=None, off: bool=False)`
+
+Apply the CLI's knobs on top of the workspace table, never loosening past it.
 
 ### `sdk`
 
@@ -558,6 +1214,62 @@ Cheap session statistics for the CLI's ``--inspect-session`` flag.
 
 Pitfall guard: a run without a session store still needs a session id.
 
+### `session_lease`
+
+Source: `components/northstar-agent-runtime/session_lease.py`
+
+One writer per session file, using the durable-run lease envelope.
+
+#### `LeaseError`
+
+The lease could not be used as asked (bad owner id, unusable directory, ...).
+
+#### `SessionBusyError`
+
+Another live process holds this session.
+
+#### `validate_owner_id(value: Any)`
+
+The durable contract's id rule, applied to a lease owner.
+
+#### `validate_ttl(value: Any)`
+
+#### `LeaseStatus`
+
+What can be said about one lease path *right now*, without owning it.
+
+- `free()`
+  - Nothing is *known* to hold it. ``probed=False`` means "unverified", not "free".
+- `expired()`
+  - The holder stopped promising liveness. This never makes it stealable.
+- `as_dict()`
+- `human()`
+#### `inspect_lease(path: str | Path, *, probe: bool=True)`
+
+Read-only report on one lease file (never creates it, never steals anything).
+
+#### `lease_path_for(directory: str | Path, session_id: str)`
+
+``<directory>/<session_id>.lease`` - the sibling of the transcript it guards.
+
+#### `SessionLease`
+
+An exclusive, kernel-enforced claim on one session file's write path.
+
+- `held()`
+- `kernel_lock_available()`
+- `status()`
+- `acquire()`
+- `heartbeat(*, ttl_seconds: int | None=None)`
+  - Extend the promise. A no-op when the lease is not held, so the loop can call it from a boundary that a refused run never reached.
+- `close()`
+  - Alias for :meth:`release`, so the lease works with ``with``.
+- `release()`
+  - Drop the lock. The envelope is left in place as a trace of the last writer.
+#### `owner_id_for(run_id: str | None, *, session_id: str='')`
+
+The lease owner: the run's own correlation id when it has one.
+
 ### `session_view`
 
 Source: `components/northstar-agent-runtime/session_view.py`
@@ -601,6 +1313,7 @@ Structured outcome of one sidecar round trip. Failures are data, not raises.
 One-connection-per-request Unix socket client for the sidecar.
 
 - `new_request_id()`
+  - The run's id when the operator set one, else a generated legacy-form id.
 - `execute(prompt: str, *, timeout_ms: int | None=None, request_id: str | None=None)`
   - Run one prompt. Never raises for an expected condition.
 - `execute_tool(*, prompt: Any, timeout_ms: Any=None)`
@@ -616,6 +1329,89 @@ The socket path was absent before attempting transport.
 Response framing the runtime cannot trust.
 
 #### `known_statuses()`
+
+### `skill_audit`
+
+Source: `components/northstar-agent-runtime/skill_audit.py`
+
+Skill supply-chain review: read-only, deterministic, and pinned by digest.
+
+#### `SkillAuditError`
+
+Raised for an unusable audit target (unreadable file, bad lockfile).
+
+#### `Finding`
+
+One rule hit at one line.
+
+- `as_dict()`
+#### `SkillAudit`
+
+The review result for one skill file.
+
+- `worst()`
+- `highest_severity()`
+- `as_dict()`
+#### `digest_of(data: bytes)`
+
+#### `scan_text(text: str)`
+
+Apply the line rules to one skill file's text (frontmatter included).
+
+#### `audit_text(name: str, text: str, *, relative_path: str='', raw: bytes | None=None)`
+
+Review one skill's text without touching the filesystem.
+
+#### `audit_file(path: Path | str, *, root: Path | str | None=None)`
+
+Review one ``SKILL.md``. Unreadable files become a finding, not a crash.
+
+#### `skill_files(root: Path | str, *, trees: Sequence[str]=SKILL_TREE_GLOBS)`
+
+Every ``SKILL.md`` under the known skill install paths of one checkout.
+
+#### `audit_tree(root: Path | str, *, trees: Sequence[str]=SKILL_TREE_GLOBS)`
+
+Review a whole checkout, including foreign ``.claude`` / ``.agents`` trees.
+
+#### `summarise(audits: Iterable[SkillAudit])`
+
+The aggregate a CLI or CI job reads.
+
+#### `threshold_met(audits: Sequence[SkillAudit], fail_on: str)`
+
+True when any finding is at or above ``fail_on`` (``never`` disables the gate).
+
+#### `lock_payload(audits: Sequence[SkillAudit], *, source: str='')`
+
+#### `write_lock(path: Path | str, audits: Sequence[SkillAudit], *, source: str='')`
+
+#### `load_lock(path: Path | str)`
+
+#### `LockStatus`
+
+Comparison of a reviewed set against a live one.
+
+- `clean()`
+- `as_dict()`
+- `summary()`
+#### `check_lock(audits: Sequence[SkillAudit], payload: dict[str, Any])`
+
+#### `lock_path_for(workspace: str | Path)`
+
+### `skill_check`
+
+Source: `components/northstar-agent-runtime/skill_check.py`
+
+``cli skills check`` - the operator-facing half of :mod:`skill_audit`.
+
+#### `add_skills_arguments(parser: argparse.ArgumentParser)`
+
+#### `run_skills_command(args: argparse.Namespace)`
+
+#### `run_lock_status(workspace: str | Path)`
+
+The one-liner ``run --require-skill-lock`` and ``doctor`` share.
 
 ### `skills`
 
@@ -633,7 +1429,7 @@ One discovered skill package: identity plus the path to read.
 
 #### `skills_directory(workspace: str | Path)`
 
-#### `discover_skills(workspace: str | Path)`
+#### `discover_skills(workspace: str | Path, *, extra_roots: Iterable[str | Path]=())`
 
 Discover skills under the workspace root; errors are operator-facing.
 
@@ -809,6 +1605,30 @@ Schema for the sidecar-delegated tool (registered only with a socket).
 
 #### `truncate_text(text: str, limit: int=MAX_TOOL_RESULT_CHARS)`
 
+### `tools.verify_invariants`
+
+Source: `components/northstar-agent-runtime/tools/verify_invariants.py`
+
+Revert each core guard in a throwaway copy of the component and confirm the matching test goes red. A green test that survives removing the guard is not a test of the guard.
+
+#### `prepare(root: Path)`
+
+Copy every component into a throwaway tree, keeping the `components/` layout.
+
+#### `run(component: Path, pattern: str)`
+
+#### `main()`
+
+### `providers`
+
+Source: `components/northstar-agent-runtime/providers/__init__.py`
+
+Northstar runtime provider package.
+
+#### `make_provider(kind: str='scripted', **kwargs)`
+
+Factory used by the CLI; keeps ``anthropic`` importable only on demand.
+
 ### `providers.base`
 
 Source: `components/northstar-agent-runtime/providers/base.py`
@@ -899,11 +1719,32 @@ The wire shape a provider needs to describe a tool.
 One provider turn.
 
 - `tool_uses()`
+- `text()`
+  - The turn's text as one string, in block order (what a stream must reproduce).
+#### `StreamDelta`
+
+One provisional chunk of assistant text, on its way to becoming an :class:`AssistantMessage`.
+
+- `as_dict()`
+#### `split_for_stream(text: str, *, size: int=MAX_STREAM_DELTA_CHARS)`
+
+Slice ``text`` into chunks no longer than ``size`` (the provider-side helper).
+
+#### `stream_comparable_text(turn: Any)`
+
+The turn's text, joined **without** separators, for stream comparison.
+
+#### `stream_fidelity(parts: Sequence[str], final_text: str)`
+
+Compare what a stream showed with what the run is about to record.
+
 #### `Provider`
 
 Base class for providers; subclasses implement :meth:`generate`.
 
 - `generate(request: GenerationRequest)`
+- `stream(request: GenerationRequest)`
+  - Yield :class:`StreamDelta` chunks, then exactly one :class:`Generation`.
 - `close()`
 #### `coerce_blocks(values: Iterable[Any] | None)`
 
@@ -921,14 +1762,39 @@ Anthropic Messages API provider.
 
 #### `AnthropicProvider`
 
-Thin, normalising adapter over ``client.messages.create``.
+Thin, normalising adapter over ``client.messages.create`` and ``...stream``.
 
 - `client()`
 - `build_payload(request: GenerationRequest)`
   - Translate a GenerationRequest into ``messages.create`` kwargs.
 - `generate(request: GenerationRequest)`
+- `stream(request: GenerationRequest)`
+  - Forward ``text`` deltas, then the turn normalised from the *final* message.
 - `normalise(response: Any)`
   - Convert an SDK response (or a matching fake) into a Generation.
+- `close()`
+### `providers.openai_compat`
+
+Source: `components/northstar-agent-runtime/providers/openai_compat.py`
+
+Any-model provider for endpoints that speak the OpenAI Chat Completions wire.
+
+#### `OpenAICompatProvider`
+
+Normalising adapter over ``client.chat.completions.create``.
+
+- `client()`
+- `resolve_token_limit_field(model: str)`
+- `to_chat_tools(tools: Sequence[dict[str, Any]])`
+  - Anthropic tool definitions -> chat ``function`` wrappers.
+- `to_chat_messages(system: str, messages: Sequence[dict[str, Any]])`
+  - Translate the Anthropic-shaped transcript into chat messages.
+- `build_payload(request: GenerationRequest)`
+  - Translate a :class:`GenerationRequest` into ``chat.completions.create`` kwargs.
+- `generate(request: GenerationRequest)`
+- `stream(request: GenerationRequest)`
+  - Reassemble an SSE chat completion into deltas plus one normalised turn.
+- `normalise(response: Any)`
 - `close()`
 ### `providers.scripted`
 
@@ -944,11 +1810,15 @@ One scripted model turn.
 - `tool(name: str, payload: dict[str, Any] | None=None, *, call_id: str | None=None, also_text: str='', usage: Usage | dict[str, Any] | None=None)`
 - `tools(calls: Sequence[Any], *, usage: Usage | dict[str, Any] | None=None)`
 - `error(error: Exception)`
+- `streamed(text: str, chunks: Sequence[str], **kwargs: Any)`
+  - A turn whose stream is written out by hand (chunking is then under test, not derived).
 #### `ScriptedProvider`
 
 Plays back a fixed list of turns.
 
 - `generate(request: GenerationRequest)`
+- `stream(request: GenerationRequest)`
+  - Yield this turn's text as deterministic deltas, then the :class:`Generation`.
 - `pending()`
 - `last_request()`
 - `sent_tool_results()`
