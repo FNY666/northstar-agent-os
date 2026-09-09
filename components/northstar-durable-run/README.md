@@ -36,7 +36,16 @@ status. It checks the actual run state, private workspace, required file
 an `ok` receipt; missing observations produce `unknown` and failed checks
 produce `failed`.
 
-## Local example
+The governed Agent Loop prototype is also defined in `agent_loop.py`: it admits a
+strict planner-produced `AgentPlan`, persists a bounded plan-step manifest in
+the first admission event, executes only registered actions, and requires an
+independent observer read-back. A manifest binds every evidence `step_id`,
+logical `execution_id`, and per-attempt `attempt_id` to the admitted plan;
+forged or unplanned identities fail closed before evidence is written. An
+`unknown` read-back pauses the loop, while only an independently observed
+`absent` result can authorize a bounded retry. This remains a local-only
+prototype, not a real model planner or proof of exactly-once external effects.
+
 
 The tests demonstrate a complete local flow:
 
