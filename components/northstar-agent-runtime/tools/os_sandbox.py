@@ -26,10 +26,11 @@ import os
 import shutil
 import signal
 import subprocess
+import threading
 import time
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Mapping, Sequence
+from typing import Any, Iterable, Mapping, Sequence
 
 #: Hard ceilings a single Shell invocation may not exceed. Operators may only
 #: tighten these (via tool payload or run config), never widen past the runtime.
@@ -40,6 +41,11 @@ MAX_OUTPUT_BYTES = 512 * 1024
 DEFAULT_MAX_ARGV = 64
 MAX_ARGV_BYTES = 32 * 1024
 DEFAULT_MAX_ENV = 32
+
+#: Where a sandboxed command may put scratch files, relative to the workspace. One name on
+#: purpose: :func:`_scrubbed_env` creates it, the Shell tool re-binds it writable inside the
+#: read-only governance tree, and the drift watch ignores it. Two spellings would drift.
+SANDBOX_TMP_RELATIVE = ".northstar/tmp"
 
 BACKENDS = ("auto", "bwrap", "process")
 
@@ -80,6 +86,17 @@ class SandboxRequest:
     max_output_bytes: int = DEFAULT_MAX_OUTPUT_BYTES
     env: Mapping[str, str] | None = None
     network: bool = False  # reserved: bwrap always unshares net today; True is refused
+    #: Workspace paths the child must not be able to write even though the workspace is its
+    #: only writable bind: the tree the run is gated by. Enforced by a read-only re-bind on
+    #: bwrap, which is what lets the permission gate keep its promise across an approved
+    #: ``Shell`` call (audit F4). On the process backend these are inert - nothing can be
+    #: bound without user namespaces - and ``governance_watch`` detects there instead.
+    read_only_paths: tuple[Path, ...] = ()
+    #: Paths *inside* ``read_only_paths`` that stay writable on purpose: the documented
+    #: carve-outs (workspace memory, the sandbox tmp dir). Applied after the read-only binds,
+    #: because the later bind wins - which is also why a caller cannot widen a rule by
+    #: listing a carve-out that was never protected.
+    writable_paths: tuple[Path, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -226,7 +243,7 @@ def _scrubbed_env(extra: Mapping[str, str] | None, *, workspace: Path) -> dict[s
         "LANG": lang,
         "LC_ALL": lang,
         "HOME": str(workspace),
-        "TMPDIR": str(workspace / ".northstar" / "tmp"),
+        "TMPDIR": str(workspace / SANDBOX_TMP_RELATIVE),
         "NORTHSTAR_SANDBOX": "1",
     }
     if extra:
@@ -275,6 +292,14 @@ def _validate_request(request: SandboxRequest) -> None:
         raise SandboxError(f"cwd is not a directory: {cwd}")
     if not workspace.is_dir():
         raise SandboxError(f"workspace is not a directory: {workspace}")
+    for label, paths in (("read_only_paths", request.read_only_paths), ("writable_paths", request.writable_paths)):
+        for path in paths:
+            candidate = Path(workspace) / path if not Path(path).is_absolute() else Path(path)
+            resolved = _contained_target(candidate, workspace=workspace)
+            try:
+                resolved.relative_to(workspace)
+            except ValueError as error:
+                raise SandboxError(f"{label} {path} escapes the workspace ({resolved})") from error
 
 
 def _read_capped(stream: Any, limit: int) -> tuple[bytes, bool]:
@@ -298,7 +323,7 @@ def _run_popen(
 ) -> SandboxResult:
     """Shared runner: process-group kill on timeout, capped pipes, no shell=True."""
     # Ensure TMPDIR exists for the child (workspace-scoped).
-    tmp = Path(env.get("TMPDIR") or (cwd / ".northstar" / "tmp"))
+    tmp = Path(env.get("TMPDIR") or (cwd / SANDBOX_TMP_RELATIVE))
     try:
         tmp.mkdir(parents=True, exist_ok=True, mode=0o700)
     except OSError:
@@ -395,6 +420,103 @@ def _run_popen(
     )
 
 
+#: Per-process verdicts for "did the read-only bind actually hold", keyed by
+#: ``(workspace, protected paths)``. The answer depends on this kernel and this bwrap, not on
+#: the command about to run, so a run that makes forty ``Shell`` calls pays one probe - and
+#: every later call gets the same *answer* rather than the same silence.
+_BIND_VERDICTS: dict[tuple, tuple[bool, str]] = {}
+_BIND_VERDICTS_LOCK = threading.Lock()
+
+
+def _assert_binds_hold(workspace: Path, read_only_paths: Sequence[Path], *, caps: SandboxCapabilities) -> None:
+    """Refuse to run when a path this sandbox promised to protect is writable from inside it.
+
+    ``resolve_backend`` already refuses to lie about *which* backend you get; this refuses the
+    next lie down. ``--ro-bind-try`` is deliberately quiet when it cannot do the job, so a bind
+    that did not hold would have let a run advertise "governance tree bound read-only" in its own
+    audit while the tree was open. One probe per (workspace, set of paths) per process, and the
+    verdict is cached whether it is good or bad - a host where the bind fails must fail every
+    call the same way, not loudly once and silently afterwards.
+    """
+    key = (str(workspace), tuple(sorted(str(path) for path in read_only_paths)))
+    with _BIND_VERDICTS_LOCK:
+        verdict = _BIND_VERDICTS.get(key)
+    if verdict is None:
+        verdict = probe_governance_binds(workspace, read_only_paths, capabilities=caps, phase=True)
+        with _BIND_VERDICTS_LOCK:
+            _BIND_VERDICTS[key] = verdict
+    if not verdict[0]:
+        raise SandboxError(
+            f"the governance bind this backend promised does not hold: {verdict[1]} - refusing "
+            "to run a command that could rewrite the policy it is gated by (repair or install "
+            "bubblewrap, or accept the weaker boundary with --sandbox process)"
+        )
+
+
+def reset_bind_verdicts() -> None:
+    """Forget the cached verdicts. For tests and for a doctor run after installing bwrap."""
+    with _BIND_VERDICTS_LOCK:
+        _BIND_VERDICTS.clear()
+
+
+def _flagged(flag: str, pairs: Mapping[str, str]) -> list[str]:
+    """Flatten ``{src: dst}`` into bwrap's flat argument list."""
+    out: list[str] = []
+    for source, destination in pairs.items():
+        out.extend([flag, source, destination])
+    return out
+
+
+def _contained_target(candidate: Path, *, workspace: Path) -> Path:
+    """Realpath of ``candidate`` when it exists, normalised path when it does not.
+
+    Two callers need the same thing - validation and bind construction - and they must agree:
+    a path that validates as "inside the workspace" has to bind as the same path. A missing file
+    cannot be realpath'ed (that would resolve through a symlink a later write may not create), so
+    it is only normalised, and the ``--*-try`` flags make a vanished target a no-op at bind time.
+    """
+    if candidate.exists():
+        return Path(os.path.realpath(str(candidate)))
+    return Path(os.path.normpath(str(candidate)))
+
+
+def _bind_pairs(paths: Iterable[Path], *, workspace: Path) -> dict[str, str]:
+    """Ordered, de-duplicated ``source -> destination`` map for a set of bind requests."""
+    seen: dict[str, str] = {}
+    for raw in paths:
+        candidate = Path(workspace) / raw if not Path(raw).is_absolute() else Path(raw)
+        resolved = _contained_target(candidate, workspace=workspace)
+        try:
+            resolved.relative_to(workspace)
+        except ValueError:
+            continue  # outside the workspace: refused by validation, never bound
+        seen[str(resolved)] = str(resolved)
+    return dict(sorted(seen.items()))
+
+
+def ensure_governance_dirs(workspace: Path, paths: Iterable[Path]) -> list[Path]:
+    """Create a missing governance *directory* so a read-only bind has something to bind.
+
+    The hole being closed is the shape CVE-2026-25725 was: "not protected at startup" and
+    "did not exist at startup" are the same door. Only a dot-directory that is a direct child
+    of the workspace is created - an empty ``.git`` would confuse real tooling instead of
+    protecting anything, and a deeper path is the caller business to create.
+    """
+    created: list[Path] = []
+    for raw in paths:
+        candidate = Path(workspace) / raw if not Path(raw).is_absolute() else Path(raw)
+        if candidate.exists():
+            continue
+        if candidate.parent != Path(workspace) or not candidate.name.startswith("."):
+            continue
+        try:
+            candidate.mkdir(mode=0o700, parents=False, exist_ok=True)
+        except OSError:
+            continue
+        created.append(candidate)
+    return created
+
+
 def _bwrap_argv(request: SandboxRequest, *, bwrap_path: str) -> list[str]:
     """Build a conservative bubblewrap command line around the user argv."""
     workspace = Path(os.path.realpath(str(request.workspace)))
@@ -427,6 +549,11 @@ def _bwrap_argv(request: SandboxRequest, *, bwrap_path: str) -> list[str]:
         "--bind",
         str(workspace),
         str(workspace),
+        # Later binds win in bwrap, so the governance tree is re-bound read-only *after* the
+        # workspace, and the carve-outs after that. Without this block the run's own policy
+        # file is writable by the very command the run approved.
+        *_flagged("--ro-bind-try", _bind_pairs(request.read_only_paths, workspace=workspace)),
+        *_flagged("--bind-try", _bind_pairs(request.writable_paths, workspace=workspace)),
         "--chdir",
         str(cwd),
         "--",
@@ -440,8 +567,12 @@ def run_sandboxed(
     *,
     backend: str = "auto",
     capabilities: SandboxCapabilities | None = None,
+    phase: bool = False,
 ) -> SandboxResult:
-    """Run ``request`` under the resolved backend. Never uses ``shell=True``."""
+    """Run ``request`` under the resolved backend. Never uses ``shell=True``.
+
+    ``phase=True`` skips the bind-holds probe and is reserved for the probe itself.
+    """
     _validate_request(request)
     caps = capabilities or probe_capabilities()
     chosen = resolve_backend(backend, capabilities=caps)
@@ -451,6 +582,11 @@ def run_sandboxed(
 
     if chosen == "bwrap":
         assert caps.bwrap_path  # resolve_backend guaranteed usable
+        # A protected tree that does not exist yet is a hole, not a relief: create it so the
+        # read-only bind has a target, otherwise "nothing to protect" means "free to create".
+        ensure_governance_dirs(workspace, request.read_only_paths)
+        if request.read_only_paths and not phase:
+            _assert_binds_hold(workspace, request.read_only_paths, caps=caps)
         wrapped = _bwrap_argv(request, bwrap_path=caps.bwrap_path)
         return _run_popen(
             wrapped,
@@ -460,7 +596,14 @@ def run_sandboxed(
             max_output_bytes=request.max_output_bytes,
             backend="bwrap",
             isolation="os",
-            detail="network namespace unshared; workspace is the only writable bind",
+            detail=(
+                "network namespace unshared; workspace is the only writable bind"
+                + (
+                    f"; {len(request.read_only_paths)} governance path(s) bound read-only"
+                    if request.read_only_paths
+                    else "; no governance bind requested (policy files are NOT write-blocked here)"
+                )
+            ),
         )
 
     return _run_popen(
@@ -478,6 +621,64 @@ def run_sandboxed(
     )
 
 
+
+
+def probe_governance_binds(
+    workspace: str | os.PathLike[str],
+    read_only_paths: Sequence[Path],
+    *,
+    capabilities: SandboxCapabilities | None = None,
+) -> tuple[bool, str]:
+    """Ask a real sandbox whether it can still write where the gate says it may not.
+
+    One throwaway command inside a sandbox built exactly like a Shell call would be, so the
+    answer is about this host and this kernel rather than about a manual. ``(True, ...)`` only
+    when every protected path refused the write; ``(False, why)`` when a bind did not hold or
+    bwrap cannot run at all - the caller reports "not verifiable here" as its own state, never
+    as a pass.
+
+    ``phase`` exists only so :func:`_assert_binds_hold` can call this without recursing into
+    itself; every other caller leaves it out. One honest limit: the probe writes a single file
+    inside each protected directory and looks for it afterwards. A filesystem that permits the
+    write but hides it (an overlay oddity) would read as "held" - strictly better than not
+    looking, and the reason the answer is a verdict about this host rather than a promise about
+    the tool.
+    """
+    root = Path(os.path.realpath(str(workspace)))
+    caps = capabilities or probe_capabilities()
+    if not caps.bwrap_usable or not caps.bwrap_path:
+        return False, "not verifiable on this host: " + caps.bwrap_detail
+    targets = [Path(str(path)) for path in read_only_paths if str(path).strip()]
+    if not targets:
+        return True, "nothing protected, nothing to probe"
+    probe_name = ".northstar-drift-probe"
+    checks: list[str] = []
+    for target in targets:
+        candidate = root / target if not target.is_absolute() else target
+        # Deliberately not created here: this function runs inside `northstar doctor`, whose
+        # contract is "no file writes". A missing target is reported as skipped - run_sandboxed
+        # is where a missing governance directory is created so the bind has a target.
+        if not candidate.is_dir():
+            checks.append(f"{target}: absent, nothing to bind (created by a real run, not by this probe)")
+            continue
+        probe = candidate / probe_name
+        request = SandboxRequest(
+            argv=("/bin/sh", "-c", "touch " + probe.as_posix()),
+            cwd=root,
+            workspace=root,
+            read_only_paths=tuple(targets),
+        )
+        result = run_sandboxed(request, backend="bwrap", capabilities=caps, phase=phase)
+        wrote = probe.exists()
+        try:
+            probe.unlink(missing_ok=True)
+        except OSError:
+            pass
+        if wrote:
+            return False, f"{target} is writable inside the sandbox: the read-only bind did not hold"
+        checks.append(f"{target}: refused (exit={result.exit_code})")
+    return True, "; ".join(checks)
+
 __all__ = [
     "BACKENDS",
     "DEFAULT_MAX_OUTPUT_BYTES",
@@ -487,8 +688,12 @@ __all__ = [
     "SandboxCapabilities",
     "SandboxError",
     "SandboxRequest",
+    "SANDBOX_TMP_RELATIVE",
     "SandboxResult",
+    "ensure_governance_dirs",
     "probe_capabilities",
+    "probe_governance_binds",
+    "reset_bind_verdicts",
     "reset_capabilities_cache",
     "resolve_backend",
     "run_sandboxed",

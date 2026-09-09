@@ -25,6 +25,7 @@ from __future__ import annotations
 
 import os
 import shutil
+from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from tools.os_sandbox import (
@@ -32,11 +33,38 @@ from tools.os_sandbox import (
     DEFAULT_TIMEOUT_MS,
     MAX_OUTPUT_BYTES,
     MAX_TIMEOUT_MS,
+    SANDBOX_TMP_RELATIVE,
     SandboxError,
     SandboxRequest,
     probe_capabilities,
     run_sandboxed,
 )
+
+#: Subtrees under a protected prefix that stay writable. Mirrored from the file-tool
+#: carve-out (``memory.MEMORY_DIRECTORY``) plus the sandbox tmp dir, because a second
+#: definition of "what the agent may write" is exactly how the two paths start to disagree.
+PROTECTED_CARVE_OUTS: tuple[str, ...] = (".northstar/memory", SANDBOX_TMP_RELATIVE)
+
+
+def governance_binds(ctx: "ToolContext") -> tuple[tuple, tuple]:
+    """``(read_only, writable)`` bind requests for the sandbox, derived from the run's limits.
+
+    Refusing a write in a tool handler is only half a rule: an approved ``Shell`` call can
+    reach the same bytes with ``printf``. So the tree the gate protects is handed to the OS
+    backend too, where bwrap can bind it read-only. The process backend has no namespaces to
+    bind with and reports that in its own ``detail`` line rather than hiding it.
+    """
+    limits = getattr(getattr(ctx, "sandbox", None), "limits", None)
+    prefixes = tuple(getattr(limits, "protected_prefixes", ()) or ())
+    if not prefixes:
+        return (), ()
+    read_only = tuple(Path(prefix) for prefix in prefixes)
+    writable = tuple(
+        Path(name)
+        for name in PROTECTED_CARVE_OUTS
+        if any(str(name) == str(Path(prefix)) or str(name).startswith(str(Path(prefix)) + "/") for prefix in prefixes)
+    )
+    return read_only, writable
 
 if TYPE_CHECKING:
     from tools import ToolContext
@@ -132,6 +160,7 @@ def shell_handler(payload: dict[str, Any], ctx: "ToolContext") -> Any:
                 raise SandboxError("env must be an object of string keys to string values")
             env = {str(k): str(v) for k, v in env_payload.items()}
 
+        read_only, writable = governance_binds(ctx)
         request = SandboxRequest(
             argv=argv,
             cwd=cwd_path,
@@ -140,6 +169,10 @@ def shell_handler(payload: dict[str, Any], ctx: "ToolContext") -> Any:
             max_output_bytes=max_output,
             env=env,
             network=bool(payload.get("network", False)),
+            # Not operator- or model-supplied: derived from the run's own limits, so a payload
+            # cannot widen what is protected by naming a path here.
+            read_only_paths=read_only,
+            writable_paths=writable,
         )
         result = run_sandboxed(request, backend=backend)
     except SandboxError as error:
@@ -150,6 +183,13 @@ def shell_handler(payload: dict[str, Any], ctx: "ToolContext") -> Any:
     body = result.render()
     data = result.as_dict()
     data["cwd"] = ctx.relative(cwd_path)
+    # What the sandbox actually enforced for this call, in the transcript next to the exit
+    # code: "protected" is a claim about the backend, and a reader should not have to infer it.
+    data["governance_binds"] = {
+        "read_only": [str(path) for path in read_only],
+        "writable": [str(path) for path in writable],
+        "enforced": result.backend == "bwrap",
+    }
     # A non-zero exit is a tool *result*, not a tool *crash*: the model must see
     # stdout/stderr to decide what to do next. timed_out is the only case we
     # mark is_error so the loop's PostToolUseFailure hooks can fire.
@@ -212,8 +252,13 @@ def shell_tool_spec():
     )
 
 
-def sandbox_status_line(backend: str = "auto") -> str:
-    """One-line summary for doctor / dry-run."""
+def sandbox_status_line(backend: str = "auto", *, governance_watch: bool = True) -> str:
+    """One-line summary for doctor / dry-run, including how the policy tree is guarded.
+
+    The second half is the point: ``bwrap`` can bind the governance tree read-only, the
+    process backend cannot, and a dry-run that only said ``sandbox=process`` would let an
+    operator read "no OS isolation" as "no protection" or as "protection", at their guess.
+    """
     caps = probe_capabilities()
     try:
         from tools.os_sandbox import resolve_backend
@@ -221,18 +266,25 @@ def sandbox_status_line(backend: str = "auto") -> str:
         chosen = resolve_backend(backend, capabilities=caps)
     except SandboxError as error:
         return f"sandbox=unavailable ({error})"
+    tail = _governance_guard_note(chosen, governance_watch=governance_watch)
     if chosen == "bwrap":
-        return f"sandbox=bwrap (OS isolation) — {caps.bwrap_detail}"
-    return (
-        f"sandbox=process (cwd+env only; host FS reachable) — "
-        f"bwrap: {caps.bwrap_detail}"
-    )
+        return f"sandbox=bwrap (OS isolation) — {caps.bwrap_detail}{tail}"
+    return f"sandbox=process (cwd+env only; host FS reachable) — bwrap: {caps.bwrap_detail}{tail}"
+
+
+def _governance_guard_note(chosen: str, *, governance_watch: bool) -> str:
+    if chosen == "bwrap":
+        return "; governance tree bound read-only (.northstar/memory and .northstar/tmp re-opened)"
+    if governance_watch:
+        return "; governance tree not bindable here: drift detection on, the run stops when it moves"
+    return "; governance tree not bindable here: drift detection OFF, nothing stops a Shell rewrite"
 
 
 __all__ = [
     "SHELL_KIND",
     "SHELL_NAME",
     "parse_shell_argv",
+    "governance_binds",
     "sandbox_status_line",
     "shell_handler",
     "shell_tool_spec",

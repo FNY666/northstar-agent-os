@@ -4,6 +4,7 @@
 > 本轮范围：**「闸门之后」的执行路径**（文件工具 vs Shell vs MCP 子进程）+ **治理的定量代价**（第一次给出毫秒数）
 > 方法：本地实测（全仓测试复跑 + 三条最小复现链）+ 外部公开资料（官方规范/公告优先，第三方评测标注）
 > 定位：分析文档。本轮**未改任何代码**；给出 6 项可开工的修复（§8 的 P0-5 … P2-x），每项带验收判据。
+> **后续：同日第四批代码落地了 P0-5 / P0-6 / P1-6 / P2-x，并对账到判据粒度 —— 见 §11（其余三项仍按本文原样待补）。**
 > 复现全部离线、确定性、无需 API key（scripted provider）。
 
 ---
@@ -149,6 +150,7 @@ $ _bwrap_argv(...) 的绑定部分
 `symlink_escape_refused` / `memory_carveout_only`）与 `test_governance_writes.py` 的 12 项**全部**通过
 `Write`/`Edit`/`resolve()` 路径——即"闸门做了什么决定"，而不是"被批准的动作能造成什么后果"。
 所以 **记分卡的 13/13 与本轮的 F4 同时为真，不矛盾**：测的是门，不是门后的世界。
+（第四批补上了门后的世界：记分卡 14/14，第 14 条就是 exec 路径本身，见 §11.1。）
 这也是 P2「治理基准数字」对外发布前必须补的一条：**exec 后果轨道**。
 
 ### 3.4 修法（三层，都能确定性测试覆盖）
@@ -380,6 +382,51 @@ HTTP 传输，无法验证；技能仓库供应链统计数字沿用上一轮的
 §3.2 两条复现链（策略漂移、`.git/config` alias 在沙箱外执行）；§4.2 MCP 子进程密钥与"被拒仍执行"；
 §5 的 76,301 字符拼装提示与"中毒后仍 `[verified]`"；§6 全部毫秒数（x86_64/2 核/overlayfs/无 bwrap，
 3–5 次最小值）；`northstar bench` 13/13（19 ms）。
+
+---
+
+## 11. 落地复盘（同日第四批：P0-5 + P0-6 + P1-6 + P2-x）
+
+**先说结论：§3.2 那条复现链现在失败闭合了；本文查出的三处漏补了一处，读侧的去二次方也补上了，MCP（F5）与摘要覆盖（F6）按原样待补。**
+
+### 11.1 逐条对账（判据是 §8 原文，不重写判据）
+
+| 项 | §8 的判据 | 结果 | 证据（本机 2026-09-09，无 bwrap，overlayfs） |
+|---|---|---|---|
+| **P0-5** | `--sandbox bwrap` 下沙箱内 `touch .northstar/config.toml` 失败；探针不成立即配置错误 | 🟰 代码级 + 单测，**未实机** | `_bwrap_argv` 在 `--bind <ws> <ws>` **之后**追加 `--ro-bind-try <ws>/.git`、`--ro-bind-try <ws>/.northstar`，再 `--bind-try` 开回 `.northstar/memory`、`.northstar/tmp`；`run_sandboxed` 里 `ensure_governance_dirs` 先把缺失的 `.northstar` 以 `0700` 建出来（CVE-2026-25725 的形状：当时不存在＝没得保护）。探针 `probe_governance_binds` 每次真在沙箱里 `touch` 一个文件再查它在不在；`_assert_binds_hold` 每进程一次、按 `(workspace, paths)` 缓存结论，不成立就 `SandboxError`（**不是**静默降级）。本机 `bwrap` 不在 PATH，所以断言只到 argv 构造与 fake-probe 分支：`test_governance_drift.SandboxBindTests`（6 项） |
+| **P0-6** | §3.2 的复现链必须以 `error_governance_drift` 结束，并在 transcript 里留下 `governance_drift` 记录 | ✅ 实测 | `governance_watch.py`（新，366 行，其中约 1/3 是把诚实限制写进 docstring）冻结→复核→留痕；`loop._governance_drift()` 在 `after_tools` 检查点**之后**、`_ceiling_stop`/halt **之前**：halting 原因优先级保留，发现仍然入 transcript。§3.2 那条命令现在跑出来是 `result=error_governance_drift`（退出码 8）而不是 `success`+`denials=[]`，`wsF` 的第二轮不再继承被松掉的 `disallowed_tools=[]`（因为第一轮不成功了） |
+| **P1-6** | 1200 边界校验 < 1 s；`northstar --version` 从 97 ms 降到 < 60 ms | ✅ 前者远超 / ⚠️ 后者只走了一半 | `checkpoint_reports` 改成单趟：`transcript` 只重建一次，`checkpoints.canonical_parts()` 出逐条 JSON，跑一个 `hashlib.sha256` 游标、在需要的长度处 `copy()` 后补 `]`。**读侧数字**（同一脚本 `repro/replay3.py`，全部 `[verified]`）：25 边界 5.1→0.5 ms、100 57.6→1.9、250 432→4.6、600 2584→9.7、**1200 10,357→21.6 ms（480×）**，斜率从 4×/2× 变 2.2×/2×（线性）。摘要格式一字未改：`_canonical` 现在由 `canonical_parts` 拼出，等价性是构造性成立，另有测试逐边界比对快慢两路。启动侧只做了安全的一半：`governance_bench` 不再在模块级 `from loop import`（`import cli` 累计 77.3→72.0 ms，`--version` 97–101→**80.6 ms**）；`plugin_load`/`plugin_manifest`/`doctor` 仍是启动即入（它们被 `build_parser` 需要，改成惰性要么 PEP-562 要么散点 import，风险/收益不划算，写在这里而不是偷偷不做） |
+| **P2-x** | 记分卡 14/14，且**故意把 P0-6 关掉时该项红** | ✅ 14/14，红/绿各一次 | 新案 `injection.shell_drift_detected`：**按宿主能力选判据**——有 bwrap 就断言文件没变（阻断），没有就断言 `expect_subtype=error_governance_drift` 且 transcript 里真有 `governance_drift` 帧（检测）。红/绿**都已实跑**：把 `loop.py` 里 `self.governance.freeze()` 换成 `pass` 再跑 `northstar bench` → `✗ injection.shell_drift_detected  success  subtype 'success' != 'error_governance_drift'; run never reported 'governance_drift' on the record; governance file changed: .northstar/config.toml`（13/14），恢复那行 → 14/14。`budget.exec_count` 那条**没做**，理由见 §11.4 |
+
+### 11.2 这一批的形状（数字，不是形容词）
+
+- 新增 `governance_watch.py`；`os_sandbox.py` +~90 行（字段、校验、`_bind_pairs`/`_flagged`/`ensure_governance_dirs`/`probe_governance_binds`/`_assert_binds_hold`）、`shell.py` +~40 行（`governance_binds()`、`detail`、结果 `governance_binds` 数据）、`loop.py` +~45 行、`session_replay.py` 单趟折叠 + 漂移帧、`checkpoints.py` 拆出 `canonical_parts`/`digest_parts`、`governance_bench.py` 第 14 案 + 惰性 import、`doctor.py` 两条新 finding、`cli.py`/`sdk.py` 各一个开关。
+- 一个新线上诉语要六处注册：`providers/base.py` 的 `RESULT_SUBTYPES`/`SYSTEM_SUBTYPES`、`events.py` 的 `EXIT_CODES`（8）、`sessions.RECORD_TYPES`（第 14 项）、`audit_export._ERROR_TYPES`、`sdk-ts/src/events.ts` 镜像、`examples/session-panel/session-panel.html` 的 vocabulary/tone/两个渲染器/过滤。**这批每处都被仓库自己的 pin 抓到过一次**（`test_events`、`test_cli.CeilingTests`、`test_sessions`、`test_typescript_sdk`、`test_module_layout`、`test_observability_examples`）——这些门是有用的，别嫌它们吵。
+- 测试：runtime 1294 → **1321**（`tests/test_governance_drift.py` 27 项：快照 8 / 沙箱绑定 6 / 端到端 6 / 读侧 5 / 注册表 2），全仓 1612 → **1639**，TS 57/57。`make test` 全绿；`docbuild verify` 全绿；`northstar bench` **14/14（39 ms）**。
+
+### 11.3 判据没要求，但顺手修掉的两处事实错误
+
+1. `--dry-run` 在已经 `--allow-tool Shell` 时仍然打 `shell=registered, denied until --allow-tool Shell`——一行**每次都在撒谎**的提示。现在分两支，`granted` 那支直接把治理树保护层指回上一行（`sandbox=…`）。
+2. `northstar doctor` 的 policy 检查只比 `config.toml` vs `git HEAD`。新增 `governance-tree`（冻结了多少文件、摘要多少）与 `sandbox-binds`（**问真沙箱**能不能写；答不出就 warn 并说明"只有检测层"）。探针本身**不写任何文件**（`doctor` 的契约是 no file writes），所以缺失的目录在探针里报 `absent`，只有真跑 `run_sandboxed` 才建。
+
+### 11.4 仍然没做（以及为什么不是拖延）
+
+- **P0-7 / F5（MCP 子进程）**：env 剥离、`sh -c` 形状拒绝、`--mcp-config`（声明）与 `--mcp-allow-exec`（启动）分离、`mcp` 事实入 init、§4.3 的 roots 错位一行修。整块留给下一批：它要动 `mcp_config.py`+`mcp_client.py`+`cli.py` 三处契约，混进这批会把「同一件事一个 commit」变成「两个半件事」。
+- **P1-5 / F6（指令进摘要）**：`context.digest` 入 init 与 checkpoint payload 是**加字段**，`sessions checkpoints --against-workspace` 是**加动词**，doctor 六件套是**改口径**；三件都要新测试与文档同步，且缺字段必须 `unknown` 而不是 fail-closed（旧 transcript 要仍能校验）。
+- **`budget.exec_count`**：要做就得给 `Checkpoint` 加字段——那是 transcript 里的线上格式，与本批「格式一字不改」的纪律冲突；先把 `exec_calls` 放进 `governance_drift` 记录（漂移那条帧里有 `exec_calls`，面板也回显「after N exec result(s)」），够用。
+- **`.git` 整目录只读的副作用**：bwrap 下沙箱里的 `git add`/`git commit` 会 EROFS。这是**有意的粗规则**（同一条也关掉 `config` alias 与 `hooks`），已写进 threat-model 的 Residual risks #2，而不是藏在 changelog 里。
+
+### 11.5 复跑
+
+```sh
+make test                        # 1639 项离线测试（含 27 项本批新增）
+./bin/northstar bench            # 14/14
+./bin/northstar doctor --workspace . | grep -E "governance-tree|sandbox-binds"
+./bin/northstar agent --workspace . --prompt hi --provider scripted --scripted-text ok \
+  --allow-tool Shell --dry-run | grep -E "sandbox=|shell="   # 披露两行
+python3 /home/user/repro/replay3.py                          # §11.1 的读侧数字（需自行改路径）
+# 红一次：把 loop.py 的 self.governance.freeze() 注释掉 → ./bin/northstar bench 第 14 案红，恢复即绿
+```
 
 ---
 

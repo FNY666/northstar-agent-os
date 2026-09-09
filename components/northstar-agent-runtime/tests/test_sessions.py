@@ -48,8 +48,11 @@ class SessionIdTests(unittest.TestCase):
         # 13 since the fourteenth batch: "checkpoint" (checkpoints.py) joins: "postconditions" is the independent
         # "postconditions" (the end-of-run verdict) and "checkpoint" (a resumable
         # turn boundary), each with its own record type rather than hiding inside
-        # "informational". Add a type here only with a test for it.
-        self.assertEqual(len(RECORD_TYPES), 13)
+        # "informational". "governance_drift" is the fourteenth: the audit record for a
+        # run that caught its policy tree moving (docs/benchmark-top-agents-2026-09, F4) -
+        # deliberately its own type, so "denied" and "the file I gate you on changed" stay
+        # two different sentences in the transcript. Add a type here only with a test for it.
+        self.assertEqual(len(RECORD_TYPES), 14)
 
 
 class WriteTests(RuntimeTestCase):

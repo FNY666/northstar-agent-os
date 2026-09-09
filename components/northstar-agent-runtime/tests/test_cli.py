@@ -337,8 +337,10 @@ class CeilingTests(unittest.TestCase):
                 # or an exit code nothing ever returns - fails here rather than in a
                 # pipeline that reads 1 as "the run failed" and 7 as "try again".
                 "error_session_busy": 7,
+                "error_governance_drift": 8,
             },
         )
+        self.assertEqual(EXIT_CODES["error_governance_drift"], 8)  # the number a wrapper reads
 
     def test_max_turns(self):
         code, out, _ = self.run_with([{"tool": {"name": "Read", "input": {"path": "nope"}}}] * 5, "--max-turns", "2")

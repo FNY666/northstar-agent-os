@@ -16,7 +16,7 @@ release is worse than none.
 | Credentials in the parent environment | API keys, tokens, cloud configs the agent must not inherit |
 | Network egress | Exfil, supply-chain pulls, unexpected C2 |
 | The run's own budget and audit trail | A runaway shell that burns tokens or erases evidence |
-| Policy files under `.northstar/` | Already write-protected by the tool sandbox; shell must not undo that |
+| Policy files under `.northstar/` | Write-protected by the tool sandbox **and** re-bound read-only inside the OS sandbox; where a bind is impossible, the run detects the change and stops itself |
 
 ## Actors
 
@@ -102,21 +102,40 @@ A run that promised OS isolation and then could not deliver it is a
 - Override reserved env keys (`PATH`, `HOME`, `TMPDIR`, `LD_*`, `NORTHSTAR_SANDBOX`).
 - Escape the workspace via `cwd` (resolved through `ToolSandbox` before the backend sees it).
 - Exceed closed ceilings: timeout, output bytes, argv size, env entry count.
+- Rewrite the governance tree. `--allow-tool Shell` buys command execution, not write access to
+  `.northstar/` or `.git/`: bwrap re-binds them read-only *after* the workspace bind
+  (`.northstar/memory` and `.northstar/tmp` re-opened, because those are documented carve-outs),
+  the bind is *probed* once per process and a bind that did not hold is a hard error, and on a
+  host without user namespaces the run re-hashes the tree after every exec result and ends with
+  `error_governance_drift` (exit 8) rather than `success`.
+- Create a governance file that did not exist at startup. A missing `.northstar/` is created
+  empty (mode `0700`) before the bind, so "nothing to protect" is not "free to create" — the
+  shape CVE-2026-25725 took.
 
 ## Residual risks (accepted, labelled)
 
 1. **Process backend on hosts without bwrap** — common in restricted CI and
    some containers. Mitigation: honest labelling + default deny + install
-   bubblewrap for production agent hosts.
-2. **Read-only host binds still expose content** — bwrap does not hide
+   bubblewrap for production agent hosts. On this backend the governance tree is
+   write-protected **by detection only**: a payload with a single-shot side effect
+   (drop a file the *next* run will read, then exit 0) is noticed after the fact, not
+   prevented. `--no-drift-check` removes even that, and says so in the transcript.
+2. **A sandboxed `git commit` fails on bwrap** — `.git` is bound read-only as a whole,
+   which is the coarse rule that also closes `.git/config` aliases and `.git/hooks`. Commit
+   from the host (or via the sidecar) rather than from inside a run. The drift watch, by
+   contrast, deliberately watches only `.git`'s execution-bearing names (`config`,
+   `config.local`, `info/exclude`, `hooks/**`): flagging `git add` as an attack would make the
+   detection layer unusable, and a commit is a durable action this architecture puts outside the
+   guest anyway.
+3. **Read-only host binds still expose content** — bwrap does not hide
    `/etc/passwd`; it prevents writes outside the workspace. Secrets that live
    on the host filesystem remain readable unless the operator further
    restricts the host (separate user, drop paths, secrets manager).
-3. **`command` strings still parse shell metacharacters** — intentional, but
+4. **`command` strings still parse shell metacharacters** — intentional, but
    confined *inside* the sandbox. Prefer `argv` lists from the model side.
-4. **No seccomp profile yet** — bwrap gives namespaces and bind mounts; a
+5. **No seccomp profile yet** — bwrap gives namespaces and bind mounts; a
    tighter seccomp filter is a later hardening step, not claimed today.
-5. **Sidecar is a different trust domain** — `CodexReadOnly` stays read-only
+6. **Sidecar is a different trust domain** — `CodexReadOnly` stays read-only
    over a Unix socket; it is not a substitute for Shell, and Shell is not a
    path into the sidecar.
 
@@ -133,7 +152,12 @@ northstar agent "…" --sandbox bwrap --allow-tool Shell
 # Accept process-level isolation explicitly (lab / no-bwrap CI):
 northstar agent "…" --sandbox process --allow-tool Shell
 
-# Never: host Full Auto. Shell stays denied until named.
+# The governance-tree invariant is on the public scorecard:
+northstar bench          # 14 cases; injection.shell_drift_detected is the exec-path one
+
+# Never: host Full Auto. Shell stays denied until named. And never
+# --no-drift-check together with --allow-tool Shell on a host without bwrap:
+# that is a sandbox whose rules are writable and whose alarms are switched off.
 ```
 
 ## Related

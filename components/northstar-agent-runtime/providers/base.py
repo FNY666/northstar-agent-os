@@ -46,9 +46,18 @@ RESULT_SUBTYPES: tuple[str, ...] = (
     "error_permission_denied",
     "error_postconditions_failed",
     "error_session_busy",
+    # The governance tree the run is gated by changed underneath it (governance_watch.py):
+    # detection on a backend that cannot prevent it, never a silent success.
+    "error_governance_drift",
 )
 
-SYSTEM_SUBTYPES: tuple[str, ...] = ("init", "compact_boundary", "informational", "postconditions")
+SYSTEM_SUBTYPES: tuple[str, ...] = (
+    "init",
+    "compact_boundary",
+    "informational",
+    "postconditions",
+    "governance_drift",
+)
 
 BlockKind = Literal["text", "tool_use", "tool_result", "thinking"]
 

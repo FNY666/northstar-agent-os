@@ -47,6 +47,13 @@ recipe (a run that also attempted a `Write`, so it shows a permission
 absolute `workspace` path inside the `session_start` record is shown as
 `<repo>/examples/demo/workspace`.
 
+## Record vocabulary
+
+The panel mirrors `sessions.py`'s `RECORD_TYPES`, including `governance_drift`: the record a
+run appends when the tree it is gated by (`.northstar/`, `.git/`) changed under it. It is
+rendered in red and counts toward "errors & denials only" on purpose — it is not a note about
+the work, it is a note about the gate.
+
 ## Honesty notes
 
 - The panel renders whatever fields it finds and falls back to raw JSON for

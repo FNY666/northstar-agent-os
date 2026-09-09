@@ -97,13 +97,13 @@
 var RECORD_TYPES = [
   "session_start", "user_prompt", "assistant", "tool_result", "hook",
   "denial", "compact_boundary", "informational", "postconditions",
-  "checkpoint", "subagent", "result", "session_end"
+  "checkpoint", "subagent", "result", "session_end", "governance_drift"
 ];
 var TYPE_COLOR = {
   session_start: "ok", session_end: "ok", user_prompt: "warn", assistant: "ok",
   tool_result: "ok", hook: "warn", denial: "err", compact_boundary: "warn",
   informational: "warn", subagent: "ok", result: "ok", postconditions: "audit",
-  checkpoint: "audit"
+  checkpoint: "audit", governance_drift: "err"
 };
 var MAX_PREVIEW = 300;
 var MAX_RAW = 20000;
@@ -178,6 +178,18 @@ function summarize(rec) {
         (row.structural ? "" : " (non-structural)"));
     });
     return lines.join("\n");
+  }
+  if (rec.type === "governance_drift") {
+    // The tree the run is gated by changed underneath it: on a backend that cannot bind it
+    // read-only this is detection, not prevention, and the panel says so in the record itself.
+    var g = rec.data && typeof rec.data === "object" ? rec.data : {};
+    var moved = (g.changed || []).concat(g.removed || [], g.added || []);
+    var head = (g.summary || "governance drift") +
+      (g.exec_calls != null ? " after " + g.exec_calls + " exec result(s)" : "") + " \u2014 digest " +
+      String(g.before || "?").slice(0, 12) + " \u2192 " + String(g.after || "?").slice(0, 12) +
+      (g.truncated ? " (entry list truncated)" : "");
+    if (!moved.length) { return head; }
+    return head + "\n" + moved.slice(0, 12).map(function (p) { return "\u21e5 " + p; }).join("\n");
   }
   if (rec.type === "denial") {
     return "tool=" + String(rec.tool || "?") + " source=" + String(rec.source || "?") +
@@ -254,7 +266,19 @@ function isErrorRecord(rec) {
     });
     return lines.join("\n");
   }
-  if (rec.type === "denial") { return true; }
+  if (rec.type === "governance_drift") {
+    // The tree the run is gated by changed underneath it: on a backend that cannot bind it
+    // read-only this is detection, not prevention, and the panel says so in the record itself.
+    var g = rec.data && typeof rec.data === "object" ? rec.data : {};
+    var moved = (g.changed || []).concat(g.removed || [], g.added || []);
+    var head = (g.summary || "governance drift") +
+      (g.exec_calls != null ? " after " + g.exec_calls + " exec result(s)" : "") + " \u2014 digest " +
+      String(g.before || "?").slice(0, 12) + " \u2192 " + String(g.after || "?").slice(0, 12) +
+      (g.truncated ? " (entry list truncated)" : "");
+    if (!moved.length) { return head; }
+    return head + "\n" + moved.slice(0, 12).map(function (p) { return "\u21e5 " + p; }).join("\n");
+  }
+  if (rec.type === "denial" || rec.type === "governance_drift") { return true; }
   if (rec.is_error === true) { return true; }
   if (rec.subtype && String(rec.subtype).indexOf("error") === 0) { return true; }
   if (rec.type === "tool_result") {

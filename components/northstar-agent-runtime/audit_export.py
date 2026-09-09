@@ -29,7 +29,7 @@ AUDIT_SCHEMA_VERSION = "audit.ndjson/1"
 COMPONENT = "northstar-agent-runtime"
 
 _ENVELOPE_KEYS = ("index", "ts", "session_id", "type")
-_ERROR_TYPES = {"denial"}
+_ERROR_TYPES = {"denial", "governance_drift"}
 
 
 def _record_level(record: dict[str, Any]) -> str:

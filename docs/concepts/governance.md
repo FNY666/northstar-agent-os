@@ -39,6 +39,16 @@ bypass.
 - **Shell is gated twice**: once by the permission gate (default deny, kind
   `exec`) and once by the OS sandbox backend (`bwrap` when usable, else an
   honestly-labelled `process` backend). See [threat-model.md](threat-model.md).
+- **The tree a run is gated by is not writable by that run**: `protected_prefixes`
+  (`.northstar/`, `.git/`) is not only a rule the file tools obey — an approved
+  `Shell` call reaches those bytes with `printf`, so the sandbox is handed the same
+  list and re-binds it read-only *after* the workspace bind (`.northstar/memory` and
+  `.northstar/tmp` are re-opened, since those are the documented carve-outs), with a
+  per-process probe that makes an unheld bind a hard error. Where there are no
+  namespaces to bind with, the run freezes the tree's digest at start, re-checks after
+  every exec-shaped result, and ends with `error_governance_drift` (exit 8) instead of
+  `success`. Detection is weaker than prevention, so it is labelled as such in
+  `--dry-run`, in `doctor`, and in `system:init`; `--no-drift-check` opts out loudly.
 - **Subagent subsets**: an agent-definition run fixes its tool subset and
   ceilings by definition, which is why `--mcp-server` cannot be combined with
   `--agent` — silently widening a declared policy would defeat the gate.

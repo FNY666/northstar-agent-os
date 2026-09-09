@@ -107,6 +107,10 @@ class Frame:
     output_tokens: int = 0
     cost_usd: float | None = None
     agent: str = "main"
+    #: How many ``governance_drift`` records this frame carries. Zero on every transcript that
+    #: never caught its own policy tree moving, so the frame shape - and every consumer of it -
+    #: is exactly what it was before.
+    governance_drift: int = 0
     checkpoint: CheckpointReport | None = None
 
     def as_dict(self) -> dict[str, Any]:
@@ -124,6 +128,8 @@ class Frame:
         }
         if self.cost_usd is not None:
             payload["cost_usd"] = self.cost_usd
+        if self.governance_drift:
+            payload["governance_drift"] = self.governance_drift
         if self.checkpoint is not None:
             payload["checkpoint"] = self.checkpoint.as_dict()
         return payload
@@ -138,6 +144,8 @@ class Frame:
             parts.append(f"{self.tool_errors} tool error(s)")
         if self.denials:
             parts.append(f"{self.denials} denial(s)")
+        if self.governance_drift:
+            parts.append(f"{self.governance_drift} governance drift(s)")
         if self.input_tokens or self.output_tokens:
             parts.append(f"tok {self.input_tokens}+{self.output_tokens}")
         if self.cost_usd is not None:
@@ -215,6 +223,9 @@ class Replay:
             "tool_errors": sum(frame.tool_errors for frame in self.frames),
             "denials": sum(frame.denials for frame in self.frames),
             "records": sum(len(frame.records) for frame in self.frames),
+            # Its own count, never folded into "denials": a denial says the gate refused an
+            # action, drift says the gate itself moved. A reader filters those differently.
+            "governance_drift": sum(frame.governance_drift for frame in self.frames),
         }
 
     def summary(self) -> str:
@@ -222,9 +233,12 @@ class Replay:
         checkpoints = "no checkpoints" if not self.checkpoints else (
             f"{len(self.checkpoints)} checkpoint(s), all verified" if self.verified else f"{len(self.checkpoints)} checkpoint(s), UNVERIFIED"
         )
+        drift = (
+            "" if not counts["governance_drift"] else f"{counts['governance_drift']} governance drift record(s), "
+        )
         return (
             f"# {counts['turns']} turn(s), {counts['tool_calls']} tool call(s), {counts['tool_errors']} tool error(s), "
-            f"{counts['denials']} denial(s), {checkpoints}, result={self.result.get('subtype', '(no result)')}, "
+            f"{drift}{counts['denials']} denial(s), {checkpoints}, result={self.result.get('subtype', '(no result)')}, "
             f"sealed={'yes' if self.sealed else 'NO'}"
         )
 
@@ -307,12 +321,23 @@ def _usage_tokens(record: Mapping[str, Any]) -> tuple[int, int]:
     return int(usage.get("input_tokens", 0) or 0), int(usage.get("output_tokens", 0) or 0)
 
 
-def describe_checkpoint(record: Mapping[str, Any], records: Sequence[Mapping[str, Any]]) -> CheckpointReport:
+def describe_checkpoint(
+    record: Mapping[str, Any],
+    records: Sequence[Mapping[str, Any]],
+    *,
+    transcript: Sequence[Any] | None = None,
+    prefix_digest: str | None = None,
+) -> CheckpointReport:
     """Verify one checkpoint *record* against the transcript it lives in.
 
     A recognised checkpoint that cannot be read is reported as :data:`MALFORMED` rather than
     raised: a listing has to survive one bad record to be useful during an incident, and the
     status line is where an operator needs to see it.
+
+    ``transcript`` / ``prefix_digest`` are the batch path - see :func:`checkpoint_reports`, which
+    has already rebuilt the transcript and digested this boundary's prefix. Left out, the report
+    is computed the long way, which is what an ad-hoc single question ("is *this* fork point
+    sound?") wants; supplied, nothing here walks the file again.
     """
     from checkpoints import CheckpointError, digest_transcript, from_record
     from sessions import transcript_from_records
@@ -340,7 +365,8 @@ def describe_checkpoint(record: Mapping[str, Any], records: Sequence[Mapping[str
     # or a `checkpoint` line is written for the reader and never sent to a provider. So the
     # rebuild happens first and the cut happens after it - the same order `prepare_resume` uses,
     # which is what makes "verified here" mean "accepted by a resume".
-    transcript = transcript_from_records(list(records))
+    if transcript is None:
+        transcript = transcript_from_records(list(records))
     if checkpoint.transcript_len > len(transcript):
         return CheckpointReport(
             record_index=index,
@@ -351,8 +377,11 @@ def describe_checkpoint(record: Mapping[str, Any], records: Sequence[Mapping[str
             ),
             **fields,
         )
-    prefix = transcript[: checkpoint.transcript_len]
-    actual = digest_transcript(prefix)
+    actual = (
+        prefix_digest
+        if prefix_digest is not None
+        else digest_transcript(transcript[: checkpoint.transcript_len])
+    )
     if actual != checkpoint.transcript_digest:
         return CheckpointReport(
             record_index=index,
@@ -367,11 +396,60 @@ def describe_checkpoint(record: Mapping[str, Any], records: Sequence[Mapping[str
 
 
 def checkpoint_reports(records: Sequence[Mapping[str, Any]]) -> tuple[CheckpointReport, ...]:
-    """Every checkpoint in ``records``, in transcript order, each verified against the prefix."""
-    from checkpoints import CHECKPOINT_TYPE
+    """Every checkpoint in ``records``, in transcript order, each verified against the prefix.
 
+    One pass over the transcript, not one per boundary. The obvious implementation - "for each
+    checkpoint, rebuild the transcript and digest its prefix" - is quadratic in the length of
+    the file: the 2026-09 audit measured 10.4 s for a 1200-boundary lineage, all of it in the
+    *reader*, which is the component a human reaches for during an incident. So the transcript is
+    rebuilt once, its canonical parts are hashed left to right with a running SHA-256, and each
+    boundary takes the digest of its own prefix from a copy of that hash. Byte-identical to
+    per-prefix ``digest_transcript``, because both routes are ``checkpoints.digest_parts``.
+    """
+    import hashlib
+
+    from checkpoints import CHECKPOINT_TYPE, canonical_parts
+    from sessions import transcript_from_records
+
+    marked: list[tuple[int, Mapping[str, Any]]] = []
+    for record in records:
+        if record.get("type") != CHECKPOINT_TYPE:
+            continue
+        try:
+            length = int(record.get("transcript_len", 0) or 0)
+        except (TypeError, ValueError):
+            length = -1  # malformed: let describe_checkpoint say so, digest nothing for it
+        marked.append((length, record))
+    if not marked:
+        return ()
+
+    transcript = transcript_from_records(list(records))
+    parts = canonical_parts(transcript)
+    wanted = {length for length, _ in marked if 0 <= length <= len(parts)}
+    digests: dict[int, str] = {}
+    if 0 in wanted:
+        digests[0] = hashlib.sha256(b"[]").hexdigest()
+    remaining = wanted - {0}
+    running = hashlib.sha256(b"[")
+    for position, part in enumerate(parts, start=1):
+        if position > 1:
+            running.update(b",")
+        running.update(part.encode("utf-8"))
+        if position in remaining:
+            closed = running.copy()
+            closed.update(b"]")
+            digests[position] = closed.hexdigest()
+            remaining.discard(position)
+            if not remaining:
+                break
     return tuple(
-        describe_checkpoint(record, records) for record in records if record.get("type") == CHECKPOINT_TYPE
+        describe_checkpoint(
+            record,
+            records,
+            transcript=transcript,
+            prefix_digest=digests.get(length),
+        )
+        for length, record in marked
     )
 
 
@@ -499,6 +577,22 @@ def build_replay(
                     agent=agent,
                     cost_usd=float(record.get("cost_usd", 0.0) or 0.0),
                     checkpoint=report,
+                )
+            )
+            continue
+        if kind == "governance_drift":
+            # Its own frame rather than a turn attachment: the record is about the gate, not
+            # about the work, and closing the turn puts it next to the boundary checkpoint that
+            # follows it - the pair a reader wants to see side by side.
+            close_turn()
+            emit(
+                Frame(
+                    index=len(frames) + 1,
+                    kind="governance_drift",
+                    records=(index,),
+                    label=_preview(record.get("content") or "the governance tree changed during this run"),
+                    agent=agent,
+                    governance_drift=1,
                 )
             )
             continue

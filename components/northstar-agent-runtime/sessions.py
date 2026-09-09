@@ -40,6 +40,9 @@ RECORD_TYPES: tuple[str, ...] = (
     # The independent end-of-run verdict (postconditions.py): its own type so an
     # audit consumer can require it instead of grepping informational records.
     "postconditions",
+    # The governance tree changed under this run (governance_watch.py). Its own type for the
+    # same reason: a reader must be able to *require* its absence, not grep for it.
+    "governance_drift",
     # A resumable turn boundary (checkpoints.py): transcript length + digest plus
     # the consumed counters, so a resume cannot restart the ceilings.
     "checkpoint",
@@ -193,6 +196,7 @@ class SessionStore:
             "init": "session_start",
             "compact_boundary": "compact_boundary",
             "postconditions": "postconditions",
+            "governance_drift": "governance_drift",
         }.get(message.subtype, "informational")
         return self.append(kind, {"agent": agent, "subtype": message.subtype, "content": message.content, "data": message.data})
 

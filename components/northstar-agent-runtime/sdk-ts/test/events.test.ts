@@ -26,7 +26,7 @@ const ASSISTANT =
 const RESULT =
   '{"type":"result","subtype":"error_permission_denied","is_error":true,"num_turns":2,"duration_ms":12,"total_cost_usd":0.004,"total_usage":{"input_tokens":5,"output_tokens":2,"cache_read_input_tokens":0,"cache_creation_input_tokens":0},"session_id":"ns-1","pricing_estimated":true,"errors":["Write refused"],"permission_denials":[{"tool":"Write","source":"policy:deny","reason":"refused by the permission gate","agent":"main","turn_index":1,"kind":"tool"}]}';
 
-test("the exit-code table is the runtime's table, eight subtypes and 64", () => {
+test("the exit-code table is the runtime's table, nine subtypes and 64", () => {
   assert.deepEqual(EXIT_CODES, {
     success: 0,
     error_during_execution: 1,
@@ -36,10 +36,14 @@ test("the exit-code table is the runtime's table, eight subtypes and 64", () => 
     error_permission_denied: 5,
     error_postconditions_failed: 6,
     error_session_busy: 7,
+    // The drift watch's own code: on a backend that cannot bind the governance tree read-only,
+    // "the policy moved under this run" has to be a number a wrapper can page on.
+    error_governance_drift: 8,
   });
   assert.equal(USAGE_ERROR, 64);
   assert.equal(exitCodeFor("success"), 0);
   assert.equal(exitCodeFor("error_session_busy"), 7);
+  assert.equal(exitCodeFor("error_governance_drift"), 8);
   // A subtype this build has never seen must not read as success: it gets the generic failure
   // code, which is the same fallback the shell uses for `error_during_execution`.
   assert.equal(exitCodeFor("error_something_new"), 1);

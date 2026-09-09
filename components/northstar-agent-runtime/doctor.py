@@ -109,6 +109,55 @@ def policy_drift_finding(workspace: Path, policy: Any) -> Finding:
     )
 
 
+def governance_tree_finding(workspace: Path) -> Finding:
+    """How many governance files the next run will freeze, and what protects them here.
+
+    The audit this closes (docs/benchmark-top-agents-2026-09, F4) was a *wording* bug as much
+    as a code bug: the protected prefixes were enforced by the file tools and advertised in
+    ``system:init``, while the exec path never saw them. A doctor that only compares
+    ``config.toml`` to git HEAD cannot tell an operator which layer their host actually has.
+    """
+    from governance_watch import snapshot
+    from tools import ToolLimits
+
+    limits = ToolLimits()
+    report = snapshot(workspace, prefixes=limits.protected_prefixes)
+    return Finding(
+        "governance-tree",
+        "ok" if report.items else "warn",
+        (
+            f"{len(report.items)} file(s) digest {report.digest[:12]} will be frozen at run start"
+            + (" [entry list truncated]" if report.truncated else "")
+            if report.items
+            else "no governance files present yet - the digest is taken anyway, so a file "
+            "created by a run is reported as drift rather than silently absent"
+        )
+        + f" (protected prefixes: {', '.join(limits.protected_prefixes)})",
+    )
+
+
+def sandbox_bind_finding(workspace: Path) -> Finding:
+    """Ask a real sandbox whether the governance tree is writable inside it."""
+    from tools import ToolLimits
+    from tools.os_sandbox import probe_capabilities, probe_governance_binds
+
+    prefixes = [Path(prefix) for prefix in ToolLimits().protected_prefixes]
+    caps = probe_capabilities()
+    if not caps.bwrap_usable:
+        return Finding(
+            "sandbox-binds",
+            "warn",
+            f"{caps.bwrap_detail} - the governance tree cannot be bound read-only here; a run "
+            "with --allow-tool Shell is guarded by drift detection only (see --no-drift-check)",
+        )
+    ok, detail = probe_governance_binds(workspace, prefixes)
+    return Finding(
+        "sandbox-binds",
+        "ok" if ok else "fail",
+        f"governance tree inside bwrap: {detail}",
+    )
+
+
 def _checks(args: argparse.Namespace) -> list[Finding]:
     findings: list[Finding] = []
 
@@ -371,6 +420,16 @@ def _checks(args: argparse.Namespace) -> list[Finding]:
         )
     else:
         findings.append(Finding("provider", "ok", f"{args.provider} with model {resolved_model}"))
+
+    # -- governance tree and what the OS backend does with it --------------------
+    # Only when a workspace was given: both findings walk it, which is the one thing a
+    # host self-check should not do to an arbitrary directory.
+    if workspace is not None and workspace.is_dir():
+        try:
+            findings.append(governance_tree_finding(workspace))
+            findings.append(sandbox_bind_finding(workspace))
+        except (OSError, ImportError) as error:  # pragma: no cover - defensive
+            findings.append(Finding("governance-tree", "fail", f"cannot inspect the governance tree: {error}"))
 
     # -- scripted script -------------------------------------------------------
     if args.provider == "scripted" and args.script:

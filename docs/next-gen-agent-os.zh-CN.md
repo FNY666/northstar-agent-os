@@ -45,10 +45,14 @@
 
 附加产品层不变量：
 
-5. **策略不可自改** — `.northstar/` 默认写保护
-   *（当前实现由文件工具路径强制：`Write`/`Edit`/`LS`/`Grep`/`Read` 之外的执行路径——`Shell` 与 MCP
-   子进程——不经过 `ToolSandbox.resolve`，因此这一条在执行路径上是**待补**而非**已成立**；
-   复现与三层修法见 [execution-boundary-audit-2026-09.zh-CN.md](execution-boundary-audit-2026-09.zh-CN.md) §3/§4）*  
+5. **策略不可自改** — `.northstar/` 默认写保护，且执行路径不得撤销它  
+   *文件工具经 `ToolSandbox.resolve` 拒绝写；被批准的 `Shell` **不经过**那条路，所以同一份
+   `protected_prefixes` 交给沙箱：bwrap 在工作区写绑定**之后**把 `.northstar`/`.git` 重挂为只读
+   （`.northstar/memory`、`.northstar/tmp` 再开回可写），并且**实测探针**——绑定没成立就是配置错误，
+   不是静默降级。没有用户命名空间的宿主上，run 启动即冻结治理树摘要、每个 exec 结果之后复核，
+   变了就以 `error_governance_drift`（退出码 8）收尾并写 `governance_drift` 审计记录；
+   `--no-drift-check` 可关，关掉就在 `system:init` 里落一行。**检测弱于阻断，所以它被写出来而不是被暗示。**
+   MCP 子进程仍在待补清单上（[execution-boundary-audit-2026-09.zh-CN.md](execution-boundary-audit-2026-09.zh-CN.md) §4/F5）*  
 6. **恢复不洗预算** — checkpoint / resume 继承已消耗计数  
 7. **后置条件独立于模型** — agent 说「做完了」不算数  
 8. **无 key 可回归** — 吸收的能力若不能进 scripted 测试，就不算吸收成功  
@@ -189,7 +193,7 @@ northstar agent "…"          ← 唯一推荐入口
 ```sh
 bin/northstar --version          # 打印 northstar <version>
 bin/northstar agent --help       # 产品路径存在
-bin/northstar bench              # 公开治理基准 13/13
+bin/northstar bench              # 公开治理基准 14/14（新增的那条正是"shell 不得改写闸门"）
 make demo                        # 仍离线全绿
 # agent 路径不传 --session-dir 也应写出 <workspace>/.northstar/sessions
 # agent 路径 transcript 含 checkpoint 记录（默认每 turn）

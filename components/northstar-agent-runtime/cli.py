@@ -298,6 +298,17 @@ def _add_run_arguments(parser: argparse.ArgumentParser) -> None:
     policy.add_argument("--allow-nested-delegation", action="store_true", help="subagents may delegate one level deeper")
     policy.add_argument("--halt-on-denial", action="store_true", help="end the run with error_permission_denied when a call is refused")
     policy.add_argument(
+        "--no-drift-check",
+        action="store_true",
+        help=(
+            "do not re-hash .northstar/ and .git/ after exec-shaped tool results. On by default "
+            "on the process sandbox backend, where nothing can bind those paths read-only: the "
+            "run then cannot *stop* a Shell call from rewriting the policy that gates it, only "
+            "notice and end itself with error_governance_drift (exit 8). Turning it off is a "
+            "documented trade, and it is disclosed in system:init and in --dry-run"
+        ),
+    )
+    policy.add_argument(
         "--require-skill-lock",
         action="store_true",
         help="refuse to start unless every installed skill matches the digest recorded by `skills check --write-lock`",
@@ -584,18 +595,28 @@ def _print_dry_run(
     )
     print(_retry_note(config))
     try:
-        from tools.shell import sandbox_status_line
+        from tools.shell import SHELL_NAME, sandbox_status_line
 
-        sandbox_note = sandbox_status_line(getattr(config, "shell_backend", "auto"))
+        sandbox_note = sandbox_status_line(
+            getattr(config, "shell_backend", "auto"),
+            governance_watch=bool(getattr(config, "governance_watch", True)),
+        )
     except Exception:  # noqa: BLE001
+        SHELL_NAME = "Shell"
         sandbox_note = f"sandbox={getattr(config, 'shell_backend', 'auto')}"
     print(f"sidecar={'on' if config.sidecar_socket else 'off'} "
           f"session_dir={args.session_dir or 'off'} "
           f"halt_on_denial={config.halt_on_denial}")
     print(sandbox_note)
+    shell_granted = SHELL_NAME in set(config.allowed_tools) and config.permission_mode != "plan"
     print(
-        "shell=registered, denied until --allow-tool Shell "
-        f"(backend={getattr(config, 'shell_backend', 'auto')})"
+        (
+            "shell=granted for this run - the governance tree guard named above is the only "
+            "thing between it and the policy files"
+            if shell_granted
+            else "shell=registered, denied until --allow-tool Shell"
+        )
+        + f" (backend={getattr(config, 'shell_backend', 'auto')})"
     )
     print(_session_lease_note(config, session_dir=args.session_dir))
     print(f"policy_file={policy_note}")
@@ -1474,6 +1495,10 @@ def _run(args: argparse.Namespace) -> int:
         config_kwargs["lock_session"] = False
     elif args.session_lease_seconds != 900:
         config_kwargs["session_lease_seconds"] = args.session_lease_seconds
+    if args.no_drift_check:
+        # An opt-out has to reach the object the run is built from, not just the parser, and
+        # the loop echoes it in system:init so the transcript says it was off.
+        config_kwargs["governance_watch"] = False
     config_kwargs["session_id"] = store.session_id
     try:
         config = RuntimeConfig(**config_kwargs)

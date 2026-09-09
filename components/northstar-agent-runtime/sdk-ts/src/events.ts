@@ -104,8 +104,9 @@ export const KNOWN_EVENT_TYPES = ["result", "system", "assistant", "user", "stre
  * Terminal convention per result subtype, mirroring `events.EXIT_CODES`.
  *
  * Only 0 is "the run did what you asked". 64 means nothing ran and the command needs fixing -
- * the one code a caller should never treat as a failed attempt - and 7 means another process
- * owns the session, which is a wait-and-retry rather than an error.
+ * the one code a caller should never treat as a failed attempt - 7 means another process owns
+ * the session, which is a wait-and-retry rather than an error, and 8 says the workspace's own
+ * governance was rewritten while the run was under it (8 is the code to page on).
  */
 export const EXIT_CODES = {
   success: 0,
@@ -116,6 +117,9 @@ export const EXIT_CODES = {
   error_permission_denied: 5,
   error_postconditions_failed: 6,
   error_session_busy: 7,
+  // The governance tree the run was gated by changed underneath it (`governance_watch`):
+  // detection on a backend that cannot prevent it, so a rewrite never looks like a success.
+  error_governance_drift: 8,
 } as const;
 
 export type ResultSubtype = keyof typeof EXIT_CODES;

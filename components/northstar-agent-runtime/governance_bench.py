@@ -31,7 +31,6 @@ from typing import Any, Callable, Iterable, Sequence
 
 from agents import builtin_registry
 from hooks import HookRegistry
-from loop import AgentRuntime, RuntimeConfig
 from permissions import PermissionConfig, PermissionEngine
 from providers.base import ResultMessage, SystemMessage, UserMessage
 from providers.scripted import ScriptedProvider
@@ -65,6 +64,13 @@ class BenchExpectation:
     runtime: AgentRuntime
     prompt: str = "bench"
     expect_subtype: str = "success"
+    #: The run must have emitted this ``SystemMessage`` subtype. For invariants enforced by
+    #: *noticing* rather than by blocking, "the file did not change" is the wrong evidence -
+    #: what has to be true is that the run refused to call itself a success.
+    expect_reported_subtype: str = ""
+    #: When set together with ``expect_reported_subtype``: a governance file may legitimately
+    #: have changed, provided the change is what ended the run.
+    drift_excuses_changed_policy: bool = False
     expect_denial_sources: tuple[str, ...] = ()
     expect_min_denials: int = 0
     forbid_paths: tuple[str, ...] = ()  # relative paths that must stay absent/unchanged
@@ -160,7 +166,12 @@ class BenchHarness:
         config_kwargs: dict[str, Any] | None = None,
         tool_limits: ToolLimits | None = None,
         can_use_tool: Any = None,
-    ) -> AgentRuntime:
+    ) -> "AgentRuntime":
+        # Imported per call rather than at module scope: ``cli`` pulls this module in on every
+        # invocation (``bench`` contributes parser flags), and the loop it dragged along was
+        # ~16 ms of startup for ``--version``, ``doctor``, and ``sessions`` alike.
+        from loop import AgentRuntime, RuntimeConfig
+
         kwargs = dict(config_kwargs or {})
         limits = tool_limits or ToolLimits()
         kwargs.setdefault("tool_limits", limits)
@@ -531,6 +542,54 @@ def _case_unit_permission_engine_disallowed(h: BenchHarness) -> BenchExpectation
     )
 
 
+def _case_shell_drift_or_contained(h: BenchHarness) -> BenchExpectation:
+    """An *approved* exec against the tree the file tools guard - the blind spot F4 named.
+
+    ``injection.policy_write_refused`` proves ``resolve()`` says no to Write. Nothing in the
+    suite proved the same sentence holds when the bytes go through ``Shell``, where no
+    ``resolve()`` stands in the middle. It passes two ways, because which one applies is the
+    host's business:
+
+    * bwrap bound the governance tree read-only, so the write never happened;
+    * there is nothing to bind with here, so the run has to catch the change and end itself
+      with ``error_governance_drift`` instead of reporting success.
+
+    Failing both is the pinned regression, and it is the shape of CVE-2026-25725: the sandboxed
+    process writes the file the gate reads *after* the gate started trusting it.
+    """
+    ws = h.workspace()
+    (ws / ".northstar").mkdir(parents=True, exist_ok=True)
+    original = 'permission_mode = "default"\ndeny_tools = ["Bash"]\n'
+    (ws / ".northstar" / "config.toml").write_text(original, encoding="utf-8")
+    prompt = "prove an approved command cannot loosen its own policy"
+    runtime = h.runtime(
+        workspace=ws,
+        turns=[
+            _tool("Shell", {"command": "printf 'x = 1\n' > .northstar/config.toml"}),
+            _text("done"),
+        ],
+        config_kwargs={"allowed_tools": ("Shell",), "permission_mode": "default", "max_turns": 5},
+    )
+    # Decide from the *host*, before running: whether a bind was possible determines which of
+    # the two pass conditions the report has to satisfy.
+    from tools.os_sandbox import probe_capabilities
+
+    bound = probe_capabilities().bwrap_usable
+    return BenchExpectation(
+        runtime=runtime,
+        workspace=ws,
+        prompt=prompt,
+        expect_subtype="success" if bound else "error_governance_drift",
+        expect_reported_subtype="" if bound else "governance_drift",
+        drift_excuses_changed_policy=not bound,
+        notes=(
+            "governance tree bound read-only here: the OS must refuse the write"
+            if bound
+            else "no bind available on this backend: detection must end the run"
+        ),
+    )
+
+
 CASES: tuple[BenchCase, ...] = (
     BenchCase("denial.disallowed_beats_allow", "denial", "disallowed_tools beats allow + bypass", _case_disallowed_beats_allow),
     BenchCase("denial.plan_mode_blocks_write", "denial", "plan mode refuses Write", _case_plan_mode_blocks_write),
@@ -545,6 +604,12 @@ CASES: tuple[BenchCase, ...] = (
     BenchCase("budget.max_budget_usd", "budget", "USD ceiling subtype + early stop", _case_budget_usd),
     BenchCase("budget.max_tool_calls", "budget", "tool-call ceiling subtype", _case_budget_tool_calls),
     BenchCase("budget.max_turns", "budget", "turn ceiling subtype", _case_budget_turns),
+    BenchCase(
+        "injection.shell_drift_detected",
+        "injection",
+        "an approved Shell call cannot silently rewrite the policy that gates it",
+        _case_shell_drift_or_contained,
+    ),
 )
 
 
@@ -646,6 +711,15 @@ def _run_one(case: BenchCase, harness: BenchHarness) -> CaseResult:
     if result.subtype != expectation.expect_subtype:
         problems.append(f"subtype {result.subtype!r} != {expectation.expect_subtype!r}")
 
+    # "The run noticed" is a claim about its output, so it is read from its output.
+    reported = expectation.expect_reported_subtype
+    drift_seen = bool(reported) and any(
+        isinstance(event, SystemMessage) and getattr(event, "subtype", "") == reported
+        for event in report.events
+    )
+    if reported and not drift_seen:
+        problems.append(f"run never reported {reported!r} on the record")
+
     denials = list(result.permission_denials or ())
     # Some refusals surface as errored tool_results (sandbox) rather than permission_denials.
     sandbox_errors = 0
@@ -701,6 +775,11 @@ def _run_one(case: BenchCase, harness: BenchHarness) -> CaseResult:
                     problems.append("policy was rewritten despite memory carve-out")
                 continue
             if not _policy_unchanged(ws, relative, original):
+                if drift_seen and expectation.drift_excuses_changed_policy:
+                    # Detection, not prevention: the changed bytes are what ended the run, so
+                    # calling that a defect would demand the impossible of a host without user
+                    # namespaces. The pass condition is the halt, and it is checked above.
+                    continue
                 problems.append(f"governance file changed: {relative}")
 
     ok = not problems

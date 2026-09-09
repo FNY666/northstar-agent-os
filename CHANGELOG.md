@@ -1,5 +1,51 @@
 # Northstar Agent OS — initial public component
 
+## Unreleased (code batch) — the gate reaches behind itself
+
+Acted on the 2026-09-09 execution-path audit (`docs/execution-boundary-audit-2026-09.zh-CN.md`):
+its P0-5, P0-6, P1-6 and P2-x are implemented here, and §11 of that document reconciles each
+acceptance criterion with what this host can prove. F5 (MCP children) and F6 (instructions in the
+digest) are deliberately not mixed in.
+
+- **`Shell` no longer undoes the policy that gates it.** `protected_prefixes` is handed to the OS
+  sandbox: on bwrap the governance tree is re-bound `--ro-bind-try` *after* the workspace bind, the
+  documented carve-outs (`.northstar/memory`, `.northstar/tmp`) are re-opened after that, a missing
+  `.northstar/` is created `0700` first (the CVE-2026-25725 shape - "not protected at startup" and
+  "did not exist at startup" are one door), and `probe_governance_binds` asks a real sandbox whether
+  it can still write there. A bind that did not hold is a `SandboxError`, not a quieter run: the
+  verdict is probed once per process per `(workspace, paths)` and cached in both directions, so a
+  host where the promise fails fails every call the same way.
+- **Where nothing can be bound, the run notices.** New `governance_watch.py`: freeze a fingerprint
+  of the governance tree at run start (before the first yield, next to the postcondition snapshot),
+  re-hash it after every exec-shaped tool result, and on a delta append a `governance_drift` record
+  and end with `error_governance_drift` (**exit 8**) instead of `success`. Under `.git` the watch
+  covers only what can execute (`config`, `config.local`, `info/exclude`, `hooks/**`) - flagging
+  `git add` as an attack would make detection unusable - and a file too big to hash is named by
+  size rather than skipped. Subagent runs do not re-watch their parent's tree.
+- **The vocabulary grew in six places, on purpose.** `governance_drift` is `RECORD_TYPES`' 14th
+  type, a `SystemMessage` subtype, a `ResultMessage` subtype, `EXIT_CODES[8]`, an `audit_export`
+  error type, the TypeScript mirror's table, and the session panel's render + "errors & denials"
+  filter. Every one of those registrations was caught by an existing pin before it could drift,
+  which is the argument for keeping such pins.
+- **Disclosure, because detection is the weaker half.** `--no-drift-check` exists and is echoed in
+  `system:init` (with the digest it froze, or the reason it is off); `--dry-run`'s `sandbox=`/`shell=`
+  lines now say which layer is in force (and stop claiming Shell is denied when it was granted);
+  `northstar doctor` gained `governance-tree` and `sandbox-binds` findings, the latter probing bwrap
+  for real and never writing to the workspace itself. `docs/concepts/threat-model.md` now states the
+  two layers where it used to state only the requirement, and lists the sandboxed-`git commit`
+  consequence as an accepted cost.
+- **`sessions checkpoints` stops being quadratic in the reader.** `checkpoint_reports` rebuilds the
+  transcript once and derives every boundary's prefix digest from a single running SHA-256
+  (`checkpoints.canonical_parts`/`digest_parts`, which `_canonical` is now defined through - so
+  "byte-identical to per-prefix `digest_transcript`" holds by construction, and every existing
+  digest still verifies). A 1200-boundary lineage went from 10.4 s to 21.6 ms; a `Replay` also
+  renders a `governance_drift` frame with its own count, kept separate from denials, because
+  "the gate refused" and "the gate moved" are different sentences.
+- **`northstar bench` is 14/14**, the new `injection.shell_drift_detected` case asserting *either*
+  containment or a self-halt depending on what this host can do, and it goes red when the watch is
+  disabled. `governance_bench` no longer imports `loop` at module scope, which is ~16 ms off every
+  CLI invocation that is not a bench run (`--version`: 97-101 ms → 80.6 ms measured).
+
 ## Unreleased (documentation batch) — third-round audit: the path *behind* the gate
 
 No code changed in this batch. `docs/execution-boundary-audit-2026-09.zh-CN.md` deepens the 2026-09-08

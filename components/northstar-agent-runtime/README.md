@@ -766,7 +766,10 @@ replaying the same boundary is a no-op (`idempotency_key = "<session>:<record_in
 while a different boundary under that key conflicts.
 
 Two limits, stated rather than hidden. The **transcript record format is not unified**:
-`RECORD_TYPES` stays at thirteen types, because a checkpoint digest certifies a byte range
+`RECORD_TYPES` is fourteen (the exec-path batch added `governance_drift`, and a new record type
+has to be registered in five places at once — `sessions.RECORD_TYPES`, the `SystemMessage`
+subtypes, the `ResultMessage` subtypes, `EXIT_CODES`, the TypeScript mirror, and the panel's
+vocabulary — which is why each of those places owns a test that fails on purpose), because a checkpoint digest certifies a byte range
 of the transcript and changing those bytes would change what every existing checkpoint
 attests to. And a durable event cannot authorise a resume by itself: an event's
 `payload_digest` covers its own payload, not the transcript, so `checkpoint_from_event()`
@@ -1043,6 +1046,7 @@ condition arrives as an event, never as a raised exception:
 | `error_permission_denied`   | a denial ended the run (`halt_on_denial`)           |
 | `error_postconditions_failed` | the model stopped, but a declared workspace check did not hold |
 | `error_session_busy` | another live run holds this session's transcript; nothing was written |
+| `error_governance_drift` | the tree this run is gated by (`.northstar/`, `.git/`) changed during it, on a backend that cannot bind it read-only |
 | `error_during_execution`    | provider failure, malformed tool input, internal bug |
 
 The three ceilings are independent, each with its own subtype, so an operator can
@@ -1222,6 +1226,7 @@ size (`result_chars`), so truncation is visible instead of inferred.
 | `durable_bridge.py`   | runtime checkpoint ↔ durable-run event/document translation (mirrored schema, opt-in `cross_check`) |
 | `postconditions.py` | independent end-of-run workspace checks (`exists`/`absent`/`changed`/`unchanged`/`contains`) |
 | `checkpoints.py`    | turn-boundary checkpoints: verified resume, inherited ceilings, fork-on-read |
+| `governance_watch.py` | freeze the governance tree, re-hash it after each exec result, name the files that moved (`error_governance_drift`) |
 | `cli.py`            | one governed run from a shell, with distinct exit codes              |
 | `doctor.py`         | `cli doctor` environment self-checks (no requests, no file writes)   |
 | `session_view.py`   | `cli sessions list/show/export/checkpoints/replay` - the read-back half of the transcripts |
@@ -1253,8 +1258,14 @@ size (`result_chars`), so truncation is visible instead of inferred.
 `0` success · `1` error_during_execution · `2` error_max_turns ·
 `3` error_max_tool_calls · `4` error_max_budget_usd · `5` error_permission_denied ·
 `6` error_postconditions_failed · `7` error_session_busy ·
+`8` error_governance_drift ·
 `64` usage or configuration error (nothing was run). Result errors and refusals
 are printed to stderr; `--json` emits one object per event.
+
+`8` means "the run stopped itself because its own policy moved". It is separated from `1` so
+an operator can page on it: on a host without user namespaces it is the only thing standing
+between an approved `Shell` call and the files that decide what is approved. `--no-drift-check`
+turns the detector off, and `system:init` records that it was.
 
 `7` is separated from `1` on purpose, and from `64` too: `7` means the command was
 right and the session was occupied (wait, or resume from a copy), while `64` means the

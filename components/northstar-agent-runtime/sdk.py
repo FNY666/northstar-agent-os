@@ -62,6 +62,10 @@ class RunOptions:
     max_tool_calls: int | None = 50
     max_budget_usd: float | None = None
     halt_on_denial: bool = False
+    #: Re-hash the governance tree (``.northstar/``, ``.git/``) after exec-shaped tool results
+    #: and end the run with ``error_governance_drift`` if it moved. On by default; an embedder
+    #: that turns it off is choosing a run that will not notice, and ``system:init`` says so.
+    governance_watch: bool = True
     session_dir: str | None = None  # persist the append-only JSONL transcript here
     max_subagent_depth: int = 1
     allow_nested_delegation: bool = False
@@ -178,6 +182,7 @@ def _build(options: RunOptions, resume: str | None = None) -> tuple[Any, Any, li
         "max_subagent_depth": options.max_subagent_depth,
         "allow_nested_delegation": options.allow_nested_delegation,
         "halt_on_denial": options.halt_on_denial,
+        "governance_watch": options.governance_watch,
         "tool_limits": ToolLimits(),
         "record_tool_output_in_session": not options.redact_tool_output,
         "stream": options.stream,

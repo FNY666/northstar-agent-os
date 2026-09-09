@@ -23,7 +23,7 @@ from __future__ import annotations
 from typing import Any
 
 #: Terminal convention for each result subtype (0 success … 5 permission, 6 postconditions,
-#: 7 session contention). Only 64 means "nothing was run and the operator should fix the
+#: 7 session contention, 8 governance drift). Only 64 means "nothing was run and the operator should fix the
 #: command"; 7 means "the command was fine, another run owns the session - wait, retry".
 EXIT_CODES: dict[str, int] = {
     "success": 0,
@@ -35,6 +35,8 @@ EXIT_CODES: dict[str, int] = {
     "error_postconditions_failed": 6,
     # Another live process holds this session's transcript; nothing was written.
     "error_session_busy": 7,
+    # The governance tree changed underneath a run that was gated by it (governance_watch.py).
+    "error_governance_drift": 8,
 }
 
 

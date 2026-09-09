@@ -78,6 +78,7 @@ the same conditions a reviewer should fail on:
 | 1 | execution error mid-review — fail the job |
 | 4 | budget ceiling hit — the review cost more than `REVIEW_MAX_USD`; fail |
 | 5 | a tool call was denied (`--halt-on-denial`) — a policy surprise; fail |
+| 8 | the governance tree (`.northstar/`, `.git/`) changed *while the review ran* — on a read-only run that should be impossible, so treat it as a tampered checkout and fail |
 
 Gate on the verdict by parsing the last JSON line (`"type": "result"`) of
 `review-events.jsonl`, or keep it advisory and ship the transcript as an

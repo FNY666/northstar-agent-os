@@ -72,6 +72,7 @@ MANIFEST: dict[str, tuple[str, ...]] = {
         "events",
         "frontmatter",
         "governance_bench",
+        "governance_watch",
         "hooks",
         "loop",
         "mcp_client",

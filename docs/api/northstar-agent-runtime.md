@@ -140,6 +140,14 @@ Source: `components/northstar-agent-runtime/checkpoints.py`
 
 Turn-boundary checkpoints: resume without resetting the counters, fork without rewriting.
 
+#### `canonical_parts(transcript: Sequence[Any])`
+
+The transcript as one canonical JSON element per message, in order.
+
+#### `digest_parts(parts: Sequence[str])`
+
+Digest of already-canonicalised parts; equals ``digest_transcript`` of their source.
+
 #### `digest_transcript(transcript: Sequence[Any])`
 
 #### `Checkpoint`
@@ -327,6 +335,14 @@ Flags mirroring ``cli run``'s defaults so a doctor verdict predicts a run.
 #### `policy_drift_finding(workspace: Path, policy: Any)`
 
 Compare the workspace policy file with the committed one.
+
+#### `governance_tree_finding(workspace: Path)`
+
+How many governance files the next run will freeze, and what protects them here.
+
+#### `sandbox_bind_finding(workspace: Path)`
+
+Ask a real sandbox whether the governance tree is writable inside it.
 
 #### `run_doctor(args: argparse.Namespace)`
 
@@ -521,6 +537,52 @@ Execute the public suite. Always cleans temp workspaces.
 
 #### `run_bench_command(args: argparse.Namespace)`
 
+### `governance_watch`
+
+Source: `components/northstar-agent-runtime/governance_watch.py`
+
+Governance-tree drift watch: what the exec path could not be stopped from doing.
+
+#### `GovernanceWatchError`
+
+The watch cannot be built. A configuration error, never a silent no-op.
+
+#### `GovernanceSnapshot`
+
+One frozen view of the governance tree: relative path -> fingerprint.
+
+- `watched()`
+- `digest()`
+  - A single key for the whole tree, so a transcript can compare two runs cheaply.
+- `as_dict()`
+#### `DriftReport`
+
+What changed between a frozen snapshot and the tree as it is now.
+
+- `ok()`
+- `findings()`
+- `summary()`
+- `as_dict()`
+#### `snapshot(workspace: str | os.PathLike[str], *, prefixes: Iterable[str]=DEFAULT_PREFIXES)`
+
+Freeze the governance tree: every watched path with a content fingerprint.
+
+#### `compare(workspace: str | os.PathLike[str], before: GovernanceSnapshot, *, prefixes: Iterable[str]=DEFAULT_PREFIXES)`
+
+Re-read the tree and diff it against ``before``. Never raises for a missing file.
+
+#### `GovernanceWatch`
+
+The small object the loop holds: freeze once, ask after each exec.
+
+- `freeze()`
+  - Take the baseline. A disabled watch returns ``None`` and never raises.
+- `snapshot()`
+- `frozen()`
+- `check()`
+  - ``None`` when there is nothing to say (off, unfrozen, or no drift).
+- `describe()`
+  - What the loop puts in the ``init`` record — including its own blind spot.
 ### `hooks`
 
 Source: `components/northstar-agent-runtime/hooks.py`
@@ -755,7 +817,7 @@ A transcript folded into frames, with its fork points verified and its lineage n
 - `render()`
 - `as_dict()`
 - `to_json()`
-#### `describe_checkpoint(record: Mapping[str, Any], records: Sequence[Mapping[str, Any]])`
+#### `describe_checkpoint(record: Mapping[str, Any], records: Sequence[Mapping[str, Any]], *, transcript: Sequence[Any] | None=None, prefix_digest: str | None=None)`
 
 Verify one checkpoint *record* against the transcript it lives in.
 
@@ -1792,9 +1854,21 @@ Discover what isolation this host can provide (cached after first call).
 
 Map ``auto|bwrap|process`` to the backend that will actually run.
 
-#### `run_sandboxed(request: SandboxRequest, *, backend: str='auto', capabilities: SandboxCapabilities | None=None)`
+#### `reset_bind_verdicts()`
+
+Forget the cached verdicts. For tests and for a doctor run after installing bwrap.
+
+#### `ensure_governance_dirs(workspace: Path, paths: Iterable[Path])`
+
+Create a missing governance *directory* so a read-only bind has something to bind.
+
+#### `run_sandboxed(request: SandboxRequest, *, backend: str='auto', capabilities: SandboxCapabilities | None=None, phase: bool=False)`
 
 Run ``request`` under the resolved backend. Never uses ``shell=True``.
+
+#### `probe_governance_binds(workspace: str | os.PathLike[str], read_only_paths: Sequence[Path], *, capabilities: SandboxCapabilities | None=None)`
+
+Ask a real sandbox whether it can still write where the gate says it may not.
 
 ### `tools.parallel`
 
@@ -1820,6 +1894,10 @@ Source: `components/northstar-agent-runtime/tools/shell.py`
 
 Shell tool: governed command execution inside the OS sandbox.
 
+#### `governance_binds(ctx: 'ToolContext')`
+
+``(read_only, writable)`` bind requests for the sandbox, derived from the run's limits.
+
 #### `parse_shell_argv(payload: dict[str, Any])`
 
 Build the argv the sandbox will exec. Prefer ``argv``; ``command`` is sh -c.
@@ -1832,9 +1910,9 @@ Run one governed command in the configured OS sandbox backend.
 
 Build the :class:`ToolSpec` for Shell (lazy import to keep tools package light).
 
-#### `sandbox_status_line(backend: str='auto')`
+#### `sandbox_status_line(backend: str='auto', *, governance_watch: bool=True)`
 
-One-line summary for doctor / dry-run.
+One-line summary for doctor / dry-run, including how the policy tree is guarded.
 
 ### `tools.skill_scripts`
 

@@ -27,9 +27,14 @@ from providers.base import (
 
 class EventTypeTests(unittest.TestCase):
     def test_system_message_accepts_the_documented_subtypes(self):
-        for subtype in ("init", "compact_boundary", "informational", "postconditions"):
+        for subtype in ("init", "compact_boundary", "informational", "postconditions", "governance_drift"):
             self.assertEqual(SystemMessage(subtype=subtype, content="x").subtype, subtype)
-        self.assertEqual(SYSTEM_SUBTYPES, ("init", "compact_boundary", "informational", "postconditions"))
+        # ``governance_drift`` is the fifth: a run that caught its own policy tree moving has
+        # to say so in a frame a consumer can key on, not in prose inside ``informational``.
+        self.assertEqual(
+            SYSTEM_SUBTYPES,
+            ("init", "compact_boundary", "informational", "postconditions", "governance_drift"),
+        )
 
     def test_system_message_rejects_an_unknown_subtype(self):
         with self.assertRaises(ValueError):
@@ -47,6 +52,9 @@ class EventTypeTests(unittest.TestCase):
                 "error_permission_denied",
                 "error_postconditions_failed",
                 "error_session_busy",
+                # 8, and paired with the ``governance_drift`` system frame above: a sandbox
+                # that cannot bind read-only must still stop a run that edited its own policy.
+                "error_governance_drift",
             ),
         )
         # Pinned against the exit-code table as well: a subtype with no code is a result

@@ -580,6 +580,43 @@ Requirements and rules worth knowing before you wire it into a service:
 
 `make demo` stays Python-only; the TypeScript face is verified by its own tests, not by a runner.
 
+## 18. Freeze the governance tree, and let the run notice if it moved
+
+`.northstar/config.toml` and `.git/` are `protected_prefixes`: Write/Edit refuse
+them, the deny list is merge-only, and a run can neither widen its own tool list nor
+delete an audit record. That promise is enforced in the *file tools* — and a run with
+`--allow-tool Shell` can write the same bytes with `printf`, because the OS sandbox
+binds the workspace as one writable mount.
+
+Two layers close that, and both are on by default:
+
+- **bwrap backend**: the governance tree is re-bound read-only *after* the workspace
+  (`--ro-bind-try`), with the documented carve-outs re-bound writable after that
+  (`.northstar/memory`, `.northstar/tmp`). A protected directory that does not exist
+  yet is created empty first — "not protected at startup" and "did not exist at
+  startup" were the same hole in CVE-2026-25725. The Shell tool reports what was
+  enforced in its result data (`governance_binds`), derived from the run's own limits
+  so a tool payload cannot widen or narrow the list.
+- **process backend** (no user namespaces — CI containers, most laptops): detection
+  instead of prevention. The runtime hashes the governance tree at `system:init`,
+  re-checks it after every `Shell`/`Bash` result, and on any change appends a
+  `governance_drift` record and ends the run with `error_governance_drift` (**exit
+  8**). It runs after `postconditions`, so a run that wrote the required file *and*
+  its own policy reports the drift, not the success.
+
+```sh
+python3 -m cli run --workspace . --prompt "..."            # drift check on
+python3 -m cli run --workspace . --prompt "..." --no-drift-check   # says so in init
+python3 -m cli bench --workspace . --json                  # 14 cases, one per invariant
+```
+
+Detection is the weaker guarantee, so it is stated rather than implied: `--dry-run`
+prints `shell: … drift detection on/off`, `northstar doctor` reports the governance
+tree state, and `system:init` carries the digest it froze (or `{"enabled": false}`).
+A `--allow-tool Shell` run with `--no-drift-check` is a documented trade with no
+enforcement layer behind it, which is exactly the case `northstar bench` must go red
+on.
+
 ## Consumer CI recipe
 
 `examples/ci-readonly-review/` is a copy-paste template for running a

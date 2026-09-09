@@ -31,6 +31,7 @@ from budget import Budget
 from compaction import CompactionOutcome, compact, should_compact
 from hooks import HookInput, HookRegistry
 from checkpoints import CheckpointError, build as build_checkpoint, digest_transcript, prepare_resume
+from governance_watch import GovernanceWatch
 from postconditions import (
     PostConditionError,
     PostConditionSet,
@@ -182,6 +183,13 @@ class RuntimeConfig:
     #: grant Shell — the permission gate still denies it under ``default`` until
     #: ``--allow-tool Shell``. ``bwrap`` is refused at construction if unusable.
     shell_backend: str = "auto"
+    #: Watch the tree this run is gated by (``governance_watch.py``): freeze at start,
+    #: re-check after every tool call that could execute, end the run as
+    #: ``error_governance_drift`` if the governance files changed underneath it.
+    #: On the ``bwrap`` backend the tree is also bound read-only, so this is belt
+    #: and braces; on the ``process`` backend it is the only answer the runtime has.
+    #: Subagent runs inherit the parent's watch (``depth > 0`` disables it here).
+    governance_watch: bool = True
     #: How many **parallel-safe** tool handlers may run at once inside one
     #: assistant turn. ``1`` (default) is full serial dispatch. Values >1 only
     #: accelerate a turn whose *every* call is kind=read and non-mutating;
@@ -298,6 +306,7 @@ class RuntimeConfig:
             "halt_on_denial": self.halt_on_denial,
             "parallel_tools": self.parallel_tools,
             "shell_backend": self.shell_backend,
+            "governance_watch": self.governance_watch,
             "compaction_threshold_tokens": self.compaction_threshold_tokens,
             "stream": self.stream,
             "retry": self.retry.as_dict() if self.retry is not None else None,
@@ -509,6 +518,11 @@ class _RunState:
     turn_retry_wait_ms: int = 0
     #: Whether this run already spent its single free compaction on an oversized request.
     overflow_compacted: bool = False
+    #: Tool calls that could have touched the filesystem through an exec backend, and how
+    #: many of them the governance watch has already looked at. The watch costs one tree
+    #: walk per exec call and nothing at all when no exec ran, which is the common case.
+    exec_calls: int = 0
+    governance_checks: int = 0
 
 
 class AgentRuntime:
@@ -556,6 +570,15 @@ class AgentRuntime:
         except PostConditionError as error:
             raise RuntimeConfigurationError(f"postconditions: {error}") from error
         self.limits = self.config.tool_limits
+        #: The exec-path companion to the write gate: what `Shell` and any other exec-kind
+        #: tool may reach is wider than what `ToolSandbox` refuses, so the loop watches the
+        #: tree instead of trusting the promise. Top-level runs only; a child shares the
+        #: parent's workspace and the parent's next check covers both.
+        self.governance = GovernanceWatch(
+            self.sandbox.root_real,
+            prefixes=self.config.tool_limits.protected_prefixes,
+            enabled=self.config.governance_watch and self.config.depth == 0,
+        )
         self.budget = budget if isinstance(budget, Budget) else Budget(max_budget_usd=self.config.max_budget_usd)
         self.tools = tools if isinstance(tools, ToolRegistry) else build_default_registry(include_describe=self.config.include_describe_tool)
         # The sidecar is the only execution path this runtime knows about, and it
@@ -1008,6 +1031,8 @@ class AgentRuntime:
             init_data["sandbox"] = {"backend": config.shell_backend, "isolation": "unknown"}
         if self.postconditions:
             init_data["postconditions"] = [condition.as_dict() for condition in self.postconditions.conditions]
+        # ``governance_watch`` is filled in below, after the freeze, so the record carries the
+        # baseline it will be compared against rather than an empty description.
         if state.resumed_from is not None:
             init_data["resumed_from"] = state.resumed_from
         if config.parent_session and state.resumed_from is None:
@@ -1045,6 +1070,12 @@ class AgentRuntime:
             self.postconditions.snapshot()
         except PostConditionError as error:
             raise RuntimeConfigurationError(f"postconditions: {error}") from error
+        # Same moment for the same reason: the governance tree's "before" has to be the
+        # state the run started in, not the state after the first thing it did.
+        self.governance.freeze()
+        # Described here, after the freeze: the init record is where a reader finds the digest
+        # this run was checked against, and "it was on" without a baseline is only half an audit.
+        init_data["governance_watch"] = self.governance.describe()
         init = SystemMessage(subtype="init", content=f"runtime ready: {self.provider_name}/{config.model}", data=init_data)
         self.sessions.record_system(init, agent=config.agent)
         yield init
@@ -1293,8 +1324,17 @@ class AgentRuntime:
                 self._record_tool_message(tool_message)
                 yield tool_message
                 self._checkpoint(state, boundary="after_tools")
+                drift = self._governance_drift(state)
+                if drift is not None:
+                    yield drift
                 if halted is not None:
+                    # The run is already ending for a reason that outranks this one (a denial
+                    # or a ceiling). The finding is still on the record; inventing a second
+                    # cause would hide the first.
                     yield self._finish(state, halted)
+                    return
+                if drift is not None:
+                    yield self._finish(state, "error_governance_drift")
                     return
         yield self._finish(state, "error_max_turns")
 
@@ -1404,6 +1444,37 @@ class AgentRuntime:
         self._heartbeat()
 
     # -- ceilings ----------------------------------------------------------
+    def _governance_drift(self, state: _RunState) -> SystemMessage | None:
+        """Re-walk the governance tree if anything this run could have executed did.
+
+        Returns the finding as a :class:`SystemMessage` (already in the transcript) or
+        ``None`` when there is nothing to report. Detection, not prevention: by the time
+        this fires the bytes are already changed - what is still available is refusing to
+        call the run a success, and telling the operator which files moved.
+        """
+        watch = self.governance
+        if not watch.frozen or state.exec_calls <= state.governance_checks:
+            return None
+        state.governance_checks = state.exec_calls
+        found = watch.check()
+        if found is None:
+            return None
+        record = SystemMessage(
+            subtype="governance_drift",
+            content=f"governance drift: {found.summary()}",
+            # ``exec_calls`` travels with the finding: "how much had this run already been
+            # allowed to run when the tree moved" is the first question an investigator asks,
+            # and it is the one number that makes "somewhere in these 9 calls" a bounded claim.
+            data={**found.as_dict(), "exec_calls": state.exec_calls},
+        )
+        self.sessions.record_system(record, agent=self.config.agent)
+        state.errors.append(
+            "the governance tree this run was gated by changed during the run: "
+            + ", ".join(found.findings[:8])
+            + ("" if len(found.findings) <= 8 else f" (+{len(found.findings) - 8} more)")
+        )
+        return record
+
     def _ceiling_stop(self, state: _RunState) -> str | None:
         config = self.config
         if config.max_budget_usd is not None and self.budget.exhausted:
@@ -1854,6 +1925,11 @@ class AgentRuntime:
                     },
                 ),
             )
+        if getattr(spec, "kind", "") == "exec":
+            # Counted here rather than in the dispatcher: this is the one place both the
+            # serial and the parallel path agree on, and the watch must not be able to miss
+            # a call simply because it happened in a batch.
+            state.exec_calls += 1
         block = result.as_block(call.id, max_chars=self.limits.max_result_chars)
         report = ToolCallReport(
             name=spec.name,

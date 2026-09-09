@@ -45,22 +45,39 @@ from typing import Any, Mapping, Sequence
 CHECKPOINT_TYPE = "checkpoint"
 
 
-def _canonical(transcript: Sequence[Any]) -> str:
-    """Deterministic text for a message list, shared by write and read paths.
+def canonical_parts(transcript: Sequence[Any]) -> list[str]:
+    """The transcript as one canonical JSON element per message, in order.
 
     ``event_to_dict`` is used rather than ``repr`` so the digest describes the same
     bytes a reader of the transcript file would see, and sorting keys removes
     dict-ordering as a source of false mismatch.
+
+    Split out of :func:`_canonical` for the *reader* side (``session_replay``): verifying
+    every checkpoint in a file means digesting every prefix of the transcript, and having the
+    per-message element is what turns that into one pass instead of a serialisation per
+    boundary. ``digest_parts(canonical_parts(t)) == digest_transcript(t)`` holds by
+    construction - both are defined here, against the same join.
     """
     from events import event_to_dict
 
-    payload = []
+    parts: list[str] = []
     for message in transcript:
         try:
-            payload.append(event_to_dict(message))
+            element = event_to_dict(message)
         except Exception:  # noqa: BLE001 - an unknown object must not silently digest
-            payload.append({"type": "opaque", "rendered": str(message)})
-    return json.dumps(payload, sort_keys=True, ensure_ascii=False, default=str)
+            element = {"type": "opaque", "rendered": str(message)}
+        parts.append(json.dumps(element, sort_keys=True, ensure_ascii=False, default=str))
+    return parts
+
+
+def _canonical(transcript: Sequence[Any]) -> str:
+    """The whole transcript as JSON: ``"["`` + the parts + ``"]"`` - and nothing else."""
+    return "[" + ",".join(canonical_parts(transcript)) + "]"
+
+
+def digest_parts(parts: Sequence[str]) -> str:
+    """Digest of already-canonicalised parts; equals ``digest_transcript`` of their source."""
+    return hashlib.sha256(("[" + ",".join(parts) + "]").encode("utf-8")).hexdigest()
 
 
 def digest_transcript(transcript: Sequence[Any]) -> str:
