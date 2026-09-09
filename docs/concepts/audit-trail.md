@@ -16,6 +16,28 @@ the run reports success, so a crash still leaves the decision trail behind.
 read-only. Subagent runs nest as spans and are recorded too, so a delegation
 tree is auditable end to end.
 
+Append-only is a property of *how* a file is written, not of *who* is writing
+it, so the transcript is claimed for the duration of a run
+(`session_lease.py`): one `flock` per session file, taken before the first
+record and dropped after the last. A second run aimed at the same session ends
+`error_session_busy` having written nothing, which is the outcome that keeps
+everything above trustworthy — a transcript two processes interleaved is a
+record nobody can replay, and a checkpoint digest computed over it would be
+certifying an order of events that never happened. The `session_start` record
+therefore carries what the run claimed (`locked`, `ttl_seconds`,
+`kernel_lock_available`) and no process identity, since a record that differs
+between two identical runs cannot be digested at all.
+
+That trustworthiness is checkable without spending a run. `sessions checkpoints
+--session-dir D` recomputes every boundary's prefix digest from the file as it stands and exits
+1 when any of them no longer matches, through the same code path `run --resume-from` uses to
+decide whether to accept a fork point - so the listing and the resume cannot disagree about
+whether the transcript still describes itself. `sessions replay` renders the run as frames and,
+with `--from-checkpoint`, cuts at a boundary to show exactly what a resumed run inherits.
+Neither command writes, takes the lease, or re-executes a tool. This is detection, not proof:
+a digest is recomputable by anyone who can rewrite the file. It is still worth a CI job, because
+a property nobody can check is not a property.
+
 ## 2. Durable-run event store and verification
 
 `northstar-durable-run` generalises the audit surface for long-lived runs:
@@ -24,6 +46,16 @@ an append-only `event_store` with checkpoints and leases, a per-call
 after the fact rather than trusting the runner's own report. `trace_metrics`
 keeps minimal span/trace numbers, and `evaluation` measures how closely a
 recorded run followed the declared plan.
+
+The lease vocabulary is shared with the runtime, and the enforcement is
+deliberately not: durable-run's lease is reclaimed once `expires_at` passes,
+because its runs outlive requests, while the runtime's is held by a live
+descriptor and cannot be taken from a process that forgot to renew. Both write
+the same two-field envelope (`owner_id`, `expires_at`) at mode `0600`, and a
+checkpoint crosses the boundary as a valid `EventContract` event
+(`checkpoint.created`) or a `northstar.checkpoint.v1` document via
+`durable_bridge.py` — translated, never imported: the runtime does not depend
+on this component, and the tests pin both sides of the mirror.
 
 This slice is deliberately a local, standard-library prototype — it proves
 the mechanisms a hosted durable-run service would need, on a fixture, with no

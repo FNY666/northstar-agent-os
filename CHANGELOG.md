@@ -1,5 +1,608 @@
 # Northstar Agent OS — initial public component
 
+## Unreleased (twenty-third batch) — a second face on the same contract: the TypeScript SDK (`sdk-ts/`)
+
+The blueprint's T1 remainder. `components/northstar-agent-runtime/sdk-ts` is `@northstar/agent-runtime`:
+`RunOptions` → argv (one key per `run` flag, closed sets, refusals before a process exists), the
+`--json` stream typed and parsed (`parseEventLine`, NDJSON splitter, unknown event types passed
+through for forward-compatibility), and `run` / `streamRun` / `preview` over a spawned
+`python3 -m cli`. A finished run never throws — subtype and exit code carry the verdict; a broken
+stream does, with `UsageError` reserved for exit 64. Node ≥ 22.6 type-strips the sources, so there is
+no build step, no `npm install` and no network: `"private": true` stays, because publishing is the
+line this repository has not crossed.
+
+The mirror is gated, not trusted: `test/parity.test.ts` compares the exit-code table, the event
+vocabulary, the closed value sets and every emitted flag against the runtime's own modules and
+argparse tree, and `tests/test_typescript_sdk.py` re-runs those comparisons from Python so drift
+still fails an image with no node. `Makefile` gains a guarded `ts-test` target (skip, never a silent
+pass); the CI `agent-runtime` job installs node 22 and runs the suite.
+
+Fixed on the way, because the mirror read it wrong first: `run --dry-run` printed an explicit
+`--max-tool-calls 0` as `unlimited` while the loop enforces 0 as "no call allowed" - and does it
+*before* the first generation, so a zero ceiling costs no request and records no denial, while a
+ceiling of 1 spends a turn and writes one. `cli.format_tool_call_ceiling` now separates the three
+states (`unlimited` / `0 (no tool call allowed)` / the number), `CeilingTests` pins the difference
+between 0 and 1, and `sdk-ts`'s `preview()` test pins the wording from the other side.
+
+Two stale spots in the guard harness went with it. `tools/verify_invariants.py` copied only this
+component into its throwaway tree, so the bridge tests that import the real sibling components
+failed to import, the baseline went red, and every mutation result became meaningless - which is how
+CI's `Guard verification` step had been failing since the bridges landed. It copies the whole
+`components/` tree now, and `tests/test_tools_verify_invariants.py` pins the copy step plus one
+end-to-end mutation. And one mutation anchor had been written against `loop.py`'s indentation, which
+had since reflowed: a guard reporting "anchor not found" reports nothing at all, so it is anchored on
+the comment above the call instead. All five guards verify green again against a 1197-test baseline.
+
+Runtime slice 1188 → **1197** (+5 ceiling semantics, +4 harness), the TypeScript face adds **57**
+node tests, and repository `make test` 1485 → **1515** (51+41+37+65+54+1197+70), all offline;
+`make demo` green. CI's `agent-runtime` job installs node 22 and runs the face between the CLI smoke
+and the guard verification. Version stays `0.1.0.dev0`: nothing is published, `private: true` included.
+
+## Unreleased (twenty-second batch) — a fork point you can check before you pay for it
+
+Checkpoints have been written since the resume-budget fix, and `run --resume-from` has honoured
+them since then. What did not exist was any way to *ask* about one: which boundaries a session
+recorded, whether the transcript still agrees with a given boundary, and what a resumed run
+would start with. That left the component's strongest durability primitive as its least
+inspectable one, and left a README line reading "no tamper evidence" when a prefix digest is
+sitting in every checkpoint record.
+
+- **`session_replay.py` — verification that cannot drift from the real thing.** A checkpoint is
+  checked by rebuilding the transcript with the reader's own filter and recomputing the digest
+  with the writer's own canonical form, so "verified in this listing" means "accepted by
+  `run --resume-from`" by construction rather than by two implementations agreeing by luck. The
+  four verdicts are `verified`, `digest-mismatch`, `prefix-short` and `malformed` - a recognised
+  checkpoint missing `turns` is reported, never defaulted to zero, because restoring partial
+  counters is exactly the budget leak checkpoints were invented to close.
+- **`sessions checkpoints` — the CI-shaped half.** It walks one transcript or a whole directory
+  and exits 1 when any boundary is not verified: an edited or truncated audit trail becomes a
+  build result, without a provider key, without a session lease, and without spending a run to
+  discover it. Each boundary is priced, too - with a `max_budget_usd` ceiling in force the
+  listing says what a resume inherits and what it may still spend, and says plainly that a
+  boundary whose spend already covers the ceiling would be refused.
+- **`sessions replay` — what a run did, and where it could have been cut.** Records fold into
+  frames (`start`, `prompt`, `turn`, `checkpoint`, `compaction`, `result`, `note`): a turn frame
+  carries the assistant's prose, its tool calls, its error and denial counts and its token
+  usage, so a listing is diff-able instead of a scroll. `--from-checkpoint N` cuts the replay at
+  that boundary, which is the fork preview: everything after it is history the child would not
+  see. `--json` gives the same shape to a machine, and the child's `session_start` lineage is
+  rendered ("forked from session X record #N, inherits 2 turns / $0.500000") because a fork that
+  cannot name its parent is a fork nobody can audit.
+- **What it refuses to be.** Not a TUI and not a replayer: no tool is executed a second time, and
+  nothing is re-decided - the transcript is read as the record of what was permitted. Not a
+  signature: a digest detects the accident and the casual edit, and someone who can rewrite the
+  file can recompute one, which is now stated in the limitations instead of being waved at.
+- **Two shapes accepted on purpose**: `transcript_len` governs the cut (a boundary before any
+  message legitimately digests the empty transcript), and lineage is read from the nested
+  `resumed_from` block the loop writes, with the older flat keys still accepted.
+
+Runtime slice 1149 → **1188** (+39 `test_session_replay`, including the test that lists a
+boundary as verified and then *really* resumes from it, and the one that edits a prompt and
+shows both commands refusing), repository `make test` 1446 → **1485**, all offline; `make demo`
+unchanged. Docs: the runtime README's read-back section and its "no tamper evidence" line,
+cookbook §16, blueprint §6.27, and `dx-benchmark` §10.3/§10.5 (T3 closed).
+
+## Unreleased (twenty-first batch) — reading someone else's `.mcp.json` without inheriting their approvals
+
+Three places in this repository told operators to declare MCP servers in a workspace
+`[mcp.servers]` table. That table has never existed — `policy_file.py` has no `mcp` key, and
+`--mcp-server` was the only way in. The misprint was not a stray sentence, it was the shape of the
+real gap: every other 2026 host reads `.mcp.json`, so an adopting repository kept its server list in
+two files and kept them in sync by hand. This batch closes the gap and corrects the claim together.
+
+- **`mcp_config.py` reads their format and keeps our gates.** `.mcp.json`, `.cursor/mcp.json`,
+  `.vscode/mcp.json` and `.gemini/settings.json` are parsed (`mcpServers`, or VS Code's `servers` —
+  never both in one file), and each declaration becomes exactly what `--mcp-server` produces: a name,
+  an argv, plus optional `env`/`cwd`. So an imported server is mutating by default, denied until
+  `--allow-tool` names it, TERM→KILLed with the run, and indistinguishable from a flag's server in the
+  transcript. There is no second class of tool.
+- **Three severities, because a config file can be wrong in three ways.** A file whose *meaning* would
+  have to be guessed raises (malformed JSON, both table keys, a key this importer does not read, a
+  `command` that is a list, an unresolved `${VAR}`, a `cwd` that escapes the workspace, more than 16
+  servers): exit 64, nothing runs. A server this runtime *cannot start* is skipped with a stderr line
+  naming the reason (`url`, `headers`, `type: "http" | "sse"`), because that is our limitation rather
+  than somebody else's typo — a repository with one remote server still gets its stdio ones. And
+  `disabled: true` is a note: the file decided that, not us, but a review should still see it.
+- **`autoApprove` is a refusal, not an option.** A repository file cannot buy back an approval an
+  operator withheld, so a non-empty `autoApprove`/`alwaysAllow` stops the run and prints the sentence
+  to delete instead; an empty list is a no-op. `env` values are expanded from the operator's own
+  environment (`${VAR}` / `${VAR:-fallback}`, with a missing variable as an error rather than an empty
+  API key three layers away), are *added* to the child's environment and never a filter over it, and
+  are reported as names only — a secret keeps its place in the environment and out of the digest.
+- **Off by default, inert until asked.** `--mcp-config off|auto|PATH` defaults to `off`: a file inside a
+  repository cannot start a process by itself, which is the same rule that keeps a plugin's server
+  behind the operator's flag. `northstar mcp list --workspace .` is the read-only face — it spawns
+  nothing, touches nothing — and exits 1 when anything was refused, so CI can fail a pull request that
+  quietly adds a server.
+- **Names are not rewritten.** `"GitHub"` is refused with instructions, because a tool name nobody
+  read is a tool name nobody reviewed; one name claimed by two files refuses both rather than letting
+  the later file win.
+
+Runtime slice 1103 → **1149** (+46 `test_mcp_config`, including an end-to-end run whose child process
+proves the imported `env`/`cwd` arrived), repository `make test` 1400 → **1446**, all offline;
+`make demo` unchanged. The echo-server fixture grew one switch (`MCP_SPAWN_REPORT`) so that test asserts
+what the *child* was given, not what the test object holds. The MCP section of the runtime README grew
+the import and its three severities, the cookbook gained §15, and the blueprint's retry row stopped
+claiming "待做" after batch 20 shipped it.
+
+## Unreleased (twentieth batch) — the retry budget belongs to the runtime, not to the SDK
+
+The last item on the contract roadmap ("explicit retry, backoff, degradation") was deferred on
+purpose: retries have to sit above a defined interface, or they become a second, undocumented
+boundary. That interface is now settled, so the boundary is being defined instead of inherited —
+before this batch, "does it retry?" had no answer in this repository at all: both providers
+passed `max_retries` to their SDK client.
+
+- **`provider_retry.py` — classification first, then a schedule.** Ten named faults
+  (`rate_limited`, `overloaded`, `network`, `timeout`, `server_error`, `context_overflow`,
+  `auth`, `client_error`, `stream_interrupted`, `unknown`); status code, then the provider's own
+  claim, then prose. `unknown` is deliberately not retryable, because "we could not tell" is not
+  evidence that repetition helps. The four unretryable classes may not be put in `retry_on` —
+  `stream_interrupted` least of all, since re-issuing a broken stream shows the terminal the
+  same text twice and the transcript/terminal agreement is what streaming exists to guarantee.
+- **The schedule is a pure function.** `RetryPolicy.plan(attempt, fault, waited)` returns a delay
+  or a named stop (`attempts_exhausted`, `deadline_exceeded`, `not_retryable`), so the whole
+  policy is testable as a table of numbers; `execute()` is the only part that touches time and
+  takes its sleeper as an argument. Full jitter is **seeded from the session id**, which is how
+  "deterministic tests" and "do not synchronise on the same 429 window" stop being
+  contradictory. Caps belong to the runtime, not the operator: 8 attempts, 120 s per delay,
+  15 min per-turn deadline.
+- **`[retry]` is a workspace table and the flags only tighten it.** `.northstar/config.toml`
+  carries the promise (`max_attempts`, `base_delay_ms`, `multiplier`, `max_delay_ms`,
+  `deadline_ms`, `jitter`, `retry_on`, `respect_retry_after`, `on_context_overflow`), the CLI
+  offers `--retry-max-attempts`, `--retry-deadline-ms`, `--retry-on`, `--no-retry`, and every
+  merge goes through `restrict()` so a flag cannot loosen the file. A bundle may not touch it:
+  `retry` is not a `[policy]` key, so a plugin cannot raise the number of requests its own code
+  makes. `Retry-After` is honoured up to `max_delay_ms`, and overriding it is stated in the
+  event; an HTTP-date form is declined rather than guessed at.
+- **Degradation, bounded.** `on_context_overflow = "compact_once"` answers a 413 by compacting
+  through the ordinary `PreCompact` hook path (a hook may veto it) and re-issuing once without
+  consuming retry budget; a second overflow in the same run stops the run and says why. There
+  is no `fallback_model`: changing which model answers is a policy decision, not a transport
+  detail — degrade the request, never the identity of the answerer.
+- **Visibility without a format change.** The providers now default `max_retries=0` and attach
+  `failure_kind`/`status_code`/`retry_after_ms` to the `ProviderError` they raise, so the loop's
+  classification agrees with theirs by construction. Retries are informational events on the
+  live stream and span attributes in the trace, and never transcript records: a run's digest
+  should not move because a 429 happened. A retry that exhausted the budget does reach the
+  record, as the explanation: `provider failure on turn 1: too many requests (after 4
+  request(s), 35 ms of policy waiting)`.
+- **Offline rehearsal is the point.** A `--script` turn may now carry
+  `{"raises": {"status": 429, "retry_after_ms": 300}}`, which builds the same classified
+  `ProviderError` a real gateway produces, so the entire retry path is exercised on the
+  provider the demo uses - no key, no network, no monkey-patching. Unknown fault keys are
+  refused at script build time, because a script that silently failed to produce its fault
+  would test the wrong thing.
+- **Honest limits, stated where the feature is documented.** This is not a circuit breaker
+  (no shared state between processes) and not a queue (`deadline_ms` bounds the wait, so a
+  provider needing ten minutes to recover means re-running later, visibly, from CI); no real
+  provider endpoint was exercised, so the taxonomy is verified against fake clients and a
+  scripted script; a mid-stream recovery is *not* attempted, which is a capability gap relative
+  to hosts that resume generation, taken on purpose.
+
+74 new tests (`tests/test_provider_retry.py`), including a CLI rehearsal that retries a 429 and
+an overloaded turn and lands the answer, and one that shows `--no-retry` failing the same script
+immediately. Runtime slice 1029 → 1103, repository 1326 → 1400, all offline; `make demo`
+unchanged. The contract roadmap in `docs/next-gen-agent-blueprint.zh-CN.md` has no remaining
+items; what is left there is product surface, not semantics.
+
+## Unreleased (nineteenth batch) — plugins are a packaging format, not a permission channel
+
+Asked directly: do we have plugins, and do they work on every platform? The honest answer
+before this batch was "four extension seams, no bundle concept" — which is why
+`docs/dx-benchmark-2026.zh-CN.md` scored the extension ecosystem at 1 then 3, with the gap
+written as "no plugins/marketplace, no installer, no index". Blueprint row C5 had already
+ruled on what to take from the marketplace world: the **format**, an install that is one
+visible copy plus a verification, and **no online marketplace** — a marketplace is a supply
+chain, and a reviewable diff is what this repository is for.
+
+- **`plugin_manifest.py` — `northstar.plugin.v1`.** A bundle is `plugin.toml` plus the four
+  things this runtime can already consume: `skills`, `agents`, `context` file paths,
+  `[[components.hooks]]` and `[[components.mcp_servers]]`, and a `[policy]` table of
+  ceilings. Closed schema — an unknown key is refused with *"A key nobody reads is a
+  capability somebody meant"*. The content digest covers the manifest **minus its own
+  `[integrity]` table** and every file, length-prefixed, because a hash of yourself is not a
+  signature and because concatenating file bytes lets `"ab"+"c"` collide with `"a"+"bc"`.
+  `[integrity]` may carry only `seal` + `seal_key_env`: the manifest cannot pin itself.
+- **Skill text is reviewed on the way in**, the other half of what `skills check` was for: `install` audits each bundle's own `SKILL.md` files with the same versioned rules before a byte is copied, refuses on any finding at or above `--fail-on` (default `error`, the same scale as that command's), and `plugin verify` repeats the review so a rules bump surfaces against already-pinned bundles. `run` deliberately does not consult it — a rule change must not turn every workspace's installed plugins into a configuration error by itself; that is a human re-reviewing (`--write-lock`). Lowering the bar is a decision, and the verify report says which bar was in force.
+- **Install is a copy; the pin is the review.** `plugin install DIR` refuses — before
+  writing anything — a bundle that renames itself relative to its directory, that cannot run
+  on this host, that loosens the loaded workspace policy, or whose seal cannot be verified
+  (`--require-seal`). It lands in `.northstar/plugins/<name>/` and writes
+  `{version, publisher, content_digest, source}` into `.northstar/plugins.lock`. `uninstall`
+  removes only what install placed, and refuses to delete *through* a symlink.
+- **Nothing loads that nobody reviewed.** A bundle whose bytes moved since its pin is
+  reported as `drift` by `plugin verify` and **blocks the run** (exit 64) — the same reason
+  an unpinned bundle, a broken manifest, a denial naming a tool this runtime does not have,
+  and an MCP server declaring `env` do. "The skills loaded but not the hooks" is not a state
+  anyone reviewed, so there is no such state. `plugin verify --write-lock` records a review,
+  and says which pins moved (`repinned`) instead of going quiet about it.
+- **Capability never widens.** `[policy]` is compared against the loaded workspace policy
+  and only ever tightens — `min` on ceilings, union on denials, `read_only`/`halt_on_denial`
+  one-way, `permission_mode` accepts only `plan`, because `acceptEdits` and
+  `bypassPermissions` **are** approvals and approvals stay a human at a command line. There
+  is no `allow_tools` key, mirroring the policy file. An MCP server with `env` is refused at
+  load and pointed at the workspace's own `[mcp.servers]`: this runtime starts a server from
+  a command line, and a side channel for a plugin's secrets would be a new permission path.
+- **The four seams are the real ones.** A bundle's skills go through `discover_skills(...,
+  extra_roots=)` (a name already used by the repository is an error, not an override), its
+  agent files through `register_workspace_agents(..., extra_paths=)` (no shadowing a
+  built-in), its hooks are rendered as ordinary `[[hooks]]` tables and policed by
+  `command_hooks.parse_hooks` with the workspace as confinement root — same veto-only event
+  set, same interpreter allowlist, same timeout bounds, same `--enable-workspace-hooks`
+  switch, imported rather than mirrored — and its MCP servers join the operator's own list,
+  so they are mutating-by-default and denied until named.
+- **"Every platform", answered twice.** Per-host gating: `compatibility.{platforms,min_python,
+  requires_flock,requires_network}` is enforced at install (refused, not half-applied), and
+  `plugin compat` prints the matrix across `HOST_PROFILES` including case-insensitive
+  filename collisions, with `only_hosts` filtering the display but never the verdict. To
+  other ecosystems: `plugin export` renders `claude-code`, `codex`, `openai-agents`,
+  `agents-md`, `cursor`, `mcp` and `skills`, and refuses to write a downgrade until
+  `--allow-drop`, printing what stayed behind. The drop list is **computed from one table**
+  (`CARRIED_BY_TARGET`), so a renderer cannot disagree with it.
+- **Publisher identity, named honestly.** No signature verification is possible with the
+  standard library here, so `[integrity].seal` is an **HMAC-SHA256 seal** keyed by
+  `$NORTHSTAR_PLUGIN_KEY`, compared in constant time, and called a seal everywhere it appears.
+  An unverifiable seal is not an absent one.
+
+`policy_file.read_policy_document()` was extracted as the raw-value reader for the
+tighten-only comparison: comparing two numbers must not require the plugin loader to
+re-adjudicate which tool names the workspace's file is allowed to mention — that is the
+run's job, with the registry it will actually have.
+
+87 new tests (1029 in the runtime slice, 1326 in the repository: 51 + 41 + 37 + 65 + 54 +
+1029 + 49), all offline. Honest limits, stated in the same breath as the feature: the host
+profiles are our description of the primitives this runtime uses, not a conformance suite,
+and nothing in this repository runs on Windows; the foreign hosts' file shapes are rendered
+from reading their docs, and no other agent host is exercised here; `MAX_FILES` is 200 and
+`MAX_FILE_BYTES` 1 MiB, so a bundle is a bundle, not a vendored tree.
+
+## Unreleased (eighteenth batch) — one writer per session, and one boundary two readers can parse
+
+The last row of the roadmap that sat *between* components rather than inside one. The
+runtime could checkpoint, fork and resume; `northstar-durable-run` had an event store, a
+lease and its own checkpoint document; and the two dialects had never been reconciled.
+Nothing was "integrated" by importing one component from the other - the dependency
+direction stays one-way - it was unified by agreeing on artefacts and then proving the
+agreement in tests.
+
+- **A session transcript now has exactly one writer.** `session_lease.py` claims
+  `<session>.lease` with `flock(LOCK_EX)` for the whole run, before the first record is
+  appended, and releases only after the last one (`_close_run`, not `_finish` - releasing
+  before the result record is how a "protected" file grows a torn tail). Contention is a
+  named outcome: `error_session_busy`, **exit 7**, nothing written, no hook fired.
+  A new subtype means a new exit code, and the pinned tables in `test_cli.py` /
+  `test_events.py` had to be updated deliberately rather than allowed to drift.
+- **The lease is held, not counted.** durable-run's `LeaseManager` reclaims once
+  `now >= expires_at`; a runtime process cannot be reasoned about that way, because
+  reclaiming from a *live* holder is exactly the corruption being prevented. So the
+  envelope is shared (`{"owner_id", "expires_at"}`, `0600`, same two keys) and the
+  enforcement diverges on purpose: `expires_at` is a liveness promise renewed at each turn
+  boundary and each checkpoint, and a holder whose promise has expired is still refused.
+  There is no `--steal-lease`; killing the holder is the way to free a session.
+- **The lock is the fact, the JSON is a claim.** The envelope is written *in place on the
+  locked descriptor* - `tempfile` + `os.replace`, which is what durable's writer does, would
+  unlink the inode the lock lives on and silently destroy mutual exclusion. `release()`
+  clears the lock and keeps the file as a trace of the last owner (deleting it races a
+  waiter that already opened the path). A torn or unreadable envelope reads as "owner
+  unknown", never as "free"; `inspect_lease(path, probe=False)` lets `sessions list/show`
+  repeat the holder's claim while labelling it `(unverified)`, because a viewer that takes
+  the lock to answer a question can make an unrelated run refuse to start.
+- **Refusal, not degradation.** Without `fcntl` there is no lease: starting anyway would
+  make a transcript *look* protected. `--no-session-lease` is the explicit opt-out, and
+  `--no-session-lease --session-lease-seconds N` is a usage error (64) rather than an
+  ignored number - the same contradiction `RuntimeConfig` refuses for embedders, so the
+  SDK cannot express it either.
+- **Delegation does not deadlock on it.** A child runtime shares its parent's transcript
+  file, and `flock` is per open file description, not per process: a child that claimed
+  again would be refused by its own parent. Claims happen at depth 0 only, and the child's
+  init record says so (`covered by the parent run's claim`).
+- **One boundary, two schemas.** `durable_bridge.py` translates a runtime checkpoint into
+  a dict satisfying durable-run's *closed* `EventContract` schema (`checkpoint.created` →
+  `running`, one-based contiguous `sequence`, ids under the same charset rule,
+  `payload_digest` over the boundary's facts) and into a `northstar.checkpoint.v1`
+  document digested under durable's canonical rule. `cross_check()` re-derives both through
+  the real modules when they are importable and reports `unchecked` when they are not.
+- **What is *not* unified, in as many words.** The transcript record format:
+  `RECORD_TYPES` stays at 13, because a checkpoint digest certifies a byte range of the
+  transcript and rewriting those bytes would change what every existing checkpoint attests
+  to. And no durable event can authorise a resume: `payload_digest` covers a payload, not a
+  transcript, so `checkpoint_from_event()` sends a foreign boundary through the same
+  `prepare_resume` digest gate - and `EventStore.restore()` correspondingly *refuses* a
+  runtime document, which the tests assert rather than merely describe.
+- **The API reference can no longer shrink in silence.** `docbuild` gained a two-way
+  coverage check: every public module is either documented or recorded in
+  `MANIFEST_EXCLUSIONS` (which is where `_version` lives, with the reason). "Listed
+  explicitly on purpose" was not true while forgetting was invisible.
+
+87 new tests (942 in the runtime, 1239 in the repository), all offline. Honest limits:
+`flock` semantics are exercised on one POSIX host (the cross-process tests spawn real
+children, so at least the refusal path is not simulated), which is exactly the coverage a
+repository without Windows CI can offer; NFS and other network filesystems have their own
+locking rules, and neither component claims to have tested them.
+
+## Unreleased (seventeenth batch) — streaming that cannot disagree with the record
+
+The blueprint's last user-visible gap. Every serious agent tool streams; Northstar
+could not have claimed the "governed" position while its output arrived only at the end
+of a turn. The interesting part was never the printing.
+
+- **The provider contract gained a second entry point.** `Provider.stream()` yields text
+  chunks then exactly one `Generation`; `generate()` is unchanged, so every existing
+  adapter, test and embedding keeps working, and the default `stream()` (whole turn, no
+  chunks) is a safe fallback for a *direct* caller - but not for a run: `streams = True`
+  without real chunks is caught, so the flag cannot be a marketing claim.
+- **Fidelity is enforced by the runtime, not promised by the provider.** `"".join(deltas)`
+  must equal the text of the **assembled** message - deliberately compared against the
+  record rather than against the provider's own object, since the record is what a
+  checkpoint digest and a later reader are verified against. Disagreement in either
+  direction (`the stream carried N char(s) the turn does not contain`, `the stream stopped
+  N char(s) short`) fails the turn as `error_during_execution` and writes **no
+  `AssistantMessage`**: a run cannot end with a verdict on a turn nobody can describe.
+- **What the client caps, the client admits.** Per-turn ceilings (200 000 chars, 4 000
+  events - "one event per character" is legal at the protocol level and would otherwise let
+  a provider size this process's event stream), oversized chunks are re-split rather than
+  dropped, and when text is withheld the live view is required to be a *prefix* of the
+  record plus an `informational` event saying how much was held back. Shorter is allowed;
+  different is not.
+- **The transcript is untouched, on purpose.** Deltas are events, not records: `RECORD_TYPES`
+  stays at 13, so checkpoint digests, `--resume-from` and the session panel mean exactly
+  what they meant before streaming existed, and a resumed run has nothing to replay. A test
+  asserts the records are byte-identical with and without `--stream`, with the single
+  tolerated difference being the `stream` declaration in the init record.
+- **What never streams:** partial `tool_use` arguments (a half-received
+  `{"path": "/etc/pass` must not be displayable, executable, or hashable), `thinking` /
+  `reasoning_content` (an unsigned Anthropic block is not yet legitimate text, and chat-side
+  reasoning has no place in the transcript), and delegated turns - streaming is a property of
+  the operator's terminal, not of the delegation chain, so a subagent on a provider that
+  cannot stream still runs.
+- **Adapters**: `anthropic` forwards `messages.stream`'s text deltas and normalises from
+  `get_final_message()`; `openai` reassembles SSE `delta.content` into the *same*
+  `choices[0].message` shape a non-streaming call would have carried and then reuses
+  `normalise()`, so truncated `arguments` still fail closed instead of becoming an empty
+  write, and `stream_options.include_usage` keeps cost attached to the turn (with
+  `stream_usage=False` as the operator's explicit opt-out for gateways that reject the
+  field, because a run reporting `$0.000000` silently is worse than one that says so).
+- `scripted` gained `"stream": ["chunk", …]` so chunking is under test rather than incidental,
+  and `RunOptions.stream` keeps the SDK at parity: `stream_run()` yields the extra
+  `stream_delta` dicts, `run()` reports the same numbers either way.
+
+45 new tests (855 in the runtime, 1149 in the repository), all offline and
+credential-free. Honest limits: both live adapters are verified against injected fakes,
+not against a network; a gateway that accepts `stream` but never sets `finish_reason`, or
+that puts text in a field we do not model, will fail the fidelity check rather than
+silently under-report - that is the intended direction of failure, but it is a direction
+nobody has exercised against a real vendor.
+
+## Unreleased (sixteenth batch) — MCP grows a second generation, and a remote question becomes an approval
+
+The blueprint's first P1 row. The 2026-07-28 Model Context Protocol revision deleted the
+handshake: there is no session id any more, version and capabilities ride in
+`params._meta` on every request, servers may no longer initiate JSON-RPC requests, and
+`elicitation/create` / `sampling/createMessage` / `roots/list` became **Multi Round-Trip
+Requests** — a server answers a tool call with `resultType: "input_required"` and waits
+for the client to retry. That last part is the one that matters here: it is a permission
+request arriving over a socket, and every other agent tool on the market treats it as a UI
+detail. Northstar treats it as a gate.
+
+- **`mcp_negotiate.py`: the generation rules as pure functions.** `server/discover` is
+  probed first; a reply means modern, a `-32022` means modern *and* names the versions to
+  adopt (only a modern server can produce that code), and anything else — method-not-found,
+  garbage, a dead process — falls back to the `initialize` handshake. Never a guessed
+  version: with nothing mutual in common the client reports the server's own list instead
+  of trying a favourite date. `auto` is the default; `--mcp-protocol legacy|modern` pins it,
+  and the reason is printed to stderr so a CI log records which dialect was used. Era is a
+  property of the server process, decided once.
+- **`_meta` everywhere on modern, nowhere on legacy.** The probe carries it too — a client
+  that asked "are you modern?" without declaring a version would be asking in a language
+  only modern servers read. Legacy payloads get no extra keys, because unknown keys are how
+  a strict 2024 server ends a conversation.
+- **`mcp_elicitation.py`: what may be answered.** `elicitation` is advertised as a
+  capability **only when an approver is attached**, so an unattended run is never asked
+  (per spec a server must not send what the client did not declare) rather than asked and
+  defaulted. `sampling/createMessage` is always declined — a remote tool does not get to
+  run our model on a prompt we did not write. `roots/list` is declined unless
+  `--mcp-allow-roots`, and then answered with exactly one root, the workspace. A field named
+  like a credential is refused before a human sees it, unless `--mcp-allow-sensitive-input`.
+  Schemas are bounded (16 fields, depth 3, 8 KB), and an answer that includes a field the
+  server never asked for is rejected: volunteering data to a remote process is not a client's
+  job.
+- **The retry is a real retry.** `--mcp-elicit-answers '{"approved": true}'` is an approval
+  granted *in advance*, and coverage is strict: a server that adds a required field gets a
+  refusal, not a guess. `--mcp-elicit` without it prompts on a terminal and refuses to start
+  when stdin is not a tty. The retry is a **new JSON-RPC request** carrying `inputResponses`
+  plus the server's opaque `requestState` verbatim — the client never inspects it — and
+  `--mcp-max-rounds` (default 3) bounds how long a server may re-ask. When a round contains
+  nothing but refusals the in-flight call is cancelled with `notifications/cancelled`:
+  declining is final, not a negotiation.
+- **Audited, values excluded.** Each verdict is
+  `{kind, server, tool, method, action, reason, answered_fields}` in
+  `client.elicitation_log` and the `audit=` callback, and a `[governance] …` line rides
+  inside the tool result so the model and the transcript both see that a server tried to ask
+  and what became of it. Answer *values* are never recorded.
+- **A new fixture speaks only the modern generation** (`mcp_mrtr_server.py`), with
+  switchable modes for the `-32022` retry, method-not-found, an `input_required` with nothing
+  to answer, and a server that re-asks forever — and it logs every inbound byte so tests
+  assert on the wire, not on the client's self-report. 67 new tests; the legacy fixture is
+  unchanged and still passes, which is the point of the fallback.
+- **Docs debt closed**: `docbuild` now covers `checkpoints`, `postconditions`,
+  `contract_bridge`, `command_hooks`, `skill_audit`, `skill_check`, the two new MCP modules,
+  `providers.openai_compat` and `tools.verify_invariants` — modules that shipped in earlier
+  batches without ever reaching the generated API page.
+
+Honest limits: "conformant" here means matching the published grammar, verified against our
+own fixture — **no vendor MCP server has been exercised in this sandbox**. There is no HTTP
+transport (the era rules and MRTR are transport-agnostic; only framing differs), no
+prompts/resources UI, and no task extension.
+
+## Unreleased (fifteenth batch) — the skill supply chain gets a gate
+
+`skills check`, the highest-leverage row left in the blueprint's debt table: the Agent
+Skills standard fixed the file format and left review out, and 2026's surveys of
+third-party skill collections found instruction-override phrasing and
+install-the-world instructions widely.
+
+- **`skill_audit.py`: rules as pure functions of the bytes.** No model call, no
+  network, no classifier - so it cannot be prompted out of existence by the file under
+  review, and the suite proves it. Rule families: instruction override, concealment
+  ("do not tell the user"), role hijack, **policy self-edit / disabling controls**
+  (CBSE), remote script piped to a shell, host privilege, instance-metadata
+  endpoints, credential stores, environment-value exfiltration (both word orders),
+  installers, inline `eval`/`python -c`, tunnelling, outbound POSTs, invisible
+  unicode (zero-width, bidi, tag chars), and the context-bloat limits the spec
+  implies (description length, body lines, body size). `RULES_VERSION` is recorded in
+  every lockfile, because "no findings" under an older rule set is not a pass.
+- **One deliberate demotion.** A command inside a fenced code block is an example,
+  not an instruction, so it is reported one level lower with a note - which is what
+  keeps the tool usable on real documentation instead of drowning in `pip install`.
+  Invisible-character findings never demote: invisibility is identical inside code.
+- **Reviewed means pinned.** `--write-lock` writes `.northstar/skills.lock` (content
+  digest per skill path + name + size + finding count); `check_lock` reports
+  `stale`/`added`/`removed`, and `run --require-skill-lock` refuses to start on any of
+  them (exit 64). Pins bind the path *and* the bytes, so a rename cannot borrow
+  another skill's review. `doctor` gained a `skills-review` check (warn, never fails
+  a host).
+- **The gate is outside the model's reach.** `skills.lock` sits under `.northstar`,
+  which the tool layer already refuses to write, so a run cannot mark its own skills
+  reviewed - tested end to end, including that the refusal is a tool error rather
+  than a permission denial.
+- **Foreign trees are auditable before adoption**: `--root DIR` reads
+  `.northstar/skills`, `.claude/skills` and `.agents/skills`, since the standard does
+  not fix an install path.
+- **Scaffold closes the loop**: `cli new` now writes `.northstar/skills/README.md`
+  (where skills go, what the frontmatter may say, how trust is earned) and the CI
+  recipe runs `skills check` before the reviewer, so a fresh project gates skill
+  drift by default. `[[verify]]` is documented in the generated config too.
+
+Runtime 686 → 734 tests, repository 1028, all offline and credential-free. **No
+release**: version stays `0.1.0.dev0`, no tag, no index upload.
+
+## Unreleased (fourteenth batch, continued) — resumable turn boundaries (F3)
+
+- **`checkpoints.py` + `--checkpoint-turns` / `--resume-from`.** A turn boundary can
+  now be recorded (transcript length, digest of that exact prefix, consumed
+  turns/tool calls/cost) and resumed from. This closed a real hole, not just an
+  inconvenience: ceilings were per-run and `--resume` started a new run, so resuming
+  a session that had spent $4.90 of a $5 budget handed it $5 again — resume was an
+  escape hatch around `max_budget_usd`. A resumed run now *inherits* the spend, the
+  turn number (so `max_turns` bounds the lineage, not the process) and the tool-call
+  count; an embedder who forgets to seed the `Budget` gets a configuration error
+  instead of a wider ceiling.
+- **Fork-on-read, never rewind-in-place.** `--resume-from` writes a new session file
+  whose `session_start` names the parent and the checkpoint; the parent transcript is
+  never modified, and a digest mismatch at the cut refuses the run rather than
+  attributing numbers to the wrong history. `--resume` keeps the old append-in-place
+  behaviour, and the two flags are mutually exclusive because they disagree about the
+  parent file. A `--checkpoint-turns` value that could never fire is refused: a
+  cadence that writes no records would leave the operator believing the run was
+  resumable.
+- Protocol addition: 13th session record type `checkpoint` (panel renders it), still
+  opt-in so no transcript changes shape unless asked. SDK parity via
+  `RunOptions.checkpoint_turns` / `resume_from`. Runtime 660 → 683 tests; repository
+  977, all offline.
+
+## Unreleased (fourteenth batch) — many models, and a verdict that is not the model's
+
+Continued the blueprint's non-conflicting debt (`docs/next-gen-agent-blueprint.zh-CN.md`
+§6). Three changes, still offline and credential-free; **no release is made**, no tag
+is pushed, the version stays `0.1.0.dev0`.
+
+- **P1-2 multi-model, one door.** New `providers/openai_compat.py` speaks the Chat
+  Completions wire, so a single adapter brings the OpenAI / Azure / vLLM / SGLang /
+  Ollama / LM Studio / LiteLLM / OpenRouter universe into the governed loop instead
+  of requiring a per-vendor harness. It translates both directions per call
+  (`tool_use` -> `tool_calls` with JSON-encoded `arguments`, `tool_result` ->
+  `role: "tool"` + `tool_call_id`, `finish_reason` -> the runtime's stop
+  vocabulary, `prompt_tokens_details.cached_tokens` -> `cache_read_input_tokens`),
+  drops `thinking` from the *request* while keeping it in the transcript, picks
+  `max_completion_tokens` for reasoning-era model ids, fails the turn on
+  non-JSON `arguments` rather than running a truncated call as a real write, and
+  never invents a price: unknown ids stay on the conservative tier with
+  `pricing_estimated: true`. `--provider openai` reads `OPENAI_API_KEY` /
+  `OPENAI_BASE_URL` from the environment only (a flag would leak via `ps` and CI
+  logs), and `--model` is validated against `--provider` before a credential is
+  touched, so an impossible pair exits `64` instead of 400-ing at a server.
+  `doctor` now reports the SDK the *selected* provider needs, not every SDK that
+  exists.
+- **Independent completion verification (blueprint §4 #4).** New
+  `postconditions.py`: `--verify KIND:PATH[:TEXT]` and `[[verify]]` declare claims
+  about the workspace (`exists`, `absent`, `changed`, `unchanged`, `contains`) that
+  the runtime checks after the run, so *the agent saying it finished* stops being
+  the evidence that it did. The design constraints that make it governance: the
+  conditions are **never injected into the prompt** (a model told what is checked
+  optimises the check, and `contains` is the easiest string to write), digests are
+  snapshotted before the first event, evaluation only reads, symlinks and paths
+  that resolve outside the workspace are refused at configuration time, and a
+  repository may add a check but can never remove or weaken the operator's. Two
+  protocol additions, each with its own tests: result subtype
+  `error_postconditions_failed` (exit `6`) and session record type
+  `postconditions`, so the verdict is a first-class audit record that
+  `examples/session-panel` renders rather than a line of prose.
+- **Drift guards.** `tests/test_module_layout.py` now asserts every top-level
+  module is listed in `pyproject.toml`'s `py-modules` (an unpackaged module works in
+  the checkout and vanishes after `pip install .`), and the session-panel record
+  vocabulary test caught the new `RECORD_TYPES` entry the way it is meant to.
+
+Runtime tests 596 -> 660; repository total 890 -> 954, all offline, no API key.
+Verified by hand: the same claim ("全部检查通过") with `report.md` absent exits `6`,
+and exits `0` once a `Write` actually creates it, with `unchanged:keep.txt` still
+holding across the run.
+
+**Not in this batch**: turn-boundary checkpoints and fork-on-read resume (blueprint
+F3) remain open — the transcript is append-only and resumable, but a run still
+restarts from the beginning rather than from a checkpoint.
+
+## Unreleased (thirteenth batch) — closing the governance seams (P0)
+
+Acted on the 2026-09-08 capability audit (`docs/benchmark-top-agents-2026-09.zh-CN.md`
+F1/F2, plus the new `docs/next-gen-agent-blueprint.zh-CN.md` decision on absorbing
+top-tier features only in a governed form). Four changes, all offline-testable,
+none of which loosens a guardrail; **no release is made** and no tag is pushed.
+
+- **P0-1 the Run Contract is now on the execution path.** New
+  `contract_bridge.py` is the single definition of the runtime -> sidecar wire
+  format (the runtime previously kept a second copy), `--run-id` becomes the
+  sidecar `request_id` so the runtime transcript and the sidecar log share one
+  correlation key, and `policy_revision`/`run_id`/`protected_prefixes` are
+  recorded in the `init` event (so the transcript and the `sessions export` audit
+  feed carry them). When a host injects `NORTHSTAR_RUN_BINDING` +
+  `NORTHSTAR_HOST_KEY` + `NORTHSTAR_RUN_REQUEST`, the client re-derives its own
+  request through `validate_run_request -> verify_binding -> to_sidecar_request`
+  and **refuses the call** on any mismatch, expiry, or inability to verify - fail
+  closed, never a silent downgrade. With no binding configured the bridge is
+  inert, so the runtime keeps its zero-dependency, bare-interpreter property.
+  The sidecar itself still authenticates by Unix permissions only: putting the
+  binding on the wire means changing its strict request allowlist, which is left
+  as an explicit protocol decision rather than taken here.
+- **P0-2 an agent can no longer rewrite its own governance.** `ToolLimits.protected_prefixes`
+  defaults to `(".git", ".northstar")`: `Write`/`Edit` refuse the policy file, the
+  repository agent definitions, and the skill packages. Measured before the change:
+  a run under `--permission-mode acceptEdits` replaced its own
+  `.northstar/config.toml` (and the next run inherited it). Escalation was bounded -
+  a policy file may only tighten, so `bypassPermissions` fails closed - so this is
+  about silent policy drift, poisoned instructions, and self-DoS, not privilege gain.
+  `--allow-policy-writes` opens the tree for one run when a human means it, and the
+  effective set is auditable in the `init` event.
+- **P0-3 repository-declared lifecycle hooks** (`[[hooks]]` in the policy file),
+  the governed subset of a "command hook": veto-capable events only, no `command`
+  key and no shell at all, workspace-contained script resolved symlink-first,
+  interpreter allowlist, bounded output and a TERM->KILL process-group cleanup,
+  a scrubbed child environment (model credentials never cross into hook code), and
+  **off unless `--enable-workspace-hooks` is passed** - cloning a repository must
+  not mean executing it. A timeout, crash, or unparseable verdict on a veto event
+  is a denial.
+- **P0-4 drift is visible before the run.** `doctor` gains `policy-drift` (disk
+  policy digest vs `git HEAD`, warn, never blocking) and a warn for declared-but-
+  disabled hooks; `--dry-run` prints `run_id`, `policy_revision`, and the
+  effective `protected_prefixes`.
+
+Tests 830 -> **890** (runtime 536 -> 596: `test_contract_bridge` 18 including the
+three-way runtime/adapter/sidecar field agreement, `test_governance_writes` 12,
+`test_command_hooks` 30). The three real-subprocess hook tests were mutation-checked:
+leaking the API key into the child environment turns one red, removing the timeout
+turns another slow-and-red. `pyproject.toml` ships both new modules; the generated
+API pages were regenerated for the doc-freshness test. `0.1.0.dev0` unchanged.
+
 ## Unreleased (twelfth batch) — remote-worker ops substance (T5)
 
 T5 answered the four P3-3 ops gaps with authoritative, code-grounded

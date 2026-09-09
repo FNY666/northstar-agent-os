@@ -49,6 +49,21 @@ bypass.
   semantics, and an optional/required `revision` id (no whitespace or
   slashes, ≤128 chars) is what authorization grants and audit records carry
   as `policy_revision` — every decision traces to the exact policy revision.
+- **The transport budget is a ceiling too**: a retry cannot widen what a run may
+  *do*, but it multiplies what it *costs* — requests, waiting, and money at
+  per-token prices — so `.northstar/config.toml`'s `[retry]` table (parsed by
+  `provider_retry`) sits in the same file as `max_turns` and `deny_tools`. The
+  same rules apply there: command-line flags may only tighten it, a plugin
+  bundle has no key for it, and an out-of-range or unknown value is a
+  configuration error before the run, never a defaulted guess.
+- **A workspace may declare its MCP servers in a file, and that file still
+  decides nothing**: `.mcp.json` (and the Cursor/VS Code/Gemini dialects) is read
+  by `mcp_config.py` only when an operator passes `--mcp-config` on the command
+  line. An imported server is mutating by default and denied until `--allow-tool`
+  names it; a non-empty `autoApprove`/`alwaysAllow` list is a fatal error rather
+  than a hint, because a repository file cannot buy back an approval a human
+  withheld; and `mcp list` exits 1 on any refusal, so what a run *would* obey is
+  reviewable in CI without a provider key.
 
 ## Where each component sits
 

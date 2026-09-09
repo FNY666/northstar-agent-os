@@ -11,6 +11,10 @@ should use. The runtime itself reports *subtypes*, never exit codes; the codes
 are a terminal convention shared with ``cli`` so an embedded run and a
 ``python -m cli run`` wrapper agree.
 
+``stream_delta`` events exist only while a run is in flight: they are part of the
+event vocabulary, not of the session transcript, so a resumed or audited run has no
+deltas to replay and nothing to reconcile.
+
 The ``result`` dict additionally carries ``errors`` and ``permission_denials``
 lists so a programmatic caller never has to re-derive why a run ended.
 """
@@ -18,7 +22,9 @@ from __future__ import annotations
 
 from typing import Any
 
-#: Terminal convention for each result subtype (0 success … 5 permission).
+#: Terminal convention for each result subtype (0 success … 5 permission, 6 postconditions,
+#: 7 session contention). Only 64 means "nothing was run and the operator should fix the
+#: command"; 7 means "the command was fine, another run owns the session - wait, retry".
 EXIT_CODES: dict[str, int] = {
     "success": 0,
     "error_during_execution": 1,
@@ -26,6 +32,9 @@ EXIT_CODES: dict[str, int] = {
     "error_max_tool_calls": 3,
     "error_max_budget_usd": 4,
     "error_permission_denied": 5,
+    "error_postconditions_failed": 6,
+    # Another live process holds this session's transcript; nothing was written.
+    "error_session_busy": 7,
 }
 
 
@@ -56,6 +65,10 @@ def event_to_dict(event: Any) -> dict[str, Any]:
             "usage": event.usage.as_dict(),
             "stop_reason": event.stop_reason,
         }
+    if kind == "StreamDelta":
+        # Provisional output, in the same vocabulary as everything else: a consumer that
+        # iterates ``type`` values must be able to ignore it without guessing.
+        return event.as_dict()
     if kind == "UserMessage":
         return {"type": "user", "content": [block.to_api() for block in event.content], "is_meta": event.is_meta}
     return {"type": kind.lower(), "repr": str(event)[:400]}

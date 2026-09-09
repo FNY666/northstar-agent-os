@@ -146,7 +146,7 @@ Northstar 是"运行时组件集合"，不是一个终端产品。因此对标�
 - **MCP**：Claude Agent SDK 原生 MCP 客户端 + 进程内 `@tool` 服务器[5](https://letsdatascience.com/blog/claude-agent-sdk-tutorial)；Codex 支持 MCP 并可作为 MCP server 被 Agents SDK 调用[1](https://blakecrosley.com/guides/codex)；LangGraph 全面接入[5](https://o-mega.ai/articles/langgraph-vs-crewai-vs-autogen-top-10-agent-frameworks-2026)。Northstar：**README 自认 "MCP is not implemented"**。
 - **Agent Skills（开放标准）**：Anthropic 2025-10 提出、2025-12-18 发布开放标准（agentskills.io），**截至 2026 年中约 40 个平台采纳**：Claude Code、Codex、Gemini CLI、Cursor、Copilot、VS Code、Goose…[11](https://www.paperclipped.de/en/blog/agent-skills-open-standard-interoperability/)[13](https://agentman.ai/blog/agent-skills-ecosystem-report-2026)。SKILL.md（YAML frontmatter + 渐进式披露：先只载入名称/描述，命中后才载全文）已成通用格式[10](https://www.agensi.io/learn/agent-skills-open-standard)[12](https://strapi.io/blog/what-are-agent-skills-and-how-to-use-them)。社区目录 skills.sh 收录技能以十万计（SkillsMP 口径达百万级，第三方）[13](https://agentman.ai/blog/agent-skills-ecosystem-report-2026)。Northstar：完全不支持——意味着**数十万个现成技能与北星无关**。
 - **Subagent 文件化**：Claude Code 的 subagents 是 `.claude/agents/*.md` 文本文件[14](https://www.developersdigest.tech/blog/claude-code-agent-teams-subagents-2026)；Northstar 的 subagent 是 Python 注册表（`agents.py`）——能力更强但门槛更高，两者可以兼容并存（markdown 定义 → 编译进 registry）。
-- **Plugins**：Agent SDK 支持打包 skills/agents/hooks/MCP 的插件按本地路径加载[4](https://code.claude.com/docs/en/agent-sdk/overview)。
+- **Plugins**：Agent SDK 支持打包 skills/agents/hooks/MCP 的插件按本地路径加载[4](https://code.claude.com/docs/en/agent-sdk/overview)。**（第 19 批已补：`northstar.plugin.v1` bundle + `plugin install/verify/list/show/compat/export`，安装即 `.northstar/plugins/` 一次可见拷贝 + `plugins.lock` 按内容 digest 钉住；按 C5 裁定仍不做在线市场/索引。）**
 
 > 安全注记：北星若接入 skills/MCP，必须让其内容与工具仍走既有权限门与 hooks——技能是"文本+可执行引用"，不是权限提升。这也正是北星可宣传的差异点（"消费开放生态，但由治理内核兜底"）。
 
@@ -371,7 +371,7 @@ Northstar 是"运行时组件集合"，不是一个终端产品。因此对标�
 | G1 | 不可安装、无入口 | ✅ 六组件 pyproject + console script；`make install` 五组件同 venv 验证 |
 | G2 | 无版本/发布渠道 | 🟡 版本对齐测试 + Release CI 管道就绪；**未发布**（0.1.0.dev0，发布须过就绪门）；未上 pip index |
 | G3 | 无配置/约定文件 | ✅ AGENTS.md、`.northstar/config.toml`、agents/skills 文件、context-file；🟡 策略 schema 版本化（P3-1b）未做 |
-| G4 | 无 MCP/Skills/Plugins | 🟡 MCP stdio 最小客户端（默认 deny、穿权限门）；SKILL.md 只读渐进披露；**无 plugins/市场、无 HTTP/SSE+auth** |
+| G4 | 无 MCP/Skills/Plugins | 🟡 MCP stdio 最小客户端（默认 deny、穿权限门）；SKILL.md 只读渐进披露；plugin bundle 有安装器/锁定/校验/导出（第 19 批）；**仍无在线市场与索引、无 HTTP/SSE+auth** |
 | G5 | 会话/追踪无读回 | ✅ `sessions list/show/export`（export 即 audit.ndjson/1）+ OTEL + resume；🟡 无 rewind/checkpoint 可视化 |
 | G6 | 上手路径长 | ✅ `make demo` 一条命令 + examples 索引 |
 | G7 | 无环境自查 | ✅ `--version`、`doctor`、`--dry-run` 全配置预览 |
@@ -379,51 +379,51 @@ Northstar 是"运行时组件集合"，不是一个终端产品。因此对标�
 | G9 | 无 CI/团队 recipe | 🟡 demo + ci-readonly-review 模板 + headless `--json` + 语义退出码；**无官方 GitHub Action/后台任务** |
 | G10 | 优势未叙事化 | ✅ 文档强调确定性内核；🟡 对外叙事仍缺"治理即卖点"的独立页 |
 
-### 10.3 十维复评：Northstar 23 → 34（/50）
+### 10.3 十维复评：Northstar 23 → 38（/50）
 
 | 维度 | Northstar（原） | Northstar（复评） | 一句依据 |
 |---|:-:|:-:|---|
 | 安装与上手 | 2 | **3** | 可 pip 安装 + demo/doctor 一条命令；差官方 index 发布与"账号即用" |
 | CLI / 终端体验 | 3 | **4** | headless、dry-run、语义退出码 0–5/64、json 事件流一流；无交互 TUI/rewind/tasks |
-| 程序化 API / 包管理 | 1 | **3** | `sdk.run()/stream_run()` + 事件 dict 词表 + resume + 示例；无 TS 面、无 exec/app-server 协议 |
+| 程序化 API / 包管理 | 1 | **4** | `sdk.run()/stream_run()` + 事件 dict 词表 + resume + 示例，**并有 TypeScript 面**（`sdk-ts/`：`RunOptions`/`RunEvent`/`RunReport`，node ≥22.6 直跑 `.ts`，零依赖零构建）；差 exec/app-server 长连接协议与官方 index 上架 |
 | 配置与项目约定 | 1 | **4** | AGENTS.md/config/agents/skills/context-file 齐全；差策略 schema 版本化与托管下发 |
-| 扩展生态（MCP/Skills/Plugins） | 1 | **3** | 三类都占位且默认 deny/只读（安全侧反而领先）；差 plugins/市场、MCP HTTP+auth、技能脚本执行 |
-| 会话 / 调试 / 可观测 | 3 | **4** | 读回 + 审计导出 + resume 齐全；差 rewind/checkpoint 与交互式回放 |
-| 测试与确定性 | 5 | **5** | 736 项、guard 红绿 harness、离线 scripted provider——头部普遍 3 分档，仍是最稀缺资产 |
+| 扩展生态（MCP/Skills/Plugins） | 1 | **4** | 四类都占位且默认 deny/只读（安全侧反而领先）：plugin bundle 有封闭 schema、digest 钉住、按宿主门禁与 7 目标导出；差在线市场/索引、MCP HTTP+auth、技能脚本执行 |
+| 会话 / 调试 / 可观测 | 3 | **4** | 读回 + 审计导出 + resume + **fork 点可校验**（`sessions checkpoints` 重算前缀摘要，不符 exit 1）与**确定性 replay**（帧化 + `--from-checkpoint` 预览继承态）；仍是 4 不是 5，因为差的是交互式 TUI 与产品内 rewind，不是可检视性 |
+| 测试与确定性 | 5 | **5** | 全仓 1515 项（runtime 片 1197，另加 TS 面 57 项）+ guard 红绿 harness + 离线 scripted provider（现可彩排 429/529 故障）；TS 镜像的漂移门在**没有 node 的机器上**也照跑——头部普遍 3 分档，仍是最稀缺资产 |
 | 文档与教学 | 3 | **4** | 四层 + 生成 API + examples 索引 + 11 语言；差课程/playground 型教学 |
 | 版本化与发布 | 2 | **3** | 版本单一源 + 对齐测试 + 就绪门 Release CI；未发出版本（按纪律等"最完美"） |
 | 团队 / CI / 协作面 | 2 | **3** | CI 模板 + headless + 审计 feed 天然 CI 友好；差官方 Action/review 后台 |
-| **合计（/50）** | **23** | **36** | 头部（Claude Code/Codex）2026-09 口径仍 ≥46 且持续外扩 |
+| **合计（/50）** | **23** | **38** | 头部（Claude Code/Codex）2026-09 口径仍 ≥46 且持续外扩 |
 
 ### 10.4 新增横向战场六维（2026 年新出现的竞争面，1–5）
 
 | 维度 | 头部代表 | Northstar | 说明 |
 |---|:---:|:---:|---|
-| N1 可嵌入 harness（SDK/exec/app-server） | Codex platform、Claude Agent SDK（py/ts） | **2** | 内核（AgentRuntime/events/resume/hooks）在，未产品化为 SDK 面 |
+| N1 可嵌入 harness（SDK/exec/app-server） | Codex platform、Claude Agent SDK（py/ts） | **3** | 内核在，并已产品化为**两语言 SDK 面**（`sdk.py` + `sdk-ts/`，含封闭选项与退出码契约）；仍是 3：没有 exec/app-server 长连接、没有流式输入、一次调用一个进程 |
 | N2 后台/并行/任务化 | Codex Automations、CC background agents/task mgmt | **2** | durable-run 内核（event_store/action_gateway/verifier）超前，无 CLI/调度/云端面 |
 | N3 远程/多端 | CC remote sessions/Desktop、Codex cloud、Gemini remote subagents | **1** | 目前只有 sidecar 单向委派 |
-| N4 生态市场接入 | CC plugin marketplace、skills 71k+、.mcp.json | **2** | 格式兼容可读；无市场/安装器/索引 |
+| N4 生态市场接入 | CC plugin marketplace、skills 71k+、.mcp.json | **4** | 自有 bundle 格式有安装器/锁定/校验与 `plugin export` 七个外家格式；**并直接读外家的 `.mcp.json`**（三档严重度：读不懂=退出 64、起不了=点名跳过、`disabled`=注记；`autoApprove` 一律拒），`mcp list` 是可在 CI 里 gate 的只读面；**按裁定不做市场与索引**（市场=供给链，可评审 diff 才是本仓的目的） |
 | N5 安全治理纵深 | CC managed settings/enterprise、Codex sandbox 网络隔离、Muse 默认沙箱 | **3** | 权限门/hooks/只读/审计 feed 治理叙事强；无 OS 级沙箱与技能供应链校验（36% 缺陷率=空白机会） |
-| N6 模型层能力 | model routing/steering、多模型 fallback | **3** | providers 抽象 + 记账 + 确定性 scripted；仅两个后端 |
-| **合计（/30）** | ≈24 | **13** | 新战场是当前差距的主要来源 |
+| N6 模型层能力 | model routing/steering、多模型 fallback | **4** | 故障分类 + 退避 + 有界降级已策略化（封闭 retry_on、per-turn deadline、session 种子化抖动）；仍仅两个后端，且刻意不做 fallback_model/model routing |
+| **合计（/30）** | ≈24 | **17** | 新战场是当前差距的主要来源 |
 
 ### 10.5 还差多远：排序与最短路径（批次粒度估算，主观）
 
 | # | 差距 | 对齐谁 | 内容 | 批次 |
 |---|---|---|---|---|
-| T1 | SDK/可嵌入面 | Codex exec/SDK、Claude Agent SDK | ✅ 已完成（2026-09-07）：`sdk.py`（RunOptions/run/stream_run/RunReport）+ `events.py` 公共事件词表 + examples/sdk 示例；TS 面与稳定 API 承诺待续 | — |
+| T1 | SDK/可嵌入面 | Codex exec/SDK、Claude Agent SDK（py/ts） | ✅ **已完成**：`sdk.py`（RunOptions/run/stream_run/RunReport）+ `events.py` 公共事件词表 + examples/sdk 示例；**第 23 批补上 TS 面**（`sdk-ts/`，57 项 node 测试 + 两侧漂移门）。**不做**：`@northstar/agent-runtime` 上架 npm（发布按纪律停在门外，包内 `"private": true` 已写明）；exec/app-server 长连接协议属 N1 的下一步，不属本条 | — |
 | T2 | 发布工程 | `@latest`/Release 渠道 | 🟡 管道已完成并留作待命；**按发布纪律撤回 v0.1.0**（未发布、dev0、须过就绪门）；余：pip index 上架 | — |
-| T3 | 交互最小集 | CC `/rewind`+tasks、Gemini checkpointing | checkpoint/restore 子命令 + `sessions` 可视化回放 | 1–2 |
-| T4 | 生态纵深 | CC plugins/marketplace、MCP login | `.mcp.json`/HTTP+auth、skills `check`（供应链校验器，直接回应 99%/36% 审计）、技能脚本沙箱或写明取舍 | 1–2 |
+| T3 | 交互最小集 | CC `/rewind`+tasks、Gemini checkpointing | ✅ **已完成**（第 22 批）：`sessions checkpoints` 校验/报价每条 fork 边界 + `sessions replay`（帧化时间线、`--from-checkpoint` 继承预览、`--json`、谱系）；restore 侧（`--resume-from/--resume-record`）自第 14 批即在。**不做**交互式 TUI/产品内 rewind——那与"确定性可 diff"是两个产品，本仓选后者 | — |
+| T4 | 生态纵深 | CC plugins/marketplace、MCP login | skills `check` ✅（第 15 批）、plugin bundle 打包格式与安装器 ✅（第 19 批，含按宿主门禁与 `plugin export`）、**读外家 `.mcp.json`** ✅（第 21 批：`--mcp-config` + `mcp list`，审批清单一律拒）；余：MCP HTTP+auth 传输、技能脚本沙箱或写明取舍、市场/索引（按 C5 裁定不做） | 1–2 |
 | T5 | 后台/远程化 | Codex Automations、CC remote | durable-run 之上做任务调度 CLI 面 + P3-3 远程 worker 协议评估 | 2–3 |
 | T6 | 治理叙事页 | — | "确定性 + 治理默认值"独立页/演示（评审/CI 场景） | 0.5 |
 
-其中 **T2+T1 是把 34 → ~40 的最短路径**（与 §7"只做三件事"呼应：打包已完成，接下来是"包得住 → 嵌得进 → 发得出去"）；T3 增黏性，T4 是差异化杠杆（别的工具都缺的技能安全校验），T5 承接 P3-2/3/4 地图。
+T1（两语言可编程面）与 T3（fork 点先校验）已收口，剩下的最短路径是 **T4 余波 + T5**（差异化在 T4：别的工具都缺的技能/配置安全校验；T5 承接 P3-2/3/4 地图）；T2 只等发布决定，不列工时。
 
 ### 10.6 结论
 
 - **内核侧差距已经基本收平甚至反超**（测试与确定性 5/5、治理不绕行的架构、审计导出）——这部分不再是对标短板。
-- **外围产品化差距仍然显著**：十维口径 23→34（头部 46 并继续外扩）；把 2026 新战场六维算进来，缺口主要落在"可嵌入 SDK 面、发布工程、交互面、后台/远程、市场接入"——全部在 P3 剩余批次 + 上述 T 清单的可执行范围内，按既有批次节奏约 8–11 个小批可把十维推到 40+ 并在新战场完成占位。
+- **外围产品化差距仍然显著**：十维口径 23→38（头部 46 并继续外扩）；把 2026 新战场六维算进来是 **17/30**（头部 ≈24），缺口集中在"发布工程、exec 协议、交互面、后台/远程"——全部在 P3 剩余批次 + 上述 T 清单的可执行范围内，按既有批次节奏约 **3–5 个小批**可把十维推到 40+（T3 已于第 22 批收口，T1 的两语言 SDK 面已于第 23 批收口） 并在新战场完成占位（第二十一批已把 N4"生态市场接入"补到 4：读外家的 `.mcp.json`，而不是让它变成第二份手抄清单）。
 - **一句话**：已经从"差一个时代"（库 + 手工拼装）追到"差外围成型"（内核领先、外壳未打磨）；下一个里程碑不是再补内核，而是**把治理内核包装成别人能 embed、能发布、能在 CI 里直接用的产品面**。
 
 ### 10.7 本节增补参考来源（2026-06 ~ 2026-09）
@@ -525,3 +525,117 @@ Northstar 是"运行时组件集合"，不是一个终端产品。因此对标�
   - `examples/remote-canary/` — 操作者执行的通道 canary：ssh 可达 → socket forward → 确定性探针（server 在 spawn 前拒绝，无需模型/key），`NS_REAL=1` 可选真实 codex run；探针在 CI 对真实 `sidecar_socket.serve` 回路验证；整脚本需真实主机、按设计永不进 CI。
 - **计分器如实重算**：两条"文档性质"缺口（story、guide）翻转为仓库权威工件检查（状态 marker 本身被 repo 测试钉死，空壳文件翻不了分）；两条实现项缺口保持 MISSING 并写明翻转条件（Profile A helper 存在 + 真实主机 canary 通过）。
 - 测试：仓库文档 28 → **43**；全仓 812 → **827 全绿**；docbuild md 48→56。版本仍对齐 `0.1.0.dev0` 未发布。
+
+### 2026-09-08（第十九批）— plugin bundle 落地：扩展生态 3→4、N4 2→3
+
+用户直接问的两件事——"我们有插件吗""能适配所有平台吗"——分别由 C5（打包格式）与
+`plugin compat`/`plugin export` 两个可验证机制回答；市场与索引按裁定继续不做。
+
+- **`northstar.plugin.v1`**：`plugin.toml` + skills/agents/context/hooks/MCP + `[policy]` 收紧表 +
+  `[compatibility]` 宿主声明 + `[integrity]` HMAC seal；封闭 schema，未知键即拒。内容 digest
+  **排除 `[integrity]` 自身**（自哈希不是签名），长度前缀防拼接碰撞。
+- **安装 = 可见拷贝 + `plugins.lock` 钉 digest**，且拷贝前先跑 `skills check` 同一套规则
+  （`--fail-on`，默认 error；`plugin verify` 每次重跑，`run` 刻意不看——规则升级不该自动变成全仓配置错误）；
+  未钉、漂移、坏 manifest、denial 指向不存在的工具、
+  MCP server 带 `env`——一律 block 整个 run（64），不做"装上但部分生效"。
+- **跨平台两义**：装前按 `HOST_PROFILES` 拒跑不起来的 bundle（含大小写同名冲突），装后
+  `plugin compat` 出矩阵；`plugin export` 把包渲染进 7 个外家格式，`dropped` 由
+  `CARRIED_BY_TARGET` 一处算出，带不动就默认拒写（须 `--allow-drop`）。
+- **诚实边界**：本仓没有任何东西在 Windows 上跑过，profile 只是"我们对本组件所用原语的描述"；
+  别家格式按读到的文档渲染，未做任何一家的一致性验证——两句都写进 `plugin show`/导出 notes。
+- 接线：runtime README 新增 "Plugin bundles" 小节 + 布局两行、cookbook §13、blueprint C5 翻 ✅ +
+  §6.24、`py-modules`/`tests/docbuild.py` MANIFEST（66→68 模块）、CHANGELOG nineteenth batch。
+
+测试规模：runtime 942 → **1029 全绿**（+87：`test_plugin_manifest` 42 / `test_plugin_install` 45，
+含"bundle hook 经真实 `parse_hooks` 否决一次 Write"、"bundle 的 SKILL.md 被 `skills check` 规则拒绝安装"
+两项端到端），全仓 **1326 全绿**（51+41+37+65+54+1029+49）；§10.3 表 Northstar 列 36 → **37**，新战场表 13 → **14**。
+版本仍对齐 `0.1.0.dev0` 未发布。
+
+### 2026-09-08（第二十批）— 重试/退避/降级落地：N6 模型层 3→4
+
+契约面（跨组件语义）在此清空。此前"会不会重试"本仓没有答案——两个 provider 都把
+`max_retries` 交给 SDK 客户端，等于把一次运行的请求数交给一个没人评审过的循环。
+
+- **`provider_retry.py`**：十个封闭故障名 + "状态码 → provider 自述 → 文本"三级判据；`unknown`
+  不可重试（"判断不了"不是"临时"）；auth/client_error/stream_interrupted 在 schema 层就禁写。
+- **日程是纯函数**（`plan()` 只回延迟或具名停止），full jitter 种子取自 session id → CI 可钉表、
+  舰队又不齐步走；上限归运行时：8 次 / 120 s / 每轮 30 s 等待预算。
+- **`[retry]` 写进 `.northstar/config.toml`**，CLI 四个旗标只能收紧（`restrict()`），插件碰不到。
+- **降级不换答题人**：`on_context_overflow = "compact_once"`（一次、走 PreCompact hook、不耗重试预算）；
+  明确不做 `fallback_model`——换模型是策略决定。
+- **可见性**：provider 默认 `max_retries=0` 且给 `ProviderError` 附上 `failure_kind/status_code/retry_after_ms`；
+  重试只进事件与跨度，不进 transcript（429 不该移动评审员钉住的摘要），失败时才进解释。
+- **零凭据彩排**：`--script` 轮次可 `{"raises": {"status": 429, "retry_after_ms": 300}}`，74 项新测试全跑在
+  demo 那个 provider 上。CI 的 py_compile 手抄清单换成整目录 glob（它已漏掉数个新模块）。
+
+测试规模：runtime 1029 → **1103 全绿**（+74：`test_provider_retry`），全仓 **1400 全绿**
+（51+41+37+65+54+1103+49）；N6 模型层能力 3 → **4**（合计 15/30），§10.3 表"测试与确定性"行同步。
+版本仍对齐 `0.1.0.dev0` 未发布。
+
+### 2026-09-09（第二十一批）— 读外家的 `.mcp.json`：生态接入 N4 3→4
+
+- **入口是导入器不是注册表**：`.mcp.json` 与 Cursor/VS Code/Gemini 的方言被读成 `--mcp-server` 同形的
+  `(name, argv)`（+ 可选 `env`/`cwd`），于是导入的 server 走**同一套**规则：默认 mutating、未 `--allow-tool`
+  点名即拒、随 run 关闭、transcript 里与旗标无差别。
+- **三档严重度**：含义要猜的 → 致命（exit 64，一个都不启动）；本运行时起不了的（`url`/`headers`/
+  `type: http|sse`）→ stderr 点名跳过，其余照跑；`disabled: true` → 注记。非空的 `autoApprove`/`alwaysAllow`
+  一律致命：仓库文件不能买回操作者撤回的审批。
+- **默认 off + 只读 `mcp list`**：`--mcp-config auto|PATH|off`（默认 off）把"要不要按文件说的跑"留给命令行；
+  `mcp list` 不 spawn、不联网，**有拒绝即 exit 1**，因此可以原样进 CI 当门。
+- **勘误**：batch 19 的"指向 workspace 自己的 `[mcp.servers]`"三处（runtime README 插件节 / cookbook /
+  blueprint）以及插件加载器的错误文案，都指向一张**从未存在**的表；现在它们指向 `.mcp.json` + `--mcp-config`，
+  这句话在本批之后才为真。blueprint 特性表里"显式重试/退避/降级"也停止标"待做"。
+
+测试规模：runtime 1103 → **1149 全绿**（+46：`test_mcp_config`），全仓 **1446 全绿**
+（51+41+37+65+54+1149+49）；N4 3 → **4**（合计 16/30），§10.3"测试与确定性"行与 §10.5 T4 同步。
+版本仍对齐 `0.1.0.dev0` 未发布。
+
+### 2026-09-09（第二十二批）— fork 点先校验再花钱：T3 收口
+
+- **同一份校验，两个出口**：`session_replay.py` 用写方的规范化形式重算 checkpoint 前缀摘要，
+  `sessions checkpoints` 与 `run --resume-from` 因此不可能"碰巧不一致"；结论四档
+  （verified/digest-mismatch/prefix-short/malformed），缺字段只报告不补零。
+- **CI 形状**：任何边界非 verified → **exit 1**（不联网、不占 lease、不花一次运行才知道审计流被动过）；
+  每条边界按 `session_start` 里记的上限报价："继承 $X、还可用 $Y"，或"这条边界恢复即被拒"。
+- **replay 是帧化时间线**：start/prompt/turn/checkpoint/compaction/result/note；`--from-checkpoint N`
+  给孩子会继承的前缀（切在边界处），孩子的 `session_start` 谱系被渲染出来。`--json` 同一形状给机器。
+- **不做**：二次执行工具、重新裁决权限、交互式 TUI 与产品内 rewind（§10.5 T3 因此整体收口，而非转成"待做"）；
+  也**不是签名**——能改写文件的人就能重算摘要，这句已写进 runtime README 的 limitations。
+
+测试规模：runtime 1149 → **1188 全绿**（+39：`test_session_replay`），全仓 **1485 全绿**
+（51+41+37+65+54+1188+49）；§10.3"会话/调试/可观测"行改写（**维持 4**，差的是交互面而非可检视性），
+§10.5 T3 标为完成；剩余 T 清单为 T1（TS 面）、T2（发布，按纪律待命）、T4（MCP HTTP+auth、技能脚本沙箱取舍）、
+T5（后台/远程）、T6（治理叙事页），合计约 **4–7 个小批**。版本仍对齐 `0.1.0.dev0` 未发布。
+
+### 2026-09-09（第二十三批）— 第二张脸：TypeScript SDK 面（T1 收口）
+
+- **形态选择**：`sdk-ts/` 不是第二份实现，而是 `python3 -m cli run --json` 的类型化外壳——一次运行 =
+  一个子进程。权限门、上限、transcript、退出码因此不可能与 shell 侧分叉：分叉的可能性被架构排除，
+  不是靠纪律维持。
+- **零构建、零依赖**：node ≥ 22.6 的原生类型擦除直接跑 `.ts`，`dependencies`/`devDependencies` 皆空，
+  没有 tsc、没有 lockfile、没有 `npm install`；`package.json` 写 `"private": true`——发布是本项目明确
+  不越的线，TS 面以"源码 + 测试"交付。
+- **漂移门双向装**：`sdk-ts/test/parity.test.ts`（node）与 `tests/test_typescript_sdk.py`（python，21 项）
+  比对同一批事实——`events.EXIT_CODES`、`RESULT_SUBTYPES`、`ResultMessage`/`Denial`/`Usage` 的字段集、
+  `permissions.PERMISSION_MODES`、`postconditions.KINDS`、`provider_retry.RETRYABLE_CLASSES`、
+  `cli.build_parser()` 里 `run` 的全部 flag 与 choices，外加一次真实 `--json` 跑的 result 键集合。
+  后者保证"这台机器没装 node"不是绿灯的理由；`make ts-test` 则把"没装 node"处理成 skip，而不是 fail，
+  也不是"通过"。
+- **镜像先抓到一个谎**：`--dry-run` 把显式 `--max-tool-calls 0` 印成 `unlimited`，而 loop 的判定是
+  `is not None`——0 是"一次都不许"，且在**首次生成之前**就收尾（`num_turns: 0`、`input_tokens: 0`、
+  denials 为空，因为根本没有调用被拒）。新增 `cli.format_tool_call_ceiling` 把 unlimited / 0 / 数字
+  三种状态分开写，TS 侧 `preview()` 与 python 侧 `CeilingTests` 各钉一头。
+- **分数怎么动**：§10.3"程序化 API / 包管理"3 → **4**（两语言可编程面 + 封闭选项契约 + 取消语义），
+  合计 37 → **38**；§10.4 N1 2 → **3**（合计 16 → **17**）。不给 4：没有 exec/app-server 长连接、
+  没有流式输入、一次调用一个进程。§10.5 T1 标为完成，剩余里 T2 只等发布决定，不计工时。
+- **仍未做**：npm/pypi 上架、`@latest` 渠道、稳定 API 承诺（`0.1.0.dev0` 不变）、TS 侧 hooks 回调
+  （跨进程边界只能以事件呈现）、`stream_delta` 的分片重放语义。
+
+测试规模：runtime 1188 → **1197 全绿**（+9：上限三态与 0/1 之别 +5，守卫 harness 自身 +4），
+TypeScript 面新增 **57 全绿**（node 22.22，独立于 python 口径统计，不与 1515 相加），全仓 1485 →
+**1515 全绿**（51+41+37+65+54+1197+70）；`make demo` exit 0。CI 侧同时修掉一个"假绿"：
+`tools/verify_invariants.py` 以前只拷本组件，桥接测试因此 import 不到兄弟组件、基线常红，五个变异的结果
+全部失去意义（`Guard verification` 步骤自桥接落地起就红）；现在整棵 `components/` 一起拷，
+并新增 4 项测试钉住拷贝与端到端变异——五个守卫对 1197 项基线全部转红。剩余 T 清单：T2（发布，按纪律待命）、
+T4（MCP HTTP+auth、技能脚本沙箱取舍）、T5（后台/远程）、T6（治理叙事页），约 **3–5 个小批**。
+版本仍对齐 `0.1.0.dev0` 未发布。
