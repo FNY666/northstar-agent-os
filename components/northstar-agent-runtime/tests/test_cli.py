@@ -242,6 +242,32 @@ class CeilingTests(unittest.TestCase):
         self.assertEqual(code, 3)
         self.assertIn("error_max_tool_calls", out)
 
+    def test_a_zero_ceiling_refuses_before_the_first_request(self):
+        # 0 is the strictest policy in the book, not "no policy". The loop checks the ceiling at the
+        # top of the turn, so a zero ceiling asks the model nothing at all - and the dry-run used to
+        # print exactly that run as "unlimited", which described the opposite of the policy.
+        code, out, err = self.run_with(
+            [{"tool": {"name": "Read", "input": {"path": "nope"}}}], "--max-tool-calls", "0", "--json"
+        )
+        self.assertEqual(code, 3, err)
+        payload = json.loads(out.strip().splitlines()[-1])
+        self.assertEqual(payload["subtype"], "error_max_tool_calls")
+        self.assertEqual(payload["num_turns"], 0)
+        self.assertEqual(payload["permission_denials"], [], "nothing was refused mid-turn: the run never asked")
+        self.assertEqual(payload["total_usage"]["input_tokens"], 0)
+
+    def test_a_ceiling_of_one_spends_the_turn_and_records_the_refusal(self):
+        # The contrast is the point of pinning both: 1 asks once, then refuses the second call and
+        # records why; 0 refuses without ever costing a request.
+        turns = [{"tools": [{"name": "Read", "input": {"path": "nope"}}, {"name": "Read", "input": {"path": "nope2"}}]}]
+        code, out, err = self.run_with(turns, "--max-tool-calls", "1", "--max-turns", "6", "--json")
+        self.assertEqual(code, 3, err)
+        payload = json.loads(out.strip().splitlines()[-1])
+        self.assertEqual(payload["num_turns"], 1)
+        denial = payload["permission_denials"][0]
+        self.assertEqual(denial["source"], "limit:max_tool_calls")
+        self.assertIn("ceiling of 1", denial["reason"])
+
     def test_max_budget_usd(self):
         # The ceiling is checked before a generation, so the expensive turn has to
         # ask for another one: a text-only turn ends the run first.
@@ -611,6 +637,32 @@ class DryRunTests(unittest.TestCase):
         self.assertEqual(code, 0)
         self.assertIn("disallowed_tools=Grep,Write,Edit", out)
         self.assertIn("allowed_tools=(none)", out)
+
+    def test_dry_run_reads_a_zero_ceiling_as_zero(self):
+        code, out, err = run_cli("run", "--workspace", str(self.workspace), "--prompt", "hi",
+                                 "--scripted-text", "reply", "--max-tool-calls", "0", "--dry-run")
+        self.assertEqual(code, 0, err)
+        self.assertIn("max_tool_calls=0 (no tool call allowed)", out)
+        self.assertNotIn("max_tool_calls=unlimited", out)
+
+    def test_dry_run_distinguishes_an_omitted_ceiling_from_a_zero_one(self):
+        # Omitting the flag is not "no ceiling" either: the workspace's own number still applies,
+        # and a reader must be able to tell the three cases apart from this one line.
+        omitted, out_omitted, _ = run_cli("run", "--workspace", str(self.workspace), "--prompt", "hi",
+                                          "--scripted-text", "reply", "--dry-run")
+        self.assertEqual(omitted, 0)
+        self.assertRegex(out_omitted, r"max_tool_calls=[1-9]\d*\b")
+        explicit, out_explicit, _ = run_cli("run", "--workspace", str(self.workspace), "--prompt", "hi",
+                                            "--scripted-text", "reply", "--max-tool-calls", "3", "--dry-run")
+        self.assertEqual(explicit, 0)
+        self.assertIn("max_tool_calls=3 ", out_explicit)
+
+    def test_the_ceiling_formatter_is_a_function_because_three_states_are_not_a_format(self):
+        from cli import format_tool_call_ceiling
+
+        self.assertEqual(format_tool_call_ceiling(None), "unlimited")
+        self.assertEqual(format_tool_call_ceiling(0), "0 (no tool call allowed)")
+        self.assertEqual(format_tool_call_ceiling(7), "7")
 
     def test_dry_run_shows_the_estimated_cost_line(self):
         code, out, _ = run_cli("run", "--workspace", str(self.workspace), "--prompt", "hi",

@@ -379,51 +379,51 @@ Northstar 是"运行时组件集合"，不是一个终端产品。因此对标�
 | G9 | 无 CI/团队 recipe | 🟡 demo + ci-readonly-review 模板 + headless `--json` + 语义退出码；**无官方 GitHub Action/后台任务** |
 | G10 | 优势未叙事化 | ✅ 文档强调确定性内核；🟡 对外叙事仍缺"治理即卖点"的独立页 |
 
-### 10.3 十维复评：Northstar 23 → 37（/50）
+### 10.3 十维复评：Northstar 23 → 38（/50）
 
 | 维度 | Northstar（原） | Northstar（复评） | 一句依据 |
 |---|:-:|:-:|---|
 | 安装与上手 | 2 | **3** | 可 pip 安装 + demo/doctor 一条命令；差官方 index 发布与"账号即用" |
 | CLI / 终端体验 | 3 | **4** | headless、dry-run、语义退出码 0–5/64、json 事件流一流；无交互 TUI/rewind/tasks |
-| 程序化 API / 包管理 | 1 | **3** | `sdk.run()/stream_run()` + 事件 dict 词表 + resume + 示例；无 TS 面、无 exec/app-server 协议 |
+| 程序化 API / 包管理 | 1 | **4** | `sdk.run()/stream_run()` + 事件 dict 词表 + resume + 示例，**并有 TypeScript 面**（`sdk-ts/`：`RunOptions`/`RunEvent`/`RunReport`，node ≥22.6 直跑 `.ts`，零依赖零构建）；差 exec/app-server 长连接协议与官方 index 上架 |
 | 配置与项目约定 | 1 | **4** | AGENTS.md/config/agents/skills/context-file 齐全；差策略 schema 版本化与托管下发 |
 | 扩展生态（MCP/Skills/Plugins） | 1 | **4** | 四类都占位且默认 deny/只读（安全侧反而领先）：plugin bundle 有封闭 schema、digest 钉住、按宿主门禁与 7 目标导出；差在线市场/索引、MCP HTTP+auth、技能脚本执行 |
 | 会话 / 调试 / 可观测 | 3 | **4** | 读回 + 审计导出 + resume + **fork 点可校验**（`sessions checkpoints` 重算前缀摘要，不符 exit 1）与**确定性 replay**（帧化 + `--from-checkpoint` 预览继承态）；仍是 4 不是 5，因为差的是交互式 TUI 与产品内 rewind，不是可检视性 |
-| 测试与确定性 | 5 | **5** | 全仓 1485 项（runtime 片 1188）、guard 红绿 harness、离线 scripted provider（现可彩排 429/529 故障）——头部普遍 3 分档，仍是最稀缺资产 |
+| 测试与确定性 | 5 | **5** | 全仓 1515 项（runtime 片 1197，另加 TS 面 57 项）+ guard 红绿 harness + 离线 scripted provider（现可彩排 429/529 故障）；TS 镜像的漂移门在**没有 node 的机器上**也照跑——头部普遍 3 分档，仍是最稀缺资产 |
 | 文档与教学 | 3 | **4** | 四层 + 生成 API + examples 索引 + 11 语言；差课程/playground 型教学 |
 | 版本化与发布 | 2 | **3** | 版本单一源 + 对齐测试 + 就绪门 Release CI；未发出版本（按纪律等"最完美"） |
 | 团队 / CI / 协作面 | 2 | **3** | CI 模板 + headless + 审计 feed 天然 CI 友好；差官方 Action/review 后台 |
-| **合计（/50）** | **23** | **37** | 头部（Claude Code/Codex）2026-09 口径仍 ≥46 且持续外扩 |
+| **合计（/50）** | **23** | **38** | 头部（Claude Code/Codex）2026-09 口径仍 ≥46 且持续外扩 |
 
 ### 10.4 新增横向战场六维（2026 年新出现的竞争面，1–5）
 
 | 维度 | 头部代表 | Northstar | 说明 |
 |---|:---:|:---:|---|
-| N1 可嵌入 harness（SDK/exec/app-server） | Codex platform、Claude Agent SDK（py/ts） | **2** | 内核（AgentRuntime/events/resume/hooks）在，未产品化为 SDK 面 |
+| N1 可嵌入 harness（SDK/exec/app-server） | Codex platform、Claude Agent SDK（py/ts） | **3** | 内核在，并已产品化为**两语言 SDK 面**（`sdk.py` + `sdk-ts/`，含封闭选项与退出码契约）；仍是 3：没有 exec/app-server 长连接、没有流式输入、一次调用一个进程 |
 | N2 后台/并行/任务化 | Codex Automations、CC background agents/task mgmt | **2** | durable-run 内核（event_store/action_gateway/verifier）超前，无 CLI/调度/云端面 |
 | N3 远程/多端 | CC remote sessions/Desktop、Codex cloud、Gemini remote subagents | **1** | 目前只有 sidecar 单向委派 |
 | N4 生态市场接入 | CC plugin marketplace、skills 71k+、.mcp.json | **4** | 自有 bundle 格式有安装器/锁定/校验与 `plugin export` 七个外家格式；**并直接读外家的 `.mcp.json`**（三档严重度：读不懂=退出 64、起不了=点名跳过、`disabled`=注记；`autoApprove` 一律拒），`mcp list` 是可在 CI 里 gate 的只读面；**按裁定不做市场与索引**（市场=供给链，可评审 diff 才是本仓的目的） |
 | N5 安全治理纵深 | CC managed settings/enterprise、Codex sandbox 网络隔离、Muse 默认沙箱 | **3** | 权限门/hooks/只读/审计 feed 治理叙事强；无 OS 级沙箱与技能供应链校验（36% 缺陷率=空白机会） |
 | N6 模型层能力 | model routing/steering、多模型 fallback | **4** | 故障分类 + 退避 + 有界降级已策略化（封闭 retry_on、per-turn deadline、session 种子化抖动）；仍仅两个后端，且刻意不做 fallback_model/model routing |
-| **合计（/30）** | ≈24 | **16** | 新战场是当前差距的主要来源 |
+| **合计（/30）** | ≈24 | **17** | 新战场是当前差距的主要来源 |
 
 ### 10.5 还差多远：排序与最短路径（批次粒度估算，主观）
 
 | # | 差距 | 对齐谁 | 内容 | 批次 |
 |---|---|---|---|---|
-| T1 | SDK/可嵌入面 | Codex exec/SDK、Claude Agent SDK | ✅ 已完成（2026-09-07）：`sdk.py`（RunOptions/run/stream_run/RunReport）+ `events.py` 公共事件词表 + examples/sdk 示例；TS 面与稳定 API 承诺待续 | — |
+| T1 | SDK/可嵌入面 | Codex exec/SDK、Claude Agent SDK（py/ts） | ✅ **已完成**：`sdk.py`（RunOptions/run/stream_run/RunReport）+ `events.py` 公共事件词表 + examples/sdk 示例；**第 23 批补上 TS 面**（`sdk-ts/`，57 项 node 测试 + 两侧漂移门）。**不做**：`@northstar/agent-runtime` 上架 npm（发布按纪律停在门外，包内 `"private": true` 已写明）；exec/app-server 长连接协议属 N1 的下一步，不属本条 | — |
 | T2 | 发布工程 | `@latest`/Release 渠道 | 🟡 管道已完成并留作待命；**按发布纪律撤回 v0.1.0**（未发布、dev0、须过就绪门）；余：pip index 上架 | — |
 | T3 | 交互最小集 | CC `/rewind`+tasks、Gemini checkpointing | ✅ **已完成**（第 22 批）：`sessions checkpoints` 校验/报价每条 fork 边界 + `sessions replay`（帧化时间线、`--from-checkpoint` 继承预览、`--json`、谱系）；restore 侧（`--resume-from/--resume-record`）自第 14 批即在。**不做**交互式 TUI/产品内 rewind——那与"确定性可 diff"是两个产品，本仓选后者 | — |
 | T4 | 生态纵深 | CC plugins/marketplace、MCP login | skills `check` ✅（第 15 批）、plugin bundle 打包格式与安装器 ✅（第 19 批，含按宿主门禁与 `plugin export`）、**读外家 `.mcp.json`** ✅（第 21 批：`--mcp-config` + `mcp list`，审批清单一律拒）；余：MCP HTTP+auth 传输、技能脚本沙箱或写明取舍、市场/索引（按 C5 裁定不做） | 1–2 |
 | T5 | 后台/远程化 | Codex Automations、CC remote | durable-run 之上做任务调度 CLI 面 + P3-3 远程 worker 协议评估 | 2–3 |
 | T6 | 治理叙事页 | — | "确定性 + 治理默认值"独立页/演示（评审/CI 场景） | 0.5 |
 
-其中 **T2+T1 是把 37 → ~40 的最短路径**（与 §7"只做三件事"呼应：打包已完成，接下来是"包得住 → 嵌得进 → 发得出去"）；T3 增黏性，T4 是差异化杠杆（别的工具都缺的技能安全校验），T5 承接 P3-2/3/4 地图。
+T1（两语言可编程面）与 T3（fork 点先校验）已收口，剩下的最短路径是 **T4 余波 + T5**（差异化在 T4：别的工具都缺的技能/配置安全校验；T5 承接 P3-2/3/4 地图）；T2 只等发布决定，不列工时。
 
 ### 10.6 结论
 
 - **内核侧差距已经基本收平甚至反超**（测试与确定性 5/5、治理不绕行的架构、审计导出）——这部分不再是对标短板。
-- **外围产品化差距仍然显著**：十维口径 23→37（头部 46 并继续外扩）；把 2026 新战场六维算进来是 **16/30**（头部 ≈24），缺口集中在"可嵌入 SDK 面、发布工程、交互面、后台/远程"——全部在 P3 剩余批次 + 上述 T 清单的可执行范围内，按既有批次节奏约 **4–7 个小批**可把十维推到 40+（T3 已于第 22 批收口） 并在新战场完成占位（第二十一批已把 N4"生态市场接入"补到 4：读外家的 `.mcp.json`，而不是让它变成第二份手抄清单）。
+- **外围产品化差距仍然显著**：十维口径 23→38（头部 46 并继续外扩）；把 2026 新战场六维算进来是 **17/30**（头部 ≈24），缺口集中在"发布工程、exec 协议、交互面、后台/远程"——全部在 P3 剩余批次 + 上述 T 清单的可执行范围内，按既有批次节奏约 **3–5 个小批**可把十维推到 40+（T3 已于第 22 批收口，T1 的两语言 SDK 面已于第 23 批收口） 并在新战场完成占位（第二十一批已把 N4"生态市场接入"补到 4：读外家的 `.mcp.json`，而不是让它变成第二份手抄清单）。
 - **一句话**：已经从"差一个时代"（库 + 手工拼装）追到"差外围成型"（内核领先、外壳未打磨）；下一个里程碑不是再补内核，而是**把治理内核包装成别人能 embed、能发布、能在 CI 里直接用的产品面**。
 
 ### 10.7 本节增补参考来源（2026-06 ~ 2026-09）
@@ -606,3 +606,36 @@ Northstar 是"运行时组件集合"，不是一个终端产品。因此对标�
 （51+41+37+65+54+1188+49）；§10.3"会话/调试/可观测"行改写（**维持 4**，差的是交互面而非可检视性），
 §10.5 T3 标为完成；剩余 T 清单为 T1（TS 面）、T2（发布，按纪律待命）、T4（MCP HTTP+auth、技能脚本沙箱取舍）、
 T5（后台/远程）、T6（治理叙事页），合计约 **4–7 个小批**。版本仍对齐 `0.1.0.dev0` 未发布。
+
+### 2026-09-09（第二十三批）— 第二张脸：TypeScript SDK 面（T1 收口）
+
+- **形态选择**：`sdk-ts/` 不是第二份实现，而是 `python3 -m cli run --json` 的类型化外壳——一次运行 =
+  一个子进程。权限门、上限、transcript、退出码因此不可能与 shell 侧分叉：分叉的可能性被架构排除，
+  不是靠纪律维持。
+- **零构建、零依赖**：node ≥ 22.6 的原生类型擦除直接跑 `.ts`，`dependencies`/`devDependencies` 皆空，
+  没有 tsc、没有 lockfile、没有 `npm install`；`package.json` 写 `"private": true`——发布是本项目明确
+  不越的线，TS 面以"源码 + 测试"交付。
+- **漂移门双向装**：`sdk-ts/test/parity.test.ts`（node）与 `tests/test_typescript_sdk.py`（python，21 项）
+  比对同一批事实——`events.EXIT_CODES`、`RESULT_SUBTYPES`、`ResultMessage`/`Denial`/`Usage` 的字段集、
+  `permissions.PERMISSION_MODES`、`postconditions.KINDS`、`provider_retry.RETRYABLE_CLASSES`、
+  `cli.build_parser()` 里 `run` 的全部 flag 与 choices，外加一次真实 `--json` 跑的 result 键集合。
+  后者保证"这台机器没装 node"不是绿灯的理由；`make ts-test` 则把"没装 node"处理成 skip，而不是 fail，
+  也不是"通过"。
+- **镜像先抓到一个谎**：`--dry-run` 把显式 `--max-tool-calls 0` 印成 `unlimited`，而 loop 的判定是
+  `is not None`——0 是"一次都不许"，且在**首次生成之前**就收尾（`num_turns: 0`、`input_tokens: 0`、
+  denials 为空，因为根本没有调用被拒）。新增 `cli.format_tool_call_ceiling` 把 unlimited / 0 / 数字
+  三种状态分开写，TS 侧 `preview()` 与 python 侧 `CeilingTests` 各钉一头。
+- **分数怎么动**：§10.3"程序化 API / 包管理"3 → **4**（两语言可编程面 + 封闭选项契约 + 取消语义），
+  合计 37 → **38**；§10.4 N1 2 → **3**（合计 16 → **17**）。不给 4：没有 exec/app-server 长连接、
+  没有流式输入、一次调用一个进程。§10.5 T1 标为完成，剩余里 T2 只等发布决定，不计工时。
+- **仍未做**：npm/pypi 上架、`@latest` 渠道、稳定 API 承诺（`0.1.0.dev0` 不变）、TS 侧 hooks 回调
+  （跨进程边界只能以事件呈现）、`stream_delta` 的分片重放语义。
+
+测试规模：runtime 1188 → **1197 全绿**（+9：上限三态与 0/1 之别 +5，守卫 harness 自身 +4），
+TypeScript 面新增 **57 全绿**（node 22.22，独立于 python 口径统计，不与 1515 相加），全仓 1485 →
+**1515 全绿**（51+41+37+65+54+1197+70）；`make demo` exit 0。CI 侧同时修掉一个"假绿"：
+`tools/verify_invariants.py` 以前只拷本组件，桥接测试因此 import 不到兄弟组件、基线常红，五个变异的结果
+全部失去意义（`Guard verification` 步骤自桥接落地起就红）；现在整棵 `components/` 一起拷，
+并新增 4 项测试钉住拷贝与端到端变异——五个守卫对 1197 项基线全部转红。剩余 T 清单：T2（发布，按纪律待命）、
+T4（MCP HTTP+auth、技能脚本沙箱取舍）、T5（后台/远程）、T6（治理叙事页），约 **3–5 个小批**。
+版本仍对齐 `0.1.0.dev0` 未发布。

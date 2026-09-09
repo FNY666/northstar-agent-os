@@ -432,7 +432,7 @@ def _print_dry_run(
     print(f"allowed_tools={','.join(config.allowed_tools) or '(none)'}  "
           f"disallowed_tools={','.join(config.disallowed_tools) or '(none)'}")
     print(f"max_turns={config.max_turns} "
-          f"max_tool_calls={config.max_tool_calls or 'unlimited'} "
+          f"max_tool_calls={format_tool_call_ceiling(config.max_tool_calls)} "
           f"max_budget_usd={config.max_budget_usd or 'unlimited'}")
     print(_retry_note(config))
     print(f"sidecar={'on' if config.sidecar_socket else 'off'} "
@@ -569,6 +569,21 @@ def _retry_policy(args: argparse.Namespace, policy: Any):
         retry_on=retry_on,
         off=bool(getattr(args, "no_retry", False)),
     )
+
+
+def format_tool_call_ceiling(value: "int | None") -> str:
+    """How the resolved tool-call ceiling reads to a human.
+
+    ``0`` and ``None`` are different policies - "no tool call at all" and "no ceiling" - and the
+    loop enforces exactly that difference (``max_tool_calls is not None``), so printing 0 as
+    "unlimited" made a dry-run describe a run that would refuse its first tool call. Saying
+    ``(none allowed)`` out loud costs one word and removes the ambiguity.
+    """
+    if value is None:
+        return "unlimited"
+    if value == 0:
+        return "0 (no tool call allowed)"
+    return str(value)
 
 
 def _retry_note(config: Any) -> str:

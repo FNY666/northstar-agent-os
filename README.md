@@ -83,8 +83,10 @@ python3 -m cli run --workspace . --provider anthropic --prompt "summarise README
 python3 -m cli plugin verify --workspace .  # review the installed extension bundles
 ```
 
-`make test` runs every component's suite and the repository documentation tests
-(1485 tests, all offline).
+`make test` runs every component's suite, the runtime's TypeScript face
+(`components/northstar-agent-runtime/sdk-ts`, 57 tests run straight from the `.ts` sources by
+node ≥ 22.6 — skipped, never failed, where node is older) and the repository documentation tests
+(1515 tests, all offline).
 
 Extensions arrive as `northstar.plugin.v1` bundles: one directory packing the four seams
 this runtime already has — skills, agent files, command hooks, MCP servers — installed as a

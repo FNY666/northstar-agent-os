@@ -1,5 +1,43 @@
 # Northstar Agent OS — initial public component
 
+## Unreleased (twenty-third batch) — a second face on the same contract: the TypeScript SDK (`sdk-ts/`)
+
+The blueprint's T1 remainder. `components/northstar-agent-runtime/sdk-ts` is `@northstar/agent-runtime`:
+`RunOptions` → argv (one key per `run` flag, closed sets, refusals before a process exists), the
+`--json` stream typed and parsed (`parseEventLine`, NDJSON splitter, unknown event types passed
+through for forward-compatibility), and `run` / `streamRun` / `preview` over a spawned
+`python3 -m cli`. A finished run never throws — subtype and exit code carry the verdict; a broken
+stream does, with `UsageError` reserved for exit 64. Node ≥ 22.6 type-strips the sources, so there is
+no build step, no `npm install` and no network: `"private": true` stays, because publishing is the
+line this repository has not crossed.
+
+The mirror is gated, not trusted: `test/parity.test.ts` compares the exit-code table, the event
+vocabulary, the closed value sets and every emitted flag against the runtime's own modules and
+argparse tree, and `tests/test_typescript_sdk.py` re-runs those comparisons from Python so drift
+still fails an image with no node. `Makefile` gains a guarded `ts-test` target (skip, never a silent
+pass); the CI `agent-runtime` job installs node 22 and runs the suite.
+
+Fixed on the way, because the mirror read it wrong first: `run --dry-run` printed an explicit
+`--max-tool-calls 0` as `unlimited` while the loop enforces 0 as "no call allowed" - and does it
+*before* the first generation, so a zero ceiling costs no request and records no denial, while a
+ceiling of 1 spends a turn and writes one. `cli.format_tool_call_ceiling` now separates the three
+states (`unlimited` / `0 (no tool call allowed)` / the number), `CeilingTests` pins the difference
+between 0 and 1, and `sdk-ts`'s `preview()` test pins the wording from the other side.
+
+Two stale spots in the guard harness went with it. `tools/verify_invariants.py` copied only this
+component into its throwaway tree, so the bridge tests that import the real sibling components
+failed to import, the baseline went red, and every mutation result became meaningless - which is how
+CI's `Guard verification` step had been failing since the bridges landed. It copies the whole
+`components/` tree now, and `tests/test_tools_verify_invariants.py` pins the copy step plus one
+end-to-end mutation. And one mutation anchor had been written against `loop.py`'s indentation, which
+had since reflowed: a guard reporting "anchor not found" reports nothing at all, so it is anchored on
+the comment above the call instead. All five guards verify green again against a 1197-test baseline.
+
+Runtime slice 1188 → **1197** (+5 ceiling semantics, +4 harness), the TypeScript face adds **57**
+node tests, and repository `make test` 1485 → **1515** (51+41+37+65+54+1197+70), all offline;
+`make demo` green. CI's `agent-runtime` job installs node 22 and runs the face between the CLI smoke
+and the guard verification. Version stays `0.1.0.dev0`: nothing is published, `private: true` included.
+
 ## Unreleased (twenty-second batch) — a fork point you can check before you pay for it
 
 Checkpoints have been written since the resume-budget fix, and `run --resume-from` has honoured
