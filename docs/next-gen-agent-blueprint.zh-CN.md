@@ -2,6 +2,7 @@
 
 > 编制日期：2026-09-08 ｜ 触发问题：**"能不能包含所有顶级 agent 的优点，因为我们要创造次世代的 agent"**
 > 本文是设计与取舍文档；本批已按其中 P0 四条落了代码（见 §6）。配套现状对标见 [benchmark-top-agents-2026-09.zh-CN.md](benchmark-top-agents-2026-09.zh-CN.md)。
+> **2026-09-09**：产品目标从「组件库」升格为 **Agent OS 整机**——见 [next-gen-agent-os.zh-CN.md](next-gen-agent-os.zh-CN.md)（统一入口 `northstar agent`、默认会话/检查点、优先级重排）。本文的吸收/拒绝判据仍然有效；「明确不做」里的 shell 在 OS 沙箱落地前仍拒绝，但已排进脊梁第 1 序而非永久搁置。
 
 ---
 
@@ -28,7 +29,7 @@
 
 | # | 想吸收的优点 | 来源 | 与 Northstar 哪条不变量冲突 | 裁决 |
 |---|---|---|---|---|
-| C1 | 任意 shell 工具 + Full Auto | Codex Full Auto、Devin/OpenHands 长自主 | 根 README 的"不是通用 shell 执行 API"；且本仓**无 OS 级沙箱**（对标报告 F/维度 #3） | ⛔ **推迟**：先有 bwrap/seatbelt 级隔离与网络 egress 策略，再谈 shell。顺序反了就是把治理叙事换成攻击面 |
+| C1 | 任意 shell 工具 + Full Auto | Codex Full Auto、Devin/OpenHands 长自主 | 根 README 的"不是通用 shell 执行 API"；`Shell` 已落地但**默认 deny** + OS 沙箱（bwrap\|process） | ✅ **改造落地**：有隔离才有 Shell；宿主机 Full Auto 仍明确拒绝；显式 `--allow-tool Shell` 才放行 |
 | C2 | settings 里声明 command hooks | Claude Code（31 事件 × 5 类 handler） | 仓库文件=可执行代码 → 绕过权限门；clone 即执行 | ✅ **改造后收**：本批 P0-3 落地，但只允许否决型事件 + 无 shell + 脚本必须在工作区内 + 默认关 + 子进程环境变量清洗 |
 | C3 | 无限工具/无限技能（no per-server cap、几百个 skill） | Claude Code Tool Search、Skills 生态 71k+ | `MAX_TOOLS_PER_SERVER=25`、`MAX_SKILLS=40`、listing 上限——"仓库文件不得无界撑大上下文" | 🔧 **改造**：数量可有界放宽（如 25→100），但必须配 **deferred definitions**（按需取 schema）；直接去上限 = 放弃边界 |
 | C4 | 模型分类器自动批准（`auto` mode） | Claude Code auto、Cursor auto-review | 三层权限门的确定性；"谁批准了这次调用"必须可复现 | ⛔ **拒绝原样**：分类器只能作为**额外否决**挂在 PreToolUse 上（可 deny、不可 allow），默认关 |
@@ -58,7 +59,7 @@
 | 外家 `.mcp.json` 导入 | Claude Code/Cursor/VS Code 的配置文件 | `mcp_config.py` + `--mcp-config`（默认 off）+ `mcp list`（拒绝即 exit 1，可当 CI 门） | ✅ 已落地（第二十一批） |
 | MCP 现行规范 2026-07-28 | 标准 | `mcp_negotiate.py`：`server/discover` 代际探测 + `params._meta` 逐请求携带 + MRTR 重试 + 旧代际 fallback | ✅ 已落地（第十六批） |
 | elicitation ↔ 审批回合 | MCP 特性 | `mcp_elicitation.py`：把"服务器问用户"映射到权限门，无人应答即拒绝并 `notifications/cancelled`（**这是别人没有的角度**） | ✅ 已落地（第十六批） |
-| OS 级沙箱 | Claude seatbelt/bubblewrap、Gemini gVisor | 可选 `bwrap` 包装器（只读 bind + no net + cgroup），CI 真跑 | 🔧 待做（P1-4，C1 的前置） |
+| OS 级沙箱 | Claude seatbelt/bubblewrap、Gemini gVisor | `tools/os_sandbox.py`：bwrap 优先、process 诚实回退；`Shell` 默认 deny；[threat-model](concepts/threat-model.md) | ✅ 已落地（次世代脊梁 P1；显式 bwrap 不可用则硬错误，不静默降级） |
 | 技能供应链校验 | 无人做（第三方审计：99% 坏味道/36% 缺陷） | `skills check`：规则纯函数 + `skills.lock` 摘要钉定 + 漂移拒跑 | ✅ 已落地（第十五批） |
 | 两语言可编程面（Python + TypeScript SDK） | Claude Agent SDK（py/ts 双官方面） | `sdk-ts/`：把 `run --json` 包成 `RunOptions`/`RunEvent`/`RunReport`，**镜像而非重定义**，两侧各有一条漂移门 | ✅ 已落地（第二十三批）；发布仍按纪律不做（`private: true`） |
 | 会话 rewind/fork | Claude /rewind、LangGraph time-travel | `--resume-from`：从任一检查点分叉新 session（摘要校验），**绝不回写**旧文件 | ✅ 已落地（与 append-only 兼容） |

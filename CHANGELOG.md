@@ -1,5 +1,55 @@
 # Northstar Agent OS — initial public component
 
+## Unreleased (twenty-fifth batch) — P5: public governance bench + install smoke + minimal agent task
+
+Closes the spine's P5 slice without cutting a release tag (version stays
+`0.1.0.dev0`; the readiness gate still refuses a `.dev` publish).
+
+- **`governance_bench.py` + `northstar bench`** — offline, deterministic public
+  scorecard for the *permission gate* (not model quality): denial correctness,
+  injection resistance (policy/skills write-protect + symlink containment +
+  memory carve-out), and budget hit rate (each ceiling owns its subtype).
+  `make bench` and `bin/northstar bench` share one entry so CI cannot drift from
+  the product path. JSON payload is versioned `northstar.governance.bench.v1`.
+- **`make install-smoke`** — throwaway venv, pip-install every packaged
+  component from the checkout, then `northstar --version` + `tools` + `bench
+  --json`. Does not touch a developer's `.venv` and does not publish.
+- **Minimal interaction** — `northstar agent "task text"` accepts a positional
+  task (rewritten to `--prompt` by `product_path`); on a TTY, bare `agent` reads
+  one line instead of dumping usage. Non-TTY stays a hard usage error so CI
+  never hangs. Still no TUI.
+
+Still deferred by readiness gate: drop `.dev0`, GitHub Release / pip index,
+hosted cloud, interactive TUI. See `docs/next-gen-agent-os.zh-CN.md` §5 / §8.
+
+## Unreleased (twenty-fourth batch) — product spine: next-gen Agent OS entry (`northstar agent`)
+
+Not another component. The delivery target is reframed from a component catalogue
+to a **next-generation Agent OS** with a governed kernel. See
+`docs/next-gen-agent-os.zh-CN.md` (product spine, priority order, refuse list).
+
+Shipped in this batch:
+
+- **Product entry** `northstar` (console script + checkout wrapper `bin/northstar`).
+  The legacy `northstar-agent-runtime` console script remains an alias of the same
+  process. `--version` prints `northstar <version>`.
+- **`agent` subcommand** — product path. Same gate as `run`, but welds
+  `--session-dir <workspace>/.northstar/sessions` and `--checkpoint-turns 1` unless
+  the operator opts out with `--no-session` / `--no-checkpoint`. Never loosens
+  permissions, never enables hooks, never grants tools.
+- **`resume <session-id>` subcommand** — short path for continuing a product
+  session with the same defaults.
+- **`product_path.py`** — pure argv rewrite; the loop does not know "product mode"
+  exists, so there is no second place the gate can be wrong.
+- **Demo / Makefile / root README / zh-CN README** teach `northstar agent` first.
+  `make demo` asserts a checkpoint landed in the product transcript.
+- Scaffold CI recipe and project README use `northstar agent`.
+
+Historical note: P1–P4 of the spine (sandbox+Shell, resume fork, parallel+
+handoff, workspace memory+skill scripts) landed in later unreleased batches;
+see the twenty-fifth batch and `docs/next-gen-agent-os.zh-CN.md`. Version stayed
+`0.1.0.dev0` under the readiness gate.
+
 ## Unreleased (twenty-third batch) — a second face on the same contract: the TypeScript SDK (`sdk-ts/`)
 
 The blueprint's T1 remainder. `components/northstar-agent-runtime/sdk-ts` is `@northstar/agent-runtime`:

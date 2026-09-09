@@ -1,30 +1,34 @@
 # Northstar Agent OS
 
-**面向自主 AI 同事的开放、可靠、可治理运行时组件。**
+**面向自主 AI 同事的开放、可靠、可治理 Agent 操作系统。**
 
 > 中文名：北辰智能体系统
 
 [English](../README.md) · [简体中文](README.zh-CN.md) · [繁體中文](README.zh-TW.md) · [日本語](README.ja.md) · [Español](README.es.md) · [한국어](README.ko.md) · [Français](README.fr.md) · [Deutsch](README.de.md) · [Português (Brasil)](README.pt-BR.md) · [Italiano](README.it.md) · [Türkçe](README.tr.md) · [Tiếng Việt](README.vi.md)
 
-**一句话说明：** Northstar 是一个独立维护的项目，用于把明确的模型路由、本地工具边界、可审计性和可恢复执行组合成受治理的 AI 同事运行时。**目前真正发布的内容是 Northstar Codex Sidecar——一个受限的本地工作器适配器，而不是已经完成的自主智能体操作系统。**
-
+**一句话说明：** Northstar 是**次世代 Agent 操作系统**：统一入口 `northstar agent`、可见边界、可审计、可恢复。内核由 runtime / contract / host / durable / sidecar / interop 等子系统组成。**目前还不是已经完成的多智能体平台**（无托管云、无并行舰队）；今天交付的是焊死的产品路径 + 可证明的治理内核、**默认拒绝的沙箱 `Shell`**（有 bubblewrap 时 OS 隔离，否则诚实的 process 回退——见 [concepts/threat-model.md](concepts/threat-model.md)），以及 **Northstar Codex Sidecar**——一个受限的本地工作器适配器（read-only、ephemeral、仅 Unix socket）。
 > English is the canonical project entry. Translations mirror its scope and security claims; update them when the canonical README changes.
 
 ## 它是什么
 
-Northstar 面向希望 AI 同事在明确边界内运行的开发者，而不是让系统停留在不受约束的“提示词加工具”循环中。项目关注小而可测试的构件：调用方可见的合同、受限执行、结构化结果和可恢复的运维流程。
+Northstar 面向希望**把活交给 AI 同事**、并要求其在明确边界内运行的人——而不是不受约束的「提示词加工具」循环，也不是需要手工拼装的零件目录。
 
-项目采用渐进式建设方式。单个组件可以独立有用，但组件测试通过，并不证明完整智能体平台安全或适合生产环境。
+- **产品路径：** `northstar agent "…"` — 默认开启会话落盘与每 turn 检查点  
+- **内核路径：** `northstar run …` — 每个默认都显式（嵌入、CI、高阶用法）  
+- **不变量：** 每次工具调用穿过权限门、hooks、预算天花板与审计；策略只能收紧  
+
+产品脊梁与路线图：[next-gen-agent-os.zh-CN.md](next-gen-agent-os.zh-CN.md)。  
+对标全球顶级 agent：[benchmark-top-agents-2026-09.zh-CN.md](benchmark-top-agents-2026-09.zh-CN.md)。
 
 ## 当前发布了什么
 
-本仓库当前发布三个组件：
+- **产品入口** `northstar` / `bin/northstar` — Agent OS CLI（`agent` / `resume` + 内核命令）  
+- `../components/northstar-agent-runtime/` — 受治理智能体循环（事件、hooks、三层权限门、预算、子智能体、仅追加会话、MCP、skills、插件）  
+- `../components/northstar-codex-sidecar/` — 本地 Unix socket 服务：校验请求，以 read-only 模式运行 Codex，限制 I/O，脱敏错误，清理超时进程组  
+- `../components/northstar-run-contract/` — 版本化 Run Request/Receipt、HMAC Run Binding、严格适配边界  
+- 以及 host / durable-run / agent-interop 等内核子系统（见英文 README 全表）
 
-- `../components/northstar-codex-sidecar/` — 本地 Unix socket 服务，负责校验请求，以 read-only 模式运行 Codex，限制输入和输出，脱敏错误，清理超时进程组，并返回结构化状态。
-- `../components/northstar-run-contract/` — 版本化的 Run Request/Receipt 合同、带有效期的 HMAC Run Binding，以及把已验证运行交给 Sidecar 的严格适配边界。
-- `../components/northstar-agent-runtime/` — 受治理的智能体循环：事件流、十个生命周期钩子、三层权限门、轮次/工具调用/美元预算三项独立上限、子智能体、仅追加会话、只在安全边界处压缩、以及 span 级追踪。它不持有模型凭据，也不启动模型 CLI：Codex 执行通过 Unix socket 委托给 Sidecar。
-
-仓库同时提供确定性测试、systemd 加固模板、保守的安装脚本和回滚脚本。
+仓库同时提供确定性测试、systemd 加固模板、保守安装/回滚脚本。
 
 ## Sidecar 如何工作
 
@@ -40,88 +44,65 @@ Sidecar 为每个 Unix socket 连接接收一个 JSON 请求：
 {"request_id":"demo-1","status":"ok","text":"OK"}
 ```
 
-主要特性：
-
-- 仅使用 Unix socket，不提供 TCP 监听器。
-- 严格请求白名单：`request_id`、`prompt`、`timeout_ms`。
-- 限制 prompt 和超时时间。
-- Codex 使用 `--sandbox read-only` 和 `--ephemeral` 运行。
-- 独立进程组，超时时先 TERM、再 KILL 清理。
-- 每个连接都有读取截止时间，并使用有上限的工作器池。
-- 结构化错误分类和敏感信息脱敏。
-- 专用服务用户和 systemd 加固模板。
-- 只有主机管理员明确安装并启用服务后，Codex 才会运行。
+主要特性：仅 Unix socket；Codex 使用 `--sandbox read-only` 与 `--ephemeral`；独立进程组，超时时 TERM→KILL；结构化错误与脱敏；专用服务用户与 systemd 加固。只有主机管理员明确安装并启用后，Codex 才会运行。
 
 ## 快速开始
 
-要求：
-
-- Linux 与 Python 3.10 或更高版本。
-- 已单独安装、且服务用户可执行的 `codex` 程序。
-- 用于所提供服务单元的 systemd。
-- 专用的非特权服务用户和工作区。
-
-在组件目录中运行本地验证：
+**一行离线演示（无 API key、无网络）：**
 
 ```sh
-cd components/northstar-codex-sidecar
-python3 -m py_compile sidecar.py transport.py service.py sidecar_socket.py
+make demo
+```
+
+**检出即用的产品入口：**
+
+```sh
+bin/northstar --version
+bin/northstar agent --workspace . --provider scripted --scripted-text "ok" --prompt "hello"
+bin/northstar resume latest --workspace . --prompt "continue" --scripted-text "ok"
+bin/northstar sessions list --workspace .
+bin/northstar bench                  # 公开治理基准（离线）
+```
+
+Sidecar 本地验证：
+
+```sh
+cd ../components/northstar-codex-sidecar
 python3 -m unittest discover -s tests -p 'test_*.py' -v
-sh -n install.sh rollback.sh
-```
-
-若要查看并安装保守的服务生命周期：
-
-```sh
 sudo ./install.sh
-sudo systemctl enable --now northstar-codex-sidecar.service
 ```
-
-默认从 `PATH` 查找 Codex；主机使用非标准路径时可显式设置 `CODEX_BIN`。启用前请审阅脚本、服务用户、路径和权限。
 
 ## 适用对象
 
-Northstar 适合构建本地或自托管 AI 同事运行时的开发者与运维人员，他们需要一个可测试、可审计、可停用、可回滚的窄范围执行组件。它不是托管 AI 产品、不是一键安全保证，也不能替代完整的身份、策略、工作区和可观测性架构。
+构建本地或自托管 AI 同事的开发者与运维：需要可测试、可审计、可停用、可续跑的 Agent OS。它不是托管 AI 产品，也不能单独替代完整的企业身份与隔离架构。
 
 ## 它不是什么
 
-- 它还不是一个完整的多智能体操作系统。
-- 它不是托管服务，也不代表已经具备生产就绪性。
-- 它不是通用 shell 执行 API。
-- 它不会单独完成调用方授权、每次运行隔离或父级取消传播。
-- 它不包含 Codex 凭据，也不提供 Codex 账号。
+- 它**还不是**一个完整的多智能体操作系统（并行舰队、真实多后端 handoff 仍在脊梁路线图上）。OS 沙箱 `Shell` 已落地且**默认拒绝**；生产主机请安装 bubblewrap 以获得真实 OS 隔离。  
+- 它不是托管服务，也不代表已经生产就绪。  
+- 它不是通用宿主机 shell 执行 API。  
+- 它不会单独完成调用方授权、每次运行隔离或父级取消传播。  
+- 它不包含 Codex 凭据，也不提供 Codex 账号。  
 
 **Not a complete autonomous-agent platform.**
 
 ## 与 OpenBot 的关系
 
-Northstar 是独立维护、面向 OpenBot 兼容场景的项目。它不隶属于 OpenBot 或 CopilotKit，也未得到它们及其维护者的官方认可。Sidecar 的设计目标是接入 OpenBot 风格的运行时，但不声称属于上游 OpenBot 仓库。
-
-“兼容”只表示集成目标，不表示所有权、背书或安全等价。
+Northstar 是独立维护、面向 OpenBot 兼容场景的项目。它不隶属于 OpenBot 或 CopilotKit，也未得到它们的官方认可。「兼容」只表示集成目标，不表示所有权、背书或安全等价。
 
 ## 安全边界
 
-Sidecar 仅通过 Unix 权限认证调用方。生产集成还必须提供：
+Sidecar 仅通过 Unix 权限认证调用方。生产集成还必须提供：调用方授权与身份绑定；按运行隔离工作区；取消传播；不记录敏感 prompt 的可观测性；健康检查与回滚；原生 Linux 进程树验证；对 Codex 自身配置的审查。
 
-- 调用方授权和身份绑定；
-- 按运行或按参与者隔离工作区；
-- 从父运行时传播取消信号；
-- 不记录敏感 prompt 的结构化可观测性；
-- 健康检查和回滚流程；
-- 原生 Linux 并发及进程树验证；
-- 对 Codex 自身账号、网络和工具配置进行审查。
-
-不要通过 TCP 代理暴露 Unix socket。不要提交 API key、OAuth token、Codex 登录状态、私钥、生产 `.env` 文件或用户 transcript。
+不要通过 TCP 代理暴露 Unix socket。不要提交 API key、OAuth token、Codex 登录状态、私钥、生产 `.env` 或用户 transcript。
 
 ## 项目状态
 
-这是 Northstar 的首个公开组件。更大的 Northstar Agent OS 运行时仍在逐步建设。运行时身份绑定、按运行授权工作区、取消传播、原生 Linux 端到端验证和生产部署集成，仍属于主机侧责任或未来工作。**未完成的自主智能体平台不能被当作已完成项目。**
-
-进程组清理应在目标原生 Linux 发行版上验证；移动 Linux 环境中的信号和 PID 回收行为不一定具有代表性。
+Northstar 正按**次世代 Agent OS** 增量建设。产品入口、治理内核与默认拒绝的沙箱 `Shell` 已真实可用；并行工具批与真实 interop 后端仍是后续脊梁工作。**未完成的自主智能体平台不能被当作已完成项目。**
 
 ## 贡献与维护
 
-请查看 [CONTRIBUTING.md](../CONTRIBUTING.md) 了解证据、测试、安全、兼容性和回滚要求；安全问题请查看 [SECURITY.md](../SECURITY.md)。English is the canonical source for project scope; translations should be updated when it changes.
+见 [CONTRIBUTING.md](../CONTRIBUTING.md) 与 [SECURITY.md](../SECURITY.md)。English is the canonical source for project scope; translations should be updated when it changes.
 
 ## 许可证
 

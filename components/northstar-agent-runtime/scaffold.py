@@ -1,4 +1,4 @@
-"""Scaffold a new governed Northstar project (``northstar-agent-runtime new``).
+"""Scaffold a new governed Northstar project (``northstar new``).
 
 Generates a minimal, self-consistent workspace that bakes in the governance
 defaults, so a new repository starts *safe and auditable* and loosens
@@ -278,7 +278,7 @@ jobs:
         # agent's own policy; also fails when a skill changed since it was pinned
         # with `skills check --write-lock` (commit that lockfile).
         run: |
-          northstar-agent-runtime skills check --workspace . || {
+          northstar skills check --workspace . || {
             echo "::error::unreviewed or unsafe Agent Skills - run 'skills check' locally and read the findings"
             exit 1
           }
@@ -286,13 +286,13 @@ jobs:
         env:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
         run: |
-          northstar-agent-runtime run --workspace . --agent reviewer \
+          northstar agent --workspace . --agent reviewer \
             --prompt "Review this change for correctness and security. Do not change files." \
-            --halt-on-denial --session-dir .northstar/sessions
+            --halt-on-denial
       - name: List the audit trail
         if: always()
         run: |
-          northstar-agent-runtime sessions list --session-dir .northstar/sessions \
+          northstar sessions list --session-dir .northstar/sessions \
             || echo "no sessions yet"
 """
 
@@ -324,7 +324,7 @@ def _project_readme(name: str) -> str:
     return f"""\
 # {name}
 
-A governed Northstar workspace, scaffolded by `northstar-agent-runtime new`.
+A governed Northstar workspace, scaffolded by `northstar new`.
 
 ## What the template created
 
@@ -340,15 +340,16 @@ A governed Northstar workspace, scaffolded by `northstar-agent-runtime new`.
 ## Try it
 
 ```sh
-northstar-agent-runtime doctor --workspace .            # environment self-check
-northstar-agent-runtime run --workspace . --prompt "What does this project do?" --dry-run
-northstar-agent-runtime run --workspace . --agent reviewer \\
-  --prompt "Review the current state and report findings." --session-dir .northstar/sessions
+northstar doctor --workspace .            # environment self-check
+northstar agent --workspace . --prompt "What does this project do?" --dry-run
+northstar agent --workspace . --agent reviewer \\
+  --prompt "Review the current state and report findings."
 ```
 
-Runs default to the read-only `reviewer` agent because `.northstar/config.toml`
-sets `agent = "reviewer"`. Loosen deliberately: `--agent explorer` for a
-read/write exploration run, or remove the key to run the main loop.
+Product path (`agent`) writes sessions under `.northstar/sessions` and checkpoints
+every turn by default. Runs default to the read-only `reviewer` agent because
+`.northstar/config.toml` sets `agent = "reviewer"`. Loosen deliberately:
+`--agent explorer` for a read/write exploration run, or remove the key to run the main loop.
 
 ## Adding a skill
 
@@ -357,9 +358,9 @@ those two lines go into the prompt, the model reads the body on demand). A skill
 instructions, so it gets reviewed like a dependency before it is trusted:
 
 ```sh
-northstar-agent-runtime skills check --workspace .              # findings only
-northstar-agent-runtime skills check --workspace . --write-lock # pin what you read
-northstar-agent-runtime run --workspace . --require-skill-lock … # refuse drift
+northstar skills check --workspace .              # findings only
+northstar skills check --workspace . --write-lock # pin what you read
+northstar agent --workspace . --require-skill-lock … # refuse drift
 ```
 
 Commit `.northstar/skills.lock`. A model cannot forge it: writes under `.northstar`
@@ -376,7 +377,7 @@ runtime checks itself after the run — `exists`, `absent`, `changed`, `unchange
 The conditions are deliberately *not* shown to the model: a check the model can see
 becomes a string it can write.
 
-Every run is auditable: `northstar-agent-runtime sessions list --session-dir
+Every run is auditable: `northstar sessions list --session-dir
 .northstar/sessions` and `sessions export <id> --session-dir …` give you the
 canonical NDJSON audit feed.
 """

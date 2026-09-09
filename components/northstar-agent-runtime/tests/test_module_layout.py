@@ -36,7 +36,10 @@ class ToolsPackageLayoutTests(unittest.TestCase):
     def test_registry_names_still_resolve_from_the_package(self):
         from tools import ToolRegistry, build_default_registry
 
-        self.assertEqual(len(build_default_registry().names()), 6)
+        # Read/Write/Edit/LS/Grep/DescribeTools/Shell — Shell is registered but
+        # denied by default under the permission gate until --allow-tool Shell.
+        self.assertEqual(len(build_default_registry().names()), 7)
+        self.assertIn("Shell", build_default_registry().names())
         self.assertTrue(issubclass(ToolRegistry, object))
 
 
@@ -76,7 +79,11 @@ class VersionSingleSourceTests(unittest.TestCase):
 
     def test_the_console_script_points_at_the_cli_entry(self):
         pyproject = tomllib.loads((COMPONENT / "pyproject.toml").read_text(encoding="utf-8"))
-        self.assertEqual(pyproject["project"]["scripts"]["northstar-agent-runtime"], "cli:main")
+        scripts = pyproject["project"]["scripts"]
+        # Product entry is the primary name; the component name stays as an alias
+        # so existing scripts and the package identity remain resolvable.
+        self.assertEqual(scripts["northstar"], "cli:main")
+        self.assertEqual(scripts["northstar-agent-runtime"], "cli:main")
 
     def test_install_without_extras_stays_offline_importable(self):
         # No hard dependency may sneak into pyproject: the scripted provider and
