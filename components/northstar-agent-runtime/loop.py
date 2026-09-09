@@ -190,6 +190,12 @@ class RuntimeConfig:
     #: and braces; on the ``process`` backend it is the only answer the runtime has.
     #: Subagent runs inherit the parent's watch (``depth > 0`` disables it here).
     governance_watch: bool = True
+    #: What this run decided about MCP servers before any of them was connected: the exec gate,
+    #: the declarations it deferred, the variables it released. Filled in by the CLI, the only
+    #: place that reads those flags, and recorded in ``system:init`` so a transcript answers
+    #: "what was this run willing to start" without anybody re-running it (see the execution
+    #: boundary audit, §4.4).
+    mcp_declaration: dict[str, Any] = field(default_factory=dict)
     #: How many **parallel-safe** tool handlers may run at once inside one
     #: assistant turn. ``1`` (default) is full serial dispatch. Values >1 only
     #: accelerate a turn whose *every* call is kind=read and non-mutating;
@@ -307,6 +313,7 @@ class RuntimeConfig:
             "parallel_tools": self.parallel_tools,
             "shell_backend": self.shell_backend,
             "governance_watch": self.governance_watch,
+            "mcp_declaration": dict(self.mcp_declaration),
             "compaction_threshold_tokens": self.compaction_threshold_tokens,
             "stream": self.stream,
             "retry": self.retry.as_dict() if self.retry is not None else None,
@@ -579,6 +586,10 @@ class AgentRuntime:
             prefixes=self.config.tool_limits.protected_prefixes,
             enabled=self.config.governance_watch and self.config.depth == 0,
         )
+        #: What the MCP clients turned out to be, once they existed. Empty until the host
+        #: that owns the servers hands them over with :meth:`observe_mcp`; the loop cannot
+        #: discover them itself, because it does not start them.
+        self._mcp_started: list[dict[str, Any]] = []
         self.budget = budget if isinstance(budget, Budget) else Budget(max_budget_usd=self.config.max_budget_usd)
         self.tools = tools if isinstance(tools, ToolRegistry) else build_default_registry(include_describe=self.config.include_describe_tool)
         # The sidecar is the only execution path this runtime knows about, and it
@@ -681,6 +692,18 @@ class AgentRuntime:
             "session_store": "jsonl" if self.sessions.enabled else "none",
             "workspace": str(self.sandbox.root_real),
         }
+
+    def observe_mcp(self, summaries: Sequence[Mapping[str, Any]]) -> None:
+        """Take note of the MCP servers the host started, before `system:init` is written.
+
+        The runtime does not launch MCP servers - its caller does, and only once the run's own
+        checks have passed, because a dry run must not spawn a child process. That order is why
+        the live facts arrive through a method rather than the constructor: the only honest
+        place to learn which protocol generation a server speaks is after the handshake. The
+        declaration half is already in ``config.mcp_declaration``, so a run that failed to connect
+        still leaves a record of what it tried.
+        """
+        self._mcp_started = [dict(item) for item in summaries]
 
     def pricing(self) -> dict[str, Any]:
         from budget import price_for
@@ -1076,6 +1099,16 @@ class AgentRuntime:
         # Described here, after the freeze: the init record is where a reader finds the digest
         # this run was checked against, and "it was on" without a baseline is only half an audit.
         init_data["governance_watch"] = self.governance.describe()
+        # The last of the run's disclosures, and the only one whose full answer arrives after
+        # construction: a declaration is known up front, the era a server negotiated is not. A
+        # non-empty ``deferred`` beside an absent ``started`` is the shape of a run that read a
+        # file and refused to act on it - the outcome a reviewer most needs to tell apart from
+        # "no MCP config anywhere", which is why neither is left implicit.
+        mcp_record = dict(config.mcp_declaration)
+        if self._mcp_started:
+            mcp_record["started"] = [dict(item) for item in self._mcp_started]
+        if mcp_record:
+            init_data["mcp"] = mcp_record
         init = SystemMessage(subtype="init", content=f"runtime ready: {self.provider_name}/{config.model}", data=init_data)
         self.sessions.record_system(init, agent=config.agent)
         yield init

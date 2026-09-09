@@ -699,6 +699,8 @@ One configured governed loop.
 - `tool_names()`
 - `api_tools()`
 - `describe()`
+- `observe_mcp(summaries: Sequence[Mapping[str, Any]])`
+  - Take note of the MCP servers the host started, before `system:init` is written.
 - `pricing()`
 - `run(prompt: str, *, resume: Sequence[Any] | None=None)`
   - Stream events for one run. Terminates in exactly one ResultMessage.
@@ -726,6 +728,14 @@ MCP transport, protocol, or configuration error. Operator-facing.
 
 #### `RemoteTool`
 
+#### `mcp_environment(*, declared: Mapping[str, str] | None=None, inherit: Sequence[str]=(), environment: Mapping[str, str] | None=None)`
+
+Build a server's environment from an allowlist, never the parent's whole view.
+
+#### `argv_digest(argv: Sequence[str])`
+
+A fingerprint of a launch command, for records that must not carry the command.
+
 #### `parse_mcp_flag(value: str)`
 
 Parse ``--mcp-server NAME=COMMAND ARG...`` (command split with shlex).
@@ -736,6 +746,10 @@ One MCP server over stdio: modern (per-request metadata) or legacy (handshake).
 
 - `connected()`
 - `modern()`
+- `declared_env_keys()`
+  - The variables this child was *given*, beyond the base trio.
+- `launch_summary()`
+  - What this server was, in a form safe to put in `system:init` and share.
 - `connect()`
   - Spawn the server, agree a generation, and list its tools.
 - `tool_names()`
@@ -753,6 +767,10 @@ Build governed ``ToolSpec``s (mutating by default) for one connected server.
 Source: `components/northstar-agent-runtime/mcp_config.py`
 
 Import the MCP config files other hosts already use, and say what was not carried.
+
+#### `check_launch_shape(name: str, argv: Sequence[str], *, source: str)`
+
+The rule above, for declarations assembled somewhere other than a config file.
 
 #### `McpConfigError`
 
@@ -779,11 +797,11 @@ Attach the `mcp` verb's actions to the CLI parser.
 
 Report what the workspace declares, and exit 1 if any of it had to be refused.
 
-#### `read_document(path: Path, *, workspace: Path)`
+#### `read_document(path: Path, *, workspace: Path, allowed_variables: Sequence[str]=(), resolve: bool=True)`
 
 One file, as servers, refusals and notes.
 
-#### `discover(workspace: str | Path, *, candidates: Sequence[str] | None=None)`
+#### `discover(workspace: str | Path, *, candidates: Sequence[str] | None=None, allowed_variables: Sequence[str]=(), resolve: bool=True)`
 
 Read every config file this workspace declares, merged with no silent overrides.
 

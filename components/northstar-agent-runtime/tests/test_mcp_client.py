@@ -15,7 +15,17 @@ from pathlib import Path
 
 import mcp_client
 from cli import USAGE_ERROR, main
-from mcp_client import McpError, McpStdioClient, mcp_tool_specs, parse_mcp_flag
+from mcp_client import (
+    MCP_BASE_ENV_KEYS,
+    McpError,
+    McpStdioClient,
+    argv_digest,
+    mcp_environment,
+    mcp_tool_specs,
+    parse_mcp_flag,
+)
+
+SECRET_SENTINEL = "ghp_sentinel-value-never-for-the-child"
 
 FIXTURE = Path(__file__).resolve().parent / "fixtures" / "mcp_echo_server.py"
 MRTR_FIXTURE = Path(__file__).resolve().parent / "fixtures" / "mcp_mrtr_server.py"
@@ -109,31 +119,26 @@ class ClientTests(unittest.TestCase):
         self.assertIn("cannot start", str(caught.exception))
 
     def test_a_server_that_never_answers_is_killed_on_timeout(self):
-        client = McpStdioClient("demo", ["python3", str(FIXTURE)], timeout_ms=FAST_TIMEOUT_MS)
-        saved = dict(os.environ)
-        os.environ["MCP_SILENT"] = "1"
-        try:
-            with self.assertRaises(McpError) as caught:
-                client.connect()
-            self.assertIn("timed out", str(caught.exception))
-            self.assertIsNone(client._proc, "the timed-out server must be closed")
-        finally:
-            os.environ.clear()
-            os.environ.update(saved)
+        # The server is made unresponsive by handing it MCP_SILENT through the same door a real
+        # server gets its configuration: the client's env map. A child no longer picks a
+        # variable up by finding it in the test process, which is the point of the rule.
+        client = McpStdioClient(
+            "demo", ["python3", str(FIXTURE)], timeout_ms=FAST_TIMEOUT_MS, env={"MCP_SILENT": "1"}
+        )
+        with self.assertRaises(McpError) as caught:
+            client.connect()
+        self.assertIn("timed out", str(caught.exception))
+        self.assertIsNone(client._proc, "the timed-out server must be closed")
 
     def test_a_slow_call_times_out_and_reports_an_error_result(self):
-        client = McpStdioClient("demo", ["python3", str(FIXTURE)], timeout_ms=FAST_TIMEOUT_MS)
-        saved = dict(os.environ)
-        os.environ["MCP_SLOW_TOOL"] = "1"
-        try:
-            client.connect()
-            result = client.call_tool("echo", {"text": "x"})
-            self.assertTrue(result.is_error)
-            self.assertIn("timed out", result.text())
-        finally:
-            os.environ.clear()
-            os.environ.update(saved)
-            client.close()
+        client = McpStdioClient(
+            "demo", ["python3", str(FIXTURE)], timeout_ms=FAST_TIMEOUT_MS, env={"MCP_SLOW_TOOL": "1"}
+        )
+        client.connect()
+        result = client.call_tool("echo", {"text": "x"})
+        self.assertTrue(result.is_error)
+        self.assertIn("timed out", result.text())
+        client.close()
 
     def test_close_terminates_the_server_process_group(self):
         client = self.connect()
@@ -228,6 +233,8 @@ class GenerationFlagTests(unittest.TestCase):
     def setUp(self):
         self.ws = Path(tempfile.mkdtemp(prefix="nsar-mcpgen-"))
         self.saved_env = dict(os.environ)
+        # Set in the environment *and* named in run_with's --mcp-env, which is the operator's
+        # workflow for a server that needs a variable: this class exercises the CLI path of it.
         os.environ["MRTR_SERVER_MODE"] = "discover"
 
     def tearDown(self):
@@ -259,6 +266,9 @@ class GenerationFlagTests(unittest.TestCase):
             self.server(),
             "--allow-tool",
             "mcp__demo__needs_input",
+            "--mcp-allow-exec",
+            "--mcp-env",
+            "MRTR_SERVER_MODE",
             *extra,
         )
 
@@ -334,6 +344,96 @@ class GenerationFlagTests(unittest.TestCase):
         )
         self.assertEqual(code, 0, out)
         self.assertIn("echo:still fine", out)
+
+
+class ServerChildEnvironmentTests(unittest.TestCase):
+    """What a server process can read about the machine that started it (finding F5).
+
+    Before this rule, a repository file naming a command bought the whole parent environment:
+    the provider's API key, cloud tokens, whatever the operator keeps there. The sandboxed Shell
+    tool scrubs its child and command hooks receive three variables; an MCP server was the one
+    place in the house where a repo-authored process was handed everything, and nothing in the
+    file's shape announced the difference.
+    """
+
+    def test_server_child_inherits_no_credentials(self):
+        # Asserted in the child, not about the dict the parent built: the fixture writes the
+        # MCP_TEST_* variables it was actually given, so a value that leaked through any
+        # inherited path - including one nobody thought to filter - would show up here.
+        marker = Path(tempfile.mkdtemp(prefix="nsar-mcpenv-")) / "seen.json"
+        os.environ["MCP_TEST_PARENT_SECRET"] = SECRET_SENTINEL
+        self.addCleanup(os.environ.pop, "MCP_TEST_PARENT_SECRET", None)
+        client = McpStdioClient(
+            "demo",
+            ["python3", str(FIXTURE)],
+            timeout_ms=FAST_TIMEOUT_MS,
+            env={"MCP_SPAWN_REPORT": str(marker), "MCP_TEST_FROM_FILE": "declared"},
+        )
+        try:
+            client.connect()
+        finally:
+            client.close()
+        seen = json.loads(marker.read_text(encoding="utf-8"))
+        self.assertEqual(
+            seen["env"],
+            {"MCP_TEST_FROM_FILE": "declared"},
+            "the parent's MCP_TEST_PARENT_SECRET reached the server child",
+        )
+
+    def test_only_named_variables_are_inherited(self):
+        parent = {
+            "PATH": "/usr/bin",
+            "LANG": "C.UTF-8",
+            "HOME": "/home/operator",
+            "AWS_SECRET_ACCESS_KEY": "leak-me",
+            "ANTHROPIC_API_KEY": "leak-me-too",
+            "GIT_TOKEN": "release-me",
+        }
+        env = mcp_environment(
+            declared={"SERVER_MODE": "read-only"}, inherit=("GIT_TOKEN", "ABSENT_NAME"), environment=parent
+        )
+        self.assertEqual(
+            env,
+            {
+                "PATH": "/usr/bin",
+                "LANG": "C.UTF-8",
+                "GIT_TOKEN": "release-me",
+                "SERVER_MODE": "read-only",
+                "NORTHSTAR_MCP": "1",
+            },
+        )
+        self.assertNotIn("HOME", env, "a name nobody released is not handed over because a server asked")
+
+    def test_the_base_environment_is_no_wider_than_a_sandboxed_commands(self):
+        # The invariant, stated as a subset rather than as a file hash: the child an MCP server
+        # gets may never see a variable the same runtime would strip from a sandboxed `Shell`
+        # call. Two lists of "what a child may inherit" drift; one shared rule does not.
+        from tools.os_sandbox import _scrubbed_env
+
+        sandbox = set(_scrubbed_env({}, workspace=Path(tempfile.mkdtemp(prefix="nsar-mcpbase-"))))
+        extra = set(MCP_BASE_ENV_KEYS) - sandbox
+        self.assertFalse(extra, f"an MCP child inherits {sorted(extra)}, which a sandboxed command would be stripped of")
+
+    def test_launch_summary_fingerprints_argv_instead_of_printing_it(self):
+        secret_path = "/srv/run/secrets/TOKEN=leak-me"
+        client = McpStdioClient("demo", ["python3", secret_path], timeout_ms=FAST_TIMEOUT_MS)
+        summary = client.launch_summary()
+        self.assertEqual(summary["argv_entries"], 2)
+        self.assertNotIn("leak-me", json.dumps(summary))
+        self.assertEqual(summary["argv_digest"], argv_digest(["python3", secret_path]))
+        self.assertEqual(len(summary["argv_digest"]), 16)
+        self.assertNotEqual(argv_digest(["python3", secret_path]), argv_digest(["python3", "other.py"]))
+
+    def test_a_server_with_no_declared_cwd_starts_in_the_workspace(self):
+        # `cwd` absent used to mean "wherever the CLI happened to be invoked", which is not the
+        # directory the run is governing, and the same value is what roots/list announces.
+        root = Path(tempfile.mkdtemp(prefix="nsar-mcpcwd-"))
+        client = McpStdioClient(
+            "demo", ["python3", "x.py"], timeout_ms=FAST_TIMEOUT_MS, workspace_root=str(root), allow_roots=True
+        )
+        self.assertEqual(client.cwd, str(root))
+        self.assertEqual(client.launch_summary()["cwd_relative"], ".")
+        self.assertEqual(client.launch_summary()["roots"], "workspace")
 
 
 if __name__ == "__main__":

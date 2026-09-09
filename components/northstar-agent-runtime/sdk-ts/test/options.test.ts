@@ -191,6 +191,8 @@ test("MCP: servers, protocol, elicitation gating, and the config declaration", (
       elicitAnswers: { confirm: { action: "accept", content: { ok: true } } },
       allowRoots: true,
       maxRounds: 2,
+      allowExec: true,
+      env: ["GITHUB_TOKEN", "HOME"],
     },
   });
   assert.equal(argv.filter((a) => a === "--mcp-server").length, 2);
@@ -203,6 +205,13 @@ test("MCP: servers, protocol, elicitation gating, and the config declaration", (
   assert.equal(flagValue(argv, "--mcp-elicit-answers"), '{"confirm":{"action":"accept","content":{"ok":true}}}');
   assert.equal(flagValue(argv, "--mcp-config"), "/tmp/.mcp.json");
   assert.equal(flagValue(argv, "--mcp-max-rounds"), "2");
+  assert.ok(argv.includes("--mcp-allow-exec"), "reading a declaration and starting it are separate flags");
+  assert.equal(argv.filter((a) => a === "--mcp-env").length, 2);
+  assert.equal(flagValue(argv, "--mcp-env"), "GITHUB_TOKEN");
+  assert.ok(
+    !argvOf({ prompt: "p", mcp: { allowExec: false } }).includes("--mcp-allow-exec"),
+    "false is not an opt-in",
+  );
 
   assert.throws(() => argvOf({ prompt: "p", mcp: { elicitAnswers: {} } }), /requires `mcp.elicit: true`/);
   assert.throws(() => argvOf({ prompt: "p", mcp: { maxRounds: 0 } }), /expects a value >= 1/);
@@ -211,6 +220,7 @@ test("MCP: servers, protocol, elicitation gating, and the config declaration", (
   assert.throws(() => argvOf({ prompt: "p", mcp: { protocol: "2024-01-01" } }), /must be one of auto, legacy, modern/);
   assert.throws(() => argvOf({ prompt: "p", mcp: { config: "yes" } }), /expects "off", "auto", or a path/);
   assert.throws(() => argvOf({ prompt: "p", mcp: { bogus: 1 } }), /northstar mcp options: unknown option\(s\) bogus/);
+  assert.throws(() => argvOf({ prompt: "p", mcp: { env: ["7BAD"] } }), /--mcp-env expects a variable name/);
   for (const value of ["off", "auto"]) {
     assert.equal(flagValue(argvOf({ prompt: "p", mcp: { config: value } }), "--mcp-config"), value);
   }

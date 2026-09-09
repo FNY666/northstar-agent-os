@@ -18,6 +18,7 @@
 
 > **2026-09-08 更新**：P0 四项（含新增的 F3 前置项）已随第十三批落地，全仓 830 → 890 项测试全绿；F1/F2 已闭合、F3 未动。
 > **同日第十四～十八批**：F3（检查点/派生恢复）、P1-2（多模型 + 独立完成判定）、`skills check`（技能供应链门）、**P1-1（MCP 2026-07-28 代际 + elicitation 走审批门）**、**token 级流式（`--stream`，带流-记录一致性校验）**、**durable 统一（会话一写者 + 检查点↔durable 事件双向翻译）**全部落地，全仓 **1239 项全绿**（runtime 942）。下表与 §4/§5 的"待做"标记已按此同步；仍未做：显式重试/退避/降级、OS 级沙箱、sidecar 侧 binding 校验。吸收"顶级优点"的取舍判据与冲突清单见 [next-gen-agent-blueprint.zh-CN.md](next-gen-agent-blueprint.zh-CN.md)。
+> **同日第五批（执行边界 P0-7 / F5）**：MCP 子进程从「全量继承父环境」改为白名单；仓库声明起进程另需`--mcp-allow-exec`；`command` 形状与 hooks 同尺（shell / 内联脚本拒，`${VAR}` 展开后判定、wrapper 前缀剥壳）；`system:init` 记 `mcp` 段（argv 摘要、env 键名、`sandboxed:false`）；`--mcp-allow-roots` 报的 root 修成`--workspace`。上表 MCP 行已按此改写。未闭合的一条仍是「服务器子进程不经 OS 沙箱」，理由写在 audit §12.2。
 > **2026-09-09 第三轮（执行路径与治理税）**：本轮基线已复测为 **1612 项全绿**（runtime 1294）；**F2 被证实只闭合了一半**——`protected_prefixes` 只拦文件工具，`Shell` 与 MCP 子进程都能改写 `.northstar/` 与 `.git/`（含一条"沙箱内植入、沙箱外 `git` 执行"的复现链），并且中毒之后 `sessions checkpoints` 仍报 `[verified]`，因为摘要只覆盖 transcript。三条新发现（F4/F5/F6）、治理税的毫秒数与修订后的路线见 [execution-boundary-audit-2026-09.zh-CN.md](execution-boundary-audit-2026-09.zh-CN.md)。
 
 ---
@@ -48,7 +49,7 @@
 | 权限 | 4 模式（`default`/`acceptEdits`/`plan`/`bypassPermissions`）；`disallowed_tools` 连 `bypassPermissions` 也不能覆盖 ✅ |
 | 内置工具 | `Read`/`Write`/`Edit`/`LS`/`Grep`/`DescribeTools`（+ 条件 `Task`、`CodexReadOnly`）；**无 shell、无网络工具** ✅ |
 | 工具沙箱 | `realpath` 先于包含性检查、写路径保护前缀默认 **仅 `(".git",)`** ✅ |
-| MCP | stdio 子进程、`initialize`→`notifications/initialized`→`tools/list`、`mcp__<server>__<tool>`、**默认 deny**、单服务器 25 工具上限、无 sampling/roots/prompts/elicitation、无重连 ✅ |
+| MCP | stdio 子进程、`server/discover` 探测 2026-07-28 无状态代际并回落旧 `initialize` 握手、MRTR `input_required` 多轮、elicitation 走审批门（默认全拒）、roots 仅 `--mcp-allow-roots` 且只报`--workspace`、`mcp__<server>__<tool>`、**默认 deny**、单服务器 25 工具上限、无 sampling/prompts、无重连；**第二道闸门（第五批）**：读声明≠起进程（`--mcp-allow-exec`）、`command` 不能是 shell 或内联脚本、子进程环境是白名单（`${VAR}` 要 `--mcp-env` 点名）、init 记 `mcp` 段（argv 摘要 + `sandboxed:false`） ✅ |
 | Skills | `.northstar/skills/*/SKILL.md` 只读渐进披露（仅 name+description 入 prompt，上限 40）；**不执行 scripts/**；无供应链校验 ✅ |
 | 策略 | `.northstar/config.toml`，13 个允许键（**不含 `hooks`**），收紧型，未知键/放宽值 fail-closed（实测：写 `permission_mode=bypassPermissions` → 拒绝启动）✅ |
 | Provider | `anthropic`（`messages.create` / `messages.stream`，prompt cache 已接）+ `openai_compat`（一个适配器覆盖一片模型，SSE 分片重组 + `stream_options` 取 usage）+ `scripted`（确定性分片）；**token 级流式已落地（第十七批）；仍无显式重试/降级策略** |

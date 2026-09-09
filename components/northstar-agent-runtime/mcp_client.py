@@ -24,12 +24,19 @@ Scope is deliberately small and fail-closed:
   every timeout path).
 - No third-party dependency: plain ``json`` + ``select`` on POSIX.
 
-Not implemented here (documented limits): MCP sampling/roots/prompts, image and
+Not implemented here (documented limits): MCP sampling and prompts, image and
 resource content blocks are passed through as text placeholders, and there is no
 reconnection. The live-tool surface of the runtime remains the registry.
+
+Two things a caller must not assume about a server started here: it is a child of the CLI,
+not of the run's sandbox (``launch_summary`` says ``sandboxed: false`` so the record cannot
+be read as a promise), and it is started with an allowlist environment - ``PATH``/``LANG``/
+``LC_ALL`` plus whatever its own declaration named - never with the parent's, because a
+workspace file that can name a program must not thereby obtain the operator's credentials.
 """
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import re
@@ -40,7 +47,7 @@ import subprocess
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Mapping
+from typing import Any, Mapping, Sequence
 
 from _version import __version__
 from mcp_elicitation import (
@@ -94,6 +101,54 @@ class RemoteTool:
     annotations: dict[str, Any] = field(default_factory=dict)
 
 
+#: What an MCP server child is started with unless the operator or the config
+#: file names more. These are the same trio `tools.os_sandbox._scrubbed_env` hands a
+#: sandboxed command, plus this client's own marker so a server can tell it was
+#: launched by us. One list of "what a child may inherit" is the point: two lists
+#: would be two answers to one question.
+MCP_BASE_ENV_KEYS: tuple[str, ...] = ("PATH", "LANG", "LC_ALL")
+MCP_MARKER_KEY = "NORTHSTAR_MCP"
+
+
+def mcp_environment(
+    *,
+    declared: Mapping[str, str] | None = None,
+    inherit: Sequence[str] = (),
+    environment: Mapping[str, str] | None = None,
+) -> dict[str, str]:
+    """Build a server's environment from an allowlist, never the parent's whole view.
+
+    The parent environment of a governed run holds the model's API key, cloud tokens,
+    and whatever else the operator keeps there. A repository that named an MCP server
+    used to receive all of it - a materially different bargain from the one the same
+    repository's command hooks get (three variables, and no shell at all). Default-deny
+    is the fix: the config file's own ``env`` map always arrives, a name in ``inherit``
+    arrives when the operator passes ``--mcp-env NAME``, and nothing else does.
+    """
+    source = os.environ if environment is None else environment
+    env = {key: source[key] for key in MCP_BASE_ENV_KEYS if key in source}
+    for name in inherit:
+        key = str(name)
+        if key in source:
+            env[key] = source[key]
+    for key, value in dict(declared or {}).items():
+        env[str(key)] = str(value)
+    env[MCP_MARKER_KEY] = "1"
+    return env
+
+
+def argv_digest(argv: Sequence[str]) -> str:
+    """A fingerprint of a launch command, for records that must not carry the command.
+
+    An argv read from `.mcp.json` can contain a resolved `${TOKEN}`, and the transcript
+    is the one artifact here that gets shared, pasted into tickets and grepped in CI. A
+    digest still answers "is this the server I reviewed?", which is what an audit record
+    is for, without becoming the secret itself.
+    """
+    joined = "\x00".join(str(item) for item in argv)
+    return hashlib.sha256(joined.encode("utf-8")).hexdigest()[:16]
+
+
 def parse_mcp_flag(value: str) -> tuple[str, list[str]]:
     """Parse ``--mcp-server NAME=COMMAND ARG...`` (command split with shlex)."""
     if "=" not in value:
@@ -139,6 +194,7 @@ class McpStdioClient:
         elicitor: Any | None = None,
         audit: Any | None = None,
         workspace_root: str = "",
+        inherit_env: Sequence[str] = (),
         allow_sensitive_input: bool = False,
         allow_roots: bool = False,
         max_input_rounds: int = MAX_INPUT_ROUNDS,
@@ -158,13 +214,21 @@ class McpStdioClient:
         self.elicitor = elicitor
         self.audit = audit
         self.workspace_root = str(Path(workspace_root).resolve()) if workspace_root else ""
-        # A server imported from a workspace config file may name extra environment
-        # variables and a working directory. Those variables are *added* to the inherited
-        # environment, never a filter over it: trimming what a child process may see is the
-        # host OS's job (see the component README's limitations), and claiming otherwise
-        # here would be a security promise this function could not keep.
+        # What a server child gets is an allowlist now, not the parent's environment plus a
+        # few. The comment this replaces argued that trimming a child's view is the host
+        # OS's job - true of a process you chose to trust, false of one a repository file
+        # named, and inconsistent with `tools.os_sandbox` scrubbing and with a command
+        # hook's three variables. The cost is stated instead of hidden: a server that needs
+        # a variable is given it by its own `env` map, or by the operator's `--mcp-env`.
         self.extra_env = {str(key): str(value) for key, value in dict(env or {}).items()}
-        self.cwd = str(cwd) if cwd else ""
+        self.inherit_env = tuple(dict.fromkeys(
+            str(key) for key in inherit_env if str(key).strip()
+        ))
+        # An unqualified cwd used to mean 'wherever the CLI happened to be started', which
+        # for `--workspace X` is a different directory than the one the run governs. A
+        # server with no declared cwd now starts in the workspace it was declared in.
+        self.cwd = str(cwd) if cwd else self.workspace_root
+        self.child_env = mcp_environment(declared=self.extra_env, inherit=self.inherit_env)
         self.allow_sensitive_input = bool(allow_sensitive_input)
         self.allow_roots = bool(allow_roots)
         self.max_input_rounds = int(max_input_rounds)
@@ -234,6 +298,51 @@ class McpStdioClient:
             raise McpError(f"mcp server {self.name!r}: initialize returned a non-object result")
         self._notify("notifications/initialized")
 
+    @property
+    def declared_env_keys(self) -> tuple[str, ...]:
+        """The variables this child was *given*, beyond the base trio.
+
+        Names only, always: an MCP server's `API_KEY=...` value must not land in a
+        transcript, and the audit record needs to say which secrets were in play
+        without becoming one.
+        """
+        return tuple(sorted(
+            key
+            for key in self.child_env
+            if key not in MCP_BASE_ENV_KEYS and key != MCP_MARKER_KEY
+        ))
+
+    def launch_summary(self) -> dict[str, Any]:
+        """What this server was, in a form safe to put in `system:init` and share."""
+        return {
+            "name": self.name,
+            "argv_digest": argv_digest(self.command),
+            "argv_entries": len(self.command),
+            "cwd_relative": self._cwd_note(),
+            "env_keys": list(self.declared_env_keys),
+            # The field a reader must not be allowed to miss: this child runs outside the
+            # OS sandbox, so its filesystem writes are not contained by the run's own gate.
+            "sandboxed": False,
+            "era": self.era,
+            "protocol_version": self.protocol_version,
+            # "workspace", not the path: the root this client will announce is by construction
+            # the run's workspace, and the record should say which of the two it was without
+            # copying an absolute host path into a transcript that is meant to be shared.
+            "roots": "workspace" if self.allow_roots and self.workspace_root else "none",
+        }
+
+    def _cwd_note(self) -> str:
+        """Where the child starts, phrased relative to the workspace when it can be."""
+        if not self.cwd:
+            return "unset"
+        path = Path(str(self.cwd))
+        if self.workspace_root:
+            try:
+                return str(path.relative_to(Path(self.workspace_root)))
+            except ValueError:
+                return f"outside ({path.name})"
+        return str(path)
+
     def connect(self) -> None:
         """Spawn the server, agree a generation, and list its tools."""
         if self._proc is not None:
@@ -245,7 +354,7 @@ class McpStdioClient:
                 stdout=subprocess.PIPE,
                 stderr=subprocess.DEVNULL,  # server logs never block the client
                 start_new_session=True,      # own process group for TERM->KILL cleanup
-                env=({**os.environ, **self.extra_env} if self.extra_env else None),
+                env=self.child_env,
                 cwd=self.cwd or None,
             )
         except OSError as error:

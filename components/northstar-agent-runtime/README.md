@@ -248,9 +248,13 @@ python3 -m cli run --workspace . --prompt "summarise the files" \
   `--mcp-config auto` imports the `mcpServers` (or VS Code's `servers`) table from
   `.mcp.json`, `.cursor/mcp.json`, `.vscode/mcp.json` and `.gemini/settings.json` — the
   dialects the other 2026 hosts ship — and `--mcp-config PATH` reads exactly one file.
-  It is **off by default and stays off unless the operator asks**: a file inside a
-  repository cannot start a process by itself, which is the same reason a plugin's MCP
-  server needs nothing more than the operator's flag to run. An imported server arrives as
+  It is **off by default and stays off unless the operator asks**, and asking has two
+  steps: `--mcp-config` says *read the file*, `--mcp-allow-exec` says *the servers it names may
+  become processes*. Without the second, every declaration in the file is reported, deferred and
+  recorded in the run's own `system:init` (`mcp.deferred`) instead of being dropped silently - the
+  same division that keeps a repository's hooks inert until `enable_commands`, and the reason a
+  plugin bundle's server is treated as repository content too. A server you typed yourself with
+  `--mcp-server` needs neither flag: authorship is the line, not file format. An imported server arrives as
   `(name, argv)` plus optional `env`/`cwd`, which is what `--mcp-server` produces, so it
   inherits every rule above — mutating by default, denied until `--allow-tool` names it,
   closed on SIGTERM. `python3 -m cli mcp list --workspace .` prints the same report without
@@ -270,10 +274,13 @@ python3 -m cli run --workspace . --prompt "summarise the files" \
   to be legal — `"GitHub"` is refused with instructions rather than renamed, because a tool
   name nobody read is a tool name nobody reviewed. A repository with one remote server still
   gets its stdio ones. And it *notes* what the file decided deliberately:
-  `disabled: true` is reported as "not started", not as an alarm. `env` values are **added**
-  to the child's environment, never a filter over it — trimming what a process may see is
-  the host OS's job — and `${VAR}` is expanded from the operator's environment, so a secret
-  lives in the environment and a digest of the run records only the variable *names*.
+  `disabled: true` is reported as "not started", not as an alarm. What a server child is
+  started with is an **allowlist**: `PATH`, `LANG`, `LC_ALL`, plus the entries that server's own
+  `env` map spells out, and nothing else from this process's environment. A repository naming a
+  program does not thereby earn the operator's credentials, which is the bargain a command hook
+  already gets (`hooks.py` hands it three variables and no shell). So `${VAR}` in the file is
+  unreadable unless the run releases that one name - `--mcp-env DEMO_API_KEY` - and the run's
+  record keeps to variable *names* plus a digest of the argv, never a value.
 - Each server is a child process speaking JSON-RPC 2.0 over stdio, under a
   per-request deadline (`--mcp-timeout-ms`, default 15 s); a server that stops
   answering is TERM→KILLed as a process group.
@@ -910,8 +917,10 @@ What a bundle may not do:
   the workspace's own `.mcp.json`: this runtime starts a server from a command line or an
   imported workspace declaration, and inventing a side channel for a plugin's environment
   would be a new permission path wearing a plugin's clothes. A workspace file may name
-  variables for its own servers, but their values come from the operator's environment at
-  launch, not from the repository.
+  variables for its own servers, but their values come from the operator's environment only
+  for the names that operator released with `--mcp-env`, never from the repository - and a
+  bundle's server meets the launch-shape rule as well (no shell, no inline script), because a
+  bundle on disk is repository content by authorship whatever its format.
 - **Leave the directory.** Declared paths are resolved inside the bundle; symlinks are
   refused on the way in and on the way out (`uninstall` will not remove through one).
 - **Vouch for itself.** The content digest deliberately excludes the manifest's
@@ -1334,8 +1343,12 @@ caught by the unit-level compaction tests rather than the loop-level one.
   file that governs a run is the one under the `--workspace` given that time. Foreign
   approvals are refused rather than approximated; a remote (HTTP/SSE) declaration is
   skipped with a warning rather than downgraded into a stdio guess; and the `env` a file
-  names is *added* to the child's environment, because this component does not sandbox
-  processes - a declared variable is a convenience, never an isolation boundary.
+  names is added to an environment this component builds from three inherited keys rather than
+  from the parent's, because a declared variable is a convenience and used to be mistaken for an
+  isolation boundary. What is *not* closed: a server child runs outside the OS sandbox, so it can
+  write anywhere its user can (`sandboxed: false` is in the run's init record for that reason),
+  and wrapping it in `run_sandboxed` would need a long-lived spawn primitive this component does
+  not have - see the audit's §12.2.
 - **Process-group `TERM`→`KILL` cleanup is not verified on real Linux here.** That
   behaviour belongs to the sidecar; the runtime only bounds its own socket read.
 - **The retry policy is a bound, not a resilience system.** It is verified against a

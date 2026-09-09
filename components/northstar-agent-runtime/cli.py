@@ -374,10 +374,12 @@ def _add_run_arguments(parser: argparse.ArgumentParser) -> None:
         default="off",
         metavar="auto|PATH|off",
         help=(
-            "also start the servers this workspace declares in its own MCP config file "
+            "read the servers this workspace declares in its own MCP config file "
             "(.mcp.json, .cursor/mcp.json, .vscode/mcp.json, .gemini/settings.json). Off by "
             "default: the operator opts in at the command line, and a repository file never "
-            "opts itself in. HTTP/SSE servers and autoApprove lists are refused, not imported"
+            "opts itself in. Reading is not starting: the file's servers run only if the same "
+            "command also passes --mcp-allow-exec. HTTP/SSE servers and autoApprove lists are "
+            "refused, not imported"
         ),
     )
     mcp.add_argument("--mcp-server", dest="mcp_servers", action="append", default=[], metavar="NAME=COMMAND...", help="connect one MCP stdio server; its tools appear as mcp__NAME__tool and are mutating-by-default (denied until --allow-tool names them). Repeatable.")
@@ -388,6 +390,34 @@ def _add_run_arguments(parser: argparse.ArgumentParser) -> None:
     mcp.add_argument("--mcp-allow-sensitive-input", action="store_true", help="allow an MCP elicitation to ask for a password/token/secret field. Off by default: secrets do not travel through a tool transport")
     mcp.add_argument("--mcp-allow-roots", action="store_true", help="let an MCP server list workspace roots; when allowed it is offered exactly one root, the workspace itself")
     mcp.add_argument("--mcp-max-rounds", type=int, default=3, help="how many times one tool call may be re-asked for input before the client gives up")
+    mcp.add_argument(
+        "--mcp-allow-exec",
+        action="store_true",
+        help=(
+            "start the servers a workspace MCP config file declares. Off by default, and the "
+            "default is the point: a repository may name a server - that is what .mcp.json is "
+            "for - but only the operator decides it runs, the same division of labour that "
+            "keeps hooks inert until a second flag enables them. Servers you typed with "
+            "--mcp-server start either way; nobody needed to approve your command line. A run "
+            "without this flag still reads the file and reports what it found"
+        ),
+    )
+    mcp.add_argument(
+        "--mcp-env",
+        dest="mcp_env",
+        action="append",
+        default=[],
+        metavar="NAME",
+        help=(
+            "release one variable of this process's environment to the MCP servers this run "
+            "starts, and let a workspace config file resolve ${NAME} in it (repeatable). Off by "
+            "default: a server child gets PATH, LANG and LC_ALL plus whatever the file spells "
+            "out itself, which is the bargain a command hook gets too. A file cannot read "
+            "$ANY_OTHER_VARIABLE; that was finding F5. The name reaches every server this run "
+            "starts, so a secret meant for one of them belongs in that server's own env map "
+            "instead, where the file says which one it is for"
+        ),
+    )
 
     execution = parser.add_argument_group("execution delegation")
     execution.add_argument("--sidecar-socket", default="", help="Unix socket of northstar-codex-sidecar; enables the CodexReadOnly tool")
@@ -882,7 +912,7 @@ def _parse_mcp_servers(args: argparse.Namespace) -> list[tuple[str, list[str]]]:
 def _mcp_launch(args: argparse.Namespace) -> tuple[list[tuple[str, list[str]]], dict[str, Any], Any]:
     """The servers to start, plus the env/cwd each imported one asked for.
 
-    Returns ``(servers, launch, report)``. ``servers`` keeps the ``(name, argv)`` shape every
+    Returns ``(servers, launch, report, sources)``. ``servers`` keeps the ``(name, argv)`` shape every
     other caller of the MCP path uses - flags and plugin contributions both produce it - and
     ``launch`` carries the two per-server extras only a config file can supply. Keeping them
     apart is deliberate: inventing a parallel field for flag- and plugin-declared servers
@@ -893,19 +923,28 @@ def _mcp_launch(args: argparse.Namespace) -> tuple[list[tuple[str, list[str]]], 
     approved is worse than no run. A file that describes one server we cannot start (an HTTP
     transport) is a loud warning instead, because that is a limitation of this runtime rather
     than a question about trust, and the other servers in the file are still the operator's.
+
+    ``sources`` carries the answer to the question the exec gate asks - who wrote this
+    declaration - and is why the return tuple grew instead of the server tuples: provenance is
+    not a property of a launch command, and slipping it into ``argv`` would put it in front of
+    the model.
     """
     from mcp_config import McpImport, McpConfigError, discover, read_document
 
     requested = str(getattr(args, "mcp_config", "off") or "off")
     servers = _parse_mcp_servers(args)
+    allowed = tuple(str(name) for name in getattr(args, "mcp_env", []) or [])
+    sources = {name: "flag" for name, _argv in servers}
     if requested == "off":
-        return servers, {}, None
+        return servers, {}, None, sources
     workspace = Path(str(getattr(args, "workspace", ".") or ".")).resolve()
     try:
         if requested == "auto":
-            report = discover(workspace)
+            report = discover(workspace, allowed_variables=allowed)
         else:
-            found, refused, notes = read_document(workspace / requested, workspace=workspace)
+            found, refused, notes = read_document(
+                workspace / requested, workspace=workspace, allowed_variables=allowed
+            )
             report = McpImport(servers=found, refused=refused, notes=notes, files=(requested,))
     except (McpConfigError, OSError, ValueError) as error:
         raise ValueError(f"mcp config: {error}") from error
@@ -920,7 +959,9 @@ def _mcp_launch(args: argparse.Namespace) -> tuple[list[tuple[str, list[str]]], 
             "mcp config: " + ", ".join(clash) + " declared by both --mcp-server and the workspace file; "
             "remove one - neither source may shadow the other's environment"
         )
-    return [*servers, *[(server.name, list(server.argv)) for server in report.servers]], launch, report
+    for server in report.servers:
+        sources[server.name] = f"file:{server.source}"
+    return [*servers, *[(server.name, list(server.argv)) for server in report.servers]], launch, report, sources
 
 
 def _mcp_stance_note(args: argparse.Namespace) -> str:
@@ -975,6 +1016,34 @@ def _mcp_elicitor(args: argparse.Namespace) -> Any:
     return make_terminal_elicitor()
 
 
+def _mcp_exec_gate(
+    servers: list[tuple[str, list[str]]], sources: dict[str, str], *, allow_exec: bool
+) -> tuple[list[tuple[str, list[str]]], list[str]]:
+    """Split declarations into the ones this run may start and the ones it may not.
+
+    One flag decides whether a repository's text becomes a process. Before it, ``--mcp-config``
+    was the whole decision, which left a workspace file holding a power no other repo file has:
+    ``hooks`` needs ``enable_commands`` before a command runs, a skill needs review before it is
+    loaded, a plugin bundle needs its name on an allowlist, and ``.mcp.json`` needed only to
+    exist. What separates them is authorship, and authorship is checkable: a command line the
+    operator typed is their own act, a file a dependency committed is not.
+
+    A deferred declaration is reported, never dropped quietly - silence would leave the author
+    wondering whether the file was read at all, and the value of a two-stage rule is that stage
+    one answers out loud.
+    """
+    if allow_exec:
+        return list(servers), []
+    started: list[tuple[str, list[str]]] = []
+    deferred: list[str] = []
+    for name, argv in servers:
+        if sources.get(name) == "flag":
+            started.append((name, argv))
+        else:
+            deferred.append(name)
+    return started, deferred
+
+
 def _connect_mcp_clients(
     servers: Sequence[tuple[str, list[str]]],
     timeout_ms: int,
@@ -987,6 +1056,11 @@ def _connect_mcp_clients(
     Every tool is mutating-by-default and needs_workspace=False, so the runtime's
     permission gate denies it under 'default' until --allow-tool names it. On any
     failure the servers opened so far are closed before the error propagates.
+
+    Nothing here decides whether a server may run: every rule that can refuse a declaration -
+    shell or inline-script shape, approval lists, unknown keys, a cwd that escapes the
+    workspace, a variable nobody released - ran in ``mcp_config`` while the file was read, so
+    one unacceptable server cannot leave the rest of the file half-started.
     """
     from mcp_client import McpStdioClient, mcp_tool_specs
 
@@ -998,7 +1072,11 @@ def _connect_mcp_clients(
             "allow_sensitive_input": bool(getattr(args, "mcp_allow_sensitive_input", False)),
             "allow_roots": bool(getattr(args, "mcp_allow_roots", False)),
             "max_input_rounds": getattr(args, "mcp_max_rounds", 3),
-            "workspace_root": Path.cwd(),
+            "inherit_env": tuple(str(name) for name in getattr(args, "mcp_env", []) or []),
+            # The run's workspace, not wherever the CLI happened to be invoked. This is the
+            # value `roots/list` offers a server as the one directory it may ask about, so a run
+            # started from a repository root was handing that root to any server in range.
+            "workspace_root": Path(str(getattr(args, "workspace", ".") or ".")).resolve(),
         }
     clients: list[Any] = []
     extras = dict(launch or {})
@@ -1249,13 +1327,39 @@ def _run(args: argparse.Namespace) -> int:
     mcp_servers: list[tuple[str, list[str]]] = []
     mcp_launch: dict[str, Any] = {}
     mcp_report = None
+    mcp_sources: dict[str, str] = {}
+    mcp_deferred: list[str] = []
     if args.mcp_servers or str(getattr(args, "mcp_config", "off") or "off") != "off":
-        mcp_servers, mcp_launch, mcp_report = _mcp_launch(args)
-    for server in (plugins.mcp_servers if plugins else ()):
-        # A bundle's server enters the same list as an operator's flag, so it inherits the
-        # whole rule set that comes with it: mutating by default, denied until named, and
-        # closed on SIGTERM. Nothing here lets a plugin register a tool directly.
-        mcp_servers.append((str(server["name"]), [str(server["command"]), *[str(a) for a in server.get("args") or ()]]))
+        mcp_servers, mcp_launch, mcp_report, mcp_sources = _mcp_launch(args)
+    from mcp_config import MCP_IMPORT_VERSION, McpConfigError as _ShapeError, check_launch_shape
+
+    try:
+        for server in (plugins.mcp_servers if plugins else ()):
+            bundle_name = str(server["name"])
+            bundle_argv = [str(server["command"]), *[str(a) for a in server.get("args") or ()]]
+            # A bundle is repository content like `.mcp.json` is, and it arrives as strings
+            # rather than JSON, so the shape rule has to be applied here by hand.
+            check_launch_shape(bundle_name, bundle_argv, source=f"plugin:{bundle_name}")
+            # A bundle's server enters the same list as an operator's flag, so it inherits the
+            # whole rule set that comes with it: mutating by default, denied until named, and
+            # closed on SIGTERM. Nothing here lets a plugin register a tool directly.
+            mcp_servers.append((bundle_name, bundle_argv))
+            mcp_sources[bundle_name] = "file:bundle"
+    except _ShapeError as error:
+        raise ValueError(f"mcp config: {error}") from None
+
+    # Every declaration is now in hand, from all three sources, so this is the one place the
+    # "may it become a process?" question can be answered without a source sneaking past it.
+    mcp_declared = list(mcp_servers)
+    mcp_servers, mcp_deferred = _mcp_exec_gate(
+        mcp_servers, mcp_sources, allow_exec=bool(getattr(args, "mcp_allow_exec", False))
+    )
+    for name in mcp_deferred:
+        print(
+            f"! mcp config: {name} (declared by {mcp_sources.get(name, 'the workspace')}) was not started: a repository "
+            "file may name a server, only --mcp-allow-exec may start one; add that flag if this run should",
+            file=sys.stderr,
+        )
 
     def tighten(cli_value: int | None, file_value: int | None) -> int | None:
         """Policy-file ceilings may only lower; when both are set, the lower wins."""
@@ -1499,6 +1603,16 @@ def _run(args: argparse.Namespace) -> int:
         # An opt-out has to reach the object the run is built from, not just the parser, and
         # the loop echoes it in system:init so the transcript says it was off.
         config_kwargs["governance_watch"] = False
+    if mcp_declared or mcp_report is not None:
+        config_kwargs["mcp_declaration"] = {
+            "exec_gate": "open" if getattr(args, "mcp_allow_exec", False) else "operator-typed-only",
+            "config": str(getattr(args, "mcp_config", "off") or "off"),
+            "declared": sorted(mcp_sources),
+            "sources": dict(sorted(mcp_sources.items())),
+            "deferred": sorted(mcp_deferred),
+            "released_env": sorted(str(name) for name in getattr(args, "mcp_env", []) or []),
+            "import_rules": MCP_IMPORT_VERSION,
+        }
     config_kwargs["session_id"] = store.session_id
     try:
         config = RuntimeConfig(**config_kwargs)
@@ -1538,11 +1652,16 @@ def _run(args: argparse.Namespace) -> int:
         )
     else:
         plugin_note = "none (.northstar/plugins is empty)"
-    if mcp_servers:
-        listed = ", ".join(f"{name}={' '.join(command)}" for name, command in mcp_servers)
+    if mcp_declared:
+        # The note lists what was *declared*, not just what this run may start: a dry run that
+        # printed "off" because a gate held a server back would teach a reader that the
+        # workspace says nothing, which is the opposite of the truth.
+        listed = ", ".join(f"{name}={' '.join(command)}" for name, command in mcp_declared)
         note = _mcp_stance_note(args)
         if mcp_report is not None:
             note += f"; config {mcp_report.summary()}"
+        if mcp_deferred:
+            note += f"; not started without --mcp-allow-exec: {', '.join(sorted(mcp_deferred))}"
         mcp_note = f"{listed} ({note})"
     else:
         mcp_note = "off"
@@ -1597,6 +1716,7 @@ def _run(args: argparse.Namespace) -> int:
     if mcp_servers:
         try:
             mcp_clients = _connect_mcp_clients(mcp_servers, args.mcp_timeout_ms, registry, args, mcp_launch)
+            runtime.observe_mcp([client.launch_summary() for client in mcp_clients])
         except ValueError as error:
             print(f"configuration error: {error}", file=sys.stderr)
             return USAGE_ERROR

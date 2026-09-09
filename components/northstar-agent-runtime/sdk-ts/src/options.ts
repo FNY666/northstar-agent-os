@@ -70,6 +70,12 @@ export type McpOptions = {
   allowSensitiveInput?: boolean;
   allowRoots?: boolean;
   maxRounds?: number;
+  /** Let the servers named by `config` actually start. Off by default: a workspace file may
+   *  declare a process, and only this flag (or `servers`, which you typed yourself) starts one. */
+  allowExec?: boolean;
+  /** Variable names released from this process's environment, one at a time. A child gets
+   *  `PATH`/`LANG`/`LC_ALL` plus its own `env` map unless a name appears here. */
+  env?: string[];
 };
 
 export type SidecarOptions = {
@@ -214,6 +220,8 @@ const MCP_FLAGS: Record<keyof McpOptions, string> = {
   allowSensitiveInput: "--mcp-allow-sensitive-input",
   allowRoots: "--mcp-allow-roots",
   maxRounds: "--mcp-max-rounds",
+  allowExec: "--mcp-allow-exec",
+  env: "--mcp-env",
 };
 
 const SIDECAR_FLAGS: Record<keyof SidecarOptions, string> = {
@@ -511,7 +519,16 @@ function appendMcp(mcp: McpOptions, options: RunOptions, argv: string[]): void {
     push(value, MCP_FLAGS.protocol, argv);
   }
   if (mcp.maxRounds !== undefined) push(checkNumber(mcp.maxRounds, MCP_FLAGS.maxRounds, { min: 1, max: 8, integer: true }), MCP_FLAGS.maxRounds, argv);
-  for (const key of ["elicit", "allowSensitiveInput", "allowRoots"] as const) {
+  if (mcp.env !== undefined) {
+    const names = checkStringList(mcp.env, MCP_FLAGS.env);
+    for (const name of names) {
+      if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(name)) {
+        fail(`${MCP_FLAGS.env} expects a variable name (got ${JSON.stringify(name)})`);
+      }
+    }
+    pushList(names, MCP_FLAGS.env, argv);
+  }
+  for (const key of ["elicit", "allowSensitiveInput", "allowRoots", "allowExec"] as const) {
     const value = mcp[key];
     if (value === undefined) continue;
     if (typeof value !== "boolean") fail(`${MCP_FLAGS[key]} expects a boolean`);

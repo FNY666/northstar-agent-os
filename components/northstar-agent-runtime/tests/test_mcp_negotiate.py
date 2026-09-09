@@ -183,14 +183,16 @@ class NegotiationSubprocessTests(unittest.TestCase):
 
     def connect(self, *, mode: str, fixture: Path = FIXTURE, **kwargs: object) -> McpStdioClient:
         wire = Path(tempfile.mkdtemp(prefix="nsar-mcpwire-")) / "wire.jsonl"
-        saved = dict(os.environ)
-        os.environ.update({"MRTR_SERVER_MODE": mode, "MRTR_SERVER_WIRE": str(wire)})
-        try:
-            client = McpStdioClient("demo", [sys.executable, str(fixture)], timeout_ms=8_000, **kwargs)  # type: ignore[arg-type]
-            client.connect()
-        finally:
-            os.environ.clear()
-            os.environ.update(saved)
+        # Told through the client's env map rather than the test process's environment, because a
+        # child receives exactly what the run handed it. Nothing here mutates global state.
+        client = McpStdioClient(
+            "demo",
+            [sys.executable, str(fixture)],
+            timeout_ms=8_000,
+            env={"MRTR_SERVER_MODE": mode, "MRTR_SERVER_WIRE": str(wire)},
+            **kwargs,  # type: ignore[arg-type]
+        )
+        client.connect()
         client._wire_path = str(wire)  # noqa: SLF001 - test-local bookkeeping
         return client
 
@@ -268,15 +270,10 @@ class NegotiationSubprocessTests(unittest.TestCase):
     def test_the_older_echo_server_still_works_unchanged(self):
         # Backward compatibility is the point of the fallback, so it is asserted
         # against the fixture that predates this whole generation.
-        saved = dict(os.environ)
-        os.environ.pop("MRTR_SERVER_MODE", None)
-        os.environ.pop("MRTR_SERVER_WIRE", None)
-        try:
-            client = McpStdioClient("old", [sys.executable, str(LEGACY_FIXTURE)], timeout_ms=8_000)
-            client.connect()
-        finally:
-            os.environ.clear()
-            os.environ.update(saved)
+        # No env map at all: this fixture's point is that a server which never heard of the
+        # newer generation needs no configuration to keep working.
+        client = McpStdioClient("old", [sys.executable, str(LEGACY_FIXTURE)], timeout_ms=8_000)
+        client.connect()
         try:
             self.assertEqual(client.era, "legacy")
             result = client.call_tool("echo", {"text": "still fine"})
@@ -289,15 +286,11 @@ class NegotiationSubprocessTests(unittest.TestCase):
     def test_a_modern_only_server_on_the_legacy_fallback_fails_loudly(self):
         # ``no-discover`` refuses the probe *and* the handshake: the client must report
         # the server's own error, not a timeout the operator would debug for an hour.
-        saved = dict(os.environ)
-        os.environ["MRTR_SERVER_MODE"] = "no-discover"
-        try:
-            client = McpStdioClient("demo", [sys.executable, str(FIXTURE)], timeout_ms=8_000)
-            with self.assertRaises(McpError) as caught:
-                client.connect()
-        finally:
-            os.environ.clear()
-            os.environ.update(saved)
+        client = McpStdioClient(
+            "demo", [sys.executable, str(FIXTURE)], timeout_ms=8_000, env={"MRTR_SERVER_MODE": "no-discover"}
+        )
+        with self.assertRaises(McpError) as caught:
+            client.connect()
         self.assertIn("modern-only", str(caught.exception))
         self.assertEqual(client._proc, None, "a failed connection leaves no child process behind")
 

@@ -1,5 +1,49 @@
 # Northstar Agent OS — initial public component
 
+## Unreleased (code batch) — a repository may name a process, not start one
+
+The 2026-09-09 audit's P0-7 (finding F5: MCP children were the one place in the house where a
+repository-authored process got the operator's whole environment). `docs/execution-boundary-audit-2026-09.zh-CN.md`
+§12 reconciles each acceptance criterion with what this host proves, and records the two places
+this batch deliberately did not do what §4.4 proposed.
+
+- **Two consents, not one.** `--mcp-config` reads a workspace's `.mcp.json` (and the Cursor / VS Code
+  / Gemini dialects) and reports it; `--mcp-allow-exec` is what turns those declarations into
+  processes. Without it every imported server is named on stderr, deferred, and recorded as
+  `mcp.deferred` in the run's own `system:init` — reported, not silently dropped. A server you typed
+  with `--mcp-server` needs neither flag: the line is drawn at authorship, the same place `hooks`
+  draws it. A plugin bundle's server is repository content too, so it passes the same gate and the
+  same shape rule.
+- **A server child gets an allowlist.** `PATH`, `LANG`, `LC_ALL`, plus whatever that server's own
+  `env` map spells out — and nothing else from the parent environment, which used to include the
+  provider key and every cloud token in reach. `${VAR}` in a workspace file now resolves only for
+  names the operator releases one at a time with `--mcp-env NAME`; anything else is a configuration
+  error that names the flag to add. The base keys are pinned to be no wider than what
+  `tools.os_sandbox` leaves a sandboxed command, so "what a child may inherit" is one answer again.
+- **A declaration must be reviewable, so no shell and no inline script.** `command: "sh"` with
+  `-c`, an interpreter with `-c/-e/-E/eval`, a wrapper prefix (`env`, `nohup`, …) hiding either, and
+  a whole command line stuffed into `command` are refused after `${VAR}` expansion. The seven shapes
+  real servers actually use (`python3 server.py`, `-m package`, `npx -y`, `uvx`, `docker run -i`) are
+  pinned as accepted, because a rule that rejects them is a rule somebody disables.
+- **The run records what it was willing to start.** `system:init` gains an `mcp` block: the exec gate,
+  which files were read, every declaration with its source, what was deferred, which variables were
+  released — and per connected server, an argv *digest* (never the argv, which can carry a resolved
+  secret), its cwd relative to the workspace, the environment's *names*, the negotiated era, and
+  `sandboxed: false`, said out loud because a server child still runs outside the OS sandbox.
+- **Roots now mean what the help text says.** `--mcp-allow-roots` used to announce the directory the
+  CLI was invoked from as "the workspace"; it is the run's `--workspace` (`audit §4.3`), and a server
+  with no declared `cwd` starts there too instead of wherever the tool happened to live.
+- `MCP_IMPORT_VERSION` `v1 → v2` — a launch-policy generation, not a format change — and the
+  `mcp list` JSON report pins it, since the version is how a log says which rules were applied.
+  `mcp list` also stopped *resolving* `${VAR}`: reviewing a file no longer prints a secret into a CI log.
+- Not done, with reasons written down: wrapping a server in `run_sandboxed` (it is a one-shot,
+  deadline-bound exec primitive; a stdio server needs a long-lived pipe — a separate batch), and a
+  hard exit 64 for `--mcp-config` without the exec flag (that would hand a denial-of-service lever to
+  whoever commits the file; the disclosure is loud instead, and `mcp list` is the CI gate).
+
+Runtime suite 1321 → 1344 (23 tests in this batch, six of them re-driven through the CLI); repo
+`make test` 1662 green, TypeScript face 57/57, `./bin/northstar bench` 14/14 unchanged.
+
 ## Unreleased (code batch) — the gate reaches behind itself
 
 Acted on the 2026-09-09 execution-path audit (`docs/execution-boundary-audit-2026-09.zh-CN.md`):

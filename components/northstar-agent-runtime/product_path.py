@@ -151,6 +151,10 @@ def _flags_taking_value() -> frozenset[str]:
             "--context-file",
             "--memory-file",
             "--mcp-config",
+            # `--mcp-allow-exec` is deliberately absent: it is a boolean, so the token after it
+            # *is* the task, which is what the leading-dash rule below relies on. `--mcp-env`
+            # takes a name, and a task must not be able to steal it.
+            "--mcp-env",
             "--mcp-protocol",
             "--mcp-elicit-answers",
             "--mcp-max-rounds",

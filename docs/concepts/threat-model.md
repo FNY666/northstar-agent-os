@@ -13,7 +13,7 @@ release is worse than none.
 | Asset | Why it matters |
 | --- | --- |
 | Host filesystem outside the workspace | Source code, secrets, SSH keys, sibling projects |
-| Credentials in the parent environment | API keys, tokens, cloud configs the agent must not inherit |
+| Credentials in the parent environment | API keys, tokens, cloud configs the agent must not inherit — nor may a child this runtime launches, including an MCP server named by a repository file |
 | Network egress | Exfil, supply-chain pulls, unexpected C2 |
 | The run's own budget and audit trail | A runaway shell that burns tokens or erases evidence |
 | Policy files under `.northstar/` | Write-protected by the tool sandbox **and** re-bound read-only inside the OS sandbox; where a bind is impossible, the run detects the change and stops itself |
@@ -138,6 +138,17 @@ A run that promised OS isolation and then could not deliver it is a
 6. **Sidecar is a different trust domain** — `CodexReadOnly` stays read-only
    over a Unix socket; it is not a substitute for Shell, and Shell is not a
    path into the sidecar.
+7. **An MCP server child is not sandboxed** — it is a direct child of the CLI, so
+   its writes are not contained by the run's mounts even when bwrap is available.
+   What is closed around it: starting a repository-declared server needs
+   `--mcp-allow-exec` (and `--mcp-config` before it), the launch shape may not be a
+   shell or an inline interpreter script, and the environment is an allowlist rather
+   than the parent's. What is not: a released variable (`--mcp-env NAME`) reaches
+   every server the run starts, and `sandboxed: false` is recorded in `system:init`
+   so the gap is readable after the fact rather than deniable. Containing the child
+   is deferred with its reason written down (audit §12.2): `run_sandboxed` is a
+   one-shot, deadline-bound exec, and a stdio server needs a long-lived bidirectional
+   pipe.
 
 ## Operator checklist
 

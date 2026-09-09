@@ -78,6 +78,15 @@ bypass.
   than a hint, because a repository file cannot buy back an approval a human
   withheld; and `mcp list` exits 1 on any refusal, so what a run *would* obey is
   reviewable in CI without a provider key.
+- **Reading a declaration and starting it are separate consents.** `--mcp-config`
+  imports and reports; only `--mcp-allow-exec` turns those servers into child processes,
+  and a deferred one is named on stderr and recorded as `mcp.deferred` in the run's
+  `system:init` rather than vanishing. The same flag pair carries a plugin bundle's
+  servers, because authorship - not file format - is what the rule is about; a server the
+  operator typed themselves is theirs and is not gated. A launched server also gets an
+  allowlist environment (`PATH`, `LANG`, `LC_ALL` plus its own declared `env`), so a
+  repository file cannot read a credential out of the parent: `${VAR}` resolves only for
+  names released one at a time with `--mcp-env`.
 
 ## Where each component sits
 

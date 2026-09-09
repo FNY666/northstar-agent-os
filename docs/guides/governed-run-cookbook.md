@@ -432,15 +432,15 @@ python3 -m cli mcp list --workspace .
 #    == MCP declarations ==
 #      file: .mcp.json
 #      demo: python3 server.py
-#          env=DEMO_TOKEN cwd=. (.mcp.json)
+#          env=DEMO_TOKEN cwd=. sandboxed=false (.mcp.json)
 #      ! .mcp.json: remote: refused (url/headers); this runtime speaks MCP over stdio only
-#      (declarations are inert until a run passes --mcp-config; approval lists are never honoured)
+#      (declarations are inert until a run passes both --mcp-config and --mcp-allow-exec; approval lists are never honoured)
 
 # 2. Then decide. `auto` searches the four known locations, a PATH reads exactly one.
 python3 -m cli run --workspace . --prompt "summarise the files" \
   --mcp-config auto --dry-run
 python3 -m cli run --workspace . --prompt "list the files" \
-  --mcp-config .mcp.json --allow-tool mcp__demo__list_directory
+  --mcp-config .mcp.json --mcp-allow-exec --allow-tool mcp__demo__list_directory
 ```
 
 What the importer refuses to do, in its three severities:
@@ -448,6 +448,20 @@ What the importer refuses to do, in its three severities:
 - **start something nobody asked for.** `--mcp-config` defaults to `off`, so a
   declaration in a checkout is inert; the dry-run line records what was imported
   (`config 1 server(s) from .mcp.json: demo`).
+  And *reading is not starting*: without `--mcp-allow-exec` every declared server in the
+  file is named on stderr, deferred, and recorded as `mcp.deferred` in the run's own
+  `system:init`. A server you typed yourself with `--mcp-server` needs neither flag - the
+  line is drawn at who wrote the text, not at the file format.
+- **read a credential it was never given.** A server child starts with `PATH`, `LANG`,
+  `LC_ALL` plus that server's own `env` map - the parent's environment is not handed over -
+  and `${VAR}` in the file resolves only for a name released with `--mcp-env NAME`.
+  Anything else is a configuration error that prints the flag to add. `mcp list` no longer
+  resolves references at all, because reviewing a file should not put a secret in a CI log.
+- **name a shape nobody can review.** A `command` that is a shell (`sh`, `bash`, `cmd`,
+  `powershell`) or an interpreter followed by `-c`/`-e`/`eval` is refused - after `${VAR}`
+  expansion, so a declaration that *resolves* to `sh` is refused as one, and past wrappers
+  (`env`, `nohup`, `timeout`), so a prefix is not an escape. `python3 server.py`,
+  `python3 -m package`, `npx -y pkg`, `uvx pkg` and `docker run -i img` stay legal.
 - **skip a refusal quietly, or treat ours as theirs.** A server this runtime cannot
   start (`url`, `headers`, `type: "http" | "sse"`) is named on stderr and skipped —
   that is our missing transport, not somebody's typo, and the rest of the file still

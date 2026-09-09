@@ -639,3 +639,13 @@ TypeScript 面新增 **57 全绿**（node 22.22，独立于 python 口径统计�
 并新增 4 项测试钉住拷贝与端到端变异——五个守卫对 1197 项基线全部转红。剩余 T 清单：T2（发布，按纪律待命）、
 T4（MCP HTTP+auth、技能脚本沙箱取舍）、T5（后台/远程）、T6（治理叙事页），约 **3–5 个小批**。
 版本仍对齐 `0.1.0.dev0` 未发布。
+
+### 2026-09-09（执行边界第五批）— 仓库可以点名一个进程，不能启动它：F5 闭合
+
+- **两级同意**：`--mcp-config` 只读与报告，`--mcp-allow-exec` 才把 `.mcp.json` 里的声明变成子进程；被推迟的项逐台在 stderr 点名，并落进 `system:init` 的 `mcp.deferred`。「操作者手打的 `--mcp-server`」不受门」是这条规则的全部内容：分界线是**谁写的**，不是文件格式。插件 bundle 的 server 走同一道门（它同样是仓库内容），也按同一把尺校验形状。
+- **子进程环境从「全量继承」改成白名单**：`PATH`/`LANG`/`LC_ALL` + 该服务器自己 `env` 里的项；`${VAR}` 只对 `--mcp-env NAME` 点名的变量可读，其余是配置错误且文案点名该补什么。基集被钉成「⊆ `tools.os_sandbox` 给沙箱命令的那三个」——同一件事不该有两份答案。这是本轮对 N4 的**加固**而不是新能力：**分数不动**（那 4 分给的是「能读外家格式」这件事本身）。
+- **`command` 与 hooks 同尺**：shell 与解释器内联脚本（`env`/`nohup` 前缀先剥、`${VAR}` 展开后再判）一律拒；同时把 7 种真实写法钉成必须放行——一条会把人逼到关掉规则的规则不算规则。`mcp list` 不再解析 `${VAR}`（评审一个文件不该把密钥打进 CI 日志），并固定打印 `sandboxed=false`。
+- **记录与换代**：`MCP_IMPORT_VERSION` v1→v2（启动策略换代，文件格式一字未改）并被 JSON 报告钉死；`system:init` 补 `mcp` 段（argv 只落摘要、env 只落键名）；`--mcp-allow-roots` 报的 root 从 `Path.cwd()`修成 `--workspace`，无 `cwd` 的服务器改在 workspace 里启动。
+- **仍未闭合，理由写在这**：服务器子进程不经 OS 沙箱——`run_sandboxed` 是一次性、带 deadline 的执行原语，stdio 服务器要的是长命双向管道，包装它等于新增一个 `spawn_sandboxed`（绑挂与超时语义重做），独立一批。`--mcp-env` 一个旗标两个效果：被点名的变量会到达本轮启动的**每一台**服务器；取舍、缓解（逐台记 `env_keys`）与替代写法（单台密钥写进那台的 `env`）都写进 help、threat-model 与一条专门钉它的测试。
+- 测试规模：runtime 1321 → **1344**（本批 +23：20 项新测试 + 2 项因契约变化改名 + 产品路径与记录各 1），
+  全仓 **1662** 全绿，TypeScript 面 57/57，`./bin/northstar bench` 14/14 不变（没有第 15 例，理由见 audit §12.5）。判据对账、两处有意偏离与「红线要能见红」的 6 条探针见 [execution-boundary-audit-2026-09.zh-CN.md](execution-boundary-audit-2026-09.zh-CN.md) §12。

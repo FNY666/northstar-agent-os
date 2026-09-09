@@ -21,6 +21,7 @@ from support import text_turn  # noqa: F401
 from product_path import (
     DEFAULT_CHECKPOINT_TURNS,
     apply_agent_defaults,
+    extract_positional_task,
     apply_resume_defaults,
     default_session_dir,
     resolve_session_dir,
@@ -124,6 +125,18 @@ class ProductPathUnitTests(unittest.TestCase):
         self.assertNotIn("--allow-tool", joined)
         self.assertNotIn("--enable-workspace-hooks", joined)
         self.assertNotIn("bypassPermissions", joined)
+
+    def test_a_released_mcp_variable_is_not_mistaken_for_the_task(self):
+        # `northstar agent TASK` has to tell a bare task from a flag's value, and `--mcp-env`
+        # (F5) is exactly the kind of flag that trips it up: one that takes a name. A boolean
+        # like `--mcp-allow-exec` must *not* be added to the value-taking set, or the task would
+        # start being eaten by a flag with no argument.
+        argv, task = extract_positional_task(["agent", "--mcp-env", "HOME", "fix the flake"])
+        self.assertEqual(task, "fix the flake")
+        self.assertIn("--mcp-env", argv)
+        self.assertNotIn("HOME", task)
+        _argv, second = extract_positional_task(["agent", "--mcp-allow-exec", "fix the flake"])
+        self.assertEqual(second, "fix the flake")
 
 
 class ResumeDefaultsUnitTests(unittest.TestCase):

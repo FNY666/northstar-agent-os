@@ -96,6 +96,9 @@ The traps a reader of the type alone would not guess, all of them inherited from
   or `maxTurns: 0` is a mistake and is refused before a process exists.
 - **`mcp.elicitAnswers` requires `mcp.elicit: true`.** Answering a server's input request is opt-in;
   supplying answers is not consent.
+- **`mcp.config` reads a workspace file; `mcp.allowExec` starts what it names.** Two flags, two
+  decisions, so that a repository can declare a server without being able to launch one. `mcp.env`
+  is the matching release list for `${VAR}` and for the environment a server child inherits.
 - **`mcp.servers` cannot combine with `agent`**, and `--mcp-config` takes a path (or `off`/`auto`),
   never an inline object: a run may use the servers the workspace declares or name its own, and an
   inline declaration would let a caller smuggle a server definition past review.

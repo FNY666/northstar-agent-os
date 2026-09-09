@@ -301,14 +301,16 @@ class MrtrRoundTripTests(unittest.TestCase):
 
     def connect(self, *, mode: str = "discover", **kwargs: object) -> McpStdioClient:
         wire = Path(tempfile.mkdtemp(prefix="nsar-mrtr-")) / "wire.jsonl"
-        saved = dict(os.environ)
-        os.environ.update({"MRTR_SERVER_MODE": mode, "MRTR_SERVER_WIRE": str(wire)})
-        try:
-            client = McpStdioClient("demo", [sys.executable, str(FIXTURE)], timeout_ms=8_000, **kwargs)  # type: ignore[arg-type]
-            client.connect()
-        finally:
-            os.environ.clear()
-            os.environ.update(saved)
+        # The fixture's instructions arrive through the client, the only door left open to it: a
+        # server child sees what it is given, never what the test process happens to hold.
+        client = McpStdioClient(
+            "demo",
+            [sys.executable, str(FIXTURE)],
+            timeout_ms=8_000,
+            env={"MRTR_SERVER_MODE": mode, "MRTR_SERVER_WIRE": str(wire)},
+            **kwargs,  # type: ignore[arg-type]
+        )
+        client.connect()
         client._wire_path = str(wire)  # noqa: SLF001 - test-local bookkeeping
         return client
 
