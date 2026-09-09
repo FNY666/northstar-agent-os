@@ -84,7 +84,8 @@ class SidecarSecurityTests(unittest.TestCase):
             fake.write_text("#!/bin/sh\ncat >/dev/null\nprintf '%s\\n' '{\"type\":\"item.completed\",\"item\":{\"type\":\"agent_message\",\"text\":\"FAKE_OK\"}}'\n", encoding="utf-8")
             fake.chmod(fake.stat().st_mode | stat.S_IXUSR)
             env = {**os.environ, "CODEX_BIN": str(fake), "CODEX_HOME": str(root), "CODEX_WORKSPACE": str(workspace)}
-            run = subprocess.run(["python3", "sidecar.py"], input='{"request_id":"e2e-1","prompt":"Say OK","timeout_ms":10000}\n', text=True, capture_output=True, env=env, check=False)
+            sidecar_path = Path(__file__).resolve().parents[1] / "sidecar.py"
+            run = subprocess.run([sys.executable, str(sidecar_path)], input='{"request_id":"e2e-1","prompt":"Say OK","timeout_ms":10000}\n', text=True, capture_output=True, env=env, check=False)
             self.assertEqual(run.returncode, 0, run.stderr)
             self.assertEqual(json.loads(run.stdout), {"request_id": "e2e-1", "status": "ok", "text": "FAKE_OK"})
 
