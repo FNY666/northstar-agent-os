@@ -1,0 +1,20 @@
+#!/usr/bin/env sh
+# Northstar Agent OS — product entry (no pip install required).
+#
+# Resolves the runtime component next to this repository and runs the same
+# CLI the console script `northstar` exposes after `pip install`. Prefer the
+# installed console script in production; this wrapper is the offline /
+# checkout path `make demo` and the docs teach first.
+set -eu
+
+ROOT="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)"
+RUNTIME="$ROOT/components/northstar-agent-runtime"
+
+if [ ! -d "$RUNTIME" ]; then
+  echo "northstar: cannot find components/northstar-agent-runtime under $ROOT" >&2
+  exit 64
+fi
+
+export PYTHONPATH="${RUNTIME}${PYTHONPATH:+:$PYTHONPATH}"
+cd "$RUNTIME"
+exec python3 -m cli "$@"

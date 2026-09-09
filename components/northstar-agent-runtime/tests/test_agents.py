@@ -57,6 +57,7 @@ class DefinitionTests(unittest.TestCase):
         self.assertEqual(evaluator.tools, ("Read", "Grep", "LS", "DescribeTools"))
         self.assertIn("Write", evaluator.disallowed_tools)
         self.assertIn("Edit", evaluator.disallowed_tools)
+        self.assertIn("Shell", evaluator.disallowed_tools)
         self.assertIn("Task", evaluator.disallowed_tools)
         self.assertTrue(evaluator.require_verdict)
         self.assertEqual(evaluator.acceptance_criteria, ("tests pass", "no secrets committed"))

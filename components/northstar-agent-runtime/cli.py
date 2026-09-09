@@ -1,10 +1,17 @@
-"""Command-line entry point for one governed run.
+"""Command-line entry point for the Northstar Agent OS.
 
-The CLI is a thin shell around :class:`~loop.AgentRuntime`: it builds a
-:class:`~loop.RuntimeConfig`, wires the provider, and streams the event sequence.
-Every interesting failure - an exhausted script, a denied tool, a budget stop -
-still arrives as a ``ResultMessage`` and becomes an exit code, so the shell can
-tell the outcomes apart:
+Two surfaces share one gate:
+
+* **Product path** (``agent``, ``resume``) — the next-gen Agent OS entry. Session
+  transcripts and per-turn checkpoints are on by default so a task is auditable
+  and resumable without rediscovering flags. See :mod:`product_path`.
+* **Kernel path** (``run`` and the rest) — flag-explicit, embedding- and CI-safe.
+  Nothing is implied; every ceiling and allow-list is named on the command line.
+
+Both surfaces build a :class:`~loop.RuntimeConfig`, wire the provider, and stream
+the same event sequence. Every interesting failure - an exhausted script, a
+denied tool, a budget stop - still arrives as a ``ResultMessage`` and becomes an
+exit code, so the shell can tell the outcomes apart:
 
 =====  ==============================================
 0      success
@@ -18,7 +25,12 @@ tell the outcomes apart:
 64     usage or configuration error (nothing was run)
 =====  ==============================================
 
-Offline use, which is how the tests exercise it:
+Product path (what docs and ``make demo`` teach):
+
+    northstar agent --workspace . --prompt "summarise README" --provider scripted --scripted-text "ok"
+    northstar resume ns-... --workspace . --prompt "continue" --scripted-text "ok"
+
+Kernel path (offline tests and embedding):
 
     python3 -m cli run --provider scripted --script demo.json --prompt "hi" \\
         --workspace /tmp/ws --deny-tool Write
@@ -47,34 +59,114 @@ from session_view import add_arguments as add_session_arguments
 from plugin_load import add_plugin_arguments
 from mcp_config import add_mcp_arguments
 from skill_check import add_skills_arguments
+from governance_bench import add_bench_arguments
 
 USAGE_ERROR = 64
 
 #: Tools that change state; ``--read-only`` refuses them at the gate.
-MUTATING_TOOLS = ("Write", "Edit")
+#: Shell is included: a "read-only" run must not execute commands either.
+MUTATING_TOOLS = ("Write", "Edit", "Shell")
+
+#: Product-facing program name. The legacy console script
+#: ``northstar-agent-runtime`` still points here; argv[0] may be either.
+PROG_NAME = "northstar"
 
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        prog="northstar-agent-runtime",
-        description="Run one governed Northstar agent loop.",
+        prog=PROG_NAME,
+        description=(
+            "Northstar Agent OS — governed AI coworker runtime. "
+            "Prefer `agent` for day-to-day work; `run` is the explicit kernel path."
+        ),
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog=(
             "examples:\n"
-            "  python3 -m cli run --provider scripted --script plan.json --prompt 'summarise README'\n"
-            "  python3 -m cli run --workspace . --read-only --sidecar-socket /var/run/northstar-codex/sidecar.sock\n"
-            "  python3 -m cli tools --workspace .\n"
-            "  python3 -m cli doctor --workspace .\n"
-            "  python3 -m cli sessions list --session-dir /tmp/northstar-sessions\n"
-            "  python3 -m cli new my-project  # scaffold a governed project\n"
-            "  python3 -m cli sessions show --session-dir /tmp/northstar-sessions ns-20260907T000000Z-00000000\n"
-            "  python3 -m cli plugin install ./my-bundle --workspace . && python3 -m cli plugin verify --workspace .\n"
+            "  northstar agent --workspace . --prompt 'summarise README' --provider scripted --scripted-text ok\n"
+            "  northstar resume latest --workspace . --prompt 'continue' --scripted-text ok\n"
+            "  northstar resume ns-20260909T000000Z-abcd1234 --workspace . --prompt 'continue' --scripted-text ok\n"
+            "  northstar run --provider scripted --script plan.json --prompt 'summarise README'\n"
+            "  northstar run --workspace . --read-only --sidecar-socket /var/run/northstar-codex/sidecar.sock\n"
+            "  northstar tools\n"
+            "  northstar doctor --workspace .\n"
+            "  northstar sessions list --workspace .\n"
+            "  northstar bench\n"
+            "  northstar agent --workspace . 'summarise README' --provider scripted --scripted-text ok\n"
+            "  northstar new my-project\n"
+            "  northstar plugin install ./my-bundle --workspace . && northstar plugin verify --workspace .\n"
         ),
     )
-    parser.add_argument("--version", action="version", version=f"northstar-agent-runtime {__version__}")
+    parser.add_argument("--version", action="version", version=f"{PROG_NAME} {__version__}")
     sub = parser.add_subparsers(dest="command")
 
-    run = sub.add_parser("run", help="run one agent loop to completion")
+    # Product path: same flags as run, plus product-only opt-outs. Defaults are
+    # applied in main() via product_path so argparse stays a pure flag surface.
+    agent = sub.add_parser(
+        "agent",
+        help="product path: one governed coworker turn (session + checkpoints on by default)",
+        description=(
+            "Next-gen Agent OS entry. Identical governance to `run`, but session "
+            "transcripts land under <workspace>/.northstar/sessions and a checkpoint "
+            "is written every turn unless you opt out. Does not loosen permissions, "
+            "enable hooks, or grant tools. A bare task string is accepted as a "
+            "positional argument (equivalent to --prompt)."
+        ),
+    )
+    agent.add_argument(
+        "task",
+        nargs="?",
+        default="",
+        help="optional task text (shorthand for --prompt; use --prompt-file - to read stdin)",
+    )
+    _add_run_arguments(agent)
+    agent.add_argument(
+        "--no-session",
+        action="store_true",
+        help="product opt-out: do not write a session transcript (kernel `run` default)",
+    )
+    agent.add_argument(
+        "--no-checkpoint",
+        action="store_true",
+        help="product opt-out: do not write per-turn checkpoints (kernel `run` default)",
+    )
+
+    resume = sub.add_parser(
+        "resume",
+        help="product path: fork from a prior session's checkpoint (budget/turns inherited)",
+        description=(
+            "Short path for `run --resume-from <id>` with the same product defaults as `agent`. "
+            "Forks a **new** session from the parent's latest checkpoint so consumed turns, "
+            "tool calls and cost carry over (ceilings bind the lineage). The parent transcript "
+            "is never modified. Pass `latest` to continue the most recent transcript under "
+            "<workspace>/.northstar/sessions. Use --in-place only when you deliberately want "
+            "the low-level append path (no counter inheritance)."
+        ),
+    )
+    resume.add_argument(
+        "session_id",
+        help="session id to continue, or 'latest' for the newest transcript in the product session dir",
+    )
+    _add_run_arguments(resume)
+    resume.add_argument(
+        "--no-session",
+        action="store_true",
+        help="product opt-out: do not claim/write the session (rarely useful on resume)",
+    )
+    resume.add_argument(
+        "--no-checkpoint",
+        action="store_true",
+        help="product opt-out: do not write further checkpoints on this continuation",
+    )
+    resume.add_argument(
+        "--in-place",
+        action="store_true",
+        help=(
+            "append to the same transcript file instead of forking (kernel --resume). "
+            "Does not inherit checkpoint counters — prefer the default fork when ceilings matter"
+        ),
+    )
+
+    run = sub.add_parser("run", help="kernel path: one agent loop, every default explicit")
     _add_run_arguments(run)
 
     sub.add_parser("tools", help="list the built-in tools and their classification")
@@ -96,6 +188,15 @@ def build_parser() -> argparse.ArgumentParser:
         help="install, verify and export plugin bundles (a pinned set of skills/agents/hooks/MCP servers)",
     )
     add_plugin_arguments(plugins)
+    bench = sub.add_parser(
+        "bench",
+        help="public governance benchmark (denial correctness / injection resistance / budget hit rate)",
+        description=(
+            "Offline, deterministic scorecard for the permission gate — not model quality. "
+            "Same cases CI and `make bench` run. Never loosens a ceiling."
+        ),
+    )
+    add_bench_arguments(bench)
     new_proj = sub.add_parser("new", help="scaffold a governed project (config, agents, hooks guide, CI recipe)")
     new_proj.add_argument("directory", help="directory to create (must not exist, or be empty unless --force)")
     new_proj.add_argument("--force", action="store_true", help="write the template files into a non-empty directory (never deletes)")
@@ -175,10 +276,25 @@ def _add_run_arguments(parser: argparse.ArgumentParser) -> None:
     policy.add_argument("--permission-mode", choices=("default", "acceptEdits", "plan", "bypassPermissions"), default="default")
     policy.add_argument("--allow-tool", action="append", default=[], metavar="NAME", help="auto-approve a tool (repeatable)")
     policy.add_argument("--deny-tool", action="append", default=[], metavar="NAME", help="always refuse a tool, and remove it from the allow list (repeatable)")
-    policy.add_argument("--read-only", action="store_true", help="deny Write and Edit")
+    policy.add_argument(
+        "--read-only",
+        action="store_true",
+        help="deny Write, Edit, and Shell (no file mutations and no command execution)",
+    )
     policy.add_argument("--plan", action="store_true", help="shorthand for --permission-mode plan")
     policy.add_argument("--agent", default="", help="run as a built-in subagent definition (its tools and ceilings apply)")
     policy.add_argument("--max-subagent-depth", type=int, default=1, help="0 disables delegation")
+    policy.add_argument(
+        "--parallel-tools",
+        type=int,
+        default=1,
+        metavar="N",
+        help=(
+            "run up to N parallel-safe (read-only) tool handlers concurrently inside one "
+            "assistant turn (default 1 = serial). Gate + hooks stay serial and independent. "
+            f"Max 8. Mutating tools (Write/Edit/Shell/Task/MCP) force the whole turn serial"
+        ),
+    )
     policy.add_argument("--allow-nested-delegation", action="store_true", help="subagents may delegate one level deeper")
     policy.add_argument("--halt-on-denial", action="store_true", help="end the run with error_permission_denied when a call is refused")
     policy.add_argument(
@@ -205,10 +321,22 @@ def _add_run_arguments(parser: argparse.ArgumentParser) -> None:
     policy.add_argument("--no-workspace-agents", action="store_true", help="ignore .northstar/agents/*.md subagent files")
     policy.add_argument("--no-skills", action="store_true", help="do not list .northstar/skills/*/SKILL.md packages in the system prompt")
     policy.add_argument(
+        "--no-memory",
+        action="store_true",
+        help="do not inject workspace memory (.northstar/memory/MEMORY.md) into the system prompt",
+    )
+    policy.add_argument(
+        "--memory-file",
+        default="",
+        metavar="PATH",
+        help="inject this memory file instead of the default (must live inside the workspace; no global MEMORY)",
+    )
+    policy.add_argument(
         "--no-plugins",
         action="store_true",
         help="ignore .northstar/plugins/ entirely (installed bundles contribute skills, agents, hooks, MCP servers and ceilings)",
     )
+
     policy.add_argument(
         "--enable-workspace-hooks",
         action="store_true",
@@ -254,6 +382,16 @@ def _add_run_arguments(parser: argparse.ArgumentParser) -> None:
     execution.add_argument("--sidecar-socket", default="", help="Unix socket of northstar-codex-sidecar; enables the CodexReadOnly tool")
     execution.add_argument("--sidecar-timeout-ms", type=int, default=30_000, help="sidecar execution deadline")
     execution.add_argument("--probe-sidecar", action="store_true", help="send one health-check prompt to the sidecar and exit")
+    execution.add_argument(
+        "--sandbox",
+        choices=("auto", "bwrap", "process"),
+        default="auto",
+        help=(
+            "OS sandbox backend for the Shell tool: auto (bwrap when usable, else process), "
+            "bwrap (required; refuse to start if missing), or process (cwd+env only — not OS isolation). "
+            "Shell stays denied until --allow-tool Shell. See docs/concepts/threat-model.md"
+        ),
+    )
 
     output = parser.add_argument_group("output")
     output.add_argument("--json", action="store_true", help="emit every event as a JSONL line")
@@ -406,6 +544,7 @@ def _print_dry_run(
     *,
     policy_note: str = "none",
     context_note: str = "off",
+    memory_note: str = "none",
     workspace_agents_note: str = "none",
     skills_note: str = "none",
     plugin_note: str = "none",
@@ -434,16 +573,37 @@ def _print_dry_run(
     print(f"max_turns={config.max_turns} "
           f"max_tool_calls={format_tool_call_ceiling(config.max_tool_calls)} "
           f"max_budget_usd={config.max_budget_usd or 'unlimited'}")
+    parallel_n = int(getattr(config, "parallel_tools", 1) or 1)
+    print(
+        f"parallel_tools={parallel_n}"
+        + (
+            " (serial; only read-only batches may share workers when N>1)"
+            if parallel_n <= 1
+            else " (read-only handlers may overlap; gate+hooks stay serial per call)"
+        )
+    )
     print(_retry_note(config))
+    try:
+        from tools.shell import sandbox_status_line
+
+        sandbox_note = sandbox_status_line(getattr(config, "shell_backend", "auto"))
+    except Exception:  # noqa: BLE001
+        sandbox_note = f"sandbox={getattr(config, 'shell_backend', 'auto')}"
     print(f"sidecar={'on' if config.sidecar_socket else 'off'} "
           f"session_dir={args.session_dir or 'off'} "
           f"halt_on_denial={config.halt_on_denial}")
+    print(sandbox_note)
+    print(
+        "shell=registered, denied until --allow-tool Shell "
+        f"(backend={getattr(config, 'shell_backend', 'auto')})"
+    )
     print(_session_lease_note(config, session_dir=args.session_dir))
     print(f"policy_file={policy_note}")
     print(f"run_id={config.run_id or '(generated per sidecar call)'} "
           f"policy_revision={config.policy_revision or '(none)'} "
           f"unwritable={','.join(config.tool_limits.protected_prefixes)}")
     print(f"project_context={context_note}")
+    print(f"memory={memory_note}")
     print(f"workspace_agents={workspace_agents_note}")
     print(f"skills={skills_note}")
     print(f"plugins={plugin_note}")
@@ -460,9 +620,46 @@ def _print_dry_run(
     return 0
 
 
+def _product_argv(command: str, argv: Sequence[str]) -> list[str]:
+    """Strip the product verb and weld defaults; return a ``run``-shaped argv list.
+
+    ``argv`` is the full process argv *including* the verb (``agent`` / ``resume``).
+    Re-parsing through the same parser keeps flag validation identical to ``run``.
+    """
+    from product_path import apply_agent_defaults, apply_resume_defaults
+
+    body = list(argv[1:])  # drop the verb
+    if command == "agent":
+        return apply_agent_defaults(body)
+    if command == "resume":
+        if not body or body[0].startswith("-"):
+            raise ValueError("resume: pass the session id as the first argument")
+        session_id, rest = body[0], body[1:]
+        return apply_resume_defaults(rest, session_id=session_id)
+    raise ValueError(f"unknown product command {command!r}")
+
+
 def main(argv: Sequence[str] | None = None) -> int:
+    raw = list(argv) if argv is not None else None
+    # Product verbs are rewritten before argparse so the rest of the CLI only
+    # ever sees a `run`-shaped namespace. Help/usage for those verbs must still
+    # go through the real subparser (so `agent --help` documents --no-session),
+    # which is why a bare help request skips the weld.
     parser = build_parser()
-    args = parser.parse_args(list(argv) if argv is not None else None)
+    preview = list(raw) if raw is not None else sys.argv[1:]
+    product_command = preview[0] if preview and preview[0] in {"agent", "resume"} else None
+    help_requested = any(item in {"-h", "--help"} for item in preview)
+    if product_command is not None and not help_requested:
+        try:
+            welded = _product_argv(product_command, preview)
+        except ValueError as error:
+            print(f"configuration error: {error}", file=sys.stderr)
+            return USAGE_ERROR
+        # Re-parse as `run …` so _run() receives the same namespace shape.
+        args = parser.parse_args(["run", *welded])
+    else:
+        args = parser.parse_args(raw)
+
     if args.command == "tools":
         from tools import build_default_registry
 
@@ -495,7 +692,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             return USAGE_ERROR
         for path in created:
             print(f"created {path}")
-        print("governed project scaffolded; start with `northstar-agent-runtime doctor --workspace <dir>`")
+        print(f"governed project scaffolded; start with `{PROG_NAME} doctor --workspace <dir>`")
         return 0
     if args.command != "run":
         if args.command == "doctor":
@@ -527,6 +724,13 @@ def main(argv: Sequence[str] | None = None) -> int:
                 # them would make "I typed less" mean "I changed the workspace".
                 parser.parse_args([*(args.command, "list"), "--help"])
                 return 0
+            return handler(args)
+        if args.command == "bench":
+            handler = getattr(args, "handler", None)
+            if handler is None:
+                from governance_bench import run_bench_command
+
+                return run_bench_command(args)
             return handler(args)
         parser.print_help()
         return USAGE_ERROR
@@ -825,6 +1029,13 @@ def _run(args: argparse.Namespace) -> int:
             return USAGE_ERROR
 
     prompt = args.prompt
+    # Product `agent TASK` lands as args.task after the product_path weld keeps it
+    # as a trailing positional that argparse bound on the agent subparser — but the
+    # weld re-parses as `run`, so the task is rewritten to --prompt up front. The
+    # getattr below is the belt for any future weld that leaves the attribute.
+    task = getattr(args, "task", "") or ""
+    if task and not prompt:
+        prompt = task
     if args.prompt_file:
         if args.prompt_file == "-":
             prompt = sys.stdin.read()
@@ -833,8 +1044,20 @@ def _run(args: argparse.Namespace) -> int:
     if args.probe_sidecar and not prompt.strip():
         prompt = "Reply with OK"
     if not prompt.strip():
-        print("no prompt: pass --prompt, --prompt-file, or --probe-sidecar", file=sys.stderr)
-        return USAGE_ERROR
+        # Minimal interaction: a bare `agent` on a TTY asks once instead of dumping
+        # usage. Non-TTY (CI, pipes) stays a hard usage error so scripts never hang.
+        if sys.stdin and sys.stdin.isatty() and not args.prompt_file:
+            try:
+                prompt = input(f"{PROG_NAME}> ").rstrip("\n")
+            except EOFError:
+                prompt = ""
+        if not prompt.strip():
+            print(
+                "no prompt: pass a task string, --prompt, --prompt-file, or --probe-sidecar "
+                "(on a TTY, bare `agent` also reads one line)",
+                file=sys.stderr,
+            )
+            return USAGE_ERROR
 
     registry = build_default_registry()
     agents = builtin_registry()
@@ -1113,6 +1336,46 @@ def _run(args: argparse.Namespace) -> int:
     if skills:
         base_prompt = config_kwargs.get("system_prompt", DEFAULT_SYSTEM_PROMPT)
         config_kwargs["system_prompt"] = base_prompt + skill_listing(skills, args.workspace)
+        # Skill-bundled scripts: listed for progressive disclosure; execution is
+        # only via Shell (still default-deny). Discovery never runs them.
+        try:
+            from tools.skill_scripts import discover_skill_scripts, skill_scripts_listing
+
+            skill_scripts = discover_skill_scripts(args.workspace, skills)
+        except SkillError as error:
+            print(f"configuration error: {error}", file=sys.stderr)
+            return USAGE_ERROR
+        if skill_scripts:
+            base_prompt = config_kwargs.get("system_prompt", DEFAULT_SYSTEM_PROMPT)
+            config_kwargs["system_prompt"] = base_prompt + skill_scripts_listing(skill_scripts)
+
+    # Workspace memory (P4): workspace-scoped only, digest-labelled, opt-out.
+    # Never a user-home / global MEMORY store (blueprint C7).
+    memory = None
+    memory_note = "none (.northstar/memory/MEMORY.md absent)"
+    try:
+        from memory import MemoryError, append_memory, discover_memory
+
+        if getattr(args, "no_memory", False) and not (getattr(args, "memory_file", "") or ""):
+            memory = None
+            memory_note = "off (--no-memory)"
+        else:
+            memory = discover_memory(
+                args.workspace,
+                configured=False if getattr(args, "no_memory", False) else None,
+                explicit=(getattr(args, "memory_file", "") or None) or None,
+            )
+            if memory is not None:
+                base_prompt = config_kwargs.get("system_prompt", DEFAULT_SYSTEM_PROMPT)
+                config_kwargs["system_prompt"] = append_memory(base_prompt, memory)
+                memory_note = (
+                    f"{memory.relative} digest={memory.digest[:12]}"
+                    + (" [truncated]" if memory.truncated else "")
+                )
+    except MemoryError as error:
+        print(f"configuration error: {error}", file=sys.stderr)
+        return USAGE_ERROR
+
     if plugins is not None and plugins.context_blocks:
         # A bundle's README-style context is the same kind of content as AGENTS.md: it
         # informs, it does not authorise. It is therefore appended after the policy and
@@ -1125,6 +1388,8 @@ def _run(args: argparse.Namespace) -> int:
     if args.sidecar_socket:
         config_kwargs["sidecar_socket"] = args.sidecar_socket
         config_kwargs["sidecar_timeout_ms"] = args.sidecar_timeout_ms
+    config_kwargs["shell_backend"] = getattr(args, "sandbox", "auto") or "auto"
+    config_kwargs["parallel_tools"] = int(getattr(args, "parallel_tools", 1) or 1)
 
     if args.checkpoint_turns < 0:
         print("configuration error: --checkpoint-turns must be >= 0 (0 disables checkpoints)", file=sys.stderr)
@@ -1281,6 +1546,7 @@ def _run(args: argparse.Namespace) -> int:
             policy_note=policy_note,
             hooks_note=hooks_note,
             context_note=context_note,
+            memory_note=memory_note,
             workspace_agents_note=workspace_agents_note,
             skills_note=skills_note,
             plugin_note=plugin_note,

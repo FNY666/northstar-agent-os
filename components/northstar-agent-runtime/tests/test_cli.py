@@ -37,18 +37,29 @@ class ParserTests(unittest.TestCase):
     def test_no_subcommand_prints_help_and_exits_64(self):
         code, out, _ = run_cli()
         self.assertEqual(code, USAGE_ERROR)
-        self.assertIn("usage: northstar-agent-runtime", out)
+        self.assertIn("usage: northstar", out)
         self.assertIn("scripted", out)
+        self.assertIn("agent", out, "the product path must be visible on the bare help surface")
 
     def test_tools_and_agents_subcommands_describe_the_surface(self):
         code, out, _ = run_cli("tools")
         self.assertEqual(code, 0)
-        for name, kind in (("Read", "read"), ("Write", "edit"), ("Edit", "edit"), ("Grep", "read"), ("LS", "read"), ("DescribeTools", "read")):
+        for name, kind in (
+            ("Read", "read"),
+            ("Write", "edit"),
+            ("Edit", "edit"),
+            ("Grep", "read"),
+            ("LS", "read"),
+            ("DescribeTools", "read"),
+            ("Shell", "exec"),
+        ):
             self.assertIn(name, out)
             line = next(item for item in out.splitlines() if item.startswith(name))
             self.assertIn(kind, line, "the kind column is how a reviewer spots a mutating tool")
         self.assertIn("mutating", out)
         self.assertNotIn("CodexReadOnly", out)
+        shell_line = next(item for item in out.splitlines() if item.startswith("Shell"))
+        self.assertIn("mutating", shell_line, "Shell must never look read-only in the tools listing")
         code, out, _ = run_cli("agents")
         self.assertEqual(code, 0)
         for name in ("evaluator", "explorer", "planner", "general"):
@@ -74,9 +85,10 @@ class ParserTests(unittest.TestCase):
 
     def test_read_only_implies_the_mutating_denials(self):
         args = build_parser().parse_args(["run", "--read-only", "--allow-tool", "Write", "--allow-tool", "Grep"])
-        allowed, denied = _tool_lists(args, base_tools=("Read", "Write", "Edit", "Grep"))
+        allowed, denied = _tool_lists(args, base_tools=("Read", "Write", "Edit", "Grep", "Shell"))
         self.assertEqual(allowed, ("Grep",))
-        self.assertEqual(sorted(denied), ["Edit", "Write"])
+        # Shell is mutating (kind=exec): a "read-only" run must not execute commands.
+        self.assertEqual(sorted(denied), ["Edit", "Shell", "Write"])
 
     def test_bypass_mode_starts_from_the_whole_registry(self):
         args = build_parser().parse_args(["run", "--permission-mode", "bypassPermissions"])
@@ -181,6 +193,103 @@ class RunHappyPathTests(unittest.TestCase):
         code, out, _ = run_cli(*self.base("--script", str(script), "--prompt", "write", "--allow-tool", "Write"))
         self.assertEqual(code, 0)
         self.assertEqual((self.workspace / "b.txt").read_text(), "made")
+
+    def test_shell_is_denied_by_default_even_when_the_model_asks(self):
+        script = self.workspace / "s.json"
+        script.write_text(
+            json.dumps(
+                [
+                    {
+                        "tool": {
+                            "name": "Shell",
+                            "input": {"argv": [sys.executable, "-c", "print('should-not-run')"]},
+                        }
+                    },
+                    {"text": "understood"},
+                ]
+            ),
+            encoding="utf-8",
+        )
+        code, out, _ = run_cli(*self.base("--script", str(script), "--prompt", "run it", "--json"))
+        self.assertEqual(code, 0)
+        events = [json.loads(line) for line in out.splitlines()]
+        denial = events[2]
+        body = denial["content"][0]["content"]
+        self.assertIn("refused", body)
+        self.assertTrue(denial["content"][0]["is_error"])
+        # The model *proposed* the argv (visible in the assistant tool_use event);
+        # what must not appear is a successful Shell result body.
+        self.assertNotIn("backend=", body)
+        self.assertNotIn("isolation=", body)
+        result = events[-1]
+        self.assertTrue(result.get("permission_denials"))
+        self.assertEqual(result["permission_denials"][0]["tool"], "Shell")
+
+    def test_allow_tool_shell_runs_inside_the_process_sandbox(self):
+        script = self.workspace / "s.json"
+        script.write_text(
+            json.dumps(
+                [
+                    {
+                        "tool": {
+                            "name": "Shell",
+                            "input": {"argv": [sys.executable, "-c", "print('shell-allowed')"]},
+                        }
+                    },
+                    {"text": "done"},
+                ]
+            ),
+            encoding="utf-8",
+        )
+        code, out, _ = run_cli(
+            *self.base(
+                "--script",
+                str(script),
+                "--prompt",
+                "run it",
+                "--allow-tool",
+                "Shell",
+                "--sandbox",
+                "process",
+                "--json",
+            )
+        )
+        self.assertEqual(code, 0)
+        events = [json.loads(line) for line in out.splitlines()]
+        init = events[0]
+        self.assertIn("sandbox", init.get("data", {}))
+        self.assertEqual(init["data"]["sandbox"]["backend"], "process")
+        self.assertEqual(init["data"]["sandbox"]["isolation"], "process")
+        tool_result = events[2]
+        body = tool_result["content"][0]["content"]
+        self.assertIn("shell-allowed", body)
+        self.assertIn("backend=process", body)
+        self.assertIn("isolation=process", body)
+        self.assertFalse(tool_result["content"][0]["is_error"])
+
+    def test_dry_run_reports_sandbox_and_shell_status(self):
+        code, out, _ = run_cli(
+            "run",
+            "--workspace",
+            str(self.workspace),
+            "--prompt",
+            "hi",
+            "--scripted-text",
+            "reply",
+            "--sandbox",
+            "process",
+            "--dry-run",
+        )
+        self.assertEqual(code, 0)
+        self.assertIn("sandbox=process", out)
+        self.assertIn("shell=registered", out)
+        self.assertIn("--allow-tool Shell", out)
+
+    def test_doctor_reports_sandbox_backend(self):
+        code, out, _ = run_cli("doctor", "--workspace", str(self.workspace), "--sandbox", "process")
+        self.assertEqual(code, 0)
+        self.assertIn("sandbox", out)
+        self.assertIn("process", out)
 
     def test_deny_tool_wins_over_allow_tool_on_the_command_line(self):
         script = self.workspace / "s.json"
@@ -587,7 +696,7 @@ class VersionFlagTests(unittest.TestCase):
                 parser.parse_args(["--version"])
         self.assertEqual(caught.exception.code, 0)
         printed = out.getvalue()
-        self.assertIn("northstar-agent-runtime", printed)
+        self.assertIn("northstar", printed)
         self.assertIn(cli.__version__, printed)  # the printed version is _version's, never a literal
         self.assertEqual(len(printed.strip().splitlines()), 1)
 
@@ -598,7 +707,8 @@ class VersionFlagTests(unittest.TestCase):
             with self.assertRaises(SystemExit) as caught:
                 parser.parse_args(["--version"])
         self.assertEqual(caught.exception.code, 0)
-        self.assertTrue(out.getvalue().startswith("northstar-agent-runtime "), out.getvalue())
+        # Product name first; the legacy console-script alias is not what --version prints.
+        self.assertTrue(out.getvalue().startswith("northstar "), out.getvalue())
 
     def test_version_beats_a_missing_prompt(self):
         # The version action exits before any prompt validation, so it must work
@@ -635,7 +745,11 @@ class DryRunTests(unittest.TestCase):
         code, out, _ = run_cli("run", "--workspace", str(self.workspace), "--prompt", "hi",
                                "--scripted-text", "reply", "--read-only", "--deny-tool", "Grep", "--dry-run")
         self.assertEqual(code, 0)
-        self.assertIn("disallowed_tools=Grep,Write,Edit", out)
+        self.assertIn("Write", out)
+        self.assertIn("Edit", out)
+        self.assertIn("Shell", out, "read-only must refuse command execution too")
+        self.assertIn("Grep", out)
+        self.assertIn("disallowed_tools=", out)
         self.assertIn("allowed_tools=(none)", out)
 
     def test_dry_run_reads_a_zero_ceiling_as_zero(self):
@@ -748,10 +862,15 @@ class SessionViewTests(unittest.TestCase):
         self.assertEqual(code, USAGE_ERROR)
         self.assertIn("sessions: pass a subcommand", err)
 
-    def test_sessions_list_without_a_directory_is_argparse_business(self):
-        with self.assertRaises(SystemExit) as caught:
-            build_parser().parse_args(["sessions", "list"])
-        self.assertEqual(caught.exception.code, 2)
+    def test_sessions_list_defaults_to_the_product_session_dir(self):
+        # Product path: bare `sessions list` looks under <cwd>/.northstar/sessions.
+        # An empty / missing default dir is a soft error (exit 1), not argparse.
+        args = build_parser().parse_args(["sessions", "list"])
+        self.assertEqual(getattr(args, "session_dir", ""), "")
+        self.assertEqual(getattr(args, "workspace", "."), ".")
+        code, _, err = run_cli("sessions", "list", "--session-dir", "/nonexistent-ns-sessions-default-check")
+        self.assertEqual(code, 1)
+        self.assertIn("no such directory", err)
 
     def test_sessions_list_missing_directory_is_an_error(self):
         code, _, err = run_cli("sessions", "list", "--session-dir", "/nonexistent-ns-sessions")

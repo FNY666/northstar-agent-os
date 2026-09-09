@@ -11,6 +11,8 @@ dist/
 .env
 *.log
 *.sock
+# Product-path session transcripts (agent default: <workspace>/.northstar/sessions)
+**/.northstar/sessions/
 
 # Build and editor artifacts
 .DS_Store

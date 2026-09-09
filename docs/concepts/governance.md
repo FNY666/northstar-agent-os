@@ -26,15 +26,19 @@ bypass.
 ## Layers and semantics
 
 - **Permission modes** (`default`, `acceptEdits`, `plan`, `bypassPermissions`):
-  each tool carries a kind (`read`, `write`, `edit`, `other`); mutating tools
-  need explicit approval unless the mode grants them. `plan` mode denies
-  mutating tools outright.
+  each tool carries a kind (`read`, `edit`, `exec`, `task`, `network`, `other`);
+  mutating tools need explicit approval unless the mode grants them. `plan`
+  mode denies mutating tools outright. `acceptEdits` auto-approves **edit**
+  only — never `exec` (`Shell`).
 - **Deny beats allow**: `--deny-tool`, policy-file `deny_tools` and `--read-only`
   subtract from the allow list; a denied tool can never be re-allowed later in
   the same run (a subagent cannot widen what its parent narrowed).
-- **Read-only is structural**: `Write`/`Edit` (and anything declared mutating)
-  are removed from the registry under `--read-only`; workspaces and skill
-  stores are checked file-by-file against symlink escapes.
+- **Read-only is structural**: `Write`/`Edit`/`Shell` (and anything declared
+  mutating) are refused under `--read-only`; workspaces and skill stores are
+  checked file-by-file against symlink escapes.
+- **Shell is gated twice**: once by the permission gate (default deny, kind
+  `exec`) and once by the OS sandbox backend (`bwrap` when usable, else an
+  honestly-labelled `process` backend). See [threat-model.md](threat-model.md).
 - **Subagent subsets**: an agent-definition run fixes its tool subset and
   ceilings by definition, which is why `--mcp-server` cannot be combined with
   `--agent` — silently widening a declared policy would defeat the gate.

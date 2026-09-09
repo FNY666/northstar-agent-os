@@ -278,7 +278,13 @@ test("preview is the CLI's own human-readable resolution, before a request or a 
   assert.match(text, /^provider=scripted model=scripted$/m);
   assert.match(text, /^permission_mode=plan$/m);
   assert.match(text, /^tools=\w/m);
-  assert.match(text, /^allowed_tools=\(none\)  disallowed_tools=Write,Edit$/m, "readOnly has to be visible in the preview");
+  assert.match(
+    text,
+    /^allowed_tools=\(none\)  disallowed_tools=Write,Edit,Shell$/m,
+    "readOnly has to refuse command execution too (Shell is kind=exec)",
+  );
+  assert.match(text, /^sandbox=/m, "dry-run must name the OS sandbox backend honestly");
+  assert.match(text, /shell=registered/, "Shell is always registered and still default-deny");
   assert.match(text, /max_turns=2/);
   assert.match(text, /dry-run: configuration is valid; no request was sent/);
 });

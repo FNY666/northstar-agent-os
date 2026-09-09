@@ -4,14 +4,14 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "northstar-agent-runtime"
-description = "Governed agent loop: hooks, three-layer permissions, ceilings, append-only sessions, span tracing, sandboxed tools, and subagents - with execution delegated to a sidecar."
+description = "Northstar Agent OS kernel: governed coworker loop (hooks, three-layer permissions, ceilings, append-only sessions, span tracing, sandboxed tools, subagents) with a product entry `northstar agent` and execution delegated to a sidecar."
 readme = "README.md"
 license = { text = "MIT" }
 requires-python = ">=3.10"
 # The version string is deliberately static here and is asserted equal to
 # _version.__version__ by the test suite, so the two cannot drift.
 version = "0.1.0.dev0"
-keywords = ["agent", "runtime", "governance", "permissions", "hooks", "northstar"]
+keywords = ["agent", "agent-os", "runtime", "governance", "permissions", "hooks", "northstar"]
 classifiers = [
     "Development Status :: 3 - Alpha",
     "Intended Audience :: Developers",
@@ -33,6 +33,10 @@ tracing = ["opentelemetry-api>=1.20", "opentelemetry-sdk>=1.20"]
 full = ["anthropic>=1.0", "opentelemetry-api>=1.20", "opentelemetry-sdk>=1.20"]
 
 [project.scripts]
+# Product entry (next-gen Agent OS). Prefer this in docs and day-to-day use.
+northstar = "cli:main"
+# Kernel / legacy entry — same process, kept so existing scripts and the
+# component name stay resolvable after pip install.
 northstar-agent-runtime = "cli:main"
 
 [tool.setuptools]
@@ -53,8 +57,11 @@ py-modules = [
     "contract_bridge",
     "doctor",
     "durable_bridge",
+    "interop_bridge",
+    "memory",
     "events",
     "frontmatter",
+    "governance_bench",
     "hooks",
     "loop",
     "mcp_client",
@@ -68,6 +75,7 @@ py-modules = [
     "plugin_load",
     "plugin_manifest",
     "policy_file",
+    "product_path",
     "sdk",
     "scaffold",
     "session_lease",

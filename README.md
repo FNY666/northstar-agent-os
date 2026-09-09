@@ -1,64 +1,39 @@
 # Northstar Agent OS
 
-**Open, reliable, and governed runtime components for autonomous AI coworkers.**
+**Open, reliable, and governed runtime for autonomous AI coworkers.**
 
 > 中文名：北辰智能体系统
 
 [English](README.md) · [简体中文](docs/README.zh-CN.md) · [繁體中文](docs/README.zh-TW.md) · [日本語](docs/README.ja.md) · [Español](docs/README.es.md) · [한국어](docs/README.ko.md) · [Français](docs/README.fr.md) · [Deutsch](docs/README.de.md) · [Português (Brasil)](docs/README.pt-BR.md) · [Italiano](docs/README.it.md) · [Türkçe](docs/README.tr.md) · [Tiếng Việt](docs/README.vi.md)
 
-**In one sentence:** Northstar is an independently maintained project for assembling governed AI coworkers from explicit routing, local tool boundaries, auditability, and recoverable execution components. **What exists today is the Northstar Codex Sidecar—a restricted local worker adapter—not a finished autonomous-agent operating system.**
-
+**In one sentence:** Northstar is a **next-generation Agent operating system** with a governed kernel — one entry (`northstar agent`), visible boundaries, auditability, and recoverable execution. The kernel is assembled from explicit subsystems (runtime, contract, host, durable, sidecar, interop). **It is not yet a finished multi-agent platform** (no hosted cloud, no parallel fleets); what ships today is a real product path on top of battle-tested governance primitives, a **default-deny sandboxed `Shell`** (bubblewrap when usable, honest process fallback otherwise — see [docs/concepts/threat-model.md](docs/concepts/threat-model.md)), plus the Northstar Codex Sidecar as a restricted local worker adapter.
 > English is the canonical project entry. Translations mirror its scope and security claims; update them when this file changes.
 
 ## What it is
 
-Northstar is a component-oriented runtime project for developers who want AI coworkers to operate with visible boundaries instead of an unconstrained prompt-and-tools loop. It focuses on small, testable building blocks: a caller-visible contract, constrained execution, structured outcomes, and operational recovery.
+Northstar is for people who want to **hand work to an AI coworker** that operates with visible boundaries — not an unconstrained prompt-and-tools loop, and not a pile of libraries you must wire by hand.
 
-The project is built incrementally. A component can be useful on its own, but a component passing its tests does not prove that a complete agent platform is safe or production-ready.
+- **Product path:** `northstar agent "…"` — session transcript and per-turn checkpoints on by default.
+- **Kernel path:** `northstar run …` — every default explicit (embedding, CI, advanced operators).
+- **Invariant:** every tool call crosses the permission gate, hooks, budget ceilings, and the audit trail. Policy may only tighten.
 
-## What is shipped today
+Product spine and roadmap: [docs/next-gen-agent-os.zh-CN.md](docs/next-gen-agent-os.zh-CN.md).  
+Capability benchmark vs top agents: [docs/benchmark-top-agents-2026-09.zh-CN.md](docs/benchmark-top-agents-2026-09.zh-CN.md).  
+Absorb / refuse rules: [docs/next-gen-agent-blueprint.zh-CN.md](docs/next-gen-agent-blueprint.zh-CN.md).
 
-This repository currently publishes six complementary components:
+## What ships today
 
-- `components/northstar-codex-sidecar/` — a local Unix-socket service that validates requests, runs Codex in read-only mode, bounds input and output behavior, redacts errors, cleans up timed-out process groups, and returns structured statuses.
-- `components/northstar-run-contract/` — a versioned Run Request/Receipt contract, expiring HMAC Run Binding, and strict adapter boundary for passing a verified run to the Sidecar.
-- `components/northstar-agent-runtime/` — a governed agent loop with the Claude Agent SDK capability surface (events, ten lifecycle hooks, a three-layer permission gate, turn/tool-call/USD ceilings, subagents, append-only sessions, safe-boundary compaction, and span tracing). It holds no model credentials for Codex and never spawns a model CLI: Codex execution is delegated to the sidecar over its Unix socket, so reasoning and policy stay in the runtime while execution and sandboxing stay in the sidecar.
-- `components/northstar-host/` — a standard-library local candidate for explicit host policy grants and opaque private workspaces; it re-verifies binding and authorization and does not execute commands.
-- `components/northstar-durable-run/` — a local vertical-slice prototype for canonical Run/Step/Event contracts, append-only history, checkpoints, leases, per-call action authorization, independent verification, minimal trace metrics, and a deterministic fixture evaluation harness. It is not a production scheduler or sandbox.
-- `components/northstar-agent-interop/` — a backend-neutral local candidate for signed Agent attestations, narrowed handoff grants, opaque context envelopes, and typed adapter receipts. It does not yet connect real Codex, Claude Code, Hermes, Cursor, or OpenBot backends.
+| Layer | What | Role |
+| --- | --- | --- |
+| **Product entry** | `northstar` / `bin/northstar` | Agent OS CLI (`agent`, `resume`, plus kernel commands) |
+| **Kernel** | `components/northstar-agent-runtime/` | Governed loop: events, lifecycle hooks, three-layer permission gate, turn/tool/USD ceilings, subagents, append-only sessions, safe-boundary compaction, span tracing, MCP, skills, plugins |
+| **Execution adapter** | `components/northstar-codex-sidecar/` | Local Unix-socket worker: validates requests, runs Codex read-only, bounds I/O, redacts errors, cleans up timed-out process groups |
+| **Contract** | `components/northstar-run-contract/` | Versioned Run Request/Receipt, expiring HMAC Run Binding, strict adapter boundary |
+| **Host candidate** | `components/northstar-host/` | Explicit host policy grants and opaque private workspaces (local; not production identity) |
+| **Durable vocabulary** | `components/northstar-durable-run/` | Run/Step/Event contracts, append-only history, checkpoints, leases, per-call authorization, independent verification |
+| **Interop candidate** | `components/northstar-agent-interop/` | Signed attestations, narrowed handoff grants, opaque envelopes, typed receipts; runtime `interop_bridge` mints/verifies grants (local-dev labelled; live CLI backends still host-supplied) |
 
-The Run Contract separates structural validation, host-key authentication, authorization, execution, and postcondition verification. The host and durable-run candidates demonstrate these boundaries locally; neither claims production identity, isolation, or deployment readiness.
-
-The agent runtime is deliberately split from execution in the same way: a `Read`/`Grep`/`LS`/`Write`/`Edit` tool set is confined to a workspace root, and the optional `CodexReadOnly` tool exists only when a sidecar socket path is supplied. Denials, exhausted ceilings, provider failures, and hook vetos are all reported as events in the run's stream, and every run ends with exactly one `ResultMessage` whose subtype says why.
-
-The repository also includes its deterministic tests, a systemd hardening template, a conservative installer, and a rollback script.
-
-## How the sidecar works
-
-The sidecar accepts one JSON request per Unix-socket connection:
-
-```json
-{"request_id":"demo-1","prompt":"Reply with OK","timeout_ms":10000}
-```
-
-It returns one bounded JSON response:
-
-```json
-{"request_id":"demo-1","status":"ok","text":"OK"}
-```
-
-Important properties:
-
-- Unix socket only; no TCP listener is provided.
-- The listener refuses to bind unless the socket path satisfies `service.validate_socket_path`.
-- Strict request allowlist: `request_id`, `prompt`, and `timeout_ms`.
-- Prompt and timeout bounds. The 100,000-character prompt limit is a character limit, and the wire cap is derived from it, so a maximum-length prompt survives framing whether the client sends raw UTF-8 or `\uXXXX` escapes.
-- Codex runs with `--sandbox read-only` and `--ephemeral`.
-- Separate process group with TERM-to-KILL cleanup on timeout.
-- Per-connection read deadline and bounded worker pool.
-- Structured error classes and secret redaction.
-- Dedicated service user and systemd hardening template.
-- Codex is disabled until the host administrator explicitly installs and enables the service.
+The agent runtime holds no model credentials for Codex and never spawns a model CLI: Codex execution is delegated to the sidecar over its Unix socket, so reasoning and policy stay in the runtime while execution and sandboxing stay in the sidecar.
 
 ## Quick start
 
@@ -68,33 +43,36 @@ Important properties:
 make demo        # or: sh examples/demo/run_offline.sh
 ```
 
-It runs one full governed agent loop (tool call, permission gate, ceilings,
-event stream) against the scripted provider and writes an audit transcript to
-`/tmp/northstar-demo-sessions/`.
+It runs one full governed agent loop (tool call, permission gate, ceilings, event stream, default session + checkpoint) against the scripted provider and writes an audit transcript under the demo workspace’s `.northstar/sessions/`.
 
-The agent runtime CLI also self-checks and previews a run before it spends a
-token — both commands are side-effect free:
+**Product entry from a checkout (no pip install):**
+
+```sh
+bin/northstar --version
+bin/northstar doctor --workspace .
+bin/northstar agent --workspace . --provider scripted --scripted-text "ok" --prompt "hello"
+bin/northstar resume latest --workspace . --prompt "continue" --scripted-text "ok"
+bin/northstar sessions list --workspace .
+bin/northstar bench                  # public governance scorecard (offline)
+```
+
+**After `make install` (venv):**
+
+```sh
+.venv/bin/northstar agent --workspace . --prompt "summarise README" --dry-run
+```
+
+Kernel / advanced path (every default explicit):
 
 ```sh
 cd components/northstar-agent-runtime
-python3 -m cli --version
-python3 -m cli doctor --workspace .       # environment self-check
 python3 -m cli run --workspace . --provider anthropic --prompt "summarise README" --dry-run
-python3 -m cli plugin verify --workspace .  # review the installed extension bundles
+python3 -m cli plugin verify --workspace .
 ```
 
-`make test` runs every component's suite, the runtime's TypeScript face
-(`components/northstar-agent-runtime/sdk-ts`, 57 tests run straight from the `.ts` sources by
-node ≥ 22.6 — skipped, never failed, where node is older) and the repository documentation tests
-(1515 tests, all offline).
+`make test` runs every component’s suite, the runtime’s TypeScript face (`sdk-ts/`, 57 tests on node ≥ 22.6 — skipped, never failed, where node is older) and the repository documentation tests (offline).
 
-Extensions arrive as `northstar.plugin.v1` bundles: one directory packing the four seams
-this runtime already has — skills, agent files, command hooks, MCP servers — installed as a
-visible copy under `.northstar/plugins/` with its content digest pinned in
-`plugins.lock`. A bundle may tighten a ceiling, never widen one; a bundle whose bytes moved
-since review blocks the run instead of warning. There is no marketplace and no remote fetch,
-deliberately: [Plugin bundles](components/northstar-agent-runtime/README.md#plugin-bundles-plugin-install)
-has the whole rule set.
+Extensions arrive as `northstar.plugin.v1` bundles under `.northstar/plugins/` with digests pinned in `plugins.lock`. A bundle may tighten a ceiling, never widen one. There is no marketplace and no remote fetch.
 
 ### Sidecar installation
 
@@ -105,91 +83,59 @@ Requirements:
 - systemd for the supplied service unit.
 - `useradd`/`groupadd` (or `adduser`/`addgroup`) for `install.sh` to create the service account.
 
-`install.sh` creates the dedicated unprivileged service account and the state directories; you do not need to prepare them by hand.
-
-`CODEX_HOME` is Codex's own config/auth directory and is passed to the child process verbatim. The sidecar never appends to it, so the value in the unit file is exactly the directory Codex reads. The run workspace is deliberately separate from `CODEX_HOME`; credentials and run inputs do not share a directory. Set `CODEX_BIN` explicitly when the host uses a non-standard installation path.
-
-Run the local verification from the component directory:
-
 ```sh
 cd components/northstar-codex-sidecar
-python3 -m py_compile sidecar.py transport.py service.py sidecar_socket.py
 python3 -m unittest discover -s tests -p 'test_*.py' -v
-sh -n install.sh rollback.sh
-```
-
-The agent runtime verifies the same way, offline and with no API key (its scripted provider is the only model; one test file starts a real sidecar listener on a temporary Unix socket):
-
-```sh
-cd components/northstar-agent-runtime
-pip install -r requirements.txt -r requirements-tracing.txt
-python3 -m unittest discover -s tests -p 'test_*.py' -v
-```
-
-The process-group cleanup behavior should also be validated on the target native Linux distribution. Signal and PID reaping behavior in mobile Linux environments may not be representative.
-
-To review and install the deliberately conservative service lifecycle:
-
-```sh
 sudo ./install.sh
 sudo systemctl enable --now northstar-codex-sidecar.service
 ```
 
-`install.sh` creates the `northstar-codex` system account, `/var/lib/northstar-codex` with its `codex-home` and `workspace` subdirectories, installs the code and unit, and runs `systemctl daemon-reload`. It is idempotent and warns if `codex` is not on `PATH`. It does not enable or start the service.
+Do not expose the Unix socket through a TCP proxy. Review scripts, service account, paths, and permissions before enabling anything.
 
-`rollback.sh --confirm` removes the installed code and unit but deliberately preserves the service account and `/var/lib/northstar-codex`, because those hold Codex login state and run inputs.
+## How the sidecar works
 
-The default Codex executable is resolved from `PATH`. Review the scripts, service account, paths, and permissions before enabling anything. Do not expose the Unix socket through a TCP proxy; it is intended to be called by a local, authenticated runtime under a dedicated Unix group.
+One JSON request per Unix-socket connection:
+
+```json
+{"request_id":"demo-1","prompt":"Reply with OK","timeout_ms":10000}
+```
+
+One bounded JSON response:
+
+```json
+{"request_id":"demo-1","status":"ok","text":"OK"}
+```
+
+Unix socket only; Codex runs with `--sandbox read-only` and `--ephemeral`; separate process group with TERM-to-KILL cleanup; structured error classes and secret redaction.
 
 ## Who it is for
 
-Northstar is for developers and operators building local or self-hosted AI coworker runtimes who need a narrow execution component that can be tested, audited, disabled, and rolled back. It is not a hosted AI product, a drop-in security guarantee, or a replacement for a full identity, policy, workspace, and observability architecture.
+Operators and developers building **local or self-hosted AI coworkers** who need a governed Agent OS: testable, auditable, disableable, resumable. It is not a hosted AI product and not a drop-in replacement for a full enterprise identity stack.
 
 ## What it is not
 
-- It is not yet a complete multi-agent operating system.
+- It is **not yet** a complete multi-agent operating system (hosted cloud and auto-launched vendor CLI fleets remain out of scope — see the next-gen doc). OS-sandboxed `Shell` is **default-deny**; read-only tool batches can run with `--parallel-tools N`; signed handoff grants mint via `interop_bridge`; workspace memory + skill-script discovery ship under P4; `northstar bench` is the public governance scorecard.
 - It is not a hosted service or a promise of production readiness.
-- It is not a general shell execution API.
-- It does not by itself authorize callers, isolate every run, or propagate parent cancellation.
+- It is not a general host shell execution API (no unconstrained shell on the host).
+- It does not by itself replace enterprise identity, isolation, or cancellation fabrics.
 - It does not include Codex credentials or provide a Codex account.
-- The agent runtime does not implement MCP, and its live Anthropic calls are unverified in this repository's sandbox (no credentials): request building and response normalisation are covered against an injected fake client.
 
 ## Relationship to OpenBot
 
-Northstar is an independent, OpenBot-compatible project. It is not affiliated with or endorsed by CopilotKit, OpenBot, or their maintainers. The sidecar is designed to integrate with OpenBot-style runtimes without claiming to be part of the upstream OpenBot repository.
-
-Compatibility describes an integration target, not ownership, endorsement, or security equivalence.
+Northstar is an independent, OpenBot-compatible project. It is not affiliated with or endorsed by CopilotKit, OpenBot, or their maintainers. Compatibility describes an integration target, not ownership or security equivalence.
 
 ## Security boundary
 
-The sidecar authenticates callers through Unix permissions only. The local
-`northstar-host` candidate adds a separately testable host-side policy grant
-and opaque `0700` workspace allocation, but it is not a sandbox or production
-identity system. A production integration must additionally provide:
-
-- caller identity and authorization policy storage/rotation/revocation;
-- workspace lifecycle, cleanup, lease, and native filesystem race handling;
-- cancellation propagation from the parent runtime;
-- structured observability without sensitive prompt logging;
-- health checks and rollback procedures;
-- native Linux concurrency and process-tree verification;
-- a review of Codex's own account, network, and tool configuration.
-
-The host candidate has not been deployed to 103, 104, a dormitory host, or
-production OpenBot. It does not execute commands or connect the workspace to
-the Sidecar by itself.
+The sidecar authenticates callers through Unix permissions only. The local `northstar-host` candidate adds a separately testable host-side policy grant and opaque `0700` workspace allocation, but it is not a sandbox or production identity system. Production integrations must still provide caller identity, workspace lifecycle, cancellation propagation, observability without sensitive prompt logging, health/rollback, and a review of Codex’s own configuration.
 
 Do not expose the Unix socket through a TCP proxy. Never commit API keys, OAuth tokens, Codex login state, private keys, production `.env` files, or user transcripts.
 
 ## Project status
 
-This is the first public Northstar component. The broader Northstar Agent OS runtime is intentionally being built incrementally. Runtime identity binding, per-run workspace authorization, cancellation propagation, native Linux end-to-end verification, and production deployment integration remain host-level responsibilities or future work. Do not treat this repository as a finished autonomous-agent platform.
-
-Process-group cleanup should be validated on the target native Linux distribution. Signal and PID reaping behavior in mobile Linux environments may not be representative.
-
+Northstar is building a **next-gen Agent OS incrementally**. The product entry, governed kernel, default-deny sandboxed `Shell`, checkpoint-fork `resume`, parallel-safe tool batches, and signed handoff bridge are real; hosted cloud and turnkey vendor-CLI fleets remain out of scope. Do not treat this repository as a finished autonomous-agent platform.
 ## Contributing
 
-See [CONTRIBUTING.md](CONTRIBUTING.md) for the evidence, testing, security, compatibility, and rollback expectations. Security reports belong in [SECURITY.md](SECURITY.md).
+See [CONTRIBUTING.md](CONTRIBUTING.md). Security reports: [SECURITY.md](SECURITY.md).
 
 ## License
 

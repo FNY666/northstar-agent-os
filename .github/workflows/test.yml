@@ -128,11 +128,13 @@ jobs:
           cd sdk-ts && node --test "test/*.test.ts"
       - name: CLI smoke
         # The public entry points must work from the installed layout: version,
-        # environment self-check, dry-run (no request), and the offline demo.
+        # environment self-check, dry-run (no request), the offline demo, and the
+        # public governance bench (denial / injection / budget — offline, no key).
         run: |
           python -m cli --version
           python -m cli doctor --workspace . | grep -q "ready to run"
           python -m cli run --workspace . --prompt smoke --scripted-text ok --dry-run | grep -q "no request was sent"
+          python -m cli bench --json | python -c 'import json,sys; r=json.load(sys.stdin); assert r["ok"] and r["failed"]==0, r'
           sh ../../examples/demo/run_offline.sh >/dev/null
       - name: Packaging smoke
         # `pip install .` must yield a working console script and importable
@@ -141,8 +143,10 @@ jobs:
           python -m pip install --quiet --no-deps .
           cd /tmp
           northstar-agent-runtime --version
+          northstar --version
           northstar-agent-runtime doctor --workspace /tmp | grep -q "ready to run"
-          python -c "import cli, loop, tools, tools.verify_invariants; print('northstar-agent-runtime imports OK')"
+          northstar bench --json | python -c 'import json,sys; r=json.load(sys.stdin); assert r["ok"] and r["failed"]==0, r'
+          python -c "import cli, loop, tools, tools.verify_invariants, governance_bench, memory, product_path; print('northstar-agent-runtime imports OK')"
       - name: Guard verification
         # Reverting each core guard in a throwaway copy must turn its test red;
         # the untouched copy must stay green. ~1-2 minutes.
