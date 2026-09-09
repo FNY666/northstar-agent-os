@@ -167,6 +167,12 @@ requiring shared task/run/workspace/policy identity and correct source/target
 agents. These links are bounded evidence only, not signed authorization; the
 actual Handoff grant remains verified by `handoff.py`.
 
+`causal_store.py` provides a separate append-only evidence index for these
+validated edges. It uses a versioned envelope, canonical record digest,
+predecessor chain, `fsync`, and an external `EvidenceCursor` for suffix
+rollback detection after restart. The store persists evidence only; it is not
+an authorization database and cannot authorize tools, agents, or providers.
+
 `CausalGraph.from_events()` is intentionally limited to one route segment:
 its route identity and target agent remain fixed. Cross-agent delegation must
 use `CausalGraph.from_segments()` with separate verified segments and an

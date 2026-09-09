@@ -148,23 +148,11 @@ class RouteStateMachineTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             RouteStateMachine.replay([events[0], forged, *events[2:]])
 
-
+    def test_lineage_recovery_uses_public_state_machine_not_route_ledger_private_method(self):
         with tempfile.TemporaryDirectory() as directory:
-            ledger_path = Path(directory) / "route-ledger.jsonl"
             lineage_path = Path(directory) / "lineage.jsonl"
-            ledger = RouteLedger(ledger_path)
-            events = valid_retry_events()
-            for event in events:
-                if event.event_type == "decision.selected":
-                    ledger.append_decision(
-                        DECISION,
-                        attempt=event.attempt,
-                        idempotency_key=event.idempotency_key,
-                        recorded_at=event.recorded_at,
-                    )
-                else:
-                    ledger.append_receipt(RouteReceipt.from_dict(event.payload["receipt"]))
             lineage = RouteLineage(lineage_path)
+            events = valid_retry_events()
             for event in events:
                 lineage.append(event)
             original = route_ledger.RouteLedger._replay_events

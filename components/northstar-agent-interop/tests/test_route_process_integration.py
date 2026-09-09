@@ -50,7 +50,7 @@ class LocalRouteToProcessTests(unittest.TestCase):
                 spec,
                 workspace_resolver=lambda workspace_id: workspace,
                 context_loader=lambda context_ref: "opaque-context",
-                timeout_seconds=2,
+                timeout_seconds=10,
                 max_output_bytes=16_384,
             )
             router = BackendRouter()

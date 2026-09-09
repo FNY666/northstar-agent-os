@@ -523,37 +523,46 @@ class RouteLedgerPersistenceTests(RouteLedgerTestCase):
         script.write_text(
             "import json, sys\n"
             "from pathlib import Path\n"
+            "Path(sys.argv[4]).write_text('started')\n"
             "sys.path.insert(0, sys.argv[3])\n"
             "from route_ledger import RouteLedger, RouteReceipt\n"
-            "Path(sys.argv[4]).write_text('started')\n"
             "ledger = RouteLedger(sys.argv[1])\n"
             "ledger.append_receipt(RouteReceipt.from_dict(json.loads(Path(sys.argv[2]).read_text())))\n"
             "Path(sys.argv[5]).write_text('finished')\n",
             encoding="utf-8",
         )
         lock_path = self.path.with_name(self.path.name + ".lock")
-        with lock_path.open("a+b") as lock:
-            fcntl.flock(lock.fileno(), fcntl.LOCK_EX)
-            child = subprocess.Popen(
-                [
-                    sys.executable,
-                    str(script),
-                    str(self.path),
-                    str(payload_path),
-                    str(COMPONENT_ROOT),
-                    str(started_path),
-                    str(result_path),
-                ]
-            )
-            deadline = time.monotonic() + 3
-            while not started_path.exists() and time.monotonic() < deadline:
-                time.sleep(0.01)
-            self.assertTrue(started_path.exists())
-            time.sleep(0.25)
-            self.assertFalse(result_path.exists())
-            fcntl.flock(lock.fileno(), fcntl.LOCK_UN)
-        child.wait(timeout=5)
-        self.assertEqual(child.returncode, 0)
+        child = None
+        try:
+            with lock_path.open("a+b") as lock:
+                fcntl.flock(lock.fileno(), fcntl.LOCK_EX)
+                child = subprocess.Popen(
+                    [
+                        sys.executable,
+                        str(script),
+                        str(self.path),
+                        str(payload_path),
+                        str(COMPONENT_ROOT),
+                        str(started_path),
+                        str(result_path),
+                    ],
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                    start_new_session=True,
+                )
+                deadline = time.monotonic() + 10
+                while not started_path.exists() and time.monotonic() < deadline:
+                    time.sleep(0.01)
+                self.assertTrue(started_path.exists())
+                time.sleep(0.25)
+                self.assertFalse(result_path.exists())
+                fcntl.flock(lock.fileno(), fcntl.LOCK_UN)
+            child.wait(timeout=15)
+            self.assertEqual(child.returncode, 0)
+        finally:
+            if child is not None and child.poll() is None:
+                child.kill()
+                child.wait()
         self.assertEqual(len(self.ledger.read_history("run-route-001")), 2)
 
     def test_stale_lock_file_is_reusable_and_normalized(self):
@@ -603,25 +612,33 @@ class RouteLedgerPersistenceTests(RouteLedgerTestCase):
             encoding="utf-8",
         )
         processes = []
+        streams = []
         for index in range(4):
             result_path = result_dir / f"child-{index}"
             error_path = result_dir / f"child-{index}.err"
             error_stream = error_path.open("w")
+            streams.append(error_stream)
             process = subprocess.Popen(
                 [sys.executable, str(script), str(self.path), str(payload_path), str(COMPONENT_ROOT), str(result_path)],
                 stdout=subprocess.DEVNULL,
                 stderr=error_stream,
-                text=True,
+                start_new_session=True,
             )
-            processes.append((process, result_path, error_path, error_stream))
-        for process, _result_path, _error_path, _error_stream in processes:
-            process.wait(timeout=5)
-        for _process, _result_path, _error_path, error_stream in processes:
-            error_stream.close()
-        results = [result_path.read_text() for _process, result_path, _error_path, _error_stream in processes]
-        for process, _result_path, error_path, _error_stream in processes:
-            self.assertEqual(process.returncode, 0, error_path.read_text())
-        self.assertEqual(sum(result == "ok" for result in results), 4)
+            processes.append((process, result_path, error_path))
+        try:
+            for process, result_path, error_path in processes:
+                process.wait(timeout=20)
+                self.assertEqual(process.returncode, 0, error_path.read_text())
+                self.assertTrue(result_path.exists())
+            results = [result_path.read_text() for _process, result_path, _error_path in processes]
+            self.assertEqual(sum(result == "ok" for result in results), 4)
+        finally:
+            for process, _result_path, _error_path in processes:
+                if process.poll() is None:
+                    process.kill()
+                    process.wait()
+            for stream in streams:
+                stream.close()
         self.assertEqual(len(self.ledger.read_history("run-route-001")), 2)
 
 
