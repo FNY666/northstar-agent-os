@@ -20,7 +20,6 @@ from pathlib import Path
 
 COMPONENT = Path(__file__).resolve().parents[1]
 REPO = COMPONENT.parents[1]
-SIDECAR = REPO / "components/northstar-codex-sidecar"
 
 # guard -> (mutated file, [(old, new), ...], test module glob)
 GUARDS: list[tuple[str, str, list[tuple[str, str]], str, str]] = [
@@ -30,7 +29,10 @@ GUARDS: list[tuple[str, str, list[tuple[str, str]], str, str]] = [
         [("    prefix = transcript[:cut]\n    suffix = transcript[cut:]\n    if pending_tool_uses(prefix):\n        return False",
           "    prefix = transcript[:cut]\n    suffix = transcript[cut:]\n    if False and pending_tool_uses(prefix):\n        return False")],
         "test_compaction*",
-        "test_the_loop_never_sends_a_dangling_tool_use_after_compacting",
+        # The test that actually covers it: the cut rule, not a loop-level story about it. A
+        # marker naming a test the pattern cannot reach is only a note, but a note that is always
+        # printed is a note nobody reads - so point it at the real one.
+        "test_cutting_after_an_unanswered_tool_use_is_unsafe",
     ),
     (
         "tool paths are contained in the workspace after resolving symlinks",
@@ -65,8 +67,11 @@ GUARDS: list[tuple[str, str, list[tuple[str, str]], str, str]] = [
     (
         "usage and cost are recorded before the generation span ends",
         "loop.py",
-        [("                            generation_span.record_usage(",
-          "                            generation_span.end()  # MUTATION: write after end\n                            generation_span.record_usage(")],
+        # Anchored on the comment above the call, not on the call's indentation: this is a
+        # nested block that has already been reflowed once, and a guard whose anchor is a
+        # whitespace accident reports "anchor not found" instead of a real result.
+        [("                        # goes missing from the trace with no error anywhere.\n                        generation_span.record_usage(",
+          "                        # goes missing from the trace with no error anywhere.\n                        generation_span.end()  # MUTATION: write after end\n                        generation_span.record_usage(")],
         "test_tracing*",
         "test_no_attribute_anywhere_was_dropped_because_a_span_had_ended",
     ),
@@ -74,13 +79,22 @@ GUARDS: list[tuple[str, str, list[tuple[str, str]], str, str]] = [
 
 
 def prepare(root: Path) -> Path:
-    target = root / "components/northstar-agent-runtime"
-    target.parent.mkdir(parents=True, exist_ok=True)
-    shutil.copytree(COMPONENT, target)
-    shutil.copytree(SIDECAR, root / "components/northstar-codex-sidecar")
-    for cached in target.rglob("__pycache__"):
-        shutil.rmtree(cached, ignore_errors=True)
-    return target
+    """Copy every component into a throwaway tree, keeping the `components/` layout.
+
+    A copy of the runtime alone cannot be a green baseline: its own suite reaches across to
+    `northstar-run-contract`, `northstar-host` and `northstar-durable-run` - the bridge tests
+    validate against the *real* sibling components, deliberately - and the sidecar integration test
+    drives the real `serve()`. Those imports failed in the copy, the baseline went red, and every
+    mutation result became meaningless: a guard that "turns the test red" proves nothing when the
+    suite was already broken for an unrelated reason. So the whole `components/` directory travels,
+    and the path bootstrap the tests use keeps resolving exactly as it does in a checkout.
+    """
+    for source in sorted((REPO / "components").iterdir()):
+        if not source.is_dir():
+            continue
+        target = root / "components" / source.name
+        shutil.copytree(source, target, ignore=shutil.ignore_patterns("__pycache__"))
+    return root / "components/northstar-agent-runtime"
 
 
 def run(component: Path, pattern: str) -> tuple[int, str]:

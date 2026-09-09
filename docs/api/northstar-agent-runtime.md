@@ -186,6 +186,10 @@ The parent's token totals as a Usage, so a resumed run's cost view is continuous
 
 #### `main(argv: Sequence[str] | None=None)`
 
+#### `format_tool_call_ceiling(value: 'int | None')`
+
+How the resolved tool-call ceiling reads to a human.
+
 ### `command_hooks`
 
 Source: `components/northstar-agent-runtime/command_hooks.py`
@@ -1608,6 +1612,8 @@ Source: `components/northstar-agent-runtime/tools/verify_invariants.py`
 Revert each core guard in a throwaway copy of the component and confirm the matching test goes red. A green test that survives removing the guard is not a test of the guard.
 
 #### `prepare(root: Path)`
+
+Copy every component into a throwaway tree, keeping the `components/` layout.
 
 #### `run(component: Path, pattern: str)`
 

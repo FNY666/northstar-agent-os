@@ -76,7 +76,7 @@
 | 13 | 治理可归因 | 唯一 ResultMessage + 语义退出码 + 审计 feed + 策略修订号 ✅ | 有 hooks 审计但无 SIEM feed/修订号 | 有审计但无策略即代码 | 无 | **领** |
 | 14 | 契约 / 多代理互操作 | 有零件、**不在执行路径上**（见 F1）✅ | Agent Teams（实验）+ MCP 服务器可充当 🟡 | handoffs 内建 🟢 | subgraphs/swarm | **概念领、落地 0** |
 | 15 | 独立验证 / eval | durable-run verifier（后置条件 + 工件摘要）+ 确定性 fixture eval ✅ | **无一手 eval** | 无 | 无 | **领**（但是孤岛） |
-| 16 | 分发与生态 | `0.1.0.dev0` 未上架、无 TS 面、无官方 Action ✅ | pip+npm+市场+GitHub App | pip+npm | pip + Platform | **后** |
+| 16 | 分发与生态 | `0.1.0.dev0` 未上架、**TS 面已有（`sdk-ts/`，同样未发布）**、无官方 Action ✅ | pip+npm+市场+GitHub App | pip+npm | pip + Platform | **后** |
 
 **小计**：领先 3（#12/#13/#15，全部集中在"确定性 + 治理 + 验证"）、齐平 4、落后/代际 8、有意收敛 1。
 **读法**：分数不是重点——**#3/#5/#6/#8 是可被验证的硬缺口，#14/#15 是"已经有但没接上"**。后者性价比远高于前者。

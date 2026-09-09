@@ -536,6 +536,47 @@ the record of what was permitted, not a script to re-run); and it is not a signa
 can rewrite the file can recompute a digest for the file they wrote - the check catches the
 accident and the casual edit, and says nothing about a determined forger.
 
+## 17. Embed the governed run from TypeScript
+
+If your caller is a Node service, `components/northstar-agent-runtime/sdk-ts` is the face to use.
+It is not a second runtime: every run is the CLI as a child process, so you inherit the permission
+gate, the ceilings, the transcript and the exit codes instead of re-implementing them.
+
+```ts
+import { run, streamRun } from "@northstar/agent-runtime";
+
+const report = await run({
+  prompt: "Review the diff and list anything that writes outside src/",
+  workspace: repo,
+  provider: "anthropic",
+  model: "claude-sonnet-4-5",
+  permissionMode: "plan",
+  maxTurns: 6,
+  maxBudgetUsd: 0.4,
+  sessionDir: `${repo}/.northstar/sessions`,
+  redactToolOutput: true,
+});
+if (report.exitCode === 5) for (const d of report.permissionDenials) console.log(d.tool, d.source, d.reason);
+```
+
+Requirements and rules worth knowing before you wire it into a service:
+
+- node ≥ 22.6 and nothing else: the `.ts` files are the artefact (native type stripping), so there
+  is no build step, no lockfile and no registry contact;
+- a completed run returns a report — `exitCode` is what the subtype promises a wrapper and
+  `processExitCode` is what the child actually did, and both are reported so a disagreement is
+  visible instead of smoothed over;
+- `RunOptions` is a closed set: an unknown key is a `ConfigurationError` raised before a process
+  exists, and the flags it refuses include anything that looks like a credential (keys come from the
+  environment, as they do for the CLI);
+- abort is a first-class option: pass `signal` (or `timeoutMs`) and the run gets SIGTERM — the same
+  signal a Ctrl-C sends, which is the one the runtime knows how to seal a transcript on — with a
+  short grace period before the process group is killed;
+- the suite is drift-gated against the Python side, in both languages:
+  `make -C ../../.. ts-test` where node exists, `tests/test_typescript_sdk.py` where it does not.
+
+`make demo` stays Python-only; the TypeScript face is verified by its own tests, not by a runner.
+
 ## Consumer CI recipe
 
 `examples/ci-readonly-review/` is a copy-paste template for running a

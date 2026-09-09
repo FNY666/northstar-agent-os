@@ -193,6 +193,46 @@ print(report.subtype, report.exit_code, report.session_id, report.total_cost_usd
   ([example](../../examples/sdk/README.md), full API in the
   [reference page](../../docs/api/northstar-agent-runtime.md)).
 
+## Embedding in TypeScript (`sdk-ts/`)
+
+`@northstar/agent-runtime` is a typed face on the same CLI, not a second implementation: a run is
+`python3 -m cli run --json …` as a child process, so permissions, ceilings, transcripts and exit
+codes are inherited rather than re-declared.
+
+```ts
+import { run } from "@northstar/agent-runtime";
+
+const report = await run({
+  prompt: "Summarise notes.txt",
+  workspace: "examples/demo/workspace",
+  provider: "scripted",
+  model: "scripted",
+  maxTurns: 4,
+  permissionMode: "plan",
+});
+console.log(report.subtype, report.exitCode, report.totalCostUsd, report.permissionDenials.length);
+```
+
+- `run(options)` → `RunReport`; `streamRun(options)` yields each `RunEvent` as it arrives and ends
+  with the `result`; `preview(options)` returns the CLI's own `--dry-run` text.
+- A finished run never throws: an exhausted ceiling or a denied tool is a `subtype` and an
+  `exitCode`. A *broken* stream throws — no result event, a non-JSON line, or exit 64 (`UsageError`)
+  — because those are complaints about the call, not about the agent.
+- `RunOptions` is closed: one key per `run` flag, `retry`/`mcp`/`sidecar` namespaces, and an unknown
+  key is a `ConfigurationError` instead of a silent drop. `--json` is appended by the SDK.
+- Zeroes are not interchangeable: `maxToolCalls: 0` means **no tool call is allowed** (the loop
+  checks `is not None`, and `--dry-run` prints `max_tool_calls=0 (no tool call allowed)`), while
+  `compactionThresholdTokens: 0` means compaction off and an omitted ceiling means the workspace's
+  own number. `null` and `undefined` both mean "unset" — never "widen", which is the policy file's
+  authority.
+- MCP is reachable here the way it is reachable from the shell (`mcp.servers`, `mcp.config` as a
+  path or `off`/`auto`). That is not a contradiction of the Python SDK's "no MCP option": `sdk.py`
+  embeds in-process and will not grow a client, while `sdk-ts` spawns the CLI and passes the same
+  flags an operator would type — same refusals, no inline server objects, no foreign approval lists.
+- Node ≥ 22.6 runs the `.ts` sources directly (type stripping), so there is no build step and no
+  dependency to install. `package.json` is `"private": true`: this repository does not publish.
+  Full notes in [`sdk-ts/README.md`](sdk-ts/README.md).
+
 ## MCP servers (experimental)
 
 A minimal Model Context Protocol **stdio client** connects external tool
@@ -1199,6 +1239,9 @@ size (`result_chars`), so truncation is visible instead of inferred.
 | `audit_export.py`   | transcript replay as the canonical NDJSON audit feed (`audit.ndjson/1`)      |
 | `events.py`         | public event vocabulary: `event_to_dict` shapes + result `EXIT_CODES` |
 | `sdk.py`            | Python API: `RunOptions` / `run` / `stream_run` / `RunReport`       |
+| `sdk-ts/src/events.ts` | the same event vocabulary as types, + `parseEventLine`/NDJSON splitter |
+| `sdk-ts/src/options.ts` | closed `RunOptions` → argv: one key per flag, refusals before a process exists |
+| `sdk-ts/src/run.ts` | spawn + stream: `run` / `streamRun` / `preview`, `RunReport`, abort/timeout |
 | `scaffold.py`       | `new` project generator: governance-default template files   |
 | `_version.py`       | single source of truth for the component version                     |
 
@@ -1226,12 +1269,27 @@ cd components/northstar-agent-runtime
 python3 -m unittest discover -s tests -p 'test_*.py' -v
 ```
 
-1188 tests, fully offline and deterministic: the scripted provider is the only
+1197 tests, fully offline and deterministic: the scripted provider is the only
 model, and `test_integration_sidecar.py` runs the real sidecar `serve()` over a
 real Unix socket with a 100,000-Chinese-character prompt.
 
+The TypeScript face adds 57 more, run without a build step or a package install:
+
+```sh
+cd sdk-ts && node --test "test/*.test.ts"   # or: make -C ../../.. ts-test
+```
+
+Its `test/parity.test.ts` asks this component — `events.py`, `permissions.py`,
+`postconditions.py`, `provider_retry.py` and the live `argparse` tree — whether the mirror still
+matches, and `tests/test_typescript_sdk.py` (repository root) re-runs the same comparisons from
+Python, so a build image with no node in it cannot go green while the mirror rots.
+
 To confirm the tests actually cover the guards they claim, revert each one in a
-throwaway copy and check that its test goes red:
+throwaway copy and check that its test goes red. The copy is the whole
+`components/` tree, not just this component: the bridge tests validate against
+the real sibling components by design, so a runtime-only copy has a red
+baseline - and a guard judged against a broken baseline proves nothing.
+`tests/test_tools_verify_invariants.py` pins that the copy step keeps them:
 
 ```sh
 python3 tools/verify_invariants.py

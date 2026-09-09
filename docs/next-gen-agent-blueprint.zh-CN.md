@@ -18,7 +18,7 @@
 
 这件事有一个可检验的判据，本仓已经具备而头部工具都没有：
 
-> **零凭据、零网络、1485 项测试跑通同一套语义。** 任何被吸收进来的优点，若不能在没有 API key 的情况下被确定性测试，就不算吸收成功——那只是多了一条无法回归的功能面。
+> **零凭据、零网络、1515 项测试（另加 57 项 node 面测试）跑通同一套语义。** 任何被吸收进来的优点，若不能在没有 API key 的情况下被确定性测试，就不算吸收成功——那只是多了一条无法回归的功能面。
 
 按这个判据，顶级工具的优点分成三类。
 
@@ -60,6 +60,7 @@
 | elicitation ↔ 审批回合 | MCP 特性 | `mcp_elicitation.py`：把"服务器问用户"映射到权限门，无人应答即拒绝并 `notifications/cancelled`（**这是别人没有的角度**） | ✅ 已落地（第十六批） |
 | OS 级沙箱 | Claude seatbelt/bubblewrap、Gemini gVisor | 可选 `bwrap` 包装器（只读 bind + no net + cgroup），CI 真跑 | 🔧 待做（P1-4，C1 的前置） |
 | 技能供应链校验 | 无人做（第三方审计：99% 坏味道/36% 缺陷） | `skills check`：规则纯函数 + `skills.lock` 摘要钉定 + 漂移拒跑 | ✅ 已落地（第十五批） |
+| 两语言可编程面（Python + TypeScript SDK） | Claude Agent SDK（py/ts 双官方面） | `sdk-ts/`：把 `run --json` 包成 `RunOptions`/`RunEvent`/`RunReport`，**镜像而非重定义**，两侧各有一条漂移门 | ✅ 已落地（第二十三批）；发布仍按纪律不做（`private: true`） |
 | 会话 rewind/fork | Claude /rewind、LangGraph time-travel | `--resume-from`：从任一检查点分叉新 session（摘要校验），**绝不回写**旧文件 | ✅ 已落地（与 append-only 兼容） |
 
 ---
@@ -73,7 +74,8 @@
    → 头部工具的权限配置是"行为开关"，这里是**可评审、可归因、可 diff 的策略文档**。CI 场景里这是合规资产，不是 DX 糖。
 
 2. **确定性回归治理（治理本身的 golden test）**
-   scripted provider + 1485 项离线测试 + guard 红绿 harness，意味着"把 deny 改成 allow 会让哪些测试变红"是可计算的。
+   scripted provider + 1515 项离线测试 + guard 红绿 harness，意味着"把 deny 改成 allow 会让哪些测试变红"是可计算的。
+   第二张脸（TypeScript）也不放宽这条：它的测试直接问 Python 侧的模块与 argparse 树"你今天的定义是什么"。
    → 别人有 output eval；**没有人在 eval 权限决策**。这条可以直接做成公开基准（denial correctness / 注入抵抗 / 预算命中率），是 Northstar 唯一能自定义考题的赛道。
 
 3. **可归因的委派链（contract → execution → receipt）**
@@ -128,6 +130,56 @@
 **这一项的真实动机不是便利，是漏洞**：上限是 per-run 的，而 `--resume` 会新开一次运行——
 所以"恢复"一直是绕过 `max_budget_usd` 的后门。现在它必须把父花费带过来；
 嵌入式调用忘了传 seed 过的 `Budget` 会直接报错，而不是拿到更宽的额度。
+
+### 6.28 第二十三批（第二张脸不能变成第二份真相）
+
+**选边**：Claude Agent SDK 有官方 py + ts 两 face；本仓只有 `sdk.py`。要补 TS 面，最省事的写法是
+"照抄一份类型定义"，而照抄的定义一旦漂移，用户拿到的就是**同一条命令的两种语义**——这恰好是本项目
+最不能接受的失败。因此第二十三批的实现把"抄"变成"抄 + 对账"，并让对账在没有 node 的机器上也跑。
+
+落地：`components/northstar-agent-runtime/sdk-ts/`（`@northstar/agent-runtime`，57 项 node 测试）：
+
+- **一次运行 = 一个子进程**：`run(options)` / `streamRun(options)` / `preview(options)` 直接组装
+  `python3 -m cli run ... --json`，权限门、上限、transcript、退出码全部继承；没有守护进程、没有第二协议，
+  也就没有"TS 侧多一条能绕过的路"。
+- **封闭选项面**：`RunOptions` 45 个键与 `run` 的 60 个 flag 一一对上，`retry/mcp/sidecar` 是命名空间；
+  未知键是 `ConfigurationError`（在建 argv 时、进程存在前），`--json` 由 SDK 追加、调用方不得关闭；
+  没有 `extraArgs` 逃生舱——那会把漂移门挡在真正需要它的那些选项之外。
+- **语义陷阱写明而非抹平**：`maxToolCalls: 0` = 一次工具调用都不允许（不是 unlimited）；
+  `compactionThresholdTokens: 0` = 关闭压缩；`retry.baseDelayMs/jitter/onContextOverflow` 属于
+  `[retry]` 策略表，被点名拒绝而不是静默丢弃；`mcp.elicitAnswers` 必须配 `elicit: true`；
+  `agent` 与 `mcp.servers` 互斥；`null`/`undefined` 都表示"不设"，永远不等于"放宽"。
+- **失败形状**：跑完的 run 从不抛错（subtype + `exitCode` 说话），只有"流不可信"才抛——
+  没有 result 事件、出现非 JSON 行、exit 64 分别对应 `RunFailedError`/`UsageError`；
+  `exitCode`（契约）与 `processExitCode`（事实）同时保留，两者不一致时报出来而不是被抹平。
+- **取消是一等公民**：`signal`/`timeoutMs` 发 SIGTERM（正是 runtime 会封存 transcript 的那个信号），
+  宽限后再对**进程组** SIGKILL；测试用一个自证文件确认"被中止的运行没有留下孤儿"。
+
+**漂移门（两面都装）**：`sdk-ts/test/parity.test.ts` 直接问 Python 侧——`events.EXIT_CODES`、
+`providers.base.RESULT_SUBTYPES`/`ResultMessage` 的字段集、`loop.Denial.as_dict()`、
+`permissions.PERMISSION_MODES`、`postconditions.KINDS`、`provider_retry.RETRYABLE_CLASSES`、
+`cli.build_parser()` 里 `run` 的真实 flag 与 `choices`，外加一次真实 `--json` 跑的 result 键集合；
+`tests/test_typescript_sdk.py`（21 项）用同一批断言在 **Python** 里再跑一遍，所以
+"这台机器没有 node"不能成为绿灯的理由。`Makefile` 的 `ts-test` 是**守卫式**的：node < 22.6 时打印
+skip 并 exit 0，绝不把"跑不了"伪装成"跑过了"，也绝不让真失败的测试被 `||` 吞掉。
+
+**顺手修掉一个显示层的谎**：`run --dry-run` 把显式 `--max-tool-calls 0` 打成 `unlimited`，而
+`loop.py` 的判定是 `max_tool_calls is not None`——0 是"一次都不许"，且 `_ceiling_stop` 在**首次生成之前**
+就结束运行（`num_turns: 0`、`input_tokens: 0`、连 denials 都没有，因为根本没有调用被拒）。
+`cli.format_tool_call_ceiling` 现在把三种状态分开写：`unlimited` / `0 (no tool call allowed)` / 数字；
+`CeilingTests` 钉住 0 与 1 的差别（1 会花掉一次请求并记录一条 denial）。镜像读错这一点，正是"第二张脸
+能让第一张脸变诚实"的最直接证据。
+
+测试量：**+9 → 1197**（runtime 片：上限语义 +5、守卫 harness 自身 +4），TypeScript 面 **+57**（node，
+独立口径不与 python 相加），全仓 `make test` **1515 全绿**（51+41+37+65+54+1197+70）；`make demo` exit 0。
+
+**顺手把 CI 的一个"假绿"变真**：`tools/verify_invariants.py` 过去只把本组件拷进临时目录，而本组件的
+桥接测试是**故意**去 import 真实的兄弟组件的——拷贝里缺了它们，基线直接红，于是每次变异的结果都不再说明
+任何事（这正是 `Guard verification` 步骤自桥接落地起就失败的原因）。现在它拷整棵 `components/`，并由
+`tests/test_tools_verify_invariants.py` 钉住"拷贝必须带齐兄弟组件 + 一次端到端变异必须变红"；另一条
+变异锚点原本按 `loop.py` 的缩进写，缩进一改就变成"锚点没找到"——一个报不出结果的守卫等于没有守卫，
+现在锚在调用上方的注释上。五个守卫对 1197 项基线全部转红 ✓。§10.5 T1 的"TS 面"尾巴因此收口，剩下的只有发布纪律
+之外的部分——见第 23 批 dx-benchmark 追加。
 
 ### 6.27 第二十二批（fork 点必须能在花钱之前被检查）
 
@@ -339,4 +391,4 @@ workspace 的数字，但不需要在这里第二次判定文件名对不对。
 ## 7. 一句话
 
 **"包含所有顶级 agent 的优点"这条路的正确走法，是把每个优点都过一遍"能不能不绕门"的改写；改不动的就明确拒绝。**
-Northstar 的次世代位置不在功能并集上，在于：**同一个 agent loop，别人要牺牲确定性或牺牲边界来换能力，这里两样都不换——而且每一项能力都能在 CI 里用 1485 个无 key 测试证明它今天和昨天行为一致。**
+Northstar 的次世代位置不在功能并集上，在于：**同一个 agent loop，别人要牺牲确定性或牺牲边界来换能力，这里两样都不换——而且每一项能力都能在 CI 里用 1515 个无 key 测试（外加 TypeScript 面的 57 个）证明它今天和昨天行为一致。**
