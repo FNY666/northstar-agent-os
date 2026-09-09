@@ -16,7 +16,7 @@ prompt ──► AgentRuntime ──► provider (Anthropic Messages API, or scr
                  ├─ hooks (10 lifecycle events, veto-capable)
                  ├─ permission gate (disallowed → allowed → mode + host callback)
                  ├─ ceilings (turns / tool calls / USD)
-                 ├─ tools (Read, Grep, LS, Write, Edit, DescribeTools, Task)
+                 ├─ tools (Read, Grep, LS, Write, Edit, DescribeTools, Shell, Task)
                  │        └── CodexReadOnly ──Unix socket──► northstar-codex-sidecar ──► codex --sandbox read-only
                  ├─ subagents (own context, tool subset, ceilings, provider)
                  ├─ compaction (safe boundaries only)
@@ -365,8 +365,7 @@ schema_version = "northstar.policy.v1"   # canonical policy schema; an unsupport
 revision = "2026-09-07.r1"       # optional audit correlation key for this file revision
 permission_mode = "plan"        # "default" or "plan" only; acceptEdits/bypassPermissions
                                 # are an operator's per-run CLI decision
-read_only = true                # denies Write/Edit for every run
-deny_tools = ["Write", "Grep"]  # additive floor; even --allow-tool cannot resurrect one
+read_only = true                # denies Write/Edit/Shell for every rundeny_tools = ["Write", "Grep"]  # additive floor; even --allow-tool cannot resurrect one
 max_turns = 10                  # may only lower the built-in ceiling of 25
 max_tool_calls = 50             # may only lower 50
 max_budget_usd = 0.25           # any positive cap (built-in default: unlimited)
@@ -1113,6 +1112,11 @@ Three layers, evaluated in this order:
 2. `allowed_tools` — auto-approves without consulting anything else.
 3. `permission_mode` plus the optional `can_use_tool` host callback.
 
+`Shell` is kind `exec` (mutating): denied under `default` until `--allow-tool Shell`,
+never covered by `acceptEdits`, and refused by `--read-only` / `plan`. Execution goes
+through `tools.os_sandbox` (`bwrap` when usable, else an honestly-labelled `process`
+backend). See [docs/concepts/threat-model.md](../../docs/concepts/threat-model.md).
+
 Modes: `default`, `acceptEdits`, `plan`, `bypassPermissions`. In `default`, a
 mutating tool with no host approval callback is **denied, not executed** — the
 fail-safe direction is always "no". A denial is not an exception: the model
@@ -1206,8 +1210,7 @@ size (`result_chars`), so truncation is visible instead of inferred.
 | `hooks.py`          | 10 lifecycle events, veto semantics, fail-closed errors              |
 | `permissions.py`    | the three-layer gate and the delegation gate                         |
 | `budget.py`         | price table, cost computation, budget meter                          |
-| `tools/`            | package: registry, sandbox, caps, built-in tools, `CodexReadOnly` spec (`__init__.py`), plus the guard-verification harness (`verify_invariants.py`) |
-| `compaction.py`     | safe-boundary detection and summarisation                            |
+| `tools/`            | package: registry, path sandbox, caps, built-ins (`__init__.py`), OS sandbox (`os_sandbox.py`), governed `Shell` (`shell.py`), guard harness (`verify_invariants.py`) || `compaction.py`     | safe-boundary detection and summarisation                            |
 | `sessions.py`       | append-only JSONL transcripts and recovery                            |
 | `session_lease.py`    | one writer per session file: `flock` claim, renewed while alive, never stolen |
 | `agents.py`         | agent definitions, registry, verdict parsing                         |

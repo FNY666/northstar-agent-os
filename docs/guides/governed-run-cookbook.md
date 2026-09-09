@@ -17,24 +17,27 @@ To install into a virtualenv (`components/*` are local path-installable):
 
 ```sh
 make install       # creates ./.venv with all six components
-./.venv/bin/northstar-agent-runtime doctor --workspace .
+./.venv/bin/northstar doctor --workspace .
 ```
 
 ## 2. First run: the offline demo
 
 ```sh
-cd examples/demo && sh run_offline.sh
+make demo
+# or: cd examples/demo && sh run_offline.sh
 ```
 
-One full governed loop (Read call + scripted model turn) through the **same
-code path** a live run uses — permission gate, ceilings, event stream,
-append-only transcript in `/tmp/northstar-demo-sessions/`. Exit code 0.
+One full governed loop via the **product path** (`bin/northstar agent`): Read call
++ scripted model turn through the same code path a live run uses — permission
+gate, ceilings, event stream, append-only transcript and per-turn checkpoint under
+`examples/demo/workspace/.northstar/sessions/`. Exit code 0.
 
 ## 3. Dry-run before anything real
 
 ```sh
-python3 -m cli run --workspace . --prompt "summarise the repo" \
+bin/northstar agent --workspace . --prompt "summarise the repo" \
   --scripted-text ok --dry-run
+# kernel path (every default explicit): python3 -m cli run …
 ```
 
 Prints the plan — provider, pricing, tools, skills, MCP servers, sessions —

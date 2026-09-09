@@ -172,7 +172,7 @@ The prefix a resumed run should start from, verified against the digest.
 
 Source: `components/northstar-agent-runtime/cli.py`
 
-Command-line entry point for one governed run.
+Command-line entry point for the Northstar Agent OS.
 
 #### `build_parser()`
 
@@ -387,6 +387,78 @@ What the mirror concluded about itself. ``ok`` is the only verdict callers read.
 
 Compare this module's mirror against the durable component, if it is importable.
 
+### `interop_bridge`
+
+Source: `components/northstar-agent-runtime/interop_bridge.py`
+
+Runtime → interop handoff bridge: signed multi-agent grants without a second gate.
+
+#### `InteropBridgeError`
+
+A handoff the bridge refuses to mint or verify. Operator-facing.
+
+#### `BridgeReport`
+
+What the bridge concluded. ``ok`` is the only verdict callers branch on.
+
+- `as_dict()`
+#### `load_interop(name: str)`
+
+Import one interop module; raises ImportError when the component is absent.
+
+#### `digest_input(payload: Any)`
+
+Canonical sha256 digest of a handoff input (prompt / context envelope).
+
+#### `cross_check()`
+
+Can this host import the interop handoff surface?
+
+#### `mint_local_handoff(*, secret: bytes, source_agent_id: str, target_agent_id: str, target_capabilities: Sequence[str], requested_capabilities: Sequence[str], input_payload: Any, run_id: str, actor_id: str='local-operator', workspace_id: str='local-workspace', policy_revision: str='local-dev', task_id: str | None=None, thread_id: str | None=None, step_id: str | None=None, trace_id: str | None=None, handoff_id: str | None=None, deadline_at: int | None=None, now: int | None=None, grant_ttl_seconds: int=300, source_capabilities: Sequence[str] | None=None, expected_postconditions: Sequence[str]=(), parent_authorization: Any=None, parent_handoff: Any=None, target_provider: str='local', target_version: str='0.1.0')`
+
+Mint a signed handoff grant for a local or host-authorized parent.
+
+#### `verify_local_grant(token: str, secret: bytes, *, now: int | None=None)`
+
+Verify a grant token; returns a report (never raises on signature failure).
+
+### `memory`
+
+Source: `components/northstar-agent-runtime/memory.py`
+
+Workspace-scoped agent memory (P4): durable notes inside the run boundary.
+
+#### `MemoryError`
+
+A memory path the runtime refuses. Operator-facing.
+
+#### `WorkspaceMemory`
+
+Discovered memory, ready to append to the system prompt.
+
+- `as_dict()`
+#### `memory_directory(workspace: str | Path)`
+
+#### `default_memory_path(workspace: str | Path)`
+
+#### `is_memory_write_path(relative_parts: tuple[str, ...])`
+
+True when ``relative_parts`` is under the writable memory carve-out.
+
+#### `digest_text(text: str)`
+
+#### `discover_memory(workspace: str | Path, *, configured: str | bool | None=None, explicit: str | Path | None=None)`
+
+Load workspace memory, or ``None`` when absent / disabled.
+
+#### `append_memory(base_prompt: str, memory: WorkspaceMemory)`
+
+Append clearly delimited memory content to a system prompt.
+
+#### `ensure_memory_dir(workspace: str | Path)`
+
+Create the memory directory (mode 0700) so a first Write has a home.
+
 ### `events`
 
 Source: `components/northstar-agent-runtime/events.py`
@@ -410,6 +482,44 @@ The frontmatter block cannot be parsed. Message is operator-facing.
 #### `parse_frontmatter(text: str)`
 
 Return ``(fields, body)``; ``fields`` is ``None`` when there is no block.
+
+### `governance_bench`
+
+Source: `components/northstar-agent-runtime/governance_bench.py`
+
+Public governance benchmark — eval the *permission decisions*, not model output.
+
+#### `BenchCase`
+
+One offline scenario with a closed expected verdict.
+
+#### `BenchExpectation`
+
+What a green case must produce. Checked after the run, never before.
+
+#### `CaseResult`
+
+- `as_dict()`
+#### `BenchReport`
+
+- `as_dict()`
+#### `BenchHarness`
+
+Temp workspaces + scripted providers for one suite run.
+
+- `close()`
+- `workspace(files: dict[str, str] | None=None)`
+- `provider(turns: Sequence[Any], **kwargs: Any)`
+- `runtime(*, workspace: Path, turns: Sequence[Any], config_kwargs: dict[str, Any] | None=None, tool_limits: ToolLimits | None=None, can_use_tool: Any=None)`
+#### `list_cases()`
+
+#### `run_suite(*, only: Iterable[str] | None=None, tracks: Iterable[str] | None=None)`
+
+Execute the public suite. Always cleans temp workspaces.
+
+#### `add_bench_arguments(parser: argparse.ArgumentParser)`
+
+#### `run_bench_command(args: argparse.Namespace)`
 
 ### `hooks`
 
@@ -1064,6 +1174,40 @@ A snapshot-and-compare verifier bound to one workspace.
 
 The audit shape: a pass/fail roll-up with the structural split made visible.
 
+### `product_path`
+
+Source: `components/northstar-agent-runtime/product_path.py`
+
+Product defaults for the next-gen Agent OS entry path.
+
+#### `default_session_dir(workspace: str | Path)`
+
+Absolute path of the product-default session directory for ``workspace``.
+
+#### `resolve_workspace(argv: Sequence[str])`
+
+Workspace a product invocation will confine tools to (mirrors CLI default).
+
+#### `resolve_session_dir(argv: Sequence[str], *, workspace: str | Path | None=None)`
+
+Session directory a product invocation will read/write.
+
+#### `resolve_session_id(session_id: str, session_dir: str | Path)`
+
+Resolve ``latest`` (and aliases) to a concrete session id, or pass through.
+
+#### `extract_positional_task(argv: Sequence[str])`
+
+Pull a bare task string out of product ``agent`` argv.
+
+#### `apply_agent_defaults(argv: Sequence[str])`
+
+Rewrite product ``agent`` argv into a ``run`` argv with welded defaults.
+
+#### `apply_resume_defaults(argv: Sequence[str], *, session_id: str, workspace: str | None=None)`
+
+Rewrite product ``resume`` argv into a governed ``run --resume-from`` argv.
+
 ### `provider_retry`
 
 Source: `components/northstar-agent-runtime/provider_retry.py`
@@ -1161,7 +1305,7 @@ Run one governed loop to completion and return its :class:`RunReport`.
 
 Source: `components/northstar-agent-runtime/scaffold.py`
 
-Scaffold a new governed Northstar project (``northstar-agent-runtime new``).
+Scaffold a new governed Northstar project (``northstar new``).
 
 #### `scaffold_project(directory: str | Path, *, force: bool=False)`
 
@@ -1275,6 +1419,10 @@ The lease owner: the run's own correlation id when it has one.
 Source: `components/northstar-agent-runtime/session_view.py`
 
 Read-side of the session transcripts: ``cli sessions list`` and ``show``.
+
+#### `resolve_view_session_dir(args: argparse.Namespace)`
+
+Session directory for a sessions subcommand: explicit wins, else product default.
 
 #### `add_arguments(parser: argparse.ArgumentParser)`
 
@@ -1604,6 +1752,108 @@ The workspace tool set every run starts from.
 Schema for the sidecar-delegated tool (registered only with a socket).
 
 #### `truncate_text(text: str, limit: int=MAX_TOOL_RESULT_CHARS)`
+
+### `tools.os_sandbox`
+
+Source: `components/northstar-agent-runtime/tools/os_sandbox.py`
+
+OS-level execution backends for governed command tools (Shell).
+
+#### `SandboxError`
+
+The sandbox refused to start or enforce. Message is operator-facing.
+
+#### `SandboxCapabilities`
+
+What this host can actually offer. Doctor and init records both use it.
+
+- `as_dict()`
+#### `SandboxRequest`
+
+One command the sandbox is asked to run.
+
+#### `SandboxResult`
+
+Outcome of one sandboxed command. Always returned, never raised for exit≠0.
+
+- `ok()`
+- `as_dict()`
+- `render()`
+  - Human/model-facing body: exit, streams, and an honest isolation line.
+#### `reset_capabilities_cache()`
+
+Tests only: drop the cached probe so a fixture can re-run discovery.
+
+#### `probe_capabilities(*, force: bool=False, bwrap_bin: str | None=None)`
+
+Discover what isolation this host can provide (cached after first call).
+
+#### `resolve_backend(requested: str, *, capabilities: SandboxCapabilities | None=None)`
+
+Map ``auto|bwrap|process`` to the backend that will actually run.
+
+#### `run_sandboxed(request: SandboxRequest, *, backend: str='auto', capabilities: SandboxCapabilities | None=None)`
+
+Run ``request`` under the resolved backend. Never uses ``shell=True``.
+
+### `tools.parallel`
+
+Source: `components/northstar-agent-runtime/tools/parallel.py`
+
+Classify which tools may share a concurrent execution batch.
+
+#### `clamp_parallel_tools(value: Any)`
+
+Validate and clamp a ``parallel_tools`` setting to ``1..MAX_PARALLEL_TOOLS``.
+
+#### `is_parallel_safe_spec(spec: Any)`
+
+True when ``spec``'s handler body may run beside another safe handler.
+
+#### `batch_is_parallel_safe(specs: list[Any])`
+
+True when every spec in the turn is parallel-safe (and there is more than one).
+
+### `tools.shell`
+
+Source: `components/northstar-agent-runtime/tools/shell.py`
+
+Shell tool: governed command execution inside the OS sandbox.
+
+#### `parse_shell_argv(payload: dict[str, Any])`
+
+Build the argv the sandbox will exec. Prefer ``argv``; ``command`` is sh -c.
+
+#### `shell_handler(payload: dict[str, Any], ctx: 'ToolContext')`
+
+Run one governed command in the configured OS sandbox backend.
+
+#### `shell_tool_spec()`
+
+Build the :class:`ToolSpec` for Shell (lazy import to keep tools package light).
+
+#### `sandbox_status_line(backend: str='auto')`
+
+One-line summary for doctor / dry-run.
+
+### `tools.skill_scripts`
+
+Source: `components/northstar-agent-runtime/tools/skill_scripts.py`
+
+Skill-bundled scripts: discoverable, sandboxed, never auto-run.
+
+#### `SkillScript`
+
+One discovered script file under a skill package.
+
+- `as_dict()`
+#### `discover_skill_scripts(workspace: str | Path, skills: Iterable[Skill])`
+
+Walk each skill's ``scripts/`` directory; refuse symlink escapes.
+
+#### `skill_scripts_listing(scripts: Iterable[SkillScript])`
+
+Compose the progressive-disclosure section for skill scripts.
 
 ### `tools.verify_invariants`
 

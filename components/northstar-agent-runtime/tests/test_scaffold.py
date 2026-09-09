@@ -114,7 +114,7 @@ class ScaffoldTests(unittest.TestCase):
         self.scaffold()
         workflow = (self.project / ".github/workflows/northstar-review.yml").read_text(encoding="utf-8")
         self.assertIn("pull_request", workflow)
-        self.assertIn("northstar-agent-runtime run --workspace . --agent reviewer", workflow)
+        self.assertIn("northstar agent --workspace . --agent reviewer", workflow)
         self.assertIn("TODO", workflow)
 
     # -- CLI end to end ---------------------------------------------------------

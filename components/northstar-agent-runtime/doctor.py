@@ -49,6 +49,12 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--script", default="", help="scripted-provider script to validate (JSON array of turns)")
     parser.add_argument("--sidecar-socket", default="", help="sidecar socket path to check for presence")
     parser.add_argument("--session-dir", default="", help="session transcript directory to check for creatability")
+    parser.add_argument(
+        "--sandbox",
+        choices=("auto", "bwrap", "process"),
+        default="auto",
+        help="Shell tool sandbox backend a run would use (default: auto)",
+    )
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -187,6 +193,38 @@ def _checks(args: argparse.Namespace) -> list[Finding]:
             )
     else:
         findings.append(Finding("sidecar", "ok", "off - CodexReadOnly tool is not registered (pass --sidecar-socket to enable)"))
+
+    # -- OS sandbox (Shell tool backend) ----------------------------------------
+    try:
+        from tools.os_sandbox import SandboxError, probe_capabilities, resolve_backend
+
+        caps = probe_capabilities()
+        requested = getattr(args, "sandbox", "auto") or "auto"
+        try:
+            chosen = resolve_backend(requested, capabilities=caps)
+            if chosen == "bwrap":
+                findings.append(
+                    Finding(
+                        "sandbox",
+                        "ok",
+                        f"backend=bwrap (OS isolation) — {caps.bwrap_detail}; "
+                        "Shell still denied until --allow-tool Shell",
+                    )
+                )
+            else:
+                findings.append(
+                    Finding(
+                        "sandbox",
+                        "warn",
+                        f"backend=process (cwd+env only; host FS reachable) — {caps.bwrap_detail}. "
+                        "Install bubblewrap for OS isolation. Shell still denied until --allow-tool Shell. "
+                        "See docs/concepts/threat-model.md",
+                    )
+                )
+        except SandboxError as error:
+            findings.append(Finding("sandbox", "fail", str(error)))
+    except Exception as error:  # noqa: BLE001
+        findings.append(Finding("sandbox", "warn", f"could not probe sandbox: {error}"))
 
     # -- workspace policy file, repository agents, skills, project context ------
     if workspace.is_dir():
@@ -366,7 +404,7 @@ def _checks(args: argparse.Namespace) -> list[Finding]:
 def run_doctor(args: argparse.Namespace) -> int:
     """Print the report; return 0 unless a check failed."""
     findings = _checks(args)
-    print(f"northstar-agent-runtime {__version__} - doctor")
+    print(f"northstar {__version__} - doctor")
     print("  every check is local and side-effect free: no request, no file written")
     for finding in findings:
         print(f"{ICONS[finding.level]} {finding.name:<14} {finding.message}")
