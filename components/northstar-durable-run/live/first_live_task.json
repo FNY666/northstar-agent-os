@@ -1,0 +1,16 @@
+{
+  "schema_version": "northstar.live-task.v1",
+  "task_id": "live-column-report",
+  "goal": "Read the workspace files, then write out/report.md so that it states how many data rows the CSV has, names every column, and names the top scorer. Use only the two actions you are given.",
+  "rounds": 3,
+  "seed": {
+    "README.md": "Workspace notes\n\n- data/records.csv holds the scores.\n- The deliverable is out/report.md.\n",
+    "data/records.csv": "name,score,city\nalice,11,paris\nbob,7,rome\ncarol,23,oslo\ndave,19,berlin\n"
+  },
+  "expect": [
+    {
+      "path": "out/report.md",
+      "contains": ["4", "name", "score", "city", "carol"]
+    }
+  ]
+}

@@ -22,6 +22,10 @@ _FORBIDDEN_KEYS = {
     "credential", "credentials", "secret", "secrets", "token", "tokens",
 }
 _ID_RE = re.compile(r"^[^\s/\\\x00]+$")
+# Host-declared model names may carry a gateway namespace (openrouter uses
+# vendor/model); they are data, never paths, so the stricter rule stays for
+# identity fields such as provider and model_revision.
+_MODEL_ID_RE = re.compile(r"^[^\s\\\x00]+$")
 
 
 def _canonical(value: Any) -> bytes:
@@ -37,6 +41,12 @@ def _digest(value: Any) -> str:
 
 def _id(value: Any, field: str) -> str:
     if not isinstance(value, str) or not value or len(value) > _MAX_ID or not _ID_RE.fullmatch(value):
+        raise ValueError(f"{field} is invalid")
+    return value
+
+
+def _model_id(value: Any, field: str) -> str:
+    if not isinstance(value, str) or not value or len(value) > _MAX_ID or not _MODEL_ID_RE.fullmatch(value):
         raise ValueError(f"{field} is invalid")
     return value
 
@@ -87,7 +97,7 @@ class PlannerModelResponse:
     model_revision: str
 
     def __post_init__(self) -> None:
-        _id(self.model_id, "model_id")
+        _model_id(self.model_id, "model_id")
         _id(self.provider, "provider")
         _id(self.model_revision, "model_revision")
         if not isinstance(self.content, (str, dict)):
@@ -112,7 +122,7 @@ class PlannerCandidate:
         if value["schema_version"] != _SCHEMA:
             raise ValueError("planner candidate schema is invalid")
         plan = AgentPlan.from_dict(value["plan"])
-        model_id = _id(value["model_id"], "model_id")
+        model_id = _model_id(value["model_id"], "model_id")
         provider = _id(value["provider"], "provider")
         model_revision = _id(value["model_revision"], "model_revision")
         unsigned = {

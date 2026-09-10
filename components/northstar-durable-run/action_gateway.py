@@ -279,6 +279,26 @@ def _require_digest(value: Any) -> str:
     return value
 
 
+class ToolRefused(ValueError):
+    """A tool rejected the request outright and certainly did not execute.
+
+    Tools raise this for inadmissible input (bad path, unauthorized target,
+    symlink escape, size bound, wrong payload shape). The gateway keeps the
+    class intact so the dispatcher can report a refusal, and the loop then
+    refuses to let an observation stand in for an action that never ran.
+    """
+
+
+class ToolExecutionFailed(ValueError):
+    """The executor ran and raised.
+
+    This must stay distinguishable from every earlier refusal (authorization,
+    capability, scope, contract, approval): a tool that ran and failed has a
+    world state to observe and may have committed an effect, while a refused
+    call certainly did not.
+    """
+
+
 @dataclass(frozen=True)
 class ToolSpec:
     name: str
@@ -413,8 +433,12 @@ class ActionGateway:
 
         try:
             output = spec.executor(arguments)
+        except ToolRefused:
+            # A refusal is a decision, not a failure: keep the class so the
+            # dispatcher can report it as "certainly did not execute".
+            raise
         except Exception as error:
-            raise ValueError("tool execution failed") from error
+            raise ToolExecutionFailed("tool execution failed") from error
         if not isinstance(output, dict):
             raise ValueError("tool executor must return an object")
         result = ToolExecutionResult(

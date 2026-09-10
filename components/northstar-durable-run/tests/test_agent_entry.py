@@ -168,6 +168,41 @@ class AgentEntryTests(unittest.TestCase):
         self.assertFalse(outcome.ok)
         self.assertEqual(outcome.verification.failures, ("other.txt:missing",))
 
+    def test_contains_expectation_accepts_a_free_text_deliverable(self):
+        steps = [
+            step_value(
+                "write-report",
+                WRITE_ACTION,
+                {"path": "out/report.md", "content": "# Report\nrows: 4\ntop: carol\n"},
+                ["content_matches_payload"],
+            )
+        ]
+        outcome = self.harness.run_goal(
+            "Write the report",
+            self.planner(steps),
+            expectations=[ExpectedArtifact("out/report.md", contains=("rows: 4", "top: carol"))],
+        )
+        self.assertTrue(outcome.ok)
+        missed = self.harness.run_goal(
+            "Write the report",
+            self.planner(steps),
+            expectations=[ExpectedArtifact("out/report.md", contains=("rows: 9",))],
+        )
+        self.assertFalse(missed.ok)
+        self.assertEqual(missed.verification.failures, ("out/report.md:missing_text:rows: 9",))
+
+    def test_workspace_inventory_names_files_without_exposing_content(self):
+        (self.workspace / "data").mkdir()
+        (self.workspace / "data" / "records.csv").write_text("name,score\n", encoding="utf-8")
+        inventory = self.harness.workspace_inventory()
+        self.assertEqual(
+            sorted(entry["path"] for entry in inventory), ["README.md", "data/records.csv"]
+        )
+        self.assertTrue(all(set(entry) == {"path", "size_bytes"} for entry in inventory))
+        self.assertEqual(self.harness.workspace_inventory(limit=1).__len__(), 1)
+        with self.assertRaises(ValueError):
+            self.harness.workspace_inventory(limit=0)
+
     def test_escape_path_is_refused_and_never_leaves_the_root(self):
         steps = [
             step_value(

@@ -162,6 +162,41 @@ PYTHONPATH=components/northstar-durable-run:components/northstar-run-contract:co
   python3 components/northstar-durable-run/agent_benchmark.py
 ```
 
+`agent_driver.py` closes the loop a static plan cannot close. A plan fixes
+`content` before anything has been read, so a data-dependent deliverable is
+impossible in one plan. The driver runs bounded rounds of
+`plan → execute → observe → re-plan`: each round is its own governed run with
+its own run id, authorization grant, and evidence file; observations are
+collected by the host from the filesystem (never from a tool's claimed output);
+and the model sees only bounded observations plus a bounded workspace
+inventory. Only a round that provably produced no effect may be re-planned — a
+refused action (`step.action_denied`) or a pending approval stops the driver,
+and an uncertain (`paused_unknown`) round stops it too. The deliverable is still
+verified by the host against host-owned expectations, so a confident model is
+never the evidence.
+
+`live_run.py` is the real-model path: it seeds a private workspace from a
+fixture, drives the same chain with an OpenAI-compatible model, and writes a
+report beside the evidence streams. `live/first_live_task.json` is the first
+recorded task. The model receives the published planner context (identity,
+budget, tool schema, inventory, observations) and never a credential.
+
+```sh
+OPENROUTER_API_KEY=... PYTHONPATH=components/northstar-durable-run:components/northstar-run-contract:components/northstar-host \
+  python3 components/northstar-durable-run/live_run.py \
+  --fixture components/northstar-durable-run/live/first_live_task.json \
+  --endpoint https://openrouter.ai/api/v1/chat/completions \
+  --key-env OPENROUTER_API_KEY --model deepseek/deepseek-v4-flash --provider openrouter \
+  --reasoning off --sandbox /tmp/northstar-live
+```
+
+Real-model findings worth keeping: gateways price a request by its worst case,
+so the host must send an explicit `max_tokens` or the call is refused; reasoning
+models spend that budget thinking before emitting the plan, so a ceiling sized
+for the answer alone truncates the call; and a round must never reuse an
+existing evidence file, or the loop rejects the new plan digest against the old
+events.
+
 ## Deliberate ceiling
 
 This is not a production scheduler, sandbox, VM, container runtime, browser

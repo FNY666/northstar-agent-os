@@ -87,6 +87,54 @@ class OpenAIPlannerCallerTests(unittest.TestCase):
         self.assertIn("Inspect the repository", body["messages"][1]["content"])
         self.assertNotIn("fixture-key", request.data.decode("utf-8"))
 
+    def test_request_carries_a_host_owned_output_budget(self):
+        """Gateways price a request by its worst case, so the host sets the ceiling."""
+        captured = []
+        with mock.patch.dict(os.environ, {"TEST_PLANNER_API_KEY": "fixture-key"}, clear=False):
+            caller = OpenAICompatiblePlannerCaller(
+                self.config(max_output_tokens=512),
+                transport=lambda request, timeout: captured.append(json.loads(request.data.decode())) or provider_response(json.dumps({"plan": plan_value()})),
+            )
+            caller(goal="x", context={}, repair_error=None, attempt=1)
+        self.assertEqual(captured[0]["max_tokens"], 512)
+        with self.assertRaises(ValueError):
+            self.config(max_output_tokens=0)
+        with self.assertRaises(ValueError):
+            self.config(max_output_tokens=32_769)
+
+    def test_reasoning_controls_are_host_owned_and_validated(self):
+        """Reasoning models must be given room to think, and the host sets it."""
+
+        def bodies(**overrides):
+            captured = []
+            with mock.patch.dict(os.environ, {"TEST_PLANNER_API_KEY": "fixture-key"}, clear=False):
+                caller = OpenAICompatiblePlannerCaller(
+                    self.config(**overrides),
+                    transport=lambda request, timeout: captured.append(json.loads(request.data.decode()))
+                    or provider_response(json.dumps({"plan": plan_value()})),
+                )
+                caller(goal="x", context={}, repair_error=None, attempt=1)
+            return captured[0]
+
+        self.assertEqual(self.config().max_output_tokens, 8_192)
+        self.assertNotIn("reasoning", bodies())
+        self.assertEqual(bodies(reasoning_effort="off")["reasoning"], {"enabled": False})
+        self.assertEqual(bodies(reasoning_effort="low")["reasoning"], {"effort": "low"})
+        with self.assertRaises(ValueError):
+            self.config(reasoning_effort="maximal")
+
+    def test_gateway_model_namespaces_are_accepted_but_unsafe_ids_are_not(self):
+        """OpenRouter and most gateways name models vendor/model; identity stays strict."""
+        namespaced = self.config(model_id="deepseek/deepseek-v4-pro", provider="openrouter")
+        self.assertEqual(namespaced.model_id, "deepseek/deepseek-v4-pro")
+        for bad in ("host model", "host\x00model", "host\\model", ""):
+            with self.assertRaises(ValueError):
+                self.config(model_id=bad)
+        with self.assertRaises(ValueError):
+            self.config(provider="host provider")
+        with self.assertRaises(ValueError):
+            self.config(model_revision="rev/1")
+
     def test_endpoint_and_secret_boundaries_fail_closed(self):
         with self.assertRaises(ValueError): self.config(endpoint="http://planner.example/chat")
         with self.assertRaises(ValueError): self.config(endpoint="https://user:pass@planner.example/chat")

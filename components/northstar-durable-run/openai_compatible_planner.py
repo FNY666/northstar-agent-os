@@ -22,6 +22,22 @@ def _id(value: Any, field: str) -> str:
     return value
 
 
+def _model_id(value: Any) -> str:
+    """Gateway model names keep their namespace: openrouter uses vendor/model.
+
+    This value only ever travels inside a JSON request body, so the strict
+    identifier rule that guards host-owned identity fields would reject every
+    real OpenRouter or proxy model without adding any safety.
+    """
+    if (
+        not isinstance(value, str)
+        or not 1 <= len(value) <= _MAX_ID
+        or any(c.isspace() or c in "\\\x00" for c in value)
+    ):
+        raise ValueError("model_id is invalid")
+    return value
+
+
 def _endpoint(value: Any) -> str:
     if not isinstance(value, str) or not 1 <= len(value) <= _MAX_ENDPOINT:
         raise ValueError("endpoint is invalid")
@@ -46,14 +62,30 @@ class OpenAICompatiblePlannerConfig:
     model_revision: str
     timeout_seconds: float = 30.0
     max_response_bytes: int = 262_144
+    max_output_tokens: int = 8_192
+    reasoning_effort: str | None = None
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "endpoint", _endpoint(self.endpoint))
         if not isinstance(self.api_key_env, str) or not 1 <= len(self.api_key_env) <= _MAX_ENV or not self.api_key_env.replace("_", "A").isalnum() or self.api_key_env[0].isdigit():
             raise ValueError("api_key_env is invalid")
-        for field in ("model_id", "provider", "model_revision"):
+        object.__setattr__(self, "model_id", _model_id(self.model_id))
+        for field in ("provider", "model_revision"):
             object.__setattr__(self, field, _id(getattr(self, field), field))
         object.__setattr__(self, "timeout_seconds", _positive_float(self.timeout_seconds, "timeout_seconds"))
+        # The host owns the response budget: without an explicit ceiling some
+        # gateways price the request against the model's whole context window
+        # and refuse it, and none of them can spend more than this on output.
+        # Reasoning models spend this budget on thinking before they emit the
+        # plan, so a ceiling sized for the answer alone truncates the call.
+        if (
+            not isinstance(self.max_output_tokens, int)
+            or isinstance(self.max_output_tokens, bool)
+            or not 16 <= self.max_output_tokens <= 32_768
+        ):
+            raise ValueError("max_output_tokens is invalid")
+        if self.reasoning_effort not in {None, "off", "low", "medium", "high"}:
+            raise ValueError("reasoning_effort is invalid")
         if not isinstance(self.max_response_bytes, int) or isinstance(self.max_response_bytes, bool) or not 1 <= self.max_response_bytes <= 16 * 1024 * 1024:
             raise ValueError("max_response_bytes is invalid")
 
@@ -82,12 +114,17 @@ class OpenAICompatiblePlannerCaller:
         body = {
             "model": self.config.model_id,
             "temperature": 0,
+            "max_tokens": self.config.max_output_tokens,
             "response_format": {"type": "json_object"},
             "messages": [
                 {"role": "system", "content": "Return JSON with exactly one top-level plan field. The plan must be a typed candidate; do not return commands, callables, credentials, or provider metadata."},
                 {"role": "user", "content": json.dumps({"goal": goal, "context": context, "repair_error": repair_error}, ensure_ascii=False, sort_keys=True, separators=(",", ":"))},
             ],
         }
+        if self.config.reasoning_effort == "off":
+            body["reasoning"] = {"enabled": False}
+        elif self.config.reasoning_effort is not None:
+            body["reasoning"] = {"effort": self.config.reasoning_effort}
         encoded = json.dumps(body, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")
         if len(encoded) > 512_000:
             raise ValueError("planner request exceeds the maximum size")
@@ -96,13 +133,19 @@ class OpenAICompatiblePlannerCaller:
     def _parse_response(self, raw: bytes) -> PlannerModelResponse:
         if not isinstance(raw, bytes) or len(raw) > self.config.max_response_bytes:
             raise ValueError("planner response exceeds the maximum size")
+        finish_reason = None
         try:
             envelope = json.loads(raw.decode("utf-8"))
             choices = envelope["choices"]
             content = choices[0]["message"]["content"]
+            finish_reason = choices[0].get("finish_reason")
         except (UnicodeDecodeError, json.JSONDecodeError, KeyError, IndexError, TypeError) as error:
             raise ValueError("planner provider response is invalid") from error
         if not isinstance(content, str) or not content:
+            if finish_reason == "length":
+                # Distinguishable on purpose: a reasoning model that spent the
+                # whole output budget thinking needs a bigger host ceiling.
+                raise ValueError("planner provider response was truncated before content")
             raise ValueError("planner provider content is invalid")
         try:
             body = json.loads(content)

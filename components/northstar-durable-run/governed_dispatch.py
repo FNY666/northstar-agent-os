@@ -13,7 +13,15 @@ import time
 from collections.abc import Callable
 from typing import Any
 
-from action_gateway import ActionGateway, ToolCall, digest_arguments
+import re
+
+from action_gateway import (
+    ActionGateway,
+    ToolCall,
+    ToolExecutionFailed,
+    ToolRefused,
+    digest_arguments,
+)
 from agent_loop import ActionAwaitingApproval, ActionNotExecuted, AgentPlan, PlanStep
 
 TOOL_CALL_SCHEMA_VERSION = "northstar.tool-call.v1"
@@ -27,6 +35,26 @@ class UnboundAction(ActionNotExecuted, ValueError):
 
 class GovernanceDenied(ActionNotExecuted, ValueError):
     """The gateway refused the call: authorization, scope, contract, or tool."""
+
+
+class ActionExecutionFailed(Exception):
+    """The tool ran and raised: not a refusal, and not a pending approval.
+
+    The loop treats a plain exception as "the action ran", records
+    `step.action_failed`, and still allows an independent observer to decide
+    what the world looks like. The failure kind is preserved in the class name
+    so evidence stays readable, and the exception message is never copied.
+    """
+
+
+_KIND_RE = re.compile(r"^[A-Za-z][A-Za-z0-9_]{0,48}$")
+
+
+def _execution_failure(cause: BaseException) -> ActionExecutionFailed:
+    kind = type(cause).__name__
+    if not _KIND_RE.fullmatch(kind):
+        kind = "ToolError"
+    return type(f"{kind}ExecutionFailure", (ActionExecutionFailed,), {})(kind)
 
 
 class ApprovalPending(ActionAwaitingApproval, ValueError):
@@ -135,6 +163,13 @@ class GovernedActionDispatcher:
                 approval_token=approval_token,
                 now=self._now_provider(),
             )
+        except ToolRefused as error:
+            # A tool-side refusal is still a refusal: it never executed.
+            raise GovernanceDenied(type(error).__name__) from error
+        except ToolExecutionFailed as error:
+            # The tool ran and raised; the loop must see an execution failure,
+            # not a refusal, so recovery through observation stays legal.
+            raise _execution_failure(error.__cause__ or error) from error
         except Exception as error:
             # Denials stay fail-closed but remain distinguishable in evidence.
             raise GovernanceDenied(type(error).__name__) from error

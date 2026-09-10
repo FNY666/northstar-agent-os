@@ -18,6 +18,8 @@ import stat
 from dataclasses import dataclass
 from pathlib import Path
 
+from action_gateway import ToolExecutionFailed, ToolRefused
+
 _MAX_PATH = 1024
 _MAX_CONTENT = 1_048_576
 _TEMP_PREFIX = ".northstar-tmp-"
@@ -27,10 +29,10 @@ _CHUNK = 65_536
 def _parts(path: object) -> list[str]:
     """Mirror the read-side path rule: relative, no traversal, no separators."""
     if not isinstance(path, str) or not path or len(path) > _MAX_PATH:
-        raise ValueError("invalid relative path")
+        raise ToolRefused("invalid relative path")
     parts = path.split("/")
     if any(p in {"", ".", ".."} or "\\" in p or "\x00" in p for p in parts):
-        raise ValueError("invalid relative path")
+        raise ToolRefused("invalid relative path")
     return parts
 
 
@@ -72,20 +74,20 @@ class WorkspaceWriteTool:
 
     def __call__(self, payload: object) -> WorkspaceWriteResult:
         if not isinstance(payload, dict) or set(payload) != {"path", "content"}:
-            raise ValueError("invalid write payload")
+            raise ToolRefused("invalid write payload")
         path = payload["path"]
         parts = _parts(path)
         content = payload["content"]
         if not isinstance(content, str):
-            raise ValueError("content must be a string")
+            raise ToolRefused("content must be a string")
         try:
             raw = content.encode("utf-8")
         except UnicodeEncodeError:
-            raise ValueError("content is not encodable UTF-8 text") from None
+            raise ToolRefused("content is not encodable UTF-8 text") from None
         if len(raw) > self.max_bytes:
-            raise ValueError("content exceeds the write bound")
+            raise ToolRefused("content exceeds the write bound")
         if self.allowed_paths is not None and path not in self.allowed_paths:
-            raise ValueError("file is not authorized")
+            raise ToolRefused("file is not authorized")
 
         directory_fd = None
         temporary_fd = None
@@ -135,7 +137,9 @@ class WorkspaceWriteTool:
                 previous_digest=previous_digest,
             )
         except (OSError, UnicodeError):
-            raise ValueError("workspace write failed") from None
+            # The filesystem was reached and refused mid-write: the effect is
+            # not a decision, so the observer must get to decide the outcome.
+            raise ToolExecutionFailed("workspace write failed") from None
         finally:
             if temporary_fd is not None:
                 os.close(temporary_fd)
@@ -154,9 +158,9 @@ class WorkspaceWriteTool:
         except FileNotFoundError:
             return True, None
         if stat.S_ISLNK(found.st_mode):
-            raise ValueError("target is a symlink")
+            raise ToolRefused("target is a symlink")
         if not stat.S_ISREG(found.st_mode):
-            raise ValueError("target is not a regular file")
+            raise ToolRefused("target is not a regular file")
         previous = os.open(
             name, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=directory_fd
         )

@@ -85,14 +85,26 @@ class ExpectedArtifact:
     content: str | None = None
     digest: str | None = None
     absent: bool = False
+    contains: tuple[str, ...] | None = None
 
     def __post_init__(self) -> None:
         _relative_parts(self.path)
-        declared = [self.content is not None, self.digest is not None, self.absent]
+        declared = [
+            self.content is not None,
+            self.digest is not None,
+            self.absent,
+            self.contains is not None,
+        ]
         if sum(declared) != 1:
             raise ValueError("expected artifact needs exactly one expectation")
         if self.digest is not None and not self.digest.startswith("sha256:"):
             raise ValueError("expected digest must be a sha256 digest")
+        if self.contains is not None and (
+            not isinstance(self.contains, tuple)
+            or not self.contains
+            or any(not isinstance(item, str) or not item for item in self.contains)
+        ):
+            raise ValueError("expected contains must be a non-empty tuple of strings")
 
 
 @dataclass(frozen=True)
@@ -216,6 +228,7 @@ class AgentHarness:
         self._observations: dict[str, int] = {}
         self._attempts: dict[str, int] = {}
         self._registered: set[str] = set()
+        self._admitted_steps: list[Any] = []
 
         self._run_request = {
             "schema_version": RUN_SCHEMA,
@@ -335,6 +348,7 @@ class AgentHarness:
             raise ValueError("plan partially overlaps a registered plan")
         self.dispatcher.register_plan(plan)
         self._registered.update(pending)
+        self._admitted_steps = list(plan.steps)
 
     # ------------------------------------------------- independent observer
 
@@ -430,6 +444,16 @@ class AgentHarness:
                 if raw != artifact.content.encode("utf-8"):
                     failures.append(f"{artifact.path}:content_mismatch")
                 continue
+            if artifact.contains is not None:
+                try:
+                    text = raw.decode("utf-8")
+                except UnicodeDecodeError:
+                    undecided = True
+                    continue
+                missing = [item for item in artifact.contains if item not in text]
+                if missing:
+                    failures.append(f"{artifact.path}:missing_text:{','.join(missing)}")
+                continue
             if _digest_bytes(raw) != artifact.digest:
                 failures.append(f"{artifact.path}:digest_mismatch")
         if failures:
@@ -442,16 +466,101 @@ class AgentHarness:
 
     # ------------------------------------------------------------- the entry
 
-    def planner_context(self, *, extra: dict[str, Any] | None = None) -> dict[str, Any]:
-        """Everything the planner legitimately needs: identity, budget, tools."""
+    def plan_format(self) -> dict[str, Any]:
+        """The exact envelope the model must echo, with host-owned identity.
+
+        Identity is not delegated: the model copies these values verbatim and
+        admission rejects any mismatch. Publishing the shape here is what makes
+        a real model able to produce an admissible plan at all.
+        """
         return {
+            "schema_version": "northstar.agent-plan.v1",
+            "envelope_fields": {
+                "schema_version": "northstar.agent-plan.v1",
+                "plan_id": "any identifier you choose, unique per plan",
+                "plan_version": "positive integer, 1 for the first plan",
+                "task_id": self.run.task_id,
+                "thread_id": self.run.thread_id,
+                "run_id": self.run.run_id,
+                "actor_id": self.actor_id,
+                "workspace_id": self.workspace_id,
+                "policy_revision": self.policy_revision,
+                "trace_id": self.run.trace_id,
+                "steps": "non-empty array of at most 64 step objects",
+            },
+            "step_fields": {
+                "schema_version": "northstar.agent-plan-step.v1",
+                "step_id": "identifier, unique inside the plan",
+                "action_id": "one of the action ids listed in actions",
+                "input_payload": "object with exactly the payload_fields of that action",
+                "scope_snapshot": "non-empty subset of the run scope",
+                "expected_postconditions": "non-empty subset of that action's postconditions",
+                "idempotency_key": "identifier, unique inside the plan",
+                "max_attempts": "integer 1..3",
+                "deadline_at": f"integer, at most {self.run.deadline_at}",
+            },
+            "rules": [
+                "Return JSON with exactly one top-level key, plan.",
+                "Copy every host identity value verbatim; do not invent or change one.",
+                "Plan only steps that the listed actions can perform; you cannot run commands or reach the network.",
+                "deadline_at must not exceed the run deadline.",
+            ],
+        }
+
+    def workspace_inventory(self, *, limit: int = 64, max_depth: int = 4) -> tuple[dict[str, Any], ...]:
+        """Bounded host-side inventory of the agent's own sandbox.
+
+        A planner that cannot see which files exist can only guess names, and a
+        guessed name is rejected by the tool boundary anyway. Names and sizes
+        only: content still requires a read step, so the inventory never becomes
+        a shortcut around the tools.
+        """
+        if not 1 <= limit <= 512 or not 1 <= max_depth <= 8:
+            raise ValueError("inventory bounds are invalid")
+        root = self.workspace_root
+        entries: list[dict[str, Any]] = []
+        for directory, subdirectories, names in os.walk(root, followlinks=False):
+            subdirectories[:] = sorted(
+                name
+                for name in subdirectories
+                if not os.path.islink(os.path.join(directory, name))
+                and directory[len(str(root)):].count(os.sep) < max_depth
+            )
+            for name in sorted(names):
+                absolute = os.path.join(directory, name)
+                if os.path.islink(absolute) or not os.path.isfile(absolute):
+                    continue
+                entries.append(
+                    {
+                        "path": os.path.relpath(absolute, root),
+                        "size_bytes": os.path.getsize(absolute),
+                    }
+                )
+                if len(entries) >= limit:
+                    return tuple(entries)
+        return tuple(entries)
+
+    def planner_context(self, *, extra: dict[str, Any] | None = None) -> dict[str, Any]:
+        """Everything the planner legitimately needs: identity, budget, tools.
+
+        Every field an admissible plan must echo is published here; nothing the
+        model returns is trusted, and admission still rejects any mismatch.
+        Round state (observations, feedback) is merged at the top level so a
+        model reads one flat context, and host fields cannot be overridden.
+        """
+        context = {
             "task_id": self.run.task_id,
+            "thread_id": self.run.thread_id,
             "run_id": self.run.run_id,
+            "actor_id": self.actor_id,
             "workspace_id": self.workspace_id,
+            "trace_id": self.run.trace_id,
             "now": self.now(),
             "deadline_at": self.run.deadline_at,
             "policy_revision": self.policy_revision,
             "scope": list(self.run.scope_snapshot),
+            "workspace_files": [dict(entry) for entry in self.workspace_inventory()],
+            "plan_format": self.plan_format(),
             "actions": [
                 {
                     "action_id": READ_ACTION,
@@ -469,8 +578,37 @@ class AgentHarness:
                 },
             ],
             "workspace_boundary": "host-owned root; relative paths only; no network",
-            "extra": dict(extra or {}),
         }
+        for key, value in (extra or {}).items():
+            if key in context:
+                raise ValueError(f"round context cannot override host field {key}")
+            context[key] = value
+        return context
+
+    def admitted_steps(self) -> tuple[Any, ...]:
+        """Steps this harness admitted, in plan order (read-only for the driver)."""
+        return tuple(self._admitted_steps)
+
+    def inspect(self, path: str, *, limit: int = 2_048) -> dict[str, Any]:
+        """Bounded host-side view of one workspace path, independent of tools.
+
+        The driver re-plans from these observations, so they must come from the
+        filesystem rather than from a tool's claimed output. Content is dropped
+        when it does not fit, and never trusted as a verification result.
+        """
+        state, raw = self._host_state(path)
+        observation: dict[str, Any] = {"state": state, "digest": None, "size_bytes": None}
+        if raw is not None:
+            observation["digest"] = _digest_bytes(raw)
+            observation["size_bytes"] = len(raw)
+            observation["truncated"] = len(raw) > limit
+            if len(raw) <= limit:
+                try:
+                    observation["content"] = raw.decode("utf-8")
+                except UnicodeDecodeError:
+                    observation["content"] = None
+                    observation["encoding"] = "binary"
+        return observation
 
     def evidence_events(self) -> int:
         if not self.evidence_path.exists():
