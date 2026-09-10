@@ -146,6 +146,9 @@ class GovernedDispatchTests(unittest.TestCase):
     def _attempts(self):
         return len([event for event in self._events() if event["event_type"] == "step.attempted"])
 
+    def _waits(self):
+        return len([event for event in self._events() if event["event_type"] == "step.awaiting_approval"])
+
     def test_authorized_dispatch_executes_and_finishes(self):
         state, _ = self._run()
         self.assertEqual(state.status, "finished")
@@ -248,9 +251,10 @@ class GovernedDispatchTests(unittest.TestCase):
     def test_high_risk_tool_never_runs_without_approval(self):
         calls = []
         state, _ = self._run_write(calls)
-        self.assertNotEqual(state.status, "finished")
+        self.assertEqual(state.status, "awaiting_approval",
+                         "an unapproved high-risk tool waits instead of failing")
         self.assertEqual(calls, [], "an unapproved high-risk tool must not reach the executor")
-        self.assertEqual(self._denied_reason(), "GovernanceDenied")
+        self.assertEqual(self._waits(), 1, "the wait is recorded as a wait, not a refusal")
 
     def test_high_risk_tool_runs_once_with_approval(self):
         calls = []
@@ -264,13 +268,15 @@ class GovernedDispatchTests(unittest.TestCase):
         approved = {"ready": False}
         provider = lambda call: approval_for() if approved["ready"] else None
 
-        state, _ = self._run_write(calls, approval_provider=provider, max_attempts=2)
-        self.assertEqual(state.status, "paused_unknown")
+        # max_attempts=1: waiting must not spend the single execution budget.
+        state, _ = self._run_write(calls, approval_provider=provider, max_attempts=1)
+        self.assertEqual(state.status, "awaiting_approval")
         self.assertEqual(calls, [], "waiting for approval must not execute the tool")
 
         approved["ready"] = True
-        state, _ = self._run_write(calls, approval_provider=provider, max_attempts=2)
-        self.assertEqual(state.status, "finished")
+        state, _ = self._run_write(calls, approval_provider=provider, max_attempts=1)
+        self.assertEqual(state.status, "finished",
+                         "a wait must not consume the execution budget")
         self.assertEqual(len(calls), 1, "the approved write must execute exactly once")
 
     def test_denied_high_risk_approval_is_sanitized(self):

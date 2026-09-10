@@ -87,6 +87,13 @@ reason code, so a refusal stays visible even when the observer reports its own
 "unverified" reason. A repeated resume also records each pause attempt, so a run
 cannot sit in `running` with no closing event.
 
+A high-risk tool without approval is recorded as `step.awaiting_approval` and the
+run rests in `awaiting_approval`. Waiting is a human time scale, so it does not
+consume the step's attempt budget — the budget counts executions, and a wait is
+never an execution; the step deadline is what bounds it. A refusal (expired
+grant, missing capability, unregistered tool) still consumes the budget and
+stays fail-closed.
+
 
 strict planner-produced `AgentPlan`, persists a bounded plan-step manifest in
 the first admission event, executes only registered actions, and requires an

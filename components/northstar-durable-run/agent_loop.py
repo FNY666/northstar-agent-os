@@ -72,6 +72,14 @@ class ActionNotExecuted(Exception):
     """
 
 
+class ActionAwaitingApproval(ActionNotExecuted):
+    """Contract: the action is waiting for an external condition (e.g. approval).
+
+    Also certainly not executed, but distinct: waiting is a human time scale, so
+    it must not consume the step's attempt budget. The step deadline bounds it.
+    """
+
+
 def _scopes(value: Any, field: str) -> tuple[str, ...]:
     if not isinstance(value, list) or not value:
         raise ValueError(f"{field} must be a non-empty list")
@@ -268,6 +276,7 @@ _LOOP_EVENT_TYPES = {
     "step.attempted",
     "step.action_failed",
     "step.action_denied",
+    "step.awaiting_approval",
     "step.observed",
     "loop.paused",
     "loop.failed",
@@ -279,6 +288,7 @@ _LOOP_STATUS_BY_EVENT = {
     "step.attempted": "attempted",
     "step.action_failed": "attempted",
     "step.action_denied": "attempted",
+    "step.awaiting_approval": "awaiting_approval",
     "step.observed": {"verified_committed", "verified_absent", "paused_unknown"},
     "loop.paused": "paused_unknown",
     "loop.failed": "failed",
@@ -291,6 +301,7 @@ _LOOP_STATUSES = {
     "verified_absent",
     "verified_committed",
     "paused_unknown",
+    "awaiting_approval",
     "failed",
     "finished",
 }
@@ -638,7 +649,7 @@ class AgentLoop:
                 if event.idempotency_key.startswith(event.attempt_id or "") is False:
                     raise ValueError("loop event attempt identity is invalid")
             if event.event_type == "loop.started":
-                if status not in {"admitted", "paused_unknown"}:
+                if status not in {"admitted", "paused_unknown", "awaiting_approval"}:
                     raise ValueError("loop.started follows invalid loop state")
                 status = "running"
                 current_step_id = None
@@ -654,7 +665,10 @@ class AgentLoop:
                 if old is not None and event.attempt < old["attempt"]:
                     raise ValueError("step attempt moved backwards")
                 expected = manifest_by_step[event.step_id]
-                if event.attempt > expected["max_attempts"]:
+                # The budget counts executions; waiting rounds are not executions.
+                prior = steps.get(event.step_id)
+                prior_waits = prior.get("waits", 0) if prior else 0
+                if event.attempt - prior_waits > expected["max_attempts"]:
                     raise ValueError("step attempt exceeds plan maximum")
                 steps[event.step_id] = {
                     "status": "attempted",
@@ -663,6 +677,9 @@ class AgentLoop:
                     "attempt_id": event.attempt_id,
                     "reason_code": event.reason_code,
                     "observed_digest": None,
+                    # Accumulated facts must survive a new attempt.
+                    "waits": prior_waits,
+                    "denied": prior.get("denied", False) if prior else False,
                 }
                 current_step_id = event.step_id
                 continue
@@ -683,6 +700,26 @@ class AgentLoop:
                     old["denied"] = True
                     steps[event.step_id] = old
                 # Trajectory record only: the step verdict still comes from step.observed.
+                current_step_id = event.step_id
+                continue
+            if event.event_type == "step.awaiting_approval":
+                if status != "running":
+                    raise ValueError("step.awaiting_approval requires a running loop")
+                if event.execution_id is None or event.attempt_id is None:
+                    raise ValueError("step.awaiting_approval requires attempt identity")
+                old = steps.get(event.step_id)
+                if old is None or old["status"] not in {"attempted", "awaiting_approval"}:
+                    raise ValueError("step.awaiting_approval requires an attempted step")
+                if old["attempt"] != event.attempt or old["attempt_id"] != event.attempt_id:
+                    raise ValueError("step.awaiting_approval does not match attempted step")
+                old = dict(old)
+                old["status"] = "awaiting_approval"
+                old["reason_code"] = event.reason_code
+                # Waiting does not consume the attempt budget: count the waits so
+                # the budget can keep counting executions only.
+                old["waits"] = old.get("waits", 0) + 1
+                steps[event.step_id] = old
+                status = "awaiting_approval"
                 current_step_id = event.step_id
                 continue
             if event.event_type == "step.observed":
@@ -975,6 +1012,22 @@ class AgentLoop:
                 output = self.actions[step.action_id](step, attempt_id)
             except KeyboardInterrupt:
                 raise
+            except ActionAwaitingApproval as error:
+                # Waiting is not an execution: record it and stop, without
+                # observing a postcondition the step never produced.
+                self._append_event(
+                    plan_digest=plan.plan_digest,
+                    event_type="step.awaiting_approval",
+                    step_id=step.step_id,
+                    execution_id=execution_id,
+                    attempt_id=attempt_id,
+                    attempt=attempt,
+                    status="awaiting_approval",
+                    reason_code=_failure_reason(error),
+                    idempotency_key=f"{attempt_id}:awaiting-approval",
+                    recorded_at=now,
+                )
+                return PostconditionResult("unknown", "awaiting_approval")
             except ActionNotExecuted as error:
                 output = None
                 denied = True
@@ -1087,6 +1140,17 @@ class AgentLoop:
                 idempotency_key=f"{plan.plan_digest}:resumed:{resume_marker}",
                 recorded_at=now,
             )
+        elif state.status == "awaiting_approval":
+            resume_marker = state.sequence + 1
+            self._append_event(
+                plan_digest=plan.plan_digest,
+                event_type="loop.started",
+                step_id="__loop__",
+                status="running",
+                reason_code="loop_resumed_for_approval",
+                idempotency_key=f"{plan.plan_digest}:resumed:{resume_marker}",
+                recorded_at=now,
+            )
 
         for step in plan.steps:
             state = self._load_state(plan.plan_digest)
@@ -1133,7 +1197,9 @@ class AgentLoop:
                     continue
                 details = self._load_state(plan.plan_digest).steps[step.step_id]  # type: ignore[union-attr]
             attempt = details["attempt"] + 1 if details is not None else 1
-            while attempt <= step.max_attempts:
+            waited = details.get("waits", 0) if details is not None else 0
+            executed = (details["attempt"] - waited) if details is not None else 0
+            while executed < step.max_attempts:
                 if now >= step.deadline_at:
                     self._append_event(
                         plan_digest=plan.plan_digest,
@@ -1149,6 +1215,10 @@ class AgentLoop:
                 if result.verdict == "verified":
                     break
                 if result.verdict == "unknown":
+                    current = self._load_state(plan.plan_digest)
+                    if current.steps[step.step_id]["status"] == "awaiting_approval":
+                        # Waiting is not an execution: keep the budget untouched.
+                        return current
                     attempt_id = f"{self._execution_id(step)}:attempt-{attempt}"
                     self._append_event(
                         plan_digest=plan.plan_digest,
@@ -1164,6 +1234,7 @@ class AgentLoop:
                     )
                     return self._load_state(plan.plan_digest)  # type: ignore[return-value]
                 attempt += 1
+                executed += 1
             else:
                 self._append_event(
                     plan_digest=plan.plan_digest,

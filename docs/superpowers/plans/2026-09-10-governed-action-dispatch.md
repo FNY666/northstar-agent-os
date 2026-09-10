@@ -50,6 +50,14 @@
 - [x] Confirm public checkout unchanged.
 - [x] Create one local-only commit; never push.
 
+### Task 6: Waiting for approval is not a failed attempt
+
+- [x] Write tests: a wait does not consume the attempt budget; repeated waits keep it intact; the wait is visible as `step.awaiting_approval`; a wait past the step deadline fails closed; a genuine refusal still consumes the budget.
+- [x] Add the `ActionAwaitingApproval` contract and `ApprovalPending`; the dispatcher consults the registered tool's risk level before dispatch, so a missing approval is a wait rather than a gateway refusal.
+- [x] Fix: the `step.attempted` handler rebuilt the step dict and dropped accumulated `waits`/`denied`, resetting the budget arithmetic every round (forensic probe showed round 2 as `waits=1`, round 3 as `max_attempts_exhausted`). Accumulated fields now survive a new attempt.
+- [x] Budget counts executions (`attempt - waits`), and recovery from `awaiting_approval` re-dispatches without spending it.
+- [x] Run the full suite and confirm GREEN (Durable Run 117/117, Interop 136/136, others unchanged).
+
 ### Task 5: High-risk approval interacting with recovery
 
 - [x] Write tests: an unapproved high-risk tool never reaches the executor; an approved one runs exactly once; approval arriving later is re-dispatched on recovery; a denied approval is traceable and sanitized.

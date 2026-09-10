@@ -14,7 +14,7 @@ from collections.abc import Callable
 from typing import Any
 
 from action_gateway import ActionGateway, ToolCall, digest_arguments
-from agent_loop import ActionNotExecuted, AgentPlan, PlanStep
+from agent_loop import ActionAwaitingApproval, ActionNotExecuted, AgentPlan, PlanStep
 
 TOOL_CALL_SCHEMA_VERSION = "northstar.tool-call.v1"
 _ID_RE = re.compile(r"^[^\s/\\\x00]+$")
@@ -27,6 +27,14 @@ class UnboundAction(ActionNotExecuted, ValueError):
 
 class GovernanceDenied(ActionNotExecuted, ValueError):
     """The gateway refused the call: authorization, scope, contract, or tool."""
+
+
+class ApprovalPending(ActionAwaitingApproval, ValueError):
+    """A high-risk tool is waiting for approval, not failing.
+
+    Waiting is a human time scale, so the loop must not spend the step's attempt
+    budget on it; the step deadline is what bounds the wait.
+    """
 
 
 def _idempotency_key(step: PlanStep, attempt_id: str) -> str:
@@ -112,6 +120,11 @@ class GovernedActionDispatcher:
             "deadline_at": step.deadline_at,
         })
         approval_token = self._approval_provider(call) if self._approval_provider else None
+        spec = self._gateway.spec_for(tool_name)
+        if approval_token is None and spec is not None and spec.risk_level == "high":
+            # Distinguish waiting from refusing: the step has not run, so this
+            # must not consume its attempt budget.
+            raise ApprovalPending("approval is pending")
         try:
             result = self._gateway.execute(
                 call,

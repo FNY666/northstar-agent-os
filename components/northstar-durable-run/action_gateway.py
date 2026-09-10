@@ -323,6 +323,10 @@ class ActionGateway:
             raise ValueError("tool is already registered")
         self._tools[spec.name] = spec
 
+    def spec_for(self, tool_name: str) -> ToolSpec | None:
+        """Read-only lookup so a caller can prepare, e.g. request approval."""
+        return self._tools.get(tool_name)
+
     def execute(
         self,
         call: ToolCall,
