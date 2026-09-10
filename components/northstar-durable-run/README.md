@@ -59,12 +59,28 @@ check. It never writes, and it is not an OS sandbox or a secret classifier:
 anything readable inside the host-owned root is readable by this tool, so pair
 it with `allowed_paths` and an independent observer.
 
-Action failures are traceable. When a registered action raises, the loop
-records `step.action_failed` with the failure *kind* (`ValueError`,
-`CustomFailure`, ...) and never copies the exception message into evidence, so
-a trace can distinguish "the action ran" from "the action raised". Recovery
-through an independent observer remains legal, because a remotely committed
-effect may still be verifiable after a local error.
+Action failures are traceable, and refusals are distinct from errors. When a
+registered action raises, the loop records `step.action_failed` with the
+failure *kind* (`ValueError`, `CustomFailure`, ...) and never copies the
+exception message into evidence, so a trace can distinguish "the action ran"
+from "the action raised". Recovery through an independent observer remains
+legal there, because a remotely committed effect may still be verifiable after
+a local error.
+
+When an action raises `ActionNotExecuted` instead, the loop records
+`step.action_denied` and refuses to let observation stand in for the action: a
+step that certainly never ran cannot become a verified commit merely because
+the world already matches. Recovery re-dispatches it inside the attempt budget,
+and an exhausted budget fails closed.
+
+`governed_dispatch.py` routes loop actions through `ActionGateway`. The loop
+stays unaware of the gateway; a host binds one dispatcher callable per action
+id, and every attempt is re-authorized against a fresh `ToolCall` built from the
+admitted plan (task, thread, run, step, actor, workspace, trace, scope,
+arguments digest, deadline). Refusals surface as `GovernanceDenied` and unbound
+steps as `UnboundAction` — both `ActionNotExecuted` subclasses, so they reach
+evidence as denials rather than as tool crashes. Each attempt uses its own
+idempotency key so a retry really executes instead of replaying a cached result.
 
 
 strict planner-produced `AgentPlan`, persists a bounded plan-step manifest in

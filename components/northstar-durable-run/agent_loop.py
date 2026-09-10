@@ -61,6 +61,17 @@ def _failure_reason(error: BaseException) -> str:
     return reason if reason.isidentifier() and len(reason) <= _MAX_ID else "action_error"
 
 
+class ActionNotExecuted(Exception):
+    """Contract: the action certainly did not run.
+
+    Raising this from a registered action tells the loop that the attempt never
+    reached the outside world (refused authorization, unbound step, rejected
+    contract). Unlike an ordinary error, the result is not merely unknown, so an
+    observer that happens to find the world in the expected state must not be
+    treated as verifying this step's execution.
+    """
+
+
 def _scopes(value: Any, field: str) -> tuple[str, ...]:
     if not isinstance(value, list) or not value:
         raise ValueError(f"{field} must be a non-empty list")
@@ -256,6 +267,7 @@ _LOOP_EVENT_TYPES = {
     "loop.started",
     "step.attempted",
     "step.action_failed",
+    "step.action_denied",
     "step.observed",
     "loop.paused",
     "loop.failed",
@@ -266,6 +278,7 @@ _LOOP_STATUS_BY_EVENT = {
     "loop.started": "running",
     "step.attempted": "attempted",
     "step.action_failed": "attempted",
+    "step.action_denied": "attempted",
     "step.observed": {"verified_committed", "verified_absent", "paused_unknown"},
     "loop.paused": "paused_unknown",
     "loop.failed": "failed",
@@ -653,16 +666,16 @@ class AgentLoop:
                 }
                 current_step_id = event.step_id
                 continue
-            if event.event_type == "step.action_failed":
+            if event.event_type in {"step.action_failed", "step.action_denied"}:
                 if status != "running":
-                    raise ValueError("step.action_failed requires a running loop")
+                    raise ValueError("action failure event requires a running loop")
                 if event.execution_id is None or event.attempt_id is None:
-                    raise ValueError("step.action_failed requires attempt identity")
+                    raise ValueError("action failure event requires attempt identity")
                 old = steps.get(event.step_id)
                 if old is None or old["status"] != "attempted":
-                    raise ValueError("step.action_failed requires an attempted step")
+                    raise ValueError("action failure event requires an attempted step")
                 if old["attempt"] != event.attempt or old["attempt_id"] != event.attempt_id:
-                    raise ValueError("step.action_failed attempt does not match attempted step")
+                    raise ValueError("action failure event does not match attempted step")
                 # Trajectory record only: the step verdict still comes from step.observed.
                 current_step_id = event.step_id
                 continue
@@ -938,6 +951,7 @@ class AgentLoop:
         execution_id = self._execution_id(step)
         attempt_id = existing_attempt_id or f"{execution_id}:attempt-{attempt}"
         output_digest: str | None = None
+        denied = False
         if not observe_only:
             self._append_event(
                 plan_digest=plan.plan_digest,
@@ -955,6 +969,22 @@ class AgentLoop:
                 output = self.actions[step.action_id](step, attempt_id)
             except KeyboardInterrupt:
                 raise
+            except ActionNotExecuted as error:
+                output = None
+                denied = True
+                # Refused before reaching the outside world: recorded separately.
+                self._append_event(
+                    plan_digest=plan.plan_digest,
+                    event_type="step.action_denied",
+                    step_id=step.step_id,
+                    execution_id=execution_id,
+                    attempt_id=attempt_id,
+                    attempt=attempt,
+                    status="attempted",
+                    reason_code=_failure_reason(error),
+                    idempotency_key=f"{attempt_id}:action-denied",
+                    recorded_at=now,
+                )
             except BaseException as error:
                 output = None
                 # Record the failure itself: "action ran" and "action raised"
@@ -974,6 +1004,10 @@ class AgentLoop:
             if isinstance(output, dict):
                 output_digest = _digest(output)
         result = self._observe(step, attempt_id)
+        if denied and result.verdict == "verified":
+            # A refused action is never a verified commit, even if the world
+            # already matches: this step's execution never happened.
+            result = PostconditionResult("unknown", "action_not_executed")
         self._record_observation(
             plan,
             step,
@@ -1052,7 +1086,14 @@ class AgentLoop:
             details = state.steps.get(step.step_id)
             if details is not None and details["status"] == "verified_committed":
                 continue
-            if details is not None and details["status"] in {"attempted", "paused_unknown"}:
+            # A refused attempt never reached the outside world, so read-back
+            # cannot stand in for it: fall through and re-dispatch within the
+            # attempt budget instead of trusting an observation.
+            if (
+                details is not None
+                and details["status"] in {"attempted", "paused_unknown"}
+                and details.get("reason_code") != "action_not_executed"
+            ):
                 result = self._run_attempt(
                     plan,
                     step,
