@@ -676,6 +676,12 @@ class AgentLoop:
                     raise ValueError("action failure event requires an attempted step")
                 if old["attempt"] != event.attempt or old["attempt_id"] != event.attempt_id:
                     raise ValueError("action failure event does not match attempted step")
+                if event.event_type == "step.action_denied":
+                    # Persist the refusal so recovery can tell "refused" apart
+                    # from "ran and errored", whatever the observer reported.
+                    old = dict(old)
+                    old["denied"] = True
+                    steps[event.step_id] = old
                 # Trajectory record only: the step verdict still comes from step.observed.
                 current_step_id = event.step_id
                 continue
@@ -1036,6 +1042,7 @@ class AgentLoop:
             raise ValueError("current policy revision is required")
         plan = self.admit(plan, current_policy_revision=current_policy_revision)
         expected_manifest = _manifest_for_plan(plan)
+        resume_marker: int | None = None
         state = self._load_state(plan.plan_digest)
         if state is not None:
             with self._locked():
@@ -1070,13 +1077,14 @@ class AgentLoop:
                 recorded_at=now,
             )
         elif state.status == "paused_unknown":
+            resume_marker = state.sequence + 1
             self._append_event(
                 plan_digest=plan.plan_digest,
                 event_type="loop.started",
                 step_id="__loop__",
                 status="running",
                 reason_code="loop_resumed_for_readback",
-                idempotency_key=f"{plan.plan_digest}:resumed:{state.sequence + 1}",
+                idempotency_key=f"{plan.plan_digest}:resumed:{resume_marker}",
                 recorded_at=now,
             )
 
@@ -1092,7 +1100,7 @@ class AgentLoop:
             if (
                 details is not None
                 and details["status"] in {"attempted", "paused_unknown"}
-                and details.get("reason_code") != "action_not_executed"
+                and not details.get("denied")
             ):
                 result = self._run_attempt(
                     plan,
@@ -1103,6 +1111,11 @@ class AgentLoop:
                     existing_attempt_id=details["attempt_id"],
                 )
                 if result.verdict == "unknown":
+                    # A repeated resume must still record that it happened;
+                    # otherwise the run sits in "running" with no closing event.
+                    pause_key = f"{details['attempt_id']}:paused"
+                    if resume_marker is not None:
+                        pause_key = f"{pause_key}:resume-{resume_marker}"
                     self._append_event(
                         plan_digest=plan.plan_digest,
                         event_type="loop.paused",
@@ -1112,7 +1125,7 @@ class AgentLoop:
                         attempt=details["attempt"],
                         status="paused_unknown",
                         reason_code=result.reason_code,
-                        idempotency_key=f"{details['attempt_id']}:paused",
+                        idempotency_key=pause_key,
                         recorded_at=now,
                     )
                     return self._load_state(plan.plan_digest)  # type: ignore[return-value]

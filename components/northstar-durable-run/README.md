@@ -82,6 +82,11 @@ steps as `UnboundAction` — both `ActionNotExecuted` subclasses, so they reach
 evidence as denials rather than as tool crashes. Each attempt uses its own
 idempotency key so a retry really executes instead of replaying a cached result.
 
+Recovery keys off the derived `denied` flag on the step, not off the observation
+reason code, so a refusal stays visible even when the observer reports its own
+"unverified" reason. A repeated resume also records each pause attempt, so a run
+cannot sit in `running` with no closing event.
+
 
 strict planner-produced `AgentPlan`, persists a bounded plan-step manifest in
 the first admission event, executes only registered actions, and requires an

@@ -48,7 +48,14 @@
 - [x] Durable Run 108/108, Interop 136/136 (absolute PYTHONPATH), Host 24/24, Contract 22/22, Sidecar 51/51, Docs 3/3.
 - [x] py_compile, `git diff --check`, sensitive scan.
 - [x] Confirm public checkout unchanged.
-- [ ] Create one local-only commit; never push.
+- [x] Create one local-only commit; never push.
+
+### Task 5: High-risk approval interacting with recovery
+
+- [x] Write tests: an unapproved high-risk tool never reaches the executor; an approved one runs exactly once; approval arriving later is re-dispatched on recovery; a denied approval is traceable and sanitized.
+- [x] Fix 1 — recovery predicate: key off the derived `denied` flag instead of the observation reason code. The old predicate only matched when an observer had already reported `verified`, so a refusal followed by an observer `unknown` was silently treated as "read-back eligible".
+- [x] Fix 2 — pause idempotency: a repeated resume wrote `loop.started` but its `loop.paused` was deduplicated by `{attempt_id}:paused`, leaving the run stuck in `running` with no closing event. The pause key now carries the resume round.
+- [x] Run the full suite and confirm GREEN (Durable Run 112/112, Interop 136/136, others unchanged).
 
 ## Known boundaries
 
