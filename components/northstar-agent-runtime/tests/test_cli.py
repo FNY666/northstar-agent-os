@@ -226,6 +226,9 @@ class CeilingTests(unittest.TestCase):
                 "error_max_budget_usd": 4,
                 "error_permission_denied": 5,
                 "error_cancelled": 6,
+                # Appended, never re-pointed: 6 stays cancellation for consumers
+                # that already ship against it.
+                "error_postconditions_failed": 8,
             },
         )
 

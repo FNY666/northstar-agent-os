@@ -42,6 +42,12 @@ from doctor import add_arguments as add_doctor_arguments
 from doctor import run_doctor
 from providers.base import ResultMessage
 from session_view import add_arguments as add_session_arguments
+from postconditions import (
+    PostConditionError,
+    parse_cli_specs as parse_verify_specs,
+    parse_postconditions,
+)
+from hooks import HookRegistry
 
 USAGE_ERROR = 64
 
@@ -134,6 +140,18 @@ def _add_run_arguments(parser: argparse.ArgumentParser) -> None:
     policy.add_argument("--max-subagent-depth", type=int, default=1, help="0 disables delegation")
     policy.add_argument("--allow-nested-delegation", action="store_true", help="subagents may delegate one level deeper")
     policy.add_argument("--halt-on-denial", action="store_true", help="end the run with error_permission_denied when a call is refused")
+    policy.add_argument(
+        "--enable-workspace-hooks",
+        action="store_true",
+        help="run [[hooks]] declared in the workspace policy (off by default: they are code the repo ships)",
+    )
+    policy.add_argument(
+        "--verify",
+        action="append",
+        default=[],
+        metavar="KIND:PATH",
+        help="independent end-of-run workspace check (repeatable); kinds: exists, missing, unchanged, contains",
+    )
     policy.add_argument("--no-policy-file", action="store_true", help="ignore .northstar/config.toml in the workspace")
     policy.add_argument("--no-workspace-agents", action="store_true", help="ignore .northstar/agents/*.md subagent files")
     policy.add_argument("--no-skills", action="store_true", help="do not list workspace Agent Skills in the system prompt")
@@ -233,6 +251,8 @@ def _print_dry_run(
     workspace_agents_note: str = "none",
     skills_note: str = "none",
     mcp_note: str = "off",
+    hooks_note: str = "none",
+    postconditions_note: str = "none",
 ) -> int:
     """Print what a run would do and exit, without constructing a provider.
 
@@ -269,6 +289,8 @@ def _print_dry_run(
     print(f"project_context={context_note}")
     print(f"workspace_agents={workspace_agents_note}")
     print(f"skills={skills_note}")
+    print(f"hooks={hooks_note}")
+    print(f"postconditions={postconditions_note}")
     print(f"mcp_servers={mcp_note}" + (" (not connected in dry-run)" if mcp_note != "off" else ""))
     print(f"pricing: ${pricing.input_per_mtok}/MTok in, ${pricing.output_per_mtok}/MTok out "
           f"(cache read x0.1, cache write x1.25)"
@@ -480,6 +502,36 @@ def _run(args: argparse.Namespace) -> int:
     )
     validate_mode(mode)
 
+    # Workspace [[hooks]] are code the repository ships, so they stay inert until
+    # the operator asks for them. Silently ignoring a declared policy is the one
+    # thing this project refuses to do, so the skipped case is reported loudly.
+    # Validated here, before anything else acts, so a malformed declaration is
+    # rejected instead of surfacing later as an unrelated failure.
+    declared_hooks = tuple(getattr(policy, "hooks", ()) or ())
+    workspace_hooks = HookRegistry()
+    hooks_note = ""
+    if declared_hooks:
+        from command_hooks import parse_hooks, register_into
+
+        events = ", ".join(sorted({str(getattr(hook, "event", hook)) for hook in declared_hooks}))
+        if args.enable_workspace_hooks:
+            try:
+                parsed_hooks = parse_hooks(
+                    declared_hooks,
+                    workspace=args.workspace,
+                    known_tools=registry.names(),
+                )
+            except Exception as error:  # command_hooks.CommandHookError and subclasses
+                print(f"configuration error: {error}", file=sys.stderr)
+                return USAGE_ERROR
+            register_into(workspace_hooks, parsed_hooks, workspace=args.workspace)
+            hooks_note = f"enabled ({len(parsed_hooks)}: {events})"
+        else:
+            hooks_note = f"IGNORED ({len(declared_hooks)} declared: {events}; pass --enable-workspace-hooks)"
+            print(f"note: hooks {hooks_note}", file=sys.stderr)
+            if not args.enable_workspace_hooks:
+                print(f"note: hooks {hooks_note}", file=sys.stderr)
+
     allowed_cli, denied_cli = _tool_lists(args, base_tools=registry.names())
     denied_list = list(denied_cli)
     if policy is not None:
@@ -535,6 +587,18 @@ def _run(args: argparse.Namespace) -> int:
     )
     halt_on_denial = bool(args.halt_on_denial or (policy is not None and policy.halt_on_denial))
 
+    # End-of-run workspace claims: policy [[verify]] entries plus --verify specs.
+    # These are checked by the host against the real filesystem, so "the model
+    # said it was done" is never the evidence that it was.
+    try:
+        postconditions = parse_postconditions(
+            tuple(policy.verify if policy is not None else ()),
+            source="policy",
+        ) + tuple(parse_verify_specs(args.verify))
+    except (PostConditionError, ValueError) as error:
+        print(f"configuration error: {error}", file=sys.stderr)
+        return USAGE_ERROR
+
     config_kwargs: dict[str, Any] = {
         "model": (definition.model if definition and definition.model else args.model),
         "max_turns": max_turns,
@@ -551,6 +615,7 @@ def _run(args: argparse.Namespace) -> int:
         "max_subagent_depth": args.max_subagent_depth,
         "allow_nested_delegation": args.allow_nested_delegation,
         "halt_on_denial": halt_on_denial,
+        "postconditions": postconditions,
         "tool_limits": ToolLimits(),
         "record_tool_output_in_session": not args.redact_tool_output,
     }
@@ -668,6 +733,7 @@ def _run(args: argparse.Namespace) -> int:
         tools=registry,
         sessions=store,
         agents=agents,
+        hooks=workspace_hooks,
         receipt_secret=receipt_secret,
     )
 
@@ -686,6 +752,12 @@ def _run(args: argparse.Namespace) -> int:
             workspace_agents_note=workspace_agents_note,
             skills_note=skills_note,
             mcp_note=mcp_note,
+            hooks_note=hooks_note or "none",
+            postconditions_note=(
+                f"{len(postconditions)} declared ({', '.join(sorted({c.kind for c in postconditions}))})"
+                if postconditions
+                else "none"
+            ),
         )
     if args.probe_sidecar:
         if args.provider == "anthropic":

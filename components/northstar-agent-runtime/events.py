@@ -27,6 +27,11 @@ EXIT_CODES: dict[str, int] = {
     "error_max_budget_usd": 4,
     "error_permission_denied": 5,
     "error_cancelled": 6,
+    # Added by the governance line. 6 stays bound to cancellation: reusing an
+    # existing code for a new failure mode is a silent protocol change, and a
+    # consumer that treats "cancelled" as "the user went away" would then treat a
+    # failed postcondition as a user action. New codes are appended.
+    "error_postconditions_failed": 8,
 }
 
 

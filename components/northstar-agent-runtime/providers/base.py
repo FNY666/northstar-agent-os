@@ -37,9 +37,12 @@ RESULT_SUBTYPES: tuple[str, ...] = (
     "error_during_execution",
     "error_permission_denied",
     "error_cancelled",
+    # The host checked the workspace after the model stopped, and the claim did
+    # not hold. Distinct from error_during_execution: nothing crashed.
+    "error_postconditions_failed",
 )
 
-SYSTEM_SUBTYPES: tuple[str, ...] = ("init", "compact_boundary", "informational")
+SYSTEM_SUBTYPES: tuple[str, ...] = ("init", "compact_boundary", "informational", "postconditions")
 
 BlockKind = Literal["text", "tool_use", "tool_result", "thinking"]
 

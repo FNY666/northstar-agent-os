@@ -190,6 +190,28 @@ def _checks(args: argparse.Namespace) -> list[Finding]:
                 if policy.read_only:
                     parts.append("read_only")
                 findings.append(Finding("policy-file", "ok", f"{policy.source} applies: {' '.join(parts)}"))
+                declared_hooks = tuple(getattr(policy, "hooks", ()) or ())
+                if declared_hooks:
+                    # Not a failure: declared-but-inert is the safe default. But the
+                    # operator must be able to see that a repo asked for hooks.
+                    events = ", ".join(sorted({str(getattr(hook, "event", hook)) for hook in declared_hooks}))
+                    findings.append(
+                        Finding(
+                            "hooks",
+                            "warn",
+                            f"{policy.source} declares {len(declared_hooks)} hook(s) ({events}); "
+                            "they are IGNORED unless --enable-workspace-hooks is passed",
+                        )
+                    )
+                declared_verify = tuple(getattr(policy, "verify", ()) or ())
+                if declared_verify:
+                    findings.append(
+                        Finding(
+                            "postconditions",
+                            "ok",
+                            f"{policy.source} declares {len(declared_verify)} end-of-run check(s)",
+                        )
+                    )
             try:
                 configured = policy.project_context_setting if policy is not None else "AGENTS.md"
                 context = discover_project_context(workspace, configured=configured)

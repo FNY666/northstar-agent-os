@@ -54,6 +54,7 @@ RECORD_TYPES: tuple[str, ...] = (
     "denial",
     "compact_boundary",
     "informational",
+    "postconditions",
     "subagent",
     "result",
     "session_end",
@@ -430,7 +431,7 @@ class SessionStore:
         )
 
     def record_system(self, message: SystemMessage, *, agent: str = "main") -> dict[str, Any] | None:
-        kind = {"init": "session_start", "compact_boundary": "compact_boundary"}.get(message.subtype, "informational")
+        kind = {"init": "session_start", "compact_boundary": "compact_boundary", "postconditions": "postconditions"}.get(message.subtype, "informational")
         return self.append(kind, {"agent": agent, "subtype": message.subtype, "content": message.content, "data": message.data})
 
     def record_result(self, message: ResultMessage) -> dict[str, Any] | None:

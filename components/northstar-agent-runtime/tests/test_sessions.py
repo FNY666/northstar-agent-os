@@ -57,7 +57,7 @@ class SessionIdTests(unittest.TestCase):
         store = SessionStore(None)
         with self.assertRaises(ValueError):
             store.append("raw_prompt_bytes", {})
-        self.assertEqual(len(RECORD_TYPES), 12)
+        self.assertEqual(len(RECORD_TYPES), 13)
 
 
 class WriteTests(RuntimeTestCase):
