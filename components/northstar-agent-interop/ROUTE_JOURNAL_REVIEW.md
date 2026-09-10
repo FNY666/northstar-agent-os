@@ -109,6 +109,29 @@ What this does not prove:
   that the challenge reached the intended party. Freshness here is a binding
   property, not a measurement.
 
+## Minimal-disclosure inclusion
+
+- A disclosure carries the root, the leaf count, the index, and the sibling
+  path. It does not carry the bundle, so a verifier no longer needs every leaf
+  digest to check one event.
+- Disclosures are byte-identical to what `make_proof` produces, so the two paths
+  cannot drift apart.
+- `verify_disclosure` refuses a disclosure whose root contradicts the caller's
+  expected root, whose path length contradicts its leaf count, whose siblings are
+  malformed, or whose recomputed root does not match the subject.
+
+What this does not prove:
+
+- That `leaf_count` and `index` are true. Neither enters the merkle computation,
+  so both are self-reported metadata. The verdict reports them as `unverified`
+  instead of implying they were checked.
+- That other leaves stay hidden. When a sibling node is itself a leaf, its digest
+  is exposed by construction. Padding the tree to a power of two is the fix, and
+  this slice does not pad.
+- That the root is honest. A disclosure carries its own root, so a verifier that
+  does not pin `expected_root` accepts a self-consistent forgery. That case is
+  reported as `verified-unpinned`, never as `verified`.
+
 ## Release boundary
 
 Do not cherry-pick or publish this candidate automatically. It requires a
