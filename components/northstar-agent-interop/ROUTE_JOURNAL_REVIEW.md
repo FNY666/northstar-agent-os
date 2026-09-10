@@ -91,9 +91,27 @@ What this does not prove:
   as-of revision, so a past attestation is refused rather than judged — which is
   the fail-closed direction, not a verified answer.
 
+## Attestation freshness
+
+- A sealed attestation binds its signature domain to a single-use challenge id,
+  the attestation digest, and the key id. A seal made against an earlier
+  challenge fails on the challenge id, so a replay is refused without comparing
+  clocks.
+- `ChallengeBook` is the only party that knows which challenges exist: issuing is
+  single-use, expiry is measured from the issue time, and a consumed challenge
+  cannot be consumed again.
+- The verifier must state the challenge it expects. The sealed record carries no
+  freshness claim of its own, so its holder cannot assert that it is current.
+
+What this does not prove:
+
+- That the clock is honest, that the verifier stored the challenge it issued, or
+  that the challenge reached the intended party. Freshness here is a binding
+  property, not a measurement.
+
 ## Release boundary
 
 Do not cherry-pick or publish this candidate automatically. It requires a
 separate comparison against the local-only Router, a multi-process rotation
-experiment on a real filesystem, a cross-host identity decision, and an explicit
-generation release gate.
+experiment on a real filesystem, a key-anchor distribution decision, a
+cross-host identity decision, and an explicit generation release gate.
