@@ -80,6 +80,21 @@ def _decode(value: Any, *, max_bytes: int) -> dict[str, Any]:
 
 
 @dataclass(frozen=True)
+class PlannerModelResponse:
+    content: str | dict[str, Any]
+    model_id: str
+    provider: str
+    model_revision: str
+
+    def __post_init__(self) -> None:
+        _id(self.model_id, "model_id")
+        _id(self.provider, "provider")
+        _id(self.model_revision, "model_revision")
+        if not isinstance(self.content, (str, dict)):
+            raise ValueError("planner model content is invalid")
+
+
+@dataclass(frozen=True)
 class PlannerCandidate:
     plan: AgentPlan
     model_id: str
@@ -158,8 +173,20 @@ class TypedPlannerAdapter:
                 )
             except Exception as error:
                 raise ValueError("planner model call failed") from error
+            if not isinstance(response, PlannerModelResponse):
+                raise ValueError("planner model caller must return PlannerModelResponse")
             try:
-                candidate = PlannerCandidate.from_value(response, max_bytes=self.max_output_bytes)
+                candidate_value = response.content
+                candidate = PlannerCandidate.from_value(
+                    {
+                        "schema_version": _SCHEMA,
+                        "plan": _decode(candidate_value, max_bytes=self.max_output_bytes).get("plan", candidate_value),
+                        "model_id": response.model_id,
+                        "provider": response.provider,
+                        "model_revision": response.model_revision,
+                    },
+                    max_bytes=self.max_output_bytes,
+                )
             except Exception as error:
                 previous_error = type(error).__name__
                 if attempt == self.max_attempts:

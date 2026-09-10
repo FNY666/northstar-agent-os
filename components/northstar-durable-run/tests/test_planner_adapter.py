@@ -10,7 +10,7 @@ sys.path.insert(0, str(ROOT.parent / "northstar-run-contract"))
 
 from agent_loop import AgentLoop, AgentPlan, PostconditionResult  # noqa: E402
 from durable_contract import RunContract  # noqa: E402
-from planner_adapter import PlannerCandidate, PlannerResult, TypedPlannerAdapter  # noqa: E402
+from planner_adapter import PlannerCandidate, PlannerModelResponse, PlannerResult, TypedPlannerAdapter  # noqa: E402
 
 RUN = RunContract.from_dict({
     "schema_version": "northstar.durable-run.v1",
@@ -63,8 +63,9 @@ class PlannerAdapterTests(unittest.TestCase):
     def tearDown(self): self.tempdir.cleanup()
 
     def test_valid_model_output_is_admitted_without_executing_action(self):
-        def caller(**kwargs): return {"schema_version": "northstar.planner-candidate.v1", "plan": plan_value(), "model_id": "model-a", "provider": "provider-a", "model_revision": "rev-1"}
+        def caller(**kwargs): return PlannerModelResponse(plan_value(), "model-a", "provider-a", "rev-1")
         result = TypedPlannerAdapter(caller).generate("inspect README", context={"ref": "ctx"}, loop=self.loop, current_policy_revision="policy-1", owner_id="owner-1", now=100)
+        self.assertEqual(result.model_id, "model-a")
         self.assertIsInstance(result, PlannerResult)
         self.assertEqual(result.attempts, 1)
         self.assertEqual(self.calls, [])
@@ -73,17 +74,21 @@ class PlannerAdapterTests(unittest.TestCase):
         calls = []
         def caller(**kwargs):
             calls.append(kwargs)
-            return "still invalid" if len(calls) == 1 else {"schema_version": "northstar.planner-candidate.v1", "plan": plan_value(), "model_id": "m", "provider": "p", "model_revision": "r"}
+            return PlannerModelResponse("still invalid", "m", "p", "r") if len(calls) == 1 else PlannerModelResponse({"plan": plan_value()}, "m", "p", "r")
         result = TypedPlannerAdapter(caller).generate("inspect", context={}, loop=self.loop, current_policy_revision="policy-1", owner_id="o", now=100)
         self.assertEqual(result.attempts, 2)
         self.assertEqual(self.calls, [])
         self.assertEqual(calls[1]["attempt"], 2)
         self.assertIsNotNone(calls[1]["repair_error"])
-        with self.assertRaises(ValueError): TypedPlannerAdapter(lambda **kwargs: "bad").generate("inspect", context={}, loop=self.loop, current_policy_revision="policy-1", owner_id="o", now=100)
+        with self.assertRaises(ValueError): TypedPlannerAdapter(lambda **kwargs: PlannerModelResponse("bad", "m", "p", "r")).generate("inspect", context={}, loop=self.loop, current_policy_revision="policy-1", owner_id="o", now=100)
+
+    def test_raw_model_dictionary_is_rejected(self):
+        caller = lambda **kwargs: {"schema_version": "northstar.planner-candidate.v1", "plan": plan_value(), "model_id": "m", "provider": "p", "model_revision": "r"}
+        with self.assertRaises(ValueError): TypedPlannerAdapter(caller).generate("inspect", context={}, loop=self.loop, current_policy_revision="policy-1", owner_id="o", now=100)
 
     def test_admission_rejection_propagates(self):
         bad = plan_value(); bad["actor_id"] = "other"
-        caller = lambda **kwargs: {"schema_version": "northstar.planner-candidate.v1", "plan": bad, "model_id": "m", "provider": "p", "model_revision": "r"}
+        caller = lambda **kwargs: PlannerModelResponse({"plan": bad}, "m", "p", "r")
         with self.assertRaises(ValueError): TypedPlannerAdapter(caller).generate("inspect", context={}, loop=self.loop, current_policy_revision="policy-1", owner_id="o", now=100)
 
     def test_model_exception_fails_closed_without_unbounded_retry(self):
@@ -100,7 +105,7 @@ class PlannerAdapterTests(unittest.TestCase):
         calls = []
         def caller(**kwargs):
             calls.append(kwargs)
-            return "{" + ("x" * 1000)
+            return PlannerModelResponse("{" + ("x" * 1000), "m", "p", "r")
         with self.assertRaises(ValueError):
             TypedPlannerAdapter(caller, max_output_bytes=100).generate("inspect", context={}, loop=self.loop, current_policy_revision="policy-1", owner_id="o", now=100)
         self.assertEqual(len(calls), 2)

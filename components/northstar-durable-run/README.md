@@ -43,6 +43,13 @@ repair attempt by default, and sends the parsed `AgentPlan` through the existing
 admission checks. It never executes an action during planning. This is still an
 adapter boundary, not a bundled model SDK or production planner service.
 
+`openai_compatible_planner.py` provides an optional standard-library caller for
+an explicitly configured HTTPS OpenAI-compatible endpoint. Configure the
+endpoint URL, API-key environment-variable name, model ID, provider, and model
+revision in host code; the model response can supply only a `plan` object. The
+caller does not retry transport failures and never logs the API-key value. Tests
+use a fake transport; no live provider is configured in this repository.
+
 strict planner-produced `AgentPlan`, persists a bounded plan-step manifest in
 the first admission event, executes only registered actions, and requires an
 independent observer read-back. A manifest binds every evidence `step_id`,
