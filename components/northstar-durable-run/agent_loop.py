@@ -55,6 +55,12 @@ def _positive(value: Any, field: str) -> int:
     return value
 
 
+def _failure_reason(error: BaseException) -> str:
+    """Name the failure kind without ever copying error text into evidence."""
+    reason = type(error).__name__
+    return reason if reason.isidentifier() and len(reason) <= _MAX_ID else "action_error"
+
+
 def _scopes(value: Any, field: str) -> tuple[str, ...]:
     if not isinstance(value, list) or not value:
         raise ValueError(f"{field} must be a non-empty list")
@@ -249,6 +255,7 @@ _LOOP_EVENT_TYPES = {
     "plan.admitted",
     "loop.started",
     "step.attempted",
+    "step.action_failed",
     "step.observed",
     "loop.paused",
     "loop.failed",
@@ -258,6 +265,7 @@ _LOOP_STATUS_BY_EVENT = {
     "plan.admitted": "admitted",
     "loop.started": "running",
     "step.attempted": "attempted",
+    "step.action_failed": "attempted",
     "step.observed": {"verified_committed", "verified_absent", "paused_unknown"},
     "loop.paused": "paused_unknown",
     "loop.failed": "failed",
@@ -645,6 +653,19 @@ class AgentLoop:
                 }
                 current_step_id = event.step_id
                 continue
+            if event.event_type == "step.action_failed":
+                if status != "running":
+                    raise ValueError("step.action_failed requires a running loop")
+                if event.execution_id is None or event.attempt_id is None:
+                    raise ValueError("step.action_failed requires attempt identity")
+                old = steps.get(event.step_id)
+                if old is None or old["status"] != "attempted":
+                    raise ValueError("step.action_failed requires an attempted step")
+                if old["attempt"] != event.attempt or old["attempt_id"] != event.attempt_id:
+                    raise ValueError("step.action_failed attempt does not match attempted step")
+                # Trajectory record only: the step verdict still comes from step.observed.
+                current_step_id = event.step_id
+                continue
             if event.event_type == "step.observed":
                 if event.step_id not in steps:
                     raise ValueError("observation has no attempted step")
@@ -934,8 +955,22 @@ class AgentLoop:
                 output = self.actions[step.action_id](step, attempt_id)
             except KeyboardInterrupt:
                 raise
-            except BaseException:
+            except BaseException as error:
                 output = None
+                # Record the failure itself: "action ran" and "action raised"
+                # must be distinguishable in the evidence stream.
+                self._append_event(
+                    plan_digest=plan.plan_digest,
+                    event_type="step.action_failed",
+                    step_id=step.step_id,
+                    execution_id=execution_id,
+                    attempt_id=attempt_id,
+                    attempt=attempt,
+                    status="attempted",
+                    reason_code=_failure_reason(error),
+                    idempotency_key=f"{attempt_id}:action-failed",
+                    recorded_at=now,
+                )
             if isinstance(output, dict):
                 output_digest = _digest(output)
         result = self._observe(step, attempt_id)

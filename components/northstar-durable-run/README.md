@@ -50,6 +50,23 @@ revision in host code; the model response can supply only a `plan` object. The
 caller does not retry transport failures and never logs the API-key value. Tests
 use a fake transport; no live provider is configured in this repository.
 
+`repo_read.py` is the first real read-only action bound to an admitted plan.
+`RepoReadTool` owns its workspace root, walks every path component with
+`O_NOFOLLOW`, rejects absolute paths, traversal, symlinked components,
+directories, non-regular files, and payloads outside
+`{"path", "max_bytes"}`, and enforces a byte bound plus a post-read stability
+check. It never writes, and it is not an OS sandbox or a secret classifier:
+anything readable inside the host-owned root is readable by this tool, so pair
+it with `allowed_paths` and an independent observer.
+
+Action failures are traceable. When a registered action raises, the loop
+records `step.action_failed` with the failure *kind* (`ValueError`,
+`CustomFailure`, ...) and never copies the exception message into evidence, so
+a trace can distinguish "the action ran" from "the action raised". Recovery
+through an independent observer remains legal, because a remotely committed
+effect may still be verifiable after a local error.
+
+
 strict planner-produced `AgentPlan`, persists a bounded plan-step manifest in
 the first admission event, executes only registered actions, and requires an
 independent observer read-back. A manifest binds every evidence `step_id`,
