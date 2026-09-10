@@ -67,6 +67,30 @@ What this does not prove:
   writer is excluded, and sequence identity is per-log, not global.
 - It has no real Codex, Claude Code, Cursor, Hermes, or OpenBot dependency.
 
+## Signing-key lifecycle
+
+- `KeyHistory` is an append-only, hash-chained record of `introduced` /
+  `rotated` / `revoked` actions. It stores a material digest, never the material.
+- A verdict is only ever derived from a chain that verified against the supplied
+  anchor. A history whose first record is not the pinned anchor is
+  `untrusted-anchor`; a chain with a revision gap, a broken link, or a
+  recomputed-digest mismatch makes every key in it `unverifiable`.
+- Rotation retires the previous key without forgetting it. The retired key still
+  resolves as `trusted-retired`, so old attestations stay verifiable while the
+  policy decision stays with the caller.
+- Revocation is retrospective refusal, not retroactive invalidation. `KeyRing`
+  stops resolving a revoked key immediately, and `proof_signing` then refuses an
+  otherwise valid attestation rather than silently accepting it.
+
+What this does not prove:
+
+- That the writer of the key history is honest, or that a revocation happened at
+  a specific wall-clock time. A host able to rewrite the history can also
+  rewrite the anchor unless the anchor is pinned out of band.
+- Anything about a signature made *before* a revocation. This slice has no
+  as-of revision, so a past attestation is refused rather than judged — which is
+  the fail-closed direction, not a verified answer.
+
 ## Release boundary
 
 Do not cherry-pick or publish this candidate automatically. It requires a
