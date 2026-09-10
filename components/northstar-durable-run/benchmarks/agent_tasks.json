@@ -1,0 +1,108 @@
+{
+  "schema_version": "northstar.agent-benchmark.v1",
+  "planner": "scripted-fixture",
+  "notes": "Host-owned task definitions. Each task gets a fresh workspace and evidence stream. `fault` injects one controlled failure so recovery is measured, not assumed.",
+  "tasks": [
+    {
+      "task_id": "bench-handbook-notes",
+      "goal": "Read the handbook and leave a short note that follows it.",
+      "seed": {
+        "README.md": "handbook: keep it boring\n"
+      },
+      "steps": [
+        {
+          "step_id": "read-handbook",
+          "action_id": "repo.read",
+          "payload": {"path": "README.md", "max_bytes": 4096},
+          "postconditions": ["read_ok"]
+        },
+        {
+          "step_id": "write-note",
+          "action_id": "workspace.write",
+          "payload": {"path": "out/notes.md", "content": "note: keep it boring\n"},
+          "postconditions": ["content_matches_payload"]
+        }
+      ],
+      "expect": [
+        {"path": "out/notes.md", "content": "note: keep it boring\n"}
+      ]
+    },
+    {
+      "task_id": "bench-nested-deliverable",
+      "goal": "Produce a two-file deliverable under a nested directory.",
+      "steps": [
+        {
+          "step_id": "write-plan",
+          "action_id": "workspace.write",
+          "payload": {"path": "out/deep/plan.md", "content": "# plan\n"},
+          "postconditions": ["content_matches_payload"]
+        },
+        {
+          "step_id": "write-index",
+          "action_id": "workspace.write",
+          "payload": {"path": "out/deep/index.txt", "content": "plan.md\n"},
+          "postconditions": ["content_matches_payload"]
+        }
+      ],
+      "expect": [
+        {"path": "out/deep/plan.md", "content": "# plan\n"},
+        {"path": "out/deep/index.txt", "content": "plan.md\n"}
+      ]
+    },
+    {
+      "task_id": "bench-transient-recovery",
+      "goal": "Write the report even though the first write attempt fails.",
+      "fault": "fail_first_attempt",
+      "fault_action": "workspace.write",
+      "steps": [
+        {
+          "step_id": "write-report",
+          "action_id": "workspace.write",
+          "payload": {"path": "report.txt", "content": "final\n"},
+          "postconditions": ["content_matches_payload"]
+        }
+      ],
+      "expect": [
+        {"path": "report.txt", "content": "final\n"}
+      ]
+    },
+    {
+      "task_id": "bench-observer-pause-recovery",
+      "goal": "Complete the task even when the first observation cannot decide.",
+      "fault": "unknown_once",
+      "steps": [
+        {
+          "step_id": "write-report",
+          "action_id": "workspace.write",
+          "payload": {"path": "report.txt", "content": "final\n"},
+          "postconditions": ["content_matches_payload"]
+        }
+      ],
+      "expect": [
+        {"path": "report.txt", "content": "final\n"}
+      ]
+    },
+    {
+      "task_id": "bench-absent-guard",
+      "goal": "Write one file and leave no scratch file behind.",
+      "steps": [
+        {
+          "step_id": "write-kept",
+          "action_id": "workspace.write",
+          "payload": {"path": "kept.txt", "content": "kept\n"},
+          "postconditions": ["content_matches_payload"]
+        },
+        {
+          "step_id": "confirm-absent",
+          "action_id": "repo.read",
+          "payload": {"path": "kept.txt", "max_bytes": 4096},
+          "postconditions": ["read_ok"]
+        }
+      ],
+      "expect": [
+        {"path": "kept.txt", "content": "kept\n"},
+        {"path": "scratch.tmp", "absent": true}
+      ]
+    }
+  ]
+}

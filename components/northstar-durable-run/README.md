@@ -124,6 +124,44 @@ PYTHONPATH=components/northstar-durable-run \
   -s components/northstar-durable-run/tests -p 'test_*.py' -v
 ```
 
+`workspace_write.py` is the write counterpart of the bounded read: `WorkspaceWriteTool`
+owns a host-owned root, accepts exactly `{"path", "content"}`, rejects absolute
+paths, traversal, symlinked targets or intermediate directories, directories, and
+sizes over the bound, then writes through an exclusive `0o600` temporary file that
+is fsynced and renamed into place. A reader never observes a partial file, an
+existing symlink is never replaced, and the result reports `created` plus the
+previous digest. It is not an OS sandbox or a secret boundary: anything writable
+inside the root is writable through it, so pair it with an allowlist, a private
+root, and an independent observer. A tool that rejects its input surfaces as
+`step.action_denied`, not as an execution error: the gateway refuses it before it
+can touch the outside world.
+
+`agent_entry.py` is the first entry point that runs a whole task. `AgentHarness`
+binds one run, one workspace root, both real tools, the authorization chain, and
+an independent observer, then drives `goal → planner candidate → admission →
+per-step authorization → bounded real tools → independent observation → bounded
+autonomous resume → independent final check`. The observer re-reads the world
+itself and never trusts the tool's output; postconditions are a fixed vocabulary
+(`read_ok`, `file_present`, `content_matches_payload`, `file_absent`) and an
+unknown postcondition is never a verified one. `TaskOutcome.ok` requires both a
+`finished` loop and a host-owned verification of the expected artifacts, so a
+finished run whose deliverable is wrong is not a done task. Approvals,
+high-risk tools, re-planning, and network tools are still absent; the harness
+also exposes fault-injection hooks used only by tests and the benchmark.
+
+`agent_benchmark.py` scores whole tasks instead of contracts. Each fixture
+(`benchmarks/agent_tasks.json`) is a host-owned task definition with seed files,
+steps, expected artifacts, and an optional injected fault; every task gets a
+fresh workspace and evidence stream, so a result cannot depend on leftovers. It
+reports task success rate, step-level verification, and recovery counts for
+injected faults. The planner is a *scripted* fixture caller: this measures the
+execution, recovery, and verification harness, not model planning quality.
+
+```sh
+PYTHONPATH=components/northstar-durable-run:components/northstar-run-contract:components/northstar-host \
+  python3 components/northstar-durable-run/agent_benchmark.py
+```
+
 ## Deliberate ceiling
 
 This is not a production scheduler, sandbox, VM, container runtime, browser
@@ -136,6 +174,7 @@ signal behavior, secret rotation, or production deployment safety.
 Before any production integration, add native Linux/VM/container canaries,
 crash and replay tests across process boundaries, durable queue semantics,
 stronger filesystem and lease locking, cancellation propagation, tool-specific
-postconditions, redacted audit export, and a fixed task-level benchmark. No
-part of this component has been deployed to 103, 104, a dormitory host, or
-production OpenBot.
+postconditions, redacted audit export, and a real-model planner benchmark (the
+task-level benchmark exists, but its planner is a scripted fixture, so nothing
+here measures model planning quality yet). No part of this component has been
+deployed to 103, 104, a dormitory host, or production OpenBot.
