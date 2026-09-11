@@ -137,17 +137,22 @@ root, and an independent observer. A tool that rejects its input surfaces as
 can touch the outside world.
 
 `agent_entry.py` is the first entry point that runs a whole task. `AgentHarness`
-binds one run, one workspace root, both real tools, the authorization chain, and
-an independent observer, then drives `goal → planner candidate → admission →
+binds one run, one workspace root, three real tools (`workspace.list`,
+`repo.read`, and `workspace.write`), the authorization chain, and an
+independent observer, then drives `goal → planner candidate → admission →
 per-step authorization → bounded real tools → independent observation → bounded
 autonomous resume → independent final check`. The observer re-reads the world
-itself and never trusts the tool's output; postconditions are a fixed vocabulary
-(`read_ok`, `file_present`, `content_matches_payload`, `file_absent`) and an
-unknown postcondition is never a verified one. `TaskOutcome.ok` requires both a
-`finished` loop and a host-owned verification of the expected artifacts, so a
-finished run whose deliverable is wrong is not a done task. Approvals,
-high-risk tools, re-planning, and network tools are still absent; the harness
-also exposes fault-injection hooks used only by tests and the benchmark.
+itself and never trusts the tool's output. `workspace.list` is metadata-only:
+it returns bounded names, kinds, and file sizes, never content; content still
+requires an explicit `repo.read` step. The list action and the read/write
+actions all use the same per-call authorization chain. Postconditions are a
+fixed vocabulary (`listing_ok`, `read_ok`, `file_present`,
+`content_matches_payload`, `file_absent`) and an unknown postcondition is never
+a verified one. `TaskOutcome.ok` requires both a `finished` loop and a
+host-owned verification of the expected artifacts, so a finished run whose
+deliverable is wrong is not a done task. Approvals, high-risk tools,
+re-planning, and network tools are still absent; the harness also exposes
+fault-injection hooks used only by tests and the benchmark.
 
 `agent_benchmark.py` scores whole tasks instead of contracts. Each fixture
 (`benchmarks/agent_tasks.json`) is a host-owned task definition with seed files,
@@ -175,20 +180,46 @@ and an uncertain (`paused_unknown`) round stops it too. The deliverable is still
 verified by the host against host-owned expectations, so a confident model is
 never the evidence.
 
-`live_run.py` is the real-model path: it seeds a private workspace from a
-fixture, drives the same chain with an OpenAI-compatible model, and writes a
-report beside the evidence streams. `live/first_live_task.json` is the first
-recorded task. The model receives the published planner context (identity,
-budget, tool schema, inventory, observations) and never a credential.
+`workspace.list` is the bounded exploration action used before a model knows
+which file to read. Its payload is exactly `{"prefix", "max_depth",
+"max_entries"}`. It returns sorted relative names, `file`/`directory` kinds,
+file sizes, and a truncation flag; it never returns file content and never
+follows or returns symlinks. The action still goes through the per-call gateway
+and an independent host postcondition (`listing_ok`), so listing metadata does
+not grant read or write authority. The driver stores a list observation under
+`listing:<prefix>`; a subsequent `repo.read` is required to obtain content.
+
+`live_run.py` is the single-task real-model path: it seeds a private workspace
+from a fixture, drives the same chain with an OpenAI-compatible model, and
+writes a report beside the evidence streams. `live/first_live_task.json` is the
+first recorded task. The model receives the published planner context (identity,
+budget, action schema, inventory, observations) and never a credential.
+
+`live_benchmark.py` runs a directory of independent real-model fixtures and
+reports task success rate, total rounds, model calls, recovery rounds, token
+usage, and provider-reported cost. Each task gets a fresh sandbox and evidence
+stream; a pre-existing benchmark sandbox is refused. The three checked-in
+fixtures under `live/tasks/` cover CSV column extraction, changelog summarizing,
+and numeric score auditing. They deliberately require the model to inspect or
+read before producing the final write, and their host-owned `contains`
+expectations are the only success criterion.
 
 ```sh
 OPENROUTER_API_KEY=... PYTHONPATH=components/northstar-durable-run:components/northstar-run-contract:components/northstar-host \
-  python3 components/northstar-durable-run/live_run.py \
-  --fixture components/northstar-durable-run/live/first_live_task.json \
+  python3 components/northstar-durable-run/live_benchmark.py \
+  --tasks components/northstar-durable-run/live/tasks \
   --endpoint https://openrouter.ai/api/v1/chat/completions \
   --key-env OPENROUTER_API_KEY --model deepseek/deepseek-v4-flash --provider openrouter \
-  --reasoning off --sandbox /tmp/northstar-live
+  --reasoning off --max-output-tokens 2048 \
+  --sandbox /tmp/northstar-live-benchmark --report /tmp/northstar-live-benchmark/report.json
 ```
+
+The current recorded live benchmark used DeepSeek V4 Flash through OpenRouter
+with reasoning disabled and a 2048-token output ceiling: 3/3 tasks were
+independently verified in 6 rounds and 6 model calls. Provider-reported usage
+was 8,664 total tokens at cost `0.001083739986` (OpenRouter accounting; not a
+price guarantee). The report and evidence are archived outside the repository
+under `/var/minis/shared/northstar-live-runs/` when a run is retained.
 
 Real-model findings worth keeping: gateways price a request by its worst case,
 so the host must send an explicit `max_tokens` or the call is refused; reasoning

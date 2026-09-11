@@ -12,6 +12,7 @@ sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(ROOT.parent / "northstar-run-contract"))
 
 from agent_loop import AgentLoop, PostconditionResult  # noqa: E402
+from action_gateway import ToolExecutionFailed, ToolRefused  # noqa: E402
 from durable_contract import RunContract  # noqa: E402
 from openai_compatible_planner import (  # noqa: E402
     OpenAICompatiblePlannerCaller,
@@ -56,6 +57,25 @@ class RepoReadToolTests(unittest.TestCase):
         self.assertEqual(result.content, "hello Northstar\n")
         self.assertEqual(result.size_bytes, len(result.content.encode()))
         self.assertEqual(result.digest, "sha256:" + hashlib.sha256(result.content.encode()).hexdigest())
+
+    def test_missing_file_is_execution_failure_not_input_refusal(self):
+        with self.assertRaises(ToolExecutionFailed):
+            self.tool({"path": "missing.txt", "max_bytes": 100})
+
+    def test_escape_path_remains_input_refusal(self):
+        with self.assertRaises(ToolRefused):
+            self.tool({"path": "../outside.txt", "max_bytes": 100})
+
+    def test_symlink_path_remains_input_refusal(self):
+        outside = Path(self.tempdir.name) / "outside.txt"
+        outside.write_text("outside\n", encoding="utf-8")
+        link = self.root / "link.txt"
+        try:
+            link.symlink_to(outside)
+        except (OSError, NotImplementedError):
+            self.skipTest("symlinks unavailable")
+        with self.assertRaises(ToolRefused):
+            self.tool({"path": "link.txt", "max_bytes": 100})
 
     def test_rejects_escape_absolute_directory_missing_and_invalid_payload(self):
         for payload in (

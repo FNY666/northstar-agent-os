@@ -10,6 +10,7 @@ sys.path.insert(0, str(ROOT.parent / "northstar-run-contract"))
 sys.path.insert(0, str(ROOT.parent / "northstar-host"))
 
 from agent_entry import (  # noqa: E402
+    LIST_ACTION,
     READ_ACTION,
     WRITE_ACTION,
     AgentHarness,
@@ -21,7 +22,7 @@ from planner_adapter import PlannerModelResponse, TypedPlannerAdapter  # noqa: E
 
 
 def step_value(step_id, action_id, payload, postconditions, *, key=None, attempts=2):
-    scope = "workspace:read" if action_id == READ_ACTION else "workspace:write"
+    scope = "workspace:read" if action_id in {READ_ACTION, LIST_ACTION} else "workspace:write"
     return {
         "schema_version": "northstar.agent-plan-step.v1",
         "step_id": step_id,
@@ -203,6 +204,29 @@ class AgentEntryTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             self.harness.workspace_inventory(limit=0)
 
+    def test_governed_workspace_list_finishes_without_exposing_file_content(self):
+        (self.workspace / "data").mkdir()
+        (self.workspace / "data" / "records.csv").write_text("private,score\n", encoding="utf-8")
+        steps = [
+            step_value(
+                "list-data",
+                LIST_ACTION,
+                {"prefix": "data", "max_depth": 1, "max_entries": 8},
+                ["listing_ok"],
+            )
+        ]
+        outcome = self.harness.run_goal("List data files", self.planner(steps))
+        self.assertEqual(outcome.run_status, "finished")
+        self.assertEqual(outcome.steps[0].status, "verified_committed")
+        events = self.events()
+        observed = [event for event in events if event["event_type"] == "step.observed"][0]
+        self.assertTrue(observed["output_digest"].startswith("sha256:"))
+        self.assertNotIn("private,score", json.dumps(events))
+        context = self.harness.planner_context()
+        action = next(item for item in context["actions"] if item["action_id"] == LIST_ACTION)
+        self.assertEqual(action["payload_fields"], ["prefix", "max_depth", "max_entries"])
+        self.assertEqual(action["postconditions"], ["listing_ok"])
+
     def test_escape_path_is_refused_and_never_leaves_the_root(self):
         steps = [
             step_value(
@@ -359,7 +383,8 @@ class AgentEntryTests(unittest.TestCase):
         self.assertEqual(captured["run_id"], self.run.run_id)
         self.assertEqual(captured["deadline_at"], self.run.deadline_at)
         self.assertEqual(
-            [action["action_id"] for action in captured["actions"]], [READ_ACTION, WRITE_ACTION]
+            [action["action_id"] for action in captured["actions"]],
+            [LIST_ACTION, READ_ACTION, WRITE_ACTION],
         )
         rendered = json.dumps(captured).lower()
         self.assertNotIn("secret", rendered)

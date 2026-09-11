@@ -16,6 +16,7 @@ scheduling. It is a local harness, not a hosted agent service.
 from __future__ import annotations
 
 import hashlib
+import json
 import os
 import time
 from dataclasses import dataclass
@@ -29,8 +30,10 @@ from binding import sign_binding, verify_binding
 from durable_contract import RunContract
 from governed_dispatch import GovernedActionDispatcher
 from repo_read import RepoReadTool
+from workspace_list import WorkspaceListTool
 from workspace_write import WorkspaceWriteTool
 
+LIST_ACTION = "workspace.list"
 READ_ACTION = "repo.read"
 WRITE_ACTION = "workspace.write"
 READ_CAPABILITY = "workspace:read"
@@ -215,6 +218,7 @@ class AgentHarness:
         self._approval_secret = supplied.get("approval") or os.urandom(32)
 
         self._read_tool = RepoReadTool(self.workspace_root, allowed_paths=allowed_read_paths)
+        self._list_tool = WorkspaceListTool(self.workspace_root)
         self._write_tool = WorkspaceWriteTool(
             self.workspace_root,
             allowed_paths=allowed_write_paths,
@@ -260,6 +264,16 @@ class AgentHarness:
         )
         self.gateway.register(
             ToolSpec(
+                name=LIST_ACTION,
+                required_capability=READ_CAPABILITY,
+                required_scope=READ_CAPABILITY,
+                resource_kind="workspace",
+                risk_level="low",
+                executor=self._list_executor,
+            )
+        )
+        self.gateway.register(
+            ToolSpec(
                 name=WRITE_ACTION,
                 required_capability=WRITE_CAPABILITY,
                 required_scope=WRITE_CAPABILITY,
@@ -280,6 +294,7 @@ class AgentHarness:
             actor_id=actor_id,
             workspace_id=workspace_id,
             actions={
+                LIST_ACTION: self._bound(LIST_ACTION),
                 READ_ACTION: self._bound(READ_ACTION),
                 WRITE_ACTION: self._bound(WRITE_ACTION),
             },
@@ -322,6 +337,9 @@ class AgentHarness:
             "digest": result.digest,
             "content": result.content,
         }
+
+    def _list_executor(self, arguments: dict[str, Any]) -> dict[str, Any]:
+        return self._list_tool(arguments).as_output()
 
     def _write_executor(self, arguments: dict[str, Any]) -> dict[str, Any]:
         return self._write_tool(arguments).as_output()
@@ -369,7 +387,63 @@ class AgentHarness:
         except OSError:
             return "invalid", None
 
+    def _host_listing(self, prefix: object, *, max_depth: int, max_entries: int) -> tuple[str, tuple[dict[str, Any], ...], bool]:
+        """Independent metadata-only directory listing for postconditions."""
+        try:
+            parts = _relative_parts(prefix) if prefix else []
+            if type(max_depth) is not int or not 1 <= max_depth <= 8:
+                return "invalid", (), False
+            if type(max_entries) is not int or not 1 <= max_entries <= 512:
+                return "invalid", (), False
+        except ValueError:
+            return "invalid", (), False
+        base = self.workspace_root.joinpath(*parts)
+        resolved = Path(os.path.realpath(base))
+        if not resolved.is_relative_to(self.workspace_root) or not resolved.is_dir():
+            return "invalid", (), False
+        entries: list[dict[str, Any]] = []
+
+        def walk(directory: Path, current: str, depth: int) -> bool:
+            try:
+                names = sorted(directory.iterdir(), key=lambda item: item.name)
+            except OSError:
+                return False
+            for item in names:
+                if item.is_symlink():
+                    continue
+                if item.is_dir():
+                    kind, size = "directory", None
+                elif item.is_file():
+                    kind, size = "file", item.stat().st_size
+                else:
+                    continue
+                path = item.name if not current else f"{current}/{item.name}"
+                if len(entries) >= max_entries:
+                    return True
+                entries.append({"path": path, "kind": kind, "size_bytes": size})
+                if kind == "directory" and depth < max_depth and walk(item, path, depth + 1):
+                    return True
+            return False
+
+        truncated = walk(resolved, prefix or "", 1)
+        return "ok", tuple(entries), truncated
+
     def _check(self, name: str, payload: dict[str, Any]) -> tuple[str, str | None]:
+        if name == "listing_ok":
+            status, entries, truncated = self._host_listing(
+                payload.get("prefix"),
+                max_depth=payload.get("max_depth"),
+                max_entries=payload.get("max_entries"),
+            )
+            if status != "ok":
+                return "unknown", None
+            canonical = json.dumps(
+                {"entries": list(entries), "prefix": payload.get("prefix", ""), "truncated": truncated},
+                ensure_ascii=False,
+                sort_keys=True,
+                separators=(",", ":"),
+            ).encode("utf-8")
+            return "verified", _digest_bytes(canonical)
         path = payload.get("path")
         state, raw = self._host_state(path)
         if name == "read_ok":
@@ -563,6 +637,11 @@ class AgentHarness:
             "plan_format": self.plan_format(),
             "actions": [
                 {
+                    "action_id": LIST_ACTION,
+                    "payload_fields": ["prefix", "max_depth", "max_entries"],
+                    "postconditions": ["listing_ok"],
+                },
+                {
                     "action_id": READ_ACTION,
                     "payload_fields": ["path", "max_bytes"],
                     "postconditions": ["read_ok", "file_present"],
@@ -588,6 +667,17 @@ class AgentHarness:
     def admitted_steps(self) -> tuple[Any, ...]:
         """Steps this harness admitted, in plan order (read-only for the driver)."""
         return tuple(self._admitted_steps)
+
+    def inspect_listing(self, prefix: str, *, max_depth: int, max_entries: int) -> dict[str, Any]:
+        status, entries, truncated = self._host_listing(
+            prefix, max_depth=max_depth, max_entries=max_entries
+        )
+        return {
+            "state": status,
+            "prefix": prefix,
+            "entries": [dict(entry) for entry in entries],
+            "truncated": truncated,
+        }
 
     def inspect(self, path: str, *, limit: int = 2_048) -> dict[str, Any]:
         """Bounded host-side view of one workspace path, independent of tools.

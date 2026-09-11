@@ -201,7 +201,19 @@ class AgentDriver:
         collected: dict[str, dict[str, Any]] = {}
         for step in harness.admitted_steps():
             payload = step.input_payload
+            if step.action_id == "workspace.list":
+                prefix = payload.get("prefix", "")
+                observation = harness.inspect_listing(
+                    prefix,
+                    max_depth=payload.get("max_depth"),
+                    max_entries=payload.get("max_entries"),
+                )
+                observation["action_id"] = step.action_id
+                collected[f"listing:{prefix or '.'}"] = observation
+                continue
             path = payload.get("path")
+            if not isinstance(path, str):
+                continue
             observation = harness.inspect(path, limit=self.budget.max_observation_bytes)
             observation["action_id"] = step.action_id
             if step.action_id == "workspace.write":
@@ -237,9 +249,9 @@ class AgentDriver:
                 )
                 break
             fresh = self._observe(harness)
-            observations.update(
-                {path: value for path, value in fresh.items() if len(observations) < self.budget.max_observed_files or path in observations}
-            )
+            for path, value in sorted(fresh.items()):
+                if path in observations or len(observations) < self.budget.max_observed_files:
+                    observations[path] = value
             blocked = _round_blocked(self.evidence_dir / f"round-{round_index}.evidence.jsonl")
             rounds.append(
                 RoundRecord(

@@ -1,0 +1,13 @@
+{
+  "schema_version": "northstar.live-task.v1",
+  "task_id": "live-score-audit-v2",
+  "goal": "Inspect the workspace, read data/scores.csv, then write out/audit.md. Report the number of data rows, the average score rounded to two decimals, and the highest-scoring name. Use only workspace.list, repo.read, and workspace.write.",
+  "rounds": 3,
+  "seed": {
+    "README.md": "Scores are integers. The audit belongs at out/audit.md.\n",
+    "data/scores.csv": "name,score\nAda,80\nLin,95\nMika,75\n"
+  },
+  "expect": [
+    {"path": "out/audit.md", "contains": ["3", "83.33", "Lin"]}
+  ]
+}

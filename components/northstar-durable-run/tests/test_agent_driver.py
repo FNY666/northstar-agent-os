@@ -15,6 +15,7 @@ from planner_adapter import PlannerModelResponse, TypedPlannerAdapter  # noqa: E
 
 WRITE = "workspace.write"
 READ = "repo.read"
+LIST = "workspace.list"
 
 
 def plan_from_context(context, steps, *, plan_id="plan-live"):
@@ -43,6 +44,20 @@ def read_step(context, path, *, step_id=None, max_bytes=4096):
         "input_payload": {"path": path, "max_bytes": max_bytes},
         "scope_snapshot": ["workspace:read"],
         "expected_postconditions": ["read_ok"],
+        "idempotency_key": f"{step_id}-{context['run_id']}",
+        "max_attempts": 1,
+        "deadline_at": context["deadline_at"] - 10,
+    }
+
+
+def list_step(context, prefix="", *, step_id="list-workspace"):
+    return {
+        "schema_version": "northstar.agent-plan-step.v1",
+        "step_id": step_id,
+        "action_id": LIST,
+        "input_payload": {"prefix": prefix, "max_depth": 3, "max_entries": 16},
+        "scope_snapshot": ["workspace:read"],
+        "expected_postconditions": ["listing_ok"],
         "idempotency_key": f"{step_id}-{context['run_id']}",
         "max_attempts": 1,
         "deadline_at": context["deadline_at"] - 10,
@@ -196,6 +211,40 @@ class AgentDriverTests(unittest.TestCase):
         self.assertEqual(len(outcome.rounds), 3)
         self.assertIsNone(outcome.rounds[0].blocked)
         self.assertEqual(outcome.verification.verdict, "verified")
+
+    def test_observation_file_budget_is_strictly_bounded(self):
+        def decide(context):
+            return [
+                read_step(context, "README.md", step_id="read-readme"),
+                read_step(context, "data/records.csv", step_id="read-csv"),
+            ]
+
+        outcome = self.driver(
+            budget=DriverBudget(max_rounds=1, max_observed_files=1)
+        ).run("driver-011", "Inspect files", TypedPlannerAdapter(ReplanningCaller(decide)))
+        self.assertFalse(outcome.ok)
+        self.assertEqual(len(outcome.observations), 1)
+
+    def test_directory_listing_observation_is_metadata_only_until_an_explicit_read(self):
+        def decide(context):
+            if context["round"] == 1:
+                return [list_step(context)]
+            if context["round"] == 2:
+                listing = context["observations"]["listing:."]
+                self.assertEqual(listing["action_id"], LIST)
+                self.assertIn("README.md", [item["path"] for item in listing["entries"]])
+                self.assertNotIn("content", listing)
+                return [read_step(context, "README.md")]
+            readback = context["observations"]["README.md"]
+            self.assertIn("data/records.csv", readback["content"])
+            return [write_step(context, "out/report.md", "columns: name, score, city\n")]
+
+        outcome = self.driver().run(
+            "driver-010", "Inspect then write", TypedPlannerAdapter(ReplanningCaller(decide))
+        )
+        self.assertTrue(outcome.ok)
+        self.assertEqual(len(outcome.rounds), 3)
+        self.assertEqual(outcome.rounds[0].observed, ("listing:.",))
 
     def test_a_round_never_reuses_another_runs_evidence_file(self):
         """Stale evidence must fail loudly, not silently mismatch plan digests."""

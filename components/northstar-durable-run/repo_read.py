@@ -1,4 +1,5 @@
 """Bounded local reads; not an OS sandbox or a secret classifier."""
+import errno
 import hashlib
 import os
 import stat
@@ -69,8 +70,22 @@ class RepoReadTool:
                 raise ToolExecutionFailed("file exceeded limit or changed during read")
             content = raw.decode("utf-8")
             return RepoReadResult(path, content, len(raw), "sha256:" + hashlib.sha256(raw).hexdigest())
-        except (OSError, UnicodeError):
-            raise ValueError("repository file is unavailable") from None
+        except (OSError, UnicodeError) as error:
+            # O_NOFOLLOW reports a symlink as ELOOP: this is an inadmissible
+            # path, not an execution-time failure. Keep it fail-closed so the
+            # loop cannot re-plan around a path that was explicitly refused.
+            if isinstance(error, OSError) and error.errno == errno.ELOOP:
+                raise ToolRefused("repository path contains a symlink") from None
+            # A missing file is an execution-time world observation, not an
+            # inadmissible model request. Preserve refusal only for explicit
+            # input validation above; the dispatcher may then re-plan safely.
+            if isinstance(error, OSError) and error.errno in {
+                errno.ENOENT,
+                errno.ENOTDIR,
+                errno.EACCES,
+            }:
+                raise ToolExecutionFailed("repository file is unavailable") from None
+            raise ToolExecutionFailed("repository file read failed") from None
         finally:
             if fd is not None:
                 os.close(fd)
