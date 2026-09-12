@@ -1,0 +1,20 @@
+{
+  "schema_version": "northstar.live-task.v1",
+  "task_id": "live-transient-write-recovery-v1",
+  "goal": "Inspect the workspace, read data/service-status.txt, then write out/recovery.md. The deliverable must state the service name, the incident state, and the required next action. A host-controlled transient tool failure may occur; recover within the bounded rounds without changing the required output path.",
+  "rounds": 3,
+  "seed": {
+    "README.md": "The source of truth is data/service-status.txt. Write the final deliverable to out/recovery.md.\n",
+    "data/service-status.txt": "service: atlas\nincident: degraded\nnext_action: restart worker pool\n"
+  },
+  "expect": [
+    {
+      "path": "out/recovery.md",
+      "contains": ["atlas", "degraded", "restart worker pool"]
+    }
+  ],
+  "fault": {
+    "action_id": "workspace.write",
+    "count": 1
+  }
+}

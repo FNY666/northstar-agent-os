@@ -73,6 +73,100 @@ class LiveBenchmarkTests(unittest.TestCase):
         self.assertEqual(args.max_output_tokens, 2048)
         self.assertEqual(args.reasoning, "off")
 
+    def test_loader_rejects_malformed_fault_declarations(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            cases = [
+                {"action_id": "shell.exec", "count": 1},
+                {"action_id": "workspace.write", "count": 0},
+                {"action_id": "workspace.write", "count": 4},
+                {"action_id": "workspace.write"},
+                {"action_id": "workspace.write", "count": 1, "extra": True},
+            ]
+            for index, fault in enumerate(cases):
+                path = root / f"bad-{index}.json"
+                path.write_text(
+                    json.dumps(
+                        {
+                            "schema_version": "northstar.live-task.v1",
+                            "task_id": f"bad-fault-{index}",
+                            "goal": "x",
+                            "seed": {},
+                            "expect": [],
+                            "fault": fault,
+                        }
+                    ),
+                    encoding="utf-8",
+                )
+                with self.assertRaises(ValueError):
+                    load_live_tasks(path)
+
+    def test_one_shot_action_failure_is_shared_across_rounds_and_reported(self):
+        def write_only_transport(request, timeout):
+            body = json.loads(request.data.decode("utf-8"))
+            context = json.loads(body["messages"][1]["content"])["context"]
+            plan = {
+                "schema_version": "northstar.agent-plan.v1",
+                "plan_id": f"plan-{context['run_id']}",
+                "plan_version": 1,
+                "task_id": context["task_id"],
+                "thread_id": context["thread_id"],
+                "run_id": context["run_id"],
+                "actor_id": context["actor_id"],
+                "workspace_id": context["workspace_id"],
+                "policy_revision": context["policy_revision"],
+                "trace_id": context["trace_id"],
+                "steps": [{
+                    "schema_version": "northstar.agent-plan-step.v1",
+                    "step_id": "write-report",
+                    "action_id": "workspace.write",
+                    "input_payload": {"path": "out/report.md", "content": "recovered\\n"},
+                    "scope_snapshot": ["workspace:write"],
+                    "expected_postconditions": ["content_matches_payload"],
+                    "idempotency_key": f"write-{context['run_id']}",
+                    "max_attempts": 1,
+                    "deadline_at": context["deadline_at"] - 10,
+                }],
+            }
+            return json.dumps({
+                "choices": [{"message": {"content": json.dumps({"plan": plan})}, "finish_reason": "stop"}],
+                "usage": {"cost": 0.0003, "prompt_tokens": 20, "completion_tokens": 30, "total_tokens": 50},
+            }).encode("utf-8")
+
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            tasks_dir = root / "tasks"
+            tasks_dir.mkdir()
+            path = self.fixture(tasks_dir, "action-failure")
+            value = json.loads(path.read_text(encoding="utf-8"))
+            value["fault"] = {"action_id": "workspace.write", "count": 1}
+            value["rounds"] = 2
+            value["expect"] = [{"path": "out/report.md", "contains": ["recovered"]}]
+            path.write_text(json.dumps(value), encoding="utf-8")
+            report = run_live_benchmark(
+                load_live_tasks(path),
+                endpoint="https://planner.example/v1/chat/completions",
+                key_env="TEST_PLANNER_API_KEY",
+                model="fixture/model",
+                provider="fixture",
+                model_revision="rev-1",
+                reasoning_effort="off",
+                max_output_tokens=1024,
+                sandbox=root / "sandbox",
+                transport_factory=lambda task: write_only_transport,
+            )
+
+        task = report["tasks"][0]
+        self.assertTrue(task["ok"])
+        self.assertEqual(task["round_count"], 2)
+        self.assertEqual(task["faults_injected"], 1)
+        self.assertEqual(task["action_failures"], 1)
+        self.assertTrue(task["recovered_after_action_failure"])
+        self.assertEqual(report["summary"]["fault_tasks"], 1)
+        self.assertEqual(report["summary"]["faults_injected"], 1)
+        self.assertEqual(report["summary"]["action_failures"], 1)
+        self.assertEqual(report["summary"]["recovered_after_action_failure"], 1)
+
     def test_loader_rejects_malformed_expectation(self):
         with tempfile.TemporaryDirectory() as temporary:
             path = Path(temporary) / "bad.json"

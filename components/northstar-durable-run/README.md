@@ -197,12 +197,14 @@ budget, action schema, inventory, observations) and never a credential.
 
 `live_benchmark.py` runs a directory of independent real-model fixtures and
 reports task success rate, total rounds, model calls, recovery rounds, token
-usage, and provider-reported cost. Each task gets a fresh sandbox and evidence
-stream; a pre-existing benchmark sandbox is refused. The three checked-in
-fixtures under `live/tasks/` cover CSV column extraction, changelog summarizing,
-and numeric score auditing. They deliberately require the model to inspect or
-read before producing the final write, and their host-owned `contains`
-expectations are the only success criterion.
+usage, provider-reported cost, and evidence-derived action-failure recovery.
+Each task gets a fresh sandbox and evidence stream; a pre-existing benchmark
+sandbox is refused. The checked-in fixtures under `live/tasks/` cover CSV column
+extraction, changelog summarizing, numeric score auditing, and one bounded
+transient `workspace.write` failure. Faults are host-owned evaluation controls,
+not model capabilities; the benchmark counts `step.action_failed` in evidence
+and requires final host verification before calling recovery successful. The
+host-owned `contains` expectations are the only task success criterion.
 
 ```sh
 OPENROUTER_API_KEY=... PYTHONPATH=components/northstar-durable-run:components/northstar-run-contract:components/northstar-host \
@@ -218,8 +220,15 @@ The current recorded live benchmark used DeepSeek V4 Flash through OpenRouter
 with reasoning disabled and a 2048-token output ceiling: 3/3 tasks were
 independently verified in 6 rounds and 6 model calls. Provider-reported usage
 was 8,664 total tokens at cost `0.001083739986` (OpenRouter accounting; not a
-price guarantee). The report and evidence are archived outside the repository
-under `/var/minis/shared/northstar-live-runs/` when a run is retained.
+price guarantee). A separate recovery fixture then injected one host-owned
+`workspace.write` execution failure: evidence contained one
+`step.action_failed`, the same round retried the write successfully, and the
+host verified the final `out/recovery.md`; that run used 2 calls, 2,986 tokens,
+and provider cost `0.0002801421`. This proves one bounded execution-failure
+recovery path only; it does not prove arbitrary crash recovery, exactly-once
+external side effects, or production reliability. The reports and evidence are
+archived outside the repository under
+`/var/minis/shared/northstar-live-runs/` when a run is retained.
 
 Real-model findings worth keeping: gateways price a request by its worst case,
 so the host must send an explicit `max_tokens` or the call is refused; reasoning

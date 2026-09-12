@@ -17,7 +17,7 @@ from pathlib import Path
 from typing import Any, Callable
 
 from agent_driver import AgentDriver, DriverBudget
-from agent_entry import ExpectedArtifact
+from agent_entry import AgentHarness, ExpectedArtifact
 from openai_compatible_planner import (
     OpenAICompatiblePlannerCaller,
     OpenAICompatiblePlannerConfig,
@@ -35,6 +35,20 @@ def _seed_path(value: Any) -> str:
     if any(part in {"", ".", ".."} or "\\" in part or "\x00" in part for part in parts):
         raise ValueError("live task seed path is invalid")
     return value
+
+
+def _validate_fault(value: Any) -> dict[str, Any] | None:
+    if value is None:
+        return None
+    if not isinstance(value, dict) or set(value) != {"action_id", "count"}:
+        raise ValueError("live task fault is invalid")
+    action_id = value["action_id"]
+    count = value["count"]
+    if action_id not in {"workspace.list", "repo.read", "workspace.write"}:
+        raise ValueError("live task fault action is invalid")
+    if type(count) is not int or not 1 <= count <= 3:
+        raise ValueError("live task fault count is invalid")
+    return {"action_id": action_id, "count": count}
 
 
 def _expectation(value: Any) -> ExpectedArtifact:
@@ -75,8 +89,10 @@ def _validate_task(value: Any) -> dict[str, Any]:
     if not isinstance(expects, list):
         raise ValueError("live task expectations are invalid")
     parsed = [_expectation(item) for item in expects]
+    fault = _validate_fault(value.get("fault"))
     result = dict(value)
     result["expect"] = parsed
+    result["fault"] = fault
     return result
 
 
@@ -146,6 +162,38 @@ def _sum_usage(records: list[dict[str, Any]]) -> dict[str, Any]:
     return result
 
 
+def _count_action_failures(evidence_dir: Path) -> int:
+    """Count only task-scoped evidence events; malformed evidence fails closed."""
+    count = 0
+    for path in sorted(evidence_dir.glob("round-*.evidence.jsonl")):
+        try:
+            lines = path.read_text(encoding="utf-8").splitlines()
+        except OSError as error:
+            raise ValueError("benchmark evidence cannot be read") from error
+        for line in lines:
+            if not line.strip():
+                continue
+            try:
+                event = json.loads(line)
+            except json.JSONDecodeError as error:
+                raise ValueError("benchmark evidence is malformed") from error
+            if not isinstance(event, dict):
+                raise ValueError("benchmark evidence event is invalid")
+            if event.get("event_type") == "step.action_failed":
+                count += 1
+    return count
+
+
+def _fault_hook(state: dict[str, int], action_id: str) -> Callable[..., None]:
+    """Return a host-only hook that fails an action a bounded number of times."""
+    def fail(step, attempt_id, ordinal):
+        if step.action_id == action_id and state["remaining"] > 0:
+            state["remaining"] -= 1
+            raise RuntimeError("injected transient execution failure")
+
+    return fail
+
+
 def _run_one(
     task: dict[str, Any],
     *,
@@ -181,6 +229,23 @@ def _run_one(
         ),
         transport=recorder,
     )
+    fault = task.get("fault")
+    fault_state = {"remaining": fault["count"] if fault is not None else 0}
+    fault_action = fault["action_id"] if fault is not None else None
+    hook = _fault_hook(fault_state, fault_action) if fault_action is not None else None
+
+    def harness_builder(run, evidence_path):
+        faults = {} if hook is None else {fault_action: hook}
+        return AgentHarness(
+            run,
+            workspace,
+            evidence_path,
+            actor_id="actor-agent-001",
+            workspace_id="workspace-agent-001",
+            policy_revision="policy-agent-1",
+            faults=faults,
+        )
+
     driver = AgentDriver(
         workspace_root=workspace,
         evidence_dir=task_root / "evidence",
@@ -189,9 +254,19 @@ def _run_one(
             max_rounds=int(task.get("rounds", 3)),
             max_observation_bytes=int(task.get("max_observation_bytes", 2_048)),
         ),
+        harness_builder=harness_builder,
     )
     outcome = driver.run(task["task_id"], task["goal"], TypedPlannerAdapter(caller))
+    action_failures = _count_action_failures(task_root / "evidence")
+    declared_faults = fault["count"] if fault is not None else 0
+    faults_injected = declared_faults - fault_state["remaining"]
     result = outcome.as_dict()
+    result["fault"] = fault
+    result["faults_injected"] = faults_injected
+    result["action_failures"] = action_failures
+    result["recovered_after_action_failure"] = bool(
+        faults_injected > 0 and action_failures > 0 and outcome.ok
+    )
     result["usage"] = _sum_usage(recorder.records)
     result["usage_calls"] = len(recorder.records)
     result["workspace"] = str(workspace)
@@ -247,6 +322,12 @@ def run_live_benchmark(
             "total_rounds": sum(record["round_count"] for record in records),
             "total_model_calls": sum(record["model_calls"] for record in records),
             "recovered_tasks": sum(1 for record in records if record["round_count"] > 1 and record["ok"]),
+            "fault_tasks": sum(1 for record in records if record["fault"] is not None),
+            "faults_injected": sum(record["faults_injected"] for record in records),
+            "action_failures": sum(record["action_failures"] for record in records),
+            "recovered_after_action_failure": sum(
+                1 for record in records if record["recovered_after_action_failure"]
+            ),
             "total_cost": usage["cost"],
             "prompt_tokens": usage["prompt_tokens"],
             "completion_tokens": usage["completion_tokens"],
