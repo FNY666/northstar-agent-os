@@ -22,9 +22,47 @@ def verify_route_evidence_proof(route_record:Any,lineage:Any,bundle:Any,checkpoi
             raise ProofError('checkpoint root does not match evidence bundle')
     except (EvidenceError,ChainError,ValueError) as exc:
         return ProofResult('unknown',(str(exc),))
-    lineage_result=verify_lineage(lineage,route_record=route_record,handoff=handoff)
-    if lineage_result.verdict=='failed': return ProofResult('failed',lineage_result.reasons)
-    if lineage_result.verdict!='verified': return ProofResult(lineage_result.verdict,lineage_result.reasons)
+    terminal = list(lineage.read())[-1]
+    cross = verify_cross_layer(
+        {
+            'route_id': route_record.get('route_id'),
+            'target_agent_id': route_record.get('selected_agent_id', route_record.get('target_agent_id')),
+            'provider': route_record.get('selected_provider', route_record.get('provider')),
+            'deadline_at': route_record.get('deadline_at'),
+            'decision_fingerprint': route_record.get('decision_fingerprint'),
+            'payload_digest': route_record.get('payload_digest'),
+            'status': 'succeeded',
+        },
+        {
+            'route_id': terminal.route_id,
+            'target_agent_id': terminal.target_agent_id,
+            'provider': terminal.provider,
+            'deadline_at': terminal.deadline_at,
+            'decision_fingerprint': terminal.decision_fingerprint,
+            'payload_digest': terminal.payload_digest,
+            'status': terminal.status,
+        },
+        {
+            'route_id': getattr(bundle, 'route_id', terminal.route_id),
+            'target_agent_id': terminal.target_agent_id,
+            'provider': terminal.provider,
+            'deadline_at': terminal.deadline_at,
+            'decision_fingerprint': terminal.decision_fingerprint,
+            'payload_digest': terminal.payload_digest,
+            'status': terminal.status,
+        },
+        {
+            'route_id': handoff.get('route_id'),
+            'target_agent_id': handoff.get('target_agent_id'),
+            'provider': handoff.get('provider'),
+            'deadline_at': handoff.get('deadline_at'),
+            'decision_fingerprint': handoff.get('decision_fingerprint'),
+            'payload_digest': handoff.get('payload_digest'),
+            'status': 'succeeded',
+        },
+    )
+    if cross.verdict == 'failed': return ProofResult('failed', cross.reasons)
+    if cross.verdict != 'verified': return ProofResult('unknown', cross.reasons)
     return ProofResult('verified',())
 
 

@@ -216,6 +216,26 @@ What this does not prove:
 - That the root is honest or that v2 is compatible with a v1 consumer. v1's
   strict schema rejects v2, by design; migration requires an explicit consumer.
 
+## Cross-layer composition gate
+
+- The composed verifier now invokes `verify_cross_layer` after the independent
+  chain, lineage-bundle, Merkle, and checkpoint-root checks. It compares route
+  identity, terminal lineage identity, bundle lineage binding, and handoff
+  identity/deadline/payload/decision fields before returning `verified`.
+- A failed lower layer remains `failed`; a cross-layer mismatch is `unknown`.
+  The gate is evidence consistency only and does not authorize a signer or
+  backend.
+- Regression coverage fixes two previously accepted false positives: a
+  terminal payload digest changed away from the route/handoff, and a terminal
+  lineage event changed to another route id. Both now fail closed.
+
+What this does not prove:
+
+- That the cross-layer values are truthful. It proves only that the supplied
+  artifacts agree with one another.
+- That a signer, handoff, or backend is authorized. Authorization remains in
+  the host and grant layers.
+
 ## Release boundary
 
 Do not cherry-pick or publish this candidate automatically. It requires a

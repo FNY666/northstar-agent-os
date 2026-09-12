@@ -36,4 +36,40 @@ class ProofTests(unittest.TestCase):
         data=list(self.setup_data()); data[-1]=None
         with self.assertRaises(ProofError): make_proof_attestation(*data)
 
+    def test_cross_layer_gate_rejects_terminal_payload_mismatch(self):
+        data = list(self.setup_data())
+        event = data[4]
+        changed = event.to_dict()
+        changed["payload_digest"] = "sha256:" + "c" * 64
+        changed.pop("event_digest", None)
+        from route_lineage import LineageGraph
+        graph = LineageGraph()
+        graph.append(RouteLineageEvent.from_dict(changed))
+        data[1] = graph
+        from evidence_bundle import build_lineage_bundle, make_proof
+        data[2] = build_lineage_bundle([graph.events["e1"]])
+        data[3] = EvidenceChain()
+        data[3].append(data[2])
+        data[4] = graph.events["e1"]
+        data[5] = make_proof(data[2], 0)
+        self.assertEqual(verify_route_evidence_proof(*data).verdict, "unknown")
+
+    def test_cross_layer_gate_rejects_lineage_route_mismatch(self):
+        data = list(self.setup_data())
+        event = data[4]
+        changed = event.to_dict()
+        changed["route_id"] = "other-route"
+        changed.pop("event_digest", None)
+        from route_lineage import LineageGraph
+        graph = LineageGraph()
+        graph.append(RouteLineageEvent.from_dict(changed))
+        data[1] = graph
+        from evidence_bundle import build_lineage_bundle, make_proof
+        data[2] = build_lineage_bundle([graph.events["e1"]])
+        data[3] = EvidenceChain()
+        data[3].append(data[2])
+        data[4] = graph.events["e1"]
+        data[5] = make_proof(data[2], 0)
+        self.assertEqual(verify_route_evidence_proof(*data).verdict, "unknown")
+
 if __name__=='__main__': unittest.main()
