@@ -161,6 +161,34 @@ What this does not prove:
   must bind that head to a separately governed history before treating it as
   sufficient audit evidence.
 
+## Persistent verifier-scoped challenge ledger
+
+- `ChallengeLedger` persists `issued` and `consumed` events as a canonical,
+  fsynced, hash-chained JSONL log. A new process reconstructs the consumed set,
+  so a replay remains refused after restart.
+- Every challenge carries a verifier audience. Consuming it under a different
+  verifier id fails before appending anything; unknown, expired, and repeated
+  challenges fail closed.
+- Consumption holds a same-host `flock` across read/check/append. Two local
+  processes racing the same challenge produce exactly one successful consume.
+- A truncated final line is ignored as an incomplete write. A complete malformed
+  line, digest mismatch, chain break, or missing history after the ledger began
+  makes the ledger `unverifiable` and blocks mutation.
+- `VerifierBoundSeal` is a v2 protocol separate from the existing v1 freshness
+  seal. Its domain includes challenge id, verifier id, attestation digest, and
+  key id. Existing v1 imports and signing semantics remain unchanged.
+
+What this does not prove:
+
+- That `flock` gives exactly-once semantics across hosts or network filesystems;
+  this is a same-host persistence primitive only.
+- That a verifier id is an authorization credential. It is an audience binding,
+  not an identity proof or permission grant.
+- That expiry is true wall-clock time. The clock remains injected and owned by
+  the host; clock rollback/failure policy is outside this slice.
+- That a consumed record can be safely garbage-collected. Forgetting it would
+  reopen the replay window, so compaction requires a separate retention design.
+
 ## Release boundary
 
 Do not cherry-pick or publish this candidate automatically. It requires a
