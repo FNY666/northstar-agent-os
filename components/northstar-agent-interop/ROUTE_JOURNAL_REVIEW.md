@@ -189,6 +189,33 @@ What this does not prove:
 - That a consumed record can be safely garbage-collected. Forgetting it would
   reopen the replay window, so compaction requires a separate retention design.
 
+## Padded Merkle v2 and non-inclusion
+
+- v1 remains unchanged. v2 uses `northstar.evidence-bundle.v2`, sorts unique
+  real event leaf digests, and pads the leaf layer to the next power of two with
+  a domain-separated constant pad digest. A pad digest can never be a real leaf.
+- v2 inclusion paths therefore do not expose a real sibling merely because the
+  tree has an odd number of leaves. Real inclusion indices are separate from
+  padding positions, and a proof cannot request a pad position as an event.
+- v2 absence proofs are relative to the committed sorted set. A target outside
+  the first/last leaf uses one boundary neighbor; a target between leaves uses
+  two adjacent real-leaf inclusion paths plus strict predecessor < target <
+  successor ordering.
+- Duplicate real leaves are rejected. This avoids pretending that a set absence
+  proof is sound for an unaddressed multiset duplicate policy.
+- Both inclusion and absence require a pinned expected root for `verified`.
+  Without it they return `verified-unpinned`, never `verified`.
+
+What this does not prove:
+
+- That the target event never existed outside the committed set. Non-inclusion
+  means only that the target digest is absent from this particular committed,
+  sorted set.
+- That `index`/`padded_count` are independently witnessed by the root; they are
+  still metadata carried by the proof and reported as unverified.
+- That the root is honest or that v2 is compatible with a v1 consumer. v1's
+  strict schema rejects v2, by design; migration requires an explicit consumer.
+
 ## Release boundary
 
 Do not cherry-pick or publish this candidate automatically. It requires a
