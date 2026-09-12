@@ -132,6 +132,35 @@ What this does not prove:
   does not pin `expected_root` accepts a self-consistent forgery. That case is
   reported as `verified-unpinned`, never as `verified`.
 
+## Portable evidence notarization envelope
+
+- `EvidenceEnvelope` composes a subject event, minimal disclosure, verified proof
+  attestation, digest-only key-history records, checkpoint head, signer identity
+  declaration, key id, and a signature. Its unsigned payload is canonical JSON,
+  so the same bytes are signed and verified.
+- The producer runs the existing full evidence verifier before emitting the
+  envelope. The offline verifier then checks the signature, embedded key-history
+  chain, key state, checkpoint root, attestation roots, and disclosure path. It
+  does not re-authorize the signer: `signer` is a claim about identity, not a
+  permission grant.
+- `HMACSignatureScheme` is intentionally labeled `same-key`. It is a standard
+  library compatibility scheme, not third-party independent verification. The
+  `SignatureScheme` interface can accept a host-provided public-key scheme, but
+  this research line does not ship an asymmetric cryptography dependency.
+- A pinned evidence root and pinned key-history anchor are required for
+  `verified`. Missing pins produce `verified-unpinned`; they never silently
+  become `verified`. The envelope contains no signing secret or raw lineage.
+
+What this does not prove:
+
+- That HMAC evidence was independently verified by a party without the secret.
+- That an injected public-key implementation is secure, that the signer is
+  authorized, or that the key-history anchor was distributed honestly.
+- That the checkpoint head alone proves the entire checkpoint history. The
+  portable envelope deliberately carries a head, not the full chain; a producer
+  must bind that head to a separately governed history before treating it as
+  sufficient audit evidence.
+
 ## Release boundary
 
 Do not cherry-pick or publish this candidate automatically. It requires a
