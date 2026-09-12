@@ -290,30 +290,29 @@ What this does not prove:
   answers an as-of evidence question; the caller still decides whether old
   evidence is acceptable for the current action.
 
-## Verifier receipts
+## Checkpoint-chain witnesses
 
-- `VerificationReceipt` binds a verifier's signed observation to the exact
-  envelope digest, one consumed challenge, verifier audience, evidence root,
-  claimed evidence state, and explicit unverified fields.
-- Receipt issuance verifies the envelope first, then consumes the persistent
-  challenge before signing. A restart or second issuance cannot reuse the same
-  challenge. The challenge's key binding must agree with the envelope key.
-- Offline receipt verification returns `receipt-verified`, not `verified`. It
-  verifies the receipt statement and its bindings but deliberately does not
-  re-run the evidence verifier, so `receipt-only` remains visible.
-- Missing expected root is reported as `root-unpinned`; same-key HMAC is reported
-  as `same-key`. Neither is silently upgraded to independent trusted evidence.
-- The verifier identity is an audience claim, not an authorization grant, and a
-  receipt is not permission to execute an action.
+- `CheckpointChainWitness` carries the complete ordered checkpoint list, the
+  explicit checkpoint count, the head root, and a domain-separated canonical
+  chain digest. Verification recomputes every checkpoint digest and continuity
+  edge instead of trusting a portable head alone.
+- A result is `verified` only when both the expected head root and expected chain
+  digest are pinned out of band. Either missing pin returns
+  `verified-unpinned`; a self-carried digest is integrity metadata, not a trust
+  anchor.
+- A valid historical prefix remains verifiable with its own pins and reports its
+  `checkpoint_count` and `head_root`. This is prefix scope, not a claim that the
+  prefix is the latest history.
+- The witness contains no raw event, prompt, secret, or provider output.
 
 What this does not prove:
 
-- That the verifier actually ran the evidence verifier honestly; this module
-  checks the signed receipt's binding, not the verifier's internal execution.
-- That the evidence is true, that the signer or verifier is authorized, or that
-  same-key HMAC permits independent third-party verification.
-- That a challenge was delivered to the intended verifier or that the injected
-  clock is trustworthy. Those remain host and transport responsibilities.
+- That the carried sequence is the latest checkpoint history. A shorter prefix
+  with a recomputed self-carried digest is internally valid; only external pins
+  detect rollback.
+- That checkpoint roots represent truthful events or authorized actions. The
+  witness proves the integrity and ordering of the records it carries.
+- That the external pin was distributed honestly or retained durably.
 
 ## Release boundary
 
