@@ -236,6 +236,33 @@ What this does not prove:
 - That a signer, handoff, or backend is authorized. Authorization remains in
   the host and grant layers.
 
+## Key-history snapshots and as-of verdicts
+
+- `KeyHistorySnapshot` pins an exact prefix by revision, the first-record anchor,
+  and the prefix head digest. Verification recomputes only that prefix and
+  refuses a future, missing, corrupted, or head-mismatched snapshot.
+- `verdict_at` derives `trusted`, `trusted-retired`, `revoked`, or `unknown-key`
+  from the verified prefix rather than the current suffix. A later revocation
+  therefore does not rewrite an earlier snapshot's state.
+- A suffix corrupted after the pinned prefix does not invalidate the prefix;
+  this is intentional prefix semantics, not evidence that the suffix is valid.
+- An unpinned history returns `verified-unpinned` with `anchor_unpinned`; it is
+  never silently promoted to trusted evidence. The revision is ordering metadata,
+  not a timestamp and not proof of when a signature was made.
+- Snapshots contain only digests and revision metadata. They never carry key
+  material or claim that revocation was authorized.
+
+What this does not prove:
+
+- That a revision corresponds to wall-clock time, that the host's ordering is
+  honest, or that a signature was produced before/after a revocation without an
+  explicit caller-supplied historical binding.
+- That a pinned anchor was distributed honestly. Anchor possession is a trust
+  input, not a proof of key ownership or authorization.
+- That a valid historical verdict can override a current revocation policy. It
+  answers an as-of evidence question; the caller still decides whether old
+  evidence is acceptable for the current action.
+
 ## Release boundary
 
 Do not cherry-pick or publish this candidate automatically. It requires a
