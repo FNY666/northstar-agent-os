@@ -21,7 +21,6 @@ Usage:
 from __future__ import annotations
 
 import argparse
-import hashlib
 import json
 import os
 import shutil
@@ -63,7 +62,7 @@ def seed_workspace(root: Path, seed: dict[str, str]) -> None:
         target.write_text(content, encoding="utf-8")
 
 
-def main(argv=None) -> int:
+def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Run one real-model task through the driver.")
     parser.add_argument("--fixture", required=True)
     parser.add_argument("--endpoint", required=True)
@@ -74,8 +73,15 @@ def main(argv=None) -> int:
     parser.add_argument("--sandbox", required=True, help="directory that will hold the workspace")
     parser.add_argument("--report", default=None)
     parser.add_argument("--timeout-seconds", type=float, default=180.0)
-    parser.add_argument("--max-output-tokens", type=int, default=8192)
-    parser.add_argument("--reasoning", default=None, choices=[None, "off", "low", "medium", "high"])
+    # Low-credit-safe defaults: OpenRouter reserves max_tokens up front, and
+    # reasoning models can consume the whole budget before emitting JSON.
+    parser.add_argument("--max-output-tokens", type=int, default=2048)
+    parser.add_argument("--reasoning", default="off", choices=["off", "low", "medium", "high"])
+    return parser
+
+
+def main(argv=None) -> int:
+    parser = build_parser()
     arguments = parser.parse_args(argv)
 
     fixture = json.loads(Path(arguments.fixture).read_text(encoding="utf-8"))

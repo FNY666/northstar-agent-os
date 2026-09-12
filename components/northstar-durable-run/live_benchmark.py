@@ -255,7 +255,7 @@ def run_live_benchmark(
     }
 
 
-def main(argv=None) -> int:
+def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Run bounded real-model tasks.")
     parser.add_argument("--tasks", required=True)
     parser.add_argument("--endpoint", required=True)
@@ -263,11 +263,18 @@ def main(argv=None) -> int:
     parser.add_argument("--model", required=True)
     parser.add_argument("--provider", default="openai-compatible")
     parser.add_argument("--model-revision", default="rev-1")
-    parser.add_argument("--reasoning", default=None, choices=[None, "off", "low", "medium", "high"])
-    parser.add_argument("--max-output-tokens", type=int, default=8192)
+    # Match live_run.py: low-credit-safe defaults for OpenRouter reservation
+    # and reasoning models that can consume the entire output budget.
+    parser.add_argument("--reasoning", default="off", choices=["off", "low", "medium", "high"])
+    parser.add_argument("--max-output-tokens", type=int, default=2048)
     parser.add_argument("--sandbox", required=True)
     parser.add_argument("--report", required=True)
     parser.add_argument("--max-tasks", type=int, default=None)
+    return parser
+
+
+def main(argv=None) -> int:
+    parser = build_parser()
     args = parser.parse_args(argv)
     tasks = load_live_tasks(args.tasks)
     if args.max_tasks is not None:

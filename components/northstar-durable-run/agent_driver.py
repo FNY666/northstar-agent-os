@@ -25,6 +25,7 @@ from pathlib import Path
 from typing import Any, Callable
 
 from agent_entry import AgentHarness, DeliverableVerification, ExpectedArtifact, build_run
+from planner_adapter import PlannerModelCallFailed
 
 DEFAULT_MAX_ROUNDS = 3
 DEFAULT_MAX_OBSERVED_FILES = 12
@@ -59,6 +60,7 @@ class RoundRecord:
     steps: tuple[dict[str, Any], ...]
     observed: tuple[str, ...]
     error: str | None
+    error_detail: str | None = None
     blocked: str | None = None
 
     def as_dict(self) -> dict[str, Any]:
@@ -71,6 +73,7 @@ class RoundRecord:
             "steps": list(self.steps),
             "observed": list(self.observed),
             "error": self.error,
+            "error_detail": self.error_detail,
             "blocked": self.blocked,
         }
 
@@ -240,11 +243,13 @@ class AgentDriver:
                 outcome = harness.run_goal(goal, planner, context=extra)
             except Exception as error:
                 # Planning, admission, or the round itself failed before any
-                # step could run. Record the failure kind and stop: retrying a
-                # rejection blindly is not recovery.
+                # step could run. Preserve only a bounded, host-sanitized
+                # planner detail; never expose arbitrary exception text.
+                detail = error.detail if isinstance(error, PlannerModelCallFailed) else None
                 rounds.append(
                     RoundRecord(
-                        round_index, harness.run.run_id, "round_failed", 0, 0, (), (), type(error).__name__
+                        round_index, harness.run.run_id, "round_failed", 0, 0, (), (), type(error).__name__,
+                        detail,
                     )
                 )
                 break
@@ -262,6 +267,7 @@ class AgentDriver:
                     outcome.resumes,
                     tuple(step.as_dict() for step in outcome.steps),
                     tuple(sorted(fresh)),
+                    None,
                     None,
                     blocked,
                 )

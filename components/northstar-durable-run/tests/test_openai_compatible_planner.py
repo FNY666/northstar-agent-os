@@ -116,8 +116,9 @@ class OpenAIPlannerCallerTests(unittest.TestCase):
                 caller(goal="x", context={}, repair_error=None, attempt=1)
             return captured[0]
 
-        self.assertEqual(self.config().max_output_tokens, 8_192)
-        self.assertNotIn("reasoning", bodies())
+        self.assertEqual(self.config().max_output_tokens, 2_048)
+        self.assertEqual(self.config().reasoning_effort, "off")
+        self.assertEqual(bodies()["reasoning"], {"enabled": False})
         self.assertEqual(bodies(reasoning_effort="off")["reasoning"], {"enabled": False})
         self.assertEqual(bodies(reasoning_effort="low")["reasoning"], {"effort": "low"})
         with self.assertRaises(ValueError):
@@ -151,6 +152,28 @@ class OpenAIPlannerCallerTests(unittest.TestCase):
         malformed = OpenAICompatiblePlannerCaller(self.config(), transport=lambda request, timeout: provider_response("not-json"))
         with mock.patch.dict(os.environ, {"TEST_PLANNER_API_KEY": "fixture-key"}, clear=False):
             with self.assertRaises(ValueError): malformed(goal="x", context={}, repair_error=None, attempt=1)
+
+    def test_http_error_preserves_safe_provider_diagnostics(self):
+        from urllib.error import HTTPError
+
+        def transport(request, timeout):
+            raise HTTPError(
+                request.full_url,
+                402,
+                "Payment Required",
+                {},
+                __import__("io").BytesIO(
+                    b'{"error":{"message":"need fewer max_tokens","code":402}}'
+                ),
+            )
+
+        caller = OpenAICompatiblePlannerCaller(self.config(), transport=transport)
+        with mock.patch.dict(os.environ, {"TEST_PLANNER_API_KEY": "fixture-key"}, clear=False):
+            with self.assertRaises(ValueError) as raised:
+                caller(goal="x", context={}, repair_error=None, attempt=1)
+        self.assertIn("HTTP 402", str(raised.exception))
+        self.assertIn("need fewer max_tokens", str(raised.exception))
+        self.assertNotIn("fixture-key", str(raised.exception))
 
     def test_transport_error_does_not_leak_provider_details(self):
         def transport(request, timeout):

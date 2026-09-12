@@ -28,6 +28,27 @@ _ID_RE = re.compile(r"^[^\s/\\\x00]+$")
 _MODEL_ID_RE = re.compile(r"^[^\s\\\x00]+$")
 
 
+class PlannerModelCallFailed(ValueError):
+    """A planner transport/provider call failed with safe bounded detail.
+
+    The detail is produced only by a trusted host caller after it has removed
+    credentials and bounded provider text. Arbitrary model-caller exceptions
+    are converted to the generic form by ``TypedPlannerAdapter``.
+    """
+
+    def __init__(self, detail: str | None = None):
+        if detail is not None:
+            if not isinstance(detail, str):
+                detail = ""
+            detail = " ".join(detail.split())[:400]
+        self.detail = detail or None
+        message = "planner model call failed"
+        if self.detail:
+            message += f": {self.detail}"
+        super().__init__(message)
+
+
+
 def _canonical(value: Any) -> bytes:
     try:
         return json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")
@@ -182,7 +203,9 @@ class TypedPlannerAdapter:
                     attempt=attempt,
                 )
             except Exception as error:
-                raise ValueError("planner model call failed") from error
+                if isinstance(error, PlannerModelCallFailed):
+                    raise
+                raise PlannerModelCallFailed() from error
             if not isinstance(response, PlannerModelResponse):
                 raise ValueError("planner model caller must return PlannerModelResponse")
             try:

@@ -57,6 +57,22 @@ class LiveBenchmarkTests(unittest.TestCase):
             with self.assertRaises(ValueError):
                 load_live_tasks(root)
 
+    def test_cli_defaults_are_safe_for_low_credit_reasoning_gateways(self):
+        from live_benchmark import build_parser
+
+        args = build_parser().parse_args(
+            [
+                "--tasks", "tasks",
+                "--endpoint", "https://planner.example/v1/chat/completions",
+                "--key-env", "TEST_PLANNER_API_KEY",
+                "--model", "fixture/model",
+                "--sandbox", "/tmp/sandbox",
+                "--report", "/tmp/report.json",
+            ]
+        )
+        self.assertEqual(args.max_output_tokens, 2048)
+        self.assertEqual(args.reasoning, "off")
+
     def test_loader_rejects_malformed_expectation(self):
         with tempfile.TemporaryDirectory() as temporary:
             path = Path(temporary) / "bad.json"
@@ -194,6 +210,46 @@ class LiveBenchmarkTests(unittest.TestCase):
         self.assertEqual(report["summary"]["total_model_calls"], 2)
         self.assertEqual(report["summary"]["recovered_tasks"], 1)
         self.assertAlmostEqual(report["summary"]["total_cost"], 0.0004)
+
+    def test_provider_402_diagnostic_survives_driver_boundary_without_secret(self):
+        from urllib.error import HTTPError
+        import io
+
+        def failing_transport(request, timeout):
+            raise HTTPError(
+                request.full_url,
+                402,
+                "Payment Required",
+                {},
+                io.BytesIO(
+                    b'{"error":{"message":"can only afford 825 tokens","code":402}}'
+                ),
+            )
+
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            tasks_dir = root / "tasks"
+            tasks_dir.mkdir()
+            self.fixture(tasks_dir, "provider-402")
+            report = run_live_benchmark(
+                load_live_tasks(tasks_dir),
+                endpoint="https://planner.example/v1/chat/completions",
+                key_env="TEST_PLANNER_API_KEY",
+                model="fixture/model",
+                provider="fixture",
+                model_revision="rev-1",
+                reasoning_effort=None,
+                max_output_tokens=8192,
+                sandbox=root / "sandbox",
+                transport_factory=lambda task: failing_transport,
+            )
+
+        task = report["tasks"][0]
+        self.assertFalse(task["ok"])
+        self.assertEqual(task["rounds"][0]["error"], "PlannerModelCallFailed")
+        self.assertIn("HTTP 402", task["rounds"][0]["error_detail"])
+        self.assertIn("can only afford 825 tokens", task["rounds"][0]["error_detail"])
+        self.assertNotIn("fixture-key", json.dumps(report))
 
     def test_failed_task_is_counted_as_failed(self):
         with tempfile.TemporaryDirectory() as temporary:

@@ -6,9 +6,10 @@ import os
 from dataclasses import dataclass
 from typing import Any, Callable
 from urllib.parse import urlparse
+from urllib.error import HTTPError
 from urllib.request import Request, urlopen
 
-from planner_adapter import PlannerModelResponse
+from planner_adapter import PlannerModelCallFailed, PlannerModelResponse
 
 _SCHEMA = "northstar.planner-candidate.v1"
 _MAX_ENDPOINT = 2_048
@@ -62,8 +63,8 @@ class OpenAICompatiblePlannerConfig:
     model_revision: str
     timeout_seconds: float = 30.0
     max_response_bytes: int = 262_144
-    max_output_tokens: int = 8_192
-    reasoning_effort: str | None = None
+    max_output_tokens: int = 2_048
+    reasoning_effort: str | None = "off"
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "endpoint", _endpoint(self.endpoint))
@@ -169,6 +170,24 @@ class OpenAICompatiblePlannerCaller:
         )
         try:
             raw = self._transport(request, self.config.timeout_seconds)
+        except HTTPError as error:
+            # Keep the status and provider's actionable, bounded message, but
+            # never propagate the URL, request headers, or credential value.
+            detail = ""
+            try:
+                payload = json.loads(error.read().decode("utf-8", "replace"))
+                provider_error = payload.get("error", {}) if isinstance(payload, dict) else {}
+                if isinstance(provider_error, dict):
+                    detail = provider_error.get("message") or provider_error.get("code") or ""
+                elif isinstance(provider_error, str):
+                    detail = provider_error
+            except (OSError, UnicodeDecodeError, json.JSONDecodeError, AttributeError):
+                detail = ""
+            detail = " ".join(str(detail).split())[:400]
+            message = f"planner provider HTTP {error.code}"
+            if detail:
+                message += f": {detail}"
+            raise PlannerModelCallFailed(message) from None
         except Exception as error:
-            raise ValueError("planner transport failed") from error
+            raise PlannerModelCallFailed() from error
         return self._parse_response(raw)
