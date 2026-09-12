@@ -17,6 +17,7 @@
 - A receipt is a signed statement about an observation; it is not proof that the evidence is truthful and not permission to act.
 - Same-key HMAC receipt signatures are explicitly not third-party independent verification; injected public-key schemes remain host-provided.
 - Challenge consumption is single-use and persistent; failure or replay must not silently issue a second receipt.
+- Receipt issuance must preflight a challenge, finish signing, and consume only after a valid signature exists; a signing failure or key mismatch must not burn the challenge.
 
 ---
 

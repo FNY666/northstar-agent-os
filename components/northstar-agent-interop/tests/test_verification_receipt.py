@@ -145,6 +145,40 @@ class IssueTests(unittest.TestCase):
         with self.assertRaises(ReceiptError):
             self.issue(receipt_scheme=BadScheme())
 
+    def test_failed_receipt_signature_does_not_burn_the_challenge(self):
+        class BadScheme:
+            mode = "public-key"
+            def sign(self, payload, *, key_id):
+                raise RuntimeError("signing failed")
+        challenge = self.ledger.issue(verifier_id="verifier-a", key_id="k1")
+        with self.assertRaises(ReceiptError):
+            issue_verification_receipt(
+                envelope=self.envelope, ledger=self.ledger,
+                challenge_id=challenge.challenge_id, verifier_id="verifier-a",
+                evidence_anchor=self.anchor, evidence_scheme=self.evidence_scheme,
+                receipt_key_id="rk1", receipt_scheme=BadScheme(),
+                expected_root=self.envelope.disclosure["root_digest"],
+            )
+        self.assertEqual(
+            self.ledger.consume(challenge.challenge_id, verifier_id="verifier-a"),
+            challenge,
+        )
+
+    def test_challenge_key_mismatch_does_not_burn_the_challenge(self):
+        challenge = self.ledger.issue(verifier_id="verifier-a", key_id="other-key")
+        with self.assertRaises(ReceiptError):
+            issue_verification_receipt(
+                envelope=self.envelope, ledger=self.ledger,
+                challenge_id=challenge.challenge_id, verifier_id="verifier-a",
+                evidence_anchor=self.anchor, evidence_scheme=self.evidence_scheme,
+                receipt_key_id="rk1", receipt_scheme=self.receipt_scheme,
+                expected_root=self.envelope.disclosure["root_digest"],
+            )
+        self.assertEqual(
+            self.ledger.consume(challenge.challenge_id, verifier_id="verifier-a"),
+            challenge,
+        )
+
 
 class VerifyTests(unittest.TestCase):
     def setUp(self):

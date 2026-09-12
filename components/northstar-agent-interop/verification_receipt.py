@@ -188,9 +188,9 @@ def issue_verification_receipt(
     if observed.state not in _ALLOWED_EVIDENCE_STATES:
         raise ReceiptError("evidence result is not receiptable")
     try:
-        challenge = ledger.consume(challenge_id, verifier_id=verifier_id)
+        challenge = ledger.peek(challenge_id, verifier_id=verifier_id)
     except LedgerError as exc:
-        raise ReceiptError("challenge was not consumed") from exc
+        raise ReceiptError("challenge is not available") from exc
     if challenge.key_id is not None and challenge.key_id != envelope.key_id:
         raise ReceiptError("challenge key does not match evidence envelope")
     unverified = list(observed.unverified)
@@ -215,6 +215,10 @@ def issue_verification_receipt(
     )
     if not isinstance(signature, str) or _SIGNATURE.fullmatch(signature) is None:
         raise ReceiptError("receipt signature is invalid")
+    try:
+        ledger.consume(challenge_id, verifier_id=verifier_id)
+    except LedgerError as exc:
+        raise ReceiptError("challenge was not consumed") from exc
     return VerificationReceipt(**{**unsigned.__dict__, "signature": signature})
 
 

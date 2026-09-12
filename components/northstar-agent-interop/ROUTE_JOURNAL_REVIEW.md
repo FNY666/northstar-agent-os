@@ -241,9 +241,11 @@ What this does not prove:
 - `VerificationReceipt` binds a verifier's signed observation to the exact
   envelope digest, one consumed persistent challenge, verifier audience,
   evidence root, claimed evidence state, and explicit unverified fields.
-- Issuance verifies the envelope first, then consumes the challenge before
-  signing. Restart and duplicate issuance cannot reuse a consumed challenge;
-  a challenge key binding must agree with the envelope key.
+- Issuance verifies the envelope first, preflights the challenge without
+  consuming it, signs the receipt, and consumes only after a valid signature
+  exists. Restart and duplicate issuance cannot reuse a consumed challenge; a
+  signing failure or challenge-key mismatch leaves the challenge available for
+  retry.
 - Offline verification returns `receipt-verified`, not `verified`. It checks the
   receipt statement and bindings but deliberately does not rerun evidence
   verification, so `receipt-only` remains visible.

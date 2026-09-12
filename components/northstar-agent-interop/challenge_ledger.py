@@ -380,6 +380,31 @@ class ChallengeLedger:
             self._append(records, action="issued", challenge=challenge)
             return challenge
 
+    def peek(self, challenge_id: str, *, verifier_id: str) -> LedgerChallenge:
+        """Validate a pending challenge without consuming its one-time claim."""
+        challenge_id = _challenge_id(challenge_id)
+        verifier_id = _id(verifier_id, "verifier_id")
+        now = _time(self.clock(), "clock")
+        with self._lock():
+            records, error = self._read_records()
+            self._require_healthy(records, error)
+            issued = [record for record in records
+                      if record["challenge_id"] == challenge_id and record["action"] == "issued"]
+            if not issued:
+                raise LedgerError("challenge is unknown")
+            if any(record["challenge_id"] == challenge_id and record["action"] == "consumed"
+                   for record in records):
+                raise LedgerError("challenge is already consumed")
+            record = issued[-1]
+            if record["verifier_id"] != verifier_id:
+                raise LedgerError("challenge audience mismatch")
+            if now > record["expires_at"]:
+                raise LedgerError("challenge is expired")
+            return LedgerChallenge(
+                record["challenge_id"], record["verifier_id"], record["issued_at"],
+                record["expires_at"], record["key_id"],
+            )
+
     def consume(self, challenge_id: str, *, verifier_id: str) -> LedgerChallenge:
         challenge_id = _challenge_id(challenge_id)
         verifier_id = _id(verifier_id, "verifier_id")
