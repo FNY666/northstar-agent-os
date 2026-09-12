@@ -236,6 +236,31 @@ What this does not prove:
 - That a signer, handoff, or backend is authorized. Authorization remains in
   the host and grant layers.
 
+## Verifier receipts
+
+- `VerificationReceipt` binds a verifier's signed observation to the exact
+  envelope digest, one consumed persistent challenge, verifier audience,
+  evidence root, claimed evidence state, and explicit unverified fields.
+- Issuance verifies the envelope first, then consumes the challenge before
+  signing. Restart and duplicate issuance cannot reuse a consumed challenge;
+  a challenge key binding must agree with the envelope key.
+- Offline verification returns `receipt-verified`, not `verified`. It checks the
+  receipt statement and bindings but deliberately does not rerun evidence
+  verification, so `receipt-only` remains visible.
+- Missing expected root is reported as `root-unpinned`; same-key HMAC is reported
+  as `same-key`. Neither is silently upgraded to independent trusted evidence.
+- Verifier identity is an audience declaration, not an authorization grant, and
+  a receipt is not permission to execute an action.
+
+What this does not prove:
+
+- That the verifier ran the evidence verifier honestly; this layer checks the
+  signed receipt binding, not the verifier's internal execution.
+- That the evidence is true, the signer or verifier is authorized, or an HMAC
+  receipt can be independently checked without the shared secret.
+- That a challenge reached the intended verifier or that the injected clock is
+  trustworthy. Those remain host and transport responsibilities.
+
 ## Key-history snapshots and as-of verdicts
 
 - `KeyHistorySnapshot` pins an exact prefix by revision, the first-record anchor,
@@ -262,6 +287,31 @@ What this does not prove:
 - That a valid historical verdict can override a current revocation policy. It
   answers an as-of evidence question; the caller still decides whether old
   evidence is acceptable for the current action.
+
+## Verifier receipts
+
+- `VerificationReceipt` binds a verifier's signed observation to the exact
+  envelope digest, one consumed challenge, verifier audience, evidence root,
+  claimed evidence state, and explicit unverified fields.
+- Receipt issuance verifies the envelope first, then consumes the persistent
+  challenge before signing. A restart or second issuance cannot reuse the same
+  challenge. The challenge's key binding must agree with the envelope key.
+- Offline receipt verification returns `receipt-verified`, not `verified`. It
+  verifies the receipt statement and its bindings but deliberately does not
+  re-run the evidence verifier, so `receipt-only` remains visible.
+- Missing expected root is reported as `root-unpinned`; same-key HMAC is reported
+  as `same-key`. Neither is silently upgraded to independent trusted evidence.
+- The verifier identity is an audience claim, not an authorization grant, and a
+  receipt is not permission to execute an action.
+
+What this does not prove:
+
+- That the verifier actually ran the evidence verifier honestly; this module
+  checks the signed receipt's binding, not the verifier's internal execution.
+- That the evidence is true, that the signer or verifier is authorized, or that
+  same-key HMAC permits independent third-party verification.
+- That a challenge was delivered to the intended verifier or that the injected
+  clock is trustworthy. Those remain host and transport responsibilities.
 
 ## Release boundary
 
