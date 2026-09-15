@@ -833,6 +833,33 @@ What this does not prove:
 - That the lock covers writers on other hosts, or a writer that never takes it.
   It serialises cooperating processes on one filesystem only.
 
+## Route liveness as a missing dimension
+
+- Readiness was previously decided without ever asking what the lineage says about
+  the route. `route_liveness.evaluate_route_liveness` now derives
+  `dispatchable` / `retryable` / `in_flight` / `blocked` / `unknown` for a route
+  and always reports `execution_authorized=False`.
+- Two library guards corrected the first implementation while it was being
+  written, and both are worth keeping in mind:
+  - `active_attempts` only returns attempts that reached an execution terminal,
+    so an unfinished `planned`/`dispatched` attempt has no chain. Classifying on
+    that primitive alone marked an in-flight attempt as `dispatchable`; the
+    verdict is now derived from the route's latest event, with the attempt-chain
+    count used only to flag ambiguity.
+  - `derive_retry` refuses to widen a deadline, so a retry stays inside the
+    original commitment.
+- An unmarked log still yields a verdict, with `lineage_mark_absent` surfaced in
+  `unverified` rather than silently ignored.
+
+What this does not prove:
+
+- That a `dispatchable` verdict authorises a dispatch, or that the lineage is
+  complete. A deleted log reads like a fresh route; distinguishing that needs an
+  externally remembered head.
+- That the route's lineage agrees with the evidence stores. Liveness answers a
+  scheduling question, not an evidential one; the two are composed only when a
+  caller chooses to consult both.
+
 ## Release boundary
 
 Do not cherry-pick or publish this candidate automatically. It requires a
