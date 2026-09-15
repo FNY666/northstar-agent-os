@@ -515,6 +515,28 @@ What this does not prove:
 - That a decision digest or manifest digest was distributed honestly or is
   current.
 
+## Evidence dependency graphs
+
+- `EvidenceDependencyGraph` makes claim-to-claim evidence prerequisites explicit
+  and rejects duplicate nodes/edges, self-dependencies, undeclared dependencies,
+  and cycles. Canonical graph ordering is only deterministic serialization.
+- Direct `conflicted`, `insufficient`, and `unverifiable` states dominate every
+  dependent result; blocked dependencies propagate `blocked`; unknown or missing
+  direct evidence propagates `unknown` with the originating reason retained.
+- `DependencyGraphWitness` binds canonical graph structure, direct projections,
+  all derived projections, and a domain-separated witness digest. Replay rejects
+  graph, projection, ordering, state, or digest substitution.
+- Every derived projection and graph witness has `actionable=False`. The graph
+  expresses evidence dependencies only; authorization remains with the host.
+
+What this does not prove:
+
+- That a declared dependency graph is complete, truthful, or an execution DAG.
+  It is an evidence prerequisite graph, not a task scheduler.
+- That a supported dependency authorizes a dependent claim or action. It only
+  removes one evidence blocker from the reduced state.
+- Cross-host graph witness consistency or an exhaustive set of observed claims.
+
 ## Release boundary
 
 Do not cherry-pick or publish this candidate automatically. It requires a
