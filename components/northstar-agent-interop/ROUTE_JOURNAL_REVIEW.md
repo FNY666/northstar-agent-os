@@ -561,6 +561,31 @@ What this does not prove:
 - That its item set is exhaustive beyond the plan manifest and currently
   supplied projections.
 
+## Evidence readiness leases
+
+- `EvidenceReadinessLease` binds an exact fully pinned `ready` plan evidence
+  decision to injected issue/expiry values, decision/manifest/gate digests, and
+  a domain-separated lease digest. It detects source drift before a prior ready
+  conclusion is reused as current evidence.
+- A lease can be issued only after the source decision replays as fully pinned
+  `ready`. Blocked, unknown, and unpinned decision evidence cannot issue a
+  lease; lease verification reruns that source decision and rejects changed
+  plan, manifest, gate, projection, or digest bindings.
+- A valid externally pinned active lease returns `lease-valid`; a missing
+  external lease pin returns `lease-valid-unpinned`; expiry returns
+  `lease-expired` regardless of its digest pins.
+- `execution_authorized` is false for every lease state. A lease is freshness
+  metadata for evidence, not permission to run a plan.
+
+What this does not prove:
+
+- That injected time is wall-clock truth, monotonic across hosts, or honestly
+  supplied. Time remains caller policy input, not a cryptographic timestamp.
+- That a valid lease makes a plan safe, complete, factual, or authorized.
+  Capability/approval/sandbox/postcondition policy remains external.
+- That every plan evidence requirement was declared; an incomplete manifest can
+  still receive a valid lease for its narrower set of claims.
+
 ## Release boundary
 
 Do not cherry-pick or publish this candidate automatically. It requires a
