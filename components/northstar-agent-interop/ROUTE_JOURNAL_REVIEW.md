@@ -860,6 +860,27 @@ What this does not prove:
   scheduling question, not an evidential one; the two are composed only when a
   caller chooses to consult both.
 
+## Dispatch admission: compose evidence and scheduling
+
+- `evaluate_dispatch_admission` closes the previous composition gap by combining
+  a preflight artifact with a route-liveness verdict. It returns `admit`,
+  `admit-unpinned`, `blocked-evidence`, `blocked-route`, `blocked-both`, or
+  `unknown`, and rejects any wire form that claims execution authorization.
+- A clean `admit` requires `preflight-ready`, a dispatchable/retryable route, and
+  no unresolved fields. `preflight-unpinned` or an unmarked lineage stays
+  `admit-unpinned`; an in-flight route blocks even otherwise-ready evidence.
+- The admission binds only plan id, route id, states, reasons, and digests. It
+  has no action body, tool name, provider output, or authority to execute.
+
+What this does not prove:
+
+- That `admit` permits a dispatch. It means the declared evidence and scheduling
+  predicates agree; policy, permission, budget, and the actual action still need
+  their own gates.
+- That the artifact is live. Both source verdicts are snapshots; a caller must
+  still use their respective pin/witness/cursor mechanisms when it needs drift
+  detection.
+
 ## Release boundary
 
 Do not cherry-pick or publish this candidate automatically. It requires a
