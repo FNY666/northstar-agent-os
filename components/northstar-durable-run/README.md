@@ -428,6 +428,15 @@ evidence journal but not the durable event store, so the production gate cannot
 be replayed over the archive and only this contract's half of the comparison can
 be re-run today.
 
+`completion_shadow.py` is the first safe integration surface for the layered
+decision. It takes a production `VerificationResult` and a contract
+`CompletionResult`, preserves both underlying verdicts and namespaced errors,
+and returns `verified` only when both are verified. Any failure dominates;
+unknown and insufficient-information states remain fail-closed. Crucially,
+`execution_authorized` is invariantly false: this is a shadow comparison policy,
+not a change to `TaskOutcome.ok` or a new authorization path. The policy tests
+pin the composition matrix before any production wiring is considered.
+
 ## Deliberate ceiling
 
 This is not a production scheduler, sandbox, VM, container runtime, browser

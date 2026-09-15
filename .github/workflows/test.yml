@@ -35,7 +35,7 @@ jobs:
         run: PYTHONPATH=../northstar-run-contract python -m unittest discover -s tests -p 'test_*.py' -v
       - name: Compile durable run component
         working-directory: components/northstar-durable-run
-        run: python -m py_compile durable_contract.py event_store.py action_gateway.py runner.py verifier.py trace_metrics.py evaluation.py planner_adapter.py openai_compatible_planner.py repo_read.py workspace_list.py workspace_write.py agent_entry.py agent_benchmark.py agent_driver.py live_run.py live_benchmark.py completion_contract_v2.py completion_replay.py completion_batch_replay.py completion_workspace_snapshot.py completion_coverage.py mutation_check.py tests/test_*.py
+        run: python -m py_compile durable_contract.py event_store.py action_gateway.py runner.py verifier.py trace_metrics.py evaluation.py planner_adapter.py openai_compatible_planner.py repo_read.py workspace_list.py workspace_write.py agent_entry.py agent_benchmark.py agent_driver.py live_run.py live_benchmark.py completion_contract_v2.py completion_replay.py completion_batch_replay.py completion_workspace_snapshot.py completion_coverage.py mutation_check.py completion_shadow.py tests/test_*.py
       - name: Durable run component tests
         working-directory: components/northstar-durable-run
         run: PYTHONPATH=. python -m unittest discover -s tests -p 'test_*.py' -v
