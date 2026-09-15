@@ -417,6 +417,30 @@ What this does not prove:
 - That a conflict is exhaustive; it records only witnesses supplied to this
   ledger instance.
 
+## Evidence state projection
+
+- `EvidenceStateProjection` reduces admission witnesses and conflict observations
+  into one deterministic claim state: `supported`, `conflicted`, `insufficient`,
+  `unverifiable`, or `unknown`.
+- Same-claim conflict observations dominate otherwise supported witness evidence.
+  The projection preserves every conflict id, witness digest, package digest,
+  and reason; it never chooses a winning witness.
+- A fully pinned admissible witness projects to `supported`. Insufficient policy
+  outcomes remain `insufficient`; unresolved external pins project to
+  `unverifiable`; no witness projects to `unknown`.
+- `actionable=True` appears only for `supported` as an evidence-readiness hint.
+  It is explicitly not an authorization grant, and a host still owns the action
+  decision.
+
+What this does not prove:
+
+- That the projected state is factual truth, exhaustive world state, or a
+  resolution of a conflict. It is a conservative reduction of supplied evidence.
+- That `actionable` allows execution. Authorization, capability policy, and
+  postcondition checks remain outside this module.
+- That all relevant witnesses were supplied to the projection; omitted evidence
+  can still change a future state.
+
 ## Release boundary
 
 Do not cherry-pick or publish this candidate automatically. It requires a
