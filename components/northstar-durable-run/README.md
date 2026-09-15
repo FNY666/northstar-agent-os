@@ -258,8 +258,13 @@ PYTHONPATH=components/northstar-durable-run:components/northstar-run-contract:co
 
 The first archive audit accepted all three historical correct artifacts and
 rejected all three semantic-negation cases plus all three collateral-file cases.
-That is evidence for the test evaluator only; it does not establish general
-semantic truth or authorize production rollout.
+`completion_replay.py` then adapts a real Northstar `report.json` plus an
+independently checked evidence JSONL into the test-only contract: the archived
+report without provenance returns `insufficient_information`, while an
+explicitly enriched host-owned provenance envelope plus a valid terminal
+`loop.finished` evidence chain verifies. The adapter ignores report `ok` and
+verification claims. This is evidence for the test evaluator only; it does not
+establish general semantic truth or authorize production rollout.
 
 ## Deliberate ceiling
 

@@ -9,6 +9,8 @@
 **Files:**
 - Create `components/northstar-durable-run/completion_contract_v2.py`
 - Create `components/northstar-durable-run/tests/test_completion_contract_v2.py`
+- Create `components/northstar-durable-run/completion_replay.py`
+- Create `components/northstar-durable-run/tests/test_completion_replay.py`
 - Modify `components/northstar-durable-run/README.md` only after tests pass
 - Modify `.github/workflows/test.yml` only to include compile coverage
 
