@@ -388,6 +388,23 @@ the executor with a direct write fails three of the five checks while the
 control and the read check still pass, which is what makes the guards evidence
 rather than decoration.
 
+`mutation_check.py` makes that verification repeatable instead of a one-off. It
+declares four weakenings — the registered executor bypassing the path guard, the
+write tool accepting parent traversal, the observer skipping symlinks instead of
+refusing them, and the replay skipping chain verification — plus one neutral
+change. Each declaration is applied inside a scratch copy of the component, and
+the named guard must then fail; the neutral change must leave the guards passing
+so a harness that simply failed everything could not look correct; and a
+baseline run first confirms the guards pass unmutated.
+
+```sh
+python3 components/northstar-durable-run/mutation_check.py
+```
+
+`tests/test_mutation_declarations.py` checks the same declarations cheaply on
+every test pass, so a declaration that stops matching the code fails fast
+instead of silently skipping its guard.
+
 ## Deliberate ceiling
 
 This is not a production scheduler, sandbox, VM, container runtime, browser
