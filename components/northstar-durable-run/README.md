@@ -405,6 +405,29 @@ python3 components/northstar-durable-run/mutation_check.py
 every test pass, so a declaration that stops matching the code fails fast
 instead of silently skipping its guard.
 
+`tests/test_completion_gate_composition.py` settles how this contract relates to
+the production gate. A live run writes two different artifacts: the durable
+runner writes an event store consumed by `verify_run_completion`, and the agent
+harness writes this hash-chained evidence journal. The event contract carries
+`run_id`, `trace_id`, and `payload_digest`, none of which appear in the journal,
+and the journal carries `event_digest`, `prev_event_digest`, and
+`observed_digest`, none of which appear in the event contract, so neither gate
+can be replayed from the other's artifact.
+
+The consequence is tested in both directions rather than asserted. The contract
+returns `verified` for a finished run whose test exit code is non-zero, which
+the production gate rejects, so replacing that gate with this contract would
+drop the exit-code check. Conversely the production gate returns `verified` for a
+deliverable whose digest matches even though the claim inside it is negated
+(`Top scorer: carol, NOT verified by source`), which this contract rejects. The
+two are therefore layered: production keeps the durable gate and adds this one
+on top, rather than swapping one for the other.
+
+One archival gap follows from the same finding: the archived runs preserved the
+evidence journal but not the durable event store, so the production gate cannot
+be replayed over the archive and only this contract's half of the comparison can
+be re-run today.
+
 ## Deliberate ceiling
 
 This is not a production scheduler, sandbox, VM, container runtime, browser
