@@ -759,6 +759,36 @@ What this does not prove:
 - That a repaired-forward log is trustworthy against an adversary rather than a
   crash; the repair trusts chain-valid records that only a writer could produce.
 
+## Chain-store audit: where the same rollback hole lived
+
+The same structure — append-only log, hash chain, and a state decision taken
+from the newest record — existed in three places. Each needed its own
+high-water mark; fixing one did not fix the others.
+
+- `evidence_preflight_pins.py` and `evidence_readiness_lease_registry.py`:
+  fixed first, and now reject a shortened prefix (`history_truncated` /
+  `high_water_mismatch`) instead of reading it as current.
+- `route_lineage.py`: the lineage log decides which route state is active, so a
+  truncated terminal event rolled a route back to an earlier, still-plausible
+  state; `cursor()` was derived from the log itself and could not detect it.
+  Appends now write a sibling mark (`<log>.mark.json`) and `from_path` validates
+  it: a shorter log is `lineage history is truncated`, an equal-length log with a
+  different tail is `lineage mark mismatch`, and a log ahead of its mark is
+  repaired forward.
+- `audit_export.py` already anchors exports with a manifest carrying the line
+  count and digest, so truncation is detectable there without a new mark. It was
+  audited and deliberately left unchanged.
+
+What this does not prove:
+
+- That a lineage log written without a mark is trustworthy: `from_path` accepts
+  it as `mark_absent` rather than failing, because hand-built and migrated v1
+  logs are a legitimate workflow. v1 logs carry no chain and are never marked.
+- That removing both a log and its mark is detectable; that state reads as
+  absent, and only an externally remembered head can distinguish it.
+- That a mark survives a writer with access to the same directory. It is an
+  integrity check for corruption and partial rollback, not an authorization.
+
 ## Release boundary
 
 Do not cherry-pick or publish this candidate automatically. It requires a

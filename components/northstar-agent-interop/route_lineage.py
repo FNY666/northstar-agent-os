@@ -9,6 +9,7 @@ from recovery_cursor import RecoveryCursor, Lease, LeaseManager, RecoveryError
 
 SCHEMA = "northstar.route-lineage.v1"
 INTEGRITY_SCHEMA = "northstar.route-lineage.v2"
+MARK_SCHEMA = "northstar.route-lineage-mark.v1"
 ZERO_DIGEST = "0" * 64
 STATUSES = ("planned", "dispatched", "succeeded", "failed", "replayed", "superseded")
 OLD_FIELDS = {"schema_version","event_id","route_id","parent_event_id","receipt_id","status","target_agent_id","provider","capabilities","deadline_at","payload_digest","decision_fingerprint","retryable"}
@@ -67,7 +68,42 @@ class RouteLineageEvent:
 
 class LineageGraph:
     _migrations=MigrationRegistry()
-    def __init__(self,path:Path|str|None=None): self.path=Path(path) if path else None; self.events:dict[str,RouteLineageEvent]={}
+    def __init__(self,path:Path|str|None=None): self.path=Path(path) if path else None; self.events:dict[str,RouteLineageEvent]={}; self.mark_state='unmarked'
+    @property
+    def mark_path(self):
+        return Path(str(self.path)+'.mark.json') if self.path else None
+    def _head_digest(self):
+        if not self.events: return None
+        return self.events[next(reversed(self.events))].event_digest.removeprefix('sha256:')
+    def _write_mark(self):
+        mark_path=self.mark_path
+        if mark_path is None: return
+        events=list(self.events.values())
+        if not events: return
+        if any(event.schema_version!=INTEGRITY_SCHEMA for event in events): return
+        head=self._head_digest()
+        if head is None: return
+        payload={'schema_version':MARK_SCHEMA,'high_water':{'sequence':len(events),'head_digest':head}}
+        mark_path.parent.mkdir(parents=True,exist_ok=True)
+        temp=mark_path.with_name(mark_path.name+'.%d.tmp' % os.getpid())
+        with temp.open('w',encoding='utf-8') as handle:
+            handle.write(json.dumps(payload,sort_keys=True,separators=(',',':'))); handle.flush(); os.fsync(handle.fileno())
+        os.replace(temp,mark_path)
+        self.mark_state='verified'
+    def _read_mark(self):
+        mark_path=self.mark_path
+        if mark_path is None or not mark_path.exists(): return None,None
+        try: value=json.loads(mark_path.read_text(encoding='utf-8'))
+        except (OSError,UnicodeDecodeError,json.JSONDecodeError): return None,'lineage mark is corrupt'
+        if not isinstance(value,dict) or value.get('schema_version')!=MARK_SCHEMA: return None,'lineage mark is invalid'
+        high_water=value.get('high_water')
+        if not isinstance(high_water,dict) or set(high_water)!={'sequence','head_digest'}: return None,'lineage mark is invalid'
+        sequence=high_water['sequence']; head=high_water['head_digest']
+        if isinstance(sequence,bool) or not isinstance(sequence,int) or sequence<0: return None,'lineage mark is invalid'
+        if sequence==0:
+            if head is not None: return None,'lineage mark is invalid'
+        elif not (isinstance(head,str) and len(head)==64 and all(c in '0123456789abcdef' for c in head)): return None,'lineage mark is invalid'
+        return (sequence,head),None
     @classmethod
     def migrations(cls): return cls._migrations
     def append(self,e:RouteLineageEvent):
@@ -88,6 +124,7 @@ class LineageGraph:
         if self.path:
             self.path.parent.mkdir(parents=True,exist_ok=True)
             with self.path.open('ab') as f: f.write(e.canonical()+b'\n'); f.flush(); os.fsync(f.fileno())
+            self._write_mark()
         return e
     def read(self)->Iterator[RouteLineageEvent]: return iter(self.events.values())
     def cursor(self) -> RecoveryCursor:
@@ -124,6 +161,19 @@ class LineageGraph:
                 if not raw.endswith(b'\n'): continue
                 try: graph.append(RouteLineageEvent.from_dict(json.loads(raw.decode('utf-8'))))
                 except (UnicodeDecodeError,json.JSONDecodeError,ValueError) as exc: raise LineageError('lineage history is corrupt') from exc
+        graph.path=path
+        mark,error=graph._read_mark()
+        if error is not None: raise LineageError(error)
+        if mark is None:
+            graph.mark_state='mark_absent'
+            return graph
+        sequence,head=mark
+        if sequence>len(graph.events): raise LineageError('lineage history is truncated')
+        if sequence==len(graph.events):
+            if graph.events and graph._head_digest()!=head: raise LineageError('lineage mark mismatch')
+            graph.mark_state='verified'
+        else:
+            graph._write_mark(); graph.mark_state='repaired'
         return graph
 
 def derive_retry(parent:RouteLineageEvent,*,event_id:str,receipt_id:str,deadline_at:int,capabilities:list[str])->RouteLineageEvent:
