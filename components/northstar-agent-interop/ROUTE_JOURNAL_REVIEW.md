@@ -711,6 +711,31 @@ What this does not prove:
   same-host `flock`, hash chain, and fsync, with no signature and no cross-host
   agreement.
 
+## Pin log rollback detection
+
+- The pin store keeps a high-water mark (`sequence`, `head_digest`) in its
+  metadata, written atomically after every append, so a log that shrank is
+  detected: a shorter-but-self-consistent prefix previously read as
+  `pins-current`.
+- Fewer records than marked is `pin history truncated`; an equal-length log with
+  a different tail digest is `pin high-water mismatch`; a mark that is malformed
+  or missing beside an existing log is unverifiable.
+- A log ahead of its mark is the crash window between append and mark update. It
+  is repaired forward and the resolution says `pin_high_water_repaired`, so the
+  store cannot wedge itself after an unclean shutdown.
+
+What this does not prove:
+
+- That the store can defend itself against a writer who removes both the log and
+  the mark: that state reads as an unrecorded store. Detecting it needs an
+  externally remembered head, which is why `verify_pin_resolution` still
+  requires one.
+- That repairing forward is safe against an adversary rather than a crash. The
+  repair trusts chain-valid records that only a writer could produce, and no
+  signature distinguishes the two.
+- That a recovered pin is fresh. Nothing here changes the rule that a resolved
+  pin must still be re-verified by running the preflight.
+
 ## Release boundary
 
 Do not cherry-pick or publish this candidate automatically. It requires a

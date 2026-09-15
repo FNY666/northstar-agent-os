@@ -217,10 +217,17 @@ class PreflightPinStore:
             finally:
                 fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
 
-    def _write_meta(self) -> None:
-        if self._meta.exists():
-            return
-        payload = {"schema_version": STORE_SCHEMA}
+    def _write_meta(self, sequence: int, head_digest: str | None) -> None:
+        """Persist the high-water mark of the append-only log, atomically.
+
+        The mark is what makes a shorter-but-self-consistent prefix detectable:
+        without it, dropping the newest records leaves a chain that still
+        verifies and would be read as current.
+        """
+        payload = {
+            "schema_version": STORE_SCHEMA,
+            "high_water": {"sequence": sequence, "head_digest": head_digest},
+        }
         fd, temp = tempfile.mkstemp(dir=str(self._root), prefix=".pins-meta-")
         try:
             with os.fdopen(fd, "w", encoding="utf-8") as handle:
@@ -237,6 +244,61 @@ class PreflightPinStore:
             os.fsync(directory)
         finally:
             os.close(directory)
+
+    def _read_meta(self) -> tuple[tuple[int, str | None] | None, str | None]:
+        if not self._meta.exists():
+            return None, None
+        try:
+            with self._meta.open("r", encoding="utf-8") as handle:
+                payload = json.load(handle)
+        except (OSError, json.JSONDecodeError):
+            return None, "pin high-water unreadable"
+        if not isinstance(payload, dict) or payload.get("schema_version") != STORE_SCHEMA:
+            return None, "pin high-water malformed"
+        high_water = payload.get("high_water")
+        if not isinstance(high_water, dict) or set(high_water) != {"sequence", "head_digest"}:
+            return None, "pin high-water malformed"
+        sequence = high_water["sequence"]
+        head = high_water["head_digest"]
+        if isinstance(sequence, bool) or not isinstance(sequence, int) or sequence < 0:
+            return None, "pin high-water malformed"
+        if sequence == 0:
+            if head is not None:
+                return None, "pin high-water malformed"
+        elif not isinstance(head, str) or _DIGEST.fullmatch(head) is None:
+            return None, "pin high-water malformed"
+        return (sequence, head), None
+
+    def _read_state(self) -> tuple[list[PreflightPinRecord], bool, str | None]:
+        """Return (records, repaired, error) with the high-water mark applied."""
+        log_exists = self._log.exists()
+        meta_exists = self._meta.exists()
+        records, error = self._read_records()
+        if error is not None:
+            if not log_exists and not meta_exists:
+                return [], False, None
+            return [], False, error
+        high_water, meta_error = self._read_meta()
+        if meta_error is not None:
+            return [], False, meta_error
+        if high_water is None:
+            if records:
+                return [], False, "pin high-water missing"
+            return [], False, None
+        sequence, head = high_water
+        if sequence > len(records):
+            return [], False, "pin history truncated"
+        if sequence == len(records):
+            if len(records) == 0:
+                return records, False, None
+            if records[-1].record_digest != head:
+                return [], False, "pin high-water mismatch"
+            return records, False, None
+        # The log is ahead of the mark: a crash between append and mark update.
+        # Repairing forward is the honest read, since the extra records still
+        # satisfy the chain and only a writer could have produced them.
+        self._write_meta(len(records), records[-1].record_digest)
+        return records, True, None
 
     def _read_records(self) -> tuple[list[PreflightPinRecord], str | None]:
         if not self._log.exists():
@@ -298,7 +360,7 @@ class PreflightPinStore:
         timestamp = _integer(now, "now")
         origin = "verified" if normalized.state == "preflight-ready" else "first-use"
         with self._locked():
-            records, error = self._read_records()
+            records, repaired, error = self._read_state()
             if error is not None:
                 raise PinStoreError(error)
             existing = [record for record in records if record.plan_id == plan]
@@ -331,14 +393,16 @@ class PreflightPinStore:
             record = PreflightPinRecord(
                 **{**record.unsigned_dict(), "record_digest": record.computed_digest}
             )
-            self._write_meta()
+            if not records and not self._meta.exists():
+                self._write_meta(0, None)
             self._append(records, record)
+            self._write_meta(len(records) + 1, record.record_digest)
             return record
 
     def resolve(self, plan_id: str) -> PinResolution:
         plan = _plan_id(plan_id)
         with self._locked():
-            records, error = self._read_records()
+            records, repaired, error = self._read_state()
             if error is not None:
                 return PinResolution("pins-unverifiable", plan_id=plan, reasons=(error,))
             if not records:
@@ -365,7 +429,8 @@ class PreflightPinStore:
                 plan_sequence=len(matching),
                 chain_sequence=len(records),
                 chain_head_digest=records[-1].record_digest,
-                reasons=(
+                reasons=(("pin_high_water_repaired",) if repaired else ())
+                + (
                     (
                         "trust-on-first-use"
                         if latest.origin == "first-use"
@@ -377,7 +442,7 @@ class PreflightPinStore:
 
     def chain_head(self) -> tuple[int, str] | None:
         with self._locked():
-            records, error = self._read_records()
+            records, _repaired, error = self._read_state()
             if error is not None or not records:
                 return None
             return len(records), records[-1].record_digest
