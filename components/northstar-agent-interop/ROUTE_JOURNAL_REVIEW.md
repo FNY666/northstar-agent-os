@@ -634,6 +634,31 @@ What this does not prove:
   bounded by the registry's same-host persistence and locking model.
 - That an observation is latest without a retained external witness digest.
 
+## Evidence readiness preflight
+
+- `evaluate_preflight` recomposes the plan evidence decision, the readiness
+  lease, and the lease-registry witness immediately before a caller considers
+  acting. `preflight-ready` requires all three to be current *and* every
+  external pin to be supplied.
+- Registry revocation dominates lease freshness; stale witnesses, expired
+  leases, unknown leases, and tampered/unverifiable registry history each keep
+  their own distinct non-ready state. A missing pin yields `preflight-unpinned`
+  rather than a weaker ready.
+- The artifact carries only digests, states, reasons, and unresolved fields;
+  `execution_authorized` is rejected as `true` at both construction and parse
+  time, and the source objects are re-verified rather than trusted.
+
+What this does not prove:
+
+- That preflight approval permits the action, or that the evidence itself is
+  true. `preflight-ready` means declared evidence is still self-consistent,
+  fresh, and registered — nothing about safety, legality, or desirability.
+- That the clock is trustworthy, or that a same-host registry reflects other
+  hosts. Cross-host revocation propagation remains out of scope.
+- That an unpinned comparison is meaningful: without a retained external pin,
+  preflight cannot distinguish "unchanged" from "changed and re-verified
+  against itself".
+
 ## Release boundary
 
 Do not cherry-pick or publish this candidate automatically. It requires a
