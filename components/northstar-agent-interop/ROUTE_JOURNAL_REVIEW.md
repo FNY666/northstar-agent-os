@@ -392,6 +392,31 @@ What this does not prove:
   remains preserved for a higher-level resolver or human.
 - That an external policy/witness digest was distributed honestly or is current.
 
+## Evidence conflict ledger
+
+- `EvidenceConflictLedger` persists same-claim admission witness conflicts as
+  fsynced, hash-chained observations. A record contains only canonical witness,
+  package, claim, root, state, and reason digests; it carries no raw event,
+  prompt, secret, or provider output.
+- The two witness digests are sorted solely for idempotency. Reversing input
+  order returns the same observation and does not designate a winner or loser.
+- Same evidence and different claims are rejected as non-conflicts. Same claim
+  with a different evidence root or claimed state is preserved as
+  `evidence_root_mismatch` or `claimed_evidence_state_mismatch`.
+- Restart recovery, truncated-tail tolerance, complete-corruption detection, and
+  same-host concurrent idempotency are verified. Metadata initialization uses a
+  unique temporary file so concurrent first-open does not race on one `.tmp`
+  name.
+
+What this does not prove:
+
+- Which conflicting witness is true, more trustworthy, authorized, or should be
+  used for an action. The ledger preserves evidence for a higher-level resolver
+  or human.
+- Cross-host exactly-once recording. `flock` protects one host/filesystem only.
+- That a conflict is exhaustive; it records only witnesses supplied to this
+  ledger instance.
+
 ## Release boundary
 
 Do not cherry-pick or publish this candidate automatically. It requires a
