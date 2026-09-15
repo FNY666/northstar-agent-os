@@ -341,6 +341,32 @@ What this does not prove:
 - That same-key HMAC gives an independent third-party result. The package keeps
   `same-key` explicit rather than elevating it to an external trust claim.
 
+## Evidence admission and conflict preservation
+
+- `EvidenceAdmissionPolicy` names which external pins are required, whether a
+  verifier receipt is mandatory, which unresolved boundaries are forbidden, and
+  whether an explicitly unpinned package is acceptable for a particular evidence
+  use. It evaluates evidence only; it never grants action authorization.
+- `admit_package` reuses package verification and returns `admissible`,
+  `insufficient`, or `unverifiable`. Missing external root/package/chain/key
+  pins remain explicit policy failures rather than being inferred from a
+  self-carried digest.
+- Claim identity is a canonical digest of route id, target agent, provider,
+  payload digest, decision fingerprint, and event digest. It contains no raw
+  prompt or output.
+- `compare_admissions` preserves conflict: same claim with different evidence
+  roots or claimed evidence states becomes `conflicting`; different claims are
+  `incomparable`; no function chooses a winner.
+
+What this does not prove:
+
+- That an admissible package is true or authorizes any action. Admission is
+  policy compliance for evidence, not a factual or permission decision.
+- That a conflict identifies which package is false. It preserves conflicting
+  package digests and reasons for a higher-level resolver or human.
+- That policy defaults are universally safe. Required pins, receipt mandates,
+  and allowed unresolved boundaries remain explicit caller policy choices.
+
 ## Release boundary
 
 Do not cherry-pick or publish this candidate automatically. It requires a
