@@ -789,6 +789,30 @@ What this does not prove:
 - That a mark survives a writer with access to the same directory. It is an
   integrity check for corruption and partial rollback, not an authorization.
 
+## Restore limits, pinned by tests
+
+Three limits were documented in prose but never exercised. They are now
+characterisation tests in `tests/test_store_restore_limits.py`, so both the gap
+and its mitigation are pinned rather than assumed:
+
+- Pins: restoring an older copy of the store makes `resolve` answer
+  `pins-current` for an older pin, and only a remembered chain head (through
+  `verify_pin_resolution`) reports `pins-stale`.
+- Lease registry: restoring a pre-revocation copy makes `inspect` answer
+  `active` again, and only a previously taken registry witness reports `stale`.
+- Lineage: a restored copy loads as `mark_state == "verified"` with fewer events;
+  nothing local objects, and only a caller that remembers the cursor length or
+  head can tell.
+
+What this does not prove:
+
+- That the mitigations are automatic. Each one requires the caller to have kept
+  an external expectation; without it, a restored store is indistinguishable from
+  a legitimate older state.
+- That these tests cover every limit. They pin the three largest ones; a local
+  store under the control of a writer who can also restore snapshots is outside
+  what any same-host mark can defend.
+
 ## Release boundary
 
 Do not cherry-pick or publish this candidate automatically. It requires a
