@@ -23,9 +23,10 @@ from pathlib import Path
 from typing import Any
 
 from evidence_readiness_preflight import EvidenceReadinessPreflight, PreflightError
+from readiness_lease_witness import LeaseRegistryWitness, RegistryWitnessError
 
 STORE_SCHEMA = "northstar.evidence-preflight-pins.v1"
-RECORD_SCHEMA = "northstar.evidence-preflight-pin-record.v1"
+RECORD_SCHEMA = "northstar.evidence-preflight-pin-record.v2"
 ORIGINS = ("first-use", "verified")
 PINNABLE_STATES = ("preflight-ready", "preflight-unpinned")
 
@@ -34,7 +35,8 @@ _CONTROL = re.compile(r"[\x00-\x1f\x7f]")
 _RECORD_FIELDS = frozenset({
     "schema_version", "sequence", "plan_id", "origin", "lease_digest",
     "registry_witness_digest", "decision_digest", "manifest_digest",
-    "gate_digest", "recorded_at", "prev_digest", "record_digest",
+    "gate_digest", "recorded_at", "registry_witness", "prev_digest",
+    "record_digest",
 })
 _DIGEST_FIELDS = (
     "lease_digest", "registry_witness_digest", "decision_digest",
@@ -83,6 +85,21 @@ def _origin(value: Any) -> str:
     return value
 
 
+def _witness_payload(value: Any, expected_digest: str) -> dict | None:
+    """Return the canonical witness payload, or None when absent."""
+    if value is None:
+        return None
+    if not isinstance(value, dict):
+        raise PinStoreError("registry_witness must be an object or null")
+    try:
+        witness = LeaseRegistryWitness.from_dict(value)
+    except RegistryWitnessError as exc:
+        raise PinStoreError("registry_witness invalid") from exc
+    if witness.witness_digest != expected_digest:
+        raise PinStoreError("registry_witness does not match its digest")
+    return witness.to_dict()
+
+
 @dataclass(frozen=True)
 class PreflightPinRecord:
     schema_version: str
@@ -95,6 +112,7 @@ class PreflightPinRecord:
     manifest_digest: str
     gate_digest: str
     recorded_at: int
+    registry_witness: dict | None
     prev_digest: str | None
     record_digest: str
 
@@ -110,6 +128,7 @@ class PreflightPinRecord:
             "manifest_digest": self.manifest_digest,
             "gate_digest": self.gate_digest,
             "recorded_at": self.recorded_at,
+            "registry_witness": self.registry_witness,
             "prev_digest": self.prev_digest,
         }
 
@@ -139,7 +158,9 @@ class PreflightPinRecord:
             RECORD_SCHEMA, sequence, _plan_id(value["plan_id"]), _origin(value["origin"]),
             digests["lease_digest"], digests["registry_witness_digest"],
             digests["decision_digest"], digests["manifest_digest"], digests["gate_digest"],
-            recorded_at, prev, record_digest,
+            recorded_at,
+            _witness_payload(value["registry_witness"], digests["registry_witness_digest"]),
+            prev, record_digest,
         )
         if record.computed_digest != record_digest:
             raise PinStoreError("pin record digest mismatch")
@@ -156,6 +177,8 @@ class PinResolution:
     manifest_digest: str = ""
     gate_digest: str = ""
     origin: str = ""
+    registry_witness: dict | None = None
+    witness_replayable: bool = False
     pin_record_digest: str = ""
     plan_sequence: int = 0
     chain_sequence: int = 0
@@ -253,7 +276,9 @@ class PreflightPinStore:
         finally:
             os.close(directory)
 
-    def pin_preflight(self, plan_id: str, preflight: Any, *, now: int) -> PreflightPinRecord:
+    def pin_preflight(
+        self, plan_id: str, preflight: Any, *, now: int, witness: Any = None
+    ) -> PreflightPinRecord:
         plan = _plan_id(plan_id)
         if not isinstance(preflight, EvidenceReadinessPreflight):
             raise PinStoreError("preflight invalid")
@@ -263,6 +288,13 @@ class PreflightPinStore:
             normalized = EvidenceReadinessPreflight.from_dict(preflight.to_dict())
         except PreflightError as exc:
             raise PinStoreError("preflight invalid") from exc
+        payload = None
+        if witness is not None:
+            if not isinstance(witness, LeaseRegistryWitness):
+                raise PinStoreError("registry witness invalid")
+            if witness.witness_digest != normalized.registry_witness_digest:
+                raise PinStoreError("registry witness does not match preflight")
+            payload = witness.to_dict()
         timestamp = _integer(now, "now")
         origin = "verified" if normalized.state == "preflight-ready" else "first-use"
         with self._locked():
@@ -272,8 +304,13 @@ class PreflightPinStore:
             existing = [record for record in records if record.plan_id == plan]
             if existing:
                 latest = existing[-1]
-                if latest.origin == origin and all(
-                    getattr(latest, field) == getattr(normalized, field) for field in _DIGEST_FIELDS
+                if (
+                    latest.origin == origin
+                    and latest.registry_witness == payload
+                    and all(
+                        getattr(latest, field) == getattr(normalized, field)
+                        for field in _DIGEST_FIELDS
+                    )
                 ):
                     return latest
             record = PreflightPinRecord(
@@ -287,6 +324,7 @@ class PreflightPinStore:
                 normalized.manifest_digest,
                 normalized.gate_digest,
                 timestamp,
+                payload,
                 records[-1].record_digest if records else None,
                 "",
             )
@@ -321,11 +359,20 @@ class PreflightPinStore:
                 manifest_digest=latest.manifest_digest,
                 gate_digest=latest.gate_digest,
                 origin=latest.origin,
+                registry_witness=latest.registry_witness,
+                witness_replayable=latest.registry_witness is not None,
                 pin_record_digest=latest.record_digest,
                 plan_sequence=len(matching),
                 chain_sequence=len(records),
                 chain_head_digest=records[-1].record_digest,
-                reasons=(f"trust-on-first-use" if latest.origin == "first-use" else "externally-pinned",),
+                reasons=(
+                    (
+                        "trust-on-first-use"
+                        if latest.origin == "first-use"
+                        else "externally-pinned"
+                    ),
+                )
+                + (() if latest.registry_witness is not None else ("witness_payload_absent",)),
             )
 
     def chain_head(self) -> tuple[int, str] | None:
@@ -334,6 +381,25 @@ class PreflightPinStore:
             if error is not None or not records:
                 return None
             return len(records), records[-1].record_digest
+
+
+def restore_witness(resolution: Any) -> LeaseRegistryWitness:
+    """Rebuild the pinned observation so a later run can re-verify it.
+
+    A witness digest binds its injected observation time, so a restarted process
+    cannot rebuild a matching witness by re-observing. The payload stored with
+    the pin is the only honest source for that past observation.
+    """
+    if not isinstance(resolution, PinResolution):
+        raise PinStoreError("resolution invalid")
+    if resolution.state != "pins-current":
+        raise PinStoreError("resolution is not current")
+    if resolution.registry_witness is None:
+        raise PinStoreError("resolution has no replayable witness")
+    try:
+        return LeaseRegistryWitness.from_dict(resolution.registry_witness)
+    except RegistryWitnessError as exc:
+        raise PinStoreError("stored registry witness invalid") from exc
 
 
 def verify_pin_resolution(
@@ -366,5 +432,6 @@ def verify_pin_resolution(
 
 __all__ = [
     "STORE_SCHEMA", "RECORD_SCHEMA", "PinStoreError", "PreflightPinRecord",
-    "PinResolution", "PinVerdict", "PreflightPinStore", "verify_pin_resolution",
+    "PinResolution", "PinVerdict", "PreflightPinStore", "restore_witness",
+    "verify_pin_resolution",
 ]

@@ -182,6 +182,7 @@ class PinStoreTests(unittest.TestCase):
                 "manifest_digest",
                 "gate_digest",
                 "recorded_at",
+                "registry_witness",
                 "prev_digest",
                 "record_digest",
             },

@@ -687,6 +687,30 @@ What this does not prove:
   that the same evidence is still current now; that still requires re-running
   the preflight with the resolved pins.
 
+## Replayable witness payloads in pins
+
+- A witness digest binds its injected observation time, so a restarted process
+  cannot rebuild a matching witness by re-observing the registry. `pin_preflight`
+  therefore stores the canonical witness payload alongside its digest (record
+  schema v2), refusing any payload whose digest disagrees with the pinned
+  `registry_witness_digest`.
+- `resolve` reports `witness_replayable`, and `restore_witness` rebuilds the exact
+  past observation so a later run can re-verify it. Because the witness carries
+  the registry sequence and head observed at the time, restoring it is what makes
+  cross-restart drift detection possible without a second external pin.
+- Pins recorded without a payload stay readable but are marked
+  `witness_payload_absent`; records in the previous shape are rejected as
+  `pins-unverifiable` rather than silently accepted.
+
+What this does not prove:
+
+- That restoring a witness proves the evidence is still valid. It proves what the
+  registry looked like at the pinned observation; a `preflight-ready` result still
+  requires re-running the whole preflight with the resolved pins.
+- That the stored payload is trustworthy beyond the store's own integrity model:
+  same-host `flock`, hash chain, and fsync, with no signature and no cross-host
+  agreement.
+
 ## Release boundary
 
 Do not cherry-pick or publish this candidate automatically. It requires a
