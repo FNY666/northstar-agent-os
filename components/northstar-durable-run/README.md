@@ -270,6 +270,31 @@ is only a fallback for compatibility and is still checked against the contract.
 This is evidence for the test evaluator only; it does not establish general
 semantic truth or authorize production rollout.
 
+`completion_batch_replay.py` replays every archived run through that contract in
+two independent passes. The `digest` pass requires each archived deliverable to
+hash to a digest the run's final round actually committed in its evidence
+journal, which binds the archive to the run rather than to the report; the
+`semantic` pass requires host-declared fields parsed from the deliverable's own
+content. Hard-coded declarations live in `replay/archive-replay-spec.json`, and
+nothing in the replay reads report `ok` or `verification`.
+
+```sh
+PYTHONPATH=components/northstar-durable-run:components/northstar-run-contract:components/northstar-host \
+  python3 components/northstar-durable-run/completion_batch_replay.py
+```
+
+Across the five archived tasks the `digest` pass verifies all five, so the
+contract does not misjudge any archived legitimate completion. The `semantic`
+pass verifies four and returns `insufficient_information` for the release note,
+whose deliverable states its facts as prose and headings with no machine-
+checkable key/value statements; failing closed there is the intended behaviour
+rather than a false negative. Two provenance limits are reported instead of
+hidden: the archived runs did not record their original `max_output_tokens`,
+`reasoning_effort`, or model revision, so the envelope describes host-declared
+replay conditions, and the release-note fixture's three requirements are not
+expressible as declared semantic fields, which the spec records as a coverage
+gap.
+
 ## Deliberate ceiling
 
 This is not a production scheduler, sandbox, VM, container runtime, browser

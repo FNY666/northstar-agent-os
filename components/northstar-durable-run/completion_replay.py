@@ -63,7 +63,11 @@ def _load_json(path: str | Path) -> Any:
 
 
 def _task(report: Any, task_id: str) -> dict[str, Any] | None:
-    if not isinstance(report, dict) or not isinstance(report.get("tasks"), list):
+    if not isinstance(report, dict):
+        return None
+    if "tasks" not in report and report.get("task_id") == task_id:
+        return report
+    if not isinstance(report.get("tasks"), list):
         return None
     matches = [item for item in report["tasks"] if isinstance(item, dict) and item.get("task_id") == task_id]
     return matches[0] if len(matches) == 1 else None

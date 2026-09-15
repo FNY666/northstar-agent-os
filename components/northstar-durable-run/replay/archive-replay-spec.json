@@ -1,0 +1,97 @@
+{
+  "schema_version": "northstar.completion-replay-spec.v1",
+  "comment": "Host-owned ground truth for replaying archived Northstar runs. Every field here is declared by the host from archived artifacts, never inferred from a model self-report. semantic_fields list only requirements that the archived deliverable format can express as machine-checkable key/value statements; fixture_requirement_count records how many requirements the original fixture asserted, so coverage is visible rather than implied.",
+  "runs": [
+    {
+      "run": "2026-09-10-first-live-run",
+      "report": "report.json",
+      "tasks": [
+        {
+          "task_id": "live-column-report",
+          "fixture": "fixture.json",
+          "evidence": "evidence/round-2.evidence.jsonl",
+          "artifacts": { "out/report.md": "deliverable/out-report.md" },
+          "milestone_labels": ["read", "write"],
+          "milestone_edges": [["read", "write"]],
+          "fixture_requirement_count": 5,
+          "semantic_fields": {
+            "out/report.md": [
+              ["columns", "name", "contains"],
+              ["top_scorer", "carol", "contains"]
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "run": "2026-09-11-action-failure-recovery",
+      "report": "report.json",
+      "tasks": [
+        {
+          "task_id": "live-transient-write-recovery-v1",
+          "fixture": "fixtures/04-transient-write-recovery.json",
+          "evidence": "evidence/round-2.evidence.jsonl",
+          "artifacts": { "out/recovery.md": "deliverables/recovery.md" },
+          "milestone_labels": ["list", "read", "write"],
+          "milestone_edges": [["list", "read"], ["read", "write"]],
+          "fixture_requirement_count": 3,
+          "semantic_fields": {
+            "out/recovery.md": [
+              ["service", "atlas", "contains"],
+              ["incident", "degraded", "contains"],
+              ["next_action", "restart worker pool", "contains"]
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "run": "2026-09-11-multi-task",
+      "report": "report.json",
+      "tasks": [
+        {
+          "task_id": "live-column-report-v2",
+          "fixture": "fixtures/01-column-report.json",
+          "evidence": "evidence/live-column-report-v2/round-2.evidence.jsonl",
+          "artifacts": { "out/report.md": "deliverables/report.md" },
+          "milestone_labels": ["list", "read", "write"],
+          "milestone_edges": [["list", "read"], ["read", "write"]],
+          "fixture_requirement_count": 5,
+          "semantic_fields": {
+            "out/report.md": [
+              ["number_of_data_rows", "4", "contains"],
+              ["columns", "name", "contains"],
+              ["top_scorer", "carol", "contains"]
+            ]
+          }
+        },
+        {
+          "task_id": "live-release-note-v2",
+          "fixture": "fixtures/02-release-note.json",
+          "evidence": "evidence/live-release-note-v2/round-2.evidence.jsonl",
+          "artifacts": { "out/release-note.md": "deliverables/release-note.md" },
+          "milestone_labels": ["list", "read", "write"],
+          "milestone_edges": [["list", "read"], ["read", "write"]],
+          "fixture_requirement_count": 3,
+          "semantic_fields": {}
+        },
+        {
+          "task_id": "live-score-audit-v2",
+          "fixture": "fixtures/03-score-audit.json",
+          "evidence": "evidence/live-score-audit-v2/round-2.evidence.jsonl",
+          "artifacts": { "out/audit.md": "deliverables/audit.md" },
+          "milestone_labels": ["list", "read", "write"],
+          "milestone_edges": [["list", "read"], ["read", "write"]],
+          "fixture_requirement_count": 3,
+          "semantic_fields": {
+            "out/audit.md": [
+              ["number_of_data_rows", "3", "contains"],
+              ["average_score", "83.33", "contains"],
+              ["highest_scoring_name", "Lin", "contains"]
+            ]
+          }
+        }
+      ]
+    }
+  ]
+}
