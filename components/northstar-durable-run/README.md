@@ -295,6 +295,29 @@ replay conditions, and the release-note fixture's three requirements are not
 expressible as declared semantic fields, which the spec records as a coverage
 gap.
 
+`completion_workspace_snapshot.py` removes the remaining hand-built input. The
+contract needs independent before/after state, so this module observes a real
+directory tree instead of trusting caller-supplied text. It mirrors the
+agent-facing listing tool's posture — host-owned root, `O_NOFOLLOW` reads,
+bounded depth and entry counts, no symlink following — and differs in one
+deliberate way: it retains file content at or below the declared text bound so
+semantic fields can be parsed, and reduces larger, non-UTF-8, or empty files to
+a digest so absence and emptiness stay distinguishable. Observation is
+fail-closed: a symlink, an unsupported entry kind, or a tree beyond the bounds
+refuses the whole observation rather than yielding a partial snapshot that a
+completion decision might trust.
+
+```sh
+PYTHONPATH=components/northstar-durable-run:components/northstar-run-contract:components/northstar-host \
+  python3 components/northstar-durable-run/completion_batch_replay.py --observe
+```
+
+Replaying the archive with `--observe` materializes each archived workspace,
+observes the real directory before and after the deliverable is written, and
+reproduces the identical distribution — five verified in the `digest` pass and
+four verified plus one `insufficient_information` in the `semantic` pass — so
+the verdict does not depend on which snapshot source is used.
+
 ## Deliberate ceiling
 
 This is not a production scheduler, sandbox, VM, container runtime, browser

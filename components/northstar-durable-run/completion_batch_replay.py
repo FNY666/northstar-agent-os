@@ -33,6 +33,7 @@ from completion_contract_v2 import (
     WorkspaceSnapshot,
 )
 from completion_replay import ReplayConfig, replay_task_report
+from completion_workspace_snapshot import materialize_workspace, observe_workspace
 
 _DIGEST_PREFIX = "sha256:"
 _MODES = ("digest", "semantic")
@@ -204,6 +205,34 @@ def _snapshot(files: Mapping[str, str]) -> WorkspaceSnapshot:
     return WorkspaceSnapshot.from_files(dict(files))
 
 
+def observe_archived_workspace(
+    context: HostReplayContext,
+    run: RunReplaySpec,
+    spec: TaskReplaySpec,
+    dest: str | Path,
+) -> tuple[WorkspaceSnapshot, WorkspaceSnapshot]:
+    """Observe the archived workspace the way a live run would be observed.
+
+    Seed files are materialized first, the deliverable is written, and the same
+    root is observed again. The contract then sees host observation of real
+    directory state rather than caller-supplied text.
+    """
+    run_root = context.archive_root / run.run
+    fixture = json.loads((run_root / spec.fixture).read_text(encoding="utf-8"))
+    seed = {
+        name: value
+        for name, value in (fixture.get("seed") or {}).items()
+        if isinstance(value, str)
+    }
+    root = materialize_workspace(dest, seed)
+    before = observe_workspace(root)
+    for path, archived in sorted(spec.artifacts.items()):
+        content = (run_root / archived).read_text(encoding="utf-8")
+        materialize_workspace(root, {path: content})
+    after = observe_workspace(root)
+    return before, after
+
+
 def _build_contract(
     *,
     mode: str,
@@ -247,6 +276,7 @@ def replay_archive_task(
     spec: TaskReplaySpec,
     *,
     mode: str,
+    observed_root: Path | None = None,
 ) -> TaskReplayOutcome:
     """Replay one archived task in one mode. Fail closed on any missing ground truth."""
     if mode not in _MODES:
@@ -327,8 +357,11 @@ def replay_archive_task(
             run.run, spec.task_id, mode, "insufficient_information",
             ("fixture_seed_invalid",), False, (), 0,
         )
-    before = _snapshot({name: value for name, value in seed.items() if isinstance(value, str)})
-    after = _snapshot({**seed, **contents})
+    if observed_root is None:
+        before = _snapshot({name: value for name, value in seed.items() if isinstance(value, str)})
+        after = _snapshot({**seed, **contents})
+    else:
+        before, after = observe_archived_workspace(context, run, spec, observed_root)
     milestones = observed_milestones(events, spec.milestone_labels)
     result = replay_task_report(
         run_root / run.report,
@@ -351,12 +384,18 @@ def replay_archive(
     specs: Sequence[RunReplaySpec],
     *,
     modes: Sequence[str] = _MODES,
+    observed_root: Path | None = None,
 ) -> tuple[TaskReplayOutcome, ...]:
     outcomes = []
     for run in specs:
         for spec in run.tasks:
+            dest = None
+            if observed_root is not None:
+                dest = observed_root / run.run / spec.task_id
             for mode in modes:
-                outcomes.append(replay_archive_task(context, run, spec, mode=mode))
+                outcomes.append(
+                    replay_archive_task(context, run, spec, mode=mode, observed_root=dest)
+                )
     return tuple(outcomes)
 
 
@@ -406,13 +445,23 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("--archive-root", default="/var/minis/shared/northstar-live-runs")
     parser.add_argument("--spec", default=str(Path(__file__).with_name("replay") / "archive-replay-spec.json"))
     parser.add_argument("--json-out")
+    parser.add_argument(
+        "--observe",
+        action="store_true",
+        help="materialize and observe archived workspaces instead of caller-built snapshots",
+    )
     arguments = parser.parse_args(argv)
 
     specs = load_spec(arguments.spec)
     context = default_context(
         Path(arguments.archive_root), Path(__file__).resolve().parent / "completion_contract_v2.py"
     )
-    outcomes = replay_archive(context, specs)
+    observed_root = None
+    if arguments.observe:
+        import tempfile
+
+        observed_root = Path(tempfile.mkdtemp(prefix="northstar-replay-observed-"))
+    outcomes = replay_archive(context, specs, observed_root=observed_root)
     summary = summarize(outcomes)
     for mode, data in summary["modes"].items():
         print(f"[{mode}] {data['counts']}")
