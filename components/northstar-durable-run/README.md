@@ -237,6 +237,30 @@ for the answer alone truncates the call; and a round must never reuse an
 existing evidence file, or the loop rejects the new plan digest against the old
 events.
 
+`completion_contract_v2.py` is a test-only completion contract derived from
+stateful-agent benchmark research. It is deliberately not wired into
+`TaskOutcome.ok` yet. It combines host-owned artifact expectations, an
+independent before/after workspace snapshot, an allowed mutation set, optional
+ordered milestones, and a versioned provenance envelope containing evaluator,
+fixture, benchmark commit, environment, model, reasoning, budget, seed, and
+trial identity. It returns `verified`, `failed`, `unknown`, or
+`insufficient_information` and never treats a model claim or tool receipt as
+proof. Exact digests cover binary artifacts; structured semantic fields allow
+controlled formatting variation while rejecting missing fields, explicit
+negation, wrong values, and duplicate conflicting fields. The accompanying
+unit tests and archive audit are the gate before any production verifier
+change.
+
+```sh
+PYTHONPATH=components/northstar-durable-run:components/northstar-run-contract:components/northstar-host \
+  python3 -m unittest components.northstar-durable-run.tests.test_completion_contract_v2
+```
+
+The first archive audit accepted all three historical correct artifacts and
+rejected all three semantic-negation cases plus all three collateral-file cases.
+That is evidence for the test evaluator only; it does not establish general
+semantic truth or authorize production rollout.
+
 ## Deliberate ceiling
 
 This is not a production scheduler, sandbox, VM, container runtime, browser
