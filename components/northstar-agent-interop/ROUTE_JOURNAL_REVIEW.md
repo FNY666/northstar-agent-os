@@ -586,6 +586,33 @@ What this does not prove:
 - That every plan evidence requirement was declared; an incomplete manifest can
   still receive a valid lease for its narrower set of claims.
 
+## Evidence-readiness lease registry
+
+- `EvidenceReadinessLeaseRegistry` persists `registered` and `revoked` lease
+  events as a canonical, fsynced, hash-chained JSONL log. Registration is
+  idempotent for identical lease metadata; conflicting metadata is rejected.
+- Revocation is monotonic and survives restart. An active lease becomes
+  `revoked` rather than becoming valid again through replay or re-registration;
+  expiry remains a separate `expired` state.
+- Inspection returns `active`, `expired`, `revoked`, `unknown`, or
+  `unverifiable`, and all states carry `execution_authorized=False`.
+- Same-host `flock` covers first-open initialization and register/revoke
+  read-check-append. Unique metadata temporary files prevent concurrent first
+  initialization from racing on one path.
+- The registry stores lease/digest metadata only; no prompt, action, event body,
+  secret, or provider output is persisted.
+
+What this does not prove:
+
+- That the lease was originally issued from truthful evidence, or that an active
+  registry lease authorizes execution. Freshness/revocation state is not
+  permission.
+- Cross-host revocation propagation or exactly-once semantics. Local `flock`
+  cannot coordinate independent hosts/filesystems.
+- That deletion of the registry is safe. Once history is missing after first
+  registration, the registry fails closed rather than treating the lease as
+  unknown-but-active.
+
 ## Release boundary
 
 Do not cherry-pick or publish this candidate automatically. It requires a
