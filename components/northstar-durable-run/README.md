@@ -340,6 +340,25 @@ all three of its facts as prose and headings. `--strict` exits non-zero while
 any requirement is unbound, which makes the audit usable as a gate on task
 definitions.
 
+`completion_replay.py` also verifies the evidence journal's own integrity rather
+than only parsing it. Archived journals are hash-chained — each event carries a
+`sequence`, an `event_digest`, and the `prev_event_digest` it extends — and the
+replay now recomputes each digest and checks both the chain link and the
+sequence before trusting a terminal `loop.finished`. Sequence continuity alone
+would miss an event rewritten in place and renumbered, which the digest
+comparison catches; an inserted duplicate is caught even when the attacker
+renumbers the rest.
+
+Two boundaries are pinned by tests rather than left implicit. A process killed
+mid-append leaves unparseable bytes, which is a different failure from a
+cleanly shortened journal, and dropping the final event leaves a shorter chain
+that is still internally consistent — so a missing tail is detected by the
+terminal-state check, not by the chain. An actor who rewrites the whole file and
+recomputes the entire chain produces an internally consistent journal, so
+integrity checking cannot prove the contents were never rewritten; that needs an
+anchor held outside the journal. All ten archived journals verify intact, so the
+added checking produces no false rejections on the real corpus.
+
 ## Deliberate ceiling
 
 This is not a production scheduler, sandbox, VM, container runtime, browser

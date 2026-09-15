@@ -5,7 +5,7 @@ import hashlib
 import json
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, Mapping, Sequence
 
 from completion_contract_v2 import (
     CompletionContractV2,
@@ -73,6 +73,46 @@ def _task(report: Any, task_id: str) -> dict[str, Any] | None:
     return matches[0] if len(matches) == 1 else None
 
 
+def _canonical_digests(event: Mapping[str, Any]) -> tuple[str, str]:
+    """Return the two canonical event digests a writer may have produced.
+
+    The journal encoder was never pinned in the archive, and both ASCII-escaped
+    and raw UTF-8 canonical JSON appear in practice, so both are accepted. This
+    does not widen hole detection: a removed or reordered event breaks the
+    sequence and chain links regardless of which encoding was used.
+    """
+    body = {key: value for key, value in event.items() if key != "event_digest"}
+    forms = (
+        json.dumps(body, sort_keys=True, separators=(",", ":"), ensure_ascii=True),
+        json.dumps(body, sort_keys=True, separators=(",", ":"), ensure_ascii=False),
+    )
+    return tuple(
+        "sha256:" + hashlib.sha256(form.encode("utf-8")).hexdigest() for form in forms
+    )
+
+
+def verify_evidence_chain(events: Sequence[Any]) -> str | None:
+    """Return None when the journal is intact, otherwise a reason code.
+
+    Sequence continuity alone cannot catch an event rewritten in place and then
+    renumbered, so each event's own digest and its link to the previous event
+    are checked as well.
+    """
+    previous: Any = None
+    for index, event in enumerate(events, start=1):
+        if not isinstance(event, dict):
+            return "evidence_event_malformed"
+        if event.get("sequence") != index:
+            return "evidence_sequence_gap"
+        if event.get("prev_event_digest") != previous:
+            return "evidence_chain_broken"
+        digest = event.get("event_digest")
+        if not isinstance(digest, str) or digest not in _canonical_digests(event):
+            return "evidence_digest_mismatch"
+        previous = digest
+    return None
+
+
 def _evidence_status(path: str | Path) -> str:
     """Return an independently derived terminal status, or empty on uncertainty."""
     try:
@@ -85,8 +125,7 @@ def _evidence_status(path: str | Path) -> str:
         return ""
     if not events or any(not isinstance(event, dict) for event in events):
         return ""
-    sequences = [event.get("sequence") for event in events]
-    if sequences != list(range(1, len(events) + 1)):
+    if verify_evidence_chain(events) is not None:
         return ""
     if events[-1].get("event_type") != "loop.finished":
         return ""
