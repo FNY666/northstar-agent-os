@@ -359,6 +359,18 @@ integrity checking cannot prove the contents were never rewritten; that needs an
 anchor held outside the journal. All ten archived journals verify intact, so the
 added checking produces no false rejections on the real corpus.
 
+`tests/test_completion_trust_boundary.py` pins the assumption the whole contract
+rests on: that the evidence journal sits outside the actor's write domain. The
+run layout puts `workspace/` and `evidence/` side by side, so the boundary is
+only real if no agent-reachable call can cross between them. The checks cover
+parent-traversal, absolute paths, and symlink escapes through both the write and
+list tools, including a symlink planted one level down, and assert the journal's
+digest is byte-identical afterwards. The production wiring was traced rather
+than assumed: `agent_entry.py` registers tools whose executors delegate to the
+path-safe `WorkspaceWriteTool` rather than writing to disk directly. Gateway
+identity, resource, capability, and arguments-digest binding is already covered
+by `test_action_gateway.py` and is not duplicated here.
+
 ## Deliberate ceiling
 
 This is not a production scheduler, sandbox, VM, container runtime, browser
