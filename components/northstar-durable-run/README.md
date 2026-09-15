@@ -371,6 +371,23 @@ path-safe `WorkspaceWriteTool` rather than writing to disk directly. Gateway
 identity, resource, capability, and arguments-digest binding is already covered
 by `test_action_gateway.py` and is not duplicated here.
 
+`tests/test_completion_guarantee_scope.py` guards that boundary against future
+weakening by driving the real production harness — the tools `agent_entry.py`
+actually registers — and attempting escapes through them, including a symlink
+planted inside the workspace and a write aimed at the journal itself. A positive
+control runs a legitimate write first and proves the step really reaches the
+executor, so a boundary assertion cannot pass merely because nothing ran.
+
+That control exists for a reason: the first version of these checks passed even
+after the registered executor was replaced with a direct write that skipped the
+path guard. Their assertions held trivially because the step never executed at
+all. Mutation testing caught it, and the three root causes were a wrong
+postcondition name, a wrongly wrapped planner candidate, and a pre-seeded
+journal the harness rejected as an invalid event. With those fixed, replacing
+the executor with a direct write fails three of the five checks while the
+control and the read check still pass, which is what makes the guards evidence
+rather than decoration.
+
 ## Deliberate ceiling
 
 This is not a production scheduler, sandbox, VM, container runtime, browser
