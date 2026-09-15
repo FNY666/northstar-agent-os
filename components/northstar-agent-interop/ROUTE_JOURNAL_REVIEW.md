@@ -813,6 +813,26 @@ What this does not prove:
   store under the control of a writer who can also restore snapshots is outside
   what any same-host mark can defend.
 
+## Lineage append locking
+
+- The lineage log is now appended under a same-directory `flock` (`<log>.lock`),
+  matching the pin store and the lease registry. Before this it was the only
+  chain store with no lock, so two writers could compute the same next sequence.
+- Inside the lock the append re-reads the on-disk tail and refuses a graph that
+  is behind the file (`lineage log advanced by another writer; reload before
+  appending`) instead of writing a duplicate sequence or a broken link.
+- The guard is verified by mutation: removing it makes the concurrency tests fail
+  (a stale writer succeeds, and the resulting log is no longer loadable), so the
+  tests are evidence rather than decoration.
+
+What this does not prove:
+
+- That concurrent writers make progress. A refused writer must reload and retry;
+  the log stays correct at the cost of caller retries, which the test performs
+  explicitly.
+- That the lock covers writers on other hosts, or a writer that never takes it.
+  It serialises cooperating processes on one filesystem only.
+
 ## Release boundary
 
 Do not cherry-pick or publish this candidate automatically. It requires a

@@ -1,6 +1,7 @@
 """Causal, append-only lifecycle evidence for route decisions and receipts."""
 from __future__ import annotations
-import hashlib, json, os
+import fcntl, hashlib, json, os
+from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Iterator, Literal
@@ -75,6 +76,29 @@ class LineageGraph:
     def _head_digest(self):
         if not self.events: return None
         return self.events[next(reversed(self.events))].event_digest.removeprefix('sha256:')
+    @property
+    def lock_path(self):
+        return Path(str(self.path)+'.lock') if self.path else None
+    @contextmanager
+    def _locked(self):
+        lock_path=self.lock_path
+        if lock_path is None:
+            yield; return
+        lock_path.parent.mkdir(parents=True,exist_ok=True)
+        with lock_path.open('a+',encoding='utf-8') as handle:
+            fcntl.flock(handle.fileno(),fcntl.LOCK_EX)
+            try: yield
+            finally: fcntl.flock(handle.fileno(),fcntl.LOCK_UN)
+    def _disk_tail(self):
+        if self.path is None or not self.path.exists(): return 0,None
+        last=None
+        with self.path.open('rb') as handle:
+            for raw in handle:
+                if raw.endswith(b'\n') and raw.strip(): last=raw
+        if last is None: return 0,None
+        try: event=RouteLineageEvent.from_dict(json.loads(last.decode('utf-8')))
+        except (UnicodeDecodeError,json.JSONDecodeError,ValueError): return None,None
+        return event.sequence, (event.event_digest.removeprefix('sha256:') if event.event_digest else None)
     def _write_mark(self):
         mark_path=self.mark_path
         if mark_path is None: return
@@ -120,11 +144,16 @@ class LineageGraph:
             if p is None or p.route_id!=e.route_id: raise LineageError('parent lineage mismatch')
             allowed={'planned':{'dispatched','superseded'},'dispatched':{'succeeded','failed'},'failed':{'replayed','planned'},'succeeded':{'replayed','superseded'},'replayed':set(),'superseded':set()}
             if e.status not in allowed.get(p.status,set()): raise LineageError('illegal lifecycle transition')
-        self.events[e.event_id]=e
-        if self.path:
-            self.path.parent.mkdir(parents=True,exist_ok=True)
-            with self.path.open('ab') as f: f.write(e.canonical()+b'\n'); f.flush(); os.fsync(f.fileno())
-            self._write_mark()
+        with self._locked():
+            if self.path is not None:
+                tail_sequence,_tail_head=self._disk_tail()
+                if tail_sequence is not None and tail_sequence!=len(self.events):
+                    raise LineageError('lineage log advanced by another writer; reload before appending')
+            self.events[e.event_id]=e
+            if self.path:
+                self.path.parent.mkdir(parents=True,exist_ok=True)
+                with self.path.open('ab') as f: f.write(e.canonical()+b'\n'); f.flush(); os.fsync(f.fileno())
+                self._write_mark()
         return e
     def read(self)->Iterator[RouteLineageEvent]: return iter(self.events.values())
     def cursor(self) -> RecoveryCursor:
