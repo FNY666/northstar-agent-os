@@ -14,7 +14,7 @@ from completion_contract_v2 import (  # noqa: E402
     Provenance,
     WorkspaceSnapshot,
 )
-from completion_replay import replay_task_report  # noqa: E402
+from completion_replay import ReplayConfig, replay_task_report  # noqa: E402
 
 
 ARCHIVE = Path("/var/minis/shared/northstar-live-runs/2026-09-11-multi-task")
@@ -99,6 +99,42 @@ class CompletionReplayTests(unittest.TestCase):
             )
         self.assertEqual(result.verdict, "verified")
         self.assertEqual(result.errors, ())
+
+    def test_host_replay_config_builds_provenance_without_report_claim(self):
+        fixture = ARCHIVE / "fixtures" / "01-column-report.json"
+        before, after, output_digest = self.snapshots()
+        config = ReplayConfig(
+            evaluator_path=ROOT / "completion_contract_v2.py",
+            fixture_path=fixture,
+            benchmark_commit="acb04df3f1bb21a41e58092c363c3598937dd340",
+            environment_digest="sha256:" + "n" * 64,
+            model_id="deepseek/deepseek-v4-flash",
+            model_revision="archived-replay",
+            reasoning_effort="off",
+            max_output_tokens=2048,
+            seed="replay-seed-1",
+            trial_id=fixture.stem,
+        )
+        provenance = config.provenance()
+        contract = self.contract(output_digest, provenance)
+        original = json.loads((ARCHIVE / "report.json").read_text(encoding="utf-8"))
+        enriched = json.loads(json.dumps(original))
+        task = next(item for item in enriched["tasks"] if item["task_id"] == "live-column-report-v2")
+        task.pop("provenance", None)
+        with tempfile.TemporaryDirectory() as temporary:
+            path = Path(temporary) / "report.json"
+            path.write_text(json.dumps(enriched), encoding="utf-8")
+            result = replay_task_report(
+                path,
+                ARCHIVE / "evidence" / "live-column-report-v2" / "round-2.evidence.jsonl",
+                task_id="live-column-report-v2",
+                contract=contract,
+                before=before,
+                after=after,
+                milestones=("read-source", "write-report"),
+                provenance=config.provenance(),
+            )
+        self.assertEqual(result.verdict, "verified")
 
     def test_malformed_provenance_is_insufficient_not_success(self):
         fixture = ARCHIVE / "fixtures" / "01-column-report.json"

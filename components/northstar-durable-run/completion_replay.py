@@ -1,7 +1,9 @@
 """Test-only adapter from Northstar reports/evidence to Completion Contract v2."""
 from __future__ import annotations
 
+import hashlib
 import json
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -11,6 +13,46 @@ from completion_contract_v2 import (
     Provenance,
     WorkspaceSnapshot,
 )
+
+
+def _sha256_file(path: str | Path) -> str:
+    try:
+        raw = Path(path).read_bytes()
+    except OSError as error:
+        raise ValueError("provenance source could not be read") from error
+    return "sha256:" + hashlib.sha256(raw).hexdigest()
+
+
+@dataclass(frozen=True)
+class ReplayConfig:
+    evaluator_path: str | Path
+    fixture_path: str | Path
+    benchmark_commit: str
+    environment_digest: str
+    model_id: str
+    model_revision: str
+    reasoning_effort: str
+    max_output_tokens: int
+    seed: str
+    trial_id: str
+    contract_revision: str = "completion-v2-replay-1"
+
+    def provenance(self) -> Provenance:
+        return Provenance.from_dict(
+            {
+                "contract_revision": self.contract_revision,
+                "evaluator_digest": _sha256_file(self.evaluator_path),
+                "fixture_digest": _sha256_file(self.fixture_path),
+                "benchmark_commit": self.benchmark_commit,
+                "environment_digest": self.environment_digest,
+                "model_id": self.model_id,
+                "model_revision": self.model_revision,
+                "reasoning_effort": self.reasoning_effort,
+                "max_output_tokens": self.max_output_tokens,
+                "seed": self.seed,
+                "trial_id": self.trial_id,
+            }
+        )
 
 
 def _load_json(path: str | Path) -> Any:
@@ -56,6 +98,7 @@ def replay_task_report(
     before: WorkspaceSnapshot,
     after: WorkspaceSnapshot,
     milestones: tuple[str, ...] | None,
+    provenance: Provenance | None = None,
 ) -> CompletionResult:
     """Replay one task through the test-only contract.
 
@@ -70,13 +113,14 @@ def replay_task_report(
     task = _task(report, task_id)
     if task is None:
         return CompletionResult("insufficient_information", ("task_report_missing",), ())
-    raw_provenance = task.get("provenance")
-    if raw_provenance is None:
-        return CompletionResult("insufficient_information", ("provenance_missing",), ())
-    try:
-        provenance = Provenance.from_dict(raw_provenance)
-    except ValueError:
-        return CompletionResult("insufficient_information", ("provenance_invalid",), ())
+    if provenance is None:
+        raw_provenance = task.get("provenance")
+        if raw_provenance is None:
+            return CompletionResult("insufficient_information", ("provenance_missing",), ())
+        try:
+            provenance = Provenance.from_dict(raw_provenance)
+        except ValueError:
+            return CompletionResult("insufficient_information", ("provenance_invalid",), ())
     run_status = _evidence_status(evidence_path)
     if not run_status:
         return CompletionResult("unknown", ("evidence_terminal_state_unavailable",), ())

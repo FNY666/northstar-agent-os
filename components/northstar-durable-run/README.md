@@ -263,8 +263,12 @@ independently checked evidence JSONL into the test-only contract: the archived
 report without provenance returns `insufficient_information`, while an
 explicitly enriched host-owned provenance envelope plus a valid terminal
 `loop.finished` evidence chain verifies. The adapter ignores report `ok` and
-verification claims. This is evidence for the test evaluator only; it does not
-establish general semantic truth or authorize production rollout.
+verification claims. `ReplayConfig` can generate the provenance envelope from
+host-selected evaluator/fixture files plus benchmark commit, environment,
+model, reasoning, budget, seed, and trial inputs; report-supplied provenance
+is only a fallback for compatibility and is still checked against the contract.
+This is evidence for the test evaluator only; it does not establish general
+semantic truth or authorize production rollout.
 
 ## Deliberate ceiling
 

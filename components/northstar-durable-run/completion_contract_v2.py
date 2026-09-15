@@ -79,7 +79,7 @@ def _semantic_errors(
         lowered = actual.lower()
         expected_lowered = expected.lower()
         negated = re.search(
-            r"(?:^|\\b)(?:not|false|unknown|unverified|incorrect|no)\\b",
+            r"(?:^|\b)(?:not|false|unknown|unverified|incorrect|no)\b",
             lowered,
         )
         if field.mode == "exact":

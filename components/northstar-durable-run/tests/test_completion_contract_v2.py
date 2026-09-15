@@ -88,6 +88,25 @@ class CompletionContractV2Tests(unittest.TestCase):
         self.assertEqual(negated.verdict, "failed")
         self.assertIn("out/report.md:semantic_field:top_scorer", negated.errors)
 
+    def test_inline_negation_is_rejected_not_just_line_start_negation(self):
+        contract = self.contract(
+            required_artifacts=(
+                ArtifactExpectation(
+                    path="out/report.md",
+                    semantic_fields=(SemanticField("top_scorer", "carol", mode="contains"),),
+                ),
+            )
+        )
+        result = contract.evaluate(
+            before=self.snapshot({}),
+            after=self.snapshot({"out/report.md": "Top scorer: carol, NOT verified by source\n"}),
+            milestones=("read-source", "write-report"),
+            provenance=self.provenance(),
+            run_status="finished",
+        )
+        self.assertEqual(result.verdict, "failed")
+        self.assertIn("out/report.md:semantic_field:top_scorer", result.errors)
+
     def test_structured_field_missing_or_digest_only_is_insufficient(self):
         contract = self.contract(
             required_artifacts=(
