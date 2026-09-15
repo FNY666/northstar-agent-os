@@ -318,6 +318,28 @@ reproduces the identical distribution — five verified in the `digest` pass and
 four verified plus one `insufficient_information` in the `semantic` pass — so
 the verdict does not depend on which snapshot source is used.
 
+`completion_coverage.py` turns the release-note limitation into a measured
+precondition. It reads each fixture's own asserted values, then checks whether
+every one of them is bound by a declared semantic field, so a task whose
+deliverable never states a required fact as a checkable key/value pair is
+rejected while the task is being defined rather than surfacing as an
+unverifiable completion later.
+
+```sh
+PYTHONPATH=components/northstar-durable-run:components/northstar-run-contract:components/northstar-host \
+  python3 components/northstar-durable-run/completion_coverage.py --strict
+```
+
+Across the archive the audit binds 15 of 19 asserted requirements and marks
+three of five tasks fully checkable. Strengthening one declaration to pin the
+whole column list lifts `live-column-report-v2` from three of five to five of
+five, so declaration quality is now measurable rather than assumed. The two
+remaining gaps are genuine task-design defects, not verifier gaps: the first
+live run states its row count in prose with no key, and the release note states
+all three of its facts as prose and headings. `--strict` exits non-zero while
+any requirement is unbound, which makes the audit usable as a gate on task
+definitions.
+
 ## Deliberate ceiling
 
 This is not a production scheduler, sandbox, VM, container runtime, browser

@@ -65,7 +65,6 @@ class TaskReplaySpec:
     milestone_labels: tuple[str, ...]
     milestone_edges: tuple[tuple[str, str], ...]
     semantic_fields: Mapping[str, tuple[SemanticRequirement, ...]]
-    fixture_requirement_count: int
 
 
 @dataclass(frozen=True)
@@ -128,7 +127,6 @@ def load_spec(path: str | Path) -> tuple[RunReplaySpec, ...]:
                     milestone_labels=tuple(task["milestone_labels"]),
                     milestone_edges=tuple(tuple(edge) for edge in task["milestone_edges"]),
                     semantic_fields=semantics,
-                    fixture_requirement_count=int(task.get("fixture_requirement_count", 0)),
                 )
             )
         runs.append(RunReplaySpec(run=item["run"], report=item["report"], tasks=tuple(tasks)))
