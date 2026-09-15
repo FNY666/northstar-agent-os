@@ -159,24 +159,83 @@ class EvidenceReadinessLeaseRegistry:
             except FileNotFoundError:
                 pass
 
+    def _fresh_meta(self, sequence: int, head: str | None, started: bool) -> dict[str, Any]:
+        return {
+            "schema_version": META_SCHEMA,
+            "history_started": started,
+            "high_water": {"sequence": sequence, "head_digest": head},
+        }
+
     def _ensure_meta(self) -> None:
         if self.meta_path.exists():
-            try:
-                value = json.loads(self.meta_path.read_text(encoding="utf-8"))
-            except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
-                raise LeaseRegistryError("lease registry metadata is corrupt") from exc
-            if (not isinstance(value, dict)
-                    or value.get("schema_version") != META_SCHEMA
-                    or not isinstance(value.get("history_started"), bool)):
-                raise LeaseRegistryError("lease registry metadata is invalid")
+            _high_water, error = self._read_high_water()
+            if error is not None:
+                raise LeaseRegistryError("lease registry metadata is corrupt")
             return
-        self._write_meta({"schema_version": META_SCHEMA, "history_started": False})
+        self._write_meta(self._fresh_meta(0, None, False))
+
+    def _read_high_water(self) -> tuple[tuple[int, str | None] | None, str | None]:
+        if not self.meta_path.exists():
+            return None, "missing"
+        try:
+            value = json.loads(self.meta_path.read_text(encoding="utf-8"))
+        except (OSError, UnicodeDecodeError, json.JSONDecodeError):
+            return None, "corrupt"
+        if not isinstance(value, dict) or value.get("schema_version") != META_SCHEMA:
+            return None, "invalid"
+        if not isinstance(value.get("history_started"), bool):
+            return None, "invalid"
+        high_water = value.get("high_water")
+        if not isinstance(high_water, dict) or set(high_water) != {"sequence", "head_digest"}:
+            return None, "invalid"
+        sequence = high_water["sequence"]
+        head = high_water["head_digest"]
+        if isinstance(sequence, bool) or not isinstance(sequence, int) or sequence < 0:
+            return None, "invalid"
+        if sequence == 0:
+            if head is not None:
+                return None, "invalid"
+        elif not isinstance(head, str) or _DIGEST.fullmatch(head) is None:
+            return None, "invalid"
+        return (sequence, head), None
 
     def _history_started(self) -> bool:
-        try:
-            return bool(json.loads(self.meta_path.read_text(encoding="utf-8")).get("history_started"))
-        except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
-            raise LeaseRegistryError("lease registry metadata is corrupt") from exc
+        high_water, error = self._read_high_water()
+        if error == "missing":
+            return False
+        if error is not None:
+            raise LeaseRegistryError("lease registry metadata is corrupt")
+        return bool(high_water and high_water[0] > 0)
+
+    def _read_state(self) -> tuple[list[LeaseRegistryRecord], bool, str | None]:
+        """Return (records, repaired, error) with the high-water mark applied.
+
+        A hash chain alone cannot detect a rollback: any prefix of it verifies.
+        The mark is what makes a shortened log — for example one with the
+        revocation removed — read as unverifiable instead of current.
+        """
+        records, error = self._read_records()
+        if error is not None:
+            if not self.path.exists() and not self.meta_path.exists():
+                return [], False, None
+            return records, False, error
+        high_water, mark_error = self._read_high_water()
+        if mark_error is not None or high_water is None:
+            if not self.path.exists() and not self.meta_path.exists():
+                return [], False, None
+            return [], False, "high_water_" + str(mark_error)
+        sequence, head = high_water
+        if sequence > len(records):
+            return [], False, "history_truncated"
+        if sequence == len(records):
+            if len(records) == 0:
+                return records, False, None
+            if records[-1].record_digest != head:
+                return [], False, "high_water_mismatch"
+            return records, False, None
+        # The log is ahead of its mark: a crash between append and mark update.
+        self._write_meta(self._fresh_meta(len(records), records[-1].record_digest, True))
+        return records, True, None
 
     @contextmanager
     def _lock(self):
@@ -217,13 +276,13 @@ class EvidenceReadinessLeaseRegistry:
 
     @property
     def records(self) -> list[LeaseRegistryRecord]:
-        records, error = self._read_records()
+        records, _repaired, error = self._read_state()
         if error is not None:
             raise LeaseRegistryError(error)
         return records
 
     def verify(self) -> LeaseRegistryVerdict:
-        records, error = self._read_records()
+        records, _repaired, error = self._read_state()
         if error is not None:
             return LeaseRegistryVerdict("unverifiable", (error,), "", False)
         return LeaseRegistryVerdict(
@@ -250,8 +309,7 @@ class EvidenceReadinessLeaseRegistry:
             handle.flush()
             os.fsync(handle.fileno())
         os.chmod(self.path, 0o600)
-        if not self._history_started():
-            self._write_meta({"schema_version": META_SCHEMA, "history_started": True})
+        self._write_meta(self._fresh_meta(len(records) + 1, record.record_digest, True))
         return record
 
     def register(self, lease: EvidenceReadinessLease) -> LeaseRegistryRecord:
@@ -262,7 +320,7 @@ class EvidenceReadinessLeaseRegistry:
         except LeaseError as exc:
             raise LeaseRegistryError("lease is invalid") from exc
         with self._lock():
-            records, error = self._read_records()
+            records, _repaired, error = self._read_state()
             if error is not None:
                 raise LeaseRegistryError(error)
             existing = [record for record in records if record.lease_digest == lease.lease_digest]
@@ -281,7 +339,7 @@ class EvidenceReadinessLeaseRegistry:
     def revoke(self, lease_digest: str) -> LeaseRegistryRecord:
         _digest(lease_digest, "lease_digest")
         with self._lock():
-            records, error = self._read_records()
+            records, _repaired, error = self._read_state()
             if error is not None:
                 raise LeaseRegistryError(error)
             matching = [record for record in records if record.lease_digest == lease_digest]
@@ -302,7 +360,7 @@ class EvidenceReadinessLeaseRegistry:
         _digest(lease_digest, "lease_digest")
         if not isinstance(now, int) or isinstance(now, bool):
             raise LeaseRegistryError("now is invalid")
-        records, error = self._read_records()
+        records, _repaired, error = self._read_state()
         if error is not None:
             return LeaseRegistryVerdict("unverifiable", (error,), lease_digest, False)
         matching = [record for record in records if record.lease_digest == lease_digest]

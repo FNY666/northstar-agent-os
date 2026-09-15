@@ -736,6 +736,29 @@ What this does not prove:
 - That a recovered pin is fresh. Nothing here changes the rule that a resolved
   pin must still be re-verified by running the preflight.
 
+## Lease registry rollback detection
+
+- The lease registry now keeps the same high-water mark (`sequence`,
+  `head_digest`) as the pin store, written atomically after each append. Before
+  this, a hash chain alone accepted any prefix of itself: truncating the log to
+  the register-only record turned a revoked lease back into `active`.
+- A log shorter than its mark is `history_truncated`, an equal-length log with a
+  different tail is `high_water_mismatch`, a missing or malformed mark beside an
+  existing log is unverifiable, and a log ahead of its mark is the crash window
+  and is repaired forward.
+- Removing both the log and the mark still reads as an empty registry
+  (`unknown`), which is the honest answer: it is indistinguishable from a store
+  that was never used.
+
+What this does not prove:
+
+- That revocation is enforced by anything other than readers consulting this
+  registry. The registry records lifecycle facts; it does not gate actions.
+- Cross-host revocation, or that a mark cannot be removed by a writer with
+  access to the store directory.
+- That a repaired-forward log is trustworthy against an adversary rather than a
+  crash; the repair trusts chain-valid records that only a writer could produce.
+
 ## Release boundary
 
 Do not cherry-pick or publish this candidate automatically. It requires a
