@@ -367,6 +367,31 @@ What this does not prove:
 - That policy defaults are universally safe. Required pins, receipt mandates,
   and allowed unresolved boundaries remain explicit caller policy choices.
 
+## Policy-bound admission witnesses
+
+- `AdmissionWitness` binds the complete canonical policy body and its digest to
+  an exact package digest, claim digest, evidence root, admission state, reasons,
+  and unresolved fields. A policy id alone is never treated as a policy
+  commitment.
+- Verification replays admission under the embedded policy and caller-supplied
+  trust pins, then compares every replayed result field. Policy/package/claim/
+  state/reason/unverified substitution fails closed rather than being silently
+  normalized.
+- Fully pinned witnesses return `witness-verified`; missing witness or policy
+  digest pins return `witness-verified-unpinned`. Evidence-level boundaries such
+  as `same-key`, `index`, and `leaf_count` remain visible even with all witness
+  anchors supplied.
+- Insufficient policy outcomes can be witnessed for audit. Unverifiable package
+  outcomes are not turned into trustworthy witness artifacts.
+
+What this does not prove:
+
+- That an admissible outcome authorizes an action, that evidence is true, or
+  that a policy's default requirements are safe for every use case.
+- That a conflict between witness results identifies a false package. Conflict
+  remains preserved for a higher-level resolver or human.
+- That an external policy/witness digest was distributed honestly or is current.
+
 ## Release boundary
 
 Do not cherry-pick or publish this candidate automatically. It requires a
