@@ -613,6 +613,27 @@ What this does not prove:
   registration, the registry fails closed rather than treating the lease as
   unknown-but-active.
 
+## Readiness lease registry witnesses
+
+- `LeaseRegistryWitness` binds a lease digest to the observed registry state,
+  record sequence, registry head digest, and injected observation time. It lets a
+  caller detect post-observation append/revoke/history drift before reusing a
+  lease freshness conclusion.
+- A registry append after the snapshot returns `stale`; a revoke returns
+  `revoked` (revocation takes precedence over ordinary head drift); an expired
+  or unknown observation remains explicit. Missing/tampered history is
+  `unverifiable`.
+- Missing external witness pin returns `current-unpinned`; `execution_authorized`
+  remains false in every state.
+
+What this does not prove:
+
+- That the lease was originally issued from truthful evidence, that the clock is
+  trusted, or that a current registry state grants permission to execute.
+- Cross-host registry consistency or revocation propagation. This witness is
+  bounded by the registry's same-host persistence and locking model.
+- That an observation is latest without a retained external witness digest.
+
 ## Release boundary
 
 Do not cherry-pick or publish this candidate automatically. It requires a
