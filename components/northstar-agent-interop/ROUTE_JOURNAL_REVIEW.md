@@ -466,6 +466,30 @@ What this does not prove:
 - That a conflict has been resolved. Conflicted evidence remains blocked and no
   witness winner is selected.
 
+## Evidence state witnesses
+
+- `EvidenceStateWitness` binds canonical admission witness and conflict
+  observation source wires to one replayed `ClaimProjection`. It detects
+  substituted source, ordering, projection, claim, or state fields through a
+  domain-separated state digest.
+- A state witness cannot be created for source-free `unknown`: absence of
+  supplied evidence is not transformed into an attested fact. Sources must be
+  same-claim and canonical; conflict witnesses remain non-resolving.
+- Reverification reparses all sources and reruns the projection. A pinned state
+  digest returns `state-witness-verified`; absence of that external pin remains
+  `state-witness-verified-unpinned` while preserving all source-level unresolved
+  boundaries.
+- State witnesses are deterministic provenance receipts. They do not assert
+  truth, authorization, or that every relevant witness was supplied.
+
+What this does not prove:
+
+- That a projected state is factual world truth, complete evidence coverage, or
+  an authorization to execute a plan.
+- That a conflicted state can be resolved by ordering witness digests. Canonical
+  order is serialization-only and never a winner selection.
+- That an external state digest is current or honestly distributed.
+
 ## Release boundary
 
 Do not cherry-pick or publish this candidate automatically. It requires a
