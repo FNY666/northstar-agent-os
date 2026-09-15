@@ -441,6 +441,31 @@ What this does not prove:
 - That all relevant witnesses were supplied to the projection; omitted evidence
   can still change a future state.
 
+## Evidence readiness gates
+
+- `EvidenceReadinessGate` evaluates a plan's declared claim requirements against
+  projected evidence state and returns `ready`, `blocked`, or `unknown`.
+  `conflicted`, `insufficient`, and `unverifiable` claims block; missing or
+  unknown claims remain unknown rather than being assumed false or supported.
+- Every gate binds canonical plan id, requirement list, observed projection wire
+  forms, decision, blockers, unknown claims, reasons, and a gate digest. Replay
+  rejects plan, requirement, projection, state, or digest substitution.
+- `execution_authorized` is always false, including for `ready`. Ready is an
+  evidence-readiness hint only; the host still owns policy, capability, approval,
+  sandbox, and postcondition authorization.
+- Projection provenance stays attached through the gate, so a blocked decision
+  can expose its claim/package/witness/conflict reasons without serializing raw
+  prompt, event, secret, or provider output.
+
+What this does not prove:
+
+- That a ready plan is safe, true, complete, or permitted to run. It says only
+  that its declared evidence prerequisites were projected supported.
+- That the requirement set is exhaustive. Missing requirements can lead to a
+  ready gate that a higher-level planner should still reject.
+- That a conflict has been resolved. Conflicted evidence remains blocked and no
+  witness winner is selected.
+
 ## Release boundary
 
 Do not cherry-pick or publish this candidate automatically. It requires a
