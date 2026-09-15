@@ -109,7 +109,7 @@ def _projections(projections):
         if p.claim_digest!=claim: raise PlanDecisionError('projection mapping mismatch')
         out[claim]=p
     return out
-def _requirements(manifest): return [EvidenceRequirement(step.claim_digest,step.rationale) for step in manifest.steps]
+def _requirements(manifest): return sorted((EvidenceRequirement(step.claim_digest,step.rationale) for step in manifest.steps),key=lambda item:item.claim_digest)
 
 def make_plan_evidence_decision(manifest:EvidencePlanManifest,projections:Mapping[str,ClaimProjection])->PlanEvidenceDecision:
     m=_manifest(manifest);p=_projections(projections)

@@ -537,6 +537,30 @@ What this does not prove:
   removes one evidence blocker from the reduced state.
 - Cross-host graph witness consistency or an exhaustive set of observed claims.
 
+## Evidence resolution agendas
+
+- `EvidenceResolutionAgenda` converts non-ready plan evidence decisions into
+  deterministic, non-executing suggestions: `escalate-conflict` for conflicts,
+  `reacquire-evidence` for insufficient or unverifiable claims, and
+  `collect-evidence` for missing or unknown claims.
+- Items are canonically ordered by disposition severity then claim digest only
+  for reproducible serialization. `escalate-conflict` preserves disagreement;
+  it never chooses a witness winner or asserts which evidence is true.
+- Agenda replay binds the exact plan evidence decision, every item disposition,
+  evidence state, reason, unresolved boundary, and agenda digest. External
+  decision and agenda digest pins distinguish `agenda-verified` from
+  `agenda-verified-unpinned`.
+- `execution_authorized` is always false for the agenda and every item. An
+  agenda is decision support for evidence completion, not a command queue.
+
+What this does not prove:
+
+- That collecting evidence will resolve a conflict, or that a re-acquired item
+  will become sufficient. The agenda names a gap; it does not predict outcomes.
+- That a human escalation selects a correct witness or grants permission to act.
+- That its item set is exhaustive beyond the plan manifest and currently
+  supplied projections.
+
 ## Release boundary
 
 Do not cherry-pick or publish this candidate automatically. It requires a
