@@ -659,6 +659,34 @@ What this does not prove:
   preflight cannot distinguish "unchanged" from "changed and re-verified
   against itself".
 
+## Preflight pin store
+
+- `PreflightPinStore` retains the five preflight digests as a canonical,
+  fsynced, hash-chained JSONL under a same-host `flock`, so a later run compares
+  against a real previous observation instead of re-verifying evidence against
+  itself.
+- Pinning is refused unless the artifact's decision, lease, and registry witness
+  are all current (`preflight-ready` or `preflight-unpinned`). The first pin for a
+  plan is labelled `first-use`; only a pin taken while state was
+  `preflight-ready` is labelled `verified`.
+- `resolve` returns the newest pin plus the global chain head/sequence, so a
+  remembered head detects later repins as `pins-stale`. Tampering, a truncated
+  tail, a broken chain, or lost history returns `pins-unverifiable`; an unseen
+  plan returns `pins-unrecorded`. Every resolution and verdict keeps
+  `execution_authorized=False`.
+
+What this does not prove:
+
+- That a pin is permission, or that trust-on-first-use was correct. Pinning an
+  unpinned artifact records self-asserted digests; only subsequent comparisons
+  gain real meaning.
+- That per-plan rollback is detectable. Removing the newest record for one plan
+  while the rest of the chain stays intact is indistinguishable without an
+  externally remembered head, which is why `verify_pin_resolution` requires one.
+- That a pin is fresh. A pin says what was observed when it was recorded, not
+  that the same evidence is still current now; that still requires re-running
+  the preflight with the resolved pins.
+
 ## Release boundary
 
 Do not cherry-pick or publish this candidate automatically. It requires a

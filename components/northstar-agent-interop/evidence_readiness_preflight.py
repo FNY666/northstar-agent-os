@@ -65,13 +65,23 @@ def evaluate_preflight(*,lease,registry_witness,registry,decision,manifest,proje
         for item in registry_verdict.unverified
     )
     reasons=list(lease_verdict.reasons)+list(registry_verdict.reasons)
+    lease_current=lease_verdict.state in ('lease-valid','lease-valid-unpinned')
+    unpinned=(lease_verdict.state=='lease-valid-unpinned'
+        or registry_verdict.state=='current-unpinned'
+        or expected_lease_digest is None
+        or expected_registry_witness_digest is None
+        or expected_decision_digest is None
+        or expected_manifest_digest is None
+        or expected_gate_digest is None)
     state='preflight-ready'
     if registry_verdict.state=='revoked': state='preflight-revoked'
     elif registry_verdict.state=='stale': state='preflight-stale'
     elif registry_verdict.state=='unverifiable': state='preflight-unverifiable'
     elif lease_verdict.state=='lease-expired' or registry_verdict.state=='expired': state='preflight-expired'
-    elif registry_verdict.state=='unknown' or lease_verdict.state!='lease-valid': state='preflight-unknown'
-    if expected_lease_digest is None or expected_registry_witness_digest is None or expected_decision_digest is None or expected_manifest_digest is None or expected_gate_digest is None: unresolved.append('preflight_pin_unpinned'); state='preflight-unpinned' if state=='preflight-ready' else state
+    elif registry_verdict.state=='unknown' or not lease_current: state='preflight-unknown'
+    if unpinned:
+        unresolved.append('preflight_pin_unpinned')
+        if state=='preflight-ready': state='preflight-unpinned'
     draft=EvidenceReadinessPreflight(SCHEMA,lease.lease_digest,witness.witness_digest,decision.decision_digest,manifest.manifest_digest,decision.gate['gate_digest'],state,lease_verdict.state,registry_verdict.state,lease_verdict.claimed_decision_state,tuple(sorted(set(unresolved))),tuple(sorted(set(reasons))),False,'')
     return EvidenceReadinessPreflight(draft.schema_version,draft.lease_digest,draft.registry_witness_digest,draft.decision_digest,draft.manifest_digest,draft.gate_digest,draft.state,draft.lease_state,draft.registry_state,draft.decision_state,draft.unverified,draft.reasons,False,draft.computed_digest)
 __all__=['SCHEMA','PreflightError','EvidenceReadinessPreflight','PreflightVerdict','evaluate_preflight']
