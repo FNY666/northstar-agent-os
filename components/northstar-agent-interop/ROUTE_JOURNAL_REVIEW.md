@@ -314,6 +314,33 @@ What this does not prove:
   witness proves the integrity and ordering of the records it carries.
 - That the external pin was distributed honestly or retained durably.
 
+## Portable evidence packages
+
+- `EvidencePackage` canonically binds an envelope, complete checkpoint-chain
+  witness, key-history snapshot, and optional verifier receipt. The package
+  digest detects transport/component substitution, but becomes a trust anchor
+  only when a verifier pins it externally.
+- Construction checks that the envelope disclosure root, envelope checkpoint
+  head, and witness head root agree; that the key snapshot binds the envelope's
+  embedded key-history prefix; and that an optional receipt binds the exact
+  envelope digest and evidence root.
+- Verification re-runs envelope and witness verification, validates the key
+  snapshot prefix, and optionally verifies the verifier receipt. All required
+  external pins — package digest, checkpoint chain digest, evidence root, and
+  key anchor — remain visible as `verified-unpinned` when absent.
+- A verifier receipt remains `receipt-only` in the package result. It records a
+  signed observation; it does not become evidence truth or authorization.
+
+What this does not prove:
+
+- That the package is the latest or complete world state. A package can carry a
+  valid historical prefix; external pins, retention, and freshness policy are
+  required to detect rollback or staleness.
+- That the envelope subject, checkpoint facts, signer, or verifier is truthful
+  or authorized. This composition proves bindings and verifier behavior only.
+- That same-key HMAC gives an independent third-party result. The package keeps
+  `same-key` explicit rather than elevating it to an external trust claim.
+
 ## Release boundary
 
 Do not cherry-pick or publish this candidate automatically. It requires a
