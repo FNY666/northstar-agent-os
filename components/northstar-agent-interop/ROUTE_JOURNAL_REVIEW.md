@@ -490,6 +490,31 @@ What this does not prove:
   order is serialization-only and never a winner selection.
 - That an external state digest is current or honestly distributed.
 
+## Plan evidence decisions
+
+- `EvidencePlanManifest` binds only canonical step identifiers, evidence claim
+  digests, and bounded rationales. It excludes executable actions, commands,
+  prompts, raw output, and secrets.
+- `PlanEvidenceDecision` binds the exact manifest, replayed readiness gate,
+  readiness state, blocked/unknown claims, and a decision digest. Verification
+  reparses the manifest and replays the gate under supplied projections.
+- The decision states are `ready`, `blocked`, and `unknown`. Even `ready` has
+  `execution_authorized=False`: it only means the manifest's declared evidence
+  prerequisites were projected supported.
+- External decision, manifest, and gate digest pins distinguish
+  `decision-verified` from `decision-verified-unpinned`; projection-level
+  unresolved boundaries remain visible in either result.
+
+What this does not prove:
+
+- That a ready plan is safe, complete, factually true, or permitted to execute.
+  Host policy, capabilities, approval, sandboxing, and postconditions still own
+  every execution decision.
+- That the manifest enumerates every evidence claim a real plan needs. Omitted
+  requirements can make a narrow manifest look ready.
+- That a decision digest or manifest digest was distributed honestly or is
+  current.
+
 ## Release boundary
 
 Do not cherry-pick or publish this candidate automatically. It requires a
