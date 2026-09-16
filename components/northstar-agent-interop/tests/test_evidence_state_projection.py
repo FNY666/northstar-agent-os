@@ -155,3 +155,36 @@ class StateProjectionTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class SupportedRequiresEvidenceTests(unittest.TestCase):
+    def _wire(self, **overrides):
+        wire = {
+            "schema_version": "northstar.evidence-state-projection.v1",
+            "claim_digest": "sha256:" + "a" * 64,
+            "state": "supported",
+            "actionable": True,
+            "witness_digests": [],
+            "package_digests": [],
+            "conflict_ids": [],
+            "reasons": [],
+            "unverified": [],
+        }
+        wire.update(overrides)
+        return wire
+
+    def test_supported_without_any_evidence_is_refused(self):
+        with self.assertRaises(ProjectionError):
+            ClaimProjection.from_dict(self._wire())
+
+    def test_supported_with_a_witness_is_accepted(self):
+        projection = ClaimProjection.from_dict(
+            self._wire(witness_digests=["sha256:" + "c" * 64])
+        )
+        self.assertEqual(projection.state, "supported")
+
+    def test_supported_with_only_a_package_is_accepted(self):
+        projection = ClaimProjection.from_dict(
+            self._wire(package_digests=["sha256:" + "d" * 64])
+        )
+        self.assertEqual(projection.state, "supported")

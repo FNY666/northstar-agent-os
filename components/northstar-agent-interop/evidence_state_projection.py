@@ -78,6 +78,8 @@ class ClaimProjection:
         unverified = _strings(value["unverified"], "unverified")
         if state == "unknown" and witnesses:
             raise ProjectionError("unknown projection cannot contain witnesses")
+        if state == "supported" and not witnesses and not packages:
+            raise ProjectionError("supported projection requires evidence")
         if state == "conflicted" and not conflicts:
             raise ProjectionError("conflicted projection requires conflicts")
         return cls(SCHEMA, claim, state, actionable, witnesses, packages, conflicts, reasons, unverified)
