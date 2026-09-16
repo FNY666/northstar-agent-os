@@ -469,6 +469,18 @@ for credentials. This is a small sample, not a production rollout statistic,
 but it establishes that the layered gate distinguishes recovery from semantic
 and collateral violations on real model output.
 
+`completion_advisory.py` carries the same comparison into the ordinary
+production run. When a fixture declares a `shadow_contract`, `live_run.py`
+attaches a `shadow_advisory` object to its report and nothing else changes: the
+production gate alone still decides `ok` and the exit code, and a fixture
+without a shadow contract produces a report with no advisory field at all. The
+advisory records `authoritative`, `affects_task_outcome`, and
+`execution_authorized` as false, carries a digest over its own payload so a
+later edit is detectable, and records a reason instead of an opinion when the
+workspace cannot be observed or the contract cannot be evaluated. Two
+mutation declarations keep this honest: making the exit code read the advisory,
+or widening the contract's allowed mutations, must make the guards fail.
+
 ## Deliberate ceiling
 
 This is not a production scheduler, sandbox, VM, container runtime, browser

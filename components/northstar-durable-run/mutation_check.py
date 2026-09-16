@@ -74,6 +74,31 @@ MUTATIONS = (
         expect="fail",
     ),
     Mutation(
+        name="advisory-decides-the-exit-code",
+        target="live_run.py",
+        old=(
+            "    # The production gate alone decides this; the advisory is recorded, never read.\n"
+            "    return 0 if outcome.ok else 1"
+        ),
+        new=(
+            '    advisory_ok = report.get("shadow_advisory", {}).get("layered_verdict", "verified") == "verified"\n'
+            "    return 0 if (outcome.ok and advisory_ok) else 1"
+        ),
+        guard="tests.test_completion_advisory",
+        expect="fail",
+    ),
+    Mutation(
+        name="advisory-contract-allows-undeclared-mutations",
+        target="completion_advisory.py",
+        old='allowed_mutations=tuple(item["path"] for item in spec["artifacts"]),',
+        new=(
+            'allowed_mutations=tuple(item["path"] for item in spec["artifacts"]) '
+            '+ ("out/notes.txt",),'
+        ),
+        guard="tests.test_completion_advisory",
+        expect="fail",
+    ),
+    Mutation(
         name="neutral-docstring-change",
         target="completion_replay.py",
         old='"""Return an independently derived terminal status, or empty on uncertainty."""',

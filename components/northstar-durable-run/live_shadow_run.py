@@ -12,6 +12,7 @@ from pathlib import Path
 
 from agent_entry import AgentHarness, ExpectedArtifact, build_run
 from completion_contract_v2 import ArtifactExpectation, CompletionContractV2, Provenance, SemanticField
+from completion_advisory import contract_from_spec, provenance_from
 from completion_live_shadow import run_live_shadow
 from openai_compatible_planner import OpenAICompatiblePlannerCaller, OpenAICompatiblePlannerConfig
 from planner_adapter import TypedPlannerAdapter
@@ -32,23 +33,6 @@ def seed(workspace: Path, files: dict[str, str]) -> None:
         target = workspace.joinpath(*name.split("/"))
         target.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
         target.write_text(content, encoding="utf-8")
-
-
-def build_contract(spec: dict, provenance: Provenance) -> CompletionContractV2:
-    artifacts = []
-    for item in spec["artifacts"]:
-        fields = tuple(
-            SemanticField(field["name"], field["value"], field.get("mode", "contains"))
-            for field in item["semantic_fields"]
-        )
-        artifacts.append(ArtifactExpectation(item["path"], semantic_fields=fields))
-    return CompletionContractV2(
-        required_artifacts=tuple(artifacts),
-        allowed_mutations=tuple(item["path"] for item in spec["artifacts"]),
-        required_milestones=tuple(spec["milestones"]),
-        milestone_edges=tuple(tuple(edge) for edge in spec.get("milestone_edges", [])),
-        expected_provenance=provenance,
-    )
 
 
 def parse_args(argv=None):
@@ -127,27 +111,23 @@ def main(argv=None) -> int:
         max_output_tokens=args.max_output_tokens,
         reasoning_effort=args.reasoning,
     )
-    provenance = Provenance.from_dict(
-        {
-            "contract_revision": "live-shadow-1",
-            "evaluator_digest": digest(Path(__file__).with_name("completion_contract_v2.py")),
-            "fixture_digest": digest(fixture_path),
-            "benchmark_commit": os.popen("git rev-parse HEAD").read().strip() or "0" * 40,
-            "environment_digest": "sha256:" + hashlib.sha256(sys.version.encode()).hexdigest(),
-            "model_id": args.model,
-            "model_revision": args.model_revision,
-            "reasoning_effort": args.reasoning,
-            "max_output_tokens": args.max_output_tokens,
-            "seed": fixture["task_id"],
-            "trial_id": fixture["task_id"] + "-live-shadow",
-        }
+    provenance = provenance_from(
+        contract_revision="live-shadow-1",
+        fixture_path=fixture_path,
+        evaluator_path=Path(__file__).with_name("completion_contract_v2.py"),
+        model_id=args.model,
+        model_revision=args.model_revision,
+        reasoning_effort=args.reasoning,
+        max_output_tokens=args.max_output_tokens,
+        seed=fixture["task_id"],
+        trial_id=fixture["task_id"] + "-live-shadow",
     )
     started = time.time()
     result = run_live_shadow(
         harness,
         fixture["goal"],
         TypedPlannerAdapter(OpenAICompatiblePlannerCaller(config)),
-        contract=build_contract(spec, provenance),
+        contract=contract_from_spec(spec, provenance),
         expectations=[expected_from(item) for item in fixture["expect"]],
         provenance=provenance,
         milestones=None,

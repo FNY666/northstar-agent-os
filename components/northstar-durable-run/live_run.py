@@ -30,6 +30,12 @@ from pathlib import Path
 
 from agent_driver import AgentDriver, DriverBudget
 from agent_entry import ExpectedArtifact
+from completion_advisory import (
+    contract_from_spec,
+    evaluate_driver_advisory,
+    provenance_from,
+)
+from completion_workspace_snapshot import WorkspaceObservationRefused, observe_workspace
 from openai_compatible_planner import (
     OpenAICompatiblePlannerCaller,
     OpenAICompatiblePlannerConfig,
@@ -60,6 +66,78 @@ def seed_workspace(root: Path, seed: dict[str, str]) -> None:
         target = root / name
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_text(content, encoding="utf-8")
+
+
+def observe_or_none(root: Path):
+    """Observation can refuse a tree it cannot vouch for; that is not a failure."""
+    try:
+        return observe_workspace(root)
+    except WorkspaceObservationRefused:
+        return None
+
+
+def build_shadow_advisory(
+    *,
+    fixture: dict,
+    fixture_path: str | Path,
+    outcome,
+    sandbox: Path,
+    before,
+    after,
+    model_id: str,
+    model_revision: str,
+    reasoning_effort: str,
+    max_output_tokens: int,
+) -> dict | None:
+    """Compute the read-only advisory, or explain why it is unavailable.
+
+    Returns ``None`` when the fixture does not declare a shadow contract, so a
+    fixture without one produces a report identical to before this existed. The
+    result is never consulted when deciding success: an unavailable or failing
+    advisory is recorded as data and the production verdict stands.
+    """
+    spec = fixture.get("shadow_contract")
+    if not spec:
+        return None
+    unavailable = {
+        "schema_version": "northstar.completion-advisory.v1",
+        "authoritative": False,
+        "affects_task_outcome": False,
+        "execution_authorized": False,
+        "available": False,
+    }
+    if before is None or after is None:
+        return {**unavailable, "reason": "workspace_observation_unavailable"}
+    if not outcome.rounds:
+        return {**unavailable, "reason": "no_completed_round"}
+    last = outcome.rounds[-1]
+    evidence_path = sandbox / "evidence" / f"round-{last.round_index}.evidence.jsonl"
+    try:
+        provenance = provenance_from(
+            contract_revision="live-run-advisory-1",
+            fixture_path=fixture_path,
+            evaluator_path=Path(__file__).with_name("completion_contract_v2.py"),
+            model_id=model_id,
+            model_revision=model_revision,
+            reasoning_effort=reasoning_effort,
+            max_output_tokens=max_output_tokens,
+            seed=fixture["task_id"],
+            trial_id=fixture["task_id"] + "-run-advisory",
+        )
+        advisory = evaluate_driver_advisory(
+            contract=contract_from_spec(spec, provenance),
+            provenance=provenance,
+            verification=outcome.verification,
+            run_status=last.status,
+            before=before,
+            after=after,
+            evidence_path=evidence_path,
+            milestone_action_map=spec.get("milestone_action_map"),
+            round_steps=last.steps,
+        )
+    except (ValueError, OSError) as error:
+        return {**unavailable, "reason": f"advisory_error:{type(error).__name__}"}
+    return {**advisory.as_report_dict(), "available": True}
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -117,7 +195,9 @@ def main(argv=None) -> int:
         allowed_write_paths=None,
     )
     started = time.time()
+    before = observe_or_none(workspace)
     outcome = driver.run(task_id, goal, TypedPlannerAdapter(caller))
+    after = observe_or_none(workspace)
     report = outcome.as_dict()
     report.update(
         {
@@ -136,10 +216,25 @@ def main(argv=None) -> int:
     report["deliverables"] = {
         record["round"]: sorted(record["observed"]) for record in report["rounds"]
     }
+    advisory = build_shadow_advisory(
+        fixture=fixture,
+        fixture_path=arguments.fixture,
+        outcome=outcome,
+        sandbox=sandbox,
+        before=before,
+        after=after,
+        model_id=arguments.model,
+        model_revision=arguments.model_revision,
+        reasoning_effort=arguments.reasoning,
+        max_output_tokens=arguments.max_output_tokens,
+    )
+    if advisory is not None:
+        report["shadow_advisory"] = advisory
     rendered = json.dumps(report, indent=2)
     if arguments.report:
         Path(arguments.report).write_text(rendered + "\n", encoding="utf-8")
     print(rendered)
+    # The production gate alone decides this; the advisory is recorded, never read.
     return 0 if outcome.ok else 1
 
 

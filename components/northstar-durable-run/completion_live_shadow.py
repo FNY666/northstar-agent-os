@@ -33,23 +33,44 @@ class LiveShadowResult:
     after: WorkspaceSnapshot
 
 
+def production_result_from_host_check(
+    *,
+    verdict: str,
+    failures: tuple[str, ...] | list[str],
+    checked: tuple[str, ...] | list[str],
+    run_status: str,
+    after: WorkspaceSnapshot,
+) -> VerificationResult:
+    """Adapt a host check without trusting its boolean summary.
+
+    This is the single definition of how the production gate's own result is
+    re-expressed for shadow comparison: a cancelled run is a failure, any run
+    that is not finished is unknown, and only a finished run passes its verdict
+    through. Both the harness shadow adapter and the production advisory reuse
+    it so the two paths cannot drift.
+    """
+    digests = {path: after.files[path].digest for path in checked if path in after.files}
+    if run_status == "cancelled":
+        return VerificationResult("failed", ("run was cancelled",), digests)
+    if run_status != "finished":
+        return VerificationResult(
+            "unknown",
+            (f"run is not finished: {run_status}",),
+            digests,
+        )
+    return VerificationResult(verdict, tuple(failures), digests)
+
+
 def _production_result(task_outcome: Any, after: WorkspaceSnapshot) -> VerificationResult:
     """Adapt the harness-owned host check without trusting its boolean summary."""
     verification = task_outcome.verification
-    digests = {
-        path: after.files[path].digest
-        for path in verification.checked
-        if path in after.files
-    }
-    if task_outcome.run_status == "cancelled":
-        return VerificationResult("failed", ("run was cancelled",), digests)
-    if task_outcome.run_status != "finished":
-        return VerificationResult(
-            "unknown",
-            (f"run is not finished: {task_outcome.run_status}",),
-            digests,
-        )
-    return VerificationResult(verification.verdict, tuple(verification.failures), digests)
+    return production_result_from_host_check(
+        verdict=verification.verdict,
+        failures=verification.failures,
+        checked=verification.checked,
+        run_status=task_outcome.run_status,
+        after=after,
+    )
 
 
 def _unknown_contract(error: str) -> CompletionResult:

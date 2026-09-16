@@ -8,8 +8,8 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
+from completion_advisory import contract_from_spec as build_contract  # noqa: E402
 from completion_contract_v2 import Provenance, WorkspaceSnapshot  # noqa: E402
-from live_shadow_run import build_contract  # noqa: E402
 
 FIXTURE = ROOT / "live" / "shadow" / "01-column-report-shadow.json"
 
