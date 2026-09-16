@@ -111,6 +111,20 @@ class ForecastSettlement:
     execution_authorized: bool = False
 
 
+@dataclass(frozen=True)
+class ExperienceStatistics:
+    """Actionable performance metrics for a fingerprint."""
+
+    fingerprint: str
+    total_runs: int
+    successes: int
+    failures: int
+    success_rate: float | None
+    recent_trend: str
+    last_n_outcomes: tuple[str, ...]
+    execution_authorized: bool = False
+
+
 def _digest(payload: dict[str, Any]) -> str:
     encoded = json.dumps(
         payload, sort_keys=True, separators=(",", ":"), ensure_ascii=False
@@ -364,8 +378,8 @@ class ExperienceLedger:
         *,
         actual_verdict: str,
         run_id: str,
-        run_digest: str,
-        event_head: str,
+        run_digest: str | None,
+        event_head: str | None,
     ) -> ForecastSettlement:
         """Record whether a forecast was confirmed or falsified by reality.
 
@@ -376,12 +390,11 @@ class ExperienceLedger:
         """
         if actual_verdict not in _KINDS:
             raise ValueError(f"actual verdict {actual_verdict!r} is not settled")
-        for label, value in (
-            ("run_id", run_id),
-            ("run_digest", run_digest),
-            ("event_head", event_head),
-        ):
-            _validate_text(value, label)
+        _validate_text(run_id, "run_id")
+        if run_digest is not None:
+            _validate_text(run_digest, "run_digest")
+        if event_head is not None:
+            _validate_text(event_head, "event_head")
         current_forecast = self.forecast(forecast.fingerprint)
         if current_forecast.forecast_digest != forecast.forecast_digest:
             outcome = SETTLEMENT_NOT_EVALUABLE
@@ -460,3 +473,88 @@ class ExperienceLedger:
         finally:
             fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
             handle.close()
+
+    def query_statistics(
+        self, fingerprint: str, *, recent_window: int = 5
+    ) -> ExperienceStatistics:
+        """Compute actionable performance metrics from settlement history."""
+        if not isinstance(fingerprint, str) or not fingerprint:
+            raise ValueError("fingerprint must be a non-empty string")
+        if not isinstance(recent_window, int) or recent_window < 1:
+            raise ValueError("recent_window must be a positive integer")
+
+        settlements_path = Path(str(self._path) + ".settlements.jsonl")
+        if not settlements_path.exists():
+            return ExperienceStatistics(
+                fingerprint=fingerprint,
+                total_runs=0,
+                successes=0,
+                failures=0,
+                success_rate=None,
+                recent_trend="insufficient-data",
+                last_n_outcomes=(),
+            )
+
+        # Read all settlements for this fingerprint
+        handle = open(settlements_path, "r", encoding="utf-8")
+        try:
+            fcntl.flock(handle.fileno(), fcntl.LOCK_SH)
+            settlements = _load(handle)
+        finally:
+            fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
+            handle.close()
+        
+        matching = [
+            s for s in settlements 
+            if s.get("fingerprint") == fingerprint
+        ]
+        
+        if not matching:
+            return ExperienceStatistics(
+                fingerprint=fingerprint,
+                total_runs=0,
+                successes=0,
+                failures=0,
+                success_rate=None,
+                recent_trend="insufficient-data",
+                last_n_outcomes=(),
+            )
+        
+        # Extract verdicts (recent first order)
+        verdicts = [s["actual_verdict"] for s in matching]
+        verdicts.reverse()  # Recent first
+        
+        total_runs = len(verdicts)
+        successes = sum(1 for v in verdicts if v == "verified")
+        failures = sum(1 for v in verdicts if v == "failed")
+        success_rate = successes / total_runs if total_runs > 0 else None
+        
+        # Compute recent trend
+        recent = verdicts[:recent_window]
+        if len(recent) < 2:
+            recent_trend = "insufficient-data"
+        else:
+            # Split: first half = most recent, second half = older
+            mid = len(recent) // 2
+            most_recent = recent[:mid]
+            older = recent[mid:]
+            
+            recent_success_rate = sum(1 for v in most_recent if v == "verified") / len(most_recent)
+            older_success_rate = sum(1 for v in older if v == "verified") / len(older)
+            
+            if recent_success_rate > older_success_rate + 0.2:
+                recent_trend = "improving"
+            elif recent_success_rate < older_success_rate - 0.2:
+                recent_trend = "declining"
+            else:
+                recent_trend = "stable"
+        
+        return ExperienceStatistics(
+            fingerprint=fingerprint,
+            total_runs=total_runs,
+            successes=successes,
+            failures=failures,
+            success_rate=success_rate,
+            recent_trend=recent_trend,
+            last_n_outcomes=tuple(verdicts[:recent_window]),
+        )
