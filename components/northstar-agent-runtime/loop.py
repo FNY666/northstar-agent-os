@@ -33,6 +33,7 @@ from autonomy_checkpoint import (
     capture_checkpoint,
     verify_checkpoint,
 )
+from autonomy_checkpoint_store import AutonomyCheckpointStore
 from budget import Budget
 from compaction import CompactionOutcome, compact, should_compact
 from hooks import HookInput, HookRegistry
@@ -1536,6 +1537,53 @@ class AgentRuntime:
             now=now,
             expected_checkpoint_digest=expected_checkpoint_digest,
         )
+
+    def persist_continuation_checkpoint(
+        self, store: AutonomyCheckpointStore, *, goal: Any, observed_at: int
+    ) -> Any:
+        """Persist a non-authorizing host checkpoint; never resumes work."""
+        if not isinstance(store, AutonomyCheckpointStore):
+            raise RuntimeConfigurationError("continuation store is invalid")
+        return store.append(
+            self.capture_continuation_checkpoint(goal=goal, observed_at=observed_at)
+        )
+
+    def resolve_persisted_continuation_checkpoint(
+        self,
+        store: AutonomyCheckpointStore,
+        *,
+        goal: Any,
+        now: int,
+        expected_record_digest: str | None = None,
+    ) -> ContinuationVerdict:
+        """Resolve and re-verify a persisted checkpoint; never resumes work."""
+        if not isinstance(store, AutonomyCheckpointStore):
+            raise RuntimeConfigurationError("continuation store is invalid")
+        resolution = store.resolve(
+            self.session_id, expected_record_digest=expected_record_digest
+        )
+        if resolution.state == "stale":
+            return ContinuationVerdict("stale", resolution.reasons, (), False)
+        if resolution.state in {"unrecorded", "unverifiable"} or resolution.record is None:
+            return ContinuationVerdict("unknown", resolution.reasons, resolution.unverified, False)
+        verdict = self.verify_continuation_checkpoint(
+            resolution.record.checkpoint_value,
+            goal=goal,
+            now=now,
+            expected_checkpoint_digest=(
+                resolution.record.checkpoint_value.checkpoint_digest
+                if resolution.state == "recorded"
+                else None
+            ),
+        )
+        if resolution.state == "recorded-unpinned" and verdict.state == "current-unpinned":
+            return ContinuationVerdict(
+                verdict.state,
+                verdict.reasons,
+                tuple(sorted(set(verdict.unverified) | set(resolution.unverified))),
+                False,
+            )
+        return verdict
 
     # -- resume ------------------------------------------------------------
     def resume_transcript(self) -> list[Any]:

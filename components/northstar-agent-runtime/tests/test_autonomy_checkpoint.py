@@ -152,3 +152,59 @@ class AgentRuntimeAdapterTests(unittest.TestCase):
         verdict = runtime.verify_continuation_checkpoint(checkpoint, goal={"objective": "x"}, now=1010)
         self.assertEqual(verdict.state, "stale")
         self.assertIn("runtime_changed", verdict.reasons)
+
+    def test_runtime_persists_and_recovers_a_pinned_continuation(self):
+        import tempfile
+        from pathlib import Path
+        from autonomy_checkpoint_store import AutonomyCheckpointStore
+        from sessions import SessionStore
+        with tempfile.TemporaryDirectory() as root:
+            sessions = SessionStore(root, session_id="ns-adapter")
+            runtime = self._runtime(sessions=sessions)
+            store = AutonomyCheckpointStore(Path(root) / "continuations.jsonl")
+            record = runtime.persist_continuation_checkpoint(
+                store, goal={"objective": "persist"}, observed_at=1000
+            )
+            restored = self._runtime(sessions=SessionStore(root, session_id="ns-adapter"))
+            verdict = restored.resolve_persisted_continuation_checkpoint(
+                store, goal={"objective": "persist"}, now=1010,
+                expected_record_digest=record.record_digest,
+            )
+            self.assertEqual(verdict.state, "current")
+            self.assertFalse(verdict.execution_authorized)
+            self.assertEqual(restored.provider.requests, [])
+
+    def test_runtime_persisted_checkpoint_detects_session_drift_without_resuming(self):
+        import tempfile
+        from pathlib import Path
+        from autonomy_checkpoint_store import AutonomyCheckpointStore
+        from sessions import SessionStore
+        with tempfile.TemporaryDirectory() as root:
+            sessions = SessionStore(root, session_id="ns-adapter")
+            runtime = self._runtime(sessions=sessions)
+            store = AutonomyCheckpointStore(Path(root) / "continuations.jsonl")
+            runtime.persist_continuation_checkpoint(store, goal={"objective": "persist"}, observed_at=1000)
+            sessions.append("session_start", {"note": "changed"})
+            verdict = runtime.resolve_persisted_continuation_checkpoint(
+                store, goal={"objective": "persist"}, now=1010
+            )
+            self.assertEqual(verdict.state, "stale")
+            self.assertIn("transcript_changed", verdict.reasons)
+
+    def test_runtime_treats_a_tampered_store_as_unknown(self):
+        import tempfile
+        from pathlib import Path
+        import json
+        from autonomy_checkpoint_store import AutonomyCheckpointStore
+        with tempfile.TemporaryDirectory() as root:
+            runtime = self._runtime()
+            store = AutonomyCheckpointStore(Path(root) / "continuations.jsonl")
+            runtime.persist_continuation_checkpoint(store, goal={"objective": "persist"}, observed_at=1000)
+            row = json.loads(store.path.read_text(encoding="utf-8").splitlines()[0])
+            row["record_digest"] = "sha256:" + "f" * 64
+            store.path.write_text(json.dumps(row) + "\n", encoding="utf-8")
+            verdict = runtime.resolve_persisted_continuation_checkpoint(
+                store, goal={"objective": "persist"}, now=1010
+            )
+            self.assertEqual(verdict.state, "unknown")
+            self.assertFalse(verdict.execution_authorized)

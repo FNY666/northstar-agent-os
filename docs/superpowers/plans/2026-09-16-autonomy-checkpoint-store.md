@@ -42,7 +42,7 @@
 - Add optional explicit `persist_continuation_checkpoint(store, goal, observed_at)` and `resolve_persisted_continuation_checkpoint(store, goal, now, expected_record_digest=None)` APIs.
 - APIs compose checkpoint capture/verify with store resolution; they do not auto-resume or authorize execution.
 
-- [ ] Write RED tests for restart persistence and tampered store → unknown.
-- [ ] Implement additive adapter only.
-- [ ] Mutation-check and run both suites.
-- [ ] Commit.
+- [x] Write RED tests for restart persistence and tampered store → unknown.
+- [x] Implement additive adapter only.
+- [x] Mutation-check and run both suites.
+- [x] Commit.
