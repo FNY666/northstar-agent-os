@@ -4,6 +4,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
+from plan_evidence_decision import derive_plan_id
 from evidence_preflight_pins import (
     PreflightPinStore,
     PinStoreError,
@@ -67,7 +68,7 @@ class PinStoreTests(unittest.TestCase):
         self.root = tempfile.mkdtemp(prefix="pins-")
         self.addCleanup(shutil.rmtree, self.root, True)
         self.store = PreflightPinStore(Path(self.root) / "pins")
-        self.plan = "plan-alpha"
+        self.plan = derive_plan_id(D("d"))
         self.preflight = make_preflight()
 
     def test_pin_then_resolve_matches_digests(self):
@@ -243,10 +244,10 @@ class PinStoreIntegrationTests(unittest.TestCase):
         witness = make_registry_witness(self.registry, self.lease.lease_digest, now=1000)
         first = self._evaluate(witness)
         self.assertEqual(first.state, "preflight-unpinned")
-        record = self.store.pin_preflight("plan-e2e", first, now=1000)
+        record = self.store.pin_preflight(derive_plan_id(self.manifest.manifest_digest), first, now=1000)
         self.assertEqual(record.origin, "first-use")
 
-        resolved = self.store.resolve("plan-e2e")
+        resolved = self.store.resolve(derive_plan_id(self.manifest.manifest_digest))
         second = self._evaluate(
             witness,
             now=1010,
@@ -255,14 +256,14 @@ class PinStoreIntegrationTests(unittest.TestCase):
         )
         self.assertEqual(second.state, "preflight-ready")
         self.assertFalse(second.execution_authorized)
-        repinned = self.store.pin_preflight("plan-e2e", second, now=1010)
+        repinned = self.store.pin_preflight(derive_plan_id(self.manifest.manifest_digest), second, now=1010)
         self.assertEqual(repinned.origin, "verified")
 
     def test_stored_pin_detects_real_decision_drift(self):
         witness = make_registry_witness(self.registry, self.lease.lease_digest, now=1000)
         first = self._evaluate(witness)
-        self.store.pin_preflight("plan-e2e", first, now=1000)
-        resolved = self.store.resolve("plan-e2e")
+        self.store.pin_preflight(derive_plan_id(self.manifest.manifest_digest), first, now=1000)
+        resolved = self.store.resolve(derive_plan_id(self.manifest.manifest_digest))
 
         drifted = {self.claim: projection(self.claim, state="conflicted")}
         with self.assertRaises(Exception):
@@ -276,3 +277,21 @@ class PinStoreIntegrationTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class PinLabelIdentityTests(unittest.TestCase):
+    def setUp(self):
+        self.root = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, self.root, True)
+        self.store = PreflightPinStore(self.root / "pins.jsonl")
+        self.preflight = make_preflight()
+
+    def test_a_pin_label_must_match_the_derived_plan_identity(self):
+        with self.assertRaises(PinStoreError):
+            self.store.pin_preflight("plan-alpha", self.preflight, now=1000)
+
+    def test_the_derived_identity_is_accepted(self):
+        record = self.store.pin_preflight(
+            derive_plan_id(self.preflight.manifest_digest), self.preflight, now=1000
+        )
+        self.assertEqual(record.manifest_digest, self.preflight.manifest_digest)

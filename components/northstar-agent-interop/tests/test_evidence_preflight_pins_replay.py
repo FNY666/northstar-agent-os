@@ -4,6 +4,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
+from plan_evidence_decision import derive_plan_id
 from evidence_preflight_pins import (
     PinStoreError,
     PreflightPinStore,
@@ -58,13 +59,14 @@ class ReplayFixture(unittest.TestCase):
         self.addCleanup(shutil.rmtree, self.root, True)
         self.store_path = Path(self.root) / "pins"
         self.store = PreflightPinStore(self.store_path)
-        self.plan = "plan-replay"
         claim = D("a")
         self.claim = claim
         self.manifest = EvidencePlanManifest(
             "northstar.evidence-plan-manifest.v1",
             (EvidencePlanStep("step-a", claim, "required evidence"),),
         )
+        self.plan = derive_plan_id(self.manifest.manifest_digest)
+        self.fixture_plan = derive_plan_id(D("d"))
         self.projections = {claim: projection(claim)}
         self.decision = make_plan_evidence_decision(self.manifest, self.projections)
         self.pins = dict(
@@ -99,10 +101,10 @@ class ReplayFixture(unittest.TestCase):
 class PinWitnessPayloadTests(ReplayFixture):
     def test_pin_with_payload_is_replayable_after_restart(self):
         self.store.pin_preflight(
-            self.plan, make_preflight(witness=self.witness), now=1000, witness=self.witness
+            self.fixture_plan, make_preflight(witness=self.witness), now=1000, witness=self.witness
         )
         reopened = PreflightPinStore(self.store_path)
-        resolved = reopened.resolve(self.plan)
+        resolved = reopened.resolve(self.fixture_plan)
         self.assertTrue(resolved.witness_replayable)
         self.assertEqual(resolved.registry_witness, self.witness.to_dict())
         restored = restore_witness(resolved)
@@ -112,8 +114,8 @@ class PinWitnessPayloadTests(ReplayFixture):
         self.assertFalse(resolved.execution_authorized)
 
     def test_pin_without_payload_is_not_replayable(self):
-        self.store.pin_preflight(self.plan, make_preflight(), now=1000)
-        resolved = self.store.resolve(self.plan)
+        self.store.pin_preflight(self.fixture_plan, make_preflight(), now=1000)
+        resolved = self.store.resolve(self.fixture_plan)
         self.assertEqual(resolved.state, "pins-current")
         self.assertFalse(resolved.witness_replayable)
         with self.assertRaises(PinStoreError):
@@ -123,31 +125,31 @@ class PinWitnessPayloadTests(ReplayFixture):
         mismatched = make_preflight(registry_witness_digest=self.witness.witness_digest)
         other = make_registry_witness(self.registry, self.lease.lease_digest, now=1011)
         with self.assertRaises(PinStoreError):
-            self.store.pin_preflight(self.plan, mismatched, now=1000, witness=other)
+            self.store.pin_preflight(self.fixture_plan, mismatched, now=1000, witness=other)
 
     def test_tampered_payload_is_unverifiable(self):
         self.store.pin_preflight(
-            self.plan, make_preflight(witness=self.witness), now=1000, witness=self.witness
+            self.fixture_plan, make_preflight(witness=self.witness), now=1000, witness=self.witness
         )
         log = self.store_path / "pins.jsonl"
         payload = json.loads(log.read_text(encoding="utf-8").splitlines()[0])
         payload["registry_witness"]["observed_at"] = 9999
         log.write_text(json.dumps(payload) + "\n", encoding="utf-8")
-        self.assertEqual(self.store.resolve(self.plan).state, "pins-unverifiable")
+        self.assertEqual(self.store.resolve(self.fixture_plan).state, "pins-unverifiable")
 
     def test_older_field_set_is_unverifiable(self):
         self.store.pin_preflight(
-            self.plan, make_preflight(witness=self.witness), now=1000, witness=self.witness
+            self.fixture_plan, make_preflight(witness=self.witness), now=1000, witness=self.witness
         )
         log = self.store_path / "pins.jsonl"
         row = json.loads(log.read_text(encoding="utf-8").splitlines()[0])
         legacy = {key: value for key, value in row.items() if key != "registry_witness"}
         log.write_text(json.dumps(legacy) + "\n", encoding="utf-8")
-        self.assertEqual(self.store.resolve(self.plan).state, "pins-unverifiable")
+        self.assertEqual(self.store.resolve(self.fixture_plan).state, "pins-unverifiable")
 
     def test_record_field_set_is_closed(self):
         record = self.store.pin_preflight(
-            self.plan, make_preflight(witness=self.witness), now=1000,
+            self.fixture_plan, make_preflight(witness=self.witness), now=1000,
             witness=self.witness,
         )
         self.assertEqual(

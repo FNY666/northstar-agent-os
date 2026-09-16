@@ -6,6 +6,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
+from plan_evidence_decision import derive_plan_id
 from evidence_preflight_pins import (
     PreflightPinStore,
     verify_pin_resolution,
@@ -22,11 +23,13 @@ class PinRollbackTests(unittest.TestCase):
         self.path = self.root / "pins"
         self.store = PreflightPinStore(self.path)
         self.log = self.path / "pins.jsonl"
+        self.plan = derive_plan_id(D("d"))
         self.meta = self.path / "pins.meta.json"
 
     def _pin(self, plan, seed="a"):
+        preflight = make_preflight(decision_digest=D(seed))
         return self.store.pin_preflight(
-            plan, make_preflight(decision_digest=D(seed)), now=1000
+            derive_plan_id(preflight.manifest_digest), preflight, now=1000
         )
 
     def _lines(self):
@@ -53,7 +56,7 @@ class PinRollbackTests(unittest.TestCase):
         self._pin("plan-a", "a")
         self._pin("plan-a", "b")
         self.log.write_text("".join(self._lines()[:1]), encoding="utf-8")
-        resolved = self.store.resolve("plan-a")
+        resolved = self.store.resolve(self.plan)
         self.assertEqual(resolved.state, "pins-unverifiable")
         self.assertIn("truncat", self._reasons(resolved))
 
@@ -61,36 +64,36 @@ class PinRollbackTests(unittest.TestCase):
         self._pin("plan-a", "a")
         self._pin("plan-a", "b")
         self.log.write_text("", encoding="utf-8")
-        resolved = self.store.resolve("plan-a")
+        resolved = self.store.resolve(self.plan)
         self.assertEqual(resolved.state, "pins-unverifiable")
 
     def test_crash_window_is_repaired_forward(self):
         first = self._pin("plan-a", "a")
         self._pin("plan-a", "b")
         self._write_meta(1, first.record_digest)
-        resolved = self.store.resolve("plan-a")
+        resolved = self.store.resolve(self.plan)
         self.assertEqual(resolved.state, "pins-current")
         self.assertIn("repaired", self._reasons(resolved))
         self.assertEqual(resolved.decision_digest, D("b"))
-        again = self.store.resolve("plan-a")
+        again = self.store.resolve(self.plan)
         self.assertEqual(again.state, "pins-current")
         self.assertNotIn("repaired", self._reasons(again))
 
     def test_high_water_ahead_of_log_is_rejected(self):
         self._pin("plan-a", "a")
         self._write_meta(9, D("a"))
-        self.assertEqual(self.store.resolve("plan-a").state, "pins-unverifiable")
+        self.assertEqual(self.store.resolve(self.plan).state, "pins-unverifiable")
 
     def test_tampered_high_water_head_is_rejected(self):
         self._pin("plan-a", "a")
         self._pin("plan-a", "b")
         self._write_meta(2, D("f"))
-        self.assertEqual(self.store.resolve("plan-a").state, "pins-unverifiable")
+        self.assertEqual(self.store.resolve(self.plan).state, "pins-unverifiable")
 
     def test_missing_high_water_with_existing_log_is_rejected(self):
         self._pin("plan-a", "a")
         self.meta.unlink()
-        resolved = self.store.resolve("plan-a")
+        resolved = self.store.resolve(self.plan)
         self.assertEqual(resolved.state, "pins-unverifiable")
         self.assertIn("high-water", self._reasons(resolved))
 
@@ -98,7 +101,7 @@ class PinRollbackTests(unittest.TestCase):
         self._pin("plan-a", "a")
         self.log.unlink()
         self.meta.unlink()
-        resolved = self.store.resolve("plan-a")
+        resolved = self.store.resolve(self.plan)
         self.assertEqual(resolved.state, "pins-unrecorded")
         self.assertFalse(resolved.execution_authorized)
 
@@ -106,13 +109,13 @@ class PinRollbackTests(unittest.TestCase):
         first = self._pin("plan-a", "a")
         self._pin("plan-a", "b")
         self._write_meta(1, first.record_digest)
-        self.assertEqual(self.store.resolve("plan-a").state, "pins-current")
+        self.assertEqual(self.store.resolve(self.plan).state, "pins-current")
         third = self.store.pin_preflight(
-            "plan-a", make_preflight(decision_digest=D("c")), now=1010
+            self.plan, make_preflight(decision_digest=D("c")), now=1010
         )
         self.assertEqual(third.sequence, 3)
         self.assertEqual(third.prev_digest, self._pin_record_digest(2))
-        resolved = self.store.resolve("plan-a")
+        resolved = self.store.resolve(self.plan)
         verdict = verify_pin_resolution(
             resolved,
             self.store,
@@ -133,7 +136,7 @@ class PinRollbackTests(unittest.TestCase):
         first = self._pin("plan-a", "a")
         self._pin("plan-a", "b")
         self._write_meta(1, first.record_digest)
-        resolved = self.store.resolve("plan-a")
+        resolved = self.store.resolve(self.plan)
         self.assertFalse(resolved.execution_authorized)
         self.assertTrue(resolved.witness_replayable is False)
 

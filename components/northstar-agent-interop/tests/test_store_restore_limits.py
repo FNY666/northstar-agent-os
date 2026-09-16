@@ -4,6 +4,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
+from plan_evidence_decision import derive_plan_id
 from evidence_preflight_pins import (
     PreflightPinStore,
     verify_pin_resolution,
@@ -27,8 +28,9 @@ class PinStoreRestoreLimitTests(unittest.TestCase):
         self.backup = self.root / "snapshot"
 
     def _pin(self, seed):
+        preflight = make_preflight(decision_digest=D(seed))
         return self.store.pin_preflight(
-            "plan-a", make_preflight(decision_digest=D(seed)), now=1000
+            derive_plan_id(preflight.manifest_digest), preflight, now=1000
         )
 
     def test_restoring_an_older_copy_is_stale_only_against_a_remembered_head(self):
@@ -38,7 +40,7 @@ class PinStoreRestoreLimitTests(unittest.TestCase):
         third = self._pin("c")
         shutil.rmtree(self.store._root)
         shutil.copytree(self.backup, self.store._root)
-        resolved = self.store.resolve("plan-a")
+        resolved = self.store.resolve(derive_plan_id(D("d")))
         self.assertEqual(resolved.state, "pins-current")
         self.assertEqual(resolved.decision_digest, D("b"))
         verdict = verify_pin_resolution(

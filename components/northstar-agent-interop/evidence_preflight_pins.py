@@ -23,6 +23,7 @@ from pathlib import Path
 from typing import Any
 
 from evidence_readiness_preflight import EvidenceReadinessPreflight, PreflightError
+from plan_evidence_decision import derive_plan_id
 from readiness_lease_witness import LeaseRegistryWitness, RegistryWitnessError
 
 STORE_SCHEMA = "northstar.evidence-preflight-pins.v1"
@@ -350,6 +351,8 @@ class PreflightPinStore:
             normalized = EvidenceReadinessPreflight.from_dict(preflight.to_dict())
         except PreflightError as exc:
             raise PinStoreError("preflight invalid") from exc
+        if plan != derive_plan_id(normalized.manifest_digest):
+            raise PinStoreError("plan_id does not match the derived plan identity")
         payload = None
         if witness is not None:
             if not isinstance(witness, LeaseRegistryWitness):
