@@ -54,3 +54,58 @@ class CheckpointContractTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class ContinuationVerificationTests(unittest.TestCase):
+    def setUp(self):
+        self.source = inputs()
+        self.checkpoint = capture_checkpoint(**self.source, observed_at=1000)
+
+    def test_matching_observation_is_current_unpinned_and_never_authorizes(self):
+        from autonomy_checkpoint import verify_checkpoint
+        verdict = verify_checkpoint(self.checkpoint, **self.source, now=1010)
+        self.assertEqual(verdict.state, "current-unpinned")
+        self.assertIn("checkpoint_digest_unpinned", verdict.unverified)
+        self.assertFalse(verdict.execution_authorized)
+
+    def test_matching_external_pin_is_current(self):
+        from autonomy_checkpoint import verify_checkpoint
+        verdict = verify_checkpoint(
+            self.checkpoint, **self.source, now=1010,
+            expected_checkpoint_digest=self.checkpoint.checkpoint_digest,
+        )
+        self.assertEqual(verdict.state, "current")
+        self.assertFalse(verdict.unverified)
+
+    def test_each_host_owned_binding_can_make_a_checkpoint_stale(self):
+        from autonomy_checkpoint import verify_checkpoint
+        cases = {
+            "goal": {"objective": "a different goal"},
+            "runtime": {"permission_mode": "plan"},
+            "transcript": [{"role": "user", "content": "tampered"}],
+            "budget": {"max_budget_usd": 1.0, "total_cost_usd": 0.9},
+        }
+        for field, changed in cases.items():
+            source = dict(self.source)
+            source[field] = changed
+            verdict = verify_checkpoint(self.checkpoint, **source, now=1010)
+            self.assertEqual(verdict.state, "stale", field)
+            self.assertIn(field + "_changed", verdict.reasons)
+            self.assertFalse(verdict.execution_authorized)
+
+    def test_bad_current_observation_is_unknown_not_a_crash(self):
+        from autonomy_checkpoint import verify_checkpoint
+        source = dict(self.source)
+        source["budget"] = None
+        verdict = verify_checkpoint(self.checkpoint, **source, now=1010)
+        self.assertEqual(verdict.state, "unknown")
+        self.assertIn("budget_unreadable", verdict.reasons)
+        self.assertFalse(verdict.execution_authorized)
+
+    def test_wrong_external_pin_is_refused(self):
+        from autonomy_checkpoint import verify_checkpoint
+        with self.assertRaises(AutonomyCheckpointError):
+            verify_checkpoint(
+                self.checkpoint, **self.source, now=1010,
+                expected_checkpoint_digest="sha256:" + "f" * 64,
+            )

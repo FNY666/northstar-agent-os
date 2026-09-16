@@ -43,10 +43,10 @@
 - Produces: `ContinuationVerdict` and `verify_checkpoint()`.
 - Verification compares a checkpoint with current host-observed goal/runtime/transcript/budget inputs and emits `current`, `stale`, or `unknown`; never an execution grant.
 
-- [ ] Write RED tests for goal/policy/transcript/budget drift, no external pin (`current-unpinned`), matching external checkpoint pin (`current`), and invalid current inputs.
-- [ ] Implement comparison and reason precedence.
-- [ ] Run mutation checks proving each binding matters.
-- [ ] Run runtime and interop suites; commit.
+- [x] Write RED tests for goal/policy/transcript/budget drift, no external pin (`current-unpinned`), matching external checkpoint pin (`current`), and invalid current inputs.
+- [x] Implement comparison and reason precedence.
+- [x] Run mutation checks proving each binding matters; runtime suite 413/413 and interop suite 620/620 pass.
+- [x] Commit.
 
 ### Task 3: Explicit runtime adapter
 

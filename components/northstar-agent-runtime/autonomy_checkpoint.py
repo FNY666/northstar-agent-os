@@ -40,9 +40,42 @@ class AutonomyCheckpoint:
         if item.computed_digest!=item.checkpoint_digest:raise AutonomyCheckpointError("checkpoint digest mismatch")
         return item
 
+@dataclass(frozen=True)
+class ContinuationVerdict:
+    state:str; reasons:tuple[str,...]=(); unverified:tuple[str,...]=(); execution_authorized:bool=False
+
+def _observed_digest(value:Any,field:str,domain:bytes)->str:
+    try:return _hash(domain,_host(value,field))
+    except AutonomyCheckpointError:raise AutonomyCheckpointError(field+"_unreadable") from None
+
+def verify_checkpoint(checkpoint:Any,*,goal:Any,session_id:str,runtime:Any,transcript:Any,budget:Any,now:int,expected_checkpoint_digest:str|None=None)->ContinuationVerdict:
+    try:
+        if not isinstance(checkpoint,AutonomyCheckpoint):raise AutonomyCheckpointError("checkpoint invalid")
+        checkpoint=AutonomyCheckpoint.from_dict(checkpoint.to_dict())
+    except (AttributeError,AutonomyCheckpointError):
+        return ContinuationVerdict("unknown",("checkpoint_unreadable",),(),False)
+    if not isinstance(now,int) or isinstance(now,bool):raise AutonomyCheckpointError("now invalid")
+    if expected_checkpoint_digest is not None and _digest(expected_checkpoint_digest,"expected_checkpoint_digest")!=checkpoint.checkpoint_digest:raise AutonomyCheckpointError("external checkpoint digest mismatch")
+    try:
+        observed={
+            "goal":_observed_digest(goal,"goal",b"northstar.autonomy-goal.v1\0"),
+            "runtime":_observed_digest(runtime,"runtime",b"northstar.autonomy-runtime.v1\0"),
+            "transcript":_observed_digest(transcript,"transcript",b"northstar.autonomy-transcript.v1\0"),
+            "budget":_observed_digest(budget,"budget",b"northstar.autonomy-budget.v1\0"),
+        }
+        observed_session=_session(session_id)
+    except AutonomyCheckpointError as error:
+        return ContinuationVerdict("unknown",(str(error),),(),False)
+    bindings={"goal":checkpoint.goal_digest,"runtime":checkpoint.runtime_digest,"transcript":checkpoint.transcript_digest,"budget":checkpoint.budget_digest}
+    changed=[field+"_changed" for field,digest in bindings.items() if observed[field]!=digest]
+    if observed_session!=checkpoint.session_id:changed.append("session_id_changed")
+    if changed:return ContinuationVerdict("stale",tuple(changed),(),False)
+    if expected_checkpoint_digest is None:return ContinuationVerdict("current-unpinned",(),("checkpoint_digest_unpinned",),False)
+    return ContinuationVerdict("current",(),(),False)
+
 def capture_checkpoint(*,goal:Any,session_id:str,runtime:Any,transcript:Any,budget:Any,observed_at:int)->AutonomyCheckpoint:
     if not isinstance(observed_at,int) or isinstance(observed_at,bool):raise AutonomyCheckpointError("observed_at invalid")
     draft=AutonomyCheckpoint(SCHEMA,_hash(b"northstar.autonomy-goal.v1\0",_host(goal,"goal")),_session(session_id),_hash(b"northstar.autonomy-runtime.v1\0",_host(runtime,"runtime")),_hash(b"northstar.autonomy-transcript.v1\0",_host(transcript,"transcript")),_hash(b"northstar.autonomy-budget.v1\0",_host(budget,"budget")),observed_at,False,"")
     return AutonomyCheckpoint(draft.schema_version,draft.goal_digest,draft.session_id,draft.runtime_digest,draft.transcript_digest,draft.budget_digest,draft.observed_at,False,draft.computed_digest)
 
-__all__=["SCHEMA","AutonomyCheckpointError","AutonomyCheckpoint","capture_checkpoint"]
+__all__=["SCHEMA","AutonomyCheckpointError","AutonomyCheckpoint","ContinuationVerdict","capture_checkpoint","verify_checkpoint"]
