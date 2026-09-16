@@ -16,6 +16,18 @@ class AdmissionLedgerError(ValueError):
 
 
 @dataclass(frozen=True)
+class AdmissionConflict:
+    """A detected conflict between two admission decisions."""
+    earlier_sequence: int
+    later_sequence: int
+    checkpoint_digest: str
+    earlier_state: str
+    later_state: str
+    conflict_type: str  # "admit-vs-block" | "block-vs-admit" | "state-change"
+    time_delta_seconds: int
+
+
+@dataclass(frozen=True)
 class AdmissionRecord:
     """A recorded admission decision."""
     sequence: int
@@ -23,6 +35,7 @@ class AdmissionRecord:
     admission_digest: str
     state: str
     observed_at: int
+    checkpoint_digest: str = ""  # Added for conflict detection
     record_digest: str = ""
     
     def to_dict(self) -> dict[str, Any]:
@@ -32,6 +45,7 @@ class AdmissionRecord:
             "admission_digest": self.admission_digest,
             "state": self.state,
             "observed_at": self.observed_at,
+            "checkpoint_digest": self.checkpoint_digest,
             "record_digest": self.record_digest,
         }
     
@@ -45,6 +59,9 @@ class AdmissionRecord:
             "state": self.state,
             "observed_at": self.observed_at,
         }
+        # Only include checkpoint_digest if present (backward compatible)
+        if self.checkpoint_digest:
+            draft["checkpoint_digest"] = self.checkpoint_digest
         return sha256(json.dumps(draft, sort_keys=True).encode()).hexdigest()
 
 
@@ -82,6 +99,7 @@ class AdmissionLedger:
             admission_digest=admission.admission_digest,
             state=admission.state,
             observed_at=observed_at,
+            checkpoint_digest=admission.checkpoint_digest,
         )
         
         # Finalize with computed digest
@@ -91,6 +109,7 @@ class AdmissionLedger:
             record.admission_digest,
             record.state,
             record.observed_at,
+            record.checkpoint_digest,  # Must preserve checkpoint_digest
             record.computed_digest,
         )
         
@@ -131,6 +150,75 @@ class AdmissionLedger:
         
         return matches
     
+    def detect_conflicts(
+        self,
+        session_id: str,
+        *,
+        window_seconds: int | None = None,
+    ) -> list[AdmissionConflict]:
+        """
+        Detect conflicting admission decisions for same checkpoint.
+        
+        Returns chronologically ordered conflicts.
+        """
+        records = self.query(session_id)
+        
+        if len(records) < 2:
+            return []
+        
+        conflicts = []
+        
+        # Group by checkpoint_digest
+        by_checkpoint: dict[str, list[AdmissionRecord]] = {}
+        for record in records:
+            if record.checkpoint_digest:
+                by_checkpoint.setdefault(record.checkpoint_digest, []).append(record)
+        
+        # Compare pairs within each checkpoint group
+        for checkpoint_digest, group in by_checkpoint.items():
+            if len(group) < 2:
+                continue
+            
+            # Compare chronologically ordered pairs
+            for i, earlier in enumerate(group):
+                for later in group[i+1:]:
+                    time_delta = later.observed_at - earlier.observed_at
+                    
+                    # Apply window filter
+                    if window_seconds is not None and time_delta > window_seconds:
+                        continue
+                    
+                    # Detect conflict type
+                    conflict_type = self._classify_conflict(earlier.state, later.state)
+                    
+                    if conflict_type:
+                        conflicts.append(AdmissionConflict(
+                            earlier_sequence=earlier.sequence,
+                            later_sequence=later.sequence,
+                            checkpoint_digest=checkpoint_digest,
+                            earlier_state=earlier.state,
+                            later_state=later.state,
+                            conflict_type=conflict_type,
+                            time_delta_seconds=time_delta,
+                        ))
+        
+        return conflicts
+    
+    def _classify_conflict(self, earlier_state: str, later_state: str) -> str | None:
+        """Classify conflict type between two states."""
+        earlier_is_admit = earlier_state.startswith("admit")
+        later_is_admit = later_state.startswith("admit")
+        
+        if earlier_is_admit and not later_is_admit:
+            return "admit-vs-block"
+        elif not earlier_is_admit and later_is_admit:
+            return "block-vs-admit"
+        elif earlier_state != later_state:
+            return "state-change"
+        else:
+            # Same state, no conflict
+            return None
+    
     def _read_all(self) -> list[AdmissionRecord]:
         """Read all records from ledger. Fail-closed on corruption."""
         if not self.path.exists():
@@ -156,6 +244,7 @@ class AdmissionLedger:
                         admission_digest=data.get("admission_digest"),
                         state=data.get("state"),
                         observed_at=data.get("observed_at"),
+                        checkpoint_digest=data.get("checkpoint_digest", ""),  # Backward compatible
                         record_digest=data.get("record_digest"),
                     )
                     
