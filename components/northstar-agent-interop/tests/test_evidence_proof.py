@@ -73,3 +73,44 @@ class ProofTests(unittest.TestCase):
         self.assertEqual(verify_route_evidence_proof(*data).verdict, "unknown")
 
 if __name__=='__main__': unittest.main()
+
+
+class ProofLineageCoverageTests(ProofTests):
+    def _graph_with_unaccounted_branch(self):
+        from route_lineage import (
+            INTEGRITY_SCHEMA, ZERO_DIGEST, LineageGraph, RouteLineageEvent,
+        )
+        def make(sequence, prev, event_id, status, parent):
+            return RouteLineageEvent(
+                schema_version=INTEGRITY_SCHEMA, event_id=event_id, route_id="r1",
+                parent_event_id=parent, receipt_id="receipt-" + event_id,
+                status=status, target_agent_id="codex", provider="openai",
+                capabilities=("workspace:read",), deadline_at=90,
+                payload_digest="sha256:" + "a" * 64,
+                decision_fingerprint="sha256:" + "b" * 64, retryable=False,
+                sequence=sequence, prev_event_digest=prev,
+            )
+        graph = LineageGraph()
+        prev = ZERO_DIGEST
+        for sequence, (event_id, status, parent) in enumerate(
+            (("e1", "planned", None), ("e2", "dispatched", "e1"),
+             ("e3", "dispatched", "e1"), ("e4", "succeeded", "e2")), start=1
+        ):
+            item = make(sequence, prev, event_id, status, parent)
+            graph.append(item)
+            prev = item.event_digest.removeprefix("sha256:")
+        return graph
+
+    def test_an_unaccounted_branch_is_not_verified_by_the_proof(self):
+        from evidence_bundle import build_lineage_bundle, make_proof
+        from evidence_chain import EvidenceChain
+        data = list(self.setup_data())
+        graph = self._graph_with_unaccounted_branch()
+        terminal = graph.events["e4"]
+        events = list(graph.read())
+        data[1] = graph
+        data[2] = build_lineage_bundle(events)
+        chain = EvidenceChain(); chain.append(data[2]); data[3] = chain
+        data[4] = terminal
+        data[5] = make_proof(data[2], events.index(terminal))
+        self.assertNotEqual(verify_route_evidence_proof(*data).verdict, "verified")

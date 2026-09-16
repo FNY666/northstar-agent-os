@@ -12,6 +12,7 @@ class ProofResult:
     verdict:str
     reasons:tuple[str,...]
 def verify_route_evidence_proof(route_record:Any,lineage:Any,bundle:Any,checkpoint_chain:Any,event:Any,proof:Any,handoff:Any,*extra)->ProofResult:
+    """Compose the evidence layers; the lineage layer is verified, not assumed."""
     if any(x is None for x in (route_record,lineage,bundle,checkpoint_chain,event,proof,handoff)): return ProofResult('unknown',('missing evidence layer',))
     try:
         verify_chain(checkpoint_chain)
@@ -22,6 +23,15 @@ def verify_route_evidence_proof(route_record:Any,lineage:Any,bundle:Any,checkpoi
             raise ProofError('checkpoint root does not match evidence bundle')
     except (EvidenceError,ChainError,ValueError) as exc:
         return ProofResult('unknown',(str(exc),))
+    try:
+        lineage_verdict = verify_lineage(
+            lineage, route_record=route_record, handoff=handoff,
+            route_id=route_record.get('route_id'),
+        )
+    except ValueError as exc:
+        return ProofResult('unknown', (str(exc),))
+    if lineage_verdict.verdict != 'verified':
+        return ProofResult('unknown', lineage_verdict.reasons or ('lineage is not verified',))
     terminal = list(lineage.read())[-1]
     cross = verify_cross_layer(
         {
