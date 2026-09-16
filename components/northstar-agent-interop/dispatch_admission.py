@@ -5,6 +5,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from evidence_readiness_preflight import EvidenceReadinessPreflight, PreflightError
+from plan_evidence_decision import EvidencePlanManifest, PlanDecisionError
 from route_liveness import RouteLivenessVerdict
 
 SCHEMA = "northstar.dispatch-admission.v1"
@@ -101,10 +102,24 @@ def _label(value: Any, field: str) -> str:
     return value
 
 
+def derive_plan_id(manifest_digest: Any) -> str:
+    """Reproduce the host-owned plan identity used by the plan evidence gate."""
+    if not isinstance(manifest_digest, str) or _DIGEST.fullmatch(manifest_digest) is None:
+        raise DispatchAdmissionError("manifest_digest invalid")
+    return "plan-evidence:" + manifest_digest[7:23]
+
+
 def evaluate_dispatch_admission(
-    preflight: Any, liveness: Any, *, plan_id: str
+    preflight: Any, liveness: Any, *, plan_id: str, plan_manifest: Any = None
 ) -> DispatchAdmission:
-    """Combine evidence readiness with route liveness; never authorises a dispatch."""
+    """Combine evidence readiness with route liveness; never authorises a dispatch.
+
+    ``plan_id`` is caller-labelled and therefore cannot be trusted on its own. A
+    host-owned ``plan_manifest`` corroborates it: the manifest digest must match
+    the preflight's manifest digest and the label must equal the derived plan
+    identity. Without that corroboration the plan identity is recorded in
+    ``unverified`` and no clean ``admit`` is produced.
+    """
     if not isinstance(preflight, EvidenceReadinessPreflight):
         raise DispatchAdmissionError("preflight invalid")
     if not isinstance(liveness, RouteLivenessVerdict):
@@ -117,9 +132,25 @@ def evaluate_dispatch_admission(
         preflight = EvidenceReadinessPreflight.from_dict(preflight.to_dict())
     except PreflightError as exc:
         raise DispatchAdmissionError("preflight invalid") from exc
+    if plan_manifest is None:
+        plan_unverified = ("plan_id_unverified",)
+    else:
+        if not isinstance(plan_manifest, EvidencePlanManifest):
+            raise DispatchAdmissionError("plan_manifest invalid")
+        try:
+            manifest = EvidencePlanManifest.from_dict(plan_manifest.to_dict())
+        except PlanDecisionError as exc:
+            raise DispatchAdmissionError("plan_manifest invalid") from exc
+        if manifest.manifest_digest != preflight.manifest_digest:
+            raise DispatchAdmissionError("plan manifest was not the preflighted plan")
+        if plan != derive_plan_id(manifest.manifest_digest):
+            raise DispatchAdmissionError("plan_id does not match the derived plan identity")
+        plan_unverified = ()
     evidence_state = preflight.state
     route_state = liveness.state
-    unverified = tuple(sorted(set(preflight.unverified) | set(liveness.unverified)))
+    unverified = tuple(
+        sorted(set(preflight.unverified) | set(liveness.unverified) | set(plan_unverified))
+    )
     evidence_open = evidence_state in EVIDENCE_READY
     evidence_unpinned = evidence_state in EVIDENCE_UNPINNED
     route_open = route_state in ROUTE_OPEN
@@ -153,5 +184,5 @@ def evaluate_dispatch_admission(
 
 __all__ = [
     "SCHEMA", "STATES", "DispatchAdmission", "DispatchAdmissionError",
-    "evaluate_dispatch_admission",
+    "derive_plan_id", "evaluate_dispatch_admission",
 ]

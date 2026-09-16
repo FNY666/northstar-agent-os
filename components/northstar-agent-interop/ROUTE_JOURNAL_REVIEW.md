@@ -881,6 +881,18 @@ What this does not prove:
   still use their respective pin/witness/cursor mechanisms when it needs drift
   detection.
 
+## Plan identity in dispatch admission
+
+- `plan_id` is caller-labelled, so it can never make an admission clean on its
+  own: without corroboration it is recorded as `plan_id_unverified` and the
+  strongest state becomes `admit-unpinned`.
+- A host-owned `EvidencePlanManifest` corroborates it: the manifest digest must
+  equal the preflight's manifest digest, and the label must equal the derived
+  plan identity (`plan-evidence:<manifest digest prefix>`), mirroring the plan
+  evidence gate. A drift test fails loudly if that upstream derivation changes.
+- Two callers can no longer label the same evidence preflight with different
+  plan identities and obtain different admission digests that both look bound.
+
 ## Dispatch admission witness
 
 - `DispatchAdmissionWitness` binds the admission digest to the source preflight
