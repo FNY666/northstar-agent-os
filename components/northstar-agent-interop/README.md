@@ -231,3 +231,20 @@ prefix, or the rebuilt graph does not reproduce the recorded commitment) or
 caller-held digest pin). Every verdict carries `execution_authorized=False`:
 this reports a relation between two evidence artifacts, and it converges
 nothing, repairs nothing and authorizes nothing.
+
+The `CausalEvidenceStore` index has the same blind spot at a finer grain. An
+edge keeps the digests of the two events it connects, admission only checks that
+the edge is internally consistent, and nothing afterwards related the index to
+the source - so a rollback or truncation leaves the index holding edges whose
+endpoints no longer exist, while recovery still reports the journal as verified.
+`verify_edge_against_source()` reports `edge-current`, `edge-stale` (an endpoint
+is gone, or the endpoints are no longer ordered parent-before-child) or
+`edge-unknown` (nothing to compare), always with `execution_authorized=False`.
+
+This is deliberately weaker than projection reconciliation, because the edge
+record carries less: it can confirm the endpoints are still present and ordered,
+but it cannot re-derive the edge, which would need the segment boundaries and
+handoffs the edge record does not keep. Appending an edge also still only checks
+that the edge is internally consistent, so a forged but self-consistent edge is
+accepted - reconciling it against the source is the caller's check, not
+something the index performs.

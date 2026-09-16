@@ -5,6 +5,7 @@ import fcntl
 import hashlib
 import json
 import os
+from collections.abc import Sequence
 from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
@@ -12,9 +13,14 @@ from typing import Any
 
 from interop_contract import RECOVERY_EMPTY, RECOVERY_VERIFIED
 from route_causality import CausalEdge
+from route_lineage import LineageEvent
 
 _SCHEMA = "northstar.causal-evidence.v2"
 _PREFIX = "sha256:"
+
+EDGE_CURRENT = "edge-current"
+EDGE_STALE = "edge-stale"
+EDGE_UNKNOWN = "edge-unknown"
 
 
 def _canonical(value: Any) -> bytes:
@@ -196,3 +202,60 @@ class CausalEvidenceStore:
         # journals are indistinguishable without an external cursor anchor.
         verdict = RECOVERY_VERIFIED if records else RECOVERY_EMPTY
         return EvidenceRecovery(verdict, tuple(records), cursor)
+@dataclass(frozen=True)
+class EdgeVerdict:
+    """Whether a stored causal edge still stands against the source lineage."""
+
+    verdict: str
+    reason: str
+    execution_authorized: bool = False
+
+
+def verify_edge_against_source(
+    edge: CausalEdge,
+    source_events: Sequence[LineageEvent],
+) -> EdgeVerdict:
+    """Re-check a stored causal edge against the source it was derived from.
+
+    The index holds edges for admitted graph commitments, but nothing related a
+    stored edge back to the source afterwards: an edge carries the digests of the
+    two events it connects and no API read them back. A source that was later
+    rolled back or truncated therefore leaves the index holding edges whose
+    endpoints no longer exist, while recovery still reports the journal as
+    verified.
+
+    What this does and does not say: the record keeps only its two endpoints, so
+    this confirms both are still present and still ordered parent-before-child.
+    It does not re-derive the edge, so it cannot show the source would produce it
+    again - that would need the segment boundaries and handoffs the edge record
+    does not carry. Nothing here authorizes execution.
+    """
+    if not isinstance(edge, CausalEdge):
+        raise ValueError("causal edge is invalid")
+    if not isinstance(source_events, Sequence) or isinstance(source_events, (str, bytes)):
+        raise ValueError("source lineage events are invalid")
+    for event in source_events:
+        if not isinstance(event, LineageEvent):
+            raise ValueError("source lineage events are invalid")
+    if not source_events:
+        return EdgeVerdict(
+            EDGE_UNKNOWN,
+            "source lineage has no events to compare",
+        )
+    positions = {event.event_digest: index for index, event in enumerate(source_events)}
+    parent = positions.get(edge.parent_event_digest)
+    child = positions.get(edge.child_event_digest)
+    if parent is None or child is None:
+        return EdgeVerdict(
+            EDGE_STALE,
+            "causal edge references events the source no longer contains",
+        )
+    if parent >= child:
+        return EdgeVerdict(
+            EDGE_STALE,
+            "causal edge endpoints are no longer ordered in the source",
+        )
+    return EdgeVerdict(
+        EDGE_CURRENT,
+        "source lineage still contains the causal edge endpoints in order",
+    )
