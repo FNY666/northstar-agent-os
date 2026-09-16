@@ -486,6 +486,16 @@ verdict. Three mutation declarations keep this honest: making the exit code read
 the advisory, widening the contract's allowed mutations, or ignoring the
 evidence journal must each make the guards fail.
 
+`live/advisory-*.json` are the fixtures that turn the advisory on for the
+ordinary production path; a fixture-integrity test keeps their production
+expectations, contract artifacts, and milestone map from drifting apart. The
+first live production run of this path (2026-09-16, DeepSeek V4 Flash) produced
+a verified advisory, and a second run reproduced a failure worth keeping: the
+provider refused the second round (HTTP 402, exhausted credit) after the first
+round delivered a wrong report, and the advisory had to report `unknown` rather
+than inherit that round's apparent progress. An offline guard now pins that
+sequence.
+
 ## Deliberate ceiling
 
 This is not a production scheduler, sandbox, VM, container runtime, browser

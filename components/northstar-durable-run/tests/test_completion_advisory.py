@@ -45,6 +45,7 @@ from completion_contract_v2 import (  # noqa: E402
 from completion_live_shadow import production_result_from_host_check  # noqa: E402
 from completion_shadow import compose_shadow  # noqa: E402
 from live_run import build_shadow_advisory  # noqa: E402
+from planner_adapter import PlannerModelCallFailed  # noqa: E402
 from planner_adapter import PlannerModelResponse  # noqa: E402
 from test_agent_entry import step_value  # noqa: E402
 
@@ -114,9 +115,10 @@ def plan_from_context(context: dict, steps: list[dict]) -> dict:
 class _ContextCaller:
     """Deterministic planner: builds the plan from published context, no network."""
 
-    def __init__(self, written: _Written, contents: list[str] | None = None):
+    def __init__(self, written: _Written, contents: list[str] | None = None, fail_on_call: int | None = None):
         self.written = written
         self.contents = contents
+        self.fail_on_call = fail_on_call
         self.calls = 0
 
     def _content(self) -> str:
@@ -127,6 +129,10 @@ class _ContextCaller:
 
     def __call__(self, *, goal, context, repair_error, attempt):
         self.calls += 1
+        if self.fail_on_call is not None and self.calls >= self.fail_on_call:
+            # Mirrors a provider refusal observed live (HTTP 402, exhausted credit):
+            # the condition persists rather than clearing on the next attempt.
+            raise PlannerModelCallFailed("provider call refused")
         deadline = context["deadline_at"]
 
         def step(step_id, action_id, payload, postcondition):
@@ -256,6 +262,7 @@ class LiveRunWiringTest(unittest.TestCase):
         written: _Written,
         contents: list[str] | None = None,
         tag: str = "run",
+        fail_on_call: int | None = None,
     ) -> tuple[int, dict, Path]:
         """Run the real production path offline by scripting the planner."""
         fixture_path = self.root / f"{tag}-fixture.json"
@@ -266,7 +273,7 @@ class LiveRunWiringTest(unittest.TestCase):
         with patch.object(
             live_run,
             "OpenAICompatiblePlannerCaller",
-            lambda config: _ContextCaller(written, contents),
+            lambda config: _ContextCaller(written, contents, fail_on_call),
         ), contextlib.redirect_stdout(stdout):
             code = live_run.main(
                 [
@@ -364,6 +371,33 @@ class LiveRunWiringTest(unittest.TestCase):
         self.assertTrue(advisory["evidence_journal"].endswith("round-2.evidence.jsonl"))
         self.assertTrue((sandbox / "evidence" / "round-2.evidence.jsonl").exists())
 
+    def test_provider_failure_mid_run_yields_unknown_not_verified(self):
+        """Observed live on 2026-09-16: the planner was refused on round 2 (HTTP 402).
+
+        The first round ended with a wrong deliverable (the model reported 3 rows
+        and `top_scorer: Alice`), so a second round was attempted and the provider
+        refused it. The advisory had to say `unknown` rather than inherit the
+        first round's apparent progress.
+        """
+        fixture = json.loads((SHADOW / "01-column-report-shadow.json").read_text(encoding="utf-8"))
+        wrong = (
+            "number_of_data_rows: 3\n"
+            "columns: name, score, city\n"
+            "top_scorer: Alice\n"
+        )
+        code, report, _ = self.run_fixture(
+            fixture,
+            _Written("out/report.md", wrong),
+            contents=[wrong, COMPLIANT],
+            tag="provider-failure",
+            fail_on_call=2,
+        )
+        self.assertFalse(report["ok"])
+        self.assertEqual(code, 1)
+        advisory = report["shadow_advisory"]
+        self.assertTrue(advisory["available"], advisory)
+        self.assertEqual(advisory["layered_verdict"], "unknown", advisory)
+
     def test_the_verdict_follows_the_journal_it_is_given(self):
         """Discriminating twin: same inputs, only the terminal journal differs."""
         fixture = {
@@ -435,6 +469,46 @@ class LiveRunWiringTest(unittest.TestCase):
         self.assertTrue(without_journal["available"], without_journal)
         self.assertEqual(with_journal["layered_verdict"], "verified", with_journal)
         self.assertNotEqual(without_journal["layered_verdict"], "verified", without_journal)
+
+
+class ProductionFixtureIntegrityTest(unittest.TestCase):
+    """Keep the fixtures that enable the advisory from drifting apart."""
+
+    def fixtures(self) -> list[tuple[Path, dict]]:
+        root = Path(__file__).resolve().parent.parent
+        found = sorted(root.glob("live/advisory-*.json"))
+        self.assertTrue(found, "expected production advisory fixtures")
+        return [(path, json.loads(path.read_text(encoding="utf-8"))) for path in found]
+
+    def test_every_contract_artifact_is_also_a_production_expectation(self):
+        for path, fixture in self.fixtures():
+            expected = {item["path"] for item in fixture["expect"]}
+            declared = {item["path"] for item in fixture["shadow_contract"]["artifacts"]}
+            self.assertTrue(
+                declared <= expected,
+                f"{path.name}: contract checks files production does not: {declared - expected}",
+            )
+
+    def test_milestone_map_covers_only_actions_the_fixture_can_use(self):
+        allowed = {"workspace.list", "repo.read", "workspace.write"}
+        for path, fixture in self.fixtures():
+            spec = fixture["shadow_contract"]
+            mapped = set(spec["milestone_action_map"])
+            self.assertTrue(mapped <= allowed, f"{path.name}: unknown actions {mapped - allowed}")
+            self.assertEqual(
+                set(spec["milestones"]),
+                set(spec["milestone_action_map"].values()),
+                f"{path.name}: milestones and action map disagree",
+            )
+
+    def test_semantic_fields_name_a_machine_checkable_value(self):
+        for path, fixture in self.fixtures():
+            for artifact in fixture["shadow_contract"]["artifacts"]:
+                for field in artifact["semantic_fields"]:
+                    self.assertTrue(
+                        field["name"] and field["value"],
+                        f"{path.name}: empty semantic field {field}",
+                    )
 
 
 if __name__ == "__main__":
