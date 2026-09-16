@@ -1,0 +1,195 @@
+"""Host-owned, non-authorizing admission for autonomous continuation.
+
+An admission states only whether the *declared* continuation predicates agree:
+the checkpoint was verified against current host state, it is fresh within the
+host policy window, and any required pin is present. It never authorizes
+execution, never calls a provider, and never resumes a session.
+"""
+from __future__ import annotations
+import hashlib,json,re
+from dataclasses import dataclass
+from typing import Any
+
+from autonomy_checkpoint import AutonomyCheckpoint, AutonomyCheckpointError, ContinuationVerdict
+
+POLICY_SCHEMA = "northstar.continuation-policy.v1"
+ADMISSION_SCHEMA = "northstar.continuation-admission.v1"
+ADMISSION_STATES = frozenset({
+    "admit-continuation",
+    "admit-continuation-unpinned",
+    "blocked-continuation-stale",
+    "blocked-continuation-age",
+    "blocked-continuation-policy",
+    "unknown",
+})
+VERDICT_STATES = frozenset({"current", "current-unpinned", "stale", "unknown"})
+_DIGEST = re.compile(r"^sha256:[0-9a-f]{64}$")
+_POLICY_FIELDS = frozenset({"schema_version", "max_age_seconds", "require_pinned_checkpoint"})
+_ADMISSION_FIELDS = frozenset({
+    "schema_version", "state", "reasons", "unresolved", "policy_digest",
+    "checkpoint_digest", "age_seconds", "verdict_state", "execution_authorized",
+})
+
+
+class ContinuationAdmissionError(ValueError):
+    pass
+
+
+def _canonical(value: Any) -> bytes:
+    try:
+        return json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":"), allow_nan=False).encode()
+    except (TypeError, ValueError) as exc:
+        raise ContinuationAdmissionError("admission value is not canonical JSON") from exc
+
+
+def _digest(value: Any) -> str:
+    return "sha256:" + hashlib.sha256(_canonical(value)).hexdigest()
+
+
+def _digest_value(value: Any, field: str) -> str:
+    if not isinstance(value, str) or _DIGEST.fullmatch(value) is None:
+        raise ContinuationAdmissionError(field + " invalid")
+    return value
+
+
+def _tokens(value: Any, field: str) -> tuple[str, ...]:
+    if not isinstance(value, (list, tuple)):
+        raise ContinuationAdmissionError(field + " invalid")
+    for item in value:
+        if not isinstance(item, str) or not item:
+            raise ContinuationAdmissionError(field + " invalid")
+    return tuple(value)
+
+
+@dataclass(frozen=True)
+class ContinuationPolicy:
+    """Host-declared freshness and pinning requirements for a continuation."""
+    max_age_seconds: int
+    require_pinned_checkpoint: bool = True
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.max_age_seconds, int) or isinstance(self.max_age_seconds, bool) or self.max_age_seconds < 0:
+            raise ContinuationAdmissionError("max_age_seconds invalid")
+        if not isinstance(self.require_pinned_checkpoint, bool):
+            raise ContinuationAdmissionError("require_pinned_checkpoint invalid")
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "schema_version": POLICY_SCHEMA,
+            "max_age_seconds": self.max_age_seconds,
+            "require_pinned_checkpoint": self.require_pinned_checkpoint,
+        }
+
+    @property
+    def policy_digest(self) -> str:
+        return _digest(self.to_dict())
+
+    @classmethod
+    def from_dict(cls, value: Any) -> "ContinuationPolicy":
+        if not isinstance(value, dict) or set(value) != _POLICY_FIELDS or value.get("schema_version") != POLICY_SCHEMA:
+            raise ContinuationAdmissionError("policy fields invalid")
+        return cls(value.get("max_age_seconds"), value.get("require_pinned_checkpoint"))
+
+
+@dataclass(frozen=True)
+class ContinuationAdmission:
+    state: str
+    reasons: tuple[str, ...] = ()
+    unresolved: tuple[str, ...] = ()
+    policy_digest: str | None = None
+    checkpoint_digest: str | None = None
+    age_seconds: int | None = None
+    verdict_state: str | None = None
+    execution_authorized: bool = False
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "schema_version": ADMISSION_SCHEMA,
+            "state": self.state,
+            "reasons": list(self.reasons),
+            "unresolved": list(self.unresolved),
+            "policy_digest": self.policy_digest,
+            "checkpoint_digest": self.checkpoint_digest,
+            "age_seconds": self.age_seconds,
+            "verdict_state": self.verdict_state,
+            "execution_authorized": self.execution_authorized,
+        }
+
+    @classmethod
+    def from_dict(cls, value: Any) -> "ContinuationAdmission":
+        if not isinstance(value, dict) or set(value) != _ADMISSION_FIELDS or value.get("schema_version") != ADMISSION_SCHEMA:
+            raise ContinuationAdmissionError("admission fields invalid")
+        if value.get("execution_authorized") is not False:
+            raise ContinuationAdmissionError("admission cannot authorize execution")
+        state = value.get("state")
+        if state not in ADMISSION_STATES:
+            raise ContinuationAdmissionError("admission state invalid")
+        age = value.get("age_seconds")
+        if age is not None and (not isinstance(age, int) or isinstance(age, bool)):
+            raise ContinuationAdmissionError("age_seconds invalid")
+        verdict_state = value.get("verdict_state")
+        if verdict_state is not None and verdict_state not in VERDICT_STATES:
+            raise ContinuationAdmissionError("verdict_state invalid")
+        policy_digest = value.get("policy_digest")
+        checkpoint_digest = value.get("checkpoint_digest")
+        return cls(
+            state,
+            _tokens(value.get("reasons"), "reasons"),
+            _tokens(value.get("unresolved"), "unresolved"),
+            None if policy_digest is None else _digest_value(policy_digest, "policy_digest"),
+            None if checkpoint_digest is None else _digest_value(checkpoint_digest, "checkpoint_digest"),
+            age,
+            verdict_state,
+            False,
+        )
+
+
+def _admission(state, reasons, unresolved, policy, checkpoint_digest, age, verdict_state):
+    return ContinuationAdmission(
+        state, tuple(reasons), tuple(unresolved), policy.policy_digest,
+        checkpoint_digest, age, verdict_state, False,
+    )
+
+
+def evaluate_continuation_admission(
+    checkpoint: Any, verdict: Any, *, policy: ContinuationPolicy, now: int
+) -> ContinuationAdmission:
+    """Compose a host policy with a verified continuation; never authorizes execution."""
+    if not isinstance(policy, ContinuationPolicy):
+        raise ContinuationAdmissionError("policy invalid")
+    policy = ContinuationPolicy.from_dict(policy.to_dict())
+    if not isinstance(now, int) or isinstance(now, bool):
+        raise ContinuationAdmissionError("now invalid")
+    if not isinstance(verdict, ContinuationVerdict):
+        return _admission("unknown", ("verdict_unreadable",), (), policy, None, None, None)
+    if verdict.execution_authorized is not False:
+        raise ContinuationAdmissionError("verdict cannot authorize execution")
+    if verdict.state not in VERDICT_STATES:
+        raise ContinuationAdmissionError("verdict state invalid")
+    if checkpoint is None:
+        return _admission("unknown", verdict.reasons or ("checkpoint_unrecorded",), verdict.unverified, policy, None, None, verdict.state)
+    try:
+        checkpoint = AutonomyCheckpoint.from_dict(checkpoint.to_dict())
+    except (AttributeError, AutonomyCheckpointError):
+        return _admission("unknown", ("checkpoint_unreadable",), verdict.unverified, policy, None, None, verdict.state)
+    age = now - checkpoint.observed_at
+    if age < 0:
+        return _admission("unknown", ("observation_in_future",), verdict.unverified, policy, checkpoint.checkpoint_digest, None, verdict.state)
+    if verdict.state == "unknown":
+        return _admission("unknown", verdict.reasons or ("continuation_unverifiable",), verdict.unverified, policy, checkpoint.checkpoint_digest, age, verdict.state)
+    if verdict.state == "stale":
+        return _admission("blocked-continuation-stale", verdict.reasons, verdict.unverified, policy, checkpoint.checkpoint_digest, age, verdict.state)
+    if age > policy.max_age_seconds:
+        return _admission("blocked-continuation-age", ("continuation_expired",), verdict.unverified, policy, checkpoint.checkpoint_digest, age, verdict.state)
+    if verdict.state == "current-unpinned":
+        if policy.require_pinned_checkpoint:
+            return _admission("blocked-continuation-policy", ("continuation_requires_pinned_checkpoint",), verdict.unverified, policy, checkpoint.checkpoint_digest, age, verdict.state)
+        return _admission("admit-continuation-unpinned", verdict.reasons, verdict.unverified, policy, checkpoint.checkpoint_digest, age, verdict.state)
+    return _admission("admit-continuation", verdict.reasons, verdict.unverified, policy, checkpoint.checkpoint_digest, age, verdict.state)
+
+
+__all__ = [
+    "ADMISSION_SCHEMA", "POLICY_SCHEMA", "ADMISSION_STATES",
+    "ContinuationAdmissionError", "ContinuationPolicy", "ContinuationAdmission",
+    "evaluate_continuation_admission",
+]

@@ -34,6 +34,11 @@ from autonomy_checkpoint import (
     verify_checkpoint,
 )
 from autonomy_checkpoint_store import AutonomyCheckpointStore
+from continuation_admission import (
+    ContinuationAdmission,
+    ContinuationPolicy,
+    evaluate_continuation_admission,
+)
 from budget import Budget
 from compaction import CompactionOutcome, compact, should_compact
 from hooks import HookInput, HookRegistry
@@ -1562,6 +1567,9 @@ class AgentRuntime:
         resolution = store.resolve(
             self.session_id, expected_record_digest=expected_record_digest
         )
+        return self._compose_persisted_verdict(resolution, goal=goal, now=now)
+
+    def _compose_persisted_verdict(self, resolution: Any, *, goal: Any, now: int) -> ContinuationVerdict:
         if resolution.state == "stale":
             return ContinuationVerdict("stale", resolution.reasons, (), False)
         if resolution.state in {"unrecorded", "unverifiable"} or resolution.record is None:
@@ -1584,6 +1592,26 @@ class AgentRuntime:
                 False,
             )
         return verdict
+
+    def admit_persisted_continuation_checkpoint(
+        self,
+        store: AutonomyCheckpointStore,
+        *,
+        goal: Any,
+        now: int,
+        policy: ContinuationPolicy,
+        expected_record_digest: str | None = None,
+    ) -> ContinuationAdmission:
+        """Evaluate a host-owned admission for a persisted continuation; never resumes work."""
+        if not isinstance(store, AutonomyCheckpointStore):
+            raise RuntimeConfigurationError("continuation store is invalid")
+        resolution = store.resolve(
+            self.session_id, expected_record_digest=expected_record_digest
+        )
+        verdict = self._compose_persisted_verdict(resolution, goal=goal, now=now)
+        record = resolution.record
+        checkpoint = record.checkpoint_value if record is not None else None
+        return evaluate_continuation_admission(checkpoint, verdict, policy=policy, now=now)
 
     # -- resume ------------------------------------------------------------
     def resume_transcript(self) -> list[Any]:
