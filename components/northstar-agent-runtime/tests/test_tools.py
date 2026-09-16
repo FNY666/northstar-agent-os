@@ -9,6 +9,7 @@ from pathlib import Path
 import support  # noqa: F401
 from support import RuntimeTestCase, tool_turn
 
+from permissions import MUTATING_KINDS, TOOL_KINDS
 from tools import (
     MAX_GREP_MATCHES,
     MAX_LIST_ENTRIES,
@@ -334,3 +335,32 @@ class SidecarToolShapeTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class ToolKindValidationTests(unittest.TestCase):
+    """A kind outside the declared set must not be read as read-only."""
+
+    def _spec(self, **overrides):
+        fields = dict(
+            name="Mystery",
+            description="a capability",
+            input_schema={"type": "object", "properties": {}},
+            handler=lambda payload, context: None,
+        )
+        fields.update(overrides)
+        return ToolSpec(**fields)
+
+    def test_an_unknown_kind_is_refused_at_construction(self):
+        with self.assertRaises(ValueError):
+            self._spec(kind="totally_unknown_kind")
+
+    def test_every_declared_kind_still_constructs_with_a_derived_flag(self):
+        for kind in sorted(TOOL_KINDS):
+            spec = self._spec(kind=kind)
+            self.assertEqual(spec.is_mutating, kind in MUTATING_KINDS, kind)
+
+    def test_an_unknown_kind_cannot_reach_the_gate_as_read_only(self):
+        from permissions import PermissionEngine
+        engine = PermissionEngine(mode="plan")
+        with self.assertRaises(ValueError):
+            engine.evaluate_spec(self._spec(kind="totally_unknown_kind"), {})

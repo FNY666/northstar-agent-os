@@ -37,6 +37,10 @@ PERMISSION_MODES: tuple[PermissionMode, ...] = (
 
 ToolKind = Literal["read", "edit", "exec", "task", "network", "other"]
 
+#: Every kind a tool may declare. Anything else is a protocol breach, not a
+#: read-only default, so tools validate against this set at construction.
+TOOL_KINDS: frozenset[str] = frozenset({"read", "edit", "exec", "task", "network", "other"})
+
 #: Kinds that can change state outside the conversation.
 MUTATING_KINDS: frozenset[str] = frozenset({"edit", "exec", "network", "other"})
 
@@ -223,7 +227,7 @@ class PermissionEngine:
         why the engine keeps a name→kind map as well.
         """
         resolved_kind = kind or self._kinds.get(tool_name) or "other"
-        if resolved_kind not in {"read", "edit", "exec", "task", "network", "other"}:
+        if resolved_kind not in TOOL_KINDS:
             resolved_kind = "other"
         is_mutating = (resolved_kind in MUTATING_KINDS) if mutating is None else bool(mutating)
 

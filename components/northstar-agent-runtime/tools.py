@@ -21,6 +21,8 @@ import json
 import os
 import re
 from dataclasses import dataclass, field, replace
+
+from permissions import MUTATING_KINDS, TOOL_KINDS
 from pathlib import Path
 from typing import Any, Callable, Iterable, Literal, Mapping, Sequence
 
@@ -146,8 +148,12 @@ class ToolSpec:
     def __post_init__(self) -> None:
         if not self.name or not isinstance(self.name, str):
             raise ValueError("tool name must be a non-empty string")
+        if self.kind not in TOOL_KINDS:
+            raise ValueError(
+                f"unknown tool kind {self.kind!r}; expected one of {', '.join(sorted(TOOL_KINDS))}"
+            )
         if self.is_mutating is None:
-            object.__setattr__(self, "is_mutating", self.kind in {"edit", "exec", "network", "other"})
+            object.__setattr__(self, "is_mutating", self.kind in MUTATING_KINDS)
         _validate_handler_signature(self.name, self.handler)
 
     @property
