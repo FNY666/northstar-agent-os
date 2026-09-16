@@ -125,6 +125,85 @@ class ExperienceStatistics:
     execution_authorized: bool = False
 
 
+@dataclass(frozen=True)
+class AdmissionVerdict:
+    """Risk-informed admission decision based on experience."""
+
+    state: str
+    reason: str
+    confidence: float
+    execution_authorized: bool
+
+
+def evaluate_admission(
+    statistics: ExperienceStatistics,
+    *,
+    min_success_rate: float = 0.3,
+    min_sample_size: int = 3,
+    decline_is_blocking: bool = True,
+) -> AdmissionVerdict:
+    """Decide whether to admit a task based on its track record.
+    
+    Policy logic:
+    1. Insufficient data → admitted-with-caution, low confidence
+    2. Consistent failure → blocked
+    3. Declining trend → blocked (if flag set) or warned
+    4. Good standing → admitted
+    5. Excellent standing → admitted with high confidence
+    
+    Confidence based on sample size: min(1.0, total_runs / 10)
+    """
+    total_runs = statistics.total_runs
+    success_rate = statistics.success_rate
+    recent_trend = statistics.recent_trend
+    
+    # Confidence scoring based on sample size
+    confidence = min(1.0, total_runs / 10.0) if total_runs > 0 else 0.1
+    
+    # Insufficient data
+    if total_runs < min_sample_size:
+        return AdmissionVerdict(
+            state="admitted-with-caution",
+            reason="insufficient-data",
+            confidence=confidence,
+            execution_authorized=True,
+        )
+    
+    # Consistent failure
+    if success_rate is not None and success_rate < min_success_rate:
+        return AdmissionVerdict(
+            state="blocked",
+            reason="consistent-failure",
+            confidence=confidence,
+            execution_authorized=False,
+        )
+    
+    # Declining trend
+    if recent_trend == "declining":
+        if decline_is_blocking:
+            return AdmissionVerdict(
+                state="blocked",
+                reason="performance-declining",
+                confidence=confidence,
+                execution_authorized=False,
+            )
+        else:
+            return AdmissionVerdict(
+                state="admitted-with-caution",
+                reason="performance-declining-warning",
+                confidence=confidence,
+                execution_authorized=True,
+            )
+    
+    # Good or excellent standing
+    return AdmissionVerdict(
+        state="admitted",
+        reason="acceptable-standing",
+        confidence=confidence,
+        execution_authorized=True,
+    )
+
+
 def _digest(payload: dict[str, Any]) -> str:
     encoded = json.dumps(
         payload, sort_keys=True, separators=(",", ":"), ensure_ascii=False
