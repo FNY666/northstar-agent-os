@@ -250,8 +250,16 @@ class VerificationResult:
     verdict: Literal["verified", "failed", "unknown"]
     reasons: tuple[str, ...]
 
-def verify_lineage(graph: LineageGraph, *, route_record: dict[str, Any], handoff: dict[str, Any], max_events: int = 256) -> VerificationResult:
+def verify_lineage(graph: LineageGraph, *, route_record: dict[str, Any], handoff: dict[str, Any], max_events: int = 256, route_id: str | None = None) -> VerificationResult:
     events = list(graph.read())
+    if route_id is not None:
+        if not isinstance(route_id, str) or not route_id:
+            raise LineageError("route_id invalid")
+        events = [item for item in events if item.route_id == route_id]
+        if not events:
+            return VerificationResult("unknown", ("no lineage for the requested route",))
+    elif len({item.route_id for item in events}) > 1:
+        return VerificationResult("unknown", ("route identity not pinned for a multi-route lineage",))
     if not events or len(events) > max_events:
         return VerificationResult("unknown", ("lineage is missing or too large",))
     terminal = events[-1]
