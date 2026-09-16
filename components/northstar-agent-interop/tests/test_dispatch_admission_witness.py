@@ -44,6 +44,16 @@ class AdmissionWitnessTests(unittest.TestCase):
         )
         self.assertEqual(result.state, "current")
 
+    def test_liveness_for_a_different_route_is_refused(self):
+        other_route = RouteLivenessVerdict(LS, "route-2", "dispatchable", "", 0, (), (), False)
+        with self.assertRaises(AdmissionWitnessError):
+            make_admission_witness(self.admission, self.preflight, other_route, observed_at=1000)
+
+    def test_liveness_cannot_claim_execution_authority(self):
+        forged = RouteLivenessVerdict(LS, "route-1", "dispatchable", "", 0, (), (), True)
+        with self.assertRaises(AdmissionWitnessError):
+            make_admission_witness(self.admission, self.preflight, forged, observed_at=1000)
+
     def test_changed_preflight_is_stale(self):
         witness = make_admission_witness(
             self.admission, self.preflight, self.liveness, observed_at=1000

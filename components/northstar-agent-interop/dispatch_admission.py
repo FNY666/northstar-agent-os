@@ -109,6 +109,9 @@ def evaluate_dispatch_admission(
         raise DispatchAdmissionError("preflight invalid")
     if not isinstance(liveness, RouteLivenessVerdict):
         raise DispatchAdmissionError("liveness invalid")
+    if liveness.execution_authorized is not False:
+        raise DispatchAdmissionError("liveness cannot authorize execution")
+    _label(liveness.route_id, "liveness route_id")
     plan = _label(plan_id, "plan_id")
     try:
         preflight = EvidenceReadinessPreflight.from_dict(preflight.to_dict())

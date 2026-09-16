@@ -893,7 +893,9 @@ What this does not prove:
   `execution_authorized=False`.
 - Wire parsing re-validates the source-shaped digests and rejects a claimed
   execution authorization. The witness contains no action body, tool, provider
-  output, or permission.
+  output, or permission. Liveness must name the same route as the admission,
+  and both the admission evaluator and witness reject a liveness verdict that
+  claims execution authority.
 
 What this does not prove:
 

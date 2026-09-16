@@ -65,6 +65,13 @@ class DispatchAdmissionTests(unittest.TestCase):
         self.assertEqual(result.state, "admit-unpinned")
         self.assertIn("lineage_mark_absent", result.unverified)
 
+    def test_liveness_cannot_claim_execution_authority(self):
+        forged = RouteLivenessVerdict(
+            LIVENESS_SCHEMA, "route-1", "dispatchable", "", 0, (), (), True
+        )
+        with self.assertRaises(DispatchAdmissionError):
+            evaluate_dispatch_admission(make_preflight(), forged, plan_id="plan-a")
+
     def test_wire_form_rejects_authorization_and_tampering(self):
         result = evaluate_dispatch_admission(
             make_preflight(), liveness("dispatchable"), plan_id="plan-a"
