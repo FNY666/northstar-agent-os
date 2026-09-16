@@ -188,3 +188,70 @@ class ExperienceLedgerTests(unittest.TestCase):
         ledger = ExperienceLedger(self.path)
         self._record(ledger)
         self.assertFalse(ledger.forecast("fix-failing-pytest").execution_authorized)
+
+    def test_settle_confirmed_when_forecast_matches_actual(self):
+        ledger = ExperienceLedger(self.path)
+        self._record(ledger)
+        forecast = ledger.forecast("fix-failing-pytest")
+        settlement = ledger.settle(
+            forecast, actual_verdict="failed", run_id="run-2",
+            run_digest="sha256:" + "d" * 64, event_head="sha256:" + "e" * 64
+        )
+        self.assertEqual(settlement.outcome, "confirmed")
+        self.assertEqual(settlement.forecast_digest, forecast.forecast_digest)
+
+    def test_settle_falsified_when_forecast_contradicts_actual(self):
+        ledger = ExperienceLedger(self.path)
+        self._record(ledger)
+        forecast = ledger.forecast("fix-failing-pytest")
+        settlement = ledger.settle(
+            forecast, actual_verdict="verified", run_id="run-3",
+            run_digest="sha256:" + "f" * 64, event_head="sha256:" + "g" * 64
+        )
+        self.assertEqual(settlement.outcome, "falsified")
+
+    def test_settle_refuses_unknown_actual_verdict(self):
+        ledger = ExperienceLedger(self.path)
+        self._record(ledger)
+        forecast = ledger.forecast("fix-failing-pytest")
+        with self.assertRaises(ValueError):
+            ledger.settle(
+                forecast, actual_verdict="unknown", run_id="run-4",
+                run_digest="sha256:" + "h" * 64, event_head="sha256:" + "i" * 64
+            )
+    def test_settle_stale_forecast_is_not_evaluable(self):
+        """A forecast made before new evidence cannot be settled against it."""
+        ledger = ExperienceLedger(self.path)
+        self._record(ledger)
+        old_forecast = ledger.forecast("fix-failing-pytest")
+        self._record(ledger, run_id="run-new", verdict_result=_verified())
+        settlement = ledger.settle(
+            old_forecast, actual_verdict="verified", run_id="run-settle",
+            run_digest="sha256:" + "j" * 64, event_head="sha256:" + "k" * 64
+        )
+        self.assertEqual(settlement.outcome, "not-evaluable")
+        self.assertEqual(settlement.reason, "forecast-stale")
+
+    def test_settle_same_run_twice_is_idempotent(self):
+        ledger = ExperienceLedger(self.path)
+        self._record(ledger)
+        forecast = ledger.forecast("fix-failing-pytest")
+        first = ledger.settle(
+            forecast, actual_verdict="failed", run_id="run-5",
+            run_digest="sha256:" + "m" * 64, event_head="sha256:" + "n" * 64
+        )
+        second = ledger.settle(
+            forecast, actual_verdict="failed", run_id="run-5",
+            run_digest="sha256:" + "m" * 64, event_head="sha256:" + "n" * 64
+        )
+        self.assertEqual(first.settlement_digest, second.settlement_digest)
+
+    def test_settle_never_authorizes_execution(self):
+        ledger = ExperienceLedger(self.path)
+        self._record(ledger)
+        forecast = ledger.forecast("fix-failing-pytest")
+        settlement = ledger.settle(
+            forecast, actual_verdict="failed", run_id="run-6",
+            run_digest="sha256:" + "o" * 64, event_head="sha256:" + "p" * 64
+        )
+        self.assertFalse(settlement.execution_authorized)

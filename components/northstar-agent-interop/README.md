@@ -276,3 +276,11 @@ agree, so `standing()` reports that separately instead of averaging it away:
 `contradicted` means a later run overturned an earlier one - reported rather
 than resolved, because the ledger has no standing to pick a side. A ledger that
 does not verify has no standing at all.
+
+`forecast()` derives a deterministic expectation from verified standing and binds
+it to the exact record digests observed, so a forecast made before new evidence
+becomes stale when standing changes. `settle()` records whether a forecast was
+confirmed or falsified by the actual outcome, in a separate hash-chained journal
+so settlement calibration cannot corrupt the source experience. A stale forecast
+or an unknown actual verdict cannot be settled. Settling the same run twice is
+idempotent.

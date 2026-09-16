@@ -37,6 +37,9 @@ CONSISTENT_SUCCESS = "consistent-success"
 CONTRADICTED = "contradicted"
 FORECAST_FAILURE = "likely-failure"
 FORECAST_SUCCESS = "likely-success"
+SETTLEMENT_CONFIRMED = "confirmed"
+SETTLEMENT_FALSIFIED = "falsified"
+SETTLEMENT_NOT_EVALUABLE = "not-evaluable"
 
 
 @dataclass(frozen=True)
@@ -87,6 +90,24 @@ class ExperienceForecast:
     successes: int
     based_on: tuple[str, ...]
     forecast_digest: str
+    execution_authorized: bool = False
+
+
+@dataclass(frozen=True)
+class ForecastSettlement:
+    """Whether a forecast was confirmed or falsified by the actual outcome."""
+
+    fingerprint: str
+    outcome: str
+    reason: str | None
+    forecast_digest: str
+    actual_verdict: str
+    source_run_id: str
+    run_digest: str
+    event_head: str
+    sequence: int
+    prev_settlement_digest: str | None
+    settlement_digest: str
     execution_authorized: bool = False
 
 
@@ -336,3 +357,106 @@ class ExperienceLedger:
             based_on=standing.record_digests,
             forecast_digest=forecast_digest,
         )
+
+    def settle(
+        self,
+        forecast: ExperienceForecast,
+        *,
+        actual_verdict: str,
+        run_id: str,
+        run_digest: str,
+        event_head: str,
+    ) -> ForecastSettlement:
+        """Record whether a forecast was confirmed or falsified by reality.
+
+        A forecast becomes stale when standing changes, so a forecast made
+        before new evidence cannot be settled against that new evidence. An
+        unknown actual verdict is refused because it is not a determinate
+        outcome. Settling the same run twice is idempotent.
+        """
+        if actual_verdict not in _KINDS:
+            raise ValueError(f"actual verdict {actual_verdict!r} is not settled")
+        for label, value in (
+            ("run_id", run_id),
+            ("run_digest", run_digest),
+            ("event_head", event_head),
+        ):
+            _validate_text(value, label)
+        current_forecast = self.forecast(forecast.fingerprint)
+        if current_forecast.forecast_digest != forecast.forecast_digest:
+            outcome = SETTLEMENT_NOT_EVALUABLE
+            reason = "forecast-stale"
+        else:
+            expected_kind = _KINDS[actual_verdict]
+            if (
+                (forecast.expectation == FORECAST_FAILURE and expected_kind == "failure")
+                or (forecast.expectation == FORECAST_SUCCESS and expected_kind == "success")
+            ):
+                outcome = SETTLEMENT_CONFIRMED
+                reason = None
+            else:
+                outcome = SETTLEMENT_FALSIFIED
+                reason = None
+        settlements_path = Path(str(self._path) + ".settlements.jsonl")
+        settlements_path.parent.mkdir(parents=True, exist_ok=True)
+        handle = open(settlements_path, "a+", encoding="utf-8")
+        try:
+            fcntl.flock(handle.fileno(), fcntl.LOCK_EX)
+            handle.seek(0)
+            settlements = []
+            for line in handle.read().splitlines():
+                line = line.strip()
+                if line:
+                    settlements.append(json.loads(line))
+            for s in settlements:
+                if (
+                    s.get("source_run_id") == run_id
+                    and s.get("forecast_digest") == forecast.forecast_digest
+                ):
+                    return ForecastSettlement(
+                        fingerprint=s["fingerprint"],
+                        outcome=s["outcome"],
+                        reason=s.get("reason"),
+                        forecast_digest=s["forecast_digest"],
+                        actual_verdict=s["actual_verdict"],
+                        source_run_id=s["source_run_id"],
+                        run_digest=s["run_digest"],
+                        event_head=s["event_head"],
+                        sequence=s["sequence"],
+                        prev_settlement_digest=s.get("prev_settlement_digest"),
+                        settlement_digest=s["settlement_digest"],
+                    )
+            body = {
+                "fingerprint": forecast.fingerprint,
+                "outcome": outcome,
+                "reason": reason,
+                "forecast_digest": forecast.forecast_digest,
+                "actual_verdict": actual_verdict,
+                "source_run_id": run_id,
+                "run_digest": run_digest,
+                "event_head": event_head,
+                "sequence": len(settlements) + 1,
+                "prev_settlement_digest": settlements[-1]["settlement_digest"] if settlements else None,
+            }
+            settlement_digest = _digest(body)
+            payload = dict(body, settlement_digest=settlement_digest)
+            handle.seek(0, os.SEEK_END)
+            handle.write(json.dumps(payload, sort_keys=True, separators=(",", ":")) + "\n")
+            handle.flush()
+            os.fsync(handle.fileno())
+            return ForecastSettlement(
+                fingerprint=forecast.fingerprint,
+                outcome=outcome,
+                reason=reason,
+                forecast_digest=forecast.forecast_digest,
+                actual_verdict=actual_verdict,
+                source_run_id=run_id,
+                run_digest=run_digest,
+                event_head=event_head,
+                sequence=body["sequence"],
+                prev_settlement_digest=body["prev_settlement_digest"],
+                settlement_digest=settlement_digest,
+            )
+        finally:
+            fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
+            handle.close()
