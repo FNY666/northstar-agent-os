@@ -15,3 +15,25 @@ class CrossLayerTests(unittest.TestCase):
         identity=self.base(); self.assertEqual(verify_cross_layer(identity,None,identity,identity).verdict,'unknown')
 
 if __name__=='__main__': unittest.main()
+
+
+class AbsentIdentityTests(unittest.TestCase):
+    def test_an_identity_no_layer_records_is_not_agreement(self):
+        identity = {
+            'target_agent_id': 'codex', 'provider': 'openai', 'deadline_at': 80,
+            'decision_fingerprint': 'sha256:' + 'b' * 64,
+            'payload_digest': 'sha256:' + 'a' * 64,
+        }
+        result = verify_cross_layer(identity, identity, identity, identity)
+        self.assertEqual(result.verdict, 'unknown')
+        self.assertIn('route_id missing', result.reasons)
+
+    def test_an_identity_recorded_in_only_one_layer_is_flagged(self):
+        identity = {
+            'target_agent_id': 'codex', 'provider': 'openai', 'deadline_at': 80,
+            'decision_fingerprint': 'sha256:' + 'b' * 64,
+            'payload_digest': 'sha256:' + 'a' * 64,
+        }
+        result = verify_cross_layer(identity, dict(identity, route_id='r1'), identity, identity)
+        self.assertEqual(result.verdict, 'unknown')
+        self.assertIn('route_id missing', result.reasons)
