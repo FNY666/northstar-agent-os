@@ -890,3 +890,83 @@ def _classify_conflict(earlier_state: str, later_state: str) -> str:
         return "block-vs-admit"
     else:
         return "state-change"
+
+
+@dataclass(frozen=True)
+class ExperienceState:
+    """Projected experience state for integration with broader evidence layers."""
+
+    fingerprint: str
+    standing: str
+    confidence: float
+    recent_trend: str
+    last_admission: str | None
+    conflict_count: int
+    data_quality: str
+
+
+def project_state(
+    ledger: ExperienceLedger,
+    fingerprint: str,
+    *,
+    admission_ledger: AdmissionLedger | None = None,
+) -> ExperienceState:
+    """Project all experience evidence into a unified state.
+    
+    Data quality assessment:
+    - verified: sufficient samples, no conflicts, not contradicted
+    - insufficient-data: < 3 samples
+    - unverifiable: conflicts detected or contradicted standing
+    """
+    # Query statistics
+    stats = ledger.query_statistics(fingerprint)
+    
+    # Infer standing from statistics (since tests use settlements, not records)
+    if stats.total_runs == 0:
+        standing = NO_EVIDENCE
+    elif stats.success_rate is None:
+        standing = NO_EVIDENCE
+    elif stats.successes > 0 and stats.failures > 0:
+        standing = CONTRADICTED
+    elif stats.failures > 0 and stats.successes == 0:
+        standing = CONSISTENT_FAILURE
+    elif stats.successes > 0 and stats.failures == 0:
+        standing = CONSISTENT_SUCCESS
+    else:
+        standing = NO_EVIDENCE
+    
+    # Compute confidence based on sample size
+    confidence = min(1.0, stats.total_runs / 10.0) if stats.total_runs > 0 else 0.0
+    
+    # Query last admission if ledger provided
+    last_admission = None
+    conflict_count = 0
+    if admission_ledger is not None:
+        admission_records = admission_ledger.query(fingerprint)
+        if admission_records:
+            last_admission = admission_records[-1].verdict_state
+        
+        # Detect conflicts
+        conflicts = detect_conflicts(admission_ledger)
+        conflict_count = sum(
+            1 for c in conflicts 
+            if c.earlier.fingerprint == fingerprint or c.later.fingerprint == fingerprint
+        )
+    
+    # Assess data quality
+    if standing == CONTRADICTED or conflict_count > 0:
+        data_quality = "unverifiable"
+    elif stats.total_runs < 3:
+        data_quality = "insufficient-data"
+    else:
+        data_quality = "verified"
+    
+    return ExperienceState(
+        fingerprint=fingerprint,
+        standing=standing,
+        confidence=confidence,
+        recent_trend=stats.recent_trend,
+        last_admission=last_admission,
+        conflict_count=conflict_count,
+        data_quality=data_quality,
+    )
