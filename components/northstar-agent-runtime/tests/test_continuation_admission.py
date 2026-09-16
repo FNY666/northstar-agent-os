@@ -342,5 +342,126 @@ class ContinuationAdmissionWitnessTests(unittest.TestCase):
             ContinuationAdmissionWitness.from_dict(tampered)
 
 
+class ObjectiveContinuityEvaluationTests(unittest.TestCase):
+    def _pinned(self, *, observed_at=1000, now=1010):
+        source = inputs()
+        checkpoint = capture_checkpoint(**source, observed_at=observed_at)
+        verdict = verify_checkpoint(
+            checkpoint, **source, now=now, expected_checkpoint_digest=checkpoint.checkpoint_digest
+        )
+        return checkpoint, verdict
+
+    def test_a_changed_objective_blocks_under_the_default_policy(self):
+        checkpoint, verdict = self._pinned()
+        admission = evaluate_continuation_admission(
+            checkpoint, verdict, policy=ContinuationPolicy(max_age_seconds=60), now=1010,
+            objective_changed_at_sequence=2,
+        )
+        self.assertEqual(admission.state, "blocked-continuation-objective")
+        self.assertIn("continuation_objective_changed", admission.reasons)
+        self.assertEqual(admission.objective_changed_at_sequence, 2)
+        self.assertFalse(admission.execution_authorized)
+
+    def test_an_invalid_objective_sequence_is_rejected(self):
+        checkpoint, verdict = self._pinned()
+        for bad in (0, True, "2"):
+            with self.assertRaises(ContinuationAdmissionError):
+                evaluate_continuation_admission(
+                    checkpoint, verdict, policy=ContinuationPolicy(max_age_seconds=60), now=1010,
+                    objective_changed_at_sequence=bad,
+                )
+
+
+class RuntimeObjectiveAdmissionTests(unittest.TestCase):
+    def _runtime(self, *, sessions=None):
+        from loop import AgentRuntime, RuntimeConfig
+        from providers.scripted import ScriptedProvider
+        return AgentRuntime(
+            provider=ScriptedProvider([]),
+            config=RuntimeConfig(session_id="ns-objective", workspace=".", max_budget_usd=1.0),
+            sessions=sessions,
+        )
+
+    def _store_with(self, root, goals):
+        from pathlib import Path
+        from autonomy_checkpoint_store import AutonomyCheckpointStore
+        from sessions import SessionStore
+        runtime = self._runtime(sessions=SessionStore(root, session_id="ns-objective"))
+        store = AutonomyCheckpointStore(Path(root) / "objective.jsonl")
+        last = None
+        for index, goal in enumerate(goals):
+            last = runtime.persist_continuation_checkpoint(
+                store, goal={"objective": goal}, observed_at=1000 + index
+            )
+        return runtime, store, last.record_digest
+
+    def test_a_swapped_objective_is_refused_by_default(self):
+        import tempfile
+        with tempfile.TemporaryDirectory() as root:
+            runtime, store, digest = self._store_with(root, ["first", "second"])
+            admission = runtime.admit_persisted_continuation_checkpoint(
+                store, goal={"objective": "second"}, now=1010,
+                policy=ContinuationPolicy(max_age_seconds=60),
+                expected_record_digest=digest,
+            )
+            self.assertEqual(admission.state, "blocked-continuation-objective")
+            self.assertIn("continuation_objective_changed", admission.reasons)
+            self.assertEqual(admission.objective_changed_at_sequence, 2)
+            self.assertFalse(admission.execution_authorized)
+            self.assertEqual(runtime.provider.requests, [])
+
+    def test_the_host_can_opt_out_of_objective_continuity(self):
+        import tempfile
+        with tempfile.TemporaryDirectory() as root:
+            runtime, store, digest = self._store_with(root, ["first", "second"])
+            admission = runtime.admit_persisted_continuation_checkpoint(
+                store, goal={"objective": "second"}, now=1010,
+                policy=ContinuationPolicy(max_age_seconds=60, require_objective_continuity=False),
+                expected_record_digest=digest,
+            )
+            self.assertEqual(admission.state, "admit-continuation")
+            self.assertEqual(admission.objective_changed_at_sequence, 2)
+            self.assertFalse(admission.execution_authorized)
+
+    def test_a_continuous_chain_is_unaffected(self):
+        import tempfile
+        with tempfile.TemporaryDirectory() as root:
+            runtime, store, digest = self._store_with(root, ["steady", "steady"])
+            admission = runtime.admit_persisted_continuation_checkpoint(
+                store, goal={"objective": "steady"}, now=1010,
+                policy=ContinuationPolicy(max_age_seconds=60),
+                expected_record_digest=digest,
+            )
+            self.assertEqual(admission.state, "admit-continuation")
+            self.assertIsNone(admission.objective_changed_at_sequence)
+
+    def test_a_tampered_chain_fails_closed(self):
+        import json
+        import tempfile
+        with tempfile.TemporaryDirectory() as root:
+            runtime, store, digest = self._store_with(root, ["steady"])
+            row = json.loads(store.path.read_text(encoding="utf-8").splitlines()[0])
+            row["record_digest"] = "sha256:" + "e" * 64
+            store.path.write_text(json.dumps(row) + "\n", encoding="utf-8")
+            admission = runtime.admit_persisted_continuation_checkpoint(
+                store, goal={"objective": "steady"}, now=1010,
+                policy=ContinuationPolicy(max_age_seconds=60),
+            )
+            self.assertEqual(admission.state, "unknown")
+            self.assertFalse(admission.execution_authorized)
+
+    def test_policy_wire_form_requires_the_objective_flag(self):
+        wire = ContinuationPolicy(max_age_seconds=60).to_dict()
+        self.assertTrue(wire["require_objective_continuity"])
+        without = dict(wire)
+        without.pop("require_objective_continuity")
+        with self.assertRaises(ContinuationAdmissionError):
+            ContinuationPolicy.from_dict(without)
+        flipped = dict(wire)
+        flipped["require_objective_continuity"] = "yes"
+        with self.assertRaises(ContinuationAdmissionError):
+            ContinuationPolicy.from_dict(flipped)
+
+
 if __name__ == "__main__":
     unittest.main()

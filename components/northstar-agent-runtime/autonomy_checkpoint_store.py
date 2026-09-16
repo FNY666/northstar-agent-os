@@ -34,6 +34,31 @@ def _tokens(value:Any,field:str)->tuple[str,...]:
     if not isinstance(value,list) or any(not isinstance(token,str) for token in value):raise AutonomyCheckpointStoreError(field+" invalid")
     return tuple(value)
 
+def _resolution_from(records:list[CheckpointRecord],session:str,expected_record_digest:str|None)->CheckpointResolution:
+    matches=[record for record in records if record.checkpoint_value.session_id==session]
+    if not matches:return CheckpointResolution("unrecorded",None,("checkpoint_unrecorded",),(),False)
+    record=matches[-1]
+    if expected_record_digest is not None and expected_record_digest!=record.record_digest:return CheckpointResolution("stale",record,("record_digest_changed",),(),False)
+    if expected_record_digest is None:return CheckpointResolution("recorded-unpinned",record,(),("record_digest_unpinned",),False)
+    return CheckpointResolution("recorded",record,(),(),False)
+
+def _history_from(records:list[CheckpointRecord],session:str,expected_head_digest:str|None)->ContinuationHistory:
+    matches=[record for record in records if record.checkpoint_value.session_id==session]
+    if not matches:return ContinuationHistory("unrecorded",session,(),("continuation_history_unrecorded",),(),None,None,False)
+    entries=tuple(ContinuationHistoryEntry(record.sequence,record.record_digest,record.checkpoint_value.checkpoint_digest,record.checkpoint_value.goal_digest,record.checkpoint_value.observed_at) for record in matches)
+    changed=None
+    for previous,current in zip(entries,entries[1:]):
+        if previous.objective_digest!=current.objective_digest:
+            changed=current.sequence
+            break
+    reasons=("objective_changed",) if changed is not None else ()
+    head=entries[-1].record_digest
+    if expected_head_digest is None:unverified=("history_head_unpinned",)
+    else:
+        unverified=()
+        if expected_head_digest!=head:reasons=reasons+("history_head_changed",)
+    return ContinuationHistory("objective_changed" if changed is not None else "continuous",session,entries,reasons,unverified,changed,head,False)
+
 @dataclass(frozen=True)
 class CheckpointRecord:
     schema_version:str;sequence:int;checkpoint:dict[str,Any];prev_record_digest:str|None;record_digest:str
@@ -169,12 +194,7 @@ class AutonomyCheckpointStore:
             if expected_record_digest is not None:_valid_digest(expected_record_digest,"expected_record_digest")
             with self._locked():records=self._records()
         except AutonomyCheckpointStoreError as exc:return CheckpointResolution("unverifiable",None,(str(exc),),(),False)
-        matches=[record for record in records if record.checkpoint_value.session_id==session]
-        if not matches:return CheckpointResolution("unrecorded",None,("checkpoint_unrecorded",),(),False)
-        record=matches[-1]
-        if expected_record_digest is not None and expected_record_digest!=record.record_digest:return CheckpointResolution("stale",record,("record_digest_changed",),(),False)
-        if expected_record_digest is None:return CheckpointResolution("recorded-unpinned",record,(),("record_digest_unpinned",),False)
-        return CheckpointResolution("recorded",record,(),(),False)
+        return _resolution_from(records,session,expected_record_digest)
     def history(self,session_id:str,*,expected_head_digest:str|None=None)->ContinuationHistory:
         """Report objective continuity across a session's persisted checkpoints; read-only."""
         session=""
@@ -183,21 +203,18 @@ class AutonomyCheckpointStore:
             if expected_head_digest is not None:_valid_digest(expected_head_digest,"expected_head_digest")
             with self._locked():records=self._records()
         except AutonomyCheckpointStoreError as exc:return ContinuationHistory("unverifiable",session,(),(str(exc),),(),None,None,False)
-        matches=[record for record in records if record.checkpoint_value.session_id==session]
-        if not matches:return ContinuationHistory("unrecorded",session,(),("continuation_history_unrecorded",),(),None,None,False)
-        entries=tuple(ContinuationHistoryEntry(record.sequence,record.record_digest,record.checkpoint_value.checkpoint_digest,record.checkpoint_value.goal_digest,record.checkpoint_value.observed_at) for record in matches)
-        changed=None
-        for previous,current in zip(entries,entries[1:]):
-            if previous.objective_digest!=current.objective_digest:
-                changed=current.sequence
-                break
-        reasons=("objective_changed",) if changed is not None else ()
-        head=entries[-1].record_digest
-        if expected_head_digest is None:unverified=("history_head_unpinned",)
-        else:
-            unverified=()
-            if expected_head_digest!=head:reasons=reasons+("history_head_changed",)
-        return ContinuationHistory("objective_changed" if changed is not None else "continuous",session,entries,reasons,unverified,changed,head,False)
+        return _history_from(records,session,expected_head_digest)
+    def resolve_with_history(self,session_id:str,*,expected_record_digest:str|None=None,expected_head_digest:str|None=None)->tuple[CheckpointResolution,ContinuationHistory]:
+        """Resolve the newest record and the objective history from one locked read."""
+        session=""
+        try:
+            session=_session(session_id)
+            if expected_record_digest is not None:_valid_digest(expected_record_digest,"expected_record_digest")
+            if expected_head_digest is not None:_valid_digest(expected_head_digest,"expected_head_digest")
+            with self._locked():records=self._records()
+        except AutonomyCheckpointStoreError as exc:
+            return CheckpointResolution("unverifiable",None,(str(exc),),(),False),ContinuationHistory("unverifiable",session,(),(str(exc),),(),None,None,False)
+        return _resolution_from(records,session,expected_record_digest),_history_from(records,session,expected_head_digest)
 
 class _StoreLock:
     def __init__(self,path:Path):self.path=path;self.handle=None

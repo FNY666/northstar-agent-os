@@ -21,15 +21,16 @@ ADMISSION_STATES = frozenset({
     "blocked-continuation-stale",
     "blocked-continuation-age",
     "blocked-continuation-policy",
+    "blocked-continuation-objective",
     "unknown",
 })
 VERDICT_STATES = frozenset({"current", "current-unpinned", "stale", "unknown"})
 _DIGEST = re.compile(r"^sha256:[0-9a-f]{64}$")
-_POLICY_FIELDS = frozenset({"schema_version", "max_age_seconds", "require_pinned_checkpoint"})
+_POLICY_FIELDS = frozenset({"schema_version", "max_age_seconds", "require_pinned_checkpoint", "require_objective_continuity"})
 _ADMISSION_FIELDS = frozenset({
     "schema_version", "state", "reasons", "unresolved", "policy_digest",
     "checkpoint_digest", "age_seconds", "verdict_state", "execution_authorized",
-    "admission_digest",
+    "admission_digest", "objective_changed_at_sequence",
 })
 _WITNESS_FIELDS = frozenset({
     "schema_version", "admission_digest", "state", "policy_digest",
@@ -72,18 +73,22 @@ class ContinuationPolicy:
     """Host-declared freshness and pinning requirements for a continuation."""
     max_age_seconds: int
     require_pinned_checkpoint: bool = True
+    require_objective_continuity: bool = True
 
     def __post_init__(self) -> None:
         if not isinstance(self.max_age_seconds, int) or isinstance(self.max_age_seconds, bool) or self.max_age_seconds < 0:
             raise ContinuationAdmissionError("max_age_seconds invalid")
         if not isinstance(self.require_pinned_checkpoint, bool):
             raise ContinuationAdmissionError("require_pinned_checkpoint invalid")
+        if not isinstance(self.require_objective_continuity, bool):
+            raise ContinuationAdmissionError("require_objective_continuity invalid")
 
     def to_dict(self) -> dict[str, Any]:
         return {
             "schema_version": POLICY_SCHEMA,
             "max_age_seconds": self.max_age_seconds,
             "require_pinned_checkpoint": self.require_pinned_checkpoint,
+            "require_objective_continuity": self.require_objective_continuity,
         }
 
     @property
@@ -94,7 +99,11 @@ class ContinuationPolicy:
     def from_dict(cls, value: Any) -> "ContinuationPolicy":
         if not isinstance(value, dict) or set(value) != _POLICY_FIELDS or value.get("schema_version") != POLICY_SCHEMA:
             raise ContinuationAdmissionError("policy fields invalid")
-        return cls(value.get("max_age_seconds"), value.get("require_pinned_checkpoint"))
+        return cls(
+            value.get("max_age_seconds"),
+            value.get("require_pinned_checkpoint"),
+            value.get("require_objective_continuity"),
+        )
 
 
 @dataclass(frozen=True)
@@ -108,6 +117,7 @@ class ContinuationAdmission:
     verdict_state: str | None = None
     execution_authorized: bool = False
     admission_digest: str = ""
+    objective_changed_at_sequence: int | None = None
 
     def unsigned_dict(self) -> dict[str, Any]:
         return {
@@ -120,6 +130,7 @@ class ContinuationAdmission:
             "age_seconds": self.age_seconds,
             "verdict_state": self.verdict_state,
             "execution_authorized": self.execution_authorized,
+            "objective_changed_at_sequence": self.objective_changed_at_sequence,
         }
 
     @property
@@ -146,6 +157,9 @@ class ContinuationAdmission:
             raise ContinuationAdmissionError("verdict_state invalid")
         policy_digest = value.get("policy_digest")
         checkpoint_digest = value.get("checkpoint_digest")
+        objective_changed = value.get("objective_changed_at_sequence")
+        if objective_changed is not None and (not isinstance(objective_changed, int) or isinstance(objective_changed, bool) or objective_changed < 1):
+            raise ContinuationAdmissionError("objective_changed_at_sequence invalid")
         admission = cls(
             state,
             _tokens(value.get("reasons"), "reasons"),
@@ -156,26 +170,37 @@ class ContinuationAdmission:
             verdict_state,
             False,
             _digest_value(value.get("admission_digest"), "admission_digest"),
+            objective_changed,
         )
         if admission.admission_digest != admission.computed_digest:
             raise ContinuationAdmissionError("admission digest mismatch")
         return admission
 
 
-def _admission(state, reasons, unresolved, policy, checkpoint_digest, age, verdict_state):
+def _admission(state, reasons, unresolved, policy, checkpoint_digest, age, verdict_state, objective_changed=None):
     draft = ContinuationAdmission(
         state, tuple(reasons), tuple(unresolved), policy.policy_digest,
-        checkpoint_digest, age, verdict_state, False,
+        checkpoint_digest, age, verdict_state, False, "", objective_changed,
     )
     return ContinuationAdmission(
         draft.state, draft.reasons, draft.unresolved, draft.policy_digest,
         draft.checkpoint_digest, draft.age_seconds, draft.verdict_state,
-        False, draft.computed_digest,
+        False, draft.computed_digest, objective_changed,
     )
 
 
+def _objective_changed(value: Any) -> int | None:
+    if value is None:
+        return None
+    if not isinstance(value, int) or isinstance(value, bool) or value < 1:
+        raise ContinuationAdmissionError("objective_changed_at_sequence invalid")
+    return value
+
+
 def evaluate_continuation_admission(
-    checkpoint: Any, verdict: Any, *, policy: ContinuationPolicy, now: int
+    checkpoint: Any, verdict: Any, *, policy: ContinuationPolicy, now: int,
+    objective_changed_at_sequence: int | None = None,
+    objective_history_unverifiable: bool = False,
 ) -> ContinuationAdmission:
     """Compose a host policy with a verified continuation; never authorizes execution."""
     if not isinstance(policy, ContinuationPolicy):
@@ -183,32 +208,39 @@ def evaluate_continuation_admission(
     policy = ContinuationPolicy.from_dict(policy.to_dict())
     if not isinstance(now, int) or isinstance(now, bool):
         raise ContinuationAdmissionError("now invalid")
+    if not isinstance(objective_history_unverifiable, bool):
+        raise ContinuationAdmissionError("objective_history_unverifiable invalid")
+    objective = _objective_changed(objective_changed_at_sequence)
     if not isinstance(verdict, ContinuationVerdict):
-        return _admission("unknown", ("verdict_unreadable",), (), policy, None, None, None)
+        return _admission("unknown", ("verdict_unreadable",), (), policy, None, None, None, objective)
     if verdict.execution_authorized is not False:
         raise ContinuationAdmissionError("verdict cannot authorize execution")
     if verdict.state not in VERDICT_STATES:
         raise ContinuationAdmissionError("verdict state invalid")
+    if objective_history_unverifiable:
+        return _admission("unknown", ("objective_history_unverifiable",), verdict.unverified, policy, None, None, "unknown", objective)
     if checkpoint is None:
-        return _admission("unknown", verdict.reasons or ("checkpoint_unrecorded",), verdict.unverified, policy, None, None, verdict.state)
+        return _admission("unknown", verdict.reasons or ("checkpoint_unrecorded",), verdict.unverified, policy, None, None, verdict.state, objective)
     try:
         checkpoint = AutonomyCheckpoint.from_dict(checkpoint.to_dict())
     except (AttributeError, AutonomyCheckpointError):
-        return _admission("unknown", ("checkpoint_unreadable",), verdict.unverified, policy, None, None, verdict.state)
+        return _admission("unknown", ("checkpoint_unreadable",), verdict.unverified, policy, None, None, verdict.state, objective)
     age = now - checkpoint.observed_at
     if age < 0:
-        return _admission("unknown", ("observation_in_future",), verdict.unverified, policy, checkpoint.checkpoint_digest, None, verdict.state)
+        return _admission("unknown", ("observation_in_future",), verdict.unverified, policy, checkpoint.checkpoint_digest, None, verdict.state, objective)
     if verdict.state == "unknown":
-        return _admission("unknown", verdict.reasons or ("continuation_unverifiable",), verdict.unverified, policy, checkpoint.checkpoint_digest, age, verdict.state)
+        return _admission("unknown", verdict.reasons or ("continuation_unverifiable",), verdict.unverified, policy, checkpoint.checkpoint_digest, age, verdict.state, objective)
     if verdict.state == "stale":
-        return _admission("blocked-continuation-stale", verdict.reasons, verdict.unverified, policy, checkpoint.checkpoint_digest, age, verdict.state)
+        return _admission("blocked-continuation-stale", verdict.reasons, verdict.unverified, policy, checkpoint.checkpoint_digest, age, verdict.state, objective)
     if age > policy.max_age_seconds:
-        return _admission("blocked-continuation-age", ("continuation_expired",), verdict.unverified, policy, checkpoint.checkpoint_digest, age, verdict.state)
+        return _admission("blocked-continuation-age", ("continuation_expired",), verdict.unverified, policy, checkpoint.checkpoint_digest, age, verdict.state, objective)
+    if objective is not None and policy.require_objective_continuity:
+        return _admission("blocked-continuation-objective", ("continuation_objective_changed",), verdict.unverified, policy, checkpoint.checkpoint_digest, age, verdict.state, objective)
     if verdict.state == "current-unpinned":
         if policy.require_pinned_checkpoint:
-            return _admission("blocked-continuation-policy", ("continuation_requires_pinned_checkpoint",), verdict.unverified, policy, checkpoint.checkpoint_digest, age, verdict.state)
-        return _admission("admit-continuation-unpinned", verdict.reasons, verdict.unverified, policy, checkpoint.checkpoint_digest, age, verdict.state)
-    return _admission("admit-continuation", verdict.reasons, verdict.unverified, policy, checkpoint.checkpoint_digest, age, verdict.state)
+            return _admission("blocked-continuation-policy", ("continuation_requires_pinned_checkpoint",), verdict.unverified, policy, checkpoint.checkpoint_digest, age, verdict.state, objective)
+        return _admission("admit-continuation-unpinned", verdict.reasons, verdict.unverified, policy, checkpoint.checkpoint_digest, age, verdict.state, objective)
+    return _admission("admit-continuation", verdict.reasons, verdict.unverified, policy, checkpoint.checkpoint_digest, age, verdict.state, objective)
 
 
 @dataclass(frozen=True)

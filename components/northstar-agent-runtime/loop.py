@@ -1605,13 +1605,17 @@ class AgentRuntime:
         """Evaluate a host-owned admission for a persisted continuation; never resumes work."""
         if not isinstance(store, AutonomyCheckpointStore):
             raise RuntimeConfigurationError("continuation store is invalid")
-        resolution = store.resolve(
+        resolution, history = store.resolve_with_history(
             self.session_id, expected_record_digest=expected_record_digest
         )
         verdict = self._compose_persisted_verdict(resolution, goal=goal, now=now)
         record = resolution.record
         checkpoint = record.checkpoint_value if record is not None else None
-        return evaluate_continuation_admission(checkpoint, verdict, policy=policy, now=now)
+        return evaluate_continuation_admission(
+            checkpoint, verdict, policy=policy, now=now,
+            objective_changed_at_sequence=history.changed_at_sequence,
+            objective_history_unverifiable=history.state == "unverifiable",
+        )
 
     def continuation_objective_history(
         self, store: AutonomyCheckpointStore, *, expected_head_digest: str | None = None
