@@ -81,6 +81,21 @@ class DispatchAdmissionTests(unittest.TestCase):
         self.assertFalse(result.execution_authorized)
         self.assertEqual(DispatchAdmission.from_dict(result.to_dict()), result)
 
+    def test_uncorroborated_route_identity_downgrades_clean_admit(self):
+        manifest = plan_manifest()
+        fresh_route = RouteLivenessVerdict(
+            LIVENESS_SCHEMA, "route-1", "dispatchable", "", 0,
+            ("route_identity_unverified",), (), False,
+        )
+        result = evaluate_dispatch_admission(
+            make_preflight(manifest_digest=manifest.manifest_digest),
+            fresh_route,
+            plan_id=derive_plan_id(manifest.manifest_digest),
+            plan_manifest=manifest,
+        )
+        self.assertEqual(result.state, "admit-unpinned")
+        self.assertIn("route_identity_unverified", result.unverified)
+
     def test_in_flight_route_blocks_otherwise_ready_evidence(self):
         result = evaluate_dispatch_admission(
             make_preflight(), liveness("in_flight"), plan_id="plan-a"

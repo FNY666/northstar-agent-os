@@ -1,6 +1,7 @@
 """Derive whether a route may accept a new attempt, from its lineage alone."""
 from __future__ import annotations
 from dataclasses import dataclass
+from typing import Any
 
 from route_lineage import LineageGraph, active_attempts
 
@@ -32,8 +33,17 @@ class RouteLivenessVerdict:
         }
 
 
-def evaluate_route_liveness(graph: LineageGraph, route_id: str) -> RouteLivenessVerdict:
-    """Report whether a route may accept a new attempt, without authorising one."""
+def evaluate_route_liveness(
+    graph: LineageGraph, route_id: str, *, declared_routes: Any = None
+) -> RouteLivenessVerdict:
+    """Report whether a route may accept a new attempt, without authorising one.
+
+    A route with no lineage is dispatchable but its identity is not corroborated
+    by anything, so it is reported as ``route_identity_unverified``: a typo or a
+    route belonging to another graph looks exactly like a legitimate new route.
+    A host-owned ``declared_routes`` collection corroborates the identity; a
+    route outside that set is refused instead of silently reported dispatchable.
+    """
     if not isinstance(graph, LineageGraph):
         raise ValueError("graph invalid")
     if not isinstance(route_id, str) or not route_id:
@@ -49,6 +59,17 @@ def evaluate_route_liveness(graph: LineageGraph, route_id: str) -> RouteLiveness
     attempts = active_attempts(graph, route_id)
     events = [item for item in graph.read() if item.route_id == route_id]
     if not events:
+        identity_unverified = True
+        if declared_routes is not None:
+            try:
+                declared = frozenset(declared_routes)
+            except TypeError as exc:
+                raise ValueError("declared_routes invalid") from exc
+            if route_id not in declared:
+                raise ValueError("route is not in the declared route set")
+            identity_unverified = False
+        if identity_unverified:
+            unverified = unverified + ("route_identity_unverified",)
         return verdict("dispatchable", "", 0, ("no_prior_attempts",))
     if len(attempts) > 1:
         return verdict("unknown", "", len(attempts), ("multiple_active_attempts",))

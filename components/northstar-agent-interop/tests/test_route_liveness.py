@@ -62,6 +62,26 @@ class RouteLivenessTests(unittest.TestCase):
         self.assertIn("no_prior_attempts", verdict.reasons)
         self.assertFalse(verdict.execution_authorized)
 
+    def test_a_route_without_lineage_cannot_corroborate_its_identity(self):
+        verdict = evaluate_route_liveness(self.build(), "route-1")
+        self.assertEqual(verdict.state, "dispatchable")
+        self.assertIn("route_identity_unverified", verdict.unverified)
+
+    def test_lineage_corroborates_the_identity_of_a_known_route(self):
+        verdict = evaluate_route_liveness(self.build("dispatched"), "route-1")
+        self.assertNotIn("route_identity_unverified", verdict.unverified)
+
+    def test_declared_routes_corroborate_a_new_route(self):
+        verdict = evaluate_route_liveness(
+            self.build(), "route-1", declared_routes=("route-1",)
+        )
+        self.assertEqual(verdict.state, "dispatchable")
+        self.assertNotIn("route_identity_unverified", verdict.unverified)
+
+    def test_a_route_outside_the_declared_set_is_refused(self):
+        with self.assertRaises(ValueError):
+            evaluate_route_liveness(self.build(), "route-1", declared_routes=("route-2",))
+
     def test_an_unfinished_attempt_is_in_flight(self):
         for status in ("planned", "dispatched"):
             verdict = evaluate_route_liveness(self.build(status), "route-1")
