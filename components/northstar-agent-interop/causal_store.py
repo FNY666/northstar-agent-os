@@ -10,6 +10,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from interop_contract import RECOVERY_EMPTY, RECOVERY_VERIFIED
 from route_causality import CausalEdge
 
 _SCHEMA = "northstar.causal-evidence.v2"
@@ -191,4 +192,7 @@ class CausalEvidenceStore:
         cursor = None if not records else EvidenceCursor(records[-1].sequence, records[-1].record_digest)
         if expected_cursor is not None and expected_cursor != cursor:
             raise ValueError("causal evidence cursor does not match history")
-        return EvidenceRecovery("verified", tuple(records), cursor)
+        # Empty history is not a verified chain: absent, deleted and truncated
+        # journals are indistinguishable without an external cursor anchor.
+        verdict = RECOVERY_VERIFIED if records else RECOVERY_EMPTY
+        return EvidenceRecovery(verdict, tuple(records), cursor)

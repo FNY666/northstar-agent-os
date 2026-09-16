@@ -46,6 +46,25 @@ class CausalEvidenceStoreTests(unittest.TestCase):
         self.assertEqual(tuple(record.edge for record in recovery.records), (self.edge, self.edge2))
         self.assertEqual(recovery.cursor, EvidenceCursor(2, second.record_digest))
 
+    def test_absent_history_is_not_reported_as_verified(self):
+        recovery = CausalEvidenceStore(self.path).recover()
+        self.assertEqual(recovery.verdict, "empty")
+        self.assertEqual(recovery.records, ())
+        self.assertIsNone(recovery.cursor)
+
+    def test_deleting_the_evidence_file_stops_it_reading_as_verified(self):
+        CausalEvidenceStore(self.path).append(self.edge)
+        self.assertEqual(CausalEvidenceStore(self.path).recover().verdict, "verified")
+        self.path.unlink()
+        recovery = CausalEvidenceStore(self.path).recover()
+        self.assertEqual(recovery.verdict, "empty")
+        self.assertEqual(recovery.records, ())
+
+    def test_truncating_the_evidence_file_stops_it_reading_as_verified(self):
+        CausalEvidenceStore(self.path).append(self.edge)
+        self.path.write_text("", encoding="utf-8")
+        self.assertEqual(CausalEvidenceStore(self.path).recover().verdict, "empty")
+
     def test_same_edge_append_is_idempotent(self):
         store = CausalEvidenceStore(self.path)
         first = store.append(self.edge)
