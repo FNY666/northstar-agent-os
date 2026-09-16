@@ -455,3 +455,20 @@ class InvalidHookDecisionTests(unittest.TestCase):
         outcome = registry.fire("PreToolUse", HookInput(event="PreToolUse", tool_name="Write"))
         self.assertTrue(outcome.denied)
         self.assertIn("ValueError", outcome.deny_reason)
+
+
+class ExplicitInvalidHookDecisionTests(unittest.TestCase):
+    def test_an_explicit_unknown_dict_decision_is_refused(self):
+        with self.assertRaises(ValueError):
+            coerce_result({"decision": "denyy"}, event="PreToolUse")
+
+    def test_an_explicit_unknown_dict_decision_fails_closed_on_veto(self):
+        registry = HookRegistry()
+        registry.register("PreToolUse", lambda _: {"decision": "denyy"}, name="bad")
+        outcome = registry.fire("PreToolUse", HookInput(event="PreToolUse", tool_name="Write"))
+        self.assertTrue(outcome.denied)
+        self.assertIn("ValueError", outcome.deny_reason)
+
+    def test_reason_only_inference_remains_available(self):
+        result = coerce_result({"reason": "do not run"}, event="PreToolUse")
+        self.assertEqual(result.decision, "deny")

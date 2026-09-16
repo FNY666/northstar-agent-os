@@ -199,14 +199,20 @@ def coerce_result(value: Any, *, event: str | None = None) -> HookResult:
         return HookResult(decision="allow") if value else HookResult(decision="deny", reason="hook returned False")
     if isinstance(value, dict):
         payload = dict(value)
-        decision = str(payload.pop("decision", "") or "")
+        has_explicit_decision = "decision" in payload
+        raw_decision = payload.pop("decision", None)
+        if has_explicit_decision:
+            if not isinstance(raw_decision, str) or raw_decision not in HOOK_DECISIONS:
+                raise ValueError(f"unknown hook decision {raw_decision!r}")
+            decision = raw_decision
+        else:
+            decision = ""
         reason = str(payload.pop("reason", "") or "")
         context = str(payload.pop("additional_context", "") or payload.pop("context", "") or "")
         updated = payload.pop("updated_input", None) or payload.pop("payload", None)
-        if decision not in HOOK_DECISIONS:
-            # Infer the intent so a hook that only wrote {"reason": ...} on a
-            # Stop event still gets to block, and one that only wrote a reason on
-            # PreToolUse still gets to deny.
+        if not has_explicit_decision:
+            # Infer the intent only when the hook omitted a decision. An explicit
+            # but unknown decision is a protocol breach, not an invitation to guess.
             if reason:
                 # A reason-only verdict is a conservative refusal only where the
                 # event actually supports one.  Keeping block for no event
