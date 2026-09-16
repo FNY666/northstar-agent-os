@@ -14,6 +14,7 @@ from autonomy_checkpoint import AutonomyCheckpoint, AutonomyCheckpointError, Con
 
 POLICY_SCHEMA = "northstar.continuation-policy.v1"
 ADMISSION_SCHEMA = "northstar.continuation-admission.v1"
+WITNESS_SCHEMA = "northstar.continuation-admission-witness.v1"
 ADMISSION_STATES = frozenset({
     "admit-continuation",
     "admit-continuation-unpinned",
@@ -28,6 +29,11 @@ _POLICY_FIELDS = frozenset({"schema_version", "max_age_seconds", "require_pinned
 _ADMISSION_FIELDS = frozenset({
     "schema_version", "state", "reasons", "unresolved", "policy_digest",
     "checkpoint_digest", "age_seconds", "verdict_state", "execution_authorized",
+    "admission_digest",
+})
+_WITNESS_FIELDS = frozenset({
+    "schema_version", "admission_digest", "state", "policy_digest",
+    "checkpoint_digest", "observed_at", "witness_digest",
 })
 
 
@@ -101,8 +107,9 @@ class ContinuationAdmission:
     age_seconds: int | None = None
     verdict_state: str | None = None
     execution_authorized: bool = False
+    admission_digest: str = ""
 
-    def to_dict(self) -> dict[str, Any]:
+    def unsigned_dict(self) -> dict[str, Any]:
         return {
             "schema_version": ADMISSION_SCHEMA,
             "state": self.state,
@@ -114,6 +121,13 @@ class ContinuationAdmission:
             "verdict_state": self.verdict_state,
             "execution_authorized": self.execution_authorized,
         }
+
+    @property
+    def computed_digest(self) -> str:
+        return _digest(self.unsigned_dict())
+
+    def to_dict(self) -> dict[str, Any]:
+        return {**self.unsigned_dict(), "admission_digest": self.admission_digest}
 
     @classmethod
     def from_dict(cls, value: Any) -> "ContinuationAdmission":
@@ -132,7 +146,7 @@ class ContinuationAdmission:
             raise ContinuationAdmissionError("verdict_state invalid")
         policy_digest = value.get("policy_digest")
         checkpoint_digest = value.get("checkpoint_digest")
-        return cls(
+        admission = cls(
             state,
             _tokens(value.get("reasons"), "reasons"),
             _tokens(value.get("unresolved"), "unresolved"),
@@ -141,13 +155,22 @@ class ContinuationAdmission:
             age,
             verdict_state,
             False,
+            _digest_value(value.get("admission_digest"), "admission_digest"),
         )
+        if admission.admission_digest != admission.computed_digest:
+            raise ContinuationAdmissionError("admission digest mismatch")
+        return admission
 
 
 def _admission(state, reasons, unresolved, policy, checkpoint_digest, age, verdict_state):
-    return ContinuationAdmission(
+    draft = ContinuationAdmission(
         state, tuple(reasons), tuple(unresolved), policy.policy_digest,
         checkpoint_digest, age, verdict_state, False,
+    )
+    return ContinuationAdmission(
+        draft.state, draft.reasons, draft.unresolved, draft.policy_digest,
+        draft.checkpoint_digest, draft.age_seconds, draft.verdict_state,
+        False, draft.computed_digest,
     )
 
 
@@ -188,8 +211,111 @@ def evaluate_continuation_admission(
     return _admission("admit-continuation", verdict.reasons, verdict.unverified, policy, checkpoint.checkpoint_digest, age, verdict.state)
 
 
+@dataclass(frozen=True)
+class ContinuationAdmissionWitness:
+    """A host-owned record of one observed admission decision."""
+    admission_digest: str
+    state: str
+    policy_digest: str | None
+    checkpoint_digest: str | None
+    observed_at: int
+    witness_digest: str = ""
+
+    def unsigned_dict(self) -> dict[str, Any]:
+        return {
+            "schema_version": WITNESS_SCHEMA,
+            "admission_digest": self.admission_digest,
+            "state": self.state,
+            "policy_digest": self.policy_digest,
+            "checkpoint_digest": self.checkpoint_digest,
+            "observed_at": self.observed_at,
+        }
+
+    @property
+    def computed_digest(self) -> str:
+        return _digest(self.unsigned_dict())
+
+    def to_dict(self) -> dict[str, Any]:
+        return {**self.unsigned_dict(), "witness_digest": self.witness_digest}
+
+    @classmethod
+    def from_dict(cls, value: Any) -> "ContinuationAdmissionWitness":
+        if not isinstance(value, dict) or set(value) != _WITNESS_FIELDS or value.get("schema_version") != WITNESS_SCHEMA:
+            raise ContinuationAdmissionError("witness fields invalid")
+        state = value.get("state")
+        if state not in ADMISSION_STATES:
+            raise ContinuationAdmissionError("witness state invalid")
+        observed_at = value.get("observed_at")
+        if not isinstance(observed_at, int) or isinstance(observed_at, bool):
+            raise ContinuationAdmissionError("observed_at invalid")
+        policy_digest = value.get("policy_digest")
+        checkpoint_digest = value.get("checkpoint_digest")
+        witness = cls(
+            _digest_value(value.get("admission_digest"), "admission_digest"),
+            state,
+            None if policy_digest is None else _digest_value(policy_digest, "policy_digest"),
+            None if checkpoint_digest is None else _digest_value(checkpoint_digest, "checkpoint_digest"),
+            observed_at,
+            _digest_value(value.get("witness_digest"), "witness_digest"),
+        )
+        if witness.witness_digest != witness.computed_digest:
+            raise ContinuationAdmissionError("witness digest mismatch")
+        return witness
+
+
+def capture_admission_witness(admission: Any, *, observed_at: int) -> ContinuationAdmissionWitness:
+    """Record an admission so a later check can detect its replacement."""
+    if not isinstance(admission, ContinuationAdmission):
+        raise ContinuationAdmissionError("admission invalid")
+    admission = ContinuationAdmission.from_dict(admission.to_dict())
+    if not isinstance(observed_at, int) or isinstance(observed_at, bool):
+        raise ContinuationAdmissionError("observed_at invalid")
+    draft = ContinuationAdmissionWitness(
+        admission.admission_digest, admission.state, admission.policy_digest,
+        admission.checkpoint_digest, observed_at,
+    )
+    return ContinuationAdmissionWitness(
+        draft.admission_digest, draft.state, draft.policy_digest,
+        draft.checkpoint_digest, draft.observed_at, draft.computed_digest,
+    )
+
+
+def verify_admission_witness(
+    witness: Any, admission: Any, *, now: int, expected_witness_digest: str | None = None
+) -> ContinuationVerdict:
+    """Check a stored witness against a supplied admission; never authorizes execution."""
+    if not isinstance(now, int) or isinstance(now, bool):
+        raise ContinuationAdmissionError("now invalid")
+    if expected_witness_digest is not None:
+        _digest_value(expected_witness_digest, "expected_witness_digest")
+    try:
+        if not isinstance(witness, ContinuationAdmissionWitness):
+            witness = ContinuationAdmissionWitness.from_dict(witness)
+        else:
+            witness = ContinuationAdmissionWitness.from_dict(witness.to_dict())
+    except (AttributeError, ContinuationAdmissionError):
+        return ContinuationVerdict("unknown", ("witness_unreadable",), (), False)
+    try:
+        if not isinstance(admission, ContinuationAdmission):
+            admission = ContinuationAdmission.from_dict(admission)
+        else:
+            admission = ContinuationAdmission.from_dict(admission.to_dict())
+    except (AttributeError, ContinuationAdmissionError):
+        return ContinuationVerdict("unknown", ("admission_unreadable",), (), False)
+    if now < witness.observed_at:
+        return ContinuationVerdict("unknown", ("observation_in_future",), (), False)
+    if witness.admission_digest != admission.admission_digest or witness.state != admission.state:
+        return ContinuationVerdict("stale", ("admission_replaced",), (), False)
+    if expected_witness_digest is None:
+        return ContinuationVerdict("current-unpinned", (), ("witness_digest_unpinned",), False)
+    if expected_witness_digest != witness.witness_digest:
+        return ContinuationVerdict("stale", ("witness_digest_changed",), (), False)
+    return ContinuationVerdict("current", (), (), False)
+
+
 __all__ = [
-    "ADMISSION_SCHEMA", "POLICY_SCHEMA", "ADMISSION_STATES",
+    "ADMISSION_SCHEMA", "POLICY_SCHEMA", "WITNESS_SCHEMA", "ADMISSION_STATES",
     "ContinuationAdmissionError", "ContinuationPolicy", "ContinuationAdmission",
-    "evaluate_continuation_admission",
+    "ContinuationAdmissionWitness", "capture_admission_witness",
+    "evaluate_continuation_admission", "verify_admission_witness",
 ]

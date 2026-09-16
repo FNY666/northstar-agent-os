@@ -5,8 +5,11 @@ from autonomy_checkpoint import ContinuationVerdict, capture_checkpoint, verify_
 from continuation_admission import (
     ContinuationAdmission,
     ContinuationAdmissionError,
+    ContinuationAdmissionWitness,
     ContinuationPolicy,
+    capture_admission_witness,
     evaluate_continuation_admission,
+    verify_admission_witness,
 )
 
 
@@ -225,6 +228,118 @@ class RuntimeContinuationAdmissionTests(unittest.TestCase):
             self.assertEqual(admission.state, "blocked-continuation-stale")
             self.assertIn("transcript_changed", admission.reasons)
             self.assertEqual(runtime.provider.requests, [])
+
+
+def admit(*, max_age=60, now=1010, observed_at=1000):
+    source = inputs()
+    checkpoint = capture_checkpoint(**source, observed_at=observed_at)
+    verdict = verify_checkpoint(
+        checkpoint, **source, now=now, expected_checkpoint_digest=checkpoint.checkpoint_digest
+    )
+    return evaluate_continuation_admission(
+        checkpoint, verdict, policy=ContinuationPolicy(max_age_seconds=max_age), now=now
+    )
+
+
+class ContinuationAdmissionDigestTests(unittest.TestCase):
+    def test_every_decision_field_is_bound_into_the_admission_digest(self):
+        base = admit()
+        self.assertTrue(base.admission_digest.startswith("sha256:"))
+        self.assertEqual(base.admission_digest, base.computed_digest)
+        self.assertNotEqual(base.admission_digest, admit(max_age=61).admission_digest)
+        self.assertNotEqual(base.admission_digest, admit(now=1011).admission_digest)
+        self.assertNotEqual(base.admission_digest, admit(observed_at=999).admission_digest)
+        expired = admit(max_age=1)
+        self.assertEqual(expired.state, "blocked-continuation-age")
+        self.assertNotEqual(base.admission_digest, expired.admission_digest)
+
+    def test_wire_round_trip_revalidates_the_admission_digest(self):
+        base = admit()
+        self.assertEqual(ContinuationAdmission.from_dict(base.to_dict()), base)
+        for field, value in (
+            ("state", "admit-continuation-unpinned"),
+            ("age_seconds", base.age_seconds + 1),
+            ("policy_digest", "sha256:" + "0" * 64),
+            ("checkpoint_digest", "sha256:" + "0" * 64),
+            ("verdict_state", "stale"),
+            ("admission_digest", "sha256:" + "0" * 64),
+        ):
+            tampered = base.to_dict()
+            tampered[field] = value
+            with self.assertRaises(ContinuationAdmissionError):
+                ContinuationAdmission.from_dict(tampered)
+
+
+class ContinuationAdmissionWitnessTests(unittest.TestCase):
+    def test_matching_admission_and_pin_is_current(self):
+        admission = admit()
+        witness = capture_admission_witness(admission, observed_at=1010)
+        verdict = verify_admission_witness(
+            witness, admission, now=1011, expected_witness_digest=witness.witness_digest
+        )
+        self.assertEqual(verdict.state, "current")
+        self.assertEqual(verdict.reasons, ())
+        self.assertFalse(verdict.execution_authorized)
+
+    def test_without_an_external_pin_the_witness_stays_unpinned(self):
+        admission = admit()
+        witness = capture_admission_witness(admission, observed_at=1010)
+        verdict = verify_admission_witness(witness, admission, now=1011)
+        self.assertEqual(verdict.state, "current-unpinned")
+        self.assertIn("witness_digest_unpinned", verdict.unverified)
+        self.assertFalse(verdict.execution_authorized)
+
+    def test_a_replaced_admission_is_detected_even_when_it_is_self_consistent(self):
+        admission = admit()
+        witness = capture_admission_witness(admission, observed_at=1010)
+        replaced = admit(max_age=1)
+        self.assertEqual(replaced.state, "blocked-continuation-age")
+        self.assertEqual(
+            ContinuationAdmission.from_dict(replaced.to_dict()), replaced
+        )
+        verdict = verify_admission_witness(
+            witness, replaced, now=1011, expected_witness_digest=witness.witness_digest
+        )
+        self.assertEqual(verdict.state, "stale")
+        self.assertIn("admission_replaced", verdict.reasons)
+
+    def test_a_replaced_witness_is_detected_against_an_external_pin(self):
+        admission = admit()
+        first = capture_admission_witness(admission, observed_at=1010)
+        second = capture_admission_witness(admission, observed_at=1020)
+        verdict = verify_admission_witness(
+            second, admission, now=1021, expected_witness_digest=first.witness_digest
+        )
+        self.assertEqual(verdict.state, "stale")
+        self.assertIn("witness_digest_changed", verdict.reasons)
+
+    def test_a_future_observation_is_unknown(self):
+        admission = admit()
+        witness = capture_admission_witness(admission, observed_at=2000)
+        verdict = verify_admission_witness(witness, admission, now=1011)
+        self.assertEqual(verdict.state, "unknown")
+        self.assertIn("observation_in_future", verdict.reasons)
+
+    def test_unreadable_witness_or_admission_stays_unknown(self):
+        admission = admit()
+        witness = capture_admission_witness(admission, observed_at=1010)
+        self.assertEqual(
+            verify_admission_witness({"not": "a witness"}, admission, now=1011).state, "unknown"
+        )
+        self.assertEqual(
+            verify_admission_witness(witness, {"not": "an admission"}, now=1011).state, "unknown"
+        )
+        tampered = witness.to_dict()
+        tampered["admission_digest"] = "sha256:" + "0" * 64
+        self.assertEqual(verify_admission_witness(tampered, admission, now=1011).state, "unknown")
+
+    def test_witness_wire_round_trip_revalidates_its_own_digest(self):
+        witness = capture_admission_witness(admit(), observed_at=1010)
+        self.assertEqual(ContinuationAdmissionWitness.from_dict(witness.to_dict()), witness)
+        tampered = witness.to_dict()
+        tampered["witness_digest"] = "sha256:" + "0" * 64
+        with self.assertRaises(ContinuationAdmissionError):
+            ContinuationAdmissionWitness.from_dict(tampered)
 
 
 if __name__ == "__main__":
