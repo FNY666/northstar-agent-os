@@ -27,6 +27,7 @@ from sidecar_client import (
     SidecarResult,
     fallback_allowed,
     known_statuses,
+    SIDECAR_STATUSES,
     socket_path_text,
     validate_request,
     validate_socket_path,
@@ -346,3 +347,20 @@ class ToolAdapterTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class UnknownStatusTests(unittest.TestCase):
+    """A status the sidecar has no right to return is a protocol breach."""
+
+    def test_an_unknown_status_is_refused_rather_than_surfaced(self):
+        client, _ = client_with({"status": "made_up_status", "request_id": "r", "text": ""})
+        result = client.execute("hello", request_id="r")
+        self.assertEqual(result.status, "protocol_error")
+        self.assertFalse(result.ok)
+
+    def test_every_declared_status_still_passes_through(self):
+        for status in sorted(SIDECAR_STATUSES):
+            payload = {"status": status, "request_id": "r", "text": "answer"}
+            client, _ = client_with(payload)
+            result = client.execute("hello", request_id="r")
+            self.assertEqual(result.status, status, status)

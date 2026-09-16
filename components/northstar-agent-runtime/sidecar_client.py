@@ -376,6 +376,10 @@ class SidecarClient:
         status = payload.get("status")
         if not isinstance(status, str) or not status:
             raise SidecarProtocolError("sidecar response has no status field")
+        if status not in SIDECAR_STATUSES:
+            # SIDECAR_STATUSES is the contract: a status outside it is a breach, not
+            # a verdict the runtime should pass through to callers.
+            raise SidecarProtocolError(f"sidecar reported an unknown status {status!r}")
         text = payload.get("text", "")
         if not isinstance(text, str):
             raise SidecarProtocolError("sidecar text field is not a string")
