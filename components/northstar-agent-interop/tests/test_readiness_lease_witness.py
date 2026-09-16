@@ -7,6 +7,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
+from plan_evidence_decision import derive_plan_id
 from evidence_readiness_lease import EvidenceReadinessLease, SCHEMA as LEASE_SCHEMA
 from evidence_readiness_lease_registry import EvidenceReadinessLeaseRegistry
 from readiness_lease_witness import (
@@ -22,7 +23,7 @@ D = lambda char: "sha256:" + char * 64
 
 def lease(suffix="a", issued=1000, expires=1060):
     draft = EvidenceReadinessLease(
-        LEASE_SCHEMA, "plan-evidence:abcdef1234567890", D(suffix), D("b"), D("c"),
+        LEASE_SCHEMA, derive_plan_id(D("b")), D(suffix), D("b"), D("c"),
         issued, expires, False, "",
     )
     return EvidenceReadinessLease(

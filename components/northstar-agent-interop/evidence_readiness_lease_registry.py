@@ -18,6 +18,7 @@ from pathlib import Path
 from typing import Any
 
 from evidence_readiness_lease import EvidenceReadinessLease, LeaseError
+from plan_evidence_decision import derive_plan_id
 
 SCHEMA = "northstar.readiness-lease-registry.v1"
 META_SCHEMA = "northstar.readiness-lease-registry-meta.v1"
@@ -319,6 +320,8 @@ class EvidenceReadinessLeaseRegistry:
             lease = EvidenceReadinessLease.from_dict(lease.to_dict())
         except LeaseError as exc:
             raise LeaseRegistryError("lease is invalid") from exc
+        if lease.plan_id != derive_plan_id(lease.manifest_digest):
+            raise LeaseRegistryError("lease plan id does not match its manifest digest")
         with self._lock():
             records, _repaired, error = self._read_state()
             if error is not None:

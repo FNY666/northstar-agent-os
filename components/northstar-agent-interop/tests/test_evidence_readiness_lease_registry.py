@@ -9,6 +9,7 @@ import unittest
 from pathlib import Path
 
 from evidence_readiness_lease import EvidenceReadinessLease, SCHEMA as LEASE_SCHEMA
+from plan_evidence_decision import derive_plan_id
 from evidence_readiness_lease_registry import (
     LeaseRegistryError,
     LeaseRegistryRecord,
@@ -22,7 +23,7 @@ D = lambda char: "sha256:" + char * 64
 def lease(*, issued=1000, expires=1060, suffix="a"):
     draft = EvidenceReadinessLease(
         LEASE_SCHEMA,
-        "plan-evidence:abcdef1234567890",
+        derive_plan_id(D("b")),
         D(suffix),
         D("b"),
         D("c"),
@@ -200,3 +201,23 @@ class ConcurrencyTests(RegistryFixture):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class LeaseLabelIdentityTests(RegistryFixture):
+    def test_a_lease_label_must_match_its_own_manifest_digest(self):
+        draft = EvidenceReadinessLease(
+            self.lease.schema_version, "plan-evidence:0000000000000000",
+            self.lease.decision_digest, self.lease.manifest_digest,
+            self.lease.gate_digest, self.lease.issued_at,
+            self.lease.expires_at, False, "",
+        )
+        inconsistent = EvidenceReadinessLease(
+            draft.schema_version, draft.plan_id, draft.decision_digest,
+            draft.manifest_digest, draft.gate_digest, draft.issued_at,
+            draft.expires_at, False, draft.computed_digest,
+        )
+        self.assertNotEqual(
+            inconsistent.plan_id, derive_plan_id(inconsistent.manifest_digest)
+        )
+        with self.assertRaises(LeaseRegistryError):
+            self.registry.register(inconsistent)
