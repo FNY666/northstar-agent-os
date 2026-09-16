@@ -6,6 +6,7 @@ import hashlib
 import json
 import os
 import tempfile
+from collections.abc import Sequence
 from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
@@ -18,10 +19,16 @@ from route_causality import (
     HandoffLink,
     canonical_graph_commitment,
 )
+from route_lineage import LineageEvent
 
 _SCHEMA = "northstar.graph-evidence.v2"
 _GRAPH_SCHEMA = "northstar.causal-graph.v1"
 _PREFIX = "sha256:"
+
+PROJECTION_CURRENT = "projection-current"
+PROJECTION_EXTENDED = "projection-extended"
+PROJECTION_STALE = "projection-stale"
+PROJECTION_UNKNOWN = "projection-unknown"
 
 
 def _canonical(value: Any) -> bytes:
@@ -357,3 +364,73 @@ class GraphEvidenceStore:
         # way as one that was never written.
         verdict = RECOVERY_VERIFIED if records else RECOVERY_EMPTY
         return GraphEvidenceRecovery(verdict, tuple(records), cursor)
+
+
+@dataclass(frozen=True)
+class ProjectionVerdict:
+    """Whether a stored graph projection still agrees with the source it came from."""
+
+    verdict: str
+    reason: str
+    record_sequence: int | None = None
+    execution_authorized: bool = False
+
+
+def verify_projection_against_source(
+    record: GraphEvidenceRecord,
+    source_events: Sequence[LineageEvent],
+    *,
+    expected_record_digest: str | None = None,
+) -> ProjectionVerdict:
+    """Re-check a stored graph projection against the source lineage as it reads now.
+
+    A graph projection is not a replacement for the source lineage, and until now
+    nothing related the two after admission: the record stored the source event
+    digests but no API read them back. That left a projection unable to answer
+    whether the history it was taken from was later rolled back, truncated or
+    replaced - the caller had to remember its own cursor for that.
+
+    The recorded digests make the projection itself an anchor the caller does not
+    have to remember. This never authorizes execution and never repairs anything;
+    it only reports how the projection and the source currently relate.
+    """
+    if not isinstance(record, GraphEvidenceRecord):
+        raise ValueError("graph projection record is invalid")
+    if not isinstance(source_events, Sequence) or isinstance(source_events, (str, bytes)):
+        raise ValueError("source lineage events are invalid")
+    for event in source_events:
+        if not isinstance(event, LineageEvent):
+            raise ValueError("source lineage events are invalid")
+    if expected_record_digest is not None:
+        _digest_field(expected_record_digest, "expected_record_digest")
+        if expected_record_digest != record.record_digest:
+            return ProjectionVerdict(
+                PROJECTION_UNKNOWN,
+                "graph projection record does not match the caller pin",
+                record.sequence,
+            )
+    if not source_events:
+        return ProjectionVerdict(
+            PROJECTION_UNKNOWN,
+            "source lineage has no events to compare",
+            None,
+        )
+    source_digests = tuple(event.event_digest for event in source_events)
+    recorded = record.event_digests
+    if source_digests[: len(recorded)] != recorded:
+        return ProjectionVerdict(
+            PROJECTION_STALE,
+            "source lineage no longer contains the recorded events",
+            record.sequence,
+        )
+    if len(source_digests) > len(recorded):
+        return ProjectionVerdict(
+            PROJECTION_EXTENDED,
+            "source lineage grew past the recorded projection",
+            record.sequence,
+        )
+    return ProjectionVerdict(
+        PROJECTION_CURRENT,
+        "source lineage still matches the recorded projection",
+        record.sequence,
+    )

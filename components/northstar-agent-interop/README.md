@@ -212,3 +212,20 @@ must still be checked against the source lineage. A graph digest is not a
 signature or authorization, and atomic filesystem publication is not a proof
 of distributed crash consistency. A caller-held graph cursor is still needed
 to detect deletion of the final index record.
+
+## Projection and source reconciliation
+
+Admission checks a graph against the lineage it is built from, but nothing
+re-read that relation afterwards: the record kept the source event digests and
+no API read them back, so a projection could not say whether the history it was
+taken from had since been rolled back, truncated or replaced. Because the
+recorded digests make the projection its own anchor,
+`verify_projection_against_source()` compares a stored `GraphEvidenceRecord`
+with the route lineage as it reads now and returns `projection-current` (the
+source still matches), `projection-extended` (the source grew past the
+projection, which remains a valid record of the earlier state),
+`projection-stale` (the recorded events are no longer the source prefix) or
+`projection-unknown` (nothing to compare, or the record does not match a
+caller-held digest pin). Every verdict carries `execution_authorized=False`:
+this reports a relation between two evidence artifacts, and it converges
+nothing, repairs nothing and authorizes nothing.
