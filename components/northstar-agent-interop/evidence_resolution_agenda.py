@@ -14,7 +14,12 @@ from typing import Any
 
 from evidence_readiness_gate import EvidenceReadinessGate, GateError
 from evidence_state_projection import ClaimProjection, ProjectionError
-from plan_evidence_decision import EvidencePlanManifest, PlanDecisionError, PlanEvidenceDecision
+from plan_evidence_decision import (
+    derive_plan_id,
+    EvidencePlanManifest,
+    PlanDecisionError,
+    PlanEvidenceDecision,
+)
 
 SCHEMA = "northstar.evidence-resolution-agenda.v1"
 _DIGEST = re.compile(r"^sha256:[0-9a-f]{64}$")
@@ -248,7 +253,7 @@ def make_resolution_agenda(decision: PlanEvidenceDecision) -> EvidenceResolution
     manifest = _manifest(decision)
     items = _derive_items(decision)
     agenda = EvidenceResolutionAgenda(
-        SCHEMA, "plan-evidence:" + manifest.manifest_digest[7:23], decision.decision_digest,
+        SCHEMA, derive_plan_id(manifest.manifest_digest), decision.decision_digest,
         decision.state, items, False, "",
     )
     return EvidenceResolutionAgenda(
@@ -269,7 +274,7 @@ def verify_resolution_agenda(
     parsed = EvidenceResolutionAgenda.from_dict(agenda.to_dict())
     decision = _decision(decision)
     manifest = _manifest(decision)
-    expected_plan_id = "plan-evidence:" + manifest.manifest_digest[7:23]
+    expected_plan_id = derive_plan_id(manifest.manifest_digest)
     if parsed.plan_id != expected_plan_id:
         raise AgendaError("agenda plan id mismatch")
     if parsed.decision_digest != decision.decision_digest:

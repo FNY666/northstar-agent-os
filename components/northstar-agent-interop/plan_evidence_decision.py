@@ -83,6 +83,11 @@ class PlanEvidenceDecision:
 class PlanDecisionVerdict:
     state:str; claimed_state:str; reasons:tuple[str,...]=(); unverified:tuple[str,...]=(); execution_authorized:bool=False; decision_digest:str=''
 
+def derive_plan_id(manifest_digest: str) -> str:
+    """The single host-owned derivation of a plan identity from its manifest."""
+    return "plan-evidence:" + manifest_digest[7:23]
+
+
 def _canonical(v):
     try:return json.dumps(v,ensure_ascii=False,sort_keys=True,separators=(',',':'),allow_nan=False).encode()
     except (TypeError,ValueError) as e: raise PlanDecisionError('value not canonical JSON') from e
@@ -113,7 +118,7 @@ def _requirements(manifest): return sorted((EvidenceRequirement(step.claim_diges
 
 def make_plan_evidence_decision(manifest:EvidencePlanManifest,projections:Mapping[str,ClaimProjection])->PlanEvidenceDecision:
     m=_manifest(manifest);p=_projections(projections)
-    gate=evaluate_readiness('plan-evidence:'+m.manifest_digest[7:23],_requirements(m),p)
+    gate=evaluate_readiness(derive_plan_id(m.manifest_digest),_requirements(m),p)
     unsigned=PlanEvidenceDecision(SCHEMA,m.to_dict(),m.manifest_digest,gate.to_dict(),gate.state,gate.blocked_claims,gate.unknown_claims,False,'')
     return PlanEvidenceDecision(unsigned.schema_version,unsigned.manifest,unsigned.manifest_digest,unsigned.gate,unsigned.state,unsigned.blocked_claims,unsigned.unknown_claims,False,unsigned.computed_digest)
 
@@ -125,7 +130,7 @@ def verify_plan_evidence_decision(decision:PlanEvidenceDecision,*,manifest:Evide
     if expected_manifest_digest is not None and _digest(expected_manifest_digest,'expected_manifest_digest')!=parsed.manifest_digest: raise PlanDecisionError('external manifest digest mismatch')
     replay=make_plan_evidence_decision(m,p)
     if replay.to_dict()!=parsed.to_dict(): raise PlanDecisionError('decision replay mismatch')
-    try: gate_verdict=verify_readiness_gate(EvidenceReadinessGate.from_dict(parsed.gate),plan_id='plan-evidence:'+m.manifest_digest[7:23],requirements=_requirements(m),projections=p,expected_gate_digest=expected_gate_digest)
+    try: gate_verdict=verify_readiness_gate(EvidenceReadinessGate.from_dict(parsed.gate),plan_id=derive_plan_id(m.manifest_digest),requirements=_requirements(m),projections=p,expected_gate_digest=expected_gate_digest)
     except GateError as e: raise PlanDecisionError('gate verification failed') from e
     unresolved=list(gate_verdict.unverified)
     if expected_decision_digest is None: unresolved.append('decision_digest_unpinned')

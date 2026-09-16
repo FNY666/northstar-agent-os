@@ -13,6 +13,7 @@ from typing import Any, Mapping
 
 from evidence_state_projection import ClaimProjection, ProjectionError
 from plan_evidence_decision import (
+    derive_plan_id,
     EvidencePlanManifest,
     PlanDecisionError,
     PlanEvidenceDecision,
@@ -162,7 +163,7 @@ def _projections(values: Any) -> Mapping[str, ClaimProjection]:
 
 
 def _plan_id(manifest: EvidencePlanManifest) -> str:
-    return "plan-evidence:" + manifest.manifest_digest[7:23]
+    return derive_plan_id(manifest.manifest_digest)
 
 
 def _verify_ready_source(

@@ -5,7 +5,11 @@ from dataclasses import dataclass
 from typing import Any
 
 from evidence_readiness_preflight import EvidenceReadinessPreflight, PreflightError
-from plan_evidence_decision import EvidencePlanManifest, PlanDecisionError
+from plan_evidence_decision import (
+    derive_plan_id as _derive_plan_id,
+    EvidencePlanManifest,
+    PlanDecisionError,
+)
 from route_liveness import RouteLivenessVerdict
 
 SCHEMA = "northstar.dispatch-admission.v1"
@@ -106,7 +110,7 @@ def derive_plan_id(manifest_digest: Any) -> str:
     """Reproduce the host-owned plan identity used by the plan evidence gate."""
     if not isinstance(manifest_digest, str) or _DIGEST.fullmatch(manifest_digest) is None:
         raise DispatchAdmissionError("manifest_digest invalid")
-    return "plan-evidence:" + manifest_digest[7:23]
+    return _derive_plan_id(manifest_digest)
 
 
 def evaluate_dispatch_admission(
