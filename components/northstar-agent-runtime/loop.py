@@ -27,6 +27,12 @@ from dataclasses import dataclass, field, replace
 from typing import Any, Callable, Iterable, Iterator, Mapping, Sequence
 
 from agents import AgentDefinition, AgentRegistry, Verdict, builtin_registry, parse_verdict
+from autonomy_checkpoint import (
+    AutonomyCheckpoint,
+    ContinuationVerdict,
+    capture_checkpoint,
+    verify_checkpoint,
+)
 from budget import Budget
 from compaction import CompactionOutcome, compact, should_compact
 from hooks import HookInput, HookRegistry
@@ -1479,6 +1485,56 @@ class AgentRuntime:
             session_id=state.session_id,
             spans=tuple(self.tracer.names()),
             _trace=self.tracer.tree(),
+        )
+
+    # -- autonomous continuation ------------------------------------------
+    def _continuation_runtime_observation(self) -> dict[str, Any]:
+        """Host-owned governance surface used by continuation checkpoints."""
+        records, dropped = self.sessions.read()
+        return {
+            "config": self.config.as_dict(),
+            "permission": {
+                "mode": self.permissions.mode,
+                "allowed_tools": list(self.permissions.config.allowed_tools),
+                "disallowed_tools": list(self.permissions.config.disallowed_tools),
+                "has_host_approval_callback": self.permissions.config.can_use_tool is not None,
+            },
+            "tools": [spec.as_dict() for spec in self.tools.specs()],
+            "session_records": records,
+            "session_dropped_records": dropped,
+        }
+
+    def capture_continuation_checkpoint(self, *, goal: Any, observed_at: int) -> AutonomyCheckpoint:
+        """Capture a non-authorizing continuation observation; never resumes work."""
+        observation = self._continuation_runtime_observation()
+        return capture_checkpoint(
+            goal=goal,
+            session_id=self.session_id,
+            runtime={key: value for key, value in observation.items() if key not in {"session_records", "session_dropped_records"}},
+            transcript={"records": observation["session_records"], "dropped": observation["session_dropped_records"]},
+            budget=self.budget.status(),
+            observed_at=observed_at,
+        )
+
+    def verify_continuation_checkpoint(
+        self,
+        checkpoint: AutonomyCheckpoint,
+        *,
+        goal: Any,
+        now: int,
+        expected_checkpoint_digest: str | None = None,
+    ) -> ContinuationVerdict:
+        """Compare current host observations with a checkpoint; never executes."""
+        observation = self._continuation_runtime_observation()
+        return verify_checkpoint(
+            checkpoint,
+            goal=goal,
+            session_id=self.session_id,
+            runtime={key: value for key, value in observation.items() if key not in {"session_records", "session_dropped_records"}},
+            transcript={"records": observation["session_records"], "dropped": observation["session_dropped_records"]},
+            budget=self.budget.status(),
+            now=now,
+            expected_checkpoint_digest=expected_checkpoint_digest,
         )
 
     # -- resume ------------------------------------------------------------

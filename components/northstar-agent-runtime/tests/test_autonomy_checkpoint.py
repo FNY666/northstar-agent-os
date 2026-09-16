@@ -109,3 +109,46 @@ class ContinuationVerificationTests(unittest.TestCase):
                 self.checkpoint, **self.source, now=1010,
                 expected_checkpoint_digest="sha256:" + "f" * 64,
             )
+
+class AgentRuntimeAdapterTests(unittest.TestCase):
+    def _runtime(self, *, sessions=None):
+        from loop import AgentRuntime, RuntimeConfig
+        from providers.scripted import ScriptedProvider
+        return AgentRuntime(
+            provider=ScriptedProvider([]),
+            config=RuntimeConfig(session_id="ns-adapter", workspace=".", max_budget_usd=1.0),
+            sessions=sessions,
+        )
+
+    def test_runtime_captures_and_verifies_its_host_owned_state(self):
+        runtime = self._runtime()
+        checkpoint = runtime.capture_continuation_checkpoint(
+            goal={"objective": "continue safely"}, observed_at=1000
+        )
+        verdict = runtime.verify_continuation_checkpoint(
+            checkpoint, goal={"objective": "continue safely"}, now=1010,
+            expected_checkpoint_digest=checkpoint.checkpoint_digest,
+        )
+        self.assertEqual(verdict.state, "current")
+        self.assertFalse(verdict.execution_authorized)
+
+    def test_runtime_detects_a_transcript_change_without_resuming(self):
+        from sessions import SessionStore
+        import tempfile
+        from pathlib import Path
+        with tempfile.TemporaryDirectory() as root:
+            store = SessionStore(root, session_id="ns-adapter")
+            runtime = self._runtime(sessions=store)
+            checkpoint = runtime.capture_continuation_checkpoint(goal={"objective": "x"}, observed_at=1000)
+            store.append("session_start", {"note": "new host record"})
+            verdict = runtime.verify_continuation_checkpoint(checkpoint, goal={"objective": "x"}, now=1010)
+            self.assertEqual(verdict.state, "stale")
+            self.assertIn("transcript_changed", verdict.reasons)
+
+    def test_runtime_detects_governance_surface_drift(self):
+        runtime = self._runtime()
+        checkpoint = runtime.capture_continuation_checkpoint(goal={"objective": "x"}, observed_at=1000)
+        runtime.tools.unregister("Write")
+        verdict = runtime.verify_continuation_checkpoint(checkpoint, goal={"objective": "x"}, now=1010)
+        self.assertEqual(verdict.state, "stale")
+        self.assertIn("runtime_changed", verdict.reasons)

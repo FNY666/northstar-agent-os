@@ -59,10 +59,10 @@
 - Produces: additive `AgentRuntime.capture_continuation_checkpoint()` and `verify_continuation_checkpoint()` methods.
 - Adapter derives inputs from `RuntimeConfig.as_dict()`, registered tool manifest, `SessionStore.read()`, and `Budget.status()`; it must not change `continue_session()` yet.
 
-- [ ] Write RED tests using ScriptedProvider and a SessionStore.
-- [ ] Implement the adapter with no hidden I/O or auto-resume.
-- [ ] Verify checkpoint drift after a transcript/config change.
-- [ ] Run mutation checks, both suites, docs, and commit.
+- [x] Write RED tests using ScriptedProvider and a SessionStore.
+- [x] Implement the adapter with no hidden I/O or auto-resume.
+- [x] Verify checkpoint drift after a transcript/config/tool-governance change.
+- [x] Run mutation checks and both suites; commit.
 
 ## Self-Review
 
