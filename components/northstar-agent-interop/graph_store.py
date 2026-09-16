@@ -376,6 +376,17 @@ class ProjectionVerdict:
     execution_authorized: bool = False
 
 
+def _projection_segments(
+    segment_lengths: Sequence[int], events: Sequence[LineageEvent]
+) -> tuple[tuple[LineageEvent, ...], ...]:
+    segments = []
+    offset = 0
+    for length in segment_lengths:
+        segments.append(tuple(events[offset : offset + length]))
+        offset += length
+    return tuple(segments)
+
+
 def verify_projection_against_source(
     record: GraphEvidenceRecord,
     source_events: Sequence[LineageEvent],
@@ -389,6 +400,12 @@ def verify_projection_against_source(
     digests but no API read them back. That left a projection unable to answer
     whether the history it was taken from was later rolled back, truncated or
     replaced - the caller had to remember its own cursor for that.
+
+    Two questions are answered together, because either can disagree on its own:
+    whether the source still contains the recorded events, and whether the graph
+    commitment survives re-derivation from those events. A record can stay
+    internally consistent while claiming a graph the source does not produce, so
+    the commitment is rebuilt rather than trusted.
 
     The recorded digests make the projection itself an anchor the caller does not
     have to remember. This never authorizes execution and never repairs anything;
@@ -421,6 +438,27 @@ def verify_projection_against_source(
         return ProjectionVerdict(
             PROJECTION_STALE,
             "source lineage no longer contains the recorded events",
+            record.sequence,
+        )
+    covered = tuple(source_events[: len(recorded)])
+    try:
+        rebuilt = CausalGraph.from_segments(
+            _projection_segments(record.segment_lengths, covered),
+            handoffs=record.handoffs,
+        )
+    except (TypeError, ValueError) as error:
+        return ProjectionVerdict(
+            PROJECTION_UNKNOWN,
+            f"graph commitment could not be re-derived from the source: {error}",
+            record.sequence,
+        )
+    if rebuilt.graph_digest != record.graph_digest:
+        # The record can be internally consistent and still claim a graph the
+        # source does not produce, so the commitment is re-derived rather than
+        # trusted.
+        return ProjectionVerdict(
+            PROJECTION_STALE,
+            "recorded graph commitment does not match the graph rebuilt from the source",
             record.sequence,
         )
     if len(source_digests) > len(recorded):

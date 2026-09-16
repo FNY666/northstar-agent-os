@@ -88,6 +88,16 @@ class GraphProjectionVerificationTests(unittest.TestCase):
         )
         self.assertEqual(verdict.verdict, "projection-current")
 
+    def test_record_with_a_forged_graph_commitment_is_stale(self):
+        # The record stays internally consistent, so only re-deriving the
+        # commitment from the source can catch it.
+        graph = verified_graph()
+        record = GraphEvidenceRecord.create(graph, sequence=1, prev_record_digest=None)
+        forged = replace(record, graph_digest="sha256:" + "c" * 64)
+        verdict = verify_projection_against_source(forged, graph.events)
+        self.assertEqual(verdict.verdict, "projection-stale")
+        self.assertIn("commitment", verdict.reason)
+
     def test_no_verdict_ever_authorizes_execution(self):
         record = admitted_record()
         events = verified_graph().events

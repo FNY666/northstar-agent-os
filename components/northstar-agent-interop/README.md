@@ -221,10 +221,12 @@ no API read them back, so a projection could not say whether the history it was
 taken from had since been rolled back, truncated or replaced. Because the
 recorded digests make the projection its own anchor,
 `verify_projection_against_source()` compares a stored `GraphEvidenceRecord`
-with the route lineage as it reads now and returns `projection-current` (the
-source still matches), `projection-extended` (the source grew past the
-projection, which remains a valid record of the earlier state),
-`projection-stale` (the recorded events are no longer the source prefix) or
+with the route lineage as it reads now, re-deriving the graph commitment from
+the recorded events instead of trusting the stored one, and returns
+`projection-current` (the source still matches), `projection-extended` (the
+source grew past the projection, which remains a valid record of the earlier
+state), `projection-stale` (the recorded events are no longer the source
+prefix, or the rebuilt graph does not reproduce the recorded commitment) or
 `projection-unknown` (nothing to compare, or the record does not match a
 caller-held digest pin). Every verdict carries `execution_authorized=False`:
 this reports a relation between two evidence artifacts, and it converges
