@@ -135,7 +135,11 @@ def build_shadow_advisory(
             milestone_action_map=spec.get("milestone_action_map"),
             round_steps=last.steps,
         )
-    except (ValueError, OSError) as error:
+    except Exception as error:  # noqa: BLE001 - see below
+        # Deliberately broad: the advisory is non-authoritative, so no failure of
+        # it may break the production run. A bug in a malformed fixture spec shows
+        # up as a distinctive recorded reason (``advisory_error:KeyError``) rather
+        # than as a crash in the path that actually decides success.
         return {**unavailable, "reason": f"advisory_error:{type(error).__name__}"}
     return {**advisory.as_report_dict(), "available": True}
 

@@ -99,6 +99,14 @@ MUTATIONS = (
         expect="fail",
     ),
     Mutation(
+        name="advisory-ignores-the-evidence-journal",
+        target="completion_advisory.py",
+        old="    status = _evidence_status(journal)",
+        new='    status = "finished"',
+        guard="tests.test_completion_advisory",
+        expect="fail",
+    ),
+    Mutation(
         name="neutral-docstring-change",
         target="completion_replay.py",
         old='"""Return an independently derived terminal status, or empty on uncertainty."""',

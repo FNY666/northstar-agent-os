@@ -477,9 +477,14 @@ without a shadow contract produces a report with no advisory field at all. The
 advisory records `authoritative`, `affects_task_outcome`, and
 `execution_authorized` as false, carries a digest over its own payload so a
 later edit is detectable, and records a reason instead of an opinion when the
-workspace cannot be observed or the contract cannot be evaluated. Two
-mutation declarations keep this honest: making the exit code read the advisory,
-or widening the contract's allowed mutations, must make the guards fail.
+workspace cannot be observed or the contract cannot be evaluated — including a
+malformed fixture spec, which must degrade to a recorded `advisory_error:...`
+rather than interrupt the run that actually decides success. The advisory binds
+the *final* round's evidence journal, and a twin test proves that binding is
+real: identical inputs with only the terminal journal removed change the
+verdict. Three mutation declarations keep this honest: making the exit code read
+the advisory, widening the contract's allowed mutations, or ignoring the
+evidence journal must each make the guards fail.
 
 ## Deliberate ceiling
 
