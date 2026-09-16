@@ -557,7 +557,9 @@ class RouteLedgerPersistenceTests(RouteLedgerTestCase):
                 time.sleep(0.25)
                 self.assertFalse(result_path.exists())
                 fcntl.flock(lock.fileno(), fcntl.LOCK_UN)
-            child.wait(timeout=15)
+            # See the note on the sibling concurrency test: memory pressure
+            # makes child startup slow here, not deadlocked.
+            child.wait(timeout=120)
             self.assertEqual(child.returncode, 0)
         finally:
             if child is not None and child.poll() is None:
@@ -627,7 +629,7 @@ class RouteLedgerPersistenceTests(RouteLedgerTestCase):
             processes.append((process, result_path, error_path))
         try:
             for process, result_path, error_path in processes:
-                process.wait(timeout=20)
+                process.wait(timeout=120)
                 self.assertEqual(process.returncode, 0, error_path.read_text())
                 self.assertTrue(result_path.exists())
             results = [result_path.read_text() for _process, result_path, _error_path in processes]

@@ -238,7 +238,11 @@ class CausalEvidenceStoreTests(unittest.TestCase):
             processes.append((process, result_path, error_path))
         try:
             for process, result_path, error_path in processes:
-                process.wait(timeout=20)
+                # iSH is memory-bound rather than CPU-bound: four concurrent
+                # Python children can take far longer than the ~4s they need
+                # when idle, so this bound should only catch a real deadlock,
+                # not slow startup.
+                process.wait(timeout=120)
                 self.assertEqual(process.returncode, 0, error_path.read_text(encoding="utf-8"))
                 self.assertEqual(result_path.read_text(encoding="utf-8"), "ok")
         finally:
