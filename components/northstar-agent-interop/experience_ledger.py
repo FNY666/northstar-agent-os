@@ -795,3 +795,98 @@ class ExperienceLedger:
             recent_trend=recent_trend,
             last_n_outcomes=tuple(verdicts[:recent_window]),
         )
+
+
+@dataclass(frozen=True)
+class AdmissionConflict:
+    """One detected conflict between two admission decisions."""
+
+    earlier: AdmissionRecord
+    later: AdmissionRecord
+    conflict_type: str
+    time_delta: int
+
+
+def detect_conflicts(
+    ledger: AdmissionLedger,
+    *,
+    window_seconds: int | None = None,
+) -> tuple[AdmissionConflict, ...]:
+    """Find contradictory decisions for the same fingerprint.
+    
+    Conflict types:
+    - "admit-vs-block": Earlier admitted, later blocked (high severity)
+    - "block-vs-admit": Earlier blocked, later admitted (policy relaxation or override)
+    - "state-change": Any other verdict state change
+    """
+    if not ledger._path.exists():
+        return ()
+    
+    handle = open(ledger._path, "r", encoding="utf-8")
+    try:
+        fcntl.flock(handle.fileno(), fcntl.LOCK_SH)
+        records = _load(handle)
+    finally:
+        fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
+        handle.close()
+    
+    if not records:
+        return ()
+    
+    # Group by fingerprint
+    by_fingerprint: dict[str, list[AdmissionRecord]] = {}
+    for r in records:
+        fp = r["fingerprint"]
+        if fp not in by_fingerprint:
+            by_fingerprint[fp] = []
+        by_fingerprint[fp].append(
+            AdmissionRecord(
+                fingerprint=r["fingerprint"],
+                verdict_state=r["verdict_state"],
+                verdict_reason=r["verdict_reason"],
+                verdict_confidence=r["verdict_confidence"],
+                statistics_snapshot=r["statistics_snapshot"],
+                decided_at=r["decided_at"],
+                policy_config=r["policy_config"],
+                sequence=r["sequence"],
+                prev_record_digest=r.get("prev_record_digest"),
+                record_digest=r["record_digest"],
+            )
+        )
+    
+    conflicts = []
+    for fp, fp_records in by_fingerprint.items():
+        # Compare consecutive decisions
+        for i in range(len(fp_records) - 1):
+            earlier = fp_records[i]
+            later = fp_records[i + 1]
+            
+            time_delta = later.decided_at - earlier.decided_at
+            
+            # Apply window filter
+            if window_seconds is not None and time_delta > window_seconds:
+                continue
+            
+            # Check for state change
+            if earlier.verdict_state != later.verdict_state:
+                conflict_type = _classify_conflict(earlier.verdict_state, later.verdict_state)
+                conflicts.append(
+                    AdmissionConflict(
+                        earlier=earlier,
+                        later=later,
+                        conflict_type=conflict_type,
+                        time_delta=time_delta,
+                    )
+                )
+    
+    return tuple(conflicts)
+
+
+def _classify_conflict(earlier_state: str, later_state: str) -> str:
+    """Classify conflict severity."""
+    if earlier_state == "admitted" and later_state == "blocked":
+        return "admit-vs-block"
+    elif earlier_state == "blocked" and later_state == "admitted":
+        return "block-vs-admit"
+    else:
+        return "state-change"
