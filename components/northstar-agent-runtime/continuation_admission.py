@@ -27,7 +27,7 @@ ADMISSION_STATES = frozenset({
 })
 VERDICT_STATES = frozenset({"current", "current-unpinned", "stale", "unknown"})
 _DIGEST = re.compile(r"^sha256:[0-9a-f]{64}$")
-_POLICY_FIELDS = frozenset({"schema_version", "max_age_seconds", "require_pinned_checkpoint", "require_objective_continuity"})
+_POLICY_FIELDS = frozenset({"schema_version", "max_age_seconds", "require_pinned_checkpoint", "require_objective_continuity", "authorize_resume"})
 _ADMISSION_FIELDS = frozenset({
     "schema_version", "state", "reasons", "unresolved", "policy_digest",
     "checkpoint_digest", "age_seconds", "verdict_state", "execution_authorized",
@@ -75,6 +75,7 @@ class ContinuationPolicy:
     max_age_seconds: int
     require_pinned_checkpoint: bool = True
     require_objective_continuity: bool = True
+    authorize_resume: bool = False
 
     def __post_init__(self) -> None:
         if not isinstance(self.max_age_seconds, int) or isinstance(self.max_age_seconds, bool) or self.max_age_seconds < 0:
@@ -83,6 +84,8 @@ class ContinuationPolicy:
             raise ContinuationAdmissionError("require_pinned_checkpoint invalid")
         if not isinstance(self.require_objective_continuity, bool):
             raise ContinuationAdmissionError("require_objective_continuity invalid")
+        if not isinstance(self.authorize_resume, bool):
+            raise ContinuationAdmissionError("authorize_resume invalid")
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -90,6 +93,7 @@ class ContinuationPolicy:
             "max_age_seconds": self.max_age_seconds,
             "require_pinned_checkpoint": self.require_pinned_checkpoint,
             "require_objective_continuity": self.require_objective_continuity,
+            "authorize_resume": self.authorize_resume,
         }
 
     @property
@@ -98,12 +102,17 @@ class ContinuationPolicy:
 
     @classmethod
     def from_dict(cls, value: Any) -> "ContinuationPolicy":
-        if not isinstance(value, dict) or set(value) != _POLICY_FIELDS or value.get("schema_version") != POLICY_SCHEMA:
+        # Tolerate missing authorize_resume for backward compatibility
+        if not isinstance(value, dict) or value.get("schema_version") != POLICY_SCHEMA:
+            raise ContinuationAdmissionError("policy fields invalid")
+        expected = _POLICY_FIELDS if "authorize_resume" in value else _POLICY_FIELDS - {"authorize_resume"}
+        if set(value) != expected:
             raise ContinuationAdmissionError("policy fields invalid")
         return cls(
             value.get("max_age_seconds"),
             value.get("require_pinned_checkpoint"),
             value.get("require_objective_continuity"),
+            value.get("authorize_resume", False),  # Default False for backward compatibility
         )
 
 
@@ -179,14 +188,16 @@ class ContinuationAdmission:
 
 
 def _admission(state, reasons, unresolved, policy, checkpoint_digest, age, verdict_state, objective_changed=None):
+    # Authorize execution only when policy explicitly allows AND state is admit-continuation
+    execution_authorized = policy.authorize_resume and state == "admit-continuation"
     draft = ContinuationAdmission(
         state, tuple(reasons), tuple(unresolved), policy.policy_digest,
-        checkpoint_digest, age, verdict_state, False, "", objective_changed,
+        checkpoint_digest, age, verdict_state, execution_authorized, "", objective_changed,
     )
     return ContinuationAdmission(
         draft.state, draft.reasons, draft.unresolved, draft.policy_digest,
         draft.checkpoint_digest, draft.age_seconds, draft.verdict_state,
-        False, draft.computed_digest, objective_changed,
+        execution_authorized, draft.computed_digest, objective_changed,
     )
 
 
