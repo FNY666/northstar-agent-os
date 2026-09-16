@@ -437,6 +437,15 @@ unknown and insufficient-information states remain fail-closed. Crucially,
 not a change to `TaskOutcome.ok` or a new authorization path. The policy tests
 pin the composition matrix before any production wiring is considered.
 
+`completion_live_shadow.py` drives that policy against a real `AgentHarness` run
+in test-only code. It observes the host workspace before and after the run, uses
+the harness-owned verification as the production-side result, independently
+validates the evidence journal, and passes both results to `completion_shadow.py`.
+The adapter preserves the original `TaskOutcome` unchanged; missing evidence or
+a non-finished run cannot be promoted by a successful artifact check, and the
+layered result remains non-authorizing. The live tests include a positive real
+write, a missing-evidence case, and a non-finished task-state case.
+
 ## Deliberate ceiling
 
 This is not a production scheduler, sandbox, VM, container runtime, browser
