@@ -41,7 +41,7 @@ jobs:
         run: PYTHONPATH=. python -m unittest discover -s tests -p 'test_*.py' -v
       - name: Compile agent interop component
         working-directory: components/northstar-agent-interop
-        run: PYTHONPATH=../northstar-run-contract:../northstar-host python -m py_compile interop_contract.py handoff.py interop_adapter.py canary.py tests/test_*.py
+        run: PYTHONPATH=../northstar-run-contract:../northstar-host python -m py_compile backend_router.py canary.py causal_store.py graph_store.py handoff.py interop_adapter.py interop_contract.py process_adapter.py process_backend.py route_causality.py route_ledger.py route_lineage.py route_state.py tests/test_*.py
       - name: Agent interop component tests
         working-directory: components/northstar-agent-interop
         run: PYTHONPATH=.:../northstar-run-contract:../northstar-host python -m unittest discover -s tests -p 'test_*.py' -v
