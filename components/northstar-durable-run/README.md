@@ -446,6 +446,18 @@ a non-finished run cannot be promoted by a successful artifact check, and the
 layered result remains non-authorizing. The live tests include a positive real
 write, a missing-evidence case, and a non-finished task-state case.
 
+`live_shadow_run.py` turns the same process into a repeatable real-model run:
+a host-owned fixture declares the production contains check, the contract's
+machine-checkable semantic fields, and the action-id-to-milestone mapping. It
+creates a fresh private sandbox, calls the configured OpenAI-compatible planner,
+and writes a report containing the original task outcome, both gate verdicts,
+the non-authorizing layered verdict, and digest-only before/after views. The
+first low-cost live run used DeepSeek V4 Flash with `reasoning=off` and a 1024
+token cap; it completed `workspace.list → repo.read → workspace.write`, and all
+three verdicts were `verified` while `execution_authorized` remained false. Its
+fixture is covered by offline tests so the semantic contract and negative
+semantic case remain reproducible without making another provider call.
+
 ## Deliberate ceiling
 
 This is not a production scheduler, sandbox, VM, container runtime, browser

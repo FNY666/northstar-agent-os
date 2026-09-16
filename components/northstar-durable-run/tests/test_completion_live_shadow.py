@@ -90,8 +90,9 @@ class LiveShadowTest(unittest.TestCase):
             self.planner(),
             contract=self.contract,
             expectations=[ExpectedArtifact("out/report.md", content="rows: 1\n")],
-            milestones=("write",),
             provenance=self.provenance,
+            milestones=None,
+            milestone_action_map={WRITE_ACTION: "write"},
         )
         self.assertTrue(outcome.task_outcome.ok)
         self.assertEqual(outcome.production.verdict, "verified")
@@ -125,8 +126,9 @@ class LiveShadowTest(unittest.TestCase):
             self.planner(),
             contract=self.contract,
             expectations=[ExpectedArtifact("out/report.md", content="rows: 1\n")],
-            milestones=("write",),
             provenance=self.provenance,
+            milestones=None,
+            milestone_action_map={WRITE_ACTION: "write"},
             evidence_path=self.root / "missing-evidence.jsonl",
         )
         self.assertTrue(outcome.task_outcome.ok)

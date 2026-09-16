@@ -63,8 +63,9 @@ def run_live_shadow(
     *,
     contract: CompletionContractV2,
     expectations: list[Any] | tuple[Any, ...],
-    milestones: tuple[str, ...] | None,
     provenance: Provenance,
+    milestones: tuple[str, ...] | None = None,
+    milestone_action_map: dict[str, str] | None = None,
     evidence_path: str | Path | None = None,
 ) -> LiveShadowResult:
     """Run one real harness goal and calculate a non-authorizing shadow result."""
@@ -76,6 +77,12 @@ def run_live_shadow(
     task_outcome = harness.run_goal(goal, planner, expectations=expectations)
     after = observe_workspace(harness.workspace_root)
     production = _production_result(task_outcome, after)
+    if milestones is None and milestone_action_map is not None:
+        milestones = tuple(
+            milestone_action_map[step.action_id]
+            for step in task_outcome.steps
+            if step.action_id in milestone_action_map
+        )
     journal = Path(evidence_path) if evidence_path is not None else harness.evidence_path
     status = _evidence_status(journal)
     if not status:
