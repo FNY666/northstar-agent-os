@@ -115,3 +115,56 @@ class RouteLivenessTests(unittest.TestCase):
         verdict = evaluate_route_liveness(LineageGraph.from_path(self.log), "route-1")
         self.assertEqual(verdict.state, "blocked")
         self.assertIn("lineage_mark_absent", verdict.unverified)
+
+
+class UnresolvedBranchTests(unittest.TestCase):
+    def setUp(self):
+        self.root = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, self.root, True)
+        self.log = self.root / "lineage.jsonl"
+
+    def build(self, *specs):
+        for stale in (self.log, Path(str(self.log) + ".mark.json")):
+            if stale.exists():
+                stale.unlink()
+        graph = LineageGraph(self.log)
+        prev = ZERO_DIGEST
+        for index, (event_id, status, parent) in enumerate(specs, start=1):
+            item = RouteLineageEvent(
+                schema_version=INTEGRITY_SCHEMA, event_id=event_id, route_id="route-1",
+                parent_event_id=parent, receipt_id="rcpt-" + event_id, status=status,
+                target_agent_id="agent-a", provider="local",
+                capabilities=("fs:read",), deadline_at=1000, payload_digest=D("a"),
+                decision_fingerprint=D("b"), retryable=False, sequence=index,
+                prev_event_digest=prev,
+            )
+            graph.append(item)
+            prev = item.event_digest.removeprefix("sha256:")
+        return graph
+
+    def test_an_unaccounted_dispatch_branch_is_not_reported_as_a_clean_state(self):
+        graph = self.build(
+            ("e1", "planned", None),
+            ("e2", "dispatched", "e1"),
+            ("e3", "dispatched", "e1"),
+            ("e4", "succeeded", "e2"),
+        )
+        verdict = evaluate_route_liveness(graph, "route-1")
+        self.assertEqual(verdict.state, "unknown")
+        self.assertIn("unresolved_attempt_branch", verdict.reasons)
+
+    def test_a_retry_after_a_concluded_attempt_still_reports_in_flight(self):
+        graph = self.build(
+            ("e1", "planned", None),
+            ("e2", "dispatched", "e1"),
+            ("e3", "failed", "e2"),
+            ("e4", "planned", "e3"),
+            ("e5", "dispatched", "e4"),
+        )
+        verdict = evaluate_route_liveness(graph, "route-1")
+        self.assertEqual(verdict.state, "in_flight")
+        self.assertNotIn("unresolved_attempt_branch", verdict.reasons)
+
+
+if __name__ == "__main__":
+    unittest.main()

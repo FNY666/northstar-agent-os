@@ -5,7 +5,7 @@ import json
 from dataclasses import dataclass
 from typing import Any
 
-from route_lineage import LineageGraph, active_attempts
+from route_lineage import LineageError, LineageGraph, active_attempts, causal_chain
 
 SCHEMA = "northstar.route-liveness.v1"
 STATES = ("dispatchable", "retryable", "in_flight", "blocked", "unknown")
@@ -43,6 +43,46 @@ class RouteLivenessVerdict:
         }
 
 
+_EXECUTION_STATUSES = ("planned", "dispatched", "succeeded", "failed")
+
+
+def _unresolved_branches(graph, events):
+    """Open branches that no concluded attempt under the same root accounts for.
+
+    A retry is not flagged: a concluded terminal that has any execution child is
+    not counted as concluded at all, so a retry branch never reaches this check.
+    Roots without any concluded attempt are left to the ordinary state logic.
+    """
+    children = {}
+    for item in events:
+        children.setdefault(item.parent_event_id, []).append(item)
+
+    def execution_children(item):
+        return [child for child in children.get(item.event_id, ()) if child.status in _EXECUTION_STATUSES]
+
+    def chain_of(item):
+        try:
+            return causal_chain(graph, item.event_id)
+        except LineageError:
+            return ()
+
+    chains = {item.event_id: chain_of(item) for item in events}
+    root_of = {event_id: (chain[0].event_id if chain else None) for event_id, chain in chains.items()}
+    concluded = {
+        item.event_id: root_of[item.event_id] for item in events
+        if item.status in ("succeeded", "failed") and not execution_children(item)
+    }
+    roots_with_conclusion = set(concluded.values())
+    unresolved = []
+    for item in events:
+        if item.status not in ("planned", "dispatched") or execution_children(item):
+            continue
+        if root_of[item.event_id] not in roots_with_conclusion:
+            continue
+        unresolved.append(item)
+    return tuple(unresolved)
+
+
 def evaluate_route_liveness(
     graph: LineageGraph, route_id: str, *, declared_routes: Any = None
 ) -> RouteLivenessVerdict:
@@ -68,6 +108,7 @@ def evaluate_route_liveness(
 
     attempts = active_attempts(graph, route_id)
     events = [item for item in graph.read() if item.route_id == route_id]
+    unresolved = _unresolved_branches(graph, events)
     if not events:
         identity_unverified = True
         if declared_routes is not None:
@@ -83,6 +124,8 @@ def evaluate_route_liveness(
         return verdict("dispatchable", "", 0, ("no_prior_attempts",))
     if len(attempts) > 1:
         return verdict("unknown", "", len(attempts), ("multiple_active_attempts",))
+    if unresolved:
+        return verdict("unknown", "", len(attempts), ("unresolved_attempt_branch",))
     latest = events[-1]
     status = latest.status
     if status in ("planned", "dispatched"):
