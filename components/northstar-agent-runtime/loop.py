@@ -1602,6 +1602,7 @@ class AgentRuntime:
         policy: ContinuationPolicy,
         expected_record_digest: str | None = None,
         expected_head_digest: str | None = None,
+        admission_ledger: Any = None,
     ) -> ContinuationAdmission:
         """Evaluate a host-owned admission for a persisted continuation; never resumes work."""
         if not isinstance(store, AutonomyCheckpointStore):
@@ -1614,13 +1615,23 @@ class AgentRuntime:
         verdict = self._compose_persisted_verdict(resolution, goal=goal, now=now)
         record = resolution.record
         checkpoint = record.checkpoint_value if record is not None else None
-        return evaluate_continuation_admission(
+        admission = evaluate_continuation_admission(
             checkpoint, verdict, policy=policy, now=now,
             objective_changed_at_sequence=history.changed_at_sequence,
             objective_history_unverifiable=history.state == "unverifiable",
             history_reasons=history.reasons,
             history_unverified=history.unverified,
         )
+        
+        # Optionally record admission to ledger
+        if admission_ledger is not None:
+            admission_ledger.record(
+                session_id=self.session_id,
+                admission=admission,
+                observed_at=now,
+            )
+        
+        return admission
 
     def continuation_objective_history(
         self, store: AutonomyCheckpointStore, *, expected_head_digest: str | None = None
@@ -1640,6 +1651,7 @@ class AgentRuntime:
         now: int | None = None,
         expected_record_digest: str | None = None,
         expected_head_digest: str | None = None,
+        admission_ledger: Any = None,
     ) -> tuple[ContinuationAdmission, Any]:
         """
         Evaluate continuation admission; if authorized, resume the session.
@@ -1655,6 +1667,7 @@ class AgentRuntime:
             policy=policy,
             expected_record_digest=expected_record_digest,
             expected_head_digest=expected_head_digest,
+            admission_ledger=admission_ledger,
         )
         
         if admission.execution_authorized:
