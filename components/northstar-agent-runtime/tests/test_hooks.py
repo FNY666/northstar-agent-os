@@ -472,3 +472,20 @@ class ExplicitInvalidHookDecisionTests(unittest.TestCase):
     def test_reason_only_inference_remains_available(self):
         result = coerce_result({"reason": "do not run"}, event="PreToolUse")
         self.assertEqual(result.decision, "deny")
+
+
+class InvalidHookPayloadTests(unittest.TestCase):
+    def test_explicit_modify_input_requires_a_dict_payload(self):
+        with self.assertRaises(ValueError):
+            coerce_result({"decision": "modify_input", "updated_input": "bad"}, event="PreToolUse")
+
+    def test_invalid_explicit_modify_input_fails_closed_on_veto(self):
+        registry = HookRegistry()
+        registry.register("PreToolUse", lambda _: {"decision": "modify_input", "updated_input": "bad"}, name="bad")
+        outcome = registry.fire("PreToolUse", HookInput(event="PreToolUse", tool_name="Write"))
+        self.assertTrue(outcome.denied)
+        self.assertIn("ValueError", outcome.deny_reason)
+
+    def test_explicit_modify_input_with_dict_remains_available(self):
+        result = coerce_result({"decision": "modify_input", "updated_input": {"path": "x"}}, event="PreToolUse")
+        self.assertEqual(result.updated_input, {"path": "x"})

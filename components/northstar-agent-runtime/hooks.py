@@ -231,6 +231,8 @@ def coerce_result(value: Any, *, event: str | None = None) -> HookResult:
                 decision = "noop"
         if decision == "deny" and not reason:
             reason = "denied by hook"
+        if decision == "modify_input" and not isinstance(updated, dict):
+            raise ValueError("modify_input hook decision requires a dict updated_input")
         return HookResult(
             decision=decision,
             reason=reason,
