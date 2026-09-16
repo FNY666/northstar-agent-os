@@ -107,6 +107,20 @@ MUTATIONS = (
         expect="fail",
     ),
     Mutation(
+        name="distribution-invents-a-missing-verdict",
+        target="advisory_report.py",
+        old=(
+            "    if not isinstance(value, str) or not value.strip():\n"
+            "        return UNKNOWN"
+        ),
+        new=(
+            "    if not isinstance(value, str) or not value.strip():\n"
+            '        return "verified"'
+        ),
+        guard="tests.test_advisory_report",
+        expect="fail",
+    ),
+    Mutation(
         name="neutral-docstring-change",
         target="completion_replay.py",
         old='"""Return an independently derived terminal status, or empty on uncertainty."""',

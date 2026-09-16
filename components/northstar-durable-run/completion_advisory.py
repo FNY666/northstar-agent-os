@@ -24,6 +24,7 @@ Two deliberate reuse decisions keep this honest:
 from __future__ import annotations
 
 import hashlib
+import hmac
 import json
 import subprocess
 import sys
@@ -156,6 +157,19 @@ class DriverAdvisory:
         }
         payload["advisory_digest"] = _digest(payload)
         return payload
+
+
+def verify_advisory_digest(payload: dict[str, Any]) -> bool:
+    """Recompute a recorded advisory's digest so later edits are detectable.
+
+    Returns False for a payload that carries no digest, so an unstamped object
+    cannot pass as verified.
+    """
+    recorded = payload.get("advisory_digest")
+    if not isinstance(recorded, str):
+        return False
+    body = {key: value for key, value in payload.items() if key != "advisory_digest"}
+    return hmac.compare_digest(recorded, _digest(body))
 
 
 def evaluate_driver_advisory(
