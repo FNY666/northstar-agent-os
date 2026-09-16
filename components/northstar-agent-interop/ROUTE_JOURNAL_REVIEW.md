@@ -924,3 +924,20 @@ Do not cherry-pick or publish this candidate automatically. It requires a
 separate comparison against the local-only Router, a multi-process rotation
 experiment on a real filesystem, a key-anchor distribution decision, a
 cross-host identity decision, and an explicit generation release gate.
+
+## Close-out audit: absence handling in adjacent layers (2026-09-16)
+
+Six probes run against the "an absent or unaccounted input is treated as
+agreement" class. Each was checked by executing it, not by reading alone. No gap
+was found in this pass, so no code was changed for it.
+
+| Probe | Result |
+| --- | --- |
+| Readiness gate with a requirement that has no projection | fails closed: `unknown` plus `missing_claim_projection`; only `supported` counts as satisfied |
+| Projection mapping keyed by a different claim than the projection's own digest | refused: `projection mapping mismatch` |
+| `verify_disclosure` accepting a proof whose root it did not recompute | refused: the root is recomputed from the subject, path length must match the leaf count, and an unpinned root becomes `verified-unpinned` |
+| Sealed attestation replayed after use | refused by `ChallengeBook.consume` (single use, expiry, unknown challenge); the verifier is a binding check only, by design |
+| `PaddedEvidenceBundle.from_dict` accepting `PAD_DIGEST` as a real leaf | refused: `pad digest cannot be a real leaf`, so the builder and the parser agree |
+| `project_claim` emitting `supported` with no witness after the new parser rule | cannot happen: no witnesses returns `unknown` first, so builder and parser stay consistent |
+
+The last row re-checks the previous slice's own change rather than trusting it.
