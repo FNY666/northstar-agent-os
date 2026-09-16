@@ -173,3 +173,24 @@ class DerivedPlanIdentityDriftTests(unittest.TestCase):
         self.assertEqual(derive_plan_id(digest), "plan-evidence:" + digest[7:23])
         with self.assertRaises(DispatchAdmissionError):
             derive_plan_id("not-a-digest")
+
+
+class AdmissionSourceBindingTests(unittest.TestCase):
+    def test_admission_records_the_sources_it_was_composed_from(self):
+        preflight = make_preflight()
+        liveness_verdict = liveness("dispatchable")
+        result = evaluate_dispatch_admission(
+            preflight, liveness_verdict, plan_id="plan-a"
+        )
+        self.assertEqual(result.preflight_digest, preflight.preflight_digest)
+        self.assertEqual(result.liveness_digest, liveness_verdict.computed_digest)
+
+    def test_a_different_preflight_cannot_be_substituted_after_the_fact(self):
+        preflight = make_preflight()
+        result = evaluate_dispatch_admission(
+            preflight, liveness("dispatchable"), plan_id="plan-a"
+        )
+        other = make_preflight(lease_digest=D("e"))
+        self.assertEqual(other.state, preflight.state)
+        self.assertNotEqual(other.preflight_digest, preflight.preflight_digest)
+        self.assertNotEqual(result.preflight_digest, other.preflight_digest)

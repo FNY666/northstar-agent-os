@@ -1,5 +1,7 @@
 """Derive whether a route may accept a new attempt, from its lineage alone."""
 from __future__ import annotations
+import hashlib
+import json
 from dataclasses import dataclass
 from typing import Any
 
@@ -19,6 +21,14 @@ class RouteLivenessVerdict:
     unverified: tuple[str, ...] = ()
     reasons: tuple[str, ...] = ()
     execution_authorized: bool = False
+
+    @property
+    def computed_digest(self) -> str:
+        payload = json.dumps(
+            self.to_dict(), ensure_ascii=False, sort_keys=True,
+            separators=(",", ":"), allow_nan=False,
+        ).encode()
+        return "sha256:" + hashlib.sha256(b"northstar.route-liveness.v1\0" + payload).hexdigest()
 
     def to_dict(self) -> dict:
         return {

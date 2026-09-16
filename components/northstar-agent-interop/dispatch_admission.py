@@ -19,7 +19,8 @@ EVIDENCE_UNPINNED = ("preflight-unpinned",)
 ROUTE_OPEN = ("dispatchable", "retryable")
 _DIGEST = re.compile(r"^sha256:[0-9a-f]{64}$")
 _FIELDS = frozenset({
-    "schema_version", "plan_id", "route_id", "state", "evidence_state",
+    "schema_version", "plan_id", "route_id", "preflight_digest",
+    "liveness_digest", "state", "evidence_state",
     "route_state", "unverified", "reasons", "execution_authorized",
     "admission_digest",
 })
@@ -34,6 +35,8 @@ class DispatchAdmission:
     schema_version: str
     plan_id: str
     route_id: str
+    preflight_digest: str
+    liveness_digest: str
     state: str
     evidence_state: str
     route_state: str
@@ -47,6 +50,8 @@ class DispatchAdmission:
             "schema_version": self.schema_version,
             "plan_id": self.plan_id,
             "route_id": self.route_id,
+            "preflight_digest": self.preflight_digest,
+            "liveness_digest": self.liveness_digest,
             "state": self.state,
             "evidence_state": self.evidence_state,
             "route_state": self.route_state,
@@ -72,11 +77,15 @@ class DispatchAdmission:
             raise DispatchAdmissionError("admission state invalid")
         if not isinstance(value["execution_authorized"], bool) or value["execution_authorized"]:
             raise DispatchAdmissionError("admission cannot authorize execution")
+        for field in ("preflight_digest", "liveness_digest"):
+            if not isinstance(value[field], str) or _DIGEST.fullmatch(value[field]) is None:
+                raise DispatchAdmissionError(field + " invalid")
         digest = value["admission_digest"]
         if not isinstance(digest, str) or _DIGEST.fullmatch(digest) is None:
             raise DispatchAdmissionError("admission digest invalid")
         result = cls(
             SCHEMA, _label(value["plan_id"], "plan_id"), _label(value["route_id"], "route_id"),
+            value["preflight_digest"], value["liveness_digest"],
             value["state"], value["evidence_state"], value["route_state"],
             tuple(value["unverified"]), tuple(value["reasons"]), False, digest,
         )
@@ -176,11 +185,13 @@ def evaluate_dispatch_admission(
         "admission:" + state,
     )
     draft = DispatchAdmission(
-        SCHEMA, plan, liveness.route_id, state, evidence_state, route_state,
+        SCHEMA, plan, liveness.route_id, preflight.preflight_digest,
+        liveness.computed_digest, state, evidence_state, route_state,
         unverified, reasons, False, "",
     )
     return DispatchAdmission(
-        draft.schema_version, draft.plan_id, draft.route_id, draft.state,
+        draft.schema_version, draft.plan_id, draft.route_id, draft.preflight_digest,
+        draft.liveness_digest, draft.state,
         draft.evidence_state, draft.route_state, draft.unverified, draft.reasons,
         False, draft.computed_digest,
     )

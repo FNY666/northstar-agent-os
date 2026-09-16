@@ -105,3 +105,24 @@ class AdmissionWitnessTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class AdmissionWitnessCorrespondenceTests(unittest.TestCase):
+    def setUp(self):
+        self.preflight = make_preflight()
+        self.liveness = live()
+        self.admission = evaluate_dispatch_admission(
+            self.preflight, self.liveness, plan_id="plan-a"
+        )
+
+    def test_a_preflight_the_admission_was_not_built_from_is_refused(self):
+        other = make_preflight(lease_digest="sha256:" + "e" * 64)
+        self.assertEqual(other.state, self.preflight.state)
+        with self.assertRaises(AdmissionWitnessError):
+            make_admission_witness(self.admission, other, self.liveness, observed_at=1000)
+
+    def test_a_liveness_the_admission_was_not_built_from_is_refused(self):
+        other = live(unverified=("lineage_mark_absent",))
+        self.assertEqual(other.state, self.liveness.state)
+        with self.assertRaises(AdmissionWitnessError):
+            make_admission_witness(self.admission, self.preflight, other, observed_at=1000)

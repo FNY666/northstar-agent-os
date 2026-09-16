@@ -30,7 +30,7 @@ def _source_digest(v):
         if v.execution_authorized is not False:
             raise AdmissionWitnessError('liveness cannot authorize execution')
         _label(v.route_id, 'liveness route_id')
-        return _hash(b'northstar.route-liveness.v1\0',v.to_dict())
+        return v.computed_digest
     raise AdmissionWitnessError('source invalid')
 
 @dataclass(frozen=True)
@@ -60,6 +60,8 @@ def make_admission_witness(admission,preflight,liveness,*,observed_at):
     except (DispatchAdmissionError,PreflightError) as e: raise AdmissionWitnessError('source invalid') from e
     if not isinstance(observed_at,int) or isinstance(observed_at,bool): raise AdmissionWitnessError('observed_at invalid')
     if liveness.route_id != admission.route_id: raise AdmissionWitnessError('liveness route does not match admission')
+    if preflight.preflight_digest != admission.preflight_digest: raise AdmissionWitnessError('preflight is not the one the admission was built from')
+    if liveness.computed_digest != admission.liveness_digest: raise AdmissionWitnessError('liveness is not the one the admission was built from')
     if admission.evidence_state!=preflight.state or admission.route_state!=liveness.state: raise AdmissionWitnessError('admission/source state mismatch')
     draft=DispatchAdmissionWitness(SCHEMA,admission.admission_digest,preflight.preflight_digest,_source_digest(liveness),admission.plan_id,admission.route_id,observed_at,'')
     return DispatchAdmissionWitness(draft.schema_version,draft.admission_digest,draft.preflight_digest,draft.liveness_digest,draft.plan_id,draft.route_id,draft.observed_at,draft.computed_digest,False)
