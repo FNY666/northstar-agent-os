@@ -396,3 +396,24 @@ class FullCoverageTests(RuntimeTestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class MalformedHookResultTests(unittest.TestCase):
+    def test_an_unsupported_return_type_is_not_silently_noop(self):
+        with self.assertRaises(TypeError):
+            coerce_result("not-a-hook-result")
+
+    def test_a_malformed_veto_hook_fails_closed(self):
+        registry = HookRegistry()
+        registry.register("PreToolUse", lambda _: "not-a-hook-result", name="bad")
+        outcome = registry.fire("PreToolUse", HookInput(event="PreToolUse", tool_name="Write"))
+        self.assertTrue(outcome.denied)
+        self.assertIn("TypeError", outcome.deny_reason)
+        self.assertEqual(outcome.errors[0].split(":")[0], "bad")
+
+    def test_a_malformed_observation_hook_is_logged_but_does_not_veto(self):
+        registry = HookRegistry()
+        registry.register("PostToolUse", lambda _: "not-a-hook-result", name="bad")
+        outcome = registry.fire("PostToolUse", HookInput(event="PostToolUse", tool_name="Read"))
+        self.assertFalse(outcome.denied)
+        self.assertEqual(outcome.errors[0].split(":")[0], "bad")

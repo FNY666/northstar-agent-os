@@ -209,7 +209,9 @@ def coerce_result(value: Any) -> HookResult:
             updated_input=dict(updated) if isinstance(updated, dict) else None,
             data=_merge_data(payload),
         )
-    return HookResult(decision="noop", reason=str(value))
+    raise TypeError(
+        "hook returned an unsupported result type " + type(value).__name__
+    )
 
 
 @dataclass
