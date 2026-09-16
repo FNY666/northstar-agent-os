@@ -1601,12 +1601,15 @@ class AgentRuntime:
         now: int,
         policy: ContinuationPolicy,
         expected_record_digest: str | None = None,
+        expected_head_digest: str | None = None,
     ) -> ContinuationAdmission:
         """Evaluate a host-owned admission for a persisted continuation; never resumes work."""
         if not isinstance(store, AutonomyCheckpointStore):
             raise RuntimeConfigurationError("continuation store is invalid")
         resolution, history = store.resolve_with_history(
-            self.session_id, expected_record_digest=expected_record_digest
+            self.session_id,
+            expected_record_digest=expected_record_digest,
+            expected_head_digest=expected_head_digest,
         )
         verdict = self._compose_persisted_verdict(resolution, goal=goal, now=now)
         record = resolution.record
@@ -1615,6 +1618,8 @@ class AgentRuntime:
             checkpoint, verdict, policy=policy, now=now,
             objective_changed_at_sequence=history.changed_at_sequence,
             objective_history_unverifiable=history.state == "unverifiable",
+            history_reasons=history.reasons,
+            history_unverified=history.unverified,
         )
 
     def continuation_objective_history(

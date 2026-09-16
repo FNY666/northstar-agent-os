@@ -22,6 +22,7 @@ ADMISSION_STATES = frozenset({
     "blocked-continuation-age",
     "blocked-continuation-policy",
     "blocked-continuation-objective",
+    "blocked-continuation-head",
     "unknown",
 })
 VERDICT_STATES = frozenset({"current", "current-unpinned", "stale", "unknown"})
@@ -197,10 +198,18 @@ def _objective_changed(value: Any) -> int | None:
     return value
 
 
+def _signals(value: Any, field: str) -> tuple[str, ...]:
+    if not isinstance(value, (list, tuple)) or any(not isinstance(token, str) for token in value):
+        raise ContinuationAdmissionError(field + " invalid")
+    return tuple(dict.fromkeys(value))
+
+
 def evaluate_continuation_admission(
     checkpoint: Any, verdict: Any, *, policy: ContinuationPolicy, now: int,
     objective_changed_at_sequence: int | None = None,
     objective_history_unverifiable: bool = False,
+    history_reasons: tuple[str, ...] = (),
+    history_unverified: tuple[str, ...] = (),
 ) -> ContinuationAdmission:
     """Compose a host policy with a verified continuation; never authorizes execution."""
     if not isinstance(policy, ContinuationPolicy):
@@ -211,36 +220,41 @@ def evaluate_continuation_admission(
     if not isinstance(objective_history_unverifiable, bool):
         raise ContinuationAdmissionError("objective_history_unverifiable invalid")
     objective = _objective_changed(objective_changed_at_sequence)
+    history_reasons = _signals(history_reasons, "history_reasons")
+    history_unverified = _signals(history_unverified, "history_unverified")
     if not isinstance(verdict, ContinuationVerdict):
-        return _admission("unknown", ("verdict_unreadable",), (), policy, None, None, None, objective)
+        return _admission("unknown", ("verdict_unreadable",), history_unverified, policy, None, None, None, objective)
     if verdict.execution_authorized is not False:
         raise ContinuationAdmissionError("verdict cannot authorize execution")
     if verdict.state not in VERDICT_STATES:
         raise ContinuationAdmissionError("verdict state invalid")
+    unresolved = tuple(dict.fromkeys((*verdict.unverified, *history_unverified)))
     if objective_history_unverifiable:
-        return _admission("unknown", ("objective_history_unverifiable",), verdict.unverified, policy, None, None, "unknown", objective)
+        return _admission("unknown", tuple(dict.fromkeys(("objective_history_unverifiable", *history_reasons))), unresolved, policy, None, None, "unknown", objective)
     if checkpoint is None:
-        return _admission("unknown", verdict.reasons or ("checkpoint_unrecorded",), verdict.unverified, policy, None, None, verdict.state, objective)
+        return _admission("unknown", tuple(dict.fromkeys((*(verdict.reasons or ("checkpoint_unrecorded",)), *history_reasons))), unresolved, policy, None, None, verdict.state, objective)
     try:
         checkpoint = AutonomyCheckpoint.from_dict(checkpoint.to_dict())
     except (AttributeError, AutonomyCheckpointError):
-        return _admission("unknown", ("checkpoint_unreadable",), verdict.unverified, policy, None, None, verdict.state, objective)
+        return _admission("unknown", tuple(dict.fromkeys(("checkpoint_unreadable", *history_reasons))), unresolved, policy, None, None, verdict.state, objective)
     age = now - checkpoint.observed_at
     if age < 0:
-        return _admission("unknown", ("observation_in_future",), verdict.unverified, policy, checkpoint.checkpoint_digest, None, verdict.state, objective)
+        return _admission("unknown", tuple(dict.fromkeys(("observation_in_future", *history_reasons))), unresolved, policy, checkpoint.checkpoint_digest, None, verdict.state, objective)
     if verdict.state == "unknown":
-        return _admission("unknown", verdict.reasons or ("continuation_unverifiable",), verdict.unverified, policy, checkpoint.checkpoint_digest, age, verdict.state, objective)
+        return _admission("unknown", tuple(dict.fromkeys((*(verdict.reasons or ("continuation_unverifiable",)), *history_reasons))), unresolved, policy, checkpoint.checkpoint_digest, age, verdict.state, objective)
     if verdict.state == "stale":
-        return _admission("blocked-continuation-stale", verdict.reasons, verdict.unverified, policy, checkpoint.checkpoint_digest, age, verdict.state, objective)
+        return _admission("blocked-continuation-stale", tuple(dict.fromkeys((*verdict.reasons, *history_reasons))), unresolved, policy, checkpoint.checkpoint_digest, age, verdict.state, objective)
+    if "history_head_changed" in history_reasons:
+        return _admission("blocked-continuation-head", history_reasons, unresolved, policy, checkpoint.checkpoint_digest, age, verdict.state, objective)
     if age > policy.max_age_seconds:
-        return _admission("blocked-continuation-age", ("continuation_expired",), verdict.unverified, policy, checkpoint.checkpoint_digest, age, verdict.state, objective)
+        return _admission("blocked-continuation-age", tuple(dict.fromkeys(("continuation_expired", *history_reasons))), unresolved, policy, checkpoint.checkpoint_digest, age, verdict.state, objective)
     if objective is not None and policy.require_objective_continuity:
-        return _admission("blocked-continuation-objective", ("continuation_objective_changed",), verdict.unverified, policy, checkpoint.checkpoint_digest, age, verdict.state, objective)
+        return _admission("blocked-continuation-objective", tuple(dict.fromkeys(("continuation_objective_changed", *history_reasons))), unresolved, policy, checkpoint.checkpoint_digest, age, verdict.state, objective)
     if verdict.state == "current-unpinned":
         if policy.require_pinned_checkpoint:
-            return _admission("blocked-continuation-policy", ("continuation_requires_pinned_checkpoint",), verdict.unverified, policy, checkpoint.checkpoint_digest, age, verdict.state, objective)
-        return _admission("admit-continuation-unpinned", verdict.reasons, verdict.unverified, policy, checkpoint.checkpoint_digest, age, verdict.state, objective)
-    return _admission("admit-continuation", verdict.reasons, verdict.unverified, policy, checkpoint.checkpoint_digest, age, verdict.state, objective)
+            return _admission("blocked-continuation-policy", tuple(dict.fromkeys(("continuation_requires_pinned_checkpoint", *history_reasons))), unresolved, policy, checkpoint.checkpoint_digest, age, verdict.state, objective)
+        return _admission("admit-continuation-unpinned", tuple(dict.fromkeys((*verdict.reasons, *history_reasons))), unresolved, policy, checkpoint.checkpoint_digest, age, verdict.state, objective)
+    return _admission("admit-continuation", tuple(dict.fromkeys((*verdict.reasons, *history_reasons))), unresolved, policy, checkpoint.checkpoint_digest, age, verdict.state, objective)
 
 
 @dataclass(frozen=True)

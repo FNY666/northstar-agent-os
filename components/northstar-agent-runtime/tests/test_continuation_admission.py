@@ -462,6 +462,51 @@ class RuntimeObjectiveAdmissionTests(unittest.TestCase):
         with self.assertRaises(ContinuationAdmissionError):
             ContinuationPolicy.from_dict(flipped)
 
+    def test_matching_head_pin_is_unaffected(self):
+        import tempfile
+        with tempfile.TemporaryDirectory() as root:
+            runtime, store, digest = self._store_with(root, ["steady"])
+            head = runtime.continuation_objective_history(store).head_digest
+            admission = runtime.admit_persisted_continuation_checkpoint(
+                store, goal={"objective": "steady"}, now=1010,
+                policy=ContinuationPolicy(max_age_seconds=60),
+                expected_record_digest=digest, expected_head_digest=head,
+            )
+            self.assertEqual(admission.state, "admit-continuation")
+            self.assertNotIn("history_head_unpinned", admission.unresolved)
+            self.assertEqual(runtime.provider.requests, [])
+
+    def test_head_drift_is_blocked_instead_of_being_dropped(self):
+        import tempfile
+        with tempfile.TemporaryDirectory() as root:
+            runtime, store, first_digest = self._store_with(root, ["steady"])
+            old_head = runtime.continuation_objective_history(store).head_digest
+            latest = runtime.persist_continuation_checkpoint(
+                store, goal={"objective": "steady"}, observed_at=1001
+            )
+            admission = runtime.admit_persisted_continuation_checkpoint(
+                store, goal={"objective": "steady"}, now=1010,
+                policy=ContinuationPolicy(max_age_seconds=60),
+                expected_record_digest=latest.record_digest, expected_head_digest=old_head,
+            )
+            self.assertEqual(admission.state, "blocked-continuation-head")
+            self.assertIn("history_head_changed", admission.reasons)
+            self.assertFalse(admission.execution_authorized)
+            self.assertEqual(runtime.provider.requests, [])
+
+    def test_an_unpinned_head_is_visible_without_silently_blocking(self):
+        import tempfile
+        with tempfile.TemporaryDirectory() as root:
+            runtime, store, digest = self._store_with(root, ["steady"])
+            admission = runtime.admit_persisted_continuation_checkpoint(
+                store, goal={"objective": "steady"}, now=1010,
+                policy=ContinuationPolicy(max_age_seconds=60),
+                expected_record_digest=digest,
+            )
+            self.assertEqual(admission.state, "admit-continuation")
+            self.assertIn("history_head_unpinned", admission.unresolved)
+            self.assertFalse(admission.execution_authorized)
+
 
 if __name__ == "__main__":
     unittest.main()
