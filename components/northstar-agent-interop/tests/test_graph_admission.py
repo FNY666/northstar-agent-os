@@ -10,6 +10,7 @@ sys.path.insert(0, str(COMPONENT_ROOT.parent / "northstar-host"))
 sys.path.insert(0, str(COMPONENT_ROOT.parent / "northstar-run-contract"))
 
 from backend_router import RouteDecision  # noqa: E402
+from graph_store import GraphEvidenceCursor, GraphEvidenceStore  # noqa: E402
 from route_causality import CausalEdge, CausalGraph  # noqa: E402
 from route_ledger import RouteEvent, RouteReceipt  # noqa: E402
 from route_lineage import LineageEvent  # noqa: E402
@@ -131,3 +132,44 @@ class GraphAdmissionTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class GraphEvidenceStoreRecoveryTests(unittest.TestCase):
+    """`recover` had no coverage, which let absence pass as verification."""
+
+    def setUp(self):
+        self.tempdir = tempfile.TemporaryDirectory()
+        self.path = Path(self.tempdir.name) / "graph-evidence.jsonl"
+
+    def tearDown(self):
+        self.tempdir.cleanup()
+
+    def test_absent_history_is_not_reported_as_verified(self):
+        recovery = GraphEvidenceStore(self.path).recover()
+        self.assertEqual(recovery.verdict, "empty")
+        self.assertEqual(recovery.records, ())
+        self.assertIsNone(recovery.cursor)
+
+    def test_deleting_the_evidence_file_stops_it_reading_as_verified(self):
+        GraphEvidenceStore(self.path).admit(verified_graph())
+        self.assertEqual(GraphEvidenceStore(self.path).recover().verdict, "verified")
+        self.path.unlink()
+        recovery = GraphEvidenceStore(self.path).recover()
+        self.assertEqual(recovery.verdict, "empty")
+        self.assertEqual(recovery.records, ())
+
+    def test_truncating_the_evidence_file_stops_it_reading_as_verified(self):
+        GraphEvidenceStore(self.path).admit(verified_graph())
+        self.path.write_text("", encoding="utf-8")
+        self.assertEqual(GraphEvidenceStore(self.path).recover().verdict, "empty")
+
+    def test_a_matching_cursor_still_verifies_and_a_missing_file_fails_closed(self):
+        record = GraphEvidenceStore(self.path).admit(verified_graph())
+        cursor = GraphEvidenceCursor(
+            sequence=record.sequence, record_digest=record.record_digest
+        )
+        recovery = GraphEvidenceStore(self.path).recover(expected_cursor=cursor)
+        self.assertEqual(recovery.verdict, "verified")
+        self.path.unlink()
+        with self.assertRaises(ValueError):
+            GraphEvidenceStore(self.path).recover(expected_cursor=cursor)

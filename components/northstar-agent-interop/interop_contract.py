@@ -18,6 +18,15 @@ MAX_CAPABILITIES = 32
 MAX_POSTCONDITIONS = 32
 MAX_SCOPE_CHARS = 128
 MAX_TIME = 9_223_372_036_854_775_807
+
+# Recovery verdicts shared by the evidence stores. `empty` exists because a store
+# that read no records cannot be called verified: an absent, deleted, or truncated
+# journal is indistinguishable from one that was never written.
+RECOVERY_VERIFIED = "verified"
+RECOVERY_EMPTY = "empty"
+RECOVERY_UNVERIFIABLE = "unverifiable"
+RECOVERY_STALE = "stale"
+REPLAY_REPLAYABLE = "replayable"
 _ID_RE = re.compile(r"^[^\s/\\]+$")
 _DIGEST_RE = re.compile(r"^sha256:[0-9a-f]{64}$")
 _SCOPE_RE = re.compile(r"^[^\s/\\:]+:[^\s/\\:]+$")

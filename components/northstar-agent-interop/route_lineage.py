@@ -11,6 +11,13 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from interop_contract import (
+    RECOVERY_EMPTY,
+    RECOVERY_STALE,
+    RECOVERY_UNVERIFIABLE,
+    RECOVERY_VERIFIED,
+    REPLAY_REPLAYABLE,
+)
 from route_ledger import RouteEvent, RouteReceipt
 from route_state import RouteStateMachine
 
@@ -283,15 +290,23 @@ class RouteLineage:
         cursor = None if not events else LineageCursor(events[-1].sequence, events[-1].event_digest)
         if expected_cursor is not None and expected_cursor != cursor:
             raise ValueError("lineage recovery cursor does not match history")
-        return LineageRecovery("verified", tuple(events), cursor)
+        # No events means nothing was read, so nothing can have been verified: a
+        # deleted or truncated journal would otherwise read exactly like an intact
+        # one, which is the tamper this store exists to detect.
+        verdict = RECOVERY_VERIFIED if events else RECOVERY_EMPTY
+        return LineageRecovery(verdict, tuple(events), cursor)
     def replay_verdict(self, *, expected_cursor: LineageCursor | None = None) -> ReplayVerdict:
         try:
             recovery = self.recover()
         except (OSError, ValueError) as error:
-            return ReplayVerdict("unverifiable", str(error), None)
+            return ReplayVerdict(RECOVERY_UNVERIFIABLE, str(error), None)
+        if recovery.verdict == RECOVERY_EMPTY:
+            return ReplayVerdict(RECOVERY_EMPTY, "no lineage history to replay", None)
         if expected_cursor is not None and expected_cursor != recovery.cursor:
-            return ReplayVerdict("stale", "lineage recovery cursor does not match history", recovery.cursor)
-        return ReplayVerdict("replayable", "verified", recovery.cursor)
+            return ReplayVerdict(
+                RECOVERY_STALE, "lineage recovery cursor does not match history", recovery.cursor
+            )
+        return ReplayVerdict(REPLAY_REPLAYABLE, "verified", recovery.cursor)
 
     def causal_graph(self, *, handoffs=()):
         from route_causality import CausalGraph

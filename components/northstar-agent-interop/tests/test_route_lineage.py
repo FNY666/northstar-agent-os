@@ -113,11 +113,41 @@ class RouteLineageTests(unittest.TestCase):
             lineage.append(self.succeeded_event(sequence=2))
         self.assertEqual(len(lineage.recover().events), 1)
 
-    def test_recovery_of_empty_history_is_verified_with_no_cursor(self):
+    def test_recovery_of_empty_history_is_not_reported_as_verified(self):
+        """Nothing was read, so nothing was verified.
+
+        This expectation used to be `verified`, which made a journal that was
+        deleted or truncated read exactly like an intact one.
+        """
         recovery = RouteLineage(self.path).recover()
-        self.assertEqual(recovery.verdict, "verified")
+        self.assertEqual(recovery.verdict, "empty")
         self.assertEqual(recovery.events, ())
         self.assertIsNone(recovery.cursor)
+
+    def test_deleting_the_journal_stops_it_reading_as_verified(self):
+        lineage = RouteLineage(self.path)
+        lineage.append(self.decision_event())
+        self.assertEqual(len(RouteLineage(self.path).recover().events), 1)
+        self.path.unlink()
+        recovery = RouteLineage(self.path).recover()
+        self.assertEqual(recovery.verdict, "empty")
+        self.assertEqual(recovery.events, ())
+        self.assertNotEqual(RouteLineage(self.path).replay_verdict().verdict, "replayable")
+
+    def test_truncating_the_journal_stops_it_reading_as_verified(self):
+        lineage = RouteLineage(self.path)
+        lineage.append(self.decision_event())
+        self.path.write_text("", encoding="utf-8")
+        recovery = RouteLineage(self.path).recover()
+        self.assertEqual(recovery.verdict, "empty")
+        self.assertEqual(recovery.events, ())
+
+    def test_an_intact_journal_still_verifies(self):
+        lineage = RouteLineage(self.path)
+        lineage.append(self.decision_event())
+        recovery = RouteLineage(self.path).recover()
+        self.assertEqual(recovery.verdict, "verified")
+        self.assertEqual(len(recovery.events), 1)
 
     def test_recovery_rejects_structurally_valid_but_illegal_route_history(self):
         first = self.decision_event()

@@ -164,10 +164,16 @@ class RouteStateMachineTests(unittest.TestCase):
             finally:
                 route_ledger.RouteLedger._replay_events = original
 
-    def test_route_lineage_empty_history_remains_verified(self):
+    def test_route_lineage_empty_history_is_not_verified(self):
+        """`verified` means a chain was read and checked; zero rows are neither.
+
+        Returning `verified` for an empty journal contradicted this module's own
+        documented contract, and made a deleted or truncated journal read exactly
+        like one that was never written.
+        """
         with tempfile.TemporaryDirectory() as directory:
             recovery = RouteLineage(Path(directory) / "empty.jsonl").recover()
-            self.assertEqual(recovery.verdict, "verified")
+            self.assertEqual(recovery.verdict, "empty")
             self.assertEqual(recovery.events, ())
 
 

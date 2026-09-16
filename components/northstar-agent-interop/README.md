@@ -142,7 +142,12 @@ predecessor chain before returning a `verified` result.
 
 A hash chain cannot detect deletion of its final row by itself. Callers that
 need rollback detection must retain and pass the returned `LineageCursor`;
-recovery fails closed when the current head differs. The v1-to-v2 migration
+recovery fails closed when the current head differs. Reporting a verdict is
+separate from having read something: `recover()` returns `empty` when no rows
+were read, because a journal that was deleted or truncated is indistinguishable
+from one that was never written, and `replay_verdict()` reports the same
+`empty` verdict instead of `replayable`. Only a caller-held anchor can tell
+those two apart. The v1-to-v2 migration
 reads the source JSONL without writing it, validates the complete route state
 machine, writes and verifies a separate temporary target, and refuses to
 overwrite an existing target. The migrated target remains appendable.

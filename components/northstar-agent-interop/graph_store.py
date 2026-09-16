@@ -11,6 +11,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from interop_contract import RECOVERY_EMPTY, RECOVERY_VERIFIED
 from route_causality import (
     CausalEdge,
     CausalGraph,
@@ -351,4 +352,8 @@ class GraphEvidenceStore:
         cursor = None if not records else GraphEvidenceCursor(records[-1].sequence, records[-1].record_digest)
         if expected_cursor is not None and expected_cursor != cursor:
             raise ValueError("graph evidence cursor does not match history")
-        return GraphEvidenceRecovery("verified", tuple(records), cursor)
+        # Same rule as the route lineage: a store that read no records cannot be
+        # reported as verified, because a deleted or truncated file reads the same
+        # way as one that was never written.
+        verdict = RECOVERY_VERIFIED if records else RECOVERY_EMPTY
+        return GraphEvidenceRecovery(verdict, tuple(records), cursor)
