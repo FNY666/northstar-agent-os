@@ -29,3 +29,11 @@ is safe. The candidate remains local-only and the remote remains frozen at
 2. Whether and when to align with the parallel session before any push.
 3. Whether the next generation should add execution admission or integrate the
    completion contract first, while preserving the non-authorizing boundary.
+
+## Successor verification
+
+The candidate line moved to `3d4dcaa` when the continuation admission layer
+landed. The same procedure was repeated for that commit: fresh bundle clone,
+focused continuation tests 34/34, runtime 438/438, interop 620/620,
+`RC2_VERIFICATION=PASS`. `2ce0e84` remains a verified historical candidate; the
+current head is `3d4dcaa`.
