@@ -881,6 +881,29 @@ What this does not prove:
   still use their respective pin/witness/cursor mechanisms when it needs drift
   detection.
 
+## Dispatch admission witness
+
+- `DispatchAdmissionWitness` binds the admission digest to the source preflight
+  digest, a deterministic liveness digest, plan/route identifiers, and an
+  injected observation time. A later check can therefore detect replacement of
+  either source or of the combined admission artifact.
+- No external witness pin yields `current-unpinned`; a supplied matching pin
+  yields `current`; changed preflight or liveness yields `stale`; unknown source
+  state yields `unknown`. Every verdict remains
+  `execution_authorized=False`.
+- Wire parsing re-validates the source-shaped digests and rejects a claimed
+  execution authorization. The witness contains no action body, tool, provider
+  output, or permission.
+
+What this does not prove:
+
+- That a current admission is permission to dispatch. It only proves that the
+  recorded evidence and scheduling snapshots agree; policy, budget, capability,
+  and action gates remain separate.
+- That the source snapshots are live without their own pins, registry witness,
+  or lineage cursor. The admission witness detects replacement, not time passing
+  by itself.
+
 ## Release boundary
 
 Do not cherry-pick or publish this candidate automatically. It requires a
