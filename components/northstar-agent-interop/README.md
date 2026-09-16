@@ -248,3 +248,25 @@ handoffs the edge record does not keep. Appending an edge also still only checks
 that the edge is internally consistent, so a forged but self-consistent edge is
 accepted - reconciling it against the source is the caller's check, not
 something the index performs.
+
+## Cross-run experience
+
+Nothing in this repository carried anything from one finished run to the next:
+every run started from nothing, so an agent could repeat its own failure
+indefinitely. `ExperienceLedger` records what a run proved, keyed by a
+caller-declared fingerprint, and binds each entry to its source: the run id, the
+run digest, the completion verdict and the head of the event chain it came from.
+
+Two rules keep the memory honest. Only a settled verdict becomes experience -
+`verified` becomes a success entry and `failed` a failure entry, while `unknown`
+is refused, because an unresolved run is not a lesson. And recall is
+fail-closed: a ledger whose hash chain does not verify yields no entries at all,
+so a rewritten store cannot inject advice that was never earned. Every entry
+carries `execution_authorized=False`, because remembering something is not
+permission to do it.
+
+The limits are the honest ones. The fingerprint is declared by the caller: the
+ledger compares exact fingerprints and makes no claim about semantic similarity,
+so deciding that two tasks are alike stays a caller judgement. The entry records
+what a verdict said, and it does not re-verify the source run - re-checking a
+run's evidence is what the reconciliation APIs above are for.
