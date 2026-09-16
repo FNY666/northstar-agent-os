@@ -417,3 +417,20 @@ class MalformedHookResultTests(unittest.TestCase):
         outcome = registry.fire("PostToolUse", HookInput(event="PostToolUse", tool_name="Read"))
         self.assertFalse(outcome.denied)
         self.assertEqual(outcome.errors[0].split(":")[0], "bad")
+
+
+class InferredHookDecisionTests(unittest.TestCase):
+    def test_a_reason_only_pretool_hook_is_inferred_as_a_terminal_deny(self):
+        registry = HookRegistry()
+        registry.register("PreToolUse", lambda _: {"reason": "do not run"}, name="policy")
+        outcome = registry.fire("PreToolUse", HookInput(event="PreToolUse", tool_name="Write"))
+        self.assertTrue(outcome.denied)
+        self.assertEqual(outcome.deny_reason, "do not run")
+        self.assertFalse(outcome.ignored)
+
+    def test_a_reason_only_stop_hook_remains_a_block(self):
+        registry = HookRegistry()
+        registry.register("Stop", lambda _: {"reason": "continue auditing"}, name="policy")
+        outcome = registry.fire("Stop", HookInput(event="Stop"))
+        self.assertTrue(outcome.blocked)
+        self.assertEqual(outcome.block_reason, "continue auditing")

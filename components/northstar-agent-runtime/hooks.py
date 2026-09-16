@@ -174,7 +174,7 @@ def _merge_data(payload: dict[str, Any]) -> dict[str, Any]:
     return merged
 
 
-def coerce_result(value: Any) -> HookResult:
+def coerce_result(value: Any, *, event: str | None = None) -> HookResult:
     """Normalise whatever a hook returned into a :class:`HookResult`."""
     if value is None:
         return HookResult()
@@ -193,7 +193,15 @@ def coerce_result(value: Any) -> HookResult:
             # Stop event still gets to block, and one that only wrote a reason on
             # PreToolUse still gets to deny.
             if reason:
-                decision = "block"
+                # A reason-only verdict is a conservative refusal only where the
+                # event actually supports one.  Keeping block for no event
+                # preserves the public coerce_result() compatibility default.
+                if event in VETO_EVENTS:
+                    decision = "deny"
+                elif event in BLOCK_EVENTS or event is None:
+                    decision = "block"
+                else:
+                    decision = "noop"
             elif updated is not None:
                 decision = "modify_input"
             elif context:
@@ -349,7 +357,7 @@ class HookRegistry:
             registrations.append(_Registration(event, hook, f"extra[{position}]", None, None))
         for index, registration in enumerate(registrations):
             try:
-                result = coerce_result(registration.hook(hook_input))
+                result = coerce_result(registration.hook(hook_input), event=event)
             except Exception as error:  # noqa: BLE001 - a hook must not kill the run
                 outcome.errors.append(f"{registration.name}: {type(error).__name__}: {error}")
                 if event in VETO_EVENTS:
