@@ -31,6 +31,10 @@ _PREFIX = "sha256:"
 # Only a determinate verdict becomes a lesson; "unknown" is not one.
 _KINDS = {"verified": "success", "failed": "failure"}
 UNVERIFIABLE = "unverifiable"
+NO_EVIDENCE = "no-evidence"
+CONSISTENT_FAILURE = "consistent-failure"
+CONSISTENT_SUCCESS = "consistent-success"
+CONTRADICTED = "contradicted"
 
 
 @dataclass(frozen=True)
@@ -57,6 +61,19 @@ class ExperienceRecovery:
     verdict: str
     records: tuple[ExperienceRecord, ...]
     cursor: str | None
+
+
+@dataclass(frozen=True)
+class ExperienceStanding:
+    """Whether the ledger's history for one fingerprint agrees with itself."""
+
+    fingerprint: str
+    verdict: str
+    failures: int
+    successes: int
+    record_digests: tuple[str, ...]
+    execution_authorized: bool = False
+
 
 def _digest(payload: dict[str, Any]) -> str:
     encoded = json.dumps(
@@ -233,4 +250,42 @@ class ExperienceLedger:
                 _record_from_dict(payload)
                 for payload in records
                 if payload.get("fingerprint") == fingerprint
+            )
+
+    def standing(self, fingerprint: str) -> ExperienceStanding:
+        """Whether the stored history for one fingerprint agrees with itself.
+
+        Recall hands back every entry under a fingerprint; it does not say
+        whether they agree. A later success next to an earlier failure means the
+        history contradicts itself, and that is reported rather than resolved,
+        because the ledger has no standing to choose a side.
+        """
+        _validate_text(fingerprint, "fingerprint")
+        if not self._path.exists():
+            return ExperienceStanding(fingerprint, NO_EVIDENCE, 0, 0, ())
+        with self._locked() as handle:
+            try:
+                records = _load(handle)
+            except ValueError:
+                return ExperienceStanding(fingerprint, UNVERIFIABLE, 0, 0, ())
+            if not _verify_chain(records)[0]:
+                return ExperienceStanding(fingerprint, UNVERIFIABLE, 0, 0, ())
+            matching = [
+                payload
+                for payload in records
+                if payload.get("fingerprint") == fingerprint
+            ]
+            failures = sum(1 for p in matching if p.get("kind") == "failure")
+            successes = sum(1 for p in matching if p.get("kind") == "success")
+            if not matching:
+                verdict = NO_EVIDENCE
+            elif failures and successes:
+                verdict = CONTRADICTED
+            elif failures:
+                verdict = CONSISTENT_FAILURE
+            else:
+                verdict = CONSISTENT_SUCCESS
+            digests = tuple(p["record_digest"] for p in matching)
+            return ExperienceStanding(
+                fingerprint, verdict, failures, successes, digests
             )

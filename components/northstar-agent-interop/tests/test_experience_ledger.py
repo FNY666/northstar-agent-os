@@ -104,3 +104,45 @@ class ExperienceLedgerTests(unittest.TestCase):
         lines[0] = lines[0].replace("failed", "verified")
         self.path.write_text("\n".join(lines) + "\n", encoding="utf-8")
         self.assertEqual(ExperienceLedger(self.path).recall("fix-failing-pytest"), ())
+
+    def test_no_history_is_not_a_verdict_about_the_task(self):
+        standing = ExperienceLedger(self.path).standing("never-seen")
+        self.assertEqual(standing.verdict, "no-evidence")
+        self.assertEqual((standing.failures, standing.successes), (0, 0))
+
+    def test_repeated_failures_stand_together(self):
+        ledger = ExperienceLedger(self.path)
+        self._record(ledger)
+        self._record(ledger, run_id="run-2")
+        standing = ledger.standing("fix-failing-pytest")
+        self.assertEqual(standing.verdict, "consistent-failure")
+        self.assertEqual(standing.failures, 2)
+
+    def test_successes_stand_apart_from_failures(self):
+        ledger = ExperienceLedger(self.path)
+        self._record(ledger, verdict_result=_verified())
+        standing = ledger.standing("fix-failing-pytest")
+        self.assertEqual(standing.verdict, "consistent-success")
+        self.assertEqual(standing.successes, 1)
+    def test_a_later_success_contradicts_an_earlier_failure(self):
+        """History that disagrees with itself must say so, not pick a side."""
+        ledger = ExperienceLedger(self.path)
+        self._record(ledger)
+        self._record(ledger, run_id="run-2", verdict_result=_verified())
+        standing = ledger.standing("fix-failing-pytest")
+        self.assertEqual(standing.verdict, "contradicted")
+        self.assertEqual((standing.failures, standing.successes), (1, 1))
+
+    def test_standing_never_authorizes_execution(self):
+        ledger = ExperienceLedger(self.path)
+        self._record(ledger)
+        self.assertFalse(ledger.standing("fix-failing-pytest").execution_authorized)
+
+    def test_a_tampered_ledger_has_no_standing(self):
+        ledger = ExperienceLedger(self.path)
+        self._record(ledger)
+        lines = self.path.read_text(encoding="utf-8").splitlines()
+        lines[0] = lines[0].replace("failure", "success")
+        self.path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+        standing = ExperienceLedger(self.path).standing("fix-failing-pytest")
+        self.assertEqual(standing.verdict, "unverifiable")

@@ -270,3 +270,9 @@ ledger compares exact fingerprints and makes no claim about semantic similarity,
 so deciding that two tasks are alike stays a caller judgement. The entry records
 what a verdict said, and it does not re-verify the source run - re-checking a
 run's evidence is what the reconciliation APIs above are for.
+Recall hands back every entry under a fingerprint without saying whether they
+agree, so `standing()` reports that separately instead of averaging it away:
+`consistent-failure` and `consistent-success` mean the history agrees, while
+`contradicted` means a later run overturned an earlier one - reported rather
+than resolved, because the ledger has no standing to pick a side. A ledger that
+does not verify has no standing at all.
