@@ -204,6 +204,164 @@ def evaluate_admission(
     )
 
 
+@dataclass(frozen=True)
+class AdmissionRecord:
+    """One recorded admission decision."""
+
+    fingerprint: str
+    verdict_state: str
+    verdict_reason: str
+    verdict_confidence: float
+    statistics_snapshot: dict[str, Any]
+    decided_at: int
+    policy_config: dict[str, Any]
+    sequence: int
+    prev_record_digest: str | None
+    record_digest: str
+
+
+class AdmissionLedger:
+    """Persist admission decisions for audit and retrospective analysis."""
+
+    def __init__(self, path: Path):
+        self._path = Path(path)
+
+    def record(
+        self,
+        fingerprint: str,
+        verdict: AdmissionVerdict,
+        statistics: ExperienceStatistics,
+        policy_config: dict[str, Any],
+        decided_at: int,
+    ) -> AdmissionRecord:
+        """Append admission decision to ledger (append-only, flock, fsync)."""
+        self._path.parent.mkdir(parents=True, exist_ok=True)
+        handle = open(self._path, "a+", encoding="utf-8")
+        try:
+            fcntl.flock(handle.fileno(), fcntl.LOCK_EX)
+            
+            # Read existing records to get sequence and prev digest
+            handle.seek(0)
+            records = _load(handle)
+            sequence = len(records) + 1
+            prev_digest = records[-1]["record_digest"] if records else None
+            
+            # Build record
+            stats_snapshot = {
+                "total_runs": statistics.total_runs,
+                "successes": statistics.successes,
+                "failures": statistics.failures,
+                "success_rate": statistics.success_rate,
+                "recent_trend": statistics.recent_trend,
+            }
+            
+            body = {
+                "fingerprint": fingerprint,
+                "verdict_state": verdict.state,
+                "verdict_reason": verdict.reason,
+                "verdict_confidence": verdict.confidence,
+                "statistics_snapshot": stats_snapshot,
+                "decided_at": decided_at,
+                "policy_config": policy_config,
+                "sequence": sequence,
+                "prev_record_digest": prev_digest,
+            }
+            
+            record_digest = _digest(body)
+            payload = dict(body, record_digest=record_digest)
+            
+            # Append to file
+            handle.seek(0, os.SEEK_END)
+            handle.write(json.dumps(payload, sort_keys=True, separators=(",", ":")) + "\n")
+            handle.flush()
+            os.fsync(handle.fileno())
+            
+            return AdmissionRecord(
+                fingerprint=fingerprint,
+                verdict_state=verdict.state,
+                verdict_reason=verdict.reason,
+                verdict_confidence=verdict.confidence,
+                statistics_snapshot=stats_snapshot,
+                decided_at=decided_at,
+                policy_config=policy_config,
+                sequence=sequence,
+                prev_record_digest=prev_digest,
+                record_digest=record_digest,
+            )
+        finally:
+            fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
+            handle.close()
+
+    def query(self, fingerprint: str) -> tuple[AdmissionRecord, ...]:
+        """Retrieve all decisions for a fingerprint (oldest first)."""
+        if not self._path.exists():
+            return ()
+        
+        handle = open(self._path, "r", encoding="utf-8")
+        try:
+            fcntl.flock(handle.fileno(), fcntl.LOCK_SH)
+            records = _load(handle)
+        finally:
+            fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
+            handle.close()
+        
+        matching = [
+            AdmissionRecord(
+                fingerprint=r["fingerprint"],
+                verdict_state=r["verdict_state"],
+                verdict_reason=r["verdict_reason"],
+                verdict_confidence=r["verdict_confidence"],
+                statistics_snapshot=r["statistics_snapshot"],
+                decided_at=r["decided_at"],
+                policy_config=r["policy_config"],
+                sequence=r["sequence"],
+                prev_record_digest=r.get("prev_record_digest"),
+                record_digest=r["record_digest"],
+            )
+            for r in records
+            if r.get("fingerprint") == fingerprint
+        ]
+        return tuple(matching)
+
+    def summary(self) -> dict[str, Any]:
+        """Global stats: total decisions, block rate, caution rate."""
+        if not self._path.exists():
+            return {
+                "total_decisions": 0,
+                "block_rate": 0.0,
+                "caution_rate": 0.0,
+                "admit_rate": 0.0,
+            }
+        
+        handle = open(self._path, "r", encoding="utf-8")
+        try:
+            fcntl.flock(handle.fileno(), fcntl.LOCK_SH)
+            records = _load(handle)
+        finally:
+            fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
+            handle.close()
+        
+        total = len(records)
+        if total == 0:
+            return {
+                "total_decisions": 0,
+                "block_rate": 0.0,
+                "caution_rate": 0.0,
+                "admit_rate": 0.0,
+            }
+        
+        blocked = sum(1 for r in records if r["verdict_state"] == "blocked")
+        caution = sum(1 for r in records if r["verdict_state"] == "admitted-with-caution")
+        admitted = sum(1 for r in records if r["verdict_state"] == "admitted")
+        
+        return {
+            "total_decisions": total,
+            "block_rate": blocked / total,
+            "caution_rate": caution / total,
+            "admit_rate": admitted / total,
+        }
+
+
 def _digest(payload: dict[str, Any]) -> str:
     encoded = json.dumps(
         payload, sort_keys=True, separators=(",", ":"), ensure_ascii=False
