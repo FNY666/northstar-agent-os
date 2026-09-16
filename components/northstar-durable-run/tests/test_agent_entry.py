@@ -405,6 +405,42 @@ class AgentEntryTests(unittest.TestCase):
         self.assertTrue(first.ok)
         self.assertTrue(second.ok)
 
+    def test_run_goal_with_experience_settlement_confirmed(self):
+        """Task with forecast settles when verification matches expectation."""
+        class MockForecast:
+            expectation = "likely-success"
+            fingerprint = "test-task-001"
+            forecast_digest = "sha256:" + "f" * 64
+        
+        class MockLedger:
+            def __init__(self):
+                self.settlements = []
+            
+            def settle(self, forecast, *, actual_verdict, run_id, run_digest, event_head):
+                self.settlements.append({
+                    "forecast": forecast,
+                    "actual_verdict": actual_verdict,
+                    "run_id": run_id,
+                })
+                return {"outcome": "confirmed"}
+        
+        ledger = MockLedger()
+        forecast = MockForecast()
+        
+        outcome = self.harness.run_goal(
+            "write hello world",
+            self.planner([step_value("write-out", WRITE_ACTION, {"path": "out.txt", "content": "hello world\n"}, ["content_matches_payload"])]),
+            expectations=[ExpectedArtifact("out.txt", content="hello world\n")],
+            experience_ledger=ledger,
+            forecast=forecast,
+            fingerprint="test-task-001",
+        )
+        
+        self.assertTrue(outcome.ok)
+        self.assertEqual(len(ledger.settlements), 1)
+        self.assertEqual(ledger.settlements[0]["actual_verdict"], "verified")
+        self.assertEqual(ledger.settlements[0]["run_id"], self.run.run_id)
+
 
 class AgentEntryCliTests(unittest.TestCase):
     def test_cli_runs_a_host_supplied_plan_and_reports_json(self):

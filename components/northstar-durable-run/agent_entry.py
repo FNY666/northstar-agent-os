@@ -713,6 +713,9 @@ class AgentHarness:
         *,
         expectations: tuple[ExpectedArtifact, ...] | list[ExpectedArtifact] = (),
         context: dict[str, Any] | None = None,
+        experience_ledger: Any = None,
+        forecast: Any = None,
+        fingerprint: str | None = None,
     ) -> TaskOutcome:
         """Plan, execute, recover within bound, then verify the deliverable."""
         generated = planner.generate(
@@ -752,7 +755,7 @@ class AgentHarness:
             for step in plan.steps
             if step.step_id in state.steps
         )
-        return TaskOutcome(
+        outcome = TaskOutcome(
             task_id=self.run.task_id,
             goal=goal,
             run_status=state.status,
@@ -762,6 +765,26 @@ class AgentHarness:
             resumes=resumes,
             evidence_events=self.evidence_events(),
         )
+        
+        # Settle forecast if provided (Phase 1: log-and-continue)
+        if experience_ledger is not None and forecast is not None:
+            if fingerprint is None:
+                import sys
+                print("Warning: experience settlement skipped (fingerprint required)", file=sys.stderr)
+            else:
+                try:
+                    experience_ledger.settle(
+                        forecast,
+                        actual_verdict=verification.verdict,
+                        run_id=self.run.run_id,
+                        run_digest=None,  # Phase 1:暂未暴露
+                        event_head=None,  # Phase 1: 暂未暴露
+                    )
+                except Exception as error:
+                    import sys
+                    print(f"Warning: experience settlement failed: {error}", file=sys.stderr)
+        
+        return outcome
 
 
 def _steps_plan(steps: list[dict[str, Any]], run: RunContract, *, actor_id: str, workspace_id: str,
