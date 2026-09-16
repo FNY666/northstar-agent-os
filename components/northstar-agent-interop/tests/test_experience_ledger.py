@@ -146,3 +146,45 @@ class ExperienceLedgerTests(unittest.TestCase):
         self.path.write_text("\n".join(lines) + "\n", encoding="utf-8")
         standing = ExperienceLedger(self.path).standing("fix-failing-pytest")
         self.assertEqual(standing.verdict, "unverifiable")
+
+    def test_forecast_from_consistent_failure_is_likely_failure(self):
+        ledger = ExperienceLedger(self.path)
+        self._record(ledger)
+        forecast = ledger.forecast("fix-failing-pytest")
+        self.assertEqual(forecast.expectation, "likely-failure")
+        self.assertEqual(len(forecast.based_on), 1)
+        self.assertTrue(forecast.forecast_digest.startswith("sha256:"))
+
+    def test_forecast_from_consistent_success_is_likely_success(self):
+        ledger = ExperienceLedger(self.path)
+        self._record(ledger, verdict_result=_verified())
+        forecast = ledger.forecast("fix-failing-pytest")
+        self.assertEqual(forecast.expectation, "likely-success")
+        self.assertEqual(forecast.successes, 1)
+
+    def test_forecast_reports_no_evidence_without_inventing_expectation(self):
+        forecast = ExperienceLedger(self.path).forecast("never-seen")
+        self.assertEqual(forecast.expectation, "no-evidence")
+        self.assertEqual(forecast.based_on, ())
+
+    def test_forecast_refuses_to_choose_for_contradicted_history(self):
+        ledger = ExperienceLedger(self.path)
+        self._record(ledger)
+        self._record(ledger, run_id="run-2", verdict_result=_verified())
+        forecast = ledger.forecast("fix-failing-pytest")
+        self.assertEqual(forecast.expectation, "contradicted")
+        self.assertEqual(forecast.based_on, (ledger.recall("fix-failing-pytest")[0].record_digest,
+                                              ledger.recall("fix-failing-pytest")[1].record_digest))
+
+    def test_forecast_on_tampered_history_is_unverifiable(self):
+        ledger = ExperienceLedger(self.path)
+        self._record(ledger)
+        lines = self.path.read_text(encoding="utf-8").splitlines()
+        lines[0] = lines[0].replace("failure", "success")
+        self.path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+        self.assertEqual(ledger.forecast("fix-failing-pytest").expectation, "unverifiable")
+
+    def test_forecast_never_authorizes_execution(self):
+        ledger = ExperienceLedger(self.path)
+        self._record(ledger)
+        self.assertFalse(ledger.forecast("fix-failing-pytest").execution_authorized)

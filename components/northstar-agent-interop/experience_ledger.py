@@ -35,6 +35,8 @@ NO_EVIDENCE = "no-evidence"
 CONSISTENT_FAILURE = "consistent-failure"
 CONSISTENT_SUCCESS = "consistent-success"
 CONTRADICTED = "contradicted"
+FORECAST_FAILURE = "likely-failure"
+FORECAST_SUCCESS = "likely-success"
 
 
 @dataclass(frozen=True)
@@ -72,6 +74,19 @@ class ExperienceStanding:
     failures: int
     successes: int
     record_digests: tuple[str, ...]
+    execution_authorized: bool = False
+
+
+@dataclass(frozen=True)
+class ExperienceForecast:
+    """What the ledger expects next, given its verified history."""
+
+    fingerprint: str
+    expectation: str
+    failures: int
+    successes: int
+    based_on: tuple[str, ...]
+    forecast_digest: str
     execution_authorized: bool = False
 
 
@@ -289,3 +304,35 @@ class ExperienceLedger:
             return ExperienceStanding(
                 fingerprint, verdict, failures, successes, digests
             )
+
+    def forecast(self, fingerprint: str) -> ExperienceForecast:
+        """Derive an expectation from verified standing, bound to what was seen.
+
+        Forecasts hold the record digests they were derived from, so a forecast
+        that was made before new evidence becomes stale when the standing
+        changes. No forecast from contradicted or unverifiable history, because
+        the ledger has no standing to pick a side when the evidence disagrees.
+        """
+        standing = self.standing(fingerprint)
+        if standing.verdict in (CONSISTENT_FAILURE, CONSISTENT_SUCCESS):
+            expectation = (
+                FORECAST_FAILURE if standing.verdict == CONSISTENT_FAILURE else FORECAST_SUCCESS
+            )
+        else:
+            expectation = standing.verdict
+        body = {
+            "fingerprint": fingerprint,
+            "expectation": expectation,
+            "failures": standing.failures,
+            "successes": standing.successes,
+            "based_on": list(standing.record_digests),
+        }
+        forecast_digest = _digest(body)
+        return ExperienceForecast(
+            fingerprint=fingerprint,
+            expectation=expectation,
+            failures=standing.failures,
+            successes=standing.successes,
+            based_on=standing.record_digests,
+            forecast_digest=forecast_digest,
+        )
