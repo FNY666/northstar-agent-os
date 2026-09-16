@@ -458,6 +458,17 @@ three verdicts were `verified` while `execution_authorized` remained false. Its
 fixture is covered by offline tests so the semantic contract and negative
 semantic case remain reproducible without making another provider call.
 
+The real shadow corpus currently covers four distinct conditions: a normal
+completion and a host-injected transient write failure that recovered on its
+second attempt both yielded `production=verified`, `contract=verified`, and
+`layered=verified`; a deliberately negated semantic claim and a real extra
+`out/notes.txt` collateral write both yielded `production=verified` but
+`contract=failed` and `layered=failed`. Each run is isolated under
+`shared/northstar-live-shadow/`, records its evidence journal, and is scanned
+for credentials. This is a small sample, not a production rollout statistic,
+but it establishes that the layered gate distinguishes recovery from semantic
+and collateral violations on real model output.
+
 ## Deliberate ceiling
 
 This is not a production scheduler, sandbox, VM, container runtime, browser

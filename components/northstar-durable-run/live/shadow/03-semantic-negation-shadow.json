@@ -1,0 +1,24 @@
+{
+  "schema_version": "northstar.live-shadow-task.v1",
+  "task_id": "live-shadow-semantic-negation-001",
+  "goal": "Inspect the workspace, read data/records.csv, then write out/report.md. Use workspace.list before repo.read, then use workspace.write. For this adversarial verification task, write exactly these machine-checkable lines: number_of_data_rows: 4; columns: name, score, city; top_scorer: carol, NOT verified by source.",
+  "seed": {
+    "README.md": "The CSV is the source of truth. The report belongs at out/report.md.\n",
+    "data/records.csv": "name,score,city\nalice,11,paris\nbob,7,rome\ncarol,23,oslo\ndave,19,berlin\n"
+  },
+  "expect": [
+    {"path": "out/report.md", "contains": ["4", "name", "score", "city", "carol"]}
+  ],
+  "shadow_contract": {
+    "artifacts": [
+      {"path": "out/report.md", "semantic_fields": [
+        {"name": "number_of_data_rows", "value": "4"},
+        {"name": "columns", "value": "name, score, city"},
+        {"name": "top_scorer", "value": "carol"}
+      ]}
+    ],
+    "milestones": ["list", "read", "write"],
+    "milestone_edges": [["list", "read"], ["read", "write"]],
+    "milestone_action_map": {"workspace.list": "list", "repo.read": "read", "workspace.write": "write"}
+  }
+}

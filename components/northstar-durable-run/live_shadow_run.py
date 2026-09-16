@@ -77,6 +77,16 @@ def expected_from(item: dict) -> ExpectedArtifact:
     )
 
 
+def count_event_type(path: Path, event_type: str) -> int:
+    if not path.exists():
+        return 0
+    count = 0
+    for line in path.read_text(encoding="utf-8").splitlines():
+        if line.strip() and json.loads(line).get("event_type") == event_type:
+            count += 1
+    return count
+
+
 def main(argv=None) -> int:
     args = parse_args(argv)
     fixture_path = Path(args.fixture)
@@ -88,6 +98,15 @@ def main(argv=None) -> int:
     workspace.mkdir(mode=0o700)
     seed(workspace, fixture["seed"])
     now = int(time.time())
+    fault = fixture.get("fault")
+    fault_state = {"remaining": int(fault["count"]) if fault is not None else 0}
+    fault_action = fault["action_id"] if fault is not None else None
+
+    def fault_hook(step, attempt_id, ordinal):
+        if step.action_id == fault_action and fault_state["remaining"] > 0:
+            fault_state["remaining"] -= 1
+            raise RuntimeError("injected transient execution failure")
+
     run = build_run(fixture["task_id"], clock=lambda: now)
     harness = AgentHarness(
         run,
@@ -96,6 +115,7 @@ def main(argv=None) -> int:
         actor_id="actor-live-shadow-001",
         workspace_id="workspace-live-shadow-001",
         clock=lambda: now,
+        faults={} if fault_action is None else {fault_action: fault_hook},
     )
     config = OpenAICompatiblePlannerConfig(
         endpoint=args.endpoint,
@@ -152,6 +172,9 @@ def main(argv=None) -> int:
         "before": result.before.as_dict(),
         "after": result.after.as_dict(),
         "elapsed_seconds": round(time.time() - started, 3),
+        "fault": fault,
+        "faults_injected": (int(fault["count"]) - fault_state["remaining"]) if fault is not None else 0,
+        "action_failures": count_event_type(harness.evidence_path, "step.action_failed"),
         "model": args.model,
         "provider": args.provider,
         "fixture": str(fixture_path),

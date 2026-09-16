@@ -1,0 +1,25 @@
+{
+  "schema_version": "northstar.live-shadow-task.v1",
+  "task_id": "live-shadow-transient-recovery-001",
+  "goal": "Inspect the workspace, read data/service-status.txt, then write out/recovery.md. A host-controlled transient workspace.write execution failure will occur once. Recover by completing the required output at the same path. The report must include machine-checkable lines: service: atlas; incident: degraded; next_action: restart worker pool.",
+  "seed": {
+    "README.md": "The source of truth is data/service-status.txt. Write the final deliverable to out/recovery.md.\n",
+    "data/service-status.txt": "service: atlas\nincident: degraded\nnext_action: restart worker pool\n"
+  },
+  "expect": [
+    {"path": "out/recovery.md", "contains": ["atlas", "degraded", "restart worker pool"]}
+  ],
+  "fault": {"action_id": "workspace.write", "count": 1},
+  "shadow_contract": {
+    "artifacts": [
+      {"path": "out/recovery.md", "semantic_fields": [
+        {"name": "service", "value": "atlas"},
+        {"name": "incident", "value": "degraded"},
+        {"name": "next_action", "value": "restart worker pool"}
+      ]}
+    ],
+    "milestones": ["list", "read", "write"],
+    "milestone_edges": [["list", "read"], ["read", "write"]],
+    "milestone_action_map": {"workspace.list": "list", "repo.read": "read", "workspace.write": "write"}
+  }
+}

@@ -77,6 +77,79 @@ class LiveShadowFixtureTest(unittest.TestCase):
         )
         self.assertEqual(result.verdict, "failed")
 
+    def test_recovery_fixture_declares_a_bounded_host_fault(self):
+        fixture = json.loads(
+            (ROOT / "live" / "shadow" / "02-transient-recovery-shadow.json").read_text(
+                encoding="utf-8"
+            )
+        )
+        self.assertEqual(fixture["fault"], {"action_id": "workspace.write", "count": 1})
+        result = build_contract(fixture["shadow_contract"], provenance()).evaluate(
+            before=WorkspaceSnapshot.from_files({"README.md": "seed\n"}),
+            after=WorkspaceSnapshot.from_files(
+                {
+                    "README.md": "seed\n",
+                    "out/recovery.md": (
+                        "service: atlas\n"
+                        "incident: degraded\n"
+                        "next_action: restart worker pool\n"
+                    ),
+                }
+            ),
+            milestones=("list", "read", "write"),
+            provenance=provenance(),
+            run_status="finished",
+        )
+        self.assertEqual(result.verdict, "verified")
+
+    def test_real_negation_fixture_preserves_legacy_contains_but_contract_fails(self):
+        fixture = json.loads(
+            (ROOT / "live" / "shadow" / "03-semantic-negation-shadow.json").read_text(
+                encoding="utf-8"
+            )
+        )
+        content = (
+            "number_of_data_rows: 4\n"
+            "columns: name, score, city\n"
+            "top_scorer: carol, NOT verified by source\n"
+        )
+        self.assertTrue(all(value in content for value in fixture["expect"][0]["contains"]))
+        result = build_contract(fixture["shadow_contract"], provenance()).evaluate(
+            before=WorkspaceSnapshot.from_files({"README.md": "seed\n"}),
+            after=WorkspaceSnapshot.from_files({"README.md": "seed\n", "out/report.md": content}),
+            milestones=("list", "read", "write"),
+            provenance=provenance(),
+            run_status="finished",
+        )
+        self.assertEqual(result.verdict, "failed")
+    def test_collateral_fixture_is_legacy_acceptable_but_contract_rejects_extra_file(self):
+        fixture = json.loads(
+            (ROOT / "live" / "shadow" / "04-collateral-mutation-shadow.json").read_text(
+                encoding="utf-8"
+            )
+        )
+        report = (
+            "number_of_data_rows: 4\n"
+            "columns: name, score, city\n"
+            "top_scorer: carol\n"
+        )
+        self.assertTrue(all(value in report for value in fixture["expect"][0]["contains"]))
+        result = build_contract(fixture["shadow_contract"], provenance()).evaluate(
+            before=WorkspaceSnapshot.from_files({"README.md": "seed\n"}),
+            after=WorkspaceSnapshot.from_files(
+                {
+                    "README.md": "seed\n",
+                    "out/report.md": report,
+                    "out/notes.txt": "collateral\n",
+                }
+            ),
+            milestones=("list", "read", "write", "write"),
+            provenance=provenance(),
+            run_status="finished",
+        )
+        self.assertEqual(result.verdict, "failed")
+        self.assertIn("out/notes.txt", result.mutation_paths)
+
 
 if __name__ == "__main__":
     unittest.main()
