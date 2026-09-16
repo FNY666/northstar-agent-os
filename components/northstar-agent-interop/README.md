@@ -175,7 +175,10 @@ actual Handoff grant remains verified by `handoff.py`.
 `causal_store.py` provides a separate append-only evidence index for these
 validated edges. It uses a versioned envelope, canonical record digest,
 predecessor chain, `fsync`, and an external `EvidenceCursor` for suffix
-rollback detection after restart. The store persists evidence only; it is not
+rollback detection after restart. Recovery applies the same rule as the route
+lineage: reading no records reports `empty`, never `verified`, because an
+erased journal and an intact empty one are indistinguishable without a
+caller-held anchor. The store persists evidence only; it is not
 an authorization database and cannot authorize tools, agents, or providers.
 
 `CausalGraph.from_events()` is intentionally limited to one route segment:
@@ -194,7 +197,14 @@ edges and typed handoff links, then publishes the complete record list through
 a same-directory temporary file, `fsync`, and atomic replacement. Invalid
 admission leaves the existing index unchanged; recovery verifies record
 sequence, predecessor links, graph commitment, endpoint coverage, handoff-edge
-matching and duplicate prevention.
+matching and duplicate prevention, and reports `empty` rather than `verified`
+when no records were read.
+
+All three persistence layers (`route_lineage.py`, `graph_store.py`,
+`causal_store.py`) share that one rule, and
+`tests/test_evidence_recovery_parity.py` keeps them from drifting apart: they
+were repaired one at a time, so nothing else would stop a later edit from
+fixing one layer and leaving the others fail-open.
 
 The index is a compact evidence projection, not a replacement for the source
 `RouteLineage`: it does not duplicate full event payloads, so event semantics
