@@ -434,3 +434,24 @@ class InferredHookDecisionTests(unittest.TestCase):
         outcome = registry.fire("Stop", HookInput(event="Stop"))
         self.assertTrue(outcome.blocked)
         self.assertEqual(outcome.block_reason, "continue auditing")
+
+
+class InvalidHookDecisionTests(unittest.TestCase):
+    def test_direct_construction_rejects_an_unknown_decision(self):
+        with self.assertRaises(ValueError):
+            HookResult(decision="unknown_decision")
+
+    def test_an_invalid_direct_result_fails_closed_on_veto_event(self):
+        registry = HookRegistry()
+        # Bypass constructor intentionally to simulate an untrusted/deserialized object.
+        result = object.__new__(HookResult)
+        object.__setattr__(result, "decision", "unknown_decision")
+        object.__setattr__(result, "reason", "")
+        object.__setattr__(result, "payload", None)
+        object.__setattr__(result, "additional_context", "")
+        object.__setattr__(result, "updated_input", None)
+        object.__setattr__(result, "data", {})
+        registry.register("PreToolUse", lambda _: result, name="bad")
+        outcome = registry.fire("PreToolUse", HookInput(event="PreToolUse", tool_name="Write"))
+        self.assertTrue(outcome.denied)
+        self.assertIn("ValueError", outcome.deny_reason)

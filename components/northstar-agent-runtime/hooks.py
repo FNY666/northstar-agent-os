@@ -71,6 +71,9 @@ CONTEXT_INJECT_EVENTS: tuple[HookEvent, ...] = ("UserPromptSubmit", "SessionStar
 BLOCK_EVENTS: tuple[HookEvent, ...] = ("Stop", "SubagentStop")
 
 HookDecisionKind = Literal["noop", "allow", "deny", "modify_input", "inject_context", "block"]
+HOOK_DECISIONS: tuple[HookDecisionKind, ...] = (
+    "noop", "allow", "deny", "modify_input", "inject_context", "block",
+)
 
 
 @dataclass(frozen=True)
@@ -121,6 +124,10 @@ class HookResult:
     additional_context: str = ""
     updated_input: dict[str, Any] | None = None
     data: dict[str, Any] = field(default_factory=dict)
+
+    def __post_init__(self) -> None:
+        if self.decision not in HOOK_DECISIONS:
+            raise ValueError(f"unknown hook decision {self.decision!r}")
 
     @property
     def is_deny(self) -> bool:
@@ -174,12 +181,20 @@ def _merge_data(payload: dict[str, Any]) -> dict[str, Any]:
     return merged
 
 
+def _validated_result(value: HookResult) -> HookResult:
+    # __post_init__ protects ordinary construction; re-check here because callers
+    # can receive/deserialise objects that bypassed the constructor.
+    if value.decision not in HOOK_DECISIONS:
+        raise ValueError(f"unknown hook decision {value.decision!r}")
+    return value
+
+
 def coerce_result(value: Any, *, event: str | None = None) -> HookResult:
     """Normalise whatever a hook returned into a :class:`HookResult`."""
     if value is None:
         return HookResult()
     if isinstance(value, HookResult):
-        return value
+        return _validated_result(value)
     if isinstance(value, bool):
         return HookResult(decision="allow") if value else HookResult(decision="deny", reason="hook returned False")
     if isinstance(value, dict):
@@ -188,7 +203,7 @@ def coerce_result(value: Any, *, event: str | None = None) -> HookResult:
         reason = str(payload.pop("reason", "") or "")
         context = str(payload.pop("additional_context", "") or payload.pop("context", "") or "")
         updated = payload.pop("updated_input", None) or payload.pop("payload", None)
-        if decision not in {"noop", "allow", "deny", "modify_input", "inject_context", "block"}:
+        if decision not in HOOK_DECISIONS:
             # Infer the intent so a hook that only wrote {"reason": ...} on a
             # Stop event still gets to block, and one that only wrote a reason on
             # PreToolUse still gets to deny.
