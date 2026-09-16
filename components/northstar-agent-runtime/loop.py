@@ -1630,6 +1630,39 @@ class AgentRuntime:
             raise RuntimeConfigurationError("continuation store is invalid")
         return store.history(self.session_id, expected_head_digest=expected_head_digest)
 
+    def resume_if_authorized_continuation(
+        self,
+        store: AutonomyCheckpointStore,
+        *,
+        goal: Any,
+        policy: ContinuationPolicy,
+        prompt: str = "",
+        now: int | None = None,
+        expected_record_digest: str | None = None,
+        expected_head_digest: str | None = None,
+    ) -> tuple[ContinuationAdmission, Any]:
+        """
+        Evaluate continuation admission; if authorized, resume the session.
+        
+        Returns (admission, report) where:
+        - admission: the admission decision (always present)
+        - report: RunReport if execution was authorized and resumed, None otherwise
+        """
+        admission = self.admit_persisted_continuation_checkpoint(
+            store,
+            goal=goal,
+            now=now if now is not None else int(time.time()),
+            policy=policy,
+            expected_record_digest=expected_record_digest,
+            expected_head_digest=expected_head_digest,
+        )
+        
+        if admission.execution_authorized:
+            report = self.continue_session(prompt)
+            return (admission, report)
+        else:
+            return (admission, None)
+
     # -- resume ------------------------------------------------------------
     def resume_transcript(self) -> list[Any]:
         return self.sessions.transcript()
