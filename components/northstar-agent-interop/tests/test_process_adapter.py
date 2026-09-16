@@ -350,7 +350,10 @@ class ProcessAdapterTests(unittest.TestCase):
             _handoff_token(), context_ref="ctx-process-001",
             handoff_secret=HANDOFF_SECRET, current_policy_revision="policy-1", now=1_010,
         )
-        self.assertLess(time.monotonic() - started, 2.0)
+        # The bound has to stay below the sleeper's 10s, or a broken timeout
+        # would still pass; it also has to clear a loaded device, where a
+        # correct implementation has been measured at ~3.0s against ~0.1s idle.
+        self.assertLess(time.monotonic() - started, 6.0)
         self.assertEqual(result.status, "failed")
         self.assertEqual(result.error_class, "timeout")
 

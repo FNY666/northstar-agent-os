@@ -550,7 +550,11 @@ class RouteLedgerPersistenceTests(RouteLedgerTestCase):
                     stderr=subprocess.DEVNULL,
                     start_new_session=True,
                 )
-                deadline = time.monotonic() + 10
+                # Waiting for the child to start, not detecting anything: on
+                # this memory-bound box startup alone has been measured well
+                # past 10s. The lock assertion below and the final history
+                # check carry the meaning.
+                deadline = time.monotonic() + 60
                 while not started_path.exists() and time.monotonic() < deadline:
                     time.sleep(0.01)
                 self.assertTrue(started_path.exists())
