@@ -33,7 +33,7 @@ from autonomy_checkpoint import (
     capture_checkpoint,
     verify_checkpoint,
 )
-from autonomy_checkpoint_store import AutonomyCheckpointStore
+from autonomy_checkpoint_store import AutonomyCheckpointStore, ContinuationHistory
 from continuation_admission import (
     ContinuationAdmission,
     ContinuationPolicy,
@@ -1612,6 +1612,14 @@ class AgentRuntime:
         record = resolution.record
         checkpoint = record.checkpoint_value if record is not None else None
         return evaluate_continuation_admission(checkpoint, verdict, policy=policy, now=now)
+
+    def continuation_objective_history(
+        self, store: AutonomyCheckpointStore, *, expected_head_digest: str | None = None
+    ) -> ContinuationHistory:
+        """Read-only objective continuity report; never resumes or authorizes anything."""
+        if not isinstance(store, AutonomyCheckpointStore):
+            raise RuntimeConfigurationError("continuation store is invalid")
+        return store.history(self.session_id, expected_head_digest=expected_head_digest)
 
     # -- resume ------------------------------------------------------------
     def resume_transcript(self) -> list[Any]:
