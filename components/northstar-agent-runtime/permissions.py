@@ -15,6 +15,11 @@ host never approved is not.
 name would mean no subagent is ever created, and the error would blame a tool
 that was never the problem. Delegation is instead gated per tool inside the
 subagent's declared tool set (:meth:`PermissionEngine.check_delegation`).
+
+That reasoning does not extend to the unknown-tool rule: a tool the engine has
+not registered is denied whatever kind it declares, so a tool cannot excuse
+itself by labelling itself ``task``. The loop registers the delegation entry
+point, so its own calls evaluate as known.
 """
 from __future__ import annotations
 
@@ -230,7 +235,7 @@ class PermissionEngine:
                 rule="disallowed_tools",
                 tool=tool_name,
             )
-        if not known and resolved_kind != "task":
+        if not known:
             return PermissionDecision(
                 False,
                 source="unknown_tool",

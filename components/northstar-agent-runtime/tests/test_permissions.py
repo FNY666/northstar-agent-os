@@ -235,3 +235,26 @@ class EngineAtRuntimeTests(RuntimeTestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class UnknownToolKindTests(RuntimeTestCase):
+    """An unknown tool may not escape the denial by declaring a kind."""
+
+    def test_claiming_the_task_kind_does_not_excuse_an_unknown_tool(self):
+        engine = PermissionEngine(mode="default")
+        decision = engine.evaluate("Mystery", kind="task", known=False)
+        self.assertFalse(decision.allowed)
+        self.assertEqual(decision.source, "unknown_tool")
+
+    def test_every_other_kind_is_still_refused(self):
+        engine = PermissionEngine(mode="default")
+        for kind in ("read", "edit", "exec", "network", "other"):
+            decision = engine.evaluate("Mystery", kind=kind, known=False)
+            self.assertFalse(decision.allowed, kind)
+            self.assertEqual(decision.source, "unknown_tool", kind)
+
+    def test_the_registered_delegation_entry_point_still_evaluates(self):
+        engine = PermissionEngine(mode="default")
+        engine.register_kind("Task", "task")
+        decision = engine.evaluate("Task", kind="task", known=True)
+        self.assertTrue(decision.allowed)
