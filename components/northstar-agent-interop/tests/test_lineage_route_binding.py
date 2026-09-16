@@ -79,3 +79,29 @@ class LineageRouteBindingTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+def sibling_branch_graph():
+    graph = LineageGraph()
+    graph.append(event("e1"))
+    graph.append(event("e2", "dispatched", "e1"))
+    graph.append(event("e3", "dispatched", "e1"))
+    graph.append(event("e4", "succeeded", "e2"))
+    return graph
+
+
+class UnresolvedBranchVerificationTests(unittest.TestCase):
+    def test_a_route_with_an_unaccounted_branch_is_not_verified(self):
+        verdict = verify_lineage(
+            sibling_branch_graph(), route_record=ROUTE_RECORD, handoff=IDENT, route_id="r1"
+        )
+        self.assertNotEqual(verdict.verdict, "verified")
+        self.assertIn("unresolved attempt branch", verdict.reasons)
+
+    def test_a_fully_accounted_route_is_still_verified(self):
+        graph = LineageGraph()
+        graph.append(event("e1"))
+        graph.append(event("e2", "dispatched", "e1"))
+        graph.append(event("e3", "succeeded", "e2"))
+        verdict = verify_lineage(graph, route_record=ROUTE_RECORD, handoff=IDENT, route_id="r1")
+        self.assertEqual(verdict.verdict, "verified")

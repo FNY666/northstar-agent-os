@@ -236,6 +236,49 @@ def active_attempts(graph:LineageGraph,route_id:str)->tuple[tuple[RouteLineageEv
         except LineageError: continue
     return tuple(attempts)
 
+_EXECUTION_STATUSES = ("planned", "dispatched", "succeeded", "failed")
+
+
+def unresolved_attempt_branches(graph: LineageGraph, route_id: str) -> tuple[RouteLineageEvent, ...]:
+    """Open branches of one route that no concluded attempt accounts for.
+
+    ``active_attempts`` only returns attempts whose terminal concluded, so a
+    dispatched branch that never received a terminal receipt is invisible. Such a
+    branch is reported here when it shares a causal root with a concluded attempt
+    but does not descend from one. Roots without any conclusion are left to the
+    ordinary state logic, and a retry is never flagged: a terminal that has any
+    execution child is not counted as concluded at all.
+    """
+    events = [item for item in graph.read() if item.route_id == route_id]
+    children = {}
+    for item in events:
+        children.setdefault(item.parent_event_id, []).append(item)
+
+    def execution_children(item):
+        return [child for child in children.get(item.event_id, ()) if child.status in _EXECUTION_STATUSES]
+
+    def chain_of(item):
+        try:
+            return causal_chain(graph, item.event_id)
+        except LineageError:
+            return ()
+
+    chains = {item.event_id: chain_of(item) for item in events}
+    root_of = {event_id: (chain[0].event_id if chain else None) for event_id, chain in chains.items()}
+    roots_with_conclusion = {
+        root_of[item.event_id] for item in events
+        if item.status in ("succeeded", "failed") and not execution_children(item)
+    }
+    if not roots_with_conclusion:
+        return ()
+    return tuple(
+        item for item in events
+        if item.status in ("planned", "dispatched")
+        and not execution_children(item)
+        and root_of[item.event_id] in roots_with_conclusion
+    )
+
+
 def select_active_terminal(graph:LineageGraph,route_id:str)->RouteLineageEvent|None:
     attempts=active_attempts(graph,route_id)
     if len(attempts)!=1: return None
@@ -262,6 +305,9 @@ def verify_lineage(graph: LineageGraph, *, route_record: dict[str, Any], handoff
         return VerificationResult("unknown", ("route identity not pinned for a multi-route lineage",))
     if not events or len(events) > max_events:
         return VerificationResult("unknown", ("lineage is missing or too large",))
+    route = route_id if route_id is not None else events[0].route_id
+    if unresolved_attempt_branches(graph, route):
+        return VerificationResult("unknown", ("unresolved attempt branch",))
     terminal = events[-1]
     reasons: list[str] = []
     if route_record.get("selected_agent_id") != handoff.get("target_agent_id"):
