@@ -1632,6 +1632,89 @@ class AgentRuntime:
             )
         
         return admission
+    
+    def admit_with_experience_check(
+        self,
+        store: AutonomyCheckpointStore,
+        experience_ledger: Any,
+        *,
+        goal: Any,
+        policy: ContinuationPolicy,
+        fingerprint: str | None = None,
+        now: int | None = None,
+        expected_record_digest: str | None = None,
+        expected_head_digest: str | None = None,
+        admission_ledger: Any = None,
+    ) -> tuple[ContinuationAdmission, Any]:
+        """
+        Evaluate admission with experience check (Phase 3 MVP).
+        
+        Queries experience ledger for historical performance, then performs
+        standard admission evaluation. Returns both results for host decision.
+        
+        Returns:
+            (admission, exp_state): Admission decision and experience state
+        """
+        from experience_integration import derive_fingerprint
+        
+        # Import project_state from experience_ledger (interop component)
+        # Graceful degradation if not available
+        try:
+            from experience_ledger import project_state
+        except ImportError:
+            project_state = None
+        
+        # Derive fingerprint if not provided
+        if fingerprint is None:
+            fingerprint = derive_fingerprint(goal)
+        
+        # Query experience (fail-open on error or if not available)
+        if project_state is None:
+            # Interop component not available - degraded state
+            class DegradedExperienceState:
+                def __init__(self, fp):
+                    self.fingerprint = fp
+                    self.standing = "no-evidence"
+                    self.confidence = 0.0
+                    self.recent_trend = "insufficient-data"
+                    self.last_admission = None
+                    self.conflict_count = 0
+                    self.data_quality = "unverifiable"
+            
+            exp_state = DegradedExperienceState(fingerprint)
+        else:
+            try:
+                exp_state = project_state(
+                    experience_ledger,
+                    fingerprint,
+                    admission_ledger=admission_ledger,
+                )
+            except Exception as e:
+                # Degraded experience state on query failure
+                class DegradedExperienceState:
+                    def __init__(self, fp):
+                        self.fingerprint = fp
+                        self.standing = "no-evidence"
+                        self.confidence = 0.0
+                        self.recent_trend = "insufficient-data"
+                        self.last_admission = None
+                        self.conflict_count = 0
+                        self.data_quality = "unverifiable"
+                
+                exp_state = DegradedExperienceState(fingerprint)
+        
+        # Perform standard admission evaluation
+        admission = self.admit_persisted_continuation_checkpoint(
+            store,
+            goal=goal,
+            now=now if now is not None else int(time.time()),
+            policy=policy,
+            expected_record_digest=expected_record_digest,
+            expected_head_digest=expected_head_digest,
+            admission_ledger=admission_ledger,
+        )
+        
+        return (admission, exp_state)
 
     def continuation_objective_history(
         self, store: AutonomyCheckpointStore, *, expected_head_digest: str | None = None
