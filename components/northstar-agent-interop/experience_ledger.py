@@ -17,6 +17,7 @@ from __future__ import annotations
 import fcntl
 import hashlib
 import json
+import logging
 import os
 from contextlib import contextmanager
 from dataclasses import dataclass
@@ -27,6 +28,21 @@ from interop_contract import RECOVERY_EMPTY, RECOVERY_VERIFIED
 
 _SCHEMA = "northstar.experience-ledger.v1"
 _PREFIX = "sha256:"
+
+logger = logging.getLogger(__name__)
+
+
+class OwnershipViolationError(Exception):
+    """Raised when settlement is attempted without valid ownership.
+
+    Settling a forecast is a write to the evidence layer, and a write is only
+    legitimate for the run that currently owns the fingerprint. When an
+    ownership ledger is supplied and refuses the fencing token, the settlement
+    is refused here rather than recorded, because a forged settlement would
+    outlive the claim that produced it.
+    """
+
+    pass
 
 # Only a determinate verdict becomes a lesson; "unknown" is not one.
 _KINDS = {"verified": "success", "failed": "failure"}
@@ -429,6 +445,47 @@ def _validate_text(value: Any, label: str) -> None:
         raise ValueError(f"{label} is invalid")
 
 
+def _verify_ownership(
+    *,
+    run_id: str,
+    fencing_token: str | None,
+    ownership_ledger: Any | None,
+) -> bool:
+    """Check the caller still owns the run before a settlement is written.
+
+    Returns ``True`` when ownership was actually verified, ``False`` when the
+    settlement proceeds unverified. Raises ``OwnershipViolationError`` when an
+    ownership ledger explicitly refuses the token.
+
+    The ledger is used through duck typing -- only ``validate_token(run_id,
+    token)`` is required -- so this module never imports the ownership layer
+    and the dependency between the two stays one-directional.
+    """
+    if fencing_token is None or ownership_ledger is None:
+        logger.warning(
+            "experience settle for run %s proceeded without verified ownership "
+            "(fencing_token=%s, ownership_ledger=%s); backward-compatible path",
+            run_id,
+            "present" if fencing_token is not None else "missing",
+            type(ownership_ledger).__name__ if ownership_ledger is not None else "missing",
+        )
+        return False
+    validate = getattr(ownership_ledger, "validate_token", None)
+    if not callable(validate):
+        logger.warning(
+            "experience settle for run %s proceeded without verified ownership "
+            "(ownership_ledger %s has no callable validate_token)",
+            run_id,
+            type(ownership_ledger).__name__,
+        )
+        return False
+    if not validate(run_id, fencing_token):
+        raise OwnershipViolationError(
+            f"run {run_id} does not hold a valid ownership token for this settlement"
+        )
+    return True
+
+
 class ExperienceLedger:
     """Append-only, hash-chained store of lessons bound to their evidence."""
 
@@ -615,8 +672,10 @@ class ExperienceLedger:
         *,
         actual_verdict: str,
         run_id: str,
-        run_digest: str | None,
-        event_head: str | None,
+        run_digest: str | None = None,
+        event_head: str | None = None,
+        fencing_token: str | None = None,
+        ownership_ledger: Any | None = None,
     ) -> ForecastSettlement:
         """Record whether a forecast was confirmed or falsified by reality.
 
@@ -624,7 +683,40 @@ class ExperienceLedger:
         before new evidence cannot be settled against that new evidence. An
         unknown actual verdict is refused because it is not a determinate
         outcome. Settling the same run twice is idempotent.
+
+        Ownership
+        ---------
+        Settling is a write into shared evidence, so the caller must prove it
+        still owns the fingerprint it is writing about:
+
+        ``fencing_token``
+            The token handed out by the ownership ledger when the run acquired
+            the fingerprint. It is checked against the run attempting to settle.
+        ``ownership_ledger``
+            Any object exposing ``validate_token(run_id, token) -> bool``. It is
+            typed as ``Any`` on purpose: the experience ledger must not import
+            the ownership ledgers, or the two components would depend on each
+            other. Duck typing keeps the dependency pointing one way, and the
+            real ``OwnershipLedger`` is passed in by the caller at runtime.
+
+        Behaviour:
+
+        * Both supplied -> the token is validated. A rejecting ledger raises
+          ``OwnershipViolationError`` and nothing is written.
+        * Neither supplied -> permitted for backward compatibility, but a
+          WARNING is logged. This is the pre-ownership call path: existing
+          callers keep working, and the warning surfaces every unverified
+          settlement so it can be tightened later.
+        * Only one supplied -> indistinguishable from "not verified", so it is
+          treated as the unverified case: a WARNING is logged and the
+          settlement is allowed. A token with no ledger cannot be checked, and
+          a ledger with no token has nothing to check.
         """
+        _verify_ownership(
+            run_id=run_id,
+            fencing_token=fencing_token,
+            ownership_ledger=ownership_ledger,
+        )
         if actual_verdict not in _KINDS:
             raise ValueError(f"actual verdict {actual_verdict!r} is not settled")
         _validate_text(run_id, "run_id")
