@@ -970,3 +970,168 @@ def project_state(
         conflict_count=conflict_count,
         data_quality=data_quality,
     )
+
+
+@dataclass(frozen=True)
+class ExperienceTrend:
+    """Time-series trend analysis of experience history."""
+    
+    fingerprint: str
+    window_size: int
+    
+    # Trend direction
+    trend_direction: str  # "improving" / "declining" / "stable" / "volatile" / "insufficient-data"
+    trend_strength: float  # 0.0-1.0
+    
+    # Statistics
+    mean_success_rate: float
+    variance: float
+    recent_volatility: float
+    
+    # Anomaly detection
+    has_degradation: bool
+    has_breakthrough: bool
+    change_points: tuple[int, ...]
+    
+    # Prediction
+    predicted_next_success_rate: float
+
+
+def analyze_trend(
+    ledger: ExperienceLedger,
+    fingerprint: str,
+    *,
+    window_size: int = 20,
+    min_samples: int = 5,
+) -> ExperienceTrend:
+    """Analyze time-series trend of experience history.
+    
+    Uses linear regression to detect trend direction and strength.
+    Detects change points using simple threshold method.
+    """
+    _validate_text(fingerprint, "fingerprint")
+    
+    # Get settlements history
+    settlements_path = Path(str(ledger._path) + ".settlements.jsonl")
+    if not settlements_path.exists():
+        # No history
+        return ExperienceTrend(
+            fingerprint=fingerprint,
+            window_size=window_size,
+            trend_direction="insufficient-data",
+            trend_strength=0.0,
+            mean_success_rate=0.0,
+            variance=0.0,
+            recent_volatility=0.0,
+            has_degradation=False,
+            has_breakthrough=False,
+            change_points=(),
+            predicted_next_success_rate=0.0,
+        )
+    
+    # Load settlements
+    with open(settlements_path, 'r') as f:
+        all_settlements = [json.loads(line) for line in f]
+    
+    # Filter by fingerprint
+    settlements = [s for s in all_settlements if s.get("fingerprint") == fingerprint]
+    
+    if len(settlements) < min_samples:
+        return ExperienceTrend(
+            fingerprint=fingerprint,
+            window_size=window_size,
+            trend_direction="insufficient-data",
+            trend_strength=0.0,
+            mean_success_rate=0.0,
+            variance=0.0,
+            recent_volatility=0.0,
+            has_degradation=False,
+            has_breakthrough=False,
+            change_points=(),
+            predicted_next_success_rate=0.0,
+        )
+    
+    # Convert to success/failure time series
+    outcomes = [1.0 if s.get("actual_verdict") == "verified" else 0.0 for s in settlements]
+    n = len(outcomes)
+    
+    # Compute statistics
+    mean_rate = sum(outcomes) / n
+    variance = sum((x - mean_rate) ** 2 for x in outcomes) / n
+    
+    # Linear regression for trend
+    # y = mx + b, where x is index, y is outcome
+    x_mean = (n - 1) / 2.0
+    y_mean = mean_rate
+    
+    numerator = sum((i - x_mean) * (outcomes[i] - y_mean) for i in range(n))
+    denominator = sum((i - x_mean) ** 2 for i in range(n))
+    
+    if denominator > 0:
+        slope = numerator / denominator
+        intercept = y_mean - slope * x_mean
+    else:
+        slope = 0.0
+        intercept = y_mean
+    
+    # Trend direction and strength
+    if abs(slope) < 0.01:
+        direction = "stable"
+        strength = 0.0
+    elif slope > 0:
+        direction = "improving"
+        strength = min(1.0, abs(slope) * n)  # Scale by number of samples
+    else:
+        direction = "declining"
+        strength = min(1.0, abs(slope) * n)
+    
+    # Volatility (recent window)
+    recent_window = min(5, n)
+    recent_outcomes = outcomes[-recent_window:]
+    recent_mean = sum(recent_outcomes) / recent_window
+    recent_volatility = (sum((x - recent_mean) ** 2 for x in recent_outcomes) / recent_window) ** 0.5
+    
+    # Override direction if highly volatile
+    if recent_volatility > 0.4 and variance > 0.2:
+        direction = "volatile"
+    
+    # Degradation detection (declining trend or recent failures after success)
+    has_degradation = False
+    if direction == "declining":
+        has_degradation = True
+    elif n >= 6:
+        first_half_rate = sum(outcomes[:n//2]) / (n//2)
+        second_half_rate = sum(outcomes[n//2:]) / (n - n//2)
+        if first_half_rate > 0.6 and second_half_rate < 0.4:
+            has_degradation = True
+    
+    # Breakthrough detection (improving trend)
+    has_breakthrough = False
+    if direction == "improving" and strength > 0.5:
+        has_breakthrough = True
+    
+    # Change point detection (simple threshold)
+    change_points = []
+    for i in range(1, n - 1):
+        before_rate = sum(outcomes[:i]) / i
+        after_rate = sum(outcomes[i:]) / (n - i)
+        if abs(before_rate - after_rate) > 0.5:  # Significant change
+            change_points.append(i)
+    
+    # Prediction (linear extrapolation)
+    predicted = slope * n + intercept
+    predicted_next_success_rate = max(0.0, min(1.0, predicted))
+    
+    return ExperienceTrend(
+        fingerprint=fingerprint,
+        window_size=window_size,
+        trend_direction=direction,
+        trend_strength=strength,
+        mean_success_rate=mean_rate,
+        variance=variance,
+        recent_volatility=recent_volatility,
+        has_degradation=has_degradation,
+        has_breakthrough=has_breakthrough,
+        change_points=tuple(change_points),
+        predicted_next_success_rate=predicted_next_success_rate,
+    )
