@@ -344,13 +344,33 @@ class OwnershipLedger:
 
         self._append_and_verify(lost, records, expected_gen=current.generation)
 
-    def list_all(self) -> list[RunOwnership]:
-        """Return the latest record for every run_id (for Reaper scans)."""
+    def list_all(self, states: list[str] | None = None) -> list[RunOwnership]:
+        """Return the latest record for every run_id (for Reaper scans).
+        
+        Args:
+            states: Optional list of states to filter by (e.g. ["active"]).
+                    If None, returns all states.
+                    Default None for backward compatibility.
+        
+        Returns:
+            List of RunOwnership records, one per run_id, optionally filtered by state.
+        
+        Performance note:
+            For Reaper scans, pass states=["active"] to avoid processing
+            already-lost or released leases.
+        """
         records = self._read_all()
         latest: dict[str, RunOwnership] = {}
         for rec in records:
             latest[rec.run_id] = rec
-        return list(latest.values())
+        
+        result = list(latest.values())
+        
+        # Filter by states if specified
+        if states is not None:
+            result = [r for r in result if r.state in states]
+        
+        return result
 
     # ── Internal helpers ────────────────────────────────────────────────
 
