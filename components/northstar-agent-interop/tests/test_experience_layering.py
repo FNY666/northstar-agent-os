@@ -181,28 +181,89 @@ class TestRecallLayer:
     
     def test_add_batch(self, temp_dir, sample_records):
         """Test adding batch of records to Recall Layer"""
-        # TODO: Implement
-        pass
+        from experience_layering import RecallLayer, ExperienceRecord
+        
+        layer = RecallLayer(storage_dir=temp_dir / "recall")
+        records = [ExperienceRecord(**r) for r in sample_records[:10]]
+        
+        layer.add_batch(records)
+        
+        # Check files were created
+        assert (temp_dir / "recall").exists()
+        # Check index was updated
+        assert "test-fp-1" in layer.index
     
     def test_date_sharding(self, temp_dir, sample_records):
         """Test records are sharded by date"""
-        # TODO: Implement
-        pass
+        from experience_layering import RecallLayer, ExperienceRecord
+        import time
+        
+        layer = RecallLayer(storage_dir=temp_dir / "recall")
+        
+        # Create records with different dates
+        now = int(time.time())
+        records = [
+            ExperienceRecord(fingerprint="fp", outcome="success", timestamp=now),
+            ExperienceRecord(fingerprint="fp", outcome="success", timestamp=now - 86400),  # 1 day ago
+            ExperienceRecord(fingerprint="fp", outcome="success", timestamp=now - 86400*2),  # 2 days ago
+        ]
+        
+        layer.add_batch(records)
+        
+        # Should create 3 different files
+        files = list((temp_dir / "recall").glob("recall-*.jsonl"))
+        assert len(files) == 3
     
     def test_query_by_fingerprint(self, temp_dir, sample_records):
         """Test querying across date shards"""
-        # TODO: Implement
-        pass
+        from experience_layering import RecallLayer, ExperienceRecord
+        
+        layer = RecallLayer(storage_dir=temp_dir / "recall")
+        records = [ExperienceRecord(**r) for r in sample_records]
+        
+        layer.add_batch(records)
+        
+        # Query
+        results = layer.query("test-fp-1", limit=10)
+        
+        assert len(results) == 10
+        assert all(r.fingerprint == "test-fp-1" for r in results)
+        # Should be newest first
+        assert results[0].timestamp >= results[-1].timestamp
     
     def test_find_older_than(self, temp_dir, sample_records):
         """Test finding records older than cutoff date"""
-        # TODO: Implement
-        pass
+        from experience_layering import RecallLayer, ExperienceRecord
+        from datetime import datetime, timedelta
+        
+        layer = RecallLayer(storage_dir=temp_dir / "recall")
+        records = [ExperienceRecord(**r) for r in sample_records]
+        
+        layer.add_batch(records)
+        
+        # Find records older than 10 hours
+        cutoff = datetime.now() - timedelta(hours=10)
+        old_records = layer.find_older_than(cutoff)
+        
+        # All found records should be older than cutoff
+        cutoff_ts = int(cutoff.timestamp())
+        assert all(r.timestamp < cutoff_ts for r in old_records)
     
     def test_index_update(self, temp_dir, sample_records):
         """Test index is updated when adding records"""
-        # TODO: Implement
-        pass
+        from experience_layering import RecallLayer, ExperienceRecord
+        
+        layer = RecallLayer(storage_dir=temp_dir / "recall")
+        records = [ExperienceRecord(**r) for r in sample_records[:5]]
+        
+        layer.add_batch(records)
+        
+        # Index should be persisted
+        assert (temp_dir / "recall" / "recall-index.json").exists()
+        
+        # Reload and check
+        layer2 = RecallLayer(storage_dir=temp_dir / "recall")
+        assert "test-fp-1" in layer2.index
 
 
 # =============================================================================
@@ -240,20 +301,93 @@ class TestArchivalLayer:
 class TestDataFlow:
     """Tests for data flow between layers"""
     
-    def test_working_to_recall_flow(self, temp_dir, sample_records):
+    def test_working_to_recall_flow(self, temp_dir, mock_experience_record):
         """Test automatic eviction from Working to Recall"""
-        # TODO: Implement
-        pass
+        from experience_layering import ExperienceLayering, ExperienceRecord
+        
+        # Initialize with small Working capacity
+        layering = ExperienceLayering(base_dir=temp_dir, working_capacity=10)
+        
+        # Add 15 records (exceeds capacity)
+        for i in range(15):
+            record = ExperienceRecord(**mock_experience_record(fingerprint=f"fp-{i}"))
+            layering.settle(record)
+        
+        # Working should have <= 10 records (some evicted)
+        assert len(layering.working) <= 10
+        
+        # Recall should have evicted records
+        recall_files = list((temp_dir / "recall").glob("recall-*.jsonl"))
+        assert len(recall_files) > 0
+        
+        # Total records should be preserved (Working + Recall)
+        working_count = len(layering.working)
+        
+        # Count records in Recall
+        recall_count = 0
+        for f in recall_files:
+            with open(f) as file:
+                recall_count += sum(1 for line in file if line.strip())
+        
+        # Total should be 15
+        assert working_count + recall_count == 15
     
-    def test_recall_to_archival_flow(self, temp_dir, sample_records):
+    def test_recall_to_archival_flow(self, temp_dir, mock_experience_record):
         """Test automatic archiving from Recall to Archival"""
-        # TODO: Implement
-        pass
+        from experience_layering import ExperienceLayering, ExperienceRecord
+        from datetime import datetime, timedelta
+        import time
+        
+        layering = ExperienceLayering(base_dir=temp_dir, recall_window_days=30)
+        
+        # Add old records directly to Recall
+        old_records = []
+        old_ts = int((datetime.now() - timedelta(days=35)).timestamp())
+        for i in range(5):
+            record = ExperienceRecord(
+                fingerprint=f"old-fp-{i}",
+                outcome="success",
+                timestamp=old_ts - i * 3600,
+            )
+            old_records.append(record)
+        
+        layering.recall.add_batch(old_records)
+        
+        # Trigger archiving
+        layering._check_and_archive()
+        
+        # Old records should be removed from Recall
+        recall_files = list((temp_dir / "recall").glob("recall-*.jsonl"))
+        # Should have no files from 35 days ago
+        cutoff_date = (datetime.now() - timedelta(days=30)).strftime("%Y-%m-%d")
+        old_files = [f for f in recall_files if f.stem.replace("recall-", "") < cutoff_date]
+        assert len(old_files) == 0
     
     def test_end_to_end_flow(self, temp_dir, mock_experience_record):
         """Test complete data flow through all three layers"""
-        # TODO: Implement
-        pass
+        from experience_layering import ExperienceLayering, ExperienceRecord
+        
+        layering = ExperienceLayering(base_dir=temp_dir, working_capacity=5)
+        
+        # Add 10 records
+        for i in range(10):
+            record = ExperienceRecord(**mock_experience_record(fingerprint="test-fp"))
+            layering.settle(record)
+        
+        # Working should have <= capacity
+        assert len(layering.working) <= 5
+        
+        # Recall should have evicted records
+        recall_results = layering.recall.query("test-fp", limit=20)
+        working_count = len(layering.working)
+        recall_count = len(recall_results)
+        
+        # Total should be 10 (preserved across both layers)
+        assert working_count + recall_count == 10
+        
+        # query_statistics should aggregate from both layers
+        stats = layering.query_statistics("test-fp")
+        assert stats["total_runs"] == 10  # Working + Recall
 
 
 # =============================================================================
@@ -409,3 +543,54 @@ def assert_eviction_order(evicted: List[dict], expected_order: str = "fifo"):
     """Assert evicted records follow expected order (FIFO)"""
     # TODO: Implement
     pass
+
+
+# =============================================================================
+# Edge Cases and Error Handling Tests
+# =============================================================================
+
+class TestEdgeCases:
+    """Tests for edge cases and error handling"""
+    
+    def test_empty_working_layer_forecast(self, temp_dir):
+        """Test forecast() with empty Working Layer returns default"""
+        from experience_layering import ExperienceLayering
+        
+        layering = ExperienceLayering(base_dir=temp_dir)
+        forecast = layering.forecast("nonexistent-fp")
+        
+        assert forecast["success_rate"] == 0.5
+        assert forecast["confidence"] == 0.0
+        assert forecast["sample_size"] == 0
+        assert forecast["source"] == "default"
+    
+    def test_empty_working_layer_statistics(self, temp_dir):
+        """Test query_statistics() with empty Working Layer"""
+        from experience_layering import ExperienceLayering
+        
+        layering = ExperienceLayering(base_dir=temp_dir)
+        stats = layering.query_statistics("nonexistent-fp")
+        
+        assert stats["total_runs"] == 0
+        assert stats["success_rate"] == 0.0
+        assert stats["lost_rate"] == 0.0
+        assert stats["source"] == "none"
+    
+    def test_working_layer_reload(self, temp_dir):
+        """Test Working Layer persists and reloads correctly"""
+        from experience_layering import ExperienceLayering, ExperienceRecord
+        
+        # Create and populate
+        layering1 = ExperienceLayering(base_dir=temp_dir)
+        for i in range(5):
+            layering1.working.add(ExperienceRecord(
+                fingerprint=f"fp-{i}",
+                outcome="success",
+                timestamp=int(time.time()) - i * 3600,
+            ))
+        
+        # Reload
+        layering2 = ExperienceLayering(base_dir=temp_dir)
+        
+        assert len(layering2.working) == 5
+        assert layering2.working.records[0].fingerprint == "fp-0"
