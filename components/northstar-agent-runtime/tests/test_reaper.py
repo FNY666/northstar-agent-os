@@ -221,6 +221,120 @@ class TestConcurrency:
 
 
 # ============================================================
+# 测试：错误处理
+# ============================================================
+
+class TestErrorHandling:
+    """测试错误处理场景"""
+    
+    def test_mark_lost_nonexistent_run(self, reaper):
+        """标记不存在的 run 应该报错"""
+        with pytest.raises(Exception):  # OwnershipError
+            reaper.mark_lost("nonexistent-run", "test")
+    
+    def test_scan_with_negative_grace_period(self, reaper, ownership_ledger):
+        """负数 grace_period 应该正常工作（视为 0）"""
+        ownership_ledger.acquire("run-1", "owner-1", ttl=1)
+        time.sleep(2)
+        
+        # 负数 grace_period 不应该崩溃
+        stale = reaper.scan_stale_leases(grace_period=-10)
+        assert len(stale) == 1
+    
+    def test_reap_with_custom_grace_period(self, reaper, ownership_ledger):
+        """自定义 grace_period 应该覆盖默认值"""
+        ownership_ledger.acquire("run-1", "owner-1", ttl=1)
+        time.sleep(1.2)
+        
+        # 默认 60 秒不会标记
+        result1 = reaper.reap()
+        assert result1.marked_lost == 0
+        assert result1.grace_period == 60
+        
+        # 自定义 0 秒会标记
+        result2 = reaper.reap(grace_period=0)
+        assert result2.marked_lost == 1
+        assert result2.grace_period == 0
+
+
+# ============================================================
+# 测试：监控指标（Phase 2）
+# ============================================================
+
+class TestMetrics:
+    """测试监控指标（Phase 2）"""
+    
+    def test_reap_writes_metrics(self, temp_dir, ownership_ledger):
+        """reap 应该写入监控指标到文件"""
+        from reaper import Reaper
+        
+        metrics_path = temp_dir / "reaper-metrics.json"
+        reaper = Reaper(ownership_ledger, metrics_path=metrics_path)
+        
+        # 创建并标记一个 lease
+        ownership_ledger.acquire("run-1", "owner-1", ttl=1)
+        time.sleep(2)
+        
+        # 执行 reap
+        result = reaper.reap(grace_period=0)
+        
+        # 验证 metrics 文件存在
+        assert metrics_path.exists()
+        
+        # 验证 metrics 内容
+        import json
+        with open(metrics_path) as f:
+            metrics = json.load(f)
+        
+        assert metrics["total_scanned"] == 1
+        assert metrics["total_marked_lost"] == 1
+        assert metrics["grace_period_seconds"] == 0
+        assert "scan_duration_ms" in metrics
+        assert "mark_duration_ms" in metrics
+        assert "total_duration_ms" in metrics
+        assert metrics["active_leases"] == 0
+        assert metrics["lost_leases"] == 1
+    
+    def test_reap_without_metrics_path(self, ownership_ledger):
+        """没有 metrics_path 时应该正常运行（不写入）"""
+        from reaper import Reaper
+        
+        reaper = Reaper(ownership_ledger, metrics_path=None)
+        ownership_ledger.acquire("run-1", "owner-1", ttl=1)
+        time.sleep(2)
+        
+        # 应该正常运行不报错
+        result = reaper.reap(grace_period=0)
+        assert result.marked_lost == 1
+    
+    def test_metrics_performance_tracking(self, temp_dir, ownership_ledger):
+        """监控指标应该包含性能数据"""
+        from reaper import Reaper
+        
+        metrics_path = temp_dir / "metrics.json"
+        reaper = Reaper(ownership_ledger, metrics_path=metrics_path)
+        
+        # 创建多个 lease
+        for i in range(5):
+            ownership_ledger.acquire(f"run-{i}", f"owner-{i}", ttl=1)
+        time.sleep(2)
+        
+        # 执行 reap
+        reaper.reap(grace_period=0)
+        
+        # 验证性能指标
+        import json
+        with open(metrics_path) as f:
+            metrics = json.load(f)
+        
+        # 应该有合理的性能数据
+        assert metrics["scan_duration_ms"] >= 0
+        assert metrics["mark_duration_ms"] >= 0
+        assert metrics["total_duration_ms"] >= metrics["scan_duration_ms"]
+        assert metrics["total_duration_ms"] >= metrics["mark_duration_ms"]
+
+
+# ============================================================
 # 运行测试
 # ============================================================
 
