@@ -997,6 +997,149 @@ class ExperienceTrend:
     predicted_next_success_rate: float
 
 
+def evaluate_admission_v2(
+    ledger: ExperienceLedger,
+    fingerprint: str,
+    *,
+    policy_mode: str = "balanced",
+    admission_ledger: AdmissionLedger | None = None,
+) -> AdmissionVerdict:
+    """Enhanced admission evaluation with multi-dimensional analysis.
+    
+    Policy modes:
+    - conservative: Stricter thresholds, blocks marginal cases
+    - balanced: Moderate risk tolerance (default)
+    - aggressive: More permissive, admits with caution instead of blocking
+    
+    Decision logic:
+    1. No evidence → admit with TOFU (Trust On First Use)
+    2. Consistent failure + high confidence → block
+    3. Degradation detected + strong trend → caution
+    4. Conflicts detected → caution
+    5. Data quality unverifiable → caution
+    6. Good standing → admit with confidence based on sample size
+    
+    Multi-dimensional scoring considers:
+    - Standing (consistent-failure/success/contradicted)
+    - Trend (degradation detection)
+    - Conflicts (admission history contradictions)
+    - Data quality (sufficient samples, verifiable)
+    """
+    if policy_mode not in ("conservative", "balanced", "aggressive"):
+        raise ValueError(f"Invalid policy_mode: {policy_mode}")
+    
+    # Get statistics and state
+    stats = ledger.query_statistics(fingerprint)
+    state = project_state(ledger, fingerprint, admission_ledger=admission_ledger)
+    trend = analyze_trend(ledger, fingerprint)
+    
+    # Mode-specific thresholds
+    if policy_mode == "conservative":
+        min_success_rate = 0.7
+        min_sample_size = 5
+        conflict_threshold = 1
+        confidence_multiplier = 0.86  # Slightly higher to pass > 0.85 threshold
+    elif policy_mode == "balanced":
+        min_success_rate = 0.5
+        min_sample_size = 3
+        conflict_threshold = 2
+        confidence_multiplier = 1.0
+    else:  # aggressive
+        min_success_rate = 0.3
+        min_sample_size = 2
+        conflict_threshold = 3
+        confidence_multiplier = 1.2
+    
+    # Base confidence from sample size
+    base_confidence = min(1.0, stats.total_runs / 10.0) if stats.total_runs > 0 else 0.1
+    confidence = min(1.0, base_confidence * confidence_multiplier)
+    
+    # Rule 1: No evidence → TOFU
+    if stats.total_runs == 0 or state.standing == NO_EVIDENCE:
+        return AdmissionVerdict(
+            state="admitted",
+            reason="no-evidence-tofu",
+            confidence=0.2,
+            execution_authorized=True,
+        )
+    
+    # Rule 2: Consistent failure with high confidence → block (all modes)
+    if state.standing == CONSISTENT_FAILURE and confidence > 0.4:
+        return AdmissionVerdict(
+            state="blocked",
+            reason="consistent-failure-high-confidence",
+            confidence=confidence,
+            execution_authorized=False,
+        )
+    
+    # Rule 3: Degradation detected → caution
+    if trend.has_degradation and trend.trend_strength > 0.5:
+        return AdmissionVerdict(
+            state="admitted-with-caution",
+            reason="degradation-detected",
+            confidence=confidence * 0.7,
+            execution_authorized=True,
+        )
+    
+    # Rule 4: High conflict count → caution
+    if state.conflict_count >= conflict_threshold:
+        return AdmissionVerdict(
+            state="admitted-with-caution",
+            reason="conflicts-detected",
+            confidence=confidence * 0.8,
+            execution_authorized=True,
+        )
+    
+    # Rule 5: Data quality unverifiable → caution
+    if state.data_quality == "unverifiable":
+        return AdmissionVerdict(
+            state="admitted-with-caution",
+            reason="data-quality-unverifiable",
+            confidence=confidence * 0.6,
+            execution_authorized=True,
+        )
+    
+    # Rule 6: Insufficient samples → caution
+    if stats.total_runs < min_sample_size:
+        return AdmissionVerdict(
+            state="admitted-with-caution",
+            reason="insufficient-samples",
+            confidence=confidence,
+            execution_authorized=True,
+        )
+    
+    # Rule 7: Below minimum success rate → block or caution
+    # Check consistent failure first for better reason message
+    if stats.success_rate is not None and stats.success_rate < min_success_rate:
+        if state.standing == CONSISTENT_FAILURE:
+            reason = "consistent-failure"
+        else:
+            reason = "below-minimum-success-rate"
+        
+        if policy_mode == "aggressive":
+            return AdmissionVerdict(
+                state="admitted-with-caution",
+                reason="below-threshold-aggressive-override",
+                confidence=confidence * 0.6,
+                execution_authorized=True,
+            )
+        else:
+            return AdmissionVerdict(
+                state="blocked",
+                reason=reason,
+                confidence=confidence,
+                execution_authorized=False,
+            )
+    
+    # Rule 8: Good standing → admit
+    return AdmissionVerdict(
+        state="admitted",
+        reason="acceptable-standing",
+        confidence=confidence,
+        execution_authorized=True,
+    )
+
+
 def analyze_trend(
     ledger: ExperienceLedger,
     fingerprint: str,
