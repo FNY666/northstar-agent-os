@@ -1749,6 +1749,29 @@ class AgentRuntime:
         
         return admission
 
+    def query_admission_history_by_goal(
+        self,
+        ledger: Any,
+        *,
+        goal: Any,
+        session_id: str | None = None,
+        since: int | None = None,
+        until: int | None = None,
+    ) -> list:
+        """
+        Query admission history by goal (convenience wrapper).
+        
+        Derives fingerprint from goal and queries ledger.
+        """
+        from experience_integration import derive_fingerprint
+        fingerprint = derive_fingerprint(goal)
+        return ledger.query_by_fingerprint(
+            fingerprint,
+            session_id=session_id,
+            since=since,
+            until=until,
+        )
+
     def continuation_objective_history(
         self, store: AutonomyCheckpointStore, *, expected_head_digest: str | None = None
     ) -> ContinuationHistory:

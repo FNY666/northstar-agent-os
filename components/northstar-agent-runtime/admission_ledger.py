@@ -36,6 +36,7 @@ class AdmissionRecord:
     state: str
     observed_at: int
     checkpoint_digest: str = ""  # Added for conflict detection
+    goal_fingerprint: str = ""  # Added for fingerprint-based queries
     record_digest: str = ""
     
     def to_dict(self) -> dict[str, Any]:
@@ -46,6 +47,7 @@ class AdmissionRecord:
             "state": self.state,
             "observed_at": self.observed_at,
             "checkpoint_digest": self.checkpoint_digest,
+            "goal_fingerprint": self.goal_fingerprint,
             "record_digest": self.record_digest,
         }
     
@@ -62,6 +64,9 @@ class AdmissionRecord:
         # Only include checkpoint_digest if present (backward compatible)
         if self.checkpoint_digest:
             draft["checkpoint_digest"] = self.checkpoint_digest
+        # Only include goal_fingerprint if present (backward compatible)
+        if self.goal_fingerprint:
+            draft["goal_fingerprint"] = self.goal_fingerprint
         return sha256(json.dumps(draft, sort_keys=True).encode()).hexdigest()
 
 
@@ -76,6 +81,7 @@ class AdmissionLedger:
         session_id: str,
         admission: Any,
         observed_at: int,
+        goal_fingerprint: str = "",
     ) -> AdmissionRecord:
         """
         Persist an admission decision.
@@ -87,6 +93,8 @@ class AdmissionLedger:
             raise AdmissionLedgerError("session_id invalid")
         if not isinstance(observed_at, int) or observed_at < 0:
             raise AdmissionLedgerError("observed_at invalid")
+        if goal_fingerprint and (not isinstance(goal_fingerprint, str) or len(goal_fingerprint) != 64):
+            raise AdmissionLedgerError("goal_fingerprint invalid")
         
         # Read existing records to determine next sequence
         existing = self._read_all()
@@ -100,6 +108,7 @@ class AdmissionLedger:
             state=admission.state,
             observed_at=observed_at,
             checkpoint_digest=admission.checkpoint_digest,
+            goal_fingerprint=goal_fingerprint,
         )
         
         # Finalize with computed digest
@@ -110,6 +119,7 @@ class AdmissionLedger:
             record.state,
             record.observed_at,
             record.checkpoint_digest,  # Must preserve checkpoint_digest
+            record.goal_fingerprint,  # Must preserve goal_fingerprint
             record.computed_digest,
         )
         
@@ -147,6 +157,50 @@ class AdmissionLedger:
         # Optionally filter by checkpoint_digest (requires parsing admission)
         # For now, just return session matches
         # TODO: add checkpoint_digest filter if needed
+        
+        return matches
+    
+    def query_by_fingerprint(
+        self,
+        fingerprint: str,
+        *,
+        session_id: str | None = None,
+        since: int | None = None,
+        until: int | None = None,
+    ) -> list[AdmissionRecord]:
+        """
+        Query admission history by goal fingerprint.
+        
+        Args:
+            fingerprint: SHA256 hex digest of goal (64 chars)
+            session_id: Optional session filter
+            since: Optional minimum observed_at timestamp (inclusive)
+            until: Optional maximum observed_at timestamp (inclusive)
+        
+        Returns:
+            Chronologically ordered list of admission records.
+        """
+        # Validate fingerprint format (accept any non-empty string)
+        if not isinstance(fingerprint, str) or not fingerprint:
+            raise ValueError("fingerprint must be non-empty string")
+        
+        records = self._read_all()
+        
+        # Filter by fingerprint
+        matches = [r for r in records if r.goal_fingerprint == fingerprint]
+        
+        # Optional session filter
+        if session_id is not None:
+            matches = [r for r in matches if r.session_id == session_id]
+        
+        # Optional time window filters
+        if since is not None:
+            matches = [r for r in matches if r.observed_at >= since]
+        if until is not None:
+            matches = [r for r in matches if r.observed_at <= until]
+        
+        # Sort by observed_at (chronological order)
+        matches.sort(key=lambda r: r.observed_at)
         
         return matches
     
@@ -245,6 +299,7 @@ class AdmissionLedger:
                         state=data.get("state"),
                         observed_at=data.get("observed_at"),
                         checkpoint_digest=data.get("checkpoint_digest", ""),  # Backward compatible
+                        goal_fingerprint=data.get("goal_fingerprint", ""),  # Backward compatible
                         record_digest=data.get("record_digest"),
                     )
                     
