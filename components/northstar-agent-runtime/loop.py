@@ -1715,6 +1715,39 @@ class AgentRuntime:
         )
         
         return (admission, exp_state)
+    
+    def simulate_admission(
+        self,
+        store: AutonomyCheckpointStore,
+        *,
+        goal: Any,
+        policy: ContinuationPolicy,
+        now: int | None = None,
+        expected_record_digest: str | None = None,
+        expected_head_digest: str | None = None,
+    ) -> ContinuationAdmission:
+        """
+        Simulate admission decision without recording to ledger.
+        
+        Identical logic to admit_persisted_continuation_checkpoint, but
+        never writes to admission_ledger. Useful for policy testing,
+        debugging, and "what-if" analysis.
+        
+        Returns:
+            ContinuationAdmission: Admission decision (no side effects)
+        """
+        # Use same evaluation logic as real admit, but without ledger
+        admission = self.admit_persisted_continuation_checkpoint(
+            store,
+            goal=goal,
+            now=now if now is not None else int(time.time()),
+            policy=policy,
+            expected_record_digest=expected_record_digest,
+            expected_head_digest=expected_head_digest,
+            admission_ledger=None,  # Never record
+        )
+        
+        return admission
 
     def continuation_objective_history(
         self, store: AutonomyCheckpointStore, *, expected_head_digest: str | None = None
