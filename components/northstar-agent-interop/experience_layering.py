@@ -578,6 +578,7 @@ class ExperienceLayering:
         base_dir: Path,
         working_capacity: int = 100,
         recall_window_days: int = 30,
+        admission_callback: Optional[callable] = None,
     ):
         """
         Initialize Experience Layering.
@@ -586,6 +587,8 @@ class ExperienceLayering:
             base_dir: Base directory for storage
             working_capacity: Working Layer capacity
             recall_window_days: Recall Layer time window
+            admission_callback: Optional callback for admission reevaluation
+                               Called with (fingerprint, lost_record, stats)
         """
         self.base_dir = base_dir
         self.base_dir.mkdir(parents=True, exist_ok=True)
@@ -603,6 +606,8 @@ class ExperienceLayering:
         self.archival = ArchivalLayer(
             storage_path=base_dir / "archival.jsonl.gz",
         )
+        
+        self.admission_callback = admission_callback
     
     def forecast(self, fingerprint: str) -> dict:
         """
@@ -742,12 +747,8 @@ class ExperienceLayering:
         self.working.add(record)
         
         # 4. Trigger admission policy reevaluation
-        # TODO Phase 2: Integrate with AdmissionPolicy
-        # Implementation plan:
-        # - Call admission_policy.reevaluate(fingerprint)
-        # - Update admission decision based on new lost_rate
-        # - Trigger Reaper recovery decision if needed
-        # Current: Stub implementation (no-op)
+        # Integrate with AdmissionLedger (via callback if provided)
+        self._trigger_admission_reevaluation(fingerprint, record)
         pass
     
     def settle(self, record: ExperienceRecord) -> None:
@@ -785,3 +786,31 @@ class ExperienceLayering:
         # 
         # For now, old records are removed from Recall
         # Phase 3 will implement Archival Layer storage
+    
+    def _trigger_admission_reevaluation(
+        self,
+        fingerprint: str,
+        lost_record: ExperienceRecord,
+    ) -> None:
+        """
+        Trigger admission policy reevaluation after recording a lost event.
+        
+        Args:
+            fingerprint: Goal fingerprint
+            lost_record: The lost event record
+        """
+        if self.admission_callback is None:
+            # No callback configured, skip
+            return
+        
+        # Query current statistics (including the new lost event)
+        stats = self.query_statistics(fingerprint)
+        
+        # Call the admission callback
+        # This allows Reaper/AdmissionLedger to make decisions based on updated stats
+        try:
+            self.admission_callback(fingerprint, lost_record, stats)
+        except Exception as e:
+            # Log but don't fail - admission reevaluation is advisory
+            import sys
+            print(f"Warning: admission callback failed: {e}", file=sys.stderr)

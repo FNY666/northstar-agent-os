@@ -594,3 +594,185 @@ class TestEdgeCases:
         
         assert len(layering2.working) == 5
         assert layering2.working.records[0].fingerprint == "fp-0"
+
+
+# =============================================================================
+# AdmissionLedger Integration Tests
+# =============================================================================
+
+class TestAdmissionIntegration:
+    """Tests for AdmissionLedger integration"""
+    
+    def test_admission_callback_triggered(self, temp_dir):
+        """Test admission callback is triggered on record_lost"""
+        from experience_layering import ExperienceLayering
+        
+        # Track callback invocations
+        callback_calls = []
+        
+        def admission_callback(fingerprint, lost_record, stats):
+            callback_calls.append({
+                "fingerprint": fingerprint,
+                "lost_record": lost_record,
+                "stats": stats,
+            })
+        
+        # Initialize with callback
+        layering = ExperienceLayering(
+            base_dir=temp_dir,
+            admission_callback=admission_callback,
+        )
+        
+        # Record a lost event
+        layering.record_lost("test-fp", "lease_expired")
+        
+        # Callback should have been triggered
+        assert len(callback_calls) == 1
+        assert callback_calls[0]["fingerprint"] == "test-fp"
+        assert callback_calls[0]["lost_record"].outcome == "lost"
+        assert callback_calls[0]["stats"]["lost_rate"] == 1.0
+    
+    def test_admission_callback_with_statistics(self, temp_dir, mock_experience_record):
+        """Test callback receives accurate statistics"""
+        from experience_layering import ExperienceLayering, ExperienceRecord
+        
+        callback_calls = []
+        
+        def admission_callback(fingerprint, lost_record, stats):
+            callback_calls.append(stats)
+        
+        layering = ExperienceLayering(
+            base_dir=temp_dir,
+            admission_callback=admission_callback,
+        )
+        
+        # Add some success records first
+        for i in range(5):
+            record = ExperienceRecord(**mock_experience_record(fingerprint="test-fp"))
+            layering.settle(record)
+        
+        # Record a lost event
+        layering.record_lost("test-fp", "lease_expired")
+        
+        # Callback should have accurate stats
+        assert len(callback_calls) == 1
+        stats = callback_calls[0]
+        assert stats["total_runs"] == 6  # 5 success + 1 lost
+        assert stats["success_count"] == 5
+        assert stats["lost_count"] == 1
+        assert abs(stats["lost_rate"] - 1/6) < 0.01
+    
+    def test_no_callback_configured(self, temp_dir):
+        """Test record_lost works without callback"""
+        from experience_layering import ExperienceLayering
+        
+        # Initialize without callback
+        layering = ExperienceLayering(base_dir=temp_dir)
+        
+        # Should not raise error
+        layering.record_lost("test-fp", "lease_expired")
+        
+        # Record should still be added
+        assert len(layering.working) == 1
+    
+    def test_callback_exception_handled(self, temp_dir):
+        """Test callback exceptions don't break record_lost"""
+        from experience_layering import ExperienceLayering
+        
+        def failing_callback(fingerprint, lost_record, stats):
+            raise RuntimeError("Callback failed")
+        
+        layering = ExperienceLayering(
+            base_dir=temp_dir,
+            admission_callback=failing_callback,
+        )
+        
+        # Should not raise, should log warning
+        layering.record_lost("test-fp", "lease_expired")
+        
+        # Record should still be added despite callback failure
+        assert len(layering.working) == 1
+
+
+# =============================================================================
+# Performance and Stress Tests
+# =============================================================================
+
+class TestPerformance:
+    """Performance and stress tests"""
+    
+    def test_large_batch_performance(self, temp_dir, mock_experience_record):
+        """Test performance with large batch of records"""
+        from experience_layering import ExperienceLayering, ExperienceRecord
+        import time
+        
+        layering = ExperienceLayering(base_dir=temp_dir, working_capacity=100)
+        
+        # Add 1000 records
+        start = time.time()
+        for i in range(1000):
+            record = ExperienceRecord(**mock_experience_record(fingerprint=f"fp-{i % 10}"))
+            layering.settle(record)
+        duration = time.time() - start
+        
+        # Should complete in reasonable time (< 5 seconds)
+        assert duration < 5.0
+        
+        # Data should be distributed across layers
+        assert len(layering.working) <= 100
+        
+        # Query should still be fast
+        query_start = time.time()
+        stats = layering.query_statistics("fp-0")
+        query_duration = time.time() - query_start
+        
+        assert query_duration < 0.5  # < 500ms
+        assert stats["total_runs"] > 0
+    
+    def test_concurrent_record_lost(self, temp_dir):
+        """Test multiple record_lost calls don't corrupt data"""
+        from experience_layering import ExperienceLayering
+        
+        layering = ExperienceLayering(base_dir=temp_dir)
+        
+        # Simulate rapid lost events
+        for i in range(50):
+            layering.record_lost(f"fp-{i % 5}", "lease_expired")
+        
+        # All records should be preserved
+        # (Some may be deduplicated if within 60s window)
+        assert len(layering.working) > 0
+        assert len(layering.working) <= 50
+        
+        # Statistics should be consistent
+        for i in range(5):
+            stats = layering.query_statistics(f"fp-{i}")
+            assert stats["lost_count"] >= 1
+    
+    def test_recall_query_performance(self, temp_dir, mock_experience_record):
+        """Test Recall Layer query performance with many shards"""
+        from experience_layering import ExperienceLayering, ExperienceRecord
+        from datetime import datetime, timedelta
+        import time
+        
+        layering = ExperienceLayering(base_dir=temp_dir, working_capacity=10)
+        
+        # Add records spanning 30 days (creating multiple date shards)
+        base_time = int(datetime.now().timestamp())
+        for day in range(30):
+            for i in range(10):
+                ts = base_time - (day * 86400) - (i * 3600)
+                record = ExperienceRecord(
+                    fingerprint="test-fp",
+                    outcome="success",
+                    timestamp=ts,
+                )
+                layering.recall.add_batch([record])
+        
+        # Query should still be fast despite 30 shards
+        query_start = time.time()
+        results = layering.recall.query("test-fp", limit=100)
+        query_duration = time.time() - query_start
+        
+        assert query_duration < 1.0  # < 1 second
+        assert len(results) > 0
