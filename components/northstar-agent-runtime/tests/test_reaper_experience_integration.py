@@ -114,17 +114,16 @@ class TestReaperExperienceIntegration:
         result = reaper.reap(grace_period=0)
         assert result.marked_lost == 1
         
-        # 3. 验证 AdmissionLedger 有记录
-        # TODO: 等待 AdmissionLedger 实际实现后启用
-        # assert len(mock_admission_ledger.records) == 1
-        # record = mock_admission_ledger.records[0]
-        # assert record["admission"]["state"] == "lost-lease-expired"
+        # 3. 验证 AdmissionLedger 有记录（Phase 2 完整集成）
+        assert len(mock_admission_ledger.records) == 1
+        record = mock_admission_ledger.records[0]
+        assert record["admission"]["state"] == "lost-lease-expired"
+        assert record["session_id"] == "owner-1"
         
-        # 4. 验证 Experience 收到通知
-        # TODO: 等待完整集成后启用
-        # assert len(mock_experience.lost_records) == 1
-        # lost = mock_experience.lost_records[0]
-        # assert lost["reason"] == "lease_expired"
+        # 4. 验证 Experience 收到通知（通过 mock_admission_ledger 桥接）
+        assert len(mock_experience.lost_records) == 1
+        lost = mock_experience.lost_records[0]
+        assert lost["reason"] == "lease_expired"
     
     def test_lost_rate_affects_statistics(
         self, reaper, ownership_ledger, mock_experience

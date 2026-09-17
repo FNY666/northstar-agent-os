@@ -235,34 +235,31 @@ class Reaper:
         # 重新查询获取最新状态
         ownership = self.ownership_ledger.query(run_id)
         
-        # 集成 AdmissionLedger（如果配置）
-        # Phase 1: 暂时跳过，等待 Phase 2 完整实现
-        # 
-        # 原因：
-        # 1. AdmissionLedger 和 ContinuationAdmission 尚未完整实现
-        # 2. Phase 1 专注于 Reaper 核心功能（扫描/标记/reap）
-        # 3. 集成测试框架已验证接口正确性
-        # 
-        # Phase 2 实现计划：
-        # ```python
-        # if self.admission_ledger:
-        #     admission = ContinuationAdmission(
-        #         state="lost-lease-expired",
-        #         observed_at=int(time.time()),
-        #         reason=reason,
-        #     )
-        #     self.admission_ledger.record(
-        #         session_id=ownership.owner_id,
-        #         admission=admission,
-        #         observed_at=int(time.time()),
-        #         goal_fingerprint=self._derive_fingerprint(run_id),
-        #     )
-        # ```
-        # 
-        # 集成后流程：
-        # AdmissionLedger.record() → Experience.record_lost() → WorkingLayer
+        # 集成 AdmissionLedger（Phase 2 完整实现）
         if self.admission_ledger:
-            pass  # Phase 2 实现
+            try:
+                # 创建 admission 记录（使用简化结构）
+                admission = {
+                    "state": "lost-lease-expired",
+                    "reason": reason,
+                    "observed_at": int(time.time()),
+                }
+                
+                # 记录到 AdmissionLedger
+                # goal_fingerprint 暂时使用 run_id 的 sha256
+                import hashlib
+                goal_fingerprint = hashlib.sha256(run_id.encode()).hexdigest()
+                
+                self.admission_ledger.record(
+                    session_id=ownership.owner_id,
+                    admission=admission,
+                    observed_at=int(time.time()),
+                    goal_fingerprint=goal_fingerprint,
+                )
+            except Exception as e:
+                # AdmissionLedger 集成失败不应该阻止 reap
+                import logging
+                logging.warning(f"Failed to record admission for {run_id}: {e}")
         
         return ownership
     
