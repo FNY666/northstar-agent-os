@@ -320,11 +320,19 @@ def stale_pages() -> list[str]:
     return stale
 
 
+# Top-level directories whose markdown is not this repository's documentation. `research/`
+# holds verbatim captures of third-party pages (their links point at the original sites, not
+# at files here), so checking them would report the source site's navigation as broken links.
+LINK_CHECK_EXCLUDED_ROOTS: frozenset[str] = frozenset({"research"})
+
+
 def markdown_files() -> list[Path]:
     return sorted(
         path
         for path in ROOT.rglob("*.md")
-        if ".git" not in path.parts and "node_modules" not in path.parts
+        if ".git" not in path.parts
+        and "node_modules" not in path.parts
+        and path.relative_to(ROOT).parts[0] not in LINK_CHECK_EXCLUDED_ROOTS
     )
 
 
