@@ -1,0 +1,297 @@
+diff --git a/components/northstar-agent-runtime/cli.py b/components/northstar-agent-runtime/cli.py
+index 36f614c..01075f6 100644
+--- a/components/northstar-agent-runtime/cli.py
++++ b/components/northstar-agent-runtime/cli.py
+@@ -47,6 +47,7 @@ import json
+ import os
+ import stat
+ import sys
++from dataclasses import dataclass
+ from pathlib import Path
+ from typing import Any, Sequence
+ 
+@@ -1015,28 +1016,19 @@ def _connect_mcp_clients(
+     return clients
+ 
+ 
+-def _run(args: argparse.Namespace) -> int:
+-    from agent_files import AgentFileError, register_workspace_agents
+-    from agents import builtin_registry
+-    from loop import AgentRuntime, DEFAULT_SYSTEM_PROMPT, RuntimeConfig, RuntimeConfigurationError
+-    from permissions import validate_mode
+-    from policy_file import PolicyFileError, append_project_context, discover_project_context, load_policy_file
+-    from sessions import SessionStore
+-    from skills import SkillError, discover_skills, skill_listing
+-    from tools import ToolLimits, build_default_registry
++# ---------------------------------------------------------------------------------------
++# The steps of `_run()`, in the order it calls them. Each step either returns what the next
++# steps need or raises RunConfigurationError; none of them prints a configuration error
++# itself, so the order of stderr lines is exactly the order of the calls in `_run()`.
++# ---------------------------------------------------------------------------------------
+ 
+-    try:
+-        args.model = resolve_model(args.provider, args.model)
+-    except ValueError as error:
+-        raise RunConfigurationError(str(error)) from error
+ 
+-    if args.require_skill_lock:
+-        from skill_check import run_lock_status
+-
+-        locked, detail = run_lock_status(args.workspace)
+-        if not locked:
+-            raise RunConfigurationError(f"skill review is required and failed: {detail}")
++def _read_prompt(args: argparse.Namespace) -> str:
++    """The task text from --prompt, the product `agent TASK` positional, or --prompt-file.
+ 
++    Returns an empty string when there is none; `_run()` reports that, because its message
++    is a usage hint rather than a configuration error.
++    """
+     prompt = args.prompt
+     # Product `agent TASK` lands as args.task after the product_path weld keeps it
+     # as a trailing positional that argparse bound on the agent subparser — but the
+@@ -1060,68 +1052,92 @@ def _run(args: argparse.Namespace) -> int:
+                 prompt = input(f"{PROG_NAME}> ").rstrip("\n")
+             except EOFError:
+                 prompt = ""
+-        if not prompt.strip():
+-            print(
+-                "no prompt: pass a task string, --prompt, --prompt-file, or --probe-sidecar "
+-                "(on a TTY, bare `agent` also reads one line)",
+-                file=sys.stderr,
+-            )
+-            return USAGE_ERROR
++    return prompt
+ 
+-    registry = build_default_registry()
+-    agents = builtin_registry()
+ 
+-    # Installed plugin bundles (.northstar/plugins/). A bundle is a *packaging* format, not
+-    # a new permission channel: everything it contributes is handed to the seam that already
+-    # governs it (skills check rules, agent-file collisions, hook validation, MCP permission
+-    # gate, tighten-only ceilings), and a bundle that fails any check blocks the run instead
+-    # of loading "partially" - half a reviewed plugin is not a reviewed plugin.
+-    plugins: Any = None
+-    if not args.no_plugins:
+-        from plugin_load import load_contributions
+-        from plugin_manifest import PluginError
++def _load_plugins(args: argparse.Namespace, registry: Any) -> Any:
++    """Installed plugin bundles (.northstar/plugins/), or None with --no-plugins.
+ 
+-        try:
+-            plugins = load_contributions(args.workspace, known_tools=registry.names())
+-        except (PluginError, OSError, ValueError) as error:
+-            raise RunConfigurationError(str(error)) from error
+-        if plugins.blocked:
+-            raise RunConfigurationError(
+-                "installed plugins are not loadable:\n  - "
+-                + "\n  - ".join(str(item) for item in plugins.blocked)
+-                + f"\n  run `python3 -m cli plugin verify --workspace {args.workspace}` to see the reviewed set, "
+-                "and `plugin list` to see what is installed"
+-            )
+-        for note in plugins.notes:
+-            print(f"note: plugin: {note}", file=sys.stderr)
++    A bundle is a *packaging* format, not a new permission channel: everything it
++    contributes is handed to the seam that already governs it (skills check rules,
++    agent-file collisions, hook validation, MCP permission gate, tighten-only ceilings),
++    and a bundle that fails any check blocks the run instead of loading "partially" - half
++    a reviewed plugin is not a reviewed plugin.
++    """
++    if args.no_plugins:
++        return None
++    from plugin_load import load_contributions
++    from plugin_manifest import PluginError
+ 
+-    # Repository-defined subagents (.northstar/agents/*.md). Governed like
+-    # built-ins: known tools only, tighten-only ceilings, fail-closed parse.
+-    workspace_agents: tuple[Any, ...] = ()
+-    if not args.no_workspace_agents:
+-        try:
+-            workspace_agents = register_workspace_agents(
+-                agents,
+-                args.workspace,
+-                known_tools=registry.names(),
+-                extra_paths=[path for _name, path in (plugins.agent_directories if plugins else ())],
+-            )
+-        except AgentFileError as error:
+-            raise RunConfigurationError(str(error)) from error
++    try:
++        plugins = load_contributions(args.workspace, known_tools=registry.names())
++    except (PluginError, OSError, ValueError) as error:
++        raise RunConfigurationError(str(error)) from error
++    if plugins.blocked:
++        raise RunConfigurationError(
++            "installed plugins are not loadable:\n  - "
++            + "\n  - ".join(str(item) for item in plugins.blocked)
++            + f"\n  run `python3 -m cli plugin verify --workspace {args.workspace}` to see the reviewed set, "
++            "and `plugin list` to see what is installed"
++        )
++    for note in plugins.notes:
++        print(f"note: plugin: {note}", file=sys.stderr)
++    return plugins
+ 
+-    # Workspace policy file (.northstar/config.toml). It may only tighten; any
+-    # violation is a configuration error (exit 64), never a silent ignore.
+-    # Known agents include repository-defined ones, so the file may pick them.
+-    policy = None
+-    if not args.no_policy_file:
+-        try:
+-            policy = load_policy_file(args.workspace, known_tools=registry.names(), known_agents=agents.names())
+-        except PolicyFileError as error:
+-            raise RunConfigurationError(str(error)) from error
+ 
+-    # Repository-declared lifecycle hooks. Off unless a human enables them: cloning
+-    # a repository must not mean executing it. Anything the file declares is
+-    # validated fail-closed, and an unusable declaration is a configuration error.
++def _load_workspace_agents(args: argparse.Namespace, agents: Any, registry: Any, plugins: Any) -> tuple[Any, ...]:
++    """Register repository-defined subagents (.northstar/agents/*.md) into ``agents``.
++
++    Governed like built-ins: known tools only, tighten-only ceilings, fail-closed parse.
++    Returns the definitions that were added (for the dry-run note).
++    """
++    if args.no_workspace_agents:
++        return ()
++    from agent_files import AgentFileError, register_workspace_agents
++
++    try:
++        return register_workspace_agents(
++            agents,
++            args.workspace,
++            known_tools=registry.names(),
++            extra_paths=[path for _name, path in (plugins.agent_directories if plugins else ())],
++        )
++    except AgentFileError as error:
++        raise RunConfigurationError(str(error)) from error
++
++
++def _load_policy(args: argparse.Namespace, registry: Any, agents: Any) -> Any:
++    """The workspace policy file (.northstar/config.toml), or None.
++
++    It may only tighten; any violation is a configuration error (exit 64), never a silent
++    ignore. Known agents include repository-defined ones, so the file may pick them.
++    """
++    if args.no_policy_file:
++        return None
++    from policy_file import PolicyFileError, load_policy_file
++
++    try:
++        return load_policy_file(args.workspace, known_tools=registry.names(), known_agents=agents.names())
++    except PolicyFileError as error:
++        raise RunConfigurationError(str(error)) from error
++
++
++@dataclass(frozen=True)
++class _HookSetup:
++    """What `_load_hooks()` decided: the registry to run (or None) and what fed it."""
++
++    registry: Any
++    command_hooks: tuple[Any, ...]
++    plugin_hook_count: int
++
++
++def _load_hooks(args: argparse.Namespace, policy: Any, plugins: Any, registry: Any) -> _HookSetup:
++    """Repository-declared lifecycle hooks (policy file and plugins).
++
++    Off unless a human enables them: cloning a repository must not mean executing it.
++    Anything the file declares is validated fail-closed, and an unusable declaration is a
++    configuration error.
++    """
+     hook_registry = None
+     command_hooks: tuple[Any, ...] = ()
+     plugin_hook_tables = tuple(table for _name, table in (plugins.hook_tables if plugins else ()))
+@@ -1156,21 +1172,66 @@ def _run(args: argparse.Namespace) -> int:
+                 )
+         except CommandHookError as error:
+             raise RunConfigurationError(str(error)) from error
++    return _HookSetup(registry=hook_registry, command_hooks=command_hooks, plugin_hook_count=len(plugin_hook_tables))
+ 
+-    # Postconditions are checked after the run by this process, not by the model.
+-    # CLI and policy file are additive in both directions: a repository can require
+-    # a check, an operator can require one more, neither can drop the other's.
+-    postconditions: tuple[Any, ...] = ()
++
++def _load_postconditions(args: argparse.Namespace, policy: Any) -> tuple[Any, ...]:
++    """Checks this process runs after the run (--verify and the policy file's ``verify``).
++
++    Postconditions are checked after the run by this process, not by the model. CLI and
++    policy file are additive in both directions: a repository can require a check, an
++    operator can require one more, neither can drop the other's.
++    """
+     declared_checks = tuple(args.verify or ()) + tuple(getattr(policy, "verify", ()) or ())
+-    if declared_checks:
+-        from postconditions import parse_cli_specs, parse_postconditions
++    if not declared_checks:
++        return ()
++    from postconditions import parse_cli_specs, parse_postconditions
+ 
+-        try:
+-            postconditions = parse_cli_specs(args.verify or ()) + parse_postconditions(
+-                tuple(getattr(policy, "verify", ()) or ()), source=str(getattr(policy, "source", "policy file"))
+-            )
+-        except ValueError as error:
+-            raise RunConfigurationError(str(error)) from error
++    try:
++        return parse_cli_specs(args.verify or ()) + parse_postconditions(
++            tuple(getattr(policy, "verify", ()) or ()), source=str(getattr(policy, "source", "policy file"))
++        )
++    except ValueError as error:
++        raise RunConfigurationError(str(error)) from error
++
++
++def _run(args: argparse.Namespace) -> int:
++    from agents import builtin_registry
++    from loop import AgentRuntime, DEFAULT_SYSTEM_PROMPT, RuntimeConfig, RuntimeConfigurationError
++    from permissions import validate_mode
++    from policy_file import append_project_context, discover_project_context
++    from sessions import SessionStore
++    from skills import SkillError, discover_skills, skill_listing
++    from tools import ToolLimits, build_default_registry
++
++    try:
++        args.model = resolve_model(args.provider, args.model)
++    except ValueError as error:
++        raise RunConfigurationError(str(error)) from error
++
++    if args.require_skill_lock:
++        from skill_check import run_lock_status
++
++        locked, detail = run_lock_status(args.workspace)
++        if not locked:
++            raise RunConfigurationError(f"skill review is required and failed: {detail}")
++
++    prompt = _read_prompt(args)
++    if not prompt.strip():
++        print(
++            "no prompt: pass a task string, --prompt, --prompt-file, or --probe-sidecar "
++            "(on a TTY, bare `agent` also reads one line)",
++            file=sys.stderr,
++        )
++        return USAGE_ERROR
++
++    registry = build_default_registry()
++    agents = builtin_registry()
++    plugins = _load_plugins(args, registry)
++    workspace_agents = _load_workspace_agents(args, agents, registry, plugins)
++    policy = _load_policy(args, registry, agents)
++    hooks = _load_hooks(args, policy, plugins, registry)
++    postconditions = _load_postconditions(args, policy)
+ 
+     cli_mode = "plan" if args.plan else args.permission_mode
+     validate_mode(cli_mode)
+@@ -1484,7 +1545,7 @@ def _run(args: argparse.Namespace) -> int:
+         context_note = "off (no AGENTS.md in the workspace)"
+     workspace_agents_note = ",".join(agent.name for agent in workspace_agents) or "none"
+     hooks_note = _hooks_note(
+-        policy, command_hooks, enabled=args.enable_workspace_hooks, plugin_hooks=len(plugin_hook_tables)
++        policy, hooks.command_hooks, enabled=args.enable_workspace_hooks, plugin_hooks=hooks.plugin_hook_count
+     )
+     skills_note = (f"{len(skills)} package(s): " + ", ".join(skill.name for skill in skills)) if skills else "none"
+     if args.no_plugins:
+@@ -1512,7 +1573,7 @@ def _run(args: argparse.Namespace) -> int:
+         tools=registry,
+         sessions=store,
+         agents=agents,
+-        hooks=hook_registry,
++        hooks=hooks.registry,
+         budget=resume_budget,
+     )
+ 

@@ -1,0 +1,32 @@
+diff --git a/components/northstar-agent-runtime/sdk.py b/components/northstar-agent-runtime/sdk.py
+index c9aa008..717c163 100644
+--- a/components/northstar-agent-runtime/sdk.py
++++ b/components/northstar-agent-runtime/sdk.py
+@@ -193,7 +193,7 @@ def _build(options: RunOptions, resume: str | None = None) -> tuple[Any, Any, li
+     if options.resume_from:
+         from budget import Budget
+         from checkpoints import CheckpointError, select as select_checkpoint
+-        from providers.base import Usage
++        from run_setup import checkpoint_usage
+ 
+         if not options.session_dir:
+             raise ValueError("resume_from needs session_dir to read the parent transcript from")
+@@ -212,16 +212,11 @@ def _build(options: RunOptions, resume: str | None = None) -> tuple[Any, Any, li
+         config_kwargs["resume_from"] = checkpoint
+         config_kwargs["parent_session"] = options.resume_from
+         config_kwargs["max_turns"] = max(int(options.max_turns), checkpoint.turns)
+-        data = checkpoint.usage
+         budget = Budget(
+             max_budget_usd=options.max_budget_usd,
+             total_cost_usd=checkpoint.cost_usd,
+-            total_usage=Usage(
+-                input_tokens=int(data.get("input_tokens", 0) or 0),
+-                output_tokens=int(data.get("output_tokens", 0) or 0),
+-                cache_read_input_tokens=int(data.get("cache_read_input_tokens", 0) or 0),
+-                cache_creation_input_tokens=int(data.get("cache_creation_input_tokens", 0) or 0),
+-            ),
++            # One conversion from a checkpoint's recorded usage, shared with the CLI.
++            total_usage=checkpoint_usage(checkpoint),
+         )
+         store = SessionStore(options.session_dir or None, session_id=None)
+         resume_transcript = store.transcript(options.resume_from)

@@ -1,0 +1,168 @@
+diff --git a/components/northstar-agent-runtime/loop.py b/components/northstar-agent-runtime/loop.py
+index b96cea6..a6cab2d 100644
+--- a/components/northstar-agent-runtime/loop.py
++++ b/components/northstar-agent-runtime/loop.py
+@@ -540,6 +540,16 @@ class _Delegate:
+     rewritten: bool
+ 
+ 
++@dataclass(frozen=True)
++class _Admission:
++    """A delegation that passed every check in `_admit_delegation()`."""
++
++    definition: AgentDefinition
++    task_prompt: str
++    gate: Any
++    provider: Any
++
++
+ class AgentRuntime:
+     """One configured governed loop."""
+ 
+@@ -2147,6 +2157,30 @@ class AgentRuntime:
+         happening at all, and it would blame the delegation tool for a policy
+         violation committed by the tool inside it.
+         """
++        admission = self._admit_delegation(call, spec, payload, state, turn_index=turn_index)
++        if isinstance(admission, _Refused):
++            return admission.block, admission.report, admission.fatal
++        child, child_config, child_mode = self._child_runtime(admission.definition, admission.provider, state)
++        subagent_report, verdict = self._run_child(child, child_config, child_mode, admission, span=span)
++        return self._subagent_result(
++            call, spec, admission.definition, subagent_report, verdict, state, turn_index=turn_index, rewritten=rewritten
++        )
++
++    def _admit_delegation(
++        self,
++        call: ToolUseBlock,
++        spec: ToolSpec,
++        payload: dict[str, Any],
++        state: _RunState,
++        *,
++        turn_index: int,
++    ) -> _Refused | _Admission:
++        """Every check a delegation must pass before a child run exists, in order.
++
++        The agent must exist, the prompt must be text, depth must allow it, the run must
++        offer every tool the agent declares, the delegation gate and the SubagentStart hook
++        must agree, and the agent's provider (if it names one) must have been given.
++        """
+         agent_name = str(payload.get("agent") or self.config.default_subagent).strip()
+         task_prompt = payload.get("prompt", payload.get("task", ""))
+         definition = self.agents.get(agent_name)
+@@ -2155,13 +2189,13 @@ class AgentRuntime:
+                 f"unknown subagent {agent_name!r}. Declared agents: {', '.join(self.agents.names()) or '(none)'}. "
+                 "The tool name Task is not the problem - the agent name is."
+             )
+-            return (
++            return _Refused(
+                 ToolResultBlock(tool_use_id=call.id, content=reason, is_error=True),
+                 ToolCallReport(name=spec.name, call_id=call.id, is_error=True, permission_source="agent_registry", turn_index=turn_index, agent=self.config.agent),
+                 None,
+             )
+         if not isinstance(task_prompt, str) or not task_prompt.strip():
+-            return (
++            return _Refused(
+                 ToolResultBlock(tool_use_id=call.id, content="Task input needs a non-empty 'prompt' string", is_error=True),
+                 ToolCallReport(name=spec.name, call_id=call.id, is_error=True, permission_source="input", turn_index=turn_index, agent=self.config.agent),
+                 None,
+@@ -2173,7 +2207,7 @@ class AgentRuntime:
+                 f"allow_nested_delegation={self.config.allow_nested_delegation})"
+             )
+             state.denials.append(Denial(tool=spec.name, source="policy:depth", reason=reason, agent=self.config.agent, turn_index=turn_index, kind="delegation"))
+-            return (
++            return _Refused(
+                 ToolResultBlock(tool_use_id=call.id, content=reason, is_error=True),
+                 ToolCallReport(name=spec.name, call_id=call.id, is_error=True, denied=True, permission_source="policy:depth", turn_index=turn_index, agent=self.config.agent),
+                 None,
+@@ -2182,7 +2216,7 @@ class AgentRuntime:
+         missing = self.tools.missing([name for name in definition.tools if name != TASK_TOOL_NAME])
+         if missing:
+             reason = f"subagent {agent_name} declares tools this run cannot offer: {', '.join(missing)}"
+-            return (
++            return _Refused(
+                 ToolResultBlock(tool_use_id=call.id, content=reason, is_error=True),
+                 ToolCallReport(name=spec.name, call_id=call.id, is_error=True, permission_source="registry:subset", turn_index=turn_index, agent=self.config.agent),
+                 None,
+@@ -2210,7 +2244,7 @@ class AgentRuntime:
+                     Denial(tool=tool_name, source="delegation_gate", reason=why, agent=definition.name, turn_index=turn_index, kind="delegation")
+                 )
+             self.sessions.append("denial", {"agent": self.config.agent, "tool": spec.name, "source": "delegation_gate", "reason": reason, "kind": "delegation", "turn_index": turn_index})
+-            return (
++            return _Refused(
+                 ToolResultBlock(tool_use_id=call.id, content=reason, is_error=True),
+                 ToolCallReport(name=spec.name, call_id=call.id, is_error=True, denied=True, permission_source="delegation_gate", turn_index=turn_index, agent=self.config.agent),
+                 "error_permission_denied" if self.config.halt_on_denial else None,
+@@ -2235,7 +2269,7 @@ class AgentRuntime:
+         if start.denied:
+             reason = f"delegation to {definition.name} refused by the {start.denied_by} hook: {start.deny_reason}"
+             state.denials.append(Denial(tool=spec.name, source=f"hook:{start.denied_by}", reason=reason, agent=definition.name, turn_index=turn_index, kind="delegation"))
+-            return (
++            return _Refused(
+                 ToolResultBlock(tool_use_id=call.id, content=reason, is_error=True),
+                 ToolCallReport(name=spec.name, call_id=call.id, is_error=True, denied=True, permission_source="hook:SubagentStart", turn_index=turn_index, agent=self.config.agent),
+                 "error_permission_denied" if self.config.halt_on_denial else None,
+@@ -2249,12 +2283,17 @@ class AgentRuntime:
+                     f"subagent {definition.name} requests provider {definition.provider!r}, which this run was not "
+                     f"given (available: {', '.join(sorted(self.providers)) or 'none'})"
+                 )
+-                return (
++                return _Refused(
+                     ToolResultBlock(tool_use_id=call.id, content=reason, is_error=True),
+                     ToolCallReport(name=spec.name, call_id=call.id, is_error=True, permission_source="provider_registry", turn_index=turn_index, agent=self.config.agent),
+                     None,
+                 )
++        return _Admission(definition=definition, task_prompt=task_prompt, gate=gate, provider=child_provider)
+ 
++    def _child_runtime(
++        self, definition: AgentDefinition, child_provider: Any, state: _RunState
++    ) -> tuple["AgentRuntime", RuntimeConfig, str]:
++        """The child run for ``definition``: ``(runtime, config, permission_mode)``."""
+         # Permission policy inheritance. The child must not be able to loosen what
+         # the host decided for the run, and it must not silently *tighten* the parts
+         # the host already auto-approved either: a parent whose policy allows Write
+@@ -2323,6 +2362,22 @@ class AgentRuntime:
+             budget=Budget(max_budget_usd=child_config.max_budget_usd),
+             summarizer=self.summarizer,
+         )
++        return child, child_config, child_mode
++
++    def _run_child(
++        self,
++        child: "AgentRuntime",
++        child_config: RuntimeConfig,
++        child_mode: str,
++        admission: _Admission,
++        *,
++        span: Any,
++    ) -> tuple[SubagentReport, Verdict | None]:
++        """Run the child to completion inside its span; charge its spend to this run."""
++        definition = admission.definition
++        child_provider = admission.provider
++        task_prompt = admission.task_prompt
++        gate = admission.gate
+         with span.child(f"subagent:{definition.name}") as sub_span:
+             sub_span.set_attributes(
+                 {
+@@ -2363,6 +2418,21 @@ class AgentRuntime:
+             )
+             if verdict is not None:
+                 sub_span.set_attributes({"subagent.acceptance": verdict.acceptance, "subagent.verdict_explicit": verdict.explicit})
++        return subagent_report, verdict
++
++    def _subagent_result(
++        self,
++        call: ToolUseBlock,
++        spec: ToolSpec,
++        definition: AgentDefinition,
++        subagent_report: SubagentReport,
++        verdict: Verdict | None,
++        state: _RunState,
++        *,
++        turn_index: int,
++        rewritten: bool,
++    ) -> tuple[ToolResultBlock, ToolCallReport, str | None]:
++        """Record the child's report, ask the SubagentStop hook, and turn it into a tool result."""
+         state.subagents.append(subagent_report)
+         stop_verdict = self._fire(
+             state,

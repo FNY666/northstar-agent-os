@@ -1,0 +1,412 @@
+diff --git a/components/northstar-agent-runtime/cli.py b/components/northstar-agent-runtime/cli.py
+index 955a8b7..a62f3aa 100644
+--- a/components/northstar-agent-runtime/cli.py
++++ b/components/northstar-agent-runtime/cli.py
+@@ -1453,99 +1453,8 @@ def _compose_system_prompt(args: argparse.Namespace, definition: Any, policy: An
+     return _PromptSetup(system_prompt=system_prompt, context=context, skills=skills, memory_note=memory_note)
+ 
+ 
+-def _run(args: argparse.Namespace) -> int:
+-    from agents import builtin_registry
+-    from loop import AgentRuntime, RuntimeConfig, RuntimeConfigurationError
+-    from sessions import SessionStore
+-    from tools import ToolLimits, build_default_registry
+-
+-    try:
+-        args.model = resolve_model(args.provider, args.model)
+-    except ValueError as error:
+-        raise RunConfigurationError(str(error)) from error
+-
+-    if args.require_skill_lock:
+-        from skill_check import run_lock_status
+-
+-        locked, detail = run_lock_status(args.workspace)
+-        if not locked:
+-            raise RunConfigurationError(f"skill review is required and failed: {detail}")
+-
+-    prompt = _read_prompt(args)
+-    if not prompt.strip():
+-        print(
+-            "no prompt: pass a task string, --prompt, --prompt-file, or --probe-sidecar "
+-            "(on a TTY, bare `agent` also reads one line)",
+-            file=sys.stderr,
+-        )
+-        return USAGE_ERROR
+-
+-    registry = build_default_registry()
+-    agents = builtin_registry()
+-    plugins = _load_plugins(args, registry)
+-    workspace_agents = _load_workspace_agents(args, agents, registry, plugins)
+-    policy = _load_policy(args, registry, agents)
+-    hooks = _load_hooks(args, policy, plugins, registry)
+-    postconditions = _load_postconditions(args, policy)
+-
+-    mode = _resolve_permission_mode(args, policy, plugins)
+-    allowed, denied = _resolve_tool_access(args, registry, policy, plugins)
+-    definition, registry, allowed = _resolve_agent(args, policy, agents, registry, allowed)
+-    mcp_servers, mcp_launch, mcp_report = _resolve_mcp_servers(args, plugins, definition)
+-    ceilings = _resolve_ceilings(args, definition, policy, plugins)
+-
+-    try:
+-        from provider_retry import RetryConfigurationError
+-
+-        retry_policy = _retry_policy(args, policy)
+-    except RetryConfigurationError as error:
+-        raise RunConfigurationError(str(error)) from error
+-    config_kwargs: dict[str, Any] = {
+-        "retry": retry_policy,
+-        "model": (definition.model if definition and definition.model else args.model),
+-        "max_turns": ceilings.max_turns,
+-        "max_tool_calls": ceilings.max_tool_calls,
+-        "max_budget_usd": ceilings.max_budget_usd,
+-        "permission_mode": definition.permission_mode if definition else mode,
+-        "allowed_tools": allowed,
+-        "disallowed_tools": denied,
+-        "workspace": args.workspace,
+-        "max_output_tokens": args.max_output_tokens,
+-        "compaction_threshold_tokens": ceilings.compaction_threshold or None,
+-        "compaction_keep_messages": args.compaction_keep_messages,
+-        "max_subagent_depth": args.max_subagent_depth,
+-        "allow_nested_delegation": args.allow_nested_delegation,
+-        "halt_on_denial": ceilings.halt_on_denial,
+-        "tool_limits": ToolLimits(
+-            # The agent's own governance is unwritable unless a human explicitly
+-            # says otherwise for this run (see tools.ToolLimits for why).
+-            protected_prefixes=(".git",) if args.allow_policy_writes else (".git", ".northstar")
+-        ),
+-        "record_tool_output_in_session": not args.redact_tool_output,
+-        "stream": args.stream,
+-    }
+-    if postconditions:
+-        config_kwargs["postconditions"] = postconditions
+-    if args.run_id:
+-        config_kwargs["run_id"] = args.run_id
+-    if policy is not None and policy.revision:
+-        config_kwargs["policy_revision"] = policy.revision
+-    if definition:
+-        config_kwargs["agent"] = definition.name
+-        config_kwargs["allow_delegation"] = definition.allow_delegation and args.max_subagent_depth > 0
+-    prompt_setup = _compose_system_prompt(args, definition, policy, plugins)
+-    if prompt_setup.system_prompt is not None:
+-        config_kwargs["system_prompt"] = prompt_setup.system_prompt
+-    context = prompt_setup.context
+-    skills = prompt_setup.skills
+-    memory_note = prompt_setup.memory_note
+-
+-    if args.sidecar_socket:
+-        config_kwargs["sidecar_socket"] = args.sidecar_socket
+-        config_kwargs["sidecar_timeout_ms"] = args.sidecar_timeout_ms
+-    config_kwargs["shell_backend"] = getattr(args, "sandbox", "auto") or "auto"
+-    config_kwargs["parallel_tools"] = int(getattr(args, "parallel_tools", 1) or 1)
+-
++def _validate_session_flags(args: argparse.Namespace, ceilings: _Ceilings) -> None:
++    """Refuse checkpoint, lease and resume flags that contradict each other or the ceilings."""
+     if args.checkpoint_turns < 0:
+         raise RunConfigurationError("--checkpoint-turns must be >= 0 (0 disables checkpoints)")
+     if args.checkpoint_turns and args.checkpoint_turns > ceilings.max_turns:
+@@ -1578,8 +1487,26 @@ def _run(args: argparse.Namespace) -> int:
+     if args.resume_from and not args.session_dir:
+         raise RunConfigurationError("--resume-from needs --session-dir to read the parent transcript from")
+ 
++
++@dataclass(frozen=True)
++class _SessionSetup:
++    """Where the run records itself, what it inherits from a parent, and the config it implies."""
++
++    store: Any
++    resume_budget: Any
++    config_updates: dict[str, Any]
++
++
++def _resolve_session(args: argparse.Namespace, ceilings: _Ceilings) -> _SessionSetup:
++    """The session store, and for --resume-from the parent's checkpoint and spend.
++
++    ``config_updates`` holds the ``RuntimeConfig`` fields this decides (resume point,
++    lineage, checkpoint cadence, lease, session id); `_run()` merges them into its kwargs.
++    """
+     from budget import Budget as _Budget
++    from sessions import SessionStore
+ 
++    config_kwargs: dict[str, Any] = {}
+     resume_budget: Any = None
+     if args.resume_from:
+         from checkpoints import CheckpointError, select as select_checkpoint
+@@ -1619,11 +1546,23 @@ def _run(args: argparse.Namespace) -> int:
+     elif args.session_lease_seconds != 900:
+         config_kwargs["session_lease_seconds"] = args.session_lease_seconds
+     config_kwargs["session_id"] = store.session_id
+-    try:
+-        config = RuntimeConfig(**config_kwargs)
+-    except RuntimeConfigurationError as error:
+-        raise RunConfigurationError(str(error)) from error
++    return _SessionSetup(store=store, resume_budget=resume_budget, config_updates=config_kwargs)
++
+ 
++def _setup_notes(
++    args: argparse.Namespace,
++    *,
++    policy: Any,
++    prompt_setup: _PromptSetup,
++    workspace_agents: tuple[Any, ...],
++    hooks: _HookSetup,
++    plugins: Any,
++    mcp_servers: list[tuple[str, list[str]]],
++    mcp_report: Any,
++) -> dict[str, str]:
++    """One human-readable line per configuration source, keyed as `_print_dry_run()` takes them."""
++    context = prompt_setup.context
++    skills = prompt_setup.skills
+     if args.no_policy_file:
+         policy_note = "none (--no-policy-file)"
+     elif policy is not None:
+@@ -1664,16 +1603,179 @@ def _run(args: argparse.Namespace) -> int:
+         mcp_note = f"{listed} ({note})"
+     else:
+         mcp_note = "off"
++    return {
++        "policy_note": policy_note,
++        "hooks_note": hooks_note,
++        "context_note": context_note,
++        "memory_note": prompt_setup.memory_note,
++        "workspace_agents_note": workspace_agents_note,
++        "skills_note": skills_note,
++        "plugin_note": plugin_note,
++        "mcp_note": mcp_note,
++    }
++
++
++def _stream_events(args: argparse.Namespace, runtime: Any, store: Any, prompt: str) -> int:
++    """Run the prompt, print every event as it arrives, then the one-line summary; return the exit code."""
++    if args.resume_from:
++        resume = store.transcript(args.resume_from)
++    else:
++        resume = store.transcript(args.resume) if args.resume else None
++    exit_code = 0
++    result = None
++    stream_open = False
++    for event in runtime.run(prompt, resume=resume):
++        if args.json:
++            print(json.dumps(event_to_dict(event), ensure_ascii=False, sort_keys=True))
++        else:
++            _print_event(event, quiet=args.quiet, stream_open=stream_open)
++        # The assistant event that follows its own deltas must not print the same
++        # text a second time; the one that does not must print it normally. Tracking
++        # "did the previous event stream" is the whole rule, and it lives here rather
++        # than in the printer so the printer stays a pure function of one event.
++        stream_open = type(event).__name__ == "StreamDelta"
++        if isinstance(event, ResultMessage):
++            result = event
++            exit_code = EXIT_CODES.get(event.subtype, 1)
++    if args.trace:
++        print(runtime.tracer.tree())
++    # --quiet suppresses the narration, not the result: a script wrapping the
++    # CLI still gets exactly one line to parse, including the session id.
++    if result is not None and not args.json:
++        report = runtime.last_report
++        tool_calls = len(report.tool_calls) if report is not None else 0
++        print(
++            f"\n[{result.subtype}] turns={result.num_turns} tool_calls={tool_calls} "
++            f"cost=${result.total_cost_usd:.6f}"
++            + (" (pricing estimated)" if result.pricing_estimated else "")
++            + f" session={result.session_id}"
++        )
++        # A run that ended in error must say why; the summary line alone is a
++        # dead end for whoever is reading a CI log.
++        for message in result.errors:
++            print(f"  ! {message}", file=sys.stderr)
++        for denial in result.permission_denials:
++            name = denial.get("tool", "?") if isinstance(denial, dict) else getattr(denial, "tool", "?")
++            print(f"  ! refused: {name}", file=sys.stderr)
++    return exit_code
++
++
++def _run(args: argparse.Namespace) -> int:
++    from agents import builtin_registry
++    from loop import AgentRuntime, RuntimeConfig, RuntimeConfigurationError
++    from tools import ToolLimits, build_default_registry
++
++    try:
++        args.model = resolve_model(args.provider, args.model)
++    except ValueError as error:
++        raise RunConfigurationError(str(error)) from error
++
++    if args.require_skill_lock:
++        from skill_check import run_lock_status
++
++        locked, detail = run_lock_status(args.workspace)
++        if not locked:
++            raise RunConfigurationError(f"skill review is required and failed: {detail}")
++
++    prompt = _read_prompt(args)
++    if not prompt.strip():
++        print(
++            "no prompt: pass a task string, --prompt, --prompt-file, or --probe-sidecar "
++            "(on a TTY, bare `agent` also reads one line)",
++            file=sys.stderr,
++        )
++        return USAGE_ERROR
++
++    registry = build_default_registry()
++    agents = builtin_registry()
++    plugins = _load_plugins(args, registry)
++    workspace_agents = _load_workspace_agents(args, agents, registry, plugins)
++    policy = _load_policy(args, registry, agents)
++    hooks = _load_hooks(args, policy, plugins, registry)
++    postconditions = _load_postconditions(args, policy)
++
++    mode = _resolve_permission_mode(args, policy, plugins)
++    allowed, denied = _resolve_tool_access(args, registry, policy, plugins)
++    definition, registry, allowed = _resolve_agent(args, policy, agents, registry, allowed)
++    mcp_servers, mcp_launch, mcp_report = _resolve_mcp_servers(args, plugins, definition)
++    ceilings = _resolve_ceilings(args, definition, policy, plugins)
++
++    try:
++        from provider_retry import RetryConfigurationError
++
++        retry_policy = _retry_policy(args, policy)
++    except RetryConfigurationError as error:
++        raise RunConfigurationError(str(error)) from error
++    config_kwargs: dict[str, Any] = {
++        "retry": retry_policy,
++        "model": (definition.model if definition and definition.model else args.model),
++        "max_turns": ceilings.max_turns,
++        "max_tool_calls": ceilings.max_tool_calls,
++        "max_budget_usd": ceilings.max_budget_usd,
++        "permission_mode": definition.permission_mode if definition else mode,
++        "allowed_tools": allowed,
++        "disallowed_tools": denied,
++        "workspace": args.workspace,
++        "max_output_tokens": args.max_output_tokens,
++        "compaction_threshold_tokens": ceilings.compaction_threshold or None,
++        "compaction_keep_messages": args.compaction_keep_messages,
++        "max_subagent_depth": args.max_subagent_depth,
++        "allow_nested_delegation": args.allow_nested_delegation,
++        "halt_on_denial": ceilings.halt_on_denial,
++        "tool_limits": ToolLimits(
++            # The agent's own governance is unwritable unless a human explicitly
++            # says otherwise for this run (see tools.ToolLimits for why).
++            protected_prefixes=(".git",) if args.allow_policy_writes else (".git", ".northstar")
++        ),
++        "record_tool_output_in_session": not args.redact_tool_output,
++        "stream": args.stream,
++    }
++    if postconditions:
++        config_kwargs["postconditions"] = postconditions
++    if args.run_id:
++        config_kwargs["run_id"] = args.run_id
++    if policy is not None and policy.revision:
++        config_kwargs["policy_revision"] = policy.revision
++    if definition:
++        config_kwargs["agent"] = definition.name
++        config_kwargs["allow_delegation"] = definition.allow_delegation and args.max_subagent_depth > 0
++    prompt_setup = _compose_system_prompt(args, definition, policy, plugins)
++    if prompt_setup.system_prompt is not None:
++        config_kwargs["system_prompt"] = prompt_setup.system_prompt
++    if args.sidecar_socket:
++        config_kwargs["sidecar_socket"] = args.sidecar_socket
++        config_kwargs["sidecar_timeout_ms"] = args.sidecar_timeout_ms
++    config_kwargs["shell_backend"] = getattr(args, "sandbox", "auto") or "auto"
++    config_kwargs["parallel_tools"] = int(getattr(args, "parallel_tools", 1) or 1)
++
++    _validate_session_flags(args, ceilings)
++    session = _resolve_session(args, ceilings)
++    config_kwargs.update(session.config_updates)
++    try:
++        config = RuntimeConfig(**config_kwargs)
++    except RuntimeConfigurationError as error:
++        raise RunConfigurationError(str(error)) from error
++
++    notes = _setup_notes(
++        args,
++        policy=policy,
++        prompt_setup=prompt_setup,
++        workspace_agents=workspace_agents,
++        hooks=hooks,
++        plugins=plugins,
++        mcp_servers=mcp_servers,
++        mcp_report=mcp_report,
++    )
+ 
+     provider = _build_provider(args)
+     runtime = AgentRuntime(
+         provider=provider,
+         config=config,
+         tools=registry,
+-        sessions=store,
++        sessions=session.store,
+         agents=agents,
+         hooks=hooks.registry,
+-        budget=resume_budget,
++        budget=session.resume_budget,
+     )
+ 
+     if args.show_pricing:
+@@ -1683,18 +1785,7 @@ def _run(args: argparse.Namespace) -> int:
+         # Never constructs the provider and never connects MCP servers:
+         # configuration is validated above, so a healthy configuration prints a
+         # plan and exits 0 before any request or child process.
+-        return _print_dry_run(
+-            args,
+-            runtime,
+-            policy_note=policy_note,
+-            hooks_note=hooks_note,
+-            context_note=context_note,
+-            memory_note=memory_note,
+-            workspace_agents_note=workspace_agents_note,
+-            skills_note=skills_note,
+-            plugin_note=plugin_note,
+-            mcp_note=mcp_note,
+-        )
++        return _print_dry_run(args, runtime, **notes)
+     if args.probe_sidecar:
+         if args.provider == "anthropic":
+             sdk_ok, message = _check_anthropic_sdk()
+@@ -1718,47 +1809,7 @@ def _run(args: argparse.Namespace) -> int:
+         except ValueError as error:
+             raise RunConfigurationError(str(error)) from error
+     try:
+-        if args.resume_from:
+-            resume = store.transcript(args.resume_from)
+-        else:
+-            resume = store.transcript(args.resume) if args.resume else None
+-        exit_code = 0
+-        result = None
+-        stream_open = False
+-        for event in runtime.run(prompt, resume=resume):
+-            if args.json:
+-                print(json.dumps(event_to_dict(event), ensure_ascii=False, sort_keys=True))
+-            else:
+-                _print_event(event, quiet=args.quiet, stream_open=stream_open)
+-            # The assistant event that follows its own deltas must not print the same
+-            # text a second time; the one that does not must print it normally. Tracking
+-            # "did the previous event stream" is the whole rule, and it lives here rather
+-            # than in the printer so the printer stays a pure function of one event.
+-            stream_open = type(event).__name__ == "StreamDelta"
+-            if isinstance(event, ResultMessage):
+-                result = event
+-                exit_code = EXIT_CODES.get(event.subtype, 1)
+-        if args.trace:
+-            print(runtime.tracer.tree())
+-        # --quiet suppresses the narration, not the result: a script wrapping the
+-        # CLI still gets exactly one line to parse, including the session id.
+-        if result is not None and not args.json:
+-            report = runtime.last_report
+-            tool_calls = len(report.tool_calls) if report is not None else 0
+-            print(
+-                f"\n[{result.subtype}] turns={result.num_turns} tool_calls={tool_calls} "
+-                f"cost=${result.total_cost_usd:.6f}"
+-                + (" (pricing estimated)" if result.pricing_estimated else "")
+-                + f" session={result.session_id}"
+-            )
+-            # A run that ended in error must say why; the summary line alone is a
+-            # dead end for whoever is reading a CI log.
+-            for message in result.errors:
+-                print(f"  ! {message}", file=sys.stderr)
+-            for denial in result.permission_denials:
+-                name = denial.get("tool", "?") if isinstance(denial, dict) else getattr(denial, "tool", "?")
+-                print(f"  ! refused: {name}", file=sys.stderr)
+-        return exit_code
++        return _stream_events(args, runtime, session.store, prompt)
+     finally:
+         for client in mcp_clients:
+             client.close()

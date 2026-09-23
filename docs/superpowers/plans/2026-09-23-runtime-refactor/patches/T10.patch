@@ -1,0 +1,421 @@
+diff --git a/components/northstar-agent-runtime/loop.py b/components/northstar-agent-runtime/loop.py
+index 90ad8ea..258ce7a 100644
+--- a/components/northstar-agent-runtime/loop.py
++++ b/components/northstar-agent-runtime/loop.py
+@@ -1473,57 +1473,85 @@ class AgentRuntime:
+         """
+         from tools.parallel import batch_is_parallel_safe
+ 
+-        results: list[ToolResultBlock] = []
+-        halted: str | None = None
+         workers = int(getattr(self.config, "parallel_tools", 1) or 1)
+         specs = [self.tools.get(call.name) for call in calls]
+         can_parallel = workers > 1 and batch_is_parallel_safe(specs)
+ 
+         if not can_parallel:
+-            for call in calls:
+-                if halted is not None:
+-                    results.append(
+-                        ToolResultBlock(
+-                            tool_use_id=call.id,
+-                            content=(
+-                                f"not executed: this run halted after the current turn "
+-                                f"because a ceiling was reached ({halted})"
+-                            ),
+-                            is_error=True,
+-                        )
+-                    )
+-                    continue
+-                if self.config.max_tool_calls is not None and state.tool_calls >= self.config.max_tool_calls:
+-                    block, report = self._ceiling_refusal(call, state, turn_index)
+-                    results.append(block)
+-                    state.tool_reports.append(report)
+-                    halted = "error_max_tool_calls"
+-                    continue
+-                block, report, fatal = self._dispatch(call, state, turn_index=turn_index, span=span)
++            return self._run_serial_batch(calls, state, turn_index=turn_index, span=span)
++        prepared, early, halted = self._authorize_parallel_batch(calls, specs, state, turn_index=turn_index, span=span)
++        handler_results = self._execute_parallel_batch(prepared, state, workers=workers, turn_index=turn_index)
++        return self._assemble_parallel_batch(
++            calls, prepared, early, handler_results, halted, state, turn_index=turn_index, span=span
++        )
++
++    def _halted_block(self, call: ToolUseBlock, halted: str) -> ToolResultBlock:
++        """The result a call gets when an earlier call in the same turn halted the run."""
++        return ToolResultBlock(
++            tool_use_id=call.id,
++            content=(
++                f"not executed: this run halted after the current turn "
++                f"because a ceiling was reached ({halted})"
++            ),
++            is_error=True,
++        )
++
++    def _run_serial_batch(
++        self,
++        calls: Sequence[ToolUseBlock],
++        state: _RunState,
++        *,
++        turn_index: int,
++        span: Any,
++    ) -> tuple[list[ToolResultBlock], str | None]:
++        """One call after another: gate, hooks and handler each run to completion in turn."""
++        results: list[ToolResultBlock] = []
++        halted: str | None = None
++        for call in calls:
++            if halted is not None:
++                results.append(self._halted_block(call, halted))
++                continue
++            if self.config.max_tool_calls is not None and state.tool_calls >= self.config.max_tool_calls:
++                block, report = self._ceiling_refusal(call, state, turn_index)
+                 results.append(block)
+                 state.tool_reports.append(report)
+-                state.tool_calls += 1
+-                if fatal is not None:
+-                    halted = fatal
+-            return results, halted
++                halted = "error_max_tool_calls"
++                continue
++            block, report, fatal = self._dispatch(call, state, turn_index=turn_index, span=span)
++            results.append(block)
++            state.tool_reports.append(report)
++            state.tool_calls += 1
++            if fatal is not None:
++                halted = fatal
++        return results, halted
+ 
+-        # Parallel-safe path: authorize each call on the main thread first, then
+-        # run only the approved handler bodies concurrently. Order of results
+-        # matches the assistant's tool_use order.
++    def _authorize_parallel_batch(
++        self,
++        calls: Sequence[ToolUseBlock],
++        specs: Sequence[Any],
++        state: _RunState,
++        *,
++        turn_index: int,
++        span: Any,
++    ) -> tuple[
++        list[tuple[ToolUseBlock, Any, dict[str, Any], Any, bool] | None],
++        list[tuple[ToolResultBlock, ToolCallReport, str | None] | None],
++        str | None,
++    ]:
++        """Authorize each call on the main thread, in order, before any handler runs.
++
++        Returns ``(prepared, early, halted)``: for every call exactly one of
++        ``prepared[i]`` (approved: call, spec, payload, decision, rewritten) and
++        ``early[i]`` (refused or not executed: block, report, fatal) is set.
++        """
++        halted: str | None = None
+         prepared: list[tuple[ToolUseBlock, Any, dict[str, Any], Any, bool] | None] = []
+         early: list[tuple[ToolResultBlock, ToolCallReport, str | None] | None] = []
+         for call, spec in zip(calls, specs):
+             if halted is not None:
+                 early.append(
+                     (
+-                        ToolResultBlock(
+-                            tool_use_id=call.id,
+-                            content=(
+-                                f"not executed: this run halted after the current turn "
+-                                f"because a ceiling was reached ({halted})"
+-                            ),
+-                            is_error=True,
+-                        ),
++                        self._halted_block(call, halted),
+                         ToolCallReport(
+                             name=call.name,
+                             call_id=call.id,
+@@ -1557,8 +1585,17 @@ class AgentRuntime:
+                 state.tool_calls += 1
+                 if outcome.fatal is not None:
+                     halted = outcome.fatal
++        return prepared, early, halted
+ 
+-        # Execute approved handlers concurrently.
++    def _execute_parallel_batch(
++        self,
++        prepared: Sequence[tuple[ToolUseBlock, Any, dict[str, Any], Any, bool] | None],
++        state: _RunState,
++        *,
++        workers: int,
++        turn_index: int,
++    ) -> dict[int, tuple[ToolResult, int, str]]:
++        """Run the approved handler bodies concurrently; ``{index: (result, duration_ms, error_class)}``."""
+         from concurrent.futures import ThreadPoolExecutor, as_completed
+ 
+         handler_results: dict[int, tuple[ToolResult, int, str]] = {}
+@@ -1605,8 +1642,22 @@ class AgentRuntime:
+                             0,
+                             err_name,
+                         )
++        return handler_results
+ 
+-        # Assemble in original order; post-hooks stay serial on the main thread.
++    def _assemble_parallel_batch(
++        self,
++        calls: Sequence[ToolUseBlock],
++        prepared: Sequence[tuple[ToolUseBlock, Any, dict[str, Any], Any, bool] | None],
++        early: Sequence[tuple[ToolResultBlock, ToolCallReport, str | None] | None],
++        handler_results: Mapping[int, tuple[ToolResult, int, str]],
++        halted: str | None,
++        state: _RunState,
++        *,
++        turn_index: int,
++        span: Any,
++    ) -> tuple[list[ToolResultBlock], str | None]:
++        """Assemble in original order; post-hooks stay serial on the main thread."""
++        results: list[ToolResultBlock] = []
+         for index, call in enumerate(calls):
+             if early[index] is not None:
+                 block, report, fatal = early[index]
+@@ -1653,40 +1704,7 @@ class AgentRuntime:
+         delegation call, which `_dispatch()` hands to `_delegate()`.
+         """
+         if spec is None:
+-            reason = (
+-                f"unknown tool {call.name!r}. Registered tools for this agent: "
+-                f"{', '.join(self.tools.names()) or '(none)'}."
+-            )
+-            if call.name == TASK_TOOL_NAME:
+-                reason += (
+-                    f" Delegation is not available at depth {self.config.depth} "
+-                    f"(max_subagent_depth={self.config.max_subagent_depth}, "
+-                    f"allow_nested_delegation={self.config.allow_nested_delegation})."
+-                )
+-            self._fire(
+-                state,
+-                "PostToolUseFailure",
+-                HookInput(
+-                    event="PostToolUseFailure",
+-                    session_id=state.session_id,
+-                    agent=self.config.agent,
+-                    depth=self.config.depth,
+-                    turn_index=turn_index,
+-                    tool_name=call.name,
+-                    tool_use_id=call.id,
+-                    error=reason,
+-                ),
+-            )
+-            block = ToolResultBlock(tool_use_id=call.id, content=reason, is_error=True)
+-            report = ToolCallReport(
+-                name=call.name,
+-                call_id=call.id,
+-                is_error=True,
+-                permission_source="unknown_tool",
+-                turn_index=turn_index,
+-                agent=self.config.agent,
+-            )
+-            return _Refused(block, report, None)
++            return self._refuse_unknown_tool(call, state, turn_index=turn_index)
+ 
+         payload = dict(call.input) if isinstance(call.input, dict) else {}
+         pre = self._fire(
+@@ -1705,29 +1723,7 @@ class AgentRuntime:
+             ),
+         )
+         if pre.denied:
+-            self._trace_refusal(span, spec.name, source=f"hook:{pre.denied_by}", turn_index=turn_index)
+-            reason = f"{spec.name} refused by the {pre.denied_by} hook: {pre.deny_reason}"
+-            state.denials.append(
+-                Denial(
+-                    tool=spec.name,
+-                    source=f"hook:{pre.denied_by}",
+-                    reason=reason,
+-                    agent=self.config.agent,
+-                    turn_index=turn_index,
+-                )
+-            )
+-            block = ToolResultBlock(tool_use_id=call.id, content=reason, is_error=True)
+-            report = ToolCallReport(
+-                name=spec.name,
+-                call_id=call.id,
+-                is_error=True,
+-                denied=True,
+-                permission_source="hook",
+-                turn_index=turn_index,
+-                agent=self.config.agent,
+-            )
+-            fatal = "error_permission_denied" if self.config.halt_on_denial else None
+-            return _Refused(block, report, fatal)
++            return self._refuse_by_hook(call, spec, pre, state, turn_index=turn_index, span=span)
+         if pre.updated_input is not None:
+             payload = dict(pre.updated_input)
+         rewritten = pre.updated_input is not None
+@@ -1751,59 +1747,130 @@ class AgentRuntime:
+             known=True,
+         )
+         if not decision.allowed:
+-            self._trace_refusal(span, spec.name, source=decision.source, turn_index=turn_index)
+-            reason = f"{spec.name} refused by the permission gate: {decision.reason}"
+-            state.denials.append(
+-                Denial(
++            return self._refuse_by_gate(call, spec, decision, state, turn_index=turn_index, span=span)
++
++        return _Authorized(spec, payload, decision, rewritten)
++
++    def _refuse_unknown_tool(self, call: ToolUseBlock, state: _RunState, *, turn_index: int) -> _Refused:
++        """The model named a tool this agent does not have."""
++        reason = (
++            f"unknown tool {call.name!r}. Registered tools for this agent: "
++            f"{', '.join(self.tools.names()) or '(none)'}."
++        )
++        if call.name == TASK_TOOL_NAME:
++            reason += (
++                f" Delegation is not available at depth {self.config.depth} "
++                f"(max_subagent_depth={self.config.max_subagent_depth}, "
++                f"allow_nested_delegation={self.config.allow_nested_delegation})."
++            )
++        self._fire(
++            state,
++            "PostToolUseFailure",
++            HookInput(
++                event="PostToolUseFailure",
++                session_id=state.session_id,
++                agent=self.config.agent,
++                depth=self.config.depth,
++                turn_index=turn_index,
++                tool_name=call.name,
++                tool_use_id=call.id,
++                error=reason,
++            ),
++        )
++        block = ToolResultBlock(tool_use_id=call.id, content=reason, is_error=True)
++        report = ToolCallReport(
++            name=call.name,
++            call_id=call.id,
++            is_error=True,
++            permission_source="unknown_tool",
++            turn_index=turn_index,
++            agent=self.config.agent,
++        )
++        return _Refused(block, report, None)
++
++    def _refuse_by_hook(
++        self, call: ToolUseBlock, spec: Any, pre: Any, state: _RunState, *, turn_index: int, span: Any
++    ) -> _Refused:
++        """A PreToolUse hook denied the call; a hook deny is terminal."""
++        self._trace_refusal(span, spec.name, source=f"hook:{pre.denied_by}", turn_index=turn_index)
++        reason = f"{spec.name} refused by the {pre.denied_by} hook: {pre.deny_reason}"
++        state.denials.append(
++            Denial(
++                tool=spec.name,
++                source=f"hook:{pre.denied_by}",
++                reason=reason,
++                agent=self.config.agent,
++                turn_index=turn_index,
++            )
++        )
++        block = ToolResultBlock(tool_use_id=call.id, content=reason, is_error=True)
++        report = ToolCallReport(
++            name=spec.name,
++            call_id=call.id,
++            is_error=True,
++            denied=True,
++            permission_source="hook",
++            turn_index=turn_index,
++            agent=self.config.agent,
++        )
++        fatal = "error_permission_denied" if self.config.halt_on_denial else None
++        return _Refused(block, report, fatal)
++
++    def _refuse_by_gate(
++        self, call: ToolUseBlock, spec: Any, decision: Any, state: _RunState, *, turn_index: int, span: Any
++    ) -> _Refused:
++        """The permission gate refused the call: record the denial, tell the hooks, refuse."""
++        self._trace_refusal(span, spec.name, source=decision.source, turn_index=turn_index)
++        reason = f"{spec.name} refused by the permission gate: {decision.reason}"
++        state.denials.append(
++            Denial(
++                tool=spec.name,
++                source=decision.source,
++                reason=reason,
++                agent=self.config.agent,
++                turn_index=turn_index,
++            )
++        )
++        self.sessions.append(
++            "denial",
++            {
++                "agent": self.config.agent,
++                **Denial(
+                     tool=spec.name,
+                     source=decision.source,
+                     reason=reason,
+                     agent=self.config.agent,
+                     turn_index=turn_index,
+-                )
+-            )
+-            self.sessions.append(
+-                "denial",
+-                {
+-                    "agent": self.config.agent,
+-                    **Denial(
+-                        tool=spec.name,
+-                        source=decision.source,
+-                        reason=reason,
+-                        agent=self.config.agent,
+-                        turn_index=turn_index,
+-                    ).as_dict(),
+-                },
+-            )
+-            self._fire(
+-                state,
+-                "PostToolUseFailure",
+-                HookInput(
+-                    event="PostToolUseFailure",
+-                    session_id=state.session_id,
+-                    agent=self.config.agent,
+-                    depth=self.config.depth,
+-                    turn_index=turn_index,
+-                    tool_name=spec.name,
+-                    tool_use_id=call.id,
+-                    error=reason,
+-                    data={"denied": True, "source": decision.source},
+-                ),
+-            )
+-            block = ToolResultBlock(tool_use_id=call.id, content=reason, is_error=True)
+-            report = ToolCallReport(
+-                name=spec.name,
+-                call_id=call.id,
+-                is_error=True,
+-                denied=True,
+-                permission_source=decision.source,
+-                turn_index=turn_index,
++                ).as_dict(),
++            },
++        )
++        self._fire(
++            state,
++            "PostToolUseFailure",
++            HookInput(
++                event="PostToolUseFailure",
++                session_id=state.session_id,
+                 agent=self.config.agent,
+-            )
+-            fatal = "error_permission_denied" if self.config.halt_on_denial else None
+-            return _Refused(block, report, fatal)
+-
+-        return _Authorized(spec, payload, decision, rewritten)
++                depth=self.config.depth,
++                turn_index=turn_index,
++                tool_name=spec.name,
++                tool_use_id=call.id,
++                error=reason,
++                data={"denied": True, "source": decision.source},
++            ),
++        )
++        block = ToolResultBlock(tool_use_id=call.id, content=reason, is_error=True)
++        report = ToolCallReport(
++            name=spec.name,
++            call_id=call.id,
++            is_error=True,
++            denied=True,
++            permission_source=decision.source,
++            turn_index=turn_index,
++            agent=self.config.agent,
++        )
++        fatal = "error_permission_denied" if self.config.halt_on_denial else None
++        return _Refused(block, report, fatal)
+ 
+     def _finish_tool_result(
+         self,

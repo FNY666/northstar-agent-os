@@ -1,0 +1,279 @@
+diff --git a/components/northstar-agent-runtime/cli.py b/components/northstar-agent-runtime/cli.py
+index 01075f6..d505efc 100644
+--- a/components/northstar-agent-runtime/cli.py
++++ b/components/northstar-agent-runtime/cli.py
+@@ -1195,58 +1195,32 @@ def _load_postconditions(args: argparse.Namespace, policy: Any) -> tuple[Any, ..
+         raise RunConfigurationError(str(error)) from error
+ 
+ 
+-def _run(args: argparse.Namespace) -> int:
+-    from agents import builtin_registry
+-    from loop import AgentRuntime, DEFAULT_SYSTEM_PROMPT, RuntimeConfig, RuntimeConfigurationError
++def _resolve_permission_mode(args: argparse.Namespace, policy: Any, plugins: Any) -> str:
++    """The permission mode the run uses, after the policy file and plugins had their say.
++
++    The file may pin 'plan' (or keep 'default'); it may never loosen. A CLI mode other than
++    the built-in default is an explicit operator choice and wins. --no-policy-file is the
++    escape hatch for an explicit 'default'. A plugin may pin 'plan' (a ceiling), never
++    'default' or 'bypassPermissions': the policy file's own value wins over a bundle's, and
++    an explicit operator flag wins over both, because a human typing it is the only thing
++    that can widen a mode here.
++    """
+     from permissions import validate_mode
+-    from policy_file import append_project_context, discover_project_context
+-    from sessions import SessionStore
+-    from skills import SkillError, discover_skills, skill_listing
+-    from tools import ToolLimits, build_default_registry
+-
+-    try:
+-        args.model = resolve_model(args.provider, args.model)
+-    except ValueError as error:
+-        raise RunConfigurationError(str(error)) from error
+-
+-    if args.require_skill_lock:
+-        from skill_check import run_lock_status
+-
+-        locked, detail = run_lock_status(args.workspace)
+-        if not locked:
+-            raise RunConfigurationError(f"skill review is required and failed: {detail}")
+-
+-    prompt = _read_prompt(args)
+-    if not prompt.strip():
+-        print(
+-            "no prompt: pass a task string, --prompt, --prompt-file, or --probe-sidecar "
+-            "(on a TTY, bare `agent` also reads one line)",
+-            file=sys.stderr,
+-        )
+-        return USAGE_ERROR
+-
+-    registry = build_default_registry()
+-    agents = builtin_registry()
+-    plugins = _load_plugins(args, registry)
+-    workspace_agents = _load_workspace_agents(args, agents, registry, plugins)
+-    policy = _load_policy(args, registry, agents)
+-    hooks = _load_hooks(args, policy, plugins, registry)
+-    postconditions = _load_postconditions(args, policy)
+ 
+     cli_mode = "plan" if args.plan else args.permission_mode
+     validate_mode(cli_mode)
+-    # The file may pin 'plan' (or keep 'default'); it may never loosen. A CLI
+-    # mode other than the built-in default is an explicit operator choice and
+-    # wins. --no-policy-file is the escape hatch for an explicit 'default'.
+-    # A plugin may pin 'plan' (a ceiling), never 'default' or 'bypassPermissions': the
+-    # policy file's own value wins over a bundle's, and an explicit operator flag wins over
+-    # both, because a human typing it is the only thing that can widen a mode here.
+     policy_mode = policy.permission_mode if (policy is not None and policy.permission_mode is not None) else None
+     plugin_mode = str(plugins.policy.get("permission_mode") or "") if plugins is not None else ""
+     pinned_mode = policy_mode or plugin_mode
+     mode = pinned_mode if (cli_mode == "default" and pinned_mode) else cli_mode
+     validate_mode(mode)
++    return mode
++
+ 
++def _resolve_tool_access(
++    args: argparse.Namespace, registry: Any, policy: Any, plugins: Any
++) -> tuple[tuple[str, ...], tuple[str, ...]]:
++    """``(allowed, denied)`` tool names: the CLI lists plus every denial a file or bundle adds."""
+     allowed_cli, denied_cli = _tool_lists(args, base_tools=registry.names())
+     denied_list = list(denied_cli)
+     if policy is not None:
+@@ -1264,7 +1238,17 @@ def _run(args: argparse.Namespace) -> int:
+         denied_list.extend(MUTATING_TOOLS)
+     denied = tuple(dict.fromkeys(denied_list))
+     allowed = tuple(name for name in allowed_cli if name not in denied)
++    return allowed, denied
+ 
++
++def _resolve_agent(
++    args: argparse.Namespace, policy: Any, agents: Any, registry: Any, allowed: tuple[str, ...]
++) -> tuple[Any, Any, tuple[str, ...]]:
++    """``(definition, registry, allowed)`` for a run *as* a named agent (--agent or the policy file).
++
++    Without an agent the registry and allow list come back unchanged and the definition is
++    None.
++    """
+     definition = None
+     agent_name = args.agent or (policy.agent if policy is not None else "")
+     if agent_name:
+@@ -1276,7 +1260,16 @@ def _run(args: argparse.Namespace) -> int:
+         # the host's and policy file's deny lists still apply on top.
+         registry = registry.subset(definition.tools)
+         allowed = tuple(name for name in allowed if name in registry.names())
++    return definition, registry, allowed
+ 
++
++def _resolve_mcp_servers(
++    args: argparse.Namespace, plugins: Any, definition: Any
++) -> tuple[list[tuple[str, list[str]]], dict[str, Any], Any]:
++    """``(servers, launch, report)``: the MCP servers to start, from flags, config and plugins.
++
++    Nothing is started here; `_run()` connects them only once it knows the run is real.
++    """
+     if (args.mcp_servers or (plugins and plugins.mcp_servers)) and definition is not None:
+         # An agent-definition run fixes its tool subset by definition; silently
+         # adding MCP tools to that subset would widen the declared policy.
+@@ -1295,23 +1288,42 @@ def _run(args: argparse.Namespace) -> int:
+         # whole rule set that comes with it: mutating by default, denied until named, and
+         # closed on SIGTERM. Nothing here lets a plugin register a tool directly.
+         mcp_servers.append((str(server["name"]), [str(server["command"]), *[str(a) for a in server.get("args") or ()]]))
++    return mcp_servers, mcp_launch, mcp_report
++
++
++def _tighten(cli_value: int | None, file_value: int | None) -> int | None:
++    """Policy-file ceilings may only lower; when both are set, the lower wins."""
++    candidates = [value for value in (cli_value, file_value) if value is not None]
++    return min(candidates) if candidates else None
+ 
+-    def tighten(cli_value: int | None, file_value: int | None) -> int | None:
+-        """Policy-file ceilings may only lower; when both are set, the lower wins."""
+-        candidates = [value for value in (cli_value, file_value) if value is not None]
+-        return min(candidates) if candidates else None
+ 
++@dataclass(frozen=True)
++class _Ceilings:
++    """The run's ceilings after every source (flags, agent, policy file, plugins) tightened them.
++
++    Anything that later rebuilds a ceiling - a checkpoint resume, for one - must start from
++    these values, never from the flags: the flags are only one of the sources.
++    """
++
++    max_turns: int
++    max_tool_calls: int | None
++    max_budget_usd: float | None
++    compaction_threshold: int | None
++    halt_on_denial: bool
++
++
++def _resolve_ceilings(args: argparse.Namespace, definition: Any, policy: Any, plugins: Any) -> _Ceilings:
+     base_turns = definition.max_turns if definition else args.max_turns
+     base_tool_calls = definition.max_tool_calls if definition else args.max_tool_calls
+     plugin_policy = plugins.policy if plugins is not None else {}
+-    max_turns = tighten(tighten(base_turns, policy.max_turns if policy is not None else None), plugin_policy.get("max_turns"))
+-    max_tool_calls = tighten(
+-        tighten(base_tool_calls, policy.max_tool_calls if policy is not None else None), plugin_policy.get("max_tool_calls")
++    max_turns = _tighten(_tighten(base_turns, policy.max_turns if policy is not None else None), plugin_policy.get("max_turns"))
++    max_tool_calls = _tighten(
++        _tighten(base_tool_calls, policy.max_tool_calls if policy is not None else None), plugin_policy.get("max_tool_calls")
+     )
+-    max_budget_usd = tighten(
+-        tighten(args.max_budget_usd, policy.max_budget_usd if policy is not None else None), plugin_policy.get("max_budget_usd")
++    max_budget_usd = _tighten(
++        _tighten(args.max_budget_usd, policy.max_budget_usd if policy is not None else None), plugin_policy.get("max_budget_usd")
+     )
+-    compaction_threshold = tighten(
++    compaction_threshold = _tighten(
+         args.compaction_threshold_tokens,
+         policy.compaction_threshold_tokens if policy is not None else None,
+     )
+@@ -1320,6 +1332,57 @@ def _run(args: argparse.Namespace) -> int:
+         or (policy is not None and policy.halt_on_denial)
+         or (plugins is not None and plugins.policy.get("halt_on_denial"))
+     )
++    return _Ceilings(
++        max_turns=max_turns,
++        max_tool_calls=max_tool_calls,
++        max_budget_usd=max_budget_usd,
++        compaction_threshold=compaction_threshold,
++        halt_on_denial=halt_on_denial,
++    )
++
++
++def _run(args: argparse.Namespace) -> int:
++    from agents import builtin_registry
++    from loop import AgentRuntime, DEFAULT_SYSTEM_PROMPT, RuntimeConfig, RuntimeConfigurationError
++    from policy_file import append_project_context, discover_project_context
++    from sessions import SessionStore
++    from skills import SkillError, discover_skills, skill_listing
++    from tools import ToolLimits, build_default_registry
++
++    try:
++        args.model = resolve_model(args.provider, args.model)
++    except ValueError as error:
++        raise RunConfigurationError(str(error)) from error
++
++    if args.require_skill_lock:
++        from skill_check import run_lock_status
++
++        locked, detail = run_lock_status(args.workspace)
++        if not locked:
++            raise RunConfigurationError(f"skill review is required and failed: {detail}")
++
++    prompt = _read_prompt(args)
++    if not prompt.strip():
++        print(
++            "no prompt: pass a task string, --prompt, --prompt-file, or --probe-sidecar "
++            "(on a TTY, bare `agent` also reads one line)",
++            file=sys.stderr,
++        )
++        return USAGE_ERROR
++
++    registry = build_default_registry()
++    agents = builtin_registry()
++    plugins = _load_plugins(args, registry)
++    workspace_agents = _load_workspace_agents(args, agents, registry, plugins)
++    policy = _load_policy(args, registry, agents)
++    hooks = _load_hooks(args, policy, plugins, registry)
++    postconditions = _load_postconditions(args, policy)
++
++    mode = _resolve_permission_mode(args, policy, plugins)
++    allowed, denied = _resolve_tool_access(args, registry, policy, plugins)
++    definition, registry, allowed = _resolve_agent(args, policy, agents, registry, allowed)
++    mcp_servers, mcp_launch, mcp_report = _resolve_mcp_servers(args, plugins, definition)
++    ceilings = _resolve_ceilings(args, definition, policy, plugins)
+ 
+     try:
+         from provider_retry import RetryConfigurationError
+@@ -1330,19 +1393,19 @@ def _run(args: argparse.Namespace) -> int:
+     config_kwargs: dict[str, Any] = {
+         "retry": retry_policy,
+         "model": (definition.model if definition and definition.model else args.model),
+-        "max_turns": max_turns,
+-        "max_tool_calls": max_tool_calls,
+-        "max_budget_usd": max_budget_usd,
++        "max_turns": ceilings.max_turns,
++        "max_tool_calls": ceilings.max_tool_calls,
++        "max_budget_usd": ceilings.max_budget_usd,
+         "permission_mode": definition.permission_mode if definition else mode,
+         "allowed_tools": allowed,
+         "disallowed_tools": denied,
+         "workspace": args.workspace,
+         "max_output_tokens": args.max_output_tokens,
+-        "compaction_threshold_tokens": compaction_threshold or None,
++        "compaction_threshold_tokens": ceilings.compaction_threshold or None,
+         "compaction_keep_messages": args.compaction_keep_messages,
+         "max_subagent_depth": args.max_subagent_depth,
+         "allow_nested_delegation": args.allow_nested_delegation,
+-        "halt_on_denial": halt_on_denial,
++        "halt_on_denial": ceilings.halt_on_denial,
+         "tool_limits": ToolLimits(
+             # The agent's own governance is unwritable unless a human explicitly
+             # says otherwise for this run (see tools.ToolLimits for why).
+@@ -1449,12 +1512,12 @@ def _run(args: argparse.Namespace) -> int:
+ 
+     if args.checkpoint_turns < 0:
+         raise RunConfigurationError("--checkpoint-turns must be >= 0 (0 disables checkpoints)")
+-    if args.checkpoint_turns and args.checkpoint_turns > max_turns:
++    if args.checkpoint_turns and args.checkpoint_turns > ceilings.max_turns:
+         # A cadence that can never fire would leave the operator believing the run
+         # was resumable when no record was ever written. Compared with the effective
+         # ceiling (after the policy file and plugins tightened it), not the flag alone.
+         raise RunConfigurationError(
+-            f"--checkpoint-turns {args.checkpoint_turns} exceeds the run's max_turns {max_turns}, "
++            f"--checkpoint-turns {args.checkpoint_turns} exceeds the run's max_turns {ceilings.max_turns}, "
+             "so no checkpoint could ever be written",
+         )
+     if args.no_session_lease and args.session_lease_seconds != 900:
+@@ -1502,11 +1565,11 @@ def _run(args: argparse.Namespace) -> int:
+         config_kwargs["parent_session"] = args.resume_from
+         # Start from the tightened ceiling, never from the flag: a policy file or plugin
+         # that lowered max_turns must keep binding the lineage after a resume.
+-        config_kwargs["max_turns"] = max(max_turns, checkpoint.turns)
++        config_kwargs["max_turns"] = max(ceilings.max_turns, checkpoint.turns)
+         # The ceiling travels with the lineage: the resumed run starts *at* what the
+         # parent had already spent, so resuming cannot hand out a fresh budget.
+         resume_budget = _Budget(
+-            max_budget_usd=max_budget_usd,
++            max_budget_usd=ceilings.max_budget_usd,
+             total_cost_usd=checkpoint.cost_usd,
+             total_usage=checkpoint_usage(checkpoint),
+         )

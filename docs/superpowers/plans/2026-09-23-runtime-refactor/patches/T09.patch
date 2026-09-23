@@ -1,0 +1,156 @@
+diff --git a/components/northstar-agent-runtime/loop.py b/components/northstar-agent-runtime/loop.py
+index 6fdc044..90ad8ea 100644
+--- a/components/northstar-agent-runtime/loop.py
++++ b/components/northstar-agent-runtime/loop.py
+@@ -511,6 +511,35 @@ class _RunState:
+     overflow_compacted: bool = False
+ 
+ 
++@dataclass(frozen=True)
++class _Refused:
++    """`_authorize_tool()` refused the call before any handler ran."""
++
++    block: ToolResultBlock
++    report: ToolCallReport
++    fatal: str | None
++
++
++@dataclass(frozen=True)
++class _Authorized:
++    """`_authorize_tool()` approved the call; the handler may run with ``payload``."""
++
++    spec: Any
++    payload: dict[str, Any]
++    decision: Any
++    rewritten: bool
++
++
++@dataclass(frozen=True)
++class _Delegate:
++    """`_authorize_tool()` passed a delegation call on to `_delegate()` (never parallel-batched)."""
++
++    call: ToolUseBlock
++    spec: Any
++    payload: dict[str, Any]
++    rewritten: bool
++
++
+ class AgentRuntime:
+     """One configured governed loop."""
+ 
+@@ -1515,20 +1544,19 @@ class AgentRuntime:
+                 halted = "error_max_tool_calls"
+                 continue
+             outcome = self._authorize_tool(call, spec, state, turn_index=turn_index, span=span)
+-            # Authorized shape: (None, spec, payload, decision, rewritten)
+-            # Refused shape:    (block, report, fatal, None)
+-            if outcome[0] is None:
+-                _, auth_spec, payload, decision, rewritten = outcome
+-                prepared.append((call, auth_spec, payload, decision, rewritten))
++            # A parallel batch never holds a delegation call (batch_is_parallel_safe
++            # refuses is_delegation specs), so the outcome is authorized or refused.
++            assert not isinstance(outcome, _Delegate), "a delegation call reached a parallel batch"
++            if isinstance(outcome, _Authorized):
++                prepared.append((call, outcome.spec, outcome.payload, outcome.decision, outcome.rewritten))
+                 early.append(None)
+                 state.tool_calls += 1
+             else:
+-                block, report, fatal = outcome[0], outcome[1], outcome[2]
+-                early.append((block, report, fatal))
++                early.append((outcome.block, outcome.report, outcome.fatal))
+                 prepared.append(None)
+                 state.tool_calls += 1
+-                if fatal is not None:
+-                    halted = fatal
++                if outcome.fatal is not None:
++                    halted = outcome.fatal
+ 
+         # Execute approved handlers concurrently.
+         from concurrent.futures import ThreadPoolExecutor, as_completed
+@@ -1617,13 +1645,12 @@ class AgentRuntime:
+         *,
+         turn_index: int,
+         span: Any,
+-    ) -> tuple:
++    ) -> _Authorized | _Refused | _Delegate:
+         """PreToolUse + permission gate for one call (always serial, main thread).
+ 
+-        Returns either ``(None, spec, payload, decision, rewritten)`` when the
+-        call is approved for handler execution, or
+-        ``(block, report, fatal, None)`` shaped as a 4-tuple starting with the
+-        ToolResultBlock when the call is refused before the handler.
++        Returns ``_Authorized`` when the call is approved for handler execution,
++        ``_Refused`` when it is refused before the handler, and ``_Delegate`` for a
++        delegation call, which `_dispatch()` hands to `_delegate()`.
+         """
+         if spec is None:
+             reason = (
+@@ -1659,7 +1686,7 @@ class AgentRuntime:
+                 turn_index=turn_index,
+                 agent=self.config.agent,
+             )
+-            return (block, report, None, None)
++            return _Refused(block, report, None)
+ 
+         payload = dict(call.input) if isinstance(call.input, dict) else {}
+         pre = self._fire(
+@@ -1700,7 +1727,7 @@ class AgentRuntime:
+                 agent=self.config.agent,
+             )
+             fatal = "error_permission_denied" if self.config.halt_on_denial else None
+-            return (block, report, fatal, None)
++            return _Refused(block, report, fatal)
+         if pre.updated_input is not None:
+             payload = dict(pre.updated_input)
+         rewritten = pre.updated_input is not None
+@@ -1708,7 +1735,7 @@ class AgentRuntime:
+         if spec.is_delegation:
+             # Delegation is never parallel-batched; caller should not reach here
+             # for Task, but keep the path explicit.
+-            return ("delegate", call, spec, payload, rewritten)
++            return _Delegate(call, spec, payload, rewritten)
+ 
+         decision = self.permissions.evaluate_spec(
+             spec,
+@@ -1774,9 +1801,9 @@ class AgentRuntime:
+                 agent=self.config.agent,
+             )
+             fatal = "error_permission_denied" if self.config.halt_on_denial else None
+-            return (block, report, fatal, None)
++            return _Refused(block, report, fatal)
+ 
+-        return (None, spec, payload, decision, rewritten)
++        return _Authorized(spec, payload, decision, rewritten)
+ 
+     def _finish_tool_result(
+         self,
+@@ -1885,18 +1912,20 @@ class AgentRuntime:
+         """
+         spec = self.tools.get(call.name)
+         outcome = self._authorize_tool(call, spec, state, turn_index=turn_index, span=span)
+-        head = outcome[0]
+-        if head == "delegate":
+-            _, call_d, spec_d, payload, rewritten = outcome
++        if isinstance(outcome, _Delegate):
+             return self._delegate(
+-                call_d, spec_d, payload, state, turn_index=turn_index, span=span, rewritten=rewritten
++                outcome.call,
++                outcome.spec,
++                outcome.payload,
++                state,
++                turn_index=turn_index,
++                span=span,
++                rewritten=outcome.rewritten,
+             )
+-        if head is not None:
+-            # Refused before handler: (block, report, fatal, None)
+-            block, report, fatal = head, outcome[1], outcome[2]
+-            return block, report, fatal
++        if isinstance(outcome, _Refused):
++            return outcome.block, outcome.report, outcome.fatal
+ 
+-        _, spec, payload, decision, rewritten = outcome
++        spec, payload, decision, rewritten = outcome.spec, outcome.payload, outcome.decision, outcome.rewritten
+         context = ToolContext(
+             session_id=state.session_id,
+             agent=self.config.agent,

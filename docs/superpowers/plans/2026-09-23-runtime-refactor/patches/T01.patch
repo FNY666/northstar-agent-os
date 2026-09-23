@@ -1,0 +1,44 @@
+diff --git a/tests/docbuild.py b/tests/docbuild.py
+index 17cd5a4..4536e5b 100644
+--- a/tests/docbuild.py
++++ b/tests/docbuild.py
+@@ -320,11 +320,19 @@ def stale_pages() -> list[str]:
+     return stale
+ 
+ 
++# Top-level directories whose markdown is not this repository's documentation. `research/`
++# holds verbatim captures of third-party pages (their links point at the original sites, not
++# at files here), so checking them would report the source site's navigation as broken links.
++LINK_CHECK_EXCLUDED_ROOTS: frozenset[str] = frozenset({"research"})
++
++
+ def markdown_files() -> list[Path]:
+     return sorted(
+         path
+         for path in ROOT.rglob("*.md")
+-        if ".git" not in path.parts and "node_modules" not in path.parts
++        if ".git" not in path.parts
++        and "node_modules" not in path.parts
++        and path.relative_to(ROOT).parts[0] not in LINK_CHECK_EXCLUDED_ROOTS
+     )
+ 
+ 
+diff --git a/tests/test_docbuild.py b/tests/test_docbuild.py
+index 06ff5c3..bd8de20 100644
+--- a/tests/test_docbuild.py
++++ b/tests/test_docbuild.py
+@@ -113,6 +113,14 @@ class MarkdownLinkTests(unittest.TestCase):
+         broken = docbuild.broken_links()
+         self.assertEqual(broken, [], "broken internal markdown links:\n  " + "\n  ".join(broken))
+ 
++    def test_only_third_party_captures_are_excluded_from_the_link_check(self):
++        checked = {path.relative_to(docbuild.ROOT).as_posix() for path in docbuild.markdown_files()}
++        self.assertFalse(any(name.startswith("research/") for name in checked))
++        # The exclusion must stay narrow: the project's own documentation is still checked.
++        self.assertIn("README.md", checked)
++        self.assertTrue(any(name.startswith("docs/") for name in checked))
++        self.assertTrue(any(name.startswith("components/") for name in checked))
++
+ 
+ if __name__ == "__main__":
+     unittest.main()

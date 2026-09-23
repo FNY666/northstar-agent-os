@@ -1,0 +1,552 @@
+diff --git a/components/northstar-agent-runtime/loop.py b/components/northstar-agent-runtime/loop.py
+index 258ce7a..b96cea6 100644
+--- a/components/northstar-agent-runtime/loop.py
++++ b/components/northstar-agent-runtime/loop.py
+@@ -991,6 +991,86 @@ class AgentRuntime:
+             yield self._finish(state, "error_during_execution")
+             return
+ 
++        init_data = self._init_data(state)
++        try:
++            # Taken before the first yield so a hook or a tool cannot be the thing
++            # that changes what "before" means.
++            self.postconditions.snapshot()
++        except PostConditionError as error:
++            raise RuntimeConfigurationError(f"postconditions: {error}") from error
++        init = SystemMessage(subtype="init", content=f"runtime ready: {self.provider_name}/{config.model}", data=init_data)
++        self.sessions.record_system(init, agent=config.agent)
++        yield init
++
++        if (yield from self._open_session(state, prompt)):
++            return
++
++        # A resumed run continues the parent's numbering, so max_turns bounds the
++        # whole lineage rather than restarting at every resume.
++        first_turn = state.turns + 1
++        for turn_index in range(first_turn, max(first_turn, config.max_turns + 1)):
++            self._heartbeat()
++            # Ceilings are checked before spending, never after.
++            stop = self._ceiling_stop(state)
++            if stop is not None:
++                yield self._finish(state, stop)
++                return
++            if should_compact(state.transcript, config.compaction_threshold_tokens):
++                outcome = self._compact(state, turn_index=turn_index)
++                if outcome.performed and outcome.boundary is not None:
++                    state.transcript = list(outcome.transcript)
++                    self.sessions.append(
++                        "compact_boundary",
++                        {"agent": config.agent, "subtype": "compact_boundary", "content": outcome.summary, "data": outcome.as_dict()},
++                    )
++                    yield outcome.boundary
++
++            state.cost_at_turn_start = self.budget.total_cost_usd
++            # The waiting budget is per turn (see _retry_step): "no turn may stall for more
++            # than the deadline" is a promise an operator can check.
++            state.turn_retry_wait_ms = 0
++            with run_span.child(f"turn[{turn_index}]") as turn_span:
++                turn_span.set_attributes({"turn.index": turn_index, "turn.depth": config.depth, "agent.name": config.agent})
++                generation, breakdown, streamed, stream_withheld = yield from self._generate(state, turn_index, turn_span)
++                if generation is None or breakdown is None:
++                    yield self._finish(state, "error_during_execution")
++                    return
++                assistant = AssistantMessage(
++                    content=_assign_tool_use_ids(generation.content, state),
++                    model=generation.model or config.model,
++                    usage=generation.usage,
++                    stop_reason=generation.stop_reason,
++                )
++                if config.stream:
++                    if (yield from self._stream_mismatch(state, turn_index, turn_span, assistant, streamed, stream_withheld)):
++                        return
++                state.transcript.append(assistant)
++                state.turns += 1
++                self.sessions.record_assistant(assistant, agent=config.agent)
++                yield assistant
++
++                calls = assistant.tool_uses
++                if not calls:
++                    if (yield from self._finish_without_tools(state, turn_index, assistant)):
++                        return
++                    continue
++
++                results, halted = self._run_tool_batch(calls, state, turn_index=turn_index, span=turn_span)
++                if not results:  # pragma: no cover - defensive: tool_use implies a result
++                    results.append(ToolResultBlock(tool_use_id=calls[-1].id, content="no result produced", is_error=True))
++                tool_message = UserMessage(content=tuple(results))
++                state.transcript.append(tool_message)
++                self._record_tool_message(tool_message)
++                yield tool_message
++                self._checkpoint(state, boundary="after_tools")
++                if halted is not None:
++                    yield self._finish(state, halted)
++                    return
++        yield self._finish(state, "error_max_turns")
++
++    def _init_data(self, state: _RunState) -> dict[str, Any]:
++        """The ``init`` record's data: what this run is, may do, and was started under."""
++        config = self.config
+         init_data = {
+             "session_id": state.session_id,
+             "provider": self.provider_name,
+@@ -1068,22 +1148,20 @@ class AgentRuntime:
+             # that saw no deltas needs to know whether streaming was on and the turn had
+             # no text, or whether it was never on.
+             init_data["stream"] = True
+-        try:
+-            # Taken before the first yield so a hook or a tool cannot be the thing
+-            # that changes what "before" means.
+-            self.postconditions.snapshot()
+-        except PostConditionError as error:
+-            raise RuntimeConfigurationError(f"postconditions: {error}") from error
+-        init = SystemMessage(subtype="init", content=f"runtime ready: {self.provider_name}/{config.model}", data=init_data)
+-        self.sessions.record_system(init, agent=config.agent)
+-        yield init
++        return init_data
++
++    def _open_session(self, state: _RunState, prompt: str) -> Generator[Message, None, bool]:
++        """SessionStart and UserPromptSubmit hooks, then the prompt itself.
+ 
++        Yields the notes hooks add; returns True when a hook refused and the run has ended.
++        """
++        config = self.config
+         # SessionStart may seed context or refuse the run outright.
+         start = self._fire(state, "SessionStart", HookInput(event="SessionStart", session_id=state.session_id, agent=config.agent, depth=config.depth, data={"model": config.model, "tools": list(self.tools.names())}))
+         if start.denied:
+             state.denials.append(Denial(tool="", source="hook:SessionStart", reason=start.deny_reason, agent=config.agent, kind="run"))
+             yield self._finish(state, "error_permission_denied")
+-            return
++            return True
+         for context in (start.additional_context,):
+             if context:
+                 note = SystemMessage(subtype="informational", content=context)
+@@ -1101,7 +1179,7 @@ class AgentRuntime:
+                 Denial(source="hook:UserPromptSubmit", reason=submitted.deny_reason, agent=config.agent, turn_index=0, kind="prompt")
+             )
+             yield self._finish(state, "error_permission_denied")
+-            return
++            return True
+         for context in submitted.additional_context:
+             if context:
+                 note = SystemMessage(subtype="informational", content=context)
+@@ -1112,220 +1190,200 @@ class AgentRuntime:
+         user = UserMessage.text_block(prompt)
+         state.transcript.append(user)
+         self.sessions.append("user_prompt", {"agent": config.agent, "role": "user", "content": [block.to_api() for block in user.content]})
++        return False
+ 
+-        # A resumed run continues the parent's numbering, so max_turns bounds the
+-        # whole lineage rather than restarting at every resume.
+-        first_turn = state.turns + 1
+-        for turn_index in range(first_turn, max(first_turn, config.max_turns + 1)):
+-            self._heartbeat()
+-            # Ceilings are checked before spending, never after.
+-            stop = self._ceiling_stop(state)
+-            if stop is not None:
+-                yield self._finish(state, stop)
+-                return
+-            if should_compact(state.transcript, config.compaction_threshold_tokens):
+-                outcome = self._compact(state, turn_index=turn_index)
+-                if outcome.performed and outcome.boundary is not None:
+-                    state.transcript = list(outcome.transcript)
+-                    self.sessions.append(
+-                        "compact_boundary",
+-                        {"agent": config.agent, "subtype": "compact_boundary", "content": outcome.summary, "data": outcome.as_dict()},
+-                    )
+-                    yield outcome.boundary
++    def _generate(
++        self, state: _RunState, turn_index: int, turn_span: Any
++    ) -> Generator[Message, None, tuple[Generation | None, Any, list[str], int]]:
++        """One model request for this turn, retried under the policy, inside its own span.
+ 
+-            state.cost_at_turn_start = self.budget.total_cost_usd
+-            # The waiting budget is per turn (see _retry_step): "no turn may stall for more
+-            # than the deadline" is a promise an operator can check.
+-            state.turn_retry_wait_ms = 0
+-            with run_span.child(f"turn[{turn_index}]") as turn_span:
+-                turn_span.set_attributes({"turn.index": turn_index, "turn.depth": config.depth, "agent.name": config.agent})
+-                request = GenerationRequest(
+-                    system=config.system_prompt,
+-                    messages=tuple(transcript_to_api(state.transcript)),
+-                    tools=self.api_tools(),
+-                    model=config.model,
+-                    max_tokens=config.max_output_tokens,
+-                    agent=config.agent,
+-                    turn_index=turn_index,
+-                    depth=config.depth,
+-                )
+-                generation: Generation | None = None
+-                breakdown = None
+-                streamed: list[str] = []
+-                stream_withheld = 0
+-                with turn_span.child("generation") as generation_span:
+-                    generation_span.set_attributes(
+-                        {"provider.name": self.provider_name, "model": config.model, "turn.index": turn_index, "stream": config.stream}
+-                    )
++        Yields stream deltas and retry notes; returns ``(generation, breakdown, streamed,
++        stream_withheld)``. ``generation`` or ``breakdown`` is None when the turn failed.
++        """
++        config = self.config
++        request = GenerationRequest(
++            system=config.system_prompt,
++            messages=tuple(transcript_to_api(state.transcript)),
++            tools=self.api_tools(),
++            model=config.model,
++            max_tokens=config.max_output_tokens,
++            agent=config.agent,
++            turn_index=turn_index,
++            depth=config.depth,
++        )
++        generation: Generation | None = None
++        breakdown = None
++        streamed: list[str] = []
++        stream_withheld = 0
++        with turn_span.child("generation") as generation_span:
++            generation_span.set_attributes(
++                {"provider.name": self.provider_name, "model": config.model, "turn.index": turn_index, "stream": config.stream}
++            )
++            try:
++                attempt = 1
++                while True:
+                     try:
+-                        attempt = 1
+-                        while True:
+-                            try:
+-                                if config.stream:
+-                                    generation, stream_withheld = yield from self._stream_turn(request, streamed, generation_span)
+-                                else:
+-                                    candidate = self.provider.generate(request)
+-                                    if not isinstance(candidate, Generation):
+-                                        raise ProviderError(
+-                                            f"provider returned {type(candidate).__name__} instead of a Generation"
+-                                        )
+-                                    generation = candidate
+-                                break
+-                            except ProviderError as error:
+-                                # ``streamed`` is the gate: once a character has reached the
+-                                # consumer the request may not be re-issued, because the retry
+-                                # would show the same text twice and the transcript/terminal
+-                                # agreement is worth more than a recovered turn.
+-                                retry, notes = self._retry_step(
+-                                    state,
+-                                    turn_index,
+-                                    error,
+-                                    attempt=attempt,
+-                                    already_streamed=bool(streamed),
+-                                    span=generation_span,
++                        if config.stream:
++                            generation, stream_withheld = yield from self._stream_turn(request, streamed, generation_span)
++                        else:
++                            candidate = self.provider.generate(request)
++                            if not isinstance(candidate, Generation):
++                                raise ProviderError(
++                                    f"provider returned {type(candidate).__name__} instead of a Generation"
+                                 )
+-                                for note in notes:
+-                                    yield note
+-                                if not retry:
+-                                    raise
+-                                attempt += 1
++                            generation = candidate
++                        break
+                     except ProviderError as error:
+-                        # A provider that breaks its contract is a fault to report, and
+-                        # the partial text it already streamed must stay unrecorded: the
+-                        # transcript is only ever written from a complete turn.
+-                        detail = f"provider failure on turn {turn_index}: {error}"
+-                        if state.retries:
+-                            # Say what the budget did, in the line that explains the failure:
+-                            # "it failed" and "it failed after four attempts and 12 s of
+-                            # waiting, then stopped on the deadline" are different incidents.
+-                            # The turn's first request is counted at the turn head, so the running
+-                            # total is already the number of requests this run sent.
+-                            detail += (
+-                                f" (after {state.retries + 1} request(s), {state.retry_wait_ms} ms of policy waiting)"
+-                            )
+-                        state.errors.append(detail)
+-                        generation_span.record_error("ProviderError")
+-                    except Exception as error:  # noqa: BLE001 - a provider fault is an event
+-                        state.errors.append(f"provider failure on turn {turn_index}: {type(error).__name__}: {error}")
+-                        generation_span.record_error(f"{type(error).__name__}")
+-                    else:
+-                        breakdown = self.budget.observe(generation.usage, generation.model or config.model)
+-                        # Usage and cost are recorded while the generation span is
+-                        # still open. The instant it ends, OpenTelemetry discards
+-                        # any further attribute write silently and the cost simply
+-                        # goes missing from the trace with no error anywhere.
+-                        generation_span.record_usage(
+-                            generation.usage,
+-                            breakdown.total_usd,
+-                            extra={
+-                                "stop_reason": generation.stop_reason,
+-                                "pricing.estimated": breakdown.pricing_estimated,
+-                                "pricing.source": breakdown.pricing_source,
+-                                "tokens.total": generation.usage.total_tokens,
+-                            },
++                        # ``streamed`` is the gate: once a character has reached the
++                        # consumer the request may not be re-issued, because the retry
++                        # would show the same text twice and the transcript/terminal
++                        # agreement is worth more than a recovered turn.
++                        retry, notes = self._retry_step(
++                            state,
++                            turn_index,
++                            error,
++                            attempt=attempt,
++                            already_streamed=bool(streamed),
++                            span=generation_span,
+                         )
+-                if generation is None or breakdown is None:
+-                    yield self._finish(state, "error_during_execution")
+-                    return
+-                assistant = AssistantMessage(
+-                    content=_assign_tool_use_ids(generation.content, state),
+-                    model=generation.model or config.model,
+-                    usage=generation.usage,
+-                    stop_reason=generation.stop_reason,
++                        for note in notes:
++                            yield note
++                        if not retry:
++                            raise
++                        attempt += 1
++            except ProviderError as error:
++                # A provider that breaks its contract is a fault to report, and
++                # the partial text it already streamed must stay unrecorded: the
++                # transcript is only ever written from a complete turn.
++                detail = f"provider failure on turn {turn_index}: {error}"
++                if state.retries:
++                    # Say what the budget did, in the line that explains the failure:
++                    # "it failed" and "it failed after four attempts and 12 s of
++                    # waiting, then stopped on the deadline" are different incidents.
++                    # The turn's first request is counted at the turn head, so the running
++                    # total is already the number of requests this run sent.
++                    detail += (
++                        f" (after {state.retries + 1} request(s), {state.retry_wait_ms} ms of policy waiting)"
++                    )
++                state.errors.append(detail)
++                generation_span.record_error("ProviderError")
++            except Exception as error:  # noqa: BLE001 - a provider fault is an event
++                state.errors.append(f"provider failure on turn {turn_index}: {type(error).__name__}: {error}")
++                generation_span.record_error(f"{type(error).__name__}")
++            else:
++                breakdown = self.budget.observe(generation.usage, generation.model or config.model)
++                # Usage and cost are recorded while the generation span is
++                # still open. The instant it ends, OpenTelemetry discards
++                # any further attribute write silently and the cost simply
++                # goes missing from the trace with no error anywhere.
++                generation_span.record_usage(
++                    generation.usage,
++                    breakdown.total_usd,
++                    extra={
++                        "stop_reason": generation.stop_reason,
++                        "pricing.estimated": breakdown.pricing_estimated,
++                        "pricing.source": breakdown.pricing_source,
++                        "tokens.total": generation.usage.total_tokens,
++                    },
+                 )
+-                if config.stream:
+-                    problem = None
+-                    if stream_withheld:
+-                        # Our cap, our choice, our duty to say so: the live view is allowed
+-                        # to be shorter than the record, never longer and never different,
+-                        # so the check relaxes from equality to prefix. The note is an
+-                        # event and not a transcript record, which keeps the digest a run
+-                        # would have produced before streaming existed.
+-                        if not stream_comparable_text(assistant).startswith("".join(streamed)):
+-                            problem = "the forwarded text is not a prefix of the recorded turn"
+-                        else:
+-                            yield SystemMessage(
+-                                subtype="informational",
+-                                content=(
+-                                    f"streamed text for turn {turn_index} was capped at {MAX_STREAM_TURN_CHARS} chars "
+-                                    f"/ {MAX_STREAM_EVENTS_PER_TURN} event(s); {stream_withheld} char(s) reached the "
+-                                    "record but not the live view"
+-                                ),
+-                            )
+-                    else:
+-                        problem = stream_fidelity(streamed, stream_comparable_text(assistant))
+-                    if problem is not None:
+-                        # The record and what the operator watched must agree. Either
+-                        # direction of disagreement is a provider we cannot vouch for,
+-                        # and the run stops: no verdict on a turn we cannot describe.
+-                        state.errors.append(f"provider stream mismatch on turn {turn_index}: {problem}")
+-                        turn_span.set_attribute("stream.fault", problem[:200])
+-                        yield self._finish(state, "error_during_execution")
+-                        return
+-                state.transcript.append(assistant)
+-                state.turns += 1
+-                self.sessions.record_assistant(assistant, agent=config.agent)
+-                yield assistant
++        return generation, breakdown, streamed, stream_withheld
+ 
+-                calls = assistant.tool_uses
+-                if not calls:
+-                    stop_verdict = self._fire(
+-                        state,
+-                        "Stop",
+-                        HookInput(
+-                            event="Stop",
+-                            session_id=state.session_id,
+-                            agent=config.agent,
+-                            depth=config.depth,
+-                            turn_index=turn_index,
+-                            data={"transcript_messages": len(state.transcript), "final_text_chars": len(assistant.text)},
+-                        ),
+-                    )
+-                    if stop_verdict.blocked:
+-                        state.stop_blocks += 1
+-                        reason = stop_verdict.block_reason or "the run was not allowed to stop"
+-                        follow_up = UserMessage.text_block(reason, is_meta=True, meta_reason="Stop hook")
+-                        state.transcript.append(follow_up)
+-                        self.sessions.append(
+-                            "user_prompt",
+-                            {"agent": config.agent, "role": "user", "is_meta": True, "content": [block.to_api() for block in follow_up.content]},
+-                        )
+-                        continue
+-                    state.final_text = assistant.text
+-                    self._checkpoint(state, boundary="after_text")
+-                    subtype = "success"
+-                    if self.postconditions:
+-                        summary = summarise_postconditions(self.postconditions.evaluate())
+-                        record = SystemMessage(
+-                            subtype="postconditions",
+-                            content=(
+-                                f"postconditions: {summary['passed']}/{summary['checked']} passed"
+-                                if summary["ok"]
+-                                else f"postconditions: {summary['failed']} of {summary['checked']} check(s) failed"
+-                            ),
+-                            data=summary,
+-                        )
+-                        self.sessions.record_system(record, agent=config.agent)
+-                        yield record
+-                        if not summary["ok"]:
+-                            # The model asked to stop and the workspace disagrees.
+-                            # "It said it was done" is not the evidence we accept.
+-                            subtype = "error_postconditions_failed"
+-                    yield self._finish(state, subtype)
+-                    return
++    def _stream_mismatch(
++        self,
++        state: _RunState,
++        turn_index: int,
++        turn_span: Any,
++        assistant: AssistantMessage,
++        streamed: list[str],
++        stream_withheld: int,
++    ) -> Generator[Message, None, bool]:
++        """Check that what the operator watched matches what will be recorded.
++
++        Returns True when they disagree and the run has ended.
++        """
++        problem = None
++        if stream_withheld:
++            # Our cap, our choice, our duty to say so: the live view is allowed
++            # to be shorter than the record, never longer and never different,
++            # so the check relaxes from equality to prefix. The note is an
++            # event and not a transcript record, which keeps the digest a run
++            # would have produced before streaming existed.
++            if not stream_comparable_text(assistant).startswith("".join(streamed)):
++                problem = "the forwarded text is not a prefix of the recorded turn"
++            else:
++                yield SystemMessage(
++                    subtype="informational",
++                    content=(
++                        f"streamed text for turn {turn_index} was capped at {MAX_STREAM_TURN_CHARS} chars "
++                        f"/ {MAX_STREAM_EVENTS_PER_TURN} event(s); {stream_withheld} char(s) reached the "
++                        "record but not the live view"
++                    ),
++                )
++        else:
++            problem = stream_fidelity(streamed, stream_comparable_text(assistant))
++        if problem is not None:
++            # The record and what the operator watched must agree. Either
++            # direction of disagreement is a provider we cannot vouch for,
++            # and the run stops: no verdict on a turn we cannot describe.
++            state.errors.append(f"provider stream mismatch on turn {turn_index}: {problem}")
++            turn_span.set_attribute("stream.fault", problem[:200])
++            yield self._finish(state, "error_during_execution")
++            return True
++        return False
+ 
+-                results, halted = self._run_tool_batch(calls, state, turn_index=turn_index, span=turn_span)
+-                if not results:  # pragma: no cover - defensive: tool_use implies a result
+-                    results.append(ToolResultBlock(tool_use_id=calls[-1].id, content="no result produced", is_error=True))
+-                tool_message = UserMessage(content=tuple(results))
+-                state.transcript.append(tool_message)
+-                self._record_tool_message(tool_message)
+-                yield tool_message
+-                self._checkpoint(state, boundary="after_tools")
+-                if halted is not None:
+-                    yield self._finish(state, halted)
+-                    return
+-        yield self._finish(state, "error_max_turns")
++    def _finish_without_tools(
++        self, state: _RunState, turn_index: int, assistant: AssistantMessage
++    ) -> Generator[Message, None, bool]:
++        """The model answered without calling a tool: the Stop hook, postconditions, the result.
++
++        Returns True when the run has ended, False when a Stop hook sent it back for
++        another turn.
++        """
++        config = self.config
++        stop_verdict = self._fire(
++            state,
++            "Stop",
++            HookInput(
++                event="Stop",
++                session_id=state.session_id,
++                agent=config.agent,
++                depth=config.depth,
++                turn_index=turn_index,
++                data={"transcript_messages": len(state.transcript), "final_text_chars": len(assistant.text)},
++            ),
++        )
++        if stop_verdict.blocked:
++            state.stop_blocks += 1
++            reason = stop_verdict.block_reason or "the run was not allowed to stop"
++            follow_up = UserMessage.text_block(reason, is_meta=True, meta_reason="Stop hook")
++            state.transcript.append(follow_up)
++            self.sessions.append(
++                "user_prompt",
++                {"agent": config.agent, "role": "user", "is_meta": True, "content": [block.to_api() for block in follow_up.content]},
++            )
++            return False
++        state.final_text = assistant.text
++        self._checkpoint(state, boundary="after_text")
++        subtype = "success"
++        if self.postconditions:
++            summary = summarise_postconditions(self.postconditions.evaluate())
++            record = SystemMessage(
++                subtype="postconditions",
++                content=(
++                    f"postconditions: {summary['passed']}/{summary['checked']} passed"
++                    if summary["ok"]
++                    else f"postconditions: {summary['failed']} of {summary['checked']} check(s) failed"
++                ),
++                data=summary,
++            )
++            self.sessions.record_system(record, agent=config.agent)
++            yield record
++            if not summary["ok"]:
++                # The model asked to stop and the workspace disagrees.
++                # "It said it was done" is not the evidence we accept.
++                subtype = "error_postconditions_failed"
++        yield self._finish(state, subtype)
++        return True
+ 
+     def _claim_session(self) -> str | None:
+         """Take the per-session lease; return a refusal message, or ``None`` if we own it.
+diff --git a/components/northstar-agent-runtime/tools/verify_invariants.py b/components/northstar-agent-runtime/tools/verify_invariants.py
+index b53d8cf..4333253 100644
+--- a/components/northstar-agent-runtime/tools/verify_invariants.py
++++ b/components/northstar-agent-runtime/tools/verify_invariants.py
+@@ -70,8 +70,8 @@ GUARDS: list[tuple[str, str, list[tuple[str, str]], str, str]] = [
+         # Anchored on the comment above the call, not on the call's indentation: this is a
+         # nested block that has already been reflowed once, and a guard whose anchor is a
+         # whitespace accident reports "anchor not found" instead of a real result.
+-        [("                        # goes missing from the trace with no error anywhere.\n                        generation_span.record_usage(",
+-          "                        # goes missing from the trace with no error anywhere.\n                        generation_span.end()  # MUTATION: write after end\n                        generation_span.record_usage(")],
++        [("                # goes missing from the trace with no error anywhere.\n                generation_span.record_usage(",
++          "                # goes missing from the trace with no error anywhere.\n                generation_span.end()  # MUTATION: write after end\n                generation_span.record_usage(")],
+         "test_tracing*",
+         "test_no_attribute_anywhere_was_dropped_because_a_span_had_ended",
+     ),
