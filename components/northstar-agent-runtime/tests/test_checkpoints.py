@@ -444,6 +444,56 @@ class CliCheckpointTests(RuntimeTestCase):
         self.assertIn("error_max_budget_usd", out)
         self.assertNotIn("one more thing", out)
 
+    # --- policy-file ceilings must survive a checkpoint resume -----------------------
+    # A policy file (and a plugin) may only tighten. A resume that rebuilt its ceilings from
+    # the command-line values alone would silently loosen them, which is the exact failure
+    # the tighten-only rule exists to prevent.
+
+    _POLICY = 'schema_version = "northstar.policy.v1"\n'
+
+    def _fork_parent(self, root: Path, sessions: Path, script_body: list[dict]) -> str:
+        code, _, err = self.invoke(
+            "run", "--workspace", str(root), "--session-dir", str(sessions),
+            "--script", str(self._script(script_body)), "--checkpoint-turns", "1", "--prompt", "go",
+        )
+        self.assertEqual(code, 0, err)
+        return next(path.name[: -len(".jsonl")] for path in sessions.glob("*.jsonl"))
+
+    def test_a_policy_file_budget_still_binds_a_resumed_run(self):
+        root = self.workspace({".northstar/config.toml": self._POLICY + "max_budget_usd = 1.0\n"})
+        sessions = Path(self.temp_dir()) / "sessions"
+        # The parent spends more than the policy's cap in its only turn; the cap is checked
+        # before each generation, so the parent itself still ends normally.
+        parent = self._fork_parent(root, sessions, [{"text": "costly", "usage": {"input_tokens": 2_000_000}}])
+        code, out, err = self.invoke(
+            "run", "--workspace", str(root), "--session-dir", str(sessions),
+            "--script", str(self._script([{"text": "one more thing"}])),
+            "--resume-from", parent, "--prompt", "continue",
+        )
+        self.assertEqual(code, 4, f"error_max_budget_usd expected; stdout={out!r} stderr={err!r}")
+        self.assertNotIn("one more thing", out)
+
+    def test_a_policy_file_turn_ceiling_still_binds_a_resumed_run(self):
+        root = self.workspace({".northstar/config.toml": self._POLICY + "max_turns = 1\n"})
+        sessions = Path(self.temp_dir()) / "sessions"
+        parent = self._fork_parent(root, sessions, [{"text": "first answer"}])
+        code, out, err = self.invoke(
+            "run", "--workspace", str(root), "--session-dir", str(sessions),
+            "--script", str(self._script([{"text": "one more thing"}])),
+            "--resume-from", parent, "--prompt", "continue",
+        )
+        # The lineage already used its one turn: the resumed run may not start another.
+        self.assertEqual(code, 2, f"error_max_turns expected; stdout={out!r} stderr={err!r}")
+        self.assertNotIn("one more thing", out)
+
+    def test_a_cadence_the_policy_ceiling_makes_unreachable_is_refused(self):
+        root = self.workspace({".northstar/config.toml": self._POLICY + "max_turns = 2\n"})
+        code, _, err = self.invoke(
+            "run", "--workspace", str(root), "--checkpoint-turns", "5", "--prompt", "x", "--scripted-text", "y",
+        )
+        self.assertEqual(code, 64)
+        self.assertIn("no checkpoint could ever be written", err)
+
 
 class SdkParityTests(RuntimeTestCase):
     """The same guarantees through the embedding API, because that is how hosts use it."""
