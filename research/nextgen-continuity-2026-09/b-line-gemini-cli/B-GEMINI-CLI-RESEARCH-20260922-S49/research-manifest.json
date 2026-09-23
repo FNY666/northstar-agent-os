@@ -1,0 +1,154 @@
+{
+  "schema_version": "1.0",
+  "question": "What do official Gemini CLI sources establish about headless output, Plan Mode restrictions/approval, policy overrides, and model steering?",
+  "scope": "public first-party Google Gemini CLI sources only; read-only research",
+  "coverage": [
+    "headless JSON/JSONL",
+    "exit codes",
+    "Plan Mode restrictions",
+    "approval/cancel",
+    "policy modes",
+    "model steering",
+    "effect boundaries"
+  ],
+  "slice_id": "B-S49-OFFICIAL-HEADLESS-PLAN-STEERING-20260922",
+  "status": "complete",
+  "research_date": "2026-09-22",
+  "access_date": "2026-09-22",
+  "sources": [
+    {
+      "id": "S49-1",
+      "url": "https://github.com/google-gemini/gemini-cli/blob/main/docs/cli/headless.md",
+      "access_date": "2026-09-22",
+      "evidence_window": "JSON/JSONL output, event types, exit codes",
+      "evidence_level": "verified",
+      "cannot_prove": "external commit or production effect"
+    },
+    {
+      "id": "S49-2",
+      "url": "https://github.com/google-gemini/gemini-cli/blob/main/docs/cli/plan-mode.md",
+      "access_date": "2026-09-22",
+      "evidence_window": "read-only tools, approval, cancel, policy customization, hooks",
+      "evidence_level": "verified",
+      "cannot_prove": "implementation success, complete audit, rollback"
+    },
+    {
+      "id": "S49-3",
+      "url": "https://github.com/google-gemini/gemini-cli/blob/main/docs/cli/model-steering.md",
+      "access_date": "2026-09-22",
+      "evidence_window": "experimental/default-off steering and plan reevaluation",
+      "evidence_level": "verified",
+      "cannot_prove": "cancellation, fencing, external state"
+    },
+    {
+      "id": "S49-4",
+      "url": "https://github.com/google-gemini/gemini-cli/blob/main/docs/cli/tutorials/plan-mode-steering.md",
+      "access_date": "2026-09-22",
+      "evidence_window": "research-time steering and post-approval implementation workflow",
+      "evidence_level": "verified",
+      "cannot_prove": "production effect"
+    }
+  ],
+  "claims": [
+    {
+      "id": "C1",
+      "claim": "Headless mode documents JSON and JSONL outputs with tool and error events and standard exit codes.",
+      "status": "confirmed",
+      "confidence": "high",
+      "sources": [
+        {
+          "url": "https://github.com/google-gemini/gemini-cli/blob/main/docs/cli/headless.md",
+          "publisher": "Google Gemini CLI",
+          "published_or_updated": "2026-09-22 repository snapshot",
+          "tier": "primary",
+          "support": "Headless technical reference."
+        }
+      ],
+      "caveat": "Reported process/tool state is not external-effect verification."
+    },
+    {
+      "id": "C2",
+      "claim": "Plan Mode defaults to read-only exploration, limits file writes to plan artifacts, and requires explicit confirmation for web_fetch; it has mode-specific restrictions.",
+      "status": "confirmed",
+      "confidence": "high",
+      "sources": [
+        {
+          "url": "https://github.com/google-gemini/gemini-cli/blob/main/docs/cli/plan-mode.md",
+          "publisher": "Google Gemini CLI",
+          "published_or_updated": "2026-09-22 repository snapshot",
+          "tier": "primary",
+          "support": "Tool Restrictions and workflow sections."
+        }
+      ],
+      "caveat": "Custom policy may change effective behavior; audit active policy."
+    },
+    {
+      "id": "C3",
+      "claim": "Plan workflow asks for user confirmation, produces a plan, waits for formal approval, and begins implementation only after approval; Esc cancels the plan.",
+      "status": "confirmed",
+      "confidence": "high",
+      "sources": [
+        {
+          "url": "https://github.com/google-gemini/gemini-cli/blob/main/docs/cli/plan-mode.md",
+          "publisher": "Google Gemini CLI",
+          "published_or_updated": "2026-09-22 repository snapshot",
+          "tier": "primary",
+          "support": "How to use Plan Mode."
+        }
+      ],
+      "caveat": "Approval is not proof implementation completed."
+    },
+    {
+      "id": "C4",
+      "claim": "Model steering is experimental and default-off; steering hints can cause plan reevaluation and adjustment of subsequent actions.",
+      "status": "confirmed",
+      "confidence": "high",
+      "sources": [
+        {
+          "url": "https://github.com/google-gemini/gemini-cli/blob/main/docs/cli/model-steering.md",
+          "publisher": "Google Gemini CLI",
+          "published_or_updated": "2026-09-22 repository snapshot",
+          "tier": "primary",
+          "support": "Enabling and how-it-works sections."
+        }
+      ],
+      "caveat": "Steering is not cancellation, rollback, or fencing."
+    },
+    {
+      "id": "C5",
+      "claim": "Exactly-once, external persistence, post-timeout/disconnect state, complete audit delivery, and production business effect remain unknown.",
+      "status": "unverified",
+      "confidence": "high",
+      "sources": [
+        {
+          "url": "https://github.com/google-gemini/gemini-cli/blob/main/docs/cli/headless.md",
+          "publisher": "Google Gemini CLI",
+          "published_or_updated": "2026-09-22 repository snapshot",
+          "tier": "primary",
+          "support": "Output and exit code docs do not define distributed effect guarantees."
+        },
+        {
+          "url": "https://github.com/google-gemini/gemini-cli/blob/main/docs/cli/plan-mode.md",
+          "publisher": "Google Gemini CLI",
+          "published_or_updated": "2026-09-22 repository snapshot",
+          "tier": "primary",
+          "support": "Approval/policy docs do not define external effect guarantees."
+        }
+      ],
+      "caveat": "Ambiguous outcomes remain UNKNOWN until independent read-back/reconciliation."
+    }
+  ],
+  "limitations": [
+    "Documentation only",
+    "No live CLI/service",
+    "No credentials/production access"
+  ],
+  "production_verified": false,
+  "unknowns": [
+    "exactly-once",
+    "external persistence",
+    "timeout/disconnect state",
+    "audit delivery",
+    "production effect"
+  ]
+}

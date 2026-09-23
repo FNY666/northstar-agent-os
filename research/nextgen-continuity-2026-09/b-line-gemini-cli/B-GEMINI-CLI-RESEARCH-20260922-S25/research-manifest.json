@@ -1,0 +1,41 @@
+{
+  "schema_version": "1.0",
+  "question": "What can a deterministic offline journal model classify at simulated crash and restart boundaries without making production durability claims?",
+  "manifest_version": "S25-1",
+  "slice_id": "S25",
+  "title": "offline synthetic restart-window slice",
+  "synthetic_only": true,
+  "production_verified": false,
+  "worker_id": "worker-s25-01",
+  "op_id": "op-s25-0001",
+  "attempts": [1, 2],
+  "network_access": false,
+  "real_services_accessed": false,
+  "real_gemini_cli_accessed": false,
+  "credentials_accessed": false,
+  "prior_research_read": false,
+  "prohibited_paths_accessed": [],
+  "scope": {
+    "mode": "offline synthetic-only",
+    "included": ["before-record", "record-before-response", "response-before-record", "local journal classification"],
+    "excluded": ["real Gemini CLI", "real services", "credentials", "crash durability", "remote state", "exactly-once", "rollback", "production safety"]
+  },
+  "required_artifacts": ["REPORT.md", "sources.md", "research-manifest.json", "SHA256SUMS", "harness.py", "fixtures/cases.json", "outputs/results.json"],
+  "fixture_count": 12,
+  "classifications": {"accepted": 3, "rejected": 2, "UNKNOWN": 7},
+  "evidence_statuses": ["confirmed", "inferred", "unverified", "conflicting", "inaccessible"],
+  "claims": [
+    {"id": "C1", "claim": "The local harness deterministically reproduces all 12 authored fixture classifications.", "status": "inferred", "confidence": "high", "sources": [], "caveat": "This is a local execution property, not external product evidence."},
+    {"id": "C2", "claim": "A response-before-record boundary remains UNKNOWN under this local rule.", "status": "inferred", "confidence": "high", "sources": [], "caveat": "The rule is intentionally conservative and synthetic."},
+    {"id": "C3", "claim": "A record-before-response boundary with a stable matching value and references is classified accepted by this harness.", "status": "inferred", "confidence": "high", "sources": [], "caveat": "Accepted means accepted by the local classifier only."},
+    {"id": "C4", "claim": "Real crash durability, remote state, exactly-once behavior, rollback, and production safety are not established.", "status": "unverified", "confidence": "high", "sources": [], "caveat": "Those properties were explicitly excluded from the experiment."},
+    {"id": "C5", "claim": "Any assertion that this synthetic run proves Gemini CLI or production behavior conflicts with the declared scope.", "status": "conflicting", "confidence": "high", "sources": [], "caveat": "No external system was accessed."},
+    {"id": "C6", "claim": "Real Gemini CLI, real services, credentials, and prohibited research artifacts were inaccessible by design.", "status": "inaccessible", "confidence": "high", "sources": [], "caveat": "Inaccessible here does not describe their real-world validity."}
+  ],
+  "coverage": {
+    "searched": ["new local fixtures and harness only"],
+    "inaccessible": ["real Gemini CLI", "real services", "credentials", "prior research artifacts"],
+    "unresolved_conflicts": ["real persistence semantics", "remote state", "crash recovery behavior"]
+  },
+  "disclaimer": "Results must not be interpreted as real crash durability, remote state, exactly-once, rollback, or production safety."
+}

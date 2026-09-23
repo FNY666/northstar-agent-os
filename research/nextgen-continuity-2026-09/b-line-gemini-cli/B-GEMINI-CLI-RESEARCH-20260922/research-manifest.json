@@ -1,0 +1,30 @@
+{
+  "schema_version": "1.0",
+  "research_id": "B-GEMINI-CLI-RESEARCH-20260922",
+  "question": "How does Gemini CLI structure task lifecycle, permission boundaries, audit surfaces, and failure recovery?",
+  "title": "Gemini CLI lifecycle, permissions, audit, and failure recovery",
+  "date": "2026-09-22",
+  "scope": "public first-party sources only",
+  "coverage": {"product":"Google Gemini CLI","version":"main branch documentation accessed 2026-09-22","topics":["lifecycle","permissions","sandbox","trusted folders","checkpointing","sessions","headless mode","telemetry"]},
+  "artifact": "REPORT.md",
+  "sources": [
+    {"url":"https://github.com/google-gemini/gemini-cli","tier":"primary","status":"verified_accessed"},
+    {"url":"https://raw.githubusercontent.com/google-gemini/gemini-cli/main/docs/cli/sandbox.md","tier":"primary","status":"verified_fetched"},
+    {"url":"https://raw.githubusercontent.com/google-gemini/gemini-cli/main/docs/cli/checkpointing.md","tier":"primary","status":"verified_fetched"},
+    {"url":"https://raw.githubusercontent.com/google-gemini/gemini-cli/main/docs/cli/session-management.md","tier":"primary","status":"verified_fetched"},
+    {"url":"https://raw.githubusercontent.com/google-gemini/gemini-cli/main/docs/cli/trusted-folders.md","tier":"primary","status":"verified_fetched"},
+    {"url":"https://raw.githubusercontent.com/google-gemini/gemini-cli/main/docs/cli/telemetry.md","tier":"primary","status":"verified_fetched"},
+    {"url":"https://raw.githubusercontent.com/google-gemini/gemini-cli/main/docs/cli/headless.md","tier":"primary","status":"verified_fetched"},
+    {"url":"https://raw.githubusercontent.com/google-gemini/gemini-cli/main/docs/cli/settings.md","tier":"primary","status":"verified_fetched"}
+  ],
+  "claims": [
+    {"id":"C1","claim":"interactive/headless/JSON/stream lifecycle surfaces documented","status":"confirmed","confidence":"high","class":"D","sources":[{"url":"https://raw.githubusercontent.com/google-gemini/gemini-cli/main/docs/cli/headless.md","publisher":"Google Gemini CLI","published_or_updated":"main branch accessed 2026-09-22","tier":"primary","support":"Documents headless output and lifecycle surfaces."},{"url":"https://raw.githubusercontent.com/google-gemini/gemini-cli/main/docs/cli/session-management.md","publisher":"Google Gemini CLI","published_or_updated":"main branch accessed 2026-09-22","tier":"primary","support":"Documents session management surfaces."}],"caveat":"Documentation describes available surfaces; it does not independently measure runtime reliability."},
+    {"id":"C2","claim":"checkpoint/rewind is a local recovery boundary, not proof of external rollback","status":"inferred","confidence":"medium","class":"D","sources":[{"url":"https://raw.githubusercontent.com/google-gemini/gemini-cli/main/docs/cli/checkpointing.md","publisher":"Google Gemini CLI","published_or_updated":"main branch accessed 2026-09-22","tier":"primary","support":"Documents checkpoint and restore behavior."}],"caveat":"The docs do not establish rollback of effects outside the local workspace."},
+    {"id":"C3","claim":"trust, sandbox, approval, and postcondition proof are distinct","status":"inferred","confidence":"medium","class":"D","sources":[{"url":"https://raw.githubusercontent.com/google-gemini/gemini-cli/main/docs/cli/sandbox.md","publisher":"Google Gemini CLI","published_or_updated":"main branch accessed 2026-09-22","tier":"primary","support":"Documents sandbox configuration and boundaries."},{"url":"https://raw.githubusercontent.com/google-gemini/gemini-cli/main/docs/cli/trusted-folders.md","publisher":"Google Gemini CLI","published_or_updated":"main branch accessed 2026-09-22","tier":"primary","support":"Documents trusted-folder decisions."},{"url":"https://raw.githubusercontent.com/google-gemini/gemini-cli/main/docs/cli/settings.md","publisher":"Google Gemini CLI","published_or_updated":"main branch accessed 2026-09-22","tier":"primary","support":"Documents configurable permission and policy settings."}],"caveat":"This is a design interpretation, not a measured claim about every configuration."},
+    {"id":"C4","claim":"telemetry alone is not complete business audit evidence","status":"inferred","confidence":"high","class":"D","sources":[{"url":"https://raw.githubusercontent.com/google-gemini/gemini-cli/main/docs/cli/telemetry.md","publisher":"Google Gemini CLI","published_or_updated":"main branch accessed 2026-09-22","tier":"primary","support":"Documents telemetry configuration and emitted observability signals."}],"caveat":"Telemetry coverage and retention depend on configuration and deployment."},
+    {"id":"C5","claim":"exactly-once for external tools","status":"unverified","confidence":"low","class":"D","sources":[{"url":"https://raw.githubusercontent.com/google-gemini/gemini-cli/main/docs/cli/checkpointing.md","publisher":"Google Gemini CLI","published_or_updated":"main branch accessed 2026-09-22","tier":"primary","support":"Checkpoint documentation does not establish exactly-once external effects."}],"caveat":"No first-party source reviewed here proves exactly-once external side effects."}
+  ],
+  "production_verified": false,
+  "synthetic_only": false,
+  "notes": ["Official docs are primary design evidence, not empirical effectiveness evidence.","No protected/shared/production target accessed."]
+}

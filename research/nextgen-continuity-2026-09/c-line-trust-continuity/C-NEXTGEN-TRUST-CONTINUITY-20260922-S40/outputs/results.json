@@ -1,0 +1,308 @@
+{
+  "all_cases_match": true,
+  "case_count": 25,
+  "claims_status": "inferred",
+  "class_distribution": {
+    "DELAYED": 3,
+    "DROPPED": 2,
+    "EXPORTER_FAILURE": 4,
+    "NO_EVENT": 2,
+    "QUERY_GAP": 6,
+    "RETENTION_EXPIRED": 1,
+    "VERIFIED_CONTINUITY": 7
+  },
+  "coverage": [
+    "NO_EVENT",
+    "DELAYED",
+    "DROPPED",
+    "EXPORTER_FAILURE",
+    "QUERY_GAP",
+    "RETENTION_EXPIRED",
+    "VERIFIED_CONTINUITY",
+    "PLATFORM_RECEIPT",
+    "DURABLE_LOG",
+    "EXTERNAL_EFFECT"
+  ],
+  "digest": "c59c75b7e218058e97658c80680edb28e2fa9677a6a8d094c19fa6e425fbd0c5",
+  "production_verified": false,
+  "property_sweep": {
+    "combinations": 2097152,
+    "counts": {
+      "RECOVERED": 1,
+      "REJECT": 1572864,
+      "UNKNOWN": 524287
+    },
+    "dimensions": 21,
+    "fields": [
+      "same_identity",
+      "identity_conflict",
+      "window_declared",
+      "window_bounds_closed",
+      "source_scope_complete",
+      "platform_receipt_attested",
+      "durable_log_attested",
+      "external_effect_attested",
+      "event_time_closed",
+      "ingest_time_closed",
+      "watermark_closed",
+      "retention_closed",
+      "pagination_closed",
+      "query_gap_absent",
+      "export_attempt_closed",
+      "exporter_failure_absent",
+      "delay_explained",
+      "drop_explained",
+      "no_event_contract_known",
+      "state_conflict",
+      "unknown_commit"
+    ],
+    "single_gate_minimizer": [
+      {
+        "bits": [],
+        "mask": 0,
+        "target": "UNKNOWN"
+      },
+      {
+        "bits": [
+          1
+        ],
+        "mask": 2,
+        "target": "REJECT"
+      },
+      {
+        "bits": [
+          0,
+          2,
+          3,
+          4,
+          5,
+          6,
+          7,
+          8,
+          9,
+          10,
+          11,
+          12,
+          13,
+          14,
+          15,
+          16,
+          17,
+          18
+        ],
+        "mask": 524285,
+        "target": "RECOVERED"
+      }
+    ]
+  },
+  "results": [
+    {
+      "class": "VERIFIED_CONTINUITY",
+      "evidence_count": 1,
+      "expected": "RECOVERED",
+      "id": "verified-continuity",
+      "match": true,
+      "status": "RECOVERED"
+    },
+    {
+      "class": "DELAYED",
+      "evidence_count": 2,
+      "expected": "RECOVERED",
+      "id": "delayed-closed",
+      "match": true,
+      "status": "RECOVERED"
+    },
+    {
+      "class": "NO_EVENT",
+      "evidence_count": 2,
+      "expected": "RECOVERED",
+      "id": "no-event-contract",
+      "match": true,
+      "status": "RECOVERED"
+    },
+    {
+      "class": "VERIFIED_CONTINUITY",
+      "evidence_count": 2,
+      "expected": "RECOVERED",
+      "id": "platform-log-effect-closed",
+      "match": true,
+      "status": "RECOVERED"
+    },
+    {
+      "class": "DROPPED",
+      "evidence_count": 2,
+      "expected": "RECOVERED",
+      "id": "dropped-explained",
+      "match": true,
+      "status": "RECOVERED"
+    },
+    {
+      "class": "EXPORTER_FAILURE",
+      "evidence_count": 2,
+      "expected": "RECOVERED",
+      "id": "exporter-failure-recovered",
+      "match": true,
+      "status": "RECOVERED"
+    },
+    {
+      "class": "DELAYED",
+      "evidence_count": 1,
+      "expected": "UNKNOWN",
+      "id": "delayed-unbounded",
+      "match": true,
+      "status": "UNKNOWN"
+    },
+    {
+      "class": "DROPPED",
+      "evidence_count": 1,
+      "expected": "UNKNOWN",
+      "id": "dropped-unexplained",
+      "match": true,
+      "status": "UNKNOWN"
+    },
+    {
+      "class": "EXPORTER_FAILURE",
+      "evidence_count": 1,
+      "expected": "UNKNOWN",
+      "id": "exporter-failure-open",
+      "match": true,
+      "status": "UNKNOWN"
+    },
+    {
+      "class": "QUERY_GAP",
+      "evidence_count": 1,
+      "expected": "UNKNOWN",
+      "id": "query-gap",
+      "match": true,
+      "status": "UNKNOWN"
+    },
+    {
+      "class": "RETENTION_EXPIRED",
+      "evidence_count": 1,
+      "expected": "UNKNOWN",
+      "id": "retention-expired",
+      "match": true,
+      "status": "UNKNOWN"
+    },
+    {
+      "class": "NO_EVENT",
+      "evidence_count": 1,
+      "expected": "UNKNOWN",
+      "id": "no-event-unknown",
+      "match": true,
+      "status": "UNKNOWN"
+    },
+    {
+      "class": "QUERY_GAP",
+      "evidence_count": 1,
+      "expected": "UNKNOWN",
+      "id": "window-open",
+      "match": true,
+      "status": "UNKNOWN"
+    },
+    {
+      "class": "QUERY_GAP",
+      "evidence_count": 1,
+      "expected": "UNKNOWN",
+      "id": "source-scope-open",
+      "match": true,
+      "status": "UNKNOWN"
+    },
+    {
+      "class": "VERIFIED_CONTINUITY",
+      "evidence_count": 1,
+      "expected": "UNKNOWN",
+      "id": "platform-only",
+      "match": true,
+      "status": "UNKNOWN"
+    },
+    {
+      "class": "VERIFIED_CONTINUITY",
+      "evidence_count": 1,
+      "expected": "UNKNOWN",
+      "id": "log-only",
+      "match": true,
+      "status": "UNKNOWN"
+    },
+    {
+      "class": "VERIFIED_CONTINUITY",
+      "evidence_count": 1,
+      "expected": "UNKNOWN",
+      "id": "effect-only",
+      "match": true,
+      "status": "UNKNOWN"
+    },
+    {
+      "class": "DELAYED",
+      "evidence_count": 1,
+      "expected": "UNKNOWN",
+      "id": "watermark-open",
+      "match": true,
+      "status": "UNKNOWN"
+    },
+    {
+      "class": "QUERY_GAP",
+      "evidence_count": 1,
+      "expected": "UNKNOWN",
+      "id": "pagination-open",
+      "match": true,
+      "status": "UNKNOWN"
+    },
+    {
+      "class": "EXPORTER_FAILURE",
+      "evidence_count": 1,
+      "expected": "UNKNOWN",
+      "id": "export-attempt-open",
+      "match": true,
+      "status": "UNKNOWN"
+    },
+    {
+      "class": "QUERY_GAP",
+      "evidence_count": 1,
+      "expected": "UNKNOWN",
+      "id": "identity-unresolved",
+      "match": true,
+      "status": "UNKNOWN"
+    },
+    {
+      "class": "EXPORTER_FAILURE",
+      "evidence_count": 1,
+      "expected": "UNKNOWN",
+      "id": "unknown-commit",
+      "match": true,
+      "status": "UNKNOWN"
+    },
+    {
+      "class": "VERIFIED_CONTINUITY",
+      "evidence_count": 1,
+      "expected": "REJECT",
+      "id": "state-conflict",
+      "match": true,
+      "status": "REJECT"
+    },
+    {
+      "class": "QUERY_GAP",
+      "evidence_count": 1,
+      "expected": "REJECT",
+      "id": "identity-conflict",
+      "match": true,
+      "status": "REJECT"
+    },
+    {
+      "class": "VERIFIED_CONTINUITY",
+      "evidence_count": 1,
+      "expected": "REJECT",
+      "id": "receipt-effect-conflict",
+      "match": true,
+      "status": "REJECT"
+    }
+  ],
+  "schema_version": "S40-results-1",
+  "sources": [],
+  "status_distribution": {
+    "RECOVERED": 6,
+    "REJECT": 3,
+    "UNKNOWN": 16
+  },
+  "synthetic_only": true
+}

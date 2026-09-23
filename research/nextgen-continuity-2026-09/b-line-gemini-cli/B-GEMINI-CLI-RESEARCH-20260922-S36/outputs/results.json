@@ -1,0 +1,1059 @@
+{
+  "fixture_count": 24,
+  "invariants": {
+    "baseline_conflicts_zero": true,
+    "mutated_conflicts_match_theory": true,
+    "unknown_to_accepted_is_conflict": true,
+    "unobservable_semantics": "unknown"
+  },
+  "mutation": {
+    "file": "impl_b_mut.py",
+    "from": "unknown",
+    "function": "verdict_for",
+    "operation": "R",
+    "theoretical_impact_fixtures": [
+      "F03_R",
+      "F06_PR",
+      "F07_QR",
+      "F10_RX",
+      "F11_PQR",
+      "F13_PRX",
+      "F14_QRX",
+      "F15_PQRX",
+      "F16_RR",
+      "F18_PPR",
+      "F19_QQR",
+      "F20_PRR",
+      "F21_QRX",
+      "F22_PQRR",
+      "F23_RXX",
+      "F24_PQRX_DUP"
+    ],
+    "to": "accepted"
+  },
+  "offline": true,
+  "operation_set": [
+    "P",
+    "Q",
+    "R",
+    "X"
+  ],
+  "pairs": {
+    "baseline": {
+      "conflict_count": 0,
+      "conflict_fixtures": [],
+      "left_impl": "impl_a.py",
+      "results": [
+        {
+          "canonical_input_sha256": "aa1a5d44e3c509864181bef39634235313bca8772a8a6a76548fe8c422bb634d",
+          "conflict": false,
+          "fixture_id": "F01_P",
+          "fixture_verdict_map": {
+            "left": {
+              "P": "accepted"
+            },
+            "right": {
+              "P": "accepted"
+            }
+          },
+          "left_impl": "impl_a.py",
+          "pair_type": "baseline",
+          "right_impl": "impl_b_baseline.py",
+          "status": "INTEROP_OK",
+          "unknown_to_accepted_caught": false
+        },
+        {
+          "canonical_input_sha256": "889108232a2c9c843fc8190b63deac25103ee4e7f2a203721f2758ecef5ed9c8",
+          "conflict": false,
+          "fixture_id": "F02_Q",
+          "fixture_verdict_map": {
+            "left": {
+              "Q": "rejected"
+            },
+            "right": {
+              "Q": "rejected"
+            }
+          },
+          "left_impl": "impl_a.py",
+          "pair_type": "baseline",
+          "right_impl": "impl_b_baseline.py",
+          "status": "INTEROP_OK",
+          "unknown_to_accepted_caught": false
+        },
+        {
+          "canonical_input_sha256": "039332fdfe70f93f95d7eee3d9b9e1c0f5d3e3032b51c698387870db8088474a",
+          "conflict": false,
+          "fixture_id": "F03_R",
+          "fixture_verdict_map": {
+            "left": {
+              "R": "unknown"
+            },
+            "right": {
+              "R": "unknown"
+            }
+          },
+          "left_impl": "impl_a.py",
+          "pair_type": "baseline",
+          "right_impl": "impl_b_baseline.py",
+          "status": "INTEROP_OK",
+          "unknown_to_accepted_caught": false
+        },
+        {
+          "canonical_input_sha256": "9b47dd0a9c1c8c9556317b7bf48d0a430cbbf55eaaf1a7118f8e2d392c2eb689",
+          "conflict": false,
+          "fixture_id": "F04_X",
+          "fixture_verdict_map": {
+            "left": {
+              "X": "unknown"
+            },
+            "right": {
+              "X": "unknown"
+            }
+          },
+          "left_impl": "impl_a.py",
+          "pair_type": "baseline",
+          "right_impl": "impl_b_baseline.py",
+          "status": "INTEROP_OK",
+          "unknown_to_accepted_caught": false
+        },
+        {
+          "canonical_input_sha256": "8d5d643c1608b9243b0b1e4454229befe3d06703ebd8f0357742e72128a4626f",
+          "conflict": false,
+          "fixture_id": "F05_PQ",
+          "fixture_verdict_map": {
+            "left": {
+              "P": "accepted",
+              "Q": "rejected"
+            },
+            "right": {
+              "P": "accepted",
+              "Q": "rejected"
+            }
+          },
+          "left_impl": "impl_a.py",
+          "pair_type": "baseline",
+          "right_impl": "impl_b_baseline.py",
+          "status": "INTEROP_OK",
+          "unknown_to_accepted_caught": false
+        },
+        {
+          "canonical_input_sha256": "97ae6e5753e51b965f0f763d264f45b0cfb545a10048212e61f365c3eda67106",
+          "conflict": false,
+          "fixture_id": "F06_PR",
+          "fixture_verdict_map": {
+            "left": {
+              "P": "accepted",
+              "R": "unknown"
+            },
+            "right": {
+              "P": "accepted",
+              "R": "unknown"
+            }
+          },
+          "left_impl": "impl_a.py",
+          "pair_type": "baseline",
+          "right_impl": "impl_b_baseline.py",
+          "status": "INTEROP_OK",
+          "unknown_to_accepted_caught": false
+        },
+        {
+          "canonical_input_sha256": "03ec4e1c5a97168c3d1e629ef577c0d3fb7efd07ce94a62fc54ecb4ae9f15b5f",
+          "conflict": false,
+          "fixture_id": "F07_QR",
+          "fixture_verdict_map": {
+            "left": {
+              "Q": "rejected",
+              "R": "unknown"
+            },
+            "right": {
+              "Q": "rejected",
+              "R": "unknown"
+            }
+          },
+          "left_impl": "impl_a.py",
+          "pair_type": "baseline",
+          "right_impl": "impl_b_baseline.py",
+          "status": "INTEROP_OK",
+          "unknown_to_accepted_caught": false
+        },
+        {
+          "canonical_input_sha256": "ade98a0bf143e4eab356c595e1ff8c85b3983c60a9d2e017b94fabf368c2df9a",
+          "conflict": false,
+          "fixture_id": "F08_PX",
+          "fixture_verdict_map": {
+            "left": {
+              "P": "accepted",
+              "X": "unknown"
+            },
+            "right": {
+              "P": "accepted",
+              "X": "unknown"
+            }
+          },
+          "left_impl": "impl_a.py",
+          "pair_type": "baseline",
+          "right_impl": "impl_b_baseline.py",
+          "status": "INTEROP_OK",
+          "unknown_to_accepted_caught": false
+        },
+        {
+          "canonical_input_sha256": "8baf48af141a85f07a3ac0d3bdaa867e88ba93c20e9c998e9bbf54a08e8e0e98",
+          "conflict": false,
+          "fixture_id": "F09_QX",
+          "fixture_verdict_map": {
+            "left": {
+              "Q": "rejected",
+              "X": "unknown"
+            },
+            "right": {
+              "Q": "rejected",
+              "X": "unknown"
+            }
+          },
+          "left_impl": "impl_a.py",
+          "pair_type": "baseline",
+          "right_impl": "impl_b_baseline.py",
+          "status": "INTEROP_OK",
+          "unknown_to_accepted_caught": false
+        },
+        {
+          "canonical_input_sha256": "a7c6921ed8b229559dc7654ae921ff9e1815802dc8a5f3a484f49645199284c0",
+          "conflict": false,
+          "fixture_id": "F10_RX",
+          "fixture_verdict_map": {
+            "left": {
+              "R": "unknown",
+              "X": "unknown"
+            },
+            "right": {
+              "R": "unknown",
+              "X": "unknown"
+            }
+          },
+          "left_impl": "impl_a.py",
+          "pair_type": "baseline",
+          "right_impl": "impl_b_baseline.py",
+          "status": "INTEROP_OK",
+          "unknown_to_accepted_caught": false
+        },
+        {
+          "canonical_input_sha256": "a2f1ef1dda764c70a9ae763f6fc1bc9ce78c51ebdf7d0675784188d23631a067",
+          "conflict": false,
+          "fixture_id": "F11_PQR",
+          "fixture_verdict_map": {
+            "left": {
+              "P": "accepted",
+              "Q": "rejected",
+              "R": "unknown"
+            },
+            "right": {
+              "P": "accepted",
+              "Q": "rejected",
+              "R": "unknown"
+            }
+          },
+          "left_impl": "impl_a.py",
+          "pair_type": "baseline",
+          "right_impl": "impl_b_baseline.py",
+          "status": "INTEROP_OK",
+          "unknown_to_accepted_caught": false
+        },
+        {
+          "canonical_input_sha256": "b7997a0d1ee1491e36c55a54e682dd636e6f9921a94b9c664a7797ab1eabb427",
+          "conflict": false,
+          "fixture_id": "F12_PQX",
+          "fixture_verdict_map": {
+            "left": {
+              "P": "accepted",
+              "Q": "rejected",
+              "X": "unknown"
+            },
+            "right": {
+              "P": "accepted",
+              "Q": "rejected",
+              "X": "unknown"
+            }
+          },
+          "left_impl": "impl_a.py",
+          "pair_type": "baseline",
+          "right_impl": "impl_b_baseline.py",
+          "status": "INTEROP_OK",
+          "unknown_to_accepted_caught": false
+        },
+        {
+          "canonical_input_sha256": "25b9453bdb418db88a6e7869832c69359cd93e639efbffa582c2fe5572fd2848",
+          "conflict": false,
+          "fixture_id": "F13_PRX",
+          "fixture_verdict_map": {
+            "left": {
+              "P": "accepted",
+              "R": "unknown",
+              "X": "unknown"
+            },
+            "right": {
+              "P": "accepted",
+              "R": "unknown",
+              "X": "unknown"
+            }
+          },
+          "left_impl": "impl_a.py",
+          "pair_type": "baseline",
+          "right_impl": "impl_b_baseline.py",
+          "status": "INTEROP_OK",
+          "unknown_to_accepted_caught": false
+        },
+        {
+          "canonical_input_sha256": "6f52aa46e0031ae99d125694296d765520e16f06c6e095334cfc34034e7ed3f0",
+          "conflict": false,
+          "fixture_id": "F14_QRX",
+          "fixture_verdict_map": {
+            "left": {
+              "Q": "rejected",
+              "R": "unknown",
+              "X": "unknown"
+            },
+            "right": {
+              "Q": "rejected",
+              "R": "unknown",
+              "X": "unknown"
+            }
+          },
+          "left_impl": "impl_a.py",
+          "pair_type": "baseline",
+          "right_impl": "impl_b_baseline.py",
+          "status": "INTEROP_OK",
+          "unknown_to_accepted_caught": false
+        },
+        {
+          "canonical_input_sha256": "f28e49eea22615542c8e4ba877dc8874583609b13188128a264d5aaa28e20c9a",
+          "conflict": false,
+          "fixture_id": "F15_PQRX",
+          "fixture_verdict_map": {
+            "left": {
+              "P": "accepted",
+              "Q": "rejected",
+              "R": "unknown",
+              "X": "unknown"
+            },
+            "right": {
+              "P": "accepted",
+              "Q": "rejected",
+              "R": "unknown",
+              "X": "unknown"
+            }
+          },
+          "left_impl": "impl_a.py",
+          "pair_type": "baseline",
+          "right_impl": "impl_b_baseline.py",
+          "status": "INTEROP_OK",
+          "unknown_to_accepted_caught": false
+        },
+        {
+          "canonical_input_sha256": "dceb141fdd4d8541f39cfd69aee4b3806f7c76512c6fe58286445a48f25b9552",
+          "conflict": false,
+          "fixture_id": "F16_RR",
+          "fixture_verdict_map": {
+            "left": {
+              "R": "unknown"
+            },
+            "right": {
+              "R": "unknown"
+            }
+          },
+          "left_impl": "impl_a.py",
+          "pair_type": "baseline",
+          "right_impl": "impl_b_baseline.py",
+          "status": "INTEROP_OK",
+          "unknown_to_accepted_caught": false
+        },
+        {
+          "canonical_input_sha256": "3a4e72b55d9d894a1a3d081fd4fbb922692b955470b51cce235a502fa2b13355",
+          "conflict": false,
+          "fixture_id": "F17_XX",
+          "fixture_verdict_map": {
+            "left": {
+              "X": "unknown"
+            },
+            "right": {
+              "X": "unknown"
+            }
+          },
+          "left_impl": "impl_a.py",
+          "pair_type": "baseline",
+          "right_impl": "impl_b_baseline.py",
+          "status": "INTEROP_OK",
+          "unknown_to_accepted_caught": false
+        },
+        {
+          "canonical_input_sha256": "d746f4e0829feba18419cdd1c25ac516c4087ba1c892351db7e48608a012b172",
+          "conflict": false,
+          "fixture_id": "F18_PPR",
+          "fixture_verdict_map": {
+            "left": {
+              "P": "accepted",
+              "R": "unknown"
+            },
+            "right": {
+              "P": "accepted",
+              "R": "unknown"
+            }
+          },
+          "left_impl": "impl_a.py",
+          "pair_type": "baseline",
+          "right_impl": "impl_b_baseline.py",
+          "status": "INTEROP_OK",
+          "unknown_to_accepted_caught": false
+        },
+        {
+          "canonical_input_sha256": "0248ca4164190fd6553ba7c510ea2b0c7d284158cbb5a2939104b7f598aed4e5",
+          "conflict": false,
+          "fixture_id": "F19_QQR",
+          "fixture_verdict_map": {
+            "left": {
+              "Q": "rejected",
+              "R": "unknown"
+            },
+            "right": {
+              "Q": "rejected",
+              "R": "unknown"
+            }
+          },
+          "left_impl": "impl_a.py",
+          "pair_type": "baseline",
+          "right_impl": "impl_b_baseline.py",
+          "status": "INTEROP_OK",
+          "unknown_to_accepted_caught": false
+        },
+        {
+          "canonical_input_sha256": "cd5fbea48a4cee40e328bf2335878fb87ffc2644e243a1eb0058a3a9aae2494e",
+          "conflict": false,
+          "fixture_id": "F20_PRR",
+          "fixture_verdict_map": {
+            "left": {
+              "P": "accepted",
+              "R": "unknown"
+            },
+            "right": {
+              "P": "accepted",
+              "R": "unknown"
+            }
+          },
+          "left_impl": "impl_a.py",
+          "pair_type": "baseline",
+          "right_impl": "impl_b_baseline.py",
+          "status": "INTEROP_OK",
+          "unknown_to_accepted_caught": false
+        },
+        {
+          "canonical_input_sha256": "63e8296da0bc3ebe410581116dd826022de86356953789e68ec4fa9651e7deea",
+          "conflict": false,
+          "fixture_id": "F21_QRX",
+          "fixture_verdict_map": {
+            "left": {
+              "Q": "rejected",
+              "R": "unknown",
+              "X": "unknown"
+            },
+            "right": {
+              "Q": "rejected",
+              "R": "unknown",
+              "X": "unknown"
+            }
+          },
+          "left_impl": "impl_a.py",
+          "pair_type": "baseline",
+          "right_impl": "impl_b_baseline.py",
+          "status": "INTEROP_OK",
+          "unknown_to_accepted_caught": false
+        },
+        {
+          "canonical_input_sha256": "c812a5b554c538cd0516e20c4007a3e0bcc2c5350fb31706961cc861d80cec8d",
+          "conflict": false,
+          "fixture_id": "F22_PQRR",
+          "fixture_verdict_map": {
+            "left": {
+              "P": "accepted",
+              "Q": "rejected",
+              "R": "unknown"
+            },
+            "right": {
+              "P": "accepted",
+              "Q": "rejected",
+              "R": "unknown"
+            }
+          },
+          "left_impl": "impl_a.py",
+          "pair_type": "baseline",
+          "right_impl": "impl_b_baseline.py",
+          "status": "INTEROP_OK",
+          "unknown_to_accepted_caught": false
+        },
+        {
+          "canonical_input_sha256": "752bc404276842d75c4e570daf833b8004308d222407acb3c27a401522815f0c",
+          "conflict": false,
+          "fixture_id": "F23_RXX",
+          "fixture_verdict_map": {
+            "left": {
+              "R": "unknown",
+              "X": "unknown"
+            },
+            "right": {
+              "R": "unknown",
+              "X": "unknown"
+            }
+          },
+          "left_impl": "impl_a.py",
+          "pair_type": "baseline",
+          "right_impl": "impl_b_baseline.py",
+          "status": "INTEROP_OK",
+          "unknown_to_accepted_caught": false
+        },
+        {
+          "canonical_input_sha256": "009a15933e2232dce845fda335f6fe28c68ac1e31655dbcb202473c84eb18a6b",
+          "conflict": false,
+          "fixture_id": "F24_PQRX_DUP",
+          "fixture_verdict_map": {
+            "left": {
+              "P": "accepted",
+              "Q": "rejected",
+              "R": "unknown",
+              "X": "unknown"
+            },
+            "right": {
+              "P": "accepted",
+              "Q": "rejected",
+              "R": "unknown",
+              "X": "unknown"
+            }
+          },
+          "left_impl": "impl_a.py",
+          "pair_type": "baseline",
+          "right_impl": "impl_b_baseline.py",
+          "status": "INTEROP_OK",
+          "unknown_to_accepted_caught": false
+        }
+      ],
+      "right_impl": "impl_b_baseline.py"
+    },
+    "mutated": {
+      "conflict_count": 16,
+      "conflict_fixtures": [
+        "F03_R",
+        "F06_PR",
+        "F07_QR",
+        "F10_RX",
+        "F11_PQR",
+        "F13_PRX",
+        "F14_QRX",
+        "F15_PQRX",
+        "F16_RR",
+        "F18_PPR",
+        "F19_QQR",
+        "F20_PRR",
+        "F21_QRX",
+        "F22_PQRR",
+        "F23_RXX",
+        "F24_PQRX_DUP"
+      ],
+      "left_impl": "impl_a.py",
+      "results": [
+        {
+          "canonical_input_sha256": "aa1a5d44e3c509864181bef39634235313bca8772a8a6a76548fe8c422bb634d",
+          "conflict": false,
+          "fixture_id": "F01_P",
+          "fixture_verdict_map": {
+            "left": {
+              "P": "accepted"
+            },
+            "right": {
+              "P": "accepted"
+            }
+          },
+          "left_impl": "impl_a.py",
+          "pair_type": "mutated",
+          "right_impl": "impl_b_mut.py",
+          "status": "INTEROP_OK",
+          "unknown_to_accepted_caught": false
+        },
+        {
+          "canonical_input_sha256": "889108232a2c9c843fc8190b63deac25103ee4e7f2a203721f2758ecef5ed9c8",
+          "conflict": false,
+          "fixture_id": "F02_Q",
+          "fixture_verdict_map": {
+            "left": {
+              "Q": "rejected"
+            },
+            "right": {
+              "Q": "rejected"
+            }
+          },
+          "left_impl": "impl_a.py",
+          "pair_type": "mutated",
+          "right_impl": "impl_b_mut.py",
+          "status": "INTEROP_OK",
+          "unknown_to_accepted_caught": false
+        },
+        {
+          "canonical_input_sha256": "039332fdfe70f93f95d7eee3d9b9e1c0f5d3e3032b51c698387870db8088474a",
+          "conflict": true,
+          "fixture_id": "F03_R",
+          "fixture_verdict_map": {
+            "left": {
+              "R": "unknown"
+            },
+            "right": {
+              "R": "accepted"
+            }
+          },
+          "left_impl": "impl_a.py",
+          "pair_type": "mutated",
+          "right_impl": "impl_b_mut.py",
+          "status": "INTEROP_CONFLICT",
+          "unknown_to_accepted_caught": true
+        },
+        {
+          "canonical_input_sha256": "9b47dd0a9c1c8c9556317b7bf48d0a430cbbf55eaaf1a7118f8e2d392c2eb689",
+          "conflict": false,
+          "fixture_id": "F04_X",
+          "fixture_verdict_map": {
+            "left": {
+              "X": "unknown"
+            },
+            "right": {
+              "X": "unknown"
+            }
+          },
+          "left_impl": "impl_a.py",
+          "pair_type": "mutated",
+          "right_impl": "impl_b_mut.py",
+          "status": "INTEROP_OK",
+          "unknown_to_accepted_caught": false
+        },
+        {
+          "canonical_input_sha256": "8d5d643c1608b9243b0b1e4454229befe3d06703ebd8f0357742e72128a4626f",
+          "conflict": false,
+          "fixture_id": "F05_PQ",
+          "fixture_verdict_map": {
+            "left": {
+              "P": "accepted",
+              "Q": "rejected"
+            },
+            "right": {
+              "P": "accepted",
+              "Q": "rejected"
+            }
+          },
+          "left_impl": "impl_a.py",
+          "pair_type": "mutated",
+          "right_impl": "impl_b_mut.py",
+          "status": "INTEROP_OK",
+          "unknown_to_accepted_caught": false
+        },
+        {
+          "canonical_input_sha256": "97ae6e5753e51b965f0f763d264f45b0cfb545a10048212e61f365c3eda67106",
+          "conflict": true,
+          "fixture_id": "F06_PR",
+          "fixture_verdict_map": {
+            "left": {
+              "P": "accepted",
+              "R": "unknown"
+            },
+            "right": {
+              "P": "accepted",
+              "R": "accepted"
+            }
+          },
+          "left_impl": "impl_a.py",
+          "pair_type": "mutated",
+          "right_impl": "impl_b_mut.py",
+          "status": "INTEROP_CONFLICT",
+          "unknown_to_accepted_caught": true
+        },
+        {
+          "canonical_input_sha256": "03ec4e1c5a97168c3d1e629ef577c0d3fb7efd07ce94a62fc54ecb4ae9f15b5f",
+          "conflict": true,
+          "fixture_id": "F07_QR",
+          "fixture_verdict_map": {
+            "left": {
+              "Q": "rejected",
+              "R": "unknown"
+            },
+            "right": {
+              "Q": "rejected",
+              "R": "accepted"
+            }
+          },
+          "left_impl": "impl_a.py",
+          "pair_type": "mutated",
+          "right_impl": "impl_b_mut.py",
+          "status": "INTEROP_CONFLICT",
+          "unknown_to_accepted_caught": true
+        },
+        {
+          "canonical_input_sha256": "ade98a0bf143e4eab356c595e1ff8c85b3983c60a9d2e017b94fabf368c2df9a",
+          "conflict": false,
+          "fixture_id": "F08_PX",
+          "fixture_verdict_map": {
+            "left": {
+              "P": "accepted",
+              "X": "unknown"
+            },
+            "right": {
+              "P": "accepted",
+              "X": "unknown"
+            }
+          },
+          "left_impl": "impl_a.py",
+          "pair_type": "mutated",
+          "right_impl": "impl_b_mut.py",
+          "status": "INTEROP_OK",
+          "unknown_to_accepted_caught": false
+        },
+        {
+          "canonical_input_sha256": "8baf48af141a85f07a3ac0d3bdaa867e88ba93c20e9c998e9bbf54a08e8e0e98",
+          "conflict": false,
+          "fixture_id": "F09_QX",
+          "fixture_verdict_map": {
+            "left": {
+              "Q": "rejected",
+              "X": "unknown"
+            },
+            "right": {
+              "Q": "rejected",
+              "X": "unknown"
+            }
+          },
+          "left_impl": "impl_a.py",
+          "pair_type": "mutated",
+          "right_impl": "impl_b_mut.py",
+          "status": "INTEROP_OK",
+          "unknown_to_accepted_caught": false
+        },
+        {
+          "canonical_input_sha256": "a7c6921ed8b229559dc7654ae921ff9e1815802dc8a5f3a484f49645199284c0",
+          "conflict": true,
+          "fixture_id": "F10_RX",
+          "fixture_verdict_map": {
+            "left": {
+              "R": "unknown",
+              "X": "unknown"
+            },
+            "right": {
+              "R": "accepted",
+              "X": "unknown"
+            }
+          },
+          "left_impl": "impl_a.py",
+          "pair_type": "mutated",
+          "right_impl": "impl_b_mut.py",
+          "status": "INTEROP_CONFLICT",
+          "unknown_to_accepted_caught": true
+        },
+        {
+          "canonical_input_sha256": "a2f1ef1dda764c70a9ae763f6fc1bc9ce78c51ebdf7d0675784188d23631a067",
+          "conflict": true,
+          "fixture_id": "F11_PQR",
+          "fixture_verdict_map": {
+            "left": {
+              "P": "accepted",
+              "Q": "rejected",
+              "R": "unknown"
+            },
+            "right": {
+              "P": "accepted",
+              "Q": "rejected",
+              "R": "accepted"
+            }
+          },
+          "left_impl": "impl_a.py",
+          "pair_type": "mutated",
+          "right_impl": "impl_b_mut.py",
+          "status": "INTEROP_CONFLICT",
+          "unknown_to_accepted_caught": true
+        },
+        {
+          "canonical_input_sha256": "b7997a0d1ee1491e36c55a54e682dd636e6f9921a94b9c664a7797ab1eabb427",
+          "conflict": false,
+          "fixture_id": "F12_PQX",
+          "fixture_verdict_map": {
+            "left": {
+              "P": "accepted",
+              "Q": "rejected",
+              "X": "unknown"
+            },
+            "right": {
+              "P": "accepted",
+              "Q": "rejected",
+              "X": "unknown"
+            }
+          },
+          "left_impl": "impl_a.py",
+          "pair_type": "mutated",
+          "right_impl": "impl_b_mut.py",
+          "status": "INTEROP_OK",
+          "unknown_to_accepted_caught": false
+        },
+        {
+          "canonical_input_sha256": "25b9453bdb418db88a6e7869832c69359cd93e639efbffa582c2fe5572fd2848",
+          "conflict": true,
+          "fixture_id": "F13_PRX",
+          "fixture_verdict_map": {
+            "left": {
+              "P": "accepted",
+              "R": "unknown",
+              "X": "unknown"
+            },
+            "right": {
+              "P": "accepted",
+              "R": "accepted",
+              "X": "unknown"
+            }
+          },
+          "left_impl": "impl_a.py",
+          "pair_type": "mutated",
+          "right_impl": "impl_b_mut.py",
+          "status": "INTEROP_CONFLICT",
+          "unknown_to_accepted_caught": true
+        },
+        {
+          "canonical_input_sha256": "6f52aa46e0031ae99d125694296d765520e16f06c6e095334cfc34034e7ed3f0",
+          "conflict": true,
+          "fixture_id": "F14_QRX",
+          "fixture_verdict_map": {
+            "left": {
+              "Q": "rejected",
+              "R": "unknown",
+              "X": "unknown"
+            },
+            "right": {
+              "Q": "rejected",
+              "R": "accepted",
+              "X": "unknown"
+            }
+          },
+          "left_impl": "impl_a.py",
+          "pair_type": "mutated",
+          "right_impl": "impl_b_mut.py",
+          "status": "INTEROP_CONFLICT",
+          "unknown_to_accepted_caught": true
+        },
+        {
+          "canonical_input_sha256": "f28e49eea22615542c8e4ba877dc8874583609b13188128a264d5aaa28e20c9a",
+          "conflict": true,
+          "fixture_id": "F15_PQRX",
+          "fixture_verdict_map": {
+            "left": {
+              "P": "accepted",
+              "Q": "rejected",
+              "R": "unknown",
+              "X": "unknown"
+            },
+            "right": {
+              "P": "accepted",
+              "Q": "rejected",
+              "R": "accepted",
+              "X": "unknown"
+            }
+          },
+          "left_impl": "impl_a.py",
+          "pair_type": "mutated",
+          "right_impl": "impl_b_mut.py",
+          "status": "INTEROP_CONFLICT",
+          "unknown_to_accepted_caught": true
+        },
+        {
+          "canonical_input_sha256": "dceb141fdd4d8541f39cfd69aee4b3806f7c76512c6fe58286445a48f25b9552",
+          "conflict": true,
+          "fixture_id": "F16_RR",
+          "fixture_verdict_map": {
+            "left": {
+              "R": "unknown"
+            },
+            "right": {
+              "R": "accepted"
+            }
+          },
+          "left_impl": "impl_a.py",
+          "pair_type": "mutated",
+          "right_impl": "impl_b_mut.py",
+          "status": "INTEROP_CONFLICT",
+          "unknown_to_accepted_caught": true
+        },
+        {
+          "canonical_input_sha256": "3a4e72b55d9d894a1a3d081fd4fbb922692b955470b51cce235a502fa2b13355",
+          "conflict": false,
+          "fixture_id": "F17_XX",
+          "fixture_verdict_map": {
+            "left": {
+              "X": "unknown"
+            },
+            "right": {
+              "X": "unknown"
+            }
+          },
+          "left_impl": "impl_a.py",
+          "pair_type": "mutated",
+          "right_impl": "impl_b_mut.py",
+          "status": "INTEROP_OK",
+          "unknown_to_accepted_caught": false
+        },
+        {
+          "canonical_input_sha256": "d746f4e0829feba18419cdd1c25ac516c4087ba1c892351db7e48608a012b172",
+          "conflict": true,
+          "fixture_id": "F18_PPR",
+          "fixture_verdict_map": {
+            "left": {
+              "P": "accepted",
+              "R": "unknown"
+            },
+            "right": {
+              "P": "accepted",
+              "R": "accepted"
+            }
+          },
+          "left_impl": "impl_a.py",
+          "pair_type": "mutated",
+          "right_impl": "impl_b_mut.py",
+          "status": "INTEROP_CONFLICT",
+          "unknown_to_accepted_caught": true
+        },
+        {
+          "canonical_input_sha256": "0248ca4164190fd6553ba7c510ea2b0c7d284158cbb5a2939104b7f598aed4e5",
+          "conflict": true,
+          "fixture_id": "F19_QQR",
+          "fixture_verdict_map": {
+            "left": {
+              "Q": "rejected",
+              "R": "unknown"
+            },
+            "right": {
+              "Q": "rejected",
+              "R": "accepted"
+            }
+          },
+          "left_impl": "impl_a.py",
+          "pair_type": "mutated",
+          "right_impl": "impl_b_mut.py",
+          "status": "INTEROP_CONFLICT",
+          "unknown_to_accepted_caught": true
+        },
+        {
+          "canonical_input_sha256": "cd5fbea48a4cee40e328bf2335878fb87ffc2644e243a1eb0058a3a9aae2494e",
+          "conflict": true,
+          "fixture_id": "F20_PRR",
+          "fixture_verdict_map": {
+            "left": {
+              "P": "accepted",
+              "R": "unknown"
+            },
+            "right": {
+              "P": "accepted",
+              "R": "accepted"
+            }
+          },
+          "left_impl": "impl_a.py",
+          "pair_type": "mutated",
+          "right_impl": "impl_b_mut.py",
+          "status": "INTEROP_CONFLICT",
+          "unknown_to_accepted_caught": true
+        },
+        {
+          "canonical_input_sha256": "63e8296da0bc3ebe410581116dd826022de86356953789e68ec4fa9651e7deea",
+          "conflict": true,
+          "fixture_id": "F21_QRX",
+          "fixture_verdict_map": {
+            "left": {
+              "Q": "rejected",
+              "R": "unknown",
+              "X": "unknown"
+            },
+            "right": {
+              "Q": "rejected",
+              "R": "accepted",
+              "X": "unknown"
+            }
+          },
+          "left_impl": "impl_a.py",
+          "pair_type": "mutated",
+          "right_impl": "impl_b_mut.py",
+          "status": "INTEROP_CONFLICT",
+          "unknown_to_accepted_caught": true
+        },
+        {
+          "canonical_input_sha256": "c812a5b554c538cd0516e20c4007a3e0bcc2c5350fb31706961cc861d80cec8d",
+          "conflict": true,
+          "fixture_id": "F22_PQRR",
+          "fixture_verdict_map": {
+            "left": {
+              "P": "accepted",
+              "Q": "rejected",
+              "R": "unknown"
+            },
+            "right": {
+              "P": "accepted",
+              "Q": "rejected",
+              "R": "accepted"
+            }
+          },
+          "left_impl": "impl_a.py",
+          "pair_type": "mutated",
+          "right_impl": "impl_b_mut.py",
+          "status": "INTEROP_CONFLICT",
+          "unknown_to_accepted_caught": true
+        },
+        {
+          "canonical_input_sha256": "752bc404276842d75c4e570daf833b8004308d222407acb3c27a401522815f0c",
+          "conflict": true,
+          "fixture_id": "F23_RXX",
+          "fixture_verdict_map": {
+            "left": {
+              "R": "unknown",
+              "X": "unknown"
+            },
+            "right": {
+              "R": "accepted",
+              "X": "unknown"
+            }
+          },
+          "left_impl": "impl_a.py",
+          "pair_type": "mutated",
+          "right_impl": "impl_b_mut.py",
+          "status": "INTEROP_CONFLICT",
+          "unknown_to_accepted_caught": true
+        },
+        {
+          "canonical_input_sha256": "009a15933e2232dce845fda335f6fe28c68ac1e31655dbcb202473c84eb18a6b",
+          "conflict": true,
+          "fixture_id": "F24_PQRX_DUP",
+          "fixture_verdict_map": {
+            "left": {
+              "P": "accepted",
+              "Q": "rejected",
+              "R": "unknown",
+              "X": "unknown"
+            },
+            "right": {
+              "P": "accepted",
+              "Q": "rejected",
+              "R": "accepted",
+              "X": "unknown"
+            }
+          },
+          "left_impl": "impl_a.py",
+          "pair_type": "mutated",
+          "right_impl": "impl_b_mut.py",
+          "status": "INTEROP_CONFLICT",
+          "unknown_to_accepted_caught": true
+        }
+      ],
+      "right_impl": "impl_b_mut.py",
+      "unobservable_fixtures": []
+    }
+  },
+  "production_verified": false,
+  "schema_version": "s36-meta-test-1",
+  "synthetic_only": true,
+  "undeclared_operations": [
+    "X"
+  ]
+}

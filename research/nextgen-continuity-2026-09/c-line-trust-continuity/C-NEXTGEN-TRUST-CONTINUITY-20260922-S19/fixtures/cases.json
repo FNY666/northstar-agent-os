@@ -1,0 +1,1068 @@
+{
+  "synthetic_only": true,
+  "production_verified": false,
+  "cases": [
+    {
+      "case_id": "F01",
+      "scenario": "multi_chain_consensus",
+      "event_id": "evt-001",
+      "chains": [
+        {
+          "chain_id": "L1",
+          "accessible": true,
+          "anchor_present": true,
+          "explicit_missing": [],
+          "blocks": [
+            {
+              "event_id": "evt-001",
+              "seq": 1,
+              "ts_start": "2026-09-22T10:00:00Z",
+              "ts_end": "2026-09-22T10:01:00Z",
+              "payload": "ok"
+            }
+          ]
+        },
+        {
+          "chain_id": "L2",
+          "accessible": true,
+          "anchor_present": true,
+          "explicit_missing": [],
+          "blocks": [
+            {
+              "event_id": "evt-001",
+              "seq": 1,
+              "ts_start": "2026-09-22T10:00:00Z",
+              "ts_end": "2026-09-22T10:01:00Z",
+              "payload": "ok"
+            }
+          ]
+        },
+        {
+          "chain_id": "L3",
+          "accessible": true,
+          "anchor_present": true,
+          "explicit_missing": [],
+          "blocks": [
+            {
+              "event_id": "evt-001",
+              "seq": 1,
+              "ts_start": "2026-09-22T10:00:00Z",
+              "ts_end": "2026-09-22T10:01:00Z",
+              "payload": "ok"
+            }
+          ]
+        }
+      ],
+      "notes": ""
+    },
+    {
+      "case_id": "F02",
+      "scenario": "multi_chain_consensus_three_way",
+      "event_id": "evt-002",
+      "chains": [
+        {
+          "chain_id": "L1",
+          "accessible": true,
+          "anchor_present": true,
+          "explicit_missing": [],
+          "blocks": [
+            {
+              "event_id": "evt-002",
+              "seq": 2,
+              "ts_start": "2026-09-22T10:00:00Z",
+              "ts_end": "2026-09-22T10:01:00Z",
+              "payload": "payload-a"
+            }
+          ]
+        },
+        {
+          "chain_id": "L2",
+          "accessible": true,
+          "anchor_present": true,
+          "explicit_missing": [],
+          "blocks": [
+            {
+              "event_id": "evt-002",
+              "seq": 2,
+              "ts_start": "2026-09-22T10:00:00Z",
+              "ts_end": "2026-09-22T10:01:00Z",
+              "payload": "payload-a"
+            }
+          ]
+        },
+        {
+          "chain_id": "L3",
+          "accessible": true,
+          "anchor_present": true,
+          "explicit_missing": [],
+          "blocks": [
+            {
+              "event_id": "evt-002",
+              "seq": 2,
+              "ts_start": "2026-09-22T10:00:00Z",
+              "ts_end": "2026-09-22T10:01:00Z",
+              "payload": "payload-a"
+            }
+          ]
+        }
+      ],
+      "notes": ""
+    },
+    {
+      "case_id": "F03",
+      "scenario": "single_chain_unique_no_missing",
+      "event_id": "evt-003",
+      "chains": [
+        {
+          "chain_id": "L1",
+          "accessible": true,
+          "anchor_present": true,
+          "explicit_missing": [],
+          "blocks": [
+            {
+              "event_id": "evt-003",
+              "seq": 1,
+              "ts_start": "2026-09-22T10:00:00Z",
+              "ts_end": "2026-09-22T10:01:00Z",
+              "payload": "ok"
+            }
+          ]
+        },
+        {
+          "chain_id": "L2",
+          "accessible": true,
+          "anchor_present": true,
+          "explicit_missing": [],
+          "blocks": []
+        },
+        {
+          "chain_id": "L3",
+          "accessible": true,
+          "anchor_present": true,
+          "explicit_missing": [],
+          "blocks": []
+        }
+      ],
+      "notes": ""
+    },
+    {
+      "case_id": "F04",
+      "scenario": "single_unique_explicit_missing",
+      "event_id": "evt-004",
+      "chains": [
+        {
+          "chain_id": "L1",
+          "accessible": true,
+          "anchor_present": true,
+          "explicit_missing": [],
+          "blocks": [
+            {
+              "event_id": "evt-004",
+              "seq": 1,
+              "ts_start": "2026-09-22T10:00:00Z",
+              "ts_end": "2026-09-22T10:01:00Z",
+              "payload": "ok"
+            }
+          ]
+        },
+        {
+          "chain_id": "L2",
+          "accessible": true,
+          "anchor_present": true,
+          "explicit_missing": [
+            "evt-004"
+          ],
+          "blocks": []
+        },
+        {
+          "chain_id": "L3",
+          "accessible": true,
+          "anchor_present": true,
+          "explicit_missing": [
+            "evt-004"
+          ],
+          "blocks": []
+        }
+      ],
+      "notes": ""
+    },
+    {
+      "case_id": "F05",
+      "scenario": "cross_chain_content_conflict",
+      "event_id": "evt-005",
+      "chains": [
+        {
+          "chain_id": "L1",
+          "accessible": true,
+          "anchor_present": true,
+          "explicit_missing": [],
+          "blocks": [
+            {
+              "event_id": "evt-005",
+              "seq": 1,
+              "ts_start": "2026-09-22T10:00:00Z",
+              "ts_end": "2026-09-22T10:01:00Z",
+              "payload": "alpha"
+            }
+          ]
+        },
+        {
+          "chain_id": "L2",
+          "accessible": true,
+          "anchor_present": true,
+          "explicit_missing": [],
+          "blocks": [
+            {
+              "event_id": "evt-005",
+              "seq": 1,
+              "ts_start": "2026-09-22T10:00:00Z",
+              "ts_end": "2026-09-22T10:01:00Z",
+              "payload": "beta"
+            }
+          ]
+        },
+        {
+          "chain_id": "L3",
+          "accessible": true,
+          "anchor_present": true,
+          "explicit_missing": [],
+          "blocks": []
+        }
+      ],
+      "notes": ""
+    },
+    {
+      "case_id": "F06",
+      "scenario": "same_content_sequence_misalignment",
+      "event_id": "evt-006",
+      "chains": [
+        {
+          "chain_id": "L1",
+          "accessible": true,
+          "anchor_present": true,
+          "explicit_missing": [],
+          "blocks": [
+            {
+              "event_id": "evt-006",
+              "seq": 1,
+              "ts_start": "2026-09-22T10:00:00Z",
+              "ts_end": "2026-09-22T10:01:00Z",
+              "payload": "same"
+            }
+          ]
+        },
+        {
+          "chain_id": "L2",
+          "accessible": true,
+          "anchor_present": true,
+          "explicit_missing": [],
+          "blocks": [
+            {
+              "event_id": "evt-006",
+              "seq": 4,
+              "ts_start": "2026-09-22T10:00:00Z",
+              "ts_end": "2026-09-22T10:01:00Z",
+              "payload": "same"
+            }
+          ]
+        },
+        {
+          "chain_id": "L3",
+          "accessible": true,
+          "anchor_present": true,
+          "explicit_missing": [],
+          "blocks": [
+            {
+              "event_id": "evt-006",
+              "seq": 2,
+              "ts_start": "2026-09-22T10:00:00Z",
+              "ts_end": "2026-09-22T10:01:00Z",
+              "payload": "same"
+            }
+          ]
+        }
+      ],
+      "notes": ""
+    },
+    {
+      "case_id": "F07",
+      "scenario": "timeline_overlap_ambiguous_ownership",
+      "event_id": "evt-007",
+      "chains": [
+        {
+          "chain_id": "L1",
+          "accessible": true,
+          "anchor_present": true,
+          "explicit_missing": [],
+          "blocks": [
+            {
+              "event_id": "evt-007",
+              "seq": 1,
+              "ts_start": "2026-09-22T10:00:00Z",
+              "ts_end": "2026-09-22T10:05:00Z",
+              "payload": "same"
+            }
+          ]
+        },
+        {
+          "chain_id": "L2",
+          "accessible": true,
+          "anchor_present": true,
+          "explicit_missing": [],
+          "blocks": [
+            {
+              "event_id": "evt-007",
+              "seq": 9,
+              "ts_start": "2026-09-22T10:04:00Z",
+              "ts_end": "2026-09-22T10:08:00Z",
+              "payload": "same"
+            }
+          ]
+        },
+        {
+          "chain_id": "L3",
+          "accessible": true,
+          "anchor_present": true,
+          "explicit_missing": [],
+          "blocks": []
+        }
+      ],
+      "notes": ""
+    },
+    {
+      "case_id": "F08",
+      "scenario": "partial_chain_inaccessible_consensus_scope",
+      "event_id": "evt-008",
+      "chains": [
+        {
+          "chain_id": "L1",
+          "accessible": true,
+          "anchor_present": true,
+          "explicit_missing": [],
+          "blocks": [
+            {
+              "event_id": "evt-008",
+              "seq": 1,
+              "ts_start": "2026-09-22T10:00:00Z",
+              "ts_end": "2026-09-22T10:01:00Z",
+              "payload": "ok"
+            }
+          ]
+        },
+        {
+          "chain_id": "L2",
+          "accessible": true,
+          "anchor_present": true,
+          "explicit_missing": [],
+          "blocks": [
+            {
+              "event_id": "evt-008",
+              "seq": 1,
+              "ts_start": "2026-09-22T10:00:00Z",
+              "ts_end": "2026-09-22T10:01:00Z",
+              "payload": "ok"
+            }
+          ]
+        },
+        {
+          "chain_id": "L3",
+          "accessible": false,
+          "anchor_present": true,
+          "explicit_missing": [],
+          "blocks": []
+        }
+      ],
+      "notes": ""
+    },
+    {
+      "case_id": "F09",
+      "scenario": "partial_chain_inaccessible_unique",
+      "event_id": "evt-009",
+      "chains": [
+        {
+          "chain_id": "L1",
+          "accessible": true,
+          "anchor_present": true,
+          "explicit_missing": [],
+          "blocks": [
+            {
+              "event_id": "evt-009",
+              "seq": 1,
+              "ts_start": "2026-09-22T10:00:00Z",
+              "ts_end": "2026-09-22T10:01:00Z",
+              "payload": "ok"
+            }
+          ]
+        },
+        {
+          "chain_id": "L2",
+          "accessible": false,
+          "anchor_present": true,
+          "explicit_missing": [],
+          "blocks": []
+        },
+        {
+          "chain_id": "L3",
+          "accessible": true,
+          "anchor_present": true,
+          "explicit_missing": [],
+          "blocks": []
+        }
+      ],
+      "notes": ""
+    },
+    {
+      "case_id": "F10",
+      "scenario": "missing_anchor",
+      "event_id": "evt-010",
+      "chains": [
+        {
+          "chain_id": "L1",
+          "accessible": true,
+          "anchor_present": false,
+          "explicit_missing": [],
+          "blocks": [
+            {
+              "event_id": "evt-010",
+              "seq": 1,
+              "ts_start": "2026-09-22T10:00:00Z",
+              "ts_end": "2026-09-22T10:01:00Z",
+              "payload": "ok"
+            }
+          ]
+        },
+        {
+          "chain_id": "L2",
+          "accessible": true,
+          "anchor_present": true,
+          "explicit_missing": [],
+          "blocks": [
+            {
+              "event_id": "evt-010",
+              "seq": 1,
+              "ts_start": "2026-09-22T10:00:00Z",
+              "ts_end": "2026-09-22T10:01:00Z",
+              "payload": "ok"
+            }
+          ]
+        },
+        {
+          "chain_id": "L3",
+          "accessible": true,
+          "anchor_present": true,
+          "explicit_missing": [],
+          "blocks": [
+            {
+              "event_id": "evt-010",
+              "seq": 1,
+              "ts_start": "2026-09-22T10:00:00Z",
+              "ts_end": "2026-09-22T10:01:00Z",
+              "payload": "ok"
+            }
+          ]
+        }
+      ],
+      "notes": ""
+    },
+    {
+      "case_id": "F11",
+      "scenario": "duplicate_block_no_new_evidence",
+      "event_id": "evt-011",
+      "chains": [
+        {
+          "chain_id": "L1",
+          "accessible": true,
+          "anchor_present": true,
+          "explicit_missing": [],
+          "blocks": [
+            {
+              "event_id": "evt-011",
+              "seq": 1,
+              "ts_start": "2026-09-22T10:00:00Z",
+              "ts_end": "2026-09-22T10:01:00Z",
+              "payload": "ok"
+            },
+            {
+              "event_id": "evt-011",
+              "seq": 1,
+              "ts_start": "2026-09-22T10:00:00Z",
+              "ts_end": "2026-09-22T10:01:00Z",
+              "payload": "ok"
+            }
+          ]
+        },
+        {
+          "chain_id": "L2",
+          "accessible": true,
+          "anchor_present": true,
+          "explicit_missing": [],
+          "blocks": []
+        },
+        {
+          "chain_id": "L3",
+          "accessible": true,
+          "anchor_present": true,
+          "explicit_missing": [],
+          "blocks": []
+        }
+      ],
+      "notes": ""
+    },
+    {
+      "case_id": "F12",
+      "scenario": "duplicate_one_chain_other_chain_consensus",
+      "event_id": "evt-012",
+      "chains": [
+        {
+          "chain_id": "L1",
+          "accessible": true,
+          "anchor_present": true,
+          "explicit_missing": [],
+          "blocks": [
+            {
+              "event_id": "evt-012",
+              "seq": 1,
+              "ts_start": "2026-09-22T10:00:00Z",
+              "ts_end": "2026-09-22T10:01:00Z",
+              "payload": "ok"
+            },
+            {
+              "event_id": "evt-012",
+              "seq": 1,
+              "ts_start": "2026-09-22T10:00:00Z",
+              "ts_end": "2026-09-22T10:01:00Z",
+              "payload": "ok"
+            }
+          ]
+        },
+        {
+          "chain_id": "L2",
+          "accessible": true,
+          "anchor_present": true,
+          "explicit_missing": [],
+          "blocks": [
+            {
+              "event_id": "evt-012",
+              "seq": 2,
+              "ts_start": "2026-09-22T10:00:00Z",
+              "ts_end": "2026-09-22T10:01:00Z",
+              "payload": "ok"
+            }
+          ]
+        },
+        {
+          "chain_id": "L3",
+          "accessible": true,
+          "anchor_present": true,
+          "explicit_missing": [],
+          "blocks": []
+        }
+      ],
+      "notes": ""
+    },
+    {
+      "case_id": "F13",
+      "scenario": "two_chain_consensus_one_absent",
+      "event_id": "evt-013",
+      "chains": [
+        {
+          "chain_id": "L1",
+          "accessible": true,
+          "anchor_present": true,
+          "explicit_missing": [],
+          "blocks": [
+            {
+              "event_id": "evt-013",
+              "seq": 2,
+              "ts_start": "2026-09-22T10:00:00Z",
+              "ts_end": "2026-09-22T10:01:00Z",
+              "payload": "ok"
+            }
+          ]
+        },
+        {
+          "chain_id": "L2",
+          "accessible": true,
+          "anchor_present": true,
+          "explicit_missing": [],
+          "blocks": [
+            {
+              "event_id": "evt-013",
+              "seq": 2,
+              "ts_start": "2026-09-22T10:00:00Z",
+              "ts_end": "2026-09-22T10:01:00Z",
+              "payload": "ok"
+            }
+          ]
+        },
+        {
+          "chain_id": "L3",
+          "accessible": true,
+          "anchor_present": true,
+          "explicit_missing": [],
+          "blocks": []
+        }
+      ],
+      "notes": ""
+    },
+    {
+      "case_id": "F14",
+      "scenario": "three_chains_disagree_two_against_one",
+      "event_id": "evt-014",
+      "chains": [
+        {
+          "chain_id": "L1",
+          "accessible": true,
+          "anchor_present": true,
+          "explicit_missing": [],
+          "blocks": [
+            {
+              "event_id": "evt-014",
+              "seq": 1,
+              "ts_start": "2026-09-22T10:00:00Z",
+              "ts_end": "2026-09-22T10:01:00Z",
+              "payload": "x"
+            }
+          ]
+        },
+        {
+          "chain_id": "L2",
+          "accessible": true,
+          "anchor_present": true,
+          "explicit_missing": [],
+          "blocks": [
+            {
+              "event_id": "evt-014",
+              "seq": 1,
+              "ts_start": "2026-09-22T10:00:00Z",
+              "ts_end": "2026-09-22T10:01:00Z",
+              "payload": "x"
+            }
+          ]
+        },
+        {
+          "chain_id": "L3",
+          "accessible": true,
+          "anchor_present": true,
+          "explicit_missing": [],
+          "blocks": [
+            {
+              "event_id": "evt-014",
+              "seq": 1,
+              "ts_start": "2026-09-22T10:00:00Z",
+              "ts_end": "2026-09-22T10:01:00Z",
+              "payload": "y"
+            }
+          ]
+        }
+      ],
+      "notes": ""
+    },
+    {
+      "case_id": "F15",
+      "scenario": "event_absent_all_chains",
+      "event_id": "evt-015",
+      "chains": [
+        {
+          "chain_id": "L1",
+          "accessible": true,
+          "anchor_present": true,
+          "explicit_missing": [],
+          "blocks": []
+        },
+        {
+          "chain_id": "L2",
+          "accessible": true,
+          "anchor_present": true,
+          "explicit_missing": [],
+          "blocks": []
+        },
+        {
+          "chain_id": "L3",
+          "accessible": true,
+          "anchor_present": true,
+          "explicit_missing": [],
+          "blocks": []
+        }
+      ],
+      "notes": ""
+    },
+    {
+      "case_id": "F16",
+      "scenario": "only_one_accessible_chain",
+      "event_id": "evt-016",
+      "chains": [
+        {
+          "chain_id": "L1",
+          "accessible": true,
+          "anchor_present": true,
+          "explicit_missing": [],
+          "blocks": [
+            {
+              "event_id": "evt-016",
+              "seq": 1,
+              "ts_start": "2026-09-22T10:00:00Z",
+              "ts_end": "2026-09-22T10:01:00Z",
+              "payload": "ok"
+            }
+          ]
+        },
+        {
+          "chain_id": "L2",
+          "accessible": false,
+          "anchor_present": true,
+          "explicit_missing": [],
+          "blocks": []
+        },
+        {
+          "chain_id": "L3",
+          "accessible": false,
+          "anchor_present": true,
+          "explicit_missing": [],
+          "blocks": []
+        }
+      ],
+      "notes": ""
+    },
+    {
+      "case_id": "F17",
+      "scenario": "same_hash_sequence_misalignment_two_way",
+      "event_id": "evt-017",
+      "chains": [
+        {
+          "chain_id": "L1",
+          "accessible": true,
+          "anchor_present": true,
+          "explicit_missing": [],
+          "blocks": [
+            {
+              "event_id": "evt-017",
+              "seq": 8,
+              "ts_start": "2026-09-22T10:00:00Z",
+              "ts_end": "2026-09-22T10:01:00Z",
+              "payload": "ok"
+            }
+          ]
+        },
+        {
+          "chain_id": "L2",
+          "accessible": true,
+          "anchor_present": true,
+          "explicit_missing": [],
+          "blocks": [
+            {
+              "event_id": "evt-017",
+              "seq": 9,
+              "ts_start": "2026-09-22T10:00:00Z",
+              "ts_end": "2026-09-22T10:01:00Z",
+              "payload": "ok"
+            }
+          ]
+        },
+        {
+          "chain_id": "L3",
+          "accessible": true,
+          "anchor_present": true,
+          "explicit_missing": [],
+          "blocks": []
+        }
+      ],
+      "notes": ""
+    },
+    {
+      "case_id": "F18",
+      "scenario": "non_overlapping_consensus",
+      "event_id": "evt-018",
+      "chains": [
+        {
+          "chain_id": "L1",
+          "accessible": true,
+          "anchor_present": true,
+          "explicit_missing": [],
+          "blocks": [
+            {
+              "event_id": "evt-018",
+              "seq": 1,
+              "ts_start": "2026-09-22T10:00:00Z",
+              "ts_end": "2026-09-22T10:01:00Z",
+              "payload": "v"
+            }
+          ]
+        },
+        {
+          "chain_id": "L2",
+          "accessible": true,
+          "anchor_present": true,
+          "explicit_missing": [],
+          "blocks": [
+            {
+              "event_id": "evt-018",
+              "seq": 1,
+              "ts_start": "2026-09-22T10:02:00Z",
+              "ts_end": "2026-09-22T10:03:00Z",
+              "payload": "v"
+            }
+          ]
+        },
+        {
+          "chain_id": "L3",
+          "accessible": true,
+          "anchor_present": true,
+          "explicit_missing": [],
+          "blocks": []
+        }
+      ],
+      "notes": ""
+    },
+    {
+      "case_id": "F19",
+      "scenario": "explicit_missing_without_occurrence",
+      "event_id": "evt-019",
+      "chains": [
+        {
+          "chain_id": "L1",
+          "accessible": true,
+          "anchor_present": true,
+          "explicit_missing": [],
+          "blocks": []
+        },
+        {
+          "chain_id": "L2",
+          "accessible": true,
+          "anchor_present": true,
+          "explicit_missing": [
+            "evt-019"
+          ],
+          "blocks": []
+        },
+        {
+          "chain_id": "L3",
+          "accessible": true,
+          "anchor_present": true,
+          "explicit_missing": [
+            "evt-019"
+          ],
+          "blocks": []
+        }
+      ],
+      "notes": ""
+    },
+    {
+      "case_id": "F20",
+      "scenario": "inaccessible_chain_conflicts_visible_chain",
+      "event_id": "evt-020",
+      "chains": [
+        {
+          "chain_id": "L1",
+          "accessible": true,
+          "anchor_present": true,
+          "explicit_missing": [],
+          "blocks": [
+            {
+              "event_id": "evt-020",
+              "seq": 1,
+              "ts_start": "2026-09-22T10:00:00Z",
+              "ts_end": "2026-09-22T10:01:00Z",
+              "payload": "left"
+            }
+          ]
+        },
+        {
+          "chain_id": "L2",
+          "accessible": true,
+          "anchor_present": true,
+          "explicit_missing": [],
+          "blocks": [
+            {
+              "event_id": "evt-020",
+              "seq": 1,
+              "ts_start": "2026-09-22T10:00:00Z",
+              "ts_end": "2026-09-22T10:01:00Z",
+              "payload": "right"
+            }
+          ]
+        },
+        {
+          "chain_id": "L3",
+          "accessible": false,
+          "anchor_present": true,
+          "explicit_missing": [],
+          "blocks": []
+        }
+      ],
+      "notes": ""
+    },
+    {
+      "case_id": "F21",
+      "scenario": "anchorless_single_chain",
+      "event_id": "evt-021",
+      "chains": [
+        {
+          "chain_id": "L1",
+          "accessible": true,
+          "anchor_present": false,
+          "explicit_missing": [],
+          "blocks": [
+            {
+              "event_id": "evt-021",
+              "seq": 1,
+              "ts_start": "2026-09-22T10:00:00Z",
+              "ts_end": "2026-09-22T10:01:00Z",
+              "payload": "ok"
+            }
+          ]
+        },
+        {
+          "chain_id": "L2",
+          "accessible": true,
+          "anchor_present": true,
+          "explicit_missing": [],
+          "blocks": []
+        },
+        {
+          "chain_id": "L3",
+          "accessible": true,
+          "anchor_present": true,
+          "explicit_missing": [],
+          "blocks": []
+        }
+      ],
+      "notes": ""
+    },
+    {
+      "case_id": "F22",
+      "scenario": "duplicate_hash_nonadjacent",
+      "event_id": "evt-022",
+      "chains": [
+        {
+          "chain_id": "L1",
+          "accessible": true,
+          "anchor_present": true,
+          "explicit_missing": [],
+          "blocks": [
+            {
+              "event_id": "evt-022",
+              "seq": 1,
+              "ts_start": "2026-09-22T10:00:00Z",
+              "ts_end": "2026-09-22T10:01:00Z",
+              "payload": "ok"
+            },
+            {
+              "event_id": "other",
+              "seq": 2,
+              "ts_start": "2026-09-22T10:00:00Z",
+              "ts_end": "2026-09-22T10:01:00Z",
+              "payload": "ok"
+            },
+            {
+              "event_id": "evt-022",
+              "seq": 1,
+              "ts_start": "2026-09-22T10:00:00Z",
+              "ts_end": "2026-09-22T10:01:00Z",
+              "payload": "ok"
+            }
+          ]
+        },
+        {
+          "chain_id": "L2",
+          "accessible": true,
+          "anchor_present": true,
+          "explicit_missing": [],
+          "blocks": []
+        },
+        {
+          "chain_id": "L3",
+          "accessible": true,
+          "anchor_present": true,
+          "explicit_missing": [],
+          "blocks": []
+        }
+      ],
+      "notes": ""
+    },
+    {
+      "case_id": "F23",
+      "scenario": "fourth_event_consensus_pair",
+      "event_id": "evt-023",
+      "chains": [
+        {
+          "chain_id": "L1",
+          "accessible": true,
+          "anchor_present": true,
+          "explicit_missing": [],
+          "blocks": [
+            {
+              "event_id": "evt-023",
+              "seq": 3,
+              "ts_start": "2026-09-22T10:00:00Z",
+              "ts_end": "2026-09-22T10:01:00Z",
+              "payload": "ok"
+            }
+          ]
+        },
+        {
+          "chain_id": "L2",
+          "accessible": true,
+          "anchor_present": true,
+          "explicit_missing": [],
+          "blocks": []
+        },
+        {
+          "chain_id": "L3",
+          "accessible": true,
+          "anchor_present": true,
+          "explicit_missing": [],
+          "blocks": [
+            {
+              "event_id": "evt-023",
+              "seq": 3,
+              "ts_start": "2026-09-22T10:00:00Z",
+              "ts_end": "2026-09-22T10:01:00Z",
+              "payload": "ok"
+            }
+          ]
+        }
+      ],
+      "notes": ""
+    },
+    {
+      "case_id": "F24",
+      "scenario": "unique_event_with_one_explicit_negative",
+      "event_id": "evt-024",
+      "chains": [
+        {
+          "chain_id": "L1",
+          "accessible": true,
+          "anchor_present": true,
+          "explicit_missing": [],
+          "blocks": [
+            {
+              "event_id": "evt-024",
+              "seq": 1,
+              "ts_start": "2026-09-22T10:00:00Z",
+              "ts_end": "2026-09-22T10:01:00Z",
+              "payload": "ok"
+            }
+          ]
+        },
+        {
+          "chain_id": "L2",
+          "accessible": true,
+          "anchor_present": true,
+          "explicit_missing": [
+            "evt-024"
+          ],
+          "blocks": []
+        },
+        {
+          "chain_id": "L3",
+          "accessible": true,
+          "anchor_present": true,
+          "explicit_missing": [],
+          "blocks": []
+        }
+      ],
+      "notes": ""
+    }
+  ]
+}

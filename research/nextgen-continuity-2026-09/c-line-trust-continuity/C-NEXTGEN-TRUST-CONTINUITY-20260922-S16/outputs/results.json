@@ -1,0 +1,2063 @@
+{
+  "schema_version": "S16-results-1",
+  "generated_by": "harness.py",
+  "deterministic": true,
+  "fixture_count": 22,
+  "run_count": 44,
+  "results": [
+    {
+      "fixture_id": "F01-key-order",
+      "description": "JSON key order is serialization-only difference",
+      "runs": [
+        {
+          "rule_set": "v1",
+          "status": "RECOVERED",
+          "reason": "all required provenance levels are complete, reachable, and coherent",
+          "blockers": [],
+          "provenance": {
+            "l1": {
+              "present": true,
+              "complete": true,
+              "reachable": true
+            },
+            "l2": {
+              "present": true,
+              "complete": true,
+              "reachable": true
+            }
+          },
+          "input_hash": "sha256:ecf9e98ec0641e23113ff3ce8bdc78d0ddd249886517fd4a7f68cc83d4e65667",
+          "comparison_input_hash": "sha256:ecf9e98ec0641e23113ff3ce8bdc78d0ddd249886517fd4a7f68cc83d4e65667",
+          "canonical_hash_equal": true,
+          "canonical_bytes_sha256": "ecf9e98ec0641e23113ff3ce8bdc78d0ddd249886517fd4a7f68cc83d4e65667",
+          "comparison_canonical_bytes_sha256": "ecf9e98ec0641e23113ff3ce8bdc78d0ddd249886517fd4a7f68cc83d4e65667",
+          "synthetic_only": true,
+          "production_verified": false
+        },
+        {
+          "rule_set": "v2",
+          "status": "RECOVERED",
+          "reason": "all required provenance levels are complete, reachable, and coherent",
+          "blockers": [],
+          "provenance": {
+            "l1": {
+              "present": true,
+              "complete": true,
+              "reachable": true
+            },
+            "l2": {
+              "present": true,
+              "complete": true,
+              "reachable": true
+            }
+          },
+          "input_hash": "sha256:ecf9e98ec0641e23113ff3ce8bdc78d0ddd249886517fd4a7f68cc83d4e65667",
+          "comparison_input_hash": "sha256:ecf9e98ec0641e23113ff3ce8bdc78d0ddd249886517fd4a7f68cc83d4e65667",
+          "canonical_hash_equal": true,
+          "canonical_bytes_sha256": "ecf9e98ec0641e23113ff3ce8bdc78d0ddd249886517fd4a7f68cc83d4e65667",
+          "comparison_canonical_bytes_sha256": "ecf9e98ec0641e23113ff3ce8bdc78d0ddd249886517fd4a7f68cc83d4e65667",
+          "synthetic_only": true,
+          "production_verified": false
+        }
+      ],
+      "version_drift": {
+        "present": false,
+        "from": "RECOVERED",
+        "to": "RECOVERED",
+        "recorded": true,
+        "classification": "NONE",
+        "rule_sets_compared": [
+          "v1",
+          "v2"
+        ]
+      },
+      "final_status": "RECOVERED",
+      "final_reason": "both rule_set versions produce the same decision",
+      "final_blockers": [],
+      "provenance": {
+        "l1": {
+          "present": true,
+          "complete": true,
+          "reachable": true
+        },
+        "l2": {
+          "present": true,
+          "complete": true,
+          "reachable": true
+        }
+      },
+      "input_hash": "sha256:ecf9e98ec0641e23113ff3ce8bdc78d0ddd249886517fd4a7f68cc83d4e65667",
+      "rule_sets_used": [
+        "v1",
+        "v2"
+      ],
+      "synthetic_only": true,
+      "production_verified": false
+    },
+    {
+      "fixture_id": "F02-unicode-nfc-nfd",
+      "description": "NFC and NFD spellings normalize to one value",
+      "runs": [
+        {
+          "rule_set": "v1",
+          "status": "RECOVERED",
+          "reason": "all required provenance levels are complete, reachable, and coherent",
+          "blockers": [],
+          "provenance": {
+            "l1": {
+              "present": true,
+              "complete": true,
+              "reachable": true
+            },
+            "l2": {
+              "present": true,
+              "complete": true,
+              "reachable": true
+            }
+          },
+          "input_hash": "sha256:42d3cbf59fdccced04e5dff14433fb52d34d58e385e9770ffd896ff517d63b92",
+          "comparison_input_hash": "sha256:42d3cbf59fdccced04e5dff14433fb52d34d58e385e9770ffd896ff517d63b92",
+          "canonical_hash_equal": true,
+          "canonical_bytes_sha256": "42d3cbf59fdccced04e5dff14433fb52d34d58e385e9770ffd896ff517d63b92",
+          "comparison_canonical_bytes_sha256": "42d3cbf59fdccced04e5dff14433fb52d34d58e385e9770ffd896ff517d63b92",
+          "synthetic_only": true,
+          "production_verified": false
+        },
+        {
+          "rule_set": "v2",
+          "status": "RECOVERED",
+          "reason": "all required provenance levels are complete, reachable, and coherent",
+          "blockers": [],
+          "provenance": {
+            "l1": {
+              "present": true,
+              "complete": true,
+              "reachable": true
+            },
+            "l2": {
+              "present": true,
+              "complete": true,
+              "reachable": true
+            }
+          },
+          "input_hash": "sha256:42d3cbf59fdccced04e5dff14433fb52d34d58e385e9770ffd896ff517d63b92",
+          "comparison_input_hash": "sha256:42d3cbf59fdccced04e5dff14433fb52d34d58e385e9770ffd896ff517d63b92",
+          "canonical_hash_equal": true,
+          "canonical_bytes_sha256": "42d3cbf59fdccced04e5dff14433fb52d34d58e385e9770ffd896ff517d63b92",
+          "comparison_canonical_bytes_sha256": "42d3cbf59fdccced04e5dff14433fb52d34d58e385e9770ffd896ff517d63b92",
+          "synthetic_only": true,
+          "production_verified": false
+        }
+      ],
+      "version_drift": {
+        "present": false,
+        "from": "RECOVERED",
+        "to": "RECOVERED",
+        "recorded": true,
+        "classification": "NONE",
+        "rule_sets_compared": [
+          "v1",
+          "v2"
+        ]
+      },
+      "final_status": "RECOVERED",
+      "final_reason": "both rule_set versions produce the same decision",
+      "final_blockers": [],
+      "provenance": {
+        "l1": {
+          "present": true,
+          "complete": true,
+          "reachable": true
+        },
+        "l2": {
+          "present": true,
+          "complete": true,
+          "reachable": true
+        }
+      },
+      "input_hash": "sha256:42d3cbf59fdccced04e5dff14433fb52d34d58e385e9770ffd896ff517d63b92",
+      "rule_sets_used": [
+        "v1",
+        "v2"
+      ],
+      "synthetic_only": true,
+      "production_verified": false
+    },
+    {
+      "fixture_id": "F03-null-omission",
+      "description": "Explicit null and omitted optional field are equivalent",
+      "runs": [
+        {
+          "rule_set": "v1",
+          "status": "RECOVERED",
+          "reason": "all required provenance levels are complete, reachable, and coherent",
+          "blockers": [],
+          "provenance": {
+            "l1": {
+              "present": true,
+              "complete": true,
+              "reachable": true
+            },
+            "l2": {
+              "present": true,
+              "complete": true,
+              "reachable": true
+            }
+          },
+          "input_hash": "sha256:015abd7f5cc57a2dd94b7590f04ad8084273905ee33ec5cebeae62276a97f862",
+          "comparison_input_hash": "sha256:015abd7f5cc57a2dd94b7590f04ad8084273905ee33ec5cebeae62276a97f862",
+          "canonical_hash_equal": true,
+          "canonical_bytes_sha256": "015abd7f5cc57a2dd94b7590f04ad8084273905ee33ec5cebeae62276a97f862",
+          "comparison_canonical_bytes_sha256": "015abd7f5cc57a2dd94b7590f04ad8084273905ee33ec5cebeae62276a97f862",
+          "synthetic_only": true,
+          "production_verified": false
+        },
+        {
+          "rule_set": "v2",
+          "status": "RECOVERED",
+          "reason": "all required provenance levels are complete, reachable, and coherent",
+          "blockers": [],
+          "provenance": {
+            "l1": {
+              "present": true,
+              "complete": true,
+              "reachable": true
+            },
+            "l2": {
+              "present": true,
+              "complete": true,
+              "reachable": true
+            }
+          },
+          "input_hash": "sha256:015abd7f5cc57a2dd94b7590f04ad8084273905ee33ec5cebeae62276a97f862",
+          "comparison_input_hash": "sha256:015abd7f5cc57a2dd94b7590f04ad8084273905ee33ec5cebeae62276a97f862",
+          "canonical_hash_equal": true,
+          "canonical_bytes_sha256": "015abd7f5cc57a2dd94b7590f04ad8084273905ee33ec5cebeae62276a97f862",
+          "comparison_canonical_bytes_sha256": "015abd7f5cc57a2dd94b7590f04ad8084273905ee33ec5cebeae62276a97f862",
+          "synthetic_only": true,
+          "production_verified": false
+        }
+      ],
+      "version_drift": {
+        "present": false,
+        "from": "RECOVERED",
+        "to": "RECOVERED",
+        "recorded": true,
+        "classification": "NONE",
+        "rule_sets_compared": [
+          "v1",
+          "v2"
+        ]
+      },
+      "final_status": "RECOVERED",
+      "final_reason": "both rule_set versions produce the same decision",
+      "final_blockers": [],
+      "provenance": {
+        "l1": {
+          "present": true,
+          "complete": true,
+          "reachable": true
+        },
+        "l2": {
+          "present": true,
+          "complete": true,
+          "reachable": true
+        }
+      },
+      "input_hash": "sha256:015abd7f5cc57a2dd94b7590f04ad8084273905ee33ec5cebeae62276a97f862",
+      "rule_sets_used": [
+        "v1",
+        "v2"
+      ],
+      "synthetic_only": true,
+      "production_verified": false
+    },
+    {
+      "fixture_id": "F04-integer-decimal",
+      "description": "1 and 1.0 use one canonical numeric form",
+      "runs": [
+        {
+          "rule_set": "v1",
+          "status": "RECOVERED",
+          "reason": "all required provenance levels are complete, reachable, and coherent",
+          "blockers": [],
+          "provenance": {
+            "l1": {
+              "present": true,
+              "complete": true,
+              "reachable": true
+            },
+            "l2": {
+              "present": true,
+              "complete": true,
+              "reachable": true
+            }
+          },
+          "input_hash": "sha256:2bfd14f43d17fc7cea24e0917a8879b4b2f880b8baeec1b9d90fbaad655e71bd",
+          "comparison_input_hash": "sha256:2bfd14f43d17fc7cea24e0917a8879b4b2f880b8baeec1b9d90fbaad655e71bd",
+          "canonical_hash_equal": true,
+          "canonical_bytes_sha256": "2bfd14f43d17fc7cea24e0917a8879b4b2f880b8baeec1b9d90fbaad655e71bd",
+          "comparison_canonical_bytes_sha256": "2bfd14f43d17fc7cea24e0917a8879b4b2f880b8baeec1b9d90fbaad655e71bd",
+          "synthetic_only": true,
+          "production_verified": false
+        },
+        {
+          "rule_set": "v2",
+          "status": "RECOVERED",
+          "reason": "all required provenance levels are complete, reachable, and coherent",
+          "blockers": [],
+          "provenance": {
+            "l1": {
+              "present": true,
+              "complete": true,
+              "reachable": true
+            },
+            "l2": {
+              "present": true,
+              "complete": true,
+              "reachable": true
+            }
+          },
+          "input_hash": "sha256:2bfd14f43d17fc7cea24e0917a8879b4b2f880b8baeec1b9d90fbaad655e71bd",
+          "comparison_input_hash": "sha256:2bfd14f43d17fc7cea24e0917a8879b4b2f880b8baeec1b9d90fbaad655e71bd",
+          "canonical_hash_equal": true,
+          "canonical_bytes_sha256": "2bfd14f43d17fc7cea24e0917a8879b4b2f880b8baeec1b9d90fbaad655e71bd",
+          "comparison_canonical_bytes_sha256": "2bfd14f43d17fc7cea24e0917a8879b4b2f880b8baeec1b9d90fbaad655e71bd",
+          "synthetic_only": true,
+          "production_verified": false
+        }
+      ],
+      "version_drift": {
+        "present": false,
+        "from": "RECOVERED",
+        "to": "RECOVERED",
+        "recorded": true,
+        "classification": "NONE",
+        "rule_sets_compared": [
+          "v1",
+          "v2"
+        ]
+      },
+      "final_status": "RECOVERED",
+      "final_reason": "both rule_set versions produce the same decision",
+      "final_blockers": [],
+      "provenance": {
+        "l1": {
+          "present": true,
+          "complete": true,
+          "reachable": true
+        },
+        "l2": {
+          "present": true,
+          "complete": true,
+          "reachable": true
+        }
+      },
+      "input_hash": "sha256:2bfd14f43d17fc7cea24e0917a8879b4b2f880b8baeec1b9d90fbaad655e71bd",
+      "rule_sets_used": [
+        "v1",
+        "v2"
+      ],
+      "synthetic_only": true,
+      "production_verified": false
+    },
+    {
+      "fixture_id": "F05-trailing-zero",
+      "description": "Trailing decimal zeroes do not alter value",
+      "runs": [
+        {
+          "rule_set": "v1",
+          "status": "RECOVERED",
+          "reason": "all required provenance levels are complete, reachable, and coherent",
+          "blockers": [],
+          "provenance": {
+            "l1": {
+              "present": true,
+              "complete": true,
+              "reachable": true
+            },
+            "l2": {
+              "present": true,
+              "complete": true,
+              "reachable": true
+            }
+          },
+          "input_hash": "sha256:c2f4a8099bdaf483ac3f465590b90ae2156f94d0d32c194bfbb06ca2289ad25f",
+          "comparison_input_hash": "sha256:c2f4a8099bdaf483ac3f465590b90ae2156f94d0d32c194bfbb06ca2289ad25f",
+          "canonical_hash_equal": true,
+          "canonical_bytes_sha256": "c2f4a8099bdaf483ac3f465590b90ae2156f94d0d32c194bfbb06ca2289ad25f",
+          "comparison_canonical_bytes_sha256": "c2f4a8099bdaf483ac3f465590b90ae2156f94d0d32c194bfbb06ca2289ad25f",
+          "synthetic_only": true,
+          "production_verified": false
+        },
+        {
+          "rule_set": "v2",
+          "status": "RECOVERED",
+          "reason": "all required provenance levels are complete, reachable, and coherent",
+          "blockers": [],
+          "provenance": {
+            "l1": {
+              "present": true,
+              "complete": true,
+              "reachable": true
+            },
+            "l2": {
+              "present": true,
+              "complete": true,
+              "reachable": true
+            }
+          },
+          "input_hash": "sha256:c2f4a8099bdaf483ac3f465590b90ae2156f94d0d32c194bfbb06ca2289ad25f",
+          "comparison_input_hash": "sha256:c2f4a8099bdaf483ac3f465590b90ae2156f94d0d32c194bfbb06ca2289ad25f",
+          "canonical_hash_equal": true,
+          "canonical_bytes_sha256": "c2f4a8099bdaf483ac3f465590b90ae2156f94d0d32c194bfbb06ca2289ad25f",
+          "comparison_canonical_bytes_sha256": "c2f4a8099bdaf483ac3f465590b90ae2156f94d0d32c194bfbb06ca2289ad25f",
+          "synthetic_only": true,
+          "production_verified": false
+        }
+      ],
+      "version_drift": {
+        "present": false,
+        "from": "RECOVERED",
+        "to": "RECOVERED",
+        "recorded": true,
+        "classification": "NONE",
+        "rule_sets_compared": [
+          "v1",
+          "v2"
+        ]
+      },
+      "final_status": "RECOVERED",
+      "final_reason": "both rule_set versions produce the same decision",
+      "final_blockers": [],
+      "provenance": {
+        "l1": {
+          "present": true,
+          "complete": true,
+          "reachable": true
+        },
+        "l2": {
+          "present": true,
+          "complete": true,
+          "reachable": true
+        }
+      },
+      "input_hash": "sha256:c2f4a8099bdaf483ac3f465590b90ae2156f94d0d32c194bfbb06ca2289ad25f",
+      "rule_sets_used": [
+        "v1",
+        "v2"
+      ],
+      "synthetic_only": true,
+      "production_verified": false
+    },
+    {
+      "fixture_id": "F06-precision-mismatch",
+      "description": "Different numeric precision is a content mismatch",
+      "runs": [
+        {
+          "rule_set": "v1",
+          "status": "REJECT",
+          "reason": "canonical content hashes contradict must_match expectation",
+          "blockers": [
+            "canonical content equality"
+          ],
+          "provenance": {
+            "l1": {
+              "present": true,
+              "complete": true,
+              "reachable": true
+            },
+            "l2": {
+              "present": true,
+              "complete": true,
+              "reachable": true
+            }
+          },
+          "input_hash": "sha256:399299ae7e87ca72e1e92fa63506ae95c4c338e80135e2069edb3594e72715c5",
+          "comparison_input_hash": "sha256:9cbeef5f2cc70d876d534e291b79834a8a59cc20db755505fddb3163196ff361",
+          "canonical_hash_equal": false,
+          "canonical_bytes_sha256": "399299ae7e87ca72e1e92fa63506ae95c4c338e80135e2069edb3594e72715c5",
+          "comparison_canonical_bytes_sha256": "9cbeef5f2cc70d876d534e291b79834a8a59cc20db755505fddb3163196ff361",
+          "synthetic_only": true,
+          "production_verified": false
+        },
+        {
+          "rule_set": "v2",
+          "status": "REJECT",
+          "reason": "canonical content hashes contradict must_match expectation",
+          "blockers": [
+            "canonical content equality"
+          ],
+          "provenance": {
+            "l1": {
+              "present": true,
+              "complete": true,
+              "reachable": true
+            },
+            "l2": {
+              "present": true,
+              "complete": true,
+              "reachable": true
+            }
+          },
+          "input_hash": "sha256:399299ae7e87ca72e1e92fa63506ae95c4c338e80135e2069edb3594e72715c5",
+          "comparison_input_hash": "sha256:9cbeef5f2cc70d876d534e291b79834a8a59cc20db755505fddb3163196ff361",
+          "canonical_hash_equal": false,
+          "canonical_bytes_sha256": "399299ae7e87ca72e1e92fa63506ae95c4c338e80135e2069edb3594e72715c5",
+          "comparison_canonical_bytes_sha256": "9cbeef5f2cc70d876d534e291b79834a8a59cc20db755505fddb3163196ff361",
+          "synthetic_only": true,
+          "production_verified": false
+        }
+      ],
+      "version_drift": {
+        "present": false,
+        "from": "REJECT",
+        "to": "REJECT",
+        "recorded": true,
+        "classification": "NONE",
+        "rule_sets_compared": [
+          "v1",
+          "v2"
+        ]
+      },
+      "final_status": "REJECT",
+      "final_reason": "both rule_set versions produce the same decision",
+      "final_blockers": [
+        "canonical content equality"
+      ],
+      "provenance": {
+        "l1": {
+          "present": true,
+          "complete": true,
+          "reachable": true
+        },
+        "l2": {
+          "present": true,
+          "complete": true,
+          "reachable": true
+        }
+      },
+      "input_hash": "sha256:399299ae7e87ca72e1e92fa63506ae95c4c338e80135e2069edb3594e72715c5",
+      "rule_sets_used": [
+        "v1",
+        "v2"
+      ],
+      "synthetic_only": true,
+      "production_verified": false
+    },
+    {
+      "fixture_id": "F07-l1-complete-l2-missing",
+      "description": "L1 complete but L2 missing",
+      "runs": [
+        {
+          "rule_set": "v1",
+          "status": "UNKNOWN",
+          "reason": "L2 provenance is missing or incomplete",
+          "blockers": [
+            "L2 complete record"
+          ],
+          "provenance": {
+            "l1": {
+              "present": true,
+              "complete": true,
+              "reachable": true
+            },
+            "l2": {
+              "present": false,
+              "complete": false,
+              "reachable": false
+            }
+          },
+          "input_hash": "sha256:5e2b92cc57ce618dfbb54844a31775e4b95c6fb552ee6bf5a068133c12d2ad90",
+          "comparison_input_hash": "sha256:5e2b92cc57ce618dfbb54844a31775e4b95c6fb552ee6bf5a068133c12d2ad90",
+          "canonical_hash_equal": true,
+          "canonical_bytes_sha256": "5e2b92cc57ce618dfbb54844a31775e4b95c6fb552ee6bf5a068133c12d2ad90",
+          "comparison_canonical_bytes_sha256": "5e2b92cc57ce618dfbb54844a31775e4b95c6fb552ee6bf5a068133c12d2ad90",
+          "synthetic_only": true,
+          "production_verified": false
+        },
+        {
+          "rule_set": "v2",
+          "status": "UNKNOWN",
+          "reason": "L2 provenance is missing or incomplete",
+          "blockers": [
+            "L2 complete record"
+          ],
+          "provenance": {
+            "l1": {
+              "present": true,
+              "complete": true,
+              "reachable": true
+            },
+            "l2": {
+              "present": false,
+              "complete": false,
+              "reachable": false
+            }
+          },
+          "input_hash": "sha256:5e2b92cc57ce618dfbb54844a31775e4b95c6fb552ee6bf5a068133c12d2ad90",
+          "comparison_input_hash": "sha256:5e2b92cc57ce618dfbb54844a31775e4b95c6fb552ee6bf5a068133c12d2ad90",
+          "canonical_hash_equal": true,
+          "canonical_bytes_sha256": "5e2b92cc57ce618dfbb54844a31775e4b95c6fb552ee6bf5a068133c12d2ad90",
+          "comparison_canonical_bytes_sha256": "5e2b92cc57ce618dfbb54844a31775e4b95c6fb552ee6bf5a068133c12d2ad90",
+          "synthetic_only": true,
+          "production_verified": false
+        }
+      ],
+      "version_drift": {
+        "present": false,
+        "from": "UNKNOWN",
+        "to": "UNKNOWN",
+        "recorded": true,
+        "classification": "NONE",
+        "rule_sets_compared": [
+          "v1",
+          "v2"
+        ]
+      },
+      "final_status": "UNKNOWN",
+      "final_reason": "both rule_set versions produce the same decision",
+      "final_blockers": [
+        "L2 complete record"
+      ],
+      "provenance": {
+        "l1": {
+          "present": true,
+          "complete": true,
+          "reachable": true
+        },
+        "l2": {
+          "present": false,
+          "complete": false,
+          "reachable": false
+        }
+      },
+      "input_hash": "sha256:5e2b92cc57ce618dfbb54844a31775e4b95c6fb552ee6bf5a068133c12d2ad90",
+      "rule_sets_used": [
+        "v1",
+        "v2"
+      ],
+      "synthetic_only": true,
+      "production_verified": false
+    },
+    {
+      "fixture_id": "F08-l1-missing-l2-complete",
+      "description": "L1 missing but L2 complete",
+      "runs": [
+        {
+          "rule_set": "v1",
+          "status": "UNKNOWN",
+          "reason": "L1 provenance is missing or incomplete",
+          "blockers": [
+            "L1 complete record"
+          ],
+          "provenance": {
+            "l1": {
+              "present": false,
+              "complete": false,
+              "reachable": false
+            },
+            "l2": {
+              "present": true,
+              "complete": true,
+              "reachable": true
+            }
+          },
+          "input_hash": "sha256:5e2b92cc57ce618dfbb54844a31775e4b95c6fb552ee6bf5a068133c12d2ad90",
+          "comparison_input_hash": "sha256:5e2b92cc57ce618dfbb54844a31775e4b95c6fb552ee6bf5a068133c12d2ad90",
+          "canonical_hash_equal": true,
+          "canonical_bytes_sha256": "5e2b92cc57ce618dfbb54844a31775e4b95c6fb552ee6bf5a068133c12d2ad90",
+          "comparison_canonical_bytes_sha256": "5e2b92cc57ce618dfbb54844a31775e4b95c6fb552ee6bf5a068133c12d2ad90",
+          "synthetic_only": true,
+          "production_verified": false
+        },
+        {
+          "rule_set": "v2",
+          "status": "UNKNOWN",
+          "reason": "L1 provenance is missing or incomplete",
+          "blockers": [
+            "L1 complete record"
+          ],
+          "provenance": {
+            "l1": {
+              "present": false,
+              "complete": false,
+              "reachable": false
+            },
+            "l2": {
+              "present": true,
+              "complete": true,
+              "reachable": true
+            }
+          },
+          "input_hash": "sha256:5e2b92cc57ce618dfbb54844a31775e4b95c6fb552ee6bf5a068133c12d2ad90",
+          "comparison_input_hash": "sha256:5e2b92cc57ce618dfbb54844a31775e4b95c6fb552ee6bf5a068133c12d2ad90",
+          "canonical_hash_equal": true,
+          "canonical_bytes_sha256": "5e2b92cc57ce618dfbb54844a31775e4b95c6fb552ee6bf5a068133c12d2ad90",
+          "comparison_canonical_bytes_sha256": "5e2b92cc57ce618dfbb54844a31775e4b95c6fb552ee6bf5a068133c12d2ad90",
+          "synthetic_only": true,
+          "production_verified": false
+        }
+      ],
+      "version_drift": {
+        "present": false,
+        "from": "UNKNOWN",
+        "to": "UNKNOWN",
+        "recorded": true,
+        "classification": "NONE",
+        "rule_sets_compared": [
+          "v1",
+          "v2"
+        ]
+      },
+      "final_status": "UNKNOWN",
+      "final_reason": "both rule_set versions produce the same decision",
+      "final_blockers": [
+        "L1 complete record"
+      ],
+      "provenance": {
+        "l1": {
+          "present": false,
+          "complete": false,
+          "reachable": false
+        },
+        "l2": {
+          "present": true,
+          "complete": true,
+          "reachable": true
+        }
+      },
+      "input_hash": "sha256:5e2b92cc57ce618dfbb54844a31775e4b95c6fb552ee6bf5a068133c12d2ad90",
+      "rule_sets_used": [
+        "v1",
+        "v2"
+      ],
+      "synthetic_only": true,
+      "production_verified": false
+    },
+    {
+      "fixture_id": "F09-all-provenance-missing",
+      "description": "Both provenance levels absent",
+      "runs": [
+        {
+          "rule_set": "v1",
+          "status": "UNKNOWN",
+          "reason": "L1 provenance is missing or incomplete",
+          "blockers": [
+            "L1 complete record"
+          ],
+          "provenance": {
+            "l1": {
+              "present": false,
+              "complete": false,
+              "reachable": false
+            },
+            "l2": {
+              "present": false,
+              "complete": false,
+              "reachable": false
+            }
+          },
+          "input_hash": "sha256:5e2b92cc57ce618dfbb54844a31775e4b95c6fb552ee6bf5a068133c12d2ad90",
+          "comparison_input_hash": "sha256:5e2b92cc57ce618dfbb54844a31775e4b95c6fb552ee6bf5a068133c12d2ad90",
+          "canonical_hash_equal": true,
+          "canonical_bytes_sha256": "5e2b92cc57ce618dfbb54844a31775e4b95c6fb552ee6bf5a068133c12d2ad90",
+          "comparison_canonical_bytes_sha256": "5e2b92cc57ce618dfbb54844a31775e4b95c6fb552ee6bf5a068133c12d2ad90",
+          "synthetic_only": true,
+          "production_verified": false
+        },
+        {
+          "rule_set": "v2",
+          "status": "UNKNOWN",
+          "reason": "L1 provenance is missing or incomplete",
+          "blockers": [
+            "L1 complete record"
+          ],
+          "provenance": {
+            "l1": {
+              "present": false,
+              "complete": false,
+              "reachable": false
+            },
+            "l2": {
+              "present": false,
+              "complete": false,
+              "reachable": false
+            }
+          },
+          "input_hash": "sha256:5e2b92cc57ce618dfbb54844a31775e4b95c6fb552ee6bf5a068133c12d2ad90",
+          "comparison_input_hash": "sha256:5e2b92cc57ce618dfbb54844a31775e4b95c6fb552ee6bf5a068133c12d2ad90",
+          "canonical_hash_equal": true,
+          "canonical_bytes_sha256": "5e2b92cc57ce618dfbb54844a31775e4b95c6fb552ee6bf5a068133c12d2ad90",
+          "comparison_canonical_bytes_sha256": "5e2b92cc57ce618dfbb54844a31775e4b95c6fb552ee6bf5a068133c12d2ad90",
+          "synthetic_only": true,
+          "production_verified": false
+        }
+      ],
+      "version_drift": {
+        "present": false,
+        "from": "UNKNOWN",
+        "to": "UNKNOWN",
+        "recorded": true,
+        "classification": "NONE",
+        "rule_sets_compared": [
+          "v1",
+          "v2"
+        ]
+      },
+      "final_status": "UNKNOWN",
+      "final_reason": "both rule_set versions produce the same decision",
+      "final_blockers": [
+        "L1 complete record"
+      ],
+      "provenance": {
+        "l1": {
+          "present": false,
+          "complete": false,
+          "reachable": false
+        },
+        "l2": {
+          "present": false,
+          "complete": false,
+          "reachable": false
+        }
+      },
+      "input_hash": "sha256:5e2b92cc57ce618dfbb54844a31775e4b95c6fb552ee6bf5a068133c12d2ad90",
+      "rule_sets_used": [
+        "v1",
+        "v2"
+      ],
+      "synthetic_only": true,
+      "production_verified": false
+    },
+    {
+      "fixture_id": "F10-l2-unreachable",
+      "description": "Both records exist but L2 is unreachable",
+      "runs": [
+        {
+          "rule_set": "v1",
+          "status": "UNKNOWN",
+          "reason": "L2 provenance level is unreachable",
+          "blockers": [
+            "reachable L2 chain"
+          ],
+          "provenance": {
+            "l1": {
+              "present": true,
+              "complete": true,
+              "reachable": true
+            },
+            "l2": {
+              "present": true,
+              "complete": true,
+              "reachable": false
+            }
+          },
+          "input_hash": "sha256:5e2b92cc57ce618dfbb54844a31775e4b95c6fb552ee6bf5a068133c12d2ad90",
+          "comparison_input_hash": "sha256:5e2b92cc57ce618dfbb54844a31775e4b95c6fb552ee6bf5a068133c12d2ad90",
+          "canonical_hash_equal": true,
+          "canonical_bytes_sha256": "5e2b92cc57ce618dfbb54844a31775e4b95c6fb552ee6bf5a068133c12d2ad90",
+          "comparison_canonical_bytes_sha256": "5e2b92cc57ce618dfbb54844a31775e4b95c6fb552ee6bf5a068133c12d2ad90",
+          "synthetic_only": true,
+          "production_verified": false
+        },
+        {
+          "rule_set": "v2",
+          "status": "UNKNOWN",
+          "reason": "L2 provenance level is unreachable",
+          "blockers": [
+            "reachable L2 chain"
+          ],
+          "provenance": {
+            "l1": {
+              "present": true,
+              "complete": true,
+              "reachable": true
+            },
+            "l2": {
+              "present": true,
+              "complete": true,
+              "reachable": false
+            }
+          },
+          "input_hash": "sha256:5e2b92cc57ce618dfbb54844a31775e4b95c6fb552ee6bf5a068133c12d2ad90",
+          "comparison_input_hash": "sha256:5e2b92cc57ce618dfbb54844a31775e4b95c6fb552ee6bf5a068133c12d2ad90",
+          "canonical_hash_equal": true,
+          "canonical_bytes_sha256": "5e2b92cc57ce618dfbb54844a31775e4b95c6fb552ee6bf5a068133c12d2ad90",
+          "comparison_canonical_bytes_sha256": "5e2b92cc57ce618dfbb54844a31775e4b95c6fb552ee6bf5a068133c12d2ad90",
+          "synthetic_only": true,
+          "production_verified": false
+        }
+      ],
+      "version_drift": {
+        "present": false,
+        "from": "UNKNOWN",
+        "to": "UNKNOWN",
+        "recorded": true,
+        "classification": "NONE",
+        "rule_sets_compared": [
+          "v1",
+          "v2"
+        ]
+      },
+      "final_status": "UNKNOWN",
+      "final_reason": "both rule_set versions produce the same decision",
+      "final_blockers": [
+        "reachable L2 chain"
+      ],
+      "provenance": {
+        "l1": {
+          "present": true,
+          "complete": true,
+          "reachable": true
+        },
+        "l2": {
+          "present": true,
+          "complete": true,
+          "reachable": false
+        }
+      },
+      "input_hash": "sha256:5e2b92cc57ce618dfbb54844a31775e4b95c6fb552ee6bf5a068133c12d2ad90",
+      "rule_sets_used": [
+        "v1",
+        "v2"
+      ],
+      "synthetic_only": true,
+      "production_verified": false
+    },
+    {
+      "fixture_id": "F11-l1-unreachable",
+      "description": "L1 is complete in storage but unreachable",
+      "runs": [
+        {
+          "rule_set": "v1",
+          "status": "UNKNOWN",
+          "reason": "L1 provenance level is unreachable",
+          "blockers": [
+            "reachable L1 chain"
+          ],
+          "provenance": {
+            "l1": {
+              "present": true,
+              "complete": true,
+              "reachable": false
+            },
+            "l2": {
+              "present": true,
+              "complete": true,
+              "reachable": true
+            }
+          },
+          "input_hash": "sha256:5e2b92cc57ce618dfbb54844a31775e4b95c6fb552ee6bf5a068133c12d2ad90",
+          "comparison_input_hash": "sha256:5e2b92cc57ce618dfbb54844a31775e4b95c6fb552ee6bf5a068133c12d2ad90",
+          "canonical_hash_equal": true,
+          "canonical_bytes_sha256": "5e2b92cc57ce618dfbb54844a31775e4b95c6fb552ee6bf5a068133c12d2ad90",
+          "comparison_canonical_bytes_sha256": "5e2b92cc57ce618dfbb54844a31775e4b95c6fb552ee6bf5a068133c12d2ad90",
+          "synthetic_only": true,
+          "production_verified": false
+        },
+        {
+          "rule_set": "v2",
+          "status": "UNKNOWN",
+          "reason": "L1 provenance level is unreachable",
+          "blockers": [
+            "reachable L1 chain"
+          ],
+          "provenance": {
+            "l1": {
+              "present": true,
+              "complete": true,
+              "reachable": false
+            },
+            "l2": {
+              "present": true,
+              "complete": true,
+              "reachable": true
+            }
+          },
+          "input_hash": "sha256:5e2b92cc57ce618dfbb54844a31775e4b95c6fb552ee6bf5a068133c12d2ad90",
+          "comparison_input_hash": "sha256:5e2b92cc57ce618dfbb54844a31775e4b95c6fb552ee6bf5a068133c12d2ad90",
+          "canonical_hash_equal": true,
+          "canonical_bytes_sha256": "5e2b92cc57ce618dfbb54844a31775e4b95c6fb552ee6bf5a068133c12d2ad90",
+          "comparison_canonical_bytes_sha256": "5e2b92cc57ce618dfbb54844a31775e4b95c6fb552ee6bf5a068133c12d2ad90",
+          "synthetic_only": true,
+          "production_verified": false
+        }
+      ],
+      "version_drift": {
+        "present": false,
+        "from": "UNKNOWN",
+        "to": "UNKNOWN",
+        "recorded": true,
+        "classification": "NONE",
+        "rule_sets_compared": [
+          "v1",
+          "v2"
+        ]
+      },
+      "final_status": "UNKNOWN",
+      "final_reason": "both rule_set versions produce the same decision",
+      "final_blockers": [
+        "reachable L1 chain"
+      ],
+      "provenance": {
+        "l1": {
+          "present": true,
+          "complete": true,
+          "reachable": false
+        },
+        "l2": {
+          "present": true,
+          "complete": true,
+          "reachable": true
+        }
+      },
+      "input_hash": "sha256:5e2b92cc57ce618dfbb54844a31775e4b95c6fb552ee6bf5a068133c12d2ad90",
+      "rule_sets_used": [
+        "v1",
+        "v2"
+      ],
+      "synthetic_only": true,
+      "production_verified": false
+    },
+    {
+      "fixture_id": "F12-both-complete",
+      "description": "Complete reachable coherent two-level chain",
+      "runs": [
+        {
+          "rule_set": "v1",
+          "status": "RECOVERED",
+          "reason": "all required provenance levels are complete, reachable, and coherent",
+          "blockers": [],
+          "provenance": {
+            "l1": {
+              "present": true,
+              "complete": true,
+              "reachable": true
+            },
+            "l2": {
+              "present": true,
+              "complete": true,
+              "reachable": true
+            }
+          },
+          "input_hash": "sha256:6e8ad2be09fee840b8a88902209af823b375d37c242915625cb2bf58448b918b",
+          "comparison_input_hash": "sha256:6e8ad2be09fee840b8a88902209af823b375d37c242915625cb2bf58448b918b",
+          "canonical_hash_equal": true,
+          "canonical_bytes_sha256": "6e8ad2be09fee840b8a88902209af823b375d37c242915625cb2bf58448b918b",
+          "comparison_canonical_bytes_sha256": "6e8ad2be09fee840b8a88902209af823b375d37c242915625cb2bf58448b918b",
+          "synthetic_only": true,
+          "production_verified": false
+        },
+        {
+          "rule_set": "v2",
+          "status": "RECOVERED",
+          "reason": "all required provenance levels are complete, reachable, and coherent",
+          "blockers": [],
+          "provenance": {
+            "l1": {
+              "present": true,
+              "complete": true,
+              "reachable": true
+            },
+            "l2": {
+              "present": true,
+              "complete": true,
+              "reachable": true
+            }
+          },
+          "input_hash": "sha256:6e8ad2be09fee840b8a88902209af823b375d37c242915625cb2bf58448b918b",
+          "comparison_input_hash": "sha256:6e8ad2be09fee840b8a88902209af823b375d37c242915625cb2bf58448b918b",
+          "canonical_hash_equal": true,
+          "canonical_bytes_sha256": "6e8ad2be09fee840b8a88902209af823b375d37c242915625cb2bf58448b918b",
+          "comparison_canonical_bytes_sha256": "6e8ad2be09fee840b8a88902209af823b375d37c242915625cb2bf58448b918b",
+          "synthetic_only": true,
+          "production_verified": false
+        }
+      ],
+      "version_drift": {
+        "present": false,
+        "from": "RECOVERED",
+        "to": "RECOVERED",
+        "recorded": true,
+        "classification": "NONE",
+        "rule_sets_compared": [
+          "v1",
+          "v2"
+        ]
+      },
+      "final_status": "RECOVERED",
+      "final_reason": "both rule_set versions produce the same decision",
+      "final_blockers": [],
+      "provenance": {
+        "l1": {
+          "present": true,
+          "complete": true,
+          "reachable": true
+        },
+        "l2": {
+          "present": true,
+          "complete": true,
+          "reachable": true
+        }
+      },
+      "input_hash": "sha256:6e8ad2be09fee840b8a88902209af823b375d37c242915625cb2bf58448b918b",
+      "rule_sets_used": [
+        "v1",
+        "v2"
+      ],
+      "synthetic_only": true,
+      "production_verified": false
+    },
+    {
+      "fixture_id": "F13-parent-mismatch",
+      "description": "Verifiable L2 parent mismatch is rejectable",
+      "runs": [
+        {
+          "rule_set": "v1",
+          "status": "REJECT",
+          "reason": "verifiable L2-to-L1 parent mismatch",
+          "blockers": [
+            "verifiable L2-to-L1 parent mismatch"
+          ],
+          "provenance": {
+            "l1": {
+              "present": true,
+              "complete": true,
+              "reachable": true
+            },
+            "l2": {
+              "present": true,
+              "complete": true,
+              "reachable": true,
+              "parent_match": "mismatch"
+            }
+          },
+          "input_hash": "sha256:5e2b92cc57ce618dfbb54844a31775e4b95c6fb552ee6bf5a068133c12d2ad90",
+          "comparison_input_hash": "sha256:5e2b92cc57ce618dfbb54844a31775e4b95c6fb552ee6bf5a068133c12d2ad90",
+          "canonical_hash_equal": true,
+          "canonical_bytes_sha256": "5e2b92cc57ce618dfbb54844a31775e4b95c6fb552ee6bf5a068133c12d2ad90",
+          "comparison_canonical_bytes_sha256": "5e2b92cc57ce618dfbb54844a31775e4b95c6fb552ee6bf5a068133c12d2ad90",
+          "synthetic_only": true,
+          "production_verified": false
+        },
+        {
+          "rule_set": "v2",
+          "status": "REJECT",
+          "reason": "verifiable L2-to-L1 parent mismatch",
+          "blockers": [
+            "verifiable L2-to-L1 parent mismatch"
+          ],
+          "provenance": {
+            "l1": {
+              "present": true,
+              "complete": true,
+              "reachable": true
+            },
+            "l2": {
+              "present": true,
+              "complete": true,
+              "reachable": true,
+              "parent_match": "mismatch"
+            }
+          },
+          "input_hash": "sha256:5e2b92cc57ce618dfbb54844a31775e4b95c6fb552ee6bf5a068133c12d2ad90",
+          "comparison_input_hash": "sha256:5e2b92cc57ce618dfbb54844a31775e4b95c6fb552ee6bf5a068133c12d2ad90",
+          "canonical_hash_equal": true,
+          "canonical_bytes_sha256": "5e2b92cc57ce618dfbb54844a31775e4b95c6fb552ee6bf5a068133c12d2ad90",
+          "comparison_canonical_bytes_sha256": "5e2b92cc57ce618dfbb54844a31775e4b95c6fb552ee6bf5a068133c12d2ad90",
+          "synthetic_only": true,
+          "production_verified": false
+        }
+      ],
+      "version_drift": {
+        "present": false,
+        "from": "REJECT",
+        "to": "REJECT",
+        "recorded": true,
+        "classification": "NONE",
+        "rule_sets_compared": [
+          "v1",
+          "v2"
+        ]
+      },
+      "final_status": "REJECT",
+      "final_reason": "both rule_set versions produce the same decision",
+      "final_blockers": [
+        "verifiable L2-to-L1 parent mismatch"
+      ],
+      "provenance": {
+        "l1": {
+          "present": true,
+          "complete": true,
+          "reachable": true
+        },
+        "l2": {
+          "present": true,
+          "complete": true,
+          "reachable": true,
+          "parent_match": "mismatch"
+        }
+      },
+      "input_hash": "sha256:5e2b92cc57ce618dfbb54844a31775e4b95c6fb552ee6bf5a068133c12d2ad90",
+      "rule_sets_used": [
+        "v1",
+        "v2"
+      ],
+      "synthetic_only": true,
+      "production_verified": false
+    },
+    {
+      "fixture_id": "F14-normalized-key-collision",
+      "description": "NFC key collision cannot be canonicalized safely",
+      "runs": [
+        {
+          "rule_set": "v1",
+          "status": "REJECT",
+          "reason": "canonicalization contradiction: normalized key collision at $: 'é'",
+          "blockers": [
+            "canonicalizable JSON content"
+          ],
+          "provenance": {
+            "l1": {
+              "present": true,
+              "complete": true,
+              "reachable": true
+            },
+            "l2": {
+              "present": true,
+              "complete": true,
+              "reachable": true
+            }
+          },
+          "input_hash": "sha256:39efa15fe5cdc87df339fb68b62b1ead22f6ef34bc121d498dd24262d48a3890",
+          "comparison_input_hash": "sha256:39efa15fe5cdc87df339fb68b62b1ead22f6ef34bc121d498dd24262d48a3890",
+          "canonical_hash_equal": false,
+          "canonical_bytes_sha256": null,
+          "comparison_canonical_bytes_sha256": null,
+          "synthetic_only": true,
+          "production_verified": false
+        },
+        {
+          "rule_set": "v2",
+          "status": "REJECT",
+          "reason": "canonicalization contradiction: normalized key collision at $: 'é'",
+          "blockers": [
+            "canonicalizable JSON content"
+          ],
+          "provenance": {
+            "l1": {
+              "present": true,
+              "complete": true,
+              "reachable": true
+            },
+            "l2": {
+              "present": true,
+              "complete": true,
+              "reachable": true
+            }
+          },
+          "input_hash": "sha256:39efa15fe5cdc87df339fb68b62b1ead22f6ef34bc121d498dd24262d48a3890",
+          "comparison_input_hash": "sha256:39efa15fe5cdc87df339fb68b62b1ead22f6ef34bc121d498dd24262d48a3890",
+          "canonical_hash_equal": false,
+          "canonical_bytes_sha256": null,
+          "comparison_canonical_bytes_sha256": null,
+          "synthetic_only": true,
+          "production_verified": false
+        }
+      ],
+      "version_drift": {
+        "present": false,
+        "from": "REJECT",
+        "to": "REJECT",
+        "recorded": true,
+        "classification": "NONE",
+        "rule_sets_compared": [
+          "v1",
+          "v2"
+        ]
+      },
+      "final_status": "REJECT",
+      "final_reason": "both rule_set versions produce the same decision",
+      "final_blockers": [
+        "canonicalizable JSON content"
+      ],
+      "provenance": {
+        "l1": {
+          "present": true,
+          "complete": true,
+          "reachable": true
+        },
+        "l2": {
+          "present": true,
+          "complete": true,
+          "reachable": true
+        }
+      },
+      "input_hash": "sha256:39efa15fe5cdc87df339fb68b62b1ead22f6ef34bc121d498dd24262d48a3890",
+      "rule_sets_used": [
+        "v1",
+        "v2"
+      ],
+      "synthetic_only": true,
+      "production_verified": false
+    },
+    {
+      "fixture_id": "F15-v2-attestation-gap",
+      "description": "v2 requires attestation while v1 does not",
+      "runs": [
+        {
+          "rule_set": "v1",
+          "status": "RECOVERED",
+          "reason": "all required provenance levels are complete, reachable, and coherent",
+          "blockers": [],
+          "provenance": {
+            "l1": {
+              "present": true,
+              "complete": true,
+              "reachable": true
+            },
+            "l2": {
+              "present": true,
+              "complete": true,
+              "reachable": true
+            }
+          },
+          "input_hash": "sha256:5e2b92cc57ce618dfbb54844a31775e4b95c6fb552ee6bf5a068133c12d2ad90",
+          "comparison_input_hash": "sha256:5e2b92cc57ce618dfbb54844a31775e4b95c6fb552ee6bf5a068133c12d2ad90",
+          "canonical_hash_equal": true,
+          "canonical_bytes_sha256": "5e2b92cc57ce618dfbb54844a31775e4b95c6fb552ee6bf5a068133c12d2ad90",
+          "comparison_canonical_bytes_sha256": "5e2b92cc57ce618dfbb54844a31775e4b95c6fb552ee6bf5a068133c12d2ad90",
+          "synthetic_only": true,
+          "production_verified": false
+        },
+        {
+          "rule_set": "v2",
+          "status": "UNKNOWN",
+          "reason": "v2 requires valid attestation",
+          "blockers": [
+            "valid v2 attestation"
+          ],
+          "provenance": {
+            "l1": {
+              "present": true,
+              "complete": true,
+              "reachable": true
+            },
+            "l2": {
+              "present": true,
+              "complete": true,
+              "reachable": true
+            }
+          },
+          "input_hash": "sha256:5e2b92cc57ce618dfbb54844a31775e4b95c6fb552ee6bf5a068133c12d2ad90",
+          "comparison_input_hash": "sha256:5e2b92cc57ce618dfbb54844a31775e4b95c6fb552ee6bf5a068133c12d2ad90",
+          "canonical_hash_equal": true,
+          "canonical_bytes_sha256": "5e2b92cc57ce618dfbb54844a31775e4b95c6fb552ee6bf5a068133c12d2ad90",
+          "comparison_canonical_bytes_sha256": "5e2b92cc57ce618dfbb54844a31775e4b95c6fb552ee6bf5a068133c12d2ad90",
+          "synthetic_only": true,
+          "production_verified": false
+        }
+      ],
+      "version_drift": {
+        "present": true,
+        "from": "RECOVERED",
+        "to": "UNKNOWN",
+        "recorded": true,
+        "classification": "VERSION_CONFLICT",
+        "rule_sets_compared": [
+          "v1",
+          "v2"
+        ]
+      },
+      "final_status": "UNKNOWN",
+      "final_reason": "version conflict: v1 and v2 produce different decisions",
+      "final_blockers": [
+        "single agreed rule_set version"
+      ],
+      "provenance": {
+        "l1": {
+          "present": true,
+          "complete": true,
+          "reachable": true
+        },
+        "l2": {
+          "present": true,
+          "complete": true,
+          "reachable": true
+        }
+      },
+      "input_hash": "sha256:5e2b92cc57ce618dfbb54844a31775e4b95c6fb552ee6bf5a068133c12d2ad90",
+      "rule_sets_used": [
+        "v1",
+        "v2"
+      ],
+      "synthetic_only": true,
+      "production_verified": false
+    },
+    {
+      "fixture_id": "F16-explicit-version-contradiction",
+      "description": "Version difference explicitly declared contradiction",
+      "runs": [
+        {
+          "rule_set": "v1",
+          "status": "RECOVERED",
+          "reason": "all required provenance levels are complete, reachable, and coherent",
+          "blockers": [],
+          "provenance": {
+            "l1": {
+              "present": true,
+              "complete": true,
+              "reachable": true
+            },
+            "l2": {
+              "present": true,
+              "complete": true,
+              "reachable": true
+            }
+          },
+          "input_hash": "sha256:5e2b92cc57ce618dfbb54844a31775e4b95c6fb552ee6bf5a068133c12d2ad90",
+          "comparison_input_hash": "sha256:5e2b92cc57ce618dfbb54844a31775e4b95c6fb552ee6bf5a068133c12d2ad90",
+          "canonical_hash_equal": true,
+          "canonical_bytes_sha256": "5e2b92cc57ce618dfbb54844a31775e4b95c6fb552ee6bf5a068133c12d2ad90",
+          "comparison_canonical_bytes_sha256": "5e2b92cc57ce618dfbb54844a31775e4b95c6fb552ee6bf5a068133c12d2ad90",
+          "synthetic_only": true,
+          "production_verified": false
+        },
+        {
+          "rule_set": "v2",
+          "status": "REJECT",
+          "reason": "v2 attestation difference explicitly declared a contradiction",
+          "blockers": [
+            "valid v2 attestation"
+          ],
+          "provenance": {
+            "l1": {
+              "present": true,
+              "complete": true,
+              "reachable": true
+            },
+            "l2": {
+              "present": true,
+              "complete": true,
+              "reachable": true
+            }
+          },
+          "input_hash": "sha256:5e2b92cc57ce618dfbb54844a31775e4b95c6fb552ee6bf5a068133c12d2ad90",
+          "comparison_input_hash": "sha256:5e2b92cc57ce618dfbb54844a31775e4b95c6fb552ee6bf5a068133c12d2ad90",
+          "canonical_hash_equal": true,
+          "canonical_bytes_sha256": "5e2b92cc57ce618dfbb54844a31775e4b95c6fb552ee6bf5a068133c12d2ad90",
+          "comparison_canonical_bytes_sha256": "5e2b92cc57ce618dfbb54844a31775e4b95c6fb552ee6bf5a068133c12d2ad90",
+          "synthetic_only": true,
+          "production_verified": false
+        }
+      ],
+      "version_drift": {
+        "present": true,
+        "from": "RECOVERED",
+        "to": "REJECT",
+        "recorded": true,
+        "classification": "VERSION_CONFLICT",
+        "rule_sets_compared": [
+          "v1",
+          "v2"
+        ]
+      },
+      "final_status": "REJECT",
+      "final_reason": "version drift is explicitly declared a contradiction by the fixture rule",
+      "final_blockers": [
+        "explicit version-difference contradiction policy"
+      ],
+      "provenance": {
+        "l1": {
+          "present": true,
+          "complete": true,
+          "reachable": true
+        },
+        "l2": {
+          "present": true,
+          "complete": true,
+          "reachable": true
+        }
+      },
+      "input_hash": "sha256:5e2b92cc57ce618dfbb54844a31775e4b95c6fb552ee6bf5a068133c12d2ad90",
+      "rule_sets_used": [
+        "v1",
+        "v2"
+      ],
+      "synthetic_only": true,
+      "production_verified": false
+    },
+    {
+      "fixture_id": "F17-stable-unknown-across-versions",
+      "description": "Missing L2 remains unknown in both versions",
+      "runs": [
+        {
+          "rule_set": "v1",
+          "status": "UNKNOWN",
+          "reason": "L2 provenance is missing or incomplete",
+          "blockers": [
+            "L2 complete record"
+          ],
+          "provenance": {
+            "l1": {
+              "present": true,
+              "complete": true,
+              "reachable": true
+            },
+            "l2": {
+              "present": false,
+              "complete": false,
+              "reachable": false
+            }
+          },
+          "input_hash": "sha256:015abd7f5cc57a2dd94b7590f04ad8084273905ee33ec5cebeae62276a97f862",
+          "comparison_input_hash": "sha256:015abd7f5cc57a2dd94b7590f04ad8084273905ee33ec5cebeae62276a97f862",
+          "canonical_hash_equal": true,
+          "canonical_bytes_sha256": "015abd7f5cc57a2dd94b7590f04ad8084273905ee33ec5cebeae62276a97f862",
+          "comparison_canonical_bytes_sha256": "015abd7f5cc57a2dd94b7590f04ad8084273905ee33ec5cebeae62276a97f862",
+          "synthetic_only": true,
+          "production_verified": false
+        },
+        {
+          "rule_set": "v2",
+          "status": "UNKNOWN",
+          "reason": "L2 provenance is missing or incomplete",
+          "blockers": [
+            "L2 complete record"
+          ],
+          "provenance": {
+            "l1": {
+              "present": true,
+              "complete": true,
+              "reachable": true
+            },
+            "l2": {
+              "present": false,
+              "complete": false,
+              "reachable": false
+            }
+          },
+          "input_hash": "sha256:015abd7f5cc57a2dd94b7590f04ad8084273905ee33ec5cebeae62276a97f862",
+          "comparison_input_hash": "sha256:015abd7f5cc57a2dd94b7590f04ad8084273905ee33ec5cebeae62276a97f862",
+          "canonical_hash_equal": true,
+          "canonical_bytes_sha256": "015abd7f5cc57a2dd94b7590f04ad8084273905ee33ec5cebeae62276a97f862",
+          "comparison_canonical_bytes_sha256": "015abd7f5cc57a2dd94b7590f04ad8084273905ee33ec5cebeae62276a97f862",
+          "synthetic_only": true,
+          "production_verified": false
+        }
+      ],
+      "version_drift": {
+        "present": false,
+        "from": "UNKNOWN",
+        "to": "UNKNOWN",
+        "recorded": true,
+        "classification": "NONE",
+        "rule_sets_compared": [
+          "v1",
+          "v2"
+        ]
+      },
+      "final_status": "UNKNOWN",
+      "final_reason": "both rule_set versions produce the same decision",
+      "final_blockers": [
+        "L2 complete record"
+      ],
+      "provenance": {
+        "l1": {
+          "present": true,
+          "complete": true,
+          "reachable": true
+        },
+        "l2": {
+          "present": false,
+          "complete": false,
+          "reachable": false
+        }
+      },
+      "input_hash": "sha256:015abd7f5cc57a2dd94b7590f04ad8084273905ee33ec5cebeae62276a97f862",
+      "rule_sets_used": [
+        "v1",
+        "v2"
+      ],
+      "synthetic_only": true,
+      "production_verified": false
+    },
+    {
+      "fixture_id": "F18-stable-reject-across-versions",
+      "description": "Integrity contradiction remains reject in both versions",
+      "runs": [
+        {
+          "rule_set": "v1",
+          "status": "REJECT",
+          "reason": "verifiable provenance integrity contradiction",
+          "blockers": [
+            "verifiable provenance integrity contradiction"
+          ],
+          "provenance": {
+            "l1": {
+              "present": true,
+              "complete": true,
+              "reachable": true,
+              "integrity": "contradictory"
+            },
+            "l2": {
+              "present": true,
+              "complete": true,
+              "reachable": true
+            }
+          },
+          "input_hash": "sha256:015abd7f5cc57a2dd94b7590f04ad8084273905ee33ec5cebeae62276a97f862",
+          "comparison_input_hash": "sha256:015abd7f5cc57a2dd94b7590f04ad8084273905ee33ec5cebeae62276a97f862",
+          "canonical_hash_equal": true,
+          "canonical_bytes_sha256": "015abd7f5cc57a2dd94b7590f04ad8084273905ee33ec5cebeae62276a97f862",
+          "comparison_canonical_bytes_sha256": "015abd7f5cc57a2dd94b7590f04ad8084273905ee33ec5cebeae62276a97f862",
+          "synthetic_only": true,
+          "production_verified": false
+        },
+        {
+          "rule_set": "v2",
+          "status": "REJECT",
+          "reason": "verifiable provenance integrity contradiction",
+          "blockers": [
+            "verifiable provenance integrity contradiction"
+          ],
+          "provenance": {
+            "l1": {
+              "present": true,
+              "complete": true,
+              "reachable": true,
+              "integrity": "contradictory"
+            },
+            "l2": {
+              "present": true,
+              "complete": true,
+              "reachable": true
+            }
+          },
+          "input_hash": "sha256:015abd7f5cc57a2dd94b7590f04ad8084273905ee33ec5cebeae62276a97f862",
+          "comparison_input_hash": "sha256:015abd7f5cc57a2dd94b7590f04ad8084273905ee33ec5cebeae62276a97f862",
+          "canonical_hash_equal": true,
+          "canonical_bytes_sha256": "015abd7f5cc57a2dd94b7590f04ad8084273905ee33ec5cebeae62276a97f862",
+          "comparison_canonical_bytes_sha256": "015abd7f5cc57a2dd94b7590f04ad8084273905ee33ec5cebeae62276a97f862",
+          "synthetic_only": true,
+          "production_verified": false
+        }
+      ],
+      "version_drift": {
+        "present": false,
+        "from": "REJECT",
+        "to": "REJECT",
+        "recorded": true,
+        "classification": "NONE",
+        "rule_sets_compared": [
+          "v1",
+          "v2"
+        ]
+      },
+      "final_status": "REJECT",
+      "final_reason": "both rule_set versions produce the same decision",
+      "final_blockers": [
+        "verifiable provenance integrity contradiction"
+      ],
+      "provenance": {
+        "l1": {
+          "present": true,
+          "complete": true,
+          "reachable": true,
+          "integrity": "contradictory"
+        },
+        "l2": {
+          "present": true,
+          "complete": true,
+          "reachable": true
+        }
+      },
+      "input_hash": "sha256:015abd7f5cc57a2dd94b7590f04ad8084273905ee33ec5cebeae62276a97f862",
+      "rule_sets_used": [
+        "v1",
+        "v2"
+      ],
+      "synthetic_only": true,
+      "production_verified": false
+    },
+    {
+      "fixture_id": "F19-majority-cannot-recover",
+      "description": "Majority and retry metadata cannot upgrade provenance unknown",
+      "runs": [
+        {
+          "rule_set": "v1",
+          "status": "UNKNOWN",
+          "reason": "L2 provenance is missing or incomplete",
+          "blockers": [
+            "L2 complete record"
+          ],
+          "provenance": {
+            "l1": {
+              "present": true,
+              "complete": true,
+              "reachable": true
+            },
+            "l2": {
+              "present": false,
+              "complete": false,
+              "reachable": false
+            }
+          },
+          "input_hash": "sha256:015abd7f5cc57a2dd94b7590f04ad8084273905ee33ec5cebeae62276a97f862",
+          "comparison_input_hash": "sha256:015abd7f5cc57a2dd94b7590f04ad8084273905ee33ec5cebeae62276a97f862",
+          "canonical_hash_equal": true,
+          "canonical_bytes_sha256": "015abd7f5cc57a2dd94b7590f04ad8084273905ee33ec5cebeae62276a97f862",
+          "comparison_canonical_bytes_sha256": "015abd7f5cc57a2dd94b7590f04ad8084273905ee33ec5cebeae62276a97f862",
+          "synthetic_only": true,
+          "production_verified": false
+        },
+        {
+          "rule_set": "v2",
+          "status": "UNKNOWN",
+          "reason": "L2 provenance is missing or incomplete",
+          "blockers": [
+            "L2 complete record"
+          ],
+          "provenance": {
+            "l1": {
+              "present": true,
+              "complete": true,
+              "reachable": true
+            },
+            "l2": {
+              "present": false,
+              "complete": false,
+              "reachable": false
+            }
+          },
+          "input_hash": "sha256:015abd7f5cc57a2dd94b7590f04ad8084273905ee33ec5cebeae62276a97f862",
+          "comparison_input_hash": "sha256:015abd7f5cc57a2dd94b7590f04ad8084273905ee33ec5cebeae62276a97f862",
+          "canonical_hash_equal": true,
+          "canonical_bytes_sha256": "015abd7f5cc57a2dd94b7590f04ad8084273905ee33ec5cebeae62276a97f862",
+          "comparison_canonical_bytes_sha256": "015abd7f5cc57a2dd94b7590f04ad8084273905ee33ec5cebeae62276a97f862",
+          "synthetic_only": true,
+          "production_verified": false
+        }
+      ],
+      "version_drift": {
+        "present": false,
+        "from": "UNKNOWN",
+        "to": "UNKNOWN",
+        "recorded": true,
+        "classification": "NONE",
+        "rule_sets_compared": [
+          "v1",
+          "v2"
+        ]
+      },
+      "final_status": "UNKNOWN",
+      "final_reason": "both rule_set versions produce the same decision",
+      "final_blockers": [
+        "L2 complete record"
+      ],
+      "provenance": {
+        "l1": {
+          "present": true,
+          "complete": true,
+          "reachable": true
+        },
+        "l2": {
+          "present": false,
+          "complete": false,
+          "reachable": false
+        }
+      },
+      "input_hash": "sha256:015abd7f5cc57a2dd94b7590f04ad8084273905ee33ec5cebeae62276a97f862",
+      "rule_sets_used": [
+        "v1",
+        "v2"
+      ],
+      "synthetic_only": true,
+      "production_verified": false
+    },
+    {
+      "fixture_id": "F20-serialization-unknown",
+      "description": "Serialization mismatch does not upgrade incomplete chain",
+      "runs": [
+        {
+          "rule_set": "v1",
+          "status": "UNKNOWN",
+          "reason": "L2 provenance is missing or incomplete",
+          "blockers": [
+            "L2 complete record"
+          ],
+          "provenance": {
+            "l1": {
+              "present": true,
+              "complete": true,
+              "reachable": true
+            },
+            "l2": {
+              "present": false,
+              "complete": false,
+              "reachable": false
+            }
+          },
+          "input_hash": "sha256:015abd7f5cc57a2dd94b7590f04ad8084273905ee33ec5cebeae62276a97f862",
+          "comparison_input_hash": "sha256:09a71bb54c2086d500723645d10edfdd5d4db1d7ee7bd8fb7703e5419620c063",
+          "canonical_hash_equal": false,
+          "canonical_bytes_sha256": "015abd7f5cc57a2dd94b7590f04ad8084273905ee33ec5cebeae62276a97f862",
+          "comparison_canonical_bytes_sha256": "09a71bb54c2086d500723645d10edfdd5d4db1d7ee7bd8fb7703e5419620c063",
+          "synthetic_only": true,
+          "production_verified": false
+        },
+        {
+          "rule_set": "v2",
+          "status": "UNKNOWN",
+          "reason": "L2 provenance is missing or incomplete",
+          "blockers": [
+            "L2 complete record"
+          ],
+          "provenance": {
+            "l1": {
+              "present": true,
+              "complete": true,
+              "reachable": true
+            },
+            "l2": {
+              "present": false,
+              "complete": false,
+              "reachable": false
+            }
+          },
+          "input_hash": "sha256:015abd7f5cc57a2dd94b7590f04ad8084273905ee33ec5cebeae62276a97f862",
+          "comparison_input_hash": "sha256:09a71bb54c2086d500723645d10edfdd5d4db1d7ee7bd8fb7703e5419620c063",
+          "canonical_hash_equal": false,
+          "canonical_bytes_sha256": "015abd7f5cc57a2dd94b7590f04ad8084273905ee33ec5cebeae62276a97f862",
+          "comparison_canonical_bytes_sha256": "09a71bb54c2086d500723645d10edfdd5d4db1d7ee7bd8fb7703e5419620c063",
+          "synthetic_only": true,
+          "production_verified": false
+        }
+      ],
+      "version_drift": {
+        "present": false,
+        "from": "UNKNOWN",
+        "to": "UNKNOWN",
+        "recorded": true,
+        "classification": "NONE",
+        "rule_sets_compared": [
+          "v1",
+          "v2"
+        ]
+      },
+      "final_status": "UNKNOWN",
+      "final_reason": "both rule_set versions produce the same decision",
+      "final_blockers": [
+        "L2 complete record"
+      ],
+      "provenance": {
+        "l1": {
+          "present": true,
+          "complete": true,
+          "reachable": true
+        },
+        "l2": {
+          "present": false,
+          "complete": false,
+          "reachable": false
+        }
+      },
+      "input_hash": "sha256:015abd7f5cc57a2dd94b7590f04ad8084273905ee33ec5cebeae62276a97f862",
+      "rule_sets_used": [
+        "v1",
+        "v2"
+      ],
+      "synthetic_only": true,
+      "production_verified": false
+    },
+    {
+      "fixture_id": "F21-v2-l1-only-drift",
+      "description": "v2 declared L1-only acceptance conflicts with v1",
+      "runs": [
+        {
+          "rule_set": "v1",
+          "status": "UNKNOWN",
+          "reason": "L2 provenance is missing or incomplete",
+          "blockers": [
+            "L2 complete record"
+          ],
+          "provenance": {
+            "l1": {
+              "present": true,
+              "complete": true,
+              "reachable": true
+            },
+            "l2": {
+              "present": false,
+              "complete": false,
+              "reachable": false
+            }
+          },
+          "input_hash": "sha256:5e2b92cc57ce618dfbb54844a31775e4b95c6fb552ee6bf5a068133c12d2ad90",
+          "comparison_input_hash": "sha256:5e2b92cc57ce618dfbb54844a31775e4b95c6fb552ee6bf5a068133c12d2ad90",
+          "canonical_hash_equal": true,
+          "canonical_bytes_sha256": "5e2b92cc57ce618dfbb54844a31775e4b95c6fb552ee6bf5a068133c12d2ad90",
+          "comparison_canonical_bytes_sha256": "5e2b92cc57ce618dfbb54844a31775e4b95c6fb552ee6bf5a068133c12d2ad90",
+          "synthetic_only": true,
+          "production_verified": false
+        },
+        {
+          "rule_set": "v2",
+          "status": "RECOVERED",
+          "reason": "all required provenance levels are complete, reachable, and coherent",
+          "blockers": [],
+          "provenance": {
+            "l1": {
+              "present": true,
+              "complete": true,
+              "reachable": true
+            },
+            "l2": {
+              "present": false,
+              "complete": false,
+              "reachable": false
+            }
+          },
+          "input_hash": "sha256:5e2b92cc57ce618dfbb54844a31775e4b95c6fb552ee6bf5a068133c12d2ad90",
+          "comparison_input_hash": "sha256:5e2b92cc57ce618dfbb54844a31775e4b95c6fb552ee6bf5a068133c12d2ad90",
+          "canonical_hash_equal": true,
+          "canonical_bytes_sha256": "5e2b92cc57ce618dfbb54844a31775e4b95c6fb552ee6bf5a068133c12d2ad90",
+          "comparison_canonical_bytes_sha256": "5e2b92cc57ce618dfbb54844a31775e4b95c6fb552ee6bf5a068133c12d2ad90",
+          "synthetic_only": true,
+          "production_verified": false
+        }
+      ],
+      "version_drift": {
+        "present": true,
+        "from": "UNKNOWN",
+        "to": "RECOVERED",
+        "recorded": true,
+        "classification": "VERSION_CONFLICT",
+        "rule_sets_compared": [
+          "v1",
+          "v2"
+        ]
+      },
+      "final_status": "UNKNOWN",
+      "final_reason": "version conflict: v1 and v2 produce different decisions",
+      "final_blockers": [
+        "single agreed rule_set version"
+      ],
+      "provenance": {
+        "l1": {
+          "present": true,
+          "complete": true,
+          "reachable": true
+        },
+        "l2": {
+          "present": false,
+          "complete": false,
+          "reachable": false
+        }
+      },
+      "input_hash": "sha256:5e2b92cc57ce618dfbb54844a31775e4b95c6fb552ee6bf5a068133c12d2ad90",
+      "rule_sets_used": [
+        "v1",
+        "v2"
+      ],
+      "synthetic_only": true,
+      "production_verified": false
+    },
+    {
+      "fixture_id": "F22-array-order-content",
+      "description": "Array order is content-significant",
+      "runs": [
+        {
+          "rule_set": "v1",
+          "status": "REJECT",
+          "reason": "canonical content hashes contradict must_match expectation",
+          "blockers": [
+            "canonical content equality"
+          ],
+          "provenance": {
+            "l1": {
+              "present": true,
+              "complete": true,
+              "reachable": true
+            },
+            "l2": {
+              "present": true,
+              "complete": true,
+              "reachable": true
+            }
+          },
+          "input_hash": "sha256:02d21651bf4a0c676159456cd47d09d4ac585db5ed1324ac191f3e98640846a3",
+          "comparison_input_hash": "sha256:999e7876bd6caa905b1c5fd6e9a875224c9523c3f71d792d62de83fb5201ade1",
+          "canonical_hash_equal": false,
+          "canonical_bytes_sha256": "02d21651bf4a0c676159456cd47d09d4ac585db5ed1324ac191f3e98640846a3",
+          "comparison_canonical_bytes_sha256": "999e7876bd6caa905b1c5fd6e9a875224c9523c3f71d792d62de83fb5201ade1",
+          "synthetic_only": true,
+          "production_verified": false
+        },
+        {
+          "rule_set": "v2",
+          "status": "REJECT",
+          "reason": "canonical content hashes contradict must_match expectation",
+          "blockers": [
+            "canonical content equality"
+          ],
+          "provenance": {
+            "l1": {
+              "present": true,
+              "complete": true,
+              "reachable": true
+            },
+            "l2": {
+              "present": true,
+              "complete": true,
+              "reachable": true
+            }
+          },
+          "input_hash": "sha256:02d21651bf4a0c676159456cd47d09d4ac585db5ed1324ac191f3e98640846a3",
+          "comparison_input_hash": "sha256:999e7876bd6caa905b1c5fd6e9a875224c9523c3f71d792d62de83fb5201ade1",
+          "canonical_hash_equal": false,
+          "canonical_bytes_sha256": "02d21651bf4a0c676159456cd47d09d4ac585db5ed1324ac191f3e98640846a3",
+          "comparison_canonical_bytes_sha256": "999e7876bd6caa905b1c5fd6e9a875224c9523c3f71d792d62de83fb5201ade1",
+          "synthetic_only": true,
+          "production_verified": false
+        }
+      ],
+      "version_drift": {
+        "present": false,
+        "from": "REJECT",
+        "to": "REJECT",
+        "recorded": true,
+        "classification": "NONE",
+        "rule_sets_compared": [
+          "v1",
+          "v2"
+        ]
+      },
+      "final_status": "REJECT",
+      "final_reason": "both rule_set versions produce the same decision",
+      "final_blockers": [
+        "canonical content equality"
+      ],
+      "provenance": {
+        "l1": {
+          "present": true,
+          "complete": true,
+          "reachable": true
+        },
+        "l2": {
+          "present": true,
+          "complete": true,
+          "reachable": true
+        }
+      },
+      "input_hash": "sha256:02d21651bf4a0c676159456cd47d09d4ac585db5ed1324ac191f3e98640846a3",
+      "rule_sets_used": [
+        "v1",
+        "v2"
+      ],
+      "synthetic_only": true,
+      "production_verified": false
+    }
+  ]
+}

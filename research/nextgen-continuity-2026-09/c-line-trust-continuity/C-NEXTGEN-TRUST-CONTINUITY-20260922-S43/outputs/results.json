@@ -1,0 +1,295 @@
+{
+  "all_cases_match": true,
+  "case_count": 27,
+  "claims_status": "inferred",
+  "coverage": [
+    "TOOL_DECLARATION",
+    "POLICY",
+    "APPROVAL",
+    "SHELL",
+    "FILESYSTEM",
+    "ASK_USER",
+    "SKILL",
+    "SANDBOX",
+    "CWD",
+    "ALLOWLIST",
+    "POSTCONDITION",
+    "TIMEOUT",
+    "RETRY",
+    "NO_EVENT",
+    "UNKNOWN"
+  ],
+  "digest": "c7fde95e2704c262532c0804db526f9076b2ec0115cf27a3bb1aa3bc8c93cf61",
+  "production_verified": false,
+  "property_sweep": {
+    "combinations": 4194304,
+    "counts": {
+      "RECOVERED": 1,
+      "REJECT": 3145728,
+      "UNKNOWN": 1048575
+    },
+    "dimensions": 22,
+    "fields": [
+      "same_identity",
+      "identity_conflict",
+      "tool_declared",
+      "tool_scope_allowed",
+      "policy_decision_attested",
+      "approval_required_known",
+      "approval_obtained",
+      "sandbox_boundary_closed",
+      "cwd_boundary_closed",
+      "path_allowlist_closed",
+      "command_arguments_bound",
+      "input_canonical",
+      "output_captured",
+      "side_effect_attested",
+      "postcondition_readback",
+      "timeout_semantics_known",
+      "failure_state_known",
+      "retry_policy_known",
+      "user_visible_result_bound",
+      "tool_chain_complete",
+      "permission_conflict",
+      "unknown_side_effect"
+    ],
+    "single_gate_minimizer": [
+      {
+        "bits": [],
+        "mask": 0,
+        "target": "UNKNOWN"
+      },
+      {
+        "bits": [
+          1
+        ],
+        "mask": 2,
+        "target": "REJECT"
+      },
+      {
+        "bits": [
+          0,
+          2,
+          3,
+          4,
+          5,
+          6,
+          7,
+          8,
+          9,
+          10,
+          11,
+          12,
+          13,
+          14,
+          15,
+          16,
+          17,
+          18,
+          19
+        ],
+        "mask": 1048573,
+        "target": "RECOVERED"
+      }
+    ]
+  },
+  "results": [
+    {
+      "evidence_count": 2,
+      "expected": "RECOVERED",
+      "id": "tool-call-closed",
+      "match": true,
+      "status": "RECOVERED"
+    },
+    {
+      "evidence_count": 2,
+      "expected": "RECOVERED",
+      "id": "shell-sandbox-closed",
+      "match": true,
+      "status": "RECOVERED"
+    },
+    {
+      "evidence_count": 2,
+      "expected": "RECOVERED",
+      "id": "filesystem-write-closed",
+      "match": true,
+      "status": "RECOVERED"
+    },
+    {
+      "evidence_count": 2,
+      "expected": "RECOVERED",
+      "id": "ask-user-approval-closed",
+      "match": true,
+      "status": "RECOVERED"
+    },
+    {
+      "evidence_count": 2,
+      "expected": "RECOVERED",
+      "id": "skill-activation-closed",
+      "match": true,
+      "status": "RECOVERED"
+    },
+    {
+      "evidence_count": 2,
+      "expected": "RECOVERED",
+      "id": "timeout-postcondition-closed",
+      "match": true,
+      "status": "RECOVERED"
+    },
+    {
+      "evidence_count": 1,
+      "expected": "UNKNOWN",
+      "id": "tool-undeclared",
+      "match": true,
+      "status": "UNKNOWN"
+    },
+    {
+      "evidence_count": 1,
+      "expected": "UNKNOWN",
+      "id": "scope-unknown",
+      "match": true,
+      "status": "UNKNOWN"
+    },
+    {
+      "evidence_count": 1,
+      "expected": "UNKNOWN",
+      "id": "policy-unread",
+      "match": true,
+      "status": "UNKNOWN"
+    },
+    {
+      "evidence_count": 1,
+      "expected": "UNKNOWN",
+      "id": "approval-required-unknown",
+      "match": true,
+      "status": "UNKNOWN"
+    },
+    {
+      "evidence_count": 1,
+      "expected": "UNKNOWN",
+      "id": "approval-missing",
+      "match": true,
+      "status": "UNKNOWN"
+    },
+    {
+      "evidence_count": 1,
+      "expected": "UNKNOWN",
+      "id": "sandbox-open",
+      "match": true,
+      "status": "UNKNOWN"
+    },
+    {
+      "evidence_count": 1,
+      "expected": "UNKNOWN",
+      "id": "cwd-open",
+      "match": true,
+      "status": "UNKNOWN"
+    },
+    {
+      "evidence_count": 1,
+      "expected": "UNKNOWN",
+      "id": "path-allowlist-open",
+      "match": true,
+      "status": "UNKNOWN"
+    },
+    {
+      "evidence_count": 1,
+      "expected": "UNKNOWN",
+      "id": "arguments-unbound",
+      "match": true,
+      "status": "UNKNOWN"
+    },
+    {
+      "evidence_count": 1,
+      "expected": "UNKNOWN",
+      "id": "input-noncanonical",
+      "match": true,
+      "status": "UNKNOWN"
+    },
+    {
+      "evidence_count": 1,
+      "expected": "UNKNOWN",
+      "id": "output-missing",
+      "match": true,
+      "status": "UNKNOWN"
+    },
+    {
+      "evidence_count": 1,
+      "expected": "UNKNOWN",
+      "id": "side-effect-unread",
+      "match": true,
+      "status": "UNKNOWN"
+    },
+    {
+      "evidence_count": 1,
+      "expected": "UNKNOWN",
+      "id": "postcondition-missing",
+      "match": true,
+      "status": "UNKNOWN"
+    },
+    {
+      "evidence_count": 1,
+      "expected": "UNKNOWN",
+      "id": "timeout-unknown",
+      "match": true,
+      "status": "UNKNOWN"
+    },
+    {
+      "evidence_count": 1,
+      "expected": "UNKNOWN",
+      "id": "failure-state-unknown",
+      "match": true,
+      "status": "UNKNOWN"
+    },
+    {
+      "evidence_count": 1,
+      "expected": "UNKNOWN",
+      "id": "retry-unknown",
+      "match": true,
+      "status": "UNKNOWN"
+    },
+    {
+      "evidence_count": 1,
+      "expected": "UNKNOWN",
+      "id": "user-result-unbound",
+      "match": true,
+      "status": "UNKNOWN"
+    },
+    {
+      "evidence_count": 1,
+      "expected": "UNKNOWN",
+      "id": "tool-chain-gap",
+      "match": true,
+      "status": "UNKNOWN"
+    },
+    {
+      "evidence_count": 1,
+      "expected": "UNKNOWN",
+      "id": "identity-unresolved",
+      "match": true,
+      "status": "UNKNOWN"
+    },
+    {
+      "evidence_count": 1,
+      "expected": "REJECT",
+      "id": "permission-conflict",
+      "match": true,
+      "status": "REJECT"
+    },
+    {
+      "evidence_count": 1,
+      "expected": "REJECT",
+      "id": "side-effect-conflict",
+      "match": true,
+      "status": "REJECT"
+    }
+  ],
+  "schema_version": "S43-results-1",
+  "sources": [],
+  "status_distribution": {
+    "RECOVERED": 6,
+    "REJECT": 2,
+    "UNKNOWN": 19
+  },
+  "synthetic_only": true
+}

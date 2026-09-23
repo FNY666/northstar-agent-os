@@ -1,0 +1,170 @@
+{
+  "synthetic_only": true,
+  "production_verified": false,
+  "suite_id": "S28",
+  "worker_id": "worker-1",
+  "op_id": "s28-op-0001",
+  "case_count": 16,
+  "results": [
+    {
+      "case_id": "S28-01",
+      "retry_position": "before_reference",
+      "reconciliation_position": "before_response",
+      "scenario": "valid_match",
+      "verdict": "accepted",
+      "reason": "reference and response match",
+      "synthetic_only": true,
+      "production_verified": false
+    },
+    {
+      "case_id": "S28-02",
+      "retry_position": "before_reference",
+      "reconciliation_position": "before_response",
+      "scenario": "response_mismatch",
+      "verdict": "rejected",
+      "reason": "response differs from reference",
+      "synthetic_only": true,
+      "production_verified": false
+    },
+    {
+      "case_id": "S28-03",
+      "retry_position": "before_reference",
+      "reconciliation_position": "before_response",
+      "scenario": "missing_response",
+      "verdict": "UNKNOWN",
+      "reason": "response unavailable",
+      "synthetic_only": true,
+      "production_verified": false
+    },
+    {
+      "case_id": "S28-04",
+      "retry_position": "before_reference",
+      "reconciliation_position": "before_response",
+      "scenario": "invalid_reference",
+      "verdict": "UNKNOWN",
+      "reason": "reference unavailable",
+      "synthetic_only": true,
+      "production_verified": false
+    },
+    {
+      "case_id": "S28-05",
+      "retry_position": "before_reference",
+      "reconciliation_position": "after_response",
+      "scenario": "valid_match",
+      "verdict": "accepted",
+      "reason": "reference and response match",
+      "synthetic_only": true,
+      "production_verified": false
+    },
+    {
+      "case_id": "S28-06",
+      "retry_position": "before_reference",
+      "reconciliation_position": "after_response",
+      "scenario": "response_mismatch",
+      "verdict": "rejected",
+      "reason": "response differs from reference",
+      "synthetic_only": true,
+      "production_verified": false
+    },
+    {
+      "case_id": "S28-07",
+      "retry_position": "before_reference",
+      "reconciliation_position": "after_response",
+      "scenario": "missing_response",
+      "verdict": "UNKNOWN",
+      "reason": "response unavailable",
+      "synthetic_only": true,
+      "production_verified": false
+    },
+    {
+      "case_id": "S28-08",
+      "retry_position": "before_reference",
+      "reconciliation_position": "after_response",
+      "scenario": "invalid_reference",
+      "verdict": "UNKNOWN",
+      "reason": "reference unavailable",
+      "synthetic_only": true,
+      "production_verified": false
+    },
+    {
+      "case_id": "S28-09",
+      "retry_position": "after_reference",
+      "reconciliation_position": "before_response",
+      "scenario": "valid_match",
+      "verdict": "accepted",
+      "reason": "reference and response match",
+      "synthetic_only": true,
+      "production_verified": false
+    },
+    {
+      "case_id": "S28-10",
+      "retry_position": "after_reference",
+      "reconciliation_position": "before_response",
+      "scenario": "response_mismatch",
+      "verdict": "rejected",
+      "reason": "response differs from reference",
+      "synthetic_only": true,
+      "production_verified": false
+    },
+    {
+      "case_id": "S28-11",
+      "retry_position": "after_reference",
+      "reconciliation_position": "before_response",
+      "scenario": "missing_response",
+      "verdict": "UNKNOWN",
+      "reason": "response unavailable",
+      "synthetic_only": true,
+      "production_verified": false
+    },
+    {
+      "case_id": "S28-12",
+      "retry_position": "after_reference",
+      "reconciliation_position": "before_response",
+      "scenario": "invalid_reference",
+      "verdict": "UNKNOWN",
+      "reason": "reference unavailable",
+      "synthetic_only": true,
+      "production_verified": false
+    },
+    {
+      "case_id": "S28-13",
+      "retry_position": "after_reference",
+      "reconciliation_position": "after_response",
+      "scenario": "valid_match",
+      "verdict": "accepted",
+      "reason": "reference and response match",
+      "synthetic_only": true,
+      "production_verified": false
+    },
+    {
+      "case_id": "S28-14",
+      "retry_position": "after_reference",
+      "reconciliation_position": "after_response",
+      "scenario": "response_mismatch",
+      "verdict": "rejected",
+      "reason": "response differs from reference",
+      "synthetic_only": true,
+      "production_verified": false
+    },
+    {
+      "case_id": "S28-15",
+      "retry_position": "after_reference",
+      "reconciliation_position": "after_response",
+      "scenario": "missing_response",
+      "verdict": "UNKNOWN",
+      "reason": "response unavailable",
+      "synthetic_only": true,
+      "production_verified": false
+    },
+    {
+      "case_id": "S28-16",
+      "retry_position": "after_reference",
+      "reconciliation_position": "after_response",
+      "scenario": "invalid_reference",
+      "verdict": "UNKNOWN",
+      "reason": "reference unavailable",
+      "synthetic_only": true,
+      "production_verified": false
+    }
+  ]
+}

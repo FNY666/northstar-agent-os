@@ -1,0 +1,843 @@
+{
+  "cases": [
+    {
+      "evidence": [
+        "query scope与时间窗固定",
+        "cursor链和terminal均有证明"
+      ],
+      "flags": {
+        "cross_region_complete": true,
+        "duplicate_page_deduped": true,
+        "filter_semantics_known": true,
+        "gap_absent": true,
+        "identity_conflict": false,
+        "no_event_semantics_known": true,
+        "page_cursor_chain_complete": true,
+        "page_terminal_attested": true,
+        "pagination_limit_known": true,
+        "query_conflict": false,
+        "query_retry_reconciled": true,
+        "query_scope_fixed": true,
+        "resource_version_monotonic": true,
+        "retention_boundary_attested": true,
+        "retention_expired": false,
+        "retention_window_open": false,
+        "same_identity": true,
+        "snapshot_consistent": true,
+        "time_window_fixed": true,
+        "watermark_closed": true
+      },
+      "id": "complete-paginated-window",
+      "label": "分页查询窗口完整",
+      "status": "RECOVERED"
+    },
+    {
+      "evidence": [
+        "snapshot/resourceVersion单调",
+        "跨页查询使用一致快照"
+      ],
+      "flags": {
+        "cross_region_complete": true,
+        "duplicate_page_deduped": true,
+        "filter_semantics_known": true,
+        "gap_absent": true,
+        "identity_conflict": false,
+        "no_event_semantics_known": true,
+        "page_cursor_chain_complete": true,
+        "page_terminal_attested": true,
+        "pagination_limit_known": true,
+        "query_conflict": false,
+        "query_retry_reconciled": true,
+        "query_scope_fixed": true,
+        "resource_version_monotonic": true,
+        "retention_boundary_attested": true,
+        "retention_expired": false,
+        "retention_window_open": false,
+        "same_identity": true,
+        "snapshot_consistent": true,
+        "time_window_fixed": true,
+        "watermark_closed": true
+      },
+      "id": "resource-version-continuous",
+      "label": "resourceVersion连续",
+      "status": "RECOVERED"
+    },
+    {
+      "evidence": [
+        "watermark覆盖完整窗口",
+        "NO_EVENT语义已由系统契约定义"
+      ],
+      "flags": {
+        "cross_region_complete": true,
+        "duplicate_page_deduped": true,
+        "filter_semantics_known": true,
+        "gap_absent": true,
+        "identity_conflict": false,
+        "no_event_semantics_known": true,
+        "page_cursor_chain_complete": true,
+        "page_terminal_attested": true,
+        "pagination_limit_known": true,
+        "query_conflict": false,
+        "query_retry_reconciled": true,
+        "query_scope_fixed": true,
+        "resource_version_monotonic": true,
+        "retention_boundary_attested": true,
+        "retention_expired": false,
+        "retention_window_open": false,
+        "same_identity": true,
+        "snapshot_consistent": true,
+        "time_window_fixed": true,
+        "watermark_closed": true
+      },
+      "id": "watermark-no-event-closed",
+      "label": "水位闭合下NO_EVENT",
+      "status": "RECOVERED"
+    },
+    {
+      "evidence": [
+        "所有区域返回边界均已对账",
+        "重复页已去重"
+      ],
+      "flags": {
+        "cross_region_complete": true,
+        "duplicate_page_deduped": true,
+        "filter_semantics_known": true,
+        "gap_absent": true,
+        "identity_conflict": false,
+        "no_event_semantics_known": true,
+        "page_cursor_chain_complete": true,
+        "page_terminal_attested": true,
+        "pagination_limit_known": true,
+        "query_conflict": false,
+        "query_retry_reconciled": true,
+        "query_scope_fixed": true,
+        "resource_version_monotonic": true,
+        "retention_boundary_attested": true,
+        "retention_expired": false,
+        "retention_window_open": false,
+        "same_identity": true,
+        "snapshot_consistent": true,
+        "time_window_fixed": true,
+        "watermark_closed": true
+      },
+      "id": "cross-region-query-complete",
+      "label": "跨区域查询完整",
+      "status": "RECOVERED"
+    },
+    {
+      "evidence": [
+        "重试不会扩大或丢失查询窗口",
+        "结果集按query identity去重"
+      ],
+      "flags": {
+        "cross_region_complete": true,
+        "duplicate_page_deduped": true,
+        "filter_semantics_known": true,
+        "gap_absent": true,
+        "identity_conflict": false,
+        "no_event_semantics_known": true,
+        "page_cursor_chain_complete": true,
+        "page_terminal_attested": true,
+        "pagination_limit_known": true,
+        "query_conflict": false,
+        "query_retry_reconciled": true,
+        "query_scope_fixed": true,
+        "resource_version_monotonic": true,
+        "retention_boundary_attested": true,
+        "retention_expired": false,
+        "retention_window_open": false,
+        "same_identity": true,
+        "snapshot_consistent": true,
+        "time_window_fixed": true,
+        "watermark_closed": true
+      },
+      "id": "retry-query-reconciled",
+      "label": "查询重试已对账",
+      "status": "RECOVERED"
+    },
+    {
+      "evidence": [
+        "API limit和cursor语义固定",
+        "terminal边界可达"
+      ],
+      "flags": {
+        "cross_region_complete": true,
+        "duplicate_page_deduped": true,
+        "filter_semantics_known": true,
+        "gap_absent": true,
+        "identity_conflict": false,
+        "no_event_semantics_known": true,
+        "page_cursor_chain_complete": true,
+        "page_terminal_attested": true,
+        "pagination_limit_known": true,
+        "query_conflict": false,
+        "query_retry_reconciled": true,
+        "query_scope_fixed": true,
+        "resource_version_monotonic": true,
+        "retention_boundary_attested": true,
+        "retention_expired": false,
+        "retention_window_open": false,
+        "same_identity": true,
+        "snapshot_consistent": true,
+        "time_window_fixed": true,
+        "watermark_closed": true
+      },
+      "id": "pagination-limit-known",
+      "label": "分页限制已知且覆盖",
+      "status": "RECOVERED"
+    },
+    {
+      "evidence": [
+        "过滤器或租户范围不明确"
+      ],
+      "flags": {
+        "cross_region_complete": true,
+        "duplicate_page_deduped": true,
+        "filter_semantics_known": true,
+        "gap_absent": true,
+        "identity_conflict": false,
+        "no_event_semantics_known": true,
+        "page_cursor_chain_complete": true,
+        "page_terminal_attested": true,
+        "pagination_limit_known": true,
+        "query_conflict": false,
+        "query_retry_reconciled": true,
+        "query_scope_fixed": false,
+        "resource_version_monotonic": true,
+        "retention_boundary_attested": true,
+        "retention_expired": false,
+        "retention_window_open": false,
+        "same_identity": true,
+        "snapshot_consistent": true,
+        "time_window_fixed": true,
+        "watermark_closed": true
+      },
+      "id": "query-scope-missing",
+      "label": "查询scope未固定",
+      "status": "UNKNOWN"
+    },
+    {
+      "evidence": [
+        "起止时间语义不明确"
+      ],
+      "flags": {
+        "cross_region_complete": true,
+        "duplicate_page_deduped": true,
+        "filter_semantics_known": true,
+        "gap_absent": true,
+        "identity_conflict": false,
+        "no_event_semantics_known": true,
+        "page_cursor_chain_complete": true,
+        "page_terminal_attested": true,
+        "pagination_limit_known": true,
+        "query_conflict": false,
+        "query_retry_reconciled": true,
+        "query_scope_fixed": true,
+        "resource_version_monotonic": true,
+        "retention_boundary_attested": true,
+        "retention_expired": false,
+        "retention_window_open": false,
+        "same_identity": true,
+        "snapshot_consistent": true,
+        "time_window_fixed": false,
+        "watermark_closed": true
+      },
+      "id": "time-window-missing",
+      "label": "时间窗口未固定",
+      "status": "UNKNOWN"
+    },
+    {
+      "evidence": [
+        "中间页未返回或游标跳过"
+      ],
+      "flags": {
+        "cross_region_complete": true,
+        "duplicate_page_deduped": true,
+        "filter_semantics_known": true,
+        "gap_absent": false,
+        "identity_conflict": false,
+        "no_event_semantics_known": true,
+        "page_cursor_chain_complete": false,
+        "page_terminal_attested": true,
+        "pagination_limit_known": true,
+        "query_conflict": false,
+        "query_retry_reconciled": true,
+        "query_scope_fixed": true,
+        "resource_version_monotonic": true,
+        "retention_boundary_attested": true,
+        "retention_expired": false,
+        "retention_window_open": false,
+        "same_identity": true,
+        "snapshot_consistent": true,
+        "time_window_fixed": true,
+        "watermark_closed": true
+      },
+      "id": "page-cursor-gap",
+      "label": "分页cursor缺口",
+      "status": "UNKNOWN"
+    },
+    {
+      "evidence": [
+        "当前页成功不能证明没有下一页"
+      ],
+      "flags": {
+        "cross_region_complete": true,
+        "duplicate_page_deduped": true,
+        "filter_semantics_known": true,
+        "gap_absent": true,
+        "identity_conflict": false,
+        "no_event_semantics_known": true,
+        "page_cursor_chain_complete": true,
+        "page_terminal_attested": false,
+        "pagination_limit_known": true,
+        "query_conflict": false,
+        "query_retry_reconciled": true,
+        "query_scope_fixed": true,
+        "resource_version_monotonic": true,
+        "retention_boundary_attested": true,
+        "retention_expired": false,
+        "retention_window_open": false,
+        "same_identity": true,
+        "snapshot_consistent": true,
+        "time_window_fixed": true,
+        "watermark_closed": true
+      },
+      "id": "terminal-missing",
+      "label": "分页终止未证明",
+      "status": "UNKNOWN"
+    },
+    {
+      "evidence": [
+        "版本回退可能来自不同快照或查询重启"
+      ],
+      "flags": {
+        "cross_region_complete": true,
+        "duplicate_page_deduped": true,
+        "filter_semantics_known": true,
+        "gap_absent": true,
+        "identity_conflict": false,
+        "no_event_semantics_known": true,
+        "page_cursor_chain_complete": true,
+        "page_terminal_attested": true,
+        "pagination_limit_known": true,
+        "query_conflict": false,
+        "query_retry_reconciled": true,
+        "query_scope_fixed": true,
+        "resource_version_monotonic": false,
+        "retention_boundary_attested": true,
+        "retention_expired": false,
+        "retention_window_open": false,
+        "same_identity": true,
+        "snapshot_consistent": true,
+        "time_window_fixed": true,
+        "watermark_closed": true
+      },
+      "id": "resource-version-regression",
+      "label": "resourceVersion回退",
+      "status": "UNKNOWN"
+    },
+    {
+      "evidence": [
+        "各页可能来自不同状态时点"
+      ],
+      "flags": {
+        "cross_region_complete": true,
+        "duplicate_page_deduped": true,
+        "filter_semantics_known": true,
+        "gap_absent": true,
+        "identity_conflict": false,
+        "no_event_semantics_known": true,
+        "page_cursor_chain_complete": true,
+        "page_terminal_attested": true,
+        "pagination_limit_known": true,
+        "query_conflict": false,
+        "query_retry_reconciled": true,
+        "query_scope_fixed": true,
+        "resource_version_monotonic": true,
+        "retention_boundary_attested": true,
+        "retention_expired": false,
+        "retention_window_open": false,
+        "same_identity": true,
+        "snapshot_consistent": false,
+        "time_window_fixed": true,
+        "watermark_closed": true
+      },
+      "id": "snapshot-inconsistent",
+      "label": "跨页快照不一致",
+      "status": "UNKNOWN"
+    },
+    {
+      "evidence": [
+        "迟到数据仍可能进入窗口"
+      ],
+      "flags": {
+        "cross_region_complete": true,
+        "duplicate_page_deduped": true,
+        "filter_semantics_known": true,
+        "gap_absent": true,
+        "identity_conflict": false,
+        "no_event_semantics_known": true,
+        "page_cursor_chain_complete": true,
+        "page_terminal_attested": true,
+        "pagination_limit_known": true,
+        "query_conflict": false,
+        "query_retry_reconciled": true,
+        "query_scope_fixed": true,
+        "resource_version_monotonic": true,
+        "retention_boundary_attested": true,
+        "retention_expired": false,
+        "retention_window_open": false,
+        "same_identity": true,
+        "snapshot_consistent": true,
+        "time_window_fixed": true,
+        "watermark_closed": false
+      },
+      "id": "watermark-open",
+      "label": "查询水位未闭合",
+      "status": "UNKNOWN"
+    },
+    {
+      "evidence": [
+        "查询范围跨越未知保留期"
+      ],
+      "flags": {
+        "cross_region_complete": true,
+        "duplicate_page_deduped": true,
+        "filter_semantics_known": true,
+        "gap_absent": true,
+        "identity_conflict": false,
+        "no_event_semantics_known": true,
+        "page_cursor_chain_complete": true,
+        "page_terminal_attested": true,
+        "pagination_limit_known": true,
+        "query_conflict": false,
+        "query_retry_reconciled": true,
+        "query_scope_fixed": true,
+        "resource_version_monotonic": true,
+        "retention_boundary_attested": false,
+        "retention_expired": false,
+        "retention_window_open": false,
+        "same_identity": true,
+        "snapshot_consistent": true,
+        "time_window_fixed": true,
+        "watermark_closed": true
+      },
+      "id": "retention-unknown",
+      "label": "保留边界未知",
+      "status": "UNKNOWN"
+    },
+    {
+      "evidence": [
+        "空结果可能是过滤/分页/延迟造成"
+      ],
+      "flags": {
+        "cross_region_complete": true,
+        "duplicate_page_deduped": true,
+        "filter_semantics_known": true,
+        "gap_absent": true,
+        "identity_conflict": false,
+        "no_event_semantics_known": false,
+        "page_cursor_chain_complete": true,
+        "page_terminal_attested": true,
+        "pagination_limit_known": true,
+        "query_conflict": false,
+        "query_retry_reconciled": true,
+        "query_scope_fixed": true,
+        "resource_version_monotonic": true,
+        "retention_boundary_attested": true,
+        "retention_expired": false,
+        "retention_window_open": false,
+        "same_identity": true,
+        "snapshot_consistent": true,
+        "time_window_fixed": true,
+        "watermark_closed": true
+      },
+      "id": "no-event-semantics-unknown",
+      "label": "NO_EVENT语义未知",
+      "status": "UNKNOWN"
+    },
+    {
+      "evidence": [
+        "API返回QUERY_GAP或局部失败"
+      ],
+      "flags": {
+        "cross_region_complete": true,
+        "duplicate_page_deduped": true,
+        "filter_semantics_known": true,
+        "gap_absent": false,
+        "identity_conflict": false,
+        "no_event_semantics_known": true,
+        "page_cursor_chain_complete": true,
+        "page_terminal_attested": true,
+        "pagination_limit_known": true,
+        "query_conflict": false,
+        "query_retry_reconciled": true,
+        "query_scope_fixed": true,
+        "resource_version_monotonic": true,
+        "retention_boundary_attested": true,
+        "retention_expired": false,
+        "retention_window_open": false,
+        "same_identity": true,
+        "snapshot_consistent": true,
+        "time_window_fixed": true,
+        "watermark_closed": true
+      },
+      "id": "query-gap",
+      "label": "查询缺口",
+      "status": "UNKNOWN"
+    },
+    {
+      "evidence": [
+        "不能判断是否达到服务端上限"
+      ],
+      "flags": {
+        "cross_region_complete": true,
+        "duplicate_page_deduped": true,
+        "filter_semantics_known": true,
+        "gap_absent": true,
+        "identity_conflict": false,
+        "no_event_semantics_known": true,
+        "page_cursor_chain_complete": true,
+        "page_terminal_attested": true,
+        "pagination_limit_known": false,
+        "query_conflict": false,
+        "query_retry_reconciled": true,
+        "query_scope_fixed": true,
+        "resource_version_monotonic": true,
+        "retention_boundary_attested": true,
+        "retention_expired": false,
+        "retention_window_open": false,
+        "same_identity": true,
+        "snapshot_consistent": true,
+        "time_window_fixed": true,
+        "watermark_closed": true
+      },
+      "id": "pagination-limit-unknown",
+      "label": "分页limit未知",
+      "status": "UNKNOWN"
+    },
+    {
+      "evidence": [
+        "服务端过滤器是否覆盖全部字段未确认"
+      ],
+      "flags": {
+        "cross_region_complete": true,
+        "duplicate_page_deduped": true,
+        "filter_semantics_known": false,
+        "gap_absent": true,
+        "identity_conflict": false,
+        "no_event_semantics_known": true,
+        "page_cursor_chain_complete": true,
+        "page_terminal_attested": true,
+        "pagination_limit_known": true,
+        "query_conflict": false,
+        "query_retry_reconciled": true,
+        "query_scope_fixed": true,
+        "resource_version_monotonic": true,
+        "retention_boundary_attested": true,
+        "retention_expired": false,
+        "retention_window_open": false,
+        "same_identity": true,
+        "snapshot_consistent": true,
+        "time_window_fixed": true,
+        "watermark_closed": true
+      },
+      "id": "filter-semantics-unknown",
+      "label": "过滤语义未知",
+      "status": "UNKNOWN"
+    },
+    {
+      "evidence": [
+        "一个区域缺少terminal或page链"
+      ],
+      "flags": {
+        "cross_region_complete": false,
+        "duplicate_page_deduped": true,
+        "filter_semantics_known": true,
+        "gap_absent": false,
+        "identity_conflict": false,
+        "no_event_semantics_known": true,
+        "page_cursor_chain_complete": true,
+        "page_terminal_attested": true,
+        "pagination_limit_known": true,
+        "query_conflict": false,
+        "query_retry_reconciled": true,
+        "query_scope_fixed": true,
+        "resource_version_monotonic": true,
+        "retention_boundary_attested": true,
+        "retention_expired": false,
+        "retention_window_open": false,
+        "same_identity": true,
+        "snapshot_consistent": true,
+        "time_window_fixed": true,
+        "watermark_closed": true
+      },
+      "id": "cross-region-partial",
+      "label": "跨区域部分返回",
+      "status": "UNKNOWN"
+    },
+    {
+      "evidence": [
+        "断线重试后无法区分重复页和新页"
+      ],
+      "flags": {
+        "cross_region_complete": true,
+        "duplicate_page_deduped": true,
+        "filter_semantics_known": true,
+        "gap_absent": true,
+        "identity_conflict": false,
+        "no_event_semantics_known": true,
+        "page_cursor_chain_complete": true,
+        "page_terminal_attested": true,
+        "pagination_limit_known": true,
+        "query_conflict": false,
+        "query_retry_reconciled": false,
+        "query_scope_fixed": true,
+        "resource_version_monotonic": true,
+        "retention_boundary_attested": true,
+        "retention_expired": false,
+        "retention_window_open": false,
+        "same_identity": true,
+        "snapshot_consistent": true,
+        "time_window_fixed": true,
+        "watermark_closed": true
+      },
+      "id": "retry-reconciliation-missing",
+      "label": "查询重试未对账",
+      "status": "UNKNOWN"
+    },
+    {
+      "evidence": [
+        "同一cursor多次结果可能污染计数"
+      ],
+      "flags": {
+        "cross_region_complete": true,
+        "duplicate_page_deduped": false,
+        "filter_semantics_known": true,
+        "gap_absent": true,
+        "identity_conflict": false,
+        "no_event_semantics_known": true,
+        "page_cursor_chain_complete": true,
+        "page_terminal_attested": true,
+        "pagination_limit_known": true,
+        "query_conflict": false,
+        "query_retry_reconciled": true,
+        "query_scope_fixed": true,
+        "resource_version_monotonic": true,
+        "retention_boundary_attested": true,
+        "retention_expired": false,
+        "retention_window_open": false,
+        "same_identity": true,
+        "snapshot_consistent": true,
+        "time_window_fixed": true,
+        "watermark_closed": true
+      },
+      "id": "duplicate-page-unresolved",
+      "label": "重复页未去重",
+      "status": "UNKNOWN"
+    },
+    {
+      "evidence": [
+        "tenant/source/event_id字段不完整"
+      ],
+      "flags": {
+        "cross_region_complete": true,
+        "duplicate_page_deduped": true,
+        "filter_semantics_known": true,
+        "gap_absent": true,
+        "identity_conflict": false,
+        "no_event_semantics_known": true,
+        "page_cursor_chain_complete": true,
+        "page_terminal_attested": true,
+        "pagination_limit_known": true,
+        "query_conflict": false,
+        "query_retry_reconciled": true,
+        "query_scope_fixed": true,
+        "resource_version_monotonic": true,
+        "retention_boundary_attested": true,
+        "retention_expired": false,
+        "retention_window_open": false,
+        "same_identity": false,
+        "snapshot_consistent": true,
+        "time_window_fixed": true,
+        "watermark_closed": true
+      },
+      "id": "identity-unresolved",
+      "label": "身份域无法确定",
+      "status": "UNKNOWN"
+    },
+    {
+      "evidence": [
+        "RETENTION_EXPIRED不能证明事件未发生"
+      ],
+      "flags": {
+        "cross_region_complete": true,
+        "duplicate_page_deduped": true,
+        "filter_semantics_known": true,
+        "gap_absent": true,
+        "identity_conflict": false,
+        "no_event_semantics_known": true,
+        "page_cursor_chain_complete": true,
+        "page_terminal_attested": true,
+        "pagination_limit_known": true,
+        "query_conflict": false,
+        "query_retry_reconciled": true,
+        "query_scope_fixed": true,
+        "resource_version_monotonic": true,
+        "retention_boundary_attested": true,
+        "retention_expired": true,
+        "retention_window_open": true,
+        "same_identity": true,
+        "snapshot_consistent": true,
+        "time_window_fixed": true,
+        "watermark_closed": true
+      },
+      "id": "retention-expired",
+      "label": "保留期已过期",
+      "status": "UNKNOWN"
+    },
+    {
+      "evidence": [
+        "多个不确定门不能相互抵消"
+      ],
+      "flags": {
+        "cross_region_complete": true,
+        "duplicate_page_deduped": true,
+        "filter_semantics_known": true,
+        "gap_absent": false,
+        "identity_conflict": false,
+        "no_event_semantics_known": true,
+        "page_cursor_chain_complete": true,
+        "page_terminal_attested": true,
+        "pagination_limit_known": true,
+        "query_conflict": false,
+        "query_retry_reconciled": true,
+        "query_scope_fixed": false,
+        "resource_version_monotonic": true,
+        "retention_boundary_attested": true,
+        "retention_expired": false,
+        "retention_window_open": false,
+        "same_identity": true,
+        "snapshot_consistent": true,
+        "time_window_fixed": true,
+        "watermark_closed": true
+      },
+      "id": "scope-and-gap-edge",
+      "label": "scope与缺口同时未知",
+      "status": "UNKNOWN"
+    },
+    {
+      "evidence": [
+        "tenant或source明确不同"
+      ],
+      "flags": {
+        "cross_region_complete": true,
+        "duplicate_page_deduped": true,
+        "filter_semantics_known": true,
+        "gap_absent": true,
+        "identity_conflict": true,
+        "no_event_semantics_known": true,
+        "page_cursor_chain_complete": true,
+        "page_terminal_attested": true,
+        "pagination_limit_known": true,
+        "query_conflict": false,
+        "query_retry_reconciled": true,
+        "query_scope_fixed": true,
+        "resource_version_monotonic": true,
+        "retention_boundary_attested": true,
+        "retention_expired": false,
+        "retention_window_open": false,
+        "same_identity": false,
+        "snapshot_consistent": true,
+        "time_window_fixed": true,
+        "watermark_closed": true
+      },
+      "id": "identity-conflict",
+      "label": "跨身份域查询",
+      "status": "REJECT"
+    },
+    {
+      "evidence": [
+        "同一snapshot/query identity对同一event给出冲突结果"
+      ],
+      "flags": {
+        "cross_region_complete": true,
+        "duplicate_page_deduped": true,
+        "filter_semantics_known": true,
+        "gap_absent": true,
+        "identity_conflict": false,
+        "no_event_semantics_known": true,
+        "page_cursor_chain_complete": true,
+        "page_terminal_attested": true,
+        "pagination_limit_known": true,
+        "query_conflict": true,
+        "query_retry_reconciled": true,
+        "query_scope_fixed": true,
+        "resource_version_monotonic": true,
+        "retention_boundary_attested": true,
+        "retention_expired": false,
+        "retention_window_open": false,
+        "same_identity": true,
+        "snapshot_consistent": true,
+        "time_window_fixed": true,
+        "watermark_closed": true
+      },
+      "id": "query-conflict",
+      "label": "同一查询返回不可调和结果",
+      "status": "REJECT"
+    },
+    {
+      "evidence": [
+        "同一资源同一时间边界同时给出可取回与已过期声明"
+      ],
+      "flags": {
+        "cross_region_complete": true,
+        "duplicate_page_deduped": true,
+        "filter_semantics_known": true,
+        "gap_absent": true,
+        "identity_conflict": false,
+        "no_event_semantics_known": true,
+        "page_cursor_chain_complete": true,
+        "page_terminal_attested": true,
+        "pagination_limit_known": true,
+        "query_conflict": true,
+        "query_retry_reconciled": true,
+        "query_scope_fixed": true,
+        "resource_version_monotonic": true,
+        "retention_boundary_attested": true,
+        "retention_expired": true,
+        "retention_window_open": false,
+        "same_identity": true,
+        "snapshot_consistent": true,
+        "time_window_fixed": true,
+        "watermark_closed": true
+      },
+      "id": "retention-contract-conflict",
+      "label": "保留契约冲突",
+      "status": "REJECT"
+    }
+  ],
+  "identity_domain": [
+    "tenant",
+    "source",
+    "event_id",
+    "epoch",
+    "version"
+  ],
+  "production_verified": false,
+  "query_domain": [
+    "query_scope",
+    "time_window",
+    "page_cursor",
+    "resource_version",
+    "snapshot",
+    "watermark",
+    "retention",
+    "NO_EVENT",
+    "QUERY_GAP",
+    "cross_region",
+    "retry"
+  ],
+  "schema_version": "S39-cases-1",
+  "synthetic_only": true
+}

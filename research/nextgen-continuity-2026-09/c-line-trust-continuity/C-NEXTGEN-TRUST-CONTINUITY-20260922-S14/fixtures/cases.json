@@ -1,0 +1,136 @@
+{
+  "synthetic_only": true,
+  "production_verified": false,
+  "fixture_schema_version": "s14.case.v1",
+  "cases": [
+    {
+      "id": "S14-01-clock-drift",
+      "question": "Can clock drift alone recover an unknown event?",
+      "initial_state": "UNKNOWN",
+      "events": [{"event_id":"e-clock-1","seq":10,"observed_at":"2026-09-22T10:00:00Z","source_id":"sensor-a","kind":"recovery_candidate","verifiable":true,"independence_verified":true,"clock_anomaly":true}],
+      "budget_truncated": false,
+      "expected_state": "UNKNOWN"
+    },
+    {
+      "id": "S14-02-same-event-different-seq",
+      "question": "Does the same event ID with different sequence numbers recover state?",
+      "initial_state": "UNKNOWN",
+      "events": [{"event_id":"e-seq-1","seq":7,"observed_at":"2026-09-22T10:00:00Z","source_id":"sensor-a","kind":"recovery_candidate","verifiable":true,"independence_verified":true},{"event_id":"e-seq-1","seq":8,"observed_at":"2026-09-22T10:00:01Z","source_id":"sensor-a","kind":"recovery_candidate","verifiable":true,"independence_verified":true}],
+      "budget_truncated": false,
+      "expected_state": "UNKNOWN"
+    },
+    {
+      "id": "S14-03-duplicate-event-id",
+      "question": "Does a duplicate event ID count twice as independent proof?",
+      "initial_state": "UNKNOWN",
+      "events": [{"event_id":"e-dup-1","seq":1,"observed_at":"2026-09-22T10:00:00Z","source_id":"sensor-a","kind":"recovery_candidate","verifiable":true,"independence_verified":true},{"event_id":"e-dup-1","seq":1,"observed_at":"2026-09-22T10:00:02Z","source_id":"sensor-b","kind":"recovery_candidate","verifiable":true,"independence_verified":true}],
+      "budget_truncated": false,
+      "expected_state": "UNKNOWN"
+    },
+    {
+      "id": "S14-04-budget-cut-before-proof",
+      "question": "Can a truncated stream recover when proof may be after the cutoff?",
+      "initial_state": "UNKNOWN",
+      "events": [{"event_id":"e-budget-1","seq":1,"observed_at":"2026-09-22T10:00:00Z","source_id":"sensor-a","kind":"recovery_candidate","verifiable":true,"independence_verified":true}],
+      "budget_truncated": true,
+      "expected_state": "UNKNOWN"
+    },
+    {
+      "id": "S14-05-budget-cut-at-proof",
+      "question": "Can a truncation marker silently certify a proof at the boundary?",
+      "initial_state": "UNKNOWN",
+      "events": [{"event_id":"e-budget-2a","seq":1,"observed_at":"2026-09-22T10:00:00Z","source_id":"sensor-a","kind":"recovery_candidate","verifiable":true,"independence_verified":true},{"event_id":"e-budget-2b","seq":2,"observed_at":"2026-09-22T10:00:01Z","source_id":"sensor-b","kind":"recovery_candidate","verifiable":true,"independence_verified":true}],
+      "budget_truncated": true,
+      "expected_state": "UNKNOWN"
+    },
+    {
+      "id": "S14-06-mislabelled-independence",
+      "question": "Does a source self-label make same-origin evidence independent?",
+      "initial_state": "UNKNOWN",
+      "events": [{"event_id":"e-mis-1","seq":1,"observed_at":"2026-09-22T10:00:00Z","source_id":"aggregator-x","kind":"recovery_candidate","verifiable":true,"independence_verified":false,"independence_claimed":true},{"event_id":"e-mis-2","seq":2,"observed_at":"2026-09-22T10:00:01Z","source_id":"aggregator-x","kind":"recovery_candidate","verifiable":true,"independence_verified":false,"independence_claimed":true}],
+      "budget_truncated": false,
+      "expected_state": "UNKNOWN"
+    },
+    {
+      "id": "S14-07-single-source",
+      "question": "Is one verifiable source sufficient for recovery?",
+      "initial_state": "UNKNOWN",
+      "events": [{"event_id":"e-one-1","seq":1,"observed_at":"2026-09-22T10:00:00Z","source_id":"source-a","kind":"recovery_candidate","verifiable":true,"independence_verified":true}],
+      "budget_truncated": false,
+      "expected_state": "UNKNOWN"
+    },
+    {
+      "id": "S14-08-valid-independent-recovery",
+      "question": "Do two distinct verified sources recover state?",
+      "initial_state": "UNKNOWN",
+      "events": [{"event_id":"e-good-1","seq":1,"observed_at":"2026-09-22T10:00:00Z","source_id":"source-a","kind":"recovery_candidate","verifiable":true,"independence_verified":true},{"event_id":"e-good-2","seq":2,"observed_at":"2026-09-22T10:00:01Z","source_id":"source-b","kind":"recovery_candidate","verifiable":true,"independence_verified":true}],
+      "budget_truncated": false,
+      "expected_state": "RECOVERED"
+    },
+    {
+      "id": "S14-09-explicit-verifiable-contradiction",
+      "question": "Does explicit verifiable contradiction reject?",
+      "initial_state": "UNKNOWN",
+      "events": [{"event_id":"e-contra-1","seq":1,"observed_at":"2026-09-22T10:00:00Z","source_id":"source-a","kind":"contradiction","verifiable":true,"independence_verified":true,"contradicts":"event absent"}],
+      "budget_truncated": false,
+      "expected_state": "REJECT"
+    },
+    {
+      "id": "S14-10-unverifiable-conflict",
+      "question": "Does an unverified conflict reject?",
+      "initial_state": "UNKNOWN",
+      "events": [{"event_id":"e-unver-1","seq":1,"observed_at":"2026-09-22T10:00:00Z","source_id":"source-a","kind":"contradiction","verifiable":false,"independence_verified":true}],
+      "budget_truncated": false,
+      "expected_state": "UNKNOWN"
+    },
+    {
+      "id": "S14-11-clock-drift-with-two-sources",
+      "question": "Can two source records recover when both have clock anomalies?",
+      "initial_state": "UNKNOWN",
+      "events": [{"event_id":"e-clock-2a","seq":1,"observed_at":"2026-09-22T10:00:00Z","source_id":"source-a","kind":"recovery_candidate","verifiable":true,"independence_verified":true,"clock_anomaly":true},{"event_id":"e-clock-2b","seq":2,"observed_at":"2026-09-22T09:00:00Z","source_id":"source-b","kind":"recovery_candidate","verifiable":true,"independence_verified":true,"clock_anomaly":true}],
+      "budget_truncated": false,
+      "expected_state": "UNKNOWN"
+    },
+    {
+      "id": "S14-12-duplicate-around-valid-proof",
+      "question": "Does duplicate delivery change a valid two-source result?",
+      "initial_state": "UNKNOWN",
+      "events": [{"event_id":"e-good-3","seq":1,"observed_at":"2026-09-22T10:00:00Z","source_id":"source-a","kind":"recovery_candidate","verifiable":true,"independence_verified":true},{"event_id":"e-good-3","seq":1,"observed_at":"2026-09-22T10:00:00Z","source_id":"source-a","kind":"recovery_candidate","verifiable":true,"independence_verified":true},{"event_id":"e-good-4","seq":2,"observed_at":"2026-09-22T10:00:01Z","source_id":"source-b","kind":"recovery_candidate","verifiable":true,"independence_verified":true}],
+      "budget_truncated": false,
+      "expected_state": "RECOVERED"
+    },
+    {
+      "id": "S14-13-contradiction-with-recovery",
+      "question": "What happens when recovery candidates coexist with explicit contradiction?",
+      "initial_state": "UNKNOWN",
+      "events": [{"event_id":"e-mix-1","seq":1,"observed_at":"2026-09-22T10:00:00Z","source_id":"source-a","kind":"recovery_candidate","verifiable":true,"independence_verified":true},{"event_id":"e-mix-2","seq":2,"observed_at":"2026-09-22T10:00:01Z","source_id":"source-b","kind":"recovery_candidate","verifiable":true,"independence_verified":true},{"event_id":"e-mix-3","seq":3,"observed_at":"2026-09-22T10:00:02Z","source_id":"source-c","kind":"contradiction","verifiable":true,"independence_verified":true,"contradicts":"event absent"}],
+      "budget_truncated": false,
+      "expected_state": "REJECT"
+    },
+    {
+      "id": "S14-14-seq-gap-only",
+      "question": "Does a sequence gap alone reject or recover?",
+      "initial_state": "UNKNOWN",
+      "events": [{"event_id":"e-gap-1","seq":1,"observed_at":"2026-09-22T10:00:00Z","source_id":"source-a","kind":"recovery_candidate","verifiable":true,"independence_verified":true},{"event_id":"e-gap-2","seq":9,"observed_at":"2026-09-22T10:00:01Z","source_id":"source-b","kind":"recovery_candidate","verifiable":true,"independence_verified":true}],
+      "budget_truncated": false,
+      "expected_state": "UNKNOWN"
+    },
+    {
+      "id": "S14-15-budget-with-explicit-completeness",
+      "question": "Does truncation remain conservative even with two candidates?",
+      "initial_state": "UNKNOWN",
+      "events": [{"event_id":"e-budget-3a","seq":1,"observed_at":"2026-09-22T10:00:00Z","source_id":"source-a","kind":"recovery_candidate","verifiable":true,"independence_verified":true},{"event_id":"e-budget-3b","seq":2,"observed_at":"2026-09-22T10:00:01Z","source_id":"source-b","kind":"recovery_candidate","verifiable":true,"independence_verified":true}],
+      "budget_truncated": true,
+      "explicit_completeness_proof": false,
+      "expected_state": "UNKNOWN"
+    },
+    {
+      "id": "S14-16-noncontradictory-missing",
+      "question": "Does absence of evidence become reject?",
+      "initial_state": "UNKNOWN",
+      "events": [],
+      "budget_truncated": false,
+      "expected_state": "UNKNOWN"
+    }
+  ]
+}

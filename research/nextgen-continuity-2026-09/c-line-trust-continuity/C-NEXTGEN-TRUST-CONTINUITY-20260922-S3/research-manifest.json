@@ -1,0 +1,83 @@
+{
+  "schema_version": "1.0",
+  "question": "取消、超时或断流后，官方工作流、OAuth、serverless identity 与 Kubernetes SSA 语义是否重新授权或拒绝 stale writer？",
+  "scope": {
+    "time_window": "current as of 2026-09-22",
+    "geography_or_context": "Public official first-party cloud documentation and IETF OAuth RFCs",
+    "inclusions": ["GCP Workflows callbacks", "AWS Step Functions StopExecution and callback tasks", "RFC 6749 refresh-token rotation", "RFC 7009 revocation", "Cloud Run and Azure Functions timeout/identity", "Kubernetes Server-Side Apply managedFields"],
+    "exclusions": ["production validation", "private accounts or credentials", "private or pre-existing C-line research artifacts", "real services", "claim that tokens/leases/logs prove production authorization, fencing, or exactly-once"]
+  },
+  "claims": [
+    {
+      "id": "S3-C1",
+      "claim": "GCP callback receipt resumes a waiting workflow; official human-in-the-loop guidance places production authentication at the callback request, but does not establish revalidation of the original initiating identity by the workflow engine.",
+      "status": "confirmed",
+      "confidence": "medium",
+      "sources": [
+        {"url": "https://docs.cloud.google.com/workflows/docs/creating-callback-endpoints", "publisher": "Google Cloud", "published_or_updated": "Page date not stated; accessed 2026-09-22", "tier": "primary", "support": "Callback endpoint creation/await semantics and guidance that a frontend request to the endpoint is where authentication would take place in a production application."},
+        {"url": "https://docs.cloud.google.com/workflows/docs/reference/stdlib/events/await_callback", "publisher": "Google Cloud", "published_or_updated": "Page date not stated; accessed 2026-09-22", "tier": "primary", "support": "Defines await_callback as waiting for a callback to be received."}
+      ],
+      "caveat": "Absence of documented revalidation is unknown, not evidence that no authentication occurs. Callback URL possession is not proven to be business authorization or fencing."
+    },
+    {
+      "id": "S3-C2",
+      "claim": "AWS Step Functions StopExecution stops an execution; callback tasks wait for task-token return and a timed-out callback task gets a new random token, but documentation checked does not specify external in-flight cancellation or exact post-stop stale-token response.",
+      "status": "confirmed",
+      "confidence": "medium",
+      "sources": [
+        {"url": "https://docs.aws.amazon.com/step-functions/latest/apireference/API_StopExecution.html", "publisher": "Amazon Web Services", "published_or_updated": "Page date not stated; accessed 2026-09-22", "tier": "primary", "support": "API states that StopExecution stops an execution and notes EXPRESS state machines are unsupported."},
+        {"url": "https://docs.aws.amazon.com/step-functions/latest/dg/connect-to-resource.html#connect-wait-token", "publisher": "Amazon Web Services", "published_or_updated": "Page date not stated; accessed 2026-09-22", "tier": "primary", "support": "Callback task waits for SendTaskSuccess/Failure token; task timeout generates a new random token; same-account principal requirement."}
+      ],
+      "caveat": "Execution stop should not be represented as rollback or guaranteed immediate revocation of external work; exact stale token handling is unknown from checked sources."
+    },
+    {
+      "id": "S3-C3",
+      "claim": "RFC 6749 makes refresh-token issuance optional and old-token revocation optional; RFC 7009 recommends revoking access tokens associated with a revoked refresh token but recognizes propagation delay, so this is not a universal instantaneous cascade guarantee.",
+      "status": "confirmed",
+      "confidence": "high",
+      "sources": [
+        {"url": "https://www.rfc-editor.org/rfc/rfc6749.html", "publisher": "IETF", "published_or_updated": "2012-10", "tier": "primary", "support": "Section 6: server MAY issue a new refresh token; client MUST replace old token if issued; server MAY revoke old token."},
+        {"url": "https://www.rfc-editor.org/rfc/rfc7009.html", "publisher": "IETF", "published_or_updated": "2013-08", "tier": "primary", "support": "Section 2.1: SHOULD invalidate access tokens based on same grant when revoking refresh token if supported; propagation delay possible; client must not use token after 200 response."}
+      ],
+      "caveat": "Normative SHOULD/MAY and propagation delays do not constitute resource-side fencing, atomic revocation, or exactly-once behavior."
+    },
+    {
+      "id": "S3-C4",
+      "claim": "Cloud Run request timeout closes the network connection and returns 504 without terminating the serving container; the old handler may continue, and reconnect is a new request not guaranteed to reach the same instance.",
+      "status": "confirmed",
+      "confidence": "high",
+      "sources": [
+        {"url": "https://docs.cloud.google.com/run/docs/configuring/request-timeout", "publisher": "Google Cloud", "published_or_updated": "Page date not stated; accessed 2026-09-22", "tier": "primary", "support": "Request timeout page explicitly states container is not terminated and code might continue; reconnect starts new request and may reach another instance."},
+        {"url": "https://docs.cloud.google.com/run/docs/securing/service-identity", "publisher": "Google Cloud", "published_or_updated": "Page date not stated; accessed 2026-09-22", "tier": "primary", "support": "Documents configured service identity and token acquisition; does not state timeout revokes prior business operation."}
+      ],
+      "caveat": "Platform identity token availability is not per-operation reauthorization or proof that the resource will reject a stale writer."
+    },
+    {
+      "id": "S3-C5",
+      "claim": "Azure Functions timeout produces a timeout error and restarts the language worker (and for in-process C# the host); managed identity token endpoint availability does not establish cancellation or revocation of work already in flight.",
+      "status": "confirmed",
+      "confidence": "medium",
+      "sources": [
+        {"url": "https://learn.microsoft.com/en-us/azure/azure-functions/functions-scale#timeout", "publisher": "Microsoft", "published_or_updated": "Page date not stated; accessed 2026-09-22", "tier": "primary", "support": "Timeout documentation explicitly describes timeout error and worker/host restart behavior."},
+        {"url": "https://learn.microsoft.com/en-us/azure/app-service/overview-managed-identity", "publisher": "Microsoft", "published_or_updated": "Page date not stated; accessed 2026-09-22", "tier": "primary", "support": "Describes managed identity local token endpoint and platform-rotated identity header."}
+      ],
+      "caveat": "No assertion that timeout revokes previously issued tokens, fences another process, or rolls back resource side effects."
+    },
+    {
+      "id": "S3-C6",
+      "claim": "Kubernetes SSA managedFields records field-manager ownership and conflicting apply can be rejected unless forced, but field manager is supplied by the client and is not itself an authenticated principal or general stale-writer fencing mechanism.",
+      "status": "confirmed",
+      "confidence": "high",
+      "sources": [
+        {"url": "https://kubernetes.io/docs/reference/using-api/server-side-apply/", "publisher": "Kubernetes Documentation", "published_or_updated": "Page date not stated; accessed 2026-09-22", "tier": "primary", "support": "SSA docs explain managed fields, required client-provided field manager, conflict rejection and force ownership transfer."},
+        {"url": "https://kubernetes.io/docs/reference/kubernetes-api/common-definitions/object-meta/#ObjectMeta", "publisher": "Kubernetes Documentation", "published_or_updated": "Page date not stated; accessed 2026-09-22", "tier": "primary", "support": "API reference defines ObjectMeta and managedFields metadata structure."}
+      ],
+      "caveat": "SSA field ownership is conflict management, not general authorization, epoch fencing, or exactly-once; force and other write paths matter."
+    }
+  ],
+  "coverage": {
+    "searched": ["Official Google Cloud Workflows callback, Cloud Run timeout and service identity documentation", "Official AWS Step Functions StopExecution API and callback task documentation", "IETF RFC 6749 and RFC 7009 full text", "Official Azure Functions timeout and managed identity documentation", "Official Kubernetes Server-Side Apply and ObjectMeta documentation"],
+    "inaccessible": [],
+    "unresolved_conflicts": ["Official materials checked do not explicitly settle GCP resume-time original caller revalidation or AWS post-stop in-flight callback behavior; these are marked unknown rather than treated as contrary evidence.", "OAuth RFC normative SHOULD/MAY language plus propagation delay conflicts with any stronger claim of universal immediate revocation cascade."]
+  }
+}

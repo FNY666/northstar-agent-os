@@ -1,0 +1,509 @@
+{
+  "algorithm": "SHA-256 over sorted-key compact UTF-8 JSON",
+  "production_verified": false,
+  "results": [
+    {
+      "blocking_conditions": [],
+      "canonical_input_sha256": "e7576980753f942c16e9214d1021ef90267c6e2fa3d37851718ab9cd45a661fa",
+      "case_id": "F01",
+      "chains_checked": [
+        "L1",
+        "L2",
+        "L3"
+      ],
+      "chains_with_event": [
+        "L1",
+        "L2",
+        "L3"
+      ],
+      "duplicate_hash_chains": [],
+      "event_id": "evt-001",
+      "inaccessible_chains": [],
+      "reason": "同一事件在至少两条可访问链中 canonical hash 一致",
+      "status": "RECOVERED"
+    },
+    {
+      "blocking_conditions": [],
+      "canonical_input_sha256": "7daeb6b2a8dbc7cb842b4443823b113c1a74c0fdd47cf0d5604acf8d57162929",
+      "case_id": "F02",
+      "chains_checked": [
+        "L1",
+        "L2",
+        "L3"
+      ],
+      "chains_with_event": [
+        "L1",
+        "L2",
+        "L3"
+      ],
+      "duplicate_hash_chains": [],
+      "event_id": "evt-002",
+      "inaccessible_chains": [],
+      "reason": "同一事件在至少两条可访问链中 canonical hash 一致",
+      "status": "RECOVERED"
+    },
+    {
+      "blocking_conditions": [
+        "cross_chain_confirmation"
+      ],
+      "canonical_input_sha256": "d62f0ceebaccadf9bb7767e5b93be74f3eeb8ef6219b9ea7a11bba293496d150",
+      "case_id": "F03",
+      "chains_checked": [
+        "L1",
+        "L2",
+        "L3"
+      ],
+      "chains_with_event": [
+        "L1"
+      ],
+      "duplicate_hash_chains": [],
+      "event_id": "evt-003",
+      "inaccessible_chains": [],
+      "reason": "事件仅见于一条可访问链；缺少跨链证据，不升级为恢复",
+      "status": "UNKNOWN"
+    },
+    {
+      "blocking_conditions": [
+        "cross_chain_confirmation"
+      ],
+      "canonical_input_sha256": "41e65d4ba6a96ecf583c702f1b26e9c1ad1bec0caee15debb1caad16540f43ed",
+      "case_id": "F04",
+      "chains_checked": [
+        "L1",
+        "L2",
+        "L3"
+      ],
+      "chains_with_event": [
+        "L1"
+      ],
+      "duplicate_hash_chains": [],
+      "event_id": "evt-004",
+      "inaccessible_chains": [],
+      "reason": "事件仅见于一条可访问链；缺少跨链证据，不升级为恢复",
+      "status": "UNKNOWN"
+    },
+    {
+      "blocking_conditions": [
+        "conflicting_hashes"
+      ],
+      "canonical_input_sha256": "a4875e512c3df6d0b9a4dba127b882893c2d56a9d5463afe46304e638036618a",
+      "case_id": "F05",
+      "chains_checked": [
+        "L1",
+        "L2",
+        "L3"
+      ],
+      "chains_with_event": [
+        "L1",
+        "L2"
+      ],
+      "duplicate_hash_chains": [],
+      "event_id": "evt-005",
+      "inaccessible_chains": [],
+      "reason": "同一事件在可访问链中 canonical hash 不同，可验证内容矛盾",
+      "status": "REJECT"
+    },
+    {
+      "blocking_conditions": [
+        "sequence_alignment"
+      ],
+      "canonical_input_sha256": "0aff6cf82d2bf9d5f541982e1a049bc0a7f596f5bbd5d41cabd64b81fdf8a296",
+      "case_id": "F06",
+      "chains_checked": [
+        "L1",
+        "L2",
+        "L3"
+      ],
+      "chains_with_event": [
+        "L1",
+        "L2",
+        "L3"
+      ],
+      "duplicate_hash_chains": [],
+      "event_id": "evt-006",
+      "inaccessible_chains": [],
+      "reason": "事件内容一致但链级序号错位，需外部裁决",
+      "status": "UNKNOWN"
+    },
+    {
+      "blocking_conditions": [
+        "timeline_ownership"
+      ],
+      "canonical_input_sha256": "0619400f5ad9ce7c7c6d9ac2458c2e472e8db214d1813900b363d4140764cf57",
+      "case_id": "F07",
+      "chains_checked": [
+        "L1",
+        "L2",
+        "L3"
+      ],
+      "chains_with_event": [
+        "L1",
+        "L2"
+      ],
+      "duplicate_hash_chains": [],
+      "event_id": "evt-007",
+      "inaccessible_chains": [],
+      "reason": "时间戳区间重叠导致事件归属不清，不以时间先后判优先",
+      "status": "UNKNOWN"
+    },
+    {
+      "blocking_conditions": [
+        "inaccessible:L3"
+      ],
+      "canonical_input_sha256": "51637fc9521bedabc7d059c1a6a5558de975e865e7354d32d3bdcfc3b7a5a5e2",
+      "case_id": "F08",
+      "chains_checked": [
+        "L1",
+        "L2"
+      ],
+      "chains_with_event": [
+        "L1",
+        "L2"
+      ],
+      "duplicate_hash_chains": [],
+      "event_id": "evt-008",
+      "inaccessible_chains": [
+        "L3"
+      ],
+      "reason": "同一事件在至少两条可访问链中 canonical hash 一致",
+      "status": "RECOVERED"
+    },
+    {
+      "blocking_conditions": [
+        "cross_chain_confirmation",
+        "inaccessible:L2"
+      ],
+      "canonical_input_sha256": "5065f6dee984d6fe95c3d079cc7e328aecf411f0933ba8e9b9acc85d80a3ab9e",
+      "case_id": "F09",
+      "chains_checked": [
+        "L1",
+        "L3"
+      ],
+      "chains_with_event": [
+        "L1"
+      ],
+      "duplicate_hash_chains": [],
+      "event_id": "evt-009",
+      "inaccessible_chains": [
+        "L2"
+      ],
+      "reason": "事件仅见于一条可访问链；缺少跨链证据，不升级为恢复",
+      "status": "UNKNOWN"
+    },
+    {
+      "blocking_conditions": [
+        "L1:missing_anchor"
+      ],
+      "canonical_input_sha256": "33101c09b4057cee66b2644d917772149b3045e2f95a78f053b2611cb63faba7",
+      "case_id": "F10",
+      "chains_checked": [
+        "L1",
+        "L2",
+        "L3"
+      ],
+      "chains_with_event": [
+        "L1",
+        "L2",
+        "L3"
+      ],
+      "duplicate_hash_chains": [],
+      "event_id": "evt-010",
+      "inaccessible_chains": [],
+      "reason": "缺少首块锚点，无法建立链级证据",
+      "status": "UNKNOWN"
+    },
+    {
+      "blocking_conditions": [
+        "cross_chain_confirmation",
+        "duplicate_hash:L1"
+      ],
+      "canonical_input_sha256": "caa7e07bd1622a835011c95c7dbee868fbcab376036abb1128e5e4f87b3cb5df",
+      "case_id": "F11",
+      "chains_checked": [
+        "L1",
+        "L2",
+        "L3"
+      ],
+      "chains_with_event": [
+        "L1"
+      ],
+      "duplicate_hash_chains": [
+        "L1"
+      ],
+      "event_id": "evt-011",
+      "inaccessible_chains": [],
+      "reason": "事件仅见于一条可访问链；缺少跨链证据，不升级为恢复",
+      "status": "UNKNOWN"
+    },
+    {
+      "blocking_conditions": [
+        "duplicate_hash:L1",
+        "sequence_alignment"
+      ],
+      "canonical_input_sha256": "02ab3bcf65f301ab3376176abf7177810129e85927abcba98df39a9263a91065",
+      "case_id": "F12",
+      "chains_checked": [
+        "L1",
+        "L2",
+        "L3"
+      ],
+      "chains_with_event": [
+        "L1",
+        "L2"
+      ],
+      "duplicate_hash_chains": [
+        "L1"
+      ],
+      "event_id": "evt-012",
+      "inaccessible_chains": [],
+      "reason": "事件内容一致但链级序号错位，需外部裁决",
+      "status": "UNKNOWN"
+    },
+    {
+      "blocking_conditions": [],
+      "canonical_input_sha256": "2be93ff6cfe7993f58c9b4d4c6e0c2b57ef859103b2cf684f560aa708c6a6bbf",
+      "case_id": "F13",
+      "chains_checked": [
+        "L1",
+        "L2",
+        "L3"
+      ],
+      "chains_with_event": [
+        "L1",
+        "L2"
+      ],
+      "duplicate_hash_chains": [],
+      "event_id": "evt-013",
+      "inaccessible_chains": [],
+      "reason": "同一事件在至少两条可访问链中 canonical hash 一致",
+      "status": "RECOVERED"
+    },
+    {
+      "blocking_conditions": [
+        "conflicting_hashes"
+      ],
+      "canonical_input_sha256": "fdadcde58d752935294d5f1b3ac66806860ff79e212266719cee53a608691c1a",
+      "case_id": "F14",
+      "chains_checked": [
+        "L1",
+        "L2",
+        "L3"
+      ],
+      "chains_with_event": [
+        "L1",
+        "L2",
+        "L3"
+      ],
+      "duplicate_hash_chains": [],
+      "event_id": "evt-014",
+      "inaccessible_chains": [],
+      "reason": "同一事件在可访问链中出现不同 canonical hash，可验证内容矛盾",
+      "status": "REJECT"
+    },
+    {
+      "blocking_conditions": [
+        "event_presence"
+      ],
+      "canonical_input_sha256": "93761248d29a767f901058b3c4201d65c422635fc432586ba8b52eeb9709cf8f",
+      "case_id": "F15",
+      "chains_checked": [
+        "L1",
+        "L2",
+        "L3"
+      ],
+      "chains_with_event": [],
+      "duplicate_hash_chains": [],
+      "event_id": "evt-015",
+      "inaccessible_chains": [],
+      "reason": "事件未在可访问链出现；无正向证据",
+      "status": "UNKNOWN"
+    },
+    {
+      "blocking_conditions": [
+        "cross_chain_confirmation",
+        "inaccessible:L2",
+        "inaccessible:L3"
+      ],
+      "canonical_input_sha256": "58ee96a6e0d151cb348e76e2152a7b7c720456350b3c2f00c9139db81a832d74",
+      "case_id": "F16",
+      "chains_checked": [
+        "L1"
+      ],
+      "chains_with_event": [
+        "L1"
+      ],
+      "duplicate_hash_chains": [],
+      "event_id": "evt-016",
+      "inaccessible_chains": [
+        "L2",
+        "L3"
+      ],
+      "reason": "事件仅见于一条可访问链；缺少跨链证据，不升级为恢复",
+      "status": "UNKNOWN"
+    },
+    {
+      "blocking_conditions": [
+        "sequence_alignment"
+      ],
+      "canonical_input_sha256": "926e9d3356c5a100d93a86828eb81d4b7d7cdf1010338ba1aa6dbd161a2b9e47",
+      "case_id": "F17",
+      "chains_checked": [
+        "L1",
+        "L2",
+        "L3"
+      ],
+      "chains_with_event": [
+        "L1",
+        "L2"
+      ],
+      "duplicate_hash_chains": [],
+      "event_id": "evt-017",
+      "inaccessible_chains": [],
+      "reason": "事件内容一致但链级序号错位，需外部裁决",
+      "status": "UNKNOWN"
+    },
+    {
+      "blocking_conditions": [],
+      "canonical_input_sha256": "48f8adec47fc2d12efe8220648a7e9cac5e24d5e1bdb68a790eca6de98b6342f",
+      "case_id": "F18",
+      "chains_checked": [
+        "L1",
+        "L2",
+        "L3"
+      ],
+      "chains_with_event": [
+        "L1",
+        "L2"
+      ],
+      "duplicate_hash_chains": [],
+      "event_id": "evt-018",
+      "inaccessible_chains": [],
+      "reason": "同一事件在至少两条可访问链中 canonical hash 一致",
+      "status": "RECOVERED"
+    },
+    {
+      "blocking_conditions": [
+        "event_presence"
+      ],
+      "canonical_input_sha256": "bd4e595f65381c2a521a7f0604d24f33506aa7640b8dcfd6458bc1db8554abb4",
+      "case_id": "F19",
+      "chains_checked": [
+        "L1",
+        "L2",
+        "L3"
+      ],
+      "chains_with_event": [],
+      "duplicate_hash_chains": [],
+      "event_id": "evt-019",
+      "inaccessible_chains": [],
+      "reason": "事件未在可访问链出现；无正向证据",
+      "status": "UNKNOWN"
+    },
+    {
+      "blocking_conditions": [
+        "conflicting_hashes",
+        "inaccessible:L3"
+      ],
+      "canonical_input_sha256": "81bedc2500edd600ec16f508f516275485a93b823ac8c822f8927fd4e2988a0a",
+      "case_id": "F20",
+      "chains_checked": [
+        "L1",
+        "L2"
+      ],
+      "chains_with_event": [
+        "L1",
+        "L2"
+      ],
+      "duplicate_hash_chains": [],
+      "event_id": "evt-020",
+      "inaccessible_chains": [
+        "L3"
+      ],
+      "reason": "同一事件在可访问链中 canonical hash 不同，可验证内容矛盾",
+      "status": "REJECT"
+    },
+    {
+      "blocking_conditions": [
+        "L1:missing_anchor"
+      ],
+      "canonical_input_sha256": "2a8b592790a2c179cf8d3a418e62b5ede2d10880b33b7e5292d8669816d0c394",
+      "case_id": "F21",
+      "chains_checked": [
+        "L1",
+        "L2",
+        "L3"
+      ],
+      "chains_with_event": [
+        "L1"
+      ],
+      "duplicate_hash_chains": [],
+      "event_id": "evt-021",
+      "inaccessible_chains": [],
+      "reason": "缺少首块锚点，无法建立链级证据",
+      "status": "UNKNOWN"
+    },
+    {
+      "blocking_conditions": [
+        "cross_chain_confirmation",
+        "duplicate_hash:L1"
+      ],
+      "canonical_input_sha256": "8b768d75d38210885affe4f99e08edde74b67858a6d6368391ecf06bffb2abb3",
+      "case_id": "F22",
+      "chains_checked": [
+        "L1",
+        "L2",
+        "L3"
+      ],
+      "chains_with_event": [
+        "L1"
+      ],
+      "duplicate_hash_chains": [
+        "L1"
+      ],
+      "event_id": "evt-022",
+      "inaccessible_chains": [],
+      "reason": "事件仅见于一条可访问链；缺少跨链证据，不升级为恢复",
+      "status": "UNKNOWN"
+    },
+    {
+      "blocking_conditions": [],
+      "canonical_input_sha256": "a798ebbe80dac060527a6c90eb2154050bbb9dd3fa3c46c268f75c65c559cbd6",
+      "case_id": "F23",
+      "chains_checked": [
+        "L1",
+        "L2",
+        "L3"
+      ],
+      "chains_with_event": [
+        "L1",
+        "L3"
+      ],
+      "duplicate_hash_chains": [],
+      "event_id": "evt-023",
+      "inaccessible_chains": [],
+      "reason": "同一事件在至少两条可访问链中 canonical hash 一致",
+      "status": "RECOVERED"
+    },
+    {
+      "blocking_conditions": [
+        "cross_chain_confirmation"
+      ],
+      "canonical_input_sha256": "08c07df1a16e16a3db75f395ded4fa4c62b295517ce3a3dac467b6927e627173",
+      "case_id": "F24",
+      "chains_checked": [
+        "L1",
+        "L2",
+        "L3"
+      ],
+      "chains_with_event": [
+        "L1"
+      ],
+      "duplicate_hash_chains": [],
+      "event_id": "evt-024",
+      "inaccessible_chains": [],
+      "reason": "事件仅见于一条可访问链；缺少跨链证据，不升级为恢复",
+      "status": "UNKNOWN"
+    }
+  ],
+  "synthetic_only": true
+}

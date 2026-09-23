@@ -1,0 +1,18 @@
+{
+  "schema_version": "S18-research-manifest-v1",
+  "question": "本地合成确定性链式哈希审计日志的完整性与缺口检测能否在保守三态规则下分类？",
+  "scope": {
+    "unit": "C线下一独立合成切片 S18",
+    "directory": "/tmp/C-NEXTGEN-TRUST-CONTINUITY-20260922-S18/",
+    "network_access": false,
+    "synthetic_only": true,
+    "production_verified": false,
+    "excluded": ["S1-S17", "other research artifacts", "real logs", "audit services", "SDK", "credentials", "shared/P0", "accident directories", "D10/L12/D14", "canonical/staging/140/tri-line/systemd"]
+  },
+  "claims": [
+    {"id":"S18-C01","claim":"完整且连续、每条记录自哈希和 prev_hash 可验证的合成链可判定为 RECOVERED。","status":"inferred","confidence":0.99,"sources":[{"url":"https://local.invalid/S18/harness","publisher":"S18 local harness placeholder (not accessed)","published_or_updated":"2026-09-22","tier":"primary","support":"Local deterministic implementation only; URL is validator-compatible placeholder."}],"caveat":"纯本地 synthetic 合成推断，不代表生产系统。"},
+    {"id":"S18-C02","claim":"链内可验证的 prev_hash 矛盾可判定为 REJECT；缺乏可验证矛盾的断链、截断、空洞、锚点不可达或自哈希缺失保持 UNKNOWN。","status":"inferred","confidence":0.99,"sources":[{"url":"https://local.invalid/S18/fixtures","publisher":"S18 local fixtures placeholder (not accessed)","published_or_updated":"2026-09-22","tier":"primary","support":"20 deterministic local fixtures exercise the conservative oracle."}],"caveat":"纯本地 synthetic 合成推断；UNKNOWN 不因重复、多数票或重试升级。"},
+    {"id":"S18-C03","claim":"同一序号不同内容分叉是 REJECT，同内容分叉需外部裁决而为 UNKNOWN；时间戳仅在观察窗口内可用。","status":"inferred","confidence":0.98,"sources":[{"url":"https://local.invalid/S18/results","publisher":"S18 local results placeholder (not accessed)","published_or_updated":"2026-09-22","tier":"primary","support":"Local output records status, blockers, gap locations, and canonical input hashes."}],"caveat":"外部锚点只表示来源可达性，不证明内容正确；纯本地 synthetic 结论不证明 durability、exactly-once、rollback 或 production readiness。"}
+  ],
+  "coverage": {"fixtures":20,"statuses":["RECOVERED","UNKNOWN","REJECT"],"deterministic":true,"local_only":true,"notes":"All conclusions are inferred; no network or production evidence."}
+}

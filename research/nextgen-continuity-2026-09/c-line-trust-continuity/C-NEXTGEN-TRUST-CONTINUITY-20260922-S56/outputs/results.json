@@ -1,0 +1,311 @@
+{
+  "all_cases_match": true,
+  "case_count": 28,
+  "claims_status": "inferred",
+  "coverage": [
+    "LEDGER_SCHEMA",
+    "ENTRY",
+    "QUESTION",
+    "CLAIM",
+    "SOURCE_URL",
+    "SOURCE_DATE",
+    "EVIDENCE_WINDOW",
+    "STATUS",
+    "CONFIDENCE",
+    "CAVEAT",
+    "CANONICAL",
+    "DERIVED",
+    "RAW_IMMUTABLE",
+    "DIGEST",
+    "MANIFEST",
+    "CROSS_REFERENCE",
+    "FILESYSTEM_COUNT",
+    "ARCHIVE",
+    "NO_EVENT",
+    "UNKNOWN"
+  ],
+  "digest": "d3653f58737d88cd048d00af0f8bef40da9ce177a4e65c6d4f1f5a94ac098612",
+  "production_verified": false,
+  "property_sweep": {
+    "combinations": 16777216,
+    "counts": {
+      "RECOVERED": 1,
+      "REJECT": 12582912,
+      "UNKNOWN": 4194303
+    },
+    "dimensions": 24,
+    "fields": [
+      "same_identity",
+      "identity_conflict",
+      "ledger_schema_valid",
+      "entry_id_bound",
+      "question_bound",
+      "claim_bound",
+      "source_url_bound",
+      "source_date_bound",
+      "evidence_window_bound",
+      "status_bound",
+      "confidence_bound",
+      "caveat_bound",
+      "canonical_path_bound",
+      "derived_path_bound",
+      "raw_immutable_attested",
+      "derived_not_canonical",
+      "digest_recorded",
+      "digest_recomputed",
+      "manifest_complete",
+      "cross_reference_closed",
+      "count_filesystem_grounded",
+      "archive_index_closed",
+      "ledger_conflict",
+      "unknown_lineage"
+    ],
+    "single_gate_minimizer": [
+      {
+        "bits": [],
+        "mask": 0,
+        "target": "UNKNOWN"
+      },
+      {
+        "bits": [
+          1
+        ],
+        "mask": 2,
+        "target": "REJECT"
+      },
+      {
+        "bits": [
+          0,
+          2,
+          3,
+          4,
+          5,
+          6,
+          7,
+          8,
+          9,
+          10,
+          11,
+          12,
+          13,
+          14,
+          15,
+          16,
+          17,
+          18,
+          19,
+          20,
+          21
+        ],
+        "mask": 4194301,
+        "target": "RECOVERED"
+      }
+    ]
+  },
+  "results": [
+    {
+      "evidence_count": 2,
+      "expected": "RECOVERED",
+      "id": "ledger-entry-complete",
+      "match": true,
+      "status": "RECOVERED"
+    },
+    {
+      "evidence_count": 2,
+      "expected": "RECOVERED",
+      "id": "canonical-derived-separated",
+      "match": true,
+      "status": "RECOVERED"
+    },
+    {
+      "evidence_count": 2,
+      "expected": "RECOVERED",
+      "id": "manifest-digest-closed",
+      "match": true,
+      "status": "RECOVERED"
+    },
+    {
+      "evidence_count": 2,
+      "expected": "RECOVERED",
+      "id": "filesystem-count-grounded",
+      "match": true,
+      "status": "RECOVERED"
+    },
+    {
+      "evidence_count": 2,
+      "expected": "RECOVERED",
+      "id": "cross-reference-closed",
+      "match": true,
+      "status": "RECOVERED"
+    },
+    {
+      "evidence_count": 2,
+      "expected": "RECOVERED",
+      "id": "archive-index-closed",
+      "match": true,
+      "status": "RECOVERED"
+    },
+    {
+      "evidence_count": 1,
+      "expected": "UNKNOWN",
+      "id": "schema-invalid",
+      "match": true,
+      "status": "UNKNOWN"
+    },
+    {
+      "evidence_count": 1,
+      "expected": "UNKNOWN",
+      "id": "entry-id-unbound",
+      "match": true,
+      "status": "UNKNOWN"
+    },
+    {
+      "evidence_count": 1,
+      "expected": "UNKNOWN",
+      "id": "question-unbound",
+      "match": true,
+      "status": "UNKNOWN"
+    },
+    {
+      "evidence_count": 1,
+      "expected": "UNKNOWN",
+      "id": "claim-unbound",
+      "match": true,
+      "status": "UNKNOWN"
+    },
+    {
+      "evidence_count": 1,
+      "expected": "UNKNOWN",
+      "id": "source-url-missing",
+      "match": true,
+      "status": "UNKNOWN"
+    },
+    {
+      "evidence_count": 1,
+      "expected": "UNKNOWN",
+      "id": "source-date-missing",
+      "match": true,
+      "status": "UNKNOWN"
+    },
+    {
+      "evidence_count": 1,
+      "expected": "UNKNOWN",
+      "id": "evidence-window-missing",
+      "match": true,
+      "status": "UNKNOWN"
+    },
+    {
+      "evidence_count": 1,
+      "expected": "UNKNOWN",
+      "id": "status-missing",
+      "match": true,
+      "status": "UNKNOWN"
+    },
+    {
+      "evidence_count": 1,
+      "expected": "UNKNOWN",
+      "id": "confidence-missing",
+      "match": true,
+      "status": "UNKNOWN"
+    },
+    {
+      "evidence_count": 1,
+      "expected": "UNKNOWN",
+      "id": "caveat-missing",
+      "match": true,
+      "status": "UNKNOWN"
+    },
+    {
+      "evidence_count": 1,
+      "expected": "UNKNOWN",
+      "id": "canonical-path-open",
+      "match": true,
+      "status": "UNKNOWN"
+    },
+    {
+      "evidence_count": 1,
+      "expected": "UNKNOWN",
+      "id": "derived-overwrite-risk",
+      "match": true,
+      "status": "UNKNOWN"
+    },
+    {
+      "evidence_count": 1,
+      "expected": "UNKNOWN",
+      "id": "raw-immutable-unknown",
+      "match": true,
+      "status": "UNKNOWN"
+    },
+    {
+      "evidence_count": 1,
+      "expected": "UNKNOWN",
+      "id": "digest-missing",
+      "match": true,
+      "status": "UNKNOWN"
+    },
+    {
+      "evidence_count": 1,
+      "expected": "UNKNOWN",
+      "id": "digest-recompute-missing",
+      "match": true,
+      "status": "UNKNOWN"
+    },
+    {
+      "evidence_count": 1,
+      "expected": "UNKNOWN",
+      "id": "manifest-incomplete",
+      "match": true,
+      "status": "UNKNOWN"
+    },
+    {
+      "evidence_count": 1,
+      "expected": "UNKNOWN",
+      "id": "cross-reference-gap",
+      "match": true,
+      "status": "UNKNOWN"
+    },
+    {
+      "evidence_count": 1,
+      "expected": "UNKNOWN",
+      "id": "filesystem-count-missing",
+      "match": true,
+      "status": "UNKNOWN"
+    },
+    {
+      "evidence_count": 1,
+      "expected": "UNKNOWN",
+      "id": "archive-index-gap",
+      "match": true,
+      "status": "UNKNOWN"
+    },
+    {
+      "evidence_count": 1,
+      "expected": "UNKNOWN",
+      "id": "identity-unresolved",
+      "match": true,
+      "status": "UNKNOWN"
+    },
+    {
+      "evidence_count": 1,
+      "expected": "REJECT",
+      "id": "identity-conflict",
+      "match": true,
+      "status": "REJECT"
+    },
+    {
+      "evidence_count": 1,
+      "expected": "REJECT",
+      "id": "ledger-conflict",
+      "match": true,
+      "status": "REJECT"
+    }
+  ],
+  "schema_version": "S56-results-1",
+  "sources": [],
+  "status_distribution": {
+    "RECOVERED": 6,
+    "REJECT": 2,
+    "UNKNOWN": 20
+  },
+  "synthetic_only": true
+}

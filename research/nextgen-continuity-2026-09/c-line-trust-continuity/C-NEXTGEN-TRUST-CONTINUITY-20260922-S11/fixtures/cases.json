@@ -1,0 +1,22 @@
+{
+  "synthetic_only": true,
+  "production_verified": false,
+  "schema_version": "1.0",
+  "cases": [
+    {"id":"S11-01","title":"clean path","evidence_class":"confirmed","retry_budget":2,"ops":["journal","ack_ok","replay","reconcile"],"expected_raw":"ACCEPT"},
+    {"id":"S11-02","title":"cut after prepared to journaled","evidence_class":"confirmed","retry_budget":2,"ops":["journal","ack_ok","replay","reconcile"],"cut_at":1,"expected_raw":"UNKNOWN"},
+    {"id":"S11-03","title":"cut after journaled to acknowledged","evidence_class":"inferred","retry_budget":2,"ops":["journal","ack_ok","replay","reconcile"],"cut_at":2,"expected_raw":"UNKNOWN"},
+    {"id":"S11-04","title":"cut after acknowledged to replayed","evidence_class":"unverified","retry_budget":2,"ops":["journal","ack_ok","replay","reconcile"],"cut_at":3,"expected_raw":"UNKNOWN"},
+    {"id":"S11-05","title":"cut after replayed to reconciled","evidence_class":"inferred","retry_budget":2,"ops":["journal","ack_ok","replay","reconcile"],"cut_at":4,"expected_raw":"UNKNOWN"},
+    {"id":"S11-06","title":"bounded retry exhausted","evidence_class":"confirmed","retry_budget":2,"journal_failures":2,"ops":["journal","ack_ok","replay","reconcile"],"expected_raw":"UNKNOWN"},
+    {"id":"S11-07","title":"idempotency key collision","evidence_class":"conflicting","retry_budget":2,"ops":["journal","ack_collision","replay","reconcile"],"expected_raw":"REJECT"},
+    {"id":"S11-08","title":"stale checkpoint","evidence_class":"conflicting","retry_budget":2,"ops":["journal","ack_ok","replay","reconcile_stale"],"expected_raw":"REJECT"},
+    {"id":"S11-09","title":"operator abort","evidence_class":"confirmed","retry_budget":2,"ops":["journal","operator_abort","replay","reconcile"],"expected_raw":"REJECT"},
+    {"id":"S11-10","title":"duplicate replay same digest","evidence_class":"confirmed","retry_budget":2,"ops":["journal","ack_ok","replay","replay_duplicate","reconcile"],"expected_raw":"ACCEPT"},
+    {"id":"S11-11","title":"duplicate replay conflicting digest","evidence_class":"conflicting","retry_budget":2,"ops":["journal","ack_ok","replay","replay_conflict","reconcile"],"expected_raw":"REJECT"},
+    {"id":"S11-12","title":"missing acknowledgement","evidence_class":"unverified","retry_budget":2,"ops":["journal","ack_missing","replay","reconcile"],"expected_raw":"UNKNOWN"},
+    {"id":"S11-13","title":"acknowledgement conflict","evidence_class":"conflicting","retry_budget":2,"ops":["journal","ack_conflict","replay","reconcile"],"expected_raw":"REJECT"},
+    {"id":"S11-14","title":"external durability unavailable","evidence_class":"inaccessible","retry_budget":2,"ops":["journal","ack_ok","replay","reconcile"],"cut_at":1,"expected_raw":"UNKNOWN"},
+    {"id":"S11-15","title":"retry succeeds before budget","evidence_class":"inferred","retry_budget":3,"journal_failures":1,"ops":["journal","ack_ok","replay","reconcile"],"expected_raw":"ACCEPT"}
+  ]
+}

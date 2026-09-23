@@ -1,0 +1,155 @@
+{
+  "schema_version": "1.0",
+  "question": "What do official Gemini CLI sources establish about authentication, quota, pricing, model fallback, and model-selection precedence?",
+  "scope": "public first-party Google Gemini CLI sources only; read-only research",
+  "coverage": [
+    "Google/API key/Vertex auth",
+    "headless credentials",
+    "quota/pricing",
+    "usage stats",
+    "model fallback",
+    "user consent",
+    "model precedence",
+    "sub-agent boundary",
+    "effect limitations"
+  ],
+  "slice_id": "B-S50-OFFICIAL-AUTH-QUOTA-ROUTING-20260922",
+  "status": "complete",
+  "research_date": "2026-09-22",
+  "access_date": "2026-09-22",
+  "sources": [
+    {
+      "id": "S50-1",
+      "url": "https://github.com/google-gemini/gemini-cli/blob/main/docs/get-started/authentication.mdx",
+      "access_date": "2026-09-22",
+      "evidence_window": "authentication methods, headless credentials, sensitive credential warnings",
+      "evidence_level": "verified",
+      "cannot_prove": "authorization or external commit"
+    },
+    {
+      "id": "S50-2",
+      "url": "https://github.com/google-gemini/gemini-cli/blob/main/docs/resources/quota-and-pricing.md",
+      "access_date": "2026-09-22",
+      "evidence_window": "quotas, pricing, rate limits, stats",
+      "evidence_level": "verified",
+      "cannot_prove": "billing finality or server acceptance"
+    },
+    {
+      "id": "S50-3",
+      "url": "https://github.com/google-gemini/gemini-cli/blob/main/docs/cli/model-routing.md",
+      "access_date": "2026-09-22",
+      "evidence_window": "fallback on failure, user consent, silent policy, precedence",
+      "evidence_level": "verified",
+      "cannot_prove": "exactly-once or original request absence"
+    },
+    {
+      "id": "S50-4",
+      "url": "https://github.com/google-gemini/gemini-cli/blob/main/docs/cli/model.md",
+      "access_date": "2026-09-22",
+      "evidence_window": "model selection and sub-agent boundary",
+      "evidence_level": "verified",
+      "cannot_prove": "all runtime model choices"
+    }
+  ],
+  "claims": [
+    {
+      "id": "C1",
+      "claim": "Official docs support Google, Gemini API key, and Vertex AI authentication methods, with headless cached/environment credential behavior and sensitive-key warnings.",
+      "status": "confirmed",
+      "confidence": "high",
+      "sources": [
+        {
+          "url": "https://github.com/google-gemini/gemini-cli/blob/main/docs/get-started/authentication.mdx",
+          "publisher": "Google Gemini CLI",
+          "published_or_updated": "2026-09-22 repository snapshot",
+          "tier": "primary",
+          "support": "Authentication methods and headless sections."
+        }
+      ],
+      "caveat": "Credential presence is not universal authorization."
+    },
+    {
+      "id": "C2",
+      "claim": "Quota and pricing differ by authentication method; official docs expose usage/limit inspection via `/stats model`.",
+      "status": "confirmed",
+      "confidence": "high",
+      "sources": [
+        {
+          "url": "https://github.com/google-gemini/gemini-cli/blob/main/docs/resources/quota-and-pricing.md",
+          "publisher": "Google Gemini CLI",
+          "published_or_updated": "2026-09-22 repository snapshot",
+          "tier": "primary",
+          "support": "Quota tables and check usage section."
+        }
+      ],
+      "caveat": "Snapshot is not final billing."
+    },
+    {
+      "id": "C3",
+      "claim": "Model routing can fallback after quota/server failure, with user consent depending on policy; precedence is --model, GEMINI_MODEL, settings model.name, local router, default auto.",
+      "status": "confirmed",
+      "confidence": "high",
+      "sources": [
+        {
+          "url": "https://github.com/google-gemini/gemini-cli/blob/main/docs/cli/model-routing.md",
+          "publisher": "Google Gemini CLI",
+          "published_or_updated": "2026-09-22 repository snapshot",
+          "tier": "primary",
+          "support": "Fallback and selection precedence sections."
+        }
+      ],
+      "caveat": "Fallback does not prove primary request was not accepted."
+    },
+    {
+      "id": "C4",
+      "claim": "The `/model` command and `--model` flag do not override sub-agent models.",
+      "status": "confirmed",
+      "confidence": "high",
+      "sources": [
+        {
+          "url": "https://github.com/google-gemini/gemini-cli/blob/main/docs/cli/model.md",
+          "publisher": "Google Gemini CLI",
+          "published_or_updated": "2026-09-22 repository snapshot",
+          "tier": "primary",
+          "support": "Explicit sub-agent note."
+        }
+      ],
+      "caveat": "Runtime reports may show additional models."
+    },
+    {
+      "id": "C5",
+      "claim": "After quota/routing/auth/network ambiguity, server acceptance, external effect, duplicate execution, and final usage/billing remain unknown.",
+      "status": "unverified",
+      "confidence": "high",
+      "sources": [
+        {
+          "url": "https://github.com/google-gemini/gemini-cli/blob/main/docs/cli/model-routing.md",
+          "publisher": "Google Gemini CLI",
+          "published_or_updated": "2026-09-22 repository snapshot",
+          "tier": "primary",
+          "support": "Routing docs describe fallback but not distributed effect guarantees."
+        },
+        {
+          "url": "https://github.com/google-gemini/gemini-cli/blob/main/docs/resources/quota-and-pricing.md",
+          "publisher": "Google Gemini CLI",
+          "published_or_updated": "2026-09-22 repository snapshot",
+          "tier": "primary",
+          "support": "Usage docs describe snapshots/limits but not final acceptance."
+        }
+      ],
+      "caveat": "Use authoritative provider usage and target read-back/reconciliation."
+    }
+  ],
+  "limitations": [
+    "Documentation only",
+    "No credentials/login/model calls",
+    "No production access"
+  ],
+  "production_verified": false,
+  "unknowns": [
+    "server acceptance after failure",
+    "external effect",
+    "duplicate execution",
+    "final billing convergence"
+  ]
+}

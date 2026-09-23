@@ -1,0 +1,306 @@
+{
+  "all_cases_match": true,
+  "case_count": 28,
+  "claims_status": "inferred",
+  "coverage": [
+    "SECURITY_REPORT",
+    "SEVERITY",
+    "TRIAGE",
+    "REMEDIATION",
+    "ARTIFACT_DIGEST",
+    "SIGNATURE",
+    "BUILD_PROVENANCE",
+    "RELEASE_METADATA",
+    "VERSION_PIN",
+    "ENTERPRISE_POLICY",
+    "ALLOWLIST",
+    "REQUIRED_CONTROL",
+    "ROLLBACK",
+    "CONVERGENCE",
+    "AUDIT",
+    "NO_EVENT",
+    "UNKNOWN"
+  ],
+  "digest": "364a1838e0e44705bc7459e852ca95e6b6d96098518fcf5ea8089903d74a53b6",
+  "production_verified": false,
+  "property_sweep": {
+    "combinations": 8388608,
+    "counts": {
+      "RECOVERED": 1,
+      "REJECT": 6291456,
+      "UNKNOWN": 2097151
+    },
+    "dimensions": 23,
+    "fields": [
+      "same_identity",
+      "identity_conflict",
+      "report_scope_fixed",
+      "report_receiver_bound",
+      "finding_identity_bound",
+      "severity_method_known",
+      "triage_state_closed",
+      "remediation_owner_bound",
+      "artifact_digest_verified",
+      "artifact_signature_verified",
+      "build_provenance_verified",
+      "release_metadata_consistent",
+      "version_pinned",
+      "enterprise_policy_scope_bound",
+      "allowlist_effective_readback",
+      "required_control_attested",
+      "rollback_trigger_bound",
+      "rollback_target_attested",
+      "rollback_completion_readback",
+      "runtime_convergence_closed",
+      "audit_trail_complete",
+      "security_conflict",
+      "unknown_release_state"
+    ],
+    "single_gate_minimizer": [
+      {
+        "bits": [],
+        "mask": 0,
+        "target": "UNKNOWN"
+      },
+      {
+        "bits": [
+          1
+        ],
+        "mask": 2,
+        "target": "REJECT"
+      },
+      {
+        "bits": [
+          0,
+          2,
+          3,
+          4,
+          5,
+          6,
+          7,
+          8,
+          9,
+          10,
+          11,
+          12,
+          13,
+          14,
+          15,
+          16,
+          17,
+          18,
+          19,
+          20
+        ],
+        "mask": 2097149,
+        "target": "RECOVERED"
+      }
+    ]
+  },
+  "results": [
+    {
+      "evidence_count": 2,
+      "expected": "RECOVERED",
+      "id": "security-report-complete",
+      "match": true,
+      "status": "RECOVERED"
+    },
+    {
+      "evidence_count": 2,
+      "expected": "RECOVERED",
+      "id": "artifact-provenance-signature",
+      "match": true,
+      "status": "RECOVERED"
+    },
+    {
+      "evidence_count": 2,
+      "expected": "RECOVERED",
+      "id": "enterprise-control-effective",
+      "match": true,
+      "status": "RECOVERED"
+    },
+    {
+      "evidence_count": 2,
+      "expected": "RECOVERED",
+      "id": "rollback-converged",
+      "match": true,
+      "status": "RECOVERED"
+    },
+    {
+      "evidence_count": 2,
+      "expected": "RECOVERED",
+      "id": "audit-complete",
+      "match": true,
+      "status": "RECOVERED"
+    },
+    {
+      "evidence_count": 2,
+      "expected": "RECOVERED",
+      "id": "pinned-release-stable",
+      "match": true,
+      "status": "RECOVERED"
+    },
+    {
+      "evidence_count": 1,
+      "expected": "UNKNOWN",
+      "id": "report-scope-missing",
+      "match": true,
+      "status": "UNKNOWN"
+    },
+    {
+      "evidence_count": 1,
+      "expected": "UNKNOWN",
+      "id": "receiver-unbound",
+      "match": true,
+      "status": "UNKNOWN"
+    },
+    {
+      "evidence_count": 1,
+      "expected": "UNKNOWN",
+      "id": "finding-unbound",
+      "match": true,
+      "status": "UNKNOWN"
+    },
+    {
+      "evidence_count": 1,
+      "expected": "UNKNOWN",
+      "id": "severity-method-unknown",
+      "match": true,
+      "status": "UNKNOWN"
+    },
+    {
+      "evidence_count": 1,
+      "expected": "UNKNOWN",
+      "id": "triage-open",
+      "match": true,
+      "status": "UNKNOWN"
+    },
+    {
+      "evidence_count": 1,
+      "expected": "UNKNOWN",
+      "id": "remediation-owner-missing",
+      "match": true,
+      "status": "UNKNOWN"
+    },
+    {
+      "evidence_count": 1,
+      "expected": "UNKNOWN",
+      "id": "artifact-digest-missing",
+      "match": true,
+      "status": "UNKNOWN"
+    },
+    {
+      "evidence_count": 1,
+      "expected": "UNKNOWN",
+      "id": "artifact-signature-missing",
+      "match": true,
+      "status": "UNKNOWN"
+    },
+    {
+      "evidence_count": 1,
+      "expected": "UNKNOWN",
+      "id": "build-provenance-open",
+      "match": true,
+      "status": "UNKNOWN"
+    },
+    {
+      "evidence_count": 1,
+      "expected": "UNKNOWN",
+      "id": "release-metadata-conflict",
+      "match": true,
+      "status": "UNKNOWN"
+    },
+    {
+      "evidence_count": 1,
+      "expected": "UNKNOWN",
+      "id": "version-floating",
+      "match": true,
+      "status": "UNKNOWN"
+    },
+    {
+      "evidence_count": 1,
+      "expected": "UNKNOWN",
+      "id": "policy-scope-open",
+      "match": true,
+      "status": "UNKNOWN"
+    },
+    {
+      "evidence_count": 1,
+      "expected": "UNKNOWN",
+      "id": "allowlist-readback-missing",
+      "match": true,
+      "status": "UNKNOWN"
+    },
+    {
+      "evidence_count": 1,
+      "expected": "UNKNOWN",
+      "id": "required-control-missing",
+      "match": true,
+      "status": "UNKNOWN"
+    },
+    {
+      "evidence_count": 1,
+      "expected": "UNKNOWN",
+      "id": "rollback-trigger-open",
+      "match": true,
+      "status": "UNKNOWN"
+    },
+    {
+      "evidence_count": 1,
+      "expected": "UNKNOWN",
+      "id": "rollback-target-open",
+      "match": true,
+      "status": "UNKNOWN"
+    },
+    {
+      "evidence_count": 1,
+      "expected": "UNKNOWN",
+      "id": "rollback-readback-missing",
+      "match": true,
+      "status": "UNKNOWN"
+    },
+    {
+      "evidence_count": 1,
+      "expected": "UNKNOWN",
+      "id": "runtime-convergence-open",
+      "match": true,
+      "status": "UNKNOWN"
+    },
+    {
+      "evidence_count": 1,
+      "expected": "UNKNOWN",
+      "id": "audit-gap",
+      "match": true,
+      "status": "UNKNOWN"
+    },
+    {
+      "evidence_count": 1,
+      "expected": "UNKNOWN",
+      "id": "identity-unresolved",
+      "match": true,
+      "status": "UNKNOWN"
+    },
+    {
+      "evidence_count": 1,
+      "expected": "REJECT",
+      "id": "identity-conflict",
+      "match": true,
+      "status": "REJECT"
+    },
+    {
+      "evidence_count": 1,
+      "expected": "REJECT",
+      "id": "security-conflict",
+      "match": true,
+      "status": "REJECT"
+    }
+  ],
+  "schema_version": "S48-results-1",
+  "sources": [],
+  "status_distribution": {
+    "RECOVERED": 6,
+    "REJECT": 2,
+    "UNKNOWN": 20
+  },
+  "synthetic_only": true
+}

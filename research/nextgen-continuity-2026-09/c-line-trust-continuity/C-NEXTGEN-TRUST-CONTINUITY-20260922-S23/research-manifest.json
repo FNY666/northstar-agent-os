@@ -1,0 +1,23 @@
+{
+  "schema": "trust-continuity-research-manifest-v1",
+  "schema_version": "1.0",
+  "question": "在多快照交叠与恢复重试窗口中，epoch/fence token 和三类独立证据能否支持 fail-closed 连续性分类？",
+  "scope": "仅本地、离线、确定性 synthetic fixtures；不代表生产验证。",
+  "coverage": ["overlapping_snapshots", "epoch_fence_tokens", "exporter_restart_window", "recovery_retry_duplicate", "audit_rejection_reason", "platform_receipt", "log_presence", "external_effect", "NO_EVENT", "DELAYED", "DROPPED", "EXPORTER_FAILURE", "QUERY_GAP", "RETENTION_EXPIRED", "VERIFIED_CONTINUITY"],
+  "study_id": "C-NEXTGEN-TRUST-CONTINUITY-20260922-S23",
+  "title": "多快照交叠边界 + 恢复重试矩阵",
+  "synthetic_only": true,
+  "production_verified": false,
+  "offline_only": true,
+  "deterministic": true,
+  "case_count": 20,
+  "allowed_states": ["RECOVERED", "UNKNOWN", "REJECT"],
+  "classification_coverage": ["NO_EVENT", "DELAYED", "DROPPED", "EXPORTER_FAILURE", "QUERY_GAP", "RETENTION_EXPIRED", "VERIFIED_CONTINUITY"],
+  "claims": [
+    {"id":"claim-fail-closed","claim":"旧 epoch、token 缺失/冲突/过期或审计拒绝不会被判为 RECOVERED。","text":"旧 epoch、token 缺失/冲突/过期或审计拒绝不会被判为 RECOVERED。","status":"inferred","confidence":0.99,"sources":[],"caveat":"仅 synthetic fixture 内推断，不能外推生产。"},
+    {"id":"claim-independent-evidence","claim":"只有平台回执、日志存在与外部效果确认三类合成证据一致时才可得到 RECOVERED。","text":"只有平台回执、日志存在与外部效果确认三类合成证据一致时才可得到 RECOVERED。","status":"inferred","confidence":0.99,"sources":[],"caveat":"仅 synthetic fixture 内推断，不能证明外部效果。"},
+    {"id":"claim-deterministic","claim":"相同 fixtures 重复运行产生字节一致结果。","text":"相同 fixtures 重复运行产生字节一致结果。","status":"inferred","confidence":0.99,"sources":[],"caveat":"本地重复运行观察，不能证明生产耐久性。"}
+  ],
+  "limitations": ["不能证明生产耐久性","不能证明 exactly-once","不能证明回滚","不能证明外部效果","不能证明 production readiness"],
+  "artifacts": ["REPORT.md","sources.md","research-manifest.json","SHA256SUMS","harness.py","fixtures/cases.json","outputs/results.json","validator.py","manifest_validator.py"]
+}

@@ -1,0 +1,15 @@
+{
+  "schema_version":"1.0",
+  "question":"在完全离线合成证据中，epoch/fence 跨 crash 的撤销水位是否保持单调，并在 bounded replay 截断或证据缺口时 fail-closed？",
+  "scope":{"synthetic_only":true,"production_verified":false,"network":false,"real_services":false,"credentials":false,"sdk":false,"excluded_prior_slices":["S1-S28"]},
+  "synthetic_only":true,
+  "production_verified":false,
+  "claims":[
+    {"id":"C1","claim":"仅当跨 crash 水位单调、epoch/fence 连续、bounded replay 完整、日志无分叉、crash/restart 已对账且平台 receipt/持久日志/外部效果三类证据一致时才产生 RECOVERED。","status":"inferred","confidence":0.98,"sources":[],"caveat":"仅来自本地合成 harness，不能证明生产耐久性或 exactly-once。"},
+    {"id":"C2","claim":"乱序与可去重重复事件不应误拒；无法判定的缺失、截断、分页/查询缺口、retention expired、未知提交返回 UNKNOWN。","status":"inferred","confidence":0.97,"sources":[],"caveat":"合成分类规则，不代表任何生产系统语义。"},
+    {"id":"C3","claim":"明确日志分叉、水位回退、旧 epoch/token 重放为硬冲突并返回 REJECT。","status":"inferred","confidence":0.96,"sources":[],"caveat":"未覆盖真实时钟、存储或故障注入。"}
+  ],
+  "coverage":{"labels":["NO_EVENT","DELAYED","DROPPED","EXPORTER_FAILURE","QUERY_GAP","RETENTION_EXPIRED","VERIFIED_CONTINUITY","UNKNOWN"],"cases":13,"states":{"RECOVERED":2,"UNKNOWN":7,"REJECT":4}},
+  "limitations":["不能证明生产耐久性、exactly-once、回滚安全、外部效果真实性或 production readiness。","所有证据均为本地合成；无网络、真实服务、SDK、凭据。"],
+  "artifacts":["REPORT.md","sources.md","research-manifest.json","SHA256SUMS","harness.py","fixtures/cases.json","outputs/results.json","validator.py","manifest_validator.py"]
+}

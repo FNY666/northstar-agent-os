@@ -1,0 +1,35 @@
+{
+  "schema_version": "1.0",
+  "question": "Can an offline synthetic trace-integrity model reject tampering, reordering, duplication, loss, unauthorized rotation, context changes, and divergent replay without claiming production audit guarantees?",
+  "synthetic_only": true,
+  "production_verified": false,
+  "slice": "C/S9",
+  "title": "synthetic-only trace integrity and deterministic replay",
+  "root": "/tmp/C-NEXTGEN-TRUST-CONTINUITY-20260922-S9/",
+  "inputs": ["fixtures/cases.json"],
+  "generated": ["outputs/results.json"],
+  "files": ["REPORT.md", "sources.md", "research-manifest.json", "SHA256SUMS", "harness.py", "fixtures/cases.json", "outputs/results.json"],
+  "network_access": false,
+  "real_services_accessed": false,
+  "credentials_accessed": false,
+  "prior_research_accessed": false,
+  "scope": {
+    "included": ["hash-chain records", "reordering", "duplicates", "missing records", "payload tampering", "clock rollback", "validator rotation", "authorization context", "deterministic replay"],
+    "excluded": ["real services", "credentials", "crash durability", "exactly-once", "production audit immutability", "remote state", "production readiness"]
+  },
+  "case_count": 14,
+  "claims": [
+    {"id": "C1", "claim": "The local harness classifies all 14 deterministic trace fixtures according to their declared expected outcomes.", "status": "inferred", "confidence": "high", "sources": [], "caveat": "This is a local synthetic replay property, not external product evidence."},
+    {"id": "C2", "claim": "Reordering, duplication, loss, tampering, clock rollback, unauthorized rotation, context change, and divergent replay are rejected by this local policy model.", "status": "inferred", "confidence": "high", "sources": [], "caveat": "This describes the harness policy, not a production audit system."},
+    {"id": "C3", "claim": "Authorized validator rotation and declared authorization context can be accepted by the local model.", "status": "inferred", "confidence": "medium", "sources": [], "caveat": "The acceptance is synthetic and does not establish signature or authorization validity."},
+    {"id": "C4", "claim": "An unverified crash-durability property produces a fail-closed rejection and differs from fail-open acceptance with UNKNOWN.", "status": "inferred", "confidence": "high", "sources": [], "caveat": "This is a policy comparison, not a durability measurement."},
+    {"id": "C5", "claim": "Real immutable audit, signature authorization, crash durability, exactly-once, remote state, and production readiness are proven by this run.", "status": "conflicting", "confidence": "high", "sources": [], "caveat": "Explicitly rejected by scope."},
+    {"id": "C6", "claim": "Validator material and production properties excluded from the slice are inaccessible by design.", "status": "inaccessible", "confidence": "high", "sources": [], "caveat": "No external system or credential was accessed."}
+  ],
+  "coverage": {
+    "searched": ["new local synthetic fixtures and harness only"],
+    "inaccessible": ["real validator material", "real services", "credentials", "prior research artifacts"],
+    "unresolved_conflicts": ["production audit immutability", "crash durability", "exactly-once", "remote state"]
+  },
+  "commands": ["python3 harness.py run", "python3 harness.py validate", "sha256sum -c SHA256SUMS"]
+}

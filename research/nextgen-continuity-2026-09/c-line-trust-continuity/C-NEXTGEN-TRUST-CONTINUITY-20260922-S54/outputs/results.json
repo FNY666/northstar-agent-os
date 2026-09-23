@@ -1,0 +1,292 @@
+{
+  "all_cases_match": true,
+  "case_count": 27,
+  "claims_status": "inferred",
+  "coverage": [
+    "MODEL_ROUTE",
+    "TOKEN_CACHE",
+    "AUTO_MEMORY",
+    "RETENTION",
+    "EXPORT",
+    "WORKTREE",
+    "BRANCH",
+    "DIRTY_STATE",
+    "CLEANUP",
+    "ISOLATION",
+    "NO_EVENT",
+    "UNKNOWN"
+  ],
+  "digest": "0c106b2c38d0610a85d17bca93d18b1825423bf5cf2979c93da3bf65d3a76196",
+  "production_verified": false,
+  "property_sweep": {
+    "combinations": 4194304,
+    "counts": {
+      "RECOVERED": 1,
+      "REJECT": 3145728,
+      "UNKNOWN": 1048575
+    },
+    "dimensions": 22,
+    "fields": [
+      "same_identity",
+      "identity_conflict",
+      "model_source_declared",
+      "model_precedence_known",
+      "provider_route_readback",
+      "token_cache_scope_bound",
+      "token_cache_expiry_known",
+      "token_cache_key_bound",
+      "cache_invalidation_attested",
+      "auto_memory_scope_bound",
+      "memory_write_policy_known",
+      "memory_read_policy_known",
+      "memory_retention_bound",
+      "memory_export_bound",
+      "worktree_identity_bound",
+      "worktree_path_bound",
+      "worktree_branch_bound",
+      "worktree_dirty_state_known",
+      "worktree_cleanup_attested",
+      "cross_worktree_isolation_closed",
+      "route_conflict",
+      "unknown_state"
+    ],
+    "single_gate_minimizer": [
+      {
+        "bits": [],
+        "mask": 0,
+        "target": "UNKNOWN"
+      },
+      {
+        "bits": [
+          1
+        ],
+        "mask": 2,
+        "target": "REJECT"
+      },
+      {
+        "bits": [
+          0,
+          2,
+          3,
+          4,
+          5,
+          6,
+          7,
+          8,
+          9,
+          10,
+          11,
+          12,
+          13,
+          14,
+          15,
+          16,
+          17,
+          18,
+          19
+        ],
+        "mask": 1048573,
+        "target": "RECOVERED"
+      }
+    ]
+  },
+  "results": [
+    {
+      "evidence_count": 2,
+      "expected": "RECOVERED",
+      "id": "model-route-closed",
+      "match": true,
+      "status": "RECOVERED"
+    },
+    {
+      "evidence_count": 2,
+      "expected": "RECOVERED",
+      "id": "token-cache-closed",
+      "match": true,
+      "status": "RECOVERED"
+    },
+    {
+      "evidence_count": 2,
+      "expected": "RECOVERED",
+      "id": "auto-memory-closed",
+      "match": true,
+      "status": "RECOVERED"
+    },
+    {
+      "evidence_count": 2,
+      "expected": "RECOVERED",
+      "id": "worktree-isolation-closed",
+      "match": true,
+      "status": "RECOVERED"
+    },
+    {
+      "evidence_count": 2,
+      "expected": "RECOVERED",
+      "id": "cross-worktree-closed",
+      "match": true,
+      "status": "RECOVERED"
+    },
+    {
+      "evidence_count": 2,
+      "expected": "RECOVERED",
+      "id": "cache-invalidation-closed",
+      "match": true,
+      "status": "RECOVERED"
+    },
+    {
+      "evidence_count": 1,
+      "expected": "UNKNOWN",
+      "id": "model-source-unknown",
+      "match": true,
+      "status": "UNKNOWN"
+    },
+    {
+      "evidence_count": 1,
+      "expected": "UNKNOWN",
+      "id": "precedence-unknown",
+      "match": true,
+      "status": "UNKNOWN"
+    },
+    {
+      "evidence_count": 1,
+      "expected": "UNKNOWN",
+      "id": "provider-readback-missing",
+      "match": true,
+      "status": "UNKNOWN"
+    },
+    {
+      "evidence_count": 1,
+      "expected": "UNKNOWN",
+      "id": "cache-scope-open",
+      "match": true,
+      "status": "UNKNOWN"
+    },
+    {
+      "evidence_count": 1,
+      "expected": "UNKNOWN",
+      "id": "cache-expiry-unknown",
+      "match": true,
+      "status": "UNKNOWN"
+    },
+    {
+      "evidence_count": 1,
+      "expected": "UNKNOWN",
+      "id": "cache-key-open",
+      "match": true,
+      "status": "UNKNOWN"
+    },
+    {
+      "evidence_count": 1,
+      "expected": "UNKNOWN",
+      "id": "cache-invalidation-unknown",
+      "match": true,
+      "status": "UNKNOWN"
+    },
+    {
+      "evidence_count": 1,
+      "expected": "UNKNOWN",
+      "id": "memory-scope-open",
+      "match": true,
+      "status": "UNKNOWN"
+    },
+    {
+      "evidence_count": 1,
+      "expected": "UNKNOWN",
+      "id": "memory-write-unknown",
+      "match": true,
+      "status": "UNKNOWN"
+    },
+    {
+      "evidence_count": 1,
+      "expected": "UNKNOWN",
+      "id": "memory-read-unknown",
+      "match": true,
+      "status": "UNKNOWN"
+    },
+    {
+      "evidence_count": 1,
+      "expected": "UNKNOWN",
+      "id": "memory-retention-open",
+      "match": true,
+      "status": "UNKNOWN"
+    },
+    {
+      "evidence_count": 1,
+      "expected": "UNKNOWN",
+      "id": "memory-export-open",
+      "match": true,
+      "status": "UNKNOWN"
+    },
+    {
+      "evidence_count": 1,
+      "expected": "UNKNOWN",
+      "id": "worktree-identity-open",
+      "match": true,
+      "status": "UNKNOWN"
+    },
+    {
+      "evidence_count": 1,
+      "expected": "UNKNOWN",
+      "id": "worktree-path-open",
+      "match": true,
+      "status": "UNKNOWN"
+    },
+    {
+      "evidence_count": 1,
+      "expected": "UNKNOWN",
+      "id": "worktree-branch-open",
+      "match": true,
+      "status": "UNKNOWN"
+    },
+    {
+      "evidence_count": 1,
+      "expected": "UNKNOWN",
+      "id": "dirty-state-unknown",
+      "match": true,
+      "status": "UNKNOWN"
+    },
+    {
+      "evidence_count": 1,
+      "expected": "UNKNOWN",
+      "id": "cleanup-unattested",
+      "match": true,
+      "status": "UNKNOWN"
+    },
+    {
+      "evidence_count": 1,
+      "expected": "UNKNOWN",
+      "id": "isolation-open",
+      "match": true,
+      "status": "UNKNOWN"
+    },
+    {
+      "evidence_count": 1,
+      "expected": "UNKNOWN",
+      "id": "identity-unresolved",
+      "match": true,
+      "status": "UNKNOWN"
+    },
+    {
+      "evidence_count": 1,
+      "expected": "REJECT",
+      "id": "identity-conflict",
+      "match": true,
+      "status": "REJECT"
+    },
+    {
+      "evidence_count": 1,
+      "expected": "REJECT",
+      "id": "route-conflict",
+      "match": true,
+      "status": "REJECT"
+    }
+  ],
+  "schema_version": "S54-results-1",
+  "sources": [],
+  "status_distribution": {
+    "RECOVERED": 6,
+    "REJECT": 2,
+    "UNKNOWN": 19
+  },
+  "synthetic_only": true
+}

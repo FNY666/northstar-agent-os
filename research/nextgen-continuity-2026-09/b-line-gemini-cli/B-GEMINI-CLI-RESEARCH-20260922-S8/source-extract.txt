@@ -1,0 +1,1212 @@
+### packages/core/src/context/eventBus.ts
+     1	/**
+     2	 * @license
+     3	 * Copyright 2026 Google LLC
+     4	 * SPDX-License-Identifier: Apache-2.0
+     5	 */
+     6	
+     7	import { EventEmitter } from 'node:events';
+     8	import type { ConcreteNode } from './graph/types.js';
+     9	
+    10	export interface ProcessorResultEvent {
+    11	  processorId: string;
+    12	  targets: readonly ConcreteNode[];
+    13	  returnedNodes: readonly ConcreteNode[];
+    14	}
+    15	
+    16	export interface PristineHistoryUpdatedEvent {
+    17	  nodes: readonly ConcreteNode[];
+    18	  newNodes: Set<string>;
+    19	}
+    20	
+    21	export interface ContextConsolidationEvent {
+    22	  nodes: readonly ConcreteNode[];
+    23	  targetDeficit: number;
+    24	  targetNodeIds: Set<string>;
+    25	}
+    26	
+    27	export interface ChunkReceivedEvent {
+    28	  nodes: readonly ConcreteNode[];
+    29	  targetNodeIds: Set<string>;
+    30	}
+    31	
+    32	export interface TokenGroundTruthEvent {
+    33	  actualTokens: number;
+    34	  promptBaseUnits: number;
+    35	}
+    36	
+    37	export interface NormalizeNeededEvent {
+    38	  nodes: readonly ConcreteNode[];
+    39	  targetDeficit: number;
+    40	  targetNodeIds: Set<string>;
+    41	}
+    42	
+    43	export class ContextEventBus extends EventEmitter {
+    44	  emitTokenGroundTruth(event: TokenGroundTruthEvent) {
+    45	    this.emit('TOKEN_GROUND_TRUTH', event);
+    46	  }
+    47	
+    48	  onTokenGroundTruth(listener: (event: TokenGroundTruthEvent) => void) {
+    49	    this.on('TOKEN_GROUND_TRUTH', listener);
+    50	  }
+    51	
+    52	  emitPristineHistoryUpdated(event: PristineHistoryUpdatedEvent) {
+    53	    this.emit('PRISTINE_HISTORY_UPDATED', event);
+    54	  }
+    55	
+    56	  onPristineHistoryUpdated(
+    57	    listener: (event: PristineHistoryUpdatedEvent) => void,
+    58	  ) {
+    59	    this.on('PRISTINE_HISTORY_UPDATED', listener);
+    60	  }
+    61	
+    62	  emitChunkReceived(event: ChunkReceivedEvent) {
+    63	    this.emit('IR_CHUNK_RECEIVED', event);
+    64	  }
+    65	
+    66	  onChunkReceived(listener: (event: ChunkReceivedEvent) => void) {
+    67	    this.on('IR_CHUNK_RECEIVED', listener);
+    68	  }
+    69	
+    70	  emitConsolidationNeeded(event: ContextConsolidationEvent) {
+    71	    this.emit('BUDGET_RETAINED_CROSSED', event);
+    72	  }
+    73	
+    74	  onConsolidationNeeded(listener: (event: ContextConsolidationEvent) => void) {
+    75	    this.on('BUDGET_RETAINED_CROSSED', listener);
+    76	  }
+    77	
+    78	  emitNormalizeNeeded(event: NormalizeNeededEvent) {
+    79	    this.emit('BUDGET_NORMALIZED_CROSSED', event);
+    80	  }
+    81	
+    82	  onNormalizeNeeded(listener: (event: NormalizeNeededEvent) => void) {
+    83	    this.on('BUDGET_NORMALIZED_CROSSED', listener);
+    84	  }
+    85	
+    86	  emitProcessorResult(event: ProcessorResultEvent) {
+    87	    this.emit('PROCESSOR_RESULT', event);
+    88	  }
+    89	
+    90	  onProcessorResult(listener: (event: ProcessorResultEvent) => void) {
+    91	    this.on('PROCESSOR_RESULT', listener);
+    92	  }
+    93	}
+### packages/core/src/telemetry/types.ts
+     1	/**
+     2	 * @license
+     3	 * Copyright 2025 Google LLC
+     4	 * SPDX-License-Identifier: Apache-2.0
+     5	 */
+     6	
+     7	import type {
+     8	  Candidate,
+     9	  Content,
+    10	  GenerateContentConfig,
+    11	  GenerateContentResponseUsageMetadata,
+    12	} from '@google/genai';
+    13	import type { Config } from '../config/config.js';
+    14	import type { ApprovalMode } from '../policy/types.js';
+    15	
+    16	import type { CompletedToolCall } from '../scheduler/types.js';
+    17	import { CoreToolCallStatus } from '../scheduler/types.js';
+    18	import { DiscoveredMCPTool } from '../tools/mcp-tool.js';
+    19	import { AuthType } from '../core/contentGenerator.js';
+    20	import type { LogAttributes, LogRecord } from '@opentelemetry/api-logs';
+    21	import {
+    22	  getDecisionFromOutcome,
+    23	  ToolCallDecision,
+    24	} from './tool-call-decision.js';
+    25	import { getConventionAttributes, type FileOperation } from './metrics.js';
+    26	export { ToolCallDecision };
+    27	import type { ToolRegistry } from '../tools/tool-registry.js';
+    28	import type { OutputFormat } from '../output/types.js';
+    29	import type { AgentTerminateMode } from '../agents/types.js';
+    30	
+    31	import { getCommonAttributes } from './telemetryAttributes.js';
+    32	import { SemanticAttributes } from '@opentelemetry/semantic-conventions';
+    33	import { safeJsonStringify } from '../utils/safeJsonStringify.js';
+    34	import {
+    35	  toInputMessages,
+    36	  toOutputMessages,
+    37	  toFinishReasons,
+    38	  toOutputType,
+    39	  toSystemInstruction,
+    40	  type OTelFinishReason,
+    41	} from './semantic.js';
+    42	import { sanitizeHookName } from './sanitize.js';
+    43	import { getFileDiffFromResultDisplay } from '../utils/fileDiffUtils.js';
+    44	import { LlmRole } from './llmRole.js';
+    45	export { LlmRole };
+    46	import type { HookType } from '../hooks/types.js';
+    47	
+    48	export interface BaseTelemetryEvent {
+    49	  'event.name': string;
+    50	  /** Current timestamp in ISO 8601 format */
+    51	  'event.timestamp': string;
+    52	}
+    53	
+    54	type CommonFields = keyof BaseTelemetryEvent;
+    55	
+    56	export const EVENT_CLI_CONFIG = 'gemini_cli.config';
+    57	export class StartSessionEvent implements BaseTelemetryEvent {
+    58	  'event.name': 'cli_config';
+    59	  'event.timestamp': string;
+    60	  model: string;
+    61	  embedding_model: string;
+    62	  sandbox_enabled: boolean;
+    63	  core_tools_enabled: string;
+    64	  approval_mode: string;
+    65	  api_key_enabled: boolean;
+    66	  vertex_ai_enabled: boolean;
+    67	  debug_enabled: boolean;
+    68	  mcp_servers: string;
+    69	  telemetry_enabled: boolean;
+    70	  telemetry_log_user_prompts_enabled: boolean;
+    71	  file_filtering_respect_git_ignore: boolean;
+    72	  mcp_servers_count: number;
+    73	  mcp_tools_count?: number;
+    74	  mcp_tools?: string;
+    75	  output_format: OutputFormat;
+    76	  extensions_count: number;
+    77	  extensions: string;
+    78	  extension_ids: string;
+    79	  auth_type?: string;
+    80	  worktree_active: boolean;
+    81	
+    82	  constructor(config: Config, toolRegistry?: ToolRegistry) {
+    83	    const generatorConfig = config.getContentGeneratorConfig();
+    84	    const mcpServers =
+    85	      config.getMcpClientManager()?.getMcpServers() ?? config.getMcpServers();
+    86	
+    87	    let useGemini = false;
+    88	    let useVertex = false;
+    89	    if (generatorConfig && generatorConfig.authType) {
+    90	      useGemini = generatorConfig.authType === AuthType.USE_GEMINI;
+    91	      useVertex = generatorConfig.authType === AuthType.USE_VERTEX_AI;
+    92	    }
+    93	
+    94	    this['event.name'] = 'cli_config';
+    95	    this['event.timestamp'] = new Date().toISOString();
+    96	    this.model = config.getModel();
+    97	    this.embedding_model = config.getEmbeddingModel();
+    98	    this.sandbox_enabled =
+    99	      typeof config.getSandbox() === 'string' || !!config.getSandbox();
+   100	    this.core_tools_enabled = (config.getCoreTools() ?? []).join(',');
+   101	    this.approval_mode = config.getApprovalMode();
+   102	    this.api_key_enabled = useGemini || useVertex;
+   103	    this.vertex_ai_enabled = useVertex;
+   104	    this.debug_enabled = config.getDebugMode();
+   105	    this.mcp_servers = mcpServers ? Object.keys(mcpServers).join(',') : '';
+   106	    this.telemetry_enabled = config.getTelemetryEnabled();
+   107	    this.telemetry_log_user_prompts_enabled =
+   108	      config.getTelemetryLogPromptsEnabled();
+   109	    this.file_filtering_respect_git_ignore =
+   110	      config.getFileFilteringRespectGitIgnore();
+   111	    this.mcp_servers_count = mcpServers ? Object.keys(mcpServers).length : 0;
+   112	    this.output_format = config.getOutputFormat();
+   113	    const extensions = config.getExtensions();
+   114	    this.extensions_count = extensions.length;
+   115	    this.extensions = extensions.map((e) => e.name).join(',');
+   116	    this.extension_ids = extensions.map((e) => e.id).join(',');
+   117	    this.auth_type = generatorConfig?.authType;
+   118	    this.worktree_active = !!config.getWorktreeSettings();
+   119	    if (toolRegistry) {
+   120	      const mcpTools = toolRegistry
+   121	        .getAllTools()
+   122	        .filter((tool) => tool instanceof DiscoveredMCPTool);
+   123	      this.mcp_tools_count = mcpTools.length;
+   124	      this.mcp_tools = mcpTools.map((tool) => tool.name).join(',');
+   125	    }
+   126	  }
+   127	
+   128	  toOpenTelemetryAttributes(config: Config): LogAttributes {
+   129	    return {
+   130	      ...getCommonAttributes(config),
+   131	      'event.name': EVENT_CLI_CONFIG,
+   132	      'event.timestamp': this['event.timestamp'],
+   133	      model: this.model,
+   134	      embedding_model: this.embedding_model,
+   135	      sandbox_enabled: this.sandbox_enabled,
+   136	      core_tools_enabled: this.core_tools_enabled,
+   137	      approval_mode: this.approval_mode,
+   138	      api_key_enabled: this.api_key_enabled,
+   139	      vertex_ai_enabled: this.vertex_ai_enabled,
+   140	      log_user_prompts_enabled: this.telemetry_log_user_prompts_enabled,
+   141	      file_filtering_respect_git_ignore: this.file_filtering_respect_git_ignore,
+   142	      debug_mode: this.debug_enabled,
+   143	      mcp_servers: this.mcp_servers,
+   144	      mcp_servers_count: this.mcp_servers_count,
+   145	      mcp_tools: this.mcp_tools,
+   146	      mcp_tools_count: this.mcp_tools_count,
+   147	      output_format: this.output_format,
+   148	      extensions: this.extensions,
+   149	      extensions_count: this.extensions_count,
+   150	      extension_ids: this.extension_ids,
+   151	      auth_type: this.auth_type,
+   152	      worktree_active: this.worktree_active,
+   153	    };
+   154	  }
+   155	
+   156	  toLogBody(): string {
+   157	    return 'CLI configuration loaded.';
+   158	  }
+   159	}
+   160	
+   161	export class EndSessionEvent implements BaseTelemetryEvent {
+   162	  'event.name': 'end_session';
+   163	  'event.timestamp': string;
+   164	  session_id?: string;
+   165	
+   166	  constructor(config?: Config) {
+   167	    this['event.name'] = 'end_session';
+   168	    this['event.timestamp'] = new Date().toISOString();
+   169	    this.session_id = config?.getSessionId();
+   170	  }
+   171	
+   172	  toOpenTelemetryAttributes(config: Config): LogAttributes {
+   173	    return {
+   174	      ...getCommonAttributes(config),
+   175	      'event.name': this['event.name'],
+   176	      'event.timestamp': this['event.timestamp'],
+   177	      session_id: this.session_id,
+   178	    };
+   179	  }
+   180	
+   181	  toLogBody(): string {
+   182	    return 'Session ended.';
+   183	  }
+   184	}
+   185	
+   186	export const EVENT_USER_PROMPT = 'gemini_cli.user_prompt';
+   187	export class UserPromptEvent implements BaseTelemetryEvent {
+   188	  'event.name': 'user_prompt';
+   189	  'event.timestamp': string;
+   190	  prompt_length: number;
+   191	  prompt_id: string;
+   192	  auth_type?: string;
+   193	  prompt?: string;
+   194	
+   195	  constructor(
+   196	    prompt_length: number,
+   197	    prompt_Id: string,
+   198	    auth_type?: string,
+   199	    prompt?: string,
+   200	  ) {
+   201	    this['event.name'] = 'user_prompt';
+   202	    this['event.timestamp'] = new Date().toISOString();
+   203	    this.prompt_length = prompt_length;
+   204	    this.prompt_id = prompt_Id;
+   205	    this.auth_type = auth_type;
+   206	    this.prompt = prompt;
+   207	  }
+   208	
+   209	  toOpenTelemetryAttributes(config: Config): LogAttributes {
+   210	    const attributes: LogAttributes = {
+   211	      ...getCommonAttributes(config),
+   212	      'event.name': EVENT_USER_PROMPT,
+   213	      'event.timestamp': this['event.timestamp'],
+   214	      prompt_length: this.prompt_length,
+   215	      prompt_id: this.prompt_id,
+   216	    };
+   217	
+   218	    if (this.auth_type) {
+   219	      attributes['auth_type'] = this.auth_type;
+   220	    }
+   221	
+   222	    if (config.getTelemetryLogPromptsEnabled()) {
+   223	      attributes['prompt'] = this.prompt;
+   224	    }
+   225	    return attributes;
+   226	  }
+   227	
+   228	  toLogBody(): string {
+   229	    return `User prompt. Length: ${this.prompt_length}.`;
+   230	  }
+   231	}
+   232	
+   233	export const EVENT_TOOL_CALL = 'gemini_cli.tool_call';
+   234	
+   235	const TOOL_CALL_METADATA_SAFE_KEYS = [
+   236	  'model_added_lines',
+   237	  'model_removed_lines',
+   238	  'model_added_chars',
+   239	  'model_removed_chars',
+   240	  'user_added_lines',
+   241	  'user_removed_lines',
+   242	  'user_added_chars',
+   243	  'user_removed_chars',
+   244	] as const;
+   245	export class ToolCallEvent implements BaseTelemetryEvent {
+   246	  'event.name': 'tool_call';
+   247	  'event.timestamp': string;
+   248	  function_name: string;
+   249	  function_args: Record<string, unknown>;
+   250	  duration_ms: number;
+   251	  success: boolean;
+   252	  decision?: ToolCallDecision;
+   253	  error?: string;
+   254	  error_type?: string;
+   255	  prompt_id: string;
+   256	  tool_type: 'native' | 'mcp';
+   257	  content_length?: number;
+   258	  mcp_server_name?: string;
+   259	  extension_name?: string;
+   260	  extension_id?: string;
+### packages/core/src/telemetry/telemetry.ts
+### packages/core/src/telemetry/semantic.ts
+     1	/**
+     2	 * @license
+     3	 * Copyright 2025 Google LLC
+     4	 * SPDX-License-Identifier: Apache-2.0
+     5	 */
+     6	
+     7	/**
+     8	 * This file contains functions and types for converting Gemini API request/response
+     9	 * formats to the OpenTelemetry semantic conventions for generative AI.
+    10	 *
+    11	 * @see https://github.com/open-telemetry/semantic-conventions/blob/8b4f210f43136e57c1f6f47292eb6d38e3bf30bb/docs/gen-ai/gen-ai-events.md
+    12	 */
+    13	
+    14	import {
+    15	  FinishReason,
+    16	  type Candidate,
+    17	  type Content,
+    18	  type ContentUnion,
+    19	  type Part,
+    20	  type PartUnion,
+    21	} from '@google/genai';
+    22	import { truncateString } from '../utils/textUtils.js';
+    23	
+    24	// 160KB limit for the total size of string content in a log entry.
+    25	// The total log entry size limit is 256KB. We leave ~96KB (approx 37%) for JSON overhead (escaping, structure) and other fields.
+    26	const GLOBAL_TEXT_LIMIT = 160 * 1024;
+    27	
+    28	interface StringReference {
+    29	  get: () => string | undefined;
+    30	  set: (val: string) => void;
+    31	  len: () => number;
+    32	}
+    33	
+    34	function getStringReferences(parts: AnyPart[]): StringReference[] {
+    35	  const refs: StringReference[] = [];
+    36	  for (const part of parts) {
+    37	    if (part instanceof TextPart) {
+    38	      refs.push({
+    39	        get: () => part.content,
+    40	        set: (val: string) => (part.content = val),
+    41	        len: () => part.content.length,
+    42	      });
+    43	    } else if (part instanceof ReasoningPart) {
+    44	      refs.push({
+    45	        get: () => part.content,
+    46	        set: (val: string) => (part.content = val),
+    47	        len: () => part.content.length,
+    48	      });
+    49	    } else if (part instanceof ToolCallRequestPart) {
+    50	      if (part.arguments) {
+    51	        refs.push({
+    52	          get: () => part.arguments,
+    53	          set: (val: string) => (part.arguments = val),
+    54	          len: () => part.arguments?.length ?? 0,
+    55	        });
+    56	      }
+    57	    } else if (part instanceof ToolCallResponsePart) {
+    58	      if (part.response) {
+    59	        refs.push({
+    60	          get: () => part.response,
+    61	          set: (val: string) => (part.response = val),
+    62	          len: () => part.response?.length ?? 0,
+    63	        });
+    64	      }
+    65	    } else if (part instanceof GenericPart) {
+    66	      // eslint-disable-next-line no-restricted-syntax
+    67	      if (part.type === 'executableCode' && typeof part['code'] === 'string') {
+    68	        refs.push({
+    69	          // eslint-disable-next-line @typescript-eslint/no-unsafe-type-assertion
+    70	          get: () => part['code'] as string,
+    71	          set: (val: string) => (part['code'] = val),
+    72	          // eslint-disable-next-line @typescript-eslint/no-unsafe-type-assertion
+    73	          len: () => (part['code'] as string).length,
+    74	        });
+    75	      } else if (
+    76	        part.type === 'codeExecutionResult' &&
+    77	        // eslint-disable-next-line no-restricted-syntax
+    78	        typeof part['output'] === 'string'
+    79	      ) {
+    80	        refs.push({
+    81	          // eslint-disable-next-line @typescript-eslint/no-unsafe-type-assertion
+    82	          get: () => part['output'] as string,
+    83	          set: (val: string) => (part['output'] = val),
+    84	          // eslint-disable-next-line @typescript-eslint/no-unsafe-type-assertion
+    85	          len: () => (part['output'] as string).length,
+    86	        });
+    87	      }
+    88	    }
+    89	  }
+    90	  return refs;
+    91	}
+    92	
+    93	function limitTotalLength(parts: AnyPart[]): void {
+    94	  const refs = getStringReferences(parts);
+    95	  const totalLength = refs.reduce((sum, ref) => sum + ref.len(), 0);
+    96	
+    97	  if (totalLength <= GLOBAL_TEXT_LIMIT) {
+    98	    return;
+    99	  }
+   100	
+   101	  // Calculate the average budget per part for "large" parts.
+   102	  // We identify parts that are larger than the fair share (average) and truncate them.
+   103	  const averageSize = GLOBAL_TEXT_LIMIT / refs.length;
+   104	
+   105	  // Filter out parts that are already small enough to not need truncation
+   106	  const largeRefs = refs.filter((ref) => ref.len() > averageSize);
+   107	  const smallRefsLength = refs
+   108	    .filter((ref) => ref.len() <= averageSize)
+   109	    .reduce((sum, ref) => sum + ref.len(), 0);
+   110	
+   111	  // Distribute the remaining budget among large parts
+   112	  const remainingBudget = GLOBAL_TEXT_LIMIT - smallRefsLength;
+   113	  const budgetPerLargePart = Math.max(
+   114	    1,
+   115	    Math.floor(remainingBudget / largeRefs.length),
+   116	  );
+   117	
+   118	  for (const ref of largeRefs) {
+   119	    const original = ref.get();
+   120	    if (original) {
+   121	      ref.set(truncateString(original, budgetPerLargePart));
+   122	    }
+   123	  }
+   124	}
+   125	
+   126	export function toInputMessages(contents: Content[]): InputMessages {
+   127	  const messages: ChatMessage[] = [];
+   128	  for (const content of contents) {
+   129	    messages.push(toChatMessage(content));
+   130	  }
+   131	  const allParts = messages.flatMap((m) => m.parts);
+   132	  limitTotalLength(allParts);
+   133	  return messages;
+   134	}
+   135	
+   136	function isPart(value: unknown): value is Part {
+   137	  return (
+   138	    typeof value === 'object' &&
+   139	    value !== null &&
+   140	    !Array.isArray(value) &&
+   141	    !('parts' in value)
+   142	  );
+   143	}
+   144	
+   145	function toPart(part: PartUnion): Part {
+   146	  if (typeof part === 'string') {
+   147	    return { text: part };
+   148	  }
+   149	  return part;
+   150	}
+   151	
+   152	function toContent(content: ContentUnion): Content | undefined {
+   153	  if (typeof content === 'string') {
+   154	    // 1. It's a string
+   155	    return {
+   156	      parts: [toPart(content)],
+   157	    };
+   158	  } else if (Array.isArray(content)) {
+   159	    // 2. It's an array of parts (PartUnion[])
+   160	    return {
+   161	      parts: content.map(toPart),
+   162	    };
+   163	  } else if ('parts' in content) {
+   164	    // 3. It's a Content object
+   165	    return content;
+   166	  } else if (isPart(content)) {
+   167	    // 4. It's a single Part object (asserted with type guard)
+   168	    return {
+   169	      parts: [content],
+   170	    };
+   171	  } else {
+   172	    // 5. Handle any other unexpected case
+   173	    return undefined;
+   174	  }
+   175	}
+   176	
+   177	export function toSystemInstruction(
+   178	  systemInstruction?: ContentUnion,
+   179	): SystemInstruction | undefined {
+   180	  const parts: AnyPart[] = [];
+   181	  if (systemInstruction) {
+   182	    const content = toContent(systemInstruction);
+   183	    if (content && content.parts) {
+   184	      for (const part of content.parts) {
+   185	        parts.push(toOTelPart(part));
+   186	      }
+   187	    }
+   188	  }
+   189	  limitTotalLength(parts);
+   190	  return parts;
+   191	}
+   192	
+   193	export function toOutputMessages(candidates?: Candidate[]): OutputMessages {
+   194	  const messages: OutputMessage[] = [];
+   195	  if (candidates) {
+   196	    for (const candidate of candidates) {
+   197	      messages.push({
+   198	        finish_reason: toOTelFinishReason(candidate.finishReason),
+   199	        ...toChatMessage(candidate.content),
+   200	      });
+   201	    }
+   202	  }
+   203	  const allParts = messages.flatMap((m) => m.parts);
+   204	  limitTotalLength(allParts);
+   205	  return messages;
+   206	}
+   207	
+   208	export function toFinishReasons(candidates?: Candidate[]): OTelFinishReason[] {
+   209	  const reasons: OTelFinishReason[] = [];
+   210	  if (candidates) {
+   211	    for (const candidate of candidates) {
+   212	      reasons.push(toOTelFinishReason(candidate.finishReason));
+   213	    }
+   214	  }
+   215	  return reasons;
+   216	}
+   217	
+   218	export function toOutputType(requested_mime?: string): string | undefined {
+   219	  switch (requested_mime) {
+   220	    // explicitly support the known good values of responseMimeType
+   221	    case 'text/plain':
+   222	      return OTelOutputType.TEXT;
+   223	    case 'application/json':
+   224	      return OTelOutputType.JSON;
+   225	    default:
+   226	      // if none of the well-known values applies, a custom value may be used
+   227	      return requested_mime;
+   228	  }
+   229	}
+   230	
+   231	export function toChatMessage(content?: Content): ChatMessage {
+   232	  const message: ChatMessage = {
+   233	    role: undefined,
+   234	    parts: [],
+   235	  };
+   236	  if (content && content.parts) {
+   237	    message.role = toOTelRole(content.role);
+   238	    for (const part of content.parts) {
+   239	      message.parts.push(toOTelPart(part));
+   240	    }
+   241	  }
+   242	  return message;
+   243	}
+   244	
+   245	function toOTelPart(part: Part): AnyPart {
+   246	  if (part.thought) {
+   247	    if (part.text) {
+   248	      return new ReasoningPart(part.text);
+   249	    } else {
+   250	      return new ReasoningPart('');
+   251	    }
+   252	  } else if (part.text) {
+   253	    return new TextPart(part.text);
+   254	  } else if (part.functionCall) {
+   255	    return new ToolCallRequestPart(
+   256	      part.functionCall.name,
+   257	      part.functionCall.id,
+   258	      JSON.stringify(part.functionCall.args),
+   259	    );
+   260	  } else if (part.functionResponse) {
+### packages/core/src/telemetry/file-exporters.ts
+     1	/**
+     2	 * @license
+     3	 * Copyright 2025 Google LLC
+     4	 * SPDX-License-Identifier: Apache-2.0
+     5	 */
+     6	
+     7	import * as fs from 'node:fs';
+     8	import { ExportResultCode, type ExportResult } from '@opentelemetry/core';
+     9	import type { ReadableSpan, SpanExporter } from '@opentelemetry/sdk-trace-base';
+    10	import type {
+    11	  ReadableLogRecord,
+    12	  LogRecordExporter,
+    13	} from '@opentelemetry/sdk-logs';
+    14	import {
+    15	  AggregationTemporality,
+    16	  type ResourceMetrics,
+    17	  type PushMetricExporter,
+    18	} from '@opentelemetry/sdk-metrics';
+    19	import { safeJsonStringify } from '../utils/safeJsonStringify.js';
+    20	
+    21	class FileExporter {
+    22	  protected writeStream: fs.WriteStream;
+    23	
+    24	  constructor(filePath: string) {
+    25	    this.writeStream = fs.createWriteStream(filePath, { flags: 'a' });
+    26	  }
+    27	
+    28	  protected serialize(data: unknown): string {
+    29	    return safeJsonStringify(data, 2) + '\n';
+    30	  }
+    31	
+    32	  /**
+    33	   * Ensures that all pending writes are flushed to the underlying stream.
+    34	   */
+    35	  forceFlush(): Promise<void> {
+    36	    return new Promise((resolve, reject) => {
+    37	      if (!this.writeStream.writable) {
+    38	        resolve();
+    39	        return;
+    40	      }
+    41	      // write('') will be queued after all previous writes and its callback
+    42	      // will be called when it (and thus all previous writes) are flushed.
+    43	      this.writeStream.write('', (err) => {
+    44	        if (err) {
+    45	          reject(err);
+    46	        } else {
+    47	          resolve();
+    48	        }
+    49	      });
+    50	    });
+    51	  }
+    52	
+    53	  shutdown(): Promise<void> {
+    54	    return new Promise((resolve) => {
+    55	      this.writeStream.end(resolve);
+    56	    });
+    57	  }
+    58	}
+    59	
+    60	export class FileSpanExporter extends FileExporter implements SpanExporter {
+    61	  export(
+    62	    spans: ReadableSpan[],
+    63	    resultCallback: (result: ExportResult) => void,
+    64	  ): void {
+    65	    const data = spans.map((span) => this.serialize(span)).join('');
+    66	    this.writeStream.write(data, (err) => {
+    67	      resultCallback({
+    68	        code: err ? ExportResultCode.FAILED : ExportResultCode.SUCCESS,
+    69	        error: err || undefined,
+    70	      });
+    71	    });
+    72	  }
+    73	}
+    74	
+    75	export class FileLogExporter extends FileExporter implements LogRecordExporter {
+    76	  export(
+    77	    logs: ReadableLogRecord[],
+    78	    resultCallback: (result: ExportResult) => void,
+    79	  ): void {
+    80	    const data = logs.map((log) => this.serialize(log)).join('');
+    81	    this.writeStream.write(data, (err) => {
+    82	      resultCallback({
+    83	        code: err ? ExportResultCode.FAILED : ExportResultCode.SUCCESS,
+    84	        error: err || undefined,
+    85	      });
+    86	    });
+    87	  }
+    88	}
+    89	
+    90	export class FileMetricExporter
+    91	  extends FileExporter
+    92	  implements PushMetricExporter
+    93	{
+    94	  export(
+    95	    metrics: ResourceMetrics,
+    96	    resultCallback: (result: ExportResult) => void,
+    97	  ): void {
+    98	    const data = this.serialize(metrics);
+    99	    this.writeStream.write(data, (err) => {
+   100	      resultCallback({
+   101	        code: err ? ExportResultCode.FAILED : ExportResultCode.SUCCESS,
+   102	        error: err || undefined,
+   103	      });
+   104	    });
+   105	  }
+   106	
+   107	  getPreferredAggregationTemporality(): AggregationTemporality {
+   108	    return AggregationTemporality.CUMULATIVE;
+   109	  }
+   110	}
+### packages/core/src/telemetry/gcp-exporters.ts
+     1	/**
+     2	 * @license
+     3	 * Copyright 2025 Google LLC
+     4	 * SPDX-License-Identifier: Apache-2.0
+     5	 */
+     6	
+     7	import { type JWTInput } from 'google-auth-library';
+     8	import { TraceExporter } from '@google-cloud/opentelemetry-cloud-trace-exporter';
+     9	import { MetricExporter } from '@google-cloud/opentelemetry-cloud-monitoring-exporter';
+    10	import { Logging, type Log } from '@google-cloud/logging';
+    11	import {
+    12	  hrTimeToMilliseconds,
+    13	  ExportResultCode,
+    14	  type ExportResult,
+    15	} from '@opentelemetry/core';
+    16	import type {
+    17	  ReadableLogRecord,
+    18	  LogRecordExporter,
+    19	} from '@opentelemetry/sdk-logs';
+    20	import type { ResourceMetrics } from '@opentelemetry/sdk-metrics';
+    21	
+    22	/**
+    23	 * Google Cloud Trace exporter that extends the official trace exporter
+    24	 */
+    25	export class GcpTraceExporter extends TraceExporter {
+    26	  constructor(projectId?: string, credentials?: JWTInput) {
+    27	    super({
+    28	      projectId,
+    29	      credentials,
+    30	      resourceFilter: /^gcp\./,
+    31	    });
+    32	  }
+    33	
+    34	  async forceFlush(): Promise<void> {
+    35	    return Promise.resolve();
+    36	  }
+    37	}
+    38	
+    39	/**
+    40	 * Google Cloud Monitoring exporter that extends the official metrics exporter
+    41	 */
+    42	export class GcpMetricExporter extends MetricExporter {
+    43	  constructor(projectId?: string, credentials?: JWTInput) {
+    44	    super({
+    45	      projectId,
+    46	      credentials,
+    47	      prefix: 'custom.googleapis.com/gemini_cli',
+    48	    });
+    49	  }
+    50	
+    51	  override export(
+    52	    metrics: ResourceMetrics,
+    53	    resultCallback: (result: ExportResult) => void,
+    54	  ): void {
+    55	    super.export(metrics, (result: ExportResult) => {
+    56	      if (result.code === ExportResultCode.FAILED && result.error) {
+    57	        // Suppress errors related to writing too frequently, as they are
+    58	        // expected when the CLI shuts down quickly after a periodic export.
+    59	        const errorMessage = result.error.message || String(result.error);
+    60	        if (
+    61	          process.env['GEMINI_STRICT_TELEMETRY_LIMITS'] === 'true' &&
+    62	          errorMessage.includes(
+    63	            'written more frequently than the maximum sampling period',
+    64	          )
+    65	        ) {
+    66	          resultCallback({ code: ExportResultCode.SUCCESS });
+    67	          return;
+    68	        }
+    69	      }
+    70	      resultCallback(result);
+    71	    });
+    72	  }
+    73	}
+    74	
+    75	/**
+    76	 * Deeply truncates strings in an object to prevent GCP log size limit errors.
+    77	 */
+    78	function truncateLogPayload(payload: unknown, limit = 200000): unknown {
+    79	  if (typeof payload === 'string') {
+    80	    return payload.length > limit
+    81	      ? payload.substring(0, limit) + '... (truncated due to size)'
+    82	      : payload;
+    83	  }
+    84	  if (Array.isArray(payload)) {
+    85	    return payload.map((item) => truncateLogPayload(item, limit));
+    86	  }
+    87	  if (payload !== null && typeof payload === 'object') {
+    88	    const truncatedObj: Record<string, unknown> = {};
+    89	    for (const [key, value] of Object.entries(payload)) {
+    90	      // Keys are also strings, but usually small. Truncate values.
+    91	      truncatedObj[key] = truncateLogPayload(value, limit);
+    92	    }
+    93	    return truncatedObj;
+    94	  }
+    95	  return payload;
+    96	}
+    97	
+    98	/**
+    99	 * Google Cloud Logging exporter that uses the Cloud Logging client
+   100	 */
+   101	export class GcpLogExporter implements LogRecordExporter {
+   102	  private logging: Logging;
+   103	  private log: Log;
+   104	  private pendingWrites: Array<Promise<void>> = [];
+   105	
+   106	  constructor(projectId?: string, credentials?: JWTInput) {
+   107	    this.logging = new Logging({ projectId, credentials });
+   108	    this.log = this.logging.log('gemini_cli');
+   109	  }
+   110	
+   111	  export(
+   112	    logs: ReadableLogRecord[],
+   113	    resultCallback: (result: ExportResult) => void,
+   114	  ): void {
+   115	    try {
+   116	      const entries = logs.map((log) => {
+   117	        const rawPayload = {
+   118	          ...log.attributes,
+   119	          ...log.resource?.attributes,
+   120	          message: log.body,
+   121	        };
+   122	
+   123	        const isStrictTelemetry =
+   124	          process.env['GEMINI_STRICT_TELEMETRY_LIMITS'] === 'true';
+   125	
+   126	        let finalPayload: unknown = rawPayload;
+   127	
+   128	        if (isStrictTelemetry) {
+   129	          // Enforce a strict cap on the entire payload to avoid 256KB limit crashes in CI.
+   130	          let safePayload = truncateLogPayload(rawPayload, 10000);
+   131	          let payloadString = JSON.stringify(safePayload);
+   132	
+   133	          if (payloadString && payloadString.length > 100000) {
+   134	            // If still too large, apply a stricter limit
+   135	            safePayload = truncateLogPayload(rawPayload, 2000);
+   136	            payloadString = JSON.stringify(safePayload);
+   137	
+   138	            if (payloadString && payloadString.length > 100000) {
+   139	              safePayload = truncateLogPayload(rawPayload, 5000);
+   140	              payloadString = JSON.stringify(safePayload);
+   141	
+   142	              if (payloadString && payloadString.length > 100000) {
+   143	                // Fallback: strip structure and send a truncated raw string
+   144	                safePayload = {
+   145	                  _warning: 'Payload heavily truncated due to strict limits',
+   146	                  data: payloadString.substring(0, 50000) + '... (truncated)',
+   147	                };
+   148	              }
+   149	            }
+   150	          }
+   151	          finalPayload = safePayload;
+   152	        }
+   153	
+   154	        const entry = this.log.entry(
+   155	          {
+   156	            severity: this.mapSeverityToCloudLogging(log.severityNumber),
+   157	            timestamp: new Date(hrTimeToMilliseconds(log.hrTime)),
+   158	            resource: {
+   159	              type: 'global',
+   160	              labels: {
+   161	                project_id: this.logging.projectId,
+   162	              },
+   163	            },
+   164	          },
+   165	          // eslint-disable-next-line @typescript-eslint/no-unsafe-type-assertion
+   166	          finalPayload as Record<string, unknown>,
+   167	        );
+   168	        return entry;
+   169	      });
+   170	
+   171	      const writePromise = this.log
+   172	        .write(entries)
+   173	        .then(() => {
+   174	          resultCallback({ code: ExportResultCode.SUCCESS });
+   175	        })
+   176	        .catch((error: Error) => {
+   177	          resultCallback({
+   178	            code: ExportResultCode.FAILED,
+   179	            error,
+   180	          });
+   181	        })
+   182	        .finally(() => {
+   183	          const index = this.pendingWrites.indexOf(writePromise);
+   184	          if (index > -1) {
+   185	            // eslint-disable-next-line @typescript-eslint/no-floating-promises
+   186	            this.pendingWrites.splice(index, 1);
+   187	          }
+   188	        });
+   189	      this.pendingWrites.push(writePromise);
+   190	    } catch (error) {
+   191	      resultCallback({
+   192	        code: ExportResultCode.FAILED,
+   193	        // eslint-disable-next-line @typescript-eslint/no-unsafe-type-assertion
+   194	        error: error as Error,
+   195	      });
+   196	    }
+   197	  }
+   198	
+   199	  async forceFlush(): Promise<void> {
+   200	    if (this.pendingWrites.length > 0) {
+   201	      await Promise.all(this.pendingWrites);
+   202	    }
+   203	  }
+   204	
+   205	  async shutdown(): Promise<void> {
+   206	    await this.forceFlush();
+   207	    this.pendingWrites = [];
+   208	  }
+   209	
+   210	  private mapSeverityToCloudLogging(severityNumber?: number): string {
+   211	    if (!severityNumber) return 'DEFAULT';
+   212	
+   213	    // Map OpenTelemetry severity numbers to Cloud Logging severity levels
+   214	    // https://opentelemetry.io/docs/specs/otel/logs/data-model/#field-severitynumber
+   215	    if (severityNumber >= 21) return 'CRITICAL';
+   216	    if (severityNumber >= 17) return 'ERROR';
+   217	    if (severityNumber >= 13) return 'WARNING';
+   218	    if (severityNumber >= 9) return 'INFO';
+   219	    if (severityNumber >= 5) return 'DEBUG';
+   220	    return 'DEFAULT';
+   221	  }
+   222	}
+### docs/cli/telemetry.md
+     1	# Observability with OpenTelemetry
+     2	
+     3	Observability is the key to turning experimental AI into reliable software.
+     4	Gemini CLI provides built-in support for OpenTelemetry, transforming every agent
+     5	interaction into a rich stream of logs, metrics, and traces. This three-pillar
+     6	approach gives you the high-fidelity visibility needed to understand agent
+     7	behavior, optimize performance, and ensure reliability across your entire
+     8	workflow.
+     9	
+    10	Whether you are debugging a complex tool interaction locally or monitoring
+    11	enterprise-wide usage in the cloud, Gemini CLI's observability system provides
+    12	the actionable intelligence needed to move from "black box" AI to predictable,
+    13	high-performance systems.
+    14	
+    15	## OpenTelemetry integration
+    16	
+    17	Gemini CLI integrates with **[OpenTelemetry]**, a vendor-neutral,
+    18	industry-standard observability framework.
+    19	
+    20	The observability system provides:
+    21	
+    22	- Universal compatibility: Export to any OpenTelemetry backend (Google Cloud,
+    23	  Jaeger, Prometheus, Datadog, etc.).
+    24	- Standardized data: Use consistent formats and collection methods across your
+    25	  toolchain.
+    26	- Future-proof integration: Connect with existing and future observability
+    27	  infrastructure.
+    28	- No vendor lock-in: Switch between backends without changing your
+    29	  instrumentation.
+    30	
+    31	[OpenTelemetry]: https://opentelemetry.io/
+    32	
+    33	## Configuration
+    34	
+    35	You control telemetry behavior through the `.gemini/settings.json` file.
+    36	Environment variables can override these settings.
+    37	
+    38	| Setting        | Environment Variable              | Description                                         | Values            | Default                 |
+    39	| -------------- | --------------------------------- | --------------------------------------------------- | ----------------- | ----------------------- |
+    40	| `enabled`      | `GEMINI_TELEMETRY_ENABLED`        | Enable or disable telemetry                         | `true`/`false`    | `false`                 |
+    41	| `traces`       | `GEMINI_TELEMETRY_TRACES_ENABLED` | Enable detailed attribute tracing                   | `true`/`false`    | `false`                 |
+    42	| `target`       | `GEMINI_TELEMETRY_TARGET`         | Where to send telemetry data                        | `"gcp"`/`"local"` | `"local"`               |
+    43	| `otlpEndpoint` | `GEMINI_TELEMETRY_OTLP_ENDPOINT`  | OTLP collector endpoint                             | URL string        | `http://localhost:4317` |
+    44	| `otlpProtocol` | `GEMINI_TELEMETRY_OTLP_PROTOCOL`  | OTLP transport protocol                             | `"grpc"`/`"http"` | `"grpc"`                |
+    45	| `outfile`      | `GEMINI_TELEMETRY_OUTFILE`        | Save telemetry to file (overrides `otlpEndpoint`)   | file path         | -                       |
+    46	| `logPrompts`   | `GEMINI_TELEMETRY_LOG_PROMPTS`    | Include prompts in telemetry logs                   | `true`/`false`    | `true`                  |
+    47	| `useCollector` | `GEMINI_TELEMETRY_USE_COLLECTOR`  | Use external OTLP collector (advanced)              | `true`/`false`    | `false`                 |
+    48	| `useCliAuth`   | `GEMINI_TELEMETRY_USE_CLI_AUTH`   | Use CLI credentials for telemetry (GCP target only) | `true`/`false`    | `false`                 |
+    49	| -              | `GEMINI_CLI_SURFACE`              | Optional custom label for traffic reporting         | string            | -                       |
+    50	
+    51	**Note on boolean environment variables:** For boolean settings like `enabled`,
+    52	setting the environment variable to `true` or `1` enables the feature.
+    53	
+    54	For detailed configuration information, see the
+    55	[Configuration guide](../reference/configuration.md).
+    56	
+    57	## Google Cloud telemetry
+    58	
+    59	You can export telemetry data directly to Google Cloud Trace, Cloud Monitoring,
+    60	and Cloud Logging.
+    61	
+    62	### Prerequisites
+    63	
+    64	You must complete several setup steps before enabling Google Cloud telemetry.
+    65	
+    66	1.  Set your Google Cloud project ID:
+    67	
+    68	    - To send telemetry to a separate project:
+    69	
+    70	      **macOS/Linux**
+    71	
+    72	      ```bash
+    73	      export OTLP_GOOGLE_CLOUD_PROJECT="your-telemetry-project-id"
+    74	      ```
+    75	
+    76	      **Windows (PowerShell)**
+    77	
+    78	      ```powershell
+    79	      $env:OTLP_GOOGLE_CLOUD_PROJECT="your-telemetry-project-id"
+    80	      ```
+    81	
+    82	    - To send telemetry to the same project as inference:
+    83	
+    84	      **macOS/Linux**
+    85	
+    86	      ```bash
+    87	      export GOOGLE_CLOUD_PROJECT="your-project-id"
+    88	      ```
+    89	
+    90	      **Windows (PowerShell)**
+    91	
+    92	      ```powershell
+    93	      $env:GOOGLE_CLOUD_PROJECT="your-project-id"
+    94	      ```
+    95	
+    96	2.  Authenticate with Google Cloud using one of these methods:
+    97	
+    98	    - **Method A: Application Default Credentials (ADC)**: Use this method for
+    99	      service accounts or standard `gcloud` authentication.
+   100	
+   101	      - For user accounts:
+   102	        ```bash
+   103	        gcloud auth application-default login
+   104	        ```
+   105	      - For service accounts:
+   106	
+   107	        **macOS/Linux**
+   108	
+   109	        ```bash
+   110	        export GOOGLE_APPLICATION_CREDENTIALS="/path/to/your/service-account.json"
+   111	        ```
+   112	
+   113	        **Windows (PowerShell)**
+   114	
+   115	        ```powershell
+   116	        $env:GOOGLE_APPLICATION_CREDENTIALS="C:\path\to\your\service-account.json"
+   117	        ```
+   118	
+   119	    * **Method B: CLI Auth** (Direct export only): Simplest method for local
+   120	      users. Gemini CLI uses the same OAuth credentials you used for login. To
+   121	      enable this, set `useCliAuth: true` in your `.gemini/settings.json`:
+   122	
+   123	      ```json
+   124	      {
+   125	        "telemetry": {
+   126	          "enabled": true,
+   127	          "target": "gcp",
+   128	          "useCliAuth": true
+   129	        }
+   130	      }
+   131	      ```
+   132	
+   133	<!-- prettier-ignore -->
+   134	> [!NOTE]
+   135	> This setting requires **Direct export** (in-process exporters)
+   136	> and cannot be used when `useCollector` is `true`. If both are enabled,
+   137	> telemetry will be disabled.
+   138	
+   139	3.  Ensure your account or service account has these IAM roles:
+   140	
+   141	    - Cloud Trace Agent
+   142	    - Monitoring Metric Writer
+   143	    - Logs Writer
+   144	
+   145	4.  Enable the required Google Cloud APIs:
+   146	    ```bash
+   147	    gcloud services enable \
+   148	      cloudtrace.googleapis.com \
+   149	      monitoring.googleapis.com \
+   150	      logging.googleapis.com \
+   151	      --project="$OTLP_GOOGLE_CLOUD_PROJECT"
+   152	    ```
+   153	
+   154	### Direct export
+   155	
+   156	We recommend using direct export to send telemetry directly to Google Cloud
+   157	services.
+   158	
+   159	1.  Enable telemetry in `.gemini/settings.json`:
+   160	    ```json
+   161	    {
+   162	      "telemetry": {
+   163	        "enabled": true,
+   164	        "target": "gcp"
+   165	      }
+   166	    }
+   167	    ```
+   168	2.  Run Gemini CLI and send prompts.
+   169	3.  View logs, metrics, and traces in the Google Cloud Console. See
+   170	    [View Google Cloud telemetry](#view-google-cloud-telemetry) for details.
+   171	
+   172	### View Google Cloud telemetry
+   173	
+   174	After you enable telemetry and run Gemini CLI, you can view your data in the
+   175	Google Cloud Console.
+   176	
+   177	- **Logs:** [Logs Explorer](https://console.cloud.google.com/logs/)
+   178	- **Metrics:**
+   179	  [Metrics Explorer](https://console.cloud.google.com/monitoring/metrics-explorer)
+   180	- **Traces:** [Trace Explorer](https://console.cloud.google.com/traces/list)
+   181	
+   182	For detailed information on how to use these tools, see the following official
+   183	Google Cloud documentation:
+   184	
+   185	- [View and analyze logs with Logs Explorer](https://cloud.google.com/logging/docs/view/logs-explorer-interface)
+   186	- [Create charts with Metrics Explorer](https://cloud.google.com/monitoring/charts/metrics-explorer)
+   187	- [Find and explore traces](https://cloud.google.com/trace/docs/finding-traces)
+   188	
+   189	#### Monitoring dashboards
+   190	
+   191	Gemini CLI provides a pre-configured
+   192	[Google Cloud Monitoring](https://cloud.google.com/monitoring) dashboard to
+   193	visualize your telemetry.
+   194	
+   195	Find this dashboard under **Google Cloud Monitoring Dashboard Templates** as
+   196	"**Gemini CLI Monitoring**".
+   197	
+   198	![Gemini CLI Monitoring Dashboard Overview](/docs/assets/monitoring-dashboard-overview.png)
+   199	
+   200	![Gemini CLI Monitoring Dashboard Metrics](/docs/assets/monitoring-dashboard-metrics.png)
+   201	
+   202	![Gemini CLI Monitoring Dashboard Logs](/docs/assets/monitoring-dashboard-logs.png)
+   203	
+   204	To learn more, see
+   205	[Instant insights: Gemini CLI’s pre-configured monitoring dashboards](https://cloud.google.com/blog/topics/developers-practitioners/instant-insights-gemini-clis-new-pre-configured-monitoring-dashboards/).
+   206	
+   207	## Local telemetry
+   208	
+   209	You can capture telemetry data locally for development and debugging. We
+   210	recommend using file-based output for local development.
+   211	
+   212	1.  Enable telemetry in `.gemini/settings.json`:
+   213	    ```json
+   214	    {
+   215	      "telemetry": {
+   216	        "enabled": true,
+   217	        "target": "local",
+   218	        "outfile": ".gemini/telemetry.log"
+   219	      }
+   220	    }
+   221	    ```
+   222	2.  Run Gemini CLI and send prompts.
+   223	3.  View logs and metrics in `.gemini/telemetry.log`.
+   224	
+   225	For advanced local telemetry setups (such as Jaeger or Genkit), see the
+   226	[Local development guide](../local-development.md#viewing-traces).
+   227	
+   228	## Client identification
+   229	
+   230	Gemini CLI includes identifiers in its `User-Agent` header to help you
+   231	differentiate and report on API traffic from different environments (for
+   232	example, identifying calls from Gemini Code Assist versus a standard terminal).
+   233	
+   234	### Automatic identification
+   235	
+   236	Most integrated environments are identified automatically without additional
+   237	configuration. The identifier is included as a prefix to the `User-Agent` and as
+   238	a "surface" tag in the parenthetical metadata.
+   239	
+   240	| Environment                         | User-Agent Prefix            | Surface Tag |
+   241	| :---------------------------------- | :--------------------------- | :---------- |
+   242	| **Gemini Code Assist (Agent Mode)** | `GeminiCLI-a2a-server`       | `vscode`    |
+   243	| **Zed (via ACP)**                   | `GeminiCLI-acp-zed`          | `zed`       |
+   244	| **XCode (via ACP)**                 | `GeminiCLI-acp-xcode`        | `xcode`     |
+   245	| **IntelliJ IDEA (via ACP)**         | `GeminiCLI-acp-intellijidea` | `jetbrains` |
+   246	| **Standard Terminal**               | `GeminiCLI`                  | `terminal`  |
+   247	
+   248	**Example User-Agent:**
+   249	`GeminiCLI-a2a-server/0.34.0/gemini-pro (linux; x64; vscode)`
+   250	
+   251	### Custom identification
+   252	
+   253	You can provide a custom identifier for your own scripts or automation by
+   254	setting the `GEMINI_CLI_SURFACE` environment variable. This is useful for
+   255	tracking specific internal tools or distribution channels in your GCP logs.
+   256	
+   257	**macOS/Linux**
+   258	
+   259	```bash
+   260	export GEMINI_CLI_SURFACE="my-custom-tool"

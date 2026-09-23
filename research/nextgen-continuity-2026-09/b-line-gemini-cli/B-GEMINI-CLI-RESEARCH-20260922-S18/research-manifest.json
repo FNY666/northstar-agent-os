@@ -1,0 +1,120 @@
+{
+  "schema_version": "1.0",
+  "question": "仅依据 Google Gemini CLI 官方公开资料，哪些 checkpoint、session resume、OTel、MCP OAuth retry/idempotentHint 缓解措施可操作，哪些审计与外部副作用缺口仍需外部系统承担？",
+  "scope": {
+    "subject": "google-gemini/gemini-cli official public documentation, source, and tests",
+    "slice": "S18",
+    "as_of": "2026-09-22",
+    "exclusions": ["prior slice directories", "shared/P0", "事故目录", "D10/L12/D14", "canonical", "140", "tri-line", "systemd", "real services", "credentials", "repository clone"]
+  },
+  "claims": [
+    {
+      "id": "S18-C1",
+      "claim": "Checkpointing is disabled by default and can be enabled with general.checkpointing.enabled in settings.json; the official docs state that the --checkpointing flag was removed in 0.11.0 and configuration requires restart.",
+      "status": "confirmed",
+      "confidence": 0.99,
+      "sources": [
+        {"url": "https://geminicli.com/docs/cli/checkpointing/", "publisher": "Google Gemini CLI", "published_or_updated": "undated official documentation", "tier": "primary", "support": "Documents default disabled, settings.json configuration, and removed CLI flag."},
+        {"url": "https://github.com/google-gemini/gemini-cli/blob/main/packages/cli/src/config/settingsSchema.ts", "publisher": "Google Gemini CLI", "published_or_updated": "main source", "tier": "primary", "support": "Schema defines general.checkpointing.enabled with default false and requiresRestart."}
+      ],
+      "caveat": "This is a local CLI configuration, not a remote transaction or audit guarantee."
+    },
+    {
+      "id": "S18-C2",
+      "claim": "Official public materials expose no documented checkpoint interval setting; the documented setting and schema show enabled only, so interval semantics are unknown rather than safely assumed to be fixed-period or per-request.",
+      "status": "unverified",
+      "confidence": 0.88,
+      "sources": [
+        {"url": "https://geminicli.com/docs/cli/checkpointing/", "publisher": "Google Gemini CLI", "published_or_updated": "undated official documentation", "tier": "primary", "support": "Documents automatic creation before approved filesystem-modifying tools but gives no interval configuration."},
+        {"url": "https://github.com/google-gemini/gemini-cli/blob/main/packages/cli/src/config/settingsSchema.ts", "publisher": "Google Gemini CLI", "published_or_updated": "main source", "tier": "primary", "support": "Checkpointing schema contains enabled, with no interval property."}
+      ],
+      "caveat": "Absence in these current public materials is not proof that no future version can add an interval."
+    },
+    {
+      "id": "S18-C3",
+      "claim": "Checkpoint restore is a local project recovery feature: it records a shadow-Git snapshot plus conversation/tool-call data before eligible filesystem modifications and is used through /restore.",
+      "status": "confirmed",
+      "confidence": 0.98,
+      "sources": [
+        {"url": "https://geminicli.com/docs/cli/checkpointing/", "publisher": "Google Gemini CLI", "published_or_updated": "undated official documentation", "tier": "primary", "support": "Defines snapshot contents, local paths, and /restore behavior."},
+        {"url": "https://github.com/google-gemini/gemini-cli/blob/main/packages/core/src/utils/checkpointUtils.ts", "publisher": "Google Gemini CLI", "published_or_updated": "main source", "tier": "primary", "support": "Implements checkpoint data and checkpoint file listing."}
+      ],
+      "caveat": "The official materials do not say that MCP, database, network, cloud, or other external side effects are rolled back."
+    },
+    {
+      "id": "S18-C4",
+      "claim": "Session resume is correctly performed with gemini --resume (latest), an index or UUID, or the interactive /resume browser; sessions are project-specific and subject to retention settings.",
+      "status": "confirmed",
+      "confidence": 0.99,
+      "sources": [
+        {"url": "https://geminicli.com/docs/cli/session-management/", "publisher": "Google Gemini CLI", "published_or_updated": "undated official documentation", "tier": "primary", "support": "Documents all resume forms, project-specific storage, and retention."},
+        {"url": "https://geminicli.com/docs/reference/configuration/", "publisher": "Google Gemini CLI", "published_or_updated": "undated official documentation", "tier": "primary", "support": "Documents sessionRetention enabled, maxAge, maxCount, and minRetention settings."}
+      ],
+      "caveat": "Resume restores CLI history/context; it is not documented as restoring remote service state or proving an earlier remote write."
+    },
+    {
+      "id": "S18-C5",
+      "claim": "Gemini CLI can export telemetry to an append file, OTLP endpoint/backend, GCP exporters, or a Console exporter fallback; outfile takes precedence over OTLP endpoint in the implementation.",
+      "status": "confirmed",
+      "confidence": 0.97,
+      "sources": [
+        {"url": "https://geminicli.com/docs/cli/telemetry/", "publisher": "Google Gemini CLI", "published_or_updated": "undated official documentation", "tier": "primary", "support": "Documents outfile, OTLP endpoint/protocol, GCP, and local file setup."},
+        {"url": "https://github.com/google-gemini/gemini-cli/blob/main/packages/core/src/telemetry/sdk.ts", "publisher": "Google Gemini CLI", "published_or_updated": "main source", "tier": "primary", "support": "Selects GCP, OTLP, File, and Console exporters; outfile prevents OTLP selection."}
+      ],
+      "caveat": "The source proves exporter selection; it does not prove stdout durability or backend durable acknowledgement."
+    },
+    {
+      "id": "S18-C6",
+      "claim": "Official implementation provides forceFlush for span/log/metric processors and shutdown via sdk.shutdown; the file exporter waits for queued stream writes and ends the stream. This can reduce normal orderly-shutdown loss of queued telemetry but does not establish crash, power-loss, fsync, network, durable-ack, or exactly-once guarantees.",
+      "status": "inferred",
+      "confidence": 0.93,
+      "sources": [
+        {"url": "https://github.com/google-gemini/gemini-cli/blob/main/packages/core/src/telemetry/sdk.ts", "publisher": "Google Gemini CLI", "published_or_updated": "main source", "tier": "primary", "support": "flushTelemetry calls processor forceFlush; shutdownTelemetry calls sdk.shutdown and handles SIGINT/SIGTERM."},
+        {"url": "https://github.com/google-gemini/gemini-cli/blob/main/packages/core/src/telemetry/file-exporters.ts", "publisher": "Google Gemini CLI", "published_or_updated": "main source", "tier": "primary", "support": "File forceFlush waits for stream write callback; shutdown ends stream."},
+        {"url": "https://github.com/google-gemini/gemini-cli/blob/main/packages/core/src/telemetry/sdk.test.ts", "publisher": "Google Gemini CLI", "published_or_updated": "main tests", "tier": "primary", "support": "Tests exporter selection, including outfile preventing OTLP exporters."}
+      ],
+      "caveat": "Telemetry is observation, not a transaction log or proof that an external side effect committed."
+    },
+    {
+      "id": "S18-C7",
+      "claim": "MCP OAuth retry is a transport authentication recovery path: after authentication failure, the CLI retries HTTP with an OAuth token or, for an SSE-only indication, retries SSE; it is not documented as a business-operation retry policy.",
+      "status": "confirmed",
+      "confidence": 0.97,
+      "sources": [
+        {"url": "https://geminicli.com/docs/tools/mcp-server/", "publisher": "Google Gemini CLI", "published_or_updated": "undated official documentation", "tier": "primary", "support": "Documents 401 detection, OAuth discovery, token flow, and connection retry."},
+        {"url": "https://github.com/google-gemini/gemini-cli/blob/main/packages/core/src/tools/mcp-client.ts", "publisher": "Google Gemini CLI", "published_or_updated": "main source", "tier": "primary", "support": "retryWithOAuth chooses HTTP or SSE connection retry based on previous transport result."}
+      ],
+      "caveat": "Do not infer safe replay of a create/update/payment/message tool from a connection-level OAuth retry."
+    },
+    {
+      "id": "S18-C8",
+      "claim": "The CLI preserves MCP tool annotations including idempotentHint and uses readOnlyHint for its read-only classification, but official source/tests provide no evidence that idempotentHint creates idempotency keys, deduplicates calls, performs read-back, or guarantees server-side idempotence.",
+      "status": "confirmed",
+      "confidence": 0.96,
+      "sources": [
+        {"url": "https://github.com/google-gemini/gemini-cli/blob/main/packages/core/src/tools/mcp-client.test.ts", "publisher": "Google Gemini CLI", "published_or_updated": "main tests", "tier": "primary", "support": "Test preserves readOnlyHint, destructiveHint, and idempotentHint and asserts read-only classification."},
+        {"url": "https://github.com/google-gemini/gemini-cli/blob/main/packages/core/src/tools/mcp-client.ts", "publisher": "Google Gemini CLI", "published_or_updated": "main source", "tier": "primary", "support": "Extracts annotations and derives isReadOnly from readOnlyHint."}
+      ],
+      "caveat": "Tool authors should declare the hint only when the server operation's real semantics support it; the hint is not an external compensator."
+    },
+    {
+      "id": "S18-C9",
+      "claim": "External systems must provide client idempotency keys, read-back/state reconciliation, fencing/epoch control, durable outbox or journal, consumer deduplication, and durable audit retention for gaps that CLI checkpointing, resume, telemetry, OAuth retry, and idempotentHint do not close.",
+      "status": "inferred",
+      "confidence": 0.94,
+      "sources": [
+        {"url": "https://geminicli.com/docs/cli/checkpointing/", "publisher": "Google Gemini CLI", "published_or_updated": "undated official documentation", "tier": "primary", "support": "Defines checkpoint as local project snapshot and local conversation/tool-call data."},
+        {"url": "https://geminicli.com/docs/cli/session-management/", "publisher": "Google Gemini CLI", "published_or_updated": "undated official documentation", "tier": "primary", "support": "Defines resume as project-specific CLI history with retention."},
+        {"url": "https://github.com/google-gemini/gemini-cli/blob/main/packages/core/src/telemetry/sdk.ts", "publisher": "Google Gemini CLI", "published_or_updated": "main source", "tier": "primary", "support": "Shows telemetry flush/shutdown and exporter lifecycle, without transaction or exactly-once semantics."},
+        {"url": "https://github.com/google-gemini/gemini-cli/blob/main/packages/core/src/tools/mcp-client.ts", "publisher": "Google Gemini CLI", "published_or_updated": "main source", "tier": "primary", "support": "Shows OAuth connection retry rather than business idempotency controls."}
+      ],
+      "caveat": "These are required external design responsibilities derived from the documented boundaries; they are not claimed as Gemini CLI features."
+    }
+  ],
+  "coverage": {
+    "required_topics": ["checkpoint enabled and interval limitation", "session resume", "OTel file/stdout/backend and flush/shutdown", "MCP OAuth retry", "idempotentHint", "external idempotency/read-back/fencing/outbox"],
+    "covered_claim_ids": ["S18-C1", "S18-C2", "S18-C3", "S18-C4", "S18-C5", "S18-C6", "S18-C7", "S18-C8", "S18-C9"],
+    "official_only": true,
+    "notes": "No claims are represented as a keyed claims object; claims is a validator-compatible list of claim records."
+  }
+}

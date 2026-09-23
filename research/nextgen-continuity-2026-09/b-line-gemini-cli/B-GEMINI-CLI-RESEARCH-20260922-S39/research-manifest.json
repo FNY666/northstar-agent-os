@@ -1,0 +1,28 @@
+{
+  "schema_version": "1.0",
+  "question": "S39：Gemini CLI 官方 session、checkpoint、headless 与 sandbox 文档分别能证明什么，哪些外部连续性与副作用结论仍不可证明？",
+  "scope": {
+    "slice": "B line S39",
+    "time_window": "2026-09-22",
+    "context": "Gemini CLI official public repository/docs only",
+    "offline_snapshot_commit": "d5b3e3accb26000d273abf16e0f1dd83aa5428a9",
+    "production_verified": false,
+    "read_only": true,
+    "excluded": ["synthetic tests", "real Gemini CLI execution", "credentials", "private accounts", "shared/P0", "事故目录", "D10", "L12", "D14", "canonical", "staging", "140", "tri-line", "systemd", "real services"]
+  },
+  "claims": [
+    {"id":"S39-C1","claim":"官方文档直接说明 session history 自动保存，并支持按最近会话、索引或 UUID resume；session retention 默认 30 天且可配置。","status":"confirmed","confidence":"high","sources":[{"url":"https://github.com/google-gemini/gemini-cli/blob/main/docs/cli/session-management.md","publisher":"Google Gemini CLI","published_or_updated":"2026-09-21","tier":"primary","support":"session-management.md lines 3-54 and 152-186"}],"caveat":"仅验证官方文档陈述，不是本机运行验证。"},
+    {"id":"S39-C2","claim":"官方 checkpointing 文档描述在 AI 修改项目文件前创建快照，/restore 可恢复项目文件，并保存 Git snapshot 与 conversation history。","status":"confirmed","confidence":"high","sources":[{"url":"https://github.com/google-gemini/gemini-cli/blob/main/docs/cli/checkpointing.md","publisher":"Google Gemini CLI","published_or_updated":"2026-09-21","tier":"primary","support":"checkpointing.md lines 1-35 and 60-95"}],"caveat":"不能扩展为第三方外部副作用回滚。"},
+    {"id":"S39-C3","claim":"headless 文档直接规定 structured text/JSON、JSONL 事件流与标准退出码。","status":"confirmed","confidence":"high","sources":[{"url":"https://github.com/google-gemini/gemini-cli/blob/main/docs/cli/headless.md","publisher":"Google Gemini CLI","published_or_updated":"2026-09-21","tier":"primary","support":"headless.md lines 1-45"}],"caveat":"输出与退出码不证明业务 commit 或外部效果。"},
+    {"id":"S39-C4","claim":"sandbox 文档规定 flag、环境变量和 settings 的配置优先级，并列出多种后端及工具级 sandbox、sandbox expansion。","status":"confirmed","confidence":"high","sources":[{"url":"https://github.com/google-gemini/gemini-cli/blob/main/docs/cli/sandbox.md","publisher":"Google Gemini CLI","published_or_updated":"2026-09-21","tier":"primary","support":"sandbox.md lines 34-80 and 267-337"}],"caveat":"不证明任一具体配置在生产中提供充分隔离。"},
+    {"id":"S39-C5","claim":"checkpoint restore 可被推断为项目文件/会话状态恢复机制，而非自动撤回已发网络请求、数据库写入或第三方 API 变更。","status":"inferred","confidence":"high","sources":[{"url":"https://github.com/google-gemini/gemini-cli/blob/main/docs/cli/checkpointing.md","publisher":"Google Gemini CLI","published_or_updated":"2026-09-21","tier":"primary","support":"文档范围明确描述 project files、Git snapshot 和 conversation history，未声称外部副作用回滚。"}],"caveat":"这是边界推导，不是官方对所有外部系统的穷尽性否定。"},
+    {"id":"S39-C6","claim":"sandbox 的实际隔离强度、扩权审批结果、resume/restore 运行成功、崩溃恢复、审计完整性、exactly-once 与生产连续性在本切片均为 unknown。","status":"unverified","confidence":"high","sources":[{"url":"https://github.com/google-gemini/gemini-cli/blob/main/docs/cli/sandbox.md","publisher":"Google Gemini CLI","published_or_updated":"2026-09-21","tier":"primary","support":"文档是配置/行为参考，不提供本机运行或外部目标证据。"}],"caveat":"需要受控运行态和目标 read-back 才能进一步判定。"},
+    {"id":"S39-C7","claim":"官方文档建议使用 Git worktrees 为并行 Gemini session 提供独立代码副本，以降低会话间修改碰撞。","status":"confirmed","confidence":"high","sources":[{"url":"https://github.com/google-gemini/gemini-cli/blob/main/docs/cli/session-management.md","publisher":"Google Gemini CLI","published_or_updated":"2026-09-21","tier":"primary","support":"session-management.md lines 99-104"}],"caveat":"建议不等于实际使用或保证没有竞态。"}
+  ],
+  "coverage": {
+    "searched": ["official session-management.md", "official checkpointing.md", "official headless.md", "official sandbox.md", "raw GitHub URLs"],
+    "inaccessible": [],
+    "unresolved_conflicts": [],
+    "not_covered": ["runtime execution", "external side effects", "rollback completeness", "exactly-once", "production readiness"]
+  }
+}

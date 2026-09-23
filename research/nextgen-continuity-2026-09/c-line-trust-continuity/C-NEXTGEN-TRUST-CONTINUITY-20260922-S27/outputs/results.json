@@ -1,0 +1,338 @@
+{
+  "case_count": 13,
+  "production_verified": false,
+  "property_sweep": {
+    "combination_count": 256,
+    "minimizer": {
+      "minimal_witness_size": 1,
+      "single_gate_witnesses": [
+        "quorum",
+        "independence",
+        "monotonic",
+        "revocation",
+        "crash",
+        "evidence_complete",
+        "evidence_consistent",
+        "retention_query"
+      ]
+    },
+    "property_pass": true,
+    "violations": 0
+  },
+  "results": [
+    {
+      "case_id": "recovered_2of3_closed",
+      "checks": {
+        "crash_restart_closed": true,
+        "evidence_complete": true,
+        "evidence_consistent": true,
+        "observer_independence": true,
+        "query_complete": true,
+        "quorum": true,
+        "retention_within_boundary": true,
+        "revocation_reached": true,
+        "watermark_monotonic": true
+      },
+      "distinct_observers": [
+        "o1",
+        "o2"
+      ],
+      "quorum_observed": 2,
+      "quorum_threshold": 2,
+      "reasons": [
+        "all_fail_closed_gates_satisfied"
+      ],
+      "status": "RECOVERED"
+    },
+    {
+      "case_id": "unknown_quorum_missing_3of5",
+      "checks": {
+        "crash_restart_closed": true,
+        "evidence_complete": true,
+        "evidence_consistent": true,
+        "observer_independence": true,
+        "query_complete": true,
+        "quorum": false,
+        "retention_within_boundary": true,
+        "revocation_reached": true,
+        "watermark_monotonic": true
+      },
+      "distinct_observers": [
+        "o1",
+        "o2"
+      ],
+      "quorum_observed": 2,
+      "quorum_threshold": 3,
+      "reasons": [
+        "quorum_missing_or_split"
+      ],
+      "status": "UNKNOWN"
+    },
+    {
+      "case_id": "unknown_duplicate_observer_not_independent",
+      "checks": {
+        "crash_restart_closed": true,
+        "evidence_complete": true,
+        "evidence_consistent": true,
+        "observer_independence": false,
+        "query_complete": true,
+        "quorum": false,
+        "retention_within_boundary": true,
+        "revocation_reached": true,
+        "watermark_monotonic": true
+      },
+      "distinct_observers": [
+        "o1"
+      ],
+      "quorum_observed": 1,
+      "quorum_threshold": 2,
+      "reasons": [
+        "quorum_missing_or_split"
+      ],
+      "status": "UNKNOWN"
+    },
+    {
+      "case_id": "unknown_partition_stale_quorum",
+      "checks": {
+        "crash_restart_closed": true,
+        "evidence_complete": true,
+        "evidence_consistent": true,
+        "observer_independence": true,
+        "query_complete": true,
+        "quorum": true,
+        "retention_within_boundary": true,
+        "revocation_reached": false,
+        "watermark_monotonic": true
+      },
+      "distinct_observers": [
+        "o1",
+        "o2"
+      ],
+      "quorum_observed": 2,
+      "quorum_threshold": 2,
+      "reasons": [
+        "revocation_watermark_not_reached"
+      ],
+      "status": "UNKNOWN"
+    },
+    {
+      "case_id": "unknown_watermark_regresses_cross_epoch",
+      "checks": {
+        "crash_restart_closed": true,
+        "evidence_complete": true,
+        "evidence_consistent": true,
+        "observer_independence": true,
+        "query_complete": true,
+        "quorum": true,
+        "retention_within_boundary": true,
+        "revocation_reached": true,
+        "watermark_monotonic": false
+      },
+      "distinct_observers": [
+        "o1",
+        "o2"
+      ],
+      "quorum_observed": 2,
+      "quorum_threshold": 2,
+      "reasons": [
+        "watermark_not_monotonic"
+      ],
+      "status": "UNKNOWN"
+    },
+    {
+      "case_id": "unknown_crash_post_commit",
+      "checks": {
+        "crash_restart_closed": false,
+        "evidence_complete": true,
+        "evidence_consistent": true,
+        "observer_independence": true,
+        "query_complete": true,
+        "quorum": true,
+        "retention_within_boundary": true,
+        "revocation_reached": true,
+        "watermark_monotonic": true
+      },
+      "distinct_observers": [
+        "o1",
+        "o2"
+      ],
+      "quorum_observed": 2,
+      "quorum_threshold": 2,
+      "reasons": [
+        "crash_restart_unclosed"
+      ],
+      "status": "UNKNOWN"
+    },
+    {
+      "case_id": "unknown_duplicate_receipt",
+      "checks": {
+        "crash_restart_closed": true,
+        "evidence_complete": true,
+        "evidence_consistent": false,
+        "observer_independence": true,
+        "query_complete": true,
+        "quorum": true,
+        "retention_within_boundary": true,
+        "revocation_reached": true,
+        "watermark_monotonic": true
+      },
+      "distinct_observers": [
+        "o1",
+        "o2"
+      ],
+      "quorum_observed": 2,
+      "quorum_threshold": 2,
+      "reasons": [
+        "evidence_inconsistent"
+      ],
+      "status": "UNKNOWN"
+    },
+    {
+      "case_id": "unknown_retention_expired",
+      "checks": {
+        "crash_restart_closed": true,
+        "evidence_complete": true,
+        "evidence_consistent": true,
+        "observer_independence": true,
+        "query_complete": true,
+        "quorum": true,
+        "retention_within_boundary": false,
+        "revocation_reached": true,
+        "watermark_monotonic": true
+      },
+      "distinct_observers": [
+        "o1",
+        "o2"
+      ],
+      "quorum_observed": 2,
+      "quorum_threshold": 2,
+      "reasons": [
+        "retention_boundary_exceeded"
+      ],
+      "status": "UNKNOWN"
+    },
+    {
+      "case_id": "unknown_query_gap",
+      "checks": {
+        "crash_restart_closed": true,
+        "evidence_complete": true,
+        "evidence_consistent": true,
+        "observer_independence": true,
+        "query_complete": false,
+        "quorum": true,
+        "retention_within_boundary": true,
+        "revocation_reached": true,
+        "watermark_monotonic": true
+      },
+      "distinct_observers": [
+        "o1",
+        "o2"
+      ],
+      "quorum_observed": 2,
+      "quorum_threshold": 2,
+      "reasons": [
+        "query_gap"
+      ],
+      "status": "UNKNOWN"
+    },
+    {
+      "case_id": "unknown_evidence_missing",
+      "checks": {
+        "crash_restart_closed": true,
+        "evidence_complete": false,
+        "evidence_consistent": false,
+        "observer_independence": true,
+        "query_complete": true,
+        "quorum": true,
+        "retention_within_boundary": true,
+        "revocation_reached": true,
+        "watermark_monotonic": true
+      },
+      "distinct_observers": [
+        "o1",
+        "o2"
+      ],
+      "quorum_observed": 2,
+      "quorum_threshold": 2,
+      "reasons": [
+        "evidence_class_missing"
+      ],
+      "status": "UNKNOWN"
+    },
+    {
+      "case_id": "reject_explicit_conflict",
+      "checks": {
+        "crash_restart_closed": true,
+        "evidence_complete": true,
+        "evidence_consistent": false,
+        "observer_independence": true,
+        "query_complete": true,
+        "quorum": true,
+        "retention_within_boundary": true,
+        "revocation_reached": true,
+        "watermark_monotonic": true
+      },
+      "distinct_observers": [
+        "o1",
+        "o2"
+      ],
+      "quorum_observed": 2,
+      "quorum_threshold": 2,
+      "reasons": [
+        "explicit_hard_conflict"
+      ],
+      "status": "REJECT"
+    },
+    {
+      "case_id": "unknown_3of5_split",
+      "checks": {
+        "crash_restart_closed": true,
+        "evidence_complete": true,
+        "evidence_consistent": false,
+        "observer_independence": true,
+        "query_complete": true,
+        "quorum": true,
+        "retention_within_boundary": true,
+        "revocation_reached": true,
+        "watermark_monotonic": true
+      },
+      "distinct_observers": [
+        "o1",
+        "o2",
+        "o3"
+      ],
+      "quorum_observed": 3,
+      "quorum_threshold": 3,
+      "reasons": [
+        "evidence_inconsistent"
+      ],
+      "status": "UNKNOWN"
+    },
+    {
+      "case_id": "unknown_cross_epoch_rollback",
+      "checks": {
+        "crash_restart_closed": true,
+        "evidence_complete": true,
+        "evidence_consistent": true,
+        "observer_independence": true,
+        "query_complete": true,
+        "quorum": true,
+        "retention_within_boundary": true,
+        "revocation_reached": true,
+        "watermark_monotonic": false
+      },
+      "distinct_observers": [
+        "o1",
+        "o2"
+      ],
+      "quorum_observed": 2,
+      "quorum_threshold": 2,
+      "reasons": [
+        "watermark_not_monotonic"
+      ],
+      "status": "UNKNOWN"
+    }
+  ],
+  "schema_version": "s27-trust-continuity-results-1",
+  "synthetic_only": true
+}

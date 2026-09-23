@@ -1,0 +1,26 @@
+{
+  "schema_version": "1.0",
+  "question": "What do official Gemini CLI sources establish about the MCP lifecycle and what remains unknown about remote effects?",
+  "scope": "public first-party Google Gemini CLI sources only; read-only research",
+  "coverage": ["MCP discovery and execution", "server/tool filters and trust", "timeouts", "environment sanitization", "resource list/read", "reload/setup", "external-effect boundary"],
+  "slice_id": "B-S45-OFFICIAL-MCP-LIFECYCLE-20260922",
+  "status": "complete",
+  "research_date": "2026-09-22",
+  "access_date": "2026-09-22",
+  "sources": [
+    {"id":"S45-1","url":"https://github.com/google-gemini/gemini-cli/blob/main/docs/tools/mcp-server.md","access_date":"2026-09-22","evidence_window":"MCP architecture, discovery/execution, transports, settings, trust, timeout, environment sanitization, resources","evidence_level":"verified","cannot_prove":"third-party safety, target commit, exactly-once, post-timeout state"},
+    {"id":"S45-2","url":"https://github.com/google-gemini/gemini-cli/blob/main/docs/cli/tutorials/mcp-setup.md","access_date":"2026-09-22","evidence_window":"MCP setup, credentials, restart/reload","evidence_level":"verified","cannot_prove":"credential safety, remote success, external-effect confirmation"},
+    {"id":"S45-3","url":"https://github.com/google-gemini/gemini-cli/blob/main/docs/tools/mcp-resources.md","access_date":"2026-09-22","evidence_window":"resource list/read/reference","evidence_level":"verified","cannot_prove":"freshness, completeness, authorization, business effect"}
+  ],
+  "claims": [
+    {"id":"C1","claim":"Official docs describe configured-server discovery over Stdio/SSE/Streamable HTTP, schema validation, registration, resource discovery, connection state, and timeout handling.","status":"confirmed","confidence":"high","sources":[{"url":"https://github.com/google-gemini/gemini-cli/blob/main/docs/tools/mcp-server.md","publisher":"Google Gemini CLI","published_or_updated":"2026-09-22 repository snapshot","tier":"primary","support":"Core integration architecture and transport sections."}],"caveat":"Documented client lifecycle is not a target-side commit receipt."},
+    {"id":"C2","claim":"allowed/excluded filter servers; includeTools allowlists tools; excludeTools takes precedence; trust=true bypasses tool-call confirmations for the server.","status":"confirmed","confidence":"high","sources":[{"url":"https://github.com/google-gemini/gemini-cli/blob/main/docs/tools/mcp-server.md","publisher":"Google Gemini CLI","published_or_updated":"2026-09-22 repository snapshot","tier":"primary","support":"Global MCP settings and server configuration properties."}],"caveat":"Policy/confirmation behavior does not prove tool safety or effect correctness."},
+    {"id":"C3","claim":"The documented MCP timeout default is 600000 ms and environment sanitization redacts sensitive inherited variables while explicitly configured variables bypass automatic redaction.","status":"confirmed","confidence":"high","sources":[{"url":"https://github.com/google-gemini/gemini-cli/blob/main/docs/tools/mcp-server.md","publisher":"Google Gemini CLI","published_or_updated":"2026-09-22 repository snapshot","tier":"primary","support":"Configuration properties and security/environment sanitization sections."}],"caveat":"The remote outcome after timeout and handling of explicitly shared secrets remain unspecified."},
+    {"id":"C4","claim":"MCP resources are listed/read and injected into conversation context using documented resource URIs; this does not establish freshness, completeness, authorization correctness, or business effect.","status":"confirmed","confidence":"high","sources":[{"url":"https://github.com/google-gemini/gemini-cli/blob/main/docs/tools/mcp-resources.md","publisher":"Google Gemini CLI","published_or_updated":"2026-09-22 repository snapshot","tier":"primary","support":"Resource interaction reference."}],"caveat":"Independent authoritative validation is required for consequential decisions."},
+    {"id":"C5","claim":"Exactly-once behavior, cancellation-after-timeout, remote durability, complete audit coverage, resource freshness, and post-timeout external status remain unknown from these sources.","status":"unverified","confidence":"high","sources":[{"url":"https://github.com/google-gemini/gemini-cli/blob/main/docs/tools/mcp-server.md","publisher":"Google Gemini CLI","published_or_updated":"2026-09-22 repository snapshot","tier":"primary","support":"The documentation specifies integration/configuration but not these guarantees."}],"caveat":"Do not infer not-committed from timeout/disconnect alone; reconcile with the authoritative target."}
+  ],
+  "limitations": ["No real MCP server or credential was used", "No production or remote service was accessed", "Documentation is evidence of documented behavior, not proof of every runtime outcome"],
+  "production_verified": false,
+  "synthetic_only": false,
+  "unknowns": ["exactly-once", "cancellation-after-timeout", "remote durability", "complete audit coverage", "resource freshness", "post-timeout external status"]
+}

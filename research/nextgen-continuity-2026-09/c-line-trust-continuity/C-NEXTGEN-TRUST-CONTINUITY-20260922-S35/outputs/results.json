@@ -1,0 +1,274 @@
+{
+  "all_cases_match": true,
+  "case_count": 26,
+  "claims_status": "inferred",
+  "coverage": [
+    "MERKLE_ROOT",
+    "INCLUSION_PROOF",
+    "CONSISTENCY_PROOF",
+    "CHECKPOINT_CHAIN",
+    "ROOT_ROTATION",
+    "OBSERVER_QUORUM",
+    "FRESHNESS",
+    "FORK",
+    "NO_EVENT",
+    "UNKNOWN"
+  ],
+  "digest": "c43484f40a771cda315127d93cc25ffbcfa8512379511fa359331cbc7c035ba4",
+  "production_verified": false,
+  "property_sweep": {
+    "combinations": 524288,
+    "counts": {
+      "RECOVERED": 1,
+      "REJECT": 491520,
+      "UNKNOWN": 32767
+    },
+    "dimensions": 19,
+    "fields": [
+      "same_identity",
+      "identity_conflict",
+      "root_attested",
+      "leaf_canonical",
+      "inclusion_proof_valid",
+      "consistency_proof_valid",
+      "checkpoint_chain_complete",
+      "root_sequence_monotonic",
+      "root_epoch_continuous",
+      "observer_quorum_agreed",
+      "observer_independent",
+      "freshness_closed",
+      "key_rotation_attested",
+      "algorithm_compatible",
+      "fork_conflict",
+      "proof_conflict",
+      "stale_root_conflict",
+      "query_gap",
+      "proof_gap"
+    ],
+    "single_gate_minimizer": [
+      {
+        "bits": [],
+        "mask": 0,
+        "target": "UNKNOWN"
+      },
+      {
+        "bits": [
+          1
+        ],
+        "mask": 2,
+        "target": "REJECT"
+      },
+      {
+        "bits": [
+          0,
+          2,
+          3,
+          4,
+          5,
+          6,
+          7,
+          8,
+          9,
+          10,
+          11,
+          12,
+          13
+        ],
+        "mask": 16381,
+        "target": "RECOVERED"
+      }
+    ]
+  },
+  "results": [
+    {
+      "evidence_count": 2,
+      "expected": "RECOVERED",
+      "id": "complete-inclusion-consistency",
+      "match": true,
+      "status": "RECOVERED"
+    },
+    {
+      "evidence_count": 2,
+      "expected": "RECOVERED",
+      "id": "checkpoint-root-chain",
+      "match": true,
+      "status": "RECOVERED"
+    },
+    {
+      "evidence_count": 2,
+      "expected": "RECOVERED",
+      "id": "attested-key-rotation",
+      "match": true,
+      "status": "RECOVERED"
+    },
+    {
+      "evidence_count": 2,
+      "expected": "RECOVERED",
+      "id": "quorum-independent-observers",
+      "match": true,
+      "status": "RECOVERED"
+    },
+    {
+      "evidence_count": 2,
+      "expected": "RECOVERED",
+      "id": "delayed-proof-freshness-closed",
+      "match": true,
+      "status": "RECOVERED"
+    },
+    {
+      "evidence_count": 2,
+      "expected": "RECOVERED",
+      "id": "duplicate-inclusion-proof",
+      "match": true,
+      "status": "RECOVERED"
+    },
+    {
+      "evidence_count": 1,
+      "expected": "UNKNOWN",
+      "id": "root-not-attested",
+      "match": true,
+      "status": "UNKNOWN"
+    },
+    {
+      "evidence_count": 1,
+      "expected": "UNKNOWN",
+      "id": "leaf-canonicalization-missing",
+      "match": true,
+      "status": "UNKNOWN"
+    },
+    {
+      "evidence_count": 1,
+      "expected": "UNKNOWN",
+      "id": "inclusion-proof-missing",
+      "match": true,
+      "status": "UNKNOWN"
+    },
+    {
+      "evidence_count": 1,
+      "expected": "UNKNOWN",
+      "id": "consistency-proof-missing",
+      "match": true,
+      "status": "UNKNOWN"
+    },
+    {
+      "evidence_count": 1,
+      "expected": "UNKNOWN",
+      "id": "checkpoint-chain-gap",
+      "match": true,
+      "status": "UNKNOWN"
+    },
+    {
+      "evidence_count": 1,
+      "expected": "UNKNOWN",
+      "id": "root-sequence-gap",
+      "match": true,
+      "status": "UNKNOWN"
+    },
+    {
+      "evidence_count": 1,
+      "expected": "UNKNOWN",
+      "id": "epoch-transition-unproven",
+      "match": true,
+      "status": "UNKNOWN"
+    },
+    {
+      "evidence_count": 1,
+      "expected": "UNKNOWN",
+      "id": "quorum-not-closed",
+      "match": true,
+      "status": "UNKNOWN"
+    },
+    {
+      "evidence_count": 1,
+      "expected": "UNKNOWN",
+      "id": "observer-correlation",
+      "match": true,
+      "status": "UNKNOWN"
+    },
+    {
+      "evidence_count": 2,
+      "expected": "UNKNOWN",
+      "id": "freshness-open",
+      "match": true,
+      "status": "UNKNOWN"
+    },
+    {
+      "evidence_count": 1,
+      "expected": "UNKNOWN",
+      "id": "key-rotation-unattested",
+      "match": true,
+      "status": "UNKNOWN"
+    },
+    {
+      "evidence_count": 1,
+      "expected": "UNKNOWN",
+      "id": "algorithm-incompatible",
+      "match": true,
+      "status": "UNKNOWN"
+    },
+    {
+      "evidence_count": 2,
+      "expected": "UNKNOWN",
+      "id": "query-gap",
+      "match": true,
+      "status": "UNKNOWN"
+    },
+    {
+      "evidence_count": 1,
+      "expected": "UNKNOWN",
+      "id": "proof-gap",
+      "match": true,
+      "status": "UNKNOWN"
+    },
+    {
+      "evidence_count": 1,
+      "expected": "UNKNOWN",
+      "id": "identity-unresolved",
+      "match": true,
+      "status": "UNKNOWN"
+    },
+    {
+      "evidence_count": 1,
+      "expected": "UNKNOWN",
+      "id": "freshness-and-query-edge",
+      "match": true,
+      "status": "UNKNOWN"
+    },
+    {
+      "evidence_count": 1,
+      "expected": "REJECT",
+      "id": "identity-conflict",
+      "match": true,
+      "status": "REJECT"
+    },
+    {
+      "evidence_count": 1,
+      "expected": "REJECT",
+      "id": "root-fork-conflict",
+      "match": true,
+      "status": "REJECT"
+    },
+    {
+      "evidence_count": 1,
+      "expected": "REJECT",
+      "id": "proof-conflict",
+      "match": true,
+      "status": "REJECT"
+    },
+    {
+      "evidence_count": 1,
+      "expected": "REJECT",
+      "id": "stale-root-conflict",
+      "match": true,
+      "status": "REJECT"
+    }
+  ],
+  "schema_version": "S35-results-1",
+  "sources": [],
+  "status_distribution": {
+    "RECOVERED": 6,
+    "REJECT": 4,
+    "UNKNOWN": 16
+  },
+  "synthetic_only": true
+}

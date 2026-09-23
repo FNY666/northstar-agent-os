@@ -1,0 +1,181 @@
+{
+  "schema_version": "1.0",
+  "research_date": "2026-09-22",
+  "question": "What do official sources establish about continuity recovery after queue, digest, query, watch, history, or telemetry gaps?",
+  "scope": "Official first-party public documentation only; isolated /tmp; no production, credentials, protected targets, or shared directories.",
+  "coverage": [
+    "OpenTelemetry Collector resiliency and WAL",
+    "AWS CloudTrail digest validation",
+    "GitHub Actions query completeness",
+    "Kubernetes list-watch recovery",
+    "Temporal Event History and Visibility",
+    "Claude Agent SDK observability"
+  ],
+  "claims": [
+    {
+      "id": "S5-C1",
+      "status": "inferred",
+      "caveat": "Documentation evidence only; no production observation or pass claim.",
+      "confidence": "high",
+      "claim": "OpenTelemetry Collector documents queues, retry/backoff, WAL persistence and loss conditions.",
+      "sources": [
+        {
+          "url": "https://opentelemetry.io/docs/collector/resiliency/",
+          "publisher": "opentelemetry.io",
+          "published_or_updated": "accessed 2026-09-22; publication date not relied upon",
+          "tier": "primary",
+          "support": "OpenTelemetry Collector documents queues, retry/backoff, WAL persistence and loss conditions."
+        }
+      ]
+    },
+    {
+      "id": "S5-C2",
+      "status": "inferred",
+      "caveat": "Documentation evidence only; no production observation or pass claim.",
+      "confidence": "high",
+      "claim": "CloudTrail digest chains and validate-logs can identify integrity failures and unvalidated ranges within covered original S3 objects.",
+      "sources": [
+        {
+          "url": "https://docs.aws.amazon.com/awscloudtrail/latest/userguide/cloudtrail-log-file-validation-intro.html",
+          "publisher": "docs.aws.amazon.com",
+          "published_or_updated": "accessed 2026-09-22; publication date not relied upon",
+          "tier": "primary",
+          "support": "CloudTrail digest chains and validate-logs can identify integrity failures and unvalidated ranges within covered original S3 objects."
+        },
+        {
+          "url": "https://docs.aws.amazon.com/awscloudtrail/latest/userguide/cloudtrail-log-file-validation-cli.html",
+          "publisher": "docs.aws.amazon.com",
+          "published_or_updated": "accessed 2026-09-22; publication date not relied upon",
+          "tier": "primary",
+          "support": "CloudTrail digest chains and validate-logs can identify integrity failures and unvalidated ranges within covered original S3 objects."
+        },
+        {
+          "url": "https://docs.aws.amazon.com/awscloudtrail/latest/userguide/cloudtrail-log-file-validation-digest-file-structure.html",
+          "publisher": "docs.aws.amazon.com",
+          "published_or_updated": "accessed 2026-09-22; publication date not relied upon",
+          "tier": "primary",
+          "support": "CloudTrail digest chains and validate-logs can identify integrity failures and unvalidated ranges within covered original S3 objects."
+        }
+      ]
+    },
+    {
+      "id": "S5-C3",
+      "status": "inferred",
+      "caveat": "Documentation evidence only; no production observation or pass claim.",
+      "confidence": "high",
+      "claim": "GitHub Actions run/job/log/artifact enumeration has pagination, search-limit, expiration and separate-endpoint completeness hazards.",
+      "sources": [
+        {
+          "url": "https://docs.github.com/en/rest/actions/workflow-runs",
+          "publisher": "docs.github.com",
+          "published_or_updated": "accessed 2026-09-22; publication date not relied upon",
+          "tier": "primary",
+          "support": "GitHub Actions run/job/log/artifact enumeration has pagination, search-limit, expiration and separate-endpoint completeness hazards."
+        },
+        {
+          "url": "https://docs.github.com/en/rest/actions/workflow-jobs#list-jobs-for-a-workflow-run",
+          "publisher": "docs.github.com",
+          "published_or_updated": "accessed 2026-09-22; publication date not relied upon",
+          "tier": "primary",
+          "support": "GitHub Actions run/job/log/artifact enumeration has pagination, search-limit, expiration and separate-endpoint completeness hazards."
+        },
+        {
+          "url": "https://docs.github.com/en/rest/actions/artifacts",
+          "publisher": "docs.github.com",
+          "published_or_updated": "accessed 2026-09-22; publication date not relied upon",
+          "tier": "primary",
+          "support": "GitHub Actions run/job/log/artifact enumeration has pagination, search-limit, expiration and separate-endpoint completeness hazards."
+        },
+        {
+          "url": "https://docs.github.com/en/rest/using-the-rest-api/using-pagination-in-the-rest-api",
+          "publisher": "docs.github.com",
+          "published_or_updated": "accessed 2026-09-22; publication date not relied upon",
+          "tier": "primary",
+          "support": "GitHub Actions run/job/log/artifact enumeration has pagination, search-limit, expiration and separate-endpoint completeness hazards."
+        }
+      ]
+    },
+    {
+      "id": "S5-C4",
+      "status": "inferred",
+      "caveat": "Documentation evidence only; no production observation or pass claim.",
+      "confidence": "high",
+      "claim": "Kubernetes documents list pagination, resourceVersion watches, 410 recovery and limited best-effort Events.",
+      "sources": [
+        {
+          "url": "https://kubernetes.io/docs/reference/using-api/api-concepts/",
+          "publisher": "kubernetes.io",
+          "published_or_updated": "accessed 2026-09-22; publication date not relied upon",
+          "tier": "primary",
+          "support": "Kubernetes documents list pagination, resourceVersion watches, 410 recovery and limited best-effort Events."
+        },
+        {
+          "url": "https://kubernetes.io/docs/reference/kubernetes-api/cluster-resources/event-v1/",
+          "publisher": "kubernetes.io",
+          "published_or_updated": "accessed 2026-09-22; publication date not relied upon",
+          "tier": "primary",
+          "support": "Kubernetes documents list pagination, resourceVersion watches, 410 recovery and limited best-effort Events."
+        }
+      ]
+    },
+    {
+      "id": "S5-C5",
+      "status": "inferred",
+      "caveat": "Documentation evidence only; no production observation or pass claim.",
+      "confidence": "high",
+      "claim": "Temporal Event History/replay support recovery while Visibility is asynchronous/stale and approximate.",
+      "sources": [
+        {
+          "url": "https://docs.temporal.io/workflow-execution/event",
+          "publisher": "docs.temporal.io",
+          "published_or_updated": "accessed 2026-09-22; publication date not relied upon",
+          "tier": "primary",
+          "support": "Temporal Event History/replay support recovery while Visibility is asynchronous/stale and approximate."
+        },
+        {
+          "url": "https://docs.temporal.io/workflow-execution",
+          "publisher": "docs.temporal.io",
+          "published_or_updated": "accessed 2026-09-22; publication date not relied upon",
+          "tier": "primary",
+          "support": "Temporal Event History/replay support recovery while Visibility is asynchronous/stale and approximate."
+        },
+        {
+          "url": "https://docs.temporal.io/visibility",
+          "publisher": "docs.temporal.io",
+          "published_or_updated": "accessed 2026-09-22; publication date not relied upon",
+          "tier": "primary",
+          "support": "Temporal Event History/replay support recovery while Visibility is asynchronous/stale and approximate."
+        }
+      ]
+    },
+    {
+      "id": "S5-C6",
+      "status": "inferred",
+      "caveat": "Documentation evidence only; no production observation or pass claim.",
+      "confidence": "high",
+      "claim": "Claude Agent SDK observability documents independent OTel signals, batching, bounded flush, possible loss on forced termination and silent exporter errors.",
+      "sources": [
+        {
+          "url": "https://code.claude.com/docs/en/agent-sdk/observability",
+          "publisher": "code.claude.com",
+          "published_or_updated": "accessed 2026-09-22; publication date not relied upon",
+          "tier": "primary",
+          "support": "Claude Agent SDK observability documents independent OTel signals, batching, bounded flush, possible loss on forced termination and silent exporter errors."
+        }
+      ]
+    },
+    {
+      "id": "S5-C7",
+      "status": "unverified",
+      "caveat": "Documentation evidence only; no production observation or pass claim.",
+      "confidence": "high",
+      "claim": "No cited official documentation alone proves a particular deployment is lossless, exactly-once, continuously covered, or production-ready.",
+      "sources": []
+    }
+  ],
+  "limitations": [
+    "Documentation evidence is not production observation.",
+    "External effect and business postcondition require independent target read-back.",
+    "A missing record remains UNKNOWN unless generation, query, exporter, retention and latency boundaries are independently proven."
+  ]
+}

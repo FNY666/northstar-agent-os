@@ -1,0 +1,148 @@
+{
+  "cases": [
+    {
+      "category": "VERIFIED_CONTINUITY",
+      "id": "S30-01",
+      "state": "RECOVERED"
+    },
+    {
+      "category": "NO_EVENT",
+      "id": "S30-02",
+      "state": "UNKNOWN"
+    },
+    {
+      "category": "DELAYED",
+      "id": "S30-03",
+      "state": "UNKNOWN"
+    },
+    {
+      "category": "DROPPED",
+      "id": "S30-04",
+      "state": "UNKNOWN"
+    },
+    {
+      "category": "EXPORTER_FAILURE",
+      "id": "S30-05",
+      "state": "UNKNOWN"
+    },
+    {
+      "category": "QUERY_GAP",
+      "id": "S30-06",
+      "state": "UNKNOWN"
+    },
+    {
+      "category": "RETENTION_EXPIRED",
+      "id": "S30-07",
+      "state": "UNKNOWN"
+    },
+    {
+      "category": "VERIFIED_CONTINUITY",
+      "id": "S30-08",
+      "state": "RECOVERED"
+    },
+    {
+      "category": "UNKNOWN",
+      "id": "S30-09",
+      "state": "UNKNOWN"
+    },
+    {
+      "category": "REJECT_PAYLOAD_CONFLICT",
+      "id": "S30-10",
+      "state": "REJECT"
+    },
+    {
+      "category": "REJECT_FENCE_FORK",
+      "id": "S30-11",
+      "state": "REJECT"
+    },
+    {
+      "category": "UNKNOWN_OVERLAP_ONLY",
+      "id": "S30-12",
+      "state": "UNKNOWN"
+    },
+    {
+      "category": "UNKNOWN_CURSOR_SKIP_RETENTION",
+      "id": "S30-13",
+      "state": "UNKNOWN"
+    }
+  ],
+  "minimizer": {
+    "method": "single-gate exhaustive minimizer",
+    "results": {
+      "cursor_jump": {
+        "active_gates": [
+          "cursor_jump"
+        ],
+        "state": "UNKNOWN"
+      },
+      "fence_continuous": {
+        "active_gates": [
+          "fence_continuous"
+        ],
+        "state": "UNKNOWN"
+      },
+      "fence_fork": {
+        "active_gates": [
+          "fence_fork"
+        ],
+        "state": "REJECT"
+      },
+      "fence_merge": {
+        "active_gates": [
+          "fence_merge"
+        ],
+        "state": "UNKNOWN"
+      },
+      "missing_page": {
+        "active_gates": [
+          "missing_page"
+        ],
+        "state": "UNKNOWN"
+      },
+      "payload_conflict": {
+        "active_gates": [
+          "payload_conflict"
+        ],
+        "state": "REJECT"
+      },
+      "query_gap": {
+        "active_gates": [
+          "query_gap"
+        ],
+        "state": "UNKNOWN"
+      },
+      "replay_truncated": {
+        "active_gates": [
+          "replay_truncated"
+        ],
+        "state": "UNKNOWN"
+      },
+      "retention_complete": {
+        "active_gates": [
+          "retention_complete"
+        ],
+        "state": "UNKNOWN"
+      }
+    }
+  },
+  "property_sweep": {
+    "combinations": 256,
+    "counts": {
+      "RECOVERED": 8,
+      "REJECT": 0,
+      "UNKNOWN": 248
+    },
+    "fields": [
+      "cursor_jump",
+      "overlap_page",
+      "retention_complete",
+      "fence_merge",
+      "out_of_order",
+      "duplicate",
+      "missing_page",
+      "fence_continuous"
+    ],
+    "violations": []
+  },
+  "schema_version": "S30-harness-1"
+}

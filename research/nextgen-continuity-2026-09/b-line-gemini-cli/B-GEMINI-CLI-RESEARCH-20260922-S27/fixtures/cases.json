@@ -1,0 +1,28 @@
+{
+  "schema_version": "S27-fixtures-v1",
+  "synthetic_only": true,
+  "production_verified": false,
+  "worker_count": 1,
+  "op_id": "s27-op-0001",
+  "fixture_count": 18,
+  "fixtures": [
+    {"fixture_id":"S27-F01","op_id":"s27-op-0001","order":["record_append","response_emission","durable_reference_emission"],"cut_stage":"record_append","cut_phase":"before","expected_status":"rejected"},
+    {"fixture_id":"S27-F02","op_id":"s27-op-0001","order":["record_append","response_emission","durable_reference_emission"],"cut_stage":"record_append","cut_phase":"after","expected_status":"UNKNOWN"},
+    {"fixture_id":"S27-F03","op_id":"s27-op-0001","order":["record_append","response_emission","durable_reference_emission"],"cut_stage":"response_emission","cut_phase":"before","expected_status":"UNKNOWN"},
+    {"fixture_id":"S27-F04","op_id":"s27-op-0001","order":["record_append","response_emission","durable_reference_emission"],"cut_stage":"response_emission","cut_phase":"after","expected_status":"UNKNOWN"},
+    {"fixture_id":"S27-F05","op_id":"s27-op-0001","order":["record_append","response_emission","durable_reference_emission"],"cut_stage":"durable_reference_emission","cut_phase":"before","expected_status":"UNKNOWN"},
+    {"fixture_id":"S27-F06","op_id":"s27-op-0001","order":["record_append","response_emission","durable_reference_emission"],"cut_stage":"durable_reference_emission","cut_phase":"after","expected_status":"accepted"},
+    {"fixture_id":"S27-F07","op_id":"s27-op-0001","order":["durable_reference_emission","response_emission","record_append"],"cut_stage":"durable_reference_emission","cut_phase":"before","expected_status":"rejected"},
+    {"fixture_id":"S27-F08","op_id":"s27-op-0001","order":["durable_reference_emission","response_emission","record_append"],"cut_stage":"durable_reference_emission","cut_phase":"after","expected_status":"UNKNOWN"},
+    {"fixture_id":"S27-F09","op_id":"s27-op-0001","order":["durable_reference_emission","response_emission","record_append"],"cut_stage":"response_emission","cut_phase":"before","expected_status":"UNKNOWN"},
+    {"fixture_id":"S27-F10","op_id":"s27-op-0001","order":["durable_reference_emission","response_emission","record_append"],"cut_stage":"response_emission","cut_phase":"after","expected_status":"UNKNOWN"},
+    {"fixture_id":"S27-F11","op_id":"s27-op-0001","order":["durable_reference_emission","response_emission","record_append"],"cut_stage":"record_append","cut_phase":"before","expected_status":"UNKNOWN"},
+    {"fixture_id":"S27-F12","op_id":"s27-op-0001","order":["durable_reference_emission","response_emission","record_append"],"cut_stage":"record_append","cut_phase":"after","expected_status":"UNKNOWN"},
+    {"fixture_id":"S27-F13","op_id":"s27-op-0001","order":["record_append","durable_reference_emission","response_emission"],"cut_stage":"record_append","cut_phase":"before","expected_status":"rejected"},
+    {"fixture_id":"S27-F14","op_id":"s27-op-0001","order":["record_append","durable_reference_emission","response_emission"],"cut_stage":"record_append","cut_phase":"after","expected_status":"UNKNOWN"},
+    {"fixture_id":"S27-F15","op_id":"s27-op-0001","order":["record_append","durable_reference_emission","response_emission"],"cut_stage":"durable_reference_emission","cut_phase":"before","expected_status":"UNKNOWN"},
+    {"fixture_id":"S27-F16","op_id":"s27-op-0001","order":["record_append","durable_reference_emission","response_emission"],"cut_stage":"durable_reference_emission","cut_phase":"after","expected_status":"accepted"},
+    {"fixture_id":"S27-F17","op_id":"s27-op-0001","order":["record_append","durable_reference_emission","response_emission"],"cut_stage":"response_emission","cut_phase":"before","expected_status":"accepted"},
+    {"fixture_id":"S27-F18","op_id":"s27-op-0001","order":["record_append","durable_reference_emission","response_emission"],"cut_stage":"response_emission","cut_phase":"after","expected_status":"accepted"}
+  ]
+}

@@ -1,0 +1,24 @@
+{
+  "schema_version": "1.0",
+  "question": "在离线合成证据中，何时多渠道通知的 notification/decision/recipient/version、delivery attempt/receipt、retry/dedup、ack/deadline/escalation、coverage/order/readback/audit 能够闭合最终决定传播连续性，何时必须保持 UNKNOWN 或 REJECT？",
+  "scope": {
+    "project": "C-line S62",
+    "mode": "offline synthetic fixtures",
+    "date": "2026-09-23",
+    "excluded": ["S1-S61", "production", "network", "real services", "credentials"],
+    "identity_domain": ["project", "decision_id", "notification_id", "recipient_id", "channel", "version"],
+    "notification_domain": ["recipient_set", "payload_digest", "attempt", "receipt", "retry", "dedup", "ack", "deadline", "escalation", "fallback", "coverage", "order", "readback", "audit"]
+  },
+  "claims_status": "inferred",
+  "synthetic_only": true,
+  "production_verified": false,
+  "sources": [],
+  "claims": [
+    {"id":"notification-closure","claim":"只有 notification/decision/recipient/version、channel/payload/attempt/receipt、retry/dedup、ack/deadline/escalation/fallback、coverage/order/readback/audit 全部闭合时才可 RECOVERED。","status":"inferred","confidence":"bounded","sources":[],"caveat":"仅由本地合成夹具和规则推导，不代表生产系统。"},
+    {"id":"single-ack-not-coverage-proof","claim":"发送成功、2xx、单个ack或升级请求不能证明所有recipient收到并采用正确版本；必须逐recipient对账和最终read-back。","status":"inferred","confidence":"bounded","sources":[],"caveat":"未验证任何真实通知系统。"},
+    {"id":"delivery-unknown","claim":"recipient/channel/receipt/ack/deadline/escalation/retry/coverage/order 或最终状态未知时必须 UNKNOWN。","status":"inferred","confidence":"bounded","sources":[],"caveat":"布尔门不量化真实通知漏达风险。"},
+    {"id":"notification-conflict-reject","claim":"身份冲突和同一recipient/version不可调和的通知终态冲突必须 REJECT。","status":"inferred","confidence":"bounded","sources":[],"caveat":"只验证合成判定逻辑，不证明目标系统执行拒绝。"}
+  ],
+  "coverage": {"cases": 29, "property_sweep": 16777216, "dimensions": 24, "statuses": ["RECOVERED", "UNKNOWN", "REJECT"], "events": ["NOTIFICATION", "RECIPIENT_SET", "CHANNEL", "PAYLOAD_DIGEST", "ATTEMPT", "RECEIPT", "RETRY", "DEDUP", "ACK", "DEADLINE", "ESCALATION", "FALLBACK", "COVERAGE", "ORDER", "READBACK", "AUDIT", "NO_EVENT", "UNKNOWN"]},
+  "notes": "三态互斥并 fail-closed；RECOVERED 仅代表本片离线夹具中的 notification evidence gate 闭合，不代表 production continuity、external effect 或 exactly-once。"
+}

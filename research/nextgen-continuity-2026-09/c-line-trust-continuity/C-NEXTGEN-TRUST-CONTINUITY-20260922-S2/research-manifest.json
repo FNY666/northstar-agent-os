@@ -1,0 +1,225 @@
+{
+  "schema_version": "1.0",
+  "question": "What public, official, primary-source evidence exists for next-gen agent identity/authorization continuity across cancellation, timeout, stream disconnection, permission change, and recovery, plus resource-side rejection of stale writers?",
+  "scope": {
+    "time_window": "accessed 2026-09-22T07:53Z to 2026-09-22T08:00Z",
+    "geography_or_context": "protocol/cloud documentation; agent-systems trust continuity (public official primary sources only)",
+    "inclusions": [
+      "IETF RFCs 6749, 7009, 7662, 8693, 8705, 9449, 9700",
+      "OpenID Connect Core 1.0 (openid.net)",
+      "kubernetes.io official docs (API concepts, leases)",
+      "AWS S3 conditional requests, AWS Step Functions StopExecution",
+      "GCP Cloud Storage request preconditions, GCP Workflows execute",
+      "Azure Blob conditional headers (Microsoft Learn)"
+    ],
+    "exclusions": [
+      "blog posts, vendor marketing claims, synthetic fixtures, incident reports",
+      "any non-primary or third-party reproduction",
+      "credentials, cookies, private URLs, or sensitive data (task constraint)"
+    ]
+  },
+  "claims": [
+    {
+      "id": "C1",
+      "label": "verified",
+      "claim": "In OIDC, the combined iss+sub claims are the only stable, never-reassigned end-user identifier within an issuer; all other claims (email, preferred_username) carry no cross-issuer or time-stability guarantees.",
+      "status": "confirmed",
+      "confidence": "high",
+      "sources": [
+        {"url": "https://openid.net/specs/openid-connect-core-1_0.html", "publisher": "OpenID Foundation", "published_or_updated": "2014-04-01 (Core 1.0)", "tier": "primary", "support": "Section 5.7 Claim Stability and Uniqueness: 'sub' MUST be locally unique and never reassigned within the Issuer; only iss+sub combination is a guaranteed stable identifier."}
+      ],
+      "caveat": "Guarantee is scoped to a single issuer; cross-issuer continuity is not addressed by OIDC Core."
+    },
+    {
+      "id": "C2",
+      "label": "verified",
+      "claim": "OAuth 2.0 token revocation: refresh-token revocation SHOULD cascade to invalidate all related access tokens on the same grant; invalidation is immediate in the implementation but a propagation delay across servers may exist.",
+      "status": "confirmed",
+      "confidence": "high",
+      "sources": [
+        {"url": "https://www.rfc-editor.org/rfc/rfc7009.txt", "publisher": "IETF (RFC 7009)", "published_or_updated": "2013-08", "tier": "primary", "support": "Section 2: refresh token revocation SHOULD cascade; Section 2.2: 'invalidation takes place immediately ... in practice, there could be a propagation delay ... some servers know about the invalidation while others do not.'"}
+      ],
+      "caveat": "Propagation window is explicitly unbounded; a stale edge can still honor a revoked token for some period after revocation."
+    },
+    {
+      "id": "C3",
+      "label": "verified",
+      "claim": "OAuth 2.0 token introspection returns a live `active` boolean; a resource server MUST treat an unknown or `active=false` token as not authorized; the resource can re-check authorization on every request rather than caching the old grant.",
+      "status": "confirmed",
+      "confidence": "high",
+      "sources": [
+        {"url": "https://www.rfc-editor.org/rfc/rfc7662.txt", "publisher": "IETF (RFC 7662)", "published_or_updated": "2015-10", "tier": "primary", "support": "Section 2.2: active is 'REQUIRED ... currently active'; 'has not been revoked by the resource owner, and is within its given time window of validity.'"}
+      ],
+      "caveat": "Introspection narrows the stale-grant window; it is a query primitive, not a fencing guarantee."
+    },
+    {
+      "id": "C4",
+      "label": "inferred",
+      "claim": "After a permission change or revocation, an agent that reconnects with the old access token may still be honored by a stale edge until propagation completes; the standards require the agent to treat any 401/inactive as a normal recovery transition, not a cached error.",
+      "status": "inferred",
+      "confidence": "medium",
+      "sources": [
+        {"url": "https://www.rfc-editor.org/rfc/rfc7009.txt", "publisher": "IETF (RFC 7009)", "published_or_updated": "2013-08", "tier": "primary", "support": "'A client compliant with [RFC 6749] must be prepared to handle unexpected token invalidation at any time.'"}
+      ],
+      "caveat": "Inference; the RFC does not specify agent-side reconnection semantics. DPoP/OIDC tokens do not by themselves close the propagation gap."
+    },
+    {
+      "id": "C5",
+      "label": "verified",
+      "claim": "DPoP binds an access token (and, for public clients, refresh tokens) to a public key via a per-request proof JWT; a rotated token value requires a fresh proof; server-issued nonces limit proof lifetime and reject pre-computed/replayed proofs.",
+      "status": "confirmed",
+      "confidence": "high",
+      "sources": [
+        {"url": "https://www.rfc-editor.org/rfc/rfc9449.txt", "publisher": "IETF (RFC 9449)", "published_or_updated": "2023-11", "tier": "primary", "support": "Section 2: primary aim is sender-constraint via key binding. Section 7 (ath): 'a rotated token value would require the calculation of a new proof.' Section 8: nonce limits proof lifetime; nonce mismatch triggers use_dpop_nonce + retry."}
+      ],
+      "caveat": "DPoP constrains who can present a token; it does not assert the grant's scope is still current. Not an authorization check, not a fencing token."
+    },
+    {
+      "id": "C6",
+      "label": "verified",
+      "claim": "OAuth 2.0 Token Exchange (RFC 8693) `act` claim: nested `act` objects express a delegation history trail; access-control consumers MUST only use top-level claims + the current actor; nested `act` is informational only.",
+      "status": "confirmed",
+      "confidence": "high",
+      "sources": [
+        {"url": "https://www.rfc-editor.org/rfc/rfc8693.txt", "publisher": "IETF (RFC 8693)", "published_or_updated": "2019-10", "tier": "primary", "support": "Section 1.1 (delegation vs impersonation), Section 4.1 (act claim): 'Prior actors identified by any nested act claims are informational only and are not to be considered in access control decisions.'"}
+      ],
+      "caveat": "How a resource enforces actor-specific scopes is at AS/RS policy, not specified further in the RFC."
+    },
+    {
+      "id": "C7",
+      "label": "verified",
+      "claim": "Kubernetes optimistic concurrency: a PUT/PATCH carrying a stale resourceVersion returns 409 Conflict; the API server uses the resourceVersion to 'detect lost updates and reject requests made by a client that is out of date with the cluster.'",
+      "status": "confirmed",
+      "confidence": "high",
+      "sources": [
+        {"url": "https://kubernetes.io/docs/reference/using-api/api-concepts/", "publisher": "Kubernetes official documentation", "published_or_updated": "2026-09 (v1.37 docs)", "tier": "primary", "support": "Section 'Updates — Choosing an update mechanism': 'Kubernetes uses that resourceVersion information so that the API server can detect lost updates and reject requests made by a client that is out of date with the cluster ... the API server returns a 409 Conflict error response.'"}
+      ],
+      "caveat": "CAS rejection applies to API-level writes only; it does not fence external side-effects already dispatched by a stale writer. It is not exactly-once."
+    },
+    {
+      "id": "C8",
+      "label": "inferred",
+      "claim": "Kubernetes Lease objects (coordination.k8s.io) are coordination primitives for leader election and node heartbeats; they do not by themselves fence writes to arbitrary resources. Fencing in practice comes from the resourceVersion CAS layer. The lock-release-on-exit feature is Alpha (v1.36), disabled by default.",
+      "status": "inferred",
+      "confidence": "medium",
+      "sources": [
+        {"url": "https://kubernetes.io/docs/concepts/architecture/leases/", "publisher": "Kubernetes official documentation", "published_or_updated": "2026-09 (v1.37 docs)", "tier": "primary", "support": "'provide a mechanism to lock shared resources and coordinate activity between members of a set.' Lock-release-on-exit: 'Feature state: Alpha since Kubernetes v1.36; disabled by default.'"}
+      ],
+      "caveat": "A Lease is not a fencing token. It is a coordination mechanism. No K8s doc in this slice asserts Lease = production fencing."
+    },
+    {
+      "id": "C9",
+      "label": "verified",
+      "claim": "AWS S3 conditional writes: If-None-Match:* prevents overwrite of an existing object; If-Match:<etag> performs CAS update. 'This prevents unintentional overwrites on an object without knowing the state of its content.'",
+      "status": "confirmed",
+      "confidence": "high",
+      "sources": [
+        {"url": "https://docs.aws.amazon.com/AmazonS3/latest/userguide/conditional-requests.html", "publisher": "AWS (S3 User Guide)", "published_or_updated": "2026 (current)", "tier": "primary", "support": "'Conditional writes can ensure there is no existing object with the same key name ... prevents overwriting of existing objects with identical key names. Similarly ... check if an object's ETag is unchanged before updating the object. This prevents unintentional overwrites.'"}
+      ],
+      "caveat": "ETag CAS is optimistic concurrency control; a stale writer that ignores the 412/409 and retries with a fresh GET can succeed. Not exactly-once delivery."
+    },
+    {
+      "id": "C10",
+      "label": "verified",
+      "claim": "GCP Cloud Storage request preconditions: ifGenerationMatch and ifMetagenerationMatch fail with 412 when the value does not match; generation changes on every object replacement, making it a per-write version counter.",
+      "status": "confirmed",
+      "confidence": "high",
+      "sources": [
+        {"url": "https://cloud.google.com/storage/docs/request-preconditions", "publisher": "Google Cloud (Cloud Storage docs)", "published_or_updated": "2026 (current)", "tier": "primary", "support": "'ifGenerationMatch ... Request proceeds if the generation of the target resource matches the value used in the precondition. If the values don't match, the request fails with a 412 Precondition Failed response.'"}
+      ],
+      "caveat": "Generation CAS is per-object-store; it does not fence external side-effects. Not a fencing token."
+    },
+    {
+      "id": "C11",
+      "label": "verified",
+      "claim": "Azure Blob conditional headers: If-Match (ETag) and If-None-Match (ETag or * wildcard); wildcard * means 'perform only if the resource does not exist, and fail the operation if it does exist.' Multiple conditional headers evaluate as a logical expression; any false → 412.",
+      "status": "confirmed",
+      "confidence": "high",
+      "sources": [
+        {"url": "https://learn.microsoft.com/en-us/rest/api/storageservices/specifying-conditional-headers-for-blob-service-operations", "publisher": "Microsoft Learn (Azure Blob REST API)", "published_or_updated": "2026 (current)", "tier": "primary", "support": "'If-None-Match ... Specify the wildcard character (*) to perform the operation only if the resource doesn't exist, and fail the operation if it does exist.' Multiple header combinations evaluated per a documented expression; 412 on any failure."}
+      ],
+      "caveat": "ETag CAS is optimistic concurrency control, not fencing, not exactly-once."
+    },
+    {
+      "id": "C12",
+      "label": "verified",
+      "claim": "AWS Step Functions StopExecution stops a running execution; the API is not supported for EXPRESS state machines; optional error/cause fields are KMS-encrypted for encrypted executions.",
+      "status": "confirmed",
+      "confidence": "high",
+      "sources": [
+        {"url": "https://docs.aws.amazon.com/step-functions/latest/apireference/API_StopExecution.html", "publisher": "AWS (Step Functions API Reference)", "published_or_updated": "2026 (current)", "tier": "primary", "support": "'Stops an execution. This API action is not supported by EXPRESS state machines.' Request parameters: executionArn, error, cause."}
+      ],
+      "caveat": "Docs do not specify whether in-flight task callbacks are aborted or complete in the background. Cancellation ≠ credential revocation; no Step Functions doc in this slice binds StopExecution to in-flight OAuth/DPoP token invalidation."
+    },
+    {
+      "id": "C13",
+      "label": "unknown",
+      "claim": "GCP Cloud Workflows has a first-class cancel/stop/terminate API for a running workflow execution.",
+      "status": "unverified",
+      "confidence": "low",
+      "sources": [],
+      "caveat": "Negative result: page https://cloud.google.com/workflows/docs/executing-workflow fetched 2026-09-22; 'Stop a workflow', 'cancel', 'terminated' all absent. Not searched across all GCP Workflows docs. Marked unknown, not accessed."
+    },
+    {
+      "id": "C14",
+      "label": "unknown",
+      "claim": "After a timeout-triggered restart, a serverless agent (GCP Cloud Run, Azure Functions) re-authenticates via a fresh service-account token rather than reusing a cached JWT.",
+      "status": "unverified",
+      "confidence": "low",
+      "sources": [],
+      "caveat": "Not searched in this slice. No primary source fetched. Marked unknown / not searched."
+    },
+    {
+      "id": "C15",
+      "label": "inferred",
+      "claim": "No public primary standard in this slice defines a 'timeout-then-reconnect identity continuity' guarantee for agent frameworks. The closest mechanisms are: OIDC refresh-token reissue, DPoP nonce re-challenge, and workflow resumption callbacks (GCP Workflows, linked but not fetched).",
+      "status": "inferred",
+      "confidence": "medium",
+      "sources": [
+        {"url": "https://openid.net/specs/openid-connect-core-1_0.html", "publisher": "OpenID Foundation", "published_or_updated": "2014-04-01", "tier": "primary", "support": "Section 11 (Offline Access) + Section 12 (Using Refresh Tokens): refresh token used to request a new access token without further user interaction."}
+      ],
+      "caveat": "Synthesis inference from the absence of a dedicated standard; GCP Workflows callback doc (S16) not yet fetched."
+    },
+    {
+      "id": "C16",
+      "label": "verified",
+      "claim": "RFC 9700 §4.10.1 identifies two sender-constrained token mechanisms in use: mutual-TLS certificate-bound tokens (RFC 8705) and DPoP (RFC 9449). 'Sender-constrained tokens at least protect against the use of the token when the client is offline' — security is undermined if both token and key material are compromised.",
+      "status": "confirmed",
+      "confidence": "high",
+      "sources": [
+        {"url": "https://www.rfc-editor.org/rfc/rfc9700.txt", "publisher": "IETF (RFC 9700, OAuth 2.0 BCP)", "published_or_updated": "2024-11", "tier": "primary", "support": "Section 4.10.1: 'Two methods for sender-constrained access tokens using proof of possession have been defined ... RFC8705 ... RFC9449.' 'If the key material is protected in a hardware or software security module ... sender-constrained tokens at least protect against the use of the token when the client is offline.'"}
+      ],
+      "caveat": "Sender-constraint is not authorization; it is a presentation-boundary control. Token possession + key possession together defeat it (RFC 9700 §4.10.1 note)."
+    },
+    {
+      "id": "C17",
+      "label": "verified",
+      "claim": "RFC 8705: mutual-TLS client authentication associates the client's X.509 certificate fingerprint with the token at issuance; certificate-bound refresh tokens are indirectly bound via the client ID. Resource server verifies the fingerprint at request time.",
+      "status": "confirmed",
+      "confidence": "high",
+      "sources": [
+        {"url": "https://www.rfc-editor.org/rfc/rfc8705.txt", "publisher": "IETF (RFC 8705)", "published_or_updated": "2020-02", "tier": "primary", "support": "Section 3: mutual-TLS client certificate-bound access tokens; Section 7.1: 'Certificate-Bound Refresh Tokens' — refresh tokens are 'indirectly certificate-bound by way of the client ID'."}
+      ],
+      "caveat": "Fingerprint binding is per-token-issuance; a refresh on a different TLS connection with a different certificate fails the check. This is a transport-layer sender constraint, not an authorization check."
+    }
+  ],
+  "coverage": {
+    "searched": [
+      "IETF RFC 6749, 7009, 7662, 8693, 8705, 9449, 9700 (rfc-editor.org, all 200)",
+      "OpenID Connect Core 1.0 (openid.net, 200)",
+      "Kubernetes official docs: api-concepts, leases (kubernetes.io, both 200)",
+      "AWS S3 conditional-requests user guide (docs.aws.amazon.com, 200)",
+      "GCP Cloud Storage request-preconditions (cloud.google.com, 200)",
+      "Azure Blob conditional headers (learn.microsoft.com, 200)",
+      "AWS Step Functions StopExecution API (docs.aws.amazon.com, 200)",
+      "GCP Workflows executing-workflow doc (cloud.google.com, 200)"
+    ],
+    "inaccessible": [
+      "Temporal cancellation doc (docs.temporal.io): 404 on 2026-09-22 — not substituted"
+    ],
+    "unresolved_conflicts": [
+      "C-1 (RFC 7009 §2.2): 'invalidation takes place immediately' vs 'propagation delay may exist' — documented conflict, window unbounded",
+      "C-2 (K8s Lease): Lease coordination primitive vs resourceVersion CAS as the actual write-rejection layer — not a direct text conflict; semantic layering (inferred)"
+    ]
+  }
+}

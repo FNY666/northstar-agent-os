@@ -1,0 +1,26 @@
+{
+  "schema_version": "1.0",
+  "synthetic_only": true,
+  "production_verified": false,
+  "question": "What deterministic outcomes arise when a local checkpoint/ack state machine is crash-cut across prepared, journaled, acknowledged, replayed, and reconciled, including bounded retries and contradiction cases?",
+  "scope": {
+    "included": ["offline deterministic simulation", "15 fixtures", "crash cuts", "bounded retry budget", "idempotency collision", "stale checkpoint", "operator abort", "duplicate replay", "conflicting acknowledgement", "fail-closed vs fail-open"],
+    "excluded": ["network", "real services", "credentials", "SDKs", "filesystem durability", "remote state", "exactly-once", "rollback", "immutable audit", "production readiness", "prohibited prior artifacts"]
+  },
+  "claims": [
+    {"id":"C1","claim":"A clean modeled path reaches reconciled and returns ACCEPT.","status":"inferred","confidence":"high","sources":[],"caveat":"This is a deterministic local harness outcome, not external system evidence."},
+    {"id":"C2","claim":"Crash cuts and missing acknowledgement preserve UNKNOWN in raw output.","status":"inferred","confidence":"high","sources":[],"caveat":"Local model classification only; not real crash behavior."},
+    {"id":"C3","claim":"Collision, stale checkpoint, abort, and conflicting inputs return REJECT in this model.","status":"inferred","confidence":"high","sources":[],"caveat":"Authored fixture semantics only."},
+    {"id":"C4","claim":"Local simulation does not establish external durability, remote state, exactly-once, rollback, immutable audit, or production readiness.","status":"unverified","confidence":"high","sources":[],"caveat":"Explicit limitations of scope, not empirical production findings."}
+  ],
+  "coverage": {
+    "fixture_count": 15,
+    "required_fixture_count": 12,
+    "states": ["prepared", "journaled", "acknowledged", "replayed", "reconciled"],
+    "crash_cut": true,
+    "evidence_classes": ["confirmed", "inferred", "unverified", "conflicting", "inaccessible"],
+    "raw_statuses": ["ACCEPT", "REJECT", "UNKNOWN"],
+    "policies": ["fail-closed", "fail-open"]
+  },
+  "artifacts": ["REPORT.md", "sources.md", "harness.py", "fixtures/cases.json", "outputs/results.json", "validator.py", "manifest_validator.py", "SHA256SUMS"]
+}

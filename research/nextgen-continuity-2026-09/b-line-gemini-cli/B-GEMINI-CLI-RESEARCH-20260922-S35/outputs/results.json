@@ -1,0 +1,496 @@
+{
+  "declared_operations": [
+    "P",
+    "Q",
+    "R"
+  ],
+  "fixture_count": 24,
+  "operation_set": [
+    "P",
+    "Q",
+    "R",
+    "X"
+  ],
+  "production_verified": false,
+  "results": [
+    {
+      "canonical_input_sha256": "eaf11655f747516337ddd7839ef5773047cddc92d0ce8249559324d5c7de2d2e",
+      "conflict": false,
+      "consistent": true,
+      "fixture_id": "F01",
+      "impl_A": {
+        "impl_id": "impl-A",
+        "verdicts": {
+          "e01": "accepted"
+        }
+      },
+      "impl_B": {
+        "impl_id": "impl-B",
+        "verdicts": {
+          "e01": "accepted"
+        }
+      },
+      "interop": "INTEROP_OK"
+    },
+    {
+      "canonical_input_sha256": "c8fd2b162269cd14d0e7243685b734b34dc59dbfc46ef521f9db0b597a27113a",
+      "conflict": false,
+      "consistent": true,
+      "fixture_id": "F02",
+      "impl_A": {
+        "impl_id": "impl-A",
+        "verdicts": {
+          "e02": "accepted"
+        }
+      },
+      "impl_B": {
+        "impl_id": "impl-B",
+        "verdicts": {
+          "e02": "accepted"
+        }
+      },
+      "interop": "INTEROP_OK"
+    },
+    {
+      "canonical_input_sha256": "40b9c8881a5bdafd30fd4f3aec82fce46c1d4d2629b0b0a94af662628ae10403",
+      "conflict": false,
+      "consistent": true,
+      "fixture_id": "F03",
+      "impl_A": {
+        "impl_id": "impl-A",
+        "verdicts": {
+          "e03": "accepted"
+        }
+      },
+      "impl_B": {
+        "impl_id": "impl-B",
+        "verdicts": {
+          "e03": "accepted"
+        }
+      },
+      "interop": "INTEROP_OK"
+    },
+    {
+      "canonical_input_sha256": "7f746bd598d3eed971f33f23ead5ee78c54dcbb1a299f259e0d95280e7daee9a",
+      "conflict": false,
+      "consistent": true,
+      "fixture_id": "F04",
+      "impl_A": {
+        "impl_id": "impl-A",
+        "verdicts": {
+          "e04": "rejected"
+        }
+      },
+      "impl_B": {
+        "impl_id": "impl-B",
+        "verdicts": {
+          "e04": "rejected"
+        }
+      },
+      "interop": "INTEROP_OK"
+    },
+    {
+      "canonical_input_sha256": "f02ef38c58a2967cf070a0e5960c9277823f14cdd73946c38583dc32d025c835",
+      "conflict": false,
+      "consistent": true,
+      "fixture_id": "F05",
+      "impl_A": {
+        "impl_id": "impl-A",
+        "verdicts": {
+          "e05": "rejected"
+        }
+      },
+      "impl_B": {
+        "impl_id": "impl-B",
+        "verdicts": {
+          "e05": "rejected"
+        }
+      },
+      "interop": "INTEROP_OK"
+    },
+    {
+      "canonical_input_sha256": "54d3399ed4343a1d343ef9dfe392f2611cfd85b7dacb66a1b6a97c5a301ee80e",
+      "conflict": false,
+      "consistent": true,
+      "fixture_id": "F06",
+      "impl_A": {
+        "impl_id": "impl-A",
+        "verdicts": {
+          "e06": "rejected"
+        }
+      },
+      "impl_B": {
+        "impl_id": "impl-B",
+        "verdicts": {
+          "e06": "rejected"
+        }
+      },
+      "interop": "INTEROP_OK"
+    },
+    {
+      "canonical_input_sha256": "cf0f5f161dbec2a9307f8901022f9121115fa7672312c3ee9759b86f04ff3582",
+      "conflict": false,
+      "consistent": true,
+      "fixture_id": "F07",
+      "impl_A": {
+        "impl_id": "impl-A",
+        "verdicts": {
+          "e07": "UNKNOWN"
+        }
+      },
+      "impl_B": {
+        "impl_id": "impl-B",
+        "verdicts": {
+          "e07": "UNKNOWN"
+        }
+      },
+      "interop": "INTEROP_OK"
+    },
+    {
+      "canonical_input_sha256": "4c4985946eabfc90a9d8999377b76b85a70bb90238e32d06408b51501fd0c56c",
+      "conflict": false,
+      "consistent": true,
+      "fixture_id": "F08",
+      "impl_A": {
+        "impl_id": "impl-A",
+        "verdicts": {
+          "e08": "UNKNOWN"
+        }
+      },
+      "impl_B": {
+        "impl_id": "impl-B",
+        "verdicts": {
+          "e08": "UNKNOWN"
+        }
+      },
+      "interop": "INTEROP_OK"
+    },
+    {
+      "canonical_input_sha256": "e34c7b2580cf46a920c305d56fad2be0f5f8a372a9e5b6e21bc05509019f6261",
+      "conflict": false,
+      "consistent": true,
+      "fixture_id": "F09",
+      "impl_A": {
+        "impl_id": "impl-A",
+        "verdicts": {
+          "e09": "UNKNOWN"
+        }
+      },
+      "impl_B": {
+        "impl_id": "impl-B",
+        "verdicts": {
+          "e09": "UNKNOWN"
+        }
+      },
+      "interop": "INTEROP_OK"
+    },
+    {
+      "canonical_input_sha256": "e95f29969cd5eb9393a5666a90ebf26992cabf4e8adc45f6c4ecb563c9973ffc",
+      "conflict": false,
+      "consistent": true,
+      "fixture_id": "F10",
+      "impl_A": {
+        "impl_id": "impl-A",
+        "verdicts": {
+          "e10": "UNKNOWN"
+        }
+      },
+      "impl_B": {
+        "impl_id": "impl-B",
+        "verdicts": {
+          "e10": "UNKNOWN"
+        }
+      },
+      "interop": "INTEROP_OK"
+    },
+    {
+      "canonical_input_sha256": "edd2dbd67a050470ffee77aae12f8619183133e2843139cfd403bf453e400b6b",
+      "conflict": false,
+      "consistent": true,
+      "fixture_id": "F11",
+      "impl_A": {
+        "impl_id": "impl-A",
+        "verdicts": {
+          "e11": "UNKNOWN"
+        }
+      },
+      "impl_B": {
+        "impl_id": "impl-B",
+        "verdicts": {
+          "e11": "UNKNOWN"
+        }
+      },
+      "interop": "INTEROP_OK"
+    },
+    {
+      "canonical_input_sha256": "7a2eca18821266bf29708c4296d82cae02a79c7819ea037525bc536fac9094ed",
+      "conflict": false,
+      "consistent": true,
+      "fixture_id": "F12",
+      "impl_A": {
+        "impl_id": "impl-A",
+        "verdicts": {
+          "e12": "UNKNOWN"
+        }
+      },
+      "impl_B": {
+        "impl_id": "impl-B",
+        "verdicts": {
+          "e12": "UNKNOWN"
+        }
+      },
+      "interop": "INTEROP_OK"
+    },
+    {
+      "canonical_input_sha256": "790ee9b3c1434fdd7c84c7e7eb107526f1d2e1d54b0c207a1ed7d5df246fc4e7",
+      "conflict": false,
+      "consistent": true,
+      "fixture_id": "F13",
+      "impl_A": {
+        "impl_id": "impl-A",
+        "verdicts": {
+          "e13": "UNKNOWN"
+        }
+      },
+      "impl_B": {
+        "impl_id": "impl-B",
+        "verdicts": {
+          "e13": "UNKNOWN"
+        }
+      },
+      "interop": "INTEROP_OK"
+    },
+    {
+      "canonical_input_sha256": "5ad6b3ff0bda1a54a9118579e5658c9312579922801b7cbf610b77f76511966b",
+      "conflict": false,
+      "consistent": true,
+      "fixture_id": "F14",
+      "impl_A": {
+        "impl_id": "impl-A",
+        "verdicts": {
+          "e14": "UNKNOWN"
+        }
+      },
+      "impl_B": {
+        "impl_id": "impl-B",
+        "verdicts": {
+          "e14": "UNKNOWN"
+        }
+      },
+      "interop": "INTEROP_OK"
+    },
+    {
+      "canonical_input_sha256": "d6e6b891bc91c698b556b455dc7ac8ba6594e68e73e2ab6049b18986b508d00b",
+      "conflict": false,
+      "consistent": true,
+      "fixture_id": "F15",
+      "impl_A": {
+        "impl_id": "impl-A",
+        "verdicts": {
+          "e15": "UNKNOWN"
+        }
+      },
+      "impl_B": {
+        "impl_id": "impl-B",
+        "verdicts": {
+          "e15": "UNKNOWN"
+        }
+      },
+      "interop": "INTEROP_OK"
+    },
+    {
+      "canonical_input_sha256": "900149d7fef0b25393e499fba0bcb7426d3db561c58f48423c5c5673605f4eeb",
+      "conflict": false,
+      "consistent": true,
+      "fixture_id": "F16",
+      "impl_A": {
+        "impl_id": "impl-A",
+        "verdicts": {
+          "e16a": "accepted",
+          "e16b": "rejected",
+          "e16c": "accepted"
+        }
+      },
+      "impl_B": {
+        "impl_id": "impl-B",
+        "verdicts": {
+          "e16a": "accepted",
+          "e16b": "rejected",
+          "e16c": "accepted"
+        }
+      },
+      "interop": "INTEROP_OK"
+    },
+    {
+      "canonical_input_sha256": "2696df01ab377a89b4262b42e11d9ba43261718a83a523aa1759357fb518d882",
+      "conflict": false,
+      "consistent": true,
+      "fixture_id": "F17",
+      "impl_A": {
+        "impl_id": "impl-A",
+        "verdicts": {
+          "e17a": "accepted",
+          "e17b": "accepted",
+          "e17x": "UNKNOWN"
+        }
+      },
+      "impl_B": {
+        "impl_id": "impl-B",
+        "verdicts": {
+          "e17a": "accepted",
+          "e17b": "accepted",
+          "e17x": "UNKNOWN"
+        }
+      },
+      "interop": "INTEROP_OK"
+    },
+    {
+      "canonical_input_sha256": "b5470ff2e76337caf70dd718da172b1f66296f7afbef6260c0e8b270df0fcb18",
+      "conflict": false,
+      "consistent": true,
+      "fixture_id": "F18",
+      "impl_A": {
+        "impl_id": "impl-A",
+        "verdicts": {
+          "e18a": "accepted",
+          "e18b": "UNKNOWN",
+          "e18c": "UNKNOWN"
+        }
+      },
+      "impl_B": {
+        "impl_id": "impl-B",
+        "verdicts": {
+          "e18a": "accepted",
+          "e18b": "UNKNOWN",
+          "e18c": "UNKNOWN"
+        }
+      },
+      "interop": "INTEROP_OK"
+    },
+    {
+      "canonical_input_sha256": "92712cd980477fb5842bf3301f9d608c2f4b3807784e0845edf40a19eea4ee71",
+      "conflict": false,
+      "consistent": true,
+      "fixture_id": "F19",
+      "impl_A": {
+        "impl_id": "impl-A",
+        "verdicts": {
+          "e19a": "UNKNOWN",
+          "e19b": "accepted"
+        }
+      },
+      "impl_B": {
+        "impl_id": "impl-B",
+        "verdicts": {
+          "e19a": "UNKNOWN",
+          "e19b": "accepted"
+        }
+      },
+      "interop": "INTEROP_OK"
+    },
+    {
+      "canonical_input_sha256": "fdd2c67183ac761f222078b41205c1733eaf762c8271f4a9b88089f978dc628f",
+      "conflict": false,
+      "consistent": true,
+      "fixture_id": "F20",
+      "impl_A": {
+        "impl_id": "impl-A",
+        "verdicts": {
+          "e20a": "UNKNOWN",
+          "e20b": "UNKNOWN",
+          "e20c": "UNKNOWN"
+        }
+      },
+      "impl_B": {
+        "impl_id": "impl-B",
+        "verdicts": {
+          "e20a": "UNKNOWN",
+          "e20b": "UNKNOWN",
+          "e20c": "UNKNOWN"
+        }
+      },
+      "interop": "INTEROP_OK"
+    },
+    {
+      "canonical_input_sha256": "03fdcc4012c6a5031cbfbaa2342e1fdb935affa4d32b385c74dce54f1aee458d",
+      "conflict": false,
+      "consistent": true,
+      "fixture_id": "F21",
+      "impl_A": {
+        "impl_id": "impl-A",
+        "verdicts": {
+          "e21": "UNKNOWN"
+        }
+      },
+      "impl_B": {
+        "impl_id": "impl-B",
+        "verdicts": {
+          "e21": "UNKNOWN"
+        }
+      },
+      "interop": "INTEROP_OK"
+    },
+    {
+      "canonical_input_sha256": "a3ac37ca0137d084f38cacfa986fdce8c6727be3f9a27c8751c25c9b7e5841d0",
+      "conflict": false,
+      "consistent": true,
+      "fixture_id": "F22",
+      "impl_A": {
+        "impl_id": "impl-A",
+        "verdicts": {
+          "e22a": "rejected",
+          "e22b": "accepted"
+        }
+      },
+      "impl_B": {
+        "impl_id": "impl-B",
+        "verdicts": {
+          "e22a": "rejected",
+          "e22b": "accepted"
+        }
+      },
+      "interop": "INTEROP_OK"
+    },
+    {
+      "canonical_input_sha256": "e9379afdf571e04cd0cd00dd39ce0e3f29c617172a7a2821a6fb89a3ec84cbe6",
+      "conflict": false,
+      "consistent": true,
+      "fixture_id": "F23",
+      "impl_A": {
+        "impl_id": "impl-A",
+        "verdicts": {
+          "e23a": "UNKNOWN",
+          "e23b": "accepted"
+        }
+      },
+      "impl_B": {
+        "impl_id": "impl-B",
+        "verdicts": {
+          "e23a": "UNKNOWN",
+          "e23b": "accepted"
+        }
+      },
+      "interop": "INTEROP_OK"
+    },
+    {
+      "canonical_input_sha256": "4080108bdac91c68d8bca6717225a4b861b74aa9275021a547b498a1e4cc8da1",
+      "conflict": false,
+      "consistent": true,
+      "fixture_id": "F24",
+      "impl_A": {
+        "impl_id": "impl-A",
+        "verdicts": {
+          "e24": "UNKNOWN"
+        }
+      },
+      "impl_B": {
+        "impl_id": "impl-B",
+        "verdicts": {
+          "e24": "UNKNOWN"
+        }
+      },
+      "interop": "INTEROP_OK"
+    }
+  ],
+  "synthetic_only": true
+}

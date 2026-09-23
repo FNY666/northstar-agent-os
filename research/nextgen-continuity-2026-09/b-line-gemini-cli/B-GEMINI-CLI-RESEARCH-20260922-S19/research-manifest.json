@@ -1,0 +1,163 @@
+{
+  "schema_version": "1.0",
+  "question": "在 Google Gemini CLI 官方公开文档、源码和测试中，跨重启/崩溃/断电后的 session history 恢复、历史保留与清理、工具调用恢复及审计证据边界分别被证明到什么程度？重点是 crash/power-loss、恢复后的 dangling tool call 与 resume 后重试安全性。",
+  "scope": {
+    "product": "Google Gemini CLI",
+    "repository": "https://github.com/google-gemini/gemini-cli",
+    "snapshot_commit": "d5b3e3accb26000d273abf16e0f1dd83aa5428a9",
+    "cutoff_or_access_date": "2026-09-22",
+    "allowed_sources": ["Google Gemini CLI official documentation", "official GitHub source", "official GitHub tests"],
+    "excluded": ["S1-S18 directories and local research artifacts", "shared/P0", "事故目录", "D10", "L12", "D14", "canonical", "staging", "140", "tri-line", "systemd", "real services", "credentials"],
+    "out_of_scope": ["production validation", "remote side effects", "exactly-once guarantees", "credentialed experiments", "power-loss experiments on real devices"]
+  },
+  "claims": [
+    {
+      "id": "C1",
+      "claim": "Checkpointing is created before an approved filesystem-modifying tool and stores a shadow Git snapshot, conversation history, and the tool call; /restore restores local files/history and re-proposes the original tool call.",
+      "status": "confirmed",
+      "confidence": "high",
+      "sources": [{"url": "https://github.com/google-gemini/gemini-cli/blob/d5b3e3accb26000d273abf16e0f1dd83aa5428a9/docs/cli/checkpointing.md", "publisher": "Google Gemini CLI", "published_or_updated": "snapshot commit 2026-09-21", "tier": "primary", "support": "Official documentation explicitly lists Git snapshot, conversation history, tool call, and restore/re-propose behavior."}],
+      "caveat": "This is a local pre-modification checkpoint workflow, not proof of crash/power-loss automatic recovery."
+    },
+    {
+      "id": "C2",
+      "claim": "Checkpointing is disabled by default and enabled through settings.json; the --checkpointing flag was removed in version 0.11.0.",
+      "status": "confirmed",
+      "confidence": "high",
+      "sources": [{"url": "https://github.com/google-gemini/gemini-cli/blob/d5b3e3accb26000d273abf16e0f1dd83aa5428a9/docs/cli/checkpointing.md", "publisher": "Google Gemini CLI", "published_or_updated": "snapshot commit 2026-09-21", "tier": "primary", "support": "Official configuration section states default disabled and settings.json enablement."}],
+      "caveat": "Configuration documentation does not establish durability after power loss."
+    },
+    {
+      "id": "C3",
+      "claim": "Normal session resume is exposed through --resume/-r and /resume, restoring saved chat history and allowing session browsing.",
+      "status": "confirmed",
+      "confidence": "high",
+      "sources": [{"url": "https://github.com/google-gemini/gemini-cli/blob/d5b3e3accb26000d273abf16e0f1dd83aa5428a9/docs/cli/tutorials/session-management.md", "publisher": "Google Gemini CLI", "published_or_updated": "snapshot commit 2026-09-21", "tier": "primary", "support": "Official tutorial describes --resume/-r, restored chat history/memory, /resume browser, and loading a selected session."}],
+      "caveat": "A resume entry point is not proof that every interrupted tool is automatically replayed."
+    },
+    {
+      "id": "C4",
+      "claim": "Manual deletion paths include /resume browser deletion, --delete-session, and /exit --delete; exit deletion removes conversation history and tool output files.",
+      "status": "confirmed",
+      "confidence": "high",
+      "sources": [{"url": "https://github.com/google-gemini/gemini-cli/blob/d5b3e3accb26000d273abf16e0f1dd83aa5428a9/docs/cli/tutorials/session-management.md", "publisher": "Google Gemini CLI", "published_or_updated": "snapshot commit 2026-09-21", "tier": "primary", "support": "Official session management tutorial documents all listed deletion operations."}],
+      "caveat": "These documented paths do not establish retention behavior for every checkpoint or remote log."
+    },
+    {
+      "id": "C5",
+      "claim": "The settings reference gives session retention defaults of enabled=true and maxAge=30d.",
+      "status": "confirmed",
+      "confidence": "high",
+      "sources": [{"url": "https://github.com/google-gemini/gemini-cli/blob/d5b3e3accb26000d273abf16e0f1dd83aa5428a9/docs/cli/settings.md", "publisher": "Google Gemini CLI", "published_or_updated": "snapshot commit 2026-09-21", "tier": "primary", "support": "Official settings table lists Enable Session Cleanup default true and Keep chat history default 30d."}],
+      "caveat": "This is the documented setting default; filesystem availability and user overrides remain separate."
+    },
+    {
+      "id": "C6",
+      "claim": "Startup session cleanup scans chats, deletes corrupted files, applies maxAge/maxCount based on lastUpdated, and excludes the current active session from deletable sessions; official tests cover these behaviors.",
+      "status": "confirmed",
+      "confidence": "high",
+      "sources": [
+        {"url": "https://github.com/google-gemini/gemini-cli/blob/d5b3e3accb26000d273abf16e0f1dd83aa5428a9/packages/cli/src/utils/sessionCleanup.ts", "publisher": "Google Gemini CLI", "published_or_updated": "snapshot commit 2026-09-21", "tier": "primary", "support": "Implementation calls cleanup during startup, identifies corrupted/expired sessions, sorts by lastUpdated, excludes current session, and cleans artifacts."},
+        {"url": "https://github.com/google-gemini/gemini-cli/blob/d5b3e3accb26000d273abf16e0f1dd83aa5428a9/packages/cli/src/utils/sessionCleanup.integration.test.ts", "publisher": "Google Gemini CLI", "published_or_updated": "snapshot commit 2026-09-21", "tier": "primary", "support": "Official integration tests assert disabled/no-directory behavior, old session deletion, current/recent retention, and subagent cleanup."}
+      ],
+      "caveat": "Cleanup concerns local session files and associated artifacts; it is not evidence of crash recovery or a universal retention policy for all data."
+    },
+    {
+      "id": "C7",
+      "claim": "ToolCallRecord supports id, name, args, optional/null result, status, timestamp, and optional agent/display fields; status values include validating, scheduled, executing, awaiting_approval, success, error, and cancelled.",
+      "status": "confirmed",
+      "confidence": "high",
+      "sources": [
+        {"url": "https://github.com/google-gemini/gemini-cli/blob/d5b3e3accb26000d273abf16e0f1dd83aa5428a9/packages/core/src/services/chatRecordingTypes.ts", "publisher": "Google Gemini CLI", "published_or_updated": "snapshot commit 2026-09-21", "tier": "primary", "support": "Official type definition makes result optional/null and status required."},
+        {"url": "https://github.com/google-gemini/gemini-cli/blob/d5b3e3accb26000d273abf16e0f1dd83aa5428a9/packages/core/src/scheduler/types.ts", "publisher": "Google Gemini CLI", "published_or_updated": "snapshot commit 2026-09-21", "tier": "primary", "support": "Official scheduler enum defines the call lifecycle statuses."}
+      ],
+      "caveat": "A recorded status/result is local evidence of recording, not proof of external side-effect state."
+    },
+    {
+      "id": "C8",
+      "claim": "Completed tool calls are recorded with request name/args, response parts when available, status, timestamp, and are merged by call ID into the Gemini message.",
+      "status": "confirmed",
+      "confidence": "high",
+      "sources": [{"url": "https://github.com/google-gemini/gemini-cli/blob/d5b3e3accb26000d273abf16e0f1dd83aa5428a9/packages/core/src/services/chatRecordingService.ts", "publisher": "Google Gemini CLI", "published_or_updated": "snapshot commit 2026-09-21", "tier": "primary", "support": "Official ChatRecordingService/GeminiChat code constructs completed records and updates existing records by tool call id."}],
+      "caveat": "The source does not define a crash-time transaction spanning tool execution and recording."
+    },
+    {
+      "id": "C9",
+      "claim": "Session recording appends JSONL records synchronously and has a fallback that preserves an unreadable file and atomically rewrites a clean file from in-memory conversation; no explicit fsync or power-loss guarantee is shown.",
+      "status": "confirmed",
+      "confidence": "high",
+      "sources": [{"url": "https://github.com/google-gemini/gemini-cli/blob/d5b3e3accb26000d273abf16e0f1dd83aa5428a9/packages/core/src/services/chatRecordingService.ts", "publisher": "Google Gemini CLI", "published_or_updated": "snapshot commit 2026-09-21", "tier": "primary", "support": "Official implementation uses appendFileSync for lines and temp-file rename in rewriteConversationFile; no fsync is present in the cited path."}],
+      "caveat": "Absence in this code path is not proof that no platform/filesystem durability exists elsewhere."
+    },
+    {
+      "id": "C10",
+      "claim": "Checkpoint utility data includes history, clientHistory, tool name/args, commitHash, and messageId; missing file_path causes the restorable tool call to be skipped.",
+      "status": "confirmed",
+      "confidence": "high",
+      "sources": [{"url": "https://github.com/google-gemini/gemini-cli/blob/d5b3e3accb26000d273abf16e0f1dd83aa5428a9/packages/core/src/utils/checkpointUtils.ts", "publisher": "Google Gemini CLI", "published_or_updated": "snapshot commit 2026-09-21", "tier": "primary", "support": "Official checkpoint utility constructs the data structure and tests fallback/skip behavior."}],
+      "caveat": "This is checkpoint creation/restoration data, not an automatic replay protocol."
+    },
+    {
+      "id": "I1",
+      "claim": "A process termination between recording stages could leave a stored tool call with no result or an intermediate status; this is allowed by the model and append structure but is not an officially crash-tested replay semantic.",
+      "status": "inferred",
+      "confidence": "medium",
+      "sources": [{"url": "https://github.com/google-gemini/gemini-cli/blob/d5b3e3accb26000d273abf16e0f1dd83aa5428a9/packages/core/src/services/chatRecordingService.ts", "publisher": "Google Gemini CLI", "published_or_updated": "snapshot commit 2026-09-21", "tier": "primary", "support": "Tool calls are appended/merged and results are optional in the record type; inference is limited to possible persisted shapes."}],
+      "caveat": "No permitted official test was found that kills the process at each boundary or proves the resulting state after restart."
+    },
+    {
+      "id": "I2",
+      "claim": "Because /restore re-proposes the original tool call, repeating a call can carry duplicate-side-effect risk unless the tool/external system is idempotent; official material does not establish exactly-once or remote deduplication.",
+      "status": "inferred",
+      "confidence": "medium",
+      "sources": [{"url": "https://github.com/google-gemini/gemini-cli/blob/d5b3e3accb26000d273abf16e0f1dd83aa5428a9/docs/cli/checkpointing.md", "publisher": "Google Gemini CLI", "published_or_updated": "snapshot commit 2026-09-21", "tier": "primary", "support": "Official docs state that restore re-proposes the original tool call; no exactly-once or deduplication statement accompanies it."}],
+      "caveat": "Risk is a safety inference, not evidence that a duplicate actually occurred."
+    },
+    {
+      "id": "U1",
+      "claim": "Automatic recovery after crash or power loss to the last consistent point is proven by the official public materials.",
+      "status": "unverified",
+      "confidence": "low",
+      "sources": [],
+      "caveat": "Unknown: the allowed snapshot/docs/tests did not provide a crash/power-loss durability proof or test."
+    },
+    {
+      "id": "U2",
+      "claim": "Gemini CLI provides exactly-once execution, deduplication, or a safe automatic retry protocol for resumed tool calls.",
+      "status": "unverified",
+      "confidence": "low",
+      "sources": [],
+      "caveat": "Unknown: no official exactly-once, idempotency-key, or remote deduplication contract was found."
+    },
+    {
+      "id": "U3",
+      "claim": "Restoring a checkpoint rolls back remote side effects or proves their absence.",
+      "status": "unverified",
+      "confidence": "low",
+      "sources": [],
+      "caveat": "Unknown: official checkpoint docs describe local files, shadow Git, history, and tool re-proposal only."
+    },
+    {
+      "id": "U4",
+      "claim": "Checkpoint files, shadow Git snapshots, tool-output artifacts, and remote logs all obey the same documented retention period.",
+      "status": "unverified",
+      "confidence": "low",
+      "sources": [],
+      "caveat": "Unknown: session cleanup implementation documents/implements session and associated local artifacts, not a universal retention contract for every evidence store."
+    },
+    {
+      "id": "A1",
+      "claim": "Production validation of crash recovery, dangling-call repair, exactly-once behavior, or remote rollback was performed by this research.",
+      "status": "inaccessible",
+      "confidence": "high",
+      "sources": [],
+      "caveat": "Inaccessible by scope: no real services, credentials, or production systems were accessed; this report makes no such claim."
+    }
+  ],
+  "coverage": {
+    "searched": ["docs/cli/checkpointing.md", "docs/cli/tutorials/session-management.md", "docs/cli/settings.md", "ChatRecordingService", "chatRecordingTypes", "checkpointUtils", "sessionCleanup", "scheduler types", "official unit/integration tests"],
+    "not_found_or_unverified": ["dedicated crash/power-loss replay harness", "automatic dangling tool call recovery contract", "exactly-once or remote deduplication guarantee", "remote side-effect rollback guarantee", "universal checkpoint/tool-output/remote-log retention contract"],
+    "not_accessed": ["prior S1-S18 artifacts", "prohibited local directories", "real services", "credentials", "production runtime state"],
+    "next_slice": "S20: isolated fault-injection matrix for local JSONL append, checkpoint write, tool execution boundary, and resume/restore observability without real remote side effects."
+  }
+}

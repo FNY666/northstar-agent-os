@@ -1,0 +1,1132 @@
+{
+  "case_count": 20,
+  "fail_count": 0,
+  "op_ids": [
+    "A",
+    "B"
+  ],
+  "pass_count": 20,
+  "production_verified": false,
+  "records": [
+    {
+      "actual": {
+        "A": "accepted",
+        "B": "accepted"
+      },
+      "expected": {
+        "A": "accepted",
+        "B": "accepted"
+      },
+      "id": "S31-01",
+      "pass": true,
+      "title": "sequential_same_payload",
+      "trace": [
+        {
+          "accepted_after_evidence": false,
+          "index": 0,
+          "op_id": "A",
+          "terminal_rejected": false,
+          "type": "dispatch"
+        },
+        {
+          "accepted_after_evidence": false,
+          "index": 1,
+          "op_id": "A",
+          "terminal_rejected": false,
+          "type": "evidence"
+        },
+        {
+          "accepted_after_evidence": true,
+          "index": 2,
+          "op_id": "A",
+          "terminal_rejected": false,
+          "type": "ack"
+        },
+        {
+          "accepted_after_evidence": false,
+          "index": 3,
+          "op_id": "B",
+          "terminal_rejected": false,
+          "type": "dispatch"
+        },
+        {
+          "accepted_after_evidence": false,
+          "index": 4,
+          "op_id": "B",
+          "terminal_rejected": false,
+          "type": "evidence"
+        },
+        {
+          "accepted_after_evidence": true,
+          "index": 5,
+          "op_id": "B",
+          "terminal_rejected": false,
+          "type": "ack"
+        }
+      ]
+    },
+    {
+      "actual": {
+        "A": "accepted",
+        "B": "accepted"
+      },
+      "expected": {
+        "A": "accepted",
+        "B": "accepted"
+      },
+      "id": "S31-02",
+      "pass": true,
+      "title": "interleaved_same_payload",
+      "trace": [
+        {
+          "accepted_after_evidence": false,
+          "index": 0,
+          "op_id": "A",
+          "terminal_rejected": false,
+          "type": "dispatch"
+        },
+        {
+          "accepted_after_evidence": false,
+          "index": 1,
+          "op_id": "B",
+          "terminal_rejected": false,
+          "type": "dispatch"
+        },
+        {
+          "accepted_after_evidence": false,
+          "index": 2,
+          "op_id": "A",
+          "terminal_rejected": false,
+          "type": "evidence"
+        },
+        {
+          "accepted_after_evidence": false,
+          "index": 3,
+          "op_id": "B",
+          "terminal_rejected": false,
+          "type": "evidence"
+        },
+        {
+          "accepted_after_evidence": true,
+          "index": 4,
+          "op_id": "B",
+          "terminal_rejected": false,
+          "type": "ack"
+        },
+        {
+          "accepted_after_evidence": true,
+          "index": 5,
+          "op_id": "A",
+          "terminal_rejected": false,
+          "type": "ack"
+        }
+      ]
+    },
+    {
+      "actual": {
+        "A": "accepted",
+        "B": "accepted"
+      },
+      "expected": {
+        "A": "accepted",
+        "B": "accepted"
+      },
+      "id": "S31-03",
+      "pass": true,
+      "title": "interleaved_different_payloads",
+      "trace": [
+        {
+          "accepted_after_evidence": false,
+          "index": 0,
+          "op_id": "A",
+          "terminal_rejected": false,
+          "type": "dispatch"
+        },
+        {
+          "accepted_after_evidence": false,
+          "index": 1,
+          "op_id": "B",
+          "terminal_rejected": false,
+          "type": "dispatch"
+        },
+        {
+          "accepted_after_evidence": false,
+          "index": 2,
+          "op_id": "B",
+          "terminal_rejected": false,
+          "type": "evidence"
+        },
+        {
+          "accepted_after_evidence": true,
+          "index": 3,
+          "op_id": "B",
+          "terminal_rejected": false,
+          "type": "ack"
+        },
+        {
+          "accepted_after_evidence": false,
+          "index": 4,
+          "op_id": "A",
+          "terminal_rejected": false,
+          "type": "evidence"
+        },
+        {
+          "accepted_after_evidence": true,
+          "index": 5,
+          "op_id": "A",
+          "terminal_rejected": false,
+          "type": "ack"
+        }
+      ]
+    },
+    {
+      "actual": {
+        "A": "UNKNOWN",
+        "B": "accepted"
+      },
+      "expected": {
+        "A": "UNKNOWN",
+        "B": "accepted"
+      },
+      "id": "S31-04",
+      "pass": true,
+      "title": "ack_before_own_evidence",
+      "trace": [
+        {
+          "accepted_after_evidence": false,
+          "index": 0,
+          "op_id": "A",
+          "terminal_rejected": false,
+          "type": "dispatch"
+        },
+        {
+          "accepted_after_evidence": false,
+          "index": 1,
+          "op_id": "B",
+          "terminal_rejected": false,
+          "type": "dispatch"
+        },
+        {
+          "accepted_after_evidence": false,
+          "index": 2,
+          "op_id": "A",
+          "terminal_rejected": false,
+          "type": "ack"
+        },
+        {
+          "accepted_after_evidence": false,
+          "index": 3,
+          "op_id": "A",
+          "terminal_rejected": false,
+          "type": "evidence"
+        },
+        {
+          "accepted_after_evidence": false,
+          "index": 4,
+          "op_id": "B",
+          "terminal_rejected": false,
+          "type": "evidence"
+        },
+        {
+          "accepted_after_evidence": true,
+          "index": 5,
+          "op_id": "B",
+          "terminal_rejected": false,
+          "type": "ack"
+        }
+      ]
+    },
+    {
+      "actual": {
+        "A": "accepted",
+        "B": "accepted"
+      },
+      "expected": {
+        "A": "accepted",
+        "B": "accepted"
+      },
+      "id": "S31-05",
+      "pass": true,
+      "title": "early_then_later_valid_ack",
+      "trace": [
+        {
+          "accepted_after_evidence": false,
+          "index": 0,
+          "op_id": "A",
+          "terminal_rejected": false,
+          "type": "dispatch"
+        },
+        {
+          "accepted_after_evidence": false,
+          "index": 1,
+          "op_id": "A",
+          "terminal_rejected": false,
+          "type": "ack"
+        },
+        {
+          "accepted_after_evidence": false,
+          "index": 2,
+          "op_id": "A",
+          "terminal_rejected": false,
+          "type": "evidence"
+        },
+        {
+          "accepted_after_evidence": true,
+          "index": 3,
+          "op_id": "A",
+          "terminal_rejected": false,
+          "type": "ack"
+        },
+        {
+          "accepted_after_evidence": false,
+          "index": 4,
+          "op_id": "B",
+          "terminal_rejected": false,
+          "type": "dispatch"
+        },
+        {
+          "accepted_after_evidence": false,
+          "index": 5,
+          "op_id": "B",
+          "terminal_rejected": false,
+          "type": "evidence"
+        },
+        {
+          "accepted_after_evidence": true,
+          "index": 6,
+          "op_id": "B",
+          "terminal_rejected": false,
+          "type": "ack"
+        }
+      ]
+    },
+    {
+      "actual": {
+        "A": "accepted",
+        "B": "accepted"
+      },
+      "expected": {
+        "A": "accepted",
+        "B": "accepted"
+      },
+      "id": "S31-06",
+      "pass": true,
+      "title": "late_ack_after_other_op",
+      "trace": [
+        {
+          "accepted_after_evidence": false,
+          "index": 0,
+          "op_id": "A",
+          "terminal_rejected": false,
+          "type": "dispatch"
+        },
+        {
+          "accepted_after_evidence": false,
+          "index": 1,
+          "op_id": "B",
+          "terminal_rejected": false,
+          "type": "dispatch"
+        },
+        {
+          "accepted_after_evidence": false,
+          "index": 2,
+          "op_id": "A",
+          "terminal_rejected": false,
+          "type": "evidence"
+        },
+        {
+          "accepted_after_evidence": false,
+          "index": 3,
+          "op_id": "B",
+          "terminal_rejected": false,
+          "type": "evidence"
+        },
+        {
+          "accepted_after_evidence": true,
+          "index": 4,
+          "op_id": "B",
+          "terminal_rejected": false,
+          "type": "ack"
+        },
+        {
+          "accepted_after_evidence": true,
+          "index": 5,
+          "op_id": "A",
+          "terminal_rejected": false,
+          "type": "ack"
+        }
+      ]
+    },
+    {
+      "actual": {
+        "A": "UNKNOWN",
+        "B": "accepted"
+      },
+      "expected": {
+        "A": "UNKNOWN",
+        "B": "accepted"
+      },
+      "id": "S31-07",
+      "pass": true,
+      "title": "ack_lost_for_A",
+      "trace": [
+        {
+          "accepted_after_evidence": false,
+          "index": 0,
+          "op_id": "A",
+          "terminal_rejected": false,
+          "type": "dispatch"
+        },
+        {
+          "accepted_after_evidence": false,
+          "index": 1,
+          "op_id": "B",
+          "terminal_rejected": false,
+          "type": "dispatch"
+        },
+        {
+          "accepted_after_evidence": false,
+          "index": 2,
+          "op_id": "A",
+          "terminal_rejected": false,
+          "type": "evidence"
+        },
+        {
+          "accepted_after_evidence": false,
+          "index": 3,
+          "op_id": "B",
+          "terminal_rejected": false,
+          "type": "evidence"
+        },
+        {
+          "accepted_after_evidence": true,
+          "index": 4,
+          "op_id": "B",
+          "terminal_rejected": false,
+          "type": "ack"
+        }
+      ]
+    },
+    {
+      "actual": {
+        "A": "UNKNOWN",
+        "B": "accepted"
+      },
+      "expected": {
+        "A": "UNKNOWN",
+        "B": "accepted"
+      },
+      "id": "S31-08",
+      "pass": true,
+      "title": "evidence_missing_for_A",
+      "trace": [
+        {
+          "accepted_after_evidence": false,
+          "index": 0,
+          "op_id": "A",
+          "terminal_rejected": false,
+          "type": "dispatch"
+        },
+        {
+          "accepted_after_evidence": false,
+          "index": 1,
+          "op_id": "B",
+          "terminal_rejected": false,
+          "type": "dispatch"
+        },
+        {
+          "accepted_after_evidence": false,
+          "index": 2,
+          "op_id": "A",
+          "terminal_rejected": false,
+          "type": "ack"
+        },
+        {
+          "accepted_after_evidence": false,
+          "index": 3,
+          "op_id": "B",
+          "terminal_rejected": false,
+          "type": "evidence"
+        },
+        {
+          "accepted_after_evidence": true,
+          "index": 4,
+          "op_id": "B",
+          "terminal_rejected": false,
+          "type": "ack"
+        }
+      ]
+    },
+    {
+      "actual": {
+        "A": "UNKNOWN",
+        "B": "accepted"
+      },
+      "expected": {
+        "A": "UNKNOWN",
+        "B": "accepted"
+      },
+      "id": "S31-09",
+      "pass": true,
+      "title": "evidence_inaccessible_for_A",
+      "trace": [
+        {
+          "accepted_after_evidence": false,
+          "index": 0,
+          "op_id": "A",
+          "terminal_rejected": false,
+          "type": "dispatch"
+        },
+        {
+          "accepted_after_evidence": false,
+          "index": 1,
+          "op_id": "B",
+          "terminal_rejected": false,
+          "type": "dispatch"
+        },
+        {
+          "accepted_after_evidence": false,
+          "index": 2,
+          "op_id": "A",
+          "terminal_rejected": false,
+          "type": "evidence"
+        },
+        {
+          "accepted_after_evidence": false,
+          "index": 3,
+          "op_id": "A",
+          "terminal_rejected": false,
+          "type": "ack"
+        },
+        {
+          "accepted_after_evidence": false,
+          "index": 4,
+          "op_id": "B",
+          "terminal_rejected": false,
+          "type": "evidence"
+        },
+        {
+          "accepted_after_evidence": true,
+          "index": 5,
+          "op_id": "B",
+          "terminal_rejected": false,
+          "type": "ack"
+        }
+      ]
+    },
+    {
+      "actual": {
+        "A": "rejected",
+        "B": "accepted"
+      },
+      "expected": {
+        "A": "rejected",
+        "B": "accepted"
+      },
+      "id": "S31-10",
+      "pass": true,
+      "title": "conflicting_ack_A",
+      "trace": [
+        {
+          "accepted_after_evidence": false,
+          "index": 0,
+          "op_id": "A",
+          "terminal_rejected": false,
+          "type": "dispatch"
+        },
+        {
+          "accepted_after_evidence": false,
+          "index": 1,
+          "op_id": "A",
+          "terminal_rejected": false,
+          "type": "evidence"
+        },
+        {
+          "accepted_after_evidence": true,
+          "index": 2,
+          "op_id": "A",
+          "terminal_rejected": false,
+          "type": "ack"
+        },
+        {
+          "accepted_after_evidence": true,
+          "index": 3,
+          "op_id": "A",
+          "terminal_rejected": true,
+          "type": "ack"
+        },
+        {
+          "accepted_after_evidence": false,
+          "index": 4,
+          "op_id": "B",
+          "terminal_rejected": false,
+          "type": "dispatch"
+        },
+        {
+          "accepted_after_evidence": false,
+          "index": 5,
+          "op_id": "B",
+          "terminal_rejected": false,
+          "type": "evidence"
+        },
+        {
+          "accepted_after_evidence": true,
+          "index": 6,
+          "op_id": "B",
+          "terminal_rejected": false,
+          "type": "ack"
+        }
+      ]
+    },
+    {
+      "actual": {
+        "A": "rejected",
+        "B": "accepted"
+      },
+      "expected": {
+        "A": "rejected",
+        "B": "accepted"
+      },
+      "id": "S31-11",
+      "pass": true,
+      "title": "explicit_rejection_A",
+      "trace": [
+        {
+          "accepted_after_evidence": false,
+          "index": 0,
+          "op_id": "A",
+          "terminal_rejected": false,
+          "type": "dispatch"
+        },
+        {
+          "accepted_after_evidence": false,
+          "index": 1,
+          "op_id": "A",
+          "terminal_rejected": true,
+          "type": "ack"
+        },
+        {
+          "accepted_after_evidence": false,
+          "index": 2,
+          "op_id": "B",
+          "terminal_rejected": false,
+          "type": "dispatch"
+        },
+        {
+          "accepted_after_evidence": false,
+          "index": 3,
+          "op_id": "B",
+          "terminal_rejected": false,
+          "type": "evidence"
+        },
+        {
+          "accepted_after_evidence": true,
+          "index": 4,
+          "op_id": "B",
+          "terminal_rejected": false,
+          "type": "ack"
+        }
+      ]
+    },
+    {
+      "actual": {
+        "A": "UNKNOWN",
+        "B": "UNKNOWN"
+      },
+      "expected": {
+        "A": "UNKNOWN",
+        "B": "UNKNOWN"
+      },
+      "id": "S31-12",
+      "pass": true,
+      "title": "cross_op_ack_payload_mixup",
+      "trace": [
+        {
+          "accepted_after_evidence": false,
+          "index": 0,
+          "op_id": "A",
+          "terminal_rejected": false,
+          "type": "dispatch"
+        },
+        {
+          "accepted_after_evidence": false,
+          "index": 1,
+          "op_id": "B",
+          "terminal_rejected": false,
+          "type": "dispatch"
+        },
+        {
+          "accepted_after_evidence": false,
+          "index": 2,
+          "op_id": "A",
+          "terminal_rejected": false,
+          "type": "evidence"
+        },
+        {
+          "accepted_after_evidence": false,
+          "index": 3,
+          "op_id": "B",
+          "terminal_rejected": false,
+          "type": "ack"
+        },
+        {
+          "accepted_after_evidence": false,
+          "index": 4,
+          "op_id": "B",
+          "terminal_rejected": false,
+          "type": "evidence"
+        }
+      ]
+    },
+    {
+      "actual": {
+        "A": "accepted",
+        "B": "UNKNOWN"
+      },
+      "expected": {
+        "A": "accepted",
+        "B": "UNKNOWN"
+      },
+      "id": "S31-13",
+      "pass": true,
+      "title": "same_payload_wrong_evidence_owner",
+      "trace": [
+        {
+          "accepted_after_evidence": false,
+          "index": 0,
+          "op_id": "A",
+          "terminal_rejected": false,
+          "type": "dispatch"
+        },
+        {
+          "accepted_after_evidence": false,
+          "index": 1,
+          "op_id": "B",
+          "terminal_rejected": false,
+          "type": "dispatch"
+        },
+        {
+          "accepted_after_evidence": false,
+          "index": 2,
+          "op_id": "A",
+          "terminal_rejected": false,
+          "type": "evidence"
+        },
+        {
+          "accepted_after_evidence": false,
+          "index": 3,
+          "op_id": "B",
+          "terminal_rejected": false,
+          "type": "ack"
+        },
+        {
+          "accepted_after_evidence": true,
+          "index": 4,
+          "op_id": "A",
+          "terminal_rejected": false,
+          "type": "ack"
+        }
+      ]
+    },
+    {
+      "actual": {
+        "A": "accepted",
+        "B": "UNKNOWN"
+      },
+      "expected": {
+        "A": "accepted",
+        "B": "UNKNOWN"
+      },
+      "id": "S31-14",
+      "pass": true,
+      "title": "A_acceptance_cannot_supply_B_evidence",
+      "trace": [
+        {
+          "accepted_after_evidence": false,
+          "index": 0,
+          "op_id": "A",
+          "terminal_rejected": false,
+          "type": "dispatch"
+        },
+        {
+          "accepted_after_evidence": false,
+          "index": 1,
+          "op_id": "B",
+          "terminal_rejected": false,
+          "type": "dispatch"
+        },
+        {
+          "accepted_after_evidence": false,
+          "index": 2,
+          "op_id": "A",
+          "terminal_rejected": false,
+          "type": "evidence"
+        },
+        {
+          "accepted_after_evidence": true,
+          "index": 3,
+          "op_id": "A",
+          "terminal_rejected": false,
+          "type": "ack"
+        },
+        {
+          "accepted_after_evidence": false,
+          "index": 4,
+          "op_id": "B",
+          "terminal_rejected": false,
+          "type": "ack"
+        }
+      ]
+    },
+    {
+      "actual": {
+        "A": "rejected",
+        "B": "accepted"
+      },
+      "expected": {
+        "A": "rejected",
+        "B": "accepted"
+      },
+      "id": "S31-15",
+      "pass": true,
+      "title": "late_conflicting_ack_after_acceptance",
+      "trace": [
+        {
+          "accepted_after_evidence": false,
+          "index": 0,
+          "op_id": "A",
+          "terminal_rejected": false,
+          "type": "dispatch"
+        },
+        {
+          "accepted_after_evidence": false,
+          "index": 1,
+          "op_id": "A",
+          "terminal_rejected": false,
+          "type": "evidence"
+        },
+        {
+          "accepted_after_evidence": true,
+          "index": 2,
+          "op_id": "A",
+          "terminal_rejected": false,
+          "type": "ack"
+        },
+        {
+          "accepted_after_evidence": false,
+          "index": 3,
+          "op_id": "B",
+          "terminal_rejected": false,
+          "type": "dispatch"
+        },
+        {
+          "accepted_after_evidence": false,
+          "index": 4,
+          "op_id": "B",
+          "terminal_rejected": false,
+          "type": "evidence"
+        },
+        {
+          "accepted_after_evidence": true,
+          "index": 5,
+          "op_id": "B",
+          "terminal_rejected": false,
+          "type": "ack"
+        },
+        {
+          "accepted_after_evidence": true,
+          "index": 6,
+          "op_id": "A",
+          "terminal_rejected": true,
+          "type": "ack"
+        }
+      ]
+    },
+    {
+      "actual": {
+        "A": "rejected",
+        "B": "accepted"
+      },
+      "expected": {
+        "A": "rejected",
+        "B": "accepted"
+      },
+      "id": "S31-16",
+      "pass": true,
+      "title": "rejection_then_accept_ack",
+      "trace": [
+        {
+          "accepted_after_evidence": false,
+          "index": 0,
+          "op_id": "A",
+          "terminal_rejected": false,
+          "type": "dispatch"
+        },
+        {
+          "accepted_after_evidence": false,
+          "index": 1,
+          "op_id": "A",
+          "terminal_rejected": true,
+          "type": "ack"
+        },
+        {
+          "accepted_after_evidence": false,
+          "index": 2,
+          "op_id": "A",
+          "terminal_rejected": true,
+          "type": "evidence"
+        },
+        {
+          "accepted_after_evidence": true,
+          "index": 3,
+          "op_id": "A",
+          "terminal_rejected": true,
+          "type": "ack"
+        },
+        {
+          "accepted_after_evidence": false,
+          "index": 4,
+          "op_id": "B",
+          "terminal_rejected": false,
+          "type": "dispatch"
+        },
+        {
+          "accepted_after_evidence": false,
+          "index": 5,
+          "op_id": "B",
+          "terminal_rejected": false,
+          "type": "evidence"
+        },
+        {
+          "accepted_after_evidence": true,
+          "index": 6,
+          "op_id": "B",
+          "terminal_rejected": false,
+          "type": "ack"
+        }
+      ]
+    },
+    {
+      "actual": {
+        "A": "accepted",
+        "B": "accepted"
+      },
+      "expected": {
+        "A": "accepted",
+        "B": "accepted"
+      },
+      "id": "S31-17",
+      "pass": true,
+      "title": "duplicate_valid_ack_same_op",
+      "trace": [
+        {
+          "accepted_after_evidence": false,
+          "index": 0,
+          "op_id": "A",
+          "terminal_rejected": false,
+          "type": "dispatch"
+        },
+        {
+          "accepted_after_evidence": false,
+          "index": 1,
+          "op_id": "B",
+          "terminal_rejected": false,
+          "type": "dispatch"
+        },
+        {
+          "accepted_after_evidence": false,
+          "index": 2,
+          "op_id": "B",
+          "terminal_rejected": false,
+          "type": "evidence"
+        },
+        {
+          "accepted_after_evidence": true,
+          "index": 3,
+          "op_id": "B",
+          "terminal_rejected": false,
+          "type": "ack"
+        },
+        {
+          "accepted_after_evidence": true,
+          "index": 4,
+          "op_id": "B",
+          "terminal_rejected": false,
+          "type": "ack"
+        },
+        {
+          "accepted_after_evidence": false,
+          "index": 5,
+          "op_id": "A",
+          "terminal_rejected": false,
+          "type": "evidence"
+        },
+        {
+          "accepted_after_evidence": true,
+          "index": 6,
+          "op_id": "A",
+          "terminal_rejected": false,
+          "type": "ack"
+        }
+      ]
+    },
+    {
+      "actual": {
+        "A": "UNKNOWN",
+        "B": "UNKNOWN"
+      },
+      "expected": {
+        "A": "UNKNOWN",
+        "B": "UNKNOWN"
+      },
+      "id": "S31-18",
+      "pass": true,
+      "title": "inaccessible_and_ack_lost",
+      "trace": [
+        {
+          "accepted_after_evidence": false,
+          "index": 0,
+          "op_id": "A",
+          "terminal_rejected": false,
+          "type": "dispatch"
+        },
+        {
+          "accepted_after_evidence": false,
+          "index": 1,
+          "op_id": "B",
+          "terminal_rejected": false,
+          "type": "dispatch"
+        },
+        {
+          "accepted_after_evidence": false,
+          "index": 2,
+          "op_id": "A",
+          "terminal_rejected": false,
+          "type": "evidence"
+        },
+        {
+          "accepted_after_evidence": false,
+          "index": 3,
+          "op_id": "B",
+          "terminal_rejected": false,
+          "type": "evidence"
+        }
+      ]
+    },
+    {
+      "actual": {
+        "A": "UNKNOWN",
+        "B": "accepted"
+      },
+      "expected": {
+        "A": "UNKNOWN",
+        "B": "accepted"
+      },
+      "id": "S31-19",
+      "pass": true,
+      "title": "wrong_payload_evidence_A",
+      "trace": [
+        {
+          "accepted_after_evidence": false,
+          "index": 0,
+          "op_id": "A",
+          "terminal_rejected": false,
+          "type": "dispatch"
+        },
+        {
+          "accepted_after_evidence": false,
+          "index": 1,
+          "op_id": "B",
+          "terminal_rejected": false,
+          "type": "dispatch"
+        },
+        {
+          "accepted_after_evidence": false,
+          "index": 2,
+          "op_id": "A",
+          "terminal_rejected": false,
+          "type": "evidence"
+        },
+        {
+          "accepted_after_evidence": false,
+          "index": 3,
+          "op_id": "A",
+          "terminal_rejected": false,
+          "type": "ack"
+        },
+        {
+          "accepted_after_evidence": false,
+          "index": 4,
+          "op_id": "B",
+          "terminal_rejected": false,
+          "type": "evidence"
+        },
+        {
+          "accepted_after_evidence": true,
+          "index": 5,
+          "op_id": "B",
+          "terminal_rejected": false,
+          "type": "ack"
+        }
+      ]
+    },
+    {
+      "actual": {
+        "A": "UNKNOWN",
+        "B": "accepted"
+      },
+      "expected": {
+        "A": "UNKNOWN",
+        "B": "accepted"
+      },
+      "id": "S31-20",
+      "pass": true,
+      "title": "unknown_A_is_not_rejection",
+      "trace": [
+        {
+          "accepted_after_evidence": false,
+          "index": 0,
+          "op_id": "A",
+          "terminal_rejected": false,
+          "type": "dispatch"
+        },
+        {
+          "accepted_after_evidence": false,
+          "index": 1,
+          "op_id": "B",
+          "terminal_rejected": false,
+          "type": "dispatch"
+        },
+        {
+          "accepted_after_evidence": false,
+          "index": 2,
+          "op_id": "A",
+          "terminal_rejected": false,
+          "type": "evidence"
+        },
+        {
+          "accepted_after_evidence": false,
+          "index": 3,
+          "op_id": "B",
+          "terminal_rejected": false,
+          "type": "evidence"
+        },
+        {
+          "accepted_after_evidence": true,
+          "index": 4,
+          "op_id": "B",
+          "terminal_rejected": false,
+          "type": "ack"
+        }
+      ]
+    }
+  ],
+  "schema_version": "S31-results-1",
+  "synthetic_only": true,
+  "verdict_counts": {
+    "UNKNOWN": 12,
+    "accepted": 24,
+    "rejected": 4
+  },
+  "worker_count": 1
+}

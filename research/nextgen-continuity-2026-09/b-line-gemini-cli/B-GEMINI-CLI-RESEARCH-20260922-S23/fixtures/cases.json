@@ -1,0 +1,16 @@
+{
+  "synthetic_only": true,
+  "production_verified": false,
+  "cases": [
+    {"case_id":"S23-01","op_id":"op-01","attempt":1,"kind":"response","records":["response:ok"]},
+    {"case_id":"S23-02","op_id":"op-02","attempt":1,"kind":"response","records":["response:ok","response:ok"]},
+    {"case_id":"S23-03","op_id":"op-03","attempt":1,"kind":"response","records":["response:ok","response:other"]},
+    {"case_id":"S23-04","op_id":"op-04","attempt":1,"kind":"durable","records":["durable:ref-A","durable:ref-A"]},
+    {"case_id":"S23-05","op_id":"op-05","attempt":1,"kind":"durable","records":["durable:ref-A","durable:ref-B"]},
+    {"case_id":"S23-06","op_id":"op-06","attempt":1,"kind":"response_and_durable_mismatch","records":["response:ref-A","durable:ref-B"]},
+    {"case_id":"S23-07","op_id":"op-07","attempt":1,"kind":"response_and_durable_mismatch","records":["response:ref-A","durable:ref-A"]},
+    {"case_id":"S23-08","op_id":"op-08","attempt":1,"kind":"response","records":["response:ok","response:ok"],"after_restart":true,"prior_status":"UNKNOWN"},
+    {"case_id":"S23-09","op_id":"op-09","attempt":1,"kind":"durable","records":["durable:ref-A","durable:ref-A"],"after_restart":true,"prior_status":"UNKNOWN"},
+    {"case_id":"S23-10","op_id":"op-10","attempt":1,"kind":"response","records":["response:ok","response:changed"],"after_restart":true,"prior_status":"UNKNOWN"}
+  ]
+}

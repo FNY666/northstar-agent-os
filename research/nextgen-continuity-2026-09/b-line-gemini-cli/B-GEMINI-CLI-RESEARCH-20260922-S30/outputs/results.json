@@ -1,0 +1,121 @@
+{
+  "synthetic_only": true,
+  "production_verified": false,
+  "schema_version": "S30-1.0",
+  "worker_id": "worker-0",
+  "op_id": "op-s30-single",
+  "results": [
+    {
+      "id": "S30-01",
+      "label": "ack received",
+      "expected": "accepted",
+      "actual": "accepted",
+      "pass": true
+    },
+    {
+      "id": "S30-02",
+      "label": "ack lost",
+      "expected": "UNKNOWN",
+      "actual": "UNKNOWN",
+      "pass": true
+    },
+    {
+      "id": "S30-03",
+      "label": "duplicate retry then ack",
+      "expected": "accepted",
+      "actual": "accepted",
+      "pass": true
+    },
+    {
+      "id": "S30-04",
+      "label": "duplicate retry and duplicate ack",
+      "expected": "accepted",
+      "actual": "accepted",
+      "pass": true
+    },
+    {
+      "id": "S30-05",
+      "label": "late ack agrees with fact",
+      "expected": "accepted",
+      "actual": "accepted",
+      "pass": true
+    },
+    {
+      "id": "S30-06",
+      "label": "late ack conflicts with rejected fact",
+      "expected": "rejected",
+      "actual": "rejected",
+      "pass": true
+    },
+    {
+      "id": "S30-07",
+      "label": "conflicting late ack against accepted fact",
+      "expected": "accepted",
+      "actual": "accepted",
+      "pass": true
+    },
+    {
+      "id": "S30-08",
+      "label": "evidence unavailable",
+      "expected": "UNKNOWN",
+      "actual": "UNKNOWN",
+      "pass": true
+    },
+    {
+      "id": "S30-09",
+      "label": "verified rejected ack",
+      "expected": "rejected",
+      "actual": "rejected",
+      "pass": true
+    },
+    {
+      "id": "S30-10",
+      "label": "retry exhausted without ack",
+      "expected": "UNKNOWN",
+      "actual": "UNKNOWN",
+      "pass": true
+    },
+    {
+      "id": "S30-11",
+      "label": "late ack with no conflicting fact",
+      "expected": "accepted",
+      "actual": "accepted",
+      "pass": true
+    },
+    {
+      "id": "S30-12",
+      "label": "conflicting acknowledgements no fact",
+      "expected": "UNKNOWN",
+      "actual": "UNKNOWN",
+      "pass": true
+    },
+    {
+      "id": "S30-13",
+      "label": "rejected fact with duplicate accepted retries",
+      "expected": "rejected",
+      "actual": "rejected",
+      "pass": true
+    },
+    {
+      "id": "S30-14",
+      "label": "accepted fact with duplicate rejected retries",
+      "expected": "accepted",
+      "actual": "accepted",
+      "pass": true
+    },
+    {
+      "id": "S30-15",
+      "label": "ack missing outcome",
+      "expected": "UNKNOWN",
+      "actual": "UNKNOWN",
+      "pass": true
+    },
+    {
+      "id": "S30-16",
+      "label": "retry with unavailable evidence",
+      "expected": "UNKNOWN",
+      "actual": "UNKNOWN",
+      "pass": true
+    }
+  ]
+}

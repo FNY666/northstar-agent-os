@@ -1,0 +1,199 @@
+{
+  "synthetic_only": true,
+  "production_verified": false,
+  "worker_id": "worker-s29-1",
+  "operation_id": "op-s29-001",
+  "model_rule": "local deterministic payload-fingerprint rule; not external/Gemini behavior",
+  "results": [
+    {
+      "id": "S29-01-first-canonical",
+      "expected_classification": "accepted",
+      "classification": "accepted",
+      "match": true,
+      "reasons": [
+        "delivery 1: first observable payload accepted as local canonical"
+      ],
+      "synthetic_only": true,
+      "production_verified": false
+    },
+    {
+      "id": "S29-02-same-event-repeat",
+      "expected_classification": "accepted",
+      "classification": "accepted",
+      "match": true,
+      "reasons": [
+        "delivery 1: first observable payload accepted as local canonical",
+        "delivery 2: same event and same payload; duplicate accepted"
+      ],
+      "synthetic_only": true,
+      "production_verified": false
+    },
+    {
+      "id": "S29-03-ack-lost-same-payload",
+      "expected_classification": "accepted",
+      "classification": "accepted",
+      "match": true,
+      "reasons": [
+        "delivery 1: first observable payload accepted as local canonical",
+        "delivery 2: equivalent payload; duplicate/retry accepted"
+      ],
+      "synthetic_only": true,
+      "production_verified": false
+    },
+    {
+      "id": "S29-04-different-event-same-payload",
+      "expected_classification": "accepted",
+      "classification": "accepted",
+      "match": true,
+      "reasons": [
+        "delivery 1: first observable payload accepted as local canonical",
+        "delivery 2: equivalent payload; duplicate/retry accepted"
+      ],
+      "synthetic_only": true,
+      "production_verified": false
+    },
+    {
+      "id": "S29-05-same-key-different-payload",
+      "expected_classification": "rejected",
+      "classification": "rejected",
+      "match": true,
+      "reasons": [
+        "delivery 1: first observable payload accepted as local canonical",
+        "delivery 2: payload differs from local canonical; conflict rejected"
+      ],
+      "synthetic_only": true,
+      "production_verified": false
+    },
+    {
+      "id": "S29-06-retry-after-conflict",
+      "expected_classification": "rejected",
+      "classification": "rejected",
+      "match": true,
+      "reasons": [
+        "delivery 1: first observable payload accepted as local canonical",
+        "delivery 2: payload differs from local canonical; conflict rejected"
+      ],
+      "synthetic_only": true,
+      "production_verified": false
+    },
+    {
+      "id": "S29-07-reversed-order-same-payload",
+      "expected_classification": "accepted",
+      "classification": "accepted",
+      "match": true,
+      "reasons": [
+        "delivery 1: first observable payload accepted as local canonical",
+        "delivery 2: equivalent payload; duplicate/retry accepted"
+      ],
+      "synthetic_only": true,
+      "production_verified": false
+    },
+    {
+      "id": "S29-08-reversed-order-conflict",
+      "expected_classification": "rejected",
+      "classification": "rejected",
+      "match": true,
+      "reasons": [
+        "delivery 1: first observable payload accepted as local canonical",
+        "delivery 2: payload differs from local canonical; conflict rejected"
+      ],
+      "synthetic_only": true,
+      "production_verified": false
+    },
+    {
+      "id": "S29-09-ack-lost-different-retry",
+      "expected_classification": "rejected",
+      "classification": "rejected",
+      "match": true,
+      "reasons": [
+        "delivery 1: first observable payload accepted as local canonical",
+        "delivery 2: payload differs from local canonical; conflict rejected"
+      ],
+      "synthetic_only": true,
+      "production_verified": false
+    },
+    {
+      "id": "S29-10-ack-lost-evidence-missing",
+      "expected_classification": "UNKNOWN",
+      "classification": "UNKNOWN",
+      "match": true,
+      "reasons": [
+        "delivery 1: first observable payload accepted as local canonical",
+        "delivery 2: evidence or payload inaccessible; outcome cannot be proven yet"
+      ],
+      "synthetic_only": true,
+      "production_verified": false
+    },
+    {
+      "id": "S29-11-initial-evidence-missing",
+      "expected_classification": "UNKNOWN",
+      "classification": "UNKNOWN",
+      "match": true,
+      "reasons": [
+        "delivery 1: evidence or payload inaccessible; outcome cannot be proven yet"
+      ],
+      "synthetic_only": true,
+      "production_verified": false
+    },
+    {
+      "id": "S29-12-conflict-evidence-missing",
+      "expected_classification": "UNKNOWN",
+      "classification": "UNKNOWN",
+      "match": true,
+      "reasons": [
+        "delivery 1: first observable payload accepted as local canonical",
+        "delivery 2: evidence or payload inaccessible; outcome cannot be proven yet"
+      ],
+      "synthetic_only": true,
+      "production_verified": false
+    },
+    {
+      "id": "S29-13-payload-evidence-missing",
+      "expected_classification": "UNKNOWN",
+      "classification": "UNKNOWN",
+      "match": true,
+      "reasons": [
+        "delivery 1: first observable payload accepted as local canonical",
+        "delivery 2: evidence or payload inaccessible; outcome cannot be proven yet"
+      ],
+      "synthetic_only": true,
+      "production_verified": false
+    },
+    {
+      "id": "S29-14-unknown-before-retry",
+      "expected_classification": "accepted",
+      "classification": "accepted",
+      "match": true,
+      "reasons": [
+        "delivery 1: evidence or payload inaccessible; outcome cannot be proven yet",
+        "delivery 2: first observable payload accepted as local canonical"
+      ],
+      "synthetic_only": true,
+      "production_verified": false
+    },
+    {
+      "id": "S29-15-reversed-order-missing-evidence",
+      "expected_classification": "UNKNOWN",
+      "classification": "UNKNOWN",
+      "match": true,
+      "reasons": [
+        "delivery 1: first observable payload accepted as local canonical",
+        "delivery 2: evidence or payload inaccessible; outcome cannot be proven yet"
+      ],
+      "synthetic_only": true,
+      "production_verified": false
+    },
+    {
+      "id": "S29-16-conflict-then-canonical",
+      "expected_classification": "rejected",
+      "classification": "rejected",
+      "match": true,
+      "reasons": [
+        "delivery 1: first observable payload accepted as local canonical",
+        "delivery 2: payload differs from local canonical; conflict rejected"
+      ],
+      "synthetic_only": true,
+      "production_verified": false
+    }
+  ]
+}

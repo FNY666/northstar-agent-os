@@ -1,0 +1,87 @@
+{
+  "schema_version": "1.0",
+  "synthetic_only": true,
+  "production_verified": false,
+  "question": "在完全离线 synthetic-only 的双 worker、单 op_id 事件交错模型中，能否验证无 matching intent 拒绝 response/durable、同 attempt 冲突拒绝，以及 crash/restart/resume 和本地记录不把远端效果从 UNKNOWN 自动分类为 applied/not_applied？",
+  "scope": {
+    "included": ["dispatch_intent", "tool_response", "durable_result", "crash", "restart", "resume", "two labeled workers", "one op_id per fixture"],
+    "excluded": ["Gemini CLI production behavior", "real remote services", "credentials", "multi-process execution", "state-space enumeration", "dedup key collision", "manual reconcile", "real CLI tests", "remote state", "exactly-once", "rollback", "crash durability"],
+    "directory_policy": "Only /tmp/B-GEMINI-CLI-RESEARCH-20260922-S22A was written; no prior research directories or prohibited artifacts were read."
+  },
+  "claims": [
+    {
+      "id": "C1",
+      "claim": "The deterministic harness passes all 10 synthetic fixtures, with 25 accepted and 6 rejected local event decisions; all 10 fixture-level remote_effect values are UNKNOWN.",
+      "status": "confirmed",
+      "confidence": "high_for_local_model",
+      "sources": [{"url": "https://example.invalid/s22a/outputs/results.json", "publisher": "local synthetic harness", "published_or_updated": "2026-09-22", "tier": "primary", "support": "Generated outputs/results.json; URL is an inaccessible placeholder, not a web source."}],
+      "caveat": "Only confirms this local run and not any production behavior."
+    },
+    {
+      "id": "C2",
+      "claim": "A response or durable result without a matching same-op_id same-attempt dispatch_intent is rejected in the tested arrival-order model.",
+      "status": "confirmed",
+      "confidence": "high_for_local_model",
+      "sources": [{"url": "https://example.invalid/s22a/harness.py", "publisher": "local synthetic harness", "published_or_updated": "2026-09-22", "tier": "primary", "support": "Harness rule and C01/C02/C03/C10 fixture outputs."}],
+      "caveat": "The rule is not evidence about Gemini CLI or a remote service."
+    },
+    {
+      "id": "C3",
+      "claim": "A later response or durable result with a different value for the same op_id and attempt is rejected after the first value is recorded.",
+      "status": "confirmed",
+      "confidence": "high_for_local_model",
+      "sources": [{"url": "https://example.invalid/s22a/fixtures/cases.json", "publisher": "local synthetic fixtures", "published_or_updated": "2026-09-22", "tier": "primary", "support": "C05 and C06 conflict fixtures and results."}],
+      "caveat": "This does not establish a distributed conflict protocol or remote effect."
+    },
+    {
+      "id": "C4",
+      "claim": "In this model, crash/restart/resume and local accepted/rejected records never change remote_effect from UNKNOWN to applied or not_applied.",
+      "status": "confirmed",
+      "confidence": "high_for_local_model",
+      "sources": [{"url": "https://example.invalid/s22a/outputs/results.json", "publisher": "local synthetic harness", "published_or_updated": "2026-09-22", "tier": "primary", "support": "All 10 result objects retain remote_effect UNKNOWN."}],
+      "caveat": "UNKNOWN is a deliberate model classification, not a remote observation."
+    },
+    {
+      "id": "C5",
+      "claim": "A response arriving before its intent is rejected at arrival and is not retroactively accepted when the later intent arrives.",
+      "status": "inferred",
+      "confidence": "medium_for_model_semantics",
+      "sources": [{"url": "https://example.invalid/s22a/fixtures/cases.json", "publisher": "local synthetic fixtures", "published_or_updated": "2026-09-22", "tier": "primary", "support": "C03 order and expected decisions."}],
+      "caveat": "This is an inference from the harness's online processing semantics, not a general distributed-systems claim."
+    },
+    {
+      "id": "C6",
+      "claim": "The tested rules describe Gemini CLI, production behavior, remote state, exactly-once, rollback, or crash durability.",
+      "status": "unverified",
+      "confidence": "none",
+      "sources": [],
+      "caveat": "Explicitly out of scope; no such validation was performed."
+    },
+    {
+      "id": "C7",
+      "claim": "Any accepted local durable or response record proves a remote effect is applied.",
+      "status": "conflicting",
+      "confidence": "high_against_model_assumption",
+      "sources": [{"url": "https://example.invalid/s22a/REPORT.md", "publisher": "local research report", "published_or_updated": "2026-09-22", "tier": "primary", "support": "Report explicitly preserves UNKNOWN and rejects automatic applied/not_applied classification."}],
+      "caveat": "The conflict is between the proposition and the model's conservative rule, not evidence of a production incident."
+    },
+    {
+      "id": "C8",
+      "claim": "Actual remote effects, production crash durability, exactly-once behavior, rollback, and production logs are accessible from this study.",
+      "status": "inaccessible",
+      "confidence": "not_applicable",
+      "sources": [],
+      "caveat": "No network, real service, credentials, production CLI, or prohibited artifact was accessed."
+    }
+  ],
+  "coverage": {
+    "fixture_count": 10,
+    "fixture_pass_count": 10,
+    "fixture_fail_count": 0,
+    "accepted_local_event_decisions": 25,
+    "rejected_local_event_decisions": 6,
+    "unknown_fixture_remote_effects": 10,
+    "invariants_tested": 3,
+    "evidence_statuses_present": ["confirmed", "inferred", "unverified", "conflicting", "inaccessible"]
+  }
+}

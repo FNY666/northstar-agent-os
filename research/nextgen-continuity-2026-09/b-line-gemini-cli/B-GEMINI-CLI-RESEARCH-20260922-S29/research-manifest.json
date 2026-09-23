@@ -1,0 +1,52 @@
+{
+  "schema_version": "1.0",
+  "question": "In a single-worker single-operation offline model, how do deterministic duplicate-delivery and idempotency permutations classify when evidence may be inaccessible?",
+  "scope": {
+    "included": ["same event repeated", "same and different payloads", "reversed order", "lost acknowledgements", "conflicting retries", "inaccessible evidence", "16 deterministic fixtures", "local payload fingerprint rule"],
+    "excluded": ["Gemini behavior", "real CLI or external services", "network", "credentials", "durability", "remote state", "exactly-once", "rollback", "production safety", "prior research artifacts"],
+    "synthetic_only": true,
+    "production_verified": false
+  },
+  "claims": [
+    {
+      "id": "S29-C1",
+      "claim": "The local model classifies fully observable equivalent duplicate or retry payloads as accepted.",
+      "status": "inferred",
+      "confidence": 0.99,
+      "sources": [{"url":"https://example.invalid/s29-local-model","publisher":"S29 local harness","published_or_updated":"2026-09-22","tier":"secondary","support":"Synthetic harness rule and deterministic fixture outputs."}],
+      "caveat": "This is not observed Gemini or external-service behavior and does not establish remote acceptance or durability."
+    },
+    {
+      "id": "S29-C2",
+      "claim": "The local model classifies a fully observable payload conflict with its local canonical payload as rejected.",
+      "status": "inferred",
+      "confidence": 0.99,
+      "sources": [{"url":"https://example.invalid/s29-local-model","publisher":"S29 local harness","published_or_updated":"2026-09-22","tier":"secondary","support":"Synthetic harness conflict branch and deterministic fixture outputs."}],
+      "caveat": "Rejected is a local model result only; it is not a remote rejection, rollback, or production safety claim."
+    },
+    {
+      "id": "S29-C3",
+      "claim": "When evidence or payload needed for comparison is inaccessible, the result is UNKNOWN rather than rejected.",
+      "status": "inferred",
+      "confidence": 0.99,
+      "sources": [{"url":"https://example.invalid/s29-local-model","publisher":"S29 local harness","published_or_updated":"2026-09-22","tier":"secondary","support":"Synthetic harness explicitly returns UNKNOWN on inaccessible evidence or payload."}],
+      "caveat": "UNKNOWN expresses insufficient local evidence and must not be treated as rejection."
+    },
+    {
+      "id": "S29-C4",
+      "claim": "The fixture run is deterministic for 16 cases with 6 accepted, 5 rejected, and 5 UNKNOWN classifications.",
+      "status": "inferred",
+      "confidence": 0.99,
+      "sources": [{"url":"https://example.invalid/s29-run","publisher":"S29 local run","published_or_updated":"2026-09-22","tier":"secondary","support":"Harness stdout and outputs/results.json."}],
+      "caveat": "Synthetic execution evidence only; production_verified=false."
+    }
+  ],
+  "coverage": {
+    "claims_total": 4,
+    "claims_with_sources": 4,
+    "source_types": {"external": 0, "local_synthetic": 4},
+    "gaps": ["No external or production evidence by design", "No durability, remote state, exactly-once, rollback, or production safety verification"],
+    "synthetic_only": true,
+    "production_verified": false
+  }
+}

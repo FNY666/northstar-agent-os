@@ -1,0 +1,88 @@
+{
+  "combination_count": 1024,
+  "examples": [
+    {
+      "decision": "NO_GO_D1",
+      "gates": {
+        "authority": true,
+        "d1_opt_in": false,
+        "fencing": true,
+        "producer": true,
+        "readback": true,
+        "registry": true,
+        "schema": true,
+        "secret_boundary": true,
+        "target_acceptance": true,
+        "trusted_time": true
+      },
+      "name": "schema_only"
+    },
+    {
+      "decision": "NO_GO:authority",
+      "gates": {
+        "authority": false,
+        "d1_opt_in": true,
+        "fencing": true,
+        "producer": true,
+        "readback": true,
+        "registry": true,
+        "schema": true,
+        "secret_boundary": true,
+        "target_acceptance": true,
+        "trusted_time": true
+      },
+      "name": "d1_without_authority"
+    },
+    {
+      "decision": "NO_GO:target_acceptance",
+      "gates": {
+        "authority": true,
+        "d1_opt_in": true,
+        "fencing": true,
+        "producer": true,
+        "readback": true,
+        "registry": true,
+        "schema": true,
+        "secret_boundary": true,
+        "target_acceptance": false,
+        "trusted_time": true
+      },
+      "name": "dry_run_all_control_gates"
+    },
+    {
+      "decision": "CONTROLLED_REAL_ELIGIBLE",
+      "gates": {
+        "authority": true,
+        "d1_opt_in": true,
+        "fencing": true,
+        "producer": true,
+        "readback": true,
+        "registry": true,
+        "schema": true,
+        "secret_boundary": true,
+        "target_acceptance": true,
+        "trusted_time": true
+      },
+      "name": "all_gates_closed"
+    },
+    {
+      "decision": "SCHEMA_REJECT",
+      "gates": {
+        "authority": true,
+        "d1_opt_in": true,
+        "fencing": true,
+        "producer": true,
+        "readback": true,
+        "registry": true,
+        "schema": false,
+        "secret_boundary": true,
+        "target_acceptance": true,
+        "trusted_time": true
+      },
+      "name": "schema_invalid"
+    }
+  ],
+  "gate_count": 10,
+  "invariants": "PASS",
+  "real_eligible_count": 1
+}

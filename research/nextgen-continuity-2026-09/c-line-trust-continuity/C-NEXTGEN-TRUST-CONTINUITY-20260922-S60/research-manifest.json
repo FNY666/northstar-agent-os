@@ -1,0 +1,24 @@
+{
+  "schema_version": "1.0",
+  "question": "在离线合成证据中，何时最终 evidence decision gate、pre/postcondition、独立 verifier、RECOVERED/UNKNOWN/REJECT规则、quarantine/escalation/manual review、remediation/retry/revalidation、decision immutability、audit 与 conflict resolution 能够闭合连续性，何时必须保持 UNKNOWN 或 REJECT？",
+  "scope": {
+    "project": "C-line S60",
+    "mode": "offline synthetic fixtures",
+    "date": "2026-09-23",
+    "excluded": ["S1-S59", "production", "network", "real services", "credentials"],
+    "identity_domain": ["project", "task", "operation", "evidence_window", "decision_id", "review_id"],
+    "decision_domain": ["precondition", "postcondition", "verifier", "policy", "recovered", "unknown", "reject", "quarantine", "escalation", "manual_review", "remediation", "retry", "revalidation", "audit", "conflict"]
+  },
+  "claims_status": "inferred",
+  "synthetic_only": true,
+  "production_verified": false,
+  "sources": [],
+  "claims": [
+    {"id":"final-decision-closure","claim":"只有 evidence/source/claim scope、pre/postcondition、独立 verifier、decision rules、UNKNOWN quarantine/escalation/manual review、remediation/retry/revalidation、immutability/audit/conflict 全部闭合时才可 RECOVERED。","status":"inferred","confidence":"bounded","sources":[],"caveat":"仅由本地合成夹具和规则推导，不代表生产系统。"},
+    {"id":"success-not-final-proof","claim":"平台完成、输出成功、补偿请求或人工结论不能证明最终目标状态；必须独立 read-back/reconciliation，未知状态不得继续下游。","status":"inferred","confidence":"bounded","sources":[],"caveat":"未验证任何真实最终决策系统。"},
+    {"id":"decision-unknown","claim":"后置条件、独立验证、人工审核、修复/重试、最终复验或冲突解决未知时必须 UNKNOWN。","status":"inferred","confidence":"bounded","sources":[],"caveat":"布尔门不量化真实补偿或人工审核风险。"},
+    {"id":"decision-conflict-reject","claim":"身份冲突和同一目标的不可调和最终决策冲突必须 REJECT。","status":"inferred","confidence":"bounded","sources":[],"caveat":"只验证合成判定逻辑，不证明目标系统执行拒绝。"}
+  ],
+  "coverage": {"cases": 28, "property_sweep": 16777216, "dimensions": 24, "statuses": ["RECOVERED", "UNKNOWN", "REJECT"], "events": ["EVIDENCE_WINDOW", "SOURCE_SET", "CLAIM_SCOPE", "PRECONDITION", "POSTCONDITION", "VERIFIER", "POLICY", "RECOVERED", "UNKNOWN", "REJECT", "QUARANTINE", "ESCALATION", "MANUAL_REVIEW", "REMEDIATION", "RETRY", "REVALIDATION", "AUDIT", "CONFLICT"]},
+  "notes": "三态互斥并 fail-closed；RECOVERED 仅代表本片离线夹具中的 final-decision evidence gate 闭合，不代表 production continuity、external effect 或 exactly-once。"
+}

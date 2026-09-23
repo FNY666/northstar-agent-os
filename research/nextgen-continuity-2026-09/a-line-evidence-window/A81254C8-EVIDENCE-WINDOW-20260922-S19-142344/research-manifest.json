@@ -1,0 +1,66 @@
+{
+  "schema_version": "1.0",
+  "question": "How should query completeness, retention, pagination and visibility gaps be classified in a cross-system evidence window?",
+  "scope": "Official first-party public documentation only; fetched 2026-09-22; no production systems or protected local targets.",
+  "coverage": ["QUERY_GAP", "RETENTION_EXPIRED", "DELAYED", "NO_EVENT", "VERIFIED_CONTINUITY", "UNKNOWN"],
+  "claims": [
+    {
+      "id": "S19-C1",
+      "claim": "CloudTrail, GitHub workflow runs, Kubernetes list/watch and Temporal Visibility are bounded query surfaces, not universal continuity proofs.",
+      "status": "confirmed",
+      "confidence": "high",
+      "sources": [
+        {"url":"https://docs.aws.amazon.com/awscloudtrail/latest/userguide/view-cloudtrail-events.html","publisher":"AWS","published_or_updated":"unknown","tier":"primary","support":"Official query/history documentation."},
+        {"url":"https://docs.github.com/en/rest/actions/workflow-runs","publisher":"GitHub","published_or_updated":"unknown","tier":"primary","support":"Official workflow-run API documentation."},
+        {"url":"https://kubernetes.io/docs/reference/using-api/api-concepts/","publisher":"Kubernetes","published_or_updated":"unknown","tier":"primary","support":"Official list/watch and resourceVersion documentation."},
+        {"url":"https://docs.temporal.io/visibility","publisher":"Temporal","published_or_updated":"unknown","tier":"primary","support":"Official Visibility documentation."}
+      ],
+      "caveat": "Does not prove complete event generation, external commit, or absence of filtering/sampling."
+    },
+    {
+      "id": "S19-C2",
+      "claim": "An empty query result can be classified as NO_EVENT only after query completeness, pagination, authorization, time range and retention checks pass.",
+      "status": "inferred",
+      "confidence": "medium",
+      "sources": [
+        {"url":"https://kubernetes.io/docs/reference/using-api/api-concepts/","publisher":"Kubernetes","published_or_updated":"unknown","tier":"primary","support":"Official consistency and resourceVersion semantics."},
+        {"url":"https://docs.aws.amazon.com/awscloudtrail/latest/userguide/view-cloudtrail-events.html","publisher":"AWS","published_or_updated":"unknown","tier":"primary","support":"Official event-history query boundary."}
+      ],
+      "caveat": "This is a cross-system acceptance rule inferred from documented query boundaries, not a vendor guarantee."
+    },
+    {
+      "id": "S19-C3",
+      "claim": "Retention expiry, pagination truncation, stale resourceVersion or unavailable visibility must produce QUERY_GAP or RETENTION_EXPIRED, never a negative proof.",
+      "status": "inferred",
+      "confidence": "high",
+      "sources": [
+        {"url":"https://docs.github.com/en/rest/actions/workflow-runs","publisher":"GitHub","published_or_updated":"unknown","tier":"primary","support":"Official paginated run query API."},
+        {"url":"https://kubernetes.io/docs/reference/using-api/api-concepts/","publisher":"Kubernetes","published_or_updated":"unknown","tier":"primary","support":"Official stale resourceVersion and watch semantics."},
+        {"url":"https://docs.temporal.io/visibility","publisher":"Temporal","published_or_updated":"unknown","tier":"primary","support":"Official visibility query surface."}
+      ],
+      "caveat": "Exact retention durations and provider-specific completeness differ by deployment and configuration."
+    },
+    {
+      "id": "S19-C4",
+      "claim": "VERIFIED_CONTINUITY requires an evidence-window manifest, complete query/read-back, integrity checks and an explicit postcondition; platform success alone is insufficient.",
+      "status": "inferred",
+      "confidence": "high",
+      "sources": [
+        {"url":"https://docs.aws.amazon.com/awscloudtrail/latest/userguide/cloudtrail-log-file-validation-intro.html","publisher":"AWS","published_or_updated":"unknown","tier":"primary","support":"Official digest validation semantics."},
+        {"url":"https://docs.temporal.io/workflow-execution/event","publisher":"Temporal","published_or_updated":"unknown","tier":"primary","support":"Official event-history semantics."}
+      ],
+      "caveat": "No public source here proves a universal production continuity standard or external business-effect completion."
+    },
+    {
+      "id": "S19-C5",
+      "claim": "Deterministic vectors must preserve UNKNOWN when timeout, delayed ingestion, export failure, query incompleteness or retention expiry prevents authoritative read-back.",
+      "status": "inferred",
+      "confidence": "high",
+      "sources": [
+        {"url":"https://opentelemetry.io/docs/collector/resiliency/","publisher":"OpenTelemetry","published_or_updated":"unknown","tier":"primary","support":"Official queue/retry/WAL resiliency documentation."},
+        {"url":"https://docs.temporal.io/encyclopedia/retry-policies","publisher":"Temporal","published_or_updated":"unknown","tier":"primary","support":"Official retry semantics."}
+      ],
+      "caveat": "The state machine is a proposed cross-system acceptance design, not an implementation claim."
+    }
+  ]
+}

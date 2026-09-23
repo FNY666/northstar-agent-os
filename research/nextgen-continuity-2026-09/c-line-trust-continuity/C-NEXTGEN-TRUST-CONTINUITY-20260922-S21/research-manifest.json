@@ -1,0 +1,26 @@
+{
+  "schema_version": "S21-research-manifest-v1",
+  "question": "在本地确定性事件 DAG 中，给定查询 X、Y，是否可保守判定严格 happens-before X ≺ Y？",
+  "scope": {
+    "included": ["direct reachability", "transitive closure", "cycles", "missing edges", "missing nodes", "duplicate edges", "damaged endpoints", "partial-vs-total-order declarations"],
+    "excluded": ["network", "real services", "SDKs", "credentials", "shared/P0", "accident directories", "D10/L12/D14", "canonical/staging/140/tri-line/systemd", "S1-S20", "durability", "exactly-once", "rollback", "production readiness"],
+    "directory_isolation": "Only this new S21 directory was read or written for research inputs/outputs."
+  },
+  "synthetic_only": true,
+  "production_verified": false,
+  "claims": [
+    {"id":"S21-C1","claim":"A complete X-to-Y path supports RECOVERED for X ≺ Y.","status":"inferred","confidence":1.0,"sources":[],"caveat":"Local synthetic DAG semantics only."},
+    {"id":"S21-C2","claim":"A reachable path without a direct query edge is RECOVERED/transitive_order, not direct_edge.","status":"inferred","confidence":1.0,"sources":[],"caveat":"Transitive closure is not evidence of a direct edge."},
+    {"id":"S21-C3","claim":"Two-way unreachable pairs are UNKNOWN and are explicitly treated as incomparable/concurrent in the report.","status":"inferred","confidence":1.0,"sources":[],"caveat":"UNKNOWN means no verified causal order in this graph."},
+    {"id":"S21-C4","claim":"A verifiable cycle or inconsistent edge endpoint is REJECT.","status":"inferred","confidence":1.0,"sources":[],"caveat":"Structural fixture validation, not a production log guarantee."},
+    {"id":"S21-C5","claim":"Missing nodes/edges and duplicate edges do not upgrade UNKNOWN; duplicate edges add no evidence.","status":"inferred","confidence":1.0,"sources":[],"caveat":"Results apply to the fixture schema and deterministic harness."},
+    {"id":"S21-C6","claim":"A total-order declaration alone does not force REJECT; only an explicit enforceable total-order invariant with a verified violation does.","status":"inferred","confidence":1.0,"sources":[],"caveat":"Synthetic declaration semantics."}
+  ],
+  "coverage": {
+    "fixtures": 24,
+    "states": {"RECOVERED": 7, "UNKNOWN": 12, "REJECT": 5},
+    "recovered_subclasses": {"direct_edge": 3, "transitive_order": 4},
+    "deterministic_runs": 2,
+    "byte_stability_checked": true
+  }
+}

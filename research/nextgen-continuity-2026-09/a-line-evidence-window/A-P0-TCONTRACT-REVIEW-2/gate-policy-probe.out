@@ -1,0 +1,35 @@
+[
+  {
+    "case": "schema-only",
+    "decision": "CONDITIONAL_GO_SCHEMA_ONLY",
+    "reason": "pure_schema_only"
+  },
+  {
+    "case": "d1-missing",
+    "decision": "NO_GO",
+    "reason": "d1_opt_in_required"
+  },
+  {
+    "case": "all-preflight-dry-run",
+    "decision": "ELIGIBLE_CONTROLLED_DRY_RUN",
+    "reason": "all_preflight_gates_closed"
+  },
+  {
+    "case": "authority-unknown",
+    "decision": "NO_GO",
+    "missing": [
+      "authority"
+    ],
+    "reason": "trust_gate_missing_or_unknown"
+  },
+  {
+    "case": "real-acceptance-missing",
+    "decision": "NO_GO",
+    "reason": "real_external_acceptance_unverified"
+  },
+  {
+    "case": "synthetic-real-all-flags",
+    "decision": "REAL_GO",
+    "reason": "explicit_target_acceptance_and_all_gates"
+  }
+]

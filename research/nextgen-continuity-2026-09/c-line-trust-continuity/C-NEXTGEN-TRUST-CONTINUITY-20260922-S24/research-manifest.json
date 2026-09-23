@@ -1,0 +1,28 @@
+{
+  "schema_version": "S24-trust-continuity-1",
+  "research_id": "C-NEXTGEN-TRUST-CONTINUITY-20260922-S24",
+  "question": "在跨 epoch 恢复重试中，幂等键、token 轮换、重放窗口、提交、fencing 与审计哈希链如何共同决定安全的连续性状态？",
+  "synthetic_only": true,
+  "production_verified": false,
+  "scope": {
+    "mode": "offline_synthetic_only",
+    "network_access": false,
+    "real_services": false,
+    "sdk_or_credentials": false,
+    "excluded_paths": ["/var/minis/shared/P0", "事故目录", "D10", "L12", "D14", "canonical", "140", "tri-line", "systemd", "S1-S23"]
+  },
+  "claims": [
+    {"id":"C1","claim":"RECOVERED 只能在 admission/platform receipt、日志存在、外部效果确认三类独立证据均闭合，并且幂等、epoch、token 连续性、重放窗口、提交、fence 与审计链条件均闭合时产生。","status":"inferred","confidence":0.99,"sources":[],"caveat":"仅为离线合成决策规则，不能证明生产耐久性或 exactly-once。"},
+    {"id":"C2","claim":"幂等键缺失、复用或参数冲突应阻止恢复确认；参数冲突、复用、epoch 不匹配、危险重放窗口或双重提交在本切片中 fail-closed 为 REJECT。","status":"inferred","confidence":0.98,"sources":[],"caveat":"合成矩阵不代表任何具体平台语义。"},
+    {"id":"C3","claim":"部分提交、审计哈希链断裂、查询缺口、导出失败、留存过期或恢复后 fencing 未证实时，不能将不完整证据升级为 RECOVERED。","status":"inferred","confidence":0.98,"sources":[],"caveat":"不能证明回滚、外部效果或 production readiness。"}
+  ],
+  "coverage": {
+    "event_classes": ["NO_EVENT","DELAYED","DROPPED","EXPORTER_FAILURE","QUERY_GAP","RETENTION_EXPIRED","VERIFIED_CONTINUITY","UNKNOWN"],
+    "controls": ["token_rotation","replay_window","partial_commit","double_commit","audit_hash_chain_break","post_recovery_fencing","idempotency_missing","idempotency_reuse","idempotency_parameter_conflict"],
+    "evidence_axes": ["admission_platform_receipt","log_presence","external_effect_confirmation"],
+    "states": ["RECOVERED","UNKNOWN","REJECT"],
+    "mutual_exclusion": true
+  },
+  "limitations": ["不能证明生产耐久性", "不能证明 exactly-once", "不能证明回滚", "不能证明外部效果", "不能证明 production readiness"],
+  "reproducibility": {"command":"python3 harness.py", "expected_runs":2, "byte_compare":"cmp outputs/results.run1.json outputs/results.run2.json", "network_required":false}
+}

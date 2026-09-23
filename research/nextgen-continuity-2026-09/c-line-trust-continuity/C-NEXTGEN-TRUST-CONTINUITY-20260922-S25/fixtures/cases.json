@@ -1,0 +1,105 @@
+{
+  "synthetic_only": true,
+  "production_verified": false,
+  "description": "Offline-only synthetic fixtures for cross-signed receipts and external-effect confirmation across regions and observers.",
+  "cases": [
+    {
+      "case_id": "C01-clean-cross-region",
+      "classification": "VERIFIED_CONTINUITY",
+      "expected_status": "RECOVERED",
+      "tags": ["multi_region", "multi_observer", "cross_signature", "freshness_window", "clock_skew", "fence_continuity", "platform_receipt", "log", "external_effect"],
+      "evidence": {"independent_observers": 3, "event_seen": true, "platform_log_external_closed": true, "cross_signature_complete": true, "cross_signature_conflict": false, "identity_epoch_fence_continuous": true, "freshness_seconds": 4, "max_clock_skew_seconds": 2, "clock_rollback": false, "fence_revoked": false, "platform_log_match": true, "query_complete": true, "retained": true, "external_effect_confirmed": true, "exporter_healthy": true, "observer_disagreement": false, "delivery_delayed": false, "delivery_dropped": false}
+    },
+    {
+      "case_id": "C02-observer-disagreement",
+      "classification": "UNKNOWN",
+      "expected_status": "UNKNOWN",
+      "tags": ["multi_observer", "observer_disagreement", "fail_closed"],
+      "evidence": {"independent_observers": 3, "event_seen": true, "platform_log_external_closed": true, "cross_signature_complete": true, "cross_signature_conflict": false, "identity_epoch_fence_continuous": true, "freshness_seconds": 6, "max_clock_skew_seconds": 2, "clock_rollback": false, "fence_revoked": false, "platform_log_match": true, "query_complete": true, "retained": true, "external_effect_confirmed": true, "exporter_healthy": true, "observer_disagreement": true, "delivery_delayed": false, "delivery_dropped": false}
+    },
+    {
+      "case_id": "C03-stale-window",
+      "classification": "QUERY_GAP",
+      "expected_status": "UNKNOWN",
+      "tags": ["freshness_window", "query_gap", "fail_closed"],
+      "evidence": {"independent_observers": 2, "event_seen": true, "platform_log_external_closed": true, "cross_signature_complete": true, "cross_signature_conflict": false, "identity_epoch_fence_continuous": true, "freshness_seconds": 31, "max_clock_skew_seconds": 1, "clock_rollback": false, "fence_revoked": false, "platform_log_match": true, "query_complete": false, "retained": true, "external_effect_confirmed": true, "exporter_healthy": true, "observer_disagreement": false, "delivery_delayed": false, "delivery_dropped": false}
+    },
+    {
+      "case_id": "C04-clock-rollback",
+      "classification": "UNKNOWN",
+      "expected_status": "REJECT",
+      "tags": ["clock_rollback", "clock_skew", "fail_closed"],
+      "evidence": {"independent_observers": 3, "event_seen": true, "platform_log_external_closed": true, "cross_signature_complete": true, "cross_signature_conflict": false, "identity_epoch_fence_continuous": true, "freshness_seconds": 3, "max_clock_skew_seconds": 2, "clock_rollback": true, "fence_revoked": false, "platform_log_match": true, "query_complete": true, "retained": true, "external_effect_confirmed": true, "exporter_healthy": true, "observer_disagreement": false, "delivery_delayed": false, "delivery_dropped": false}
+    },
+    {
+      "case_id": "C05-skew-bound",
+      "classification": "DELAYED",
+      "expected_status": "UNKNOWN",
+      "tags": ["clock_skew", "delayed", "freshness_window"],
+      "evidence": {"independent_observers": 2, "event_seen": true, "platform_log_external_closed": true, "cross_signature_complete": true, "cross_signature_conflict": false, "identity_epoch_fence_continuous": true, "freshness_seconds": 9, "max_clock_skew_seconds": 6, "clock_rollback": false, "fence_revoked": false, "platform_log_match": true, "query_complete": true, "retained": true, "external_effect_confirmed": true, "exporter_healthy": true, "observer_disagreement": false, "delivery_delayed": true, "delivery_dropped": false}
+    },
+    {
+      "case_id": "C06-fence-revoked",
+      "classification": "UNKNOWN",
+      "expected_status": "REJECT",
+      "tags": ["fence_revocation", "epoch_continuity", "fail_closed"],
+      "evidence": {"independent_observers": 3, "event_seen": true, "platform_log_external_closed": true, "cross_signature_complete": true, "cross_signature_conflict": false, "identity_epoch_fence_continuous": false, "freshness_seconds": 5, "max_clock_skew_seconds": 2, "clock_rollback": false, "fence_revoked": true, "platform_log_match": true, "query_complete": true, "retained": true, "external_effect_confirmed": true, "exporter_healthy": true, "observer_disagreement": false, "delivery_delayed": false, "delivery_dropped": false}
+    },
+    {
+      "case_id": "C07-missing-cross-signature",
+      "classification": "UNKNOWN",
+      "expected_status": "UNKNOWN",
+      "tags": ["cross_signature_missing", "fail_closed", "platform_receipt"],
+      "evidence": {"independent_observers": 3, "event_seen": true, "platform_log_external_closed": true, "cross_signature_complete": false, "cross_signature_conflict": false, "identity_epoch_fence_continuous": true, "freshness_seconds": 5, "max_clock_skew_seconds": 2, "clock_rollback": false, "fence_revoked": false, "platform_log_match": true, "query_complete": true, "retained": true, "external_effect_confirmed": true, "exporter_healthy": true, "observer_disagreement": false, "delivery_delayed": false, "delivery_dropped": false}
+    },
+    {
+      "case_id": "C08-conflicting-signatures",
+      "classification": "UNKNOWN",
+      "expected_status": "REJECT",
+      "tags": ["cross_signature_conflict", "identity", "epoch", "fail_closed"],
+      "evidence": {"independent_observers": 3, "event_seen": true, "platform_log_external_closed": true, "cross_signature_complete": true, "cross_signature_conflict": true, "identity_epoch_fence_continuous": true, "freshness_seconds": 5, "max_clock_skew_seconds": 2, "clock_rollback": false, "fence_revoked": false, "platform_log_match": true, "query_complete": true, "retained": true, "external_effect_confirmed": true, "exporter_healthy": true, "observer_disagreement": false, "delivery_delayed": false, "delivery_dropped": false}
+    },
+    {
+      "case_id": "C09-platform-log-mismatch",
+      "classification": "EXPORTER_FAILURE",
+      "expected_status": "UNKNOWN",
+      "tags": ["platform_receipt", "log", "inconsistency", "exporter_failure"],
+      "evidence": {"independent_observers": 2, "event_seen": true, "platform_log_external_closed": true, "cross_signature_complete": true, "cross_signature_conflict": false, "identity_epoch_fence_continuous": true, "freshness_seconds": 7, "max_clock_skew_seconds": 2, "clock_rollback": false, "fence_revoked": false, "platform_log_match": false, "query_complete": true, "retained": true, "external_effect_confirmed": true, "exporter_healthy": false, "observer_disagreement": false, "delivery_delayed": false, "delivery_dropped": false}
+    },
+    {
+      "case_id": "C10-no-event",
+      "classification": "NO_EVENT",
+      "expected_status": "UNKNOWN",
+      "tags": ["no_event", "absence_not_proof", "fail_closed"],
+      "evidence": {"independent_observers": 3, "event_seen": false, "platform_log_external_closed": false, "cross_signature_complete": false, "cross_signature_conflict": false, "identity_epoch_fence_continuous": true, "freshness_seconds": 2, "max_clock_skew_seconds": 1, "clock_rollback": false, "fence_revoked": false, "platform_log_match": true, "query_complete": true, "retained": true, "external_effect_confirmed": false, "exporter_healthy": true, "observer_disagreement": false, "delivery_delayed": false, "delivery_dropped": false}
+    },
+    {
+      "case_id": "C11-dropped",
+      "classification": "DROPPED",
+      "expected_status": "UNKNOWN",
+      "tags": ["dropped", "external_effect", "fail_closed"],
+      "evidence": {"independent_observers": 2, "event_seen": true, "platform_log_external_closed": false, "cross_signature_complete": true, "cross_signature_conflict": false, "identity_epoch_fence_continuous": true, "freshness_seconds": 8, "max_clock_skew_seconds": 2, "clock_rollback": false, "fence_revoked": false, "platform_log_match": true, "query_complete": true, "retained": true, "external_effect_confirmed": false, "exporter_healthy": true, "observer_disagreement": false, "delivery_delayed": false, "delivery_dropped": true}
+    },
+    {
+      "case_id": "C12-retention-expired",
+      "classification": "RETENTION_EXPIRED",
+      "expected_status": "UNKNOWN",
+      "tags": ["retention_expired", "freshness_window", "fail_closed"],
+      "evidence": {"independent_observers": 2, "event_seen": true, "platform_log_external_closed": true, "cross_signature_complete": true, "cross_signature_conflict": false, "identity_epoch_fence_continuous": true, "freshness_seconds": 12, "max_clock_skew_seconds": 2, "clock_rollback": false, "fence_revoked": false, "platform_log_match": true, "query_complete": true, "retained": false, "external_effect_confirmed": true, "exporter_healthy": true, "observer_disagreement": false, "delivery_delayed": false, "delivery_dropped": false}
+    },
+    {
+      "case_id": "C13-delayed-but-closed",
+      "classification": "DELAYED",
+      "expected_status": "UNKNOWN",
+      "tags": ["delayed", "multi_region", "fail_closed"],
+      "evidence": {"independent_observers": 2, "event_seen": true, "platform_log_external_closed": true, "cross_signature_complete": true, "cross_signature_conflict": false, "identity_epoch_fence_continuous": true, "freshness_seconds": 20, "max_clock_skew_seconds": 3, "clock_rollback": false, "fence_revoked": false, "platform_log_match": true, "query_complete": true, "retained": true, "external_effect_confirmed": true, "exporter_healthy": true, "observer_disagreement": false, "delivery_delayed": true, "delivery_dropped": false}
+    },
+    {
+      "case_id": "C14-unknown-external",
+      "classification": "UNKNOWN",
+      "expected_status": "UNKNOWN",
+      "tags": ["external_effect", "unknown", "platform_log_mismatch"],
+      "evidence": {"independent_observers": 2, "event_seen": true, "platform_log_external_closed": false, "cross_signature_complete": true, "cross_signature_conflict": false, "identity_epoch_fence_continuous": true, "freshness_seconds": 10, "max_clock_skew_seconds": 2, "clock_rollback": false, "fence_revoked": false, "platform_log_match": false, "query_complete": true, "retained": true, "external_effect_confirmed": false, "exporter_healthy": true, "observer_disagreement": false, "delivery_delayed": false, "delivery_dropped": false}
+    }
+  ]
+}

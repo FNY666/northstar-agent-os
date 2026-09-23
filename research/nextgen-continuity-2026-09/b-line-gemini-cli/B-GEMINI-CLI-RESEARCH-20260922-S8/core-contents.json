@@ -1,0 +1,530 @@
+[
+  {
+    "name": "__mocks__",
+    "path": "packages/core/src/__mocks__",
+    "sha": "bfeab6d3d886c51a614956622b5c5829739a51bf",
+    "size": 0,
+    "url": "https://api.github.com/repos/google-gemini/gemini-cli/contents/packages/core/src/__mocks__?ref=main",
+    "html_url": "https://github.com/google-gemini/gemini-cli/tree/main/packages/core/src/__mocks__",
+    "git_url": "https://api.github.com/repos/google-gemini/gemini-cli/git/trees/bfeab6d3d886c51a614956622b5c5829739a51bf",
+    "download_url": null,
+    "type": "dir",
+    "_links": {
+      "self": "https://api.github.com/repos/google-gemini/gemini-cli/contents/packages/core/src/__mocks__?ref=main",
+      "git": "https://api.github.com/repos/google-gemini/gemini-cli/git/trees/bfeab6d3d886c51a614956622b5c5829739a51bf",
+      "html": "https://github.com/google-gemini/gemini-cli/tree/main/packages/core/src/__mocks__"
+    }
+  },
+  {
+    "name": "agent",
+    "path": "packages/core/src/agent",
+    "sha": "6c8acb47c94fbee97119975b5ebfdb806666ebeb",
+    "size": 0,
+    "url": "https://api.github.com/repos/google-gemini/gemini-cli/contents/packages/core/src/agent?ref=main",
+    "html_url": "https://github.com/google-gemini/gemini-cli/tree/main/packages/core/src/agent",
+    "git_url": "https://api.github.com/repos/google-gemini/gemini-cli/git/trees/6c8acb47c94fbee97119975b5ebfdb806666ebeb",
+    "download_url": null,
+    "type": "dir",
+    "_links": {
+      "self": "https://api.github.com/repos/google-gemini/gemini-cli/contents/packages/core/src/agent?ref=main",
+      "git": "https://api.github.com/repos/google-gemini/gemini-cli/git/trees/6c8acb47c94fbee97119975b5ebfdb806666ebeb",
+      "html": "https://github.com/google-gemini/gemini-cli/tree/main/packages/core/src/agent"
+    }
+  },
+  {
+    "name": "agents",
+    "path": "packages/core/src/agents",
+    "sha": "d60489c37126b5cc208055075d8853cfa2ce6b60",
+    "size": 0,
+    "url": "https://api.github.com/repos/google-gemini/gemini-cli/contents/packages/core/src/agents?ref=main",
+    "html_url": "https://github.com/google-gemini/gemini-cli/tree/main/packages/core/src/agents",
+    "git_url": "https://api.github.com/repos/google-gemini/gemini-cli/git/trees/d60489c37126b5cc208055075d8853cfa2ce6b60",
+    "download_url": null,
+    "type": "dir",
+    "_links": {
+      "self": "https://api.github.com/repos/google-gemini/gemini-cli/contents/packages/core/src/agents?ref=main",
+      "git": "https://api.github.com/repos/google-gemini/gemini-cli/git/trees/d60489c37126b5cc208055075d8853cfa2ce6b60",
+      "html": "https://github.com/google-gemini/gemini-cli/tree/main/packages/core/src/agents"
+    }
+  },
+  {
+    "name": "availability",
+    "path": "packages/core/src/availability",
+    "sha": "6dee29e57ad09d18468b8e2d643552164eb41659",
+    "size": 0,
+    "url": "https://api.github.com/repos/google-gemini/gemini-cli/contents/packages/core/src/availability?ref=main",
+    "html_url": "https://github.com/google-gemini/gemini-cli/tree/main/packages/core/src/availability",
+    "git_url": "https://api.github.com/repos/google-gemini/gemini-cli/git/trees/6dee29e57ad09d18468b8e2d643552164eb41659",
+    "download_url": null,
+    "type": "dir",
+    "_links": {
+      "self": "https://api.github.com/repos/google-gemini/gemini-cli/contents/packages/core/src/availability?ref=main",
+      "git": "https://api.github.com/repos/google-gemini/gemini-cli/git/trees/6dee29e57ad09d18468b8e2d643552164eb41659",
+      "html": "https://github.com/google-gemini/gemini-cli/tree/main/packages/core/src/availability"
+    }
+  },
+  {
+    "name": "billing",
+    "path": "packages/core/src/billing",
+    "sha": "41c2e355ee983b86c978d0a9d8b6b01deddba1fe",
+    "size": 0,
+    "url": "https://api.github.com/repos/google-gemini/gemini-cli/contents/packages/core/src/billing?ref=main",
+    "html_url": "https://github.com/google-gemini/gemini-cli/tree/main/packages/core/src/billing",
+    "git_url": "https://api.github.com/repos/google-gemini/gemini-cli/git/trees/41c2e355ee983b86c978d0a9d8b6b01deddba1fe",
+    "download_url": null,
+    "type": "dir",
+    "_links": {
+      "self": "https://api.github.com/repos/google-gemini/gemini-cli/contents/packages/core/src/billing?ref=main",
+      "git": "https://api.github.com/repos/google-gemini/gemini-cli/git/trees/41c2e355ee983b86c978d0a9d8b6b01deddba1fe",
+      "html": "https://github.com/google-gemini/gemini-cli/tree/main/packages/core/src/billing"
+    }
+  },
+  {
+    "name": "code_assist",
+    "path": "packages/core/src/code_assist",
+    "sha": "0a958ca89ff153232df89d4e72697f95eb1cb166",
+    "size": 0,
+    "url": "https://api.github.com/repos/google-gemini/gemini-cli/contents/packages/core/src/code_assist?ref=main",
+    "html_url": "https://github.com/google-gemini/gemini-cli/tree/main/packages/core/src/code_assist",
+    "git_url": "https://api.github.com/repos/google-gemini/gemini-cli/git/trees/0a958ca89ff153232df89d4e72697f95eb1cb166",
+    "download_url": null,
+    "type": "dir",
+    "_links": {
+      "self": "https://api.github.com/repos/google-gemini/gemini-cli/contents/packages/core/src/code_assist?ref=main",
+      "git": "https://api.github.com/repos/google-gemini/gemini-cli/git/trees/0a958ca89ff153232df89d4e72697f95eb1cb166",
+      "html": "https://github.com/google-gemini/gemini-cli/tree/main/packages/core/src/code_assist"
+    }
+  },
+  {
+    "name": "commands",
+    "path": "packages/core/src/commands",
+    "sha": "da693a7e8e983ed9c950279bc77555319b4de621",
+    "size": 0,
+    "url": "https://api.github.com/repos/google-gemini/gemini-cli/contents/packages/core/src/commands?ref=main",
+    "html_url": "https://github.com/google-gemini/gemini-cli/tree/main/packages/core/src/commands",
+    "git_url": "https://api.github.com/repos/google-gemini/gemini-cli/git/trees/da693a7e8e983ed9c950279bc77555319b4de621",
+    "download_url": null,
+    "type": "dir",
+    "_links": {
+      "self": "https://api.github.com/repos/google-gemini/gemini-cli/contents/packages/core/src/commands?ref=main",
+      "git": "https://api.github.com/repos/google-gemini/gemini-cli/git/trees/da693a7e8e983ed9c950279bc77555319b4de621",
+      "html": "https://github.com/google-gemini/gemini-cli/tree/main/packages/core/src/commands"
+    }
+  },
+  {
+    "name": "config",
+    "path": "packages/core/src/config",
+    "sha": "51fb9933d28d699acb0cf1288dfd9274b05ac88f",
+    "size": 0,
+    "url": "https://api.github.com/repos/google-gemini/gemini-cli/contents/packages/core/src/config?ref=main",
+    "html_url": "https://github.com/google-gemini/gemini-cli/tree/main/packages/core/src/config",
+    "git_url": "https://api.github.com/repos/google-gemini/gemini-cli/git/trees/51fb9933d28d699acb0cf1288dfd9274b05ac88f",
+    "download_url": null,
+    "type": "dir",
+    "_links": {
+      "self": "https://api.github.com/repos/google-gemini/gemini-cli/contents/packages/core/src/config?ref=main",
+      "git": "https://api.github.com/repos/google-gemini/gemini-cli/git/trees/51fb9933d28d699acb0cf1288dfd9274b05ac88f",
+      "html": "https://github.com/google-gemini/gemini-cli/tree/main/packages/core/src/config"
+    }
+  },
+  {
+    "name": "confirmation-bus",
+    "path": "packages/core/src/confirmation-bus",
+    "sha": "794a2546ebe60c21b8fc41c49bf7455b4c9a9039",
+    "size": 0,
+    "url": "https://api.github.com/repos/google-gemini/gemini-cli/contents/packages/core/src/confirmation-bus?ref=main",
+    "html_url": "https://github.com/google-gemini/gemini-cli/tree/main/packages/core/src/confirmation-bus",
+    "git_url": "https://api.github.com/repos/google-gemini/gemini-cli/git/trees/794a2546ebe60c21b8fc41c49bf7455b4c9a9039",
+    "download_url": null,
+    "type": "dir",
+    "_links": {
+      "self": "https://api.github.com/repos/google-gemini/gemini-cli/contents/packages/core/src/confirmation-bus?ref=main",
+      "git": "https://api.github.com/repos/google-gemini/gemini-cli/git/trees/794a2546ebe60c21b8fc41c49bf7455b4c9a9039",
+      "html": "https://github.com/google-gemini/gemini-cli/tree/main/packages/core/src/confirmation-bus"
+    }
+  },
+  {
+    "name": "context",
+    "path": "packages/core/src/context",
+    "sha": "642df5079112e51bd1cff0a954c2d5e23edd24a1",
+    "size": 0,
+    "url": "https://api.github.com/repos/google-gemini/gemini-cli/contents/packages/core/src/context?ref=main",
+    "html_url": "https://github.com/google-gemini/gemini-cli/tree/main/packages/core/src/context",
+    "git_url": "https://api.github.com/repos/google-gemini/gemini-cli/git/trees/642df5079112e51bd1cff0a954c2d5e23edd24a1",
+    "download_url": null,
+    "type": "dir",
+    "_links": {
+      "self": "https://api.github.com/repos/google-gemini/gemini-cli/contents/packages/core/src/context?ref=main",
+      "git": "https://api.github.com/repos/google-gemini/gemini-cli/git/trees/642df5079112e51bd1cff0a954c2d5e23edd24a1",
+      "html": "https://github.com/google-gemini/gemini-cli/tree/main/packages/core/src/context"
+    }
+  },
+  {
+    "name": "core",
+    "path": "packages/core/src/core",
+    "sha": "9283b601fd120b7ee29c1992a07d1873d2e1ee11",
+    "size": 0,
+    "url": "https://api.github.com/repos/google-gemini/gemini-cli/contents/packages/core/src/core?ref=main",
+    "html_url": "https://github.com/google-gemini/gemini-cli/tree/main/packages/core/src/core",
+    "git_url": "https://api.github.com/repos/google-gemini/gemini-cli/git/trees/9283b601fd120b7ee29c1992a07d1873d2e1ee11",
+    "download_url": null,
+    "type": "dir",
+    "_links": {
+      "self": "https://api.github.com/repos/google-gemini/gemini-cli/contents/packages/core/src/core?ref=main",
+      "git": "https://api.github.com/repos/google-gemini/gemini-cli/git/trees/9283b601fd120b7ee29c1992a07d1873d2e1ee11",
+      "html": "https://github.com/google-gemini/gemini-cli/tree/main/packages/core/src/core"
+    }
+  },
+  {
+    "name": "fallback",
+    "path": "packages/core/src/fallback",
+    "sha": "9d3ee19cfa020a5f8a9cc0685c83dee19e39d07e",
+    "size": 0,
+    "url": "https://api.github.com/repos/google-gemini/gemini-cli/contents/packages/core/src/fallback?ref=main",
+    "html_url": "https://github.com/google-gemini/gemini-cli/tree/main/packages/core/src/fallback",
+    "git_url": "https://api.github.com/repos/google-gemini/gemini-cli/git/trees/9d3ee19cfa020a5f8a9cc0685c83dee19e39d07e",
+    "download_url": null,
+    "type": "dir",
+    "_links": {
+      "self": "https://api.github.com/repos/google-gemini/gemini-cli/contents/packages/core/src/fallback?ref=main",
+      "git": "https://api.github.com/repos/google-gemini/gemini-cli/git/trees/9d3ee19cfa020a5f8a9cc0685c83dee19e39d07e",
+      "html": "https://github.com/google-gemini/gemini-cli/tree/main/packages/core/src/fallback"
+    }
+  },
+  {
+    "name": "hooks",
+    "path": "packages/core/src/hooks",
+    "sha": "66930624e56cb5e776882b9d509523093695c156",
+    "size": 0,
+    "url": "https://api.github.com/repos/google-gemini/gemini-cli/contents/packages/core/src/hooks?ref=main",
+    "html_url": "https://github.com/google-gemini/gemini-cli/tree/main/packages/core/src/hooks",
+    "git_url": "https://api.github.com/repos/google-gemini/gemini-cli/git/trees/66930624e56cb5e776882b9d509523093695c156",
+    "download_url": null,
+    "type": "dir",
+    "_links": {
+      "self": "https://api.github.com/repos/google-gemini/gemini-cli/contents/packages/core/src/hooks?ref=main",
+      "git": "https://api.github.com/repos/google-gemini/gemini-cli/git/trees/66930624e56cb5e776882b9d509523093695c156",
+      "html": "https://github.com/google-gemini/gemini-cli/tree/main/packages/core/src/hooks"
+    }
+  },
+  {
+    "name": "ide",
+    "path": "packages/core/src/ide",
+    "sha": "a1a2aa88829786f685ef40df2c1ea47599723d34",
+    "size": 0,
+    "url": "https://api.github.com/repos/google-gemini/gemini-cli/contents/packages/core/src/ide?ref=main",
+    "html_url": "https://github.com/google-gemini/gemini-cli/tree/main/packages/core/src/ide",
+    "git_url": "https://api.github.com/repos/google-gemini/gemini-cli/git/trees/a1a2aa88829786f685ef40df2c1ea47599723d34",
+    "download_url": null,
+    "type": "dir",
+    "_links": {
+      "self": "https://api.github.com/repos/google-gemini/gemini-cli/contents/packages/core/src/ide?ref=main",
+      "git": "https://api.github.com/repos/google-gemini/gemini-cli/git/trees/a1a2aa88829786f685ef40df2c1ea47599723d34",
+      "html": "https://github.com/google-gemini/gemini-cli/tree/main/packages/core/src/ide"
+    }
+  },
+  {
+    "name": "index.test.ts",
+    "path": "packages/core/src/index.test.ts",
+    "sha": "154c96a6a2e4e6bd66c8eee9c5002f83d526391b",
+    "size": 242,
+    "url": "https://api.github.com/repos/google-gemini/gemini-cli/contents/packages/core/src/index.test.ts?ref=main",
+    "html_url": "https://github.com/google-gemini/gemini-cli/blob/main/packages/core/src/index.test.ts",
+    "git_url": "https://api.github.com/repos/google-gemini/gemini-cli/git/blobs/154c96a6a2e4e6bd66c8eee9c5002f83d526391b",
+    "download_url": "https://raw.githubusercontent.com/google-gemini/gemini-cli/main/packages/core/src/index.test.ts",
+    "type": "file",
+    "_links": {
+      "self": "https://api.github.com/repos/google-gemini/gemini-cli/contents/packages/core/src/index.test.ts?ref=main",
+      "git": "https://api.github.com/repos/google-gemini/gemini-cli/git/blobs/154c96a6a2e4e6bd66c8eee9c5002f83d526391b",
+      "html": "https://github.com/google-gemini/gemini-cli/blob/main/packages/core/src/index.test.ts"
+    }
+  },
+  {
+    "name": "index.ts",
+    "path": "packages/core/src/index.ts",
+    "sha": "d8ba3289c43d33dec6f9837e2ff4d7dae4be1a58",
+    "size": 10854,
+    "url": "https://api.github.com/repos/google-gemini/gemini-cli/contents/packages/core/src/index.ts?ref=main",
+    "html_url": "https://github.com/google-gemini/gemini-cli/blob/main/packages/core/src/index.ts",
+    "git_url": "https://api.github.com/repos/google-gemini/gemini-cli/git/blobs/d8ba3289c43d33dec6f9837e2ff4d7dae4be1a58",
+    "download_url": "https://raw.githubusercontent.com/google-gemini/gemini-cli/main/packages/core/src/index.ts",
+    "type": "file",
+    "_links": {
+      "self": "https://api.github.com/repos/google-gemini/gemini-cli/contents/packages/core/src/index.ts?ref=main",
+      "git": "https://api.github.com/repos/google-gemini/gemini-cli/git/blobs/d8ba3289c43d33dec6f9837e2ff4d7dae4be1a58",
+      "html": "https://github.com/google-gemini/gemini-cli/blob/main/packages/core/src/index.ts"
+    }
+  },
+  {
+    "name": "mcp",
+    "path": "packages/core/src/mcp",
+    "sha": "bda6b40186b0ee3a489687000c0453fd3ced6ca5",
+    "size": 0,
+    "url": "https://api.github.com/repos/google-gemini/gemini-cli/contents/packages/core/src/mcp?ref=main",
+    "html_url": "https://github.com/google-gemini/gemini-cli/tree/main/packages/core/src/mcp",
+    "git_url": "https://api.github.com/repos/google-gemini/gemini-cli/git/trees/bda6b40186b0ee3a489687000c0453fd3ced6ca5",
+    "download_url": null,
+    "type": "dir",
+    "_links": {
+      "self": "https://api.github.com/repos/google-gemini/gemini-cli/contents/packages/core/src/mcp?ref=main",
+      "git": "https://api.github.com/repos/google-gemini/gemini-cli/git/trees/bda6b40186b0ee3a489687000c0453fd3ced6ca5",
+      "html": "https://github.com/google-gemini/gemini-cli/tree/main/packages/core/src/mcp"
+    }
+  },
+  {
+    "name": "mocks",
+    "path": "packages/core/src/mocks",
+    "sha": "17f5b0edca453ab789886ddc8d71161a04f02f75",
+    "size": 0,
+    "url": "https://api.github.com/repos/google-gemini/gemini-cli/contents/packages/core/src/mocks?ref=main",
+    "html_url": "https://github.com/google-gemini/gemini-cli/tree/main/packages/core/src/mocks",
+    "git_url": "https://api.github.com/repos/google-gemini/gemini-cli/git/trees/17f5b0edca453ab789886ddc8d71161a04f02f75",
+    "download_url": null,
+    "type": "dir",
+    "_links": {
+      "self": "https://api.github.com/repos/google-gemini/gemini-cli/contents/packages/core/src/mocks?ref=main",
+      "git": "https://api.github.com/repos/google-gemini/gemini-cli/git/trees/17f5b0edca453ab789886ddc8d71161a04f02f75",
+      "html": "https://github.com/google-gemini/gemini-cli/tree/main/packages/core/src/mocks"
+    }
+  },
+  {
+    "name": "output",
+    "path": "packages/core/src/output",
+    "sha": "0948e45e3cede998398fceea8b067467888a1ee4",
+    "size": 0,
+    "url": "https://api.github.com/repos/google-gemini/gemini-cli/contents/packages/core/src/output?ref=main",
+    "html_url": "https://github.com/google-gemini/gemini-cli/tree/main/packages/core/src/output",
+    "git_url": "https://api.github.com/repos/google-gemini/gemini-cli/git/trees/0948e45e3cede998398fceea8b067467888a1ee4",
+    "download_url": null,
+    "type": "dir",
+    "_links": {
+      "self": "https://api.github.com/repos/google-gemini/gemini-cli/contents/packages/core/src/output?ref=main",
+      "git": "https://api.github.com/repos/google-gemini/gemini-cli/git/trees/0948e45e3cede998398fceea8b067467888a1ee4",
+      "html": "https://github.com/google-gemini/gemini-cli/tree/main/packages/core/src/output"
+    }
+  },
+  {
+    "name": "policy",
+    "path": "packages/core/src/policy",
+    "sha": "c56b5c390b95776a63e330e53edd1edf84851106",
+    "size": 0,
+    "url": "https://api.github.com/repos/google-gemini/gemini-cli/contents/packages/core/src/policy?ref=main",
+    "html_url": "https://github.com/google-gemini/gemini-cli/tree/main/packages/core/src/policy",
+    "git_url": "https://api.github.com/repos/google-gemini/gemini-cli/git/trees/c56b5c390b95776a63e330e53edd1edf84851106",
+    "download_url": null,
+    "type": "dir",
+    "_links": {
+      "self": "https://api.github.com/repos/google-gemini/gemini-cli/contents/packages/core/src/policy?ref=main",
+      "git": "https://api.github.com/repos/google-gemini/gemini-cli/git/trees/c56b5c390b95776a63e330e53edd1edf84851106",
+      "html": "https://github.com/google-gemini/gemini-cli/tree/main/packages/core/src/policy"
+    }
+  },
+  {
+    "name": "prompts",
+    "path": "packages/core/src/prompts",
+    "sha": "9c071ec895cc5b5c24d81fe918bae58b16fe85ad",
+    "size": 0,
+    "url": "https://api.github.com/repos/google-gemini/gemini-cli/contents/packages/core/src/prompts?ref=main",
+    "html_url": "https://github.com/google-gemini/gemini-cli/tree/main/packages/core/src/prompts",
+    "git_url": "https://api.github.com/repos/google-gemini/gemini-cli/git/trees/9c071ec895cc5b5c24d81fe918bae58b16fe85ad",
+    "download_url": null,
+    "type": "dir",
+    "_links": {
+      "self": "https://api.github.com/repos/google-gemini/gemini-cli/contents/packages/core/src/prompts?ref=main",
+      "git": "https://api.github.com/repos/google-gemini/gemini-cli/git/trees/9c071ec895cc5b5c24d81fe918bae58b16fe85ad",
+      "html": "https://github.com/google-gemini/gemini-cli/tree/main/packages/core/src/prompts"
+    }
+  },
+  {
+    "name": "resources",
+    "path": "packages/core/src/resources",
+    "sha": "eebe8abce65f84fb26e9993c68d7d15bc3d19b96",
+    "size": 0,
+    "url": "https://api.github.com/repos/google-gemini/gemini-cli/contents/packages/core/src/resources?ref=main",
+    "html_url": "https://github.com/google-gemini/gemini-cli/tree/main/packages/core/src/resources",
+    "git_url": "https://api.github.com/repos/google-gemini/gemini-cli/git/trees/eebe8abce65f84fb26e9993c68d7d15bc3d19b96",
+    "download_url": null,
+    "type": "dir",
+    "_links": {
+      "self": "https://api.github.com/repos/google-gemini/gemini-cli/contents/packages/core/src/resources?ref=main",
+      "git": "https://api.github.com/repos/google-gemini/gemini-cli/git/trees/eebe8abce65f84fb26e9993c68d7d15bc3d19b96",
+      "html": "https://github.com/google-gemini/gemini-cli/tree/main/packages/core/src/resources"
+    }
+  },
+  {
+    "name": "routing",
+    "path": "packages/core/src/routing",
+    "sha": "135a9cc80a977ed9a78ac7f8e4586a7177619bb7",
+    "size": 0,
+    "url": "https://api.github.com/repos/google-gemini/gemini-cli/contents/packages/core/src/routing?ref=main",
+    "html_url": "https://github.com/google-gemini/gemini-cli/tree/main/packages/core/src/routing",
+    "git_url": "https://api.github.com/repos/google-gemini/gemini-cli/git/trees/135a9cc80a977ed9a78ac7f8e4586a7177619bb7",
+    "download_url": null,
+    "type": "dir",
+    "_links": {
+      "self": "https://api.github.com/repos/google-gemini/gemini-cli/contents/packages/core/src/routing?ref=main",
+      "git": "https://api.github.com/repos/google-gemini/gemini-cli/git/trees/135a9cc80a977ed9a78ac7f8e4586a7177619bb7",
+      "html": "https://github.com/google-gemini/gemini-cli/tree/main/packages/core/src/routing"
+    }
+  },
+  {
+    "name": "safety",
+    "path": "packages/core/src/safety",
+    "sha": "39d111fce6c97cbc8806ca9e08ef62e0a7a35557",
+    "size": 0,
+    "url": "https://api.github.com/repos/google-gemini/gemini-cli/contents/packages/core/src/safety?ref=main",
+    "html_url": "https://github.com/google-gemini/gemini-cli/tree/main/packages/core/src/safety",
+    "git_url": "https://api.github.com/repos/google-gemini/gemini-cli/git/trees/39d111fce6c97cbc8806ca9e08ef62e0a7a35557",
+    "download_url": null,
+    "type": "dir",
+    "_links": {
+      "self": "https://api.github.com/repos/google-gemini/gemini-cli/contents/packages/core/src/safety?ref=main",
+      "git": "https://api.github.com/repos/google-gemini/gemini-cli/git/trees/39d111fce6c97cbc8806ca9e08ef62e0a7a35557",
+      "html": "https://github.com/google-gemini/gemini-cli/tree/main/packages/core/src/safety"
+    }
+  },
+  {
+    "name": "sandbox",
+    "path": "packages/core/src/sandbox",
+    "sha": "550200c0060a63c99568c6e7948720f62307c5a0",
+    "size": 0,
+    "url": "https://api.github.com/repos/google-gemini/gemini-cli/contents/packages/core/src/sandbox?ref=main",
+    "html_url": "https://github.com/google-gemini/gemini-cli/tree/main/packages/core/src/sandbox",
+    "git_url": "https://api.github.com/repos/google-gemini/gemini-cli/git/trees/550200c0060a63c99568c6e7948720f62307c5a0",
+    "download_url": null,
+    "type": "dir",
+    "_links": {
+      "self": "https://api.github.com/repos/google-gemini/gemini-cli/contents/packages/core/src/sandbox?ref=main",
+      "git": "https://api.github.com/repos/google-gemini/gemini-cli/git/trees/550200c0060a63c99568c6e7948720f62307c5a0",
+      "html": "https://github.com/google-gemini/gemini-cli/tree/main/packages/core/src/sandbox"
+    }
+  },
+  {
+    "name": "scheduler",
+    "path": "packages/core/src/scheduler",
+    "sha": "67db4835a053b9b899fac2c998e99368dd3d01a5",
+    "size": 0,
+    "url": "https://api.github.com/repos/google-gemini/gemini-cli/contents/packages/core/src/scheduler?ref=main",
+    "html_url": "https://github.com/google-gemini/gemini-cli/tree/main/packages/core/src/scheduler",
+    "git_url": "https://api.github.com/repos/google-gemini/gemini-cli/git/trees/67db4835a053b9b899fac2c998e99368dd3d01a5",
+    "download_url": null,
+    "type": "dir",
+    "_links": {
+      "self": "https://api.github.com/repos/google-gemini/gemini-cli/contents/packages/core/src/scheduler?ref=main",
+      "git": "https://api.github.com/repos/google-gemini/gemini-cli/git/trees/67db4835a053b9b899fac2c998e99368dd3d01a5",
+      "html": "https://github.com/google-gemini/gemini-cli/tree/main/packages/core/src/scheduler"
+    }
+  },
+  {
+    "name": "services",
+    "path": "packages/core/src/services",
+    "sha": "b2a6576f5a32c33f379d22fe7887796a00c30cc1",
+    "size": 0,
+    "url": "https://api.github.com/repos/google-gemini/gemini-cli/contents/packages/core/src/services?ref=main",
+    "html_url": "https://github.com/google-gemini/gemini-cli/tree/main/packages/core/src/services",
+    "git_url": "https://api.github.com/repos/google-gemini/gemini-cli/git/trees/b2a6576f5a32c33f379d22fe7887796a00c30cc1",
+    "download_url": null,
+    "type": "dir",
+    "_links": {
+      "self": "https://api.github.com/repos/google-gemini/gemini-cli/contents/packages/core/src/services?ref=main",
+      "git": "https://api.github.com/repos/google-gemini/gemini-cli/git/trees/b2a6576f5a32c33f379d22fe7887796a00c30cc1",
+      "html": "https://github.com/google-gemini/gemini-cli/tree/main/packages/core/src/services"
+    }
+  },
+  {
+    "name": "skills",
+    "path": "packages/core/src/skills",
+    "sha": "b31e242847357e9a87b6c00cb13cefc25696b2ff",
+    "size": 0,
+    "url": "https://api.github.com/repos/google-gemini/gemini-cli/contents/packages/core/src/skills?ref=main",
+    "html_url": "https://github.com/google-gemini/gemini-cli/tree/main/packages/core/src/skills",
+    "git_url": "https://api.github.com/repos/google-gemini/gemini-cli/git/trees/b31e242847357e9a87b6c00cb13cefc25696b2ff",
+    "download_url": null,
+    "type": "dir",
+    "_links": {
+      "self": "https://api.github.com/repos/google-gemini/gemini-cli/contents/packages/core/src/skills?ref=main",
+      "git": "https://api.github.com/repos/google-gemini/gemini-cli/git/trees/b31e242847357e9a87b6c00cb13cefc25696b2ff",
+      "html": "https://github.com/google-gemini/gemini-cli/tree/main/packages/core/src/skills"
+    }
+  },
+  {
+    "name": "telemetry",
+    "path": "packages/core/src/telemetry",
+    "sha": "0596565f20afbd2b0d45c3d2389c0444d5cd8528",
+    "size": 0,
+    "url": "https://api.github.com/repos/google-gemini/gemini-cli/contents/packages/core/src/telemetry?ref=main",
+    "html_url": "https://github.com/google-gemini/gemini-cli/tree/main/packages/core/src/telemetry",
+    "git_url": "https://api.github.com/repos/google-gemini/gemini-cli/git/trees/0596565f20afbd2b0d45c3d2389c0444d5cd8528",
+    "download_url": null,
+    "type": "dir",
+    "_links": {
+      "self": "https://api.github.com/repos/google-gemini/gemini-cli/contents/packages/core/src/telemetry?ref=main",
+      "git": "https://api.github.com/repos/google-gemini/gemini-cli/git/trees/0596565f20afbd2b0d45c3d2389c0444d5cd8528",
+      "html": "https://github.com/google-gemini/gemini-cli/tree/main/packages/core/src/telemetry"
+    }
+  },
+  {
+    "name": "test-utils",
+    "path": "packages/core/src/test-utils",
+    "sha": "0bcc0be4e035023f1a74c17f8fbb4194e26ffb30",
+    "size": 0,
+    "url": "https://api.github.com/repos/google-gemini/gemini-cli/contents/packages/core/src/test-utils?ref=main",
+    "html_url": "https://github.com/google-gemini/gemini-cli/tree/main/packages/core/src/test-utils",
+    "git_url": "https://api.github.com/repos/google-gemini/gemini-cli/git/trees/0bcc0be4e035023f1a74c17f8fbb4194e26ffb30",
+    "download_url": null,
+    "type": "dir",
+    "_links": {
+      "self": "https://api.github.com/repos/google-gemini/gemini-cli/contents/packages/core/src/test-utils?ref=main",
+      "git": "https://api.github.com/repos/google-gemini/gemini-cli/git/trees/0bcc0be4e035023f1a74c17f8fbb4194e26ffb30",
+      "html": "https://github.com/google-gemini/gemini-cli/tree/main/packages/core/src/test-utils"
+    }
+  },
+  {
+    "name": "tools",
+    "path": "packages/core/src/tools",
+    "sha": "4fabdd635e47506af64e0ec747a869d3a273411d",
+    "size": 0,
+    "url": "https://api.github.com/repos/google-gemini/gemini-cli/contents/packages/core/src/tools?ref=main",
+    "html_url": "https://github.com/google-gemini/gemini-cli/tree/main/packages/core/src/tools",
+    "git_url": "https://api.github.com/repos/google-gemini/gemini-cli/git/trees/4fabdd635e47506af64e0ec747a869d3a273411d",
+    "download_url": null,
+    "type": "dir",
+    "_links": {
+      "self": "https://api.github.com/repos/google-gemini/gemini-cli/contents/packages/core/src/tools?ref=main",
+      "git": "https://api.github.com/repos/google-gemini/gemini-cli/git/trees/4fabdd635e47506af64e0ec747a869d3a273411d",
+      "html": "https://github.com/google-gemini/gemini-cli/tree/main/packages/core/src/tools"
+    }
+  },
+  {
+    "name": "utils",
+    "path": "packages/core/src/utils",
+    "sha": "c24ac00cc881a8734f2a605dbdc716b93fde3bcf",
+    "size": 0,
+    "url": "https://api.github.com/repos/google-gemini/gemini-cli/contents/packages/core/src/utils?ref=main",
+    "html_url": "https://github.com/google-gemini/gemini-cli/tree/main/packages/core/src/utils",
+    "git_url": "https://api.github.com/repos/google-gemini/gemini-cli/git/trees/c24ac00cc881a8734f2a605dbdc716b93fde3bcf",
+    "download_url": null,
+    "type": "dir",
+    "_links": {
+      "self": "https://api.github.com/repos/google-gemini/gemini-cli/contents/packages/core/src/utils?ref=main",
+      "git": "https://api.github.com/repos/google-gemini/gemini-cli/git/trees/c24ac00cc881a8734f2a605dbdc716b93fde3bcf",
+      "html": "https://github.com/google-gemini/gemini-cli/tree/main/packages/core/src/utils"
+    }
+  },
+  {
+    "name": "voice",
+    "path": "packages/core/src/voice",
+    "sha": "6eda0bfd646797fd4866d9aee10931eeff4e1c20",
+    "size": 0,
+    "url": "https://api.github.com/repos/google-gemini/gemini-cli/contents/packages/core/src/voice?ref=main",
+    "html_url": "https://github.com/google-gemini/gemini-cli/tree/main/packages/core/src/voice",
+    "git_url": "https://api.github.com/repos/google-gemini/gemini-cli/git/trees/6eda0bfd646797fd4866d9aee10931eeff4e1c20",
+    "download_url": null,
+    "type": "dir",
+    "_links": {
+      "self": "https://api.github.com/repos/google-gemini/gemini-cli/contents/packages/core/src/voice?ref=main",
+      "git": "https://api.github.com/repos/google-gemini/gemini-cli/git/trees/6eda0bfd646797fd4866d9aee10931eeff4e1c20",
+      "html": "https://github.com/google-gemini/gemini-cli/tree/main/packages/core/src/voice"
+    }
+  }
+]

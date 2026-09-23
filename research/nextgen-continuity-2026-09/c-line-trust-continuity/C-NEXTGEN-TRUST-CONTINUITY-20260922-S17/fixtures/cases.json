@@ -1,0 +1,826 @@
+{
+  "canonicalizer_a": "canonicalizer-A/json-sort-keys-v1",
+  "canonicalizer_b": "canonicalizer-B/json-sort-keys-v1-or-deliberate-divergence",
+  "cases": [
+    {
+      "canonicalization_profile": "stable",
+      "expected": {
+        "status": "RECOVERED"
+      },
+      "fixture_key_id": "S17-fixed-nonreal-key-v1",
+      "id": "S17-01",
+      "name": "signature_valid_revocation_valid",
+      "observation_time": "2026-09-22T12:00:00Z",
+      "policy": {
+        "package_id": "pkg-s17-01",
+        "rules": {
+          "allow": [
+            "read"
+          ],
+          "deny": [
+            "write"
+          ],
+          "threshold": 7
+        }
+      },
+      "production_verified": false,
+      "revocation_list": {
+        "declared_sha256": "a6a20076da005b27c9afc3a5d5b2457798c0ac817d1abc38b2fee4398ac3f133",
+        "entries": [],
+        "version": 1
+      },
+      "signature": "70d41e4676ab83f816f7536d7c51fcceaa629941c2ad22da5ca784dbcb3fd0c5",
+      "synthetic_only": true
+    },
+    {
+      "canonicalization_profile": "stable",
+      "expected": {
+        "status": "REJECT"
+      },
+      "fixture_key_id": "S17-fixed-nonreal-key-v1",
+      "id": "S17-02",
+      "name": "policy_tampered",
+      "observation_time": "2026-09-22T12:00:00Z",
+      "policy": {
+        "package_id": "pkg-s17-02",
+        "rules": {
+          "allow": [
+            "read"
+          ],
+          "deny": [
+            "write"
+          ],
+          "threshold": 8
+        }
+      },
+      "production_verified": false,
+      "revocation_list": {
+        "declared_sha256": "a6a20076da005b27c9afc3a5d5b2457798c0ac817d1abc38b2fee4398ac3f133",
+        "entries": [],
+        "version": 1
+      },
+      "signature": "7d4705cfd63189b22f13aa5dcecc08311a34f43ce352726558dfcba46e03b953",
+      "synthetic_only": true
+    },
+    {
+      "canonicalization_profile": "stable",
+      "expected": {
+        "status": "REJECT"
+      },
+      "fixture_key_id": "S17-fixed-nonreal-key-v1",
+      "id": "S17-03",
+      "name": "signature_missing",
+      "observation_time": "2026-09-22T12:00:00Z",
+      "policy": {
+        "package_id": "pkg-s17-03",
+        "rules": {
+          "allow": [
+            "read"
+          ],
+          "deny": [
+            "write"
+          ],
+          "threshold": 7
+        }
+      },
+      "production_verified": false,
+      "revocation_list": {
+        "declared_sha256": "a6a20076da005b27c9afc3a5d5b2457798c0ac817d1abc38b2fee4398ac3f133",
+        "entries": [],
+        "version": 1
+      },
+      "signature": null,
+      "synthetic_only": true
+    },
+    {
+      "canonicalization_profile": "stable",
+      "expected": {
+        "status": "REJECT"
+      },
+      "fixture_key_id": "S17-fixed-nonreal-key-v1",
+      "id": "S17-04",
+      "name": "revocation_hit",
+      "observation_time": "2026-09-22T12:00:00Z",
+      "policy": {
+        "package_id": "pkg-s17-04",
+        "rules": {
+          "allow": [
+            "read"
+          ],
+          "deny": [
+            "write"
+          ],
+          "threshold": 7
+        }
+      },
+      "production_verified": false,
+      "revocation_list": {
+        "declared_sha256": "ec8e4b65f43d551dcfebdd5fda0ae931e08bd0d0ebc4ad827c1b32d7b3b63b65",
+        "entries": [
+          {
+            "package_id": "pkg-s17-04",
+            "reason": "fixture",
+            "revoked_at": "2026-09-22T11:00:00Z"
+          }
+        ],
+        "version": 1
+      },
+      "signature": "a7da996775b7f4fa37c4ffdc9f9789c447d7834df619329f3e7948885a97a377",
+      "synthetic_only": true
+    },
+    {
+      "canonicalization_profile": "stable",
+      "expected": {
+        "status": "RECOVERED"
+      },
+      "fixture_key_id": "S17-fixed-nonreal-key-v1",
+      "id": "S17-05",
+      "name": "revocation_miss",
+      "observation_time": "2026-09-22T12:00:00Z",
+      "policy": {
+        "package_id": "pkg-s17-05",
+        "rules": {
+          "allow": [
+            "read"
+          ],
+          "deny": [
+            "write"
+          ],
+          "threshold": 7
+        }
+      },
+      "production_verified": false,
+      "revocation_list": {
+        "declared_sha256": "f7fe0690bee49617ae0910aa463b712d78b888185dbc75eeb9f58badeb02d425",
+        "entries": [
+          {
+            "package_id": "other-package",
+            "revoked_at": "2026-09-22T11:00:00Z"
+          }
+        ],
+        "version": 1
+      },
+      "signature": "d3bef760064dd3304107458c6a0e8058d1262db75d7a847b50f1bf627110b503",
+      "synthetic_only": true
+    },
+    {
+      "canonicalization_profile": "stable",
+      "expected": {
+        "status": "UNKNOWN"
+      },
+      "fixture_key_id": "S17-fixed-nonreal-key-v1",
+      "id": "S17-06",
+      "name": "revocation_list_missing",
+      "observation_time": "2026-09-22T12:00:00Z",
+      "policy": {
+        "package_id": "pkg-s17-06",
+        "rules": {
+          "allow": [
+            "read"
+          ],
+          "deny": [
+            "write"
+          ],
+          "threshold": 7
+        }
+      },
+      "production_verified": false,
+      "revocation_list": null,
+      "signature": "c408c63443c5dfbdc88dc8ed0daea58a9a6493e43433c1a7d9e756c10afc9e9b",
+      "synthetic_only": true
+    },
+    {
+      "canonicalization_profile": "stable",
+      "expected": {
+        "status": "UNKNOWN"
+      },
+      "fixture_key_id": "S17-fixed-nonreal-key-v1",
+      "id": "S17-07",
+      "name": "revocation_list_tampered",
+      "observation_time": "2026-09-22T12:00:00Z",
+      "policy": {
+        "package_id": "pkg-s17-07",
+        "rules": {
+          "allow": [
+            "read"
+          ],
+          "deny": [
+            "write"
+          ],
+          "threshold": 7
+        }
+      },
+      "production_verified": false,
+      "revocation_list": {
+        "declared_sha256": "a6a20076da005b27c9afc3a5d5b2457798c0ac817d1abc38b2fee4398ac3f133",
+        "entries": [
+          {
+            "package_id": "tampered",
+            "revoked_at": "2026-09-22T11:00:00Z"
+          }
+        ],
+        "version": 1
+      },
+      "signature": "078cc228e7ff267677317954837cf9e4bfb5ed35815e8ea41183fefd129a39db",
+      "synthetic_only": true
+    },
+    {
+      "canonicalization_profile": "stable",
+      "expected": {
+        "status": "RECOVERED"
+      },
+      "fixture_key_id": "S17-fixed-nonreal-key-v1",
+      "id": "S17-08",
+      "name": "cross_impl_same_hash",
+      "observation_time": "2026-09-22T12:00:00Z",
+      "policy": {
+        "metadata": {
+          "a": 1,
+          "b": 2
+        },
+        "package_id": "pkg-s17-08",
+        "rules": {
+          "allow": [
+            "read"
+          ],
+          "deny": [
+            "write"
+          ],
+          "threshold": 7
+        }
+      },
+      "production_verified": false,
+      "revocation_list": {
+        "declared_sha256": "a6a20076da005b27c9afc3a5d5b2457798c0ac817d1abc38b2fee4398ac3f133",
+        "entries": [],
+        "version": 1
+      },
+      "signature": "c5f1809d9b4a237463200885acef4fc24a20719261e6822130a1987a0654d8f1",
+      "synthetic_only": true
+    },
+    {
+      "canonicalization_profile": "divergent",
+      "expected": {
+        "status": "UNKNOWN"
+      },
+      "fixture_key_id": "S17-fixed-nonreal-key-v1",
+      "id": "S17-09",
+      "name": "cross_impl_hash_mismatch_unknown",
+      "observation_time": "2026-09-22T12:00:00Z",
+      "policy": {
+        "metadata": {
+          "a": 2,
+          "z": 1
+        },
+        "package_id": "pkg-s17-09",
+        "rules": {
+          "allow": [
+            "read"
+          ],
+          "deny": [
+            "write"
+          ],
+          "threshold": 7
+        }
+      },
+      "production_verified": false,
+      "revocation_list": {
+        "declared_sha256": "a6a20076da005b27c9afc3a5d5b2457798c0ac817d1abc38b2fee4398ac3f133",
+        "entries": [],
+        "version": 1
+      },
+      "signature": "0aeff0cd34bee82f504ef6687a44dc8c4ca2fa67c0aaf932b3121d12eb09dc6c",
+      "synthetic_only": true
+    },
+    {
+      "canonicalization_profile": "divergent",
+      "declared_contradiction": true,
+      "expected": {
+        "status": "REJECT"
+      },
+      "fixture_key_id": "S17-fixed-nonreal-key-v1",
+      "id": "S17-10",
+      "name": "cross_impl_explicit_contradiction",
+      "observation_time": "2026-09-22T12:00:00Z",
+      "policy": {
+        "metadata": {
+          "a": 2,
+          "z": 1
+        },
+        "package_id": "pkg-s17-10",
+        "rules": {
+          "allow": [
+            "read"
+          ],
+          "deny": [
+            "write"
+          ],
+          "threshold": 7
+        }
+      },
+      "production_verified": false,
+      "revocation_list": {
+        "declared_sha256": "a6a20076da005b27c9afc3a5d5b2457798c0ac817d1abc38b2fee4398ac3f133",
+        "entries": [],
+        "version": 1
+      },
+      "signature": "3ed88cda961413aa12100182a2affbd9cc4a95b1054e27b5228c374fe29f5e9f",
+      "synthetic_only": true
+    },
+    {
+      "canonicalization_profile": "stable",
+      "expected": {
+        "status": "RECOVERED"
+      },
+      "fixture_key_id": "S17-fixed-nonreal-key-v1",
+      "id": "S17-11",
+      "name": "combination_signature_ok_revocation_ok",
+      "observation_time": "2026-09-22T12:00:00Z",
+      "policy": {
+        "package_id": "pkg-s17-11",
+        "rules": {
+          "allow": [
+            "read"
+          ],
+          "deny": [
+            "write"
+          ],
+          "threshold": 7
+        }
+      },
+      "production_verified": false,
+      "revocation_list": {
+        "declared_sha256": "a6a20076da005b27c9afc3a5d5b2457798c0ac817d1abc38b2fee4398ac3f133",
+        "entries": [],
+        "version": 1
+      },
+      "signature": "2a7d8519318ad17395161c79158b8aafe4273e09aa3a4323113d5ba9a2a3634c",
+      "synthetic_only": true
+    },
+    {
+      "canonicalization_profile": "stable",
+      "expected": {
+        "status": "REJECT"
+      },
+      "fixture_key_id": "S17-fixed-nonreal-key-v1",
+      "id": "S17-12",
+      "name": "combination_signature_ok_revoked",
+      "observation_time": "2026-09-22T12:00:00Z",
+      "policy": {
+        "package_id": "pkg-s17-12",
+        "rules": {
+          "allow": [
+            "read"
+          ],
+          "deny": [
+            "write"
+          ],
+          "threshold": 7
+        }
+      },
+      "production_verified": false,
+      "revocation_list": {
+        "declared_sha256": "e9cc8896bf1799e40494c368f006bf251fbef55467d255b22e1658c501387e88",
+        "entries": [
+          {
+            "package_id": "pkg-s17-12",
+            "revoked_at": "2026-09-22T11:59:59Z"
+          }
+        ],
+        "version": 1
+      },
+      "signature": "413772349aea1bf1394ee5d7e9fa3bec479dc11a839ac92b6cf5d2ecc0c2b120",
+      "synthetic_only": true
+    },
+    {
+      "canonicalization_profile": "stable",
+      "expected": {
+        "status": "REJECT"
+      },
+      "fixture_key_id": "S17-fixed-nonreal-key-v1",
+      "id": "S17-13",
+      "name": "combination_signature_bad_revoked",
+      "observation_time": "2026-09-22T12:00:00Z",
+      "policy": {
+        "package_id": "pkg-s17-13",
+        "rules": {
+          "allow": [
+            "read",
+            "list"
+          ],
+          "deny": [
+            "write"
+          ],
+          "threshold": 7
+        }
+      },
+      "production_verified": false,
+      "revocation_list": {
+        "declared_sha256": "69de7c71b8192e9b7508aa05be1f92c03eaa3846902e4992f9b7a4bed9a84018",
+        "entries": [
+          {
+            "package_id": "pkg-s17-13",
+            "revoked_at": "2026-09-22T11:59:59Z"
+          }
+        ],
+        "version": 1
+      },
+      "signature": "4325ab45e9b8af99c968d2e0ae927b6f8b1c3b208d12f4729e75f7fad2340da3",
+      "synthetic_only": true
+    },
+    {
+      "canonicalization_profile": "stable",
+      "expected": {
+        "status": "UNKNOWN"
+      },
+      "fixture_key_id": "S17-fixed-nonreal-key-v1",
+      "id": "S17-14",
+      "name": "combination_revocation_inaccessible",
+      "observation_time": "2026-09-22T12:00:00Z",
+      "policy": {
+        "package_id": "pkg-s17-14",
+        "rules": {
+          "allow": [
+            "read"
+          ],
+          "deny": [
+            "write"
+          ],
+          "threshold": 7
+        }
+      },
+      "production_verified": false,
+      "revocation_list": {
+        "unavailable": true
+      },
+      "signature": "40feff21a019fb96cad82e801f4c0d94038e8e124c38aad509b87b0f208d6cef",
+      "synthetic_only": true
+    },
+    {
+      "canonicalization_profile": "stable",
+      "expected": {
+        "status": "REJECT"
+      },
+      "fixture_key_id": "S17-fixed-nonreal-key-v1",
+      "id": "S17-15",
+      "name": "clock_equal_boundary_inside",
+      "observation_time": "2026-09-22T12:00:00Z",
+      "policy": {
+        "package_id": "pkg-s17-15",
+        "rules": {
+          "allow": [
+            "read"
+          ],
+          "deny": [
+            "write"
+          ],
+          "threshold": 7
+        }
+      },
+      "production_verified": false,
+      "revocation_list": {
+        "declared_sha256": "e6d148c17cc50feddffcaa8a5f4076e611d4cf1bc2fd4ac2442d8d681436b094",
+        "entries": [
+          {
+            "package_id": "pkg-s17-15",
+            "revoked_at": "2026-09-22T12:00:00Z"
+          }
+        ],
+        "version": 1
+      },
+      "signature": "b49f1f77567a7bc156e7c3f820c566ac81f1a9dd5c5859bac1e6c79c1746e3b3",
+      "synthetic_only": true
+    },
+    {
+      "canonicalization_profile": "stable",
+      "expected": {
+        "status": "RECOVERED"
+      },
+      "fixture_key_id": "S17-fixed-nonreal-key-v1",
+      "id": "S17-16",
+      "name": "clock_just_before_boundary_outside",
+      "observation_time": "2026-09-22T11:59:59Z",
+      "policy": {
+        "package_id": "pkg-s17-16",
+        "rules": {
+          "allow": [
+            "read"
+          ],
+          "deny": [
+            "write"
+          ],
+          "threshold": 7
+        }
+      },
+      "production_verified": false,
+      "revocation_list": {
+        "declared_sha256": "a4ff76db042beb3540d7d90528c801b11f172bcddb791222a77921f92d036bfa",
+        "entries": [
+          {
+            "package_id": "pkg-s17-16",
+            "revoked_at": "2026-09-22T12:00:00Z"
+          }
+        ],
+        "version": 1
+      },
+      "signature": "33c873b8c172ad94d8fbe66f933e4c06b2db8d5e88f2bec497f4b473382defee",
+      "synthetic_only": true
+    },
+    {
+      "canonicalization_profile": "stable",
+      "expected": {
+        "status": "REJECT"
+      },
+      "fixture_key_id": "S17-fixed-nonreal-key-v1",
+      "id": "S17-17",
+      "name": "clock_after_boundary_inside",
+      "observation_time": "2026-09-22T12:00:01Z",
+      "policy": {
+        "package_id": "pkg-s17-17",
+        "rules": {
+          "allow": [
+            "read"
+          ],
+          "deny": [
+            "write"
+          ],
+          "threshold": 7
+        }
+      },
+      "production_verified": false,
+      "revocation_list": {
+        "declared_sha256": "30a30e65b706e4171cfaddf6eef59bbc8982868e3b116ae4dc947ce5e735e055",
+        "entries": [
+          {
+            "package_id": "pkg-s17-17",
+            "revoked_at": "2026-09-22T12:00:00Z"
+          }
+        ],
+        "version": 1
+      },
+      "signature": "f5456990daad7310dc63499ec75610acb6e7a31b703359ba0334a47dfa5a3a9f",
+      "synthetic_only": true
+    },
+    {
+      "canonicalization_profile": "stable",
+      "expected": {
+        "status": "REJECT"
+      },
+      "fixture_key_id": "S17-fixed-nonreal-key-v1",
+      "id": "S17-18",
+      "name": "clock_window_inside",
+      "observation_time": "2026-09-22T12:30:00Z",
+      "policy": {
+        "package_id": "pkg-s17-18",
+        "rules": {
+          "allow": [
+            "read"
+          ],
+          "deny": [
+            "write"
+          ],
+          "threshold": 7
+        }
+      },
+      "production_verified": false,
+      "revocation_list": {
+        "declared_sha256": "6b26565d6688407e245ebe34759d919f845f78aaf75a262ad4d394bee59c35e0",
+        "entries": [
+          {
+            "effective_until": "2026-09-22T13:00:00Z",
+            "package_id": "pkg-s17-18",
+            "revoked_at": "2026-09-22T12:00:00Z"
+          }
+        ],
+        "version": 1
+      },
+      "signature": "87a1da1ea28be0d97963d696be1baaa73d47393b61849246a9119df8f9c22541",
+      "synthetic_only": true
+    },
+    {
+      "canonicalization_profile": "stable",
+      "expected": {
+        "status": "RECOVERED"
+      },
+      "fixture_key_id": "S17-fixed-nonreal-key-v1",
+      "id": "S17-19",
+      "name": "clock_window_outside_after_expiry",
+      "observation_time": "2026-09-22T13:00:01Z",
+      "policy": {
+        "package_id": "pkg-s17-19",
+        "rules": {
+          "allow": [
+            "read"
+          ],
+          "deny": [
+            "write"
+          ],
+          "threshold": 7
+        }
+      },
+      "production_verified": false,
+      "revocation_list": {
+        "declared_sha256": "280069469e1dd2c9e42cb6d7f88bae66573b4676715a1b3de66b54f6a4a40435",
+        "entries": [
+          {
+            "effective_until": "2026-09-22T13:00:00Z",
+            "package_id": "pkg-s17-19",
+            "revoked_at": "2026-09-22T12:00:00Z"
+          }
+        ],
+        "version": 1
+      },
+      "signature": "1c391d1124c2810229545ff103b1792ca643fdbaefb219e6efa6fd1e427543ce",
+      "synthetic_only": true
+    },
+    {
+      "canonicalization_profile": "stable",
+      "expected": {
+        "status": "REJECT"
+      },
+      "fixture_key_id": "S17-fixed-nonreal-key-v1",
+      "id": "S17-20",
+      "name": "malformed_signature",
+      "observation_time": "2026-09-22T12:00:00Z",
+      "policy": {
+        "package_id": "pkg-s17-20",
+        "rules": {
+          "allow": [
+            "read"
+          ],
+          "deny": [
+            "write"
+          ],
+          "threshold": 7
+        }
+      },
+      "production_verified": false,
+      "revocation_list": {
+        "declared_sha256": "a6a20076da005b27c9afc3a5d5b2457798c0ac817d1abc38b2fee4398ac3f133",
+        "entries": [],
+        "version": 1
+      },
+      "signature": "00-not-a-sha256-signature",
+      "synthetic_only": true
+    },
+    {
+      "canonicalization_profile": "stable",
+      "expected": {
+        "status": "UNKNOWN"
+      },
+      "fixture_key_id": "S17-fixed-nonreal-key-v1",
+      "id": "S17-21",
+      "implementation_b_available": false,
+      "name": "unknown_implementation",
+      "observation_time": "2026-09-22T12:00:00Z",
+      "policy": {
+        "package_id": "pkg-s17-21",
+        "rules": {
+          "allow": [
+            "read"
+          ],
+          "deny": [
+            "write"
+          ],
+          "threshold": 7
+        }
+      },
+      "production_verified": false,
+      "revocation_list": {
+        "declared_sha256": "a6a20076da005b27c9afc3a5d5b2457798c0ac817d1abc38b2fee4398ac3f133",
+        "entries": [],
+        "version": 1
+      },
+      "signature": "bbd0f740c1bb6a2da7603b18bc70b0310aa67d5ac924c386d9f52350aadf259f",
+      "synthetic_only": true
+    },
+    {
+      "canonicalization_profile": "stable",
+      "expected": {
+        "status": "RECOVERED"
+      },
+      "fixture_key_id": "S17-fixed-nonreal-key-v1",
+      "id": "S17-22",
+      "name": "empty_policy_still_deterministic",
+      "observation_time": "2026-09-22T12:00:00Z",
+      "policy": {
+        "package_id": "pkg-s17-22",
+        "rules": {
+          "allow": [
+            "read"
+          ],
+          "deny": [
+            "write"
+          ],
+          "threshold": 7
+        }
+      },
+      "production_verified": false,
+      "revocation_list": {
+        "declared_sha256": "a6a20076da005b27c9afc3a5d5b2457798c0ac817d1abc38b2fee4398ac3f133",
+        "entries": [],
+        "version": 1
+      },
+      "signature": "c0a1d1dbc2b161f918ad67d7ec1823863b230d322583c2b82b30fabd80dab583",
+      "synthetic_only": true
+    },
+    {
+      "canonicalization_profile": "stable",
+      "expected": {
+        "status": "UNKNOWN"
+      },
+      "fixture_key_id": "S17-fixed-nonreal-key-v1",
+      "id": "S17-23",
+      "name": "malformed_revocation_entry",
+      "observation_time": "2026-09-22T12:00:00Z",
+      "policy": {
+        "package_id": "pkg-s17-23",
+        "rules": {
+          "allow": [
+            "read"
+          ],
+          "deny": [
+            "write"
+          ],
+          "threshold": 7
+        }
+      },
+      "production_verified": false,
+      "revocation_list": {
+        "declared_sha256": "5766246b8043a02bce6a8234a729d1e6ac7334dc0dcc4a735b9b46bb7d1126a2",
+        "entries": [
+          {
+            "package_id": "pkg-s17-23"
+          }
+        ],
+        "version": 1
+      },
+      "signature": "8327603753d5547720e94d90de21a4869285e85b9cded1864192c4a18655136b",
+      "synthetic_only": true
+    },
+    {
+      "canonicalization_profile": "stable",
+      "expected": {
+        "status": "RECOVERED"
+      },
+      "fixture_key_id": "S17-fixed-nonreal-key-v1",
+      "id": "S17-24",
+      "name": "package_id_revocation_miss",
+      "observation_time": "2026-09-22T12:00:00Z",
+      "policy": {
+        "package_id": "pkg-s17-24",
+        "rules": {
+          "allow": [
+            "read"
+          ],
+          "deny": [
+            "write"
+          ],
+          "threshold": 7
+        }
+      },
+      "production_verified": false,
+      "revocation_list": {
+        "declared_sha256": "d0a6c4ac28407733dfc073727e83abffd705edbfbb50583deed7905c98886b77",
+        "entries": [
+          {
+            "package_id": "pkg-s17-24-typo",
+            "revoked_at": "2026-09-22T11:00:00Z"
+          }
+        ],
+        "version": 1
+      },
+      "signature": "24181940bf6d6f9dbc98858067529d40c4f468792daf2bb6ac9da3d02275c1a2",
+      "synthetic_only": true
+    },
+    {
+      "canonicalization_profile": "stable",
+      "expected": {
+        "status": "REJECT"
+      },
+      "fixture_key_id": "S17-fixed-nonreal-key-v1",
+      "id": "S17-25",
+      "name": "signature_bad_and_revocation_unavailable",
+      "observation_time": "2026-09-22T12:00:00Z",
+      "policy": {
+        "package_id": "pkg-s17-25",
+        "rules": {
+          "allow": [
+            "changed"
+          ]
+        }
+      },
+      "production_verified": false,
+      "revocation_list": {
+        "unavailable": true
+      },
+      "signature": "23a50e0d9e5ffb0c361b0f89a9ee68d2d7b1b22708144f49a16b5e8519a68291",
+      "synthetic_only": true
+    }
+  ],
+  "hmac_key_id": "S17-fixed-nonreal-key-v1",
+  "hmac_key_literal_for_fixture_only": "S17-FIXED-NONREAL-HMAC-KEY-v1",
+  "production_verified": false,
+  "schema_version": "S17-fixtures-v1",
+  "synthetic_only": true
+}

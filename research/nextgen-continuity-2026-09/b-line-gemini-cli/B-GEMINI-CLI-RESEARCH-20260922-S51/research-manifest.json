@@ -1,0 +1,128 @@
+{
+  "schema_version": "1.0",
+  "question": "What do official Gemini CLI sources establish about privacy notices, telemetry content/export, and configuration precedence?",
+  "scope": "public first-party Google Gemini CLI sources only; read-only research",
+  "coverage": [
+    "terms and privacy by auth",
+    "usage opt-out",
+    "telemetry settings and fields",
+    "prompt logging",
+    "user/workspace/env precedence",
+    "security and hooks settings",
+    "audit/effect boundaries"
+  ],
+  "slice_id": "B-S51-OFFICIAL-PRIVACY-TELEMETRY-CONFIG-20260922",
+  "status": "complete",
+  "research_date": "2026-09-22",
+  "access_date": "2026-09-22",
+  "sources": [
+    {
+      "id": "S51-1",
+      "url": "https://github.com/google-gemini/gemini-cli/blob/main/docs/resources/tos-privacy.md",
+      "access_date": "2026-09-22",
+      "evidence_window": "terms/privacy by authentication and usage opt-out",
+      "evidence_level": "verified",
+      "cannot_prove": "runtime data-flow compliance"
+    },
+    {
+      "id": "S51-2",
+      "url": "https://github.com/google-gemini/gemini-cli/blob/main/docs/cli/telemetry.md",
+      "access_date": "2026-09-22",
+      "evidence_window": "telemetry configuration, prompt logging, logs/metrics/traces",
+      "evidence_level": "verified",
+      "cannot_prove": "complete audit or exporter persistence"
+    },
+    {
+      "id": "S51-3",
+      "url": "https://github.com/google-gemini/gemini-cli/blob/main/docs/cli/settings.md",
+      "access_date": "2026-09-22",
+      "evidence_window": "user/workspace/env precedence and behavior settings",
+      "evidence_level": "verified",
+      "cannot_prove": "all subprocesses/external services use same settings"
+    }
+  ],
+  "claims": [
+    {
+      "id": "C1",
+      "claim": "Official docs distinguish privacy/terms by Google account, Gemini Developer API, and Vertex AI authentication path and provide usage-statistics opt-out.",
+      "status": "confirmed",
+      "confidence": "high",
+      "sources": [
+        {
+          "url": "https://github.com/google-gemini/gemini-cli/blob/main/docs/resources/tos-privacy.md",
+          "publisher": "Google Gemini CLI",
+          "published_or_updated": "2026-09-22 repository snapshot",
+          "tier": "primary",
+          "support": "Terms/privacy table and opt-out section."
+        }
+      ],
+      "caveat": "This is a notice/choice map, not per-event verification."
+    },
+    {
+      "id": "C2",
+      "claim": "Telemetry is configured by settings/environment for enabled, target, endpoint/outfile, prompt logging, and collector; documented events can include prompts, identity, tool calls, approvals, sessions, and file data.",
+      "status": "confirmed",
+      "confidence": "high",
+      "sources": [
+        {
+          "url": "https://github.com/google-gemini/gemini-cli/blob/main/docs/cli/telemetry.md",
+          "publisher": "Google Gemini CLI",
+          "published_or_updated": "2026-09-22 repository snapshot",
+          "tier": "primary",
+          "support": "Configuration and event schemas."
+        }
+      ],
+      "caveat": "Field presence and export success depend on active settings/runtime."
+    },
+    {
+      "id": "C3",
+      "claim": "Workspace settings override user settings, and environment variables can override settings; these settings affect security, billing, model, retry, telemetry, and hooks behavior.",
+      "status": "confirmed",
+      "confidence": "high",
+      "sources": [
+        {
+          "url": "https://github.com/google-gemini/gemini-cli/blob/main/docs/cli/settings.md",
+          "publisher": "Google Gemini CLI",
+          "published_or_updated": "2026-09-22 repository snapshot",
+          "tier": "primary",
+          "support": "Settings precedence and reference table."
+        }
+      ],
+      "caveat": "Effective policy must be audited per process."
+    },
+    {
+      "id": "C4",
+      "claim": "Complete telemetry delivery, exporter durability, prompt-data absence under all configurations, cross-process consistency, and external business effect remain unknown.",
+      "status": "unverified",
+      "confidence": "high",
+      "sources": [
+        {
+          "url": "https://github.com/google-gemini/gemini-cli/blob/main/docs/cli/telemetry.md",
+          "publisher": "Google Gemini CLI",
+          "published_or_updated": "2026-09-22 repository snapshot",
+          "tier": "primary",
+          "support": "Observability docs describe emission/configuration, not complete delivery semantics."
+        },
+        {
+          "url": "https://github.com/google-gemini/gemini-cli/blob/main/docs/cli/settings.md",
+          "publisher": "Google Gemini CLI",
+          "published_or_updated": "2026-09-22 repository snapshot",
+          "tier": "primary",
+          "support": "Settings docs define precedence, not distributed enforcement."
+        }
+      ],
+      "caveat": "Do not treat telemetry as postcondition; use independent target read-back."
+    }
+  ],
+  "limitations": [
+    "Documentation only",
+    "No login, credentials, live CLI, collector, or production access"
+  ],
+  "production_verified": false,
+  "unknowns": [
+    "complete telemetry delivery",
+    "exporter durability",
+    "cross-process consistency",
+    "external effect"
+  ]
+}

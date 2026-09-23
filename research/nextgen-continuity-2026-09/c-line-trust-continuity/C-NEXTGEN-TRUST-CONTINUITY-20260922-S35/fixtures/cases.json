@@ -1,0 +1,787 @@
+{
+  "cases": [
+    {
+      "evidence": [
+        "leaf canonical bytes已固定",
+        "inclusion与consistency proof均验证通过"
+      ],
+      "flags": {
+        "algorithm_compatible": true,
+        "checkpoint_chain_complete": true,
+        "consistency_proof_valid": true,
+        "fork_conflict": false,
+        "freshness_closed": true,
+        "identity_conflict": false,
+        "inclusion_proof_valid": true,
+        "key_rotation_attested": true,
+        "leaf_canonical": true,
+        "observer_independent": true,
+        "observer_quorum_agreed": true,
+        "proof_conflict": false,
+        "proof_gap": false,
+        "query_gap": false,
+        "root_attested": true,
+        "root_epoch_continuous": true,
+        "root_sequence_monotonic": true,
+        "same_identity": true,
+        "stale_root_conflict": false
+      },
+      "id": "complete-inclusion-consistency",
+      "label": "包含与一致性证明均闭合",
+      "status": "RECOVERED"
+    },
+    {
+      "evidence": [
+        "root sequence单调",
+        "checkpoint链和epoch链均闭合"
+      ],
+      "flags": {
+        "algorithm_compatible": true,
+        "checkpoint_chain_complete": true,
+        "consistency_proof_valid": true,
+        "fork_conflict": false,
+        "freshness_closed": true,
+        "identity_conflict": false,
+        "inclusion_proof_valid": true,
+        "key_rotation_attested": true,
+        "leaf_canonical": true,
+        "observer_independent": true,
+        "observer_quorum_agreed": true,
+        "proof_conflict": false,
+        "proof_gap": false,
+        "query_gap": false,
+        "root_attested": true,
+        "root_epoch_continuous": true,
+        "root_sequence_monotonic": true,
+        "same_identity": true,
+        "stale_root_conflict": false
+      },
+      "id": "checkpoint-root-chain",
+      "label": "checkpoint根链连续",
+      "status": "RECOVERED"
+    },
+    {
+      "evidence": [
+        "旧新验证密钥的rotation attestation完整",
+        "根签名链连续"
+      ],
+      "flags": {
+        "algorithm_compatible": true,
+        "checkpoint_chain_complete": true,
+        "consistency_proof_valid": true,
+        "fork_conflict": false,
+        "freshness_closed": true,
+        "identity_conflict": false,
+        "inclusion_proof_valid": true,
+        "key_rotation_attested": true,
+        "leaf_canonical": true,
+        "observer_independent": true,
+        "observer_quorum_agreed": true,
+        "proof_conflict": false,
+        "proof_gap": false,
+        "query_gap": false,
+        "root_attested": true,
+        "root_epoch_continuous": true,
+        "root_sequence_monotonic": true,
+        "same_identity": true,
+        "stale_root_conflict": false
+      },
+      "id": "attested-key-rotation",
+      "label": "密钥轮换有证明",
+      "status": "RECOVERED"
+    },
+    {
+      "evidence": [
+        "观察者满足独立性和quorum",
+        "不存在根分叉"
+      ],
+      "flags": {
+        "algorithm_compatible": true,
+        "checkpoint_chain_complete": true,
+        "consistency_proof_valid": true,
+        "fork_conflict": false,
+        "freshness_closed": true,
+        "identity_conflict": false,
+        "inclusion_proof_valid": true,
+        "key_rotation_attested": true,
+        "leaf_canonical": true,
+        "observer_independent": true,
+        "observer_quorum_agreed": true,
+        "proof_conflict": false,
+        "proof_gap": false,
+        "query_gap": false,
+        "root_attested": true,
+        "root_epoch_continuous": true,
+        "root_sequence_monotonic": true,
+        "same_identity": true,
+        "stale_root_conflict": false
+      },
+      "id": "quorum-independent-observers",
+      "label": "独立观察者一致",
+      "status": "RECOVERED"
+    },
+    {
+      "evidence": [
+        "迟到proof已纳入窗口",
+        "freshness watermark已闭合"
+      ],
+      "flags": {
+        "algorithm_compatible": true,
+        "checkpoint_chain_complete": true,
+        "consistency_proof_valid": true,
+        "fork_conflict": false,
+        "freshness_closed": true,
+        "identity_conflict": false,
+        "inclusion_proof_valid": true,
+        "key_rotation_attested": true,
+        "leaf_canonical": true,
+        "observer_independent": true,
+        "observer_quorum_agreed": true,
+        "proof_conflict": false,
+        "proof_gap": false,
+        "query_gap": false,
+        "root_attested": true,
+        "root_epoch_continuous": true,
+        "root_sequence_monotonic": true,
+        "same_identity": true,
+        "stale_root_conflict": false
+      },
+      "id": "delayed-proof-freshness-closed",
+      "label": "延迟证明仍在新鲜度窗口",
+      "status": "RECOVERED"
+    },
+    {
+      "evidence": [
+        "相同身份和leaf digest的重复proof已去重",
+        "根和路径一致"
+      ],
+      "flags": {
+        "algorithm_compatible": true,
+        "checkpoint_chain_complete": true,
+        "consistency_proof_valid": true,
+        "fork_conflict": false,
+        "freshness_closed": true,
+        "identity_conflict": false,
+        "inclusion_proof_valid": true,
+        "key_rotation_attested": true,
+        "leaf_canonical": true,
+        "observer_independent": true,
+        "observer_quorum_agreed": true,
+        "proof_conflict": false,
+        "proof_gap": false,
+        "query_gap": false,
+        "root_attested": true,
+        "root_epoch_continuous": true,
+        "root_sequence_monotonic": true,
+        "same_identity": true,
+        "stale_root_conflict": false
+      },
+      "id": "duplicate-inclusion-proof",
+      "label": "重复包含证明一致",
+      "status": "RECOVERED"
+    },
+    {
+      "evidence": [
+        "root值存在但缺少可信签名或来源"
+      ],
+      "flags": {
+        "algorithm_compatible": true,
+        "checkpoint_chain_complete": true,
+        "consistency_proof_valid": true,
+        "fork_conflict": false,
+        "freshness_closed": true,
+        "identity_conflict": false,
+        "inclusion_proof_valid": true,
+        "key_rotation_attested": true,
+        "leaf_canonical": true,
+        "observer_independent": true,
+        "observer_quorum_agreed": true,
+        "proof_conflict": false,
+        "proof_gap": false,
+        "query_gap": false,
+        "root_attested": false,
+        "root_epoch_continuous": true,
+        "root_sequence_monotonic": true,
+        "same_identity": true,
+        "stale_root_conflict": false
+      },
+      "id": "root-not-attested",
+      "label": "证据根未认证",
+      "status": "UNKNOWN"
+    },
+    {
+      "evidence": [
+        "无法确定proof针对的canonical bytes"
+      ],
+      "flags": {
+        "algorithm_compatible": true,
+        "checkpoint_chain_complete": true,
+        "consistency_proof_valid": true,
+        "fork_conflict": false,
+        "freshness_closed": true,
+        "identity_conflict": false,
+        "inclusion_proof_valid": true,
+        "key_rotation_attested": true,
+        "leaf_canonical": false,
+        "observer_independent": true,
+        "observer_quorum_agreed": true,
+        "proof_conflict": false,
+        "proof_gap": false,
+        "query_gap": false,
+        "root_attested": true,
+        "root_epoch_continuous": true,
+        "root_sequence_monotonic": true,
+        "same_identity": true,
+        "stale_root_conflict": false
+      },
+      "id": "leaf-canonicalization-missing",
+      "label": "叶节点规范化缺失",
+      "status": "UNKNOWN"
+    },
+    {
+      "evidence": [
+        "只看到root与leaf，缺少完整路径"
+      ],
+      "flags": {
+        "algorithm_compatible": true,
+        "checkpoint_chain_complete": true,
+        "consistency_proof_valid": true,
+        "fork_conflict": false,
+        "freshness_closed": true,
+        "identity_conflict": false,
+        "inclusion_proof_valid": false,
+        "key_rotation_attested": true,
+        "leaf_canonical": true,
+        "observer_independent": true,
+        "observer_quorum_agreed": true,
+        "proof_conflict": false,
+        "proof_gap": true,
+        "query_gap": false,
+        "root_attested": true,
+        "root_epoch_continuous": true,
+        "root_sequence_monotonic": true,
+        "same_identity": true,
+        "stale_root_conflict": false
+      },
+      "id": "inclusion-proof-missing",
+      "label": "包含证明缺失",
+      "status": "UNKNOWN"
+    },
+    {
+      "evidence": [
+        "两个root存在但无append-only consistency proof"
+      ],
+      "flags": {
+        "algorithm_compatible": true,
+        "checkpoint_chain_complete": true,
+        "consistency_proof_valid": false,
+        "fork_conflict": false,
+        "freshness_closed": true,
+        "identity_conflict": false,
+        "inclusion_proof_valid": true,
+        "key_rotation_attested": true,
+        "leaf_canonical": true,
+        "observer_independent": true,
+        "observer_quorum_agreed": true,
+        "proof_conflict": false,
+        "proof_gap": true,
+        "query_gap": false,
+        "root_attested": true,
+        "root_epoch_continuous": true,
+        "root_sequence_monotonic": true,
+        "same_identity": true,
+        "stale_root_conflict": false
+      },
+      "id": "consistency-proof-missing",
+      "label": "一致性证明缺失",
+      "status": "UNKNOWN"
+    },
+    {
+      "evidence": [
+        "中间root checkpoint不可取回"
+      ],
+      "flags": {
+        "algorithm_compatible": true,
+        "checkpoint_chain_complete": false,
+        "consistency_proof_valid": true,
+        "fork_conflict": false,
+        "freshness_closed": true,
+        "identity_conflict": false,
+        "inclusion_proof_valid": true,
+        "key_rotation_attested": true,
+        "leaf_canonical": true,
+        "observer_independent": true,
+        "observer_quorum_agreed": true,
+        "proof_conflict": false,
+        "proof_gap": true,
+        "query_gap": false,
+        "root_attested": true,
+        "root_epoch_continuous": true,
+        "root_sequence_monotonic": true,
+        "same_identity": true,
+        "stale_root_conflict": false
+      },
+      "id": "checkpoint-chain-gap",
+      "label": "根 checkpoint 链缺口",
+      "status": "UNKNOWN"
+    },
+    {
+      "evidence": [
+        "sequence跳变无法区分丢失与重排"
+      ],
+      "flags": {
+        "algorithm_compatible": true,
+        "checkpoint_chain_complete": true,
+        "consistency_proof_valid": true,
+        "fork_conflict": false,
+        "freshness_closed": true,
+        "identity_conflict": false,
+        "inclusion_proof_valid": true,
+        "key_rotation_attested": true,
+        "leaf_canonical": true,
+        "observer_independent": true,
+        "observer_quorum_agreed": true,
+        "proof_conflict": false,
+        "proof_gap": false,
+        "query_gap": false,
+        "root_attested": true,
+        "root_epoch_continuous": true,
+        "root_sequence_monotonic": false,
+        "same_identity": true,
+        "stale_root_conflict": false
+      },
+      "id": "root-sequence-gap",
+      "label": "根序列不闭合",
+      "status": "UNKNOWN"
+    },
+    {
+      "evidence": [
+        "新旧epoch根之间缺少连续边"
+      ],
+      "flags": {
+        "algorithm_compatible": true,
+        "checkpoint_chain_complete": true,
+        "consistency_proof_valid": true,
+        "fork_conflict": false,
+        "freshness_closed": true,
+        "identity_conflict": false,
+        "inclusion_proof_valid": true,
+        "key_rotation_attested": true,
+        "leaf_canonical": true,
+        "observer_independent": true,
+        "observer_quorum_agreed": true,
+        "proof_conflict": false,
+        "proof_gap": false,
+        "query_gap": false,
+        "root_attested": true,
+        "root_epoch_continuous": false,
+        "root_sequence_monotonic": true,
+        "same_identity": true,
+        "stale_root_conflict": false
+      },
+      "id": "epoch-transition-unproven",
+      "label": "根 epoch 迁移无证明",
+      "status": "UNKNOWN"
+    },
+    {
+      "evidence": [
+        "观察者返回不完整，不能升级为一致"
+      ],
+      "flags": {
+        "algorithm_compatible": true,
+        "checkpoint_chain_complete": true,
+        "consistency_proof_valid": true,
+        "fork_conflict": false,
+        "freshness_closed": true,
+        "identity_conflict": false,
+        "inclusion_proof_valid": true,
+        "key_rotation_attested": true,
+        "leaf_canonical": true,
+        "observer_independent": true,
+        "observer_quorum_agreed": false,
+        "proof_conflict": false,
+        "proof_gap": false,
+        "query_gap": false,
+        "root_attested": true,
+        "root_epoch_continuous": true,
+        "root_sequence_monotonic": true,
+        "same_identity": true,
+        "stale_root_conflict": false
+      },
+      "id": "quorum-not-closed",
+      "label": "观察者 quorum 未闭合",
+      "status": "UNKNOWN"
+    },
+    {
+      "evidence": [
+        "多个观察者可能共享同一上游来源"
+      ],
+      "flags": {
+        "algorithm_compatible": true,
+        "checkpoint_chain_complete": true,
+        "consistency_proof_valid": true,
+        "fork_conflict": false,
+        "freshness_closed": true,
+        "identity_conflict": false,
+        "inclusion_proof_valid": true,
+        "key_rotation_attested": true,
+        "leaf_canonical": true,
+        "observer_independent": false,
+        "observer_quorum_agreed": true,
+        "proof_conflict": false,
+        "proof_gap": false,
+        "query_gap": false,
+        "root_attested": true,
+        "root_epoch_continuous": true,
+        "root_sequence_monotonic": true,
+        "same_identity": true,
+        "stale_root_conflict": false
+      },
+      "id": "observer-correlation",
+      "label": "观察者不具独立性",
+      "status": "UNKNOWN"
+    },
+    {
+      "evidence": [
+        "root/proof可能已过期",
+        "当前读回不能排除新分叉"
+      ],
+      "flags": {
+        "algorithm_compatible": true,
+        "checkpoint_chain_complete": true,
+        "consistency_proof_valid": true,
+        "fork_conflict": false,
+        "freshness_closed": false,
+        "identity_conflict": false,
+        "inclusion_proof_valid": true,
+        "key_rotation_attested": true,
+        "leaf_canonical": true,
+        "observer_independent": true,
+        "observer_quorum_agreed": true,
+        "proof_conflict": false,
+        "proof_gap": false,
+        "query_gap": false,
+        "root_attested": true,
+        "root_epoch_continuous": true,
+        "root_sequence_monotonic": true,
+        "same_identity": true,
+        "stale_root_conflict": false
+      },
+      "id": "freshness-open",
+      "label": "证明新鲜度窗口未闭合",
+      "status": "UNKNOWN"
+    },
+    {
+      "evidence": [
+        "验证密钥变化但没有可信rotation链"
+      ],
+      "flags": {
+        "algorithm_compatible": true,
+        "checkpoint_chain_complete": true,
+        "consistency_proof_valid": true,
+        "fork_conflict": false,
+        "freshness_closed": true,
+        "identity_conflict": false,
+        "inclusion_proof_valid": true,
+        "key_rotation_attested": false,
+        "leaf_canonical": true,
+        "observer_independent": true,
+        "observer_quorum_agreed": true,
+        "proof_conflict": false,
+        "proof_gap": false,
+        "query_gap": false,
+        "root_attested": true,
+        "root_epoch_continuous": true,
+        "root_sequence_monotonic": true,
+        "same_identity": true,
+        "stale_root_conflict": false
+      },
+      "id": "key-rotation-unattested",
+      "label": "密钥轮换未认证",
+      "status": "UNKNOWN"
+    },
+    {
+      "evidence": [
+        "hash/signature算法不同且无迁移映射"
+      ],
+      "flags": {
+        "algorithm_compatible": false,
+        "checkpoint_chain_complete": true,
+        "consistency_proof_valid": true,
+        "fork_conflict": false,
+        "freshness_closed": true,
+        "identity_conflict": false,
+        "inclusion_proof_valid": true,
+        "key_rotation_attested": true,
+        "leaf_canonical": true,
+        "observer_independent": true,
+        "observer_quorum_agreed": true,
+        "proof_conflict": false,
+        "proof_gap": false,
+        "query_gap": false,
+        "root_attested": true,
+        "root_epoch_continuous": true,
+        "root_sequence_monotonic": true,
+        "same_identity": true,
+        "stale_root_conflict": false
+      },
+      "id": "algorithm-incompatible",
+      "label": "证明算法不可直接比较",
+      "status": "UNKNOWN"
+    },
+    {
+      "evidence": [
+        "NO_EVENT或无proof只表示当前视图",
+        "query gap未闭合"
+      ],
+      "flags": {
+        "algorithm_compatible": true,
+        "checkpoint_chain_complete": true,
+        "consistency_proof_valid": true,
+        "fork_conflict": false,
+        "freshness_closed": true,
+        "identity_conflict": false,
+        "inclusion_proof_valid": true,
+        "key_rotation_attested": true,
+        "leaf_canonical": true,
+        "observer_independent": true,
+        "observer_quorum_agreed": true,
+        "proof_conflict": false,
+        "proof_gap": false,
+        "query_gap": true,
+        "root_attested": true,
+        "root_epoch_continuous": true,
+        "root_sequence_monotonic": true,
+        "same_identity": false,
+        "stale_root_conflict": false
+      },
+      "id": "query-gap",
+      "label": "查询缺口下无叶节点",
+      "status": "UNKNOWN"
+    },
+    {
+      "evidence": [
+        "proof segment或root checkpoint缺失"
+      ],
+      "flags": {
+        "algorithm_compatible": true,
+        "checkpoint_chain_complete": true,
+        "consistency_proof_valid": true,
+        "fork_conflict": false,
+        "freshness_closed": true,
+        "identity_conflict": false,
+        "inclusion_proof_valid": true,
+        "key_rotation_attested": true,
+        "leaf_canonical": true,
+        "observer_independent": true,
+        "observer_quorum_agreed": true,
+        "proof_conflict": false,
+        "proof_gap": true,
+        "query_gap": false,
+        "root_attested": true,
+        "root_epoch_continuous": true,
+        "root_sequence_monotonic": true,
+        "same_identity": true,
+        "stale_root_conflict": false
+      },
+      "id": "proof-gap",
+      "label": "证明链有缺口",
+      "status": "UNKNOWN"
+    },
+    {
+      "evidence": [
+        "tenant/source/event_id/epoch字段不完整"
+      ],
+      "flags": {
+        "algorithm_compatible": true,
+        "checkpoint_chain_complete": true,
+        "consistency_proof_valid": true,
+        "fork_conflict": false,
+        "freshness_closed": true,
+        "identity_conflict": false,
+        "inclusion_proof_valid": true,
+        "key_rotation_attested": true,
+        "leaf_canonical": true,
+        "observer_independent": true,
+        "observer_quorum_agreed": true,
+        "proof_conflict": false,
+        "proof_gap": false,
+        "query_gap": false,
+        "root_attested": true,
+        "root_epoch_continuous": true,
+        "root_sequence_monotonic": true,
+        "same_identity": false,
+        "stale_root_conflict": false
+      },
+      "id": "identity-unresolved",
+      "label": "身份域无法确定",
+      "status": "UNKNOWN"
+    },
+    {
+      "evidence": [
+        "两个不确定门不能相互抵消"
+      ],
+      "flags": {
+        "algorithm_compatible": true,
+        "checkpoint_chain_complete": true,
+        "consistency_proof_valid": true,
+        "fork_conflict": false,
+        "freshness_closed": false,
+        "identity_conflict": false,
+        "inclusion_proof_valid": true,
+        "key_rotation_attested": true,
+        "leaf_canonical": true,
+        "observer_independent": true,
+        "observer_quorum_agreed": true,
+        "proof_conflict": false,
+        "proof_gap": false,
+        "query_gap": true,
+        "root_attested": true,
+        "root_epoch_continuous": true,
+        "root_sequence_monotonic": true,
+        "same_identity": false,
+        "stale_root_conflict": false
+      },
+      "id": "freshness-and-query-edge",
+      "label": "新鲜度与查询边界同时开放",
+      "status": "UNKNOWN"
+    },
+    {
+      "evidence": [
+        "tenant或source明确不同"
+      ],
+      "flags": {
+        "algorithm_compatible": true,
+        "checkpoint_chain_complete": true,
+        "consistency_proof_valid": true,
+        "fork_conflict": false,
+        "freshness_closed": true,
+        "identity_conflict": true,
+        "inclusion_proof_valid": true,
+        "key_rotation_attested": true,
+        "leaf_canonical": true,
+        "observer_independent": true,
+        "observer_quorum_agreed": true,
+        "proof_conflict": false,
+        "proof_gap": false,
+        "query_gap": false,
+        "root_attested": true,
+        "root_epoch_continuous": true,
+        "root_sequence_monotonic": true,
+        "same_identity": false,
+        "stale_root_conflict": false
+      },
+      "id": "identity-conflict",
+      "label": "跨身份域合并",
+      "status": "REJECT"
+    },
+    {
+      "evidence": [
+        "同一root sequence出现不可调和的两个根"
+      ],
+      "flags": {
+        "algorithm_compatible": true,
+        "checkpoint_chain_complete": true,
+        "consistency_proof_valid": true,
+        "fork_conflict": true,
+        "freshness_closed": true,
+        "identity_conflict": false,
+        "inclusion_proof_valid": true,
+        "key_rotation_attested": true,
+        "leaf_canonical": true,
+        "observer_independent": true,
+        "observer_quorum_agreed": true,
+        "proof_conflict": false,
+        "proof_gap": false,
+        "query_gap": false,
+        "root_attested": true,
+        "root_epoch_continuous": true,
+        "root_sequence_monotonic": true,
+        "same_identity": true,
+        "stale_root_conflict": false
+      },
+      "id": "root-fork-conflict",
+      "label": "同一epoch出现根分叉",
+      "status": "REJECT"
+    },
+    {
+      "evidence": [
+        "同一身份和root下proof路径不可同时成立"
+      ],
+      "flags": {
+        "algorithm_compatible": true,
+        "checkpoint_chain_complete": true,
+        "consistency_proof_valid": true,
+        "fork_conflict": false,
+        "freshness_closed": true,
+        "identity_conflict": false,
+        "inclusion_proof_valid": false,
+        "key_rotation_attested": true,
+        "leaf_canonical": true,
+        "observer_independent": true,
+        "observer_quorum_agreed": true,
+        "proof_conflict": true,
+        "proof_gap": false,
+        "query_gap": false,
+        "root_attested": true,
+        "root_epoch_continuous": true,
+        "root_sequence_monotonic": true,
+        "same_identity": true,
+        "stale_root_conflict": false
+      },
+      "id": "proof-conflict",
+      "label": "同一叶节点路径证明冲突",
+      "status": "REJECT"
+    },
+    {
+      "evidence": [
+        "stale root或旧generation被用于当前状态"
+      ],
+      "flags": {
+        "algorithm_compatible": true,
+        "checkpoint_chain_complete": true,
+        "consistency_proof_valid": true,
+        "fork_conflict": false,
+        "freshness_closed": true,
+        "identity_conflict": false,
+        "inclusion_proof_valid": true,
+        "key_rotation_attested": true,
+        "leaf_canonical": true,
+        "observer_independent": true,
+        "observer_quorum_agreed": true,
+        "proof_conflict": false,
+        "proof_gap": false,
+        "query_gap": false,
+        "root_attested": true,
+        "root_epoch_continuous": true,
+        "root_sequence_monotonic": true,
+        "same_identity": true,
+        "stale_root_conflict": true
+      },
+      "id": "stale-root-conflict",
+      "label": "旧根越过当前边界",
+      "status": "REJECT"
+    }
+  ],
+  "identity_domain": [
+    "tenant",
+    "source",
+    "event_id",
+    "epoch",
+    "version"
+  ],
+  "production_verified": false,
+  "proof_domain": [
+    "root",
+    "leaf",
+    "inclusion_proof",
+    "consistency_proof",
+    "checkpoint",
+    "observer",
+    "key_rotation",
+    "freshness",
+    "fence"
+  ],
+  "schema_version": "S35-cases-1",
+  "synthetic_only": true
+}

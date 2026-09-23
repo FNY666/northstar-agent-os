@@ -1,0 +1,16 @@
+{
+  "schema_version": "s22.research-manifest.v1",
+  "question": "在版本化快照边界下，增量 DAG 能否在证据完整性门禁中确定性重放？",
+  "scope": "离线合成 fixture；仅研究 RECOVERED/UNKNOWN/REJECT 的 fail-closed 判定，不连接生产。",
+  "synthetic_only": true,
+  "production_verified": false,
+  "sources": [],
+  "claims": [
+    {"id":"C1","claim":"完整快照、连续增量、版本一致、边界内、DAG 父引用闭合且平台回执/日志/外部效果三通道齐备时，合成重放可判定 RECOVERED。","status":"inferred","confidence":"medium","sources":[],"caveat":"仅适用于本地合成模型，不能证明生产耐久性或 exactly-once。"},
+    {"id":"C2","claim":"缺页、缺分片、断点缺口、查询缺口、保留期过期或证据通道缺失时，门禁 fail-closed 为 UNKNOWN。","status":"inferred","confidence":"medium","sources":[],"caveat":"UNKNOWN 表示证据不足，不表示事件不存在。"},
+    {"id":"C3","claim":"版本漂移、明确矛盾、重复冲突或边界外事件时，门禁 fail-closed 为 REJECT。","status":"inferred","confidence":"medium","sources":[],"caveat":"仅证明 synthetic fixture 中的规则行为。"},
+    {"id":"C4","claim":"平台回执、日志存在与外部效果确认是独立证据维度，任一单独存在不能推出连续性或外部效果。","status":"inferred","confidence":"medium","sources":[],"caveat":"不能证明真实平台的观测语义。"}
+  ],
+  "coverage": {"fixtures":24,"states":["RECOVERED","UNKNOWN","REJECT"],"classifications":["NO_EVENT","DELAYED","DROPPED","EXPORTER_FAILURE","QUERY_GAP","RETENTION_EXPIRED","VERIFIED_CONTINUITY","UNKNOWN"],"channels":["platform_receipts","logs","external_effects"],"external_sources":0},
+  "limitations": ["不能证明生产耐久性","不能证明 exactly-once","不能证明回滚","不能证明外部效果","不能证明 production readiness"]
+}

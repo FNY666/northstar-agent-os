@@ -1,0 +1,819 @@
+{
+  "model_config": {
+    "freshness_window_seconds": 3600,
+    "independence_key": "source_id",
+    "observation_budget": 4,
+    "production_verified": false,
+    "reference_time": "2026-09-22T00:00:00Z",
+    "synthetic_only": true
+  },
+  "production_verified": false,
+  "results": [
+    {
+      "budget": 4,
+      "budget_exhausted": false,
+      "case_id": "S13-01-fresh-corroborated",
+      "conflict_groups": [],
+      "consumed_observations": 2,
+      "production_verified": false,
+      "provenance": [
+        {
+          "accessible": true,
+          "considered": true,
+          "decision": "RECOVERED",
+          "event_id": "e01",
+          "event_time": "2026-09-21T23:50:00Z",
+          "fresh": true,
+          "freshness_age_seconds": 540,
+          "input_index": 0,
+          "observation_role": "evidence",
+          "observed_at": "2026-09-21T23:51:00Z",
+          "seq": 1,
+          "source_id": "sensor-a",
+          "usable": true
+        },
+        {
+          "accessible": true,
+          "considered": true,
+          "decision": "RECOVERED",
+          "event_id": "e01",
+          "event_time": "2026-09-21T23:50:00Z",
+          "fresh": true,
+          "freshness_age_seconds": 480,
+          "input_index": 1,
+          "observation_role": "evidence",
+          "observed_at": "2026-09-21T23:52:00Z",
+          "seq": 1,
+          "source_id": "sensor-b",
+          "usable": true
+        }
+      ],
+      "reason": "at least two independent accessible fresh observations agree on the same event version",
+      "recovery_groups": [
+        {
+          "event_id": "e01",
+          "input_indices": [
+            0,
+            1
+          ],
+          "seq": 1,
+          "source_ids": [
+            "sensor-a",
+            "sensor-b"
+          ]
+        }
+      ],
+      "status": "RECOVERED",
+      "supplied_observations": 2,
+      "synthetic_only": true
+    },
+    {
+      "budget": 4,
+      "budget_exhausted": false,
+      "case_id": "S13-02-single-observation",
+      "conflict_groups": [],
+      "consumed_observations": 1,
+      "production_verified": false,
+      "provenance": [
+        {
+          "accessible": true,
+          "considered": true,
+          "decision": "RECOVERED",
+          "event_id": "e02",
+          "event_time": "2026-09-21T23:55:00Z",
+          "fresh": true,
+          "freshness_age_seconds": 240,
+          "input_index": 0,
+          "observation_role": "evidence",
+          "observed_at": "2026-09-21T23:56:00Z",
+          "seq": 1,
+          "source_id": "sensor-a",
+          "usable": true
+        }
+      ],
+      "reason": "insufficient independent agreeing observations",
+      "recovery_groups": [],
+      "status": "UNKNOWN",
+      "supplied_observations": 1,
+      "synthetic_only": true
+    },
+    {
+      "budget": 4,
+      "budget_exhausted": false,
+      "case_id": "S13-03-stale-only",
+      "conflict_groups": [],
+      "consumed_observations": 2,
+      "production_verified": false,
+      "provenance": [
+        {
+          "accessible": true,
+          "considered": true,
+          "decision": "RECOVERED",
+          "event_id": "e03",
+          "event_time": "2026-09-21T21:00:00Z",
+          "fresh": false,
+          "freshness_age_seconds": 10740,
+          "input_index": 0,
+          "observation_role": "excluded",
+          "observed_at": "2026-09-21T21:01:00Z",
+          "seq": 1,
+          "source_id": "sensor-a",
+          "usable": false
+        },
+        {
+          "accessible": true,
+          "considered": true,
+          "decision": "RECOVERED",
+          "event_id": "e03",
+          "event_time": "2026-09-21T21:00:00Z",
+          "fresh": false,
+          "freshness_age_seconds": 10680,
+          "input_index": 1,
+          "observation_role": "excluded",
+          "observed_at": "2026-09-21T21:02:00Z",
+          "seq": 1,
+          "source_id": "sensor-b",
+          "usable": false
+        }
+      ],
+      "reason": "no usable accessible fresh observations within budget; one or more accessible records stale",
+      "recovery_groups": [],
+      "status": "UNKNOWN",
+      "supplied_observations": 2,
+      "synthetic_only": true
+    },
+    {
+      "budget": 4,
+      "budget_exhausted": false,
+      "case_id": "S13-04-same-source-duplicate",
+      "conflict_groups": [],
+      "consumed_observations": 2,
+      "production_verified": false,
+      "provenance": [
+        {
+          "accessible": true,
+          "considered": true,
+          "decision": "RECOVERED",
+          "event_id": "e04",
+          "event_time": "2026-09-21T23:40:00Z",
+          "fresh": true,
+          "freshness_age_seconds": 1140,
+          "input_index": 0,
+          "observation_role": "evidence",
+          "observed_at": "2026-09-21T23:41:00Z",
+          "seq": 1,
+          "source_id": "sensor-a",
+          "usable": true
+        },
+        {
+          "accessible": true,
+          "considered": true,
+          "decision": "RECOVERED",
+          "event_id": "e04",
+          "event_time": "2026-09-21T23:40:00Z",
+          "fresh": true,
+          "freshness_age_seconds": 1080,
+          "input_index": 1,
+          "observation_role": "evidence",
+          "observed_at": "2026-09-21T23:42:00Z",
+          "seq": 1,
+          "source_id": "sensor-a",
+          "usable": true
+        }
+      ],
+      "reason": "insufficient independent agreeing observations",
+      "recovery_groups": [],
+      "status": "UNKNOWN",
+      "supplied_observations": 2,
+      "synthetic_only": true
+    },
+    {
+      "budget": 4,
+      "budget_exhausted": false,
+      "case_id": "S13-05-out-of-order",
+      "conflict_groups": [],
+      "consumed_observations": 2,
+      "production_verified": false,
+      "provenance": [
+        {
+          "accessible": true,
+          "considered": true,
+          "decision": "RECOVERED",
+          "event_id": "e05",
+          "event_time": "2026-09-21T23:30:00Z",
+          "fresh": true,
+          "freshness_age_seconds": 1680,
+          "input_index": 0,
+          "observation_role": "evidence",
+          "observed_at": "2026-09-21T23:32:00Z",
+          "seq": 1,
+          "source_id": "sensor-b",
+          "usable": true
+        },
+        {
+          "accessible": true,
+          "considered": true,
+          "decision": "RECOVERED",
+          "event_id": "e05",
+          "event_time": "2026-09-21T23:29:00Z",
+          "fresh": true,
+          "freshness_age_seconds": 1740,
+          "input_index": 1,
+          "observation_role": "evidence",
+          "observed_at": "2026-09-21T23:31:00Z",
+          "seq": 1,
+          "source_id": "sensor-a",
+          "usable": true
+        }
+      ],
+      "reason": "at least two independent accessible fresh observations agree on the same event version",
+      "recovery_groups": [
+        {
+          "event_id": "e05",
+          "input_indices": [
+            0,
+            1
+          ],
+          "seq": 1,
+          "source_ids": [
+            "sensor-a",
+            "sensor-b"
+          ]
+        }
+      ],
+      "status": "RECOVERED",
+      "supplied_observations": 2,
+      "synthetic_only": true
+    },
+    {
+      "budget": 4,
+      "budget_exhausted": false,
+      "case_id": "S13-06-boundary-fresh",
+      "conflict_groups": [],
+      "consumed_observations": 2,
+      "production_verified": false,
+      "provenance": [
+        {
+          "accessible": true,
+          "considered": true,
+          "decision": "RECOVERED",
+          "event_id": "e06",
+          "event_time": "2026-09-21T23:00:00Z",
+          "fresh": true,
+          "freshness_age_seconds": 3600,
+          "input_index": 0,
+          "observation_role": "evidence",
+          "observed_at": "2026-09-21T23:00:00Z",
+          "seq": 1,
+          "source_id": "sensor-a",
+          "usable": true
+        },
+        {
+          "accessible": true,
+          "considered": true,
+          "decision": "RECOVERED",
+          "event_id": "e06",
+          "event_time": "2026-09-21T23:00:00Z",
+          "fresh": true,
+          "freshness_age_seconds": 3600,
+          "input_index": 1,
+          "observation_role": "evidence",
+          "observed_at": "2026-09-21T23:00:00Z",
+          "seq": 1,
+          "source_id": "sensor-b",
+          "usable": true
+        }
+      ],
+      "reason": "at least two independent accessible fresh observations agree on the same event version",
+      "recovery_groups": [
+        {
+          "event_id": "e06",
+          "input_indices": [
+            0,
+            1
+          ],
+          "seq": 1,
+          "source_ids": [
+            "sensor-a",
+            "sensor-b"
+          ]
+        }
+      ],
+      "status": "RECOVERED",
+      "supplied_observations": 2,
+      "synthetic_only": true
+    },
+    {
+      "budget": 4,
+      "budget_exhausted": false,
+      "case_id": "S13-07-boundary-stale",
+      "conflict_groups": [],
+      "consumed_observations": 2,
+      "production_verified": false,
+      "provenance": [
+        {
+          "accessible": true,
+          "considered": true,
+          "decision": "RECOVERED",
+          "event_id": "e07",
+          "event_time": "2026-09-21T22:59:59Z",
+          "fresh": false,
+          "freshness_age_seconds": 3601,
+          "input_index": 0,
+          "observation_role": "excluded",
+          "observed_at": "2026-09-21T22:59:59Z",
+          "seq": 1,
+          "source_id": "sensor-a",
+          "usable": false
+        },
+        {
+          "accessible": true,
+          "considered": true,
+          "decision": "RECOVERED",
+          "event_id": "e07",
+          "event_time": "2026-09-21T22:59:59Z",
+          "fresh": false,
+          "freshness_age_seconds": 3601,
+          "input_index": 1,
+          "observation_role": "excluded",
+          "observed_at": "2026-09-21T22:59:59Z",
+          "seq": 1,
+          "source_id": "sensor-b",
+          "usable": false
+        }
+      ],
+      "reason": "no usable accessible fresh observations within budget; one or more accessible records stale",
+      "recovery_groups": [],
+      "status": "UNKNOWN",
+      "supplied_observations": 2,
+      "synthetic_only": true
+    },
+    {
+      "budget": 2,
+      "budget_exhausted": false,
+      "case_id": "S13-08-budget-complete",
+      "conflict_groups": [],
+      "consumed_observations": 2,
+      "production_verified": false,
+      "provenance": [
+        {
+          "accessible": true,
+          "considered": true,
+          "decision": "RECOVERED",
+          "event_id": "e08",
+          "event_time": "2026-09-21T23:45:00Z",
+          "fresh": true,
+          "freshness_age_seconds": 840,
+          "input_index": 0,
+          "observation_role": "evidence",
+          "observed_at": "2026-09-21T23:46:00Z",
+          "seq": 1,
+          "source_id": "sensor-a",
+          "usable": true
+        },
+        {
+          "accessible": true,
+          "considered": true,
+          "decision": "RECOVERED",
+          "event_id": "e08",
+          "event_time": "2026-09-21T23:45:00Z",
+          "fresh": true,
+          "freshness_age_seconds": 780,
+          "input_index": 1,
+          "observation_role": "evidence",
+          "observed_at": "2026-09-21T23:47:00Z",
+          "seq": 1,
+          "source_id": "sensor-b",
+          "usable": true
+        }
+      ],
+      "reason": "at least two independent accessible fresh observations agree on the same event version",
+      "recovery_groups": [
+        {
+          "event_id": "e08",
+          "input_indices": [
+            0,
+            1
+          ],
+          "seq": 1,
+          "source_ids": [
+            "sensor-a",
+            "sensor-b"
+          ]
+        }
+      ],
+      "status": "RECOVERED",
+      "supplied_observations": 2,
+      "synthetic_only": true
+    },
+    {
+      "budget": 1,
+      "budget_exhausted": true,
+      "case_id": "S13-09-budget-exhausted",
+      "conflict_groups": [],
+      "consumed_observations": 1,
+      "production_verified": false,
+      "provenance": [
+        {
+          "accessible": true,
+          "considered": true,
+          "decision": "RECOVERED",
+          "event_id": "e09",
+          "event_time": "2026-09-21T23:45:00Z",
+          "fresh": true,
+          "freshness_age_seconds": 840,
+          "input_index": 0,
+          "observation_role": "evidence",
+          "observed_at": "2026-09-21T23:46:00Z",
+          "seq": 1,
+          "source_id": "sensor-a",
+          "usable": true
+        },
+        {
+          "accessible": true,
+          "considered": false,
+          "decision": "RECOVERED",
+          "event_id": "e09",
+          "event_time": "2026-09-21T23:45:00Z",
+          "fresh": true,
+          "freshness_age_seconds": 780,
+          "input_index": 1,
+          "observation_role": "excluded",
+          "observed_at": "2026-09-21T23:47:00Z",
+          "seq": 1,
+          "source_id": "sensor-b",
+          "usable": false
+        }
+      ],
+      "reason": "insufficient independent agreeing observations; observation budget exhausted before all supplied records were considered",
+      "recovery_groups": [],
+      "status": "UNKNOWN",
+      "supplied_observations": 2,
+      "synthetic_only": true
+    },
+    {
+      "budget": 4,
+      "budget_exhausted": false,
+      "case_id": "S13-10-explicit-conflict",
+      "conflict_groups": [
+        {
+          "decisions": [
+            "RECOVERED",
+            "REJECT"
+          ],
+          "event_id": "e10",
+          "input_indices": [
+            0,
+            1
+          ],
+          "seq": 7,
+          "source_ids": [
+            "sensor-a",
+            "sensor-b"
+          ]
+        }
+      ],
+      "consumed_observations": 2,
+      "production_verified": false,
+      "provenance": [
+        {
+          "accessible": true,
+          "considered": true,
+          "decision": "RECOVERED",
+          "event_id": "e10",
+          "event_time": "2026-09-21T23:50:00Z",
+          "fresh": true,
+          "freshness_age_seconds": 540,
+          "input_index": 0,
+          "observation_role": "evidence",
+          "observed_at": "2026-09-21T23:51:00Z",
+          "seq": 7,
+          "source_id": "sensor-a",
+          "usable": true
+        },
+        {
+          "accessible": true,
+          "considered": true,
+          "decision": "REJECT",
+          "event_id": "e10",
+          "event_time": "2026-09-21T23:50:00Z",
+          "fresh": true,
+          "freshness_age_seconds": 480,
+          "input_index": 1,
+          "observation_role": "evidence",
+          "observed_at": "2026-09-21T23:52:00Z",
+          "seq": 7,
+          "source_id": "sensor-b",
+          "usable": true
+        }
+      ],
+      "reason": "explicit fresh same-version contradictory terminal decisions from independent sources",
+      "recovery_groups": [],
+      "status": "REJECT",
+      "supplied_observations": 2,
+      "synthetic_only": true
+    },
+    {
+      "budget": 4,
+      "budget_exhausted": false,
+      "case_id": "S13-11-missing",
+      "conflict_groups": [],
+      "consumed_observations": 0,
+      "production_verified": false,
+      "provenance": [],
+      "reason": "missing observations",
+      "recovery_groups": [],
+      "status": "UNKNOWN",
+      "supplied_observations": 0,
+      "synthetic_only": true
+    },
+    {
+      "budget": 4,
+      "budget_exhausted": false,
+      "case_id": "S13-12-inaccessible",
+      "conflict_groups": [],
+      "consumed_observations": 2,
+      "production_verified": false,
+      "provenance": [
+        {
+          "access_note": "synthetic permission denial",
+          "accessible": false,
+          "considered": true,
+          "decision": "RECOVERED",
+          "event_id": "e12",
+          "event_time": "2026-09-21T23:50:00Z",
+          "fresh": true,
+          "freshness_age_seconds": 540,
+          "input_index": 0,
+          "observation_role": "unavailable",
+          "observed_at": "2026-09-21T23:51:00Z",
+          "seq": 1,
+          "source_id": "sensor-a",
+          "usable": false
+        },
+        {
+          "access_note": "synthetic timeout",
+          "accessible": false,
+          "considered": true,
+          "decision": "RECOVERED",
+          "event_id": "e12",
+          "event_time": "2026-09-21T23:50:00Z",
+          "fresh": true,
+          "freshness_age_seconds": 480,
+          "input_index": 1,
+          "observation_role": "unavailable",
+          "observed_at": "2026-09-21T23:52:00Z",
+          "seq": 1,
+          "source_id": "sensor-b",
+          "usable": false
+        }
+      ],
+      "reason": "no usable accessible fresh observations within budget; one or more provenance records inaccessible",
+      "recovery_groups": [],
+      "status": "UNKNOWN",
+      "supplied_observations": 2,
+      "synthetic_only": true
+    },
+    {
+      "budget": 4,
+      "budget_exhausted": false,
+      "case_id": "S13-13-mixed-access",
+      "conflict_groups": [],
+      "consumed_observations": 3,
+      "production_verified": false,
+      "provenance": [
+        {
+          "accessible": true,
+          "considered": true,
+          "decision": "RECOVERED",
+          "event_id": "e13",
+          "event_time": "2026-09-21T23:50:00Z",
+          "fresh": true,
+          "freshness_age_seconds": 540,
+          "input_index": 0,
+          "observation_role": "evidence",
+          "observed_at": "2026-09-21T23:51:00Z",
+          "seq": 1,
+          "source_id": "sensor-a",
+          "usable": true
+        },
+        {
+          "accessible": true,
+          "considered": true,
+          "decision": "RECOVERED",
+          "event_id": "e13",
+          "event_time": "2026-09-21T23:50:00Z",
+          "fresh": true,
+          "freshness_age_seconds": 480,
+          "input_index": 1,
+          "observation_role": "evidence",
+          "observed_at": "2026-09-21T23:52:00Z",
+          "seq": 1,
+          "source_id": "sensor-b",
+          "usable": true
+        },
+        {
+          "access_note": "synthetic unavailable endpoint",
+          "accessible": false,
+          "considered": true,
+          "decision": "RECOVERED",
+          "event_id": "e13",
+          "event_time": "2026-09-21T23:50:00Z",
+          "fresh": true,
+          "freshness_age_seconds": 420,
+          "input_index": 2,
+          "observation_role": "unavailable",
+          "observed_at": "2026-09-21T23:53:00Z",
+          "seq": 1,
+          "source_id": "sensor-c",
+          "usable": false
+        }
+      ],
+      "reason": "at least two independent accessible fresh observations agree on the same event version",
+      "recovery_groups": [
+        {
+          "event_id": "e13",
+          "input_indices": [
+            0,
+            1
+          ],
+          "seq": 1,
+          "source_ids": [
+            "sensor-a",
+            "sensor-b"
+          ]
+        }
+      ],
+      "status": "RECOVERED",
+      "supplied_observations": 3,
+      "synthetic_only": true
+    },
+    {
+      "budget": 4,
+      "budget_exhausted": false,
+      "case_id": "S13-14-no-clear-conflict",
+      "conflict_groups": [],
+      "consumed_observations": 3,
+      "production_verified": false,
+      "provenance": [
+        {
+          "accessible": true,
+          "considered": true,
+          "decision": "RECOVERED",
+          "event_id": "e14",
+          "event_time": "2026-09-21T23:40:00Z",
+          "fresh": true,
+          "freshness_age_seconds": 1140,
+          "input_index": 0,
+          "observation_role": "evidence",
+          "observed_at": "2026-09-21T23:41:00Z",
+          "seq": 3,
+          "source_id": "sensor-a",
+          "usable": true
+        },
+        {
+          "accessible": true,
+          "considered": true,
+          "decision": "RECOVERED",
+          "event_id": "e14",
+          "event_time": "2026-09-21T23:40:00Z",
+          "fresh": true,
+          "freshness_age_seconds": 1080,
+          "input_index": 1,
+          "observation_role": "evidence",
+          "observed_at": "2026-09-21T23:42:00Z",
+          "seq": 3,
+          "source_id": "sensor-b",
+          "usable": true
+        },
+        {
+          "accessible": true,
+          "considered": true,
+          "decision": "REJECT",
+          "event_id": "e14",
+          "event_time": "2026-09-21T20:00:00Z",
+          "fresh": false,
+          "freshness_age_seconds": 14340,
+          "input_index": 2,
+          "observation_role": "excluded",
+          "observed_at": "2026-09-21T20:01:00Z",
+          "seq": 3,
+          "source_id": "sensor-c",
+          "usable": false
+        }
+      ],
+      "reason": "at least two independent accessible fresh observations agree on the same event version",
+      "recovery_groups": [
+        {
+          "event_id": "e14",
+          "input_indices": [
+            0,
+            1
+          ],
+          "seq": 3,
+          "source_ids": [
+            "sensor-a",
+            "sensor-b"
+          ]
+        }
+      ],
+      "status": "RECOVERED",
+      "supplied_observations": 3,
+      "synthetic_only": true
+    },
+    {
+      "budget": 4,
+      "budget_exhausted": false,
+      "case_id": "S13-15-one-reject-only",
+      "conflict_groups": [],
+      "consumed_observations": 1,
+      "production_verified": false,
+      "provenance": [
+        {
+          "accessible": true,
+          "considered": true,
+          "decision": "REJECT",
+          "event_id": "e15",
+          "event_time": "2026-09-21T23:55:00Z",
+          "fresh": true,
+          "freshness_age_seconds": 240,
+          "input_index": 0,
+          "observation_role": "evidence",
+          "observed_at": "2026-09-21T23:56:00Z",
+          "seq": 2,
+          "source_id": "sensor-a",
+          "usable": true
+        }
+      ],
+      "reason": "insufficient independent agreeing observations",
+      "recovery_groups": [],
+      "status": "UNKNOWN",
+      "supplied_observations": 1,
+      "synthetic_only": true
+    },
+    {
+      "budget": 4,
+      "budget_exhausted": false,
+      "case_id": "S13-16-out-of-order-conflict",
+      "conflict_groups": [
+        {
+          "decisions": [
+            "RECOVERED",
+            "REJECT"
+          ],
+          "event_id": "e16",
+          "input_indices": [
+            0,
+            1
+          ],
+          "seq": 4,
+          "source_ids": [
+            "sensor-a",
+            "sensor-b"
+          ]
+        }
+      ],
+      "consumed_observations": 2,
+      "production_verified": false,
+      "provenance": [
+        {
+          "accessible": true,
+          "considered": true,
+          "decision": "REJECT",
+          "event_id": "e16",
+          "event_time": "2026-09-21T23:20:00Z",
+          "fresh": true,
+          "freshness_age_seconds": 2280,
+          "input_index": 0,
+          "observation_role": "evidence",
+          "observed_at": "2026-09-21T23:22:00Z",
+          "seq": 4,
+          "source_id": "sensor-b",
+          "usable": true
+        },
+        {
+          "accessible": true,
+          "considered": true,
+          "decision": "RECOVERED",
+          "event_id": "e16",
+          "event_time": "2026-09-21T23:20:00Z",
+          "fresh": true,
+          "freshness_age_seconds": 2340,
+          "input_index": 1,
+          "observation_role": "evidence",
+          "observed_at": "2026-09-21T23:21:00Z",
+          "seq": 4,
+          "source_id": "sensor-a",
+          "usable": true
+        }
+      ],
+      "reason": "explicit fresh same-version contradictory terminal decisions from independent sources",
+      "recovery_groups": [],
+      "status": "REJECT",
+      "supplied_observations": 2,
+      "synthetic_only": true
+    }
+  ],
+  "schema_version": "S13-results-1.0",
+  "synthetic_only": true
+}

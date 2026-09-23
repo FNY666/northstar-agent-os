@@ -1,0 +1,1860 @@
+### packages/core/src/agent/event-translator.ts
+     1	/**
+     2	 * @license
+     3	 * Copyright 2026 Google LLC
+     4	 * SPDX-License-Identifier: Apache-2.0
+     5	 */
+     6	
+     7	/**
+     8	 * @fileoverview Pure, stateless-per-call translation functions that convert
+     9	 * ServerGeminiStreamEvent objects into AgentEvent objects.
+    10	 *
+    11	 * No side effects, no generators. Each call to `translateEvent` takes an event
+    12	 * and mutable TranslationState, returning zero or more AgentEvents.
+    13	 */
+    14	
+    15	import type { FinishReason } from '@google/genai';
+    16	import { GeminiEventType } from '../core/turn.js';
+    17	import type {
+    18	  ServerGeminiStreamEvent,
+    19	  StructuredError,
+    20	  GeminiFinishedEventValue,
+    21	} from '../core/turn.js';
+    22	import type {
+    23	  AgentEvent,
+    24	  StreamEndReason,
+    25	  ErrorData,
+    26	  Usage,
+    27	  AgentEventType,
+    28	  ToolDisplay,
+    29	} from './types.js';
+    30	import {
+    31	  geminiPartsToContentParts,
+    32	  buildToolResponseData,
+    33	} from './content-utils.js';
+    34	import { toolResultDisplayToDisplayContent } from './tool-display-utils.js';
+    35	
+    36	// ---------------------------------------------------------------------------
+    37	// Translation State
+    38	// ---------------------------------------------------------------------------
+    39	
+    40	export interface TranslationState {
+    41	  streamId: string;
+    42	  streamStartEmitted: boolean;
+    43	  model: string | undefined;
+    44	  eventCounter: number;
+    45	  /** Tracks callId → tool name from requests so responses can reference the name. */
+    46	  pendingToolNames: Map<string, string>;
+    47	}
+    48	
+    49	export function createTranslationState(streamId?: string): TranslationState {
+    50	  return {
+    51	    streamId: streamId ?? crypto.randomUUID(),
+    52	    streamStartEmitted: false,
+    53	    model: undefined,
+    54	    eventCounter: 0,
+    55	    pendingToolNames: new Map(),
+    56	  };
+    57	}
+    58	
+    59	// ---------------------------------------------------------------------------
+    60	// Helpers
+    61	// ---------------------------------------------------------------------------
+    62	
+    63	function makeEvent<T extends AgentEventType>(
+    64	  type: T,
+    65	  state: TranslationState,
+    66	  payload: Partial<AgentEvent<T>>,
+    67	): AgentEvent {
+    68	  const id = `${state.streamId}-${state.eventCounter++}`;
+    69	  // TypeScript cannot preserve the specific discriminated union member across
+    70	  // this generic object assembly, so keep the narrowing local to the event
+    71	  // constructor boundary.
+    72	  // eslint-disable-next-line @typescript-eslint/no-unsafe-type-assertion
+    73	  return {
+    74	    ...payload,
+    75	    id,
+    76	    timestamp: new Date().toISOString(),
+    77	    streamId: state.streamId,
+    78	    type,
+    79	  } as AgentEvent;
+    80	}
+    81	
+    82	function ensureStreamStart(state: TranslationState, out: AgentEvent[]): void {
+    83	  if (!state.streamStartEmitted) {
+    84	    out.push(makeEvent('agent_start', state, {}));
+    85	    state.streamStartEmitted = true;
+    86	  }
+    87	}
+    88	
+    89	// ---------------------------------------------------------------------------
+    90	// Core Translator
+    91	// ---------------------------------------------------------------------------
+    92	
+    93	/**
+    94	 * Translates a single ServerGeminiStreamEvent into zero or more AgentEvents.
+    95	 * Mutates `state` (counter, flags) as a side effect.
+    96	 */
+    97	export function translateEvent(
+    98	  event: ServerGeminiStreamEvent,
+    99	  state: TranslationState,
+   100	): AgentEvent[] {
+   101	  const out: AgentEvent[] = [];
+   102	
+   103	  switch (event.type) {
+   104	    case GeminiEventType.ModelInfo:
+   105	      state.model = event.value;
+   106	      ensureStreamStart(state, out);
+   107	      out.push(makeEvent('session_update', state, { model: event.value }));
+   108	      break;
+   109	
+   110	    case GeminiEventType.Content:
+   111	      ensureStreamStart(state, out);
+   112	      out.push(
+   113	        makeEvent('message', state, {
+   114	          role: 'agent',
+   115	          content: [{ type: 'text', text: event.value }],
+   116	        }),
+   117	      );
+   118	      break;
+   119	
+   120	    case GeminiEventType.Thought:
+   121	      ensureStreamStart(state, out);
+   122	      out.push(
+   123	        makeEvent('message', state, {
+   124	          role: 'agent',
+   125	          content: [{ type: 'thought', thought: event.value.description }],
+   126	          _meta: event.value.subject
+   127	            ? { source: 'agent', subject: event.value.subject }
+   128	            : { source: 'agent' },
+   129	        }),
+   130	      );
+   131	      break;
+   132	
+   133	    case GeminiEventType.Citation:
+   134	      ensureStreamStart(state, out);
+   135	      out.push(
+   136	        makeEvent('message', state, {
+   137	          role: 'agent',
+   138	          content: [{ type: 'text', text: event.value }],
+   139	          _meta: { source: 'agent', citation: true },
+   140	        }),
+   141	      );
+   142	      break;
+   143	
+   144	    case GeminiEventType.Finished:
+   145	      handleFinished(event.value, state, out);
+   146	      break;
+   147	
+   148	    case GeminiEventType.Error:
+   149	      handleError(event.value.error, state, out);
+   150	      break;
+   151	
+   152	    case GeminiEventType.UserCancelled:
+   153	      ensureStreamStart(state, out);
+   154	      out.push(
+   155	        makeEvent('agent_end', state, {
+   156	          reason: 'aborted',
+   157	        }),
+   158	      );
+   159	      break;
+   160	
+   161	    case GeminiEventType.MaxSessionTurns:
+   162	      ensureStreamStart(state, out);
+   163	      out.push(
+   164	        makeEvent('agent_end', state, {
+   165	          reason: 'max_turns',
+   166	          data: {
+   167	            code: 'MAX_TURNS_EXCEEDED',
+   168	          },
+   169	        }),
+   170	      );
+   171	      break;
+   172	
+   173	    case GeminiEventType.LoopDetected:
+   174	      ensureStreamStart(state, out);
+   175	      out.push(
+   176	        makeEvent('error', state, {
+   177	          status: 'INTERNAL',
+   178	          message: 'Loop detected, stopping execution',
+   179	          fatal: false,
+   180	          _meta: { code: 'LOOP_DETECTED' },
+   181	        }),
+   182	      );
+   183	      break;
+   184	
+   185	    case GeminiEventType.ContextWindowWillOverflow:
+   186	      ensureStreamStart(state, out);
+   187	      out.push(
+   188	        makeEvent('error', state, {
+   189	          status: 'RESOURCE_EXHAUSTED',
+   190	          message: `Context window will overflow (estimated: ${event.value.estimatedRequestTokenCount}, remaining: ${event.value.remainingTokenCount})`,
+   191	          fatal: true,
+   192	        }),
+   193	      );
+   194	      break;
+   195	
+   196	    case GeminiEventType.AgentExecutionStopped:
+   197	      ensureStreamStart(state, out);
+   198	      out.push(
+   199	        makeEvent('agent_end', state, {
+   200	          reason: 'completed',
+   201	          data: {
+   202	            message: event.value.systemMessage?.trim() || event.value.reason,
+   203	          },
+   204	        }),
+   205	      );
+   206	      break;
+   207	
+   208	    case GeminiEventType.AgentExecutionBlocked:
+   209	      ensureStreamStart(state, out);
+   210	      out.push(
+   211	        makeEvent('error', state, {
+   212	          status: 'PERMISSION_DENIED',
+   213	          message: event.value.systemMessage?.trim() || event.value.reason,
+   214	          fatal: false,
+   215	          _meta: { code: 'AGENT_EXECUTION_BLOCKED' },
+   216	        }),
+   217	      );
+   218	      break;
+   219	
+   220	    case GeminiEventType.InvalidStream:
+   221	      ensureStreamStart(state, out);
+   222	      out.push(
+   223	        makeEvent('error', state, {
+   224	          status: 'INTERNAL',
+   225	          message:
+   226	            event.value?.message?.trim() ||
+   227	            'Invalid stream received from model',
+   228	          fatal: true,
+   229	          _meta: {
+   230	            code: 'INVALID_STREAM',
+   231	            errorType: event.value?.type,
+   232	            rawMessage: event.value?.message,
+   233	          },
+   234	        }),
+   235	      );
+   236	      break;
+   237	
+   238	    case GeminiEventType.ToolCallRequest:
+   239	      ensureStreamStart(state, out);
+   240	      state.pendingToolNames.set(event.value.callId, event.value.name);
+   241	      out.push(
+   242	        makeEvent('tool_request', state, {
+   243	          requestId: event.value.callId,
+   244	          name: event.value.name,
+   245	          args: event.value.args,
+   246	          display: event.value.display,
+   247	        }),
+   248	      );
+   249	      break;
+   250	
+   251	    case GeminiEventType.ToolCallResponse: {
+   252	      ensureStreamStart(state, out);
+   253	      const data = buildToolResponseData(event.value);
+   254	      const display: ToolDisplay | undefined =
+   255	        event.value.display ??
+   256	        (event.value.resultDisplay
+   257	          ? {
+   258	              result: toolResultDisplayToDisplayContent(
+   259	                event.value.resultDisplay,
+   260	              ),
+   261	            }
+   262	          : undefined);
+   263	      out.push(
+   264	        makeEvent('tool_response', state, {
+   265	          requestId: event.value.callId,
+   266	          name: state.pendingToolNames.get(event.value.callId) ?? 'unknown',
+   267	          content: event.value.error
+   268	            ? [{ type: 'text', text: event.value.error.message }]
+   269	            : geminiPartsToContentParts(event.value.responseParts),
+   270	          isError: event.value.error !== undefined,
+   271	          ...(display ? { display } : {}),
+   272	          ...(data ? { data } : {}),
+   273	        }),
+   274	      );
+   275	      state.pendingToolNames.delete(event.value.callId);
+   276	      break;
+   277	    }
+   278	
+   279	    case GeminiEventType.ToolCallConfirmation:
+   280	      // Elicitations are handled separately by the session layer
+   281	      break;
+   282	
+   283	    // Internal concerns — no AgentEvent emitted
+   284	    case GeminiEventType.ChatCompressed:
+   285	    case GeminiEventType.Retry:
+   286	      break;
+   287	
+   288	    default:
+   289	      ((x: never) => {
+   290	        throw new Error(`Unhandled event type: ${JSON.stringify(x)}`);
+   291	      })(event);
+   292	  }
+   293	
+   294	  return out;
+   295	}
+   296	
+   297	// ---------------------------------------------------------------------------
+   298	// Finished Event Handling
+   299	// ---------------------------------------------------------------------------
+   300	
+### packages/core/src/agent/event-translator.test.ts
+     1	/**
+     2	 * @license
+     3	 * Copyright 2026 Google LLC
+     4	 * SPDX-License-Identifier: Apache-2.0
+     5	 */
+     6	
+     7	import { describe, expect, it, beforeEach } from 'vitest';
+     8	import { FinishReason } from '@google/genai';
+     9	import { ToolErrorType } from '../tools/tool-error.js';
+    10	import {
+    11	  translateEvent,
+    12	  createTranslationState,
+    13	  mapFinishReason,
+    14	  mapHttpToGrpcStatus,
+    15	  mapError,
+    16	  mapUsage,
+    17	  type TranslationState,
+    18	} from './event-translator.js';
+    19	import { GeminiEventType } from '../core/turn.js';
+    20	import type { ServerGeminiStreamEvent } from '../core/turn.js';
+    21	import type { AgentEvent } from './types.js';
+    22	
+    23	describe('createTranslationState', () => {
+    24	  it('creates state with default streamId', () => {
+    25	    const state = createTranslationState();
+    26	    expect(state.streamId).toBeDefined();
+    27	    expect(state.streamStartEmitted).toBe(false);
+    28	    expect(state.model).toBeUndefined();
+    29	    expect(state.eventCounter).toBe(0);
+    30	    expect(state.pendingToolNames.size).toBe(0);
+    31	  });
+    32	
+    33	  it('creates state with custom streamId', () => {
+    34	    const state = createTranslationState('custom-stream');
+    35	    expect(state.streamId).toBe('custom-stream');
+    36	  });
+    37	});
+    38	
+    39	describe('translateEvent', () => {
+    40	  let state: TranslationState;
+    41	
+    42	  beforeEach(() => {
+    43	    state = createTranslationState('test-stream');
+    44	  });
+    45	
+    46	  describe('Content events', () => {
+    47	    it('emits agent_start + message for first content event', () => {
+    48	      const event: ServerGeminiStreamEvent = {
+    49	        type: GeminiEventType.Content,
+    50	        value: 'Hello world',
+    51	      };
+    52	      const result = translateEvent(event, state);
+    53	      expect(result).toHaveLength(2);
+    54	      expect(result[0]?.type).toBe('agent_start');
+    55	      expect(result[1]?.type).toBe('message');
+    56	      const msg = result[1] as AgentEvent<'message'>;
+    57	      expect(msg.role).toBe('agent');
+    58	      expect(msg.content).toEqual([{ type: 'text', text: 'Hello world' }]);
+    59	    });
+    60	
+    61	    it('skips agent_start for subsequent content events', () => {
+    62	      state.streamStartEmitted = true;
+    63	      const event: ServerGeminiStreamEvent = {
+    64	        type: GeminiEventType.Content,
+    65	        value: 'more text',
+    66	      };
+    67	      const result = translateEvent(event, state);
+    68	      expect(result).toHaveLength(1);
+    69	      expect(result[0]?.type).toBe('message');
+    70	    });
+    71	  });
+    72	
+    73	  describe('Thought events', () => {
+    74	    it('emits thought content with metadata', () => {
+    75	      state.streamStartEmitted = true;
+    76	      const event: ServerGeminiStreamEvent = {
+    77	        type: GeminiEventType.Thought,
+    78	        value: { subject: 'Planning', description: 'I am thinking...' },
+    79	      };
+    80	      const result = translateEvent(event, state);
+    81	      expect(result).toHaveLength(1);
+    82	      const msg = result[0] as AgentEvent<'message'>;
+    83	      expect(msg.content).toEqual([
+    84	        { type: 'thought', thought: 'I am thinking...' },
+    85	      ]);
+    86	      expect(msg._meta?.['subject']).toBe('Planning');
+    87	    });
+    88	  });
+    89	
+    90	  describe('ToolCallRequest events', () => {
+    91	    it('emits tool_request and tracks pending tool name', () => {
+    92	      state.streamStartEmitted = true;
+    93	      const event: ServerGeminiStreamEvent = {
+    94	        type: GeminiEventType.ToolCallRequest,
+    95	        value: {
+    96	          callId: 'call-1',
+    97	          name: 'read_file',
+    98	          args: { path: '/tmp/test' },
+    99	          isClientInitiated: false,
+   100	          prompt_id: 'p1',
+   101	        },
+   102	      };
+   103	      const result = translateEvent(event, state);
+   104	      expect(result).toHaveLength(1);
+   105	      const req = result[0] as AgentEvent<'tool_request'>;
+   106	      expect(req.requestId).toBe('call-1');
+   107	      expect(req.name).toBe('read_file');
+   108	      expect(req.args).toEqual({ path: '/tmp/test' });
+   109	      expect(state.pendingToolNames.get('call-1')).toBe('read_file');
+   110	    });
+   111	  });
+   112	
+   113	  describe('ToolCallResponse events', () => {
+   114	    it('emits tool_response with content from responseParts', () => {
+   115	      state.streamStartEmitted = true;
+   116	      state.pendingToolNames.set('call-1', 'read_file');
+   117	      const event: ServerGeminiStreamEvent = {
+   118	        type: GeminiEventType.ToolCallResponse,
+   119	        value: {
+   120	          callId: 'call-1',
+   121	          responseParts: [{ text: 'file contents' }],
+   122	          resultDisplay: undefined,
+   123	          error: undefined,
+   124	          errorType: undefined,
+   125	        },
+   126	      };
+   127	      const result = translateEvent(event, state);
+   128	      expect(result).toHaveLength(1);
+   129	      const resp = result[0] as AgentEvent<'tool_response'>;
+   130	      expect(resp.requestId).toBe('call-1');
+   131	      expect(resp.name).toBe('read_file');
+   132	      expect(resp.content).toEqual([{ type: 'text', text: 'file contents' }]);
+   133	      expect(resp.isError).toBe(false);
+   134	      expect(state.pendingToolNames.has('call-1')).toBe(false);
+   135	    });
+   136	
+   137	    it('uses error.message for content when tool errored', () => {
+   138	      state.streamStartEmitted = true;
+   139	      state.pendingToolNames.set('call-2', 'write_file');
+   140	      const event: ServerGeminiStreamEvent = {
+   141	        type: GeminiEventType.ToolCallResponse,
+   142	        value: {
+   143	          callId: 'call-2',
+   144	          responseParts: [{ text: 'stale parts' }],
+   145	          resultDisplay: 'Permission denied',
+   146	          error: new Error('Permission denied to write'),
+   147	          errorType: ToolErrorType.PERMISSION_DENIED,
+   148	        },
+   149	      };
+   150	      const result = translateEvent(event, state);
+   151	      expect(result).toHaveLength(1);
+   152	      const resp = result[0] as AgentEvent<'tool_response'>;
+   153	      expect(resp.isError).toBe(true);
+   154	      // Should use error.message, not responseParts
+   155	      expect(resp.content).toEqual([
+   156	        { type: 'text', text: 'Permission denied to write' },
+   157	      ]);
+   158	      expect(resp.display?.result).toEqual({
+   159	        type: 'text',
+   160	        text: 'Permission denied',
+   161	      });
+   162	      expect(resp.data).toEqual({ errorType: 'permission_denied' });
+   163	    });
+   164	
+   165	    it('uses "unknown" name for untracked tool calls', () => {
+   166	      state.streamStartEmitted = true;
+   167	      const event: ServerGeminiStreamEvent = {
+   168	        type: GeminiEventType.ToolCallResponse,
+   169	        value: {
+   170	          callId: 'untracked',
+   171	          responseParts: [{ text: 'data' }],
+   172	          resultDisplay: undefined,
+   173	          error: undefined,
+   174	          errorType: undefined,
+   175	        },
+   176	      };
+   177	      const result = translateEvent(event, state);
+   178	      const resp = result[0] as AgentEvent<'tool_response'>;
+   179	      expect(resp.name).toBe('unknown');
+   180	    });
+   181	
+   182	    it('stringifies object resultDisplay correctly', () => {
+   183	      state.streamStartEmitted = true;
+   184	      state.pendingToolNames.set('call-3', 'diff_tool');
+   185	      const objectDisplay = {
+   186	        fileDiff: '@@ -1 +1 @@\n-a\n+b',
+   187	        fileName: 'test.txt',
+   188	        filePath: '/tmp/test.txt',
+   189	        originalContent: 'a',
+   190	        newContent: 'b',
+   191	      };
+   192	      const event: ServerGeminiStreamEvent = {
+   193	        type: GeminiEventType.ToolCallResponse,
+   194	        value: {
+   195	          callId: 'call-3',
+   196	          responseParts: [{ text: 'diff result' }],
+   197	          resultDisplay: objectDisplay,
+   198	          error: undefined,
+   199	          errorType: undefined,
+   200	        },
+   201	      };
+   202	      const result = translateEvent(event, state);
+   203	      const resp = result[0] as AgentEvent<'tool_response'>;
+   204	      expect(resp.display?.result).toEqual({
+   205	        type: 'diff',
+   206	        path: '/tmp/test.txt',
+   207	        beforeText: 'a',
+   208	        afterText: 'b',
+   209	      });
+   210	    });
+   211	
+   212	    it('passes through string resultDisplay as-is', () => {
+   213	      state.streamStartEmitted = true;
+   214	      state.pendingToolNames.set('call-4', 'shell');
+   215	      const event: ServerGeminiStreamEvent = {
+   216	        type: GeminiEventType.ToolCallResponse,
+   217	        value: {
+   218	          callId: 'call-4',
+   219	          responseParts: [{ text: 'output' }],
+   220	          resultDisplay: 'Command output text',
+   221	          error: undefined,
+   222	          errorType: undefined,
+   223	        },
+   224	      };
+   225	      const result = translateEvent(event, state);
+   226	      const resp = result[0] as AgentEvent<'tool_response'>;
+   227	      expect(resp.display?.result).toEqual({
+   228	        type: 'text',
+   229	        text: 'Command output text',
+   230	      });
+   231	    });
+   232	
+   233	    it('preserves outputFile and contentLength in data', () => {
+   234	      state.streamStartEmitted = true;
+   235	      state.pendingToolNames.set('call-5', 'write_file');
+   236	      const event: ServerGeminiStreamEvent = {
+   237	        type: GeminiEventType.ToolCallResponse,
+   238	        value: {
+   239	          callId: 'call-5',
+   240	          responseParts: [{ text: 'written' }],
+   241	          resultDisplay: undefined,
+   242	          error: undefined,
+   243	          errorType: undefined,
+   244	          outputFile: '/tmp/out.txt',
+   245	          contentLength: 42,
+   246	        },
+   247	      };
+   248	      const result = translateEvent(event, state);
+   249	      const resp = result[0] as AgentEvent<'tool_response'>;
+   250	      expect(resp.data?.['outputFile']).toBe('/tmp/out.txt');
+   251	      expect(resp.data?.['contentLength']).toBe(42);
+   252	    });
+   253	
+   254	    it('handles multi-part responses (text + inlineData)', () => {
+   255	      state.streamStartEmitted = true;
+   256	      state.pendingToolNames.set('call-6', 'screenshot');
+   257	      const event: ServerGeminiStreamEvent = {
+   258	        type: GeminiEventType.ToolCallResponse,
+   259	        value: {
+   260	          callId: 'call-6',
+   261	          responseParts: [
+   262	            { text: 'Here is the screenshot' },
+   263	            { inlineData: { data: 'base64img', mimeType: 'image/png' } },
+   264	          ],
+   265	          resultDisplay: undefined,
+   266	          error: undefined,
+   267	          errorType: undefined,
+   268	        },
+   269	      };
+   270	      const result = translateEvent(event, state);
+   271	      const resp = result[0] as AgentEvent<'tool_response'>;
+   272	      expect(resp.content).toEqual([
+   273	        { type: 'text', text: 'Here is the screenshot' },
+   274	        { type: 'media', data: 'base64img', mimeType: 'image/png' },
+   275	      ]);
+   276	      expect(resp.isError).toBe(false);
+   277	    });
+   278	  });
+   279	
+   280	  describe('Error events', () => {
+   281	    it('emits error event for structured errors', () => {
+   282	      state.streamStartEmitted = true;
+   283	      const event: ServerGeminiStreamEvent = {
+   284	        type: GeminiEventType.Error,
+   285	        value: { error: { message: 'Rate limited', status: 429 } },
+   286	      };
+   287	      const result = translateEvent(event, state);
+   288	      expect(result).toHaveLength(1);
+   289	      const err = result[0] as AgentEvent<'error'>;
+   290	      expect(err.status).toBe('RESOURCE_EXHAUSTED');
+   291	      expect(err.message).toBe('Rate limited');
+   292	      expect(err.fatal).toBe(true);
+   293	    });
+   294	
+   295	    it('emits error event for Error instances', () => {
+   296	      state.streamStartEmitted = true;
+   297	      const event: ServerGeminiStreamEvent = {
+   298	        type: GeminiEventType.Error,
+   299	        value: { error: new Error('Something broke') },
+   300	      };
+### packages/core/src/utils/events.ts
+     1	/**
+     2	 * @license
+     3	 * Copyright 2026 Google LLC
+     4	 * SPDX-License-Identifier: Apache-2.0
+     5	 */
+     6	
+     7	import { EventEmitter } from 'node:events';
+     8	import type { AgentDefinition } from '../agents/types.js';
+     9	import type { McpClient } from '../tools/mcp-client.js';
+    10	import type { ExtensionEvents } from './extensionLoader.js';
+    11	import type { EditorType } from './editor.js';
+    12	import type {
+    13	  TokenStorageInitializationEvent,
+    14	  KeychainAvailabilityEvent,
+    15	} from '../telemetry/types.js';
+    16	import { debugLogger } from './debugLogger.js';
+    17	import type { ApprovalMode } from '../policy/types.js';
+    18	
+    19	/**
+    20	 * Defines the severity level for user-facing feedback.
+    21	 * This maps loosely to UI `MessageType`
+    22	 */
+    23	export type FeedbackSeverity = 'info' | 'warning' | 'error';
+    24	
+    25	/**
+    26	 * Payload for the 'user-feedback' event.
+    27	 */
+    28	export interface UserFeedbackPayload {
+    29	  /**
+    30	   * The severity level determines how the message is rendered in the UI
+    31	   * (e.g. colored text, specific icon).
+    32	   */
+    33	  severity: FeedbackSeverity;
+    34	  /**
+    35	   * The main message to display to the user in the chat history or stdout.
+    36	   */
+    37	  message: string;
+    38	  /**
+    39	   * The original error object, if applicable.
+    40	   * Listeners can use this to extract stack traces for debug logging
+    41	   * or verbose output, while keeping the 'message' field clean for end users.
+    42	   */
+    43	  error?: unknown;
+    44	}
+    45	
+    46	/**
+    47	 * Payload for the 'model-changed' event.
+    48	 */
+    49	export interface ModelChangedPayload {
+    50	  /**
+    51	   * The new model that was set.
+    52	   */
+    53	  model: string;
+    54	}
+    55	
+    56	/**
+    57	 * Payload for the 'approval-mode-changed' event.
+    58	 */
+    59	export interface ApprovalModeChangedPayload {
+    60	  /**
+    61	   * The session ID associated with the mode change.
+    62	   */
+    63	  sessionId: string;
+    64	  /**
+    65	   * The new approval mode.
+    66	   */
+    67	  mode: ApprovalMode;
+    68	}
+    69	
+    70	/**
+    71	 * Payload for the 'console-log' event.
+    72	 */
+    73	export interface ConsoleLogPayload {
+    74	  type: 'log' | 'warn' | 'error' | 'debug' | 'info';
+    75	  content: string;
+    76	}
+    77	
+    78	/**
+    79	 * Payload for the 'output' event.
+    80	 */
+    81	export interface OutputPayload {
+    82	  isStderr: boolean;
+    83	  chunk: Uint8Array | string;
+    84	  encoding?: BufferEncoding;
+    85	}
+    86	
+    87	/**
+    88	 * Payload for the 'memory-changed' event.
+    89	 */
+    90	export interface MemoryChangedPayload {
+    91	  fileCount: number;
+    92	}
+    93	
+    94	/**
+    95	 * Base payload for hook-related events.
+    96	 */
+    97	export interface HookPayload {
+    98	  hookName: string;
+    99	  eventName: string;
+   100	}
+   101	
+   102	/**
+   103	 * Payload for the 'hook-start' event.
+   104	 */
+   105	export interface HookStartPayload extends HookPayload {
+   106	  /**
+   107	   * The source of the hook configuration.
+   108	   */
+   109	  source?: string;
+   110	  /**
+   111	   * The 1-based index of the current hook in the execution sequence.
+   112	   */
+   113	  hookIndex?: number;
+   114	  /**
+   115	   * The total number of hooks in the current execution sequence.
+   116	   */
+   117	  totalHooks?: number;
+   118	}
+   119	
+   120	/**
+   121	 * Payload for the 'hook-end' event.
+   122	 */
+   123	export interface HookEndPayload extends HookPayload {
+   124	  success: boolean;
+   125	}
+   126	
+   127	/**
+   128	 * Payload for the 'hook-system-message' event.
+   129	 */
+   130	export interface HookSystemMessagePayload extends HookPayload {
+   131	  message: string;
+   132	}
+   133	
+   134	/**
+   135	 * Payload for the 'retry-attempt' event.
+   136	 */
+   137	export interface RetryAttemptPayload {
+   138	  attempt: number;
+   139	  maxAttempts: number;
+   140	  delayMs: number;
+   141	  error?: string;
+   142	  model: string;
+   143	}
+   144	
+   145	/**
+   146	 * Payload for the 'consent-request' event.
+   147	 */
+   148	export interface ConsentRequestPayload {
+   149	  prompt: string;
+   150	  onConfirm: (confirmed: boolean) => void;
+   151	}
+   152	
+   153	/**
+   154	 * Payload for the 'mcp-progress' event.
+   155	 */
+   156	export interface McpProgressPayload {
+   157	  serverName: string;
+   158	  callId: string;
+   159	  progressToken: string | number;
+   160	  progress: number;
+   161	  total?: number;
+   162	  message?: string;
+   163	}
+   164	
+   165	/**
+   166	 * Payload for the 'agents-discovered' event.
+   167	 */
+   168	export interface AgentsDiscoveredPayload {
+   169	  agents: AgentDefinition[];
+   170	}
+   171	
+   172	export interface SlashCommandConflict {
+   173	  name: string;
+   174	  renamedTo: string;
+   175	  loserExtensionName?: string;
+   176	  winnerExtensionName?: string;
+   177	  loserMcpServerName?: string;
+   178	  winnerMcpServerName?: string;
+   179	  loserKind?: string;
+   180	  winnerKind?: string;
+   181	}
+   182	
+   183	export interface SlashCommandConflictsPayload {
+   184	  conflicts: SlashCommandConflict[];
+   185	}
+   186	
+   187	/**
+   188	 * Payload for the 'quota-changed' event.
+   189	 */
+   190	export interface QuotaChangedPayload {
+   191	  remaining: number | undefined;
+   192	  limit: number | undefined;
+   193	  resetTime?: string;
+   194	}
+   195	
+   196	export enum CoreEvent {
+   197	  UserFeedback = 'user-feedback',
+   198	  ModelChanged = 'model-changed',
+   199	  ApprovalModeChanged = 'approval-mode-changed',
+   200	  ConsoleLog = 'console-log',
+   201	  Output = 'output',
+   202	  MemoryChanged = 'memory-changed',
+   203	  ExternalEditorClosed = 'external-editor-closed',
+   204	  McpClientUpdate = 'mcp-client-update',
+   205	  OauthDisplayMessage = 'oauth-display-message',
+   206	  SettingsChanged = 'settings-changed',
+   207	  HookStart = 'hook-start',
+   208	  HookEnd = 'hook-end',
+   209	  HookSystemMessage = 'hook-system-message',
+   210	  AgentsRefreshed = 'agents-refreshed',
+   211	  AdminSettingsChanged = 'admin-settings-changed',
+   212	  RetryAttempt = 'retry-attempt',
+   213	  ConsentRequest = 'consent-request',
+   214	  McpProgress = 'mcp-progress',
+   215	  AgentsDiscovered = 'agents-discovered',
+   216	  RequestEditorSelection = 'request-editor-selection',
+   217	  EditorSelected = 'editor-selected',
+   218	  SlashCommandConflicts = 'slash-command-conflicts',
+   219	  QuotaChanged = 'quota-changed',
+   220	  TelemetryKeychainAvailability = 'telemetry-keychain-availability',
+   221	  TelemetryTokenStorageType = 'telemetry-token-storage-type',
+   222	}
+   223	
+   224	/**
+   225	 * Payload for the 'editor-selected' event.
+   226	 */
+   227	export interface EditorSelectedPayload {
+   228	  editor?: EditorType;
+   229	}
+   230	
+   231	export interface CoreEvents extends ExtensionEvents {
+   232	  [CoreEvent.UserFeedback]: [UserFeedbackPayload];
+   233	  [CoreEvent.ModelChanged]: [ModelChangedPayload];
+   234	  [CoreEvent.ApprovalModeChanged]: [ApprovalModeChangedPayload];
+   235	  [CoreEvent.ConsoleLog]: [ConsoleLogPayload];
+   236	  [CoreEvent.Output]: [OutputPayload];
+   237	  [CoreEvent.MemoryChanged]: [MemoryChangedPayload];
+   238	  [CoreEvent.QuotaChanged]: [QuotaChangedPayload];
+   239	  [CoreEvent.ExternalEditorClosed]: never[];
+   240	  [CoreEvent.McpClientUpdate]: Array<Map<string, McpClient> | never>;
+   241	  [CoreEvent.OauthDisplayMessage]: string[];
+   242	  [CoreEvent.SettingsChanged]: never[];
+   243	  [CoreEvent.HookStart]: [HookStartPayload];
+   244	  [CoreEvent.HookEnd]: [HookEndPayload];
+   245	  [CoreEvent.HookSystemMessage]: [HookSystemMessagePayload];
+   246	  [CoreEvent.AgentsRefreshed]: never[];
+   247	  [CoreEvent.AdminSettingsChanged]: never[];
+   248	  [CoreEvent.RetryAttempt]: [RetryAttemptPayload];
+   249	  [CoreEvent.ConsentRequest]: [ConsentRequestPayload];
+   250	  [CoreEvent.McpProgress]: [McpProgressPayload];
+   251	  [CoreEvent.AgentsDiscovered]: [AgentsDiscoveredPayload];
+   252	  [CoreEvent.RequestEditorSelection]: never[];
+   253	  [CoreEvent.EditorSelected]: [EditorSelectedPayload];
+   254	  [CoreEvent.SlashCommandConflicts]: [SlashCommandConflictsPayload];
+   255	  [CoreEvent.TelemetryKeychainAvailability]: [KeychainAvailabilityEvent];
+   256	  [CoreEvent.TelemetryTokenStorageType]: [TokenStorageInitializationEvent];
+   257	}
+   258	
+   259	type EventBacklogItem = {
+   260	  [K in keyof CoreEvents]: {
+   261	    event: K;
+   262	    args: CoreEvents[K];
+   263	  };
+   264	}[keyof CoreEvents];
+   265	
+   266	export class CoreEventEmitter extends EventEmitter<CoreEvents> {
+   267	  private _eventBacklog: EventBacklogItem[] = [];
+   268	  private _backlogHead = 0;
+   269	  private static readonly MAX_BACKLOG_SIZE = 10000;
+   270	
+   271	  constructor() {
+   272	    super();
+   273	  }
+   274	
+   275	  private _emitOrQueue<K extends keyof CoreEvents>(
+   276	    event: K,
+   277	    ...args: CoreEvents[K]
+   278	  ): void {
+   279	    if (this.listenerCount(event) === 0) {
+   280	      const backlogSize = this._eventBacklog.length - this._backlogHead;
+   281	      if (backlogSize >= CoreEventEmitter.MAX_BACKLOG_SIZE) {
+   282	        // Evict oldest entry. Use a head pointer instead of shift() to avoid
+   283	        // O(n) array reindexing on every eviction at capacity.
+   284	        (this._eventBacklog as unknown[])[this._backlogHead] = undefined;
+   285	        this._backlogHead++;
+   286	        // Compact once dead entries exceed half capacity to bound memory
+   287	        if (this._backlogHead >= CoreEventEmitter.MAX_BACKLOG_SIZE / 2) {
+   288	          this._eventBacklog = this._eventBacklog.slice(this._backlogHead);
+   289	          this._backlogHead = 0;
+   290	        }
+   291	      }
+   292	      // eslint-disable-next-line @typescript-eslint/no-unsafe-type-assertion
+   293	      this._eventBacklog.push({ event, args } as EventBacklogItem);
+   294	    } else {
+   295	      // eslint-disable-next-line @typescript-eslint/no-unsafe-type-assertion
+   296	      (this.emit as (event: K, ...args: CoreEvents[K]) => boolean)(
+   297	        event,
+   298	        ...args,
+   299	      );
+   300	    }
+### packages/core/src/utils/events.test.ts
+     1	/**
+     2	 * @license
+     3	 * Copyright 2026 Google LLC
+     4	 * SPDX-License-Identifier: Apache-2.0
+     5	 */
+     6	
+     7	import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+     8	import {
+     9	  CoreEventEmitter,
+    10	  CoreEvent,
+    11	  coreEvents,
+    12	  type CoreEvents,
+    13	  type UserFeedbackPayload,
+    14	  type McpProgressPayload,
+    15	} from './events.js';
+    16	
+    17	vi.mock('./debugLogger.js', () => ({
+    18	  debugLogger: { log: vi.fn() },
+    19	}));
+    20	
+    21	describe('CoreEventEmitter', () => {
+    22	  let events: CoreEventEmitter;
+    23	
+    24	  beforeEach(() => {
+    25	    events = new CoreEventEmitter();
+    26	  });
+    27	
+    28	  it('should emit feedback immediately when a listener is present', () => {
+    29	    const listener = vi.fn();
+    30	    events.on(CoreEvent.UserFeedback, listener);
+    31	
+    32	    const payload = {
+    33	      severity: 'info' as const,
+    34	      message: 'Test message',
+    35	    };
+    36	
+    37	    events.emitFeedback(payload.severity, payload.message);
+    38	
+    39	    expect(listener).toHaveBeenCalledTimes(1);
+    40	    expect(listener).toHaveBeenCalledWith(expect.objectContaining(payload));
+    41	  });
+    42	
+    43	  it('should buffer feedback when no listener is present', () => {
+    44	    const listener = vi.fn();
+    45	    const payload = {
+    46	      severity: 'warning' as const,
+    47	      message: 'Buffered message',
+    48	    };
+    49	
+    50	    // Emit while no listeners attached
+    51	    events.emitFeedback(payload.severity, payload.message);
+    52	    expect(listener).not.toHaveBeenCalled();
+    53	
+    54	    // Attach listener and drain
+    55	    events.on(CoreEvent.UserFeedback, listener);
+    56	    events.drainBacklogs();
+    57	
+    58	    expect(listener).toHaveBeenCalledTimes(1);
+    59	    expect(listener).toHaveBeenCalledWith(expect.objectContaining(payload));
+    60	  });
+    61	
+    62	  it('should respect the backlog size limit and maintain FIFO order', () => {
+    63	    const listener = vi.fn();
+    64	    const MAX_BACKLOG_SIZE = 10000;
+    65	
+    66	    for (let i = 0; i < MAX_BACKLOG_SIZE + 10; i++) {
+    67	      events.emitFeedback('info', `Message ${i}`);
+    68	    }
+    69	
+    70	    events.on(CoreEvent.UserFeedback, listener);
+    71	    events.drainBacklogs();
+    72	
+    73	    expect(listener).toHaveBeenCalledTimes(MAX_BACKLOG_SIZE);
+    74	    // Verify strictly that the FIRST call was Message 10 (0-9 dropped)
+    75	    expect(listener.mock.calls[0][0]).toMatchObject({ message: 'Message 10' });
+    76	    // Verify strictly that the LAST call was Message 109
+    77	    expect(listener.mock.lastCall?.[0]).toMatchObject({
+    78	      message: `Message ${MAX_BACKLOG_SIZE + 9}`,
+    79	    });
+    80	  });
+    81	
+    82	  it('should clear the backlog after draining', () => {
+    83	    const listener = vi.fn();
+    84	    events.emitFeedback('error', 'Test error');
+    85	
+    86	    events.on(CoreEvent.UserFeedback, listener);
+    87	    events.drainBacklogs();
+    88	    expect(listener).toHaveBeenCalledTimes(1);
+    89	
+    90	    listener.mockClear();
+    91	    events.drainBacklogs();
+    92	    expect(listener).not.toHaveBeenCalled();
+    93	  });
+    94	
+    95	  it('should include optional error object in payload', () => {
+    96	    const listener = vi.fn();
+    97	    events.on(CoreEvent.UserFeedback, listener);
+    98	
+    99	    const error = new Error('Original error');
+   100	    events.emitFeedback('error', 'Something went wrong', error);
+   101	
+   102	    expect(listener).toHaveBeenCalledWith(
+   103	      expect.objectContaining({
+   104	        severity: 'error',
+   105	        message: 'Something went wrong',
+   106	        error,
+   107	      }),
+   108	    );
+   109	  });
+   110	
+   111	  it('should handle multiple listeners correctly', () => {
+   112	    const listenerA = vi.fn();
+   113	    const listenerB = vi.fn();
+   114	
+   115	    events.on(CoreEvent.UserFeedback, listenerA);
+   116	    events.on(CoreEvent.UserFeedback, listenerB);
+   117	
+   118	    events.emitFeedback('info', 'Broadcast message');
+   119	
+   120	    expect(listenerA).toHaveBeenCalledTimes(1);
+   121	    expect(listenerB).toHaveBeenCalledTimes(1);
+   122	  });
+   123	
+   124	  it('should stop receiving events after off() is called', () => {
+   125	    const listener = vi.fn();
+   126	    events.on(CoreEvent.UserFeedback, listener);
+   127	
+   128	    events.emitFeedback('info', 'First message');
+   129	    expect(listener).toHaveBeenCalledTimes(1);
+   130	
+   131	    events.off(CoreEvent.UserFeedback, listener);
+   132	    events.emitFeedback('info', 'Second message');
+   133	    expect(listener).toHaveBeenCalledTimes(1); // Still 1
+   134	  });
+   135	
+   136	  it('should handle re-entrant feedback emission during draining safely', () => {
+   137	    events.emitFeedback('info', 'Buffered 1');
+   138	    events.emitFeedback('info', 'Buffered 2');
+   139	
+   140	    const listener = vi.fn((payload: UserFeedbackPayload) => {
+   141	      // When 'Buffered 1' is received, immediately emit another event.
+   142	      if (payload.message === 'Buffered 1') {
+   143	        events.emitFeedback('warning', 'Re-entrant message');
+   144	      }
+   145	    });
+   146	
+   147	    events.on(CoreEvent.UserFeedback, listener);
+   148	    events.drainBacklogs();
+   149	
+   150	    // Expectation with atomic snapshot:
+   151	    // 1. loop starts with ['Buffered 1', 'Buffered 2']
+   152	    // 2. emits 'Buffered 1'
+   153	    // 3. listener fires for 'Buffered 1', calls emitFeedback('Re-entrant')
+   154	    // 4. emitFeedback sees listener attached, emits 'Re-entrant' synchronously
+   155	    // 5. listener fires for 'Re-entrant'
+   156	    // 6. loop continues, emits 'Buffered 2'
+   157	    // 7. listener fires for 'Buffered 2'
+   158	
+   159	    expect(listener).toHaveBeenCalledTimes(3);
+   160	    expect(listener.mock.calls[0][0]).toMatchObject({ message: 'Buffered 1' });
+   161	    expect(listener.mock.calls[1][0]).toMatchObject({
+   162	      message: 'Re-entrant message',
+   163	    });
+   164	    expect(listener.mock.calls[2][0]).toMatchObject({ message: 'Buffered 2' });
+   165	  });
+   166	
+   167	  describe('ConsoleLog Event', () => {
+   168	    it('should emit console log immediately when a listener is present', () => {
+   169	      const listener = vi.fn();
+   170	      events.on(CoreEvent.ConsoleLog, listener);
+   171	
+   172	      const payload = {
+   173	        type: 'info' as const,
+   174	        content: 'Test log',
+   175	      };
+   176	
+   177	      events.emitConsoleLog(payload.type, payload.content);
+   178	
+   179	      expect(listener).toHaveBeenCalledTimes(1);
+   180	      expect(listener).toHaveBeenCalledWith(expect.objectContaining(payload));
+   181	    });
+   182	
+   183	    it('should buffer console logs when no listener is present', () => {
+   184	      const listener = vi.fn();
+   185	      const payload = {
+   186	        type: 'warn' as const,
+   187	        content: 'Buffered log',
+   188	      };
+   189	
+   190	      // Emit while no listeners attached
+   191	      events.emitConsoleLog(payload.type, payload.content);
+   192	      expect(listener).not.toHaveBeenCalled();
+   193	
+   194	      // Attach listener and drain
+   195	      events.on(CoreEvent.ConsoleLog, listener);
+   196	      events.drainBacklogs();
+   197	
+   198	      expect(listener).toHaveBeenCalledTimes(1);
+   199	      expect(listener).toHaveBeenCalledWith(expect.objectContaining(payload));
+   200	    });
+   201	
+   202	    it('should respect the backlog size limit for console logs', () => {
+   203	      const listener = vi.fn();
+   204	      const MAX_BACKLOG_SIZE = 10000;
+   205	
+   206	      for (let i = 0; i < MAX_BACKLOG_SIZE + 10; i++) {
+   207	        events.emitConsoleLog('debug', `Log ${i}`);
+   208	      }
+   209	
+   210	      events.on(CoreEvent.ConsoleLog, listener);
+   211	      events.drainBacklogs();
+   212	
+   213	      expect(listener).toHaveBeenCalledTimes(MAX_BACKLOG_SIZE);
+   214	      // Verify strictly that the FIRST call was Log 10 (0-9 dropped)
+   215	      expect(listener.mock.calls[0][0]).toMatchObject({ content: 'Log 10' });
+   216	    });
+   217	  });
+   218	
+   219	  describe('Output Event', () => {
+   220	    it('should emit output immediately when a listener is present', () => {
+   221	      const listener = vi.fn();
+   222	      events.on(CoreEvent.Output, listener);
+   223	
+   224	      const payload = {
+   225	        isStderr: false,
+   226	        chunk: 'Test output',
+   227	        encoding: 'utf8' as BufferEncoding,
+   228	      };
+   229	
+   230	      events.emitOutput(payload.isStderr, payload.chunk, payload.encoding);
+   231	
+   232	      expect(listener).toHaveBeenCalledTimes(1);
+   233	      expect(listener).toHaveBeenCalledWith(expect.objectContaining(payload));
+   234	    });
+   235	
+   236	    it('should buffer output when no listener is present', () => {
+   237	      const listener = vi.fn();
+   238	      const payload = {
+   239	        isStderr: true,
+   240	        chunk: 'Buffered output',
+   241	      };
+   242	
+   243	      // Emit while no listeners attached
+   244	      events.emitOutput(payload.isStderr, payload.chunk);
+   245	      expect(listener).not.toHaveBeenCalled();
+   246	
+   247	      // Attach listener and drain
+   248	      events.on(CoreEvent.Output, listener);
+   249	      events.drainBacklogs();
+   250	
+   251	      expect(listener).toHaveBeenCalledTimes(1);
+   252	      expect(listener).toHaveBeenCalledWith(expect.objectContaining(payload));
+   253	    });
+   254	
+   255	    it('should respect the backlog size limit for output', () => {
+   256	      const listener = vi.fn();
+   257	      const MAX_BACKLOG_SIZE = 10000;
+   258	
+   259	      for (let i = 0; i < MAX_BACKLOG_SIZE + 10; i++) {
+   260	        events.emitOutput(false, `Output ${i}`);
+   261	      }
+   262	
+   263	      events.on(CoreEvent.Output, listener);
+   264	      events.drainBacklogs();
+   265	
+   266	      expect(listener).toHaveBeenCalledTimes(MAX_BACKLOG_SIZE);
+   267	      // Verify strictly that the FIRST call was Output 10 (0-9 dropped)
+   268	      expect(listener.mock.calls[0][0]).toMatchObject({ chunk: 'Output 10' });
+   269	    });
+   270	  });
+   271	
+   272	  describe('drainBacklogs Transformation', () => {
+   273	    it('should transform events during drain', () => {
+   274	      const listener = vi.fn();
+   275	      events.emitOutput(false, 'stdout chunk');
+   276	      events.emitFeedback('info', 'info message');
+   277	
+   278	      events.on(CoreEvent.Output, listener);
+   279	      events.on(CoreEvent.UserFeedback, listener);
+   280	
+   281	      events.drainBacklogs(
+   282	        <K extends keyof CoreEvents>(event: K, args: CoreEvents[K]) => {
+   283	          if (event === (CoreEvent.Output as string)) {
+   284	            const payload = args[0] as { isStderr: boolean; chunk: string };
+   285	            return {
+   286	              event,
+   287	              args: [
+   288	                { ...payload, isStderr: true },
+   289	              ] as unknown as CoreEvents[K],
+   290	            };
+   291	          }
+   292	          return { event, args };
+   293	        },
+   294	      );
+   295	
+   296	      expect(listener).toHaveBeenCalledTimes(2);
+   297	      expect(listener).toHaveBeenCalledWith(
+   298	        expect.objectContaining({ isStderr: true, chunk: 'stdout chunk' }),
+   299	      );
+   300	      expect(listener).toHaveBeenCalledWith(
+### packages/core/src/telemetry/tool-call-decision.ts
+     1	/**
+     2	 * @license
+     3	 * Copyright 2025 Google LLC
+     4	 * SPDX-License-Identifier: Apache-2.0
+     5	 */
+     6	
+     7	import { ToolConfirmationOutcome } from '../tools/tools.js';
+     8	
+     9	export enum ToolCallDecision {
+    10	  ACCEPT = 'accept',
+    11	  REJECT = 'reject',
+    12	  MODIFY = 'modify',
+    13	  AUTO_ACCEPT = 'auto_accept',
+    14	}
+    15	
+    16	export function getDecisionFromOutcome(
+    17	  outcome: ToolConfirmationOutcome,
+    18	): ToolCallDecision {
+    19	  switch (outcome) {
+    20	    case ToolConfirmationOutcome.ProceedOnce:
+    21	      return ToolCallDecision.ACCEPT;
+    22	    case ToolConfirmationOutcome.ProceedAlways:
+    23	    case ToolConfirmationOutcome.ProceedAlwaysServer:
+    24	    case ToolConfirmationOutcome.ProceedAlwaysTool:
+    25	      return ToolCallDecision.AUTO_ACCEPT;
+    26	    case ToolConfirmationOutcome.ModifyWithEditor:
+    27	      return ToolCallDecision.MODIFY;
+    28	    case ToolConfirmationOutcome.Cancel:
+    29	    default:
+    30	      return ToolCallDecision.REJECT;
+    31	  }
+    32	}
+### packages/core/src/telemetry/activity-types.ts
+     1	/**
+     2	 * @license
+     3	 * Copyright 2025 Google LLC
+     4	 * SPDX-License-Identifier: Apache-2.0
+     5	 */
+     6	
+     7	/**
+     8	 * Types of user activities that can be tracked
+     9	 */
+    10	export enum ActivityType {
+    11	  USER_INPUT_START = 'user_input_start',
+    12	  USER_INPUT_END = 'user_input_end',
+    13	  MESSAGE_ADDED = 'message_added',
+    14	  TOOL_CALL_SCHEDULED = 'tool_call_scheduled',
+    15	  TOOL_CALL_COMPLETED = 'tool_call_completed',
+    16	  STREAM_START = 'stream_start',
+    17	  STREAM_END = 'stream_end',
+    18	  HISTORY_UPDATED = 'history_updated',
+    19	  MANUAL_TRIGGER = 'manual_trigger',
+    20	}
+### packages/core/src/telemetry/loggers.ts
+     1	/**
+     2	 * @license
+     3	 * Copyright 2025 Google LLC
+     4	 * SPDX-License-Identifier: Apache-2.0
+     5	 */
+     6	
+     7	import { logs, type LogRecord } from '@opentelemetry/api-logs';
+     8	import type { Config } from '../config/config.js';
+     9	import { SERVICE_NAME } from './constants.js';
+    10	import {
+    11	  EVENT_API_ERROR,
+    12	  EVENT_API_RESPONSE,
+    13	  EVENT_TOOL_CALL,
+    14	  EVENT_REWIND,
+    15	  type ApiErrorEvent,
+    16	  type ApiRequestEvent,
+    17	  type ApiResponseEvent,
+    18	  type FileOperationEvent,
+    19	  type IdeConnectionEvent,
+    20	  type StartSessionEvent,
+    21	  type ToolCallEvent,
+    22	  type UserPromptEvent,
+    23	  type FlashFallbackEvent,
+    24	  type NextSpeakerCheckEvent,
+    25	  type LoopDetectedEvent,
+    26	  type LoopDetectionDisabledEvent,
+    27	  type SlashCommandEvent,
+    28	  type RewindEvent,
+    29	  type ConversationFinishedEvent,
+    30	  type ChatCompressionEvent,
+    31	  type MalformedJsonResponseEvent,
+    32	  type InvalidChunkEvent,
+    33	  type ContentRetryEvent,
+    34	  type ContentRetryFailureEvent,
+    35	  type NetworkRetryAttemptEvent,
+    36	  type RipgrepFallbackEvent,
+    37	  type ToolOutputTruncatedEvent,
+    38	  type ModelRoutingEvent,
+    39	  type ExtensionDisableEvent,
+    40	  type ExtensionEnableEvent,
+    41	  type ExtensionUninstallEvent,
+    42	  type ExtensionInstallEvent,
+    43	  type ModelSlashCommandEvent,
+    44	  type EditStrategyEvent,
+    45	  type EditCorrectionEvent,
+    46	  type AgentStartEvent,
+    47	  type AgentFinishEvent,
+    48	  type RecoveryAttemptEvent,
+    49	  type WebFetchFallbackAttemptEvent,
+    50	  type ExtensionUpdateEvent,
+    51	  type ApprovalModeSwitchEvent,
+    52	  type ApprovalModeDurationEvent,
+    53	  type HookCallEvent,
+    54	  type StartupStatsEvent,
+    55	  type LlmLoopCheckEvent,
+    56	  type PlanExecutionEvent,
+    57	  type ToolOutputMaskingEvent,
+    58	  type KeychainAvailabilityEvent,
+    59	  type TokenStorageInitializationEvent,
+    60	  type OnboardingStartEvent,
+    61	  type OnboardingSuccessEvent,
+    62	} from './types.js';
+    63	import {
+    64	  recordApiErrorMetrics,
+    65	  recordToolCallMetrics,
+    66	  recordChatCompressionMetrics,
+    67	  recordFileOperationMetric,
+    68	  recordRetryAttemptMetrics,
+    69	  recordContentRetry,
+    70	  recordContentRetryFailure,
+    71	  recordModelRoutingMetrics,
+    72	  recordModelSlashCommand,
+    73	  getConventionAttributes,
+    74	  recordTokenUsageMetrics,
+    75	  recordApiResponseMetrics,
+    76	  recordAgentRunMetrics,
+    77	  recordRecoveryAttemptMetrics,
+    78	  recordLinesChanged,
+    79	  recordHookCallMetrics,
+    80	  recordPlanExecution,
+    81	  recordKeychainAvailability,
+    82	  recordTokenStorageInitialization,
+    83	  recordInvalidChunk,
+    84	  recordOnboardingStart,
+    85	  recordOnboardingSuccess,
+    86	  recordBrowserAgentConnection,
+    87	  recordBrowserAgentVisionStatus,
+    88	  recordBrowserAgentTaskOutcome,
+    89	  recordBrowserAgentCleanup,
+    90	} from './metrics.js';
+    91	import { bufferTelemetryEvent } from './sdk.js';
+    92	import { uiTelemetryService, type UiEvent } from './uiTelemetry.js';
+    93	import { ClearcutLogger } from './clearcut-logger/clearcut-logger.js';
+    94	import { debugLogger } from '../utils/debugLogger.js';
+    95	import type { BillingTelemetryEvent } from './billingEvents.js';
+    96	import {
+    97	  CreditsUsedEvent,
+    98	  OverageOptionSelectedEvent,
+    99	  EmptyWalletMenuShownEvent,
+   100	  CreditPurchaseClickEvent,
+   101	} from './billingEvents.js';
+   102	
+   103	export function logCliConfiguration(
+   104	  config: Config,
+   105	  event: StartSessionEvent,
+   106	): void {
+   107	  void ClearcutLogger.getInstance(config)?.logStartSessionEvent(event);
+   108	  bufferTelemetryEvent(() => {
+   109	    // Wait for experiments to load before emitting so we capture experimentIds
+   110	    void config
+   111	      .getExperimentsAsync()
+   112	      .then(() => {
+   113	        const logger = logs.getLogger(SERVICE_NAME);
+   114	        const logRecord: LogRecord = {
+   115	          body: event.toLogBody(),
+   116	          attributes: event.toOpenTelemetryAttributes(config),
+   117	        };
+   118	        logger.emit(logRecord);
+   119	      })
+   120	      .catch((e: unknown) => {
+   121	        debugLogger.error('Failed to log telemetry event', e);
+   122	      });
+   123	  });
+   124	}
+   125	
+   126	export function logUserPrompt(config: Config, event: UserPromptEvent): void {
+   127	  ClearcutLogger.getInstance(config)?.logNewPromptEvent(event);
+   128	  bufferTelemetryEvent(() => {
+   129	    const logger = logs.getLogger(SERVICE_NAME);
+   130	
+   131	    const logRecord: LogRecord = {
+   132	      body: event.toLogBody(),
+   133	      attributes: event.toOpenTelemetryAttributes(config),
+   134	    };
+   135	    logger.emit(logRecord);
+   136	  });
+   137	}
+   138	
+   139	export function logToolCall(config: Config, event: ToolCallEvent): void {
+   140	  // eslint-disable-next-line @typescript-eslint/no-unsafe-type-assertion
+   141	  const uiEvent = {
+   142	    // eslint-disable-next-line @typescript-eslint/no-misused-spread
+   143	    ...event,
+   144	    'event.name': EVENT_TOOL_CALL,
+   145	    'event.timestamp': new Date().toISOString(),
+   146	  } as UiEvent;
+   147	  uiTelemetryService.addEvent(uiEvent);
+   148	  ClearcutLogger.getInstance(config)?.logToolCallEvent(event);
+   149	  bufferTelemetryEvent(() => {
+   150	    const logger = logs.getLogger(SERVICE_NAME);
+   151	    const logRecord: LogRecord = {
+   152	      body: event.toLogBody(),
+   153	      attributes: event.toOpenTelemetryAttributes(config),
+   154	    };
+   155	    logger.emit(logRecord);
+   156	    recordToolCallMetrics(config, event.duration_ms, {
+   157	      function_name: event.function_name,
+   158	      success: event.success,
+   159	      decision: event.decision,
+   160	      tool_type: event.tool_type,
+   161	    });
+   162	
+   163	    if (event.metadata) {
+   164	      // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
+   165	      const added = event.metadata['model_added_lines'];
+   166	      if (typeof added === 'number' && added > 0) {
+   167	        recordLinesChanged(config, added, 'added', {
+   168	          function_name: event.function_name,
+   169	        });
+   170	      }
+   171	      // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
+   172	      const removed = event.metadata['model_removed_lines'];
+   173	      if (typeof removed === 'number' && removed > 0) {
+   174	        recordLinesChanged(config, removed, 'removed', {
+   175	          function_name: event.function_name,
+   176	        });
+   177	      }
+   178	    }
+   179	  });
+   180	}
+   181	
+   182	export function logToolOutputTruncated(
+   183	  config: Config,
+   184	  event: ToolOutputTruncatedEvent,
+   185	): void {
+   186	  ClearcutLogger.getInstance(config)?.logToolOutputTruncatedEvent(event);
+   187	  bufferTelemetryEvent(() => {
+   188	    const logger = logs.getLogger(SERVICE_NAME);
+   189	    const logRecord: LogRecord = {
+   190	      body: event.toLogBody(),
+   191	      attributes: event.toOpenTelemetryAttributes(config),
+   192	    };
+   193	    logger.emit(logRecord);
+   194	  });
+   195	}
+   196	
+   197	export function logToolOutputMasking(
+   198	  config: Config,
+   199	  event: ToolOutputMaskingEvent,
+   200	): void {
+   201	  ClearcutLogger.getInstance(config)?.logToolOutputMaskingEvent(event);
+   202	  bufferTelemetryEvent(() => {
+   203	    const logger = logs.getLogger(SERVICE_NAME);
+   204	    const logRecord: LogRecord = {
+   205	      body: event.toLogBody(),
+   206	      attributes: event.toOpenTelemetryAttributes(config),
+   207	    };
+   208	    logger.emit(logRecord);
+   209	  });
+   210	}
+   211	
+   212	export function logFileOperation(
+   213	  config: Config,
+   214	  event: FileOperationEvent,
+   215	): void {
+   216	  ClearcutLogger.getInstance(config)?.logFileOperationEvent(event);
+   217	  bufferTelemetryEvent(() => {
+   218	    const logger = logs.getLogger(SERVICE_NAME);
+   219	    const logRecord: LogRecord = {
+   220	      body: event.toLogBody(),
+   221	      attributes: event.toOpenTelemetryAttributes(config),
+   222	    };
+   223	    logger.emit(logRecord);
+   224	
+   225	    recordFileOperationMetric(config, {
+   226	      operation: event.operation,
+   227	      lines: event.lines,
+   228	      mimetype: event.mimetype,
+   229	      extension: event.extension,
+   230	      programming_language: event.programming_language,
+   231	    });
+   232	  });
+   233	}
+   234	
+   235	export function logApiRequest(config: Config, event: ApiRequestEvent): void {
+   236	  ClearcutLogger.getInstance(config)?.logApiRequestEvent(event);
+   237	  bufferTelemetryEvent(() => {
+   238	    const logger = logs.getLogger(SERVICE_NAME);
+   239	    logger.emit(event.toLogRecord(config));
+   240	    logger.emit(event.toSemanticLogRecord(config));
+   241	  });
+   242	}
+   243	
+   244	export function logFlashFallback(
+   245	  config: Config,
+   246	  event: FlashFallbackEvent,
+   247	): void {
+   248	  ClearcutLogger.getInstance(config)?.logFlashFallbackEvent();
+   249	  bufferTelemetryEvent(() => {
+   250	    const logger = logs.getLogger(SERVICE_NAME);
+   251	    const logRecord: LogRecord = {
+   252	      body: event.toLogBody(),
+   253	      attributes: event.toOpenTelemetryAttributes(config),
+   254	    };
+   255	    logger.emit(logRecord);
+   256	  });
+   257	}
+   258	
+   259	export function logRipgrepFallback(
+   260	  config: Config,
+   261	  event: RipgrepFallbackEvent,
+   262	): void {
+   263	  ClearcutLogger.getInstance(config)?.logRipgrepFallbackEvent();
+   264	  bufferTelemetryEvent(() => {
+   265	    const logger = logs.getLogger(SERVICE_NAME);
+   266	    const logRecord: LogRecord = {
+   267	      body: event.toLogBody(),
+   268	      attributes: event.toOpenTelemetryAttributes(config),
+   269	    };
+   270	    logger.emit(logRecord);
+   271	  });
+   272	}
+   273	
+   274	export function logApiError(config: Config, event: ApiErrorEvent): void {
+   275	  // eslint-disable-next-line @typescript-eslint/no-unsafe-type-assertion
+   276	  const uiEvent = {
+   277	    // eslint-disable-next-line @typescript-eslint/no-misused-spread
+   278	    ...event,
+   279	    'event.name': EVENT_API_ERROR,
+   280	    'event.timestamp': new Date().toISOString(),
+   281	  } as UiEvent;
+   282	  uiTelemetryService.addEvent(uiEvent);
+   283	  ClearcutLogger.getInstance(config)?.logApiErrorEvent(event);
+   284	  bufferTelemetryEvent(() => {
+   285	    const logger = logs.getLogger(SERVICE_NAME);
+   286	    logger.emit(event.toLogRecord(config));
+   287	    logger.emit(event.toSemanticLogRecord(config));
+   288	
+   289	    recordApiErrorMetrics(config, event.duration_ms, {
+   290	      model: event.model,
+   291	      status_code: event.status_code,
+   292	      error_type: event.error_type,
+   293	    });
+   294	
+   295	    // Record GenAI operation duration for errors
+   296	    recordApiResponseMetrics(config, event.duration_ms, {
+   297	      model: event.model,
+   298	      status_code: event.status_code,
+   299	      genAiAttributes: {
+   300	        ...getConventionAttributes(event),
+### packages/core/src/telemetry/sdk.ts
+     1	/**
+     2	 * @license
+     3	 * Copyright 2025 Google LLC
+     4	 * SPDX-License-Identifier: Apache-2.0
+     5	 */
+     6	
+     7	import {
+     8	  DiagLogLevel,
+     9	  diag,
+    10	  trace,
+    11	  context,
+    12	  metrics,
+    13	  propagation,
+    14	} from '@opentelemetry/api';
+    15	import { OTLPTraceExporter } from '@opentelemetry/exporter-trace-otlp-grpc';
+    16	import { OTLPLogExporter } from '@opentelemetry/exporter-logs-otlp-grpc';
+    17	import { OTLPMetricExporter } from '@opentelemetry/exporter-metrics-otlp-grpc';
+    18	import { OTLPTraceExporter as OTLPTraceExporterHttp } from '@opentelemetry/exporter-trace-otlp-http';
+    19	import { OTLPLogExporter as OTLPLogExporterHttp } from '@opentelemetry/exporter-logs-otlp-http';
+    20	import { OTLPMetricExporter as OTLPMetricExporterHttp } from '@opentelemetry/exporter-metrics-otlp-http';
+    21	import { CompressionAlgorithm } from '@opentelemetry/otlp-exporter-base';
+    22	import { NodeSDK } from '@opentelemetry/sdk-node';
+    23	import { SemanticResourceAttributes } from '@opentelemetry/semantic-conventions';
+    24	import { resourceFromAttributes } from '@opentelemetry/resources';
+    25	import {
+    26	  BatchSpanProcessor,
+    27	  ConsoleSpanExporter,
+    28	} from '@opentelemetry/sdk-trace-node';
+    29	import {
+    30	  BatchLogRecordProcessor,
+    31	  ConsoleLogRecordExporter,
+    32	} from '@opentelemetry/sdk-logs';
+    33	import {
+    34	  ConsoleMetricExporter,
+    35	  PeriodicExportingMetricReader,
+    36	} from '@opentelemetry/sdk-metrics';
+    37	import { HttpInstrumentation } from '@opentelemetry/instrumentation-http';
+    38	import type { JWTInput } from 'google-auth-library';
+    39	import type { Config } from '../config/config.js';
+    40	import { SERVICE_NAME } from './constants.js';
+    41	import { initializeMetrics } from './metrics.js';
+    42	import { ClearcutLogger } from './clearcut-logger/clearcut-logger.js';
+    43	import {
+    44	  FileLogExporter,
+    45	  FileMetricExporter,
+    46	  FileSpanExporter,
+    47	} from './file-exporters.js';
+    48	import {
+    49	  GcpTraceExporter,
+    50	  GcpMetricExporter,
+    51	  GcpLogExporter,
+    52	} from './gcp-exporters.js';
+    53	import { TelemetryTarget } from './index.js';
+    54	import { debugLogger } from '../utils/debugLogger.js';
+    55	import {
+    56	  startGlobalMemoryMonitoring,
+    57	  getMemoryMonitor,
+    58	} from './memory-monitor.js';
+    59	import { startGlobalEventLoopMonitoring } from './event-loop-monitor.js';
+    60	import { authEvents } from '../code_assist/oauth2.js';
+    61	import { coreEvents, CoreEvent } from '../utils/events.js';
+    62	import {
+    63	  logKeychainAvailability,
+    64	  logTokenStorageInitialization,
+    65	} from './loggers.js';
+    66	import type {
+    67	  KeychainAvailabilityEvent,
+    68	  TokenStorageInitializationEvent,
+    69	} from './types.js';
+    70	
+    71	// For troubleshooting, set the log level to DiagLogLevel.DEBUG
+    72	class DiagLoggerAdapter {
+    73	  error(message: string, ...args: unknown[]): void {
+    74	    debugLogger.error(message, ...args);
+    75	  }
+    76	
+    77	  warn(message: string, ...args: unknown[]): void {
+    78	    debugLogger.warn(message, ...args);
+    79	  }
+    80	
+    81	  info(message: string, ...args: unknown[]): void {
+    82	    debugLogger.log(message, ...args);
+    83	  }
+    84	
+    85	  debug(message: string, ...args: unknown[]): void {
+    86	    debugLogger.debug(message, ...args);
+    87	  }
+    88	
+    89	  verbose(message: string, ...args: unknown[]): void {
+    90	    debugLogger.debug(message, ...args);
+    91	  }
+    92	}
+    93	
+    94	diag.setLogger(new DiagLoggerAdapter(), DiagLogLevel.INFO);
+    95	
+    96	let sdk: NodeSDK | undefined;
+    97	let spanProcessor: BatchSpanProcessor | undefined;
+    98	let logRecordProcessor: BatchLogRecordProcessor | undefined;
+    99	let metricReader: PeriodicExportingMetricReader | undefined;
+   100	let telemetryInitialized = false;
+   101	let callbackRegistered = false;
+   102	let authListener: ((newCredentials: JWTInput) => Promise<void>) | undefined =
+   103	  undefined;
+   104	let keychainAvailabilityListener:
+   105	  | ((event: KeychainAvailabilityEvent) => void)
+   106	  | undefined = undefined;
+   107	let tokenStorageTypeListener:
+   108	  | ((event: TokenStorageInitializationEvent) => void)
+   109	  | undefined = undefined;
+   110	const telemetryBuffer: Array<() => void | Promise<void>> = [];
+   111	let activeTelemetryEmail: string | undefined;
+   112	
+   113	export function isTelemetrySdkInitialized(): boolean {
+   114	  return telemetryInitialized;
+   115	}
+   116	
+   117	export function bufferTelemetryEvent(fn: () => void | Promise<void>): void {
+   118	  if (telemetryInitialized) {
+   119	    // eslint-disable-next-line @typescript-eslint/no-floating-promises
+   120	    fn();
+   121	  } else {
+   122	    telemetryBuffer.push(fn);
+   123	  }
+   124	}
+   125	
+   126	async function flushTelemetryBuffer(): Promise<void> {
+   127	  if (!telemetryInitialized) return;
+   128	  while (telemetryBuffer.length > 0) {
+   129	    const fn = telemetryBuffer.shift();
+   130	    if (fn) {
+   131	      try {
+   132	        await fn();
+   133	      } catch (e) {
+   134	        debugLogger.error('Error executing buffered telemetry event', e);
+   135	      }
+   136	    }
+   137	  }
+   138	}
+   139	
+   140	function parseOtlpEndpoint(
+   141	  otlpEndpointSetting: string | undefined,
+   142	  protocol: 'grpc' | 'http',
+   143	): string | undefined {
+   144	  if (!otlpEndpointSetting) {
+   145	    return undefined;
+   146	  }
+   147	  // Trim leading/trailing quotes that might come from env variables
+   148	  const trimmedEndpoint = otlpEndpointSetting.replace(/^["']|["']$/g, '');
+   149	
+   150	  try {
+   151	    const url = new URL(trimmedEndpoint);
+   152	    if (protocol === 'grpc') {
+   153	      // OTLP gRPC exporters expect an endpoint in the format scheme://host:port
+   154	      // The `origin` property provides this, stripping any path, query, or hash.
+   155	      return url.origin;
+   156	    }
+   157	    // For http, use the full href.
+   158	    return url.href;
+   159	  } catch (error) {
+   160	    diag.error('Invalid OTLP endpoint URL provided:', trimmedEndpoint, error);
+   161	    return undefined;
+   162	  }
+   163	}
+   164	
+   165	export async function initializeTelemetry(
+   166	  config: Config,
+   167	  credentials?: JWTInput,
+   168	): Promise<void> {
+   169	  if (!config.getTelemetryEnabled()) {
+   170	    return;
+   171	  }
+   172	
+   173	  if (telemetryInitialized) {
+   174	    if (
+   175	      credentials?.client_email &&
+   176	      activeTelemetryEmail &&
+   177	      credentials.client_email !== activeTelemetryEmail
+   178	    ) {
+   179	      const message = `Telemetry credentials have changed (from ${activeTelemetryEmail} to ${credentials.client_email}), but telemetry cannot be re-initialized in this process. Please restart the CLI to use the new account for telemetry.`;
+   180	      debugLogger.error(message);
+   181	    }
+   182	    return;
+   183	  }
+   184	
+   185	  if (config.getTelemetryUseCollector() && config.getTelemetryUseCliAuth()) {
+   186	    debugLogger.error(
+   187	      'Telemetry configuration error: "useCollector" and "useCliAuth" cannot both be true. ' +
+   188	        'CLI authentication is only supported with in-process exporters. ' +
+   189	        'Disabling telemetry.',
+   190	    );
+   191	    return;
+   192	  }
+   193	
+   194	  // If using CLI auth and no credentials provided, defer initialization
+   195	  if (config.getTelemetryUseCliAuth() && !credentials) {
+   196	    // Register a callback to initialize telemetry when the user logs in.
+   197	    // This is done only once.
+   198	    if (!callbackRegistered) {
+   199	      callbackRegistered = true;
+   200	      authListener = async (newCredentials: JWTInput) => {
+   201	        if (config.getTelemetryEnabled() && config.getTelemetryUseCliAuth()) {
+   202	          debugLogger.log('Telemetry reinit with credentials.');
+   203	          await initializeTelemetry(config, newCredentials);
+   204	        }
+   205	      };
+   206	      authEvents.on('post_auth', authListener);
+   207	    }
+   208	    debugLogger.log(
+   209	      'CLI auth is requested but no credentials, deferring telemetry initialization.',
+   210	    );
+   211	    return;
+   212	  }
+   213	
+   214	  const resource = resourceFromAttributes({
+   215	    [SemanticResourceAttributes.SERVICE_NAME]: SERVICE_NAME,
+   216	    [SemanticResourceAttributes.SERVICE_VERSION]: process.version,
+   217	    'session.id': config.getSessionId(),
+   218	  });
+   219	
+   220	  if (!keychainAvailabilityListener) {
+   221	    keychainAvailabilityListener = (event: KeychainAvailabilityEvent) => {
+   222	      logKeychainAvailability(config, event);
+   223	    };
+   224	    coreEvents.on(
+   225	      CoreEvent.TelemetryKeychainAvailability,
+   226	      keychainAvailabilityListener,
+   227	    );
+   228	  }
+   229	
+   230	  if (!tokenStorageTypeListener) {
+   231	    tokenStorageTypeListener = (event: TokenStorageInitializationEvent) => {
+   232	      logTokenStorageInitialization(config, event);
+   233	    };
+   234	    coreEvents.on(
+   235	      CoreEvent.TelemetryTokenStorageType,
+   236	      tokenStorageTypeListener,
+   237	    );
+   238	  }
+   239	
+   240	  const otlpEndpoint = config.getTelemetryOtlpEndpoint();
+   241	  const otlpProtocol = config.getTelemetryOtlpProtocol();
+   242	  const telemetryTarget = config.getTelemetryTarget();
+   243	  const useCollector = config.getTelemetryUseCollector();
+   244	
+   245	  const parsedEndpoint = parseOtlpEndpoint(otlpEndpoint, otlpProtocol);
+   246	  const telemetryOutfile = config.getTelemetryOutfile();
+   247	  const useOtlp = !!parsedEndpoint && !telemetryOutfile;
+   248	
+   249	  const gcpProjectId =
+   250	    process.env['OTLP_GOOGLE_CLOUD_PROJECT'] ||
+   251	    process.env['GOOGLE_CLOUD_PROJECT'];
+   252	  const useDirectGcpExport =
+   253	    telemetryTarget === TelemetryTarget.GCP && !useCollector;
+   254	
+   255	  let spanExporter:
+   256	    | OTLPTraceExporter
+   257	    | OTLPTraceExporterHttp
+   258	    | GcpTraceExporter
+   259	    | FileSpanExporter
+   260	    | ConsoleSpanExporter;
+   261	  let logExporter:
+   262	    | OTLPLogExporter
+   263	    | OTLPLogExporterHttp
+   264	    | GcpLogExporter
+   265	    | FileLogExporter
+   266	    | ConsoleLogRecordExporter;
+   267	
+   268	  if (useDirectGcpExport) {
+   269	    debugLogger.log(
+   270	      'Creating GCP exporters with projectId:',
+   271	      gcpProjectId,
+   272	      'using',
+   273	      credentials ? 'provided credentials' : 'ADC',
+   274	    );
+   275	    spanExporter = new GcpTraceExporter(gcpProjectId, credentials);
+   276	    logExporter = new GcpLogExporter(gcpProjectId, credentials);
+   277	    metricReader = new PeriodicExportingMetricReader({
+   278	      exporter: new GcpMetricExporter(gcpProjectId, credentials),
+   279	      exportIntervalMillis: 30000,
+   280	    });
+   281	  } else if (useOtlp) {
+   282	    if (otlpProtocol === 'http') {
+   283	      const buildUrl = (path: string) => {
+   284	        const url = new URL(parsedEndpoint);
+   285	        // Join the existing pathname with the new path, handling trailing slashes.
+   286	        url.pathname = [url.pathname.replace(/\/$/, ''), path].join('/');
+   287	        return url.href;
+   288	      };
+   289	      spanExporter = new OTLPTraceExporterHttp({
+   290	        url: buildUrl('v1/traces'),
+   291	      });
+   292	      logExporter = new OTLPLogExporterHttp({
+   293	        url: buildUrl('v1/logs'),
+   294	      });
+   295	      metricReader = new PeriodicExportingMetricReader({
+   296	        exporter: new OTLPMetricExporterHttp({
+   297	          url: buildUrl('v1/metrics'),
+   298	        }),
+   299	        exportIntervalMillis: 10000,
+   300	      });

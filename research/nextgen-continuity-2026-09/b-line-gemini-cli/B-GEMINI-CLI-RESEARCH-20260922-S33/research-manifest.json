@@ -1,0 +1,26 @@
+{
+  "schema_version": "1.0",
+  "question": "在 synthetic-only、离线、单 worker 的确定性 trace 中，跨至少四个 epoch 的 P/Q/R 与未声明 X 组合，哪些同 epoch 证据可判定 accepted、哪些必须保持 UNKNOWN 或 rejected？",
+  "scope": {
+    "synthetic_only": true,
+    "production_verified": false,
+    "boundary": "仅本目录 harness、fixtures、validator 与通用 manifest 校验；不访问网络、真实 Gemini CLI/服务、凭据、shared/P0、事故目录、D10/L12/D14、canonical/staging/140/tri-line/systemd。",
+    "operations": ["P", "Q", "R", "X(unknown 未声明)"],
+    "epochs_minimum": 4,
+    "worker_count": 1
+  },
+  "claims": [
+    {"id":"C1","claim":"同 epoch 的已知 op 事件与正确 ack 成对且有序时可判定 accepted。","status":"inferred","confidence":"high","sources":[],"caveat":"仅由本地合成 fixtures 与 harness 规则推导。"},
+    {"id":"C2","claim":"epoch rollover 后缺少本 epoch 事件、跨 epoch delayed ack、缺失 ack、reordered/stale/unmatched evidence 均保持 UNKNOWN，不升级。","status":"inferred","confidence":"high","sources":[],"caveat":"不代表任何生产系统实现或远端状态。"},
+    {"id":"C3","claim":"未声明 X 的整组事件即使看似完整也为 UNKNOWN；同 trace 中 P/Q/R 的判定独立，不受 X 影响。","status":"inferred","confidence":"high","sources":[],"caveat":"X 是本切片显式未声明操作。"},
+    {"id":"C4","claim":"同一 op 跨 epoch 重复 payload 不视为新证据；显式撤销记录使结果保持 UNKNOWN 而非 REJECTED，除非有明确矛盾记录。","status":"inferred","confidence":"high","sources":[],"caveat":"本切片将 conflict 作为唯一显式 rejected 条件。"},
+    {"id":"C5","claim":"每条输出保留 epoch 序列、逐 op 判定、理由、阻塞条件与 canonical input SHA-256。","status":"inferred","confidence":"high","sources":[],"caveat":"字段完整性由独立 validator 检查。"}
+  ],
+  "coverage": {
+    "fixtures": 22,
+    "epochs": "1-4 and additional epoch labels",
+    "operations": ["P", "Q", "R", "X"],
+    "scenarios": ["epoch rollover", "delayed ack", "missing ack", "unknown op", "same-op duplicate payload", "revoked epoch", "explicit contradiction", "reordered", "stale", "unmatched"],
+    "verdict_domain": ["accepted", "rejected", "UNKNOWN"]
+  }
+}

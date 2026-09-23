@@ -1,0 +1,90 @@
+{
+  "schema_version": "1.0",
+  "question": "Under a fully offline synthetic-only design, which fault-injection outcomes are locally decidable and which must remain UNKNOWN across restart, crash, power loss, network interruption, missing tool response, and recovery retry?",
+  "scope": {
+    "slice": "B line / Gemini CLI / S20",
+    "synthetic_only": true,
+    "production_verified": false,
+    "time_cutoff": "2026-09-22",
+    "included": ["local fixture protocol", "deterministic adjudicator", "restart/crash/power/network/tool-response/retry labels"],
+    "excluded": ["Gemini CLI execution", "real network", "remote services", "credentials", "prior research artifacts", "production validation"]
+  },
+  "claims": [
+    {
+      "id": "C1",
+      "claim": "The supplied harness deterministically maps the local fixture vocabulary to explicit decision labels, while retaining UNKNOWN when dispatch is recorded but authoritative response/result evidence is absent.",
+      "status": "confirmed",
+      "confidence": "high",
+      "sources": [{"url":"https://github.com/google-gemini/gemini-cli/blob/main/README.md","publisher":"Google Gemini CLI project","published_or_updated":"accessed 2026-09-22","tier":"primary","support":"Official project background only; the deterministic support comes from local harness.py and cases.json, not this URL."}],
+      "caveat": "Confirmed only as a property of this local synthetic adjudicator; not a claim about Gemini CLI."
+    },
+    {
+      "id": "C2",
+      "claim": "The official public project/documentation URLs provide background context but do not establish crash durability, exactly-once delivery, remote side-effect rollback, retry behavior, or production safety for this slice.",
+      "status": "confirmed",
+      "confidence": "high",
+      "sources": [
+        {"url":"https://geminicli.com/docs/","publisher":"Gemini CLI","published_or_updated":"accessed 2026-09-22","tier":"primary","support":"Public documentation landing page was used only as background; no production semantics are asserted."},
+        {"url":"https://ai.google.dev/gemini-api/docs/function-calling","publisher":"Google","published_or_updated":"accessed 2026-09-22","tier":"primary","support":"Official API function-calling background does not validate local fault-injection outcomes."}
+      ],
+      "caveat": "Negative scope statement, not evidence that the capabilities do not exist; they are simply not verified here."
+    },
+    {
+      "id": "C3",
+      "claim": "A locally recorded not_sent dispatch is decidable as NOT_DISPATCHED within the fixture protocol.",
+      "status": "inferred",
+      "confidence": "high",
+      "sources": [],
+      "caveat": "Inference from explicit fixture semantics; not a statement about a real transport or CLI."
+    },
+    {
+      "id": "C4",
+      "claim": "A sent dispatch with no, lost, or malformed authoritative response remains UNKNOWN in this protocol.",
+      "status": "inferred",
+      "confidence": "high",
+      "sources": [],
+      "caveat": "This is a conservative local rule; it cannot distinguish remote non-execution from successful remote execution without authoritative evidence."
+    },
+    {
+      "id": "C5",
+      "claim": "Fixture-only dedupe can produce DEDUPED_IN_FIXTURE, but cannot prove real exactly-once or idempotency behavior.",
+      "status": "inferred",
+      "confidence": "high",
+      "sources": [],
+      "caveat": "Synthetic dedupe is a protocol test knob, not remote evidence."
+    },
+    {
+      "id": "C6",
+      "claim": "Gemini CLI production behavior for cross-restart/crash/power-loss durability, retry, tool response loss, exactly-once semantics, and remote rollback is established by this package.",
+      "status": "unverified",
+      "confidence": "none",
+      "sources": [],
+      "caveat": "Explicitly not tested: the package is offline, synthetic-only, and production_verified=false."
+    },
+    {
+      "id": "C7",
+      "claim": "Real remote side effects and real crash/power-loss durability were observable in this slice.",
+      "status": "inaccessible",
+      "confidence": "none",
+      "sources": [],
+      "caveat": "Real services, credentials, network execution, and production environments were out of scope and not accessed."
+    },
+    {
+      "id": "C8",
+      "claim": "The available official background sources agree with one another on the synthetic protocol's decision outcomes.",
+      "status": "conflicting",
+      "confidence": "none",
+      "sources": [],
+      "caveat": "The sources do not address this synthetic protocol; therefore no source-level agreement or contradiction can be established."
+    }
+  ],
+  "coverage": {
+    "searched": ["official Gemini CLI GitHub README", "official Gemini CLI docs landing page", "official Gemini API function calling docs", "official Gemini API troubleshooting docs"],
+    "not_searched": ["prior S1-S19 directories", "local research artifacts", "production systems", "real CLI runs", "credentials", "private accounts"],
+    "inaccessible_or_excluded": ["real crash/power durability", "remote side effects", "exactly-once semantics", "production safety"],
+    "synthetic_case_count": 16,
+    "expected_unknown_count": 9,
+    "synthetic_only": true,
+    "production_verified": false
+  }
+}

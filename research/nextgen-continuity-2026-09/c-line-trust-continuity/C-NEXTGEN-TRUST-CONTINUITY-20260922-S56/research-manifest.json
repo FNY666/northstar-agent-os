@@ -1,0 +1,24 @@
+{
+  "schema_version": "1.0",
+  "question": "在离线合成证据中，何时证据账本 schema/entry、question/claim/source/window/status/confidence/caveat、canonical/derived/raw 隔离、manifest/digest、跨引用、文件系统计数和归档索引能够闭合可追溯性，何时必须保持 UNKNOWN 或 REJECT？",
+  "scope": {
+    "project": "C-line S56",
+    "mode": "offline synthetic fixtures",
+    "date": "2026-09-23",
+    "excluded": ["S1-S55", "production", "network", "real services", "credentials"],
+    "identity_domain": ["project", "slice", "entry_id", "question", "claim", "source", "canonical_path", "derived_path"],
+    "ledger_domain": ["schema", "manifest", "digest", "raw", "wiki", "experiment", "question", "archive", "filesystem_count", "cross_reference"]
+  },
+  "claims_status": "inferred",
+  "synthetic_only": true,
+  "production_verified": false,
+  "sources": [],
+  "claims": [
+    {"id":"ledger-traceability-closure","claim":"只有 ledger schema/entry/question/claim/source/window/status/confidence/caveat、canonical/derived/raw、digest/manifest、cross-reference、filesystem count 与archive 全部闭合时才可 RECOVERED。","status":"inferred","confidence":"bounded","sources":[],"caveat":"仅由本地合成夹具和规则推导，不代表生产系统。"},
+    {"id":"digest-not-ground-truth","claim":"摘要索引、digest记录或硬编码计数不能替代当前文件重算、manifest核对和canonical/derived隔离验证。","status":"inferred","confidence":"bounded","sources":[],"caveat":"未验证任何真实研究账本。"},
+    {"id":"lineage-unknown","claim":"来源、证据窗口、状态、计数、归档、manifest 或 canonical lineage 未知时必须 UNKNOWN。","status":"inferred","confidence":"bounded","sources":[],"caveat":"布尔门不量化真实账本漂移风险。"},
+    {"id":"ledger-conflict-reject","claim":"身份冲突和同一entry的不可调和 canonical/status/digest 冲突必须 REJECT。","status":"inferred","confidence":"bounded","sources":[],"caveat":"只验证合成判定逻辑，不证明目标系统执行拒绝。"}
+  ],
+  "coverage": {"cases": 28, "property_sweep": 16777216, "dimensions": 24, "statuses": ["RECOVERED", "UNKNOWN", "REJECT"], "events": ["LEDGER_SCHEMA", "ENTRY", "QUESTION", "CLAIM", "SOURCE_URL", "SOURCE_DATE", "EVIDENCE_WINDOW", "STATUS", "CONFIDENCE", "CAVEAT", "CANONICAL", "DERIVED", "RAW_IMMUTABLE", "DIGEST", "MANIFEST", "CROSS_REFERENCE", "FILESYSTEM_COUNT", "ARCHIVE", "NO_EVENT", "UNKNOWN"]},
+  "notes": "三态互斥并 fail-closed；RECOVERED 仅代表本片离线夹具中的 ledger evidence gate 闭合，不代表 production continuity、external effect 或 exactly-once。"
+}

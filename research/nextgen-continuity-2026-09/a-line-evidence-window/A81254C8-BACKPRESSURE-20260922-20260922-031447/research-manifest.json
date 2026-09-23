@@ -1,0 +1,40 @@
+{
+  "schema_version": "1.0",
+  "question": "What do durable queues officially prove at admission, delivery, acknowledgement, backpressure, retention, and execution boundaries?",
+  "manifest_version": "1.0",
+  "research_id": "A81254C8-BACKPRESSURE-20260922",
+  "directory": "/tmp/A81254C8-BACKPRESSURE-20260922-20260922-031447",
+  "created_at": "2026-09-22T03:14:47+08:00",
+  "access_date": "2026-09-22",
+  "topic": "Agent runtime durable backpressure and admission control",
+  "scope": "Public first-party sources only; no private accounts, credentials, real services, shared targets, or prior-slice directory",
+  "platforms": ["Apache Kafka", "Amazon SQS", "NATS JetStream", "RabbitMQ"],
+  "artifacts": ["report.md", "sources.md", "summary.md", "research-manifest.json", "SHA256SUMS", "next-slice-dispatch.md"],
+  "source_policy": {
+    "official_only": true,
+    "benchmark_as_production": false,
+    "platform_ack_as_business_commit": false,
+    "access_date": "2026-09-22"
+  },
+  "claims": [
+    {"id":"C1","claim":"Admission receipt is distinct from execution receipt.","status":"confirmed","confidence":"high","sources":[{"url":"https://docs.aws.amazon.com/AWSSimpleQueueService/latest/APIReference/API_SendMessage.html","publisher":"AWS","published_or_updated":"accessed 2026-09-22","tier":"primary","support":"SendMessage is an API acceptance boundary; downstream processing is not described as part of the response."}],"caveat":"Does not prove consumer processing or business commit."},
+    {"id":"C2","claim":"Queue systems expose redelivery, acknowledgement, retention, or backpressure boundaries that require idempotent handlers.","status":"confirmed","confidence":"high","sources":[{"url":"https://docs.nats.io/nats-concepts/jetstream/consumers","publisher":"NATS","published_or_updated":"accessed 2026-09-22","tier":"primary","support":"Official consumer documentation describes ack, redelivery, AckWait, and MaxAckPending."}],"caveat":"Platform delivery semantics do not prove external exactly-once effects."},
+    {"id":"C3","claim":"Broker or publisher acknowledgement cannot be upgraded into downstream business commitment.","status":"inferred","confidence":"high","sources":[{"url":"https://raw.githubusercontent.com/rabbitmq/rabbitmq-website/main/docs/confirms.md","publisher":"RabbitMQ","published_or_updated":"accessed 2026-09-22","tier":"primary","support":"Official source distinguishes publisher confirms and consumer acknowledgements as orthogonal."}],"caveat":"This is a cross-system boundary inference, not a universal vendor guarantee."}
+  ],
+  "coverage": {
+    "searched": ["Apache Kafka official source", "Amazon SQS official documentation", "NATS JetStream official documentation", "RabbitMQ official website source"],
+    "inaccessible": ["RabbitMQ direct pages challenged by Cloudflare; official website repository source used"],
+    "unresolved_conflicts": ["Exact limits and defaults vary by version, region, queue/stream type, and deployment configuration."]
+  },
+  "limitations": [
+    "Kafka source uses trunk, not a fixed release",
+    "AWS source uses latest Developer Guide and quotas vary by region, queue type, and account",
+    "NATS source uses master docs and documents version fields; verify deployed server/client",
+    "RabbitMQ direct pages were Cloudflare challenged; confirms.md was read from official website repository main; queues/TTL details remain unknown"
+  ],
+  "validation": {
+    "required": ["existence", "nonzero_size", "sha256", "manifest_parse_and_artifact_match"],
+    "status": "pending-parent-revalidation"
+  }
+}
+

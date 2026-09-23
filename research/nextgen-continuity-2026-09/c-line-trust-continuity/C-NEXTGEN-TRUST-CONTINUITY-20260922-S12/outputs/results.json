@@ -1,0 +1,369 @@
+{
+  "synthetic_only": true,
+  "production_verified": false,
+  "model": "offline_synthetic_recovery_window_v1",
+  "outcome_vocabulary": [
+    "RECOVERED",
+    "REJECT",
+    "UNKNOWN"
+  ],
+  "case_count": 14,
+  "results": [
+    {
+      "id": "S12-01",
+      "crash_window": "W0_before_journal",
+      "outcome": "UNKNOWN",
+      "expected_outcome": "UNKNOWN",
+      "trace": [
+        {
+          "step": "observed_events",
+          "journal": false,
+          "ack": false,
+          "replay": false,
+          "reconciliation": false
+        },
+        {
+          "step": "evidence_gate",
+          "result": "absent_or_incomplete",
+          "fields": [
+            "journal",
+            "ack",
+            "replay",
+            "reconciliation"
+          ]
+        }
+      ],
+      "unknown_preserved": true,
+      "replay_used": 0,
+      "synthetic_only": true,
+      "production_verified": false
+    },
+    {
+      "id": "S12-02",
+      "crash_window": "W1_after_journal_before_ack",
+      "outcome": "UNKNOWN",
+      "expected_outcome": "UNKNOWN",
+      "trace": [
+        {
+          "step": "observed_events",
+          "journal": true,
+          "ack": false,
+          "replay": false,
+          "reconciliation": false
+        },
+        {
+          "step": "evidence_gate",
+          "result": "absent_or_incomplete",
+          "fields": [
+            "ack",
+            "replay",
+            "reconciliation"
+          ]
+        }
+      ],
+      "unknown_preserved": true,
+      "replay_used": 0,
+      "synthetic_only": true,
+      "production_verified": false
+    },
+    {
+      "id": "S12-03",
+      "crash_window": "W1_after_journal_before_ack",
+      "outcome": "UNKNOWN",
+      "expected_outcome": "UNKNOWN",
+      "trace": [
+        {
+          "step": "observed_events",
+          "journal": true,
+          "ack": true,
+          "replay": false,
+          "reconciliation": false
+        },
+        {
+          "step": "replay_budget",
+          "result": "exhausted",
+          "budget": 0
+        }
+      ],
+      "unknown_preserved": true,
+      "replay_used": 0,
+      "synthetic_only": true,
+      "production_verified": false
+    },
+    {
+      "id": "S12-04",
+      "crash_window": "W2_after_ack_before_replay",
+      "outcome": "RECOVERED",
+      "expected_outcome": "RECOVERED",
+      "trace": [
+        {
+          "step": "observed_events",
+          "journal": true,
+          "ack": true,
+          "replay": false,
+          "reconciliation": true
+        },
+        {
+          "step": "replay_budget",
+          "result": "one_application_allowed",
+          "budget": 1
+        },
+        {
+          "step": "reconciliation_gate",
+          "result": "committed"
+        }
+      ],
+      "unknown_preserved": false,
+      "replay_used": 1,
+      "synthetic_only": true,
+      "production_verified": false
+    },
+    {
+      "id": "S12-05",
+      "crash_window": "W2_after_ack_before_replay",
+      "outcome": "UNKNOWN",
+      "expected_outcome": "UNKNOWN",
+      "trace": [
+        {
+          "step": "observed_events",
+          "journal": true,
+          "ack": true,
+          "replay": false,
+          "reconciliation": false
+        },
+        {
+          "step": "replay_budget",
+          "result": "exhausted",
+          "budget": 0
+        }
+      ],
+      "unknown_preserved": true,
+      "replay_used": 0,
+      "synthetic_only": true,
+      "production_verified": false
+    },
+    {
+      "id": "S12-06",
+      "crash_window": "W3_during_replay",
+      "outcome": "UNKNOWN",
+      "expected_outcome": "UNKNOWN",
+      "trace": [
+        {
+          "step": "observed_events",
+          "journal": true,
+          "ack": true,
+          "replay": false,
+          "reconciliation": false
+        },
+        {
+          "step": "replay_budget",
+          "result": "one_application_allowed",
+          "budget": 1
+        },
+        {
+          "step": "evidence_gate",
+          "result": "absent_or_incomplete",
+          "fields": [
+            "reconciliation"
+          ]
+        }
+      ],
+      "unknown_preserved": true,
+      "replay_used": 1,
+      "synthetic_only": true,
+      "production_verified": false
+    },
+    {
+      "id": "S12-07",
+      "crash_window": "W3_during_replay",
+      "outcome": "RECOVERED",
+      "expected_outcome": "RECOVERED",
+      "trace": [
+        {
+          "step": "observed_events",
+          "journal": true,
+          "ack": true,
+          "replay": true,
+          "reconciliation": true
+        },
+        {
+          "step": "reconciliation_gate",
+          "result": "committed"
+        }
+      ],
+      "unknown_preserved": false,
+      "replay_used": 0,
+      "synthetic_only": true,
+      "production_verified": false
+    },
+    {
+      "id": "S12-08",
+      "crash_window": "W4_after_replay_before_reconciliation",
+      "outcome": "UNKNOWN",
+      "expected_outcome": "UNKNOWN",
+      "trace": [
+        {
+          "step": "observed_events",
+          "journal": true,
+          "ack": true,
+          "replay": true,
+          "reconciliation": false
+        },
+        {
+          "step": "evidence_gate",
+          "result": "absent_or_incomplete",
+          "fields": [
+            "reconciliation"
+          ]
+        }
+      ],
+      "unknown_preserved": true,
+      "replay_used": 0,
+      "synthetic_only": true,
+      "production_verified": false
+    },
+    {
+      "id": "S12-09",
+      "crash_window": "W5_during_reconciliation",
+      "outcome": "UNKNOWN",
+      "expected_outcome": "UNKNOWN",
+      "trace": [
+        {
+          "step": "observed_events",
+          "journal": true,
+          "ack": true,
+          "replay": true,
+          "reconciliation": true
+        },
+        {
+          "step": "reconciliation_gate",
+          "result": "not_deterministic"
+        }
+      ],
+      "unknown_preserved": true,
+      "replay_used": 0,
+      "synthetic_only": true,
+      "production_verified": false
+    },
+    {
+      "id": "S12-10",
+      "crash_window": "W5_during_reconciliation",
+      "outcome": "REJECT",
+      "expected_outcome": "REJECT",
+      "trace": [
+        {
+          "step": "observed_events",
+          "journal": true,
+          "ack": true,
+          "replay": true,
+          "reconciliation": true
+        },
+        {
+          "step": "reconciliation_gate",
+          "result": "explicit_abort"
+        }
+      ],
+      "unknown_preserved": false,
+      "replay_used": 0,
+      "synthetic_only": true,
+      "production_verified": false
+    },
+    {
+      "id": "S12-11",
+      "crash_window": "W6_after_reconciliation",
+      "outcome": "RECOVERED",
+      "expected_outcome": "RECOVERED",
+      "trace": [
+        {
+          "step": "observed_events",
+          "journal": true,
+          "ack": true,
+          "replay": true,
+          "reconciliation": true
+        },
+        {
+          "step": "reconciliation_gate",
+          "result": "committed"
+        }
+      ],
+      "unknown_preserved": false,
+      "replay_used": 0,
+      "synthetic_only": true,
+      "production_verified": false
+    },
+    {
+      "id": "S12-12",
+      "crash_window": "W6_after_reconciliation",
+      "outcome": "REJECT",
+      "expected_outcome": "REJECT",
+      "trace": [
+        {
+          "step": "observed_events",
+          "journal": true,
+          "ack": true,
+          "replay": true,
+          "reconciliation": true
+        },
+        {
+          "step": "evidence_gate",
+          "result": "contradictory"
+        }
+      ],
+      "unknown_preserved": false,
+      "replay_used": 0,
+      "synthetic_only": true,
+      "production_verified": false
+    },
+    {
+      "id": "S12-13",
+      "crash_window": "W6_after_reconciliation",
+      "outcome": "RECOVERED",
+      "expected_outcome": "RECOVERED",
+      "trace": [
+        {
+          "step": "observed_events",
+          "journal": true,
+          "ack": true,
+          "replay": true,
+          "reconciliation": true
+        },
+        {
+          "step": "reconciliation_gate",
+          "result": "committed"
+        }
+      ],
+      "unknown_preserved": false,
+      "replay_used": 0,
+      "synthetic_only": true,
+      "production_verified": false
+    },
+    {
+      "id": "S12-14",
+      "crash_window": "W4_after_replay_before_reconciliation",
+      "outcome": "REJECT",
+      "expected_outcome": "REJECT",
+      "trace": [
+        {
+          "step": "observed_events",
+          "journal": true,
+          "ack": true,
+          "replay": true,
+          "reconciliation": false
+        },
+        {
+          "step": "evidence_gate",
+          "result": "contradictory"
+        }
+      ],
+      "unknown_preserved": false,
+      "replay_used": 0,
+      "synthetic_only": true,
+      "production_verified": false
+    }
+  ],
+  "summary": {
+    "RECOVERED": 4,
+    "REJECT": 3,
+    "UNKNOWN": 7
+  }
+}

@@ -1,0 +1,52 @@
+[
+  {
+    "case_id": "recovered_2of3_closed",
+    "classification": ["VERIFIED_CONTINUITY"],
+    "quorum": {"threshold": 2, "members": 3},
+    "observations": [{"observer_id":"o1","epoch":4,"watermark":12},{"observer_id":"o2","epoch":4,"watermark":12}],
+    "watermark": {"samples":[{"epoch":4,"value":12},{"epoch":4,"value":12}],"revocation_reached":true},
+    "crash_restart": {"events":["crash","restart","reconcile"],"closed":true},
+    "evidence": [{"kind":"platform_receipt","state":"confirmed","commit_digest":"d-7"},{"kind":"durable_log","state":"confirmed","commit_digest":"d-7"},{"kind":"external_effect","state":"confirmed","commit_digest":"d-7"}],
+    "retention": {"within_boundary":true,"age_days":2,"limit_days":7}, "query":{"complete":true}
+  },
+  {
+    "case_id":"unknown_quorum_missing_3of5",
+    "classification":["DROPPED","QUERY_GAP"], "quorum":{"threshold":3,"members":5},
+    "observations":[{"observer_id":"o1"},{"observer_id":"o2"}], "watermark":{"samples":[{"epoch":4,"value":12}],"revocation_reached":true},
+    "crash_restart":{"closed":true},"evidence":[{"kind":"platform_receipt","state":"confirmed","commit_digest":"d-7"},{"kind":"durable_log","state":"confirmed","commit_digest":"d-7"},{"kind":"external_effect","state":"confirmed","commit_digest":"d-7"}],"retention":{"within_boundary":true},"query":{"complete":true}
+  },
+  {
+    "case_id":"unknown_duplicate_observer_not_independent",
+    "classification":["DELAYED"],"quorum":{"threshold":2,"members":3},"observations":[{"observer_id":"o1"},{"observer_id":"o1"}],"watermark":{"samples":[{"epoch":4,"value":12}],"revocation_reached":true},"crash_restart":{"closed":true},"evidence":[{"kind":"platform_receipt","state":"confirmed","commit_digest":"d-7"},{"kind":"durable_log","state":"confirmed","commit_digest":"d-7"},{"kind":"external_effect","state":"confirmed","commit_digest":"d-7"}],"retention":{"within_boundary":true},"query":{"complete":true}
+  },
+  {
+    "case_id":"unknown_partition_stale_quorum","classification":["DROPPED"],"quorum":{"threshold":2,"members":3},"observations":[{"observer_id":"o1"},{"observer_id":"o2"}],"watermark":{"samples":[{"epoch":3,"value":9}],"revocation_reached":false},"crash_restart":{"closed":true},"evidence":[{"kind":"platform_receipt","state":"confirmed","commit_digest":"d-7"},{"kind":"durable_log","state":"confirmed","commit_digest":"d-7"},{"kind":"external_effect","state":"confirmed","commit_digest":"d-7"}],"retention":{"within_boundary":true},"query":{"complete":true}
+  },
+  {
+    "case_id":"unknown_watermark_regresses_cross_epoch","classification":["EXPORTER_FAILURE"],"quorum":{"threshold":2,"members":3},"observations":[{"observer_id":"o1"},{"observer_id":"o2"}],"watermark":{"samples":[{"epoch":4,"value":12},{"epoch":5,"value":11}],"revocation_reached":true},"crash_restart":{"closed":true},"evidence":[{"kind":"platform_receipt","state":"confirmed","commit_digest":"d-7"},{"kind":"durable_log","state":"confirmed","commit_digest":"d-7"},{"kind":"external_effect","state":"confirmed","commit_digest":"d-7"}],"retention":{"within_boundary":true},"query":{"complete":true}
+  },
+  {
+    "case_id":"unknown_crash_post_commit","classification":["UNKNOWN","NO_EVENT"],"quorum":{"threshold":2,"members":3},"observations":[{"observer_id":"o1"},{"observer_id":"o2"}],"watermark":{"samples":[{"epoch":4,"value":12}],"revocation_reached":true},"crash_restart":{"events":["crash","restart","commit_unknown"],"closed":false},"evidence":[{"kind":"platform_receipt","state":"confirmed","commit_digest":"d-7"},{"kind":"durable_log","state":"confirmed","commit_digest":"d-7"},{"kind":"external_effect","state":"confirmed","commit_digest":"d-7"}],"retention":{"within_boundary":true},"query":{"complete":true}
+  },
+  {
+    "case_id":"unknown_duplicate_receipt","classification":["DELAYED"],"quorum":{"threshold":2,"members":3},"observations":[{"observer_id":"o1"},{"observer_id":"o2"}],"watermark":{"samples":[{"epoch":4,"value":12}],"revocation_reached":true},"crash_restart":{"events":["crash","restart","duplicate_receipt"],"closed":true},"evidence":[{"kind":"platform_receipt","state":"confirmed","commit_digest":"d-7"},{"kind":"durable_log","state":"confirmed","commit_digest":"d-7"},{"kind":"external_effect","state":"confirmed","commit_digest":"d-7"}],"retention":{"within_boundary":true},"query":{"complete":true}
+  },
+  {
+    "case_id":"unknown_retention_expired","classification":["RETENTION_EXPIRED"],"quorum":{"threshold":2,"members":3},"observations":[{"observer_id":"o1"},{"observer_id":"o2"}],"watermark":{"samples":[{"epoch":4,"value":12}],"revocation_reached":true},"crash_restart":{"closed":true},"evidence":[{"kind":"platform_receipt","state":"confirmed","commit_digest":"d-7"},{"kind":"durable_log","state":"confirmed","commit_digest":"d-7"},{"kind":"external_effect","state":"confirmed","commit_digest":"d-7"}],"retention":{"within_boundary":false,"age_days":8,"limit_days":7},"query":{"complete":true}
+  },
+  {
+    "case_id":"unknown_query_gap","classification":["QUERY_GAP"],"quorum":{"threshold":2,"members":3},"observations":[{"observer_id":"o1"},{"observer_id":"o2"}],"watermark":{"samples":[{"epoch":4,"value":12}],"revocation_reached":true},"crash_restart":{"closed":true},"evidence":[{"kind":"platform_receipt","state":"confirmed","commit_digest":"d-7"},{"kind":"durable_log","state":"confirmed","commit_digest":"d-7"},{"kind":"external_effect","state":"confirmed","commit_digest":"d-7"}],"retention":{"within_boundary":true},"query":{"complete":false}
+  },
+  {
+    "case_id":"unknown_evidence_missing","classification":["NO_EVENT"],"quorum":{"threshold":2,"members":3},"observations":[{"observer_id":"o1"},{"observer_id":"o2"}],"watermark":{"samples":[{"epoch":4,"value":12}],"revocation_reached":true},"crash_restart":{"closed":true},"evidence":[{"kind":"platform_receipt","state":"confirmed","commit_digest":"d-7"},{"kind":"durable_log","state":"confirmed","commit_digest":"d-7"}],"retention":{"within_boundary":true},"query":{"complete":true}
+  },
+  {
+    "case_id":"reject_explicit_conflict","classification":["VERIFIED_CONTINUITY"],"hard_conflict":true,"quorum":{"threshold":2,"members":3},"observations":[{"observer_id":"o1"},{"observer_id":"o2"}],"watermark":{"samples":[{"epoch":4,"value":12}],"revocation_reached":true},"crash_restart":{"closed":true},"evidence":[{"kind":"platform_receipt","state":"confirmed","commit_digest":"d-7"},{"kind":"durable_log","state":"confirmed","commit_digest":"d-7"},{"kind":"external_effect","state":"confirmed","commit_digest":"d-8"}],"retention":{"within_boundary":true},"query":{"complete":true}
+  },
+  {
+    "case_id":"unknown_3of5_split","classification":["DROPPED","DELAYED"],"quorum":{"threshold":3,"members":5},"observations":[{"observer_id":"o1"},{"observer_id":"o2"},{"observer_id":"o3"}],"watermark":{"samples":[{"epoch":4,"value":12}],"revocation_reached":true},"crash_restart":{"closed":true},"evidence":[{"kind":"platform_receipt","state":"confirmed","commit_digest":"d-7"},{"kind":"durable_log","state":"confirmed","commit_digest":"d-7"},{"kind":"external_effect","state":"confirmed","commit_digest":"d-8"}],"retention":{"within_boundary":true},"query":{"complete":true}
+  },
+  {
+    "case_id":"unknown_cross_epoch_rollback","classification":["EXPORTER_FAILURE"],"quorum":{"threshold":2,"members":3},"observations":[{"observer_id":"o1"},{"observer_id":"o2"}],"watermark":{"samples":[{"epoch":5,"value":20},{"epoch":6,"value":19}],"revocation_reached":true},"crash_restart":{"closed":true},"evidence":[{"kind":"platform_receipt","state":"confirmed","commit_digest":"d-7"},{"kind":"durable_log","state":"confirmed","commit_digest":"d-7"},{"kind":"external_effect","state":"confirmed","commit_digest":"d-7"}],"retention":{"within_boundary":true},"query":{"complete":true}
+  }
+]

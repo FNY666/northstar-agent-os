@@ -1,0 +1,154 @@
+{
+  "schema_version": "1.0",
+  "question": "What do official Gemini CLI sources establish about behavioral evaluations, integration testing, deflake, sandbox matrices, and evidence limits?",
+  "scope": "public first-party Google Gemini CLI sources only; read-only research",
+  "coverage": [
+    "behavioral evals",
+    "static validation",
+    "integration testing",
+    "deflake",
+    "sandbox matrix",
+    "memory/performance baselines",
+    "evidence boundaries"
+  ],
+  "slice_id": "B-S47-OFFICIAL-EVALS-INTEGRATION-20260922",
+  "status": "complete",
+  "research_date": "2026-09-22",
+  "access_date": "2026-09-22",
+  "sources": [
+    {
+      "id": "S47-1",
+      "url": "https://github.com/google-gemini/gemini-cli/blob/main/docs/behavioral-evals.md",
+      "access_date": "2026-09-22",
+      "evidence_window": "behavioral eval design, validation, deflake, tool-behavior assertions",
+      "evidence_level": "verified",
+      "cannot_prove": "production effects, exactly-once, complete deployment coverage"
+    },
+    {
+      "id": "S47-2",
+      "url": "https://github.com/google-gemini/gemini-cli/blob/main/docs/integration-tests.md",
+      "access_date": "2026-09-22",
+      "evidence_window": "integration commands, 5-run deflake, sandbox matrix, memory/performance baselines",
+      "evidence_level": "verified",
+      "cannot_prove": "production equivalence or external commit"
+    },
+    {
+      "id": "S47-3",
+      "url": "https://github.com/google-gemini/gemini-cli/commit/d5b3e3accb26000d273abf16e0f1dd83aa5428a9",
+      "access_date": "2026-09-22",
+      "evidence_window": "fixed repository snapshot",
+      "evidence_level": "verified",
+      "cannot_prove": "current deployment state"
+    }
+  ],
+  "claims": [
+    {
+      "id": "C1",
+      "claim": "Official behavioral evals assert tool behavior rather than final prose because model prose is nondeterministic.",
+      "status": "confirmed",
+      "confidence": "high",
+      "sources": [
+        {
+          "url": "https://github.com/google-gemini/gemini-cli/blob/main/docs/behavioral-evals.md",
+          "publisher": "Google Gemini CLI",
+          "published_or_updated": "2026-09-22 repository snapshot",
+          "tier": "primary",
+          "support": "Overview and contributor workflow."
+        }
+      ],
+      "caveat": "Behavioral assertion is not external-effect verification."
+    },
+    {
+      "id": "C2",
+      "claim": "Eval validation has blocking errors and non-blocking warnings covering policy, metadata, prompts, tool references, positive assertions, and workspace setup.",
+      "status": "confirmed",
+      "confidence": "high",
+      "sources": [
+        {
+          "url": "https://github.com/google-gemini/gemini-cli/blob/main/docs/behavioral-evals.md",
+          "publisher": "Google Gemini CLI",
+          "published_or_updated": "2026-09-22 repository snapshot",
+          "tier": "primary",
+          "support": "Validation rules and severities."
+        }
+      ],
+      "caveat": "Static validation cannot establish runtime outcome."
+    },
+    {
+      "id": "C3",
+      "claim": "Official guidance asks for at least 3 local runs for behavioral evals and at least 5 runs for new integration tests to detect flakiness.",
+      "status": "confirmed",
+      "confidence": "high",
+      "sources": [
+        {
+          "url": "https://github.com/google-gemini/gemini-cli/blob/main/docs/behavioral-evals.md",
+          "publisher": "Google Gemini CLI",
+          "published_or_updated": "2026-09-22 repository snapshot",
+          "tier": "primary",
+          "support": "Deflake workflow."
+        },
+        {
+          "url": "https://github.com/google-gemini/gemini-cli/blob/main/docs/integration-tests.md",
+          "publisher": "Google Gemini CLI",
+          "published_or_updated": "2026-09-22 repository snapshot",
+          "tier": "primary",
+          "support": "Deflaking section."
+        }
+      ],
+      "caveat": "Repeated local tests do not prove production reliability."
+    },
+    {
+      "id": "C4",
+      "claim": "Integration testing documents no-sandbox/docker/podman coverage and independent memory/performance baselines.",
+      "status": "confirmed",
+      "confidence": "high",
+      "sources": [
+        {
+          "url": "https://github.com/google-gemini/gemini-cli/blob/main/docs/integration-tests.md",
+          "publisher": "Google Gemini CLI",
+          "published_or_updated": "2026-09-22 repository snapshot",
+          "tier": "primary",
+          "support": "Sandbox matrix and regression sections."
+        }
+      ],
+      "caveat": "Coverage is documented design, not proof every matrix cell passed."
+    },
+    {
+      "id": "C5",
+      "claim": "Exactly-once, external business commit, timeout/disconnect final state, complete audit, and production equivalence remain unknown.",
+      "status": "unverified",
+      "confidence": "high",
+      "sources": [
+        {
+          "url": "https://github.com/google-gemini/gemini-cli/blob/main/docs/behavioral-evals.md",
+          "publisher": "Google Gemini CLI",
+          "published_or_updated": "2026-09-22 repository snapshot",
+          "tier": "primary",
+          "support": "Eval docs define behavioral/test evidence but not distributed effect guarantees."
+        },
+        {
+          "url": "https://github.com/google-gemini/gemini-cli/blob/main/docs/integration-tests.md",
+          "publisher": "Google Gemini CLI",
+          "published_or_updated": "2026-09-22 repository snapshot",
+          "tier": "primary",
+          "support": "Integration docs define test execution and baselines but not external business commit."
+        }
+      ],
+      "caveat": "Ambiguous execution must remain UNKNOWN until independent read-back/reconciliation."
+    }
+  ],
+  "limitations": [
+    "No live CLI or service",
+    "No credentials",
+    "No production access",
+    "Documentation-only evidence"
+  ],
+  "production_verified": false,
+  "unknowns": [
+    "exactly-once",
+    "external commit",
+    "timeout/disconnect final state",
+    "complete audit",
+    "production equivalence"
+  ]
+}

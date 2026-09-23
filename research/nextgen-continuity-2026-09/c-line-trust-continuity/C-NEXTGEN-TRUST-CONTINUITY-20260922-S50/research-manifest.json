@@ -1,0 +1,24 @@
+{
+  "schema_version": "1.0",
+  "question": "在离线合成证据中，何时认证方式、凭据 scope/freshness、quota、billing、privacy/telemetry、model/fallback/routing、rate-limit/retry 与 usage record 能够闭合连续性，何时必须保持 UNKNOWN 或 REJECT？",
+  "scope": {
+    "project": "C-line S50",
+    "mode": "offline synthetic fixtures",
+    "date": "2026-09-23",
+    "excluded": ["S1-S49", "production", "network", "real services", "credentials"],
+    "identity_domain": ["account", "project", "provider", "model", "region", "request_id"],
+    "auth_routing_domain": ["auth_method", "credential", "scope", "freshness", "quota", "billing", "privacy", "telemetry", "model", "fallback", "routing_precedence", "rate_limit", "retry", "usage"]
+  },
+  "claims_status": "inferred",
+  "synthetic_only": true,
+  "production_verified": false,
+  "sources": [],
+  "claims": [
+    {"id":"auth-routing-closure","claim":"只有认证/凭据/scope/freshness、quota/billing、privacy/telemetry、model/fallback/provider、routing precedence、rate-limit/retry/region/usage 全部闭合时才可 RECOVERED。","status":"inferred","confidence":"bounded","sources":[],"caveat":"仅由本地合成夹具和规则推导，不代表生产系统。"},
+    {"id":"response-not-billing-proof","claim":"API响应、模型名或 fallback 触发不能证明最终 provider/model、账单归属、请求费用、隐私处理或外部效果；必须独立 usage/provider/model read-back。","status":"inferred","confidence":"bounded","sources":[],"caveat":"未验证任何真实 provider runtime。"},
+    {"id":"provider-unknown","claim":"credential/quota/billing/privacy/model/fallback/rate-limit/retry/region/usage 或 provider 状态未知时必须 UNKNOWN。","status":"inferred","confidence":"bounded","sources":[],"caveat":"布尔门不量化真实费用或隐私风险。"},
+    {"id":"auth-conflict-reject","claim":"身份冲突和不可调和的认证/路由/计费隐私状态冲突必须 REJECT。","status":"inferred","confidence":"bounded","sources":[],"caveat":"只验证合成判定逻辑，不证明目标系统执行拒绝。"}
+  ],
+  "coverage": {"cases": 27, "property_sweep": 8388608, "dimensions": 23, "statuses": ["RECOVERED", "UNKNOWN", "REJECT"], "events": ["AUTH_METHOD", "CREDENTIAL", "SCOPE", "FRESHNESS", "QUOTA", "BILLING", "PRIVACY", "TELEMETRY", "MODEL", "FALLBACK", "ROUTING_PRECEDENCE", "RATE_LIMIT", "RETRY", "USAGE", "NO_EVENT", "UNKNOWN"]},
+  "notes": "三态互斥并 fail-closed；RECOVERED 仅代表本片离线夹具中的 auth/quota/routing evidence gate 闭合，不代表 production continuity、external effect 或 exactly-once。"
+}

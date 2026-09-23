@@ -1,0 +1,260 @@
+{
+  "synthetic_only": true,
+  "production_verified": false,
+  "schema": "S9-results-v1",
+  "case_count": 14,
+  "coverage_confirmed_case_fraction": 0.2857142857142857,
+  "coverage_executed_case_fraction": 1.0,
+  "residual_unknown_case_count": 2,
+  "results": [
+    {
+      "synthetic_only": true,
+      "production_verified": false,
+      "case_id": "C01-valid-append",
+      "label": "valid append-only synthetic chain",
+      "statuses": [
+        "confirmed"
+      ],
+      "observations": [
+        "synthetic hash-chain and synthetic signature checks pass"
+      ],
+      "fail_closed": "ACCEPT",
+      "fail_open": "ACCEPT",
+      "expected_status": "confirmed",
+      "expected_fail_closed": "ACCEPT",
+      "expected_fail_open": "ACCEPT"
+    },
+    {
+      "synthetic_only": true,
+      "production_verified": false,
+      "case_id": "C02-reorder",
+      "label": "records reordered",
+      "statuses": [
+        "conflicting"
+      ],
+      "observations": [
+        "chain link mismatch at index 0",
+        "chain link mismatch at index 1",
+        "clock rollback"
+      ],
+      "fail_closed": "REJECT",
+      "fail_open": "REJECT",
+      "expected_status": "conflicting",
+      "expected_fail_closed": "REJECT",
+      "expected_fail_open": "REJECT"
+    },
+    {
+      "synthetic_only": true,
+      "production_verified": false,
+      "case_id": "C03-duplicate",
+      "label": "record repeated exactly",
+      "statuses": [
+        "conflicting"
+      ],
+      "observations": [
+        "duplicate event_id or divergent replay",
+        "record count differs from source",
+        "chain link mismatch at index 2"
+      ],
+      "fail_closed": "REJECT",
+      "fail_open": "REJECT",
+      "expected_status": "conflicting",
+      "expected_fail_closed": "REJECT",
+      "expected_fail_open": "REJECT"
+    },
+    {
+      "synthetic_only": true,
+      "production_verified": false,
+      "case_id": "C04-drop",
+      "label": "middle record lost",
+      "statuses": [
+        "conflicting"
+      ],
+      "observations": [
+        "record count differs from source",
+        "chain link mismatch at index 1"
+      ],
+      "fail_closed": "REJECT",
+      "fail_open": "REJECT",
+      "expected_status": "conflicting",
+      "expected_fail_closed": "REJECT",
+      "expected_fail_open": "REJECT"
+    },
+    {
+      "synthetic_only": true,
+      "production_verified": false,
+      "case_id": "C05-tamper",
+      "label": "payload tampered after signing",
+      "statuses": [
+        "conflicting"
+      ],
+      "observations": [
+        "signature mismatch at index 0"
+      ],
+      "fail_closed": "REJECT",
+      "fail_open": "REJECT",
+      "expected_status": "conflicting",
+      "expected_fail_closed": "REJECT",
+      "expected_fail_open": "REJECT"
+    },
+    {
+      "synthetic_only": true,
+      "production_verified": false,
+      "case_id": "C06-clock-rollback",
+      "label": "timestamp moves backward",
+      "statuses": [
+        "conflicting"
+      ],
+      "observations": [
+        "clock rollback"
+      ],
+      "fail_closed": "REJECT",
+      "fail_open": "REJECT",
+      "expected_status": "conflicting",
+      "expected_fail_closed": "REJECT",
+      "expected_fail_open": "REJECT"
+    },
+    {
+      "synthetic_only": true,
+      "production_verified": false,
+      "case_id": "C07-unknown-validator",
+      "label": "validator key outside known set",
+      "statuses": [
+        "inaccessible"
+      ],
+      "observations": [
+        "validator key unavailable"
+      ],
+      "fail_closed": "REJECT",
+      "fail_open": "REJECT",
+      "expected_status": "inaccessible",
+      "expected_fail_closed": "REJECT",
+      "expected_fail_open": "REJECT"
+    },
+    {
+      "synthetic_only": true,
+      "production_verified": false,
+      "case_id": "C08-rotation-authorized",
+      "label": "declared validator rotation",
+      "statuses": [
+        "confirmed"
+      ],
+      "observations": [
+        "declared validator rotation"
+      ],
+      "fail_closed": "ACCEPT",
+      "fail_open": "ACCEPT",
+      "expected_status": "confirmed",
+      "expected_fail_closed": "ACCEPT",
+      "expected_fail_open": "ACCEPT"
+    },
+    {
+      "synthetic_only": true,
+      "production_verified": false,
+      "case_id": "C09-rotation-unauthorized",
+      "label": "undeclared validator rotation",
+      "statuses": [
+        "conflicting"
+      ],
+      "observations": [
+        "validator rotation lacks authorization evidence"
+      ],
+      "fail_closed": "REJECT",
+      "fail_open": "REJECT",
+      "expected_status": "conflicting",
+      "expected_fail_closed": "REJECT",
+      "expected_fail_open": "REJECT"
+    },
+    {
+      "synthetic_only": true,
+      "production_verified": false,
+      "case_id": "C10-auth-change",
+      "label": "authorization context changes unexpectedly",
+      "statuses": [
+        "conflicting"
+      ],
+      "observations": [
+        "signature mismatch at index 0",
+        "authorization context changed without declared transition"
+      ],
+      "fail_closed": "REJECT",
+      "fail_open": "REJECT",
+      "expected_status": "conflicting",
+      "expected_fail_closed": "REJECT",
+      "expected_fail_open": "REJECT"
+    },
+    {
+      "synthetic_only": true,
+      "production_verified": false,
+      "case_id": "C11-auth-declared",
+      "label": "declared authorization-context transition",
+      "statuses": [
+        "confirmed"
+      ],
+      "observations": [
+        "declared authorization-context transition"
+      ],
+      "fail_closed": "ACCEPT",
+      "fail_open": "ACCEPT",
+      "expected_status": "confirmed",
+      "expected_fail_closed": "ACCEPT",
+      "expected_fail_open": "ACCEPT"
+    },
+    {
+      "synthetic_only": true,
+      "production_verified": false,
+      "case_id": "C12-replay",
+      "label": "same trace replayed deterministically",
+      "statuses": [
+        "confirmed"
+      ],
+      "observations": [
+        "same input yields deterministic replay result"
+      ],
+      "fail_closed": "ACCEPT",
+      "fail_open": "ACCEPT",
+      "expected_status": "confirmed",
+      "expected_fail_closed": "ACCEPT",
+      "expected_fail_open": "ACCEPT"
+    },
+    {
+      "synthetic_only": true,
+      "production_verified": false,
+      "case_id": "C13-divergent-replay",
+      "label": "same event id with different payload",
+      "statuses": [
+        "conflicting"
+      ],
+      "observations": [
+        "duplicate event_id or divergent replay",
+        "record count differs from source",
+        "chain link mismatch at index 1",
+        "signature mismatch at index 1"
+      ],
+      "fail_closed": "REJECT",
+      "fail_open": "REJECT",
+      "expected_status": "conflicting",
+      "expected_fail_closed": "REJECT",
+      "expected_fail_open": "REJECT"
+    },
+    {
+      "synthetic_only": true,
+      "production_verified": false,
+      "case_id": "C14-unverified-property",
+      "label": "crash durability is not tested",
+      "statuses": [
+        "inferred",
+        "unverified"
+      ],
+      "observations": [
+        "fixture-level inference, not direct evidence",
+        "expected property not established by fixture"
+      ],
+      "fail_closed": "REJECT",
+      "fail_open": "ACCEPT_WITH_UNKNOWN",
+      "expected_status": "unverified",
+      "expected_fail_closed": "REJECT",
+      "expected_fail_open": "ACCEPT_WITH_UNKNOWN"
+    }
+  ]
+}

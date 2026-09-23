@@ -1,0 +1,426 @@
+[
+  {
+    "case_id": "C01-valid-append",
+    "label": "valid append-only synthetic chain",
+    "records": [
+      {
+        "event_id": "E1",
+        "timestamp": 100,
+        "validator_id": "validator-A",
+        "auth_context": "ctx-1",
+        "payload": "alpha"
+      },
+      {
+        "event_id": "E2",
+        "timestamp": 101,
+        "validator_id": "validator-A",
+        "auth_context": "ctx-1",
+        "payload": "beta"
+      }
+    ],
+    "expected": {
+      "status": "confirmed",
+      "fail_closed": "ACCEPT",
+      "fail_open": "ACCEPT"
+    },
+    "_metadata": {
+      "synthetic_only": true,
+      "production_verified": false
+    }
+  },
+  {
+    "case_id": "C02-reorder",
+    "label": "records reordered",
+    "records": [
+      {
+        "event_id": "E1",
+        "timestamp": 100,
+        "validator_id": "validator-A",
+        "auth_context": "ctx-1",
+        "payload": "alpha"
+      },
+      {
+        "event_id": "E2",
+        "timestamp": 101,
+        "validator_id": "validator-A",
+        "auth_context": "ctx-1",
+        "payload": "beta"
+      }
+    ],
+    "operations": [
+      {
+        "op": "reorder"
+      }
+    ],
+    "expected": {
+      "status": "conflicting",
+      "fail_closed": "REJECT",
+      "fail_open": "REJECT"
+    },
+    "_metadata": {
+      "synthetic_only": true,
+      "production_verified": false
+    }
+  },
+  {
+    "case_id": "C03-duplicate",
+    "label": "record repeated exactly",
+    "records": [
+      {
+        "event_id": "E1",
+        "timestamp": 100,
+        "validator_id": "validator-A",
+        "auth_context": "ctx-1",
+        "payload": "alpha"
+      },
+      {
+        "event_id": "E2",
+        "timestamp": 101,
+        "validator_id": "validator-A",
+        "auth_context": "ctx-1",
+        "payload": "beta"
+      }
+    ],
+    "operations": [
+      {
+        "op": "duplicate"
+      }
+    ],
+    "expected": {
+      "status": "conflicting",
+      "fail_closed": "REJECT",
+      "fail_open": "REJECT"
+    },
+    "_metadata": {
+      "synthetic_only": true,
+      "production_verified": false
+    }
+  },
+  {
+    "case_id": "C04-drop",
+    "label": "middle record lost",
+    "records": [
+      {
+        "event_id": "E1",
+        "timestamp": 100,
+        "validator_id": "validator-A",
+        "auth_context": "ctx-1",
+        "payload": "alpha"
+      },
+      {
+        "event_id": "E2",
+        "timestamp": 101,
+        "validator_id": "validator-A",
+        "auth_context": "ctx-1",
+        "payload": "beta"
+      },
+      {
+        "event_id": "E3",
+        "timestamp": 102,
+        "validator_id": "validator-A",
+        "auth_context": "ctx-1",
+        "payload": "gamma"
+      }
+    ],
+    "operations": [
+      {
+        "op": "drop"
+      }
+    ],
+    "expected": {
+      "status": "conflicting",
+      "fail_closed": "REJECT",
+      "fail_open": "REJECT"
+    },
+    "_metadata": {
+      "synthetic_only": true,
+      "production_verified": false
+    }
+  },
+  {
+    "case_id": "C05-tamper",
+    "label": "payload tampered after signing",
+    "records": [
+      {
+        "event_id": "E1",
+        "timestamp": 100,
+        "validator_id": "validator-A",
+        "auth_context": "ctx-1",
+        "payload": "alpha"
+      }
+    ],
+    "operations": [
+      {
+        "op": "tamper_payload"
+      }
+    ],
+    "expected": {
+      "status": "conflicting",
+      "fail_closed": "REJECT",
+      "fail_open": "REJECT"
+    },
+    "_metadata": {
+      "synthetic_only": true,
+      "production_verified": false
+    }
+  },
+  {
+    "case_id": "C06-clock-rollback",
+    "label": "timestamp moves backward",
+    "records": [
+      {
+        "event_id": "E1",
+        "timestamp": 100,
+        "validator_id": "validator-A",
+        "auth_context": "ctx-1",
+        "payload": "alpha"
+      },
+      {
+        "event_id": "E2",
+        "timestamp": 99,
+        "validator_id": "validator-A",
+        "auth_context": "ctx-1",
+        "payload": "beta"
+      }
+    ],
+    "operations": [
+      {
+        "op": "clock_rollback"
+      }
+    ],
+    "expected": {
+      "status": "conflicting",
+      "fail_closed": "REJECT",
+      "fail_open": "REJECT"
+    },
+    "_metadata": {
+      "synthetic_only": true,
+      "production_verified": false
+    }
+  },
+  {
+    "case_id": "C07-unknown-validator",
+    "label": "validator key outside known set",
+    "records": [
+      {
+        "event_id": "E1",
+        "timestamp": 100,
+        "validator_id": "validator-A",
+        "auth_context": "ctx-1",
+        "payload": "alpha"
+      }
+    ],
+    "operations": [
+      {
+        "op": "unknown_validator"
+      }
+    ],
+    "expected": {
+      "status": "inaccessible",
+      "fail_closed": "REJECT",
+      "fail_open": "REJECT"
+    },
+    "_metadata": {
+      "synthetic_only": true,
+      "production_verified": false
+    }
+  },
+  {
+    "case_id": "C08-rotation-authorized",
+    "label": "declared validator rotation",
+    "records": [
+      {
+        "event_id": "E1",
+        "timestamp": 100,
+        "validator_id": "validator-A",
+        "auth_context": "ctx-1",
+        "payload": "alpha"
+      },
+      {
+        "event_id": "E2",
+        "timestamp": 101,
+        "validator_id": "validator-B",
+        "auth_context": "ctx-1",
+        "payload": "beta"
+      }
+    ],
+    "rotation": "authorized",
+    "expected": {
+      "status": "confirmed",
+      "fail_closed": "ACCEPT",
+      "fail_open": "ACCEPT"
+    },
+    "_metadata": {
+      "synthetic_only": true,
+      "production_verified": false
+    }
+  },
+  {
+    "case_id": "C09-rotation-unauthorized",
+    "label": "undeclared validator rotation",
+    "records": [
+      {
+        "event_id": "E1",
+        "timestamp": 100,
+        "validator_id": "validator-A",
+        "auth_context": "ctx-1",
+        "payload": "alpha"
+      },
+      {
+        "event_id": "E2",
+        "timestamp": 101,
+        "validator_id": "validator-B",
+        "auth_context": "ctx-1",
+        "payload": "beta"
+      }
+    ],
+    "rotation": "unauthorized",
+    "expected": {
+      "status": "conflicting",
+      "fail_closed": "REJECT",
+      "fail_open": "REJECT"
+    },
+    "_metadata": {
+      "synthetic_only": true,
+      "production_verified": false
+    }
+  },
+  {
+    "case_id": "C10-auth-change",
+    "label": "authorization context changes unexpectedly",
+    "records": [
+      {
+        "event_id": "E1",
+        "timestamp": 100,
+        "validator_id": "validator-A",
+        "auth_context": "ctx-1",
+        "payload": "alpha"
+      }
+    ],
+    "operations": [
+      {
+        "op": "auth_change",
+        "auth_context": "ctx-2"
+      }
+    ],
+    "authorization": "changed-unexpectedly",
+    "expected": {
+      "status": "conflicting",
+      "fail_closed": "REJECT",
+      "fail_open": "REJECT"
+    },
+    "_metadata": {
+      "synthetic_only": true,
+      "production_verified": false
+    }
+  },
+  {
+    "case_id": "C11-auth-declared",
+    "label": "declared authorization-context transition",
+    "records": [
+      {
+        "event_id": "E1",
+        "timestamp": 100,
+        "validator_id": "validator-A",
+        "auth_context": "ctx-1",
+        "payload": "alpha"
+      },
+      {
+        "event_id": "E2",
+        "timestamp": 101,
+        "validator_id": "validator-A",
+        "auth_context": "ctx-2",
+        "payload": "beta"
+      }
+    ],
+    "authorization": "changed-declared",
+    "expected": {
+      "status": "confirmed",
+      "fail_closed": "ACCEPT",
+      "fail_open": "ACCEPT"
+    },
+    "_metadata": {
+      "synthetic_only": true,
+      "production_verified": false
+    }
+  },
+  {
+    "case_id": "C12-replay",
+    "label": "same trace replayed deterministically",
+    "records": [
+      {
+        "event_id": "E1",
+        "timestamp": 100,
+        "validator_id": "validator-A",
+        "auth_context": "ctx-1",
+        "payload": "alpha"
+      }
+    ],
+    "operations": [
+      {
+        "op": "replay"
+      }
+    ],
+    "replay_expected": true,
+    "expected": {
+      "status": "confirmed",
+      "fail_closed": "ACCEPT",
+      "fail_open": "ACCEPT"
+    },
+    "_metadata": {
+      "synthetic_only": true,
+      "production_verified": false
+    }
+  },
+  {
+    "case_id": "C13-divergent-replay",
+    "label": "same event id with different payload",
+    "records": [
+      {
+        "event_id": "E1",
+        "timestamp": 100,
+        "validator_id": "validator-A",
+        "auth_context": "ctx-1",
+        "payload": "alpha"
+      }
+    ],
+    "operations": [
+      {
+        "op": "divergent_duplicate"
+      }
+    ],
+    "expected": {
+      "status": "conflicting",
+      "fail_closed": "REJECT",
+      "fail_open": "REJECT"
+    },
+    "_metadata": {
+      "synthetic_only": true,
+      "production_verified": false
+    }
+  },
+  {
+    "case_id": "C14-unverified-property",
+    "label": "crash durability is not tested",
+    "records": [
+      {
+        "event_id": "E1",
+        "timestamp": 100,
+        "validator_id": "validator-A",
+        "auth_context": "ctx-1",
+        "payload": "alpha"
+      }
+    ],
+    "evidence": "inferred",
+    "unknown_expected": true,
+    "expected": {
+      "status": "unverified",
+      "fail_closed": "REJECT",
+      "fail_open": "ACCEPT_WITH_UNKNOWN"
+    },
+    "_metadata": {
+      "synthetic_only": true,
+      "production_verified": false
+    }
+  }
+]

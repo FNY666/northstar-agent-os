@@ -1,0 +1,21 @@
+{
+  "schema_version": "1.0",
+  "synthetic_only": true,
+  "production_verified": false,
+  "question": "Under a deterministic, fully offline synthetic-only policy, how are same-attempt duplicate response/durable records classified for one worker and one op_id, including restart/resume UNKNOWN preservation?",
+  "scope": {
+    "included": ["one worker", "one op_id per fixture", "same attempt", "same-value repeats", "different-value conflicts", "response/durable reference consistency", "synthetic crash/restart/resume"],
+    "excluded": ["multiple workers", "state-space enumeration", "dedup-key collisions", "manual reconcile", "real Gemini CLI", "real services", "credentials", "production claims", "remote state", "exactly-once", "rollback", "crash durability"]
+  },
+  "claims": [
+    {"id":"C1","claim":"The deterministic harness classified 10 permitted synthetic fixtures as 4 accepted, 3 rejected, and 3 UNKNOWN.","status":"confirmed","confidence":"high","sources":[{"url":"https://example.invalid/s23-local-harness","publisher":"S23 local artifact (URL placeholder; no network source)","published_or_updated":"2026-09-22","tier":"primary","support":"Directly reproduced by harness.py and outputs/results.json; URL is non-resolving by design."}],"caveat":"This is only a local synthetic run, not a product or service result."},
+    {"id":"C2","claim":"Within this local policy, a same-value duplicate in the same attempt is classified accepted/idempotent.","status":"confirmed","confidence":"high","sources":[{"url":"https://example.invalid/s23-local-harness","publisher":"S23 local artifact (URL placeholder; no network source)","published_or_updated":"2026-09-22","tier":"primary","support":"S23-02 and S23-04 outputs."}],"caveat":"Policy behavior does not establish Gemini CLI behavior."},
+    {"id":"C3","claim":"Within this local policy, differing values for the same record kind are classified rejected as conflict.","status":"confirmed","confidence":"high","sources":[{"url":"https://example.invalid/s23-local-harness","publisher":"S23 local artifact (URL placeholder; no network source)","published_or_updated":"2026-09-22","tier":"primary","support":"S23-03 and S23-05 outputs."}],"caveat":"No dedup-key collision or multi-worker behavior was tested."},
+    {"id":"C4","claim":"Within this local policy, response and durable references with the same reference are accepted; differing references are rejected.","status":"confirmed","confidence":"high","sources":[{"url":"https://example.invalid/s23-local-harness","publisher":"S23 local artifact (URL placeholder; no network source)","published_or_updated":"2026-09-22","tier":"primary","support":"S23-06 and S23-07 outputs."}],"caveat":"This is synthetic reference comparison only; it is not a claim about durable storage."},
+    {"id":"C5","claim":"After synthetic crash/restart/resume markers, prior UNKNOWN remains UNKNOWN and is not locally downgraded to applied/not_applied.","status":"confirmed","confidence":"high","sources":[{"url":"https://example.invalid/s23-local-harness","publisher":"S23 local artifact (URL placeholder; no network source)","published_or_updated":"2026-09-22","tier":"primary","support":"S23-08 through S23-10 outputs."}],"caveat":"The harness does not prove crash durability, recovery correctness, or any remote status."},
+    {"id":"C6","claim":"The local rule could generalize to Gemini CLI, production, remote state, exactly-once semantics, rollback, or crash durability.","status":"inaccessible","confidence":"none","sources":[],"caveat":"Explicitly outside scope and not tested; no extrapolation is permitted."},
+    {"id":"C7","claim":"Independent production verification of these duplicate-record rules is available from this run.","status":"unverified","confidence":"none","sources":[],"caveat":"No real CLI, service, credentials, or remote state was accessed."},
+    {"id":"C8","claim":"The fixture set is exhaustive over the relevant state space.","status":"unverified","confidence":"none","sources":[],"caveat":"State-space enumeration is explicitly excluded."}
+  ],
+  "coverage": {"fixture_count":10,"accepted":4,"rejected":3,"UNKNOWN":3,"remaining_unknown_cases":["S23-08","S23-09","S23-10"],"all_files_marked_synthetic_only":true,"all_files_marked_production_verified_false":true}
+}

@@ -1,0 +1,24 @@
+{
+  "schema_version": "1.0",
+  "question": "Under deterministic local synthetic evidence, does provenance handling preserve RECOVERED, UNKNOWN, and REJECT without upgrading absence or ambiguity?",
+  "scope": {
+    "slice": "C-line S15",
+    "offline": true,
+    "synthetic_only": true,
+    "production_verified": false,
+    "fixtures": 18,
+    "excluded": ["S1-S14", "other research artifacts", "network", "real services", "SDKs", "credentials", "shared/P0", "事故目录", "D10/L12/D14", "canonical/staging/140/tri-line/systemd"]
+  },
+  "claims": [
+    {"id":"C15-1","claim":"The local harness preserves three states and records provenance, reason, blocker, and input hash per result.","status":"inferred","confidence":"high","sources":[],"caveat":"Inferred solely from synthetic fixtures and local validator; not a production guarantee."},
+    {"id":"C15-2","claim":"Only explicit rule-verifiable contradictions are REJECT; missing, inaccessible, partial, ambiguous, truncated, retry-only, or majority-only evidence remains UNKNOWN.","status":"inferred","confidence":"high","sources":[],"caveat":"Inferred from the S15-v1-local-deterministic rule set; no external evidence."},
+    {"id":"C15-3","claim":"An inclusive clock boundary and repeat agreement can recover under the declared synthetic rules.","status":"inferred","confidence":"medium","sources":[],"caveat":"Inferred synthetic model behavior only; does not establish real clock durability or replay semantics."},
+    {"id":"C15-4","claim":"This slice does not prove durability, remote state, exactly-once behavior, rollback, or production readiness.","status":"inferred","confidence":"high","sources":[],"caveat":"Scope limitation inferred from the offline design and explicit exclusions."}
+  ],
+  "coverage": {
+    "fixture_count": 18,
+    "dimensions": ["cross-source linkage mismatch", "source fingerprint reuse", "same summary heterogeneous content", "replay order inversion", "clock boundary drift", "partial provenance", "budget truncation", "explicit contradiction", "missing evidence", "inaccessible source", "ambiguity", "majority vote", "retry", "repeat agreement"],
+    "three_state_counts": {"RECOVERED":3,"UNKNOWN":10,"REJECT":5},
+    "external_sources": 0
+  }
+}

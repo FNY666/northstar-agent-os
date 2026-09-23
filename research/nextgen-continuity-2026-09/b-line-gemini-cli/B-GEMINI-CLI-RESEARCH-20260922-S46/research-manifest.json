@@ -1,0 +1,157 @@
+{
+  "schema_version": "1.0",
+  "question": "What do official Gemini CLI sources establish about ACP/IDE session lifecycle and failure boundaries?",
+  "scope": "public first-party Google Gemini CLI sources only; read-only research",
+  "coverage": [
+    "ACP JSON-RPC transport",
+    "initialize/newSession/loadSession/prompt/cancel",
+    "filesystem proxy",
+    "streaming updates",
+    "IDE companion lifecycle",
+    "diff acceptance/rejection",
+    "disconnect/error boundaries"
+  ],
+  "slice_id": "B-S46-OFFICIAL-ACP-IDE-LIFECYCLE-20260922",
+  "status": "complete",
+  "research_date": "2026-09-22",
+  "access_date": "2026-09-22",
+  "sources": [
+    {
+      "id": "S46-1",
+      "url": "https://github.com/google-gemini/gemini-cli/blob/main/docs/cli/acp-mode.md",
+      "access_date": "2026-09-22",
+      "evidence_window": "ACP stdio JSON-RPC architecture; initialize/newSession/loadSession/prompt/cancel; filesystem proxy; debugging and telemetry",
+      "evidence_level": "verified",
+      "cannot_prove": "external side-effect commit, exactly-once, cancellation enforcement after request acceptance"
+    },
+    {
+      "id": "S46-2",
+      "url": "https://github.com/google-gemini/gemini-cli/blob/main/docs/ide-integration/ide-companion-spec.md",
+      "access_date": "2026-09-22",
+      "evidence_window": "MCP-over-HTTP companion transport, port-file discovery, contextUpdate, openDiff/closeDiff, accepted/rejected notifications, lifecycle",
+      "evidence_level": "verified",
+      "cannot_prove": "editor persistence beyond protocol responses, complete delivery, external business effect"
+    },
+    {
+      "id": "S46-3",
+      "url": "https://github.com/google-gemini/gemini-cli/blob/main/docs/ide-integration/index.md",
+      "access_date": "2026-09-22",
+      "evidence_window": "VS Code companion setup/enable/disable, diff approval workflow, ACP integration, sandboxing and troubleshooting/disconnect behavior",
+      "evidence_level": "verified",
+      "cannot_prove": "automatic recovery, rollback, no duplicate effects after reconnect"
+    },
+    {
+      "id": "S46-4",
+      "url": "https://github.com/google-gemini/gemini-cli/tree/main/packages/cli/src/acp",
+      "access_date": "2026-09-22",
+      "evidence_window": "Official implementation README describing session manager/session execution, workspace-bound filesystem, permissions, streaming, and resume tests",
+      "evidence_level": "verified",
+      "cannot_prove": "runtime production success from README/tests alone"
+    }
+  ],
+  "claims": [
+    {
+      "id": "C1",
+      "claim": "ACP uses JSON-RPC over stdio; initialize establishes connection, newSession starts a session, loadSession loads a previous session, prompt sends work, and cancel cancels an ongoing prompt.",
+      "status": "confirmed",
+      "confidence": "high",
+      "sources": [
+        {
+          "url": "https://github.com/google-gemini/gemini-cli/blob/main/docs/cli/acp-mode.md",
+          "publisher": "Google Gemini CLI",
+          "published_or_updated": "2026-09-22 repository snapshot",
+          "tier": "primary",
+          "support": "Architecture and supported-methods sections."
+        }
+      ],
+      "caveat": "Protocol method semantics do not prove that a remote or local side effect was committed."
+    },
+    {
+      "id": "C2",
+      "claim": "The official ACP implementation separates RPC dispatch, session management, individual session execution, error mapping, and workspace/permission-bounded filesystem handling; it streams updates to the client.",
+      "status": "confirmed",
+      "confidence": "high",
+      "sources": [
+        {
+          "url": "https://github.com/google-gemini/gemini-cli/tree/main/packages/cli/src/acp",
+          "publisher": "Google Gemini CLI",
+          "published_or_updated": "2026-09-22 repository snapshot",
+          "tier": "primary",
+          "support": "Official implementation README."
+        }
+      ],
+      "caveat": "Architecture and tests are not proof of all deployment configurations."
+    },
+    {
+      "id": "C3",
+      "claim": "The IDE companion protocol uses MCP over HTTP with port-file discovery; context updates are notifications, diff open/close return success or error content, and acceptance/rejection are separate notifications.",
+      "status": "confirmed",
+      "confidence": "high",
+      "sources": [
+        {
+          "url": "https://github.com/google-gemini/gemini-cli/blob/main/docs/ide-integration/ide-companion-spec.md",
+          "publisher": "Google Gemini CLI",
+          "published_or_updated": "2026-09-22 repository snapshot",
+          "tier": "primary",
+          "support": "Communication, context, diffing, and lifecycle sections."
+        }
+      ],
+      "caveat": "A protocol response/notification does not by itself prove durable editor state."
+    },
+    {
+      "id": "C4",
+      "claim": "The IDE integration documents user approval for diffs and distinguishes allow-for-session behavior; it also documents connection-loss troubleshooting and sandboxing.",
+      "status": "confirmed",
+      "confidence": "high",
+      "sources": [
+        {
+          "url": "https://github.com/google-gemini/gemini-cli/blob/main/docs/ide-integration/index.md",
+          "publisher": "Google Gemini CLI",
+          "published_or_updated": "2026-09-22 repository snapshot",
+          "tier": "primary",
+          "support": "Diff workflow, enabling/disabling, sandboxing, and connection-error sections."
+        }
+      ],
+      "caveat": "The docs do not define automatic retry, rollback, or reconciliation after disconnect."
+    },
+    {
+      "id": "C5",
+      "claim": "Exactly-once behavior, cancellation-after-acceptance, reconnect deduplication, complete notification delivery, durable editor commit, rollback, and external business effect remain unknown from these sources.",
+      "status": "unverified",
+      "confidence": "high",
+      "sources": [
+        {
+          "url": "https://github.com/google-gemini/gemini-cli/blob/main/docs/cli/acp-mode.md",
+          "publisher": "Google Gemini CLI",
+          "published_or_updated": "2026-09-22 repository snapshot",
+          "tier": "primary",
+          "support": "ACP docs define protocol methods but not these guarantees."
+        },
+        {
+          "url": "https://github.com/google-gemini/gemini-cli/blob/main/docs/ide-integration/ide-companion-spec.md",
+          "publisher": "Google Gemini CLI",
+          "published_or_updated": "2026-09-22 repository snapshot",
+          "tier": "primary",
+          "support": "Companion spec defines messages and errors but not distributed delivery/commit guarantees."
+        }
+      ],
+      "caveat": "After disconnect or ambiguous cancellation, retain UNKNOWN and use target read-back/reconciliation before retry."
+    }
+  ],
+  "limitations": [
+    "No live ACP client, IDE, credential, or real service was used",
+    "No production environment was accessed",
+    "Documentation and repository README are evidence of documented design, not proof of all runtime outcomes"
+  ],
+  "production_verified": false,
+  "synthetic_only": false,
+  "unknowns": [
+    "exactly-once",
+    "cancellation-after-acceptance",
+    "reconnect deduplication",
+    "complete notification delivery",
+    "durable editor commit",
+    "rollback",
+    "external business effect"
+  ]
+}

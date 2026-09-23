@@ -1,0 +1,26 @@
+{
+  "research_id": "A81254C8-LEASE-FENCING-20260922-025109",
+  "topic": "Agent runtime lease expiry, heartbeat, and fencing tokens",
+  "access_date": "2026-09-22",
+  "directory": "/tmp/A81254C8-LEASE-FENCING-20260922-025109",
+  "source_policy": "public first-party documentation only",
+  "prior_slice": "not read; path explicitly excluded",
+  "shared_targets_accessed": false,
+  "private_accounts_or_credentials_accessed": false,
+  "files": ["report.md", "sources.md", "summary.md", "research-manifest.json", "SHA256SUMS", "next-slice-dispatch.md"],
+  "sources": [
+    {"url":"https://kubernetes.io/docs/concepts/architecture/leases/","vendor":"Kubernetes","status":"verified+boundary"},
+    {"url":"https://kubernetes.io/docs/reference/kubernetes-api/cluster-resources/lease-v1/","vendor":"Kubernetes","status":"verified+boundary"},
+    {"url":"https://kubernetes.io/docs/reference/using-api/api-concepts/","vendor":"Kubernetes","status":"verified+boundary"},
+    {"url":"https://kubernetes.io/docs/concepts/workloads/controllers/job/","vendor":"Kubernetes","status":"verified+boundary"},
+    {"url":"https://kubernetes.io/docs/concepts/workloads/pods/pod-lifecycle/","vendor":"Kubernetes","status":"verified+boundary"},
+    {"url":"https://docs.temporal.io/encyclopedia/detecting-activity-failures","vendor":"Temporal","status":"verified+boundary"},
+    {"url":"https://docs.temporal.io/activities","vendor":"Temporal","status":"verified+boundary"},
+    {"url":"https://docs.temporal.io/workers","vendor":"Temporal","status":"verified+boundary"},
+    {"url":"https://docs.aws.amazon.com/step-functions/latest/apireference/API_SendTaskHeartbeat.html","vendor":"AWS","status":"verified+boundary"},
+    {"url":"https://docs.aws.amazon.com/step-functions/latest/dg/activities.html","vendor":"AWS","status":"verified+boundary"},
+    {"url":"https://docs.aws.amazon.com/step-functions/latest/dg/choosing-workflow-type.html","vendor":"AWS","status":"verified+boundary"}
+  ],
+  "claims": {"verified":"vendor documentation statements recorded in sources.md", "inferred":"target-side fencing, overlap, evidence, and reconciliation recommendations", "unknown":"expiry does not establish process death or arbitrary external-write fencing"},
+  "validation": {"planned":"existence, nonzero sizes, sha256, manifest consistency"}
+}

@@ -1,0 +1,174 @@
+{
+  "algorithm": "fail-closed-trust-continuity-v1",
+  "case_count": 10,
+  "coverage_labels": [
+    "DELAYED",
+    "DROPPED",
+    "EXPORTER_FAILURE",
+    "NO_EVENT",
+    "QUERY_GAP",
+    "RETENTION_EXPIRED",
+    "UNKNOWN",
+    "VERIFIED_CONTINUITY"
+  ],
+  "production_verified": false,
+  "results": [
+    {
+      "case_id": "S24-01-clean-recovery",
+      "event_class": "VERIFIED_CONTINUITY",
+      "evidence_independence": {
+        "admission_platform_receipt": "apr-001",
+        "external_effect_confirmation": "ext-001",
+        "log_presence": "log-001"
+      },
+      "input_fingerprint": "45213bc6bae8df94f2138b054ce7297d56456b5d6184f7196d3bb8e89c4b6179",
+      "reason_codes": [
+        "ALL_INDEPENDENT_EVIDENCE_AND_GUARDS_CLOSED"
+      ],
+      "state": "RECOVERED"
+    },
+    {
+      "case_id": "S24-02-no-event",
+      "event_class": "NO_EVENT",
+      "evidence_independence": {
+        "admission_platform_receipt": "apr-002",
+        "external_effect_confirmation": "ext-002",
+        "log_presence": "log-002"
+      },
+      "input_fingerprint": "b6ce331951bd087e8ee3d48c89aa4065da306f2d3dcaa03d529f0f0fdce813c9",
+      "reason_codes": [
+        "TOKEN_CONTINUITY_UNPROVEN"
+      ],
+      "state": "UNKNOWN"
+    },
+    {
+      "case_id": "S24-03-delayed-receipt",
+      "event_class": "DELAYED",
+      "evidence_independence": {
+        "admission_platform_receipt": "apr-003",
+        "external_effect_confirmation": "ext-003",
+        "log_presence": "log-003"
+      },
+      "input_fingerprint": "7c24a3f053c6a22172a03bae62d7dc071064d56c3f477f5d0bcb9eee2b584872",
+      "reason_codes": [
+        "REPLAY_WINDOW_UNSAFE"
+      ],
+      "state": "REJECT"
+    },
+    {
+      "case_id": "S24-04-dropped-partial",
+      "event_class": "DROPPED",
+      "evidence_independence": {
+        "admission_platform_receipt": "apr-004",
+        "external_effect_confirmation": "ext-004",
+        "log_presence": "log-004"
+      },
+      "input_fingerprint": "9eef051c4f7e949de255e4eb5de567aa3bdab0dfcf5930c566ddd67d6c8814d2",
+      "reason_codes": [
+        "PARTIAL_COMMIT"
+      ],
+      "state": "UNKNOWN"
+    },
+    {
+      "case_id": "S24-05-exporter-chain-break",
+      "event_class": "EXPORTER_FAILURE",
+      "evidence_independence": {
+        "admission_platform_receipt": "apr-005",
+        "external_effect_confirmation": "ext-005",
+        "log_presence": "log-005"
+      },
+      "input_fingerprint": "286746635826e624a6569d0760be7eea503309948c20fa07393cbf62e1d965ec",
+      "reason_codes": [
+        "AUDIT_HASH_CHAIN_BREAK"
+      ],
+      "state": "UNKNOWN"
+    },
+    {
+      "case_id": "S24-06-query-gap-missing-key",
+      "event_class": "QUERY_GAP",
+      "evidence_independence": {
+        "admission_platform_receipt": "apr-006",
+        "external_effect_confirmation": "ext-006",
+        "log_presence": "log-006"
+      },
+      "input_fingerprint": "86b51052a544ba14afe0906af549e617e9173798ff7e80be10ab19911c1cdbc9",
+      "reason_codes": [
+        "IDEMPOTENCY_KEY_MISSING"
+      ],
+      "state": "UNKNOWN"
+    },
+    {
+      "case_id": "S24-07-retention-epoch-fence",
+      "event_class": "RETENTION_EXPIRED",
+      "evidence_independence": {
+        "admission_platform_receipt": "apr-007",
+        "external_effect_confirmation": "ext-007",
+        "log_presence": "log-007"
+      },
+      "input_fingerprint": "cb43996029744d7f7e95f12c2cc4a1d790552be4c4301dad8799ac717553d89c",
+      "reason_codes": [
+        "EPOCH_MISMATCH",
+        "TOKEN_CONTINUITY_UNPROVEN",
+        "REPLAY_WINDOW_UNSAFE",
+        "POST_RECOVERY_FENCE_UNPROVEN"
+      ],
+      "state": "REJECT"
+    },
+    {
+      "case_id": "S24-08-replay-double-commit",
+      "event_class": "UNKNOWN",
+      "evidence_independence": {
+        "admission_platform_receipt": "apr-008",
+        "external_effect_confirmation": "ext-008",
+        "log_presence": "log-008"
+      },
+      "input_fingerprint": "e5f72030da8eead8d548355c83134292a589baa8b3b58464a5921b23e79a689f",
+      "reason_codes": [
+        "IDEMPOTENCY_KEY_REUSED",
+        "REPLAY_WINDOW_UNSAFE",
+        "DOUBLE_COMMIT"
+      ],
+      "state": "REJECT"
+    },
+    {
+      "case_id": "S24-09-parameter-conflict",
+      "event_class": "UNKNOWN",
+      "evidence_independence": {
+        "admission_platform_receipt": "apr-009",
+        "external_effect_confirmation": "ext-009",
+        "log_presence": "log-009"
+      },
+      "input_fingerprint": "8277e8a9287ffbcd1e83a14f0b1edc1a3655a4041e2bfa54089e58f51ba370fe",
+      "reason_codes": [
+        "IDEMPOTENCY_PARAMETER_CONFLICT"
+      ],
+      "state": "REJECT"
+    },
+    {
+      "case_id": "S24-10-post-recovery-fencing",
+      "event_class": "UNKNOWN",
+      "evidence_independence": {
+        "admission_platform_receipt": "apr-010",
+        "external_effect_confirmation": "ext-010",
+        "log_presence": "log-010"
+      },
+      "input_fingerprint": "f59833b4e67dc6757a4df73fe77176f8b9d9059b877e7fb7dca340b887ddf50b",
+      "reason_codes": [
+        "POST_RECOVERY_FENCE_UNPROVEN"
+      ],
+      "state": "UNKNOWN"
+    }
+  ],
+  "schema_version": "S24-results-1",
+  "state_counts": {
+    "RECOVERED": 1,
+    "REJECT": 4,
+    "UNKNOWN": 5
+  },
+  "state_domain": [
+    "RECOVERED",
+    "UNKNOWN",
+    "REJECT"
+  ],
+  "synthetic_only": true
+}

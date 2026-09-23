@@ -1,0 +1,81 @@
+{
+  "schema_version": "1.0",
+  "question": "S37：Gemini CLI 官方资料如何定义 Extensions 与 Agent Skills 的生命周期、发现/激活、权限和安全边界？这些资料不能证明什么？",
+  "scope": {
+    "slice": "B line S37 official",
+    "time_window": "current as of 2026-09-22; official repository snapshot commit d5b3e3accb26000d273abf16e0f1dd83aa5428a9",
+    "geography_or_context": "Google Gemini CLI public official GitHub documentation",
+    "inclusions": ["official Gemini CLI docs/extensions", "official CLI Agent Skills docs", "official best-practices pages", "read-only local snapshot and raw URL HTTP verification"],
+    "exclusions": ["third-party sources", "private accounts", "real CLI execution", "real extensions or skills", "credentials", "shared/P0", "事故目录", "D10", "L12", "D14", "canonical", "staging", "140", "tri-line", "systemd", "real services"],
+    "synthetic_only": false,
+    "production_verified": false,
+    "offline_analysis_of_public_sources": true,
+    "access_date": "2026-09-22"
+  },
+  "claims": [
+    {
+      "id": "S37-C1",
+      "claim": "官方 reference 规定 Extension 安装可从 GitHub URL 或本地路径进行，安装创建副本，源变化需通过 extensions update 拉取，并支持 ref、auto-update、pre-release、consent；管理变更需重启 CLI 会话后生效。",
+      "status": "confirmed",
+      "confidence": "high",
+      "sources": [{"url": "https://github.com/google-gemini/gemini-cli/blob/main/docs/extensions/reference.md", "publisher": "Google Gemini CLI", "published_or_updated": "2026-09-21 commit; accessed 2026-09-22", "tier": "primary", "support": "reference.md lines 11-34 and 67-80 directly state copy-on-install, update, options, and restart boundary."}],
+      "caveat": "文档事实已核验；未实际安装、更新或验证具体扩展。"
+    },
+    {
+      "id": "S37-C2",
+      "claim": "官方区分 interactive mode 与终端管理：install 等命令不在 interactive mode 支持；可用 /extensions list 查看，扩展支持 user/workspace scope 的 disable/enable，Skills 提供 list/link/disable/enable/reload/install/uninstall。",
+      "status": "confirmed",
+      "confidence": "high",
+      "sources": [{"url": "https://github.com/google-gemini/gemini-cli/blob/main/docs/extensions/reference.md", "publisher": "Google Gemini CLI", "published_or_updated": "2026-09-21 commit; accessed 2026-09-22", "tier": "primary", "support": "reference.md lines 6-14 and 36-80."}, {"url": "https://github.com/google-gemini/gemini-cli/blob/main/docs/cli/skills.md", "publisher": "Google Gemini CLI", "published_or_updated": "2026-09-21 commit; accessed 2026-09-22", "tier": "primary", "support": "skills.md lines 81-127."}],
+      "caveat": "不能据此证明当前版本、OS 或权限环境下命令运行成功，也不能证明已激活能力即时撤销。"
+    },
+    {
+      "id": "S37-C3",
+      "claim": "Agent Skills 官方生命周期为发现 name/description、任务匹配后 activate_skill、展示同意提示、批准后注入 SKILL.md 与目录访问；Skills 可执行脚本并访问文件，因此官方要求安装/激活安全同意。",
+      "status": "confirmed",
+      "confidence": "high",
+      "sources": [{"url": "https://github.com/google-gemini/gemini-cli/blob/main/docs/cli/skills.md", "publisher": "Google Gemini CLI", "published_or_updated": "2026-09-21 commit; accessed 2026-09-22", "tier": "primary", "support": "skills.md lines 15-31."}, {"url": "https://github.com/google-gemini/gemini-cli/blob/main/docs/cli/using-agent-skills.md", "publisher": "Google Gemini CLI", "published_or_updated": "2026-09-21 commit; accessed 2026-09-22", "tier": "primary", "support": "using-agent-skills.md lines 71-80 explicitly mention scripts/files and installation/activation consent."}],
+      "caveat": "未运行 CLI；弹窗、沙箱、细粒度写权限和网络隔离的运行态均 unknown。"
+    },
+    {
+      "id": "S37-C4",
+      "claim": "Skills discovery tiers 的官方优先级为 built-in < extension < user < workspace；同名使用更高优先级版本，且同层级 .agents/skills/ 优先于 .gemini/skills/。",
+      "status": "confirmed",
+      "confidence": "high",
+      "sources": [{"url": "https://github.com/google-gemini/gemini-cli/blob/main/docs/cli/skills.md", "publisher": "Google Gemini CLI", "published_or_updated": "2026-09-21 commit; accessed 2026-09-22", "tier": "primary", "support": "skills.md lines 35-55."}],
+      "caveat": "优先级规则不等于内容可信或用户意图正确；未验证具体冲突运行态。"
+    },
+    {
+      "id": "S37-C5",
+      "claim": "Extension 默认不继承完整 shell 环境；敏感变量默认过滤，只允许标准安全变量和 manifest settings 中显式声明的 envVar。",
+      "status": "confirmed",
+      "confidence": "high",
+      "sources": [{"url": "https://github.com/google-gemini/gemini-cli/blob/main/docs/extensions/reference.md", "publisher": "Google Gemini CLI", "published_or_updated": "2026-09-21 commit; accessed 2026-09-22", "tier": "primary", "support": "reference.md lines 213-227."}],
+      "caveat": "不证明 secret 不会通过文件、参数、日志、MCP 返回值或其他通道泄露；不证明 MCP server 自身安全。"
+    },
+    {
+      "id": "S37-C6",
+      "claim": "Extension policy 位于 tier 2，高于默认、低于 user/admin；官方明确忽略 extension policy 的 allow/yolo，防止扩展自动批准工具调用或绕过确认。",
+      "status": "confirmed",
+      "confidence": "high",
+      "sources": [{"url": "https://github.com/google-gemini/gemini-cli/blob/main/docs/extensions/reference.md", "publisher": "Google Gemini CLI", "published_or_updated": "2026-09-21 commit; accessed 2026-09-22", "tier": "primary", "support": "reference.md lines 261-280."}],
+      "caveat": "不证明所有危险路径被捕获、user/admin 配置正确、工具无副作用或存在完整审计。"
+    },
+    {
+      "id": "S37-C7",
+      "claim": "官方 best-practices 建议最小权限、限制强工具、验证 MCP 输入、使用 sensitive 设置保护秘密，并审查第三方 skill 的 SKILL.md/scripts、限制 scope。",
+      "status": "confirmed",
+      "confidence": "high",
+      "sources": [{"url": "https://github.com/google-gemini/gemini-cli/blob/main/docs/extensions/best-practices.md", "publisher": "Google Gemini CLI", "published_or_updated": "2026-09-21 commit; accessed 2026-09-22", "tier": "primary", "support": "extensions-best-practices.md lines 58-108."}, {"url": "https://github.com/google-gemini/gemini-cli/blob/main/docs/cli/skills-best-practices.md", "publisher": "Google Gemini CLI", "published_or_updated": "2026-09-21 commit; accessed 2026-09-22", "tier": "primary", "support": "skills-best-practices.md lines 69-77."}],
+      "caveat": "这是官方设计指导，不是独立审计、渗透测试、生产合规或攻击阻断证明；效果保持 unknown。"
+    }
+  ],
+  "coverage": {
+    "searched": ["official Gemini CLI extension reference", "official Agent Skills lifecycle and management", "official extension security best practices", "official skill security best practices", "raw URL HTTP 200 verification", "repository commit and local snapshot"],
+    "inaccessible": [],
+    "unresolved_conflicts": [],
+    "covered": ["install/update/enable/disable/uninstall", "interactive versus terminal boundary", "skill discovery/activation/consent", "precedence", "environment filtering", "extension policy fail-closed behavior", "least privilege and input validation guidance"],
+    "not_covered": ["runtime execution", "third-party source trust", "signatures and dependency integrity", "sandbox/network isolation", "audit logging", "rollback", "exactly-once", "crash recovery", "external effects", "production readiness"],
+    "unknown_policy": "Do not upgrade official documentation into runtime or production verification."
+  }
+}

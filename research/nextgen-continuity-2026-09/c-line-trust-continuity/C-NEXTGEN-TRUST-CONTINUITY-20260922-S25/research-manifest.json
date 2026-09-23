@@ -1,0 +1,30 @@
+{
+  "schema_version": "1.0",
+  "question": "在仅离线合成条件下，多区域、多观察者的 receipt 与外部效果确认，如何用交叉签名及时钟偏差矩阵维持 fail-closed 的 trust-continuity 判定？",
+  "scope": {
+    "mode": "offline synthetic experiment",
+    "regions": ["synthetic-region-a", "synthetic-region-b", "synthetic-region-c"],
+    "observers": ["synthetic-observer-1", "synthetic-observer-2", "synthetic-observer-3"],
+    "cutoff": "2026-09-22",
+    "excluded": ["network", "real services", "SDKs", "credentials", "production systems", "S1-S24", "/var/minis/shared/P0", "accident directories", "D10/L12/D14", "canonical", "140", "tri-line", "systemd"]
+  },
+  "synthetic_only": true,
+  "production_verified": false,
+  "claims": [
+    {"id": "C-S25-01", "claim": "RECOVERED requires at least two independent observer records plus valid freshness, bounded clock skew, complete non-conflicting cross-signatures, continuous identity/epoch/fence, and closure of platform receipt, durable log, and external-effect evidence.", "status": "inferred", "confidence": "bounded", "sources": [], "caveat": "A deterministic local rule, not production evidence."},
+    {"id": "C-S25-02", "claim": "Clock rollback, revoked fence, signature conflict, or identity/epoch/fence discontinuity must prevent recovery and may yield REJECT.", "status": "inferred", "confidence": "bounded", "sources": [], "caveat": "Synthetic adversarial cases only."},
+    {"id": "C-S25-03", "claim": "Missing, stale, delayed, dropped, exporter-failed, query-gap, retention-expired, or externally unconfirmed evidence remains UNKNOWN rather than being promoted to RECOVERED.", "status": "inferred", "confidence": "bounded", "sources": [], "caveat": "No claim about real-world failure rates or durability."},
+    {"id": "C-S25-04", "claim": "The three-state outcome space is mutually exclusive: RECOVERED, UNKNOWN, or REJECT.", "status": "inferred", "confidence": "bounded", "sources": [], "caveat": "Model invariant exercised by local validator."}
+  ],
+  "coverage": {
+    "required_labels": ["NO_EVENT", "DELAYED", "DROPPED", "EXPORTER_FAILURE", "QUERY_GAP", "RETENTION_EXPIRED", "VERIFIED_CONTINUITY", "UNKNOWN"],
+    "states": ["RECOVERED", "UNKNOWN", "REJECT"],
+    "matrix_dimensions": ["region", "observer", "receipt", "log", "external_effect", "freshness", "clock_skew", "clock_rollback", "fence_revocation", "signature_completeness", "signature_conflict", "identity_epoch", "observer_agreement"],
+    "evidence_classes": ["platform_receipt", "durable_log", "external_effect"]
+  },
+  "limitations": [
+    "All records are locally generated fixtures; no external sources were used.",
+    "This cannot prove production durability, exactly-once behavior, rollback safety, external effects, or production readiness.",
+    "RECOVERED is a synthetic policy outcome, not an attestation of any real system."
+  ]
+}

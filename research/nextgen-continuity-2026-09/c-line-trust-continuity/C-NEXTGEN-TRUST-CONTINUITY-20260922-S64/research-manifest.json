@@ -1,0 +1,24 @@
+{
+  "schema_version": "1.0",
+  "question": "在离线合成证据中，何时通知内容的分类、recipient授权/consent/purpose、最小化/redaction、渠道/区域、retention/deletion、export/access audit、模板/locale/version、偏好/fallback/replay 能够闭合隐私连续性，何时必须保持 UNKNOWN 或 REJECT？",
+  "scope": {
+    "project": "C-line S64",
+    "mode": "offline synthetic fixtures",
+    "date": "2026-09-23",
+    "excluded": ["S1-S63", "production", "network", "real services", "credentials"],
+    "identity_domain": ["project", "decision_id", "recipient_id", "notification_id", "channel", "region", "version"],
+    "privacy_notification_domain": ["classification", "authorization", "consent", "purpose", "minimization", "redaction", "channel_policy", "retention", "deletion", "export", "destination", "access_role", "audit", "template", "locale", "preference", "replay"]
+  },
+  "claims_status": "inferred",
+  "synthetic_only": true,
+  "production_verified": false,
+  "sources": [],
+  "claims": [
+    {"id":"notification-privacy-closure","claim":"只有分类、recipient授权/consent/purpose、最小化/redaction、渠道/区域、retention/deletion、export/access audit、template/locale/version、preference/fallback/replay全部闭合时才可 RECOVERED。","status":"inferred","confidence":"bounded","sources":[],"caveat":"仅由本地合成夹具和规则推导，不代表生产系统。"},
+    {"id":"send-not-privacy-proof","claim":"发送成功、recipient存在或渠道允许不能证明内容可被对象接收、字段最小化或过期数据已删除；必须独立 policy/runtime/data path read-back。","status":"inferred","confidence":"bounded","sources":[],"caveat":"未验证任何真实通知隐私系统。"},
+    {"id":"privacy-unknown","claim":"授权/同意/目的/区域/保留/导出/访问/模板/偏好/fallback/replay或隐私状态未知时必须 UNKNOWN。","status":"inferred","confidence":"bounded","sources":[],"caveat":"布尔门不量化真实隐私风险。"},
+    {"id":"privacy-conflict-reject","claim":"身份冲突和同一recipient/decision不可调和的隐私状态冲突必须 REJECT。","status":"inferred","confidence":"bounded","sources":[],"caveat":"只验证合成判定逻辑，不证明目标系统执行拒绝。"}
+  ],
+  "coverage": {"cases": 29, "property_sweep": 16777216, "dimensions": 24, "statuses": ["RECOVERED", "UNKNOWN", "REJECT"], "events": ["CLASSIFICATION", "AUTHORIZATION", "CONSENT", "PURPOSE", "MINIMIZATION", "REDACTION", "CHANNEL_POLICY", "REGION", "RETENTION", "DELETION", "EXPORT", "DESTINATION", "ACCESS_ROLE", "AUDIT", "TEMPLATE", "LOCALE", "PREFERENCE", "REPLAY", "NO_EVENT", "UNKNOWN"]},
+  "notes": "三态互斥并 fail-closed；RECOVERED 仅代表本片离线夹具中的 notification privacy evidence gate 闭合，不代表 production continuity、external effect 或 exactly-once。"
+}

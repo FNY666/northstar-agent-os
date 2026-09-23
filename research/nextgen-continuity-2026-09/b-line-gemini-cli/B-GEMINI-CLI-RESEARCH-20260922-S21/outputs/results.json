@@ -1,0 +1,316 @@
+{
+  "synthetic_only": true,
+  "production_verified": false,
+  "model": "S21-journal-recovery-v1",
+  "stats": {
+    "total": 12,
+    "pass": 12,
+    "failed": 0,
+    "by_result": {
+      "PASS": 5,
+      "CONTRADICTION_REJECTED": 6,
+      "UNSAFE_REJECTED": 1
+    }
+  },
+  "results": [
+    {
+      "id": "C01-happy-durable",
+      "description": "dispatch, response, durable result, then restart/resume",
+      "expected": "PASS",
+      "result": "PASS",
+      "pass": true,
+      "events": 5,
+      "violations": [],
+      "contradictions": [],
+      "unknown_keys": [],
+      "local_durable_keys": [
+        [
+          "op1",
+          1
+        ]
+      ],
+      "notes": [
+        "('op1', 1): local dispatch intent recorded; no remote completion inferred",
+        "('op1', 1): response observed (not_applied); response is not durable proof of remote state",
+        "('op1', 1): local durable result committed; remote completion remains unproven",
+        "op1: process restart; only durable local records are recoverable"
+      ]
+    },
+    {
+      "id": "C02-crash-before-response",
+      "description": "crash after dispatch leaves remote outcome UNKNOWN",
+      "expected": "PASS",
+      "result": "PASS",
+      "pass": true,
+      "events": 4,
+      "violations": [],
+      "contradictions": [],
+      "unknown_keys": [
+        [
+          "op2",
+          1
+        ]
+      ],
+      "local_durable_keys": [],
+      "notes": [
+        "('op2', 1): local dispatch intent recorded; no remote completion inferred",
+        "('op2', 1): crash makes in-flight completion unknown",
+        "op2: process restart; only durable local records are recoverable",
+        "('op2', 1): resume found intent but no durable result => UNKNOWN"
+      ]
+    },
+    {
+      "id": "C03-retry-with-dedup",
+      "description": "unknown first attempt, retry carries dedup key, later response durable",
+      "expected": "PASS",
+      "result": "PASS",
+      "pass": true,
+      "events": 9,
+      "violations": [],
+      "contradictions": [],
+      "unknown_keys": [
+        [
+          "op3",
+          1
+        ]
+      ],
+      "local_durable_keys": [
+        [
+          "op3",
+          2
+        ]
+      ],
+      "notes": [
+        "('op3', 1): local dispatch intent recorded; no remote completion inferred",
+        "('op3', 1): crash makes in-flight completion unknown",
+        "op3: process restart; only durable local records are recoverable",
+        "('op3', 1): resume found intent but no durable result => UNKNOWN",
+        "('op3', 2): retry requested; dedup/reconcile gate must be checked",
+        "('op3', 2): local dispatch intent recorded; no remote completion inferred",
+        "('op3', 2): dedup outcome unknown",
+        "('op3', 2): response observed (unknown); response is not durable proof of remote state",
+        "('op3', 2): local durable result committed; remote completion remains unproven"
+      ]
+    },
+    {
+      "id": "C04-manual-reconcile",
+      "description": "local records plus explicit human remote reconciliation",
+      "expected": "PASS",
+      "result": "PASS",
+      "pass": true,
+      "events": 5,
+      "violations": [],
+      "contradictions": [],
+      "unknown_keys": [
+        [
+          "op4",
+          1
+        ]
+      ],
+      "local_durable_keys": [],
+      "notes": [
+        "('op4', 1): local dispatch intent recorded; no remote completion inferred",
+        "('op4', 1): crash makes in-flight completion unknown",
+        "op4: process restart; only durable local records are recoverable",
+        "('op4', 1): resume found intent but no durable result => UNKNOWN",
+        "op4: explicit manual reconcile says remote=not_applied"
+      ]
+    },
+    {
+      "id": "C05-response-without-intent",
+      "description": "reject orphan tool response",
+      "expected": "CONTRADICTION_REJECTED",
+      "result": "CONTRADICTION_REJECTED",
+      "pass": true,
+      "events": 1,
+      "violations": [],
+      "contradictions": [
+        {
+          "code": "RESPONSE_WITHOUT_INTENT",
+          "message": "event 0: tool response has no matching dispatch intent"
+        }
+      ],
+      "unknown_keys": [],
+      "local_durable_keys": [],
+      "notes": []
+    },
+    {
+      "id": "C06-conflicting-response",
+      "description": "reject two incompatible responses for same attempt",
+      "expected": "CONTRADICTION_REJECTED",
+      "result": "CONTRADICTION_REJECTED",
+      "pass": true,
+      "events": 3,
+      "violations": [],
+      "contradictions": [
+        {
+          "code": "RESPONSE_CONFLICT",
+          "message": "event 2: conflicting tool responses for ('op6', 1)"
+        }
+      ],
+      "unknown_keys": [],
+      "local_durable_keys": [],
+      "notes": [
+        "('op6', 1): local dispatch intent recorded; no remote completion inferred",
+        "('op6', 1): response observed (applied); response is not durable proof of remote state",
+        "('op6', 1): response observed (not_applied); response is not durable proof of remote state"
+      ]
+    },
+    {
+      "id": "C07-durable-mismatch",
+      "description": "reject durable result referencing wrong response",
+      "expected": "CONTRADICTION_REJECTED",
+      "result": "CONTRADICTION_REJECTED",
+      "pass": true,
+      "events": 3,
+      "violations": [],
+      "contradictions": [
+        {
+          "code": "DURABLE_RESPONSE_REF_CONFLICT",
+          "message": "event 2: durable result references 'wrong', observed 'r7'"
+        }
+      ],
+      "unknown_keys": [],
+      "local_durable_keys": [
+        [
+          "op7",
+          1
+        ]
+      ],
+      "notes": [
+        "('op7', 1): local dispatch intent recorded; no remote completion inferred",
+        "('op7', 1): response observed (not_applied); response is not durable proof of remote state",
+        "('op7', 1): local durable result committed; remote completion remains unproven"
+      ]
+    },
+    {
+      "id": "C08-retry-without-dedup",
+      "description": "reject unsafe retry while prior attempt unknown and no dedup",
+      "expected": "UNSAFE_REJECTED",
+      "result": "UNSAFE_REJECTED",
+      "pass": true,
+      "events": 5,
+      "violations": [
+        {
+          "code": "RETRY_UNKNOWN_WITHOUT_DEDUP",
+          "message": "event 4: retry while prior attempt is UNKNOWN without dedup key"
+        }
+      ],
+      "contradictions": [],
+      "unknown_keys": [
+        [
+          "op8",
+          1
+        ]
+      ],
+      "local_durable_keys": [],
+      "notes": [
+        "('op8', 1): local dispatch intent recorded; no remote completion inferred",
+        "('op8', 1): crash makes in-flight completion unknown",
+        "op8: process restart; only durable local records are recoverable",
+        "('op8', 1): resume found intent but no durable result => UNKNOWN",
+        "('op8', 2): retry requested; dedup/reconcile gate must be checked"
+      ]
+    },
+    {
+      "id": "C09-intent-hash-conflict",
+      "description": "reject conflicting intent hashes for same operation attempt",
+      "expected": "CONTRADICTION_REJECTED",
+      "result": "CONTRADICTION_REJECTED",
+      "pass": true,
+      "events": 2,
+      "violations": [],
+      "contradictions": [
+        {
+          "code": "INTENT_HASH_CONFLICT",
+          "message": "event 1: same operation/attempt has different intent hash"
+        }
+      ],
+      "unknown_keys": [],
+      "local_durable_keys": [],
+      "notes": [
+        "('op9', 1): local dispatch intent recorded; no remote completion inferred",
+        "('op9', 1): local dispatch intent recorded; no remote completion inferred"
+      ]
+    },
+    {
+      "id": "C10-applied-response-not-proof",
+      "description": "applied response without durable local record remains a valid UNKNOWN model state",
+      "expected": "PASS",
+      "result": "PASS",
+      "pass": true,
+      "events": 5,
+      "violations": [],
+      "contradictions": [],
+      "unknown_keys": [
+        [
+          "op10",
+          1
+        ]
+      ],
+      "local_durable_keys": [],
+      "notes": [
+        "('op10', 1): local dispatch intent recorded; no remote completion inferred",
+        "('op10', 1): response observed (applied); response is not durable proof of remote state",
+        "('op10', 1): crash makes in-flight completion unknown",
+        "op10: process restart; only durable local records are recoverable",
+        "('op10', 1): resume found intent but no durable result => UNKNOWN",
+        "('op10', 1): applied response without durable result => local recovery UNKNOWN"
+      ]
+    },
+    {
+      "id": "C11-dedup-missing-canonical",
+      "description": "reject dedup assertion that names absent canonical attempt",
+      "expected": "CONTRADICTION_REJECTED",
+      "result": "CONTRADICTION_REJECTED",
+      "pass": true,
+      "events": 2,
+      "violations": [],
+      "contradictions": [
+        {
+          "code": "DEDUP_CANONICAL_MISSING",
+          "message": "event 1: dedup points to missing canonical attempt ('op11', 1)"
+        }
+      ],
+      "unknown_keys": [],
+      "local_durable_keys": [],
+      "notes": [
+        "('op11', 2): local dispatch intent recorded; no remote completion inferred",
+        "('op11', 2): dedup outcome same_result"
+      ]
+    },
+    {
+      "id": "C12-remote-conflict-reconcile",
+      "description": "reject incompatible human reconciliation updates",
+      "expected": "CONTRADICTION_REJECTED",
+      "result": "CONTRADICTION_REJECTED",
+      "pass": true,
+      "events": 3,
+      "violations": [],
+      "contradictions": [
+        {
+          "code": "RECONCILE_CONFLICT",
+          "message": "event 2: manual reconcile changed op12 from applied to not_applied"
+        }
+      ],
+      "unknown_keys": [],
+      "local_durable_keys": [],
+      "notes": [
+        "('op12', 1): local dispatch intent recorded; no remote completion inferred",
+        "op12: explicit manual reconcile says remote=applied",
+        "op12: explicit manual reconcile says remote=not_applied"
+      ]
+    }
+  ],
+  "residual_unknown": [
+    "C02-crash-before-response",
+    "C03-retry-with-dedup",
+    "C04-manual-reconcile",
+    "C08-retry-without-dedup",
+    "C10-applied-response-not-proof"
+  ],
+  "limitations": [
+    "No network, process, filesystem crash, Gemini CLI, or remote service was exercised.",
+    "A tool response and a local durable result do not prove remote side effects."
+  ]
+}

@@ -1,0 +1,163 @@
+{
+  "schema_version": "1.0",
+  "question": "What do official Gemini CLI sources establish about synchronous hooks, hook decisions, project trust, subagent isolation, and failure boundaries?",
+  "scope": "public first-party Google Gemini CLI sources only; read-only research",
+  "coverage": [
+    "hook lifecycle/events",
+    "hook JSON and exit semantics",
+    "timeouts and blocking",
+    "project hook fingerprinting",
+    "subagent tools and MCP isolation",
+    "turn/time limits",
+    "subagent policy overrides",
+    "effect boundaries"
+  ],
+  "slice_id": "B-S52-OFFICIAL-HOOKS-SUBAGENTS-20260922",
+  "status": "complete",
+  "research_date": "2026-09-22",
+  "access_date": "2026-09-22",
+  "sources": [
+    {
+      "id": "S52-1",
+      "url": "https://github.com/google-gemini/gemini-cli/blob/main/docs/hooks/index.md",
+      "access_date": "2026-09-22",
+      "evidence_window": "hook lifecycle, events, JSON/exit codes, timeout, fingerprint, enable/disable",
+      "evidence_level": "verified",
+      "cannot_prove": "external effects or exactly-once"
+    },
+    {
+      "id": "S52-2",
+      "url": "https://github.com/google-gemini/gemini-cli/blob/main/docs/hooks/reference.md",
+      "access_date": "2026-09-22",
+      "evidence_window": "hook input/output schemas, decisions, continue, ordering",
+      "evidence_level": "verified",
+      "cannot_prove": "pre/post external state"
+    },
+    {
+      "id": "S52-3",
+      "url": "https://github.com/google-gemini/gemini-cli/blob/main/docs/core/subagents.md",
+      "access_date": "2026-09-22",
+      "evidence_window": "tools/MCP, limits, isolation, recursion protection, policy/model overrides",
+      "evidence_level": "verified",
+      "cannot_prove": "remote state, cancellation, rollback"
+    },
+    {
+      "id": "S52-4",
+      "url": "https://github.com/google-gemini/gemini-cli/blob/main/docs/hooks/best-practices.md",
+      "access_date": "2026-09-22",
+      "evidence_window": "hook security and least privilege practices",
+      "evidence_level": "verified",
+      "cannot_prove": "actual project safety"
+    }
+  ],
+  "claims": [
+    {
+      "id": "C1",
+      "claim": "Hooks run synchronously in the agent loop and can inject context, block actions, retry, or halt at documented lifecycle events.",
+      "status": "confirmed",
+      "confidence": "high",
+      "sources": [
+        {
+          "url": "https://github.com/google-gemini/gemini-cli/blob/main/docs/hooks/index.md",
+          "publisher": "Google Gemini CLI",
+          "published_or_updated": "2026-09-22 repository snapshot",
+          "tier": "primary",
+          "support": "What hooks are and event table."
+        }
+      ],
+      "caveat": "Control flow is not external-state verification."
+    },
+    {
+      "id": "C2",
+      "claim": "Hook JSON and exit codes distinguish success, system block, and warning; default hook timeout is 60000 ms; decision deny and continue false have documented blocking effects.",
+      "status": "confirmed",
+      "confidence": "high",
+      "sources": [
+        {
+          "url": "https://github.com/google-gemini/gemini-cli/blob/main/docs/hooks/index.md",
+          "publisher": "Google Gemini CLI",
+          "published_or_updated": "2026-09-22 repository snapshot",
+          "tier": "primary",
+          "support": "Strict JSON, exit code, timeout, and schema sections."
+        },
+        {
+          "url": "https://github.com/google-gemini/gemini-cli/blob/main/docs/hooks/reference.md",
+          "publisher": "Google Gemini CLI",
+          "published_or_updated": "2026-09-22 repository snapshot",
+          "tier": "primary",
+          "support": "Common output and BeforeTool sections."
+        }
+      ],
+      "caveat": "Block/return status does not prove no prior effect."
+    },
+    {
+      "id": "C3",
+      "claim": "Project hook fingerprint changes create a new untrusted hook warning; hooks can be managed through enable/disable commands.",
+      "status": "confirmed",
+      "confidence": "high",
+      "sources": [
+        {
+          "url": "https://github.com/google-gemini/gemini-cli/blob/main/docs/hooks/index.md",
+          "publisher": "Google Gemini CLI",
+          "published_or_updated": "2026-09-22 repository snapshot",
+          "tier": "primary",
+          "support": "Security and managing hooks sections."
+        }
+      ],
+      "caveat": "Warning is not complete code audit."
+    },
+    {
+      "id": "C4",
+      "claim": "Subagents support explicit tools/MCP servers, max_turns and timeout_mins, independent history, tool isolation, recursion protection, and subagent-specific policy/model overrides.",
+      "status": "confirmed",
+      "confidence": "high",
+      "sources": [
+        {
+          "url": "https://github.com/google-gemini/gemini-cli/blob/main/docs/core/subagents.md",
+          "publisher": "Google Gemini CLI",
+          "published_or_updated": "2026-09-22 repository snapshot",
+          "tier": "primary",
+          "support": "Agent definition, isolation, policy and override sections."
+        }
+      ],
+      "caveat": "Isolation is client-side/tool-scope design, not remote target isolation."
+    },
+    {
+      "id": "C5",
+      "claim": "External effects before hook timeout/block, after tool invocation, during parallel hooks, or after subagent disconnect remain unknown; exactly-once, rollback, and complete audit remain unspecified.",
+      "status": "unverified",
+      "confidence": "high",
+      "sources": [
+        {
+          "url": "https://github.com/google-gemini/gemini-cli/blob/main/docs/hooks/reference.md",
+          "publisher": "Google Gemini CLI",
+          "published_or_updated": "2026-09-22 repository snapshot",
+          "tier": "primary",
+          "support": "Hook protocol specifies control messages but not distributed effect guarantees."
+        },
+        {
+          "url": "https://github.com/google-gemini/gemini-cli/blob/main/docs/core/subagents.md",
+          "publisher": "Google Gemini CLI",
+          "published_or_updated": "2026-09-22 repository snapshot",
+          "tier": "primary",
+          "support": "Subagent isolation and limits do not specify external commit semantics."
+        }
+      ],
+      "caveat": "Ambiguous outcomes remain UNKNOWN until independent read-back/reconciliation."
+    }
+  ],
+  "limitations": [
+    "Documentation only",
+    "No live CLI/hooks/subagents",
+    "No credentials or production access"
+  ],
+  "production_verified": false,
+  "unknowns": [
+    "pre-timeout effects",
+    "parallel-hook duplicates/order effects",
+    "subagent disconnect state",
+    "exactly-once",
+    "rollback",
+    "complete audit"
+  ]
+}

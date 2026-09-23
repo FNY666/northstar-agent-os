@@ -1,0 +1,18 @@
+{
+  "schema_version": "S30-fixtures-1",
+  "cases": [
+    {"id":"S30-01","category":"VERIFIED_CONTINUITY","expected_state":"RECOVERED","retention_complete":true,"fence_merge":true,"fence_continuous":true,"cursor_jump":false,"missing_page":false,"query_gap":false,"replay_truncated":false},
+    {"id":"S30-02","category":"NO_EVENT","expected_state":"UNKNOWN","retention_complete":true,"fence_merge":true,"fence_continuous":true,"cursor_jump":false,"missing_page":false,"query_gap":true,"replay_truncated":false},
+    {"id":"S30-03","category":"DELAYED","expected_state":"UNKNOWN","retention_complete":true,"fence_merge":true,"fence_continuous":true,"cursor_jump":true,"missing_page":false,"query_gap":false,"replay_truncated":false},
+    {"id":"S30-04","category":"DROPPED","expected_state":"UNKNOWN","retention_complete":true,"fence_merge":true,"fence_continuous":true,"cursor_jump":false,"missing_page":true,"query_gap":false,"replay_truncated":false},
+    {"id":"S30-05","category":"EXPORTER_FAILURE","expected_state":"UNKNOWN","retention_complete":true,"fence_merge":false,"fence_continuous":true,"cursor_jump":false,"missing_page":false,"query_gap":false,"replay_truncated":false},
+    {"id":"S30-06","category":"QUERY_GAP","expected_state":"UNKNOWN","retention_complete":true,"fence_merge":true,"fence_continuous":true,"cursor_jump":false,"missing_page":false,"query_gap":true,"replay_truncated":false},
+    {"id":"S30-07","category":"RETENTION_EXPIRED","expected_state":"UNKNOWN","retention_complete":false,"fence_merge":true,"fence_continuous":true,"cursor_jump":false,"missing_page":false,"query_gap":false,"replay_truncated":false},
+    {"id":"S30-08","category":"VERIFIED_CONTINUITY","expected_state":"RECOVERED","retention_complete":true,"fence_merge":true,"fence_continuous":true,"cursor_jump":false,"missing_page":false,"query_gap":false,"replay_truncated":false,"overlap_page":true,"out_of_order":true,"duplicate":true},
+    {"id":"S30-09","category":"UNKNOWN","expected_state":"UNKNOWN","retention_complete":true,"fence_merge":true,"fence_continuous":true,"cursor_jump":false,"missing_page":false,"query_gap":false,"replay_truncated":true},
+    {"id":"S30-10","category":"REJECT_PAYLOAD_CONFLICT","expected_state":"REJECT","retention_complete":true,"fence_merge":true,"fence_continuous":true,"payload_conflict":true},
+    {"id":"S30-11","category":"REJECT_FENCE_FORK","expected_state":"REJECT","retention_complete":true,"fence_merge":true,"fence_continuous":true,"fence_fork":true},
+    {"id":"S30-12","category":"UNKNOWN_OVERLAP_ONLY","expected_state":"UNKNOWN","retention_complete":true,"fence_merge":false,"fence_continuous":true,"overlap_page":true},
+    {"id":"S30-13","category":"UNKNOWN_CURSOR_SKIP_RETENTION","expected_state":"UNKNOWN","retention_complete":false,"fence_merge":true,"fence_continuous":true,"cursor_jump":true}
+  ]
+}

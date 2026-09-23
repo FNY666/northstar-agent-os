@@ -1,0 +1,71 @@
+{
+  "schema_version": "1.0",
+  "question": "How should an evidence-window schema represent time normalization, validation and unknown boundaries?",
+  "scope": "Official public RFC and JSON Schema documentation only; design inference; no production systems.",
+  "claims": [
+    {
+      "id": "S23-C1",
+      "claim": "RFC 3339 defines interoperable timestamp representation but timestamp syntax does not prove event ordering, delivery or business effect.",
+      "status": "confirmed",
+      "confidence": "high",
+      "sources": [
+        {
+          "url": "https://www.rfc-editor.org/rfc/rfc3339",
+          "publisher": "IETF",
+          "published_or_updated": "2002-07",
+          "tier": "primary",
+          "support": "Timestamp syntax and representation."
+        }
+      ],
+      "caveat": "No proof of clock synchronization, causal order, completeness or external commit."
+    },
+    {
+      "id": "S23-C2",
+      "claim": "JSON Schema can constrain the shape and types of evidence records, but schema validation cannot prove truth, completeness or continuity.",
+      "status": "confirmed",
+      "confidence": "high",
+      "sources": [
+        {
+          "url": "https://json-schema.org/draft/2020-12/json-schema-core.html",
+          "publisher": "JSON Schema",
+          "published_or_updated": "2020-12",
+          "tier": "primary",
+          "support": "Schema validation vocabulary and semantics."
+        }
+      ],
+      "caveat": "Validation is structural; it cannot attest origin, absence, temporal coverage or postcondition."
+    },
+    {
+      "id": "S23-C3",
+      "claim": "A deterministic acceptance record should separate observed_at, event_time, source_window, query_window, evidence_hash, status and cannot_prove fields.",
+      "status": "inferred",
+      "confidence": "medium",
+      "sources": [
+        {
+          "url": "https://www.rfc-editor.org/rfc/rfc3339",
+          "publisher": "IETF",
+          "published_or_updated": "2002-07",
+          "tier": "primary",
+          "support": "Time representation basis."
+        },
+        {
+          "url": "https://json-schema.org/draft/2020-12/json-schema-core.html",
+          "publisher": "JSON Schema",
+          "published_or_updated": "2020-12",
+          "tier": "primary",
+          "support": "Structural validation basis."
+        }
+      ],
+      "caveat": "This is a design inference, not an RFC-defined continuity protocol."
+    }
+  ],
+  "coverage": {
+    "accessed": "2026-09-22",
+    "evidence_window": "Official RFC/JSON Schema pages fetched 2026-09-22; no production or private data.",
+    "not_covered": [
+      "clock synchronization",
+      "event generation completeness",
+      "external business effects"
+    ]
+  }
+}

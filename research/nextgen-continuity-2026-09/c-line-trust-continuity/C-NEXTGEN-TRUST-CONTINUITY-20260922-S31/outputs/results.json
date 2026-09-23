@@ -1,0 +1,185 @@
+{
+  "all_cases_match": true,
+  "case_count": 16,
+  "claims_status": "inferred",
+  "coverage": [
+    "NO_EVENT",
+    "DELAYED",
+    "DROPPED",
+    "EXPORTER_FAILURE",
+    "QUERY_GAP",
+    "PAGINATION_INSUFFICIENT",
+    "RETENTION_EXPIRED",
+    "VERIFIED_CONTINUITY",
+    "UNKNOWN",
+    "same payload",
+    "conflicting payload",
+    "version migration",
+    "epoch fence",
+    "cross tenant/source"
+  ],
+  "digest": "582be4f6687a681f65c0f8e286ccf5d0b0ba051969661cbda5586401719ecb6c",
+  "identity_domain": [
+    "tenant",
+    "source",
+    "event_id",
+    "epoch",
+    "version"
+  ],
+  "production_verified": false,
+  "property_sweep": {
+    "combinations": 256,
+    "counts": {
+      "RECOVERED": 2,
+      "REJECT": 208,
+      "UNKNOWN": 46
+    },
+    "dimensions": 8,
+    "single_gate_minimizer": [
+      {
+        "bits": [
+          0,
+          1,
+          3,
+          4
+        ],
+        "mask": 27,
+        "target": "RECOVERED"
+      },
+      {
+        "bits": [],
+        "mask": 0,
+        "target": "UNKNOWN"
+      },
+      {
+        "bits": [
+          2
+        ],
+        "mask": 4,
+        "target": "REJECT"
+      }
+    ]
+  },
+  "results": [
+    {
+      "evidence_count": 3,
+      "expected": "RECOVERED",
+      "id": "same-payload-cross-partition",
+      "match": true,
+      "status": "RECOVERED"
+    },
+    {
+      "evidence_count": 2,
+      "expected": "RECOVERED",
+      "id": "duplicate-delivery",
+      "match": true,
+      "status": "RECOVERED"
+    },
+    {
+      "evidence_count": 2,
+      "expected": "RECOVERED",
+      "id": "same-digest-different-time",
+      "match": true,
+      "status": "RECOVERED"
+    },
+    {
+      "evidence_count": 2,
+      "expected": "RECOVERED",
+      "id": "versioned-migration",
+      "match": true,
+      "status": "RECOVERED"
+    },
+    {
+      "evidence_count": 1,
+      "expected": "RECOVERED",
+      "id": "delayed",
+      "match": true,
+      "status": "RECOVERED"
+    },
+    {
+      "evidence_count": 1,
+      "expected": "UNKNOWN",
+      "id": "no-event",
+      "match": true,
+      "status": "UNKNOWN"
+    },
+    {
+      "evidence_count": 1,
+      "expected": "UNKNOWN",
+      "id": "dropped",
+      "match": true,
+      "status": "UNKNOWN"
+    },
+    {
+      "evidence_count": 1,
+      "expected": "UNKNOWN",
+      "id": "exporter-failure",
+      "match": true,
+      "status": "UNKNOWN"
+    },
+    {
+      "evidence_count": 1,
+      "expected": "UNKNOWN",
+      "id": "query-gap",
+      "match": true,
+      "status": "UNKNOWN"
+    },
+    {
+      "evidence_count": 1,
+      "expected": "UNKNOWN",
+      "id": "pagination-insufficient",
+      "match": true,
+      "status": "UNKNOWN"
+    },
+    {
+      "evidence_count": 1,
+      "expected": "UNKNOWN",
+      "id": "retention-expired",
+      "match": true,
+      "status": "UNKNOWN"
+    },
+    {
+      "evidence_count": 2,
+      "expected": "REJECT",
+      "id": "conflicting-payload",
+      "match": true,
+      "status": "REJECT"
+    },
+    {
+      "evidence_count": 1,
+      "expected": "REJECT",
+      "id": "cross-tenant",
+      "match": true,
+      "status": "REJECT"
+    },
+    {
+      "evidence_count": 1,
+      "expected": "REJECT",
+      "id": "cross-source",
+      "match": true,
+      "status": "REJECT"
+    },
+    {
+      "evidence_count": 1,
+      "expected": "REJECT",
+      "id": "epoch-fence",
+      "match": true,
+      "status": "REJECT"
+    },
+    {
+      "evidence_count": 1,
+      "expected": "UNKNOWN",
+      "id": "version-gap",
+      "match": true,
+      "status": "UNKNOWN"
+    }
+  ],
+  "schema_version": "S31-results-1",
+  "sources": [],
+  "status_distribution": {
+    "RECOVERED": 5,
+    "REJECT": 4,
+    "UNKNOWN": 7
+  },
+  "synthetic_only": true
+}

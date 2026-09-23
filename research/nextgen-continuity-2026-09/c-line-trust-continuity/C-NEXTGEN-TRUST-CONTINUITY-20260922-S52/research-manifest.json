@@ -1,0 +1,24 @@
+{
+  "schema_version": "1.0",
+  "question": "在离线合成证据中，何时 hooks、subagents、MCP/tool isolation、timeout/continue/decision、fingerprint/trust、history/recursion/policy/model override 与最终 loop state read-back 能够闭合连续性，何时必须保持 UNKNOWN 或 REJECT？",
+  "scope": {
+    "project": "C-line S52",
+    "mode": "offline synthetic fixtures",
+    "date": "2026-09-23",
+    "excluded": ["S1-S51", "production", "network", "real services", "credentials"],
+    "identity_domain": ["session", "project", "agent", "hook_id", "tool_request", "turn_id"],
+    "hook_subagent_domain": ["SessionStart", "BeforeAgent", "AfterAgent", "BeforeTool", "AfterTool", "PreCompress", "stdout_json", "exit_code", "timeout", "continue", "decision", "fingerprint", "trust", "subagent", "tools", "MCP", "max_turns", "history", "isolation", "recursion", "policy_override", "model_override"]
+  },
+  "claims_status": "inferred",
+  "synthetic_only": true,
+  "production_verified": false,
+  "sources": [],
+  "claims": [
+    {"id":"hook-subagent-closure","claim":"只有 hook event/scope/order/stdout/exit/timeout/continue/decision/fingerprint/trust、subagent tools/MCP/max turns/timeout/history/isolation/recursion/override 与 final read-back 全部闭合时才可 RECOVERED。","status":"inferred","confidence":"bounded","sources":[],"caveat":"仅由本地合成夹具和规则推导，不代表生产系统。"},
+    {"id":"control-not-effect-proof","claim":"hook exit/decision/stdout 或 subagent 完成消息不能证明 loop 已收敛、工具副作用已提交或远端状态已知；必须独立 read-back。","status":"inferred","confidence":"bounded","sources":[],"caveat":"未验证任何真实 hooks/subagent runtime。"},
+    {"id":"loop-unknown","claim":"事件顺序、超时、递归、隔离、history/override 或最终状态未知时必须 UNKNOWN。","status":"inferred","confidence":"bounded","sources":[],"caveat":"布尔门不量化真实 agent loop 风险。"},
+    {"id":"hook-conflict-reject","claim":"身份冲突和同一 tool/loop 的不可调和 hook 控制冲突必须 REJECT。","status":"inferred","confidence":"bounded","sources":[],"caveat":"只验证合成判定逻辑，不证明目标系统执行拒绝。"}
+  ],
+  "coverage": {"cases": 28, "property_sweep": 16777216, "dimensions": 24, "statuses": ["RECOVERED", "UNKNOWN", "REJECT"], "events": ["HOOK", "SESSION_START", "BEFORE_AGENT", "AFTER_AGENT", "BEFORE_TOOL", "AFTER_TOOL", "PRECOMPRESS", "STDOUT_JSON", "EXIT_CODE", "TIMEOUT", "CONTINUE", "DECISION", "FINGERPRINT", "TRUST", "SUBAGENT", "MCP", "MAX_TURNS", "HISTORY", "ISOLATION", "RECURSION", "POLICY_OVERRIDE", "MODEL_OVERRIDE", "NO_EVENT", "UNKNOWN"]},
+  "notes": "三态互斥并 fail-closed；RECOVERED 仅代表本片离线夹具中的 hook/subagent evidence gate 闭合，不代表 production continuity、external effect 或 exactly-once。"
+}

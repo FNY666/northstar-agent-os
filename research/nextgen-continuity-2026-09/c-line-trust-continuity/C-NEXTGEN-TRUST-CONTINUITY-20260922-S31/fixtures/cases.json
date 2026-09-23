@@ -1,0 +1,26 @@
+{
+  "schema_version": "S31-cases-1",
+  "synthetic_only": true,
+  "production_verified": false,
+  "identity_domain": ["tenant", "source", "event_id", "epoch", "version"],
+  "locator_fields": ["partition"],
+  "evidence_fields": ["payload_digest", "causal_parent", "event_time", "ingest_time"],
+  "cases": [
+    {"id":"same-payload-cross-partition","label":"同 payload 跨分区","status":"RECOVERED","flags":{"same_identity":true,"same_digest":true,"cross_partition":true,"ordering_complete":true,"within_retention":true,"query_gap":false,"payload_conflict":false,"fence_conflict":false},"evidence":["tenant/source/event_id/epoch/version相同","payload_digest相同","event-time与ingest-time均可排序"]},
+    {"id":"duplicate-delivery","label":"重复投递","status":"RECOVERED","flags":{"same_identity":true,"same_digest":true,"cross_partition":true,"ordering_complete":true,"within_retention":true,"query_gap":false,"payload_conflict":false,"fence_conflict":false},"evidence":["同一身份域、同一摘要、不同传输定位","重复投递不改变事件身份"]},
+    {"id":"same-digest-different-time","label":"同摘要不同时间","status":"RECOVERED","flags":{"same_identity":true,"same_digest":true,"cross_partition":true,"ordering_complete":true,"within_retention":true,"query_gap":false,"payload_conflict":false,"fence_conflict":false},"evidence":["event_time可早于ingest_time","两次时间均在保留范围，时间差不是身份冲突"]},
+    {"id":"versioned-migration","label":"版本化 payload 迁移","status":"RECOVERED","flags":{"same_identity":true,"same_digest":true,"cross_partition":true,"ordering_complete":true,"within_retention":true,"query_gap":false,"payload_conflict":false,"fence_conflict":false},"evidence":["version显式参与身份域","新版本有causal_parent且迁移边可验证"]},
+    {"id":"delayed","label":"延迟到达","status":"RECOVERED","flags":{"same_identity":true,"same_digest":true,"cross_partition":true,"ordering_complete":true,"within_retention":true,"query_gap":false,"payload_conflict":false,"fence_conflict":false},"evidence":["event-time先于ingest-time但排序链闭合"]},
+    {"id":"no-event","label":"无事件证据","status":"UNKNOWN","flags":{"same_identity":false,"same_digest":false,"cross_partition":false,"ordering_complete":false,"within_retention":true,"query_gap":false,"payload_conflict":false,"fence_conflict":false},"evidence":["NO_EVENT仅表示查询结果无记录，不证明未发生"]},
+    {"id":"dropped","label":"疑似丢弃","status":"UNKNOWN","flags":{"same_identity":true,"same_digest":false,"cross_partition":true,"ordering_complete":false,"within_retention":true,"query_gap":false,"payload_conflict":false,"fence_conflict":false},"evidence":["DROPPED缺少可闭合的接收与导出链"]},
+    {"id":"exporter-failure","label":"导出器故障","status":"UNKNOWN","flags":{"same_identity":true,"same_digest":false,"cross_partition":true,"ordering_complete":false,"within_retention":true,"query_gap":false,"payload_conflict":false,"fence_conflict":false},"evidence":["EXPORTER_FAILURE阻断下游证据，不能推断事件不存在"]},
+    {"id":"query-gap","label":"查询缺口","status":"UNKNOWN","flags":{"same_identity":true,"same_digest":true,"cross_partition":true,"ordering_complete":true,"within_retention":true,"query_gap":true,"payload_conflict":false,"fence_conflict":false},"evidence":["QUERY_GAP使保留范围内的证据不完整"]},
+    {"id":"pagination-insufficient","label":"分页范围不足","status":"UNKNOWN","flags":{"same_identity":true,"same_digest":true,"cross_partition":true,"ordering_complete":true,"within_retention":true,"query_gap":true,"payload_conflict":false,"fence_conflict":false},"evidence":["分页游标/页界未覆盖完整时间窗，不能闭合证据"]},
+    {"id":"retention-expired","label":"保留期过期","status":"UNKNOWN","flags":{"same_identity":true,"same_digest":true,"cross_partition":true,"ordering_complete":true,"within_retention":false,"query_gap":false,"payload_conflict":false,"fence_conflict":false},"evidence":["RETENTION_EXPIRED不能把当前缺证据解释为未发生"]},
+    {"id":"conflicting-payload","label":"同身份域异摘要","status":"REJECT","flags":{"same_identity":true,"same_digest":false,"cross_partition":true,"ordering_complete":true,"within_retention":true,"query_gap":false,"payload_conflict":true,"fence_conflict":false},"evidence":["同tenant/source/event_id/epoch/version下payload_digest不一致","不可调和 payload 冲突触发拒绝"]},
+    {"id":"cross-tenant","label":"跨 tenant 误合并","status":"REJECT","flags":{"same_identity":false,"same_digest":true,"cross_partition":true,"ordering_complete":true,"within_retention":true,"query_gap":false,"payload_conflict":false,"fence_conflict":false},"evidence":["tenant是身份域，跨tenant相同event_id不得关联"]},
+    {"id":"cross-source","label":"跨 source 误合并","status":"REJECT","flags":{"same_identity":false,"same_digest":true,"cross_partition":true,"ordering_complete":true,"within_retention":true,"query_gap":false,"payload_conflict":false,"fence_conflict":false},"evidence":["source是身份域，跨source相同event_id不得关联"]},
+    {"id":"epoch-fence","label":"跨 epoch fence 冲突","status":"REJECT","flags":{"same_identity":false,"same_digest":true,"cross_partition":true,"ordering_complete":true,"within_retention":true,"query_gap":false,"payload_conflict":false,"fence_conflict":true},"evidence":["epoch fence阻断前后周期的身份穿透"]},
+    {"id":"version-gap","label":"版本迁移缺口","status":"UNKNOWN","flags":{"same_identity":true,"same_digest":true,"cross_partition":true,"ordering_complete":false,"within_retention":true,"query_gap":false,"payload_conflict":false,"fence_conflict":false},"evidence":["版本边存在但causal_parent/中间迁移证据缺失"]}
+  ]
+}

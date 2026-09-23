@@ -1,0 +1,31 @@
+{
+  "schema_version": "1.0",
+  "synthetic_only": true,
+  "production_verified": false,
+  "question": "在完全离线 synthetic-only 模型中，journal/recovery 状态机能否拒绝矛盾输入，并保持 local journal 与 remote side effect 的语义隔离？",
+  "scope": {
+    "included": ["dispatch intent", "tool response", "durable result", "crash/restart", "resume", "retry", "dedup", "UNKNOWN", "manual reconcile", "offline deterministic fixtures"],
+    "excluded": ["Gemini CLI source or real implementation", "real services", "network", "credentials", "prior research directories S1-S20", "shared/P0", "D10", "L12", "D14", "canonical", "staging", "140", "tri-line", "systemd", "incident directories"],
+    "synthetic_only": true,
+    "production_verified": false
+  },
+  "claims": [
+    {"id":"E1","claim":"The offline harness replayed 12 cases and all expected classifications matched.","status":"confirmed","confidence":1.0,"sources":[{"url":"https://example.invalid/s21/harness","publisher":"S21 local synthetic harness (citation placeholder)","published_or_updated":"2026-09-22","tier":"primary","support":"The local generated output reports 12 total and 12 pass."}],"caveat":"The URL is a schema-valid non-network citation placeholder; evidence is local files only."},
+    {"id":"E2","claim":"The model rejects orphan responses, conflicting responses, wrong durable references, intent hash conflicts, missing dedup canonical attempts, and contradictory reconcile updates.","status":"confirmed","confidence":0.99,"sources":[{"url":"https://example.invalid/s21/fixtures","publisher":"S21 synthetic fixtures","published_or_updated":"2026-09-22","tier":"primary","support":"C05-C07, C09, C11-C12."}],"caveat":"Confirmed only for this model and fixtures."},
+    {"id":"E3","claim":"A retry while the previous attempt is UNKNOWN and has no dedup key is rejected as unsafe.","status":"confirmed","confidence":0.99,"sources":[{"url":"https://example.invalid/s21/c08","publisher":"S21 synthetic fixture C08","published_or_updated":"2026-09-22","tier":"primary","support":"C08 yields UNSAFE_REJECTED."}],"caveat":"Not evidence of any real CLI retry policy."},
+    {"id":"E4","claim":"Local dispatch/response/durable records do not prove a remote side effect is complete.","status":"inferred","confidence":0.95,"sources":[{"url":"https://example.invalid/s21/model-boundary","publisher":"S21 model boundary","published_or_updated":"2026-09-22","tier":"primary","support":"C02, C03, C10 retain UNKNOWN and report the separation."}],"caveat":"A conservative model invariant, not a production observation."},
+    {"id":"E5","claim":"A manual reconcile event is treated as an explicit remote-status assertion, and incompatible assertions are rejected.","status":"confirmed","confidence":0.98,"sources":[{"url":"https://example.invalid/s21/reconcile","publisher":"S21 synthetic fixtures","published_or_updated":"2026-09-22","tier":"primary","support":"C04 and C12."}],"caveat":"Human assertion quality and auditability are outside this model."},
+    {"id":"E6","claim":"A dedup key guarantees exactly-once remote execution.","status":"unverified","confidence":0.0,"sources":[],"caveat":"The harness intentionally cannot establish remote execution semantics."},
+    {"id":"E7","claim":"Gemini CLI real crash durability and journal fsync behavior are established.","status":"inaccessible","confidence":0.0,"sources":[],"caveat":"Real implementation and production artifacts were out of scope and not accessed."},
+    {"id":"E8","claim":"Gemini CLI real remote state, remote rollback, exactly-once, or production safety are established.","status":"inaccessible","confidence":0.0,"sources":[],"caveat":"No network, service, credentials, or production component was used."},
+    {"id":"E9","claim":"The synthetic invariant set holds for every real input and every concurrent schedule.","status":"conflicting","confidence":0.0,"sources":[],"caveat":"The result is limited to the enumerated deterministic fixtures; adversarial scheduling is deferred to S22."}
+  ],
+  "coverage": {
+    "cases": 12,
+    "case_ids": ["C01-happy-durable","C02-crash-before-response","C03-retry-with-dedup","C04-manual-reconcile","C05-response-without-intent","C06-conflicting-response","C07-durable-mismatch","C08-retry-without-dedup","C09-intent-hash-conflict","C10-applied-response-not-proof","C11-dedup-missing-canonical","C12-remote-conflict-reconcile"],
+    "event_types": ["dispatch_intent","tool_response","durable_result","crash","restart","resume","retry","dedup","manual_reconcile"],
+    "statuses_used": ["confirmed","inferred","unverified","conflicting","inaccessible"],
+    "residual_unknown_cases": ["C02-crash-before-response","C03-retry-with-dedup","C04-manual-reconcile","C08-retry-without-dedup","C10-applied-response-not-proof"],
+    "limitations": ["No real Gemini CLI implementation was tested.","No remote state was observed.","No exactly-once or rollback was proven.","No production safety claim is made."]
+  }
+}

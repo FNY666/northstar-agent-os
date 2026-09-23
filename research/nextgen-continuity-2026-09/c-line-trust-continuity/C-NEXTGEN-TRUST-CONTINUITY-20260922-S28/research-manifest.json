@@ -1,0 +1,15 @@
+{
+  "schema_version": "1.0",
+  "question": "在 observer membership churn 下，何时可以 fail-closed 地恢复 evidence provenance continuity，如何处理 equivocation、旧成员迟到证据和 bounded replay 缺口？",
+  "scope": {"synthetic_only": true, "production_verified": false, "offline": true, "forbidden": ["network", "real_services", "SDKs", "credentials", "production_data", "S1-S27"]},
+  "synthetic_only": true,
+  "production_verified": false,
+  "claims": [
+    {"id":"CLM-01","claim":"RECOVERED 仅可在成员 epoch 闭合、quorum 重算并满足、身份/签名来源无 equivocation、撤销水位达到、bounded replay 完整、crash/restart 闭合且三类证据一致时产生。","status":"inferred","confidence":0.99,"sources":[],"caveat":"仅由本地合成 harness 的 fail-closed 规则推断，非生产证明。"},
+    {"id":"CLM-02","claim":"成员变更未收敛、quorum 分裂、查询/保留期缺口、迟到旧成员证据或身份重用冲突不得升级为 RECOVERED；明确硬冲突可 REJECT。","status":"inferred","confidence":0.99,"sources":[],"caveat":"合成状态机分类，不代表真实系统时序完备。"},
+    {"id":"CLM-03","claim":"同一 observer 在冲突 scope 中签发不兼容 receipt 时，provenance equivocation 应 fail-closed 并进入 REJECT。","status":"inferred","confidence":0.98,"sources":[],"caveat":"仅测试了定义的冲突模型。"},
+    {"id":"CLM-04","claim":"本切片不能证明生产耐久性、exactly-once、回滚、外部效果、真实平台 receipt、持久日志一致性或 production readiness。","status":"inferred","confidence":1.0,"sources":[],"caveat":"限制性结论来自 synthetic-only 设计。"}
+  ],
+  "coverage": {"classification_labels":["NO_EVENT","DELAYED","DROPPED","EXPORTER_FAILURE","QUERY_GAP","RETENTION_EXPIRED","VERIFIED_CONTINUITY","UNKNOWN"],"status_labels":["RECOVERED","UNKNOWN","REJECT"],"dimensions":["observer_add_remove_epoch","membership_epoch_closure","quorum_recompute","cross_region_epoch_receipt_equivocation","delayed_revocation_confirmation","bounded_query_replay","observer_identity_reuse","late_old_member_evidence","revocation_watermark","epoch_fence_continuity","crash_restart_closure","platform_receipt_persistent_log_external_effect_consistency"]},
+  "method": {"harness":"harness.py","case_fixture":"fixtures/cases.json","property_sweep":"256 combinations over 8 mandatory gates","minimizer":"8 one-gate counterexamples","determinism":"run twice and byte-compare outputs/results.json"}
+}

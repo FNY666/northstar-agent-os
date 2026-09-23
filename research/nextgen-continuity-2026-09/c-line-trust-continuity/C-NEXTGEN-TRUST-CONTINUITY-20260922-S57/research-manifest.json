@@ -1,0 +1,24 @@
+{
+  "schema_version": "1.0",
+  "question": "在离线合成证据中，何时跨切片账本的 slice/version/previous-new digest、状态迁移、重复/冲突entry、canonical winner、derived/raw、manifest、跨引用、claim/source revision、文件系统读回和最终收敛能够闭合连续性，何时必须保持 UNKNOWN 或 REJECT？",
+  "scope": {
+    "project": "C-line S57",
+    "mode": "offline synthetic fixtures",
+    "date": "2026-09-23",
+    "excluded": ["S1-S56", "production", "network", "real services", "credentials"],
+    "identity_domain": ["project", "ledger", "slice_id", "entry_id", "question", "claim", "source", "canonical_version"],
+    "migration_domain": ["version", "previous_digest", "new_digest", "state_transition", "migration_reason", "duplicate", "conflict", "canonical_winner", "derived_archive", "raw", "manifest", "cross_slice_reference", "convergence"]
+  },
+  "claims_status": "inferred",
+  "synthetic_only": true,
+  "production_verified": false,
+  "sources": [],
+  "claims": [
+    {"id":"slice-migration-closure","claim":"只有 slice/version/digest/reason、duplicate/conflict、canonical/derived/raw、manifest/cross-reference/status/claim/source、filesystem read-back 与 convergence 全部闭合时才可 RECOVERED。","status":"inferred","confidence":"bounded","sources":[],"caveat":"仅由本地合成夹具和规则推导，不代表生产系统。"},
+    {"id":"new-digest-not-transition-proof","claim":"新digest、迁移消息或目录存在不能证明前后内容关系、合法状态迁移或 canonical 收敛；必须重算并独立 read-back。","status":"inferred","confidence":"bounded","sources":[],"caveat":"未验证任何真实账本迁移系统。"},
+    {"id":"migration-unknown","claim":"版本/前后digest/迁移理由、重复/冲突、manifest/引用、raw/derived、文件或 convergence 未知时必须 UNKNOWN。","status":"inferred","confidence":"bounded","sources":[],"caveat":"布尔门不量化真实迁移风险。"},
+    {"id":"migration-conflict-reject","claim":"身份冲突和同一slice不可调和的 canonical 迁移状态冲突必须 REJECT。","status":"inferred","confidence":"bounded","sources":[],"caveat":"只验证合成判定逻辑，不证明目标系统执行拒绝。"}
+  ],
+  "coverage": {"cases": 28, "property_sweep": 8388608, "dimensions": 23, "statuses": ["RECOVERED", "UNKNOWN", "REJECT"], "events": ["SLICE_ID", "VERSION", "STATE_TRANSITION", "PREVIOUS_DIGEST", "NEW_DIGEST", "MIGRATION_REASON", "DUPLICATE", "CONFLICT", "CANONICAL_WINNER", "DERIVED_ARCHIVE", "RAW", "MANIFEST", "CROSS_SLICE_REFERENCE", "STATUS_TRANSITION", "CLAIM_REVISION", "SOURCE_SET", "FILESYSTEM_READBACK", "CONVERGENCE", "NO_EVENT", "UNKNOWN"]},
+  "notes": "三态互斥并 fail-closed；RECOVERED 仅代表本片离线夹具中的 cross-slice migration evidence gate 闭合，不代表 production continuity、external effect 或 exactly-once。"
+}

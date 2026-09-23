@@ -1,0 +1,313 @@
+{
+  "schema_version": "2026-09-22",
+  "question": "Gemini CLI 官方公开 GitHub 证据是否证明授权快照、策略版本、调用身份、审计关联键，以及伪造/重放/跨进程身份、审批持久化、业务效果、远端提交、回滚或 exactly-once 证明？",
+  "coverage": [
+    "MCP trust",
+    "trusted folder",
+    "policy allow/deny/ask_user",
+    "Plan Mode / YOLO",
+    "MCP server/tool/args and policy matching",
+    "correlation IDs",
+    "authorization snapshot and policy version",
+    "forgery/replay/cross-process identity",
+    "approval persistence",
+    "business effect/remote commit/rollback/exactly-once"
+  ],
+  "claims": [
+    {
+      "id": "C1",
+      "claim": "MCP trust + tool allowlist + trusted folder are independent pre-execution gates; folder trust alone does not authorize the MCP tool surface.",
+      "status": "confirmed",
+      "evidence_level": "B",
+      "caveat": "Local implementation evidence only; no server-side authorization proof.",
+      "confidence": "high",
+      "sources": [
+        {
+          "url": "https://raw.githubusercontent.com/google-gemini/gemini-cli/main/docs/cli/plan-mode.md",
+          "accessed": "2026-09-22",
+          "evidence_level": "B",
+          "publisher": "Google Gemini CLI official public repository",
+          "published_or_updated": "2026-09-22",
+          "tier": "primary",
+          "support": "Official MCP docs, plan-mode docs, trusted-folder docs and policy docs jointly support the layered gate boundary."
+        },
+        {
+          "url": "https://raw.githubusercontent.com/google-gemini/gemini-cli/main/docs/cli/policy.md",
+          "accessed": "2026-09-22",
+          "evidence_level": "B",
+          "publisher": "Google Gemini CLI official public repository",
+          "published_or_updated": "2026-09-22",
+          "tier": "primary",
+          "support": "Official MCP docs, plan-mode docs, trusted-folder docs and policy docs jointly support the layered gate boundary."
+        },
+        {
+          "url": "https://raw.githubusercontent.com/google-gemini/gemini-cli/main/docs/tools/mcp-server.md",
+          "accessed": "2026-09-22",
+          "evidence_level": "B",
+          "publisher": "Google Gemini CLI official public repository",
+          "published_or_updated": "2026-09-22",
+          "tier": "primary",
+          "support": "Official MCP docs, plan-mode docs, trusted-folder docs and policy docs jointly support the layered gate boundary."
+        },
+        {
+          "url": "https://raw.githubusercontent.com/google-gemini/gemini-cli/main/docs/cli/trusted-folders.md",
+          "accessed": "2026-09-22",
+          "evidence_level": "B",
+          "publisher": "Google Gemini CLI official public repository",
+          "published_or_updated": "2026-09-22",
+          "tier": "primary",
+          "support": "Official MCP docs, plan-mode docs, trusted-folder docs and policy docs jointly support the layered gate boundary."
+        }
+      ]
+    },
+    {
+      "id": "C2",
+      "claim": "Policy allow/deny/ask_user is evaluated per tool and mode, then execution state changes; approval request/rejection/timeout/cancel persistence and policy revision correlation are not proven.",
+      "status": "inferred",
+      "evidence_level": "B",
+      "caveat": "Persistence and audit correlation not proven by the cited source.",
+      "confidence": "high",
+      "sources": [
+        {
+          "url": "https://raw.githubusercontent.com/google-gemini/gemini-cli/main/docs/cli/plan-mode.md",
+          "accessed": "2026-09-22",
+          "evidence_level": "B",
+          "publisher": "Google Gemini CLI official public repository",
+          "published_or_updated": "2026-09-22",
+          "tier": "primary",
+          "support": "Policy and tool-execution docs indicate decision evaluation and state change; persistence/audit fields are absent from the cited text."
+        },
+        {
+          "url": "https://raw.githubusercontent.com/google-gemini/gemini-cli/main/docs/cli/policy.md",
+          "accessed": "2026-09-22",
+          "evidence_level": "B",
+          "publisher": "Google Gemini CLI official public repository",
+          "published_or_updated": "2026-09-22",
+          "tier": "primary",
+          "support": "Policy and tool-execution docs indicate decision evaluation and state change; persistence/audit fields are absent from the cited text."
+        },
+        {
+          "url": "https://raw.githubusercontent.com/google-gemini/gemini-cli/main/docs/tools/mcp-server.md",
+          "accessed": "2026-09-22",
+          "evidence_level": "B",
+          "publisher": "Google Gemini CLI official public repository",
+          "published_or_updated": "2026-09-22",
+          "tier": "primary",
+          "support": "Policy and tool-execution docs indicate decision evaluation and state change; persistence/audit fields are absent from the cited text."
+        },
+        {
+          "url": "https://raw.githubusercontent.com/google-gemini/gemini-cli/main/docs/cli/trusted-folders.md",
+          "accessed": "2026-09-22",
+          "evidence_level": "B",
+          "publisher": "Google Gemini CLI official public repository",
+          "published_or_updated": "2026-09-22",
+          "tier": "primary",
+          "support": "Policy and tool-execution docs indicate decision evaluation and state change; persistence/audit fields are absent from the cited text."
+        }
+      ]
+    },
+    {
+      "id": "C3",
+      "claim": "YOLO vs Plan Mode is a documented mode boundary, but it does not prove external side-effect rollback or business outcome.",
+      "status": "confirmed",
+      "evidence_level": "A",
+      "caveat": "Official mode docs; external-effect proof not claimed.",
+      "confidence": "high",
+      "sources": [
+        {
+          "url": "https://raw.githubusercontent.com/google-gemini/gemini-cli/main/docs/cli/plan-mode.md",
+          "accessed": "2026-09-22",
+          "evidence_level": "A",
+          "publisher": "Google Gemini CLI official public repository",
+          "published_or_updated": "2026-09-22",
+          "tier": "primary",
+          "support": "Plan-mode docs directly define read/plan and execution boundaries, without asserting external-effect rollback."
+        },
+        {
+          "url": "https://raw.githubusercontent.com/google-gemini/gemini-cli/main/docs/cli/policy.md",
+          "accessed": "2026-09-22",
+          "evidence_level": "A",
+          "publisher": "Google Gemini CLI official public repository",
+          "published_or_updated": "2026-09-22",
+          "tier": "primary",
+          "support": "Plan-mode docs directly define read/plan and execution boundaries, without asserting external-effect rollback."
+        },
+        {
+          "url": "https://raw.githubusercontent.com/google-gemini/gemini-cli/main/docs/tools/mcp-server.md",
+          "accessed": "2026-09-22",
+          "evidence_level": "A",
+          "publisher": "Google Gemini CLI official public repository",
+          "published_or_updated": "2026-09-22",
+          "tier": "primary",
+          "support": "Plan-mode docs directly define read/plan and execution boundaries, without asserting external-effect rollback."
+        },
+        {
+          "url": "https://raw.githubusercontent.com/google-gemini/gemini-cli/main/docs/cli/trusted-folders.md",
+          "accessed": "2026-09-22",
+          "evidence_level": "A",
+          "publisher": "Google Gemini CLI official public repository",
+          "published_or_updated": "2026-09-22",
+          "tier": "primary",
+          "support": "Plan-mode docs directly define read/plan and execution boundaries, without asserting external-effect rollback."
+        }
+      ]
+    },
+    {
+      "id": "C4",
+      "claim": "MCP tool name and declared args are matched to policy, while server identity and cross-process caller identity are not guaranteed in public docs.",
+      "status": "inferred",
+      "evidence_level": "B",
+      "caveat": "Server identity and cross-process caller identity are not proven.",
+      "confidence": "high",
+      "sources": [
+        {
+          "url": "https://raw.githubusercontent.com/google-gemini/gemini-cli/main/docs/cli/plan-mode.md",
+          "accessed": "2026-09-22",
+          "evidence_level": "B",
+          "publisher": "Google Gemini CLI official public repository",
+          "published_or_updated": "2026-09-22",
+          "tier": "primary",
+          "support": "MCP docs match tool name/args to policy; they do not define server or cross-process caller identity."
+        },
+        {
+          "url": "https://raw.githubusercontent.com/google-gemini/gemini-cli/main/docs/cli/policy.md",
+          "accessed": "2026-09-22",
+          "evidence_level": "B",
+          "publisher": "Google Gemini CLI official public repository",
+          "published_or_updated": "2026-09-22",
+          "tier": "primary",
+          "support": "MCP docs match tool name/args to policy; they do not define server or cross-process caller identity."
+        },
+        {
+          "url": "https://raw.githubusercontent.com/google-gemini/gemini-cli/main/docs/tools/mcp-server.md",
+          "accessed": "2026-09-22",
+          "evidence_level": "B",
+          "publisher": "Google Gemini CLI official public repository",
+          "published_or_updated": "2026-09-22",
+          "tier": "primary",
+          "support": "MCP docs match tool name/args to policy; they do not define server or cross-process caller identity."
+        },
+        {
+          "url": "https://raw.githubusercontent.com/google-gemini/gemini-cli/main/docs/cli/trusted-folders.md",
+          "accessed": "2026-09-22",
+          "evidence_level": "B",
+          "publisher": "Google Gemini CLI official public repository",
+          "published_or_updated": "2026-09-22",
+          "tier": "primary",
+          "support": "MCP docs match tool name/args to policy; they do not define server or cross-process caller identity."
+        }
+      ]
+    },
+    {
+      "id": "C5",
+      "claim": "callId, schedulerId, parentCallId, subagent and stream/event identifiers provide process-local correlation keys, not cross-process identity or replay protection.",
+      "status": "unverified",
+      "evidence_level": "B",
+      "caveat": "Cross-process identity, replay prevention, and policy-version pinning are not proven.",
+      "confidence": "medium",
+      "sources": [
+        {
+          "url": "https://raw.githubusercontent.com/google-gemini/gemini-cli/main/docs/cli/plan-mode.md",
+          "accessed": "2026-09-22",
+          "evidence_level": "B",
+          "publisher": "Google Gemini CLI official public repository",
+          "published_or_updated": "2026-09-22",
+          "tier": "primary",
+          "support": "Scheduler/telemetry identifiers appear as process-local correlation fields; cross-process identity is not asserted."
+        },
+        {
+          "url": "https://raw.githubusercontent.com/google-gemini/gemini-cli/main/docs/cli/policy.md",
+          "accessed": "2026-09-22",
+          "evidence_level": "B",
+          "publisher": "Google Gemini CLI official public repository",
+          "published_or_updated": "2026-09-22",
+          "tier": "primary",
+          "support": "Scheduler/telemetry identifiers appear as process-local correlation fields; cross-process identity is not asserted."
+        },
+        {
+          "url": "https://raw.githubusercontent.com/google-gemini/gemini-cli/main/docs/tools/mcp-server.md",
+          "accessed": "2026-09-22",
+          "evidence_level": "B",
+          "publisher": "Google Gemini CLI official public repository",
+          "published_or_updated": "2026-09-22",
+          "tier": "primary",
+          "support": "Scheduler/telemetry identifiers appear as process-local correlation fields; cross-process identity is not asserted."
+        },
+        {
+          "url": "https://raw.githubusercontent.com/google-gemini/gemini-cli/main/docs/cli/trusted-folders.md",
+          "accessed": "2026-09-22",
+          "evidence_level": "B",
+          "publisher": "Google Gemini CLI official public repository",
+          "published_or_updated": "2026-09-22",
+          "tier": "primary",
+          "support": "Scheduler/telemetry identifiers appear as process-local correlation fields; cross-process identity is not asserted."
+        },
+        {
+          "url": "https://github.com/google-gemini/gemini-cli",
+          "accessed": "2026-09-22",
+          "evidence_level": "B",
+          "publisher": "Google Gemini CLI official public repository",
+          "published_or_updated": "2026-09-22",
+          "tier": "primary",
+          "support": "Scheduler/telemetry identifiers appear as process-local correlation fields; cross-process identity is not asserted."
+        }
+      ]
+    },
+    {
+      "id": "C6",
+      "claim": "Public official evidence does not prove authorization snapshots, approval persistence, forged/replayed calls, rollback, remote commit, or exactly-once; these remain unknown/conflict.",
+      "status": "unverified",
+      "evidence_level": "D",
+      "caveat": "Negative-evidence boundary; absent from the cited official source does not mean the capability cannot exist elsewhere.",
+      "confidence": "medium",
+      "sources": [
+        {
+          "url": "https://raw.githubusercontent.com/google-gemini/gemini-cli/main/docs/cli/plan-mode.md",
+          "accessed": "2026-09-22",
+          "evidence_level": "D",
+          "publisher": "Google Gemini CLI official public repository",
+          "published_or_updated": "2026-09-22",
+          "tier": "primary",
+          "support": "Absence of public evidence in cited official docs supports the unknown boundary for audit and effect claims."
+        },
+        {
+          "url": "https://raw.githubusercontent.com/google-gemini/gemini-cli/main/docs/cli/policy.md",
+          "accessed": "2026-09-22",
+          "evidence_level": "D",
+          "publisher": "Google Gemini CLI official public repository",
+          "published_or_updated": "2026-09-22",
+          "tier": "primary",
+          "support": "Absence of public evidence in cited official docs supports the unknown boundary for audit and effect claims."
+        },
+        {
+          "url": "https://raw.githubusercontent.com/google-gemini/gemini-cli/main/docs/tools/mcp-server.md",
+          "accessed": "2026-09-22",
+          "evidence_level": "D",
+          "publisher": "Google Gemini CLI official public repository",
+          "published_or_updated": "2026-09-22",
+          "tier": "primary",
+          "support": "Absence of public evidence in cited official docs supports the unknown boundary for audit and effect claims."
+        },
+        {
+          "url": "https://raw.githubusercontent.com/google-gemini/gemini-cli/main/docs/cli/trusted-folders.md",
+          "accessed": "2026-09-22",
+          "evidence_level": "D",
+          "publisher": "Google Gemini CLI official public repository",
+          "published_or_updated": "2026-09-22",
+          "tier": "primary",
+          "support": "Absence of public evidence in cited official docs supports the unknown boundary for audit and effect claims."
+        },
+        {
+          "url": "https://github.com/google-gemini/gemini-cli",
+          "accessed": "2026-09-22",
+          "evidence_level": "D",
+          "publisher": "Google Gemini CLI official public repository",
+          "published_or_updated": "2026-09-22",
+          "tier": "primary",
+          "support": "Absence of public evidence in cited official docs supports the unknown boundary for audit and effect claims."
+        }
+      ]
+    }
+  ],
+  "scope": "google-gemini/gemini-cli public GitHub docs/source/tests/API only"
+}

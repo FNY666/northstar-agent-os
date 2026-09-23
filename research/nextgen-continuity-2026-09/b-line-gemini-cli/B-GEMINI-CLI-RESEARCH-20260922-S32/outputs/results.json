@@ -1,0 +1,186 @@
+{
+  "ordering": "case id ascending; event order preserved",
+  "results": [
+    {
+      "decisions": {
+        "P": "accepted",
+        "Q": "accepted",
+        "R": "accepted"
+      },
+      "id": "F01"
+    },
+    {
+      "decisions": {
+        "P": "accepted",
+        "Q": "accepted",
+        "R": "accepted"
+      },
+      "id": "F02"
+    },
+    {
+      "decisions": {
+        "P": "accepted",
+        "Q": "accepted",
+        "R": "accepted"
+      },
+      "id": "F03"
+    },
+    {
+      "decisions": {
+        "P": "rejected",
+        "Q": "accepted",
+        "R": "accepted"
+      },
+      "id": "F04"
+    },
+    {
+      "decisions": {
+        "P": "rejected",
+        "Q": "accepted",
+        "R": "accepted"
+      },
+      "id": "F05"
+    },
+    {
+      "decisions": {
+        "P": "accepted",
+        "Q": "rejected",
+        "R": "accepted"
+      },
+      "id": "F06"
+    },
+    {
+      "decisions": {
+        "P": "accepted",
+        "Q": "rejected",
+        "R": "accepted"
+      },
+      "id": "F07"
+    },
+    {
+      "decisions": {
+        "P": "rejected",
+        "Q": "accepted",
+        "R": "accepted"
+      },
+      "id": "F08"
+    },
+    {
+      "decisions": {
+        "P": "accepted",
+        "Q": "accepted",
+        "R": "rejected"
+      },
+      "id": "F09"
+    },
+    {
+      "decisions": {
+        "P": "UNKNOWN",
+        "Q": "accepted",
+        "R": "UNKNOWN"
+      },
+      "id": "F10"
+    },
+    {
+      "decisions": {
+        "P": "UNKNOWN",
+        "Q": "accepted",
+        "R": "accepted"
+      },
+      "id": "F11"
+    },
+    {
+      "decisions": {
+        "P": "UNKNOWN",
+        "Q": "accepted",
+        "R": "accepted"
+      },
+      "id": "F12"
+    },
+    {
+      "decisions": {
+        "P": "UNKNOWN",
+        "Q": "accepted",
+        "R": "accepted"
+      },
+      "id": "F13"
+    },
+    {
+      "decisions": {
+        "P": "accepted",
+        "Q": "UNKNOWN",
+        "R": "accepted"
+      },
+      "id": "F14"
+    },
+    {
+      "decisions": {
+        "P": "accepted",
+        "Q": "accepted",
+        "R": "accepted",
+        "X": "UNKNOWN"
+      },
+      "id": "F15"
+    },
+    {
+      "decisions": {
+        "P": "accepted",
+        "Q": "accepted",
+        "R": "accepted",
+        "X": "UNKNOWN"
+      },
+      "id": "F16"
+    },
+    {
+      "decisions": {
+        "P": "accepted",
+        "Q": "accepted",
+        "R": "accepted",
+        "X": "UNKNOWN"
+      },
+      "id": "F17"
+    },
+    {
+      "decisions": {
+        "P": "UNKNOWN",
+        "Q": "UNKNOWN",
+        "R": "UNKNOWN"
+      },
+      "id": "F18"
+    },
+    {
+      "decisions": {
+        "P": "accepted",
+        "Q": "accepted",
+        "R": "UNKNOWN"
+      },
+      "id": "F19"
+    },
+    {
+      "decisions": {
+        "P": "accepted",
+        "Q": "accepted",
+        "R": "accepted"
+      },
+      "id": "F20"
+    },
+    {
+      "decisions": {
+        "P": "accepted",
+        "Q": "UNKNOWN",
+        "R": "accepted"
+      },
+      "id": "F21"
+    },
+    {
+      "decisions": {
+        "P": "rejected",
+        "Q": "accepted",
+        "R": "accepted"
+      },
+      "id": "F22"
+    }
+  ],
+  "schema_version": "S32-results-1",
+  "worker_count": 1
+}

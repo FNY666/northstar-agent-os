@@ -1,0 +1,20 @@
+S20-01-clean-success	NOT_DISPATCHED	fixture records no outbound dispatch
+S20-02-restart-before-journal	NOT_DISPATCHED	fixture records no outbound dispatch
+S20-03-restart-after-journal	NOT_DISPATCHED	fixture records no outbound dispatch
+S20-04-crash-after-dispatch	UNKNOWN	dispatch is recorded but authoritative response/result is unavailable
+S20-05-crash-after-response	UNKNOWN	response existed but durable result commit was not observed
+S20-06-power-before-journal	NOT_DISPATCHED	fixture records no outbound dispatch
+S20-07-power-after-dispatch	UNKNOWN	dispatch is recorded but authoritative response/result is unavailable
+S20-08-network-before-dispatch	NOT_DISPATCHED	fixture records no outbound dispatch
+S20-09-network-response-lost	UNKNOWN	dispatch is recorded but authoritative response/result is unavailable
+S20-10-tool-response-missing	UNKNOWN	dispatch is recorded but authoritative response/result is unavailable
+S20-11-retry-no-dedupe	UNKNOWN	dispatch is recorded but authoritative response/result is unavailable
+S20-12-retry-fixture-dedupe	UNKNOWN	dispatch is recorded but authoritative response/result is unavailable
+S20-13-tool-error-then-retry	TOOL_ERROR	fixture explicitly supplies a tool error
+S20-14-duplicate-response	DEDUPED_IN_FIXTURE	fixture dedupe rule suppresses duplicate response
+S20-15-malformed-response	UNKNOWN	dispatch is recorded but authoritative response/result is unavailable
+S20-16-crash-during-retry	UNKNOWN	dispatch is recorded but authoritative response/result is unavailable
+CASE_COUNT 16
+UNKNOWN_COUNT 9
+INVARIANT_SYNTHETIC_FLAGS True
+INVARIANT_NO_EXACTLY_ONCE_CLAIM True

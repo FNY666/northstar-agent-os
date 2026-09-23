@@ -1,0 +1,32 @@
+{
+  "schema_version": "1.0",
+  "question": "Can an offline synthetic evidence state machine classify response loss, retries, read-back, conditional conflicts, stale reads, and authorization outcomes across documented cloud field families without claiming live platform behavior?",
+  "synthetic_only": true,
+  "production_verified": false,
+  "scope": {
+    "time_window": "2026-09-22; offline synthetic run",
+    "geography_or_context": "cross-platform documentation mapping; no service access",
+    "inclusions": ["Kubernetes resourceVersion 409", "S3 412/409", "GCS generation precondition failure", "Azure Blob ETag/lease 412 and lease 409", "response loss", "old/cache read", "permission denial", "duplicate retry", "fixed operation identity and payload digest", "W measurement design"],
+    "exclusions": ["real endpoints", "credentials", "existing C-line directories", "shared/P0", "事故目录", "D10", "L12", "D14", "canonical", "staging", "140", "tri-line", "systemd", "production verification", "remote state", "exactly-once", "fencing completion", "crash durability"]
+  },
+  "fixed_identity": {
+    "operation_id": "op-s8-20260922-fixed-0001",
+    "payload_sha256": "89bf43244bd1b9f752a3063e7a03bbcca6bb7b182021e469f601f872dbbb3966"
+  },
+  "claims": [
+    {"id":"C1","claim":"Official documentation describes Kubernetes resourceVersion optimistic concurrency and conflict handling.","status":"confirmed","confidence":"high","sources":[{"url":"https://kubernetes.io/docs/reference/using-api/api-concepts/","publisher":"Kubernetes project","published_or_updated":"access/version dependent","tier":"primary","support":"API concepts documentation topic."}],"caveat":"No live Kubernetes API call."},
+    {"id":"C2","claim":"Official documentation describes S3 conditional request validators and 412/409 error surfaces that require operation context.","status":"confirmed","confidence":"high","sources":[{"url":"https://docs.aws.amazon.com/AmazonS3/latest/userguide/conditional-requests.html","publisher":"Amazon Web Services","published_or_updated":"access/version dependent","tier":"primary","support":"Conditional requests documentation."},{"url":"https://docs.aws.amazon.com/AmazonS3/latest/API/ErrorResponses.html","publisher":"Amazon Web Services","published_or_updated":"access/version dependent","tier":"primary","support":"Error response reference."}],"caveat":"No live S3 call; no universal 409 meaning inferred."},
+    {"id":"C3","claim":"Official documentation describes GCS generation/metageneration preconditions and failed-precondition behavior.","status":"confirmed","confidence":"high","sources":[{"url":"https://cloud.google.com/storage/docs/generations-preconditions","publisher":"Google Cloud","published_or_updated":"access/version dependent","tier":"primary","support":"Generations and preconditions documentation."}],"caveat":"No live GCS call."},
+    {"id":"C4","claim":"Official Azure documentation describes Blob ETag conditional concurrency and lease conditions.","status":"confirmed","confidence":"high","sources":[{"url":"https://learn.microsoft.com/en-us/azure/storage/blobs/concurrency-manage","publisher":"Microsoft","published_or_updated":"access/version dependent","tier":"primary","support":"Blob concurrency documentation."},{"url":"https://learn.microsoft.com/en-us/rest/api/storageservices/lease-blob","publisher":"Microsoft","published_or_updated":"access/version dependent","tier":"primary","support":"Lease Blob REST documentation."}],"caveat":"No live Azure call."},
+    {"id":"C5","claim":"A fixed identity tuple plus matching read-back can be represented as synthetic confirmation after response loss.","status":"inferred","confidence":"medium","sources":[],"caveat":"Harness design inference, not vendor guarantee."},
+    {"id":"C6","claim":"A universal numeric W, exactly-once, fencing completion, remote state, or crash durability is proven by this run.","status":"conflicting","confidence":"high","sources":[],"caveat":"Explicitly rejected by scope and report."},
+    {"id":"C7","claim":"Real service behavior is available to this run.","status":"inaccessible","confidence":"high","sources":[],"caveat":"Real services are explicitly out of scope."}
+  ],
+  "coverage": {
+    "searched": ["local official URL ledger only; no network access"],
+    "inaccessible": ["all real service endpoints and credentials"],
+    "unresolved_conflicts": ["status-only 409 cause", "stale/cache visibility bound", "production W/SLO", "remote idempotency/fencing semantics"]
+  },
+  "artifacts": ["REPORT.md", "sources.md", "research-manifest.json", "SHA256SUMS", "harness.py", "fixtures/cases.json", "outputs/results.json"],
+  "reproduction": ["python3 harness.py", "python3 harness.py --validate", "(cd /tmp/C-NEXTGEN-TRUST-CONTINUITY-20260922-S8 && sha256sum -c SHA256SUMS)"]
+}

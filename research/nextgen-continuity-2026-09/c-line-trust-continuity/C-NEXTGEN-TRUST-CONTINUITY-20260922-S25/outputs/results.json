@@ -1,0 +1,231 @@
+{
+  "policy": {
+    "freshness_seconds": 30,
+    "max_clock_skew_seconds": 5,
+    "required_evidence_classes": [
+      "platform_receipt",
+      "durable_log",
+      "external_effect"
+    ],
+    "required_independent_observers": 2
+  },
+  "production_verified": false,
+  "results": [
+    {
+      "case_id": "C01-clean-cross-region",
+      "classification": "VERIFIED_CONTINUITY",
+      "evidence_digest": "466a68c28883a179",
+      "reasons": [
+        "two independent observers; fresh; signed identity/epoch/fence continuity; platform, log, and external effect closed"
+      ],
+      "status": "RECOVERED",
+      "tags": [
+        "multi_region",
+        "multi_observer",
+        "cross_signature",
+        "freshness_window",
+        "clock_skew",
+        "fence_continuity",
+        "platform_receipt",
+        "log",
+        "external_effect"
+      ]
+    },
+    {
+      "case_id": "C02-observer-disagreement",
+      "classification": "UNKNOWN",
+      "evidence_digest": "1a4a6707b8ddaa75",
+      "reasons": [
+        "observer_disagreement"
+      ],
+      "status": "UNKNOWN",
+      "tags": [
+        "multi_observer",
+        "observer_disagreement",
+        "fail_closed"
+      ]
+    },
+    {
+      "case_id": "C03-stale-window",
+      "classification": "QUERY_GAP",
+      "evidence_digest": "e9a842e5d6d1e534",
+      "reasons": [
+        "freshness_window_expired",
+        "query_gap"
+      ],
+      "status": "UNKNOWN",
+      "tags": [
+        "freshness_window",
+        "query_gap",
+        "fail_closed"
+      ]
+    },
+    {
+      "case_id": "C04-clock-rollback",
+      "classification": "UNKNOWN",
+      "evidence_digest": "b1be976f8424a90d",
+      "reasons": [
+        "clock_rollback"
+      ],
+      "status": "REJECT",
+      "tags": [
+        "clock_rollback",
+        "clock_skew",
+        "fail_closed"
+      ]
+    },
+    {
+      "case_id": "C05-skew-bound",
+      "classification": "DELAYED",
+      "evidence_digest": "1b8868000537f554",
+      "reasons": [
+        "clock_skew_exceeds_bound",
+        "delayed"
+      ],
+      "status": "UNKNOWN",
+      "tags": [
+        "clock_skew",
+        "delayed",
+        "freshness_window"
+      ]
+    },
+    {
+      "case_id": "C06-fence-revoked",
+      "classification": "UNKNOWN",
+      "evidence_digest": "55e9027e9be07bb9",
+      "reasons": [
+        "fence_revoked",
+        "identity_epoch_fence_discontinuity"
+      ],
+      "status": "REJECT",
+      "tags": [
+        "fence_revocation",
+        "epoch_continuity",
+        "fail_closed"
+      ]
+    },
+    {
+      "case_id": "C07-missing-cross-signature",
+      "classification": "UNKNOWN",
+      "evidence_digest": "7fdbd9b5710e141c",
+      "reasons": [
+        "cross_signature_missing"
+      ],
+      "status": "UNKNOWN",
+      "tags": [
+        "cross_signature_missing",
+        "fail_closed",
+        "platform_receipt"
+      ]
+    },
+    {
+      "case_id": "C08-conflicting-signatures",
+      "classification": "UNKNOWN",
+      "evidence_digest": "0e8d3c835d77989d",
+      "reasons": [
+        "cross_signature_conflict"
+      ],
+      "status": "REJECT",
+      "tags": [
+        "cross_signature_conflict",
+        "identity",
+        "epoch",
+        "fail_closed"
+      ]
+    },
+    {
+      "case_id": "C09-platform-log-mismatch",
+      "classification": "EXPORTER_FAILURE",
+      "evidence_digest": "0212b4bd1866183e",
+      "reasons": [
+        "platform_log_mismatch",
+        "exporter_failure"
+      ],
+      "status": "UNKNOWN",
+      "tags": [
+        "platform_receipt",
+        "log",
+        "inconsistency",
+        "exporter_failure"
+      ]
+    },
+    {
+      "case_id": "C10-no-event",
+      "classification": "NO_EVENT",
+      "evidence_digest": "037fd5b034c4e780",
+      "reasons": [
+        "cross_signature_missing",
+        "three_evidence_classes_not_closed",
+        "external_effect_unconfirmed",
+        "no_event"
+      ],
+      "status": "UNKNOWN",
+      "tags": [
+        "no_event",
+        "absence_not_proof",
+        "fail_closed"
+      ]
+    },
+    {
+      "case_id": "C11-dropped",
+      "classification": "DROPPED",
+      "evidence_digest": "79f1ff685ecdd7dd",
+      "reasons": [
+        "three_evidence_classes_not_closed",
+        "external_effect_unconfirmed",
+        "dropped"
+      ],
+      "status": "UNKNOWN",
+      "tags": [
+        "dropped",
+        "external_effect",
+        "fail_closed"
+      ]
+    },
+    {
+      "case_id": "C12-retention-expired",
+      "classification": "RETENTION_EXPIRED",
+      "evidence_digest": "6054ff326443d43b",
+      "reasons": [
+        "retention_expired"
+      ],
+      "status": "UNKNOWN",
+      "tags": [
+        "retention_expired",
+        "freshness_window",
+        "fail_closed"
+      ]
+    },
+    {
+      "case_id": "C13-delayed-but-closed",
+      "classification": "DELAYED",
+      "evidence_digest": "dc3115dd6820e1c5",
+      "reasons": [
+        "delayed"
+      ],
+      "status": "UNKNOWN",
+      "tags": [
+        "delayed",
+        "multi_region",
+        "fail_closed"
+      ]
+    },
+    {
+      "case_id": "C14-unknown-external",
+      "classification": "UNKNOWN",
+      "evidence_digest": "2f8f3eb561e9a2c4",
+      "reasons": [
+        "three_evidence_classes_not_closed",
+        "platform_log_mismatch",
+        "external_effect_unconfirmed"
+      ],
+      "status": "UNKNOWN",
+      "tags": [
+        "external_effect",
+        "unknown",
+        "platform_log_mismatch"
+      ]
+    }
+  ],
+  "synthetic_only": true
+}

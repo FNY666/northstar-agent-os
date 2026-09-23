@@ -1,0 +1,483 @@
+{
+  "schema_version": "1.0",
+  "question": "For representative Stripe payment methods, what do official docs state about refund timing/failure, delayed failure notification, mandate authorization, finality, and capture/cancellation as of 2026-09-22?",
+  "scope": {
+    "time_window": "current as of 2026-09-22",
+    "geography_or_context": "Stripe payment methods documented on docs.stripe.com; method-specific scope, not API execution",
+    "inclusions": [
+      "ACH Direct Debit",
+      "SEPA Direct Debit",
+      "Bacs Direct Debit",
+      "iDEAL | Wero",
+      "Konbini",
+      "Klarna"
+    ],
+    "exclusions": [
+      "Stripe API calls, keys, test objects, non-official sources, undocumented typical behavior"
+    ]
+  },
+  "claims": [
+    {
+      "id": "C01",
+      "claim": "ACH Direct Debit is a reusable delayed-notification method and acknowledgement of success or failure can take up to 4 business days.",
+      "status": "confirmed",
+      "confidence": "high",
+      "sources": [
+        {
+          "url": "https://docs.stripe.com/payments/ach-direct-debit",
+          "publisher": "Stripe",
+          "published_or_updated": "unknown",
+          "tier": "primary",
+          "support": "Method description states delayed notification and up to 4 business days."
+        }
+      ],
+      "caveat": ""
+    },
+    {
+      "id": "C02",
+      "claim": "ACH refunds may be submitted up to 180 days after original payment, are asynchronous and take up to 3 business days, and cannot be canceled.",
+      "status": "confirmed",
+      "confidence": "high",
+      "sources": [
+        {
+          "url": "https://docs.stripe.com/payments/ach-direct-debit",
+          "publisher": "Stripe",
+          "published_or_updated": "unknown",
+          "tier": "primary",
+          "support": "Refund section states submission window, processing time and cannot be canceled."
+        }
+      ],
+      "caveat": ""
+    },
+    {
+      "id": "C03",
+      "claim": "ACH refund final status is communicated by refund.updated or refund.failed; failure changes status to failed and returns amount to Stripe balance.",
+      "status": "confirmed",
+      "confidence": "high",
+      "sources": [
+        {
+          "url": "https://docs.stripe.com/payments/ach-direct-debit",
+          "publisher": "Stripe",
+          "published_or_updated": "unknown",
+          "tier": "primary",
+          "support": "Refund tracking section states webhook events and failure balance treatment."
+        }
+      ],
+      "caveat": ""
+    },
+    {
+      "id": "C04",
+      "claim": "ACH requires customer debit authorization/mandate and cancellation invalidates future debit requests.",
+      "status": "confirmed",
+      "confidence": "high",
+      "sources": [
+        {
+          "url": "https://docs.stripe.com/payments/ach-direct-debit",
+          "publisher": "Stripe",
+          "published_or_updated": "unknown",
+          "tier": "primary",
+          "support": "Mandate authorization and cancellation sections."
+        }
+      ],
+      "caveat": ""
+    },
+    {
+      "id": "C05",
+      "claim": "ACH Direct Debit disputes are final and have no appeal process.",
+      "status": "confirmed",
+      "confidence": "high",
+      "sources": [
+        {
+          "url": "https://docs.stripe.com/payments/ach-direct-debit",
+          "publisher": "Stripe",
+          "published_or_updated": "unknown",
+          "tier": "primary",
+          "support": "Dispute section explicitly says final and no appeal."
+        }
+      ],
+      "caveat": "This is dispute finality, not a claim that every successful payment is absolutely irreversible."
+    },
+    {
+      "id": "C06",
+      "claim": "SEPA Direct Debit refunds typically take 3-4 business days to process and funds arrive within 5 business days; submission is within 180 days.",
+      "status": "confirmed",
+      "confidence": "high",
+      "sources": [
+        {
+          "url": "https://docs.stripe.com/payments/sepa-debit",
+          "publisher": "Stripe",
+          "published_or_updated": "unknown",
+          "tier": "primary",
+          "support": "SEPA refund section states both windows and timing."
+        }
+      ],
+      "caveat": ""
+    },
+    {
+      "id": "C07",
+      "claim": "SEPA is reusable and delayed-notification; most failures occur within 6 business days and a 5-business-day refusal window follows submission.",
+      "status": "confirmed",
+      "confidence": "high",
+      "sources": [
+        {
+          "url": "https://docs.stripe.com/payments/sepa-debit",
+          "publisher": "Stripe",
+          "published_or_updated": "unknown",
+          "tier": "primary",
+          "support": "SEPA processing/failure timeline."
+        }
+      ],
+      "caveat": "Rare failures can appear later as disputes."
+    },
+    {
+      "id": "C08",
+      "claim": "SEPA requires a mandate and cancellation invalidates future debit requests; Stripe learns of cancellation after a failed attempt and sends mandate.updated.",
+      "status": "confirmed",
+      "confidence": "high",
+      "sources": [
+        {
+          "url": "https://docs.stripe.com/payments/sepa-debit",
+          "publisher": "Stripe",
+          "published_or_updated": "unknown",
+          "tier": "primary",
+          "support": "Mandates and cancellation sections."
+        }
+      ],
+      "caveat": ""
+    },
+    {
+      "id": "C09",
+      "claim": "SEPA Direct Debit disputes are final and cannot be appealed; Manual capture support is No.",
+      "status": "confirmed",
+      "confidence": "high",
+      "sources": [
+        {
+          "url": "https://docs.stripe.com/payments/sepa-debit",
+          "publisher": "Stripe",
+          "published_or_updated": "unknown",
+          "tier": "primary",
+          "support": "Dispute finality text and payment properties table."
+        }
+      ],
+      "caveat": "Finality refers to disputes; no general payment irreversibility claim is made."
+    },
+    {
+      "id": "C10",
+      "claim": "Bacs confirmation takes 4 business days with an existing mandate and up to 7 business days with a new mandate.",
+      "status": "confirmed",
+      "confidence": "high",
+      "sources": [
+        {
+          "url": "https://docs.stripe.com/payments/bacs-debit",
+          "publisher": "Stripe",
+          "published_or_updated": "unknown",
+          "tier": "primary",
+          "support": "Bacs timing text."
+        }
+      ],
+      "caveat": ""
+    },
+    {
+      "id": "C11",
+      "claim": "Bacs may be reported as failed by the bank after Stripe marks it successful, in which case it is identified as a dispute.",
+      "status": "confirmed",
+      "confidence": "high",
+      "sources": [
+        {
+          "url": "https://docs.stripe.com/payments/bacs-debit",
+          "publisher": "Stripe",
+          "published_or_updated": "unknown",
+          "tier": "primary",
+          "support": "Bacs delayed failure/dispute text."
+        }
+      ],
+      "caveat": ""
+    },
+    {
+      "id": "C12",
+      "claim": "Bacs refunds must be submitted within 180 days and typically take 3-4 business days; pending refund is canceled if the original Charge fails.",
+      "status": "confirmed",
+      "confidence": "high",
+      "sources": [
+        {
+          "url": "https://docs.stripe.com/payments/bacs-debit",
+          "publisher": "Stripe",
+          "published_or_updated": "unknown",
+          "tier": "primary",
+          "support": "Bacs refund timing and processing-state refund text."
+        }
+      ],
+      "caveat": "The page does not state a separate refund failure webhook."
+    },
+    {
+      "id": "C13",
+      "claim": "Bacs requires a Direct Debit Instruction/mandate and cancellation invalidates future debit requests.",
+      "status": "confirmed",
+      "confidence": "high",
+      "sources": [
+        {
+          "url": "https://docs.stripe.com/payments/bacs-debit",
+          "publisher": "Stripe",
+          "published_or_updated": "unknown",
+          "tier": "primary",
+          "support": "Bacs mandate and cancellation text."
+        }
+      ],
+      "caveat": ""
+    },
+    {
+      "id": "C14",
+      "claim": "Bacs disputes can be submitted indefinitely and are final/non-appealable; Bacs retries can run up to twice within 30 days when enabled.",
+      "status": "confirmed",
+      "confidence": "high",
+      "sources": [
+        {
+          "url": "https://docs.stripe.com/payments/bacs-debit",
+          "publisher": "Stripe",
+          "published_or_updated": "unknown",
+          "tier": "primary",
+          "support": "Bacs dispute and retry sections."
+        }
+      ],
+      "caveat": "Finality refers to disputes."
+    },
+    {
+      "id": "C15",
+      "claim": "iDEAL | Wero gives immediate payment success/failure notification after bank authentication.",
+      "status": "confirmed",
+      "confidence": "high",
+      "sources": [
+        {
+          "url": "https://docs.stripe.com/payments/ideal",
+          "publisher": "Stripe",
+          "published_or_updated": "unknown",
+          "tier": "primary",
+          "support": "Method description states immediate notification."
+        }
+      ],
+      "caveat": "Exact customer experience depends on the bank."
+    },
+    {
+      "id": "C16",
+      "claim": "iDEAL refunds may be submitted up to 180 days; they may remain pending up to 7 days and are considered successful after 7 days without a failure signal.",
+      "status": "confirmed",
+      "confidence": "high",
+      "sources": [
+        {
+          "url": "https://docs.stripe.com/payments/ideal",
+          "publisher": "Stripe",
+          "published_or_updated": "unknown",
+          "tier": "primary",
+          "support": "iDEAL refund section."
+        }
+      ],
+      "caveat": "The page does not specify post-failure balance or webhook semantics."
+    },
+    {
+      "id": "C17",
+      "claim": "iDEAL does not support manual capture.",
+      "status": "confirmed",
+      "confidence": "high",
+      "sources": [
+        {
+          "url": "https://docs.stripe.com/payments/ideal",
+          "publisher": "Stripe",
+          "published_or_updated": "unknown",
+          "tier": "primary",
+          "support": "Payment properties table says Manual capture support No."
+        }
+      ],
+      "caveat": ""
+    },
+    {
+      "id": "C18",
+      "claim": "Konbini refunds require customer return-account information collected by Stripe through the confirmation email flow; completion timing is not stated.",
+      "status": "confirmed",
+      "confidence": "high",
+      "sources": [
+        {
+          "url": "https://docs.stripe.com/payments/konbini",
+          "publisher": "Stripe",
+          "published_or_updated": "unknown",
+          "tier": "primary",
+          "support": "Konbini refund section."
+        }
+      ],
+      "caveat": "Refund failure and arrival time are not stated."
+    },
+    {
+      "id": "C19",
+      "claim": "Konbini payment flow states the customer receives a notification that payment is complete after cash payment; Manual capture support is No.",
+      "status": "confirmed",
+      "confidence": "high",
+      "sources": [
+        {
+          "url": "https://docs.stripe.com/payments/konbini",
+          "publisher": "Stripe",
+          "published_or_updated": "unknown",
+          "tier": "primary",
+          "support": "Payment flow and properties table."
+        }
+      ],
+      "caveat": "No delayed-failure window was found."
+    },
+    {
+      "id": "C20",
+      "claim": "Klarna refunds may be submitted up to 180 days, usually take 5-7 business days, cancel remaining payments and return already-paid amounts.",
+      "status": "confirmed",
+      "confidence": "high",
+      "sources": [
+        {
+          "url": "https://docs.stripe.com/payments/klarna",
+          "publisher": "Stripe",
+          "published_or_updated": "unknown",
+          "tier": "primary",
+          "support": "Klarna refund section."
+        }
+      ],
+      "caveat": "May take longer depending on financial institution and purchase type."
+    },
+    {
+      "id": "C21",
+      "claim": "Klarna supports full and partial refunds but not refunding a payment escalated to a dispute; Manual capture support is Yes.",
+      "status": "confirmed",
+      "confidence": "high",
+      "sources": [
+        {
+          "url": "https://docs.stripe.com/payments/klarna",
+          "publisher": "Stripe",
+          "published_or_updated": "unknown",
+          "tier": "primary",
+          "support": "Klarna refund and payment properties sections."
+        }
+      ],
+      "caveat": ""
+    },
+    {
+      "id": "C22",
+      "claim": "For Klarna authorization scenarios where a down payment is collected, the general authorization page says it is refunded if not captured and the balance must be captured within 30 days.",
+      "status": "confirmed",
+      "confidence": "medium",
+      "sources": [
+        {
+          "url": "https://docs.stripe.com/payments/place-a-hold-on-a-payment-method",
+          "publisher": "Stripe",
+          "published_or_updated": "unknown",
+          "tier": "primary",
+          "support": "Klarna-specific row in authorization validity guidance."
+        }
+      ],
+      "caveat": "The page does not establish that this conditional rule applies to every Klarna configuration."
+    },
+    {
+      "id": "C23",
+      "claim": "For ACH and Bacs, the official payment pages do not provide a directly stated method-specific automatic-cancellation rule when capture is not performed.",
+      "status": "unverified",
+      "confidence": "low",
+      "sources": [
+        {
+          "url": "https://docs.stripe.com/payments/ach-direct-debit",
+          "publisher": "Stripe",
+          "published_or_updated": "unknown",
+          "tier": "primary",
+          "support": "Reviewed capabilities/refund sections; no such direct statement located."
+        },
+        {
+          "url": "https://docs.stripe.com/payments/bacs-debit",
+          "publisher": "Stripe",
+          "published_or_updated": "unknown",
+          "tier": "primary",
+          "support": "Reviewed capabilities/refund sections; no such direct statement located."
+        }
+      ],
+      "caveat": "Requested semantic status: unknown (manifest validator accepts unverified as the corresponding no-direct-evidence status). Unknown is retained rather than inferred from generic card authorization behavior."
+    },
+    {
+      "id": "C24",
+      "claim": "The reviewed official pages do not state general payment irreversibility/finality for iDEAL, Konbini, or Klarna.",
+      "status": "unverified",
+      "confidence": "low",
+      "sources": [
+        {
+          "url": "https://docs.stripe.com/payments/ideal",
+          "publisher": "Stripe",
+          "published_or_updated": "unknown",
+          "tier": "primary",
+          "support": "No general irreversibility statement located."
+        },
+        {
+          "url": "https://docs.stripe.com/payments/konbini",
+          "publisher": "Stripe",
+          "published_or_updated": "unknown",
+          "tier": "primary",
+          "support": "No general irreversibility statement located."
+        },
+        {
+          "url": "https://docs.stripe.com/payments/klarna",
+          "publisher": "Stripe",
+          "published_or_updated": "unknown",
+          "tier": "primary",
+          "support": "No general irreversibility statement located."
+        }
+      ],
+      "caveat": "Requested semantic status: unknown (manifest validator accepts unverified as the corresponding no-direct-evidence status). This does not contradict method-specific dispute-support table values."
+    },
+    {
+      "id": "C25",
+      "claim": "The reviewed official pages do not state general refund-failure notification and balance treatment for SEPA, Bacs, iDEAL, Konbini, or Klarna beyond the method-specific statements recorded above.",
+      "status": "unverified",
+      "confidence": "low",
+      "sources": [
+        {
+          "url": "https://docs.stripe.com/payments/sepa-debit",
+          "publisher": "Stripe",
+          "published_or_updated": "unknown",
+          "tier": "primary",
+          "support": "No direct general refund-failure semantics found."
+        },
+        {
+          "url": "https://docs.stripe.com/payments/bacs-debit",
+          "publisher": "Stripe",
+          "published_or_updated": "unknown",
+          "tier": "primary",
+          "support": "Only pending-refund cancellation on Charge failure is stated."
+        },
+        {
+          "url": "https://docs.stripe.com/payments/ideal",
+          "publisher": "Stripe",
+          "published_or_updated": "unknown",
+          "tier": "primary",
+          "support": "Only failure-signal condition is stated."
+        },
+        {
+          "url": "https://docs.stripe.com/payments/konbini",
+          "publisher": "Stripe",
+          "published_or_updated": "unknown",
+          "tier": "primary",
+          "support": "Refund account-information flow only."
+        },
+        {
+          "url": "https://docs.stripe.com/payments/klarna",
+          "publisher": "Stripe",
+          "published_or_updated": "unknown",
+          "tier": "primary",
+          "support": "Dispute refund restriction only."
+        }
+      ],
+      "caveat": "Requested semantic status: unknown (manifest validator accepts unverified as the corresponding no-direct-evidence status). Unknown means not explicitly stated in reviewed official pages."
+    }
+  ],
+  "coverage": {
+    "searched": [
+      "ACH Direct Debit",
+      "SEPA Direct Debit",
+      "Bacs Direct Debit",
+      "iDEAL | Wero",
+      "Konbini",
+      "Klarna",
+      "Place a hold on a payment method"
+    ],
+    "inaccessible": [],
+    "unresolved_conflicts": []
+  }
+}

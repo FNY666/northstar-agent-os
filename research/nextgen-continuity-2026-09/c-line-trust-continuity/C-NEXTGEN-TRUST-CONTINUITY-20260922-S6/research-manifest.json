@@ -1,0 +1,43 @@
+{
+  "schema_version": "1.0",
+  "question": "取消、失联或租约/版本过期后，如何用资源侧条件写、epoch/version、read-back 与证据状态机证明旧 writer 被拒绝及新 writer 是否提交，并界定 UNKNOWN？",
+  "scope": {
+    "time_window": "current as of 2026-09-22",
+    "geography_or_context": "公开云/编排 API 文档；协议级研究，不是生产验证",
+    "inclusions": [
+      "Kubernetes resourceVersion and Server-Side Apply",
+      "Azure Blob ETag and lease-conditioned operations",
+      "Amazon S3 conditional writes",
+      "Google Cloud Storage generation/metageneration preconditions",
+      "AWS Step Functions and Azure Logic Apps cancellation/retry-relevant workflow semantics",
+      "stale writer rejection, postcondition read-back, evidence state machine, retry/compensation decisions"
+    ],
+    "exclusions": [
+      "任何现有 C 线目录或本地研究产物",
+      "shared/P0、事故目录、D10、L12、D14、canonical、staging、140、tri-line、systemd",
+      "真实服务、账户、集群、桶、凭据和生产测试",
+      "泛泛 lease 介绍、供应商二手资料、非官方来源"
+    ]
+  },
+  "claims": [
+    {"id":"C1","claim":"Kubernetes stale resourceVersion PUT 可被 API server 以 409 Conflict 拒绝，并用于检测 lost updates。","status":"confirmed","confidence":"high","sources":[{"url":"https://kubernetes.io/docs/reference/using-api/api-concepts/","publisher":"Kubernetes Documentation","published_or_updated":"current","tier":"primary","support":"Updates to existing resources 明确要求 PUT 携带 resourceVersion；过期时返回 409 Conflict。"}],"caveat":"仅证明该次带条件更新的资源协议结果，不覆盖此前副作用。"},
+    {"id":"C2","claim":"Kubernetes SSA 跟踪 field manager/managedFields，未 force 的 ownership conflict 会使 Apply 失败。","status":"confirmed","confidence":"high","sources":[{"url":"https://kubernetes.io/docs/reference/using-api/server-side-apply/","publisher":"Kubernetes Documentation","published_or_updated":"current","tier":"primary","support":"SSA 文档直接描述 fieldManager、managedFields 与 conflict/force 语义。"}],"caveat":"Field conflict 与 resourceVersion conflict 是不同保护维度。"},
+    {"id":"C3","claim":"Azure Blob If-Match 比较当前 ETag；不相等时返回 412 Precondition Failed。","status":"confirmed","confidence":"high","sources":[{"url":"https://learn.microsoft.com/en-us/azure/storage/blobs/concurrency-manage","publisher":"Microsoft Learn / Azure Storage","published_or_updated":"current","tier":"primary","support":"官方并发文档逐步描述读取 ETag、If-Match、当前 ETag 不同时的 412。"}],"caveat":"不证明旧 writer 没有其它副作用。"},
+    {"id":"C4","claim":"S3 条件请求在条件不满足时失败，并支持按 ETag 的条件读写及 If-None-Match 类 create-if-absent 保护。","status":"confirmed","confidence":"high","sources":[{"url":"https://docs.aws.amazon.com/AmazonS3/latest/userguide/conditional-requests.html","publisher":"AWS Documentation","published_or_updated":"current","tier":"primary","support":"S3 官方条件请求文档定义失败前提、ETag 条件和防同 key 已存在的条件写。"}],"caveat":"具体错误码按操作记录完整响应，不跨 API 臆造统一码。"},
+    {"id":"C5","claim":"GCS generation/metageneration 与 request preconditions 可阻止不符合 generation 条件的写；if-generation-match:0 可表达不存在前提。","status":"confirmed","confidence":"high","sources":[{"url":"https://cloud.google.com/storage/docs/request-preconditions","publisher":"Google Cloud Documentation","published_or_updated":"current","tier":"primary","support":"官方 preconditions 文档说明仅在资源符合条件时继续，并给出 generation-match 与 0 的示例。"},{"url":"https://cloud.google.com/storage/docs/metadata","publisher":"Google Cloud Documentation","published_or_updated":"current","tier":"primary","support":"官方 metadata 文档定义 generation/metageneration。"}],"caveat":"读取未匹配对象不自动证明 never-applied。"},
+    {"id":"C6","claim":"Step Functions Standard 与 Express 分别被官方描述为 exactly-once workflow execution 与 at-least-once workflow execution；不等于下游业务资源 exactly-once。","status":"confirmed","confidence":"high","sources":[{"url":"https://docs.aws.amazon.com/step-functions/latest/dg/what-is-step-functions.html","publisher":"AWS Documentation","published_or_updated":"current","tier":"primary","support":"官方 workflow 类型比较及 Retry/Catch 说明。"}],"caveat":"后半句是范围解释，不能从 workflow 语义直接推出资源提交语义。"},
+    {"id":"C7","claim":"Azure Logic Apps 支持的 action/trigger 在 timeout 或 408/429/5xx 时可按 retry policy 重发。","status":"confirmed","confidence":"high","sources":[{"url":"https://learn.microsoft.com/en-us/azure/logic-apps/logic-apps-exception-handling","publisher":"Microsoft Learn / Azure Logic Apps","published_or_updated":"current","tier":"primary","support":"官方异常处理文档直接描述 timeout、HTTP 状态与 retry policy。"}],"caveat":"重发策略不是提交结果证明。"},
+    {"id":"C8","claim":"资源返回明确条件失败时，该次带该条件的资源写未以该前提提交。","status":"inferred","confidence":"high","sources":[{"url":"https://kubernetes.io/docs/reference/using-api/api-concepts/","publisher":"Kubernetes Documentation","published_or_updated":"current","tier":"primary","support":"stale resourceVersion update rejected with 409。"},{"url":"https://learn.microsoft.com/en-us/azure/storage/blobs/concurrency-manage","publisher":"Microsoft Learn / Azure Storage","published_or_updated":"current","tier":"primary","support":"ETag mismatch yields precondition failure。"},{"url":"https://cloud.google.com/storage/docs/request-preconditions","publisher":"Google Cloud Documentation","published_or_updated":"current","tier":"primary","support":"request proceeds only when preconditions meet。"}],"caveat":"这是协议推断，不是对旧 writer 其它副作用的证明。"},
+    {"id":"C9","claim":"绑定精确 key、epoch、payload/digest、idempotency key 与服务端版本的新鲜 read-back，可作为新 writer 提交的强 postcondition evidence。","status":"inferred","confidence":"medium","sources":[{"url":"https://cloud.google.com/storage/docs/request-preconditions","publisher":"Google Cloud Documentation","published_or_updated":"current","tier":"primary","support":"官方定义 generation preconditions 并讨论 read-before-write 与竞态。"},{"url":"https://kubernetes.io/docs/reference/using-api/api-concepts/","publisher":"Kubernetes Documentation","published_or_updated":"current","tier":"primary","support":"官方定义 resourceVersion 及后续 watch/read 版本材料。"}],"caveat":"证据强度依赖应用 marker、读新鲜度和并发控制；并非供应商文档承诺的统一结论。"},
+    {"id":"C10","claim":"旧 writer 在 fence 前是否已经造成不可逆外部副作用。","status":"unverified","confidence":"low","sources":[],"caveat":"资源条件拒绝与 workflow cancellation 不能回答跨资源历史副作用。"},
+    {"id":"C11","claim":"timeout/reset/cancel 后写请求是否已经在资源侧提交。","status":"unverified","confidence":"low","sources":[],"caveat":"必须通过资源 read-back、审计或幂等提交记录核验；不能把取消当拒绝。"},
+    {"id":"C12","claim":"read-back 未发现对象/marker 是否等于 never-applied。","status":"unverified","confidence":"low","sources":[],"caveat":"可见性、覆盖、删除、错误版本或读失败均可产生同样观察。"},
+    {"id":"C13","claim":"SSA field conflict 与 resourceVersion lost-update conflict 保护不同维度，不可互换。","status":"conflicting","confidence":"high","sources":[{"url":"https://kubernetes.io/docs/reference/using-api/server-side-apply/","publisher":"Kubernetes Documentation","published_or_updated":"current","tier":"primary","support":"SSA 文档定义 field ownership conflict。"},{"url":"https://kubernetes.io/docs/reference/using-api/api-concepts/","publisher":"Kubernetes Documentation","published_or_updated":"current","tier":"primary","support":"API Concepts 定义 resourceVersion stale update conflict。"}],"caveat":"status=conflicting 表示不能合并为一个机制，不是官方文档相互矛盾。"},
+    {"id":"C14","claim":"Step Functions Standard exactly-once 与 Express at-least-once 不能合并为统一 workflow 保证；下游资源仍需自己的 evidence chain。","status":"conflicting","confidence":"high","sources":[{"url":"https://docs.aws.amazon.com/step-functions/latest/dg/what-is-step-functions.html","publisher":"AWS Documentation","published_or_updated":"current","tier":"primary","support":"同一官方文档对两类 workflow 给出不同交付语义。"}],"caveat":"这里 conflict 指产品模式之间的语义差异，不是待平均的数值冲突。"}
+  ],
+  "coverage": {
+    "searched": ["Kubernetes official API Concepts and Server-Side Apply", "Microsoft Azure Storage concurrency", "AWS S3 conditional requests and Step Functions", "Google Cloud Storage preconditions and metadata", "Azure Logic Apps exception handling"],
+    "inaccessible": [],
+    "unresolved_conflicts": ["S3/GCS/Kubernetes 条件失败的精确错误码随 API/操作不同；报告保留完整响应要求，不建立跨产品统一码。", "workflow-level exactly-once/at-least-once 与 resource-level commit evidence 不是同一语义层。"]
+  }
+}

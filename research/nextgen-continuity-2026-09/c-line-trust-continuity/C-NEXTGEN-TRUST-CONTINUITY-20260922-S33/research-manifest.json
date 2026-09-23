@@ -1,0 +1,24 @@
+{
+  "schema_version": "1.0",
+  "question": "在离线合成证据中，何时 checkpoint、snapshot、delta、compaction、archive restore 与 tombstone 链能够跨 crash/restart 闭合连续性，何时必须保持 UNKNOWN 或 REJECT？",
+  "scope": {
+    "project": "C-line S33",
+    "mode": "offline synthetic fixtures",
+    "date": "2026-09-23",
+    "excluded": ["S1-S32", "production", "network", "real services", "credentials"],
+    "identity_domain": ["tenant", "source", "event_id", "epoch", "version"],
+    "continuity_domain": ["checkpoint", "snapshot", "delta_segment", "compaction_manifest", "archive_restore", "tombstone", "watermark", "retention", "fence"]
+  },
+  "claims_status": "inferred",
+  "synthetic_only": true,
+  "production_verified": false,
+  "sources": [],
+  "claims": [
+    {"id":"all-recovery-gates","claim":"只有 checkpoint、snapshot、delta、compaction、restore、tombstone、watermark、retention、epoch 与 fence 门全部闭合时才可 RECOVERED。","status":"inferred","confidence":"bounded","sources":[],"caveat":"仅由本地合成夹具和规则推导，不代表生产系统。"},
+    {"id":"restore-attestation","claim":"restore 成功消息或进程退出码不是连续性证明；必须有可比对的 generation 和独立 restore attestation。","status":"inferred","confidence":"bounded","sources":[],"caveat":"未验证任何真实归档或快照协议。"},
+    {"id":"gaps-unknown","claim":"delta/segment/manifest/tombstone 缺口、未闭合水位线或 retention 窗口、查询无事件均保持 UNKNOWN。","status":"inferred","confidence":"bounded","sources":[],"caveat":"布尔门不量化实际漏检概率。"},
+    {"id":"hard-conflicts-reject","claim":"身份冲突、同规范摘要冲突、旧 fence 和不可调和 restore generation 冲突必须 REJECT。","status":"inferred","confidence":"bounded","sources":[],"caveat":"只验证合成判定逻辑，不证明目标系统执行拒绝。"}
+  ],
+  "coverage": {"cases": 25, "property_sweep": 524288, "dimensions": 19, "statuses": ["RECOVERED", "UNKNOWN", "REJECT"], "events": ["CHECKPOINT", "SNAPSHOT", "DELTA_CHAIN", "COMPACTION", "ARCHIVE_RESTORE", "TOMBSTONE", "WATERMARK", "RETENTION", "FENCE", "NO_EVENT", "UNKNOWN"]},
+  "notes": "三态互斥并 fail-closed；RECOVERED 仅代表本片离线夹具中的证据门闭合，不代表 production continuity、external effect 或 exactly-once。"
+}

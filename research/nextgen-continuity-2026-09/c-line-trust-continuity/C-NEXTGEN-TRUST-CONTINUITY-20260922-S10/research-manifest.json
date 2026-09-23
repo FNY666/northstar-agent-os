@@ -1,0 +1,58 @@
+{
+  "schema_version": "1.0",
+  "question": "What can a deterministic offline journal/replay model classify around crash cuts, partial or torn records, restart replay, duplicates, and inaccessible evidence without claiming production durability?",
+  "synthetic_only": true,
+  "production_verified": false,
+  "explicit_flags": "synthetic_only=true; production_verified=false",
+  "manifest_version": "S10-1",
+  "slice": "C-line / S10",
+  "title": "offline synthetic crash-window / partial-write / torn-record / restart-recovery",
+  "purpose": "Deterministic local simulation only",
+  "scope": {
+    "mode": "offline synthetic-only local simulation",
+    "included": ["crash-before-write", "partial record", "torn record", "response-before-record", "record-before-response", "restart replay", "duplicate", "loss", "conflict", "inaccessible evidence", "fail-closed/fail-open comparison"],
+    "excluded": ["real services", "credentials", "SDKs", "filesystem durability", "remote state", "exactly-once", "rollback", "immutable audit", "production readiness"]
+  },
+  "network_access": false,
+  "real_services_access": false,
+  "credentials_access": false,
+  "sdk_access": false,
+  "forbidden_inputs_read": [],
+  "forbidden_scopes": ["shared/P0", "事故目录", "D10", "L12", "D14", "canonical", "staging", "140", "tri-line", "systemd", "S1-S9", "既有研究产物"],
+  "artifacts": [
+    {"path": "REPORT.md", "role": "findings and limitations"},
+    {"path": "sources.md", "role": "local synthetic source register"},
+    {"path": "research-manifest.json", "role": "scope and provenance manifest"},
+    {"path": "SHA256SUMS", "role": "artifact checksums"},
+    {"path": "harness.py", "role": "deterministic local simulator"},
+    {"path": "fixtures/cases.json", "role": "14 deterministic fixtures"},
+    {"path": "outputs/results.json", "role": "generated results"}
+  ],
+  "fixture_count": 14,
+  "evidence_labels": ["confirmed", "inferred", "unverified", "conflicting", "inaccessible"],
+  "decision_labels": ["ACCEPT", "REJECT", "UNKNOWN"],
+  "claims": [
+    {"id": "C1", "claim": "The local harness deterministically classifies the 14 authored fixtures and compares fail-closed with fail-open outcomes.", "status": "inferred", "confidence": "high", "sources": [], "caveat": "Local synthetic execution only."},
+    {"id": "C2", "claim": "Partial/torn records, missing record evidence, and inaccessible journal evidence remain UNKNOWN under fail-closed policy in the modeled cases.", "status": "inferred", "confidence": "high", "sources": [], "caveat": "This is a local policy rule, not a filesystem guarantee."},
+    {"id": "C3", "claim": "A complete local record and success response can be classified ACCEPT by the model.", "status": "inferred", "confidence": "high", "sources": [], "caveat": "ACCEPT is local model output, not proof of remote commit."},
+    {"id": "C4", "claim": "Conflicting payload evidence is classified REJECT by both policies in the modeled case.", "status": "inferred", "confidence": "high", "sources": [], "caveat": "No production conflict was tested."},
+    {"id": "C5", "claim": "Fail-open converts unresolved synthetic states to ACCEPT in most cases, illustrating a policy risk rather than a system result.", "status": "inferred", "confidence": "high", "sources": [], "caveat": "The comparison is deterministic local simulation."},
+    {"id": "C6", "claim": "Real crash durability, filesystem ordering, remote state, exactly-once, rollback, immutable audit, and production readiness are proven by this run.", "status": "conflicting", "confidence": "high", "sources": [], "caveat": "Explicitly rejected by scope."},
+    {"id": "C7", "claim": "Production storage and runtime evidence are inaccessible by design.", "status": "unverified", "confidence": "high", "sources": [], "caveat": "No external service, credential, or production artifact was accessed."}
+  ],
+  "coverage": {
+    "searched": ["new local fixtures, harness, validator, and manifest validator only"],
+    "inaccessible": ["production filesystem/device semantics", "real services", "credentials", "prior research artifacts"],
+    "unresolved_conflicts": ["whether a remote effect occurred when local evidence is missing", "real restart/recovery semantics", "durability guarantees"]
+  },
+  "validation_commands": [
+    "python3 harness.py",
+    "python3 validator.py",
+    "python3 manifest_validator.py",
+    "(cd /tmp/C-NEXTGEN-TRUST-CONTINUITY-20260922-S10 && sha256sum -c SHA256SUMS)"
+  ],
+  "limitations": [
+    "Local journal/replay cannot prove real crash durability.",
+    "Cannot prove remote state, exactly-once, rollback, immutable audit, or production readiness."
+  ]
+}

@@ -1,0 +1,25 @@
+{
+  "schema_version": "s26.synthetic.trust-continuity.v1",
+  "synthetic_only": true,
+  "production_verified": false,
+  "question": "在撤销、epoch/fence 与观察者视图存在延迟或冲突时，何时应拒绝将迟到 receipt 升级为 RECOVERED？",
+  "scope": {
+    "in_scope": ["证据撤销后的迟到 receipt", "epoch/fence 重放窗口", "跨区域传播延迟", "observer-specific stale view", "顺序冲突", "三证据闭合", "最小反例收缩", "property-based 状态转换覆盖"],
+    "out_of_scope": ["生产系统验证", "网络、真实服务、SDK、凭据", "exactly-once、回滚、外部效果证明", "跨会话或历史切片复用"],
+    "method": "仅本地合成 fixtures、确定性状态机与性质测试；无外部来源"
+  },
+  "claims": [
+    {"id":"C1","claim":"RECOVERED 仅能在撤销权威可见、时间顺序闭合、epoch/fence 连续、证据新鲜且平台 receipt/持久日志/外部效果三类证据均闭合时产生。","status":"inferred","confidence":"high","sources":[],"caveat":"这是合成状态机的安全不变量，不是生产耐久性证明。"},
+    {"id":"C2","claim":"撤销前签名若在撤销后迟到，且无法证明其观察顺序已闭合，不得升级为 RECOVERED。","status":"inferred","confidence":"high","sources":[],"caveat":"时间与传播字段均为合成输入。"},
+    {"id":"C3","claim":"确定的 fence 重放或 epoch 回退属于硬冲突，可进入 REJECT；不确定的重放窗口或未知撤销传播只能保持 UNKNOWN。","status":"inferred","confidence":"high","sources":[],"caveat":"REJECT 代表安全状态拒绝，不代表发现了真实攻击。"},
+    {"id":"C4","claim":"observer-specific stale view 与跨区域撤销传播延迟会阻止状态升级，直到权威视图和时间顺序闭合。","status":"inferred","confidence":"high","sources":[],"caveat":"未建模真实网络时延分布或服务语义。"},
+    {"id":"C5","claim":"迟到 receipt 与外部效果确认不一致时，不能以单一 receipt 覆盖持久日志或外部效果证据；在没有硬冲突判定时保持 UNKNOWN。","status":"inferred","confidence":"high","sources":[],"caveat":"合成规则不证明外部效果存在、持久或 exactly-once。"},
+    {"id":"C6","claim":"最小反例可收缩为单个 late receipt 加一个未闭合门（例如 stale observer 或 missing external effect），并保持非 RECOVERED。","status":"inferred","confidence":"medium","sources":[],"caveat":"收缩器针对本切片规则和固定字段集合。"},
+    {"id":"C7","claim":"确定性组合性质测试覆盖所有关键门和 RECOVERED/UNKNOWN/REJECT 三态互斥性。","status":"inferred","confidence":"medium","sources":[],"caveat":"组合覆盖不等于生产流量、并发或故障注入覆盖。"}
+  ],
+  "coverage": {
+    "labels": ["NO_EVENT", "DELAYED", "DROPPED", "EXPORTER_FAILURE", "QUERY_GAP", "RETENTION_EXPIRED", "VERIFIED_CONTINUITY", "UNKNOWN", "late_receipt_after_revocation", "fence_replay", "epoch_rollback", "cross_region_delay", "observer_stale_view", "ordering_conflict", "external_effect_mismatch", "minimal_counterexample", "property_based"],
+    "evidence_classes": ["platform_receipt", "persistent_log", "external_effect"],
+    "states": ["RECOVERED", "UNKNOWN", "REJECT"]
+  }
+}

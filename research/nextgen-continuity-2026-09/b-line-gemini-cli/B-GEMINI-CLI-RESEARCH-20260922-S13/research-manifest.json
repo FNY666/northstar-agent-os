@@ -1,0 +1,89 @@
+{
+  "schema_version": "1.0",
+  "question": "Given Gemini CLI session JSONL, checkpoint shadow Git, OTel events, MessageBus/tool events, and policy/telemetry settings, which minimum audit views can be reconstructed and which gaps remain unknown for approval chains, policy versions, authorization snapshots, remote side effects, deduplication, rollback, and exactly-once semantics?",
+  "scope": {
+    "project": "google-gemini/gemini-cli",
+    "allowed_sources": ["official public GitHub documentation", "official public source", "official public tests/API"],
+    "topic": "S13 audit reconstruction and gaps",
+    "as_of": "2026-09-22",
+    "prohibitions": ["no full clone", "no access to shared/P0", "no incident directories", "no D10/L12/D14", "no canonical/140/tri-line/systemd", "no real services", "no credentials", "no modification of S4-S12", "no custom validator"]
+  },
+  "coverage": {
+    "required": ["parseable session history events", "scheduler/tool association fields", "checkpoint shadow Git recovery boundary", "OTel attributes/events persistence or delivery"],
+    "provided": ["session history and conversion", "scheduler/tool callId and session correlation", "checkpoint commitHash/messageId/file boundary", "OTel fields and local-vs-remote export boundary", "policy/approval unknowns", "remote side effects/dedup/rollback/exactly-once unknowns"],
+    "limitations": ["no live service validation", "no claim of fixed JSONL line schema", "no claim of backend delivery", "no claim of complete approval ledger"]
+  },
+  "confidence": "high for documented/source-visible fields and local recovery boundaries; low/unknown for persistence under failure, authorization snapshots, remote effects, deduplication, rollback, and exactly-once",
+  "claims": [
+    {
+      "id": "S13-C1",
+      "claim": "A present and intact session history can provide a partial conversation/tool timeline including prompts, model responses, tool inputs/outputs, and token usage; official source converts modern content and legacy tool-call metadata into function call/response history with stable IDs.",
+      "status": "confirmed",
+      "confidence": "high",
+      "sources": [
+        {"url": "https://github.com/google-gemini/gemini-cli/blob/main/docs/cli/session-management.md", "publisher": "Google Gemini CLI", "published_or_updated": "main", "tier": "primary", "support": "Automatic history includes prompts, responses, tool inputs/outputs, token usage; retention/deletion described."},
+        {"url": "https://github.com/google-gemini/gemini-cli/blob/main/packages/core/src/utils/sessionUtils.ts", "publisher": "Google Gemini CLI", "published_or_updated": "main", "tier": "primary", "support": "Session conversion uses content and reconstructs tool call/response parts and IDs."}
+      ],
+      "caveat": "The materials do not establish a fixed public JSONL line schema, atomic append, crash-tail completeness, or absence of retention deletion; missing/truncated records remain unknown."
+    },
+    {
+      "id": "S13-C2",
+      "claim": "Scheduler/tool records expose callId and tool identity/arguments, and tool spans correlate callId with the session conversation ID; runtime CoreEvents include consent/approval-mode/MCP progress payloads.",
+      "status": "confirmed",
+      "confidence": "high",
+      "sources": [
+        {"url": "https://github.com/google-gemini/gemini-cli/blob/main/packages/core/src/scheduler/types.ts", "publisher": "Google Gemini CLI", "published_or_updated": "main", "tier": "primary", "support": "ToolCallRequestInfo includes callId and tool request fields; status types are defined."},
+        {"url": "https://github.com/google-gemini/gemini-cli/blob/main/packages/core/src/scheduler/tool-executor.ts", "publisher": "Google Gemini CLI", "published_or_updated": "main", "tier": "primary", "support": "Tool execution span receives sessionId and gen_ai.tool.call_id."},
+        {"url": "https://github.com/google-gemini/gemini-cli/blob/main/packages/core/src/utils/events.ts", "publisher": "Google Gemini CLI", "published_or_updated": "main", "tier": "primary", "support": "Core event payloads include approval mode, consent, MCP progress and bounded backlog."}
+      ],
+      "caveat": "Runtime EventEmitter/backlog and scheduler state are not proven durable audit storage; complete approval request/response/retry chains remain unknown when not explicitly persisted."
+    },
+    {
+      "id": "S13-C3",
+      "claim": "Checkpointing can reconstruct the pre-modification project-file state when a shadow Git snapshot succeeds, together with checkpoint commitHash, tool call, messageId/call mapping, and a restore/re-propose boundary.",
+      "status": "confirmed",
+      "confidence": "high",
+      "sources": [
+        {"url": "https://github.com/google-gemini/gemini-cli/blob/main/docs/cli/checkpointing.md", "publisher": "Google Gemini CLI", "published_or_updated": "main", "tier": "primary", "support": "Shadow repository snapshot, conversation/tool-call checkpoint files, and restore behavior are documented."},
+        {"url": "https://github.com/google-gemini/gemini-cli/blob/main/packages/core/src/utils/checkpointUtils.ts", "publisher": "Google Gemini CLI", "published_or_updated": "main", "tier": "primary", "support": "ToolCallData has commitHash/messageId; checkpoint mapping and snapshot failure fallback are implemented."}
+      ],
+      "caveat": "Shadow Git is not a remote-side-effect transaction log; non-file effects, third-party state, and failed/partial snapshots are not proven reversible."
+    },
+    {
+      "id": "S13-C4",
+      "claim": "OTel can provide session/tool correlation and documented operation/attribute/event fields, but detailed prompt/tool output tracing is disabled by default and export callback/buffering does not prove collector/backend delivery.",
+      "status": "confirmed",
+      "confidence": "high",
+      "sources": [
+        {"url": "https://github.com/google-gemini/gemini-cli/blob/main/docs/cli/telemetry.md", "publisher": "Google Gemini CLI", "published_or_updated": "main", "tier": "primary", "support": "Detailed traces default off; standard span attributes include conversation ID and tool call ID."},
+        {"url": "https://github.com/google-gemini/gemini-cli/blob/main/packages/core/src/telemetry/trace.ts", "publisher": "Google Gemini CLI", "published_or_updated": "main", "tier": "primary", "support": "sessionId maps to conversation ID; span metadata handles input/output/errors and end."},
+        {"url": "https://github.com/google-gemini/gemini-cli/blob/main/packages/core/src/telemetry/file-exporters.ts", "publisher": "Google Gemini CLI", "published_or_updated": "main", "tier": "primary", "support": "File exporters append and expose flush/shutdown behavior."},
+        {"url": "https://github.com/google-gemini/gemini-cli/blob/main/packages/core/src/telemetry/sdk.ts", "publisher": "Google Gemini CLI", "published_or_updated": "main", "tier": "primary", "support": "SDK configures buffers and multiple exporter paths."}
+      ],
+      "caveat": "Only a verified local file plus successful flush/shutdown supports local persistence; sampling, disabled traces, crashes, network errors, and backend retention/delivery remain unknown."
+    },
+    {
+      "id": "S13-C5",
+      "claim": "Policy and telemetry settings can contextualize approval mode and trace configuration, but they do not by themselves reconstruct the complete policy version/hash, matched rule set, authorization subject, or authorization snapshot for a specific tool call.",
+      "status": "unverified",
+      "confidence": "low",
+      "sources": [
+        {"url": "https://github.com/google-gemini/gemini-cli/blob/main/docs/reference/policy-engine.md", "publisher": "Google Gemini CLI", "published_or_updated": "main", "tier": "primary", "support": "Documents rules, priorities, approval modes and persistent approval semantics."},
+        {"url": "https://github.com/google-gemini/gemini-cli/blob/main/packages/core/src/utils/events.ts", "publisher": "Google Gemini CLI", "published_or_updated": "main", "tier": "primary", "support": "Approval-mode-changed carries sessionId in event payload."},
+        {"url": "https://github.com/google-gemini/gemini-cli/blob/main/docs/cli/telemetry.md", "publisher": "Google Gemini CLI", "published_or_updated": "main", "tier": "primary", "support": "Approval mode appears among telemetry attributes."}
+      ],
+      "caveat": "No provided official evidence proves a per-call immutable policy snapshot, policy version/hash, final matched rule, approver identity, or authorization credential snapshot; retain these as unknown."
+    },
+    {
+      "id": "S13-C6",
+      "claim": "Remote side effects, deduplication, rollback of non-file effects, and exactly-once execution/delivery cannot be established from session/tool events, OTel IDs, or checkpoint shadow Git.",
+      "status": "unverified",
+      "confidence": "low",
+      "sources": [
+        {"url": "https://github.com/google-gemini/gemini-cli/blob/main/docs/cli/checkpointing.md", "publisher": "Google Gemini CLI", "published_or_updated": "main", "tier": "primary", "support": "Restore is described for project files, conversation history and tool-call re-proposal."},
+        {"url": "https://github.com/google-gemini/gemini-cli/blob/main/packages/core/src/scheduler/types.ts", "publisher": "Google Gemini CLI", "published_or_updated": "main", "tier": "primary", "support": "callId is a tool-call association field, not an official exactly-once guarantee."}
+      ],
+      "caveat": "Do not treat callId as an idempotency key, event count as remote execution count, exporter callback as backend receipt, or restore as remote compensation."
+    }
+  ]
+}
