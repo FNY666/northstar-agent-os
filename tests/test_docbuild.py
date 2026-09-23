@@ -11,7 +11,9 @@ These are the tests behind the CI documentation job's three concerns:
 The generator/checker itself lives in docbuild.py (pure standard library).
 """
 import unittest
+import unittest.mock
 from pathlib import Path
+import tempfile
 
 import docbuild
 
@@ -112,6 +114,77 @@ class MarkdownLinkTests(unittest.TestCase):
     def test_all_internal_markdown_links_resolve(self):
         broken = docbuild.broken_links()
         self.assertEqual(broken, [], "broken internal markdown links:\n  " + "\n  ".join(broken))
+
+    def test_only_third_party_captures_are_excluded_from_the_link_check(self):
+        checked = {path.relative_to(docbuild.ROOT).as_posix() for path in docbuild.markdown_files()}
+        self.assertFalse(any(name.startswith("research/") for name in checked))
+        # The exclusion must stay narrow: the project's own documentation is still checked.
+        self.assertIn("README.md", checked)
+        self.assertTrue(any(name.startswith("docs/") for name in checked))
+        self.assertTrue(any(name.startswith("components/") for name in checked))
+
+
+class LinkCheckExclusionBoundaryTests(unittest.TestCase):
+    """Isolated fixtures (not the real repository tree) that pin down the exact shape of
+    the research/ exclusion: it drops *source files* under the top-level research/
+    directory from the scan, nothing else. A link check that instead excluded *targets*
+    under research/, or matched research/ by prefix, would pass the tests above (which
+    only look at the real tree) while silently widening the exclusion."""
+
+    def _build_tree(self, root: Path, files: dict[str, str]) -> None:
+        for relative, text in files.items():
+            path = root / relative
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(text, encoding="utf-8")
+
+    def test_a_non_research_document_linking_into_research_still_fails(self):
+        # The exclusion drops research/ *source* files from the scan; it must not become a
+        # blanket allowance for any link that merely points *at* something under research/.
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            self._build_tree(root, {
+                "docs/guide.md": "See the [capture](../research/missing.md) for details.\n",
+            })
+            with unittest.mock.patch.object(docbuild, "ROOT", root):
+                broken = docbuild.broken_links()
+            self.assertEqual(
+                broken,
+                ["docs/guide.md:1: ../research/missing.md"],
+                "a non-research document's link to a missing research/ target must still be reported",
+            )
+
+    def test_a_look_alike_top_level_directory_is_not_swept_into_the_exclusion(self):
+        # Only the exact top-level name "research" is excluded. A directory whose name
+        # merely starts with it (or contains it) must keep being checked, which would fail
+        # a naive str.startswith("research") check but passes the parts[0]-equality check.
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            self._build_tree(root, {
+                "research-old/broken.md": "[dangling](./nowhere.md)\n",
+                "not-research/broken.md": "[dangling](./nowhere.md)\n",
+            })
+            with unittest.mock.patch.object(docbuild, "ROOT", root):
+                checked = {path.relative_to(root).as_posix() for path in docbuild.markdown_files()}
+                broken = {entry.split(":", 1)[0] for entry in docbuild.broken_links()}
+            self.assertIn("research-old/broken.md", checked)
+            self.assertIn("not-research/broken.md", checked)
+            self.assertIn("research-old/broken.md", broken)
+            self.assertIn("not-research/broken.md", broken)
+
+    def test_the_exclusion_only_matches_the_exact_top_level_research_directory(self):
+        # A file literally named "research.md" at the root is not the research/ directory
+        # and must still be checked; nested "research" directories below the top level are
+        # not the excluded root either.
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            self._build_tree(root, {
+                "research.md": "[dangling](./nowhere.md)\n",
+                "docs/research/broken.md": "[dangling](./nowhere.md)\n",
+            })
+            with unittest.mock.patch.object(docbuild, "ROOT", root):
+                checked = {path.relative_to(root).as_posix() for path in docbuild.markdown_files()}
+            self.assertIn("research.md", checked)
+            self.assertIn("docs/research/broken.md", checked)
 
 
 if __name__ == "__main__":
