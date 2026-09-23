@@ -1,0 +1,88 @@
+{
+  "decision": {
+    "authority": "authority-A",
+    "decided_at": "2026-09-20T21:59:10Z",
+    "policy_id": "policy-P0",
+    "status": "accepted"
+  },
+  "dedupe": {
+    "enabled": true
+  },
+  "effect": {
+    "read_at": "2026-09-20T21:59:50Z",
+    "reason": "independent effect evidence",
+    "source": "effect-A",
+    "status": "verified"
+  },
+  "execution": {
+    "ended_at": "2026-09-20T21:59:30Z",
+    "idempotency_key": "idem-001",
+    "operation_id": "op-001",
+    "started_at": "2026-09-20T21:59:20Z",
+    "status": "succeeded"
+  },
+  "expected": "invalid",
+  "observation": {
+    "channel": "observe-A",
+    "groundtruth_health": "healthy",
+    "raw_ref": "evidence://sha256/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "read_at": "2026-09-20T21:59:40Z",
+    "source": "observer-A",
+    "status": "returned"
+  },
+  "operation": {
+    "args": {
+      "amount": 7,
+      "currency": "USD"
+    },
+    "kind": "write",
+    "operation_id": "op-001",
+    "target": "acct://test/alpha"
+  },
+  "postconditions": [
+    {
+      "channel": "pc-A",
+      "evidence_id": "ev-1",
+      "evidence_strength": "strong",
+      "name": "effect-applied",
+      "read_at": "2026-09-20T21:59:45Z",
+      "source": "pc-A",
+      "status": "verified"
+    }
+  ],
+  "receipt": {
+    "operation_id": "op-001",
+    "producer": "receipt-A",
+    "read_at": "2026-09-20T21:59:55Z",
+    "run_id": "run-001",
+    "status": "ok"
+  },
+  "run": [],
+  "schema_version": "p0-1.execution-contract/t-contract-0",
+  "trusted_binding": {
+    "decision": {
+      "authority": "authority-A",
+      "decided_at": "2026-09-20T21:59:10Z",
+      "policy_id": "policy-P0",
+      "status": "accepted"
+    },
+    "expiry": "2026-09-20T22:30:00Z",
+    "identity": "identity-A",
+    "operation": {
+      "args": {
+        "amount": 7,
+        "currency": "USD"
+      },
+      "kind": "write",
+      "operation_id": "op-001",
+      "target": "acct://test/alpha"
+    },
+    "operation_fingerprint": "sha256:286393809b01b9679d1efd2dba3f04f8ade537c445ea8d804ff1ee0928e7cc30",
+    "operation_id": "op-001",
+    "owner": "owner-A",
+    "policy_revision": "p0-v04",
+    "read_at": "2026-09-20T21:59:00Z",
+    "run_id": "run-001",
+    "signature": "aed126ce209d53a53b4d5ce1b8e6212e28511454864f494156dc14ce48bff473"
+  }
+}

@@ -1,0 +1,208 @@
+{
+  "schema_version": "1.0",
+  "question": "在仅依赖 Stripe 官方公开资料且不调用 API 的前提下，PaymentIntent webhook delivery/read-back reconciliation 如何处理重放去重、API/event version、一致性边界、投递/业务收敛窗口及 update/cancel 人工复核？",
+  "scope": {
+    "time_window": "current as of 2026-09-22",
+    "geography_or_context": "Stripe PaymentIntent snapshot webhooks and API reference; public docs only",
+    "inclusions": [
+      "webhook delivery/retry/replay/deduplication",
+      "Event API version",
+      "PaymentIntent event vs retrieve boundary",
+      "delivery and business convergence windows",
+      "update/cancel errors and manual review gate"
+    ],
+    "exclusions": [
+      "multi-provider generalization",
+      "Stripe API calls",
+      "credentials/accounts",
+      "existing A-line artifacts and prohibited directories"
+    ]
+  },
+  "claims": [
+    {
+      "id": "C1",
+      "claim": "Webhook duplicates/retries and event ordering require event.id deduplication; manual resend does not cancel automatic retry.",
+      "status": "confirmed",
+      "confidence": "high",
+      "sources": [
+        {
+          "url": "https://docs.stripe.com/webhooks",
+          "publisher": "Stripe",
+          "published_or_updated": "current as of 2026-09-22",
+          "tier": "primary",
+          "support": "Official page directly supports the claim."
+        }
+      ],
+      "caveat": ""
+    },
+    {
+      "id": "C2",
+      "claim": "Event api_version and data are fixed at event creation; endpoint version can define webhook representation.",
+      "status": "confirmed",
+      "confidence": "high",
+      "sources": [
+        {
+          "url": "https://docs.stripe.com/webhooks",
+          "publisher": "Stripe",
+          "published_or_updated": "current as of 2026-09-22",
+          "tier": "primary",
+          "support": "Official page directly supports the claim."
+        },
+        {
+          "url": "https://docs.stripe.com/api/events",
+          "publisher": "Stripe",
+          "published_or_updated": "current as of 2026-09-22",
+          "tier": "primary",
+          "support": "Official page directly supports the claim."
+        }
+      ],
+      "caveat": ""
+    },
+    {
+      "id": "C3",
+      "claim": "Event data.object and direct retrieve share object identity/definition, but retrieve is a later current read and no strong consistency SLA is documented.",
+      "status": "inferred",
+      "confidence": "medium",
+      "sources": [
+        {
+          "url": "https://docs.stripe.com/webhooks",
+          "publisher": "Stripe",
+          "published_or_updated": "current as of 2026-09-22",
+          "tier": "primary",
+          "support": "Official page directly supports the claim."
+        },
+        {
+          "url": "https://docs.stripe.com/api/events",
+          "publisher": "Stripe",
+          "published_or_updated": "current as of 2026-09-22",
+          "tier": "primary",
+          "support": "Official page directly supports the claim."
+        }
+      ],
+      "caveat": ""
+    },
+    {
+      "id": "C4",
+      "claim": "Delivery retry window is documented (live ~3 days; sandbox hours/three retries), while a universal business convergence window is not.",
+      "status": "confirmed",
+      "confidence": "high",
+      "sources": [
+        {
+          "url": "https://docs.stripe.com/webhooks",
+          "publisher": "Stripe",
+          "published_or_updated": "current as of 2026-09-22",
+          "tier": "primary",
+          "support": "Official page directly supports the claim."
+        },
+        {
+          "url": "https://docs.stripe.com/payments/paymentintents/lifecycle",
+          "publisher": "Stripe",
+          "published_or_updated": "current as of 2026-09-22",
+          "tier": "primary",
+          "support": "Official page directly supports the claim."
+        }
+      ],
+      "caveat": "The business-window separation is an inference."
+    },
+    {
+      "id": "C5",
+      "claim": "Update may require reconfirmation; cancel is state-gated and errors when already canceled/non-cancelable.",
+      "status": "confirmed",
+      "confidence": "high",
+      "sources": [
+        {
+          "url": "https://docs.stripe.com/api/payment_intents/update",
+          "publisher": "Stripe",
+          "published_or_updated": "current as of 2026-09-22",
+          "tier": "primary",
+          "support": "Official page directly supports the claim."
+        },
+        {
+          "url": "https://docs.stripe.com/api/payment_intents/cancel",
+          "publisher": "Stripe",
+          "published_or_updated": "current as of 2026-09-22",
+          "tier": "primary",
+          "support": "Official page directly supports the claim."
+        },
+        {
+          "url": "https://docs.stripe.com/payments/paymentintents/lifecycle",
+          "publisher": "Stripe",
+          "published_or_updated": "current as of 2026-09-22",
+          "tier": "primary",
+          "support": "Official page directly supports the claim."
+        }
+      ],
+      "caveat": ""
+    },
+    {
+      "id": "C6",
+      "claim": "Manual review should be a local control for ambiguous/error/conflicting evidence, not a Stripe-defined threshold.",
+      "status": "inferred",
+      "confidence": "medium",
+      "sources": [
+        {
+          "url": "https://docs.stripe.com/webhooks",
+          "publisher": "Stripe",
+          "published_or_updated": "current as of 2026-09-22",
+          "tier": "primary",
+          "support": "Official page directly supports the claim."
+        },
+        {
+          "url": "https://docs.stripe.com/api/events",
+          "publisher": "Stripe",
+          "published_or_updated": "current as of 2026-09-22",
+          "tier": "primary",
+          "support": "Official page directly supports the claim."
+        },
+        {
+          "url": "https://docs.stripe.com/api/payment_intents/update",
+          "publisher": "Stripe",
+          "published_or_updated": "current as of 2026-09-22",
+          "tier": "primary",
+          "support": "Official page directly supports the claim."
+        },
+        {
+          "url": "https://docs.stripe.com/api/payment_intents/cancel",
+          "publisher": "Stripe",
+          "published_or_updated": "current as of 2026-09-22",
+          "tier": "primary",
+          "support": "Official page directly supports the claim."
+        },
+        {
+          "url": "https://docs.stripe.com/api/versioning",
+          "publisher": "Stripe",
+          "published_or_updated": "current as of 2026-09-22",
+          "tier": "primary",
+          "support": "Official page directly supports the claim."
+        }
+      ],
+      "caveat": "Stripe does not publish a universal manual-review rule."
+    },
+    {
+      "id": "C7",
+      "claim": "No official public source in this slice establishes a universal payment-method finality SLA or cross-version field mapping.",
+      "status": "unverified",
+      "confidence": "high",
+      "sources": [],
+      "caveat": "Status is unverified in the validator schema; substantive label is unknown: not found in searched official pages, absence is not proof of nonexistence."
+    }
+  ],
+  "coverage": {
+    "searched": [
+      "S1",
+      "S2",
+      "S3",
+      "S4",
+      "S5",
+      "S6",
+      "S7"
+    ],
+    "inaccessible": [
+      "S8: returned Page not found; not used as evidence"
+    ],
+    "unresolved_conflicts": [
+      "Event data.object is same object definition as direct retrieve vs retrieve provides most recent object: different time semantics, not a contradiction",
+      "No public unified consistency or payment-method finality SLA found"
+    ]
+  }
+}

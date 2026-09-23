@@ -1,0 +1,29 @@
+{
+  "synthetic_only": true,
+  "production_verified": false,
+  "schema_version": "1.0",
+  "question": "Under a deterministic offline synthetic oracle, how do retry-before/after-reference and reconciliation-before/after-response permutations classify reconciliation outcomes?",
+  "scope": {
+    "suite": "S28",
+    "worker_count": 1,
+    "worker_id": "worker-1",
+    "op_id": "s28-op-0001",
+    "fixtures": 16,
+    "included": ["retry before reference", "retry after reference", "reconciliation before response", "reconciliation after response", "accepted", "rejected", "UNKNOWN"],
+    "excluded": ["network", "real Gemini CLI or service", "credentials", "shared/P0", "accident directories", "D10/L12/D14", "canonical/staging/140/tri-line/systemd", "S27 and other prior research artifacts"],
+    "evidence_mode": "local synthetic execution only"
+  },
+  "claims": [
+    {"id":"C1","claim":"The S28 harness executed one worker and one op_id over 16 deterministic fixtures covering both retry positions and both reconciliation positions.","status":"inferred","confidence":"high","sources":[],"caveat":"This is a local execution claim, not production evidence; it is supported only by the locally generated fixture and result files."},
+    {"id":"C2","claim":"Under the explicit synthetic oracle, valid_match fixtures classify as accepted.","status":"inferred","confidence":"high","sources":[],"caveat":"Oracle-defined result only; no claim about Gemini CLI or any production system."},
+    {"id":"C3","claim":"Under the explicit synthetic oracle, response_mismatch fixtures classify as rejected.","status":"inferred","confidence":"high","sources":[],"caveat":"Oracle-defined result only; no claim about Gemini CLI or any production system."},
+    {"id":"C4","claim":"Under the explicit synthetic oracle, missing_response and invalid_reference fixtures classify as UNKNOWN, and UNKNOWN is distinct from REJECTED.","status":"inferred","confidence":"high","sources":[],"caveat":"UNKNOWN means the synthetic oracle does not assert a verdict for unavailable evidence; it is not evidence of acceptance or rejection in production."},
+    {"id":"C5","claim":"The slice establishes production behavior or validates a real Gemini CLI/service integration.","status":"unverified","confidence":"none","sources":[],"caveat":"Explicitly out of scope: no network, real service, CLI, credentials, or production artifacts were used."}
+  ],
+  "coverage": {
+    "status": "complete_for_local_fixture_matrix",
+    "covered": ["16 fixtures", "all four retry/reconciliation permutations", "accepted", "rejected", "UNKNOWN", "UNKNOWN != REJECT"],
+    "not_covered": ["production semantics", "real retries", "transport failures", "concurrency", "durability", "service-specific behavior"],
+    "next_slice": "S29: add a separately isolated offline synthetic slice for duplicate delivery and idempotency permutations; retain UNKNOWN as non-rejection and do not infer production behavior."
+  }
+}

@@ -1,0 +1,53 @@
+{
+  "schema_version": "1.0",
+  "question": "在 synthetic-only、离线、单 worker 条件下，两个独立本地实现是否对撤销、不可归属和保守三态规则给出一致且局部的 verdict？",
+  "scope": {
+    "included": ["S35 local synthetic fixtures", "impl-A", "impl-B", "before/after local property checks"],
+    "excluded": ["S27-S34", "other prior research", "network", "real Gemini CLI/service", "credentials", "shared/P0", "事故目录", "D10/L12/D14", "canonical/staging/140/tri-line/systemd", "durability", "remote state", "exactly-once", "rollback", "production readiness"],
+    "synthetic_only": true,
+    "production_verified": false
+  },
+  "claims": [
+    {
+      "id": "S35-C1",
+      "claim": "24 个确定性 fixture 在 impl-A 与 impl-B 上的完整 verdict map 一致，INTEROP_OK=24，conflict=0。",
+      "status": "inferred",
+      "confidence": "high",
+      "sources": [{"url":"https://example.invalid/s35-local-only","publisher":"local synthetic harness placeholder","published_or_updated":"2026-09-22","tier":"primary","support":"本地 harness 输出与 outputs/results.json；该 URL 不被访问，仅满足通用 manifest 的 URL schema。"}],
+      "caveat": "仅代表本目录的合成输入与本地实现，不外推到真实服务。"
+    },
+    {
+      "id": "S35-C2",
+      "claim": "显式撤销只允许影响目标事件及其同批次事件；其他 op 的 verdict 在 before/after 运行中逐字节不变。",
+      "status": "inferred",
+      "confidence": "high",
+      "sources": [{"url":"https://example.invalid/s35-locality","publisher":"local property validator placeholder","published_or_updated":"2026-09-22","tier":"primary","support":"validator.py 的 locality under explicit revocation 断言。"}],
+      "caveat": "这是 synthetic fixture 上的局部性质，不是生产 durability 或 rollback 证明。"
+    },
+    {
+      "id": "S35-C3",
+      "claim": "未声明 op_id（包括 X、x、null）在两个实现中均为 UNKNOWN，删除这些事件不改变已知 op 的 verdict。",
+      "status": "inferred",
+      "confidence": "high",
+      "sources": [{"url":"https://example.invalid/s35-unattribution","publisher":"local property validator placeholder","published_or_updated":"2026-09-22","tier":"primary","support":"validator.py 的 undeclared op non-attribution 断言。"}],
+      "caveat": "仅验证本地规则与 24 个合成 fixture。"
+    },
+    {
+      "id": "S35-C4",
+      "claim": "UNKNOWN、accepted、rejected 三态互斥；重复、乱序、撤销、缺失不会升级为 accepted，且 UNKNOWN 不等于 rejected。",
+      "status": "inferred",
+      "confidence": "high",
+      "sources": [{"url":"https://example.invalid/s35-conservative","publisher":"local property validator placeholder","published_or_updated":"2026-09-22","tier":"primary","support":"validator.py 的 conservative 三态断言与两实现输出。"}],
+      "caveat": "不证明 exactly-once、远端状态或 production readiness。"
+    }
+  ],
+  "coverage": {
+    "fixtures": 24,
+    "implementations": ["impl-A", "impl-B"],
+    "operation_set": ["P", "Q", "R", "X"],
+    "declared_operations": ["P", "Q", "R"],
+    "assertions_passed": 6,
+    "assertions_total": 6,
+    "network_access": false
+  }
+}

@@ -1,0 +1,24 @@
+{
+  "schema_version": "1.0",
+  "question": "在离线合成证据中，何时 provenance lineage 能够追溯 origin、parent digest、变换、导出/导入、脱敏、重签名和证据位置，何时必须保持 UNKNOWN 或 REJECT？",
+  "scope": {
+    "project": "C-line S41",
+    "mode": "offline synthetic fixtures",
+    "date": "2026-09-23",
+    "excluded": ["S1-S40", "production", "network", "real services", "credentials"],
+    "identity_domain": ["tenant", "source", "event_id", "epoch", "version"],
+    "lineage_domain": ["origin", "parent_digest", "transform", "export", "import", "resign", "redaction", "canonicalization", "algorithm", "timestamp", "actor", "location"]
+  },
+  "claims_status": "inferred",
+  "synthetic_only": true,
+  "production_verified": false,
+  "sources": [],
+  "claims": [
+    {"id":"lineage-closure","claim":"只有 origin、parent digest、变换授权/确定性、export/import mapping、resign/redaction provenance、版本、时间、actor、location、order 与 dedup 全部闭合时才可 RECOVERED。","status":"inferred","confidence":"bounded","sources":[],"caveat":"仅由本地合成夹具和规则推导，不代表生产系统。"},
+    {"id":"derived-not-origin","claim":"导出、导入、脱敏或重签名结果不能替代源证据和变换链；缺少 parent digest 或 mapping 时必须 UNKNOWN。","status":"inferred","confidence":"bounded","sources":[],"caveat":"未验证任何真实 provenance 系统。"},
+    {"id":"transform-unknown","claim":"变换未声明、未授权、不可重放、版本未绑定或 actor/location/time 链不完整时必须 UNKNOWN。","status":"inferred","confidence":"bounded","sources":[],"caveat":"布尔门不量化真实派生风险。"},
+    {"id":"lineage-conflict-reject","claim":"身份冲突、lineage equivocation 或同一 lineage 边的 parent digest 冲突必须 REJECT。","status":"inferred","confidence":"bounded","sources":[],"caveat":"只验证合成判定逻辑，不证明目标系统执行拒绝。"}
+  ],
+  "coverage": {"cases": 28, "property_sweep": 2097152, "dimensions": 21, "statuses": ["RECOVERED", "UNKNOWN", "REJECT"], "events": ["ORIGIN", "DERIVATION", "PARENT_DIGEST", "TRANSFORM", "EXPORT", "IMPORT", "RESIGN", "REDACTION", "CANONICALIZATION", "ALGORITHM", "TIMESTAMP", "ACTOR", "LOCATION", "NO_EVENT", "UNKNOWN"]},
+  "notes": "三态互斥并 fail-closed；RECOVERED 仅代表本片离线夹具中的证据门闭合，不代表 production continuity、external effect 或 exactly-once。"
+}

@@ -1,0 +1,459 @@
+{
+  "cases": [
+    {
+      "W_ms": "UNKNOWN",
+      "action": "retry_after_fresh_read_or_compensate",
+      "case_id": "S8-K8S-RV-409",
+      "events": [
+        "write_attempt",
+        "api_response_409_resource_version_conflict",
+        "fresh_read_resourceVersion_18"
+      ],
+      "evidence_status": "confirmed",
+      "kind": "k8s_rv_409",
+      "notes": "Synthetic analogue of documented optimistic-concurrency conflict; no Kubernetes endpoint called.",
+      "operation_id": "op-s8-20260922-fixed-0001",
+      "payload_sha256": "89bf43244bd1b9f752a3063e7a03bbcca6bb7b182021e469f601f872dbbb3966",
+      "platform": "Kubernetes",
+      "production_verified": false,
+      "read_back": {
+        "state": "not_attempted"
+      },
+      "state": "PRECONDITION_CONFLICT",
+      "synthetic_only": true,
+      "terminal": "PRECONDITION_CONFLICT"
+    },
+    {
+      "W_ms": "UNKNOWN",
+      "action": "retry_after_fresh_read_or_compensate",
+      "case_id": "S8-S3-412",
+      "events": [
+        "put_attempt",
+        "api_response_412_precondition_failed",
+        "fresh_head"
+      ],
+      "evidence_status": "confirmed",
+      "kind": "s3_412",
+      "notes": "Synthetic analogue of conditional-request failure.",
+      "operation_id": "op-s8-20260922-fixed-0001",
+      "payload_sha256": "89bf43244bd1b9f752a3063e7a03bbcca6bb7b182021e469f601f872dbbb3966",
+      "platform": "Amazon S3",
+      "production_verified": false,
+      "read_back": {
+        "state": "not_attempted"
+      },
+      "state": "PRECONDITION_CONFLICT",
+      "synthetic_only": true,
+      "terminal": "PRECONDITION_CONFLICT"
+    },
+    {
+      "W_ms": "UNKNOWN",
+      "action": "retry_after_fresh_read_or_compensate",
+      "case_id": "S8-S3-409",
+      "events": [
+        "multipart_or_conditional_attempt",
+        "api_response_409_conflict"
+      ],
+      "evidence_status": "confirmed",
+      "kind": "s3_409",
+      "notes": "Synthetic status branch; exact cause depends on S3 operation/context.",
+      "operation_id": "op-s8-20260922-fixed-0001",
+      "payload_sha256": "89bf43244bd1b9f752a3063e7a03bbcca6bb7b182021e469f601f872dbbb3966",
+      "platform": "Amazon S3",
+      "production_verified": false,
+      "read_back": {
+        "state": "not_attempted"
+      },
+      "state": "PRECONDITION_CONFLICT",
+      "synthetic_only": true,
+      "terminal": "PRECONDITION_CONFLICT"
+    },
+    {
+      "W_ms": "UNKNOWN",
+      "action": "retry_after_fresh_read_or_compensate",
+      "case_id": "S8-GCS-GENERATION-412",
+      "events": [
+        "upload_attempt_if_generation_match",
+        "api_response_412_precondition_failed",
+        "fresh_metadata_read"
+      ],
+      "evidence_status": "confirmed",
+      "kind": "gcs_412",
+      "notes": "Synthetic analogue of generation/metageneration precondition failure.",
+      "operation_id": "op-s8-20260922-fixed-0001",
+      "payload_sha256": "89bf43244bd1b9f752a3063e7a03bbcca6bb7b182021e469f601f872dbbb3966",
+      "platform": "Google Cloud Storage",
+      "production_verified": false,
+      "read_back": {
+        "state": "not_attempted"
+      },
+      "state": "PRECONDITION_CONFLICT",
+      "synthetic_only": true,
+      "terminal": "PRECONDITION_CONFLICT"
+    },
+    {
+      "W_ms": "UNKNOWN",
+      "action": "retry_after_fresh_read_or_compensate",
+      "case_id": "S8-AZURE-ETAG-412",
+      "events": [
+        "write_if_match_etag",
+        "api_response_412_condition_not_met",
+        "fresh_properties_read"
+      ],
+      "evidence_status": "confirmed",
+      "kind": "azure_etag_412",
+      "notes": "Synthetic analogue of If-Match/ETag condition failure.",
+      "operation_id": "op-s8-20260922-fixed-0001",
+      "payload_sha256": "89bf43244bd1b9f752a3063e7a03bbcca6bb7b182021e469f601f872dbbb3966",
+      "platform": "Azure Blob Storage",
+      "production_verified": false,
+      "read_back": {
+        "state": "not_attempted"
+      },
+      "state": "PRECONDITION_CONFLICT",
+      "synthetic_only": true,
+      "terminal": "PRECONDITION_CONFLICT"
+    },
+    {
+      "W_ms": "UNKNOWN",
+      "action": "retry_after_fresh_read_or_compensate",
+      "case_id": "S8-AZURE-LEASE-412",
+      "events": [
+        "write_with_lease_id",
+        "api_response_412_condition_not_met",
+        "fresh_properties_read"
+      ],
+      "evidence_status": "confirmed",
+      "kind": "azure_lease_412",
+      "notes": "Synthetic analogue of lease condition failure.",
+      "operation_id": "op-s8-20260922-fixed-0001",
+      "payload_sha256": "89bf43244bd1b9f752a3063e7a03bbcca6bb7b182021e469f601f872dbbb3966",
+      "platform": "Azure Blob Storage",
+      "production_verified": false,
+      "read_back": {
+        "state": "not_attempted"
+      },
+      "state": "PRECONDITION_CONFLICT",
+      "synthetic_only": true,
+      "terminal": "PRECONDITION_CONFLICT"
+    },
+    {
+      "W_ms": "UNKNOWN",
+      "action": "retry_after_fresh_read_or_compensate",
+      "case_id": "S8-AZURE-LEASE-409",
+      "events": [
+        "lease_operation",
+        "api_response_409_conflict"
+      ],
+      "evidence_status": "confirmed",
+      "kind": "azure_lease_409",
+      "notes": "Synthetic status branch; exact cause depends on lease operation/context.",
+      "operation_id": "op-s8-20260922-fixed-0001",
+      "payload_sha256": "89bf43244bd1b9f752a3063e7a03bbcca6bb7b182021e469f601f872dbbb3966",
+      "platform": "Azure Blob Storage",
+      "production_verified": false,
+      "read_back": {
+        "state": "not_attempted"
+      },
+      "state": "PRECONDITION_CONFLICT",
+      "synthetic_only": true,
+      "terminal": "PRECONDITION_CONFLICT"
+    },
+    {
+      "W_ms": 120,
+      "action": "retry_same_operation_only_then_read_back",
+      "case_id": "S8-RESP-LOST-MATCH",
+      "events": [
+        "write_sent",
+        "transport_response_lost",
+        "same_identity_retry",
+        "read_back_match"
+      ],
+      "evidence_status": "inferred",
+      "kind": "response_lost",
+      "notes": "Synthetic logical clock only; does not establish crash durability or remote state.",
+      "operation_id": "op-s8-20260922-fixed-0001",
+      "payload_sha256": "89bf43244bd1b9f752a3063e7a03bbcca6bb7b182021e469f601f872dbbb3966",
+      "platform": "cross-platform protocol",
+      "production_verified": false,
+      "read_back": {
+        "operation_id": "op-s8-20260922-fixed-0001",
+        "payload_sha256": "89bf43244bd1b9f752a3063e7a03bbcca6bb7b182021e469f601f872dbbb3966",
+        "state": "matched"
+      },
+      "state": "AMBIGUOUS_COMMIT",
+      "synthetic_only": true,
+      "terminal": "CONFIRMED_BY_SYNTHETIC_READ_BACK"
+    },
+    {
+      "W_ms": "UNKNOWN",
+      "action": "retry_same_operation_only_then_read_back",
+      "case_id": "S8-RESP-LOST-NOMATCH",
+      "events": [
+        "write_sent",
+        "transport_response_lost",
+        "same_identity_retry",
+        "read_back_no_match"
+      ],
+      "evidence_status": "inferred",
+      "kind": "response_lost",
+      "notes": "Synthetic logical clock only; result remains unknown rather than a proof of non-commit.",
+      "operation_id": "op-s8-20260922-fixed-0001",
+      "payload_sha256": "89bf43244bd1b9f752a3063e7a03bbcca6bb7b182021e469f601f872dbbb3966",
+      "platform": "cross-platform protocol",
+      "production_verified": false,
+      "read_back": {
+        "state": "no_match"
+      },
+      "state": "AMBIGUOUS_COMMIT",
+      "synthetic_only": true,
+      "terminal": "UNKNOWN"
+    },
+    {
+      "W_ms": "UNKNOWN",
+      "action": "do_not_claim_success; widen_window_or_human_review",
+      "case_id": "S8-OLD-READ-CACHE",
+      "events": [
+        "write_acceptance_synthetic",
+        "read_back_cache_hit_old_digest"
+      ],
+      "evidence_status": "unverified",
+      "kind": "old_read_cache",
+      "notes": "Synthetic stale/cache branch; official docs do not make this matrix a cross-platform consistency proof.",
+      "operation_id": "op-s8-20260922-fixed-0001",
+      "payload_sha256": "89bf43244bd1b9f752a3063e7a03bbcca6bb7b182021e469f601f872dbbb3966",
+      "platform": "cross-platform protocol",
+      "production_verified": false,
+      "read_back": {
+        "age_ms": 80,
+        "state": "stale"
+      },
+      "state": "VISIBILITY_UNKNOWN",
+      "synthetic_only": true,
+      "terminal": "UNKNOWN"
+    },
+    {
+      "W_ms": "UNKNOWN",
+      "action": "do_not_claim_success; widen_window_or_human_review",
+      "case_id": "S8-OLD-READ-GENERATION",
+      "events": [
+        "write_acceptance_synthetic",
+        "read_back_older_generation"
+      ],
+      "evidence_status": "unverified",
+      "kind": "old_read_generation",
+      "notes": "Synthetic stale-generation branch only.",
+      "operation_id": "op-s8-20260922-fixed-0001",
+      "payload_sha256": "89bf43244bd1b9f752a3063e7a03bbcca6bb7b182021e469f601f872dbbb3966",
+      "platform": "Google Cloud Storage",
+      "production_verified": false,
+      "read_back": {
+        "generation": "older-synthetic-generation",
+        "state": "stale"
+      },
+      "state": "VISIBILITY_UNKNOWN",
+      "synthetic_only": true,
+      "terminal": "UNKNOWN"
+    },
+    {
+      "W_ms": "UNKNOWN",
+      "action": "stop_and_request_authorization_or_human_review",
+      "case_id": "S8-PERMISSION-403",
+      "events": [
+        "write_attempt",
+        "api_response_403_forbidden"
+      ],
+      "evidence_status": "confirmed",
+      "kind": "permission_403",
+      "notes": "Synthetic authorization denial; no credential was used.",
+      "operation_id": "op-s8-20260922-fixed-0001",
+      "payload_sha256": "89bf43244bd1b9f752a3063e7a03bbcca6bb7b182021e469f601f872dbbb3966",
+      "platform": "cross-platform protocol",
+      "production_verified": false,
+      "read_back": {
+        "state": "not_attempted"
+      },
+      "state": "PERMISSION_DENIED",
+      "synthetic_only": true,
+      "terminal": "PERMISSION_DENIED"
+    },
+    {
+      "W_ms": "UNKNOWN",
+      "action": "stop_and_request_authorization_or_human_review",
+      "case_id": "S8-PERMISSION-401",
+      "events": [
+        "write_attempt",
+        "api_response_401_unauthorized"
+      ],
+      "evidence_status": "confirmed",
+      "kind": "permission_401",
+      "notes": "Synthetic authentication/authorization branch; no credential was used.",
+      "operation_id": "op-s8-20260922-fixed-0001",
+      "payload_sha256": "89bf43244bd1b9f752a3063e7a03bbcca6bb7b182021e469f601f872dbbb3966",
+      "platform": "cross-platform protocol",
+      "production_verified": false,
+      "read_back": {
+        "state": "not_attempted"
+      },
+      "state": "PERMISSION_DENIED",
+      "synthetic_only": true,
+      "terminal": "PERMISSION_DENIED"
+    },
+    {
+      "W_ms": 90,
+      "action": "dedupe_by_operation_and_digest; verify_read_back",
+      "case_id": "S8-DUPLICATE-RETRY-MATCH",
+      "events": [
+        "write_attempt_timeout",
+        "same_identity_retry",
+        "read_back_match"
+      ],
+      "evidence_status": "inferred",
+      "kind": "duplicate_retry",
+      "notes": "Synthetic dedupe decision only; no exactly-once claim.",
+      "operation_id": "op-s8-20260922-fixed-0001",
+      "payload_sha256": "89bf43244bd1b9f752a3063e7a03bbcca6bb7b182021e469f601f872dbbb3966",
+      "platform": "cross-platform protocol",
+      "production_verified": false,
+      "read_back": {
+        "operation_id": "op-s8-20260922-fixed-0001",
+        "payload_sha256": "89bf43244bd1b9f752a3063e7a03bbcca6bb7b182021e469f601f872dbbb3966",
+        "state": "matched"
+      },
+      "state": "DUPLICATE_ATTEMPT",
+      "synthetic_only": true,
+      "terminal": "CONFIRMED_BY_SYNTHETIC_READ_BACK"
+    },
+    {
+      "W_ms": "UNKNOWN",
+      "action": "block_retry_and_escalate",
+      "case_id": "S8-DUPLICATE-RETRY-DIGEST-MISMATCH",
+      "events": [
+        "write_attempt_timeout",
+        "retry_same_operation_id_different_payload_digest"
+      ],
+      "evidence_status": "conflicting",
+      "kind": "payload_digest_mismatch",
+      "notes": "Synthetic identity fence at the harness boundary; not a remote fencing proof.",
+      "operation_id": "op-s8-20260922-fixed-0001",
+      "payload_sha256": "89bf43244bd1b9f752a3063e7a03bbcca6bb7b182021e469f601f872dbbb3966",
+      "platform": "cross-platform protocol",
+      "production_verified": false,
+      "read_back": {
+        "state": "not_attempted"
+      },
+      "state": "IDENTITY_MISMATCH",
+      "synthetic_only": true,
+      "terminal": "IDENTITY_MISMATCH"
+    },
+    {
+      "W_ms": "UNKNOWN",
+      "action": "require_platform_and_precondition_context",
+      "case_id": "S8-AMBIGUOUS-409",
+      "events": [
+        "write_attempt",
+        "api_response_409_without_context"
+      ],
+      "evidence_status": "conflicting",
+      "kind": "status_only_409",
+      "notes": "Status alone is insufficient to map cause across platforms.",
+      "operation_id": "op-s8-20260922-fixed-0001",
+      "payload_sha256": "89bf43244bd1b9f752a3063e7a03bbcca6bb7b182021e469f601f872dbbb3966",
+      "platform": "cross-platform protocol",
+      "production_verified": false,
+      "read_back": {
+        "state": "not_attempted"
+      },
+      "state": "AMBIGUOUS_CONFLICT",
+      "synthetic_only": true,
+      "terminal": "AMBIGUOUS_CONFLICT"
+    },
+    {
+      "W_ms": "UNKNOWN",
+      "action": "do_not_probe; keep synthetic-only",
+      "case_id": "S8-INACCESSIBLE-REAL-PROBE",
+      "events": [
+        "probe_blocked_by_scope"
+      ],
+      "evidence_status": "inaccessible",
+      "kind": "real_service_probe",
+      "notes": "Intentionally inaccessible: no real service access is permitted in S8.",
+      "operation_id": "op-s8-20260922-fixed-0001",
+      "payload_sha256": "89bf43244bd1b9f752a3063e7a03bbcca6bb7b182021e469f601f872dbbb3966",
+      "platform": "all",
+      "production_verified": false,
+      "read_back": {
+        "state": "not_attempted"
+      },
+      "state": "INACCESSIBLE",
+      "synthetic_only": true,
+      "terminal": "INACCESSIBLE"
+    },
+    {
+      "W_ms": "UNKNOWN",
+      "action": "human_review",
+      "case_id": "S8-UNKNOWN-MISSING-READBACK",
+      "events": [
+        "write_attempt",
+        "no_response",
+        "no_read_back"
+      ],
+      "evidence_status": "unverified",
+      "kind": "missing_branch",
+      "notes": "Intentional residual UNKNOWN to test fail-closed handling.",
+      "operation_id": "op-s8-20260922-fixed-0001",
+      "payload_sha256": "89bf43244bd1b9f752a3063e7a03bbcca6bb7b182021e469f601f872dbbb3966",
+      "platform": "cross-platform protocol",
+      "production_verified": false,
+      "read_back": {
+        "state": "not_attempted"
+      },
+      "state": "UNKNOWN",
+      "synthetic_only": true,
+      "terminal": "UNKNOWN"
+    }
+  ],
+  "measurement": {
+    "W_definition": "first synthetic read-back event t >= write acceptance with matching operation_id and payload_sha256; UNKNOWN if absent or stale",
+    "clock": "logical milliseconds; not wall-clock or durability evidence"
+  },
+  "operation_id": "op-s8-20260922-fixed-0001",
+  "payload": {
+    "action": "conditional-write",
+    "resource": "synthetic/object/alpha",
+    "value": "S8-fixed-payload-v1"
+  },
+  "payload_sha256": "89bf43244bd1b9f752a3063e7a03bbcca6bb7b182021e469f601f872dbbb3966",
+  "production_verified": false,
+  "schema_version": "s8-results-1.0",
+  "stats": {
+    "W_ms_matched": {
+      "S8-DUPLICATE-RETRY-MATCH": 90,
+      "S8-RESP-LOST-MATCH": 120
+    },
+    "by_evidence_status": {
+      "confirmed": 9,
+      "conflicting": 2,
+      "inaccessible": 1,
+      "inferred": 3,
+      "unverified": 3
+    },
+    "by_terminal": {
+      "AMBIGUOUS_CONFLICT": 1,
+      "CONFIRMED_BY_SYNTHETIC_READ_BACK": 2,
+      "IDENTITY_MISMATCH": 1,
+      "INACCESSIBLE": 1,
+      "PERMISSION_DENIED": 2,
+      "PRECONDITION_CONFLICT": 7,
+      "UNKNOWN": 4
+    },
+    "total": 18,
+    "unknown_case_ids": [
+      "S8-RESP-LOST-NOMATCH",
+      "S8-OLD-READ-CACHE",
+      "S8-OLD-READ-GENERATION",
+      "S8-UNKNOWN-MISSING-READBACK"
+    ]
+  },
+  "synthetic_only": true
+}

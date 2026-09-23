@@ -1,0 +1,68 @@
+{
+  "synthetic_only": true,
+  "production_verified": false,
+  "schema": "offline-synthetic-journal-replay-fixtures-v1",
+  "worker_count": 1,
+  "op_id": "synthetic-op-S26-0001",
+  "cases": [
+    {"case_id":"S26-01-ordered-a1-same","evidence_status":"confirmed","expected_attempt":1,"events":[
+      {"kind":"record_visible","attempt":1,"entry_id":"record_visible-a1","journal_seq":1,"value":"V1"},
+      {"kind":"response_visible","attempt":1,"entry_id":"response_visible-a1","journal_seq":2,"value":"V1","durable_ref":"D1"},
+      {"kind":"durable_ref_visible","attempt":1,"entry_id":"durable_ref_visible-a1","journal_seq":3,"value":"V1","ref":"D1"}]},
+    {"case_id":"S26-02-response-first-same","evidence_status":"inferred","expected_attempt":1,"events":[
+      {"kind":"response_visible","attempt":1,"entry_id":"response_visible-a1","journal_seq":2,"value":"V2","durable_ref":"D2"},
+      {"kind":"record_visible","attempt":1,"entry_id":"record_visible-a1","journal_seq":1,"value":"V2"},
+      {"kind":"durable_ref_visible","attempt":1,"entry_id":"durable_ref_visible-a1","journal_seq":3,"value":"V2","ref":"D2"}]},
+    {"case_id":"S26-03-missing-record","evidence_status":"unverified","events":[
+      {"kind":"response_visible","attempt":1,"entry_id":"response_visible-a1","journal_seq":2,"value":"V3","durable_ref":"D3"},
+      {"kind":"durable_ref_visible","attempt":1,"entry_id":"durable_ref_visible-a1","journal_seq":3,"value":"V3","ref":"D3"}]},
+    {"case_id":"S26-04-missing-response","evidence_status":"unverified","events":[
+      {"kind":"record_visible","attempt":1,"entry_id":"record_visible-a1","journal_seq":1,"value":"V4"},
+      {"kind":"durable_ref_visible","attempt":1,"entry_id":"durable_ref_visible-a1","journal_seq":3,"value":"V4","ref":"D4"}]},
+    {"case_id":"S26-05-missing-durable-ref","evidence_status":"inaccessible","events":[
+      {"kind":"record_visible","attempt":1,"entry_id":"record_visible-a1","journal_seq":1,"value":"V5"},
+      {"kind":"response_visible","attempt":1,"entry_id":"response_visible-a1","journal_seq":2,"value":"V5","durable_ref":"D5"},
+      {"kind":"durable_ref_visible","attempt":1,"entry_id":"durable_ref_visible-a1","journal_seq":3,"value":"V5","ref":"D5","inaccessible":true}]},
+    {"case_id":"S26-06-duplicate-record","evidence_status":"conflicting","events":[
+      {"kind":"record_visible","attempt":1,"entry_id":"record_visible-a1","journal_seq":1,"value":"V6"},
+      {"kind":"record_visible","attempt":1,"entry_id":"record_visible-a1","journal_seq":2,"value":"V6"},
+      {"kind":"response_visible","attempt":1,"entry_id":"response_visible-a1","journal_seq":3,"value":"V6","durable_ref":"D6"},
+      {"kind":"durable_ref_visible","attempt":1,"entry_id":"durable_ref_visible-a1","journal_seq":4,"value":"V6","ref":"D6"}]},
+    {"case_id":"S26-07-reordered-same","evidence_status":"inferred","expected_attempt":1,"events":[
+      {"kind":"durable_ref_visible","attempt":1,"entry_id":"durable_ref_visible-a1","journal_seq":3,"value":"V7","ref":"D7"},
+      {"kind":"record_visible","attempt":1,"entry_id":"record_visible-a1","journal_seq":1,"value":"V7"},
+      {"kind":"response_visible","attempt":1,"entry_id":"response_visible-a1","journal_seq":2,"value":"V7","durable_ref":"D7"}]},
+    {"case_id":"S26-08-different-values","evidence_status":"conflicting","events":[
+      {"kind":"record_visible","attempt":1,"entry_id":"record_visible-a1","journal_seq":1,"value":"V8a"},
+      {"kind":"response_visible","attempt":1,"entry_id":"response_visible-a1","journal_seq":2,"value":"V8b","durable_ref":"D8"},
+      {"kind":"durable_ref_visible","attempt":1,"entry_id":"durable_ref_visible-a1","journal_seq":3,"value":"V8a","ref":"D8"}]},
+    {"case_id":"S26-09-reference-mismatch","evidence_status":"conflicting","events":[
+      {"kind":"record_visible","attempt":1,"entry_id":"record_visible-a1","journal_seq":1,"value":"V9"},
+      {"kind":"response_visible","attempt":1,"entry_id":"response_visible-a1","journal_seq":2,"value":"V9","durable_ref":"D9x"},
+      {"kind":"durable_ref_visible","attempt":1,"entry_id":"durable_ref_visible-a1","journal_seq":3,"value":"V9","ref":"D9"}]},
+    {"case_id":"S26-10-attempt1-incomplete-attempt2-complete","evidence_status":"inferred","expected_attempt":2,"events":[
+      {"kind":"record_visible","attempt":1,"entry_id":"record_visible-a1","journal_seq":1,"value":"old"},
+      {"kind":"record_visible","attempt":2,"entry_id":"record_visible-a2","journal_seq":4,"value":"new"},
+      {"kind":"response_visible","attempt":2,"entry_id":"response_visible-a2","journal_seq":5,"value":"new","durable_ref":"D10"},
+      {"kind":"durable_ref_visible","attempt":2,"entry_id":"durable_ref_visible-a2","journal_seq":6,"value":"new","ref":"D10"}]},
+    {"case_id":"S26-11-attempt1-complete-attempt2-complete","evidence_status":"inferred","events":[
+      {"kind":"record_visible","attempt":1,"entry_id":"record_visible-a1","journal_seq":1,"value":"A"},
+      {"kind":"response_visible","attempt":1,"entry_id":"response_visible-a1","journal_seq":2,"value":"A","durable_ref":"D11a"},
+      {"kind":"durable_ref_visible","attempt":1,"entry_id":"durable_ref_visible-a1","journal_seq":3,"value":"A","ref":"D11a"},
+      {"kind":"record_visible","attempt":2,"entry_id":"record_visible-a2","journal_seq":4,"value":"B"},
+      {"kind":"response_visible","attempt":2,"entry_id":"response_visible-a2","journal_seq":5,"value":"B","durable_ref":"D11b"},
+      {"kind":"durable_ref_visible","attempt":2,"entry_id":"durable_ref_visible-a2","journal_seq":6,"value":"B","ref":"D11b"}]},
+    {"case_id":"S26-12-unknown-entry-kind","evidence_status":"unverified","events":[
+      {"kind":"record_visible","attempt":1,"entry_id":"record_visible-a1","journal_seq":1,"value":"V12"},
+      {"kind":"mystery_visible","attempt":1,"entry_id":"mystery_visible-a1","journal_seq":2,"value":"V12"},
+      {"kind":"durable_ref_visible","attempt":1,"entry_id":"durable_ref_visible-a1","journal_seq":3,"value":"V12","ref":"D12"}]},
+    {"case_id":"S26-13-attempt-mismatch","evidence_status":"inferred","expected_attempt":2,"events":[
+      {"kind":"record_visible","attempt":1,"entry_id":"record_visible-a1","journal_seq":1,"value":"V13"},
+      {"kind":"response_visible","attempt":1,"entry_id":"response_visible-a1","journal_seq":2,"value":"V13","durable_ref":"D13"},
+      {"kind":"durable_ref_visible","attempt":1,"entry_id":"durable_ref_visible-a1","journal_seq":3,"value":"V13","ref":"D13"}]},
+    {"case_id":"S26-14-sequence-collision","evidence_status":"conflicting","events":[
+      {"kind":"record_visible","attempt":1,"entry_id":"record_visible-a1","journal_seq":1,"value":"V14"},
+      {"kind":"response_visible","attempt":1,"entry_id":"response_visible-a1","journal_seq":1,"value":"V14","durable_ref":"D14x"},
+      {"kind":"durable_ref_visible","attempt":1,"entry_id":"durable_ref_visible-a1","journal_seq":2,"value":"V14","ref":"D14x"}]}
+  ]
+}

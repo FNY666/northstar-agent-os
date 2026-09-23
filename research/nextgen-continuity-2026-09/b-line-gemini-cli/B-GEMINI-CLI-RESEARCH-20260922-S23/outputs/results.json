@@ -1,0 +1,161 @@
+{
+  "synthetic_only": true,
+  "production_verified": false,
+  "scope": "S23 offline single-worker single-op_id same-attempt duplicate records",
+  "results": [
+    {
+      "case_id": "S23-01",
+      "status": "accepted",
+      "reason": "same_value_duplicate",
+      "synthetic_only": true,
+      "production_verified": false,
+      "worker_count": 1,
+      "op_id": "op-01",
+      "attempt": 1,
+      "kind": "response",
+      "records": [
+        "response:ok"
+      ]
+    },
+    {
+      "case_id": "S23-02",
+      "status": "accepted",
+      "reason": "same_value_duplicate",
+      "synthetic_only": true,
+      "production_verified": false,
+      "worker_count": 1,
+      "op_id": "op-02",
+      "attempt": 1,
+      "kind": "response",
+      "records": [
+        "response:ok",
+        "response:ok"
+      ]
+    },
+    {
+      "case_id": "S23-03",
+      "status": "rejected",
+      "reason": "different_value_conflict",
+      "synthetic_only": true,
+      "production_verified": false,
+      "worker_count": 1,
+      "op_id": "op-03",
+      "attempt": 1,
+      "kind": "response",
+      "records": [
+        "response:ok",
+        "response:other"
+      ]
+    },
+    {
+      "case_id": "S23-04",
+      "status": "accepted",
+      "reason": "same_value_duplicate",
+      "synthetic_only": true,
+      "production_verified": false,
+      "worker_count": 1,
+      "op_id": "op-04",
+      "attempt": 1,
+      "kind": "durable",
+      "records": [
+        "durable:ref-A",
+        "durable:ref-A"
+      ]
+    },
+    {
+      "case_id": "S23-05",
+      "status": "rejected",
+      "reason": "different_value_conflict",
+      "synthetic_only": true,
+      "production_verified": false,
+      "worker_count": 1,
+      "op_id": "op-05",
+      "attempt": 1,
+      "kind": "durable",
+      "records": [
+        "durable:ref-A",
+        "durable:ref-B"
+      ]
+    },
+    {
+      "case_id": "S23-06",
+      "status": "rejected",
+      "reason": "response_durable_reference_mismatch",
+      "synthetic_only": true,
+      "production_verified": false,
+      "worker_count": 1,
+      "op_id": "op-06",
+      "attempt": 1,
+      "kind": "response_and_durable_mismatch",
+      "records": [
+        "response:ref-A",
+        "durable:ref-B"
+      ]
+    },
+    {
+      "case_id": "S23-07",
+      "status": "accepted",
+      "reason": "response_durable_reference_consistent",
+      "synthetic_only": true,
+      "production_verified": false,
+      "worker_count": 1,
+      "op_id": "op-07",
+      "attempt": 1,
+      "kind": "response_and_durable_mismatch",
+      "records": [
+        "response:ref-A",
+        "durable:ref-A"
+      ]
+    },
+    {
+      "case_id": "S23-08",
+      "status": "UNKNOWN",
+      "reason": "restart_resume_preserves_unknown",
+      "synthetic_only": true,
+      "production_verified": false,
+      "worker_count": 1,
+      "op_id": "op-08",
+      "attempt": 1,
+      "kind": "response",
+      "records": [
+        "response:ok",
+        "response:ok"
+      ]
+    },
+    {
+      "case_id": "S23-09",
+      "status": "UNKNOWN",
+      "reason": "restart_resume_preserves_unknown",
+      "synthetic_only": true,
+      "production_verified": false,
+      "worker_count": 1,
+      "op_id": "op-09",
+      "attempt": 1,
+      "kind": "durable",
+      "records": [
+        "durable:ref-A",
+        "durable:ref-A"
+      ]
+    },
+    {
+      "case_id": "S23-10",
+      "status": "UNKNOWN",
+      "reason": "restart_resume_preserves_unknown",
+      "synthetic_only": true,
+      "production_verified": false,
+      "worker_count": 1,
+      "op_id": "op-10",
+      "attempt": 1,
+      "kind": "response",
+      "records": [
+        "response:ok",
+        "response:changed"
+      ]
+    }
+  ],
+  "statistics": {
+    "accepted": 4,
+    "rejected": 3,
+    "UNKNOWN": 3
+  }
+}

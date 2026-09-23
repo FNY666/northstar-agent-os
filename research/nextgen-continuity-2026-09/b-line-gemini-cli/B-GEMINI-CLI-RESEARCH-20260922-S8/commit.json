@@ -1,0 +1,113 @@
+{
+  "sha": "d5b3e3accb26000d273abf16e0f1dd83aa5428a9",
+  "node_id": "C_kwDOObWEYNoAKGQ1YjNlM2FjY2IyNjAwMGQyNzNhYmYxNmUwZjFkZDgzYWE1NDI4YTk",
+  "commit": {
+    "author": {
+      "name": "urielefrenvirtusa",
+      "email": "urielefren@google.com",
+      "date": "2026-09-21T20:36:40Z"
+    },
+    "committer": {
+      "name": "GitHub",
+      "email": "noreply@github.com",
+      "date": "2026-09-21T20:36:40Z"
+    },
+    "message": "fix(cli): emit tool_call update prior to request_permission in ACP mode (#29439)",
+    "tree": {
+      "sha": "8a4b16d85476ce9ca844fb6fd18482f1533d966b",
+      "url": "https://api.github.com/repos/google-gemini/gemini-cli/git/trees/8a4b16d85476ce9ca844fb6fd18482f1533d966b"
+    },
+    "url": "https://api.github.com/repos/google-gemini/gemini-cli/git/commits/d5b3e3accb26000d273abf16e0f1dd83aa5428a9",
+    "comment_count": 0,
+    "verification": {
+      "verified": true,
+      "reason": "valid",
+      "signature": "-----BEGIN PGP SIGNATURE-----\n\nwsFcBAABCAAQBQJqsZVoCRC1aQ7uu5UhlAAANywQAALzY4o9Quh+AoMWRHn3jgQl\nwDL3ZZ11Qx6vWG3XefdOELb6Ivi+ZfloqUfND+lrvIKAa22mFwIDsbz0UYeJq4qS\nYRdRSU9xbesNl97P5OXwtDZN1pTLJds8nE+CBYU/Ps9Cuz1QK2+tyoMBpMk1BYAn\nL8arFGxvQc/WDWEb7729HGzRsLqXGpt/wocQ3ebtMJia7Jc/jgN50tJIzW8KisS8\niNyXuW5r4emMm4IRu5QHzSzvUqETxsRhE9IYHrLRCH1+6ytI1DqgTrDMnGdr0HcU\nj5cH69XhVfnGrCntWGz7+gyDCbTaN15nuYCT1hA5d5AzNCZMXxjaVSUAlKC7HCRt\nbpVDfiPAeZbfCymUK3DV9mkXzaXsjBu5nR1gxewbU/ZsaC55rMObixMXKZ8Be2V0\n4X0EtTkxzZ6kMy5tVK5VZEUOa8/G5jeEvla7vQDXXJaH2er8zkuZP/7swLlOH7mS\nh7MQseOqYtbZvnc5k9Rtx23fvAcrmhO7fOzkEc5suTTARjh3Y41ac8wT7buY9IoX\n4D/RrEf2i7qOukxiSqnAWszd+qoEYmRz7WND+IDpN60ekiA84IOqV1SpG8Vki+Gh\ntRRaY+V9RaqY2LlIB3F0n2/tANDnyRq0nx03oqclHECDJVNN1zQB0kyJpcU346JP\nUSogeLpoJI7LXXPAkvbp\n=qVsh\n-----END PGP SIGNATURE-----\n",
+      "payload": "tree 8a4b16d85476ce9ca844fb6fd18482f1533d966b\nparent 04e39e5dc44f658c217df87c34757e86e1400e00\nauthor urielefrenvirtusa <urielefren@google.com> 1790023000 +0000\ncommitter GitHub <noreply@github.com> 1790023000 +0000\n\nfix(cli): emit tool_call update prior to request_permission in ACP mode (#29439)",
+      "verified_at": "2026-09-21T20:36:58Z"
+    }
+  },
+  "url": "https://api.github.com/repos/google-gemini/gemini-cli/commits/d5b3e3accb26000d273abf16e0f1dd83aa5428a9",
+  "html_url": "https://github.com/google-gemini/gemini-cli/commit/d5b3e3accb26000d273abf16e0f1dd83aa5428a9",
+  "comments_url": "https://api.github.com/repos/google-gemini/gemini-cli/commits/d5b3e3accb26000d273abf16e0f1dd83aa5428a9/comments",
+  "author": {
+    "login": "urielefrenvirtusa",
+    "id": 321139542,
+    "node_id": "U_kgDOEyQzVg",
+    "avatar_url": "https://avatars.githubusercontent.com/u/321139542?v=4",
+    "gravatar_id": "",
+    "url": "https://api.github.com/users/urielefrenvirtusa",
+    "html_url": "https://github.com/urielefrenvirtusa",
+    "followers_url": "https://api.github.com/users/urielefrenvirtusa/followers",
+    "following_url": "https://api.github.com/users/urielefrenvirtusa/following{/other_user}",
+    "gists_url": "https://api.github.com/users/urielefrenvirtusa/gists{/gist_id}",
+    "starred_url": "https://api.github.com/users/urielefrenvirtusa/starred{/owner}{/repo}",
+    "subscriptions_url": "https://api.github.com/users/urielefrenvirtusa/subscriptions",
+    "organizations_url": "https://api.github.com/users/urielefrenvirtusa/orgs",
+    "repos_url": "https://api.github.com/users/urielefrenvirtusa/repos",
+    "events_url": "https://api.github.com/users/urielefrenvirtusa/events{/privacy}",
+    "received_events_url": "https://api.github.com/users/urielefrenvirtusa/received_events",
+    "type": "User",
+    "user_view_type": "public",
+    "site_admin": false
+  },
+  "committer": {
+    "login": "web-flow",
+    "id": 19864447,
+    "node_id": "MDQ6VXNlcjE5ODY0NDQ3",
+    "avatar_url": "https://avatars.githubusercontent.com/u/19864447?v=4",
+    "gravatar_id": "",
+    "url": "https://api.github.com/users/web-flow",
+    "html_url": "https://github.com/web-flow",
+    "followers_url": "https://api.github.com/users/web-flow/followers",
+    "following_url": "https://api.github.com/users/web-flow/following{/other_user}",
+    "gists_url": "https://api.github.com/users/web-flow/gists{/gist_id}",
+    "starred_url": "https://api.github.com/users/web-flow/starred{/owner}{/repo}",
+    "subscriptions_url": "https://api.github.com/users/web-flow/subscriptions",
+    "organizations_url": "https://api.github.com/users/web-flow/orgs",
+    "repos_url": "https://api.github.com/users/web-flow/repos",
+    "events_url": "https://api.github.com/users/web-flow/events{/privacy}",
+    "received_events_url": "https://api.github.com/users/web-flow/received_events",
+    "type": "User",
+    "user_view_type": "public",
+    "site_admin": false
+  },
+  "parents": [
+    {
+      "sha": "04e39e5dc44f658c217df87c34757e86e1400e00",
+      "url": "https://api.github.com/repos/google-gemini/gemini-cli/commits/04e39e5dc44f658c217df87c34757e86e1400e00",
+      "html_url": "https://github.com/google-gemini/gemini-cli/commit/04e39e5dc44f658c217df87c34757e86e1400e00"
+    }
+  ],
+  "stats": {
+    "total": 167,
+    "additions": 164,
+    "deletions": 3
+  },
+  "files": [
+    {
+      "sha": "ec14ce86f3e3ae88238868288a6cfc2784d67d24",
+      "filename": "packages/cli/src/acp/acpSession.test.ts",
+      "status": "modified",
+      "additions": 137,
+      "deletions": 0,
+      "changes": 137,
+      "blob_url": "https://github.com/google-gemini/gemini-cli/blob/d5b3e3accb26000d273abf16e0f1dd83aa5428a9/packages%2Fcli%2Fsrc%2Facp%2FacpSession.test.ts",
+      "raw_url": "https://github.com/google-gemini/gemini-cli/raw/d5b3e3accb26000d273abf16e0f1dd83aa5428a9/packages%2Fcli%2Fsrc%2Facp%2FacpSession.test.ts",
+      "contents_url": "https://api.github.com/repos/google-gemini/gemini-cli/contents/packages%2Fcli%2Fsrc%2Facp%2FacpSession.test.ts?ref=d5b3e3accb26000d273abf16e0f1dd83aa5428a9",
+      "patch": "@@ -459,6 +459,143 @@ describe('Session', () => {\n     expect(confirmationDetails.onConfirm).toHaveBeenCalled();\n   });\n \n+  it('should emit tool_call session update with status pending before requesting permission', async () => {\n+    const confirmationDetails = {\n+      type: 'info',\n+      onConfirm: vi.fn(),\n+    };\n+    mockTool.build.mockReturnValue({\n+      getDescription: () => 'Test Tool',\n+      toolLocations: () => [],\n+      shouldConfirmExecute: vi.fn().mockResolvedValue(confirmationDetails),\n+      execute: vi.fn().mockResolvedValue({ llmContent: 'Tool Result' }),\n+    });\n+\n+    mockConnection.requestPermission.mockResolvedValue({\n+      outcome: {\n+        outcome: 'selected',\n+        optionId: 'proceed_once',\n+      },\n+    });\n+\n+    const stream1 = createMockStream([\n+      {\n+        type: GeminiEventType.ToolCallRequest,\n+        value: {\n+          callId: 'call-1',\n+          name: 'test_tool',\n+          args: {},\n+          isClientInitiated: false,\n+          prompt_id: 'prompt-1',\n+        },\n+      },\n+    ]);\n+    const stream2 = createMockStream([\n+      {\n+        type: GeminiEventType.Content,\n+        value: '',\n+      },\n+    ]);\n+\n+    mockSendMessageStream\n+      .mockReturnValueOnce(stream1)\n+      .mockReturnValueOnce(stream2);\n+\n+    await session.prompt({\n+      sessionId: 'session-1',\n+      prompt: [{ type: 'text', text: 'Call tool' }],\n+    });\n+\n+    // Check that we sent a sessionUpdate notification for tool_call with status: pending\n+    expect(mockConnection.sessionUpdate).toHaveBeenCalledWith(\n+      expect.objectContaining({\n+        update: expect.objectContaining({\n+          sessionUpdate: 'tool_call',\n+          toolCallId: 'call-1',\n+          status: 'pending',\n+          title: 'Test Tool',\n+        }),\n+      }),\n+    );\n+  });\n+\n+  it('should emit tool_call_update with status failed when tool permission is denied', async () => {\n+    const confirmationDetails = {\n+      type: 'info',\n+      onConfirm: vi.fn(),\n+    };\n+    mockTool.build.mockReturnValue({\n+      getDescription: () => 'Test Tool',\n+      toolLocations: () => [],\n+      shouldConfirmExecute: vi.fn().mockResolvedValue(confirmationDetails),\n+      execute: vi.fn(),\n+    });\n+\n+    mockConnection.requestPermission.mockResolvedValue({\n+      outcome: {\n+        outcome: 'cancelled',\n+      },\n+    });\n+\n+    const stream1 = createMockStream([\n+      {\n+        type: GeminiEventType.ToolCallRequest,\n+        value: {\n+          callId: 'call-1',\n+          name: 'test_tool',\n+          args: {},\n+          isClientInitiated: false,\n+          prompt_id: 'prompt-1',\n+        },\n+      },\n+    ]);\n+    const stream2 = createMockStream([\n+      {\n+        type: GeminiEventType.Content,\n+        value: '',\n+      },\n+    ]);\n+\n+    mockSendMessageStream\n+      .mockReturnValueOnce(stream1)\n+      .mockReturnValueOnce(stream2);\n+\n+    await session.prompt({\n+      sessionId: 'session-1',\n+      prompt: [{ type: 'text', text: 'Call tool' }],\n+    });\n+\n+    // Check that we sent a sessionUpdate notification for tool_call with status: pending\n+    expect(mockConnection.sessionUpdate).toHaveBeenCalledWith(\n+      expect.objectContaining({\n+        update: expect.objectContaining({\n+          sessionUpdate: 'tool_call',\n+          toolCallId: 'call-1',\n+          status: 'pending',\n+        }),\n+      }),\n+    );\n+\n+    // Check that we also sent a sessionUpdate notification for tool_call_update with status: failed\n+    expect(mockConnection.sessionUpdate).toHaveBeenCalledWith(\n+      expect.objectContaining({\n+        update: expect.objectContaining({\n+          sessionUpdate: 'tool_call_update',\n+          toolCallId: 'call-1',\n+          status: 'failed',\n+          content: expect.arrayContaining([\n+            expect.objectContaining({\n+              type: 'content',\n+              content: expect.objectContaining({\n+                text: expect.stringContaining('was canceled by the user'),\n+              }),\n+            }),\n+          ]),\n+        }),\n+      }),\n+    );\n+  });\n+\n   it('should handle @path resolution', async () => {\n     (path.resolve as unknown as Mock).mockReturnValue('/tmp/file.txt');\n     (fs.stat as unknown as Mock).mockResolvedValue({"
+    },
+    {
+      "sha": "162b4703969f4527f544a29cdf4c5cd07d9e11bc",
+      "filename": "packages/cli/src/acp/acpSession.ts",
+      "status": "modified",
+      "additions": 27,
+      "deletions": 3,
+      "changes": 30,
+      "blob_url": "https://github.com/google-gemini/gemini-cli/blob/d5b3e3accb26000d273abf16e0f1dd83aa5428a9/packages%2Fcli%2Fsrc%2Facp%2FacpSession.ts",
+      "raw_url": "https://github.com/google-gemini/gemini-cli/raw/d5b3e3accb26000d273abf16e0f1dd83aa5428a9/packages%2Fcli%2Fsrc%2Facp%2FacpSession.ts",
+      "contents_url": "https://api.github.com/repos/google-gemini/gemini-cli/contents/packages%2Fcli%2Fsrc%2Facp%2FacpSession.ts?ref=d5b3e3accb26000d273abf16e0f1dd83aa5428a9",
+      "patch": "@@ -750,6 +750,16 @@ export class Session {\n           });\n         }\n \n+        await this.sendUpdate({\n+          sessionUpdate: 'tool_call',\n+          toolCallId: callId,\n+          status: 'pending',\n+          title: displayTitle,\n+          content,\n+          locations: invocation.toolLocations(),\n+          kind: toAcpToolKind(tool.kind),\n+        });\n+\n         const params: acp.RequestPermissionRequest = {\n           sessionId: this.id,\n           options: toPermissionOptions(\n@@ -791,10 +801,24 @@ export class Session {\n         );\n \n         switch (outcome) {\n-          case ToolConfirmationOutcome.Cancel:\n-            return errorResponse(\n-              new Error(`Tool \"${fc.name}\" was canceled by the user.`),\n+          case ToolConfirmationOutcome.Cancel: {\n+            const cancelError = new Error(\n+              `Tool \"${fc.name}\" was canceled by the user.`,\n             );\n+            await this.sendUpdate({\n+              sessionUpdate: 'tool_call_update',\n+              toolCallId: callId,\n+              status: 'failed',\n+              content: [\n+                {\n+                  type: 'content',\n+                  content: { type: 'text', text: cancelError.message },\n+                },\n+              ],\n+              kind: toAcpToolKind(tool.kind),\n+            });\n+            return errorResponse(cancelError);\n+          }\n           case ToolConfirmationOutcome.ProceedOnce:\n           case ToolConfirmationOutcome.ProceedAlways:\n           case ToolConfirmationOutcome.ProceedAlwaysAndSave:"
+    }
+  ]
+}

@@ -1,0 +1,134 @@
+{
+  "schema_version": "1.0",
+  "question": "哪些恢复/审计能力无法由 google-gemini/gemini-cli 官方公开文档、源码、测试、API 证明？",
+  "scope": "仅 google-gemini/gemini-cli 官方公开 GitHub 文档、源码、测试、API；不外推到远端服务、分布式系统或合规保证；不读取或修改任何旧切片和受限目录。",
+  "claims": [
+    {
+      "id": "S16-C01",
+      "claim": "授权快照：unknown。官方证明 policy engine 按规则/模式/优先级决策，checkpoint 保存会话、工具调用和本地项目快照；但未证明把主体、策略输入、决策、时间和版本作为不可变授权快照绑定到副作用执行或恢复。",
+      "status": "unverified",
+      "confidence": 0.96,
+      "sources": [
+        {"url": "https://github.com/google-gemini/gemini-cli/blob/main/docs/reference/policy-engine.md", "publisher": "Google Gemini CLI", "published_or_updated": "main (accessed 2026-09-22)", "tier": "primary", "support": "规则、优先级和 approval mode；不含执行授权快照规范。"},
+        {"url": "https://github.com/google-gemini/gemini-cli/blob/main/docs/cli/checkpointing.md", "publisher": "Google Gemini CLI", "published_or_updated": "main (accessed 2026-09-22)", "tier": "primary", "support": "checkpoint 保存本地项目状态、会话和工具调用；不含授权快照。"}
+      ],
+      "caveat": "unknown 表示公开证据不足，不表示实现不存在；需每次执行记录及恢复复核测试。"
+    },
+    {
+      "id": "S16-C02",
+      "claim": "策略版本 pinning：unknown。官方证明策略有分层路径、优先级、工作区完整性检查和更新确认，但未证明策略内容哈希/版本绑定到每次工具决策并在恢复、重试、并发更新时固定。",
+      "status": "unverified",
+      "confidence": 0.96,
+      "sources": [
+        {"url": "https://github.com/google-gemini/gemini-cli/blob/main/packages/cli/src/config/policy.ts", "publisher": "Google Gemini CLI", "published_or_updated": "main (accessed 2026-09-22)", "tier": "primary", "support": "源码显示 policy paths、integrity manager 和 update confirmation state。"},
+        {"url": "https://github.com/google-gemini/gemini-cli/blob/main/packages/cli/src/config/policy-engine.integration.test.ts", "publisher": "Google Gemini CLI", "published_or_updated": "main (accessed 2026-09-22)", "tier": "primary", "support": "测试 ALLOW/DENY/ASK_USER 和模式规则；未测试版本 pinning。"}
+      ],
+      "caveat": "完整性检查和优先级不是执行级策略版本 pinning。"
+    },
+    {
+      "id": "S16-C03",
+      "claim": "完整审批日志：unknown。官方证明 hooks 可观察 BeforeTool/AfterTool 等事件，session transcript 保存会话和工具执行；未证明 allow/deny/ask、审批者、匹配规则、失败和策略变更全部以不可篡改、无损日志持久化。",
+      "status": "unverified",
+      "confidence": 0.95,
+      "sources": [
+        {"url": "https://github.com/google-gemini/gemini-cli/blob/main/docs/hooks/reference.md", "publisher": "Google Gemini CLI", "published_or_updated": "main (accessed 2026-09-22)", "tier": "primary", "support": "定义 hook 事件、session_id、transcript_path。"},
+        {"url": "https://github.com/google-gemini/gemini-cli/blob/main/docs/cli/session-management.md", "publisher": "Google Gemini CLI", "published_or_updated": "main (accessed 2026-09-22)", "tier": "primary", "support": "定义保存的会话与工具执行内容。"}
+      ],
+      "caveat": "可扩展 hook 和 transcript 不自动构成完整审批审计链。"
+    },
+    {
+      "id": "S16-C04",
+      "claim": "工具去重/幂等键：unknown。官方 ToolRegistry 对重复工具名称覆盖并警告、列表去重，并有 loop detection；未证明副作用调用拥有 idempotency key、跨重试/跨进程去重或服务端幂等语义。",
+      "status": "unverified",
+      "confidence": 0.97,
+      "sources": [
+        {"url": "https://github.com/google-gemini/gemini-cli/blob/main/packages/core/src/tools/tool-registry.ts", "publisher": "Google Gemini CLI", "published_or_updated": "main (accessed 2026-09-22)", "tier": "primary", "support": "按名称注册、重复名称覆盖警告、列表去重。"},
+        {"url": "https://github.com/google-gemini/gemini-cli/blob/main/docs/cli/settings.md", "publisher": "Google Gemini CLI", "published_or_updated": "main (accessed 2026-09-22)", "tier": "primary", "support": "列出 loop detection 设置；未定义副作用幂等键。"}
+      ],
+      "caveat": "名称级去重和循环检测不能推出调用级幂等。"
+    },
+    {
+      "id": "S16-C05",
+      "claim": "远端状态 read-back：unknown。官方证明 AfterTool hook 可收到工具结果并能记录到 session；未证明写入远端资源后执行 read-back、版本核对、提交可见性验证或一致性证明。",
+      "status": "unverified",
+      "confidence": 0.98,
+      "sources": [
+        {"url": "https://github.com/google-gemini/gemini-cli/blob/main/docs/hooks/reference.md", "publisher": "Google Gemini CLI", "published_or_updated": "main (accessed 2026-09-22)", "tier": "primary", "support": "定义 AfterTool 事件；不定义远端 read-back 协议。"},
+        {"url": "https://github.com/google-gemini/gemini-cli/blob/main/docs/cli/session-management.md", "publisher": "Google Gemini CLI", "published_or_updated": "main (accessed 2026-09-22)", "tier": "primary", "support": "说明工具执行被保存；不证明外部状态核对。"}
+      ],
+      "caveat": "记录工具结果不等于读取并验证外部最终状态。"
+    },
+    {
+      "id": "S16-C06",
+      "claim": "副作用回滚：inferred（仅限文档明确的本地文件 checkpoint 范围）。官方明确文件修改前 shadow Git snapshot 和 /restore 文件/会话恢复；未证明外部 API、数据库、云资源或任意 shell 副作用可回滚。",
+      "status": "inferred",
+      "confidence": 0.93,
+      "sources": [
+        {"url": "https://github.com/google-gemini/gemini-cli/blob/main/docs/cli/checkpointing.md", "publisher": "Google Gemini CLI", "published_or_updated": "main (accessed 2026-09-22)", "tier": "primary", "support": "明确本地项目 Git snapshot、会话恢复和重新提出工具调用。"}
+      ],
+      "caveat": "inferred 只描述 checkpoint 文档的受限范围，不能外推到外部副作用或跨资源原子回滚。"
+    },
+    {
+      "id": "S16-C07",
+      "claim": "exactly-once：unknown。官方测试可断言某些 agent hook 每轮一次，session/checkpoint 保存工具执行；未证明副作用工具在崩溃、重试、恢复、并发和远端提交场景 exactly-once。",
+      "status": "unverified",
+      "confidence": 0.96,
+      "sources": [
+        {"url": "https://github.com/google-gemini/gemini-cli/blob/main/integration-tests/user-policy.test.ts", "publisher": "Google Gemini CLI", "published_or_updated": "main (accessed 2026-09-22)", "tier": "primary", "support": "包含 BeforeAgent/AfterAgent exactly once per turn 测试。"},
+        {"url": "https://github.com/google-gemini/gemini-cli/blob/main/docs/cli/checkpointing.md", "publisher": "Google Gemini CLI", "published_or_updated": "main (accessed 2026-09-22)", "tier": "primary", "support": "保存工具调用并支持恢复；不定义副作用 exactly-once。"}
+      ],
+      "caveat": "hook 事件一次性测试不等价于工具副作用 exactly-once。"
+    },
+    {
+      "id": "S16-C08",
+      "claim": "跨进程身份：unknown。官方有 session_id、UI 用户身份显示以及隔离 Git identity 测试；未证明不可伪造的跨进程执行主体凭证、会话绑定、权限变化传播或重启后的身份验证。",
+      "status": "unverified",
+      "confidence": 0.96,
+      "sources": [
+        {"url": "https://github.com/google-gemini/gemini-cli/blob/main/docs/hooks/reference.md", "publisher": "Google Gemini CLI", "published_or_updated": "main (accessed 2026-09-22)", "tier": "primary", "support": "定义 session_id 和 transcript_path。"},
+        {"url": "https://github.com/google-gemini/gemini-cli/blob/main/integration-tests/checkpointing.test.ts", "publisher": "Google Gemini CLI", "published_or_updated": "main (accessed 2026-09-22)", "tier": "primary", "support": "测试 isolated Git identity；不是跨进程主体认证。"},
+        {"url": "https://github.com/google-gemini/gemini-cli/blob/main/docs/cli/settings.md", "publisher": "Google Gemini CLI", "published_or_updated": "main (accessed 2026-09-22)", "tier": "primary", "support": "列出 showUserIdentity UI 设置。"}
+      ],
+      "caveat": "会话 UUID、显示邮箱和 Git identity 都不能独立证明执行身份安全属性。"
+    },
+    {
+      "id": "S16-C09",
+      "claim": "fencing token：unknown。官方有 policy 拒绝、工作区完整性/信任和 worktree 隔离控制；未证明资源端校验单调 fencing token、旧进程 token 被拒绝或租约 epoch 机制。",
+      "status": "unverified",
+      "confidence": 0.98,
+      "sources": [
+        {"url": "https://github.com/google-gemini/gemini-cli/blob/main/docs/reference/policy-engine.md", "publisher": "Google Gemini CLI", "published_or_updated": "main (accessed 2026-09-22)", "tier": "primary", "support": "规则和拒绝机制。"},
+        {"url": "https://github.com/google-gemini/gemini-cli/blob/main/docs/cli/session-management.md#parallel-sessions-with-git-worktrees", "publisher": "Google Gemini CLI", "published_or_updated": "main (accessed 2026-09-22)", "tier": "primary", "support": "并行会话工作区隔离。"}
+      ],
+      "caveat": "策略拒绝和工作区隔离不是资源端 fencing token。"
+    },
+    {
+      "id": "S16-C10",
+      "claim": "事件持久送达：unknown。官方定义多种 hook 事件并保存会话；源码/文档还明确磁盘满时可能禁用记录。未证明事件 durable delivery、顺序、ack、重放、崩溃后补发或无损送达。",
+      "status": "unverified",
+      "confidence": 0.95,
+      "sources": [
+        {"url": "https://github.com/google-gemini/gemini-cli/blob/main/docs/hooks/reference.md", "publisher": "Google Gemini CLI", "published_or_updated": "main (accessed 2026-09-22)", "tier": "primary", "support": "定义事件种类和触发时机。"},
+        {"url": "https://github.com/google-gemini/gemini-cli/blob/main/packages/core/src/services/chatRecordingService.ts", "publisher": "Google Gemini CLI", "published_or_updated": "main (accessed 2026-09-22)", "tier": "primary", "support": "会话记录源码包含磁盘满时禁用记录告警。"}
+      ],
+      "caveat": "事件存在和本地记录不能推出 durable delivery；磁盘满行为是相反方向的边界证据。"
+    },
+    {
+      "id": "S16-C11",
+      "claim": "长期审计保存：conflict。官方同时证明会话/工具记录本地保存且默认 30 天自动清理、可按 maxAge/maxCount 删除；因此不能证明长期、不可变、合规审计保存。",
+      "status": "conflicting",
+      "confidence": 0.99,
+      "sources": [
+        {"url": "https://github.com/google-gemini/gemini-cli/blob/main/docs/cli/session-management.md", "publisher": "Google Gemini CLI", "published_or_updated": "main (accessed 2026-09-22)", "tier": "primary", "support": "保存完整会话/工具执行，并明确默认 30 天 retention 和删除 artifacts。"},
+        {"url": "https://github.com/google-gemini/gemini-cli/blob/main/docs/cli/settings.md#session-retention", "publisher": "Google Gemini CLI", "published_or_updated": "main (accessed 2026-09-22)", "tier": "primary", "support": "maxAge、maxCount、minRetention 配置；不提供不可变审计保全。"},
+        {"url": "https://github.com/google-gemini/gemini-cli/blob/main/packages/core/src/services/chatRecordingService.ts", "publisher": "Google Gemini CLI", "published_or_updated": "main (accessed 2026-09-22)", "tier": "primary", "support": "会话记录实现与磁盘不足处理。"}
+      ],
+      "caveat": "conflict 是“局部保存”与“默认自动删除”之间的范围冲突；不是声称源码自相矛盾。需另有不可变存储、legal hold、导出完整性和备份恢复证据。"
+    }
+  ],
+  "coverage": {
+    "target_capabilities": ["授权快照", "策略版本 pinning", "完整审批日志", "工具去重/幂等键", "远端状态 read-back", "副作用回滚", "exactly-once", "跨进程身份", "fencing token", "事件持久送达", "长期审计保存"],
+    "claims_per_capability": 1,
+    "evidence_policy": "每项至少列本地控制证据、不可推出的原因和补证据要求；不能证明的保持 unknown。"
+  }
+}

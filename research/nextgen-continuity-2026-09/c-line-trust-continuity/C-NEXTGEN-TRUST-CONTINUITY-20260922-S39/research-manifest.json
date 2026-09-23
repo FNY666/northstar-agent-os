@@ -1,0 +1,24 @@
+{
+  "schema_version": "1.0",
+  "question": "在离线合成证据中，何时跨系统查询的 scope、分页/resourceVersion、snapshot、watermark、retention 与 QUERY_GAP/NO_EVENT 语义能够闭合完整窗口，何时必须保持 UNKNOWN 或 REJECT？",
+  "scope": {
+    "project": "C-line S39",
+    "mode": "offline synthetic fixtures",
+    "date": "2026-09-23",
+    "excluded": ["S1-S38", "production", "network", "real services", "credentials"],
+    "identity_domain": ["tenant", "source", "event_id", "epoch", "version"],
+    "query_domain": ["query_scope", "time_window", "page_cursor", "resource_version", "snapshot", "watermark", "retention", "NO_EVENT", "QUERY_GAP", "cross_region", "retry"]
+  },
+  "claims_status": "inferred",
+  "synthetic_only": true,
+  "production_verified": false,
+  "sources": [],
+  "claims": [
+    {"id":"query-window-closure","claim":"只有 scope/time window、cursor/terminal、resourceVersion/snapshot、watermark/retention、NO_EVENT semantics、分页限制、filter、跨区域和 retry/dedup 全部闭合时才可 RECOVERED。","status":"inferred","confidence":"bounded","sources":[],"caveat":"仅由本地合成夹具和规则推导，不代表生产系统。"},
+    {"id":"empty-not-absence","claim":"空结果、单页成功或一个 resourceVersion 不能证明窗口内无事件；QUERY_GAP、retention expired 或分页缺口下必须保持 UNKNOWN。","status":"inferred","confidence":"bounded","sources":[],"caveat":"未验证任何真实查询 API。"},
+    {"id":"query-gap-unknown","claim":"查询范围、分页终止、快照一致性、保留边界、重试对账或跨区域返回不完整时必须 UNKNOWN。","status":"inferred","confidence":"bounded","sources":[],"caveat":"布尔门不量化实际查询漏检概率。"},
+    {"id":"query-conflict-reject","claim":"身份冲突、同一 query identity/snapshot 的不可调和结果或保留契约冲突必须 REJECT。","status":"inferred","confidence":"bounded","sources":[],"caveat":"只验证合成判定逻辑，不证明目标系统执行拒绝。"}
+  ],
+  "coverage": {"cases": 27, "property_sweep": 1048576, "dimensions": 20, "statuses": ["RECOVERED", "UNKNOWN", "REJECT"], "events": ["QUERY_SCOPE", "TIME_WINDOW", "PAGE_CURSOR", "RESOURCE_VERSION", "SNAPSHOT", "WATERMARK", "RETENTION", "NO_EVENT", "QUERY_GAP", "CROSS_REGION", "RETRY", "PAGINATION_LIMIT", "FILTER_SEMANTICS"]},
+  "notes": "三态互斥并 fail-closed；RECOVERED 仅代表本片离线夹具中的证据门闭合，不代表 production continuity、external effect 或 exactly-once。"
+}

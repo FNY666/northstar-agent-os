@@ -1,0 +1,489 @@
+{
+  "production_verified": false,
+  "results": [
+    {
+      "blocking_conditions": [],
+      "canonical_input_sha256": "8ceb5dd8627e86c094c579d9d7df867e94ac75ac1824d3f9a6c75f8efc45f5ce",
+      "case_id": "C01",
+      "chain_id": "C01",
+      "duplicate_records_ignored": 0,
+      "gap_location": [],
+      "prev_hash": "",
+      "prev_hashes": [
+        "",
+        "bab3a18f33f708e907f51e5cd85c787e19e3fe96b40308f1a33b45420409c9fb",
+        "32d29d38c71236cc6ed5d0355495524757c8b59a1d76e3638095bcfebfe65013"
+      ],
+      "production_verified": false,
+      "reason": "all observed records form a verified contiguous chain within scope",
+      "record_hash": "bab3a18f33f708e907f51e5cd85c787e19e3fe96b40308f1a33b45420409c9fb",
+      "record_hashes": [
+        "bab3a18f33f708e907f51e5cd85c787e19e3fe96b40308f1a33b45420409c9fb",
+        "32d29d38c71236cc6ed5d0355495524757c8b59a1d76e3638095bcfebfe65013",
+        "b01efcd47ed9d5a66ca6db242dcfced0f9ee25364434c9c40d89771ca3bd8e76"
+      ],
+      "status": "RECOVERED",
+      "synthetic_only": true
+    },
+    {
+      "blocking_conditions": [],
+      "canonical_input_sha256": "670aa73557f9b92efa39161c94bd22664fc20a9c646cc822de2ec13750ab1de1",
+      "case_id": "C02",
+      "chain_id": "C02",
+      "duplicate_records_ignored": 1,
+      "gap_location": [],
+      "prev_hash": "",
+      "prev_hashes": [
+        "",
+        "bab3a18f33f708e907f51e5cd85c787e19e3fe96b40308f1a33b45420409c9fb",
+        "32d29d38c71236cc6ed5d0355495524757c8b59a1d76e3638095bcfebfe65013"
+      ],
+      "production_verified": false,
+      "reason": "all observed records form a verified contiguous chain within scope",
+      "record_hash": "bab3a18f33f708e907f51e5cd85c787e19e3fe96b40308f1a33b45420409c9fb",
+      "record_hashes": [
+        "bab3a18f33f708e907f51e5cd85c787e19e3fe96b40308f1a33b45420409c9fb",
+        "32d29d38c71236cc6ed5d0355495524757c8b59a1d76e3638095bcfebfe65013",
+        "b01efcd47ed9d5a66ca6db242dcfced0f9ee25364434c9c40d89771ca3bd8e76"
+      ],
+      "status": "RECOVERED",
+      "synthetic_only": true
+    },
+    {
+      "blocking_conditions": [],
+      "canonical_input_sha256": "fbb2202e452cd3e5e4f7395fb831c1fdef07d611f89a001f2a8ec5301e85ecda",
+      "case_id": "C03",
+      "chain_id": "C03",
+      "duplicate_records_ignored": 0,
+      "gap_location": [],
+      "prev_hash": "",
+      "prev_hashes": [
+        "",
+        "bab3a18f33f708e907f51e5cd85c787e19e3fe96b40308f1a33b45420409c9fb",
+        "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
+      ],
+      "production_verified": false,
+      "reason": "seq 3: prev_hash ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff contradicts verified predecessor seq 2 hash 32d29d38c71236cc6ed5d0355495524757c8b59a1d76e3638095bcfebfe65013",
+      "record_hash": "bab3a18f33f708e907f51e5cd85c787e19e3fe96b40308f1a33b45420409c9fb",
+      "record_hashes": [
+        "bab3a18f33f708e907f51e5cd85c787e19e3fe96b40308f1a33b45420409c9fb",
+        "32d29d38c71236cc6ed5d0355495524757c8b59a1d76e3638095bcfebfe65013",
+        "0edd2bb88f37dc9c600b5910c19e4b4c1fb9a6ea695e3512be185d1e5fa8bcf3"
+      ],
+      "status": "REJECT",
+      "synthetic_only": true
+    },
+    {
+      "blocking_conditions": [
+        "missing sequence(s): 2"
+      ],
+      "canonical_input_sha256": "8bd11432b394cbb8126ae57ea368a557dc0febc4268ac3ba7ecf1202fbbad613",
+      "case_id": "C04",
+      "chain_id": "C04",
+      "duplicate_records_ignored": 0,
+      "gap_location": [
+        "missing sequence(s): 2"
+      ],
+      "prev_hash": "",
+      "prev_hashes": [
+        "",
+        "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+      ],
+      "production_verified": false,
+      "reason": "missing sequence(s): 2",
+      "record_hash": "bab3a18f33f708e907f51e5cd85c787e19e3fe96b40308f1a33b45420409c9fb",
+      "record_hashes": [
+        "bab3a18f33f708e907f51e5cd85c787e19e3fe96b40308f1a33b45420409c9fb",
+        "77060a9d2611937de41b3811a05ecc7045df975f97d4cd8dffdc88942897a4e5"
+      ],
+      "status": "UNKNOWN",
+      "synthetic_only": true
+    },
+    {
+      "blocking_conditions": [
+        "head truncated: first observed seq 2, anchor seq 1 unavailable"
+      ],
+      "canonical_input_sha256": "31d52d17a41c68cc3024c1725ea04b291d21a2595d727db62021ad059bfd1e95",
+      "case_id": "C05",
+      "chain_id": "C05",
+      "duplicate_records_ignored": 0,
+      "gap_location": [],
+      "prev_hash": "bab3a18f33f708e907f51e5cd85c787e19e3fe96b40308f1a33b45420409c9fb",
+      "prev_hashes": [
+        "bab3a18f33f708e907f51e5cd85c787e19e3fe96b40308f1a33b45420409c9fb",
+        "32d29d38c71236cc6ed5d0355495524757c8b59a1d76e3638095bcfebfe65013"
+      ],
+      "production_verified": false,
+      "reason": "head truncated: first observed seq 2, anchor seq 1 unavailable",
+      "record_hash": "32d29d38c71236cc6ed5d0355495524757c8b59a1d76e3638095bcfebfe65013",
+      "record_hashes": [
+        "32d29d38c71236cc6ed5d0355495524757c8b59a1d76e3638095bcfebfe65013",
+        "b01efcd47ed9d5a66ca6db242dcfced0f9ee25364434c9c40d89771ca3bd8e76"
+      ],
+      "status": "UNKNOWN",
+      "synthetic_only": true
+    },
+    {
+      "blocking_conditions": [
+        "tail truncated: observed through seq 2, terminal seq 3 not reached"
+      ],
+      "canonical_input_sha256": "64ec592b75b88686c4e997a862b2373e171026515fa429c8aee6d5ce3ade97b4",
+      "case_id": "C06",
+      "chain_id": "C06",
+      "duplicate_records_ignored": 0,
+      "gap_location": [],
+      "prev_hash": "",
+      "prev_hashes": [
+        "",
+        "bab3a18f33f708e907f51e5cd85c787e19e3fe96b40308f1a33b45420409c9fb"
+      ],
+      "production_verified": false,
+      "reason": "tail truncated: observed through seq 2, terminal seq 3 not reached",
+      "record_hash": "bab3a18f33f708e907f51e5cd85c787e19e3fe96b40308f1a33b45420409c9fb",
+      "record_hashes": [
+        "bab3a18f33f708e907f51e5cd85c787e19e3fe96b40308f1a33b45420409c9fb",
+        "32d29d38c71236cc6ed5d0355495524757c8b59a1d76e3638095bcfebfe65013"
+      ],
+      "status": "UNKNOWN",
+      "synthetic_only": true
+    },
+    {
+      "blocking_conditions": [],
+      "canonical_input_sha256": "647e5df974b320adddc0d57f16b4121071df74f95fda9335d113179b5c9e970b",
+      "case_id": "C07",
+      "chain_id": "C07",
+      "duplicate_records_ignored": 0,
+      "gap_location": [],
+      "prev_hash": "",
+      "prev_hashes": [
+        "",
+        "1b4821867ddcaece1bc8101a866456e3d768015761ef395565647efe5979c1cc",
+        "1b4821867ddcaece1bc8101a866456e3d768015761ef395565647efe5979c1cc"
+      ],
+      "production_verified": false,
+      "reason": "seq 2: verified fork with different payloads",
+      "record_hash": "1b4821867ddcaece1bc8101a866456e3d768015761ef395565647efe5979c1cc",
+      "record_hashes": [
+        "1b4821867ddcaece1bc8101a866456e3d768015761ef395565647efe5979c1cc",
+        "16c4a4422f824f76d60a4f8b5ce4d2b5ba2eebf28ba7df176933366e9866a4de",
+        "460b86801560210a855512d6bee9449961da45eeb3b7a8e2dfcb14ee93444fbc"
+      ],
+      "status": "REJECT",
+      "synthetic_only": true
+    },
+    {
+      "blocking_conditions": [
+        "seq 2: same-content fork requires external adjudication"
+      ],
+      "canonical_input_sha256": "9d5cf7621ac4e52bacc831518e2f3773b3746db981848e95a23fd54f414ecfba",
+      "case_id": "C08",
+      "chain_id": "C08",
+      "duplicate_records_ignored": 0,
+      "gap_location": [],
+      "prev_hash": "",
+      "prev_hashes": [
+        "",
+        "838564767fad322d19a1bc02ed46a5a0032f989e1f94d3978d30ddcac5907250",
+        "838564767fad322d19a1bc02ed46a5a0032f989e1f94d3978d30ddcac5907250"
+      ],
+      "production_verified": false,
+      "reason": "seq 2: same-content fork requires external adjudication",
+      "record_hash": "838564767fad322d19a1bc02ed46a5a0032f989e1f94d3978d30ddcac5907250",
+      "record_hashes": [
+        "838564767fad322d19a1bc02ed46a5a0032f989e1f94d3978d30ddcac5907250",
+        "dc06b67043d34d5e2ee0d0a9cd02a664be553260549e1e2aa580825e71e3992d",
+        "e2d444845ee7cfadb5fbf714a06919192444be6031ed09bb07772ae7ed3b9af2"
+      ],
+      "status": "UNKNOWN",
+      "synthetic_only": true
+    },
+    {
+      "blocking_conditions": [],
+      "canonical_input_sha256": "7cdacd88c025f6d34c842bdb87fc7d352eb285b26f29fe3b9b3bc3bf62a3d41a",
+      "case_id": "C09",
+      "chain_id": "C09",
+      "duplicate_records_ignored": 0,
+      "gap_location": [],
+      "prev_hash": "",
+      "prev_hashes": [
+        ""
+      ],
+      "production_verified": false,
+      "reason": "all observed records form a verified contiguous chain within scope",
+      "record_hash": "95750d90625bcc35f8f970aafa62c6e0ff3d5019336808ac8e89e7f8ec4c1c08",
+      "record_hashes": [
+        "95750d90625bcc35f8f970aafa62c6e0ff3d5019336808ac8e89e7f8ec4c1c08"
+      ],
+      "status": "RECOVERED",
+      "synthetic_only": true
+    },
+    {
+      "blocking_conditions": [
+        "seq 1: timestamp outside inclusive observation window"
+      ],
+      "canonical_input_sha256": "0573c35c7126a5f2d6b5d8e313ad7362ed8a780d16037de403e43e3149c2d73e",
+      "case_id": "C10",
+      "chain_id": "C10",
+      "duplicate_records_ignored": 0,
+      "gap_location": [],
+      "prev_hash": "",
+      "prev_hashes": [
+        ""
+      ],
+      "production_verified": false,
+      "reason": "seq 1: timestamp outside inclusive observation window",
+      "record_hash": "0095d359d7ea77b833b814e66158e4470b447aabab7e2d71e572306d70380bfd",
+      "record_hashes": [
+        "0095d359d7ea77b833b814e66158e4470b447aabab7e2d71e572306d70380bfd"
+      ],
+      "status": "UNKNOWN",
+      "synthetic_only": true
+    },
+    {
+      "blocking_conditions": [
+        "missing sequence(s): 2"
+      ],
+      "canonical_input_sha256": "ea7fb6df5f7cb5edbbd2f3d2df98aac0fbe7fbfde68da177cc9e515e416cc6f6",
+      "case_id": "C11",
+      "chain_id": "C11",
+      "duplicate_records_ignored": 0,
+      "gap_location": [
+        "missing sequence(s): 2"
+      ],
+      "prev_hash": "",
+      "prev_hashes": [
+        "",
+        "bab3a18f33f708e907f51e5cd85c787e19e3fe96b40308f1a33b45420409c9fb"
+      ],
+      "production_verified": false,
+      "reason": "missing sequence(s): 2",
+      "record_hash": "bab3a18f33f708e907f51e5cd85c787e19e3fe96b40308f1a33b45420409c9fb",
+      "record_hashes": [
+        "bab3a18f33f708e907f51e5cd85c787e19e3fe96b40308f1a33b45420409c9fb",
+        "d7d344810767fb057618c4aa9b44412b55b593e008c2a2d69e7671e453dff9ef"
+      ],
+      "status": "UNKNOWN",
+      "synthetic_only": true
+    },
+    {
+      "blocking_conditions": [
+        "seq 2: missing record_hash",
+        "missing sequence(s): 2"
+      ],
+      "canonical_input_sha256": "0b8e4f35e93e59318fe4344902f33ec9784b84a931e4491a5611464971b53d68",
+      "case_id": "C12",
+      "chain_id": "C12",
+      "duplicate_records_ignored": 0,
+      "gap_location": [
+        "missing sequence(s): 2"
+      ],
+      "prev_hash": "",
+      "prev_hashes": [
+        "",
+        "bab3a18f33f708e907f51e5cd85c787e19e3fe96b40308f1a33b45420409c9fb",
+        "32d29d38c71236cc6ed5d0355495524757c8b59a1d76e3638095bcfebfe65013"
+      ],
+      "production_verified": false,
+      "reason": "seq 2: missing record_hash; missing sequence(s): 2",
+      "record_hash": "bab3a18f33f708e907f51e5cd85c787e19e3fe96b40308f1a33b45420409c9fb",
+      "record_hashes": [
+        "bab3a18f33f708e907f51e5cd85c787e19e3fe96b40308f1a33b45420409c9fb",
+        null,
+        "b01efcd47ed9d5a66ca6db242dcfced0f9ee25364434c9c40d89771ca3bd8e76"
+      ],
+      "status": "UNKNOWN",
+      "synthetic_only": true
+    },
+    {
+      "blocking_conditions": [
+        "external anchor unreachable; source provenance is unverified"
+      ],
+      "canonical_input_sha256": "d08a8bba3615fb33679d8dd1ead014cb382fece42bb3e3479a456c5164370294",
+      "case_id": "C13",
+      "chain_id": "C13",
+      "duplicate_records_ignored": 0,
+      "gap_location": [],
+      "prev_hash": "",
+      "prev_hashes": [
+        ""
+      ],
+      "production_verified": false,
+      "reason": "external anchor unreachable; source provenance is unverified",
+      "record_hash": "ce7157cb97399a2b575309aad926521f4471ffbb41413c9ee080d70b3d95d738",
+      "record_hashes": [
+        "ce7157cb97399a2b575309aad926521f4471ffbb41413c9ee080d70b3d95d738"
+      ],
+      "status": "UNKNOWN",
+      "synthetic_only": true
+    },
+    {
+      "blocking_conditions": [
+        "tail truncated: observed through seq 2, terminal seq 3 not reached"
+      ],
+      "canonical_input_sha256": "3815acf3441ccadec26cd2d1ce3056b46e0c44d24df2776aa32559860c3ba922",
+      "case_id": "C14",
+      "chain_id": "C14",
+      "duplicate_records_ignored": 1,
+      "gap_location": [],
+      "prev_hash": "",
+      "prev_hashes": [
+        "",
+        "bab3a18f33f708e907f51e5cd85c787e19e3fe96b40308f1a33b45420409c9fb"
+      ],
+      "production_verified": false,
+      "reason": "tail truncated: observed through seq 2, terminal seq 3 not reached",
+      "record_hash": "bab3a18f33f708e907f51e5cd85c787e19e3fe96b40308f1a33b45420409c9fb",
+      "record_hashes": [
+        "bab3a18f33f708e907f51e5cd85c787e19e3fe96b40308f1a33b45420409c9fb",
+        "32d29d38c71236cc6ed5d0355495524757c8b59a1d76e3638095bcfebfe65013"
+      ],
+      "status": "UNKNOWN",
+      "synthetic_only": true
+    },
+    {
+      "blocking_conditions": [],
+      "canonical_input_sha256": "0c29cd3a1b1e28cd0f1971befb3e6b09a0ef5ae597a1036bc68d88e0a2a5898c",
+      "case_id": "C15",
+      "chain_id": "C15",
+      "duplicate_records_ignored": 1,
+      "gap_location": [],
+      "prev_hash": "",
+      "prev_hashes": [
+        "",
+        "bab3a18f33f708e907f51e5cd85c787e19e3fe96b40308f1a33b45420409c9fb",
+        "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+      ],
+      "production_verified": false,
+      "reason": "seq 3: prev_hash dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd contradicts verified predecessor seq 2 hash 32d29d38c71236cc6ed5d0355495524757c8b59a1d76e3638095bcfebfe65013",
+      "record_hash": "bab3a18f33f708e907f51e5cd85c787e19e3fe96b40308f1a33b45420409c9fb",
+      "record_hashes": [
+        "bab3a18f33f708e907f51e5cd85c787e19e3fe96b40308f1a33b45420409c9fb",
+        "32d29d38c71236cc6ed5d0355495524757c8b59a1d76e3638095bcfebfe65013",
+        "5494819dca892e5bedace9e91e3f785215104a026b93966653286c7b98b17a88"
+      ],
+      "status": "REJECT",
+      "synthetic_only": true
+    },
+    {
+      "blocking_conditions": [],
+      "canonical_input_sha256": "fed7c66b8af2abdaf6c3885f4f3230ffa471529ddc6d9c87ed92573244329b2a",
+      "case_id": "C16",
+      "chain_id": "C16",
+      "duplicate_records_ignored": 0,
+      "gap_location": [],
+      "prev_hash": "",
+      "prev_hashes": [
+        "",
+        "38749de3ffb3ca99d67cebe405c43b820f38905e39443a0f868372fa1dc9e517"
+      ],
+      "production_verified": false,
+      "reason": "all observed records form a verified contiguous chain within scope",
+      "record_hash": "38749de3ffb3ca99d67cebe405c43b820f38905e39443a0f868372fa1dc9e517",
+      "record_hashes": [
+        "38749de3ffb3ca99d67cebe405c43b820f38905e39443a0f868372fa1dc9e517",
+        "cf46b1ea2144f2e7b7456ed6b2fdec26456ee0d76ebe85a10b39d5db84941845"
+      ],
+      "status": "RECOVERED",
+      "synthetic_only": true
+    },
+    {
+      "blocking_conditions": [
+        "seq 1: timestamp outside inclusive observation window"
+      ],
+      "canonical_input_sha256": "d1362a4c14ef909dc36723e3fb5dd5805b1222ebfe2b1f25f9017c84dc16318b",
+      "case_id": "C17",
+      "chain_id": "C17",
+      "duplicate_records_ignored": 1,
+      "gap_location": [],
+      "prev_hash": "",
+      "prev_hashes": [
+        ""
+      ],
+      "production_verified": false,
+      "reason": "seq 1: timestamp outside inclusive observation window",
+      "record_hash": "a87dc763ce6442f74d09e2ffd94252807f9cc66292a2a316993412ed02105e29",
+      "record_hashes": [
+        "a87dc763ce6442f74d09e2ffd94252807f9cc66292a2a316993412ed02105e29"
+      ],
+      "status": "UNKNOWN",
+      "synthetic_only": true
+    },
+    {
+      "blocking_conditions": [
+        "seq 2: same-content fork requires external adjudication"
+      ],
+      "canonical_input_sha256": "b7562f0568210e159e28ac7b8587ac2ca9abd323896872e41b54f4f16f609b32",
+      "case_id": "C18",
+      "chain_id": "C18",
+      "duplicate_records_ignored": 0,
+      "gap_location": [],
+      "prev_hash": "",
+      "prev_hashes": [
+        "",
+        "3be9de840cf54e91d02a9891c5db622a097a8f55216acfaedb3382beb814142b",
+        "3be9de840cf54e91d02a9891c5db622a097a8f55216acfaedb3382beb814142b"
+      ],
+      "production_verified": false,
+      "reason": "seq 2: same-content fork requires external adjudication",
+      "record_hash": "3be9de840cf54e91d02a9891c5db622a097a8f55216acfaedb3382beb814142b",
+      "record_hashes": [
+        "3be9de840cf54e91d02a9891c5db622a097a8f55216acfaedb3382beb814142b",
+        "7f2a1d046dbe49445debaadc07190ef86c094a0dbec6b94619f5e230529a1e4d",
+        "f910d54183573f3e6251b1cf77270af9d372dd87fbd04d63e478a4559b476869"
+      ],
+      "status": "UNKNOWN",
+      "synthetic_only": true
+    },
+    {
+      "blocking_conditions": [
+        "seq 2: missing record_hash",
+        "missing sequence(s): 2"
+      ],
+      "canonical_input_sha256": "09f23471d873f7250c1fb0147421d229709840c68fe43612a4b22d00814868a6",
+      "case_id": "C19",
+      "chain_id": "C19",
+      "duplicate_records_ignored": 0,
+      "gap_location": [
+        "missing sequence(s): 2"
+      ],
+      "prev_hash": "",
+      "prev_hashes": [
+        "",
+        "bab3a18f33f708e907f51e5cd85c787e19e3fe96b40308f1a33b45420409c9fb",
+        "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      ],
+      "production_verified": false,
+      "reason": "seq 2: missing record_hash; missing sequence(s): 2",
+      "record_hash": "bab3a18f33f708e907f51e5cd85c787e19e3fe96b40308f1a33b45420409c9fb",
+      "record_hashes": [
+        "bab3a18f33f708e907f51e5cd85c787e19e3fe96b40308f1a33b45420409c9fb",
+        null,
+        "a206319a18d2985604c28f4431f202b5e329d6c62effe9274b763d80ffa3daaa"
+      ],
+      "status": "UNKNOWN",
+      "synthetic_only": true
+    },
+    {
+      "blocking_conditions": [],
+      "canonical_input_sha256": "6b802e9bd0d8414b45604dbe57de5b89ebda45a5e15c4d92e225e19786d49524",
+      "case_id": "C20",
+      "chain_id": "C20",
+      "duplicate_records_ignored": 0,
+      "gap_location": [],
+      "prev_hash": "",
+      "prev_hashes": [
+        ""
+      ],
+      "production_verified": false,
+      "reason": "all observed records form a verified contiguous chain within scope",
+      "record_hash": "15874787e0c7cbddf2a103f424015dd29ec7bc8e8ea5651af3215d9e5d55b48b",
+      "record_hashes": [
+        "15874787e0c7cbddf2a103f424015dd29ec7bc8e8ea5651af3215d9e5d55b48b"
+      ],
+      "status": "RECOVERED",
+      "synthetic_only": true
+    }
+  ],
+  "schema_version": "S18-results-v1",
+  "synthetic_only": true
+}

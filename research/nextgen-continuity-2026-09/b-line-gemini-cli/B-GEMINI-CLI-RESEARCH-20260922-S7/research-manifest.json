@@ -1,0 +1,82 @@
+{
+  "schema_version": "1.0",
+  "question": "在官方公开 google-gemini/gemini-cli 证据中，scheduler 的状态机、并发/串行与 wait_for_previous 如何实现，MessageBus/telemetry/ToolCallEvent 是否构成可追溯审计，以及这些证据能否证明业务效果？",
+  "scope": {
+    "time_window": "2026-09-22 research snapshot; main branch as accessed",
+    "geography_or_context": "google-gemini/gemini-cli official public GitHub only",
+    "inclusions": ["official GitHub source", "official tests", "official GitHub API/Raw endpoints"],
+    "exclusions": ["full repository clone", "private data", "credentials", "real services", "protected directories", "business outcome claims beyond code/tests"]
+  },
+  "claims": [
+    {
+      "id": "C1",
+      "claim": "CoreToolCallStatus defines validating, awaiting_approval, scheduled, executing, success, error, and cancelled.",
+      "status": "confirmed",
+      "confidence": "high",
+      "sources": [{"url": "https://github.com/google-gemini/gemini-cli/blob/main/packages/core/src/scheduler/types.ts", "publisher": "Google Gemini CLI", "published_or_updated": "main as accessed 2026-09-22", "tier": "primary", "support": "Official enum and discriminated call types directly list all seven statuses."}],
+      "caveat": "Type definitions do not prove every runtime path or persistence."
+    },
+    {
+      "id": "C2",
+      "claim": "The scheduler creates validating calls, conditionally awaits approval, schedules approved calls, executes scheduled calls, and finalizes success/error/cancelled terminal calls.",
+      "status": "confirmed",
+      "confidence": "high",
+      "sources": [
+        {"url": "https://github.com/google-gemini/gemini-cli/blob/main/packages/core/src/scheduler/scheduler.ts", "publisher": "Google Gemini CLI", "published_or_updated": "main as accessed 2026-09-22", "tier": "primary", "support": "Official scheduler control flow handles validation, confirmation outcome, scheduling, execution and cancellation/error paths."},
+        {"url": "https://github.com/google-gemini/gemini-cli/blob/main/packages/core/src/scheduler/state-manager.ts", "publisher": "Google Gemini CLI", "published_or_updated": "main as accessed 2026-09-22", "tier": "primary", "support": "Official transitionCall and finalizeCall implement validated transitions and terminal collection."}
+      ],
+      "caveat": "This is implementation evidence, not a formal exhaustive state-machine specification."
+    },
+    {
+      "id": "C3",
+      "claim": "Contiguous parallelizable calls execute in parallel waves, while non-parallelizable calls serialize waves.",
+      "status": "confirmed",
+      "confidence": "high",
+      "sources": [
+        {"url": "https://github.com/google-gemini/gemini-cli/blob/main/packages/core/src/scheduler/scheduler.ts", "publisher": "Google Gemini CLI", "published_or_updated": "main as accessed 2026-09-22", "tier": "primary", "support": "_isParallelizable groups contiguous queue items and execution uses Promise.all when all active calls are ready."},
+        {"url": "https://github.com/google-gemini/gemini-cli/blob/main/packages/core/src/scheduler/scheduler_parallel.test.ts", "publisher": "Google Gemini CLI", "published_or_updated": "main as accessed 2026-09-22", "tier": "primary", "support": "Official tests assert parallel starts, sequential starts, and multiple execution waves."}
+      ],
+      "caveat": "No global concurrency, cross-instance ordering, throughput, or resource guarantee follows."
+    },
+    {
+      "id": "C4",
+      "claim": "wait_for_previous=true forces a request into sequential grouping, false permits parallel grouping; omitted defaults to parallel, subject to forced-sequential tool rules.",
+      "status": "confirmed",
+      "confidence": "high",
+      "sources": [
+        {"url": "https://github.com/google-gemini/gemini-cli/blob/main/packages/core/src/scheduler/scheduler.ts", "publisher": "Google Gemini CLI", "published_or_updated": "main as accessed 2026-09-22", "tier": "primary", "support": "The official _isParallelizable implementation reads the boolean flag and forces update_topic/edit tools sequential."},
+        {"url": "https://github.com/google-gemini/gemini-cli/blob/main/packages/core/src/scheduler/scheduler_parallel.test.ts", "publisher": "Google Gemini CLI", "published_or_updated": "main as accessed 2026-09-22", "tier": "primary", "support": "Tests cover true/false behavior and forced sequential tools."}
+      ],
+      "caveat": "This is queue grouping behavior, not proof of business-level data visibility or consistency."
+    },
+    {
+      "id": "C5",
+      "claim": "MessageBus updates, terminal callbacks, and ToolCallEvent provide correlatable runtime evidence, but do not by themselves establish a complete immutable audit log.",
+      "status": "inferred",
+      "confidence": "medium",
+      "sources": [
+        {"url": "https://github.com/google-gemini/gemini-cli/blob/main/packages/core/src/scheduler/state-manager.ts", "publisher": "Google Gemini CLI", "published_or_updated": "main as accessed 2026-09-22", "tier": "primary", "support": "State updates emit snapshots and terminal finalization invokes the terminal callback."},
+        {"url": "https://github.com/google-gemini/gemini-cli/blob/main/packages/core/src/confirmation-bus/message-bus.ts", "publisher": "Google Gemini CLI", "published_or_updated": "main as accessed 2026-09-22", "tier": "primary", "support": "MessageBus supports publish/subscribe and correlationId request-response."},
+        {"url": "https://github.com/google-gemini/gemini-cli/blob/main/packages/core/src/telemetry/types.ts", "publisher": "Google Gemini CLI", "published_or_updated": "main as accessed 2026-09-22", "tier": "primary", "support": "ToolCallEvent records completed-call identity, outcome, errors, timing, prompt_id and tool type."},
+        {"url": "https://github.com/google-gemini/gemini-cli/blob/main/packages/core/src/telemetry/loggers.ts", "publisher": "Google Gemini CLI", "published_or_updated": "main as accessed 2026-09-22", "tier": "primary", "support": "logToolCall routes ToolCallEvent into telemetry logger paths."}
+      ],
+      "caveat": "No proof of append-only persistence, full intermediate-state coverage, delivery, retention, replay, or tamper resistance."
+    },
+    {
+      "id": "C6",
+      "claim": "The cited source/test evidence cannot prove business effectiveness or causal business outcomes.",
+      "status": "confirmed",
+      "confidence": "high",
+      "sources": [
+        {"url": "https://github.com/google-gemini/gemini-cli/blob/main/packages/core/src/scheduler/scheduler_parallel.test.ts", "publisher": "Google Gemini CLI", "published_or_updated": "main as accessed 2026-09-22", "tier": "primary", "support": "Tests use mocked execution and assert ordering/control flow rather than business outcomes."},
+        {"url": "https://github.com/google-gemini/gemini-cli/blob/main/packages/core/src/telemetry/types.ts", "publisher": "Google Gemini CLI", "published_or_updated": "main as accessed 2026-09-22", "tier": "primary", "support": "ToolCallEvent.success is a per-call terminal status, not a business KPI or causal measurement."}
+      ],
+      "caveat": "Unknown: production success rate, latency/throughput, consistency, user value, cost, ROI, and causal effect; not searched further by scope."
+    }
+  ],
+  "coverage": {
+    "searched": ["targeted official Raw/API reads of scheduler, scheduler types/state-manager, scheduler_parallel tests, confirmation MessageBus, telemetry types/loggers"],
+    "inaccessible": [],
+    "unresolved_conflicts": ["No source conflict found; unknown whether production telemetry delivery/retention is guaranteed.", "Cross-scheduler global ordering and business outcomes remain unknown."]
+  }
+}

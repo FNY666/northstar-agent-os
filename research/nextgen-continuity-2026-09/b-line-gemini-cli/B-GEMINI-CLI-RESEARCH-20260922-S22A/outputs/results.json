@@ -1,0 +1,316 @@
+{
+  "synthetic_only": true,
+  "production_verified": false,
+  "model": "two-worker deterministic event reorder; one op_id scope per fixture",
+  "case_count": 10,
+  "fixture_pass_count": 10,
+  "fixture_fail_count": 0,
+  "decision_counts": {
+    "accepted": 25,
+    "rejected": 6,
+    "UNKNOWN": 10
+  },
+  "counts_definition": {
+    "accepted": "accepted local event decisions",
+    "rejected": "rejected local event decisions",
+    "UNKNOWN": "cases whose remote_effect classification remains UNKNOWN; not a remote observation"
+  },
+  "results": [
+    {
+      "case_id": "C01-no-intent-response",
+      "description": "Response arrives with no matching intent.",
+      "workers": [
+        "W1"
+      ],
+      "event_count": 1,
+      "accepted_event_ids": [],
+      "rejected_event_ids": [
+        "e1"
+      ],
+      "rejection_reasons": {
+        "e1": "no_matching_intent"
+      },
+      "decisions": {
+        "e1": "rejected"
+      },
+      "remote_effect": "UNKNOWN",
+      "invariants": {
+        "no_matching_intent_response_or_durable_rejected": true,
+        "conflicting_same_attempt_response_or_durable_rejected": true,
+        "local_lifecycle_does_not_classify_remote_effect": true
+      },
+      "case_status": "PASS"
+    },
+    {
+      "case_id": "C02-no-intent-durable",
+      "description": "Durable result arrives with no matching intent.",
+      "workers": [
+        "W2"
+      ],
+      "event_count": 1,
+      "accepted_event_ids": [],
+      "rejected_event_ids": [
+        "e1"
+      ],
+      "rejection_reasons": {
+        "e1": "no_matching_intent"
+      },
+      "decisions": {
+        "e1": "rejected"
+      },
+      "remote_effect": "UNKNOWN",
+      "invariants": {
+        "no_matching_intent_response_or_durable_rejected": true,
+        "conflicting_same_attempt_response_or_durable_rejected": true,
+        "local_lifecycle_does_not_classify_remote_effect": true
+      },
+      "case_status": "PASS"
+    },
+    {
+      "case_id": "C03-response-before-intent",
+      "description": "Response precedes its intent and remains rejected at arrival; later intent does not retroactively accept it.",
+      "workers": [
+        "W1",
+        "W2"
+      ],
+      "event_count": 2,
+      "accepted_event_ids": [
+        "e2"
+      ],
+      "rejected_event_ids": [
+        "e1"
+      ],
+      "rejection_reasons": {
+        "e1": "no_matching_intent"
+      },
+      "decisions": {
+        "e2": "accepted",
+        "e1": "rejected"
+      },
+      "remote_effect": "UNKNOWN",
+      "invariants": {
+        "no_matching_intent_response_or_durable_rejected": true,
+        "conflicting_same_attempt_response_or_durable_rejected": true,
+        "local_lifecycle_does_not_classify_remote_effect": true
+      },
+      "case_status": "PASS"
+    },
+    {
+      "case_id": "C04-matching-same-value",
+      "description": "Intent, response, and durable result agree for one attempt.",
+      "workers": [
+        "W1",
+        "W2"
+      ],
+      "event_count": 3,
+      "accepted_event_ids": [
+        "e1",
+        "e2",
+        "e3"
+      ],
+      "rejected_event_ids": [],
+      "rejection_reasons": {},
+      "decisions": {
+        "e1": "accepted",
+        "e2": "accepted",
+        "e3": "accepted"
+      },
+      "remote_effect": "UNKNOWN",
+      "invariants": {
+        "no_matching_intent_response_or_durable_rejected": true,
+        "conflicting_same_attempt_response_or_durable_rejected": true,
+        "local_lifecycle_does_not_classify_remote_effect": true
+      },
+      "case_status": "PASS"
+    },
+    {
+      "case_id": "C05-response-durable-conflict",
+      "description": "Same-attempt durable result conflicts with prior response and is rejected.",
+      "workers": [
+        "W1",
+        "W2"
+      ],
+      "event_count": 3,
+      "accepted_event_ids": [
+        "e1",
+        "e2"
+      ],
+      "rejected_event_ids": [
+        "e3"
+      ],
+      "rejection_reasons": {
+        "e3": "conflicting_same_attempt_record"
+      },
+      "decisions": {
+        "e1": "accepted",
+        "e2": "accepted",
+        "e3": "rejected"
+      },
+      "remote_effect": "UNKNOWN",
+      "invariants": {
+        "no_matching_intent_response_or_durable_rejected": true,
+        "conflicting_same_attempt_response_or_durable_rejected": true,
+        "local_lifecycle_does_not_classify_remote_effect": true
+      },
+      "case_status": "PASS"
+    },
+    {
+      "case_id": "C06-durable-response-conflict",
+      "description": "Same-attempt response conflicts with prior durable result and is rejected.",
+      "workers": [
+        "W1",
+        "W2"
+      ],
+      "event_count": 3,
+      "accepted_event_ids": [
+        "e1",
+        "e2"
+      ],
+      "rejected_event_ids": [
+        "e3"
+      ],
+      "rejection_reasons": {
+        "e3": "conflicting_same_attempt_record"
+      },
+      "decisions": {
+        "e1": "accepted",
+        "e2": "accepted",
+        "e3": "rejected"
+      },
+      "remote_effect": "UNKNOWN",
+      "invariants": {
+        "no_matching_intent_response_or_durable_rejected": true,
+        "conflicting_same_attempt_response_or_durable_rejected": true,
+        "local_lifecycle_does_not_classify_remote_effect": true
+      },
+      "case_status": "PASS"
+    },
+    {
+      "case_id": "C07-crash-restart-resume",
+      "description": "Lifecycle interleaving around an agreed local record leaves remote effect UNKNOWN.",
+      "workers": [
+        "W1",
+        "W2"
+      ],
+      "event_count": 5,
+      "accepted_event_ids": [
+        "e1",
+        "e2",
+        "e3",
+        "e4",
+        "e5"
+      ],
+      "rejected_event_ids": [],
+      "rejection_reasons": {},
+      "decisions": {
+        "e1": "accepted",
+        "e2": "accepted",
+        "e3": "accepted",
+        "e4": "accepted",
+        "e5": "accepted"
+      },
+      "remote_effect": "UNKNOWN",
+      "invariants": {
+        "no_matching_intent_response_or_durable_rejected": true,
+        "conflicting_same_attempt_response_or_durable_rejected": true,
+        "local_lifecycle_does_not_classify_remote_effect": true
+      },
+      "case_status": "PASS"
+    },
+    {
+      "case_id": "C08-crash-before-durable",
+      "description": "Crash/restart/resume before durable result does not infer a remote outcome; later matching durable is accepted.",
+      "workers": [
+        "W1",
+        "W2"
+      ],
+      "event_count": 5,
+      "accepted_event_ids": [
+        "e1",
+        "e2",
+        "e3",
+        "e4",
+        "e5"
+      ],
+      "rejected_event_ids": [],
+      "rejection_reasons": {},
+      "decisions": {
+        "e1": "accepted",
+        "e2": "accepted",
+        "e3": "accepted",
+        "e4": "accepted",
+        "e5": "accepted"
+      },
+      "remote_effect": "UNKNOWN",
+      "invariants": {
+        "no_matching_intent_response_or_durable_rejected": true,
+        "conflicting_same_attempt_response_or_durable_rejected": true,
+        "local_lifecycle_does_not_classify_remote_effect": true
+      },
+      "case_status": "PASS"
+    },
+    {
+      "case_id": "C09-cross-attempts",
+      "description": "Different attempts may each have matching same-value records; no cross-attempt conclusion is made.",
+      "workers": [
+        "W1",
+        "W2"
+      ],
+      "event_count": 4,
+      "accepted_event_ids": [
+        "e1",
+        "e2",
+        "e3",
+        "e4"
+      ],
+      "rejected_event_ids": [],
+      "rejection_reasons": {},
+      "decisions": {
+        "e1": "accepted",
+        "e2": "accepted",
+        "e3": "accepted",
+        "e4": "accepted"
+      },
+      "remote_effect": "UNKNOWN",
+      "invariants": {
+        "no_matching_intent_response_or_durable_rejected": true,
+        "conflicting_same_attempt_response_or_durable_rejected": true,
+        "local_lifecycle_does_not_classify_remote_effect": true
+      },
+      "case_status": "PASS"
+    },
+    {
+      "case_id": "C10-resume-without-intent",
+      "description": "Resume plus an unmatching response remains rejected and does not classify remote effect.",
+      "workers": [
+        "W1",
+        "W2"
+      ],
+      "event_count": 4,
+      "accepted_event_ids": [
+        "e1",
+        "e2",
+        "e3"
+      ],
+      "rejected_event_ids": [
+        "e4"
+      ],
+      "rejection_reasons": {
+        "e4": "no_matching_intent"
+      },
+      "decisions": {
+        "e1": "accepted",
+        "e2": "accepted",
+        "e3": "accepted",
+        "e4": "rejected"
+      },
+      "remote_effect": "UNKNOWN",
+      "invariants": {
+        "no_matching_intent_response_or_durable_rejected": true,
+        "conflicting_same_attempt_response_or_durable_rejected": true,
+        "local_lifecycle_does_not_classify_remote_effect": true
+      },
+      "case_status": "PASS"
+    }
+  ]
+}

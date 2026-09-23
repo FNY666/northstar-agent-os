@@ -1,0 +1,24 @@
+{
+  "schema_version": "1.0",
+  "question": "在离线合成证据中，何时跨系统 export/import provenance、origin digest、field mapping、脱敏/重签名、权限降级、target/recipient scope、规范化/算法/时间/lineage、归因与最终read-back能够闭合连续性，何时必须保持 UNKNOWN 或 REJECT？",
+  "scope": {
+    "project": "C-line S66",
+    "mode": "offline synthetic fixtures",
+    "date": "2026-09-23",
+    "excluded": ["S1-S65", "production", "network", "real services", "credentials"],
+    "identity_domain": ["project", "export_id", "import_id", "origin_digest", "actor", "recipient", "scope", "version"],
+    "lineage_domain": ["export_manifest", "import_manifest", "field_mapping", "transform", "redaction", "resign", "permission_downgrade", "canonicalization", "algorithm", "timestamp", "attribution", "readback"]
+  },
+  "claims_status": "inferred",
+  "synthetic_only": true,
+  "production_verified": false,
+  "sources": [],
+  "claims": [
+    {"id":"cross-system-lineage-closure","claim":"只有export/import id/manifest、origin/mapping/transform、redaction/resign、permission downgrade、target/recipient scope、版本/时间/顺序、归因和最终readback全部闭合时才可 RECOVERED。","status":"inferred","confidence":"bounded","sources":[],"caveat":"仅由本地合成夹具和规则推导，不代表生产系统。"},
+    {"id":"import-not-origin-proof","claim":"导出、脱敏、重签名或导入成功不能证明origin未变、目标权限未扩大或最终状态已提交；必须独立read-back。","status":"inferred","confidence":"bounded","sources":[],"caveat":"未验证任何真实跨系统provenance系统。"},
+    {"id":"lineage-unknown","claim":"导出包/变换/重签名/权限降级/目标scope/最终导入状态未知时必须 UNKNOWN。","status":"inferred","confidence":"bounded","sources":[],"caveat":"布尔门不量化真实跨系统风险。"},
+    {"id":"lineage-conflict-reject","claim":"身份冲突和同一origin的不可调和export/import lineage冲突必须 REJECT。","status":"inferred","confidence":"bounded","sources":[],"caveat":"只验证合成判定逻辑，不证明目标系统执行拒绝。"}
+  ],
+  "coverage": {"cases": 30, "property_sweep": 33554432, "dimensions": 25, "statuses": ["RECOVERED", "UNKNOWN", "REJECT"], "events": ["EXPORT", "IMPORT", "ORIGIN_DIGEST", "MANIFEST", "FIELD_MAPPING", "TRANSFORM", "REDACTION", "RESIGN", "PERMISSION_DOWNGRADE", "SCOPE", "RECIPIENT", "CANONICALIZATION", "ALGORITHM", "TIMESTAMP", "LINEAGE_ORDER", "ATTRIBUTION", "READBACK", "NO_EVENT", "UNKNOWN"]},
+  "notes": "三态互斥并 fail-closed；RECOVERED 仅代表本片离线夹具中的 cross-system provenance evidence gate 闭合，不代表 production continuity、external effect 或 exactly-once。"
+}

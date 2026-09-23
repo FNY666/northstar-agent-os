@@ -1,0 +1,286 @@
+{
+  "schema_version": "1.0",
+  "question": "After cancellation, timeout, or disconnect, how should UNKNOWN, idempotent retry, and compensation be handled?",
+  "coverage": [
+    "Temporal",
+    "AWS Step Functions",
+    "Stripe",
+    "Apache Kafka",
+    "Kubernetes Jobs"
+  ],
+  "scope": "Public first-party documentation only; no production or real-service access.",
+  "claims": [
+    {
+      "id": "U1",
+      "claim": "Cancellation, timeout, disconnect, worker crash, or orchestration termination does not by itself prove that an external side effect did not occur; unknown must be reconciled.",
+      "status": "inferred",
+      "confidence": "high",
+      "sources": [
+        {
+          "url": "https://docs.temporal.io/activity-execution",
+          "publisher": "Temporal",
+          "published_or_updated": "accessed 2026-09-22",
+          "tier": "primary",
+          "support": "Temporal documents lost Activity tasks and timeout-based detection; it does not establish external non-effect."
+        },
+        {
+          "url": "https://docs.aws.amazon.com/step-functions/latest/apireference/API_StopExecution.html",
+          "publisher": "AWS",
+          "published_or_updated": "accessed 2026-09-22",
+          "tier": "primary",
+          "support": "StopExecution terminates the execution; it does not define universal cancellation of already-issued external operations."
+        },
+        {
+          "url": "https://kubernetes.io/docs/concepts/workloads/controllers/job/",
+          "publisher": "Kubernetes",
+          "published_or_updated": "accessed 2026-09-22",
+          "tier": "primary",
+          "support": "Job replacement/termination semantics do not establish external effect absence."
+        }
+      ],
+      "caveat": "External state was not accessed."
+    },
+    {
+      "id": "U2",
+      "claim": "Retries can repeat execution: Temporal Activity is at-least-once; Step Functions Retry/redrive reruns failed states; Express is at-least-once; Kubernetes may replace failed/deleted Pods.",
+      "status": "confirmed",
+      "confidence": "high",
+      "sources": [
+        {
+          "url": "https://docs.temporal.io/develop/python/failure-detection",
+          "support": "Official Activity failure/idempotence guidance describes at-least-once and retry after worker crash.",
+          "publisher": "Temporal",
+          "published_or_updated": "accessed 2026-09-22",
+          "tier": "primary"
+        },
+        {
+          "url": "https://docs.aws.amazon.com/step-functions/latest/dg/redrive-executions.html",
+          "support": "Official redrive documentation describes resuming failed execution from unsuccessful states.",
+          "publisher": "Official",
+          "published_or_updated": "accessed 2026-09-22",
+          "tier": "primary"
+        },
+        {
+          "url": "https://docs.aws.amazon.com/step-functions/latest/dg/choosing-workflow-type.html",
+          "support": "Official workflow-type documentation distinguishes Standard and Express delivery models.",
+          "publisher": "Official",
+          "published_or_updated": "accessed 2026-09-22",
+          "tier": "primary"
+        },
+        {
+          "url": "https://kubernetes.io/docs/concepts/workloads/controllers/job/",
+          "support": "Official Job documentation describes retry/replacement after Pod failure or deletion.",
+          "publisher": "Kubernetes",
+          "published_or_updated": "accessed 2026-09-22",
+          "tier": "primary"
+        }
+      ],
+      "caveat": "Platform rerun semantics do not establish external duplicate effect."
+    },
+    {
+      "id": "U3",
+      "claim": "Stripe idempotency reuses the first saved result for a key within the retention window, but keys may be pruned after at least 24 hours; Kafka exactly-once protects Kafka transaction scope, not arbitrary external systems.",
+      "status": "confirmed",
+      "confidence": "high",
+      "sources": [
+        {
+          "url": "https://docs.stripe.com/api/idempotent_requests",
+          "support": "Official Stripe documentation defines saving and replaying the first result for a key.",
+          "publisher": "Stripe",
+          "published_or_updated": "accessed 2026-09-22",
+          "tier": "primary"
+        },
+        {
+          "url": "https://docs.stripe.com/error-low-level#idempotency",
+          "support": "Official Stripe documentation defines pruning after at least 24 hours and new-request behavior after pruning.",
+          "publisher": "Stripe",
+          "published_or_updated": "accessed 2026-09-22",
+          "tier": "primary"
+        },
+        {
+          "url": "https://kafka.apache.org/documentation/#semantics",
+          "support": "Official Kafka documentation defines delivery semantics within Kafka processing scope.",
+          "publisher": "Apache Kafka",
+          "published_or_updated": "accessed 2026-09-22",
+          "tier": "primary"
+        },
+        {
+          "url": "https://kafka.apache.org/documentation/#transactions",
+          "support": "Official Kafka documentation defines transaction scope and does not make it a universal external-side-effect transaction.",
+          "publisher": "Apache Kafka",
+          "published_or_updated": "accessed 2026-09-22",
+          "tier": "primary"
+        }
+      ],
+      "caveat": "Provider configuration and external business state were not validated."
+    },
+    {
+      "id": "U4",
+      "claim": "Compensation is application-level: Temporal Saga and Step Functions Catch can orchestrate compensating work, but do not automatically prove rollback or external postconditions.",
+      "status": "inferred",
+      "confidence": "high",
+      "sources": [
+        {
+          "url": "https://docs.temporal.io/develop/python/failure-detection#implement-saga-pattern",
+          "support": "Official Temporal Saga guidance describes application compensation actions.",
+          "publisher": "Temporal",
+          "published_or_updated": "accessed 2026-09-22",
+          "tier": "primary"
+        },
+        {
+          "url": "https://docs.aws.amazon.com/step-functions/latest/dg/concepts-error-handling.html",
+          "support": "Official Step Functions documentation describes Catch as an alternate error-handling path.",
+          "publisher": "Official",
+          "published_or_updated": "accessed 2026-09-22",
+          "tier": "primary"
+        }
+      ],
+      "caveat": "Business-specific compensation and read-back remain required."
+    },
+    {
+      "id": "U5",
+      "claim": "Safe convergence requires a stable operation ID, provider idempotency key, durable operation record, authoritative read-back, and separate idempotency for compensation; without these, keep UNKNOWN and prohibit blind duplicate side effects.",
+      "status": "inferred",
+      "confidence": "high",
+      "sources": [
+        {
+          "url": "https://docs.temporal.io/develop/python/failure-detection",
+          "support": "Official Temporal guidance supports stable retry idempotence and warns about duplicate effects.",
+          "publisher": "Temporal",
+          "published_or_updated": "accessed 2026-09-22",
+          "tier": "primary"
+        },
+        {
+          "url": "https://docs.stripe.com/api/idempotent_requests",
+          "support": "Official Stripe documentation defines provider-side idempotency key semantics.",
+          "publisher": "Stripe",
+          "published_or_updated": "accessed 2026-09-22",
+          "tier": "primary"
+        },
+        {
+          "url": "https://kafka.apache.org/documentation/#transactions",
+          "support": "Official Kafka documentation bounds transaction guarantees to Kafka processing.",
+          "publisher": "Apache Kafka",
+          "published_or_updated": "accessed 2026-09-22",
+          "tier": "primary"
+        },
+        {
+          "url": "https://kubernetes.io/docs/concepts/workloads/controllers/job/",
+          "support": "Official Job documentation defines replacement/retry without external business deduplication.",
+          "publisher": "Kubernetes",
+          "published_or_updated": "accessed 2026-09-22",
+          "tier": "primary"
+        }
+      ],
+      "caveat": "This is an engineering synthesis, not a universal vendor guarantee."
+    },
+    {
+      "id": "U6",
+      "claim": "Cancellation is cooperative and external effect status remains unknown unless a target-side authoritative query confirms stop/non-acceptance; timeout, disconnect, worker crash and Pod termination are not non-submission proofs.",
+      "status": "inferred",
+      "confidence": "high",
+      "sources": [
+        {
+          "url": "https://docs.temporal.io/develop/go/workflows/cancellation",
+          "publisher": "Temporal",
+          "published_or_updated": "accessed 2026-09-22",
+          "tier": "primary",
+          "support": "Official cancellation documentation describes heartbeat/context delivery and cleanup, not universal external cancellation."
+        },
+        {
+          "url": "https://docs.temporal.io/encyclopedia/detecting-activity-failures",
+          "publisher": "Temporal",
+          "published_or_updated": "accessed 2026-09-22",
+          "tier": "primary",
+          "support": "Official failure-detection documentation defines heartbeat/timeout boundaries."
+        },
+        {
+          "url": "https://docs.aws.amazon.com/step-functions/latest/apireference/API_StopExecution.html",
+          "publisher": "AWS",
+          "published_or_updated": "accessed 2026-09-22",
+          "tier": "primary",
+          "support": "Official API terminates execution but does not define universal revocation of issued external work."
+        },
+        {
+          "url": "https://kubernetes.io/docs/concepts/workloads/pods/pod-lifecycle/#pod-termination",
+          "publisher": "Kubernetes",
+          "published_or_updated": "accessed 2026-09-22",
+          "tier": "primary",
+          "support": "Official Pod lifecycle termination semantics do not establish remote-effect cancellation."
+        }
+      ],
+      "caveat": "External target state was not accessed."
+    },
+    {
+      "id": "U7",
+      "claim": "A retry or redrive can create another execution attempt and must be treated as a possible duplicate external effect; compensation is application-level and requires independent idempotency and read-back.",
+      "status": "inferred",
+      "confidence": "high",
+      "sources": [
+        {
+          "url": "https://docs.temporal.io/encyclopedia/retry-policies",
+          "publisher": "Temporal",
+          "published_or_updated": "accessed 2026-09-22",
+          "tier": "primary",
+          "support": "Official retry-policy documentation defines multiple Activity attempts and recommends idempotence."
+        },
+        {
+          "url": "https://docs.aws.amazon.com/step-functions/latest/dg/concepts-error-handling.html",
+          "publisher": "AWS",
+          "published_or_updated": "accessed 2026-09-22",
+          "tier": "primary",
+          "support": "Official Retry/Catch documentation defines retry and alternate error paths."
+        },
+        {
+          "url": "https://docs.aws.amazon.com/step-functions/latest/dg/redrive-executions.html",
+          "publisher": "AWS",
+          "published_or_updated": "accessed 2026-09-22",
+          "tier": "primary",
+          "support": "Official redrive documentation defines re-running unsuccessful states."
+        },
+        {
+          "url": "https://kubernetes.io/docs/concepts/workloads/controllers/job/#pod-backoff-failure-policy",
+          "publisher": "Kubernetes",
+          "published_or_updated": "accessed 2026-09-22",
+          "tier": "primary",
+          "support": "Official Job failure/backoff documentation defines replacement attempts."
+        }
+      ],
+      "caveat": "No external provider or production effect was validated."
+    },
+    {
+      "id": "U8",
+      "claim": "Stripe idempotency replays the first saved result within its retention window but is not a permanent business deduplication record; Kafka guarantees must remain scoped to Kafka processing and transactions.",
+      "status": "confirmed",
+      "confidence": "high",
+      "sources": [
+        {
+          "url": "https://docs.stripe.com/api/idempotent_requests.md",
+          "publisher": "Stripe",
+          "published_or_updated": "accessed 2026-09-22",
+          "tier": "primary",
+          "support": "Official Markdown API documentation defines result reuse, parameter comparison and pruning after at least 24 hours."
+        },
+        {
+          "url": "https://kafka.apache.org/intro/#intro_guarantees",
+          "publisher": "Apache Kafka",
+          "published_or_updated": "accessed 2026-09-22",
+          "tier": "primary",
+          "support": "Official introduction describes Kafka processing guarantees and retention/partition scope."
+        },
+        {
+          "url": "https://kafka.apache.org/41/documentation.html#semantics",
+          "publisher": "Apache Kafka",
+          "published_or_updated": "accessed 2026-09-22",
+          "tier": "primary",
+          "support": "Official semantics page exists, but detailed static extraction was not independently verified in this slice."
+        }
+      ],
+      "caveat": "Kafka detailed semantics beyond the verified official introduction remain unknown here; neither source proves arbitrary external exactly-once."
+    }
+  ],
+  "non_claims": [
+    "No production environment was accessed or validated.",
+    "No external side effect, exactly-once outcome, or compensation success is claimed."
+  ]
+}

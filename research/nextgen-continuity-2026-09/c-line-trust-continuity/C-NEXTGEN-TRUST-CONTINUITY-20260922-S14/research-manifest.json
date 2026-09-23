@@ -1,0 +1,30 @@
+{
+  "synthetic_only": true,
+  "production_verified": false,
+  "schema_version": "1.0",
+  "question": "In an offline deterministic synthetic model, can provenance state transitions remain conservative under clock drift, same event with different sequence numbers, duplicate event IDs, budget truncation, and mislabelled source independence?",
+  "scope": {
+    "included": ["16 local fixtures", "event-ID deduplication", "sequence and clock anomaly handling", "budget truncation", "independence verification", "mutually exclusive RECOVERED/UNKNOWN/REJECT transitions", "transition reason provenance"],
+    "excluded": ["S1-S13 and all prior research artifacts", "network", "real services", "SDKs", "credentials", "shared/P0", "事故目录", "D10/L12/D14", "canonical/staging/140/tri-line/systemd", "remote state", "production systems"],
+    "time_window": "2026-09-22 local execution; synthetic data timestamps are fixture values",
+    "evidence_threshold": "deterministic fixture expectation must equal deterministic harness result; this is not external validation"
+  },
+  "claims": [
+    {"id":"C-S14-01","claim":"Clock anomalies alone do not authorize UNKNOWN→RECOVERED.","status":"inferred","confidence":"high within synthetic model","sources":[],"caveat":"Rule inference from S14 fixtures; not real clock behavior."},
+    {"id":"C-S14-02","claim":"A repeated event ID, including differing sequence numbers, is deduplicated and cannot create independent proof.","status":"inferred","confidence":"high within synthetic model","sources":[],"caveat":"Synthetic deduplication rule; does not prove exactly-once delivery."},
+    {"id":"C-S14-03","claim":"Budget truncation conservatively holds UNKNOWN absent an explicit completeness proof.","status":"inferred","confidence":"high within synthetic model","sources":[],"caveat":"Does not establish behavior of any remote or production budget."},
+    {"id":"C-S14-04","claim":"A source self-label does not verify independence; same-origin candidates remain UNKNOWN.","status":"inferred","confidence":"high within synthetic model","sources":[],"caveat":"Synthetic source identity and verification fields only."},
+    {"id":"C-S14-05","claim":"No explicit verifiable contradiction means UNKNOWN is not misclassified as REJECT; an explicit verifiable contradiction yields REJECT.","status":"inferred","confidence":"high within synthetic model","sources":[],"caveat":"Not a claim about conflict resolution in deployed systems."},
+    {"id":"C-S14-06","claim":"Two verified candidates from distinct sources, with contiguous sequence and no clock anomaly or truncation, yield RECOVERED in this model.","status":"inferred","confidence":"high within synthetic model","sources":[],"caveat":"Model policy threshold, not empirical evidence."},
+    {"id":"C-S14-07","claim":"The three states RECOVERED, UNKNOWN, and REJECT are mutually exclusive in the harness output.","status":"inferred","confidence":"high within synthetic model","sources":[],"caveat":"An assertion-backed software invariant, not a production guarantee."},
+    {"id":"C-S14-08","claim":"The package records complete local provenance for each fixture result, including input hash and state-transition reasons.","status":"inferred","confidence":"high within synthetic model","sources":[],"caveat":"Completeness is relative to the local schema."},
+    {"id":"C-S14-09","claim":"This slice cannot prove real durability, remote state, exactly-once semantics, rollback, or production readiness.","status":"inferred","confidence":"high","sources":[],"caveat":"Scope limitation derived from deliberate offline synthetic design."}
+  ],
+  "coverage": {
+    "fixture_count": 16,
+    "dimensions": {"clock_drift": ["S14-01", "S14-11"], "same_event_different_seq": ["S14-02"], "duplicate_event_id": ["S14-03", "S14-12"], "budget_truncation": ["S14-04", "S14-05", "S14-15"], "mislabelled_independence": ["S14-06"], "explicit_contradiction": ["S14-09", "S14-13"], "non_contradictory_unknown": ["S14-07", "S14-10", "S14-14", "S14-16"], "valid_recovery": ["S14-08", "S14-12"]},
+    "tested_states": ["RECOVERED", "UNKNOWN", "REJECT"],
+    "gaps": ["No public sources; no real service or remote-state observation; no durability, exactly-once, rollback, or production-readiness test."],
+    "validation": ["harness.py", "validator.py", "manifest_validator.py", "validate_research.py", "sha256sum -c SHA256SUMS"]
+  }
+}

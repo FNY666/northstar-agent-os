@@ -1,0 +1,28 @@
+{
+  "schema_version": "1.0",
+  "synthetic_only": true,
+  "production_verified": false,
+  "question": "In an offline synthetic model, how should restart/crash windows between journal write, ack observation, replay application, and reconciliation be classified while preserving UNKNOWN and separating it from REJECT under a bounded replay budget?",
+  "scope": {
+    "included": ["journal write", "ack observation", "replay application", "reconciliation", "restart/crash windows W0-W6", "deterministic evidence present/absent/contradictory", "bounded replay budget", "UNKNOWN preservation", "REJECT separation"],
+    "excluded": ["production systems", "real services", "network access", "credentials", "SDKs", "remote state", "durability testing", "exactly-once", "rollback", "production readiness"],
+    "method": "offline deterministic fixture execution only"
+  },
+  "claims": [
+    {"id":"C-S12-01","claim":"The synthetic state machine distinguishes seven restart/crash windows spanning before journal through after reconciliation.","status":"inferred","confidence":"high","sources":[],"caveat":"Derived solely from local fixtures and harness vocabulary; not a claim about any deployed implementation."},
+    {"id":"C-S12-02","claim":"Absent or incomplete deterministic recovery evidence is preserved as UNKNOWN rather than converted to REJECT.","status":"inferred","confidence":"high","sources":[],"caveat":"Observed in this synthetic model only."},
+    {"id":"C-S12-03","claim":"Contradictory evidence and an explicit coherent abort are classified as REJECT, distinct from UNKNOWN.","status":"inferred","confidence":"high","sources":[],"caveat":"Synthetic policy choice, not externally validated semantics."},
+    {"id":"C-S12-04","claim":"A replay application can be synthesized only when the declared bounded replay budget permits it; exhausted budget preserves UNKNOWN.","status":"inferred","confidence":"high","sources":[],"caveat":"Budget is a fixture-level integer and does not establish operational replay guarantees."},
+    {"id":"C-S12-05","claim":"The harness is deterministic and all 14 fixtures are marked synthetic_only=true and production_verified=false.","status":"inferred","confidence":"high","sources":[],"caveat":"Local execution evidence only."},
+    {"id":"C-S12-06","claim":"This study cannot prove real durability, remote state, exactly-once behavior, rollback correctness, or production readiness.","status":"inferred","confidence":"high","sources":[],"caveat":"Explicit limitation of offline synthetic scope."}
+  ],
+  "coverage": {
+    "fixture_count": 14,
+    "windows": ["W0_before_journal","W1_after_journal_before_ack","W2_after_ack_before_replay","W3_during_replay","W4_after_replay_before_reconciliation","W5_during_reconciliation","W6_after_reconciliation"],
+    "outcomes": ["RECOVERED","UNKNOWN","REJECT"],
+    "evidence_modes": ["present","absent","contradictory"],
+    "replay_budget": "bounded; tested at 0, 1, and 2",
+    "external_sources": 0,
+    "confirmed_claims": 0
+  }
+}

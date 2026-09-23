@@ -1,0 +1,24 @@
+{
+  "schema_version": "1.0",
+  "question": "在离线合成证据中，何时 headless JSON/JSONL 事件、Plan Mode 读写边界、approval/cancel、stream order、exit code 与最终状态 read-back 能够闭合连续性，何时必须保持 UNKNOWN 或 REJECT？",
+  "scope": {
+    "project": "C-line S49",
+    "mode": "offline synthetic fixtures",
+    "date": "2026-09-23",
+    "excluded": ["S1-S48", "production", "network", "real services", "credentials"],
+    "identity_domain": ["session", "run_id", "turn_id", "project", "input_id"],
+    "output_domain": ["headless", "JSON", "JSONL", "message", "tool_use", "tool_result", "error", "exit_code", "Plan_Mode", "approval", "cancel", "stream"]
+  },
+  "claims_status": "inferred",
+  "synthetic_only": true,
+  "production_verified": false,
+  "sources": [],
+  "claims": [
+    {"id":"headless-state-closure","claim":"只有 mode/schema/framing、事件绑定、exit code、Plan Mode scope/write boundary、approval/cancel、input/stream、final read-back 与 external-effect boundary 全部闭合时才可 RECOVERED。","status":"inferred","confidence":"bounded","sources":[],"caveat":"仅由本地合成夹具和规则推导，不代表生产系统。"},
+    {"id":"exit-not-effect-proof","claim":"JSON/JSONL输出、exit code、cancel request 或计划文件本身不能证明远端已停止、动作获批或外部目标已提交；必须独立 read-back。","status":"inferred","confidence":"bounded","sources":[],"caveat":"未验证任何真实 headless/Plan runtime。"},
+    {"id":"final-unknown","claim":"事件/stream/framing/approval/cancel/final state 或 external-effect 边界未知时必须 UNKNOWN。","status":"inferred","confidence":"bounded","sources":[],"caveat":"布尔门不量化真实运行风险。"},
+    {"id":"mode-conflict-reject","claim":"身份冲突和同一 run 的不可调和 mode/approval/cancel 终态冲突必须 REJECT。","status":"inferred","confidence":"bounded","sources":[],"caveat":"只验证合成判定逻辑，不证明目标系统执行拒绝。"}
+  ],
+  "coverage": {"cases": 27, "property_sweep": 8388608, "dimensions": 23, "statuses": ["RECOVERED", "UNKNOWN", "REJECT"], "events": ["HEADLESS", "JSON", "JSONL", "MESSAGE", "TOOL_USE", "TOOL_RESULT", "ERROR", "EXIT_CODE", "PLAN_MODE", "APPROVAL", "CANCEL", "STREAM", "NO_EVENT", "UNKNOWN"]},
+  "notes": "三态互斥并 fail-closed；RECOVERED 仅代表本片离线夹具中的 headless/Plan evidence gate 闭合，不代表 production continuity、external effect 或 exactly-once。"
+}

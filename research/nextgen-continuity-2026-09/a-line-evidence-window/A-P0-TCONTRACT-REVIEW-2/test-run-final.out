@@ -1,0 +1,13 @@
+T-CONTRACT-0 TEST RESULTS
+mode=tree-external pure standard-library no services
+{"ERROR_VERIFIED": 0, "counts": {"failed": 6, "invalid": 20, "unknown": 9, "verified": 2}, "error": 0, "fail": 0, "fixture_count": 37, "idempotency": true, "invalid": 20, "match": 37, "rc": 0, "round": 1, "unknown": 9, "verified": 2}
+{"ERROR_VERIFIED": 0, "counts": {"failed": 6, "invalid": 20, "unknown": 9, "verified": 2}, "error": 0, "fail": 0, "fixture_count": 37, "idempotency": true, "invalid": 20, "match": 37, "rc": 0, "round": 2, "unknown": 9, "verified": 2}
+total_rounds=2
+total_fixtures_per_round=37
+rc=0
+fail=0
+error=0
+invalid=40
+unknown=18
+verified=4
+ERROR_VERIFIED=0

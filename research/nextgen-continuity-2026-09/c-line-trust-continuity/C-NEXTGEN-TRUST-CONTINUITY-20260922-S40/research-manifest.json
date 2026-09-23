@@ -1,0 +1,26 @@
+{
+  "schema_version": "1.0",
+  "question": "在离线合成证据中，如何定义跨系统 evidence-window schema，并让 NO_EVENT/DELAYED/DROPPED/EXPORTER_FAILURE/QUERY_GAP/RETENTION_EXPIRED/VERIFIED_CONTINUITY 保持互斥、可审计和 fail-closed？",
+  "scope": {
+    "project": "C-line S40",
+    "mode": "offline synthetic fixtures",
+    "date": "2026-09-23",
+    "excluded": ["S1-S39", "production", "network", "real services", "credentials"],
+    "identity_domain": ["tenant", "source", "event_id", "epoch", "version"],
+    "window_domain": ["event_time", "ingest_time", "watermark", "retention", "pagination", "query_gap"],
+    "evidence_axes": ["platform_receipt", "durable_log", "external_effect"],
+    "classes": ["NO_EVENT", "DELAYED", "DROPPED", "EXPORTER_FAILURE", "QUERY_GAP", "RETENTION_EXPIRED", "VERIFIED_CONTINUITY"]
+  },
+  "claims_status": "inferred",
+  "synthetic_only": true,
+  "production_verified": false,
+  "sources": [],
+  "claims": [
+    {"id":"window-state-closure","claim":"只有 evidence window、source scope、三轴证据、时间/水位、retention、pagination、export 与状态解释全部闭合时才可 RECOVERED。","status":"inferred","confidence":"bounded","sources":[],"caveat":"仅由本地合成夹具和规则推导，不代表生产系统。"},
+    {"id":"classes-not-success","claim":"NO_EVENT/DELAYED/DROPPED/EXPORTER_FAILURE/QUERY_GAP/RETENTION_EXPIRED 是证据状态类别，不自动等于成功、失败或未发生；必须保留 UNKNOWN 语义。","status":"inferred","confidence":"bounded","sources":[],"caveat":"未验证任何真实平台的状态枚举。"},
+    {"id":"three-axis-separation","claim":"平台 receipt、durable log 与 external effect 必须分别验证，单一轴不能替代另两轴；未知提交保持 UNKNOWN。","status":"inferred","confidence":"bounded","sources":[],"caveat":"布尔门不量化实际外部效果或审计缺口。"},
+    {"id":"state-conflict-reject","claim":"身份冲突、同一窗口互斥终态冲突以及 receipt 与外部效果冲突必须 REJECT。","status":"inferred","confidence":"bounded","sources":[],"caveat":"只验证合成状态机，不证明目标系统执行拒绝。"}
+  ],
+  "coverage": {"cases": 25, "property_sweep": 2097152, "dimensions": 21, "statuses": ["RECOVERED", "UNKNOWN", "REJECT"], "classes": ["NO_EVENT", "DELAYED", "DROPPED", "EXPORTER_FAILURE", "QUERY_GAP", "RETENTION_EXPIRED", "VERIFIED_CONTINUITY"], "evidence_axes": ["PLATFORM_RECEIPT", "DURABLE_LOG", "EXTERNAL_EFFECT"]},
+  "notes": "三态互斥并 fail-closed；RECOVERED 仅代表本片离线夹具中的 evidence-window 状态机闭合，不代表 production continuity、external effect 或 exactly-once。"
+}

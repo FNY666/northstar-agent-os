@@ -1,0 +1,23 @@
+{
+  "synthetic_only": true,
+  "production_verified": false,
+  "schema": "S20-fault-case-v1",
+  "cases": [
+    {"id":"S20-01-clean-success","fault":"none","boundary":"after_response_before_commit","journal":"committed:0","dispatch":"not_sent","response":"success","tool_dedup":false},
+    {"id":"S20-02-restart-before-journal","fault":"restart","boundary":"before_journal_commit","journal":"none","dispatch":"not_sent","response":"none","tool_dedup":false},
+    {"id":"S20-03-restart-after-journal","fault":"restart","boundary":"after_journal_commit_before_dispatch","journal":"committed:1","dispatch":"not_sent","response":"none","tool_dedup":false},
+    {"id":"S20-04-crash-after-dispatch","fault":"crash","boundary":"after_dispatch_before_response","journal":"committed:1","dispatch":"sent","response":"none","tool_dedup":false},
+    {"id":"S20-05-crash-after-response","fault":"crash","boundary":"after_response_before_result_commit","journal":"committed:1","dispatch":"sent","response":"success","tool_dedup":false},
+    {"id":"S20-06-power-before-journal","fault":"power_loss","boundary":"before_journal_commit","journal":"none","dispatch":"not_sent","response":"none","tool_dedup":false},
+    {"id":"S20-07-power-after-dispatch","fault":"power_loss","boundary":"after_dispatch_before_response","journal":"committed:1","dispatch":"sent","response":"none","tool_dedup":false},
+    {"id":"S20-08-network-before-dispatch","fault":"network_down","boundary":"before_dispatch","journal":"committed:1","dispatch":"not_sent","response":"none","tool_dedup":false},
+    {"id":"S20-09-network-response-lost","fault":"network_down","boundary":"after_dispatch_before_response","journal":"committed:1","dispatch":"sent","response":"lost","tool_dedup":false},
+    {"id":"S20-10-tool-response-missing","fault":"response_missing","boundary":"after_dispatch_before_response","journal":"committed:1","dispatch":"sent","response":"none","tool_dedup":false},
+    {"id":"S20-11-retry-no-dedupe","fault":"retry","boundary":"recovery_retry","journal":"committed:1","dispatch":"sent","response":"lost","tool_dedup":false},
+    {"id":"S20-12-retry-fixture-dedupe","fault":"retry","boundary":"recovery_retry","journal":"committed:1","dispatch":"sent","response":"lost","tool_dedup":true},
+    {"id":"S20-13-tool-error-then-retry","fault":"tool_error","boundary":"after_response_before_result_commit","journal":"committed:1","dispatch":"sent","response":"error","tool_dedup":true},
+    {"id":"S20-14-duplicate-response","fault":"duplicate_response","boundary":"after_response_before_result_commit","journal":"committed:1","dispatch":"sent","response":"success_duplicate","tool_dedup":true},
+    {"id":"S20-15-malformed-response","fault":"malformed_response","boundary":"after_dispatch_before_response","journal":"committed:1","dispatch":"sent","response":"malformed","tool_dedup":false},
+    {"id":"S20-16-crash-during-retry","fault":"crash","boundary":"recovery_retry","journal":"committed:1","dispatch":"sent","response":"lost","tool_dedup":true}
+  ]
+}

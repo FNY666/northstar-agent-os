@@ -1,0 +1,268 @@
+{
+  "all_cases_match": true,
+  "case_count": 25,
+  "claims_status": "inferred",
+  "coverage": [
+    "CHECKPOINT",
+    "SNAPSHOT",
+    "DELTA_CHAIN",
+    "COMPACTION",
+    "ARCHIVE_RESTORE",
+    "TOMBSTONE",
+    "WATERMARK",
+    "RETENTION",
+    "FENCE",
+    "NO_EVENT",
+    "UNKNOWN"
+  ],
+  "digest": "97a2f115015b96cebda4b1af7a20f42ea0720157f6f81fce2a9514a0ce2fb2c9",
+  "production_verified": false,
+  "property_sweep": {
+    "combinations": 524288,
+    "counts": {
+      "RECOVERED": 1,
+      "REJECT": 507904,
+      "UNKNOWN": 16383
+    },
+    "dimensions": 19,
+    "fields": [
+      "same_identity",
+      "identity_conflict",
+      "checkpoint_attested",
+      "snapshot_digest_match",
+      "delta_chain_complete",
+      "compaction_manifest_complete",
+      "archive_restore_attested",
+      "restore_generation_match",
+      "tombstone_chain_complete",
+      "segment_chain_complete",
+      "watermark_closed",
+      "retention_window_closed",
+      "source_epoch_continuous",
+      "fence_valid",
+      "fence_conflict",
+      "digest_conflict",
+      "restore_ambiguous",
+      "gap_present",
+      "restore_generation_conflict"
+    ],
+    "single_gate_minimizer": [
+      {
+        "bits": [],
+        "mask": 0,
+        "target": "REJECT"
+      },
+      {
+        "bits": [
+          13
+        ],
+        "mask": 8192,
+        "target": "UNKNOWN"
+      },
+      {
+        "bits": [
+          0,
+          2,
+          3,
+          4,
+          5,
+          6,
+          7,
+          8,
+          9,
+          10,
+          11,
+          12,
+          13
+        ],
+        "mask": 16381,
+        "target": "RECOVERED"
+      }
+    ]
+  },
+  "results": [
+    {
+      "evidence_count": 2,
+      "expected": "RECOVERED",
+      "id": "checkpoint-delta-complete",
+      "match": true,
+      "status": "RECOVERED"
+    },
+    {
+      "evidence_count": 2,
+      "expected": "RECOVERED",
+      "id": "archive-restore-complete",
+      "match": true,
+      "status": "RECOVERED"
+    },
+    {
+      "evidence_count": 2,
+      "expected": "RECOVERED",
+      "id": "compaction-manifest-complete",
+      "match": true,
+      "status": "RECOVERED"
+    },
+    {
+      "evidence_count": 2,
+      "expected": "RECOVERED",
+      "id": "tombstone-chain-complete",
+      "match": true,
+      "status": "RECOVERED"
+    },
+    {
+      "evidence_count": 2,
+      "expected": "RECOVERED",
+      "id": "delayed-watermark-closed",
+      "match": true,
+      "status": "RECOVERED"
+    },
+    {
+      "evidence_count": 2,
+      "expected": "RECOVERED",
+      "id": "duplicate-snapshot-consistent",
+      "match": true,
+      "status": "RECOVERED"
+    },
+    {
+      "evidence_count": 1,
+      "expected": "UNKNOWN",
+      "id": "checkpoint-not-attested",
+      "match": true,
+      "status": "UNKNOWN"
+    },
+    {
+      "evidence_count": 1,
+      "expected": "UNKNOWN",
+      "id": "snapshot-digest-missing",
+      "match": true,
+      "status": "UNKNOWN"
+    },
+    {
+      "evidence_count": 1,
+      "expected": "UNKNOWN",
+      "id": "delta-chain-gap",
+      "match": true,
+      "status": "UNKNOWN"
+    },
+    {
+      "evidence_count": 1,
+      "expected": "UNKNOWN",
+      "id": "compaction-manifest-gap",
+      "match": true,
+      "status": "UNKNOWN"
+    },
+    {
+      "evidence_count": 1,
+      "expected": "UNKNOWN",
+      "id": "archive-restore-unattested",
+      "match": true,
+      "status": "UNKNOWN"
+    },
+    {
+      "evidence_count": 1,
+      "expected": "UNKNOWN",
+      "id": "restore-generation-unknown",
+      "match": true,
+      "status": "UNKNOWN"
+    },
+    {
+      "evidence_count": 1,
+      "expected": "UNKNOWN",
+      "id": "tombstone-chain-gap",
+      "match": true,
+      "status": "UNKNOWN"
+    },
+    {
+      "evidence_count": 1,
+      "expected": "UNKNOWN",
+      "id": "segment-boundary-open",
+      "match": true,
+      "status": "UNKNOWN"
+    },
+    {
+      "evidence_count": 1,
+      "expected": "UNKNOWN",
+      "id": "watermark-open",
+      "match": true,
+      "status": "UNKNOWN"
+    },
+    {
+      "evidence_count": 1,
+      "expected": "UNKNOWN",
+      "id": "retention-window-open",
+      "match": true,
+      "status": "UNKNOWN"
+    },
+    {
+      "evidence_count": 1,
+      "expected": "UNKNOWN",
+      "id": "source-epoch-gap",
+      "match": true,
+      "status": "UNKNOWN"
+    },
+    {
+      "evidence_count": 1,
+      "expected": "UNKNOWN",
+      "id": "restore-ambiguous",
+      "match": true,
+      "status": "UNKNOWN"
+    },
+    {
+      "evidence_count": 2,
+      "expected": "UNKNOWN",
+      "id": "query-gap-with-no-event",
+      "match": true,
+      "status": "UNKNOWN"
+    },
+    {
+      "evidence_count": 1,
+      "expected": "UNKNOWN",
+      "id": "identity-missing",
+      "match": true,
+      "status": "UNKNOWN"
+    },
+    {
+      "evidence_count": 1,
+      "expected": "UNKNOWN",
+      "id": "checkpoint-delta-retention-edge",
+      "match": true,
+      "status": "UNKNOWN"
+    },
+    {
+      "evidence_count": 1,
+      "expected": "REJECT",
+      "id": "identity-conflict",
+      "match": true,
+      "status": "REJECT"
+    },
+    {
+      "evidence_count": 1,
+      "expected": "REJECT",
+      "id": "stale-fence",
+      "match": true,
+      "status": "REJECT"
+    },
+    {
+      "evidence_count": 1,
+      "expected": "REJECT",
+      "id": "canonical-digest-conflict",
+      "match": true,
+      "status": "REJECT"
+    },
+    {
+      "evidence_count": 1,
+      "expected": "REJECT",
+      "id": "restore-generation-conflict",
+      "match": true,
+      "status": "REJECT"
+    }
+  ],
+  "schema_version": "S33-results-1",
+  "sources": [],
+  "status_distribution": {
+    "RECOVERED": 6,
+    "REJECT": 4,
+    "UNKNOWN": 15
+  },
+  "synthetic_only": true
+}

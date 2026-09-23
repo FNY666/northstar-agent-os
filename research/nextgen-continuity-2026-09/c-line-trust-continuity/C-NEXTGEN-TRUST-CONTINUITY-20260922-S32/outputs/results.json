@@ -1,0 +1,252 @@
+{
+  "all_cases_match": true,
+  "case_count": 22,
+  "claims_status": "inferred",
+  "coverage": [
+    "DIGEST_CANONICALIZATION",
+    "HASH_ALGORITHM_MIGRATION",
+    "PAGE_CURSOR",
+    "WATERMARK",
+    "RETENTION_CUTOFF",
+    "FENCE_TOKEN",
+    "NO_EVENT",
+    "UNKNOWN"
+  ],
+  "digest": "13485476a26d3ecdc6f707166936a99876589cc4b762f13e5efee873abc68273",
+  "digest_domain": [
+    "canonicalization_version",
+    "hash_algorithm",
+    "canonical_payload_digest"
+  ],
+  "identity_domain": [
+    "tenant",
+    "source",
+    "event_id",
+    "epoch",
+    "version"
+  ],
+  "production_verified": false,
+  "property_sweep": {
+    "combinations": 65536,
+    "counts": {
+      "RECOVERED": 5,
+      "REJECT": 61440,
+      "UNKNOWN": 4091
+    },
+    "dimensions": 16,
+    "fields": [
+      "same_identity",
+      "identity_conflict",
+      "digest_equivalent",
+      "digest_conflict",
+      "canonicalization_complete",
+      "same_canonicalization",
+      "same_algorithm",
+      "migration_attested",
+      "page_chain_complete",
+      "cursor_boundary_closed",
+      "watermark_closed",
+      "retention_window_closed",
+      "within_retention",
+      "retention_boundary_attested",
+      "fence_valid",
+      "fence_conflict"
+    ],
+    "single_gate_minimizer": [
+      {
+        "bits": [
+          0,
+          2,
+          4,
+          5,
+          6,
+          8,
+          9,
+          10,
+          11,
+          12,
+          13,
+          14
+        ],
+        "mask": 32629,
+        "target": "RECOVERED"
+      },
+      {
+        "bits": [
+          14
+        ],
+        "mask": 16384,
+        "target": "UNKNOWN"
+      },
+      {
+        "bits": [],
+        "mask": 0,
+        "target": "REJECT"
+      }
+    ]
+  },
+  "results": [
+    {
+      "evidence_count": 3,
+      "expected": "RECOVERED",
+      "id": "same-semantics-complete-window",
+      "match": true,
+      "status": "RECOVERED"
+    },
+    {
+      "evidence_count": 2,
+      "expected": "RECOVERED",
+      "id": "algorithm-migration-attested",
+      "match": true,
+      "status": "RECOVERED"
+    },
+    {
+      "evidence_count": 2,
+      "expected": "RECOVERED",
+      "id": "canonicalization-migration-attested",
+      "match": true,
+      "status": "RECOVERED"
+    },
+    {
+      "evidence_count": 2,
+      "expected": "RECOVERED",
+      "id": "exact-page-end-closed",
+      "match": true,
+      "status": "RECOVERED"
+    },
+    {
+      "evidence_count": 2,
+      "expected": "RECOVERED",
+      "id": "exact-retention-cutoff-inclusive",
+      "match": true,
+      "status": "RECOVERED"
+    },
+    {
+      "evidence_count": 2,
+      "expected": "RECOVERED",
+      "id": "delayed-watermark-closed",
+      "match": true,
+      "status": "RECOVERED"
+    },
+    {
+      "evidence_count": 2,
+      "expected": "UNKNOWN",
+      "id": "algorithm-mismatch-no-attestation",
+      "match": true,
+      "status": "UNKNOWN"
+    },
+    {
+      "evidence_count": 1,
+      "expected": "UNKNOWN",
+      "id": "canonicalization-incomplete",
+      "match": true,
+      "status": "UNKNOWN"
+    },
+    {
+      "evidence_count": 2,
+      "expected": "UNKNOWN",
+      "id": "digest-not-equivalent",
+      "match": true,
+      "status": "UNKNOWN"
+    },
+    {
+      "evidence_count": 2,
+      "expected": "UNKNOWN",
+      "id": "page-terminal-missing",
+      "match": true,
+      "status": "UNKNOWN"
+    },
+    {
+      "evidence_count": 2,
+      "expected": "UNKNOWN",
+      "id": "page-gap",
+      "match": true,
+      "status": "UNKNOWN"
+    },
+    {
+      "evidence_count": 2,
+      "expected": "UNKNOWN",
+      "id": "watermark-open",
+      "match": true,
+      "status": "UNKNOWN"
+    },
+    {
+      "evidence_count": 2,
+      "expected": "UNKNOWN",
+      "id": "retention-cutoff-policy-unknown",
+      "match": true,
+      "status": "UNKNOWN"
+    },
+    {
+      "evidence_count": 2,
+      "expected": "UNKNOWN",
+      "id": "retention-expired",
+      "match": true,
+      "status": "UNKNOWN"
+    },
+    {
+      "evidence_count": 2,
+      "expected": "UNKNOWN",
+      "id": "identity-missing",
+      "match": true,
+      "status": "UNKNOWN"
+    },
+    {
+      "evidence_count": 1,
+      "expected": "UNKNOWN",
+      "id": "no-event",
+      "match": true,
+      "status": "UNKNOWN"
+    },
+    {
+      "evidence_count": 2,
+      "expected": "REJECT",
+      "id": "same-identity-digest-conflict",
+      "match": true,
+      "status": "REJECT"
+    },
+    {
+      "evidence_count": 2,
+      "expected": "REJECT",
+      "id": "identity-conflict",
+      "match": true,
+      "status": "REJECT"
+    },
+    {
+      "evidence_count": 2,
+      "expected": "REJECT",
+      "id": "stale-fence-token",
+      "match": true,
+      "status": "REJECT"
+    },
+    {
+      "evidence_count": 2,
+      "expected": "REJECT",
+      "id": "canonical-bytes-conflict",
+      "match": true,
+      "status": "REJECT"
+    },
+    {
+      "evidence_count": 2,
+      "expected": "UNKNOWN",
+      "id": "migration-claim-without-proof",
+      "match": true,
+      "status": "UNKNOWN"
+    },
+    {
+      "evidence_count": 2,
+      "expected": "UNKNOWN",
+      "id": "page-and-retention-edge-open",
+      "match": true,
+      "status": "UNKNOWN"
+    }
+  ],
+  "schema_version": "S32-results-1",
+  "sources": [],
+  "status_distribution": {
+    "RECOVERED": 6,
+    "REJECT": 4,
+    "UNKNOWN": 12
+  },
+  "synthetic_only": true
+}

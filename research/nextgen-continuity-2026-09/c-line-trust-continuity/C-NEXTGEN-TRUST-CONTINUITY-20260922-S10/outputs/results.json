@@ -1,0 +1,525 @@
+{
+  "explicit_flags": "synthetic_only=true; production_verified=false",
+  "limitations": [
+    "Local journal/replay output cannot prove real crash durability.",
+    "It cannot prove remote state, exactly-once, rollback, immutable audit, or production readiness.",
+    "No network, service, credential, SDK, or external state was accessed."
+  ],
+  "production_verified": false,
+  "results": [
+    {
+      "anomalies": [],
+      "crash_window": "before-record-write",
+      "crashed_before_all_events": true,
+      "evidence_status": "confirmed",
+      "fail_closed": "UNKNOWN",
+      "fail_open": "ACCEPT",
+      "id": "S10-01",
+      "journal_bytes": [],
+      "local_interpretation": "No journal bytes and no response are locally observed; continuity is unresolved, not proof of absence.",
+      "observed": {
+        "conflicting_payloads": false,
+        "duplicate_same_payload": false,
+        "inaccessible": false,
+        "record_count": 0,
+        "response_ok": false,
+        "target_record_id": "r01"
+      },
+      "production_claim": "not established by this synthetic run",
+      "replay_valid_records": {},
+      "residual_unknown": [
+        "fail_closed decision unresolved by local evidence",
+        "fail_open accepted without complete continuity proof"
+      ],
+      "responses_seen": [],
+      "title": "crash before write"
+    },
+    {
+      "anomalies": [
+        {
+          "type": "malformed_or_partial"
+        }
+      ],
+      "crash_window": "mid-record-write",
+      "crashed_before_all_events": true,
+      "evidence_status": "confirmed",
+      "fail_closed": "UNKNOWN",
+      "fail_open": "ACCEPT",
+      "id": "S10-02",
+      "journal_bytes": [
+        "REC|r02|"
+      ],
+      "local_interpretation": "Replay rejects the incomplete bytes as malformed_or_partial.",
+      "observed": {
+        "conflicting_payloads": false,
+        "duplicate_same_payload": false,
+        "inaccessible": false,
+        "record_count": 0,
+        "response_ok": false,
+        "target_record_id": "r02"
+      },
+      "production_claim": "not established by this synthetic run",
+      "replay_valid_records": {},
+      "residual_unknown": [
+        "fail_closed decision unresolved by local evidence",
+        "fail_open accepted without complete continuity proof"
+      ],
+      "responses_seen": [],
+      "title": "partial record after interrupted write"
+    },
+    {
+      "anomalies": [
+        {
+          "type": "torn_or_checksum_mismatch"
+        }
+      ],
+      "crash_window": "torn-record",
+      "crashed_before_all_events": true,
+      "evidence_status": "confirmed",
+      "fail_closed": "UNKNOWN",
+      "fail_open": "ACCEPT",
+      "id": "S10-03",
+      "journal_bytes": [
+        "REC|r03|char0ie|37db54748752554d"
+      ],
+      "local_interpretation": "Replay rejects a syntactically present record whose checksum no longer matches.",
+      "observed": {
+        "conflicting_payloads": false,
+        "duplicate_same_payload": false,
+        "inaccessible": false,
+        "record_count": 0,
+        "response_ok": false,
+        "target_record_id": "r03"
+      },
+      "production_claim": "not established by this synthetic run",
+      "replay_valid_records": {},
+      "residual_unknown": [
+        "fail_closed decision unresolved by local evidence",
+        "fail_open accepted without complete continuity proof"
+      ],
+      "responses_seen": [],
+      "title": "torn record with checksum mismatch"
+    },
+    {
+      "anomalies": [],
+      "crash_window": "response-before-record",
+      "crashed_before_all_events": true,
+      "evidence_status": "inferred",
+      "fail_closed": "UNKNOWN",
+      "fail_open": "ACCEPT",
+      "id": "S10-04",
+      "journal_bytes": [],
+      "local_interpretation": "A local success response precedes durable-looking journal evidence; replay cannot establish the record existed.",
+      "observed": {
+        "conflicting_payloads": false,
+        "duplicate_same_payload": false,
+        "inaccessible": false,
+        "record_count": 0,
+        "response_ok": true,
+        "target_record_id": "r04"
+      },
+      "production_claim": "not established by this synthetic run",
+      "replay_valid_records": {},
+      "residual_unknown": [
+        "fail_closed decision unresolved by local evidence",
+        "fail_open accepted without complete continuity proof"
+      ],
+      "responses_seen": [
+        {
+          "record_id": "r04",
+          "status": "ok"
+        }
+      ],
+      "title": "response before record"
+    },
+    {
+      "anomalies": [],
+      "crash_window": "record-before-response",
+      "crashed_before_all_events": true,
+      "evidence_status": "inferred",
+      "fail_closed": "UNKNOWN",
+      "fail_open": "ACCEPT",
+      "id": "S10-05",
+      "journal_bytes": [
+        "REC|r05|echo|7827a9a6a47b2d86"
+      ],
+      "local_interpretation": "Replay sees a complete local record but no response; it cannot prove whether a caller observed or applied the action.",
+      "observed": {
+        "conflicting_payloads": false,
+        "duplicate_same_payload": false,
+        "inaccessible": false,
+        "record_count": 1,
+        "response_ok": false,
+        "target_record_id": "r05"
+      },
+      "production_claim": "not established by this synthetic run",
+      "replay_valid_records": {
+        "r05": [
+          "echo"
+        ]
+      },
+      "residual_unknown": [
+        "fail_closed decision unresolved by local evidence",
+        "fail_open accepted without complete continuity proof"
+      ],
+      "responses_seen": [],
+      "title": "record before response"
+    },
+    {
+      "anomalies": [],
+      "crash_window": "no-interruption",
+      "crashed_before_all_events": false,
+      "evidence_status": "confirmed",
+      "fail_closed": "ACCEPT",
+      "fail_open": "ACCEPT",
+      "id": "S10-06",
+      "journal_bytes": [
+        "REC|r06|foxtrot|8f6d5d87622d09fd"
+      ],
+      "local_interpretation": "Both artifacts are present in this model; this is only a synthetic positive control.",
+      "observed": {
+        "conflicting_payloads": false,
+        "duplicate_same_payload": false,
+        "inaccessible": false,
+        "record_count": 1,
+        "response_ok": true,
+        "target_record_id": "r06"
+      },
+      "production_claim": "not established by this synthetic run",
+      "replay_valid_records": {
+        "r06": [
+          "foxtrot"
+        ]
+      },
+      "residual_unknown": [],
+      "responses_seen": [
+        {
+          "record_id": "r06",
+          "status": "ok"
+        }
+      ],
+      "title": "complete record and response"
+    },
+    {
+      "anomalies": [],
+      "crash_window": "restart-replay-duplicate",
+      "crashed_before_all_events": false,
+      "evidence_status": "unverified",
+      "fail_closed": "UNKNOWN",
+      "fail_open": "ACCEPT",
+      "id": "S10-07",
+      "journal_bytes": [
+        "REC|r07|golf|12374678908fd03d",
+        "REC|r07|golf|12374678908fd03d"
+      ],
+      "local_interpretation": "Replay observes two identical records; deduplication policy is not an exactly-once proof.",
+      "observed": {
+        "conflicting_payloads": false,
+        "duplicate_same_payload": true,
+        "inaccessible": false,
+        "record_count": 2,
+        "response_ok": true,
+        "target_record_id": "r07"
+      },
+      "production_claim": "not established by this synthetic run",
+      "replay_valid_records": {
+        "r07": [
+          "golf",
+          "golf"
+        ]
+      },
+      "residual_unknown": [
+        "fail_closed decision unresolved by local evidence",
+        "fail_open accepted without complete continuity proof",
+        "duplicate replay does not establish exactly-once"
+      ],
+      "responses_seen": [
+        {
+          "record_id": "r07",
+          "status": "ok"
+        }
+      ],
+      "title": "duplicate replay of identical record"
+    },
+    {
+      "anomalies": [],
+      "crash_window": "restart-replay-conflict",
+      "crashed_before_all_events": false,
+      "evidence_status": "conflicting",
+      "fail_closed": "REJECT",
+      "fail_open": "REJECT",
+      "id": "S10-08",
+      "journal_bytes": [
+        "REC|r08|hotel|35f5ca02a035e075",
+        "REC|r08|india|d60feee2c4f2464a"
+      ],
+      "local_interpretation": "Replay has contradictory payloads for one id; fail-closed rejects rather than selecting one.",
+      "observed": {
+        "conflicting_payloads": true,
+        "duplicate_same_payload": false,
+        "inaccessible": false,
+        "record_count": 2,
+        "response_ok": true,
+        "target_record_id": "r08"
+      },
+      "production_claim": "not established by this synthetic run",
+      "replay_valid_records": {
+        "r08": [
+          "hotel",
+          "india"
+        ]
+      },
+      "residual_unknown": [],
+      "responses_seen": [
+        {
+          "record_id": "r08",
+          "status": "ok"
+        }
+      ],
+      "title": "conflicting duplicate payloads"
+    },
+    {
+      "anomalies": [],
+      "crash_window": "response-before-record-loss",
+      "crashed_before_all_events": false,
+      "evidence_status": "unverified",
+      "fail_closed": "UNKNOWN",
+      "fail_open": "ACCEPT",
+      "id": "S10-09",
+      "journal_bytes": [],
+      "local_interpretation": "Response alone cannot prove local persistence or remote application.",
+      "observed": {
+        "conflicting_payloads": false,
+        "duplicate_same_payload": false,
+        "inaccessible": false,
+        "record_count": 0,
+        "response_ok": true,
+        "target_record_id": "r09"
+      },
+      "production_claim": "not established by this synthetic run",
+      "replay_valid_records": {},
+      "residual_unknown": [
+        "fail_closed decision unresolved by local evidence",
+        "fail_open accepted without complete continuity proof"
+      ],
+      "responses_seen": [
+        {
+          "record_id": "r09",
+          "status": "ok"
+        }
+      ],
+      "title": "response with lost record"
+    },
+    {
+      "anomalies": [
+        {
+          "record_id": "r10",
+          "type": "inaccessible_segment"
+        }
+      ],
+      "crash_window": "restart-recovery-inaccessible",
+      "crashed_before_all_events": false,
+      "evidence_status": "inaccessible",
+      "fail_closed": "UNKNOWN",
+      "fail_open": "ACCEPT",
+      "id": "S10-10",
+      "journal_bytes": [],
+      "local_interpretation": "The simulator marks an unavailable segment; absence of replay evidence is not evidence of absence.",
+      "observed": {
+        "conflicting_payloads": false,
+        "duplicate_same_payload": false,
+        "inaccessible": true,
+        "record_count": 0,
+        "response_ok": true,
+        "target_record_id": "r10"
+      },
+      "production_claim": "not established by this synthetic run",
+      "replay_valid_records": {},
+      "residual_unknown": [
+        "fail_closed decision unresolved by local evidence",
+        "fail_open accepted without complete continuity proof"
+      ],
+      "responses_seen": [
+        {
+          "record_id": "r10",
+          "status": "ok"
+        }
+      ],
+      "title": "inaccessible journal segment"
+    },
+    {
+      "anomalies": [
+        {
+          "type": "malformed_or_partial"
+        }
+      ],
+      "crash_window": "partial-write-response-window",
+      "crashed_before_all_events": false,
+      "evidence_status": "confirmed",
+      "fail_closed": "UNKNOWN",
+      "fail_open": "ACCEPT",
+      "id": "S10-11",
+      "journal_bytes": [
+        "REC|r11"
+      ],
+      "local_interpretation": "The response does not repair or validate the malformed replay bytes.",
+      "observed": {
+        "conflicting_payloads": false,
+        "duplicate_same_payload": false,
+        "inaccessible": false,
+        "record_count": 0,
+        "response_ok": true,
+        "target_record_id": "r11"
+      },
+      "production_claim": "not established by this synthetic run",
+      "replay_valid_records": {},
+      "residual_unknown": [
+        "fail_closed decision unresolved by local evidence",
+        "fail_open accepted without complete continuity proof"
+      ],
+      "responses_seen": [
+        {
+          "record_id": "r11",
+          "status": "ok"
+        }
+      ],
+      "title": "partial record plus success response"
+    },
+    {
+      "anomalies": [],
+      "crash_window": "duplicate-before-response",
+      "crashed_before_all_events": false,
+      "evidence_status": "unverified",
+      "fail_closed": "UNKNOWN",
+      "fail_open": "ACCEPT",
+      "id": "S10-12",
+      "journal_bytes": [
+        "REC|r12|mike|ec2507a5c074b28d",
+        "REC|r12|mike|ec2507a5c074b28d"
+      ],
+      "local_interpretation": "A response does not distinguish one application from two local replay entries.",
+      "observed": {
+        "conflicting_payloads": false,
+        "duplicate_same_payload": true,
+        "inaccessible": false,
+        "record_count": 2,
+        "response_ok": true,
+        "target_record_id": "r12"
+      },
+      "production_claim": "not established by this synthetic run",
+      "replay_valid_records": {
+        "r12": [
+          "mike",
+          "mike"
+        ]
+      },
+      "residual_unknown": [
+        "fail_closed decision unresolved by local evidence",
+        "fail_open accepted without complete continuity proof",
+        "duplicate replay does not establish exactly-once"
+      ],
+      "responses_seen": [
+        {
+          "record_id": "r12",
+          "status": "ok"
+        }
+      ],
+      "title": "duplicate record with response after replayable bytes"
+    },
+    {
+      "anomalies": [],
+      "crash_window": "record-before-error-response",
+      "crashed_before_all_events": false,
+      "evidence_status": "inferred",
+      "fail_closed": "UNKNOWN",
+      "fail_open": "ACCEPT",
+      "id": "S10-13",
+      "journal_bytes": [
+        "REC|r13|november|98f533fcb4ce07c1"
+      ],
+      "local_interpretation": "Local durable-looking intent and an error response disagree; remote side effects remain unknown.",
+      "observed": {
+        "conflicting_payloads": false,
+        "duplicate_same_payload": false,
+        "inaccessible": false,
+        "record_count": 1,
+        "response_ok": false,
+        "target_record_id": "r13"
+      },
+      "production_claim": "not established by this synthetic run",
+      "replay_valid_records": {
+        "r13": [
+          "november"
+        ]
+      },
+      "residual_unknown": [
+        "fail_closed decision unresolved by local evidence",
+        "fail_open accepted without complete continuity proof"
+      ],
+      "responses_seen": [
+        {
+          "record_id": "r13",
+          "status": "error"
+        }
+      ],
+      "title": "record then negative response"
+    },
+    {
+      "anomalies": [],
+      "crash_window": "restart-recovery-no-response",
+      "crashed_before_all_events": true,
+      "evidence_status": "unverified",
+      "fail_closed": "UNKNOWN",
+      "fail_open": "ACCEPT",
+      "id": "S10-14",
+      "journal_bytes": [
+        "REC|r14|oscar|f0535ce1c66d3658"
+      ],
+      "local_interpretation": "Recovery can replay a local record, but cannot infer whether replay is safe, duplicated remotely, or rollback-capable.",
+      "observed": {
+        "conflicting_payloads": false,
+        "duplicate_same_payload": false,
+        "inaccessible": false,
+        "record_count": 1,
+        "response_ok": false,
+        "target_record_id": "r14"
+      },
+      "production_claim": "not established by this synthetic run",
+      "replay_valid_records": {
+        "r14": [
+          "oscar"
+        ]
+      },
+      "residual_unknown": [
+        "fail_closed decision unresolved by local evidence",
+        "fail_open accepted without complete continuity proof"
+      ],
+      "responses_seen": [],
+      "title": "restart replay of complete record without response"
+    }
+  ],
+  "scope": "offline synthetic journal/replay only",
+  "simulator": "deterministic-local-crash-window-v1",
+  "summary": {
+    "evidence_status_counts": {
+      "confirmed": 5,
+      "conflicting": 1,
+      "inaccessible": 1,
+      "inferred": 3,
+      "unverified": 4
+    },
+    "fail_closed_counts": {
+      "ACCEPT": 1,
+      "REJECT": 1,
+      "UNKNOWN": 12
+    },
+    "fail_open_counts": {
+      "ACCEPT": 13,
+      "REJECT": 1,
+      "UNKNOWN": 0
+    },
+    "fixtures": 14,
+    "residual_unknown_fixture_count": 12
+  },
+  "synthetic_only": true
+}

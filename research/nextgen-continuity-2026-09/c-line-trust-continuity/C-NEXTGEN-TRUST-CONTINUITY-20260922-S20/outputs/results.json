@@ -1,0 +1,613 @@
+{
+  "fixture_count": 20,
+  "production_verified": false,
+  "results": [
+    {
+      "blocking_conditions": [],
+      "canonical_input_sha256": "253dc710340a492fc4628a83534f13e78351b6c014a85fa1918cbe8d42582105",
+      "clock_seq_evidence": {
+        "clock_source": "authoritative",
+        "offset_limit_ms": 50,
+        "reference_wall_clock_ms": 100000,
+        "scope": [
+          {
+            "event_id": "E1",
+            "seq": 1,
+            "wall_clock_ms": 100000
+          }
+        ],
+        "target": {
+          "event_id": "E1",
+          "seq": 1,
+          "wall_clock_ms": 100000
+        }
+      },
+      "fixture_id": "S20-C01-exact-single",
+      "reason": [
+        "权威时钟源、双轴完整且在含边界内，目标事件证据一致"
+      ],
+      "status": "RECOVERED"
+    },
+    {
+      "blocking_conditions": [],
+      "canonical_input_sha256": "85a45643f80486ec45c5e66c381a9dc21edd5bdd451960ccbec1367242590988",
+      "clock_seq_evidence": {
+        "clock_source": "authoritative",
+        "offset_limit_ms": 50,
+        "reference_wall_clock_ms": 200000,
+        "scope": [
+          {
+            "event_id": "E2",
+            "seq": 2,
+            "wall_clock_ms": 200000
+          }
+        ],
+        "target": {
+          "event_id": "E2",
+          "seq": 2,
+          "wall_clock_ms": 200000
+        }
+      },
+      "fixture_id": "S20-C02-exact-target-only",
+      "reason": [
+        "权威时钟源、双轴完整且在含边界内，目标事件证据一致"
+      ],
+      "status": "RECOVERED"
+    },
+    {
+      "blocking_conditions": [
+        "dual-axis ordering conflict"
+      ],
+      "canonical_input_sha256": "b83904e7174623f3bddab89823684bc4acb4d6652b1ee81864460b08adad9dc9",
+      "clock_seq_evidence": {
+        "clock_source": "authoritative",
+        "offset_limit_ms": 50,
+        "reference_wall_clock_ms": 300100,
+        "scope": [
+          {
+            "event_id": "E1",
+            "seq": 1,
+            "wall_clock_ms": 300200
+          },
+          {
+            "event_id": "E2",
+            "seq": 2,
+            "wall_clock_ms": 300100
+          }
+        ],
+        "target": {
+          "event_id": "E2",
+          "seq": 2,
+          "wall_clock_ms": 300100
+        }
+      },
+      "fixture_id": "S20-C03-wall-early-seq-late",
+      "reason": [
+        "wall-clock 与 seq 顺序冲突；不默认任一轴权威"
+      ],
+      "status": "UNKNOWN"
+    },
+    {
+      "blocking_conditions": [
+        "dual-axis ordering conflict"
+      ],
+      "canonical_input_sha256": "26c80c224a34bd760b18f9ad94294df8b590f7174e4dbf13bfaecad915109b05",
+      "clock_seq_evidence": {
+        "clock_source": "authoritative",
+        "offset_limit_ms": 50,
+        "reference_wall_clock_ms": 400200,
+        "scope": [
+          {
+            "event_id": "E1",
+            "seq": 1,
+            "wall_clock_ms": 400100
+          },
+          {
+            "event_id": "E2",
+            "seq": 0,
+            "wall_clock_ms": 400200
+          }
+        ],
+        "target": {
+          "event_id": "E2",
+          "seq": 0,
+          "wall_clock_ms": 400200
+        }
+      },
+      "fixture_id": "S20-C04-wall-late-seq-early",
+      "reason": [
+        "wall-clock 与 seq 顺序冲突；不默认任一轴权威"
+      ],
+      "status": "UNKNOWN"
+    },
+    {
+      "blocking_conditions": [
+        "wall-clock unavailable"
+      ],
+      "canonical_input_sha256": "89a6579435a208afea2260177d377b4bc0321e7381965d921c1b63e1f35fbdc4",
+      "clock_seq_evidence": {
+        "clock_source": "authoritative",
+        "offset_limit_ms": 50,
+        "reference_wall_clock_ms": 500000,
+        "scope": [
+          {
+            "event_id": "E1",
+            "seq": 5,
+            "wall_clock_ms": null
+          }
+        ],
+        "target": {
+          "event_id": "E1",
+          "seq": 5,
+          "wall_clock_ms": null
+        }
+      },
+      "fixture_id": "S20-C05-seq-only",
+      "reason": [
+        "目标事件缺失 wall-clock 时间戳"
+      ],
+      "status": "UNKNOWN"
+    },
+    {
+      "blocking_conditions": [
+        "dual-axis ordering conflict"
+      ],
+      "canonical_input_sha256": "0f4b9a765207f444ac0c2df96808f4282c7927495bb077c7c0bc72bd7b868ba5",
+      "clock_seq_evidence": {
+        "clock_source": "authoritative",
+        "offset_limit_ms": 50,
+        "reference_wall_clock_ms": 600100,
+        "scope": [
+          {
+            "event_id": "E1",
+            "seq": 1,
+            "wall_clock_ms": 600200
+          },
+          {
+            "event_id": "E2",
+            "seq": 2,
+            "wall_clock_ms": 600100
+          }
+        ],
+        "target": {
+          "event_id": "E2",
+          "seq": 2,
+          "wall_clock_ms": 600100
+        }
+      },
+      "fixture_id": "S20-C06-clock-rollback-default",
+      "reason": [
+        "wall-clock 与 seq 顺序冲突；不默认任一轴权威"
+      ],
+      "status": "UNKNOWN"
+    },
+    {
+      "blocking_conditions": [
+        "wall_clock_monotonic contradiction"
+      ],
+      "canonical_input_sha256": "9bfaf2ed7e563526478e1db9547a0585de3c12e71fba9e1267b33b1121a3dbb4",
+      "clock_seq_evidence": {
+        "clock_source": "authoritative",
+        "offset_limit_ms": 50,
+        "reference_wall_clock_ms": 700100,
+        "scope": [
+          {
+            "event_id": "E1",
+            "seq": 1,
+            "wall_clock_ms": 700200
+          },
+          {
+            "event_id": "E2",
+            "seq": 2,
+            "wall_clock_ms": 700100
+          }
+        ],
+        "target": {
+          "event_id": "E2",
+          "seq": 2,
+          "wall_clock_ms": 700100
+        }
+      },
+      "fixture_id": "S20-C07-clock-rollback-invariant",
+      "reason": [
+        "显式 wall_clock_monotonic 不变量被记录顺序中的可验证回拨违反"
+      ],
+      "status": "REJECT"
+    },
+    {
+      "blocking_conditions": [
+        "authoritative clock source missing"
+      ],
+      "canonical_input_sha256": "11f535f6d573bdf2b2aa4ec7411675d654cf9a1dd133bc23d33f2a5fcf363513",
+      "clock_seq_evidence": {
+        "clock_source": null,
+        "offset_limit_ms": 50,
+        "reference_wall_clock_ms": 800000,
+        "scope": [
+          {
+            "event_id": "E1",
+            "seq": 1,
+            "wall_clock_ms": 800000
+          }
+        ],
+        "target": {
+          "event_id": "E1",
+          "seq": 1,
+          "wall_clock_ms": 800000
+        }
+      },
+      "fixture_id": "S20-C08-clock-source-missing",
+      "reason": [
+        "缺少权威时钟源声明，时间证据降权"
+      ],
+      "status": "UNKNOWN"
+    },
+    {
+      "blocking_conditions": [],
+      "canonical_input_sha256": "02f675f06d8d087636099ed876c386ce5c4739e0f147373773f7f0c71b1b75ac",
+      "clock_seq_evidence": {
+        "clock_source": "authoritative",
+        "offset_limit_ms": 50,
+        "reference_wall_clock_ms": 900000,
+        "scope": [
+          {
+            "event_id": "E1",
+            "seq": 1,
+            "wall_clock_ms": 900010
+          }
+        ],
+        "target": {
+          "event_id": "E1",
+          "seq": 1,
+          "wall_clock_ms": 900010
+        }
+      },
+      "fixture_id": "S20-C09-authoritative-source-consistent",
+      "reason": [
+        "权威时钟源、双轴完整且在含边界内，目标事件证据一致"
+      ],
+      "status": "RECOVERED"
+    },
+    {
+      "blocking_conditions": [
+        "co-timestamp ordering ambiguity"
+      ],
+      "canonical_input_sha256": "b49c5bcb521b0bb76d0d1229e2426097f72cca9fb3972e5ad89a9d535e9688f8",
+      "clock_seq_evidence": {
+        "clock_source": "authoritative",
+        "offset_limit_ms": 50,
+        "reference_wall_clock_ms": 1000000,
+        "scope": [
+          {
+            "event_id": "E1",
+            "seq": 1,
+            "wall_clock_ms": 1000000
+          },
+          {
+            "event_id": "E2",
+            "seq": 2,
+            "wall_clock_ms": 1000000
+          }
+        ],
+        "target": {
+          "event_id": "E2",
+          "seq": 2,
+          "wall_clock_ms": 1000000
+        }
+      },
+      "fixture_id": "S20-C10-same-wall-different-seq",
+      "reason": [
+        "同墙钟不同 seq 无法用 wall-clock 区分先后"
+      ],
+      "status": "UNKNOWN"
+    },
+    {
+      "blocking_conditions": [
+        "sequence hole"
+      ],
+      "canonical_input_sha256": "d17e2ab8cd834963a40ba9af5b00030496fbc7b169bd473e120c985d66b128c6",
+      "clock_seq_evidence": {
+        "clock_source": "authoritative",
+        "offset_limit_ms": 50,
+        "reference_wall_clock_ms": 1100100,
+        "scope": [
+          {
+            "event_id": "E1",
+            "seq": 1,
+            "wall_clock_ms": 1100000
+          },
+          {
+            "event_id": "E3",
+            "seq": 3,
+            "wall_clock_ms": 1100100
+          }
+        ],
+        "target": {
+          "event_id": "E3",
+          "seq": 3,
+          "wall_clock_ms": 1100100
+        }
+      },
+      "fixture_id": "S20-C11-seq-hole-clock-continuous",
+      "reason": [
+        "seq 存在空洞，连续墙钟不可补全缺失序号"
+      ],
+      "status": "UNKNOWN"
+    },
+    {
+      "blocking_conditions": [
+        "negative assertion unproven"
+      ],
+      "canonical_input_sha256": "525972dd324f7568ead145e35665a16e5293dd2e2c5dba13e05e6bd59cb65037",
+      "clock_seq_evidence": {
+        "clock_source": "authoritative",
+        "offset_limit_ms": 50,
+        "reference_wall_clock_ms": 1200000,
+        "scope": [
+          {
+            "event_id": "E2",
+            "seq": 2,
+            "wall_clock_ms": 1200000
+          }
+        ],
+        "target": {
+          "event_id": "E2",
+          "seq": 2,
+          "wall_clock_ms": 1200000
+        }
+      },
+      "fixture_id": "S20-C12-explicit-negative-unsupported",
+      "reason": [
+        "显式负断言不是可验证的不存在证明"
+      ],
+      "status": "UNKNOWN"
+    },
+    {
+      "blocking_conditions": [],
+      "canonical_input_sha256": "ebdb058ef261dd274d07eb28f1100feb99e87fc40b1b0edab06301ed81d545f8",
+      "clock_seq_evidence": {
+        "clock_source": "authoritative",
+        "offset_limit_ms": 100,
+        "reference_wall_clock_ms": 1300000,
+        "scope": [
+          {
+            "event_id": "E1",
+            "seq": 1,
+            "wall_clock_ms": 1300100
+          }
+        ],
+        "target": {
+          "event_id": "E1",
+          "seq": 1,
+          "wall_clock_ms": 1300100
+        }
+      },
+      "fixture_id": "S20-C13-offset-boundary-inclusive",
+      "reason": [
+        "权威时钟源、双轴完整且在含边界内，目标事件证据一致"
+      ],
+      "status": "RECOVERED"
+    },
+    {
+      "blocking_conditions": [
+        "offset exceeds inclusive limit"
+      ],
+      "canonical_input_sha256": "7a44449130aa40599039e1d1c3c495e24805e2a08b97e28fb3e788de952876e4",
+      "clock_seq_evidence": {
+        "clock_source": "authoritative",
+        "offset_limit_ms": 100,
+        "reference_wall_clock_ms": 1400000,
+        "scope": [
+          {
+            "event_id": "E1",
+            "seq": 1,
+            "wall_clock_ms": 1400101
+          }
+        ],
+        "target": {
+          "event_id": "E1",
+          "seq": 1,
+          "wall_clock_ms": 1400101
+        }
+      },
+      "fixture_id": "S20-C14-offset-over-limit",
+      "reason": [
+        "目标时间偏移超过允许边界"
+      ],
+      "status": "UNKNOWN"
+    },
+    {
+      "blocking_conditions": [
+        "retry is non-independent"
+      ],
+      "canonical_input_sha256": "aa22f37294fe5415d87530fa9a8646c05a3f40c0a874640615ecb6a18df78d8f",
+      "clock_seq_evidence": {
+        "clock_source": "authoritative",
+        "offset_limit_ms": 50,
+        "reference_wall_clock_ms": 1500000,
+        "scope": [
+          {
+            "event_id": "E1",
+            "seq": 1,
+            "wall_clock_ms": 1500000
+          }
+        ],
+        "target": {
+          "event_id": "E1",
+          "seq": 1,
+          "wall_clock_ms": 1500000
+        }
+      },
+      "fixture_id": "S20-C15-retry-no-upgrade",
+      "reason": [
+        "重试不构成新的独立时间/序号证据，保守保持 UNKNOWN"
+      ],
+      "status": "UNKNOWN"
+    },
+    {
+      "blocking_conditions": [
+        "authoritative clock source missing"
+      ],
+      "canonical_input_sha256": "8bd1552a61779f34a76b98b3d243437ef9371ea7dbf7c43e07ac8ca62a3f1052",
+      "clock_seq_evidence": {
+        "clock_source": null,
+        "offset_limit_ms": 50,
+        "reference_wall_clock_ms": 1600100,
+        "scope": [
+          {
+            "event_id": "E1",
+            "seq": 1,
+            "wall_clock_ms": 1600000
+          },
+          {
+            "event_id": "E2",
+            "seq": 2,
+            "wall_clock_ms": 1600100
+          }
+        ],
+        "target": {
+          "event_id": "E2",
+          "seq": 2,
+          "wall_clock_ms": 1600100
+        }
+      },
+      "fixture_id": "S20-C16-missing-source-no-upgrade",
+      "reason": [
+        "缺少权威时钟源声明，时间证据降权"
+      ],
+      "status": "UNKNOWN"
+    },
+    {
+      "blocking_conditions": [
+        "co-timestamp ordering ambiguity"
+      ],
+      "canonical_input_sha256": "5dc87c0b3db7e17f77936c006f32745cc36e9f0a9da610e985b0fc6c88743474",
+      "clock_seq_evidence": {
+        "clock_source": "authoritative",
+        "offset_limit_ms": 50,
+        "reference_wall_clock_ms": 1700000,
+        "scope": [
+          {
+            "event_id": "E1",
+            "seq": 1,
+            "wall_clock_ms": 1700000
+          },
+          {
+            "event_id": "E2",
+            "seq": 2,
+            "wall_clock_ms": 1700000
+          },
+          {
+            "event_id": "E3",
+            "seq": 3,
+            "wall_clock_ms": 1700000
+          }
+        ],
+        "target": {
+          "event_id": "E3",
+          "seq": 3,
+          "wall_clock_ms": 1700000
+        }
+      },
+      "fixture_id": "S20-C17-co-timestamp-many",
+      "reason": [
+        "同墙钟不同 seq 无法用 wall-clock 区分先后"
+      ],
+      "status": "UNKNOWN"
+    },
+    {
+      "blocking_conditions": [
+        "seq_monotonic contradiction"
+      ],
+      "canonical_input_sha256": "fa82489d14caaadcd2661b58cc4d8b1377e314f0836996b887f38fc2c1192ab2",
+      "clock_seq_evidence": {
+        "clock_source": "authoritative",
+        "offset_limit_ms": 50,
+        "reference_wall_clock_ms": 1800100,
+        "scope": [
+          {
+            "event_id": "E1",
+            "seq": 2,
+            "wall_clock_ms": 1800000
+          },
+          {
+            "event_id": "E2",
+            "seq": 1,
+            "wall_clock_ms": 1800100
+          }
+        ],
+        "target": {
+          "event_id": "E2",
+          "seq": 1,
+          "wall_clock_ms": 1800100
+        }
+      },
+      "fixture_id": "S20-C18-seq-invariant-contradiction",
+      "reason": [
+        "显式 seq_monotonic 不变量被记录顺序中的可验证逆序违反"
+      ],
+      "status": "REJECT"
+    },
+    {
+      "blocking_conditions": [
+        "logical sequence unavailable"
+      ],
+      "canonical_input_sha256": "b8e10267582a417d76617d4bcb8f22dc530a37f29a3a3f6f436ae1321eb34835",
+      "clock_seq_evidence": {
+        "clock_source": "authoritative",
+        "offset_limit_ms": 50,
+        "reference_wall_clock_ms": 1900000,
+        "scope": [
+          {
+            "event_id": "E1",
+            "seq": null,
+            "wall_clock_ms": 1900000
+          }
+        ],
+        "target": {
+          "event_id": "E1",
+          "seq": null,
+          "wall_clock_ms": 1900000
+        }
+      },
+      "fixture_id": "S20-C19-both-axes-insufficient",
+      "reason": [
+        "目标事件缺失逻辑序号"
+      ],
+      "status": "UNKNOWN"
+    },
+    {
+      "blocking_conditions": [],
+      "canonical_input_sha256": "98770479425ba713f6b765ce98fadacc6b29cb9ed039ab71bc7a96a04e580605",
+      "clock_seq_evidence": {
+        "clock_source": "authoritative",
+        "offset_limit_ms": 50,
+        "reference_wall_clock_ms": 2000000,
+        "scope": [
+          {
+            "event_id": "E1",
+            "seq": 1,
+            "wall_clock_ms": 2000000
+          }
+        ],
+        "target": {
+          "event_id": "E1",
+          "seq": 1,
+          "wall_clock_ms": 2000000
+        }
+      },
+      "fixture_id": "S20-C20-target-local-recovery",
+      "reason": [
+        "权威时钟源、双轴完整且在含边界内，目标事件证据一致"
+      ],
+      "status": "RECOVERED"
+    }
+  ],
+  "schema_version": "s20-results-v1",
+  "status_counts": {
+    "RECOVERED": 5,
+    "REJECT": 2,
+    "UNKNOWN": 13
+  },
+  "synthetic_only": true
+}

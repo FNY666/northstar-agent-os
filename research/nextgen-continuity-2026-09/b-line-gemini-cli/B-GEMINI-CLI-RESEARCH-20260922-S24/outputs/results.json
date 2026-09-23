@@ -1,0 +1,452 @@
+{
+  "synthetic_only": true,
+  "production_verified": false,
+  "harness": "S24-v1-single-worker-single-op_id",
+  "rules": {
+    "worker_count": 1,
+    "op_id_count": 1,
+    "attempts": [
+      1,
+      2
+    ],
+    "same_attempt_exact_replay": "accepted or preserves supplied UNKNOWN",
+    "same_attempt_field_change": "rejected",
+    "attempt_boundary": "new local record; no cross-attempt dedup inference",
+    "unknown_boundary": "UNKNOWN remains local observation for its attempt"
+  },
+  "fixture_count": 14,
+  "arrival_count": 33,
+  "outcome_counts": {
+    "accepted": 17,
+    "rejected": 5,
+    "UNKNOWN": 11
+  },
+  "results": [
+    {
+      "id": "S24-01-same-attempt-same-all",
+      "outcomes": [
+        "accepted",
+        "accepted"
+      ],
+      "history": [
+        {
+          "attempt": 1,
+          "fingerprint": [
+            1,
+            "alpha",
+            "resp-a",
+            "dur-a"
+          ],
+          "outcome": "accepted"
+        }
+      ],
+      "final_local_attempts": [
+        1
+      ],
+      "status": "PASS"
+    },
+    {
+      "id": "S24-02-same-attempt-value-change",
+      "outcomes": [
+        "accepted",
+        "rejected"
+      ],
+      "history": [
+        {
+          "attempt": 1,
+          "fingerprint": [
+            1,
+            "alpha",
+            "resp-a",
+            "dur-a"
+          ],
+          "outcome": "accepted"
+        }
+      ],
+      "final_local_attempts": [
+        1
+      ],
+      "status": "PASS"
+    },
+    {
+      "id": "S24-03-same-attempt-response-ref-change",
+      "outcomes": [
+        "accepted",
+        "rejected"
+      ],
+      "history": [
+        {
+          "attempt": 1,
+          "fingerprint": [
+            1,
+            "alpha",
+            "resp-a",
+            "dur-a"
+          ],
+          "outcome": "accepted"
+        }
+      ],
+      "final_local_attempts": [
+        1
+      ],
+      "status": "PASS"
+    },
+    {
+      "id": "S24-04-same-attempt-durable-ref-change",
+      "outcomes": [
+        "accepted",
+        "rejected"
+      ],
+      "history": [
+        {
+          "attempt": 1,
+          "fingerprint": [
+            1,
+            "alpha",
+            "resp-a",
+            "dur-a"
+          ],
+          "outcome": "accepted"
+        }
+      ],
+      "final_local_attempts": [
+        1
+      ],
+      "status": "PASS"
+    },
+    {
+      "id": "S24-05-attempt1-unknown-replay",
+      "outcomes": [
+        "UNKNOWN",
+        "UNKNOWN"
+      ],
+      "history": [
+        {
+          "attempt": 1,
+          "fingerprint": [
+            1,
+            "alpha",
+            "resp-a",
+            "dur-a"
+          ],
+          "outcome": "UNKNOWN"
+        }
+      ],
+      "final_local_attempts": [
+        1
+      ],
+      "status": "PASS"
+    },
+    {
+      "id": "S24-06-unknown-to-attempt2-same",
+      "outcomes": [
+        "UNKNOWN",
+        "accepted"
+      ],
+      "history": [
+        {
+          "attempt": 1,
+          "fingerprint": [
+            1,
+            "alpha",
+            "resp-a",
+            "dur-a"
+          ],
+          "outcome": "UNKNOWN"
+        },
+        {
+          "attempt": 2,
+          "fingerprint": [
+            2,
+            "alpha",
+            "resp-a",
+            "dur-a"
+          ],
+          "outcome": "accepted"
+        }
+      ],
+      "final_local_attempts": [
+        1,
+        2
+      ],
+      "status": "PASS"
+    },
+    {
+      "id": "S24-07-unknown-to-attempt2-different",
+      "outcomes": [
+        "UNKNOWN",
+        "accepted"
+      ],
+      "history": [
+        {
+          "attempt": 1,
+          "fingerprint": [
+            1,
+            "alpha",
+            "resp-a",
+            "dur-a"
+          ],
+          "outcome": "UNKNOWN"
+        },
+        {
+          "attempt": 2,
+          "fingerprint": [
+            2,
+            "beta",
+            "resp-b",
+            "dur-b"
+          ],
+          "outcome": "accepted"
+        }
+      ],
+      "final_local_attempts": [
+        1,
+        2
+      ],
+      "status": "PASS"
+    },
+    {
+      "id": "S24-08-accepted-to-attempt2-same",
+      "outcomes": [
+        "accepted",
+        "accepted"
+      ],
+      "history": [
+        {
+          "attempt": 1,
+          "fingerprint": [
+            1,
+            "alpha",
+            "resp-a",
+            "dur-a"
+          ],
+          "outcome": "accepted"
+        },
+        {
+          "attempt": 2,
+          "fingerprint": [
+            2,
+            "alpha",
+            "resp-a",
+            "dur-a"
+          ],
+          "outcome": "accepted"
+        }
+      ],
+      "final_local_attempts": [
+        1,
+        2
+      ],
+      "status": "PASS"
+    },
+    {
+      "id": "S24-09-accepted-to-attempt2-different",
+      "outcomes": [
+        "accepted",
+        "accepted"
+      ],
+      "history": [
+        {
+          "attempt": 1,
+          "fingerprint": [
+            1,
+            "alpha",
+            "resp-a",
+            "dur-a"
+          ],
+          "outcome": "accepted"
+        },
+        {
+          "attempt": 2,
+          "fingerprint": [
+            2,
+            "beta",
+            "resp-b",
+            "dur-b"
+          ],
+          "outcome": "accepted"
+        }
+      ],
+      "final_local_attempts": [
+        1,
+        2
+      ],
+      "status": "PASS"
+    },
+    {
+      "id": "S24-10-attempt2-exact-replay",
+      "outcomes": [
+        "UNKNOWN",
+        "accepted",
+        "accepted"
+      ],
+      "history": [
+        {
+          "attempt": 1,
+          "fingerprint": [
+            1,
+            "alpha",
+            "resp-a",
+            "dur-a"
+          ],
+          "outcome": "UNKNOWN"
+        },
+        {
+          "attempt": 2,
+          "fingerprint": [
+            2,
+            "beta",
+            "resp-b",
+            "dur-b"
+          ],
+          "outcome": "accepted"
+        }
+      ],
+      "final_local_attempts": [
+        1,
+        2
+      ],
+      "status": "PASS"
+    },
+    {
+      "id": "S24-11-attempt2-response-ref-change",
+      "outcomes": [
+        "UNKNOWN",
+        "accepted",
+        "rejected"
+      ],
+      "history": [
+        {
+          "attempt": 1,
+          "fingerprint": [
+            1,
+            "alpha",
+            "resp-a",
+            "dur-a"
+          ],
+          "outcome": "UNKNOWN"
+        },
+        {
+          "attempt": 2,
+          "fingerprint": [
+            2,
+            "beta",
+            "resp-b",
+            "dur-b"
+          ],
+          "outcome": "accepted"
+        }
+      ],
+      "final_local_attempts": [
+        1,
+        2
+      ],
+      "status": "PASS"
+    },
+    {
+      "id": "S24-12-attempt2-durable-ref-change",
+      "outcomes": [
+        "UNKNOWN",
+        "accepted",
+        "rejected"
+      ],
+      "history": [
+        {
+          "attempt": 1,
+          "fingerprint": [
+            1,
+            "alpha",
+            "resp-a",
+            "dur-a"
+          ],
+          "outcome": "UNKNOWN"
+        },
+        {
+          "attempt": 2,
+          "fingerprint": [
+            2,
+            "beta",
+            "resp-b",
+            "dur-b"
+          ],
+          "outcome": "accepted"
+        }
+      ],
+      "final_local_attempts": [
+        1,
+        2
+      ],
+      "status": "PASS"
+    },
+    {
+      "id": "S24-13-unknown-preserved-after-boundary",
+      "outcomes": [
+        "UNKNOWN",
+        "accepted",
+        "UNKNOWN"
+      ],
+      "history": [
+        {
+          "attempt": 1,
+          "fingerprint": [
+            1,
+            "alpha",
+            "resp-a",
+            "dur-a"
+          ],
+          "outcome": "UNKNOWN"
+        },
+        {
+          "attempt": 2,
+          "fingerprint": [
+            2,
+            "beta",
+            "resp-b",
+            "dur-b"
+          ],
+          "outcome": "accepted"
+        }
+      ],
+      "final_local_attempts": [
+        1,
+        2
+      ],
+      "status": "PASS"
+    },
+    {
+      "id": "S24-14-unknown-attempt2-replay",
+      "outcomes": [
+        "accepted",
+        "UNKNOWN",
+        "UNKNOWN"
+      ],
+      "history": [
+        {
+          "attempt": 1,
+          "fingerprint": [
+            1,
+            "alpha",
+            "resp-a",
+            "dur-a"
+          ],
+          "outcome": "accepted"
+        },
+        {
+          "attempt": 2,
+          "fingerprint": [
+            2,
+            "beta",
+            "resp-b",
+            "dur-b"
+          ],
+          "outcome": "UNKNOWN"
+        }
+      ],
+      "final_local_attempts": [
+        1,
+        2
+      ],
+      "status": "PASS"
+    }
+  ]
+}

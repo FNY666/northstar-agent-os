@@ -1,0 +1,375 @@
+{
+  "schema": "trust-continuity-s23-results-v1",
+  "synthetic_only": true,
+  "production_verified": false,
+  "deterministic": true,
+  "case_count": 20,
+  "results": [
+    {
+      "case_id": "C01-overlap-a",
+      "state": "RECOVERED",
+      "classification": "VERIFIED_CONTINUITY",
+      "epoch": 7,
+      "fence_token": "f7-a",
+      "audit_rejection_reason": null,
+      "evidence": {
+        "platform_receipt": "ACCEPTED",
+        "log_presence": "PRESENT",
+        "external_effect": "CONFIRMED",
+        "continuity": "VERIFIED_CONTINUITY"
+      },
+      "reasons": [
+        "all_independent_evidence_agrees"
+      ],
+      "contradiction": false
+    },
+    {
+      "case_id": "C02-overlap-b",
+      "state": "UNKNOWN",
+      "classification": "QUERY_GAP",
+      "epoch": 7,
+      "fence_token": "f7-b",
+      "audit_rejection_reason": null,
+      "evidence": {
+        "platform_receipt": "ACCEPTED",
+        "log_presence": "QUERY_GAP",
+        "external_effect": "NOT_CONFIRMED",
+        "continuity": "UNKNOWN"
+      },
+      "reasons": [
+        "insufficient_independent_evidence"
+      ],
+      "contradiction": false
+    },
+    {
+      "case_id": "C03-old-epoch",
+      "state": "REJECT",
+      "classification": "DROPPED",
+      "epoch": 6,
+      "fence_token": "f6-old",
+      "audit_rejection_reason": "epoch_mismatch",
+      "evidence": {
+        "platform_receipt": "REJECTED",
+        "log_presence": "ABSENT",
+        "external_effect": "NOT_CONFIRMED",
+        "continuity": "UNKNOWN"
+      },
+      "reasons": [
+        "audit_reject:epoch_mismatch"
+      ],
+      "contradiction": false
+    },
+    {
+      "case_id": "C04-stale-token",
+      "state": "REJECT",
+      "classification": "DROPPED",
+      "epoch": 7,
+      "fence_token": "f7-stale",
+      "audit_rejection_reason": "stale_fence_token",
+      "evidence": {
+        "platform_receipt": "REJECTED",
+        "log_presence": "ABSENT",
+        "external_effect": "NOT_CONFIRMED",
+        "continuity": "UNKNOWN"
+      },
+      "reasons": [
+        "audit_reject:stale"
+      ],
+      "contradiction": false
+    },
+    {
+      "case_id": "C05-token-missing",
+      "state": "REJECT",
+      "classification": "NO_EVENT",
+      "epoch": 8,
+      "fence_token": null,
+      "audit_rejection_reason": "missing_fence_token",
+      "evidence": {
+        "platform_receipt": "REJECTED",
+        "log_presence": "ABSENT",
+        "external_effect": "NOT_CONFIRMED",
+        "continuity": "UNKNOWN"
+      },
+      "reasons": [
+        "audit_reject:missing"
+      ],
+      "contradiction": false
+    },
+    {
+      "case_id": "C06-token-conflict",
+      "state": "REJECT",
+      "classification": "EXPORTER_FAILURE",
+      "epoch": 8,
+      "fence_token": "f8-x|f8-y",
+      "audit_rejection_reason": "conflicting_fence_tokens",
+      "evidence": {
+        "platform_receipt": "REJECTED",
+        "log_presence": "PRESENT",
+        "external_effect": "NOT_CONFIRMED",
+        "continuity": "UNKNOWN"
+      },
+      "reasons": [
+        "audit_reject:conflict"
+      ],
+      "contradiction": false
+    },
+    {
+      "case_id": "C07-restart-before-receipt",
+      "state": "UNKNOWN",
+      "classification": "DELAYED",
+      "epoch": 9,
+      "fence_token": "f9-a",
+      "audit_rejection_reason": null,
+      "evidence": {
+        "platform_receipt": "UNKNOWN",
+        "log_presence": "PRESENT",
+        "external_effect": "NOT_CONFIRMED",
+        "continuity": "UNKNOWN"
+      },
+      "reasons": [
+        "insufficient_independent_evidence"
+      ],
+      "contradiction": false
+    },
+    {
+      "case_id": "C08-restart-after-receipt",
+      "state": "UNKNOWN",
+      "classification": "EXPORTER_FAILURE",
+      "epoch": 9,
+      "fence_token": "f9-b",
+      "audit_rejection_reason": null,
+      "evidence": {
+        "platform_receipt": "ACCEPTED",
+        "log_presence": "PRESENT",
+        "external_effect": "NOT_CONFIRMED",
+        "continuity": "UNKNOWN"
+      },
+      "reasons": [
+        "insufficient_independent_evidence"
+      ],
+      "contradiction": false
+    },
+    {
+      "case_id": "C09-retry-duplicate",
+      "state": "UNKNOWN",
+      "classification": "DELAYED",
+      "epoch": 10,
+      "fence_token": "f10-a",
+      "audit_rejection_reason": null,
+      "evidence": {
+        "platform_receipt": "ACCEPTED",
+        "log_presence": "PRESENT_DUPLICATE",
+        "external_effect": "NOT_CONFIRMED",
+        "continuity": "UNKNOWN"
+      },
+      "reasons": [
+        "insufficient_independent_evidence"
+      ],
+      "contradiction": false
+    },
+    {
+      "case_id": "C10-no-event",
+      "state": "UNKNOWN",
+      "classification": "NO_EVENT",
+      "epoch": 10,
+      "fence_token": "f10-b",
+      "audit_rejection_reason": null,
+      "evidence": {
+        "platform_receipt": "ABSENT",
+        "log_presence": "ABSENT",
+        "external_effect": "NOT_CONFIRMED",
+        "continuity": "UNKNOWN"
+      },
+      "reasons": [
+        "insufficient_independent_evidence"
+      ],
+      "contradiction": false
+    },
+    {
+      "case_id": "C11-delayed",
+      "state": "UNKNOWN",
+      "classification": "DELAYED",
+      "epoch": 11,
+      "fence_token": "f11-a",
+      "audit_rejection_reason": null,
+      "evidence": {
+        "platform_receipt": "PENDING",
+        "log_presence": "PRESENT",
+        "external_effect": "NOT_CONFIRMED",
+        "continuity": "UNKNOWN"
+      },
+      "reasons": [
+        "insufficient_independent_evidence"
+      ],
+      "contradiction": false
+    },
+    {
+      "case_id": "C12-dropped",
+      "state": "UNKNOWN",
+      "classification": "DROPPED",
+      "epoch": 11,
+      "fence_token": "f11-b",
+      "audit_rejection_reason": null,
+      "evidence": {
+        "platform_receipt": "REJECTED",
+        "log_presence": "ABSENT",
+        "external_effect": "NOT_CONFIRMED",
+        "continuity": "UNKNOWN"
+      },
+      "reasons": [
+        "insufficient_independent_evidence"
+      ],
+      "contradiction": false
+    },
+    {
+      "case_id": "C13-exporter-failure",
+      "state": "UNKNOWN",
+      "classification": "EXPORTER_FAILURE",
+      "epoch": 12,
+      "fence_token": "f12-a",
+      "audit_rejection_reason": null,
+      "evidence": {
+        "platform_receipt": "ACCEPTED",
+        "log_presence": "ABSENT",
+        "external_effect": "NOT_CONFIRMED",
+        "continuity": "UNKNOWN"
+      },
+      "reasons": [
+        "insufficient_independent_evidence"
+      ],
+      "contradiction": false
+    },
+    {
+      "case_id": "C14-query-gap",
+      "state": "UNKNOWN",
+      "classification": "QUERY_GAP",
+      "epoch": 12,
+      "fence_token": "f12-b",
+      "audit_rejection_reason": null,
+      "evidence": {
+        "platform_receipt": "ACCEPTED",
+        "log_presence": "QUERY_GAP",
+        "external_effect": "NOT_CONFIRMED",
+        "continuity": "UNKNOWN"
+      },
+      "reasons": [
+        "insufficient_independent_evidence"
+      ],
+      "contradiction": false
+    },
+    {
+      "case_id": "C15-retention-expired",
+      "state": "UNKNOWN",
+      "classification": "RETENTION_EXPIRED",
+      "epoch": 13,
+      "fence_token": "f13-a",
+      "audit_rejection_reason": null,
+      "evidence": {
+        "platform_receipt": "ACCEPTED",
+        "log_presence": "RETENTION_EXPIRED",
+        "external_effect": "NOT_CONFIRMED",
+        "continuity": "UNKNOWN"
+      },
+      "reasons": [
+        "insufficient_independent_evidence"
+      ],
+      "contradiction": false
+    },
+    {
+      "case_id": "C16-contradiction",
+      "state": "UNKNOWN",
+      "classification": "VERIFIED_CONTINUITY",
+      "epoch": 13,
+      "fence_token": "f13-b",
+      "audit_rejection_reason": null,
+      "evidence": {
+        "platform_receipt": "ACCEPTED",
+        "log_presence": "ABSENT",
+        "external_effect": "CONFIRMED",
+        "continuity": "VERIFIED_CONTINUITY"
+      },
+      "reasons": [
+        "verifiable_contradiction"
+      ],
+      "contradiction": true
+    },
+    {
+      "case_id": "C17-full-recovered",
+      "state": "RECOVERED",
+      "classification": "VERIFIED_CONTINUITY",
+      "epoch": 14,
+      "fence_token": "f14-a",
+      "audit_rejection_reason": null,
+      "evidence": {
+        "platform_receipt": "ACCEPTED",
+        "log_presence": "PRESENT",
+        "external_effect": "CONFIRMED",
+        "continuity": "VERIFIED_CONTINUITY"
+      },
+      "reasons": [
+        "all_independent_evidence_agrees"
+      ],
+      "contradiction": false
+    },
+    {
+      "case_id": "C18-retry-recovered",
+      "state": "RECOVERED",
+      "classification": "VERIFIED_CONTINUITY",
+      "epoch": 14,
+      "fence_token": "f14-b",
+      "audit_rejection_reason": null,
+      "evidence": {
+        "platform_receipt": "ACCEPTED",
+        "log_presence": "PRESENT",
+        "external_effect": "CONFIRMED",
+        "continuity": "VERIFIED_CONTINUITY"
+      },
+      "reasons": [
+        "all_independent_evidence_agrees"
+      ],
+      "contradiction": false
+    },
+    {
+      "case_id": "C19-audit-reject",
+      "state": "REJECT",
+      "classification": "EXPORTER_FAILURE",
+      "epoch": 15,
+      "fence_token": "f15-a",
+      "audit_rejection_reason": "audit_hash_mismatch",
+      "evidence": {
+        "platform_receipt": "ACCEPTED",
+        "log_presence": "PRESENT",
+        "external_effect": "NOT_CONFIRMED",
+        "continuity": "UNKNOWN"
+      },
+      "reasons": [
+        "audit_reject:audit_hash_mismatch"
+      ],
+      "contradiction": false
+    },
+    {
+      "case_id": "C20-late-query",
+      "state": "UNKNOWN",
+      "classification": "DELAYED",
+      "epoch": 15,
+      "fence_token": "f15-b",
+      "audit_rejection_reason": null,
+      "evidence": {
+        "platform_receipt": "PENDING",
+        "log_presence": "QUERY_GAP",
+        "external_effect": "NOT_CONFIRMED",
+        "continuity": "UNKNOWN"
+      },
+      "reasons": [
+        "insufficient_independent_evidence"
+      ],
+      "contradiction": false
+    }
+  ],
+  "state_counts": {
+    "RECOVERED": 3,
+    "REJECT": 5,
+    "UNKNOWN": 12
+  },
+  "result_digest": "8bcf4844f8749f3f9986d09f90b1413bfd5ff2d6567ac551eef2be914de08832"
+}

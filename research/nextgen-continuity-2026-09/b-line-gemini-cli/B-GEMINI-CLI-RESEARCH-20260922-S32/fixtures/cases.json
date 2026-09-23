@@ -1,0 +1,1933 @@
+[
+  {
+    "id": "F01",
+    "ops": {
+      "P": {
+        "epoch": 1,
+        "expected": [
+          "p1",
+          "p2"
+        ]
+      },
+      "Q": {
+        "epoch": 1,
+        "expected": [
+          "q1",
+          "q2"
+        ]
+      },
+      "R": {
+        "epoch": 1,
+        "expected": [
+          "r1",
+          "r2"
+        ]
+      }
+    },
+    "events": [
+      {
+        "op_id": "P",
+        "epoch": 1,
+        "kind": "evidence",
+        "token": "p1"
+      },
+      {
+        "op_id": "Q",
+        "epoch": 1,
+        "kind": "evidence",
+        "token": "q1"
+      },
+      {
+        "op_id": "R",
+        "epoch": 1,
+        "kind": "evidence",
+        "token": "r1"
+      },
+      {
+        "op_id": "P",
+        "epoch": 1,
+        "kind": "evidence",
+        "token": "p2"
+      },
+      {
+        "op_id": "Q",
+        "epoch": 1,
+        "kind": "evidence",
+        "token": "q2"
+      },
+      {
+        "op_id": "R",
+        "epoch": 1,
+        "kind": "evidence",
+        "token": "r2"
+      },
+      {
+        "op_id": "P",
+        "epoch": 1,
+        "kind": "ack",
+        "token": "ack",
+        "status": "accepted"
+      },
+      {
+        "op_id": "Q",
+        "epoch": 1,
+        "kind": "ack",
+        "token": "ack",
+        "status": "accepted"
+      },
+      {
+        "op_id": "R",
+        "epoch": 1,
+        "kind": "ack",
+        "token": "ack",
+        "status": "accepted"
+      }
+    ]
+  },
+  {
+    "id": "F02",
+    "ops": {
+      "P": {
+        "epoch": 1,
+        "expected": [
+          "p1",
+          "p2"
+        ]
+      },
+      "Q": {
+        "epoch": 1,
+        "expected": [
+          "q1",
+          "q2"
+        ]
+      },
+      "R": {
+        "epoch": 1,
+        "expected": [
+          "r1",
+          "r2"
+        ]
+      }
+    },
+    "events": [
+      {
+        "op_id": "P",
+        "epoch": 1,
+        "kind": "evidence",
+        "token": "p1"
+      },
+      {
+        "op_id": "Q",
+        "epoch": 1,
+        "kind": "evidence",
+        "token": "q1"
+      },
+      {
+        "op_id": "P",
+        "epoch": 1,
+        "kind": "evidence",
+        "token": "p2"
+      },
+      {
+        "op_id": "R",
+        "epoch": 1,
+        "kind": "evidence",
+        "token": "r1"
+      },
+      {
+        "op_id": "Q",
+        "epoch": 1,
+        "kind": "evidence",
+        "token": "q2"
+      },
+      {
+        "op_id": "R",
+        "epoch": 1,
+        "kind": "evidence",
+        "token": "r2"
+      },
+      {
+        "op_id": "P",
+        "epoch": 1,
+        "kind": "ack",
+        "token": "ack",
+        "status": "accepted"
+      },
+      {
+        "op_id": "Q",
+        "epoch": 1,
+        "kind": "ack",
+        "token": "ack",
+        "status": "accepted"
+      },
+      {
+        "op_id": "R",
+        "epoch": 1,
+        "kind": "ack",
+        "token": "ack",
+        "status": "accepted"
+      }
+    ]
+  },
+  {
+    "id": "F03",
+    "ops": {
+      "P": {
+        "epoch": 1,
+        "expected": [
+          "same",
+          "same2"
+        ]
+      },
+      "Q": {
+        "epoch": 1,
+        "expected": [
+          "same",
+          "same2"
+        ]
+      },
+      "R": {
+        "epoch": 1,
+        "expected": [
+          "same",
+          "same2"
+        ]
+      }
+    },
+    "events": [
+      {
+        "op_id": "P",
+        "epoch": 1,
+        "kind": "evidence",
+        "token": "same"
+      },
+      {
+        "op_id": "Q",
+        "epoch": 1,
+        "kind": "evidence",
+        "token": "same"
+      },
+      {
+        "op_id": "R",
+        "epoch": 1,
+        "kind": "evidence",
+        "token": "same"
+      },
+      {
+        "op_id": "P",
+        "epoch": 1,
+        "kind": "evidence",
+        "token": "same2"
+      },
+      {
+        "op_id": "Q",
+        "epoch": 1,
+        "kind": "evidence",
+        "token": "same2"
+      },
+      {
+        "op_id": "R",
+        "epoch": 1,
+        "kind": "evidence",
+        "token": "same2"
+      },
+      {
+        "op_id": "P",
+        "epoch": 1,
+        "kind": "ack",
+        "token": "ack",
+        "status": "accepted"
+      },
+      {
+        "op_id": "Q",
+        "epoch": 1,
+        "kind": "ack",
+        "token": "ack",
+        "status": "accepted"
+      },
+      {
+        "op_id": "R",
+        "epoch": 1,
+        "kind": "ack",
+        "token": "ack",
+        "status": "accepted"
+      }
+    ]
+  },
+  {
+    "id": "F04",
+    "ops": {
+      "P": {
+        "epoch": 1,
+        "expected": [
+          "p1",
+          "p2"
+        ]
+      },
+      "Q": {
+        "epoch": 1,
+        "expected": [
+          "q1",
+          "q2"
+        ]
+      },
+      "R": {
+        "epoch": 1,
+        "expected": [
+          "r1",
+          "r2"
+        ]
+      }
+    },
+    "events": [
+      {
+        "op_id": "P",
+        "epoch": 1,
+        "kind": "evidence",
+        "token": "p1"
+      },
+      {
+        "op_id": "P",
+        "epoch": 1,
+        "kind": "evidence",
+        "token": "p1"
+      },
+      {
+        "op_id": "Q",
+        "epoch": 1,
+        "kind": "evidence",
+        "token": "q1"
+      },
+      {
+        "op_id": "R",
+        "epoch": 1,
+        "kind": "evidence",
+        "token": "r1"
+      },
+      {
+        "op_id": "P",
+        "epoch": 1,
+        "kind": "evidence",
+        "token": "p2"
+      },
+      {
+        "op_id": "Q",
+        "epoch": 1,
+        "kind": "evidence",
+        "token": "q2"
+      },
+      {
+        "op_id": "R",
+        "epoch": 1,
+        "kind": "evidence",
+        "token": "r2"
+      },
+      {
+        "op_id": "P",
+        "epoch": 1,
+        "kind": "ack",
+        "token": "ack",
+        "status": "accepted"
+      },
+      {
+        "op_id": "Q",
+        "epoch": 1,
+        "kind": "ack",
+        "token": "ack",
+        "status": "accepted"
+      },
+      {
+        "op_id": "R",
+        "epoch": 1,
+        "kind": "ack",
+        "token": "ack",
+        "status": "accepted"
+      }
+    ]
+  },
+  {
+    "id": "F05",
+    "ops": {
+      "P": {
+        "epoch": 1,
+        "expected": [
+          "p1",
+          "p2"
+        ]
+      },
+      "Q": {
+        "epoch": 1,
+        "expected": [
+          "q1",
+          "q2"
+        ]
+      },
+      "R": {
+        "epoch": 1,
+        "expected": [
+          "r1",
+          "r2"
+        ]
+      }
+    },
+    "events": [
+      {
+        "op_id": "P",
+        "epoch": 1,
+        "kind": "evidence",
+        "token": "p1"
+      },
+      {
+        "op_id": "Q",
+        "epoch": 1,
+        "kind": "evidence",
+        "token": "q1"
+      },
+      {
+        "op_id": "R",
+        "epoch": 1,
+        "kind": "evidence",
+        "token": "r1"
+      },
+      {
+        "op_id": "P",
+        "epoch": 1,
+        "kind": "evidence",
+        "token": "p2"
+      },
+      {
+        "op_id": "Q",
+        "epoch": 1,
+        "kind": "evidence",
+        "token": "q2"
+      },
+      {
+        "op_id": "R",
+        "epoch": 1,
+        "kind": "evidence",
+        "token": "r2"
+      },
+      {
+        "op_id": "P",
+        "epoch": 1,
+        "kind": "ack",
+        "token": "ack",
+        "status": "accepted"
+      },
+      {
+        "op_id": "Q",
+        "epoch": 1,
+        "kind": "ack",
+        "token": "ack",
+        "status": "accepted"
+      },
+      {
+        "op_id": "R",
+        "epoch": 1,
+        "kind": "ack",
+        "token": "ack",
+        "status": "accepted"
+      },
+      {
+        "op_id": "P",
+        "epoch": 1,
+        "kind": "evidence",
+        "token": "dup"
+      }
+    ]
+  },
+  {
+    "id": "F06",
+    "ops": {
+      "P": {
+        "epoch": 1,
+        "expected": [
+          "p1",
+          "p2"
+        ]
+      },
+      "Q": {
+        "epoch": 1,
+        "expected": [
+          "q1",
+          "q2"
+        ]
+      },
+      "R": {
+        "epoch": 1,
+        "expected": [
+          "r1",
+          "r2"
+        ]
+      }
+    },
+    "events": [
+      {
+        "op_id": "P",
+        "epoch": 1,
+        "kind": "evidence",
+        "token": "p1"
+      },
+      {
+        "op_id": "Q",
+        "epoch": 1,
+        "kind": "evidence",
+        "token": "q1"
+      },
+      {
+        "op_id": "R",
+        "epoch": 1,
+        "kind": "evidence",
+        "token": "r1"
+      },
+      {
+        "op_id": "P",
+        "epoch": 1,
+        "kind": "evidence",
+        "token": "p2"
+      },
+      {
+        "op_id": "Q",
+        "epoch": 1,
+        "kind": "evidence",
+        "token": "q2"
+      },
+      {
+        "op_id": "R",
+        "epoch": 1,
+        "kind": "evidence",
+        "token": "r2"
+      },
+      {
+        "op_id": "P",
+        "epoch": 1,
+        "kind": "ack",
+        "token": "ack",
+        "status": "accepted"
+      },
+      {
+        "op_id": "Q",
+        "epoch": 1,
+        "kind": "ack",
+        "token": "ack",
+        "status": "accepted"
+      },
+      {
+        "op_id": "R",
+        "epoch": 1,
+        "kind": "ack",
+        "token": "ack",
+        "status": "accepted"
+      },
+      {
+        "op_id": "Q",
+        "epoch": 1,
+        "kind": "evidence",
+        "token": "q2"
+      }
+    ]
+  },
+  {
+    "id": "F07",
+    "ops": {
+      "P": {
+        "epoch": 1,
+        "expected": [
+          "p1",
+          "p2"
+        ]
+      },
+      "Q": {
+        "epoch": 1,
+        "expected": [
+          "q1",
+          "q2"
+        ]
+      },
+      "R": {
+        "epoch": 1,
+        "expected": [
+          "r1",
+          "r2"
+        ]
+      }
+    },
+    "events": [
+      {
+        "op_id": "P",
+        "epoch": 1,
+        "kind": "evidence",
+        "token": "p1"
+      },
+      {
+        "op_id": "Q",
+        "epoch": 1,
+        "kind": "evidence",
+        "token": "q2"
+      },
+      {
+        "op_id": "R",
+        "epoch": 1,
+        "kind": "evidence",
+        "token": "r1"
+      },
+      {
+        "op_id": "P",
+        "epoch": 1,
+        "kind": "evidence",
+        "token": "p2"
+      },
+      {
+        "op_id": "Q",
+        "epoch": 1,
+        "kind": "evidence",
+        "token": "q1"
+      },
+      {
+        "op_id": "R",
+        "epoch": 1,
+        "kind": "evidence",
+        "token": "r2"
+      },
+      {
+        "op_id": "P",
+        "epoch": 1,
+        "kind": "ack",
+        "token": "ack",
+        "status": "accepted"
+      },
+      {
+        "op_id": "Q",
+        "epoch": 1,
+        "kind": "ack",
+        "token": "ack",
+        "status": "accepted"
+      },
+      {
+        "op_id": "R",
+        "epoch": 1,
+        "kind": "ack",
+        "token": "ack",
+        "status": "accepted"
+      }
+    ]
+  },
+  {
+    "id": "F08",
+    "ops": {
+      "P": {
+        "epoch": 1,
+        "expected": [
+          "p1",
+          "p2"
+        ]
+      },
+      "Q": {
+        "epoch": 1,
+        "expected": [
+          "q1",
+          "q2"
+        ]
+      },
+      "R": {
+        "epoch": 1,
+        "expected": [
+          "r1",
+          "r2"
+        ]
+      }
+    },
+    "events": [
+      {
+        "op_id": "P",
+        "epoch": 1,
+        "kind": "evidence",
+        "token": "p2"
+      },
+      {
+        "op_id": "Q",
+        "epoch": 1,
+        "kind": "evidence",
+        "token": "q1"
+      },
+      {
+        "op_id": "R",
+        "epoch": 1,
+        "kind": "evidence",
+        "token": "r1"
+      },
+      {
+        "op_id": "P",
+        "epoch": 1,
+        "kind": "evidence",
+        "token": "p1"
+      },
+      {
+        "op_id": "Q",
+        "epoch": 1,
+        "kind": "evidence",
+        "token": "q2"
+      },
+      {
+        "op_id": "R",
+        "epoch": 1,
+        "kind": "evidence",
+        "token": "r2"
+      },
+      {
+        "op_id": "P",
+        "epoch": 1,
+        "kind": "ack",
+        "token": "ack",
+        "status": "accepted"
+      },
+      {
+        "op_id": "Q",
+        "epoch": 1,
+        "kind": "ack",
+        "token": "ack",
+        "status": "accepted"
+      },
+      {
+        "op_id": "R",
+        "epoch": 1,
+        "kind": "ack",
+        "token": "ack",
+        "status": "accepted"
+      }
+    ]
+  },
+  {
+    "id": "F09",
+    "ops": {
+      "P": {
+        "epoch": 1,
+        "expected": [
+          "p1",
+          "p2"
+        ]
+      },
+      "Q": {
+        "epoch": 1,
+        "expected": [
+          "q1",
+          "q2"
+        ]
+      },
+      "R": {
+        "epoch": 1,
+        "expected": [
+          "r1",
+          "r2"
+        ]
+      }
+    },
+    "events": [
+      {
+        "op_id": "P",
+        "epoch": 1,
+        "kind": "evidence",
+        "token": "p1"
+      },
+      {
+        "op_id": "Q",
+        "epoch": 1,
+        "kind": "evidence",
+        "token": "q1"
+      },
+      {
+        "op_id": "R",
+        "epoch": 1,
+        "kind": "evidence",
+        "token": "r1"
+      },
+      {
+        "op_id": "P",
+        "epoch": 1,
+        "kind": "evidence",
+        "token": "p2"
+      },
+      {
+        "op_id": "Q",
+        "epoch": 1,
+        "kind": "evidence",
+        "token": "q2"
+      },
+      {
+        "op_id": "R",
+        "epoch": 1,
+        "kind": "evidence",
+        "token": "r2"
+      },
+      {
+        "op_id": "P",
+        "epoch": 1,
+        "kind": "ack",
+        "token": "ack",
+        "status": "accepted"
+      },
+      {
+        "op_id": "Q",
+        "epoch": 1,
+        "kind": "ack",
+        "token": "ack",
+        "status": "accepted"
+      },
+      {
+        "op_id": "R",
+        "epoch": 1,
+        "kind": "ack",
+        "token": "ack",
+        "status": "accepted"
+      },
+      {
+        "op_id": "R",
+        "epoch": 1,
+        "kind": "evidence",
+        "token": "r2"
+      }
+    ]
+  },
+  {
+    "id": "F10",
+    "ops": {
+      "P": {
+        "epoch": 1,
+        "expected": [
+          "p1",
+          "p2"
+        ]
+      },
+      "Q": {
+        "epoch": 1,
+        "expected": [
+          "q1",
+          "q2"
+        ]
+      },
+      "R": {
+        "epoch": 1,
+        "expected": [
+          "r1",
+          "r2"
+        ]
+      }
+    },
+    "events": [
+      {
+        "op_id": "P",
+        "epoch": 1,
+        "kind": "evidence",
+        "token": "p1"
+      },
+      {
+        "op_id": "Q",
+        "epoch": 1,
+        "kind": "evidence",
+        "token": "q1"
+      },
+      {
+        "op_id": "R",
+        "epoch": 1,
+        "kind": "evidence",
+        "token": "r1"
+      },
+      {
+        "op_id": "P",
+        "epoch": 1,
+        "kind": "evidence",
+        "token": "p2"
+      },
+      {
+        "op_id": "Q",
+        "epoch": 1,
+        "kind": "evidence",
+        "token": "q2"
+      },
+      {
+        "op_id": "R",
+        "epoch": 1,
+        "kind": "evidence",
+        "token": "r2"
+      },
+      {
+        "op_id": "R",
+        "epoch": 0,
+        "kind": "ack",
+        "token": "ack",
+        "status": "accepted"
+      },
+      {
+        "op_id": "Q",
+        "epoch": 1,
+        "kind": "ack",
+        "token": "ack",
+        "status": "accepted"
+      },
+      {
+        "op_id": "R",
+        "epoch": 1,
+        "kind": "ack",
+        "token": "ack",
+        "status": "accepted"
+      }
+    ]
+  },
+  {
+    "id": "F11",
+    "ops": {
+      "P": {
+        "epoch": 1,
+        "expected": [
+          "p1",
+          "p2"
+        ]
+      },
+      "Q": {
+        "epoch": 1,
+        "expected": [
+          "q1",
+          "q2"
+        ]
+      },
+      "R": {
+        "epoch": 1,
+        "expected": [
+          "r1",
+          "r2"
+        ]
+      }
+    },
+    "events": [
+      {
+        "op_id": "P",
+        "epoch": 1,
+        "kind": "evidence",
+        "token": "p1"
+      },
+      {
+        "op_id": "Q",
+        "epoch": 1,
+        "kind": "evidence",
+        "token": "q1"
+      },
+      {
+        "op_id": "R",
+        "epoch": 1,
+        "kind": "evidence",
+        "token": "r1"
+      },
+      {
+        "op_id": "P",
+        "epoch": 1,
+        "kind": "evidence",
+        "token": "p2"
+      },
+      {
+        "op_id": "Q",
+        "epoch": 1,
+        "kind": "evidence",
+        "token": "q2"
+      },
+      {
+        "op_id": "R",
+        "epoch": 1,
+        "kind": "evidence",
+        "token": "r2"
+      },
+      {
+        "op_id": "P",
+        "epoch": 1,
+        "kind": "ack",
+        "token": "ack",
+        "status": "accepted"
+      },
+      {
+        "op_id": "Q",
+        "epoch": 1,
+        "kind": "ack",
+        "token": "ack",
+        "status": "accepted"
+      },
+      {
+        "op_id": "R",
+        "epoch": 1,
+        "kind": "ack",
+        "token": "ack",
+        "status": "accepted"
+      },
+      {
+        "op_id": "P",
+        "epoch": 0,
+        "kind": "ack",
+        "token": "ack",
+        "status": "accepted"
+      }
+    ]
+  },
+  {
+    "id": "F12",
+    "ops": {
+      "P": {
+        "epoch": 1,
+        "expected": [
+          "p1",
+          "p2"
+        ]
+      },
+      "Q": {
+        "epoch": 1,
+        "expected": [
+          "q1",
+          "q2"
+        ]
+      },
+      "R": {
+        "epoch": 1,
+        "expected": [
+          "r1",
+          "r2"
+        ]
+      }
+    },
+    "events": [
+      {
+        "op_id": "P",
+        "epoch": 2,
+        "kind": "evidence",
+        "token": "p1"
+      },
+      {
+        "op_id": "Q",
+        "epoch": 1,
+        "kind": "evidence",
+        "token": "q1"
+      },
+      {
+        "op_id": "R",
+        "epoch": 1,
+        "kind": "evidence",
+        "token": "r1"
+      },
+      {
+        "op_id": "P",
+        "epoch": 1,
+        "kind": "evidence",
+        "token": "p2"
+      },
+      {
+        "op_id": "Q",
+        "epoch": 1,
+        "kind": "evidence",
+        "token": "q2"
+      },
+      {
+        "op_id": "R",
+        "epoch": 1,
+        "kind": "evidence",
+        "token": "r2"
+      },
+      {
+        "op_id": "P",
+        "epoch": 1,
+        "kind": "ack",
+        "token": "ack",
+        "status": "accepted"
+      },
+      {
+        "op_id": "Q",
+        "epoch": 1,
+        "kind": "ack",
+        "token": "ack",
+        "status": "accepted"
+      },
+      {
+        "op_id": "R",
+        "epoch": 1,
+        "kind": "ack",
+        "token": "ack",
+        "status": "accepted"
+      }
+    ]
+  },
+  {
+    "id": "F13",
+    "ops": {
+      "P": {
+        "epoch": 1,
+        "expected": [
+          "p1",
+          "p2"
+        ]
+      },
+      "Q": {
+        "epoch": 1,
+        "expected": [
+          "q1",
+          "q2"
+        ]
+      },
+      "R": {
+        "epoch": 1,
+        "expected": [
+          "r1",
+          "r2"
+        ]
+      }
+    },
+    "events": [
+      {
+        "op_id": "P",
+        "epoch": 1,
+        "kind": "evidence",
+        "token": "p1"
+      },
+      {
+        "op_id": "Q",
+        "epoch": 1,
+        "kind": "evidence",
+        "token": "q1"
+      },
+      {
+        "op_id": "R",
+        "epoch": 1,
+        "kind": "evidence",
+        "token": "r1"
+      },
+      {
+        "op_id": "P",
+        "epoch": 2,
+        "kind": "evidence",
+        "token": "p2"
+      },
+      {
+        "op_id": "Q",
+        "epoch": 1,
+        "kind": "evidence",
+        "token": "q2"
+      },
+      {
+        "op_id": "R",
+        "epoch": 1,
+        "kind": "evidence",
+        "token": "r2"
+      },
+      {
+        "op_id": "P",
+        "epoch": 1,
+        "kind": "ack",
+        "token": "ack",
+        "status": "accepted"
+      },
+      {
+        "op_id": "Q",
+        "epoch": 1,
+        "kind": "ack",
+        "token": "ack",
+        "status": "accepted"
+      },
+      {
+        "op_id": "R",
+        "epoch": 1,
+        "kind": "ack",
+        "token": "ack",
+        "status": "accepted"
+      }
+    ]
+  },
+  {
+    "id": "F14",
+    "ops": {
+      "P": {
+        "epoch": 1,
+        "expected": [
+          "p1",
+          "p2"
+        ]
+      },
+      "Q": {
+        "epoch": 1,
+        "expected": [
+          "q1",
+          "q2"
+        ]
+      },
+      "R": {
+        "epoch": 1,
+        "expected": [
+          "r1",
+          "r2"
+        ]
+      }
+    },
+    "events": [
+      {
+        "op_id": "P",
+        "epoch": 1,
+        "kind": "evidence",
+        "token": "p1"
+      },
+      {
+        "op_id": "Q",
+        "epoch": 1,
+        "kind": "evidence",
+        "token": "q1"
+      },
+      {
+        "op_id": "R",
+        "epoch": 1,
+        "kind": "evidence",
+        "token": "r1"
+      },
+      {
+        "op_id": "P",
+        "epoch": 1,
+        "kind": "evidence",
+        "token": "p2"
+      },
+      {
+        "op_id": "Q",
+        "epoch": 1,
+        "kind": "evidence",
+        "token": "q2"
+      },
+      {
+        "op_id": "R",
+        "epoch": 1,
+        "kind": "evidence",
+        "token": "r2"
+      },
+      {
+        "op_id": "P",
+        "epoch": 1,
+        "kind": "ack",
+        "token": "ack",
+        "status": "accepted"
+      },
+      {
+        "op_id": "Q",
+        "epoch": 2,
+        "kind": "ack",
+        "token": "ack",
+        "status": "accepted"
+      },
+      {
+        "op_id": "R",
+        "epoch": 1,
+        "kind": "ack",
+        "token": "ack",
+        "status": "accepted"
+      }
+    ]
+  },
+  {
+    "id": "F15",
+    "ops": {
+      "P": {
+        "epoch": 1,
+        "expected": [
+          "p1",
+          "p2"
+        ]
+      },
+      "Q": {
+        "epoch": 1,
+        "expected": [
+          "q1",
+          "q2"
+        ]
+      },
+      "R": {
+        "epoch": 1,
+        "expected": [
+          "r1",
+          "r2"
+        ]
+      }
+    },
+    "events": [
+      {
+        "op_id": "P",
+        "epoch": 1,
+        "kind": "evidence",
+        "token": "p1"
+      },
+      {
+        "op_id": "Q",
+        "epoch": 1,
+        "kind": "evidence",
+        "token": "q1"
+      },
+      {
+        "op_id": "R",
+        "epoch": 1,
+        "kind": "evidence",
+        "token": "r1"
+      },
+      {
+        "op_id": "P",
+        "epoch": 1,
+        "kind": "evidence",
+        "token": "p2"
+      },
+      {
+        "op_id": "Q",
+        "epoch": 1,
+        "kind": "evidence",
+        "token": "q2"
+      },
+      {
+        "op_id": "R",
+        "epoch": 1,
+        "kind": "evidence",
+        "token": "r2"
+      },
+      {
+        "op_id": "P",
+        "epoch": 1,
+        "kind": "ack",
+        "token": "ack",
+        "status": "accepted"
+      },
+      {
+        "op_id": "Q",
+        "epoch": 1,
+        "kind": "ack",
+        "token": "ack",
+        "status": "accepted"
+      },
+      {
+        "op_id": "R",
+        "epoch": 1,
+        "kind": "ack",
+        "token": "ack",
+        "status": "accepted"
+      },
+      {
+        "op_id": "X",
+        "epoch": 1,
+        "kind": "evidence",
+        "token": "x1"
+      },
+      {
+        "op_id": "X",
+        "epoch": 1,
+        "kind": "evidence",
+        "token": "x2"
+      },
+      {
+        "op_id": "X",
+        "epoch": 1,
+        "kind": "ack",
+        "token": "ack",
+        "status": "accepted"
+      }
+    ]
+  },
+  {
+    "id": "F16",
+    "ops": {
+      "P": {
+        "epoch": 1,
+        "expected": [
+          "p1",
+          "p2"
+        ]
+      },
+      "Q": {
+        "epoch": 1,
+        "expected": [
+          "q1",
+          "q2"
+        ]
+      },
+      "R": {
+        "epoch": 1,
+        "expected": [
+          "r1",
+          "r2"
+        ]
+      }
+    },
+    "events": [
+      {
+        "op_id": "P",
+        "epoch": 1,
+        "kind": "evidence",
+        "token": "p1"
+      },
+      {
+        "op_id": "Q",
+        "epoch": 1,
+        "kind": "evidence",
+        "token": "q1"
+      },
+      {
+        "op_id": "R",
+        "epoch": 1,
+        "kind": "evidence",
+        "token": "r1"
+      },
+      {
+        "op_id": "P",
+        "epoch": 1,
+        "kind": "evidence",
+        "token": "p2"
+      },
+      {
+        "op_id": "Q",
+        "epoch": 1,
+        "kind": "evidence",
+        "token": "q2"
+      },
+      {
+        "op_id": "R",
+        "epoch": 1,
+        "kind": "evidence",
+        "token": "r2"
+      },
+      {
+        "op_id": "P",
+        "epoch": 1,
+        "kind": "ack",
+        "token": "ack",
+        "status": "accepted"
+      },
+      {
+        "op_id": "Q",
+        "epoch": 1,
+        "kind": "ack",
+        "token": "ack",
+        "status": "accepted"
+      },
+      {
+        "op_id": "R",
+        "epoch": 1,
+        "kind": "ack",
+        "token": "ack",
+        "status": "accepted"
+      },
+      {
+        "op_id": "X",
+        "epoch": 1,
+        "kind": "evidence",
+        "token": "x1"
+      },
+      {
+        "op_id": "X",
+        "epoch": 1,
+        "kind": "ack",
+        "token": "ack",
+        "status": "accepted"
+      }
+    ]
+  },
+  {
+    "id": "F17",
+    "ops": {
+      "P": {
+        "epoch": 1,
+        "expected": [
+          "p1",
+          "p2"
+        ]
+      },
+      "Q": {
+        "epoch": 1,
+        "expected": [
+          "q1",
+          "q2"
+        ]
+      },
+      "R": {
+        "epoch": 1,
+        "expected": [
+          "r1",
+          "r2"
+        ]
+      }
+    },
+    "events": [
+      {
+        "op_id": "P",
+        "epoch": 1,
+        "kind": "evidence",
+        "token": "p1"
+      },
+      {
+        "op_id": "Q",
+        "epoch": 1,
+        "kind": "evidence",
+        "token": "q1"
+      },
+      {
+        "op_id": "R",
+        "epoch": 1,
+        "kind": "evidence",
+        "token": "r1"
+      },
+      {
+        "op_id": "P",
+        "epoch": 1,
+        "kind": "evidence",
+        "token": "p2"
+      },
+      {
+        "op_id": "Q",
+        "epoch": 1,
+        "kind": "evidence",
+        "token": "q2"
+      },
+      {
+        "op_id": "R",
+        "epoch": 1,
+        "kind": "evidence",
+        "token": "r2"
+      },
+      {
+        "op_id": "P",
+        "epoch": 1,
+        "kind": "ack",
+        "token": "ack",
+        "status": "accepted"
+      },
+      {
+        "op_id": "Q",
+        "epoch": 1,
+        "kind": "ack",
+        "token": "ack",
+        "status": "accepted"
+      },
+      {
+        "op_id": "R",
+        "epoch": 1,
+        "kind": "ack",
+        "token": "ack",
+        "status": "accepted"
+      },
+      {
+        "op_id": "X",
+        "epoch": 9,
+        "kind": "evidence",
+        "token": "x1"
+      },
+      {
+        "op_id": "X",
+        "epoch": 9,
+        "kind": "ack",
+        "token": "ack",
+        "status": "accepted"
+      }
+    ]
+  },
+  {
+    "id": "F18",
+    "ops": {
+      "P": {
+        "epoch": 1,
+        "expected": [
+          "p1",
+          "p2"
+        ]
+      },
+      "Q": {
+        "epoch": 1,
+        "expected": [
+          "q1",
+          "q2"
+        ]
+      },
+      "R": {
+        "epoch": 1,
+        "expected": [
+          "r1",
+          "r2"
+        ]
+      }
+    },
+    "events": [
+      {
+        "op_id": "P",
+        "epoch": 1,
+        "kind": "evidence",
+        "token": "p1"
+      },
+      {
+        "op_id": "Q",
+        "epoch": 1,
+        "kind": "evidence",
+        "token": "q1"
+      },
+      {
+        "op_id": "R",
+        "epoch": 1,
+        "kind": "evidence",
+        "token": "r1"
+      },
+      {
+        "op_id": "P",
+        "epoch": 1,
+        "kind": "evidence",
+        "token": "p2"
+      },
+      {
+        "op_id": "Q",
+        "epoch": 1,
+        "kind": "evidence",
+        "token": "q2"
+      },
+      {
+        "op_id": "R",
+        "epoch": 1,
+        "kind": "evidence",
+        "token": "r2"
+      }
+    ]
+  },
+  {
+    "id": "F19",
+    "ops": {
+      "P": {
+        "epoch": 1,
+        "expected": [
+          "p1",
+          "p2"
+        ]
+      },
+      "Q": {
+        "epoch": 1,
+        "expected": [
+          "q1",
+          "q2"
+        ]
+      },
+      "R": {
+        "epoch": 1,
+        "expected": [
+          "r1",
+          "r2"
+        ]
+      }
+    },
+    "events": [
+      {
+        "op_id": "P",
+        "epoch": 1,
+        "kind": "evidence",
+        "token": "p1"
+      },
+      {
+        "op_id": "Q",
+        "epoch": 1,
+        "kind": "evidence",
+        "token": "q1"
+      },
+      {
+        "op_id": "R",
+        "epoch": 1,
+        "kind": "evidence",
+        "token": "r1"
+      },
+      {
+        "op_id": "P",
+        "epoch": 1,
+        "kind": "evidence",
+        "token": "p2"
+      },
+      {
+        "op_id": "Q",
+        "epoch": 1,
+        "kind": "evidence",
+        "token": "q2"
+      },
+      {
+        "op_id": "R",
+        "epoch": 1,
+        "kind": "evidence",
+        "token": "r2"
+      },
+      {
+        "op_id": "P",
+        "epoch": 1,
+        "kind": "ack",
+        "token": "ack",
+        "status": "accepted"
+      },
+      {
+        "op_id": "Q",
+        "epoch": 1,
+        "kind": "ack",
+        "token": "ack",
+        "status": "accepted"
+      },
+      {
+        "op_id": "R",
+        "epoch": 1,
+        "kind": "ack",
+        "token": "ack",
+        "status": "pending"
+      }
+    ]
+  },
+  {
+    "id": "F20",
+    "ops": {
+      "P": {
+        "epoch": 1,
+        "expected": [
+          "p1",
+          "p2"
+        ]
+      },
+      "Q": {
+        "epoch": 1,
+        "expected": [
+          "q1",
+          "q2"
+        ]
+      },
+      "R": {
+        "epoch": 1,
+        "expected": [
+          "r1",
+          "r2"
+        ]
+      }
+    },
+    "events": [
+      {
+        "op_id": "P",
+        "epoch": 1,
+        "kind": "evidence",
+        "token": "p1"
+      },
+      {
+        "op_id": "Q",
+        "epoch": 1,
+        "kind": "evidence",
+        "token": "q1"
+      },
+      {
+        "op_id": "R",
+        "epoch": 1,
+        "kind": "evidence",
+        "token": "r1"
+      },
+      {
+        "op_id": "P",
+        "epoch": 1,
+        "kind": "evidence",
+        "token": "p2"
+      },
+      {
+        "op_id": "R",
+        "epoch": 1,
+        "kind": "evidence",
+        "token": "r2"
+      },
+      {
+        "op_id": "Q",
+        "epoch": 1,
+        "kind": "evidence",
+        "token": "q2"
+      },
+      {
+        "op_id": "P",
+        "epoch": 1,
+        "kind": "ack",
+        "token": "ack",
+        "status": "accepted"
+      },
+      {
+        "op_id": "Q",
+        "epoch": 1,
+        "kind": "ack",
+        "token": "ack",
+        "status": "accepted"
+      },
+      {
+        "op_id": "R",
+        "epoch": 1,
+        "kind": "ack",
+        "token": "ack",
+        "status": "accepted"
+      }
+    ]
+  },
+  {
+    "id": "F21",
+    "ops": {
+      "P": {
+        "epoch": 1,
+        "expected": [
+          "p1",
+          "p2"
+        ]
+      },
+      "Q": {
+        "epoch": 1,
+        "expected": [
+          "q1",
+          "q2"
+        ]
+      },
+      "R": {
+        "epoch": 1,
+        "expected": [
+          "r1",
+          "r2"
+        ]
+      }
+    },
+    "events": [
+      {
+        "op_id": "P",
+        "epoch": 1,
+        "kind": "evidence",
+        "token": "p1"
+      },
+      {
+        "op_id": "Q",
+        "epoch": 1,
+        "kind": "evidence",
+        "token": "q1"
+      },
+      {
+        "op_id": "R",
+        "epoch": 1,
+        "kind": "evidence",
+        "token": "r1"
+      },
+      {
+        "op_id": "P",
+        "epoch": 1,
+        "kind": "evidence",
+        "token": "p2"
+      },
+      {
+        "op_id": "Q",
+        "epoch": 1,
+        "kind": "evidence",
+        "token": "q2"
+      },
+      {
+        "op_id": "R",
+        "epoch": 1,
+        "kind": "evidence",
+        "token": "r2"
+      },
+      {
+        "op_id": "P",
+        "epoch": 1,
+        "kind": "ack",
+        "token": "ack",
+        "status": "accepted"
+      },
+      {
+        "op_id": "Q",
+        "epoch": 1,
+        "kind": "ack",
+        "token": "ack",
+        "status": "accepted"
+      },
+      {
+        "op_id": "R",
+        "epoch": 1,
+        "kind": "ack",
+        "token": "ack",
+        "status": "accepted"
+      },
+      {
+        "op_id": "Q",
+        "epoch": 0,
+        "kind": "evidence",
+        "token": "q1"
+      }
+    ]
+  },
+  {
+    "id": "F22",
+    "ops": {
+      "P": {
+        "epoch": 1,
+        "expected": [
+          "p1",
+          "p2"
+        ]
+      },
+      "Q": {
+        "epoch": 1,
+        "expected": [
+          "q1",
+          "q2"
+        ]
+      },
+      "R": {
+        "epoch": 1,
+        "expected": [
+          "r1",
+          "r2"
+        ]
+      }
+    },
+    "events": [
+      {
+        "op_id": "P",
+        "epoch": 1,
+        "kind": "evidence",
+        "token": "p1"
+      },
+      {
+        "op_id": "Q",
+        "epoch": 1,
+        "kind": "evidence",
+        "token": "q1"
+      },
+      {
+        "op_id": "R",
+        "epoch": 1,
+        "kind": "evidence",
+        "token": "r1"
+      },
+      {
+        "op_id": "P",
+        "epoch": 1,
+        "kind": "evidence",
+        "token": "p2"
+      },
+      {
+        "op_id": "Q",
+        "epoch": 1,
+        "kind": "evidence",
+        "token": "q2"
+      },
+      {
+        "op_id": "R",
+        "epoch": 1,
+        "kind": "evidence",
+        "token": "r2"
+      },
+      {
+        "op_id": "P",
+        "epoch": 1,
+        "kind": "ack",
+        "token": "ack",
+        "status": "rejected"
+      },
+      {
+        "op_id": "Q",
+        "epoch": 1,
+        "kind": "ack",
+        "token": "ack",
+        "status": "accepted"
+      },
+      {
+        "op_id": "R",
+        "epoch": 1,
+        "kind": "ack",
+        "token": "ack",
+        "status": "accepted"
+      }
+    ]
+  }
+]

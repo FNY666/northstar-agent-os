@@ -1,0 +1,47 @@
+{
+  "schema_version": "1.0",
+  "question": "What can Stripe's official PaymentIntent documentation establish about object state, mutation/read-back, webhook delivery, idempotency, and reconciliation boundaries without live API verification?",
+  "slice_id": "A-line-S9",
+  "research_id": "A81254C8-RECONCILIATION-MANUAL-20260922-S9",
+  "topic": "Stripe PaymentIntent single-target resource state machine and webhook/read-back window calibration",
+  "resource": "PaymentIntent",
+  "date": "2026-09-22",
+  "timezone": "Asia/Shanghai",
+  "scope": {
+    "mode": "official public documentation research only",
+    "included": ["PaymentIntent object/status", "retrieve", "update", "cancel", "webhook delivery", "API version", "idempotency", "error handling", "read-back state machine"],
+    "excluded": ["Stripe API calls", "credentials", "production systems", "account-specific behavior", "exactly-once", "external-effect proof"]
+  },
+  "artifacts": ["report.md", "sources.md", "summary.md", "research-manifest.json", "SHA256SUMS", "next-slice-dispatch.md"],
+  "claims_policy": {
+    "verified": "Directly supported by cited Stripe documentation",
+    "inferred": "Engineering model or recommendation derived from verified material",
+    "unknown": "Not determinable without account/runtime/API context",
+    "conflict": "Version/context boundary requiring runtime disambiguation"
+  },
+  "state_machine": ["accepted", "observed", "settled", "external_effect_committed"],
+  "windows": {
+    "delivery": "Stripe-documented webhook retry/resend behavior",
+    "business_read_back": "Caller-defined; no fixed universal Stripe public value found"
+  },
+  "claims": [
+    {"id": "C1", "claim": "Stripe documents PaymentIntent status fields and lifecycle states.", "status": "confirmed", "confidence": "high", "sources": [{"url": "https://docs.stripe.com/api/payment_intents/object", "publisher": "Stripe", "published_or_updated": "accessed 2026-09-22", "tier": "primary", "support": "PaymentIntent object and status reference."}], "caveat": "Documentation does not prove a particular account or runtime state."},
+    {"id": "C2", "claim": "Stripe documents retrieve, update, and cancel operations with operation-specific constraints.", "status": "confirmed", "confidence": "high", "sources": [{"url": "https://docs.stripe.com/api/payment_intents/retrieve", "publisher": "Stripe", "published_or_updated": "accessed 2026-09-22", "tier": "primary", "support": "Retrieve PaymentIntent API reference."}, {"url": "https://docs.stripe.com/api/payment_intents/update", "publisher": "Stripe", "published_or_updated": "accessed 2026-09-22", "tier": "primary", "support": "Update PaymentIntent API reference."}, {"url": "https://docs.stripe.com/api/payment_intents/cancel", "publisher": "Stripe", "published_or_updated": "accessed 2026-09-22", "tier": "primary", "support": "Cancel PaymentIntent API reference."}], "caveat": "No live API call was made."},
+    {"id": "C3", "claim": "Stripe documents webhook acknowledgement, retries/resends, signatures, and lack of event ordering guarantee.", "status": "confirmed", "confidence": "high", "sources": [{"url": "https://docs.stripe.com/webhooks", "publisher": "Stripe", "published_or_updated": "accessed 2026-09-22", "tier": "primary", "support": "Webhook delivery, retry/resend, signature, and ordering documentation."}], "caveat": "Delivery documentation is not proof of business completion."},
+    {"id": "C4", "claim": "Stripe documents POST idempotency behavior and parameter consistency checks.", "status": "confirmed", "confidence": "high", "sources": [{"url": "https://docs.stripe.com/api/idempotent_requests", "publisher": "Stripe", "published_or_updated": "accessed 2026-09-22", "tier": "primary", "support": "Idempotent requests API documentation."}], "caveat": "Idempotency does not by itself prove external side effects."},
+    {"id": "C5", "claim": "The four-stage accepted/observed/settled/external_effect_committed model and separate delivery/read-back windows are engineering inferences, not Stripe-native guarantees.", "status": "inferred", "confidence": "high", "sources": [], "caveat": "Derived from documented boundaries."},
+    {"id": "C6", "claim": "A webhook 2xx, single retrieve, or single event is sufficient to prove business completion and external effect.", "status": "conflicting", "confidence": "high", "sources": [], "caveat": "Explicitly rejected by the report's evidence model."},
+    {"id": "C7", "claim": "A universal business read-back window, production behavior, exactly-once delivery, or no-duplicate-side-effect guarantee is established.", "status": "unverified", "confidence": "high", "sources": [], "caveat": "No live account/API context or universal Stripe SLA was established."}
+  ],
+  "coverage": {
+    "searched": ["Stripe PaymentIntent object/retrieve/update/cancel/lifecycle", "Stripe webhooks", "Stripe idempotent requests", "Stripe versioning", "Stripe error handling", "Stripe event types"],
+    "inaccessible": ["Stripe account/runtime/API", "credentials", "production state"],
+    "unresolved_conflicts": ["account-specific API/event versions", "business read-back convergence", "external effect completion"]
+  },
+  "non_claims": ["not production validated", "not exactly-once", "not no-duplicate-side-effects"],
+  "official_sources_count": 10,
+  "validation": {
+    "validator": "parent structural, manifest, and checksum validation",
+    "checksum_command": "(cd /tmp/A81254C8-RECONCILIATION-MANUAL-20260922-S9 && sha256sum -c SHA256SUMS)"
+  }
+}

@@ -1,0 +1,32 @@
+{
+  "schema_version": "evidence-first-research-1.0",
+  "question": "In a deterministic offline synthetic provenance model, how should freshness, repeated observations, event-order disorder, boundary timestamps, inaccessible or missing records, explicit conflicts, and observation-budget exhaustion map to RECOVERED, UNKNOWN, or REJECT without silent escalation?",
+  "scope": {
+    "unit": "C-line independent slice S13",
+    "directory": "/tmp/C-NEXTGEN-TRUST-CONTINUITY-20260922-S13/",
+    "timebox": "2026-09-22",
+    "network_access": false,
+    "external_sources": false,
+    "excluded_inputs": ["S1-S12", "other research artifacts", "shared/P0", "incident directories", "D10", "L12", "D14", "canonical", "staging", "140", "tri-line", "systemd"],
+    "synthetic_only": true,
+    "production_verified": false
+  },
+  "claims": [
+    {"id":"C-S13-01","claim":"Two independent accessible fresh observations agreeing on the same event version yield RECOVERED in this model.","status":"inferred","confidence":0.98,"sources":[],"caveat":"Pure model behavior; no external validation."},
+    {"id":"C-S13-02","claim":"A single observation or same-source repetition does not satisfy the independent corroboration rule and remains UNKNOWN.","status":"inferred","confidence":0.98,"sources":[],"caveat":"Independence is approximated by distinct synthetic source_id values."},
+    {"id":"C-S13-03","claim":"Freshness is inclusive at age 3600 seconds and stale at age 3601 seconds under the configured synthetic boundary.","status":"inferred","confidence":0.99,"sources":[],"caveat":"Boundary is a model parameter, not a deployed policy."},
+    {"id":"C-S13-04","claim":"Reversed input order is normalized by event_id and sequence grouping; it does not by itself change the result.","status":"inferred","confidence":0.95,"sources":[],"caveat":"The fixture model does not prove behavior of any external event system."},
+    {"id":"C-S13-05","claim":"Budget exhaustion prevents unexamined records from silently contributing evidence and yields UNKNOWN when examined evidence is insufficient.","status":"inferred","confidence":0.98,"sources":[],"caveat":"This is deterministic harness behavior only."},
+    {"id":"C-S13-06","claim":"REJECT is reserved for explicit fresh same-version contradictory terminal decisions from independent sources.","status":"inferred","confidence":0.99,"sources":[],"caveat":"A lone reject, stale reject, missing evidence, or inaccessible evidence does not establish contradiction."},
+    {"id":"C-S13-07","claim":"Missing or inaccessible evidence remains UNKNOWN rather than being promoted to RECOVERED or REJECT.","status":"inferred","confidence":0.99,"sources":[],"caveat":"Accessibility and absence are synthetic fields."},
+    {"id":"C-S13-08","claim":"This slice cannot establish real durability, remote state, exactly-once behavior, rollback behavior, or production readiness.","status":"inferred","confidence":1.0,"sources":[],"caveat":"No network, real service, SDK, credential, or production artifact was accessed."}
+  ],
+  "coverage": {
+    "fixtures": 16,
+    "dimensions": ["freshness", "repeated_observations", "event_order", "boundary_timestamps", "budget_exhaustion", "conflict", "missing", "inaccessible"],
+    "statuses": ["RECOVERED", "UNKNOWN", "REJECT"],
+    "all_claims_source_free_inferred": true
+  },
+  "synthetic_only": true,
+  "production_verified": false
+}

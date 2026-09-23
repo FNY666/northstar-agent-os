@@ -1,0 +1,739 @@
+{
+  "synthetic_only": true,
+  "production_verified": false,
+  "model": "S14-local-deterministic-v1",
+  "case_count": 16,
+  "all_pass": true,
+  "results": [
+    {
+      "case_id": "S14-01-clock-drift",
+      "synthetic_only": true,
+      "production_verified": false,
+      "state": "UNKNOWN",
+      "expected_state": "UNKNOWN",
+      "pass": true,
+      "input_sha256": "1e73486a8f96ea1ee8a131807e2b051c16e7d289ffa7e41fc1885aa2029e5568",
+      "provenance": {
+        "model": "S14-local-deterministic-v1",
+        "event_count_raw": 1,
+        "event_count_unique": 1,
+        "canonical_event_ids": [
+          "e-clock-1"
+        ],
+        "deduplicated": [],
+        "transitions": [
+          {
+            "from": "UNKNOWN",
+            "to": "UNKNOWN",
+            "reason": "initial_state_conservative",
+            "evidence": []
+          },
+          {
+            "from": "UNKNOWN",
+            "to": "UNKNOWN",
+            "reason": "recovery_not_authorized;_conservative_hold",
+            "evidence": [
+              "e-clock-1"
+            ],
+            "blockers": [
+              "clock_anomaly_not_normalized",
+              "fewer_than_two_verified_recovery_candidates",
+              "fewer_than_two_independent_source_ids"
+            ]
+          }
+        ],
+        "limitations": [
+          "no remote state",
+          "no durability",
+          "no exactly-once",
+          "no rollback",
+          "no production readiness"
+        ]
+      }
+    },
+    {
+      "case_id": "S14-02-same-event-different-seq",
+      "synthetic_only": true,
+      "production_verified": false,
+      "state": "UNKNOWN",
+      "expected_state": "UNKNOWN",
+      "pass": true,
+      "input_sha256": "4c308ace24eacaeec50af30efd8ae8e9bbeb4d7aae9a7c12fbd5a4e31d73d1d0",
+      "provenance": {
+        "model": "S14-local-deterministic-v1",
+        "event_count_raw": 2,
+        "event_count_unique": 1,
+        "canonical_event_ids": [
+          "e-seq-1"
+        ],
+        "deduplicated": [
+          {
+            "input_index": 1,
+            "event_id": "e-seq-1",
+            "reason": "duplicate_event_id_deduplicated",
+            "canonical_input_index": 0
+          }
+        ],
+        "transitions": [
+          {
+            "from": "UNKNOWN",
+            "to": "UNKNOWN",
+            "reason": "initial_state_conservative",
+            "evidence": []
+          },
+          {
+            "from": "UNKNOWN",
+            "to": "UNKNOWN",
+            "reason": "recovery_not_authorized;_conservative_hold",
+            "evidence": [
+              "e-seq-1"
+            ],
+            "blockers": [
+              "fewer_than_two_verified_recovery_candidates",
+              "fewer_than_two_independent_source_ids"
+            ]
+          }
+        ],
+        "limitations": [
+          "no remote state",
+          "no durability",
+          "no exactly-once",
+          "no rollback",
+          "no production readiness"
+        ]
+      }
+    },
+    {
+      "case_id": "S14-03-duplicate-event-id",
+      "synthetic_only": true,
+      "production_verified": false,
+      "state": "UNKNOWN",
+      "expected_state": "UNKNOWN",
+      "pass": true,
+      "input_sha256": "e9d173f6ec291a069b97aa5ff40399d7e0821d3cb6eca763c911484b905cb822",
+      "provenance": {
+        "model": "S14-local-deterministic-v1",
+        "event_count_raw": 2,
+        "event_count_unique": 1,
+        "canonical_event_ids": [
+          "e-dup-1"
+        ],
+        "deduplicated": [
+          {
+            "input_index": 1,
+            "event_id": "e-dup-1",
+            "reason": "duplicate_event_id_deduplicated",
+            "canonical_input_index": 0
+          }
+        ],
+        "transitions": [
+          {
+            "from": "UNKNOWN",
+            "to": "UNKNOWN",
+            "reason": "initial_state_conservative",
+            "evidence": []
+          },
+          {
+            "from": "UNKNOWN",
+            "to": "UNKNOWN",
+            "reason": "recovery_not_authorized;_conservative_hold",
+            "evidence": [
+              "e-dup-1"
+            ],
+            "blockers": [
+              "fewer_than_two_verified_recovery_candidates",
+              "fewer_than_two_independent_source_ids"
+            ]
+          }
+        ],
+        "limitations": [
+          "no remote state",
+          "no durability",
+          "no exactly-once",
+          "no rollback",
+          "no production readiness"
+        ]
+      }
+    },
+    {
+      "case_id": "S14-04-budget-cut-before-proof",
+      "synthetic_only": true,
+      "production_verified": false,
+      "state": "UNKNOWN",
+      "expected_state": "UNKNOWN",
+      "pass": true,
+      "input_sha256": "6c5c720b5f06c499da414ddec7f82553cc406317464199e6b60c7ea17d47510b",
+      "provenance": {
+        "model": "S14-local-deterministic-v1",
+        "event_count_raw": 1,
+        "event_count_unique": 1,
+        "canonical_event_ids": [
+          "e-budget-1"
+        ],
+        "deduplicated": [],
+        "transitions": [
+          {
+            "from": "UNKNOWN",
+            "to": "UNKNOWN",
+            "reason": "initial_state_conservative",
+            "evidence": []
+          },
+          {
+            "from": "UNKNOWN",
+            "to": "UNKNOWN",
+            "reason": "recovery_not_authorized;_conservative_hold",
+            "evidence": [
+              "e-budget-1"
+            ],
+            "blockers": [
+              "budget_truncated_without_explicit_completeness_proof",
+              "fewer_than_two_verified_recovery_candidates",
+              "fewer_than_two_independent_source_ids"
+            ]
+          }
+        ],
+        "limitations": [
+          "no remote state",
+          "no durability",
+          "no exactly-once",
+          "no rollback",
+          "no production readiness"
+        ]
+      }
+    },
+    {
+      "case_id": "S14-05-budget-cut-at-proof",
+      "synthetic_only": true,
+      "production_verified": false,
+      "state": "UNKNOWN",
+      "expected_state": "UNKNOWN",
+      "pass": true,
+      "input_sha256": "cbd27be56db922b9d1145c8d546852a0a8f39332dd6574d13694d64a53027ee5",
+      "provenance": {
+        "model": "S14-local-deterministic-v1",
+        "event_count_raw": 2,
+        "event_count_unique": 2,
+        "canonical_event_ids": [
+          "e-budget-2a",
+          "e-budget-2b"
+        ],
+        "deduplicated": [],
+        "transitions": [
+          {
+            "from": "UNKNOWN",
+            "to": "UNKNOWN",
+            "reason": "initial_state_conservative",
+            "evidence": []
+          },
+          {
+            "from": "UNKNOWN",
+            "to": "UNKNOWN",
+            "reason": "recovery_not_authorized;_conservative_hold",
+            "evidence": [
+              "e-budget-2a",
+              "e-budget-2b"
+            ],
+            "blockers": [
+              "budget_truncated_without_explicit_completeness_proof"
+            ]
+          }
+        ],
+        "limitations": [
+          "no remote state",
+          "no durability",
+          "no exactly-once",
+          "no rollback",
+          "no production readiness"
+        ]
+      }
+    },
+    {
+      "case_id": "S14-06-mislabelled-independence",
+      "synthetic_only": true,
+      "production_verified": false,
+      "state": "UNKNOWN",
+      "expected_state": "UNKNOWN",
+      "pass": true,
+      "input_sha256": "c65e99af612786005cd6fd1518277c63dba03b8d7bea3399d88b00348dadb9a8",
+      "provenance": {
+        "model": "S14-local-deterministic-v1",
+        "event_count_raw": 2,
+        "event_count_unique": 2,
+        "canonical_event_ids": [
+          "e-mis-1",
+          "e-mis-2"
+        ],
+        "deduplicated": [],
+        "transitions": [
+          {
+            "from": "UNKNOWN",
+            "to": "UNKNOWN",
+            "reason": "initial_state_conservative",
+            "evidence": []
+          },
+          {
+            "from": "UNKNOWN",
+            "to": "UNKNOWN",
+            "reason": "recovery_not_authorized;_conservative_hold",
+            "evidence": [],
+            "blockers": [
+              "fewer_than_two_verified_recovery_candidates",
+              "fewer_than_two_independent_source_ids"
+            ]
+          }
+        ],
+        "limitations": [
+          "no remote state",
+          "no durability",
+          "no exactly-once",
+          "no rollback",
+          "no production readiness"
+        ]
+      }
+    },
+    {
+      "case_id": "S14-07-single-source",
+      "synthetic_only": true,
+      "production_verified": false,
+      "state": "UNKNOWN",
+      "expected_state": "UNKNOWN",
+      "pass": true,
+      "input_sha256": "ec5e95b956b223ac73896e566c6645ab1185943080a825a1bbd351aeebbfd85a",
+      "provenance": {
+        "model": "S14-local-deterministic-v1",
+        "event_count_raw": 1,
+        "event_count_unique": 1,
+        "canonical_event_ids": [
+          "e-one-1"
+        ],
+        "deduplicated": [],
+        "transitions": [
+          {
+            "from": "UNKNOWN",
+            "to": "UNKNOWN",
+            "reason": "initial_state_conservative",
+            "evidence": []
+          },
+          {
+            "from": "UNKNOWN",
+            "to": "UNKNOWN",
+            "reason": "recovery_not_authorized;_conservative_hold",
+            "evidence": [
+              "e-one-1"
+            ],
+            "blockers": [
+              "fewer_than_two_verified_recovery_candidates",
+              "fewer_than_two_independent_source_ids"
+            ]
+          }
+        ],
+        "limitations": [
+          "no remote state",
+          "no durability",
+          "no exactly-once",
+          "no rollback",
+          "no production readiness"
+        ]
+      }
+    },
+    {
+      "case_id": "S14-08-valid-independent-recovery",
+      "synthetic_only": true,
+      "production_verified": false,
+      "state": "RECOVERED",
+      "expected_state": "RECOVERED",
+      "pass": true,
+      "input_sha256": "1c52fe15569579c7d671e7e2599199573bb157e59ce7a8dcfb8c1139a0401556",
+      "provenance": {
+        "model": "S14-local-deterministic-v1",
+        "event_count_raw": 2,
+        "event_count_unique": 2,
+        "canonical_event_ids": [
+          "e-good-1",
+          "e-good-2"
+        ],
+        "deduplicated": [],
+        "transitions": [
+          {
+            "from": "UNKNOWN",
+            "to": "UNKNOWN",
+            "reason": "initial_state_conservative",
+            "evidence": []
+          },
+          {
+            "from": "UNKNOWN",
+            "to": "RECOVERED",
+            "reason": "two_or_more_verified_candidates; distinct_sources; contiguous_seq; no_clock_anomaly; complete_stream",
+            "evidence": [
+              "e-good-1",
+              "e-good-2"
+            ]
+          }
+        ],
+        "limitations": [
+          "no remote state",
+          "no durability",
+          "no exactly-once",
+          "no rollback",
+          "no production readiness"
+        ]
+      }
+    },
+    {
+      "case_id": "S14-09-explicit-verifiable-contradiction",
+      "synthetic_only": true,
+      "production_verified": false,
+      "state": "REJECT",
+      "expected_state": "REJECT",
+      "pass": true,
+      "input_sha256": "6dbabc4a3fc2d5e8219e4c3cf7a5727494d763bbfac54ea39dcc0b161c3b15bf",
+      "provenance": {
+        "model": "S14-local-deterministic-v1",
+        "event_count_raw": 1,
+        "event_count_unique": 1,
+        "canonical_event_ids": [
+          "e-contra-1"
+        ],
+        "deduplicated": [],
+        "transitions": [
+          {
+            "from": "UNKNOWN",
+            "to": "UNKNOWN",
+            "reason": "initial_state_conservative",
+            "evidence": []
+          },
+          {
+            "from": "UNKNOWN",
+            "to": "REJECT",
+            "reason": "explicit_verifiable_contradiction",
+            "evidence": [
+              "e-contra-1"
+            ]
+          }
+        ],
+        "limitations": [
+          "no remote state",
+          "no durability",
+          "no exactly-once",
+          "no rollback",
+          "no production readiness"
+        ]
+      }
+    },
+    {
+      "case_id": "S14-10-unverifiable-conflict",
+      "synthetic_only": true,
+      "production_verified": false,
+      "state": "UNKNOWN",
+      "expected_state": "UNKNOWN",
+      "pass": true,
+      "input_sha256": "4bdef1f891802a306e7587bd823badb869a7bdd81924f467f09a91fe504fe1ed",
+      "provenance": {
+        "model": "S14-local-deterministic-v1",
+        "event_count_raw": 1,
+        "event_count_unique": 1,
+        "canonical_event_ids": [
+          "e-unver-1"
+        ],
+        "deduplicated": [],
+        "transitions": [
+          {
+            "from": "UNKNOWN",
+            "to": "UNKNOWN",
+            "reason": "initial_state_conservative",
+            "evidence": []
+          },
+          {
+            "from": "UNKNOWN",
+            "to": "UNKNOWN",
+            "reason": "recovery_not_authorized;_conservative_hold",
+            "evidence": [],
+            "blockers": [
+              "fewer_than_two_verified_recovery_candidates",
+              "fewer_than_two_independent_source_ids"
+            ]
+          }
+        ],
+        "limitations": [
+          "no remote state",
+          "no durability",
+          "no exactly-once",
+          "no rollback",
+          "no production readiness"
+        ]
+      }
+    },
+    {
+      "case_id": "S14-11-clock-drift-with-two-sources",
+      "synthetic_only": true,
+      "production_verified": false,
+      "state": "UNKNOWN",
+      "expected_state": "UNKNOWN",
+      "pass": true,
+      "input_sha256": "dd3869d580cf7270a68dca370a7c968590bfb23f6b7ec8e1fe6ad93c9aadb286",
+      "provenance": {
+        "model": "S14-local-deterministic-v1",
+        "event_count_raw": 2,
+        "event_count_unique": 2,
+        "canonical_event_ids": [
+          "e-clock-2a",
+          "e-clock-2b"
+        ],
+        "deduplicated": [],
+        "transitions": [
+          {
+            "from": "UNKNOWN",
+            "to": "UNKNOWN",
+            "reason": "initial_state_conservative",
+            "evidence": []
+          },
+          {
+            "from": "UNKNOWN",
+            "to": "UNKNOWN",
+            "reason": "recovery_not_authorized;_conservative_hold",
+            "evidence": [
+              "e-clock-2a",
+              "e-clock-2b"
+            ],
+            "blockers": [
+              "clock_anomaly_not_normalized"
+            ]
+          }
+        ],
+        "limitations": [
+          "no remote state",
+          "no durability",
+          "no exactly-once",
+          "no rollback",
+          "no production readiness"
+        ]
+      }
+    },
+    {
+      "case_id": "S14-12-duplicate-around-valid-proof",
+      "synthetic_only": true,
+      "production_verified": false,
+      "state": "RECOVERED",
+      "expected_state": "RECOVERED",
+      "pass": true,
+      "input_sha256": "3fe7ecfdc37bf7af67a9253bb2638e35114d6985eda00c40b80b41340ea2f19c",
+      "provenance": {
+        "model": "S14-local-deterministic-v1",
+        "event_count_raw": 3,
+        "event_count_unique": 2,
+        "canonical_event_ids": [
+          "e-good-3",
+          "e-good-4"
+        ],
+        "deduplicated": [
+          {
+            "input_index": 1,
+            "event_id": "e-good-3",
+            "reason": "duplicate_event_id_deduplicated",
+            "canonical_input_index": 0
+          }
+        ],
+        "transitions": [
+          {
+            "from": "UNKNOWN",
+            "to": "UNKNOWN",
+            "reason": "initial_state_conservative",
+            "evidence": []
+          },
+          {
+            "from": "UNKNOWN",
+            "to": "RECOVERED",
+            "reason": "two_or_more_verified_candidates; distinct_sources; contiguous_seq; no_clock_anomaly; complete_stream",
+            "evidence": [
+              "e-good-3",
+              "e-good-4"
+            ]
+          }
+        ],
+        "limitations": [
+          "no remote state",
+          "no durability",
+          "no exactly-once",
+          "no rollback",
+          "no production readiness"
+        ]
+      }
+    },
+    {
+      "case_id": "S14-13-contradiction-with-recovery",
+      "synthetic_only": true,
+      "production_verified": false,
+      "state": "REJECT",
+      "expected_state": "REJECT",
+      "pass": true,
+      "input_sha256": "a4b0016b3e604875b237ce113b387b95cf872e1a14027f8e5e4737b2744b49f8",
+      "provenance": {
+        "model": "S14-local-deterministic-v1",
+        "event_count_raw": 3,
+        "event_count_unique": 3,
+        "canonical_event_ids": [
+          "e-mix-1",
+          "e-mix-2",
+          "e-mix-3"
+        ],
+        "deduplicated": [],
+        "transitions": [
+          {
+            "from": "UNKNOWN",
+            "to": "UNKNOWN",
+            "reason": "initial_state_conservative",
+            "evidence": []
+          },
+          {
+            "from": "UNKNOWN",
+            "to": "REJECT",
+            "reason": "explicit_verifiable_contradiction",
+            "evidence": [
+              "e-mix-3"
+            ]
+          }
+        ],
+        "limitations": [
+          "no remote state",
+          "no durability",
+          "no exactly-once",
+          "no rollback",
+          "no production readiness"
+        ]
+      }
+    },
+    {
+      "case_id": "S14-14-seq-gap-only",
+      "synthetic_only": true,
+      "production_verified": false,
+      "state": "UNKNOWN",
+      "expected_state": "UNKNOWN",
+      "pass": true,
+      "input_sha256": "ba243aedbbcd33dfea5685d9f297db561d94284e28777b62cbbbda8e00513740",
+      "provenance": {
+        "model": "S14-local-deterministic-v1",
+        "event_count_raw": 2,
+        "event_count_unique": 2,
+        "canonical_event_ids": [
+          "e-gap-1",
+          "e-gap-2"
+        ],
+        "deduplicated": [],
+        "transitions": [
+          {
+            "from": "UNKNOWN",
+            "to": "UNKNOWN",
+            "reason": "initial_state_conservative",
+            "evidence": []
+          },
+          {
+            "from": "UNKNOWN",
+            "to": "UNKNOWN",
+            "reason": "recovery_not_authorized;_conservative_hold",
+            "evidence": [
+              "e-gap-1",
+              "e-gap-2"
+            ],
+            "blockers": [
+              "sequence_gap_or_noncontiguous_order"
+            ]
+          }
+        ],
+        "limitations": [
+          "no remote state",
+          "no durability",
+          "no exactly-once",
+          "no rollback",
+          "no production readiness"
+        ]
+      }
+    },
+    {
+      "case_id": "S14-15-budget-with-explicit-completeness",
+      "synthetic_only": true,
+      "production_verified": false,
+      "state": "UNKNOWN",
+      "expected_state": "UNKNOWN",
+      "pass": true,
+      "input_sha256": "d6320105e9b52b9e586fbe9e405096c37419713b0a7618f7a0eec3040440de04",
+      "provenance": {
+        "model": "S14-local-deterministic-v1",
+        "event_count_raw": 2,
+        "event_count_unique": 2,
+        "canonical_event_ids": [
+          "e-budget-3a",
+          "e-budget-3b"
+        ],
+        "deduplicated": [],
+        "transitions": [
+          {
+            "from": "UNKNOWN",
+            "to": "UNKNOWN",
+            "reason": "initial_state_conservative",
+            "evidence": []
+          },
+          {
+            "from": "UNKNOWN",
+            "to": "UNKNOWN",
+            "reason": "recovery_not_authorized;_conservative_hold",
+            "evidence": [
+              "e-budget-3a",
+              "e-budget-3b"
+            ],
+            "blockers": [
+              "budget_truncated_without_explicit_completeness_proof"
+            ]
+          }
+        ],
+        "limitations": [
+          "no remote state",
+          "no durability",
+          "no exactly-once",
+          "no rollback",
+          "no production readiness"
+        ]
+      }
+    },
+    {
+      "case_id": "S14-16-noncontradictory-missing",
+      "synthetic_only": true,
+      "production_verified": false,
+      "state": "UNKNOWN",
+      "expected_state": "UNKNOWN",
+      "pass": true,
+      "input_sha256": "ef66340682a690e70979ea1e0ff3eb3768547f4fde9fb46dca32d7cb4fe52668",
+      "provenance": {
+        "model": "S14-local-deterministic-v1",
+        "event_count_raw": 0,
+        "event_count_unique": 0,
+        "canonical_event_ids": [],
+        "deduplicated": [],
+        "transitions": [
+          {
+            "from": "UNKNOWN",
+            "to": "UNKNOWN",
+            "reason": "initial_state_conservative",
+            "evidence": []
+          },
+          {
+            "from": "UNKNOWN",
+            "to": "UNKNOWN",
+            "reason": "recovery_not_authorized;_conservative_hold",
+            "evidence": [],
+            "blockers": [
+              "fewer_than_two_verified_recovery_candidates",
+              "fewer_than_two_independent_source_ids"
+            ]
+          }
+        ],
+        "limitations": [
+          "no remote state",
+          "no durability",
+          "no exactly-once",
+          "no rollback",
+          "no production readiness"
+        ]
+      }
+    }
+  ]
+}

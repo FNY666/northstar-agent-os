@@ -1,0 +1,24 @@
+{
+  "schema_version": "1.0",
+  "question": "在离线合成证据中，何时人工决策的 decision/reviewer/role、职责分离、approval/override、dissent/appeal/reopen、版本/有效期、audit/notification/ack 与最终read-back能够闭合连续性，何时必须保持 UNKNOWN 或 REJECT？",
+  "scope": {
+    "project": "C-line S61",
+    "mode": "offline synthetic fixtures",
+    "date": "2026-09-23",
+    "excluded": ["S1-S60", "production", "network", "real services", "credentials"],
+    "identity_domain": ["project", "decision_id", "reviewer", "approver", "role", "appeal_id", "version"],
+    "review_domain": ["decision", "scope", "approval", "override", "dissent", "appeal", "reopen", "effective_time", "expiry", "audit", "notification", "ack", "readback"]
+  },
+  "claims_status": "inferred",
+  "synthetic_only": true,
+  "production_verified": false,
+  "sources": [],
+  "claims": [
+    {"id":"human-decision-closure","claim":"只有 decision/reviewer/role/职责分离、approval/override、dissent/appeal/reopen、version/digest/time/expiry、audit/notification/ack 与final read-back全部闭合时才可 RECOVERED。","status":"inferred","confidence":"bounded","sources":[],"caveat":"仅由本地合成夹具和规则推导，不代表生产系统。"},
+    {"id":"approval-not-effect-proof","claim":"人工结论、批准按钮、override消息或通知发送不能证明范围合法、职责分离、申诉可用或目标状态已生效；必须保留前决策关联并独立读回。","status":"inferred","confidence":"bounded","sources":[],"caveat":"未验证任何真实人工决策系统。"},
+    {"id":"review-unknown","claim":"审核者/批准scope、异议申诉、版本/有效期、审计/通知/ack 或最终状态未知时必须 UNKNOWN。","status":"inferred","confidence":"bounded","sources":[],"caveat":"布尔门不量化真实人工流程风险。"},
+    {"id":"review-conflict-reject","claim":"身份冲突和同一decision不可调和的人工终态冲突必须 REJECT。","status":"inferred","confidence":"bounded","sources":[],"caveat":"只验证合成判定逻辑，不证明目标系统执行拒绝。"}
+  ],
+  "coverage": {"cases": 29, "property_sweep": 16777216, "dimensions": 24, "statuses": ["RECOVERED", "UNKNOWN", "REJECT"], "events": ["DECISION", "REVIEWER", "ROLE", "SEPARATION_OF_DUTIES", "APPROVAL", "OVERRIDE", "DISSENT", "APPEAL", "REOPEN", "VERSION", "EFFECTIVE_TIME", "EXPIRY", "AUDIT", "NOTIFICATION", "ACK", "READBACK", "NO_EVENT", "UNKNOWN"]},
+  "notes": "三态互斥并 fail-closed；RECOVERED 仅代表本片离线夹具中的 human-decision evidence gate 闭合，不代表 production continuity、external effect 或 exactly-once。"
+}

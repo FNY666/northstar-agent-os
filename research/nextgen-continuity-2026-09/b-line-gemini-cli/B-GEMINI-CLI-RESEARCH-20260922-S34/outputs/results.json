@@ -1,0 +1,1131 @@
+{
+  "synthetic_only": true,
+  "production_verified": false,
+  "fixture_count": 24,
+  "results": [
+    {
+      "fixture_id": "S34-01",
+      "arrival_order": [
+        "B1"
+      ],
+      "epoch_sequence": [
+        1
+      ],
+      "batch_id": "B1",
+      "batch_ids": [
+        "B1"
+      ],
+      "batch_event_verdicts": [
+        {
+          "batch_id": "B1",
+          "epoch": 1,
+          "op": "P",
+          "verdict": "accepted",
+          "reason": "ack status is locally verifiable"
+        },
+        {
+          "batch_id": "B1",
+          "epoch": 1,
+          "op": "P",
+          "verdict": "accepted",
+          "reason": "ack status is locally verifiable"
+        }
+      ],
+      "target_op": "P",
+      "op_verdict": "accepted",
+      "op_verdicts": {
+        "P": "accepted",
+        "Q": "UNKNOWN",
+        "R": "UNKNOWN",
+        "X": "UNKNOWN"
+      },
+      "reason": "all op-local acks agree",
+      "blocking_conditions": [],
+      "duplicate_batches_ignored": 0,
+      "canonical_input_sha256": "e517dc994788bcc335143fdf34142cac1170d15322b6e3cbea82f221f21f34d5"
+    },
+    {
+      "fixture_id": "S34-02",
+      "arrival_order": [
+        "B1"
+      ],
+      "epoch_sequence": [
+        1
+      ],
+      "batch_id": "B1",
+      "batch_ids": [
+        "B1"
+      ],
+      "batch_event_verdicts": [
+        {
+          "batch_id": "B1",
+          "epoch": 1,
+          "op": "P",
+          "verdict": "rejected",
+          "reason": "ack status is locally verifiable"
+        },
+        {
+          "batch_id": "B1",
+          "epoch": 1,
+          "op": "P",
+          "verdict": "rejected",
+          "reason": "ack status is locally verifiable"
+        },
+        {
+          "batch_id": "B1",
+          "epoch": 1,
+          "op": "R",
+          "verdict": "accepted",
+          "reason": "ack status is locally verifiable"
+        }
+      ],
+      "target_op": "P",
+      "op_verdict": "rejected",
+      "op_verdicts": {
+        "P": "rejected",
+        "Q": "UNKNOWN",
+        "R": "accepted",
+        "X": "UNKNOWN"
+      },
+      "reason": "all op-local acks agree on rejected",
+      "blocking_conditions": [],
+      "duplicate_batches_ignored": 0,
+      "canonical_input_sha256": "5ab8594d4eae2f5c19648f8f6abef8a192275d0fef51a8b003cb2354ae0e9357"
+    },
+    {
+      "fixture_id": "S34-03",
+      "arrival_order": [
+        "B1"
+      ],
+      "epoch_sequence": [
+        1
+      ],
+      "batch_id": "B1",
+      "batch_ids": [
+        "B1"
+      ],
+      "batch_event_verdicts": [
+        {
+          "batch_id": "B1",
+          "epoch": 1,
+          "op": "P",
+          "verdict": "accepted",
+          "reason": "ack status is locally verifiable"
+        },
+        {
+          "batch_id": "B1",
+          "epoch": 1,
+          "op": "P",
+          "verdict": "rejected",
+          "reason": "ack status is locally verifiable"
+        },
+        {
+          "batch_id": "B1",
+          "epoch": 1,
+          "op": "P",
+          "verdict": "UNKNOWN",
+          "reason": "event is missing or unverifiable"
+        }
+      ],
+      "target_op": "P",
+      "op_verdict": "UNKNOWN",
+      "op_verdicts": {
+        "P": "UNKNOWN",
+        "Q": "UNKNOWN",
+        "R": "UNKNOWN",
+        "X": "UNKNOWN"
+      },
+      "reason": "epoch 1 ack is accepted; epoch 1 ack is rejected; ack status cannot be verified by the rule",
+      "blocking_conditions": [
+        "unverifiable_ack"
+      ],
+      "duplicate_batches_ignored": 0,
+      "canonical_input_sha256": "f9dc42df1e2e4b533af23ab7e8a1fd8fc7ce69dbf2fe7ea5a9eb1b584aa19576"
+    },
+    {
+      "fixture_id": "S34-04",
+      "arrival_order": [
+        "B1"
+      ],
+      "epoch_sequence": [
+        1
+      ],
+      "batch_id": "B1",
+      "batch_ids": [
+        "B1"
+      ],
+      "batch_event_verdicts": [
+        {
+          "batch_id": "B1",
+          "epoch": 1,
+          "op": "P",
+          "verdict": "accepted",
+          "reason": "ack status is locally verifiable"
+        },
+        {
+          "batch_id": "B1",
+          "epoch": 1,
+          "op": "Q",
+          "verdict": "UNKNOWN",
+          "reason": "event is missing or unverifiable"
+        }
+      ],
+      "target_op": "P",
+      "op_verdict": "accepted",
+      "op_verdicts": {
+        "P": "accepted",
+        "Q": "UNKNOWN",
+        "R": "UNKNOWN",
+        "X": "UNKNOWN"
+      },
+      "reason": "all op-local acks agree",
+      "blocking_conditions": [],
+      "duplicate_batches_ignored": 0,
+      "canonical_input_sha256": "025b0a1d84da0bc869885a8c496de0fffef3aa26f8f03a272a4ba622e4523dec"
+    },
+    {
+      "fixture_id": "S34-05",
+      "arrival_order": [
+        "B1"
+      ],
+      "epoch_sequence": [
+        1
+      ],
+      "batch_id": "B1",
+      "batch_ids": [
+        "B1"
+      ],
+      "batch_event_verdicts": [
+        {
+          "batch_id": "B1",
+          "epoch": 1,
+          "op": "Q",
+          "verdict": "accepted",
+          "reason": "ack status is locally verifiable"
+        }
+      ],
+      "target_op": "Q",
+      "op_verdict": "accepted",
+      "op_verdicts": {
+        "P": "UNKNOWN",
+        "Q": "accepted",
+        "R": "UNKNOWN",
+        "X": "UNKNOWN"
+      },
+      "reason": "all op-local acks agree",
+      "blocking_conditions": [],
+      "duplicate_batches_ignored": 0,
+      "canonical_input_sha256": "9f02f8a6c036224e89b1ef9dbcc1bac4b75b9b0526469b1c57b07c6617743e4e"
+    },
+    {
+      "fixture_id": "S34-06",
+      "arrival_order": [
+        "B1"
+      ],
+      "epoch_sequence": [
+        1
+      ],
+      "batch_id": "B1",
+      "batch_ids": [
+        "B1"
+      ],
+      "batch_event_verdicts": [
+        {
+          "batch_id": "B1",
+          "epoch": 1,
+          "op": "Q",
+          "verdict": "accepted",
+          "reason": "ack status is locally verifiable"
+        }
+      ],
+      "target_op": "P",
+      "op_verdict": "UNKNOWN",
+      "op_verdicts": {
+        "P": "UNKNOWN",
+        "Q": "accepted",
+        "R": "UNKNOWN",
+        "X": "UNKNOWN"
+      },
+      "reason": "no op-local accessible evidence",
+      "blocking_conditions": [
+        "no_local_evidence"
+      ],
+      "duplicate_batches_ignored": 0,
+      "canonical_input_sha256": "6ff8c1cf8945c8ce005de2b0dea7bfacb041c81cafdc0b48aa0c9ce541c74a48"
+    },
+    {
+      "fixture_id": "S34-07",
+      "arrival_order": [
+        "B2",
+        "B1"
+      ],
+      "epoch_sequence": [
+        2,
+        1
+      ],
+      "batch_id": "B2",
+      "batch_ids": [
+        "B2",
+        "B1"
+      ],
+      "batch_event_verdicts": [
+        {
+          "batch_id": "B2",
+          "epoch": 2,
+          "op": "P",
+          "verdict": "accepted",
+          "reason": "ack status is locally verifiable"
+        },
+        {
+          "batch_id": "B1",
+          "epoch": 1,
+          "op": "P",
+          "verdict": "rejected",
+          "reason": "ack status is locally verifiable"
+        }
+      ],
+      "target_op": "P",
+      "op_verdict": "rejected",
+      "op_verdicts": {
+        "P": "rejected",
+        "Q": "UNKNOWN",
+        "R": "UNKNOWN",
+        "X": "UNKNOWN"
+      },
+      "reason": "conflicting accepted/rejected acks; conflict rule rejects only this op",
+      "blocking_conditions": [
+        "op_local_ack_conflict"
+      ],
+      "duplicate_batches_ignored": 0,
+      "canonical_input_sha256": "b08e0219afccea60a1370b828954f69736f7a5e16d5fdcc8d3a398609b1cbe91"
+    },
+    {
+      "fixture_id": "S34-08",
+      "arrival_order": [
+        "B2",
+        "B1"
+      ],
+      "epoch_sequence": [
+        2,
+        1
+      ],
+      "batch_id": "B2",
+      "batch_ids": [
+        "B2",
+        "B1"
+      ],
+      "batch_event_verdicts": [
+        {
+          "batch_id": "B2",
+          "epoch": 2,
+          "op": "Q",
+          "verdict": "accepted",
+          "reason": "ack status is locally verifiable"
+        },
+        {
+          "batch_id": "B1",
+          "epoch": 1,
+          "op": "Q",
+          "verdict": "accepted",
+          "reason": "ack status is locally verifiable"
+        }
+      ],
+      "target_op": "Q",
+      "op_verdict": "accepted",
+      "op_verdicts": {
+        "P": "UNKNOWN",
+        "Q": "accepted",
+        "R": "UNKNOWN",
+        "X": "UNKNOWN"
+      },
+      "reason": "all op-local acks agree",
+      "blocking_conditions": [],
+      "duplicate_batches_ignored": 0,
+      "canonical_input_sha256": "b309bb2dc230f5ec862fa74bb087ffbea39bf0f78b31ee89be89bddbbddf5cda"
+    },
+    {
+      "fixture_id": "S34-09",
+      "arrival_order": [
+        "B2",
+        "B9"
+      ],
+      "epoch_sequence": [
+        2,
+        99
+      ],
+      "batch_id": "B2",
+      "batch_ids": [
+        "B2",
+        "B9"
+      ],
+      "batch_event_verdicts": [
+        {
+          "batch_id": "B2",
+          "epoch": 2,
+          "op": "P",
+          "verdict": "accepted",
+          "reason": "ack status is locally verifiable"
+        },
+        {
+          "batch_id": "B9",
+          "epoch": 99,
+          "op": "P",
+          "verdict": "UNKNOWN",
+          "reason": "epoch cannot be assigned"
+        }
+      ],
+      "target_op": "P",
+      "op_verdict": "UNKNOWN",
+      "op_verdicts": {
+        "P": "UNKNOWN",
+        "Q": "UNKNOWN",
+        "R": "UNKNOWN",
+        "X": "UNKNOWN"
+      },
+      "reason": "epoch 2 ack is accepted; epoch 99 cannot be assigned",
+      "blocking_conditions": [
+        "epoch_unassignable"
+      ],
+      "duplicate_batches_ignored": 0,
+      "canonical_input_sha256": "aaa2ca3bf78d04c113c3e0baf2dc446878d56f7bd19114fe6a47e67687530c53"
+    },
+    {
+      "fixture_id": "S34-10",
+      "arrival_order": [
+        "B1",
+        "B2"
+      ],
+      "epoch_sequence": [
+        1,
+        null
+      ],
+      "batch_id": "B1",
+      "batch_ids": [
+        "B1",
+        "B2"
+      ],
+      "batch_event_verdicts": [
+        {
+          "batch_id": "B1",
+          "epoch": 1,
+          "op": "P",
+          "verdict": "accepted",
+          "reason": "ack status is locally verifiable"
+        },
+        {
+          "batch_id": "B2",
+          "epoch": null,
+          "op": "P",
+          "verdict": "UNKNOWN",
+          "reason": "epoch cannot be assigned"
+        }
+      ],
+      "target_op": "P",
+      "op_verdict": "UNKNOWN",
+      "op_verdicts": {
+        "P": "UNKNOWN",
+        "Q": "UNKNOWN",
+        "R": "UNKNOWN",
+        "X": "UNKNOWN"
+      },
+      "reason": "epoch 1 ack is accepted; epoch None cannot be assigned",
+      "blocking_conditions": [
+        "epoch_unassignable"
+      ],
+      "duplicate_batches_ignored": 0,
+      "canonical_input_sha256": "c3d9b465115ccf3efce7c3a9087a43ba5d2f5d2279995e40afb15b4685e909f9"
+    },
+    {
+      "fixture_id": "S34-11",
+      "arrival_order": [
+        "B1",
+        "B2"
+      ],
+      "epoch_sequence": [
+        1,
+        2
+      ],
+      "batch_id": "B1",
+      "batch_ids": [
+        "B1",
+        "B2"
+      ],
+      "batch_event_verdicts": [
+        {
+          "batch_id": "B1",
+          "epoch": 1,
+          "op": "P",
+          "verdict": "UNKNOWN",
+          "reason": "batch explicitly revoked"
+        },
+        {
+          "batch_id": "B2",
+          "epoch": 2,
+          "op": "P",
+          "verdict": "accepted",
+          "reason": "ack status is locally verifiable"
+        }
+      ],
+      "target_op": "P",
+      "op_verdict": "accepted",
+      "op_verdicts": {
+        "P": "accepted",
+        "Q": "UNKNOWN",
+        "R": "UNKNOWN",
+        "X": "UNKNOWN"
+      },
+      "reason": "all op-local acks agree",
+      "blocking_conditions": [],
+      "duplicate_batches_ignored": 0,
+      "canonical_input_sha256": "7794634d2635eccf721a6df30c9c4878e9c067d76a7e5a106ad9b937aa9eb843"
+    },
+    {
+      "fixture_id": "S34-12",
+      "arrival_order": [
+        "B1"
+      ],
+      "epoch_sequence": [
+        1
+      ],
+      "batch_id": "B1",
+      "batch_ids": [
+        "B1"
+      ],
+      "batch_event_verdicts": [
+        {
+          "batch_id": "B1",
+          "epoch": 1,
+          "op": "P",
+          "verdict": "UNKNOWN",
+          "reason": "batch explicitly revoked"
+        }
+      ],
+      "target_op": "P",
+      "op_verdict": "UNKNOWN",
+      "op_verdicts": {
+        "P": "UNKNOWN",
+        "Q": "UNKNOWN",
+        "R": "UNKNOWN",
+        "X": "UNKNOWN"
+      },
+      "reason": "no op-local accessible evidence",
+      "blocking_conditions": [
+        "no_local_evidence"
+      ],
+      "duplicate_batches_ignored": 0,
+      "canonical_input_sha256": "7448001b05b7bc58fa923eaaa3fbc0d7171c0560c3f72c69361cf75c02c29aba"
+    },
+    {
+      "fixture_id": "S34-13",
+      "arrival_order": [
+        "B1"
+      ],
+      "epoch_sequence": [
+        1
+      ],
+      "batch_id": "B1",
+      "batch_ids": [
+        "B1"
+      ],
+      "batch_event_verdicts": [
+        {
+          "batch_id": "B1",
+          "epoch": 1,
+          "op": "X",
+          "verdict": "accepted",
+          "reason": "ack status is locally verifiable"
+        }
+      ],
+      "target_op": "X",
+      "op_verdict": "UNKNOWN",
+      "op_verdicts": {
+        "P": "UNKNOWN",
+        "Q": "UNKNOWN",
+        "R": "UNKNOWN",
+        "X": "UNKNOWN"
+      },
+      "reason": "undeclared operation X",
+      "blocking_conditions": [
+        "operation_not_declared"
+      ],
+      "duplicate_batches_ignored": 0,
+      "canonical_input_sha256": "311ef22f1e44b3370bcf8c63660bbeceb6a2697e6cef52e6d14d2fac44d4de2b"
+    },
+    {
+      "fixture_id": "S34-14",
+      "arrival_order": [
+        "B1",
+        "B2"
+      ],
+      "epoch_sequence": [
+        1,
+        2
+      ],
+      "batch_id": "B1",
+      "batch_ids": [
+        "B1",
+        "B2"
+      ],
+      "batch_event_verdicts": [
+        {
+          "batch_id": "B1",
+          "epoch": 1,
+          "op": "R",
+          "verdict": "accepted",
+          "reason": "ack status is locally verifiable"
+        },
+        {
+          "batch_id": "B1",
+          "epoch": 1,
+          "op": "R",
+          "verdict": "accepted",
+          "reason": "ack status is locally verifiable"
+        },
+        {
+          "batch_id": "B2",
+          "epoch": 2,
+          "op": "P",
+          "verdict": "accepted",
+          "reason": "ack status is locally verifiable"
+        }
+      ],
+      "target_op": "R",
+      "op_verdict": "accepted",
+      "op_verdicts": {
+        "P": "accepted",
+        "Q": "UNKNOWN",
+        "R": "accepted",
+        "X": "UNKNOWN"
+      },
+      "reason": "all op-local acks agree",
+      "blocking_conditions": [],
+      "duplicate_batches_ignored": 0,
+      "canonical_input_sha256": "35a3a99004fdd1a52f76927b0d62ac15ee65bb4f1eb3906a5c40a96702c241da"
+    },
+    {
+      "fixture_id": "S34-15",
+      "arrival_order": [
+        "B1",
+        "B1"
+      ],
+      "epoch_sequence": [
+        1,
+        1
+      ],
+      "batch_id": "B1",
+      "batch_ids": [
+        "B1",
+        "B1"
+      ],
+      "batch_event_verdicts": [
+        {
+          "batch_id": "B1",
+          "epoch": 1,
+          "op": "P",
+          "verdict": "accepted",
+          "reason": "ack status is locally verifiable"
+        },
+        {
+          "batch_id": "B1",
+          "epoch": 1,
+          "op": "P",
+          "verdict": "accepted",
+          "reason": "ack status is locally verifiable"
+        }
+      ],
+      "target_op": "P",
+      "op_verdict": "accepted",
+      "op_verdicts": {
+        "P": "accepted",
+        "Q": "UNKNOWN",
+        "R": "UNKNOWN",
+        "X": "UNKNOWN"
+      },
+      "reason": "all op-local acks agree",
+      "blocking_conditions": [],
+      "duplicate_batches_ignored": 1,
+      "canonical_input_sha256": "0d1c2093d8303ccdf6b09064df280859a8f9d01438eac4250d2ac8128d005b09"
+    },
+    {
+      "fixture_id": "S34-16",
+      "arrival_order": [
+        "B2",
+        "B1"
+      ],
+      "epoch_sequence": [
+        2,
+        1
+      ],
+      "batch_id": "B2",
+      "batch_ids": [
+        "B2",
+        "B1"
+      ],
+      "batch_event_verdicts": [
+        {
+          "batch_id": "B2",
+          "epoch": 2,
+          "op": "Q",
+          "verdict": "rejected",
+          "reason": "ack status is locally verifiable"
+        },
+        {
+          "batch_id": "B1",
+          "epoch": 1,
+          "op": "Q",
+          "verdict": "accepted",
+          "reason": "ack status is locally verifiable"
+        }
+      ],
+      "target_op": "Q",
+      "op_verdict": "rejected",
+      "op_verdicts": {
+        "P": "UNKNOWN",
+        "Q": "rejected",
+        "R": "UNKNOWN",
+        "X": "UNKNOWN"
+      },
+      "reason": "conflicting accepted/rejected acks; conflict rule rejects only this op",
+      "blocking_conditions": [
+        "op_local_ack_conflict"
+      ],
+      "duplicate_batches_ignored": 0,
+      "canonical_input_sha256": "ab58e1fc712188b7442cf5c1c4edc480ddda2e16fbba61e4c01249d7fd22bbeb"
+    },
+    {
+      "fixture_id": "S34-17",
+      "arrival_order": [
+        "B1"
+      ],
+      "epoch_sequence": [
+        1
+      ],
+      "batch_id": "B1",
+      "batch_ids": [
+        "B1"
+      ],
+      "batch_event_verdicts": [
+        {
+          "batch_id": "B1",
+          "epoch": 1,
+          "op": "P",
+          "verdict": "accepted",
+          "reason": "ack status is locally verifiable"
+        },
+        {
+          "batch_id": "B1",
+          "epoch": 1,
+          "op": "Q",
+          "verdict": "UNKNOWN",
+          "reason": "event is missing or unverifiable"
+        },
+        {
+          "batch_id": "B1",
+          "epoch": 1,
+          "op": "R",
+          "verdict": "rejected",
+          "reason": "ack status is locally verifiable"
+        }
+      ],
+      "target_op": "P",
+      "op_verdict": "accepted",
+      "op_verdicts": {
+        "P": "accepted",
+        "Q": "UNKNOWN",
+        "R": "rejected",
+        "X": "UNKNOWN"
+      },
+      "reason": "all op-local acks agree",
+      "blocking_conditions": [],
+      "duplicate_batches_ignored": 0,
+      "canonical_input_sha256": "094bbeb36fa8343cd78a0ff3db42f109d4d06dd7b6ba21b34f18b0c098025d79"
+    },
+    {
+      "fixture_id": "S34-18",
+      "arrival_order": [
+        "B1"
+      ],
+      "epoch_sequence": [
+        1
+      ],
+      "batch_id": "B1",
+      "batch_ids": [
+        "B1"
+      ],
+      "batch_event_verdicts": [
+        {
+          "batch_id": "B1",
+          "epoch": 1,
+          "op": "Q",
+          "verdict": "UNKNOWN",
+          "reason": "event is missing or unverifiable"
+        },
+        {
+          "batch_id": "B1",
+          "epoch": 1,
+          "op": "P",
+          "verdict": "accepted",
+          "reason": "ack status is locally verifiable"
+        }
+      ],
+      "target_op": "Q",
+      "op_verdict": "UNKNOWN",
+      "op_verdicts": {
+        "P": "accepted",
+        "Q": "UNKNOWN",
+        "R": "UNKNOWN",
+        "X": "UNKNOWN"
+      },
+      "reason": "event is missing",
+      "blocking_conditions": [
+        "event_missing"
+      ],
+      "duplicate_batches_ignored": 0,
+      "canonical_input_sha256": "543756e08bf454ec7130ce7e97cce6ce8b8d213cd0c03c9ca9c409ed1e603b25"
+    },
+    {
+      "fixture_id": "S34-19",
+      "arrival_order": [
+        "B1",
+        "B2"
+      ],
+      "epoch_sequence": [
+        1,
+        2
+      ],
+      "batch_id": "B1",
+      "batch_ids": [
+        "B1",
+        "B2"
+      ],
+      "batch_event_verdicts": [
+        {
+          "batch_id": "B1",
+          "epoch": 1,
+          "op": "R",
+          "verdict": "rejected",
+          "reason": "ack status is locally verifiable"
+        },
+        {
+          "batch_id": "B1",
+          "epoch": 1,
+          "op": "R",
+          "verdict": "rejected",
+          "reason": "ack status is locally verifiable"
+        },
+        {
+          "batch_id": "B2",
+          "epoch": 2,
+          "op": "Q",
+          "verdict": "accepted",
+          "reason": "ack status is locally verifiable"
+        }
+      ],
+      "target_op": "R",
+      "op_verdict": "rejected",
+      "op_verdicts": {
+        "P": "UNKNOWN",
+        "Q": "accepted",
+        "R": "rejected",
+        "X": "UNKNOWN"
+      },
+      "reason": "all op-local acks agree on rejected",
+      "blocking_conditions": [],
+      "duplicate_batches_ignored": 0,
+      "canonical_input_sha256": "4f801472b47f8b428cddd730debdfe8faf1a6213e5239bc61f9e86cc9142d1d9"
+    },
+    {
+      "fixture_id": "S34-20",
+      "arrival_order": [
+        "B1",
+        "B2",
+        "B3",
+        "B4"
+      ],
+      "epoch_sequence": [
+        1,
+        2,
+        3,
+        4
+      ],
+      "batch_id": "B1",
+      "batch_ids": [
+        "B1",
+        "B2",
+        "B3",
+        "B4"
+      ],
+      "batch_event_verdicts": [
+        {
+          "batch_id": "B1",
+          "epoch": 1,
+          "op": "P",
+          "verdict": "accepted",
+          "reason": "ack status is locally verifiable"
+        },
+        {
+          "batch_id": "B2",
+          "epoch": 2,
+          "op": "P",
+          "verdict": "accepted",
+          "reason": "ack status is locally verifiable"
+        },
+        {
+          "batch_id": "B3",
+          "epoch": 3,
+          "op": "P",
+          "verdict": "accepted",
+          "reason": "ack status is locally verifiable"
+        },
+        {
+          "batch_id": "B4",
+          "epoch": 4,
+          "op": "P",
+          "verdict": "accepted",
+          "reason": "ack status is locally verifiable"
+        }
+      ],
+      "target_op": "P",
+      "op_verdict": "accepted",
+      "op_verdicts": {
+        "P": "accepted",
+        "Q": "UNKNOWN",
+        "R": "UNKNOWN",
+        "X": "UNKNOWN"
+      },
+      "reason": "all op-local acks agree",
+      "blocking_conditions": [],
+      "duplicate_batches_ignored": 0,
+      "canonical_input_sha256": "b365abe4886c07d3509050f268202c677ff2379a77bae5c2630ffb5c601fa747"
+    },
+    {
+      "fixture_id": "S34-21",
+      "arrival_order": [
+        "B4",
+        "B3",
+        "B2",
+        "B1"
+      ],
+      "epoch_sequence": [
+        4,
+        3,
+        2,
+        1
+      ],
+      "batch_id": "B4",
+      "batch_ids": [
+        "B4",
+        "B3",
+        "B2",
+        "B1"
+      ],
+      "batch_event_verdicts": [
+        {
+          "batch_id": "B4",
+          "epoch": 4,
+          "op": "P",
+          "verdict": "accepted",
+          "reason": "ack status is locally verifiable"
+        },
+        {
+          "batch_id": "B3",
+          "epoch": 3,
+          "op": "P",
+          "verdict": "rejected",
+          "reason": "ack status is locally verifiable"
+        },
+        {
+          "batch_id": "B2",
+          "epoch": 2,
+          "op": "P",
+          "verdict": "accepted",
+          "reason": "ack status is locally verifiable"
+        },
+        {
+          "batch_id": "B1",
+          "epoch": 1,
+          "op": "P",
+          "verdict": "accepted",
+          "reason": "ack status is locally verifiable"
+        }
+      ],
+      "target_op": "P",
+      "op_verdict": "rejected",
+      "op_verdicts": {
+        "P": "rejected",
+        "Q": "UNKNOWN",
+        "R": "UNKNOWN",
+        "X": "UNKNOWN"
+      },
+      "reason": "conflicting accepted/rejected acks; conflict rule rejects only this op",
+      "blocking_conditions": [
+        "op_local_ack_conflict"
+      ],
+      "duplicate_batches_ignored": 0,
+      "canonical_input_sha256": "32e6932ede26eda5e25b3abe17d757423bd09c6444a922b819e638cec3da9db6"
+    },
+    {
+      "fixture_id": "S34-22",
+      "arrival_order": [
+        "B2",
+        "B1",
+        "B3"
+      ],
+      "epoch_sequence": [
+        2,
+        1,
+        3
+      ],
+      "batch_id": "B2",
+      "batch_ids": [
+        "B2",
+        "B1",
+        "B3"
+      ],
+      "batch_event_verdicts": [
+        {
+          "batch_id": "B2",
+          "epoch": 2,
+          "op": "Q",
+          "verdict": "accepted",
+          "reason": "ack status is locally verifiable"
+        },
+        {
+          "batch_id": "B1",
+          "epoch": 1,
+          "op": "Q",
+          "verdict": "UNKNOWN",
+          "reason": "event is missing or unverifiable"
+        },
+        {
+          "batch_id": "B3",
+          "epoch": 3,
+          "op": "Q",
+          "verdict": "accepted",
+          "reason": "ack status is locally verifiable"
+        }
+      ],
+      "target_op": "Q",
+      "op_verdict": "UNKNOWN",
+      "op_verdicts": {
+        "P": "UNKNOWN",
+        "Q": "UNKNOWN",
+        "R": "UNKNOWN",
+        "X": "UNKNOWN"
+      },
+      "reason": "epoch 2 ack is accepted; event is missing; epoch 3 ack is accepted",
+      "blocking_conditions": [
+        "event_missing"
+      ],
+      "duplicate_batches_ignored": 0,
+      "canonical_input_sha256": "374c3ac5eb0380bbcf2da32d5f3cdeed7930a8f757cffa9f2cbf7a80af452e2f"
+    },
+    {
+      "fixture_id": "S34-23",
+      "arrival_order": [
+        "B1",
+        "B2"
+      ],
+      "epoch_sequence": [
+        1,
+        2
+      ],
+      "batch_id": "B1",
+      "batch_ids": [
+        "B1",
+        "B2"
+      ],
+      "batch_event_verdicts": [
+        {
+          "batch_id": "B1",
+          "epoch": 1,
+          "op": "P",
+          "verdict": "rejected",
+          "reason": "ack status is locally verifiable"
+        },
+        {
+          "batch_id": "B1",
+          "epoch": 1,
+          "op": "P",
+          "verdict": "accepted",
+          "reason": "ack status is locally verifiable"
+        },
+        {
+          "batch_id": "B2",
+          "epoch": 2,
+          "op": "Q",
+          "verdict": "accepted",
+          "reason": "ack status is locally verifiable"
+        }
+      ],
+      "target_op": "P",
+      "op_verdict": "rejected",
+      "op_verdicts": {
+        "P": "rejected",
+        "Q": "accepted",
+        "R": "UNKNOWN",
+        "X": "UNKNOWN"
+      },
+      "reason": "conflicting accepted/rejected acks; conflict rule rejects only this op",
+      "blocking_conditions": [
+        "op_local_ack_conflict"
+      ],
+      "duplicate_batches_ignored": 0,
+      "canonical_input_sha256": "9a1c010557f96b142e31e8a99ec7ed1a32b6030e1efc7267b45a0d6ea75841c6"
+    },
+    {
+      "fixture_id": "S34-24",
+      "arrival_order": [
+        "B3",
+        "B1",
+        "B2"
+      ],
+      "epoch_sequence": [
+        3,
+        1,
+        2
+      ],
+      "batch_id": "B3",
+      "batch_ids": [
+        "B3",
+        "B1",
+        "B2"
+      ],
+      "batch_event_verdicts": [
+        {
+          "batch_id": "B3",
+          "epoch": 3,
+          "op": "R",
+          "verdict": "UNKNOWN",
+          "reason": "batch explicitly revoked"
+        },
+        {
+          "batch_id": "B1",
+          "epoch": 1,
+          "op": "R",
+          "verdict": "accepted",
+          "reason": "ack status is locally verifiable"
+        },
+        {
+          "batch_id": "B2",
+          "epoch": 2,
+          "op": "R",
+          "verdict": "accepted",
+          "reason": "ack status is locally verifiable"
+        }
+      ],
+      "target_op": "R",
+      "op_verdict": "accepted",
+      "op_verdicts": {
+        "P": "UNKNOWN",
+        "Q": "UNKNOWN",
+        "R": "accepted",
+        "X": "UNKNOWN"
+      },
+      "reason": "all op-local acks agree",
+      "blocking_conditions": [],
+      "duplicate_batches_ignored": 0,
+      "canonical_input_sha256": "f1142f6321c2417884e30a4d29b000d98119e77f8a20c290d8748aa832eef759"
+    }
+  ]
+}

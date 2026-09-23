@@ -1,0 +1,20 @@
+[
+ {"id":"S15-01-direct-complete","kind":"direct_complete","input":{"expected_content":{"event":"E1","value":7},"sources":[{"id":"src-a","fingerprint":"fp-a","content":{"event":"E1","value":7}}]}},
+ {"id":"S15-02-cross-source-mismatch","kind":"cross_source_mismatch","input":{"sources":[{"id":"a","event_id":"E1","fingerprint":"fa","content":"left"},{"id":"b","event_id":"E2","fingerprint":"fb","content":"right"}]}},
+ {"id":"S15-03-fingerprint-reuse","kind":"fingerprint_reuse","input":{"sources":[{"id":"a","fingerprint":"same","content":"one"},{"id":"b","fingerprint":"same","content":"two"}]}},
+ {"id":"S15-04-same-summary-heterogeneous","kind":"same_summary_heterogeneous","input":{"sources":[{"id":"a","summary":"ok","content":{"x":1}},{"id":"b","summary":"ok","content":{"x":2}}]}},
+ {"id":"S15-05-replay-inversion","kind":"replay_order_inversion","input":{"sources":[{"id":"a","sequence":2,"content":"b"},{"id":"b","sequence":1,"content":"a"}]}},
+ {"id":"S15-06-clock-at-boundary","kind":"clock_boundary","input":{"drift_seconds":5,"allowed_seconds":5,"sources":[{"id":"clock","fingerprint":"fc","content":"t"}]}},
+ {"id":"S15-07-clock-over-bound","kind":"clock_boundary","input":{"drift_seconds":6,"allowed_seconds":5,"sources":[{"id":"clock","fingerprint":"fc","content":"t"}]}},
+ {"id":"S15-08-partial-provenance","kind":"partial_provenance","input":{"sources":[{"id":"payload","content":{"event":"E"}}]}},
+ {"id":"S15-09-budget-truncation","kind":"budget_truncation","input":{"sources":[{"id":"head","fingerprint":"fh","content":"first"}],"budget":{"used":1,"limit":1}}},
+ {"id":"S15-10-explicit-contradiction","kind":"explicit_contradiction","input":{"invariant":"count>=0","observed":-1,"sources":[{"id":"counter","fingerprint":"fc","content":-1}]}},
+ {"id":"S15-11-missing-evidence","kind":"missing_evidence","input":{"assertion":"E11 happened","sources":[]}},
+ {"id":"S15-12-inaccessible","kind":"inaccessible","input":{"sources":[{"id":"remote-like","fingerprint":"fx","content":"opaque","accessible":false}]}},
+ {"id":"S15-13-ambiguous-linkage","kind":"ambiguous_linkage","input":{"candidates":["E13-a","E13-b"],"sources":[{"id":"s","content":"same token"}]}},
+ {"id":"S15-14-majority-vote-trap","kind":"majority_vote_trap","input":{"observations":["yes","yes","no"],"sources":[{"id":"a","content":"yes"},{"id":"b","content":"yes"},{"id":"c","content":"no"}]}},
+ {"id":"S15-15-retry-no-change","kind":"retry_no_change","input":{"retries":3,"sources":[{"id":"r","content":"partial"}]}},
+ {"id":"S15-16-stable-fingerprint","kind":"stable_fingerprint","input":{"sources":[{"id":"a","fingerprint":"fs","content":{"v":1}},{"id":"b","fingerprint":"fs","content":{"v":1}}]}},
+ {"id":"S15-17-complete-unverified","kind":"complete_but_unverified","input":{"record":{"a":1,"b":2},"sources":[{"id":"s","fingerprint":"fu","content":{"a":1,"b":2}}]}},
+ {"id":"S15-18-explicit-negative-not-proven","kind":"missing_evidence","input":{"assertion":"E18 did not happen","sources":[]}}
+]

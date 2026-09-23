@@ -1,0 +1,867 @@
+{
+  "fixture_count": 24,
+  "production_verified": false,
+  "results": [
+    {
+      "blocking_condition": "",
+      "canonical_input_sha256": "a8e1da8f3893e5c988141ac0604ce88e263b6547fd862e002946bba46390ae35",
+      "case_id": "S21-001",
+      "direct_edge_present": true,
+      "duplicate_edges_ignored": 0,
+      "edges": [
+        {
+          "from": "A",
+          "from_record": "A",
+          "id": "e1",
+          "to": "B",
+          "to_record": "B"
+        }
+      ],
+      "inference_path": [
+        "A",
+        "B"
+      ],
+      "judgment": "RECOVERED",
+      "nodes": [
+        "A",
+        "B"
+      ],
+      "query": {
+        "x": "A",
+        "y": "B"
+      },
+      "reason": "direct edge establishes X ≺ Y",
+      "reverse_path": [],
+      "subclass": "direct_edge"
+    },
+    {
+      "blocking_condition": "",
+      "canonical_input_sha256": "86bcbfb7e248a6d1e8cd4fc838c483b799c172f57db5b09b066f2ce9bef66e1a",
+      "case_id": "S21-002",
+      "direct_edge_present": false,
+      "duplicate_edges_ignored": 0,
+      "edges": [
+        {
+          "from": "A",
+          "from_record": "A",
+          "id": "e1",
+          "to": "B",
+          "to_record": "B"
+        },
+        {
+          "from": "B",
+          "from_record": "B",
+          "id": "e2",
+          "to": "C",
+          "to_record": "C"
+        }
+      ],
+      "inference_path": [
+        "A",
+        "B",
+        "C"
+      ],
+      "judgment": "RECOVERED",
+      "nodes": [
+        "A",
+        "B",
+        "C"
+      ],
+      "query": {
+        "x": "A",
+        "y": "C"
+      },
+      "reason": "transitive closure establishes X ≺ Y",
+      "reverse_path": [],
+      "subclass": "transitive_order"
+    },
+    {
+      "blocking_condition": "incomparable/concurrent or missing causal edge",
+      "canonical_input_sha256": "b73d3e8fad4a491c01dbd7f8a189c5aad71c7f0b07fe3f5f9119573ad8678060",
+      "case_id": "S21-003",
+      "direct_edge_present": false,
+      "duplicate_edges_ignored": 0,
+      "edges": [],
+      "inference_path": [],
+      "judgment": "UNKNOWN",
+      "nodes": [
+        "A",
+        "B"
+      ],
+      "query": {
+        "x": "A",
+        "y": "B"
+      },
+      "reason": "no X-to-Y path; absence of reverse path is not evidence for an order",
+      "reverse_path": [],
+      "subclass": null
+    },
+    {
+      "blocking_condition": "incomparable/concurrent or missing causal edge",
+      "canonical_input_sha256": "24b46e004ef2e2f5fec47176db533bcde1401464e554b8102bc69e46d8d4f969",
+      "case_id": "S21-004",
+      "direct_edge_present": false,
+      "duplicate_edges_ignored": 0,
+      "edges": [
+        {
+          "from": "A",
+          "from_record": "A",
+          "id": "e1",
+          "to": "B",
+          "to_record": "B"
+        }
+      ],
+      "inference_path": [],
+      "judgment": "UNKNOWN",
+      "nodes": [
+        "A",
+        "B"
+      ],
+      "query": {
+        "x": "B",
+        "y": "A"
+      },
+      "reason": "no X-to-Y path; absence of reverse path is not evidence for an order",
+      "reverse_path": [
+        "A",
+        "B"
+      ],
+      "subclass": null
+    },
+    {
+      "blocking_condition": "graph acyclicity violated",
+      "canonical_input_sha256": "435a8d3441e2bc8ca217075f52c5d46737870fddf6f92f8f55fdbe491ed4bf59",
+      "case_id": "S21-005",
+      "direct_edge_present": false,
+      "duplicate_edges_ignored": 0,
+      "edges": [
+        {
+          "from": "A",
+          "from_record": "A",
+          "id": "e1",
+          "to": "B",
+          "to_record": "B"
+        },
+        {
+          "from": "B",
+          "from_record": "B",
+          "id": "e2",
+          "to": "C",
+          "to_record": "C"
+        },
+        {
+          "from": "C",
+          "from_record": "C",
+          "id": "e3",
+          "to": "A",
+          "to_record": "A"
+        }
+      ],
+      "inference_path": [],
+      "judgment": "REJECT",
+      "nodes": [
+        "A",
+        "B",
+        "C"
+      ],
+      "query": {
+        "x": "A",
+        "y": "C"
+      },
+      "reason": "causal cycle is a verifiable structural contradiction",
+      "reverse_path": [],
+      "subclass": null
+    },
+    {
+      "blocking_condition": "missing node/edge endpoint",
+      "canonical_input_sha256": "15ec4b8de5a944cc951878af5f33da866732b2e3c4a51be231edb8f5fa8a487e",
+      "case_id": "S21-006",
+      "direct_edge_present": false,
+      "duplicate_edges_ignored": 0,
+      "edges": [
+        {
+          "from": "A",
+          "from_record": "A",
+          "id": "e1",
+          "to": "C",
+          "to_record": "C"
+        }
+      ],
+      "inference_path": [],
+      "judgment": "UNKNOWN",
+      "nodes": [
+        "A",
+        "B"
+      ],
+      "query": {
+        "x": "A",
+        "y": "B"
+      },
+      "reason": "node or edge endpoint is missing from the recorded graph",
+      "reverse_path": [],
+      "subclass": null
+    },
+    {
+      "blocking_condition": "",
+      "canonical_input_sha256": "cff913ef13ca56cc29395b3b2980237e8978514019bd81611b02764b2428ed1d",
+      "case_id": "S21-007",
+      "direct_edge_present": true,
+      "duplicate_edges_ignored": 1,
+      "edges": [
+        {
+          "from": "A",
+          "from_record": "A",
+          "id": "e1",
+          "to": "B",
+          "to_record": "B"
+        },
+        {
+          "from": "A",
+          "from_record": "A",
+          "id": "e2",
+          "to": "B",
+          "to_record": "B"
+        }
+      ],
+      "inference_path": [
+        "A",
+        "B"
+      ],
+      "judgment": "RECOVERED",
+      "nodes": [
+        "A",
+        "B"
+      ],
+      "query": {
+        "x": "A",
+        "y": "B"
+      },
+      "reason": "direct edge establishes X ≺ Y",
+      "reverse_path": [],
+      "subclass": "direct_edge"
+    },
+    {
+      "blocking_condition": "endpoint integrity failure",
+      "canonical_input_sha256": "99ace3cddc535cd61df7ca24dd674b20b3cbc20fc214600d8e37adb2ad2ba89f",
+      "case_id": "S21-008",
+      "direct_edge_present": false,
+      "duplicate_edges_ignored": 0,
+      "edges": [
+        {
+          "from": "A",
+          "from_record": "A",
+          "id": "e1",
+          "to": "B",
+          "to_record": "C"
+        }
+      ],
+      "inference_path": [],
+      "judgment": "REJECT",
+      "nodes": [
+        "A",
+        "B"
+      ],
+      "query": {
+        "x": "A",
+        "y": "B"
+      },
+      "reason": "edge endpoint record is inconsistent",
+      "reverse_path": [],
+      "subclass": null
+    },
+    {
+      "blocking_condition": "incomparable/concurrent or missing causal edge",
+      "canonical_input_sha256": "eed399c3ca6b23c61c93be205e9755bad4566fa358646c415b8875cc880dea4d",
+      "case_id": "S21-009",
+      "direct_edge_present": false,
+      "duplicate_edges_ignored": 0,
+      "edges": [
+        {
+          "from": "A",
+          "from_record": "A",
+          "id": "e1",
+          "to": "B",
+          "to_record": "B"
+        }
+      ],
+      "inference_path": [],
+      "judgment": "UNKNOWN",
+      "nodes": [
+        "A",
+        "B",
+        "C"
+      ],
+      "query": {
+        "x": "A",
+        "y": "C"
+      },
+      "reason": "no X-to-Y path; absence of reverse path is not evidence for an order",
+      "reverse_path": [],
+      "subclass": null
+    },
+    {
+      "blocking_condition": "incomparable pair(s): A||C,B||C",
+      "canonical_input_sha256": "e59d9d12af818f7b4b90cbf2c15b7c828b254d369491da3312300901d10f6c39",
+      "case_id": "S21-010",
+      "direct_edge_present": false,
+      "duplicate_edges_ignored": 0,
+      "edges": [
+        {
+          "from": "A",
+          "from_record": "A",
+          "id": "e1",
+          "to": "B",
+          "to_record": "B"
+        }
+      ],
+      "inference_path": [],
+      "judgment": "REJECT",
+      "nodes": [
+        "A",
+        "B",
+        "C"
+      ],
+      "query": {
+        "x": "A",
+        "y": "C"
+      },
+      "reason": "explicit total-order invariant is violated",
+      "reverse_path": [],
+      "subclass": null
+    },
+    {
+      "blocking_condition": "",
+      "canonical_input_sha256": "3b5cbf6b55c34eac4fa7c822b85247c8d59e9402c4504ebb0daf9e974c484626",
+      "case_id": "S21-011",
+      "direct_edge_present": false,
+      "duplicate_edges_ignored": 0,
+      "edges": [
+        {
+          "from": "A",
+          "from_record": "A",
+          "id": "e1",
+          "to": "B",
+          "to_record": "B"
+        },
+        {
+          "from": "B",
+          "from_record": "B",
+          "id": "e2",
+          "to": "C",
+          "to_record": "C"
+        }
+      ],
+      "inference_path": [
+        "A",
+        "B",
+        "C"
+      ],
+      "judgment": "RECOVERED",
+      "nodes": [
+        "A",
+        "B",
+        "C"
+      ],
+      "query": {
+        "x": "A",
+        "y": "C"
+      },
+      "reason": "transitive closure establishes X ≺ Y",
+      "reverse_path": [],
+      "subclass": "transitive_order"
+    },
+    {
+      "blocking_condition": "incomparable/concurrent or missing causal edge",
+      "canonical_input_sha256": "ef141a1e6a25a77de78c17eed2df8903d0930c2d488f5df0a5bd4efceea42669",
+      "case_id": "S21-012",
+      "direct_edge_present": false,
+      "duplicate_edges_ignored": 0,
+      "edges": [
+        {
+          "from": "A",
+          "from_record": "A",
+          "id": "e1",
+          "to": "B",
+          "to_record": "B"
+        },
+        {
+          "from": "C",
+          "from_record": "C",
+          "id": "e2",
+          "to": "D",
+          "to_record": "D"
+        }
+      ],
+      "inference_path": [],
+      "judgment": "UNKNOWN",
+      "nodes": [
+        "A",
+        "B",
+        "C",
+        "D"
+      ],
+      "query": {
+        "x": "A",
+        "y": "D"
+      },
+      "reason": "no X-to-Y path; absence of reverse path is not evidence for an order",
+      "reverse_path": [],
+      "subclass": null
+    },
+    {
+      "blocking_condition": "",
+      "canonical_input_sha256": "f7b1076e427610e4477fe37afc18e8ebc8edfec0d7b6886d32791ef4c345b3d1",
+      "case_id": "S21-013",
+      "direct_edge_present": false,
+      "duplicate_edges_ignored": 0,
+      "edges": [
+        {
+          "from": "A",
+          "from_record": "A",
+          "id": "e1",
+          "to": "B",
+          "to_record": "B"
+        },
+        {
+          "from": "B",
+          "from_record": "B",
+          "id": "e2",
+          "to": "D",
+          "to_record": "D"
+        },
+        {
+          "from": "A",
+          "from_record": "A",
+          "id": "e3",
+          "to": "C",
+          "to_record": "C"
+        },
+        {
+          "from": "C",
+          "from_record": "C",
+          "id": "e4",
+          "to": "D",
+          "to_record": "D"
+        }
+      ],
+      "inference_path": [
+        "A",
+        "B",
+        "D"
+      ],
+      "judgment": "RECOVERED",
+      "nodes": [
+        "A",
+        "B",
+        "C",
+        "D"
+      ],
+      "query": {
+        "x": "A",
+        "y": "D"
+      },
+      "reason": "transitive closure establishes X ≺ Y",
+      "reverse_path": [],
+      "subclass": "transitive_order"
+    },
+    {
+      "blocking_condition": "missing node/edge endpoint",
+      "canonical_input_sha256": "b9c69f923a99239d4b9b20bd45d0e2dfc4c362c06ce8920f119d5b012ab6c9df",
+      "case_id": "S21-014",
+      "direct_edge_present": false,
+      "duplicate_edges_ignored": 0,
+      "edges": [
+        {
+          "from": "A",
+          "from_record": "A",
+          "id": "e1",
+          "to": "B",
+          "to_record": "B"
+        }
+      ],
+      "inference_path": [],
+      "judgment": "UNKNOWN",
+      "nodes": [
+        "A",
+        "B"
+      ],
+      "query": {
+        "x": "A",
+        "y": "Z"
+      },
+      "reason": "node or edge endpoint is missing from the recorded graph",
+      "reverse_path": [],
+      "subclass": null
+    },
+    {
+      "blocking_condition": "missing node/edge endpoint",
+      "canonical_input_sha256": "cd38326808a09d1e7d088fa81c6a3248fef21e855271fc277066f05fd886c933",
+      "case_id": "S21-015",
+      "direct_edge_present": false,
+      "duplicate_edges_ignored": 0,
+      "edges": [],
+      "inference_path": [],
+      "judgment": "UNKNOWN",
+      "nodes": [],
+      "query": {
+        "x": "A",
+        "y": "B"
+      },
+      "reason": "node or edge endpoint is missing from the recorded graph",
+      "reverse_path": [],
+      "subclass": null
+    },
+    {
+      "blocking_condition": "",
+      "canonical_input_sha256": "89ce7d69e5b4abf6e30023a886998570a73da3b448a0c99441532a8252b875c7",
+      "case_id": "S21-016",
+      "direct_edge_present": false,
+      "duplicate_edges_ignored": 1,
+      "edges": [
+        {
+          "from": "A",
+          "from_record": "A",
+          "id": "e1",
+          "to": "B",
+          "to_record": "B"
+        },
+        {
+          "from": "A",
+          "from_record": "A",
+          "id": "e2",
+          "to": "B",
+          "to_record": "B"
+        },
+        {
+          "from": "B",
+          "from_record": "B",
+          "id": "e3",
+          "to": "C",
+          "to_record": "C"
+        }
+      ],
+      "inference_path": [
+        "A",
+        "B",
+        "C"
+      ],
+      "judgment": "RECOVERED",
+      "nodes": [
+        "A",
+        "B",
+        "C"
+      ],
+      "query": {
+        "x": "A",
+        "y": "C"
+      },
+      "reason": "transitive closure establishes X ≺ Y",
+      "reverse_path": [],
+      "subclass": "transitive_order"
+    },
+    {
+      "blocking_condition": "incomparable/concurrent or missing causal edge",
+      "canonical_input_sha256": "511fc0bb1f018600184d26d47ba0df0d665aa8833f0a807af67bd94a9c955a41",
+      "case_id": "S21-017",
+      "direct_edge_present": false,
+      "duplicate_edges_ignored": 0,
+      "edges": [
+        {
+          "from": "A",
+          "from_record": "A",
+          "id": "e1",
+          "to": "B",
+          "to_record": "B"
+        }
+      ],
+      "inference_path": [],
+      "judgment": "UNKNOWN",
+      "nodes": [
+        "A",
+        "B",
+        "C"
+      ],
+      "query": {
+        "x": "A",
+        "y": "C"
+      },
+      "reason": "no X-to-Y path; absence of reverse path is not evidence for an order",
+      "reverse_path": [],
+      "subclass": null
+    },
+    {
+      "blocking_condition": "endpoint integrity failure",
+      "canonical_input_sha256": "31f17e78110e237cdbf102af1ac962d252db2ac52787417b1cd85d15f6f1ae4a",
+      "case_id": "S21-018",
+      "direct_edge_present": false,
+      "duplicate_edges_ignored": 0,
+      "edges": [
+        {
+          "from": "A",
+          "from_record": "A",
+          "id": "e1",
+          "to": "B",
+          "to_record": "B"
+        },
+        {
+          "from": "B",
+          "from_record": "X",
+          "id": "e2",
+          "to": "C",
+          "to_record": "C"
+        }
+      ],
+      "inference_path": [],
+      "judgment": "REJECT",
+      "nodes": [
+        "A",
+        "B",
+        "C"
+      ],
+      "query": {
+        "x": "A",
+        "y": "C"
+      },
+      "reason": "edge endpoint record is inconsistent",
+      "reverse_path": [],
+      "subclass": null
+    },
+    {
+      "blocking_condition": "incomparable/concurrent or missing causal edge",
+      "canonical_input_sha256": "ea9a25d8962992c03d85f3aa8fbb9a1e621bba30e8bef3cdf2fe164799ccf4dd",
+      "case_id": "S21-019",
+      "direct_edge_present": false,
+      "duplicate_edges_ignored": 0,
+      "edges": [],
+      "inference_path": [],
+      "judgment": "UNKNOWN",
+      "nodes": [
+        "A",
+        "B"
+      ],
+      "query": {
+        "x": "A",
+        "y": "B"
+      },
+      "reason": "no X-to-Y path; absence of reverse path is not evidence for an order",
+      "reverse_path": [],
+      "subclass": null
+    },
+    {
+      "blocking_condition": "same query node",
+      "canonical_input_sha256": "1363b191bc9be2d933b049bc45e24ef5573a66929ba8088fe62b3965054b5568",
+      "case_id": "S21-020",
+      "direct_edge_present": false,
+      "duplicate_edges_ignored": 0,
+      "edges": [],
+      "inference_path": [],
+      "judgment": "UNKNOWN",
+      "nodes": [
+        "A"
+      ],
+      "query": {
+        "x": "A",
+        "y": "A"
+      },
+      "reason": "strict happens-before is irreflexive",
+      "reverse_path": [],
+      "subclass": null
+    },
+    {
+      "blocking_condition": "graph acyclicity violated",
+      "canonical_input_sha256": "1e318cfdd6d3f703dbca83954f1131bd7a3a9e379c707fb3b0d1b8d4e0bcaa76",
+      "case_id": "S21-021",
+      "direct_edge_present": false,
+      "duplicate_edges_ignored": 1,
+      "edges": [
+        {
+          "from": "A",
+          "from_record": "A",
+          "id": "e1",
+          "to": "B",
+          "to_record": "B"
+        },
+        {
+          "from": "B",
+          "from_record": "B",
+          "id": "e2",
+          "to": "C",
+          "to_record": "C"
+        },
+        {
+          "from": "C",
+          "from_record": "C",
+          "id": "e3",
+          "to": "A",
+          "to_record": "A"
+        },
+        {
+          "from": "A",
+          "from_record": "A",
+          "id": "e4",
+          "to": "B",
+          "to_record": "B"
+        }
+      ],
+      "inference_path": [],
+      "judgment": "REJECT",
+      "nodes": [
+        "A",
+        "B",
+        "C"
+      ],
+      "query": {
+        "x": "B",
+        "y": "A"
+      },
+      "reason": "causal cycle is a verifiable structural contradiction",
+      "reverse_path": [],
+      "subclass": null
+    },
+    {
+      "blocking_condition": "incomparable/concurrent or missing causal edge",
+      "canonical_input_sha256": "8fa0fb18d82f0f12eaf3b608d200b4db383cf717168559e3e374ced63e1c3c44",
+      "case_id": "S21-022",
+      "direct_edge_present": false,
+      "duplicate_edges_ignored": 0,
+      "edges": [
+        {
+          "from": "A",
+          "from_record": "A",
+          "id": "e1",
+          "to": "B",
+          "to_record": "B"
+        },
+        {
+          "from": "C",
+          "from_record": "C",
+          "id": "e2",
+          "to": "D",
+          "to_record": "D"
+        },
+        {
+          "from": "E",
+          "from_record": "E",
+          "id": "e3",
+          "to": "F",
+          "to_record": "F"
+        },
+        {
+          "from": "G",
+          "from_record": "G",
+          "id": "e4",
+          "to": "H",
+          "to_record": "H"
+        }
+      ],
+      "inference_path": [],
+      "judgment": "UNKNOWN",
+      "nodes": [
+        "A",
+        "B",
+        "C",
+        "D",
+        "E",
+        "F",
+        "G",
+        "H",
+        "I",
+        "J"
+      ],
+      "query": {
+        "x": "A",
+        "y": "J"
+      },
+      "reason": "no X-to-Y path; absence of reverse path is not evidence for an order",
+      "reverse_path": [],
+      "subclass": null
+    },
+    {
+      "blocking_condition": "",
+      "canonical_input_sha256": "1e3cbc5fff7923e6aaa4c5d9143aaaa2d5e85c81b89aecc61a592a96036cc2e9",
+      "case_id": "S21-023",
+      "direct_edge_present": true,
+      "duplicate_edges_ignored": 0,
+      "edges": [
+        {
+          "from": "A",
+          "from_record": "A",
+          "id": "e1",
+          "to": "C",
+          "to_record": "C"
+        },
+        {
+          "from": "A",
+          "from_record": "A",
+          "id": "e2",
+          "to": "B",
+          "to_record": "B"
+        },
+        {
+          "from": "B",
+          "from_record": "B",
+          "id": "e3",
+          "to": "C",
+          "to_record": "C"
+        }
+      ],
+      "inference_path": [
+        "A",
+        "C"
+      ],
+      "judgment": "RECOVERED",
+      "nodes": [
+        "A",
+        "B",
+        "C"
+      ],
+      "query": {
+        "x": "A",
+        "y": "C"
+      },
+      "reason": "direct edge establishes X ≺ Y",
+      "reverse_path": [],
+      "subclass": "direct_edge"
+    },
+    {
+      "blocking_condition": "incomparable/concurrent or missing causal edge",
+      "canonical_input_sha256": "2715d7382e9b42224a8e8e41e2412e47fb04b28039dad6cde151dbc193f67c20",
+      "case_id": "S21-024",
+      "direct_edge_present": false,
+      "duplicate_edges_ignored": 0,
+      "edges": [
+        {
+          "from": "A",
+          "from_record": "A",
+          "id": "e1",
+          "to": "B",
+          "to_record": "B"
+        },
+        {
+          "from": "B",
+          "from_record": "B",
+          "id": "e2",
+          "to": "C",
+          "to_record": "C"
+        }
+      ],
+      "inference_path": [],
+      "judgment": "UNKNOWN",
+      "nodes": [
+        "A",
+        "B",
+        "C",
+        "D"
+      ],
+      "query": {
+        "x": "A",
+        "y": "D"
+      },
+      "reason": "no X-to-Y path; absence of reverse path is not evidence for an order",
+      "reverse_path": [],
+      "subclass": null
+    }
+  ],
+  "schema_version": "S21-results-v1",
+  "synthetic_only": true
+}

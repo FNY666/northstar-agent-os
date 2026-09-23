@@ -1,0 +1,57 @@
+{
+  "schema_version": "research-manifest-v1",
+  "question": "In a local deterministic single-worker, single-op simulation, how does changing crash cut points around record append, response emission, and durable-reference emission classify the observable outcome as accepted, rejected, or UNKNOWN?",
+  "scope": {
+    "project": "B-GEMINI-CLI-RESEARCH-20260922-S27",
+    "slice": "offline synthetic crash-window permutation slice",
+    "execution": "local only; deterministic harness; one worker; one op_id",
+    "fixtures": 18,
+    "included": ["three stage permutations", "before/after cuts for each stage", "accepted/rejected/UNKNOWN classification"],
+    "excluded": ["real Gemini CLI", "real services", "network", "credentials", "remote state", "production crash testing", "durability measurement", "exactly-once", "rollback", "production safety"],
+    "synthetic_only": true,
+    "production_verified": false
+  },
+  "claims": [
+    {
+      "id": "S27-C1",
+      "claim": "The harness is a local deterministic model with exactly one worker and one operation identifier across all 18 fixtures.",
+      "status": "inferred",
+      "confidence": "high",
+      "sources": [],
+      "caveat": "This is inferred from local fixture and harness execution, not independently verified production behavior."
+    },
+    {
+      "id": "S27-C2",
+      "claim": "For the model's append-before-reference rule, a reference emitted after an appended record is classified accepted; a cut before any modeled side effect is classified rejected; partial or order-invalid evidence is classified UNKNOWN.",
+      "status": "inferred",
+      "confidence": "high",
+      "sources": [],
+      "caveat": "These are explicit simulator decision rules, not claims about Gemini CLI, a service, storage durability, or remote state."
+    },
+    {
+      "id": "S27-C3",
+      "claim": "The 18-fixture run produced 4 accepted, 3 rejected, and 11 UNKNOWN classifications.",
+      "status": "inferred",
+      "confidence": "high",
+      "sources": [],
+      "caveat": "The count is a local execution fact from this synthetic harness and does not establish a real crash-window distribution."
+    },
+    {
+      "id": "S27-C4",
+      "claim": "This slice does not establish real crash durability, remote state, exactly-once behavior, rollback, or production safety.",
+      "status": "inferred",
+      "confidence": "high",
+      "sources": [],
+      "caveat": "The non-claim follows from the intentionally offline synthetic scope; no production or remote evidence was collected."
+    }
+  ],
+  "coverage": {
+    "status": "bounded",
+    "covered": ["record append cut before/after", "response emission cut before/after", "durable-reference emission cut before/after", "three permutations", "18 fixtures", "self-validation", "official validator", "SHA-256 verification"],
+    "not_covered": ["real process crashes", "filesystem/database durability", "network acknowledgements", "remote reconciliation", "retry/interleaving/concurrency", "rollback", "production safety"],
+    "sources_consulted": 0,
+    "source_policy": "No network or external sources accessed; no confirmed claims are made."
+  },
+  "synthetic_only": true,
+  "production_verified": false
+}

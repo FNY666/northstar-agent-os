@@ -1,0 +1,24 @@
+{
+  "schema_version": "1.0",
+  "question": "在离线合成证据中，何时配置 defaults/user/workspace/environment/CLI 优先级、环境变量、作用域、重启边界和 runtime effective read-back 能够闭合连续性，何时必须保持 UNKNOWN 或 REJECT？",
+  "scope": {
+    "project": "C-line S42",
+    "mode": "offline synthetic fixtures",
+    "date": "2026-09-23",
+    "excluded": ["S1-S41", "production", "network", "real services", "credentials"],
+    "identity_domain": ["tenant", "project", "workspace", "instance", "config_key"],
+    "configuration_domain": ["defaults", "user", "workspace", "environment", "cli", "precedence", "runtime_snapshot", "restart", "secret_redaction", "schema", "unknown_key"]
+  },
+  "claims_status": "inferred",
+  "synthetic_only": true,
+  "production_verified": false,
+  "sources": [],
+  "claims": [
+    {"id":"effective-config-closure","claim":"只有来源、schema/default、各层 override、precedence、effective read-back、restart/scope、secret redaction、unknown-key、type/version、source stability 和 runtime snapshot 全部闭合时才可 RECOVERED。","status":"inferred","confidence":"bounded","sources":[],"caveat":"仅由本地合成夹具和规则推导，不代表生产系统。"},
+    {"id":"input-not-effective","claim":"配置文件、环境变量或 CLI 参数存在本身不能证明运行时采用了该值；必须有实例级 effective snapshot/read-back。","status":"inferred","confidence":"bounded","sources":[],"caveat":"未验证任何真实配置加载器。"},
+    {"id":"config-unknown","claim":"优先级、作用域、重启持久化、schema/type/version、secret redaction 或 runtime 状态未知时必须 UNKNOWN。","status":"inferred","confidence":"bounded","sources":[],"caveat":"布尔门不量化实际配置漂移或泄漏风险。"},
+    {"id":"config-conflict-reject","claim":"身份冲突、同一配置身份的覆盖冲突或最终 effective value 冲突必须 REJECT。","status":"inferred","confidence":"bounded","sources":[],"caveat":"只验证合成判定逻辑，不证明目标系统执行拒绝。"}
+  ],
+  "coverage": {"cases": 27, "property_sweep": 2097152, "dimensions": 21, "statuses": ["RECOVERED", "UNKNOWN", "REJECT"], "events": ["DEFAULTS", "USER", "WORKSPACE", "ENV", "CLI", "PRECEDENCE", "RUNTIME_READBACK", "RESTART", "SCOPE", "SECRET_REDACTION", "SCHEMA", "UNKNOWN_KEY", "NO_EVENT", "UNKNOWN"]},
+  "notes": "三态互斥并 fail-closed；RECOVERED 仅代表本片离线夹具中的配置证据门闭合，不代表 production continuity、external effect 或 exactly-once。"
+}

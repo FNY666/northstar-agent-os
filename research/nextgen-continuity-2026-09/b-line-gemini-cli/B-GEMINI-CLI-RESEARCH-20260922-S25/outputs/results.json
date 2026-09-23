@@ -1,0 +1,402 @@
+{
+  "schema_version": "S25-results-1",
+  "synthetic_only": true,
+  "production_verified": false,
+  "scope": "offline synthetic restart-window slice",
+  "worker_id": "worker-s25-01",
+  "op_id": "op-s25-0001",
+  "simulated_crash_restart": true,
+  "counts": {
+    "accepted": 3,
+    "rejected": 2,
+    "UNKNOWN": 7
+  },
+  "all_expected_match": true,
+  "cases": [
+    {
+      "fixture_id": "S25-01",
+      "worker_id": "worker-s25-01",
+      "op_id": "op-s25-0001",
+      "attempts": [
+        1,
+        2
+      ],
+      "boundary": "before-record",
+      "value_relation": "same",
+      "ref_relation": "equal",
+      "local_journal": {
+        "attempt_1": {
+          "record_written": false,
+          "response_emitted": false,
+          "value": "alpha",
+          "response_ref": null,
+          "durable_ref": null
+        },
+        "attempt_2": {
+          "record_written": true,
+          "response_emitted": true,
+          "value": "alpha",
+          "response_ref": "ref-a",
+          "durable_ref": "ref-a"
+        }
+      },
+      "classification": "accepted",
+      "classification_basis": "attempt-1 local journal was empty; attempt-2 refs equal",
+      "expected_fixture_classification": "accepted",
+      "matches_expected": true
+    },
+    {
+      "fixture_id": "S25-02",
+      "worker_id": "worker-s25-01",
+      "op_id": "op-s25-0001",
+      "attempts": [
+        1,
+        2
+      ],
+      "boundary": "before-record",
+      "value_relation": "different",
+      "ref_relation": "equal",
+      "local_journal": {
+        "attempt_1": {
+          "record_written": false,
+          "response_emitted": false,
+          "value": "alpha",
+          "response_ref": null,
+          "durable_ref": null
+        },
+        "attempt_2": {
+          "record_written": true,
+          "response_emitted": true,
+          "value": "beta",
+          "response_ref": "ref-a",
+          "durable_ref": "ref-a"
+        }
+      },
+      "classification": "accepted",
+      "classification_basis": "attempt-1 local journal was empty; attempt-2 refs equal",
+      "expected_fixture_classification": "accepted",
+      "matches_expected": true
+    },
+    {
+      "fixture_id": "S25-03",
+      "worker_id": "worker-s25-01",
+      "op_id": "op-s25-0001",
+      "attempts": [
+        1,
+        2
+      ],
+      "boundary": "before-record",
+      "value_relation": "same",
+      "ref_relation": "changed",
+      "local_journal": {
+        "attempt_1": {
+          "record_written": false,
+          "response_emitted": false,
+          "value": "alpha",
+          "response_ref": null,
+          "durable_ref": null
+        },
+        "attempt_2": {
+          "record_written": true,
+          "response_emitted": true,
+          "value": "alpha",
+          "response_ref": "ref-b",
+          "durable_ref": "ref-a"
+        }
+      },
+      "classification": "UNKNOWN",
+      "classification_basis": "attempt-2 response_ref and durable_ref differ",
+      "expected_fixture_classification": "UNKNOWN",
+      "matches_expected": true
+    },
+    {
+      "fixture_id": "S25-04",
+      "worker_id": "worker-s25-01",
+      "op_id": "op-s25-0001",
+      "attempts": [
+        1,
+        2
+      ],
+      "boundary": "before-record",
+      "value_relation": "different",
+      "ref_relation": "changed",
+      "local_journal": {
+        "attempt_1": {
+          "record_written": false,
+          "response_emitted": false,
+          "value": "alpha",
+          "response_ref": null,
+          "durable_ref": null
+        },
+        "attempt_2": {
+          "record_written": true,
+          "response_emitted": true,
+          "value": "beta",
+          "response_ref": "ref-b",
+          "durable_ref": "ref-a"
+        }
+      },
+      "classification": "UNKNOWN",
+      "classification_basis": "attempt-2 response_ref and durable_ref differ",
+      "expected_fixture_classification": "UNKNOWN",
+      "matches_expected": true
+    },
+    {
+      "fixture_id": "S25-05",
+      "worker_id": "worker-s25-01",
+      "op_id": "op-s25-0001",
+      "attempts": [
+        1,
+        2
+      ],
+      "boundary": "record-before-response",
+      "value_relation": "same",
+      "ref_relation": "equal",
+      "local_journal": {
+        "attempt_1": {
+          "record_written": true,
+          "response_emitted": false,
+          "value": "alpha",
+          "response_ref": null,
+          "durable_ref": "ref-a"
+        },
+        "attempt_2": {
+          "record_written": true,
+          "response_emitted": true,
+          "value": "alpha",
+          "response_ref": "ref-a",
+          "durable_ref": "ref-a"
+        }
+      },
+      "classification": "accepted",
+      "classification_basis": "same pre-restart local value and equal stable refs",
+      "expected_fixture_classification": "accepted",
+      "matches_expected": true
+    },
+    {
+      "fixture_id": "S25-06",
+      "worker_id": "worker-s25-01",
+      "op_id": "op-s25-0001",
+      "attempts": [
+        1,
+        2
+      ],
+      "boundary": "record-before-response",
+      "value_relation": "different",
+      "ref_relation": "equal",
+      "local_journal": {
+        "attempt_1": {
+          "record_written": true,
+          "response_emitted": false,
+          "value": "alpha",
+          "response_ref": null,
+          "durable_ref": "ref-a"
+        },
+        "attempt_2": {
+          "record_written": true,
+          "response_emitted": true,
+          "value": "beta",
+          "response_ref": "ref-a",
+          "durable_ref": "ref-a"
+        }
+      },
+      "classification": "rejected",
+      "classification_basis": "pre-restart local record value differs from attempt-2 value",
+      "expected_fixture_classification": "rejected",
+      "matches_expected": true
+    },
+    {
+      "fixture_id": "S25-07",
+      "worker_id": "worker-s25-01",
+      "op_id": "op-s25-0001",
+      "attempts": [
+        1,
+        2
+      ],
+      "boundary": "record-before-response",
+      "value_relation": "same",
+      "ref_relation": "changed",
+      "local_journal": {
+        "attempt_1": {
+          "record_written": true,
+          "response_emitted": false,
+          "value": "alpha",
+          "response_ref": null,
+          "durable_ref": "ref-a"
+        },
+        "attempt_2": {
+          "record_written": true,
+          "response_emitted": true,
+          "value": "alpha",
+          "response_ref": "ref-b",
+          "durable_ref": "ref-a"
+        }
+      },
+      "classification": "UNKNOWN",
+      "classification_basis": "attempt-2 response_ref and durable_ref differ",
+      "expected_fixture_classification": "UNKNOWN",
+      "matches_expected": true
+    },
+    {
+      "fixture_id": "S25-08",
+      "worker_id": "worker-s25-01",
+      "op_id": "op-s25-0001",
+      "attempts": [
+        1,
+        2
+      ],
+      "boundary": "record-before-response",
+      "value_relation": "different",
+      "ref_relation": "changed",
+      "local_journal": {
+        "attempt_1": {
+          "record_written": true,
+          "response_emitted": false,
+          "value": "alpha",
+          "response_ref": null,
+          "durable_ref": "ref-a"
+        },
+        "attempt_2": {
+          "record_written": true,
+          "response_emitted": true,
+          "value": "beta",
+          "response_ref": "ref-b",
+          "durable_ref": "ref-a"
+        }
+      },
+      "classification": "rejected",
+      "classification_basis": "pre-restart local record value differs from attempt-2 value",
+      "expected_fixture_classification": "rejected",
+      "matches_expected": true
+    },
+    {
+      "fixture_id": "S25-09",
+      "worker_id": "worker-s25-01",
+      "op_id": "op-s25-0001",
+      "attempts": [
+        1,
+        2
+      ],
+      "boundary": "response-before-record",
+      "value_relation": "same",
+      "ref_relation": "equal",
+      "local_journal": {
+        "attempt_1": {
+          "record_written": false,
+          "response_emitted": true,
+          "value": "alpha",
+          "response_ref": "ref-a",
+          "durable_ref": null
+        },
+        "attempt_2": {
+          "record_written": true,
+          "response_emitted": true,
+          "value": "alpha",
+          "response_ref": "ref-a",
+          "durable_ref": "ref-a"
+        }
+      },
+      "classification": "UNKNOWN",
+      "classification_basis": "response existed without local record at simulated restart",
+      "expected_fixture_classification": "UNKNOWN",
+      "matches_expected": true
+    },
+    {
+      "fixture_id": "S25-10",
+      "worker_id": "worker-s25-01",
+      "op_id": "op-s25-0001",
+      "attempts": [
+        1,
+        2
+      ],
+      "boundary": "response-before-record",
+      "value_relation": "different",
+      "ref_relation": "equal",
+      "local_journal": {
+        "attempt_1": {
+          "record_written": false,
+          "response_emitted": true,
+          "value": "alpha",
+          "response_ref": "ref-a",
+          "durable_ref": null
+        },
+        "attempt_2": {
+          "record_written": true,
+          "response_emitted": true,
+          "value": "beta",
+          "response_ref": "ref-a",
+          "durable_ref": "ref-a"
+        }
+      },
+      "classification": "UNKNOWN",
+      "classification_basis": "response existed without local record at simulated restart",
+      "expected_fixture_classification": "UNKNOWN",
+      "matches_expected": true
+    },
+    {
+      "fixture_id": "S25-11",
+      "worker_id": "worker-s25-01",
+      "op_id": "op-s25-0001",
+      "attempts": [
+        1,
+        2
+      ],
+      "boundary": "response-before-record",
+      "value_relation": "same",
+      "ref_relation": "changed",
+      "local_journal": {
+        "attempt_1": {
+          "record_written": false,
+          "response_emitted": true,
+          "value": "alpha",
+          "response_ref": "ref-a",
+          "durable_ref": null
+        },
+        "attempt_2": {
+          "record_written": true,
+          "response_emitted": true,
+          "value": "alpha",
+          "response_ref": "ref-b",
+          "durable_ref": "ref-a"
+        }
+      },
+      "classification": "UNKNOWN",
+      "classification_basis": "response existed without local record at simulated restart",
+      "expected_fixture_classification": "UNKNOWN",
+      "matches_expected": true
+    },
+    {
+      "fixture_id": "S25-12",
+      "worker_id": "worker-s25-01",
+      "op_id": "op-s25-0001",
+      "attempts": [
+        1,
+        2
+      ],
+      "boundary": "response-before-record",
+      "value_relation": "different",
+      "ref_relation": "changed",
+      "local_journal": {
+        "attempt_1": {
+          "record_written": false,
+          "response_emitted": true,
+          "value": "alpha",
+          "response_ref": "ref-a",
+          "durable_ref": null
+        },
+        "attempt_2": {
+          "record_written": true,
+          "response_emitted": true,
+          "value": "beta",
+          "response_ref": "ref-b",
+          "durable_ref": "ref-a"
+        }
+      },
+      "classification": "UNKNOWN",
+      "classification_basis": "response existed without local record at simulated restart",
+      "expected_fixture_classification": "UNKNOWN",
+      "matches_expected": true
+    }
+  ],
+  "disclaimer": "Local simulated journal states only; not evidence about real crash durability, remote state, exactly-once, rollback, or production safety."
+}

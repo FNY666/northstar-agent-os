@@ -1,0 +1,19 @@
+identity=A
+scope=/tmp/t-contract-0-20260920 (read-only) plus permitted /tmp architecture audit materials
+write_scope=/tmp/A-P0-TCONTRACT-REVIEW-2 only
+input_tree_modified=no (hash before/after identical)
+external_targets=not accessed: 140, canonical, tri-line, systemd, credentials
+verification=py_compile; isolated run_tests.py; independent_probes.py; input integrity diff empty
+--- artifacts ---
+      129     12350 A-P0-TCONTRACT-REVIEW-2.md
+      211     17972 evidence-capture.txt
+       50      2591 independent_probes.py
+       13       660 test-run-final.out
+       12      2111 independent-probes-final.out
+        5       448 SHA256-FINAL.txt
+--- sha256 ---
+28ce49976391a20f5cda55203ad280321a06fc86de78f7c971358a0f3868cc36  A-P0-TCONTRACT-REVIEW-2.md
+5bad3a1c56ccac60d16f9b90acffca09c2d272dae3c89b357b3fdb7419e9463f  evidence-capture.txt
+db9a11ee7da02675d1e29cc1b3032f658ebba4ed8a4197756e54b0d523f0a2d1  independent_probes.py
+209a4e617cb447867a889240e0b94e6ad8c7840ace816becd99efb5676a88993  test-run-final.out
+aca70d0a452af6ec883da7db7f9919f6c14d05b92848ab0b486afbfc9668ee02  independent-probes-final.out

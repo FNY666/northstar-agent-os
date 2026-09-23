@@ -1,0 +1,754 @@
+{
+  "cases": [
+    {
+      "evidence": [
+        "parent links完整",
+        "因果顺序与跨系统链接均闭合"
+      ],
+      "flags": {
+        "branch_conflict": false,
+        "branch_digest_consistent": true,
+        "branch_merge_attested": true,
+        "causal_acyclic": true,
+        "causal_cycle_conflict": false,
+        "causal_order_complete": true,
+        "cross_system_link_attested": true,
+        "duplicate_dedup_attested": true,
+        "fence_conflict": false,
+        "fence_valid": true,
+        "identity_conflict": false,
+        "parent_links_complete": true,
+        "reorder_window_closed": true,
+        "replay_gap": false,
+        "replay_window_closed": true,
+        "same_identity": true,
+        "sequence_monotonic": true,
+        "source_epoch_continuous": true,
+        "watermark_closed": true
+      },
+      "id": "linear-causal-chain",
+      "label": "线性因果链闭合",
+      "status": "RECOVERED"
+    },
+    {
+      "evidence": [
+        "branch merge attestation存在",
+        "分支摘要一致且merge点唯一"
+      ],
+      "flags": {
+        "branch_conflict": false,
+        "branch_digest_consistent": true,
+        "branch_merge_attested": true,
+        "causal_acyclic": true,
+        "causal_cycle_conflict": false,
+        "causal_order_complete": true,
+        "cross_system_link_attested": true,
+        "duplicate_dedup_attested": true,
+        "fence_conflict": false,
+        "fence_valid": true,
+        "identity_conflict": false,
+        "parent_links_complete": true,
+        "reorder_window_closed": true,
+        "replay_gap": false,
+        "replay_window_closed": true,
+        "same_identity": true,
+        "sequence_monotonic": true,
+        "source_epoch_continuous": true,
+        "watermark_closed": true
+      },
+      "id": "attested-branch-merge",
+      "label": "分支合并有证明",
+      "status": "RECOVERED"
+    },
+    {
+      "evidence": [
+        "乱序在replay window内",
+        "duplicate已由同一身份与摘要去重"
+      ],
+      "flags": {
+        "branch_conflict": false,
+        "branch_digest_consistent": true,
+        "branch_merge_attested": true,
+        "causal_acyclic": true,
+        "causal_cycle_conflict": false,
+        "causal_order_complete": true,
+        "cross_system_link_attested": true,
+        "duplicate_dedup_attested": true,
+        "fence_conflict": false,
+        "fence_valid": true,
+        "identity_conflict": false,
+        "parent_links_complete": true,
+        "reorder_window_closed": true,
+        "replay_gap": false,
+        "replay_window_closed": true,
+        "same_identity": true,
+        "sequence_monotonic": true,
+        "source_epoch_continuous": true,
+        "watermark_closed": true
+      },
+      "id": "bounded-reordered-duplicate",
+      "label": "有界乱序与重复投递",
+      "status": "RECOVERED"
+    },
+    {
+      "evidence": [
+        "迟到事件纳入重放",
+        "watermark覆盖最大允许延迟"
+      ],
+      "flags": {
+        "branch_conflict": false,
+        "branch_digest_consistent": true,
+        "branch_merge_attested": true,
+        "causal_acyclic": true,
+        "causal_cycle_conflict": false,
+        "causal_order_complete": true,
+        "cross_system_link_attested": true,
+        "duplicate_dedup_attested": true,
+        "fence_conflict": false,
+        "fence_valid": true,
+        "identity_conflict": false,
+        "parent_links_complete": true,
+        "reorder_window_closed": true,
+        "replay_gap": false,
+        "replay_window_closed": true,
+        "same_identity": true,
+        "sequence_monotonic": true,
+        "source_epoch_continuous": true,
+        "watermark_closed": true
+      },
+      "id": "delayed-watermark-closed",
+      "label": "延迟事件且水位线闭合",
+      "status": "RECOVERED"
+    },
+    {
+      "evidence": [
+        "source/target correlation完整",
+        "跨系统链无缺口"
+      ],
+      "flags": {
+        "branch_conflict": false,
+        "branch_digest_consistent": true,
+        "branch_merge_attested": true,
+        "causal_acyclic": true,
+        "causal_cycle_conflict": false,
+        "causal_order_complete": true,
+        "cross_system_link_attested": true,
+        "duplicate_dedup_attested": true,
+        "fence_conflict": false,
+        "fence_valid": true,
+        "identity_conflict": false,
+        "parent_links_complete": true,
+        "reorder_window_closed": true,
+        "replay_gap": false,
+        "replay_window_closed": true,
+        "same_identity": true,
+        "sequence_monotonic": true,
+        "source_epoch_continuous": true,
+        "watermark_closed": true
+      },
+      "id": "multi-system-link-complete",
+      "label": "多系统因果链接闭合",
+      "status": "RECOVERED"
+    },
+    {
+      "evidence": [
+        "epoch transition边已认证",
+        "旧新epoch之间没有fence穿透"
+      ],
+      "flags": {
+        "branch_conflict": false,
+        "branch_digest_consistent": true,
+        "branch_merge_attested": true,
+        "causal_acyclic": true,
+        "causal_cycle_conflict": false,
+        "causal_order_complete": true,
+        "cross_system_link_attested": true,
+        "duplicate_dedup_attested": true,
+        "fence_conflict": false,
+        "fence_valid": true,
+        "identity_conflict": false,
+        "parent_links_complete": true,
+        "reorder_window_closed": true,
+        "replay_gap": false,
+        "replay_window_closed": true,
+        "same_identity": true,
+        "sequence_monotonic": true,
+        "source_epoch_continuous": true,
+        "watermark_closed": true
+      },
+      "id": "epoch-transition-attested",
+      "label": "epoch迁移有连续证明",
+      "status": "RECOVERED"
+    },
+    {
+      "evidence": [
+        "子事件存在但causal parent不可取回"
+      ],
+      "flags": {
+        "branch_conflict": false,
+        "branch_digest_consistent": true,
+        "branch_merge_attested": true,
+        "causal_acyclic": true,
+        "causal_cycle_conflict": false,
+        "causal_order_complete": true,
+        "cross_system_link_attested": true,
+        "duplicate_dedup_attested": true,
+        "fence_conflict": false,
+        "fence_valid": true,
+        "identity_conflict": false,
+        "parent_links_complete": false,
+        "reorder_window_closed": true,
+        "replay_gap": true,
+        "replay_window_closed": true,
+        "same_identity": true,
+        "sequence_monotonic": true,
+        "source_epoch_continuous": true,
+        "watermark_closed": true
+      },
+      "id": "parent-link-missing",
+      "label": "父链接缺失",
+      "status": "UNKNOWN"
+    },
+    {
+      "evidence": [
+        "当前结果没有检测到环但缺少完整拓扑证据"
+      ],
+      "flags": {
+        "branch_conflict": false,
+        "branch_digest_consistent": true,
+        "branch_merge_attested": true,
+        "causal_acyclic": false,
+        "causal_cycle_conflict": false,
+        "causal_order_complete": true,
+        "cross_system_link_attested": true,
+        "duplicate_dedup_attested": true,
+        "fence_conflict": false,
+        "fence_valid": true,
+        "identity_conflict": false,
+        "parent_links_complete": true,
+        "reorder_window_closed": true,
+        "replay_gap": false,
+        "replay_window_closed": true,
+        "same_identity": true,
+        "sequence_monotonic": true,
+        "source_epoch_continuous": true,
+        "watermark_closed": true
+      },
+      "id": "acyclicity-unproven",
+      "label": "无环性未证明",
+      "status": "UNKNOWN"
+    },
+    {
+      "evidence": [
+        "事件时间可见但中间顺序不可闭合"
+      ],
+      "flags": {
+        "branch_conflict": false,
+        "branch_digest_consistent": true,
+        "branch_merge_attested": true,
+        "causal_acyclic": true,
+        "causal_cycle_conflict": false,
+        "causal_order_complete": false,
+        "cross_system_link_attested": true,
+        "duplicate_dedup_attested": true,
+        "fence_conflict": false,
+        "fence_valid": true,
+        "identity_conflict": false,
+        "parent_links_complete": true,
+        "reorder_window_closed": true,
+        "replay_gap": false,
+        "replay_window_closed": true,
+        "same_identity": true,
+        "sequence_monotonic": true,
+        "source_epoch_continuous": true,
+        "watermark_closed": true
+      },
+      "id": "causal-order-gap",
+      "label": "因果顺序缺口",
+      "status": "UNKNOWN"
+    },
+    {
+      "evidence": [
+        "两个分支均存在但缺少可信merge attestation"
+      ],
+      "flags": {
+        "branch_conflict": false,
+        "branch_digest_consistent": true,
+        "branch_merge_attested": false,
+        "causal_acyclic": true,
+        "causal_cycle_conflict": false,
+        "causal_order_complete": true,
+        "cross_system_link_attested": true,
+        "duplicate_dedup_attested": true,
+        "fence_conflict": false,
+        "fence_valid": true,
+        "identity_conflict": false,
+        "parent_links_complete": true,
+        "reorder_window_closed": true,
+        "replay_gap": false,
+        "replay_window_closed": true,
+        "same_identity": true,
+        "sequence_monotonic": true,
+        "source_epoch_continuous": true,
+        "watermark_closed": true
+      },
+      "id": "branch-merge-unattested",
+      "label": "分支合并无证明",
+      "status": "UNKNOWN"
+    },
+    {
+      "evidence": [
+        "没有足够canonical digest证据判断分支是否一致"
+      ],
+      "flags": {
+        "branch_conflict": false,
+        "branch_digest_consistent": false,
+        "branch_merge_attested": true,
+        "causal_acyclic": true,
+        "causal_cycle_conflict": false,
+        "causal_order_complete": true,
+        "cross_system_link_attested": true,
+        "duplicate_dedup_attested": true,
+        "fence_conflict": false,
+        "fence_valid": true,
+        "identity_conflict": false,
+        "parent_links_complete": true,
+        "reorder_window_closed": true,
+        "replay_gap": false,
+        "replay_window_closed": true,
+        "same_identity": true,
+        "sequence_monotonic": true,
+        "source_epoch_continuous": true,
+        "watermark_closed": true
+      },
+      "id": "branch-digest-unproven",
+      "label": "分支摘要不可比",
+      "status": "UNKNOWN"
+    },
+    {
+      "evidence": [
+        "sequence出现跳变但无法区分延迟与丢失"
+      ],
+      "flags": {
+        "branch_conflict": false,
+        "branch_digest_consistent": true,
+        "branch_merge_attested": true,
+        "causal_acyclic": true,
+        "causal_cycle_conflict": false,
+        "causal_order_complete": true,
+        "cross_system_link_attested": true,
+        "duplicate_dedup_attested": true,
+        "fence_conflict": false,
+        "fence_valid": true,
+        "identity_conflict": false,
+        "parent_links_complete": true,
+        "reorder_window_closed": true,
+        "replay_gap": false,
+        "replay_window_closed": true,
+        "same_identity": true,
+        "sequence_monotonic": false,
+        "source_epoch_continuous": true,
+        "watermark_closed": true
+      },
+      "id": "sequence-not-monotonic",
+      "label": "序列单调性未闭合",
+      "status": "UNKNOWN"
+    },
+    {
+      "evidence": [
+        "仍可能有迟到分支进入当前窗口"
+      ],
+      "flags": {
+        "branch_conflict": false,
+        "branch_digest_consistent": true,
+        "branch_merge_attested": true,
+        "causal_acyclic": true,
+        "causal_cycle_conflict": false,
+        "causal_order_complete": true,
+        "cross_system_link_attested": true,
+        "duplicate_dedup_attested": true,
+        "fence_conflict": false,
+        "fence_valid": true,
+        "identity_conflict": false,
+        "parent_links_complete": true,
+        "reorder_window_closed": false,
+        "replay_gap": false,
+        "replay_window_closed": true,
+        "same_identity": true,
+        "sequence_monotonic": true,
+        "source_epoch_continuous": true,
+        "watermark_closed": true
+      },
+      "id": "reorder-window-open",
+      "label": "乱序窗口未闭合",
+      "status": "UNKNOWN"
+    },
+    {
+      "evidence": [
+        "bounded replay未到终止水位"
+      ],
+      "flags": {
+        "branch_conflict": false,
+        "branch_digest_consistent": true,
+        "branch_merge_attested": true,
+        "causal_acyclic": true,
+        "causal_cycle_conflict": false,
+        "causal_order_complete": true,
+        "cross_system_link_attested": true,
+        "duplicate_dedup_attested": true,
+        "fence_conflict": false,
+        "fence_valid": true,
+        "identity_conflict": false,
+        "parent_links_complete": true,
+        "reorder_window_closed": true,
+        "replay_gap": false,
+        "replay_window_closed": false,
+        "same_identity": true,
+        "sequence_monotonic": true,
+        "source_epoch_continuous": true,
+        "watermark_closed": true
+      },
+      "id": "replay-window-open",
+      "label": "重放窗口未闭合",
+      "status": "UNKNOWN"
+    },
+    {
+      "evidence": [
+        "重复事件存在但缺少唯一键与摘要闭合"
+      ],
+      "flags": {
+        "branch_conflict": false,
+        "branch_digest_consistent": true,
+        "branch_merge_attested": true,
+        "causal_acyclic": true,
+        "causal_cycle_conflict": false,
+        "causal_order_complete": true,
+        "cross_system_link_attested": true,
+        "duplicate_dedup_attested": false,
+        "fence_conflict": false,
+        "fence_valid": true,
+        "identity_conflict": false,
+        "parent_links_complete": true,
+        "reorder_window_closed": true,
+        "replay_gap": false,
+        "replay_window_closed": true,
+        "same_identity": true,
+        "sequence_monotonic": true,
+        "source_epoch_continuous": true,
+        "watermark_closed": true
+      },
+      "id": "dedup-unproven",
+      "label": "重复去重未证明",
+      "status": "UNKNOWN"
+    },
+    {
+      "evidence": [
+        "source receipt与target log无法关联"
+      ],
+      "flags": {
+        "branch_conflict": false,
+        "branch_digest_consistent": true,
+        "branch_merge_attested": true,
+        "causal_acyclic": true,
+        "causal_cycle_conflict": false,
+        "causal_order_complete": true,
+        "cross_system_link_attested": false,
+        "duplicate_dedup_attested": true,
+        "fence_conflict": false,
+        "fence_valid": true,
+        "identity_conflict": false,
+        "parent_links_complete": true,
+        "reorder_window_closed": true,
+        "replay_gap": false,
+        "replay_window_closed": true,
+        "same_identity": true,
+        "sequence_monotonic": true,
+        "source_epoch_continuous": true,
+        "watermark_closed": true
+      },
+      "id": "cross-system-link-missing",
+      "label": "跨系统链接缺失",
+      "status": "UNKNOWN"
+    },
+    {
+      "evidence": [
+        "epoch之间缺少连续性边"
+      ],
+      "flags": {
+        "branch_conflict": false,
+        "branch_digest_consistent": true,
+        "branch_merge_attested": true,
+        "causal_acyclic": true,
+        "causal_cycle_conflict": false,
+        "causal_order_complete": true,
+        "cross_system_link_attested": true,
+        "duplicate_dedup_attested": true,
+        "fence_conflict": false,
+        "fence_valid": true,
+        "identity_conflict": false,
+        "parent_links_complete": true,
+        "reorder_window_closed": true,
+        "replay_gap": false,
+        "replay_window_closed": true,
+        "same_identity": true,
+        "sequence_monotonic": true,
+        "source_epoch_continuous": false,
+        "watermark_closed": true
+      },
+      "id": "source-epoch-gap",
+      "label": "来源epoch缺口",
+      "status": "UNKNOWN"
+    },
+    {
+      "evidence": [
+        "查询仍可能漏掉迟到事件"
+      ],
+      "flags": {
+        "branch_conflict": false,
+        "branch_digest_consistent": true,
+        "branch_merge_attested": true,
+        "causal_acyclic": true,
+        "causal_cycle_conflict": false,
+        "causal_order_complete": true,
+        "cross_system_link_attested": true,
+        "duplicate_dedup_attested": true,
+        "fence_conflict": false,
+        "fence_valid": true,
+        "identity_conflict": false,
+        "parent_links_complete": true,
+        "reorder_window_closed": true,
+        "replay_gap": false,
+        "replay_window_closed": true,
+        "same_identity": true,
+        "sequence_monotonic": true,
+        "source_epoch_continuous": true,
+        "watermark_closed": false
+      },
+      "id": "watermark-open",
+      "label": "水位线未闭合",
+      "status": "UNKNOWN"
+    },
+    {
+      "evidence": [
+        "NO_EVENT只是当前视图",
+        "replay gap未闭合"
+      ],
+      "flags": {
+        "branch_conflict": false,
+        "branch_digest_consistent": true,
+        "branch_merge_attested": true,
+        "causal_acyclic": true,
+        "causal_cycle_conflict": false,
+        "causal_order_complete": true,
+        "cross_system_link_attested": true,
+        "duplicate_dedup_attested": true,
+        "fence_conflict": false,
+        "fence_valid": true,
+        "identity_conflict": false,
+        "parent_links_complete": true,
+        "reorder_window_closed": true,
+        "replay_gap": true,
+        "replay_window_closed": true,
+        "same_identity": false,
+        "sequence_monotonic": true,
+        "source_epoch_continuous": true,
+        "watermark_closed": true
+      },
+      "id": "no-event-query-gap",
+      "label": "查询无事件但有缺口",
+      "status": "UNKNOWN"
+    },
+    {
+      "evidence": [
+        "缺少tenant/source/epoch等身份字段"
+      ],
+      "flags": {
+        "branch_conflict": false,
+        "branch_digest_consistent": true,
+        "branch_merge_attested": true,
+        "causal_acyclic": true,
+        "causal_cycle_conflict": false,
+        "causal_order_complete": true,
+        "cross_system_link_attested": true,
+        "duplicate_dedup_attested": true,
+        "fence_conflict": false,
+        "fence_valid": true,
+        "identity_conflict": false,
+        "parent_links_complete": true,
+        "reorder_window_closed": true,
+        "replay_gap": false,
+        "replay_window_closed": true,
+        "same_identity": false,
+        "sequence_monotonic": true,
+        "source_epoch_continuous": true,
+        "watermark_closed": true
+      },
+      "id": "identity-unresolved",
+      "label": "身份域无法确定",
+      "status": "UNKNOWN"
+    },
+    {
+      "evidence": [
+        "多个缺口不能互相抵消"
+      ],
+      "flags": {
+        "branch_conflict": false,
+        "branch_digest_consistent": true,
+        "branch_merge_attested": true,
+        "causal_acyclic": true,
+        "causal_cycle_conflict": false,
+        "causal_order_complete": true,
+        "cross_system_link_attested": true,
+        "duplicate_dedup_attested": true,
+        "fence_conflict": false,
+        "fence_valid": true,
+        "identity_conflict": false,
+        "parent_links_complete": false,
+        "reorder_window_closed": true,
+        "replay_gap": true,
+        "replay_window_closed": true,
+        "same_identity": true,
+        "sequence_monotonic": true,
+        "source_epoch_continuous": true,
+        "watermark_closed": true
+      },
+      "id": "partial-chain-and-gap",
+      "label": "部分链与重放缺口同时存在",
+      "status": "UNKNOWN"
+    },
+    {
+      "evidence": [
+        "tenant或source明确不同"
+      ],
+      "flags": {
+        "branch_conflict": false,
+        "branch_digest_consistent": true,
+        "branch_merge_attested": true,
+        "causal_acyclic": true,
+        "causal_cycle_conflict": false,
+        "causal_order_complete": true,
+        "cross_system_link_attested": true,
+        "duplicate_dedup_attested": true,
+        "fence_conflict": false,
+        "fence_valid": true,
+        "identity_conflict": true,
+        "parent_links_complete": true,
+        "reorder_window_closed": true,
+        "replay_gap": false,
+        "replay_window_closed": true,
+        "same_identity": false,
+        "sequence_monotonic": true,
+        "source_epoch_continuous": true,
+        "watermark_closed": true
+      },
+      "id": "cross-tenant-conflict",
+      "label": "跨身份域合并",
+      "status": "REJECT"
+    },
+    {
+      "evidence": [
+        "拓扑中出现不可调和causal cycle"
+      ],
+      "flags": {
+        "branch_conflict": false,
+        "branch_digest_consistent": true,
+        "branch_merge_attested": true,
+        "causal_acyclic": false,
+        "causal_cycle_conflict": true,
+        "causal_order_complete": true,
+        "cross_system_link_attested": true,
+        "duplicate_dedup_attested": true,
+        "fence_conflict": false,
+        "fence_valid": true,
+        "identity_conflict": false,
+        "parent_links_complete": true,
+        "reorder_window_closed": true,
+        "replay_gap": false,
+        "replay_window_closed": true,
+        "same_identity": true,
+        "sequence_monotonic": true,
+        "source_epoch_continuous": true,
+        "watermark_closed": true
+      },
+      "id": "causal-cycle-conflict",
+      "label": "因果环冲突",
+      "status": "REJECT"
+    },
+    {
+      "evidence": [
+        "同一merge边界的分支摘要不可同时成立"
+      ],
+      "flags": {
+        "branch_conflict": true,
+        "branch_digest_consistent": false,
+        "branch_merge_attested": true,
+        "causal_acyclic": true,
+        "causal_cycle_conflict": false,
+        "causal_order_complete": true,
+        "cross_system_link_attested": true,
+        "duplicate_dedup_attested": true,
+        "fence_conflict": false,
+        "fence_valid": true,
+        "identity_conflict": false,
+        "parent_links_complete": true,
+        "reorder_window_closed": true,
+        "replay_gap": false,
+        "replay_window_closed": true,
+        "same_identity": true,
+        "sequence_monotonic": true,
+        "source_epoch_continuous": true,
+        "watermark_closed": true
+      },
+      "id": "branch-conflict",
+      "label": "分支内容冲突",
+      "status": "REJECT"
+    },
+    {
+      "evidence": [
+        "目标拒绝stale generation/fence"
+      ],
+      "flags": {
+        "branch_conflict": false,
+        "branch_digest_consistent": true,
+        "branch_merge_attested": true,
+        "causal_acyclic": true,
+        "causal_cycle_conflict": false,
+        "causal_order_complete": true,
+        "cross_system_link_attested": true,
+        "duplicate_dedup_attested": true,
+        "fence_conflict": true,
+        "fence_valid": false,
+        "identity_conflict": false,
+        "parent_links_complete": true,
+        "reorder_window_closed": true,
+        "replay_gap": false,
+        "replay_window_closed": true,
+        "same_identity": true,
+        "sequence_monotonic": true,
+        "source_epoch_continuous": true,
+        "watermark_closed": true
+      },
+      "id": "stale-fence",
+      "label": "旧 fence token",
+      "status": "REJECT"
+    }
+  ],
+  "causal_domain": [
+    "parent_link",
+    "branch",
+    "merge",
+    "sequence",
+    "replay_window",
+    "watermark"
+  ],
+  "identity_domain": [
+    "tenant",
+    "source",
+    "event_id",
+    "epoch",
+    "version"
+  ],
+  "production_verified": false,
+  "schema_version": "S34-cases-1",
+  "synthetic_only": true
+}

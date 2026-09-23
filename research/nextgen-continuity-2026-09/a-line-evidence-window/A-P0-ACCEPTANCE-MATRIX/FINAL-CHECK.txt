@@ -1,0 +1,14 @@
+identity=A
+scope=offline synthetic acceptance matrix only
+forbidden_targets=140 canonical tri-line systemd credentials shared-P0
+verification=py_compile; 1024 combinations; invariants PASS
+--- wc ---
+       58      2942 acceptance_matrix.py
+       26      1944 ACCEPTANCE-MATRIX-REPORT.md
+       26       607 matrix-output.json
+        3       266 SHA256-FINAL.txt
+      113      5759 total
+--- sha256 ---
+07bd197884980f911bf880310194c1f708ddd88f91ca2b333257cf4c5ba162da  acceptance_matrix.py
+d96c1217fc4b5fdf4014c37cac192c4c7d2f2becb180f06867a024ce79357d89  ACCEPTANCE-MATRIX-REPORT.md
+1331539d41b56311307f04e2c98a18fd0476773e3e6fd2fffc78c0fb8b5b87bb  matrix-output.json

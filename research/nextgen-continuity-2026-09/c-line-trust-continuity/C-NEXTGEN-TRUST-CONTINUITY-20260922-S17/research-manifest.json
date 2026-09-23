@@ -1,0 +1,28 @@
+{
+  "schema_version": "S17-research-manifest-v1",
+  "question": "在本地合成条件下，规则包 HMAC 签名、撤销列表完整性、跨实现 canonicalization 和时钟边界能否按保守三态互操作矩阵确定性判定？",
+  "scope": {
+    "slice": "C line independent synthesis S17",
+    "directory": "/tmp/C-NEXTGEN-TRUST-CONTINUITY-20260922-S17",
+    "network_access": false,
+    "real_services": false,
+    "real_credentials": false,
+    "synthetic_only": true,
+    "production_verified": false,
+    "excluded": ["S1-S16", "shared/P0", "accident directories", "D10/L12/D14", "canonical", "staging", "140", "tri-line", "systemd"]
+  },
+  "claims": [
+    {"id":"C1","claim":"固定非真实 key 下 HMAC-SHA256 对规则包字节的通过、篡改和缺失路径可确定性区分。","status":"inferred","confidence":0.99,"sources":[{"url":"https://www.rfc-editor.org/rfc/rfc2104","publisher":"RFC Editor","published_or_updated":"1997-02","tier":"authoritative_independent","support":"HMAC construction background only; this fixture result is local."}],"caveat":"不证明生产密钥或真实签名体系。"},
+    {"id":"C2","claim":"撤销命中为 REJECT，未命中可 RECOVERED；列表缺失、不可访问、篡改或不可验证为 UNKNOWN。","status":"inferred","confidence":0.99,"sources":[],"caveat":"仅为本地矩阵规则和 fixtures。"},
+    {"id":"C3","claim":"canonicalizer A/B 哈希一致可 RECOVERED；分歧默认 UNKNOWN，显式 contradiction 才 REJECT。","status":"inferred","confidence":0.99,"sources":[],"caveat":"不代表任何外部 canonicalization 标准。"},
+    {"id":"C4","claim":"撤销时间戳等于 observation time 的边界按命中处理；边界外按 fixture 的有效窗口判定。","status":"inferred","confidence":0.99,"sources":[],"caveat":"时钟模型为合成字符串时间比较。"},
+    {"id":"C5","claim":"25 个 fixtures 两次运行结果字节一致，三态计数为 RECOVERED=8、UNKNOWN=6、REJECT=11。","status":"inferred","confidence":1.0,"sources":[],"caveat":"仅表示本地 Python harness 的重放一致性。"},
+    {"id":"C6","claim":"本切片不证明真实撤销服务、durability、exactly-once、rollback 或 production readiness。","status":"inferred","confidence":1.0,"sources":[],"caveat":"范围声明，不是生产验证。"}
+  ],
+  "coverage": {
+    "fixture_count": 25,
+    "deterministic_runs": 2,
+    "statuses": ["RECOVERED","UNKNOWN","REJECT"],
+    "areas": ["policy HMAC pass/tamper/missing","revocation hit/miss/missing/tamper","cross-implementation equal/divergent","combined matrix","clock boundaries","provenance"]
+  }
+}

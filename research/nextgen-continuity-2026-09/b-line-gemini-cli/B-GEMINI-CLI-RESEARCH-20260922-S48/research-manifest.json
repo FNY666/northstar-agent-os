@@ -1,0 +1,144 @@
+{
+  "schema_version": "1.0",
+  "question": "What do official Gemini CLI sources establish about enterprise controls, security reporting, release verification, and release rollback boundaries?",
+  "scope": "public first-party Google Gemini CLI sources only; read-only research",
+  "coverage": [
+    "enterprise controls",
+    "MCP governance",
+    "security reporting",
+    "release verification",
+    "release rollback",
+    "runtime-effect boundaries"
+  ],
+  "slice_id": "B-S48-OFFICIAL-GOVERNANCE-RELEASE-SAFETY-20260922",
+  "status": "complete",
+  "research_date": "2026-09-22",
+  "access_date": "2026-09-22",
+  "sources": [
+    {
+      "id": "S48-1",
+      "url": "https://github.com/google-gemini/gemini-cli/blob/main/SECURITY.md",
+      "access_date": "2026-09-22",
+      "evidence_window": "security reporting route and response statement",
+      "evidence_level": "verified",
+      "cannot_prove": "remediation or runtime safety"
+    },
+    {
+      "id": "S48-2",
+      "url": "https://github.com/google-gemini/gemini-cli/blob/main/docs/admin/enterprise-controls.md",
+      "access_date": "2026-09-22",
+      "evidence_window": "strict mode, extension and MCP governance, required servers and approvals",
+      "evidence_level": "verified",
+      "cannot_prove": "universal enforcement or external effects"
+    },
+    {
+      "id": "S48-3",
+      "url": "https://github.com/google-gemini/gemini-cli/blob/main/.github/workflows/verify-release.yml",
+      "access_date": "2026-09-22",
+      "evidence_window": "release verification workflow, permissions, version input, secrets",
+      "evidence_level": "verified",
+      "cannot_prove": "release success or production rollout"
+    },
+    {
+      "id": "S48-4",
+      "url": "https://github.com/google-gemini/gemini-cli/blob/main/.github/workflows/release-rollback.yml",
+      "access_date": "2026-09-22",
+      "evidence_window": "release rollback inputs, tag/release operations, failure paths",
+      "evidence_level": "verified",
+      "cannot_prove": "runtime state rollback or business effect rollback"
+    }
+  ],
+  "claims": [
+    {
+      "id": "C1",
+      "claim": "Official security guidance provides a Google vulnerability reporting route and response statement.",
+      "status": "confirmed",
+      "confidence": "high",
+      "sources": [
+        {
+          "url": "https://github.com/google-gemini/gemini-cli/blob/main/SECURITY.md",
+          "publisher": "Google Gemini CLI",
+          "published_or_updated": "2026-09-22 repository snapshot",
+          "tier": "primary",
+          "support": "Security reporting file."
+        }
+      ],
+      "caveat": "Channel availability is not remediation proof."
+    },
+    {
+      "id": "C2",
+      "claim": "Enterprise controls cover strict mode, extensions, MCP enablement/disablement, allowlists/required servers, and approval/trust governance.",
+      "status": "confirmed",
+      "confidence": "high",
+      "sources": [
+        {
+          "url": "https://github.com/google-gemini/gemini-cli/blob/main/docs/admin/enterprise-controls.md",
+          "publisher": "Google Gemini CLI",
+          "published_or_updated": "2026-09-22 repository snapshot",
+          "tier": "primary",
+          "support": "Admin controls sections."
+        }
+      ],
+      "caveat": "Policy definition is not universal runtime enforcement."
+    },
+    {
+      "id": "C3",
+      "claim": "Release verification and rollback workflows use explicit inputs and permissions, with rollback operating on release/package metadata and failure paths.",
+      "status": "confirmed",
+      "confidence": "high",
+      "sources": [
+        {
+          "url": "https://github.com/google-gemini/gemini-cli/blob/main/.github/workflows/verify-release.yml",
+          "publisher": "Google Gemini CLI",
+          "published_or_updated": "2026-09-22 repository snapshot",
+          "tier": "primary",
+          "support": "Verify release workflow."
+        },
+        {
+          "url": "https://github.com/google-gemini/gemini-cli/blob/main/.github/workflows/release-rollback.yml",
+          "publisher": "Google Gemini CLI",
+          "published_or_updated": "2026-09-22 repository snapshot",
+          "tier": "primary",
+          "support": "Rollback workflow."
+        }
+      ],
+      "caveat": "Workflow source is not execution evidence."
+    },
+    {
+      "id": "C4",
+      "claim": "Exactly-once, rollout completeness, rollback atomicity, runtime state rollback, and external business-effect reversal remain unknown.",
+      "status": "unverified",
+      "confidence": "high",
+      "sources": [
+        {
+          "url": "https://github.com/google-gemini/gemini-cli/blob/main/.github/workflows/release-rollback.yml",
+          "publisher": "Google Gemini CLI",
+          "published_or_updated": "2026-09-22 repository snapshot",
+          "tier": "primary",
+          "support": "Metadata rollback operations do not specify runtime state rollback."
+        },
+        {
+          "url": "https://github.com/google-gemini/gemini-cli/blob/main/docs/admin/enterprise-controls.md",
+          "publisher": "Google Gemini CLI",
+          "published_or_updated": "2026-09-22 repository snapshot",
+          "tier": "primary",
+          "support": "Governance docs do not specify distributed effect guarantees."
+        }
+      ],
+      "caveat": "Treat ambiguous release/runtime outcomes as UNKNOWN until independent verification."
+    }
+  ],
+  "limitations": [
+    "Documentation/workflow source only",
+    "No workflow execution",
+    "No credentials or production access"
+  ],
+  "production_verified": false,
+  "unknowns": [
+    "exactly-once",
+    "rollout completeness",
+    "rollback atomicity",
+    "runtime state rollback",
+    "business-effect reversal"
+  ]
+}

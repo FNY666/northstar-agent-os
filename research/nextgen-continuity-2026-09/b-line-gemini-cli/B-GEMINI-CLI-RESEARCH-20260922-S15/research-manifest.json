@@ -1,0 +1,116 @@
+{
+  "schema_version": "1.0",
+  "question": "在 google-gemini/gemini-cli 官方公开文档、源码和测试中，retry/backoff/abort/timeout 是否提供自动重发、去重、幂等键、恢复窗口或远端状态 read-back；checkpoint/session 是否覆盖 tool execution 的 in-flight 副作用；取消后是否证明旧进程真实终止或外部资源停止？",
+  "scope": {
+    "repository": "google-gemini/gemini-cli",
+    "allowed_sources": "官方公开 GitHub 文档、源码、测试、API",
+    "branch": "main",
+    "retrieved": "2026-09-22",
+    "excluded": ["shared/P0", "事故目录", "D10/L12/D14", "canonical", "140", "tri-line", "systemd", "真实服务", "凭据", "S4-S14", "全仓库 clone"]
+  },
+  "claims": [
+    {
+      "id": "S15-C1",
+      "claim": "retryWithBackoff 对符合判定的调用自动重试，默认最多 10 次，使用带抖动的指数退避并受最大延迟限制。",
+      "status": "confirmed",
+      "confidence": "high",
+      "sources": [
+        {"url": "https://raw.githubusercontent.com/google-gemini/gemini-cli/main/packages/core/src/utils/retry.ts", "publisher": "Google Gemini CLI", "published_or_updated": "main retrieved 2026-09-22", "tier": "primary", "support": "DEFAULT_MAX_ATTEMPTS=10；retryWithBackoff；指数退避、jitter、maxDelayMs。"},
+        {"url": "https://raw.githubusercontent.com/google-gemini/gemini-cli/main/packages/core/src/utils/retry.test.ts", "publisher": "Google Gemini CLI", "published_or_updated": "main retrieved 2026-09-22", "tier": "primary", "support": "官方测试验证成功前重试、全失败抛错、默认 10 次和 delay cap。"}
+      ],
+      "caveat": "仅证明 CLI 进程内 retry 控制流；不证明远端成功、单次执行或外部副作用安全。"
+    },
+    {
+      "id": "S15-C2",
+      "claim": "官方 retry 层没有被证实提供通用去重、幂等键、远端 operation ID 或提交确认。",
+      "status": "inferred",
+      "confidence": "medium",
+      "sources": [
+        {"url": "https://raw.githubusercontent.com/google-gemini/gemini-cli/main/packages/core/src/utils/retry.ts", "publisher": "Google Gemini CLI", "published_or_updated": "main retrieved 2026-09-22", "tier": "primary", "support": "可见 RetryOptions/实现包含函数、次数、延迟、错误/内容判定、signal 和回调，未见幂等键或去重缓存。"}
+      ],
+      "caveat": "未见 CLI retry 层机制不等于远端服务绝无此能力；不能推断服务端语义。"
+    },
+    {
+      "id": "S15-C3",
+      "claim": "流式响应已有片段后发生 503 时，CLI 测试证明会发出 RETRY 并继续获取后续成功片段。",
+      "status": "confirmed",
+      "confidence": "high",
+      "sources": [
+        {"url": "https://raw.githubusercontent.com/google-gemini/gemini-cli/main/packages/core/src/core/geminiChat_network_retry.test.ts", "publisher": "Google Gemini CLI", "published_or_updated": "main retrieved 2026-09-22", "tier": "primary", "support": "mock stream 先 yield First part，再抛 503，断言 RETRY 和 Retry success。"}
+      ],
+      "caveat": "mock stream 测试不证明远端处理回滚、tool 副作用去重或首个流只执行一次。"
+    },
+    {
+      "id": "S15-C4",
+      "claim": "retryWithBackoff 支持 AbortSignal；取消时在开始/尝试/错误后检查 aborted，并将 signal 传入退避等待。",
+      "status": "confirmed",
+      "confidence": "high",
+      "sources": [
+        {"url": "https://raw.githubusercontent.com/google-gemini/gemini-cli/main/packages/core/src/utils/retry.ts", "publisher": "Google Gemini CLI", "published_or_updated": "main retrieved 2026-09-22", "tier": "primary", "support": "throwIfAborted、AbortError 分支和 delay(delayWithJitter, signal)。"}
+      ],
+      "caveat": "只约束 retry 控制流；不推出已发出的 HTTP 请求、远端生成、tool 或外部资源已终止。"
+    },
+    {
+      "id": "S15-C5",
+      "claim": "checkpoint 保存本地文件快照、会话历史和即将执行的 tool call；restore 恢复并重新提出原 tool call。",
+      "status": "confirmed",
+      "confidence": "high",
+      "sources": [
+        {"url": "https://github.com/google-gemini/gemini-cli/blob/main/docs/cli/checkpointing.md", "publisher": "Google Gemini CLI", "published_or_updated": "main retrieved 2026-09-22", "tier": "primary", "support": "官方文档逐项描述 Git snapshot、conversation history、tool call 和 restore re-propose。"},
+        {"url": "https://raw.githubusercontent.com/google-gemini/gemini-cli/main/integration-tests/checkpointing.test.ts", "publisher": "Google Gemini CLI", "published_or_updated": "main retrieved 2026-09-22", "tier": "primary", "support": "测试创建 snapshot、修改/删除文件并验证 restore 状态。"}
+      ],
+      "caveat": "覆盖本地文件与会话记录；未证明任意 tool 的 in-flight 网络请求或外部副作用可恢复/回滚。"
+    },
+    {
+      "id": "S15-C6",
+      "claim": "session resume/上下文 GC 恢复对话上下文；是否覆盖 tool execution 的 in-flight 副作用，官方证据不足。",
+      "status": "unverified",
+      "confidence": "high",
+      "sources": [
+        {"url": "https://github.com/google-gemini/gemini-cli/blob/main/docs/cli/session-management.md", "publisher": "Google Gemini CLI", "published_or_updated": "main retrieved 2026-09-22", "tier": "primary", "support": "文档描述会话保存含 tool executions 的历史并可 --resume。"},
+        {"url": "https://raw.githubusercontent.com/google-gemini/gemini-cli/main/integration-tests/resume-gc.test.ts", "publisher": "Google Gemini CLI", "published_or_updated": "main retrieved 2026-09-22", "tier": "primary", "support": "测试验证 resume 后继续响应及 GC trace。"}
+      ],
+      "caveat": "没有测试证明崩溃/退出时 in-flight tool 被重连、恰好一次执行、补偿、回读或回滚。"
+    },
+    {
+      "id": "S15-C7",
+      "claim": "shell execution 的 abort 控制流调用进程组终止并支持升级，官方测试在 mock 下验证 SIGTERM 后 SIGKILL、aborted 标志和 PTY 清理。",
+      "status": "confirmed",
+      "confidence": "high",
+      "sources": [
+        {"url": "https://raw.githubusercontent.com/google-gemini/gemini-cli/main/packages/core/src/services/shellExecutionService.ts", "publisher": "Google Gemini CLI", "published_or_updated": "main retrieved 2026-09-22", "tier": "primary", "support": "abort handler 调用 killProcessGroup(..., escalate:true)；kill() 调用 ExecutionLifecycleService.kill 并清理。"},
+        {"url": "https://raw.githubusercontent.com/google-gemini/gemini-cli/main/packages/core/src/services/shellExecutionService.test.ts", "publisher": "Google Gemini CLI", "published_or_updated": "main retrieved 2026-09-22", "tier": "primary", "support": "测试断言 mock PID 的 SIGTERM→SIGKILL 顺序、result.aborted、PTY destroy 和 listener disposal。"}
+      ],
+      "caveat": "测试使用 mock PTY/process.kill，证明 CLI 发出的控制流，不证明 OS 进程或外部资源实际停止。"
+    },
+    {
+      "id": "S15-C8",
+      "claim": "官方本窄范围测试没有证明取消后旧进程真实终止或外部资源停止。",
+      "status": "unverified",
+      "confidence": "high",
+      "sources": [
+        {"url": "https://raw.githubusercontent.com/google-gemini/gemini-cli/main/packages/core/src/services/shellExecutionService.test.ts", "publisher": "Google Gemini CLI", "published_or_updated": "main retrieved 2026-09-22", "tier": "primary", "support": "取消测试以 mock process/PTY、退出回调和信号断言为主，未见真实存活探针或外部资源 read-back。"},
+        {"url": "https://raw.githubusercontent.com/google-gemini/gemini-cli/main/packages/core/src/tools/shellBackgroundTools.test.ts", "publisher": "Google Gemini CLI", "published_or_updated": "main retrieved 2026-09-22", "tier": "primary", "support": "后台进程测试使用 mock child/PTY、历史和日志状态。"}
+      ],
+      "caveat": "仅表示本切片已检索证据无法证明，不断言整个项目或所有版本绝对不存在其他测试。"
+    },
+    {
+      "id": "S15-C9",
+      "claim": "官方本窄范围资料未提供恢复窗口或远端状态 read-back 的可验证证据。",
+      "status": "unverified",
+      "confidence": "medium",
+      "sources": [
+        {"url": "https://raw.githubusercontent.com/google-gemini/gemini-cli/main/packages/core/src/utils/retry.ts", "publisher": "Google Gemini CLI", "published_or_updated": "main retrieved 2026-09-22", "tier": "primary", "support": "retry 实现展示次数/延迟/取消，不展示恢复窗口、状态查询或幂等键。"},
+        {"url": "https://github.com/google-gemini/gemini-cli/blob/main/docs/cli/checkpointing.md", "publisher": "Google Gemini CLI", "published_or_updated": "main retrieved 2026-09-22", "tier": "primary", "support": "checkpoint 文档描述本地 snapshot/history/tool call，不描述远端状态 read-back。"},
+        {"url": "https://github.com/google-gemini/gemini-cli/blob/main/docs/cli/session-management.md", "publisher": "Google Gemini CLI", "published_or_updated": "main retrieved 2026-09-22", "tier": "primary", "support": "session 文档描述历史恢复/保留，不给出外部状态确认窗口。"}
+      ],
+      "caveat": "未找到不等于服务端没有这些能力；只能标记 CLI 公开资料在本窄范围内无法证明。"
+    }
+  ],
+  "coverage": {
+    "areas": ["retry/backoff", "abort/timeout boundary", "checkpoint", "session resume", "tool execution", "process cancellation", "external state read-back", "deduplication/idempotency"],
+    "official_only": true,
+    "narrow_scope_closed": true,
+    "limitations": ["未验证真实服务", "未验证真实子进程存活", "未访问凭据", "未访问排除目录", "未 clone 全仓库"]
+  }
+}

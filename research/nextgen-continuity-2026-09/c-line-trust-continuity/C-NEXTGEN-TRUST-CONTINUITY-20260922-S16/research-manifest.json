@@ -1,0 +1,29 @@
+{
+  "schema_version": "S16-research-manifest-1",
+  "question": "在仅本地合成的条件下，能否对序列化/规范化差异、多级 provenance 缺口与规则版本变更提供确定性、可重复且保守的三态判定？",
+  "scope": {
+    "slice": "C-NEXTGEN-TRUST-CONTINUITY-20260922-S16",
+    "synthetic_only": true,
+    "production_verified": false,
+    "network_access": false,
+    "read_restrictions": ["S1-S15", "other prior research artifacts", "shared/P0", "accident directories", "D10", "L12", "D14", "canonical", "staging", "140", "tri-line", "systemd"]
+  },
+  "claims": [
+    {"id":"C-S16-01","claim":"Canonical key sorting, NFC normalization, null omission, and finite Decimal normalization make the declared serialization-equivalent fixture pairs hash-identical.","status":"inferred","confidence":0.98,"sources":[],"caveat":"Local harness behavior only; no external canonicalization standard or production implementation was tested."},
+    {"id":"C-S16-02","claim":"Missing or unreachable required provenance levels remain UNKNOWN and are not upgraded by serialization choice, majority vote, or retry metadata.","status":"inferred","confidence":0.98,"sources":[],"caveat":"Synthetic fixture policy; does not establish behavior of any remote provenance service."},
+    {"id":"C-S16-03","claim":"Verifiable parent/integrity/content contradictions produce REJECT, while ordinary uncertainty remains UNKNOWN.","status":"inferred","confidence":0.97,"sources":[],"caveat":"The contradiction predicates are explicitly defined by this harness and are not evidence about a deployed rule engine."},
+    {"id":"C-S16-04","claim":"Each fixture is run once under v1 and once under v2, with rule_set, hashes, reasons, blockers, and version drift retained without silent overwrite.","status":"inferred","confidence":0.99,"sources":[],"caveat":"Reproducibility is demonstrated for this local deterministic code path only."},
+    {"id":"C-S16-05","claim":"A version-induced decision difference is classified as UNKNOWN/VERSION_CONFLICT unless the fixture explicitly declares the difference a contradiction.","status":"inferred","confidence":0.99,"sources":[],"caveat":"This is a conservative policy encoded in the synthetic harness, not a production readiness claim."},
+    {"id":"C-S16-06","claim":"The artifact set records synthetic_only=true and production_verified=false and does not prove durability, remote state, exactly-once, rollback, or production readiness.","status":"inferred","confidence":1.0,"sources":[],"caveat":"Scope declaration and limitation, not an external fact."},
+    {"id":"C-S16-07","claim":"The local manifest, fixture, output, and validators pass the required validation commands in this slice directory.","status":"inferred","confidence":0.99,"sources":[],"caveat":"Validation was performed locally; no external CI or deployment validation was used."}
+  ],
+  "coverage": {
+    "fixture_count": 22,
+    "minimum_required": 18,
+    "rule_sets": ["v1", "v2"],
+    "runs": 44,
+    "serialization_dimensions": ["JSON key order", "Unicode NFC vs NFD", "null omission", "numeric precision", "array order", "NFC key collision"],
+    "provenance_dimensions": ["L1 complete/L2 missing", "L1 missing/L2 complete", "both missing", "unreachable level", "complete chain", "parent mismatch", "integrity contradiction"],
+    "invariants": ["mutually exclusive statuses", "conservative UNKNOWN", "explicit version drift", "input canonical SHA-256", "provenance/reason/blockers retained"]
+  }
+}

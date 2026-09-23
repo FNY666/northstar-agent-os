@@ -1,0 +1,67 @@
+{
+  "schema_version": "1.0",
+  "question": "在本地确定性审计事件中，wall-clock 与逻辑序号 seq 如何按保守原则共同参与三态审计判定？",
+  "scope": {
+    "synthetic_only": true,
+    "production_verified": false,
+    "network_access": false,
+    "real_clock_or_ntp": false,
+    "sdk_or_credentials": false,
+    "forbidden_inputs": ["S1-S19", "other research artifacts", "shared/P0", "incident directories", "D10/L12/D14", "canonical", "staging", "140", "tri-line", "systemd"]
+  },
+  "claims": [
+    {
+      "id": "S20-CL01",
+      "claim": "RECOVERED 仅适用于证据充分且双轴一致的目标事件，不自动扩展至其他事件。",
+      "status": "inferred",
+      "confidence": "high",
+      "sources": [{"url":"https://example.invalid/s20/local-fixtures","publisher":"S20 local synthetic harness","published_or_updated":"2026-09-22","tier":"primary","support":"fixtures/cases.json 与 harness.py 的确定性规则"}],
+      "caveat": "仅为本地合成模型推论，不是生产系统事实。"
+    },
+    {
+      "id": "S20-CL02",
+      "claim": "wall-clock 与 seq 顺序冲突时，保守结果为 UNKNOWN，规则不默认任何一轴权威。",
+      "status": "inferred",
+      "confidence": "high",
+      "sources": [{"url":"https://example.invalid/s20/local-fixtures","publisher":"S20 local synthetic harness","published_or_updated":"2026-09-22","tier":"primary","support":"冲突 fixtures 与 harness.py 双轴冲突分支"}],
+      "caveat": "只覆盖合成输入和定义的排序语义。"
+    },
+    {
+      "id": "S20-CL03",
+      "claim": "缺失墙钟、缺失 seq、缺失权威时钟源、时钟回拨、同墙钟不同 seq、seq 空洞、未证实负断言、重试和超界偏移不会把证据升级。",
+      "status": "inferred",
+      "confidence": "high",
+      "sources": [{"url":"https://example.invalid/s20/local-fixtures","publisher":"S20 local synthetic harness","published_or_updated":"2026-09-22","tier":"primary","support":"对应 UNKNOWN fixtures 与阻塞条件输出"}],
+      "caveat": "不代表现实基础设施一定具有这些性质。"
+    },
+    {
+      "id": "S20-CL04",
+      "claim": "REJECT 仅由 fixture 内显式声明的不变量及可验证矛盾触发；时钟回拨本身不构成 REJECT。",
+      "status": "inferred",
+      "confidence": "high",
+      "sources": [{"url":"https://example.invalid/s20/local-fixtures","publisher":"S20 local synthetic harness","published_or_updated":"2026-09-22","tier":"primary","support":"wall_clock_monotonic 与 seq_monotonic 显式矛盾 fixtures"}],
+      "caveat": "这是分类器边界，不是生产拒绝协议。"
+    },
+    {
+      "id": "S20-CL05",
+      "claim": "offset 等于 limit 时边界可包含判定；offset 超过 limit 时为 UNKNOWN。",
+      "status": "inferred",
+      "confidence": "high",
+      "sources": [{"url":"https://example.invalid/s20/local-fixtures","publisher":"S20 local synthetic harness","published_or_updated":"2026-09-22","tier":"primary","support":"边界含与超界 fixtures"}],
+      "caveat": "limit 的数值和单位只在本切片合成模型中定义。"
+    },
+    {
+      "id": "S20-CL06",
+      "claim": "每条结果应保留双轴证据、理由、阻塞条件和 canonical 输入 SHA-256，以支持可复现审计。",
+      "status": "inferred",
+      "confidence": "high",
+      "sources": [{"url":"https://example.invalid/s20/local-results","publisher":"S20 local synthetic harness","published_or_updated":"2026-09-22","tier":"primary","support":"outputs/results.json、validator.py"}],
+      "caveat": "哈希可追溯性不等同于 durability、exactly-once 或生产可用性。"
+    }
+  ],
+  "coverage": {
+    "fixture_count": 20,
+    "covered_topics": ["dual-axis consistency", "ordering conflict", "seq-only", "clock rollback", "missing clock source", "co-timestamp", "sequence hole", "negative assertion", "inclusive boundary", "retry conservatism", "explicit invariant contradiction"],
+    "limitations": ["synthetic local fixtures only", "no production verification", "no network or real time/NTP"]
+  }
+}

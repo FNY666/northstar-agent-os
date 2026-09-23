@@ -1,0 +1,757 @@
+{
+  "cases": [
+    {
+      "evidence": [
+        "checkpoint签名和快照摘要已证明",
+        "delta segments连续且无缺口"
+      ],
+      "flags": {
+        "archive_restore_attested": true,
+        "checkpoint_attested": true,
+        "compaction_manifest_complete": true,
+        "delta_chain_complete": true,
+        "digest_conflict": false,
+        "fence_conflict": false,
+        "fence_valid": true,
+        "gap_present": false,
+        "identity_conflict": false,
+        "restore_ambiguous": false,
+        "restore_generation_conflict": false,
+        "restore_generation_match": true,
+        "retention_window_closed": true,
+        "same_identity": true,
+        "segment_chain_complete": true,
+        "snapshot_digest_match": true,
+        "source_epoch_continuous": true,
+        "tombstone_chain_complete": true,
+        "watermark_closed": true
+      },
+      "id": "checkpoint-delta-complete",
+      "label": "checkpoint与增量链闭合",
+      "status": "RECOVERED"
+    },
+    {
+      "evidence": [
+        "archive restore有独立证明",
+        "restore generation与checkpoint一致"
+      ],
+      "flags": {
+        "archive_restore_attested": true,
+        "checkpoint_attested": true,
+        "compaction_manifest_complete": true,
+        "delta_chain_complete": true,
+        "digest_conflict": false,
+        "fence_conflict": false,
+        "fence_valid": true,
+        "gap_present": false,
+        "identity_conflict": false,
+        "restore_ambiguous": false,
+        "restore_generation_conflict": false,
+        "restore_generation_match": true,
+        "retention_window_closed": true,
+        "same_identity": true,
+        "segment_chain_complete": true,
+        "snapshot_digest_match": true,
+        "source_epoch_continuous": true,
+        "tombstone_chain_complete": true,
+        "watermark_closed": true
+      },
+      "id": "archive-restore-complete",
+      "label": "归档恢复代际一致",
+      "status": "RECOVERED"
+    },
+    {
+      "evidence": [
+        "压缩前后segment映射完整",
+        "manifest digest与快照一致"
+      ],
+      "flags": {
+        "archive_restore_attested": true,
+        "checkpoint_attested": true,
+        "compaction_manifest_complete": true,
+        "delta_chain_complete": true,
+        "digest_conflict": false,
+        "fence_conflict": false,
+        "fence_valid": true,
+        "gap_present": false,
+        "identity_conflict": false,
+        "restore_ambiguous": false,
+        "restore_generation_conflict": false,
+        "restore_generation_match": true,
+        "retention_window_closed": true,
+        "same_identity": true,
+        "segment_chain_complete": true,
+        "snapshot_digest_match": true,
+        "source_epoch_continuous": true,
+        "tombstone_chain_complete": true,
+        "watermark_closed": true
+      },
+      "id": "compaction-manifest-complete",
+      "label": "compaction manifest闭合",
+      "status": "RECOVERED"
+    },
+    {
+      "evidence": [
+        "tombstone来源与顺序完整",
+        "删除不是证据缺失"
+      ],
+      "flags": {
+        "archive_restore_attested": true,
+        "checkpoint_attested": true,
+        "compaction_manifest_complete": true,
+        "delta_chain_complete": true,
+        "digest_conflict": false,
+        "fence_conflict": false,
+        "fence_valid": true,
+        "gap_present": false,
+        "identity_conflict": false,
+        "restore_ambiguous": false,
+        "restore_generation_conflict": false,
+        "restore_generation_match": true,
+        "retention_window_closed": true,
+        "same_identity": true,
+        "segment_chain_complete": true,
+        "snapshot_digest_match": true,
+        "source_epoch_continuous": true,
+        "tombstone_chain_complete": true,
+        "watermark_closed": true
+      },
+      "id": "tombstone-chain-complete",
+      "label": "删除标记链闭合",
+      "status": "RECOVERED"
+    },
+    {
+      "evidence": [
+        "迟到segment已纳入重放",
+        "watermark覆盖最大允许延迟"
+      ],
+      "flags": {
+        "archive_restore_attested": true,
+        "checkpoint_attested": true,
+        "compaction_manifest_complete": true,
+        "delta_chain_complete": true,
+        "digest_conflict": false,
+        "fence_conflict": false,
+        "fence_valid": true,
+        "gap_present": false,
+        "identity_conflict": false,
+        "restore_ambiguous": false,
+        "restore_generation_conflict": false,
+        "restore_generation_match": true,
+        "retention_window_closed": true,
+        "same_identity": true,
+        "segment_chain_complete": true,
+        "snapshot_digest_match": true,
+        "source_epoch_continuous": true,
+        "tombstone_chain_complete": true,
+        "watermark_closed": true
+      },
+      "id": "delayed-watermark-closed",
+      "label": "延迟证据但水位线闭合",
+      "status": "RECOVERED"
+    },
+    {
+      "evidence": [
+        "重复snapshot摘要一致",
+        "重复定位已去重"
+      ],
+      "flags": {
+        "archive_restore_attested": true,
+        "checkpoint_attested": true,
+        "compaction_manifest_complete": true,
+        "delta_chain_complete": true,
+        "digest_conflict": false,
+        "fence_conflict": false,
+        "fence_valid": true,
+        "gap_present": false,
+        "identity_conflict": false,
+        "restore_ambiguous": false,
+        "restore_generation_conflict": false,
+        "restore_generation_match": true,
+        "retention_window_closed": true,
+        "same_identity": true,
+        "segment_chain_complete": true,
+        "snapshot_digest_match": true,
+        "source_epoch_continuous": true,
+        "tombstone_chain_complete": true,
+        "watermark_closed": true
+      },
+      "id": "duplicate-snapshot-consistent",
+      "label": "重复快照一致",
+      "status": "RECOVERED"
+    },
+    {
+      "evidence": [
+        "本地快照存在但无可信签名或来源证明"
+      ],
+      "flags": {
+        "archive_restore_attested": true,
+        "checkpoint_attested": false,
+        "compaction_manifest_complete": true,
+        "delta_chain_complete": true,
+        "digest_conflict": false,
+        "fence_conflict": false,
+        "fence_valid": true,
+        "gap_present": false,
+        "identity_conflict": false,
+        "restore_ambiguous": false,
+        "restore_generation_conflict": false,
+        "restore_generation_match": true,
+        "retention_window_closed": true,
+        "same_identity": true,
+        "segment_chain_complete": true,
+        "snapshot_digest_match": true,
+        "source_epoch_continuous": true,
+        "tombstone_chain_complete": true,
+        "watermark_closed": true
+      },
+      "id": "checkpoint-not-attested",
+      "label": "checkpoint未认证",
+      "status": "UNKNOWN"
+    },
+    {
+      "evidence": [
+        "canonical snapshot digest缺失"
+      ],
+      "flags": {
+        "archive_restore_attested": true,
+        "checkpoint_attested": true,
+        "compaction_manifest_complete": true,
+        "delta_chain_complete": true,
+        "digest_conflict": false,
+        "fence_conflict": false,
+        "fence_valid": true,
+        "gap_present": false,
+        "identity_conflict": false,
+        "restore_ambiguous": false,
+        "restore_generation_conflict": false,
+        "restore_generation_match": true,
+        "retention_window_closed": true,
+        "same_identity": true,
+        "segment_chain_complete": true,
+        "snapshot_digest_match": false,
+        "source_epoch_continuous": true,
+        "tombstone_chain_complete": true,
+        "watermark_closed": true
+      },
+      "id": "snapshot-digest-missing",
+      "label": "快照摘要不可比",
+      "status": "UNKNOWN"
+    },
+    {
+      "evidence": [
+        "中间delta segment不可查询"
+      ],
+      "flags": {
+        "archive_restore_attested": true,
+        "checkpoint_attested": true,
+        "compaction_manifest_complete": true,
+        "delta_chain_complete": false,
+        "digest_conflict": false,
+        "fence_conflict": false,
+        "fence_valid": true,
+        "gap_present": true,
+        "identity_conflict": false,
+        "restore_ambiguous": false,
+        "restore_generation_conflict": false,
+        "restore_generation_match": true,
+        "retention_window_closed": true,
+        "same_identity": true,
+        "segment_chain_complete": true,
+        "snapshot_digest_match": true,
+        "source_epoch_continuous": true,
+        "tombstone_chain_complete": true,
+        "watermark_closed": true
+      },
+      "id": "delta-chain-gap",
+      "label": "增量链有缺口",
+      "status": "UNKNOWN"
+    },
+    {
+      "evidence": [
+        "compaction manifest缺少输入segment"
+      ],
+      "flags": {
+        "archive_restore_attested": true,
+        "checkpoint_attested": true,
+        "compaction_manifest_complete": false,
+        "delta_chain_complete": true,
+        "digest_conflict": false,
+        "fence_conflict": false,
+        "fence_valid": true,
+        "gap_present": false,
+        "identity_conflict": false,
+        "restore_ambiguous": false,
+        "restore_generation_conflict": false,
+        "restore_generation_match": true,
+        "retention_window_closed": true,
+        "same_identity": true,
+        "segment_chain_complete": true,
+        "snapshot_digest_match": true,
+        "source_epoch_continuous": true,
+        "tombstone_chain_complete": true,
+        "watermark_closed": true
+      },
+      "id": "compaction-manifest-gap",
+      "label": "压缩映射不完整",
+      "status": "UNKNOWN"
+    },
+    {
+      "evidence": [
+        "恢复结果存在但没有独立restore attestation"
+      ],
+      "flags": {
+        "archive_restore_attested": false,
+        "checkpoint_attested": true,
+        "compaction_manifest_complete": true,
+        "delta_chain_complete": true,
+        "digest_conflict": false,
+        "fence_conflict": false,
+        "fence_valid": true,
+        "gap_present": false,
+        "identity_conflict": false,
+        "restore_ambiguous": false,
+        "restore_generation_conflict": false,
+        "restore_generation_match": true,
+        "retention_window_closed": true,
+        "same_identity": true,
+        "segment_chain_complete": true,
+        "snapshot_digest_match": true,
+        "source_epoch_continuous": true,
+        "tombstone_chain_complete": true,
+        "watermark_closed": true
+      },
+      "id": "archive-restore-unattested",
+      "label": "归档恢复无证明",
+      "status": "UNKNOWN"
+    },
+    {
+      "evidence": [
+        "restore generation无法与checkpoint比对"
+      ],
+      "flags": {
+        "archive_restore_attested": true,
+        "checkpoint_attested": true,
+        "compaction_manifest_complete": true,
+        "delta_chain_complete": true,
+        "digest_conflict": false,
+        "fence_conflict": false,
+        "fence_valid": true,
+        "gap_present": false,
+        "identity_conflict": false,
+        "restore_ambiguous": false,
+        "restore_generation_conflict": false,
+        "restore_generation_match": false,
+        "retention_window_closed": true,
+        "same_identity": true,
+        "segment_chain_complete": true,
+        "snapshot_digest_match": true,
+        "source_epoch_continuous": true,
+        "tombstone_chain_complete": true,
+        "watermark_closed": true
+      },
+      "id": "restore-generation-unknown",
+      "label": "恢复代际未知",
+      "status": "UNKNOWN"
+    },
+    {
+      "evidence": [
+        "tombstone之后的segment不可闭合"
+      ],
+      "flags": {
+        "archive_restore_attested": true,
+        "checkpoint_attested": true,
+        "compaction_manifest_complete": true,
+        "delta_chain_complete": true,
+        "digest_conflict": false,
+        "fence_conflict": false,
+        "fence_valid": true,
+        "gap_present": true,
+        "identity_conflict": false,
+        "restore_ambiguous": false,
+        "restore_generation_conflict": false,
+        "restore_generation_match": true,
+        "retention_window_closed": true,
+        "same_identity": true,
+        "segment_chain_complete": true,
+        "snapshot_digest_match": true,
+        "source_epoch_continuous": true,
+        "tombstone_chain_complete": false,
+        "watermark_closed": true
+      },
+      "id": "tombstone-chain-gap",
+      "label": "删除链缺口",
+      "status": "UNKNOWN"
+    },
+    {
+      "evidence": [
+        "当前segment成功不证明下一segment不存在"
+      ],
+      "flags": {
+        "archive_restore_attested": true,
+        "checkpoint_attested": true,
+        "compaction_manifest_complete": true,
+        "delta_chain_complete": true,
+        "digest_conflict": false,
+        "fence_conflict": false,
+        "fence_valid": true,
+        "gap_present": false,
+        "identity_conflict": false,
+        "restore_ambiguous": false,
+        "restore_generation_conflict": false,
+        "restore_generation_match": true,
+        "retention_window_closed": true,
+        "same_identity": true,
+        "segment_chain_complete": false,
+        "snapshot_digest_match": true,
+        "source_epoch_continuous": true,
+        "tombstone_chain_complete": true,
+        "watermark_closed": true
+      },
+      "id": "segment-boundary-open",
+      "label": "segment边界未闭合",
+      "status": "UNKNOWN"
+    },
+    {
+      "evidence": [
+        "仍可能有迟到证据进入窗口"
+      ],
+      "flags": {
+        "archive_restore_attested": true,
+        "checkpoint_attested": true,
+        "compaction_manifest_complete": true,
+        "delta_chain_complete": true,
+        "digest_conflict": false,
+        "fence_conflict": false,
+        "fence_valid": true,
+        "gap_present": false,
+        "identity_conflict": false,
+        "restore_ambiguous": false,
+        "restore_generation_conflict": false,
+        "restore_generation_match": true,
+        "retention_window_closed": true,
+        "same_identity": true,
+        "segment_chain_complete": true,
+        "snapshot_digest_match": true,
+        "source_epoch_continuous": true,
+        "tombstone_chain_complete": true,
+        "watermark_closed": false
+      },
+      "id": "watermark-open",
+      "label": "水位线未闭合",
+      "status": "UNKNOWN"
+    },
+    {
+      "evidence": [
+        "旧segment已不可取回"
+      ],
+      "flags": {
+        "archive_restore_attested": true,
+        "checkpoint_attested": true,
+        "compaction_manifest_complete": true,
+        "delta_chain_complete": true,
+        "digest_conflict": false,
+        "fence_conflict": false,
+        "fence_valid": true,
+        "gap_present": false,
+        "identity_conflict": false,
+        "restore_ambiguous": false,
+        "restore_generation_conflict": false,
+        "restore_generation_match": true,
+        "retention_window_closed": false,
+        "same_identity": true,
+        "segment_chain_complete": true,
+        "snapshot_digest_match": true,
+        "source_epoch_continuous": true,
+        "tombstone_chain_complete": true,
+        "watermark_closed": true
+      },
+      "id": "retention-window-open",
+      "label": "保留窗口未闭合",
+      "status": "UNKNOWN"
+    },
+    {
+      "evidence": [
+        "epoch之间缺少连续性证明"
+      ],
+      "flags": {
+        "archive_restore_attested": true,
+        "checkpoint_attested": true,
+        "compaction_manifest_complete": true,
+        "delta_chain_complete": true,
+        "digest_conflict": false,
+        "fence_conflict": false,
+        "fence_valid": true,
+        "gap_present": false,
+        "identity_conflict": false,
+        "restore_ambiguous": false,
+        "restore_generation_conflict": false,
+        "restore_generation_match": true,
+        "retention_window_closed": true,
+        "same_identity": true,
+        "segment_chain_complete": true,
+        "snapshot_digest_match": true,
+        "source_epoch_continuous": false,
+        "tombstone_chain_complete": true,
+        "watermark_closed": true
+      },
+      "id": "source-epoch-gap",
+      "label": "source epoch不连续",
+      "status": "UNKNOWN"
+    },
+    {
+      "evidence": [
+        "多个restore generation均可能匹配"
+      ],
+      "flags": {
+        "archive_restore_attested": true,
+        "checkpoint_attested": true,
+        "compaction_manifest_complete": true,
+        "delta_chain_complete": true,
+        "digest_conflict": false,
+        "fence_conflict": false,
+        "fence_valid": true,
+        "gap_present": false,
+        "identity_conflict": false,
+        "restore_ambiguous": true,
+        "restore_generation_conflict": false,
+        "restore_generation_match": true,
+        "retention_window_closed": true,
+        "same_identity": true,
+        "segment_chain_complete": true,
+        "snapshot_digest_match": true,
+        "source_epoch_continuous": true,
+        "tombstone_chain_complete": true,
+        "watermark_closed": true
+      },
+      "id": "restore-ambiguous",
+      "label": "恢复结果有歧义",
+      "status": "UNKNOWN"
+    },
+    {
+      "evidence": [
+        "NO_EVENT仅是当前查询结果",
+        "query gap未闭合"
+      ],
+      "flags": {
+        "archive_restore_attested": true,
+        "checkpoint_attested": true,
+        "compaction_manifest_complete": true,
+        "delta_chain_complete": true,
+        "digest_conflict": false,
+        "fence_conflict": false,
+        "fence_valid": true,
+        "gap_present": true,
+        "identity_conflict": false,
+        "restore_ambiguous": false,
+        "restore_generation_conflict": false,
+        "restore_generation_match": true,
+        "retention_window_closed": true,
+        "same_identity": true,
+        "segment_chain_complete": true,
+        "snapshot_digest_match": true,
+        "source_epoch_continuous": true,
+        "tombstone_chain_complete": true,
+        "watermark_closed": true
+      },
+      "id": "query-gap-with-no-event",
+      "label": "查询缺口下无事件",
+      "status": "UNKNOWN"
+    },
+    {
+      "evidence": [
+        "tenant/source/event_id等身份字段缺失"
+      ],
+      "flags": {
+        "archive_restore_attested": true,
+        "checkpoint_attested": true,
+        "compaction_manifest_complete": true,
+        "delta_chain_complete": true,
+        "digest_conflict": false,
+        "fence_conflict": false,
+        "fence_valid": true,
+        "gap_present": false,
+        "identity_conflict": false,
+        "restore_ambiguous": false,
+        "restore_generation_conflict": false,
+        "restore_generation_match": true,
+        "retention_window_closed": true,
+        "same_identity": false,
+        "segment_chain_complete": true,
+        "snapshot_digest_match": true,
+        "source_epoch_continuous": true,
+        "tombstone_chain_complete": true,
+        "watermark_closed": true
+      },
+      "id": "identity-missing",
+      "label": "身份域不完整",
+      "status": "UNKNOWN"
+    },
+    {
+      "evidence": [
+        "checkpoint与retention边界不能互相替代"
+      ],
+      "flags": {
+        "archive_restore_attested": true,
+        "checkpoint_attested": true,
+        "compaction_manifest_complete": true,
+        "delta_chain_complete": false,
+        "digest_conflict": false,
+        "fence_conflict": false,
+        "fence_valid": true,
+        "gap_present": false,
+        "identity_conflict": false,
+        "restore_ambiguous": false,
+        "restore_generation_conflict": false,
+        "restore_generation_match": true,
+        "retention_window_closed": false,
+        "same_identity": true,
+        "segment_chain_complete": true,
+        "snapshot_digest_match": true,
+        "source_epoch_continuous": true,
+        "tombstone_chain_complete": true,
+        "watermark_closed": true
+      },
+      "id": "checkpoint-delta-retention-edge",
+      "label": "窗口边界同时未闭合",
+      "status": "UNKNOWN"
+    },
+    {
+      "evidence": [
+        "tenant或source明确不同"
+      ],
+      "flags": {
+        "archive_restore_attested": true,
+        "checkpoint_attested": true,
+        "compaction_manifest_complete": true,
+        "delta_chain_complete": true,
+        "digest_conflict": false,
+        "fence_conflict": false,
+        "fence_valid": true,
+        "gap_present": false,
+        "identity_conflict": true,
+        "restore_ambiguous": false,
+        "restore_generation_conflict": false,
+        "restore_generation_match": true,
+        "retention_window_closed": true,
+        "same_identity": false,
+        "segment_chain_complete": true,
+        "snapshot_digest_match": true,
+        "source_epoch_continuous": true,
+        "tombstone_chain_complete": true,
+        "watermark_closed": true
+      },
+      "id": "identity-conflict",
+      "label": "跨身份域合并",
+      "status": "REJECT"
+    },
+    {
+      "evidence": [
+        "目标拒绝旧 generation/fence"
+      ],
+      "flags": {
+        "archive_restore_attested": true,
+        "checkpoint_attested": true,
+        "compaction_manifest_complete": true,
+        "delta_chain_complete": true,
+        "digest_conflict": false,
+        "fence_conflict": true,
+        "fence_valid": false,
+        "gap_present": false,
+        "identity_conflict": false,
+        "restore_ambiguous": false,
+        "restore_generation_conflict": false,
+        "restore_generation_match": true,
+        "retention_window_closed": true,
+        "same_identity": true,
+        "segment_chain_complete": true,
+        "snapshot_digest_match": true,
+        "source_epoch_continuous": true,
+        "tombstone_chain_complete": true,
+        "watermark_closed": true
+      },
+      "id": "stale-fence",
+      "label": "旧 fence token",
+      "status": "REJECT"
+    },
+    {
+      "evidence": [
+        "同一规范下canonical digest不可调和"
+      ],
+      "flags": {
+        "archive_restore_attested": true,
+        "checkpoint_attested": true,
+        "compaction_manifest_complete": true,
+        "delta_chain_complete": true,
+        "digest_conflict": true,
+        "fence_conflict": false,
+        "fence_valid": true,
+        "gap_present": false,
+        "identity_conflict": false,
+        "restore_ambiguous": false,
+        "restore_generation_conflict": false,
+        "restore_generation_match": true,
+        "retention_window_closed": true,
+        "same_identity": true,
+        "segment_chain_complete": true,
+        "snapshot_digest_match": false,
+        "source_epoch_continuous": true,
+        "tombstone_chain_complete": true,
+        "watermark_closed": true
+      },
+      "id": "canonical-digest-conflict",
+      "label": "同版本摘要冲突",
+      "status": "REJECT"
+    },
+    {
+      "evidence": [
+        "同一恢复边界出现不可调和generation"
+      ],
+      "flags": {
+        "archive_restore_attested": true,
+        "checkpoint_attested": true,
+        "compaction_manifest_complete": true,
+        "delta_chain_complete": true,
+        "digest_conflict": false,
+        "fence_conflict": false,
+        "fence_valid": true,
+        "gap_present": false,
+        "identity_conflict": false,
+        "restore_ambiguous": false,
+        "restore_generation_conflict": true,
+        "restore_generation_match": false,
+        "retention_window_closed": true,
+        "same_identity": true,
+        "segment_chain_complete": true,
+        "snapshot_digest_match": true,
+        "source_epoch_continuous": true,
+        "tombstone_chain_complete": true,
+        "watermark_closed": true
+      },
+      "id": "restore-generation-conflict",
+      "label": "恢复代际冲突",
+      "status": "REJECT"
+    }
+  ],
+  "continuity_domain": [
+    "checkpoint",
+    "snapshot",
+    "delta_segment",
+    "compaction_manifest",
+    "archive_restore",
+    "tombstone",
+    "watermark",
+    "retention",
+    "fence"
+  ],
+  "identity_domain": [
+    "tenant",
+    "source",
+    "event_id",
+    "epoch",
+    "version"
+  ],
+  "production_verified": false,
+  "schema_version": "S33-cases-1",
+  "synthetic_only": true
+}

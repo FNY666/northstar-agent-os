@@ -1,0 +1,52 @@
+{
+  "schema_version": "1.0",
+  "question": "S36：双实现一致判定在单一 UNKNOWN->accepted 变异下，是否能对可观察差异触发 INTEROP_CONFLICT？",
+  "scope": {
+    "slice": "B line S36",
+    "synthetic_only": true,
+    "production_verified": false,
+    "offline_only": true,
+    "fixture_count": 24,
+    "operations": ["P", "Q", "R", "X"],
+    "excluded": ["S27-S35", "other existing research artifacts", "shared/P0", "事故目录", "D10", "L12", "D14", "canonical", "staging", "140", "tri-line", "systemd", "real Gemini CLI/service", "credentials", "network"]
+  },
+  "claims": [
+    {
+      "id": "S36-C1",
+      "claim": "基线对基线的 24 个 fixture 全部为 INTEROP_OK，baseline conflicts=0。",
+      "status": "inferred",
+      "confidence": "high",
+      "sources": [],
+      "caveat": "仅由本目录 harness 与独立 validator 在本地 synthetic fixture 集上推断；不是 production verification。"
+    },
+    {
+      "id": "S36-C2",
+      "claim": "impl_b_mut.py 的 verdict_for 函数把 R 分支从 UNKNOWN 改为 accepted，且该变异使恰含 R 的 16 个 fixture 触发 INTEROP_CONFLICT。",
+      "status": "inferred",
+      "confidence": "high",
+      "sources": [],
+      "caveat": "变异影响范围由本地代码与 fixture 集推断；不代表变异测试完备性。"
+    },
+    {
+      "id": "S36-C3",
+      "claim": "变异体中的 UNKNOWN->accepted 升级在 validator 层被捕获为 conflict，而非静默通过。",
+      "status": "inferred",
+      "confidence": "high",
+      "sources": [],
+      "caveat": "只覆盖本次 R 分支与本次 24 个 fixture；UNOBSERVABLE 语义保留为 unknown。"
+    },
+    {
+      "id": "S36-C4",
+      "claim": "两次 harness 运行生成的 results.json 字节一致。",
+      "status": "inferred",
+      "confidence": "high",
+      "sources": [],
+      "caveat": "确定性仅在本地运行环境、代码和 fixture 不变时成立。"
+    }
+  ],
+  "coverage": {
+    "covered": ["baseline control", "mutated pair", "three-state conservative conflict", "canonical input SHA-256", "repeatability"],
+    "not_covered": ["mutation testing completeness", "durability", "exactly-once", "rollback", "production readiness"],
+    "unobservable_status": "unknown"
+  }
+}

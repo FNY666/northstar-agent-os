@@ -1,0 +1,25 @@
+{
+  "schema_version": "1.0",
+  "question": "在离线合成证据中，如何区分摘要规范化/算法迁移与真实冲突，并在分页游标、水位线和 retention cutoff 边界未闭合时保持跨系统连续性判定安全？",
+  "scope": {
+    "project": "C-line S32",
+    "mode": "offline synthetic fixtures",
+    "date": "2026-09-23",
+    "excluded": ["S1-S31", "production", "network", "real services", "credentials"],
+    "identity_domain": ["tenant", "source", "event_id", "epoch", "version"],
+    "digest_domain": ["canonicalization_version", "hash_algorithm", "canonical_payload_digest"],
+    "window_domain": ["page_cursor", "watermark", "retention_cutoff", "fence_token"]
+  },
+  "claims_status": "inferred",
+  "synthetic_only": true,
+  "production_verified": false,
+  "sources": [],
+  "claims": [
+    {"id":"closed-gates","claim":"只有身份、摘要等价、分页、水位线、保留窗口、cutoff 语义与 fence 全部闭合时才可 RECOVERED。","status":"inferred","confidence":"bounded","sources":[],"caveat":"仅由本地合成夹具和规则推导，不代表生产系统。"},
+    {"id":"migration-is-not-proof","claim":"规范化或哈希算法版本变化本身既不是冲突也不是等价证明；无 dual-digest、映射或重放 attestation 时必须 UNKNOWN。","status":"inferred","confidence":"bounded","sources":[],"caveat":"未验证任何真实算法迁移协议。"},
+    {"id":"boundary-unknown","claim":"分页终止缺失、游标跳页、水位线未闭合、retention cutoff 语义未知或已过期时不能推断 NO_EVENT，必须 UNKNOWN。","status":"inferred","confidence":"bounded","sources":[],"caveat":"布尔门不量化真实查询漏检概率。"},
+    {"id":"conflict-reject","claim":"同身份同规范/算法下的 canonical digest 冲突、身份冲突或 stale fence 必须 REJECT。","status":"inferred","confidence":"bounded","sources":[],"caveat":"只验证合成判定逻辑，不证明目标系统可执行拒绝。"}
+  ],
+  "coverage": {"cases": 21, "property_sweep": 65536, "statuses": ["RECOVERED", "UNKNOWN", "REJECT"], "dimensions": 16, "events": ["DIGEST_CANONICALIZATION", "HASH_ALGORITHM_MIGRATION", "PAGE_CURSOR", "WATERMARK", "RETENTION_CUTOFF", "FENCE_TOKEN", "NO_EVENT", "UNKNOWN"]},
+  "notes": "三态互斥并 fail-closed；RECOVERED 仅代表本片离线夹具中的证据门闭合，不代表 production continuity、external effect 或 exactly-once。"
+}

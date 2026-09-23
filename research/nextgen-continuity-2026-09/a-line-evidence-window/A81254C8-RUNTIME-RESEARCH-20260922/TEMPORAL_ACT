@@ -1,0 +1,344 @@
+# Activity Definition
+
+> For the complete documentation index, see [llms.txt](https://docs.temporal.io/llms.txt).
+> Any documentation page is available as raw Markdown by appending `.md` to its URL.
+
+> Learn how to define a Temporal Activity; Activity Types, parameters, constraints, idempotency, and retry behavior for the function your Worker runs.
+
+This page discusses the following:
+
+- [Idempotency](#idempotency)
+- [Parameters](#activity-parameters)
+- [Activity Type](#activity-type)
+
+An Activity Definition is a normal function or method that executes a single, well-defined action.
+The same Activity Definition can be started as a [step in a Workflow](/workflow-activity) or as a background job using a [Standalone Activity](/standalone-activity) once it's been [registered with a Worker](#worker-registration).
+
+An Activity Definition is the code that gives rise to an [Activity Task Execution](/tasks#activity-task-execution).
+
+## Define an Activity function
+
+Below are examples of basic Activity Definitions across supported SDKs.
+
+**Go**
+
+**[Activity Definition in Go](/develop/go/activities/basics)**
+
+```go
+import (
+    "context"
+
+    "go.temporal.io/sdk/activity"
+)
+
+func YourSimpleActivity(ctx context.Context) error {
+    return nil
+}
+```
+
+**Java**
+
+**[Activity Definition in Java (Interface)](/develop/java/activities/basics)**
+
+```java
+@ActivityInterface
+public interface GreetingActivities {
+    @ActivityMethod
+    String composeGreeting(String greeting, String language);
+}
+```
+
+**[Activity Definition in Java (Implementation)](/develop/java/activities/basics)**
+
+```java
+static class GreetingActivitiesImpl implements GreetingActivities {
+    @Override
+    public String composeGreeting(String greeting, String name) {
+        return greeting + " " + name + "!";
+    }
+}
+```
+
+**PHP**
+
+**[Activity Definition in PHP (Interface)](/develop/php/activities/basics)**
+
+```php
+#[ActivityInterface]
+interface GreetingActivities
+{
+    public function composeGreeting(string $greeting, string $name): string;
+}
+```
+
+**[Activity Definition in PHP (Implementation)](/develop/php/activities/basics)**
+
+```php
+class GreetingActivitiesImpl implements GreetingActivities
+{
+    public function composeGreeting(string $greeting, string $name): string
+    {
+        return $greeting . ' ' . $name;
+    }
+}
+```
+
+**Python**
+
+**[Activity Definition in Python](/develop/python/activities/basics)**
+
+```python
+from temporalio import activity
+
+@activity.defn(name="your_activity")
+async def your_activity(input: YourParams) -> str:
+    return f"{input.greeting}, {input.name}!"
+```
+
+**TypeScript**
+
+**[Activity Definition in TypeScript](/develop/typescript/activities/basics)**
+
+```ts
+export async function greet(name: string): Promise<string> {
+  return `Hello, ${name}!`;
+}
+```
+
+**.NET**
+
+**[Activity Definition in C# and .NET](/develop/dotnet/activities/basics)**
+
+```csharp
+using Temporalio.Activities;
+
+public class MyActivities
+{
+    [Activity]
+    public string MyActivity(MyActivityParams input) =>
+        $"{input.Greeting}, {input.Name}!";
+}
+```
+
+**Rust**
+
+**[Activity Definition in Rust](/develop/rust/activities/basics)**
+
+```rust
+use temporalio_sdk::activities::{ActivityContext, ActivityError};
+use temporalio_macros::activities;
+
+pub struct GreetingActivities;
+
+#[activities]
+impl GreetingActivities {
+    #[activity]
+    pub async fn greet(_ctx: ActivityContext, name: String) -> Result<String, ActivityError> {
+        Ok(format!("Hello, {}!", name))
+    }
+}
+```
+
+> **💡 Tip:**
+> GET STARTED
+>
+> Write an Activity Definition:
+> [Go](/develop/go/activities/basics)
+> | [Java](/develop/java/activities/basics)
+> | [PHP](/develop/php/activities/basics)
+> | [Python](/develop/python/activities/basics)
+> | [TypeScript](/develop/typescript/activities/basics)
+> | [.NET](/develop/dotnet/activities/basics)
+> | [Ruby](/develop/ruby/activities/basics)
+> | [Rust](/develop/rust/activities/basics)
+>
+
+### Idempotency 
+
+Temporal recommends that Activities be idempotent.
+Idempotence means that performing an operation multiple times has the same result as performing it once.
+In the context of Temporal, Activities should be designed to be safely executed multiple times without causing unexpected or undesired side effects.
+A few examples where idempotent operations are vital would be:
+
+- **Infrastructure-as-Code (IaC) tool** - Conserving resources is important when you're provisioning infrastructure in the cloud. An IaC system that was not designed with idempotence in mind could lead to high costs if the function to provision a new server was accidentally invoked multiple times. An IaC tool that is designed with idempotence in mind ensures that multiple invocations of the tool doesn't lead to unintended instances being created.
+- **Payment processing system** - A payment processing system must charge the customer only once for a given purchase. If the system was not designed to be idempotent, duplicate requests would result in extra charges and unhappy customers. A payment processing system that is designed to be idempotent ensures customers are not charged multiple times for the same transaction, preventing financial discrepancies.
+
+> **ℹ️ Info:**
+>
+> By design, completed Activities will not re-execute as part of a [Workflow Replay](/workflow-execution#replay). However, Activities won’t record to the [Event History](/encyclopedia/retry-policies#event-history) until they return or produce an error. If an Activity fails to report to the server at all, it will be retried. Designing for idempotence, especially if you have a [Global Namespace](/global-namespace), will improve reusability and reliability.
+>
+
+An Activity is idempotent if multiple [Activity Task Executions](/tasks#activity-task-execution) do not change the state of the system beyond the first Activity Task Execution.
+
+The lack of idempotency might affect the correctness of your application but does not affect the Temporal Platform.
+In other words, lack of idempotency doesn't lead to a platform error.
+
+In some cases, whether something is idempotent doesn't affect the correctness of an application.
+For example, if you have a monotonically incrementing counter, you might not care that retries increment the counter because you don't care about the actual value, only that the current value is greater than a previous value.
+
+You should always make your business logic Activities idempotent in Temporal. Because Activities may be retried, these functions may be executed more than once. A non-idempotent Activity could adversely affect the state of the system.
+
+Activities are an atomic unit of execution within Temporal. They are invoked and either complete successfully or not. Take this into consideration when you design your Activities.
+
+For example, consider an Activity that has the following three steps:
+
+1. Perform a database lookup
+2. Make a call to a microservice with parameters retrieved from the database
+3. Write the result of the microservice call to the filesystem
+
+Imagine that the first two steps succeed, but the third step fails due to a permissions issue. During retry, the entire Activity—and therefore each of the three steps—is executed again. To maintain idempotency, design your Activities to be more granular. In this case, you could have three Activities, one for each step. This way, only the step that failed will be executed again. However, you must balance this against the potential for a larger Event History, since there would now be three Activity Executions instead of one.
+
+Idempotence for Activities is also important due to a particular edge case inherent in distributed computing. Consider a scenario in which a Worker polls the Temporal Service, accepts the Activity Task, and begins executing the Activity. The Activity function completes successfully, but the Worker crashes just before it notifies the Temporal Service. In this case, the Event History won’t reflect the successful completion of the Task, so the Activity will be retried. If the Activity is not idempotent, this could have negative consequences, such as duplicate charges in a payment processing scenario.
+
+You can achieve idempotency in your application through the use of unique identifiers, known as idempotency keys, which are used to detect duplicate requests. These are enforced by the service you are calling from your Activity, not by the Activity itself.
+
+For example, the APIs provided by most payment processors allow the client to include an idempotency key with the request. When the payment service receives a request, it checks a database to determine whether there has already been a request with this key. If so, the duplicate request is ignored and does not result in another charge. If not, then it writes a new record to the database with this key, allowing it to identify duplicate requests in the future.
+
+In Temporal, the request to the payment service would be made from within an Activity. You can use a combination of the Workflow Run ID and the Activity ID as an idempotency key since this is guaranteed to be consistent across retry attempts but unique among Workflow Executions.
+
+For more information about idempotency in Temporal, see the following post:
+
+[Idempotency and Durable Execution](https://temporal.io/blog/idempotency-and-durable-execution)
+
+### Activity retry policy
+
+The Activity retry mechanism gives applications the benefits of durable execution.
+For example, Temporal will keep track of the [exponential backoff delay](/encyclopedia/retry-policies#backoff-coefficient) even if the Worker crashes. Since Temporal can’t tell when a Worker crashes, Workflows rely on the [start_to_close timeout](/encyclopedia/detecting-activity-failures#start-to-close-timeout) to know how long to wait before assuming that an Activity is inactive.
+
+For an Activity with a [Retry Policy](/encyclopedia/retry-policies) that allows retries, Temporal guarantees that the Activity will be observed as completed exactly once. However, the Activity may be executed multiple times and may even partially complete more than once during this process. This could lead to a scenario where certain parts of the Activity are executed multiple times before a successful execution is completed.
+
+> **⚠️ Caution:**
+> You should typically not write retry logic manually within your Activity Definition. It lengthens the needed Activity timeout, prevents users from counting failure metrics, and makes it harder for users to debug in Temporal UI when something is wrong.
+
+### Activity parameters 
+
+An Activity Definition can use function/method parameters as usual for your language.
+When called from a Workflow, the parameter values and return value are recorded in the [Event History](/workflow-execution/event#event-history) of the Workflow Execution.
+
+## Activity Type 
+
+An Activity Type is a name given to an Activity Definition.
+When starting an Activity, you can identify it by the name (Activity Type), or by a reference to its function/method/class (Activity Definition)
+
+## Register the Activity with a Worker 
+
+An Activity Definition doesn't run until a [Worker](/workers) registers it and starts polling the
+[Task Queue](/task-queue) its Activity Tasks are dispatched on. Registration maps the
+[Activity Type](#activity-type) name to your function, so a caller can start the Activity by name without holding a
+reference to the code.
+
+One Worker can register many Activities, and one registration serves both callers: once the Worker is polling, the same
+Activity can be started as a [Workflow Activity](/workflow-activity) or as a [Standalone Activity](/standalone-activity), with no
+code change using the existing Worker deployment.
+
+**Go**
+
+**[Run a Worker in Go](/develop/go/workers/run-worker-process)**
+
+```go
+w := worker.New(c, "my-task-queue", worker.Options{})
+
+w.RegisterActivity(helloworld.Activity)
+
+err = w.Run(worker.InterruptCh())
+```
+
+**Java**
+
+**[Run a Worker in Java](/develop/java/workers/run-worker-process)**
+
+```java
+WorkerFactory factory = WorkerFactory.newInstance(client);
+
+Worker worker = factory.newWorker("my-task-queue");
+worker.registerActivitiesImplementations(new GreetingActivitiesImpl());
+
+factory.start();
+```
+
+**PHP**
+
+**[Run a Worker in PHP](/develop/php/workers/run-worker-process)**
+
+```php
+$factory = WorkerFactory::create();
+
+$worker = $factory->newWorker('my-task-queue');
+$worker->registerActivity(App\DemoActivity::class);
+
+$factory->run();
+```
+
+**Python**
+
+**[Run a Worker in Python](/develop/python/workers/run-worker-process)**
+
+```python
+worker = Worker(
+    client,
+    task_queue="my-task-queue",
+    activities=[some_activity],
+)
+await worker.run()
+```
+
+**TypeScript**
+
+**[Run a Worker in TypeScript](/develop/typescript/workers/run-worker-process)**
+
+```ts
+const worker = await Worker.create({
+  taskQueue: 'my-task-queue',
+  activities,
+});
+
+await worker.run();
+```
+
+**.NET**
+
+**[Run a Worker in C# and .NET](/develop/dotnet/workers/run-worker-process)**
+
+```csharp
+var options = new TemporalWorkerOptions("my-task-queue");
+options.AddAllActivities(typeof(GreetingActivities), null);
+
+using var worker = new TemporalWorker(client, options);
+await worker.ExecuteAsync(CancellationToken.None);
+```
+
+**Ruby**
+
+**[Run a Worker in Ruby](/develop/ruby/workers/run-worker-process)**
+
+```ruby
+worker = Temporalio::Worker.new(
+  client: client,
+  task_queue: 'my-task-queue',
+  activities: [SayHello]
+)
+
+worker.run
+```
+
+**Rust**
+
+**[Run a Worker in Rust](/develop/rust/workers/worker-process)**
+
+```rust
+let worker_options = WorkerOptions::new("my-task-queue")
+    .register_activities(GreetingActivities)
+    .build();
+```
+
+Go and TypeScript can set the [Activity Type](#activity-type) name at registration. The other SDKs set it on the
+definition itself, as shown in the examples at the top of this page.
+
+## Best practices for defining Activities
+
+Here are some best practices you can use when you are creating Activities for your Workflow:
+
+- Activity arguments and return values must be serializable.
+- Activities that perform writes should be idempotent.
+- Activities have [timeouts](/develop/python/activities/timeouts#activity-heartbeats) and [retry policies](/encyclopedia/retry-policies). For Activities, your operation should either complete within a few minutes or it should heartbeat. This way it will be clear to the Workflow when the Activity is still making progress.
+- You need to specify at least one timeout, typically the [start_to_close timeout](/encyclopedia/detecting-activity-failures#start-to-close-timeout). Keep in mind that the shorter the timeout, the faster Temporal will detect a problem and retry. See the [Activity retry policy section](#activity-retry-policy) to learn more.

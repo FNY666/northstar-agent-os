@@ -1,0 +1,59 @@
+{
+  "schema_version": "1.0",
+  "question": "在本地确定性 SHA-256 合成模型中，多条独立审计链对同一事件的交叉对账与时间线重叠应如何保守判定？",
+  "scope": {
+    "type": "local_synthetic_only",
+    "directory": "/tmp/C-NEXTGEN-TRUST-CONTINUITY-20260922-S19",
+    "chains": ["L1", "L2", "L3"],
+    "fixture_count": 24,
+    "network_access": false,
+    "excluded": ["S1-S18", "shared/P0", "事故目录", "D10", "L12", "D14", "canonical", "staging", "140", "tri-line", "systemd"]
+  },
+  "claims": [
+    {
+      "id": "S19-C01",
+      "claim": "同一事件在至少两条可访问链中具有一致事件内容 SHA-256 时，可在本地模型中判定 RECOVERED。",
+      "status": "inferred",
+      "confidence": "high",
+      "sources": [{"url":"https://example.invalid/s19-local-model","publisher":"local synthetic harness","published_or_updated":"2026-09-22","tier":"primary","support":"harness.py and fixtures/cases.json"}],
+      "caveat": "仅为合成模型结论，不证明真实审计系统或生产属性。"
+    },
+    {
+      "id": "S19-C02",
+      "claim": "单链独有事件，包括其他链显式声明不应出现的情形，保持 UNKNOWN；负断言不可证。",
+      "status": "inferred",
+      "confidence": "high",
+      "sources": [{"url":"https://example.invalid/s19-local-model","publisher":"local synthetic harness","published_or_updated":"2026-09-22","tier":"primary","support":"F03, F04 and F24"}],
+      "caveat": "仅表示缺少跨链正向证据，不表示事件不存在。"
+    },
+    {
+      "id": "S19-C03",
+      "claim": "同事件内容 hash 矛盾可判 REJECT；内容一致但序号错位或时间区间重叠导致归属不清时保持 UNKNOWN。",
+      "status": "inferred",
+      "confidence": "high",
+      "sources": [{"url":"https://example.invalid/s19-local-model","publisher":"local synthetic harness","published_or_updated":"2026-09-22","tier":"primary","support":"F05, F06 and F07"}],
+      "caveat": "REJECT 仅是可验证内容矛盾，不是对真实系统责任的裁定。"
+    },
+    {
+      "id": "S19-C04",
+      "claim": "不可访问链、缺少首块锚点和同链重复块不会提供可用新证据；结果保留 UNKNOWN 或既有判定及阻塞条件。",
+      "status": "inferred",
+      "confidence": "high",
+      "sources": [{"url":"https://example.invalid/s19-local-model","publisher":"local synthetic harness","published_or_updated":"2026-09-22","tier":"primary","support":"F08-F12 and F16"}],
+      "caveat": "不可访问链未被假定为空；重复块不增加独立性。"
+    },
+    {
+      "id": "S19-C05",
+      "claim": "本地 harness 连续两次运行产生字节一致结果，三态结果互斥。",
+      "status": "inferred",
+      "confidence": "high",
+      "sources": [{"url":"https://example.invalid/s19-local-run","publisher":"local execution","published_or_updated":"2026-09-22","tier":"primary","support":"REPORT.md and SHA256SUMS"}],
+      "caveat": "可重复性不等于 durability、exactly-once、rollback 或 production readiness。"
+    }
+  ],
+  "coverage": {
+    "required_scenarios": ["multi_chain_consensus", "single_chain_unique", "explicit_negative", "content_conflict", "sequence_misalignment", "timeline_overlap", "partial_inaccessible", "missing_anchor", "duplicate_block"],
+    "fixture_count": 24,
+    "all_claims_local_inferred": true
+  }
+}

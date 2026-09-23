@@ -1,0 +1,176 @@
+# Cancel a Workflow - Go SDK
+
+> For the complete documentation index, see [llms.txt](https://docs.temporal.io/llms.txt).
+> Any documentation page is available as raw Markdown by appending `.md` to its URL.
+
+This page shows the following:
+
+- How to handle a Cancellation request within a Workflow.
+- How to set an Activity Heartbeat Timeout.
+- How to listen for and handle a Cancellation request within an Activity.
+- How to send a Cancellation request from a Temporal Client.
+- Heartbeating after a Cancellation.
+
+## Handle Cancellation in Workflow 
+
+Workflow Definitions can be written to handle execution cancellation requests with Go's `defer` and the
+`workflow.NewDisconnectedContext` API. In the Workflow Definition, there is a special Activity that handles clean up
+should the execution be cancelled.
+
+If the Workflow receives a Cancellation Request, but all Activities gracefully handle the Cancellation, and/or no
+Activities are skipped then the Workflow status will be Complete. It is completely up to the needs of the business
+process and your use case which determines whether you want to return the Cancellation error to show a Canceled status
+or Complete status regardless of whether a Cancellation has propagated to and/or skipped Activities.
+
+```go {7-23,28,31,34}
+const WorkflowId = "example-cancellation-workflow"
+const TaskQueueName = "cancellation"
+
+func YourWorkflow(ctx workflow.Context) error {
+	logger := workflow.GetLogger(ctx)
+	var a *Activities
+	activityOptions := workflow.ActivityOptions{
+            StartToCloseTimeout: 30 * time.Minute,
+            HeartbeatTimeout:    5 * time.Second,
+            WaitForCancellation: true,
+	}
+	defer func() {
+        if !errors.Is(ctx.Err(), workflow.ErrCanceled) {
+            return
+        }
+
+        newCtx, _ := workflow.NewDisconnectedContext(ctx)
+
+        err := workflow.ExecuteActivity(newCtx, a.CleanupActivity).Get(ctx, nil)
+        if err != nil {
+            logger.Error("CleanupActivity failed", "Error", err)
+        }
+	}()
+
+	ctx = workflow.WithActivityOptions(ctx, activityOptions)
+	var result string
+
+	err := workflow.ExecuteActivity(ctx, a.ActivityToBeCanceled).Get(ctx, &result)
+	logger.Info(fmt.Sprintf("ActivityToBeCanceled returns %v, %v", result, err))
+
+	err = workflow.ExecuteActivity(ctx, a.ActivityToBeSkipped).Get(ctx, nil)
+	logger.Error("Error from ActivityToBeSkipped", "Error", err)
+
+	return err
+}
+```
+
+## Handle Cancellation in an Activity 
+
+Ensure that the Activity is Heartbeating to receive the Cancellation request and stop execution.
+
+```go
+func (a *Activities) ActivityToBeCanceled(ctx context.Context) (string, error) {
+    logger := activity.GetLogger(ctx)
+    logger.Info("Activity started, to cancel the Workflow Execution and this Activity, use 'go run cancel/cancel/main.go " +
+        "-w <WorkflowID>' or use the CLI: 'temporal workflow cancel --workflow-id <WorkflowID>'")
+    // A for select statement is a common approach to listening for a Cancellation is an Activity
+    for {
+        select {
+        case <-time.After(1 * time.Second):
+            logger.Info("Heartbeating...")
+            activity.RecordHeartbeat(ctx, "")
+        // Listen for ctx.Done() to know if a Cancellation Request has propagated to the Activity.
+        case <-ctx.Done():
+            logger.Info("This Activity is canceled!")
+            return "I am canceled by Done", nil
+        }
+    }
+}
+```
+
+## Request Cancellation 
+
+Use the `CancelWorkflow` API to cancel a Workflow Execution using its Id.
+
+```go
+func main() {
+    temporalClient, err := client.Dial(client.Options{
+        HostPort: client.DefaultHostPort,
+    })
+    if err != nil {
+        log.Fatalln("Unable to create client", err)
+    }
+    defer temporalClient.Close()
+    // Call the CancelWorkflow API to cancel a Workflow
+    // In this call we are relying on the Workflow Id only.
+    // But a Run Id can also be supplied to ensure the correct Workflow is Canceled.
+    err = temporalClient.CancelWorkflow(context.Background(), cancellation.WorkflowId, "")
+    if err != nil {
+        log.Fatalln("Unable to cancel Workflow Execution", err)
+    }
+    log.Println("Workflow Execution cancelled", "WorkflowID", cancellation.WorkflowId)
+}
+```
+
+## Heartbeating after a Cancellation
+
+Sometimes you may want to continue running your Activity, even after a Cancellation has been issued. You may want to
+completely ignore the cancellation and continue Activity execution, including Heartbeating, or you may want to send one
+final Heartbeat after Cancellation. Even though the context is cancelled when the Workflow is Cancelled, you are still
+able to send Activity Heartbeats.
+
+When you call `activity.RecordHeartbeat` after Cancellation has occurred, a
+`WARN RecordActivityHeartbeat with error Error context canceled` message will be logged, and a `context canceled` error
+will be returned from the call. However, the Heartbeat **has** still been sent.
+
+## Reset a Workflow Execution 
+
+Resetting a Workflow Execution terminates the current Workflow Execution and starts a new Workflow Execution from a
+point you specify in its Event History. Use reset when a Workflow is blocked due to a non-deterministic error or other
+issues that prevent it from completing.
+
+When you reset a Workflow, the Event History up to the reset point is copied to the new Workflow Execution, and the
+Workflow resumes from that point with the current code. Reset only works if you've fixed the underlying issue, such as
+removing non-deterministic code. Any progress made after the reset point will be discarded. Provide a reason when
+resetting, as it will be recorded in the Event History.
+
+**Web UI**
+
+1. Navigate to the Workflow Execution details page,
+2. Click the **Reset** button in the top right dropdown menu,
+3. Select the Event ID to reset to,
+4. Provide a reason for the reset,
+5. Confirm the reset.
+
+The Web UI shows available reset points and creates a link to the new Workflow Execution after the reset completes.
+
+**Temporal CLI**
+
+Use the `temporal workflow reset` command to reset a Workflow Execution:
+
+```bash
+temporal workflow reset \
+    --workflow-id <workflow-id> \
+    --event-id <event-id> \
+    --reason "Reason for reset"
+```
+
+For example:
+
+```bash
+temporal workflow reset \
+    --workflow-id my-background-check \
+    --event-id 4 \
+    --reason "Fixed non-deterministic code"
+```
+
+By default, the command resets the latest Workflow Execution in the `default` Namespace. Use `--run-id` to reset a
+specific run. Use `--namespace` to specify a different Namespace:
+
+```bash
+temporal workflow reset \
+    --workflow-id my-background-check \
+    --event-id 4 \
+    --reason "Fixed non-deterministic code" \
+    --namespace my-namespace \
+    --tls-cert-path /path/to/cert.pem \
+    --tls-key-path /path/to/key.pem
+```
+
+Monitor the new Workflow Execution after resetting to ensure it completes successfully.

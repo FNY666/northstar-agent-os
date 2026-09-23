@@ -1,0 +1,287 @@
+{
+  "synthetic_only": true,
+  "production_verified": false,
+  "schema": "offline-synthetic-journal-replay-v1",
+  "worker_count": 1,
+  "op_id": "synthetic-op-S26-0001",
+  "deterministic": true,
+  "policy": {
+    "accepted": "exactly one complete attempt; one record, response, durable ref; same value; response durable_ref equals durable ref",
+    "rejected": "duplicate/misidentified entries, sequence collisions, reference mismatch, or different values",
+    "UNKNOWN": "missing/inaccessible/unknown entries, or multiple complete attempts",
+    "visibility_order": "events are normalized by journal_seq; arrival order alone is not evidence of durability"
+  },
+  "result_count": 14,
+  "summary": {
+    "accepted": 4,
+    "rejected": 4,
+    "UNKNOWN": 6
+  },
+  "results": [
+    {
+      "case_id": "S26-01-ordered-a1-same",
+      "classification": "accepted",
+      "evidence_status": "confirmed",
+      "reasons": [
+        "attempt 1 has coherent record/response/durable value and reference"
+      ],
+      "event_order": [
+        "record_visible:1",
+        "response_visible:2",
+        "durable_ref_visible:3"
+      ],
+      "normalized_order": [
+        "record_visible:1",
+        "response_visible:2",
+        "durable_ref_visible:3"
+      ]
+    },
+    {
+      "case_id": "S26-02-response-first-same",
+      "classification": "accepted",
+      "evidence_status": "inferred",
+      "reasons": [
+        "visibility order differs from journal sequence; replay normalizes by journal_seq",
+        "attempt 1 has coherent record/response/durable value and reference"
+      ],
+      "event_order": [
+        "response_visible:2",
+        "record_visible:1",
+        "durable_ref_visible:3"
+      ],
+      "normalized_order": [
+        "record_visible:1",
+        "response_visible:2",
+        "durable_ref_visible:3"
+      ]
+    },
+    {
+      "case_id": "S26-03-missing-record",
+      "classification": "UNKNOWN",
+      "evidence_status": "unverified",
+      "reasons": [
+        "attempt 1 is incomplete"
+      ],
+      "event_order": [
+        "response_visible:2",
+        "durable_ref_visible:3"
+      ],
+      "normalized_order": [
+        "response_visible:2",
+        "durable_ref_visible:3"
+      ]
+    },
+    {
+      "case_id": "S26-04-missing-response",
+      "classification": "UNKNOWN",
+      "evidence_status": "unverified",
+      "reasons": [
+        "attempt 1 is incomplete"
+      ],
+      "event_order": [
+        "record_visible:1",
+        "durable_ref_visible:3"
+      ],
+      "normalized_order": [
+        "record_visible:1",
+        "durable_ref_visible:3"
+      ]
+    },
+    {
+      "case_id": "S26-05-missing-durable-ref",
+      "classification": "UNKNOWN",
+      "evidence_status": "inaccessible",
+      "reasons": [
+        "one or more visibility events are inaccessible"
+      ],
+      "event_order": [
+        "record_visible:1",
+        "response_visible:2",
+        "durable_ref_visible:3"
+      ],
+      "normalized_order": [
+        "record_visible:1",
+        "response_visible:2",
+        "durable_ref_visible:3"
+      ]
+    },
+    {
+      "case_id": "S26-06-duplicate-record",
+      "classification": "rejected",
+      "evidence_status": "conflicting",
+      "reasons": [
+        "duplicate entry identity"
+      ],
+      "event_order": [
+        "record_visible:1",
+        "record_visible:2",
+        "response_visible:3",
+        "durable_ref_visible:4"
+      ],
+      "normalized_order": [
+        "record_visible:1",
+        "record_visible:2",
+        "response_visible:3",
+        "durable_ref_visible:4"
+      ]
+    },
+    {
+      "case_id": "S26-07-reordered-same",
+      "classification": "accepted",
+      "evidence_status": "inferred",
+      "reasons": [
+        "visibility order differs from journal sequence; replay normalizes by journal_seq",
+        "attempt 1 has coherent record/response/durable value and reference"
+      ],
+      "event_order": [
+        "durable_ref_visible:3",
+        "record_visible:1",
+        "response_visible:2"
+      ],
+      "normalized_order": [
+        "record_visible:1",
+        "response_visible:2",
+        "durable_ref_visible:3"
+      ]
+    },
+    {
+      "case_id": "S26-08-different-values",
+      "classification": "rejected",
+      "evidence_status": "conflicting",
+      "reasons": [
+        "attempt 1 values differ across record/response/durable"
+      ],
+      "event_order": [
+        "record_visible:1",
+        "response_visible:2",
+        "durable_ref_visible:3"
+      ],
+      "normalized_order": [
+        "record_visible:1",
+        "response_visible:2",
+        "durable_ref_visible:3"
+      ]
+    },
+    {
+      "case_id": "S26-09-reference-mismatch",
+      "classification": "rejected",
+      "evidence_status": "conflicting",
+      "reasons": [
+        "attempt 1 response/durable reference mismatch"
+      ],
+      "event_order": [
+        "record_visible:1",
+        "response_visible:2",
+        "durable_ref_visible:3"
+      ],
+      "normalized_order": [
+        "record_visible:1",
+        "response_visible:2",
+        "durable_ref_visible:3"
+      ]
+    },
+    {
+      "case_id": "S26-10-attempt1-incomplete-attempt2-complete",
+      "classification": "accepted",
+      "evidence_status": "inferred",
+      "reasons": [
+        "attempt 1 is incomplete",
+        "attempt 2 has coherent record/response/durable value and reference"
+      ],
+      "event_order": [
+        "record_visible:1",
+        "record_visible:4",
+        "response_visible:5",
+        "durable_ref_visible:6"
+      ],
+      "normalized_order": [
+        "record_visible:1",
+        "record_visible:4",
+        "response_visible:5",
+        "durable_ref_visible:6"
+      ]
+    },
+    {
+      "case_id": "S26-11-attempt1-complete-attempt2-complete",
+      "classification": "UNKNOWN",
+      "evidence_status": "inferred",
+      "reasons": [
+        "more than one complete attempt is locally observable; attempt choice is ambiguous"
+      ],
+      "event_order": [
+        "record_visible:1",
+        "response_visible:2",
+        "durable_ref_visible:3",
+        "record_visible:4",
+        "response_visible:5",
+        "durable_ref_visible:6"
+      ],
+      "normalized_order": [
+        "record_visible:1",
+        "response_visible:2",
+        "durable_ref_visible:3",
+        "record_visible:4",
+        "response_visible:5",
+        "durable_ref_visible:6"
+      ]
+    },
+    {
+      "case_id": "S26-12-unknown-entry-kind",
+      "classification": "UNKNOWN",
+      "evidence_status": "unverified",
+      "reasons": [
+        "unknown event kind cannot be interpreted locally"
+      ],
+      "event_order": [
+        "record_visible:1",
+        "mystery_visible:2",
+        "durable_ref_visible:3"
+      ],
+      "normalized_order": [
+        "record_visible:1",
+        "mystery_visible:2",
+        "durable_ref_visible:3"
+      ]
+    },
+    {
+      "case_id": "S26-13-attempt-mismatch",
+      "classification": "UNKNOWN",
+      "evidence_status": "inferred",
+      "reasons": [
+        "complete attempt differs from case selection hint"
+      ],
+      "event_order": [
+        "record_visible:1",
+        "response_visible:2",
+        "durable_ref_visible:3"
+      ],
+      "normalized_order": [
+        "record_visible:1",
+        "response_visible:2",
+        "durable_ref_visible:3"
+      ]
+    },
+    {
+      "case_id": "S26-14-sequence-collision",
+      "classification": "rejected",
+      "evidence_status": "conflicting",
+      "reasons": [
+        "journal sequence is missing or duplicated"
+      ],
+      "event_order": [
+        "record_visible:1",
+        "response_visible:1",
+        "durable_ref_visible:2"
+      ],
+      "normalized_order": [
+        "record_visible:1",
+        "response_visible:1",
+        "durable_ref_visible:2"
+      ]
+    }
+  ],
+  "limitations": [
+    "local replay cannot prove real crash durability",
+    "local replay cannot prove remote state, exactly-once, rollback, immutable audit, or production safety"
+  ]
+}

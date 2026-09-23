@@ -1,0 +1,139 @@
+{
+  "model_config": {
+    "reference_time": "2026-09-22T00:00:00Z",
+    "freshness_window_seconds": 3600,
+    "observation_budget": 4,
+    "independence_key": "source_id",
+    "synthetic_only": true,
+    "production_verified": false
+  },
+  "cases": [
+    {
+      "id": "S13-01-fresh-corroborated",
+      "description": "Two independent fresh observations agree.",
+      "observations": [
+        {"source_id":"sensor-a","event_id":"e01","event_time":"2026-09-21T23:50:00Z","observed_at":"2026-09-21T23:51:00Z","seq":1,"decision":"RECOVERED","accessible":true,"freshness_age_seconds":540},
+        {"source_id":"sensor-b","event_id":"e01","event_time":"2026-09-21T23:50:00Z","observed_at":"2026-09-21T23:52:00Z","seq":1,"decision":"RECOVERED","accessible":true,"freshness_age_seconds":480}
+      ]
+    },
+    {
+      "id": "S13-02-single-observation",
+      "description": "One fresh observation cannot establish corroboration.",
+      "observations": [
+        {"source_id":"sensor-a","event_id":"e02","event_time":"2026-09-21T23:55:00Z","observed_at":"2026-09-21T23:56:00Z","seq":1,"decision":"RECOVERED","accessible":true,"freshness_age_seconds":240}
+      ]
+    },
+    {
+      "id": "S13-03-stale-only",
+      "description": "Two agreeing observations are outside the freshness window.",
+      "observations": [
+        {"source_id":"sensor-a","event_id":"e03","event_time":"2026-09-21T21:00:00Z","observed_at":"2026-09-21T21:01:00Z","seq":1,"decision":"RECOVERED","accessible":true,"freshness_age_seconds":10740},
+        {"source_id":"sensor-b","event_id":"e03","event_time":"2026-09-21T21:00:00Z","observed_at":"2026-09-21T21:02:00Z","seq":1,"decision":"RECOVERED","accessible":true,"freshness_age_seconds":10680}
+      ]
+    },
+    {
+      "id": "S13-04-same-source-duplicate",
+      "description": "Repeated records from one source are not independent.",
+      "observations": [
+        {"source_id":"sensor-a","event_id":"e04","event_time":"2026-09-21T23:40:00Z","observed_at":"2026-09-21T23:41:00Z","seq":1,"decision":"RECOVERED","accessible":true,"freshness_age_seconds":1140},
+        {"source_id":"sensor-a","event_id":"e04","event_time":"2026-09-21T23:40:00Z","observed_at":"2026-09-21T23:42:00Z","seq":1,"decision":"RECOVERED","accessible":true,"freshness_age_seconds":1080}
+      ]
+    },
+    {
+      "id": "S13-05-out-of-order",
+      "description": "Ingest order is reversed but event sequence agrees after normalization.",
+      "observations": [
+        {"source_id":"sensor-b","event_id":"e05","event_time":"2026-09-21T23:30:00Z","observed_at":"2026-09-21T23:32:00Z","seq":1,"decision":"RECOVERED","accessible":true,"freshness_age_seconds":1680},
+        {"source_id":"sensor-a","event_id":"e05","event_time":"2026-09-21T23:29:00Z","observed_at":"2026-09-21T23:31:00Z","seq":1,"decision":"RECOVERED","accessible":true,"freshness_age_seconds":1740}
+      ]
+    },
+    {
+      "id": "S13-06-boundary-fresh",
+      "description": "Age exactly at the inclusive freshness boundary.",
+      "observations": [
+        {"source_id":"sensor-a","event_id":"e06","event_time":"2026-09-21T23:00:00Z","observed_at":"2026-09-21T23:00:00Z","seq":1,"decision":"RECOVERED","accessible":true,"freshness_age_seconds":3600},
+        {"source_id":"sensor-b","event_id":"e06","event_time":"2026-09-21T23:00:00Z","observed_at":"2026-09-21T23:00:00Z","seq":1,"decision":"RECOVERED","accessible":true,"freshness_age_seconds":3600}
+      ]
+    },
+    {
+      "id": "S13-07-boundary-stale",
+      "description": "Age one second beyond the inclusive freshness boundary.",
+      "observations": [
+        {"source_id":"sensor-a","event_id":"e07","event_time":"2026-09-21T22:59:59Z","observed_at":"2026-09-21T22:59:59Z","seq":1,"decision":"RECOVERED","accessible":true,"freshness_age_seconds":3601},
+        {"source_id":"sensor-b","event_id":"e07","event_time":"2026-09-21T22:59:59Z","observed_at":"2026-09-21T22:59:59Z","seq":1,"decision":"RECOVERED","accessible":true,"freshness_age_seconds":3601}
+      ]
+    },
+    {
+      "id": "S13-08-budget-complete",
+      "description": "Budget permits the two corroborating records.",
+      "budget": 2,
+      "observations": [
+        {"source_id":"sensor-a","event_id":"e08","event_time":"2026-09-21T23:45:00Z","observed_at":"2026-09-21T23:46:00Z","seq":1,"decision":"RECOVERED","accessible":true,"freshness_age_seconds":840},
+        {"source_id":"sensor-b","event_id":"e08","event_time":"2026-09-21T23:45:00Z","observed_at":"2026-09-21T23:47:00Z","seq":1,"decision":"RECOVERED","accessible":true,"freshness_age_seconds":780}
+      ]
+    },
+    {
+      "id": "S13-09-budget-exhausted",
+      "description": "First record is insufficient and remaining evidence is not examined.",
+      "budget": 1,
+      "observations": [
+        {"source_id":"sensor-a","event_id":"e09","event_time":"2026-09-21T23:45:00Z","observed_at":"2026-09-21T23:46:00Z","seq":1,"decision":"RECOVERED","accessible":true,"freshness_age_seconds":840},
+        {"source_id":"sensor-b","event_id":"e09","event_time":"2026-09-21T23:45:00Z","observed_at":"2026-09-21T23:47:00Z","seq":1,"decision":"RECOVERED","accessible":true,"freshness_age_seconds":780}
+      ]
+    },
+    {
+      "id": "S13-10-explicit-conflict",
+      "description": "Fresh independent terminal decisions for the same version conflict.",
+      "observations": [
+        {"source_id":"sensor-a","event_id":"e10","event_time":"2026-09-21T23:50:00Z","observed_at":"2026-09-21T23:51:00Z","seq":7,"decision":"RECOVERED","accessible":true,"freshness_age_seconds":540},
+        {"source_id":"sensor-b","event_id":"e10","event_time":"2026-09-21T23:50:00Z","observed_at":"2026-09-21T23:52:00Z","seq":7,"decision":"REJECT","accessible":true,"freshness_age_seconds":480}
+      ]
+    },
+    {
+      "id": "S13-11-missing",
+      "description": "No observations are supplied.",
+      "observations": []
+    },
+    {
+      "id": "S13-12-inaccessible",
+      "description": "All provenance records are inaccessible.",
+      "observations": [
+        {"source_id":"sensor-a","event_id":"e12","event_time":"2026-09-21T23:50:00Z","observed_at":"2026-09-21T23:51:00Z","seq":1,"decision":"RECOVERED","accessible":false,"freshness_age_seconds":540,"access_note":"synthetic permission denial"},
+        {"source_id":"sensor-b","event_id":"e12","event_time":"2026-09-21T23:50:00Z","observed_at":"2026-09-21T23:52:00Z","seq":1,"decision":"RECOVERED","accessible":false,"freshness_age_seconds":480,"access_note":"synthetic timeout"}
+      ]
+    },
+    {
+      "id": "S13-13-mixed-access",
+      "description": "One inaccessible record plus two accessible agreeing records.",
+      "observations": [
+        {"source_id":"sensor-a","event_id":"e13","event_time":"2026-09-21T23:50:00Z","observed_at":"2026-09-21T23:51:00Z","seq":1,"decision":"RECOVERED","accessible":true,"freshness_age_seconds":540},
+        {"source_id":"sensor-b","event_id":"e13","event_time":"2026-09-21T23:50:00Z","observed_at":"2026-09-21T23:52:00Z","seq":1,"decision":"RECOVERED","accessible":true,"freshness_age_seconds":480},
+        {"source_id":"sensor-c","event_id":"e13","event_time":"2026-09-21T23:50:00Z","observed_at":"2026-09-21T23:53:00Z","seq":1,"decision":"RECOVERED","accessible":false,"freshness_age_seconds":420,"access_note":"synthetic unavailable endpoint"}
+      ]
+    },
+    {
+      "id": "S13-14-no-clear-conflict",
+      "description": "A stale reject cannot contradict two fresh recoveries.",
+      "observations": [
+        {"source_id":"sensor-a","event_id":"e14","event_time":"2026-09-21T23:40:00Z","observed_at":"2026-09-21T23:41:00Z","seq":3,"decision":"RECOVERED","accessible":true,"freshness_age_seconds":1140},
+        {"source_id":"sensor-b","event_id":"e14","event_time":"2026-09-21T23:40:00Z","observed_at":"2026-09-21T23:42:00Z","seq":3,"decision":"RECOVERED","accessible":true,"freshness_age_seconds":1080},
+        {"source_id":"sensor-c","event_id":"e14","event_time":"2026-09-21T20:00:00Z","observed_at":"2026-09-21T20:01:00Z","seq":3,"decision":"REJECT","accessible":true,"freshness_age_seconds":14340}
+      ]
+    },
+    {
+      "id": "S13-15-one-reject-only",
+      "description": "A lone reject is not explicit contradiction evidence.",
+      "observations": [
+        {"source_id":"sensor-a","event_id":"e15","event_time":"2026-09-21T23:55:00Z","observed_at":"2026-09-21T23:56:00Z","seq":2,"decision":"REJECT","accessible":true,"freshness_age_seconds":240}
+      ]
+    },
+    {
+      "id": "S13-16-out-of-order-conflict",
+      "description": "Reversed ingest order does not hide a same-version conflict.",
+      "observations": [
+        {"source_id":"sensor-b","event_id":"e16","event_time":"2026-09-21T23:20:00Z","observed_at":"2026-09-21T23:22:00Z","seq":4,"decision":"REJECT","accessible":true,"freshness_age_seconds":2280},
+        {"source_id":"sensor-a","event_id":"e16","event_time":"2026-09-21T23:20:00Z","observed_at":"2026-09-21T23:21:00Z","seq":4,"decision":"RECOVERED","accessible":true,"freshness_age_seconds":2340}
+      ]
+    }
+  ]
+}

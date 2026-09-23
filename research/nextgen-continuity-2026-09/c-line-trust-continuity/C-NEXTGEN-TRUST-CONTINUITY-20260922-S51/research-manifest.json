@@ -1,0 +1,24 @@
+{
+  "schema_version": "1.0",
+  "question": "在离线合成证据中，何时隐私/条款、telemetry/opt-out、数据分类、配置优先级、runtime read-back、retention、export destination 与 access control 能够闭合连续性，何时必须保持 UNKNOWN 或 REJECT？",
+  "scope": {
+    "project": "C-line S51",
+    "mode": "offline synthetic fixtures",
+    "date": "2026-09-23",
+    "excluded": ["S1-S50", "production", "network", "real services", "credentials"],
+    "identity_domain": ["account", "project", "runtime", "auth_context", "config_key", "data_class"],
+    "privacy_domain": ["terms", "privacy_policy", "region", "telemetry", "optout", "prompt", "tool", "session", "file_event", "redaction", "precedence", "retention", "export", "access_control"]
+  },
+  "claims_status": "inferred",
+  "synthetic_only": true,
+  "production_verified": false,
+  "sources": [],
+  "claims": [
+    {"id":"privacy-telemetry-closure","claim":"只有 auth/terms/privacy/region、telemetry/opt-out、数据分类/redaction、config precedence/runtime read-back、retention/export/access control 全部闭合时才可 RECOVERED。","status":"inferred","confidence":"bounded","sources":[],"caveat":"仅由本地合成夹具和规则推导，不代表生产系统。"},
+    {"id":"optout-not-runtime-proof","claim":"隐私页面、opt-out 设置或配置文件存在不能证明当前 runtime 和数据路径已采用该策略；必须 runtime read-back。","status":"inferred","confidence":"bounded","sources":[],"caveat":"未验证任何真实 privacy/telemetry runtime。"},
+    {"id":"data-path-unknown","claim":"认证上下文、数据分类、telemetry、配置优先级、生效状态、retention、export 或 access control 未知时必须 UNKNOWN。","status":"inferred","confidence":"bounded","sources":[],"caveat":"布尔门不量化真实隐私风险。"},
+    {"id":"privacy-conflict-reject","claim":"身份冲突和不可调和的隐私采集/策略状态冲突必须 REJECT。","status":"inferred","confidence":"bounded","sources":[],"caveat":"只验证合成判定逻辑，不证明目标系统执行拒绝。"}
+  ],
+  "coverage": {"cases": 28, "property_sweep": 8388608, "dimensions": 23, "statuses": ["RECOVERED", "UNKNOWN", "REJECT"], "events": ["TERMS", "PRIVACY_POLICY", "REGION", "TELEMETRY", "OPTOUT", "PROMPT", "TOOL", "SESSION", "FILE_EVENT", "REDACTION", "PRECEDENCE", "RETENTION", "EXPORT", "ACCESS_CONTROL", "NO_EVENT", "UNKNOWN"]},
+  "notes": "三态互斥并 fail-closed；RECOVERED 仅代表本片离线夹具中的 privacy/telemetry evidence gate 闭合，不代表 production continuity、external effect 或 exactly-once。"
+}

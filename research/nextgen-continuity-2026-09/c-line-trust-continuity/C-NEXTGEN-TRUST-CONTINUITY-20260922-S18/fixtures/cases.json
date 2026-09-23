@@ -1,0 +1,657 @@
+{
+  "cases": [
+    {
+      "case_id": "C01",
+      "chain_id": "C01",
+      "expected": "RECOVERED",
+      "metadata": {
+        "hash_scheme": "HMAC-SHA256",
+        "production_verified": false,
+        "synthetic_only": true
+      },
+      "records": [
+        {
+          "chain_id": "C01",
+          "payload": "alpha",
+          "prev_hash": "",
+          "record_hash": "bab3a18f33f708e907f51e5cd85c787e19e3fe96b40308f1a33b45420409c9fb",
+          "seq": 1,
+          "timestamp": "2026-09-22T10:01:00Z"
+        },
+        {
+          "chain_id": "C01",
+          "payload": "beta",
+          "prev_hash": "bab3a18f33f708e907f51e5cd85c787e19e3fe96b40308f1a33b45420409c9fb",
+          "record_hash": "32d29d38c71236cc6ed5d0355495524757c8b59a1d76e3638095bcfebfe65013",
+          "seq": 2,
+          "timestamp": "2026-09-22T10:02:00Z"
+        },
+        {
+          "chain_id": "C01",
+          "payload": "gamma",
+          "prev_hash": "32d29d38c71236cc6ed5d0355495524757c8b59a1d76e3638095bcfebfe65013",
+          "record_hash": "b01efcd47ed9d5a66ca6db242dcfced0f9ee25364434c9c40d89771ca3bd8e76",
+          "seq": 3,
+          "timestamp": "2026-09-22T10:03:00Z"
+        }
+      ]
+    },
+    {
+      "case_id": "C02",
+      "chain_id": "C02",
+      "expected": "RECOVERED",
+      "metadata": {
+        "hash_scheme": "HMAC-SHA256",
+        "production_verified": false,
+        "synthetic_only": true
+      },
+      "records": [
+        {
+          "chain_id": "C01",
+          "payload": "alpha",
+          "prev_hash": "",
+          "record_hash": "bab3a18f33f708e907f51e5cd85c787e19e3fe96b40308f1a33b45420409c9fb",
+          "seq": 1,
+          "timestamp": "2026-09-22T10:01:00Z"
+        },
+        {
+          "chain_id": "C01",
+          "payload": "beta",
+          "prev_hash": "bab3a18f33f708e907f51e5cd85c787e19e3fe96b40308f1a33b45420409c9fb",
+          "record_hash": "32d29d38c71236cc6ed5d0355495524757c8b59a1d76e3638095bcfebfe65013",
+          "seq": 2,
+          "timestamp": "2026-09-22T10:02:00Z"
+        },
+        {
+          "chain_id": "C01",
+          "payload": "gamma",
+          "prev_hash": "32d29d38c71236cc6ed5d0355495524757c8b59a1d76e3638095bcfebfe65013",
+          "record_hash": "b01efcd47ed9d5a66ca6db242dcfced0f9ee25364434c9c40d89771ca3bd8e76",
+          "seq": 3,
+          "timestamp": "2026-09-22T10:03:00Z"
+        },
+        {
+          "chain_id": "C01",
+          "payload": "beta",
+          "prev_hash": "bab3a18f33f708e907f51e5cd85c787e19e3fe96b40308f1a33b45420409c9fb",
+          "record_hash": "32d29d38c71236cc6ed5d0355495524757c8b59a1d76e3638095bcfebfe65013",
+          "seq": 2,
+          "timestamp": "2026-09-22T10:02:00Z"
+        }
+      ]
+    },
+    {
+      "case_id": "C03",
+      "chain_id": "C03",
+      "expected": "REJECT",
+      "metadata": {
+        "hash_scheme": "HMAC-SHA256",
+        "production_verified": false,
+        "synthetic_only": true
+      },
+      "records": [
+        {
+          "chain_id": "C01",
+          "payload": "alpha",
+          "prev_hash": "",
+          "record_hash": "bab3a18f33f708e907f51e5cd85c787e19e3fe96b40308f1a33b45420409c9fb",
+          "seq": 1,
+          "timestamp": "2026-09-22T10:01:00Z"
+        },
+        {
+          "chain_id": "C01",
+          "payload": "beta",
+          "prev_hash": "bab3a18f33f708e907f51e5cd85c787e19e3fe96b40308f1a33b45420409c9fb",
+          "record_hash": "32d29d38c71236cc6ed5d0355495524757c8b59a1d76e3638095bcfebfe65013",
+          "seq": 2,
+          "timestamp": "2026-09-22T10:02:00Z"
+        },
+        {
+          "chain_id": "C01",
+          "payload": "gamma",
+          "prev_hash": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+          "record_hash": "0edd2bb88f37dc9c600b5910c19e4b4c1fb9a6ea695e3512be185d1e5fa8bcf3",
+          "seq": 3,
+          "timestamp": "2026-09-22T10:03:00Z"
+        }
+      ]
+    },
+    {
+      "case_id": "C04",
+      "chain_id": "C04",
+      "expected": "UNKNOWN",
+      "metadata": {
+        "hash_scheme": "HMAC-SHA256",
+        "production_verified": false,
+        "synthetic_only": true
+      },
+      "records": [
+        {
+          "chain_id": "C01",
+          "payload": "alpha",
+          "prev_hash": "",
+          "record_hash": "bab3a18f33f708e907f51e5cd85c787e19e3fe96b40308f1a33b45420409c9fb",
+          "seq": 1,
+          "timestamp": "2026-09-22T10:01:00Z"
+        },
+        {
+          "chain_id": "C01",
+          "payload": "gamma",
+          "prev_hash": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+          "record_hash": "77060a9d2611937de41b3811a05ecc7045df975f97d4cd8dffdc88942897a4e5",
+          "seq": 3,
+          "timestamp": "2026-09-22T10:03:00Z"
+        }
+      ]
+    },
+    {
+      "case_id": "C05",
+      "chain_id": "C05",
+      "expected": "UNKNOWN",
+      "head_seq": 1,
+      "metadata": {
+        "hash_scheme": "HMAC-SHA256",
+        "production_verified": false,
+        "synthetic_only": true
+      },
+      "records": [
+        {
+          "chain_id": "C01",
+          "payload": "beta",
+          "prev_hash": "bab3a18f33f708e907f51e5cd85c787e19e3fe96b40308f1a33b45420409c9fb",
+          "record_hash": "32d29d38c71236cc6ed5d0355495524757c8b59a1d76e3638095bcfebfe65013",
+          "seq": 2,
+          "timestamp": "2026-09-22T10:02:00Z"
+        },
+        {
+          "chain_id": "C01",
+          "payload": "gamma",
+          "prev_hash": "32d29d38c71236cc6ed5d0355495524757c8b59a1d76e3638095bcfebfe65013",
+          "record_hash": "b01efcd47ed9d5a66ca6db242dcfced0f9ee25364434c9c40d89771ca3bd8e76",
+          "seq": 3,
+          "timestamp": "2026-09-22T10:03:00Z"
+        }
+      ]
+    },
+    {
+      "case_id": "C06",
+      "chain_id": "C06",
+      "expected": "UNKNOWN",
+      "metadata": {
+        "hash_scheme": "HMAC-SHA256",
+        "production_verified": false,
+        "synthetic_only": true
+      },
+      "records": [
+        {
+          "chain_id": "C01",
+          "payload": "alpha",
+          "prev_hash": "",
+          "record_hash": "bab3a18f33f708e907f51e5cd85c787e19e3fe96b40308f1a33b45420409c9fb",
+          "seq": 1,
+          "timestamp": "2026-09-22T10:01:00Z"
+        },
+        {
+          "chain_id": "C01",
+          "payload": "beta",
+          "prev_hash": "bab3a18f33f708e907f51e5cd85c787e19e3fe96b40308f1a33b45420409c9fb",
+          "record_hash": "32d29d38c71236cc6ed5d0355495524757c8b59a1d76e3638095bcfebfe65013",
+          "seq": 2,
+          "timestamp": "2026-09-22T10:02:00Z"
+        }
+      ],
+      "terminal_seq": 3
+    },
+    {
+      "case_id": "C07",
+      "chain_id": "C07",
+      "expected": "REJECT",
+      "metadata": {
+        "hash_scheme": "HMAC-SHA256",
+        "production_verified": false,
+        "synthetic_only": true
+      },
+      "records": [
+        {
+          "chain_id": "C07",
+          "payload": "root",
+          "prev_hash": "",
+          "record_hash": "1b4821867ddcaece1bc8101a866456e3d768015761ef395565647efe5979c1cc",
+          "seq": 1,
+          "timestamp": "2026-09-22T10:01:00Z"
+        },
+        {
+          "chain_id": "C07",
+          "payload": "left",
+          "prev_hash": "1b4821867ddcaece1bc8101a866456e3d768015761ef395565647efe5979c1cc",
+          "record_hash": "460b86801560210a855512d6bee9449961da45eeb3b7a8e2dfcb14ee93444fbc",
+          "seq": 2,
+          "timestamp": "2026-09-22T10:02:00Z"
+        },
+        {
+          "chain_id": "C07",
+          "payload": "right",
+          "prev_hash": "1b4821867ddcaece1bc8101a866456e3d768015761ef395565647efe5979c1cc",
+          "record_hash": "16c4a4422f824f76d60a4f8b5ce4d2b5ba2eebf28ba7df176933366e9866a4de",
+          "seq": 2,
+          "timestamp": "2026-09-22T10:02:00Z"
+        }
+      ]
+    },
+    {
+      "case_id": "C08",
+      "chain_id": "C08",
+      "expected": "UNKNOWN",
+      "metadata": {
+        "hash_scheme": "HMAC-SHA256",
+        "production_verified": false,
+        "synthetic_only": true
+      },
+      "records": [
+        {
+          "chain_id": "C08",
+          "payload": "root",
+          "prev_hash": "",
+          "record_hash": "838564767fad322d19a1bc02ed46a5a0032f989e1f94d3978d30ddcac5907250",
+          "seq": 1,
+          "timestamp": "2026-09-22T10:01:00Z"
+        },
+        {
+          "chain_id": "C08",
+          "payload": "same",
+          "prev_hash": "838564767fad322d19a1bc02ed46a5a0032f989e1f94d3978d30ddcac5907250",
+          "record_hash": "dc06b67043d34d5e2ee0d0a9cd02a664be553260549e1e2aa580825e71e3992d",
+          "seq": 2,
+          "timestamp": "2026-09-22T10:02:00Z"
+        },
+        {
+          "chain_id": "C08",
+          "payload": "same",
+          "prev_hash": "838564767fad322d19a1bc02ed46a5a0032f989e1f94d3978d30ddcac5907250",
+          "record_hash": "e2d444845ee7cfadb5fbf714a06919192444be6031ed09bb07772ae7ed3b9af2",
+          "seq": 2,
+          "timestamp": "2026-09-22T10:02:01Z"
+        }
+      ]
+    },
+    {
+      "case_id": "C09",
+      "chain_id": "C09",
+      "expected": "RECOVERED",
+      "metadata": {
+        "hash_scheme": "HMAC-SHA256",
+        "production_verified": false,
+        "synthetic_only": true
+      },
+      "observation_window": {
+        "end": "2026-09-22T23:59:59Z",
+        "start": "2026-09-22T00:00:00Z"
+      },
+      "records": [
+        {
+          "chain_id": "C09",
+          "payload": "in-window",
+          "prev_hash": "",
+          "record_hash": "95750d90625bcc35f8f970aafa62c6e0ff3d5019336808ac8e89e7f8ec4c1c08",
+          "seq": 1,
+          "timestamp": "2026-09-22T10:01:00Z"
+        }
+      ]
+    },
+    {
+      "case_id": "C10",
+      "chain_id": "C10",
+      "expected": "UNKNOWN",
+      "metadata": {
+        "hash_scheme": "HMAC-SHA256",
+        "production_verified": false,
+        "synthetic_only": true
+      },
+      "observation_window": {
+        "end": "2026-09-22T23:59:59Z",
+        "start": "2026-09-22T00:00:00Z"
+      },
+      "records": [
+        {
+          "chain_id": "C10",
+          "payload": "out-window",
+          "prev_hash": "",
+          "record_hash": "0095d359d7ea77b833b814e66158e4470b447aabab7e2d71e572306d70380bfd",
+          "seq": 1,
+          "timestamp": "2026-09-23T00:00:00Z"
+        }
+      ]
+    },
+    {
+      "case_id": "C11",
+      "chain_id": "C11",
+      "expected": "UNKNOWN",
+      "metadata": {
+        "hash_scheme": "HMAC-SHA256",
+        "production_verified": false,
+        "synthetic_only": true
+      },
+      "records": [
+        {
+          "chain_id": "C01",
+          "payload": "alpha",
+          "prev_hash": "",
+          "record_hash": "bab3a18f33f708e907f51e5cd85c787e19e3fe96b40308f1a33b45420409c9fb",
+          "seq": 1,
+          "timestamp": "2026-09-22T10:01:00Z"
+        },
+        {
+          "chain_id": "C01",
+          "payload": "gamma",
+          "prev_hash": "bab3a18f33f708e907f51e5cd85c787e19e3fe96b40308f1a33b45420409c9fb",
+          "record_hash": "d7d344810767fb057618c4aa9b44412b55b593e008c2a2d69e7671e453dff9ef",
+          "seq": 3,
+          "timestamp": "2026-09-22T10:03:00Z"
+        }
+      ]
+    },
+    {
+      "case_id": "C12",
+      "chain_id": "C12",
+      "expected": "UNKNOWN",
+      "metadata": {
+        "hash_scheme": "HMAC-SHA256",
+        "production_verified": false,
+        "synthetic_only": true
+      },
+      "records": [
+        {
+          "chain_id": "C01",
+          "payload": "alpha",
+          "prev_hash": "",
+          "record_hash": "bab3a18f33f708e907f51e5cd85c787e19e3fe96b40308f1a33b45420409c9fb",
+          "seq": 1,
+          "timestamp": "2026-09-22T10:01:00Z"
+        },
+        {
+          "chain_id": "C01",
+          "payload": "beta",
+          "prev_hash": "bab3a18f33f708e907f51e5cd85c787e19e3fe96b40308f1a33b45420409c9fb",
+          "seq": 2,
+          "timestamp": "2026-09-22T10:02:00Z"
+        },
+        {
+          "chain_id": "C01",
+          "payload": "gamma",
+          "prev_hash": "32d29d38c71236cc6ed5d0355495524757c8b59a1d76e3638095bcfebfe65013",
+          "record_hash": "b01efcd47ed9d5a66ca6db242dcfced0f9ee25364434c9c40d89771ca3bd8e76",
+          "seq": 3,
+          "timestamp": "2026-09-22T10:03:00Z"
+        }
+      ]
+    },
+    {
+      "case_id": "C13",
+      "chain_id": "C13",
+      "expected": "UNKNOWN",
+      "external_anchor": {
+        "anchor_id": "A13",
+        "status": "unreachable"
+      },
+      "metadata": {
+        "hash_scheme": "HMAC-SHA256",
+        "production_verified": false,
+        "synthetic_only": true
+      },
+      "records": [
+        {
+          "chain_id": "C13",
+          "payload": "anchor-unreachable",
+          "prev_hash": "",
+          "record_hash": "ce7157cb97399a2b575309aad926521f4471ffbb41413c9ee080d70b3d95d738",
+          "seq": 1,
+          "timestamp": "2026-09-22T10:01:00Z"
+        }
+      ]
+    },
+    {
+      "case_id": "C14",
+      "chain_id": "C14",
+      "expected": "UNKNOWN",
+      "metadata": {
+        "hash_scheme": "HMAC-SHA256",
+        "production_verified": false,
+        "synthetic_only": true
+      },
+      "records": [
+        {
+          "chain_id": "C01",
+          "payload": "alpha",
+          "prev_hash": "",
+          "record_hash": "bab3a18f33f708e907f51e5cd85c787e19e3fe96b40308f1a33b45420409c9fb",
+          "seq": 1,
+          "timestamp": "2026-09-22T10:01:00Z"
+        },
+        {
+          "chain_id": "C01",
+          "payload": "beta",
+          "prev_hash": "bab3a18f33f708e907f51e5cd85c787e19e3fe96b40308f1a33b45420409c9fb",
+          "record_hash": "32d29d38c71236cc6ed5d0355495524757c8b59a1d76e3638095bcfebfe65013",
+          "seq": 2,
+          "timestamp": "2026-09-22T10:02:00Z"
+        },
+        {
+          "chain_id": "C01",
+          "payload": "beta",
+          "prev_hash": "bab3a18f33f708e907f51e5cd85c787e19e3fe96b40308f1a33b45420409c9fb",
+          "record_hash": "32d29d38c71236cc6ed5d0355495524757c8b59a1d76e3638095bcfebfe65013",
+          "seq": 2,
+          "timestamp": "2026-09-22T10:02:00Z"
+        }
+      ],
+      "terminal_seq": 3
+    },
+    {
+      "case_id": "C15",
+      "chain_id": "C15",
+      "expected": "REJECT",
+      "metadata": {
+        "hash_scheme": "HMAC-SHA256",
+        "production_verified": false,
+        "synthetic_only": true
+      },
+      "records": [
+        {
+          "chain_id": "C01",
+          "payload": "alpha",
+          "prev_hash": "",
+          "record_hash": "bab3a18f33f708e907f51e5cd85c787e19e3fe96b40308f1a33b45420409c9fb",
+          "seq": 1,
+          "timestamp": "2026-09-22T10:01:00Z"
+        },
+        {
+          "chain_id": "C01",
+          "payload": "beta",
+          "prev_hash": "bab3a18f33f708e907f51e5cd85c787e19e3fe96b40308f1a33b45420409c9fb",
+          "record_hash": "32d29d38c71236cc6ed5d0355495524757c8b59a1d76e3638095bcfebfe65013",
+          "seq": 2,
+          "timestamp": "2026-09-22T10:02:00Z"
+        },
+        {
+          "chain_id": "C01",
+          "payload": "gamma",
+          "prev_hash": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+          "record_hash": "5494819dca892e5bedace9e91e3f785215104a026b93966653286c7b98b17a88",
+          "seq": 3,
+          "timestamp": "2026-09-22T10:03:00Z"
+        },
+        {
+          "chain_id": "C01",
+          "payload": "gamma",
+          "prev_hash": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+          "record_hash": "5494819dca892e5bedace9e91e3f785215104a026b93966653286c7b98b17a88",
+          "seq": 3,
+          "timestamp": "2026-09-22T10:03:00Z"
+        }
+      ]
+    },
+    {
+      "case_id": "C16",
+      "chain_id": "C16",
+      "expected": "RECOVERED",
+      "metadata": {
+        "hash_scheme": "HMAC-SHA256",
+        "production_verified": false,
+        "synthetic_only": true
+      },
+      "records": [
+        {
+          "chain_id": "C16",
+          "payload": "deterministic",
+          "prev_hash": "",
+          "record_hash": "38749de3ffb3ca99d67cebe405c43b820f38905e39443a0f868372fa1dc9e517",
+          "seq": 1,
+          "timestamp": "2026-09-22T10:01:00Z"
+        },
+        {
+          "chain_id": "C16",
+          "payload": "local",
+          "prev_hash": "38749de3ffb3ca99d67cebe405c43b820f38905e39443a0f868372fa1dc9e517",
+          "record_hash": "cf46b1ea2144f2e7b7456ed6b2fdec26456ee0d76ebe85a10b39d5db84941845",
+          "seq": 2,
+          "timestamp": "2026-09-22T10:02:00Z"
+        }
+      ]
+    },
+    {
+      "case_id": "C17",
+      "chain_id": "C17",
+      "expected": "UNKNOWN",
+      "metadata": {
+        "hash_scheme": "HMAC-SHA256",
+        "production_verified": false,
+        "synthetic_only": true
+      },
+      "observation_window": {
+        "end": "2026-09-22T23:59:59Z",
+        "start": "2026-09-22T00:00:00Z"
+      },
+      "records": [
+        {
+          "chain_id": "C09",
+          "payload": "in-window",
+          "prev_hash": "",
+          "record_hash": "a87dc763ce6442f74d09e2ffd94252807f9cc66292a2a316993412ed02105e29",
+          "seq": 1,
+          "timestamp": "2026-09-23T00:00:00Z"
+        },
+        {
+          "chain_id": "C09",
+          "payload": "in-window",
+          "prev_hash": "",
+          "record_hash": "a87dc763ce6442f74d09e2ffd94252807f9cc66292a2a316993412ed02105e29",
+          "seq": 1,
+          "timestamp": "2026-09-23T00:00:00Z"
+        }
+      ]
+    },
+    {
+      "case_id": "C18",
+      "chain_id": "C18",
+      "expected": "UNKNOWN",
+      "external_anchor": {
+        "anchor_id": "A18",
+        "status": "reachable"
+      },
+      "metadata": {
+        "hash_scheme": "HMAC-SHA256",
+        "production_verified": false,
+        "synthetic_only": true
+      },
+      "records": [
+        {
+          "chain_id": "C18",
+          "payload": "root",
+          "prev_hash": "",
+          "record_hash": "3be9de840cf54e91d02a9891c5db622a097a8f55216acfaedb3382beb814142b",
+          "seq": 1,
+          "timestamp": "2026-09-22T10:01:00Z"
+        },
+        {
+          "chain_id": "C18",
+          "payload": "same",
+          "prev_hash": "3be9de840cf54e91d02a9891c5db622a097a8f55216acfaedb3382beb814142b",
+          "record_hash": "7f2a1d046dbe49445debaadc07190ef86c094a0dbec6b94619f5e230529a1e4d",
+          "seq": 2,
+          "timestamp": "2026-09-22T10:02:00Z"
+        },
+        {
+          "chain_id": "C18",
+          "payload": "same",
+          "prev_hash": "3be9de840cf54e91d02a9891c5db622a097a8f55216acfaedb3382beb814142b",
+          "record_hash": "f910d54183573f3e6251b1cf77270af9d372dd87fbd04d63e478a4559b476869",
+          "seq": 2,
+          "timestamp": "2026-09-22T10:02:01Z"
+        }
+      ]
+    },
+    {
+      "case_id": "C19",
+      "chain_id": "C19",
+      "expected": "UNKNOWN",
+      "metadata": {
+        "hash_scheme": "HMAC-SHA256",
+        "production_verified": false,
+        "synthetic_only": true
+      },
+      "records": [
+        {
+          "chain_id": "C01",
+          "payload": "alpha",
+          "prev_hash": "",
+          "record_hash": "bab3a18f33f708e907f51e5cd85c787e19e3fe96b40308f1a33b45420409c9fb",
+          "seq": 1,
+          "timestamp": "2026-09-22T10:01:00Z"
+        },
+        {
+          "chain_id": "C01",
+          "payload": "beta",
+          "prev_hash": "bab3a18f33f708e907f51e5cd85c787e19e3fe96b40308f1a33b45420409c9fb",
+          "seq": 2,
+          "timestamp": "2026-09-22T10:02:00Z"
+        },
+        {
+          "chain_id": "C01",
+          "payload": "gamma",
+          "prev_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "record_hash": "a206319a18d2985604c28f4431f202b5e329d6c62effe9274b763d80ffa3daaa",
+          "seq": 3,
+          "timestamp": "2026-09-22T10:03:00Z"
+        }
+      ]
+    },
+    {
+      "case_id": "C20",
+      "chain_id": "C20",
+      "expected": "RECOVERED",
+      "external_anchor": {
+        "anchor_id": "A20",
+        "note": "source-only context; not content proof",
+        "status": "reachable"
+      },
+      "metadata": {
+        "hash_scheme": "HMAC-SHA256",
+        "production_verified": false,
+        "synthetic_only": true
+      },
+      "records": [
+        {
+          "chain_id": "C20",
+          "payload": "anchored",
+          "prev_hash": "",
+          "record_hash": "15874787e0c7cbddf2a103f424015dd29ec7bc8e8ea5651af3215d9e5d55b48b",
+          "seq": 1,
+          "timestamp": "2026-09-22T10:01:00Z"
+        }
+      ]
+    }
+  ],
+  "production_verified": false,
+  "schema_version": "S18-fixtures-v1",
+  "synthetic_only": true
+}

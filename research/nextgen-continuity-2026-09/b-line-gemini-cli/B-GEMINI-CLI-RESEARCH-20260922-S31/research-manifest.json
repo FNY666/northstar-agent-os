@@ -1,0 +1,25 @@
+{
+  "schema_version": "evidence-first-research-1",
+  "synthetic_only": true,
+  "production_verified": false,
+  "question": "In a deterministic single-worker synthetic model with two operation IDs, can acknowledgement precedence and interleaved events be classified independently without cross-operation contamination, including same/different payloads, late/lost/conflicting acknowledgements, and missing/inaccessible evidence?",
+  "scope": {
+    "included": ["20 deterministic local fixtures", "operation IDs A and B", "one worker", "acknowledgement precedence", "interleaving", "same and different payloads", "late/lost/conflicting ack", "missing/inaccessible evidence", "independent accepted/rejected/UNKNOWN classification"],
+    "excluded": ["network", "real Gemini CLI or service", "credentials", "prior research artifacts", "shared/P0", "incident directories", "D10/L12/D14", "canonical/staging/140/tri-line/systemd", "durability", "remote state", "exactly-once", "rollback", "production readiness"]
+  },
+  "claims": [
+    {"id":"C1","claim":"Under the local deterministic rules, a matching accessible evidence event followed by a matching accepted acknowledgement yields accepted for that same operation.","status":"inferred","confidence":"high","sources":[],"caveat":"Synthetic harness observation only; not production behavior."},
+    {"id":"C2","claim":"An operation with missing, inaccessible, mismatched, or absent qualifying evidence/ack is classified UNKNOWN rather than rejected.","status":"inferred","confidence":"high","sources":[],"caveat":"UNKNOWN is a distinct local classification and does not imply failure."},
+    {"id":"C3","claim":"A matching rejected or conflicting acknowledgement is classified rejected under the local precedence rule, including when a prior acceptance existed.","status":"inferred","confidence":"high","sources":[],"caveat":"This is a synthetic precedence rule, not a statement about any external system."},
+    {"id":"C4","claim":"Across the 20 fixtures, operation A and operation B are evaluated independently; an accepted state or evidence belonging to one operation does not supply missing proof for the other.","status":"inferred","confidence":"high","sources":[],"caveat":"Two operation IDs and one serialized worker only; broader concurrency is untested."},
+    {"id":"C5","claim":"The fixture suite covers same/different payloads, interleaving, late/lost/conflicting acknowledgements, and missing/inaccessible evidence.","status":"inferred","confidence":"high","sources":[],"caveat":"Coverage is based on declared local fixtures, not external workloads."}
+  ],
+  "coverage": {
+    "fixture_count": 20,
+    "operation_ids": ["A", "B"],
+    "worker_count": 1,
+    "dimensions": {"acknowledgement_precedence": true, "interleaving": true, "same_payload": true, "different_payload": true, "ack_late": true, "ack_lost": true, "ack_conflicting": true, "evidence_missing": true, "evidence_inaccessible": true, "cross_operation_isolation": true},
+    "classification_labels": ["accepted", "rejected", "UNKNOWN"],
+    "all_claims_external_sources": false
+  }
+}

@@ -1,0 +1,162 @@
+{
+  "case_count": 13,
+  "cases": [
+    {
+      "case_id": "C01_verified_continuity",
+      "deduped_events": 2,
+      "expected": "RECOVERED",
+      "labels": [
+        "VERIFIED_CONTINUITY"
+      ],
+      "reason": "verified_continuity",
+      "state": "RECOVERED"
+    },
+    {
+      "case_id": "C02_reordered_deduped",
+      "deduped_events": 2,
+      "expected": "RECOVERED",
+      "labels": [
+        "DELAYED"
+      ],
+      "reason": "verified_continuity",
+      "state": "RECOVERED"
+    },
+    {
+      "case_id": "C03_no_event",
+      "deduped_events": 0,
+      "expected": "UNKNOWN",
+      "labels": [
+        "NO_EVENT"
+      ],
+      "reason": "no_event_cannot_establish_commit",
+      "state": "UNKNOWN"
+    },
+    {
+      "case_id": "C04_delayed_receipt",
+      "deduped_events": 1,
+      "expected": "UNKNOWN",
+      "labels": [
+        "DELAYED"
+      ],
+      "reason": "evidence_class_missing",
+      "state": "UNKNOWN"
+    },
+    {
+      "case_id": "C05_dropped_commit",
+      "deduped_events": 0,
+      "expected": "UNKNOWN",
+      "labels": [
+        "DROPPED"
+      ],
+      "reason": "bounded_replay_truncated",
+      "state": "UNKNOWN"
+    },
+    {
+      "case_id": "C06_exporter_failure",
+      "deduped_events": 1,
+      "expected": "UNKNOWN",
+      "labels": [
+        "EXPORTER_FAILURE"
+      ],
+      "reason": "evidence_class_missing",
+      "state": "UNKNOWN"
+    },
+    {
+      "case_id": "C07_query_gap",
+      "deduped_events": 1,
+      "expected": "UNKNOWN",
+      "labels": [
+        "QUERY_GAP"
+      ],
+      "reason": "query_gap",
+      "state": "UNKNOWN"
+    },
+    {
+      "case_id": "C08_retention_expired",
+      "deduped_events": 1,
+      "expected": "UNKNOWN",
+      "labels": [
+        "RETENTION_EXPIRED"
+      ],
+      "reason": "retention_expired",
+      "state": "UNKNOWN"
+    },
+    {
+      "case_id": "C09_fork",
+      "deduped_events": 1,
+      "expected": "REJECT",
+      "labels": [
+        "UNKNOWN"
+      ],
+      "reason": "log_fork",
+      "state": "REJECT"
+    },
+    {
+      "case_id": "C10_watermark_rollback",
+      "deduped_events": 0,
+      "expected": "REJECT",
+      "labels": [
+        "UNKNOWN"
+      ],
+      "reason": "watermark_regression",
+      "state": "REJECT"
+    },
+    {
+      "case_id": "C11_old_epoch_event",
+      "deduped_events": 1,
+      "expected": "REJECT",
+      "labels": [
+        "UNKNOWN"
+      ],
+      "reason": "old_token_replay",
+      "state": "REJECT"
+    },
+    {
+      "case_id": "C12_fence_token_replay",
+      "deduped_events": 0,
+      "expected": "REJECT",
+      "labels": [
+        "UNKNOWN"
+      ],
+      "reason": "fence_token_replay",
+      "state": "REJECT"
+    },
+    {
+      "case_id": "C13_unknown_commit",
+      "deduped_events": 1,
+      "expected": "UNKNOWN",
+      "labels": [
+        "UNKNOWN"
+      ],
+      "reason": "crash_restart_unreconciled",
+      "state": "UNKNOWN"
+    }
+  ],
+  "coverage_labels": [
+    "DELAYED",
+    "DROPPED",
+    "EXPORTER_FAILURE",
+    "NO_EVENT",
+    "QUERY_GAP",
+    "RETENTION_EXPIRED",
+    "UNKNOWN",
+    "VERIFIED_CONTINUITY"
+  ],
+  "production_verified": false,
+  "property_results": {
+    "minimizer": {
+      "single_gate_counterexamples_found": 8,
+      "unresolved": 0
+    },
+    "property_sweep": {
+      "combinations": 256,
+      "violations": 0
+    }
+  },
+  "status_counts": {
+    "RECOVERED": 2,
+    "REJECT": 4,
+    "UNKNOWN": 7
+  },
+  "synthetic_only": true
+}

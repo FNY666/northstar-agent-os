@@ -1,0 +1,120 @@
+{
+  "schema_version": "1.0",
+  "question": "在官方公开 google-gemini/gemini-cli 资料中，跨进程/跨重启的 MessageBus、ToolCallEvent/telemetry、session/checkpoint/history、scheduler 审计与恢复边界是什么？",
+  "scope": {
+    "repository": "google-gemini/gemini-cli",
+    "source_policy": "仅官方公开 GitHub 文档、源码、测试、API；不 clone 全仓库",
+    "branch": "main",
+    "as_of": "2026-09-22",
+    "included": ["MessageBus publish/request/error/timeout", "tool call state update events", "telemetry exporters and flush", "session JSONL and history loading", "checkpoint snapshot/restore", "scheduler state", "remote session process boundary"],
+    "excluded": ["shared/P0", "事故目录", "D10/L12/D14", "canonical", "140", "tri-line", "systemd", "真实服务", "凭据", "非官方资料", "其他主题"]
+  },
+  "claims": [
+    {
+      "id": "S9-C1",
+      "claim": "MessageBus 是进程内 EventEmitter；publish 直接 emit，公开实现没有持久队列、磁盘落盘或跨进程 transport。",
+      "status": "confirmed",
+      "confidence": "high",
+      "sources": [{"url":"https://github.com/google-gemini/gemini-cli/blob/main/packages/core/src/confirmation-bus/message-bus.ts","publisher":"Google Gemini CLI","published_or_updated":"main (accessed 2026-09-22)","tier":"primary","support":"MessageBus extends EventEmitter; emitMessage calls this.emit; ordinary publish directly emits."}],
+      "caveat": "未检索到名为 ToolCallEvent 的独立 durable event-log API；此结论不排除仓库外部集成。"
+    },
+    {
+      "id": "S9-C2",
+      "claim": "MessageBus publish 异常会发 error 事件而不自动重试；request 以 correlation response 等待并在超时 reject。",
+      "status": "confirmed",
+      "confidence": "high",
+      "sources": [
+        {"url":"https://github.com/google-gemini/gemini-cli/blob/main/packages/core/src/confirmation-bus/message-bus.ts","publisher":"Google Gemini CLI","published_or_updated":"main (accessed 2026-09-22)","tier":"primary","support":"publish catch emits error; request installs timeout and rejects after timeout."},
+        {"url":"https://github.com/google-gemini/gemini-cli/blob/main/packages/core/src/confirmation-bus/message-bus.test.ts","publisher":"Google Gemini CLI","published_or_updated":"main (accessed 2026-09-22)","tier":"primary","support":"Test verifies policy failure does not throw and calls error handler."}
+      ],
+      "caveat": "没有 delivery guarantee；timeout 不是远端执行失败、去重或回滚证明。"
+    },
+    {
+      "id": "S9-C3",
+      "claim": "telemetry 的 local outfile 使用 append stream，SDK 使用批处理并提供 forceFlush/shutdown；公开代码未证明 WAL、跨重启补发或 durable end-to-end ack。",
+      "status": "confirmed",
+      "confidence": "high",
+      "sources": [
+        {"url":"https://github.com/google-gemini/gemini-cli/blob/main/docs/cli/telemetry.md","publisher":"Google Gemini CLI","published_or_updated":"main (accessed 2026-09-22)","tier":"primary","support":"Official local telemetry configuration uses outfile."},
+        {"url":"https://github.com/google-gemini/gemini-cli/blob/main/packages/core/src/telemetry/file-exporters.ts","publisher":"Google Gemini CLI","published_or_updated":"main (accessed 2026-09-22)","tier":"primary","support":"FileExporter uses append WriteStream and export callbacks; forceFlush waits for writes."},
+        {"url":"https://github.com/google-gemini/gemini-cli/blob/main/packages/core/src/telemetry/sdk.ts","publisher":"Google Gemini CLI","published_or_updated":"main (accessed 2026-09-22)","tier":"primary","support":"Batch processors, telemetry buffer, flush and shutdown are visible."}
+      ],
+      "caveat": "底层 OpenTelemetry 依赖的额外 retry 行为不作为本仓库直接保证；forceFlush 不等于 fsync。"
+    },
+    {
+      "id": "S9-C4",
+      "claim": "session JSONL 以 appendFileSync 逐条写记录；reader 逐行解析并忽略单行 JSON parse error；无公开 fsync/checksum/事务边界证明。",
+      "status": "confirmed",
+      "confidence": "high",
+      "sources": [{"url":"https://github.com/google-gemini/gemini-cli/blob/main/packages/core/src/services/chatRecordingService.ts","publisher":"Google Gemini CLI","published_or_updated":"main (accessed 2026-09-22)","tier":"primary","support":"appendRecord uses fs.appendFileSync; loadConversationRecord parses JSONL line-by-line and catches parse errors."}],
+      "caveat": "无法从该容错逻辑证明所有部分尾行在掉电/kill 下安全恢复；实际短写窗口未被官方 fault-injection 测试覆盖。"
+    },
+    {
+      "id": "S9-C5",
+      "claim": "session rewrite 使用 temp file + rename，并保留 unreadable 旧文件；但目录 fsync、文件 fsync、并发协调及孤儿 temp/backup 重启恢复未被证明。",
+      "status": "confirmed",
+      "confidence": "high",
+      "sources": [{"url":"https://github.com/google-gemini/gemini-cli/blob/main/packages/core/src/services/chatRecordingService.ts","publisher":"Google Gemini CLI","published_or_updated":"main (accessed 2026-09-22)","tier":"primary","support":"rewriteConversationFile renames old file to unreadable backup, writes temp and renames temp into place."}],
+      "caveat": "verified 仅限采用 temp+rename 的代码设计；掉电后一定旧或新且不丢为 unverified。"
+    },
+    {
+      "id": "S9-C6",
+      "claim": "checkpoint 流程包含 Git snapshot 与 checkpoint JSON，但没有公开跨二者事务、提交标记、去重或一致性校验；restore 对 JSON 做 schema 校验。",
+      "status": "confirmed",
+      "confidence": "high",
+      "sources": [
+        {"url":"https://github.com/google-gemini/gemini-cli/blob/main/packages/core/src/utils/checkpointUtils.ts","publisher":"Google Gemini CLI","published_or_updated":"main (accessed 2026-09-22)","tier":"primary","support":"processRestorableToolCalls creates snapshot, falls back to current commit, and builds JSON data with commitHash/history/toolCall."},
+        {"url":"https://github.com/google-gemini/gemini-cli/blob/main/packages/cli/src/ui/commands/restoreCommand.ts","publisher":"Google Gemini CLI","published_or_updated":"main (accessed 2026-09-22)","tier":"primary","support":"restore reads selected JSON and safe-parses checkpoint schema."},
+        {"url":"https://github.com/google-gemini/gemini-cli/blob/main/docs/cli/checkpointing.md","publisher":"Google Gemini CLI","published_or_updated":"main (accessed 2026-09-22)","tier":"primary","support":"Officially documents local Git snapshot, conversation history, tool call and restore."}
+      ],
+      "caveat": "正常 create/restore 测试不能证明 kill/restart 时 Git 与 JSON 配对原子性；Git restore 也不回滚外部副作用。"
+    },
+    {
+      "id": "S9-C7",
+      "claim": "scheduler 状态由进程内 Map/queue/completedBatch 管理，状态变更通过 fire-and-forget TOOL_CALLS_UPDATE snapshot 发布；没有公开的重启 replay log。",
+      "status": "confirmed",
+      "confidence": "high",
+      "sources": [
+        {"url":"https://github.com/google-gemini/gemini-cli/blob/main/packages/core/src/scheduler/state-manager.ts","publisher":"Google Gemini CLI","published_or_updated":"main (accessed 2026-09-22)","tier":"primary","support":"State manager stores activeCalls, queue and completed batch; emitUpdate calls void messageBus.publish with TOOL_CALLS_UPDATE."},
+        {"url":"https://github.com/google-gemini/gemini-cli/blob/main/packages/core/src/scheduler/state-manager.test.ts","publisher":"Google Gemini CLI","published_or_updated":"main (accessed 2026-09-22)","tier":"primary","support":"Tests mock publish and verify snapshot ordering/status transitions."}
+      ],
+      "caveat": "下游可能另行记录事件，但本片未找到能证明所有 snapshot 被 durable 接收/保存的官方证据。"
+    },
+    {
+      "id": "S9-C8",
+      "claim": "仅凭公开 scheduler snapshot、MessageBus 和 session 证据不能重建跨重启完整业务审计。",
+      "status": "unverified",
+      "confidence": "medium",
+      "sources": [
+        {"url":"https://github.com/google-gemini/gemini-cli/blob/main/packages/core/src/scheduler/state-manager.ts","publisher":"Google Gemini CLI","published_or_updated":"main (accessed 2026-09-22)","tier":"primary","support":"TOOL_CALLS_UPDATE is a current snapshot and state is in memory."},
+        {"url":"https://github.com/google-gemini/gemini-cli/blob/main/packages/core/src/confirmation-bus/message-bus.ts","publisher":"Google Gemini CLI","published_or_updated":"main (accessed 2026-09-22)","tier":"primary","support":"MessageBus is process-local EventEmitter."}
+      ],
+      "caveat": "这是证据不足结论，不是对仓库外部 integration 的绝对否定。"
+    },
+    {
+      "id": "S9-C9",
+      "claim": "remote A2A contextId/taskId 使用 static Map 跨 invocation 实例保存，因此公开实现只证明同一 Node 进程内续接；跨重启、远端副作用持久化和去重未定义。",
+      "status": "confirmed",
+      "confidence": "high",
+      "sources": [{"url":"https://github.com/google-gemini/gemini-cli/blob/main/packages/core/src/agents/remote-session-invocation.ts","publisher":"Google Gemini CLI","published_or_updated":"main (accessed 2026-09-22)","tier":"primary","support":"Static sessionState Map keyed by agent name and target URL seeds later ephemeral invocation instances."}],
+      "caveat": "远端 A2A 服务不在允许的证据范围内；其 context/task durability、effect receipt、idempotency 均 unverified。"
+    },
+    {
+      "id": "S9-C10",
+      "claim": "exactly-once、全局去重、远端副作用提交确认、跨组件事务、崩溃补偿/回滚均没有本片允许资料的可核查保证。",
+      "status": "unverified",
+      "confidence": "medium",
+      "sources": [
+        {"url":"https://github.com/google-gemini/gemini-cli/blob/main/docs/cli/checkpointing.md","publisher":"Google Gemini CLI","published_or_updated":"main (accessed 2026-09-22)","tier":"primary","support":"Docs describe local project snapshot/history restore, not external-effect rollback."},
+        {"url":"https://github.com/google-gemini/gemini-cli/blob/main/packages/core/src/telemetry/sdk.ts","publisher":"Google Gemini CLI","published_or_updated":"main (accessed 2026-09-22)","tier":"primary","support":"SDK exposes flush/shutdown but no cross-component transaction or replay ledger."}
+      ],
+      "caveat": "unverified 不等于不存在；仅表示官方公开证据未覆盖这些保证。"
+    }
+  ],
+  "coverage": {
+    "searched": ["official docs", "MessageBus implementation/tests", "telemetry exporters/SDK", "ChatRecordingService/types/tests", "checkpoint utilities/restore/tests", "scheduler state/scheduler/tests", "remote/local session invocation", "checkpointing and telemetry integration tests"],
+    "not_searched": ["non-official sources", "private services", "credentials", "excluded directories and systems"],
+    "gaps": ["crash-injection", "kill/restart recovery", "fsync/durable rename semantics", "cross-process replay", "scheduler event sourcing", "remote effect ledger", "exactly-once/idempotency", "external side-effect rollback"],
+    "stop_condition": "首轮官方证据已覆盖四个窄主题；新增资料不会改变当前已校准的 verified/unverified 边界，因此立即收口。"
+  }
+}

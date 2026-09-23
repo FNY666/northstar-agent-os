@@ -1,0 +1,34 @@
+{
+  "schema_version": "1.0",
+  "synthetic_only": true,
+  "production_verified": false,
+  "question": "Under a single-worker, single-op synthetic model, how should explicit acknowledgement-state permutations classify as accepted, rejected, or UNKNOWN without allowing late acknowledgements to overwrite conflicting verified facts?",
+  "scope": {
+    "mode": "synthetic_only",
+    "directory": "/tmp/B-GEMINI-CLI-RESEARCH-20260922-S30",
+    "fixtures": 16,
+    "worker_model": "one worker",
+    "op_model": "one op_id",
+    "offline": true,
+    "excluded": ["S27-S29 and existing research artifacts", "network", "real Gemini CLI/services", "credentials", "shared/P0", "incident directories", "D10/L12/D14", "canonical/staging/140/tri-line/systemd"]
+  },
+  "claims": [
+    {"id":"S30-C1","claim":"A single evidenced acknowledgement with an explicit accepted outcome is classified accepted in this synthetic model.","status":"inferred","confidence":"high","sources":[{"url":"https://example.invalid/s30-synthetic-fixtures","publisher":"Synthetic S30 fixture set","published_or_updated":"2026-09-22","tier":"primary","support":"Fixture S30-01 and deterministic harness rule; not an external source."}],"caveat":"Synthetic inference only; does not establish remote or production semantics."},
+    {"id":"S30-C2","claim":"A single evidenced acknowledgement with an explicit rejected outcome is classified rejected in this synthetic model.","status":"inferred","confidence":"high","sources":[{"url":"https://example.invalid/s30-synthetic-fixtures","publisher":"Synthetic S30 fixture set","published_or_updated":"2026-09-22","tier":"primary","support":"Fixture S30-09 and deterministic harness rule; not an external source."}],"caveat":"Synthetic inference only; rejected is not a transport or service guarantee."},
+    {"id":"S30-C3","claim":"Missing, lost, unavailable, incomplete, or contradictory acknowledgement evidence is classified UNKNOWN rather than rejected.","status":"inferred","confidence":"high","sources":[{"url":"https://example.invalid/s30-synthetic-fixtures","publisher":"Synthetic S30 fixture set","published_or_updated":"2026-09-22","tier":"primary","support":"Fixtures S30-02, S30-08, S30-12, S30-15, S30-16 and validator assertions; not an external source."}],"caveat":"UNKNOWN is an unresolved classification in this synthetic model."},
+    {"id":"S30-C4","claim":"A verified conflicting fact takes precedence over a late acknowledgement; a late acknowledgement cannot overwrite that fact.","status":"inferred","confidence":"high","sources":[{"url":"https://example.invalid/s30-synthetic-fixtures","publisher":"Synthetic S30 fixture set","published_or_updated":"2026-09-22","tier":"primary","support":"Fixtures S30-06, S30-07, S30-13, S30-14 and validator assertions; not an external source."}],"caveat":"This precedence rule is synthetic and does not prove durability, rollback, or production readiness."},
+    {"id":"S30-C5","claim":"Duplicate retries and duplicate identical acknowledgements are idempotently classified when they do not introduce conflicting evidence.","status":"inferred","confidence":"medium","sources":[{"url":"https://example.invalid/s30-synthetic-fixtures","publisher":"Synthetic S30 fixture set","published_or_updated":"2026-09-22","tier":"primary","support":"Fixtures S30-03, S30-04, S30-13 and S30-14; not an external source."}],"caveat":"This does not prove exactly-once behavior or durable deduplication."}
+  ],
+  "coverage": {
+    "ack_received": ["S30-01", "S30-09"],
+    "ack_lost": ["S30-02"],
+    "duplicate_retry": ["S30-03", "S30-04", "S30-10", "S30-13", "S30-14", "S30-16"],
+    "late_ack": ["S30-05", "S30-11"],
+    "conflicting_late_ack": ["S30-06", "S30-07", "S30-13", "S30-14"],
+    "evidence_unavailable": ["S30-08", "S30-16"],
+    "contradictory_ack": ["S30-12"],
+    "minimum_fixture_count_met": true,
+    "synthetic_only": true,
+    "production_verified": false
+  }
+}

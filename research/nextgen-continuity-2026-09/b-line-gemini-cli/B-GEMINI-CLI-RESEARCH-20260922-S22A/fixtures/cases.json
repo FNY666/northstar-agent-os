@@ -1,0 +1,114 @@
+{
+  "synthetic_only": true,
+  "production_verified": false,
+  "scope": "One op_id per fixture; two labeled workers; dispatch_intent, tool_response, durable_result, crash/restart/resume only.",
+  "cases": [
+    {
+      "case_id": "C01-no-intent-response",
+      "description": "Response arrives with no matching intent.",
+      "op_id": "op-01",
+      "events": [{"order": 1, "event_id": "e1", "worker": "W1", "kind": "tool_response", "op_id": "op-01", "attempt": 1, "value": "ok"}],
+      "expected_decisions": {"e1": "rejected"}
+    },
+    {
+      "case_id": "C02-no-intent-durable",
+      "description": "Durable result arrives with no matching intent.",
+      "op_id": "op-02",
+      "events": [{"order": 1, "event_id": "e1", "worker": "W2", "kind": "durable_result", "op_id": "op-02", "attempt": 1, "value": "ok"}],
+      "expected_decisions": {"e1": "rejected"}
+    },
+    {
+      "case_id": "C03-response-before-intent",
+      "description": "Response precedes its intent and remains rejected at arrival; later intent does not retroactively accept it.",
+      "op_id": "op-03",
+      "events": [
+        {"order": 1, "event_id": "e1", "worker": "W1", "kind": "tool_response", "op_id": "op-03", "attempt": 1, "value": "ok"},
+        {"order": 2, "event_id": "e2", "worker": "W2", "kind": "dispatch_intent", "op_id": "op-03", "attempt": 1}
+      ],
+      "expected_decisions": {"e1": "rejected", "e2": "accepted"}
+    },
+    {
+      "case_id": "C04-matching-same-value",
+      "description": "Intent, response, and durable result agree for one attempt.",
+      "op_id": "op-04",
+      "events": [
+        {"order": 1, "event_id": "e1", "worker": "W1", "kind": "dispatch_intent", "op_id": "op-04", "attempt": 1},
+        {"order": 2, "event_id": "e2", "worker": "W2", "kind": "tool_response", "op_id": "op-04", "attempt": 1, "value": "ok"},
+        {"order": 3, "event_id": "e3", "worker": "W1", "kind": "durable_result", "op_id": "op-04", "attempt": 1, "value": "ok"}
+      ],
+      "expected_decisions": {"e1": "accepted", "e2": "accepted", "e3": "accepted"}
+    },
+    {
+      "case_id": "C05-response-durable-conflict",
+      "description": "Same-attempt durable result conflicts with prior response and is rejected.",
+      "op_id": "op-05",
+      "events": [
+        {"order": 1, "event_id": "e1", "worker": "W1", "kind": "dispatch_intent", "op_id": "op-05", "attempt": 1},
+        {"order": 2, "event_id": "e2", "worker": "W2", "kind": "tool_response", "op_id": "op-05", "attempt": 1, "value": "ok"},
+        {"order": 3, "event_id": "e3", "worker": "W1", "kind": "durable_result", "op_id": "op-05", "attempt": 1, "value": "error"}
+      ],
+      "expected_decisions": {"e1": "accepted", "e2": "accepted", "e3": "rejected"}
+    },
+    {
+      "case_id": "C06-durable-response-conflict",
+      "description": "Same-attempt response conflicts with prior durable result and is rejected.",
+      "op_id": "op-06",
+      "events": [
+        {"order": 1, "event_id": "e1", "worker": "W2", "kind": "dispatch_intent", "op_id": "op-06", "attempt": 1},
+        {"order": 2, "event_id": "e2", "worker": "W1", "kind": "durable_result", "op_id": "op-06", "attempt": 1, "value": "error"},
+        {"order": 3, "event_id": "e3", "worker": "W2", "kind": "tool_response", "op_id": "op-06", "attempt": 1, "value": "ok"}
+      ],
+      "expected_decisions": {"e1": "accepted", "e2": "accepted", "e3": "rejected"}
+    },
+    {
+      "case_id": "C07-crash-restart-resume",
+      "description": "Lifecycle interleaving around an agreed local record leaves remote effect UNKNOWN.",
+      "op_id": "op-07",
+      "events": [
+        {"order": 1, "event_id": "e1", "worker": "W1", "kind": "dispatch_intent", "op_id": "op-07", "attempt": 1},
+        {"order": 2, "event_id": "e2", "worker": "W1", "kind": "crash", "op_id": "op-07"},
+        {"order": 3, "event_id": "e3", "worker": "W2", "kind": "restart", "op_id": "op-07"},
+        {"order": 4, "event_id": "e4", "worker": "W2", "kind": "resume", "op_id": "op-07"},
+        {"order": 5, "event_id": "e5", "worker": "W2", "kind": "tool_response", "op_id": "op-07", "attempt": 1, "value": "ok"}
+      ],
+      "expected_decisions": {"e1": "accepted", "e2": "accepted", "e3": "accepted", "e4": "accepted", "e5": "accepted"}
+    },
+    {
+      "case_id": "C08-crash-before-durable",
+      "description": "Crash/restart/resume before durable result does not infer a remote outcome; later matching durable is accepted.",
+      "op_id": "op-08",
+      "events": [
+        {"order": 1, "event_id": "e1", "worker": "W2", "kind": "dispatch_intent", "op_id": "op-08", "attempt": 2},
+        {"order": 2, "event_id": "e2", "worker": "W2", "kind": "crash", "op_id": "op-08"},
+        {"order": 3, "event_id": "e3", "worker": "W1", "kind": "restart", "op_id": "op-08"},
+        {"order": 4, "event_id": "e4", "worker": "W1", "kind": "resume", "op_id": "op-08"},
+        {"order": 5, "event_id": "e5", "worker": "W1", "kind": "durable_result", "op_id": "op-08", "attempt": 2, "value": "ok"}
+      ],
+      "expected_decisions": {"e1": "accepted", "e2": "accepted", "e3": "accepted", "e4": "accepted", "e5": "accepted"}
+    },
+    {
+      "case_id": "C09-cross-attempts",
+      "description": "Different attempts may each have matching same-value records; no cross-attempt conclusion is made.",
+      "op_id": "op-09",
+      "events": [
+        {"order": 1, "event_id": "e1", "worker": "W1", "kind": "dispatch_intent", "op_id": "op-09", "attempt": 1},
+        {"order": 2, "event_id": "e2", "worker": "W2", "kind": "dispatch_intent", "op_id": "op-09", "attempt": 2},
+        {"order": 3, "event_id": "e3", "worker": "W1", "kind": "tool_response", "op_id": "op-09", "attempt": 2, "value": "ok"},
+        {"order": 4, "event_id": "e4", "worker": "W2", "kind": "durable_result", "op_id": "op-09", "attempt": 1, "value": "ok"}
+      ],
+      "expected_decisions": {"e1": "accepted", "e2": "accepted", "e3": "accepted", "e4": "accepted"}
+    },
+    {
+      "case_id": "C10-resume-without-intent",
+      "description": "Resume plus an unmatching response remains rejected and does not classify remote effect.",
+      "op_id": "op-10",
+      "events": [
+        {"order": 1, "event_id": "e1", "worker": "W1", "kind": "crash", "op_id": "op-10"},
+        {"order": 2, "event_id": "e2", "worker": "W2", "kind": "restart", "op_id": "op-10"},
+        {"order": 3, "event_id": "e3", "worker": "W2", "kind": "resume", "op_id": "op-10"},
+        {"order": 4, "event_id": "e4", "worker": "W1", "kind": "tool_response", "op_id": "op-10", "attempt": 1, "value": "ok"}
+      ],
+      "expected_decisions": {"e1": "accepted", "e2": "accepted", "e3": "accepted", "e4": "rejected"}
+    }
+  ]
+}

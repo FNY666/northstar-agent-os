@@ -1,0 +1,147 @@
+{
+  "case_count": 17,
+  "coverage_labels": [
+    "NO_EVENT",
+    "DELAYED",
+    "DROPPED",
+    "EXPORTER_FAILURE",
+    "QUERY_GAP",
+    "RETENTION_EXPIRED",
+    "VERIFIED_CONTINUITY",
+    "UNKNOWN",
+    "late_receipt_after_revocation",
+    "fence_replay",
+    "epoch_rollback",
+    "cross_region_delay",
+    "observer_stale_view",
+    "ordering_conflict",
+    "external_effect_mismatch",
+    "minimal_counterexample",
+    "property_based"
+  ],
+  "minimal_counterexample": {
+    "events": 1,
+    "open_gate": "ordering_closed",
+    "state": "UNKNOWN"
+  },
+  "production_verified": false,
+  "property_test": {
+    "all_properties_pass": true,
+    "combinations": 256,
+    "states": {
+      "RECOVERED": 1,
+      "UNKNOWN": 255
+    }
+  },
+  "results": [
+    {
+      "classification": "NO_EVENT",
+      "id": "c01",
+      "label": "NO_EVENT",
+      "state": "UNKNOWN"
+    },
+    {
+      "classification": "DELAYED",
+      "id": "c02",
+      "label": "DELAYED",
+      "state": "UNKNOWN"
+    },
+    {
+      "classification": "DROPPED",
+      "id": "c03",
+      "label": "DROPPED",
+      "state": "UNKNOWN"
+    },
+    {
+      "classification": "EXPORTER_FAILURE",
+      "id": "c04",
+      "label": "EXPORTER_FAILURE",
+      "state": "UNKNOWN"
+    },
+    {
+      "classification": "QUERY_GAP",
+      "id": "c05",
+      "label": "QUERY_GAP",
+      "state": "UNKNOWN"
+    },
+    {
+      "classification": "RETENTION_EXPIRED",
+      "id": "c06",
+      "label": "RETENTION_EXPIRED",
+      "state": "UNKNOWN"
+    },
+    {
+      "classification": "VERIFIED_CONTINUITY",
+      "id": "c07",
+      "label": "VERIFIED_CONTINUITY",
+      "state": "RECOVERED"
+    },
+    {
+      "classification": "UNKNOWN",
+      "id": "c08",
+      "label": "UNKNOWN",
+      "state": "UNKNOWN"
+    },
+    {
+      "classification": "DELAYED",
+      "id": "c09",
+      "label": "late_receipt_after_revocation",
+      "state": "UNKNOWN"
+    },
+    {
+      "classification": "UNKNOWN",
+      "id": "c10",
+      "label": "fence_replay",
+      "state": "UNKNOWN"
+    },
+    {
+      "classification": "UNKNOWN",
+      "id": "c11",
+      "label": "epoch_rollback",
+      "state": "UNKNOWN"
+    },
+    {
+      "classification": "UNKNOWN",
+      "id": "c12",
+      "label": "cross_region_delay",
+      "state": "UNKNOWN"
+    },
+    {
+      "classification": "UNKNOWN",
+      "id": "c13",
+      "label": "observer_stale_view",
+      "state": "UNKNOWN"
+    },
+    {
+      "classification": "UNKNOWN",
+      "id": "c14",
+      "label": "ordering_conflict",
+      "state": "UNKNOWN"
+    },
+    {
+      "classification": "UNKNOWN",
+      "id": "c15",
+      "label": "external_effect_mismatch",
+      "state": "UNKNOWN"
+    },
+    {
+      "classification": "UNKNOWN",
+      "id": "c16",
+      "label": "fence_replay_hard_conflict",
+      "state": "REJECT"
+    },
+    {
+      "classification": "UNKNOWN",
+      "id": "c17",
+      "label": "epoch_rollback_hard_conflict",
+      "state": "REJECT"
+    }
+  ],
+  "schema_version": "s26.results.v1",
+  "state_distribution": {
+    "RECOVERED": 1,
+    "REJECT": 2,
+    "UNKNOWN": 14
+  },
+  "synthetic_only": true
+}

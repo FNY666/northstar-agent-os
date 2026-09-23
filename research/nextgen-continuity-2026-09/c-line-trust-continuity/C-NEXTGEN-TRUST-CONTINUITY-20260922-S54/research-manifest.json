@@ -1,0 +1,24 @@
+{
+  "schema_version": "1.0",
+  "question": "在离线合成证据中，何时多源模型路由、token caching、auto memory 与 git worktrees 的 identity/scope/precedence、retention/invalidation、dirty/cleanup 和跨worktree隔离能够闭合连续性，何时必须保持 UNKNOWN 或 REJECT？",
+  "scope": {
+    "project": "C-line S54",
+    "mode": "offline synthetic fixtures",
+    "date": "2026-09-23",
+    "excluded": ["S1-S53", "production", "network", "real services", "credentials"],
+    "identity_domain": ["account", "project", "session", "model", "provider", "cache_key", "memory_id", "worktree", "branch", "commit"],
+    "continuity_domain": ["model_route", "token_cache", "auto_memory", "retention", "export", "worktree", "branch", "dirty_state", "cleanup", "isolation"]
+  },
+  "claims_status": "inferred",
+  "synthetic_only": true,
+  "production_verified": false,
+  "sources": [],
+  "claims": [
+    {"id":"route-cache-memory-worktree-closure","claim":"只有 model source/precedence/provider、token cache scope/expiry/key/invalidation、memory scope/read-write/retention/export、worktree identity/path/branch/dirty/cleanup/isolation 全部闭合时才可 RECOVERED。","status":"inferred","confidence":"bounded","sources":[],"caveat":"仅由本地合成夹具和规则推导，不代表生产系统。"},
+    {"id":"success-not-isolation-proof","claim":"模型响应、cache hit、memory写入或worktree命令成功不能证明最终归属、未跨边界复用或cleanup完成；必须独立 read-back。","status":"inferred","confidence":"bounded","sources":[],"caveat":"未验证任何真实模型/记忆/worktree runtime。"},
+    {"id":"isolation-unknown","claim":"route/cache/memory/worktree identity、scope、retention、invalidation、dirty/cleanup 或 cross-isolation 状态未知时必须 UNKNOWN。","status":"inferred","confidence":"bounded","sources":[],"caveat":"布尔门不量化真实串线或数据丢失风险。"},
+    {"id":"route-conflict-reject","claim":"身份冲突和不可调和的模型路由状态冲突必须 REJECT。","status":"inferred","confidence":"bounded","sources":[],"caveat":"只验证合成判定逻辑，不证明目标系统执行拒绝。"}
+  ],
+  "coverage": {"cases": 27, "property_sweep": 4194304, "dimensions": 22, "statuses": ["RECOVERED", "UNKNOWN", "REJECT"], "events": ["MODEL_ROUTE", "TOKEN_CACHE", "AUTO_MEMORY", "RETENTION", "EXPORT", "WORKTREE", "BRANCH", "DIRTY_STATE", "CLEANUP", "ISOLATION", "NO_EVENT", "UNKNOWN"]},
+  "notes": "三态互斥并 fail-closed；RECOVERED 仅代表本片离线夹具中的 route/cache/memory/worktree evidence gate 闭合，不代表 production continuity、external effect 或 exactly-once。"
+}

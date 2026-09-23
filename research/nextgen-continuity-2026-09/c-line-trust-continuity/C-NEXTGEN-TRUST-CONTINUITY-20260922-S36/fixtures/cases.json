@@ -1,0 +1,787 @@
+{
+  "attestation_domain": [
+    "issuer",
+    "delegate",
+    "scope",
+    "payload_digest",
+    "context",
+    "transform",
+    "redaction",
+    "resign",
+    "key_status",
+    "revocation_watermark",
+    "freshness"
+  ],
+  "cases": [
+    {
+      "evidence": [
+        "issuer到delegate的链完整",
+        "每个签名者的scope覆盖目标bundle"
+      ],
+      "flags": {
+        "bundle_canonical": true,
+        "context_bound": true,
+        "delegation_chain_complete": true,
+        "identity_conflict": false,
+        "issuer_epoch_continuous": true,
+        "key_status_current": true,
+        "payload_bound": true,
+        "quorum_agreed": true,
+        "redaction_attested": true,
+        "resign_authorized": true,
+        "revocation_conflict": false,
+        "revocation_watermark_closed": true,
+        "root_attested": true,
+        "same_identity": true,
+        "scope_conflict": false,
+        "signer_equivocation": false,
+        "signer_scope_valid": true,
+        "timestamp_fresh": true,
+        "transform_chain_attested": true
+      },
+      "id": "delegated-chain-complete",
+      "label": "委托证明链完整",
+      "status": "RECOVERED"
+    },
+    {
+      "evidence": [
+        "签名覆盖payload digest",
+        "签名同时覆盖tenant/epoch/purpose上下文"
+      ],
+      "flags": {
+        "bundle_canonical": true,
+        "context_bound": true,
+        "delegation_chain_complete": true,
+        "identity_conflict": false,
+        "issuer_epoch_continuous": true,
+        "key_status_current": true,
+        "payload_bound": true,
+        "quorum_agreed": true,
+        "redaction_attested": true,
+        "resign_authorized": true,
+        "revocation_conflict": false,
+        "revocation_watermark_closed": true,
+        "root_attested": true,
+        "same_identity": true,
+        "scope_conflict": false,
+        "signer_equivocation": false,
+        "signer_scope_valid": true,
+        "timestamp_fresh": true,
+        "transform_chain_attested": true
+      },
+      "id": "context-bound-attestation",
+      "label": "payload与上下文均绑定",
+      "status": "RECOVERED"
+    },
+    {
+      "evidence": [
+        "原签名与变换链可验证",
+        "重签名者具有明确授权且新旧scope连续"
+      ],
+      "flags": {
+        "bundle_canonical": true,
+        "context_bound": true,
+        "delegation_chain_complete": true,
+        "identity_conflict": false,
+        "issuer_epoch_continuous": true,
+        "key_status_current": true,
+        "payload_bound": true,
+        "quorum_agreed": true,
+        "redaction_attested": true,
+        "resign_authorized": true,
+        "revocation_conflict": false,
+        "revocation_watermark_closed": true,
+        "root_attested": true,
+        "same_identity": true,
+        "scope_conflict": false,
+        "signer_equivocation": false,
+        "signer_scope_valid": true,
+        "timestamp_fresh": true,
+        "transform_chain_attested": true
+      },
+      "id": "authorized-resigning",
+      "label": "授权重签名闭合",
+      "status": "RECOVERED"
+    },
+    {
+      "evidence": [
+        "redaction policy已认证",
+        "变换前后关联和新bundle canonicalization均闭合"
+      ],
+      "flags": {
+        "bundle_canonical": true,
+        "context_bound": true,
+        "delegation_chain_complete": true,
+        "identity_conflict": false,
+        "issuer_epoch_continuous": true,
+        "key_status_current": true,
+        "payload_bound": true,
+        "quorum_agreed": true,
+        "redaction_attested": true,
+        "resign_authorized": true,
+        "revocation_conflict": false,
+        "revocation_watermark_closed": true,
+        "root_attested": true,
+        "same_identity": true,
+        "scope_conflict": false,
+        "signer_equivocation": false,
+        "signer_scope_valid": true,
+        "timestamp_fresh": true,
+        "transform_chain_attested": true
+      },
+      "id": "redaction-transform-complete",
+      "label": "脱敏变换链完整",
+      "status": "RECOVERED"
+    },
+    {
+      "evidence": [
+        "观察者quorum一致",
+        "key status和revocation watermark均覆盖读取时点"
+      ],
+      "flags": {
+        "bundle_canonical": true,
+        "context_bound": true,
+        "delegation_chain_complete": true,
+        "identity_conflict": false,
+        "issuer_epoch_continuous": true,
+        "key_status_current": true,
+        "payload_bound": true,
+        "quorum_agreed": true,
+        "redaction_attested": true,
+        "resign_authorized": true,
+        "revocation_conflict": false,
+        "revocation_watermark_closed": true,
+        "root_attested": true,
+        "same_identity": true,
+        "scope_conflict": false,
+        "signer_equivocation": false,
+        "signer_scope_valid": true,
+        "timestamp_fresh": true,
+        "transform_chain_attested": true
+      },
+      "id": "current-quorum-attested",
+      "label": "当前密钥与quorum一致",
+      "status": "RECOVERED"
+    },
+    {
+      "evidence": [
+        "证明虽延迟但仍在timestamp窗口",
+        "issuer epoch与撤销水位连续"
+      ],
+      "flags": {
+        "bundle_canonical": true,
+        "context_bound": true,
+        "delegation_chain_complete": true,
+        "identity_conflict": false,
+        "issuer_epoch_continuous": true,
+        "key_status_current": true,
+        "payload_bound": true,
+        "quorum_agreed": true,
+        "redaction_attested": true,
+        "resign_authorized": true,
+        "revocation_conflict": false,
+        "revocation_watermark_closed": true,
+        "root_attested": true,
+        "same_identity": true,
+        "scope_conflict": false,
+        "signer_equivocation": false,
+        "signer_scope_valid": true,
+        "timestamp_fresh": true,
+        "transform_chain_attested": true
+      },
+      "id": "delayed-attestation-fresh",
+      "label": "延迟证明仍新鲜",
+      "status": "RECOVERED"
+    },
+    {
+      "evidence": [
+        "root/bundle存在但缺少可信issuer签名"
+      ],
+      "flags": {
+        "bundle_canonical": true,
+        "context_bound": true,
+        "delegation_chain_complete": true,
+        "identity_conflict": false,
+        "issuer_epoch_continuous": true,
+        "key_status_current": true,
+        "payload_bound": true,
+        "quorum_agreed": true,
+        "redaction_attested": true,
+        "resign_authorized": true,
+        "revocation_conflict": false,
+        "revocation_watermark_closed": true,
+        "root_attested": false,
+        "same_identity": true,
+        "scope_conflict": false,
+        "signer_equivocation": false,
+        "signer_scope_valid": true,
+        "timestamp_fresh": true,
+        "transform_chain_attested": true
+      },
+      "id": "root-not-attested",
+      "label": "根证明未认证",
+      "status": "UNKNOWN"
+    },
+    {
+      "evidence": [
+        "中间delegate证书或授权边不可取回"
+      ],
+      "flags": {
+        "bundle_canonical": true,
+        "context_bound": true,
+        "delegation_chain_complete": false,
+        "identity_conflict": false,
+        "issuer_epoch_continuous": true,
+        "key_status_current": true,
+        "payload_bound": true,
+        "quorum_agreed": true,
+        "redaction_attested": true,
+        "resign_authorized": true,
+        "revocation_conflict": false,
+        "revocation_watermark_closed": true,
+        "root_attested": true,
+        "same_identity": true,
+        "scope_conflict": false,
+        "signer_equivocation": false,
+        "signer_scope_valid": true,
+        "timestamp_fresh": true,
+        "transform_chain_attested": true
+      },
+      "id": "delegation-chain-gap",
+      "label": "委托链有缺口",
+      "status": "UNKNOWN"
+    },
+    {
+      "evidence": [
+        "无法证明签名者被授权覆盖该资源"
+      ],
+      "flags": {
+        "bundle_canonical": true,
+        "context_bound": true,
+        "delegation_chain_complete": true,
+        "identity_conflict": false,
+        "issuer_epoch_continuous": true,
+        "key_status_current": true,
+        "payload_bound": true,
+        "quorum_agreed": true,
+        "redaction_attested": true,
+        "resign_authorized": true,
+        "revocation_conflict": false,
+        "revocation_watermark_closed": true,
+        "root_attested": true,
+        "same_identity": true,
+        "scope_conflict": false,
+        "signer_equivocation": false,
+        "signer_scope_valid": false,
+        "timestamp_fresh": true,
+        "transform_chain_attested": true
+      },
+      "id": "signer-scope-missing",
+      "label": "签名者scope缺失",
+      "status": "UNKNOWN"
+    },
+    {
+      "evidence": [
+        "无法在目标时点确认key未撤销或未过期"
+      ],
+      "flags": {
+        "bundle_canonical": true,
+        "context_bound": true,
+        "delegation_chain_complete": true,
+        "identity_conflict": false,
+        "issuer_epoch_continuous": true,
+        "key_status_current": false,
+        "payload_bound": true,
+        "quorum_agreed": true,
+        "redaction_attested": true,
+        "resign_authorized": true,
+        "revocation_conflict": false,
+        "revocation_watermark_closed": true,
+        "root_attested": true,
+        "same_identity": true,
+        "scope_conflict": false,
+        "signer_equivocation": false,
+        "signer_scope_valid": true,
+        "timestamp_fresh": true,
+        "transform_chain_attested": true
+      },
+      "id": "key-status-unknown",
+      "label": "密钥状态未知",
+      "status": "UNKNOWN"
+    },
+    {
+      "evidence": [
+        "读回时点之后仍可能存在未观察到的撤销"
+      ],
+      "flags": {
+        "bundle_canonical": true,
+        "context_bound": true,
+        "delegation_chain_complete": true,
+        "identity_conflict": false,
+        "issuer_epoch_continuous": true,
+        "key_status_current": true,
+        "payload_bound": true,
+        "quorum_agreed": true,
+        "redaction_attested": true,
+        "resign_authorized": true,
+        "revocation_conflict": false,
+        "revocation_watermark_closed": false,
+        "root_attested": true,
+        "same_identity": true,
+        "scope_conflict": false,
+        "signer_equivocation": false,
+        "signer_scope_valid": true,
+        "timestamp_fresh": true,
+        "transform_chain_attested": true
+      },
+      "id": "revocation-watermark-open",
+      "label": "撤销水位未闭合",
+      "status": "UNKNOWN"
+    },
+    {
+      "evidence": [
+        "签名存在但未覆盖canonical payload digest"
+      ],
+      "flags": {
+        "bundle_canonical": true,
+        "context_bound": true,
+        "delegation_chain_complete": true,
+        "identity_conflict": false,
+        "issuer_epoch_continuous": true,
+        "key_status_current": true,
+        "payload_bound": false,
+        "quorum_agreed": true,
+        "redaction_attested": true,
+        "resign_authorized": true,
+        "revocation_conflict": false,
+        "revocation_watermark_closed": true,
+        "root_attested": true,
+        "same_identity": true,
+        "scope_conflict": false,
+        "signer_equivocation": false,
+        "signer_scope_valid": true,
+        "timestamp_fresh": true,
+        "transform_chain_attested": true
+      },
+      "id": "payload-unbound",
+      "label": "payload未绑定",
+      "status": "UNKNOWN"
+    },
+    {
+      "evidence": [
+        "同一payload可被移植到不同tenant/epoch/purpose"
+      ],
+      "flags": {
+        "bundle_canonical": true,
+        "context_bound": false,
+        "delegation_chain_complete": true,
+        "identity_conflict": false,
+        "issuer_epoch_continuous": true,
+        "key_status_current": true,
+        "payload_bound": true,
+        "quorum_agreed": true,
+        "redaction_attested": true,
+        "resign_authorized": true,
+        "revocation_conflict": false,
+        "revocation_watermark_closed": true,
+        "root_attested": true,
+        "same_identity": true,
+        "scope_conflict": false,
+        "signer_equivocation": false,
+        "signer_scope_valid": true,
+        "timestamp_fresh": true,
+        "transform_chain_attested": true
+      },
+      "id": "context-unbound",
+      "label": "上下文未绑定",
+      "status": "UNKNOWN"
+    },
+    {
+      "evidence": [
+        "字段顺序或编码规则未固定，签名对象不可唯一确定"
+      ],
+      "flags": {
+        "bundle_canonical": false,
+        "context_bound": true,
+        "delegation_chain_complete": true,
+        "identity_conflict": false,
+        "issuer_epoch_continuous": true,
+        "key_status_current": true,
+        "payload_bound": true,
+        "quorum_agreed": true,
+        "redaction_attested": true,
+        "resign_authorized": true,
+        "revocation_conflict": false,
+        "revocation_watermark_closed": true,
+        "root_attested": true,
+        "same_identity": true,
+        "scope_conflict": false,
+        "signer_equivocation": false,
+        "signer_scope_valid": true,
+        "timestamp_fresh": true,
+        "transform_chain_attested": true
+      },
+      "id": "bundle-noncanonical",
+      "label": "bundle规范化未固定",
+      "status": "UNKNOWN"
+    },
+    {
+      "evidence": [
+        "脱敏/转换后的bundle无法关联到原始证据"
+      ],
+      "flags": {
+        "bundle_canonical": true,
+        "context_bound": true,
+        "delegation_chain_complete": true,
+        "identity_conflict": false,
+        "issuer_epoch_continuous": true,
+        "key_status_current": true,
+        "payload_bound": true,
+        "quorum_agreed": true,
+        "redaction_attested": true,
+        "resign_authorized": true,
+        "revocation_conflict": false,
+        "revocation_watermark_closed": true,
+        "root_attested": true,
+        "same_identity": true,
+        "scope_conflict": false,
+        "signer_equivocation": false,
+        "signer_scope_valid": true,
+        "timestamp_fresh": true,
+        "transform_chain_attested": false
+      },
+      "id": "transform-unattested",
+      "label": "变换链未认证",
+      "status": "UNKNOWN"
+    },
+    {
+      "evidence": [
+        "不知道删除字段是否被授权且是否保持安全语义"
+      ],
+      "flags": {
+        "bundle_canonical": true,
+        "context_bound": true,
+        "delegation_chain_complete": true,
+        "identity_conflict": false,
+        "issuer_epoch_continuous": true,
+        "key_status_current": true,
+        "payload_bound": true,
+        "quorum_agreed": true,
+        "redaction_attested": false,
+        "resign_authorized": true,
+        "revocation_conflict": false,
+        "revocation_watermark_closed": true,
+        "root_attested": true,
+        "same_identity": true,
+        "scope_conflict": false,
+        "signer_equivocation": false,
+        "signer_scope_valid": true,
+        "timestamp_fresh": true,
+        "transform_chain_attested": true
+      },
+      "id": "redaction-policy-missing",
+      "label": "脱敏策略未认证",
+      "status": "UNKNOWN"
+    },
+    {
+      "evidence": [
+        "新签名存在但没有原始issuer授权"
+      ],
+      "flags": {
+        "bundle_canonical": true,
+        "context_bound": true,
+        "delegation_chain_complete": true,
+        "identity_conflict": false,
+        "issuer_epoch_continuous": true,
+        "key_status_current": true,
+        "payload_bound": true,
+        "quorum_agreed": true,
+        "redaction_attested": true,
+        "resign_authorized": false,
+        "revocation_conflict": false,
+        "revocation_watermark_closed": true,
+        "root_attested": true,
+        "same_identity": true,
+        "scope_conflict": false,
+        "signer_equivocation": false,
+        "signer_scope_valid": true,
+        "timestamp_fresh": true,
+        "transform_chain_attested": true
+      },
+      "id": "resign-unauthorized",
+      "label": "重签名未授权",
+      "status": "UNKNOWN"
+    },
+    {
+      "evidence": [
+        "签名时间超过freshness window"
+      ],
+      "flags": {
+        "bundle_canonical": true,
+        "context_bound": true,
+        "delegation_chain_complete": true,
+        "identity_conflict": false,
+        "issuer_epoch_continuous": true,
+        "key_status_current": true,
+        "payload_bound": true,
+        "quorum_agreed": true,
+        "redaction_attested": true,
+        "resign_authorized": true,
+        "revocation_conflict": false,
+        "revocation_watermark_closed": true,
+        "root_attested": true,
+        "same_identity": true,
+        "scope_conflict": false,
+        "signer_equivocation": false,
+        "signer_scope_valid": true,
+        "timestamp_fresh": false,
+        "transform_chain_attested": true
+      },
+      "id": "timestamp-stale",
+      "label": "时间戳过期",
+      "status": "UNKNOWN"
+    },
+    {
+      "evidence": [
+        "新epoch与旧epoch之间缺少连续证明"
+      ],
+      "flags": {
+        "bundle_canonical": true,
+        "context_bound": true,
+        "delegation_chain_complete": true,
+        "identity_conflict": false,
+        "issuer_epoch_continuous": false,
+        "key_status_current": true,
+        "payload_bound": true,
+        "quorum_agreed": true,
+        "redaction_attested": true,
+        "resign_authorized": true,
+        "revocation_conflict": false,
+        "revocation_watermark_closed": true,
+        "root_attested": true,
+        "same_identity": true,
+        "scope_conflict": false,
+        "signer_equivocation": false,
+        "signer_scope_valid": true,
+        "timestamp_fresh": true,
+        "transform_chain_attested": true
+      },
+      "id": "issuer-epoch-gap",
+      "label": "issuer epoch不连续",
+      "status": "UNKNOWN"
+    },
+    {
+      "evidence": [
+        "观察者返回不完整，不能升级为一致"
+      ],
+      "flags": {
+        "bundle_canonical": true,
+        "context_bound": true,
+        "delegation_chain_complete": true,
+        "identity_conflict": false,
+        "issuer_epoch_continuous": true,
+        "key_status_current": true,
+        "payload_bound": true,
+        "quorum_agreed": false,
+        "redaction_attested": true,
+        "resign_authorized": true,
+        "revocation_conflict": false,
+        "revocation_watermark_closed": true,
+        "root_attested": true,
+        "same_identity": true,
+        "scope_conflict": false,
+        "signer_equivocation": false,
+        "signer_scope_valid": true,
+        "timestamp_fresh": true,
+        "transform_chain_attested": true
+      },
+      "id": "quorum-not-closed",
+      "label": "观察者quorum未闭合",
+      "status": "UNKNOWN"
+    },
+    {
+      "evidence": [
+        "tenant/source/event_id等身份字段缺失"
+      ],
+      "flags": {
+        "bundle_canonical": true,
+        "context_bound": true,
+        "delegation_chain_complete": true,
+        "identity_conflict": false,
+        "issuer_epoch_continuous": true,
+        "key_status_current": true,
+        "payload_bound": true,
+        "quorum_agreed": true,
+        "redaction_attested": true,
+        "resign_authorized": true,
+        "revocation_conflict": false,
+        "revocation_watermark_closed": true,
+        "root_attested": true,
+        "same_identity": false,
+        "scope_conflict": false,
+        "signer_equivocation": false,
+        "signer_scope_valid": true,
+        "timestamp_fresh": true,
+        "transform_chain_attested": true
+      },
+      "id": "identity-missing",
+      "label": "身份域不完整",
+      "status": "UNKNOWN"
+    },
+    {
+      "evidence": [
+        "当前bundle状态可见但无法证明其授权边界"
+      ],
+      "flags": {
+        "bundle_canonical": true,
+        "context_bound": false,
+        "delegation_chain_complete": true,
+        "identity_conflict": false,
+        "issuer_epoch_continuous": true,
+        "key_status_current": true,
+        "payload_bound": true,
+        "quorum_agreed": true,
+        "redaction_attested": true,
+        "resign_authorized": true,
+        "revocation_conflict": false,
+        "revocation_watermark_closed": true,
+        "root_attested": true,
+        "same_identity": true,
+        "scope_conflict": false,
+        "signer_equivocation": false,
+        "signer_scope_valid": false,
+        "timestamp_fresh": true,
+        "transform_chain_attested": true
+      },
+      "id": "attestation-unknown-boundary",
+      "label": "证明边界未知",
+      "status": "UNKNOWN"
+    },
+    {
+      "evidence": [
+        "tenant或source明确不同"
+      ],
+      "flags": {
+        "bundle_canonical": true,
+        "context_bound": true,
+        "delegation_chain_complete": true,
+        "identity_conflict": true,
+        "issuer_epoch_continuous": true,
+        "key_status_current": true,
+        "payload_bound": true,
+        "quorum_agreed": true,
+        "redaction_attested": true,
+        "resign_authorized": true,
+        "revocation_conflict": false,
+        "revocation_watermark_closed": true,
+        "root_attested": true,
+        "same_identity": false,
+        "scope_conflict": false,
+        "signer_equivocation": false,
+        "signer_scope_valid": true,
+        "timestamp_fresh": true,
+        "transform_chain_attested": true
+      },
+      "id": "identity-conflict",
+      "label": "跨身份域合并",
+      "status": "REJECT"
+    },
+    {
+      "evidence": [
+        "同一issuer scope和epoch对同一身份给出不可调和声明"
+      ],
+      "flags": {
+        "bundle_canonical": true,
+        "context_bound": true,
+        "delegation_chain_complete": true,
+        "identity_conflict": false,
+        "issuer_epoch_continuous": true,
+        "key_status_current": true,
+        "payload_bound": true,
+        "quorum_agreed": true,
+        "redaction_attested": true,
+        "resign_authorized": true,
+        "revocation_conflict": false,
+        "revocation_watermark_closed": true,
+        "root_attested": true,
+        "same_identity": true,
+        "scope_conflict": false,
+        "signer_equivocation": true,
+        "signer_scope_valid": true,
+        "timestamp_fresh": true,
+        "transform_chain_attested": true
+      },
+      "id": "signer-equivocation",
+      "label": "签名者双重陈述",
+      "status": "REJECT"
+    },
+    {
+      "evidence": [
+        "签名scope明确互斥且不能同时覆盖目标bundle"
+      ],
+      "flags": {
+        "bundle_canonical": true,
+        "context_bound": true,
+        "delegation_chain_complete": true,
+        "identity_conflict": false,
+        "issuer_epoch_continuous": true,
+        "key_status_current": true,
+        "payload_bound": true,
+        "quorum_agreed": true,
+        "redaction_attested": true,
+        "resign_authorized": true,
+        "revocation_conflict": false,
+        "revocation_watermark_closed": true,
+        "root_attested": true,
+        "same_identity": true,
+        "scope_conflict": true,
+        "signer_equivocation": false,
+        "signer_scope_valid": true,
+        "timestamp_fresh": true,
+        "transform_chain_attested": true
+      },
+      "id": "scope-conflict",
+      "label": "授权scope冲突",
+      "status": "REJECT"
+    },
+    {
+      "evidence": [
+        "同一key和时点出现不可调和的active/revoked证据"
+      ],
+      "flags": {
+        "bundle_canonical": true,
+        "context_bound": true,
+        "delegation_chain_complete": true,
+        "identity_conflict": false,
+        "issuer_epoch_continuous": true,
+        "key_status_current": true,
+        "payload_bound": true,
+        "quorum_agreed": true,
+        "redaction_attested": true,
+        "resign_authorized": true,
+        "revocation_conflict": true,
+        "revocation_watermark_closed": true,
+        "root_attested": true,
+        "same_identity": true,
+        "scope_conflict": false,
+        "signer_equivocation": false,
+        "signer_scope_valid": true,
+        "timestamp_fresh": true,
+        "transform_chain_attested": true
+      },
+      "id": "revocation-conflict",
+      "label": "撤销状态冲突",
+      "status": "REJECT"
+    }
+  ],
+  "identity_domain": [
+    "tenant",
+    "source",
+    "event_id",
+    "epoch",
+    "version"
+  ],
+  "production_verified": false,
+  "schema_version": "S36-cases-1",
+  "synthetic_only": true
+}

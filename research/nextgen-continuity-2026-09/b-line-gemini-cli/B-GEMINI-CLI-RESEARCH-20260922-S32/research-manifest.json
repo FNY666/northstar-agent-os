@@ -1,0 +1,25 @@
+{
+  "schema_version": "1.0",
+  "question": "在离线 synthetic-only、单 worker、确定性序列化条件下，P/Q/R 三操作交错证据能否严格区分 accepted、rejected 与 UNKNOWN，并隔离重复、重排、stale、epoch 不匹配及未声明 op？",
+  "scope": {
+    "directory": "/tmp/B-GEMINI-CLI-RESEARCH-20260922-S32",
+    "mode": "synthetic-only offline",
+    "worker_count": 1,
+    "operations": ["P", "Q", "R"],
+    "fixtures": 22,
+    "excluded": ["S27-S31", "other prior artifacts", "network", "real Gemini CLI/service", "credentials", "shared/P0", "incident directories", "D10/L12/D14", "canonical/staging/140/tri-line/systemd"]
+  },
+  "claims": [
+    {"id":"C1","claim":"在 22 个 synthetic fixtures 中，单 worker harness 对 P/Q/R 及未声明 op 产生确定性 tri-state 输出。","status":"inferred","confidence":"high","sources":[{"url":"https://example.invalid/local-s32-harness","publisher":"Local S32 artifact","published_or_updated":"2026-09-22","tier":"primary","support":"harness.py and outputs/results.json"}],"caveat":"仅适用本地 synthetic 输入与当前规则。"},
+    {"id":"C2","claim":"同一 op 的重复 evidence 不产生新证据，重复证据不会升级 accepted。","status":"inferred","confidence":"high","sources":[{"url":"https://example.invalid/local-s32-fixtures","publisher":"Local S32 artifact","published_or_updated":"2026-09-22","tier":"primary","support":"F04/F05 and validator.py"}],"caveat":"不外推至远端系统。"},
+    {"id":"C3","claim":"reordered evidence 不被静默接受，事件 epoch 不匹配或 stale acknowledgement 导致 UNKNOWN。","status":"inferred","confidence":"high","sources":[{"url":"https://example.invalid/local-s32-fixtures","publisher":"Local S32 artifact","published_or_updated":"2026-09-22","tier":"primary","support":"F07/F10/F13 and validator.py"}],"caveat":"UNKNOWN 明确不同于 rejected；结论是 harness 语义结论。"},
+    {"id":"C4","claim":"未声明 op_id X 的事件整组为 UNKNOWN，且不影响 P/Q/R 判定。","status":"inferred","confidence":"high","sources":[{"url":"https://example.invalid/local-s32-isolation","publisher":"Local S32 artifact","published_or_updated":"2026-09-22","tier":"primary","support":"F15-F17 and validator.py"}],"caveat":"未测试真实服务的未知操作处理。"},
+    {"id":"C5","claim":"一个 op 的 accepted 不为其他 op 补证，三 op 交错可按 op_id 隔离。","status":"inferred","confidence":"high","sources":[{"url":"https://example.invalid/local-s32-results","publisher":"Local S32 artifact","published_or_updated":"2026-09-22","tier":"primary","support":"outputs/results.json and harness.py"}],"caveat":"仅覆盖 fixtures 声明的证据模型。"},
+    {"id":"C6","claim":"本研究不证明 durability、远端状态、exactly-once、rollback 或 production readiness。","status":"inferred","confidence":"high","sources":[{"url":"https://example.invalid/local-s32-scope","publisher":"Local S32 artifact","published_or_updated":"2026-09-22","tier":"primary","support":"REPORT.md scope limitations"}],"caveat":"范围限制而非外部事实。"}
+  ],
+  "coverage": {
+    "fixture_count": 22,
+    "categories": ["three-op interleaving", "same/different payload", "duplicate evidence", "reordered evidence", "stale acknowledgement", "explicit epoch mismatch", "adversarial unknown op_id", "tri-state separation"],
+    "outputs": ["REPORT.md", "sources.md", "research-manifest.json", "SHA256SUMS", "harness.py", "fixtures/cases.json", "outputs/results.json", "validator.py"]
+  }
+}

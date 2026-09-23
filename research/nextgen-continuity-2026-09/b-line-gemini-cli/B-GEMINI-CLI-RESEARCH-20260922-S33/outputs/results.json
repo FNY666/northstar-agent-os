@@ -1,0 +1,1557 @@
+{
+  "fixture_count": 22,
+  "production_verified": false,
+  "results": [
+    {
+      "canonical_input_sha256": "d0ce7dbde60cc1d0b39d9284ebeb6fe906c5d1618e02cc99608eaa085df5ef86",
+      "epoch_sequence": [
+        1
+      ],
+      "fixture_id": "F01_complete",
+      "op_judgments": [
+        {
+          "blocking_conditions": [],
+          "epoch": 1,
+          "op": "P",
+          "reason": "same-epoch event and acknowledgement are complete and ordered",
+          "verdict": "accepted"
+        },
+        {
+          "blocking_conditions": [
+            "missing_event",
+            "missing_ack"
+          ],
+          "epoch": 1,
+          "op": "Q",
+          "reason": "no evidence for this operation and epoch",
+          "verdict": "UNKNOWN"
+        },
+        {
+          "blocking_conditions": [
+            "missing_event",
+            "missing_ack"
+          ],
+          "epoch": 1,
+          "op": "R",
+          "reason": "no evidence for this operation and epoch",
+          "verdict": "UNKNOWN"
+        },
+        {
+          "blocking_conditions": [
+            "unknown_op"
+          ],
+          "epoch": 1,
+          "op": "X",
+          "reason": "operation is undeclared; its complete-looking trace is quarantined",
+          "verdict": "UNKNOWN"
+        }
+      ],
+      "production_verified": false,
+      "synthetic_only": true
+    },
+    {
+      "canonical_input_sha256": "27e531bb639ec7aba01a71538dd30cb4ca68a61a1d6babee52abfb0df30e1db9",
+      "epoch_sequence": [
+        1,
+        2
+      ],
+      "fixture_id": "F02_rollover_missing_old",
+      "op_judgments": [
+        {
+          "blocking_conditions": [],
+          "epoch": 1,
+          "op": "P",
+          "reason": "same-epoch event and acknowledgement are complete and ordered",
+          "verdict": "accepted"
+        },
+        {
+          "blocking_conditions": [
+            "missing_event",
+            "missing_ack"
+          ],
+          "epoch": 1,
+          "op": "Q",
+          "reason": "no evidence for this operation and epoch",
+          "verdict": "UNKNOWN"
+        },
+        {
+          "blocking_conditions": [
+            "missing_event",
+            "missing_ack"
+          ],
+          "epoch": 1,
+          "op": "R",
+          "reason": "no evidence for this operation and epoch",
+          "verdict": "UNKNOWN"
+        },
+        {
+          "blocking_conditions": [
+            "unknown_op"
+          ],
+          "epoch": 1,
+          "op": "X",
+          "reason": "operation is undeclared; its complete-looking trace is quarantined",
+          "verdict": "UNKNOWN"
+        },
+        {
+          "blocking_conditions": [
+            "missing_event"
+          ],
+          "epoch": 2,
+          "op": "P",
+          "reason": "ack has no same-epoch event",
+          "verdict": "UNKNOWN"
+        },
+        {
+          "blocking_conditions": [
+            "missing_event",
+            "missing_ack"
+          ],
+          "epoch": 2,
+          "op": "Q",
+          "reason": "no evidence for this operation and epoch",
+          "verdict": "UNKNOWN"
+        },
+        {
+          "blocking_conditions": [
+            "missing_event",
+            "missing_ack"
+          ],
+          "epoch": 2,
+          "op": "R",
+          "reason": "no evidence for this operation and epoch",
+          "verdict": "UNKNOWN"
+        },
+        {
+          "blocking_conditions": [
+            "unknown_op"
+          ],
+          "epoch": 2,
+          "op": "X",
+          "reason": "operation is undeclared; its complete-looking trace is quarantined",
+          "verdict": "UNKNOWN"
+        }
+      ],
+      "production_verified": false,
+      "synthetic_only": true
+    },
+    {
+      "canonical_input_sha256": "da96472b0228899ed1cb2338074bb184926fe466369d2dfbb9b29b684ac4b3e9",
+      "epoch_sequence": [
+        1,
+        2
+      ],
+      "fixture_id": "F03_rollover_new_complete",
+      "op_judgments": [
+        {
+          "blocking_conditions": [],
+          "epoch": 1,
+          "op": "P",
+          "reason": "same-epoch event and acknowledgement are complete and ordered",
+          "verdict": "accepted"
+        },
+        {
+          "blocking_conditions": [
+            "missing_event",
+            "missing_ack"
+          ],
+          "epoch": 1,
+          "op": "Q",
+          "reason": "no evidence for this operation and epoch",
+          "verdict": "UNKNOWN"
+        },
+        {
+          "blocking_conditions": [
+            "missing_event",
+            "missing_ack"
+          ],
+          "epoch": 1,
+          "op": "R",
+          "reason": "no evidence for this operation and epoch",
+          "verdict": "UNKNOWN"
+        },
+        {
+          "blocking_conditions": [
+            "unknown_op"
+          ],
+          "epoch": 1,
+          "op": "X",
+          "reason": "operation is undeclared; its complete-looking trace is quarantined",
+          "verdict": "UNKNOWN"
+        },
+        {
+          "blocking_conditions": [],
+          "epoch": 2,
+          "op": "P",
+          "reason": "same-epoch event and acknowledgement are complete and ordered",
+          "verdict": "accepted"
+        },
+        {
+          "blocking_conditions": [
+            "missing_event",
+            "missing_ack"
+          ],
+          "epoch": 2,
+          "op": "Q",
+          "reason": "no evidence for this operation and epoch",
+          "verdict": "UNKNOWN"
+        },
+        {
+          "blocking_conditions": [
+            "missing_event",
+            "missing_ack"
+          ],
+          "epoch": 2,
+          "op": "R",
+          "reason": "no evidence for this operation and epoch",
+          "verdict": "UNKNOWN"
+        },
+        {
+          "blocking_conditions": [
+            "unknown_op"
+          ],
+          "epoch": 2,
+          "op": "X",
+          "reason": "operation is undeclared; its complete-looking trace is quarantined",
+          "verdict": "UNKNOWN"
+        }
+      ],
+      "production_verified": false,
+      "synthetic_only": true
+    },
+    {
+      "canonical_input_sha256": "bd81856a04cce2e3afb104f529150e3ad87f55469f80a8e35b3d918e00a93785",
+      "epoch_sequence": [
+        1,
+        2
+      ],
+      "fixture_id": "F04_delayed_ack",
+      "op_judgments": [
+        {
+          "blocking_conditions": [
+            "missing_event",
+            "missing_ack"
+          ],
+          "epoch": 1,
+          "op": "P",
+          "reason": "no evidence for this operation and epoch",
+          "verdict": "UNKNOWN"
+        },
+        {
+          "blocking_conditions": [
+            "missing_ack"
+          ],
+          "epoch": 1,
+          "op": "Q",
+          "reason": "event evidence is present but acknowledgement is absent",
+          "verdict": "UNKNOWN"
+        },
+        {
+          "blocking_conditions": [
+            "missing_event",
+            "missing_ack"
+          ],
+          "epoch": 1,
+          "op": "R",
+          "reason": "no evidence for this operation and epoch",
+          "verdict": "UNKNOWN"
+        },
+        {
+          "blocking_conditions": [
+            "unknown_op"
+          ],
+          "epoch": 1,
+          "op": "X",
+          "reason": "operation is undeclared; its complete-looking trace is quarantined",
+          "verdict": "UNKNOWN"
+        },
+        {
+          "blocking_conditions": [
+            "missing_event",
+            "missing_ack"
+          ],
+          "epoch": 2,
+          "op": "P",
+          "reason": "no evidence for this operation and epoch",
+          "verdict": "UNKNOWN"
+        },
+        {
+          "blocking_conditions": [
+            "missing_event"
+          ],
+          "epoch": 2,
+          "op": "Q",
+          "reason": "ack has no same-epoch event",
+          "verdict": "UNKNOWN"
+        },
+        {
+          "blocking_conditions": [
+            "missing_event",
+            "missing_ack"
+          ],
+          "epoch": 2,
+          "op": "R",
+          "reason": "no evidence for this operation and epoch",
+          "verdict": "UNKNOWN"
+        },
+        {
+          "blocking_conditions": [
+            "unknown_op"
+          ],
+          "epoch": 2,
+          "op": "X",
+          "reason": "operation is undeclared; its complete-looking trace is quarantined",
+          "verdict": "UNKNOWN"
+        }
+      ],
+      "production_verified": false,
+      "synthetic_only": true
+    },
+    {
+      "canonical_input_sha256": "e792e07a5c61c1d76a254343a143fd494d5fb9883bd2188ecfbf9e11c871a090",
+      "epoch_sequence": [
+        1
+      ],
+      "fixture_id": "F05_missing_ack",
+      "op_judgments": [
+        {
+          "blocking_conditions": [
+            "missing_event",
+            "missing_ack"
+          ],
+          "epoch": 1,
+          "op": "P",
+          "reason": "no evidence for this operation and epoch",
+          "verdict": "UNKNOWN"
+        },
+        {
+          "blocking_conditions": [
+            "missing_event",
+            "missing_ack"
+          ],
+          "epoch": 1,
+          "op": "Q",
+          "reason": "no evidence for this operation and epoch",
+          "verdict": "UNKNOWN"
+        },
+        {
+          "blocking_conditions": [
+            "missing_ack"
+          ],
+          "epoch": 1,
+          "op": "R",
+          "reason": "event evidence is present but acknowledgement is absent",
+          "verdict": "UNKNOWN"
+        },
+        {
+          "blocking_conditions": [
+            "unknown_op"
+          ],
+          "epoch": 1,
+          "op": "X",
+          "reason": "operation is undeclared; its complete-looking trace is quarantined",
+          "verdict": "UNKNOWN"
+        }
+      ],
+      "production_verified": false,
+      "synthetic_only": true
+    },
+    {
+      "canonical_input_sha256": "696f3649c41c0e28bf388c8dc14b2d9afcb506784906ceeed500daafca5947eb",
+      "epoch_sequence": [
+        1
+      ],
+      "fixture_id": "F06_unknown_X",
+      "op_judgments": [
+        {
+          "blocking_conditions": [],
+          "epoch": 1,
+          "op": "P",
+          "reason": "same-epoch event and acknowledgement are complete and ordered",
+          "verdict": "accepted"
+        },
+        {
+          "blocking_conditions": [
+            "missing_event",
+            "missing_ack"
+          ],
+          "epoch": 1,
+          "op": "Q",
+          "reason": "no evidence for this operation and epoch",
+          "verdict": "UNKNOWN"
+        },
+        {
+          "blocking_conditions": [
+            "missing_event",
+            "missing_ack"
+          ],
+          "epoch": 1,
+          "op": "R",
+          "reason": "no evidence for this operation and epoch",
+          "verdict": "UNKNOWN"
+        },
+        {
+          "blocking_conditions": [
+            "unknown_op"
+          ],
+          "epoch": 1,
+          "op": "X",
+          "reason": "operation is undeclared; its complete-looking trace is quarantined",
+          "verdict": "UNKNOWN"
+        }
+      ],
+      "production_verified": false,
+      "synthetic_only": true
+    },
+    {
+      "canonical_input_sha256": "46c4767fb098fe8e6021ab91c7256f6cea6158afae0aa1b514a55730a0ea01bf",
+      "epoch_sequence": [
+        1,
+        2
+      ],
+      "fixture_id": "F07_cross_epoch_unknown_no_contam",
+      "op_judgments": [
+        {
+          "blocking_conditions": [
+            "missing_ack"
+          ],
+          "epoch": 1,
+          "op": "P",
+          "reason": "event evidence is present but acknowledgement is absent",
+          "verdict": "UNKNOWN"
+        },
+        {
+          "blocking_conditions": [
+            "missing_event",
+            "missing_ack"
+          ],
+          "epoch": 1,
+          "op": "Q",
+          "reason": "no evidence for this operation and epoch",
+          "verdict": "UNKNOWN"
+        },
+        {
+          "blocking_conditions": [
+            "missing_event",
+            "missing_ack"
+          ],
+          "epoch": 1,
+          "op": "R",
+          "reason": "no evidence for this operation and epoch",
+          "verdict": "UNKNOWN"
+        },
+        {
+          "blocking_conditions": [
+            "unknown_op"
+          ],
+          "epoch": 1,
+          "op": "X",
+          "reason": "operation is undeclared; its complete-looking trace is quarantined",
+          "verdict": "UNKNOWN"
+        },
+        {
+          "blocking_conditions": [
+            "missing_event",
+            "missing_ack"
+          ],
+          "epoch": 2,
+          "op": "P",
+          "reason": "no evidence for this operation and epoch",
+          "verdict": "UNKNOWN"
+        },
+        {
+          "blocking_conditions": [],
+          "epoch": 2,
+          "op": "Q",
+          "reason": "same-epoch event and acknowledgement are complete and ordered",
+          "verdict": "accepted"
+        },
+        {
+          "blocking_conditions": [
+            "missing_event",
+            "missing_ack"
+          ],
+          "epoch": 2,
+          "op": "R",
+          "reason": "no evidence for this operation and epoch",
+          "verdict": "UNKNOWN"
+        },
+        {
+          "blocking_conditions": [
+            "unknown_op"
+          ],
+          "epoch": 2,
+          "op": "X",
+          "reason": "operation is undeclared; its complete-looking trace is quarantined",
+          "verdict": "UNKNOWN"
+        }
+      ],
+      "production_verified": false,
+      "synthetic_only": true
+    },
+    {
+      "canonical_input_sha256": "fa59eece8ac89070d375b780387c56e9925b57b9342893448ab1fc0699d573f5",
+      "epoch_sequence": [
+        1,
+        2
+      ],
+      "fixture_id": "F08_duplicate_payload",
+      "op_judgments": [
+        {
+          "blocking_conditions": [
+            "missing_event",
+            "missing_ack"
+          ],
+          "epoch": 1,
+          "op": "P",
+          "reason": "no evidence for this operation and epoch",
+          "verdict": "UNKNOWN"
+        },
+        {
+          "blocking_conditions": [
+            "missing_event",
+            "missing_ack"
+          ],
+          "epoch": 1,
+          "op": "Q",
+          "reason": "no evidence for this operation and epoch",
+          "verdict": "UNKNOWN"
+        },
+        {
+          "blocking_conditions": [],
+          "epoch": 1,
+          "op": "R",
+          "reason": "same-epoch event and acknowledgement are complete and ordered",
+          "verdict": "accepted"
+        },
+        {
+          "blocking_conditions": [
+            "unknown_op"
+          ],
+          "epoch": 1,
+          "op": "X",
+          "reason": "operation is undeclared; its complete-looking trace is quarantined",
+          "verdict": "UNKNOWN"
+        },
+        {
+          "blocking_conditions": [
+            "missing_event",
+            "missing_ack"
+          ],
+          "epoch": 2,
+          "op": "P",
+          "reason": "no evidence for this operation and epoch",
+          "verdict": "UNKNOWN"
+        },
+        {
+          "blocking_conditions": [
+            "missing_event",
+            "missing_ack"
+          ],
+          "epoch": 2,
+          "op": "Q",
+          "reason": "no evidence for this operation and epoch",
+          "verdict": "UNKNOWN"
+        },
+        {
+          "blocking_conditions": [
+            "duplicate_payload"
+          ],
+          "epoch": 2,
+          "op": "R",
+          "reason": "same operation/payload was already accepted in an earlier epoch; repeat is not new evidence",
+          "verdict": "UNKNOWN"
+        },
+        {
+          "blocking_conditions": [
+            "unknown_op"
+          ],
+          "epoch": 2,
+          "op": "X",
+          "reason": "operation is undeclared; its complete-looking trace is quarantined",
+          "verdict": "UNKNOWN"
+        }
+      ],
+      "production_verified": false,
+      "synthetic_only": true
+    },
+    {
+      "canonical_input_sha256": "5b56c552aaeb572c4798b4cd5c5476651402a9b58088b37136e18802ff017c68",
+      "epoch_sequence": [
+        1
+      ],
+      "fixture_id": "F09_revoked_epoch",
+      "op_judgments": [
+        {
+          "blocking_conditions": [
+            "revoked_epoch"
+          ],
+          "epoch": 1,
+          "op": "P",
+          "reason": "epoch is explicitly revoked; revocation is not rejection",
+          "verdict": "UNKNOWN"
+        },
+        {
+          "blocking_conditions": [
+            "missing_event",
+            "missing_ack"
+          ],
+          "epoch": 1,
+          "op": "Q",
+          "reason": "no evidence for this operation and epoch",
+          "verdict": "UNKNOWN"
+        },
+        {
+          "blocking_conditions": [
+            "missing_event",
+            "missing_ack"
+          ],
+          "epoch": 1,
+          "op": "R",
+          "reason": "no evidence for this operation and epoch",
+          "verdict": "UNKNOWN"
+        },
+        {
+          "blocking_conditions": [
+            "unknown_op"
+          ],
+          "epoch": 1,
+          "op": "X",
+          "reason": "operation is undeclared; its complete-looking trace is quarantined",
+          "verdict": "UNKNOWN"
+        }
+      ],
+      "production_verified": false,
+      "synthetic_only": true
+    },
+    {
+      "canonical_input_sha256": "106ddef62ff53eea3ae87529df411bde640dc37850751c9cd50b16ff1592f416",
+      "epoch_sequence": [
+        1
+      ],
+      "fixture_id": "F10_explicit_conflict",
+      "op_judgments": [
+        {
+          "blocking_conditions": [
+            "missing_event",
+            "missing_ack"
+          ],
+          "epoch": 1,
+          "op": "P",
+          "reason": "no evidence for this operation and epoch",
+          "verdict": "UNKNOWN"
+        },
+        {
+          "blocking_conditions": [
+            "explicit_contradiction"
+          ],
+          "epoch": 1,
+          "op": "Q",
+          "reason": "explicit same-epoch contradiction record",
+          "verdict": "rejected"
+        },
+        {
+          "blocking_conditions": [
+            "missing_event",
+            "missing_ack"
+          ],
+          "epoch": 1,
+          "op": "R",
+          "reason": "no evidence for this operation and epoch",
+          "verdict": "UNKNOWN"
+        },
+        {
+          "blocking_conditions": [
+            "unknown_op"
+          ],
+          "epoch": 1,
+          "op": "X",
+          "reason": "operation is undeclared; its complete-looking trace is quarantined",
+          "verdict": "UNKNOWN"
+        }
+      ],
+      "production_verified": false,
+      "synthetic_only": true
+    },
+    {
+      "canonical_input_sha256": "8f90d36e9d623af9830e6ef999234c0a06895e5e397909c18081652296323f37",
+      "epoch_sequence": [
+        1
+      ],
+      "fixture_id": "F11_reordered_ack",
+      "op_judgments": [
+        {
+          "blocking_conditions": [
+            "reordered"
+          ],
+          "epoch": 1,
+          "op": "P",
+          "reason": "ack arrived before its event",
+          "verdict": "UNKNOWN"
+        },
+        {
+          "blocking_conditions": [
+            "missing_event",
+            "missing_ack"
+          ],
+          "epoch": 1,
+          "op": "Q",
+          "reason": "no evidence for this operation and epoch",
+          "verdict": "UNKNOWN"
+        },
+        {
+          "blocking_conditions": [
+            "missing_event",
+            "missing_ack"
+          ],
+          "epoch": 1,
+          "op": "R",
+          "reason": "no evidence for this operation and epoch",
+          "verdict": "UNKNOWN"
+        },
+        {
+          "blocking_conditions": [
+            "unknown_op"
+          ],
+          "epoch": 1,
+          "op": "X",
+          "reason": "operation is undeclared; its complete-looking trace is quarantined",
+          "verdict": "UNKNOWN"
+        }
+      ],
+      "production_verified": false,
+      "synthetic_only": true
+    },
+    {
+      "canonical_input_sha256": "cbca756b39c57e58ce9f13e6757f7209ba32bce9347541c93746ebaf4c373638",
+      "epoch_sequence": [
+        1
+      ],
+      "fixture_id": "F12_stale_event",
+      "op_judgments": [
+        {
+          "blocking_conditions": [
+            "stale"
+          ],
+          "epoch": 1,
+          "op": "P",
+          "reason": "stale evidence is not eligible for upgrade",
+          "verdict": "UNKNOWN"
+        },
+        {
+          "blocking_conditions": [
+            "missing_event",
+            "missing_ack"
+          ],
+          "epoch": 1,
+          "op": "Q",
+          "reason": "no evidence for this operation and epoch",
+          "verdict": "UNKNOWN"
+        },
+        {
+          "blocking_conditions": [
+            "missing_event",
+            "missing_ack"
+          ],
+          "epoch": 1,
+          "op": "R",
+          "reason": "no evidence for this operation and epoch",
+          "verdict": "UNKNOWN"
+        },
+        {
+          "blocking_conditions": [
+            "unknown_op"
+          ],
+          "epoch": 1,
+          "op": "X",
+          "reason": "operation is undeclared; its complete-looking trace is quarantined",
+          "verdict": "UNKNOWN"
+        }
+      ],
+      "production_verified": false,
+      "synthetic_only": true
+    },
+    {
+      "canonical_input_sha256": "d0718c33a45ccede2a3c42b21ca0d95e01db51d108c7d95000ee5f1f28433d46",
+      "epoch_sequence": [
+        1
+      ],
+      "fixture_id": "F13_ack_only",
+      "op_judgments": [
+        {
+          "blocking_conditions": [
+            "missing_event",
+            "missing_ack"
+          ],
+          "epoch": 1,
+          "op": "P",
+          "reason": "no evidence for this operation and epoch",
+          "verdict": "UNKNOWN"
+        },
+        {
+          "blocking_conditions": [
+            "missing_event"
+          ],
+          "epoch": 1,
+          "op": "Q",
+          "reason": "ack has no same-epoch event",
+          "verdict": "UNKNOWN"
+        },
+        {
+          "blocking_conditions": [
+            "missing_event",
+            "missing_ack"
+          ],
+          "epoch": 1,
+          "op": "R",
+          "reason": "no evidence for this operation and epoch",
+          "verdict": "UNKNOWN"
+        },
+        {
+          "blocking_conditions": [
+            "unknown_op"
+          ],
+          "epoch": 1,
+          "op": "X",
+          "reason": "operation is undeclared; its complete-looking trace is quarantined",
+          "verdict": "UNKNOWN"
+        }
+      ],
+      "production_verified": false,
+      "synthetic_only": true
+    },
+    {
+      "canonical_input_sha256": "cfb08862ab0d1a599c881139602ce7eb1f7cb19a632e73154bf45388ac659f9e",
+      "epoch_sequence": [
+        1
+      ],
+      "fixture_id": "F14_event_only_X",
+      "op_judgments": [
+        {
+          "blocking_conditions": [
+            "missing_event",
+            "missing_ack"
+          ],
+          "epoch": 1,
+          "op": "P",
+          "reason": "no evidence for this operation and epoch",
+          "verdict": "UNKNOWN"
+        },
+        {
+          "blocking_conditions": [
+            "missing_event",
+            "missing_ack"
+          ],
+          "epoch": 1,
+          "op": "Q",
+          "reason": "no evidence for this operation and epoch",
+          "verdict": "UNKNOWN"
+        },
+        {
+          "blocking_conditions": [
+            "missing_event",
+            "missing_ack"
+          ],
+          "epoch": 1,
+          "op": "R",
+          "reason": "no evidence for this operation and epoch",
+          "verdict": "UNKNOWN"
+        },
+        {
+          "blocking_conditions": [
+            "unknown_op"
+          ],
+          "epoch": 1,
+          "op": "X",
+          "reason": "operation is undeclared; its complete-looking trace is quarantined",
+          "verdict": "UNKNOWN"
+        }
+      ],
+      "production_verified": false,
+      "synthetic_only": true
+    },
+    {
+      "canonical_input_sha256": "1a06f8c6de595d900ea3bbb2ac2fa604cdc57275d998000fcf881728541531c2",
+      "epoch_sequence": [
+        3
+      ],
+      "fixture_id": "F15_all_ops_same_epoch",
+      "op_judgments": [
+        {
+          "blocking_conditions": [],
+          "epoch": 3,
+          "op": "P",
+          "reason": "same-epoch event and acknowledgement are complete and ordered",
+          "verdict": "accepted"
+        },
+        {
+          "blocking_conditions": [],
+          "epoch": 3,
+          "op": "Q",
+          "reason": "same-epoch event and acknowledgement are complete and ordered",
+          "verdict": "accepted"
+        },
+        {
+          "blocking_conditions": [],
+          "epoch": 3,
+          "op": "R",
+          "reason": "same-epoch event and acknowledgement are complete and ordered",
+          "verdict": "accepted"
+        },
+        {
+          "blocking_conditions": [
+            "unknown_op"
+          ],
+          "epoch": 3,
+          "op": "X",
+          "reason": "operation is undeclared; its complete-looking trace is quarantined",
+          "verdict": "UNKNOWN"
+        }
+      ],
+      "production_verified": false,
+      "synthetic_only": true
+    },
+    {
+      "canonical_input_sha256": "7e45ede5612a4218ed8a8a85a53e37d0d338e901185f495719b4cbf6bc2525f5",
+      "epoch_sequence": [
+        1,
+        2,
+        3,
+        4
+      ],
+      "fixture_id": "F16_multi_epoch_p_only",
+      "op_judgments": [
+        {
+          "blocking_conditions": [],
+          "epoch": 1,
+          "op": "P",
+          "reason": "same-epoch event and acknowledgement are complete and ordered",
+          "verdict": "accepted"
+        },
+        {
+          "blocking_conditions": [
+            "missing_event",
+            "missing_ack"
+          ],
+          "epoch": 1,
+          "op": "Q",
+          "reason": "no evidence for this operation and epoch",
+          "verdict": "UNKNOWN"
+        },
+        {
+          "blocking_conditions": [
+            "missing_event",
+            "missing_ack"
+          ],
+          "epoch": 1,
+          "op": "R",
+          "reason": "no evidence for this operation and epoch",
+          "verdict": "UNKNOWN"
+        },
+        {
+          "blocking_conditions": [
+            "unknown_op"
+          ],
+          "epoch": 1,
+          "op": "X",
+          "reason": "operation is undeclared; its complete-looking trace is quarantined",
+          "verdict": "UNKNOWN"
+        },
+        {
+          "blocking_conditions": [],
+          "epoch": 2,
+          "op": "P",
+          "reason": "same-epoch event and acknowledgement are complete and ordered",
+          "verdict": "accepted"
+        },
+        {
+          "blocking_conditions": [
+            "missing_event",
+            "missing_ack"
+          ],
+          "epoch": 2,
+          "op": "Q",
+          "reason": "no evidence for this operation and epoch",
+          "verdict": "UNKNOWN"
+        },
+        {
+          "blocking_conditions": [
+            "missing_event",
+            "missing_ack"
+          ],
+          "epoch": 2,
+          "op": "R",
+          "reason": "no evidence for this operation and epoch",
+          "verdict": "UNKNOWN"
+        },
+        {
+          "blocking_conditions": [
+            "unknown_op"
+          ],
+          "epoch": 2,
+          "op": "X",
+          "reason": "operation is undeclared; its complete-looking trace is quarantined",
+          "verdict": "UNKNOWN"
+        },
+        {
+          "blocking_conditions": [],
+          "epoch": 3,
+          "op": "P",
+          "reason": "same-epoch event and acknowledgement are complete and ordered",
+          "verdict": "accepted"
+        },
+        {
+          "blocking_conditions": [
+            "missing_event",
+            "missing_ack"
+          ],
+          "epoch": 3,
+          "op": "Q",
+          "reason": "no evidence for this operation and epoch",
+          "verdict": "UNKNOWN"
+        },
+        {
+          "blocking_conditions": [
+            "missing_event",
+            "missing_ack"
+          ],
+          "epoch": 3,
+          "op": "R",
+          "reason": "no evidence for this operation and epoch",
+          "verdict": "UNKNOWN"
+        },
+        {
+          "blocking_conditions": [
+            "unknown_op"
+          ],
+          "epoch": 3,
+          "op": "X",
+          "reason": "operation is undeclared; its complete-looking trace is quarantined",
+          "verdict": "UNKNOWN"
+        },
+        {
+          "blocking_conditions": [],
+          "epoch": 4,
+          "op": "P",
+          "reason": "same-epoch event and acknowledgement are complete and ordered",
+          "verdict": "accepted"
+        },
+        {
+          "blocking_conditions": [
+            "missing_event",
+            "missing_ack"
+          ],
+          "epoch": 4,
+          "op": "Q",
+          "reason": "no evidence for this operation and epoch",
+          "verdict": "UNKNOWN"
+        },
+        {
+          "blocking_conditions": [
+            "missing_event",
+            "missing_ack"
+          ],
+          "epoch": 4,
+          "op": "R",
+          "reason": "no evidence for this operation and epoch",
+          "verdict": "UNKNOWN"
+        },
+        {
+          "blocking_conditions": [
+            "unknown_op"
+          ],
+          "epoch": 4,
+          "op": "X",
+          "reason": "operation is undeclared; its complete-looking trace is quarantined",
+          "verdict": "UNKNOWN"
+        }
+      ],
+      "production_verified": false,
+      "synthetic_only": true
+    },
+    {
+      "canonical_input_sha256": "337f03577669c4c35a5127a3192dd49afb0c8ba01cedaadc3c3bcd6fdd0c86a4",
+      "epoch_sequence": [
+        7,
+        8
+      ],
+      "fixture_id": "F17_late_ack_after_rollover",
+      "op_judgments": [
+        {
+          "blocking_conditions": [
+            "missing_event",
+            "missing_ack"
+          ],
+          "epoch": 7,
+          "op": "P",
+          "reason": "no evidence for this operation and epoch",
+          "verdict": "UNKNOWN"
+        },
+        {
+          "blocking_conditions": [
+            "missing_event",
+            "missing_ack"
+          ],
+          "epoch": 7,
+          "op": "Q",
+          "reason": "no evidence for this operation and epoch",
+          "verdict": "UNKNOWN"
+        },
+        {
+          "blocking_conditions": [
+            "missing_ack"
+          ],
+          "epoch": 7,
+          "op": "R",
+          "reason": "event evidence is present but acknowledgement is absent",
+          "verdict": "UNKNOWN"
+        },
+        {
+          "blocking_conditions": [
+            "unknown_op"
+          ],
+          "epoch": 7,
+          "op": "X",
+          "reason": "operation is undeclared; its complete-looking trace is quarantined",
+          "verdict": "UNKNOWN"
+        },
+        {
+          "blocking_conditions": [
+            "missing_event",
+            "missing_ack"
+          ],
+          "epoch": 8,
+          "op": "P",
+          "reason": "no evidence for this operation and epoch",
+          "verdict": "UNKNOWN"
+        },
+        {
+          "blocking_conditions": [
+            "missing_event",
+            "missing_ack"
+          ],
+          "epoch": 8,
+          "op": "Q",
+          "reason": "no evidence for this operation and epoch",
+          "verdict": "UNKNOWN"
+        },
+        {
+          "blocking_conditions": [
+            "delayed_ack",
+            "cross_epoch_reference"
+          ],
+          "epoch": 8,
+          "op": "R",
+          "reason": "ack arrived in a later/different epoch and cannot upgrade prior evidence",
+          "verdict": "UNKNOWN"
+        },
+        {
+          "blocking_conditions": [
+            "unknown_op"
+          ],
+          "epoch": 8,
+          "op": "X",
+          "reason": "operation is undeclared; its complete-looking trace is quarantined",
+          "verdict": "UNKNOWN"
+        }
+      ],
+      "production_verified": false,
+      "synthetic_only": true
+    },
+    {
+      "canonical_input_sha256": "21dc75da6111c3ff2d55105901c03a96c69ef40b4d4287babef0455050d6d800",
+      "epoch_sequence": [
+        1
+      ],
+      "fixture_id": "F18_stale_ack",
+      "op_judgments": [
+        {
+          "blocking_conditions": [
+            "missing_event",
+            "missing_ack"
+          ],
+          "epoch": 1,
+          "op": "P",
+          "reason": "no evidence for this operation and epoch",
+          "verdict": "UNKNOWN"
+        },
+        {
+          "blocking_conditions": [
+            "stale"
+          ],
+          "epoch": 1,
+          "op": "Q",
+          "reason": "stale evidence is not eligible for upgrade",
+          "verdict": "UNKNOWN"
+        },
+        {
+          "blocking_conditions": [
+            "missing_event",
+            "missing_ack"
+          ],
+          "epoch": 1,
+          "op": "R",
+          "reason": "no evidence for this operation and epoch",
+          "verdict": "UNKNOWN"
+        },
+        {
+          "blocking_conditions": [
+            "unknown_op"
+          ],
+          "epoch": 1,
+          "op": "X",
+          "reason": "operation is undeclared; its complete-looking trace is quarantined",
+          "verdict": "UNKNOWN"
+        }
+      ],
+      "production_verified": false,
+      "synthetic_only": true
+    },
+    {
+      "canonical_input_sha256": "15c549da119f10b3a15e3a115361b8ae93bc1e35a3f5db123bfa99b5bc8df862",
+      "epoch_sequence": [
+        1,
+        2
+      ],
+      "fixture_id": "F19_mixed_independence",
+      "op_judgments": [
+        {
+          "blocking_conditions": [],
+          "epoch": 1,
+          "op": "P",
+          "reason": "same-epoch event and acknowledgement are complete and ordered",
+          "verdict": "accepted"
+        },
+        {
+          "blocking_conditions": [
+            "missing_event",
+            "missing_ack"
+          ],
+          "epoch": 1,
+          "op": "Q",
+          "reason": "no evidence for this operation and epoch",
+          "verdict": "UNKNOWN"
+        },
+        {
+          "blocking_conditions": [
+            "missing_event",
+            "missing_ack"
+          ],
+          "epoch": 1,
+          "op": "R",
+          "reason": "no evidence for this operation and epoch",
+          "verdict": "UNKNOWN"
+        },
+        {
+          "blocking_conditions": [
+            "unknown_op"
+          ],
+          "epoch": 1,
+          "op": "X",
+          "reason": "operation is undeclared; its complete-looking trace is quarantined",
+          "verdict": "UNKNOWN"
+        },
+        {
+          "blocking_conditions": [
+            "missing_event",
+            "missing_ack"
+          ],
+          "epoch": 2,
+          "op": "P",
+          "reason": "no evidence for this operation and epoch",
+          "verdict": "UNKNOWN"
+        },
+        {
+          "blocking_conditions": [],
+          "epoch": 2,
+          "op": "Q",
+          "reason": "same-epoch event and acknowledgement are complete and ordered",
+          "verdict": "accepted"
+        },
+        {
+          "blocking_conditions": [
+            "missing_event",
+            "missing_ack"
+          ],
+          "epoch": 2,
+          "op": "R",
+          "reason": "no evidence for this operation and epoch",
+          "verdict": "UNKNOWN"
+        },
+        {
+          "blocking_conditions": [
+            "unknown_op"
+          ],
+          "epoch": 2,
+          "op": "X",
+          "reason": "operation is undeclared; its complete-looking trace is quarantined",
+          "verdict": "UNKNOWN"
+        }
+      ],
+      "production_verified": false,
+      "synthetic_only": true
+    },
+    {
+      "canonical_input_sha256": "f3be3754c654fadd5f8f2d77a83315247c0c97c9dc0ff85e2be2da565d53cfa1",
+      "epoch_sequence": [
+        2
+      ],
+      "fixture_id": "F20_revoke_without_pair",
+      "op_judgments": [
+        {
+          "blocking_conditions": [
+            "missing_event",
+            "missing_ack"
+          ],
+          "epoch": 2,
+          "op": "P",
+          "reason": "no evidence for this operation and epoch",
+          "verdict": "UNKNOWN"
+        },
+        {
+          "blocking_conditions": [
+            "missing_event",
+            "missing_ack"
+          ],
+          "epoch": 2,
+          "op": "Q",
+          "reason": "no evidence for this operation and epoch",
+          "verdict": "UNKNOWN"
+        },
+        {
+          "blocking_conditions": [
+            "revoked_epoch"
+          ],
+          "epoch": 2,
+          "op": "R",
+          "reason": "epoch is explicitly revoked; revocation is not rejection",
+          "verdict": "UNKNOWN"
+        },
+        {
+          "blocking_conditions": [
+            "unknown_op"
+          ],
+          "epoch": 2,
+          "op": "X",
+          "reason": "operation is undeclared; its complete-looking trace is quarantined",
+          "verdict": "UNKNOWN"
+        }
+      ],
+      "production_verified": false,
+      "synthetic_only": true
+    },
+    {
+      "canonical_input_sha256": "af5c1f7e80e53add35fa4921fb3e2b7e333bfd6ecadbe65ccc3692f26ad025b8",
+      "epoch_sequence": [
+        1
+      ],
+      "fixture_id": "F21_unmatched_same_epoch",
+      "op_judgments": [
+        {
+          "blocking_conditions": [
+            "stale_or_unmatched_ack"
+          ],
+          "epoch": 1,
+          "op": "P",
+          "reason": "event and acknowledgement do not form a same-epoch pair",
+          "verdict": "UNKNOWN"
+        },
+        {
+          "blocking_conditions": [
+            "missing_event",
+            "missing_ack"
+          ],
+          "epoch": 1,
+          "op": "Q",
+          "reason": "no evidence for this operation and epoch",
+          "verdict": "UNKNOWN"
+        },
+        {
+          "blocking_conditions": [
+            "missing_event",
+            "missing_ack"
+          ],
+          "epoch": 1,
+          "op": "R",
+          "reason": "no evidence for this operation and epoch",
+          "verdict": "UNKNOWN"
+        },
+        {
+          "blocking_conditions": [
+            "unknown_op"
+          ],
+          "epoch": 1,
+          "op": "X",
+          "reason": "operation is undeclared; its complete-looking trace is quarantined",
+          "verdict": "UNKNOWN"
+        }
+      ],
+      "production_verified": false,
+      "synthetic_only": true
+    },
+    {
+      "canonical_input_sha256": "cc78dba0d336bec8be537a27685bbf8686af9d0cefb62e3e057a8c850121147b",
+      "epoch_sequence": [
+        1,
+        2,
+        3,
+        4
+      ],
+      "fixture_id": "F22_four_epoch_mixed",
+      "op_judgments": [
+        {
+          "blocking_conditions": [],
+          "epoch": 1,
+          "op": "P",
+          "reason": "same-epoch event and acknowledgement are complete and ordered",
+          "verdict": "accepted"
+        },
+        {
+          "blocking_conditions": [
+            "missing_event",
+            "missing_ack"
+          ],
+          "epoch": 1,
+          "op": "Q",
+          "reason": "no evidence for this operation and epoch",
+          "verdict": "UNKNOWN"
+        },
+        {
+          "blocking_conditions": [
+            "missing_event",
+            "missing_ack"
+          ],
+          "epoch": 1,
+          "op": "R",
+          "reason": "no evidence for this operation and epoch",
+          "verdict": "UNKNOWN"
+        },
+        {
+          "blocking_conditions": [
+            "unknown_op"
+          ],
+          "epoch": 1,
+          "op": "X",
+          "reason": "operation is undeclared; its complete-looking trace is quarantined",
+          "verdict": "UNKNOWN"
+        },
+        {
+          "blocking_conditions": [
+            "missing_event",
+            "missing_ack"
+          ],
+          "epoch": 2,
+          "op": "P",
+          "reason": "no evidence for this operation and epoch",
+          "verdict": "UNKNOWN"
+        },
+        {
+          "blocking_conditions": [],
+          "epoch": 2,
+          "op": "Q",
+          "reason": "same-epoch event and acknowledgement are complete and ordered",
+          "verdict": "accepted"
+        },
+        {
+          "blocking_conditions": [
+            "missing_event",
+            "missing_ack"
+          ],
+          "epoch": 2,
+          "op": "R",
+          "reason": "no evidence for this operation and epoch",
+          "verdict": "UNKNOWN"
+        },
+        {
+          "blocking_conditions": [
+            "unknown_op"
+          ],
+          "epoch": 2,
+          "op": "X",
+          "reason": "operation is undeclared; its complete-looking trace is quarantined",
+          "verdict": "UNKNOWN"
+        },
+        {
+          "blocking_conditions": [
+            "missing_event",
+            "missing_ack"
+          ],
+          "epoch": 3,
+          "op": "P",
+          "reason": "no evidence for this operation and epoch",
+          "verdict": "UNKNOWN"
+        },
+        {
+          "blocking_conditions": [
+            "missing_event",
+            "missing_ack"
+          ],
+          "epoch": 3,
+          "op": "Q",
+          "reason": "no evidence for this operation and epoch",
+          "verdict": "UNKNOWN"
+        },
+        {
+          "blocking_conditions": [
+            "missing_ack"
+          ],
+          "epoch": 3,
+          "op": "R",
+          "reason": "event evidence is present but acknowledgement is absent",
+          "verdict": "UNKNOWN"
+        },
+        {
+          "blocking_conditions": [
+            "unknown_op"
+          ],
+          "epoch": 3,
+          "op": "X",
+          "reason": "operation is undeclared; its complete-looking trace is quarantined",
+          "verdict": "UNKNOWN"
+        },
+        {
+          "blocking_conditions": [
+            "missing_event",
+            "missing_ack"
+          ],
+          "epoch": 4,
+          "op": "P",
+          "reason": "no evidence for this operation and epoch",
+          "verdict": "UNKNOWN"
+        },
+        {
+          "blocking_conditions": [
+            "missing_event",
+            "missing_ack"
+          ],
+          "epoch": 4,
+          "op": "Q",
+          "reason": "no evidence for this operation and epoch",
+          "verdict": "UNKNOWN"
+        },
+        {
+          "blocking_conditions": [
+            "missing_event",
+            "missing_ack"
+          ],
+          "epoch": 4,
+          "op": "R",
+          "reason": "no evidence for this operation and epoch",
+          "verdict": "UNKNOWN"
+        },
+        {
+          "blocking_conditions": [
+            "unknown_op"
+          ],
+          "epoch": 4,
+          "op": "X",
+          "reason": "operation is undeclared; its complete-looking trace is quarantined",
+          "verdict": "UNKNOWN"
+        }
+      ],
+      "production_verified": false,
+      "synthetic_only": true
+    }
+  ],
+  "synthetic_only": true
+}

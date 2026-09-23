@@ -1,0 +1,17 @@
+{
+  "schema_version": "1.0",
+  "question": "在离线合成证据中，如何以最小身份域证明跨分区同一 event_id 的关联并隔离冲突？",
+  "scope": {"project":"C-line S31","mode":"offline synthetic fixtures","excluded":["S1-S30","production","network","real services","credentials"],"identity_domain":["tenant","source","event_id","epoch","version"],"locator_domain":["partition"],"evidence_domain":["payload_digest","causal_parent","event_time","ingest_time"]},
+  "claims_status": "inferred",
+  "synthetic_only": true,
+  "production_verified": false,
+  "sources": [],
+  "claims": [
+    {"id":"identity-domain","claim":"关联键应包含 tenant/source/event_id/epoch/version；partition 是定位域而非身份域。","status":"inferred","confidence":"bounded","sources":[],"caveat":"仅由本地夹具与规则推导，未作生产验证。"},
+    {"id":"digest-conflict","claim":"同身份域内不可调和 payload_digest 冲突必须 REJECT。","status":"inferred","confidence":"bounded","sources":[],"caveat":"夹具不代表真实系统冲突率或恢复能力。"},
+    {"id":"evidence-gaps","claim":"query gap、retention expired、dropped、exporter failure 或不完整迁移链只能 UNKNOWN。","status":"inferred","confidence":"bounded","sources":[],"caveat":"缺证据不等于事件未发生。"},
+    {"id":"ordering","claim":"event-time 与 ingest-time 的交叉排序可在链闭合时支持 RECOVERED，但延迟本身不是冲突。","status":"inferred","confidence":"bounded","sources":[],"caveat":"夹具使用有限、人工构造的排序关系。"}
+  ],
+  "coverage": {"cases":16,"property_sweep":256,"statuses":["RECOVERED","UNKNOWN","REJECT"],"events":["NO_EVENT","DELAYED","DROPPED","EXPORTER_FAILURE","QUERY_GAP","PAGINATION_INSUFFICIENT","RETENTION_EXPIRED","VERIFIED_CONTINUITY","UNKNOWN"]},
+  "notes":"Status values are mutually exclusive and fail-closed; VERIFIED_CONTINUITY is represented by RECOVERED only when evidence closes and identity domain is correct."
+}

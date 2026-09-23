@@ -1,0 +1,26 @@
+{
+  "schema_version": "s27-trust-continuity-research-1",
+  "question": "In a synthetic recovery window, when may observer quorum and revocation watermark jointly close trust continuity across crash/restart?",
+  "synthetic_only": true,
+  "production_verified": false,
+  "scope": {
+    "network_access": false,
+    "production_inputs": false,
+    "real_services": false,
+    "sdk_or_credentials": false,
+    "offline_fixture_paths": ["fixtures/cases.json"],
+    "exclusions": ["/var/minis/shared/P0", "accident directories", "D10/L12/D14", "canonical", "140", "tri-line", "systemd", "S1-S26"]
+  },
+  "claims": [
+    {"id":"C1","claim":"RECOVERED is permitted only when independent quorum, monotonic watermark at or beyond revocation, crash/restart closure, retention/query closure, and three mutually consistent evidence classes all hold.","status":"inferred","confidence":"synthetic-high","sources":[],"caveat":"A model invariant over offline fixtures, not a production guarantee."},
+    {"id":"C2","claim":"Duplicate observations from one observer do not increase independent quorum; missing or split quorum, stale or regressing watermarks, and unknown post-crash commits remain UNKNOWN.","status":"inferred","confidence":"synthetic-high","sources":[],"caveat":"Fixture-derived fail-closed behavior."},
+    {"id":"C3","claim":"An explicit irreconcilable evidence conflict may be classified REJECT, while evidence/query/retention gaps cannot be upgraded.","status":"inferred","confidence":"synthetic-high","sources":[],"caveat":"No claim about rollback, exactly-once, external effects, durability, or readiness."},
+    {"id":"C4","claim":"The 256-combination property sweep has no RECOVERED result when any required gate is false, and a single-gate minimizer finds each gate as a non-recovery witness.","status":"inferred","confidence":"synthetic-high","sources":[],"caveat":"Exhaustive only for the finite synthetic gate model."}
+  ],
+  "coverage": {
+    "labels": ["observer_quorum", "2-of-3", "3-of-5", "duplicate_observer", "partition_stale_quorum", "revocation_watermark", "cross_epoch_regression", "crash_restart", "duplicate_receipt", "unknown_commit", "query_gap", "retention_boundary", "platform_receipt", "durable_log", "external_effect", "fail_closed", "three_state_exclusive"],
+    "classifications": ["NO_EVENT", "DELAYED", "DROPPED", "EXPORTER_FAILURE", "QUERY_GAP", "RETENTION_EXPIRED", "VERIFIED_CONTINUITY", "UNKNOWN"],
+    "states": ["RECOVERED", "UNKNOWN", "REJECT"]
+  },
+  "limitations": ["Synthetic-only; no network, real service, SDK, credential, or production input.","Cannot prove production durability, exactly-once, rollback, external effect, or production readiness.","Completion is not a stop-line signal; this is one independent research slice."]
+}

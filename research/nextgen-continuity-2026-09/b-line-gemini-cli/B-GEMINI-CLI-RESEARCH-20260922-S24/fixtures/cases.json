@@ -1,0 +1,147 @@
+{
+  "synthetic_only": true,
+  "production_verified": false,
+  "schema": "S24-fixtures-v1",
+  "cases": [
+    {
+      "id": "S24-01-same-attempt-same-all",
+      "purpose": "attempt=1 exact repeated arrival; value and both references unchanged",
+      "arrivals": [
+        {"attempt": 1, "value": "alpha", "response_ref": "resp-a", "durable_ref": "dur-a", "observation": "accepted"},
+        {"attempt": 1, "value": "alpha", "response_ref": "resp-a", "durable_ref": "dur-a", "observation": "accepted"}
+      ],
+      "expected_outcomes": ["accepted", "accepted"]
+    },
+    {
+      "id": "S24-02-same-attempt-value-change",
+      "purpose": "attempt=1 replay changes value while references remain unchanged",
+      "arrivals": [
+        {"attempt": 1, "value": "alpha", "response_ref": "resp-a", "durable_ref": "dur-a", "observation": "accepted"},
+        {"attempt": 1, "value": "beta", "response_ref": "resp-a", "durable_ref": "dur-a", "observation": "accepted"}
+      ],
+      "expected_outcomes": ["accepted", "rejected"]
+    },
+    {
+      "id": "S24-03-same-attempt-response-ref-change",
+      "purpose": "attempt=1 replay changes response reference only",
+      "arrivals": [
+        {"attempt": 1, "value": "alpha", "response_ref": "resp-a", "durable_ref": "dur-a", "observation": "accepted"},
+        {"attempt": 1, "value": "alpha", "response_ref": "resp-b", "durable_ref": "dur-a", "observation": "accepted"}
+      ],
+      "expected_outcomes": ["accepted", "rejected"]
+    },
+    {
+      "id": "S24-04-same-attempt-durable-ref-change",
+      "purpose": "attempt=1 replay changes durable reference only",
+      "arrivals": [
+        {"attempt": 1, "value": "alpha", "response_ref": "resp-a", "durable_ref": "dur-a", "observation": "accepted"},
+        {"attempt": 1, "value": "alpha", "response_ref": "resp-a", "durable_ref": "dur-b", "observation": "accepted"}
+      ],
+      "expected_outcomes": ["accepted", "rejected"]
+    },
+    {
+      "id": "S24-05-attempt1-unknown-replay",
+      "purpose": "attempt=1 local observation is UNKNOWN and exact replay keeps UNKNOWN",
+      "arrivals": [
+        {"attempt": 1, "value": "alpha", "response_ref": "resp-a", "durable_ref": "dur-a", "observation": "UNKNOWN"},
+        {"attempt": 1, "value": "alpha", "response_ref": "resp-a", "durable_ref": "dur-a", "observation": "UNKNOWN"}
+      ],
+      "expected_outcomes": ["UNKNOWN", "UNKNOWN"]
+    },
+    {
+      "id": "S24-06-unknown-to-attempt2-same",
+      "purpose": "attempt=1 UNKNOWN followed by attempt=2 local record with same value and references",
+      "arrivals": [
+        {"attempt": 1, "value": "alpha", "response_ref": "resp-a", "durable_ref": "dur-a", "observation": "UNKNOWN"},
+        {"attempt": 2, "value": "alpha", "response_ref": "resp-a", "durable_ref": "dur-a", "observation": "accepted"}
+      ],
+      "expected_outcomes": ["UNKNOWN", "accepted"],
+      "expected_history_outcomes": ["UNKNOWN", "accepted"]
+    },
+    {
+      "id": "S24-07-unknown-to-attempt2-different",
+      "purpose": "attempt=1 UNKNOWN followed by attempt=2 record with a different value",
+      "arrivals": [
+        {"attempt": 1, "value": "alpha", "response_ref": "resp-a", "durable_ref": "dur-a", "observation": "UNKNOWN"},
+        {"attempt": 2, "value": "beta", "response_ref": "resp-b", "durable_ref": "dur-b", "observation": "accepted"}
+      ],
+      "expected_outcomes": ["UNKNOWN", "accepted"],
+      "expected_history_outcomes": ["UNKNOWN", "accepted"]
+    },
+    {
+      "id": "S24-08-accepted-to-attempt2-same",
+      "purpose": "attempt=1 accepted followed by attempt=2 same value and references",
+      "arrivals": [
+        {"attempt": 1, "value": "alpha", "response_ref": "resp-a", "durable_ref": "dur-a", "observation": "accepted"},
+        {"attempt": 2, "value": "alpha", "response_ref": "resp-a", "durable_ref": "dur-a", "observation": "accepted"}
+      ],
+      "expected_outcomes": ["accepted", "accepted"],
+      "expected_history_outcomes": ["accepted", "accepted"]
+    },
+    {
+      "id": "S24-09-accepted-to-attempt2-different",
+      "purpose": "attempt=1 accepted followed by attempt=2 different value and references",
+      "arrivals": [
+        {"attempt": 1, "value": "alpha", "response_ref": "resp-a", "durable_ref": "dur-a", "observation": "accepted"},
+        {"attempt": 2, "value": "beta", "response_ref": "resp-b", "durable_ref": "dur-b", "observation": "accepted"}
+      ],
+      "expected_outcomes": ["accepted", "accepted"],
+      "expected_history_outcomes": ["accepted", "accepted"]
+    },
+    {
+      "id": "S24-10-attempt2-exact-replay",
+      "purpose": "attempt=2 exact repeated arrival after attempt=1 UNKNOWN",
+      "arrivals": [
+        {"attempt": 1, "value": "alpha", "response_ref": "resp-a", "durable_ref": "dur-a", "observation": "UNKNOWN"},
+        {"attempt": 2, "value": "beta", "response_ref": "resp-b", "durable_ref": "dur-b", "observation": "accepted"},
+        {"attempt": 2, "value": "beta", "response_ref": "resp-b", "durable_ref": "dur-b", "observation": "accepted"}
+      ],
+      "expected_outcomes": ["UNKNOWN", "accepted", "accepted"],
+      "expected_history_outcomes": ["UNKNOWN", "accepted"]
+    },
+    {
+      "id": "S24-11-attempt2-response-ref-change",
+      "purpose": "attempt=1 UNKNOWN; attempt=2 replay changes response reference",
+      "arrivals": [
+        {"attempt": 1, "value": "alpha", "response_ref": "resp-a", "durable_ref": "dur-a", "observation": "UNKNOWN"},
+        {"attempt": 2, "value": "beta", "response_ref": "resp-b", "durable_ref": "dur-b", "observation": "accepted"},
+        {"attempt": 2, "value": "beta", "response_ref": "resp-c", "durable_ref": "dur-b", "observation": "accepted"}
+      ],
+      "expected_outcomes": ["UNKNOWN", "accepted", "rejected"],
+      "expected_history_outcomes": ["UNKNOWN", "accepted"]
+    },
+    {
+      "id": "S24-12-attempt2-durable-ref-change",
+      "purpose": "attempt=1 UNKNOWN; attempt=2 replay changes durable reference",
+      "arrivals": [
+        {"attempt": 1, "value": "alpha", "response_ref": "resp-a", "durable_ref": "dur-a", "observation": "UNKNOWN"},
+        {"attempt": 2, "value": "beta", "response_ref": "resp-b", "durable_ref": "dur-b", "observation": "accepted"},
+        {"attempt": 2, "value": "beta", "response_ref": "resp-b", "durable_ref": "dur-c", "observation": "accepted"}
+      ],
+      "expected_outcomes": ["UNKNOWN", "accepted", "rejected"],
+      "expected_history_outcomes": ["UNKNOWN", "accepted"]
+    },
+    {
+      "id": "S24-13-unknown-preserved-after-boundary",
+      "purpose": "after attempt=2 local record, a later exact attempt=1 arrival remains UNKNOWN",
+      "arrivals": [
+        {"attempt": 1, "value": "alpha", "response_ref": "resp-a", "durable_ref": "dur-a", "observation": "UNKNOWN"},
+        {"attempt": 2, "value": "beta", "response_ref": "resp-b", "durable_ref": "dur-b", "observation": "accepted"},
+        {"attempt": 1, "value": "alpha", "response_ref": "resp-a", "durable_ref": "dur-a", "observation": "UNKNOWN"}
+      ],
+      "expected_outcomes": ["UNKNOWN", "accepted", "UNKNOWN"],
+      "expected_history_outcomes": ["UNKNOWN", "accepted"]
+    },
+    {
+      "id": "S24-14-unknown-attempt2-replay",
+      "purpose": "UNKNOWN is also sticky for an independently recorded attempt=2",
+      "arrivals": [
+        {"attempt": 1, "value": "alpha", "response_ref": "resp-a", "durable_ref": "dur-a", "observation": "accepted"},
+        {"attempt": 2, "value": "beta", "response_ref": "resp-b", "durable_ref": "dur-b", "observation": "UNKNOWN"},
+        {"attempt": 2, "value": "beta", "response_ref": "resp-b", "durable_ref": "dur-b", "observation": "UNKNOWN"}
+      ],
+      "expected_outcomes": ["accepted", "UNKNOWN", "UNKNOWN"],
+      "expected_history_outcomes": ["accepted", "UNKNOWN"]
+    }
+  ]
+}

@@ -1,0 +1,154 @@
+{
+  "cases": [
+    {
+      "case_id": "C01-baseline-closed",
+      "classification": "VERIFIED_CONTINUITY",
+      "reason": "closed_membership_quorum_provenance_replay_and_effects",
+      "status": "RECOVERED"
+    },
+    {
+      "case_id": "C02-no-event",
+      "classification": "NO_EVENT",
+      "reason": "membership_epoch_closed;quorum_recomputed;quorum_satisfied;revocation_watermark_reached",
+      "status": "UNKNOWN"
+    },
+    {
+      "case_id": "C03-delayed-membership",
+      "classification": "DELAYED",
+      "reason": "membership_epoch_closed;revocation_watermark_reached;membership_not_converged",
+      "status": "UNKNOWN"
+    },
+    {
+      "case_id": "C04-dropped-revocation",
+      "classification": "DROPPED",
+      "reason": "revocation_watermark_reached",
+      "status": "UNKNOWN"
+    },
+    {
+      "case_id": "C05-exporter-failure",
+      "classification": "EXPORTER_FAILURE",
+      "reason": "crash_restart_closed;evidence_consistent",
+      "status": "UNKNOWN"
+    },
+    {
+      "case_id": "C06-query-gap",
+      "classification": "QUERY_GAP",
+      "reason": "bounded_replay_complete;query_gap",
+      "status": "UNKNOWN"
+    },
+    {
+      "case_id": "C07-retention-expired",
+      "classification": "RETENTION_EXPIRED",
+      "reason": "bounded_replay_complete;retention_expired",
+      "status": "UNKNOWN"
+    },
+    {
+      "case_id": "C08-quorum-split",
+      "classification": "UNKNOWN",
+      "reason": "quorum_satisfied;quorum_split",
+      "status": "UNKNOWN"
+    },
+    {
+      "case_id": "C09-equivocation-cross-region",
+      "classification": "UNKNOWN",
+      "reason": "hard_conflict_or_receipt_equivocation",
+      "status": "REJECT"
+    },
+    {
+      "case_id": "C10-delayed-revocation-confirmation",
+      "classification": "DELAYED",
+      "reason": "revocation_watermark_reached",
+      "status": "UNKNOWN"
+    },
+    {
+      "case_id": "C11-identity-reuse",
+      "classification": "UNKNOWN",
+      "reason": "identity_no_equivocation;identity_reuse_conflict",
+      "status": "UNKNOWN"
+    },
+    {
+      "case_id": "C12-late-old-member",
+      "classification": "UNKNOWN",
+      "reason": "membership_epoch_closed;evidence_consistent;late_old_member_evidence",
+      "status": "UNKNOWN"
+    },
+    {
+      "case_id": "C13-hard-conflict",
+      "classification": "UNKNOWN",
+      "reason": "hard_conflict_or_receipt_equivocation",
+      "status": "REJECT"
+    }
+  ],
+  "minimizer": {
+    "counterexamples": [
+      {
+        "blocked_gate": "membership_epoch_closed",
+        "minimal_faults": 1,
+        "status": "UNKNOWN"
+      },
+      {
+        "blocked_gate": "quorum_recomputed",
+        "minimal_faults": 1,
+        "status": "UNKNOWN"
+      },
+      {
+        "blocked_gate": "quorum_satisfied",
+        "minimal_faults": 1,
+        "status": "UNKNOWN"
+      },
+      {
+        "blocked_gate": "identity_no_equivocation",
+        "minimal_faults": 1,
+        "status": "UNKNOWN"
+      },
+      {
+        "blocked_gate": "revocation_watermark_reached",
+        "minimal_faults": 1,
+        "status": "UNKNOWN"
+      },
+      {
+        "blocked_gate": "bounded_replay_complete",
+        "minimal_faults": 1,
+        "status": "UNKNOWN"
+      },
+      {
+        "blocked_gate": "crash_restart_closed",
+        "minimal_faults": 1,
+        "status": "UNKNOWN"
+      },
+      {
+        "blocked_gate": "evidence_consistent",
+        "minimal_faults": 1,
+        "status": "UNKNOWN"
+      }
+    ],
+    "found": 8,
+    "requested_gates": 8
+  },
+  "production_verified": false,
+  "property_sweep": {
+    "combinations": 256,
+    "details": [],
+    "violations": 0
+  },
+  "schema_version": "S28.synthetic.results.v1",
+  "summary": {
+    "case_count": 13,
+    "coverage_labels": [
+      "DELAYED",
+      "DROPPED",
+      "EXPORTER_FAILURE",
+      "NO_EVENT",
+      "QUERY_GAP",
+      "RETENTION_EXPIRED",
+      "UNKNOWN",
+      "VERIFIED_CONTINUITY"
+    ],
+    "status_counts": {
+      "RECOVERED": 1,
+      "REJECT": 2,
+      "UNKNOWN": 10
+    }
+  },
+  "synthetic_only": true
+}

@@ -1,0 +1,22 @@
+{
+  "schema_version": "1.0",
+  "question": "Under synthetic offline evidence, when may cross-partition fence evidence and bounded replay pages establish trust continuity without overclaiming?",
+  "scope": {
+    "time_window": "2026-09-22; offline deterministic synthesis only",
+    "geography_or_context": "Cross-partition event evidence, fence epochs, bounded replay pagination",
+    "inclusions": ["cursor jumps", "overlapping pages", "same event_id payload conflicts", "retention boundaries", "fence merging", "out-of-order/duplicate/missing pages", "fence epoch continuity", "query gaps", "replay truncation", "NO_EVENT", "DELAYED", "DROPPED", "EXPORTER_FAILURE", "QUERY_GAP", "RETENTION_EXPIRED", "VERIFIED_CONTINUITY", "UNKNOWN"],
+    "exclusions": ["production services", "SDKs", "credentials", "production data", "network", "external effects"]
+  },
+  "synthetic_only": true,
+  "production_verified": false,
+  "sources_policy": "all claims sources=[]",
+  "claims": [
+    {"id":"C1","claim":"A cursor jump, missing page, query gap, replay truncation, incomplete retention window, or unmerged fence is insufficient for recovery and remains UNKNOWN.","status":"inferred","confidence":"medium","sources":[],"caveat":"Deterministic harness rule, not production evidence."},
+    {"id":"C2","claim":"A same-event payload conflict across partitions is an explicit irreconcilable contradiction and is REJECT.","status":"inferred","confidence":"medium","sources":[],"caveat":"Synthetic conflict policy only."},
+    {"id":"C3","claim":"A fence epoch fork is REJECT; contiguous merged fence epochs are necessary for RECOVERED.","status":"inferred","confidence":"medium","sources":[],"caveat":"Synthetic fence model only."},
+    {"id":"C4","claim":"Overlapping, duplicated, or out-of-order replay records can be tolerated only when deduplication and all closure gates remain satisfied.","status":"inferred","confidence":"medium","sources":[],"caveat":"No implementation or durability claim."},
+    {"id":"C5","claim":"RECOVERED is reserved for complete, internally consistent synthetic evidence; it does not establish production durability, exactly-once behavior, rollback, real external effects, or production readiness.","status":"inferred","confidence":"high","sources":[],"caveat":"Boundary statement by design."}
+  ],
+  "coverage": {"searched": [], "inaccessible": ["all external and production evidence by design"], "unresolved_conflicts": ["No production behavior inferred from synthetic fixtures"]},
+  "limitations": ["production durability", "exactly-once", "rollback", "real external effects", "production readiness"]
+}

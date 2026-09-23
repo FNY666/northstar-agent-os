@@ -1,0 +1,787 @@
+{
+  "cases": [
+    {
+      "evidence": [
+        "event/ingest timestamps存在",
+        "clock bound与有效期均已证明"
+      ],
+      "flags": {
+        "causal_time_consistent": true,
+        "clock_bound_attested": true,
+        "delay_bound_attested": true,
+        "event_time_present": true,
+        "expires_after_event": true,
+        "freshness_window_closed": true,
+        "identity_conflict": false,
+        "ingest_time_present": true,
+        "nonce_unique": true,
+        "not_before_satisfied": true,
+        "replay_conflict": false,
+        "replay_window_closed": true,
+        "revalidation_attested": true,
+        "same_identity": true,
+        "sequence_monotonic": true,
+        "temporal_conflict": false,
+        "time_source_independent": true,
+        "timestamp_order_valid": true,
+        "watermark_closed": true
+      },
+      "id": "complete-time-interval",
+      "label": "时间区间与顺序闭合",
+      "status": "RECOVERED"
+    },
+    {
+      "evidence": [
+        "独立time source给出skew上界",
+        "timestamp ordering在区间语义下成立"
+      ],
+      "flags": {
+        "causal_time_consistent": true,
+        "clock_bound_attested": true,
+        "delay_bound_attested": true,
+        "event_time_present": true,
+        "expires_after_event": true,
+        "freshness_window_closed": true,
+        "identity_conflict": false,
+        "ingest_time_present": true,
+        "nonce_unique": true,
+        "not_before_satisfied": true,
+        "replay_conflict": false,
+        "replay_window_closed": true,
+        "revalidation_attested": true,
+        "same_identity": true,
+        "sequence_monotonic": true,
+        "temporal_conflict": false,
+        "time_source_independent": true,
+        "timestamp_order_valid": true,
+        "watermark_closed": true
+      },
+      "id": "bounded-skew-attested",
+      "label": "有界时钟偏差已认证",
+      "status": "RECOVERED"
+    },
+    {
+      "evidence": [
+        "nonce唯一性可验证",
+        "replay watermark覆盖完整窗口"
+      ],
+      "flags": {
+        "causal_time_consistent": true,
+        "clock_bound_attested": true,
+        "delay_bound_attested": true,
+        "event_time_present": true,
+        "expires_after_event": true,
+        "freshness_window_closed": true,
+        "identity_conflict": false,
+        "ingest_time_present": true,
+        "nonce_unique": true,
+        "not_before_satisfied": true,
+        "replay_conflict": false,
+        "replay_window_closed": true,
+        "revalidation_attested": true,
+        "same_identity": true,
+        "sequence_monotonic": true,
+        "temporal_conflict": false,
+        "time_source_independent": true,
+        "timestamp_order_valid": true,
+        "watermark_closed": true
+      },
+      "id": "nonce-replay-closed",
+      "label": "nonce与重放窗口闭合",
+      "status": "RECOVERED"
+    },
+    {
+      "evidence": [
+        "延迟小于已认证上界",
+        "watermark已越过最大延迟"
+      ],
+      "flags": {
+        "causal_time_consistent": true,
+        "clock_bound_attested": true,
+        "delay_bound_attested": true,
+        "event_time_present": true,
+        "expires_after_event": true,
+        "freshness_window_closed": true,
+        "identity_conflict": false,
+        "ingest_time_present": true,
+        "nonce_unique": true,
+        "not_before_satisfied": true,
+        "replay_conflict": false,
+        "replay_window_closed": true,
+        "revalidation_attested": true,
+        "same_identity": true,
+        "sequence_monotonic": true,
+        "temporal_conflict": false,
+        "time_source_independent": true,
+        "timestamp_order_valid": true,
+        "watermark_closed": true
+      },
+      "id": "delayed-within-bound",
+      "label": "延迟到达仍在允许边界",
+      "status": "RECOVERED"
+    },
+    {
+      "evidence": [
+        "revalidation read-back在freshness窗口内",
+        "not-before/expiry均满足"
+      ],
+      "flags": {
+        "causal_time_consistent": true,
+        "clock_bound_attested": true,
+        "delay_bound_attested": true,
+        "event_time_present": true,
+        "expires_after_event": true,
+        "freshness_window_closed": true,
+        "identity_conflict": false,
+        "ingest_time_present": true,
+        "nonce_unique": true,
+        "not_before_satisfied": true,
+        "replay_conflict": false,
+        "replay_window_closed": true,
+        "revalidation_attested": true,
+        "same_identity": true,
+        "sequence_monotonic": true,
+        "temporal_conflict": false,
+        "time_source_independent": true,
+        "timestamp_order_valid": true,
+        "watermark_closed": true
+      },
+      "id": "revalidation-current",
+      "label": "重新验证时点仍有效",
+      "status": "RECOVERED"
+    },
+    {
+      "evidence": [
+        "sequence单调",
+        "因果时间约束与跨系统时钟区间不冲突"
+      ],
+      "flags": {
+        "causal_time_consistent": true,
+        "clock_bound_attested": true,
+        "delay_bound_attested": true,
+        "event_time_present": true,
+        "expires_after_event": true,
+        "freshness_window_closed": true,
+        "identity_conflict": false,
+        "ingest_time_present": true,
+        "nonce_unique": true,
+        "not_before_satisfied": true,
+        "replay_conflict": false,
+        "replay_window_closed": true,
+        "revalidation_attested": true,
+        "same_identity": true,
+        "sequence_monotonic": true,
+        "temporal_conflict": false,
+        "time_source_independent": true,
+        "timestamp_order_valid": true,
+        "watermark_closed": true
+      },
+      "id": "sequence-time-consistent",
+      "label": "序列与因果时间一致",
+      "status": "RECOVERED"
+    },
+    {
+      "evidence": [
+        "只有ingest time不能推出事件发生时间"
+      ],
+      "flags": {
+        "causal_time_consistent": true,
+        "clock_bound_attested": true,
+        "delay_bound_attested": true,
+        "event_time_present": false,
+        "expires_after_event": true,
+        "freshness_window_closed": true,
+        "identity_conflict": false,
+        "ingest_time_present": true,
+        "nonce_unique": true,
+        "not_before_satisfied": true,
+        "replay_conflict": false,
+        "replay_window_closed": true,
+        "revalidation_attested": true,
+        "same_identity": true,
+        "sequence_monotonic": true,
+        "temporal_conflict": false,
+        "time_source_independent": true,
+        "timestamp_order_valid": true,
+        "watermark_closed": true
+      },
+      "id": "event-time-missing",
+      "label": "event time 缺失",
+      "status": "UNKNOWN"
+    },
+    {
+      "evidence": [
+        "无法建立接收与延迟边界"
+      ],
+      "flags": {
+        "causal_time_consistent": true,
+        "clock_bound_attested": true,
+        "delay_bound_attested": true,
+        "event_time_present": true,
+        "expires_after_event": true,
+        "freshness_window_closed": true,
+        "identity_conflict": false,
+        "ingest_time_present": false,
+        "nonce_unique": true,
+        "not_before_satisfied": true,
+        "replay_conflict": false,
+        "replay_window_closed": true,
+        "revalidation_attested": true,
+        "same_identity": true,
+        "sequence_monotonic": true,
+        "temporal_conflict": false,
+        "time_source_independent": true,
+        "timestamp_order_valid": true,
+        "watermark_closed": true
+      },
+      "id": "ingest-time-missing",
+      "label": "ingest time 缺失",
+      "status": "UNKNOWN"
+    },
+    {
+      "evidence": [
+        "没有可信clock skew上界"
+      ],
+      "flags": {
+        "causal_time_consistent": true,
+        "clock_bound_attested": false,
+        "delay_bound_attested": true,
+        "event_time_present": true,
+        "expires_after_event": true,
+        "freshness_window_closed": true,
+        "identity_conflict": false,
+        "ingest_time_present": true,
+        "nonce_unique": true,
+        "not_before_satisfied": true,
+        "replay_conflict": false,
+        "replay_window_closed": true,
+        "revalidation_attested": true,
+        "same_identity": true,
+        "sequence_monotonic": true,
+        "temporal_conflict": false,
+        "time_source_independent": true,
+        "timestamp_order_valid": true,
+        "watermark_closed": true
+      },
+      "id": "clock-bound-missing",
+      "label": "时钟偏差无界",
+      "status": "UNKNOWN"
+    },
+    {
+      "evidence": [
+        "timestamp区间重叠，不能确定先后"
+      ],
+      "flags": {
+        "causal_time_consistent": true,
+        "clock_bound_attested": true,
+        "delay_bound_attested": true,
+        "event_time_present": true,
+        "expires_after_event": true,
+        "freshness_window_closed": true,
+        "identity_conflict": false,
+        "ingest_time_present": true,
+        "nonce_unique": true,
+        "not_before_satisfied": true,
+        "replay_conflict": false,
+        "replay_window_closed": true,
+        "revalidation_attested": true,
+        "same_identity": true,
+        "sequence_monotonic": true,
+        "temporal_conflict": false,
+        "time_source_independent": true,
+        "timestamp_order_valid": false,
+        "watermark_closed": true
+      },
+      "id": "timestamp-order-unknown",
+      "label": "时间顺序无法确定",
+      "status": "UNKNOWN"
+    },
+    {
+      "evidence": [
+        "无法证明签名/事件在生效时间之后"
+      ],
+      "flags": {
+        "causal_time_consistent": true,
+        "clock_bound_attested": true,
+        "delay_bound_attested": true,
+        "event_time_present": true,
+        "expires_after_event": true,
+        "freshness_window_closed": true,
+        "identity_conflict": false,
+        "ingest_time_present": true,
+        "nonce_unique": true,
+        "not_before_satisfied": false,
+        "replay_conflict": false,
+        "replay_window_closed": true,
+        "revalidation_attested": true,
+        "same_identity": true,
+        "sequence_monotonic": true,
+        "temporal_conflict": false,
+        "time_source_independent": true,
+        "timestamp_order_valid": true,
+        "watermark_closed": true
+      },
+      "id": "not-before-unknown",
+      "label": "not-before 未满足或未知",
+      "status": "UNKNOWN"
+    },
+    {
+      "evidence": [
+        "无法证明事件发生时凭证仍未过期"
+      ],
+      "flags": {
+        "causal_time_consistent": true,
+        "clock_bound_attested": true,
+        "delay_bound_attested": true,
+        "event_time_present": true,
+        "expires_after_event": false,
+        "freshness_window_closed": true,
+        "identity_conflict": false,
+        "ingest_time_present": true,
+        "nonce_unique": true,
+        "not_before_satisfied": true,
+        "replay_conflict": false,
+        "replay_window_closed": true,
+        "revalidation_attested": true,
+        "same_identity": true,
+        "sequence_monotonic": true,
+        "temporal_conflict": false,
+        "time_source_independent": true,
+        "timestamp_order_valid": true,
+        "watermark_closed": true
+      },
+      "id": "expiry-unknown",
+      "label": "expiry 边界未知",
+      "status": "UNKNOWN"
+    },
+    {
+      "evidence": [
+        "当前读回可能已过期"
+      ],
+      "flags": {
+        "causal_time_consistent": true,
+        "clock_bound_attested": true,
+        "delay_bound_attested": true,
+        "event_time_present": true,
+        "expires_after_event": true,
+        "freshness_window_closed": false,
+        "identity_conflict": false,
+        "ingest_time_present": true,
+        "nonce_unique": true,
+        "not_before_satisfied": true,
+        "replay_conflict": false,
+        "replay_window_closed": true,
+        "revalidation_attested": true,
+        "same_identity": true,
+        "sequence_monotonic": true,
+        "temporal_conflict": false,
+        "time_source_independent": true,
+        "timestamp_order_valid": true,
+        "watermark_closed": true
+      },
+      "id": "freshness-open",
+      "label": "freshness 窗口未闭合",
+      "status": "UNKNOWN"
+    },
+    {
+      "evidence": [
+        "nonce重复但缺少足够证据判定是重放还是合法重试"
+      ],
+      "flags": {
+        "causal_time_consistent": true,
+        "clock_bound_attested": true,
+        "delay_bound_attested": true,
+        "event_time_present": true,
+        "expires_after_event": true,
+        "freshness_window_closed": true,
+        "identity_conflict": false,
+        "ingest_time_present": true,
+        "nonce_unique": false,
+        "not_before_satisfied": true,
+        "replay_conflict": false,
+        "replay_window_closed": true,
+        "revalidation_attested": true,
+        "same_identity": true,
+        "sequence_monotonic": true,
+        "temporal_conflict": false,
+        "time_source_independent": true,
+        "timestamp_order_valid": true,
+        "watermark_closed": true
+      },
+      "id": "nonce-reused",
+      "label": "nonce 重复",
+      "status": "UNKNOWN"
+    },
+    {
+      "evidence": [
+        "仍有未查询到的窗口片段"
+      ],
+      "flags": {
+        "causal_time_consistent": true,
+        "clock_bound_attested": true,
+        "delay_bound_attested": true,
+        "event_time_present": true,
+        "expires_after_event": true,
+        "freshness_window_closed": true,
+        "identity_conflict": false,
+        "ingest_time_present": true,
+        "nonce_unique": true,
+        "not_before_satisfied": true,
+        "replay_conflict": false,
+        "replay_window_closed": false,
+        "revalidation_attested": true,
+        "same_identity": true,
+        "sequence_monotonic": true,
+        "temporal_conflict": false,
+        "time_source_independent": true,
+        "timestamp_order_valid": true,
+        "watermark_closed": true
+      },
+      "id": "replay-window-open",
+      "label": "重放窗口未闭合",
+      "status": "UNKNOWN"
+    },
+    {
+      "evidence": [
+        "sequence跳变无法区分丢失与乱序"
+      ],
+      "flags": {
+        "causal_time_consistent": true,
+        "clock_bound_attested": true,
+        "delay_bound_attested": true,
+        "event_time_present": true,
+        "expires_after_event": true,
+        "freshness_window_closed": true,
+        "identity_conflict": false,
+        "ingest_time_present": true,
+        "nonce_unique": true,
+        "not_before_satisfied": true,
+        "replay_conflict": false,
+        "replay_window_closed": true,
+        "revalidation_attested": true,
+        "same_identity": true,
+        "sequence_monotonic": false,
+        "temporal_conflict": false,
+        "time_source_independent": true,
+        "timestamp_order_valid": true,
+        "watermark_closed": true
+      },
+      "id": "sequence-gap",
+      "label": "时间序列跳变",
+      "status": "UNKNOWN"
+    },
+    {
+      "evidence": [
+        "仍可能有迟到事件进入窗口"
+      ],
+      "flags": {
+        "causal_time_consistent": true,
+        "clock_bound_attested": true,
+        "delay_bound_attested": true,
+        "event_time_present": true,
+        "expires_after_event": true,
+        "freshness_window_closed": true,
+        "identity_conflict": false,
+        "ingest_time_present": true,
+        "nonce_unique": true,
+        "not_before_satisfied": true,
+        "replay_conflict": false,
+        "replay_window_closed": true,
+        "revalidation_attested": true,
+        "same_identity": true,
+        "sequence_monotonic": true,
+        "temporal_conflict": false,
+        "time_source_independent": true,
+        "timestamp_order_valid": true,
+        "watermark_closed": false
+      },
+      "id": "watermark-open",
+      "label": "时间水位未闭合",
+      "status": "UNKNOWN"
+    },
+    {
+      "evidence": [
+        "不能证明当前未见事件是未发生"
+      ],
+      "flags": {
+        "causal_time_consistent": true,
+        "clock_bound_attested": true,
+        "delay_bound_attested": false,
+        "event_time_present": true,
+        "expires_after_event": true,
+        "freshness_window_closed": true,
+        "identity_conflict": false,
+        "ingest_time_present": true,
+        "nonce_unique": true,
+        "not_before_satisfied": true,
+        "replay_conflict": false,
+        "replay_window_closed": true,
+        "revalidation_attested": true,
+        "same_identity": true,
+        "sequence_monotonic": true,
+        "temporal_conflict": false,
+        "time_source_independent": true,
+        "timestamp_order_valid": true,
+        "watermark_closed": true
+      },
+      "id": "delay-bound-missing",
+      "label": "延迟上界未认证",
+      "status": "UNKNOWN"
+    },
+    {
+      "evidence": [
+        "观察到时间异常但缺少完整因果链"
+      ],
+      "flags": {
+        "causal_time_consistent": false,
+        "clock_bound_attested": true,
+        "delay_bound_attested": true,
+        "event_time_present": true,
+        "expires_after_event": true,
+        "freshness_window_closed": true,
+        "identity_conflict": false,
+        "ingest_time_present": true,
+        "nonce_unique": true,
+        "not_before_satisfied": true,
+        "replay_conflict": false,
+        "replay_window_closed": true,
+        "revalidation_attested": true,
+        "same_identity": true,
+        "sequence_monotonic": true,
+        "temporal_conflict": false,
+        "time_source_independent": true,
+        "timestamp_order_valid": true,
+        "watermark_closed": true
+      },
+      "id": "causal-time-conflict-unknown",
+      "label": "因果时间证据不足",
+      "status": "UNKNOWN"
+    },
+    {
+      "evidence": [
+        "旧的有效性证据不能覆盖当前读取时点"
+      ],
+      "flags": {
+        "causal_time_consistent": true,
+        "clock_bound_attested": true,
+        "delay_bound_attested": true,
+        "event_time_present": true,
+        "expires_after_event": true,
+        "freshness_window_closed": true,
+        "identity_conflict": false,
+        "ingest_time_present": true,
+        "nonce_unique": true,
+        "not_before_satisfied": true,
+        "replay_conflict": false,
+        "replay_window_closed": true,
+        "revalidation_attested": false,
+        "same_identity": true,
+        "sequence_monotonic": true,
+        "temporal_conflict": false,
+        "time_source_independent": true,
+        "timestamp_order_valid": true,
+        "watermark_closed": true
+      },
+      "id": "revalidation-missing",
+      "label": "重新验证缺失",
+      "status": "UNKNOWN"
+    },
+    {
+      "evidence": [
+        "多个时钟可能共享同一错误源"
+      ],
+      "flags": {
+        "causal_time_consistent": true,
+        "clock_bound_attested": true,
+        "delay_bound_attested": true,
+        "event_time_present": true,
+        "expires_after_event": true,
+        "freshness_window_closed": true,
+        "identity_conflict": false,
+        "ingest_time_present": true,
+        "nonce_unique": true,
+        "not_before_satisfied": true,
+        "replay_conflict": false,
+        "replay_window_closed": true,
+        "revalidation_attested": true,
+        "same_identity": true,
+        "sequence_monotonic": true,
+        "temporal_conflict": false,
+        "time_source_independent": false,
+        "timestamp_order_valid": true,
+        "watermark_closed": true
+      },
+      "id": "time-source-correlated",
+      "label": "时间源不独立",
+      "status": "UNKNOWN"
+    },
+    {
+      "evidence": [
+        "tenant/source/event_id/epoch字段不完整"
+      ],
+      "flags": {
+        "causal_time_consistent": true,
+        "clock_bound_attested": true,
+        "delay_bound_attested": true,
+        "event_time_present": true,
+        "expires_after_event": true,
+        "freshness_window_closed": true,
+        "identity_conflict": false,
+        "ingest_time_present": true,
+        "nonce_unique": true,
+        "not_before_satisfied": true,
+        "replay_conflict": false,
+        "replay_window_closed": true,
+        "revalidation_attested": true,
+        "same_identity": false,
+        "sequence_monotonic": true,
+        "temporal_conflict": false,
+        "time_source_independent": true,
+        "timestamp_order_valid": true,
+        "watermark_closed": true
+      },
+      "id": "identity-unresolved",
+      "label": "身份域无法确定",
+      "status": "UNKNOWN"
+    },
+    {
+      "evidence": [
+        "tenant或source明确不同"
+      ],
+      "flags": {
+        "causal_time_consistent": true,
+        "clock_bound_attested": true,
+        "delay_bound_attested": true,
+        "event_time_present": true,
+        "expires_after_event": true,
+        "freshness_window_closed": true,
+        "identity_conflict": true,
+        "ingest_time_present": true,
+        "nonce_unique": true,
+        "not_before_satisfied": true,
+        "replay_conflict": false,
+        "replay_window_closed": true,
+        "revalidation_attested": true,
+        "same_identity": false,
+        "sequence_monotonic": true,
+        "temporal_conflict": false,
+        "time_source_independent": true,
+        "timestamp_order_valid": true,
+        "watermark_closed": true
+      },
+      "id": "identity-conflict",
+      "label": "跨身份域合并",
+      "status": "REJECT"
+    },
+    {
+      "evidence": [
+        "同一身份和epoch给出互斥有效期/时间顺序"
+      ],
+      "flags": {
+        "causal_time_consistent": true,
+        "clock_bound_attested": true,
+        "delay_bound_attested": true,
+        "event_time_present": true,
+        "expires_after_event": true,
+        "freshness_window_closed": true,
+        "identity_conflict": false,
+        "ingest_time_present": true,
+        "nonce_unique": true,
+        "not_before_satisfied": true,
+        "replay_conflict": false,
+        "replay_window_closed": true,
+        "revalidation_attested": true,
+        "same_identity": true,
+        "sequence_monotonic": true,
+        "temporal_conflict": true,
+        "time_source_independent": true,
+        "timestamp_order_valid": true,
+        "watermark_closed": true
+      },
+      "id": "temporal-conflict",
+      "label": "不可调和时间声明",
+      "status": "REJECT"
+    },
+    {
+      "evidence": [
+        "同一nonce在互斥上下文中被再次接受"
+      ],
+      "flags": {
+        "causal_time_consistent": true,
+        "clock_bound_attested": true,
+        "delay_bound_attested": true,
+        "event_time_present": true,
+        "expires_after_event": true,
+        "freshness_window_closed": true,
+        "identity_conflict": false,
+        "ingest_time_present": true,
+        "nonce_unique": false,
+        "not_before_satisfied": true,
+        "replay_conflict": true,
+        "replay_window_closed": true,
+        "revalidation_attested": true,
+        "same_identity": true,
+        "sequence_monotonic": true,
+        "temporal_conflict": false,
+        "time_source_independent": true,
+        "timestamp_order_valid": true,
+        "watermark_closed": true
+      },
+      "id": "replay-conflict",
+      "label": "重放与唯一性冲突",
+      "status": "REJECT"
+    },
+    {
+      "evidence": [
+        "not-before与expiry区间为空"
+      ],
+      "flags": {
+        "causal_time_consistent": true,
+        "clock_bound_attested": true,
+        "delay_bound_attested": true,
+        "event_time_present": true,
+        "expires_after_event": false,
+        "freshness_window_closed": true,
+        "identity_conflict": false,
+        "ingest_time_present": true,
+        "nonce_unique": true,
+        "not_before_satisfied": false,
+        "replay_conflict": false,
+        "replay_window_closed": true,
+        "revalidation_attested": true,
+        "same_identity": true,
+        "sequence_monotonic": true,
+        "temporal_conflict": true,
+        "time_source_independent": true,
+        "timestamp_order_valid": true,
+        "watermark_closed": true
+      },
+      "id": "not-before-after-expiry",
+      "label": "生效时间晚于失效时间",
+      "status": "REJECT"
+    }
+  ],
+  "identity_domain": [
+    "tenant",
+    "source",
+    "event_id",
+    "epoch",
+    "version"
+  ],
+  "production_verified": false,
+  "schema_version": "S37-cases-1",
+  "synthetic_only": true,
+  "temporal_domain": [
+    "event_time",
+    "ingest_time",
+    "clock_bound",
+    "not_before",
+    "expiry",
+    "freshness",
+    "nonce",
+    "replay_window",
+    "sequence",
+    "watermark",
+    "revalidation"
+  ]
+}

@@ -1,0 +1,103 @@
+{
+  "schema_version": "1.0",
+  "question": "Within the official public google-gemini/gemini-cli materials, what are the boundaries of persistence auditability for session write ordering and atomicity, checkpoint/rewind partial writes and recovery, telemetry export/flush/shutdown durability, MessageBus persistence, and whether logs/OTel can reconstruct approval chains and tool side effects?",
+  "scope": {
+    "product": "google-gemini/gemini-cli",
+    "repository": "https://github.com/google-gemini/gemini-cli",
+    "commit": "d5b3e3accb26000d273abf16e0f1dd83aa5428a9",
+    "source_policy": "Official public GitHub documentation, source, and tests only; no full clone.",
+    "accessed": "2026-09-22",
+    "excluded": ["shared/P0", "accident directories", "D10/L12/D14", "canonical", "140", "tri-line", "systemd", "real services", "credentials", "S4-S11 directories"]
+  },
+  "claims": [
+    {
+      "id": "S12-C1",
+      "claim": "The normal session JSONL path appends a message before updating the in-memory conversation, then appends metadata updates.",
+      "status": "confirmed",
+      "confidence": "high",
+      "caveat": "Node appendFileSync completion is not an fsync or device-power-loss durability guarantee.",
+      "sources": [
+        {"url": "https://github.com/google-gemini/gemini-cli/blob/d5b3e3accb26000d273abf16e0f1dd83aa5428a9/packages/core/src/services/chatRecordingService.ts", "publisher": "Google Gemini CLI official GitHub repository", "published_or_updated": "2026-09-22 (accessed fixed commit)", "tier": "primary", "support": "pushMessage calls appendRecord before mutating cachedConversation; recordMessage then calls updateMetadata.", "accessed": "2026-09-22", "evidence_level": "A"}
+      ]
+    },
+    {
+      "id": "S12-C2",
+      "claim": "The unreadable-session rewrite path uses a temporary file and rename, and attempts to preserve the old file as an unreadable backup.",
+      "status": "confirmed",
+      "confidence": "high",
+      "caveat": "No file fsync or parent-directory fsync is shown; crash/power-loss durability and always-available recovery remain unknown.",
+      "sources": [
+        {"url": "https://github.com/google-gemini/gemini-cli/blob/d5b3e3accb26000d273abf16e0f1dd83aa5428a9/packages/core/src/services/chatRecordingService.ts", "publisher": "Google Gemini CLI official GitHub repository", "published_or_updated": "2026-09-22 (accessed fixed commit)", "tier": "primary", "support": "rewriteConversationFile renames an existing unreadable file, writes a process-specific temp file, then renames the temp file into place.", "accessed": "2026-09-22", "evidence_level": "A"}
+      ]
+    },
+    {
+      "id": "S12-C3",
+      "claim": "The implementation does not prove transactional or low-loss behavior for interrupted session/summary appends, truncated JSONL tails, or multi-process races.",
+      "status": "unverified",
+      "confidence": "high",
+      "caveat": "This is a boundary conclusion from the visible write paths and tests, not a claim that every interruption loses data.",
+      "sources": [
+        {"url": "https://github.com/google-gemini/gemini-cli/blob/d5b3e3accb26000d273abf16e0f1dd83aa5428a9/packages/core/src/services/chatRecordingService.ts", "publisher": "Google Gemini CLI official GitHub repository", "published_or_updated": "2026-09-22 (accessed fixed commit)", "tier": "primary", "support": "Session writes use appendFileSync and recovery parses JSONL line by line; no transaction, checksum, or fsync is visible.", "accessed": "2026-09-22", "evidence_level": "A"},
+        {"url": "https://github.com/google-gemini/gemini-cli/blob/d5b3e3accb26000d273abf16e0f1dd83aa5428a9/packages/core/src/services/sessionSummaryUtils.ts", "publisher": "Google Gemini CLI official GitHub repository", "published_or_updated": "2026-09-22 (accessed fixed commit)", "tier": "primary", "support": "JSONL summary metadata uses fs.appendFile; no atomic transaction or fsync is visible.", "accessed": "2026-09-22", "evidence_level": "A"}
+      ]
+    },
+    {
+      "id": "S12-C4",
+      "claim": "No independently durable checkpoint creation/recovery protocol was confirmed in the scoped official source; rewind is an appended marker interpreted during load.",
+      "status": "unverified",
+      "confidence": "medium",
+      "caveat": "The negative finding is limited to the fixed commit and scoped public-source search; it does not prove no checkpoint exists anywhere in the project history.",
+      "sources": [
+        {"url": "https://github.com/google-gemini/gemini-cli/blob/d5b3e3accb26000d273abf16e0f1dd83aa5428a9/packages/core/src/services/chatRecordingService.ts", "publisher": "Google Gemini CLI official GitHub repository", "published_or_updated": "2026-09-22 (accessed fixed commit)", "tier": "primary", "support": "loadConversationRecord handles $rewindTo records while rewindTo appends a rewind marker; no checkpoint transaction is shown in this path.", "accessed": "2026-09-22", "evidence_level": "A"}
+      ]
+    },
+    {
+      "id": "S12-C5",
+      "claim": "File telemetry forceFlush and shutdown wait for Node stream queue/end operations, but durable export, immutable storage, or low-loss export is not proven.",
+      "status": "unverified",
+      "confidence": "high",
+      "caveat": "Remote OTLP/collector persistence and operating-system storage behavior were not evaluated and cannot be inferred from these application callbacks.",
+      "sources": [
+        {"url": "https://github.com/google-gemini/gemini-cli/blob/d5b3e3accb26000d273abf16e0f1dd83aa5428a9/packages/core/src/telemetry/file-exporters.ts", "publisher": "Google Gemini CLI official GitHub repository", "published_or_updated": "2026-09-22 (accessed fixed commit)", "tier": "primary", "support": "FileExporter uses append-mode WriteStream; forceFlush queues an empty write callback; shutdown calls end.", "accessed": "2026-09-22", "evidence_level": "A"},
+        {"url": "https://github.com/google-gemini/gemini-cli/blob/d5b3e3accb26000d273abf16e0f1dd83aa5428a9/packages/core/src/telemetry/sdk.ts", "publisher": "Google Gemini CLI official GitHub repository", "published_or_updated": "2026-09-22 (accessed fixed commit)", "tier": "primary", "support": "SDK flushTelemetry calls processor forceFlush and shutdownTelemetry calls sdk.shutdown.", "accessed": "2026-09-22", "evidence_level": "A"}
+      ]
+    },
+    {
+      "id": "S12-C6",
+      "claim": "MessageBus publish is in-memory EventEmitter dispatch and MessageBus itself does not persist events.",
+      "status": "confirmed",
+      "confidence": "high",
+      "caveat": "A subscriber may separately log or persist an event; that is outside MessageBus and was not treated as automatic bus persistence.",
+      "sources": [
+        {"url": "https://github.com/google-gemini/gemini-cli/blob/d5b3e3accb26000d273abf16e0f1dd83aa5428a9/packages/core/src/confirmation-bus/message-bus.ts", "publisher": "Google Gemini CLI official GitHub repository", "published_or_updated": "2026-09-22 (accessed fixed commit)", "tier": "primary", "support": "MessageBus extends EventEmitter and publish emits messages after policy handling; no file/database/journal operation is present.", "accessed": "2026-09-22", "evidence_level": "A"}
+      ]
+    },
+    {
+      "id": "S12-C7",
+      "claim": "Logs/OTel expose tool-call decision/success/duration and related API/rewind event paths, but are not proven sufficient to reconstruct a complete approval chain and tool side effects.",
+      "status": "unverified",
+      "confidence": "high",
+      "caveat": "Async batching, exporter failure, event omission, truncation/masking, missing causal binding, and lack of an independent side-effect ledger prevent a complete-reconstruction claim.",
+      "sources": [
+        {"url": "https://github.com/google-gemini/gemini-cli/blob/d5b3e3accb26000d273abf16e0f1dd83aa5428a9/packages/core/src/telemetry/loggers.ts", "publisher": "Google Gemini CLI official GitHub repository", "published_or_updated": "2026-09-22 (accessed fixed commit)", "tier": "primary", "support": "logToolCall emits tool-call attributes/metrics including decision and success; API response and rewind log paths also exist.", "accessed": "2026-09-22", "evidence_level": "A"},
+        {"url": "https://github.com/google-gemini/gemini-cli/blob/d5b3e3accb26000d273abf16e0f1dd83aa5428a9/packages/core/src/telemetry/semantic.ts", "publisher": "Google Gemini CLI official GitHub repository", "published_or_updated": "2026-09-22 (accessed fixed commit)", "tier": "primary", "support": "Semantic tool-call and tool-call-response event definitions establish schemas, not durable completeness or side-effect proof.", "accessed": "2026-09-22", "evidence_level": "A"}
+      ]
+    },
+    {
+      "id": "S12-C8",
+      "claim": "The scoped implementation does not prove session/log records are immutable, complete, or low-loss audit records.",
+      "status": "unverified",
+      "confidence": "high",
+      "caveat": "Append mode, backups, and OTel schemas do not by themselves establish hash chaining, signatures, WORM storage, transactions, or a side-effect ledger.",
+      "sources": [
+        {"url": "https://github.com/google-gemini/gemini-cli/blob/d5b3e3accb26000d273abf16e0f1dd83aa5428a9/packages/core/src/services/chatRecordingService.ts", "publisher": "Google Gemini CLI official GitHub repository", "published_or_updated": "2026-09-22 (accessed fixed commit)", "tier": "primary", "support": "Visible session persistence is mutable JSONL with append and rewrite paths and no hash/signature/WORM mechanism.", "accessed": "2026-09-22", "evidence_level": "A"},
+        {"url": "https://github.com/google-gemini/gemini-cli/blob/d5b3e3accb26000d273abf16e0f1dd83aa5428a9/packages/core/src/telemetry/file-exporters.ts", "publisher": "Google Gemini CLI official GitHub repository", "published_or_updated": "2026-09-22 (accessed fixed commit)", "tier": "primary", "support": "File telemetry is append-mode stream output with no visible fsync, hash chain, signature, or immutable backend.", "accessed": "2026-09-22", "evidence_level": "A"}
+      ]
+    }
+  ],
+  "coverage": {
+    "covered": ["session JSONL ordering", "temp+rename rewrite", "JSONL recovery/rewind", "summary append", "file telemetry exporter flush/shutdown", "SDK telemetry lifecycle", "MessageBus", "tool-call/API/rewind telemetry fields"],
+    "unknown_or_not_proven": ["power-loss/crash consistency", "fsync and directory fsync", "multi-process atomicity", "independent checkpoint protocol", "collector-side durability", "complete approval-to-side-effect linkage", "WORM/signature/hash-chain immutability", "complete/low-loss audit reconstruction"],
+    "not_accessed": ["private accounts", "credentials", "real services", "shared/P0 and prohibited directories", "S4-S11 directories", "full repository clone"]
+  }
+}

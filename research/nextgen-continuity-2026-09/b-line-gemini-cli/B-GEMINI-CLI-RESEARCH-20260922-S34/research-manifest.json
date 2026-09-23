@@ -1,0 +1,51 @@
+{
+  "schema_version": "1.0",
+  "question": "在完全离线的单 worker 确定性合成规则中，多 ack、跨 op 引用、epoch 间乱序及批次局部异常如何组合判定？",
+  "scope": {
+    "synthetic_only": true,
+    "production_verified": false,
+    "operations": ["P", "Q", "R", "X"],
+    "epochs": [1, 2, 3, 4],
+    "fixture_count": 24,
+    "network_access": false,
+    "excluded": ["S27-S33", "既有研究产物", "真实 Gemini CLI/服务", "credentials", "shared/P0", "事故目录", "D10/L12/D14", "canonical/staging/140/tri-line/systemd"]
+  },
+  "claims": [
+    {
+      "id": "S34-C1",
+      "claim": "同一 op 的一致多 ack 可在本地规则中判定为对应 accepted 或 rejected；accepted/rejected 冲突只影响该 op，并按本规则判 rejected。",
+      "status": "inferred",
+      "confidence": 0.99,
+      "sources": [],
+      "caveat": "仅由本目录合成 fixtures 与 evaluator 规则推导；UNKNOWN/不可验证证据不被强制转为 rejected。"
+    },
+    {
+      "id": "S34-C2",
+      "claim": "跨 op 文本引用不提供被引用 op 的自身可访问证据；epoch 标签决定事件归属，乱序到达本身不升级或降级；无法归属的事件为 UNKNOWN。",
+      "status": "inferred",
+      "confidence": 0.99,
+      "sources": [],
+      "caveat": "仅适用于 synthetic-only、epoch 1–4 的本地判定模型；不代表远端或生产系统语义。"
+    },
+    {
+      "id": "S34-C3",
+      "claim": "同 op/epoch/batch 重复批次不产生新证据；批次内缺失与显式批次撤销保持局部影响，其他批次与其他 op 不整批传染。",
+      "status": "inferred",
+      "confidence": 0.99,
+      "sources": [],
+      "caveat": "这是合成规则测试结论；不证明 exactly-once、rollback、durability 或 production readiness。"
+    }
+  ],
+  "coverage": {
+    "multi_ack_consistent": true,
+    "multi_ack_conflicting": true,
+    "cross_op_reference": true,
+    "epoch_reordering": true,
+    "unassignable_epoch": true,
+    "duplicate_batch": true,
+    "partial_missing_events": true,
+    "batch_revocation": true,
+    "undeclared_operation": true,
+    "four_or_more_epochs": true
+  }
+}

@@ -1,0 +1,26 @@
+{
+  "combinations": 1024,
+  "evidence_tiers": {
+    "E1": "direct contract/negative proof",
+    "E2": "platform/audit/request evidence",
+    "E3": "independent external readback/postcondition"
+  },
+  "invariants": "PASS",
+  "items": 10,
+  "negative_readback_case": {
+    "item_2": "UNKNOWN"
+  },
+  "positive_case": {
+    "1": "VERIFIED",
+    "10": "CONDITIONAL",
+    "2": "VERIFIED",
+    "3": "VERIFIED",
+    "4": "VERIFIED",
+    "5": "UNKNOWN",
+    "6": "UNKNOWN",
+    "7": "VERIFIED",
+    "8": "VERIFIED",
+    "9": "VERIFIED"
+  },
+  "real_production_acceptance": "NO_GO_UNTIL_E3_AND_D1_AND_TRUST_GATES"
+}

@@ -1,0 +1,316 @@
+{
+  "case_count": 24,
+  "fixture_digest": "e257d2258bfbbae2f204f75c1cc18501630b717236e16a414f24bdabae697d72",
+  "production_verified": false,
+  "results": [
+    {
+      "classifications": [
+        "VERIFIED_CONTINUITY"
+      ],
+      "id": "S22-01-complete",
+      "input_digest": "70877be7f5a86d869adc9650a9b69e64fcd3e578f3c275af0157ea1ce473bd11",
+      "reasons": [],
+      "state": "RECOVERED"
+    },
+    {
+      "classifications": [
+        "NO_EVENT",
+        "QUERY_GAP"
+      ],
+      "id": "S22-02-missing-page",
+      "input_digest": "d50a44167165935efedd54718d878fadc5ab473a261d17df2eaa16e19cb2edfb",
+      "reasons": [
+        "INCOMPLETE_SNAPSHOT",
+        "MISSING_PAGE",
+        "MISSING_SHARD"
+      ],
+      "state": "UNKNOWN"
+    },
+    {
+      "classifications": [
+        "NO_EVENT",
+        "QUERY_GAP"
+      ],
+      "id": "S22-03-missing-shard",
+      "input_digest": "fc7a984688cd5eeb1b669af5e2442bf49673bf39078813b2dbd5644aa5364553",
+      "reasons": [
+        "MISSING_SHARD"
+      ],
+      "state": "UNKNOWN"
+    },
+    {
+      "classifications": [
+        "UNKNOWN"
+      ],
+      "id": "S22-04-version-drift",
+      "input_digest": "31ed15958484ad8ef950bef4d5c955b901e9aecf4ebad7a1e42c1c1f8bd7eade",
+      "reasons": [
+        "VERSION_DRIFT"
+      ],
+      "state": "REJECT"
+    },
+    {
+      "classifications": [
+        "VERIFIED_CONTINUITY"
+      ],
+      "id": "S22-05-duplicate-order",
+      "input_digest": "3003f9204f350fad68a0fb05db98cae0720f91e5cc2c831a4bc6ae527f4a9cf5",
+      "reasons": [],
+      "state": "RECOVERED"
+    },
+    {
+      "classifications": [
+        "UNKNOWN"
+      ],
+      "id": "S22-06-duplicate-conflict",
+      "input_digest": "cba6e2cab125e1654f437d1f5ab56d0c8e5280d563b5d7ef166461a958c1dfb2",
+      "reasons": [
+        "DUPLICATE_CONFLICT",
+        "EXTERNAL_EFFECT_NOT_CONFIRMED:e1",
+        "LOG_NOT_PRESENT:e1",
+        "PLATFORM_RECEIPT_NOT_ACCEPTED:e1"
+      ],
+      "state": "REJECT"
+    },
+    {
+      "classifications": [
+        "QUERY_GAP",
+        "UNKNOWN"
+      ],
+      "id": "S22-07-checkpoint-gap",
+      "input_digest": "7119f049745ce7b25f1dacaf7703508514ea1214e8d942df86d0f2dacbb81258",
+      "reasons": [
+        "EXTERNAL_EFFECT_NOT_CONFIRMED:e4",
+        "LOG_NOT_PRESENT:e4",
+        "PLATFORM_RECEIPT_NOT_ACCEPTED:e4",
+        "SEQUENCE_GAP"
+      ],
+      "state": "UNKNOWN"
+    },
+    {
+      "classifications": [
+        "UNKNOWN"
+      ],
+      "id": "S22-08-boundary-before",
+      "input_digest": "ad448b62f978419102f1063dc33a459baacf40280122ffaafdd2ee60d5dc80ac",
+      "reasons": [
+        "BOUNDARY_OUTSIDE_BEFORE",
+        "EXTERNAL_EFFECT_NOT_CONFIRMED:e1",
+        "LOG_NOT_PRESENT:e1",
+        "PLATFORM_RECEIPT_NOT_ACCEPTED:e1"
+      ],
+      "state": "REJECT"
+    },
+    {
+      "classifications": [
+        "UNKNOWN"
+      ],
+      "id": "S22-09-boundary-after",
+      "input_digest": "32ccd35ccb28bd86b9a71dba9a9dd12afc602deb421f263ecdd029b961f8797b",
+      "reasons": [
+        "BOUNDARY_OUTSIDE_AFTER",
+        "EXTERNAL_EFFECT_NOT_CONFIRMED:e1",
+        "LOG_NOT_PRESENT:e1",
+        "PLATFORM_RECEIPT_NOT_ACCEPTED:e1"
+      ],
+      "state": "REJECT"
+    },
+    {
+      "classifications": [
+        "UNKNOWN"
+      ],
+      "id": "S22-10-explicit-contradiction",
+      "input_digest": "dce0aada0472eb95a5f1eccf200cfbc7f20189ed16d40e55596d9e09e29e2d44",
+      "reasons": [
+        "EXPLICIT_CONTRADICTION",
+        "EXTERNAL_EFFECT_NOT_CONFIRMED:e1",
+        "LOG_NOT_PRESENT:e1",
+        "PLATFORM_RECEIPT_NOT_ACCEPTED:e1"
+      ],
+      "state": "REJECT"
+    },
+    {
+      "classifications": [
+        "UNKNOWN"
+      ],
+      "id": "S22-11-platform-receipt-only",
+      "input_digest": "08123c70730d6d9a23ef99b62822b99ce2682aa1a308c49de18ea3c15e164add",
+      "reasons": [
+        "EXTERNAL_EFFECT_NOT_CONFIRMED:e1",
+        "LOG_NOT_PRESENT:e1"
+      ],
+      "state": "UNKNOWN"
+    },
+    {
+      "classifications": [
+        "UNKNOWN"
+      ],
+      "id": "S22-12-log-only",
+      "input_digest": "9572f78e749c4b06f5c18e992542bf7d8f5411a6ea67c0ffcf35d6898b14911b",
+      "reasons": [
+        "EXTERNAL_EFFECT_NOT_CONFIRMED:e1",
+        "PLATFORM_RECEIPT_NOT_ACCEPTED:e1"
+      ],
+      "state": "UNKNOWN"
+    },
+    {
+      "classifications": [
+        "UNKNOWN"
+      ],
+      "id": "S22-13-effect-not-proof",
+      "input_digest": "1687570795ea4558c8682245258140ebd4f112c21dfc63dc0a73ef48a40fd6d6",
+      "reasons": [
+        "LOG_NOT_PRESENT:e1",
+        "PLATFORM_RECEIPT_NOT_ACCEPTED:e1"
+      ],
+      "state": "UNKNOWN"
+    },
+    {
+      "classifications": [
+        "DELAYED"
+      ],
+      "id": "S22-14-delayed",
+      "input_digest": "c7a49040730288f734b4c73a2d1b9a2f1214262bec9a77e0f36b6e62f7b9cfbb",
+      "reasons": [
+        "DELAYED",
+        "EXTERNAL_EFFECT_NOT_CONFIRMED:e1"
+      ],
+      "state": "UNKNOWN"
+    },
+    {
+      "classifications": [
+        "DROPPED",
+        "UNKNOWN"
+      ],
+      "id": "S22-15-dropped",
+      "input_digest": "8a17f2307af6f6f25e1a5cf4593dcabcde2ce07c8421a4c43fb36d9fe92c607d",
+      "reasons": [
+        "DROPPED",
+        "EXTERNAL_EFFECT_NOT_CONFIRMED:e1",
+        "LOG_NOT_PRESENT:e1",
+        "PLATFORM_RECEIPT_NOT_ACCEPTED:e1"
+      ],
+      "state": "UNKNOWN"
+    },
+    {
+      "classifications": [
+        "EXPORTER_FAILURE",
+        "UNKNOWN"
+      ],
+      "id": "S22-16-exporter-failure",
+      "input_digest": "5e25c3b83b7291042ed991a79c706c4c859ae2fd4972243bd3ebca2d7382367d",
+      "reasons": [
+        "EXPORTER_FAILURE",
+        "EXTERNAL_EFFECT_NOT_CONFIRMED:e1",
+        "LOG_NOT_PRESENT:e1"
+      ],
+      "state": "UNKNOWN"
+    },
+    {
+      "classifications": [
+        "NO_EVENT",
+        "RETENTION_EXPIRED"
+      ],
+      "id": "S22-17-retention",
+      "input_digest": "a428f20ea91b0220ca5ded3f7d76eb4d5396ce262aa58e761fe166b2bcd47e48",
+      "reasons": [
+        "RETENTION_EXPIRED"
+      ],
+      "state": "UNKNOWN"
+    },
+    {
+      "classifications": [
+        "NO_EVENT",
+        "QUERY_GAP"
+      ],
+      "id": "S22-18-query-gap",
+      "input_digest": "b926e49168c2075e6b7df8d69357bb828eef33c6eb54873b04c7e3330381a3e9",
+      "reasons": [
+        "QUERY_GAP"
+      ],
+      "state": "UNKNOWN"
+    },
+    {
+      "classifications": [
+        "NO_EVENT",
+        "UNKNOWN"
+      ],
+      "id": "S22-19-unknown",
+      "input_digest": "7074e18a7d6c1ab05b35fe4ba9f2770f07b2079399582093c5d4636b70923d9c",
+      "reasons": [
+        "UNCLASSIFIED_EVIDENCE"
+      ],
+      "state": "UNKNOWN"
+    },
+    {
+      "classifications": [
+        "QUERY_GAP",
+        "UNKNOWN"
+      ],
+      "id": "S22-20-parent-gap",
+      "input_digest": "923c13e61515d6d86d8dce447ae28594e7fab45d4428f9aa5a45a499d2e19c87",
+      "reasons": [
+        "DAG_PARENT_GAP",
+        "EXTERNAL_EFFECT_NOT_CONFIRMED:e1",
+        "LOG_NOT_PRESENT:e1",
+        "PLATFORM_RECEIPT_NOT_ACCEPTED:e1"
+      ],
+      "state": "UNKNOWN"
+    },
+    {
+      "classifications": [
+        "VERIFIED_CONTINUITY"
+      ],
+      "id": "S22-21-boundary-anchor",
+      "input_digest": "c245fa11e8ef23e369cd5663e0d6f8d73c39572510215b69b4c7a128b69bfb3c",
+      "reasons": [],
+      "state": "RECOVERED"
+    },
+    {
+      "classifications": [
+        "NO_EVENT",
+        "QUERY_GAP"
+      ],
+      "id": "S22-22-checkpoint-mismatch",
+      "input_digest": "90a52026d0462f6e3f6a5b8fe8f270824cd0801e1210b4ff4e411c0fddc3e95f",
+      "reasons": [
+        "CHECKPOINT_MISMATCH"
+      ],
+      "state": "UNKNOWN"
+    },
+    {
+      "classifications": [
+        "NO_EVENT"
+      ],
+      "id": "S22-23-snapshot-conflict",
+      "input_digest": "f3e3c6491634f70926df3f353b0e9739c60ef68eee249ddca7101c18cb22fa8a",
+      "reasons": [
+        "DUPLICATE_CONFLICT"
+      ],
+      "state": "REJECT"
+    },
+    {
+      "classifications": [
+        "QUERY_GAP",
+        "UNKNOWN"
+      ],
+      "id": "S22-24-increment-conflict",
+      "input_digest": "2c013abbe286aa56c7082d418b3a800e062ec588cf323815ee45f8d74a002e1e",
+      "reasons": [
+        "DAG_PARENT_GAP",
+        "DUPLICATE_CONFLICT",
+        "EXTERNAL_EFFECT_NOT_CONFIRMED:e1",
+        "LOG_NOT_PRESENT:e1",
+        "PLATFORM_RECEIPT_NOT_ACCEPTED:e1"
+      ],
+      "state": "REJECT"
+    }
+  ],
+  "schema_version": "s22.results.v1",
+  "state_counts": {
+    "RECOVERED": 3,
+    "REJECT": 7,
+    "UNKNOWN": 14
+  },
+  "synthetic_only": true
+}

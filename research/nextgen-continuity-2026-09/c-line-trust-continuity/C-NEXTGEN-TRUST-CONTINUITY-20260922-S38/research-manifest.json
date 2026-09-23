@@ -1,0 +1,24 @@
+{
+  "schema_version": "1.0",
+  "question": "在离线合成证据中，何时 logs/metrics/traces/OTLP 多信号、export/drop、retry/queue 与跨信号关联能够闭合连续性，何时必须保持 UNKNOWN 或 REJECT？",
+  "scope": {
+    "project": "C-line S38",
+    "mode": "offline synthetic fixtures",
+    "date": "2026-09-23",
+    "excluded": ["S1-S37", "production", "network", "real services", "credentials"],
+    "identity_domain": ["tenant", "source", "trace_id", "span_id", "service", "resource", "scope", "batch", "sequence"],
+    "signal_domain": ["logs", "metrics", "traces", "OTLP", "sampling", "export_attempt", "export_ack", "queue", "drop_counter", "retry"]
+  },
+  "claims_status": "inferred",
+  "synthetic_only": true,
+  "production_verified": false,
+  "sources": [],
+  "claims": [
+    {"id":"multi-signal-closure","claim":"只有 signal identity、三信号存在性、关联、sequence、export attempt/ack、queue、drop/retry、scope/resource、时间窗口、sampling 与去重全部闭合时才可 RECOVERED。","status":"inferred","confidence":"bounded","sources":[],"caveat":"仅由本地合成夹具和规则推导，不代表生产系统。"},
+    {"id":"ack-not-business-proof","claim":"OTLP export ack 或 queue drain 不是业务效果或全量 telemetry 的证明；必须按 signal/attempt/batch 独立对账。","status":"inferred","confidence":"bounded","sources":[],"caveat":"未验证任何真实 collector 或 backend。"},
+    {"id":"export-gap-unknown","claim":"signal 缺失、关联/sequence/export/drop/retry/sampling/query 缺口或远端状态未知时必须 UNKNOWN。","status":"inferred","confidence":"bounded","sources":[],"caveat":"布尔门不量化实际丢失概率。"},
+    {"id":"signal-conflict-reject","claim":"身份冲突和同一 identity 的不可调和跨信号内容冲突必须 REJECT。","status":"inferred","confidence":"bounded","sources":[],"caveat":"只验证合成判定逻辑，不证明目标系统执行拒绝。"}
+  ],
+  "coverage": {"cases": 27, "property_sweep": 1048576, "dimensions": 20, "statuses": ["RECOVERED", "UNKNOWN", "REJECT"], "events": ["LOGS", "METRICS", "TRACES", "OTLP", "SAMPLING", "EXPORT_ATTEMPT", "EXPORT_ACK", "QUEUE", "DROP_COUNTER", "RETRY", "NO_EVENT", "UNKNOWN"]},
+  "notes": "三态互斥并 fail-closed；RECOVERED 仅代表本片离线夹具中的证据门闭合，不代表 production continuity、external effect 或 exactly-once。"
+}

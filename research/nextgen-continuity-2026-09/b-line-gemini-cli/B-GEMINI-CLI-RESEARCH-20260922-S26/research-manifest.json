@@ -1,0 +1,42 @@
+{
+  "schema_version": "1.0",
+  "question": "How does an offline synthetic journal replay model classify ordered, reordered, duplicate, missing, and ambiguous attempt evidence without claiming production durability?",
+  "scope": {
+    "mode": "offline synthetic-only local model",
+    "worker_count": 1,
+    "op_id": "synthetic-op-S26-0001",
+    "fixture_count": 14,
+    "included": ["missing entries", "duplicate entries", "reordered visibility", "attempt 1 and 2", "value and reference consistency", "deterministic local replay"],
+    "excluded": ["network", "real Gemini CLI", "real services", "credentials", "production durability", "remote state", "exactly-once", "rollback", "immutable audit", "production safety"]
+  },
+  "synthetic_only": true,
+  "production_verified": false,
+  "manifest_version": "S26-v1",
+  "slice_id": "S26",
+  "title": "offline synthetic journal replay permutation slice",
+  "root": "/tmp/B-GEMINI-CLI-RESEARCH-20260922-S26/",
+  "worker_count": 1,
+  "op_id": "synthetic-op-S26-0001",
+  "deterministic": true,
+  "network_access": false,
+  "real_service_access": false,
+  "credentials_access": false,
+  "forbidden_inputs_read": [],
+  "fixture_count": 14,
+  "files": ["REPORT.md", "sources.md", "research-manifest.json", "SHA256SUMS", "harness.py", "fixtures/cases.json", "outputs/results.json", "validator.py"],
+  "required_validations": ["python3 harness.py", "python3 validator.py", "research manifest validator", "sha256sum -c SHA256SUMS"],
+  "claims": [
+    {"id": "C1", "claim": "The local model accepted 4, rejected 4, and retained UNKNOWN for 6 of 14 deterministic synthetic fixtures.", "status": "inferred", "confidence": "high", "sources": [], "caveat": "These are local harness outcomes only."},
+    {"id": "C2", "claim": "The model normalizes reordered visibility by synthetic journal_seq and accepts coherent single-attempt records under its authored rule.", "status": "inferred", "confidence": "high", "sources": [], "caveat": "This does not establish real journal sequence or durability semantics."},
+    {"id": "C3", "claim": "Missing, inaccessible, unknown-kind, and multi-attempt ambiguous evidence remain UNKNOWN in the local model.", "status": "inferred", "confidence": "high", "sources": [], "caveat": "A fail-closed policy outcome, not external system evidence."},
+    {"id": "C4", "claim": "Duplicate identity, sequence collision, value disagreement, or reference mismatch are rejected by the synthetic classifier.", "status": "inferred", "confidence": "high", "sources": [], "caveat": "No production conflict was observed."},
+    {"id": "C5", "claim": "This experiment proves real crash durability, remote state, exactly-once, rollback, immutable audit, or production safety.", "status": "conflicting", "confidence": "high", "sources": [], "caveat": "Explicitly excluded and unsupported by local simulation."},
+    {"id": "C6", "claim": "Real Gemini CLI and production journal behavior were not accessible to this run.", "status": "unverified", "confidence": "high", "sources": [], "caveat": "The experiment deliberately did not access those systems."}
+  ],
+  "coverage": {
+    "searched": ["new fixtures, local harness, and generated results only"],
+    "inaccessible": ["real Gemini CLI", "production journal", "remote services", "credentials", "prior research artifacts"],
+    "unresolved_conflicts": ["real event ordering semantics", "durability", "remote state", "production retry behavior"]
+  },
+  "limitations": ["local replay cannot prove real crash durability", "local replay cannot prove remote state", "local replay cannot prove exactly-once", "local replay cannot prove rollback", "local replay cannot prove immutable audit", "local replay cannot prove production safety"]
+}

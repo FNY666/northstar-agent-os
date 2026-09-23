@@ -1,0 +1,893 @@
+{
+  "synthetic_only": true,
+  "production_verified": false,
+  "suite": "S34",
+  "cases": [
+    {
+      "id": "S34-01",
+      "target_op": "P",
+      "batches": [
+        {
+          "batch_id": "B1",
+          "epoch": 1,
+          "events": [
+            {
+              "op": "P",
+              "kind": "ack",
+              "status": "accepted"
+            },
+            {
+              "op": "P",
+              "kind": "ack",
+              "status": "accepted"
+            }
+          ]
+        }
+      ],
+      "expected": {
+        "P": "accepted",
+        "Q": "UNKNOWN",
+        "R": "UNKNOWN",
+        "X": "UNKNOWN"
+      },
+      "synthetic_only": true,
+      "production_verified": false
+    },
+    {
+      "id": "S34-02",
+      "target_op": "P",
+      "batches": [
+        {
+          "batch_id": "B1",
+          "epoch": 1,
+          "events": [
+            {
+              "op": "P",
+              "kind": "ack",
+              "status": "rejected"
+            },
+            {
+              "op": "P",
+              "kind": "ack",
+              "status": "rejected"
+            },
+            {
+              "op": "R",
+              "kind": "ack",
+              "status": "accepted"
+            }
+          ]
+        }
+      ],
+      "expected": {
+        "P": "rejected",
+        "Q": "UNKNOWN",
+        "R": "accepted",
+        "X": "UNKNOWN"
+      },
+      "synthetic_only": true,
+      "production_verified": false
+    },
+    {
+      "id": "S34-03",
+      "target_op": "P",
+      "batches": [
+        {
+          "batch_id": "B1",
+          "epoch": 1,
+          "events": [
+            {
+              "op": "P",
+              "kind": "ack",
+              "status": "accepted"
+            },
+            {
+              "op": "P",
+              "kind": "ack",
+              "status": "rejected"
+            },
+            {
+              "op": "P",
+              "kind": "conflict_unverifiable"
+            }
+          ]
+        }
+      ],
+      "expected": {
+        "P": "UNKNOWN",
+        "Q": "UNKNOWN",
+        "R": "UNKNOWN",
+        "X": "UNKNOWN"
+      },
+      "synthetic_only": true,
+      "production_verified": false
+    },
+    {
+      "id": "S34-04",
+      "target_op": "P",
+      "batches": [
+        {
+          "batch_id": "B1",
+          "epoch": 1,
+          "events": [
+            {
+              "op": "P",
+              "kind": "ack",
+              "status": "accepted"
+            },
+            {
+              "op": "Q",
+              "kind": "ack",
+              "status": "missing"
+            }
+          ]
+        }
+      ],
+      "expected": {
+        "P": "accepted",
+        "Q": "UNKNOWN",
+        "R": "UNKNOWN",
+        "X": "UNKNOWN"
+      },
+      "synthetic_only": true,
+      "production_verified": false
+    },
+    {
+      "id": "S34-05",
+      "target_op": "Q",
+      "batches": [
+        {
+          "batch_id": "B1",
+          "epoch": 1,
+          "events": [
+            {
+              "op": "Q",
+              "kind": "ack",
+              "status": "accepted",
+              "text": "mentions P op_id p-001"
+            }
+          ]
+        }
+      ],
+      "expected": {
+        "P": "UNKNOWN",
+        "Q": "accepted",
+        "R": "UNKNOWN",
+        "X": "UNKNOWN"
+      },
+      "synthetic_only": true,
+      "production_verified": false
+    },
+    {
+      "id": "S34-06",
+      "target_op": "P",
+      "batches": [
+        {
+          "batch_id": "B1",
+          "epoch": 1,
+          "events": [
+            {
+              "op": "Q",
+              "kind": "ack",
+              "status": "accepted",
+              "text": "mentions P op_id p-002"
+            }
+          ]
+        }
+      ],
+      "expected": {
+        "P": "UNKNOWN",
+        "Q": "accepted",
+        "R": "UNKNOWN",
+        "X": "UNKNOWN"
+      },
+      "synthetic_only": true,
+      "production_verified": false
+    },
+    {
+      "id": "S34-07",
+      "target_op": "P",
+      "batches": [
+        {
+          "batch_id": "B2",
+          "epoch": 2,
+          "events": [
+            {
+              "op": "P",
+              "kind": "ack",
+              "status": "accepted"
+            }
+          ]
+        },
+        {
+          "batch_id": "B1",
+          "epoch": 1,
+          "events": [
+            {
+              "op": "P",
+              "kind": "ack",
+              "status": "rejected"
+            }
+          ]
+        }
+      ],
+      "expected": {
+        "P": "rejected",
+        "Q": "UNKNOWN",
+        "R": "UNKNOWN",
+        "X": "UNKNOWN"
+      },
+      "synthetic_only": true,
+      "production_verified": false
+    },
+    {
+      "id": "S34-08",
+      "target_op": "Q",
+      "batches": [
+        {
+          "batch_id": "B2",
+          "epoch": 2,
+          "events": [
+            {
+              "op": "Q",
+              "kind": "ack",
+              "status": "accepted"
+            }
+          ]
+        },
+        {
+          "batch_id": "B1",
+          "epoch": 1,
+          "events": [
+            {
+              "op": "Q",
+              "kind": "ack",
+              "status": "accepted"
+            }
+          ]
+        }
+      ],
+      "expected": {
+        "P": "UNKNOWN",
+        "Q": "accepted",
+        "R": "UNKNOWN",
+        "X": "UNKNOWN"
+      },
+      "synthetic_only": true,
+      "production_verified": false
+    },
+    {
+      "id": "S34-09",
+      "target_op": "P",
+      "batches": [
+        {
+          "batch_id": "B2",
+          "epoch": 2,
+          "events": [
+            {
+              "op": "P",
+              "kind": "ack",
+              "status": "accepted"
+            }
+          ]
+        },
+        {
+          "batch_id": "B9",
+          "epoch": 99,
+          "events": [
+            {
+              "op": "P",
+              "kind": "ack",
+              "status": "accepted"
+            }
+          ]
+        }
+      ],
+      "expected": {
+        "P": "UNKNOWN",
+        "Q": "UNKNOWN",
+        "R": "UNKNOWN",
+        "X": "UNKNOWN"
+      },
+      "synthetic_only": true,
+      "production_verified": false
+    },
+    {
+      "id": "S34-10",
+      "target_op": "P",
+      "batches": [
+        {
+          "batch_id": "B1",
+          "epoch": 1,
+          "events": [
+            {
+              "op": "P",
+              "kind": "ack",
+              "status": "accepted"
+            }
+          ]
+        },
+        {
+          "batch_id": "B2",
+          "epoch": null,
+          "events": [
+            {
+              "op": "P",
+              "kind": "ack",
+              "status": "accepted"
+            }
+          ]
+        }
+      ],
+      "expected": {
+        "P": "UNKNOWN",
+        "Q": "UNKNOWN",
+        "R": "UNKNOWN",
+        "X": "UNKNOWN"
+      },
+      "synthetic_only": true,
+      "production_verified": false
+    },
+    {
+      "id": "S34-11",
+      "target_op": "P",
+      "batches": [
+        {
+          "batch_id": "B1",
+          "epoch": 1,
+          "events": [
+            {
+              "op": "P",
+              "kind": "ack",
+              "status": "accepted"
+            }
+          ],
+          "revoked": true
+        },
+        {
+          "batch_id": "B2",
+          "epoch": 2,
+          "events": [
+            {
+              "op": "P",
+              "kind": "ack",
+              "status": "accepted"
+            }
+          ]
+        }
+      ],
+      "expected": {
+        "P": "accepted",
+        "Q": "UNKNOWN",
+        "R": "UNKNOWN",
+        "X": "UNKNOWN"
+      },
+      "synthetic_only": true,
+      "production_verified": false
+    },
+    {
+      "id": "S34-12",
+      "target_op": "P",
+      "batches": [
+        {
+          "batch_id": "B1",
+          "epoch": 1,
+          "events": [
+            {
+              "op": "P",
+              "kind": "ack",
+              "status": "accepted"
+            }
+          ],
+          "revoked": true
+        }
+      ],
+      "expected": {
+        "P": "UNKNOWN",
+        "Q": "UNKNOWN",
+        "R": "UNKNOWN",
+        "X": "UNKNOWN"
+      },
+      "synthetic_only": true,
+      "production_verified": false
+    },
+    {
+      "id": "S34-13",
+      "target_op": "X",
+      "batches": [
+        {
+          "batch_id": "B1",
+          "epoch": 1,
+          "events": [
+            {
+              "op": "X",
+              "kind": "ack",
+              "status": "accepted"
+            }
+          ]
+        }
+      ],
+      "expected": {
+        "P": "UNKNOWN",
+        "Q": "UNKNOWN",
+        "R": "UNKNOWN",
+        "X": "UNKNOWN"
+      },
+      "synthetic_only": true,
+      "production_verified": false
+    },
+    {
+      "id": "S34-14",
+      "target_op": "R",
+      "batches": [
+        {
+          "batch_id": "B1",
+          "epoch": 1,
+          "events": [
+            {
+              "op": "R",
+              "kind": "ack",
+              "status": "accepted"
+            },
+            {
+              "op": "R",
+              "kind": "ack",
+              "status": "accepted"
+            }
+          ]
+        },
+        {
+          "batch_id": "B2",
+          "epoch": 2,
+          "events": [
+            {
+              "op": "P",
+              "kind": "ack",
+              "status": "accepted"
+            }
+          ]
+        }
+      ],
+      "expected": {
+        "P": "accepted",
+        "Q": "UNKNOWN",
+        "R": "accepted",
+        "X": "UNKNOWN"
+      },
+      "synthetic_only": true,
+      "production_verified": false
+    },
+    {
+      "id": "S34-15",
+      "target_op": "P",
+      "batches": [
+        {
+          "batch_id": "B1",
+          "epoch": 1,
+          "events": [
+            {
+              "op": "P",
+              "kind": "ack",
+              "status": "accepted"
+            },
+            {
+              "op": "P",
+              "kind": "ack",
+              "status": "accepted"
+            }
+          ]
+        },
+        {
+          "batch_id": "B1",
+          "epoch": 1,
+          "events": [
+            {
+              "op": "P",
+              "kind": "ack",
+              "status": "rejected"
+            }
+          ]
+        }
+      ],
+      "expected": {
+        "P": "accepted",
+        "Q": "UNKNOWN",
+        "R": "UNKNOWN",
+        "X": "UNKNOWN"
+      },
+      "synthetic_only": true,
+      "production_verified": false
+    },
+    {
+      "id": "S34-16",
+      "target_op": "Q",
+      "batches": [
+        {
+          "batch_id": "B2",
+          "epoch": 2,
+          "events": [
+            {
+              "op": "Q",
+              "kind": "ack",
+              "status": "rejected"
+            }
+          ]
+        },
+        {
+          "batch_id": "B1",
+          "epoch": 1,
+          "events": [
+            {
+              "op": "Q",
+              "kind": "ack",
+              "status": "accepted"
+            }
+          ]
+        }
+      ],
+      "expected": {
+        "P": "UNKNOWN",
+        "Q": "rejected",
+        "R": "UNKNOWN",
+        "X": "UNKNOWN"
+      },
+      "synthetic_only": true,
+      "production_verified": false
+    },
+    {
+      "id": "S34-17",
+      "target_op": "P",
+      "batches": [
+        {
+          "batch_id": "B1",
+          "epoch": 1,
+          "events": [
+            {
+              "op": "P",
+              "kind": "ack",
+              "status": "accepted"
+            },
+            {
+              "op": "Q",
+              "kind": "missing"
+            },
+            {
+              "op": "R",
+              "kind": "ack",
+              "status": "rejected"
+            }
+          ]
+        }
+      ],
+      "expected": {
+        "P": "accepted",
+        "Q": "UNKNOWN",
+        "R": "rejected",
+        "X": "UNKNOWN"
+      },
+      "synthetic_only": true,
+      "production_verified": false
+    },
+    {
+      "id": "S34-18",
+      "target_op": "Q",
+      "batches": [
+        {
+          "batch_id": "B1",
+          "epoch": 1,
+          "events": [
+            {
+              "op": "Q",
+              "kind": "missing"
+            },
+            {
+              "op": "P",
+              "kind": "ack",
+              "status": "accepted"
+            }
+          ]
+        }
+      ],
+      "expected": {
+        "P": "accepted",
+        "Q": "UNKNOWN",
+        "R": "UNKNOWN",
+        "X": "UNKNOWN"
+      },
+      "synthetic_only": true,
+      "production_verified": false
+    },
+    {
+      "id": "S34-19",
+      "target_op": "R",
+      "batches": [
+        {
+          "batch_id": "B1",
+          "epoch": 1,
+          "events": [
+            {
+              "op": "R",
+              "kind": "ack",
+              "status": "rejected"
+            },
+            {
+              "op": "R",
+              "kind": "ack",
+              "status": "rejected"
+            }
+          ]
+        },
+        {
+          "batch_id": "B2",
+          "epoch": 2,
+          "events": [
+            {
+              "op": "Q",
+              "kind": "ack",
+              "status": "accepted"
+            }
+          ]
+        }
+      ],
+      "expected": {
+        "P": "UNKNOWN",
+        "Q": "accepted",
+        "R": "rejected",
+        "X": "UNKNOWN"
+      },
+      "synthetic_only": true,
+      "production_verified": false
+    },
+    {
+      "id": "S34-20",
+      "target_op": "P",
+      "batches": [
+        {
+          "batch_id": "B1",
+          "epoch": 1,
+          "events": [
+            {
+              "op": "P",
+              "kind": "ack",
+              "status": "accepted"
+            }
+          ]
+        },
+        {
+          "batch_id": "B2",
+          "epoch": 2,
+          "events": [
+            {
+              "op": "P",
+              "kind": "ack",
+              "status": "accepted"
+            }
+          ]
+        },
+        {
+          "batch_id": "B3",
+          "epoch": 3,
+          "events": [
+            {
+              "op": "P",
+              "kind": "ack",
+              "status": "accepted"
+            }
+          ]
+        },
+        {
+          "batch_id": "B4",
+          "epoch": 4,
+          "events": [
+            {
+              "op": "P",
+              "kind": "ack",
+              "status": "accepted"
+            }
+          ]
+        }
+      ],
+      "expected": {
+        "P": "accepted",
+        "Q": "UNKNOWN",
+        "R": "UNKNOWN",
+        "X": "UNKNOWN"
+      },
+      "synthetic_only": true,
+      "production_verified": false
+    },
+    {
+      "id": "S34-21",
+      "target_op": "P",
+      "batches": [
+        {
+          "batch_id": "B4",
+          "epoch": 4,
+          "events": [
+            {
+              "op": "P",
+              "kind": "ack",
+              "status": "accepted"
+            }
+          ]
+        },
+        {
+          "batch_id": "B3",
+          "epoch": 3,
+          "events": [
+            {
+              "op": "P",
+              "kind": "ack",
+              "status": "rejected"
+            }
+          ]
+        },
+        {
+          "batch_id": "B2",
+          "epoch": 2,
+          "events": [
+            {
+              "op": "P",
+              "kind": "ack",
+              "status": "accepted"
+            }
+          ]
+        },
+        {
+          "batch_id": "B1",
+          "epoch": 1,
+          "events": [
+            {
+              "op": "P",
+              "kind": "ack",
+              "status": "accepted"
+            }
+          ]
+        }
+      ],
+      "expected": {
+        "P": "rejected",
+        "Q": "UNKNOWN",
+        "R": "UNKNOWN",
+        "X": "UNKNOWN"
+      },
+      "synthetic_only": true,
+      "production_verified": false
+    },
+    {
+      "id": "S34-22",
+      "target_op": "Q",
+      "batches": [
+        {
+          "batch_id": "B2",
+          "epoch": 2,
+          "events": [
+            {
+              "op": "Q",
+              "kind": "ack",
+              "status": "accepted"
+            }
+          ]
+        },
+        {
+          "batch_id": "B1",
+          "epoch": 1,
+          "events": [
+            {
+              "op": "Q",
+              "kind": "missing"
+            }
+          ]
+        },
+        {
+          "batch_id": "B3",
+          "epoch": 3,
+          "events": [
+            {
+              "op": "Q",
+              "kind": "ack",
+              "status": "accepted"
+            }
+          ]
+        }
+      ],
+      "expected": {
+        "P": "UNKNOWN",
+        "Q": "UNKNOWN",
+        "R": "UNKNOWN",
+        "X": "UNKNOWN"
+      },
+      "synthetic_only": true,
+      "production_verified": false
+    },
+    {
+      "id": "S34-23",
+      "target_op": "P",
+      "batches": [
+        {
+          "batch_id": "B1",
+          "epoch": 1,
+          "events": [
+            {
+              "op": "P",
+              "kind": "ack",
+              "status": "rejected"
+            },
+            {
+              "op": "P",
+              "kind": "ack",
+              "status": "accepted"
+            }
+          ]
+        },
+        {
+          "batch_id": "B2",
+          "epoch": 2,
+          "events": [
+            {
+              "op": "Q",
+              "kind": "ack",
+              "status": "accepted"
+            }
+          ]
+        }
+      ],
+      "expected": {
+        "P": "rejected",
+        "Q": "accepted",
+        "R": "UNKNOWN",
+        "X": "UNKNOWN"
+      },
+      "synthetic_only": true,
+      "production_verified": false
+    },
+    {
+      "id": "S34-24",
+      "target_op": "R",
+      "batches": [
+        {
+          "batch_id": "B3",
+          "epoch": 3,
+          "events": [
+            {
+              "op": "R",
+              "kind": "ack",
+              "status": "accepted"
+            }
+          ],
+          "revoked": true
+        },
+        {
+          "batch_id": "B1",
+          "epoch": 1,
+          "events": [
+            {
+              "op": "R",
+              "kind": "ack",
+              "status": "accepted"
+            }
+          ]
+        },
+        {
+          "batch_id": "B2",
+          "epoch": 2,
+          "events": [
+            {
+              "op": "R",
+              "kind": "ack",
+              "status": "accepted"
+            }
+          ]
+        }
+      ],
+      "expected": {
+        "P": "UNKNOWN",
+        "Q": "UNKNOWN",
+        "R": "accepted",
+        "X": "UNKNOWN"
+      },
+      "synthetic_only": true,
+      "production_verified": false
+    }
+  ]
+}

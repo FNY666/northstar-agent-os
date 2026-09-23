@@ -1,0 +1,12 @@
+{"case": "baseline-local-test-binding", "errors": [], "match": true, "replay": {"action": "none", "side_effect_replayed": false}, "verdict": "verified", "warnings": []}
+{"case": "binding-absent", "errors": [], "match": false, "replay": {"action": "none", "side_effect_replayed": false}, "verdict": "unknown", "warnings": ["trusted binding missing or not authenticated"]}
+{"case": "operation-mutated-old-binding", "errors": ["operation fingerprint mismatch"], "match": false, "replay": {"action": "none", "side_effect_replayed": false}, "verdict": "invalid", "warnings": ["trusted binding missing or not authenticated"]}
+{"case": "operation-mutated-re-signed-local-key", "errors": [], "match": true, "replay": {"action": "none", "side_effect_replayed": false}, "verdict": "verified", "warnings": []}
+{"case": "unregistered-producer-label", "errors": [], "match": true, "replay": {"action": "none", "side_effect_replayed": false}, "verdict": "verified", "warnings": ["receipt producer is not the rehearsal trusted channel"]}
+{"case": "nonexistent-looking-content-address-only", "errors": [], "match": true, "replay": {"action": "none", "side_effect_replayed": false}, "verdict": "verified", "warnings": []}
+{"case": "arbitrary-authority-re-signed-local-key", "errors": [], "match": true, "replay": {"action": "none", "side_effect_replayed": false}, "verdict": "verified", "warnings": []}
+{"case": "registry-first", "errors": [], "match": true, "replay": {"action": "none", "side_effect_replayed": false}, "verdict": "verified", "warnings": []}
+{"case": "registry-replay-same-process", "errors": [], "match": true, "replay": {"action": "deduplicate", "side_effect_replayed": false}, "verdict": "verified", "warnings": []}
+{"case": "registry-conflict-same-process", "errors": ["idempotency key bound to different operation fingerprint"], "match": false, "replay": {"action": "reject", "side_effect_replayed": false}, "verdict": "invalid", "warnings": []}
+{"case": "registry-storage-type", "entries": 1, "type": "dict"}
+{"case": "authority-key-type", "key_bytes": 41, "key_name": "AUTHORITY_KEY", "test_only": true}

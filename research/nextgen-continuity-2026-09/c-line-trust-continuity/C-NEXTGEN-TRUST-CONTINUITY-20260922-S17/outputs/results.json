@@ -1,0 +1,539 @@
+{
+  "fixture_count": 25,
+  "production_verified": false,
+  "results": [
+    {
+      "blocking_condition": null,
+      "expected_status": "RECOVERED",
+      "id": "S17-01",
+      "name": "signature_valid_revocation_valid",
+      "pass": true,
+      "production_verified": false,
+      "provenance": {
+        "canonical_input_sha256": "59f09e8a8c5c399f8c3e82ac0b9fd403b2cfe2fb7897ed9669bfd81ecae1296c",
+        "canonicalizer_a_sha256": "59f09e8a8c5c399f8c3e82ac0b9fd403b2cfe2fb7897ed9669bfd81ecae1296c",
+        "canonicalizer_b_sha256": "59f09e8a8c5c399f8c3e82ac0b9fd403b2cfe2fb7897ed9669bfd81ecae1296c",
+        "hmac_key_id": "S17-fixed-nonreal-key-v1",
+        "implementation_a": "canonicalizer-A/json-sort-keys-v1",
+        "implementation_b": "canonicalizer-B/json-sort-keys-v1-or-deliberate-divergence",
+        "revocation_sha256": "2cd71a58cad626449671c9cf77791719a67e63b807ce921afa10d246d152ebcf",
+        "signature_sha256": "95818280958f15030575f3dd5037b5507443ffad4414c7d7144b4cbb7482253f"
+      },
+      "reason": "signature, revocation integrity, and cross-implementation canonicalization checks passed",
+      "status": "RECOVERED",
+      "synthetic_only": true
+    },
+    {
+      "blocking_condition": "policy HMAC-SHA256 verification failed",
+      "expected_status": "REJECT",
+      "id": "S17-02",
+      "name": "policy_tampered",
+      "pass": true,
+      "production_verified": false,
+      "provenance": {
+        "canonical_input_sha256": "a6239aa51b5cde0064d0f1535df3bd9c5f3a615d2be26c7f74e0cd3978f2281e",
+        "canonicalizer_a_sha256": "a6239aa51b5cde0064d0f1535df3bd9c5f3a615d2be26c7f74e0cd3978f2281e",
+        "canonicalizer_b_sha256": "a6239aa51b5cde0064d0f1535df3bd9c5f3a615d2be26c7f74e0cd3978f2281e",
+        "hmac_key_id": "S17-fixed-nonreal-key-v1",
+        "implementation_a": "canonicalizer-A/json-sort-keys-v1",
+        "implementation_b": "canonicalizer-B/json-sort-keys-v1-or-deliberate-divergence",
+        "revocation_sha256": "2cd71a58cad626449671c9cf77791719a67e63b807ce921afa10d246d152ebcf",
+        "signature_sha256": "adac612c40791a2b8415c61fd4a033190e74f13a4fedb33ec4abc177dc9444bf"
+      },
+      "reason": "policy HMAC-SHA256 verification failed",
+      "status": "REJECT",
+      "synthetic_only": true
+    },
+    {
+      "blocking_condition": "policy HMAC-SHA256 verification failed",
+      "expected_status": "REJECT",
+      "id": "S17-03",
+      "name": "signature_missing",
+      "pass": true,
+      "production_verified": false,
+      "provenance": {
+        "canonical_input_sha256": "0d85659adc838ae34e0b6b7645cdc0ab2e9fd78504ade6df52760498b2944eb4",
+        "canonicalizer_a_sha256": "0d85659adc838ae34e0b6b7645cdc0ab2e9fd78504ade6df52760498b2944eb4",
+        "canonicalizer_b_sha256": "0d85659adc838ae34e0b6b7645cdc0ab2e9fd78504ade6df52760498b2944eb4",
+        "hmac_key_id": "S17-fixed-nonreal-key-v1",
+        "implementation_a": "canonicalizer-A/json-sort-keys-v1",
+        "implementation_b": "canonicalizer-B/json-sort-keys-v1-or-deliberate-divergence",
+        "revocation_sha256": "2cd71a58cad626449671c9cf77791719a67e63b807ce921afa10d246d152ebcf",
+        "signature_sha256": null
+      },
+      "reason": "policy HMAC-SHA256 verification failed",
+      "status": "REJECT",
+      "synthetic_only": true
+    },
+    {
+      "blocking_condition": "revocation record hit at observation boundary",
+      "expected_status": "REJECT",
+      "id": "S17-04",
+      "name": "revocation_hit",
+      "pass": true,
+      "production_verified": false,
+      "provenance": {
+        "canonical_input_sha256": "c91d4d06d3e4015572b9f730fa4f218576db7b3bb8db0f99b9782c1e523eef6a",
+        "canonicalizer_a_sha256": "c91d4d06d3e4015572b9f730fa4f218576db7b3bb8db0f99b9782c1e523eef6a",
+        "canonicalizer_b_sha256": "c91d4d06d3e4015572b9f730fa4f218576db7b3bb8db0f99b9782c1e523eef6a",
+        "hmac_key_id": "S17-fixed-nonreal-key-v1",
+        "implementation_a": "canonicalizer-A/json-sort-keys-v1",
+        "implementation_b": "canonicalizer-B/json-sort-keys-v1-or-deliberate-divergence",
+        "revocation_sha256": "5208003a3d2b69630e330bad70af58160c66ef3aa1407cb6eba1a37cbcb276df",
+        "signature_sha256": "0e1089ec87bde5366d7abcee0433eeab4a437033633b5ea6a23442a7d6f0839d"
+      },
+      "reason": "revocation record hit at observation boundary",
+      "status": "REJECT",
+      "synthetic_only": true
+    },
+    {
+      "blocking_condition": null,
+      "expected_status": "RECOVERED",
+      "id": "S17-05",
+      "name": "revocation_miss",
+      "pass": true,
+      "production_verified": false,
+      "provenance": {
+        "canonical_input_sha256": "2f1cb218546df14a442e74e0146c6f7d9f4a9ac6bd6637be7c548ffdebfcac2f",
+        "canonicalizer_a_sha256": "2f1cb218546df14a442e74e0146c6f7d9f4a9ac6bd6637be7c548ffdebfcac2f",
+        "canonicalizer_b_sha256": "2f1cb218546df14a442e74e0146c6f7d9f4a9ac6bd6637be7c548ffdebfcac2f",
+        "hmac_key_id": "S17-fixed-nonreal-key-v1",
+        "implementation_a": "canonicalizer-A/json-sort-keys-v1",
+        "implementation_b": "canonicalizer-B/json-sort-keys-v1-or-deliberate-divergence",
+        "revocation_sha256": "99b2b4c6cec91579bdd0c40501651cf893fef8ac314a453e0cf770a9eb5f229b",
+        "signature_sha256": "d9cffee6759aaa09bba22a4ef9caa5c954c209bee435c712cdf5bd335f0da904"
+      },
+      "reason": "signature, revocation integrity, and cross-implementation canonicalization checks passed",
+      "status": "RECOVERED",
+      "synthetic_only": true
+    },
+    {
+      "blocking_condition": "revocation list missing, inaccessible, malformed, or integrity unverifiable",
+      "expected_status": "UNKNOWN",
+      "id": "S17-06",
+      "name": "revocation_list_missing",
+      "pass": true,
+      "production_verified": false,
+      "provenance": {
+        "canonical_input_sha256": "119d8a9cd7066b3c590266fcf592b7bbc5b1fd43801a2d0b3e6743d207883605",
+        "canonicalizer_a_sha256": "119d8a9cd7066b3c590266fcf592b7bbc5b1fd43801a2d0b3e6743d207883605",
+        "canonicalizer_b_sha256": "119d8a9cd7066b3c590266fcf592b7bbc5b1fd43801a2d0b3e6743d207883605",
+        "hmac_key_id": "S17-fixed-nonreal-key-v1",
+        "implementation_a": "canonicalizer-A/json-sort-keys-v1",
+        "implementation_b": "canonicalizer-B/json-sort-keys-v1-or-deliberate-divergence",
+        "revocation_sha256": null,
+        "signature_sha256": "05d8ccf2f3104359739defac9f9c78b7d1cbfeaa08529e24f4e318159e0c7e7d"
+      },
+      "reason": "revocation list missing, inaccessible, malformed, or integrity unverifiable",
+      "status": "UNKNOWN",
+      "synthetic_only": true
+    },
+    {
+      "blocking_condition": "revocation list missing, inaccessible, malformed, or integrity unverifiable",
+      "expected_status": "UNKNOWN",
+      "id": "S17-07",
+      "name": "revocation_list_tampered",
+      "pass": true,
+      "production_verified": false,
+      "provenance": {
+        "canonical_input_sha256": "6a9ddf943e5982fdd6c9c813330dcb7bc570f0764aef1cc2cb92611765685ff8",
+        "canonicalizer_a_sha256": "6a9ddf943e5982fdd6c9c813330dcb7bc570f0764aef1cc2cb92611765685ff8",
+        "canonicalizer_b_sha256": "6a9ddf943e5982fdd6c9c813330dcb7bc570f0764aef1cc2cb92611765685ff8",
+        "hmac_key_id": "S17-fixed-nonreal-key-v1",
+        "implementation_a": "canonicalizer-A/json-sort-keys-v1",
+        "implementation_b": "canonicalizer-B/json-sort-keys-v1-or-deliberate-divergence",
+        "revocation_sha256": "3ca1274321ba434a6cf9e37f6b6c7c5fafbf050314b20b516181d921166167ae",
+        "signature_sha256": "f0c03095323777cef83a8f97ab2e8bf980e91ca6acb15eaf03a8036e1a3abcb4"
+      },
+      "reason": "revocation list missing, inaccessible, malformed, or integrity unverifiable",
+      "status": "UNKNOWN",
+      "synthetic_only": true
+    },
+    {
+      "blocking_condition": null,
+      "expected_status": "RECOVERED",
+      "id": "S17-08",
+      "name": "cross_impl_same_hash",
+      "pass": true,
+      "production_verified": false,
+      "provenance": {
+        "canonical_input_sha256": "c4d6c839d48dfdde86c0066e98516dce1221f1114fd657119fdbe630ca6b5b64",
+        "canonicalizer_a_sha256": "c4d6c839d48dfdde86c0066e98516dce1221f1114fd657119fdbe630ca6b5b64",
+        "canonicalizer_b_sha256": "c4d6c839d48dfdde86c0066e98516dce1221f1114fd657119fdbe630ca6b5b64",
+        "hmac_key_id": "S17-fixed-nonreal-key-v1",
+        "implementation_a": "canonicalizer-A/json-sort-keys-v1",
+        "implementation_b": "canonicalizer-B/json-sort-keys-v1-or-deliberate-divergence",
+        "revocation_sha256": "2cd71a58cad626449671c9cf77791719a67e63b807ce921afa10d246d152ebcf",
+        "signature_sha256": "1d4b0c80108d1355ff1f08ec184d144cd37da0e92633e4ffee7e4b68857c385c"
+      },
+      "reason": "signature, revocation integrity, and cross-implementation canonicalization checks passed",
+      "status": "RECOVERED",
+      "synthetic_only": true
+    },
+    {
+      "blocking_condition": "canonicalizer A/B hash divergence; conservative non-rejection",
+      "expected_status": "UNKNOWN",
+      "id": "S17-09",
+      "name": "cross_impl_hash_mismatch_unknown",
+      "pass": true,
+      "production_verified": false,
+      "provenance": {
+        "canonical_input_sha256": "14578857d5f2004595e3cbcef17dcb0ab1326b331c5b30727f4a180a4792495c",
+        "canonicalizer_a_sha256": "14578857d5f2004595e3cbcef17dcb0ab1326b331c5b30727f4a180a4792495c",
+        "canonicalizer_b_sha256": "e4067537d180669fb29f8b22872bfc7d880bb544d784700d52c4ac7982010aa9",
+        "hmac_key_id": "S17-fixed-nonreal-key-v1",
+        "implementation_a": "canonicalizer-A/json-sort-keys-v1",
+        "implementation_b": "canonicalizer-B/json-sort-keys-v1-or-deliberate-divergence",
+        "revocation_sha256": "2cd71a58cad626449671c9cf77791719a67e63b807ce921afa10d246d152ebcf",
+        "signature_sha256": "fca28d37d552d0e1256cc6f2c947196c05e4f01ecab1a362016454527ecccd20"
+      },
+      "reason": "canonicalizer A/B hash divergence; conservative non-rejection",
+      "status": "UNKNOWN",
+      "synthetic_only": true
+    },
+    {
+      "blocking_condition": "explicit canonicalization contradiction",
+      "expected_status": "REJECT",
+      "id": "S17-10",
+      "name": "cross_impl_explicit_contradiction",
+      "pass": true,
+      "production_verified": false,
+      "provenance": {
+        "canonical_input_sha256": "a41937cde8364c468edfd5a21f3e1623054b6cb37639a38056e2283eb979948a",
+        "canonicalizer_a_sha256": "a41937cde8364c468edfd5a21f3e1623054b6cb37639a38056e2283eb979948a",
+        "canonicalizer_b_sha256": "07e2bebe2a8c69ec47afe88bdbfed3305f8d93be0e7fac3238e50fce37222853",
+        "hmac_key_id": "S17-fixed-nonreal-key-v1",
+        "implementation_a": "canonicalizer-A/json-sort-keys-v1",
+        "implementation_b": "canonicalizer-B/json-sort-keys-v1-or-deliberate-divergence",
+        "revocation_sha256": "2cd71a58cad626449671c9cf77791719a67e63b807ce921afa10d246d152ebcf",
+        "signature_sha256": "d0c1747c258ed8daf23e084d7d5873417b9e7778e345265dfb36f989eb105a62"
+      },
+      "reason": "explicit canonicalization contradiction",
+      "status": "REJECT",
+      "synthetic_only": true
+    },
+    {
+      "blocking_condition": null,
+      "expected_status": "RECOVERED",
+      "id": "S17-11",
+      "name": "combination_signature_ok_revocation_ok",
+      "pass": true,
+      "production_verified": false,
+      "provenance": {
+        "canonical_input_sha256": "ae6a66fdfb132ce8ff61b87906a0ba03abed7aec5914be6fbc9f2d882d8a7653",
+        "canonicalizer_a_sha256": "ae6a66fdfb132ce8ff61b87906a0ba03abed7aec5914be6fbc9f2d882d8a7653",
+        "canonicalizer_b_sha256": "ae6a66fdfb132ce8ff61b87906a0ba03abed7aec5914be6fbc9f2d882d8a7653",
+        "hmac_key_id": "S17-fixed-nonreal-key-v1",
+        "implementation_a": "canonicalizer-A/json-sort-keys-v1",
+        "implementation_b": "canonicalizer-B/json-sort-keys-v1-or-deliberate-divergence",
+        "revocation_sha256": "2cd71a58cad626449671c9cf77791719a67e63b807ce921afa10d246d152ebcf",
+        "signature_sha256": "0b0407046955d1aa6a6b0215358e03c21087ca549e4fbaab064c779eff9b09a1"
+      },
+      "reason": "signature, revocation integrity, and cross-implementation canonicalization checks passed",
+      "status": "RECOVERED",
+      "synthetic_only": true
+    },
+    {
+      "blocking_condition": "revocation record hit at observation boundary",
+      "expected_status": "REJECT",
+      "id": "S17-12",
+      "name": "combination_signature_ok_revoked",
+      "pass": true,
+      "production_verified": false,
+      "provenance": {
+        "canonical_input_sha256": "9f9fde0494e3f3d962b4ac4297d2548742485b7307e0fce78395dd103e432f9d",
+        "canonicalizer_a_sha256": "9f9fde0494e3f3d962b4ac4297d2548742485b7307e0fce78395dd103e432f9d",
+        "canonicalizer_b_sha256": "9f9fde0494e3f3d962b4ac4297d2548742485b7307e0fce78395dd103e432f9d",
+        "hmac_key_id": "S17-fixed-nonreal-key-v1",
+        "implementation_a": "canonicalizer-A/json-sort-keys-v1",
+        "implementation_b": "canonicalizer-B/json-sort-keys-v1-or-deliberate-divergence",
+        "revocation_sha256": "9c29d2bed1a0728005f38c6f5ac012deec8a69f77fb09559a911faa2af7f04da",
+        "signature_sha256": "c9c69ec814a917f8ba715b56a4d2ca10652efb6e67cbf6bcdfcc4c6b5598cbe6"
+      },
+      "reason": "revocation record hit at observation boundary",
+      "status": "REJECT",
+      "synthetic_only": true
+    },
+    {
+      "blocking_condition": "policy HMAC-SHA256 verification failed",
+      "expected_status": "REJECT",
+      "id": "S17-13",
+      "name": "combination_signature_bad_revoked",
+      "pass": true,
+      "production_verified": false,
+      "provenance": {
+        "canonical_input_sha256": "4499ee4a8291083858fda01d6c2ec07b8622ce20aee8c156201ab0d494f4fcd1",
+        "canonicalizer_a_sha256": "4499ee4a8291083858fda01d6c2ec07b8622ce20aee8c156201ab0d494f4fcd1",
+        "canonicalizer_b_sha256": "4499ee4a8291083858fda01d6c2ec07b8622ce20aee8c156201ab0d494f4fcd1",
+        "hmac_key_id": "S17-fixed-nonreal-key-v1",
+        "implementation_a": "canonicalizer-A/json-sort-keys-v1",
+        "implementation_b": "canonicalizer-B/json-sort-keys-v1-or-deliberate-divergence",
+        "revocation_sha256": "85dbae78588dedf03e7e2ef37d72602f23fff366498f2c9bfe28734765c38a25",
+        "signature_sha256": "e5b3e61a5390d39cc25b9d58d349695a3a941a5171ead3ed28f36c1ddfbc0c59"
+      },
+      "reason": "policy HMAC-SHA256 verification failed",
+      "status": "REJECT",
+      "synthetic_only": true
+    },
+    {
+      "blocking_condition": "revocation list missing, inaccessible, malformed, or integrity unverifiable",
+      "expected_status": "UNKNOWN",
+      "id": "S17-14",
+      "name": "combination_revocation_inaccessible",
+      "pass": true,
+      "production_verified": false,
+      "provenance": {
+        "canonical_input_sha256": "a02def59395dcd97cb7127ffb67135b2a2ea03e50456de3a3a946185986fe281",
+        "canonicalizer_a_sha256": "a02def59395dcd97cb7127ffb67135b2a2ea03e50456de3a3a946185986fe281",
+        "canonicalizer_b_sha256": "a02def59395dcd97cb7127ffb67135b2a2ea03e50456de3a3a946185986fe281",
+        "hmac_key_id": "S17-fixed-nonreal-key-v1",
+        "implementation_a": "canonicalizer-A/json-sort-keys-v1",
+        "implementation_b": "canonicalizer-B/json-sort-keys-v1-or-deliberate-divergence",
+        "revocation_sha256": "1bbc5eb53033fa10f526c0245b6032760000674c4a28b7df6dd4c2989bb39c52",
+        "signature_sha256": "3e27aa9c34749fd323591deec3a10b07f2d83f23f8280943faea517f1cd541b8"
+      },
+      "reason": "revocation list missing, inaccessible, malformed, or integrity unverifiable",
+      "status": "UNKNOWN",
+      "synthetic_only": true
+    },
+    {
+      "blocking_condition": "revocation record hit at observation boundary",
+      "expected_status": "REJECT",
+      "id": "S17-15",
+      "name": "clock_equal_boundary_inside",
+      "pass": true,
+      "production_verified": false,
+      "provenance": {
+        "canonical_input_sha256": "771379be1d849f9c80b35543d5d7ddf15e7172c21fb9507693eeeecf35d5df25",
+        "canonicalizer_a_sha256": "771379be1d849f9c80b35543d5d7ddf15e7172c21fb9507693eeeecf35d5df25",
+        "canonicalizer_b_sha256": "771379be1d849f9c80b35543d5d7ddf15e7172c21fb9507693eeeecf35d5df25",
+        "hmac_key_id": "S17-fixed-nonreal-key-v1",
+        "implementation_a": "canonicalizer-A/json-sort-keys-v1",
+        "implementation_b": "canonicalizer-B/json-sort-keys-v1-or-deliberate-divergence",
+        "revocation_sha256": "97bb11ac0dc27a625b60e22c78a78e988da2c976b3d79b478181c04c609d0c9f",
+        "signature_sha256": "da001f2c5e9e15b5a4d0d317afe6ac6c0097d002de1d6f30f2a1b02b65115ee7"
+      },
+      "reason": "revocation record hit at observation boundary",
+      "status": "REJECT",
+      "synthetic_only": true
+    },
+    {
+      "blocking_condition": null,
+      "expected_status": "RECOVERED",
+      "id": "S17-16",
+      "name": "clock_just_before_boundary_outside",
+      "pass": true,
+      "production_verified": false,
+      "provenance": {
+        "canonical_input_sha256": "23174ab28d6d245dcc83d98c1de6fafefe7f722cf5f9d7859822bb4d8d98e3ef",
+        "canonicalizer_a_sha256": "23174ab28d6d245dcc83d98c1de6fafefe7f722cf5f9d7859822bb4d8d98e3ef",
+        "canonicalizer_b_sha256": "23174ab28d6d245dcc83d98c1de6fafefe7f722cf5f9d7859822bb4d8d98e3ef",
+        "hmac_key_id": "S17-fixed-nonreal-key-v1",
+        "implementation_a": "canonicalizer-A/json-sort-keys-v1",
+        "implementation_b": "canonicalizer-B/json-sort-keys-v1-or-deliberate-divergence",
+        "revocation_sha256": "3ea600e49d4de4bb0e96c42408eb00570312dc9b3fe5a4fbbc9e0e9e8b537939",
+        "signature_sha256": "31071cb3107e7f8fafc334ad8b5173b99aed8afc256729769d32660e5345dde1"
+      },
+      "reason": "signature, revocation integrity, and cross-implementation canonicalization checks passed",
+      "status": "RECOVERED",
+      "synthetic_only": true
+    },
+    {
+      "blocking_condition": "revocation record hit at observation boundary",
+      "expected_status": "REJECT",
+      "id": "S17-17",
+      "name": "clock_after_boundary_inside",
+      "pass": true,
+      "production_verified": false,
+      "provenance": {
+        "canonical_input_sha256": "73f772677fac82142f3cd0a5d8a714f2212e492538ef8f5043335db3ec074209",
+        "canonicalizer_a_sha256": "73f772677fac82142f3cd0a5d8a714f2212e492538ef8f5043335db3ec074209",
+        "canonicalizer_b_sha256": "73f772677fac82142f3cd0a5d8a714f2212e492538ef8f5043335db3ec074209",
+        "hmac_key_id": "S17-fixed-nonreal-key-v1",
+        "implementation_a": "canonicalizer-A/json-sort-keys-v1",
+        "implementation_b": "canonicalizer-B/json-sort-keys-v1-or-deliberate-divergence",
+        "revocation_sha256": "2b6c99f279a2c8c31384d71f97cc510ed76268816c43e7c7be0c4c17d20b5a7f",
+        "signature_sha256": "b83ba68ccea75572861b468b1dceff4fef482acf34c2488087d9c78b57eae79a"
+      },
+      "reason": "revocation record hit at observation boundary",
+      "status": "REJECT",
+      "synthetic_only": true
+    },
+    {
+      "blocking_condition": "revocation record hit at observation boundary",
+      "expected_status": "REJECT",
+      "id": "S17-18",
+      "name": "clock_window_inside",
+      "pass": true,
+      "production_verified": false,
+      "provenance": {
+        "canonical_input_sha256": "47fd7fc36b20d1426d7fa5836c99fe580237b5278bc0c66e5d45f60a2ad14d45",
+        "canonicalizer_a_sha256": "47fd7fc36b20d1426d7fa5836c99fe580237b5278bc0c66e5d45f60a2ad14d45",
+        "canonicalizer_b_sha256": "47fd7fc36b20d1426d7fa5836c99fe580237b5278bc0c66e5d45f60a2ad14d45",
+        "hmac_key_id": "S17-fixed-nonreal-key-v1",
+        "implementation_a": "canonicalizer-A/json-sort-keys-v1",
+        "implementation_b": "canonicalizer-B/json-sort-keys-v1-or-deliberate-divergence",
+        "revocation_sha256": "5d399013db71d2bee5265ffacb791fe5864d06dd80c05ad092e9b4c0120fd1b4",
+        "signature_sha256": "23b02b31fb9cf9f3758228a4513e53faa93527ad1395a07aa7f6a63e745c269f"
+      },
+      "reason": "revocation record hit at observation boundary",
+      "status": "REJECT",
+      "synthetic_only": true
+    },
+    {
+      "blocking_condition": null,
+      "expected_status": "RECOVERED",
+      "id": "S17-19",
+      "name": "clock_window_outside_after_expiry",
+      "pass": true,
+      "production_verified": false,
+      "provenance": {
+        "canonical_input_sha256": "3ab825428abc6416eb0a0a1ff967febf958fea2c20fe6cb73c19fe4dc5827fae",
+        "canonicalizer_a_sha256": "3ab825428abc6416eb0a0a1ff967febf958fea2c20fe6cb73c19fe4dc5827fae",
+        "canonicalizer_b_sha256": "3ab825428abc6416eb0a0a1ff967febf958fea2c20fe6cb73c19fe4dc5827fae",
+        "hmac_key_id": "S17-fixed-nonreal-key-v1",
+        "implementation_a": "canonicalizer-A/json-sort-keys-v1",
+        "implementation_b": "canonicalizer-B/json-sort-keys-v1-or-deliberate-divergence",
+        "revocation_sha256": "edfe3b0c3dd67ac2490ce4b25178ad769291c0ced5718e6aadf3c4b047044418",
+        "signature_sha256": "ebf95fdba5ed5be08536d24aa9b33fe385db0e7e1a1ba3ff53ecf34fc70c2e7b"
+      },
+      "reason": "signature, revocation integrity, and cross-implementation canonicalization checks passed",
+      "status": "RECOVERED",
+      "synthetic_only": true
+    },
+    {
+      "blocking_condition": "policy HMAC-SHA256 verification failed",
+      "expected_status": "REJECT",
+      "id": "S17-20",
+      "name": "malformed_signature",
+      "pass": true,
+      "production_verified": false,
+      "provenance": {
+        "canonical_input_sha256": "5816a6b3ff9051c3935d9028d3390c3c5b3d7f59bb7b38f8046a26fda6836578",
+        "canonicalizer_a_sha256": "5816a6b3ff9051c3935d9028d3390c3c5b3d7f59bb7b38f8046a26fda6836578",
+        "canonicalizer_b_sha256": "5816a6b3ff9051c3935d9028d3390c3c5b3d7f59bb7b38f8046a26fda6836578",
+        "hmac_key_id": "S17-fixed-nonreal-key-v1",
+        "implementation_a": "canonicalizer-A/json-sort-keys-v1",
+        "implementation_b": "canonicalizer-B/json-sort-keys-v1-or-deliberate-divergence",
+        "revocation_sha256": "2cd71a58cad626449671c9cf77791719a67e63b807ce921afa10d246d152ebcf",
+        "signature_sha256": "a97e15062904f833e38e8ad0f2e87b0f2179ed9e4e5f35266b0277f481f673aa"
+      },
+      "reason": "policy HMAC-SHA256 verification failed",
+      "status": "REJECT",
+      "synthetic_only": true
+    },
+    {
+      "blocking_condition": "canonicalizer B unavailable; no majority-vote or retry escalation",
+      "expected_status": "UNKNOWN",
+      "id": "S17-21",
+      "name": "unknown_implementation",
+      "pass": true,
+      "production_verified": false,
+      "provenance": {
+        "canonical_input_sha256": "37c22938993ff4dd11074f00a96fbf255e5a4d645e4d0bf44fd75e9dd1ac51cb",
+        "canonicalizer_a_sha256": "37c22938993ff4dd11074f00a96fbf255e5a4d645e4d0bf44fd75e9dd1ac51cb",
+        "canonicalizer_b_sha256": "37c22938993ff4dd11074f00a96fbf255e5a4d645e4d0bf44fd75e9dd1ac51cb",
+        "hmac_key_id": "S17-fixed-nonreal-key-v1",
+        "implementation_a": "canonicalizer-A/json-sort-keys-v1",
+        "implementation_b": "canonicalizer-B/json-sort-keys-v1-or-deliberate-divergence",
+        "revocation_sha256": "2cd71a58cad626449671c9cf77791719a67e63b807ce921afa10d246d152ebcf",
+        "signature_sha256": "7809e02e23bd3730deb1a4fd6f8549b0d8bb0714ac01a9f20f0b83ae5b64b589"
+      },
+      "reason": "canonicalizer B unavailable; no majority-vote or retry escalation",
+      "status": "UNKNOWN",
+      "synthetic_only": true
+    },
+    {
+      "blocking_condition": null,
+      "expected_status": "RECOVERED",
+      "id": "S17-22",
+      "name": "empty_policy_still_deterministic",
+      "pass": true,
+      "production_verified": false,
+      "provenance": {
+        "canonical_input_sha256": "d6a5236b15a0bbc53d34193ac6bda46626ed2b26b636bc5905e124c901b58ed6",
+        "canonicalizer_a_sha256": "d6a5236b15a0bbc53d34193ac6bda46626ed2b26b636bc5905e124c901b58ed6",
+        "canonicalizer_b_sha256": "d6a5236b15a0bbc53d34193ac6bda46626ed2b26b636bc5905e124c901b58ed6",
+        "hmac_key_id": "S17-fixed-nonreal-key-v1",
+        "implementation_a": "canonicalizer-A/json-sort-keys-v1",
+        "implementation_b": "canonicalizer-B/json-sort-keys-v1-or-deliberate-divergence",
+        "revocation_sha256": "2cd71a58cad626449671c9cf77791719a67e63b807ce921afa10d246d152ebcf",
+        "signature_sha256": "81358f7b5af8b30c1924c3f52b6315f35c447a7228c7e27dde7d21f0008ea16e"
+      },
+      "reason": "signature, revocation integrity, and cross-implementation canonicalization checks passed",
+      "status": "RECOVERED",
+      "synthetic_only": true
+    },
+    {
+      "blocking_condition": "revocation list missing, inaccessible, malformed, or integrity unverifiable",
+      "expected_status": "UNKNOWN",
+      "id": "S17-23",
+      "name": "malformed_revocation_entry",
+      "pass": true,
+      "production_verified": false,
+      "provenance": {
+        "canonical_input_sha256": "a5b7c62c28f3deccf25b833c257b41238984f6723dacec2f45aa79064d8d7311",
+        "canonicalizer_a_sha256": "a5b7c62c28f3deccf25b833c257b41238984f6723dacec2f45aa79064d8d7311",
+        "canonicalizer_b_sha256": "a5b7c62c28f3deccf25b833c257b41238984f6723dacec2f45aa79064d8d7311",
+        "hmac_key_id": "S17-fixed-nonreal-key-v1",
+        "implementation_a": "canonicalizer-A/json-sort-keys-v1",
+        "implementation_b": "canonicalizer-B/json-sort-keys-v1-or-deliberate-divergence",
+        "revocation_sha256": "76ab6b409681f1b48b0e7cce82bece6047084d7e8d8ff54a8722ceb0cc513329",
+        "signature_sha256": "881a867dcd2173f7e7c4fbfdf7a3a915cede36c0333486b0490f43e16bb87c12"
+      },
+      "reason": "revocation list missing, inaccessible, malformed, or integrity unverifiable",
+      "status": "UNKNOWN",
+      "synthetic_only": true
+    },
+    {
+      "blocking_condition": null,
+      "expected_status": "RECOVERED",
+      "id": "S17-24",
+      "name": "package_id_revocation_miss",
+      "pass": true,
+      "production_verified": false,
+      "provenance": {
+        "canonical_input_sha256": "50b4243466302b384e762b241687d5ad273ecfd411f929e31f5e40fabe72f640",
+        "canonicalizer_a_sha256": "50b4243466302b384e762b241687d5ad273ecfd411f929e31f5e40fabe72f640",
+        "canonicalizer_b_sha256": "50b4243466302b384e762b241687d5ad273ecfd411f929e31f5e40fabe72f640",
+        "hmac_key_id": "S17-fixed-nonreal-key-v1",
+        "implementation_a": "canonicalizer-A/json-sort-keys-v1",
+        "implementation_b": "canonicalizer-B/json-sort-keys-v1-or-deliberate-divergence",
+        "revocation_sha256": "da70430190b45b81ffde89dfc6efc416727f5382eb5f1428c7cb7289bfcc6325",
+        "signature_sha256": "9191dc2a3727a6447cbf31a5c93083138c1ef6f662b6912dca02de6baea449de"
+      },
+      "reason": "signature, revocation integrity, and cross-implementation canonicalization checks passed",
+      "status": "RECOVERED",
+      "synthetic_only": true
+    },
+    {
+      "blocking_condition": "policy HMAC-SHA256 verification failed",
+      "expected_status": "REJECT",
+      "id": "S17-25",
+      "name": "signature_bad_and_revocation_unavailable",
+      "pass": true,
+      "production_verified": false,
+      "provenance": {
+        "canonical_input_sha256": "09293a66dda7d40cdb1ad085f415e54e39e73d2bdc37ee16038fe09f79bbbed8",
+        "canonicalizer_a_sha256": "09293a66dda7d40cdb1ad085f415e54e39e73d2bdc37ee16038fe09f79bbbed8",
+        "canonicalizer_b_sha256": "09293a66dda7d40cdb1ad085f415e54e39e73d2bdc37ee16038fe09f79bbbed8",
+        "hmac_key_id": "S17-fixed-nonreal-key-v1",
+        "implementation_a": "canonicalizer-A/json-sort-keys-v1",
+        "implementation_b": "canonicalizer-B/json-sort-keys-v1-or-deliberate-divergence",
+        "revocation_sha256": "1bbc5eb53033fa10f526c0245b6032760000674c4a28b7df6dd4c2989bb39c52",
+        "signature_sha256": "0db8c321932fb7bb38030284661229d6dc871ee7834c43d61fffa7a3c23c82e7"
+      },
+      "reason": "policy HMAC-SHA256 verification failed",
+      "status": "REJECT",
+      "synthetic_only": true
+    }
+  ],
+  "run_count": 1,
+  "schema_version": "S17-results-v1",
+  "status_counts": {
+    "RECOVERED": 8,
+    "REJECT": 11,
+    "UNKNOWN": 6
+  },
+  "synthetic_only": true
+}

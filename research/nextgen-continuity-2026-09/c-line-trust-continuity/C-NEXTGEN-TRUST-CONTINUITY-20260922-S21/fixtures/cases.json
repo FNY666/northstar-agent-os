@@ -1,0 +1,1052 @@
+{
+  "cases": [
+    {
+      "case_id": "S21-001",
+      "declarations": {
+        "declares_total_order": false,
+        "invariant_graph_must_be_total_order": false
+      },
+      "edges": [
+        {
+          "from": "A",
+          "from_record": "A",
+          "id": "e1",
+          "to": "B",
+          "to_record": "B"
+        }
+      ],
+      "expected": {
+        "judgment": "RECOVERED",
+        "subclass": "direct_edge"
+      },
+      "nodes": [
+        {
+          "id": "A",
+          "label": "A"
+        },
+        {
+          "id": "B",
+          "label": "B"
+        }
+      ],
+      "notes": "",
+      "query": {
+        "x": "A",
+        "y": "B"
+      },
+      "title": "direct edge"
+    },
+    {
+      "case_id": "S21-002",
+      "declarations": {
+        "declares_total_order": false,
+        "invariant_graph_must_be_total_order": false
+      },
+      "edges": [
+        {
+          "from": "A",
+          "from_record": "A",
+          "id": "e1",
+          "to": "B",
+          "to_record": "B"
+        },
+        {
+          "from": "B",
+          "from_record": "B",
+          "id": "e2",
+          "to": "C",
+          "to_record": "C"
+        }
+      ],
+      "expected": {
+        "judgment": "RECOVERED",
+        "subclass": "transitive_order"
+      },
+      "nodes": [
+        {
+          "id": "A",
+          "label": "A"
+        },
+        {
+          "id": "B",
+          "label": "B"
+        },
+        {
+          "id": "C",
+          "label": "C"
+        }
+      ],
+      "notes": "",
+      "query": {
+        "x": "A",
+        "y": "C"
+      },
+      "title": "transitive closure"
+    },
+    {
+      "case_id": "S21-003",
+      "declarations": {
+        "declares_total_order": false,
+        "invariant_graph_must_be_total_order": false
+      },
+      "edges": [],
+      "expected": {
+        "judgment": "UNKNOWN"
+      },
+      "nodes": [
+        {
+          "id": "A",
+          "label": "A"
+        },
+        {
+          "id": "B",
+          "label": "B"
+        }
+      ],
+      "notes": "parallel events; no causal claim",
+      "query": {
+        "x": "A",
+        "y": "B"
+      },
+      "title": "missing edge concurrent pair"
+    },
+    {
+      "case_id": "S21-004",
+      "declarations": {
+        "declares_total_order": false,
+        "invariant_graph_must_be_total_order": false
+      },
+      "edges": [
+        {
+          "from": "A",
+          "from_record": "A",
+          "id": "e1",
+          "to": "B",
+          "to_record": "B"
+        }
+      ],
+      "expected": {
+        "judgment": "UNKNOWN"
+      },
+      "nodes": [
+        {
+          "id": "A",
+          "label": "A"
+        },
+        {
+          "id": "B",
+          "label": "B"
+        }
+      ],
+      "notes": "absence of reverse path blocks ordering",
+      "query": {
+        "x": "B",
+        "y": "A"
+      },
+      "title": "reverse query is not inferred"
+    },
+    {
+      "case_id": "S21-005",
+      "declarations": {
+        "declares_total_order": false,
+        "invariant_graph_must_be_total_order": false
+      },
+      "edges": [
+        {
+          "from": "A",
+          "from_record": "A",
+          "id": "e1",
+          "to": "B",
+          "to_record": "B"
+        },
+        {
+          "from": "B",
+          "from_record": "B",
+          "id": "e2",
+          "to": "C",
+          "to_record": "C"
+        },
+        {
+          "from": "C",
+          "from_record": "C",
+          "id": "e3",
+          "to": "A",
+          "to_record": "A"
+        }
+      ],
+      "expected": {
+        "judgment": "REJECT"
+      },
+      "nodes": [
+        {
+          "id": "A",
+          "label": "A"
+        },
+        {
+          "id": "B",
+          "label": "B"
+        },
+        {
+          "id": "C",
+          "label": "C"
+        }
+      ],
+      "notes": "cycle is a structural contradiction",
+      "query": {
+        "x": "A",
+        "y": "C"
+      },
+      "title": "causal cycle"
+    },
+    {
+      "case_id": "S21-006",
+      "declarations": {
+        "declares_total_order": false,
+        "invariant_graph_must_be_total_order": false
+      },
+      "edges": [
+        {
+          "from": "A",
+          "from_record": "A",
+          "id": "e1",
+          "to": "C",
+          "to_record": "C"
+        }
+      ],
+      "expected": {
+        "judgment": "UNKNOWN"
+      },
+      "nodes": [
+        {
+          "id": "A",
+          "label": "A"
+        },
+        {
+          "id": "B",
+          "label": "B"
+        }
+      ],
+      "notes": "edge references absent node C",
+      "query": {
+        "x": "A",
+        "y": "B"
+      },
+      "title": "missing node in edge"
+    },
+    {
+      "case_id": "S21-007",
+      "declarations": {
+        "declares_total_order": false,
+        "invariant_graph_must_be_total_order": false
+      },
+      "edges": [
+        {
+          "from": "A",
+          "from_record": "A",
+          "id": "e1",
+          "to": "B",
+          "to_record": "B"
+        },
+        {
+          "from": "A",
+          "from_record": "A",
+          "id": "e2",
+          "to": "B",
+          "to_record": "B"
+        }
+      ],
+      "expected": {
+        "judgment": "RECOVERED",
+        "subclass": "direct_edge"
+      },
+      "nodes": [
+        {
+          "id": "A",
+          "label": "A"
+        },
+        {
+          "id": "B",
+          "label": "B"
+        }
+      ],
+      "notes": "duplicate adds no evidence",
+      "query": {
+        "x": "A",
+        "y": "B"
+      },
+      "title": "duplicate direct edge"
+    },
+    {
+      "case_id": "S21-008",
+      "declarations": {
+        "declares_total_order": false,
+        "invariant_graph_must_be_total_order": false
+      },
+      "edges": [
+        {
+          "from": "A",
+          "from_record": "A",
+          "id": "e1",
+          "to": "B",
+          "to_record": "C"
+        }
+      ],
+      "expected": {
+        "judgment": "REJECT"
+      },
+      "nodes": [
+        {
+          "id": "A",
+          "label": "A"
+        },
+        {
+          "id": "B",
+          "label": "B"
+        }
+      ],
+      "notes": "edge endpoint and record disagree",
+      "query": {
+        "x": "A",
+        "y": "B"
+      },
+      "title": "damaged edge endpoint record"
+    },
+    {
+      "case_id": "S21-009",
+      "declarations": {
+        "declares_total_order": true,
+        "invariant_graph_must_be_total_order": false
+      },
+      "edges": [
+        {
+          "from": "A",
+          "from_record": "A",
+          "id": "e1",
+          "to": "B",
+          "to_record": "B"
+        }
+      ],
+      "expected": {
+        "judgment": "UNKNOWN"
+      },
+      "nodes": [
+        {
+          "id": "A",
+          "label": "A"
+        },
+        {
+          "id": "B",
+          "label": "B"
+        },
+        {
+          "id": "C",
+          "label": "C"
+        }
+      ],
+      "notes": "declaration is not an enforceable invariant",
+      "query": {
+        "x": "A",
+        "y": "C"
+      },
+      "title": "declared total order but partial graph"
+    },
+    {
+      "case_id": "S21-010",
+      "declarations": {
+        "declares_total_order": true,
+        "invariant_graph_must_be_total_order": true
+      },
+      "edges": [
+        {
+          "from": "A",
+          "from_record": "A",
+          "id": "e1",
+          "to": "B",
+          "to_record": "B"
+        }
+      ],
+      "expected": {
+        "judgment": "REJECT"
+      },
+      "nodes": [
+        {
+          "id": "A",
+          "label": "A"
+        },
+        {
+          "id": "B",
+          "label": "B"
+        },
+        {
+          "id": "C",
+          "label": "C"
+        }
+      ],
+      "notes": "explicit invariant makes violation reject",
+      "query": {
+        "x": "A",
+        "y": "C"
+      },
+      "title": "total-order invariant violated"
+    },
+    {
+      "case_id": "S21-011",
+      "declarations": {
+        "declares_total_order": true,
+        "invariant_graph_must_be_total_order": true
+      },
+      "edges": [
+        {
+          "from": "A",
+          "from_record": "A",
+          "id": "e1",
+          "to": "B",
+          "to_record": "B"
+        },
+        {
+          "from": "B",
+          "from_record": "B",
+          "id": "e2",
+          "to": "C",
+          "to_record": "C"
+        }
+      ],
+      "expected": {
+        "judgment": "RECOVERED",
+        "subclass": "transitive_order"
+      },
+      "nodes": [
+        {
+          "id": "A",
+          "label": "A"
+        },
+        {
+          "id": "B",
+          "label": "B"
+        },
+        {
+          "id": "C",
+          "label": "C"
+        }
+      ],
+      "notes": "",
+      "query": {
+        "x": "A",
+        "y": "C"
+      },
+      "title": "consistent total order via chain"
+    },
+    {
+      "case_id": "S21-012",
+      "declarations": {
+        "declares_total_order": false,
+        "invariant_graph_must_be_total_order": false
+      },
+      "edges": [
+        {
+          "from": "A",
+          "from_record": "A",
+          "id": "e1",
+          "to": "B",
+          "to_record": "B"
+        },
+        {
+          "from": "C",
+          "from_record": "C",
+          "id": "e2",
+          "to": "D",
+          "to_record": "D"
+        }
+      ],
+      "expected": {
+        "judgment": "UNKNOWN"
+      },
+      "nodes": [
+        {
+          "id": "A",
+          "label": "A"
+        },
+        {
+          "id": "B",
+          "label": "B"
+        },
+        {
+          "id": "C",
+          "label": "C"
+        },
+        {
+          "id": "D",
+          "label": "D"
+        }
+      ],
+      "notes": "components are incomparable",
+      "query": {
+        "x": "A",
+        "y": "D"
+      },
+      "title": "two independent components"
+    },
+    {
+      "case_id": "S21-013",
+      "declarations": {
+        "declares_total_order": false,
+        "invariant_graph_must_be_total_order": false
+      },
+      "edges": [
+        {
+          "from": "A",
+          "from_record": "A",
+          "id": "e1",
+          "to": "B",
+          "to_record": "B"
+        },
+        {
+          "from": "B",
+          "from_record": "B",
+          "id": "e2",
+          "to": "D",
+          "to_record": "D"
+        },
+        {
+          "from": "A",
+          "from_record": "A",
+          "id": "e3",
+          "to": "C",
+          "to_record": "C"
+        },
+        {
+          "from": "C",
+          "from_record": "C",
+          "id": "e4",
+          "to": "D",
+          "to_record": "D"
+        }
+      ],
+      "expected": {
+        "judgment": "RECOVERED",
+        "subclass": "transitive_order"
+      },
+      "nodes": [
+        {
+          "id": "A",
+          "label": "A"
+        },
+        {
+          "id": "B",
+          "label": "B"
+        },
+        {
+          "id": "C",
+          "label": "C"
+        },
+        {
+          "id": "D",
+          "label": "D"
+        }
+      ],
+      "notes": "",
+      "query": {
+        "x": "A",
+        "y": "D"
+      },
+      "title": "multiple transitive paths"
+    },
+    {
+      "case_id": "S21-014",
+      "declarations": {
+        "declares_total_order": false,
+        "invariant_graph_must_be_total_order": false
+      },
+      "edges": [
+        {
+          "from": "A",
+          "from_record": "A",
+          "id": "e1",
+          "to": "B",
+          "to_record": "B"
+        }
+      ],
+      "expected": {
+        "judgment": "UNKNOWN"
+      },
+      "nodes": [
+        {
+          "id": "A",
+          "label": "A"
+        },
+        {
+          "id": "B",
+          "label": "B"
+        }
+      ],
+      "notes": "queried node Z absent",
+      "query": {
+        "x": "A",
+        "y": "Z"
+      },
+      "title": "query node missing"
+    },
+    {
+      "case_id": "S21-015",
+      "declarations": {
+        "declares_total_order": false,
+        "invariant_graph_must_be_total_order": false
+      },
+      "edges": [],
+      "expected": {
+        "judgment": "UNKNOWN"
+      },
+      "nodes": [],
+      "notes": "both query nodes absent",
+      "query": {
+        "x": "A",
+        "y": "B"
+      },
+      "title": "empty graph"
+    },
+    {
+      "case_id": "S21-016",
+      "declarations": {
+        "declares_total_order": false,
+        "invariant_graph_must_be_total_order": false
+      },
+      "edges": [
+        {
+          "from": "A",
+          "from_record": "A",
+          "id": "e1",
+          "to": "B",
+          "to_record": "B"
+        },
+        {
+          "from": "A",
+          "from_record": "A",
+          "id": "e2",
+          "to": "B",
+          "to_record": "B"
+        },
+        {
+          "from": "B",
+          "from_record": "B",
+          "id": "e3",
+          "to": "C",
+          "to_record": "C"
+        }
+      ],
+      "expected": {
+        "judgment": "RECOVERED",
+        "subclass": "transitive_order"
+      },
+      "nodes": [
+        {
+          "id": "A",
+          "label": "A"
+        },
+        {
+          "id": "B",
+          "label": "B"
+        },
+        {
+          "id": "C",
+          "label": "C"
+        }
+      ],
+      "notes": "duplicate does not create a second path",
+      "query": {
+        "x": "A",
+        "y": "C"
+      },
+      "title": "duplicate transitive edge"
+    },
+    {
+      "case_id": "S21-017",
+      "declarations": {
+        "declares_total_order": false,
+        "invariant_graph_must_be_total_order": false
+      },
+      "edges": [
+        {
+          "from": "A",
+          "from_record": "A",
+          "id": "e1",
+          "to": "B",
+          "to_record": "B"
+        }
+      ],
+      "expected": {
+        "judgment": "UNKNOWN"
+      },
+      "nodes": [
+        {
+          "id": "A",
+          "label": "A"
+        },
+        {
+          "id": "B",
+          "label": "B"
+        },
+        {
+          "id": "C",
+          "label": "C"
+        }
+      ],
+      "notes": "A to C path is blocked by missing B-to-C edge",
+      "query": {
+        "x": "A",
+        "y": "C"
+      },
+      "title": "missing middle link"
+    },
+    {
+      "case_id": "S21-018",
+      "declarations": {
+        "declares_total_order": false,
+        "invariant_graph_must_be_total_order": false
+      },
+      "edges": [
+        {
+          "from": "A",
+          "from_record": "A",
+          "id": "e1",
+          "to": "B",
+          "to_record": "B"
+        },
+        {
+          "from": "B",
+          "from_record": "X",
+          "id": "e2",
+          "to": "C",
+          "to_record": "C"
+        }
+      ],
+      "expected": {
+        "judgment": "REJECT"
+      },
+      "nodes": [
+        {
+          "id": "A",
+          "label": "A"
+        },
+        {
+          "id": "B",
+          "label": "B"
+        },
+        {
+          "id": "C",
+          "label": "C"
+        }
+      ],
+      "notes": "middle edge record mismatch",
+      "query": {
+        "x": "A",
+        "y": "C"
+      },
+      "title": "damaged middle link"
+    },
+    {
+      "case_id": "S21-019",
+      "declarations": {
+        "declares_total_order": false,
+        "invariant_graph_must_be_total_order": false
+      },
+      "edges": [],
+      "expected": {
+        "judgment": "UNKNOWN"
+      },
+      "nodes": [
+        {
+          "id": "A",
+          "label": "A"
+        },
+        {
+          "id": "B",
+          "label": "B"
+        }
+      ],
+      "notes": "concurrent means no happens-before either way",
+      "query": {
+        "x": "A",
+        "y": "B"
+      },
+      "title": "explicit concurrent declaration"
+    },
+    {
+      "case_id": "S21-020",
+      "declarations": {
+        "declares_total_order": false,
+        "invariant_graph_must_be_total_order": false
+      },
+      "edges": [],
+      "expected": {
+        "judgment": "UNKNOWN"
+      },
+      "nodes": [
+        {
+          "id": "A",
+          "label": "A"
+        }
+      ],
+      "notes": "strict precedence excludes reflexive order",
+      "query": {
+        "x": "A",
+        "y": "A"
+      },
+      "title": "self query acyclic"
+    },
+    {
+      "case_id": "S21-021",
+      "declarations": {
+        "declares_total_order": false,
+        "invariant_graph_must_be_total_order": false
+      },
+      "edges": [
+        {
+          "from": "A",
+          "from_record": "A",
+          "id": "e1",
+          "to": "B",
+          "to_record": "B"
+        },
+        {
+          "from": "B",
+          "from_record": "B",
+          "id": "e2",
+          "to": "C",
+          "to_record": "C"
+        },
+        {
+          "from": "C",
+          "from_record": "C",
+          "id": "e3",
+          "to": "A",
+          "to_record": "A"
+        },
+        {
+          "from": "A",
+          "from_record": "A",
+          "id": "e4",
+          "to": "B",
+          "to_record": "B"
+        }
+      ],
+      "expected": {
+        "judgment": "REJECT"
+      },
+      "nodes": [
+        {
+          "id": "A",
+          "label": "A"
+        },
+        {
+          "id": "B",
+          "label": "B"
+        },
+        {
+          "id": "C",
+          "label": "C"
+        }
+      ],
+      "notes": "cycle remains structural contradiction",
+      "query": {
+        "x": "B",
+        "y": "A"
+      },
+      "title": "cycle with duplicate edge"
+    },
+    {
+      "case_id": "S21-022",
+      "declarations": {
+        "declares_total_order": false,
+        "invariant_graph_must_be_total_order": false
+      },
+      "edges": [
+        {
+          "from": "A",
+          "from_record": "A",
+          "id": "e1",
+          "to": "B",
+          "to_record": "B"
+        },
+        {
+          "from": "C",
+          "from_record": "C",
+          "id": "e2",
+          "to": "D",
+          "to_record": "D"
+        },
+        {
+          "from": "E",
+          "from_record": "E",
+          "id": "e3",
+          "to": "F",
+          "to_record": "F"
+        },
+        {
+          "from": "G",
+          "from_record": "G",
+          "id": "e4",
+          "to": "H",
+          "to_record": "H"
+        }
+      ],
+      "expected": {
+        "judgment": "UNKNOWN"
+      },
+      "nodes": [
+        {
+          "id": "A",
+          "label": "A"
+        },
+        {
+          "id": "B",
+          "label": "B"
+        },
+        {
+          "id": "C",
+          "label": "C"
+        },
+        {
+          "id": "D",
+          "label": "D"
+        },
+        {
+          "id": "E",
+          "label": "E"
+        },
+        {
+          "id": "F",
+          "label": "F"
+        },
+        {
+          "id": "G",
+          "label": "G"
+        },
+        {
+          "id": "H",
+          "label": "H"
+        },
+        {
+          "id": "I",
+          "label": "I"
+        },
+        {
+          "id": "J",
+          "label": "J"
+        }
+      ],
+      "notes": "scale does not upgrade missing evidence",
+      "query": {
+        "x": "A",
+        "y": "J"
+      },
+      "title": "large sparse graph stays unknown"
+    },
+    {
+      "case_id": "S21-023",
+      "declarations": {
+        "declares_total_order": false,
+        "invariant_graph_must_be_total_order": false
+      },
+      "edges": [
+        {
+          "from": "A",
+          "from_record": "A",
+          "id": "e1",
+          "to": "C",
+          "to_record": "C"
+        },
+        {
+          "from": "A",
+          "from_record": "A",
+          "id": "e2",
+          "to": "B",
+          "to_record": "B"
+        },
+        {
+          "from": "B",
+          "from_record": "B",
+          "id": "e3",
+          "to": "C",
+          "to_record": "C"
+        }
+      ],
+      "expected": {
+        "judgment": "RECOVERED",
+        "subclass": "direct_edge"
+      },
+      "nodes": [
+        {
+          "id": "A",
+          "label": "A"
+        },
+        {
+          "id": "B",
+          "label": "B"
+        },
+        {
+          "id": "C",
+          "label": "C"
+        }
+      ],
+      "notes": "",
+      "query": {
+        "x": "A",
+        "y": "C"
+      },
+      "title": "direct edge preferred over longer path"
+    },
+    {
+      "case_id": "S21-024",
+      "declarations": {
+        "declares_total_order": false,
+        "invariant_graph_must_be_total_order": false
+      },
+      "edges": [
+        {
+          "from": "A",
+          "from_record": "A",
+          "id": "e1",
+          "to": "B",
+          "to_record": "B"
+        },
+        {
+          "from": "B",
+          "from_record": "B",
+          "id": "e2",
+          "to": "C",
+          "to_record": "C"
+        }
+      ],
+      "expected": {
+        "judgment": "UNKNOWN"
+      },
+      "nodes": [
+        {
+          "id": "A",
+          "label": "A"
+        },
+        {
+          "id": "B",
+          "label": "B"
+        },
+        {
+          "id": "C",
+          "label": "C"
+        },
+        {
+          "id": "D",
+          "label": "D"
+        }
+      ],
+      "notes": "D is isolated",
+      "query": {
+        "x": "A",
+        "y": "D"
+      },
+      "title": "isolated node against reachable pair"
+    }
+  ],
+  "production_verified": false,
+  "schema_version": "S21-fixtures-v1",
+  "synthetic_only": true
+}

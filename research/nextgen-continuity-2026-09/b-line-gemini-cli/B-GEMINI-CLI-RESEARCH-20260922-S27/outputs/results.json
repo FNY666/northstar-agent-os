@@ -1,0 +1,412 @@
+{
+  "op_id": "s27-op-0001",
+  "production_verified": false,
+  "result_count": 18,
+  "results": [
+    {
+      "classification": "rejected",
+      "crash_cut": {
+        "phase": "before",
+        "stage": "record_append"
+      },
+      "executed_stages": [],
+      "fixture_id": "S27-F01",
+      "op_id": "s27-op-0001",
+      "production_verified": false,
+      "reason": "crash occurred before any observable side effect",
+      "state": {
+        "durable_reference_emitted": false,
+        "record_appended": false,
+        "reference_valid": false,
+        "response_emitted": false
+      },
+      "synthetic_only": true,
+      "worker_count": 1
+    },
+    {
+      "classification": "UNKNOWN",
+      "crash_cut": {
+        "phase": "after",
+        "stage": "record_append"
+      },
+      "executed_stages": [
+        "record_append"
+      ],
+      "fixture_id": "S27-F02",
+      "op_id": "s27-op-0001",
+      "production_verified": false,
+      "reason": "partial or order-invalid evidence cannot decide acceptance",
+      "state": {
+        "durable_reference_emitted": false,
+        "record_appended": true,
+        "reference_valid": false,
+        "response_emitted": false
+      },
+      "synthetic_only": true,
+      "worker_count": 1
+    },
+    {
+      "classification": "UNKNOWN",
+      "crash_cut": {
+        "phase": "before",
+        "stage": "response_emission"
+      },
+      "executed_stages": [
+        "record_append"
+      ],
+      "fixture_id": "S27-F03",
+      "op_id": "s27-op-0001",
+      "production_verified": false,
+      "reason": "partial or order-invalid evidence cannot decide acceptance",
+      "state": {
+        "durable_reference_emitted": false,
+        "record_appended": true,
+        "reference_valid": false,
+        "response_emitted": false
+      },
+      "synthetic_only": true,
+      "worker_count": 1
+    },
+    {
+      "classification": "UNKNOWN",
+      "crash_cut": {
+        "phase": "after",
+        "stage": "response_emission"
+      },
+      "executed_stages": [
+        "record_append",
+        "response_emission"
+      ],
+      "fixture_id": "S27-F04",
+      "op_id": "s27-op-0001",
+      "production_verified": false,
+      "reason": "partial or order-invalid evidence cannot decide acceptance",
+      "state": {
+        "durable_reference_emitted": false,
+        "record_appended": true,
+        "reference_valid": false,
+        "response_emitted": true
+      },
+      "synthetic_only": true,
+      "worker_count": 1
+    },
+    {
+      "classification": "UNKNOWN",
+      "crash_cut": {
+        "phase": "before",
+        "stage": "durable_reference_emission"
+      },
+      "executed_stages": [
+        "record_append",
+        "response_emission"
+      ],
+      "fixture_id": "S27-F05",
+      "op_id": "s27-op-0001",
+      "production_verified": false,
+      "reason": "partial or order-invalid evidence cannot decide acceptance",
+      "state": {
+        "durable_reference_emitted": false,
+        "record_appended": true,
+        "reference_valid": false,
+        "response_emitted": true
+      },
+      "synthetic_only": true,
+      "worker_count": 1
+    },
+    {
+      "classification": "accepted",
+      "crash_cut": {
+        "phase": "after",
+        "stage": "durable_reference_emission"
+      },
+      "executed_stages": [
+        "record_append",
+        "response_emission",
+        "durable_reference_emission"
+      ],
+      "fixture_id": "S27-F06",
+      "op_id": "s27-op-0001",
+      "production_verified": false,
+      "reason": "record exists and reference was emitted after append",
+      "state": {
+        "durable_reference_emitted": true,
+        "record_appended": true,
+        "reference_valid": true,
+        "response_emitted": true
+      },
+      "synthetic_only": true,
+      "worker_count": 1
+    },
+    {
+      "classification": "rejected",
+      "crash_cut": {
+        "phase": "before",
+        "stage": "durable_reference_emission"
+      },
+      "executed_stages": [],
+      "fixture_id": "S27-F07",
+      "op_id": "s27-op-0001",
+      "production_verified": false,
+      "reason": "crash occurred before any observable side effect",
+      "state": {
+        "durable_reference_emitted": false,
+        "record_appended": false,
+        "reference_valid": false,
+        "response_emitted": false
+      },
+      "synthetic_only": true,
+      "worker_count": 1
+    },
+    {
+      "classification": "UNKNOWN",
+      "crash_cut": {
+        "phase": "after",
+        "stage": "durable_reference_emission"
+      },
+      "executed_stages": [
+        "durable_reference_emission"
+      ],
+      "fixture_id": "S27-F08",
+      "op_id": "s27-op-0001",
+      "production_verified": false,
+      "reason": "partial or order-invalid evidence cannot decide acceptance",
+      "state": {
+        "durable_reference_emitted": true,
+        "record_appended": false,
+        "reference_valid": false,
+        "response_emitted": false
+      },
+      "synthetic_only": true,
+      "worker_count": 1
+    },
+    {
+      "classification": "UNKNOWN",
+      "crash_cut": {
+        "phase": "before",
+        "stage": "response_emission"
+      },
+      "executed_stages": [
+        "durable_reference_emission"
+      ],
+      "fixture_id": "S27-F09",
+      "op_id": "s27-op-0001",
+      "production_verified": false,
+      "reason": "partial or order-invalid evidence cannot decide acceptance",
+      "state": {
+        "durable_reference_emitted": true,
+        "record_appended": false,
+        "reference_valid": false,
+        "response_emitted": false
+      },
+      "synthetic_only": true,
+      "worker_count": 1
+    },
+    {
+      "classification": "UNKNOWN",
+      "crash_cut": {
+        "phase": "after",
+        "stage": "response_emission"
+      },
+      "executed_stages": [
+        "durable_reference_emission",
+        "response_emission"
+      ],
+      "fixture_id": "S27-F10",
+      "op_id": "s27-op-0001",
+      "production_verified": false,
+      "reason": "partial or order-invalid evidence cannot decide acceptance",
+      "state": {
+        "durable_reference_emitted": true,
+        "record_appended": false,
+        "reference_valid": false,
+        "response_emitted": true
+      },
+      "synthetic_only": true,
+      "worker_count": 1
+    },
+    {
+      "classification": "UNKNOWN",
+      "crash_cut": {
+        "phase": "before",
+        "stage": "record_append"
+      },
+      "executed_stages": [
+        "durable_reference_emission",
+        "response_emission"
+      ],
+      "fixture_id": "S27-F11",
+      "op_id": "s27-op-0001",
+      "production_verified": false,
+      "reason": "partial or order-invalid evidence cannot decide acceptance",
+      "state": {
+        "durable_reference_emitted": true,
+        "record_appended": false,
+        "reference_valid": false,
+        "response_emitted": true
+      },
+      "synthetic_only": true,
+      "worker_count": 1
+    },
+    {
+      "classification": "UNKNOWN",
+      "crash_cut": {
+        "phase": "after",
+        "stage": "record_append"
+      },
+      "executed_stages": [
+        "durable_reference_emission",
+        "response_emission",
+        "record_append"
+      ],
+      "fixture_id": "S27-F12",
+      "op_id": "s27-op-0001",
+      "production_verified": false,
+      "reason": "partial or order-invalid evidence cannot decide acceptance",
+      "state": {
+        "durable_reference_emitted": true,
+        "record_appended": true,
+        "reference_valid": false,
+        "response_emitted": true
+      },
+      "synthetic_only": true,
+      "worker_count": 1
+    },
+    {
+      "classification": "rejected",
+      "crash_cut": {
+        "phase": "before",
+        "stage": "record_append"
+      },
+      "executed_stages": [],
+      "fixture_id": "S27-F13",
+      "op_id": "s27-op-0001",
+      "production_verified": false,
+      "reason": "crash occurred before any observable side effect",
+      "state": {
+        "durable_reference_emitted": false,
+        "record_appended": false,
+        "reference_valid": false,
+        "response_emitted": false
+      },
+      "synthetic_only": true,
+      "worker_count": 1
+    },
+    {
+      "classification": "UNKNOWN",
+      "crash_cut": {
+        "phase": "after",
+        "stage": "record_append"
+      },
+      "executed_stages": [
+        "record_append"
+      ],
+      "fixture_id": "S27-F14",
+      "op_id": "s27-op-0001",
+      "production_verified": false,
+      "reason": "partial or order-invalid evidence cannot decide acceptance",
+      "state": {
+        "durable_reference_emitted": false,
+        "record_appended": true,
+        "reference_valid": false,
+        "response_emitted": false
+      },
+      "synthetic_only": true,
+      "worker_count": 1
+    },
+    {
+      "classification": "UNKNOWN",
+      "crash_cut": {
+        "phase": "before",
+        "stage": "durable_reference_emission"
+      },
+      "executed_stages": [
+        "record_append"
+      ],
+      "fixture_id": "S27-F15",
+      "op_id": "s27-op-0001",
+      "production_verified": false,
+      "reason": "partial or order-invalid evidence cannot decide acceptance",
+      "state": {
+        "durable_reference_emitted": false,
+        "record_appended": true,
+        "reference_valid": false,
+        "response_emitted": false
+      },
+      "synthetic_only": true,
+      "worker_count": 1
+    },
+    {
+      "classification": "accepted",
+      "crash_cut": {
+        "phase": "after",
+        "stage": "durable_reference_emission"
+      },
+      "executed_stages": [
+        "record_append",
+        "durable_reference_emission"
+      ],
+      "fixture_id": "S27-F16",
+      "op_id": "s27-op-0001",
+      "production_verified": false,
+      "reason": "record exists and reference was emitted after append",
+      "state": {
+        "durable_reference_emitted": true,
+        "record_appended": true,
+        "reference_valid": true,
+        "response_emitted": false
+      },
+      "synthetic_only": true,
+      "worker_count": 1
+    },
+    {
+      "classification": "accepted",
+      "crash_cut": {
+        "phase": "before",
+        "stage": "response_emission"
+      },
+      "executed_stages": [
+        "record_append",
+        "durable_reference_emission"
+      ],
+      "fixture_id": "S27-F17",
+      "op_id": "s27-op-0001",
+      "production_verified": false,
+      "reason": "record exists and reference was emitted after append",
+      "state": {
+        "durable_reference_emitted": true,
+        "record_appended": true,
+        "reference_valid": true,
+        "response_emitted": false
+      },
+      "synthetic_only": true,
+      "worker_count": 1
+    },
+    {
+      "classification": "accepted",
+      "crash_cut": {
+        "phase": "after",
+        "stage": "response_emission"
+      },
+      "executed_stages": [
+        "record_append",
+        "durable_reference_emission",
+        "response_emission"
+      ],
+      "fixture_id": "S27-F18",
+      "op_id": "s27-op-0001",
+      "production_verified": false,
+      "reason": "record exists and reference was emitted after append",
+      "state": {
+        "durable_reference_emitted": true,
+        "record_appended": true,
+        "reference_valid": true,
+        "response_emitted": true
+      },
+      "synthetic_only": true,
+      "worker_count": 1
+    }
+  ],
+  "schema_version": "S27-results-v1",
+  "synthetic_only": true,
+  "worker_count": 1
+}

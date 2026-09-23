@@ -1,0 +1,101 @@
+{
+  "schema_version": "1.0",
+  "question": "How should an Agent/runtime durably reconcile when external effects, query results, or final-consistency reads are incomplete or unconfirmed, including manual review gates, compensation, and closure conditions?",
+  "scope": {
+    "time_window": "current as of 2026-09-22",
+    "geography_or_context": "Public official documentation; orchestration, audit, control-loop and human-gate semantics",
+    "inclusions": ["Temporal", "AWS Step Functions", "AWS CloudTrail", "AWS IAM eventual consistency guidance", "Kubernetes Controllers", "GitHub Actions environments and reruns"],
+    "exclusions": ["production systems", "real services", "credentials", "private accounts", "local historical research directories", "shared/P0, incident directories, D10, L12, D14, canonical, staging, 140, tri-line, systemd"]
+  },
+  "claims": [
+    {
+      "id": "C1",
+      "claim": "Temporal Activities may be retried and executed more than once; idempotency is required for safe external effects.",
+      "status": "confirmed",
+      "confidence": "high",
+      "sources": [{"url":"https://docs.temporal.io/activity-definition.md","publisher":"Temporal","published_or_updated":"accessed 2026-09-22","tier":"primary","support":"Official Activity Definition states an Activity may be retried and functions may execute more than once; defines idempotent behavior."}],
+      "caveat": "Does not establish end-to-end exactly-once."
+    },
+    {
+      "id": "C2",
+      "claim": "Temporal Workflow ID and Run ID provide execution correlation constraints, not external side-effect proof.",
+      "status": "confirmed",
+      "confidence": "high",
+      "sources": [{"url":"https://docs.temporal.io/workflow-execution/workflowid-runid.md","publisher":"Temporal","published_or_updated":"accessed 2026-09-22","tier":"primary","support":"Official page describes business-meaning Workflow ID, one open execution per ID in a Namespace, and globally unique Run ID."}],
+      "caveat": "A closed Workflow ID can later have another open execution."
+    },
+    {
+      "id": "C3",
+      "claim": "AWS Step Functions supports Retry/Catch and redrive behavior for workflow states, but that is not an external exactly-once guarantee.",
+      "status": "confirmed",
+      "confidence": "high",
+      "sources": [{"url":"https://docs.aws.amazon.com/step-functions/latest/dg/concepts-error-handling.html","publisher":"Amazon Web Services","published_or_updated":"accessed 2026-09-22","tier":"primary","support":"Developer Guide documents Retry, Catch, backoff/jitter and retry-count reset on redrive for selected states."}],
+      "caveat": "External side-effect semantics remain application-specific."
+    },
+    {
+      "id": "C4",
+      "claim": "CloudTrail activity records and logs are not an ordered public-API stack trace; a log record alone is not sufficient proof that a business external effect reached its target.",
+      "status": "confirmed",
+      "confidence": "high",
+      "sources": [{"url":"https://docs.aws.amazon.com/awscloudtrail/latest/userguide/cloudtrail-concepts.html","publisher":"Amazon Web Services","published_or_updated":"accessed 2026-09-22","tier":"primary","support":"CloudTrail concepts defines events as account activity records and states log files are not an ordered stack trace of public API calls."}],
+      "caveat": "The second clause is a bounded inference from the documented record semantics."
+    },
+    {
+      "id": "C5",
+      "claim": "Eventual-consistency delays must be accounted for in distributed applications.",
+      "status": "confirmed",
+      "confidence": "high",
+      "sources": [{"url":"https://docs.aws.amazon.com/IAM/latest/UserGuide/troubleshoot.html","publisher":"Amazon Web Services","published_or_updated":"accessed 2026-09-22","tier":"primary","support":"IAM troubleshooting states IAM uses a distributed computing model called eventual consistency and applications should account for delays."}],
+      "caveat": "No universal delay window follows from this page."
+    },
+    {
+      "id": "C6",
+      "claim": "Kubernetes controllers provide an official control-loop model: observe current state and move it toward desired state, including external-state reporting.",
+      "status": "confirmed",
+      "confidence": "high",
+      "sources": [{"url":"https://kubernetes.io/docs/concepts/architecture/controller/","publisher":"Kubernetes project","published_or_updated":"accessed 2026-09-22","tier":"primary","support":"Controllers page describes desired/current state control loops and external-state controllers."}],
+      "caveat": "This is a model, not a guarantee for arbitrary external APIs."
+    },
+    {
+      "id": "C7",
+      "claim": "GitHub Actions environments can gate jobs with required reviewers and other deployment protection rules.",
+      "status": "confirmed",
+      "confidence": "high",
+      "sources": [{"url":"https://docs.github.com/en/actions/how-tos/deploy/configure-and-manage-deployments/manage-environments","publisher":"GitHub","published_or_updated":"accessed 2026-09-22","tier":"primary","support":"Official docs describe required reviewers, wait timer, branch and custom protection rules, and secret access after rules pass."}],
+      "caveat": "A human gate controls progression; it does not prove an unrelated external effect."
+    },
+    {
+      "id": "C8",
+      "claim": "The recommended durable UNKNOWN/reconciliation/manual-review/compensation/closure design is an inference from the verified product semantics, not a vendor guarantee.",
+      "status": "inferred",
+      "confidence": "medium",
+      "sources": [
+        {"url":"https://docs.temporal.io/activity-definition.md","publisher":"Temporal","published_or_updated":"accessed 2026-09-22","tier":"primary","support":"Repeated execution and idempotency constraint."},
+        {"url":"https://docs.aws.amazon.com/step-functions/latest/dg/concepts-error-handling.html","publisher":"Amazon Web Services","published_or_updated":"accessed 2026-09-22","tier":"primary","support":"Retry, Catch and redrive mechanics."},
+        {"url":"https://kubernetes.io/docs/concepts/architecture/controller/","publisher":"Kubernetes project","published_or_updated":"accessed 2026-09-22","tier":"primary","support":"Control-loop reconciliation model."}
+      ],
+      "caveat": "Must be adapted and verified against the concrete external API and business risk."
+    },
+    {
+      "id": "C9",
+      "claim": "Local logs, workflow completion, exhausted retries, or an empty eventually-consistent query alone establish external success or failure.",
+      "status": "unverified",
+      "confidence": "low",
+      "sources": [{"url":"https://docs.aws.amazon.com/awscloudtrail/latest/userguide/cloudtrail-concepts.html","publisher":"Amazon Web Services","published_or_updated":"accessed 2026-09-22","tier":"primary","support":"Documented log/event ordering and record scope do not provide this general guarantee."}],
+      "caveat": "Treat as unknown rather than closure evidence."
+    },
+    {
+      "id": "C10",
+      "claim": "These sources establish production readiness or end-to-end exactly-once external effects.",
+      "status": "unverified",
+      "confidence": "low",
+      "sources": [],
+      "caveat": "No production test, account, deployment, or end-to-end experiment was performed; do not claim production or exactly-once."
+    }
+  ],
+  "coverage": {
+    "searched": ["Temporal official docs", "AWS Step Functions official docs", "AWS CloudTrail official docs", "AWS IAM official docs", "Kubernetes official docs", "GitHub Actions official docs"],
+    "inaccessible": [],
+    "unresolved_conflicts": ["No direct same-scope source conflict found; cross-product semantics must not be conflated.", "Concrete external API idempotency, consistency windows, compensation reversibility, and SLA remain unknown."]
+  }
+}

@@ -1,0 +1,846 @@
+{
+  "cases": [
+    {
+      "evidence": [
+        "三信号共享trace identity",
+        "export与sequence均闭合"
+      ],
+      "flags": {
+        "drop_counter_reconciled": true,
+        "duplicate_dedup_attested": true,
+        "export_ack_attested": true,
+        "export_attempt_attested": true,
+        "exporter_queue_closed": true,
+        "identity_conflict": false,
+        "log_present": true,
+        "metric_present": true,
+        "otlp_scope_consistent": true,
+        "resource_identity_bound": true,
+        "retry_history_complete": true,
+        "same_identity": true,
+        "sampling_known": true,
+        "sequence_complete": true,
+        "signal_conflict": false,
+        "signal_correlation_closed": true,
+        "time_window_closed": true,
+        "trace_context_valid": true,
+        "trace_present": true,
+        "unknown_export_state": false
+      },
+      "id": "three-signal-closed",
+      "label": "logs/metrics/traces三信号闭合",
+      "status": "RECOVERED"
+    },
+    {
+      "evidence": [
+        "export attempt和ack可关联",
+        "queue与retry历史完整"
+      ],
+      "flags": {
+        "drop_counter_reconciled": true,
+        "duplicate_dedup_attested": true,
+        "export_ack_attested": true,
+        "export_attempt_attested": true,
+        "exporter_queue_closed": true,
+        "identity_conflict": false,
+        "log_present": true,
+        "metric_present": true,
+        "otlp_scope_consistent": true,
+        "resource_identity_bound": true,
+        "retry_history_complete": true,
+        "same_identity": true,
+        "sampling_known": true,
+        "sequence_complete": true,
+        "signal_conflict": false,
+        "signal_correlation_closed": true,
+        "time_window_closed": true,
+        "trace_context_valid": true,
+        "trace_present": true,
+        "unknown_export_state": false
+      },
+      "id": "otlp-export-ack-closed",
+      "label": "OTLP export与ack闭合",
+      "status": "RECOVERED"
+    },
+    {
+      "evidence": [
+        "丢弃计数与采样/过滤策略一致",
+        "没有未解释的信号缺口"
+      ],
+      "flags": {
+        "drop_counter_reconciled": true,
+        "duplicate_dedup_attested": true,
+        "export_ack_attested": true,
+        "export_attempt_attested": true,
+        "exporter_queue_closed": true,
+        "identity_conflict": false,
+        "log_present": true,
+        "metric_present": true,
+        "otlp_scope_consistent": true,
+        "resource_identity_bound": true,
+        "retry_history_complete": true,
+        "same_identity": true,
+        "sampling_known": true,
+        "sequence_complete": true,
+        "signal_conflict": false,
+        "signal_correlation_closed": true,
+        "time_window_closed": true,
+        "trace_context_valid": true,
+        "trace_present": true,
+        "unknown_export_state": false
+      },
+      "id": "drop-counter-reconciled",
+      "label": "drop counter已对账",
+      "status": "RECOVERED"
+    },
+    {
+      "evidence": [
+        "sampling policy已知",
+        "log/metric提供同一业务identity的闭合证据"
+      ],
+      "flags": {
+        "drop_counter_reconciled": true,
+        "duplicate_dedup_attested": true,
+        "export_ack_attested": true,
+        "export_attempt_attested": true,
+        "exporter_queue_closed": true,
+        "identity_conflict": false,
+        "log_present": true,
+        "metric_present": true,
+        "otlp_scope_consistent": true,
+        "resource_identity_bound": true,
+        "retry_history_complete": true,
+        "same_identity": true,
+        "sampling_known": true,
+        "sequence_complete": true,
+        "signal_conflict": false,
+        "signal_correlation_closed": true,
+        "time_window_closed": true,
+        "trace_context_valid": true,
+        "trace_present": true,
+        "unknown_export_state": false
+      },
+      "id": "sampled-trace-with-log-metric",
+      "label": "采样trace有可解释边界",
+      "status": "RECOVERED"
+    },
+    {
+      "evidence": [
+        "重复export按signal identity去重",
+        "计数器未重复增加"
+      ],
+      "flags": {
+        "drop_counter_reconciled": true,
+        "duplicate_dedup_attested": true,
+        "export_ack_attested": true,
+        "export_attempt_attested": true,
+        "exporter_queue_closed": true,
+        "identity_conflict": false,
+        "log_present": true,
+        "metric_present": true,
+        "otlp_scope_consistent": true,
+        "resource_identity_bound": true,
+        "retry_history_complete": true,
+        "same_identity": true,
+        "sampling_known": true,
+        "sequence_complete": true,
+        "signal_conflict": false,
+        "signal_correlation_closed": true,
+        "time_window_closed": true,
+        "trace_context_valid": true,
+        "trace_present": true,
+        "unknown_export_state": false
+      },
+      "id": "duplicate-signal-dedup",
+      "label": "重复信号已去重",
+      "status": "RECOVERED"
+    },
+    {
+      "evidence": [
+        "service/resource attributes稳定",
+        "跨信号关联键完整"
+      ],
+      "flags": {
+        "drop_counter_reconciled": true,
+        "duplicate_dedup_attested": true,
+        "export_ack_attested": true,
+        "export_attempt_attested": true,
+        "exporter_queue_closed": true,
+        "identity_conflict": false,
+        "log_present": true,
+        "metric_present": true,
+        "otlp_scope_consistent": true,
+        "resource_identity_bound": true,
+        "retry_history_complete": true,
+        "same_identity": true,
+        "sampling_known": true,
+        "sequence_complete": true,
+        "signal_conflict": false,
+        "signal_correlation_closed": true,
+        "time_window_closed": true,
+        "trace_context_valid": true,
+        "trace_present": true,
+        "unknown_export_state": false
+      },
+      "id": "resource-bound-correlation",
+      "label": "resource identity绑定",
+      "status": "RECOVERED"
+    },
+    {
+      "evidence": [
+        "只有metrics/traces不能证明日志未发生"
+      ],
+      "flags": {
+        "drop_counter_reconciled": true,
+        "duplicate_dedup_attested": true,
+        "export_ack_attested": true,
+        "export_attempt_attested": true,
+        "exporter_queue_closed": true,
+        "identity_conflict": false,
+        "log_present": false,
+        "metric_present": true,
+        "otlp_scope_consistent": true,
+        "resource_identity_bound": true,
+        "retry_history_complete": true,
+        "same_identity": true,
+        "sampling_known": true,
+        "sequence_complete": true,
+        "signal_conflict": false,
+        "signal_correlation_closed": true,
+        "time_window_closed": true,
+        "trace_context_valid": true,
+        "trace_present": true,
+        "unknown_export_state": false
+      },
+      "id": "log-missing",
+      "label": "日志信号缺失",
+      "status": "UNKNOWN"
+    },
+    {
+      "evidence": [
+        "只有logs/traces不能关闭计数器缺口"
+      ],
+      "flags": {
+        "drop_counter_reconciled": true,
+        "duplicate_dedup_attested": true,
+        "export_ack_attested": true,
+        "export_attempt_attested": true,
+        "exporter_queue_closed": true,
+        "identity_conflict": false,
+        "log_present": true,
+        "metric_present": false,
+        "otlp_scope_consistent": true,
+        "resource_identity_bound": true,
+        "retry_history_complete": true,
+        "same_identity": true,
+        "sampling_known": true,
+        "sequence_complete": true,
+        "signal_conflict": false,
+        "signal_correlation_closed": true,
+        "time_window_closed": true,
+        "trace_context_valid": true,
+        "trace_present": true,
+        "unknown_export_state": false
+      },
+      "id": "metric-missing",
+      "label": "指标信号缺失",
+      "status": "UNKNOWN"
+    },
+    {
+      "evidence": [
+        "没有trace context不能证明跨服务关联"
+      ],
+      "flags": {
+        "drop_counter_reconciled": true,
+        "duplicate_dedup_attested": true,
+        "export_ack_attested": true,
+        "export_attempt_attested": true,
+        "exporter_queue_closed": true,
+        "identity_conflict": false,
+        "log_present": true,
+        "metric_present": true,
+        "otlp_scope_consistent": true,
+        "resource_identity_bound": true,
+        "retry_history_complete": true,
+        "same_identity": true,
+        "sampling_known": true,
+        "sequence_complete": true,
+        "signal_conflict": false,
+        "signal_correlation_closed": true,
+        "time_window_closed": true,
+        "trace_context_valid": true,
+        "trace_present": false,
+        "unknown_export_state": false
+      },
+      "id": "trace-missing",
+      "label": "trace信号缺失",
+      "status": "UNKNOWN"
+    },
+    {
+      "evidence": [
+        "trace_id/span_id格式或parent关系不可验证"
+      ],
+      "flags": {
+        "drop_counter_reconciled": true,
+        "duplicate_dedup_attested": true,
+        "export_ack_attested": true,
+        "export_attempt_attested": true,
+        "exporter_queue_closed": true,
+        "identity_conflict": false,
+        "log_present": true,
+        "metric_present": true,
+        "otlp_scope_consistent": true,
+        "resource_identity_bound": true,
+        "retry_history_complete": true,
+        "same_identity": true,
+        "sampling_known": true,
+        "sequence_complete": true,
+        "signal_conflict": false,
+        "signal_correlation_closed": true,
+        "time_window_closed": true,
+        "trace_context_valid": false,
+        "trace_present": true,
+        "unknown_export_state": false
+      },
+      "id": "trace-context-invalid",
+      "label": "trace context无效",
+      "status": "UNKNOWN"
+    },
+    {
+      "evidence": [
+        "不同信号的resource/trace identity不能唯一关联"
+      ],
+      "flags": {
+        "drop_counter_reconciled": true,
+        "duplicate_dedup_attested": true,
+        "export_ack_attested": true,
+        "export_attempt_attested": true,
+        "exporter_queue_closed": true,
+        "identity_conflict": false,
+        "log_present": true,
+        "metric_present": true,
+        "otlp_scope_consistent": true,
+        "resource_identity_bound": true,
+        "retry_history_complete": true,
+        "same_identity": true,
+        "sampling_known": true,
+        "sequence_complete": true,
+        "signal_conflict": false,
+        "signal_correlation_closed": false,
+        "time_window_closed": true,
+        "trace_context_valid": true,
+        "trace_present": true,
+        "unknown_export_state": false
+      },
+      "id": "signal-correlation-open",
+      "label": "跨信号关联未闭合",
+      "status": "UNKNOWN"
+    },
+    {
+      "evidence": [
+        "中间batch/sequence不可取回"
+      ],
+      "flags": {
+        "drop_counter_reconciled": true,
+        "duplicate_dedup_attested": true,
+        "export_ack_attested": true,
+        "export_attempt_attested": true,
+        "exporter_queue_closed": true,
+        "identity_conflict": false,
+        "log_present": true,
+        "metric_present": true,
+        "otlp_scope_consistent": true,
+        "resource_identity_bound": true,
+        "retry_history_complete": true,
+        "same_identity": true,
+        "sampling_known": true,
+        "sequence_complete": false,
+        "signal_conflict": false,
+        "signal_correlation_closed": true,
+        "time_window_closed": true,
+        "trace_context_valid": true,
+        "trace_present": true,
+        "unknown_export_state": false
+      },
+      "id": "sequence-gap",
+      "label": "信号序列缺口",
+      "status": "UNKNOWN"
+    },
+    {
+      "evidence": [
+        "没有发出与否的可靠记录"
+      ],
+      "flags": {
+        "drop_counter_reconciled": true,
+        "duplicate_dedup_attested": true,
+        "export_ack_attested": true,
+        "export_attempt_attested": false,
+        "exporter_queue_closed": true,
+        "identity_conflict": false,
+        "log_present": true,
+        "metric_present": true,
+        "otlp_scope_consistent": true,
+        "resource_identity_bound": true,
+        "retry_history_complete": true,
+        "same_identity": true,
+        "sampling_known": true,
+        "sequence_complete": true,
+        "signal_conflict": false,
+        "signal_correlation_closed": true,
+        "time_window_closed": true,
+        "trace_context_valid": true,
+        "trace_present": true,
+        "unknown_export_state": false
+      },
+      "id": "export-attempt-missing",
+      "label": "export attempt缺失",
+      "status": "UNKNOWN"
+    },
+    {
+      "evidence": [
+        "attempt存在但没有接收/持久化确认"
+      ],
+      "flags": {
+        "drop_counter_reconciled": true,
+        "duplicate_dedup_attested": true,
+        "export_ack_attested": false,
+        "export_attempt_attested": true,
+        "exporter_queue_closed": true,
+        "identity_conflict": false,
+        "log_present": true,
+        "metric_present": true,
+        "otlp_scope_consistent": true,
+        "resource_identity_bound": true,
+        "retry_history_complete": true,
+        "same_identity": true,
+        "sampling_known": true,
+        "sequence_complete": true,
+        "signal_conflict": false,
+        "signal_correlation_closed": true,
+        "time_window_closed": true,
+        "trace_context_valid": true,
+        "trace_present": true,
+        "unknown_export_state": false
+      },
+      "id": "export-ack-missing",
+      "label": "export ack缺失",
+      "status": "UNKNOWN"
+    },
+    {
+      "evidence": [
+        "仍可能有排队或重试中的信号"
+      ],
+      "flags": {
+        "drop_counter_reconciled": true,
+        "duplicate_dedup_attested": true,
+        "export_ack_attested": true,
+        "export_attempt_attested": true,
+        "exporter_queue_closed": false,
+        "identity_conflict": false,
+        "log_present": true,
+        "metric_present": true,
+        "otlp_scope_consistent": true,
+        "resource_identity_bound": true,
+        "retry_history_complete": true,
+        "same_identity": true,
+        "sampling_known": true,
+        "sequence_complete": true,
+        "signal_conflict": false,
+        "signal_correlation_closed": true,
+        "time_window_closed": true,
+        "trace_context_valid": true,
+        "trace_present": true,
+        "unknown_export_state": false
+      },
+      "id": "queue-open",
+      "label": "exporter queue未闭合",
+      "status": "UNKNOWN"
+    },
+    {
+      "evidence": [
+        "drop counter缺失或口径不明"
+      ],
+      "flags": {
+        "drop_counter_reconciled": false,
+        "duplicate_dedup_attested": true,
+        "export_ack_attested": true,
+        "export_attempt_attested": true,
+        "exporter_queue_closed": true,
+        "identity_conflict": false,
+        "log_present": true,
+        "metric_present": true,
+        "otlp_scope_consistent": true,
+        "resource_identity_bound": true,
+        "retry_history_complete": true,
+        "same_identity": true,
+        "sampling_known": true,
+        "sequence_complete": true,
+        "signal_conflict": false,
+        "signal_correlation_closed": true,
+        "time_window_closed": true,
+        "trace_context_valid": true,
+        "trace_present": true,
+        "unknown_export_state": false
+      },
+      "id": "drop-counter-missing",
+      "label": "drop counter未对账",
+      "status": "UNKNOWN"
+    },
+    {
+      "evidence": [
+        "无法区分一次发送与重复发送"
+      ],
+      "flags": {
+        "drop_counter_reconciled": true,
+        "duplicate_dedup_attested": true,
+        "export_ack_attested": true,
+        "export_attempt_attested": true,
+        "exporter_queue_closed": true,
+        "identity_conflict": false,
+        "log_present": true,
+        "metric_present": true,
+        "otlp_scope_consistent": true,
+        "resource_identity_bound": true,
+        "retry_history_complete": false,
+        "same_identity": true,
+        "sampling_known": true,
+        "sequence_complete": true,
+        "signal_conflict": false,
+        "signal_correlation_closed": true,
+        "time_window_closed": true,
+        "trace_context_valid": true,
+        "trace_present": true,
+        "unknown_export_state": false
+      },
+      "id": "retry-history-gap",
+      "label": "retry历史不完整",
+      "status": "UNKNOWN"
+    },
+    {
+      "evidence": [
+        "不同scope/resource下的记录不能直接合并"
+      ],
+      "flags": {
+        "drop_counter_reconciled": true,
+        "duplicate_dedup_attested": true,
+        "export_ack_attested": true,
+        "export_attempt_attested": true,
+        "exporter_queue_closed": true,
+        "identity_conflict": false,
+        "log_present": true,
+        "metric_present": true,
+        "otlp_scope_consistent": false,
+        "resource_identity_bound": true,
+        "retry_history_complete": true,
+        "same_identity": true,
+        "sampling_known": true,
+        "sequence_complete": true,
+        "signal_conflict": false,
+        "signal_correlation_closed": true,
+        "time_window_closed": true,
+        "trace_context_valid": true,
+        "trace_present": true,
+        "unknown_export_state": false
+      },
+      "id": "otlp-scope-mismatch",
+      "label": "OTLP scope不一致",
+      "status": "UNKNOWN"
+    },
+    {
+      "evidence": [
+        "相同trace可能来自不同service/resource"
+      ],
+      "flags": {
+        "drop_counter_reconciled": true,
+        "duplicate_dedup_attested": true,
+        "export_ack_attested": true,
+        "export_attempt_attested": true,
+        "exporter_queue_closed": true,
+        "identity_conflict": false,
+        "log_present": true,
+        "metric_present": true,
+        "otlp_scope_consistent": true,
+        "resource_identity_bound": false,
+        "retry_history_complete": true,
+        "same_identity": true,
+        "sampling_known": true,
+        "sequence_complete": true,
+        "signal_conflict": false,
+        "signal_correlation_closed": true,
+        "time_window_closed": true,
+        "trace_context_valid": true,
+        "trace_present": true,
+        "unknown_export_state": false
+      },
+      "id": "resource-unbound",
+      "label": "resource identity未绑定",
+      "status": "UNKNOWN"
+    },
+    {
+      "evidence": [
+        "迟到信号仍可能进入当前窗口"
+      ],
+      "flags": {
+        "drop_counter_reconciled": true,
+        "duplicate_dedup_attested": true,
+        "export_ack_attested": true,
+        "export_attempt_attested": true,
+        "exporter_queue_closed": true,
+        "identity_conflict": false,
+        "log_present": true,
+        "metric_present": true,
+        "otlp_scope_consistent": true,
+        "resource_identity_bound": true,
+        "retry_history_complete": true,
+        "same_identity": true,
+        "sampling_known": true,
+        "sequence_complete": true,
+        "signal_conflict": false,
+        "signal_correlation_closed": true,
+        "time_window_closed": false,
+        "trace_context_valid": true,
+        "trace_present": true,
+        "unknown_export_state": false
+      },
+      "id": "time-window-open",
+      "label": "时间窗口未闭合",
+      "status": "UNKNOWN"
+    },
+    {
+      "evidence": [
+        "trace缺失无法判断是采样还是丢失"
+      ],
+      "flags": {
+        "drop_counter_reconciled": true,
+        "duplicate_dedup_attested": true,
+        "export_ack_attested": true,
+        "export_attempt_attested": true,
+        "exporter_queue_closed": true,
+        "identity_conflict": false,
+        "log_present": true,
+        "metric_present": true,
+        "otlp_scope_consistent": true,
+        "resource_identity_bound": true,
+        "retry_history_complete": true,
+        "same_identity": true,
+        "sampling_known": false,
+        "sequence_complete": true,
+        "signal_conflict": false,
+        "signal_correlation_closed": true,
+        "time_window_closed": true,
+        "trace_context_valid": true,
+        "trace_present": true,
+        "unknown_export_state": false
+      },
+      "id": "sampling-unknown",
+      "label": "采样策略未知",
+      "status": "UNKNOWN"
+    },
+    {
+      "evidence": [
+        "重复signal可能污染计数"
+      ],
+      "flags": {
+        "drop_counter_reconciled": true,
+        "duplicate_dedup_attested": false,
+        "export_ack_attested": true,
+        "export_attempt_attested": true,
+        "exporter_queue_closed": true,
+        "identity_conflict": false,
+        "log_present": true,
+        "metric_present": true,
+        "otlp_scope_consistent": true,
+        "resource_identity_bound": true,
+        "retry_history_complete": true,
+        "same_identity": true,
+        "sampling_known": true,
+        "sequence_complete": true,
+        "signal_conflict": false,
+        "signal_correlation_closed": true,
+        "time_window_closed": true,
+        "trace_context_valid": true,
+        "trace_present": true,
+        "unknown_export_state": false
+      },
+      "id": "dedup-unproven",
+      "label": "去重未证明",
+      "status": "UNKNOWN"
+    },
+    {
+      "evidence": [
+        "无法判断远端是否已接收"
+      ],
+      "flags": {
+        "drop_counter_reconciled": true,
+        "duplicate_dedup_attested": true,
+        "export_ack_attested": true,
+        "export_attempt_attested": true,
+        "exporter_queue_closed": true,
+        "identity_conflict": false,
+        "log_present": true,
+        "metric_present": true,
+        "otlp_scope_consistent": true,
+        "resource_identity_bound": true,
+        "retry_history_complete": true,
+        "same_identity": true,
+        "sampling_known": true,
+        "sequence_complete": true,
+        "signal_conflict": false,
+        "signal_correlation_closed": true,
+        "time_window_closed": true,
+        "trace_context_valid": true,
+        "trace_present": true,
+        "unknown_export_state": true
+      },
+      "id": "export-unknown",
+      "label": "export状态未知",
+      "status": "UNKNOWN"
+    },
+    {
+      "evidence": [
+        "tenant/source/trace identity不完整"
+      ],
+      "flags": {
+        "drop_counter_reconciled": true,
+        "duplicate_dedup_attested": true,
+        "export_ack_attested": true,
+        "export_attempt_attested": true,
+        "exporter_queue_closed": true,
+        "identity_conflict": false,
+        "log_present": true,
+        "metric_present": true,
+        "otlp_scope_consistent": true,
+        "resource_identity_bound": true,
+        "retry_history_complete": true,
+        "same_identity": false,
+        "sampling_known": true,
+        "sequence_complete": true,
+        "signal_conflict": false,
+        "signal_correlation_closed": true,
+        "time_window_closed": true,
+        "trace_context_valid": true,
+        "trace_present": true,
+        "unknown_export_state": false
+      },
+      "id": "identity-unresolved",
+      "label": "身份域无法确定",
+      "status": "UNKNOWN"
+    },
+    {
+      "evidence": [
+        "tenant或source明确不同"
+      ],
+      "flags": {
+        "drop_counter_reconciled": true,
+        "duplicate_dedup_attested": true,
+        "export_ack_attested": true,
+        "export_attempt_attested": true,
+        "exporter_queue_closed": true,
+        "identity_conflict": true,
+        "log_present": true,
+        "metric_present": true,
+        "otlp_scope_consistent": true,
+        "resource_identity_bound": true,
+        "retry_history_complete": true,
+        "same_identity": false,
+        "sampling_known": true,
+        "sequence_complete": true,
+        "signal_conflict": false,
+        "signal_correlation_closed": true,
+        "time_window_closed": true,
+        "trace_context_valid": true,
+        "trace_present": true,
+        "unknown_export_state": false
+      },
+      "id": "identity-conflict",
+      "label": "跨身份域合并",
+      "status": "REJECT"
+    },
+    {
+      "evidence": [
+        "同一identity的业务结果/计数不可调和"
+      ],
+      "flags": {
+        "drop_counter_reconciled": true,
+        "duplicate_dedup_attested": true,
+        "export_ack_attested": true,
+        "export_attempt_attested": true,
+        "exporter_queue_closed": true,
+        "identity_conflict": false,
+        "log_present": true,
+        "metric_present": true,
+        "otlp_scope_consistent": true,
+        "resource_identity_bound": true,
+        "retry_history_complete": true,
+        "same_identity": true,
+        "sampling_known": true,
+        "sequence_complete": true,
+        "signal_conflict": true,
+        "signal_correlation_closed": true,
+        "time_window_closed": true,
+        "trace_context_valid": true,
+        "trace_present": true,
+        "unknown_export_state": false
+      },
+      "id": "signal-conflict",
+      "label": "跨信号内容冲突",
+      "status": "REJECT"
+    },
+    {
+      "evidence": [
+        "同一batch同一attempt同时出现不可调和ack与拒绝"
+      ],
+      "flags": {
+        "drop_counter_reconciled": true,
+        "duplicate_dedup_attested": true,
+        "export_ack_attested": false,
+        "export_attempt_attested": true,
+        "exporter_queue_closed": true,
+        "identity_conflict": false,
+        "log_present": true,
+        "metric_present": true,
+        "otlp_scope_consistent": true,
+        "resource_identity_bound": true,
+        "retry_history_complete": true,
+        "same_identity": true,
+        "sampling_known": true,
+        "sequence_complete": true,
+        "signal_conflict": true,
+        "signal_correlation_closed": true,
+        "time_window_closed": true,
+        "trace_context_valid": true,
+        "trace_present": true,
+        "unknown_export_state": false
+      },
+      "id": "export-state-conflict",
+      "label": "export状态冲突",
+      "status": "REJECT"
+    }
+  ],
+  "identity_domain": [
+    "tenant",
+    "source",
+    "trace_id",
+    "span_id",
+    "service",
+    "resource",
+    "scope",
+    "batch",
+    "sequence"
+  ],
+  "production_verified": false,
+  "schema_version": "S38-cases-1",
+  "signal_domain": [
+    "logs",
+    "metrics",
+    "traces",
+    "OTLP",
+    "sampling",
+    "export_attempt",
+    "export_ack",
+    "queue",
+    "drop_counter",
+    "retry"
+  ],
+  "synthetic_only": true
+}

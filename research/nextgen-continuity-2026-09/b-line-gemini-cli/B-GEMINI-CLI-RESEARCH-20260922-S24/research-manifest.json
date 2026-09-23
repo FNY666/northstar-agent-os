@@ -1,0 +1,42 @@
+{
+  "slice": "B/S24",
+  "synthetic_only": true,
+  "production_verified": false,
+  "research_mode": "completely offline",
+  "directory": "/tmp/B-GEMINI-CLI-RESEARCH-20260922-S24",
+  "worker_count": 1,
+  "op_id_count": 1,
+  "attempts": [1, 2],
+  "fixture_count": 14,
+  "prohibited_inputs_read": [],
+  "excluded": [
+    "multi-worker",
+    "state-space enumeration",
+    "dedup key collision",
+    "manual reconciliation",
+    "real Gemini CLI",
+    "real service tests",
+    "credentials",
+    "S1-S23 and other research artifacts",
+    "shared/P0",
+    "incident directories",
+    "D10",
+    "L12",
+    "D14",
+    "canonical",
+    "staging",
+    "140",
+    "tri-line",
+    "systemd"
+  ],
+  "claims_boundary": "Synthetic local contract only; cannot prove Gemini CLI crash durability, remote state, exactly-once, rollback, or production safety.",
+  "files": [
+    "REPORT.md",
+    "sources.md",
+    "research-manifest.json",
+    "SHA256SUMS",
+    "harness.py",
+    "fixtures/cases.json",
+    "outputs/results.json"
+  ]
+}

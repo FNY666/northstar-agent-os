@@ -1,0 +1,781 @@
+{
+  "policy_note": "UNKNOWN is never rewritten in raw results; policy decisions map it only at the boundary.",
+  "production_verified": false,
+  "results": [
+    {
+      "crash_cut_results": [
+        {
+          "after_transition": 1,
+          "raw": "UNKNOWN",
+          "reason": "crash_cut_after_transition_1"
+        },
+        {
+          "after_transition": 2,
+          "raw": "UNKNOWN",
+          "reason": "crash_cut_after_transition_2"
+        },
+        {
+          "after_transition": 3,
+          "raw": "UNKNOWN",
+          "reason": "crash_cut_after_transition_3"
+        },
+        {
+          "after_transition": 4,
+          "raw": "UNKNOWN",
+          "reason": "crash_cut_after_transition_4"
+        }
+      ],
+      "decisions": {
+        "fail-closed": "ACCEPT",
+        "fail-open": "ACCEPT"
+      },
+      "evidence_class": "confirmed",
+      "expected_raw": "ACCEPT",
+      "id": "S11-01",
+      "raw": "ACCEPT",
+      "reason": "consistent_local_trace",
+      "state": "reconciled",
+      "title": "clean path",
+      "transitions": [
+        {
+          "event": "journal",
+          "from": "prepared",
+          "remaining_budget": 1,
+          "to": "journaled"
+        },
+        {
+          "event": "ack_match",
+          "from": "journaled",
+          "to": "acknowledged"
+        },
+        {
+          "event": "replay",
+          "from": "acknowledged",
+          "to": "replayed"
+        },
+        {
+          "event": "reconcile",
+          "from": "replayed",
+          "to": "reconciled"
+        }
+      ]
+    },
+    {
+      "crash_cut_results": [
+        {
+          "after_transition": 1,
+          "raw": "UNKNOWN",
+          "reason": "crash_cut_after_transition_1"
+        },
+        {
+          "after_transition": 2,
+          "raw": "UNKNOWN",
+          "reason": "crash_cut_after_transition_2"
+        },
+        {
+          "after_transition": 3,
+          "raw": "UNKNOWN",
+          "reason": "crash_cut_after_transition_3"
+        },
+        {
+          "after_transition": 4,
+          "raw": "UNKNOWN",
+          "reason": "crash_cut_after_transition_4"
+        }
+      ],
+      "decisions": {
+        "fail-closed": "REJECT",
+        "fail-open": "ACCEPT"
+      },
+      "evidence_class": "confirmed",
+      "expected_raw": "UNKNOWN",
+      "id": "S11-02",
+      "raw": "UNKNOWN",
+      "reason": "crash_cut_after_transition_1",
+      "state": "journaled",
+      "title": "cut after prepared to journaled",
+      "transitions": [
+        {
+          "event": "journal",
+          "from": "prepared",
+          "remaining_budget": 1,
+          "to": "journaled"
+        }
+      ]
+    },
+    {
+      "crash_cut_results": [
+        {
+          "after_transition": 1,
+          "raw": "UNKNOWN",
+          "reason": "crash_cut_after_transition_1"
+        },
+        {
+          "after_transition": 2,
+          "raw": "UNKNOWN",
+          "reason": "crash_cut_after_transition_2"
+        },
+        {
+          "after_transition": 3,
+          "raw": "UNKNOWN",
+          "reason": "crash_cut_after_transition_3"
+        },
+        {
+          "after_transition": 4,
+          "raw": "UNKNOWN",
+          "reason": "crash_cut_after_transition_4"
+        }
+      ],
+      "decisions": {
+        "fail-closed": "REJECT",
+        "fail-open": "ACCEPT"
+      },
+      "evidence_class": "inferred",
+      "expected_raw": "UNKNOWN",
+      "id": "S11-03",
+      "raw": "UNKNOWN",
+      "reason": "crash_cut_after_transition_2",
+      "state": "acknowledged",
+      "title": "cut after journaled to acknowledged",
+      "transitions": [
+        {
+          "event": "journal",
+          "from": "prepared",
+          "remaining_budget": 1,
+          "to": "journaled"
+        },
+        {
+          "event": "ack_match",
+          "from": "journaled",
+          "to": "acknowledged"
+        }
+      ]
+    },
+    {
+      "crash_cut_results": [
+        {
+          "after_transition": 1,
+          "raw": "UNKNOWN",
+          "reason": "crash_cut_after_transition_1"
+        },
+        {
+          "after_transition": 2,
+          "raw": "UNKNOWN",
+          "reason": "crash_cut_after_transition_2"
+        },
+        {
+          "after_transition": 3,
+          "raw": "UNKNOWN",
+          "reason": "crash_cut_after_transition_3"
+        },
+        {
+          "after_transition": 4,
+          "raw": "UNKNOWN",
+          "reason": "crash_cut_after_transition_4"
+        }
+      ],
+      "decisions": {
+        "fail-closed": "REJECT",
+        "fail-open": "ACCEPT"
+      },
+      "evidence_class": "unverified",
+      "expected_raw": "UNKNOWN",
+      "id": "S11-04",
+      "raw": "UNKNOWN",
+      "reason": "crash_cut_after_transition_3",
+      "state": "replayed",
+      "title": "cut after acknowledged to replayed",
+      "transitions": [
+        {
+          "event": "journal",
+          "from": "prepared",
+          "remaining_budget": 1,
+          "to": "journaled"
+        },
+        {
+          "event": "ack_match",
+          "from": "journaled",
+          "to": "acknowledged"
+        },
+        {
+          "event": "replay",
+          "from": "acknowledged",
+          "to": "replayed"
+        }
+      ]
+    },
+    {
+      "crash_cut_results": [
+        {
+          "after_transition": 1,
+          "raw": "UNKNOWN",
+          "reason": "crash_cut_after_transition_1"
+        },
+        {
+          "after_transition": 2,
+          "raw": "UNKNOWN",
+          "reason": "crash_cut_after_transition_2"
+        },
+        {
+          "after_transition": 3,
+          "raw": "UNKNOWN",
+          "reason": "crash_cut_after_transition_3"
+        },
+        {
+          "after_transition": 4,
+          "raw": "UNKNOWN",
+          "reason": "crash_cut_after_transition_4"
+        }
+      ],
+      "decisions": {
+        "fail-closed": "REJECT",
+        "fail-open": "ACCEPT"
+      },
+      "evidence_class": "inferred",
+      "expected_raw": "UNKNOWN",
+      "id": "S11-05",
+      "raw": "UNKNOWN",
+      "reason": "crash_cut_after_transition_4",
+      "state": "reconciled",
+      "title": "cut after replayed to reconciled",
+      "transitions": [
+        {
+          "event": "journal",
+          "from": "prepared",
+          "remaining_budget": 1,
+          "to": "journaled"
+        },
+        {
+          "event": "ack_match",
+          "from": "journaled",
+          "to": "acknowledged"
+        },
+        {
+          "event": "replay",
+          "from": "acknowledged",
+          "to": "replayed"
+        },
+        {
+          "event": "reconcile",
+          "from": "replayed",
+          "to": "reconciled"
+        }
+      ]
+    },
+    {
+      "crash_cut_results": [
+        {
+          "after_transition": 1,
+          "raw": "UNKNOWN",
+          "reason": "retry_budget_exhausted"
+        },
+        {
+          "after_transition": 2,
+          "raw": "UNKNOWN",
+          "reason": "retry_budget_exhausted"
+        },
+        {
+          "after_transition": 3,
+          "raw": "UNKNOWN",
+          "reason": "retry_budget_exhausted"
+        },
+        {
+          "after_transition": 4,
+          "raw": "UNKNOWN",
+          "reason": "retry_budget_exhausted"
+        }
+      ],
+      "decisions": {
+        "fail-closed": "REJECT",
+        "fail-open": "ACCEPT"
+      },
+      "evidence_class": "confirmed",
+      "expected_raw": "UNKNOWN",
+      "id": "S11-06",
+      "raw": "UNKNOWN",
+      "reason": "retry_budget_exhausted",
+      "state": "prepared",
+      "title": "bounded retry exhausted",
+      "transitions": [
+        {
+          "event": "journal_attempt_failed",
+          "from": "prepared",
+          "remaining_budget": 1,
+          "to": "prepared"
+        },
+        {
+          "event": "journal_attempt_failed",
+          "from": "prepared",
+          "remaining_budget": 0,
+          "to": "prepared"
+        }
+      ]
+    },
+    {
+      "crash_cut_results": [
+        {
+          "after_transition": 1,
+          "raw": "UNKNOWN",
+          "reason": "crash_cut_after_transition_1"
+        },
+        {
+          "after_transition": 2,
+          "raw": "REJECT",
+          "reason": "idempotency_key_collision"
+        },
+        {
+          "after_transition": 3,
+          "raw": "REJECT",
+          "reason": "idempotency_key_collision"
+        }
+      ],
+      "decisions": {
+        "fail-closed": "REJECT",
+        "fail-open": "REJECT"
+      },
+      "evidence_class": "conflicting",
+      "expected_raw": "REJECT",
+      "id": "S11-07",
+      "raw": "REJECT",
+      "reason": "idempotency_key_collision",
+      "state": "journaled",
+      "title": "idempotency key collision",
+      "transitions": [
+        {
+          "event": "journal",
+          "from": "prepared",
+          "remaining_budget": 1,
+          "to": "journaled"
+        },
+        {
+          "event": "ack_idempotency_collision",
+          "from": "journaled",
+          "to": "journaled"
+        }
+      ]
+    },
+    {
+      "crash_cut_results": [
+        {
+          "after_transition": 1,
+          "raw": "UNKNOWN",
+          "reason": "crash_cut_after_transition_1"
+        },
+        {
+          "after_transition": 2,
+          "raw": "UNKNOWN",
+          "reason": "crash_cut_after_transition_2"
+        },
+        {
+          "after_transition": 3,
+          "raw": "UNKNOWN",
+          "reason": "crash_cut_after_transition_3"
+        }
+      ],
+      "decisions": {
+        "fail-closed": "REJECT",
+        "fail-open": "REJECT"
+      },
+      "evidence_class": "conflicting",
+      "expected_raw": "REJECT",
+      "id": "S11-08",
+      "raw": "REJECT",
+      "reason": "stale_checkpoint",
+      "state": "replayed",
+      "title": "stale checkpoint",
+      "transitions": [
+        {
+          "event": "journal",
+          "from": "prepared",
+          "remaining_budget": 1,
+          "to": "journaled"
+        },
+        {
+          "event": "ack_match",
+          "from": "journaled",
+          "to": "acknowledged"
+        },
+        {
+          "event": "replay",
+          "from": "acknowledged",
+          "to": "replayed"
+        },
+        {
+          "event": "stale_checkpoint",
+          "from": "replayed",
+          "to": "replayed"
+        }
+      ]
+    },
+    {
+      "crash_cut_results": [
+        {
+          "after_transition": 1,
+          "raw": "UNKNOWN",
+          "reason": "crash_cut_after_transition_1"
+        },
+        {
+          "after_transition": 2,
+          "raw": "REJECT",
+          "reason": "operator_abort"
+        },
+        {
+          "after_transition": 3,
+          "raw": "REJECT",
+          "reason": "operator_abort"
+        }
+      ],
+      "decisions": {
+        "fail-closed": "REJECT",
+        "fail-open": "REJECT"
+      },
+      "evidence_class": "confirmed",
+      "expected_raw": "REJECT",
+      "id": "S11-09",
+      "raw": "REJECT",
+      "reason": "operator_abort",
+      "state": "journaled",
+      "title": "operator abort",
+      "transitions": [
+        {
+          "event": "journal",
+          "from": "prepared",
+          "remaining_budget": 1,
+          "to": "journaled"
+        },
+        {
+          "event": "operator_abort",
+          "from": "journaled",
+          "to": "journaled"
+        }
+      ]
+    },
+    {
+      "crash_cut_results": [
+        {
+          "after_transition": 1,
+          "raw": "UNKNOWN",
+          "reason": "crash_cut_after_transition_1"
+        },
+        {
+          "after_transition": 2,
+          "raw": "UNKNOWN",
+          "reason": "crash_cut_after_transition_2"
+        },
+        {
+          "after_transition": 3,
+          "raw": "UNKNOWN",
+          "reason": "crash_cut_after_transition_3"
+        },
+        {
+          "after_transition": 4,
+          "raw": "UNKNOWN",
+          "reason": "crash_cut_after_transition_4"
+        }
+      ],
+      "decisions": {
+        "fail-closed": "ACCEPT",
+        "fail-open": "ACCEPT"
+      },
+      "evidence_class": "confirmed",
+      "expected_raw": "ACCEPT",
+      "id": "S11-10",
+      "raw": "ACCEPT",
+      "reason": "duplicate_replay_idempotent",
+      "state": "reconciled",
+      "title": "duplicate replay same digest",
+      "transitions": [
+        {
+          "event": "journal",
+          "from": "prepared",
+          "remaining_budget": 1,
+          "to": "journaled"
+        },
+        {
+          "event": "ack_match",
+          "from": "journaled",
+          "to": "acknowledged"
+        },
+        {
+          "event": "replay",
+          "from": "acknowledged",
+          "to": "replayed"
+        },
+        {
+          "event": "duplicate_replay_same_digest",
+          "from": "replayed",
+          "to": "replayed"
+        },
+        {
+          "event": "reconcile",
+          "from": "replayed",
+          "to": "reconciled"
+        }
+      ]
+    },
+    {
+      "crash_cut_results": [
+        {
+          "after_transition": 1,
+          "raw": "UNKNOWN",
+          "reason": "crash_cut_after_transition_1"
+        },
+        {
+          "after_transition": 2,
+          "raw": "UNKNOWN",
+          "reason": "crash_cut_after_transition_2"
+        },
+        {
+          "after_transition": 3,
+          "raw": "UNKNOWN",
+          "reason": "crash_cut_after_transition_3"
+        },
+        {
+          "after_transition": 4,
+          "raw": "REJECT",
+          "reason": "duplicate_replay_conflict"
+        }
+      ],
+      "decisions": {
+        "fail-closed": "REJECT",
+        "fail-open": "REJECT"
+      },
+      "evidence_class": "conflicting",
+      "expected_raw": "REJECT",
+      "id": "S11-11",
+      "raw": "REJECT",
+      "reason": "duplicate_replay_conflict",
+      "state": "replayed",
+      "title": "duplicate replay conflicting digest",
+      "transitions": [
+        {
+          "event": "journal",
+          "from": "prepared",
+          "remaining_budget": 1,
+          "to": "journaled"
+        },
+        {
+          "event": "ack_match",
+          "from": "journaled",
+          "to": "acknowledged"
+        },
+        {
+          "event": "replay",
+          "from": "acknowledged",
+          "to": "replayed"
+        },
+        {
+          "event": "duplicate_replay_conflicting_digest",
+          "from": "replayed",
+          "to": "replayed"
+        }
+      ]
+    },
+    {
+      "crash_cut_results": [
+        {
+          "after_transition": 1,
+          "raw": "UNKNOWN",
+          "reason": "crash_cut_after_transition_1"
+        },
+        {
+          "after_transition": 2,
+          "raw": "UNKNOWN",
+          "reason": "acknowledgement_unobserved"
+        },
+        {
+          "after_transition": 3,
+          "raw": "UNKNOWN",
+          "reason": "acknowledgement_unobserved"
+        }
+      ],
+      "decisions": {
+        "fail-closed": "REJECT",
+        "fail-open": "ACCEPT"
+      },
+      "evidence_class": "unverified",
+      "expected_raw": "UNKNOWN",
+      "id": "S11-12",
+      "raw": "UNKNOWN",
+      "reason": "acknowledgement_unobserved",
+      "state": "journaled",
+      "title": "missing acknowledgement",
+      "transitions": [
+        {
+          "event": "journal",
+          "from": "prepared",
+          "remaining_budget": 1,
+          "to": "journaled"
+        },
+        {
+          "event": "ack_missing",
+          "from": "journaled",
+          "to": "journaled"
+        }
+      ]
+    },
+    {
+      "crash_cut_results": [
+        {
+          "after_transition": 1,
+          "raw": "UNKNOWN",
+          "reason": "crash_cut_after_transition_1"
+        },
+        {
+          "after_transition": 2,
+          "raw": "REJECT",
+          "reason": "conflicting_acknowledgement"
+        },
+        {
+          "after_transition": 3,
+          "raw": "REJECT",
+          "reason": "conflicting_acknowledgement"
+        }
+      ],
+      "decisions": {
+        "fail-closed": "REJECT",
+        "fail-open": "REJECT"
+      },
+      "evidence_class": "conflicting",
+      "expected_raw": "REJECT",
+      "id": "S11-13",
+      "raw": "REJECT",
+      "reason": "conflicting_acknowledgement",
+      "state": "journaled",
+      "title": "acknowledgement conflict",
+      "transitions": [
+        {
+          "event": "journal",
+          "from": "prepared",
+          "remaining_budget": 1,
+          "to": "journaled"
+        },
+        {
+          "event": "ack_conflicting_payload",
+          "from": "journaled",
+          "to": "journaled"
+        }
+      ]
+    },
+    {
+      "crash_cut_results": [
+        {
+          "after_transition": 1,
+          "raw": "UNKNOWN",
+          "reason": "crash_cut_after_transition_1"
+        },
+        {
+          "after_transition": 2,
+          "raw": "UNKNOWN",
+          "reason": "crash_cut_after_transition_2"
+        },
+        {
+          "after_transition": 3,
+          "raw": "UNKNOWN",
+          "reason": "crash_cut_after_transition_3"
+        },
+        {
+          "after_transition": 4,
+          "raw": "UNKNOWN",
+          "reason": "crash_cut_after_transition_4"
+        }
+      ],
+      "decisions": {
+        "fail-closed": "REJECT",
+        "fail-open": "ACCEPT"
+      },
+      "evidence_class": "inaccessible",
+      "expected_raw": "UNKNOWN",
+      "id": "S11-14",
+      "raw": "UNKNOWN",
+      "reason": "crash_cut_after_transition_1",
+      "state": "journaled",
+      "title": "external durability unavailable",
+      "transitions": [
+        {
+          "event": "journal",
+          "from": "prepared",
+          "remaining_budget": 1,
+          "to": "journaled"
+        }
+      ]
+    },
+    {
+      "crash_cut_results": [
+        {
+          "after_transition": 1,
+          "raw": "UNKNOWN",
+          "reason": "crash_cut_after_transition_1"
+        },
+        {
+          "after_transition": 2,
+          "raw": "UNKNOWN",
+          "reason": "crash_cut_after_transition_2"
+        },
+        {
+          "after_transition": 3,
+          "raw": "UNKNOWN",
+          "reason": "crash_cut_after_transition_3"
+        },
+        {
+          "after_transition": 4,
+          "raw": "UNKNOWN",
+          "reason": "crash_cut_after_transition_4"
+        }
+      ],
+      "decisions": {
+        "fail-closed": "ACCEPT",
+        "fail-open": "ACCEPT"
+      },
+      "evidence_class": "inferred",
+      "expected_raw": "ACCEPT",
+      "id": "S11-15",
+      "raw": "ACCEPT",
+      "reason": "consistent_local_trace",
+      "state": "reconciled",
+      "title": "retry succeeds before budget",
+      "transitions": [
+        {
+          "event": "journal_attempt_failed",
+          "from": "prepared",
+          "remaining_budget": 2,
+          "to": "prepared"
+        },
+        {
+          "event": "journal",
+          "from": "prepared",
+          "remaining_budget": 1,
+          "to": "journaled"
+        },
+        {
+          "event": "ack_match",
+          "from": "journaled",
+          "to": "acknowledged"
+        },
+        {
+          "event": "replay",
+          "from": "acknowledged",
+          "to": "replayed"
+        },
+        {
+          "event": "reconcile",
+          "from": "replayed",
+          "to": "reconciled"
+        }
+      ]
+    }
+  ],
+  "state_order": [
+    "prepared",
+    "journaled",
+    "acknowledged",
+    "replayed",
+    "reconciled"
+  ],
+  "status_vocabulary": [
+    "ACCEPT",
+    "REJECT",
+    "UNKNOWN"
+  ],
+  "synthetic_only": true
+}
