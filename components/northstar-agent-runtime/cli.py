@@ -1394,11 +1394,12 @@ def _run(args: argparse.Namespace) -> int:
     if args.checkpoint_turns < 0:
         print("configuration error: --checkpoint-turns must be >= 0 (0 disables checkpoints)", file=sys.stderr)
         return USAGE_ERROR
-    if args.checkpoint_turns and args.checkpoint_turns > args.max_turns:
+    if args.checkpoint_turns and args.checkpoint_turns > max_turns:
         # A cadence that can never fire would leave the operator believing the run
-        # was resumable when no record was ever written.
+        # was resumable when no record was ever written. Compared with the effective
+        # ceiling (after the policy file and plugins tightened it), not the flag alone.
         print(
-            f"configuration error: --checkpoint-turns {args.checkpoint_turns} exceeds --max-turns {args.max_turns}, "
+            f"configuration error: --checkpoint-turns {args.checkpoint_turns} exceeds the run's max_turns {max_turns}, "
             "so no checkpoint could ever be written",
             file=sys.stderr,
         )
@@ -1457,11 +1458,13 @@ def _run(args: argparse.Namespace) -> int:
         # A fork gets its own id and its own file; the parent stays byte-for-byte
         # what it was. --resume keeps the older append-in-place behaviour.
         config_kwargs["parent_session"] = args.resume_from
-        config_kwargs["max_turns"] = max(args.max_turns, checkpoint.turns)
+        # Start from the tightened ceiling, never from the flag: a policy file or plugin
+        # that lowered max_turns must keep binding the lineage after a resume.
+        config_kwargs["max_turns"] = max(max_turns, checkpoint.turns)
         # The ceiling travels with the lineage: the resumed run starts *at* what the
         # parent had already spent, so resuming cannot hand out a fresh budget.
         resume_budget = _Budget(
-            max_budget_usd=args.max_budget_usd,
+            max_budget_usd=max_budget_usd,
             total_cost_usd=checkpoint.cost_usd,
             total_usage=checkpoint_usage(checkpoint),
         )
