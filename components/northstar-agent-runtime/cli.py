@@ -63,6 +63,17 @@ from governance_bench import add_bench_arguments
 
 USAGE_ERROR = 64
 
+
+class RunConfigurationError(ValueError):
+    """A run cannot start because its configuration is invalid.
+
+    ``main()`` already turns every ``ValueError`` escaping ``_run()`` into
+    ``configuration error: <message>`` on stderr and exit code 64 (``USAGE_ERROR``), so
+    raising this is byte-for-byte the same as printing that line and returning 64 - but it
+    lets the steps of ``_run()`` live in their own functions. The message never repeats the
+    ``configuration error:`` prefix; ``main()`` adds it.
+    """
+
 #: Tools that change state; ``--read-only`` refuses them at the gate.
 #: Shell is included: a "read-only" run must not execute commands either.
 MUTATING_TOOLS = ("Write", "Edit", "Shell")
@@ -1017,16 +1028,14 @@ def _run(args: argparse.Namespace) -> int:
     try:
         args.model = resolve_model(args.provider, args.model)
     except ValueError as error:
-        print(f"configuration error: {error}", file=sys.stderr)
-        return USAGE_ERROR
+        raise RunConfigurationError(str(error)) from error
 
     if args.require_skill_lock:
         from skill_check import run_lock_status
 
         locked, detail = run_lock_status(args.workspace)
         if not locked:
-            print(f"configuration error: skill review is required and failed: {detail}", file=sys.stderr)
-            return USAGE_ERROR
+            raise RunConfigurationError(f"skill review is required and failed: {detail}")
 
     prompt = args.prompt
     # Product `agent TASK` lands as args.task after the product_path weld keeps it
@@ -1075,20 +1084,14 @@ def _run(args: argparse.Namespace) -> int:
         try:
             plugins = load_contributions(args.workspace, known_tools=registry.names())
         except (PluginError, OSError, ValueError) as error:
-            print(f"configuration error: {error}", file=sys.stderr)
-            return USAGE_ERROR
+            raise RunConfigurationError(str(error)) from error
         if plugins.blocked:
-            print(
-                "configuration error: installed plugins are not loadable:\n  - "
-                + "\n  - ".join(str(item) for item in plugins.blocked),
-                file=sys.stderr,
+            raise RunConfigurationError(
+                "installed plugins are not loadable:\n  - "
+                + "\n  - ".join(str(item) for item in plugins.blocked)
+                + f"\n  run `python3 -m cli plugin verify --workspace {args.workspace}` to see the reviewed set, "
+                "and `plugin list` to see what is installed"
             )
-            print(
-                f"  run `python3 -m cli plugin verify --workspace {args.workspace}` to see the reviewed set, "
-                "and `plugin list` to see what is installed",
-                file=sys.stderr,
-            )
-            return USAGE_ERROR
         for note in plugins.notes:
             print(f"note: plugin: {note}", file=sys.stderr)
 
@@ -1104,8 +1107,7 @@ def _run(args: argparse.Namespace) -> int:
                 extra_paths=[path for _name, path in (plugins.agent_directories if plugins else ())],
             )
         except AgentFileError as error:
-            print(f"configuration error: {error}", file=sys.stderr)
-            return USAGE_ERROR
+            raise RunConfigurationError(str(error)) from error
 
     # Workspace policy file (.northstar/config.toml). It may only tighten; any
     # violation is a configuration error (exit 64), never a silent ignore.
@@ -1115,8 +1117,7 @@ def _run(args: argparse.Namespace) -> int:
         try:
             policy = load_policy_file(args.workspace, known_tools=registry.names(), known_agents=agents.names())
         except PolicyFileError as error:
-            print(f"configuration error: {error}", file=sys.stderr)
-            return USAGE_ERROR
+            raise RunConfigurationError(str(error)) from error
 
     # Repository-declared lifecycle hooks. Off unless a human enables them: cloning
     # a repository must not mean executing it. Anything the file declares is
@@ -1154,8 +1155,7 @@ def _run(args: argparse.Namespace) -> int:
                     file=sys.stderr,
                 )
         except CommandHookError as error:
-            print(f"configuration error: {error}", file=sys.stderr)
-            return USAGE_ERROR
+            raise RunConfigurationError(str(error)) from error
 
     # Postconditions are checked after the run by this process, not by the model.
     # CLI and policy file are additive in both directions: a repository can require
@@ -1170,8 +1170,7 @@ def _run(args: argparse.Namespace) -> int:
                 tuple(getattr(policy, "verify", ()) or ()), source=str(getattr(policy, "source", "policy file"))
             )
         except ValueError as error:
-            print(f"configuration error: {error}", file=sys.stderr)
-            return USAGE_ERROR
+            raise RunConfigurationError(str(error)) from error
 
     cli_mode = "plan" if args.plan else args.permission_mode
     validate_mode(cli_mode)
@@ -1266,8 +1265,7 @@ def _run(args: argparse.Namespace) -> int:
 
         retry_policy = _retry_policy(args, policy)
     except RetryConfigurationError as error:
-        print(f"configuration error: {error}", file=sys.stderr)
-        return USAGE_ERROR
+        raise RunConfigurationError(str(error)) from error
     config_kwargs: dict[str, Any] = {
         "retry": retry_policy,
         "model": (definition.model if definition and definition.model else args.model),
@@ -1331,8 +1329,7 @@ def _run(args: argparse.Namespace) -> int:
                 extra_roots=[path for _name, path in (plugins.skill_roots if plugins else ())],
             )
         except SkillError as error:
-            print(f"configuration error: {error}", file=sys.stderr)
-            return USAGE_ERROR
+            raise RunConfigurationError(str(error)) from error
     if skills:
         base_prompt = config_kwargs.get("system_prompt", DEFAULT_SYSTEM_PROMPT)
         config_kwargs["system_prompt"] = base_prompt + skill_listing(skills, args.workspace)
@@ -1343,8 +1340,7 @@ def _run(args: argparse.Namespace) -> int:
 
             skill_scripts = discover_skill_scripts(args.workspace, skills)
         except SkillError as error:
-            print(f"configuration error: {error}", file=sys.stderr)
-            return USAGE_ERROR
+            raise RunConfigurationError(str(error)) from error
         if skill_scripts:
             base_prompt = config_kwargs.get("system_prompt", DEFAULT_SYSTEM_PROMPT)
             config_kwargs["system_prompt"] = base_prompt + skill_scripts_listing(skill_scripts)
@@ -1373,8 +1369,7 @@ def _run(args: argparse.Namespace) -> int:
                     + (" [truncated]" if memory.truncated else "")
                 )
     except MemoryError as error:
-        print(f"configuration error: {error}", file=sys.stderr)
-        return USAGE_ERROR
+        raise RunConfigurationError(str(error)) from error
 
     if plugins is not None and plugins.context_blocks:
         # A bundle's README-style context is the same kind of content as AGENTS.md: it
@@ -1392,47 +1387,36 @@ def _run(args: argparse.Namespace) -> int:
     config_kwargs["parallel_tools"] = int(getattr(args, "parallel_tools", 1) or 1)
 
     if args.checkpoint_turns < 0:
-        print("configuration error: --checkpoint-turns must be >= 0 (0 disables checkpoints)", file=sys.stderr)
-        return USAGE_ERROR
+        raise RunConfigurationError("--checkpoint-turns must be >= 0 (0 disables checkpoints)")
     if args.checkpoint_turns and args.checkpoint_turns > max_turns:
         # A cadence that can never fire would leave the operator believing the run
         # was resumable when no record was ever written. Compared with the effective
         # ceiling (after the policy file and plugins tightened it), not the flag alone.
-        print(
-            f"configuration error: --checkpoint-turns {args.checkpoint_turns} exceeds the run's max_turns {max_turns}, "
+        raise RunConfigurationError(
+            f"--checkpoint-turns {args.checkpoint_turns} exceeds the run's max_turns {max_turns}, "
             "so no checkpoint could ever be written",
-            file=sys.stderr,
         )
-        return USAGE_ERROR
     if args.no_session_lease and args.session_lease_seconds != 900:
-        print(
-            "configuration error: --session-lease-seconds has no meaning with --no-session-lease; "
+        raise RunConfigurationError(
+            "--session-lease-seconds has no meaning with --no-session-lease; "
             "pick one (no lease, or a lease of N seconds)",
-            file=sys.stderr,
         )
-        return USAGE_ERROR
     if not args.no_session_lease and args.session_lease_seconds < 0:
         # 0 is the one value that means something else here: it reads as "lease for no
         # time", which is a lease that is always up for grabs. Turning it off is what
         # --no-session-lease is for, and saying so beats inventing a synonym.
-        print(
-            "configuration error: --session-lease-seconds must be > 0; use --no-session-lease to run without a lease",
-            file=sys.stderr,
+        raise RunConfigurationError(
+            "--session-lease-seconds must be > 0; use --no-session-lease to run without a lease",
         )
-        return USAGE_ERROR
     if args.resume_record is not None and not args.resume_from:
-        print("configuration error: --resume-record only means something with --resume-from", file=sys.stderr)
-        return USAGE_ERROR
+        raise RunConfigurationError("--resume-record only means something with --resume-from")
     if args.resume and args.resume_from:
-        print(
-            "configuration error: choose one of --resume (append to the same transcript) or "
+        raise RunConfigurationError(
+            "choose one of --resume (append to the same transcript) or "
             "--resume-from (fork a new session from a checkpoint); they disagree about the parent file",
-            file=sys.stderr,
         )
-        return USAGE_ERROR
     if args.resume_from and not args.session_dir:
-        print("configuration error: --resume-from needs --session-dir to read the parent transcript from", file=sys.stderr)
-        return USAGE_ERROR
+        raise RunConfigurationError("--resume-from needs --session-dir to read the parent transcript from")
 
     from budget import Budget as _Budget
 
@@ -1445,15 +1429,12 @@ def _run(args: argparse.Namespace) -> int:
             _records, _dropped = _parent_store.read(args.resume_from)
             checkpoint = select_checkpoint(_records, record_index=args.resume_record)
         except (CheckpointError, OSError, ValueError) as error:
-            print(f"configuration error: cannot resume from {args.resume_from!r}: {error}", file=sys.stderr)
-            return USAGE_ERROR
+            raise RunConfigurationError(f"cannot resume from {args.resume_from!r}: {error}") from error
         if checkpoint is None:
-            print(
-                f"configuration error: session {args.resume_from!r} has no checkpoints "
+            raise RunConfigurationError(
+                f"session {args.resume_from!r} has no checkpoints "
                 f"(run it with --checkpoint-turns N to make boundaries resumable)",
-                file=sys.stderr,
             )
-            return USAGE_ERROR
         config_kwargs["resume_from"] = checkpoint
         # A fork gets its own id and its own file; the parent stays byte-for-byte
         # what it was. --resume keeps the older append-in-place behaviour.
@@ -1481,8 +1462,7 @@ def _run(args: argparse.Namespace) -> int:
     try:
         config = RuntimeConfig(**config_kwargs)
     except RuntimeConfigurationError as error:
-        print(f"configuration error: {error}", file=sys.stderr)
-        return USAGE_ERROR
+        raise RunConfigurationError(str(error)) from error
 
     if args.no_policy_file:
         policy_note = "none (--no-policy-file)"
@@ -1576,8 +1556,7 @@ def _run(args: argparse.Namespace) -> int:
         try:
             mcp_clients = _connect_mcp_clients(mcp_servers, args.mcp_timeout_ms, registry, args, mcp_launch)
         except ValueError as error:
-            print(f"configuration error: {error}", file=sys.stderr)
-            return USAGE_ERROR
+            raise RunConfigurationError(str(error)) from error
     try:
         if args.resume_from:
             resume = store.transcript(args.resume_from)

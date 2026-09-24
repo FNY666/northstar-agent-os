@@ -174,6 +174,10 @@ Source: `components/northstar-agent-runtime/cli.py`
 
 Command-line entry point for the Northstar Agent OS.
 
+#### `RunConfigurationError`
+
+A run cannot start because its configuration is invalid.
+
 #### `build_parser()`
 
 #### `resolve_model(provider: str, model: str='')`
