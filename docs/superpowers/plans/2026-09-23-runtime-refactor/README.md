@@ -25,23 +25,30 @@ T02 修复了两个真实的治理缺陷，它是唯一有意改变行为的卡�
 
 | 卡 | 内容 | 改变行为？ | 依赖 | 状态 |
 | --- | --- | --- | --- | --- |
-| [T01](T01-link-check.md) | 文档链接检查跳过 `research/`，让测试恢复全绿 | 仅测试工具 | — | 待办 |
-| [T02](T02-resume-ceilings.md) | 修复：`--resume-from` 丢失策略文件的轮次和费用上限 | **是** | T01 | 待办 |
-| [T03](T03-cli-configuration-error.md) | `cli._run()`：引入 `RunConfigurationError`，收拢 23 处“打印后返回 64” | 否 | T02 | 待办 |
-| [T04](T04-cli-extract-loaders.md) | `cli._run()`：抽出提示词读取和 6 个“加载”步骤 | 否 | T03 | 待办 |
-| [T05](T05-cli-extract-resolvers.md) | `cli._run()`：抽出权限、工具、agent、MCP、上限的“解析”步骤 | 否 | T04 | 待办 |
-| [T06](T06-cli-extract-system-prompt.md) | `cli._run()`：抽出系统提示词拼接 | 否 | T05 | 待办 |
-| [T07](T07-cli-extract-session-and-output.md) | `cli._run()`：抽出会话参数校验、会话解析、dry-run 说明和事件输出 | 否 | T06 | 待办 |
-| [T08](T08-cli-move-to-run-setup.md) | 把 T04–T07 抽出的函数移到新模块 `run_setup.py` | 否 | T07 | 待办 |
-| [T09](T09-loop-authorization-result.md) | `loop.py`：用 `_Authorized` / `_Refused` 替代两种长度的元组 | 否 | T08 | 待办 |
-| [T10](T10-loop-split-tool-batch.md) | `loop.py`：拆分 `_authorize_tool()` 和 `_run_tool_batch()` | 否 | T09 | 待办 |
-| [T11](T11-loop-split-events.md) | `loop.py`：拆分 `_events()` | 否 | T10 | 待办 |
-| [T12](T12-loop-split-delegate.md) | `loop.py`：拆分 `_delegate()` | 否 | T11 | 待办 |
-| [T13](T13-sdk-share-resume.md) | 可选：`sdk._build()` 复用 `run_setup` 的检查点恢复逻辑 | 否 | T08 | 待办 |
-| [T14](T14-doctor-split-checks.md) | 可选：拆分 `doctor._checks()` | 否 | T01 | 待办 |
-| [T15](T15-cli-group-run-arguments.md) | 可选：按主题拆分 `cli._add_run_arguments()` | 否 | T08 | 待办 |
+| [T01](T01-link-check.md) | 文档链接检查跳过 `research/`，让测试恢复全绿 | 仅测试工具 | — | 已完成（#7） |
+| [T02](T02-resume-ceilings.md) | 修复：`--resume-from` 丢失策略文件的轮次和费用上限 | **是** | T01 | 已完成（#8） |
+| [T03](T03-cli-configuration-error.md) | `cli._run()`：引入 `RunConfigurationError`，收拢 23 处“打印后返回 64” | 否 | T02 | 已完成（#9） |
+| [T04](T04-cli-extract-loaders.md) | `cli._run()`：抽出提示词读取和 6 个“加载”步骤 | 否 | T03 | 已完成（#10） |
+| [T05](T05-cli-extract-resolvers.md) | `cli._run()`：抽出权限、工具、agent、MCP、上限的“解析”步骤 | 否 | T04 | 已完成（#11） |
+| [T06](T06-cli-extract-system-prompt.md) | `cli._run()`：抽出系统提示词拼接 | 否 | T05 | 已完成（#12） |
+| [T07](T07-cli-extract-session-and-output.md) | `cli._run()`：抽出会话参数校验、会话解析、dry-run 说明和事件输出 | 否 | T06 | 已完成（#13） |
+| [T08](T08-cli-move-to-run-setup.md) | 把 T04–T07 抽出的函数移到新模块 `run_setup.py` | 否 | T07 | 已完成（#14） |
+| [T09](T09-loop-authorization-result.md) | `loop.py`：用 `_Authorized` / `_Refused` 替代两种长度的元组 | 否 | T08 | 已完成（#15） |
+| [T10](T10-loop-split-tool-batch.md) | `loop.py`：拆分 `_authorize_tool()` 和 `_run_tool_batch()` | 否 | T09 | 已完成（#16） |
+| [T11](T11-loop-split-events.md) | `loop.py`：拆分 `_events()` | 否 | T10 | 已完成（#17） |
+| [T12](T12-loop-split-delegate.md) | `loop.py`：拆分 `_delegate()` | 否 | T11 | 已完成（#18） |
+| [T13](T13-sdk-share-resume.md) | 可选：`sdk._build()` 复用 `run_setup` 的检查点恢复逻辑 | 否 | T08 | 已完成（#19） |
+| [T14](T14-doctor-split-checks.md) | 可选：拆分 `doctor._checks()` | 否 | T01 | 已完成（#20） |
+| [T15](T15-cli-group-run-arguments.md) | 可选：按主题拆分 `cli._add_run_arguments()` | 否 | T08 | 已完成（#21，历史base违规已审计） |
 
 T13–T15 互相独立，可以在各自依赖合入后任意时间进行。
+
+## 执行审计说明（2026-09-25）
+
+- T01–T15 的最终合并结果均已在远端 `main` 上回读；T01–T14 的依赖链与 PR 合并结果已核对。
+- T15 PR#21 的历史 `base` 实际为 T14 head `07b8cc4`，而不是按本方案要求从最新 `main` 独立切出；这是一次已确认的流程违规。
+- 审计确认 T15 的最终净差异相对 T14 仅包含 `cli.py`；`doctor.py` 没有被重复引入 main，最终代码结果可接受。
+- 不改写、不强推、不回滚已合并历史；后续任务必须严格从最新 `main` 创建独立分支。
 
 ## 参考补丁（T01–T13）
 
