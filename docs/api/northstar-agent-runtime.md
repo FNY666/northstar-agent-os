@@ -174,19 +174,11 @@ Source: `components/northstar-agent-runtime/cli.py`
 
 Command-line entry point for the Northstar Agent OS.
 
-#### `RunConfigurationError`
-
-A run cannot start because its configuration is invalid.
-
 #### `build_parser()`
 
 #### `resolve_model(provider: str, model: str='')`
 
 The model id to use, or a configuration error for an impossible pairing.
-
-#### `checkpoint_usage(checkpoint: Any)`
-
-The parent's token totals as a Usage, so a resumed run's cost view is continuous.
 
 #### `main(argv: Sequence[str] | None=None)`
 
@@ -1277,6 +1269,90 @@ What a retry policy actually cost this turn.
 #### `merge_cli(policy: RetryPolicy | None, *, max_attempts: int | None=None, deadline_ms: int | None=None, retry_on: Iterable[str] | None=None, off: bool=False)`
 
 Apply the CLI's knobs on top of the workspace table, never loosening past it.
+
+### `run_setup`
+
+Source: `components/northstar-agent-runtime/run_setup.py`
+
+Assembling one governed run from its configuration sources, before anything runs.
+
+#### `RunConfigurationError`
+
+A run cannot start because its configuration is invalid.
+
+#### `tool_lists(args: argparse.Namespace, *, base_tools: Sequence[str])`
+
+Resolve allow/deny lists, subtracting denies (never co-listing them).
+
+#### `checkpoint_usage(checkpoint: Any)`
+
+The parent's token totals as a Usage, so a resumed run's cost view is continuous.
+
+#### `load_plugins(args: argparse.Namespace, registry: Any)`
+
+Installed plugin bundles (.northstar/plugins/), or None with --no-plugins.
+
+#### `load_workspace_agents(args: argparse.Namespace, agents: Any, registry: Any, plugins: Any)`
+
+Register repository-defined subagents (.northstar/agents/*.md) into ``agents``.
+
+#### `load_policy(args: argparse.Namespace, registry: Any, agents: Any)`
+
+The workspace policy file (.northstar/config.toml), or None.
+
+#### `HookSetup`
+
+What `load_hooks()` decided: the registry to run (or None) and what fed it.
+
+#### `load_hooks(args: argparse.Namespace, policy: Any, plugins: Any, registry: Any)`
+
+Repository-declared lifecycle hooks (policy file and plugins).
+
+#### `load_postconditions(args: argparse.Namespace, policy: Any)`
+
+Checks this process runs after the run (--verify and the policy file's ``verify``).
+
+#### `resolve_permission_mode(args: argparse.Namespace, policy: Any, plugins: Any)`
+
+The permission mode the run uses, after the policy file and plugins had their say.
+
+#### `resolve_tool_access(args: argparse.Namespace, registry: Any, policy: Any, plugins: Any)`
+
+``(allowed, denied)`` tool names: the CLI lists plus every denial a file or bundle adds.
+
+#### `resolve_agent(args: argparse.Namespace, policy: Any, agents: Any, registry: Any, allowed: tuple[str, ...])`
+
+``(definition, registry, allowed)`` for a run *as* a named agent (--agent or the policy file).
+
+#### `tighten(cli_value: int | None, file_value: int | None)`
+
+Policy-file ceilings may only lower; when both are set, the lower wins.
+
+#### `Ceilings`
+
+The run's ceilings after every source (flags, agent, policy file, plugins) tightened them.
+
+#### `resolve_ceilings(args: argparse.Namespace, definition: Any, policy: Any, plugins: Any)`
+
+#### `PromptSetup`
+
+The assembled system prompt and what went into it (for the dry-run notes).
+
+#### `compose_system_prompt(args: argparse.Namespace, definition: Any, policy: Any, plugins: Any)`
+
+Build the system prompt in its fixed order.
+
+#### `validate_session_flags(args: argparse.Namespace, ceilings: Ceilings)`
+
+Refuse checkpoint, lease and resume flags that contradict each other or the ceilings.
+
+#### `SessionSetup`
+
+Where the run records itself, what it inherits from a parent, and the config it implies.
+
+#### `resolve_session(args: argparse.Namespace, ceilings: Ceilings)`
+
+The session store, and for --resume-from the parent's checkpoint and spend.
 
 ### `sdk`
 

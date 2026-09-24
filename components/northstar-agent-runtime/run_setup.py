@@ -1,0 +1,531 @@
+"""Assembling one governed run from its configuration sources, before anything runs.
+
+``cli run`` (and anything else that starts a run from flags, a workspace policy file and
+installed plugins) goes through the same steps, in this order:
+
+1. load what the workspace declares - plugins, repository agents, the policy file, hooks,
+   postconditions (``load_*``);
+2. resolve what the run may do - permission mode, tool access, the agent it runs as, and
+   its ceilings, where every source can only tighten (``resolve_*``, ``tighten``);
+3. compose the system prompt in its fixed order (``compose_system_prompt``);
+4. validate the session flags and resolve the session store, including a checkpoint
+   resume that carries the parent's spend (``validate_session_flags``, ``resolve_session``).
+
+Every step either returns what the next one needs or raises ``RunConfigurationError``
+(a ``ValueError``), which the CLI reports as ``configuration error: ...`` with exit code 64.
+Nothing here prints a configuration error, starts a provider, or connects to a server.
+"""
+from __future__ import annotations
+
+import argparse
+import sys
+from dataclasses import dataclass
+from typing import Any, Sequence
+
+
+class RunConfigurationError(ValueError):
+    """A run cannot start because its configuration is invalid.
+
+    ``main()`` already turns every ``ValueError`` escaping ``_run()`` into
+    ``configuration error: <message>`` on stderr and exit code 64 (``USAGE_ERROR``), so
+    raising this is byte-for-byte the same as printing that line and returning 64 - but it
+    lets the steps of ``_run()`` live in their own functions. The message never repeats the
+    ``configuration error:`` prefix; ``main()`` adds it.
+    """
+
+
+#: Tools that change state; ``--read-only`` refuses them at the gate.
+#: Shell is included: a "read-only" run must not execute commands either.
+MUTATING_TOOLS = ("Write", "Edit", "Shell")
+
+
+def tool_lists(args: argparse.Namespace, *, base_tools: Sequence[str]) -> tuple[tuple[str, ...], tuple[str, ...]]:
+    """Resolve allow/deny lists, subtracting denies (never co-listing them)."""
+    from permissions import subtract
+
+    denied = list(args.deny_tool)
+    if args.read_only:
+        denied.extend(MUTATING_TOOLS)
+    allowed = list(args.allow_tool)
+    if not allowed and args.permission_mode == "bypassPermissions":
+        allowed = list(base_tools)
+    return subtract(allowed, denied), tuple(dict.fromkeys(denied))
+
+
+def checkpoint_usage(checkpoint: Any) -> Any:
+    """The parent's token totals as a Usage, so a resumed run's cost view is continuous."""
+    from providers.base import Usage
+
+    data = getattr(checkpoint, "usage", None) or {}
+    return Usage(
+        input_tokens=int(data.get("input_tokens", 0) or 0),
+        output_tokens=int(data.get("output_tokens", 0) or 0),
+        cache_read_input_tokens=int(data.get("cache_read_input_tokens", 0) or 0),
+        cache_creation_input_tokens=int(data.get("cache_creation_input_tokens", 0) or 0),
+    )
+
+
+def load_plugins(args: argparse.Namespace, registry: Any) -> Any:
+    """Installed plugin bundles (.northstar/plugins/), or None with --no-plugins.
+
+    A bundle is a *packaging* format, not a new permission channel: everything it
+    contributes is handed to the seam that already governs it (skills check rules,
+    agent-file collisions, hook validation, MCP permission gate, tighten-only ceilings),
+    and a bundle that fails any check blocks the run instead of loading "partially" - half
+    a reviewed plugin is not a reviewed plugin.
+    """
+    if args.no_plugins:
+        return None
+    from plugin_load import load_contributions
+    from plugin_manifest import PluginError
+
+    try:
+        plugins = load_contributions(args.workspace, known_tools=registry.names())
+    except (PluginError, OSError, ValueError) as error:
+        raise RunConfigurationError(str(error)) from error
+    if plugins.blocked:
+        raise RunConfigurationError(
+            "installed plugins are not loadable:\n  - "
+            + "\n  - ".join(str(item) for item in plugins.blocked)
+            + f"\n  run `python3 -m cli plugin verify --workspace {args.workspace}` to see the reviewed set, "
+            "and `plugin list` to see what is installed"
+        )
+    for note in plugins.notes:
+        print(f"note: plugin: {note}", file=sys.stderr)
+    return plugins
+
+
+def load_workspace_agents(args: argparse.Namespace, agents: Any, registry: Any, plugins: Any) -> tuple[Any, ...]:
+    """Register repository-defined subagents (.northstar/agents/*.md) into ``agents``.
+
+    Governed like built-ins: known tools only, tighten-only ceilings, fail-closed parse.
+    Returns the definitions that were added (for the dry-run note).
+    """
+    if args.no_workspace_agents:
+        return ()
+    from agent_files import AgentFileError, register_workspace_agents
+
+    try:
+        return register_workspace_agents(
+            agents,
+            args.workspace,
+            known_tools=registry.names(),
+            extra_paths=[path for _name, path in (plugins.agent_directories if plugins else ())],
+        )
+    except AgentFileError as error:
+        raise RunConfigurationError(str(error)) from error
+
+
+def load_policy(args: argparse.Namespace, registry: Any, agents: Any) -> Any:
+    """The workspace policy file (.northstar/config.toml), or None.
+
+    It may only tighten; any violation is a configuration error (exit 64), never a silent
+    ignore. Known agents include repository-defined ones, so the file may pick them.
+    """
+    if args.no_policy_file:
+        return None
+    from policy_file import PolicyFileError, load_policy_file
+
+    try:
+        return load_policy_file(args.workspace, known_tools=registry.names(), known_agents=agents.names())
+    except PolicyFileError as error:
+        raise RunConfigurationError(str(error)) from error
+
+
+@dataclass(frozen=True)
+class HookSetup:
+    """What `load_hooks()` decided: the registry to run (or None) and what fed it."""
+
+    registry: Any
+    command_hooks: tuple[Any, ...]
+    plugin_hook_count: int
+
+
+def load_hooks(args: argparse.Namespace, policy: Any, plugins: Any, registry: Any) -> HookSetup:
+    """Repository-declared lifecycle hooks (policy file and plugins).
+
+    Off unless a human enables them: cloning a repository must not mean executing it.
+    Anything the file declares is validated fail-closed, and an unusable declaration is a
+    configuration error.
+    """
+    hook_registry = None
+    command_hooks: tuple[Any, ...] = ()
+    plugin_hook_tables = tuple(table for _name, table in (plugins.hook_tables if plugins else ()))
+    declared_hooks = tuple(getattr(policy, "hooks", ()) or ()) + plugin_hook_tables
+    hook_source_parts = []
+    if getattr(policy, "hooks", ()):
+        hook_source_parts.append(str(getattr(policy, "source", "the workspace policy")))
+    if plugin_hook_tables:
+        hook_source_parts.append(f"{len(plugin_hook_tables)} from installed plugins")
+    hook_sources = " and ".join(hook_source_parts) or "the workspace policy"
+    if declared_hooks:
+        from command_hooks import CommandHookError, parse_hooks, register_into
+
+        try:
+            if args.enable_workspace_hooks:
+                command_hooks = parse_hooks(
+                    declared_hooks,
+                    workspace=args.workspace,
+                    known_tools=registry.names(),
+                )
+                from hooks import HookRegistry
+
+                hook_registry = HookRegistry()
+                register_into(hook_registry, command_hooks, workspace=args.workspace)
+            else:
+                # Validated lazily, but reported loudly: silently ignoring a
+                # repository's policy is exactly what this project refuses to do.
+                print(
+                    f"note: {len(declared_hooks)} hook(s) declared in {hook_sources} are IGNORED "
+                    "(pass --enable-workspace-hooks to run them)",
+                    file=sys.stderr,
+                )
+        except CommandHookError as error:
+            raise RunConfigurationError(str(error)) from error
+    return HookSetup(registry=hook_registry, command_hooks=command_hooks, plugin_hook_count=len(plugin_hook_tables))
+
+
+def load_postconditions(args: argparse.Namespace, policy: Any) -> tuple[Any, ...]:
+    """Checks this process runs after the run (--verify and the policy file's ``verify``).
+
+    Postconditions are checked after the run by this process, not by the model. CLI and
+    policy file are additive in both directions: a repository can require a check, an
+    operator can require one more, neither can drop the other's.
+    """
+    declared_checks = tuple(args.verify or ()) + tuple(getattr(policy, "verify", ()) or ())
+    if not declared_checks:
+        return ()
+    from postconditions import parse_cli_specs, parse_postconditions
+
+    try:
+        return parse_cli_specs(args.verify or ()) + parse_postconditions(
+            tuple(getattr(policy, "verify", ()) or ()), source=str(getattr(policy, "source", "policy file"))
+        )
+    except ValueError as error:
+        raise RunConfigurationError(str(error)) from error
+
+
+def resolve_permission_mode(args: argparse.Namespace, policy: Any, plugins: Any) -> str:
+    """The permission mode the run uses, after the policy file and plugins had their say.
+
+    The file may pin 'plan' (or keep 'default'); it may never loosen. A CLI mode other than
+    the built-in default is an explicit operator choice and wins. --no-policy-file is the
+    escape hatch for an explicit 'default'. A plugin may pin 'plan' (a ceiling), never
+    'default' or 'bypassPermissions': the policy file's own value wins over a bundle's, and
+    an explicit operator flag wins over both, because a human typing it is the only thing
+    that can widen a mode here.
+    """
+    from permissions import validate_mode
+
+    cli_mode = "plan" if args.plan else args.permission_mode
+    validate_mode(cli_mode)
+    policy_mode = policy.permission_mode if (policy is not None and policy.permission_mode is not None) else None
+    plugin_mode = str(plugins.policy.get("permission_mode") or "") if plugins is not None else ""
+    pinned_mode = policy_mode or plugin_mode
+    mode = pinned_mode if (cli_mode == "default" and pinned_mode) else cli_mode
+    validate_mode(mode)
+    return mode
+
+
+def resolve_tool_access(
+    args: argparse.Namespace, registry: Any, policy: Any, plugins: Any
+) -> tuple[tuple[str, ...], tuple[str, ...]]:
+    """``(allowed, denied)`` tool names: the CLI lists plus every denial a file or bundle adds."""
+    allowed_cli, denied_cli = tool_lists(args, base_tools=registry.names())
+    denied_list = list(denied_cli)
+    if policy is not None:
+        # File denials and read_only are a floor: they add to the CLI denials
+        # and the permission gate's first layer keeps them terminal.
+        denied_list.extend(policy.deny_tools)
+        if policy.read_only:
+            denied_list.extend(MUTATING_TOOLS)
+    if plugins is not None and plugins.policy.get("deny_tools"):
+        # A bundle may name tools it wants refused - and nothing else. There is no
+        # `allow_tools` here for the same reason there is none in the policy file: an
+        # artefact that arrives from elsewhere cannot grant itself approvals.
+        denied_list.extend(str(name) for name in plugins.policy["deny_tools"])
+    if plugins is not None and plugins.policy.get("read_only"):
+        denied_list.extend(MUTATING_TOOLS)
+    denied = tuple(dict.fromkeys(denied_list))
+    allowed = tuple(name for name in allowed_cli if name not in denied)
+    return allowed, denied
+
+
+def resolve_agent(
+    args: argparse.Namespace, policy: Any, agents: Any, registry: Any, allowed: tuple[str, ...]
+) -> tuple[Any, Any, tuple[str, ...]]:
+    """``(definition, registry, allowed)`` for a run *as* a named agent (--agent or the policy file).
+
+    Without an agent the registry and allow list come back unchanged and the definition is
+    None.
+    """
+    definition = None
+    agent_name = args.agent or (policy.agent if policy is not None else "")
+    if agent_name:
+        definition = agents.get(agent_name)
+        if definition is None:
+            # A typo (in a flag or in the policy file) is a usage error, not a traceback.
+            raise ValueError(f"unknown agent {agent_name!r}. Known agents: {', '.join(agents.names()) or '(none)'}")
+        # Running *as* a built-in definition inherits its tool subset and ceilings;
+        # the host's and policy file's deny lists still apply on top.
+        registry = registry.subset(definition.tools)
+        allowed = tuple(name for name in allowed if name in registry.names())
+    return definition, registry, allowed
+
+
+def tighten(cli_value: int | None, file_value: int | None) -> int | None:
+    """Policy-file ceilings may only lower; when both are set, the lower wins."""
+    candidates = [value for value in (cli_value, file_value) if value is not None]
+    return min(candidates) if candidates else None
+
+
+@dataclass(frozen=True)
+class Ceilings:
+    """The run's ceilings after every source (flags, agent, policy file, plugins) tightened them.
+
+    Anything that later rebuilds a ceiling - a checkpoint resume, for one - must start from
+    these values, never from the flags: the flags are only one of the sources.
+    """
+
+    max_turns: int
+    max_tool_calls: int | None
+    max_budget_usd: float | None
+    compaction_threshold: int | None
+    halt_on_denial: bool
+
+
+def resolve_ceilings(args: argparse.Namespace, definition: Any, policy: Any, plugins: Any) -> Ceilings:
+    base_turns = definition.max_turns if definition else args.max_turns
+    base_tool_calls = definition.max_tool_calls if definition else args.max_tool_calls
+    plugin_policy = plugins.policy if plugins is not None else {}
+    max_turns = tighten(tighten(base_turns, policy.max_turns if policy is not None else None), plugin_policy.get("max_turns"))
+    max_tool_calls = tighten(
+        tighten(base_tool_calls, policy.max_tool_calls if policy is not None else None), plugin_policy.get("max_tool_calls")
+    )
+    max_budget_usd = tighten(
+        tighten(args.max_budget_usd, policy.max_budget_usd if policy is not None else None), plugin_policy.get("max_budget_usd")
+    )
+    compaction_threshold = tighten(
+        args.compaction_threshold_tokens,
+        policy.compaction_threshold_tokens if policy is not None else None,
+    )
+    halt_on_denial = bool(
+        args.halt_on_denial
+        or (policy is not None and policy.halt_on_denial)
+        or (plugins is not None and plugins.policy.get("halt_on_denial"))
+    )
+    return Ceilings(
+        max_turns=max_turns,
+        max_tool_calls=max_tool_calls,
+        max_budget_usd=max_budget_usd,
+        compaction_threshold=compaction_threshold,
+        halt_on_denial=halt_on_denial,
+    )
+
+
+@dataclass(frozen=True)
+class PromptSetup:
+    """The assembled system prompt and what went into it (for the dry-run notes).
+
+    ``system_prompt`` is None when nothing replaced or extended the runtime's default, so
+    ``RuntimeConfig`` keeps its own default exactly as before.
+    """
+
+    system_prompt: str | None
+    context: Any
+    skills: tuple[Any, ...]
+    memory_note: str
+
+
+def compose_system_prompt(args: argparse.Namespace, definition: Any, policy: Any, plugins: Any) -> PromptSetup:
+    """Build the system prompt in its fixed order.
+
+    Order: --system-prompt (or the agent definition's own prompt, which wins) -> project
+    instructions (AGENTS.md) -> workspace skills listing -> skill scripts listing ->
+    workspace memory -> plugin context. Each part is appended to whatever came before it,
+    starting from the runtime's DEFAULT_SYSTEM_PROMPT when nothing replaced it.
+    """
+    from loop import DEFAULT_SYSTEM_PROMPT
+    from policy_file import append_project_context, discover_project_context
+    from skills import SkillError, discover_skills, skill_listing
+
+    system_prompt: str | None = None
+    if args.system_prompt:
+        system_prompt = args.system_prompt
+    if definition:
+        system_prompt = definition.system_prompt(parent_cwd=args.workspace)
+
+    # Project instructions (AGENTS.md by default, the policy file's
+    # project_context, or an explicit --context-file) are appended to whichever
+    # system prompt applies, as clearly delimited developer-authored content.
+    context = None
+    if args.context_file or not args.no_project_context:
+        configured = policy.project_context_setting if policy is not None else "AGENTS.md"
+        context = discover_project_context(
+            args.workspace,
+            configured=configured,
+            explicit=args.context_file or None,
+        )
+        if context is not None:
+            base_prompt = system_prompt if system_prompt is not None else DEFAULT_SYSTEM_PROMPT
+            system_prompt = append_project_context(base_prompt, context)
+
+    # Workspace skills (.northstar/skills/*/SKILL.md): progressive disclosure -
+    # only the name/description listing enters the prompt; the model reads the
+    # full SKILL.md with the ordinary sandboxed Read tool when a task matches.
+    skills: tuple[Any, ...] = ()
+    if not args.no_skills:
+        try:
+            skills = discover_skills(
+                args.workspace,
+                extra_roots=[path for _name, path in (plugins.skill_roots if plugins else ())],
+            )
+        except SkillError as error:
+            raise RunConfigurationError(str(error)) from error
+    if skills:
+        base_prompt = system_prompt if system_prompt is not None else DEFAULT_SYSTEM_PROMPT
+        system_prompt = base_prompt + skill_listing(skills, args.workspace)
+        # Skill-bundled scripts: listed for progressive disclosure; execution is
+        # only via Shell (still default-deny). Discovery never runs them.
+        try:
+            from tools.skill_scripts import discover_skill_scripts, skill_scripts_listing
+
+            skill_scripts = discover_skill_scripts(args.workspace, skills)
+        except SkillError as error:
+            raise RunConfigurationError(str(error)) from error
+        if skill_scripts:
+            base_prompt = system_prompt if system_prompt is not None else DEFAULT_SYSTEM_PROMPT
+            system_prompt = base_prompt + skill_scripts_listing(skill_scripts)
+
+    # Workspace memory (P4): workspace-scoped only, digest-labelled, opt-out.
+    # Never a user-home / global MEMORY store (blueprint C7).
+    memory = None
+    memory_note = "none (.northstar/memory/MEMORY.md absent)"
+    try:
+        from memory import MemoryError, append_memory, discover_memory
+
+        if getattr(args, "no_memory", False) and not (getattr(args, "memory_file", "") or ""):
+            memory = None
+            memory_note = "off (--no-memory)"
+        else:
+            memory = discover_memory(
+                args.workspace,
+                configured=False if getattr(args, "no_memory", False) else None,
+                explicit=(getattr(args, "memory_file", "") or None) or None,
+            )
+            if memory is not None:
+                base_prompt = system_prompt if system_prompt is not None else DEFAULT_SYSTEM_PROMPT
+                system_prompt = append_memory(base_prompt, memory)
+                memory_note = (
+                    f"{memory.relative} digest={memory.digest[:12]}"
+                    + (" [truncated]" if memory.truncated else "")
+                )
+    except MemoryError as error:
+        raise RunConfigurationError(str(error)) from error
+
+    if plugins is not None and plugins.context_blocks:
+        # A bundle's README-style context is the same kind of content as AGENTS.md: it
+        # informs, it does not authorise. It is therefore appended after the policy and
+        # labelled, so a reader of the transcript can tell whose words these are.
+        base_prompt = system_prompt if system_prompt is not None else DEFAULT_SYSTEM_PROMPT
+        blocks = "\n\n".join(f"[from plugin '{name}']\n{text}" for name, text in plugins.context_blocks)
+        system_prompt = (
+            base_prompt + "\n\n== Plugin context (developer-authored, from installed bundles) ==\n" + blocks + "\n== End of plugin context =="
+        )
+    return PromptSetup(system_prompt=system_prompt, context=context, skills=skills, memory_note=memory_note)
+
+
+def validate_session_flags(args: argparse.Namespace, ceilings: Ceilings) -> None:
+    """Refuse checkpoint, lease and resume flags that contradict each other or the ceilings."""
+    if args.checkpoint_turns < 0:
+        raise RunConfigurationError("--checkpoint-turns must be >= 0 (0 disables checkpoints)")
+    if args.checkpoint_turns and args.checkpoint_turns > ceilings.max_turns:
+        # A cadence that can never fire would leave the operator believing the run
+        # was resumable when no record was ever written. Compared with the effective
+        # ceiling (after the policy file and plugins tightened it), not the flag alone.
+        raise RunConfigurationError(
+            f"--checkpoint-turns {args.checkpoint_turns} exceeds the run's max_turns {ceilings.max_turns}, "
+            "so no checkpoint could ever be written",
+        )
+    if args.no_session_lease and args.session_lease_seconds != 900:
+        raise RunConfigurationError(
+            "--session-lease-seconds has no meaning with --no-session-lease; "
+            "pick one (no lease, or a lease of N seconds)",
+        )
+    if not args.no_session_lease and args.session_lease_seconds < 0:
+        # 0 is the one value that means something else here: it reads as "lease for no
+        # time", which is a lease that is always up for grabs. Turning it off is what
+        # --no-session-lease is for, and saying so beats inventing a synonym.
+        raise RunConfigurationError(
+            "--session-lease-seconds must be > 0; use --no-session-lease to run without a lease",
+        )
+    if args.resume_record is not None and not args.resume_from:
+        raise RunConfigurationError("--resume-record only means something with --resume-from")
+    if args.resume and args.resume_from:
+        raise RunConfigurationError(
+            "choose one of --resume (append to the same transcript) or "
+            "--resume-from (fork a new session from a checkpoint); they disagree about the parent file",
+        )
+    if args.resume_from and not args.session_dir:
+        raise RunConfigurationError("--resume-from needs --session-dir to read the parent transcript from")
+
+
+@dataclass(frozen=True)
+class SessionSetup:
+    """Where the run records itself, what it inherits from a parent, and the config it implies."""
+
+    store: Any
+    resume_budget: Any
+    config_updates: dict[str, Any]
+
+
+def resolve_session(args: argparse.Namespace, ceilings: Ceilings) -> SessionSetup:
+    """The session store, and for --resume-from the parent's checkpoint and spend.
+
+    ``config_updates`` holds the ``RuntimeConfig`` fields this decides (resume point,
+    lineage, checkpoint cadence, lease, session id); `_run()` merges them into its kwargs.
+    """
+    from budget import Budget as _Budget
+    from sessions import SessionStore
+
+    config_kwargs: dict[str, Any] = {}
+    resume_budget: Any = None
+    if args.resume_from:
+        from checkpoints import CheckpointError, select as select_checkpoint
+
+        _parent_store = SessionStore(args.session_dir, session_id=args.resume_from)
+        try:
+            _records, _dropped = _parent_store.read(args.resume_from)
+            checkpoint = select_checkpoint(_records, record_index=args.resume_record)
+        except (CheckpointError, OSError, ValueError) as error:
+            raise RunConfigurationError(f"cannot resume from {args.resume_from!r}: {error}") from error
+        if checkpoint is None:
+            raise RunConfigurationError(
+                f"session {args.resume_from!r} has no checkpoints "
+                f"(run it with --checkpoint-turns N to make boundaries resumable)",
+            )
+        config_kwargs["resume_from"] = checkpoint
+        # A fork gets its own id and its own file; the parent stays byte-for-byte
+        # what it was. --resume keeps the older append-in-place behaviour.
+        config_kwargs["parent_session"] = args.resume_from
+        # Start from the tightened ceiling, never from the flag: a policy file or plugin
+        # that lowered max_turns must keep binding the lineage after a resume.
+        config_kwargs["max_turns"] = max(ceilings.max_turns, checkpoint.turns)
+        # The ceiling travels with the lineage: the resumed run starts *at* what the
+        # parent had already spent, so resuming cannot hand out a fresh budget.
+        resume_budget = _Budget(
+            max_budget_usd=ceilings.max_budget_usd,
+            total_cost_usd=checkpoint.cost_usd,
+            total_usage=checkpoint_usage(checkpoint),
+        )
+        store = SessionStore(args.session_dir or None, session_id=None)
+    else:
+        store = SessionStore(args.session_dir or None, session_id=args.resume or None)
+    if args.checkpoint_turns:
+        config_kwargs["checkpoint_turns"] = args.checkpoint_turns
+    if args.no_session_lease:
+        config_kwargs["lock_session"] = False
+    elif args.session_lease_seconds != 900:
+        config_kwargs["session_lease_seconds"] = args.session_lease_seconds
+    config_kwargs["session_id"] = store.session_id
+    return SessionSetup(store=store, resume_budget=resume_budget, config_updates=config_kwargs)
