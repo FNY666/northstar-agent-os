@@ -109,17 +109,19 @@ def policy_drift_finding(workspace: Path, policy: Any) -> Finding:
     )
 
 
-def _checks(args: argparse.Namespace) -> list[Finding]:
-    findings: list[Finding] = []
 
-    # -- python -----------------------------------------------------------
+
+def _check_python(args: argparse.Namespace, findings: list[Finding]) -> None:
+    """Check Python version."""
     current = sys.version_info[:3]
     if current >= MIN_PYTHON:
         findings.append(Finding("python", "ok", f"Python {current[0]}.{current[1]}.{current[2]} (>= {MIN_PYTHON[0]}.{MIN_PYTHON[1]})"))
     else:
         findings.append(Finding("python", "fail", f"Python {current[0]}.{current[1]}.{current[2]} is too old; {MIN_PYTHON[0]}.{MIN_PYTHON[1]}+ is required"))
 
-    # -- optional SDKs -----------------------------------------------------
+
+def _check_sdks(args: argparse.Namespace, findings: list[Finding]) -> None:
+    """Check optional provider SDKs and tracing support."""
     # Report the SDK the *selected* provider needs, not every SDK that exists: a
     # host running --provider openai does not care about the anthropic package.
     required = {"anthropic": "anthropic", "openai": "openai"}.get(args.provider, "")
@@ -144,7 +146,9 @@ def _checks(args: argparse.Namespace) -> list[Finding]:
                     "not installed - --trace still prints span trees, but export needs requirements-tracing.txt")
         )
 
-    # -- workspace ----------------------------------------------------------
+
+def _check_workspace(args: argparse.Namespace, findings: list[Finding]) -> None:
+    """Check workspace existence and writability."""
     workspace = Path(args.workspace)
     if not workspace.exists():
         findings.append(Finding("workspace", "fail", f"{workspace} does not exist - tools are confined to it; create it first"))
@@ -155,7 +159,9 @@ def _checks(args: argparse.Namespace) -> list[Finding]:
     else:
         findings.append(Finding("workspace", "ok", str(workspace.resolve())))
 
-    # -- session dir ---------------------------------------------------------
+
+def _check_session_dir(args: argparse.Namespace, findings: list[Finding]) -> None:
+    """Check session directory readiness."""
     if args.session_dir:
         target = Path(args.session_dir)
         if target.exists():
@@ -176,7 +182,9 @@ def _checks(args: argparse.Namespace) -> list[Finding]:
     else:
         findings.append(Finding("session-dir", "ok", "off - no audit transcript will be written (pass --session-dir to audit)"))
 
-    # -- sidecar --------------------------------------------------------------
+
+def _check_sidecar(args: argparse.Namespace, findings: list[Finding]) -> None:
+    """Check the optional local sidecar socket."""
     if args.sidecar_socket:
         socket_path = Path(args.sidecar_socket)
         if not socket_path.exists():
@@ -194,7 +202,9 @@ def _checks(args: argparse.Namespace) -> list[Finding]:
     else:
         findings.append(Finding("sidecar", "ok", "off - CodexReadOnly tool is not registered (pass --sidecar-socket to enable)"))
 
-    # -- OS sandbox (Shell tool backend) ----------------------------------------
+
+def _check_sandbox(args: argparse.Namespace, findings: list[Finding]) -> None:
+    """Check the selected Shell sandbox backend."""
     try:
         from tools.os_sandbox import SandboxError, probe_capabilities, resolve_backend
 
@@ -226,7 +236,10 @@ def _checks(args: argparse.Namespace) -> list[Finding]:
     except Exception as error:  # noqa: BLE001
         findings.append(Finding("sandbox", "warn", f"could not probe sandbox: {error}"))
 
-    # -- workspace policy file, repository agents, skills, project context ------
+
+def _check_workspace_config(args: argparse.Namespace, findings: list[Finding]) -> None:
+    """Check workspace policy, agents, skills and project context."""
+    workspace = Path(args.workspace)
     if workspace.is_dir():
         try:
             from agent_files import AgentFileError, discover_agent_files
@@ -303,7 +316,11 @@ def _checks(args: argparse.Namespace) -> list[Finding]:
                 else:
                     size = f"{len(context.text)} chars" + (" [truncated]" if context.truncated else "")
                     findings.append(Finding("project-context", "ok", f"{context.name} ({size}) will be appended to the system prompt"))
-    # -- skill supply chain ----------------------------------------------------
+
+
+def _check_skill_supply_chain(args: argparse.Namespace, findings: list[Finding]) -> None:
+    """Check the workspace skill lock and supply chain."""
+    workspace = Path(args.workspace)
     if importlib.util.find_spec("skill_check") is not None:
         from skill_check import run_lock_status
 
@@ -313,7 +330,10 @@ def _checks(args: argparse.Namespace) -> list[Finding]:
                     f"{detail}" if locked else f"{detail} - `cli skills check --workspace . --write-lock` after reading them")
         )
 
-    # -- installed plugin bundles ----------------------------------------------
+
+def _check_plugins(args: argparse.Namespace, findings: list[Finding]) -> None:
+    """Check installed plugin bundles without mutating them."""
+    workspace = Path(args.workspace)
     # Read-only by construction: `pin=False`, because a self-check that records a review
     # would be a self-check that grades its own homework.
     if importlib.util.find_spec("plugin_load") is not None:
@@ -349,7 +369,9 @@ def _checks(args: argparse.Namespace) -> list[Finding]:
                     )
                 )
 
-    # -- provider/model pair and the OpenAI-compatible endpoint ----------------
+
+def _check_provider_model(args: argparse.Namespace, findings: list[Finding]) -> str:
+    """Check provider/model resolution and endpoint configuration."""
     from cli import PROVIDER_DEFAULT_MODELS, resolve_model
 
     try:
@@ -371,8 +393,11 @@ def _checks(args: argparse.Namespace) -> list[Finding]:
         )
     else:
         findings.append(Finding("provider", "ok", f"{args.provider} with model {resolved_model}"))
+    return resolved_model
 
-    # -- scripted script -------------------------------------------------------
+
+def _check_scripted_script(args: argparse.Namespace, findings: list[Finding]) -> None:
+    """Check the scripted provider input."""
     if args.provider == "scripted" and args.script:
         try:
             payload = json.loads(Path(args.script).read_text(encoding="utf-8"))
@@ -384,7 +409,9 @@ def _checks(args: argparse.Namespace) -> list[Finding]:
         except (OSError, ValueError) as error:
             findings.append(Finding("script", "fail", f"{args.script}: {error}"))
 
-    # -- model pricing ----------------------------------------------------------
+
+def _check_pricing(args: argparse.Namespace, findings: list[Finding], resolved_model: str) -> None:
+    """Check model pricing availability."""
     pricing, estimated = price_for(resolved_model)
     if estimated:
         findings.append(
@@ -398,6 +425,21 @@ def _checks(args: argparse.Namespace) -> list[Finding]:
                     "(cache reads x0.1, cache writes x1.25)")
         )
 
+
+def _checks(args: argparse.Namespace) -> list[Finding]:
+    findings: list[Finding] = []
+    _check_python(args, findings)
+    _check_sdks(args, findings)
+    _check_workspace(args, findings)
+    _check_session_dir(args, findings)
+    _check_sidecar(args, findings)
+    _check_sandbox(args, findings)
+    _check_workspace_config(args, findings)
+    _check_skill_supply_chain(args, findings)
+    _check_plugins(args, findings)
+    resolved_model = _check_provider_model(args, findings)
+    _check_scripted_script(args, findings)
+    _check_pricing(args, findings, resolved_model)
     return findings
 
 
