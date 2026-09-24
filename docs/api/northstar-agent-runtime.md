@@ -1316,6 +1316,10 @@ Checks this process runs after the run (--verify and the policy file's ``verify`
 
 The permission mode the run uses, after the policy file and plugins had their say.
 
+#### `agent_permission_mode(mode: str, definition: Any)`
+
+The mode a run *as* ``definition`` uses: the stricter of the resolved mode and its own.
+
 #### `resolve_tool_access(args: argparse.Namespace, registry: Any, policy: Any, plugins: Any)`
 
 ``(allowed, denied)`` tool names: the CLI lists plus every denial a file or bundle adds.
