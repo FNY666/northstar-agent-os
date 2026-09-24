@@ -338,9 +338,10 @@ python3 -m cli run --workspace . --prompt "summarise the files" \
   is not a ceiling — so a server is either a per-run flag or a workspace file the operator
   opted into, and an operator always sees this line before a server is reached; `doctor` has
   nothing MCP-shaped to verify and says so by staying silent. Combining
-  `--mcp-server` with `--agent` is a configuration error: an agent-definition
-  run fixes its tool subset by definition, and silently adding MCP tools would
-  widen declared policy.
+  `--mcp-server` or `--mcp-config` with `--agent` is a configuration error: an
+  agent-definition run fixes its tool subset by definition, and silently adding
+  MCP tools would widen declared policy. `--mcp-config` is refused on the flag,
+  before the file is read.
 - Limits: no `prompts`/`resources` UI surfaces, no reconnection, no HTTP
   transport (the modern Streamable-HTTP generation differs only in framing —
   the era rules and MRTR in `mcp_negotiate.py` are transport-agnostic), and no

@@ -227,6 +227,25 @@ def resolve_permission_mode(args: argparse.Namespace, policy: Any, plugins: Any)
     return mode
 
 
+#: Permission modes from strictest to loosest. ``plan`` refuses every state change,
+#: ``default`` asks, ``acceptEdits`` pre-approves edits, ``bypassPermissions`` approves all.
+MODE_STRICTNESS = ("plan", "default", "acceptEdits", "bypassPermissions")
+
+
+def agent_permission_mode(mode: str, definition: Any) -> str:
+    """The mode a run *as* ``definition`` uses: the stricter of the resolved mode and its own.
+
+    ``mode`` is what `resolve_permission_mode()` settled on after the policy file, plugins
+    and flags. A definition may tighten it (a ``plan`` agent always runs in ``plan``) but
+    never loosen it: taking the definition's mode on its own would turn a policy file's
+    pinned ``plan`` back into ``default`` just by naming an agent. Without a definition the
+    resolved mode is returned unchanged.
+    """
+    if definition is None:
+        return mode
+    return min(mode, definition.permission_mode, key=MODE_STRICTNESS.index)
+
+
 def resolve_tool_access(
     args: argparse.Namespace, registry: Any, policy: Any, plugins: Any
 ) -> tuple[tuple[str, ...], tuple[str, ...]]:

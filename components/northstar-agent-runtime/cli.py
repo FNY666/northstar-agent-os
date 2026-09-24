@@ -65,6 +65,7 @@ from run_setup import (  # noqa: F401 - MUTATING_TOOLS and checkpoint_usage stay
     HookSetup,
     PromptSetup,
     RunConfigurationError,
+    agent_permission_mode,
     checkpoint_usage,
     compose_system_prompt,
     load_hooks,
@@ -1062,6 +1063,14 @@ def _resolve_mcp_servers(
             "subset is fixed by the agent's definition); run without --agent to expose "
             "MCP tools on the main loop"
         )
+    if str(getattr(args, "mcp_config", "off") or "off") != "off" and definition is not None:
+        # Same rule for servers a workspace file declares: refused on the flag, before the
+        # file is read, so whether an agent run is allowed never depends on repository content.
+        raise ValueError(
+            "--mcp-config cannot be combined with an agent-definition run (its tool "
+            "subset is fixed by the agent's definition); run without --agent to expose "
+            "MCP tools on the main loop"
+        )
     mcp_servers: list[tuple[str, list[str]]] = []
     mcp_launch: dict[str, Any] = {}
     mcp_report = None
@@ -1238,7 +1247,8 @@ def _run(args: argparse.Namespace) -> int:
         "max_turns": ceilings.max_turns,
         "max_tool_calls": ceilings.max_tool_calls,
         "max_budget_usd": ceilings.max_budget_usd,
-        "permission_mode": definition.permission_mode if definition else mode,
+        # A definition may tighten the resolved mode, never loosen it (see agent_permission_mode).
+        "permission_mode": agent_permission_mode(mode, definition),
         "allowed_tools": allowed,
         "disallowed_tools": denied,
         "workspace": args.workspace,
