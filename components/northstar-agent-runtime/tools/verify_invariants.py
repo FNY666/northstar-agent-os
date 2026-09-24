@@ -70,8 +70,8 @@ GUARDS: list[tuple[str, str, list[tuple[str, str]], str, str]] = [
         # Anchored on the comment above the call, not on the call's indentation: this is a
         # nested block that has already been reflowed once, and a guard whose anchor is a
         # whitespace accident reports "anchor not found" instead of a real result.
-        [("                        # goes missing from the trace with no error anywhere.\n                        generation_span.record_usage(",
-          "                        # goes missing from the trace with no error anywhere.\n                        generation_span.end()  # MUTATION: write after end\n                        generation_span.record_usage(")],
+        [("                # goes missing from the trace with no error anywhere.\n                generation_span.record_usage(",
+          "                # goes missing from the trace with no error anywhere.\n                generation_span.end()  # MUTATION: write after end\n                generation_span.record_usage(")],
         "test_tracing*",
         "test_no_attribute_anywhere_was_dropped_because_a_span_had_ended",
     ),
