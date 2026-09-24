@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import contextlib
 import io
+import json
 import sys
 import unittest
 from unittest import mock
@@ -239,12 +240,8 @@ class ResolveCeilingsKnownDefectTests(unittest.TestCase):
         self.assertEqual(got.max_tool_calls, 2)
 
 
-class CliGovernanceKnownDefectTests(RuntimeTestCase):
-    """Known defects found next to the ceilings, pinned the same way as above.
-
-    Each is the T02 shape: a value is resolved (tightened, or guarded) in one place and a
-    later step reads a different source, so the check that was made is not the one enforced.
-    """
+class _CliCase(RuntimeTestCase):
+    """``cli.main()`` in-process, with stdout/stderr captured and no stdin."""
 
     _PLAN_POLICY = 'schema_version = "northstar.policy.v1"\npermission_mode = "plan"\n'
 
@@ -262,6 +259,14 @@ class CliGovernanceKnownDefectTests(RuntimeTestCase):
 
     def dry_run(self, root: Path, *flags: str) -> tuple[int, str, str]:
         return self.invoke("run", "--workspace", str(root), "--prompt", "x", "--scripted-text", "y", "--dry-run", *flags)
+
+
+class CliGovernanceKnownDefectTests(_CliCase):
+    """Known defects found next to the ceilings, pinned the same way as above.
+
+    Each is the T02 shape: a value is resolved (tightened, or guarded) in one place and a
+    later step reads a different source, so the check that was made is not the one enforced.
+    """
 
     def test_the_policy_files_plan_mode_binds_without_an_agent(self):
         # The baseline the defects below are measured against: this one holds today.
@@ -327,6 +332,59 @@ class CliGovernanceKnownDefectTests(RuntimeTestCase):
             _connect_mcp_clients([("fs", ["python3"])], 1000, build_default_registry(), args)
         self.assertTrue(seen["allow_roots"])
         self.assertEqual(Path(seen["workspace_root"]).resolve(), workspace.resolve())
+
+
+class AgentRunTightenOnlyTests(_CliCase):
+    """Running *as* an agent definition may only tighten what the run already resolved.
+
+    ``resolve_permission_mode()`` pins the policy file's (or a plugin's) ``plan`` and honours
+    an operator's ``--plan``; the definition may add ``plan`` on top, but it may not hand the
+    run a looser mode than the one resolved. Likewise the MCP guard for agent runs must cover
+    every way a server list reaches the run, not only ``--mcp-server``.
+    """
+
+    _WRITE_SCRIPT = [{"tool": {"name": "Write", "input": {"path": "b.txt", "content": "made"}, "id": "t1"}}, {"text": "ok"}]
+
+    def run_script(self, root: Path, *flags: str) -> tuple[int, str, str]:
+        script = self.temp_dir() / "script.json"
+        script.write_text(json.dumps(self._WRITE_SCRIPT), encoding="utf-8")
+        return self.invoke("run", "--workspace", str(root), "--prompt", "x", "--script", str(script), *flags)
+
+    def test_a_policy_plan_refuses_a_write_under_plan_when_running_as_an_agent(self):
+        # Without a host approval callback the CLI refuses an unapproved Write in 'default'
+        # too, so what differs is the mode the refusal - and the run's record - is made
+        # under. An explicit --allow-tool still wins over plan, with or without an agent
+        # (the gate's documented layer order), so this call is deliberately not approved.
+        root = self.workspace({".northstar/config.toml": self._PLAN_POLICY})
+        code, out, err = self.run_script(root, "--agent", "general")
+        self.assertFalse((root / "b.txt").exists())
+        self.assertIn("permission_mode=plan sidecar=off", out)
+        self.assertIn("plan mode is read-only; Write would change state", out)
+        self.assertIn("refused: Write", err)
+
+    def test_an_agent_run_never_widens_the_operators_mode(self):
+        # The fix must tighten only: a definition in 'default' keeps a bypass flag at
+        # 'default', exactly as before, rather than inheriting the wider mode.
+        code, out, err = self.dry_run(self.workspace(), "--permission-mode", "bypassPermissions", "--agent", "general")
+        self.assertEqual(code, 0, err)
+        self.assertIn("permission_mode=default\n", out)
+
+    def test_a_plan_definition_still_pins_plan(self):
+        code, out, err = self.dry_run(self.workspace(), "--permission-mode", "acceptEdits", "--agent", "planner")
+        self.assertEqual(code, 0, err)
+        self.assertIn("permission_mode=plan\n", out)
+
+    def test_an_mcp_config_refusal_names_the_flag(self):
+        root = self.workspace({".mcp.json": '{"mcpServers": {"fs": {"command": "python3", "args": ["-c", "pass"]}}}'})
+        code, _out, err = self.dry_run(root, "--agent", "explorer", "--mcp-config", "auto")
+        self.assertEqual(code, 64, err)
+        self.assertIn("--mcp-config cannot be combined with an agent-definition run", err)
+
+    def test_mcp_config_off_is_fine_on_an_agent_run(self):
+        root = self.workspace({".mcp.json": '{"mcpServers": {"fs": {"command": "python3", "args": ["-c", "pass"]}}}'})
+        code, out, err = self.dry_run(root, "--agent", "explorer", "--mcp-config", "off")
+        self.assertEqual(code, 0, err)
+        self.assertIn("mcp_servers=off", out)
 
 
 if __name__ == "__main__":
