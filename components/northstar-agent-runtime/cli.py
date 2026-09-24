@@ -220,231 +220,244 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
+def _add_prompt_provider_arguments(parser: argparse.ArgumentParser) -> None:
+        prompt = parser.add_argument_group("prompt")
+        prompt.add_argument("--prompt", default="", help="the task text")
+        prompt.add_argument("--prompt-file", default="", help="read the task from a file, or '-' for stdin")
+
+        provider = parser.add_argument_group("provider")
+        provider.add_argument(
+            "--provider",
+            choices=("scripted", "anthropic", "openai"),
+            default="scripted",
+            help="model provider (default: scripted, offline); 'openai' speaks the Chat Completions wire, so it covers OpenAI, Azure, vLLM, SGLang, Ollama, LiteLLM, OpenRouter and similar gateways",
+        )
+        provider.add_argument(
+            "--model",
+            default="",
+            help="model id used for pricing and requests (default per provider: claude-sonnet-4-5, or gpt-4.1 for --provider openai)",
+        )
+        provider.add_argument(
+            "--base-url",
+            default="",
+            metavar="URL",
+            help="OpenAI-compatible endpoint base URL (default: $OPENAI_BASE_URL; the key is read from $OPENAI_API_KEY and is never taken from a flag)",
+        )
+        provider.add_argument("--script", default="", help="JSON file of scripted turns (scripted provider only)")
+        provider.add_argument("--scripted-text", default="", help="single scripted answer; shorthand for a one-turn script")
+        provider.add_argument("--max-output-tokens", type=int, default=4096, help="generation cap")
+        provider.add_argument("--system-prompt", default="", help="override the runtime system prompt")
+
+def _add_limits_transport_arguments(parser: argparse.ArgumentParser) -> None:
+        limits = parser.add_argument_group("limits")
+        limits.add_argument("--max-turns", type=int, default=25, help="turn ceiling (error_max_turns)")
+        limits.add_argument("--max-tool-calls", type=int, default=50, help="tool-call ceiling (error_max_tool_calls)")
+        limits.add_argument("--max-budget-usd", type=float, default=None, help="cost ceiling in USD (error_max_budget_usd)")
+        limits.add_argument("--compaction-threshold-tokens", type=int, default=60_000, help="compact above this many estimated tokens; 0 disables")
+        limits.add_argument("--compaction-keep-messages", type=int, default=4, help="tail size never summarised")
+
+        transport = parser.add_argument_group("provider transport")
+        transport.add_argument(
+            "--retry-max-attempts",
+            type=int,
+            default=None,
+            metavar="N",
+            help=(
+                "provider requests allowed per turn (1 = none). A workspace [retry] table caps this: "
+                "the flag may ask for fewer, never more"
+            ),
+        )
+        transport.add_argument(
+            "--retry-deadline-ms",
+            type=int,
+            default=None,
+            metavar="MS",
+            help="how long one turn may spend waiting between requests (request time itself is the provider's timeout)",
+        )
+        transport.add_argument(
+            "--retry-on",
+            default=None,
+            metavar="CLASSES",
+            help=(
+                "comma-separated fault classes to retry: rate_limited, overloaded, network, timeout, "
+                "server_error (anything else is refused: an auth or bad-request fault is not made true by repetition)"
+            ),
+        )
+        transport.add_argument(
+            "--no-retry",
+            action="store_true",
+            help="report the first provider fault immediately - what a CI job that must not stall wants",
+        )
+
+def _add_policy_arguments(parser: argparse.ArgumentParser) -> None:
+        policy = parser.add_argument_group("policy")
+        policy.add_argument("--workspace", default=".", help="directory the tools are confined to")
+        policy.add_argument("--permission-mode", choices=("default", "acceptEdits", "plan", "bypassPermissions"), default="default")
+        policy.add_argument("--allow-tool", action="append", default=[], metavar="NAME", help="auto-approve a tool (repeatable)")
+        policy.add_argument("--deny-tool", action="append", default=[], metavar="NAME", help="always refuse a tool, and remove it from the allow list (repeatable)")
+        policy.add_argument(
+            "--read-only",
+            action="store_true",
+            help="deny Write, Edit, and Shell (no file mutations and no command execution)",
+        )
+        policy.add_argument("--plan", action="store_true", help="shorthand for --permission-mode plan")
+        policy.add_argument("--agent", default="", help="run as a built-in subagent definition (its tools and ceilings apply)")
+        policy.add_argument("--max-subagent-depth", type=int, default=1, help="0 disables delegation")
+        policy.add_argument(
+            "--parallel-tools",
+            type=int,
+            default=1,
+            metavar="N",
+            help=(
+                "run up to N parallel-safe (read-only) tool handlers concurrently inside one "
+                "assistant turn (default 1 = serial). Gate + hooks stay serial and independent. "
+                f"Max 8. Mutating tools (Write/Edit/Shell/Task/MCP) force the whole turn serial"
+            ),
+        )
+        policy.add_argument("--allow-nested-delegation", action="store_true", help="subagents may delegate one level deeper")
+        policy.add_argument("--halt-on-denial", action="store_true", help="end the run with error_permission_denied when a call is refused")
+        policy.add_argument(
+            "--require-skill-lock",
+            action="store_true",
+            help="refuse to start unless every installed skill matches the digest recorded by `skills check --write-lock`",
+        )
+        policy.add_argument(
+            "--checkpoint-turns",
+            type=int,
+            default=0,
+            metavar="N",
+            help="append a resumable checkpoint every N turn boundaries (0 = off); a resumed run inherits the consumed turns, tool calls and cost",
+        )
+        policy.add_argument(
+            "--verify",
+            action="append",
+            default=[],
+            metavar="KIND:PATH[:TEXT]",
+            help="postcondition checked independently of the model after the run: exists, absent, changed, unchanged "
+            "or contains; a failed check ends the run with error_postconditions_failed",
+        )
+        policy.add_argument("--no-policy-file", action="store_true", help="ignore .northstar/config.toml in the workspace")
+        policy.add_argument("--no-workspace-agents", action="store_true", help="ignore .northstar/agents/*.md subagent files")
+        policy.add_argument("--no-skills", action="store_true", help="do not list .northstar/skills/*/SKILL.md packages in the system prompt")
+        policy.add_argument(
+            "--no-memory",
+            action="store_true",
+            help="do not inject workspace memory (.northstar/memory/MEMORY.md) into the system prompt",
+        )
+        policy.add_argument(
+            "--memory-file",
+            default="",
+            metavar="PATH",
+            help="inject this memory file instead of the default (must live inside the workspace; no global MEMORY)",
+        )
+        policy.add_argument(
+            "--no-plugins",
+            action="store_true",
+            help="ignore .northstar/plugins/ entirely (installed bundles contribute skills, agents, hooks, MCP servers and ceilings)",
+        )
+
+        policy.add_argument(
+            "--enable-workspace-hooks",
+            action="store_true",
+            help="run the [[hooks]] declared in .northstar/config.toml (default off: cloning a repository must not mean executing it)",
+        )
+        policy.add_argument(
+            "--allow-policy-writes",
+            action="store_true",
+            help="let mutating tools write under .northstar (default: refused - the agent must not rewrite its own governance)",
+        )
+        policy.add_argument(
+            "--run-id",
+            default="",
+            metavar="ID",
+            help="correlation id for this run; also used as the sidecar request_id (default: generated)",
+        )
+        context_group = policy.add_mutually_exclusive_group()
+        context_group.add_argument("--context-file", default="", metavar="PATH", help="inject this project-instructions file into the system prompt (must live inside the workspace)")
+        context_group.add_argument("--no-project-context", action="store_true", help="do not auto-inject AGENTS.md (or the policy file's project_context)")
+
+def _add_mcp_arguments(parser: argparse.ArgumentParser) -> None:
+        mcp = parser.add_argument_group("mcp servers (experimental)")
+        mcp.add_argument(
+            "--mcp-config",
+            default="off",
+            metavar="auto|PATH|off",
+            help=(
+                "also start the servers this workspace declares in its own MCP config file "
+                "(.mcp.json, .cursor/mcp.json, .vscode/mcp.json, .gemini/settings.json). Off by "
+                "default: the operator opts in at the command line, and a repository file never "
+                "opts itself in. HTTP/SSE servers and autoApprove lists are refused, not imported"
+            ),
+        )
+        mcp.add_argument("--mcp-server", dest="mcp_servers", action="append", default=[], metavar="NAME=COMMAND...", help="connect one MCP stdio server; its tools appear as mcp__NAME__tool and are mutating-by-default (denied until --allow-tool names them). Repeatable.")
+        mcp.add_argument("--mcp-timeout-ms", type=int, default=15_000, help="per-request deadline for the MCP handshake and tool calls")
+        mcp.add_argument("--mcp-protocol", choices=("auto", "legacy", "modern"), default="auto", help="which MCP protocol generation to speak: auto probes server/discover and falls back to the legacy initialize handshake only when that probe is refused")
+        mcp.add_argument("--mcp-elicit", action="store_true", help="let MCP servers ask this client for input (the 2026-07-28 input_required path). Off by default: with no approver attached every request is declined, so a remote server never interviews the model instead of the operator. Answers come from --mcp-elicit-answers, else from the terminal")
+        mcp.add_argument("--mcp-elicit-answers", metavar="JSON", default=None, help="pre-approved answers as a JSON object mapping field names to values, for example {\"approved\": true}. A request needing a field the set does not cover is declined rather than guessed")
+        mcp.add_argument("--mcp-allow-sensitive-input", action="store_true", help="allow an MCP elicitation to ask for a password/token/secret field. Off by default: secrets do not travel through a tool transport")
+        mcp.add_argument("--mcp-allow-roots", action="store_true", help="let an MCP server list workspace roots; when allowed it is offered exactly one root, the workspace itself")
+        mcp.add_argument("--mcp-max-rounds", type=int, default=3, help="how many times one tool call may be re-asked for input before the client gives up")
+
+def _add_execution_arguments(parser: argparse.ArgumentParser) -> None:
+        execution = parser.add_argument_group("execution delegation")
+        execution.add_argument("--sidecar-socket", default="", help="Unix socket of northstar-codex-sidecar; enables the CodexReadOnly tool")
+        execution.add_argument("--sidecar-timeout-ms", type=int, default=30_000, help="sidecar execution deadline")
+        execution.add_argument("--probe-sidecar", action="store_true", help="send one health-check prompt to the sidecar and exit")
+        execution.add_argument(
+            "--sandbox",
+            choices=("auto", "bwrap", "process"),
+            default="auto",
+            help=(
+                "OS sandbox backend for the Shell tool: auto (bwrap when usable, else process), "
+                "bwrap (required; refuse to start if missing), or process (cwd+env only — not OS isolation). "
+                "Shell stays denied until --allow-tool Shell. See docs/concepts/threat-model.md"
+            ),
+        )
+
+def _add_output_arguments(parser: argparse.ArgumentParser) -> None:
+        output = parser.add_argument_group("output")
+        output.add_argument("--json", action="store_true", help="emit every event as a JSONL line")
+        output.add_argument("--quiet", action="store_true", help="print only the final result line")
+        output.add_argument("--trace", action="store_true", help="print the span tree afterwards")
+        output.add_argument("--session-dir", default="", help="append an auditable JSONL transcript here")
+        output.add_argument(
+            "--session-lease-seconds",
+            type=int,
+            default=900,
+            metavar="N",
+            help="how long this run promises to be alive while it owns the session transcript (renewed as the run proceeds, so a slow turn is not evicted); a live holder is never displaced, so N is a signal to readers and not a lock timeout",
+        )
+        output.add_argument(
+            "--no-session-lease",
+            action="store_true",
+            help="append to the transcript without claiming it first. Two concurrent runs on one session id otherwise interleave into a file neither of them can replay; use this only where flock is unavailable, and it is reported in the transcript's init record",
+        )
+        output.add_argument("--resume", default="", help="session id to continue from --session-dir (appends to that same transcript)")
+        output.add_argument(
+            "--resume-from",
+            default="",
+            metavar="SESSION_ID",
+            help="fork a new session from a checkpoint in --session-dir: the parent transcript is never modified",
+        )
+        output.add_argument(
+            "--resume-record",
+            type=int,
+            default=None,
+            metavar="INDEX",
+            help="with --resume-from: resume from the checkpoint at this transcript record index (default: the latest)",
+        )
+        output.add_argument("--redact-tool-output", action="store_true", help="record tool results in the session without output bodies")
+        output.add_argument("--stream", action="store_true", help="print (and, with --json, emit) assistant text as it arrives instead of at end of turn. Presentation only: the transcript, the permission gate, the ceilings and the single result event are unchanged, and a provider that cannot stream is refused rather than silently degraded")
+        output.add_argument("--show-pricing", action="store_true", help="print the pricing decision and exit")
+        output.add_argument("--dry-run", action="store_true", help="validate the configuration and print what a run would do, then exit without sending any request (provider, model, and sidecar are not touched)")
+
 def _add_run_arguments(parser: argparse.ArgumentParser) -> None:
-    prompt = parser.add_argument_group("prompt")
-    prompt.add_argument("--prompt", default="", help="the task text")
-    prompt.add_argument("--prompt-file", default="", help="read the task from a file, or '-' for stdin")
-
-    provider = parser.add_argument_group("provider")
-    provider.add_argument(
-        "--provider",
-        choices=("scripted", "anthropic", "openai"),
-        default="scripted",
-        help="model provider (default: scripted, offline); 'openai' speaks the Chat Completions wire, so it covers OpenAI, Azure, vLLM, SGLang, Ollama, LiteLLM, OpenRouter and similar gateways",
-    )
-    provider.add_argument(
-        "--model",
-        default="",
-        help="model id used for pricing and requests (default per provider: claude-sonnet-4-5, or gpt-4.1 for --provider openai)",
-    )
-    provider.add_argument(
-        "--base-url",
-        default="",
-        metavar="URL",
-        help="OpenAI-compatible endpoint base URL (default: $OPENAI_BASE_URL; the key is read from $OPENAI_API_KEY and is never taken from a flag)",
-    )
-    provider.add_argument("--script", default="", help="JSON file of scripted turns (scripted provider only)")
-    provider.add_argument("--scripted-text", default="", help="single scripted answer; shorthand for a one-turn script")
-    provider.add_argument("--max-output-tokens", type=int, default=4096, help="generation cap")
-    provider.add_argument("--system-prompt", default="", help="override the runtime system prompt")
-
-    limits = parser.add_argument_group("limits")
-    limits.add_argument("--max-turns", type=int, default=25, help="turn ceiling (error_max_turns)")
-    limits.add_argument("--max-tool-calls", type=int, default=50, help="tool-call ceiling (error_max_tool_calls)")
-    limits.add_argument("--max-budget-usd", type=float, default=None, help="cost ceiling in USD (error_max_budget_usd)")
-    limits.add_argument("--compaction-threshold-tokens", type=int, default=60_000, help="compact above this many estimated tokens; 0 disables")
-    limits.add_argument("--compaction-keep-messages", type=int, default=4, help="tail size never summarised")
-
-    transport = parser.add_argument_group("provider transport")
-    transport.add_argument(
-        "--retry-max-attempts",
-        type=int,
-        default=None,
-        metavar="N",
-        help=(
-            "provider requests allowed per turn (1 = none). A workspace [retry] table caps this: "
-            "the flag may ask for fewer, never more"
-        ),
-    )
-    transport.add_argument(
-        "--retry-deadline-ms",
-        type=int,
-        default=None,
-        metavar="MS",
-        help="how long one turn may spend waiting between requests (request time itself is the provider's timeout)",
-    )
-    transport.add_argument(
-        "--retry-on",
-        default=None,
-        metavar="CLASSES",
-        help=(
-            "comma-separated fault classes to retry: rate_limited, overloaded, network, timeout, "
-            "server_error (anything else is refused: an auth or bad-request fault is not made true by repetition)"
-        ),
-    )
-    transport.add_argument(
-        "--no-retry",
-        action="store_true",
-        help="report the first provider fault immediately - what a CI job that must not stall wants",
-    )
-
-    policy = parser.add_argument_group("policy")
-    policy.add_argument("--workspace", default=".", help="directory the tools are confined to")
-    policy.add_argument("--permission-mode", choices=("default", "acceptEdits", "plan", "bypassPermissions"), default="default")
-    policy.add_argument("--allow-tool", action="append", default=[], metavar="NAME", help="auto-approve a tool (repeatable)")
-    policy.add_argument("--deny-tool", action="append", default=[], metavar="NAME", help="always refuse a tool, and remove it from the allow list (repeatable)")
-    policy.add_argument(
-        "--read-only",
-        action="store_true",
-        help="deny Write, Edit, and Shell (no file mutations and no command execution)",
-    )
-    policy.add_argument("--plan", action="store_true", help="shorthand for --permission-mode plan")
-    policy.add_argument("--agent", default="", help="run as a built-in subagent definition (its tools and ceilings apply)")
-    policy.add_argument("--max-subagent-depth", type=int, default=1, help="0 disables delegation")
-    policy.add_argument(
-        "--parallel-tools",
-        type=int,
-        default=1,
-        metavar="N",
-        help=(
-            "run up to N parallel-safe (read-only) tool handlers concurrently inside one "
-            "assistant turn (default 1 = serial). Gate + hooks stay serial and independent. "
-            f"Max 8. Mutating tools (Write/Edit/Shell/Task/MCP) force the whole turn serial"
-        ),
-    )
-    policy.add_argument("--allow-nested-delegation", action="store_true", help="subagents may delegate one level deeper")
-    policy.add_argument("--halt-on-denial", action="store_true", help="end the run with error_permission_denied when a call is refused")
-    policy.add_argument(
-        "--require-skill-lock",
-        action="store_true",
-        help="refuse to start unless every installed skill matches the digest recorded by `skills check --write-lock`",
-    )
-    policy.add_argument(
-        "--checkpoint-turns",
-        type=int,
-        default=0,
-        metavar="N",
-        help="append a resumable checkpoint every N turn boundaries (0 = off); a resumed run inherits the consumed turns, tool calls and cost",
-    )
-    policy.add_argument(
-        "--verify",
-        action="append",
-        default=[],
-        metavar="KIND:PATH[:TEXT]",
-        help="postcondition checked independently of the model after the run: exists, absent, changed, unchanged "
-        "or contains; a failed check ends the run with error_postconditions_failed",
-    )
-    policy.add_argument("--no-policy-file", action="store_true", help="ignore .northstar/config.toml in the workspace")
-    policy.add_argument("--no-workspace-agents", action="store_true", help="ignore .northstar/agents/*.md subagent files")
-    policy.add_argument("--no-skills", action="store_true", help="do not list .northstar/skills/*/SKILL.md packages in the system prompt")
-    policy.add_argument(
-        "--no-memory",
-        action="store_true",
-        help="do not inject workspace memory (.northstar/memory/MEMORY.md) into the system prompt",
-    )
-    policy.add_argument(
-        "--memory-file",
-        default="",
-        metavar="PATH",
-        help="inject this memory file instead of the default (must live inside the workspace; no global MEMORY)",
-    )
-    policy.add_argument(
-        "--no-plugins",
-        action="store_true",
-        help="ignore .northstar/plugins/ entirely (installed bundles contribute skills, agents, hooks, MCP servers and ceilings)",
-    )
-
-    policy.add_argument(
-        "--enable-workspace-hooks",
-        action="store_true",
-        help="run the [[hooks]] declared in .northstar/config.toml (default off: cloning a repository must not mean executing it)",
-    )
-    policy.add_argument(
-        "--allow-policy-writes",
-        action="store_true",
-        help="let mutating tools write under .northstar (default: refused - the agent must not rewrite its own governance)",
-    )
-    policy.add_argument(
-        "--run-id",
-        default="",
-        metavar="ID",
-        help="correlation id for this run; also used as the sidecar request_id (default: generated)",
-    )
-    context_group = policy.add_mutually_exclusive_group()
-    context_group.add_argument("--context-file", default="", metavar="PATH", help="inject this project-instructions file into the system prompt (must live inside the workspace)")
-    context_group.add_argument("--no-project-context", action="store_true", help="do not auto-inject AGENTS.md (or the policy file's project_context)")
-
-    mcp = parser.add_argument_group("mcp servers (experimental)")
-    mcp.add_argument(
-        "--mcp-config",
-        default="off",
-        metavar="auto|PATH|off",
-        help=(
-            "also start the servers this workspace declares in its own MCP config file "
-            "(.mcp.json, .cursor/mcp.json, .vscode/mcp.json, .gemini/settings.json). Off by "
-            "default: the operator opts in at the command line, and a repository file never "
-            "opts itself in. HTTP/SSE servers and autoApprove lists are refused, not imported"
-        ),
-    )
-    mcp.add_argument("--mcp-server", dest="mcp_servers", action="append", default=[], metavar="NAME=COMMAND...", help="connect one MCP stdio server; its tools appear as mcp__NAME__tool and are mutating-by-default (denied until --allow-tool names them). Repeatable.")
-    mcp.add_argument("--mcp-timeout-ms", type=int, default=15_000, help="per-request deadline for the MCP handshake and tool calls")
-    mcp.add_argument("--mcp-protocol", choices=("auto", "legacy", "modern"), default="auto", help="which MCP protocol generation to speak: auto probes server/discover and falls back to the legacy initialize handshake only when that probe is refused")
-    mcp.add_argument("--mcp-elicit", action="store_true", help="let MCP servers ask this client for input (the 2026-07-28 input_required path). Off by default: with no approver attached every request is declined, so a remote server never interviews the model instead of the operator. Answers come from --mcp-elicit-answers, else from the terminal")
-    mcp.add_argument("--mcp-elicit-answers", metavar="JSON", default=None, help="pre-approved answers as a JSON object mapping field names to values, for example {\"approved\": true}. A request needing a field the set does not cover is declined rather than guessed")
-    mcp.add_argument("--mcp-allow-sensitive-input", action="store_true", help="allow an MCP elicitation to ask for a password/token/secret field. Off by default: secrets do not travel through a tool transport")
-    mcp.add_argument("--mcp-allow-roots", action="store_true", help="let an MCP server list workspace roots; when allowed it is offered exactly one root, the workspace itself")
-    mcp.add_argument("--mcp-max-rounds", type=int, default=3, help="how many times one tool call may be re-asked for input before the client gives up")
-
-    execution = parser.add_argument_group("execution delegation")
-    execution.add_argument("--sidecar-socket", default="", help="Unix socket of northstar-codex-sidecar; enables the CodexReadOnly tool")
-    execution.add_argument("--sidecar-timeout-ms", type=int, default=30_000, help="sidecar execution deadline")
-    execution.add_argument("--probe-sidecar", action="store_true", help="send one health-check prompt to the sidecar and exit")
-    execution.add_argument(
-        "--sandbox",
-        choices=("auto", "bwrap", "process"),
-        default="auto",
-        help=(
-            "OS sandbox backend for the Shell tool: auto (bwrap when usable, else process), "
-            "bwrap (required; refuse to start if missing), or process (cwd+env only — not OS isolation). "
-            "Shell stays denied until --allow-tool Shell. See docs/concepts/threat-model.md"
-        ),
-    )
-
-    output = parser.add_argument_group("output")
-    output.add_argument("--json", action="store_true", help="emit every event as a JSONL line")
-    output.add_argument("--quiet", action="store_true", help="print only the final result line")
-    output.add_argument("--trace", action="store_true", help="print the span tree afterwards")
-    output.add_argument("--session-dir", default="", help="append an auditable JSONL transcript here")
-    output.add_argument(
-        "--session-lease-seconds",
-        type=int,
-        default=900,
-        metavar="N",
-        help="how long this run promises to be alive while it owns the session transcript (renewed as the run proceeds, so a slow turn is not evicted); a live holder is never displaced, so N is a signal to readers and not a lock timeout",
-    )
-    output.add_argument(
-        "--no-session-lease",
-        action="store_true",
-        help="append to the transcript without claiming it first. Two concurrent runs on one session id otherwise interleave into a file neither of them can replay; use this only where flock is unavailable, and it is reported in the transcript's init record",
-    )
-    output.add_argument("--resume", default="", help="session id to continue from --session-dir (appends to that same transcript)")
-    output.add_argument(
-        "--resume-from",
-        default="",
-        metavar="SESSION_ID",
-        help="fork a new session from a checkpoint in --session-dir: the parent transcript is never modified",
-    )
-    output.add_argument(
-        "--resume-record",
-        type=int,
-        default=None,
-        metavar="INDEX",
-        help="with --resume-from: resume from the checkpoint at this transcript record index (default: the latest)",
-    )
-    output.add_argument("--redact-tool-output", action="store_true", help="record tool results in the session without output bodies")
-    output.add_argument("--stream", action="store_true", help="print (and, with --json, emit) assistant text as it arrives instead of at end of turn. Presentation only: the transcript, the permission gate, the ceilings and the single result event are unchanged, and a provider that cannot stream is refused rather than silently degraded")
-    output.add_argument("--show-pricing", action="store_true", help="print the pricing decision and exit")
-    output.add_argument("--dry-run", action="store_true", help="validate the configuration and print what a run would do, then exit without sending any request (provider, model, and sidecar are not touched)")
+    _add_prompt_provider_arguments(parser)
+    _add_limits_transport_arguments(parser)
+    _add_policy_arguments(parser)
+    _add_mcp_arguments(parser)
+    _add_execution_arguments(parser)
+    _add_output_arguments(parser)
 
 
 def _load_script(path: str) -> list[Any]:
