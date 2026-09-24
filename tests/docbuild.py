@@ -86,6 +86,7 @@ MANIFEST: dict[str, tuple[str, ...]] = {
         "postconditions",
         "product_path",
         "provider_retry",
+        "run_setup",
         "sdk",
         "scaffold",
         "sessions",
