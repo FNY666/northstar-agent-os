@@ -1453,10 +1453,216 @@ def _compose_system_prompt(args: argparse.Namespace, definition: Any, policy: An
     return _PromptSetup(system_prompt=system_prompt, context=context, skills=skills, memory_note=memory_note)
 
 
+def _validate_session_flags(args: argparse.Namespace, ceilings: _Ceilings) -> None:
+    """Refuse checkpoint, lease and resume flags that contradict each other or the ceilings."""
+    if args.checkpoint_turns < 0:
+        raise RunConfigurationError("--checkpoint-turns must be >= 0 (0 disables checkpoints)")
+    if args.checkpoint_turns and args.checkpoint_turns > ceilings.max_turns:
+        # A cadence that can never fire would leave the operator believing the run
+        # was resumable when no record was ever written. Compared with the effective
+        # ceiling (after the policy file and plugins tightened it), not the flag alone.
+        raise RunConfigurationError(
+            f"--checkpoint-turns {args.checkpoint_turns} exceeds the run's max_turns {ceilings.max_turns}, "
+            "so no checkpoint could ever be written",
+        )
+    if args.no_session_lease and args.session_lease_seconds != 900:
+        raise RunConfigurationError(
+            "--session-lease-seconds has no meaning with --no-session-lease; "
+            "pick one (no lease, or a lease of N seconds)",
+        )
+    if not args.no_session_lease and args.session_lease_seconds < 0:
+        # 0 is the one value that means something else here: it reads as "lease for no
+        # time", which is a lease that is always up for grabs. Turning it off is what
+        # --no-session-lease is for, and saying so beats inventing a synonym.
+        raise RunConfigurationError(
+            "--session-lease-seconds must be > 0; use --no-session-lease to run without a lease",
+        )
+    if args.resume_record is not None and not args.resume_from:
+        raise RunConfigurationError("--resume-record only means something with --resume-from")
+    if args.resume and args.resume_from:
+        raise RunConfigurationError(
+            "choose one of --resume (append to the same transcript) or "
+            "--resume-from (fork a new session from a checkpoint); they disagree about the parent file",
+        )
+    if args.resume_from and not args.session_dir:
+        raise RunConfigurationError("--resume-from needs --session-dir to read the parent transcript from")
+
+
+@dataclass(frozen=True)
+class _SessionSetup:
+    """Where the run records itself, what it inherits from a parent, and the config it implies."""
+
+    store: Any
+    resume_budget: Any
+    config_updates: dict[str, Any]
+
+
+def _resolve_session(args: argparse.Namespace, ceilings: _Ceilings) -> _SessionSetup:
+    """The session store, and for --resume-from the parent's checkpoint and spend.
+
+    ``config_updates`` holds the ``RuntimeConfig`` fields this decides (resume point,
+    lineage, checkpoint cadence, lease, session id); `_run()` merges them into its kwargs.
+    """
+    from budget import Budget as _Budget
+    from sessions import SessionStore
+
+    config_kwargs: dict[str, Any] = {}
+    resume_budget: Any = None
+    if args.resume_from:
+        from checkpoints import CheckpointError, select as select_checkpoint
+
+        _parent_store = SessionStore(args.session_dir, session_id=args.resume_from)
+        try:
+            _records, _dropped = _parent_store.read(args.resume_from)
+            checkpoint = select_checkpoint(_records, record_index=args.resume_record)
+        except (CheckpointError, OSError, ValueError) as error:
+            raise RunConfigurationError(f"cannot resume from {args.resume_from!r}: {error}") from error
+        if checkpoint is None:
+            raise RunConfigurationError(
+                f"session {args.resume_from!r} has no checkpoints "
+                f"(run it with --checkpoint-turns N to make boundaries resumable)",
+            )
+        config_kwargs["resume_from"] = checkpoint
+        # A fork gets its own id and its own file; the parent stays byte-for-byte
+        # what it was. --resume keeps the older append-in-place behaviour.
+        config_kwargs["parent_session"] = args.resume_from
+        # Start from the tightened ceiling, never from the flag: a policy file or plugin
+        # that lowered max_turns must keep binding the lineage after a resume.
+        config_kwargs["max_turns"] = max(ceilings.max_turns, checkpoint.turns)
+        # The ceiling travels with the lineage: the resumed run starts *at* what the
+        # parent had already spent, so resuming cannot hand out a fresh budget.
+        resume_budget = _Budget(
+            max_budget_usd=ceilings.max_budget_usd,
+            total_cost_usd=checkpoint.cost_usd,
+            total_usage=checkpoint_usage(checkpoint),
+        )
+        store = SessionStore(args.session_dir or None, session_id=None)
+    else:
+        store = SessionStore(args.session_dir or None, session_id=args.resume or None)
+    if args.checkpoint_turns:
+        config_kwargs["checkpoint_turns"] = args.checkpoint_turns
+    if args.no_session_lease:
+        config_kwargs["lock_session"] = False
+    elif args.session_lease_seconds != 900:
+        config_kwargs["session_lease_seconds"] = args.session_lease_seconds
+    config_kwargs["session_id"] = store.session_id
+    return _SessionSetup(store=store, resume_budget=resume_budget, config_updates=config_kwargs)
+
+
+def _setup_notes(
+    args: argparse.Namespace,
+    *,
+    policy: Any,
+    prompt_setup: _PromptSetup,
+    workspace_agents: tuple[Any, ...],
+    hooks: _HookSetup,
+    plugins: Any,
+    mcp_servers: list[tuple[str, list[str]]],
+    mcp_report: Any,
+) -> dict[str, str]:
+    """One human-readable line per configuration source, keyed as `_print_dry_run()` takes them."""
+    context = prompt_setup.context
+    skills = prompt_setup.skills
+    if args.no_policy_file:
+        policy_note = "none (--no-policy-file)"
+    elif policy is not None:
+        policy_note = (
+            f"{policy.source} schema={policy.schema_version} revision={policy.revision or 'none'} "
+            f"mode={policy.permission_mode or 'default'} "
+            f"deny={','.join(policy.deny_tools) or 'none'} "
+            f"read_only={bool(policy.read_only)} budget={policy.max_budget_usd or 'none'} "
+            f"max_turns={policy.max_turns or 'none'} halt_on_denial={bool(policy.halt_on_denial)}"
+        )
+    else:
+        policy_note = "none"
+    if context is not None:
+        context_note = f"{context.name} ({len(context.text)} chars from {context.path})" + (" [truncated]" if context.truncated else "")
+    elif args.no_project_context and not args.context_file:
+        context_note = "off (--no-project-context)"
+    else:
+        context_note = "off (no AGENTS.md in the workspace)"
+    workspace_agents_note = ",".join(agent.name for agent in workspace_agents) or "none"
+    hooks_note = _hooks_note(
+        policy, hooks.command_hooks, enabled=args.enable_workspace_hooks, plugin_hooks=hooks.plugin_hook_count
+    )
+    skills_note = (f"{len(skills)} package(s): " + ", ".join(skill.name for skill in skills)) if skills else "none"
+    if args.no_plugins:
+        plugin_note = "off (--no-plugins)"
+    elif plugins is not None and plugins.audit:
+        plugin_note = (
+            f"{len(plugins.audit)} bundle(s): "
+            + ", ".join(f"{item['name']}@{item['version']} ({item['content_digest'][7:19]})" for item in plugins.audit)
+        )
+    else:
+        plugin_note = "none (.northstar/plugins is empty)"
+    if mcp_servers:
+        listed = ", ".join(f"{name}={' '.join(command)}" for name, command in mcp_servers)
+        note = _mcp_stance_note(args)
+        if mcp_report is not None:
+            note += f"; config {mcp_report.summary()}"
+        mcp_note = f"{listed} ({note})"
+    else:
+        mcp_note = "off"
+    return {
+        "policy_note": policy_note,
+        "hooks_note": hooks_note,
+        "context_note": context_note,
+        "memory_note": prompt_setup.memory_note,
+        "workspace_agents_note": workspace_agents_note,
+        "skills_note": skills_note,
+        "plugin_note": plugin_note,
+        "mcp_note": mcp_note,
+    }
+
+
+def _stream_events(args: argparse.Namespace, runtime: Any, store: Any, prompt: str) -> int:
+    """Run the prompt, print every event as it arrives, then the one-line summary; return the exit code."""
+    if args.resume_from:
+        resume = store.transcript(args.resume_from)
+    else:
+        resume = store.transcript(args.resume) if args.resume else None
+    exit_code = 0
+    result = None
+    stream_open = False
+    for event in runtime.run(prompt, resume=resume):
+        if args.json:
+            print(json.dumps(event_to_dict(event), ensure_ascii=False, sort_keys=True))
+        else:
+            _print_event(event, quiet=args.quiet, stream_open=stream_open)
+        # The assistant event that follows its own deltas must not print the same
+        # text a second time; the one that does not must print it normally. Tracking
+        # "did the previous event stream" is the whole rule, and it lives here rather
+        # than in the printer so the printer stays a pure function of one event.
+        stream_open = type(event).__name__ == "StreamDelta"
+        if isinstance(event, ResultMessage):
+            result = event
+            exit_code = EXIT_CODES.get(event.subtype, 1)
+    if args.trace:
+        print(runtime.tracer.tree())
+    # --quiet suppresses the narration, not the result: a script wrapping the
+    # CLI still gets exactly one line to parse, including the session id.
+    if result is not None and not args.json:
+        report = runtime.last_report
+        tool_calls = len(report.tool_calls) if report is not None else 0
+        print(
+            f"\n[{result.subtype}] turns={result.num_turns} tool_calls={tool_calls} "
+            f"cost=${result.total_cost_usd:.6f}"
+            + (" (pricing estimated)" if result.pricing_estimated else "")
+            + f" session={result.session_id}"
+        )
+        # A run that ended in error must say why; the summary line alone is a
+        # dead end for whoever is reading a CI log.
+        for message in result.errors:
+            print(f"  ! {message}", file=sys.stderr)
+        for denial in result.permission_denials:
+            name = denial.get("tool", "?") if isinstance(denial, dict) else getattr(denial, "tool", "?")
+            print(f"  ! refused: {name}", file=sys.stderr)
+    return exit_code
+
+
 def _run(args: argparse.Namespace) -> int:
     from agents import builtin_registry
     from loop import AgentRuntime, RuntimeConfig, RuntimeConfigurationError
-    from sessions import SessionStore
     from tools import ToolLimits, build_default_registry
 
     try:
@@ -1536,144 +1742,40 @@ def _run(args: argparse.Namespace) -> int:
     prompt_setup = _compose_system_prompt(args, definition, policy, plugins)
     if prompt_setup.system_prompt is not None:
         config_kwargs["system_prompt"] = prompt_setup.system_prompt
-    context = prompt_setup.context
-    skills = prompt_setup.skills
-    memory_note = prompt_setup.memory_note
-
     if args.sidecar_socket:
         config_kwargs["sidecar_socket"] = args.sidecar_socket
         config_kwargs["sidecar_timeout_ms"] = args.sidecar_timeout_ms
     config_kwargs["shell_backend"] = getattr(args, "sandbox", "auto") or "auto"
     config_kwargs["parallel_tools"] = int(getattr(args, "parallel_tools", 1) or 1)
 
-    if args.checkpoint_turns < 0:
-        raise RunConfigurationError("--checkpoint-turns must be >= 0 (0 disables checkpoints)")
-    if args.checkpoint_turns and args.checkpoint_turns > ceilings.max_turns:
-        # A cadence that can never fire would leave the operator believing the run
-        # was resumable when no record was ever written. Compared with the effective
-        # ceiling (after the policy file and plugins tightened it), not the flag alone.
-        raise RunConfigurationError(
-            f"--checkpoint-turns {args.checkpoint_turns} exceeds the run's max_turns {ceilings.max_turns}, "
-            "so no checkpoint could ever be written",
-        )
-    if args.no_session_lease and args.session_lease_seconds != 900:
-        raise RunConfigurationError(
-            "--session-lease-seconds has no meaning with --no-session-lease; "
-            "pick one (no lease, or a lease of N seconds)",
-        )
-    if not args.no_session_lease and args.session_lease_seconds < 0:
-        # 0 is the one value that means something else here: it reads as "lease for no
-        # time", which is a lease that is always up for grabs. Turning it off is what
-        # --no-session-lease is for, and saying so beats inventing a synonym.
-        raise RunConfigurationError(
-            "--session-lease-seconds must be > 0; use --no-session-lease to run without a lease",
-        )
-    if args.resume_record is not None and not args.resume_from:
-        raise RunConfigurationError("--resume-record only means something with --resume-from")
-    if args.resume and args.resume_from:
-        raise RunConfigurationError(
-            "choose one of --resume (append to the same transcript) or "
-            "--resume-from (fork a new session from a checkpoint); they disagree about the parent file",
-        )
-    if args.resume_from and not args.session_dir:
-        raise RunConfigurationError("--resume-from needs --session-dir to read the parent transcript from")
-
-    from budget import Budget as _Budget
-
-    resume_budget: Any = None
-    if args.resume_from:
-        from checkpoints import CheckpointError, select as select_checkpoint
-
-        _parent_store = SessionStore(args.session_dir, session_id=args.resume_from)
-        try:
-            _records, _dropped = _parent_store.read(args.resume_from)
-            checkpoint = select_checkpoint(_records, record_index=args.resume_record)
-        except (CheckpointError, OSError, ValueError) as error:
-            raise RunConfigurationError(f"cannot resume from {args.resume_from!r}: {error}") from error
-        if checkpoint is None:
-            raise RunConfigurationError(
-                f"session {args.resume_from!r} has no checkpoints "
-                f"(run it with --checkpoint-turns N to make boundaries resumable)",
-            )
-        config_kwargs["resume_from"] = checkpoint
-        # A fork gets its own id and its own file; the parent stays byte-for-byte
-        # what it was. --resume keeps the older append-in-place behaviour.
-        config_kwargs["parent_session"] = args.resume_from
-        # Start from the tightened ceiling, never from the flag: a policy file or plugin
-        # that lowered max_turns must keep binding the lineage after a resume.
-        config_kwargs["max_turns"] = max(ceilings.max_turns, checkpoint.turns)
-        # The ceiling travels with the lineage: the resumed run starts *at* what the
-        # parent had already spent, so resuming cannot hand out a fresh budget.
-        resume_budget = _Budget(
-            max_budget_usd=ceilings.max_budget_usd,
-            total_cost_usd=checkpoint.cost_usd,
-            total_usage=checkpoint_usage(checkpoint),
-        )
-        store = SessionStore(args.session_dir or None, session_id=None)
-    else:
-        store = SessionStore(args.session_dir or None, session_id=args.resume or None)
-    if args.checkpoint_turns:
-        config_kwargs["checkpoint_turns"] = args.checkpoint_turns
-    if args.no_session_lease:
-        config_kwargs["lock_session"] = False
-    elif args.session_lease_seconds != 900:
-        config_kwargs["session_lease_seconds"] = args.session_lease_seconds
-    config_kwargs["session_id"] = store.session_id
+    _validate_session_flags(args, ceilings)
+    session = _resolve_session(args, ceilings)
+    config_kwargs.update(session.config_updates)
     try:
         config = RuntimeConfig(**config_kwargs)
     except RuntimeConfigurationError as error:
         raise RunConfigurationError(str(error)) from error
 
-    if args.no_policy_file:
-        policy_note = "none (--no-policy-file)"
-    elif policy is not None:
-        policy_note = (
-            f"{policy.source} schema={policy.schema_version} revision={policy.revision or 'none'} "
-            f"mode={policy.permission_mode or 'default'} "
-            f"deny={','.join(policy.deny_tools) or 'none'} "
-            f"read_only={bool(policy.read_only)} budget={policy.max_budget_usd or 'none'} "
-            f"max_turns={policy.max_turns or 'none'} halt_on_denial={bool(policy.halt_on_denial)}"
-        )
-    else:
-        policy_note = "none"
-    if context is not None:
-        context_note = f"{context.name} ({len(context.text)} chars from {context.path})" + (" [truncated]" if context.truncated else "")
-    elif args.no_project_context and not args.context_file:
-        context_note = "off (--no-project-context)"
-    else:
-        context_note = "off (no AGENTS.md in the workspace)"
-    workspace_agents_note = ",".join(agent.name for agent in workspace_agents) or "none"
-    hooks_note = _hooks_note(
-        policy, hooks.command_hooks, enabled=args.enable_workspace_hooks, plugin_hooks=hooks.plugin_hook_count
+    notes = _setup_notes(
+        args,
+        policy=policy,
+        prompt_setup=prompt_setup,
+        workspace_agents=workspace_agents,
+        hooks=hooks,
+        plugins=plugins,
+        mcp_servers=mcp_servers,
+        mcp_report=mcp_report,
     )
-    skills_note = (f"{len(skills)} package(s): " + ", ".join(skill.name for skill in skills)) if skills else "none"
-    if args.no_plugins:
-        plugin_note = "off (--no-plugins)"
-    elif plugins is not None and plugins.audit:
-        plugin_note = (
-            f"{len(plugins.audit)} bundle(s): "
-            + ", ".join(f"{item['name']}@{item['version']} ({item['content_digest'][7:19]})" for item in plugins.audit)
-        )
-    else:
-        plugin_note = "none (.northstar/plugins is empty)"
-    if mcp_servers:
-        listed = ", ".join(f"{name}={' '.join(command)}" for name, command in mcp_servers)
-        note = _mcp_stance_note(args)
-        if mcp_report is not None:
-            note += f"; config {mcp_report.summary()}"
-        mcp_note = f"{listed} ({note})"
-    else:
-        mcp_note = "off"
 
     provider = _build_provider(args)
     runtime = AgentRuntime(
         provider=provider,
         config=config,
         tools=registry,
-        sessions=store,
+        sessions=session.store,
         agents=agents,
         hooks=hooks.registry,
-        budget=resume_budget,
+        budget=session.resume_budget,
     )
 
     if args.show_pricing:
@@ -1683,18 +1785,7 @@ def _run(args: argparse.Namespace) -> int:
         # Never constructs the provider and never connects MCP servers:
         # configuration is validated above, so a healthy configuration prints a
         # plan and exits 0 before any request or child process.
-        return _print_dry_run(
-            args,
-            runtime,
-            policy_note=policy_note,
-            hooks_note=hooks_note,
-            context_note=context_note,
-            memory_note=memory_note,
-            workspace_agents_note=workspace_agents_note,
-            skills_note=skills_note,
-            plugin_note=plugin_note,
-            mcp_note=mcp_note,
-        )
+        return _print_dry_run(args, runtime, **notes)
     if args.probe_sidecar:
         if args.provider == "anthropic":
             sdk_ok, message = _check_anthropic_sdk()
@@ -1718,47 +1809,7 @@ def _run(args: argparse.Namespace) -> int:
         except ValueError as error:
             raise RunConfigurationError(str(error)) from error
     try:
-        if args.resume_from:
-            resume = store.transcript(args.resume_from)
-        else:
-            resume = store.transcript(args.resume) if args.resume else None
-        exit_code = 0
-        result = None
-        stream_open = False
-        for event in runtime.run(prompt, resume=resume):
-            if args.json:
-                print(json.dumps(event_to_dict(event), ensure_ascii=False, sort_keys=True))
-            else:
-                _print_event(event, quiet=args.quiet, stream_open=stream_open)
-            # The assistant event that follows its own deltas must not print the same
-            # text a second time; the one that does not must print it normally. Tracking
-            # "did the previous event stream" is the whole rule, and it lives here rather
-            # than in the printer so the printer stays a pure function of one event.
-            stream_open = type(event).__name__ == "StreamDelta"
-            if isinstance(event, ResultMessage):
-                result = event
-                exit_code = EXIT_CODES.get(event.subtype, 1)
-        if args.trace:
-            print(runtime.tracer.tree())
-        # --quiet suppresses the narration, not the result: a script wrapping the
-        # CLI still gets exactly one line to parse, including the session id.
-        if result is not None and not args.json:
-            report = runtime.last_report
-            tool_calls = len(report.tool_calls) if report is not None else 0
-            print(
-                f"\n[{result.subtype}] turns={result.num_turns} tool_calls={tool_calls} "
-                f"cost=${result.total_cost_usd:.6f}"
-                + (" (pricing estimated)" if result.pricing_estimated else "")
-                + f" session={result.session_id}"
-            )
-            # A run that ended in error must say why; the summary line alone is a
-            # dead end for whoever is reading a CI log.
-            for message in result.errors:
-                print(f"  ! {message}", file=sys.stderr)
-            for denial in result.permission_denials:
-                name = denial.get("tool", "?") if isinstance(denial, dict) else getattr(denial, "tool", "?")
-                print(f"  ! refused: {name}", file=sys.stderr)
-        return exit_code
+        return _stream_events(args, runtime, session.store, prompt)
     finally:
         for client in mcp_clients:
             client.close()
