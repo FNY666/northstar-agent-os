@@ -1341,12 +1341,122 @@ def _resolve_ceilings(args: argparse.Namespace, definition: Any, policy: Any, pl
     )
 
 
+@dataclass(frozen=True)
+class _PromptSetup:
+    """The assembled system prompt and what went into it (for the dry-run notes).
+
+    ``system_prompt`` is None when nothing replaced or extended the runtime's default, so
+    ``RuntimeConfig`` keeps its own default exactly as before.
+    """
+
+    system_prompt: str | None
+    context: Any
+    skills: tuple[Any, ...]
+    memory_note: str
+
+
+def _compose_system_prompt(args: argparse.Namespace, definition: Any, policy: Any, plugins: Any) -> _PromptSetup:
+    """Build the system prompt in its fixed order.
+
+    Order: --system-prompt (or the agent definition's own prompt, which wins) -> project
+    instructions (AGENTS.md) -> workspace skills listing -> skill scripts listing ->
+    workspace memory -> plugin context. Each part is appended to whatever came before it,
+    starting from the runtime's DEFAULT_SYSTEM_PROMPT when nothing replaced it.
+    """
+    from loop import DEFAULT_SYSTEM_PROMPT
+    from policy_file import append_project_context, discover_project_context
+    from skills import SkillError, discover_skills, skill_listing
+
+    system_prompt: str | None = None
+    if args.system_prompt:
+        system_prompt = args.system_prompt
+    if definition:
+        system_prompt = definition.system_prompt(parent_cwd=args.workspace)
+
+    # Project instructions (AGENTS.md by default, the policy file's
+    # project_context, or an explicit --context-file) are appended to whichever
+    # system prompt applies, as clearly delimited developer-authored content.
+    context = None
+    if args.context_file or not args.no_project_context:
+        configured = policy.project_context_setting if policy is not None else "AGENTS.md"
+        context = discover_project_context(
+            args.workspace,
+            configured=configured,
+            explicit=args.context_file or None,
+        )
+        if context is not None:
+            base_prompt = system_prompt if system_prompt is not None else DEFAULT_SYSTEM_PROMPT
+            system_prompt = append_project_context(base_prompt, context)
+
+    # Workspace skills (.northstar/skills/*/SKILL.md): progressive disclosure -
+    # only the name/description listing enters the prompt; the model reads the
+    # full SKILL.md with the ordinary sandboxed Read tool when a task matches.
+    skills: tuple[Any, ...] = ()
+    if not args.no_skills:
+        try:
+            skills = discover_skills(
+                args.workspace,
+                extra_roots=[path for _name, path in (plugins.skill_roots if plugins else ())],
+            )
+        except SkillError as error:
+            raise RunConfigurationError(str(error)) from error
+    if skills:
+        base_prompt = system_prompt if system_prompt is not None else DEFAULT_SYSTEM_PROMPT
+        system_prompt = base_prompt + skill_listing(skills, args.workspace)
+        # Skill-bundled scripts: listed for progressive disclosure; execution is
+        # only via Shell (still default-deny). Discovery never runs them.
+        try:
+            from tools.skill_scripts import discover_skill_scripts, skill_scripts_listing
+
+            skill_scripts = discover_skill_scripts(args.workspace, skills)
+        except SkillError as error:
+            raise RunConfigurationError(str(error)) from error
+        if skill_scripts:
+            base_prompt = system_prompt if system_prompt is not None else DEFAULT_SYSTEM_PROMPT
+            system_prompt = base_prompt + skill_scripts_listing(skill_scripts)
+
+    # Workspace memory (P4): workspace-scoped only, digest-labelled, opt-out.
+    # Never a user-home / global MEMORY store (blueprint C7).
+    memory = None
+    memory_note = "none (.northstar/memory/MEMORY.md absent)"
+    try:
+        from memory import MemoryError, append_memory, discover_memory
+
+        if getattr(args, "no_memory", False) and not (getattr(args, "memory_file", "") or ""):
+            memory = None
+            memory_note = "off (--no-memory)"
+        else:
+            memory = discover_memory(
+                args.workspace,
+                configured=False if getattr(args, "no_memory", False) else None,
+                explicit=(getattr(args, "memory_file", "") or None) or None,
+            )
+            if memory is not None:
+                base_prompt = system_prompt if system_prompt is not None else DEFAULT_SYSTEM_PROMPT
+                system_prompt = append_memory(base_prompt, memory)
+                memory_note = (
+                    f"{memory.relative} digest={memory.digest[:12]}"
+                    + (" [truncated]" if memory.truncated else "")
+                )
+    except MemoryError as error:
+        raise RunConfigurationError(str(error)) from error
+
+    if plugins is not None and plugins.context_blocks:
+        # A bundle's README-style context is the same kind of content as AGENTS.md: it
+        # informs, it does not authorise. It is therefore appended after the policy and
+        # labelled, so a reader of the transcript can tell whose words these are.
+        base_prompt = system_prompt if system_prompt is not None else DEFAULT_SYSTEM_PROMPT
+        blocks = "\n\n".join(f"[from plugin '{name}']\n{text}" for name, text in plugins.context_blocks)
+        system_prompt = (
+            base_prompt + "\n\n== Plugin context (developer-authored, from installed bundles) ==\n" + blocks + "\n== End of plugin context =="
+        )
+    return _PromptSetup(system_prompt=system_prompt, context=context, skills=skills, memory_note=memory_note)
+
+
 def _run(args: argparse.Namespace) -> int:
     from agents import builtin_registry
-    from loop import AgentRuntime, DEFAULT_SYSTEM_PROMPT, RuntimeConfig, RuntimeConfigurationError
-    from policy_file import append_project_context, discover_project_context
+    from loop import AgentRuntime, RuntimeConfig, RuntimeConfigurationError
     from sessions import SessionStore
-    from skills import SkillError, discover_skills, skill_listing
     from tools import ToolLimits, build_default_registry
 
     try:
@@ -1420,90 +1530,16 @@ def _run(args: argparse.Namespace) -> int:
         config_kwargs["run_id"] = args.run_id
     if policy is not None and policy.revision:
         config_kwargs["policy_revision"] = policy.revision
-    if args.system_prompt:
-        config_kwargs["system_prompt"] = args.system_prompt
     if definition:
-        config_kwargs["system_prompt"] = definition.system_prompt(parent_cwd=args.workspace)
         config_kwargs["agent"] = definition.name
         config_kwargs["allow_delegation"] = definition.allow_delegation and args.max_subagent_depth > 0
+    prompt_setup = _compose_system_prompt(args, definition, policy, plugins)
+    if prompt_setup.system_prompt is not None:
+        config_kwargs["system_prompt"] = prompt_setup.system_prompt
+    context = prompt_setup.context
+    skills = prompt_setup.skills
+    memory_note = prompt_setup.memory_note
 
-    # Project instructions (AGENTS.md by default, the policy file's
-    # project_context, or an explicit --context-file) are appended to whichever
-    # system prompt applies, as clearly delimited developer-authored content.
-    context = None
-    if args.context_file or not args.no_project_context:
-        configured = policy.project_context_setting if policy is not None else "AGENTS.md"
-        context = discover_project_context(
-            args.workspace,
-            configured=configured,
-            explicit=args.context_file or None,
-        )
-        if context is not None:
-            base_prompt = config_kwargs.get("system_prompt", DEFAULT_SYSTEM_PROMPT)
-            config_kwargs["system_prompt"] = append_project_context(base_prompt, context)
-
-    # Workspace skills (.northstar/skills/*/SKILL.md): progressive disclosure -
-    # only the name/description listing enters the prompt; the model reads the
-    # full SKILL.md with the ordinary sandboxed Read tool when a task matches.
-    skills: tuple[Any, ...] = ()
-    if not args.no_skills:
-        try:
-            skills = discover_skills(
-                args.workspace,
-                extra_roots=[path for _name, path in (plugins.skill_roots if plugins else ())],
-            )
-        except SkillError as error:
-            raise RunConfigurationError(str(error)) from error
-    if skills:
-        base_prompt = config_kwargs.get("system_prompt", DEFAULT_SYSTEM_PROMPT)
-        config_kwargs["system_prompt"] = base_prompt + skill_listing(skills, args.workspace)
-        # Skill-bundled scripts: listed for progressive disclosure; execution is
-        # only via Shell (still default-deny). Discovery never runs them.
-        try:
-            from tools.skill_scripts import discover_skill_scripts, skill_scripts_listing
-
-            skill_scripts = discover_skill_scripts(args.workspace, skills)
-        except SkillError as error:
-            raise RunConfigurationError(str(error)) from error
-        if skill_scripts:
-            base_prompt = config_kwargs.get("system_prompt", DEFAULT_SYSTEM_PROMPT)
-            config_kwargs["system_prompt"] = base_prompt + skill_scripts_listing(skill_scripts)
-
-    # Workspace memory (P4): workspace-scoped only, digest-labelled, opt-out.
-    # Never a user-home / global MEMORY store (blueprint C7).
-    memory = None
-    memory_note = "none (.northstar/memory/MEMORY.md absent)"
-    try:
-        from memory import MemoryError, append_memory, discover_memory
-
-        if getattr(args, "no_memory", False) and not (getattr(args, "memory_file", "") or ""):
-            memory = None
-            memory_note = "off (--no-memory)"
-        else:
-            memory = discover_memory(
-                args.workspace,
-                configured=False if getattr(args, "no_memory", False) else None,
-                explicit=(getattr(args, "memory_file", "") or None) or None,
-            )
-            if memory is not None:
-                base_prompt = config_kwargs.get("system_prompt", DEFAULT_SYSTEM_PROMPT)
-                config_kwargs["system_prompt"] = append_memory(base_prompt, memory)
-                memory_note = (
-                    f"{memory.relative} digest={memory.digest[:12]}"
-                    + (" [truncated]" if memory.truncated else "")
-                )
-    except MemoryError as error:
-        raise RunConfigurationError(str(error)) from error
-
-    if plugins is not None and plugins.context_blocks:
-        # A bundle's README-style context is the same kind of content as AGENTS.md: it
-        # informs, it does not authorise. It is therefore appended after the policy and
-        # labelled, so a reader of the transcript can tell whose words these are.
-        base_prompt = config_kwargs.get("system_prompt", DEFAULT_SYSTEM_PROMPT)
-        blocks = "\n\n".join(f"[from plugin '{name}']\n{text}" for name, text in plugins.context_blocks)
-        config_kwargs["system_prompt"] = (
-            base_prompt + "\n\n== Plugin context (developer-authored, from installed bundles) ==\n" + blocks + "\n== End of plugin context =="
-        )
     if args.sidecar_socket:
         config_kwargs["sidecar_socket"] = args.sidecar_socket
         config_kwargs["sidecar_timeout_ms"] = args.sidecar_timeout_ms
