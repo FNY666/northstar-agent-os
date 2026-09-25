@@ -295,8 +295,8 @@ class Ceilings:
 
 
 def resolve_ceilings(args: argparse.Namespace, definition: Any, policy: Any, plugins: Any) -> Ceilings:
-    base_turns = definition.max_turns if definition else args.max_turns
-    base_tool_calls = definition.max_tool_calls if definition else args.max_tool_calls
+    base_turns = tighten(args.max_turns, definition.max_turns if definition else None)
+    base_tool_calls = tighten(args.max_tool_calls, definition.max_tool_calls if definition else None)
     plugin_policy = plugins.policy if plugins is not None else {}
     max_turns = tighten(tighten(base_turns, policy.max_turns if policy is not None else None), plugin_policy.get("max_turns"))
     max_tool_calls = tighten(
