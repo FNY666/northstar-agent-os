@@ -981,7 +981,7 @@ def _connect_mcp_clients(
             "allow_sensitive_input": bool(getattr(args, "mcp_allow_sensitive_input", False)),
             "allow_roots": bool(getattr(args, "mcp_allow_roots", False)),
             "max_input_rounds": getattr(args, "mcp_max_rounds", 3),
-            "workspace_root": Path.cwd(),
+            "workspace_root": Path(args.workspace).resolve(),
         }
     clients: list[Any] = []
     extras = dict(launch or {})
