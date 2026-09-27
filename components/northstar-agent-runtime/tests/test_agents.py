@@ -390,6 +390,29 @@ class DelegationTests(RuntimeTestCase):
         # Write is disallowed for the evaluator by definition, so the gate refuses.
         self.assertIn("Write", str([denial.tool for denial in report.denials]))
 
+    def test_child_delegation_refused_when_parent_budget_exhausted(self):
+        """F3: After parent exhausts budget mid-turn, further Task calls return error_max_budget_usd without spawning."""
+        parent = self.provider(
+            [
+                tool_turn("Task", {"agent": "explorer", "prompt": "first child"}, usage={"input_tokens": 100_000}),
+                tool_turn("Task", {"agent": "explorer", "prompt": "second child"}),
+            ]
+        )
+        # First child: parent 100k * $3/M = $0.3, child 350k * $3/M = $1.05, total $1.35 > $1.2
+        # After first child completes, budget is exhausted, second Task should be refused
+        child = self.provider([text_turn("child ran", usage={"input_tokens": 350_000})], on_exhausted="repeat_last")
+        runtime = self.runtime(
+            provider=parent,
+            providers={"child": child},
+            agents=AgentRegistry([explorer_agent().override(provider="child")]),
+            max_budget_usd=1.2,
+            max_turns=10,
+        )
+        report = self.drive(runtime, "two delegations")
+        self.assertEqual(len(report.subagents), 1, "only the first child should run")
+        self.assertEqual(report.subagents[0].subtype, "success", "first child should complete successfully")
+        self.assertEqual(self.assertExactlyOneResult(report).subtype, "error_max_budget_usd", "run should halt with budget error")
+
 
 if __name__ == "__main__":
     unittest.main()
