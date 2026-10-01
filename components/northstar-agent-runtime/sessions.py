@@ -268,6 +268,18 @@ def load_jsonl(path: str | os.PathLike[str], *, strict: bool = True) -> tuple[li
     return records, dropped
 
 
+def session_spend(records: Sequence[dict[str, Any]]) -> tuple[float, Usage]:
+    """Aggregate completed-run spend and provider usage from an append transcript."""
+    total_cost = 0.0
+    total_usage = Usage()
+    for record in records:
+        if record.get("type") == "result":
+            total_cost += float(record.get("total_cost_usd", 0.0) or 0.0)
+        elif record.get("type") == "assistant":
+            total_usage = total_usage + Usage.from_mapping(record.get("usage"))
+    return round(total_cost, 10), total_usage
+
+
 def transcript_from_records(records: Sequence[dict[str, Any]]) -> list[Any]:
     """Rebuild a provider-ready transcript from stored records."""
     transcript: list[Any] = []

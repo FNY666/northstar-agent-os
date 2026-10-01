@@ -223,6 +223,15 @@ def _build(options: RunOptions, resume: str | None = None) -> tuple[Any, Any, li
     else:
         store = SessionStore(options.session_dir or None, session_id=resume or None)
         if resume:
+            from budget import Budget
+            from sessions import session_spend
+            records, _dropped = store.read(resume)
+            spent, usage = session_spend(records)
+            budget = Budget(
+                max_budget_usd=options.max_budget_usd,
+                total_cost_usd=spent,
+                total_usage=usage,
+            )
             resume_transcript = store.transcript(resume)
     if options.checkpoint_turns:
         config_kwargs["checkpoint_turns"] = options.checkpoint_turns
