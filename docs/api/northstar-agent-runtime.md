@@ -1426,6 +1426,10 @@ Writer/reader for one session's JSONL transcript.
 
 Return ``(records, dropped)`` for a session file.
 
+#### `session_spend(records: Sequence[dict[str, Any]])`
+
+Aggregate completed-run spend and provider usage from an append transcript.
+
 #### `transcript_from_records(records: Sequence[dict[str, Any]])`
 
 Rebuild a provider-ready transcript from stored records.
