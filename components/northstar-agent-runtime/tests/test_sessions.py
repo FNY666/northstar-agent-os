@@ -21,9 +21,27 @@ from sessions import (
     load_jsonl,
     new_session_id,
     resolve_session_id,
+    session_spend,
     summarise,
     transcript_from_records,
 )
+
+
+class SessionSpendTests(unittest.TestCase):
+    def test_session_spend_aggregates_results_and_assistant_usage_only(self):
+        records = [
+            {"type": "session_start", "data": {"total_cost_usd": 999}},
+            {"type": "assistant", "usage": {"input_tokens": 10, "output_tokens": 2}},
+            {"type": "result", "total_cost_usd": 0.3},
+            {"type": "assistant", "usage": {"input_tokens": 4, "cache_read_input_tokens": 3}},
+            {"type": "result", "total_cost_usd": 0.2},
+            {"type": "session_end", "total_cost_usd": 123},
+        ]
+        cost, usage = session_spend(records)
+        self.assertEqual(cost, 0.5)
+        self.assertEqual(usage.input_tokens, 14)
+        self.assertEqual(usage.output_tokens, 2)
+        self.assertEqual(usage.cache_read_input_tokens, 3)
 
 
 class SessionIdTests(unittest.TestCase):
