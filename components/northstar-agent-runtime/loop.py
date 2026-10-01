@@ -2160,6 +2160,16 @@ class AgentRuntime:
         admission = self._admit_delegation(call, spec, payload, state, turn_index=turn_index)
         if isinstance(admission, _Refused):
             return admission.block, admission.report, admission.fatal
+
+        # F3: Stop child delegation when parent budget is exhausted
+        if self.config.max_budget_usd is not None and self.budget.exhausted:
+            reason = f"parent budget exhausted (${self.budget.total_cost_usd:.6f} >= ${self.config.max_budget_usd:.6f}), cannot spawn child"
+            return (
+                ToolResultBlock(tool_use_id=call.id, content=reason, is_error=True),
+                ToolCallReport(name=spec.name, call_id=call.id, is_error=True, permission_source="budget", turn_index=turn_index, agent=self.config.agent),
+                "error_max_budget_usd",
+            )
+
         child, child_config, child_mode = self._child_runtime(admission.definition, admission.provider, state)
         subagent_report, verdict = self._run_child(child, child_config, child_mode, admission, span=span)
         return self._subagent_result(
