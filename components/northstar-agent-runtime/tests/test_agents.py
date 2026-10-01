@@ -290,6 +290,36 @@ class DelegationTests(RuntimeTestCase):
         self.assertIn("leaf answer", middle.sent_tool_results()[0]["content"])
         self.assertEqual(leaf.requests[0].depth, 2)
 
+    def test_a_subagent_cannot_exceed_the_parent_turn_ceiling(self):
+        parent = self.provider([tool_turn("Task", {"agent": "explorer", "prompt": "loop forever"})])
+        child = self.provider([tool_turn("Read", {"path": "x"}) for _ in range(6)], on_exhausted="repeat_last")
+        runtime = self.runtime(
+            provider=parent,
+            providers={"child": child},
+            agents=AgentRegistry([explorer_agent().override(provider="child", max_turns=6, max_tool_calls=None)]),
+            max_turns=3,
+            max_tool_calls=None,
+        )
+        report = self.drive(runtime, "delegate")
+        self.assertEqual(report.subagents[0].subtype, "error_max_turns")
+        self.assertEqual(report.subagents[0].turns, 3)
+        self.assertEqual(len(child.requests), 3)
+
+    def test_a_subagent_cannot_exceed_the_parent_tool_call_ceiling(self):
+        parent = self.provider([tool_turn("Task", {"agent": "explorer", "prompt": "read repeatedly"})])
+        child = self.provider([tool_turn("Read", {"path": "x"}) for _ in range(6)], on_exhausted="repeat_last")
+        runtime = self.runtime(
+            provider=parent,
+            providers={"child": child},
+            agents=AgentRegistry([explorer_agent().override(provider="child", max_turns=20, max_tool_calls=12)]),
+            max_turns=20,
+            max_tool_calls=2,
+        )
+        report = self.drive(runtime, "delegate")
+        self.assertEqual(report.subagents[0].subtype, "error_max_tool_calls")
+        self.assertEqual(report.subagents[0].tool_calls, 2)
+        self.assertEqual(len(child.requests), 2)
+
     def test_a_subagent_turn_ceiling_is_independent_of_the_parents(self):
         parent = self.provider([tool_turn("Task", {"agent": "explorer", "prompt": "loop forever"})])
         child = self.provider([tool_turn("Read", {"path": "x"}) for _ in range(6)], on_exhausted="repeat_last")
