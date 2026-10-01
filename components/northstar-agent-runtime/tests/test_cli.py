@@ -520,6 +520,28 @@ class PromptAndSessionTests(unittest.TestCase):
         self.assertIn("the first question", text)
         self.assertIn("the follow-up", text)
 
+    def test_append_resume_carries_the_session_cost_ceiling(self):
+        first_script = self.workspace / "first.json"
+        second_script = self.workspace / "second.json"
+        usage = {"input_tokens": 100_000}
+        first_script.write_text(json.dumps([{"text": "first", "usage": usage}]), encoding="utf-8")
+        second_script.write_text(json.dumps([
+            {"tool": {"name": "Read", "input": {"path": "missing.txt"}}, "usage": usage},
+            {"text": "unreachable"},
+        ]), encoding="utf-8")
+        code, out, _ = run_cli(
+            "run", "--workspace", str(self.workspace), "--prompt", "first", "--script", str(first_script),
+            "--session-dir", str(self.session_dir), "--max-budget-usd", "0.5", "--quiet",
+        )
+        self.assertEqual(code, 0)
+        session_id = out.strip().split("session=")[1]
+        code, out, _ = run_cli(
+            "run", "--workspace", str(self.workspace), "--prompt", "second", "--script", str(second_script),
+            "--session-dir", str(self.session_dir), "--resume", session_id, "--max-budget-usd", "0.5", "--quiet",
+        )
+        self.assertEqual(code, 4, "append resume must not reset the session budget")
+        self.assertIn("error_max_budget_usd", out)
+
     def test_resuming_a_session_that_does_not_exist_is_still_a_valid_run(self):
         code, out, err = run_cli(
             "run", "--workspace", str(self.workspace), "--prompt", "hello", "--scripted-text", "ok",
