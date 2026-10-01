@@ -51,6 +51,14 @@ GUARDS: list[tuple[str, str, list[tuple[str, str]], str, str]] = [
         "test_budget_ceiling_stops_before_the_next_generation",
     ),
     (
+        "an exhausted parent cannot spawn a zero-budget child",
+        "loop.py",
+        [('        if self.config.max_budget_usd is not None and self.budget.exhausted:',
+          '        if False and self.config.max_budget_usd is not None and self.budget.exhausted:')],
+        "test_agents*",
+        "test_child_delegation_refused_when_parent_budget_exhausted",
+    ),
+    (
         "a hook deny is terminal and cannot be overturned",
         "hooks.py",
         [("""                outcome.skipped.extend(other.name for other in registrations[registrations.index(registration) + 1 :])
@@ -147,7 +155,7 @@ def main() -> int:
         for item in failures:
             print(f"  - {item}")
         return 1
-    print("\nall five guards verified: reverting each one turns its test red")
+    print(f"\nall {len(GUARDS)} guards verified: reverting each one turns its test red")
     return 0
 
 
