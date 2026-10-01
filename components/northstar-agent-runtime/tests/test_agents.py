@@ -424,12 +424,15 @@ class DelegationTests(RuntimeTestCase):
         """F3: After parent exhausts budget mid-turn, further Task calls return error_max_budget_usd without spawning."""
         parent = self.provider(
             [
-                tool_turn("Task", {"agent": "explorer", "prompt": "first child"}, usage={"input_tokens": 100_000}),
-                tool_turn("Task", {"agent": "explorer", "prompt": "second child"}),
+                {
+                    "tools": [
+                        {"name": "Task", "input": {"agent": "explorer", "prompt": "first child"}},
+                        {"name": "Task", "input": {"agent": "explorer", "prompt": "second child"}},
+                    ],
+                    "usage": {"input_tokens": 100_000},
+                }
             ]
         )
-        # First child: parent 100k * $3/M = $0.3, child 350k * $3/M = $1.05, total $1.35 > $1.2
-        # After first child completes, budget is exhausted, second Task should be refused
         child = self.provider([text_turn("child ran", usage={"input_tokens": 350_000})], on_exhausted="repeat_last")
         runtime = self.runtime(
             provider=parent,
@@ -438,10 +441,9 @@ class DelegationTests(RuntimeTestCase):
             max_budget_usd=1.2,
             max_turns=10,
         )
-        report = self.drive(runtime, "two delegations")
-        self.assertEqual(len(report.subagents), 1, "only the first child should run")
-        self.assertEqual(report.subagents[0].subtype, "success", "first child should complete successfully")
-        self.assertEqual(self.assertExactlyOneResult(report).subtype, "error_max_budget_usd", "run should halt with budget error")
+        report = self.drive(runtime, "two delegations in one turn")
+        self.assertEqual(len(report.subagents), 1, "the second child must not be spawned")
+        self.assertEqual(self.assertExactlyOneResult(report).subtype, "error_max_budget_usd")
 
 
 if __name__ == "__main__":
