@@ -2316,11 +2316,18 @@ class AgentRuntime:
         remaining = self.budget.remaining()
         if remaining is not None:
             child_budget_limit = remaining if child_budget_limit is None else min(float(remaining), float(child_budget_limit))
+        child_max_turns = min(self.config.max_turns, definition.max_turns)
+        if self.config.max_tool_calls is None:
+            child_max_tool_calls = definition.max_tool_calls
+        elif definition.max_tool_calls is None:
+            child_max_tool_calls = self.config.max_tool_calls
+        else:
+            child_max_tool_calls = min(self.config.max_tool_calls, definition.max_tool_calls)
         child_config = RuntimeConfig(
             model=definition.model or self.config.model,
             system_prompt=definition.system_prompt(parent_cwd=str(self.sandbox.root_real)),
-            max_turns=definition.max_turns,
-            max_tool_calls=definition.max_tool_calls,
+            max_turns=child_max_turns,
+            max_tool_calls=child_max_tool_calls,
             max_budget_usd=child_budget_limit,
             permission_mode=child_mode,
             allowed_tools=child_allowed,
