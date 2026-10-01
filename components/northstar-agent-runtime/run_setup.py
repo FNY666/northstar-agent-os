@@ -521,6 +521,15 @@ def resolve_session(args: argparse.Namespace, ceilings: Ceilings) -> SessionSetu
         store = SessionStore(args.session_dir or None, session_id=None)
     else:
         store = SessionStore(args.session_dir or None, session_id=args.resume or None)
+        if args.resume:
+            records, _dropped = store.read(args.resume)
+            from sessions import session_spend
+            spent, usage = session_spend(records)
+            resume_budget = _Budget(
+                max_budget_usd=ceilings.max_budget_usd,
+                total_cost_usd=spent,
+                total_usage=usage,
+            )
     if args.checkpoint_turns:
         config_kwargs["checkpoint_turns"] = args.checkpoint_turns
     if args.no_session_lease:
