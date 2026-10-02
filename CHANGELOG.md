@@ -1,5 +1,30 @@
 # Northstar Agent OS — initial public component
 
+## Unreleased (thirty-fourth batch) — durable-run lease recovery and heartbeat
+
+The execution lease could not do its job in exactly the situations it exists
+for. Three fixes in `components/northstar-durable-run/runner.py`:
+
+- **Expired leases are reclaimable again.** `LeaseManager.acquire` always
+  allowed taking over an expired lease (with a dedicated test), but
+  `DurableRunner._ensure_execution_lease` rejected expired leases outright —
+  a crashed run's lease file sat there forever and every new `execute`
+  failed with a confusing "owner does not match". Expired now falls through
+  to `acquire`'s rule: active foreign leases are still refused, corrupt
+  files still fail closed.
+- **The `finally` release no longer masks the run outcome.** If the lease
+  expired mid-run and was taken over, `release` raised `ValueError` and
+  destroyed the result the run just produced. The release is now
+  best-effort when the lease is no longer ours.
+- **Lease heartbeat for long runs.** `DurableRunner` accepts an optional
+  `clock` (epoch seconds, e.g. `time.time`); the lease is refreshed before
+  each step action. A stolen or lapsed lease aborts the run instead of
+  executing steps unowned. Without a clock the previous behavior is
+  unchanged (documented in the component README).
+
+**Verification:** 8 new/updated runner tests (73/73 component green); full
+clinic below.
+
 ## Unreleased (thirty-third batch) — doctor reports the MCP seccomp posture
 
 `northstar doctor` learned the MCP side of the denylist: a new

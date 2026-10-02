@@ -212,15 +212,23 @@ class DurableRunner:
         *,
         lease_path: str | Path,
         lease_ttl_seconds: int = 60,
+        clock: Callable[[], int] | None = None,
     ):
         if not isinstance(run, RunContract):
             raise ValueError("run must be a RunContract")
         if not isinstance(lease_ttl_seconds, int) or isinstance(lease_ttl_seconds, bool) or lease_ttl_seconds <= 0:
             raise ValueError("lease_ttl_seconds must be a positive integer")
+        if clock is not None and not callable(clock):
+            raise ValueError("clock must be callable")
         self.run = run
         self.store = store
         self.lease = LeaseManager(lease_path)
         self.lease_ttl_seconds = lease_ttl_seconds
+        # Optional clock (epoch seconds) used to heartbeat the execution
+        # lease before each step. Without one, a run that outlasts the TTL
+        # loses its lease mid-execution; pass time.time (or a fake in tests)
+        # for long-running steps.
+        self._clock = clock
 
     def _event(
         self,
@@ -294,12 +302,44 @@ class DurableRunner:
         return self.store.derive_state(self.run.run_id)
 
     def _ensure_execution_lease(self, owner_id: str, *, now: int) -> None:
+        # An expired lease is acquirable (crash recovery): LeaseManager.acquire
+        # already encodes that rule, so fall through to it when the existing
+        # lease is not valid for this owner. An active foreign lease is still
+        # refused by acquire, and a corrupt lease file still fails closed.
         if self.lease.path.exists():
-            self.lease.assert_valid(owner_id, now=now)
-        else:
-            self.lease.acquire(
-                owner_id, now=now, ttl_seconds=self.lease_ttl_seconds
-            )
+            try:
+                self.lease.assert_valid(owner_id, now=now)
+                return
+            except ValueError:
+                pass
+        self.lease.acquire(
+            owner_id, now=now, ttl_seconds=self.lease_ttl_seconds
+        )
+
+    def _release_quietly(self, owner_id: str) -> None:
+        """Release the execution lease without masking the run outcome.
+
+        If the lease expired mid-run and was taken over, it is no longer
+        ours: raising here would destroy the result the run just produced.
+        """
+        try:
+            self.lease.release(owner_id)
+        except ValueError:
+            pass
+
+    def _heartbeat(self, owner_id: str) -> None:
+        """Refresh the execution lease before a step action, if clocked.
+
+        A lost lease aborts the run instead of executing steps unowned:
+        heartbeat raises (via assert_valid) when the lease expired or was
+        taken over, and the outer handler records the failure honestly.
+        """
+        if self._clock is None:
+            return
+        now = self._clock()
+        if not isinstance(now, int) or isinstance(now, bool) or now <= 0:
+            raise ValueError("clock must return a positive integer")
+        self.lease.heartbeat(owner_id, now=now, ttl_seconds=self.lease_ttl_seconds)
 
     def _append_run_started(self, *, now: int) -> None:
         state = self.store.derive_state(self.run.run_id)
@@ -364,6 +404,7 @@ class DurableRunner:
         try:
             self._append_run_started(now=now)
             for plan in plans:
+                self._heartbeat(owner_id)
                 state = self.store.derive_state(self.run.run_id)
                 step_state = state["steps"].get(plan.step_id)
                 if step_state is not None and step_state["status"] == "finished":
@@ -464,4 +505,4 @@ class DurableRunner:
                 )
             return self.store.derive_state(self.run.run_id)
         finally:
-            self.lease.release(owner_id)
+            self._release_quietly(owner_id)
