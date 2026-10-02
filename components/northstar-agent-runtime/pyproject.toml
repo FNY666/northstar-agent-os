@@ -81,6 +81,7 @@ py-modules = [
     "scaffold",
     "session_lease",
     "sessions",
+    "session_ui",
     "session_view",
     "sidecar_client",
     "skill_audit",
