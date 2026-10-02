@@ -1,3 +1,4 @@
+import hashlib
 import json
 import os
 import stat
@@ -41,7 +42,9 @@ def _run_request(capability="workspace:read"):
     }
 
 
-def _handoff_token(*, capability="workspace:read", expiry=1_800, deadline=1_700, target="codex", policy="policy-1"):
+def _handoff_token(*, capability="workspace:read", expiry=1_800, deadline=1_700, target="codex", policy="policy-1",
+                   context_content="trusted context for ctx-process-001"):
+    input_digest = "sha256:" + hashlib.sha256(context_content.encode("utf-8")).hexdigest()
     run = _run_request(capability)
     binding = {
         "schema_version": run["schema_version"],
@@ -70,7 +73,7 @@ def _handoff_token(*, capability="workspace:read", expiry=1_800, deadline=1_700,
             "agent_id": "orchestrator",
             "step_id": "execute",
             "trace_id": "trace-process-001",
-            "input_digest": "sha256:" + "a" * 64,
+            "input_digest": input_digest,
             "capabilities": [capability],
             "delegation_depth": 0,
             "expires_at": 1_750,
@@ -90,7 +93,7 @@ def _handoff_token(*, capability="workspace:read", expiry=1_800, deadline=1_700,
             "target_agent_id": target,
             "step_id": "execute",
             "trace_id": "trace-process-001",
-            "input_digest": "sha256:" + "a" * 64,
+            "input_digest": input_digest,
             "requested_capabilities": [capability],
             "expected_postconditions": ["process_receipt"],
             "delegation_depth": 1,
@@ -264,6 +267,49 @@ class ProcessAdapterTests(unittest.TestCase):
                 now=1_011,
             )
 
+    def test_context_bytes_must_match_the_grant_input_digest(self):
+        # The grant authorizes one specific input_digest. A context store that
+        # changed under the ref (or a loader that lies) must not silently
+        # redirect the backend to unauthorized bytes.
+        lying_adapter = ProcessAgentAdapter(
+            agent_id="codex", provider="openai", version="cli-canary-v1",
+            command=self.command,
+            workspace_resolver=lambda workspace_id: self.workspace,
+            context_loader=lambda context_ref: "attacker-controlled bytes",
+            allowed_env=("LANG",),
+            supported_capabilities=("workspace:read",),
+            timeout_seconds=2.0, max_output_bytes=16_384,
+        )
+        with self.assertRaises(ValueError) as caught:
+            lying_adapter.execute(
+                _handoff_token(), context_ref="ctx-process-001",
+                handoff_secret=HANDOFF_SECRET,
+                current_policy_revision="policy-1", now=1_010,
+            )
+        self.assertIn("context digest does not match handoff", str(caught.exception))
+        # Fail-closed before launch: the backend process never ran.
+        self.assertFalse((self.workspace / "process-observation.json").exists())
+
+    def test_changed_context_under_a_live_handoff_is_not_served_stale(self):
+        # Same idempotency key, same ref, but the store now resolves to
+        # different bytes: the cached receipt must not be returned for input
+        # it was never computed from.
+        token = _handoff_token()
+        first = self.adapter.execute(
+            token, context_ref="ctx-process-001",
+            handoff_secret=HANDOFF_SECRET,
+            current_policy_revision="policy-1", now=1_010,
+        )
+        self.assertEqual(first.status, "finished")
+        self.adapter._context_loader = lambda context_ref: "different bytes under the same ref"
+        with self.assertRaises(ValueError) as caught:
+            self.adapter.execute(
+                token, context_ref="ctx-process-001",
+                handoff_secret=HANDOFF_SECRET,
+                current_policy_revision="policy-1", now=1_011,
+            )
+        self.assertIn("context digest does not match handoff", str(caught.exception))
+
     def test_wrong_target_policy_expiry_context_and_workspace_are_rejected(self):
         token = _handoff_token(target="claude-code")
         with self.assertRaises(ValueError):
@@ -304,7 +350,7 @@ class ProcessAdapterTests(unittest.TestCase):
             agent_id="codex", provider="openai", version="cli-canary-v1",
             command=(sys.executable, str(noisy)),
             workspace_resolver=lambda workspace_id: self.workspace,
-            context_loader=lambda context_ref: "trusted",
+            context_loader=lambda context_ref: "trusted context for ctx-process-001",
             allowed_env=(),
             supported_capabilities=("workspace:read",),
             timeout_seconds=2.0, max_output_bytes=100,
@@ -322,7 +368,7 @@ class ProcessAdapterTests(unittest.TestCase):
             agent_id="codex", provider="openai", version="cli-canary-v1",
             command=(sys.executable, str(malformed)),
             workspace_resolver=lambda workspace_id: self.workspace,
-            context_loader=lambda context_ref: "trusted",
+            context_loader=lambda context_ref: "trusted context for ctx-process-001",
             allowed_env=(),
             supported_capabilities=("workspace:read",),
             timeout_seconds=2.0, max_output_bytes=16_384,
@@ -340,7 +386,7 @@ class ProcessAdapterTests(unittest.TestCase):
             agent_id="codex", provider="openai", version="cli-canary-v1",
             command=(sys.executable, str(sleeper)),
             workspace_resolver=lambda workspace_id: self.workspace,
-            context_loader=lambda context_ref: "trusted",
+            context_loader=lambda context_ref: "trusted context for ctx-process-001",
             allowed_env=(),
             supported_capabilities=("workspace:read",),
             timeout_seconds=0.05, max_output_bytes=16_384,
