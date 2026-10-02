@@ -70,6 +70,15 @@ class SessionSpendTests(unittest.TestCase):
 
 
 class SessionIdTests(unittest.TestCase):
+    def test_path_traversal_and_absolute_ids_are_refused(self):
+        for value in ("../secret", "/tmp/secret", "a/b", r"a\\b", ".."):
+            with self.subTest(value=value):
+                with self.assertRaises(ValueError):
+                    SessionStore("/tmp/sessions", session_id=value)
+
+    def test_safe_legacy_id_is_accepted(self):
+        self.assertEqual(SessionStore(None, session_id="ns-given").session_id, "ns-given")
+
     def test_ids_are_unique_sortable_and_prefixed(self):
         first, second = new_session_id(now=1_000_000), new_session_id(now=2_000_000)
         self.assertTrue(first.startswith("ns-1970"))
