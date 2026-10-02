@@ -98,6 +98,22 @@ GUARDS: list[tuple[str, str, list[tuple[str, str]], str, str]] = [
         "test_tracing*",
         "test_no_attribute_anywhere_was_dropped_because_a_span_had_ended",
     ),
+    (
+        "seccomp=on with the process backend is refused, not silently downgraded",
+        "tools/os_sandbox.py",
+        [('    if seccomp_mode == "on":',
+          '    if False and seccomp_mode == "on":  # MUTATION: downgrade allowed')],
+        "test_seccomp*",
+        "test_seccomp_on_with_process_backend_refuses",
+    ),
+    (
+        "a per-call seccomp payload may only tighten, never loosen",
+        "tools/seccomp.py",
+        [("    if _STRICTNESS[requested] >= _STRICTNESS[service]:\n        return requested\n    return service",
+          "    if _STRICTNESS[requested] >= _STRICTNESS[service]:\n        return requested\n    return requested  # MUTATION: loosening allowed")],
+        "test_seccomp*",
+        "test_tighten_only",
+    ),
 ]
 
 
