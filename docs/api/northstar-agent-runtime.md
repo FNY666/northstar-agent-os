@@ -1902,6 +1902,36 @@ True when ``spec``'s handler body may run beside another safe handler.
 
 True when every spec in the turn is parallel-safe (and there is more than one).
 
+### `tools.seccomp`
+
+Source: `components/northstar-agent-runtime/tools/seccomp.py`
+
+Seccomp-BPF denylist for the sandbox backends.
+
+#### `SeccompError`
+
+Invalid seccomp mode or an unsatisfiable seccomp requirement.
+
+#### `validate_mode(mode: str)`
+
+Normalise an operator/model seccomp mode; raise on unknown values.
+
+#### `resolve_mode(payload_value: str | None, service_value: str | None)`
+
+Merge a per-call payload value with the operator-configured service value.
+
+#### `build_default_filter()`
+
+Assemble the denylist BPF program.
+
+#### `denied_syscalls(arch: str='x86_64')`
+
+The denylist table for an arch (``x86_64`` or ``aarch64``).
+
+#### `prctl_loader_argv(target_argv: Sequence[str], *, python: str='python3')`
+
+Wrap ``target_argv`` so the denylist is installed via prctl before exec.
+
 ### `tools.shell`
 
 Source: `components/northstar-agent-runtime/tools/shell.py`
