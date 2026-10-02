@@ -419,6 +419,15 @@ def skill_files(root: Path | str, *, trees: Sequence[str] = SKILL_TREE_GLOBS) ->
             continue
         for entry in sorted(directory.iterdir()):
             candidate = entry / SKILL_FILE_NAME
+            if entry.is_symlink():
+                continue
+            try:
+                resolved_entry = entry.resolve(strict=True)
+                resolved_candidate = candidate.resolve(strict=True)
+                resolved_entry.relative_to(base.resolve())
+                resolved_candidate.relative_to(base.resolve())
+            except (OSError, ValueError):
+                continue
             if entry.is_dir() and candidate.is_file():
                 found.append(candidate)
     return tuple(found)

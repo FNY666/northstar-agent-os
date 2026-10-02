@@ -17,6 +17,11 @@ from tools import verify_invariants as tool  # noqa: E402
 
 
 class PrepareCopiesTheWholeComponentsTree(unittest.TestCase):
+    def test_guard_registry_covers_supply_chain_boundaries(self) -> None:
+        titles = {item[0] for item in tool.GUARDS}
+        self.assertIn("plugin digest verification rejects drift", titles)
+        self.assertIn("skills audit refuses symlink escapes", titles)
+
     def test_guard_registry_has_named_extensible_entries(self) -> None:
         self.assertGreaterEqual(len(tool.GUARDS), 6)
         self.assertEqual(len({item[0] for item in tool.GUARDS}), len(tool.GUARDS))
