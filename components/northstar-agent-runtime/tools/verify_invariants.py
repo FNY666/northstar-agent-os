@@ -83,7 +83,7 @@ GUARDS: list[tuple[str, str, list[tuple[str, str]], str, str]] = [
     (
         "skills audit refuses symlink escapes",
         "skill_audit.py",
-        [("                resolved_entry.relative_to(base.resolve())\n                resolved_candidate.relative_to(base.resolve())", "                pass  # MUTATION: containment no longer checked")],
+        [("            if entry.is_symlink():\n                continue\n            try:\n                resolved_entry = entry.resolve(strict=True)", "            if False:  # MUTATION: symlinks and containment no longer guarded\n                continue\n            try:\n                resolved_entry = entry.resolve(strict=True)"), ("                resolved_entry.relative_to(base.resolve())\n                resolved_candidate.relative_to(base.resolve())", "                pass")],
         "test_skill_check*",
         "test_symlinked_skill_outside_root_is_not_audited",
     ),
