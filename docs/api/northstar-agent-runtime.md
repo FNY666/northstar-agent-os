@@ -1506,7 +1506,7 @@ The lease owner: the run's own correlation id when it has one.
 
 Source: `components/northstar-agent-runtime/session_view.py`
 
-Read-side of session transcripts: list, show, replay, export and search.
+Read-side of session transcripts: list, show, replay, export, search and UI.
 
 #### `resolve_view_session_dir(args: argparse.Namespace)`
 
@@ -1515,6 +1515,24 @@ Session directory for a sessions subcommand: explicit wins, else product default
 #### `add_arguments(parser: argparse.ArgumentParser)`
 
 #### `run_sessions(args: argparse.Namespace)`
+
+### `session_ui`
+
+Source: `components/northstar-agent-runtime/session_ui.py`
+
+Build a self-contained, offline interactive replay page for one transcript.
+
+#### `render_replay_page(session_id: str, records: Iterable[dict[str, Any]], summary: dict[str, Any] | None=None, *, dropped_trailing_lines: int=0)`
+
+Render the session's events and summary as self-contained interactive HTML.
+
+#### `write_replay_page(session_dir: str | Path, session_id: str, output: str | Path | None=None)`
+
+Create a mode-0600 HTML replay file without following or overwriting a path.
+
+#### `open_replay_page(path: str | Path)`
+
+Ask the host's registered browser to open a generated local file URL.
 
 ### `sidecar_client`
 
@@ -1883,6 +1901,36 @@ Map ``auto|bwrap|process`` to the backend that will actually run.
 #### `run_sandboxed(request: SandboxRequest, *, backend: str='auto', capabilities: SandboxCapabilities | None=None)`
 
 Run ``request`` under the resolved backend. Never uses ``shell=True``.
+
+### `tools.seccomp`
+
+Source: `components/northstar-agent-runtime/tools/seccomp.py`
+
+Seccomp-BPF denylist for the sandbox backends.
+
+#### `SeccompError`
+
+Invalid seccomp mode or an unsatisfiable seccomp requirement.
+
+#### `validate_mode(mode: str)`
+
+Normalise an operator/model seccomp mode; raise on unknown values.
+
+#### `resolve_mode(payload_value: str | None, service_value: str | None)`
+
+Merge a per-call payload value with the operator-configured service value.
+
+#### `build_default_filter()`
+
+Assemble the denylist BPF program.
+
+#### `denied_syscalls(arch: str='x86_64')`
+
+The denylist table for an arch (``x86_64`` or ``aarch64``).
+
+#### `prctl_loader_argv(target_argv: Sequence[str], *, python: str='python3')`
+
+Wrap ``target_argv`` so the denylist is installed via prctl before exec.
 
 ### `tools.parallel`
 

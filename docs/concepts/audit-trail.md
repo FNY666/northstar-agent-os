@@ -23,6 +23,12 @@ to narrow results; add `--json` for machine-readable matches with record indexes
 and bounded context snippets. Search is read-only and refuses unsafe transcript
 paths just like the other session viewers.
 
+For a visual walkthrough, `sessions ui ID --open --session-dir D` writes and opens
+a self-contained replay page. The timeline supports text/type filters, event-by-event
+navigation, playback speed controls, and a structured record inspector. The file is
+offline (no external assets or network calls) and created with owner-only permissions;
+it contains the transcript payload, so keep the HTML as private as the source JSONL.
+
 Append-only is a property of *how* a file is written, not of *who* is writing
 it, so the transcript is claimed for the duration of a run
 (`session_lease.py`): one `flock` per session file, taken before the first
