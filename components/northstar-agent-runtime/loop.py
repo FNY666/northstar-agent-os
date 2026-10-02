@@ -2129,6 +2129,7 @@ class AgentRuntime:
             "config": self.config,
             "runtime": self,
             "shell_backend": self.config.shell_backend,
+            "shell_seccomp": self.config.shell_seccomp,
         }
 
     def _record_tool_message(self, message: UserMessage) -> None:

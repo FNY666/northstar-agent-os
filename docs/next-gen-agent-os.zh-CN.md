@@ -185,7 +185,7 @@ northstar agent "…"          ← 唯一推荐入口
 ```sh
 bin/northstar --version          # 打印 northstar <version>
 bin/northstar agent --help       # 产品路径存在
-bin/northstar bench              # 公开治理基准 13/13
+bin/northstar bench              # 公开治理基准 16/16
 make demo                        # 仍离线全绿
 # agent 路径不传 --session-dir 也应写出 <workspace>/.northstar/sessions
 # agent 路径 transcript 含 checkpoint 记录（默认每 turn）
