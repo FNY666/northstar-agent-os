@@ -108,10 +108,23 @@ A run that promised OS isolation and then could not deliver it is a
 1. **Process backend on hosts without bwrap** — common in restricted CI and
    some containers. Mitigation: honest labelling + default deny + install
    bubblewrap for production agent hosts.
-2. **Read-only host binds still expose content** — bwrap does not hide
-   `/etc/passwd`; it prevents writes outside the workspace. Secrets that live
-   on the host filesystem remain readable unless the operator further
-   restricts the host (separate user, drop paths, secrets manager).
+2. **Read-only host binds still expose content** — the sandbox ro-binds the
+   host's `/usr`, `/bin`, `/lib`, `/lib64`, `/sbin` (whatever exists): bwrap
+   prevents writes outside the workspace but does not hide readable host
+   content, so secrets on the host filesystem remain readable unless the
+   operator further restricts the host (separate user, drop paths, secrets
+   manager). Deliberately narrowed: `/etc/resolv.conf` and `/etc/ssl` are
+   *not* bound (the net namespace is always unshared — `network=true` is
+   refused — so nothing inside can do DNS/TLS anyway, and resolv.conf leaks
+   the operator's internal DNS layout), and the real `/etc/passwd` and
+   `/etc/group` are replaced by synthetic single-user files
+   (`tools/os_sandbox._minimal_identity_files`): only the invoking uid/gid
+   resolves inside, so other host users' names stay invisible while
+   getpwuid/whoami/id/git keep working. The exact bind list is pinned by
+   `BwrapArgvSurfaceTests` — any expansion is a deliberate diff. Honest
+   boundary: the synthetic identity was validated for tool compatibility in
+   a mount namespace (sh, python3, git, whoami), but no bwrap binary exists
+   in this dev environment, so the end-to-end bind has not been run here.
 3. **`command` strings still parse shell metacharacters** — intentional, but
    confined *inside* the sandbox. Prefer `argv` lists from the model side.
 4. **Seccomp denylist, not allowlist** — both backends now load the BPF

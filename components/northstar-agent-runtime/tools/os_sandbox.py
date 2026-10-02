@@ -466,16 +466,65 @@ def _run_popen(
     )
 
 
-def _bwrap_argv(request: SandboxRequest, *, bwrap_path: str, seccomp_fd: int | None = None) -> list[str]:
+def _minimal_identity_files() -> tuple[str, str]:
+    """Synthesize minimal /etc/passwd and /etc/group contents for the sandbox.
+
+    Only the invoking uid/gid gets an entry; every other host user stays
+    invisible inside the sandbox (threat-model residual risk #2). The current
+    user's name, home and shell are preserved verbatim, so getpwuid/getpwnam,
+    whoami, id and git keep working exactly as outside; enumeration
+    (getpwent) simply sees one user. ``pwd``/``grp`` are imported locally so
+    this module still imports on platforms without them.
+    """
+    import grp
+    import pwd
+
+    uid, gid = os.getuid(), os.getgid()
+    try:
+        entry = pwd.getpwuid(uid)
+        user, home, shell = entry.pw_name, entry.pw_dir, entry.pw_shell or "/bin/sh"
+    except KeyError:
+        # NSS-backed user (sssd/LDAP) with no file entry: the numeric ids are
+        # still everything a tool needs to resolve the current user.
+        user, home, shell = f"user{uid}", "/", "/bin/sh"
+    try:
+        group = grp.getgrgid(gid).gr_name
+    except KeyError:
+        group = f"group{gid}"
+    passwd = f"{user}:x:{uid}:{gid}::{home}:{shell}\n"
+    groups = f"{group}:x:{gid}:\n"
+    return passwd, groups
+
+
+def _bwrap_argv(
+    request: SandboxRequest,
+    *,
+    bwrap_path: str,
+    seccomp_fd: int | None = None,
+    passwd_path: str | None = None,
+    group_path: str | None = None,
+) -> list[str]:
     """Build a conservative bubblewrap command line around the user argv."""
     workspace = Path(os.path.realpath(str(request.workspace)))
     cwd = Path(os.path.realpath(str(request.cwd)))
     # Host paths the child needs to actually execute anything useful. Bound
     # read-only; the workspace is the only writable bind.
+    #
+    # Deliberately NOT bound: /etc/resolv.conf and /etc/ssl — the network
+    # namespace is always unshared (network=true is refused), so nothing
+    # inside can do DNS or TLS anyway, and resolv.conf leaks the operator's
+    # internal DNS layout; the real /etc/passwd and /etc/group — replaced by
+    # single-user synthetic files (see _minimal_identity_files) so the other
+    # host users stay invisible.
     ro_binds = []
-    for host_path in ("/usr", "/bin", "/lib", "/lib64", "/sbin", "/etc/resolv.conf", "/etc/ssl", "/etc/passwd", "/etc/group"):
+    for host_path in ("/usr", "/bin", "/lib", "/lib64", "/sbin"):
         if Path(host_path).exists():
             ro_binds.extend(["--ro-bind", host_path, host_path])
+    identity_binds: list[str] = []
+    if passwd_path is not None:
+        identity_binds.extend(["--ro-bind", passwd_path, "/etc/passwd"])
+    if group_path is not None:
+        identity_binds.extend(["--ro-bind", group_path, "/etc/group"])
     seccomp_args: list[str] = []
     if seccomp_fd is not None:
         # bwrap reads the BPF program from this fd at exec time; the caller
@@ -501,6 +550,7 @@ def _bwrap_argv(request: SandboxRequest, *, bwrap_path: str, seccomp_fd: int | N
         "--dir",
         "/run",
         *ro_binds,
+        *identity_binds,
         "--bind",
         str(workspace),
         str(workspace),
@@ -532,13 +582,35 @@ def run_sandboxed(
         seccomp_fd: int | None = None
         seccomp_file = None
         pass_fds: list[int] = []
+        # The sandbox gets a synthetic identity: only the invoking user
+        # exists inside (see _minimal_identity_files). The temp files live
+        # under the workspace tmp dir, next to the seccomp program.
+        tmpdir = workspace / ".northstar" / "tmp"
+        tmpdir.mkdir(parents=True, exist_ok=True, mode=0o700)
+        passwd_content, group_content = _minimal_identity_files()
+        identity_paths: list[str] = []
+        try:
+            for prefix, content in (("passwd-", passwd_content), ("group-", group_content)):
+                fh = tempfile.NamedTemporaryFile(prefix=prefix, dir=str(tmpdir), delete=False)
+                try:
+                    fh.write(content.encode("utf-8"))
+                    fh.flush()
+                finally:
+                    fh.close()
+                identity_paths.append(fh.name)
+        except Exception:
+            for name in identity_paths:
+                try:
+                    os.unlink(name)
+                except OSError:
+                    pass
+            raise
+        passwd_path, group_path = identity_paths
         detail = "network namespace unshared; workspace is the only writable bind"
         if seccomp_mode != "off":
             # The BPF denylist rides into bwrap on an inherited fd
             # (``bwrap --seccomp FD``). A temp file under the workspace tmp dir
             # keeps the bytes off any shared location.
-            tmpdir = workspace / ".northstar" / "tmp"
-            tmpdir.mkdir(parents=True, exist_ok=True, mode=0o700)
             seccomp_file = tempfile.NamedTemporaryFile(
                 prefix="seccomp-", suffix=".bpf", dir=str(tmpdir), delete=False
             )
@@ -552,7 +624,13 @@ def run_sandboxed(
                 seccomp_file.close()
                 raise
         try:
-            wrapped = _bwrap_argv(request, bwrap_path=caps.bwrap_path, seccomp_fd=seccomp_fd)
+            wrapped = _bwrap_argv(
+                request,
+                bwrap_path=caps.bwrap_path,
+                seccomp_fd=seccomp_fd,
+                passwd_path=passwd_path,
+                group_path=group_path,
+            )
             result = _run_popen(
                 wrapped,
                 cwd=cwd,  # bwrap --chdir is authoritative; cwd here is best-effort
@@ -566,8 +644,11 @@ def run_sandboxed(
             )
         finally:
             if seccomp_file is not None:
-                name = seccomp_file.name
                 seccomp_file.close()
+            unlink_names = identity_paths
+            if seccomp_file is not None:
+                unlink_names = [seccomp_file.name] + unlink_names
+            for name in unlink_names:
                 try:
                     os.unlink(name)
                 except OSError:
