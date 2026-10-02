@@ -77,6 +77,20 @@ MAX_DESCRIPTION_CHARS = 600
 MIN_TIMEOUT_MS = 100
 MAX_TIMEOUT_MS = 300_000
 CLOSE_GRACE_SECONDS = 1.0
+# Default environment allowlist for MCP servers (minimum required for Python/Node servers)
+DEFAULT_MCP_ENV_ALLOWLIST = frozenset({
+    "PATH",
+    "PYTHONPATH",
+    "HOME",
+    "USER",
+    "LANG",
+    "LC_ALL",
+    "TMPDIR",
+    "TEMP",
+    "TMP",
+})
+
+
 TOOL_NAME_PART_RE = "^[A-Za-z0-9_-]+$"
 _NAME_RE = re.compile(r"^[a-z][a-z0-9_-]*$")
 _TOOL_PART_RE = re.compile(TOOL_NAME_PART_RE)
@@ -158,12 +172,14 @@ class McpStdioClient:
         self.elicitor = elicitor
         self.audit = audit
         self.workspace_root = str(Path(workspace_root).resolve()) if workspace_root else ""
-        # A server imported from a workspace config file may name extra environment
-        # variables and a working directory. Those variables are *added* to the inherited
-        # environment, never a filter over it: trimming what a child process may see is the
-        # host OS's job (see the component README's limitations), and claiming otherwise
-        # here would be a security promise this function could not keep.
-        self.extra_env = {str(key): str(value) for key, value in dict(env or {}).items()}
+        # Environment variables: use allowlist for security.
+        # MCP servers inherit only a minimal set (PATH, HOME, etc.) plus explicitly
+        # configured extras. This prevents leaking API keys/tokens to untrusted servers.
+        # The old "trimming is the host OS's job" claim was incorrect: subprocess.Popen
+        # gives us full control over child environment, and external threat models
+        # (Doppler/WorkOS/Corgea MCP security spec) unanimously recommend allowlist.
+        base_env = {key: os.environ[key] for key in DEFAULT_MCP_ENV_ALLOWLIST if key in os.environ}
+        self.extra_env = {**base_env, **{str(key): str(value) for key, value in dict(env or {}).items()}}
         self.cwd = str(cwd) if cwd else ""
         self.allow_sensitive_input = bool(allow_sensitive_input)
         self.allow_roots = bool(allow_roots)
@@ -245,7 +261,7 @@ class McpStdioClient:
                 stdout=subprocess.PIPE,
                 stderr=subprocess.DEVNULL,  # server logs never block the client
                 start_new_session=True,      # own process group for TERM->KILL cleanup
-                env=({**os.environ, **self.extra_env} if self.extra_env else None),
+                env=self.extra_env or None,
                 cwd=self.cwd or None,
             )
         except OSError as error:
