@@ -359,8 +359,15 @@ class ProcessAgentAdapter:
         input_bytes = context.encode("utf-8")
         if len(input_bytes) > _MAX_CONTEXT_BYTES:
             raise ValueError("process adapter context exceeds the maximum size")
+        # The grant authorizes one specific input. Bind the bytes the backend
+        # will actually consume to grant.input_digest: a context store that
+        # changed under the ref (or a loader that lies) must not silently
+        # redirect the process to unauthorized input.
+        actual_digest = _digest_bytes(input_bytes)
+        if actual_digest != grant.input_digest:
+            raise ValueError("context digest does not match handoff")
         fingerprint = hashlib.sha256(
-            grant.canonical_json() + b"\0" + context_ref.encode("utf-8")
+            grant.canonical_json() + b"\0" + actual_digest.encode("utf-8")
         ).hexdigest()
         cached = self._results.get(grant.idempotency_key)
         if cached is not None:
