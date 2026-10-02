@@ -16,6 +16,13 @@ the run reports success, so a crash still leaves the decision trail behind.
 read-only. Subagent runs nest as spans and are recorded too, so a delegation
 tree is auditable end to end.
 
+For incident triage, `sessions search "permission denied" --session-dir D`
+searches string values across saved transcripts (case-insensitive by default).
+Use `--session ID`, repeatable `--type denial`, `--case-sensitive`, and `--limit N`
+to narrow results; add `--json` for machine-readable matches with record indexes
+and bounded context snippets. Search is read-only and refuses unsafe transcript
+paths just like the other session viewers.
+
 Append-only is a property of *how* a file is written, not of *who* is writing
 it, so the transcript is claimed for the duration of a run
 (`session_lease.py`): one `flock` per session file, taken before the first

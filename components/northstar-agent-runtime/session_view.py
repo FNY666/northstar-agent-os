@@ -1,4 +1,4 @@
-"""Read-side of the session transcripts: ``cli sessions list`` and ``show``.
+"""Read-side of session transcripts: list, show, replay, export and search.
 
 Writing a transcript has always been append-only and fsynced; this module is the
 missing read-back half. It is deliberately read-only: it never creates the
@@ -11,11 +11,19 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 import sys
 from pathlib import Path
 from typing import Any, Iterable
 
-from sessions import SESSION_FILE_SUFFIX, load_jsonl, summarise
+from sessions import (
+    RECORD_TYPES,
+    SESSION_FILE_SUFFIX,
+    SessionIntegrityError,
+    load_jsonl,
+    summarise,
+    validate_session_id,
+)
 
 USAGE_ERROR = 64  # same convention as cli.USAGE_ERROR, kept local to avoid an import cycle
 CONTENT_PREVIEW = 200
@@ -105,15 +113,33 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
         "the feed is written to stdout, one validated audit record per line",
     )
 
+    searching = sub.add_parser(
+        "search",
+        help="search text across saved session transcripts",
+    )
+    _add_session_location(searching)
+    searching.add_argument("query", help="literal text to find in transcript string values")
+    searching.add_argument("--session", default="", help="search only this session id or 'latest'")
+    searching.add_argument(
+        "--type",
+        dest="record_types",
+        action="append",
+        choices=RECORD_TYPES,
+        help="limit matches to this record type (repeatable)",
+    )
+    searching.add_argument("--case-sensitive", action="store_true", help="match letter case exactly")
+    searching.add_argument("--limit", type=int, default=50, metavar="N", help="maximum matches to return (default: 50)")
+    searching.add_argument("--json", action="store_true", help="emit matches as a JSON array")
+
 
 def _resolve_session_arg(session_id: str, directory: Path) -> str:
     """Pass-through id, or resolve product `latest` aliases against ``directory``."""
     from product_path import LATEST_SESSION_ALIASES, resolve_session_id
 
     raw = (session_id or "").strip()
-    if not raw or raw not in LATEST_SESSION_ALIASES:
-        return raw
-    return resolve_session_id(raw, directory)
+    if raw in LATEST_SESSION_ALIASES:
+        raw = resolve_session_id(raw, directory)
+    return validate_session_id(raw)
 
 
 def run_sessions(args: argparse.Namespace) -> int:
@@ -123,44 +149,71 @@ def run_sessions(args: argparse.Namespace) -> int:
         print(f"sessions: {error}", file=sys.stderr)
         return USAGE_ERROR
 
-    if args.session_command == "list":
-        return _list_sessions(directory, json_out=bool(getattr(args, "json", False)))
-    if args.session_command == "show":
-        try:
-            session_id = _resolve_session_arg(args.session_id, directory)
-        except ValueError as error:
-            print(f"sessions: {error}", file=sys.stderr)
-            return USAGE_ERROR
-        return _show_session(directory, session_id, json_out=bool(getattr(args, "json", False)))
-    if args.session_command == "export":
-        try:
-            session_id = _resolve_session_arg(args.session_id, directory)
-        except ValueError as error:
-            print(f"sessions: {error}", file=sys.stderr)
-            return USAGE_ERROR
-        return _export_session(directory, session_id)
-    if args.session_command == "checkpoints":
-        session = getattr(args, "session", "") or ""
-        if session:
+    try:
+        if args.session_command == "list":
+            return _list_sessions(directory, json_out=bool(getattr(args, "json", False)))
+        if args.session_command == "show":
             try:
-                session = _resolve_session_arg(session, directory)
+                session_id = _resolve_session_arg(args.session_id, directory)
             except ValueError as error:
                 print(f"sessions: {error}", file=sys.stderr)
                 return USAGE_ERROR
-        return _checkpoints_session(directory, session, json_out=bool(getattr(args, "json", False)))
-    if args.session_command == "replay":
-        try:
-            session_id = _resolve_session_arg(args.session_id, directory)
-        except ValueError as error:
-            print(f"sessions: {error}", file=sys.stderr)
-            return USAGE_ERROR
-        return _replay_session(
-            directory,
-            session_id,
-            json_out=bool(getattr(args, "json", False)),
-            from_checkpoint=getattr(args, "from_checkpoint", None),
-        )
-    print("sessions: pass a subcommand: list, show, export, checkpoints or replay (--help for flags)", file=sys.stderr)
+            return _show_session(directory, session_id, json_out=bool(getattr(args, "json", False)))
+        if args.session_command == "export":
+            try:
+                session_id = _resolve_session_arg(args.session_id, directory)
+            except ValueError as error:
+                print(f"sessions: {error}", file=sys.stderr)
+                return USAGE_ERROR
+            return _export_session(directory, session_id)
+        if args.session_command == "checkpoints":
+            session = getattr(args, "session", "") or ""
+            if session:
+                try:
+                    session = _resolve_session_arg(session, directory)
+                except ValueError as error:
+                    print(f"sessions: {error}", file=sys.stderr)
+                    return USAGE_ERROR
+            return _checkpoints_session(directory, session, json_out=bool(getattr(args, "json", False)))
+        if args.session_command == "replay":
+            try:
+                session_id = _resolve_session_arg(args.session_id, directory)
+            except ValueError as error:
+                print(f"sessions: {error}", file=sys.stderr)
+                return USAGE_ERROR
+            return _replay_session(
+                directory,
+                session_id,
+                json_out=bool(getattr(args, "json", False)),
+                from_checkpoint=getattr(args, "from_checkpoint", None),
+            )
+        if args.session_command == "search":
+            session = getattr(args, "session", "") or ""
+            if session:
+                try:
+                    session = _resolve_session_arg(session, directory)
+                except ValueError as error:
+                    print(f"sessions: {error}", file=sys.stderr)
+                    return USAGE_ERROR
+            if not args.query.strip():
+                print("sessions search: query must not be empty", file=sys.stderr)
+                return USAGE_ERROR
+            if args.limit < 1:
+                print("sessions search: --limit must be a positive integer", file=sys.stderr)
+                return USAGE_ERROR
+            return _search_sessions(
+                directory,
+                args.query,
+                session_id=session,
+                record_types=getattr(args, "record_types", None),
+                case_sensitive=bool(getattr(args, "case_sensitive", False)),
+                limit=args.limit,
+                json_out=bool(getattr(args, "json", False)),
+            )
+    except (OSError, SessionIntegrityError) as error:
+        print(f"sessions: {error}", file=sys.stderr)
+        return 1
+    print("sessions: pass a subcommand: list, show, export, checkpoints, replay or search (--help for flags)", file=sys.stderr)
     return USAGE_ERROR
 
 
@@ -261,6 +314,104 @@ def _export_session(directory: Path, session_id: str) -> int:
         print(f"sessions: no transcript for session {session_id!r} in {directory}", file=sys.stderr)
         return 1
     sys.stdout.write(transcript_path_to_ndjson(path))
+    return 0
+
+
+def _string_values(value: Any) -> Iterable[str]:
+    """Yield searchable string leaves without stringifying structures or numbers."""
+    if isinstance(value, str):
+        yield value
+    elif isinstance(value, dict):
+        for item in value.values():
+            yield from _string_values(item)
+    elif isinstance(value, (list, tuple)):
+        for item in value:
+            yield from _string_values(item)
+
+
+def _match_snippet(record: dict[str, Any], pattern: re.Pattern[str]) -> str | None:
+    """Return a bounded context snippet for the first literal text match in a record."""
+    for key, value in record.items():
+        if key in ("index", "ts", "session_id", "type"):
+            continue
+        for text in _string_values(value):
+            match = pattern.search(text)
+            if match is None:
+                continue
+            start = max(0, match.start() - 60)
+            end = min(len(text), match.end() + 60)
+            snippet = " ".join(text[start:end].split())
+            if start:
+                snippet = "…" + snippet
+            if end < len(text):
+                snippet += "…"
+            return snippet
+    return None
+
+
+def _search_sessions(
+    directory: Path,
+    query: str,
+    *,
+    session_id: str = "",
+    record_types: list[str] | None = None,
+    case_sensitive: bool = False,
+    limit: int = 50,
+    json_out: bool = False,
+) -> int:
+    """Search saved transcripts in stable session/record order; never writes to them."""
+    if not directory.is_dir():
+        print(f"sessions: no such directory: {directory}", file=sys.stderr)
+        return 1
+    if session_id:
+        paths = [directory / f"{session_id}{SESSION_FILE_SUFFIX}"]
+        if not paths[0].is_file():
+            print(f"sessions: no transcript for session {session_id!r} in {directory}", file=sys.stderr)
+            return 1
+    else:
+        paths = sorted(directory.glob(f"*{SESSION_FILE_SUFFIX}"))
+        if not paths:
+            print(f"sessions: no transcripts in {directory}", file=sys.stderr)
+            return 1
+
+    allowed_types = set(record_types or ())
+    pattern = re.compile(re.escape(query), 0 if case_sensitive else re.IGNORECASE)
+    matches: list[dict[str, Any]] = []
+    for path in paths:
+        identity = path.name[: -len(SESSION_FILE_SUFFIX)]
+        validate_session_id(identity)
+        records, _dropped = load_jsonl(path)
+        for record in records:
+            if allowed_types and record.get("type") not in allowed_types:
+                continue
+            snippet = _match_snippet(record, pattern)
+            if snippet is None:
+                continue
+            matches.append(
+                {
+                    "session_id": identity,
+                    "index": record.get("index"),
+                    "ts": record.get("ts"),
+                    "type": record.get("type", "unknown"),
+                    "snippet": snippet,
+                }
+            )
+            if len(matches) >= limit:
+                break
+        if len(matches) >= limit:
+            break
+
+    if not matches:
+        print(f"sessions search: no matches for {query!r}", file=sys.stderr)
+        return 1
+    if json_out:
+        print(json.dumps(matches, ensure_ascii=False, sort_keys=True))
+    else:
+        for match in matches:
+            print(
+                f"{match['session_id']} #{match['index']} {match['ts'] or ''} "
+                f"{match['type']}: {match['snippet']}"
+            )
     return 0
 
 
