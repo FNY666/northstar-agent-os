@@ -48,6 +48,11 @@ output cannot alter the registry, grant, or scope.
 a state digest and sequence and are accepted only when they match the current
 history. `DurableRunner` uses an owner-bound expiring lease and stable action
 keys so a resumed fixture can avoid repeating an idempotent side effect.
+An expired lease is reclaimable by a new owner (crash recovery); an active
+lease held by someone else still refuses. `DurableRunner` accepts an
+optional `clock` (epoch seconds) to heartbeat the lease before each step —
+without one, a run that outlasts the TTL loses its lease mid-execution,
+and a stolen lease aborts the run instead of executing steps unowned.
 
 `verifier.py` does not trust a step's claimed output or a model's claimed
 status. It checks the actual run state, private workspace, required file
