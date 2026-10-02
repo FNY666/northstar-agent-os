@@ -99,12 +99,12 @@ GUARDS: list[tuple[str, str, list[tuple[str, str]], str, str]] = [
         "test_no_attribute_anywhere_was_dropped_because_a_span_had_ended",
     ),
     (
-        "seccomp=on with the process backend is refused, not silently downgraded",
+        "the process backend applies the seccomp filter (no silent skip)",
         "tools/os_sandbox.py",
-        [('    if seccomp_mode == "on":',
-          '    if False and seccomp_mode == "on":  # MUTATION: downgrade allowed')],
+        [('    if seccomp_mode != "off" and sys.platform.startswith("linux"):',
+          '    if False and seccomp_mode != "off":  # MUTATION: filter silently skipped')],
         "test_seccomp*",
-        "test_seccomp_on_with_process_backend_refuses",
+        "test_filter_is_really_loaded",
     ),
     (
         "a per-call seccomp payload may only tighten, never loosen",

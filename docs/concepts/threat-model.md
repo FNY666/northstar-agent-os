@@ -114,15 +114,18 @@ A run that promised OS isolation and then could not deliver it is a
    restricts the host (separate user, drop paths, secrets manager).
 3. **`command` strings still parse shell metacharacters** — intentional, but
    confined *inside* the sandbox. Prefer `argv` lists from the model side.
-4. **Seccomp denylist, not allowlist** — bwrap now loads a BPF denylist
-   (`tools/seccomp.py`) over escape primitives (ptrace, module loading, kexec,
-   BPF, perf, userfaultfd, keyrings, mount/pivot_root, cross-process memory);
-   denied calls fail with EPERM. It is a denylist because a default-deny
-   allowlist cannot serve a general Shell tool. `--seccomp on` requires bwrap
-   and refuses the process backend rather than silently downgrading; a per-call
-   payload may only tighten the operator's `--seccomp` setting, never loosen
-   it. Unknown CPU architectures fall through to ALLOW (documented; applying
-   the wrong table would be worse).
+4. **Seccomp denylist, not allowlist** — both backends now load the BPF
+   denylist (`tools/seccomp.py`) over escape primitives (ptrace, module
+   loading, kexec, BPF, perf, userfaultfd, keyrings, mount/pivot_root,
+   cross-process memory); denied calls fail with EPERM. It is a denylist
+   because a default-deny allowlist cannot serve a general Shell tool. bwrap
+   loads the filter via `--seccomp FD`; the process backend (Linux) applies
+   it through a `python3 -c` prctl wrapper — no `Popen(preexec_fn=...)`,
+   which would be unsafe in the threaded runtime. `--seccomp on` is refused
+   only where no backend can apply the filter (non-Linux); a per-call payload
+   may only tighten the operator's `--seccomp` setting, never loosen it.
+   Unknown CPU architectures fall through to ALLOW (documented; applying the
+   wrong table would be worse).
 5. **Sidecar is a different trust domain** — `CodexReadOnly` stays read-only
    over a Unix socket; it is not a substitute for Shell, and Shell is not a
    path into the sidecar.

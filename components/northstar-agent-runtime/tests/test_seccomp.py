@@ -3,11 +3,14 @@
 The filter is verified the way this project verifies everything else: the
 assembler output is executed in a tiny in-test classic-BPF interpreter and the
 verdict is asserted for denied/allowed syscalls on both architectures, plus
-the arch-fallback path. No bwrap needed; the whole suite runs offline.
+the arch-fallback path — and, on Linux, the filter is really loaded via prctl
+and observed through /proc/self/status. No bwrap needed; the whole suite runs
+offline.
 """
 from __future__ import annotations
 
 import struct
+import sys
 import unittest
 
 import support  # noqa: F401 — puts the runtime root on sys.path
@@ -159,26 +162,95 @@ class SandboxWiringTests(RuntimeTestCase):
         req = SandboxRequest(argv=("true",), cwd=root, workspace=root)
         self.assertNotIn("--seccomp", _bwrap_argv(req, bwrap_path="/usr/bin/bwrap"))
 
-    def test_seccomp_on_with_process_backend_refuses(self):
-        root = self.workspace()
-        req = SandboxRequest(argv=("true",), cwd=root, workspace=root, seccomp="on")
-        with self.assertRaises(SandboxError) as caught:
-            run_sandboxed(req, backend="process")
-        self.assertIn("seccomp", str(caught.exception).lower())
-        self.assertIn("bwrap", str(caught.exception).lower())
-
     def test_invalid_seccomp_mode_refuses(self):
         root = self.workspace()
         req = SandboxRequest(argv=("true",), cwd=root, workspace=root, seccomp="bogus")
         with self.assertRaises(SandboxError):
             run_sandboxed(req, backend="process")
 
-    def test_process_backend_labels_missing_seccomp(self):
+    def test_process_backend_applies_filter_via_prctl(self):
         root = self.workspace()
         req = SandboxRequest(argv=("true",), cwd=root, workspace=root, seccomp="auto")
         result = run_sandboxed(req, backend="process")
         self.assertEqual(result.backend, "process")
-        self.assertIn("seccomp not applied", result.detail)
+        self.assertIn("prctl", result.detail)
+        # The audit trail keeps the caller's argv, not the wrapper's.
+        self.assertEqual(list(result.argv), ["true"])
+
+    def test_seccomp_on_satisfied_on_process_backend(self):
+        # "on" means the filter must be active; the prctl wrapper satisfies it
+        # on Linux, so no refusal (refusal is only for platforms without BPF).
+        if not sys.platform.startswith("linux"):
+            self.skipTest("prctl seccomp needs Linux")
+        root = self.workspace()
+        req = SandboxRequest(argv=("true",), cwd=root, workspace=root, seccomp="on")
+        result = run_sandboxed(req, backend="process")
+        self.assertEqual(result.exit_code, 0)
+        self.assertIn("prctl", result.detail)
+
+    def test_prctl_loader_argv_shape(self):
+        from tools.seccomp import build_default_filter, prctl_loader_argv
+
+        argv = prctl_loader_argv(["echo", "hi"], python="python3")
+        self.assertEqual(argv[0], "python3")
+        self.assertEqual(argv[1], "-c")
+        self.assertEqual(argv[-2:], ["echo", "hi"])
+        import base64
+
+        self.assertEqual(base64.b64decode(argv[3]), build_default_filter())
+
+
+class RealKernelTests(RuntimeTestCase):
+    """Load the filter on the real kernel (Linux) and observe it from inside.
+
+    The interpreter tests prove the filter's logic; these prove the bytes the
+    assembler emits are a loadable, enforcing seccomp program — the closest
+    this suite can get to the bwrap path without bwrap on the host.
+    """
+
+    def _run(self, argv, seccomp="auto"):
+        root = self.workspace()
+        req = SandboxRequest(argv=tuple(argv), cwd=root, workspace=root, seccomp=seccomp)
+        return run_sandboxed(req, backend="process")
+
+    def _seccomp_filter_count(self, seccomp):
+        result = self._run(("sh", "-c", "grep '^Seccomp_filters:' /proc/self/status"), seccomp=seccomp)
+        self.assertEqual(result.exit_code, 0, result.stderr)
+        return int(result.stdout.strip().split(":")[1])
+
+    def test_filter_is_really_loaded(self):
+        if not sys.platform.startswith("linux"):
+            self.skipTest("prctl seccomp needs Linux")
+        # Our wrapper adds exactly one filter layer on top of whatever the
+        # host already has (this container, for example, ships several).
+        self.assertEqual(
+            self._seccomp_filter_count("auto"), self._seccomp_filter_count("off") + 1
+        )
+
+    def test_blocked_syscall_returns_eperm(self):
+        if not sys.platform.startswith("linux"):
+            self.skipTest("prctl seccomp needs Linux")
+        import platform
+
+        arch = {"x86_64": "x86_64", "aarch64": "aarch64"}.get(platform.machine())
+        if arch is None:
+            self.skipTest("no verified table for this arch")
+        nr = denied_syscalls(arch)["clock_settime"]
+        code = (
+            "import ctypes; l=ctypes.CDLL(None, use_errno=True);"
+            f"r=l.syscall({nr}, 0, 0); print(ctypes.get_errno())"
+        )
+        result = self._run(("python3", "-c", code), seccomp="auto")
+        self.assertEqual(result.exit_code, 0, result.stderr)
+        # EPERM from our filter, not EFAULT from the NULL timespec.
+        self.assertEqual(result.stdout.strip(), "1")
+
+    def test_unfiltered_syscall_still_works(self):
+        if not sys.platform.startswith("linux"):
+            self.skipTest("prctl seccomp needs Linux")
+        result = self._run(("sh", "-c", "echo alive"), seccomp="auto")
+        self.assertEqual(result.exit_code, 0)
+        self.assertEqual(result.stdout.strip(), "alive")
 
 
 if __name__ == "__main__":

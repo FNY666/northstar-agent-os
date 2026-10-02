@@ -1,5 +1,30 @@
 # Northstar Agent OS — initial public component
 
+## Unreleased (twenty-seventh batch) — seccomp-BPF denylist for the process backend
+
+Extends the twenty-sixth batch: the process backend (Linux) now applies the
+same denylist via a `python3 -c` prctl wrapper (`tools/seccomp.prctl_loader_argv`);
+no `Popen(preexec_fn=...)`, which is unsafe in the threaded runtime. Semantics
+tightened to match: `--seccomp on` now means "the filter must be active", which
+both backends satisfy — refusal happens only where no backend can apply it
+(non-Linux). Version stays `0.1.0.dev0`; no release tag cut.
+
+- **Real-kernel proof** — `tests/test_seccomp.py::RealKernelTests` loads the
+  assembled filter through the real prctl path and observes it from inside:
+  `Seccomp_filters` grows by exactly one layer under `seccomp=auto` versus
+  `seccomp=off`, and `clock_settime` returns EPERM (not EFAULT). The filter is
+  no longer proven only by the in-test interpreter.
+- **Guard harness** — the old "seccomp=on refuses the process backend" guard
+  is replaced by "the process backend applies the seccomp filter (no silent
+  skip)": mutating the wrapper away turns `test_filter_is_really_loaded` red.
+  Still 10 guards, all verified.
+- **Governance bench** — `northstar.governance.bench.v2` → `v3`, still 16/16:
+  the two process-backend cases now assert behaviorally (a `Seccomp: 2` check
+  gating proof files) that the filter is live and that a per-call
+  `seccomp=off` cannot loosen an operator `shell_seccomp=on`.
+- **Docs** — `docs/concepts/threat-model.md` residual risk #4 updated: the
+  denylist now covers both backends.
+
 ## Unreleased (twenty-sixth batch) — seccomp-BPF denylist for the bwrap sandbox
 
 Picks up the threat model's explicitly deferred hardening step ("a tighter

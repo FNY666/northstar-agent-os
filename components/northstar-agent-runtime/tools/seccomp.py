@@ -1,11 +1,12 @@
-"""Seccomp-BPF denylist for the bwrap sandbox backend.
+"""Seccomp-BPF denylist for the sandbox backends.
 
 Pure-Python classic-BPF assembler: no libseccomp dependency, so the filter is
-built on any host and unit-tested offline. It is applied only by the bwrap
-backend (``bwrap --seccomp FD``); the process backend cannot honestly apply a
-BPF filter, so ``seccomp="on"`` with a non-bwrap backend is a configuration
-error — the same no-silent-downgrade rule as ``--sandbox bwrap`` on a host
-without bubblewrap.
+built on any host and unit-tested offline. The bwrap backend loads it via
+``bwrap --seccomp FD``; the process backend (Linux only) applies it through a
+``python3 -c`` prctl wrapper (see :func:`prctl_loader_argv`) — no
+``Popen(preexec_fn=...)``, which is unsafe in the threaded runtime.
+``seccomp="on"`` is refused only where no backend can apply the filter
+(non-Linux); everywhere else both backends enforce it.
 
 Policy shape: a default-deny allowlist is unworkable for a general Shell tool
 (every command would need enumerating), so this is a conservative denylist
@@ -28,7 +29,9 @@ the failure observable and debuggable.
 """
 from __future__ import annotations
 
+import base64
 import struct
+from typing import Sequence
 
 #: Operator-facing modes. ``auto`` applies the denylist whenever the bwrap
 #: backend runs and notes its absence on the process backend; ``on`` requires
@@ -225,11 +228,59 @@ def denied_syscalls(arch: str = "x86_64") -> dict[str, int]:
     raise SeccompError(f"no denylist table for arch {arch!r}")
 
 
+#: prctl(2) constants used by the loader below.
+_PR_SET_NO_NEW_PRIVS = 38
+_PR_SET_SECCOMP = 22
+_SECCOMP_MODE_FILTER = 2
+
+#: A ``python3 -c`` loader that installs the denylist via prctl and then
+#: execs the real command. Used by the process backend, which has no bwrap to
+#: load the filter for it.
+#:
+#: Why a wrapper instead of ``Popen(preexec_fn=...)``: the runtime executes
+#: tool batches on a ``ThreadPoolExecutor`` when ``parallel_tools > 1``, and
+#: ``preexec_fn`` is not safe to use in the presence of threads (fork in a
+#: threaded process can deadlock). The wrapper is a fresh, single-threaded
+#: interpreter by construction, so there is no such hazard.
+#:
+#: Layout: ``python3 -c <LOADER> <base64-filter> <target argv...>``.
+_PRCTL_LOADER = r"""
+import base64 as _b, ctypes as _c, os as _o, sys as _s
+_f = _b.b64decode(_s.argv[1])
+class _P(_c.Structure):
+    _fields_ = [("len", _c.c_ushort), ("filter", _c.c_void_p)]
+_buf = _c.create_string_buffer(_f)
+_prog = _P(len(_f) // 8, _c.cast(_buf, _c.c_void_p))
+_lib = _c.CDLL(None, use_errno=True)
+if _lib.prctl(38, 1, 0, 0, 0) != 0:
+    _o.write(2, b"northstar: PR_SET_NO_NEW_PRIVS failed\n")
+    _o._exit(126)
+if _lib.prctl(22, 2, _c.byref(_prog), 0, 0) != 0:
+    _e = _c.get_errno()
+    _o.write(2, ("northstar: PR_SET_SECCOMP failed, errno %d\n" % _e).encode())
+    _o._exit(126)
+_o.execvp(_s.argv[2], _s.argv[2:])
+""".strip()
+
+
+def prctl_loader_argv(target_argv: Sequence[str], *, python: str = "python3") -> list[str]:
+    """Wrap ``target_argv`` so the denylist is installed via prctl before exec.
+
+    Returns ``[python, "-c", LOADER, b64(filter), *target_argv]``. The filter
+    bytes travel as base64 inside argv (the program is ~0.5KB, far below the
+    argv ceiling); no temp file is needed. A prctl failure exits 126 with a
+    stderr note instead of running unfiltered.
+    """
+    encoded = base64.b64encode(build_default_filter()).decode("ascii")
+    return [python, "-c", _PRCTL_LOADER, encoded, *target_argv]
+
+
 __all__ = [
     "SECCOMP_MODES",
     "SeccompError",
     "build_default_filter",
     "denied_syscalls",
+    "prctl_loader_argv",
     "resolve_mode",
     "validate_mode",
 ]
