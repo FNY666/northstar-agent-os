@@ -1428,7 +1428,7 @@ Return ``(records, dropped)`` for a session file.
 
 #### `session_spend(records: Sequence[dict[str, Any]])`
 
-Aggregate completed-run spend and provider usage from an append transcript.
+Aggregate completed and trailing interrupted-run spend from a transcript.
 
 #### `transcript_from_records(records: Sequence[dict[str, Any]])`
 
