@@ -19,7 +19,7 @@ Subagent definitions, the delegation rules around them, and acceptance semantics
 
 One delegatable specialist.
 
-- `is_read_only()`
+- `is_read_only` (property)
 - `system_prompt(*, parent_cwd: str='')`
 - `as_dict()`
 - `override(**changes: Any)`
@@ -30,8 +30,8 @@ One delegatable specialist.
 
 Acceptance decision, with the reasons that produced it.
 
-- `passed()`
-- `unverified_criteria()`
+- `passed` (property)
+- `unverified_criteria` (property)
 - `as_dict()`
 - `render()`
 #### `parse_criteria(text: str)`
@@ -101,8 +101,8 @@ Token budgets priced from real per-million rates, with prompt-cache accounting.
 
 Per-million-token list prices for one model.
 
-- `cache_read_per_mtok()`
-- `cache_write_per_mtok()`
+- `cache_read_per_mtok` (property)
+- `cache_write_per_mtok` (property)
 - `as_dict()`
 #### `price_for(model: str)`
 
@@ -112,7 +112,7 @@ Return ``(pricing, estimated)`` for a model id.
 
 Itemised cost for one usage report. Components sum to ``total_usd``.
 
-- `total_usd()`
+- `total_usd` (property)
 - `as_dict()`
 #### `compute_cost(usage: Any, model: str)`
 
@@ -125,7 +125,7 @@ Running cost and usage accumulator with a ceiling check.
 - `observe(usage: Any, model: str)`
 - `observe_child(child: 'Budget')`
   - Merge a subagent budget into this one (cost roll-up for governance).
-- `exhausted()`
+- `exhausted` (property)
 - `over_limit()`
   - Strictly over, i.e. the ceiling has been breached rather than reached.
 - `remaining()`
@@ -147,7 +147,7 @@ Turn-boundary checkpoints: resume without resetting the counters, fork without r
 A resumable boundary: how far the transcript had got, and what it cost.
 
 - `as_dict()`
-- `label()`
+- `label` (property)
 #### `CheckpointError`
 
 A checkpoint that cannot be trusted as a fork point.
@@ -532,7 +532,7 @@ Everything a hook may inspect. Never carries secrets it did not ask for.
 
 One hook's opinion.
 
-- `is_deny()`
+- `is_deny` (property)
 - `allow(reason: str='')`
 - `deny(reason: str, **data: Any)`
 - `modify_input(payload: dict[str, Any], reason: str='')`
@@ -554,8 +554,8 @@ Normalise whatever a hook returned into a :class:`HookResult`.
 
 Aggregate verdict for one event across the whole hook chain.
 
-- `context()`
-- `denied_by_hook()`
+- `context` (property)
+- `denied_by_hook` (property)
 - `as_dict()`
 #### `HookRegistry`
 
@@ -568,7 +568,7 @@ Ordered hook chains keyed by event.
 - `hooks_for(event: str, *, tool_name: str='', agent: str='main')`
 - `counts()`
 - `total()`
-- `events_with_hooks()`
+- `events_with_hooks` (property)
 - `fire(event: HookEvent, hook_input: HookInput, *, extra_hooks: Sequence[Callable[[HookInput], Any]]=())`
   - Run every matching hook in order. Deny is terminal.
 #### `empty_registry()`
@@ -591,7 +591,7 @@ Invalid configuration. Raised at construction, never mid-run.
 
 Everything the loop enforces. Constructed, validated, then frozen.
 
-- `budget_enabled()`
+- `budget_enabled` (property)
 - `as_dict()`
 #### `Denial`
 
@@ -607,28 +607,28 @@ Per-call bookkeeping: what ran, who allowed it, how it ended.
 
 What a delegated child run did, as the parent saw it.
 
-- `subtype()`
+- `subtype` (property)
 - `as_dict()`
 #### `RunReport`
 
 Everything a caller gets back from :meth:`AgentRuntime.run_collect`.
 
-- `ok()`
-- `subtype()`
-- `final_text()`
-- `assistant_texts()`
-- `cost_usd()`
+- `ok` (property)
+- `subtype` (property)
+- `final_text` (property)
+- `assistant_texts` (property)
+- `cost_usd` (property)
 - `events_of(kind: type)`
-- `compact_boundaries()`
-- `trace()`
+- `compact_boundaries` (property)
+- `trace` (property)
 - `as_dict()`
 #### `AgentRuntime`
 
 One configured governed loop.
 
-- `provider_name()`
-- `durable()`
-- `last_report()`
+- `provider_name` (property)
+- `durable` (property)
+- `last_report` (property)
   - Report for the most recent run this instance executed (or is running).
 - `tool_names()`
 - `api_tools()`
@@ -668,8 +668,8 @@ Parse ``--mcp-server NAME=COMMAND ARG...`` (command split with shlex).
 
 One MCP server over stdio: modern (per-request metadata) or legacy (handshake).
 
-- `connected()`
-- `modern()`
+- `connected` (property)
+- `modern` (property)
 - `connect()`
   - Spawn the server, agree a generation, and list its tools.
 - `tool_names()`
@@ -696,13 +696,13 @@ A config file cannot be imported. Message is operator-facing, names the file.
 
 One server declaration, reduced to what this runtime can launch.
 
-- `env_mapping()`
+- `env_mapping` (property)
 - `as_dict()`
 #### `McpImport`
 
 What discovery found, what it refused, and what it ignored out loud.
 
-- `ok()`
+- `ok` (property)
 - `summary()`
 - `as_dict()`
 #### `add_mcp_arguments(verb: argparse.ArgumentParser)`
@@ -731,8 +731,8 @@ Replay a session transcript as frames, and verify what a checkpoint would give b
 
 One checkpoint, plus whether the transcript still agrees with it.
 
-- `verified()`
-- `digest_prefix()`
+- `verified` (property)
+- `digest_prefix` (property)
 - `as_dict()`
 - `line()`
 #### `Frame`
@@ -745,8 +745,8 @@ One readable step of a run, and the transcript records that produced it.
 
 A transcript folded into frames, with its fork points verified and its lineage named.
 
-- `verified()`
-- `counts()`
+- `verified` (property)
+- `counts` (property)
 - `summary()`
 - `render()`
 - `as_dict()`
@@ -798,7 +798,7 @@ One requested value, as it will be shown to the approver.
 
 One embedded server request, decoded and bounded.
 
-- `sensitive()`
+- `sensitive` (property)
 - `prompt()`
   - Human-facing text. Values are never part of it.
 #### `ElicitationVerdict`
@@ -848,7 +848,7 @@ What this client can answer, and therefore what a server may ask.
 
 The outcome of the stdio probe.
 
-- `modern()`
+- `modern` (property)
 #### `select_version(supported: Iterable[Any], *, prefer: Sequence[str]=SUPPORTED_VERSIONS)`
 
 The newest version both sides speak, or ``None`` when there is none.
@@ -887,7 +887,7 @@ Three-layer permission gate: ``disallowed_tools`` → ``allowed_tools`` → mode
 
 The gate's verdict for one tool call.
 
-- `text()`
+- `text` (property)
 - `as_dict()`
 #### `PermissionRequestContext`
 
@@ -897,8 +897,8 @@ What the host approval callback gets to see.
 
 Per-tool result of gating a subagent's declared tool set.
 
-- `ok()`
-- `summary()`
+- `ok` (property)
+- `summary` (property)
 - `as_dict()`
 #### `normalise_names(values: Iterable[str] | None)`
 
@@ -908,7 +908,7 @@ Per-tool result of gating a subagent's declared tool set.
 
 #### `PermissionConfig`
 
-- `overlap()`
+- `overlap` (property)
   - Names present in both lists; kept for diagnostics, deny always wins.
 #### `validate_mode(mode: str)`
 
@@ -916,7 +916,7 @@ Per-tool result of gating a subagent's declared tool set.
 
 Evaluates one tool call against the three layers.
 
-- `mode()`
+- `mode` (property)
 - `knows(tool_name: str)`
 - `register_kind(tool_name: str, kind: str)`
 - `evaluate(tool_name: str, *, kind: str | None=None, mutating: bool | None=None, payload: dict[str, Any] | None=None, context: PermissionRequestContext | None=None, known: bool=True)`
@@ -962,7 +962,7 @@ Write the lockfile atomically, sorted, with a trailing newline: it is a review a
 
 A bundle on disk in a workspace, plus what the lock says about it.
 
-- `usable()`
+- `usable` (property)
   - ``drift`` and ``unpinned`` are both refusals, and for the same reason: the content a reviewer agreed to is the unit of trust here, so anything else has to be re-reviewed, not run with a warning.
 - `as_dict()`
 #### `load_installed(workspace: str | Path, *, require_lock: bool=True, workspace_policy: Mapping[str, Any] | None=None)`
@@ -973,7 +973,7 @@ Every installed bundle, verified, plus operator-facing problems found on the way
 
 Everything installed bundles add to a run, already gated.
 
-- `enabled()`
+- `enabled` (property)
 - `merged_policy(workspace_policy: Mapping[str, Any] | None)`
   - Fold the plugins' ceilings into the workspace policy.
 - `as_dict()`
@@ -1106,7 +1106,7 @@ The workspace policy file is unusable. Message is operator-facing.
 
 Validated contents of ``.northstar/config.toml``.
 
-- `project_context_setting()`
+- `project_context_setting` (property)
 - `as_dict()`
 #### `policy_file_path(workspace: str | Path)`
 
@@ -1144,7 +1144,7 @@ Raised for a malformed, unknown, or out-of-bounds postcondition.
 
 One claim about the workspace, evaluated after the run.
 
-- `structural()`
+- `structural` (property)
 - `as_dict()`
 #### `Verdict`
 
@@ -1218,7 +1218,7 @@ The retry table is unusable. Raised at load, never mid-run.
 
 One classified provider failure.
 
-- `retryable_by_default()`
+- `retryable_by_default` (property)
 - `as_dict()`
 #### `AttemptRecord`
 
@@ -1235,7 +1235,7 @@ How many times, how long apart, and until when.
   - Parse a ``[retry]`` table, or return ``None`` when the workspace has no opinion.
 - `restrict(other: 'RetryPolicy | None')`
   - Clamp this policy to no looser than ``other`` (the workspace's own table).
-- `enabled()`
+- `enabled` (property)
 - `plan(attempt: int, fault: ProviderFault, *, waited_ms: int=0)`
   - Decide what to do after ``attempt`` calls failed with ``fault``.
 - `planned_wait_ms()`
@@ -1263,7 +1263,7 @@ What a retry policy actually cost this turn.
 - `with_fault(attempt: int, fault: ProviderFault)`
 - `with_retry(record: AttemptRecord)`
 - `with_stop(attempt: int, stop: 'StopRetry')`
-- `retried()`
+- `retried` (property)
 - `as_dict()`
 - `line()`
 #### `merge_cli(policy: RetryPolicy | None, *, max_attempts: int | None=None, deadline_ms: int | None=None, retry_on: Iterable[str] | None=None, off: bool=False)`
@@ -1368,10 +1368,10 @@ Everything :func:`run` / :func:`stream_run` need to start one run.
 
 Outcome of one completed run: structured summary + full event list.
 
-- `is_error()`
-- `exit_code()`
+- `is_error` (property)
+- `exit_code` (property)
   - Terminal exit code a wrapper should use (``events.EXIT_CODES``).
-- `result_event()`
+- `result_event` (property)
   - The trailing ``result`` dict of :attr:`events`.
 #### `stream_run(options: RunOptions, resume: str | None=None)`
 
@@ -1409,10 +1409,10 @@ Sortable, collision-resistant identifier: ``ns-<utc>-<entropy>``.
 
 Writer/reader for one session's JSONL transcript.
 
-- `enabled()`
-- `path()`
-- `written()`
-- `bytes_written()`
+- `enabled` (property)
+- `path` (property)
+- `written` (property)
+- `bytes_written` (property)
 - `append(record_type: str, data: dict[str, Any] | None=None)`
   - Write one record. Returns the record even when no store is configured.
 - `record_assistant(message: AssistantMessage, *, agent: str='main')`
@@ -1470,9 +1470,9 @@ The durable contract's id rule, applied to a lease owner.
 
 What can be said about one lease path *right now*, without owning it.
 
-- `free()`
+- `free` (property)
   - Nothing is *known* to hold it. ``probed=False`` means "unverified", not "free".
-- `expired()`
+- `expired` (property)
   - The holder stopped promising liveness. This never makes it stealable.
 - `as_dict()`
 - `human()`
@@ -1488,8 +1488,8 @@ Read-only report on one lease file (never creates it, never steals anything).
 
 An exclusive, kernel-enforced claim on one session file's write path.
 
-- `held()`
-- `kernel_lock_available()`
+- `held` (property)
+- `kernel_lock_available` (property)
 - `status()`
 - `acquire()`
 - `heartbeat(*, ttl_seconds: int | None=None)`
@@ -1558,10 +1558,10 @@ The socket must be a real filesystem path named ``sidecar.sock``.
 
 Structured outcome of one sidecar round trip. Failures are data, not raises.
 
-- `ok()`
-- `may_fall_back()`
+- `ok` (property)
+- `may_fall_back` (property)
 - `as_dict()`
-- `report()`
+- `report` (property)
 #### `SidecarClient`
 
 One-connection-per-request Unix socket client for the sidecar.
@@ -1603,7 +1603,7 @@ One rule hit at one line.
 
 The review result for one skill file.
 
-- `worst()`
+- `worst` (property)
 - `highest_severity()`
 - `as_dict()`
 #### `digest_of(data: bytes)`
@@ -1646,7 +1646,7 @@ True when any finding is at or above ``fail_on`` (``never`` disables the gate).
 
 Comparison of a reviewed set against a live one.
 
-- `clean()`
+- `clean` (property)
 - `as_dict()`
 - `summary()`
 #### `check_lock(audits: Sequence[SkillAudit], payload: dict[str, Any])`
@@ -1716,7 +1716,7 @@ Live span with ordered-attribute semantics.
 - `child(name: str, attributes: Mapping[str, Any] | None=None)`
 - `start_child(name: str, attributes: Mapping[str, Any] | None=None)`
 - `end()`
-- `duration_ms()`
+- `duration_ms` (property)
 - `usage_recorded()`
 - `as_dict()`
 #### `Tracer`
@@ -1798,14 +1798,14 @@ What a handler returns. ``is_error`` is the only failure signal the loop reads.
 
 One callable capability.
 
-- `read_only()`
+- `read_only` (property)
 - `to_api()`
 - `as_dict()`
 #### `ToolSandbox`
 
 Workspace containment with symlink resolution ahead of the check.
 
-- `exists()`
+- `exists` (property)
 - `resolve(raw: Any, *, for_write: bool=False, must_exist: bool=False)`
 - `relative(path: Path)`
 #### `ToolRegistry`
@@ -1882,7 +1882,7 @@ One command the sandbox is asked to run.
 
 Outcome of one sandboxed command. Always returned, never raised for exit≠0.
 
-- `ok()`
+- `ok` (property)
 - `as_dict()`
 - `render()`
   - Human/model-facing body: exit, streams, and an honest isolation line.
@@ -2029,8 +2029,8 @@ Raised by a provider for any failure the loop should classify.
 
 Token counts in the shape the Anthropic Messages API reports them.
 
-- `total_tokens()`
-- `billable_input_tokens()`
+- `total_tokens` (property)
+- `billable_input_tokens` (property)
 - `as_dict()`
 - `from_mapping(value: Any)`
 #### `TextBlock`
@@ -2062,8 +2062,8 @@ Runtime chatter: run setup, compaction boundaries, host notices.
 - `render()`
 #### `AssistantMessage`
 
-- `tool_uses()`
-- `text()`
+- `tool_uses` (property)
+- `text` (property)
 - `to_api()`
 - `render()`
 #### `UserMessage`
@@ -2071,15 +2071,15 @@ Runtime chatter: run setup, compaction boundaries, host notices.
 A user turn, or the tool_result carrier for a batch of tool calls.
 
 - `text_block(text: str, *, is_meta: bool=False, meta_reason: str='')`
-- `text()`
-- `tool_results()`
+- `text` (property)
+- `tool_results` (property)
 - `to_api()`
 - `render()`
 #### `ResultMessage`
 
 Exactly one per run. Any expected failure is this event, never an exception.
 
-- `is_error()`
+- `is_error` (property)
   - Derived, never supplied: every non-success subtype is an error.
 - `to_api()`
 - `render()`
@@ -2104,7 +2104,7 @@ The wire shape a provider needs to describe a tool.
 
 One provider turn.
 
-- `tool_uses()`
+- `tool_uses` (property)
 - `text()`
   - The turn's text as one string, in block order (what a stream must reproduce).
 #### `StreamDelta`
@@ -2150,7 +2150,7 @@ Anthropic Messages API provider.
 
 Thin, normalising adapter over ``client.messages.create`` and ``...stream``.
 
-- `client()`
+- `client` (property)
 - `build_payload(request: GenerationRequest)`
   - Translate a GenerationRequest into ``messages.create`` kwargs.
 - `generate(request: GenerationRequest)`
@@ -2169,7 +2169,7 @@ Any-model provider for endpoints that speak the OpenAI Chat Completions wire.
 
 Normalising adapter over ``client.chat.completions.create``.
 
-- `client()`
+- `client` (property)
 - `resolve_token_limit_field(model: str)`
 - `to_chat_tools(tools: Sequence[dict[str, Any]])`
   - Anthropic tool definitions -> chat ``function`` wrappers.

@@ -73,7 +73,7 @@ Automated backstop in `release.yml`: dev-suffix → refuse; tag name ≠
    ```
 
 4. **Publish**: `release.yml` runs the readiness gate, builds wheels for all
-   five components and creates the GitHub Release with them attached
+   six components and creates the GitHub Release with them attached
    (idempotent — an existing release is left untouched). After the release,
    bump back to `0.1.1.dev0` (next dev iteration).
 
@@ -82,7 +82,7 @@ Automated backstop in `release.yml`: dev-suffix → refuse; tag name ≠
 ```sh
 # Only after the checklist above is green.
 mkdir -p dist
-for component in northstar-run-contract northstar-host northstar-durable-run \
+for component in northstar-run-contract northstar-run-evidence northstar-host northstar-durable-run \
                  northstar-agent-interop northstar-agent-runtime; do
   python -m pip wheel --no-deps --wheel-dir dist "components/$component"
 done
@@ -92,7 +92,7 @@ gh release create v0.1.0 dist/*.whl --title "Northstar Agent OS v0.1.0" --genera
 ## Installing a release
 
 ```sh
-pip install northstar-run-contract northstar-host northstar-durable-run \
+pip install northstar-run-contract northstar-run-evidence northstar-host northstar-durable-run \
             northstar-agent-interop northstar-agent-runtime
 # or, from the release assets:
 pip install northstar-agent-runtime-0.1.0-py3-none-any.whl

@@ -48,6 +48,15 @@ class ComponentReadmeLinkTargetTests(unittest.TestCase):
                 )
 
 
+class GeneratedApiPropertyTests(unittest.TestCase):
+    def test_evidence_chain_properties_are_not_rendered_as_methods(self):
+        page = docbuild.render_page("northstar-run-evidence")
+        for name in ("entries", "head_digest"):
+            with self.subTest(property=name):
+                self.assertIn(f"- `{name}` (property)", page)
+                self.assertNotIn(f"- `{name}()`", page)
+
+
 class ExamplesIndexTests(unittest.TestCase):
     def test_examples_index_covers_every_example(self):
         examples = ROOT / "examples"
