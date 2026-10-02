@@ -75,8 +75,8 @@ GUARDS: list[tuple[str, str, list[tuple[str, str]], str, str]] = [
     (
         "plugin digest verification rejects drift",
         "plugin_manifest.py",
-        [("    if pinned_digest and plugin.content_digest != pinned_digest:",
-          "    if False and pinned_digest and plugin.content_digest != pinned_digest:")],
+        [("        \"digest_ok\": not pinned_digest or pinned_digest == manifest.content_digest,",
+          "        \"digest_ok\": False,")],
         "test_plugin_manifest*",
         "test_a_tampered_bundle_is_refused_until_it_is_reviewed_again",
     ),
