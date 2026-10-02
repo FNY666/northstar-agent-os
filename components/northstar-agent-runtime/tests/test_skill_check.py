@@ -244,6 +244,39 @@ class LockTests(unittest.TestCase):
     def audits(self):
         return list(audit_tree(self.root))
 
+    def test_lock_symlink_is_refused_without_touching_external_target(self):
+        import tempfile
+        outside = Path(tempfile.mkdtemp(prefix="nsar-lock-outside-")) / "target.json"
+        outside.write_text("ORIGINAL", encoding="utf-8")
+        lock = self.root / ".northstar" / "skills.lock"
+        lock.parent.mkdir(parents=True, exist_ok=True)
+        lock.symlink_to(outside)
+        with self.assertRaises(Exception):
+            write_lock(lock, self.audits())
+        self.assertEqual(outside.read_text(encoding="utf-8"), "ORIGINAL")
+
+    def test_existing_lock_symlink_is_never_replaced_or_followed(self):
+        import tempfile
+        outside = Path(tempfile.mkdtemp(prefix="nsar-lock-race-")) / "target.json"
+        outside.write_text("ORIGINAL", encoding="utf-8")
+        lock = self.root / ".northstar" / "skills.lock"
+        lock.parent.mkdir(parents=True, exist_ok=True)
+        lock.symlink_to(outside)
+        with self.assertRaises(SkillAuditError):
+            write_lock(lock, self.audits())
+        self.assertTrue(lock.is_symlink())
+        self.assertEqual(outside.read_text(encoding="utf-8"), "ORIGINAL")
+
+    def test_lock_parent_symlink_is_refused(self):
+        import tempfile
+        outside = Path(tempfile.mkdtemp(prefix="nsar-lock-parent-"))
+        northstar = self.root / ".northstar"
+        import shutil
+        shutil.rmtree(northstar)
+        northstar.symlink_to(outside, target_is_directory=True)
+        with self.assertRaises(Exception):
+            write_lock(northstar / "skills.lock", self.audits())
+
     def test_round_trip(self):
         payload = write_lock(self.root / "skills.lock", self.audits(), source="test")
         self.assertEqual(payload["schema"], LOCK_SCHEMA)

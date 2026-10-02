@@ -38,7 +38,10 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import re
+import stat
+import uuid
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Iterable, Sequence
@@ -502,8 +505,34 @@ def lock_payload(audits: Sequence[SkillAudit], *, source: str = "") -> dict[str,
 def write_lock(path: Path | str, audits: Sequence[SkillAudit], *, source: str = "") -> dict[str, Any]:
     payload = lock_payload(audits, source=source)
     target = Path(path)
-    target.parent.mkdir(parents=True, exist_ok=True)
-    target.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    if target.is_symlink():
+        raise SkillAuditError(f"refusing to write skills lock through symlink: {target}")
+    parent = target.parent
+    if parent.is_symlink():
+        raise SkillAuditError(f"refusing to write skills lock through symlink directory: {parent}")
+    parent.mkdir(parents=True, exist_ok=True)
+    if parent.is_symlink():
+        raise SkillAuditError(f"refusing to write skills lock through symlink directory: {parent}")
+    data = (json.dumps(payload, indent=2, sort_keys=True) + "\n").encode("utf-8")
+    temp_name = f".{target.name}.{uuid.uuid4().hex}.tmp"
+    try:
+        parent_fd = os.open(parent, os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | getattr(os, "O_NOFOLLOW", 0))
+        try:
+            fd = os.open(temp_name, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600, dir_fd=parent_fd)
+            try:
+                os.write(fd, data)
+                os.fsync(fd)
+            finally:
+                os.close(fd)
+            os.replace(temp_name, target.name, src_dir_fd=parent_fd, dst_dir_fd=parent_fd)
+        finally:
+            os.close(parent_fd)
+    except OSError as error:
+        try:
+            (parent / temp_name).unlink(missing_ok=True)
+        except OSError:
+            pass
+        raise SkillAuditError(f"cannot safely write skills lock {target}: {error}") from error
     return payload
 
 
