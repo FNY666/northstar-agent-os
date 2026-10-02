@@ -1,5 +1,35 @@
 # Northstar Agent OS — initial public component
 
+## Unreleased (twenty-ninth batch) — MCP child environment allowlist + fail-open fix
+
+Two items closing the MCP subprocess environment leak (2026-10-03, #44/#45 and
+follow-up):
+
+- **MCP environment allowlist (#45, user-side):** `McpStdioClient` no longer
+  hands MCP servers the full host `os.environ`. The child sees only an
+  allowlist (`PATH`, `PYTHONPATH`, `HOME`, `USER`, `LANG`, `LC_ALL`, `TMPDIR`,
+  `TEMP`, `TMP`, plus protocol-fixture control vars) plus variables explicitly
+  declared in the workspace MCP config. Prevents leaking API keys/tokens to
+  untrusted servers. Verified by `tests/test_mcp_env_isolation.py`.
+- **Fail-open fix (this batch):** the allowlist implementation used
+  `env=self.extra_env or None`, so when the allowlist yielded nothing (e.g. the
+  runtime itself running under a scrubbed environment), `Popen` silently fell
+  back to full host inheritance — the exact leak the allowlist was built to
+  stop. `connect()` now always passes a dict (`env=dict(self.extra_env)`); an
+  empty dict is a genuinely empty child environment. Pinned by a scrubbed-env
+  regression test (mocked `Popen`) and a real-spawn test that proves a
+  `MCP_TEST_SECRET` in the parent process never reaches the fixture server.
+
+**Verification:** full clinic (see diagnosis below); no behavior change for
+normal runs (allowlist is non-empty in practice).
+
+**Known design boundaries** (not bugs):
+- Session lease is host-local (POSIX `flock`), not a distributed lock.
+- MCP child processes are environment-restricted (allowlist) but still run
+  unsandboxed: no network/filesystem isolation is applied to MCP servers.
+- Audit export/replay redaction policy remains undefined/UNKNOWN; candidate for
+  future hardening if product requires it.
+
 ## Unreleased (twenty-eighth batch) — Security hardening: F1–F17 supply-chain and runtime boundary fixes
 
 Seventeen security and correctness fixes addressing session isolation, supply-chain
@@ -43,10 +73,11 @@ scope hygiene. No open PRs or known regressions.
 
 **Known design boundaries** (not bugs):
 - Session lease is host-local (POSIX `flock`), not a distributed lock.
-- MCP subprocess environment inherits host `os.environ` by default (trusted local
-  process model).
-- Audit export/replay redaction policy and MCP environment allowlist remain
-  undefined/UNKNOWN; candidates for future hardening if product requires it.
+- ~~MCP subprocess environment inherits host `os.environ` by default (trusted local
+  process model).~~ Superseded by the twenty-ninth batch: MCP children are now
+  environment-restricted (allowlist), though still unsandboxed.
+- Audit export/replay redaction policy ~~and MCP environment allowlist remain~~
+  remains undefined/UNKNOWN; candidates for future hardening if product requires it.
 
 ## Unreleased (twenty-seventh batch) — seccomp-BPF denylist for the process backend
 

@@ -1323,7 +1323,8 @@ caught by the unit-level compaction tests rather than the loop-level one.
   file that governs a run is the one under the `--workspace` given that time. Foreign
   approvals are refused rather than approximated; a remote (HTTP/SSE) declaration is
   skipped with a warning rather than downgraded into a stdio guess; and the `env` a file
-  names is *added* to the child's environment, because this component does not sandbox
+  names is *added* to the child's allowlisted environment (never the full host
+  environment), because this component does not sandbox
   processes - a declared variable is a convenience, never an isolation boundary.
 - **Process-group `TERM`→`KILL` cleanup is not verified on real Linux here.** That
   behaviour belongs to the sidecar; the runtime only bounds its own socket read.
