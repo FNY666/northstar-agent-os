@@ -17,6 +17,27 @@ from tools import verify_invariants as tool  # noqa: E402
 
 
 class PrepareCopiesTheWholeComponentsTree(unittest.TestCase):
+    def test_guard_registry_has_named_extensible_entries(self) -> None:
+        self.assertGreaterEqual(len(tool.GUARDS), 6)
+        self.assertEqual(len({item[0] for item in tool.GUARDS}), len(tool.GUARDS))
+        for title, filename, edits, pattern, marker in tool.GUARDS:
+            self.assertTrue(title and filename and edits and pattern and marker)
+
+    def test_run_timeout_is_reported_as_unknown_not_raised(self) -> None:
+        class TimeoutProcess:
+            returncode = 0
+            stdout = ""
+            stderr = ""
+
+        original = tool.subprocess.run
+        try:
+            tool.subprocess.run = lambda *args, **kwargs: (_ for _ in ()).throw(TimeoutError("timed out"))
+            code, output = tool.run(Path("/tmp"), "test_timeout*")
+        finally:
+            tool.subprocess.run = original
+        self.assertNotEqual(code, 0)
+        self.assertIn("UNKNOWN", output)
+
     def test_every_sibling_component_the_suite_imports_travels_to_the_copy(self) -> None:
         with tempfile.TemporaryDirectory(prefix="nsar-prepare-") as tmp:
             runtime = tool.prepare(Path(tmp))

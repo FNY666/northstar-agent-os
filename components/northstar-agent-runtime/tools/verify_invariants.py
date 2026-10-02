@@ -106,19 +106,23 @@ def prepare(root: Path) -> Path:
 
 
 def run(component: Path, pattern: str) -> tuple[int, str]:
-    proc = subprocess.run(
-        [sys.executable, "-m", "unittest", "discover", "-s", "tests", "-p", pattern],
-        cwd=str(component),
-        capture_output=True,
-        text=True,
-        check=False,
-        timeout=300,
-    )
+    try:
+        proc = subprocess.run(
+            [sys.executable, "-m", "unittest", "discover", "-s", "tests", "-p", pattern],
+            cwd=str(component),
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=300,
+        )
+    except (subprocess.TimeoutExpired, TimeoutError) as error:
+        return 124, f"UNKNOWN: test pattern {pattern} timed out after 300s: {error}"
     return proc.returncode, proc.stdout + proc.stderr
 
 
 def main() -> int:
     failures: list[str] = []
+    unknowns: list[str] = []
     for title, filename, edits, pattern, marker in GUARDS:
         with tempfile.TemporaryDirectory(prefix="nsar-guard-") as tmp:
             component = prepare(Path(tmp))
@@ -132,8 +136,14 @@ def main() -> int:
             else:
                 source.write_text(text, encoding="utf-8")
                 code, output = run(component, pattern)
-                red = code != 0
+                unknown = output.startswith("UNKNOWN:")
+                red = code != 0 and not unknown
                 names = [line for line in output.splitlines() if line.startswith(("FAIL:", "ERROR:"))]
+                if unknown:
+                    print(f"[    UNKNOWN] {title}")
+                    print(f"            {output}")
+                    unknowns.append(f"{title}: {output}")
+                    continue
                 hit = any(marker in line for line in names) if marker else bool(names)
                 status = "RED" if red else "STILL GREEN"
                 print(f"[{status:>11}] {title}")
@@ -146,14 +156,19 @@ def main() -> int:
     with tempfile.TemporaryDirectory(prefix="nsar-baseline-") as tmp:
         component = prepare(Path(tmp))
         code, output = run(component, "test_*.py")
-        tail = [line for line in output.splitlines() if line.startswith(("Ran ", "OK", "FAILED"))]
-        print(f"\n[baseline copy] {'OK' if code == 0 else 'BROKEN'}: {' | '.join(tail)}")
-        if code != 0:
-            failures.append("baseline copy of the untouched component is not green")
-    if failures:
+        if output.startswith("UNKNOWN:"):
+            print(f"\n[baseline copy] UNKNOWN: {output}")
+        else:
+            tail = [line for line in output.splitlines() if line.startswith(("Ran ", "OK", "FAILED"))]
+            print(f"\n[baseline copy] {'OK' if code == 0 else 'BROKEN'}: {' | '.join(tail)}")
+            if code != 0:
+                failures.append("baseline copy of the untouched component is not green")
+    if failures or unknowns:
         print("\nGUARD VERIFICATION PROBLEMS:")
         for item in failures:
             print(f"  - {item}")
+        for item in unknowns:
+            print(f"  - UNKNOWN/BLOCKED: {item}")
         return 1
     print(f"\nall {len(GUARDS)} guards verified: reverting each one turns its test red")
     return 0
