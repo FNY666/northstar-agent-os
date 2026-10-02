@@ -126,3 +126,34 @@ One run's evidence chain, persisted as JSONL with a verifiable seal.
   - Produce a sealed manifest attesting to the current chain head.
 - `verify_seal(manifest: Mapping[str, Any], key_resolver: Mapping[str, SealVerifier])`
   - Verify a seal *and* bind it to this store's current contents.
+### `audit_adapter`
+
+Source: `components/northstar-run-evidence/audit_adapter.py`
+
+Seal the runtime's audit NDJSON feed into a tamper-evident evidence chain.
+
+#### `parse_audit_feed(text: str)`
+
+Parse canonical audit NDJSON into validated record dicts.
+
+#### `seal_audit_feed(records: Iterable[Mapping[str, Any]], *, store_path: str, run_id: str, signer: SealSigner, sealed_at: int | None=None)`
+
+Append an audit feed to an evidence store and seal the chain head.
+
+#### `verify_audit_seal(store_path: str, run_id: str, manifest: Mapping[str, Any], key_resolver: Mapping[str, SealVerifier])`
+
+Re-open the store (fail-closed on tamper) and verify the seal binds.
+
+### `evidence_cli`
+
+Source: `components/northstar-run-evidence/evidence_cli.py`
+
+Operator CLI for the run-evidence component: seal and verify audit feeds.
+
+#### `cmd_seal(args: argparse.Namespace)`
+
+#### `cmd_verify(args: argparse.Namespace)`
+
+#### `build_parser()`
+
+#### `main(argv: list[str] | None=None)`

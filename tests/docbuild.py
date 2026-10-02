@@ -35,7 +35,13 @@ API_DIR = ROOT / "docs" / "api"
 # it there).
 MANIFEST: dict[str, tuple[str, ...]] = {
     "northstar-run-contract": ("contract", "binding", "adapter", "audit", "policy"),
-    "northstar-run-evidence": ("evidence_contract", "evidence_chain", "evidence_store"),
+    "northstar-run-evidence": (
+        "evidence_contract",
+        "evidence_chain",
+        "evidence_store",
+        "audit_adapter",
+        "evidence_cli",
+    ),
     "northstar-host": ("authorization", "workspace", "host_audit", "host_policy"),
     "northstar-durable-run": (
         "durable_contract",
