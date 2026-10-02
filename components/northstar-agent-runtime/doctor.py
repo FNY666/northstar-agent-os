@@ -62,6 +62,12 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
         default="auto",
         help="seccomp-BPF denylist mode a run would use (default: auto)",
     )
+    parser.add_argument(
+        "--mcp-seccomp",
+        choices=("auto", "on", "off"),
+        default="auto",
+        help="seccomp-BPF denylist mode for MCP server processes (default: auto)",
+    )
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -260,6 +266,20 @@ _ARCH_TABLES = {
 }
 
 
+def _verified_seccomp_arch() -> str | None:
+    """Host arch with a kernel-verified syscall table in tools/seccomp.py, else None."""
+    from tools.seccomp import SeccompError, denied_syscalls
+
+    arch = _ARCH_TABLES.get(platform.machine().lower())
+    if arch is None:
+        return None
+    try:
+        denied_syscalls(arch)
+    except SeccompError:
+        return None
+    return arch
+
+
 def _check_seccomp(args: argparse.Namespace, findings: list[Finding], backend: str | None) -> None:
     """Report whether the seccomp-BPF denylist will actually be applied.
 
@@ -268,7 +288,7 @@ def _check_seccomp(args: argparse.Namespace, findings: list[Finding], backend: s
     is active when the host cannot load it.
     """
     try:
-        from tools.seccomp import SeccompError, build_default_filter, denied_syscalls, validate_mode
+        from tools.seccomp import SeccompError, build_default_filter, validate_mode
     except Exception as error:  # noqa: BLE001
         findings.append(Finding("seccomp", "warn", f"could not load the seccomp module: {error}"))
         return
@@ -321,14 +341,8 @@ def _check_seccomp(args: argparse.Namespace, findings: list[Finding], backend: s
         )
         return
     machine = platform.machine().lower()
-    arch = _ARCH_TABLES.get(machine)
-    table_ok = arch is not None
-    if table_ok:
-        try:
-            denied_syscalls(arch)
-        except SeccompError:
-            table_ok = False
-    if not table_ok:
+    arch = _verified_seccomp_arch()
+    if arch is None:
         findings.append(
             Finding(
                 "seccomp",
@@ -344,6 +358,84 @@ def _check_seccomp(args: argparse.Namespace, findings: list[Finding], backend: s
             "seccomp",
             "ok",
             f"mode={mode}, backend={backend}: denylist will be applied via {mechanism}; "
+            f"arch {arch} table verified; {size_note}",
+        )
+    )
+
+
+def _check_mcp_seccomp(args: argparse.Namespace, findings: list[Finding]) -> None:
+    """Report whether MCP server processes will run under the BPF denylist.
+
+    Mirrors ``McpStdioClient._spawn_argv``: ``off`` runs the server command
+    as-is, ``on`` refuses to start where no filter can load, ``auto`` applies
+    it on Linux. Like the Shell check, it never claims the filter is active
+    when the host cannot load it.
+    """
+    try:
+        from tools.seccomp import SeccompError, build_default_filter, validate_mode
+    except Exception as error:  # noqa: BLE001
+        findings.append(Finding("mcp-seccomp", "warn", f"could not load the seccomp module: {error}"))
+        return
+    mode = getattr(args, "mcp_seccomp", "auto") or "auto"
+    try:
+        mode = validate_mode(mode)
+    except SeccompError as error:
+        findings.append(Finding("mcp-seccomp", "fail", str(error)))
+        return
+    try:
+        program = build_default_filter()
+    except Exception as error:  # noqa: BLE001
+        findings.append(Finding("mcp-seccomp", "fail", f"could not assemble the denylist: {error}"))
+        return
+    size_note = f"{len(program) // 8} BPF instructions ({len(program)} bytes)"
+
+    if mode == "off":
+        findings.append(
+            Finding(
+                "mcp-seccomp",
+                "warn",
+                f"mode=off - MCP server processes run without the BPF denylist by operator choice "
+                f"({size_note} not loaded)",
+            )
+        )
+        return
+    if not sys.platform.startswith("linux"):
+        # Mirrors McpStdioClient._spawn_argv: mode=on is refused, auto degrades.
+        if mode == "on":
+            findings.append(
+                Finding(
+                    "mcp-seccomp",
+                    "fail",
+                    f"mode=on requires a platform that can load a BPF filter (this host is {sys.platform}) - "
+                    "an MCP server would refuse to start",
+                )
+            )
+        else:
+            findings.append(
+                Finding(
+                    "mcp-seccomp",
+                    "warn",
+                    f"mode={mode} on {sys.platform}: no BPF support - the denylist cannot be applied "
+                    "to MCP server processes on this host",
+                )
+            )
+        return
+    arch = _verified_seccomp_arch()
+    if arch is None:
+        findings.append(
+            Finding(
+                "mcp-seccomp",
+                "warn",
+                f"mode={mode}: no verified syscall table for arch {platform.machine().lower()!r} - "
+                f"the filter falls through to ALLOW ({size_note} assembled)",
+            )
+        )
+        return
+    findings.append(
+        Finding(
+            "mcp-seccomp",
+            "ok",
+            f"mode={mode}: denylist will be applied to MCP server processes via prctl wrapper; "
             f"arch {arch} table verified; {size_note}",
         )
     )
@@ -547,6 +639,7 @@ def _checks(args: argparse.Namespace) -> list[Finding]:
     _check_sidecar(args, findings)
     backend = _check_sandbox(args, findings)
     _check_seccomp(args, findings, backend)
+    _check_mcp_seccomp(args, findings)
     _check_workspace_config(args, findings)
     _check_skill_supply_chain(args, findings)
     _check_plugins(args, findings)

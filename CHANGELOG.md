@@ -1,5 +1,18 @@
 # Northstar Agent OS — initial public component
 
+## Unreleased (thirty-third batch) — doctor reports the MCP seccomp posture
+
+`northstar doctor` learned the MCP side of the denylist: a new
+`--mcp-seccomp` flag and an `mcp-seccomp` finding mirror
+`McpStdioClient._spawn_argv`'s mode × platform × arch decision matrix —
+`off` warns (operator choice), `on` fails where no BPF filter can load,
+`auto` warns off-Linux, and on Linux it reports the prctl wrapper with the
+verified arch table (warns on fallthrough-ALLOW). The shared arch-table
+check is now one helper used by both seccomp findings. Four new doctor
+tests.
+
+**Verification:** full clinic below.
+
 ## Unreleased (thirty-second batch) — seccomp-BPF denylist for MCP server processes
 
 MCP servers are third-party code the operator chose to run; the allowlist
