@@ -25,6 +25,10 @@ seccomp filter is a later hardening step, not claimed today"). Version stays
   in-test BPF interpreter asserting EPERM for every denylisted syscall on both
   arches, ALLOW for the everyday set, arch-scoped tables, and the tighten-only
   merge. 15 tests, offline.
+- **Guard harness** — `tools/verify_invariants.py` grows from 8 to 10 guards:
+  "seccomp=on with the process backend is refused, not silently downgraded"
+  and "a per-call seccomp payload may only tighten, never loosen". Reverting
+  either turns its test red; baseline stays green.
 - **Docs** — `docs/concepts/threat-model.md` residual risk #4 rewritten: no
   longer "no seccomp profile yet".
 
