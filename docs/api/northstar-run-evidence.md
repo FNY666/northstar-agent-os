@@ -67,3 +67,33 @@ Append-only in-memory chain for a single run; persistence belongs to a store.
   - Append a prebuilt/decoded entry after checking it extends this chain.
 - `verify()`
   - Verify the current chain without mutating it.
+### `evidence_store`
+
+Source: `components/northstar-run-evidence/evidence_store.py`
+
+Private, atomic local persistence for Northstar evidence hash chains.
+
+#### `EvidenceStoreError`
+
+Operational error while accessing the local evidence store.
+
+#### `EvidenceIntegrityError`
+
+Stored ledger is malformed, non-canonical, or fails chain validation.
+
+#### `EvidenceCommitUncertainError`
+
+Rename succeeded, but directory fsync failed and crash durability is unknown.
+
+#### `EvidenceStore`
+
+Persist one run's ledger under ``root/<run_id>/ledger.jsonl``.
+
+- `load()`
+  - Load a fully parsed and verified immutable snapshot of this run's ledger.
+- `verify()`
+  - Return structural integrity results; malformed bytes fail closed.
+- `append(*, source: str, kind: str, occurred_at: int, subject: Mapping[str, Any] | bytes, source_id: str, refs: Iterable[EvidenceRef]=())`
+  - Create and atomically persist an entry; ``source_id`` is required for safe retries.
+- `append_entry(entry: EvidenceEntry | Mapping[str, Any])`
+  - Atomically append a prebuilt entry with a stable idempotency ``source_id``.
