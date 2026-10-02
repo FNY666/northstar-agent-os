@@ -182,6 +182,11 @@ class RuntimeConfig:
     #: grant Shell — the permission gate still denies it under ``default`` until
     #: ``--allow-tool Shell``. ``bwrap`` is refused at construction if unusable.
     shell_backend: str = "auto"
+    #: Seccomp-BPF denylist for the bwrap sandbox (``auto`` | ``on`` | ``off``).
+    #: ``auto`` applies the filter whenever bwrap runs; ``on`` requires bwrap +
+    #: filter and refuses the process backend; ``off`` disables it. A per-call
+    #: Shell payload may only tighten this, never loosen it.
+    shell_seccomp: str = "auto"
     #: How many **parallel-safe** tool handlers may run at once inside one
     #: assistant turn. ``1`` (default) is full serial dispatch. Values >1 only
     #: accelerate a turn whose *every* call is kind=read and non-mutating;
@@ -259,6 +264,10 @@ class RuntimeConfig:
         if backend not in {"auto", "bwrap", "process"}:
             fail(f"shell_backend must be auto, bwrap, or process; got {self.shell_backend!r}")
         object.__setattr__(self, "shell_backend", backend)
+        seccomp = (self.shell_seccomp or "auto").strip().lower()
+        if seccomp not in {"auto", "on", "off"}:
+            fail(f"shell_seccomp must be auto, on, or off; got {self.shell_seccomp!r}")
+        object.__setattr__(self, "shell_seccomp", seccomp)
         if backend == "bwrap":
             # Fail at construction, not mid-tool-call: a run that promised OS
             # isolation and then cannot deliver it is a configuration error.
@@ -298,6 +307,7 @@ class RuntimeConfig:
             "halt_on_denial": self.halt_on_denial,
             "parallel_tools": self.parallel_tools,
             "shell_backend": self.shell_backend,
+            "shell_seccomp": self.shell_seccomp,
             "compaction_threshold_tokens": self.compaction_threshold_tokens,
             "stream": self.stream,
             "retry": self.retry.as_dict() if self.retry is not None else None,
@@ -1109,6 +1119,7 @@ class AgentRuntime:
             "policy_revision": config.policy_revision,
             "protected_prefixes": list(config.tool_limits.protected_prefixes),
             "shell_backend": config.shell_backend,
+            "shell_seccomp": config.shell_seccomp,
         }
         try:
             from tools.os_sandbox import probe_capabilities, resolve_backend

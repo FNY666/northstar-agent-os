@@ -3,12 +3,14 @@
 Two backends, one contract:
 
 * **bwrap** (preferred) — bubblewrap with a read-only host view, a writable
-  bind of the workspace, no network namespace, and die-with-parent. This is the
+  bind of the workspace, no network namespace, a seccomp-BPF denylist over
+  escape primitives (``tools/seccomp.py``), and die-with-parent. This is the
   isolation level the threat model calls a *sandbox*.
 * **process** (fallback) — a scrubbed subprocess with cwd pinned inside the
   workspace, resource limits, and process-group cleanup. This is *not* OS
   isolation: a determined command can still reach the rest of the host via
-  absolute paths. Doctor and the Shell tool both say so out loud.
+  absolute paths, and no seccomp filter is applied. Doctor and the Shell tool
+  both say so out loud.
 
 The runtime never invents a third, quieter mode. ``auto`` picks bwrap when the
 binary exists and can start a throwaway probe; otherwise process. An operator
@@ -26,10 +28,13 @@ import os
 import shutil
 import signal
 import subprocess
+import tempfile
 import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Mapping, Sequence
+
+from tools.seccomp import SECCOMP_MODES, SeccompError, build_default_filter
 
 #: Hard ceilings a single Shell invocation may not exceed. Operators may only
 #: tighten these (via tool payload or run config), never widen past the runtime.
@@ -80,6 +85,7 @@ class SandboxRequest:
     max_output_bytes: int = DEFAULT_MAX_OUTPUT_BYTES
     env: Mapping[str, str] | None = None
     network: bool = False  # reserved: bwrap always unshares net today; True is refused
+    seccomp: str = "auto"  # seccomp denylist: auto (bwrap only) | on (require) | off
 
 
 @dataclass(frozen=True)
@@ -275,6 +281,11 @@ def _validate_request(request: SandboxRequest) -> None:
         raise SandboxError(f"cwd is not a directory: {cwd}")
     if not workspace.is_dir():
         raise SandboxError(f"workspace is not a directory: {workspace}")
+    seccomp = (request.seccomp or "auto").strip().lower()
+    if seccomp not in SECCOMP_MODES:
+        raise SandboxError(
+            f"unknown seccomp mode {request.seccomp!r}; choose one of {', '.join(SECCOMP_MODES)}"
+        )
 
 
 def _read_capped(stream: Any, limit: int) -> tuple[bytes, bool]:
@@ -295,6 +306,7 @@ def _run_popen(
     backend: str,
     isolation: str,
     detail: str = "",
+    pass_fds: Sequence[int] = (),
 ) -> SandboxResult:
     """Shared runner: process-group kill on timeout, capped pipes, no shell=True."""
     # Ensure TMPDIR exists for the child (workspace-scoped).
@@ -305,6 +317,9 @@ def _run_popen(
         pass
 
     started = time.monotonic()
+    popen_kwargs: dict[str, Any] = {}
+    if pass_fds:
+        popen_kwargs["pass_fds"] = tuple(pass_fds)
     try:
         proc = subprocess.Popen(
             list(argv),
@@ -315,6 +330,7 @@ def _run_popen(
             stderr=subprocess.PIPE,
             start_new_session=True,  # own process group → TERM/KILL the tree
             close_fds=True,
+            **popen_kwargs,
         )
     except OSError as error:
         return SandboxResult(
@@ -395,7 +411,7 @@ def _run_popen(
     )
 
 
-def _bwrap_argv(request: SandboxRequest, *, bwrap_path: str) -> list[str]:
+def _bwrap_argv(request: SandboxRequest, *, bwrap_path: str, seccomp_fd: int | None = None) -> list[str]:
     """Build a conservative bubblewrap command line around the user argv."""
     workspace = Path(os.path.realpath(str(request.workspace)))
     cwd = Path(os.path.realpath(str(request.cwd)))
@@ -405,6 +421,11 @@ def _bwrap_argv(request: SandboxRequest, *, bwrap_path: str) -> list[str]:
     for host_path in ("/usr", "/bin", "/lib", "/lib64", "/sbin", "/etc/resolv.conf", "/etc/ssl", "/etc/passwd", "/etc/group"):
         if Path(host_path).exists():
             ro_binds.extend(["--ro-bind", host_path, host_path])
+    seccomp_args: list[str] = []
+    if seccomp_fd is not None:
+        # bwrap reads the BPF program from this fd at exec time; the caller
+        # keeps it open via Popen(pass_fds=[...]).
+        seccomp_args = ["--seccomp", str(seccomp_fd)]
     argv = [
         bwrap_path,
         "--die-with-parent",
@@ -413,6 +434,7 @@ def _bwrap_argv(request: SandboxRequest, *, bwrap_path: str) -> list[str]:
         "--unshare-net",
         "--unshare-ipc",
         "--unshare-uts",
+        *seccomp_args,
         "--dev",
         "/dev",
         "--proc",
@@ -448,21 +470,68 @@ def run_sandboxed(
     workspace = Path(os.path.realpath(str(request.workspace)))
     cwd = Path(os.path.realpath(str(request.cwd)))
     env = _scrubbed_env(request.env, workspace=workspace)
+    seccomp_mode = (request.seccomp or "auto").strip().lower()
 
     if chosen == "bwrap":
         assert caps.bwrap_path  # resolve_backend guaranteed usable
-        wrapped = _bwrap_argv(request, bwrap_path=caps.bwrap_path)
-        return _run_popen(
-            wrapped,
-            cwd=cwd,  # bwrap --chdir is authoritative; cwd here is best-effort
-            env=env,
-            timeout_ms=request.timeout_ms,
-            max_output_bytes=request.max_output_bytes,
-            backend="bwrap",
-            isolation="os",
-            detail="network namespace unshared; workspace is the only writable bind",
-        )
+        seccomp_fd: int | None = None
+        seccomp_file = None
+        pass_fds: list[int] = []
+        detail = "network namespace unshared; workspace is the only writable bind"
+        if seccomp_mode != "off":
+            # The BPF denylist rides into bwrap on an inherited fd
+            # (``bwrap --seccomp FD``). A temp file under the workspace tmp dir
+            # keeps the bytes off any shared location.
+            tmpdir = workspace / ".northstar" / "tmp"
+            tmpdir.mkdir(parents=True, exist_ok=True, mode=0o700)
+            seccomp_file = tempfile.NamedTemporaryFile(
+                prefix="seccomp-", suffix=".bpf", dir=str(tmpdir), delete=False
+            )
+            try:
+                seccomp_file.write(build_default_filter())
+                seccomp_file.flush()
+                seccomp_fd = seccomp_file.fileno()
+                pass_fds.append(seccomp_fd)
+                detail += "; seccomp denylist active (escape primitives -> EPERM)"
+            except Exception:
+                seccomp_file.close()
+                raise
+        try:
+            wrapped = _bwrap_argv(request, bwrap_path=caps.bwrap_path, seccomp_fd=seccomp_fd)
+            result = _run_popen(
+                wrapped,
+                cwd=cwd,  # bwrap --chdir is authoritative; cwd here is best-effort
+                env=env,
+                timeout_ms=request.timeout_ms,
+                max_output_bytes=request.max_output_bytes,
+                backend="bwrap",
+                isolation="os",
+                detail=detail,
+                pass_fds=pass_fds,
+            )
+        finally:
+            if seccomp_file is not None:
+                name = seccomp_file.name
+                seccomp_file.close()
+                try:
+                    os.unlink(name)
+                except OSError:
+                    pass
+        return result
 
+    if seccomp_mode == "on":
+        # No silent downgrade: the operator required the filter, and the
+        # process backend cannot honestly apply one.
+        raise SandboxError(
+            "seccomp='on' requires the bwrap backend, but the resolved backend is "
+            "'process' (no BPF support). Install bubblewrap or use seccomp='auto'."
+        )
+    detail = (
+        "process backend: cwd pinned and env scrubbed, but the host filesystem "
+        "and network are still reachable — install bubblewrap for OS isolation"
+    )
+    if seccomp_mode != "off":
+        detail += "; seccomp not applied (process backend has no BPF support)"
     return _run_popen(
         request.argv,
         cwd=cwd,
@@ -471,10 +540,7 @@ def run_sandboxed(
         max_output_bytes=request.max_output_bytes,
         backend="process",
         isolation="process",
-        detail=(
-            "process backend: cwd pinned and env scrubbed, but the host filesystem "
-            "and network are still reachable — install bubblewrap for OS isolation"
-        ),
+        detail=detail,
     )
 
 
@@ -484,6 +550,7 @@ __all__ = [
     "DEFAULT_TIMEOUT_MS",
     "MAX_OUTPUT_BYTES",
     "MAX_TIMEOUT_MS",
+    "SECCOMP_MODES",
     "SandboxCapabilities",
     "SandboxError",
     "SandboxRequest",
