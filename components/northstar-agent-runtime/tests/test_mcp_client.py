@@ -47,7 +47,7 @@ class ParseFlagTests(unittest.TestCase):
 
 class ClientTests(unittest.TestCase):
     def connect(self, *, env: dict[str, str] | None = None, timeout_ms: int = 4000) -> McpStdioClient:
-        client = McpStdioClient("demo", ["python3", str(FIXTURE)], timeout_ms=timeout_ms)
+        client = McpStdioClient("demo", ["python3", str(FIXTURE)], timeout_ms=timeout_ms, env=env or {})
         saved = dict(os.environ)
         if env:
             os.environ.update(env)
@@ -109,9 +109,8 @@ class ClientTests(unittest.TestCase):
         self.assertIn("cannot start", str(caught.exception))
 
     def test_a_server_that_never_answers_is_killed_on_timeout(self):
-        client = McpStdioClient("demo", ["python3", str(FIXTURE)], timeout_ms=FAST_TIMEOUT_MS)
+        client = McpStdioClient("demo", ["python3", str(FIXTURE)], timeout_ms=FAST_TIMEOUT_MS, env={"MCP_SILENT": "1"})
         saved = dict(os.environ)
-        os.environ["MCP_SILENT"] = "1"
         try:
             with self.assertRaises(McpError) as caught:
                 client.connect()
@@ -122,9 +121,8 @@ class ClientTests(unittest.TestCase):
             os.environ.update(saved)
 
     def test_a_slow_call_times_out_and_reports_an_error_result(self):
-        client = McpStdioClient("demo", ["python3", str(FIXTURE)], timeout_ms=FAST_TIMEOUT_MS)
+        client = McpStdioClient("demo", ["python3", str(FIXTURE)], timeout_ms=FAST_TIMEOUT_MS, env={"MCP_SLOW_TOOL": "1"})
         saved = dict(os.environ)
-        os.environ["MCP_SLOW_TOOL"] = "1"
         try:
             client.connect()
             result = client.call_tool("echo", {"text": "x"})

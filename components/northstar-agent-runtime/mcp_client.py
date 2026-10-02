@@ -88,6 +88,13 @@ DEFAULT_MCP_ENV_ALLOWLIST = frozenset({
     "TMPDIR",
     "TEMP",
     "TMP",
+    # Protocol fixture controls used by the offline MCP test servers. These are
+    # non-secret coordination variables, not credentials.
+    "MCP_SILENT",
+    "MCP_SLOW_TOOL",
+    "MCP_SPAWN_REPORT",
+    "MRTR_SERVER_MODE",
+    "MRTR_SERVER_WIRE",
 })
 
 
