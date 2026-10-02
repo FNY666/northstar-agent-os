@@ -67,3 +67,62 @@ Append-only in-memory chain for a single run; persistence belongs to a store.
   - Append a prebuilt/decoded entry after checking it extends this chain.
 - `verify()`
   - Verify the current chain without mutating it.
+### `evidence_store`
+
+Source: `components/northstar-run-evidence/evidence_store.py`
+
+File-backed evidence store: durable appends, tamper-evident reload, sealed manifests.
+
+#### `SealSigner`
+
+Something the host trusts to attest to a sealed manifest's bytes.
+
+- `key_id` (property)
+- `algorithm` (property)
+- `sign(data: bytes)`
+#### `SealVerifier`
+
+The checking half of a seal; resolved from ``key_id`` by the host.
+
+- `key_id` (property)
+- `algorithm` (property)
+- `verify(data: bytes, signature: bytes)`
+#### `HmacTestSigner`
+
+Shared-secret HMAC signer for tests and local diagnostics only.
+
+- `key_id` (property)
+- `sign(data: bytes)`
+- `verifier()`
+#### `HmacTestVerifier`
+
+Checking half of :class:`HmacTestSigner`; test-only, same caveats.
+
+- `key_id` (property)
+- `verify(data: bytes, signature: bytes)`
+#### `ManifestVerification`
+
+Machine-readable result of checking a sealed manifest.
+
+- `to_dict()`
+#### `verify_manifest(manifest: Any, key_resolver: Mapping[str, SealVerifier])`
+
+Check a sealed manifest's shape and signature. Never trusts blindly.
+
+#### `EvidenceStore`
+
+One run's evidence chain, persisted as JSONL with a verifiable seal.
+
+- `run_id` (property)
+- `path` (property)
+- `entry_count` (property)
+- `head_digest` (property)
+- `entries` (property)
+- `append(*, source: str, kind: str, occurred_at: int, subject: Mapping[str, Any] | bytes, refs: tuple[EvidenceRef, ...]=(), source_id: str | None=None)`
+  - Validate, append to the chain, and durably write one JSONL line.
+- `verify()`
+  - Re-verify the in-memory chain (the file was verified at open).
+- `seal(signer: SealSigner, *, sealed_at: int | None=None)`
+  - Produce a sealed manifest attesting to the current chain head.
+- `verify_seal(manifest: Mapping[str, Any], key_resolver: Mapping[str, SealVerifier])`
+  - Verify a seal *and* bind it to this store's current contents.
