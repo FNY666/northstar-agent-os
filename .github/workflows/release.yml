@@ -41,7 +41,7 @@ jobs:
           import os
           tag = os.environ["GITHUB_REF_NAME"]
           versions = {}
-          for component in ("northstar-run-contract", "northstar-host",
+          for component in ("northstar-run-contract", "northstar-run-evidence", "northstar-host",
                             "northstar-durable-run", "northstar-agent-interop",
                             "northstar-agent-runtime"):
               pyproject = tomllib.loads((Path("components") / component / "pyproject.toml").read_text())
@@ -65,7 +65,7 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p dist
-          for component in northstar-run-contract northstar-host northstar-durable-run \
+          for component in northstar-run-contract northstar-run-evidence northstar-host northstar-durable-run \
                             northstar-agent-interop northstar-agent-runtime; do
             python -m pip wheel --no-deps --wheel-dir dist "components/$component"
           done

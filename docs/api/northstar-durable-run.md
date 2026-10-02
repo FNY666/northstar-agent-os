@@ -90,7 +90,7 @@ A small local durable runner for the Northstar vertical slice.
 
 #### `StepPlan`
 
-- `input_digest()`
+- `input_digest` (property)
 #### `LeaseManager`
 
 A single-owner, expiring local lease persisted as strict JSON.
@@ -129,7 +129,7 @@ Small structured trace and metrics boundary for durable runs.
 #### `TraceSpan`
 
 - `from_dict(value: Any)`
-- `duration_ms()`
+- `duration_ms` (property)
 - `to_dict()`
 - `canonical_json()`
 #### `TraceRecorder`

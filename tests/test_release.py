@@ -1,6 +1,6 @@
 """Release readiness: one version for every packaged component.
 
-The five pip-installable components are released together from a single tag,
+The six pip-installable components are released together from a single tag,
 so their ``pyproject.toml`` versions must stay identical. Between releases the
 version carries a ``.devN`` suffix (unreleased development state); a *release*
 version is plain ``major.minor.patch`` with no suffix — the release workflow
@@ -17,6 +17,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 PACKAGED = (
     "northstar-run-contract",
+    "northstar-run-evidence",
     "northstar-host",
     "northstar-durable-run",
     "northstar-agent-interop",

@@ -35,6 +35,7 @@ API_DIR = ROOT / "docs" / "api"
 # it there).
 MANIFEST: dict[str, tuple[str, ...]] = {
     "northstar-run-contract": ("contract", "binding", "adapter", "audit", "policy"),
+    "northstar-run-evidence": ("evidence_contract", "evidence_chain"),
     "northstar-host": ("authorization", "workspace", "host_audit", "host_policy"),
     "northstar-durable-run": (
         "durable_contract",
@@ -168,6 +169,16 @@ def _signature(node: ast.FunctionDef | ast.AsyncFunctionDef | ast.ClassDef) -> s
     return f"{node.name}()"
 
 
+def _is_property(node: ast.FunctionDef | ast.AsyncFunctionDef) -> bool:
+    """Recognize property-like decorators so references do not show ``()``."""
+    for decorator in node.decorator_list:
+        if isinstance(decorator, ast.Name) and decorator.id in {"property", "cached_property"}:
+            return True
+        if isinstance(decorator, ast.Attribute) and decorator.attr in {"property", "cached_property"}:
+            return True
+    return False
+
+
 def _module_id(component: str, module: str) -> str:
     return module.replace(".__init__", "").replace("/", ".")
 
@@ -201,7 +212,8 @@ def _render_module(component: str, module: str, source: Path) -> list[str]:
             lines.append("")
             for member in node.body:
                 if isinstance(member, (ast.FunctionDef, ast.AsyncFunctionDef)) and not member.name.startswith("_"):
-                    lines.append(f"- `{_signature(member)}`")
+                    signature = f"`{member.name}` (property)" if _is_property(member) else f"`{_signature(member)}`"
+                    lines.append(f"- {signature}")
                     member_summary = _summary(ast.get_docstring(member, clean=True), cap=200)
                     if member_summary:
                         lines.append(f"  - {member_summary}")

@@ -19,6 +19,7 @@ help:
 	@echo "per-component test suites (py3.10+, no PYTHONPATH needed - the test"
 	@echo "modules bootstrap their sibling-component paths themselves):"
 	@echo "  cd components/northstar-agent-runtime   && python3 -m unittest discover -s tests"
+	@echo "  cd components/northstar-run-evidence    && python3 -m unittest discover -s tests"
 	@echo "  cd components/northstar-codex-sidecar   && python3 -m unittest discover -s tests"
 	@echo "  cd components/northstar-run-contract    && python3 -m unittest discover -s tests"
 	@echo "  cd components/northstar-host            && python3 -m unittest discover -s tests"
@@ -33,7 +34,8 @@ demo:
 
 test:
 	@set -e; \
-	for c in northstar-codex-sidecar northstar-run-contract northstar-host \
+	for c in northstar-codex-sidecar northstar-run-contract northstar-run-evidence \
+	         northstar-host \
 	         northstar-durable-run northstar-agent-interop northstar-agent-runtime; do \
 		echo "== $$c =="; \
 		(cd components/$$c && python3 -m unittest discover -s tests -p 'test_*.py'); \
@@ -59,6 +61,7 @@ install:
 	python3 -m venv .venv
 	./.venv/bin/python -m pip install --upgrade pip
 	./.venv/bin/pip install ./components/northstar-run-contract
+	./.venv/bin/pip install ./components/northstar-run-evidence
 	./.venv/bin/pip install ./components/northstar-host
 	./.venv/bin/pip install ./components/northstar-durable-run
 	./.venv/bin/pip install ./components/northstar-agent-interop
