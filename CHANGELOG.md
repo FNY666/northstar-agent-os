@@ -29,6 +29,13 @@ seccomp filter is a later hardening step, not claimed today"). Version stays
   "seccomp=on with the process backend is refused, not silently downgraded"
   and "a per-call seccomp payload may only tighten, never loosen". Reverting
   either turns its test red; baseline stays green.
+- **Governance bench** — three new `denial`-track cases, version
+  `northstar.governance.bench.v1` → `v2`, score 13/13 → 16/16:
+  denylist tables carry the kernel-verified numbers, `seccomp=on` refuses the
+  process backend, and a per-call `seccomp=off` cannot loosen an operator
+  `shell_seccomp=on`. Building the bench caught a real wiring bug first
+  (`shell_seccomp` was missing from `AgentRuntime._services()`, so the
+  tighten-only merge silently received `None`); fixed and green.
 - **Docs** — `docs/concepts/threat-model.md` residual risk #4 rewritten: no
   longer "no seccomp profile yet".
 

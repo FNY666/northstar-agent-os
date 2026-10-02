@@ -39,7 +39,7 @@ from tools import ToolLimits, ToolSandbox, build_default_registry
 
 #: Semantic version of the public case set. Bump when a case is added, removed,
 #: or its expected verdict changes — consumers pin against this string.
-BENCH_VERSION = "northstar.governance.bench.v1"
+BENCH_VERSION = "northstar.governance.bench.v2"
 
 USAGE_ERROR = 64
 
@@ -509,6 +509,86 @@ def _case_budget_turns(h: BenchHarness) -> BenchExpectation:
     )
 
 
+def _case_seccomp_denylist_tables(h: BenchHarness) -> BenchExpectation:
+    """Pure check: the denylist tables carry the verified numbers and assemble."""
+    from tools.seccomp import build_default_filter, denied_syscalls
+
+    ws = h.workspace()
+    tables = {"x86_64": denied_syscalls("x86_64"), "aarch64": denied_syscalls("aarch64")}
+    # Spot-check the highest-risk entries against the kernel-verified numbers.
+    expected = {
+        ("x86_64", "ptrace"): 101,
+        ("x86_64", "bpf"): 321,
+        ("x86_64", "kexec_load"): 246,
+        ("x86_64", "mount"): 165,
+        ("aarch64", "ptrace"): 117,
+        ("aarch64", "bpf"): 280,
+        ("aarch64", "kexec_load"): 104,
+        ("aarch64", "mount"): 40,
+    }
+    numbers_ok = all(tables[arch][name] == nr for (arch, name), nr in expected.items())
+    prog = build_default_filter()
+    well_formed = len(prog) > 0 and len(prog) % 8 == 0
+    # Wrap as a no-op runtime so the runner stays uniform.
+    runtime = h.runtime(workspace=ws, turns=[_text("engine-only")], config_kwargs={"max_turns": 1})
+    return BenchExpectation(
+        runtime=runtime,
+        workspace=ws,
+        expect_subtype="success",
+        notes="engine unit: denylist tables carry verified numbers; filter assembles",
+        engine_ok=(numbers_ok and well_formed),
+    )
+
+
+def _case_seccomp_on_refuses_process(h: BenchHarness) -> BenchExpectation:
+    ws = h.workspace()
+    runtime = h.runtime(
+        workspace=ws,
+        turns=[
+            _tool("Shell", {"command": "echo hi > seccomp_proof.txt", "seccomp": "on"}),
+            _text("done"),
+        ],
+        config_kwargs={
+            "allowed_tools": ("Shell",),
+            "shell_backend": "process",  # explicit: no bwrap on the bench host
+            "max_turns": 3,
+        },
+    )
+    return BenchExpectation(
+        runtime=runtime,
+        workspace=ws,
+        expect_subtype="success",
+        expect_min_denials=1,
+        forbid_paths=("seccomp_proof.txt",),
+        notes="seccomp=on with the process backend is refused, not silently downgraded",
+    )
+
+
+def _case_seccomp_payload_cannot_loosen(h: BenchHarness) -> BenchExpectation:
+    ws = h.workspace()
+    runtime = h.runtime(
+        workspace=ws,
+        turns=[
+            _tool("Shell", {"command": "echo hi > loosen_proof.txt", "seccomp": "off"}),
+            _text("done"),
+        ],
+        config_kwargs={
+            "allowed_tools": ("Shell",),
+            "shell_backend": "process",
+            "shell_seccomp": "on",  # operator requires the filter...
+            "max_turns": 3,
+        },
+    )
+    return BenchExpectation(
+        runtime=runtime,
+        workspace=ws,
+        expect_subtype="success",
+        expect_min_denials=1,
+        forbid_paths=("loosen_proof.txt",),
+        notes="operator --seccomp=on wins over a per-call seccomp=off (tighten-only)",
+    )
+
+
 def _case_unit_permission_engine_disallowed(h: BenchHarness) -> BenchExpectation:
     """Pure engine check (no loop) so the bench also covers the gate in isolation."""
     ws = h.workspace()
@@ -545,6 +625,9 @@ CASES: tuple[BenchCase, ...] = (
     BenchCase("budget.max_budget_usd", "budget", "USD ceiling subtype + early stop", _case_budget_usd),
     BenchCase("budget.max_tool_calls", "budget", "tool-call ceiling subtype", _case_budget_tool_calls),
     BenchCase("budget.max_turns", "budget", "turn ceiling subtype", _case_budget_turns),
+    BenchCase("denial.seccomp_denylist_tables", "denial", "denylist tables carry verified numbers", _case_seccomp_denylist_tables),
+    BenchCase("denial.seccomp_on_refuses_process", "denial", "seccomp=on refuses process backend", _case_seccomp_on_refuses_process),
+    BenchCase("denial.seccomp_payload_cannot_loosen", "denial", "per-call seccomp cannot loosen", _case_seccomp_payload_cannot_loosen),
 )
 
 
@@ -664,6 +747,7 @@ def _run_one(case: BenchCase, harness: BenchHarness) -> CaseResult:
                             "denied",
                             "refused",
                             "disallowed",
+                            "seccomp",
                         )
                     ):
                         sandbox_errors += 1
