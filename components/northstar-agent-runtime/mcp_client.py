@@ -268,7 +268,10 @@ class McpStdioClient:
                 stdout=subprocess.PIPE,
                 stderr=subprocess.DEVNULL,  # server logs never block the client
                 start_new_session=True,      # own process group for TERM->KILL cleanup
-                env=self.extra_env or None,
+                # Never None: an empty dict is a genuinely empty environment.
+                # `env or None` would silently fall back to full host inheritance
+                # when the allowlist yields nothing (fail-open).
+                env=dict(self.extra_env),
                 cwd=self.cwd or None,
             )
         except OSError as error:
