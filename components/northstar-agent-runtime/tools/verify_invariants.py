@@ -122,6 +122,7 @@ def run(component: Path, pattern: str) -> tuple[int, str]:
 
 def main() -> int:
     failures: list[str] = []
+    unknowns: list[str] = []
     for title, filename, edits, pattern, marker in GUARDS:
         with tempfile.TemporaryDirectory(prefix="nsar-guard-") as tmp:
             component = prepare(Path(tmp))
@@ -141,6 +142,7 @@ def main() -> int:
                 if unknown:
                     print(f"[    UNKNOWN] {title}")
                     print(f"            {output}")
+                    unknowns.append(f"{title}: {output}")
                     continue
                 hit = any(marker in line for line in names) if marker else bool(names)
                 status = "RED" if red else "STILL GREEN"
@@ -161,10 +163,12 @@ def main() -> int:
             print(f"\n[baseline copy] {'OK' if code == 0 else 'BROKEN'}: {' | '.join(tail)}")
             if code != 0:
                 failures.append("baseline copy of the untouched component is not green")
-    if failures:
+    if failures or unknowns:
         print("\nGUARD VERIFICATION PROBLEMS:")
         for item in failures:
             print(f"  - {item}")
+        for item in unknowns:
+            print(f"  - UNKNOWN/BLOCKED: {item}")
         return 1
     print(f"\nall {len(GUARDS)} guards verified: reverting each one turns its test red")
     return 0
