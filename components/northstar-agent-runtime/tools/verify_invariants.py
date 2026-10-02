@@ -73,6 +73,21 @@ GUARDS: list[tuple[str, str, list[tuple[str, str]], str, str]] = [
         "test_a_deny_stops_the_chain_and_cannot_be_overturned",
     ),
     (
+        "plugin digest verification rejects drift",
+        "plugin_manifest.py",
+        [("    if pinned_digest and plugin.content_digest != pinned_digest:",
+          "    if False and pinned_digest and plugin.content_digest != pinned_digest:")],
+        "test_plugin_manifest*",
+        "test_a_tampered_bundle_is_refused_until_it_is_reviewed_again",
+    ),
+    (
+        "skills audit refuses symlink escapes",
+        "skill_audit.py",
+        [("            if entry.is_symlink():\n                continue", "            if False and entry.is_symlink():\n                continue")],
+        "test_skill_check*",
+        "test_symlinked_skill_outside_root_is_not_audited",
+    ),
+    (
         "usage and cost are recorded before the generation span ends",
         "loop.py",
         # Anchored on the comment above the call, not on the call's indentation: this is a
