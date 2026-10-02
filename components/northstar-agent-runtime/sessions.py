@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import time
 import uuid
 from dataclasses import dataclass, field
@@ -49,6 +50,7 @@ RECORD_TYPES: tuple[str, ...] = (
 )
 
 SESSION_FILE_SUFFIX = ".jsonl"
+SESSION_ID_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
 MAX_RECORD_CHARS = 200_000
 TRUNCATION_NOTE = "[truncated by the session recorder]"
 
@@ -85,6 +87,7 @@ class SessionStore:
 
     def __post_init__(self) -> None:
         self.session_id = self.session_id or new_session_id()
+        validate_session_id(self.session_id)
         if self.directory is None:
             return
         path = Path(self.directory)
@@ -344,6 +347,13 @@ def summarise(records: Iterable[dict[str, Any]]) -> dict[str, Any]:
 
 def _timestamp() -> str:
     return time.strftime("%Y-%m-%dT%H:%M:%S", time.gmtime()) + f".{int((time.time() % 1) * 1000):03d}Z"
+
+
+def validate_session_id(session_id: str) -> str:
+    """Require a safe single path component for a session filename."""
+    if not isinstance(session_id, str) or not SESSION_ID_PATTERN.fullmatch(session_id):
+        raise ValueError(f"unsafe session id {session_id!r}; expected a safe single path component")
+    return session_id
 
 
 def resolve_session_id(session_id: str | None, store: SessionStore | None) -> str:

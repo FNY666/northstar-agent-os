@@ -1438,6 +1438,10 @@ Rebuild a provider-ready transcript from stored records.
 
 Cheap session statistics for the CLI's ``--inspect-session`` flag.
 
+#### `validate_session_id(session_id: str)`
+
+Require a safe single path component for a session filename.
+
 #### `resolve_session_id(session_id: str | None, store: SessionStore | None)`
 
 Pitfall guard: a run without a session store still needs a session id.
