@@ -397,6 +397,7 @@ def _add_mcp_arguments(parser: argparse.ArgumentParser) -> None:
         mcp.add_argument("--mcp-allow-sensitive-input", action="store_true", help="allow an MCP elicitation to ask for a password/token/secret field. Off by default: secrets do not travel through a tool transport")
         mcp.add_argument("--mcp-allow-roots", action="store_true", help="let an MCP server list workspace roots; when allowed it is offered exactly one root, the workspace itself")
         mcp.add_argument("--mcp-max-rounds", type=int, default=3, help="how many times one tool call may be re-asked for input before the client gives up")
+        mcp.add_argument("--mcp-seccomp", choices=("auto", "on", "off"), default="auto", help="seccomp-BPF denylist for MCP server processes on Linux (same escape-primitive denylist as the Shell process backend): auto applies it where loadable, on refuses to start where it is not, off runs the server command as-is")
 
 def _add_execution_arguments(parser: argparse.ArgumentParser) -> None:
         execution = parser.add_argument_group("execution delegation")
@@ -991,6 +992,7 @@ def _connect_mcp_clients(
             "allow_sensitive_input": bool(getattr(args, "mcp_allow_sensitive_input", False)),
             "allow_roots": bool(getattr(args, "mcp_allow_roots", False)),
             "max_input_rounds": getattr(args, "mcp_max_rounds", 3),
+            "seccomp": getattr(args, "mcp_seccomp", "auto"),
             "workspace_root": Path(args.workspace).resolve(),
         }
     clients: list[Any] = []
