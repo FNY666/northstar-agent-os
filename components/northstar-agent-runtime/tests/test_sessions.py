@@ -28,6 +28,23 @@ from sessions import (
 
 
 class SessionSpendTests(unittest.TestCase):
+    def test_session_spend_counts_trailing_assistant_usage_without_result(self):
+        records = [
+            {"type": "assistant", "model": "claude-sonnet-4-5", "usage": {"input_tokens": 100_000}},
+        ]
+        cost, usage = session_spend(records)
+        self.assertEqual(cost, 0.3)
+        self.assertEqual(usage.input_tokens, 100_000)
+
+    def test_session_spend_does_not_double_count_completed_run_usage(self):
+        records = [
+            {"type": "assistant", "model": "claude-sonnet-4-5", "usage": {"input_tokens": 100_000}},
+            {"type": "result", "total_cost_usd": 0.3},
+            {"type": "assistant", "model": "claude-sonnet-4-5", "usage": {"input_tokens": 50_000}},
+        ]
+        cost, _usage = session_spend(records)
+        self.assertEqual(cost, 0.45)
+
     def test_session_spend_aggregates_results_and_assistant_usage_only(self):
         records = [
             {"type": "session_start", "data": {"total_cost_usd": 999}},
