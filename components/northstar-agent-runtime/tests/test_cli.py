@@ -14,6 +14,7 @@ import subprocess
 import sys
 import unittest
 from pathlib import Path
+from unittest import mock
 
 import support  # noqa: F401
 from support import text_turn, tool_turn
@@ -705,6 +706,43 @@ class DoctorTests(unittest.TestCase):
         self.assertEqual(code, 1)
         self.assertIn("[fail] sidecar", out)
         self.assertIn("no socket at", out)
+
+    def test_doctor_reports_seccomp_status_for_the_process_backend(self):
+        tmp = Path(tempfile.mkdtemp(prefix="nsar-doctor-"))
+        code, out, _ = run_cli("doctor", "--workspace", str(tmp), "--sandbox", "process")
+        self.assertEqual(code, 0)
+        self.assertIn("seccomp", out)
+        self.assertIn("mode=auto", out)
+        self.assertIn("prctl wrapper", out)
+        self.assertIn("BPF instructions", out)
+
+    def test_doctor_reports_seccomp_off_as_a_warning(self):
+        tmp = Path(tempfile.mkdtemp(prefix="nsar-doctor-"))
+        code, out, _ = run_cli("doctor", "--workspace", str(tmp), "--sandbox", "process", "--seccomp", "off")
+        self.assertEqual(code, 0)  # warnings, not failures
+        self.assertIn("[warn] seccomp", out)
+        self.assertIn("mode=off", out)
+
+    def test_doctor_reports_seccomp_on_for_the_process_backend(self):
+        tmp = Path(tempfile.mkdtemp(prefix="nsar-doctor-"))
+        code, out, _ = run_cli("doctor", "--workspace", str(tmp), "--sandbox", "process", "--seccomp", "on")
+        self.assertEqual(code, 0)
+        self.assertIn("[ok]", out)
+        self.assertIn("seccomp", out)
+        self.assertIn("mode=on", out)
+
+    def test_doctor_warns_when_the_arch_has_no_verified_table(self):
+        import doctor
+
+        tmp = Path(tempfile.mkdtemp(prefix="nsar-doctor-"))
+        args = doctor.build_parser().parse_args(["--workspace", str(tmp), "--sandbox", "process"])
+        findings: list = []
+        with mock.patch.object(doctor.platform, "machine", return_value="riscv64"):
+            doctor._check_seccomp(args, findings, "process")
+        self.assertEqual(len(findings), 1)
+        self.assertEqual(findings[0].name, "seccomp")
+        self.assertEqual(findings[0].level, "warn")
+        self.assertIn("falls through to ALLOW", findings[0].message)
 
 
 class VersionFlagTests(unittest.TestCase):
