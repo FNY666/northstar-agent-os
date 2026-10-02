@@ -269,6 +269,15 @@ class RuntimeSessionTests(RuntimeTestCase):
         self.assertIn("omitted by configuration", body)
         self.assertIn("Read", body)
 
+    def test_redacted_mode_drops_error_tool_output_bodies(self):
+        from providers.base import ToolResultBlock
+        secret = "ERROR-SECRET-BODY"
+        store = SessionStore(self.workspace())
+        runtime = self.runtime(workspace=self.workspace(), sessions=store, record_tool_output_in_session=False)
+        runtime._record_tool_message(UserMessage(content=(ToolResultBlock(tool_use_id="t1", content=secret, is_error=True),)))
+        body = store.path.read_text(encoding="utf-8")
+        self.assertNotIn(secret, body)
+
     def test_session_stats_summarise_a_run(self):
         store = SessionStore(self.workspace(), session_id="ns-stats")
         store.append("session_start", {})

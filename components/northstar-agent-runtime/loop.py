@@ -2130,7 +2130,7 @@ class AgentRuntime:
         blocks: list[dict[str, Any]] = []
         for block in message.tool_results:
             text = block.text()
-            if not self.config.record_tool_output_in_session and not block.is_error:
+            if not self.config.record_tool_output_in_session:
                 text = f"[tool output omitted by configuration: {len(text)} chars]"
             blocks.append({"type": "tool_result", "tool_use_id": block.tool_use_id, "content": text, "is_error": block.is_error})
         self.sessions.append(
