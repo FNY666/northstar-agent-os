@@ -9,9 +9,11 @@ This initial component contains:
 - strict, versioned `EvidenceRef` and `EvidenceEntry` data structures;
 - deterministic canonical JSON (ASCII object keys, safe-range integers, no floating-point values) and domain-separated SHA-256 subject/entry digests;
 - an append-only in-memory `EvidenceChain` with sequence, run identity, previous-digest and idempotency checks;
-- `verify_chain()` for structured offline integrity results.
+- `verify_chain()` for structured offline integrity results;
+- `evidence_store.EvidenceStore`: a file-backed JSONL store (one canonical-JSON entry per line, fsync on append, full chain re-verified at every open so tampering fails closed);
+- sealed manifests: `EvidenceStore.seal(signer)` attests to the chain head with a host-injected `SealSigner`; `verify_manifest()` / `verify_seal()` check the seal, with unknown `key_id` reported as *unknown authenticity*, never as ok.
 
-Persistence, bundle manifests, signatures, key management, CLI commands, and runtime/host/durable-run adapters are not implemented yet.
+Key management, CLI commands, and runtime/host/durable-run adapters are not implemented yet. The bundled `HmacTestSigner` is test-only: a shared-secret MAC is not non-repudiation, and test keys must never seal real evidence.
 
 A valid hash chain only detects inconsistencies relative to its entries. It does **not** prove who created the chain or prevent an attacker from replacing the entire chain. Authenticity requires a trusted external signature over a sealed manifest/head digest.
 

@@ -1,5 +1,31 @@
 # Northstar Agent OS — initial public component
 
+## Unreleased (thirtieth batch) — run-evidence persistence and sealed manifests
+
+Continues #44's roadmap (persistence was deliberately left out of the
+in-memory primitives):
+
+- **File-backed `EvidenceStore`** (`components/northstar-run-evidence/evidence_store.py`):
+  one run's chain persisted as JSONL, one canonical-JSON entry per line, fsync
+  on every append. Every open replays and verifies the whole chain, so a
+  flipped byte, a truncated line, or a wrong run_id fails closed at open time
+  instead of serving tampered entries. Rejected appends never leave partial
+  lines; `source_id` idempotent retries survive reload without duplicating.
+- **Sealed manifests with host-injected signers:** `store.seal(signer)` signs
+  the canonical manifest bytes (schema version, run_id, head digest, entry
+  count, sealed_at, signer identity). `verify_manifest()` / `verify_seal()`
+  never conflate unknown with ok: an untrusted `key_id` reports
+  `unknown-key`, a rewritten head reports `bad-signature`, and a seal over a
+  moved-on chain does not verify against the store. The bundled
+  `HmacTestSigner` is test-only — a shared-secret MAC is not non-repudiation,
+  and the module docstring says so plainly. Production signers (HSM/KMS/
+  Sigstore) are injected by the host, which also owns key resolution.
+- Honest limits kept explicit: single-writer contract, no confidentiality
+  (plaintext JSONL), no trusted timestamp (`sealed_at` is caller-supplied but
+  signature-covered).
+
+**Verification:** 40 run-evidence tests green (14 new), full clinic below.
+
 ## Unreleased (twenty-ninth batch) — MCP child environment allowlist + fail-open fix
 
 Two items closing the MCP subprocess environment leak (2026-10-03, #44/#45 and
