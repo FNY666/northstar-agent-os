@@ -36,6 +36,14 @@ class SessionSpendTests(unittest.TestCase):
         self.assertEqual(cost, 0.3)
         self.assertEqual(usage.input_tokens, 100_000)
 
+    def test_session_spend_prices_each_interrupted_model_segment_separately(self):
+        records = [
+            {"type": "assistant", "model": "claude-haiku-4-5", "usage": {"input_tokens": 100_000}},
+            {"type": "assistant", "model": "claude-sonnet-4-5", "usage": {"input_tokens": 100_000}},
+        ]
+        cost, _usage = session_spend(records)
+        self.assertEqual(cost, 0.38)
+
     def test_session_spend_does_not_double_count_completed_run_usage(self):
         records = [
             {"type": "assistant", "model": "claude-sonnet-4-5", "usage": {"input_tokens": 100_000}},

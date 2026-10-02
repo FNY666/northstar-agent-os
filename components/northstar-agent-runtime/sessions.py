@@ -284,8 +284,12 @@ def session_spend(records: Sequence[dict[str, Any]]) -> tuple[float, Usage]:
         elif record.get("type") == "assistant":
             usage = Usage.from_mapping(record.get("usage"))
             total_usage = total_usage + usage
+            model = str(record.get("model", "") or trailing_model)
+            if trailing_usage.total_tokens and model != trailing_model:
+                total_cost += compute_cost(trailing_usage, trailing_model).total_usd
+                trailing_usage = Usage()
             trailing_usage = trailing_usage + usage
-            trailing_model = str(record.get("model", "") or trailing_model)
+            trailing_model = model
     if trailing_usage.total_tokens:
         total_cost += compute_cost(trailing_usage, trailing_model).total_usd
     return round(total_cost, 10), total_usage
