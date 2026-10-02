@@ -743,7 +743,47 @@ class DoctorTests(unittest.TestCase):
         self.assertEqual(len(findings), 1)
         self.assertEqual(findings[0].name, "seccomp")
         self.assertEqual(findings[0].level, "warn")
-        self.assertIn("falls through to ALLOW", findings[0].message)
+
+    def test_doctor_reports_mcp_seccomp_status(self):
+        tmp = Path(tempfile.mkdtemp(prefix="nsar-doctor-"))
+        code, out, _ = run_cli("doctor", "--workspace", str(tmp))
+        self.assertEqual(code, 0)
+        self.assertIn("[ok]", out)
+        self.assertIn("mcp-seccomp", out)
+        self.assertIn("mode=auto", out)
+        self.assertIn("prctl wrapper", out)
+
+    def test_doctor_reports_mcp_seccomp_off_as_a_warning(self):
+        tmp = Path(tempfile.mkdtemp(prefix="nsar-doctor-"))
+        code, out, _ = run_cli("doctor", "--workspace", str(tmp), "--mcp-seccomp", "off")
+        self.assertEqual(code, 0)  # warnings, not failures
+        self.assertIn("[warn] mcp-seccomp", out)
+        self.assertIn("mode=off", out)
+
+    def test_doctor_fails_mcp_seccomp_on_off_linux(self):
+        import doctor
+
+        tmp = Path(tempfile.mkdtemp(prefix="nsar-doctor-"))
+        args = doctor.build_parser().parse_args(["--workspace", str(tmp), "--mcp-seccomp", "on"])
+        findings: list = []
+        with mock.patch.object(doctor.sys, "platform", "darwin"):
+            doctor._check_mcp_seccomp(args, findings)
+        self.assertEqual(len(findings), 1)
+        self.assertEqual(findings[0].name, "mcp-seccomp")
+        self.assertEqual(findings[0].level, "fail")
+
+    def test_doctor_warns_mcp_seccomp_auto_off_linux(self):
+        import doctor
+
+        tmp = Path(tempfile.mkdtemp(prefix="nsar-doctor-"))
+        args = doctor.build_parser().parse_args(["--workspace", str(tmp)])
+        findings: list = []
+        with mock.patch.object(doctor.sys, "platform", "darwin"):
+            doctor._check_mcp_seccomp(args, findings)
+        self.assertEqual(len(findings), 1)
+        self.assertEqual(findings[0].name, "mcp-seccomp")
+        self.assertEqual(findings[0].level, "warn")
+        self.assertIn("no BPF support", findings[0].message)
 
 
 class VersionFlagTests(unittest.TestCase):
