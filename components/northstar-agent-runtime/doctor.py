@@ -12,6 +12,7 @@ import argparse
 import importlib.util
 import json
 import os
+import platform
 import stat
 import sys
 from dataclasses import dataclass
@@ -54,6 +55,12 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
         choices=("auto", "bwrap", "process"),
         default="auto",
         help="Shell tool sandbox backend a run would use (default: auto)",
+    )
+    parser.add_argument(
+        "--seccomp",
+        choices=("auto", "on", "off"),
+        default="auto",
+        help="seccomp-BPF denylist mode a run would use (default: auto)",
     )
 
 
@@ -203,8 +210,12 @@ def _check_sidecar(args: argparse.Namespace, findings: list[Finding]) -> None:
         findings.append(Finding("sidecar", "ok", "off - CodexReadOnly tool is not registered (pass --sidecar-socket to enable)"))
 
 
-def _check_sandbox(args: argparse.Namespace, findings: list[Finding]) -> None:
-    """Check the selected Shell sandbox backend."""
+def _check_sandbox(args: argparse.Namespace, findings: list[Finding]) -> str | None:
+    """Check the selected Shell sandbox backend.
+
+    Returns the resolved backend ("bwrap" | "process"), or None when it could
+    not be resolved — the seccomp check reuses it so the probe runs once.
+    """
     try:
         from tools.os_sandbox import SandboxError, probe_capabilities, resolve_backend
 
@@ -231,10 +242,111 @@ def _check_sandbox(args: argparse.Namespace, findings: list[Finding]) -> None:
                         "See docs/concepts/threat-model.md",
                     )
                 )
+            return chosen
         except SandboxError as error:
             findings.append(Finding("sandbox", "fail", str(error)))
+            return None
     except Exception as error:  # noqa: BLE001
         findings.append(Finding("sandbox", "warn", f"could not probe sandbox: {error}"))
+        return None
+
+
+#: Host arch names with a kernel-verified syscall table in tools/seccomp.py.
+_ARCH_TABLES = {
+    "x86_64": "x86_64",
+    "amd64": "x86_64",
+    "aarch64": "aarch64",
+    "arm64": "aarch64",
+}
+
+
+def _check_seccomp(args: argparse.Namespace, findings: list[Finding], backend: str | None) -> None:
+    """Report whether the seccomp-BPF denylist will actually be applied.
+
+    Doctor predicts the run: mode × backend × platform × arch, the same
+    combination ``tools/os_sandbox.py`` decides on. It never claims the filter
+    is active when the host cannot load it.
+    """
+    try:
+        from tools.seccomp import SeccompError, build_default_filter, denied_syscalls, validate_mode
+    except Exception as error:  # noqa: BLE001
+        findings.append(Finding("seccomp", "warn", f"could not load the seccomp module: {error}"))
+        return
+    mode = getattr(args, "seccomp", "auto") or "auto"
+    try:
+        mode = validate_mode(mode)
+    except SeccompError as error:
+        findings.append(Finding("seccomp", "fail", str(error)))
+        return
+    try:
+        program = build_default_filter()
+    except Exception as error:  # noqa: BLE001
+        findings.append(Finding("seccomp", "fail", f"could not assemble the denylist: {error}"))
+        return
+    size_note = f"{len(program) // 8} BPF instructions ({len(program)} bytes)"
+
+    if mode == "off":
+        findings.append(
+            Finding("seccomp", "warn", f"mode=off - denylist disabled by operator choice ({size_note} not loaded)")
+        )
+        return
+    if not sys.platform.startswith("linux"):
+        # Mirrors run_sandboxed: mode=on is refused, mode=auto degrades with a note.
+        if mode == "on":
+            findings.append(
+                Finding(
+                    "seccomp",
+                    "fail",
+                    f"mode=on requires a platform that can load a BPF filter (this host is {sys.platform}) - "
+                    "a run would refuse to start",
+                )
+            )
+        else:
+            findings.append(
+                Finding(
+                    "seccomp",
+                    "warn",
+                    f"mode={mode} on {sys.platform}: no BPF support - the denylist cannot be applied on this host",
+                )
+            )
+        return
+    if backend not in ("bwrap", "process"):
+        findings.append(
+            Finding(
+                "seccomp",
+                "warn",
+                f"mode={mode} but the sandbox backend did not resolve - cannot predict filter application "
+                f"({size_note} assembled)",
+            )
+        )
+        return
+    machine = platform.machine().lower()
+    arch = _ARCH_TABLES.get(machine)
+    table_ok = arch is not None
+    if table_ok:
+        try:
+            denied_syscalls(arch)
+        except SeccompError:
+            table_ok = False
+    if not table_ok:
+        findings.append(
+            Finding(
+                "seccomp",
+                "warn",
+                f"mode={mode}, backend={backend}: no verified syscall table for arch {machine!r} - "
+                f"the filter falls through to ALLOW ({size_note} assembled)",
+            )
+        )
+        return
+    mechanism = "bwrap --seccomp FD" if backend == "bwrap" else "prctl wrapper"
+    findings.append(
+        Finding(
+            "seccomp",
+            "ok",
+            f"mode={mode}, backend={backend}: denylist will be applied via {mechanism}; "
+            f"arch {arch} table verified; {size_note}",
+        )
+    )
 
 
 def _check_workspace_config(args: argparse.Namespace, findings: list[Finding]) -> None:
@@ -433,7 +545,8 @@ def _checks(args: argparse.Namespace) -> list[Finding]:
     _check_workspace(args, findings)
     _check_session_dir(args, findings)
     _check_sidecar(args, findings)
-    _check_sandbox(args, findings)
+    backend = _check_sandbox(args, findings)
+    _check_seccomp(args, findings, backend)
     _check_workspace_config(args, findings)
     _check_skill_supply_chain(args, findings)
     _check_plugins(args, findings)
