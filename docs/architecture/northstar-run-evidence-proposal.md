@@ -128,7 +128,7 @@ Verifier 返回结构化报告，而不是一个易混淆的布尔值：
   objects/sha256/ab/<full-digest>   # 仅限显式 allowlist 的小型对象/工件
 ```
 
-本地活动账本建议位于 workspace 的 `.northstar/evidence/<safe-run-id>/`。目录 `0700`、文件 `0600`，拒绝 symlink、非 regular file 和路径逃逸；创建/替换 manifest 使用同目录临时文件 + fsync + 原子 rename。bundle 是普通目录；压缩格式可稍后加入，避免 MVP 引入 archive traversal 风险。
+本地活动账本位于 workspace 的 `.northstar/evidence/<safe-run-id>/ledger.jsonl`。当前 `EvidenceStore` 要求 root 由当前用户所有且不可被 group/world 写入；目录组件通过 `O_NOFOLLOW` 逐级打开，run directory 以 pinned dirfd 操作，防止路径替换重定向。每个 run 目录为 `0700`，lock/ledger/temp 文件为 `0600`；拒绝 symlink、非 regular file、路径逃逸和非 canonical ledger 行。追加在 `flock` 下重写最多 64 MiB 的 ledger 到同目录临时文件，fsync 后通过原子 rename 替换，并 fsync 目录。该实现为 O(n) append，要求支持 `flock`/fsync/原子 rename 的本地 POSIX 文件系统；bundle manifest 和对象存储仍未实现。bundle 是普通目录；压缩格式可稍后加入，避免 MVP 引入 archive traversal 风险。
 
 ### 6.2 状态机
 
@@ -138,7 +138,8 @@ open ── append entries ──> open ── completeness check + sign ──>
 sealed ── digest / signature / identity mismatch ──────────────> invalid
 ```
 
-- `open` 账本允许尾部 torn record 的恢复策略，但必须将恢复情况记录为 warning，并且不得直接签成 complete。
+- `open` 账本通过 copy-on-write 替换实现原子追加：崩溃时 ledger 保留为旧的完整版本或新的完整版本，孤立 temp 文件在后续加锁操作时清理。当前不自动修复历史 torn/malformed 文件（缺少最终换行也会 fail closed）；未来若增加 tail recovery，必须记录 warning，且不得直接签成 complete。
+- 持久化 `append` 与 `append_entry` 必须携带稳定 `source_id`。若 rename 成功但目录 fsync 失败，抛出 commit-outcome-uncertain 错误；调用者以相同 ID 重试，可在条目已可见时幂等返回、在崩溃回滚到旧账本时安全追加。
 - `sealed` bundle 中任何 ledger 行损坏、摘要不匹配、对象缺失、source link 不一致或签名校验失败均视为失败，不得通过“忽略坏行”降级成功。
 - 所有来源均为多文件写入；MVP **不宣称跨 EventStore/session/ledger 有原子事务**。中途崩溃保留为 incomplete，并通过 source idempotency 与恢复扫描进行对账。
 - seal 操作仅在所选 capture policy 所要求的证据全部到齐且跨来源 identity 一致时成功。缺少签名适配器时可生成仅供本地诊断的 incomplete/unsigned bundle，但 `verify` 必须标出未知真实性。

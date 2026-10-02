@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "northstar-run-evidence"
-description = "Strict evidence records and hash-chain primitives for Northstar Agent OS."
+description = "Strict evidence records, hash chains, and local persistence for Northstar Agent OS."
 readme = "README.md"
 license = { text = "MIT" }
 requires-python = ">=3.10"
@@ -22,4 +22,4 @@ classifiers = [
 dependencies = []
 
 [tool.setuptools]
-py-modules = ["evidence_contract", "evidence_chain"]
+py-modules = ["evidence_contract", "evidence_chain", "evidence_store"]
