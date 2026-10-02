@@ -15,7 +15,13 @@ import sys
 from pathlib import Path
 from typing import Any, Iterable
 
-from sessions import SESSION_FILE_SUFFIX, load_jsonl, summarise
+from sessions import (
+    SESSION_FILE_SUFFIX,
+    SessionIntegrityError,
+    load_jsonl,
+    summarise,
+    validate_session_id,
+)
 
 USAGE_ERROR = 64  # same convention as cli.USAGE_ERROR, kept local to avoid an import cycle
 CONTENT_PREVIEW = 200
@@ -111,9 +117,9 @@ def _resolve_session_arg(session_id: str, directory: Path) -> str:
     from product_path import LATEST_SESSION_ALIASES, resolve_session_id
 
     raw = (session_id or "").strip()
-    if not raw or raw not in LATEST_SESSION_ALIASES:
-        return raw
-    return resolve_session_id(raw, directory)
+    if raw in LATEST_SESSION_ALIASES:
+        raw = resolve_session_id(raw, directory)
+    return validate_session_id(raw)
 
 
 def run_sessions(args: argparse.Namespace) -> int:
@@ -123,43 +129,47 @@ def run_sessions(args: argparse.Namespace) -> int:
         print(f"sessions: {error}", file=sys.stderr)
         return USAGE_ERROR
 
-    if args.session_command == "list":
-        return _list_sessions(directory, json_out=bool(getattr(args, "json", False)))
-    if args.session_command == "show":
-        try:
-            session_id = _resolve_session_arg(args.session_id, directory)
-        except ValueError as error:
-            print(f"sessions: {error}", file=sys.stderr)
-            return USAGE_ERROR
-        return _show_session(directory, session_id, json_out=bool(getattr(args, "json", False)))
-    if args.session_command == "export":
-        try:
-            session_id = _resolve_session_arg(args.session_id, directory)
-        except ValueError as error:
-            print(f"sessions: {error}", file=sys.stderr)
-            return USAGE_ERROR
-        return _export_session(directory, session_id)
-    if args.session_command == "checkpoints":
-        session = getattr(args, "session", "") or ""
-        if session:
+    try:
+        if args.session_command == "list":
+            return _list_sessions(directory, json_out=bool(getattr(args, "json", False)))
+        if args.session_command == "show":
             try:
-                session = _resolve_session_arg(session, directory)
+                session_id = _resolve_session_arg(args.session_id, directory)
             except ValueError as error:
                 print(f"sessions: {error}", file=sys.stderr)
                 return USAGE_ERROR
-        return _checkpoints_session(directory, session, json_out=bool(getattr(args, "json", False)))
-    if args.session_command == "replay":
-        try:
-            session_id = _resolve_session_arg(args.session_id, directory)
-        except ValueError as error:
-            print(f"sessions: {error}", file=sys.stderr)
-            return USAGE_ERROR
-        return _replay_session(
-            directory,
-            session_id,
-            json_out=bool(getattr(args, "json", False)),
-            from_checkpoint=getattr(args, "from_checkpoint", None),
-        )
+            return _show_session(directory, session_id, json_out=bool(getattr(args, "json", False)))
+        if args.session_command == "export":
+            try:
+                session_id = _resolve_session_arg(args.session_id, directory)
+            except ValueError as error:
+                print(f"sessions: {error}", file=sys.stderr)
+                return USAGE_ERROR
+            return _export_session(directory, session_id)
+        if args.session_command == "checkpoints":
+            session = getattr(args, "session", "") or ""
+            if session:
+                try:
+                    session = _resolve_session_arg(session, directory)
+                except ValueError as error:
+                    print(f"sessions: {error}", file=sys.stderr)
+                    return USAGE_ERROR
+            return _checkpoints_session(directory, session, json_out=bool(getattr(args, "json", False)))
+        if args.session_command == "replay":
+            try:
+                session_id = _resolve_session_arg(args.session_id, directory)
+            except ValueError as error:
+                print(f"sessions: {error}", file=sys.stderr)
+                return USAGE_ERROR
+            return _replay_session(
+                directory,
+                session_id,
+                json_out=bool(getattr(args, "json", False)),
+                from_checkpoint=getattr(args, "from_checkpoint", None),
+            )
+    except (OSError, SessionIntegrityError) as error:
+        print(f"sessions: {error}", file=sys.stderr)
+        return 1
     print("sessions: pass a subcommand: list, show, export, checkpoints or replay (--help for flags)", file=sys.stderr)
     return USAGE_ERROR
 

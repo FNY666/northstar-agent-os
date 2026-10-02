@@ -92,6 +92,21 @@ class OsSandboxProcessBackendTests(RuntimeTestCase):
         self.assertIn("backend=process", body)
         self.assertIn("isolation=process", body)
 
+    def test_process_backend_terminates_a_command_that_exceeds_output_cap(self):
+        result = run_sandboxed(
+            self._request(
+                [sys.executable, "-c", "import os; chunk=b'x'*65536\nwhile True: os.write(1, chunk)"],
+                timeout_ms=5_000,
+                max_output_bytes=1_024,
+            ),
+            backend="process",
+        )
+        self.assertFalse(result.timed_out)
+        self.assertTrue(result.truncated)
+        self.assertEqual(len(result.stdout.encode("utf-8")), 1_024)
+        self.assertIn("output cap", result.detail)
+        self.assertIsNotNone(result.exit_code)
+
     def test_process_backend_pins_cwd_inside_workspace(self):
         result = run_sandboxed(
             self._request([sys.executable, "-c", "import os; print(os.getcwd())"]),

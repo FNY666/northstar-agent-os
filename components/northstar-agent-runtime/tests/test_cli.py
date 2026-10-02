@@ -879,6 +879,28 @@ class SessionViewTests(unittest.TestCase):
         self.assertEqual(code, 1)
         self.assertIn("no transcript", err)
 
+    def test_session_view_commands_reject_path_traversal_ids(self):
+        outside = Path(self.session_dir).parent / "outside.jsonl"
+        outside.write_text(
+            '{"index":0,"session_id":"outside","type":"user_prompt",'
+            '"role":"user","content":[{"type":"text","text":"must not leak"}]}\n',
+            encoding="utf-8",
+        )
+        invocations = (
+            ("show", "../outside"),
+            ("export", "../outside"),
+            ("replay", "../outside"),
+            ("checkpoints", "--session", "../outside"),
+        )
+        for invocation in invocations:
+            with self.subTest(invocation=invocation):
+                code, out, err = run_cli(
+                    "sessions", invocation[0], "--session-dir", self.session_dir, *invocation[1:]
+                )
+                self.assertEqual(code, USAGE_ERROR)
+                self.assertNotIn("must not leak", out)
+                self.assertIn("safe single path component", err)
+
     def test_sessions_without_a_subcommand_is_a_usage_error(self):
         code, _, err = run_cli("sessions")
         self.assertEqual(code, USAGE_ERROR)
