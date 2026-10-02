@@ -1506,7 +1506,7 @@ The lease owner: the run's own correlation id when it has one.
 
 Source: `components/northstar-agent-runtime/session_view.py`
 
-Read-side of session transcripts: list, show, replay, export and search.
+Read-side of session transcripts: list, show, replay, export, search and UI.
 
 #### `resolve_view_session_dir(args: argparse.Namespace)`
 
@@ -1515,6 +1515,24 @@ Session directory for a sessions subcommand: explicit wins, else product default
 #### `add_arguments(parser: argparse.ArgumentParser)`
 
 #### `run_sessions(args: argparse.Namespace)`
+
+### `session_ui`
+
+Source: `components/northstar-agent-runtime/session_ui.py`
+
+Build a self-contained, offline interactive replay page for one transcript.
+
+#### `render_replay_page(session_id: str, records: Iterable[dict[str, Any]], summary: dict[str, Any] | None=None, *, dropped_trailing_lines: int=0)`
+
+Render the session's events and summary as self-contained interactive HTML.
+
+#### `write_replay_page(session_dir: str | Path, session_id: str, output: str | Path | None=None)`
+
+Create a mode-0600 HTML replay file without following or overwriting a path.
+
+#### `open_replay_page(path: str | Path)`
+
+Ask the host's registered browser to open a generated local file URL.
 
 ### `sidecar_client`
 

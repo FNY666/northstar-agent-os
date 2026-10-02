@@ -92,6 +92,7 @@ MANIFEST: dict[str, tuple[str, ...]] = {
         "sessions",
         "session_lease",
         "session_view",
+        "session_ui",
         "sidecar_client",
         "skill_audit",
         "skill_check",

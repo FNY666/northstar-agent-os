@@ -9,6 +9,7 @@ from __future__ import annotations
 import io
 import json
 import contextlib
+import stat
 import tempfile
 import subprocess
 import sys
@@ -938,6 +939,114 @@ class SessionViewTests(unittest.TestCase):
         self.assertEqual({match["type"] for match in matches}, {"user_prompt", "assistant"})
         self.assertEqual(len({match["session_id"] for match in matches}), 1)
 
+    def test_sessions_ui_writes_private_self_contained_replay_page(self):
+        session = self.find_session()
+        output = Path(self.tmp) / "interactive-replay.html"
+        code, out, err = run_cli(
+            "sessions", "ui", session, "--session-dir", self.session_dir,
+            "--output", str(output),
+        )
+        self.assertEqual(code, 0, err)
+        self.assertIn("owner-only permissions: 0600", out)
+        self.assertEqual(stat.S_IMODE(output.stat().st_mode), 0o600)
+        page = output.read_text(encoding="utf-8")
+        self.assertIn('id="events"', page)
+        self.assertIn('id="scrubber"', page)
+        self.assertIn('id="speed"', page)
+        self.assertIn("Playback follows the visible, filtered event list", page)
+        self.assertIn("tool_result", page)
+        self.assertNotIn('src="http', page)
+        self.assertNotIn("https://", page)
+
+    def test_sessions_ui_escapes_transcript_html_and_refuses_overwrite(self):
+        session = "ns-ui-xss-check"
+        transcript = Path(self.session_dir) / f"{session}.jsonl"
+        transcript.write_text(
+            json.dumps(
+                {
+                    "index": 0,
+                    "session_id": session,
+                    "type": "user_prompt",
+                    "role": "user",
+                    "content": [{"type": "text", "text": "</script><script>alert(1)</script>"}],
+                }
+            ) + "\n",
+            encoding="utf-8",
+        )
+        output = Path(self.tmp) / "xss-replay.html"
+        code, _out, err = run_cli(
+            "sessions", "ui", session, "--session-dir", self.session_dir, "--output", str(output)
+        )
+        self.assertEqual(code, 0, err)
+        page = output.read_text(encoding="utf-8")
+        self.assertNotIn("</script><script>alert(1)", page)
+        self.assertIn("\\u003c/script\\u003e\\u003cscript\\u003ealert(1)", page)
+
+        code, _out, err = run_cli(
+            "sessions", "ui", session, "--session-dir", self.session_dir, "--output", str(output)
+        )
+        self.assertEqual(code, 1)
+        self.assertIn("File exists", err)
+        self.assertIn("alert(1)", output.read_text(encoding="utf-8"))
+
+    def test_sessions_ui_normalizes_non_finite_numbers_for_strict_json(self):
+        session = "ns-ui-non-finite"
+        transcript = Path(self.session_dir) / f"{session}.jsonl"
+        transcript.write_text(
+            json.dumps(
+                {
+                    "index": 0,
+                    "session_id": session,
+                    "type": "user_prompt",
+                    "content": [{"type": "text", "text": "inspect"}],
+                    "metrics": {"score": float("nan"), "limit": float("inf")},
+                }
+            ) + "\n",
+            encoding="utf-8",
+        )
+        output = Path(self.tmp) / "non-finite-replay.html"
+        code, _out, err = run_cli(
+            "sessions", "ui", session, "--session-dir", self.session_dir, "--output", str(output)
+        )
+        self.assertEqual(code, 0, err)
+        page = output.read_text(encoding="utf-8")
+        data = page.split('<script id="session-data" type="application/json">', 1)[1].split("</script>", 1)[0]
+        self.assertEqual(json.loads(data)["records"][0]["metrics"], {"score": None, "limit": None})
+        self.assertNotIn(":NaN", data)
+        self.assertNotIn(":Infinity", data)
+
+    def test_sessions_ui_disables_playback_for_one_visible_event(self):
+        session = "ns-ui-single-event"
+        transcript = Path(self.session_dir) / f"{session}.jsonl"
+        transcript.write_text(
+            json.dumps({"index": 0, "session_id": session, "type": "user_prompt", "content": "one"}) + "\n",
+            encoding="utf-8",
+        )
+        output = Path(self.tmp) / "single-event-replay.html"
+        code, _out, err = run_cli(
+            "sessions", "ui", session, "--session-dir", self.session_dir, "--output", str(output)
+        )
+        self.assertEqual(code, 0, err)
+        page = output.read_text(encoding="utf-8")
+        self.assertIn("playButton.disabled = visible.length < 2;", page)
+        self.assertIn("on = Boolean(on && visible.length > 1);", page)
+
+    def test_sessions_ui_refuses_symlink_output(self):
+        session = self.find_session()
+        target = Path(self.tmp) / "target.html"
+        target.write_text("do not overwrite", encoding="utf-8")
+        output = Path(self.tmp) / "replay-link.html"
+        try:
+            output.symlink_to(target)
+        except (OSError, NotImplementedError):  # pragma: no cover - host policy
+            self.skipTest("symlinks are unavailable")
+        code, _out, err = run_cli(
+            "sessions", "ui", session, "--session-dir", self.session_dir, "--output", str(output)
+        )
+        self.assertEqual(code, 1)
+        self.assertTrue(output.is_symlink())
+        self.assertEqual(target.read_text(encoding="utf-8"), "do not overwrite")
+
     def test_session_view_commands_reject_path_traversal_ids(self):
         outside = Path(self.session_dir).parent / "outside.jsonl"
         outside.write_text(
@@ -949,6 +1058,7 @@ class SessionViewTests(unittest.TestCase):
             ("show", "../outside"),
             ("export", "../outside"),
             ("replay", "../outside"),
+            ("ui", "../outside"),
             ("checkpoints", "--session", "../outside"),
         )
         for invocation in invocations:
