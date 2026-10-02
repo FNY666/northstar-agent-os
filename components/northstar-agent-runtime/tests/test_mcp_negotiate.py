@@ -186,7 +186,7 @@ class NegotiationSubprocessTests(unittest.TestCase):
         saved = dict(os.environ)
         os.environ.update({"MRTR_SERVER_MODE": mode, "MRTR_SERVER_WIRE": str(wire)})
         try:
-            client = McpStdioClient("demo", [sys.executable, str(fixture)], timeout_ms=8_000, **kwargs)  # type: ignore[arg-type]
+            client = McpStdioClient("demo", [sys.executable, str(fixture)], timeout_ms=8_000, env={"MRTR_SERVER_MODE": mode, "MRTR_SERVER_WIRE": str(wire)}, **kwargs)  # type: ignore[arg-type]
             client.connect()
         finally:
             os.environ.clear()
