@@ -39,7 +39,7 @@ from tools import ToolLimits, ToolSandbox, build_default_registry
 
 #: Semantic version of the public case set. Bump when a case is added, removed,
 #: or its expected verdict changes — consumers pin against this string.
-BENCH_VERSION = "northstar.governance.bench.v2"
+BENCH_VERSION = "northstar.governance.bench.v3"
 
 USAGE_ERROR = 64
 
@@ -540,17 +540,23 @@ def _case_seccomp_denylist_tables(h: BenchHarness) -> BenchExpectation:
     )
 
 
-def _case_seccomp_on_refuses_process(h: BenchHarness) -> BenchExpectation:
+def _case_seccomp_filter_live_on_process(h: BenchHarness) -> BenchExpectation:
+    # Behavioral proof the prctl wrapper really loads the filter: only a live
+    # SECCOMP_MODE_FILTER lets the command observe Seccomp: 2 and create the
+    # proof file.
     ws = h.workspace()
     runtime = h.runtime(
         workspace=ws,
         turns=[
-            _tool("Shell", {"command": "echo hi > seccomp_proof.txt", "seccomp": "on"}),
+            _tool(
+                "Shell",
+                {"command": "grep -q 'Seccomp:\t2' /proc/self/status && touch filter_live.txt"},
+            ),
             _text("done"),
         ],
         config_kwargs={
             "allowed_tools": ("Shell",),
-            "shell_backend": "process",  # explicit: no bwrap on the bench host
+            "shell_backend": "process",
             "max_turns": 3,
         },
     )
@@ -558,18 +564,25 @@ def _case_seccomp_on_refuses_process(h: BenchHarness) -> BenchExpectation:
         runtime=runtime,
         workspace=ws,
         expect_subtype="success",
-        expect_min_denials=1,
-        forbid_paths=("seccomp_proof.txt",),
-        notes="seccomp=on with the process backend is refused, not silently downgraded",
+        require_paths=("filter_live.txt",),
+        notes="process backend loads the denylist via prctl (Seccomp: 2 observable)",
     )
 
 
 def _case_seccomp_payload_cannot_loosen(h: BenchHarness) -> BenchExpectation:
+    # Tighten-only, observed behaviorally: with the operator at "on", a
+    # per-call "off" must still leave the filter live (Seccomp: 2).
     ws = h.workspace()
     runtime = h.runtime(
         workspace=ws,
         turns=[
-            _tool("Shell", {"command": "echo hi > loosen_proof.txt", "seccomp": "off"}),
+            _tool(
+                "Shell",
+                {
+                    "command": "grep -q 'Seccomp:\t2' /proc/self/status && touch tightened.txt",
+                    "seccomp": "off",
+                },
+            ),
             _text("done"),
         ],
         config_kwargs={
@@ -583,8 +596,7 @@ def _case_seccomp_payload_cannot_loosen(h: BenchHarness) -> BenchExpectation:
         runtime=runtime,
         workspace=ws,
         expect_subtype="success",
-        expect_min_denials=1,
-        forbid_paths=("loosen_proof.txt",),
+        require_paths=("tightened.txt",),
         notes="operator --seccomp=on wins over a per-call seccomp=off (tighten-only)",
     )
 
@@ -626,7 +638,7 @@ CASES: tuple[BenchCase, ...] = (
     BenchCase("budget.max_tool_calls", "budget", "tool-call ceiling subtype", _case_budget_tool_calls),
     BenchCase("budget.max_turns", "budget", "turn ceiling subtype", _case_budget_turns),
     BenchCase("denial.seccomp_denylist_tables", "denial", "denylist tables carry verified numbers", _case_seccomp_denylist_tables),
-    BenchCase("denial.seccomp_on_refuses_process", "denial", "seccomp=on refuses process backend", _case_seccomp_on_refuses_process),
+    BenchCase("denial.seccomp_filter_live_on_process", "denial", "process backend loads the filter via prctl", _case_seccomp_filter_live_on_process),
     BenchCase("denial.seccomp_payload_cannot_loosen", "denial", "per-call seccomp cannot loosen", _case_seccomp_payload_cannot_loosen),
 )
 

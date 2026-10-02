@@ -7,10 +7,10 @@ Two backends, one contract:
   escape primitives (``tools/seccomp.py``), and die-with-parent. This is the
   isolation level the threat model calls a *sandbox*.
 * **process** (fallback) — a scrubbed subprocess with cwd pinned inside the
-  workspace, resource limits, and process-group cleanup. This is *not* OS
-  isolation: a determined command can still reach the rest of the host via
-  absolute paths, and no seccomp filter is applied. Doctor and the Shell tool
-  both say so out loud.
+  workspace, resource limits, and process-group cleanup, plus the same
+  seccomp-BPF denylist applied via a prctl wrapper (Linux only). This is *not*
+  OS isolation: a determined command can still reach the rest of the host via
+  absolute paths. Doctor and the Shell tool both say so out loud.
 
 The runtime never invents a third, quieter mode. ``auto`` picks bwrap when the
 binary exists and can start a throwaway probe; otherwise process. An operator
@@ -28,13 +28,14 @@ import os
 import shutil
 import signal
 import subprocess
+import sys
 import tempfile
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any, Mapping, Sequence
 
-from tools.seccomp import SECCOMP_MODES, SeccompError, build_default_filter
+from tools.seccomp import SECCOMP_MODES, SeccompError, build_default_filter, prctl_loader_argv
 
 #: Hard ceilings a single Shell invocation may not exceed. Operators may only
 #: tighten these (via tool payload or run config), never widen past the runtime.
@@ -519,21 +520,32 @@ def run_sandboxed(
                     pass
         return result
 
-    if seccomp_mode == "on":
-        # No silent downgrade: the operator required the filter, and the
-        # process backend cannot honestly apply one.
+    if seccomp_mode == "on" and not sys.platform.startswith("linux"):
+        # No silent downgrade: the operator required the filter, and this
+        # platform cannot apply one on any backend.
         raise SandboxError(
-            "seccomp='on' requires the bwrap backend, but the resolved backend is "
-            "'process' (no BPF support). Install bubblewrap or use seccomp='auto'."
+            f"seccomp='on' requires a platform that can load a BPF filter "
+            f"(this host is {sys.platform})."
         )
-    detail = (
+    base_detail = (
         "process backend: cwd pinned and env scrubbed, but the host filesystem "
         "and network are still reachable — install bubblewrap for OS isolation"
     )
-    if seccomp_mode != "off":
-        detail += "; seccomp not applied (process backend has no BPF support)"
-    return _run_popen(
-        request.argv,
+    exec_argv: Sequence[str] = request.argv
+    if seccomp_mode != "off" and sys.platform.startswith("linux"):
+        # The filter rides in on a python wrapper that prctl()s it before
+        # exec (see tools/seccomp.py: no preexec_fn, so no fork-in-threads
+        # hazard). The audit trail keeps the original argv; the wrapper is
+        # an implementation detail named in `detail`.
+        python = shutil.which("python3") or sys.executable
+        exec_argv = prctl_loader_argv(request.argv, python=python)
+        detail = base_detail + "; seccomp denylist active (prctl, EPERM on deny)"
+    else:
+        detail = base_detail + "; seccomp not applied"
+        if seccomp_mode != "off":
+            detail += f" ({sys.platform} cannot load a BPF filter)"
+    result = _run_popen(
+        exec_argv,
         cwd=cwd,
         env=env,
         timeout_ms=request.timeout_ms,
@@ -542,6 +554,8 @@ def run_sandboxed(
         isolation="process",
         detail=detail,
     )
+    # The audit trail records what the caller asked for, not the wrapper.
+    return replace(result, argv=request.argv)
 
 
 __all__ = [
