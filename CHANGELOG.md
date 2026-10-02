@@ -1,5 +1,33 @@
 # Northstar Agent OS — initial public component
 
+## Unreleased (twenty-sixth batch) — seccomp-BPF denylist for the bwrap sandbox
+
+Picks up the threat model's explicitly deferred hardening step ("a tighter
+seccomp filter is a later hardening step, not claimed today"). Version stays
+`0.1.0.dev0`; no release tag cut.
+
+- **`tools/seccomp.py`** — pure-Python classic-BPF assembler, no libseccomp
+  dependency. Per-arch denylist (x86_64 + aarch64; numbers verified against
+  kernel sources, not memory) over escape primitives: ptrace, kernel module
+  loading, kexec, BPF, perf_event_open, userfaultfd, keyrings, mount /
+  pivot_root / reboot / swapon, clock_settime, cross-process memory
+  (process_vm_*), open_by_handle_at. Denied calls fail with EPERM, not SIGSYS.
+  Unknown architectures fall through to ALLOW (documented).
+- **Wiring** — `SandboxRequest.seccomp` (`auto` | `on` | `off`, default `auto`);
+  the bwrap backend loads the filter via `bwrap --seccomp FD` on an inherited
+  fd. `seccomp="on"` with the process backend is a configuration error (no
+  silent downgrade, same rule as `--sandbox bwrap`). A per-call Shell payload
+  may only tighten the operator's `--seccomp` setting, never loosen it
+  (`tools/seccomp.resolve_mode`).
+- **CLI** — `northstar agent --seccomp auto|on|off`; plumbed through
+  `RunConfig.shell_seccomp` like `shell_backend`, validated at construction.
+- **Tests** — `tests/test_seccomp.py`: the assembled filter is executed in an
+  in-test BPF interpreter asserting EPERM for every denylisted syscall on both
+  arches, ALLOW for the everyday set, arch-scoped tables, and the tighten-only
+  merge. 15 tests, offline.
+- **Docs** — `docs/concepts/threat-model.md` residual risk #4 rewritten: no
+  longer "no seccomp profile yet".
+
 ## Unreleased (twenty-fifth batch) — P5: public governance bench + install smoke + minimal agent task
 
 Closes the spine's P5 slice without cutting a release tag (version stays

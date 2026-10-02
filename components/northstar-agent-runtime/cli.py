@@ -413,6 +413,16 @@ def _add_execution_arguments(parser: argparse.ArgumentParser) -> None:
                 "Shell stays denied until --allow-tool Shell. See docs/concepts/threat-model.md"
             ),
         )
+        execution.add_argument(
+            "--seccomp",
+            choices=("auto", "on", "off"),
+            default="auto",
+            help=(
+                "Seccomp-BPF denylist for the bwrap sandbox: auto (apply when bwrap runs), "
+                "on (require bwrap + filter; refuse the process backend), or off. "
+                "A per-call Shell payload may only tighten this, never loosen it."
+            ),
+        )
 
 def _add_output_arguments(parser: argparse.ArgumentParser) -> None:
         output = parser.add_argument_group("output")
@@ -1272,6 +1282,7 @@ def _run(args: argparse.Namespace) -> int:
         config_kwargs["sidecar_socket"] = args.sidecar_socket
         config_kwargs["sidecar_timeout_ms"] = args.sidecar_timeout_ms
     config_kwargs["shell_backend"] = getattr(args, "sandbox", "auto") or "auto"
+    config_kwargs["shell_seccomp"] = getattr(args, "seccomp", "auto") or "auto"
     config_kwargs["parallel_tools"] = int(getattr(args, "parallel_tools", 1) or 1)
 
     validate_session_flags(args, ceilings)

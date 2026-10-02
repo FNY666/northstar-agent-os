@@ -37,6 +37,8 @@ from tools.os_sandbox import (
     probe_capabilities,
     run_sandboxed,
 )
+from tools.seccomp import SeccompError
+from tools.seccomp import resolve_mode as resolve_seccomp_mode
 
 if TYPE_CHECKING:
     from tools import ToolContext
@@ -125,6 +127,14 @@ def shell_handler(payload: dict[str, Any], ctx: "ToolContext") -> Any:
         if not cwd_path.is_dir():
             raise SandboxError(f"cwd is not a directory: {raw_cwd}")
         backend = str(payload.get("backend") or ctx.service("shell_backend") or "auto")
+        # Seccomp is tighten-only: a per-call payload may move toward "on" but
+        # never loosen what the operator configured via --seccomp.
+        try:
+            seccomp = resolve_seccomp_mode(
+                payload.get("seccomp"), ctx.service("shell_seccomp")
+            )
+        except SeccompError as error:
+            return ToolResult.error(str(error))
         env_payload = payload.get("env")
         env = None
         if env_payload is not None:
@@ -140,6 +150,7 @@ def shell_handler(payload: dict[str, Any], ctx: "ToolContext") -> Any:
             max_output_bytes=max_output,
             env=env,
             network=bool(payload.get("network", False)),
+            seccomp=seccomp,
         )
         result = run_sandboxed(request, backend=backend)
     except SandboxError as error:
