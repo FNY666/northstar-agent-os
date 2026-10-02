@@ -1,5 +1,27 @@
 # Northstar Agent OS — initial public component
 
+## Unreleased (thirty-second batch) — seccomp-BPF denylist for MCP server processes
+
+MCP servers are third-party code the operator chose to run; the allowlist
+(twenty-ninth batch) stopped them from *seeing* host secrets, but a
+compromised server could still reach for escape primitives. `McpStdioClient`
+now reuses the Shell process backend's seccomp-BPF denylist
+(`tools/seccomp.py`) via the same `python3 -c` prctl wrapper — no
+`Popen(preexec_fn)`, so no fork-in-threads hazard.
+
+- `--mcp-seccomp auto|on|off` (default `auto`): `auto` applies the filter
+  where loadable (Linux), `on` refuses to start where it is not, `off` runs
+  the server command as-is. Tighten-only semantics match the Shell flag.
+- Fail-fast preserved: a missing server binary still reports `cannot start`
+  immediately (resolved against the PATH the child will actually see), instead
+  of degrading into a handshake timeout inside the wrapper.
+- Verified on the real kernel: one extra `Seccomp_filters` layer through the
+  client's wrapping, `clock_settime` → EPERM, and the fixture MCP server still
+  handshakes (the denylist does not break stdio servers).
+
+**Verification:** 12 new `test_mcp_seccomp.py` tests green plus CLI plumbing
+tests; full clinic below.
+
 ## Unreleased (thirty-first batch) — seal the runtime audit feed into evidence
 
 Makes the evidence store *useful*: the agent runtime already exports session

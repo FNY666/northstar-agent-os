@@ -1326,6 +1326,10 @@ caught by the unit-level compaction tests rather than the loop-level one.
   names is *added* to the child's allowlisted environment (never the full host
   environment), because this component does not sandbox
   processes - a declared variable is a convenience, never an isolation boundary.
+  MCP server processes additionally run under the same seccomp-BPF denylist as
+  the Shell process backend on Linux (`--mcp-seccomp auto|on|off`, default
+  `auto`): escape primitives fail with EPERM while file access is untouched,
+  so legitimate stdio servers keep working.
 - **Process-group `TERM`→`KILL` cleanup is not verified on real Linux here.** That
   behaviour belongs to the sidecar; the runtime only bounds its own socket read.
 - **The retry policy is a bound, not a resilience system.** It is verified against a

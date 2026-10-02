@@ -35,14 +35,17 @@ import os
 import re
 import select
 import shlex
+import shutil
 import signal
 import subprocess
+import sys
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Mapping
 
 from _version import __version__
+from tools.seccomp import prctl_loader_argv, validate_mode
 from mcp_elicitation import (
     ACCEPT,
     CANCEL,
@@ -165,6 +168,7 @@ class McpStdioClient:
         max_input_rounds: int = MAX_INPUT_ROUNDS,
         env: Mapping[str, str] | None = None,
         cwd: str | None = None,
+        seccomp: str = "auto",
     ) -> None:
         if not 100 <= timeout_ms <= MAX_TIMEOUT_MS:
             raise ValueError(f"--mcp-timeout-ms must be between {MIN_TIMEOUT_MS} and {MAX_TIMEOUT_MS}")
@@ -172,6 +176,7 @@ class McpStdioClient:
             raise ValueError("--mcp-protocol must be auto, modern or legacy")
         if not 1 <= max_input_rounds <= 8:
             raise ValueError("--mcp-max-rounds must be between 1 and 8")
+        self.seccomp = validate_mode(seccomp)
         self.name = name
         self.command = list(command)
         self.timeout_ms = timeout_ms
@@ -257,13 +262,44 @@ class McpStdioClient:
             raise McpError(f"mcp server {self.name!r}: initialize returned a non-object result")
         self._notify("notifications/initialized")
 
+    def _spawn_argv(self) -> list[str]:
+        """Command argv with the seccomp-BPF denylist applied per the mode.
+
+        Mirrors the process backend (``tools/os_sandbox.py``): on Linux the
+        denylist rides in on a python3 prctl wrapper that installs the filter
+        before exec, so there is no fork-in-threads hazard. ``off`` runs the
+        command as-is; ``on`` on a platform that cannot load a filter refuses
+        to start rather than running unfiltered.
+        """
+        if self.seccomp == "off":
+            return list(self.command)
+        if not sys.platform.startswith("linux"):
+            if self.seccomp == "on":
+                raise McpError(
+                    f"mcp server {self.name!r}: --mcp-seccomp on requires a platform "
+                    f"that can load a BPF filter (this host is {sys.platform})"
+                )
+            return list(self.command)
+        python = shutil.which("python3") or sys.executable
+        # Fail fast with the same "cannot start" error Popen would give: the
+        # wrapper's execvp would otherwise turn a missing binary into a
+        # confusing handshake timeout. Resolve against the PATH the child
+        # will actually see (the allowlist), not the parent's full PATH.
+        child_path = self.extra_env.get("PATH") or os.defpath
+        if shutil.which(self.command[0], path=child_path) is None:
+            raise McpError(
+                f"mcp server {self.name!r}: cannot start {self.command[0]}: "
+                "not found on the server's PATH"
+            )
+        return prctl_loader_argv(self.command, python=python)
+
     def connect(self) -> None:
         """Spawn the server, agree a generation, and list its tools."""
         if self._proc is not None:
             raise McpError(f"mcp server {self.name!r} is already connected")
         try:
             proc = subprocess.Popen(
-                self.command,
+                self._spawn_argv(),
                 stdin=subprocess.PIPE,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.DEVNULL,  # server logs never block the client

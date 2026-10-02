@@ -219,6 +219,24 @@ class CliIntegrationTests(unittest.TestCase):
         self.assertEqual(code, 0)
         self.assertNotIn("mcp__", out)
 
+    def test_mcp_seccomp_flag_rejects_unknown_modes(self):
+        with self.assertRaises(SystemExit) as exited:
+            run_cli("run", "--workspace", str(self.ws), "--prompt", "hi",
+                    "--scripted-text", "x",
+                    "--mcp-server", self.server_flag(),
+                    "--mcp-seccomp", "bogus")
+        self.assertEqual(exited.exception.code, 2)
+
+    def test_mcp_seccomp_off_still_runs_the_server(self):
+        script = self.script("mcp__demo__echo", {"text": "wrapped?"})
+        code, out, _ = run_cli("run", "--workspace", str(self.ws), "--prompt", "call",
+                               "--script", str(script),
+                               "--mcp-server", self.server_flag(),
+                               "--allow-tool", "mcp__demo__echo",
+                               "--mcp-seccomp", "off", "--json")
+        self.assertEqual(code, 0, out)
+        self.assertIn("echo:wrapped?", out)
+
 
 class GenerationFlagTests(unittest.TestCase):
     """The generation and elicitation flags, as the operator meets them."""
