@@ -879,6 +879,65 @@ class SessionViewTests(unittest.TestCase):
         self.assertEqual(code, 1)
         self.assertIn("no transcript", err)
 
+    def test_sessions_search_finds_text_inside_tool_results(self):
+        code, out, err = run_cli("sessions", "search", "ALPHA", "--session-dir", self.session_dir)
+        self.assertEqual(code, 0, err)
+        self.assertIn(self.find_session(), out)
+        self.assertIn("tool_result", out)
+        self.assertIn("alpha", out)
+
+    def test_sessions_search_filters_by_session_and_record_type(self):
+        session = self.find_session()
+        code, out, err = run_cli(
+            "sessions", "search", "alpha", "--session-dir", self.session_dir,
+            "--session", session, "--type", "tool_result", "--json",
+        )
+        self.assertEqual(code, 0, err)
+        matches = json.loads(out)
+        self.assertEqual(len(matches), 1)
+        self.assertEqual(matches[0]["session_id"], session)
+        self.assertEqual(matches[0]["type"], "tool_result")
+        self.assertIn("alpha", matches[0]["snippet"])
+
+    def test_sessions_search_case_sensitive_and_limit(self):
+        code, _out, err = run_cli(
+            "sessions", "search", "ALPHA", "--session-dir", self.session_dir,
+            "--case-sensitive",
+        )
+        self.assertEqual(code, 1)
+        self.assertIn("no matches", err)
+
+        code, out, err = run_cli(
+            "sessions", "search", "a", "--session-dir", self.session_dir,
+            "--limit", "1", "--json",
+        )
+        self.assertEqual(code, 0, err)
+        self.assertEqual(len(json.loads(out)), 1)
+
+    def test_sessions_search_rejects_empty_query_and_nonpositive_limit(self):
+        code, _out, err = run_cli("sessions", "search", "   ", "--session-dir", self.session_dir)
+        self.assertEqual(code, USAGE_ERROR)
+        self.assertIn("query must not be empty", err)
+        code, _out, err = run_cli(
+            "sessions", "search", "alpha", "--session-dir", self.session_dir, "--limit", "0"
+        )
+        self.assertEqual(code, USAGE_ERROR)
+        self.assertIn("--limit must be a positive integer", err)
+
+    def test_sessions_search_scans_across_multiple_sessions(self):
+        script = self.workspace / "second-script.json"
+        script.write_text(json.dumps([{"text": "amber answer"}]), encoding="utf-8")
+        code, _out, err = run_cli(
+            "run", "--workspace", str(self.workspace), "--prompt", "amber prompt",
+            "--script", str(script), "--session-dir", self.session_dir, "--quiet",
+        )
+        self.assertEqual(code, 0, err)
+        code, out, err = run_cli("sessions", "search", "amber", "--session-dir", self.session_dir, "--json")
+        self.assertEqual(code, 0, err)
+        matches = json.loads(out)
+        self.assertEqual({match["type"] for match in matches}, {"user_prompt", "assistant"})
+        self.assertEqual(len({match["session_id"] for match in matches}), 1)
+
     def test_session_view_commands_reject_path_traversal_ids(self):
         outside = Path(self.session_dir).parent / "outside.jsonl"
         outside.write_text(
