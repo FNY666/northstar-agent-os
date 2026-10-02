@@ -1,5 +1,53 @@
 # Northstar Agent OS — initial public component
 
+## Unreleased (twenty-eighth batch) — Security hardening: F1–F17 supply-chain and runtime boundary fixes
+
+Seventeen security and correctness fixes addressing session isolation, supply-chain
+integrity, budget enforcement, and audit redaction (2026-10-01 evening through
+2026-10-02 evening):
+
+- **F1–F11: Budget and delegation boundaries** — price interrupted spend by model
+  segment (F1, F10, F11), recover interrupted resume spend (F9), carry append
+  resume budgets forward (F8), stop child delegation after budget exhaustion (F6),
+  clamp child ceilings to parent limits (F5), verify child delegation budget guard
+  (F7), normalize duration in CLI golden snapshots (F4). Closes budget laundering
+  and resume spend loss reported in internal security review.
+- **F12/F17: Session ID containment** — reject path traversal in session transcript
+  filenames. `--resume ../secret` and `--no-session-lease` could write outside
+  `session_dir`; now unified `validate_session_id()` at `SessionStore` construction
+  refuses `../`, absolute paths, and directory separators. CLI returns exit 64 with
+  clear error. Verified by CLI/SDK/SessionStore red tests.
+- **F13: Agent loop verification mutation guard** — extend supply-chain invariant
+  coverage to detect when the verification harness itself is corrupted (e.g., by a
+  malicious skill or repository modification). `tools.verify_invariants` now has
+  its own mutation sentinel.
+- **F14: Skills symlink containment** — refuse skill directories that are symlinks
+  or contain symlink `SKILL.md` files. Blocks external path injection into the
+  skill loader and lock generator. Extends verification harness to cover plugin
+  install and manifest integrity.
+- **F15: Skills lock atomic write** — replace check-then-write with directory-fd +
+  `O_NOFOLLOW` + `O_EXCL` temporary file + atomic `os.replace()` for `skills.lock`.
+  Eliminates TOCTOU window where an attacker could replace `.northstar/` or the
+  lock file with a symlink pointing outside the workspace. Never follows symlinks
+  or overwrites external targets. Verified by red tests for existing symlinks,
+  parent directory symlinks, and race conditions.
+- **F16: Error tool output redaction** — `--redact-tool-output` now covers error
+  tool results (`is_error=True`). Previously only successful tool output was
+  redacted; error text containing MCP/external tool secrets was written to session
+  JSONL. Audit trail still records `is_error`, `tool_use_id`, and metadata.
+  Verified by red-to-green session transcript tests.
+
+**Verification:** 104+ runtime tests passing, CI 2/2 green on all PRs. Independent
+review by two parallel audit sessions confirmed boundaries, compatibility, and
+scope hygiene. No open PRs or known regressions.
+
+**Known design boundaries** (not bugs):
+- Session lease is host-local (POSIX `flock`), not a distributed lock.
+- MCP subprocess environment inherits host `os.environ` by default (trusted local
+  process model).
+- Audit export/replay redaction policy and MCP environment allowlist remain
+  undefined/UNKNOWN; candidates for future hardening if product requires it.
+
 ## Unreleased (twenty-seventh batch) — seccomp-BPF denylist for the process backend
 
 Extends the twenty-sixth batch: the process backend (Linux) now applies the
