@@ -12,8 +12,10 @@ This initial component contains:
 - `verify_chain()` for structured offline integrity results;
 - `evidence_store.EvidenceStore`: a file-backed JSONL store (one canonical-JSON entry per line, fsync on append, full chain re-verified at every open so tampering fails closed);
 - sealed manifests: `EvidenceStore.seal(signer)` attests to the chain head with a host-injected `SealSigner`; `verify_manifest()` / `verify_seal()` check the seal, with unknown `key_id` reported as *unknown authenticity*, never as ok.
+- `audit_adapter`: seals the runtime's canonical audit NDJSON feed (`audit.ndjson/1`) into an evidence store — one entry per audit record, strict RFC 3339 timestamps, idempotent re-seals — without the runtime depending on this component.
+- `evidence_cli`: operator commands `seal` / `verify` over a store file and an HMAC key file (local test-grade sealing; not non-repudiation).
 
-Key management, CLI commands, and runtime/host/durable-run adapters are not implemented yet. The bundled `HmacTestSigner` is test-only: a shared-secret MAC is not non-repudiation, and test keys must never seal real evidence.
+Key management and runtime/host/durable-run adapters beyond the audit feed are not implemented yet. The bundled `HmacTestSigner` is test-only: a shared-secret MAC is not non-repudiation, and test keys must never seal real evidence.
 
 A valid hash chain only detects inconsistencies relative to its entries. It does **not** prove who created the chain or prevent an attacker from replacing the entire chain. Authenticity requires a trusted external signature over a sealed manifest/head digest.
 

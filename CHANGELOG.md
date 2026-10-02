@@ -1,5 +1,30 @@
 # Northstar Agent OS — initial public component
 
+## Unreleased (thirty-first batch) — seal the runtime audit feed into evidence
+
+Makes the evidence store *useful*: the agent runtime already exports session
+transcripts as canonical audit NDJSON (`audit.ndjson/1`), and that feed can
+now be sealed into a tamper-evident chain.
+
+- **`audit_adapter`** (lives in `northstar-run-evidence`, so the runtime stays
+  dependency-free): `seal_audit_feed()` appends each audit record as one entry
+  (`source="audit"`, `kind="audit.<event>"`, `occurred_at` from the record's
+  strict RFC 3339 `ts` — anything else is refused, not guessed,
+  `source_id="audit:<seq>"` for idempotent re-seals) and returns a sealed
+  manifest. `verify_audit_seal()` re-opens the store fail-closed and checks
+  the seal binds to it.
+- **`evidence_cli`**: operator commands `seal` / `verify` over a store file
+  and an HMAC key file. Exit 0 only on verified; unknown keys and tampered
+  stores exit 1, malformed input exits 2. The CLI is honest about its grade:
+  local HMAC sealing proves no post-seal modification by anyone without the
+  secret, but it is not non-repudiation — production authenticity still needs
+  host-owned signer infrastructure.
+- Honest limit kept explicit: sealing proves the *exported feed* was not
+  modified afterwards; it does not prove the transcript the feed came from
+  was complete.
+
+**Verification:** 51 run-evidence tests green (11 new), full clinic below.
+
 ## Unreleased (thirtieth batch) — run-evidence persistence and sealed manifests
 
 Continues #44's roadmap (persistence was deliberately left out of the
