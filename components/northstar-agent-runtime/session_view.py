@@ -1,10 +1,10 @@
-"""Read-side of session transcripts: list, show, replay, export and search.
+"""Read-side of session transcripts: list, show, replay, export, search and UI.
 
 Writing a transcript has always been append-only and fsynced; this module is the
-missing read-back half. It is deliberately read-only: it never creates the
-session directory, never opens a file for writing, and never mutates a record.
-A transcript is an audit trail - the viewer reports corruption instead of
-"repairing" it. A torn *trailing* line is skipped the same way the writer's own
+missing read-back half. Transcript files remain read-only and are never mutated;
+the ``ui`` command may write a separate owner-only HTML replay export. It never
+creates the session directory. A transcript is an audit trail: the reader reports
+corruption instead of "repairing" it. A torn *trailing* line is skipped like the writer's
 recovery skips it; a damaged line anywhere earlier raises and names the record.
 """
 from __future__ import annotations
@@ -131,6 +131,18 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
     searching.add_argument("--limit", type=int, default=50, metavar="N", help="maximum matches to return (default: 50)")
     searching.add_argument("--json", action="store_true", help="emit matches as a JSON array")
 
+    ui = sub.add_parser(
+        "ui",
+        help="generate an offline interactive replay page for one transcript",
+    )
+    _add_session_location(ui)
+    ui.add_argument(
+        "session_id",
+        help="session id (the *.jsonl file name without its suffix), or 'latest'",
+    )
+    ui.add_argument("--output", help="new HTML file path (default: ./session-<id>-replay.html)")
+    ui.add_argument("--open", action="store_true", help="open the generated local file in the default browser")
+
 
 def _resolve_session_arg(session_id: str, directory: Path) -> str:
     """Pass-through id, or resolve product `latest` aliases against ``directory``."""
@@ -210,10 +222,23 @@ def run_sessions(args: argparse.Namespace) -> int:
                 limit=args.limit,
                 json_out=bool(getattr(args, "json", False)),
             )
+        if args.session_command == "ui":
+            try:
+                session_id = _resolve_session_arg(args.session_id, directory)
+            except ValueError as error:
+                print(f"sessions: {error}", file=sys.stderr)
+                return USAGE_ERROR
+            from session_ui import open_replay_page, write_replay_page
+
+            output = write_replay_page(directory, session_id, getattr(args, "output", None))
+            print(f"sessions ui: wrote {output} (owner-only permissions: 0600)")
+            if getattr(args, "open", False) and not open_replay_page(output):
+                print("sessions ui: no default browser could be opened; use the HTML file path above", file=sys.stderr)
+            return 0
     except (OSError, SessionIntegrityError) as error:
         print(f"sessions: {error}", file=sys.stderr)
         return 1
-    print("sessions: pass a subcommand: list, show, export, checkpoints, replay or search (--help for flags)", file=sys.stderr)
+    print("sessions: pass a subcommand: list, show, export, checkpoints, replay, search or ui (--help for flags)", file=sys.stderr)
     return USAGE_ERROR
 
 
