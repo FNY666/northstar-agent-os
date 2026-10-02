@@ -195,6 +195,17 @@ class TreeTests(unittest.TestCase):
         paths = {audit.relative_path for audit in audits}
         self.assertIn(".claude/skills/theirs/SKILL.md", paths)
 
+    def test_symlinked_skill_outside_root_is_not_audited(self):
+        import tempfile
+        outside = Path(tempfile.mkdtemp(prefix="nsar-outside-skill-"))
+        self.addCleanup(lambda: __import__("shutil").rmtree(outside, ignore_errors=True))
+        (outside / "SKILL.md").write_text(skill_text("external"), encoding="utf-8")
+        target = self.root / ".northstar" / "skills" / "external"
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.symlink_to(outside, target_is_directory=True)
+        self.assertEqual(skill_files(self.root), ())
+        self.assertEqual(audit_tree(self.root), ())
+
     def test_strays_and_placeholders_are_not_skills(self):
         (self.root / ".northstar" / "skills").mkdir(parents=True)
         (self.root / ".northstar" / "skills" / "README.md").write_text("not a skill", encoding="utf-8")
