@@ -19,12 +19,84 @@ from tools import ToolContext, ToolSandbox, ToolResult, build_default_registry
 from tools.os_sandbox import (
     SandboxError,
     SandboxRequest,
+    _bwrap_argv,
+    _minimal_identity_files,
     probe_capabilities,
     reset_capabilities_cache,
     resolve_backend,
     run_sandboxed,
 )
 from tools.shell import parse_shell_argv, shell_handler
+
+
+class BwrapArgvSurfaceTests(unittest.TestCase):
+    """Pin the bwrap bind surface: any expansion is a deliberate diff.
+
+    bwrap itself is usually absent from CI, so these tests pin the argv
+    _bwrap_argv builds rather than running a sandbox.
+    """
+
+    def _argv(self, **kwargs):
+        import tempfile
+        from pathlib import Path
+
+        root = Path(tempfile.mkdtemp(prefix="nsar-bwrap-argv-"))
+        request = SandboxRequest(argv=("true",), cwd=root, workspace=root)
+        return _bwrap_argv(request, bwrap_path="/usr/bin/bwrap", **kwargs)
+
+    def _ro_bind_sources(self, argv):
+        return [argv[i + 1] for i, a in enumerate(argv) if a == "--ro-bind"]
+
+    def test_ro_binds_are_minimal_and_pinned(self):
+        sources = self._ro_bind_sources(self._argv())
+        expected = [p for p in ("/usr", "/bin", "/lib", "/lib64", "/sbin") if os.path.exists(p)]
+        self.assertEqual(sources, expected)
+
+    def test_host_identity_and_dns_files_are_never_ro_bound(self):
+        argv = self._argv()
+        for i, arg in enumerate(argv):
+            if arg == "--ro-bind":
+                src, dest = argv[i + 1], argv[i + 2]
+                self.assertNotIn(dest, ("/etc/passwd", "/etc/group"),
+                                 f"real host identity must not be bound (src={src})")
+                self.assertNotIn(src, ("/etc/resolv.conf", "/etc/ssl", "/etc/passwd", "/etc/group"),
+                                 "host dns/tls/identity files must not be bound")
+
+    def test_synthetic_identity_is_bound_when_paths_given(self):
+        argv = self._argv(passwd_path="/tmp/pw", group_path="/tmp/gr")
+        self.assertIn("/etc/passwd", argv)
+        self.assertIn("/etc/group", argv)
+        idx = argv.index("/etc/passwd")
+        self.assertEqual(argv[idx - 2:idx + 1], ["--ro-bind", "/tmp/pw", "/etc/passwd"])
+        idx = argv.index("/etc/group")
+        self.assertEqual(argv[idx - 2:idx + 1], ["--ro-bind", "/tmp/gr", "/etc/group"])
+
+    def test_namespace_and_lifecycle_flags_are_pinned(self):
+        argv = self._argv()
+        for flag in ("--die-with-parent", "--new-session", "--unshare-pid",
+                     "--unshare-net", "--unshare-ipc", "--unshare-uts"):
+            self.assertIn(flag, argv)
+        # The workspace stays the only writable bind.
+        self.assertEqual(argv.count("--bind"), 1)
+
+    def test_minimal_identity_files_expose_only_the_current_user(self):
+        import pwd
+
+        passwd, group = _minimal_identity_files()
+        self.assertEqual(passwd.count("\n"), 1, "exactly one passwd entry")
+        self.assertEqual(group.count("\n"), 1, "exactly one group entry")
+        uid, gid = os.getuid(), os.getgid()
+        self.assertIn(f":{uid}:{gid}:", passwd)
+        self.assertIn(f":{gid}:", group)
+        try:
+            own_name = pwd.getpwuid(uid).pw_name
+        except KeyError:
+            own_name = None
+        for entry in pwd.getpwall():
+            if own_name is not None and entry.pw_name == own_name:
+                continue
+            self.assertNotIn(f"\n{entry.pw_name}:", "\n" + passwd,
+                             f"other host user {entry.pw_name!r} must stay invisible")
 
 
 class OsSandboxProbeTests(unittest.TestCase):
