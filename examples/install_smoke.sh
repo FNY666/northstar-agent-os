@@ -11,7 +11,7 @@ trap cleanup EXIT INT HUP TERM
 
 python3 -m venv "$SMOKE_ROOT/venv"
 "$SMOKE_ROOT/venv/bin/python" -m pip install --upgrade pip -q
-for c in northstar-run-contract northstar-host northstar-durable-run \
+for c in northstar-run-contract northstar-run-evidence northstar-host northstar-durable-run \
          northstar-agent-interop northstar-agent-runtime; do
   "$SMOKE_ROOT/venv/bin/pip" install --quiet "$ROOT/components/$c"
 done

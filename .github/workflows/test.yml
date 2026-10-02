@@ -37,6 +37,18 @@ jobs:
           cd /tmp
           python -c "import contract, binding, adapter; print('northstar-run-contract imports OK')"
           python -c "import contract; assert contract.SCHEMA_VERSION; print('schema', contract.SCHEMA_VERSION)"
+      - name: Compile run evidence
+        working-directory: components/northstar-run-evidence
+        run: python -m py_compile evidence_contract.py evidence_chain.py tests/test_evidence_contract.py tests/test_evidence_chain.py
+      - name: Run evidence tests
+        working-directory: components/northstar-run-evidence
+        run: python -m unittest discover -s tests -p 'test_*.py' -v
+      - name: Evidence packaging smoke
+        working-directory: components/northstar-run-evidence
+        run: |
+          python -m pip install --quiet .
+          cd /tmp
+          python -c "from evidence_chain import EvidenceChain, verify_chain; from evidence_contract import EvidenceEntry, EvidenceRef; print('northstar-run-evidence imports OK')"
       - name: Install contract dependency
         # Every declared dependency is resolved from this repository until the
         # components are published to an index; pip installs by local path.
