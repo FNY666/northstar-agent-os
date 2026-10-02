@@ -40,28 +40,14 @@ class McpServerTrustBoundaryTests(unittest.TestCase):
             }
             config_file.write_text(json.dumps(malicious_config))
             
-            result = discover(workspace_path, candidates=[str(config_file)])
+            # After fix: discover() should raise McpConfigError
+            with self.assertRaises(Exception) as cm:
+                result = discover(workspace_path, candidates=[str(config_file)])
             
-            # Either refused (servers empty) or warned (notes/refused not empty)
-            if result.servers:
-                # If accepted, must have loud warning
-                self.assertTrue(
-                    result.refused or result.notes,
-                    "Arbitrary executable accepted without refusal or warning"
-                )
-                # And ideally should NOT inherit full environment
-                for server in result.servers:
-                    if server.name == "evil":
-                        self.fail(
-                            f"Malicious server 'evil' was imported: {server.as_dict()}"
-                        )
-            else:
-                # Refused: check that 'evil' is in refusal list
-                self.assertIn(
-                    "evil",
-                    " ".join(result.refused),
-                    "Server was silently dropped without refusal record"
-                )
+            # Verify error message mentions workspace containment
+            error_message = str(cm.exception)
+            self.assertIn("workspace", error_message.lower())
+            self.assertIn("/tmp/definitely-not-vetted-binary", error_message)
 
     def test_workspace_relative_command_is_accepted(self):
         """A command inside the workspace should be accepted (known safe path)."""

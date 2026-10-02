@@ -295,6 +295,37 @@ def _argv_for(name: str, settings: Mapping[str, Any], *, workspace: Path, source
         raise McpConfigError(f"{source}: {name}: command is required and must be a non-empty string")
     if any(char in command for char in "\n\r"):
         raise McpConfigError(f"{source}: {name}: command must be a program name or path, not a script")
+    
+    # Trust boundary: refuse commands outside workspace unless explicitly allowed
+    command_path = Path(command)
+    if command_path.is_absolute():
+        # Absolute paths are refused unless they resolve to workspace
+        try:
+            if not command_path.resolve().is_relative_to(workspace.resolve()):
+                raise McpConfigError(
+                    f"{source}: {name}: command points outside workspace ({command}); "
+                    "MCP servers must be workspace-relative to prevent arbitrary executables "
+                    "from inheriting the host environment. Move the server into the workspace "
+                    "or use a relative path."
+                )
+        except (OSError, ValueError) as error:
+            raise McpConfigError(
+                f"{source}: {name}: cannot verify command path ({command}): {error}"
+            ) from error
+    else:
+        # Relative paths: resolve against workspace and verify containment
+        resolved = (workspace / command_path).resolve()
+        try:
+            if not resolved.is_relative_to(workspace.resolve()):
+                raise McpConfigError(
+                    f"{source}: {name}: command resolves outside workspace "
+                    f"({command} -> {resolved}); MCP servers must stay within workspace bounds"
+                )
+        except (OSError, ValueError) as error:
+            raise McpConfigError(
+                f"{source}: {name}: cannot verify command path ({command}): {error}"
+            ) from error
+    
     raw_args = settings.get("args") or []
     if not isinstance(raw_args, list) or not all(isinstance(item, str) for item in raw_args):
         raise McpConfigError(f"{source}: {name}: args must be an array of strings")
