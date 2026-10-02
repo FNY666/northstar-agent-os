@@ -1506,7 +1506,7 @@ The lease owner: the run's own correlation id when it has one.
 
 Source: `components/northstar-agent-runtime/session_view.py`
 
-Read-side of the session transcripts: ``cli sessions list`` and ``show``.
+Read-side of session transcripts: list, show, replay, export and search.
 
 #### `resolve_view_session_dir(args: argparse.Namespace)`
 

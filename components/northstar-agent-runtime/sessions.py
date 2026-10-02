@@ -11,9 +11,11 @@ host logs can still be correlated to a run that writes nothing to disk.
 """
 from __future__ import annotations
 
+import errno
 import json
 import os
 import re
+import stat
 import time
 import uuid
 from dataclasses import dataclass, field
@@ -57,6 +59,27 @@ TRUNCATION_NOTE = "[truncated by the session recorder]"
 
 class SessionIntegrityError(ValueError):
     """Raised for corruption that is not explainable by a crash at the tail."""
+
+
+def _open_regular_nofollow(path: Path, flags: int, mode: int = 0o600) -> int:
+    """Open one regular transcript file without following its final symlink."""
+    nofollow = getattr(os, "O_NOFOLLOW", None)
+    if nofollow is None:  # pragma: no cover - all supported production hosts are POSIX
+        raise SessionIntegrityError("safe transcript access requires O_NOFOLLOW support")
+    flags |= nofollow | getattr(os, "O_CLOEXEC", 0) | getattr(os, "O_NONBLOCK", 0)
+    try:
+        fd = os.open(str(path), flags, mode)
+    except OSError as error:
+        if error.errno == errno.ELOOP:
+            raise SessionIntegrityError(f"{path.name}: refusing to follow a transcript symlink") from error
+        raise
+    try:
+        if not stat.S_ISREG(os.fstat(fd).st_mode):
+            raise SessionIntegrityError(f"{path.name}: transcript target is not a regular file")
+        return fd
+    except Exception:
+        os.close(fd)
+        raise
 
 
 def new_session_id(*, now: float | None = None) -> str:
@@ -158,7 +181,7 @@ class SessionStore:
                 )
         path = self.path
         assert path is not None
-        fd = os.open(str(path), os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o600)
+        fd = _open_regular_nofollow(path, os.O_WRONLY | os.O_CREAT | os.O_APPEND)
         try:
             os.write(fd, (line + "\n").encode("utf-8"))
             if self.durable:
@@ -219,6 +242,8 @@ class SessionStore:
 
     # -- reading ----------------------------------------------------------
     def read(self, session_id: str | None = None, *, strict: bool = True) -> tuple[list[dict[str, Any]], int]:
+        if session_id is not None:
+            validate_session_id(session_id)
         path = self.path if session_id is None else Path(self.directory) / f"{session_id}{SESSION_FILE_SUFFIX}"
         if path is None or not path.exists():
             return [], 0
@@ -246,7 +271,8 @@ def load_jsonl(path: str | os.PathLike[str], *, strict: bool = True) -> tuple[li
     file_path = Path(path)
     records: list[dict[str, Any]] = []
     dropped = 0
-    with open(file_path, "r", encoding="utf-8", errors="replace") as handle:
+    fd = _open_regular_nofollow(file_path, os.O_RDONLY)
+    with os.fdopen(fd, "r", encoding="utf-8", errors="replace") as handle:
         lines = handle.read().splitlines()
     last_index = len(lines) - 1
     for index, line in enumerate(lines):

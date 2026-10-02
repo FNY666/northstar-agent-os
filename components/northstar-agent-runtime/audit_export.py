@@ -23,7 +23,7 @@ import json
 from pathlib import Path
 from typing import Any, Iterable
 
-from sessions import SESSION_FILE_SUFFIX, load_jsonl
+from sessions import SESSION_FILE_SUFFIX, load_jsonl, validate_session_id
 
 AUDIT_SCHEMA_VERSION = "audit.ndjson/1"
 COMPONENT = "northstar-agent-runtime"
@@ -102,4 +102,5 @@ def transcript_path_to_ndjson(path: Path) -> str:
 
 def session_path(directory: Path, session_id: str) -> Path:
     """The transcript file for one session id (mirrors the session_view lookup)."""
+    validate_session_id(session_id)
     return directory / f"{session_id}{SESSION_FILE_SUFFIX}"

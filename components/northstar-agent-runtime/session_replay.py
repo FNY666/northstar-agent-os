@@ -581,8 +581,12 @@ def load_replay(directory: str | Path, session_id: str, *, upto: int | None = No
     ``sessions replay``, ``sessions checkpoints`` and an embedder all see the same
     verification semantics - and so a caller that wants the objects never has to parse text.
     """
-    from sessions import SESSION_FILE_SUFFIX, load_jsonl
+    from sessions import SESSION_FILE_SUFFIX, load_jsonl, validate_session_id
 
+    try:
+        validate_session_id(session_id)
+    except ValueError as error:
+        return None, str(error)
     path = Path(directory) / f"{session_id}{SESSION_FILE_SUFFIX}"
     if not path.is_file():
         return None, f"no transcript for session {session_id!r} in {directory}"

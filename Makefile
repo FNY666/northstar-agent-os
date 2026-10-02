@@ -26,7 +26,7 @@ help:
 	@echo "  cd components/northstar-agent-interop   && python3 -m unittest discover -s tests"
 	@echo ""
 	@echo "TypeScript face (no npm install, no build: node runs the .ts sources directly):"
-	@echo "  cd components/northstar-agent-runtime/sdk-ts && node --test \"test/*.test.ts\""
+	@echo "  cd components/northstar-agent-runtime/sdk-ts && node --experimental-strip-types --test \"test/*.test.ts\""
 
 demo:
 	sh examples/demo/run_offline.sh
@@ -42,14 +42,15 @@ test:
 	echo "== repository documentation =="; \
 	(cd tests && python3 -m unittest discover -s . -p 'test_*.py')
 
-# The node run is guarded rather than assumed: native type stripping needs node >= 22.6, and a
-# build image without node must stay green instead of failing on a missing tool. The contract the
+# The node run is guarded rather than assumed: native type stripping is available from 22.6;
+# older 22.x releases require the explicit experimental flag below. A build image without node
+# must stay green instead of failing on a missing tool. The contract the
 # TypeScript face mirrors is checked from Python as well (tests/test_typescript_sdk.py), which is
 # what makes that skip safe rather than a hole.
 ts-test:
 	@if node -e 'const [maj, min] = process.versions.node.split(".").map(Number); process.exit(maj > 22 || (maj === 22 && min >= 6) ? 0 : 1)' >/dev/null 2>&1; then \
 		echo "== TypeScript face (node) =="; \
-		(cd components/northstar-agent-runtime/sdk-ts && node --test "test/*.test.ts"); \
+		(cd components/northstar-agent-runtime/sdk-ts && node --experimental-strip-types --test "test/*.test.ts"); \
 	else \
 		echo "skip: TypeScript face needs node >= 22.6 (found: $$(node --version 2>/dev/null || echo none))"; \
 	fi
@@ -80,4 +81,3 @@ bench:
 # never touched. Implemented as a small shell script for dash/bash portability.
 install-smoke:
 	@sh examples/install_smoke.sh
-

@@ -25,6 +25,7 @@ process backend and the policy surface offline.
 from __future__ import annotations
 
 import os
+import selectors
 import shutil
 import signal
 import subprocess
@@ -347,49 +348,100 @@ def _run_popen(
         )
 
     timed_out = False
-    try:
-        raw_out, raw_err = proc.communicate(timeout=timeout_ms / 1000.0)
-        truncated = False
-        if raw_out is None:
-            raw_out = b""
-        if raw_err is None:
-            raw_err = b""
-        if len(raw_out) > max_output_bytes:
-            raw_out = raw_out[:max_output_bytes]
-            truncated = True
-        if len(raw_err) > max_output_bytes:
-            raw_err = raw_err[:max_output_bytes]
-            truncated = True
-        exit_code = proc.returncode
-    except subprocess.TimeoutExpired:
-        timed_out = True
-        truncated = False
+    truncated = False
+    output_limited = False
+    captured = {"stdout": bytearray(), "stderr": bytearray()}
+    selector = selectors.DefaultSelector()
+    streams = (("stdout", proc.stdout), ("stderr", proc.stderr))
+    for name, stream in streams:
+        if stream is not None:
+            os.set_blocking(stream.fileno(), False)
+            selector.register(stream, selectors.EVENT_READ, name)
+
+    deadline = started + timeout_ms / 1000.0
+    stop_reason = ""
+    term_deadline: float | None = None
+    kill_deadline: float | None = None
+    kill_sent = False
+
+    def signal_group(sig: int) -> None:
         try:
-            os.killpg(proc.pid, signal.SIGTERM)
+            os.killpg(proc.pid, sig)
         except (ProcessLookupError, PermissionError, OSError):
             pass
-        try:
-            raw_out, raw_err = proc.communicate(timeout=2.0)
-        except subprocess.TimeoutExpired:
-            try:
-                os.killpg(proc.pid, signal.SIGKILL)
-            except (ProcessLookupError, PermissionError, OSError):
-                pass
-            try:
-                raw_out, raw_err = proc.communicate(timeout=1.0)
-            except subprocess.TimeoutExpired:
-                raw_out, raw_err = b"", b""
-        if raw_out is None:
-            raw_out = b""
-        if raw_err is None:
-            raw_err = b""
-        if len(raw_out) > max_output_bytes:
-            raw_out = raw_out[:max_output_bytes]
-            truncated = True
-        if len(raw_err) > max_output_bytes:
-            raw_err = raw_err[:max_output_bytes]
-            truncated = True
-        exit_code = proc.returncode
+
+    try:
+        while True:
+            now = time.monotonic()
+            if not stop_reason and now >= deadline:
+                timed_out = True
+                stop_reason = "timeout"
+                signal_group(signal.SIGTERM)
+                term_deadline = now + 2.0
+            elif stop_reason and not kill_sent and term_deadline is not None and now >= term_deadline:
+                signal_group(signal.SIGKILL)
+                kill_sent = True
+                kill_deadline = now + 1.0
+            elif kill_sent and kill_deadline is not None and now >= kill_deadline:
+                break
+
+            if proc.poll() is not None and not selector.get_map():
+                if stop_reason and not kill_sent:
+                    # The group may still contain a child that closed both pipes
+                    # and ignored TERM after the original process exited.
+                    signal_group(signal.SIGKILL)
+                break
+            wait_for = 0.05
+            if not stop_reason:
+                wait_for = min(wait_for, max(0.0, deadline - now))
+            elif not kill_sent and term_deadline is not None:
+                wait_for = min(wait_for, max(0.0, term_deadline - now))
+            elif kill_deadline is not None:
+                wait_for = min(wait_for, max(0.0, kill_deadline - now))
+
+            ready = selector.select(wait_for) if selector.get_map() else ()
+            if not ready:
+                if not selector.get_map():
+                    time.sleep(wait_for)
+                continue
+            for key, _mask in ready:
+                stream = key.fileobj
+                name = key.data
+                try:
+                    chunk = os.read(stream.fileno(), 65_536)
+                except BlockingIOError:
+                    continue
+                if not chunk:
+                    selector.unregister(stream)
+                    stream.close()
+                    continue
+                buffer = captured[name]
+                remaining = max_output_bytes - len(buffer)
+                if len(chunk) > remaining:
+                    if remaining > 0:
+                        buffer.extend(chunk[:remaining])
+                    truncated = True
+                    if not stop_reason:
+                        output_limited = True
+                        stop_reason = "output_limit"
+                        signal_group(signal.SIGTERM)
+                        term_deadline = time.monotonic() + 2.0
+                else:
+                    buffer.extend(chunk)
+    finally:
+        selector.close()
+        for _name, stream in streams:
+            if stream is not None and not stream.closed:
+                stream.close()
+
+    if proc.poll() is None:
+        signal_group(signal.SIGKILL)
+    try:
+        exit_code = proc.wait(timeout=1.0)
+    except subprocess.TimeoutExpired:
+        exit_code = proc.poll()
+    raw_out = bytes(captured["stdout"])
+    raw_err = bytes(captured["stderr"])
 
     def decode(blob: bytes) -> str:
         return blob.decode("utf-8", "replace")
@@ -397,6 +449,8 @@ def _run_popen(
     note = detail
     if timed_out:
         note = (note + "; " if note else "") + f"killed after {timeout_ms}ms (process group TERM→KILL)"
+    elif output_limited:
+        note = (note + "; " if note else "") + "output cap reached; process group terminated (TERM→KILL)"
 
     return SandboxResult(
         argv=tuple(argv),

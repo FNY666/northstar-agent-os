@@ -6,6 +6,7 @@ from __future__ import annotations
 import json
 import os
 import stat
+import tempfile
 import unittest
 from pathlib import Path
 
@@ -79,6 +80,12 @@ class SessionIdTests(unittest.TestCase):
     def test_safe_legacy_id_is_accepted(self):
         self.assertEqual(SessionStore(None, session_id="ns-given").session_id, "ns-given")
 
+    def test_read_refuses_path_traversal_ids(self):
+        with tempfile.TemporaryDirectory() as directory:
+            store = SessionStore(directory, session_id="safe")
+            with self.assertRaises(ValueError):
+                store.read("../outside")
+
     def test_ids_are_unique_sortable_and_prefixed(self):
         first, second = new_session_id(now=1_000_000), new_session_id(now=2_000_000)
         self.assertTrue(first.startswith("ns-1970"))
@@ -144,6 +151,25 @@ class WriteTests(RuntimeTestCase):
         mode = stat.S_IMODE(os.stat(store.path).st_mode)
         self.assertEqual(mode, 0o600)
         self.assertEqual(stat.S_IMODE(os.stat(root).st_mode), 0o700)
+
+    def test_append_refuses_a_transcript_symlink(self):
+        root = self.workspace()
+        outside = root.parent / "outside.jsonl"
+        outside.write_text("do not append here\n", encoding="utf-8")
+        (root / "ns-link.jsonl").symlink_to(outside)
+        store = SessionStore(root, session_id="ns-link")
+        with self.assertRaises(SessionIntegrityError):
+            store.append("informational", {"content": "must stay inside"})
+        self.assertEqual(outside.read_text(encoding="utf-8"), "do not append here\n")
+
+    def test_read_refuses_a_transcript_symlink(self):
+        root = self.workspace()
+        outside = root.parent / "outside.jsonl"
+        outside.write_text('{"index":0,"type":"session_start"}\n', encoding="utf-8")
+        link = root / "ns-link.jsonl"
+        link.symlink_to(outside)
+        with self.assertRaises(SessionIntegrityError):
+            load_jsonl(link)
 
     def test_oversized_records_stay_parseable(self):
         store = SessionStore(self.workspace(), session_id="ns-big", max_record_chars=300)

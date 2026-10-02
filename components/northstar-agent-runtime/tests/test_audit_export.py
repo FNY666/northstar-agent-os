@@ -14,6 +14,7 @@ from audit_export import (
     COMPONENT,
     record_to_audit,
     records_to_ndjson,
+    session_path,
     transcript_path_to_ndjson,
 )
 from sessions import SessionStore
@@ -147,6 +148,10 @@ class NdjsonTextTests(unittest.TestCase):
         self.assertEqual([record["level"] for record in records], ["info", "info", "error"])
         self.assertEqual(records[2]["seq"], 2)
         self.assertEqual(records[2]["session_id"], session_id)
+
+    def test_session_path_rejects_path_traversal_ids(self):
+        with self.assertRaises(ValueError):
+            session_path(Path("/tmp/sessions"), "../outside")
 
 
 class CliExportTests(unittest.TestCase):

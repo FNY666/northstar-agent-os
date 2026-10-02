@@ -490,6 +490,11 @@ class RealRunTests(RuntimeTestCase):
         _replay, _report, error = fork_preview(records, record_index=99)
         self.assertIn("no checkpoint at record #99", error)
 
+    def test_load_replay_rejects_path_traversal_ids(self):
+        replay, error = load_replay(Path.cwd(), "../outside")
+        self.assertIsNone(replay)
+        self.assertIn("safe single path component", error)
+
     def test_show_and_list_still_work_after_the_two_new_actions(self):
         sessions, session = self.recorded_run()
         code, out, _ = self.invoke("sessions", "list", "--session-dir", str(sessions))
