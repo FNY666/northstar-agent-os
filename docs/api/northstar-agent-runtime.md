@@ -1799,19 +1799,23 @@ Tamper-evident hash chain for the ``audit.ndjson/1`` feed.
 
 Canonical JSON bytes: sorted keys, no whitespace, UTF-8.
 
-#### `build_genesis_params(component: str, *, session_id: str | None=None, run_id: str | None=None, started_ts: str | None=None)`
+#### `jcs_canonical_json(obj: Any)`
+
+JSON Canonicalization Scheme (RFC 8785) bytes, UTF-8.
+
+#### `build_genesis_params(component: str, *, session_id: str | None=None, run_id: str | None=None, started_ts: str | None=None, chain_version: str=CHAIN_VERSION_V2)`
 
 The anchor object stored on the first chained record.
 
 #### `genesis_hash(params: dict[str, Any])`
 
-The genesis hash: ``sha256(canonical_json(genesis_params))`` (hex).
+The genesis hash: ``sha256(canon(genesis_params))`` (hex).
 
-#### `chain_record(record: dict[str, Any], prev_hash: str)`
+#### `chain_record(record: dict[str, Any], prev_hash: str, *, chain_version: str=CHAIN_VERSION)`
 
 Return a copy of ``record`` sealed with ``prev_hash``/``chain_hash``.
 
-#### `chain_records(records: list[dict[str, Any]], *, component: str, session_id: str | None=None, run_id: str | None=None, started_ts: str | None=None, key_id: str | None=None)`
+#### `chain_records(records: list[dict[str, Any]], *, component: str, session_id: str | None=None, run_id: str | None=None, started_ts: str | None=None, key_id: str | None=None, chain_version: str=CHAIN_VERSION_V2)`
 
 Seal a whole record list; the first record carries the genesis anchor.
 

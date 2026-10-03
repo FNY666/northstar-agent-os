@@ -62,6 +62,9 @@ _OPTIONAL: dict[str, type] = {
     "genesis": dict,
     "signature": str,
     "key_id": str,
+    # Chain version marker stamped on every v2 record's hashed body
+    # ("northstar-audit-chain/2" = JCS canonicalization, IETF-aligned).
+    "chain": str,
 }
 _HEX64_RE = re.compile(r"^[0-9a-f]{64}$")
 _HEX128_RE = re.compile(r"^[0-9a-f]{128}$")
