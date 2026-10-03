@@ -508,6 +508,14 @@ One ordered evaluation inside a probe (blast-radius needs sequences).
 One gate-decision probe with closed ground truth.
 
 - `iter_steps()`
+#### `CompositionalStep`
+
+One ordered tool call inside a compositional sequence.
+
+#### `CompositionalProbe`
+
+One labelled sequence: each step is individually compliant, but the composition may violate policy. ``violation_step`` is the index of the step that completes the violation (None for benign sequences).
+
 #### `CorpusSample`
 
 #### `run_metric_corpus()`
@@ -557,6 +565,10 @@ in-toto Layout/Link step compliance over deterministic attack scenarios.
 #### `run_tool_allowlist_enforcement()`
 
 Tool-allowlist enforcement, OpenShell decision-shape analogue.
+
+#### `run_compositional()`
+
+Compositional-safety (step-compliant, sequence-violating) sequences.
 
 #### `BenchHarness`
 
