@@ -798,5 +798,50 @@ class StrictModeTests(unittest.TestCase):
             self.assertEqual(code, 0, out + _err)
 
 
+class ProvenanceTrustVerifyTests(unittest.TestCase):
+    """`audit verify` enforces the SLSA externalParameters trust marking."""
+
+    def _feed_with_provenance(self, provenance):
+        records = [sample_audit(0), sample_audit(1)]
+        records[1]["provenance"] = provenance
+        chained = chain_records(records, component="northstar-agent-runtime", run_id="run-1")
+        return to_lines(chained)
+
+    def test_unmarked_external_parameters_fail_verification(self):
+        provenance = {
+            "buildType": "https://northstar.dev/agent-run/v1",
+            "externalParameters": {"tool": "Write"},
+            # no externalParametersTrust: unmarked external input
+        }
+        result = verify_lines(self._feed_with_provenance(provenance))
+        self.assertFalse(result.ok)
+        self.assertEqual(result.broken_at, 2)
+        self.assertIn("externalParametersTrust", result.reason)
+
+    def test_marked_untrusted_external_parameters_verify(self):
+        provenance = {
+            "buildType": "https://northstar.dev/agent-run/v1",
+            "externalParameters": {"tool": "Write"},
+            "externalParametersTrust": "untrusted",
+        }
+        result = verify_lines(self._feed_with_provenance(provenance))
+        self.assertTrue(result.ok, result.reason)
+
+    def test_marked_verified_external_parameters_verify(self):
+        provenance = {
+            "buildType": "https://northstar.dev/agent-run/v1",
+            "externalParameters": {"tool": "Write"},
+            "externalParametersTrust": "verified",
+        }
+        result = verify_lines(self._feed_with_provenance(provenance))
+        self.assertTrue(result.ok, result.reason)
+
+    def test_records_without_provenance_still_verify(self):
+        records = [sample_audit(0), sample_audit(1)]
+        chained = chain_records(records, component="northstar-agent-runtime")
+        result = verify_lines(to_lines(chained))
+        self.assertTrue(result.ok, result.reason)
+
+
 if __name__ == "__main__":
     unittest.main()

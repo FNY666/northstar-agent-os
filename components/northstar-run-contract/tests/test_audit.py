@@ -107,5 +107,99 @@ class NdjsonTests(unittest.TestCase):
             dumps_record({"schema_version": "audit.ndjson/1"})
 
 
+def provenance(**overrides):
+    """A valid SLSA v1.0-style provenance object for tests."""
+    base = {
+        "buildType": "https://northstar.dev/agent-run/v1",
+        "builder": {"id": "https://northstar.dev/runtime/northstar-agent-runtime"},
+        "invocationId": "run-1",
+        "externalParameters": {"tool": "Write", "args": {"path": "/tmp/x"}},
+        "externalParametersTrust": "untrusted",
+        "internalParameters": {"approval_tier": 3},
+        "resolvedDependencies": [
+            {"uri": "tool://Write", "digest": {"sha256": "ab" * 32}},
+        ],
+        "selfAsserted": True,
+    }
+    base.update(overrides)
+    return base
+
+
+class ProvenanceTests(unittest.TestCase):
+    def test_valid_provenance_passes_and_round_trips(self):
+        record = sample(provenance=provenance(), run_id="run-1")
+        self.assertEqual(validate_record(record), ())
+        line = dumps_record(record)
+        reparsed = next(iter_ndjson([line]))
+        self.assertEqual(reparsed["provenance"]["externalParametersTrust"], "untrusted")
+
+    def test_new_record_accepts_provenance(self):
+        record = new_record(
+            "northstar-agent-runtime", "tool_call",
+            ts="2026-09-07T03:04:05.123Z", run_id="run-9",
+            provenance=provenance(invocationId="run-9"),
+        )
+        self.assertEqual(validate_record(record), ())
+
+    def test_provenance_is_optional(self):
+        self.assertEqual(validate_record(sample()), ())
+
+    def test_unmarked_external_parameters_fail_closed(self):
+        bad = provenance()
+        del bad["externalParametersTrust"]
+        errors = validate_record(sample(provenance=bad))
+        self.assertTrue(
+            any("externalParametersTrust" in e for e in errors),
+            f"expected a trust-marking error: {errors}",
+        )
+
+    def test_invalid_trust_value_is_rejected(self):
+        bad = provenance(externalParametersTrust="probably-fine")
+        errors = validate_record(sample(provenance=bad))
+        self.assertTrue(any("externalParametersTrust" in e for e in errors))
+
+    def test_empty_external_parameters_need_no_marking(self):
+        # No external inputs, nothing to mark.
+        ok = provenance(externalParameters={})
+        del ok["externalParametersTrust"]
+        self.assertEqual(validate_record(sample(provenance=ok)), ())
+
+    def test_verified_external_parameters_pass(self):
+        ok = provenance(externalParametersTrust="verified")
+        self.assertEqual(validate_record(sample(provenance=ok)), ())
+
+    def test_invocation_id_must_match_run_id(self):
+        bad = provenance(invocationId="run-OTHER")
+        errors = validate_record(sample(provenance=bad, run_id="run-1"))
+        self.assertTrue(any("does not match" in e for e in errors), errors)
+
+    def test_invocation_id_matching_run_id_passes(self):
+        self.assertEqual(validate_record(sample(provenance=provenance(), run_id="run-1")), ())
+
+    def test_unknown_provenance_fields_are_rejected(self):
+        bad = provenance(sneaky="field")
+        errors = validate_record(sample(provenance=bad))
+        self.assertIn("unknown provenance fields: sneaky", errors)
+
+    def test_malformed_dependencies_are_rejected(self):
+        bad = provenance(resolvedDependencies=[{"uri": "", "digest": {}}])
+        errors = validate_record(sample(provenance=bad))
+        self.assertTrue(any("resolvedDependencies[0]" in e for e in errors), errors)
+
+    def test_builder_id_must_be_non_empty(self):
+        bad = provenance(builder={"id": ""})
+        errors = validate_record(sample(provenance=bad))
+        self.assertTrue(any("builder.id" in e for e in errors), errors)
+
+    def test_new_record_rejects_unmarked_external_parameters(self):
+        with self.assertRaises(ValueError):
+            bad = provenance()
+            del bad["externalParametersTrust"]
+            new_record(
+                "northstar-agent-runtime", "tool_call",
+                ts="2026-09-07T03:04:05.123Z", provenance=bad,
+            )
+
+
 if __name__ == "__main__":
     unittest.main()

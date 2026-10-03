@@ -25,8 +25,15 @@ Envelope v1 (``audit.ndjson/1``):
   (64 lowercase hex chars), ``genesis`` (anchor object, first chained record
   only), ``signature`` (128 hex chars, Ed25519), ``key_id`` (string). The
   chain extension is optional *within* ``audit.ndjson/1`` so legacy feeds
-  without it still validate; see docs/concepts/audit-proof-spec.md. No other
-  keys are allowed.
+  without it still validate; see docs/concepts/audit-proof-spec.md.
+* optional: ``provenance`` (object) — SLSA v1.0-style evidence for the
+  event (builder identity, invocation id, external/verified parameters,
+  resolved dependencies). SLSA semantics are borrowed, not its trust model:
+  ``builder.id`` here is self-asserted (see ``selfAsserted``), the chain
+  and signatures carry the integrity. See
+  docs/slsa-provenance-mapping.md for the field-by-field mapping.
+
+No other keys are allowed.
 """
 from __future__ import annotations
 
@@ -64,7 +71,19 @@ _OPTIONAL: dict[str, type] = {
     # Chain version marker stamped on every v2 record's hashed body
     # ("northstar-audit-chain/2" = JCS canonicalization, IETF-aligned).
     "chain": str,
+    # SLSA v1.0-style evidence extension (optional object; see
+    # docs/slsa-provenance-mapping.md). Deep-validated by
+    # _validate_provenance, including the externalParameters trust rule:
+    # externally-controlled inputs must carry an explicit trust marking.
+    "provenance": dict,
 }
+
+#: Trust values a record may assert for its ``externalParameters``. SLSA v1.0
+#: treats externalParameters as untrusted by definition; Northstar keeps the
+#: same default but requires the producer to say so out loud: a record that
+#: carries external inputs without an explicit marking fails validation
+#: instead of silently inheriting "untrusted".
+_PROVENANCE_TRUST_VALUES = ("untrusted", "verified")
 
 _HEX64_RE = re.compile(r"^[0-9a-f]{64}$")
 _HEX128_RE = re.compile(r"^[0-9a-f]{128}$")
@@ -93,6 +112,7 @@ def new_record(
     session_id: str | None = None,
     run_id: str | None = None,
     actor_id: str | None = None,
+    provenance: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Build one audit record; raises ``ValueError`` on the first validation error."""
     record: dict[str, Any] = {
@@ -112,6 +132,8 @@ def new_record(
     ):
         if value is not None:
             record[key] = value
+    if provenance is not None:
+        record["provenance"] = dict(provenance)
     errors = validate_record(record)
     if errors:
         raise ValueError(errors[0])
@@ -172,6 +194,135 @@ def validate_record(record: Any) -> tuple[str, ...]:
         not isinstance(record["key_id"], str) or not record["key_id"] or len(record["key_id"]) > 200
     ):
         errors.append("audit 'key_id' must be a non-empty string of at most 200 characters")
+    if "provenance" in record:
+        errors.extend(_validate_provenance(record["provenance"]))
+        # The provenance's invocationId names the same run the envelope
+        # names; a mismatch means the evidence is attached to the wrong
+        # run and the verifier must not trust it.
+        invocation_id = record["provenance"].get("invocationId") if isinstance(record["provenance"], dict) else None
+        if (
+            isinstance(invocation_id, str)
+            and invocation_id
+            and isinstance(record.get("run_id"), str)
+            and record["run_id"] != invocation_id
+        ):
+            errors.append(
+                f"provenance 'invocationId' {invocation_id!r} does not match "
+                f"envelope 'run_id' {record['run_id']!r}"
+            )
+    return tuple(errors)
+
+
+def _validate_provenance(provenance: Any) -> tuple[str, ...]:
+    """Deep validation for the SLSA v1.0-style ``provenance`` envelope field.
+
+    Field meanings follow the mapping in docs/slsa-provenance-mapping.md;
+    every rule below mirrors SLSA v1.0's own verifier obligations, adapted
+    to the audit-event setting:
+
+    * ``buildType`` (SLSA buildDefinition.buildType): URI naming the
+      run-type profile the evidence claims to follow. The verifier selects
+      its expectations by it, so it must be present and non-empty when
+      provenance is carried.
+    * ``builder.id`` (SLSA runDetails.builder.id): URI identifying the
+      builder. Self-asserted here (see ``selfAsserted``), so the verifier
+      must cross-check it against the record's Ed25519 ``key_id`` or an
+      external anchor before trusting it.
+    * ``invocationId`` (SLSA runDetails.metadata.invocationId): the unique
+      id of this run invocation; must match the envelope's ``run_id`` when
+      both are present.
+    * ``externalParameters`` (SLSA buildDefinition.externalParameters):
+      externally-controlled inputs (e.g. user-supplied tool arguments).
+      SLSA's core rule, enforced here: the verifier MUST NOT treat them as
+      trustworthy. A record carrying non-empty externalParameters MUST
+      carry ``externalParametersTrust`` ("untrusted" | "verified") —
+      unmarked external input is a validation error, never a silent
+      default.
+    * ``internalParameters`` (SLSA buildDefinition.internalParameters):
+      builder-set parameters; trusted only as far as the builder is.
+    * ``resolvedDependencies`` (SLSA
+      buildDefinition.resolvedDependencies): materials the run resolved,
+      each ``{"uri": ..., "digest": {algo: value}}``.
+    * ``selfAsserted``: honesty marker — True means ``builder.id`` is a
+      self-report, not a third-party attestation; integrity comes from the
+      hash chain + optional Ed25519 signature + external anchor.
+    """
+    errors: list[str] = []
+    if not isinstance(provenance, dict):
+        return ("audit 'provenance' must be an object",)
+    unknown = sorted(set(provenance) - {
+        "buildType", "builder", "invocationId", "externalParameters",
+        "externalParametersTrust", "internalParameters",
+        "resolvedDependencies", "selfAsserted",
+    })
+    if unknown:
+        errors.append(f"unknown provenance fields: {', '.join(unknown)}")
+    build_type = provenance.get("buildType")
+    if not isinstance(build_type, str) or not build_type or len(build_type) > 500:
+        errors.append("provenance 'buildType' must be a non-empty URI string of at most 500 characters")
+    builder = provenance.get("builder")
+    if builder is not None:
+        builder_id = builder.get("id") if isinstance(builder, dict) else None
+        if not isinstance(builder_id, str) or not builder_id or len(builder_id) > 500:
+            errors.append("provenance 'builder.id' must be a non-empty URI string of at most 500 characters")
+    invocation_id = provenance.get("invocationId")
+    if invocation_id is not None and (
+        not isinstance(invocation_id, str) or not invocation_id or len(invocation_id) > 200
+    ):
+        errors.append("provenance 'invocationId' must be a non-empty string of at most 200 characters")
+    external = provenance.get("externalParameters")
+    if external is not None:
+        if not isinstance(external, dict):
+            errors.append("provenance 'externalParameters' must be an object")
+        elif external:
+            # SLSA's core verifier rule: external inputs are untrusted until
+            # the builder says otherwise, and the saying must be explicit.
+            trust = provenance.get("externalParametersTrust")
+            if trust not in _PROVENANCE_TRUST_VALUES:
+                errors.append(
+                    "provenance carrying non-empty 'externalParameters' must mark "
+                    "'externalParametersTrust' as one of "
+                    f"{', '.join(_PROVENANCE_TRUST_VALUES)} "
+                    "(unmarked external input is untrusted input)"
+                )
+    trust_only = provenance.get("externalParametersTrust")
+    if trust_only is not None and trust_only not in _PROVENANCE_TRUST_VALUES:
+        errors.append(
+            f"provenance 'externalParametersTrust' must be one of "
+            f"{', '.join(_PROVENANCE_TRUST_VALUES)}"
+        )
+    internal = provenance.get("internalParameters")
+    if internal is not None and not isinstance(internal, dict):
+        errors.append("provenance 'internalParameters' must be an object")
+    deps = provenance.get("resolvedDependencies")
+    if deps is not None:
+        if not isinstance(deps, list):
+            errors.append("provenance 'resolvedDependencies' must be an array")
+        else:
+            for index, dep in enumerate(deps):
+                if not isinstance(dep, dict):
+                    errors.append(f"provenance 'resolvedDependencies[{index}]' must be an object")
+                    continue
+                uri = dep.get("uri")
+                if not isinstance(uri, str) or not uri or len(uri) > 500:
+                    errors.append(
+                        f"provenance 'resolvedDependencies[{index}].uri' must be a "
+                        "non-empty string of at most 500 characters"
+                    )
+                digest = dep.get("digest")
+                if digest is not None and (
+                    not isinstance(digest, dict)
+                    or not digest
+                    or any(not isinstance(k, str) or not isinstance(v, str) or not v
+                           for k, v in digest.items())
+                ):
+                    errors.append(
+                        f"provenance 'resolvedDependencies[{index}].digest' must be a "
+                        "non-empty object mapping algorithm names to digest strings"
+                    )
+    self_asserted = provenance.get("selfAsserted")
+    if self_asserted is not None and not isinstance(self_asserted, bool):
+        errors.append("provenance 'selfAsserted' must be a boolean")
     return tuple(errors)
 
 
