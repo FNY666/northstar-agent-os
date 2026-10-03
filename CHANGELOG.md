@@ -1,3 +1,37 @@
+## Unreleased (sixty-fourth batch) — official security-audit skill + self-audit
+
+New official skill `skills/security-audit/`, absorbing the audit methodology
+of [cloudflare/security-audit-skill](https://github.com/cloudflare/security-audit-skill)
+(MIT, Copyright 2025-2026 Cloudflare, Inc.) — verified against its actual
+source (`SKILL.md`, `validate-coverage-ledger.cjs`, `report-schema.json`) and
+rewritten for Northstar's governance context (not a Cloudflare product, no
+Cloudflare endorsement):
+
+- **Six-phase workflow** (`SKILL.md`): reconnaissance → coverage-led hunting
+  waves → candidate validation → structured output → independent record
+  verification → target-neutral report; guidance vs full-audit modes.
+- **Northstar trust boundaries B1–B9** (agent→gate, gate→host-callback,
+  tool→effect, MCP server→client, skill→loader, session→lease-holder,
+  provider→retry-policy, plugin→host, audit-writer→verifier) with
+  Northstar-specific subsystem and attack-class vocabularies
+  (approval-replay, consent-bypass, budget-bypass, audit-tampering,
+  tool-result-injection, lease-bypass, …).
+- **Coverage-ledger template** (`coverage-ledger.template.json`) with the
+  canonical `surface::boundary::subsystem::attack_class` unit IDs and the
+  planned/covered/candidate/blocked/deferred state invariants.
+- **Three verdict schemas** (`verdict-schemas.json`):
+  `confirmed` (with severity anchors), `needs_validation` (no severity),
+  `rejected`.
+
+**First self-audit** (`skills/security-audit/self-audit-2026-10-03/`,
+quick profile, 10 coverage units, run against `c2ec7a9`): 10 units covered,
+2 confirmed findings — both informational (sandbox `auto` backend silently
+downgrades to `process` without bwrap; `digest_arguments` silently coerces
+non-dict payloads to the `{}` digest) — and 1 rejected hypothesis
+(approval-replay via non-dict payload, refuted by source trace: every
+binding path type-checks or fails closed first). Coverage ledger, findings,
+local checks, and report are committed as the run's artifacts.
+
 ## Unreleased (sixty-third batch) — dataflow sensitivity tracking + deterministic TOML policy (OpenAPPA absorption)
 
 New metrics-track case `metrics.dataflow_sensitivity`
