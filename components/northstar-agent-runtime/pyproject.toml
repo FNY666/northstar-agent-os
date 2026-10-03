@@ -62,6 +62,7 @@ py-modules = [
     "decision_model",
     "checkpoints",
     "contract_bridge",
+    "dataflow_policy",
     "doctor",
     "durable_bridge",
     "ed25519",

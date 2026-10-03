@@ -1,4 +1,44 @@
-## Unreleased (sixty-second batch) — in-toto Layout/Link step compliance in the governance bench
+## Unreleased (sixty-third batch) — dataflow sensitivity tracking + deterministic TOML policy (OpenAPPA absorption)
+
+New metrics-track case `metrics.dataflow_sensitivity`
+(`components/northstar-agent-runtime/governance_bench.py`): the
+permission gate gains a **data-destination dimension**, absorbed — from
+real code, not docs — from `archestra-ai/openappa` (MIT, Copyright 2026
+Archestra Inc.):
+
+- **Mechanism, code-verified**: OpenAPPA's `[policy] trust_chain` with
+  "content lowers the trajectory to the rank of its source; a sink needs
+  at least its declared rank"
+  (`examples/tests/three-trust-ranks/appa.toml`); source tools with
+  `delta = { trust, audience }` and sink tools with
+  `requires = { trust }` / `requires = { audience = { contains = ["$to"] } }`
+  (`examples/tests/secret-stays-inside/appa.toml`); the policy dialect is
+  TOML compiled deterministically into the engine
+  (`appa-policy/src/lib.rs`, strict `deny_unknown_fields` in
+  `appa-policy/src/raw.rs`).
+- **Northstar analogue** (`dataflow_policy.py`, fully deterministic — no
+  LLM annotator in the loop): sensitivity labels come from the TOML
+  policy's source rules (tool-name glob + optional argument globs,
+  first-match-wins); the trajectory's sensitivity only rises; a sink call
+  whose trajectory is hotter than the sink may receive **escalates** to
+  the host approval callback (tier upgrade) instead of auto-allowing. No
+  callback → fail-closed deny. Denied calls attach no label (a denied
+  call produces no data); escalation is skipped under
+  `bypassPermissions` (bypass means the host opted out of being asked).
+- **Deterministic TOML policy**: `policy/dataflow.toml` (versioned in
+  git, auditable) parsed strictly — unknown fields, unknown trust ranks,
+  or a wrong version are refused and the gate fails closed. Same-file →
+  same compiled policy, always.
+- **Baseline**: escalation F1 1.0 on the 12-probe corpus (7 TP / 5 TN,
+  0 FP / 0 FN — a conformance regression, not a judgment measure),
+  including audience confinement (`/hr/*` → `hr@local` only, mirroring
+  OpenAPPA's secret-stays-inside) and two probes pinning the parser's
+  fail-closed behavior on schema violations.
+
+`BENCH_VERSION` v10 → v11; `DATAFLOW_CORPUS` and
+`run_dataflow_sensitivity` exported; human + `--json` output print the
+new track; 30 new unit tests (`tests/test_dataflow_policy.py`).
+
 
 Absorbs the artifact-rule mechanism of in-toto spec v1.0.0
 (`in-toto/specification`, `in-toto-spec.md` §4.3.2/§4.3.3), verified against

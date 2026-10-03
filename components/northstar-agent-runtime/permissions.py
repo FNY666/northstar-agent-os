@@ -38,7 +38,10 @@ from __future__ import annotations
 import hashlib
 import json
 from dataclasses import dataclass, field, replace
-from typing import Any, Callable, Iterable, Literal, Sequence
+from typing import Any, Callable, Iterable, Literal, Sequence, TYPE_CHECKING
+
+if TYPE_CHECKING:  # stdlib-only module; annotation-only to avoid any import cycle
+    from dataflow_policy import SessionDataflow, SinkVerdict
 
 from decision_model import (
     DecisionModel,
@@ -281,6 +284,118 @@ class PermissionEngine:
         self._kinds[tool_name] = kind
 
     def evaluate(
+        self,
+        tool_name: str,
+        *,
+        kind: str | None = None,
+        mutating: bool | None = None,
+        payload: dict[str, Any] | None = None,
+        context: PermissionRequestContext | None = None,
+        known: bool = True,
+        dataflow: SessionDataflow | None = None,
+    ) -> PermissionDecision:
+        """Run the three layers for one call, plus the dataflow dimension.
+
+        ``dataflow`` is a :class:`dataflow_policy.SessionDataflow` tracking
+        this session's data sensitivity (OpenAPPA-style: source ``delta``
+        labels, sink ``requires`` checks, from a deterministic TOML policy).
+        When ``None`` (the default) the gate behaves exactly as before.
+
+        The dataflow layer sits *between* the allow-list and the mode layer:
+        an auto-allowed sink call whose trajectory is hotter than the sink
+        may receive escalates to the host approval callback (tier upgrade).
+        Denials always stand — a denied call attaches no label, because a
+        denied call produces no data. Escalation is skipped under
+        ``bypassPermissions``: bypass means the host opted out of being
+        asked, and escalation *is* asking the host.
+        """
+        payload = dict(payload or {})
+        sink_verdict = (
+            dataflow.check_sink(tool_name, payload) if dataflow is not None else None
+        )
+        decision = self._evaluate_base(
+            tool_name,
+            kind=kind,
+            mutating=mutating,
+            payload=payload,
+            context=context,
+            known=known,
+        )
+        if dataflow is None or not decision.allowed:
+            return decision
+        # The call will execute: its result carries the source label, so the
+        # trajectory learns it now. (A denied call produces no data and
+        # attaches nothing.)
+        dataflow.observe(tool_name, payload)
+        if (
+            sink_verdict is not None
+            and sink_verdict.escalate
+            and self.config.mode != "bypassPermissions"
+        ):
+            return self._apply_dataflow_escalation(
+                tool_name, payload, context, sink_verdict
+            )
+        return decision
+
+    def _apply_dataflow_escalation(
+        self,
+        tool_name: str,
+        payload: dict[str, Any],
+        context: PermissionRequestContext | None,
+        sink_verdict: SinkVerdict,
+    ) -> PermissionDecision:
+        """Upgrade an auto-allowed sink call to host approval (or deny)."""
+        if self.config.can_use_tool is None:
+            return PermissionDecision(
+                False,
+                source="mode",
+                reason=(
+                    f"{tool_name} would move labelled data to a sink that may not "
+                    f"receive it ({sink_verdict.reason}), and this run has no host "
+                    f"approval callback, so it is denied under "
+                    f"permission_mode={self.config.mode}"
+                ),
+                rule=f"mode:{self.config.mode}:dataflow_no_callback",
+                tool=tool_name,
+            )
+        request = context or PermissionRequestContext(
+            mode=self.config.mode,
+            reason_hint=f"{tool_name} carries labelled data to a restricted sink",
+        )
+        if not request.arguments_digest:
+            request = replace(request, arguments_digest=digest_arguments(payload))
+        try:
+            verdict = self.config.can_use_tool(tool_name, dict(payload), request)
+        except Exception as error:  # noqa: BLE001 - a broken approver must not grant access
+            return PermissionDecision(
+                False,
+                source="host_callback",
+                reason=f"host approval callback raised {type(error).__name__}; failing closed",
+                rule="host_callback:error",
+                tool=tool_name,
+            )
+        approved, note = _approval_verdict(verdict)
+        if approved:
+            return PermissionDecision(
+                True,
+                source="host_callback",
+                reason=(
+                    f"{tool_name} approved by host approval callback after dataflow "
+                    f"escalation ({sink_verdict.reason})"
+                ),
+                rule="dataflow:escalation:approved",
+                tool=tool_name,
+            )
+        return PermissionDecision(
+            False,
+            source="host_callback",
+            reason=note
+            or f"{tool_name} refused by host approval callback after dataflow escalation",
+            rule="host_callback:deny",
+            tool=tool_name,
+        )
+
+    def _evaluate_base(
         self,
         tool_name: str,
         *,

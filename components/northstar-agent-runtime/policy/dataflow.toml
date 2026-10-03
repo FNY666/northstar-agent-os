@@ -1,0 +1,62 @@
+# Northstar default dataflow sensitivity policy.
+#
+# Deterministic: parsed by dataflow_policy.from_toml with a strict schema
+# (unknown fields, unknown trust ranks, or a wrong version are refused and
+# the gate fails closed). Versioned in git, so every policy change is
+# auditable. Mechanism absorbed from archestra-ai/OpenAPPA (MIT):
+# trust_chain + source `delta` + sink `requires`
+# (examples/tests/three-trust-ranks/appa.toml,
+#  examples/tests/secret-stays-inside/appa.toml).
+
+[policy]
+version = 1
+trust_chain = ["public", "internal", "confidential", "restricted"]
+
+# --- sources: reads attach a sensitivity label to the trajectory --------
+
+[[policy.source]]
+tool = "Read"
+match_args = { path = "/etc/*" }
+delta = { trust = "confidential" }
+
+[[policy.source]]
+tool = "Read"
+match_args = { path = "*.pem" }
+delta = { trust = "restricted" }
+
+[[policy.source]]
+tool = "Read"
+match_args = { path = "*credentials*" }
+delta = { trust = "restricted" }
+
+[[policy.source]]
+tool = "Read"
+match_args = { path = "*.env" }
+delta = { trust = "confidential" }
+
+[[policy.source]]
+tool = "mcp/files/read"
+match_args = { path = "/hr/*" }
+delta = { trust = "confidential", audience = ["hr@local"] }
+
+[[policy.source]]
+tool = "*secret*"
+delta = { trust = "restricted" }
+
+# --- sinks: destinations that may only receive data up to a level ------
+
+[[policy.sink]]
+tool = "send_mail"
+requires = { trust = "internal" }
+
+[[policy.sink]]
+tool = "post_slack"
+requires = { trust = "internal" }
+
+[[policy.sink]]
+tool = "http_post"
+requires = { trust = "public" }
+
+[[policy.sink]]
+tool = "mcp/mail/send"
+requires = { trust = "confidential", audience = { contains = ["$to"] } }
