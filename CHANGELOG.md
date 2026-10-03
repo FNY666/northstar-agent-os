@@ -1,3 +1,39 @@
+## Unreleased (one-hundred-eighteenth batch) — human final adjudication for AI sports (AI-sports absorption)
+
+New module `adjudication.py`: AI officiating/medical/fitness decisions in
+gated scene classes (`crowded_scene`, `subjective_call`, `medical_advice`,
+`youth_athletes`, `fitness_advice`) are NON_AUTHORITATIVE by default —
+release requires a registered human adjudicator's countersign bound to
+the exact `(decision_digest, adjudicator_id, scene_class)` triple in a
+hash-chained `AdjudicationReceipt` (the FIFA Football AI rule as
+mechanism: humans keep the final word on crowded/subjective calls).
+`check_population_fit()`: a model serving a population outside its
+declared measured populations (closed vocabulary; `mixed_population`
+covers all) flags `population_mismatch` and classifies
+NON_AUTHORITATIVE (the concussion-AI lesson: male-pro-trained models
+fail on youth/women). `biometric_purpose_binding()`: subject-signed,
+purpose-bound, revocable biometric grants checked at USE time — a
+`coaching` grant never covers `model_training` (new purpose, new
+grant, `sports.biometric_purpose_creep`); third-party resale without
+an explicit `resale_allowed` grant is a hard deny
+(`sports.biometric_resale_denied`, the labor-negotiation clause as
+mechanism). `check_coach_output()`: AI coaching must carry a
+capability-boundary honesty label naming what it is NOT qualified
+for; medical-diagnosis framing denies and redirects to the clinical
+path. `check_degradation_plan()`: critical automation needs an
+authority-signed fail-closed degradation plan pinning a
+human-takeover procedure digest per failure mode — no valid plan and
+the 110th-batch deployment registry refuses the system (the
+Wimbledon heat-failure lesson). `check_pipeline_mixing()`:
+betting-tagged inputs may not enter
+officiating/coaching/adjudication/medical pipelines
+(`sports.betting_contamination`). Honest scope: the gate enforces the
+human-in-the-loop *structure*; it does not verify the human's
+judgment quality. New `metrics.adjudication` bench track (12
+scenarios, 4 allow / 8 deny, 0 mismatches) and 27 unit tests. 2026
+sports figures are research parameters drawn from the sweep — verify
+against primary sources before legal or medical use.
+
 ## Unreleased (one-hundred-sixteenth batch) — agriculture extension (AI-agriculture absorption)
 
 New module `agri.py`: authority-signed, hash-chained `AgriSceneBinding`

@@ -47,6 +47,7 @@ northstar-agent-runtime = "cli:main"
 py-modules = [
     "_version",
     "action_card",
+    "adjudication",
     "agent_readiness",
     "approver_separation",
     "attested_receipts",
