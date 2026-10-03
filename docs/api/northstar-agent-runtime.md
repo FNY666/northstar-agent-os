@@ -1212,6 +1212,129 @@ The frontmatter block cannot be parsed. Message is operator-facing.
 
 Return ``(fields, body)``; ``fields`` is ``None`` when there is no block.
 
+### `game_agents`
+
+Source: `components/northstar-agent-runtime/game_agents.py`
+
+Game-agent integrity gates (one-hundred-twenty-second batch).
+
+#### `GameAgentsError`
+
+Malformed game-agent input (construction-time boundary).
+
+#### `MemoryWrite`
+
+One player-supplied NPC memory write, pre-commit.
+
+#### `MemoryGateVerdict`
+
+Outcome of :func:`npc_memory_gate`.
+
+#### `npc_memory_gate(write: MemoryWrite)`
+
+Gate one NPC memory write through the poisoning probe.
+
+#### `compute_envelope_digest(*, npc_id: str, allowed_actions: tuple[str, ...], issued_by: str, issued_at: int, expires_at: int, prev_hash: str)`
+
+Compute the chain digest for one envelope receipt (public so builders and verifiers share exactly one implementation).
+
+#### `NpcEnvelopeReceipt`
+
+Authority-signed approved-actions envelope for one NPC.
+
+#### `issue_envelope_receipt(*, receipt_id: str, npc_id: str, allowed_actions: tuple[str, ...], issued_by: str, authority_secret: bytes, issued_at: int, expires_at: int, prev_hash: str=_GENESIS)`
+
+Issue (authority-side) an NPC envelope receipt.
+
+#### `ActionVerdict`
+
+Outcome of :func:`check_npc_action`.
+
+#### `check_npc_action(receipts: list[NpcEnvelopeReceipt], *, npc_id: str, action: str, check_time: int)`
+
+Check an NPC action against its authority-signed envelope.
+
+#### `NpcRoleReceipt`
+
+Binds one NPC to exactly one role (profiling, spending, ...).
+
+- `receipt_digest()`
+#### `issue_role_receipt(*, receipt_id: str, npc_id: str, role: str, issued_by: str, authority_secret: bytes, issued_at: int, expires_at: int)`
+
+Issue (authority-side) an NPC role receipt.
+
+#### `RoleVerdict`
+
+Outcome of :func:`role_separation`.
+
+#### `role_separation(receipts: list[NpcRoleReceipt], *, npc_id: str, check_time: int)`
+
+Enforce profiling/spending role separation for one NPC.
+
+#### `GameCheatVerdict`
+
+Outcome of :func:`game_cheat_probe`.
+
+#### `game_cheat_probe(trace: list[str])`
+
+Run the deterministic anti-cheat probe over a session trace.
+
+#### `PerformerGrant`
+
+Performer-signed consent for synthetic voice/likeness/persona use.
+
+#### `PerformerRevocation`
+
+Terminal revocation of a performer grant.
+
+#### `issue_performer_grant(*, grant_id: str, performer_id: str, rights_scope: str, purpose: str, performer_secret: bytes, granted_at: int, expires_at: int)`
+
+Issue (performer-side) a synthetic-performance consent grant.
+
+#### `revoke_performer_grant(grant: PerformerGrant, *, performer_secret: bytes, revoked_at: int)`
+
+Revoke a performer grant. Effective immediately at ``revoked_at``; irreversible in the log (a new grant needs a new receipt; there is no "un-revoke").
+
+#### `PerformerUseVerdict`
+
+Outcome of :func:`check_performer_use`.
+
+#### `check_performer_use(grants: list[PerformerGrant], revocations: list[PerformerRevocation], *, performer_id: str, rights_scope: str, purpose: str, use_time: int)`
+
+Check synthetic-performance use at USE time (105th-batch semantics).
+
+#### `NoAiAttestation`
+
+Verifiable attestation that a product used no AI generation.
+
+#### `issue_no_ai_attestation(*, attestation_id: str, product_id: str, build_pipeline_digest: str, issued_by: str, authority_secret: bytes, issued_at: int, expires_at: int)`
+
+Issue (build-authority-side) a no-AI attestation.
+
+#### `NoAiVerdict`
+
+Outcome of :func:`check_no_ai_claim`.
+
+#### `check_no_ai_claim(attestations: list[NoAiAttestation], *, product_id: str, build_pipeline_digest: str, check_time: int)`
+
+Verify a product's "no AI was used" trust claim.
+
+#### `SandboxContent`
+
+AI-generated UGC awaiting sandbox release.
+
+#### `SandboxVerdict`
+
+Outcome of :func:`ugc_editor_sandbox`.
+
+#### `ugc_editor_sandbox(content: SandboxContent, *, release_requested: bool)`
+
+Gate AI-generated UGC out of the sandbox.
+
+#### `game_audit_event(verdict: Any, *, npc_id: str='', product_id: str='', performer_id: str='')`
+
+Build an ``audit.ndjson/1``-shaped record for a game verdict.
+
 ### `governance_bench`
 
 Source: `components/northstar-agent-runtime/governance_bench.py`
@@ -1362,6 +1485,14 @@ Language-capability receipts (one-hundred-fourteenth batch).
 #### `run_adjudication()`
 
 Human final adjudication for AI sports systems (one-hundred-eighteenth batch).
+
+#### `run_housing()`
+
+Fair-housing & coordination isolation (one-hundred-nineteenth batch).
+
+#### `run_game_agents()`
+
+Game-agent integrity gates (one-hundred-twenty-second batch).
 
 #### `run_deployment_registry()`
 
@@ -3645,6 +3776,146 @@ Audit event shaped to feed ``audit_chain.chain_record``.
 #### `authorize_trading(*, strategy_id: str, registry: StrategyRegistry, exposure_cap_cents: int, created_unix: int=0)`
 
 Gate an autonomous trading strategy's session, fail-closed.
+
+### `housing`
+
+Source: `components/northstar-agent-runtime/housing.py`
+
+Fair-housing & coordination isolation (one-hundred-nineteenth batch).
+
+#### `HousingError`
+
+Malformed receipt/probe/pack or a programming error.
+
+#### `FairnessProbeReceipt`
+
+Vendor-signed disparate-impact probe receipt, hash-chained.
+
+#### `compute_probe_digest(receipt: FairnessProbeReceipt)`
+
+Recompute the JCS digest a probe receipt claims.
+
+#### `issue_fairness_probe(*, probe_id: str, model_digest: str, probe_type: str, demographic_slices: Sequence[str], probe_digest: str, vendor_id: str, vendor_secret: bytes, measured_at: int, expires_at: int, prev_digest: str=_GENESIS)`
+
+Issue a vendor-signed fairness-probe receipt and seal it.
+
+#### `ProbeVerdict`
+
+#### `avm_fairness_receipt(probe_receipts: Sequence[FairnessProbeReceipt], *, model_digest: str, decision_kind: str, required_slices: Sequence[str], check_time: int)`
+
+Fail-closed gate: high-stakes use requires a live probe receipt.
+
+#### `probe_audit_event(verdict: ProbeVerdict, *, action: str)`
+
+Shape a probe verdict as an audit event.
+
+#### `EvidencePack`
+
+Agent-emitted evidence pack. Carries NO verdict — ever.
+
+#### `compute_pack_digest(pack: EvidencePack)`
+
+Recompute the JCS digest an evidence pack claims.
+
+#### `build_evidence_pack(*, pack_id: str, subject_id: str, decision_kind: str, factors: Mapping[str, str], evidence_digests: Sequence[str], emitted_at: int)`
+
+Build an evidence pack. The builder cannot set a verdict.
+
+#### `PackVerdict`
+
+#### `human_final_gate(pack: EvidencePack)`
+
+Fail-closed gate: the agent's output must be evidence only.
+
+#### `pack_audit_event(verdict: PackVerdict, *, action: str)`
+
+Shape a pack verdict as an audit event.
+
+#### `DecisionCountersign`
+
+Registered human's countersign bound to an evidence-pack digest.
+
+#### `countersign_decision(*, countersign_id: str, pack: EvidencePack, decision: str, decision_maker_id: str, decision_maker_secret: bytes, decided_at: int, expires_at: int)`
+
+A registered human countersigns an evidence pack.
+
+#### `AdverseAction`
+
+Adverse-action receipt with specific, human-comprehensible reasons.
+
+#### `adverse_action_receipt(*, action_id: str, subject_id: str, reasons: Sequence[str], pack: EvidencePack, countersign: DecisionCountersign, acted_at: int)`
+
+Issue an adverse-action receipt.
+
+#### `ActionVerdict`
+
+#### `check_adverse_action(action: AdverseAction, pack: EvidencePack, countersign: DecisionCountersign, *, check_time: int)`
+
+Fail-closed check of an adverse-action receipt at use time.
+
+#### `action_audit_event(verdict: ActionVerdict, *, action: str)`
+
+Shape an adverse-action verdict as an audit event.
+
+#### `LivePriceFeed`
+
+One live-price feed used by a pricing model.
+
+#### `SourceIsolationProof`
+
+Declared training-data source isolation for a rent-setting model.
+
+#### `declare_source_isolation(*, proof_id: str, model_digest: str, data_sources: Sequence[str], live_price_feeds: Sequence[Mapping[str, Any]], declared_by: str, declared_at: int)`
+
+Declare the training-data sources of a rent-setting model.
+
+#### `IsolationVerdict`
+
+#### `coordination_isolation(proof: SourceIsolationProof, *, model_digest: str)`
+
+Fail-closed coordination gate for rent-setting models.
+
+#### `isolation_audit_event(verdict: IsolationVerdict, *, action: str)`
+
+Shape an isolation verdict as an audit event.
+
+#### `SteeringVerdict`
+
+#### `steering_probe(list_listings: Callable[[Mapping[str, str]], Sequence[str]], persona_a: Mapping[str, str], persona_b: Mapping[str, str])`
+
+Deterministic steering probe over synthetic persona pairs.
+
+#### `steering_audit_event(verdict: SteeringVerdict, *, action: str)`
+
+Shape a steering verdict as an audit event.
+
+#### `VendorAdmission`
+
+Joint-liability admission binding vendor AND landlord to an audit.
+
+#### `vendor_liability_receipt(*, admission_id: str, vendor_id: str, landlord_id: str, audit_digest: str, auditor_id: str, admitted_at: int, expires_at: int)`
+
+Admit a third-party score vendor to the pipeline.
+
+#### `VendorVerdict`
+
+#### `check_vendor_admission(admission: VendorAdmission | None, *, vendor_id: str, check_time: int)`
+
+Fail-closed vendor-admission check at use time.
+
+#### `vendor_audit_event(verdict: VendorVerdict, *, action: str)`
+
+Shape a vendor verdict as an audit event.
+
+#### `MitigatingVerdict`
+
+#### `mitigating_factors(declared_factors: Mapping[str, str], presented_factors: Mapping[str, str])`
+
+Fail-closed mitigating-factor presentation check.
+
+#### `mitigating_audit_event(verdict: MitigatingVerdict, *, action: str)`
+
+Shape a mitigating-factor verdict as an audit event.
 
 ### `deployment_registry`
 

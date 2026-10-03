@@ -1,3 +1,48 @@
+## Unreleased (one-hundred-nineteenth batch) — fair-housing & coordination isolation (AI-real-estate absorption)
+
+New module `housing.py`: a valuation/tenant-screening model used in a
+high-stakes housing/credit decision must carry a vendor-signed
+disparate-impact probe receipt for the exact model digest covering the
+required demographic slices — no probe, no high-stakes use
+(`housing:no_fairness_probe`). The agent may emit ONLY an evidence pack;
+any agent-emitted verdict denies (`housing:verdict_emitted_by_agent`).
+Adverse actions require specific, human-comprehensible reasons bound to
+a registered human's deny countersign — "model output" as a reason is a
+hard deny (`housing:vague_adverse_action`, the ECOA lesson).
+Rent-setting models must bind a source-isolation proof; any live-price
+feed from a provider serving competing landlords denies
+(`housing:coordination_risk`, the RealPage lesson). Steering probes over
+synthetic persona pairs differing only in protected attributes deny on
+inequivalent listings (`housing:steering_detected`). Third-party score
+vendors need a joint-liability bias-audit admission pinning vendor AND
+landlord to the audit digest (the SafeRent lesson). Declared mitigating
+factors (housing voucher, co-signer) missing from the human's presented
+set deny (`housing:mitigating_suppressed`). Bench track `metrics.housing`:
+12 scenarios, 4 allow / 8 deny.
+
+## Unreleased (one-hundred-twenty-second batch) — game-agent integrity (AI-gaming absorption)
+
+New module `game_agents.py`: NPC memory writes pass a poisoning probe
+(competitor-content injection, instruction injection in player-supplied
+content) — poisoned writes are quarantined, never committed
+(`game.npc_memory_poisoned`). Authority-signed approved-actions
+envelopes bind each NPC to a declared action set (Behavior Engine
+lesson); actions outside the envelope deny, and the agent cannot
+widen it. Profiling ("understands the player") and spending authority
+are separated by receipt binding — holding both is `game.role_conflict`
+(PUBG Ally lesson). Deterministic anti-cheat probes reuse the 113th
+batch's `evaluator_access.cheat_probe` semantics: known cheat markers
+→ `game.cheat_detected`; incomplete traces → `game.anomaly_review`.
+Synthetic voice/likeness/persona needs a performer-signed grant
+verified at use time (SAG-AFTRA lesson); use without one is
+`game.performer_rights_violation`. "No AI" trust claims (Sega lesson)
+need a build-authority attestation binding `(product_id,
+build_pipeline_digest)`; unsubstantiated claims are
+`game.unsubstantiated_no_ai`. AI-generated UGC stays sandboxed until
+provenance + content gates pass; premature release is
+`game.sandbox_escape`. Bench track `metrics.game_agents`: 12
+scenarios, 4 allow / 8 deny.
+
 ## Unreleased (one-hundred-eighteenth batch) — human final adjudication for AI sports (AI-sports absorption)
 
 New module `adjudication.py`: AI officiating/medical/fitness decisions in
