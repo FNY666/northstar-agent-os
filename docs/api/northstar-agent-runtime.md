@@ -538,6 +538,14 @@ Structured decision-model approval path (SystemOne-style format).
 
 ASK-timing judgment, HiL-Bench Ask-F1 methodology.
 
+#### `DataflowProbe`
+
+One dataflow-sensitivity probe with closed ground truth.
+
+#### `run_dataflow_sensitivity()`
+
+Dataflow sensitivity tracking, OpenAPPA methodology.
+
 #### `run_whisper_contrast()`
 
 Contrast bench: AP2-shaped "sign the transaction" vs "bind the arguments".
@@ -1064,8 +1072,8 @@ Evaluates one tool call against the three layers.
 - `mode` (property)
 - `knows(tool_name: str)`
 - `register_kind(tool_name: str, kind: str)`
-- `evaluate(tool_name: str, *, kind: str | None=None, mutating: bool | None=None, payload: dict[str, Any] | None=None, context: PermissionRequestContext | None=None, known: bool=True)`
-  - Run the three layers for one call.
+- `evaluate(tool_name: str, *, kind: str | None=None, mutating: bool | None=None, payload: dict[str, Any] | None=None, context: PermissionRequestContext | None=None, known: bool=True, dataflow: SessionDataflow | None=None)`
+  - Run the three layers for one call, plus the dataflow dimension.
 - `evaluate_spec(spec: Any, payload: dict[str, Any] | None=None, *, context: PermissionRequestContext | None=None, known: bool=True)`
 - `check_delegation(agent: str, tool_names: Sequence[str], *, kinds: dict[str, str] | None=None, context: PermissionRequestContext | None=None, disallowed_extra: Iterable[str]=())`
   - Gate a subagent by *each tool it declared*, not by the name ``Task``.
