@@ -369,6 +369,85 @@ class WhisperContrastTests(unittest.TestCase):
         src = inspect.getsource(_case_metrics_whisper_contrast)
         self.assertIn("2609.11757", src)
         self.assertIn("arXiv", src)
+class CompositionalTests(unittest.TestCase):
+    def test_compositional_is_deterministic(self):
+        from governance_bench import run_compositional
+
+        first = run_compositional()
+        second = run_compositional()
+        self.assertEqual(first, second)
+
+    def test_compositional_catch_and_precision(self):
+        from governance_bench import run_compositional
+
+        result = run_compositional()
+        self.assertEqual(result["n_sequences"], 10)
+        self.assertEqual((result["violating_n"], result["benign_n"]), (6, 4))
+        self.assertEqual(result["catch_rate"], 1.0)
+        self.assertEqual(result["missed_ids"], [])
+        self.assertEqual(result["false_positive_ids"], [])
+        self.assertEqual(result["precision_allow_rate"], 1.0)
+        # The compositional gap: the per-call gate allowed every step of
+        # every violating sequence (the "individually compliant" premise).
+        self.assertEqual(result["step_level_miss_rate"], 1.0)
+        self.assertEqual(
+            result["caught_ids"],
+            [
+                "comp_cum_transfers",
+                "comp_cum_writes",
+                "comp_exfil_creds",
+                "comp_exfil_pii",
+                "comp_mosaic_dossier",
+                "comp_mosaic_write",
+            ],
+        )
+        self.assertEqual(
+            result["benign_clean_ids"],
+            [
+                "comp_benign_telemetry",
+                "comp_cum_under",
+                "comp_mosaic_public",
+                "comp_read_only",
+            ],
+        )
+
+    def test_compositional_by_family(self):
+        from governance_bench import run_compositional
+
+        by_family = run_compositional()["by_family"]
+        self.assertEqual(set(by_family), {"control", "cumulative", "exfil", "mosaic"})
+        for name in ("cumulative", "exfil", "mosaic"):
+            self.assertEqual(by_family[name]["n"], 3)
+            self.assertEqual(by_family[name]["violating"], 2)
+            self.assertEqual(by_family[name]["catch_rate"], 1.0)
+
+    def test_compositional_corpus_is_original_synthetic(self):
+        # Methodology-inspired, not dataset-copied: every sequence id uses
+        # the comp_ prefix and every payload is written for this bench.
+        from governance_bench import COMPOSITIONAL_CORPUS
+
+        self.assertEqual(len(COMPOSITIONAL_CORPUS), 10)
+        for probe in COMPOSITIONAL_CORPUS:
+            self.assertTrue(probe.id.startswith("comp_"), probe.id)
+            self.assertGreaterEqual(len(probe.steps), 2)
+            if probe.violation:
+                self.assertIsNotNone(probe.violation_step)
+                self.assertLess(probe.violation_step, len(probe.steps))
+
+    def test_compositional_case_is_registered(self):
+        import inspect
+
+        from governance_bench import _case_metrics_compositional
+
+        case = next(c for c in CASES if c.id == "metrics.compositional")
+        self.assertEqual(case.track, "metrics")
+        # The honest scoping must live in the case source: primary Kaspersky
+        # report not located, figures unverified, track is an original
+        # formalization — not a copy of any dataset.
+        src = inspect.getsource(_case_metrics_compositional)
+        self.assertIn("could NOT be located", src)
+        self.assertIn("unverified", src)
+        self.assertIn("ORIGINAL formalization", src)
 
 
 class PositionalTaskTests(unittest.TestCase):

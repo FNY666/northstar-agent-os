@@ -1,4 +1,44 @@
-## Unreleased (sixty-seventh batch) — OpenShell-style tool allowlist: pre-execution validation + enforcement tracing
+## Unreleased (sixty-eighth batch) — compositional safety: step-compliant sequences that violate in composition
+
+New metrics-track case `metrics.compositional`
+(`components/northstar-agent-runtime/governance_bench.py`), absorbing the
+"组合安全" (compositional safety) methodology: each tool call passes its
+local access-control decision, but the ordered composition achieves an
+adversarial goal — the textbook instance is a `read_file` of credentials
+followed by an `http_request` exfiltration.
+
+**Honest sourcing.** The term and example come from a Chinese self-media
+retelling (网易号 article `KS8M515605198NMR`) that attributes the concept
+to a claimed academic joint study. The primary Kaspersky report could NOT
+be located, and the piece's figures (847 deployments, 2,347 vulnerabilities,
+named authors, "Moltbook" incident) are unverified — none are repeated
+here as fact. This track is an ORIGINAL formalization of the concept
+(step-level compliance vs sequence-level violation), not a copy of any
+dataset.
+
+**What it measures.** A 10-sequence original synthetic corpus: 6 violating
+sequences across three families — `exfil` (sensitive read → external send),
+`cumulative` (each transfer under the per-step limit, total over the cap),
+`mosaic` (low-risk fragments assembled into a sensitive whole) — plus 4
+benign precision controls (public telemetry send, under-cap transfers,
+public-fragment assembly, sensitive read with no outbound channel). Every
+step is first evaluated by the real per-call `PermissionEngine` (ask
+posture, approving host — the "individually compliant" premise); then a
+deterministic sequence policy (`exfiltration` / `cumulative_limit` /
+`mosaic_assembly` rules) judges the prefixes.
+
+**Baseline.** Catch rate 1.000 — all 6 violating sequences flagged at
+exactly the labelled violation step; precision 1.000 — all 4 benign
+sequences fully allowed. And the measured compositional gap:
+`step_level_miss_rate` 1.000 — the per-call gate allowed *every* step of
+*every* violating sequence, because a per-call gate sees only one call at
+a time. The "sensitive"/"public" payload tags are the offline-bench
+analogue of a data-classification layer. BENCH_VERSION v10 -> v11;
+COMPOSITIONAL_CORPUS and run_compositional exported; human + --json print
+the new track. Tests: 5 new CompositionalTests (determinism, catch/precision
+numbers, by-family stats, corpus originality, case registration with
+honest-scoping check).
+
 
 Absorbs three mechanisms from NVIDIA OpenShell (Apache 2.0,
 [NVIDIA/OpenShell](https://github.com/NVIDIA/OpenShell), "the safe,
