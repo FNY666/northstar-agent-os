@@ -1,3 +1,34 @@
+## Unreleased (one-hundred-fortieth batch) — underwriting & claims discipline (AI-insurance absorption)
+
+New module `underwriting_agents.py` (extends the 125th-batch
+`insurance.py` denial receipts into the underwriting/claims
+pipeline): `approve_only_engine()` — claim engines may only approve
+or route to a human; a direct AI claim denial is a hard deny
+(`underwriting.ai_denial`, after Hesper AI's 2026-09 NAIC finding
+that zero large auto insurers reported AI for claim denials).
+`human_circuit_breaker()` + `issue_breaker_receipt()` — denials,
+large payouts, and underwriting rejections bind a live,
+human-signed breaker receipt (China's 2026-06 Generative AI
+Insurance Compliance Guidance). `fairness_stress_receipt()` +
+`issue_stress_receipt()` — underwriting templates bind
+authority-signed fairness stress tests; measured disparity above
+the pinned threshold denies. `ai_act_clock()` — EU AI Act pinned
+deadlines (Art. 50 transparency 2026-08-02, Annex III obligations
+2027-12-02 under Omnibus 2026/1744); a past-deadline unmet
+obligation is `underwriting.compliance_lapse`.
+`synthetic_fraud_probe()` — AI-generated fake-claim probes route to
+humans only, never auto-deny. `assist_not_decide()` — an assistive
+system whose output was used as a decision raises
+`underwriting.decision_creep` (Aviva's assist-not-decide line).
+`evaluation_tool_mapping()` — the NAIC AI Evaluation Tool's
+12-state-pilot items as a pre-deployment checklist; high-risk uses
+without mapped items deny. `vendor_disclosure_gate()` +
+`issue_vendor_claim()` — "99.7% accuracy"-style vendor claims are
+NON_AUTHORITATIVE until bound to trial evidence. Honest scoping:
+receipts bind declared underwriting discipline; they don't make
+insurance fair. Bench track `metrics.underwriting_agents`: 12
+scenarios, 4 allow / 8 deny.
+
 ## Unreleased (one-hundred-thirty-eighth batch) — procurement accountability gates (AI-procurement absorption)
 
 New module `procurement_agents.py`: `advisory_only_gate()` — AI may

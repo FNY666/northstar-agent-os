@@ -566,6 +566,143 @@ An award's 4-segment evidence chain.
 
 An award must bind the 4-segment evidence chain.
 
+### `underwriting_agents`
+
+Source: `components/northstar-agent-runtime/underwriting_agents.py`
+
+Underwriting & claims discipline gates (one-hundred-fortieth batch).
+
+#### `UnderwritingError`
+
+Malformed receipt/probe/checklist or a programming error.
+
+#### `EngineVerdict`
+
+Verdict for a claim-engine action request.
+
+#### `approve_only_engine(action: str)`
+
+Claim engines may only approve or route to a human.
+
+#### `engine_audit_event(verdict: EngineVerdict)`
+
+Shape an engine verdict as an audit event.
+
+#### `BreakerReceipt`
+
+Human-review circuit breaker for key content, hash-chained.
+
+- `digest()`
+#### `BreakerVerdict`
+
+Verdict for a breaker check.
+
+#### `issue_breaker_receipt(*, break_id: str, decision_id: str, decision_digest: str, breaker_kind: str, human_reviewer_id: str, reviewer_pubkey_hex: str, reviewer_secret: bytes, payout_bps: int, created_at: int, expires_at: int, prev_digest: str=_GENESIS)`
+
+Issue a human-review circuit-breaker receipt (reviewer-signed).
+
+#### `human_circuit_breaker(receipt: BreakerReceipt, *, expected_kind: str, decision_digest: str, now: int)`
+
+Verify a human-review circuit breaker is live and bound.
+
+#### `breaker_required(breaker_kind: str, *, payout_bps: int)`
+
+Whether key content requires a human-review breaker.
+
+#### `breaker_audit_event(verdict: BreakerVerdict, *, expected_kind: str)`
+
+Shape a breaker verdict as an audit event.
+
+#### `StressReceipt`
+
+Fairness stress-test receipt for an underwriting template.
+
+- `digest()`
+#### `StressVerdict`
+
+Verdict for a template stress-test check.
+
+#### `issue_stress_receipt(*, template_id: str, template_digest: str, stress_test_digest: str, fairness_threshold_bps: int, measured_disparity_bps: int, authority_id: str, authority_pubkey_hex: str, authority_secret: bytes, tested_at: int, expires_at: int, prev_digest: str=_GENESIS)`
+
+Issue a fairness stress-test receipt (authority-signed).
+
+#### `fairness_stress_receipt(receipt: StressReceipt | None, *, template_digest: str, now: int)`
+
+Verify an underwriting template binds a live stress receipt.
+
+#### `stress_audit_event(verdict: StressVerdict)`
+
+Shape a stress verdict as an audit event.
+
+#### `ClockVerdict`
+
+Verdict for the EU AI Act compliance clock.
+
+#### `ai_act_clock(deployment_id: str, *, deployment_kind: str, obligations_met: Mapping[str, bool], now: int)`
+
+Check EU AI Act obligation deadlines for an insurance-AI deployment.
+
+#### `clock_audit_event(verdict: ClockVerdict, *, deployment_kind: str)`
+
+Shape a clock verdict as an audit event.
+
+#### `FraudProbeVerdict`
+
+Verdict for a synthetic fraud-probe routing decision.
+
+#### `synthetic_fraud_probe(probe_id: str, *, routed_action: str)`
+
+Route AI-generated fake-claim probes to humans only.
+
+#### `fraud_probe_audit_event(verdict: FraudProbeVerdict, *, routed_action: str)`
+
+Shape a fraud-probe verdict as an audit event.
+
+#### `CreepVerdict`
+
+Verdict for the assist-not-decide check.
+
+#### `assist_not_decide(system_id: str, *, declared_assistive: bool, decision_made: bool)`
+
+An assistive AI that decides has crossed the line.
+
+#### `creep_audit_event(verdict: CreepVerdict)`
+
+Shape a decision-creep verdict as an audit event.
+
+#### `MappingVerdict`
+
+Verdict for the NAIC evaluation-tool mapping check.
+
+#### `evaluation_tool_mapping(deployment_id: str, *, deployment_kind: str, mapped_items: Sequence[str])`
+
+Map an insurance-AI deployment against NAIC review items.
+
+#### `mapping_audit_event(verdict: MappingVerdict, *, deployment_kind: str)`
+
+Shape a mapping verdict as an audit event.
+
+#### `VendorClaim`
+
+A vendor accuracy claim bound to trial evidence.
+
+- `digest()`
+#### `VendorVerdict`
+
+Verdict for a vendor accuracy-claim check.
+
+#### `issue_vendor_claim(*, claim_id: str, vendor_id: str, metric_name: str, metric_value_bps: int, evidence_digest: str | None, vendor_pubkey_hex: str, vendor_secret: bytes, claimed_at: int, prev_digest: str=_GENESIS)`
+
+Issue a vendor accuracy claim (vendor-signed).
+
+#### `vendor_disclosure_gate(claim: VendorClaim, *, now: int)`
+
+Verify a vendor accuracy claim binds trial evidence.
+
+#### `vendor_audit_event(verdict: VendorVerdict)`
+
+Shape a vendor verdict as an audit event.
+
 ### `disaster_agents`
 
 Source: `components/northstar-agent-runtime/disaster_agents.py`
@@ -3900,6 +4037,10 @@ Mining governance gates (one-hundred-thirty-second batch).
 #### `run_greenwash()`
 
 Greenwashing evidence gates (one-hundred-thirtieth batch).
+
+#### `run_underwriting_agents()`
+
+Underwriting & claims discipline gates (one-hundred-fortieth batch).
 
 #### `run_procurement_agents()`
 
