@@ -251,6 +251,82 @@ class LeastPrivilegeTests(unittest.TestCase):
         self.assertIn("official ToolPrivBench dataset", src)
 
 
+class AskTimingTests(unittest.TestCase):
+    def test_ask_timing_is_deterministic(self):
+        from governance_bench import run_ask_timing
+
+        first = run_ask_timing()
+        second = run_ask_timing()
+        self.assertEqual(first, second)
+
+    def test_ask_timing_confusion_matrix(self):
+        from governance_bench import run_ask_timing
+
+        result = run_ask_timing()
+        self.assertEqual(result["n_probes"], 14)
+        # 7 asked-when-should, 3 over-ask, 2 under-ask, 2 correctly silent.
+        self.assertEqual((result["tp"], result["fp"], result["fn"], result["tn"]),
+                         (7, 3, 2, 2))
+        self.assertEqual(result["ask_precision"], 0.7)
+        self.assertEqual(result["ask_recall"], round(7 / 9, 4))
+        self.assertEqual(result["ask_f1"], 0.7368)
+        self.assertEqual(result["over_ask_rate"], 0.3)
+        self.assertEqual(result["under_ask_rate"], round(2 / 9, 4))
+        # The over-ask set is exactly the routine/pre-authorized probes the
+        # blanket-ask posture escalates; the under-ask set is the two
+        # suppressed warranted asks.
+        self.assertEqual(
+            result["over_ask_ids"],
+            ["noask_repeat_authorized", "noask_routine_shell", "noask_routine_write"],
+        )
+        self.assertEqual(
+            result["under_ask_ids"],
+            ["ask_suppressed_by_acceptedits", "ask_suppressed_by_allowlist"],
+        )
+
+    def test_ask_timing_blocker_recall(self):
+        from governance_bench import run_ask_timing
+
+        by_blocker = run_ask_timing()["by_blocker"]
+        # All three HiL-Bench blocker categories are represented.
+        self.assertEqual(
+            set(by_blocker),
+            {"missing_information", "ambiguous_request", "contradictory_information"},
+        )
+        self.assertEqual(by_blocker["missing_information"]["n"], 4)
+        self.assertEqual(by_blocker["ambiguous_request"]["n"], 3)
+        self.assertEqual(by_blocker["contradictory_information"]["n"], 2)
+
+    def test_ask_timing_corpus_is_original_synthetic(self):
+        # Methodology-inspired, not dataset-copied: every probe id uses the
+        # ask_/noask_ prefix and no probe text comes from the official dataset.
+        from governance_bench import ASK_TIMING_CORPUS
+
+        self.assertEqual(len(ASK_TIMING_CORPUS), 14)
+        for probe in ASK_TIMING_CORPUS:
+            self.assertTrue(
+                probe.id.startswith("ask_") or probe.id.startswith("noask_"),
+                probe.id,
+            )
+        self.assertEqual(
+            sum(1 for p in ASK_TIMING_CORPUS if p.expect_ask), 9
+        )
+
+    def test_ask_timing_case_is_registered(self):
+        import inspect
+
+        from governance_bench import _case_metrics_ask_timing
+
+        case = next(c for c in CASES if c.id == "metrics.ask_timing")
+        self.assertEqual(case.track, "metrics")
+        # The honest scoping must live in the case source: original
+        # synthetic corpus, NOT the official dataset; gate judgment, NOT
+        # model behavior.
+        src = inspect.getsource(_case_metrics_ask_timing)
+        self.assertIn("NOT the", src)
+        self.assertIn("official HiL-Bench dataset", src)
+
+
 class PositionalTaskTests(unittest.TestCase):
     def test_extract_positional_task_pulls_bare_string(self):
         body, task = extract_positional_task(["--workspace", "/tmp/ws", "summarise README"])

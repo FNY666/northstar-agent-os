@@ -1,5 +1,41 @@
 # Northstar Agent OS — initial public component
 
+## Unreleased (fifty-sixth batch) — ASK-timing judgment, HiL-Bench Ask-F1 methodology
+
+New metrics-track case `metrics.ask_timing`
+(`components/northstar-agent-runtime/governance_bench.py`), measuring
+whether the gate asks *when it should* — the HiL-Bench question
+(arXiv:2604.09408, "Do Agents Know When to Ask for Help?", preprint, no
+peer-reviewed venue), honestly scoped to the deterministic engine:
+
+- **Ask-F1, gate analogue**: HiL-Bench defines Precision = |Q_rel|/|Q|
+  (relevant questions over all questions — penalizes over-asking),
+  Recall = |B_addr|/|B| (blockers addressed over all blockers —
+  penalizes under-asking), ASK-F1 = 2·P·R/(P+R). Here each of the 14
+  original synthetic probes is labelled with ground-truth `expect_ask`
+  (information gap present → a careful gate should escalate), and "ask"
+  is the engine consulting the host callback. The 14-probe corpus is
+  original synthetic situations inspired by the method — NOT the
+  official HiL-Bench dataset (300 tasks / 1,131 blockers; official
+  dataset location not verified).
+- **Baseline**: Ask-F1 0.7368 (precision 0.700, recall 0.778; over-ask
+  rate 0.300, under-ask rate 0.222). The confusion matrix is closed
+  ground truth (7 TP / 3 FP / 2 FN / 2 TN): the blanket-ask posture
+  asks every mutating call, so the 3 fully-specified routine ops (plus
+  one explicitly pre-authorized repeat) cost precision — including the
+  deliberate per-call re-ask binding from the fifty-fifth batch, which
+  trades ask-precision for fail-closed safety — while standing
+  authorization (allow-list) and a permissive posture suppress 2
+  warranted asks (the silent-failure analogue). Per-blocker recall
+  follows HiL-Bench's three categories: missing_information 0.75,
+  ambiguous_request 0.667, contradictory_information 1.0.
+- This measures the deterministic gate's escalation *judgment* on
+  labelled situations, NOT model help-seeking behavior (HiL-Bench
+  proper reports e.g. Claude Opus 4.6 at 44% ASK-F1).
+
+`BENCH_VERSION` v9 → v10; `ASK_TIMING_CORPUS` and `run_ask_timing`
+exported; human + `--json` output print the new track.
+
 ## Unreleased (fifty-fifth batch) — per-call approval binding + structured denial tool results
 
 Absorbs three approval-gate mechanisms from
