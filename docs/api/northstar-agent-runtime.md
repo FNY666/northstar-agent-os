@@ -1857,6 +1857,72 @@ The ``audit`` command: verify (and anchor) tamper-evident audit feeds.
 
 #### `run_audit(args: argparse.Namespace)`
 
+### `audit_rekor`
+
+Source: `components/northstar-agent-runtime/audit_rekor.py`
+
+External head anchoring for audit feeds via the Sigstore Rekor transparency log.
+
+#### `RekorError`
+
+The transparency log could not be reached or rejected the request.
+
+#### `pae(payload_type: str, payload: bytes)`
+
+DSSE v1.0.0 pre-authentication encoding (the exact bytes signed).
+
+#### `ed25519_spki_pem(public_key: bytes)`
+
+Encode a 32-byte Ed25519 public key as a PEM SubjectPublicKeyInfo.
+
+#### `build_envelope(payload: bytes, payload_type: str, signature: bytes)`
+
+Build the DSSE envelope (as a JSON-serialisable dict).
+
+#### `build_proposal(envelope: dict[str, Any], verifier_pem: str)`
+
+Build the Rekor v1 ``dsse`` proposed entry for an envelope.
+
+#### `submit_entry(rekor_url: str, proposal: dict[str, Any], *, timeout: float=60.0)`
+
+Submit a proposed entry; return ``{uuid, log_index, integrated_time}``.
+
+#### `retrieve_by_index(rekor_url: str, log_index: int, *, timeout: float=60.0)`
+
+Fetch the canonical stored entry at a log index.
+
+#### `anchor_statement(*, feed_sha256: str, head_chain_hash: str | None, records: int, anchored_at: str)`
+
+Canonical JSON bytes of the anchor statement (the DSSE payload).
+
+#### `anchor_feed_head(feed: str | Path, seed: bytes, *, rekor_url: str=REKOR_V1_DEFAULT, timeout: float=60.0)`
+
+Anchor a feed's head hash in the Rekor transparency log.
+
+#### `verify_anchor_offline(anchor: dict[str, Any], *, head_chain_hash: str)`
+
+Offline checks: head consistency + the anchor signature.
+
+#### `verify_anchor_in_log(anchor: dict[str, Any], *, rekor_url: str | None=None, timeout: float=60.0)`
+
+Online check: the entry exists in the public log, unchanged.
+
+### `audit_archive`
+
+Source: `components/northstar-agent-runtime/audit_archive.py`
+
+WORM-ready archive packages for audit feeds (``northstar-audit-archive/1``).
+
+#### `ArchiveResult`
+
+#### `write_archive(directory: str | Path, feed_bytes: bytes, *, session_id: str, external_anchor: dict[str, Any] | None=None, retention_days: int=DEFAULT_RETENTION_DAYS, created_at: str | None=None)`
+
+Write a complete, self-describing archive package directory.
+
+#### `verify_archive(directory: str | Path, *, rekor_url: str | None=None, online: bool=False, timeout: float=60.0)`
+
+Verify an archive package. Offline by default; ``online=True`` also re-fetches the Rekor entry. Never raises on malformed input.
+
 ### `ed25519`
 
 Source: `components/northstar-agent-runtime/ed25519.py`
