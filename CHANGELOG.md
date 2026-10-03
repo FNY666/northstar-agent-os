@@ -1,4 +1,42 @@
-## Unreleased (sixty-first batch) — structured decision-model approval path (Clef/Strands format)
+## Unreleased (sixty-second batch) — in-toto Layout/Link step compliance in the governance bench
+
+Absorbs the artifact-rule mechanism of in-toto spec v1.0.0
+(`in-toto/specification`, `in-toto-spec.md` §4.3.2/§4.3.3), verified against
+the specification text — nothing taken on summary faith:
+
+- **Seven artifact rules, evaluated in order**: `MATCH <pattern> [IN
+  <source-prefix>] WITH (MATERIALS|PRODUCTS) [IN <dest-prefix>] FROM
+  <step>`, `CREATE`, `DELETE`, `MODIFY`, `ALLOW`, `DISALLOW`, `REQUIRE`
+  (new `step_compliance.py`: `parse_rule` / `verify_step` /
+  `verify_layout`). First matching rule consumes the artifact; rule order is
+  semantically significant (ALLOW-then-DISALLOW and DISALLOW-first give
+  different verdicts); artifacts nobody's rule consumes fail; `REQUIRE`
+  checks presence without consuming.
+- **MATCH pins the cross-step hash flow**: a step's material must equal
+  (path + sha256, after optional prefix stripping) a *previous* step's
+  material/product — a replaced or tampered artifact mid-chain fails
+  verification. The step sequence must equal the layout order exactly: a
+  skipped, reordered, or undeclared step all fail.
+- **Honest scoping**: the bench absorbs the RULE ENGINE only. Layout
+  signature verification, functionary public keys/thresholds, expiration, and
+  inspections (in-toto §4) are NOT implemented — a deterministic offline
+  bench has no signers. It asserts step order and untampered artifact flow,
+  not who authorized what.
+
+**Bench:** new `metrics.step_compliance` case (track "metrics", scorecard
+v11): 9 deterministic scenarios over a fetch→transform→publish fixture —
+honest chain passes; product replaced / tampered mid-chain, step skipped /
+reordered / undeclared, unconsumed artifact reaching `DISALLOW *`, and a
+missing `REQUIRE`d file all fail. Baseline: 7/7 attacks caught, detection
+rate 1.000, 0 mismatches.
+
+**Verification:** `make test` fully green (runtime incl. 21 new
+`test_step_compliance.py` unit tests: rule parsing, order sensitivity,
+MATCH prefix mapping, CREATE/DELETE/MODIFY semantics, REQUIRE semantics,
+layout order violations; new module also registered in `pyproject.toml`
+`py-modules` and the docbuild MANIFEST); `make bench` 41/41; docbuild
+verify OK; `BENCH_VERSION` v10 → v11.
+
 
 Absorbs the *interface idea* of the October-2026 "decision model" wave —
 Cloudflare Clef / Clef-flash (Apache-2.0) and AWS Strands Decider 2B
