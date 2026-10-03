@@ -1,3 +1,30 @@
+## Unreleased (one-hundred-fiftieth batch) — content moderation discipline (AI-moderation absorption)
+
+New module `moderation_agents.py`: `statement_of_reasons()` —
+every removal/restriction (including shadowbans) binds an
+Art-17-style reason receipt; none live denies with
+`moderation.no_statement_of_reasons` (X court lesson).
+`overremoval_probe()` — appeal-restoration rate above tolerance
+triggers `moderation.overremoval_audit` (TikTok lower-bound
+lesson). `check_dialect_parity()` — systematic false-positive
+disparity denies with `moderation.dialect_bias` (MDPI lesson).
+`check_automation_ceiling()` — fully-automated removal limited
+to the highest severity tier, lower tiers deny with
+`moderation.auto_overreach` (Meta lesson).
+`check_non_profiling_option()` — recommenders must offer a
+non-profiling option. `legal_restriction_receipt()` — per-post
+legal restrictions bind country+basis disclosure (X "Under the
+Hood" lesson). `why_this_content()` — explanations bind the
+decision digest. `check_factcheck_non_substitution()` —
+crowdsourced notes may not substitute professional fact-checking
+(Oversight Board lesson). `aigc_label_receipt()` —
+cross-platform source labels for AI-generated content (EU AI
+Act Art. 50 lesson). `check_amplification_clock()` —
+rabbit-hole amplification audits run on a clock.
+
+Bench: `metrics.moderation_agents` (12 scenarios, 4 allow /
+8 deny). No version bump (single parent bump per wave).
+
 ## Unreleased (one-hundred-forty-sixth batch) — legal practice discipline (AI-legal absorption)
 
 New module `legal_agents.py`: `citation_verification_gate()` — every

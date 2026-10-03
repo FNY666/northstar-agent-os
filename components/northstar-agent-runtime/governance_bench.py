@@ -17705,6 +17705,64 @@ def _case_metrics_legal_agents(h: BenchHarness) -> BenchExpectation:
     )
 
 
+def _case_metrics_moderation_agents(h: BenchHarness) -> BenchExpectation:
+    """Content moderation discipline (one-hundred-fiftieth batch).
+
+    12 deterministic scenarios, 4 allow / 8 deny: a removal with a
+    live statement of reasons signs; tier-1 fully-automated removal
+    passes; a recommender with a non-profiling option passes;
+    AI-generated content with a cross-platform source label passes.
+    Denied: shadowbans without statements of reasons
+    (``moderation:no_statement_of_reasons``), fully-automated
+    removal below the highest severity tier
+    (``moderation:auto_overreach``), appeal-restoration above
+    tolerance (``moderation:overremoval_audit``), dialect
+    false-positive disparity (``moderation:dialect_bias``),
+    crowdsourced notes substituting professional fact-checking
+    (``moderation:factcheck_substitution``), unlabeled AI-generated
+    content (``moderation:unlabeled_aigc``), overdue amplification
+    audits (``moderation:amplification_audit_overdue``), and legal
+    restrictions without country+basis disclosure
+    (``moderation:undisclosed_restriction``).
+    """
+    metrics = run_moderation_agents()
+
+    def check(exp: BenchExpectation, report: Any) -> tuple[bool, str]:
+        if metrics["n_scenarios"] != 12:
+            return (False, f"expected 12 moderation scenarios, saw {metrics['n_scenarios']}")
+        if metrics["mismatches"]:
+            return (False, f"scenario(s) disagree with ground truth: {metrics['mismatches']}")
+        if metrics["allowed_ids"] != [
+            "allow_removal_with_sor",
+            "allow_tier1_auto_removal",
+            "allow_non_profiling_option",
+            "allow_labeled_aigc",
+        ]:
+            return (False, f"allowed set drifted: {metrics['allowed_ids']}")
+        reasons = metrics["denial_reasons"]
+        for sid, needle in (
+            ("deny_shadowban_no_statement", "no_statement_of_reasons"),
+            ("deny_auto_overreach", "auto_overreach"),
+            ("deny_overremoval_audit", "overremoval_audit"),
+            ("deny_dialect_bias", "dialect_bias"),
+            ("deny_factcheck_substitution", "factcheck_substitution"),
+            ("deny_unlabeled_aigc", "unlabeled_aigc"),
+            ("deny_amplification_overdue", "amplification_audit_overdue"),
+            ("deny_undisclosed_restriction", "undisclosed_restriction"),
+        ):
+            if needle not in reasons.get(sid, ""):
+                return (False, f"{sid} reason missing {needle!r}")
+        return (True, "12 scenarios, 4 allow / 8 deny, ground truth pinned")
+
+    return BenchExpectation(
+        runtime=_noop_runtime(h),
+        expect_subtype="success",
+        post_check=check,
+        metrics=metrics,
+        notes="content moderation discipline: statements of reasons, over-removal probe, dialect parity, automation ceiling, non-profiling option, legal-restriction receipts, why-this-content, fact-check non-substitution, AIGC labels, amplification audit clock",
+    )
+
+
 def _case_metrics_supplychain_agents(h: BenchHarness) -> BenchExpectation:
     """Supply-chain AI discipline (one-hundred-forty-fourth batch).
 
@@ -20400,6 +20458,7 @@ BenchCase("metrics.waste_agents", "metrics", "waste & circular-economy disciplin
     BenchCase("metrics.audit_agents", "metrics", "audit & assurance discipline: reconstruction bundles, parallel-run gates, evidence-not-conclusion, shadow-AI inventory, decision-rights charters, oversight capacity, incident procedures, alert-fatigue probes (AI-audit absorption)", _case_metrics_audit_agents),
     BenchCase("metrics.underwriting_agents", "metrics", "underwriting & claims discipline: approve-only claim engines, human-review breakers on key content, fairness stress receipts, EU AI Act compliance clock, fraud probes routed to humans, assist-not-decide, NAIC evaluation-tool mapping, vendor evidence binding (AI-insurance absorption)", _case_metrics_underwriting_agents),
     BenchCase("metrics.legal_agents", "metrics", "legal practice discipline: citation verification, AI-use disclosure, advisory-only pin, signoff clock, injection screen, evidence authentication, LIP channel, performance standards, confidentiality (AI-legal absorption)", _case_metrics_legal_agents),
+    BenchCase("metrics.moderation_agents", "metrics", "content moderation discipline: statements of reasons, over-removal probe, dialect parity, automation ceiling, non-profiling option, legal-restriction receipts, why-this-content, fact-check non-substitution, AIGC labels, amplification audit clock (AI-moderation absorption)", _case_metrics_moderation_agents),
     BenchCase("metrics.dataflow_sensitivity", "metrics", "dataflow sensitivity tracking (OpenAPPA-style)", _case_metrics_dataflow_sensitivity),
     BenchCase("metrics.decision_model", "metrics", "structured decision-model approval path", _case_metrics_decision_model),
     BenchCase("metrics.whisper_contrast", "metrics", "whisper-attacks contrast: signature vs bound arguments", _case_metrics_whisper_contrast),
@@ -24765,6 +24824,195 @@ def run_legal_agents() -> dict[str, Any]:
     }
 
 
+def run_moderation_agents() -> dict[str, Any]:
+    """Content moderation discipline (one-hundred-fiftieth batch).
+
+    Absorbs the 2026 AI-moderation thread: TikTok Q1 2026 removed
+    184M videos (96.7% automated; EU H1: 104M, 94.1% unsupervised);
+    appeal-restoration volumes as the mis-removal lower bound
+    (Iraq 157K, Egypt 146K); courts ruling shadowbans under DSA Art.
+    17 statements of reasons; X's "Under the Hood" per-post
+    legal-restriction disclosure (country+basis); Meta's
+    severity-ceiling logic ("most severe auto-remove, low severity
+    via reports") and the Oversight-Board-opposed Community Notes
+    substitution pilot; EMNLP 2026 retriever bias / dialect
+    discrimination and MDPI 2026 Arabic-dialect toxicity false
+    positives; EU AI Act Art. 50 synthetic-content labeling; DSA
+    VLOSE/VLOP designations (ChatGPT, Reddit, Roblox) and ~EUR 870M
+    cumulative fines.
+
+    Fail-closed rules over 12 deterministic scenarios: a removal
+    with a live Art-17-style statement of reasons signs; tier-1
+    fully-automated removal passes; recommenders must offer a
+    non-profiling option; AI-generated content must bind a
+    cross-platform source label. Denied: restrictions (including
+    shadowbans) without statements of reasons
+    (``moderation:no_statement_of_reasons``), fully-automated
+    removal below the highest severity tier
+    (``moderation:auto_overreach``), appeal-restoration rates above
+    tolerance (``moderation:overremoval_audit``), dialect
+    false-positive disparity (``moderation:dialect_bias``),
+    crowdsourced notes substituting professional fact-checking
+    (``moderation:factcheck_substitution``), unlabeled AI-generated
+    content (``moderation:unlabeled_aigc``), overdue amplification
+    audits (``moderation:amplification_audit_overdue``), and legal
+    restrictions without country+basis disclosure
+    (``moderation:undisclosed_restriction``). Ground truth is
+    closed: 4 allow / 8 deny.
+    """
+    from moderation_agents import (
+        MODERATION_SCHEMA_VERSION,
+        MODE_FULLY_AUTOMATED,
+        OverremovalRegistry,
+        RecommenderConfig,
+        SEVERITY_TIER_1,
+        SEVERITY_TIER_3,
+        amplification_audit_receipt,
+        aigc_label_receipt,
+        check_aigc_label,
+        check_amplification_clock,
+        check_automation_ceiling,
+        check_dialect_parity,
+        DialectParityReport,
+        check_factcheck_non_substitution,
+        check_legal_restriction,
+        check_non_profiling_option,
+        check_statement_of_reasons,
+        FactcheckProgram,
+        overremoval_probe,
+        statement_of_reasons,
+    )
+
+    SEC = b"moderation-bench-authority-00001"  # 32 bytes
+    assert len(SEC) == 32
+    T0 = 1_800_000_000
+    H64 = "ab" * 32
+    scenarios: list[dict[str, Any]] = []
+
+    def live_sor(kind: str = "removal"):
+        return statement_of_reasons(
+            receipt_id="sor-bench", content_id="post-bench",
+            decision_kind=kind, reason_code="harassment",
+            issued_by="mod-bench", authority_secret=SEC,
+            issued_at=T0, expires_at=T0 + 86400, decision_digest=H64)
+
+    # 1. allow: removal with a live statement of reasons
+    v1 = check_statement_of_reasons(
+        live_sor(), now=T0 + 100, content_id="post-bench", decision_digest=H64)
+    scenarios.append({
+        "id": "allow_removal_with_sor", "expected": True,
+        "verdict": v1.allowed, "reason": v1.reason,
+    })
+
+    # 2. allow: tier-1 fully-automated removal
+    v2 = check_automation_ceiling(
+        severity=SEVERITY_TIER_1, decision_mode=MODE_FULLY_AUTOMATED)
+    scenarios.append({
+        "id": "allow_tier1_auto_removal", "expected": True,
+        "verdict": v2.allowed, "reason": v2.reason,
+    })
+
+    # 3. allow: recommender with a non-profiling option
+    v3 = check_non_profiling_option(
+        RecommenderConfig("rec-bench", True, "np-bench", T0))
+    scenarios.append({
+        "id": "allow_non_profiling_option", "expected": True,
+        "verdict": v3.allowed, "reason": v3.reason,
+    })
+
+    # 4. allow: AI-generated content with a source label
+    v4 = check_aigc_label(
+        aigc_label_receipt(
+            receipt_id="alr-bench", content_digest=H64,
+            ai_generated=True, generator_id="gen-bench",
+            labeled_at=T0, labeler_secret=SEC),
+        content_digest=H64, ai_generated=True)
+    scenarios.append({
+        "id": "allow_labeled_aigc", "expected": True,
+        "verdict": v4.allowed, "reason": v4.reason,
+    })
+
+    # 5. deny: shadowban without a statement of reasons
+    v5 = check_statement_of_reasons(
+        None, now=T0 + 100, content_id="post-bench", decision_digest=H64)
+    scenarios.append({
+        "id": "deny_shadowban_no_statement", "expected": False,
+        "verdict": v5.allowed, "reason": v5.reason,
+    })
+
+    # 6. deny: fully-automated removal at tier 3
+    v6 = check_automation_ceiling(
+        severity=SEVERITY_TIER_3, decision_mode=MODE_FULLY_AUTOMATED)
+    scenarios.append({
+        "id": "deny_auto_overreach", "expected": False,
+        "verdict": v6.allowed, "reason": v6.reason,
+    })
+
+    # 7. deny: appeal-restoration rate above tolerance
+    v7 = overremoval_probe(
+        OverremovalRegistry("reg-bench", decisions=10000, appeals=500,
+                            appeal_restored=60, declared_at=T0))
+    scenarios.append({
+        "id": "deny_overremoval_audit", "expected": False,
+        "verdict": v7.allowed, "reason": v7.reason,
+    })
+
+    # 8. deny: systematic dialect false-positive disparity
+    v8 = check_dialect_parity(
+        DialectParityReport("dp-bench", "msa",
+                            (("msa", 5, 100), ("egyptian", 40, 100)), T0))
+    scenarios.append({
+        "id": "deny_dialect_bias", "expected": False,
+        "verdict": v8.allowed, "reason": v8.reason,
+    })
+
+    # 9. deny: crowdsourced notes substituting professional fact-checking
+    v9 = check_factcheck_non_substitution(
+        FactcheckProgram("fc-bench", True, False, True, True, T0))
+    scenarios.append({
+        "id": "deny_factcheck_substitution", "expected": False,
+        "verdict": v9.allowed, "reason": v9.reason,
+    })
+
+    # 10. deny: AI-generated content without a source label
+    v10 = check_aigc_label(None, content_digest=H64, ai_generated=True)
+    scenarios.append({
+        "id": "deny_unlabeled_aigc", "expected": False,
+        "verdict": v10.allowed, "reason": v10.reason,
+    })
+
+    # 11. deny: overdue amplification audit
+    v11 = check_amplification_clock(
+        amplification_audit_receipt(
+            audit_id="aa-bench", recommender_id="rec-bench",
+            completed_at=T0, findings_digest=H64, auditor_secret=SEC),
+        now=T0 + 90 * 86400 + 1)
+    scenarios.append({
+        "id": "deny_amplification_overdue", "expected": False,
+        "verdict": v11.allowed, "reason": v11.reason,
+    })
+
+    # 12. deny: legal restriction without country+basis disclosure
+    v12 = check_legal_restriction(None, now=T0 + 100, content_id="post-bench")
+    scenarios.append({
+        "id": "deny_undisclosed_restriction", "expected": False,
+        "verdict": v12.allowed, "reason": v12.reason,
+    })
+
+    mismatches = [
+        s["id"] for s in scenarios
+        if bool(s["verdict"]) != bool(s["expected"])
+    ]
+    return {
+        "track": "metrics.moderation_agents",
+        "n_scenarios": len(scenarios),
+        "mismatches": mismatches,
+        "allowed_ids": [s["id"] for s in scenarios if s["verdict"]],
+        "denial_reasons": {s["id"]: s["reason"] for s in scenarios if not s["verdict"]},
+        "schema_version": MODERATION_SCHEMA_VERSION,
+    }
+
+
 def run_supplychain_agents() -> dict[str, Any]:
     """Supply-chain AI discipline (one-hundred-forty-fourth batch).
 
@@ -27070,6 +27318,7 @@ __all__ = [
     "run_hr_agents",
     "run_supplychain_agents",
     "run_legal_agents",
+    "run_moderation_agents",
     "run_housing_ai_agents",
     "run_audit_agents",
     "run_disaster_agents",

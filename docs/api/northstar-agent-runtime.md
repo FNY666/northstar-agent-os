@@ -1531,6 +1531,100 @@ Issue a lawyer-signed confidentiality purpose receipt.
 
 Gate confidential client data leaving the matter.
 
+### `moderation_agents`
+
+Source: `components/northstar-agent-runtime/moderation_agents.py`
+
+Content moderation discipline (one-hundred-fiftieth batch).
+
+#### `ModerationError`
+
+Raised when a moderation-discipline field or receipt is malformed.
+
+#### `ModerationVerdict`
+
+Outcome of one moderation-discipline check.
+
+#### `StatementOfReasonsReceipt`
+
+Art-17-style reason receipt bound to one enforcement decision.
+
+#### `statement_of_reasons(*, receipt_id: str, content_id: str, decision_kind: str, reason_code: str, issued_by: str, authority_secret: bytes, issued_at: int, expires_at: int, decision_digest: str)`
+
+#### `check_statement_of_reasons(receipt: StatementOfReasonsReceipt | None, *, now: int, content_id: str, decision_digest: str)`
+
+Every enforcement decision must carry a live reason receipt.
+
+#### `OverremovalRegistry`
+
+Declared decision registry for the over-removal probe.
+
+#### `overremoval_probe(registry: OverremovalRegistry, *, tolerance: float=OVERREMOVAL_TOLERANCE)`
+
+Restoration rate above tolerance classifies over-removal-audit.
+
+#### `DialectParityReport`
+
+Declared dialect parity test report.
+
+#### `check_dialect_parity(report: DialectParityReport, *, max_disparity: float=DIALECT_FP_DISPARITY_MAX)`
+
+Dialect parity required before enforcement deployment.
+
+#### `check_automation_ceiling(*, severity: str, decision_mode: str)`
+
+Fully-automated removal is limited to the highest severity tier.
+
+#### `RecommenderConfig`
+
+Declared recommender configuration.
+
+#### `check_non_profiling_option(config: RecommenderConfig)`
+
+#### `LegalRestrictionReceipt`
+
+Per-post legal restriction with country + basis disclosure.
+
+#### `legal_restriction_receipt(*, receipt_id: str, content_id: str, country_code: str, legal_basis: str, restricted_at: int, expires_at: int, authority_secret: bytes)`
+
+#### `check_legal_restriction(receipt: LegalRestrictionReceipt | None, *, now: int, content_id: str)`
+
+A legal restriction without a disclosed country+basis denies.
+
+#### `why_this_content(*, decision_digest: str, explanation: str)`
+
+Bind a "why this content" explanation to a decision digest.
+
+#### `check_why_this_content(binding: bytes | None, *, decision_digest: str, explanation: str)`
+
+Missing or mismatched explanation degrades to non_authoritative.
+
+#### `FactcheckProgram`
+
+Declared integrity program for civic/election content.
+
+#### `check_factcheck_non_substitution(program: FactcheckProgram)`
+
+#### `AIGCLabelReceipt`
+
+Cross-platform source label for AI-generated content.
+
+#### `aigc_label_receipt(*, receipt_id: str, content_digest: str, ai_generated: bool, generator_id: str, labeled_at: int, labeler_secret: bytes)`
+
+#### `check_aigc_label(receipt: AIGCLabelReceipt | None, *, content_digest: str, ai_generated: bool)`
+
+AI-generated content without a source-label receipt denies.
+
+#### `AmplificationAuditReceipt`
+
+Rabbit-hole amplification audit receipt.
+
+#### `amplification_audit_receipt(*, audit_id: str, recommender_id: str, completed_at: int, findings_digest: str, auditor_secret: bytes)`
+
+#### `check_amplification_clock(receipt: AmplificationAuditReceipt | None, *, now: int, window_s: int=AMPLIFICATION_AUDIT_WINDOW_S)`
+
+An overdue amplification audit denies.
+
 ### `housing_ai_agents`
 
 Source: `components/northstar-agent-runtime/housing_ai_agents.py`
@@ -5052,6 +5146,10 @@ Audit & assurance discipline (one-hundred-forty-third batch).
 #### `run_legal_agents()`
 
 Legal practice discipline (one-hundred-forty-sixth batch).
+
+#### `run_moderation_agents()`
+
+Content moderation discipline (one-hundred-fiftieth batch).
 
 #### `run_supplychain_agents()`
 
