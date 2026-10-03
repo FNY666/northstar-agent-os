@@ -877,6 +877,188 @@ Hash-chained log of fire-triage receipts.
 
 Check that a battery passed fire triage before shredding.
 
+### `adtech_agents`
+
+Source: `components/northstar-agent-runtime/adtech_agents.py`
+
+Adtech & synthetic-media disclosure discipline (one-hundred-forty-ninth batch).
+
+#### `AdtechError`
+
+A malformed adtech receipt or a programming error.
+
+#### `AdtechVerdict`
+
+Outcome of one adtech-discipline check.
+
+#### `adtech_audit_event(verdict: AdtechVerdict, *, action: str)`
+
+Build the audit event for an adtech-discipline verdict.
+
+#### `SyntheticPerformerReceipt`
+
+A synthetic performer bound to identity and disclosure.
+
+#### `synthetic_performer_receipt(*, receipt_id: str, performer_id: str, identity_binding_digest: str, consent_record_digest: str, disclosure_receipt_digest: str, expires_at: int, authority_pubkey_hex: str, authority_secret: bytes, prev_digest: str)`
+
+Seal a synthetic-performer identity + disclosure binding.
+
+#### `PerformerLog`
+
+Hash-chained log of synthetic-performer receipts.
+
+- `append(receipt: SyntheticPerformerReceipt)`
+- `latest_for_performer(performer_id: str)`
+- `verify()`
+#### `check_performer_disclosure(*, log: PerformerLog, performer_id: str, now: int)`
+
+Check a synthetic performer against its identity + disclosure binding.
+
+#### `testimonial_existence_gate(*, persona_kind: str, claims_efficacy: bool, evidence_digest: str)`
+
+Refuse AI-persona efficacy testimonials whole-class.
+
+#### `MaterialityReceipt`
+
+A materiality assessment binding the AI-content labeling clock.
+
+#### `materiality_assessment_receipt(*, receipt_id: str, content_id: str, materiality: str, evidence_digest: str, assessed_at: int, expires_at: int, authority_pubkey_hex: str, authority_secret: bytes, prev_digest: str)`
+
+Seal a materiality assessment for a piece of AI content.
+
+#### `MaterialityLog`
+
+Hash-chained log of materiality assessments.
+
+- `append(receipt: MaterialityReceipt)`
+- `latest_for_content(content_id: str)`
+- `verify()`
+#### `materiality_label_clock(*, log: MaterialityLog, content_id: str, labeled: bool, now: int)`
+
+Check the labeling clock for a piece of AI content.
+
+#### `WatermarkReceipt`
+
+A machine-readable provenance marking bound to a content digest.
+
+#### `machine_readable_marking(*, receipt_id: str, content_digest: str, marking_method: str, decode_evidence_digest: str, issued_at: int, authority_pubkey_hex: str, authority_secret: bytes, prev_digest: str)`
+
+Seal a machine-readable provenance marking for AI-generated output.
+
+#### `WatermarkLog`
+
+Hash-chained log of machine-readable marking receipts.
+
+- `append(receipt: WatermarkReceipt)`
+- `latest_for_content(content_digest: str)`
+- `verify()`
+#### `check_machine_reading(*, log: WatermarkLog, content_digest: str, now: int)`
+
+Check that AI-generated commercial output carries machine-readable marking.
+
+#### `JurisdictionRule`
+
+One strictest-rule entry of the jurisdiction matrix.
+
+#### `jurisdiction_matrix_digest()`
+
+Deterministic digest of the five-jurisdiction strictest-rule matrix.
+
+#### `MatrixPinReceipt`
+
+A deployment's binding to the jurisdiction matrix digest.
+
+#### `jurisdiction_matrix_pin(*, receipt_id: str, deployment_id: str, matrix_digest: str, pinned_at: int, authority_pubkey_hex: str, authority_secret: bytes, prev_digest: str)`
+
+Seal a deployment's jurisdiction-matrix binding.
+
+#### `MatrixLog`
+
+Hash-chained log of jurisdiction-matrix pins.
+
+- `append(receipt: MatrixPinReceipt)`
+- `latest_for_deployment(deployment_id: str)`
+- `verify()`
+#### `check_matrix_pin(*, log: MatrixLog, deployment_id: str, now: int)`
+
+Check a deployment's jurisdiction-matrix binding.
+
+#### `DarkPatternScreenReceipt`
+
+A dark-pattern screen against the closed 37-pattern catalog.
+
+#### `dark_pattern_screen(*, screen_id: str, interface_id: str, observed_patterns: tuple[str, ...] | list[str], screened_at: int, authority_pubkey_hex: str, authority_secret: bytes, prev_digest: str)`
+
+Seal a dark-pattern screen of an ad interface.
+
+#### `DarkPatternLog`
+
+Hash-chained log of dark-pattern screens.
+
+- `append(receipt: DarkPatternScreenReceipt)`
+- `latest_for_interface(interface_id: str)`
+- `verify()`
+#### `check_interface(*, log: DarkPatternLog, interface_id: str, now: int)`
+
+Check an ad interface against its latest dark-pattern screen.
+
+#### `AgenticBriefReceipt`
+
+An agentic ad brief's declared objectives, pinned by digest.
+
+#### `agentic_brief_binding(*, brief_id: str, declared_objectives: tuple[str, ...] | list[str], constraints_digest: str, issued_at: int, authority_pubkey_hex: str, authority_secret: bytes, prev_digest: str)`
+
+Seal an agentic ad brief's declared objectives.
+
+#### `BriefLog`
+
+Hash-chained log of agentic brief bindings.
+
+- `append(receipt: AgenticBriefReceipt)`
+- `latest_for_brief(brief_id: str)`
+- `verify()`
+#### `check_objective_drift(*, log: BriefLog, brief_id: str, observed_objectives: tuple[str, ...] | list[str], now: int)`
+
+Check observed agent objectives against the bound brief.
+
+#### `PlatformLiabilityReceipt`
+
+A platform's joint-liability pin under declared regimes.
+
+#### `platform_liability_pin(*, receipt_id: str, platform_id: str, regimes: tuple[str, ...] | list[str], attestation_digest: str, pinned_at: int, expires_at: int, authority_pubkey_hex: str, authority_secret: bytes, prev_digest: str)`
+
+Seal a platform's joint-liability pin.
+
+#### `LiabilityLog`
+
+Hash-chained log of platform joint-liability pins.
+
+- `append(receipt: PlatformLiabilityReceipt)`
+- `latest_for_platform(platform_id: str)`
+- `verify()`
+#### `check_platform_liability(*, log: LiabilityLog, platform_id: str, now: int)`
+
+Check a platform's joint-liability pin.
+
+#### `LabelFatigueReceipt`
+
+A label-fatigue measurement for a monitored placement.
+
+#### `label_fatigue_sample(*, monitor_id: str, content_id: str, exposures: int, distinct_formats: int, comprehension_bps: int, window_days: int, measured_at: int, authority_pubkey_hex: str, authority_secret: bytes, prev_digest: str)`
+
+Seal a label-fatigue measurement.
+
+#### `FatigueLog`
+
+Hash-chained log of label-fatigue measurements.
+
+- `append(receipt: LabelFatigueReceipt)`
+- `latest_for_monitor(monitor_id: str)`
+- `verify()`
+#### `label_fatigue_guard(*, log: FatigueLog, monitor_id: str, now: int)`
+
+Check label fatigue for a monitored placement.
+
 ### `energybid_agents`
 
 Source: `components/northstar-agent-runtime/energybid_agents.py`
@@ -1531,6 +1713,124 @@ Issue a lawyer-signed confidentiality purpose receipt.
 
 Gate confidential client data leaving the matter.
 
+### `govservices_agents`
+
+Source: `components/northstar-agent-runtime/govservices_agents.py`
+
+Government-service AI discipline (one-hundred-forty-seventh batch).
+
+#### `GovServicesError`
+
+A malformed receipt/record or a programming error.
+
+#### `GateVerdict`
+
+Binary verdict for a govservices discipline check.
+
+#### `DecisionRecord`
+
+A government-service decision record.
+
+#### `issue_decision_record(*, decision_id: str, decision_kind: str, beneficiary_ref_digest: str, ai_recommendation_digest: str, decided_at: int, human_signer_id: str='', human_secret: bytes | None=None, human_pubkey: bytes | None=None)`
+
+Issue a decision record. Fail-closed at issuance: an adverse kind issued without a human signer stays *unsigned* (empty signature fields) so :func:`human_final_gate` can refuse it. A human signer must supply both the id and the key pair.
+
+#### `human_final_gate(record: DecisionRecord)`
+
+Adverse decisions require a human signature.
+
+#### `ExclusionProbe`
+
+A measured authentication-failure window for a service.
+
+#### `issue_exclusion_probe(*, probe_id: str, service_id: str, attempts_total: int, auth_failures: int, tolerance_bps: int, window_start: int, window_end: int, issuer_id: str, issuer_secret: bytes)`
+
+#### `exclusion_monitor(probe: ExclusionProbe)`
+
+Fail-closed exclusion probe: the failure rate is computed from the signed record, not re-reported by the service. Above tolerance the service's exclusion gap is AUTHORITATIVE as a *finding* — the verdict denies the claim that the service is safe to expand, with ``govservices.exclusion_gap``.
+
+#### `ChannelReceipt`
+
+Declared service channels. ``non_digital_channel`` is computed at issuance — the receipt cannot claim a paper/in-person door it does not list.
+
+#### `alternative_channel_receipt(*, receipt_id: str, service_id: str, channels: tuple[str, ...] | list[str], declared_at: int, issuer_id: str, issuer_secret: bytes)`
+
+Issue the channel declaration for a service. Fail-closed: an empty channel list is a programming error, and channels outside the closed vocabulary are refused.
+
+#### `digital_only_gate(receipt: ChannelReceipt)`
+
+A service with no non-digital channel denies with ``govservices.digital_only`` — the UK petition lesson: a digital door is an offer, a digital-only door is an exclusion.
+
+#### `DiscretionPin`
+
+A pinned discretionary boundary for one administrative act.
+
+#### `issue_discretion_pin(*, pin_id: str, service_id: str, act_kind: str, ai_role: str, rationale_digest: str, pinned_at: int, issuer_id: str, issuer_secret: bytes)`
+
+#### `discretion_pin(pin: DiscretionPin, *, acted_as_role: str, performed_act: str)`
+
+Check an AI action against the pinned boundary. An action beyond the pin — a different act kind, or a role wider than the pinned one — denies with ``govservices.discretion_breach``. Unknown roles are a programming error, never a maybe.
+
+#### `IdentityPin`
+
+The minimal identity fields a service may request for one purpose. ``needed_fields`` is closed-vocabulary; the pin is the service's own declaration of necessity, signed.
+
+#### `issue_identity_pin(*, pin_id: str, service_id: str, purpose: str, needed_fields: tuple[str, ...] | list[str], pinned_at: int, issuer_id: str, issuer_secret: bytes)`
+
+#### `identity_minimality(pin: IdentityPin, *, disclosed_fields: tuple[str, ...] | list[str])`
+
+Disclosure beyond the pinned needed fields denies with ``govservices.identity_overreach`` — minimality is a bound, not an aspiration. Fields outside the closed vocabulary are a programming error.
+
+#### `AgentIdentityEntry`
+
+A registered AI-agent identity bound to its operator key.
+
+#### `AgentIdentityRegistry`
+
+Out-of-band curated registry: AI agents acting in government services must bind a registered identity before they act. The repo cannot audit real operators; it can only pin the keys the deployment trusts.
+
+- `register(agent_id: str, agent_pubkey: bytes, operator_id: str, registered_at: int, authority_id: str, authority_secret: bytes)`
+- `known(agent_id: str)`
+#### `agent_identity_registry(registry: AgentIdentityRegistry, *, agent_id: str)`
+
+An unregistered AI agent acting in government services denies with ``govservices.unregistered_agent`` — anonymity is not a deployment mode.
+
+#### `UrgencyPassage`
+
+A law passed under urgency that expands automated decision-making. ``scrutiny_window_s`` is the clock: after ``passed_at + scrutiny_window_s`` a signed scrutiny receipt must exist.
+
+#### `ScrutinyReceipt`
+
+A signed post-passage scrutiny review of one law.
+
+#### `issue_urgency_passage(*, passage_id: str, law_id: str, automation_expansion: bool, passed_at: int, scrutiny_window_s: int, issuer_id: str, issuer_secret: bytes)`
+
+#### `issue_scrutiny_receipt(*, receipt_id: str, law_id: str, findings_digest: str, reviewed_at: int, issuer_id: str, issuer_secret: bytes)`
+
+#### `urgency_scrutiny_clock(passage: UrgencyPassage, scrutiny_receipts: tuple[ScrutinyReceipt, ...] | list[ScrutinyReceipt], *, now: int)`
+
+Urgency-passed automation expansions carry a scrutiny clock. Past ``passed_at + scrutiny_window_s`` without a valid scrutiny receipt for the law, the expansion denies with ``govservices.scrutiny_overdue`` — urgency is a procedure, not an exemption from review.
+
+#### `ReviewNotice`
+
+A signed review notice with a bound appeal deadline. The appeal deadline is part of the record — suspension logic cannot recompute or shorten it.
+
+#### `issue_review_notice(*, notice_id: str, beneficiary_ref_digest: str, review_kind: str, notice_issued_at: int, appeal_deadline: int, issuer_id: str, issuer_secret: bytes)`
+
+#### `benefit_clock(notice: ReviewNotice, *, attempted_at: int, appeal_status: str)`
+
+Suspension binds the review notice and the appeal chain. A suspension attempted before the appeal deadline while the appeal is pending denies with ``govservices.suspension_before_appeal`` — the Robodebt rule: the debt was never proved, so the clock runs toward the appeal, not toward the cutoff.
+
+#### `FraudFlag`
+
+A signed fraud *lead*. The flag binds the evidence digest and the referring human; it is not a finding. Treating it as one is exactly the failure this gate refuses.
+
+#### `issue_fraud_flag(*, flag_id: str, subject_ref_digest: str, lead_digest: str, referred_by: str, referred_at: int, issuer_id: str, issuer_secret: bytes)`
+
+#### `fraud_flag_receipt(flag: FraudFlag, *, treated_as_determination: bool)`
+
+A fraud flag routed to human review is AUTHORITATIVE as a lead. Treating the flag itself as the determination denies with ``govservices.flag_fraud`` — the flag is evidence intake, not a verdict.
+
 ### `moderation_agents`
 
 Source: `components/northstar-agent-runtime/moderation_agents.py`
@@ -1624,6 +1924,157 @@ Rabbit-hole amplification audit receipt.
 #### `check_amplification_clock(receipt: AmplificationAuditReceipt | None, *, now: int, window_s: int=AMPLIFICATION_AUDIT_WINDOW_S)`
 
 An overdue amplification audit denies.
+
+### `manufacturing_agents`
+
+Source: `components/northstar-agent-runtime/manufacturing_agents.py`
+
+Manufacturing & industrial-automation AI discipline (one-hundred-fifty-seventh batch).
+
+#### `ManufacturingError`
+
+A malformed manufacturing receipt or a programming error.
+
+#### `ManufacturingVerdict`
+
+Outcome of one manufacturing-discipline gate check.
+
+#### `AuthorityRegistry`
+
+Maps authority ids to Ed25519 public keys (hex).
+
+- `register(authority_id: str, pubkey_hex: str)`
+- `pubkey(authority_id: str)`
+#### `RestartClearanceReceipt`
+
+Binds a robot-cell restart to a two-person zone-clearance.
+
+- `receipt_digest` (property)
+#### `RestartClearanceRegistry`
+
+Hash-chained log of robot-cell restart-clearance receipts.
+
+- `issue(receipt_id: str, cell_id: str, restart_id: str, confirmer_a_id: str, confirmer_b_id: str, cleared_at: int, authority_id: str, signature: bytes)`
+- `find(restart_id: str)`
+#### `restart_clearance_receipt(registry: RestartClearanceRegistry, restart_id: str, now: int, max_age_s: int=CLEARANCE_MAX_AGE_S)`
+
+Robot-cell restarts need a live two-person zone-clearance receipt.
+
+#### `EnvelopeReceipt`
+
+Binds an industrial robot's capability envelope.
+
+- `receipt_digest` (property)
+#### `EnvelopeRegistry`
+
+Hash-chained log of industrial capability-envelope receipts.
+
+- `issue(receipt_id: str, envelope_id: str, robot_id: str, max_payload_kg: float, max_speed_ms: float, max_torque_nm: float, allowed_task_kinds: list[str] | tuple[str, ...], issued_at: int, authority_id: str, signature: bytes)`
+- `find(robot_id: str)`
+#### `capability_envelope(registry: EnvelopeRegistry, robot_id: str, task_kind: str, task_payload_kg: float, task_speed_ms: float, task_torque_nm: float, now: int, max_envelope_age_s: int=ENVELOPE_MAX_AGE_S)`
+
+Commands are checked against the robot's live capability envelope.
+
+#### `PilotStageReceipt`
+
+Binds one stage of a humanoid robot model's factory pipeline.
+
+- `receipt_digest` (property)
+#### `PilotRegistry`
+
+Hash-chained log of humanoid pipeline stage receipts.
+
+- `issue(receipt_id: str, stage_id: str, robot_model_id: str, stage: str, evidence_digest: str, completed_at: int, authority_id: str, signature: bytes)`
+- `stages_for(robot_model_id: str)`
+#### `humanoid_pilot_registry(registry: PilotRegistry, robot_model_id: str, requested_stage: str, now: int, max_stage_age_s: int=PILOT_STAGE_MAX_AGE_S)`
+
+Humanoid factory stages unlock only with a full evidence ladder.
+
+#### `MaintenanceAdviceReceipt`
+
+Binds one predictive-maintenance advice output.
+
+- `receipt_digest` (property)
+#### `MaintenanceAdviceRegistry`
+
+Hash-chained log of predictive-maintenance advice receipts.
+
+- `issue(receipt_id: str, advice_id: str, machine_id: str, action: str, model_version: str, advice_digest: str, issued_at: int, authority_id: str, signature: bytes)`
+- `find(advice_id: str)`
+#### `MaintenanceDecisionPin`
+
+A named-human sign-off on a consequential maintenance action.
+
+- `receipt_digest` (property)
+#### `MaintenanceDecisionRegistry`
+
+Hash-chained log of named-human maintenance decision pins.
+
+- `issue(receipt_id: str, pin_id: str, advice_id: str, action: str, human_approver_id: str, decided_at: int, authority_id: str, signature: bytes)`
+- `find(advice_id: str, action: str)`
+#### `maintenance_decision_pin(advice_registry: MaintenanceAdviceRegistry, pin_registry: MaintenanceDecisionRegistry, advice_id: str, action: str, now: int)`
+
+Consequential maintenance actions need a named-human pin.
+
+#### `DisplacementDisclosureReceipt`
+
+Binds an automation introduction to a worker disclosure.
+
+- `receipt_digest` (property)
+#### `DisplacementRegistry`
+
+Hash-chained log of automation displacement disclosures.
+
+- `issue(receipt_id: str, disclosure_id: str, site_id: str, automation_kind: str, displaced_workers_estimate: int, retraining_plan_digest: str, union_notified: bool, disclosed_at: int, authority_id: str, signature: bytes)`
+- `find(site_id: str)`
+#### `displacement_disclosure(registry: DisplacementRegistry, site_id: str, now: int, notice_min_s: int=DISCLOSURE_NOTICE_MIN_S)`
+
+Automation introductions need a disclosed, noticed worker receipt.
+
+#### `SafetyBaselineReceipt`
+
+Binds a deployment site to an interim safety baseline.
+
+- `receipt_digest` (property)
+#### `SafetyBaselineRegistry`
+
+Hash-chained log of interim safety-baseline receipts.
+
+- `issue(receipt_id: str, baseline_id: str, site_id: str, robot_class: str, fencing_confirmed: bool, max_speed_ms: float, max_torque_nm: float, max_robots_per_supervisor: int, pinned_at: int, expires_at: int, authority_id: str, signature: bytes)`
+- `find(site_id: str, robot_class: str)`
+#### `safety_baseline_clock(registry: SafetyBaselineRegistry, site_id: str, robot_class: str, now: int)`
+
+Deployments need a live interim safety baseline.
+
+#### `TwinSyncReceipt`
+
+Binds one twin-vs-physical sync verification for a cell.
+
+- `receipt_digest` (property)
+#### `TwinSyncRegistry`
+
+Hash-chained log of twin-sync verification receipts.
+
+- `issue(receipt_id: str, sync_id: str, cell_id: str, twin_state_digest: str, physical_state_digest: str, drift_bps: int, checked_at: int, authority_id: str, signature: bytes)`
+- `find(cell_id: str)`
+#### `twin_sync_integrity(registry: TwinSyncRegistry, cell_id: str, now: int, max_sync_age_s: int=SYNC_MAX_AGE_S, max_drift_bps: int=SYNC_MAX_DRIFT_BPS)`
+
+Control pushes need a fresh, in-tolerance twin-sync proof.
+
+#### `QualityClaimReceipt`
+
+Binds an AI-quality claim to its measurement protocol.
+
+- `receipt_digest` (property)
+#### `QualityClaimRegistry`
+
+Hash-chained log of AI-vision quality-claim receipts.
+
+- `issue(receipt_id: str, claim_id: str, metric_name: str, claimed_value: float, measurement_protocol_digest: str, sample_size: int, third_party_verified: bool, measured_at: int, authority_id: str, signature: bytes)`
+- `find(claim_id: str)`
+#### `quality_claim_evidence(registry: QualityClaimRegistry, claim_id: str, now: int, min_sample: int=QUALITY_MIN_SAMPLE)`
+
+Quality claims need a protocol-bound evidence receipt.
 
 ### `housing_ai_agents`
 
@@ -2049,6 +2500,145 @@ Audit alerts converting at or below 5% auto-degrade.
 #### `continuous_ready_gate(functionality_version: str, documentation_version: str, docs_updated_for_version: str)`
 
 Documentation must be current before new functionality ships.
+
+### `tax_agents`
+
+Source: `components/northstar-agent-runtime/tax_agents.py`
+
+Tax & customs AI discipline (one-hundred-forty-eighth batch).
+
+#### `TaxError`
+
+A malformed tax-discipline receipt or a programming error.
+
+#### `TaxVerdict`
+
+Outcome of one tax-discipline gate check.
+
+#### `AuthorityRegistry`
+
+Maps authority ids to Ed25519 public keys (hex).
+
+- `register(authority_id: str, pubkey_hex: str)`
+- `pubkey(authority_id: str)`
+#### `FlagLead`
+
+An AI-raised flag: a lead, never an accusation.
+
+#### `flag_not_fraud_gate(flag: FlagLead, action: str, acted_at: int)`
+
+A flag is a lead; an automatic fraud accusation from a flag is ``tax.auto_fraud_accusation``.
+
+#### `selection_bias_probe(feature_names: Any, slice_flag_rates: Any, checked_at: int)`
+
+Banned features are banned whole-class; slice-rate disparity is quarantined.
+
+#### `TrainingDataAuditReceipt`
+
+Binds a model to a debias audit of its historical training data.
+
+- `receipt_digest` (property)
+#### `TrainingDataAuditRegistry`
+
+Hash-chained log of training-data debias audits.
+
+- `issue(receipt_id: str, model_id: str, historical_audit_slice_id: str, debias_digest: str, auditor_id: str, issued_at: int, authority_id: str, signature: bytes)`
+- `find(model_id: str)`
+#### `training_data_audit(registry: TrainingDataAuditRegistry, model_id: str, now: int)`
+
+Training on historical audit data needs a fresh debias-audit receipt.
+
+#### `AssessmentSignoffReceipt`
+
+Binds a tax assessment to a named human's signature.
+
+- `receipt_digest` (property)
+#### `AssessmentSignoffRegistry`
+
+Hash-chained log of assessment signoffs.
+
+- `issue(receipt_id: str, assessment_id: str, assessment_digest: str, human_id: str, signed_at: int, authority_id: str, signature: bytes)`
+- `find(assessment_id: str)`
+#### `OfficerOverrideRate`
+
+Aggregate override statistics for one named human.
+
+#### `human_final_gate(signoff_registry: AssessmentSignoffRegistry, assessment_id: str, now: int, override_rates: Mapping[str, OfficerOverrideRate] | None=None)`
+
+An assessment is final only with a named-human signature.
+
+#### `AppealBindingReceipt`
+
+Binds an assessment to an appeal channel with a live window.
+
+- `receipt_digest` (property)
+#### `AppealBindingRegistry`
+
+Hash-chained log of appeal bindings.
+
+- `issue(receipt_id: str, assessment_id: str, channel_id: str, opened_at: int, deadline: int, authority_id: str, signature: bytes)`
+- `find(assessment_id: str)`
+#### `appeal_window(registry: AppealBindingRegistry, assessment_id: str, now: int, enforcing: bool=False)`
+
+An AI-influenced assessment must bind an appeal path with a minimum 30-day window.
+
+#### `ExplanationReceipt`
+
+Binds a selection to a "why me" explanation for the taxpayer.
+
+- `receipt_digest` (property)
+#### `ExplanationRegistry`
+
+Hash-chained log of "why me" explanations.
+
+- `issue(receipt_id: str, selection_id: str, factor_labels: Any, selected_at: int, issued_at: int, authority_id: str, signature: bytes)`
+- `find(selection_id: str)`
+#### `explanation_receipt(registry: ExplanationRegistry, selection_id: str, now: int)`
+
+A selection needs a "why me" explanation receipt issued within 72 hours.
+
+#### `ModelRegistrationReceipt`
+
+Binds a model id + digest to a public registration.
+
+- `receipt_digest` (property)
+#### `ModelRegistrationRegistry`
+
+Hash-chained log of registered tax AI.
+
+- `issue(receipt_id: str, model_id: str, model_digest: str, jurisdiction: str, registered_at: int, authority_id: str, signature: bytes)`
+- `find(model_id: str)`
+#### `shadow_ai_registry(registry: ModelRegistrationRegistry, model_id: str, model_digest: str, now: int)`
+
+Tax AI in production must be registered.
+
+#### `AnnexIIIPlan`
+
+An authority's self-binding compliance posture.
+
+#### `annex_iii_clock(plan: AnnexIIIPlan, now: int)`
+
+The EU AI Act compliance clock for tax AI.
+
+#### `PreArrivalScore`
+
+An AI risk score issued before a consignment arrives.
+
+#### `customs_lead_gate(prescore: PreArrivalScore, action: str, now: int, officer_id: str='')`
+
+Pre-arrival risk scores may only hold for inspection — never auto-seize.
+
+#### `AIProposal`
+
+An AI suggestion awaiting an officer's decision.
+
+#### `OfficerDecision`
+
+A named officer's decision on an AI proposal.
+
+#### `ai_proposes_human_disposes(proposal: AIProposal, decision: OfficerDecision | None, override_rates: Mapping[str, OfficerOverrideRate] | None=None)`
+
+AI suggests; the officer decides (Fuzhou/Qatar doctrine: AI for efficiency, humans for responsibility).
 
 ### `permit_agents`
 
@@ -5139,6 +5729,10 @@ Energy trading discipline (one-hundred-forty-fifth batch).
 
 Waste & circular-economy discipline (one-hundred-thirty-ninth batch).
 
+#### `run_adtech_agents()`
+
+Adtech & synthetic-media disclosure discipline (one-hundred-forty-ninth batch).
+
 #### `run_audit_agents()`
 
 Audit & assurance discipline (one-hundred-forty-third batch).
@@ -5150,6 +5744,18 @@ Legal practice discipline (one-hundred-forty-sixth batch).
 #### `run_moderation_agents()`
 
 Content moderation discipline (one-hundred-fiftieth batch).
+
+#### `run_manufacturing_agents()`
+
+Manufacturing & industrial-automation AI discipline (one-hundred-fifty-seventh batch).
+
+#### `run_tax_agents()`
+
+Tax & customs AI discipline (one-hundred-forty-eighth batch).
+
+#### `run_govservices_agents()`
+
+Government-service AI discipline (one-hundred-forty-seventh batch).
 
 #### `run_supplychain_agents()`
 

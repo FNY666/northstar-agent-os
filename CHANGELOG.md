@@ -1,3 +1,102 @@
+## Unreleased (one-hundred-forty-ninth batch) — adtech & synthetic-media discipline (AI-adtech absorption)
+
+New module `adtech_agents.py`: `synthetic_performer_receipt()` —
+synthetic performers bind identity, named-human consent, and
+disclosure receipts; unbound performers deny with
+`adtech.no_performer_identity` (NY / California / Hawaii lesson).
+`testimonial_existence_gate()` — AI personas touting efficacy are
+refused whole-class with `adtech.testimonial_refused` (Japan
+景品表示法 lesson; FTC 16 CFR 465.2: fake testimonials are not
+curable by labeling). `materiality_label_clock()` — unlabeled
+material AI content denies as `adtech.unlabeled_material` (IAB V2
+materiality axis); ungraded content denies as
+`adtech.ungraded_materiality`; non-material unlabeled content stays
+non-authoritative. `machine_readable_marking()` — machine-readable
+provenance marking per content digest; missing marking denies as
+`adtech.no_watermark` (EU Art. 50 lesson). `jurisdiction_matrix_digest()`
+/ `jurisdiction_matrix_pin()` — five-jurisdiction strictest-rule
+matrix (EU, California, New York, China, Korea); deployments bind
+the matrix digest, stale pins deny as `adtech.matrix_mismatch`.
+`dark_pattern_screen()` / `check_interface()` — closed 37-pattern
+catalog (CDT-study vocabulary); unscreened interfaces deny, detected
+patterns deny as `adtech.dark_pattern`. `agentic_brief_binding()` /
+`check_objective_drift()` — agentic ad briefs bind declared
+objectives; drift denies as `adtech.brief_drift`. `platform_liability_pin()`
+— platform joint-liability pins under CN_SAMR / KR_AI_BASIC; missing
+or expired pins deny as `adtech.no_liability_pin`.
+`label_fatigue_guard()` — comprehension below floor or exposures
+beyond the review budget deny as `adtech.fatigue_review` (IAB V2
+label-fatigue warning). Honest scoping: receipts bind declared
+adtech discipline; they don't end manipulation. Bench track
+`metrics.adtech_agents`: 12 scenarios, 4 allow / 8 deny.
+
+## Unreleased (one-hundred-forty-seventh batch) — government-service AI discipline (AI-gov-services absorption)
+
+New module `govservices_agents.py`: `human_final_gate()` — benefit
+denials/suspensions/sanctions without a valid human signature deny
+with `govservices.ai_denial` (NZ/BsAs/Muenster lesson: the AI
+recommends, a human decides). `exclusion_monitor()` — signed
+authentication-failure probes; over-tolerance failure rates deny
+with `govservices.exclusion_gap` (Aadhaar lesson: measure
+exclusion, not just success). `alternative_channel_receipt()` /
+`digital_only_gate()` — services binding no non-digital channel
+deny with `govservices.digital_only` (UK petition lesson).
+`discretion_pin()` — AI roles pinned per discretionary act;
+acting beyond the pin denies with
+`govservices.discretion_breach` (Bavaria lesson).
+`identity_minimality()` — disclosure beyond the pinned needed
+fields denies with `govservices.identity_overreach`.
+`agent_identity_registry()` — AI agents acting in government
+services must bind a registered identity; unregistered agents
+deny with `govservices.unregistered_agent` (China SAMR lesson).
+`urgency_scrutiny_clock()` — urgency-passed automation expansions
+need a scrutiny receipt by the deadline; overdue denies with
+`govservices.scrutiny_overdue` (NZ lesson). `benefit_clock()` —
+suspension before the appeal deadline with the appeal pending
+denies with `govservices.suspension_before_appeal` (Robodebt
+lesson). `fraud_flag_receipt()` — fraud flags are leads only;
+treating a flag as a determination denies with
+`govservices.flag_fraud`. Signature verification uses the
+vendored Ed25519 return value (the older try/except-only
+`_verify_sig` pattern in permit_agents/consent_receipts/
+legal_agents ignores it and always passes — flagged for a
+separate fix batch). Honest scoping: receipts bind declared
+service discipline; they don't fix exclusion. Bench track
+`metrics.govservices_agents`: 12 scenarios, 4 allow / 8 deny.
+No version bump (single parent bump per wave).
+
+## Unreleased (one-hundred-fifty-seventh batch) — manufacturing AI discipline (AI-manufacturing absorption)
+
+New module `manufacturing_agents.py`: `restart_clearance_receipt()` —
+robot-cell resets need a live two-person "zone cleared" receipt;
+unconfirmed or stale restarts are `mfg.restart_without_clearance`
+fail-closed (Ottogi SF palletizer lesson). `capability_envelope()` —
+embodied industrial robots declare an envelope (payload/speed/
+torque/task kinds); out-of-envelope commands are refused up front
+(`mfg.envelope_breach`), never "stop on detect" (John Deere
+critique lesson). `humanoid_pilot_registry()` — staged pipeline
+maturity assessment → lab validation → line testing → pilot →
+production, each step receipt-bound; uncertified scale-up is
+`mfg.uncertified_scaleup` (BMW lesson). `maintenance_decision_pin()`
+— predictive maintenance advises only; `shutdown_line`/`swap_part`
+need a named-human decision pin; AI-initiated line stops are
+`mfg.autonomous_stop` (Fascia lesson). `displacement_disclosure()` —
+automation introductions bind displacement-scale + retraining-plan
+disclosures with union notification 30 days ahead; silent
+introductions are `mfg.silent_displacement` (Hyundai Ulsan strike
+lesson). `safety_baseline_clock()` — interim safety baseline
+(fencing, speed/torque limits, supervision ratio) bound before ISO
+lands; missing or expired is `mfg.no_safety_baseline` (Humanoid
+Safety Summit lesson). `twin_sync_integrity()` — twin-vs-physical
+sync verified before control pushes; desynced/stale cells are
+`mfg.twin_desync`. `quality_claim_evidence()` — "defect-rate down
+X%" claims bind a reproducible measurement protocol and sample
+disclosure; self-reported-only numbers are
+`mfg.unverified_quality_claim` (BOE inspection lesson). Honest
+scoping: receipts bind declared manufacturing discipline; they do
+not make factories safe. Bench track
+`metrics.manufacturing_agents`: 12 scenarios, 4 allow / 8 deny.
+
 ## Unreleased (one-hundred-fiftieth batch) — content moderation discipline (AI-moderation absorption)
 
 New module `moderation_agents.py`: `statement_of_reasons()` —
@@ -24,6 +123,32 @@ rabbit-hole amplification audits run on a clock.
 
 Bench: `metrics.moderation_agents` (12 scenarios, 4 allow /
 8 deny). No version bump (single parent bump per wave).
+
+## Unreleased (one-hundred-forty-eighth batch) — tax & customs AI discipline (AI-tax absorption)
+
+New module `tax_agents.py`: `flag_not_fraud_gate()` — flags are
+leads; automatic fraud accusation from a flag denies with
+`tax.auto_fraud_accusation` (Pakistan FBR flag≠fraud doctrine).
+`selection_bias_probe()` — nationality/zip-code features banned
+whole-class (Toeslagenaffaire lesson); slice-rate disparity above
+4.0x quarantines with `tax.disparate_impact`.
+`training_data_audit()` — historical-data debias audits receipted
+before training (Stanford–Treasury 4.7x lesson).
+`human_final_gate()` — named-human signatures on assessments;
+override rates ≤2% read as `tax.rubber_stamp`. `appeal_window()` —
+every AI-influenced assessment binds an appeal path with a minimum
+30-day window. `explanation_receipt()` — "why me" explanations
+issued within 72 hours. `shadow_ai_registry()` — unregistered tax
+AI is `tax.shadow_ai` (Dutch €3.7M lesson). `annex_iii_clock()` —
+self-binding EU AI Act compliance clock (Annex III gap, Omnibus
+deferral to 2027-12-02). `customs_lead_gate()` — pre-arrival risk
+scores may only hold for inspection, never auto-seize
+(`tax.customs_auto_seizure`, CBP lesson). `ai_proposes_human_disposes()`
+— AI suggests, the officer decides (Fuzhou/Qatar doctrine: AI for
+efficiency, humans for responsibility).
+
+Bench: `metrics.tax_agents` (12 scenarios, 4 allow / 8 deny). No
+version bump (single parent bump per wave).
 
 ## Unreleased (one-hundred-forty-sixth batch) — legal practice discipline (AI-legal absorption)
 
