@@ -113,6 +113,7 @@ MANIFEST: dict[str, tuple[str, ...]] = {
         "audit_cli",
         "audit_rekor",
         "audit_archive",
+        "trace_export",
         "ed25519",
         "tools.__init__",
         "tools.os_sandbox",

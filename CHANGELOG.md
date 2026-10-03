@@ -1,5 +1,54 @@
 # Northstar Agent OS — initial public component
 
+## Unreleased (fiftieth batch) — `audit export --trace`: TRACE v0.2-shaped Trust Records
+
+Emits a Northstar audit chain head as a TRACE v0.2-shaped Trust Record
+(Linux Foundation TRACE spec, v0.2 Draft/RFC pre-ratification). Pure
+software, offline, off the hot path — no TEE involved.
+
+`northstar audit export <feed.ndjson> --trace` (writes JCS JSON to stdout
+or `--out`):
+
+- `tool_transcript.hash = "sha256:<chain head hash>"` — the Trust Record
+  commits the audit chain by hash (spec §3.3.2); receipts live in the
+  chain, not in the record.
+- `references[]` gains `{rel: "behavior-trace", id, resolver:
+  "northstar-audit-export", digest: "sha256:<feed bytes>"}` pointing at
+  the feed the record is the environment evidence for.
+- `policy.enforcement_mode: "enforce"` (Northstar really runs a gate;
+  `bundle_hash` only via `--policy-bundle-hash`).
+- `origin.kind: "log-import"` + `runtime.platform: "software-only"`
+  (§3.1.1 MUST for non-`self` origins).
+- Optional `--seed-hex`: embedded Ed25519 signature over the JCS
+  canonical form with `signature` absent, plus `cnf.jwk` (§3.2.2);
+  unsigned records carry neither.
+- Refuses loudly: UNPROTECTED feeds (exit 2, no head to commit) and
+  BROKEN feeds (exit 3).
+
+**Honesty rules (in code, CLI text and docs):**对外表述为"导出 TRACE
+v0.2 形状的证据记录（software-only/log-import）"，不宣称 conformant；
+v0.2 是 Developer Preview，字段可能变；software-only 记录永不洗白为
+attested evidence；填不出的字段（model、SLSA provenance、transparency
+收据）直接省略，不编造。
+
+**JCS cross-validation:** Northstar's hand-written RFC 8785
+implementation is now cross-validated against the TRACE spec's own
+conformance vector `examples/delegation-link/24-parent-key-
+supplementary-plane.json` (TRACE-DELEG-024): the root record's `cnf.jwk`
+carries U+E000 and U+1F600 keys, and Northstar reproduces the spec's
+published `parent_record_hash` digest exactly — while code-point
+`sorted()` order demonstrably diverges (the shortcut §3.2.2 warns
+about). Testing also caught and fixed a real ordering bug in this
+batch's signing path (`cnf` is now added before signing so the
+signature covers it, per §3.2.2).
+
+Full mapping and the SCITT-anchoring design (B, not implemented) in
+`docs/concepts/trace-export.md`.
+
+**Verification:** 14 new tests green (spec vector digest, key-order
+discrimination, export shape, signing round-trip, UNPROTECTED/BROKEN/
+missing feed refusals, CLI exits).
+
 ## Unreleased (forty-ninth batch) — strict verifier mode for `audit verify`
 
 Implements the `draft-sharif-agent-audit-trail` §6.3 verifier extras that
