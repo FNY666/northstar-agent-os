@@ -474,6 +474,356 @@ Owns liability pins; a dead object past its deadline with no pin is an unowned h
 - `register(receipt: LiabilityReceipt)`
 - `check_deorbit(*, object_id: str, at: int, still_in_orbit: bool, now: int)`
   - Check a deorbit outcome against its liability pin.
+### `procurement_agents`
+
+Source: `components/northstar-agent-runtime/procurement_agents.py`
+
+Procurement accountability gates (one-hundred-thirty-eighth batch).
+
+#### `ProcurementError`
+
+A malformed procurement receipt or a programming error.
+
+#### `ProcurementVerdict`
+
+Outcome of one procurement gate check.
+
+#### `AuthorityRegistry`
+
+Maps authority ids to Ed25519 public keys (hex).
+
+- `register(authority_id: str, pubkey_hex: str)`
+- `pubkey(authority_id: str)`
+#### `advisory_only_gate(award_id: str, evaluator_id: str, *, ai_scored: bool, human_scored: bool, human_wrote_reasons: bool, human_signed: bool)`
+
+AI may assist scoring; it may never conclude a matter.
+
+#### `SourceLocation`
+
+One original-tender-text location backing an AI claim.
+
+#### `GroundedClaimReceipt`
+
+An AI evaluation claim bound to original-text locations.
+
+- `digest()`
+#### `ClaimGroundingRegistry`
+
+Authority-signed log of claim groundings.
+
+- `issue(receipt_id: str, claim_id: str, claim_digest: str, evaluation_id: str, locations: tuple[SourceLocation, ...], authority_id: str, signature: bytes, issued_at: int)`
+#### `source_grounding_receipt(registry: ClaimGroundingRegistry, claim_id: str, claim_digest: str)`
+
+Every AI evaluation claim must bind original-tender-text locations.
+
+#### `HealthCheckReceipt`
+
+A tender document's pre-issuance health-check claim.
+
+- `digest()`
+#### `HealthCheckRegistry`
+
+Authority-signed log of pre-issuance health checks.
+
+- `issue(receipt_id: str, doc_id: str, doc_digest: str, checks_run: tuple[str, ...], authority_id: str, signature: bytes, issued_at: int, expires_at: int)`
+#### `tender_doc_screen(registry: HealthCheckRegistry, doc_id: str, doc_digest: str, now: int)`
+
+A tender document must pass its health check before publication.
+
+#### `collusion_probe(price_pattern_digest: str | None, comms_metadata_digest: str | None, structural_signal_digest: str | None, score: float | None, threshold: float)`
+
+A bid-rigging probe produces a lead, never an automatic conviction.
+
+#### `losing_bid_data_gate(evaluation_id: str, n_winner_bids: int, n_losing_bids: int, min_losing_bids: int)`
+
+Evaluations without losing-bid data auto-degrade in confidence.
+
+#### `incumbency_bias_probe(new_supplier_rejected: int, new_supplier_total: int, incumbent_rejected: int, incumbent_total: int, tolerance: float)`
+
+Flag when new suppliers are rejected far more often than incumbents.
+
+#### `AlgorithmRegistrationReceipt`
+
+A deployed evaluation algorithm's registration claim.
+
+- `digest()`
+#### `AlgorithmRegistry`
+
+Authority-signed log of evaluation-algorithm registrations.
+
+- `revoked(receipt_id: str)`
+- `issue(receipt_id: str, algorithm_id: str, version: str, review_digest: str, authority_id: str, signature: bytes, registered_at: int, expires_at: int)`
+- `revoke(receipt_id: str)`
+#### `algorithm_registry_receipt(registry: AlgorithmRegistry, algorithm_id: str, version: str, now: int)`
+
+A deployed evaluation algorithm must carry a live registration.
+
+#### `AwardTrace`
+
+An award's 4-segment evidence chain.
+
+#### `full_trace_award(trace: AwardTrace, no_ai_involved: bool=False)`
+
+An award must bind the 4-segment evidence chain.
+
+### `disaster_agents`
+
+Source: `components/northstar-agent-runtime/disaster_agents.py`
+
+Emergency-response discipline receipts (one-hundred-thirty-seventh batch).
+
+#### `DisasterError`
+
+A malformed receipt, registry, or check request — a programming error, not a verdict. Verification *failures* (unbound triage, hidden AI, superseded warnings, budget breaches, equity gaps, missing delivery evidence, AI-only evacuation orders, unmarked notices) return a :class:`DisasterVerdict` with…
+
+#### `DisasterVerdict`
+
+The verdict of a disaster-discipline gate.
+
+#### `disaster_audit_event(*, action: str, allowed: bool, reason: str, created_unix: int, **details: Any)`
+
+Build an audit event shaped to feed the incident-receipts event chain (113th batch).
+
+#### `TriageActivationReceipt`
+
+An authority-signed AI-triage activation pin.
+
+#### `triage_activation_receipt(*, receipt_id: str, deployment_id: str, channel: str, activation_digest: str, issued_at: int, ttl_s: int, issued_by: str, authority_pubkey_hex: str, authority_secret: bytes, prev_digest: str=_GENESIS)`
+
+Issue an AI-triage activation pin. The channel must come from the closed vocabulary; the digest binds the activation policy.
+
+#### `TriageRegistry`
+
+Owns AI-triage activation pins and revocations.
+
+- `register(receipt: TriageActivationReceipt)`
+  - Register an activation pin. The log must stay hash-chained; re-registering a deployment supersedes its previous pin.
+- `revoke(deployment_id: str)`
+  - Revoke a deployment's triage activation. Revocation is immediate and sticky — a new pin must be registered to re-enable.
+- `check_activation(*, deployment_id: str, channel: str, now: int)`
+  - Check whether AI triage may divert a call right now.
+#### `DisclosureReceipt`
+
+A bound disclosure that AI is involved in a call session.
+
+#### `ai_involvement_disclosure(*, receipt_id: str, session_id: str, deployment_id: str, modality: str, disclosed_at: int, ttl_s: int, issued_by: str, authority_pubkey_hex: str, authority_secret: bytes)`
+
+Issue an AI-involvement disclosure for a call session. The modality must come from the closed vocabulary.
+
+#### `DisclosureRegistry`
+
+Owns AI-involvement disclosures per call session.
+
+- `register(receipt: DisclosureReceipt)`
+  - Register a disclosure. Digest must recompute and the authority signature must verify.
+- `check_disclosure(*, session_id: str, now: int)`
+  - Check whether AI involvement in a session was disclosed.
+#### `WarningVersion`
+
+One version of a warning, hash-chained to its predecessor.
+
+#### `warning_version(*, version_id: str, warning_id: str, version: int, content_digest: str, issued_at: int, issued_by: str, authority_pubkey_hex: str, authority_secret: bytes, prev_digest: str=_GENESIS)`
+
+Issue a warning version. Versions must increase; the chain must stay unbroken.
+
+#### `WarningVersionChain`
+
+Hash-chained version history per warning id.
+
+- `publish(entry: WarningVersion)`
+  - Publish a new warning version. The chain must stay unbroken and versions must increase.
+- `check_reference(*, version_digest: str, now: int)`
+  - Check whether a reference to a warning version is authoritative.
+#### `AlarmBudgetReceipt`
+
+A pinned false-alarm rate budget for a warning channel.
+
+#### `false_alarm_budget(*, receipt_id: str, channel_id: str, max_false_alarm_bps: int, window_s: int, issued_at: int, issued_by: str, authority_pubkey_hex: str, authority_secret: bytes)`
+
+Pin a false-alarm budget for a warning channel. The channel must come from the closed vocabulary.
+
+#### `AlarmBudgetRegistry`
+
+Owns false-alarm budgets per warning channel.
+
+- `register(receipt: AlarmBudgetReceipt)`
+  - Register a budget. Digest must recompute and the authority signature must verify.
+- `check_rate(*, channel_id: str, observed_false_alarm_bps: int, now: int)`
+  - Check an observed false-alarm rate against the pinned budget.
+#### `EquityReceipt`
+
+A coverage-representativeness receipt for a deployment.
+
+#### `equity_receipt(*, receipt_id: str, deployment_id: str, coverage_bps: int, min_required_bps: int, measured_at: int, protocol_digest: str, issued_by: str, authority_pubkey_hex: str, authority_secret: bytes)`
+
+Issue a coverage-representativeness receipt.
+
+#### `equity_probe(receipt: EquityReceipt, *, now: int)`
+
+Probe a deployment's coverage receipt against its equity floor. Tampered receipts fail closed; stale measurements are NON_AUTHORITATIVE; coverage below the floor refuses go-live.
+
+#### `DeliveryReceipt`
+
+Delivery evidence bound to a warning version.
+
+#### `last_mile_receipt(*, receipt_id: str, warning_version_digest: str, delivery_proof_digest: str, delivered_at: int, reach_count: int, channel_id: str, issued_by: str, authority_pubkey_hex: str, authority_secret: bytes)`
+
+Issue delivery evidence for a warning version.
+
+#### `DeliveryRegistry`
+
+Owns delivery evidence per warning version.
+
+- `register(receipt: DeliveryReceipt)`
+  - Register delivery evidence. Digest must recompute and the authority signature must verify.
+- `check_authority(*, warning_version_digest: str, now: int)`
+  - Check whether a warning version carries bound delivery evidence.
+#### `EvacuationOrder`
+
+An evacuation order with a bound human countersignature.
+
+#### `human_final_decision(*, order_id: str, order_digest: str, zone: str, issued_at: int, expires_at: int, issued_by: str, human_signer: str, human_pubkey_hex: str, human_secret: bytes, authority_pubkey_hex: str, authority_secret: bytes)`
+
+Issue an evacuation order with a human countersignature. Both keys must sign — the authority for the form, the human for the decision.
+
+#### `check_evacuation_order(order: EvacuationOrder, *, now: int)`
+
+Check an evacuation order: authority form signature, human countersignature, and freshness must all hold. An order the machine signed alone is ``disaster:ai_evacuation``.
+
+#### `misinfo_marker_probe(notification: Mapping[str, Any])`
+
+Probe an AI emergency notification for its machine-readable source marker. The marker binds ``(notice_digest, originator, channel, created_unix)`` under an authority signature. Missing markers are ``disaster:unmarked_notice``; mismatched or invalid markers are ``disaster:marker_mismatch``. A notice…
+
+### `pharma_agents`
+
+Source: `components/northstar-agent-runtime/pharma_agents.py`
+
+Pharma manufacturing defense gates (one-hundred-thirty-fifth batch).
+
+#### `PharmaError`
+
+A malformed pharma receipt or a programming error.
+
+#### `PharmaVerdict`
+
+Outcome of one pharma-manufacturing check.
+
+#### `GmpDocumentLog`
+
+Hash-chained log of GMP document quality-unit countersigns.
+
+#### `GmpDocumentReceipt`
+
+An AI-drafted GMP document with its quality-unit countersign.
+
+#### `gmp_document_receipt(*, receipt_id: str, prev_digest: str, doc_class: str, doc_digest: str, drafted_by_ai: bool, counter_public_hex: str, counter_at: int, counter_secret: bytes | None, authority_pubkey_hex: str, authority_secret: bytes)`
+
+Seal a GMP document countersign receipt.
+
+#### `quality_unit_countersign(receipt: GmpDocumentReceipt, countersignature_hex: str, *, now: int)`
+
+Check the quality-unit countersign on a GMP document.
+
+#### `use_in_production(receipt: GmpDocumentReceipt, countersignature_hex: str, *, now: int)`
+
+Gate the production use of a GMP document.
+
+#### `ModelDeploymentReceipt`
+
+An AI model's deployment claim for a GMP step.
+
+#### `model_deployment_receipt(*, receipt_id: str, prev_digest: str, model_id: str, model_class: str, model_version: str, model_digest: str, locked: bool, criticality: str, authority_pubkey_hex: str, authority_secret: bytes)`
+
+#### `static_model_only(receipt: ModelDeploymentReceipt)`
+
+Enforce the Annex 22 red line on a GMP step's AI model.
+
+#### `generative_exclusion_gate(receipt: ModelDeploymentReceipt, qualified_person_in_loop: bool)`
+
+Gate generative-AI/LLM outputs in GMP decisions.
+
+#### `ModelLineageReceipt`
+
+An audit's 4-piece model lineage claim.
+
+#### `model_lineage_receipt(*, receipt_id: str, prev_digest: str, model_version: str, training_data_digest: str, input_digest: str, output_digest: str, authority_pubkey_hex: str, authority_secret: bytes)`
+
+#### `check_model_lineage(lineage: ModelLineageReceipt | None, *, model_version: str)`
+
+Check the 4-piece audit bundle for a model's decision.
+
+#### `AlcoaProbeVerdict`
+
+Attribute-level outcome of one ALCOA+ probe.
+
+#### `alcoa_probe(bound_attributes: Mapping[str, bool] | None)`
+
+Probe an AI rewrite of an electronic record against ALCOA+.
+
+#### `ContextOfUseReceipt`
+
+A model's declared context-of-use claim.
+
+#### `context_of_use_receipt(*, receipt_id: str, prev_digest: str, model_id: str, context_digest: str, authority_pubkey_hex: str, authority_secret: bytes)`
+
+#### `context_of_use_binding(receipt: ContextOfUseReceipt | None, *, actual_context_digest: str)`
+
+Check a model use against its declared context-of-use.
+
+#### `DriftMonitorReceipt`
+
+A drift monitor's tolerance claim for a deployed model.
+
+#### `drift_monitor_receipt(*, receipt_id: str, prev_digest: str, model_id: str, drift_metric: float, tolerance: float, checked_at: int, authority_pubkey_hex: str, authority_secret: bytes)`
+
+#### `drift_monitor_gate(monitor: DriftMonitorReceipt | None, *, now: int)`
+
+Gate a deployed model on its drift monitor.
+
+#### `PharmaClaimReceipt`
+
+An AI-pharma marketing claim with bound trial evidence.
+
+#### `pharma_claim_receipt(*, receipt_id: str, prev_digest: str, claim_digest: str, evidence_digest: str, authority_pubkey_hex: str, authority_secret: bytes)`
+
+#### `pharma_claim_evidence(claim: PharmaClaimReceipt | None, *, claimed_numbers_digest: str)`
+
+Check an AI-pharma marketing claim against trial evidence.
+
+#### `GmpDocumentChainLog`
+
+Hash-chained log of GMP document countersign receipts.
+
+- `append(receipt: GmpDocumentReceipt)`
+- `head_digest()`
+#### `ModelDeploymentChainLog`
+
+Hash-chained log of model deployment receipts.
+
+- `append(receipt: ModelDeploymentReceipt)`
+- `head_digest()`
+#### `ModelLineageChainLog`
+
+Hash-chained log of model lineage receipts.
+
+- `append(receipt: ModelLineageReceipt)`
+- `head_digest()`
+#### `DriftMonitorChainLog`
+
+Hash-chained log of drift monitor receipts.
+
+- `append(receipt: DriftMonitorReceipt)`
+- `head_digest()`
+#### `PharmaClaimChainLog`
+
+Hash-chained log of marketing-claim receipts.
+
+- `append(receipt: PharmaClaimReceipt)`
+- `head_digest()`
+#### `full_production_gate(*, doc_receipt: GmpDocumentReceipt, countersignature_hex: str, model_receipt: ModelDeploymentReceipt, lineage: ModelLineageReceipt | None, alcoa_attributes: Mapping[str, bool] | None, context_receipt: ContextOfUseReceipt | None, actual_context_digest: str, drift: DriftMonitorReceipt | None, claim: PharmaClaimReceipt | None, claimed_numbers_digest: str, generative_qualified_person: bool, now: int)`
+
+Run every pharma-manufacturing gate over one GMP decision.
+
 ### `permit_agents`
 
 Source: `components/northstar-agent-runtime/permit_agents.py`
@@ -3551,9 +3901,21 @@ Mining governance gates (one-hundred-thirty-second batch).
 
 Greenwashing evidence gates (one-hundred-thirtieth batch).
 
+#### `run_procurement_agents()`
+
+Procurement accountability gates (one-hundred-thirty-eighth batch).
+
 #### `run_orbital_agents()`
 
 Orbital safety receipts (one-hundred-thirty-fourth batch).
+
+#### `run_pharma_agents()`
+
+Pharma manufacturing defense gates (one-hundred-thirty-fifth batch).
+
+#### `run_disaster_agents()`
+
+Emergency-response discipline receipts (one-hundred-thirty-seventh batch).
 
 #### `run_suite(*, only: Iterable[str] | None=None, tracks: Iterable[str] | None=None)`
 
