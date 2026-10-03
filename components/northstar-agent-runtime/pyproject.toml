@@ -73,6 +73,7 @@ py-modules = [
     "events",
     "frontmatter",
     "governance_bench",
+    "hlc",
     "hooks",
     "loop",
     "mcp_client",

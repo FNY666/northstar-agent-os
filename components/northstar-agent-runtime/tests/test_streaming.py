@@ -581,7 +581,7 @@ def _records(directory: str) -> list[dict]:
 
 def _strip(records: list[dict]) -> list[dict]:
     """Drop the fields two runs cannot share (ids, timestamps, durations)."""
-    volatile = {"session_id", "ts", "timestamp", "created_at", "duration_ms", "run_id", "message_id", "id", "uuid"}
+    volatile = {"session_id", "ts", "hlc", "timestamp", "created_at", "duration_ms", "run_id", "message_id", "id", "uuid"}
 
     def scrub(value):
         if isinstance(value, dict):

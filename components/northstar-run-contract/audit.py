@@ -76,6 +76,11 @@ _OPTIONAL: dict[str, type] = {
     # _validate_provenance, including the externalParameters trust rule:
     # externally-controlled inputs must carry an explicit trust marking.
     "provenance": dict,
+    # Hybrid Logical Clock stamp ("<millis>:<counter>", see the runtime's
+    # hlc.py): the causal timestamp that survives multi-writer clock skew.
+    # Optional and additive — records written before HLC simply lack it,
+    # and the schema stays audit.ndjson/1.
+    "hlc": str,
 }
 
 #: Trust values a record may assert for its ``externalParameters``. SLSA v1.0
@@ -87,6 +92,19 @@ _PROVENANCE_TRUST_VALUES = ("untrusted", "verified")
 
 _HEX64_RE = re.compile(r"^[0-9a-f]{64}$")
 _HEX128_RE = re.compile(r"^[0-9a-f]{128}$")
+_HLC_RE = re.compile(r"^(\d+):(\d+)$")
+
+
+def _valid_hlc_shape(value: Any) -> bool:
+    """Wire-shape check for an HLC stamp: "<millis>:<counter>" with millis
+    in 48 bits and counter in 16 bits. Mirrors the runtime mirror's rule
+    verbatim (see northstar-agent-runtime/audit_export.py)."""
+    if not isinstance(value, str):
+        return False
+    match = _HLC_RE.fullmatch(value)
+    if match is None:
+        return False
+    return int(match.group(1)) <= (1 << 48) - 1 and int(match.group(2)) <= (1 << 16) - 1
 
 
 def now_rfc3339(*, now: float | None = None) -> str:
@@ -210,6 +228,11 @@ def validate_record(record: Any) -> tuple[str, ...]:
                 f"provenance 'invocationId' {invocation_id!r} does not match "
                 f"envelope 'run_id' {record['run_id']!r}"
             )
+    if "hlc" in record and not _valid_hlc_shape(record["hlc"]):
+        errors.append(
+            "audit 'hlc' must be '<millis>:<counter>' with millis in 48 bits "
+            "and counter in 16 bits (e.g. '1727865600000:3')"
+        )
     return tuple(errors)
 
 
@@ -323,6 +346,11 @@ def _validate_provenance(provenance: Any) -> tuple[str, ...]:
     self_asserted = provenance.get("selfAsserted")
     if self_asserted is not None and not isinstance(self_asserted, bool):
         errors.append("provenance 'selfAsserted' must be a boolean")
+    if "hlc" in record and not _valid_hlc_shape(record["hlc"]):
+        errors.append(
+            "audit 'hlc' must be '<millis>:<counter>' with millis in 48 bits "
+            "and counter in 16 bits (e.g. '1727865600000:3')"
+        )
     return tuple(errors)
 
 

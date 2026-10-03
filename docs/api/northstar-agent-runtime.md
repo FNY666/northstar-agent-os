@@ -1656,6 +1656,8 @@ Writer/reader for one session's JSONL transcript.
 - `bytes_written` (property)
 - `append(record_type: str, data: dict[str, Any] | None=None)`
   - Write one record. Returns the record even when no store is configured.
+- `merge_hlc(stamp: object)`
+  - Merge another writer's HLC stamp into this writer's clock.
 - `record_assistant(message: AssistantMessage, *, agent: str='main')`
 - `record_user(message: UserMessage, *, agent: str='main')`
 - `record_system(message: SystemMessage, *, agent: str='main')`
@@ -2257,6 +2259,42 @@ The full spike bundle: signed statement, optionally transparent.
 
 JCS-canonical JSON bytes of the bundle (deterministic).
 
+### `hlc`
+
+Source: `components/northstar-agent-runtime/hlc.py`
+
+Hybrid Logical Clock (HLC) for audit event timestamps.
+
+#### `now_ms()`
+
+Current physical time in whole milliseconds (the default clock).
+
+#### `pack(l: int, c: int)`
+
+Canonical wire string for an ``(l, c)`` stamp.
+
+#### `unpack(stamp: object)`
+
+Parse a wire stamp; ``None`` when malformed or out of range.
+
+#### `tick(state: tuple[int, int], pt_ms: int | None=None)`
+
+Stamp a new local event (the paper's send/local rule).
+
+#### `receive(state: tuple[int, int], msg_l: int, msg_c: int, pt_ms: int | None=None)`
+
+Merge an observed stamp and stamp a new event (the paper's receive rule).
+
+#### `HLCClock`
+
+Mutable per-writer HLC state; the convenient producer interface.
+
+- `state` (property)
+  - Current ``(l, c)`` (for persistence or tests).
+- `tick(pt_ms: int | None=None)`
+  - Stamp a new local event; returns the packed wire string.
+- `receive(stamp: object, pt_ms: int | None=None)`
+  - Merge an observed stamp; ``False`` (no state change) when the stamp is unparseable — a producer never lets a malformed input corrupt its clock.
 ### `trace_export`
 
 Source: `components/northstar-agent-runtime/trace_export.py`

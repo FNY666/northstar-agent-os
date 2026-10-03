@@ -101,6 +101,25 @@ fields instead of silently ignoring them.
 | `payload` | required | producer-specific object (open by design) |
 | `seq` | optional | per-producer monotonic sequence |
 | `session_id` / `run_id` / `actor_id` | optional | correlation identifiers |
+| `hlc` | optional | Hybrid Logical Clock stamp (`"<millis>:<counter>"`): the causal timestamp; records written before HLC simply omit it |
+
+### Causal timestamps (HLC)
+
+Wall-clock `ts` cannot order causally-related events written by different
+writers: clock skew inverts the order, millisecond granularity flattens it.
+Every runtime session record now also carries an **HLC stamp**
+(`hlc.py`, after Kulkarni et al., "Logical Physical Clocks", SSS 2014): a
+64-bit `(l, c)` pair where `l` tracks the maximum physical time seen and
+`c` breaks ties, ticked per writer and merged (receive rule) whenever a
+writer observes another writer's stamp. The guarantee is structural: if
+event *a* causally precedes event *b*, then `hlc(a) < hlc(b)` —
+timestamps agree with causality even when wall clocks disagree, while `l`
+stays within a bounded drift of physical time. `audit verify` enforces
+this on every adjacent parent→child pair that both carry a parseable
+stamp (`causality-inversion` violation); pairs with a missing or
+unparseable stamp are skipped, so pre-HLC feeds verify exactly as before.
+Like the chain fields, `hlc` is an optional additive envelope field: the
+schema stays `audit.ndjson/1`, no revision needed.
 
 Producer bridges (each with tests):
 

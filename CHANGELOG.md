@@ -1,3 +1,50 @@
+## Unreleased (seventy-sixth batch) — HLC causal timestamps for audit events
+
+Absorbs the **Hybrid Logical Clock** (Kulkarni et al., "Logical Physical
+Clocks and Consistent Snapshots in Globally Distributed Databases",
+SSS 2014, building on Lamport 1978): a 64-bit `(l, c)` timestamp where `l`
+tracks the maximum physical time seen and `c` is a bounded tie-break
+counter, with the guarantee that `a -> b` (causal) implies
+`hlc(a) < hlc(b)` even when the writers' wall clocks disagree. The
+implementation is a fresh ~60-line port of the paper's published
+tick/receive rules (verified against the paper's stated update rules, not
+copied from any codebase) — no new dependency, fully deterministic, the
+physical clock an explicit parameter.
+
+The problem it fixes is real and confirmed in our own code: audit records
+carry a wall-clock `ts` (millisecond RFC 3339 UTC, `sessions.py`
+`_timestamp()`), and with more than one writer — parallel tool workers,
+multi-process runs, merged transcripts — two causally-ordered events can
+receive `ts` values that invert or flatten their causal order (clock skew
+or ms-granularity collisions). `verify --strict` tolerated this with a
+clock-skew allowance; HLC fixes it structurally instead.
+
+- **Producer stamping** (`hlc.py`, `sessions.py`): every session record now
+  carries an optional top-level `hlc` stamp (`"<millis>:<counter>"`),
+  ticked from per-writer state on each `append`; `SessionStore.merge_hlc()`
+  applies the receive rule when a writer observes another writer's stamp.
+  Two-writer skewed-clock tests prove the property: B's wall clock 100ms
+  behind A's, B merges A's stamp, and `hlc(B) > hlc(A)` while the
+  wall-clock order inverts.
+- **Envelope** (`audit.ndjson/1`, still no schema revision): `hlc` is an
+  optional additive field, validated by shape (`<48-bit millis>:<16-bit
+  counter>`) in both the runtime mirror and the normative
+  `northstar-run-contract/audit.py` validator (parity test extended);
+  `audit export` maps it to the top level instead of `payload`.
+- **Verify-side causality check** (`audit_chain.py`, default verify, not
+  strict-only): for every adjacent parent→child pair that both carry a
+  parseable stamp, the child's stamp must not precede the parent's —
+  violation kind `causality-inversion`, also exposed in `audit verify
+  --json`. The check is structural (no wall clock involved), so feeds that
+  verify today keep verifying: records without a parseable stamp skip the
+  pair.
+
+Honest ceiling: HLC stamps are a *correctness* instrument, not a security
+boundary — a malicious producer can simply omit `hlc`, and the verifier
+skips unstamped pairs by design. What the check catches is producer bugs
+and feeds assembled without HLC merging, i.e. exactly the multi-writer
+inversions wall-clock `ts` cannot see.
+
 ## Unreleased (seventy-fifth batch) — timelock-delayed execution for the irreversible tier
 
 Mechanism absorbed from OpenZeppelin's `TimelockController`
