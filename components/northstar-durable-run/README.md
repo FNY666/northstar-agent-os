@@ -114,6 +114,30 @@ tool calls (every raw effect ran exactly once), and exactly one `run.finished`.
 `SIGKILL` mid-step and a healthy process takes over without re-running
 finished steps.
 
+### Claim-check: large payloads live in the blob area
+
+Payloads at or above 64 KiB (`blob_store.CLAIM_CHECK_THRESHOLD_BYTES`) never
+go inline into the JSONL history or the ledger sidecar. `runner._append`
+diverts them into a content-addressed `<events>.blobs/` directory next to the
+event file — one file per `sha256` digest, written atomically
+(temp + fsync + rename) — and the event carries only the `blob_ref`. The
+ledger sidecar does the same for large tool results: `replay_result` fetches
+the bytes on demand. `EventStore.read_blob(event)` is the fold-time accessor;
+a missing or corrupt blob raises `ValueError` naming the event and the ref
+instead of silently returning nothing. The blob area is never garbage
+collected: history is append-only, so a blob referenced by any event must
+stay readable for the lifetime of the history file.
+
+### Event schema migration
+
+The event schema is versioned (`northstar.durable-event.v2`; v2 added the
+optional `blob_ref` field for claim-check). `event_migration.py` holds one
+upcaster per revision; `EventContract.from_dict` migrates any stored dict to
+the current revision before validation, so a v1 history file replays and
+folds without being rewritten or rejected. Unknown revisions are fail-closed.
+Rule, enforced by tests: any event field change ships a schema revision plus
+an upcaster — no silent drift.
+
 `verifier.py` does not trust a step's claimed output or a model's claimed
 status. It checks the actual run state, private workspace, required file
  digests, and an observed test exit code. Only a `verified` result can produce

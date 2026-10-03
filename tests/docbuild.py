@@ -53,6 +53,8 @@ MANIFEST: dict[str, tuple[str, ...]] = {
         "evaluation",
         "durable_audit",
         "tool_ledger",
+        "blob_store",
+        "event_migration",
     ),
     "northstar-agent-interop": (
         "interop_contract",

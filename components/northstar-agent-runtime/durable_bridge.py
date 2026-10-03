@@ -5,7 +5,7 @@ Why this module exists
 ``northstar-durable-run`` and this runtime each grew a durability story, and they
 were invented separately:
 
-* durable-run persists an append-only ``EventStore`` of ``northstar.durable-event.v1``
+* durable-run persists an append-only ``EventStore`` of ``northstar.durable-event.v2``
   records, derives state by replaying them, and checkpoints that derived state as a
   ``northstar.checkpoint.v1`` document;
 * this runtime appends a ``checkpoint`` record to the session transcript, whose digest
@@ -70,7 +70,7 @@ from typing import Any, Mapping, Sequence
 #: here and pinned in the tests - not looked up at run time.
 RUN_SCHEMA_VERSION = "northstar.durable-run.v1"
 STEP_SCHEMA_VERSION = "northstar.durable-step.v1"
-EVENT_SCHEMA_VERSION = "northstar.durable-event.v1"
+EVENT_SCHEMA_VERSION = "northstar.durable-event.v2"
 CHECKPOINT_SCHEMA_VERSION = "northstar.checkpoint.v1"
 
 #: The event type that means "a boundary was recorded", and the only status durable-run
@@ -95,6 +95,7 @@ EVENT_FIELDS: tuple[str, ...] = (
     "idempotency_key",
     "trace_id",
     "payload_digest",
+    "blob_ref",
 )
 
 #: Mirrored from ``event_store._CHECKPOINT_FIELDS``. Also closed.
@@ -255,7 +256,7 @@ def checkpoint_event(
     occurred_at: int | None = None,
     sequence: int | None = None,
 ) -> dict[str, Any]:
-    """One ``northstar.durable-event.v1`` record for one runtime checkpoint.
+    """One ``northstar.durable-event.v2`` record for one runtime checkpoint.
 
     Identity defaults follow the rule the durable side already enforces - ids with no
     whitespace or path separators - by deriving them from the session: a boundary belongs
@@ -293,6 +294,10 @@ def checkpoint_event(
         "idempotency_key": f"{session_id}:{payload['record_index']}",
         "trace_id": _require_id(trace_id or run_id, "trace_id"),
         "payload_digest": durable_digest(payload),
+        # The bridge carries digests, never payloads: the checkpoint bytes
+        # stay in the runtime's session store, so there is no blob to
+        # reference. v2 requires the field to be present, hence None.
+        "blob_ref": None,
     }
     # Every id above went through _require_id, which is the only length rule that can
     # actually bind: a session id is capped at 128 characters, so the key built from it

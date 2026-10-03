@@ -14,7 +14,12 @@ from typing import Any, ClassVar, Mapping
 
 RUN_SCHEMA_VERSION = "northstar.durable-run.v1"
 STEP_SCHEMA_VERSION = "northstar.durable-step.v1"
-EVENT_SCHEMA_VERSION = "northstar.durable-event.v1"
+#: Current event schema revision. v2 added the optional ``blob_ref`` field
+#: for claim-check (see event_migration.py for the v1 -> v2 upcaster).
+EVENT_SCHEMA_VERSION = "northstar.durable-event.v2"
+#: Previous event schema revision. Histories written by v1 are migrated
+#: in-memory on read; they are never rejected and never rewritten.
+EVENT_SCHEMA_VERSION_V1 = "northstar.durable-event.v1"
 
 MAX_ID_CHARS = 128
 MAX_SCOPE_CHARS = 128
@@ -178,6 +183,12 @@ def _require_digest(value: Any, field: str) -> str:
     if not isinstance(value, str) or not _DIGEST_RE.fullmatch(value):
         raise ValueError(f"{field} must be a lowercase sha256 digest")
     return value
+
+
+def _require_optional_digest(value: Any, field: str) -> str | None:
+    if value is None:
+        return None
+    return _require_digest(value, field)
 
 
 def _require_idempotency_key(value: Any) -> str:
@@ -353,6 +364,7 @@ class EventContract(_CanonicalContract):
     idempotency_key: str
     trace_id: str
     payload_digest: str
+    blob_ref: str | None
 
     _fields: ClassVar[tuple[str, ...]] = (
         "schema_version",
@@ -368,11 +380,17 @@ class EventContract(_CanonicalContract):
         "idempotency_key",
         "trace_id",
         "payload_digest",
+        "blob_ref",
     )
 
     @classmethod
     def from_dict(cls, value: Any) -> "EventContract":
+        # Deferred import: event_migration imports this module's version
+        # constants, so a top-level import would be circular.
+        from event_migration import migrate_event_dict
+
         data = _require_object(value, "event contract")
+        data = migrate_event_dict(data)
         _require_exact_fields(data, set(cls._fields), "event contract")
         if data["schema_version"] != EVENT_SCHEMA_VERSION:
             raise ValueError(f"schema_version must be {EVENT_SCHEMA_VERSION}")
@@ -397,6 +415,7 @@ class EventContract(_CanonicalContract):
             idempotency_key=_require_idempotency_key(data["idempotency_key"]),
             trace_id=_require_id(data["trace_id"], "trace_id"),
             payload_digest=_require_digest(data["payload_digest"], "payload_digest"),
+            blob_ref=_require_optional_digest(data["blob_ref"], "blob_ref"),
         )
 
     def to_dict(self) -> dict[str, Any]:
@@ -414,6 +433,7 @@ class EventContract(_CanonicalContract):
             "idempotency_key": self.idempotency_key,
             "trace_id": self.trace_id,
             "payload_digest": self.payload_digest,
+            "blob_ref": self.blob_ref,
         }
 
 

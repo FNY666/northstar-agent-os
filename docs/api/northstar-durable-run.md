@@ -53,6 +53,10 @@ Persist one durable run's validated, append-only event history.
 
 - `path` (property)
   - Absolute path of the JSONL event history file.
+- `blob_store` (property)
+  - Content-addressed blob area next to the event history file.
+- `read_blob(event: EventContract)`
+  - Fetch an event's out-of-band payload, or ``None``.
 - `append_event(event: EventContract)`
 - `read_history(run_id: str)`
 - `derive_state(run_id: str)`
@@ -229,3 +233,32 @@ Per-tool-effect started/completed/failed ledger backed by the EventStore.
   - Return ``(found, result)`` for a completed tool call's cached result.
 - `run_tool(*, step_id: str, tool_call_id: str, fn: Callable[[str], Any], now: int, idempotency_key: str | None=None, receiver: DedupReceiver | None=None)`
   - Execute one tool effect with ledger reconcile.
+### `blob_store`
+
+Source: `components/northstar-durable-run/blob_store.py`
+
+Content-addressed blob area for the durable-run event history.
+
+#### `BlobStore`
+
+A ``<events>.blobs/`` directory of sha256-named blobs.
+
+- `root` (property)
+  - Absolute path of the blob directory (may not exist yet).
+- `digest(data: bytes)`
+  - The content address for ``data``: ``sha256:<hex>``.
+- `put(data: bytes)`
+  - Store ``data`` and return its content address.
+- `get(ref: str)`
+  - Return the blob's bytes, or fail closed.
+- `exists(ref: str)`
+  - Whether a blob file exists for ``ref`` (no integrity check).
+### `event_migration`
+
+Source: `components/northstar-durable-run/event_migration.py`
+
+Schema migration for the durable-run event history.
+
+#### `migrate_event_dict(value: Any)`
+
+Migrate a stored event dict to the current event schema revision.

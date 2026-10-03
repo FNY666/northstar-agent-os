@@ -360,7 +360,7 @@ The runtime facts of one boundary, in a form an event can carry.
 
 #### `checkpoint_event(checkpoint: Any, *, task_id: str | None=None, thread_id: str | None=None, trace_id: str | None=None, occurred_at: int | None=None, sequence: int | None=None)`
 
-One ``northstar.durable-event.v1`` record for one runtime checkpoint.
+One ``northstar.durable-event.v2`` record for one runtime checkpoint.
 
 #### `verify_event_payload(event: Mapping[str, Any], payload: Mapping[str, Any])`
 
