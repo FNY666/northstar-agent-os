@@ -7005,6 +7005,187 @@ def _case_metrics_timelock_delayed_execution(h: BenchHarness) -> BenchExpectatio
     )
 
 
+def _case_metrics_tool_receipt(h: BenchHarness) -> BenchExpectation:
+    """Per-call tool receipts: ``tool:<args-sha256>:<result-sha256>``.
+
+    Absorbed from the ACI per-request signed-receipt convention (de-facto
+    ``model:sha256(req):sha256(resp)`` with an attested keyset): format
+    layer only — one tamper-evident receipt per call binding the exact
+    request bytes to the exact response bytes — ported to durable tool
+    calls, with the receipt linked to the approval that authorized the
+    call. No ACI conformance is claimed. The case executes one high-risk
+    call through the durable ``ActionGateway`` with an audit sink and
+    asserts: (1) exactly one ``tool.receipt`` audit record is emitted with
+    a well-formed receipt id; (2) the id recomputes from the observed
+    args/result with plain hashlib+JSON (third-party verifiable);
+    (3) ``verify_tool_receipt`` passes on the original values; (4) every
+    tamper probe — mutated args, mutated result, approval mismatch — is
+    detected.
+    """
+    import hashlib as _hashlib
+    import re as _re
+
+    root = Path(__file__).resolve().parents[2]
+    for component in ("northstar-durable-run", "northstar-run-contract", "northstar-host"):
+        directory = str(root / "components" / component)
+        if directory not in sys.path:
+            sys.path.append(directory)
+    from action_gateway import ActionGateway, ToolCall, ToolSpec, digest_arguments, sign_approval
+    from authorization import HostPolicy, authorize_run
+    from binding import sign_binding, verify_binding
+    from tool_receipt import verify_tool_receipt
+
+    def canonical_hex(value: object) -> str:
+        return _hashlib.sha256(
+            json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")
+        ).hexdigest()
+
+    auth_secret = b"bench-auth-secret-32-bytes-long!!"
+    binding_secret = b"bench-binding-secret-32-bytes!"
+    approval_secret = b"bench-approval-secret-32-byt"
+    run = {
+        "schema_version": "northstar.run.v1",
+        "run_id": "run-bench-receipt",
+        "actor_id": "actor-bench",
+        "workspace_id": "workspace-bench",
+        "task_kind": "implementation",
+        "prompt": "Bench the tool receipt.",
+        "timeout_ms": 10_000,
+        "requested_capabilities": ["workspace:write"],
+        "parent_run_id": None,
+    }
+    args = {"path": "receipt.txt", "content": "evidence\n"}
+    binding = {
+        "schema_version": run["schema_version"],
+        "run_id": run["run_id"],
+        "actor_id": run["actor_id"],
+        "workspace_id": run["workspace_id"],
+        "expires_at": 2_000,
+    }
+    verified = verify_binding(sign_binding(binding, binding_secret), binding_secret, now=1_000)
+    policy = HostPolicy.from_mapping("policy-1", {run["actor_id"]: ["workspace:write"]})
+    auth_grant = authorize_run(run, verified, policy, now=1_500, secret=auth_secret, grant_ttl_seconds=300)
+    call = ToolCall.from_dict(
+        {
+            "schema_version": "northstar.tool-call.v1",
+            "task_id": "task-bench",
+            "thread_id": "thread-bench",
+            "run_id": run["run_id"],
+            "step_id": "write",
+            "actor_id": run["actor_id"],
+            "workspace_id": run["workspace_id"],
+            "trace_id": "trace-bench",
+            "tool_name": "workspace.write_file",
+            "resource_id": run["workspace_id"],
+            "requested_scope": ["workspace:write"],
+            "arguments_digest": digest_arguments(args),
+            "idempotency_key": "call-bench-001",
+            "deadline_at": 1_900,
+        }
+    )
+    approval = {
+        "schema_version": "northstar.approval.v3",
+        "approval_id": "approval-bench-001",
+        "approver_id": "human-bench",
+        "task_id": call.task_id,
+        "thread_id": call.thread_id,
+        "run_id": run["run_id"],
+        "step_id": call.step_id,
+        "actor_id": run["actor_id"],
+        "tool_name": call.tool_name,
+        "resource_id": call.resource_id,
+        "arguments_digest": call.arguments_digest,
+        "idempotency_key": call.idempotency_key,
+        "decision": "approved",
+        "expires_at": 2_000,
+    }
+    approval_token = sign_approval(approval, approval_secret)
+
+    sink_records: list[dict] = []
+    gateway = ActionGateway(approval_secret=approval_secret, audit_sink=sink_records.append)
+    gateway.register(
+        ToolSpec(
+            name="workspace.write_file",
+            required_capability="workspace:write",
+            required_scope="workspace:write",
+            resource_kind="workspace",
+            risk_level="high",
+            executor=lambda arguments: {"status": "written", "path": arguments["path"]},
+        )
+    )
+    result = gateway.execute(
+        call,
+        args,
+        authorization_token=auth_grant,
+        authorization_secret=auth_secret,
+        now=1_500,
+        approval_token=approval_token,
+        current_policy_revision="policy-1",
+        run=run,
+    )
+
+    checks: list[tuple[str, bool]] = []
+    receipt = gateway.receipt_for("call-bench-001")
+    receipt_id_ok = (
+        receipt is not None
+        and isinstance(receipt.get("receipt_id"), str)
+        and _re.fullmatch(r"tool:[0-9a-f]{64}:[0-9a-f]{64}", receipt["receipt_id"]) is not None
+    )
+    checks.append(("well-formed receipt id", receipt_id_ok))
+    checks.append(
+        ("one tool.receipt audit record", len(sink_records) == 1 and sink_records[0].get("event") == "tool.receipt")
+    )
+    if receipt is not None:
+        expected_id = f"tool:{canonical_hex(args)}:{canonical_hex(result.output)}"
+        checks.append(("id recomputes from observed args/result", receipt["receipt_id"] == expected_id))
+        checks.append(("receipt links the approval", receipt.get("approval_id") == "approval-bench-001"))
+        try:
+            verify_ok = verify_tool_receipt(receipt, args, result.output, approval=approval)
+        except ValueError:
+            verify_ok = False
+        checks.append(("original values verify", bool(verify_ok)))
+        tamper_detected = 0
+        tamper_probes = 3
+        tampered_args = {"path": "receipt.txt", "content": "forged\n"}
+        tampered_result = {"status": "written", "path": "/etc/shadow"}
+        other_approval = dict(approval, approval_id="approval-bench-002")
+        for bad_args, bad_result, bad_approval in (
+            (tampered_args, result.output, approval),
+            (args, tampered_result, approval),
+            (args, result.output, other_approval),
+        ):
+            try:
+                verify_tool_receipt(receipt, bad_args, bad_result, approval=bad_approval)
+            except ValueError:
+                tamper_detected += 1
+        checks.append(("all tamper probes detected", tamper_detected == tamper_probes))
+    else:
+        tamper_detected, tamper_probes = 0, 3
+
+    ok = all(passed for _, passed in checks)
+    detail = "; ".join(f"{name}: {'ok' if passed else 'FAIL'}" for name, passed in checks)
+    ws = h.workspace()
+    # Wrap as a no-op runtime so the runner stays uniform.
+    runtime = h.runtime(workspace=ws, turns=[_text("engine-only")], config_kwargs={"max_turns": 1})
+    return BenchExpectation(
+        runtime=runtime,
+        workspace=ws,
+        expect_subtype="success",
+        notes=(
+            "durable gateway mints tool:<args-sha256>:<result-sha256> per call, "
+            "links the approval, emits tool.receipt to the audit sink; any hash "
+            "inconsistency is detected"
+        ),
+        engine_ok=ok,
+        metrics={
+            "receipts_emitted": len(sink_records),
+            "tamper_probes": tamper_probes,
+            "tamper_detected": tamper_detected,
+            "detail": detail,
+        },
+    )
+
+
 CASES: tuple[BenchCase, ...] = (
     BenchCase("denial.disallowed_beats_allow", "denial", "disallowed_tools beats allow + bypass", _case_disallowed_beats_allow),
     BenchCase("denial.plan_mode_blocks_write", "denial", "plan mode refuses Write", _case_plan_mode_blocks_write),
@@ -7048,6 +7229,7 @@ CASES: tuple[BenchCase, ...] = (
     BenchCase("metrics.least_privilege", "metrics", "least-privilege gate enforcement (OPUR-style)", _case_metrics_least_privilege),
     BenchCase("metrics.approval_percall_binding", "metrics", "per-call approval binding + structured denial", _case_metrics_approval_percall_binding),
     BenchCase("metrics.ask_timing", "metrics", "ASK-timing judgment (Ask-F1-style)", _case_metrics_ask_timing),
+    BenchCase("metrics.tool_receipt", "metrics", "per-call tool receipt (tool:<args>:<result>)", _case_metrics_tool_receipt),
     BenchCase("metrics.timelock_delayed_execution", "metrics", "timelock-delayed execution for the irreversible tier", _case_metrics_timelock_delayed_execution),
     BenchCase("metrics.pretrade_15c3_5", "metrics", "SEC 15c3-5 pre-trade risk semantics (price/size/rate/duplicates)", _case_metrics_pretrade_15c3_5),
     BenchCase("metrics.path_shim_detection", "metrics", "PATH-shim red-team: fabricated tool output is detected", _case_metrics_path_shim_detection),
@@ -7594,6 +7776,13 @@ def _print_report(report: BenchReport) -> None:
                 f"{sum(1 for v in timelock.get('outcomes', {}).values() if v)}/"
                 f"{timelock.get('n_scenarios', 0)} scenarios hold, "
                 f"{timelock.get('n_audit_events', 0)} audit events"
+            )
+        receipt = report.metrics.get("metrics.tool_receipt", {})
+        if receipt:
+            print(
+                f"  tool receipts: {receipt.get('receipts_emitted', 0)} emitted, "
+                f"{receipt.get('tamper_detected', 0)}/{receipt.get('tamper_probes', 0)} "
+                f"tamper probes detected"
             )
     if report.ok:
         print("result: PASS — gate decisions match the public scorecard")

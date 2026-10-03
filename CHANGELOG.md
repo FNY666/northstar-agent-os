@@ -1,3 +1,12 @@
+## Unreleased (seventy-seventh batch) — per-call tool receipts
+
+Absorbs the ACI per-request signed-receipt convention (format layer only):
+every successful `ActionGateway.execute` mints a tamper-evident receipt
+`tool:<args-sha256>:<result-sha256>` binding the exact arguments, the exact
+result, and the approval (if any) that authorized the call. `verify_tool_receipt`
+recomputes both digests independently; tampered parameters, results, or
+approval links are detected, never silently accepted.
+
 ## Unreleased (seventy-sixth batch) — HLC causal timestamps for audit events
 
 Absorbs the **Hybrid Logical Clock** (Kulkarni et al., "Logical Physical

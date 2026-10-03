@@ -36,6 +36,7 @@ py-modules = [
     "runner",
     "tool_ledger",
     "tool_allowlist",
+    "tool_receipt",
     "trace_metrics",
     "verifier",
 ]
