@@ -1,3 +1,36 @@
+## Unreleased (one-hundred-seventh batch) — scene-bound authorization receipts (AI-healthcare absorption)
+
+New module `scene_bound.py`: authority-signed, hash-chained
+`SceneBinding` receipts binding `(capability_id,
+model_version_digest, authorized (care_setting, demographic_stratum)
+pairs, performance-manifest digest)` — closed care-setting and
+demographic-stratum vocabularies, Ed25519 authority signatures, JCS
+digests. `check_scene_authorized()` fail-closes on undeclared scenes,
+out-of-scope pairs (pairs are exact — a covered setting plus a
+covered stratum is not enough), manifest mismatch, expired/tampered
+bindings, and declarations pinned to another binding; denials audit
+as `scene.out_of_scope_denied`. Any stratum missing from the
+performance manifest is NOT authorized — the FDA 2025-01
+demographic-reporting gap made fail-closed (issuance refuses it, and
+the gate re-checks as defense in depth). Scene declarations are
+themselves chained receipts, so silent mid-task scene shifts are
+detectable. `authorize_capture()` requires a fresh, subject-signed,
+purpose-bound, revocable recording-consent receipt BEFORE ambient
+capture (audio/video/screen) starts — the Sutter Health 2026-04
+class-action discipline, with the 105th batch's use-time consent
+semantics scoped to capture modalities. `bind_model_to_scene()` /
+`check_model_invocation()`: a model version invoked for an unbound
+scene classifies `unverifiable-process` (87th-batch binary tiers —
+no partial rung to launder out-of-scope invocation through).
+Absorbs the 2026 AI-healthcare thread: aneurysm AI 0.846 vs 0.718
+sensitivity but extremely scene-dependent (JACR prospective study),
+Sutter ambient-recording class action, FDA demographic gap. Honest
+boundary: verifies declared-scene consistency against the binding;
+physical scene truth needs sensor attestation (future work). New
+bench track `metrics.scene_bound` (12 deterministic scenarios, 3
+allow / 9 deny, zero mismatches); rides the sibling-owned bench v24
+bump.
+
 ## Unreleased (one-hundred-tenth batch) — deployment registration gate (AI-govtech absorption)
 
 New module `deployment_registry.py`: no registration receipt →
