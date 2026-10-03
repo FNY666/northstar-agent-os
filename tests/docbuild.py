@@ -84,6 +84,7 @@ MANIFEST: dict[str, tuple[str, ...]] = {
         "cli",
         "command_hooks",
         "compaction",
+        "compute_budget",
         "consent_receipts",
         "contract_bridge",
         "doctor",

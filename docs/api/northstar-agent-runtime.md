@@ -521,6 +521,65 @@ Summarise a safe prefix of ``transcript``; keep the tail verbatim.
 
 #### `summary_block(outcome: CompactionOutcome)`
 
+### `compute_budget`
+
+Source: `components/northstar-agent-runtime/compute_budget.py`
+
+Compute-budget receipts (one-hundred-ninth batch).
+
+#### `ComputeBudgetError`
+
+A malformed budget, registry, or spend request — a programming error, not a verdict. Verification *failures* (unknown budget, overspend, tier mismatch, weak evidence, device-class breach) return a verdict with ``allowed=False`` instead; malformed input raises here, fail loud, never guess.
+
+#### `AuthorityRegistry`
+
+Maps ``authority_id`` to an Ed25519 public key (32 bytes).
+
+- `public_key_for(authority_id: str)`
+#### `ComputeBudget`
+
+An authority-signed compute budget.
+
+- `as_dict()`
+#### `issue_budget(registry: AuthorityRegistry, *, budget_id: str, owner: str, units_total: int, unit_kind: str, hardware_tier: str, device_class: str, issued_by: str, issued_at: int, expires_at: int, signature: bytes, prev_hash: str='')`
+
+Mint a compute budget. The signature must come from a registered human authority over the budget digest; anything else fails loud.
+
+#### `SpendReceipt`
+
+One authorized spend, hash-chained to its predecessor.
+
+- `receipt_hash()`
+- `as_dict()`
+#### `SpendVerdict`
+
+The verdict of :meth:`BudgetLedger.spend`.
+
+#### `BudgetLedger`
+
+Owns budgets and their spend chains; the spend gate lives here.
+
+- `issue(budget: ComputeBudget)`
+  - Register an authority-signed budget. Duplicate ids refuse.
+- `budget(budget_id: str)`
+- `remaining(budget_id: str)`
+  - Current balance. Unknown budgets raise (programmer error — the *gate* returns a verdict instead).
+- `check_hardware_tier(budget_id: str, claimed_tier: str, evidence_kind: str)`
+  - Probe whether spend at ``claimed_tier`` is legitimate.
+- `spend(*, budget_id: str, units: int, purpose: str, spend_tier: str, device_class: str, evidence_kind: str, created_unix: int=0)`
+  - Authorize one spend, fail-closed. Gate order is fixed:
+- `verify_spend_chain(budget_id: str)`
+  - Public probe: is this budget's spend chain intact?
+- `roi_ledger()`
+  - Deterministic aggregation of the spend chain.
+#### `authority_keypair(seed: bytes)`
+
+Derive ``(public_key, seed)`` from a 32-byte seed.
+
+#### `sign_budget_digest(seed: bytes, digest: str)`
+
+Sign a budget digest with an authority seed (test/bench use).
+
 ### `consent_receipts`
 
 Source: `components/northstar-agent-runtime/consent_receipts.py`
@@ -1087,6 +1146,89 @@ Vendor-chain provenance receipts (one-hundred-third batch).
 #### `run_stream_guard()`
 
 Streaming output guard (one-hundred-sixth batch).
+
+#### `run_compute_budget()`
+
+Compute-budget receipts (one-hundred-ninth batch).
+
+#### `run_herd_gate()`
+
+Herd-correlation gate (one-hundred-eighth batch).
+
+#### `run_scene_bound()`
+
+Scene-bound authorization receipts (one-hundred-seventh batch).
+
+#### `run_adversarial_scenarios()`
+
+Adversarial bench scenarios: multi-agent failures, no-adversary failures, malicious-but-signed.
+
+#### `BenchHarness`
+
+Temp workspaces + scripted providers for one suite run.
+
+- `close()`
+- `workspace(files: dict[str, str] | None=None)`
+- `provider(turns: Sequence[Any], **kwargs: Any)`
+- `runtime(*, workspace: Path, turns: Sequence[Any], config_kwargs: dict[str, Any] | None=None, tool_limits: ToolLimits | None=None, can_use_tool: Any=None, hooks: HookRegistry | None=None, sessions: Any=None)`
+#### `run_offline_bundle()`
+
+Signed offline policy bundles (ninety-seventh batch).
+
+#### `run_twin_sync()`
+
+Twin-sync receipts: freshness-gated actuation (ninety-sixth batch).
+
+#### `run_pledge_semantics()`
+
+Pledge-style self-restriction semantics, OpenBSD pledge(2) model.
+
+#### `run_attenuation()`
+
+Biscuit-style attenuating delegation credentials, offline verification.
+
+#### `run_path_shim_detection()`
+
+PATH-shim red-team: trustmebro-style fabricated tool output, detected.
+
+#### `run_pretrade_15c3_5()`
+
+SEC 15c3-5-style pre-trade risk semantics on the permission gate.
+
+#### `run_timelock()`
+
+Timelock-delayed execution, OpenZeppelin TimelockController semantics.
+
+#### `run_plugin_claim_evidence()`
+
+Plugin claim-evidence tiering, ERC-8004 validation semantics.
+
+#### `run_merkle_proofs()`
+
+RFC 9162 Merkle inclusion/consistency proofs over the audit chain.
+
+#### `PostureScenario`
+
+One control-isolating red-team scenario (original synthetic situation).
+
+- `to_metric_probe()`
+#### `RedTeamPredicate`
+
+A deterministic state predicate: a pure function over the final trace, independently recomputable by anyone (no judge, no model).
+
+#### `run_posture_decomposition()`
+
+Three-posture control decomposition, FinAgent Red-Team methodology.
+
+#### `list_cases()`
+
+#### `run_suite(*, only: Iterable[str] | None=None, tracks: Iterable[str] | None=None)`
+
+Execute the public suite. Always cleans temp workspaces.
+
+#### `add_bench_arguments(parser: argparse.ArgumentParser)`
+
+#### `run_bench_command(args: argparse.Namespace)`
 
 #### `run_herd_gate()`
 
