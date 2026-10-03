@@ -32,6 +32,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Iterable, Mapping, Sequence
 
+from plugin_trust import trust_tier
+
 import plugin_manifest as manifest_module
 from plugin_manifest import (
     HOST_PROFILES,
@@ -195,6 +197,13 @@ class InstalledPlugin:
     #: the facts are - the loader is the only thing that knows whether a lock was required
     #: at all, and "unpinned is fine" is true in exactly one of those two configurations.
     loadable: bool = False
+    #: The trust tier (:mod:`plugin_trust`): which of the bundle's trust-implying claims
+    #: carry verifiable evidence. Computed here because the loader is where pinning and
+    #: loadability are known; a tier without those two facts would be a guess.
+    trust_tier: str = "refused"
+    #: Coverable claims with no evidence item. Empty means fully evidenced (or refused,
+    #: where the tier says why instead).
+    evidence_gaps: tuple[str, ...] = ()
 
     @property
     def usable(self) -> bool:
@@ -211,6 +220,8 @@ class InstalledPlugin:
             "version": self.manifest.version,
             "publisher": self.manifest.publisher,
             "status": self.status,
+            "trust_tier": self.trust_tier,
+            "evidence_gaps": list(self.evidence_gaps),
             "content_digest": self.manifest.content_digest,
             "pinned_digest": self.pinned_digest,
             "components": manifest_module.describe_components(self.manifest),
@@ -292,6 +303,14 @@ def load_installed(
         if host_problem:
             problems.append(f"{plugin.name}: will not load here - {host_problem}")
             status, detail = "host-mismatch", host_problem
+        # The trust tier is decided here, where pinning and loadability are known: a
+        # bundle that passed every decisive check but declares trust-implying claims
+        # without evidence is *downgraded*, not refused - ERC-8004's registries are
+        # likewise separate from execution, and a declaration without proof is still a
+        # declaration. The cap is what matters: no evidence, no "evidenced" tier.
+        loadable = status == "pinned" or (status == "unpinned" and not require_lock)
+        covered = frozenset(item.claim for item in plugin.evidence)
+        tier, gaps = trust_tier(loadable=loadable, pinned=status == "pinned", covered_claims=covered)
         found.append(
             InstalledPlugin(
                 name=plugin.name,
@@ -301,7 +320,9 @@ def load_installed(
                 pinned_digest=pinned,
                 status=status,
                 detail=detail,
-                loadable=status == "pinned" or (status == "unpinned" and not require_lock),
+                loadable=loadable,
+                trust_tier=tier,
+                evidence_gaps=gaps,
             )
         )
     declared = {plugin.name for plugin in found}
@@ -497,6 +518,11 @@ def load_contributions(
                 "version": plugin.manifest.version,
                 "publisher": plugin.manifest.publisher,
                 "content_digest": plugin.manifest.content_digest,
+                # The trust basis travels with the audit record: a later reader can see
+                # not just *what* loaded but *why it was trusted* - reviewed digest,
+                # evidence coverage, or nothing at all.
+                "trust_tier": plugin.trust_tier,
+                "evidence_gaps": list(plugin.evidence_gaps),
                 "components": {
                     "skills": len(plugin.manifest.skill_dirs),
                     "agents": len(plugin.manifest.agent_dirs),
@@ -1064,6 +1090,11 @@ def _plugin_show(args: argparse.Namespace, workspace: Path) -> int:
         print(f"    case collision: {collision}")
     if plugin.status != "pinned":
         print(f"  status: {plugin.status}" + (f" - {plugin.detail}" if plugin.detail else ""))
+    print(f"  trust tier: {plugin.trust_tier}", end="")
+    if plugin.evidence_gaps:
+        print(f" (no evidence for: {', '.join(plugin.evidence_gaps)})")
+    else:
+        print(" (every trust-implying claim carries evidence)" if plugin.trust_tier == "evidenced" else "")
     return 0
 
 

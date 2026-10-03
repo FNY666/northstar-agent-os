@@ -602,6 +602,10 @@ SEC 15c3-5-style pre-trade risk semantics on the permission gate.
 
 Timelock-delayed execution, OpenZeppelin TimelockController semantics.
 
+#### `run_plugin_claim_evidence()`
+
+Plugin claim-evidence tiering, ERC-8004 validation semantics.
+
 #### `list_cases()`
 
 #### `run_suite(*, only: Iterable[str] | None=None, tracks: Iterable[str] | None=None)`
@@ -1280,6 +1284,11 @@ One declared lifecycle hook, in exactly the shape ``[[hooks]]`` uses.
 
 - `as_hook_table(*, script_path: str='')`
   - The raw ``[[hooks]]`` entry, for :func:`command_hooks.parse_hooks` to police.
+#### `EvidenceItem`
+
+One claim-to-evidence binding, in exactly the shape ``[[evidence]]`` uses.
+
+- `as_dict()`
 #### `PluginManifest`
 
 The parsed, validated claims of one bundle. Every field here was checked to load.

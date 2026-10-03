@@ -1,3 +1,12 @@
+## Unreleased (seventy-eighth batch) — plugin claim-evidence trust tiering
+
+Absorbs ERC-8004 validation semantics (EIP draft, chain-offline port):
+`trust_tier` for installable plugins — `evidenced` / `reviewed` / `declared` /
+`refused`. Trust-implying claims (publisher, platform compatibility, policy)
+without evidence are downgraded, never refused; nothing reaches `evidenced`
+without evidence. Malformed evidence (bad digest, unknown kind/claim/key) is
+rejected at parse time — a broken binding is not weak evidence.
+
 ## Unreleased (seventy-seventh batch) — per-call tool receipts
 
 Absorbs the ACI per-request signed-receipt convention (format layer only):
