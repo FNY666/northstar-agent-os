@@ -1088,6 +1088,10 @@ Vendor-chain provenance receipts (one-hundred-third batch).
 
 Streaming output guard (one-hundred-sixth batch).
 
+#### `run_herd_gate()`
+
+Herd-correlation gate (one-hundred-eighth batch).
+
 #### `run_adversarial_scenarios()`
 
 Adversarial bench scenarios: multi-agent failures, no-adversary failures, malicious-but-signed.
@@ -3250,6 +3254,70 @@ Replay a receipt chain and check for bypass, gap, or tampering.
 #### `classify_stream(result: ScreenResult)`
 
 Binary stream tier: verified-stream vs unverifiable-stream.
+
+### `herd_gate`
+
+Source: `components/northstar-agent-runtime/herd_gate.py`
+
+Herd-correlation gate (one-hundred-eighth batch).
+
+#### `HerdGateError`
+
+A malformed declaration, registry, or gate input — a programming error, not a verdict. Verification *failures* (herd correlation, exposure cap, bad authority) return a verdict with ``allowed=False`` instead; malformed inputs raise here, fail loud, never guess.
+
+#### `jaccard_overlap(a: frozenset[str], b: frozenset[str])`
+
+Jaccard similarity of two token sets. Deterministic, pure.
+
+#### `SignalDeclaration`
+
+A strategy's declared signal sources, the receipt it is judged by.
+
+- `signal_tokens()`
+- `declaration_digest()`
+#### `build_declaration(*, strategy_id: str, signal_sources: list[str] | None=None, feature_families: list[str] | None=None, data_windows: list[str] | None=None, training_corpus_manifest_digest: str, registered_by: str, declared_unix: int=0, notional_cents: int)`
+
+Construct a :class:`SignalDeclaration`, validating inputs.
+
+#### `RegistryRecord`
+
+One append-only registry entry binding a declaration digest.
+
+- `record_digest()`
+#### `StrategyRegistry`
+
+The live strategy registry: hash-chained and authority-bound.
+
+- `register(declaration: SignalDeclaration, *, recorded_unix: int=0)`
+- `deregister(strategy_id: str, authority: str)`
+  - Remove a strategy. Only the registering authority may do it.
+- `declaration(strategy_id: str)`
+- `live_strategies()`
+- `verify_chain()`
+  - Recompute every record digest and prev_hash linkage.
+#### `CorrelationVerdict`
+
+Result of :func:`check_herd_correlation`.
+
+#### `check_herd_correlation(new_declaration: SignalDeclaration, registered: list[SignalDeclaration])`
+
+Deny a strategy that is a herd clone of a registered one.
+
+#### `correlated_exposure_cents(new_declaration: SignalDeclaration, registered: list[SignalDeclaration])`
+
+Total notional of registered strategies sharing *any* signal token with the newcomer, plus the newcomer's own notional.
+
+#### `TradeVerdict`
+
+The verdict of :func:`authorize_trading`.
+
+#### `herd_audit_event(*, event: str, strategy_id: str, allowed: bool, reason: str, detail: Mapping[str, Any] | None=None, created_unix: int=0)`
+
+Audit event shaped to feed ``audit_chain.chain_record``.
+
+#### `authorize_trading(*, strategy_id: str, registry: StrategyRegistry, exposure_cap_cents: int, created_unix: int=0)`
+
+Gate an autonomous trading strategy's session, fail-closed.
 
 ### `tracing`
 

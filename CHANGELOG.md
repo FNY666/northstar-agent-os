@@ -1,3 +1,51 @@
+## Unreleased (one-hundred-tenth batch) — deployment registration gate (AI-govtech absorption)
+
+New module `deployment_registry.py`: no registration receipt →
+no deployment (fail-closed; deliberately NO "deploy now, register
+later" path). `RegistrationReceipt` hash-chains
+(system_id | model_digest | risk_class | fria_digest |
+data_record_digest | retention_floor_days | registered_by |
+expires_at), authority-signed (Ed25519); closed risk vocabulary
+minimal/limited/high/unacceptable — `unacceptable` is refused at
+registration time. `gate_deployment()` enforces: chain integrity,
+authority signature, risk class allows the intended use, FRIA +
+explanation fields for high-risk, not expired, log retention at or
+above the floor. `detect_shadow()` classifies runtime invocations
+with unknown system_id or digest mismatch as
+`unverifiable-deployment` (98th-batch tier) + audit
+`deployment.shadow_detected`. Retention-floor changes are themselves
+receipted. `explain_decision()` serves citizen explanation fields
+(decision, grounds, data used, appeal path) for high-risk systems.
+Absorbs the 2026 AI-govtech thread: EU AI Act Art. 49 (register
+high-risk AI before deployment), Art. 26 (6-month logs), Art. 27
+(FRIA); UK DWP's 6 unregistered welfare AI prototypes; Australia's
+unauthorized Medicare agent access. Honest boundary: registry
+integrity is cryptographic; the host must actually route invocations
+through the gate. New bench track `metrics.deployment_registry`
+(12 deterministic scenarios, 3 allow / 9 deny, zero mismatches);
+rides the one-hundred-eighth batch's bench v23 → v24 bump.
+
+## Unreleased (one-hundred-eighth batch) — herd-correlation gate (AI-finance absorption)
+
+New module `herd_gate.py`: every autonomous trading strategy must
+declare its signal sources — dataset/model digests, feature families
+(closed vocabulary), data windows, training-corpus manifest digest —
+in a hash-chained, authority-bound `StrategyRegistry`. A new strategy
+whose Jaccard signal overlap with any registered strategy exceeds
+`HERD_CORRELATION_MAX` (0.7) denies with `herd:correlated_strategy`
+(the N+1st copy of the same trade does not trade). Even uncorrelated
+strategies share a correlated-exposure cap: total notional across
+strategies sharing any signal token must stay under the cap, or the
+marginal strategy denies with `herd:exposure_capped`. Registration
+is hash-chained; deregistration requires the registering authority —
+no silent mid-session strategy swaps. Absorbs the 2026 AI-finance
+thread: the July selloff was synthetic correlation, not model
+failure (dozens of AIs, same trade, overlapping data); survivors had
+differentiated data, not smarter models. Honest boundary: checks
+*declared* sources — cannot detect undeclared copying. New bench
+track `metrics.herd_gate` (12 deterministic scenarios, 4 allow / 8
+deny, zero mismatches); bench v23 → v24.
+
 ## Unreleased (one-hundred-fifth batch) — revocable consent receipts (BCI absorption)
 
 New module `consent_receipts.py`: hash-chained, subject-signed consent

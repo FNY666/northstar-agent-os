@@ -115,7 +115,7 @@ from tools import ToolLimits, ToolSandbox, build_default_registry
 
 #: Semantic version of the public case set. Bump when a case is added, removed,
 #: or its expected verdict changes — consumers pin against this string.
-BENCH_VERSION = "northstar.governance.bench.v23"
+BENCH_VERSION = "northstar.governance.bench.v24"
 
 USAGE_ERROR = 64
 
@@ -6374,6 +6374,260 @@ def run_stream_guard() -> dict[str, Any]:
     }
 
 
+def run_herd_gate() -> dict[str, Any]:
+    """Herd-correlation gate (one-hundred-eighth batch).
+
+    Absorbs the 2026 AI-finance thread: the July selloff was synthetic
+    correlation, not model failure — dozens of AIs made the same trade
+    on overlapping data. This runner exercises ``herd_gate`` over 12
+    deterministic scenarios: undeclared strategies cannot trade,
+    herd clones deny on Jaccard signal overlap above
+    ``HERD_CORRELATION_MAX``, book-concentrating marginal strategies
+    deny on the correlated-exposure cap, independent strategies
+    allow, registry deregistration needs the registering authority,
+    and the registry hash chain verifies. Ground truth is closed:
+    4 allow / 8 deny.
+    """
+    from herd_gate import (
+        DENY_CORRELATED_STRATEGY,
+        DENY_EXPOSURE_CAPPED,
+        DENY_NO_DECLARATION,
+        HERD_EXPOSURE_CAPPED_EVENT,
+        HERD_STRATEGY_DENIED_EVENT,
+        StrategyRegistry,
+        build_declaration,
+        authorize_trading,
+    )
+
+    A = "a" * 64
+    B = "b" * 64
+    C = "c" * 64
+    D = "d" * 64
+    E = "e" * 64
+    F = "f" * 64
+
+    def _decl(sid, sources, features, windows, corpus, by="desk-1",
+              notional=100_00):
+        return build_declaration(
+            strategy_id=sid,
+            signal_sources=list(sources),
+            feature_families=list(features),
+            data_windows=list(windows),
+            training_corpus_manifest_digest=corpus,
+            registered_by=by,
+            declared_unix=1791057000,
+            notional_cents=notional,
+        )
+
+    def _base_registry():
+        reg = StrategyRegistry()
+        reg.register(_decl("incumbent", [A, B],
+                           ["price-momentum", "order-book"],
+                           ["2026-01..2026-06"], C, notional=1_000_00))
+        return reg
+
+    scenarios: list[tuple[str, str, Any]] = []
+
+    def _scenario(sid: str, expected: str, thunk: Any) -> None:
+        scenarios.append((sid, expected, thunk))
+
+    # 1: clean independent strategy allows.
+    def _clean() -> dict[str, Any]:
+        reg = _base_registry()
+        reg.register(_decl("clean", [E], ["on-chain-flow"],
+                           ["2026-07..2026-09"], F, by="desk-2",
+                           notional=500_00))
+        v = authorize_trading(strategy_id="clean", registry=reg,
+                              exposure_cap_cents=10_000_00)
+        return {"verdict": "allow" if v.allowed else "deny",
+                "reason": v.reason, "event": v.audit_event}
+
+    _scenario("allow_independent_strategy", "allow", _clean)
+
+    # 2: undeclared strategy cannot trade.
+    def _ghost() -> dict[str, Any]:
+        v = authorize_trading(strategy_id="ghost", registry=_base_registry(),
+                              exposure_cap_cents=10_000_00)
+        ok = (not v.allowed and v.reason == DENY_NO_DECLARATION
+              and v.audit_event["event"] == HERD_STRATEGY_DENIED_EVENT)
+        return {"verdict": "deny" if ok else "allow", "reason": v.reason,
+                "event": v.audit_event}
+
+    _scenario("deny_undeclared_strategy", "deny", _ghost)
+
+    # 3: exact herd clone denies.
+    def _clone() -> dict[str, Any]:
+        reg = _base_registry()
+        reg.register(_decl("clone", [A, B],
+                           ["price-momentum", "order-book"],
+                           ["2026-01..2026-06"], C, by="desk-2",
+                           notional=500_00))
+        v = authorize_trading(strategy_id="clone", registry=reg,
+                              exposure_cap_cents=10_000_00)
+        ok = (not v.allowed and v.reason == DENY_CORRELATED_STRATEGY
+              and v.audit_event["detail"]["most_similar_id"] == "incumbent")
+        return {"verdict": "deny" if ok else "allow", "reason": v.reason,
+                "event": v.audit_event}
+
+    _scenario("deny_herd_clone", "deny", _clone)
+
+    # 4: near-clone (same corpus + most features) denies.
+    def _near() -> dict[str, Any]:
+        reg = _base_registry()
+        reg.register(_decl("near", [A, B],
+                           ["price-momentum", "order-book"],
+                           ["2026-01..2026-06"], C, by="desk-2",
+                           notional=500_00))
+        v = authorize_trading(strategy_id="near", registry=reg,
+                              exposure_cap_cents=10_000_00)
+        ok = not v.allowed and v.reason == DENY_CORRELATED_STRATEGY
+        return {"verdict": "deny" if ok else "allow", "reason": v.reason,
+                "event": v.audit_event}
+
+    _scenario("deny_near_clone", "deny", _near)
+
+    # 5: one shared feature family stays under the limit -> allows.
+    def _cousin() -> dict[str, Any]:
+        reg = _base_registry()
+        reg.register(_decl("cousin", [E], ["price-momentum"],
+                           ["2026-07..2026-09"], F, by="desk-2",
+                           notional=500_00))
+        v = authorize_trading(strategy_id="cousin", registry=reg,
+                              exposure_cap_cents=10_000_00)
+        return {"verdict": "allow" if v.allowed else "deny",
+                "reason": v.reason, "event": v.audit_event}
+
+    _scenario("allow_distant_cousin", "allow", _cousin)
+
+    # 6: exposure cap trips on a book-concentrating marginal strategy.
+    def _cap() -> dict[str, Any]:
+        reg = _base_registry()
+        reg.register(_decl("marginal", [A], ["news-sentiment"],
+                           ["2026-07..2026-09"], D, by="desk-2",
+                           notional=500_00))
+        v = authorize_trading(strategy_id="marginal", registry=reg,
+                              exposure_cap_cents=1_200_00)
+        ok = (not v.allowed and v.reason == DENY_EXPOSURE_CAPPED
+              and v.audit_event["event"] == HERD_EXPOSURE_CAPPED_EVENT)
+        return {"verdict": "deny" if ok else "allow", "reason": v.reason,
+                "event": v.audit_event}
+
+    _scenario("deny_exposure_cap", "deny", _cap)
+
+    # 7: exposure under the cap allows.
+    def _cap_ok() -> dict[str, Any]:
+        reg = _base_registry()
+        reg.register(_decl("marginal", [A], ["news-sentiment"],
+                           ["2026-07..2026-09"], D, by="desk-2",
+                           notional=500_00))
+        v = authorize_trading(strategy_id="marginal", registry=reg,
+                              exposure_cap_cents=10_000_00)
+        return {"verdict": "allow" if v.allowed else "deny",
+                "reason": v.reason, "event": v.audit_event}
+
+    _scenario("allow_within_exposure_cap", "allow", _cap_ok)
+
+    # 8: deregistered strategy cannot trade.
+    def _dereg() -> dict[str, Any]:
+        reg = _base_registry()
+        reg.register(_decl("temp", [E], ["on-chain-flow"],
+                           ["2026-07..2026-09"], F, by="desk-2",
+                           notional=100_00))
+        reg.deregister("temp", "desk-2")
+        v = authorize_trading(strategy_id="temp", registry=reg,
+                              exposure_cap_cents=10_000_00)
+        ok = not v.allowed and v.reason == DENY_NO_DECLARATION
+        return {"verdict": "deny" if ok else "allow", "reason": v.reason,
+                "event": v.audit_event}
+
+    _scenario("deny_deregistered_strategy", "deny", _dereg)
+
+    # 9: deregistration by the wrong authority raises (fail-closed probe).
+    def _wrong_auth() -> dict[str, Any]:
+        reg = _base_registry()
+        reg.register(_decl("temp", [E], ["on-chain-flow"],
+                           ["2026-07..2026-09"], F, by="desk-2",
+                           notional=100_00))
+        try:
+            reg.deregister("temp", "desk-9")
+        except Exception:
+            return {"verdict": "deny", "reason": "wrong_authority_rejected"}
+        return {"verdict": "allow", "reason": "wrong_authority_accepted"}
+
+    _scenario("deny_wrong_authority_deregistration", "deny", _wrong_auth)
+
+    # 10: duplicate registration raises (fail-closed probe).
+    def _dup() -> dict[str, Any]:
+        reg = _base_registry()
+        try:
+            reg.register(_decl("incumbent", [E], ["on-chain-flow"],
+                               ["2026-07..2026-09"], F, by="desk-2",
+                               notional=100_00))
+        except Exception:
+            return {"verdict": "deny", "reason": "duplicate_rejected"}
+        return {"verdict": "allow", "reason": "duplicate_accepted"}
+
+    _scenario("deny_duplicate_registration", "deny", _dup)
+
+    # 11: second herd member is judged against the whole herd.
+    def _second_clone() -> dict[str, Any]:
+        reg = _base_registry()
+        reg.register(_decl("clean", [E], ["on-chain-flow"],
+                           ["2026-07..2026-09"], F, by="desk-2",
+                           notional=100_00))
+        reg.register(_decl("clone2", [A, B],
+                           ["price-momentum", "order-book"],
+                           ["2026-01..2026-06"], C, by="desk-3",
+                           notional=100_00))
+        v = authorize_trading(strategy_id="clone2", registry=reg,
+                              exposure_cap_cents=10_000_00)
+        ok = not v.allowed and v.reason == DENY_CORRELATED_STRATEGY
+        return {"verdict": "deny" if ok else "allow", "reason": v.reason,
+                "event": v.audit_event}
+
+    _scenario("deny_clone_against_herd", "deny", _second_clone)
+
+    # 12: registry chain verifies across register/deregister.
+    def _chain() -> dict[str, Any]:
+        reg = _base_registry()
+        reg.register(_decl("temp", [E], ["on-chain-flow"],
+                           ["2026-07..2026-09"], F, by="desk-2",
+                           notional=100_00))
+        reg.deregister("temp", "desk-2")
+        ok = reg.verify_chain()
+        return {"verdict": "allow" if ok else "deny",
+                "reason": "chain_ok" if ok else "chain_broken"}
+
+    _scenario("allow_registry_chain_verifies", "allow", _chain)
+
+    mismatches: list[str] = []
+    allowed_ids: list[str] = []
+    denial_reasons: dict[str, str] = {}
+    for sid, expected, thunk in scenarios:
+        try:
+            outcome = thunk()
+        except Exception as error:  # noqa: BLE001 — fail-closed probe
+            outcome = {"verdict": "deny", "reason": f"raised: {error}"}
+        verdict = outcome.get("verdict")
+        if verdict != expected:
+            mismatches.append(f"{sid}: expected {expected}, got {verdict}")
+        if verdict == "allow":
+            allowed_ids.append(sid)
+        else:
+            denial_reasons[sid] = outcome.get("reason", "")
+            ev = outcome.get("event") or {}
+            if ev and ev.get("event") not in (HERD_STRATEGY_DENIED_EVENT,
+                                              HERD_EXPOSURE_CAPPED_EVENT):
+                mismatches.append(f"{sid}: denial must emit the herd event")
+
+    return {
+        "n_scenarios": len(scenarios),
+        "mismatches": mismatches,
+        "allowed_ids": allowed_ids,
+        "denial_reasons": denial_reasons,
+    }
+
+
 def run_adversarial_scenarios() -> dict[str, Any]:
     """Adversarial bench scenarios: multi-agent failures, no-adversary failures, malicious-but-signed.
 
@@ -11902,6 +12156,57 @@ def _case_metrics_stream_guard(h: BenchHarness) -> BenchExpectation:
     )
 
 
+def _case_metrics_herd_gate(h: BenchHarness) -> BenchExpectation:
+    """Herd-correlation gate (one-hundred-eighth batch).
+
+    Absorbs the 2026 AI-finance thread: the July selloff was synthetic
+    correlation, not model failure — dozens of AIs made the same trade
+    on overlapping data. 12 deterministic scenarios: undeclared
+    strategies cannot trade, herd clones deny on Jaccard signal
+    overlap above HERD_CORRELATION_MAX, book-concentrating marginal
+    strategies deny on the correlated-exposure cap, independent
+    strategies allow, deregistration needs the registering authority,
+    and the registry hash chain verifies.
+    """
+    metrics = run_herd_gate()
+
+    def check(exp: BenchExpectation, report: Any) -> tuple[bool, str]:
+        if metrics["n_scenarios"] != 12:
+            return (False, f"expected 12 herd-gate scenarios, saw {metrics['n_scenarios']}")
+        if metrics["mismatches"]:
+            return (False, f"scenario(s) disagree with ground truth: {metrics['mismatches']}")
+        if metrics["allowed_ids"] != [
+            "allow_independent_strategy",
+            "allow_distant_cousin",
+            "allow_within_exposure_cap",
+            "allow_registry_chain_verifies",
+        ]:
+            return (False, f"allowed set drifted: {metrics['allowed_ids']}")
+        reasons = metrics["denial_reasons"]
+        if reasons.get("deny_herd_clone") != "herd:correlated_strategy":
+            return (False, "herd clone must deny on herd:correlated_strategy")
+        if reasons.get("deny_undeclared_strategy") != "herd:no_declaration":
+            return (False, "undeclared strategy must deny on herd:no_declaration")
+        if reasons.get("deny_exposure_cap") != "herd:exposure_capped":
+            return (False, "over-cap marginal strategy must deny on herd:exposure_capped")
+        return (True, "12/12 herd-gate scenarios hold: declaration/correlation/cap/registry")
+
+    return BenchExpectation(
+        runtime=_noop_runtime(h),
+        expect_subtype="success",
+        post_check=check,
+        metrics=metrics,
+        notes=(
+            "2026 AI-finance thread: the July selloff was synthetic "
+            "correlation — dozens of AIs made the same trade on "
+            "overlapping data, and the survivors had differentiated "
+            "data, not smarter models. Declared signal sources, "
+            "Jaccard herd-overlap denial, and a correlated-exposure "
+            "cap so no marginal strategy concentrates the book."
+        ),
+    )
+
+
 def _case_metrics_harness_binding(h: BenchHarness) -> BenchExpectation:
     """Harness integrity binding (ninetieth batch).
 
@@ -13184,6 +13489,7 @@ CASES: tuple[BenchCase, ...] = (
     BenchCase("metrics.safety_envelope", "metrics", "hardware safety-limit binding: authority-signed envelope, no self-issuance/widening (AI-energy absorption)", _case_metrics_safety_envelope),
     BenchCase("metrics.vendor_chain", "metrics", "vendor-chain provenance receipts: hash-chained vendor hops, transitive taint, envelope-gated autonomous action", _case_metrics_vendor_chain),
     BenchCase("metrics.stream_guard", "metrics", "streaming output guard: per-chunk screening, liveness-pinned guards, anti-smuggling overlap, receipt-chained decisions", _case_metrics_stream_guard),
+    BenchCase("metrics.herd_gate", "metrics", "herd-correlation gate: declared signal sources, Jaccard herd-overlap denial, correlated-exposure cap (AI-finance absorption)", _case_metrics_herd_gate),
     BenchCase("metrics.harness_binding", "metrics", "harness integrity binding: SHA-256 harness hash in audit, quad-only scores", _case_metrics_harness_binding),
     BenchCase("metrics.drift_detection", "metrics", "Livenerf-style drift probe: bootstrap CI + paired permutation test", _case_metrics_drift_detection),
 )
@@ -13817,6 +14123,7 @@ __all__ = [
     "run_consent_receipts",
     "run_safety_envelope",
     "run_stream_guard",
+    "run_herd_gate",
     "run_vendor_chain",
     "run_owasp_asi_coverage",
     "run_policy_axis",
