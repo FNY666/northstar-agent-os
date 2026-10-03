@@ -76,6 +76,7 @@ MANIFEST: dict[str, tuple[str, ...]] = {
         "embodied",
         "greenwash",
         "orbital_agents",
+        "permit_agents",
         "water_agents",
         "grid_agents",
         "licensing",
