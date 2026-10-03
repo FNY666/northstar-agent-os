@@ -31,6 +31,13 @@ record") on top of the chain, not instead of it.
 (sort_keys, no whitespace, UTF-8): a third party that implements the proof
 spec reproduces the exact bytes hashed here.
 
+Chain versions: ``northstar-audit-chain/1`` (legacy canonicalization) and
+``northstar-audit-chain/2`` (JCS per RFC 8785, aligned with
+draft-sharif-agent-audit-trail §6.1). The version is stamped on the genesis
+anchor and on every v2 record's hashed body; verifiers dispatch on it, so
+v1 feeds verify forever. See docs/concepts/ietf-audit-trail-alignment.md
+for the item-by-item comparison with the IETF draft.
+
 Everything here is offline and deterministic. No network, no clock reads:
 timestamps only ever come from the records themselves.
 """
@@ -46,6 +53,17 @@ from typing import Any, Iterable, Iterator
 #: Version of the chain construction described here and in the proof spec.
 CHAIN_VERSION = "northstar-audit-chain/1"
 
+#: Second chain version: identical topology to v1, but the canonicalization
+#: is the JSON Canonicalization Scheme (JCS, RFC 8785) instead of the
+#: legacy sort_keys/compact form — this is the alignment with
+#: draft-sharif-agent-audit-trail §6.1, which mandates JCS and forbids
+#: alternatives. New chains default to v2; v1 feeds keep verifying via
+#: version dispatch on the genesis anchor (see docs/concepts/
+#: ietf-audit-trail-alignment.md).
+CHAIN_VERSION_V2 = "northstar-audit-chain/2"
+
+_CHAIN_VERSIONS = (CHAIN_VERSION, CHAIN_VERSION_V2)
+
 #: Envelope fields that are *excluded* from the hashed body (they are the
 #: seal itself, or the signature over the seal).
 _SEAL_FIELDS = ("prev_hash", "chain_hash", "signature")
@@ -57,8 +75,152 @@ def canonical_json(obj: Any) -> bytes:
     """Canonical JSON bytes: sorted keys, no whitespace, UTF-8.
 
     Byte-identical to one NDJSON feed line for the same record.
+
+    This is the *legacy* (chain v1) canonicalization. It is close to JCS
+    but not JCS: control characters use JSON short escapes (``\\n`` instead
+    of JCS's ``\\u000a``), keys sort by Unicode code point instead of
+    UTF-16 code units, and float formatting follows Python repr instead of
+    ECMAScript ``Number.prototype.toString``. Kept forever so v1 feeds
+    keep verifying; new code should use :func:`jcs_canonical_json`.
     """
     return json.dumps(obj, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")
+
+
+def _utf16_key(key: str) -> bytes:
+    """Sort key for JCS object properties: UTF-16 code units, big-endian.
+
+    RFC 8785 §3.2.2.1 sorts by UTF-16 code *unit*, not Unicode code point;
+    the two orders agree inside the BMP but differ for astral characters
+    (surrogate pairs sort by their high surrogate). Comparing the
+    big-endian UTF-16 byte sequences implements exactly that order.
+    """
+    return key.encode("utf-16-be")
+
+
+def _jcs_escape(text: str) -> str:
+    """JCS string body: only ``"``, ``\\`` and U+0000-U+001F are escaped.
+
+    RFC 8785 §3.2.2.3 — notably there are *no* short escapes: newline is
+    ``\\u000a``, never ``\\n``; ``/`` is never escaped; non-ASCII is raw.
+    """
+    out: list[str] = []
+    for char in text:
+        code = ord(char)
+        if char == '"':
+            out.append('\\"')
+        elif char == "\\":
+            out.append("\\\\")
+        elif code < 0x20:
+            out.append("\\u%04x" % code)
+        else:
+            out.append(char)
+    return "".join(out)
+
+
+_SAFE_INT = 2**53  # JCS integer range is (-(2^53)+1) .. ((2^53)-1)
+
+
+def _es_number_to_string(value: float) -> str:
+    """ECMAScript ``Number.prototype.toString`` for a finite non-safe float.
+
+    Python's ``repr`` already gives shortest round-trip digits; only the
+    *formatting* differs from ECMAScript (exponent thresholds and exponent
+    padding), so parse the repr into significant digits + decimal exponent
+    and re-apply the ECMA-262 formatting rules.
+    """
+    rep = repr(value)
+    negative = rep.startswith("-")
+    if negative:
+        rep = rep[1:]
+    match = __import__("re").fullmatch(r"(\d+)(?:\.(\d+))?(?:[eE]([+-]?\d+))?", rep)
+    assert match is not None  # repr of a finite float always matches
+    int_part, frac_part, exp_part = match.group(1), match.group(2) or "", match.group(3)
+    digits = int(int_part + frac_part)  # significant digits
+    exp = (int(exp_part) if exp_part else 0) - len(frac_part)  # value = digits * 10**exp
+    # ECMA-262 picks the decomposition with the smallest k: strip trailing
+    # zeros (repr's ".0" on integral floats would otherwise add one).
+    while digits % 10 == 0:
+        digits //= 10
+        exp += 1
+    chars = str(digits)
+    width = len(chars)
+    point = exp + width  # ECMA-262's n: value = chars * 10**(point-width)
+    if width <= point <= 21:
+        body = chars + "0" * (point - width)
+    elif 0 < point <= 21:
+        body = chars[:point] + "." + chars[point:]
+    elif -6 < point <= 0:
+        body = "0." + "0" * (-point) + chars
+    else:
+        exp10 = point - 1
+        body = chars[0] + ("." + chars[1:] if width > 1 else "") + "e" + ("+" if exp10 >= 0 else "") + str(exp10)
+    return ("-" if negative else "") + body
+
+
+def _jcs_dumps(value: Any) -> str:
+    """Recursive JCS serializer (RFC 8785 §3)."""
+    if value is None:
+        return "null"
+    if value is True:
+        return "true"
+    if value is False:
+        return "false"
+    if isinstance(value, str):
+        return '"' + _jcs_escape(value) + '"'
+    if isinstance(value, int):
+        if -_SAFE_INT < value < _SAFE_INT:
+            return str(value)
+        return _es_number_to_string(float(value))
+    if isinstance(value, float):
+        if value != value or value in (float("inf"), float("-inf")):
+            raise ValueError("JCS forbids NaN and Infinity")
+        if value == 0:
+            return "0"  # JCS forbids -0
+        if value.is_integer() and -_SAFE_INT < value < _SAFE_INT:
+            return str(int(value))
+        return _es_number_to_string(value)
+    if isinstance(value, (list, tuple)):
+        return "[" + ",".join(_jcs_dumps(item) for item in value) + "]"
+    if isinstance(value, dict):
+        items = sorted(value.items(), key=lambda kv: _utf16_key(kv[0]))
+        return "{" + ",".join('"' + _jcs_escape(key) + '":' + _jcs_dumps(item) for key, item in items) + "}"
+    raise TypeError(f"JCS cannot serialize {type(value).__name__}")
+
+
+def jcs_canonical_json(obj: Any) -> bytes:
+    """JSON Canonicalization Scheme (RFC 8785) bytes, UTF-8.
+
+    This is the canonicalization mandated by
+    draft-sharif-agent-audit-trail §6.1 ("Implementations MUST use JCS;
+    alternative canonicalization schemes MUST NOT be used"). Used for all
+    hashing and signing in ``northstar-audit-chain/2``.
+    """
+    return _jcs_dumps(obj).encode("utf-8")
+
+
+def _canon_for_version(chain_version: str):
+    """Canonicalization function for a chain version (v1 legacy, v2 JCS)."""
+    if chain_version == CHAIN_VERSION_V2:
+        return jcs_canonical_json
+    return canonical_json
+
+
+def _version_of_record(record: Any) -> str:
+    """Chain version governing a record's canonicalization.
+
+    v2 chains stamp every record's hashed body with
+    ``"chain": "northstar-audit-chain/2"``; v1 records carry no stamp
+    (frozen), so a missing/unknown marker means v1 and old feeds keep
+    verifying. The genesis anchor's own ``"chain"`` field is the fallback
+    for the first record.
+    """
+    if isinstance(record, dict):
+        if record.get("chain") == CHAIN_VERSION_V2:
+            return CHAIN_VERSION_V2
+        genesis = record.get("genesis")
+        if isinstance(genesis, dict) and genesis.get("chain") == CHAIN_VERSION_V2:
+            return CHAIN_VERSION_V2
+    return CHAIN_VERSION
 
 
 def _sha256_hex(data: bytes) -> str:
@@ -71,6 +233,7 @@ def build_genesis_params(
     session_id: str | None = None,
     run_id: str | None = None,
     started_ts: str | None = None,
+    chain_version: str = CHAIN_VERSION_V2,
 ) -> dict[str, Any]:
     """The anchor object stored on the first chained record.
 
@@ -79,9 +242,15 @@ def build_genesis_params(
     instead of trusting a rewritten history's fresh chain. At least one of
     ``session_id``/``run_id`` should be given; ``started_ts`` pins the run's
     start time when the producer knows it.
+
+    ``chain_version`` selects the canonicalization the chain will use
+    (v1 legacy or v2 JCS); it is stored as ``params["chain"]`` so verifiers
+    dispatch on it.
     """
+    if chain_version not in _CHAIN_VERSIONS:
+        raise ValueError(f"unknown chain version {chain_version!r}")
     params: dict[str, Any] = {
-        "chain": CHAIN_VERSION,
+        "chain": chain_version,
         "schema_version": "audit.ndjson/1",
         "component": component,
     }
@@ -95,24 +264,33 @@ def build_genesis_params(
 
 
 def genesis_hash(params: dict[str, Any]) -> str:
-    """The genesis hash: ``sha256(canonical_json(genesis_params))`` (hex)."""
-    return _sha256_hex(canonical_json(params))
+    """The genesis hash: ``sha256(canon(genesis_params))`` (hex).
+
+    The canonicalization is dispatched on ``params["chain"]`` so v1
+    anchors keep hashing the legacy way and v2 anchors use JCS.
+    """
+    canon = _canon_for_version(_version_of_record(params))
+    return _sha256_hex(canon(params))
 
 
-def chain_record(record: dict[str, Any], prev_hash: str) -> dict[str, Any]:
+def chain_record(record: dict[str, Any], prev_hash: str, *, chain_version: str = CHAIN_VERSION) -> dict[str, Any]:
     """Return a copy of ``record`` sealed with ``prev_hash``/``chain_hash``.
 
-    ``chain_hash = sha256(raw(prev_hash) || canonical_json(body))`` where
-    ``body`` is the record minus the seal/signature fields.
+    ``chain_hash = sha256(raw(prev_hash) || canon(body))`` where ``body``
+    is the record minus the seal/signature fields and ``canon`` is the
+    chain version's canonicalization (v1 legacy, v2 JCS per RFC 8785).
     """
+    if chain_version not in _CHAIN_VERSIONS:
+        raise ValueError(f"unknown chain version {chain_version!r}")
     if not _HEX64_RE.match(prev_hash):
         raise ValueError("prev_hash must be 64 lowercase hex characters")
+    canon = _canon_for_version(chain_version)
     chained = dict(record)
     for key in _SEAL_FIELDS:
         chained.pop(key, None)
     body = {k: v for k, v in chained.items() if k not in _SEAL_FIELDS}
     chained["prev_hash"] = prev_hash
-    chained["chain_hash"] = _sha256_hex(bytes.fromhex(prev_hash) + canonical_json(body))
+    chained["chain_hash"] = _sha256_hex(bytes.fromhex(prev_hash) + canon(body))
     return chained
 
 
@@ -124,20 +302,27 @@ def chain_records(
     run_id: str | None = None,
     started_ts: str | None = None,
     key_id: str | None = None,
+    chain_version: str = CHAIN_VERSION_V2,
 ) -> list[dict[str, Any]]:
     """Seal a whole record list; the first record carries the genesis anchor.
 
     ``key_id`` (when the feed will later be signed) is baked into every
     record's hashed body here: adding it at sign time would change the body
     the chain already sealed.
+
+    ``chain_version`` defaults to v2 (JCS canonicalization, IETF-aligned);
+    pass ``CHAIN_VERSION`` explicitly for the legacy v1 construction.
     """
     if not records:
         return []
+    if chain_version not in _CHAIN_VERSIONS:
+        raise ValueError(f"unknown chain version {chain_version!r}")
     if key_id is not None and (not key_id or len(key_id) > 200):
         raise ValueError("key_id must be a non-empty string of at most 200 characters")
     anchor = build_genesis_params(
         component, session_id=session_id, run_id=run_id,
         started_ts=started_ts if started_ts is not None else records[0].get("ts"),
+        chain_version=chain_version,
     )
     genesis = genesis_hash(anchor)
     chained: list[dict[str, Any]] = []
@@ -149,7 +334,12 @@ def chain_records(
             record = {**record, "genesis": anchor}
         if key_id is not None:
             record = {**record, "key_id": key_id}
-        sealed = chain_record(record, prev)
+        if chain_version == CHAIN_VERSION_V2:
+            # Self-describing records: the version rides inside the hashed
+            # body, so any single record tells a verifier which
+            # canonicalization to use. v1 records are unstamped (frozen).
+            record = {**record, "chain": chain_version}
+        sealed = chain_record(record, prev, chain_version=chain_version)
         chained.append(sealed)
         prev = sealed["chain_hash"]
     return chained
@@ -158,9 +348,13 @@ def chain_records(
 def sign_record(record: dict[str, Any], secret_key: bytes, *, key_id: str | None = None) -> dict[str, Any]:
     """Return a copy of ``record`` with an Ed25519 ``signature``.
 
-    The signature covers ``canonical_json(record minus signature)`` — chain
-    first, then sign, so the signature binds the record to its chain
-    position. ``secret_key`` is the 32-byte Ed25519 seed.
+    The signature covers ``canon(record minus signature)`` — chain first,
+    then sign, so the signature binds the record to its chain position.
+    ``canon`` is the record's chain version canonicalization (v1 legacy,
+    v2 JCS), dispatched on the genesis anchor; like
+    draft-sharif-agent-audit-trail §6.2, the signature is computed over the
+    canonical bytes of the record with the signature-value field removed.
+    ``secret_key`` is the 32-byte Ed25519 seed.
 
     ``key_id`` names the signing key for key management. On a chained
     record it must already be in the hashed body (pass it to
@@ -179,13 +373,18 @@ def sign_record(record: dict[str, Any], secret_key: bytes, *, key_id: str | None
         if "chain_hash" in signed and existing is None:
             raise ValueError("key_id must be baked in at chain time for chained records")
         signed["key_id"] = key_id
+    canon = _canon_for_version(_version_of_record(signed))
     signed.pop("signature", None)
-    signed["signature"] = sign(secret_key, canonical_json(signed)).hex()
+    signed["signature"] = sign(secret_key, canon(signed)).hex()
     return signed
 
 
 def verify_signature(record: dict[str, Any], public_key: bytes) -> bool:
-    """Check a record's Ed25519 signature; False when absent or invalid."""
+    """Check a record's Ed25519 signature; False when absent or invalid.
+
+    The canonicalization is dispatched on the record's genesis anchor
+    (v1 legacy, v2 JCS) so signatures made under either version verify.
+    """
     from ed25519 import verify
 
     signature = record.get("signature")
@@ -195,8 +394,9 @@ def verify_signature(record: dict[str, Any], public_key: bytes) -> bool:
         sig_bytes = bytes.fromhex(signature)
     except ValueError:
         return False
+    canon = _canon_for_version(_version_of_record(record))
     body = {k: v for k, v in record.items() if k != "signature"}
-    return verify(public_key, canonical_json(body), sig_bytes)
+    return verify(public_key, canon(body), sig_bytes)
 
 
 def generate_keypair() -> tuple[bytes, bytes]:
@@ -265,6 +465,9 @@ def verify_lines(
     prev_chain: str | None = None
     chained = 0
     sig_failures: list[int] = []
+    # The chain version is a feed-wide property, stamped on every v2
+    # record's body and on the genesis anchor; the first record decides.
+    canon = _canon_for_version(_version_of_record(records[0][1]))
     for position, (number, record) in enumerate(records):
         chain_hash = record.get("chain_hash")
         prev_hash = record.get("prev_hash")
@@ -295,7 +498,7 @@ def verify_lines(
                                reason=f"line {number}: prev_hash does not link to the previous chain_hash "
                                       f"(reorder or splice)")
         body = {k: v for k, v in record.items() if k not in _SEAL_FIELDS}
-        expected = _sha256_hex(bytes.fromhex(prev_hash) + canonical_json(body))
+        expected = _sha256_hex(bytes.fromhex(prev_hash) + canon(body))
         if expected != chain_hash:
             return ChainResult(ok=False, broken_at=number, records=len(records), chained=chained,
                                reason=f"line {number}: chain_hash mismatch (record modified after sealing)")

@@ -1,5 +1,44 @@
 # Northstar Agent OS — initial public component
 
+## Unreleased (forty-eighth batch) — IETF audit-trail alignment: JCS canonicalization as chain v2
+
+Aligns the audit hash chain with `draft-sharif-agent-audit-trail-06`
+(IETF individual draft, 2026-09-29; verified against the datatracker text)
+where the alignment is low-cost, and documents where it deliberately is
+not. Full item-by-item comparison in
+`docs/concepts/ietf-audit-trail-alignment.md`.
+
+**Aligned: canonicalization.** The draft mandates JCS (RFC 8785) and
+forbids alternatives (§6.1). Northstar's v1 canonicalization was only
+JCS-*like* (short `\n` escapes instead of `\u000a`, code-point instead of
+UTF-16 code-unit key order, host float formatting). This batch adds a
+from-scratch RFC 8785 implementation (`audit_chain.jcs_canonical_json`,
+stdlib only) and a new chain version `northstar-audit-chain/2` — same
+topology as v1, JCS canonicalization. **New chains default to v2.**
+
+**Compatibility guarantee.** The version is stamped on the genesis anchor
+and on every v2 record's hashed body; every hash/sign/verify path
+dispatches on it. v1 feeds — including the frozen §11 vectors and every
+feed sealed before this change — verify exactly as before (64 audit-chain
+tests green, incl. a CLI migration test that verifies historical v1 feed
+bytes). A cross-version splice breaks the chain loudly instead of
+verifying under the wrong rules.
+
+**Deliberately not aligned** (documented with reasons in the alignment
+doc): hash-input topology (we fold `raw32(prev_hash) || canon(body)`,
+the draft hashes the complete previous record), genesis linkage (we bind
+session/run params, the draft uses null), signature algorithm (Ed25519
+vs ES256/ML-DSA-65), signer identity (`key_id` vs RFC 7638 thumbprint),
+record envelope/taxonomy, tombstone deletion. Anchor mechanisms are
+compatible in kind: our Rekor anchoring *is* the draft's "append-only
+transparency log" option, and WORM archives match its WORM option; the
+draft's optional RFC 6962 Merkle batching is not implemented.
+
+**Verification:** `make test` fully green (runtime incl. 64 audit-chain
+tests, durable-run, interop, TS face, repo docs); `make bench` 35/35;
+`python3 tests/docbuild.py verify` OK (regenerated
+`docs/api/northstar-agent-runtime.md`).
+
 ## Unreleased (forty-seventh batch) — external audit anchoring (Rekor) + WORM archive packages
 
 (Named forty-seventh because the forty-sixth batch — durable claim-check +

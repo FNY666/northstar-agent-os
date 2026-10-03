@@ -39,22 +39,41 @@ The chain fields are **optional envelope fields within `audit.ndjson/1`**
 
 ## 3. Canonical JSON
 
-Every hash and every signature is computed over **canonical JSON**:
+Every hash and every signature is computed over **canonical JSON**. Two
+chain versions exist (see also
+`docs/concepts/ietf-audit-trail-alignment.md`):
 
-* `sort_keys = true`, separators `(",", ":")` (no whitespace),
-* UTF-8 encoding, `ensure_ascii = false` (non-ASCII is emitted raw, then
-  UTF-8 encoded — never `\uXXXX` escapes),
-* numbers as JSON numbers, no NaN/Infinity (feeds never contain them).
+* `northstar-audit-chain/1` (legacy): `sort_keys = true`, separators
+  `(",", ":")` (no whitespace), UTF-8 encoding, `ensure_ascii = false`
+  (non-ASCII is emitted raw, then UTF-8 encoded — never `\uXXXX`
+  escapes), numbers as JSON numbers, no NaN/Infinity. This is
+  byte-identical to one NDJSON feed line for the same record. It is *close
+  to* JCS but not JCS (control characters use short escapes, keys sort by
+  code point, floats follow the host language's formatting).
+* `northstar-audit-chain/2` (current default): the JSON Canonicalization
+  Scheme, **JCS (RFC 8785)** — the canonicalization mandated by
+  draft-sharif-agent-audit-trail §6.1. UTF-16 code-unit key order,
+  `\u00XX` escapes (no short escapes), ECMAScript
+  `Number.prototype.toString`, NaN/Infinity rejected, `-0` normalized to
+  `0`. Implemented from scratch in `audit_chain.jcs_canonical_json`
+  (stdlib only, no new dependencies).
 
-This is byte-identical to one NDJSON feed line for the same record.
+The version is stamped on the genesis anchor (`genesis.chain`) and on
+every v2 record's hashed body (`record.chain`); verifiers dispatch on it,
+so v1 feeds verify forever under the legacy rules. A v1 feed and a v2
+feed over identical payloads produce *different* hashes — the version
+stamp is part of the hashed body, and a cross-version splice breaks the
+chain loudly rather than verifying under the wrong rules.
 
 ## 4. Chain construction
 
 Definitions:
 
-* `canon(x)` = canonical JSON bytes of `x` (§3).
+* `canon(x)` = canonical JSON bytes of `x` (§3) — legacy form for
+  `northstar-audit-chain/1`, JCS for `northstar-audit-chain/2`.
 * `body(record)` = the record **minus** `prev_hash`, `chain_hash`,
-  `signature`. (`genesis` and `key_id` stay **inside** the hashed body.)
+  `signature`. (`genesis`, `key_id`, and the v2 `chain` version stamp stay
+  **inside** the hashed body.)
 * `raw(h)` = the 32 bytes decoded from 64 hex chars.
 
 Genesis:
@@ -258,6 +277,32 @@ must equal `89b21d68…`.
 
 Ed25519 vectors: RFC 8032 §7.1 TEST 1–3 (empty message, `0x72`,
 `0xaf82`; see `tests/test_audit_chain.py`).
+
+### v2 vectors (JCS, `northstar-audit-chain/2`)
+
+Same fixture shape, sealed under chain v2 (the current default). Note the
+per-record `"chain": "northstar-audit-chain/2"` stamp inside the hashed
+body, and that the genesis JCS bytes here coincide with the legacy form
+(all keys are BMP, no control characters) — the hashes still differ from
+v1 because the version stamp is part of the body.
+
+Genesis params JCS form:
+
+```
+{"chain":"northstar-audit-chain/2","component":"northstar-agent-runtime","schema_version":"audit.ndjson/1","session_id":"ns-vector-fixture-v2","started_ts":"2026-10-03T10:00:00.000Z"}
+```
+
+`genesis_hash = sha256(JCS(above)) = b50ca8ab0f7039b433351e1051db519fb1eceb71d71f708cf0b53cd0a2442eed`
+
+Feed:
+
+```
+{"chain":"northstar-audit-chain/2","chain_hash":"1508b8f95aa46e9a02bd1b3a03e09ed5712fb0a32d9fdaab61d5bdc1f5321921","component":"northstar-agent-runtime","event":"session_start","genesis":{"chain":"northstar-audit-chain/2","component":"northstar-agent-runtime","schema_version":"audit.ndjson/1","session_id":"ns-vector-fixture-v2","started_ts":"2026-10-03T10:00:00.000Z"},"level":"info","payload":{},"prev_hash":"b50ca8ab0f7039b433351e1051db519fb1eceb71d71f708cf0b53cd0a2442eed","schema_version":"audit.ndjson/1","seq":0,"ts":"2026-10-03T10:00:00.000Z"}
+{"chain":"northstar-audit-chain/2","chain_hash":"88e7b1294e3b4aa5d8670c7b75e93b53177faae4b48dbebeed2ef881cfb3beca","component":"northstar-agent-runtime","event":"assistant","level":"info","payload":{"text":"hello"},"prev_hash":"1508b8f95aa46e9a02bd1b3a03e09ed5712fb0a32d9fdaab61d5bdc1f5321921","schema_version":"audit.ndjson/1","seq":1,"ts":"2026-10-03T10:00:01.000Z"}
+```
+
+A conforming verifier must reproduce every hash shown and report `OK`
+over the 2 records.
 
 ## 12. Honest limitations
 

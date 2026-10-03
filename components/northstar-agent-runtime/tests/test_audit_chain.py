@@ -17,7 +17,9 @@ import audit as normative_audit  # noqa: E402
 
 from audit_chain import (
     CHAIN_VERSION,
+    CHAIN_VERSION_V2,
     ChainResult,
+    _sha256_hex,
     anchor_manifest,
     build_genesis_params,
     canonical_json,
@@ -26,6 +28,7 @@ from audit_chain import (
     check_anchor,
     generate_keypair,
     genesis_hash,
+    jcs_canonical_json,
     sign_record,
     verify_file,
     verify_lines,
@@ -362,6 +365,185 @@ class ProofSpecVectorTests(unittest.TestCase):
             "0223006af268e483502c3c2fe7cc3e9900727a8c73e87cf35f5ab613f8093fc2",
         )
         self.assertEqual(first["prev_hash"], genesis_hash(first["genesis"]))
+
+
+class JcsCanonicalizationTests(unittest.TestCase):
+    """RFC 8785 JSON Canonicalization Scheme vectors."""
+
+    def test_key_order_and_separators(self):
+        self.assertEqual(jcs_canonical_json({"b": 1, "a": 2}), b'{"a":2,"b":1}')
+
+    def test_no_short_escapes(self):
+        # JCS escapes controls as \u00XX — never \n, \t, etc.
+        self.assertEqual(jcs_canonical_json({"a": "\n\t"}), b'{"a":"\\u000a\\u0009"}')
+        self.assertEqual(jcs_canonical_json({"a": '"\\'}), b'{"a":"\\"\\\\"}')
+        self.assertEqual(jcs_canonical_json({"a": "/"}), b'{"a":"/"}')
+        self.assertEqual(jcs_canonical_json({"a": "\u001f"}), b'{"a":"\\u001f"}')
+
+    def test_non_ascii_is_raw_utf8(self):
+        self.assertEqual(jcs_canonical_json({"a": "é"}), '{"a":"é"}'.encode("utf-8"))
+
+    def test_utf16_code_unit_key_order(self):
+        # U+10000 is the surrogate pair D800 DC00 in UTF-16: it sorts
+        # before U+FFFF (a single unit 0xFFFF) although its code point
+        # is larger. Legacy sort_keys (code-point order) gets this wrong.
+        self.assertEqual(
+            jcs_canonical_json({"\uffff": 1, "\U00010000": 2}),
+            '{"\U00010000":2,"\uffff":1}'.encode("utf-8"),
+        )
+        self.assertNotEqual(
+            jcs_canonical_json({"\uffff": 1, "\U00010000": 2}),
+            canonical_json({"\uffff": 1, "\U00010000": 2}),
+            "this is exactly where legacy canonicalization diverges from JCS",
+        )
+
+    def test_numbers_follow_ecmascript_to_string(self):
+        self.assertEqual(jcs_canonical_json({"n": 1e16}), b'{"n":10000000000000000}')
+        self.assertEqual(jcs_canonical_json({"n": 1e-7}), b'{"n":1e-7}')
+        self.assertEqual(jcs_canonical_json({"n": 1e-6}), b'{"n":0.000001}')
+        self.assertEqual(jcs_canonical_json({"n": 0.1}), b'{"n":0.1}')
+        self.assertEqual(jcs_canonical_json({"n": 1e21}), b'{"n":1e+21}')
+        self.assertEqual(jcs_canonical_json({"n": -0.0}), b'{"n":0}')  # JCS forbids -0
+        self.assertEqual(jcs_canonical_json({"n": 100.0}), b'{"n":100}')
+        self.assertEqual(jcs_canonical_json({"n": 2**53}), b'{"n":9007199254740992}')
+
+    def test_non_finite_rejected(self):
+        for bad in (float("nan"), float("inf"), float("-inf"), {"a": float("nan")}):
+            with self.assertRaises(ValueError, msg=repr(bad)):
+                jcs_canonical_json(bad)
+
+    def test_nested_structures(self):
+        self.assertEqual(
+            jcs_canonical_json({"l": [1, "x", None, True], "d": {}}),
+            b'{"d":{},"l":[1,"x",null,true]}',
+        )
+
+
+class ChainV2Tests(unittest.TestCase):
+    """northstar-audit-chain/2: JCS canonicalization; v1 keeps verifying."""
+
+    def test_new_chains_default_to_v2(self):
+        chained = chain_records([sample_audit(0)], component="c")
+        self.assertEqual(chained[0]["genesis"]["chain"], CHAIN_VERSION_V2)
+        self.assertEqual(chained[0]["chain"], CHAIN_VERSION_V2)
+
+    def test_v2_round_trip(self):
+        chained = chain_records(
+            [sample_audit(i, text="héllo\n%d" % i, n=1e16) for i in range(3)],
+            component="c",
+        )
+        result = verify_lines(to_lines(chained))
+        self.assertTrue(result.ok, result.reason)
+        self.assertEqual(result.chained, 3)
+
+    def test_v1_chain_still_verifies(self):
+        # Legacy construction, explicitly requested: verifies forever.
+        chained = chain_records(
+            [sample_audit(i) for i in range(3)],
+            component="c",
+            chain_version=CHAIN_VERSION,
+        )
+        self.assertEqual(chained[0]["genesis"]["chain"], CHAIN_VERSION)
+        self.assertNotIn("chain", chained[1])  # v1 records are unstamped (frozen)
+        result = verify_lines(to_lines(chained))
+        self.assertTrue(result.ok, result.reason)
+
+    def test_v1_and_v2_hashes_differ_on_nontrivial_payload(self):
+        recs = [sample_audit(i, text="héllo\nworld", n=1e16) for i in range(2)]
+        v1 = chain_records(recs, component="c", chain_version=CHAIN_VERSION)
+        v2 = chain_records(recs, component="c", chain_version=CHAIN_VERSION_V2)
+        self.assertNotEqual(v1[1]["chain_hash"], v2[1]["chain_hash"])
+
+    def test_v2_tamper_detected(self):
+        chained = chain_records([sample_audit(i) for i in range(3)], component="c")
+        lines = to_lines(chained)
+        rec = json.loads(lines[1])
+        rec["payload"] = {"x": 1}
+        lines[1] = json.dumps(rec, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+        result = verify_lines(lines)
+        self.assertFalse(result.ok)
+        self.assertEqual(result.broken_at, 2)
+
+    def test_v2_sign_round_trip(self):
+        seed, pub = generate_keypair()
+        chained = chain_records([sample_audit(i) for i in range(2)], component="c", key_id="k2")
+        signed = [sign_record(r, seed, key_id="k2") for r in chained]
+        result = verify_lines(to_lines(signed), public_key=pub)
+        self.assertTrue(result.ok, result.reason)
+
+    def test_v1_sign_round_trip_unchanged(self):
+        seed, pub = generate_keypair()
+        chained = chain_records(
+            [sample_audit(i) for i in range(2)],
+            component="c",
+            key_id="k1",
+            chain_version=CHAIN_VERSION,
+        )
+        signed = [sign_record(r, seed, key_id="k1") for r in chained]
+        result = verify_lines(to_lines(signed), public_key=pub)
+        self.assertTrue(result.ok, result.reason)
+
+    def test_mixed_version_splice_rejected(self):
+        # A v2 record spliced into a v1 chain must not verify: the version
+        # stamp rides inside the hashed body, so the splice breaks the link.
+        v1 = chain_records([sample_audit(i) for i in range(2)], component="c", chain_version=CHAIN_VERSION)
+        v2 = chain_records([sample_audit(i) for i in range(2)], component="c", chain_version=CHAIN_VERSION_V2)
+        result = verify_lines(to_lines([v1[0], v2[1]]))
+        self.assertFalse(result.ok)
+
+    def test_genesis_hash_dispatches_on_version(self):
+        v1p = build_genesis_params("c", chain_version=CHAIN_VERSION)
+        v2p = build_genesis_params("c", chain_version=CHAIN_VERSION_V2)
+        self.assertEqual(genesis_hash(v1p), _sha256_hex(canonical_json(v1p)))
+        self.assertEqual(genesis_hash(v2p), _sha256_hex(jcs_canonical_json(v2p)))
+
+    def test_unknown_chain_version_rejected_loudly(self):
+        with self.assertRaises(ValueError):
+            chain_records([sample_audit(0)], component="c", chain_version="northstar-audit-chain/9")
+
+    def test_historical_v1_feed_file_verifies_via_cli(self):
+        # Migration guarantee: feed bytes sealed before the v2 change
+        # (legacy canonicalization) still verify, via the real CLI.
+        chained = chain_records(
+            [sample_audit(i) for i in range(2)], component="c", chain_version=CHAIN_VERSION
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            feed = Path(directory) / "feed.ndjson"
+            feed.write_text("\n".join(to_lines(chained)) + "\n", encoding="utf-8")
+            code, out, _ = run_cli("audit", "verify", str(feed))
+            self.assertEqual(code, 0, out)
+            self.assertIn("OK", out)
+
+
+class ProofSpecV2VectorTests(unittest.TestCase):
+    """The fixed v2 vectors in docs/concepts/audit-proof-spec.md §11."""
+
+    VECTORS = [
+        '{"chain":"northstar-audit-chain/2","chain_hash":"1508b8f95aa46e9a02bd1b3a03e09ed5712fb0a32d9fdaab61d5bdc1f5321921","component":"northstar-agent-runtime","event":"session_start","genesis":{"chain":"northstar-audit-chain/2","component":"northstar-agent-runtime","schema_version":"audit.ndjson/1","session_id":"ns-vector-fixture-v2","started_ts":"2026-10-03T10:00:00.000Z"},"level":"info","payload":{},"prev_hash":"b50ca8ab0f7039b433351e1051db519fb1eceb71d71f708cf0b53cd0a2442eed","schema_version":"audit.ndjson/1","seq":0,"ts":"2026-10-03T10:00:00.000Z"}',
+        '{"chain":"northstar-audit-chain/2","chain_hash":"88e7b1294e3b4aa5d8670c7b75e93b53177faae4b48dbebeed2ef881cfb3beca","component":"northstar-agent-runtime","event":"assistant","level":"info","payload":{"text":"hello"},"prev_hash":"1508b8f95aa46e9a02bd1b3a03e09ed5712fb0a32d9fdaab61d5bdc1f5321921","schema_version":"audit.ndjson/1","seq":1,"ts":"2026-10-03T10:00:01.000Z"}',
+    ]
+
+    def test_vectors_verify_ok(self):
+        result = verify_lines(self.VECTORS)
+        self.assertTrue(result.ok, result.reason)
+        self.assertEqual(result.chained, 2)
+
+    def test_vectors_match_spec_genesis(self):
+        first = json.loads(self.VECTORS[0])
+        self.assertEqual(
+            genesis_hash(first["genesis"]),
+            "b50ca8ab0f7039b433351e1051db519fb1eceb71d71f708cf0b53cd0a2442eed",
+        )
+        self.assertEqual(first["prev_hash"], genesis_hash(first["genesis"]))
+
+    def test_vectors_tamper_detected(self):
+        tampered = list(self.VECTORS)
+        record = json.loads(tampered[1])
+        record["payload"] = {"text": "goodbye"}
+        tampered[1] = json.dumps(record, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+        result = verify_lines(tampered)
+        self.assertFalse(result.ok)
+        self.assertEqual(result.broken_at, 2)
 
 
 class CliAuditTests(unittest.TestCase):
