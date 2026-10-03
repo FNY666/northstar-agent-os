@@ -7380,6 +7380,195 @@ def _case_metrics_plugin_claim_evidence(h: BenchHarness) -> BenchExpectation:
     )
 
 
+def run_merkle_proofs() -> dict[str, Any]:
+    """RFC 9162 Merkle inclusion/consistency proofs over the audit chain.
+
+    Pure and deterministic: no runtime, no network, no model. Builds a
+    fixed 16-record chained feed, then measures (1) inclusion correctness
+    for every leaf index, (2) rejection of five adversarial negatives,
+    (3) detection of a re-sealed history rewrite against the old head,
+    (4) consistency correctness for every 0 < old < 16 size pair plus a
+    forged-old-root negative, and (5) proof-size bounds (audit-path depth
+    must stay O(log n)). This measures the *proof machinery*, not feed
+    content — the numbers are structural invariants, so the bench pins
+    them exactly and any drift fails.
+    """
+    from audit_chain import chain_record, chain_records
+    from audit_merkle import (
+        MerkleTree,
+        consistency_proof_for,
+        inclusion_proof_for,
+        leaves_from_chain_hashes,
+        verify_consistency,
+        verify_inclusion,
+    )
+
+    n = 16
+    records = [
+        {
+            "schema_version": "audit.ndjson/1",
+            "ts": f"2026-10-03T21:30:{i:02d}Z",
+            "component": "bench",
+            "event": "merkle-probe",
+            "payload": {"i": i},
+        }
+        for i in range(n)
+    ]
+    chained = chain_records(records, component="bench")
+    leaves = leaves_from_chain_hashes(record["chain_hash"] for record in chained)
+    tree = MerkleTree(leaves)
+    root = tree.root
+
+    inclusion_ok = 0
+    max_inclusion_path = 0
+    for index in range(n):
+        proof = inclusion_proof_for(leaves, index)
+        ok, _ = proof.verify()
+        inclusion_ok += 1 if ok else 0
+        max_inclusion_path = max(max_inclusion_path, len(proof.path))
+
+    probe = inclusion_proof_for(leaves, 5)
+    forged_sibling = bytes([probe.path[0][0] ^ 0x01]) + probe.path[0][1:]
+    negatives = [
+        verify_inclusion(probe.leaf, 5, n, probe.path, bytes(32)),  # wrong root
+        verify_inclusion(probe.leaf, 6, n, probe.path, root),  # wrong index
+        verify_inclusion(probe.leaf, 5, n, probe.path[:-1], root),  # truncated path
+        verify_inclusion(bytes(32), 5, n, probe.path, root),  # forged leaf
+        verify_inclusion(
+            probe.leaf, 5, n, [forged_sibling] + probe.path[1:], root
+        ),  # tampered sibling
+    ]
+    negatives_rejected = sum(1 for ok, _ in negatives if not ok)
+
+    # Re-seal attack: rewrite record 5 and re-seal the chain from there — a
+    # "fresh chain" the bare chain cannot see without an anchor. The new
+    # leaf must fail the old proof against the old head.
+    bodies = [
+        {k: v for k, v in record.items() if k not in ("prev_hash", "chain_hash", "signature")}
+        for record in chained
+    ]
+    bodies[5]["payload"] = {"i": "forged"}
+    prev = chained[4]["chain_hash"]
+    resealed_leaf: bytes | None = None
+    for body in bodies[5:]:
+        sealed = chain_record(body, prev)
+        if resealed_leaf is None:
+            resealed_leaf = bytes.fromhex(sealed["chain_hash"])
+        prev = sealed["chain_hash"]
+    assert resealed_leaf is not None
+    reseal_caught = not verify_inclusion(resealed_leaf, 5, n, probe.path, root)[0]
+
+    consistency_ok = 0
+    consistency_pairs = 0
+    max_consistency_path = 0
+    for old_size in range(1, n):
+        cproof = consistency_proof_for(leaves, old_size)
+        ok, _ = cproof.verify()
+        consistency_ok += 1 if ok else 0
+        consistency_pairs += 1
+        max_consistency_path = max(max_consistency_path, len(cproof.path))
+    forged_old = consistency_proof_for(leaves, 3)
+    consistency_tamper_rejected = not verify_consistency(
+        bytes(32), 3, root, n, forged_old.path
+    )[0]
+
+    sample_proof_bytes = len(json.dumps(inclusion_proof_for(leaves, 7).to_dict()).encode("utf-8"))
+
+    return {
+        "n_records": n,
+        "inclusion_checks": n,
+        "inclusion_ok": inclusion_ok,
+        "inclusion_negatives": len(negatives),
+        "inclusion_negatives_rejected": negatives_rejected,
+        "reseal_tamper_caught": reseal_caught,
+        "consistency_pairs": consistency_pairs,
+        "consistency_ok": consistency_ok,
+        "consistency_tamper_rejected": consistency_tamper_rejected,
+        "max_inclusion_path_len": max_inclusion_path,
+        "max_consistency_path_len": max_consistency_path,
+        "sample_proof_json_bytes": sample_proof_bytes,
+    }
+
+
+def _case_metrics_merkle_proofs(h: BenchHarness) -> BenchExpectation:
+    """RFC 9162 Merkle inclusion/consistency proofs over the audit chain.
+
+    The chain makes ``verify`` O(n); the transparency-log answer is O(log n)
+    proofs. This case pins the proof machinery's structural invariants on a
+    fixed 16-record feed: every inclusion proof verifies, every adversarial
+    negative is rejected, a re-sealed history rewrite fails against the old
+    head, and every consistency pair verifies.
+    """
+    metrics = run_merkle_proofs()
+
+    def check(exp: BenchExpectation, report: Any) -> tuple[bool, str]:
+        if metrics["n_records"] != 16:
+            return (False, f"expected a 16-record corpus, saw {metrics['n_records']}")
+        if metrics["inclusion_ok"] != metrics["inclusion_checks"] != 16:
+            return (
+                False,
+                f"all 16 inclusion proofs must verify: "
+                f"{metrics['inclusion_ok']}/{metrics['inclusion_checks']}",
+            )
+        if metrics["inclusion_negatives_rejected"] != metrics["inclusion_negatives"] != 5:
+            return (
+                False,
+                "all 5 adversarial negatives must be rejected: "
+                f"{metrics['inclusion_negatives_rejected']}/{metrics['inclusion_negatives']}",
+            )
+        if not metrics["reseal_tamper_caught"]:
+            return (False, "re-sealed history rewrite must fail against the old head")
+        if metrics["consistency_ok"] != metrics["consistency_pairs"] != 15:
+            return (
+                False,
+                f"all 15 consistency pairs must verify: "
+                f"{metrics['consistency_ok']}/{metrics['consistency_pairs']}",
+            )
+        if not metrics["consistency_tamper_rejected"]:
+            return (False, "forged consistency old root must be rejected")
+        if metrics["max_inclusion_path_len"] != 4:
+            return (
+                False,
+                f"inclusion path for 16 leaves must be depth 4, "
+                f"saw {metrics['max_inclusion_path_len']}",
+            )
+        if metrics["max_consistency_path_len"] != 5:
+            return (
+                False,
+                f"max consistency path for 16 leaves must be 5, "
+                f"saw {metrics['max_consistency_path_len']}",
+            )
+        return (
+            True,
+            f"16/16 inclusion proofs verify (max path 4, O(log n)), 5/5 "
+            f"negatives rejected, re-seal rewrite caught, 15/15 consistency "
+            f"pairs verify (max path 5), sample proof "
+            f"{metrics['sample_proof_json_bytes']} bytes",
+        )
+
+    return BenchExpectation(
+        runtime=_noop_runtime(h),
+        expect_subtype="success",
+        post_check=check,
+        metrics=metrics,
+        notes=(
+            "RFC 9162 methodology (obsoletes RFC 6962; the tree construction "
+            "is identical), honestly scoped: leaves are the sealed "
+            "chain_hashes, so the tree commits to the chain — an inclusion "
+            "proof says 'the record sealed at chain position i is in this "
+            "log', and the chain says what that record contains. The "
+            "corpus is synthetic and structural (16 fixed records, every "
+            "index, every size pair, 5 adversarial negatives, one re-seal "
+            "attack): it pins the PROOF MACHINERY, not feed content. "
+            "Verified against RFC 9162 §2.1.2's worked 7-leaf example and "
+            "§2.1.4.1's PROOF(3,D[7])/[c,d,g,l], PROOF(4,D[7])/[l], "
+            "PROOF(6,D[7]) examples (see tests/test_audit_merkle.py). "
+            "Complements the chain and the Rekor external anchor; never "
+            "replaces them — proofs are only minted over an intact chain."
+        ),
+    )
+
+
 CASES: tuple[BenchCase, ...] = (
     BenchCase("denial.disallowed_beats_allow", "denial", "disallowed_tools beats allow + bypass", _case_disallowed_beats_allow),
     BenchCase("denial.plan_mode_blocks_write", "denial", "plan mode refuses Write", _case_plan_mode_blocks_write),
@@ -7423,6 +7612,7 @@ CASES: tuple[BenchCase, ...] = (
     BenchCase("metrics.least_privilege", "metrics", "least-privilege gate enforcement (OPUR-style)", _case_metrics_least_privilege),
     BenchCase("metrics.approval_percall_binding", "metrics", "per-call approval binding + structured denial", _case_metrics_approval_percall_binding),
     BenchCase("metrics.ask_timing", "metrics", "ASK-timing judgment (Ask-F1-style)", _case_metrics_ask_timing),
+    BenchCase("metrics.merkle_proofs", "metrics", "RFC 9162 Merkle proofs for audit (O(log n) verify)", _case_metrics_merkle_proofs),
     BenchCase("metrics.plugin_claim_evidence", "metrics", "plugin claim-evidence trust tiering (ERC-8004 validation semantics)", _case_metrics_plugin_claim_evidence),
     BenchCase("metrics.tool_receipt", "metrics", "per-call tool receipt (tool:<args>:<result>)", _case_metrics_tool_receipt),
     BenchCase("metrics.timelock_delayed_execution", "metrics", "timelock-delayed execution for the irreversible tier", _case_metrics_timelock_delayed_execution),
@@ -7986,6 +8176,15 @@ def _print_report(report: BenchReport) -> None:
                 f"forgery capped={clev.get('forgery_capped', False)}, "
                 f"{clev.get('parse_refusal_n', 0)} malformed-evidence refusals"
             )
+        merkle = report.metrics.get("metrics.merkle_proofs", {})
+        if merkle:
+            print(
+                f"  merkle proofs: {merkle.get('inclusion_ok', 0)}/"
+                f"{merkle.get('inclusion_checks', 0)} inclusion verify, "
+                f"{merkle.get('inclusion_negatives_rejected', 0)}/"
+                f"{merkle.get('inclusion_negatives', 0)} negatives rejected, "
+                f"re-seal caught={merkle.get('reseal_tamper_caught', False)}, "
+            )
     if report.ok:
         print("result: PASS — gate decisions match the public scorecard")
     else:
@@ -8018,6 +8217,7 @@ __all__ = [
     "run_pretrade_15c3_5",
     "run_timelock",
     "run_plugin_claim_evidence",
+    "run_merkle_proofs",
     "run_bench_command",
     "run_consent_ablation",
     "run_decision_model",
