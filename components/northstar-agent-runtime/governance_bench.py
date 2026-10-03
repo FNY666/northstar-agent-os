@@ -34,7 +34,19 @@ from typing import Any, Callable, Iterable, Sequence
 from agents import builtin_registry
 from hooks import HookRegistry
 from loop import AgentRuntime, RuntimeConfig
-from permissions import PermissionConfig, PermissionEngine, digest_arguments
+from permissions import (
+    PermissionConfig,
+    PermissionEngine,
+    PermissionRequestContext,
+    digest_arguments,
+)
+from decision_model import (
+    DecisionModelResult,
+    DecisionPolicy,
+    QuestionAnswer,
+    StaticDecisionModel,
+    approval_questions,
+)
 from providers.base import AssistantMessage, ResultMessage, SystemMessage, ToolUseBlock, UserMessage
 from providers.scripted import ScriptedProvider
 from tools import ToolLimits, ToolSandbox, build_default_registry
@@ -1555,6 +1567,189 @@ def run_least_privilege() -> dict[str, Any]:
             )
         },
         "by_ped_class": {str(ped): _ped_stats(ped) for ped in (0, 1, 2)},
+    }
+
+
+def run_decision_model() -> dict[str, Any]:
+    """Structured decision-model approval path (SystemOne-style format).
+
+    Absorbs the *interface idea* of the October-2026 decision-model wave --
+    Cloudflare Clef / Clef-flash (Apache-2.0), AWS Strands Decider 2B
+    (Apache-2.0), TypeSafe Jev's SystemOne API -- not weights, code, or
+    benchmarks: input is a JSON state plus typed questions (``noul`` /
+    ``choice`` / ``score``), output is options + probabilities with no
+    free-form text, and a local threshold policy adjudicates
+    allow / deny / escalate. Vendor latency/accuracy claims ("38.8 ms",
+    "115 ms", "beats Jev") are vendor-reported and NOT independently
+    verified; the bench measures only the gate's fail-closed behavior
+    around the format.
+
+    Pure and deterministic: the probes drive ``PermissionEngine`` directly
+    with ``StaticDecisionModel`` tables (no runtime, no network, no real
+    model). What is asserted: high-confidence allow/deny verdicts decide
+    the call; low confidence escalates to the host callback; a raising
+    model falls back to the host callback (never grants); malformed
+    probabilities escalate; no model configured leaves the deterministic
+    gate path untouched; every model-path verdict carries a complete
+    audit chain (input state + questions + output probabilities +
+    thresholds + outcome).
+    """
+
+    class _NoulOnlyModel:
+        model_name = "bench.noul-only.v1"
+
+        def __init__(self, p_yes: float) -> None:
+            self._p = p_yes
+
+        def decide(self, state: dict[str, Any], questions: dict[str, Any]) -> DecisionModelResult:
+            return DecisionModelResult(
+                answers={
+                    "approval": QuestionAnswer(
+                        name="approval",
+                        type="noul",
+                        probabilities={"yes": self._p, "no": 1.0 - self._p},
+                        confidence=self._p,
+                    )
+                },
+                model=self.model_name,
+            )
+
+    class _RaisingModel:
+        model_name = "bench.raising.v1"
+
+        def decide(self, state: dict[str, Any], questions: dict[str, Any]) -> DecisionModelResult:
+            raise RuntimeError("simulated model outage")
+
+    class _MalformedModel:
+        model_name = "bench.malformed.v1"
+
+        def decide(self, state: dict[str, Any], questions: dict[str, Any]) -> DecisionModelResult:
+            questions = approval_questions()
+            return DecisionModelResult(
+                answers={
+                    "verdict": QuestionAnswer(
+                        name="verdict",
+                        type="choice",
+                        probabilities={"allow": 0.3, "deny": 0.2, "escalate": 0.0},
+                        choice="allow",
+                        confidence=0.3,
+                    )
+                },
+                model=self.model_name,
+            )
+
+    def _engine(
+        model: Any,
+        host_verdict: bool,
+        calls: list[str],
+    ) -> PermissionEngine:
+        def host_callback(name: str, payload: dict[str, Any], ctx: Any) -> bool:
+            calls.append(name)
+            return host_verdict
+
+        return PermissionEngine(
+            PermissionConfig(
+                mode="default",
+                can_use_tool=host_callback,
+                decision_model=model,
+            )
+        )
+
+    high_confidence = StaticDecisionModel(
+        profiles={
+            "tool:Write": {
+                "verdict": {"allow": 0.92, "deny": 0.04, "escalate": 0.04},
+                "approval": 0.92,
+            },
+            "tool:Bash": {
+                "verdict": {"allow": 0.05, "deny": 0.90, "escalate": 0.05},
+                "approval": 0.05,
+            },
+            "tool:WebFetch": {
+                "verdict": {"allow": 0.40, "deny": 0.35, "escalate": 0.25},
+                "approval": 0.50,
+            },
+        }
+    )
+
+    results: list[dict[str, Any]] = []
+
+    def _probe(
+        probe_id: str,
+        tool: str,
+        kind: str,
+        model: Any,
+        host_verdict: bool,
+        expect_allowed: bool,
+        expect_source: str,
+    ) -> None:
+        calls: list[str] = []
+        engine = _engine(model, host_verdict, calls)
+        ctx = PermissionRequestContext(
+            session_id="bench",
+            agent="main",
+            call_id=f"call-{probe_id}",
+            arguments_digest=digest_arguments({"probe": probe_id}),
+        )
+        decision = engine.evaluate(
+            tool, kind=kind, payload={"probe": probe_id}, context=ctx
+        )
+        audit = decision.decision_model_audit or {}
+        audit_ok = (
+            audit.get("type") == "decision_model"
+            and isinstance(audit.get("input", {}).get("state"), dict)
+            and isinstance(audit.get("input", {}).get("questions"), dict)
+            and isinstance(audit.get("output", {}).get("answers"), dict)
+            and isinstance(audit.get("policy"), dict)
+            and audit.get("outcome") in ("allow", "deny", "escalate")
+            and audit.get("input", {}).get("state", {}).get("call_id") == f"call-{probe_id}"
+            and audit.get("input", {}).get("state", {}).get("arguments_digest")
+            == digest_arguments({"probe": probe_id})
+        )
+        results.append(
+            {
+                "id": probe_id,
+                "allowed": decision.allowed,
+                "source": decision.source,
+                "host_callback_calls": len(calls),
+                "audit_ok": audit_ok,
+                "expect_allowed": expect_allowed,
+                "expect_source": expect_source,
+                "pass": (
+                    decision.allowed == expect_allowed
+                    and decision.source == expect_source
+                    and (audit_ok or decision.source != "decision_model")
+                ),
+            }
+        )
+
+    # 1-2: high-confidence model verdicts decide the call directly.
+    _probe("allow-high-confidence", "Write", "edit", high_confidence, False, True, "decision_model")
+    _probe("deny-high-confidence", "Bash", "exec", high_confidence, True, False, "decision_model")
+    # 3: low confidence (0.40 < min 0.60) escalates to the host callback.
+    _probe("escalate-low-confidence", "WebFetch", "network", high_confidence, False, False, "host_callback")
+    # 4-5: noul-only model exercises the threshold fallback path.
+    _probe("noul-allow", "Write", "edit", _NoulOnlyModel(0.95), False, True, "decision_model")
+    _probe("noul-deny", "Bash", "exec", _NoulOnlyModel(0.05), True, False, "decision_model")
+    # 6: a raising model must fall back to the host callback, never grant.
+    _probe("model-error-fallback", "Write", "edit", _RaisingModel(), True, True, "host_callback")
+    # 7: malformed probabilities (sum 0.5) escalate, never allow.
+    _probe("malformed-escalates", "Write", "edit", _MalformedModel(), False, False, "host_callback")
+    # 8: no model configured -> the deterministic gate path, unchanged.
+    _probe("no-model-control", "Write", "edit", None, False, False, "host_callback")
+
+    n_escalated = sum(1 for r in results if r["source"] == "host_callback" and r["id"] != "no-model-control")
+    return {
+        "n_probes": len(results),
+        "n_pass": sum(1 for r in results if r["pass"]),
+        "n_allowed": sum(1 for r in results if r["allowed"]),
+        "n_denied": sum(1 for r in results if not r["allowed"]),
+        "n_escalated_to_callback": n_escalated,
+        "audit_complete": all(r["audit_ok"] for r in results if r["source"] == "decision_model"),
+        "fallback_ok": next(r["pass"] for r in results if r["id"] == "model-error-fallback"),
+        "control_unchanged": next(r["pass"] for r in results if r["id"] == "no-model-control"),
+        "all_pass": all(r["pass"] for r in results),
+        "probes": results,
     }
 
 
@@ -3527,6 +3722,44 @@ def _case_metrics_approval_percall_binding(h: BenchHarness) -> BenchExpectation:
     )
 
 
+def _case_metrics_decision_model(h: BenchHarness) -> BenchExpectation:
+    """Structured decision-model approval path (SystemOne-style format)."""
+    metrics = run_decision_model()
+
+    def check(exp: BenchExpectation, report: Any) -> tuple[bool, str]:
+        if not metrics["all_pass"]:
+            failed = [p["id"] for p in metrics["probes"] if not p["pass"]]
+            return (False, f"decision-model probes failed: {failed}")
+        if not metrics["audit_complete"]:
+            return (False, "every model-path verdict must carry a complete audit chain")
+        if not metrics["fallback_ok"]:
+            return (False, "a raising model must fall back to the host callback")
+        if not metrics["control_unchanged"]:
+            return (False, "no-model control must keep the deterministic gate path")
+        return (
+            True,
+            f"{metrics['n_probes']} probes pass "
+            f"({metrics['n_allowed']} allowed, {metrics['n_denied']} denied, "
+            f"{metrics['n_escalated_to_callback']} escalated), audit complete",
+        )
+
+    return BenchExpectation(
+        runtime=_noop_runtime(h),
+        expect_subtype="success",
+        post_check=check,
+        metrics=metrics,
+        notes=(
+            "SystemOne-style decision format (state + typed noul/choice/score "
+            "questions -> options + probabilities), absorbed as an interface "
+            "idea from Cloudflare Clef / AWS Strands Decider 2B (both "
+            "Apache-2.0, Oct 2026); vendor latency/accuracy claims are "
+            "unverified and not absorbed. Threshold policy adjudicates "
+            "allow/deny/escalate; escalate and model errors fall through to "
+            "the host callback, so the model path can never grant on failure."
+        ),
+    )
+
+
 def _case_metrics_ask_timing(h: BenchHarness) -> BenchExpectation:
     """ASK-timing judgment, HiL-Bench-style Ask-F1 metric."""
     metrics = run_ask_timing()
@@ -3707,6 +3940,7 @@ CASES: tuple[BenchCase, ...] = (
     BenchCase("metrics.consent_ablation", "metrics", "consent kept vs stripped sensitivity", _case_metrics_consent_ablation),
     BenchCase("metrics.owasp_asi_coverage", "metrics", "OWASP Agentic Top 10 2026 (ASI01-ASI10) gate coverage", _case_metrics_owasp_asi_coverage),
     BenchCase("metrics.least_privilege", "metrics", "least-privilege gate enforcement (OPUR-style)", _case_metrics_least_privilege),
+    BenchCase("metrics.decision_model", "metrics", "structured decision-model approval path", _case_metrics_decision_model),
     BenchCase("metrics.approval_percall_binding", "metrics", "per-call approval binding + structured denial", _case_metrics_approval_percall_binding),
     BenchCase("metrics.ask_timing", "metrics", "ASK-timing judgment (Ask-F1-style)", _case_metrics_ask_timing),
     BenchCase("metrics.whisper_contrast", "metrics", "whisper-attacks contrast: signature vs bound arguments", _case_metrics_whisper_contrast),
@@ -4107,6 +4341,7 @@ def _print_report(report: BenchReport) -> None:
                 f"{askt.get('over_ask_rate', 0):.3f}, under-ask rate "
                 f"{askt.get('under_ask_rate', 0):.3f})"
             )
+<<<<<<< ours
         whisper = report.metrics.get("metrics.whisper_contrast", {})
         if whisper:
             print(
@@ -4136,6 +4371,17 @@ def _print_report(report: BenchReport) -> None:
                 m = report.metrics.get(cid, {})
                 live_bits.append(f"{cid.split('.')[-1]} supported={m.get('supported')}")
             print(f"    live legs: {', '.join(live_bits)}")
+        dmodel = report.metrics.get("metrics.decision_model", {})
+        if dmodel:
+            print(
+                f"  decision model path: {dmodel.get('n_probes', 0)} probes, "
+                f"{dmodel.get('n_pass', 0)} pass "
+                f"({dmodel.get('n_allowed', 0)} allowed, "
+                f"{dmodel.get('n_denied', 0)} denied, "
+                f"{dmodel.get('n_escalated_to_callback', 0)} escalated), "
+                f"audit_complete={dmodel.get('audit_complete', False)}, "
+                f"fallback_ok={dmodel.get('fallback_ok', False)}"
+            )
     if report.ok:
         print("result: PASS — gate decisions match the public scorecard")
     else:
@@ -4158,6 +4404,7 @@ __all__ = [
     "run_ask_timing",
     "run_bench_command",
     "run_consent_ablation",
+    "run_decision_model",
     "run_least_privilege",
     "run_metric_corpus",
     "run_owasp_asi_coverage",
