@@ -17132,6 +17132,124 @@ def _case_metrics_labor_algo(h: BenchHarness) -> BenchExpectation:
     )
 
 
+def _case_metrics_grid_agents(h: BenchHarness) -> BenchExpectation:
+    """Grid control envelopes (one-hundred-twenty-eighth batch).
+
+    12 deterministic scenarios, 4 allow / 8 deny: a declared
+    non-safety-optimization system passes the safety-class gate;
+    dispatch inside the pre-approved control-room envelope allows;
+    dispatch bound to a fresh forecast allows; compliance with an
+    active curtailment order allows. Denied: an undeclared system
+    (``grid:unverifiable_safety_class``), an out-of-scope dispatch
+    (``grid:out_of_envelope``), an unbound dispatch
+    (``grid:unbound_dispatch``), a stale forecast
+    (``grid:stale_forecast``), an unscreened high-fluctuation
+    workload (``grid:power_resonance_risk``), curtailment refusal
+    during an active emergency (``grid:curtailment_refusal``), an
+    ungranted nuclear control action (``grid:nuclear_control``), and
+    a blackout filing with no bound timeline
+    (``grid:unreported_blackout``).
+    """
+    metrics = run_grid_agents()
+
+    def check(exp: BenchExpectation, report: Any) -> tuple[bool, str]:
+        if metrics["n_scenarios"] != 12:
+            return (False, f"expected 12 grid scenarios, saw {metrics['n_scenarios']}")
+        if metrics["mismatches"]:
+            return (False, f"scenario(s) disagree with ground truth: {metrics['mismatches']}")
+        if metrics["allowed_ids"] != [
+            "allow_declared_optimization",
+            "allow_in_envelope_dispatch",
+            "allow_bound_forecast",
+            "allow_complied_curtailment",
+        ]:
+            return (False, f"allowed set drifted: {metrics['allowed_ids']}")
+        reasons = metrics["denial_reasons"]
+        for sid, needle in (
+            ("deny_undeclared_safety_class", "unverifiable_safety_class"),
+            ("deny_out_of_envelope_scope", "out_of_envelope"),
+            ("deny_unbound_dispatch", "unbound_dispatch"),
+            ("deny_stale_forecast", "stale_forecast"),
+            ("deny_unscreened_workload", "power_resonance_risk"),
+            ("deny_curtailment_refusal", "curtailment_refusal"),
+            ("deny_nuclear_control", "nuclear_control"),
+            ("deny_unreported_blackout", "unreported_blackout"),
+        ):
+            if needle not in reasons.get(sid, ""):
+                return (False, f"denial reason missing {needle!r}: {reasons.get(sid, '')!r}")
+        return True, "12/12 grid probes match ground truth"
+
+    return BenchExpectation(
+        runtime=_noop_runtime(h),
+        expect_subtype="success",
+        post_check=check,
+        metrics=metrics,
+        notes="grid control envelopes: safety-class gates, control-room envelopes, forecast-dispatch binding, power-resonance screens, curtailment contracts, nuclear advisory-only, blackout evidence chains",
+    )
+
+def _case_metrics_telecom_agents(h: BenchHarness) -> BenchExpectation:
+    """Telecom AI discipline gates (one-hundred-twenty-ninth batch).
+
+    12 deterministic scenarios, 4 allow / 8 deny: a visible
+    AI-identity disclosure passes; an open human channel passes; a
+    spam-flag disconnect after the appeal window with the threshold
+    met allows; an in-envelope reroute allows. Denied: a terms-only
+    disclosure (``telecom.hidden_identity``), no human door at all
+    (``telecom.no_human_door``), a revoked mis-flag after a
+    successful appeal (``telecom.misflag_harm``), an AI voice call
+    with no prior consent (``telecom.unconsented_robocall``), an
+    LLM-computed bill (``telecom.llm_billing``), signaling data
+    re-purposed to an ungranted purpose
+    (``telecom.signaling_repurpose``), a parameter change outside
+    the network-action envelope
+    (``telecom.outside_network_envelope``), and an expired outage
+    ETA (``telecom.stale_eta``, NON_AUTHORITATIVE).
+    """
+    metrics = run_telecom_agents()
+
+    def check(exp: BenchExpectation, report: Any) -> tuple[bool, str]:
+        if metrics["n_scenarios"] != 12:
+            return (False, f"expected 12 telecom scenarios, saw {metrics['n_scenarios']}")
+        if metrics["mismatches"]:
+            return (False, f"scenario(s) disagree with ground truth: {metrics['mismatches']}")
+        if metrics["allowed_ids"] != [
+            "allow_visible_identity",
+            "allow_open_human_door",
+            "allow_spam_disconnect_after_window",
+            "allow_in_envelope_action",
+        ]:
+            return (False, f"allowed set drifted: {metrics['allowed_ids']}")
+        reasons = metrics["denial_reasons"]
+        for sid, needle in (
+            ("deny_terms_only_identity", "telecom.hidden_identity"),
+            ("deny_no_human_door", "telecom.no_human_door"),
+            ("deny_misflag_harm", "telecom.misflag_harm"),
+            ("deny_unconsented_robocall", "telecom.unconsented_robocall"),
+            ("deny_llm_billing", "telecom.llm_billing"),
+            ("deny_signaling_repurpose", "telecom.signaling_repurpose"),
+            ("deny_outside_network_envelope", "telecom.outside_network_envelope"),
+            ("deny_stale_eta", "telecom.stale_eta"),
+        ):
+            if needle not in reasons.get(sid, ""):
+                return (False, f"denial reason missing {needle!r}: {reasons.get(sid, '')!r}")
+        return True, "12/12 telecom probes match ground truth"
+
+    return BenchExpectation(
+        runtime=_noop_runtime(h),
+        expect_subtype="success",
+        post_check=check,
+        metrics=metrics,
+        notes=(
+            "2026 AI-telecom thread: Ofcom/Art. 50 visible AI identity "
+            "and the human door; TRAI TCCCPR spam-flag thresholds, "
+            "15-day appeal windows, mis-flag harm; TCPA robocall "
+            "consent; authority-signed self-driving network envelopes; "
+            "deterministic billing engines; purpose-bound signaling "
+            "data; state-bound expiring outage ETAs. Receipts bind "
+            "declared discipline; they do not make the network reliable."
+        ),
+    )
+
 def _case_metrics_greenwash(h: BenchHarness) -> BenchExpectation:
     """Greenwashing evidence gates (one-hundred-thirtieth batch).
 
@@ -19446,6 +19564,8 @@ CASES: tuple[BenchCase, ...] = (
     BenchCase("metrics.embodied", "metrics", "embodied safety vacuum gates: standard=pre_ratification declarations, fall-zone receipts, measured capability honesty labels, labor-impact disclosures, prescriptive-agent envelopes, inspection confidence gates, dispatch audit, incident-clock binding", _case_metrics_embodied),
     BenchCase("metrics.greenwash", "metrics", "greenwashing evidence gates: recycled-content receipts with bound measurement evidence, mass-balance attribution-method gates, claim evidence chains (ECGT), sorting-purity binding, second-life battery inspection gates, routed datacenter decommissioning, marketing-claim probe", _case_metrics_greenwash),
     BenchCase("metrics.labor_algo", "metrics", "algorithmic-management guards: worker-signed quota receipts, human-countersigned algorithmic terminations, authority-pinned fatigue breakers, surveillance proportionality, dispatch rejection fairness, AV safety cases, labor-impact binding (AI-logistics absorption)", _case_metrics_labor_algo),
+    BenchCase("metrics.telecom_agents", "metrics", "telecom AI discipline: visible bot identity disclosure, human-door receipts, spam-flag receipts with appeal, A2P voice consent, network-action envelopes, billing logic separation, signaling purpose binding, outage ETA freshness (AI-telecom absorption)", _case_metrics_telecom_agents),
+    BenchCase("metrics.grid_agents", "metrics", "grid control envelopes: safety-component classification, control-room action envelopes, forecast-dispatch binding, workload power screens, emergency curtailment contracts, nuclear advisory-only, blackout evidence chains (AI-energy absorption)", _case_metrics_grid_agents),
     BenchCase("metrics.commerce", "metrics", "agentic commerce terms: machine-readable terms-read receipts bound to the exact product, likeness-creep gate, biometric capture receipts with verifiable deletion, non-authoritative try-on previews, tiered authentication evidence with human review for high-value items, digital passport binding, AI model-substitution disclosure (AI-fashion/retail absorption)", _case_metrics_commerce),
     BenchCase("metrics.harness_binding", "metrics", "harness integrity binding: SHA-256 harness hash in audit, quad-only scores", _case_metrics_harness_binding),
     BenchCase("metrics.drift_detection", "metrics", "Livenerf-style drift probe: bootstrap CI + paired permutation test", _case_metrics_drift_detection),
@@ -20711,6 +20831,580 @@ def run_labor_algo() -> dict[str, Any]:
     }
 
 
+def run_grid_agents() -> dict[str, Any]:
+    """Grid control envelopes (one-hundred-twenty-eighth batch).
+
+    Absorbs the 2026 AI-energy thread: Amprion keeps dispatch
+    decisions human (AI forecasts, humans decide); EU AI.grids
+    builds sovereign foundation models for grid ops; Annex III
+    classifies safety-component AI high-risk; Shenzhen "灵曦" links
+    AI load forecasts to VPP dispatch (unaudited vendor numbers);
+    Bit2Watt flags compute load resonance as a cyber-physical
+    attack surface; Ceres pushes flexible datacenter curtailment
+    contracts; blackout incidents feed the 113th-batch incident
+    clock with bound timelines.
+
+    Fail-closed rules over 12 deterministic scenarios: undeclared
+    systems classify ``grid:unverifiable_safety_class`` (Annex III
+    borderline-underreporting lesson); dispatch outside the
+    pre-approved control-room envelope denies (the requester can
+    never widen their own envelope); dispatch must bind a
+    registered, fresh forecast (unbound →
+    ``grid:unbound_dispatch``, stale → ``grid:stale_forecast``);
+    unscreened high-fluctuation workloads quarantine with
+    ``grid:power_resonance_risk`` (Bit2Watt); refusing an active
+    authority-signed curtailment order denies
+    ``grid:curtailment_refusal`` (Ceres); nuclear control actions
+    without an explicit grant deny ``grid:nuclear_control`` (never
+    implied); a blackout filing without a bound timeline is
+    ``grid:unreported_blackout``. Ground truth is closed:
+    4 allow / 8 deny.
+    """
+    from ed25519 import public_key, sign
+
+    from canonical_json import jcs_sha256_hex
+    from grid_agents import (
+        AuthorityRegistry,
+        BlackoutRegistry,
+        ControlEnvelopeRegistry,
+        CurtailmentContractRegistry,
+        ForecastRegistry,
+        NuclearGate,
+        SafetyClassRegistry,
+        WorkloadPowerScreen,
+        issue_curtailment_order,
+    )
+
+    T0 = 1_800_000_000
+    DAY = 86_400
+    HEX64 = "ab" * 32
+    ALICE_SEC = b"alice-grid-bench-key-00000000000"
+    BOB_SEC = b"bob-grid-bench-key-0000000000000"
+    ALICE_PUB = public_key(ALICE_SEC)
+    BOB_PUB = public_key(BOB_SEC)
+
+    authorities = AuthorityRegistry()
+    authorities.register("tso-alice", ALICE_PUB)
+    authorities.register("ops-bob", BOB_PUB)
+
+    # Safety classes: one declared optimization system; one ghost.
+    safety = SafetyClassRegistry()
+    safety.declare(
+        system_id="forecast-opt",
+        safety_class="non_safety_optimization",
+        declared_boundary_digest=HEX64,
+        declared_at=T0,
+    )
+
+    # Control envelope: vpp_dispatch, autonomous, 7 days.
+    envelopes = ControlEnvelopeRegistry(authorities)
+    env_payload = {
+        "schema_version": "northstar.grid-agents.v1",
+        "envelope_id": "env-grid-1",
+        "operator_id": "ops-1",
+        "scope_kinds": ["vpp_dispatch"],
+        "autonomy_modes": ["autonomous"],
+        "issued_by": "tso-alice",
+        "issued_at": T0,
+        "expires_at": T0 + 7 * DAY,
+        "prev_hash": "genesis",
+    }
+    envelopes.issue_envelope(
+        envelope_id="env-grid-1",
+        operator_id="ops-1",
+        scope_kinds=("vpp_dispatch",),
+        autonomy_modes=("autonomous",),
+        issued_by="tso-alice",
+        issued_at=T0,
+        expires_at=T0 + 7 * DAY,
+        signature=sign(ALICE_SEC, jcs_sha256_hex(env_payload).encode("utf-8")),
+    )
+
+    # Forecasts: one fresh one.
+    forecasts = ForecastRegistry()
+    forecasts.register_forecast(
+        forecast_id="fc-1",
+        forecast_digest=HEX64,
+        horizon_s=3600,
+        issued_at=T0,
+        issuer="meteo",
+    )
+
+    # Curtailment contract + active order.
+    contracts = CurtailmentContractRegistry(authorities)
+    contract_payload = {
+        "schema_version": "northstar.grid-agents.v1",
+        "contract_id": "ct-1",
+        "workload_id": "dc-1",
+        "curtailment_authority_id": "tso-alice",
+        "cap_rule_digest": HEX64,
+        "issued_by": "ops-bob",
+        "issued_at": T0,
+        "prev_hash": "genesis",
+    }
+    contracts.issue_contract(
+        contract_id="ct-1",
+        workload_id="dc-1",
+        curtailment_authority_id="tso-alice",
+        cap_rule_digest=HEX64,
+        issued_by="ops-bob",
+        issued_at=T0,
+        signature=sign(BOB_SEC, jcs_sha256_hex(contract_payload).encode("utf-8")),
+    )
+    order_payload = {
+        "schema_version": "northstar.grid-agents.v1",
+        "order_id": "ord-1",
+        "grid_region": "PJM",
+        "start_unix": T0,
+        "end_unix": T0 + DAY,
+        "issued_by": "tso-alice",
+        "issued_at": T0,
+    }
+    order = issue_curtailment_order(
+        authorities,
+        order_id="ord-1",
+        grid_region="PJM",
+        start_unix=T0,
+        end_unix=T0 + DAY,
+        issued_by="tso-alice",
+        issued_at=T0,
+        signature=sign(ALICE_SEC, jcs_sha256_hex(order_payload).encode("utf-8")),
+    )
+
+    nuclear = NuclearGate(authorities)
+    screen = WorkloadPowerScreen()
+    blackouts = BlackoutRegistry()
+
+    scenarios: list[tuple[str, str, Any]] = []
+
+    def _scenario(sid: str, expected: str, thunk: Any) -> None:
+        scenarios.append((sid, expected, thunk))
+
+    _scenario("allow_declared_optimization", "allow",
+              lambda: safety.safety_component_gate("forecast-opt"))
+    _scenario("allow_in_envelope_dispatch", "allow",
+              lambda: envelopes.check_dispatch(
+                  envelope_id="env-grid-1", action_kind="vpp_dispatch",
+                  mode="autonomous", now=T0 + 1))
+    _scenario("allow_bound_forecast", "allow",
+              lambda: forecasts.check_dispatch_binding(forecast_id="fc-1",
+                                                       now=T0 + 100))
+    _scenario("allow_complied_curtailment", "allow",
+              lambda: contracts.check_curtailment(workload_id="dc-1", order=order,
+                                                 complied=True, now=T0 + 10))
+    _scenario("deny_undeclared_safety_class", "deny",
+              lambda: safety.safety_component_gate("sys-ghost"))
+    _scenario("deny_out_of_envelope_scope", "deny",
+              lambda: envelopes.check_dispatch(
+                  envelope_id="env-grid-1", action_kind="transformer_switching",
+                  mode="autonomous", now=T0 + 1))
+    _scenario("deny_unbound_dispatch", "deny",
+              lambda: forecasts.check_dispatch_binding(forecast_id=None, now=T0))
+    _scenario("deny_stale_forecast", "deny",
+              lambda: forecasts.check_dispatch_binding(forecast_id="fc-1",
+                                                       now=T0 + 3601))
+    _scenario("deny_unscreened_workload", "deny",
+              lambda: screen.screen_workload(workload_id="dc-x", peak_mw=200,
+                                             fluctuation_class="unscreened"))
+    _scenario("deny_curtailment_refusal", "deny",
+              lambda: contracts.check_curtailment(workload_id="dc-1", order=order,
+                                                 complied=False, now=T0 + 10))
+    _scenario("deny_nuclear_control", "deny",
+              lambda: nuclear.check_action(system_id="npp-1", mode="control",
+                                           now=T0 + 10))
+    _scenario("deny_unreported_blackout", "deny",
+              lambda: blackouts.file_blackout(
+                  incident_id="bo-1", system_id="tso-1", timeline_digest=None,
+                  detected_at=T0, reported_at=T0 + 100, now=T0 + 100))
+
+    mismatches: list[str] = []
+    allowed_ids: list[str] = []
+    warned_ids: list[str] = []
+    denial_reasons: dict[str, str] = {}
+    for sid, expected, thunk in scenarios:
+        outcome = thunk()
+        verdict = "allow" if outcome.allowed else "deny"
+        reason = outcome.reason
+        if verdict != expected:
+            mismatches.append(
+                f"{sid}: expected {expected}, got {verdict}"
+            )
+        if verdict == "allow":
+            allowed_ids.append(sid)
+        elif verdict == "allow-with-warning":
+            warned_ids.append(sid)
+        else:
+            denial_reasons[sid] = reason
+
+    return {
+        "n_scenarios": len(scenarios),
+        "mismatches": mismatches,
+        "allowed_ids": allowed_ids,
+        "warned_ids": warned_ids,
+        "denial_reasons": denial_reasons,
+    }
+
+
+
+
+def run_telecom_agents() -> dict[str, Any]:
+    """Telecom AI discipline gates (one-hundred-twenty-ninth batch).
+
+    Absorbs the 2026 AI-telecom thread: Ericsson "AI in RAN"
+    (baseband/radio AI, 15+ self-reported deployments, unaudited);
+    the AI-RAN camp war (NVIDIA vs Huawei/ZTE vs Qualcomm 3GPP);
+    湖南电信x中兴 automation (vendor PR); Airtel Xtelify
+    (154M spam flags/month, vendor-reported); Ofcom 2026-09-25
+    (chatbots disclose AI identity, AI never the only door to a
+    human); EU AI Act Art. 50 (visible self-identification, fine
+    print not enough); India TRAI TCCCPR (explicit spam-flag
+    thresholds, 15-day appeal windows, mis-flag harm warning);
+    US TCPA ($500-$1500/call for AI-generated voice robocalls);
+    Mavenir NetAIShield (consent-based in-call screening).
+
+    Fail-closed rules over 12 deterministic scenarios: a visible
+    AI-identity disclosure passes the gate, while a terms-only one
+    denies as ``telecom.hidden_identity``; an open human channel
+    passes, while no door at all denies as
+    ``telecom.no_human_door``; a spam-flag disconnect after an
+    elapsed appeal window with the threshold met allows, while a
+    revoked flag after a successful appeal denies as
+    ``telecom.misflag_harm``; an AI voice call with live callee
+    consent allows, while one without denies as
+    ``telecom.unconsented_robocall``; an in-envelope reroute
+    allows, while a parameter change outside the envelope denies;
+    an LLM-computed bill denies as ``telecom.llm_billing``; training
+    on signaling data for a non-granted purpose denies as
+    ``telecom.signaling_repurpose``; an expired outage ETA denies
+    as ``telecom.stale_eta`` (NON_AUTHORITATIVE). Ground truth is
+    closed: 4 allow / 8 deny.
+    """
+    from telecom_agents import (
+        DEFAULT_APPEAL_WINDOW_S,
+        DEFAULT_ETA_TTL_S,
+        DENY_HIDDEN_IDENTITY,
+        DENY_LLM_BILLING,
+        DENY_MISFLAG_HARM,
+        DENY_NO_HUMAN_DOOR,
+        DENY_OUTSIDE_NETWORK_ENVELOPE,
+        DENY_SIGNALING_REPURPOSE,
+        DENY_STALE_ETA,
+        DENY_UNCONSENTED_ROBOCALL,
+        A2PConsentRegistry,
+        BillingRegistry,
+        HumanDoorRegistry,
+        IdentityRegistry,
+        NetworkEnvelopeRegistry,
+        OutageEtaRegistry,
+        SignalingRegistry,
+        SpamFlagRegistry,
+        a2p_consent_receipt,
+        billing_logic_separation,
+        human_door_receipt,
+        identity_disclosure_gate,
+        network_action_envelope,
+        outage_eta_receipt,
+        signaling_purpose_binding,
+        spam_flag_receipt,
+    )
+    from ed25519 import public_key
+
+    T0 = 1_700_000_000
+    AUTH = bytes([7]) * 32
+    AUTH_PUB = public_key(AUTH).hex()
+    CALLEE = bytes([13]) * 32
+    CALLEE_PUB = public_key(CALLEE).hex()
+    MODEL = "ab" * 32
+
+    def _outcome(verdict: Any) -> dict[str, Any]:
+        return {
+            "verdict": "allow" if verdict.allowed else "deny",
+            "reason": verdict.reason,
+            "classification": verdict.classification,
+        }
+
+    def _identity_reg(mode: str = "visible") -> IdentityRegistry:
+        reg = IdentityRegistry()
+        reg.issue_disclosure(
+            disclosure_id="id-1",
+            session_id="sess-1",
+            bot_id="support-bot",
+            disclosure_mode=mode,
+            disclosed_at=T0,
+            authority_pubkey_hex=AUTH_PUB,
+            authority_secret=AUTH,
+        )
+        return reg
+
+    def _door_reg(open_: bool = True) -> HumanDoorRegistry:
+        reg = HumanDoorRegistry()
+        reg.issue_door(
+            door_id="door-1",
+            session_id="sess-1",
+            human_channel_id="voice-queue-a",
+            estimated_wait_s=180,
+            door_open=open_,
+            checked_at=T0,
+            authority_pubkey_hex=AUTH_PUB,
+            authority_secret=AUTH,
+        )
+        return reg
+
+    def _spam_reg(misflag: bool = False) -> SpamFlagRegistry:
+        reg = SpamFlagRegistry()
+        reg.issue_flag(
+            flag_id="flag-1",
+            flagged_number="+8613800000001",
+            flag_threshold_digest=MODEL,
+            evidence_digest=MODEL,
+            appeal_window_s=DEFAULT_APPEAL_WINDOW_S,
+            flagged_at=T0,
+            authority_pubkey_hex=AUTH_PUB,
+            authority_secret=AUTH,
+        )
+        if misflag:
+            reg.file_appeal("flag-1")
+            reg.revoke_flag("flag-1")
+        return reg
+
+    def _a2p_reg(grant: bool = True) -> A2PConsentRegistry:
+        reg = A2PConsentRegistry()
+        if grant:
+            reg.issue_consent(
+                consent_id="c-1",
+                caller_id="carrier-a",
+                callee_id="+8613800000002",
+                purpose="fraud-alert",
+                consented_at=T0,
+                expires_at=T0 + 86_400,
+                callee_pubkey_hex=CALLEE_PUB,
+                callee_secret=CALLEE,
+            )
+        return reg
+
+    def _net_env() -> NetworkEnvelopeRegistry:
+        reg = NetworkEnvelopeRegistry()
+        reg.arm_envelope(
+            envelope_id="env-1",
+            network_element_id="gnb-42",
+            allowed_actions=("reroute", "capacity_adjust"),
+            armed_at=T0,
+            expires_at=T0 + 3_600,
+            authority_pubkey_hex=AUTH_PUB,
+            authority_secret=AUTH,
+        )
+        return reg
+
+    def _bill_reg() -> BillingRegistry:
+        reg = BillingRegistry()
+        reg.issue_receipt(
+            receipt_id="br-1",
+            bill_id="bill-1",
+            account_id="acct-1",
+            bill_digest=MODEL,
+            engine_id="billing-engine",
+            engine_version="2.4.1",
+            computed_at=T0,
+            authority_pubkey_hex=AUTH_PUB,
+            authority_secret=AUTH,
+        )
+        return reg
+
+    def _sig_reg() -> SignalingRegistry:
+        reg = SignalingRegistry()
+        reg.issue_grant(
+            grant_id="g-1",
+            subject_id="sub-1",
+            purpose="network_planning",
+            dataset_digest=MODEL,
+            granted_at=T0,
+            expires_at=T0 + 86_400,
+            subject_pubkey_hex=CALLEE_PUB,
+            subject_secret=CALLEE,
+        )
+        return reg
+
+    def _eta_reg() -> OutageEtaRegistry:
+        reg = OutageEtaRegistry()
+        reg.issue_eta(
+            eta_id="eta-1",
+            outage_id="out-1",
+            network_state_digest=MODEL,
+            eta_epoch=T0 + 7_200,
+            issued_at=T0,
+            ttl_s=DEFAULT_ETA_TTL_S,
+            authority_pubkey_hex=AUTH_PUB,
+            authority_secret=AUTH,
+        )
+        return reg
+
+    scenarios: list[tuple[str, str, Any]] = []
+
+    def _scenario(sid: str, expected: str, thunk: Any) -> None:
+        scenarios.append((sid, expected, thunk))
+
+    def _s1():
+        reg = _identity_reg("visible")
+        d = reg.for_session("sess-1")[0]
+        return _outcome(identity_disclosure_gate(d))
+
+    _scenario("allow_visible_identity", "allow", _s1)
+
+    def _s2():
+        reg = _door_reg(True)
+        door = reg.for_session("sess-1")[0]
+        return _outcome(human_door_receipt(door))
+
+    _scenario("allow_open_human_door", "allow", _s2)
+
+    def _s3():
+        reg = _spam_reg()
+        flag = reg._log[0]
+        return _outcome(
+            spam_flag_receipt(
+                flag,
+                registry=reg,
+                threshold_met=True,
+                now=T0 + DEFAULT_APPEAL_WINDOW_S + 1,
+            )
+        )
+
+    _scenario("allow_spam_disconnect_after_window", "allow", _s3)
+
+    def _s4():
+        env = _net_env().get("env-1")
+        return _outcome(
+            network_action_envelope(
+                envelope=env,
+                action="reroute",
+                network_element_id="gnb-42",
+                now=T0,
+            )
+        )
+
+    _scenario("allow_in_envelope_action", "allow", _s4)
+
+    def _s5():
+        reg = _identity_reg("terms_only")
+        d = reg.for_session("sess-1")[0]
+        return _outcome(identity_disclosure_gate(d))
+
+    _scenario("deny_terms_only_identity", "deny", _s5)
+
+    def _s6():
+        return _outcome(human_door_receipt(None))
+
+    _scenario("deny_no_human_door", "deny", _s6)
+
+    def _s7():
+        reg = _spam_reg(misflag=True)
+        flag = reg._log[0]
+        return _outcome(
+            spam_flag_receipt(
+                flag,
+                registry=reg,
+                threshold_met=True,
+                now=T0 + DEFAULT_APPEAL_WINDOW_S + 1,
+            )
+        )
+
+    _scenario("deny_misflag_harm", "deny", _s7)
+
+    def _s8():
+        reg = _a2p_reg(grant=False)
+        return _outcome(
+            a2p_consent_receipt(
+                caller_id="carrier-a",
+                callee_id="+8613800000009",
+                purpose="fraud-alert",
+                registry=reg,
+                now=T0 + 100,
+            )
+        )
+
+    _scenario("deny_unconsented_robocall", "deny", _s8)
+
+    def _s9():
+        reg = _bill_reg()
+        return _outcome(
+            billing_logic_separation(
+                bill_id="bill-1", registry=reg, computed_by_llm=True
+            )
+        )
+
+    _scenario("deny_llm_billing", "deny", _s9)
+
+    def _s10():
+        reg = _sig_reg()
+        return _outcome(
+            signaling_purpose_binding(
+                subject_id="sub-1",
+                purpose="fraud_detection",
+                dataset_digest=MODEL,
+                registry=reg,
+                now=T0 + 10,
+            )
+        )
+
+    _scenario("deny_signaling_repurpose", "deny", _s10)
+
+    def _s11():
+        env = _net_env().get("env-1")
+        return _outcome(
+            network_action_envelope(
+                envelope=env,
+                action="parameter_change",
+                network_element_id="gnb-42",
+                now=T0,
+            )
+        )
+
+    _scenario("deny_outside_network_envelope", "deny", _s11)
+
+    def _s12():
+        eta = _eta_reg().latest_for("out-1")
+        return _outcome(
+            outage_eta_receipt(
+                eta, expected_state_digest=MODEL, now=T0 + 7_200
+            )
+        )
+
+    _scenario("deny_stale_eta", "deny", _s12)
+
+    results: list[str] = []
+    mismatches: list[str] = []
+    allowed_ids: list[str] = []
+    warned_ids: list[str] = []
+    denial_reasons: dict[str, str] = {}
+    for sid, expected, thunk in scenarios:
+        try:
+            outcome = thunk()
+        except Exception as error:
+            outcome = {"verdict": "deny", "reason": f"raised: {error}",
+                       "classification": "unverifiable-process"}
+        verdict = outcome.get("verdict")
+        if verdict != expected:
+            mismatches.append(
+                f"{sid}: expected {expected}, got {verdict}"
+            )
+        if verdict == "allow":
+            allowed_ids.append(sid)
+        elif verdict == "allow-with-warning":
+            warned_ids.append(sid)
+        else:
+            denial_reasons[sid] = outcome.get("reason", "")
+
+    return {
+        "n_scenarios": len(scenarios),
+        "mismatches": mismatches,
+        "allowed_ids": allowed_ids,
+        "warned_ids": warned_ids,
+        "denial_reasons": denial_reasons,
+    }
+
+
+
+
 def run_greenwash() -> dict[str, Any]:
     """Greenwashing evidence gates (one-hundred-thirtieth batch).
 
@@ -21443,6 +22137,8 @@ __all__ = [
     "run_companionship",
     "run_embodied",
     "run_greenwash",
+    "run_telecom_agents",
+    "run_grid_agents",
     "run_labor_algo",
     "run_adjudication",
     "run_game_agents",
