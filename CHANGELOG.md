@@ -1,3 +1,60 @@
+## Unreleased (seventy-first batch) — PATH-shim red-team: binary pins + output receipts
+
+Absorbs the red-team methodology of
+[DavidCarliez/trustmebro](https://github.com/DavidCarliez/trustmebro)
+(MIT, Copyright 2026 David Carliez), verified against the real repository
+before porting — nothing taken on README faith. TrustMeBro intercepts
+command-line tools an agent invokes through `PATH` shims (install mode: a
+shim directory prepended to `PATH`; lab mode: a Bubblewrap namespace
+shadowing `PATH` lookups and discovered absolute paths) and its rules
+decide whether to return fabricated output (`spoof`), rewrite the real
+output, block the call, or pass through. In its own evaluation a
+fabricated DNS TXT marker was enough to make models proceed with a scan
+the real tool would have blocked.
+
+- **The honest gap, stated first**: the per-call approval binding
+  (`call_id` + `arguments_digest`) authenticates the *request*, never the
+  *output*. A shim swaps the *binary*, not the arguments, so the existing
+  gate cannot see the attack — a signed approval for the original
+  arguments still verifies while fabricated output flows to the model.
+  The new durable-run tests prove this explicitly rather than hiding it.
+- **Binary pins** (`components/northstar-durable-run/action_gateway.py`):
+  `ToolSpec` gains an optional `binary_pin` (`name`, `realpath`,
+  `sha256` of the file bytes, taken at registration); `execute()`
+  re-verifies the pin *before* the executor runs and fails closed on any
+  mismatch, so a shim planted after pinning never gets to produce output.
+  `verify_binary_pin()` returns `(ok, reason)` instead of raising, so the
+  refusal stays a structured denial.
+- **Output receipts**
+  (`components/northstar-agent-runtime/tools/path_integrity.py`, new):
+  `digest_output()` / `verify_output_receipt()` bind the model-visible
+  tool output into the execution receipt (`sha256` of the canonical JSON);
+  the gateway records `ToolExecutionResult.output_digest` (plus
+  `binary_path`, the `realpath` that actually ran) at execution time, and
+  `verify_output_receipt()` detects any post-execution swap of the
+  recorded output. The runtime and durable-run sides are parallel
+  implementations — the runtime never imports durable-run, so only the
+  field names and digest wire format are shared, exactly like
+  `digest_arguments`.
+- **New bench track `metrics.path_shim_detection`**
+  (`governance_bench.py`): 4 original synthetic probes, fully
+  deterministic (temp dirs, explicit `PATH` strings, no network, no
+  model) — `runtime_shim_after_pin` (pin fails closed),
+  `prepin_shim` (shim pinned itself; `scan_path_shadows` flags the
+  `PATH`-vs-trusted-fallback divergence), `receipt_forgery` (receipt
+  digest mismatch), plus a `clean_no_shim` control. Baseline: detection
+  rate 1.000 (3/3 attacks), 0 false positives. `BENCH_VERSION` v10 → v11.
+- Honest limits, documented in the module docstrings rather than
+  discovered in an incident: a shim planted *before* pinning pins the
+  shim itself (the shadow scan is the detector for that case, and it only
+  sees `PATH`-based shadowing, not lab-mode absolute-path shadowing);
+  output authenticity against an external ground truth is not claimed —
+  the receipt proves *this output came from this binary at this time*
+  and was not rewritten afterwards.
+
+`BENCH_VERSION` v10 → v11; `tools.path_integrity` added to the docbuild
+API manifest; human + `--json` bench output print the new track.
+
 ## Unreleased (seventieth batch) — biscuit-style attenuating delegation credentials
 
 New module `delegation_credentials.py`

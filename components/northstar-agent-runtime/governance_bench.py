@@ -33,6 +33,13 @@ import tempfile
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
+from tools.path_integrity import (
+    digest_output,
+    pin_binary,
+    scan_path_shadows,
+    verify_output_receipt,
+    verify_pin,
+)
 from audit_chain import chain_records, verify_lines
 from delegation_credentials import (
     CHECK_DEPTH_AT_MOST,
@@ -6053,6 +6060,210 @@ def _case_metrics_attenuation(h: BenchHarness) -> BenchExpectation:
     )
 
 
+def _write_bench_tool(directory: str, name: str, content: bytes) -> None:
+    """Write an executable file ``directory/name`` with fixed bytes.
+
+    The file is never executed by the bench — ``shutil.which`` only needs
+    the executable bit to resolve it. Two files with the same name and
+    different bytes model the real binary vs. the trustmebro-style shim.
+    """
+    script = Path(directory) / name
+    script.write_bytes(content)
+    script.chmod(0o755)
+
+
+def run_path_shim_detection() -> dict[str, Any]:
+    """PATH-shim red-team: trustmebro-style fabricated tool output, detected.
+
+    Attack model (DavidCarliez/trustmebro, MIT — verified against the real
+    repo before porting): a shim directory prepended to ``PATH`` (install
+    mode) shadows the tool binary; rules return fabricated output
+    (``spoof``) without ever running the real binary. The per-call approval
+    binding (``call_id`` + ``arguments_digest``) authenticates the *request*,
+    never the *output*, so this attack is invisible to the existing gate —
+    the bench first demonstrates that (the shim changes no argument digest),
+    then proves the two new defenses catch every variant:
+
+    * ``runtime_shim_after_pin`` — shim planted *after* the binary was
+      pinned at registration: ``verify_pin`` sees a different ``realpath``
+      (and different bytes) and fails closed before the executor runs, so
+      the fabricated output never reaches the model.
+    * ``prepin_shim`` — shim planted *before* pinning (compromised
+      install-time trust root): the pin matches the shim, so the pin layer
+      is blind; ``scan_path_shadows`` flags the name because its ``PATH``
+      resolution differs from the trusted fallback (``/usr/bin:/bin``).
+    * ``receipt_forgery`` — the recorded output is swapped after execution:
+      ``verify_output_receipt`` recomputes the ``sha256`` of the canonical
+      output JSON and the receipt digest no longer matches.
+
+    A ``clean_no_shim`` control proves the defenses do not false-positive on
+    an unshadowed binary. Pure and deterministic: temp directories, explicit
+    ``PATH`` strings, no process-environment mutation, no network, no
+    model. Only probe ids, kinds, and booleans enter the metrics — temp
+    paths are nondeterministic and stay out.
+    """
+    probes: list[dict[str, Any]] = []
+    tmpdirs: list[str] = []
+    try:
+        real_dir = tempfile.mkdtemp(prefix="ns-shim-real-")
+        shim_dir = tempfile.mkdtemp(prefix="ns-shim-shim-")
+        tmpdirs.extend((real_dir, shim_dir))
+        _write_bench_tool(real_dir, "nstool", b"real binary bytes v1")
+        _write_bench_tool(shim_dir, "nstool", b"fabricated shim bytes")
+
+        # -- control: no shim anywhere -------------------------------------
+        pin = pin_binary("nstool", path=real_dir)
+        ok, _reason = verify_pin(pin, path=real_dir)
+        probes.append(
+            {
+                "id": "clean_no_shim",
+                "kind": "control",
+                "attack": False,
+                "detected": False,
+                "allowed": ok,
+            }
+        )
+
+        # -- attack 1: shim planted after pinning ---------------------------
+        pin = pin_binary("nstool", path=real_dir)
+        ok, reason = verify_pin(
+            pin, path=shim_dir + os.pathsep + real_dir
+        )
+        probes.append(
+            {
+                "id": "runtime_shim_after_pin",
+                "kind": "attack",
+                "attack": True,
+                # verify_pin must refuse: the shim resolves first, so the
+                # (realpath, digest) pair cannot match the pin.
+                "detected": not ok,
+            }
+        )
+
+        # -- attack 2: shim planted before pinning --------------------------
+        pin = pin_binary("nstool", path=shim_dir + os.pathsep + real_dir)
+        ok, _reason = verify_pin(
+            pin, path=shim_dir + os.pathsep + real_dir
+        )
+        shadows = scan_path_shadows(
+            ["nstool"],
+            path=shim_dir + os.pathsep + real_dir,
+            trusted_path=real_dir,
+        )
+        probes.append(
+            {
+                "id": "prepin_shim",
+                "kind": "attack",
+                "attack": True,
+                # The pin layer is blind here (it pinned the shim); the
+                # shadow scan is what catches it.
+                "detected": ok and len(shadows) == 1 and shadows[0]["name"] == "nstool",
+            }
+        )
+
+        # -- attack 3: recorded output swapped after execution ---------------
+        real_output = {"text": "real answer", "exit": 0}
+        receipt = digest_output(real_output)
+        forged_output = {"text": "fabricated answer", "exit": 0}
+        ok, _reason = verify_output_receipt(forged_output, receipt)
+        probes.append(
+            {
+                "id": "receipt_forgery",
+                "kind": "attack",
+                "attack": True,
+                "detected": not ok,
+            }
+        )
+    finally:
+        for directory in tmpdirs:
+            shutil.rmtree(directory, ignore_errors=True)
+
+    attacks = [p for p in probes if p["attack"]]
+    detected = [p for p in attacks if p["detected"]]
+    controls = [p for p in probes if not p["attack"]]
+    false_positives = [p for p in controls if p["detected"] or not p["allowed"]]
+    return {
+        "n_probes": len(probes),
+        "n_attacks": len(attacks),
+        "n_detected": len(detected),
+        "detection_rate": round(len(detected) / len(attacks), 4) if attacks else 0.0,
+        "false_positives": len(false_positives),
+        "control_passed": all(p["allowed"] and not p["detected"] for p in controls),
+        "attack_ids": sorted(p["id"] for p in attacks),
+        "detected_ids": sorted(p["id"] for p in detected),
+        "probes": [
+            {
+                "id": p["id"],
+                "kind": p["kind"],
+                "attack": p["attack"],
+                "detected": p["detected"],
+            }
+            for p in probes
+        ],
+    }
+
+
+def _case_metrics_path_shim_detection(h: BenchHarness) -> BenchExpectation:
+    """PATH-shim red-team: fabricated tool output is detected, every variant."""
+    metrics = run_path_shim_detection()
+
+    def check(exp: BenchExpectation, report: Any) -> tuple[bool, str]:
+        if metrics["n_probes"] != 4:
+            return (False, f"expected 4 path-shim probes, saw {metrics['n_probes']}")
+        if metrics["n_attacks"] != 3:
+            return (False, f"expected 3 attacks, saw {metrics['n_attacks']}")
+        if metrics["detection_rate"] != 1.0:
+            return (
+                False,
+                f"detection rate must be 1.0, saw {metrics['detection_rate']} "
+                f"(detected {metrics['detected_ids']})",
+            )
+        if metrics["false_positives"] != 0 or not metrics["control_passed"]:
+            return (
+                False,
+                "control probe failed: the defenses must not false-positive "
+                "on an unshadowed binary",
+            )
+        if metrics["detected_ids"] != [
+            "prepin_shim",
+            "receipt_forgery",
+            "runtime_shim_after_pin",
+        ]:
+            return (
+                False,
+                f"detected set changed: {metrics['detected_ids']}",
+            )
+        return (
+            True,
+            f"PATH-shim detection rate {metrics['detection_rate']:.2f} "
+            f"({metrics['n_detected']}/{metrics['n_attacks']} attacks; "
+            f"{metrics['false_positives']} false positives)",
+        )
+
+    return BenchExpectation(
+        runtime=_noop_runtime(h),
+        expect_subtype="success",
+        post_check=check,
+        metrics=metrics,
+        notes=(
+            "trustmebro (DavidCarliez/trustmebro, MIT) red-team methodology, "
+            "honestly scoped: the attack *idea* (PATH shim returns fabricated "
+            "tool output; the approval binding authenticates the request, "
+            "never the output) is verified against the real repo, but the 4 "
+            "probes are original synthetic situations — no trustmebro code is "
+            "vendored or executed. runtime_shim_after_pin: shim planted after "
+            "pinning -> verify_pin fails closed on (realpath, digest) "
+            "mismatch before the executor runs. prepin_shim: shim pinned "
+            "itself (compromised install trust root) -> scan_path_shadows "
+            "flags the PATH-vs-trusted-fallback divergence. receipt_forgery: "
+            "recorded output swapped post-execution -> output_digest "
+            "mismatch. Not claimed: output authenticity against an external "
+            "ground truth; lab-mode absolute-path shadowing (out of scope "
+            "for PATH-layer defenses)."
+        ),
+    )
+
+
 CASES: tuple[BenchCase, ...] = (
     BenchCase("denial.disallowed_beats_allow", "denial", "disallowed_tools beats allow + bypass", _case_disallowed_beats_allow),
     BenchCase("denial.plan_mode_blocks_write", "denial", "plan mode refuses Write", _case_plan_mode_blocks_write),
@@ -6096,6 +6307,7 @@ CASES: tuple[BenchCase, ...] = (
     BenchCase("metrics.least_privilege", "metrics", "least-privilege gate enforcement (OPUR-style)", _case_metrics_least_privilege),
     BenchCase("metrics.approval_percall_binding", "metrics", "per-call approval binding + structured denial", _case_metrics_approval_percall_binding),
     BenchCase("metrics.ask_timing", "metrics", "ASK-timing judgment (Ask-F1-style)", _case_metrics_ask_timing),
+    BenchCase("metrics.path_shim_detection", "metrics", "PATH-shim red-team: fabricated tool output is detected", _case_metrics_path_shim_detection),
     BenchCase("metrics.attenuation", "metrics", "attenuating delegation credentials (biscuit-style)", _case_metrics_attenuation),
     BenchCase("metrics.pledge_semantics", "metrics", "pledge-style self-restriction (declare->tighten-only)", _case_metrics_pledge_semantics),
     BenchCase("metrics.dataflow_sensitivity", "metrics", "dataflow sensitivity tracking (OpenAPPA-style)", _case_metrics_dataflow_sensitivity),
@@ -6603,6 +6815,14 @@ def _print_report(report: BenchReport) -> None:
                 f"{attn.get('n_blocks', 0)} blocks, audit anchor "
                 f"{'ok' if attn.get('audit_anchor_ok') else 'BROKEN'}"
             )
+        shim = report.metrics.get("metrics.path_shim_detection", {})
+        if shim:
+            print(
+                f"  path-shim red-team: detection rate "
+                f"{shim.get('detection_rate', 0):.2f} "
+                f"({shim.get('n_detected', 0)}/{shim.get('n_attacks', 0)} "
+                f"attacks; {shim.get('false_positives', 0)} false positives)"
+            )
     if report.ok:
         print("result: PASS — gate decisions match the public scorecard")
     else:
@@ -6631,6 +6851,7 @@ __all__ = [
     "run_compositional",
     "run_pledge_semantics",
     "run_attenuation",
+    "run_path_shim_detection",
     "run_bench_command",
     "run_consent_ablation",
     "run_decision_model",

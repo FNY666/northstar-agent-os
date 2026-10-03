@@ -126,6 +126,7 @@ MANIFEST: dict[str, tuple[str, ...]] = {
         "tools.capdrop",
         "tools.pledge",
         "tools.parallel",
+        "tools.path_integrity",
         "tools.shell",
         "tools.skill_scripts",
         "tools.verify_invariants",

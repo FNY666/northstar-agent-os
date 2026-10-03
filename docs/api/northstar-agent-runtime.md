@@ -586,6 +586,10 @@ Pledge-style self-restriction semantics, OpenBSD pledge(2) model.
 
 Biscuit-style attenuating delegation credentials, offline verification.
 
+#### `run_path_shim_detection()`
+
+PATH-shim red-team: trustmebro-style fabricated tool output, detected.
+
 #### `list_cases()`
 
 #### `run_suite(*, only: Iterable[str] | None=None, tracks: Iterable[str] | None=None)`
@@ -2493,6 +2497,41 @@ True when ``spec``'s handler body may run beside another safe handler.
 #### `batch_is_parallel_safe(specs: list[Any])`
 
 True when every spec in the turn is parallel-safe (and there is more than one).
+
+### `tools.path_integrity`
+
+Source: `components/northstar-agent-runtime/tools/path_integrity.py`
+
+PATH-shim detection and tool-binary integrity pins.
+
+#### `digest_bytes(data: bytes)`
+
+``sha256:<hex>`` digest of raw bytes.
+
+#### `BinaryPin`
+
+Pinned identity of the external binary behind a tool.
+
+- `as_dict()`
+#### `pin_binary(name: str, *, path: str | None=None)`
+
+Pin a tool binary: resolve it now, record ``(realpath, content digest)``.
+
+#### `verify_pin(pin: BinaryPin, *, path: str | None=None)`
+
+Re-resolve and re-hash; ``(True, ...)`` only on an exact match.
+
+#### `scan_path_shadows(names: list[str], *, path: str | None=None, trusted_path: str=TRUSTED_FALLBACK_PATH)`
+
+Flag tool names shadowed on ``PATH`` relative to a trusted baseline.
+
+#### `digest_output(output: Any)`
+
+``sha256:<hex>`` of the canonical JSON of a tool output.
+
+#### `verify_output_receipt(output: Any, expected_digest: str)`
+
+Recompute the output digest and compare with the recorded receipt.
 
 ### `tools.shell`
 
