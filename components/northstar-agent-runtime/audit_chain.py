@@ -78,114 +78,29 @@ def canonical_json(obj: Any) -> bytes:
     Byte-identical to one NDJSON feed line for the same record.
 
     This is the *legacy* (chain v1) canonicalization. It is close to JCS
-    but not JCS: control characters use JSON short escapes (``\\n`` instead
-    of JCS's ``\\u000a``), keys sort by Unicode code point instead of
-    UTF-16 code units, and float formatting follows Python repr instead of
-    ECMAScript ``Number.prototype.toString``. Kept forever so v1 feeds
-    keep verifying; new code should use :func:`jcs_canonical_json`.
+    but not JCS: keys sort by Unicode code point instead of UTF-16 code
+    units (the two orders diverge for astral characters), and float
+    formatting follows Python repr rather than the specified ECMAScript
+    ``Number.prototype.toString`` (they coincide on every RFC 8785
+    Appendix B vector, but only JCS is specified). Kept forever so v1
+    feeds keep verifying; new code must use :func:`jcs_canonical_json`.
     """
     return json.dumps(obj, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")
 
 
-def _utf16_key(key: str) -> bytes:
-    """Sort key for JCS object properties: UTF-16 code units, big-endian.
+# ---------------------------------------------------------------------------
+# JCS (RFC 8785) — delegated to the canonical_json module.
+#
+# The JCS implementation used to live here. It had a real spec bug: it
+# emitted ``\\u000a`` for newline, contradicting RFC 8785 §3.2.2.3, which
+# mandates the short escapes \\b \\t \\n \\f \\r. The single implementation
+# now lives in ``canonical_json`` (written from the RFC text, pinned by
+# RFC golden vectors); this function keeps its signature so every caller
+# (trace_export, akf_export, audit_scitt, chain v2) is unaffected.
+# ---------------------------------------------------------------------------
 
-    RFC 8785 §3.2.2.1 sorts by UTF-16 code *unit*, not Unicode code point;
-    the two orders agree inside the BMP but differ for astral characters
-    (surrogate pairs sort by their high surrogate). Comparing the
-    big-endian UTF-16 byte sequences implements exactly that order.
-    """
-    return key.encode("utf-16-be")
-
-
-def _jcs_escape(text: str) -> str:
-    """JCS string body: only ``"``, ``\\`` and U+0000-U+001F are escaped.
-
-    RFC 8785 §3.2.2.3 — notably there are *no* short escapes: newline is
-    ``\\u000a``, never ``\\n``; ``/`` is never escaped; non-ASCII is raw.
-    """
-    out: list[str] = []
-    for char in text:
-        code = ord(char)
-        if char == '"':
-            out.append('\\"')
-        elif char == "\\":
-            out.append("\\\\")
-        elif code < 0x20:
-            out.append("\\u%04x" % code)
-        else:
-            out.append(char)
-    return "".join(out)
-
-
-_SAFE_INT = 2**53  # JCS integer range is (-(2^53)+1) .. ((2^53)-1)
-
-
-def _es_number_to_string(value: float) -> str:
-    """ECMAScript ``Number.prototype.toString`` for a finite non-safe float.
-
-    Python's ``repr`` already gives shortest round-trip digits; only the
-    *formatting* differs from ECMAScript (exponent thresholds and exponent
-    padding), so parse the repr into significant digits + decimal exponent
-    and re-apply the ECMA-262 formatting rules.
-    """
-    rep = repr(value)
-    negative = rep.startswith("-")
-    if negative:
-        rep = rep[1:]
-    match = __import__("re").fullmatch(r"(\d+)(?:\.(\d+))?(?:[eE]([+-]?\d+))?", rep)
-    assert match is not None  # repr of a finite float always matches
-    int_part, frac_part, exp_part = match.group(1), match.group(2) or "", match.group(3)
-    digits = int(int_part + frac_part)  # significant digits
-    exp = (int(exp_part) if exp_part else 0) - len(frac_part)  # value = digits * 10**exp
-    # ECMA-262 picks the decomposition with the smallest k: strip trailing
-    # zeros (repr's ".0" on integral floats would otherwise add one).
-    while digits % 10 == 0:
-        digits //= 10
-        exp += 1
-    chars = str(digits)
-    width = len(chars)
-    point = exp + width  # ECMA-262's n: value = chars * 10**(point-width)
-    if width <= point <= 21:
-        body = chars + "0" * (point - width)
-    elif 0 < point <= 21:
-        body = chars[:point] + "." + chars[point:]
-    elif -6 < point <= 0:
-        body = "0." + "0" * (-point) + chars
-    else:
-        exp10 = point - 1
-        body = chars[0] + ("." + chars[1:] if width > 1 else "") + "e" + ("+" if exp10 >= 0 else "") + str(exp10)
-    return ("-" if negative else "") + body
-
-
-def _jcs_dumps(value: Any) -> str:
-    """Recursive JCS serializer (RFC 8785 §3)."""
-    if value is None:
-        return "null"
-    if value is True:
-        return "true"
-    if value is False:
-        return "false"
-    if isinstance(value, str):
-        return '"' + _jcs_escape(value) + '"'
-    if isinstance(value, int):
-        if -_SAFE_INT < value < _SAFE_INT:
-            return str(value)
-        return _es_number_to_string(float(value))
-    if isinstance(value, float):
-        if value != value or value in (float("inf"), float("-inf")):
-            raise ValueError("JCS forbids NaN and Infinity")
-        if value == 0:
-            return "0"  # JCS forbids -0
-        if value.is_integer() and -_SAFE_INT < value < _SAFE_INT:
-            return str(int(value))
-        return _es_number_to_string(value)
-    if isinstance(value, (list, tuple)):
-        return "[" + ",".join(_jcs_dumps(item) for item in value) + "]"
-    if isinstance(value, dict):
-        items = sorted(value.items(), key=lambda kv: _utf16_key(kv[0]))
-        return "{" + ",".join('"' + _jcs_escape(key) + '":' + _jcs_dumps(item) for key, item in items) + "}"
-    raise TypeError(f"JCS cannot serialize {type(value).__name__}")
+from canonical_json import JcsError as JcsError  # noqa: E402,F401
+from canonical_json import jcs_canonical_json as _jcs_impl  # noqa: E402
 
 
 def jcs_canonical_json(obj: Any) -> bytes:
@@ -195,8 +110,11 @@ def jcs_canonical_json(obj: Any) -> bytes:
     draft-sharif-agent-audit-trail §6.1 ("Implementations MUST use JCS;
     alternative canonicalization schemes MUST NOT be used"). Used for all
     hashing and signing in ``northstar-audit-chain/2``.
+
+    Implemented in :mod:`canonical_json`; this wrapper preserves the
+    historic import location.
     """
-    return _jcs_dumps(obj).encode("utf-8")
+    return _jcs_impl(obj)
 
 
 def _canon_for_version(chain_version: str):

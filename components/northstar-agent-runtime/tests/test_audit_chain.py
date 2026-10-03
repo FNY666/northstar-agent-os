@@ -373,9 +373,14 @@ class JcsCanonicalizationTests(unittest.TestCase):
     def test_key_order_and_separators(self):
         self.assertEqual(jcs_canonical_json({"b": 1, "a": 2}), b'{"a":2,"b":1}')
 
-    def test_no_short_escapes(self):
-        # JCS escapes controls as \u00XX — never \n, \t, etc.
-        self.assertEqual(jcs_canonical_json({"a": "\n\t"}), b'{"a":"\\u000a\\u0009"}')
+    def test_rfc8785_string_escapes(self):
+        # RFC 8785 section 3.2.2.3: the five predefined controls use short
+        # escapes (\b \t \n \f \r); other controls use lowercase \uhhhh.
+        # (An older revision of this test asserted \u000a for newline --
+        # that contradicted the RFC and was fixed in the 95th batch, when
+        # the JCS implementation moved to canonical_json.)
+        self.assertEqual(jcs_canonical_json({"a": "\n\t"}), b'{"a":"\\n\\t"}')
+        self.assertEqual(jcs_canonical_json({"a": "\b\f\r"}), b'{"a":"\\b\\f\\r"}')
         self.assertEqual(jcs_canonical_json({"a": '"\\'}), b'{"a":"\\"\\\\"}')
         self.assertEqual(jcs_canonical_json({"a": "/"}), b'{"a":"/"}')
         self.assertEqual(jcs_canonical_json({"a": "\u001f"}), b'{"a":"\\u001f"}')
