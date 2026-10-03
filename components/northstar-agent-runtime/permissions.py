@@ -23,6 +23,15 @@ host never approved is not.
 name would mean no subagent is ever created, and the error would blame a tool
 that was never the problem. Delegation is instead gated per tool inside the
 subagent's declared tool set (:meth:`PermissionEngine.check_delegation`).
+
+An optional structured *decision-model* path
+(:mod:`decision_model`, SystemOne-style: state + typed questions ->
+options + probabilities) can adjudicate the calls that would otherwise reach
+the host callback: model ``allow``/``deny`` decides the call, model
+``escalate`` or a model error falls through to the host callback. With no
+model configured the gate is exactly the deterministic three layers above.
+Every model-path verdict carries its full input -> output -> verdict chain
+in ``PermissionDecision.decision_model_audit``.
 """
 from __future__ import annotations
 
@@ -30,6 +39,16 @@ import hashlib
 import json
 from dataclasses import dataclass, field, replace
 from typing import Any, Callable, Iterable, Literal, Sequence
+
+from decision_model import (
+    DecisionModel,
+    DecisionModelResult,
+    DecisionPolicy,
+    adjudicate,
+    approval_questions,
+    build_decision_audit,
+    build_decision_state,
+)
 
 PermissionMode = Literal["default", "acceptEdits", "plan", "bypassPermissions"]
 
@@ -50,6 +69,7 @@ DecisionSource = Literal[
     "allowed_tools",
     "mode",
     "host_callback",
+    "decision_model",
     "unknown_tool",
     "delegation_gate",
     "invalid_mode",
@@ -65,19 +85,26 @@ class PermissionDecision:
     reason: str = ""
     rule: str = ""
     tool: str = ""
+    #: Set only when the verdict came from the decision-model path: the full
+    #: input -> output -> verdict chain (state, questions, probabilities,
+    #: thresholds), ready to append to the audit feed.
+    decision_model_audit: dict[str, Any] | None = None
 
     @property
     def text(self) -> str:
         return self.reason or ("allowed" if self.allowed else "denied")
 
     def as_dict(self) -> dict[str, Any]:
-        return {
+        payload = {
             "tool": self.tool,
             "allowed": self.allowed,
             "source": self.source,
             "reason": self.reason,
             "rule": self.rule,
         }
+        if self.decision_model_audit is not None:
+            payload["decision_model_audit"] = self.decision_model_audit
+        return payload
 
 
 @dataclass(frozen=True)
@@ -184,6 +211,14 @@ class PermissionConfig:
     allowed_tools: tuple[str, ...] = ()
     disallowed_tools: tuple[str, ...] = ()
     can_use_tool: Callable[[str, dict[str, Any], PermissionRequestContext], Any] | None = None
+    #: Optional structured decision model (SystemOne-style: state + typed
+    #: questions -> options + probabilities). When set, mutating calls that
+    #: would otherwise go to the host callback are first offered to the
+    #: model; ``allow``/``deny`` decide the call, ``escalate`` (or a model
+    #: error) falls through to the existing host-callback path. ``None``
+    #: means the deterministic gate path, unchanged.
+    decision_model: DecisionModel | None = None
+    decision_policy: DecisionPolicy = field(default_factory=DecisionPolicy)
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "mode", validate_mode(self.mode))
@@ -191,6 +226,10 @@ class PermissionConfig:
         object.__setattr__(self, "disallowed_tools", normalise_names(self.disallowed_tools))
         if self.can_use_tool is not None and not callable(self.can_use_tool):
             raise TypeError("can_use_tool must be callable")
+        if self.decision_model is not None and not hasattr(self.decision_model, "decide"):
+            raise TypeError("decision_model must provide a decide(state, questions) method")
+        if not isinstance(self.decision_policy, DecisionPolicy):
+            raise TypeError("decision_policy must be a DecisionPolicy")
 
     @property
     def overlap(self) -> tuple[str, ...]:
@@ -332,6 +371,24 @@ class PermissionEngine:
                 rule="mode:acceptEdits",
                 tool=tool_name,
             )
+        request = context or PermissionRequestContext(
+            mode=self.config.mode, reason_hint=f"{tool_name} is mutating"
+        )
+        # The approver must always see the digest of the exact arguments being
+        # decided on: if the caller did not pin it, derive it here so a
+        # decision can never be detached from its arguments.
+        if not request.arguments_digest:
+            request = replace(
+                request, arguments_digest=digest_arguments(payload or {})
+            )
+        if self.config.decision_model is not None:
+            model_decision = self._evaluate_with_decision_model(
+                tool_name, resolved_kind, is_mutating, request
+            )
+            if model_decision is not None:
+                return model_decision
+            # The model escalated or failed: fall through to the existing
+            # host-callback path. The model path never grants on error.
         if self.config.can_use_tool is None:
             return PermissionDecision(
                 False,
@@ -342,16 +399,6 @@ class PermissionEngine:
                 ),
                 rule=f"mode:{self.config.mode}:no_callback",
                 tool=tool_name,
-            )
-        request = context or PermissionRequestContext(
-            mode=self.config.mode, reason_hint=f"{tool_name} is mutating"
-        )
-        # The approver must always see the digest of the exact arguments being
-        # decided on: if the caller did not pin it, derive it here so a
-        # decision can never be detached from its arguments.
-        if not request.arguments_digest:
-            request = replace(
-                request, arguments_digest=digest_arguments(payload or {})
             )
         try:
             verdict = self.config.can_use_tool(tool_name, dict(payload or {}), request)
@@ -396,6 +443,74 @@ class PermissionEngine:
             context=context,
             known=known,
         )
+
+    # -- decision-model path -------------------------------------------------
+    def _evaluate_with_decision_model(
+        self,
+        tool_name: str,
+        kind: str,
+        mutating: bool,
+        request: PermissionRequestContext,
+    ) -> PermissionDecision | None:
+        """Offer the call to the structured decision model.
+
+        Returns a decision for ``allow``/``deny`` outcomes, or ``None`` when
+        the model escalates or fails -- the caller then falls through to the
+        host-callback path. A broken model never grants access.
+        """
+        model = self.config.decision_model
+        assert model is not None  # noqa: S101 - guarded by the caller
+        state = build_decision_state(
+            tool_name,
+            kind=kind,
+            mutating=mutating,
+            context=request,
+            payload_digest=request.arguments_digest,
+        )
+        questions = approval_questions()
+        policy = self.config.decision_policy
+        model_error: str | None = None
+        try:
+            result = model.decide(state, questions)
+            outcome, reason = adjudicate(result, policy)
+        except Exception as error:  # noqa: BLE001 - a broken model must not grant access
+            result = DecisionModelResult(
+                answers={}, model=getattr(model, "model_name", "")
+            )
+            outcome, reason = (
+                "escalate",
+                f"decision model raised {type(error).__name__}; "
+                "deferring to host callback",
+            )
+            model_error = f"{type(error).__name__}: {error}"
+        audit = build_decision_audit(
+            state=state,
+            questions=questions,
+            result=result,
+            policy=policy,
+            outcome=outcome,
+            reason=reason,
+            model_error=model_error,
+        )
+        if outcome == "allow":
+            return PermissionDecision(
+                True,
+                source="decision_model",
+                reason=reason,
+                rule="decision_model:allow",
+                tool=tool_name,
+                decision_model_audit=audit,
+            )
+        if outcome == "deny":
+            return PermissionDecision(
+                False,
+                source="decision_model",
+                reason=reason,
+                rule="decision_model:deny",
+                tool=tool_name,
+                decision_model_audit=audit,
+            )
+        return None
 
     # -- delegation --------------------------------------------------------
     def check_delegation(

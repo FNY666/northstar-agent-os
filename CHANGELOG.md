@@ -1,4 +1,53 @@
-## Unreleased (sixtieth batch) — Linux capability-drop launcher for tool-effect subprocesses
+## Unreleased (sixty-first batch) — structured decision-model approval path (Clef/Strands format)
+
+Absorbs the *interface idea* of the October-2026 "decision model" wave —
+Cloudflare Clef / Clef-flash (Apache-2.0) and AWS Strands Decider 2B
+(Apache-2.0), via the SystemOne typed-question API they share with
+TypeSafe Jev: a decision model takes a JSON **state** plus a schema of
+typed questions (**`noul`** yes/no → P(yes), **`choice`** named options →
+per-option probabilities + confidence, **`score`** ordered rubric →
+expected score) and returns **options + probabilities in one pass, with
+no free-form text to parse**. OpenAI's "Decisions API", announced the
+same week, has no public technical detail and is not absorbed.
+
+Honestly scoped: what is absorbed is the *format*, not weights, code, or
+benchmarks. Vendor latency/accuracy claims (Clef-flash "38.8 ms", Strands
+Decider "115 ms", "beats Jev") are vendor-reported and have **not** been
+independently verified; nothing in this batch depends on them.
+
+- **New module `decision_model.py`**: `DecisionQuestion` (validated
+  `noul`/`choice`/`score` schema), `QuestionAnswer` /
+  `DecisionModelResult` (options + probabilities), the `DecisionModel`
+  protocol (host plugs in any real model — Clef, Strands, local), a
+  deterministic `StaticDecisionModel` reference (fixed answer tables, no
+  weights, no network), a `DecisionPolicy` threshold adjudicator
+  (choice argmax with `min_confidence`, else `noul` P(yes) against
+  approve/deny thresholds → `allow` / `deny` / `escalate`), and
+  `build_decision_audit()` — the full input → output → verdict chain
+  (state, questions, probabilities, thresholds, outcome) as one
+  audit-ready dict.
+- **Gate wiring (`permissions.py`)**: `PermissionConfig` gains optional
+  `decision_model` / `decision_policy`. Mutating calls that would reach
+  the host callback are first offered to the model: `allow`/`deny`
+  decides the call (new `decision_model` source), `escalate` or a model
+  exception falls through to the existing host-callback path — the
+  model path **never grants on error**. Every model-path verdict
+  carries its audit chain in
+  `PermissionDecision.decision_model_audit`. With no model configured
+  the gate is exactly the deterministic three layers, unchanged; the
+  state sent to a model carries the arguments *digest*, never raw
+  arguments.
+- **New bench track `metrics.decision_model`** (8 deterministic probes):
+  high-confidence allow/deny decide directly, low confidence escalates,
+  a raising model falls back to the host callback, malformed
+  probabilities escalate, the no-model control keeps the old path, and
+  every model-path verdict's audit chain is complete
+  (`BENCH_VERSION` v10 → v11; scorecard 41/41).
+- 23 new unit tests (`tests/test_decision_model.py`): question
+  validation, state builder, policy thresholds, static-model
+  determinism, gate wiring (allow/deny/escalate/fallback/control),
+  config validation, audit shape.
+
 
 New module `components/northstar-agent-runtime/tools/capdrop.py`: a
 least-privilege launcher that zeroes (or whitelist-narrows) the child's

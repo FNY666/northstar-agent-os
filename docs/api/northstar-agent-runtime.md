@@ -530,6 +530,10 @@ Map every bench probe to the OWASP Agentic Top 10 2026 taxonomy.
 
 Least-privilege gate enforcement, ToolPrivBench methodology.
 
+#### `run_decision_model()`
+
+Structured decision-model approval path (SystemOne-style format).
+
 #### `run_ask_timing()`
 
 ASK-timing judgment, HiL-Bench Ask-F1 methodology.
@@ -919,6 +923,58 @@ The ``tools/call`` parameters for an MRTR retry.
 #### `discover_summary(result: Mapping[str, Any] | None)`
 
 What ``server/discover`` told us, for the operator-facing ``--json`` init record.
+
+### `decision_model`
+
+Source: `components/northstar-agent-runtime/decision_model.py`
+
+Structured decision-model approval path (SystemOne-style).
+
+#### `DecisionQuestion`
+
+One typed question in the decision schema.
+
+- `as_dict()`
+#### `QuestionAnswer`
+
+The model's answer to one question: options + probabilities.
+
+- `as_dict()`
+#### `DecisionModelResult`
+
+Everything a decision model returns for one state + schema.
+
+- `as_dict()`
+#### `DecisionModel`
+
+Host-pluggable decision model (Clef / Strands Decider / local).
+
+- `decide(state: dict[str, Any], questions: dict[str, DecisionQuestion])`
+#### `build_decision_state(tool_name: str, *, kind: str, mutating: bool, context: Any, payload_digest: str='')`
+
+Build the JSON state a decision model sees for one gated call.
+
+#### `approval_questions()`
+
+The canonical question schema the gate asks a decision model.
+
+#### `DecisionPolicy`
+
+Thresholds turning model probabilities into a gate outcome.
+
+- `as_dict()`
+#### `adjudicate(result: DecisionModelResult, policy: DecisionPolicy)`
+
+Turn options + probabilities into allow / deny / escalate.
+
+#### `StaticDecisionModel`
+
+Deterministic reference model: fixed answers keyed by tool or kind.
+
+- `decide(state: dict[str, Any], questions: dict[str, DecisionQuestion])`
+#### `build_decision_audit(*, state: dict[str, Any], questions: dict[str, DecisionQuestion], result: DecisionModelResult, policy: DecisionPolicy, outcome: DecisionOutcome, reason: str, model_error: str | None=None)`
+
+The full input -> output -> verdict chain, ready for the audit feed.
 
 ### `permissions`
 
