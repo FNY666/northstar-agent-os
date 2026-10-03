@@ -115,7 +115,7 @@ from tools import ToolLimits, ToolSandbox, build_default_registry
 
 #: Semantic version of the public case set. Bump when a case is added, removed,
 #: or its expected verdict changes — consumers pin against this string.
-BENCH_VERSION = "northstar.governance.bench.v21"
+BENCH_VERSION = "northstar.governance.bench.v23"
 
 USAGE_ERROR = 64
 
@@ -5666,6 +5666,219 @@ def run_agent_readiness() -> dict[str, Any]:
     }
 
 
+def run_stream_guard() -> dict[str, Any]:
+    """Streaming output guard (one-hundred-sixth batch).
+
+    Absorbs the 2026 open-models thread: guard models are going
+    open-weight and Apache 2.0 (Shieldstral, Qwen3Guard-Stream, Granite
+    Guardian 4.1), but most deployments still gate only the *final*
+    output — so a streaming agent can exfiltrate a violating prefix
+    before the gate ever sees it. This runner exercises
+    ``stream_guard.screen_stream`` over 12 deterministic scenarios:
+    clean streams release in full, mid-stream violations halt
+    immediately with nothing after released, boundary-split patterns
+    are caught by the anti-smuggling overlap window, stale/unknown
+    guards refuse the whole stream, risk budgets gate cumulatively,
+    and the receipt chain detects bypass (gaps, tampering, narrowed
+    windows, post-halt smuggling). Ground truth is closed:
+    4 allow / 8 deny.
+    """
+    from stream_guard import (
+        DENY_MALFORMED_CHUNK,
+        DENY_PATTERN_MATCH,
+        DENY_RISK_BUDGET,
+        DENY_STALE_GUARD,
+        STREAM_HALTED_EVENT,
+        STREAM_REFUSED_EVENT,
+        VERIFIED_STREAM,
+        DenyPattern,
+        GuardPolicy,
+        classify_stream,
+        default_policy,
+        screen_stream,
+        verify_chain,
+    )
+
+    policy = default_policy()
+    pin = policy.digest()
+
+    scenarios: list[tuple[str, str, Any]] = []
+
+    def _scenario(sid: str, expected: str, thunk: Any) -> None:
+        scenarios.append((sid, expected, thunk))
+
+    # 1: clean stream releases in full.
+    def _clean() -> dict[str, Any]:
+        r = screen_stream(
+            ["Hello, ", "this is ", "a clean stream."],
+            policy, pin, stream_label="bench-clean",
+        )
+        ok = (not r.halted and r.classification == VERIFIED_STREAM
+              and r.released == ["Hello, ", "this is ", "a clean stream."])
+        return {"verdict": "allow" if ok else "deny"}
+
+    _scenario("allow_clean_stream", "allow", _clean)
+
+    # 2: mid-stream violation halts immediately; nothing after released.
+    def _midstream() -> dict[str, Any]:
+        r = screen_stream(
+            ["safe prefix ", "leaking sk-live-abc123 now ", "never released"],
+            policy, pin, stream_label="bench-mid",
+        )
+        ok = (r.halted and r.halt_index == 1
+              and r.halt_reason == DENY_PATTERN_MATCH
+              and r.released == ["safe prefix "]
+              and r.classification != VERIFIED_STREAM)
+        return {"verdict": "deny" if ok else "allow",
+                "reason": r.halt_reason or "",
+                "event": r.audit_event()}
+
+    _scenario("deny_midstream_violation", "deny", _midstream)
+
+    # 3: boundary-split pattern caught by the overlap window.
+    def _split() -> dict[str, Any]:
+        r = screen_stream(
+            ["token sk-", "live-xyz follows"],
+            policy, pin, stream_label="bench-split",
+        )
+        ok = (r.halted and r.halt_index == 1
+              and "live_secret_key_prefix" in r.receipts[1].matched)
+        return {"verdict": "deny" if ok else "allow",
+                "reason": r.halt_reason or "",
+                "event": r.audit_event()}
+
+    _scenario("deny_boundary_split", "deny", _split)
+
+    # 4: stale guard refuses the whole stream.
+    def _stale() -> dict[str, Any]:
+        r = screen_stream(["anything"], policy, "0" * 64, stream_label="bench-stale")
+        ok = (r.halted and r.halt_reason == DENY_STALE_GUARD
+              and r.released == [] and r.receipts == [])
+        return {"verdict": "deny" if ok else "allow",
+                "reason": r.halt_reason or "",
+                "event": r.audit_event()}
+
+    _scenario("deny_stale_guard", "deny", _stale)
+
+    # 5: malformed policy refuses the whole stream.
+    def _malformed_policy() -> dict[str, Any]:
+        bad = GuardPolicy("p", "v1", (DenyPattern("", 1, "r"),))
+        r = screen_stream(["x"], bad, "0" * 64, stream_label="bench-malpol")
+        ok = r.halted and r.released == []
+        return {"verdict": "deny" if ok else "allow",
+                "reason": r.halt_reason or "",
+                "event": r.audit_event()}
+
+    _scenario("deny_malformed_policy", "deny", _malformed_policy)
+
+    # 6: malformed chunk halts the stream.
+    def _malformed_chunk() -> dict[str, Any]:
+        r = screen_stream(["ok ", 123, "later"], policy, pin, stream_label="bench-malchunk")  # type: ignore[list-item]
+        ok = (r.halted and r.halt_index == 1
+              and r.halt_reason == DENY_MALFORMED_CHUNK)
+        return {"verdict": "deny" if ok else "allow",
+                "reason": r.halt_reason or "",
+                "event": r.audit_event()}
+
+    _scenario("deny_malformed_chunk", "deny", _malformed_chunk)
+
+    # 7-8: risk budget gates cumulatively.
+    budgeted = GuardPolicy(
+        "bench.budget", "v1",
+        (DenyPattern("low-a", 1, "low_a"), DenyPattern("low-b", 1, "low_b")),
+        max_chunk_risk=1, overlap_bytes=8,
+    )
+    budgeted_pin = budgeted.digest()
+
+    def _within_budget() -> dict[str, Any]:
+        r = screen_stream(["has low-a only"], budgeted, budgeted_pin,
+                          stream_label="bench-budget-ok")
+        ok = not r.halted and r.classification == VERIFIED_STREAM
+        return {"verdict": "allow" if ok else "deny"}
+
+    _scenario("allow_risk_budget", "allow", _within_budget)
+
+    def _over_budget() -> dict[str, Any]:
+        r = screen_stream(["has low-a and low-b"], budgeted, budgeted_pin,
+                          stream_label="bench-budget-over")
+        ok = r.halted and r.halt_reason == DENY_RISK_BUDGET
+        return {"verdict": "deny" if ok else "allow",
+                "reason": r.halt_reason or "",
+                "event": r.audit_event()}
+
+    _scenario("deny_risk_budget_exceeded", "deny", _over_budget)
+
+    # 9: a dropped receipt is detected as a chain gap.
+    def _gap() -> dict[str, Any]:
+        r = screen_stream(["alpha ", "beta ", "gamma"], policy, pin,
+                          stream_label="bench-gap")
+        check = verify_chain(r.receipts[:2], r.released, policy)
+        ok = not check["ok"]
+        return {"verdict": "deny" if ok else "allow", "reason": check["reason"]}
+
+    _scenario("deny_chain_gap", "deny", _gap)
+
+    # 10: a tampered receipt is detected.
+    def _tampered() -> dict[str, Any]:
+        import dataclasses
+
+        r = screen_stream(["alpha ", "beta ", "gamma"], policy, pin,
+                          stream_label="bench-tamper")
+        forged = dataclasses.replace(r.receipts[1], risk=999)
+        receipts = [r.receipts[0], forged, r.receipts[2]]
+        check = verify_chain(receipts, r.released, policy)
+        ok = not check["ok"] and "receipt digest mismatch" in check["reason"]
+        return {"verdict": "deny" if ok else "allow", "reason": check["reason"]}
+
+    _scenario("deny_tampered_receipt", "deny", _tampered)
+
+    # 11: a clean chain verifies end to end.
+    def _chain_ok() -> dict[str, Any]:
+        r = screen_stream(["alpha ", "beta ", "gamma"], policy, pin,
+                          stream_label="bench-chain-ok")
+        check = verify_chain(r.receipts, r.released, policy)
+        ok = check["ok"] and classify_stream(r) == VERIFIED_STREAM
+        return {"verdict": "allow" if ok else "deny", "reason": check["reason"]}
+
+    _scenario("allow_chain_verifies", "allow", _chain_ok)
+
+    # 12: a chunk appended after a halt is detected.
+    def _post_halt() -> dict[str, Any]:
+        r = screen_stream(["safe ", "sk-live-abc"], policy, pin,
+                          stream_label="bench-posthalt")
+        check = verify_chain(r.receipts, r.released + ["smuggled"], policy)
+        ok = not check["ok"]
+        return {"verdict": "deny" if ok else "allow", "reason": check["reason"]}
+
+    _scenario("deny_post_halt_smuggle", "deny", _post_halt)
+
+    mismatches: list[str] = []
+    allowed_ids: list[str] = []
+    denial_reasons: dict[str, str] = {}
+    for sid, expected, thunk in scenarios:
+        try:
+            outcome = thunk()
+        except Exception as error:  # noqa: BLE001 — fail-closed probe
+            outcome = {"verdict": "deny", "reason": f"raised: {error}"}
+        verdict = outcome.get("verdict")
+        if verdict != expected:
+            mismatches.append(f"{sid}: expected {expected}, got {verdict}")
+        if verdict == "allow":
+            allowed_ids.append(sid)
+        else:
+            denial_reasons[sid] = outcome.get("reason", "")
+            ev = outcome.get("event") or {}
+            if ev and ev.get("event") not in (STREAM_HALTED_EVENT, STREAM_REFUSED_EVENT):
+                mismatches.append(f"{sid}: halt/refusal must emit the stream event")
+
+    return {
+        "n_scenarios": len(scenarios),
+        "mismatches": mismatches,
+        "allowed_ids": allowed_ids,
+        "denial_reasons": denial_reasons,
+    }
+
+
 def run_adversarial_scenarios() -> dict[str, Any]:
     """Adversarial bench scenarios: multi-agent failures, no-adversary failures, malicious-but-signed.
 
@@ -10961,6 +11174,59 @@ def _case_metrics_agent_readiness(h: BenchHarness) -> BenchExpectation:
     )
 
 
+def _case_metrics_stream_guard(h: BenchHarness) -> BenchExpectation:
+    """Streaming output guard (one-hundred-sixth batch).
+
+    Absorbs the 2026 open-models thread: guard models going open-weight
+    (Shieldstral, Qwen3Guard-Stream, Granite Guardian 4.1) while most
+    deployments still gate only the final output — so a streaming agent
+    can exfiltrate a violating prefix before the gate sees it. 12
+    deterministic scenarios: clean streams release in full, mid-stream
+    violations halt immediately, boundary-split patterns are caught by
+    the overlap window, stale/unknown guards refuse the whole stream,
+    risk budgets gate cumulatively, and the receipt chain detects
+    bypass (gaps, tampering, narrowed windows, post-halt smuggling).
+    """
+    metrics = run_stream_guard()
+
+    def check(exp: BenchExpectation, report: Any) -> tuple[bool, str]:
+        if metrics["n_scenarios"] != 12:
+            return (False, f"expected 12 stream-guard scenarios, saw {metrics['n_scenarios']}")
+        if metrics["mismatches"]:
+            return (False, f"scenario(s) disagree with ground truth: {metrics['mismatches']}")
+        if metrics["allowed_ids"] != [
+            "allow_clean_stream",
+            "allow_risk_budget",
+            "allow_chain_verifies",
+        ]:
+            return (False, f"allowed set drifted: {metrics['allowed_ids']}")
+        reasons = metrics["denial_reasons"]
+        if reasons.get("deny_midstream_violation") != "deny_pattern_match":
+            return (False, "mid-stream violation must halt on deny_pattern_match")
+        if reasons.get("deny_stale_guard") != "stale_guard_version":
+            return (False, "stale guard must refuse the whole stream")
+        if reasons.get("deny_risk_budget_exceeded") != "risk_budget_exceeded":
+            return (False, "over-budget chunk must halt on risk_budget_exceeded")
+        if reasons.get("deny_boundary_split") != "deny_pattern_match":
+            return (False, "boundary-split pattern must be caught by the overlap window")
+        return (True, "12/12 stream-guard scenarios hold: halt/refuse/chain-verify")
+
+    return BenchExpectation(
+        runtime=_noop_runtime(h),
+        expect_subtype="success",
+        post_check=check,
+        metrics=metrics,
+        notes=(
+            "2026 open-models thread: open-weight guard models (Shieldstral, "
+            "Qwen3Guard-Stream, Granite Guardian 4.1) converge on streaming "
+            "guards, but final-output gating lets violating prefixes escape. "
+            "Per-chunk screening before release, liveness-pinned guard "
+            "versions, anti-smuggling overlap windows, and receipt-chained "
+            "decisions so bypass is detectable after the fact."
+        ),
+    )
+
+
 def _case_metrics_harness_binding(h: BenchHarness) -> BenchExpectation:
     """Harness integrity binding (ninetieth batch).
 
@@ -12239,6 +12505,7 @@ CASES: tuple[BenchCase, ...] = (
     BenchCase("metrics.model_lineage", "metrics", "model lineage receipts: taint/laundering/gaps/consent (AI-creative copyright absorption)", _case_metrics_model_lineage),
     BenchCase("metrics.quantum_timeline", "metrics", "quantum-threat timeline gates: BSI phaseout policy on signing", _case_metrics_quantum_timeline),
     BenchCase("metrics.agent_readiness", "metrics", "agent-readiness probes: a11y-tree legibility of public-facing action cards", _case_metrics_agent_readiness),
+    BenchCase("metrics.stream_guard", "metrics", "streaming output guard: per-chunk screening, liveness-pinned guards, anti-smuggling overlap, receipt-chained decisions", _case_metrics_stream_guard),
     BenchCase("metrics.harness_binding", "metrics", "harness integrity binding: SHA-256 harness hash in audit, quad-only scores", _case_metrics_harness_binding),
     BenchCase("metrics.drift_detection", "metrics", "Livenerf-style drift probe: bootstrap CI + paired permutation test", _case_metrics_drift_detection),
 )
@@ -12869,6 +13136,7 @@ __all__ = [
     "run_model_lineage",
     "run_quantum_timeline",
     "run_agent_readiness",
+    "run_stream_guard",
     "run_owasp_asi_coverage",
     "run_policy_axis",
     "run_step_compliance",
