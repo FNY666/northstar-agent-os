@@ -21,7 +21,10 @@ from authorization import verify_authorization
 from contract import _valid_id, validate_run_request
 
 TOOL_CALL_SCHEMA_VERSION = "northstar.tool-call.v1"
-APPROVAL_SCHEMA_VERSION = "northstar.approval.v1"
+#: v2 binds the approval to the exact approved arguments: v1 approvals pinned
+#: the call identity but not the payload, so an approval could be replayed
+#: for the same step+tool with different arguments.
+APPROVAL_SCHEMA_VERSION = "northstar.approval.v2"
 _ID_RE = re.compile(r"^[^\s/\\]+$")
 _SCOPE_RE = re.compile(r"^[^\s/\\:]+:[^\s/\\:]+$")
 _DIGEST_RE = re.compile(r"^sha256:[0-9a-f]{64}$")
@@ -55,6 +58,7 @@ _APPROVAL_FIELDS = {
     "actor_id",
     "tool_name",
     "resource_id",
+    "arguments_digest",
     "decision",
     "expires_at",
 }
@@ -150,6 +154,9 @@ def _validate_approval(value: Any) -> tuple[str, ...]:
         errors.extend(_valid_id(value.get(field), field))
     if value.get("decision") not in {"approved", "denied"}:
         errors.append("decision must be approved or denied")
+    digest = value.get("arguments_digest")
+    if not isinstance(digest, str) or not _DIGEST_RE.fullmatch(digest):
+        errors.append("arguments_digest must be a lowercase sha256 digest")
     expiry = value.get("expires_at")
     if not isinstance(expiry, int) or isinstance(expiry, bool) or expiry <= 0:
         errors.append("expires_at must be a positive integer")
@@ -393,6 +400,7 @@ class ActionGateway:
                 "actor_id",
                 "tool_name",
                 "resource_id",
+                "arguments_digest",
             ):
                 if approval[field] != getattr(call, field):
                     raise ValueError(f"approval does not match tool call {field}")

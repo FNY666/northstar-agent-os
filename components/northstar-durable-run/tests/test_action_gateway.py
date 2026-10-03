@@ -123,7 +123,7 @@ class ActionGatewayTests(unittest.TestCase):
     def approval_for(self, run, call, *, decision="approved", expires_at=2_000):
         return sign_approval(
             {
-                "schema_version": "northstar.approval.v1",
+                "schema_version": "northstar.approval.v2",
                 "approval_id": "approval-001",
                 "approver_id": "human-001",
                 "task_id": call.task_id,
@@ -133,6 +133,7 @@ class ActionGatewayTests(unittest.TestCase):
                 "actor_id": run["actor_id"],
                 "tool_name": call.tool_name,
                 "resource_id": call.resource_id,
+                "arguments_digest": call.arguments_digest,
                 "decision": decision,
                 "expires_at": expires_at,
             },
@@ -186,6 +187,42 @@ class ActionGatewayTests(unittest.TestCase):
                 current_policy_revision="policy-1",
                 now=1_001,
             )
+        self.assertEqual(self.invocations, [])
+
+    def test_approval_cannot_be_replayed_with_different_arguments(self):
+        # The approval binds the exact arguments digest: replaying a token
+        # granted for one payload against the same step+tool with different
+        # arguments must be refused.
+        run = valid_run("workspace:write")
+        approved_args = {"path": "src/main.py", "content": "fixed"}
+        call = call_for(
+            run,
+            tool_name="workspace.write_file",
+            args=approved_args,
+            scope=["workspace:write"],
+        )
+        approval = self.approval_for(run, call)
+        other_args = {"path": "src/other.py", "content": "changed"}
+        other = call_for(
+            run,
+            tool_name="workspace.write_file",
+            args=other_args,
+            scope=["workspace:write"],
+        )
+        object.__setattr__(other, "idempotency_key", "call-other")
+        token = auth_token(run)
+        with self.assertRaises(ValueError) as raised:
+            self.gateway.execute(
+                other,
+                other_args,
+                authorization_token=token,
+                authorization_secret=AUTH_SECRET,
+                current_policy_revision="policy-1",
+                approval_token=approval,
+                now=1_001,
+                run=run,
+            )
+        self.assertIn("arguments_digest", str(raised.exception))
         self.assertEqual(self.invocations, [])
 
     def test_identity_resource_scope_and_arguments_digest_are_bound(self):
