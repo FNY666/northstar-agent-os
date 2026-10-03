@@ -11,6 +11,7 @@ import json
 import os
 import re
 import tempfile
+import threading
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable
@@ -85,6 +86,22 @@ def _require_postconditions(value: Any) -> tuple[str, ...]:
     return tuple(result)
 
 
+class FencingError(ValueError):
+    """The execution lease's fencing epoch is over for this holder.
+
+    Raised when a lease holder presents a stale fencing token: the lease was
+    taken over by another owner, so this holder must stop writing instead of
+    interleaving its events with the new holder's stream. A subclass of
+    :class:`ValueError` so existing ``except ValueError`` guards keep working.
+    """
+
+
+def _require_fencing_token(value: Any) -> int:
+    if not isinstance(value, int) or isinstance(value, bool) or value <= 0:
+        raise ValueError("lease fencing_token is invalid")
+    return value
+
+
 @dataclass(frozen=True)
 class StepPlan:
     step_id: str
@@ -114,7 +131,15 @@ class StepPlan:
 
 
 class LeaseManager:
-    """A single-owner, expiring local lease persisted as strict JSON."""
+    """A single-owner, expiring local lease with fencing tokens.
+
+    The lease file is strict JSON ``{"owner_id", "expires_at",
+    "fencing_token"}``. Every successful :meth:`acquire` starts a new fencing
+    epoch with a monotonically increasing token, so a holder from an older
+    epoch is distinguishable from the current holder even after its TTL has
+    lapsed. Heartbeats, renewals, and fenced appends must present the token of
+    the epoch they belong to; a mismatch fails closed with :class:`FencingError`.
+    """
 
     def __init__(self, path: str | Path):
         self.path = Path(path).absolute()
@@ -126,12 +151,17 @@ class LeaseManager:
             value = json.loads(self.path.read_text(encoding="utf-8"))
         except (OSError, UnicodeDecodeError, json.JSONDecodeError) as error:
             raise ValueError("lease file is invalid") from error
-        if not isinstance(value, dict) or set(value) != {"owner_id", "expires_at"}:
+        if not isinstance(value, dict) or set(value) != {
+            "owner_id",
+            "expires_at",
+            "fencing_token",
+        }:
             raise ValueError("lease file has unknown or missing fields")
         _require_id(value.get("owner_id"), "lease owner_id")
         expires_at = value.get("expires_at")
         if not isinstance(expires_at, int) or isinstance(expires_at, bool) or expires_at <= 0:
             raise ValueError("lease expires_at is invalid")
+        _require_fencing_token(value.get("fencing_token"))
         return value
 
     def _write(self, value: dict[str, Any]) -> None:
@@ -163,7 +193,15 @@ class LeaseManager:
         current = self._read()
         if current is not None and now < current["expires_at"]:
             raise ValueError("lease is held by another active owner")
-        lease = {"owner_id": owner_id, "expires_at": now + ttl_seconds}
+        # A new fencing epoch on every acquire: the token only moves forward
+        # per lease file, so an older epoch's holder can never present a
+        # token that matches the current one.
+        token = current["fencing_token"] + 1 if current is not None else 1
+        lease = {
+            "owner_id": owner_id,
+            "expires_at": now + ttl_seconds,
+            "fencing_token": token,
+        }
         self._write(lease)
         return lease
 
@@ -180,13 +218,86 @@ class LeaseManager:
             raise ValueError("lease has expired")
         return current
 
-    def heartbeat(self, owner_id: str, *, now: int, ttl_seconds: int) -> dict[str, Any]:
-        self.assert_valid(owner_id, now=now)
+    def heartbeat(
+        self, owner_id: str, *, token: int, now: int, ttl_seconds: int
+    ) -> dict[str, Any]:
+        _require_id(owner_id, "owner_id")
+        _require_fencing_token(token)
+        if not isinstance(now, int) or isinstance(now, bool):
+            raise ValueError("now must be an integer")
         if not isinstance(ttl_seconds, int) or isinstance(ttl_seconds, bool) or ttl_seconds <= 0:
             raise ValueError("ttl_seconds must be a positive integer")
-        lease = {"owner_id": owner_id, "expires_at": now + ttl_seconds}
+        current = self._read()
+        if current is None:
+            raise ValueError("lease does not exist")
+        if current["owner_id"] != owner_id:
+            raise FencingError("lease owner does not match")
+        if now >= current["expires_at"]:
+            raise ValueError("lease has expired")
+        if current["fencing_token"] != token:
+            raise FencingError(
+                "fencing token mismatch: the lease was taken over by another owner"
+            )
+        lease = {
+            "owner_id": owner_id,
+            "expires_at": now + ttl_seconds,
+            "fencing_token": token,
+        }
         self._write(lease)
         return lease
+
+    def renew(
+        self, owner_id: str, *, token: int, now: int, ttl_seconds: int
+    ) -> dict[str, Any]:
+        """Renew the lease from inside a still-running action.
+
+        Unlike :meth:`heartbeat`, an expiry here does not abort: the caller is
+        demonstrably alive (it is executing right now), so a cleanly expired
+        lease is re-acquired into a new fencing epoch instead of being
+        refused. A token mismatch still fails closed — someone else owns the
+        lease now, and this holder is fenced.
+        """
+        _require_id(owner_id, "owner_id")
+        _require_fencing_token(token)
+        if not isinstance(now, int) or isinstance(now, bool) or now <= 0:
+            raise ValueError("now must be a positive integer")
+        if not isinstance(ttl_seconds, int) or isinstance(ttl_seconds, bool) or ttl_seconds <= 0:
+            raise ValueError("ttl_seconds must be a positive integer")
+        current = self._read()
+        if current is None:
+            raise FencingError("lease does not exist")
+        if current["owner_id"] != owner_id or current["fencing_token"] != token:
+            raise FencingError(
+                "fencing token mismatch: the lease was taken over by another owner"
+            )
+        new_token = token + 1 if now >= current["expires_at"] else token
+        lease = {
+            "owner_id": owner_id,
+            "expires_at": now + ttl_seconds,
+            "fencing_token": new_token,
+        }
+        self._write(lease)
+        return lease
+
+    def check_token(self, owner_id: str, *, token: int) -> dict[str, Any]:
+        """Fail closed unless this owner still holds the current fencing epoch.
+
+        Deliberately time-agnostic: an expired-but-untaken lease has no rival
+        writer, so expiry alone is not a fence. A token mismatch (or a missing
+        lease file) means the epoch is over — writes must stop.
+        """
+        _require_id(owner_id, "owner_id")
+        _require_fencing_token(token)
+        current = self._read()
+        if current is None:
+            raise FencingError("lease does not exist")
+        if current["owner_id"] != owner_id:
+            raise FencingError("lease owner does not match")
+        if current["fencing_token"] != token:
+            raise FencingError(
+                "fencing token mismatch: the lease was taken over by another owner"
+            )
+        return current
 
     def release(self, owner_id: str) -> None:
         current = self._read()
@@ -213,6 +324,7 @@ class DurableRunner:
         lease_path: str | Path,
         lease_ttl_seconds: int = 60,
         clock: Callable[[], int] | None = None,
+        heartbeat_interval_seconds: int | None = None,
     ):
         if not isinstance(run, RunContract):
             raise ValueError("run must be a RunContract")
@@ -220,6 +332,19 @@ class DurableRunner:
             raise ValueError("lease_ttl_seconds must be a positive integer")
         if clock is not None and not callable(clock):
             raise ValueError("clock must be callable")
+        if heartbeat_interval_seconds is not None:
+            if (
+                not isinstance(heartbeat_interval_seconds, int)
+                or isinstance(heartbeat_interval_seconds, bool)
+                or heartbeat_interval_seconds <= 0
+            ):
+                raise ValueError("heartbeat_interval_seconds must be a positive integer")
+            if clock is None:
+                raise ValueError("heartbeat_interval_seconds requires a clock")
+            if heartbeat_interval_seconds >= lease_ttl_seconds:
+                raise ValueError(
+                    "heartbeat_interval_seconds must be shorter than lease_ttl_seconds"
+                )
         self.run = run
         self.store = store
         self.lease = LeaseManager(lease_path)
@@ -229,6 +354,38 @@ class DurableRunner:
         # loses its lease mid-execution; pass time.time (or a fake in tests)
         # for long-running steps.
         self._clock = clock
+        # Optional renewal cadence (seconds) for a background thread that
+        # keeps the lease alive *while* a single step action executes. Without
+        # it, only the pre-step heartbeat exists and a long action can outlast
+        # the TTL mid-execution.
+        self._heartbeat_interval = heartbeat_interval_seconds
+        self._fence_lock = threading.Lock()
+        self._fencing_token: int | None = None
+
+    def _get_token(self) -> int | None:
+        with self._fence_lock:
+            return self._fencing_token
+
+    def _set_token(self, token: int | None) -> None:
+        with self._fence_lock:
+            self._fencing_token = token
+
+    def _check_fence(self, owner_id: str) -> None:
+        """Raise :class:`FencingError` unless this owner holds the live epoch."""
+        token = self._get_token()
+        if token is None:
+            return
+        self.lease.check_token(owner_id, token=token)
+
+    def _is_fenced(self, owner_id: str) -> bool:
+        token = self._get_token()
+        if token is None:
+            return False
+        try:
+            self.lease.check_token(owner_id, token=token)
+        except FencingError:
+            return True
+        return False
 
     def _event(
         self,
@@ -271,7 +428,17 @@ class DurableRunner:
         idempotency_key: str,
         now: int,
         payload: Any,
+        owner_id: str | None = None,
     ) -> None:
+        token = self._get_token()
+        if token is not None:
+            # Inside a fencing epoch every append must prove it still holds
+            # the current token. A mismatch means the lease was taken over:
+            # the write is refused instead of interleaving a dead epoch's
+            # events with the new holder's stream.
+            if owner_id is None:
+                raise ValueError("owner_id is required once a fencing epoch is active")
+            self.lease.check_token(owner_id, token=token)
         history = self.store.read_history(self.run.run_id)
         event = self._event(
             event_id=f"event-{len(history) + 1:06d}",
@@ -289,6 +456,9 @@ class DurableRunner:
         _require_id(owner_id, "owner_id")
         if not isinstance(now, int) or isinstance(now, bool):
             raise ValueError("now must be an integer")
+        # A new prepare starts outside any fencing epoch: the lease (and its
+        # token) is only established by _ensure_execution_lease below.
+        self._set_token(None)
         history = self.store.read_history(self.run.run_id)
         if not history:
             self._append(
@@ -301,20 +471,54 @@ class DurableRunner:
             )
         return self.store.derive_state(self.run.run_id)
 
-    def _ensure_execution_lease(self, owner_id: str, *, now: int) -> None:
+    def _ensure_execution_lease(self, owner_id: str, *, now: int) -> int:
         # An expired lease is acquirable (crash recovery): LeaseManager.acquire
         # already encodes that rule, so fall through to it when the existing
         # lease is not valid for this owner. An active foreign lease is still
         # refused by acquire, and a corrupt lease file still fails closed.
+        # Returns the fencing token of the epoch this holder now owns.
+        prior: dict[str, Any] | None = None
         if self.lease.path.exists():
             try:
-                self.lease.assert_valid(owner_id, now=now)
-                return
+                current = self.lease.assert_valid(owner_id, now=now)
+                token = current["fencing_token"]
+                self._set_token(token)
+                return token
             except ValueError:
                 pass
-        self.lease.acquire(
+            try:
+                prior = self.lease._read()
+            except ValueError:
+                prior = None
+        lease = self.lease.acquire(
             owner_id, now=now, ttl_seconds=self.lease_ttl_seconds
         )
+        token = lease["fencing_token"]
+        self._set_token(token)
+        if prior is not None:
+            # Takeover of a previous epoch: record it as a state-neutral
+            # run.fenced marker. It is written by the new legitimate holder
+            # (whose token is already active, so the fenced _append gate
+            # passes), so a stale holder never has to write after being
+            # fenced. The marker carries no state transition — it must not
+            # perturb the new epoch's derived run status.
+            self._append(
+                event_type="run.fenced",
+                status="running",
+                step_id="__run__",
+                idempotency_key=(
+                    f"{self.run.run_id}-fenced-{prior['owner_id']}-{prior['fencing_token']}"
+                ),
+                now=now,
+                payload={
+                    "fenced_owner_id": prior["owner_id"],
+                    "fenced_token": prior["fencing_token"],
+                    "owner_id": owner_id,
+                    "fencing_token": token,
+                },
+                owner_id=owner_id,
+            )
+        return token
 
     def _release_quietly(self, owner_id: str) -> None:
         """Release the execution lease without masking the run outcome.
@@ -331,17 +535,81 @@ class DurableRunner:
         """Refresh the execution lease before a step action, if clocked.
 
         A lost lease aborts the run instead of executing steps unowned:
-        heartbeat raises (via assert_valid) when the lease expired or was
-        taken over, and the outer handler records the failure honestly.
+        heartbeat raises (via assert_valid, or FencingError on a token
+        mismatch when the lease was taken over), and the outer handler
+        records the failure honestly.
         """
         if self._clock is None:
             return
         now = self._clock()
         if not isinstance(now, int) or isinstance(now, bool) or now <= 0:
             raise ValueError("clock must return a positive integer")
-        self.lease.heartbeat(owner_id, now=now, ttl_seconds=self.lease_ttl_seconds)
+        token = self._get_token()
+        if token is None:
+            raise ValueError("cannot heartbeat without a fencing epoch")
+        self.lease.heartbeat(
+            owner_id, token=token, now=now, ttl_seconds=self.lease_ttl_seconds
+        )
 
-    def _append_run_started(self, *, now: int) -> None:
+    def _run_action_with_heartbeat(
+        self, owner_id: str, action: Callable[[], dict[str, Any]]
+    ) -> dict[str, Any]:
+        """Run one step action, renewing the lease from a daemon thread.
+
+        Without this, a single action longer than the TTL lets the lease lapse
+        mid-execution. With ``heartbeat_interval_seconds`` set, a daemon
+        thread renews the lease on that cadence while the action runs. If the
+        lease is lost mid-action (taken over), the action is not killed — it
+        cannot be — but its result is never written: :class:`FencingError` is
+        raised after the action returns instead of appending a stale
+        ``step.finished``.
+        """
+        if self._heartbeat_interval is None:
+            return action()
+        if self._clock is None:  # guarded by __init__; fail closed anyway
+            raise ValueError("heartbeat_interval_seconds requires a clock")
+        stop = threading.Event()
+        failures: list[BaseException] = []
+
+        def _renew_loop() -> None:
+            while not stop.wait(self._heartbeat_interval):
+                try:
+                    now = self._clock()
+                    if not isinstance(now, int) or isinstance(now, bool) or now <= 0:
+                        raise ValueError("clock must return a positive integer")
+                    token = self._get_token()
+                    if token is None:
+                        raise ValueError("fencing epoch ended during step action")
+                    renewed = self.lease.renew(
+                        owner_id,
+                        token=token,
+                        now=now,
+                        ttl_seconds=self.lease_ttl_seconds,
+                    )
+                    self._set_token(renewed["fencing_token"])
+                except BaseException as error:  # recorded, then surfaced below
+                    failures.append(error)
+                    return
+
+        thread = threading.Thread(
+            target=_renew_loop, daemon=True, name="northstar-lease-heartbeat"
+        )
+        thread.start()
+        try:
+            result = action()
+        except BaseException:
+            stop.set()
+            thread.join(timeout=self._heartbeat_interval + 5)
+            raise
+        stop.set()
+        thread.join(timeout=self._heartbeat_interval + 5)
+        if failures:
+            raise FencingError(
+                f"execution lease lost during step action: {failures[0]}"
+            ) from failures[0]
+        return result
+
+    def _append_run_started(self, *, now: int, owner_id: str) -> None:
         state = self.store.derive_state(self.run.run_id)
         if state["status"] == "planned":
             self._append(
@@ -351,6 +619,7 @@ class DurableRunner:
                 idempotency_key=f"{self.run.run_id}-started",
                 now=now,
                 payload={"status": "running"},
+                owner_id=owner_id,
             )
         elif state["status"] == "waiting":
             self._append(
@@ -360,6 +629,7 @@ class DurableRunner:
                 idempotency_key=f"{self.run.run_id}-resumed-{state['sequence'] + 1}",
                 now=now,
                 payload={"status": "running"},
+                owner_id=owner_id,
             )
 
     def cancel(self, *, owner_id: str, now: int) -> dict[str, Any]:
@@ -402,7 +672,7 @@ class DurableRunner:
 
         self._ensure_execution_lease(owner_id, now=now)
         try:
-            self._append_run_started(now=now)
+            self._append_run_started(now=now, owner_id=owner_id)
             for plan in plans:
                 self._heartbeat(owner_id)
                 state = self.store.derive_state(self.run.run_id)
@@ -421,6 +691,7 @@ class DurableRunner:
                             "scope_snapshot": list(plan.scope_snapshot),
                             "expected_postconditions": list(plan.expected_postconditions),
                         },
+                        owner_id=owner_id,
                     )
                     step_state = {"status": "planned"}
                 if step_state["status"] == "failed":
@@ -433,16 +704,23 @@ class DurableRunner:
                         idempotency_key=f"{self.run.run_id}-{plan.step_id}-started",
                         now=now,
                         payload={"input_digest": plan.input_digest},
+                        owner_id=owner_id,
                     )
                 action_key = f"{self.run.run_id}:{plan.step_id}:attempt-1"
                 try:
-                    output = plan.action(action_key)
+                    output = self._run_action_with_heartbeat(
+                        owner_id, lambda: plan.action(action_key)
+                    )
                     if not isinstance(output, dict):
                         raise ValueError("step action must return an object")
                 except KeyboardInterrupt:
                     raise
                 except BaseException:
                     raise
+                # Prove the fencing epoch is still ours before the action's
+                # result lands: a holder whose lease was taken over mid-action
+                # must not append step.finished into the new holder's stream.
+                self._check_fence(owner_id)
                 self._append(
                     event_type="step.finished",
                     status="finished",
@@ -450,6 +728,7 @@ class DurableRunner:
                     idempotency_key=f"{self.run.run_id}-{plan.step_id}-finished",
                     now=now,
                     payload={"output_digest": _digest(output)},
+                    owner_id=owner_id,
                 )
                 self._append(
                     event_type="checkpoint.created",
@@ -458,6 +737,7 @@ class DurableRunner:
                     idempotency_key=f"{self.run.run_id}-checkpoint-{plan.step_id}",
                     now=now,
                     payload=self.store.derive_state(self.run.run_id),
+                    owner_id=owner_id,
                 )
                 self.store.create_checkpoint(self.run.run_id)
 
@@ -470,12 +750,19 @@ class DurableRunner:
                     idempotency_key=f"{self.run.run_id}-finished",
                     now=now,
                     payload={"status": "finished"},
+                    owner_id=owner_id,
                 )
                 self.store.create_checkpoint(self.run.run_id)
             return self.store.derive_state(self.run.run_id)
         except KeyboardInterrupt:
             raise
         except Exception as error:
+            if isinstance(error, FencingError) or self._is_fenced(owner_id):
+                # The epoch was fenced: writing step.failed/run.failed now
+                # would interleave a dead epoch's markers with the new
+                # holder's event stream, which is exactly what fencing
+                # forbids. Stop writing and surface the fence loudly.
+                raise
             state = self.store.derive_state(self.run.run_id)
             active_step = next(
                 (
@@ -493,6 +780,7 @@ class DurableRunner:
                     idempotency_key=f"{self.run.run_id}-{active_step}-failed",
                     now=now,
                     payload={"error_class": error.__class__.__name__},
+                    owner_id=owner_id,
                 )
             if self.store.derive_state(self.run.run_id)["status"] == "running":
                 self._append(
@@ -502,6 +790,7 @@ class DurableRunner:
                     idempotency_key=f"{self.run.run_id}-failed",
                     now=now,
                     payload={"error_class": error.__class__.__name__},
+                    owner_id=owner_id,
                 )
             return self.store.derive_state(self.run.run_id)
         finally:

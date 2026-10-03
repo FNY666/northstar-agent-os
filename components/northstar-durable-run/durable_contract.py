@@ -49,6 +49,11 @@ _EVENT_STATUS_BY_TYPE = {
     "step.failed": "failed",
     "step.cancelled": "cancelled",
     "checkpoint.created": "running",
+    # Fencing tripwire: written by the new holder right after a lease
+    # takeover. State-neutral (see event_store._apply_event): it records that
+    # a prior lease epoch was superseded without perturbing the new epoch's
+    # derived run status.
+    "run.fenced": "running",
 }
 
 _ALLOWED_TRANSITIONS = frozenset({

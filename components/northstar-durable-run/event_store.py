@@ -89,6 +89,13 @@ def _apply_event(
             raise ValueError("checkpoint requires an active run")
         return
 
+    if event.event_type == "run.fenced":
+        # Fencing tripwire: written by the new legitimate holder after a
+        # lease takeover. It carries no state transition on purpose — the
+        # new epoch's derived status must not be perturbed by the record of
+        # the old epoch's fencing. May appear in any run status.
+        return
+
     if event.event_type.startswith(_RUN_EVENT_PREFIX):
         if event.step_id != "__run__":
             raise ValueError("run lifecycle events must use the __run__ step")

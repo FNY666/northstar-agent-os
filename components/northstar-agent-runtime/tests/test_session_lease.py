@@ -103,7 +103,12 @@ class LeaseEnvelopeTests(RuntimeTestCase):
         manager = runner.LeaseManager(path)
         lease = manager.acquire("run-a", now=int(time.time()), ttl_seconds=60)
         their_value = json.loads(path.read_text(encoding="utf-8"))
-        self.assertEqual(sorted(their_value), ["expires_at", "owner_id"])
+        # Durable's envelope now carries a fencing_token (monotonic per lease
+        # file); the runtime reader only needs owner_id/expires_at and ignores
+        # the extra field (see _read_metadata).
+        self.assertEqual(
+            sorted(their_value), ["expires_at", "fencing_token", "owner_id"]
+        )
         # The runtime's own reader, pointed at a durable-written file: the fields, the
         # types, and the "is this still claimed" reading all have to work across the two
         # writers, or the shared envelope is a story rather than a property.
@@ -112,7 +117,7 @@ class LeaseEnvelopeTests(RuntimeTestCase):
         self.assertEqual(from_runtime.expires_at, their_value["expires_at"])
         self.assertTrue(from_runtime.metadata_readable)
         manager.release("run-a")
-        self.assertEqual(set(their_value), set(my_value))
+        self.assertEqual(set(their_value) - {"fencing_token"}, set(my_value))
         self.assertEqual(type(their_value["owner_id"]), type(my_value["owner_id"]))
         # Durable deletes its lease file on release; we keep ours as a trace. That is a real
         # divergence, and it is safe in both directions because a reader treats "no file" as

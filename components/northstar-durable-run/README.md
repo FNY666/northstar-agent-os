@@ -46,13 +46,22 @@ output cannot alter the registry, grant, or scope.
 
 `EventStore` treats the JSONL history as the source of truth. Checkpoints carry
 a state digest and sequence and are accepted only when they match the current
-history. `DurableRunner` uses an owner-bound expiring lease and stable action
-keys so a resumed fixture can avoid repeating an idempotent side effect.
+history. `DurableRunner` uses an owner-bound expiring lease with fencing
+tokens, plus stable action keys, so a resumed fixture can avoid repeating an
+idempotent side effect.
 An expired lease is reclaimable by a new owner (crash recovery); an active
-lease held by someone else still refuses. `DurableRunner` accepts an
-optional `clock` (epoch seconds) to heartbeat the lease before each step —
-without one, a run that outlasts the TTL loses its lease mid-execution,
-and a stolen lease aborts the run instead of executing steps unowned.
+lease held by someone else still refuses. Every successful acquire starts a
+new fencing epoch with a monotonically increasing token, and every heartbeat
+and event append must present the current token: a holder whose lease was
+taken over gets its writes refused (`FencingError`) instead of interleaving a
+dead epoch's events with the new holder's stream, and the takeover is recorded
+as a state-neutral `run.fenced` marker by the new holder. `DurableRunner`
+accepts an optional `clock` (epoch seconds) to heartbeat the lease before
+each step, and an optional `heartbeat_interval_seconds` (shorter than the
+TTL, requires the clock) to renew the lease from a background thread *while*
+a single step action executes — without it, a run that outlasts the TTL loses
+its lease mid-execution, and a stolen lease raises instead of executing steps
+unowned.
 
 `verifier.py` does not trust a step's claimed output or a model's claimed
 status. It checks the actual run state, private workspace, required file
@@ -87,8 +96,14 @@ This is not a production scheduler, sandbox, VM, container runtime, browser
 profile manager, distributed queue, or complete Agent OS. The first prototype
 uses local JSONL and JSON files, caller-registered Python functions, and a
 single-process test harness. It does not prove atomic multi-process claims,
-network isolation, process isolation, lease fencing under races, native Linux
-signal behavior, secret rotation, or production deployment safety.
+network isolation, process isolation, native Linux
+signal behavior, secret rotation, or production deployment safety. The
+fencing tokens are enforced on every append and heartbeat, but the lease
+itself is still a read-modify-write JSON file: two processes racing an
+acquire/renew can both believe they hold the lease (no compare-and-swap),
+and the check-then-write between a token check and the following append is
+not atomic. Treat the tokens as a single-writer discipline with loud
+detection, not as a proven distributed lock.
 
 Event history is exportable into the repository's canonical NDJSON audit feed
 (`durable_audit.py`, envelope `audit.ndjson/1` from the run contract), so the

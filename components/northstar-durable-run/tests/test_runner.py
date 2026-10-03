@@ -1,6 +1,7 @@
 import json
 import sys
 import tempfile
+import time
 import unittest
 from pathlib import Path
 
@@ -9,7 +10,7 @@ sys.path.insert(0, str(COMPONENT_ROOT))
 
 from durable_contract import RunContract  # noqa: E402
 from event_store import EventStore  # noqa: E402
-from runner import DurableRunner, LeaseManager, StepPlan  # noqa: E402
+from runner import DurableRunner, FencingError, LeaseManager, StepPlan  # noqa: E402
 
 
 RUN = RunContract.from_dict(
@@ -38,13 +39,19 @@ class LeaseManagerTests(unittest.TestCase):
 
     def test_acquire_heartbeat_and_release_are_owner_bound(self):
         lease = self.leases.acquire("worker-a", now=100, ttl_seconds=20)
-        self.assertEqual(lease, {"owner_id": "worker-a", "expires_at": 120})
         self.assertEqual(
-            self.leases.heartbeat("worker-a", now=110, ttl_seconds=20),
-            {"owner_id": "worker-a", "expires_at": 130},
+            lease,
+            {"owner_id": "worker-a", "expires_at": 120, "fencing_token": 1},
+        )
+        self.assertEqual(
+            self.leases.heartbeat("worker-a", token=1, now=110, ttl_seconds=20),
+            {"owner_id": "worker-a", "expires_at": 130, "fencing_token": 1},
         )
         with self.assertRaises(ValueError):
-            self.leases.heartbeat("worker-b", now=111, ttl_seconds=20)
+            self.leases.heartbeat("worker-b", token=1, now=111, ttl_seconds=20)
+        with self.assertRaises(FencingError):
+            # Right owner, stale token: the epoch moved on.
+            self.leases.heartbeat("worker-a", token=2, now=111, ttl_seconds=20)
         with self.assertRaises(ValueError):
             self.leases.acquire("worker-b", now=111, ttl_seconds=20)
         self.leases.release("worker-a")
@@ -54,9 +61,41 @@ class LeaseManagerTests(unittest.TestCase):
         self.leases.acquire("worker-a", now=100, ttl_seconds=5)
         reclaimed = self.leases.acquire("worker-b", now=105, ttl_seconds=10)
         self.assertEqual(reclaimed["owner_id"], "worker-b")
+        # Takeover starts a new fencing epoch: the token moves forward.
+        self.assertEqual(reclaimed["fencing_token"], 2)
         self.path.write_text('{"owner_id":"worker-b","unexpected":true}\n')
         with self.assertRaises(ValueError):
             self.leases.assert_valid("worker-b", now=106)
+
+    def test_fencing_token_is_monotonic_and_stale_tokens_are_refused(self):
+        first = self.leases.acquire("worker-a", now=100, ttl_seconds=10)
+        self.assertEqual(first["fencing_token"], 1)
+        taken = self.leases.acquire("worker-b", now=110, ttl_seconds=10)
+        self.assertEqual(taken["fencing_token"], 2)
+        with self.assertRaises(FencingError):
+            self.leases.heartbeat("worker-a", token=1, now=111, ttl_seconds=10)
+        with self.assertRaises(FencingError):
+            self.leases.check_token("worker-a", token=1)
+        with self.assertRaises(FencingError):
+            self.leases.renew("worker-a", token=1, now=111, ttl_seconds=10)
+        self.leases.check_token("worker-b", token=2)  # current holder passes
+        renewed = self.leases.renew("worker-b", token=2, now=115, ttl_seconds=10)
+        self.assertEqual(renewed["fencing_token"], 2)  # unexpired: same epoch
+        self.assertEqual(renewed["expires_at"], 125)
+        relapsed = self.leases.renew("worker-b", token=2, now=200, ttl_seconds=10)
+        self.assertEqual(relapsed["fencing_token"], 3)  # clean expiry: new epoch
+        with self.assertRaises(FencingError):
+            self.leases.renew("worker-b", token=2, now=201, ttl_seconds=10)
+
+    def test_check_token_is_time_agnostic_but_owner_strict(self):
+        self.leases.acquire("worker-a", now=100, ttl_seconds=10)
+        # Expired but untaken: no rival writer, so not a fence.
+        self.leases.check_token("worker-a", token=1)
+        with self.assertRaises(FencingError):
+            self.leases.check_token("worker-b", token=1)
+        self.leases.release("worker-a")
+        with self.assertRaises(FencingError):
+            self.leases.check_token("worker-a", token=1)
 
 
 class DurableRunnerTests(unittest.TestCase):
@@ -278,7 +317,9 @@ class RunnerLeaseHeartbeatTests(unittest.TestCase):
         self.assertEqual(state["status"], "finished")
         self.assertEqual(ran, ["s1", "s2"])
 
-    def test_stolen_lease_aborts_the_run_before_the_next_step(self):
+    def test_stolen_lease_refuses_the_stale_write_and_raises_fencing(self):
+        # worker-b takes over mid-step: worker-a's step.finished must NOT land
+        # in the new epoch's event stream, and s2 must never run unowned.
         runner = self.make_runner()
         ran = []
 
@@ -290,17 +331,24 @@ class RunnerLeaseHeartbeatTests(unittest.TestCase):
             )
             return {"ok": True}
 
-        state = runner.execute(
-            [self.plan("s1", s1), self.plan("s2", lambda key: ran.append("s2") or {})],
-            owner_id="worker-a",
-            now=100,
-        )
-        self.assertEqual(state["status"], "failed")
+        with self.assertRaises(FencingError):
+            runner.execute(
+                [
+                    self.plan("s1", s1),
+                    self.plan("s2", lambda key: ran.append("s2") or {"ok": True}),
+                ],
+                owner_id="worker-a",
+                now=100,
+            )
         self.assertEqual(ran, ["s1"], "s2 must never run without the lease")
+        event_types = [item.event_type for item in runner.store.read_history("run-001")]
+        self.assertNotIn("step.finished", event_types)
+        self.assertNotIn("run.failed", event_types)
 
-    def test_finished_result_survives_a_lost_lease(self):
-        # The finally-block release must not mask the run outcome when the
-        # lease was taken over mid-run.
+    def test_lost_lease_no_longer_lands_a_stale_step_finished(self):
+        # Regression: the old code let the taken-over holder's step.finished
+        # land after the takeover. Fencing refuses the stale write instead;
+        # the new holder resumes the unfinished step itself.
         runner = self.make_runner()
 
         def s1(key):
@@ -310,8 +358,11 @@ class RunnerLeaseHeartbeatTests(unittest.TestCase):
             )
             return {"ok": True}
 
-        state = runner.execute([self.plan("s1", s1)], owner_id="worker-a", now=100)
-        self.assertEqual(state["status"], "finished")
+        with self.assertRaises(FencingError):
+            runner.execute([self.plan("s1", s1)], owner_id="worker-a", now=100)
+        event_types = [item.event_type for item in runner.store.read_history("run-001")]
+        self.assertNotIn("step.finished", event_types)
+        self.assertNotIn("run.finished", event_types)
 
     def test_release_quietly_ignores_a_foreign_lease(self):
         runner = self.make_runner()
@@ -328,6 +379,158 @@ class RunnerLeaseHeartbeatTests(unittest.TestCase):
         runner = self.make_runner()
         state = runner.execute([self.plan("s1", lambda key: {})], owner_id="worker-a", now=100)
         self.assertEqual(state["status"], "failed")
+
+
+class RunnerFencingTests(unittest.TestCase):
+    """Fencing tokens: stale holders cannot write, takeovers are marked."""
+
+    def setUp(self):
+        self.tempdir = tempfile.TemporaryDirectory()
+        self.root = Path(self.tempdir.name)
+        self.now = [100]
+
+    def tearDown(self):
+        self.tempdir.cleanup()
+
+    def make_runner(self, **kwargs):
+        store = EventStore(self.root / "events.jsonl")
+        kwargs.setdefault("clock", lambda: self.now[0])
+        return DurableRunner(
+            RUN,
+            store,
+            lease_path=self.root / "run.lease.json",
+            lease_ttl_seconds=20,
+            **kwargs,
+        )
+
+    def plan(self, step_id, action):
+        return StepPlan(
+            step_id=step_id,
+            input_payload={"step": step_id},
+            scope_snapshot=["workspace:write"],
+            expected_postconditions=[f"{step_id}_done"],
+            action=action,
+        )
+
+    def test_fenced_holder_cannot_append_events(self):
+        runner = self.make_runner()
+        runner.prepare(owner_id="worker-a", now=100)
+        token = runner._ensure_execution_lease("worker-a", now=100)
+        self.assertEqual(token, 1)
+        # worker-b takes over the expired lease: token moves to 2.
+        LeaseManager(self.root / "run.lease.json").acquire(
+            "worker-b", now=200, ttl_seconds=60
+        )
+        with self.assertRaises(FencingError):
+            runner._append(
+                event_type="step.finished",
+                status="finished",
+                step_id="s1",
+                idempotency_key="run-001-s1-finished",
+                now=200,
+                payload={"output_digest": "sha256:" + "0" * 64},
+                owner_id="worker-a",
+            )
+        # Only run.created (pre-epoch) is in history: the stale write landed nowhere.
+        self.assertEqual(len(runner.store.read_history("run-001")), 1)
+
+    def test_takeover_appends_run_fenced_marker_for_the_new_holder(self):
+        runner = self.make_runner()
+        runner.prepare(owner_id="worker-a", now=100)
+        runner.lease.acquire("worker-a", now=100, ttl_seconds=1)
+        state = runner.execute(
+            [self.plan("s1", lambda key: {"ok": True})],
+            owner_id="worker-b",
+            now=101,
+        )
+        self.assertEqual(state["status"], "finished")
+        history = runner.store.read_history("run-001")
+        markers = [item for item in history if item.event_type == "run.fenced"]
+        self.assertEqual(len(markers), 1)
+        # The tripwire names the fenced epoch; it is state-neutral so the new
+        # epoch still runs to completion.
+        self.assertIn("worker-a", markers[0].idempotency_key)
+        self.assertEqual(
+            [item.event_type for item in history],
+            [
+                "run.created",
+                "run.fenced",
+                "run.started",
+                "step.planned",
+                "step.started",
+                "step.finished",
+                "checkpoint.created",
+                "run.finished",
+            ],
+        )
+
+    def test_background_heartbeat_renews_lease_during_long_action(self):
+        runner = self.make_runner(heartbeat_interval_seconds=1)
+        seen = {}
+
+        def long_action(key):
+            self.now[0] += 30  # the fake clock jumps past the 20s TTL mid-action
+            time.sleep(2.5)  # give the heartbeat thread room to renew
+            lease = json.loads((self.root / "run.lease.json").read_text(encoding="utf-8"))
+            seen["expires_at"] = lease["expires_at"]
+            seen["fencing_token"] = lease["fencing_token"]
+            return {"ok": True}
+
+        state = runner.execute(
+            [self.plan("s1", long_action)], owner_id="worker-a", now=100
+        )
+        self.assertEqual(state["status"], "finished")
+        # The thread renewed with the advanced clock (now=130): expiry moved
+        # past the original 120, on a new epoch after the clean lapse.
+        self.assertEqual(seen["expires_at"], 150)
+        self.assertEqual(seen["fencing_token"], 2)
+
+    def test_lease_lost_during_action_is_detected(self):
+        runner = self.make_runner(heartbeat_interval_seconds=1)
+
+        def compromised(key):
+            self.now[0] = 500
+            LeaseManager(self.root / "run.lease.json").acquire(
+                "worker-b", now=500, ttl_seconds=60
+            )
+            time.sleep(2.5)  # the heartbeat thread observes the takeover
+            return {"ok": True}
+
+        with self.assertRaises(FencingError):
+            runner.execute(
+                [self.plan("s1", compromised)], owner_id="worker-a", now=100
+            )
+        event_types = [item.event_type for item in runner.store.read_history("run-001")]
+        self.assertNotIn("step.finished", event_types)
+
+    def test_heartbeat_interval_requires_clock_and_fits_inside_ttl(self):
+        store = EventStore(self.root / "events.jsonl")
+        with self.assertRaises(ValueError):
+            DurableRunner(
+                RUN,
+                store,
+                lease_path=self.root / "run.lease.json",
+                lease_ttl_seconds=20,
+                heartbeat_interval_seconds=1,
+            )
+        with self.assertRaises(ValueError):
+            DurableRunner(
+                RUN,
+                store,
+                lease_path=self.root / "run.lease.json",
+                lease_ttl_seconds=20,
+                clock=lambda: self.now[0],
+                heartbeat_interval_seconds=20,
+            )
+        with self.assertRaises(ValueError):
+            DurableRunner(
+                RUN,
+                store,
+                lease_path=self.root / "run.lease.json",
+                lease_ttl_seconds=20,
+                clock=lambda: self.now[0],
+                heartbeat_interval_seconds=0,
+            )
 
 
 if __name__ == "__main__":
