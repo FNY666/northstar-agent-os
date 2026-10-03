@@ -4453,6 +4453,225 @@ def run_approver_separation() -> dict[str, Any]:
     }
 
 
+def run_attestation_receipts() -> dict[str, Any]:
+    """TEE attestation as receipt evidence (ninety-second batch).
+
+    Absorbs the 2026 confidential-AI thread (mechanism ideas only,
+    honestly scoped in ``attested_receipts.py``): Ritual's
+    ``ZKML > OPML > TEE`` proof-strength ladder as the receipt
+    ``evidence_kind`` taxonomy, with the rule that a receipt's claimed
+    kind is only as strong as what was actually verified. This repo
+    cannot mint real TEE quotes, so the runner uses the deterministic
+    software-emulated attestor for the ``software`` kind and a
+    caller-supplied test-double verifier for the ``tee`` kind (the
+    shape the real platform check plugs into).
+
+    Deterministic: test-domain secrets (sha256 labels), pinned integer
+    timestamps, no runtime, no network, no model. Ground truth is
+    closed: 12 scenarios, 3 allow / 9 deny — forgery, cross-call
+    replay, expiry, staleness, TEE-claim-without-verifier,
+    emulated-quote-claiming-TEE, field/quote confusion, quote-hash
+    tampering, and malformed attestations.
+    """
+    import hashlib as _hashlib
+    import json as _json
+
+    from attested_receipts import (
+        ATTESTATION_SCHEMA_VERSION,
+        AttestedReceiptError,
+        QuoteVerifier,
+        SoftwareAttestor,
+        attach_attestation,
+        receipt_binding_digest,
+        verify_attestation,
+    )
+
+    NOW = 1_789_000_100
+    RECEIPT_AT = 1_789_000_000
+
+    def _secret(label: str) -> bytes:
+        return _hashlib.sha256(f"northstar-bench-attested-receipts:{label}".encode()).digest()
+
+    def _receipt(args_hex: str, result_hex: str, issued_at: int = RECEIPT_AT) -> dict[str, Any]:
+        return {
+            "schema_version": "northstar.tool-receipt.v1",
+            "receipt_id": f"tool:{args_hex}:{result_hex}",
+            "tool_name": "workspace.write_file",
+            "arguments_digest": args_hex,
+            "result_digest": result_hex,
+            "issued_at": issued_at,
+        }
+
+    attestor = SoftwareAttestor(_secret("software"))
+    software_verifiers = {"software": attestor.as_verifier()}
+
+    # TEE test double: plays the platform verifier's role (a MAC under a
+    # separate tee secret). The real deployment registers a DCAP-style
+    # verifier here instead.
+    tee_secret = _secret("tee-platform")
+
+    def _tee_verify(quote_bytes: bytes, *, expected_binding: str) -> str:
+        quote = _json.loads(quote_bytes.decode("utf-8"))
+        envelope = {k: v for k, v in quote.items() if k != "mac"}
+        expected_mac = _hashlib.sha256(
+            tee_secret
+            + _json.dumps(envelope, sort_keys=True, separators=(",", ":")).encode()
+        ).hexdigest()
+        if quote.get("mac") != expected_mac:
+            raise AttestedReceiptError("tee quote mac mismatch")
+        measured = envelope.get("measured_config")
+        if not isinstance(measured, str):
+            raise AttestedReceiptError("tee quote measured_config malformed")
+        return measured
+
+    def _tee_attestation(binding: str, issued_at: int = RECEIPT_AT, ttl: int = 300) -> dict[str, Any]:
+        envelope = {
+            "kind": "tee",
+            "measured_config": binding,
+            "verifier_id": "bench-dcap.v1",
+            "issued_at": issued_at,
+            "expires_at": issued_at + ttl,
+        }
+        mac = _hashlib.sha256(
+            tee_secret + _json.dumps(envelope, sort_keys=True, separators=(",", ":")).encode()
+        ).hexdigest()
+        quote = dict(envelope)
+        quote["mac"] = mac
+        quote_bytes = _json.dumps(quote, sort_keys=True, separators=(",", ":")).encode()
+        return {
+            "schema_version": ATTESTATION_SCHEMA_VERSION,
+            "evidence_kind": "tee",
+            "emulated": False,
+            "quote_hex": quote_bytes.hex(),
+            "quote_hash": _hashlib.sha256(quote_bytes).hexdigest(),
+            "verifier_id": "bench-dcap.v1",
+            "measured_config": binding,
+            "issued_at": issued_at,
+            "expires_at": issued_at + ttl,
+        }
+
+    tee_verifiers = {
+        "software": attestor.as_verifier(),
+        "tee": QuoteVerifier(kind="tee", verifier_id="bench-dcap.v1", verify=_tee_verify),
+    }
+
+    receipt_a = _receipt("a" * 64, "b" * 64)
+    receipt_b = _receipt("c" * 64, "d" * 64)
+    binding_a = receipt_binding_digest(receipt_a)
+
+    scenarios: list[dict[str, Any]] = []
+
+    def record(sid: str, allowed: bool, expect_allowed: bool, detail: str = "") -> None:
+        scenarios.append(
+            {
+                "id": sid,
+                "allowed": bool(allowed),
+                "expect_allowed": expect_allowed,
+                "ok": bool(allowed) == expect_allowed,
+                "detail": detail,
+            }
+        )
+
+    # 1. valid software attestation -> allow.
+    att = attestor.mint(measured_config=binding_a, issued_at=RECEIPT_AT)
+    v = verify_attestation(receipt_a, att, verifiers=software_verifiers, now=NOW)
+    record("allow_valid_software", v.allowed, True, v.reason)
+
+    # 2. valid tee attestation with a registered platform verifier -> allow.
+    tee_att = _tee_attestation(binding_a)
+    v = verify_attestation(receipt_a, tee_att, verifiers=tee_verifiers, now=NOW)
+    record("allow_valid_tee", v.allowed, True, v.reason)
+
+    # 3. plain receipt without attestation stays a valid plain receipt
+    #    (attestation is optional, never mandatory).
+    record(
+        "allow_plain_receipt_no_attestation",
+        "attestation" not in receipt_a and receipt_a["receipt_id"].startswith("tool:"),
+        True,
+        "attestation optional",
+    )
+
+    # 4. forged quote MAC -> deny.
+    forged = dict(att)
+    quote = _json.loads(bytes.fromhex(forged["quote_hex"]).decode("utf-8"))
+    quote["measured_config"] = "e" * 64
+    forged_bytes = _json.dumps(quote, sort_keys=True, separators=(",", ":")).encode()
+    forged = dict(forged)
+    forged["quote_hex"] = forged_bytes.hex()
+    forged["quote_hash"] = _hashlib.sha256(forged_bytes).hexdigest()
+    v = verify_attestation(receipt_a, forged, verifiers=software_verifiers, now=NOW)
+    record("deny_forged_quote", v.allowed, False, v.reason)
+
+    # 5. quote replay across calls: call A's quote on receipt B -> deny.
+    v = verify_attestation(receipt_b, att, verifiers=software_verifiers, now=NOW)
+    record("deny_replay_across_calls", v.allowed, False, v.reason)
+
+    # 6. expired quote -> deny.
+    expired = attestor.mint(measured_config=binding_a, issued_at=RECEIPT_AT, ttl_seconds=60)
+    v = verify_attestation(receipt_a, expired, verifiers=software_verifiers, now=RECEIPT_AT + 61)
+    record("deny_expired_quote", v.allowed, False, v.reason)
+
+    # 7. stale quote predating the receipt -> deny.
+    stale_receipt = _receipt("a" * 64, "b" * 64, issued_at=RECEIPT_AT + 500)
+    stale_binding = receipt_binding_digest(stale_receipt)
+    stale = attestor.mint(measured_config=stale_binding, issued_at=RECEIPT_AT, ttl_seconds=3600)
+    v = verify_attestation(
+        stale_receipt, stale, verifiers=software_verifiers, now=RECEIPT_AT + 600,
+        max_age_seconds=3600,
+    )
+    record("deny_stale_quote_predates_receipt", v.allowed, False, v.reason)
+
+    # 8. TEE claim with no registered tee verifier -> deny (fail closed,
+    #    never downgraded to software).
+    tee_claim = _tee_attestation(binding_a)
+    v = verify_attestation(receipt_a, tee_claim, verifiers=software_verifiers, now=NOW)
+    record("deny_tee_claim_without_verifier", v.allowed, False, v.reason)
+
+    # 9. emulated quote claiming tee -> deny (unverifiable claim).
+    emulated_tee = dict(att)
+    emulated_tee["evidence_kind"] = "tee"
+    v = verify_attestation(receipt_a, emulated_tee, verifiers=tee_verifiers, now=NOW)
+    record("deny_emulated_quote_claiming_tee", v.allowed, False, v.reason)
+
+    # 10. measured_config field disagreeing with the quote it carries -> deny.
+    confused = dict(att)
+    confused["measured_config"] = "f" * 64
+    v = verify_attestation(receipt_a, confused, verifiers=software_verifiers, now=NOW)
+    record("deny_field_quote_confusion", v.allowed, False, v.reason)
+
+    # 11. quote_hash not matching the quote bytes -> deny.
+    tampered_hash = dict(att)
+    tampered_hash["quote_hash"] = "0" * 64
+    v = verify_attestation(receipt_a, tampered_hash, verifiers=software_verifiers, now=NOW)
+    record("deny_quote_hash_mismatch", v.allowed, False, v.reason)
+
+    # 12. malformed attestation -> AttestedReceiptError (fail loud).
+    try:
+        bad = dict(att)
+        del bad["measured_config"]
+        verify_attestation(receipt_a, bad, verifiers=software_verifiers, now=NOW)
+        record("deny_malformed_attestation", True, False, "no error raised")
+    except AttestedReceiptError as error:
+        record("deny_malformed_attestation", False, False, f"malformed: {error}")
+
+    # attach_attestation keeps receipt_id stable and refuses overwrite.
+    attached = attach_attestation(receipt_a, att)
+    assert attached["receipt_id"] == receipt_a["receipt_id"]
+    assert attached["attestation"]["quote_hash"] == att["quote_hash"]
+
+    mismatches = [s["id"] for s in scenarios if not s["ok"]]
+    allowed_ids = sorted(s["id"] for s in scenarios if s["allowed"])
+    denial_reasons = {s["id"]: s["detail"] for s in scenarios if not s["allowed"]}
+    return {
+        "n_scenarios": len(scenarios),
+        "n_allowed": len(allowed_ids),
+        "allowed_ids": allowed_ids,
+        "mismatches": mismatches,
+        "denial_reasons": denial_reasons,
+        "ladder": "zkml>opml>tee>software",
+    }
+
+
 def run_adversarial_scenarios() -> dict[str, Any]:
     """Adversarial bench scenarios: multi-agent failures, no-adversary failures, malicious-but-signed.
 
@@ -9260,6 +9479,56 @@ def _case_metrics_adversarial_scenarios(h: BenchHarness) -> BenchExpectation:
     )
 
 
+def _case_metrics_attestation_receipts(h: BenchHarness) -> BenchExpectation:
+    """TEE attestation as receipt evidence (ninety-second batch).
+
+    12 deterministic scenarios, 3 allow / 9 deny: a valid software
+    attestation (emulated, bound, fresh) verifies; a valid TEE
+    attestation verifies when — and only when — a platform verifier is
+    registered; a plain receipt without attestation stays valid
+    (attestation is optional). Denied: forged quote MAC, cross-call
+    quote replay, expired quote, stale quote predating the receipt,
+    TEE claim with no registered verifier (fail closed, never
+    downgraded), emulated quote claiming TEE, measured_config field
+    disagreeing with its own quote, quote_hash tampering, and malformed
+    attestations (fail loud).
+    """
+    metrics = run_attestation_receipts()
+
+    def check(exp: BenchExpectation, report: Any) -> tuple[bool, str]:
+        if metrics["n_scenarios"] != 12:
+            return (False, f"expected 12 attestation scenarios, saw {metrics['n_scenarios']}")
+        if metrics["mismatches"]:
+            return (False, f"scenario(s) disagree with ground truth: {metrics['mismatches']}")
+        if metrics["allowed_ids"] != [
+            "allow_plain_receipt_no_attestation",
+            "allow_valid_software",
+            "allow_valid_tee",
+        ]:
+            return (False, f"allowed set drifted: {metrics['allowed_ids']}")
+        reasons = metrics["denial_reasons"]
+        if "replay" not in reasons.get("deny_replay_across_calls", ""):
+            return (False, "cross-call replay must deny as replay")
+        if "no verifier registered" not in reasons.get("deny_tee_claim_without_verifier", ""):
+            return (False, "unverifiable TEE claim must deny for missing verifier")
+        if "emulated" not in reasons.get("deny_emulated_quote_claiming_tee", ""):
+            return (False, "emulated quote claiming TEE must deny as emulated")
+        return (True, "12/12 attestation scenarios hold: forgery/replay/staleness/downgrade")
+
+    return BenchExpectation(
+        runtime=_noop_runtime(h),
+        expect_subtype="success",
+        post_check=check,
+        metrics=metrics,
+        notes=(
+            "2026 confidential-AI thread (Ritual ZKML>OPML>TEE ladder), "
+            "honestly scoped: software quotes are emulated (MAC, stamped "
+            "emulated:true); the tee path is a verifier interface — no "
+            "verifier registered means fail-closed, never downgrade."
+        ),
+    )
+
+
 def _case_metrics_harness_binding(h: BenchHarness) -> BenchExpectation:
     """Harness integrity binding (ninetieth batch).
 
@@ -10530,6 +10799,7 @@ CASES: tuple[BenchCase, ...] = (
     BenchCase("metrics.static_verification", "metrics", "static pre-dispatch policy verification: digest-pinned definitions + Janus rule semantics", _case_metrics_static_verification),
     BenchCase("metrics.approver_separation", "metrics", "no-self-attestation: proposer excluded from approver set + delegation subtree (ERC-8004)", _case_metrics_approver_separation),
     BenchCase("metrics.adversarial_scenarios", "metrics", "adversarial scenarios: multi-agent failures, no-adversary failures, malicious-but-signed", _case_metrics_adversarial_scenarios),
+    BenchCase("metrics.attestation_receipts", "metrics", "TEE attestation as receipt evidence: forgery/replay/downgrade probes", _case_metrics_attestation_receipts),
     BenchCase("metrics.harness_binding", "metrics", "harness integrity binding: SHA-256 harness hash in audit, quad-only scores", _case_metrics_harness_binding),
     BenchCase("metrics.drift_detection", "metrics", "Livenerf-style drift probe: bootstrap CI + paired permutation test", _case_metrics_drift_detection),
 )
@@ -11152,6 +11422,7 @@ __all__ = [
     "run_static_verification",
     "run_approver_separation",
     "run_adversarial_scenarios",
+    "run_attestation_receipts",
     "run_owasp_asi_coverage",
     "run_policy_axis",
     "run_step_compliance",

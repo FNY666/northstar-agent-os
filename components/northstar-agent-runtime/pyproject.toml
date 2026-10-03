@@ -48,6 +48,7 @@ py-modules = [
     "_version",
     "action_card",
     "approver_separation",
+    "attested_receipts",
     "agent_files",
     "agent_identity",
     "agents",

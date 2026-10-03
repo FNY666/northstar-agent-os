@@ -39,6 +39,33 @@ to auto-approve. Malformed inputs fail closed (empty eligible set).
 New bench track `metrics.approver_separation` (12 deterministic scenarios,
 3 allow / 9 deny).
 
+## Unreleased (ninety-second batch) — TEE attestation as receipt evidence
+
+Absorbs the 2026 confidential-AI research thread (mechanism ideas only,
+honestly scoped in `attested_receipts.py`): Ritual's `ZKML > OPML > TEE`
+proof-strength ladder as the receipt `evidence_kind` taxonomy, with the
+rule that a receipt's claimed kind is only as strong as what was actually
+verified. Extends the seventy-seventh batch per-call tool receipt
+(`tool:<args-sha256>:<result-sha256>`) with an optional `attestation`
+field carrying `(evidence_kind, quote_hash, verifier_id,
+measured_config)`; verification is freshness + config binding + kind
+consistency and fails closed throughout. Honest limits, stated in the
+module: this repo cannot mint real TEE quotes (no SGX/SEV-SNP/TDX
+platform here) — it ships the taxonomy, the schema, the verification
+*interface*, and a deterministic software-emulated attestor for tests
+(MACs, stamped `emulated: True`, may only claim `software`). The
+real-quote path is a caller-supplied `QuoteVerifier` per kind (where a
+DCAP-style platform check plugs in); claiming `tee` with no registered
+verifier is rejected, never downgraded — an unverifiable attestation
+claim is worse than no claim. Anti-replay: the quote's `measured_config`
+must equal the binding digest of *this* receipt's exact arguments/result
+digests (constant-time compare), so a quote minted for call A presented
+with receipt B fails closed; the attestation field must also agree with
+what its own quote binds. New bench track `metrics.attestation_receipts`
+(12 deterministic scenarios, 3 allow / 9 deny: forgery, cross-call
+replay, expiry, staleness, TEE-without-verifier, emulated-claiming-TEE,
+field/quote confusion, quote-hash tampering, malformed).
+
 ## Unreleased (ninety-third batch) — adversarial bench scenarios
 
 New bench track `metrics.adversarial_scenarios` (12 deterministic
