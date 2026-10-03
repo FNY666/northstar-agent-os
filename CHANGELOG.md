@@ -1,4 +1,51 @@
-## Unreleased (sixty-fourth batch) — official security-audit skill + self-audit
+## Unreleased (sixty-fifth batch) — Landlock unprivileged self-sandbox for the process backend
+
+Absorbs the Linux Landlock mechanism (docs.kernel.org
+`userspace-api/landlock`, verified against the UAPI header
+`/usr/include/linux/landlock.h` and behaviorally on a Landlock ABI v8
+kernel — nothing taken on memory): the only sandbox mechanism that needs
+no root, no capabilities, and no user namespaces. The ritual is
+`create_ruleset → add_rule → restrict_self`: irreversible (a landlocked
+thread can only add restrictions, never remove them), inherited by all
+future children, and stackable (each `restrict_self` merges a tighter
+domain). That makes it the natural *path* layer next to
+`tools/seccomp.py`'s *syscall* layer.
+
+- **New `tools/sandbox.py`**: Landlock wrapper for every tool-effect
+  subprocess on the process backend. A `python3 -c` loader (same
+  no-`preexec_fn` pattern as the seccomp prctl loader — a fresh
+  single-threaded interpreter, so no fork-in-threads hazard) installs a
+  deny-by-default path allowlist, then execs the inner seccomp wrapper:
+  Landlock outside, seccomp inside. Default profile: system
+  binaries/libraries read+execute, `/etc` and `/proc` read-only, `/dev`
+  openable, workspace fully writable, TCP denied outright (the process
+  backend's answer to bwrap's `--unshare-net`). Access-right bit values
+  and ABI gating (`REFER`→v2, `TRUNCATE`→v3, TCP→v4, `IOCTL_DEV`→v5,
+  `RESOLVE_UNIX`→v9) follow the kernel documentation's best-effort
+  compatibility switch; `no_new_privs` is set before `restrict_self`
+  (required for unprivileged use), `TSYNC` on ABI 8+.
+- **Graceful degradation, stated out loud**: on kernels without Landlock,
+  mode `auto` emits an explicit stderr warning and continues with the
+  seccomp layer alone — fail-closed *to seccomp*, never to nothing. Mode
+  `on` refuses to start without Landlock (mirrors `seccomp="on"`).
+  Tighten-only like seccomp: a per-call payload may move toward `on` but
+  never loosen the operator's `--landlock`. The bwrap backend notes
+  Landlock as n/a (its mounts already confine paths more strongly).
+- **Wiring**: `SandboxRequest.landlock`, `shell_landlock` run config +
+  `--landlock` CLI flag + per-call `landlock` payload key, doctor
+  capability report (`_check_landlock`), all mirroring the seccomp
+  plumbing.
+- **Bench**: `denial.landlock_tables_and_spec` (pure: tables carry
+  kernel-verified bits, ABI gating, loader argv shape, tighten-only) and
+  `denial.landlock_path_whitelist_live` (behavioral: outside-workspace
+  write really fails with `EACCES` while the inside write succeeds;
+  vacuous pass where the kernel lacks Landlock). `BENCH_VERSION` v10→v11.
+- **Tests**: `tests/test_landlock.py` — 15 tests: mode validation,
+  tighten-only, table spot-checks, ABI masking, spec building, loader argv
+  shape, plus live loader tests (workspace write allowed, `/tmp` write
+  denied, TCP denied, restriction irreversible for children) and a
+  fail-closed degrade test.
+
 
 New official skill `skills/security-audit/`, absorbing the audit methodology
 of [cloudflare/security-audit-skill](https://github.com/cloudflare/security-audit-skill)

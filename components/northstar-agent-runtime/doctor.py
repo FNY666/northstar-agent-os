@@ -363,6 +363,69 @@ def _check_seccomp(args: argparse.Namespace, findings: list[Finding], backend: s
     )
 
 
+def _check_landlock(args: argparse.Namespace, findings: list[Finding], backend: str | None) -> None:
+    """Report whether the Landlock path allowlist will actually be applied.
+
+    Doctor predicts the run: mode x backend x platform x kernel, the same
+    combination ``tools/os_sandbox.py`` decides on. It never claims the
+    allowlist is active when the kernel cannot enforce it.
+    """
+    try:
+        from tools.sandbox import LandlockError, landlock_supported, probe_landlock, validate_mode
+    except Exception as error:  # noqa: BLE001
+        findings.append(Finding("landlock", "warn", f"could not load the landlock module: {error}"))
+        return
+    mode = getattr(args, "landlock", "auto") or "auto"
+    try:
+        mode = validate_mode(mode)
+    except LandlockError as error:
+        findings.append(Finding("landlock", "fail", str(error)))
+        return
+    probe = probe_landlock()
+    if mode == "off":
+        findings.append(Finding("landlock", "warn", "mode=off - path allowlist disabled by operator choice"))
+        return
+    if backend == "bwrap":
+        findings.append(
+            Finding(
+                "landlock",
+                "ok",
+                f"mode={mode}, backend=bwrap: not needed - bwrap mounts already confine paths "
+                f"(kernel Landlock: {probe['detail']})",
+            )
+        )
+        return
+    if not sys.platform.startswith("linux") or not probe["supported"]:
+        # Mirrors run_sandboxed: mode=on is refused, mode=auto degrades loudly.
+        if mode == "on":
+            findings.append(
+                Finding(
+                    "landlock",
+                    "fail",
+                    f"mode=on requires a Linux kernel with Landlock ({probe['detail']}) - "
+                    "a run would refuse to start",
+                )
+            )
+        else:
+            findings.append(
+                Finding(
+                    "landlock",
+                    "warn",
+                    f"mode={mode}: {probe['detail']} - allowlist cannot be applied; "
+                    "seccomp layer still enforced",
+                )
+            )
+        return
+    findings.append(
+        Finding(
+            "landlock",
+            "ok",
+            f"mode={mode}, backend={backend}: path allowlist will be applied "
+            f"(Landlock ABI v{probe['abi']}, FS deny-by-default, TCP denied)",
+        )
+    )
+
+
 def _check_mcp_seccomp(args: argparse.Namespace, findings: list[Finding]) -> None:
     """Report whether MCP server processes will run under the BPF denylist.
 
@@ -639,6 +702,7 @@ def _checks(args: argparse.Namespace) -> list[Finding]:
     _check_sidecar(args, findings)
     backend = _check_sandbox(args, findings)
     _check_seccomp(args, findings, backend)
+    _check_landlock(args, findings, backend)
     _check_mcp_seccomp(args, findings)
     _check_workspace_config(args, findings)
     _check_skill_supply_chain(args, findings)

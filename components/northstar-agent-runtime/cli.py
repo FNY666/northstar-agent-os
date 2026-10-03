@@ -444,6 +444,17 @@ def _add_execution_arguments(parser: argparse.ArgumentParser) -> None:
                 "may only narrow this whitelist, never widen it or switch the launcher off."
             ),
         )
+        execution.add_argument(
+            "--landlock",
+            choices=("auto", "on", "off"),
+            default="auto",
+            help=(
+                "Linux Landlock path allowlist for the process backend: auto (apply when "
+                "the kernel supports it, degrade loudly to seccomp-only otherwise), "
+                "on (require Landlock; refuse without it), or off. "
+                "A per-call Shell payload may only tighten this, never loosen it."
+            ),
+        )
 
 def _add_output_arguments(parser: argparse.ArgumentParser) -> None:
         output = parser.add_argument_group("output")
@@ -1318,6 +1329,7 @@ def _run(args: argparse.Namespace) -> int:
     config_kwargs["shell_backend"] = getattr(args, "sandbox", "auto") or "auto"
     config_kwargs["shell_seccomp"] = getattr(args, "seccomp", "auto") or "auto"
     config_kwargs["shell_capdrop"] = getattr(args, "capdrop", "on") or "on"
+    config_kwargs["shell_landlock"] = getattr(args, "landlock", "auto") or "auto"
     config_kwargs["parallel_tools"] = int(getattr(args, "parallel_tools", 1) or 1)
 
     validate_session_flags(args, ceilings)

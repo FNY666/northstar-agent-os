@@ -39,6 +39,8 @@ from tools.os_sandbox import (
 )
 from tools.capdrop import CapDropError
 from tools.capdrop import resolve_capdrop as resolve_capdrop_policy
+from tools.sandbox import LandlockError
+from tools.sandbox import resolve_mode as resolve_landlock_mode
 from tools.seccomp import SeccompError
 from tools.seccomp import resolve_mode as resolve_seccomp_mode
 
@@ -146,6 +148,14 @@ def shell_handler(payload: dict[str, Any], ctx: "ToolContext") -> Any:
             )
         except CapDropError as error:
             return ToolResult.error(str(error))
+        # Landlock is tighten-only, same as seccomp: a per-call payload may
+        # move toward "on" but never loosen the operator's --landlock.
+        try:
+            landlock = resolve_landlock_mode(
+                payload.get("landlock"), ctx.service("shell_landlock")
+            )
+        except LandlockError as error:
+            return ToolResult.error(str(error))
         env_payload = payload.get("env")
         env = None
         if env_payload is not None:
@@ -163,6 +173,7 @@ def shell_handler(payload: dict[str, Any], ctx: "ToolContext") -> Any:
             network=bool(payload.get("network", False)),
             seccomp=seccomp,
             capdrop_whitelist=capdrop_whitelist,
+            landlock=landlock,
         )
         result = run_sandboxed(request, backend=backend)
     except SandboxError as error:
