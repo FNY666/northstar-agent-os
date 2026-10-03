@@ -198,6 +198,54 @@ class BwrapCapabilityArgsTests(unittest.TestCase):
             bwrap_capability_args(["CAP_NOPE"])
 
 
+class ReportEnforcementTests(unittest.TestCase):
+    def report(self):
+        zero = '0000000000000000'
+        before = {k: zero for k in ('CapInh', 'CapPrm', 'CapEff', 'CapBnd', 'CapAmb')}
+        before['CapBnd'] = '000001ffffffffff'
+        return {'whitelist': [], 'before': before, 'after': dict(before), 'errors': [], 'ops': [
+            {'op': 'ambient_clear', 'ok': True, 'detail': ''},
+            {'op': 'bounding_drop', 'ok': True, 'detail': 'dropped='},
+            {'op': 'bounding_drop', 'ok': False, 'detail': 'eperm=' + ','.join(map(str, range(41)))},
+            {'op': 'securebits', 'ok': False, 'detail': 'errno 1 (needs CAP_SETPCAP)'},
+            {'op': 'capset', 'ok': True, 'detail': 'eff/prm/inh=00000000/00000000'},
+        ]}
+
+    def test_unprivileged_hardening_eperm_is_audited_not_false_enforcement_failure(self):
+        from tools.capdrop import drop_report_enforced
+        self.assertTrue(drop_report_enforced(self.report()))
+
+    def test_report_rejects_negative_masks_and_unknown_operations(self):
+        from tools.capdrop import drop_report_enforced
+        bad = self.report()
+        bad['before']['CapPrm'] = '-1'
+        self.assertFalse(drop_report_enforced(bad))
+        bad = self.report()
+        bad['ops'].append({'op': 'unrecognized', 'ok': False, 'detail': 'errno 5'})
+        self.assertFalse(drop_report_enforced(bad))
+
+    def test_all_bounding_drops_succeed_control(self):
+        from tools.capdrop import drop_report_enforced
+        report = self.report()
+        report['after']['CapBnd'] = '0000000000000000'
+        report['ops'][1]['detail'] = 'dropped=' + ','.join(map(str, range(41)))
+        del report['ops'][2]
+        self.assertTrue(drop_report_enforced(report))
+
+    def test_failed_enforcement_or_unexplained_privilege_is_never_accepted(self):
+        from tools.capdrop import drop_report_enforced
+        import copy
+        for field in ('CapInh', 'CapPrm', 'CapEff', 'CapAmb'):
+            bad = copy.deepcopy(self.report()); bad['after'][field] = '0000000000000001'
+            self.assertFalse(drop_report_enforced(bad), field)
+        bad = self.report(); bad['ops'][-1]['ok'] = False
+        self.assertFalse(drop_report_enforced(bad))
+        bad = self.report(); bad['ops'][2]['detail'] = 'cap=0 errno=5'
+        self.assertFalse(drop_report_enforced(bad))
+        bad = self.report(); bad['after']['CapBnd'] = '0000000000000000'
+        self.assertFalse(drop_report_enforced(bad), 'cannot claim unaudited bounding change')
+
+
 class SummarizeReportTests(unittest.TestCase):
     def test_summary_line(self):
         report = {
@@ -226,28 +274,35 @@ class SummarizeReportTests(unittest.TestCase):
 class LiveCapdropTests(unittest.TestCase):
     """Real kernel behavior: the loader actually drops capabilities."""
 
-    def test_deny_all_zeroes_all_five_sets(self):
+    def test_deny_all_enforces_four_sets_and_audits_bounding_hardening(self):
+        from tools.capdrop import drop_report_enforced
         proc, report = _run_loader([], _READ_SETS_PY)
         self.assertEqual(proc.returncode, 0, proc.stderr)
         child = json.loads(proc.stdout)
-        for field in ("CapInh", "CapPrm", "CapEff", "CapBnd", "CapAmb"):
+        for field in ("CapInh", "CapPrm", "CapEff", "CapAmb"):
             self.assertEqual(child[field], "0000000000000000", field)
-        self.assertIsNotNone(report)
-        self.assertEqual(report["whitelist"], [])
-        self.assertTrue(report["after"]["CapEff"] == "0000000000000000")
-        self.assertEqual(report["errors"], [])
+        self.assertTrue(drop_report_enforced(report), report)
+        self.assertEqual(child['CapBnd'], report['after']['CapBnd'])
 
     def test_whitelist_never_fabricates_privilege(self):
-        # Whitelist CAP_CHOWN (bit 0): the child may keep bit 0 in the
-        # bounding set, but must never gain a bit outside the whitelist.
-        # (After exec of a binary without file capabilities the kernel
-        # clears permitted/effective per the execve transformation rules —
-        # the guarantee that matters is "no bit outside the whitelist".)
+        from tools.capdrop import drop_report_enforced
+        baseline = subprocess.run(['python3', '-c', _READ_SETS_PY],
+                                  capture_output=True, text=True, check=True)
+        before = json.loads(baseline.stdout)
+        held = int(before['CapPrm'], 16) & 1
+        may_inherit = (int(before['CapInh'], 16) | int(before['CapBnd'], 16)) & 1
         proc, report = _run_loader(["CAP_CHOWN"], _READ_SETS_PY)
-        self.assertEqual(proc.returncode, 0, proc.stderr)
-        child = json.loads(proc.stdout)
-        for field, value in child.items():
-            self.assertEqual(int(value, 16) & ~0x1, 0, field)
+        if not (held and may_inherit):
+            self.assertEqual(proc.returncode, 126)
+            self.assertEqual(proc.stdout, '', 'an unheld whitelist must never run the target')
+            self.assertIn('capdrop failed', proc.stderr)
+        else:
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            self.assertTrue(drop_report_enforced(report), report)
+            child = json.loads(proc.stdout)
+            for field in ('CapInh', 'CapPrm', 'CapEff', 'CapAmb'):
+                self.assertEqual(int(child[field], 16) & ~1, 0, field)
+            self.assertEqual(child['CapBnd'], report['after']['CapBnd'])
 
     def test_escalation_attempt_gets_eperm(self):
         # After deny-all, re-raising CAP_SYS_ADMIN via capset must EPERM:
