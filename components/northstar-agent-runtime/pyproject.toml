@@ -47,6 +47,7 @@ northstar-agent-runtime = "cli:main"
 py-modules = [
     "_version",
     "action_card",
+    "agent_readiness",
     "approver_separation",
     "attested_receipts",
     "agent_files",
@@ -79,6 +80,7 @@ py-modules = [
     "interop_bridge",
     "memory",
     "memory_safety",
+    "model_lineage",
     "events",
     "frontmatter",
     "governance_bench",
@@ -127,4 +129,3 @@ py-modules = [
 [tool.setuptools.packages.find]
 where = ["."]
 include = ["providers*", "tools*"]
-    "model_lineage",

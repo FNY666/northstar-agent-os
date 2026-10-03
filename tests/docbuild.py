@@ -74,6 +74,7 @@ MANIFEST: dict[str, tuple[str, ...]] = {
     "northstar-agent-runtime": (
         "approver_separation",
         "attested_receipts",
+        "agent_readiness",
         "agents",
         "agent_files",
         "agent_identity",
@@ -90,6 +91,7 @@ MANIFEST: dict[str, tuple[str, ...]] = {
         "interop_bridge",
         "memory",
         "memory_safety",
+        "model_lineage",
         "events",
         "frontmatter",
         "governance_bench",
@@ -467,4 +469,3 @@ def main(argv: list[str] | None = None) -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
-        "model_lineage",
