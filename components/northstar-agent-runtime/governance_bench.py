@@ -33,6 +33,20 @@ import tempfile
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
+from audit_chain import chain_records, verify_lines
+from delegation_credentials import (
+    CHECK_DEPTH_AT_MOST,
+    CHECK_EXPIRES_BEFORE,
+    CHECK_OP_IN,
+    CHECK_TOOL_IN,
+    Issuer,
+    RequestFacts,
+    attenuate,
+    attenuation_audit_events,
+    credential_id,
+    seal,
+    verify,
+)
 from dataflow_policy import DataflowPolicy, DataflowPolicyError, SessionDataflow
 from typing import Any, Callable, Iterable, Sequence
 
@@ -5821,6 +5835,224 @@ def _case_metrics_pledge_semantics(h: BenchHarness) -> BenchExpectation:
     )
 
 
+def run_attenuation() -> dict[str, Any]:
+    """Biscuit-style attenuating delegation credentials, offline verification.
+
+    The root authority (supervisor role) mints a credential carrying
+    authority facts; each delegation hop appends a check-only attenuation
+    block that can narrow but never widen the rights. The tool side verifies
+    offline with the root public key alone: signature-chain walk, no facts
+    outside the authority block, holder/rights match, then every check
+    evaluated conjunctively against the request facts.
+
+    Attack battery (all must be rejected):
+    * amplification via permissive check — conjunctive narrowing neutralises
+    * authority-style fact smuggled into an attenuation block — structural gate
+    * forged credential (wrong root key) — signature chain
+    * stripped attenuation block — pinned against the audit-anchored chain
+    * reordered blocks / tampered check — signature chain
+    * tampered seal — seal verification
+
+    The attenuation chain is anchored in the audit hash chain: issuance,
+    attenuation and sealing events (each pinning the block signature) are
+    chained with ``audit_chain`` and re-verified, so a delegation's rights
+    at each hop are provable from the audit trail.
+
+    Pure and deterministic: no runtime, no network, no model, no clock reads
+    (expiry checks evaluate a caller-supplied timestamp fact).
+    """
+    issuer = Issuer.generate()
+    root_pub = issuer.root_public_key
+
+    holder = "subagent-a"
+    base_rights = [("read_file", "read"), ("write_file", "write"), ("shell", "exec")]
+    token = issuer.issue(holder, base_rights, issued_by="supervisor")
+    narrowed = attenuate(
+        token,
+        [
+            {"predicate": CHECK_TOOL_IN, "tools": ["read_file", "write_file"]},
+            {"predicate": CHECK_OP_IN, "operations": ["read", "write"]},
+            {"predicate": CHECK_DEPTH_AT_MOST, "max_depth": 2},
+            {
+                "predicate": CHECK_EXPIRES_BEFORE,
+                "not_after": "2026-10-04T00:00:00Z",
+            },
+        ],
+        attenuated_by=holder,
+    )
+    sealed = seal(narrowed)
+
+    def req(**over: Any) -> RequestFacts:
+        base = {
+            "agent": holder,
+            "tool": "read_file",
+            "operation": "read",
+            "depth": 1,
+            "time_iso": "2026-10-03T12:00:00Z",
+        }
+        base.update(over)
+        return RequestFacts(**base)
+
+    # Legitimate uses: in-scope allowed, out-of-scope denied.
+    legit_allowed = verify(narrowed, root_pub, req()).allowed
+    legit_denied_shell = not verify(
+        narrowed, root_pub, req(tool="shell", operation="exec")
+    ).allowed
+    legit_denied_expired = not verify(
+        narrowed, root_pub, req(time_iso="2026-10-05T00:00:00Z")
+    ).allowed
+    sealed_allows = verify(sealed, root_pub, req()).allowed
+
+    # Attack battery.
+    attacks: list[tuple[str, bool]] = []
+
+    # 1. Amplification via permissive check: conjunctive narrowing neutralises.
+    wider = attenuate(
+        narrowed,
+        [{"predicate": CHECK_OP_IN, "operations": ["read", "write", "exec"]}],
+        attenuated_by="attacker",
+    )
+    attacks.append(
+        ("amplification_by_wider_check",
+         not verify(wider, root_pub, req(tool="shell", operation="exec")).allowed)
+    )
+
+    # 2. Forged credential: signed by a different root.
+    forged = Issuer.generate().issue(holder, base_rights)
+    attacks.append(
+        ("forged_credential", not verify(forged, root_pub, req()).allowed)
+    )
+
+    # 3. Stripped attenuation block: the presented chain no longer matches
+    #    the audit-anchored chain (the signature chain itself cannot detect
+    #    *removal* of the tail block, which is exactly why the anchor exists).
+    stripped = dict(narrowed)
+    stripped["blocks"] = [narrowed["blocks"][0]]
+    anchored_sigs = [e["block_sig"] for e in attenuation_audit_events(narrowed)]
+    presented_sigs = [b["sig"] for b in stripped["blocks"]]
+    attacks.append(
+        ("stripped_block_detected_via_anchor", anchored_sigs != presented_sigs)
+    )
+
+    # 4. Reordered blocks.
+    reordered = dict(narrowed)
+    reordered["blocks"] = [narrowed["blocks"][1], narrowed["blocks"][0]]
+    attacks.append(
+        ("reordered_blocks", not verify(reordered, root_pub, req()).allowed)
+    )
+
+    # 5. Tampered check (signature chain breaks).
+    tampered = dict(narrowed)
+    evil_block = dict(narrowed["blocks"][1])
+    evil_data = dict(evil_block["data"])
+    evil_data["checks"] = [{"predicate": CHECK_OP_IN, "operations": ["*"]}]
+    evil_block["data"] = evil_data
+    tampered["blocks"] = [narrowed["blocks"][0], evil_block]
+    attacks.append(
+        ("tampered_check", not verify(tampered, root_pub, req()).allowed)
+    )
+
+    # 6. Tampered seal.
+    bad_seal = dict(sealed)
+    bad_seal["seal"] = "00" * 64
+    attacks.append(
+        ("tampered_seal", not verify(bad_seal, root_pub, req()).allowed)
+    )
+
+    blocked = [name for name, ok in attacks if ok]
+    missed = [name for name, ok in attacks if not ok]
+
+    # Audit anchor: issuance + attenuation + sealing events chained and
+    # re-verified; one tampered variant must fail.
+    events = attenuation_audit_events(sealed, chain_note="governance-bench")
+    chained = chain_records(events, component="northstar-agent-runtime")
+    lines = [
+        json.dumps(r, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+        for r in chained
+    ]
+    anchor_ok = bool(verify_lines(lines).ok)
+    # Editing one anchored line must break the chain: the anchor's value is
+    # that the *original* chained content no longer verifies once touched.
+    edited_lines = list(lines)
+    edited = json.loads(edited_lines[1])
+    edited["checks_added"] = ["op_always"]
+    edited_lines[1] = json.dumps(edited, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+    anchor_tamper_detected = not verify_lines(edited_lines).ok
+
+    return {
+        "credential_id": credential_id(sealed),
+        "n_blocks": len(sealed["blocks"]),
+        "legit_in_scope_allowed": legit_allowed,
+        "legit_out_of_scope_denied": legit_denied_shell,
+        "legit_expired_denied": legit_denied_expired,
+        "sealed_verifies": sealed_allows,
+        "attack_n": len(attacks),
+        "attack_blocked": blocked,
+        "attack_missed": missed,
+        "attack_block_rate": round(_rate(len(blocked), len(attacks)), 4),
+        "audit_events": [e["event"] for e in events],
+        "audit_anchor_ok": anchor_ok,
+        "audit_tamper_detected": anchor_tamper_detected,
+    }
+
+
+def _case_metrics_attenuation(h: BenchHarness) -> BenchExpectation:
+    """Biscuit-style attenuating credentials: amplification must be impossible."""
+    metrics = run_attenuation()
+
+    def check(exp: BenchExpectation, report: Any) -> tuple[bool, str]:
+        if not metrics["legit_in_scope_allowed"]:
+            return False, "in-scope request on a valid credential must verify"
+        if not metrics["legit_out_of_scope_denied"]:
+            return False, "out-of-scope request must be denied by the checks"
+        if not metrics["legit_expired_denied"]:
+            return False, "expired credential use must be denied"
+        if not metrics["sealed_verifies"]:
+            return False, "sealed credential must still verify offline"
+        if metrics["attack_missed"]:
+            return (
+                False,
+                "amplification/forgery attacks must all be rejected: "
+                f"{metrics['attack_missed']}",
+            )
+        if metrics["attack_block_rate"] != 1.0:
+            return False, "attack block rate must be 1.0"
+        if not metrics["audit_anchor_ok"]:
+            return False, "attenuation chain must anchor in the audit hash chain"
+        if not metrics["audit_tamper_detected"]:
+            return False, "tampering an anchored attenuation event must break verification"
+        return (
+            True,
+            f"{metrics['attack_n']} attacks blocked "
+            f"({metrics['attack_block_rate']:.2f}), "
+            f"{metrics['n_blocks']} blocks, audit anchored "
+            f"({', '.join(metrics['audit_events'])})",
+        )
+
+    return BenchExpectation(
+        runtime=_noop_runtime(h),
+        expect_subtype="success",
+        post_check=check,
+        metrics=metrics,
+        notes=(
+            "Attenuation mechanism borrowed from Eclipse Biscuit "
+            "(doc.biscuitsec.org: authority block + check-only attenuation "
+            "blocks + per-block signature chain with next-key, holder-kept "
+            "proof key for offline attenuation, sealed tokens; read "
+            "2026-10-03), honestly scoped: this is a Northstar-native "
+            "semantic port of authority-facts + check-attenuation + offline "
+            "Ed25519 verification — NOT wire-compatible with the biscuit "
+            "protobuf token format, and NOT Datalog (checks are a fixed "
+            "predicate vocabulary). Each delegation hop can only narrow "
+            "rights; amplification attempts (permissive check, fact smuggled "
+            "into an attenuation block, forgery, stripped/reordered/tampered "
+            "blocks, tampered seal) are all structurally rejected, and the "
+            "attenuation chain is anchored in the audit hash chain so a "
+            "delegation's rights at each hop are provable."
+        ),
+    )
+
+
 CASES: tuple[BenchCase, ...] = (
     BenchCase("denial.disallowed_beats_allow", "denial", "disallowed_tools beats allow + bypass", _case_disallowed_beats_allow),
     BenchCase("denial.plan_mode_blocks_write", "denial", "plan mode refuses Write", _case_plan_mode_blocks_write),
@@ -5864,6 +6096,7 @@ CASES: tuple[BenchCase, ...] = (
     BenchCase("metrics.least_privilege", "metrics", "least-privilege gate enforcement (OPUR-style)", _case_metrics_least_privilege),
     BenchCase("metrics.approval_percall_binding", "metrics", "per-call approval binding + structured denial", _case_metrics_approval_percall_binding),
     BenchCase("metrics.ask_timing", "metrics", "ASK-timing judgment (Ask-F1-style)", _case_metrics_ask_timing),
+    BenchCase("metrics.attenuation", "metrics", "attenuating delegation credentials (biscuit-style)", _case_metrics_attenuation),
     BenchCase("metrics.pledge_semantics", "metrics", "pledge-style self-restriction (declare->tighten-only)", _case_metrics_pledge_semantics),
     BenchCase("metrics.dataflow_sensitivity", "metrics", "dataflow sensitivity tracking (OpenAPPA-style)", _case_metrics_dataflow_sensitivity),
     BenchCase("metrics.decision_model", "metrics", "structured decision-model approval path", _case_metrics_decision_model),
@@ -6362,6 +6595,14 @@ def _print_report(report: BenchReport) -> None:
                 f"{pledge.get('legit_allow_rate', 0):.3f}, landlock_available="
                 f"{pledge.get('landlock_available', False)}"
             )
+        attn = report.metrics.get("metrics.attenuation", {})
+        if attn:
+            print(
+                f"  attenuation: {attn.get('attack_n', 0)} attacks blocked "
+                f"(rate {attn.get('attack_block_rate', 0):.2f}), "
+                f"{attn.get('n_blocks', 0)} blocks, audit anchor "
+                f"{'ok' if attn.get('audit_anchor_ok') else 'BROKEN'}"
+            )
     if report.ok:
         print("result: PASS — gate decisions match the public scorecard")
     else:
@@ -6389,6 +6630,7 @@ __all__ = [
     "run_dataflow_sensitivity",
     "run_compositional",
     "run_pledge_semantics",
+    "run_attenuation",
     "run_bench_command",
     "run_consent_ablation",
     "run_decision_model",

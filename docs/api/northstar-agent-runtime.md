@@ -582,6 +582,10 @@ Temp workspaces + scripted providers for one suite run.
 
 Pledge-style self-restriction semantics, OpenBSD pledge(2) model.
 
+#### `run_attenuation()`
+
+Biscuit-style attenuating delegation credentials, offline verification.
+
 #### `list_cases()`
 
 #### `run_suite(*, only: Iterable[str] | None=None, tracks: Iterable[str] | None=None)`
@@ -2030,6 +2034,54 @@ Build the minimal offline head anchor for a feed file.
 #### `check_anchor(path: str | Path, manifest: dict[str, Any])`
 
 Check a feed file against a previously built anchor manifest.
+
+### `delegation_credentials`
+
+Source: `components/northstar-agent-runtime/delegation_credentials.py`
+
+Biscuit-style attenuating delegation credentials (minimal subset).
+
+#### `CredentialError`
+
+Raised when a credential cannot be built (caller bug), never on verify.
+
+#### `RequestFacts`
+
+What the verifying (tool) side asserts about one request.
+
+- `as_dict()`
+#### `CredentialVerdict`
+
+Result of offline verification against the root public key.
+
+- `as_dict()`
+#### `Issuer`
+
+Root authority: the only party that can mint authority blocks.
+
+- `root_public_key` (property)
+- `generate()`
+- `issue(holder: str, rights: Iterable[tuple[str, str]], *, issued_by: str='supervisor')`
+  - Mint a credential: authority facts for ``holder``.
+#### `credential_id(token: Mapping[str, Any])`
+
+Stable id of a credential: hex of the authority block signature.
+
+#### `attenuate(token: Mapping[str, Any], checks: Sequence[Mapping[str, Any]], *, attenuated_by: str)`
+
+Append an attenuation block carrying only checks (restrictions).
+
+#### `seal(token: Mapping[str, Any])`
+
+Seal a credential: verifiable, but no further attenuation possible.
+
+#### `verify(token: Mapping[str, Any], root_pub: bytes, request: RequestFacts)`
+
+Offline verification with the root public key only.
+
+#### `attenuation_audit_events(token: Mapping[str, Any], *, chain_note: str='')`
+
+Audit events for each block of the credential, for the hash chain.
 
 ### `audit_cli`
 
