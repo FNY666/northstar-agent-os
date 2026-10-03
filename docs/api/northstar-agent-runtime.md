@@ -629,6 +629,10 @@ Everything the loop enforces. Constructed, validated, then frozen.
 One refused action, kept for the result message and the session log.
 
 - `as_dict()`
+#### `denial_tool_result(*, tool: str, call_id: str, reason: str, tier: str)`
+
+Structured tool result for a denied call.
+
 #### `ToolCallReport`
 
 Per-call bookkeeping: what ran, who allowed it, how it ended.
@@ -923,6 +927,10 @@ The gate's verdict for one tool call.
 #### `PermissionRequestContext`
 
 What the host approval callback gets to see.
+
+#### `digest_arguments(arguments: Any)`
+
+Canonical ``sha256:<hex>`` digest of tool arguments.
 
 #### `DelegationVerdict`
 

@@ -210,6 +210,58 @@ class ParallelDispatchTests(RuntimeTestCase):
         self.assertEqual([c.name for c in report.tool_calls], ["Peek", "Peek"])
         self.assertFalse(any(c.denied for c in report.tool_calls))
 
+    def test_batch_verdicts_are_per_call_approving_one_says_nothing_about_the_other(self):
+        """Batch per-call adjudication (approval-gate ``guardAll`` absorption).
+
+        Two mutating calls in one turn: the host approves the first exact
+        arguments digest and denies the second. The first must execute, the
+        second must get a structured denial — approving one call says
+        nothing about the other, and a missing/second verdict fails closed.
+        """
+        from permissions import PermissionRequestContext, digest_arguments
+
+        approved: list[str] = []
+
+        def callback(name: str, payload: dict, ctx: PermissionRequestContext) -> bool:
+            approved.append(ctx.arguments_digest)
+            return ctx.arguments_digest == digest_arguments({"path": "yes.txt", "content": "1"})
+
+        provider = self.provider(
+            [
+                {
+                    "tools": [
+                        {"name": "Write", "input": {"path": "yes.txt", "content": "1"}},
+                        {"name": "Write", "input": {"path": "no.txt", "content": "2"}},
+                    ]
+                },
+                text_turn("done"),
+            ]
+        )
+        workspace = self.workspace()
+        report = self.drive(
+            self.runtime(
+                provider=provider,
+                workspace=workspace,
+                can_use_tool=callback,
+                max_turns=4,
+            )
+        )
+        # Each gated call re-invoked the approver: no caching, no carry-over.
+        self.assertEqual(len(approved), 2)
+        self.assertNotEqual(approved[0], approved[1])
+        # First call executed, second denied with a structured tool result.
+        self.assertTrue((workspace / "yes.txt").exists())
+        self.assertFalse((workspace / "no.txt").exists())
+        self.assertEqual(len(report.denials), 1)
+        self.assertEqual(report.denials[0].source, "host_callback")
+        refusal = report.transcript[2].tool_results[1]
+        self.assertTrue(refusal.is_error)
+        content = refusal.content
+        self.assertIsInstance(content, dict)
+        self.assertEqual(content["status"], "denied")
+        self.assertEqual(content["tier"], "host_callback")
+        self.assertTrue(content["retryable"])
+
 
 if __name__ == "__main__":
     unittest.main()

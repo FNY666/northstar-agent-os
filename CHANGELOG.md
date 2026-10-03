@@ -1,5 +1,65 @@
 # Northstar Agent OS — initial public component
 
+## Unreleased (fifty-fifth batch) — per-call approval binding + structured denial tool results
+
+Absorbs three approval-gate mechanisms from
+[byquexo/agent-approval-gate](https://github.com/byquexo/agent-approval-gate)
+(MIT, Copyright 2026 byQuexo), each verified against its actual source
+before porting — nothing taken on README faith:
+
+- **No-state, per-call adjudication** (`gate.ts`: the `ApprovalGate` class
+  docstring — "the gate holds **no state between calls** … no `approveAll`,
+  no session cache, and no 'remember my choice'" — plus `guard()`'s "One
+  approver call per gated tool call. No caching, ever", with the
+  `ApprovalRequest` carrying the full call). The runtime engine already
+  re-invoked the host callback per call; this batch makes the binding
+  explicit and pinned: `PermissionRequestContext` now carries `call_id`
+  and `arguments_digest` (new `digest_arguments()` helper, `sha256:`
+  canonical-JSON format matching the durable approval tokens), the loop
+  passes the provider's `call.id` plus the digest of the exact payload
+  being decided on, and the engine backfills the digest itself if a caller
+  did not pin it — so the approver always decides on the real arguments.
+  Regression tests prove an approval for one (call, digest) pair never
+  replays onto another: same tool with new arguments fails closed.
+- **Deny → structured tool result** (`errors.ts`: `ApprovalDeniedError` —
+  "catch this at the agent boundary and feed `error.message` back to the
+  model as the tool result, so the agent can react … instead of crashing
+  the run" — plus `guardAll`'s per-call `BatchResult`
+  (`fulfilled`|`denied`|`rejected`) returned in input order, and the
+  provider adapters mapping denials to tool results, e.g. Anthropic
+  `is_error: true`, Bedrock `status: "error"`, MCP `{isError: true}`).
+  The runtime `_refuse_by_gate` now returns a structured denial dict as
+  the tool result (`status`, `tool`, `call_id`, `reason`, `tier`,
+  `retryable`, `message`) with `is_error=True`, so the model gets the
+  refusal *as its tool result* and can react. `tier` names the refusing
+  layer (`disallowed_tools` / `mode` / `host_callback` / …); `retryable`
+  is true only for host-callback denials, where re-asking or rephrasing
+  could change the outcome — policy denials are final. The durable-run
+  `ActionGateway` raises a structured `ApprovalDeniedError` (a
+  `ValueError` subclass, so fail-closed handling is unchanged) with
+  `to_result()` for the same purpose.
+- **Batch per-call verdicts, fail-closed** (`gate.ts` `guardAll`:
+  decisions keyed by `call.id`, a missing verdict becomes
+  `{approved: false, reason: "no decision returned for this call"}`,
+  and `if (!d || !d.approved)` denies at execution — "approving one call
+  in a batch says nothing about the others"). The runtime's parallel
+  batch already authorized each call independently; a new test pins it:
+  one approval in a two-call batch executes exactly one call while the
+  other gets the structured denial.
+
+**Bench:** new `metrics.approval_percall_binding` case (track "metrics",
+scorecard v7 shared with the fifty-third batch): a deterministic host
+approver grants exactly one arguments digest across two same-tool calls;
+the case asserts 2 consultations with distinct digests and non-empty
+call ids, exactly 1 structured denial tool result (`tier=host_callback`,
+`retryable=true`), the approved file written and the denied one absent.
+
+**Verification:** `make test` fully green (runtime 1537 incl. 8 new tests:
+4 per-call binding unit + 3 structured-denial runtime + 1 batch
+per-call adjudication; durable-run 155 incl. 1 new structured-denial
+test; interop 56; TS 57/57; repo docs 75/75); `make bench` 39/39 with
+the new case; `python3 tests/docbuild.py verify` OK.
+
 ## Unreleased (fifty-third batch) — OWASP Agentic Top 10 2026 (ASI01–ASI10) gate coverage
 
 Maps the whole governance bench to the OWASP Top 10 for Agentic Applications

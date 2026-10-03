@@ -182,6 +182,42 @@ def sign_approval(approval: dict[str, Any], secret: bytes) -> str:
     return f"{payload}.{signature}"
 
 
+class ApprovalDeniedError(ValueError):
+    """A signed approval whose decision is ``denied``.
+
+    Carries the structured denial (tool identity, reason, tier,
+    retryability) so the caller can return it *as the tool's result* instead
+    of crashing the run — the same propagation rule as
+    byquexo/agent-approval-gate's ``ApprovalDeniedError`` ("catch this at
+    the agent boundary and feed ``error.message`` back to the model as the
+    tool result", ``errors.ts``). Subclasses ``ValueError`` so existing
+    fail-closed handling keeps working.
+    """
+
+    def __init__(self, approval: dict[str, Any], reason: str = "") -> None:
+        self.approval = dict(approval)
+        self.tool_name = str(approval.get("tool_name", ""))
+        self.call_id = str(approval.get("step_id", ""))
+        self.arguments_digest = str(approval.get("arguments_digest", ""))
+        self.reason = reason or "the approver denied this call"
+        self.tier = "host_approval"
+        self.retryable = True
+        super().__init__(f"Tool call {self.tool_name!r} was denied: {self.reason}")
+
+    def to_result(self) -> dict[str, Any]:
+        """Structured tool-result payload for the denial."""
+        return {
+            "status": "denied",
+            "tool": self.tool_name,
+            "call_id": self.call_id,
+            "arguments_digest": self.arguments_digest,
+            "reason": self.reason,
+            "tier": self.tier,
+            "retryable": self.retryable,
+            "message": str(self),
+        }
+
+
 def _verify_approval(token: str, secret: bytes, *, now: int) -> dict[str, Any]:
     _require_secret(secret)
     if not isinstance(now, int) or isinstance(now, bool):
@@ -208,7 +244,7 @@ def _verify_approval(token: str, secret: bytes, *, now: int) -> dict[str, Any]:
     if now >= value["expires_at"]:
         raise ValueError("approval is expired")
     if value["decision"] != "approved":
-        raise ValueError("approval was denied")
+        raise ApprovalDeniedError(value)
     return value
 
 
