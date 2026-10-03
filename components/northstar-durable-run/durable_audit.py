@@ -13,6 +13,12 @@ from audit import new_record, to_ndjson
 
 COMPONENT = "northstar-durable-run"
 
+#: First-class tool-effect ledger events (see tool_ledger.py). They flow into
+#: the audit feed under their own names — one record per ledger transition —
+#: so a SIEM can track per-tool-effect started/completed/failed without
+#: reading Northstar's event store.
+TOOL_EVENT_TYPES = ("tool.started", "tool.completed", "tool.failed")
+
 # EventContract dict keys that are not needed in the audit payload (they are
 # carried by the envelope itself or are structural digests of the store).
 _PAYLOAD_KEYS = (

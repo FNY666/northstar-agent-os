@@ -1,5 +1,57 @@
 # Northstar Agent OS — initial public component
 
+## Unreleased (forty-fifth batch) — durable execution hardening: supervisor takeover, tool-effect ledger, crash benchmark
+
+(Named forty-fifth because the forty-fourth batch — audit tamper-evident
+feed — landed on main while this worktree was in flight.)
+
+Implements durable-execution hardening items 1–3 from the agent durability
+audit (report §4.1), all offline and deterministic:
+
+- **External liveness + automatic resume** (`runner.RunSupervisor`): the
+  Diagrid pattern, single-host — the orchestrator acquires the execution
+  lease and heartbeats it while the worker is alive. The worker adopts the
+  lease via `DurableRunner(adopt_lease=(owner_id, token))`: it fence-checks
+  instead of heartbeating and never releases. If the worker dies, the lease
+  expires on its own and a healthy worker reclaims it (new fencing epoch,
+  `run.fenced` marker) and resumes from the `EventStore`: finished steps are
+  skipped, a started-but-unfinished step is re-run under the same action key.
+  `RunSupervisor.supervise()` runs one acquire → heartbeat → watch cycle and
+  reports `"completed"` / `"worker-died"`.
+- **Tool-effect three-state ledger** (`tool_ledger.py`, new module): every
+  tool effect records `tool.started` / `tool.completed` / `tool.failed` as
+  first-class state-neutral events (the ledger is the ordering authority)
+  plus a best-effort result cache in a `<events>.ledger.json` sidecar
+  (atomic temp+fsync+rename; results over 4096 bytes are digest-only).
+  `DurableRunner.run_tool()` reconciles before executing: completed replays
+  with zero re-execution; started-without-completed queries the receiver's
+  dedup store under the same idempotency key (hit → adopt as completed;
+  miss → re-issue under the same key; no receiver → fail closed);
+  failed/never → fresh attempt. `fn` receives the attempt's idempotency key
+  and must route the raw effect through `receiver.execute(key, ...)`.
+  Stated honestly in the module docstring: end-to-end exactly-once holds
+  **iff the receiver deduplicates on the idempotency key**;
+  `InMemoryDedupReceiver` is single-process/tests only.
+- **Crash-benchmark regression suite** (`tests/test_crash_benchmark.py`):
+  scripted baseline (3 steps × 2 ledger tool calls + per-step checkpoints,
+  fixed logical timestamps); 26 subtests kill the run with `SimulatedCrash`
+  at every instrumented site (4 per tool call + before/after checkpoint)
+  and assert byte-identical outputs, zero re-runs of completed tool calls,
+  and exactly one `run.finished`. `tests/test_supervisor.py` adds the real
+  fault injection: a forked worker is `SIGKILL`ed mid-step and a healthy
+  process takes over without re-running finished steps.
+
+Also fixed while testing: `_execute_attempt` called `fn(key)` with an
+undefined name (the parameter is `idempotency_key`) — every raw effect was
+misrecorded as `tool.failed` with `NameError`. Now `fn(idempotency_key)`.
+
+**Verification:** `make test` fully green — durable-run 124/124 (100
+existing + 24 new, incl. the real `SIGKILL` takeover test and 26 crash-site
+subtests), runtime 1401, interop 56, bench 35/35, repo docs 75/75;
+`python3 tests/docbuild.py verify` OK (regenerated `docs/api/northstar-durable-run.md`
+with the new `tool_ledger` module; `tool_ledger` added to the docbuild
+MANIFEST).
+
 ## Unreleased (forty-fourth batch) — tamper-evident audit feed: hash chain, signatures, proof spec
 
 `audit.ndjson/1` grows an optional, backward-compatible integrity layer

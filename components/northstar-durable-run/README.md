@@ -63,6 +63,57 @@ a single step action executes — without it, a run that outlasts the TTL loses
 its lease mid-execution, and a stolen lease raises instead of executing steps
 unowned.
 
+### Supervisor pattern: orchestrator-held liveness
+
+The Diagrid pattern, single-host: a `RunSupervisor` (not the worker) acquires
+the execution lease and heartbeats it while the worker is alive. The worker
+adopts the lease via `DurableRunner(adopt_lease=(owner_id, token))` — it
+fence-checks before each step instead of heartbeating, and it never releases.
+If the worker dies, the supervisor stops heartbeating, the lease expires on
+its own, and a healthy worker reclaims the expired lease (new fencing epoch,
+`run.fenced` marker) and resumes from the `EventStore`: finished steps are
+skipped, a step that was started but never finished is re-run under the same
+action key. `RunSupervisor.supervise(owner_id, now, spawn_worker)` runs one
+cycle — acquire, heartbeat in a background thread, watch the spawned process —
+and reports `"completed"` or `"worker-died"`. The lease is a local file, so
+supervision is single-host by design.
+
+### Tool-effect ledger: three-state reconcile
+
+`ToolEffectLedger` (`tool_ledger.py`) records every tool effect as
+`tool.started` / `tool.completed` / `tool.failed` — first-class, state-neutral
+events in the `EventStore` (the ledger is the ordering authority) — plus a
+best-effort result cache in a `<events>.ledger.json` sidecar (atomic
+temp+fsync+rename; results over `MAX_INLINE_RESULT_BYTES` are digest-only).
+`DurableRunner.run_tool(step_id, tool_call_id, fn, now, receiver=...)`
+reconciles before executing: `completed` replays the cached result with zero
+re-execution; `started`-without-`completed` queries the receiver's dedup store
+under the same idempotency key — hit: adopt as completed without re-executing;
+miss: re-issue under the same key; no receiver: fail closed, never re-run the
+raw effect and risk double-apply; `failed`/never: fresh attempt. `fn` receives
+the attempt's idempotency key and must route the raw effect through
+`receiver.execute(key, ...)` — that is what makes a re-issue a no-op.
+
+Exactly-once, stated honestly: the ledger gives at-most-once replay from its
+own records and at-least-once effect application; end-to-end exactly-once
+holds **iff the receiver deduplicates on the idempotency key**.
+`InMemoryDedupReceiver` is single-process/tests only — a production receiver
+must be durable (database, Redis, a file).
+
+### Crash benchmark
+
+`tests/test_crash_benchmark.py` pins a scripted baseline (3 steps × 2 ledger
+tool calls + per-step checkpoints, fixed logical timestamps). For each of the
+26 instrumented sites (4 per tool call: before/after `tool.started` and
+`tool.completed`, plus before/after checkpoint) one subtest kills the run with
+`SimulatedCrash` — the `kill -9` stand-in, a `BaseException` that writes
+nothing, exactly like `SIGKILL` — then resumes with a fresh runner and
+asserts byte-identical outputs (canonical JSON), zero re-runs of completed
+tool calls (every raw effect ran exactly once), and exactly one `run.finished`.
+`tests/test_supervisor.py` adds the real thing: a forked worker is killed with
+`SIGKILL` mid-step and a healthy process takes over without re-running
+finished steps.
+
 `verifier.py` does not trust a step's claimed output or a model's claimed
 status. It checks the actual run state, private workspace, required file
  digests, and an observed test exit code. Only a `verified` result can produce
@@ -95,9 +146,12 @@ PYTHONPATH=components/northstar-durable-run \
 This is not a production scheduler, sandbox, VM, container runtime, browser
 profile manager, distributed queue, or complete Agent OS. The first prototype
 uses local JSONL and JSON files, caller-registered Python functions, and a
-single-process test harness. It does not prove atomic claims across hosts,
-network isolation, process isolation, native Linux
-signal behavior, secret rotation, or production deployment safety.
+local test harness. It does not prove atomic claims across hosts,
+network isolation, secret rotation, or production deployment safety.
+Single-host crash + replay is covered: a real `SIGKILL` fault-injection test
+proves takeover without re-running finished steps, and the crash benchmark
+kills every instrumented site. Cross-host orchestration, native Linux
+signal behavior beyond `SIGKILL`, and process isolation remain unproven.
 The lease read-modify-write (`acquire`/`heartbeat`/`renew`/`release`) is
 serialized with an `flock` on a `<lease>.lock` sidecar file that is never
 renamed or deleted, so cooperating processes on the same POSIX host produce

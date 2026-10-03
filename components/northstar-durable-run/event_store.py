@@ -96,6 +96,17 @@ def _apply_event(
         # the old epoch's fencing. May appear in any run status.
         return
 
+    if event.event_type.startswith("tool."):
+        # Tool-effect ledger events (see tool_ledger.py and
+        # durable_contract._EVENT_STATUS_BY_TYPE). State-neutral: they record
+        # the started/completed/failed lifecycle of individual tool effects
+        # inside a step without perturbing the run/step lifecycle. The
+        # ledger reads the last tool.* event per tool_call_id; the store does
+        # not interpret tool ordering.
+        if event.step_id == "__run__":
+            raise ValueError("tool lifecycle events require a real step_id")
+        return
+
     if event.event_type.startswith(_RUN_EVENT_PREFIX):
         if event.step_id != "__run__":
             raise ValueError("run lifecycle events must use the __run__ step")
@@ -170,6 +181,11 @@ class EventStore:
         events = _read_lines(self._path)
         _derive(events) if events else None
         return events
+
+    @property
+    def path(self) -> Path:
+        """Absolute path of the JSONL event history file."""
+        return self._path
 
     def append_event(self, event: EventContract) -> EventContract:
         if not isinstance(event, EventContract):
