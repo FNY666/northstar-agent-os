@@ -1746,6 +1746,10 @@ Source: `components/northstar-agent-runtime/audit_export.py`
 
 Export session transcripts as the canonical NDJSON audit feed (audit v1).
 
+#### `validate_audit_record(record: Any)`
+
+Envelope validation errors, mirroring the normative contract validator.
+
 #### `record_to_audit(record: dict[str, Any])`
 
 Map one session transcript record to one canonical audit record.

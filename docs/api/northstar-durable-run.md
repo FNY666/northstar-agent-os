@@ -88,16 +88,24 @@ Source: `components/northstar-durable-run/runner.py`
 
 A small local durable runner for the Northstar vertical slice.
 
+#### `FencingError`
+
+The execution lease's fencing epoch is over for this holder.
+
 #### `StepPlan`
 
 - `input_digest` (property)
 #### `LeaseManager`
 
-A single-owner, expiring local lease persisted as strict JSON.
+A single-owner, expiring local lease with fencing tokens.
 
 - `acquire(owner_id: str, *, now: int, ttl_seconds: int)`
 - `assert_valid(owner_id: str, *, now: int)`
-- `heartbeat(owner_id: str, *, now: int, ttl_seconds: int)`
+- `heartbeat(owner_id: str, *, token: int, now: int, ttl_seconds: int)`
+- `renew(owner_id: str, *, token: int, now: int, ttl_seconds: int)`
+  - Renew the lease from inside a still-running action.
+- `check_token(owner_id: str, *, token: int)`
+  - Fail closed unless this owner still holds the current fencing epoch.
 - `release(owner_id: str)`
 #### `DurableRunner`
 
