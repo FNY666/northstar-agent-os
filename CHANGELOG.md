@@ -1,3 +1,35 @@
+## Unreleased (one-hundred-twenty-seventh batch) — algorithmic-management guards (AI-logistics absorption)
+
+New module `labor_algo.py`: `quota_receipt()` — productivity quotas are
+unenforceable without a disclosed, authority-signed, worker-acknowledged
+receipt binding (value, measurement window, appeal path); a secret quota is
+`labor:hidden_quota` (California AB 701 lesson). `algorithmic_termination_gate()`
+— algorithmic firings require a human adjudicator's countersign bound to the
+exact evidence pack and never predating it; otherwise
+`labor:algorithmic_firing` (Baltimore warehouse lesson). `fatigue_circuit_breaker()`
+— authority-pinned maximum continuous hours (Meituan 12h / Didi 10h service as
+field templates); at/over the limit the worker is forced offline
+(`labor:fatigue_circuit_break`); operating with no pinned policy at all is
+`labor:no_fatigue_policy` — the platform cannot choose to have no breaker.
+`surveillance_proportionality_gate()` — worker surveillance needs a matching
+proportionality receipt (purpose, scope, retention, biometric flag); purpose
+reuse is `labor:surveillance_purpose_mismatch`, scope overreach is
+`labor:disproportionate_surveillance`, undeclared biometrics is
+`labor:biometric_surveillance_undeclared`, expired retention is
+`labor:surveillance_retention_exceeded` (DSP camera / GPAI "no upper valve" lesson).
+`dispatch_fairness_probe()` — authority-pinned daily rejection allowance (the
+rider-4-unconditional-rejections lesson); penalizing a lawful rejection is
+`labor:rejection_penalty`. `av_safety_case_receipt()` — autonomous
+trucks/robots on public roads need a fresh, unrevoked safety-case receipt;
+without it the deployment registry must refuse registration
+(`labor:no_safety_case`) (KBA licensing model). `labor_impact_binding()` —
+displacement at/above the threshold requires a disclosed labor-impact receipt
+(`labor:labor_impact_undisclosed`), binding into the 110th-batch deployment
+registry (Amazon 600K-jobs lesson). Honest boundary: receipts enforce
+declared-labor discipline; they don't replace labor-law enforcement or the
+adjudicator's judgment. Bench track `metrics.labor_algo`: 12 scenarios,
+4 allow / 8 deny.
+
 ## Unreleased (one-hundred-twenty-sixth batch) — embodied safety vacuum gates (AI-construction/manufacturing absorption)
 
 New module `embodied.py`: `safety_vacuum_gate()` — an embodied
