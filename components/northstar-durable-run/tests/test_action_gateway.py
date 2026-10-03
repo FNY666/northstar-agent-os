@@ -17,6 +17,7 @@ from action_gateway import (  # noqa: E402
     ToolCall,
     ToolExecutionResult,
     ToolSpec,
+    _digest_output,
     digest_arguments,
     sign_approval,
 )
@@ -156,7 +157,12 @@ class ActionGatewayTests(unittest.TestCase):
         )
         self.assertEqual(
             result,
-            ToolExecutionResult(status="ok", output={"text": "fixture content"}, idempotency_key="call-001"),
+            ToolExecutionResult(
+                status="ok",
+                output={"text": "fixture content"},
+                idempotency_key="call-001",
+                output_digest=_digest_output({"text": "fixture content"}),
+            ),
         )
         self.assertEqual(self.invocations, [("read", arguments)])
 

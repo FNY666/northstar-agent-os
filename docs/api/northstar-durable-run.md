@@ -84,6 +84,19 @@ A signed approval whose decision is ``denied``.
 - `from_dict(value: Any)`
 - `to_dict()`
 - `canonical_json()`
+#### `BinaryPin`
+
+Pinned identity of the external binary behind a tool executor, if any.
+
+- `as_dict()`
+#### `verify_binary_pin(pin: BinaryPin, *, path: str | None=None)`
+
+Re-resolve ``pin.name`` and compare ``(realpath, content digest)``.
+
+#### `verify_output_receipt(result: 'ToolExecutionResult')`
+
+Recompute the output digest and compare with the recorded receipt.
+
 #### `ToolSpec`
 
 #### `ToolExecutionResult`

@@ -15,7 +15,9 @@ import binascii
 import hashlib
 import hmac
 import json
+import os
 import re
+import shutil
 from collections import OrderedDict
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -339,6 +341,121 @@ def _require_digest(value: Any) -> str:
     return value
 
 
+#: Largest binary hashed for a :class:`BinaryPin`.
+_MAX_PINNED_BINARY_BYTES = 64 * 1024 * 1024
+
+
+@dataclass(frozen=True)
+class BinaryPin:
+    """Pinned identity of the external binary behind a tool executor, if any.
+
+    Red-team model: ``DavidCarliez/trustmebro``
+    (https://github.com/DavidCarliez/trustmebro, MIT) — a PATH shim swaps
+    the *binary* an agent invokes and returns fabricated output. The
+    per-call approval binding (``call_id`` + ``arguments_digest``)
+    authenticates the *request*, never the *output*, so a shim is invisible
+    to it. The pin closes that gap: ``path`` is the ``realpath`` at
+    registration time and ``digest`` the ``sha256:<hex>`` of the file bytes;
+    :func:`verify_binary_pin` re-checks both before the executor runs, and a
+    shim planted after pinning fails closed here instead of feeding
+    fabricated output to the model.
+
+    Parallel definition of the runtime's ``tools.path_integrity.BinaryPin``:
+    the runtime never imports durable-run (see ``durable_bridge.py``), so
+    only the field names and digest format are shared, never the class —
+    exactly like ``digest_arguments``.
+    """
+
+    name: str
+    path: str
+    digest: str
+
+    def as_dict(self) -> dict[str, str]:
+        return {"name": self.name, "path": self.path, "digest": self.digest}
+
+
+def _hash_pinned_file(path: str) -> str:
+    digest = hashlib.sha256()
+    total = 0
+    with open(path, "rb") as handle:
+        for chunk in iter(lambda: handle.read(65536), b""):
+            total += len(chunk)
+            if total > _MAX_PINNED_BINARY_BYTES:
+                raise ValueError(f"binary {path!r} exceeds the hashable size limit")
+            digest.update(chunk)
+    return "sha256:" + digest.hexdigest()
+
+
+def verify_binary_pin(
+    pin: BinaryPin, *, path: str | None = None
+) -> tuple[bool, str]:
+    """Re-resolve ``pin.name`` and compare ``(realpath, content digest)``.
+
+    Returns ``(ok, reason)`` rather than raising so the gateway can refuse
+    the execution with a clear message. A shim planted after pinning changes
+    the resolved path, the file bytes, or both — any difference fails
+    closed. Honest limit: a shim planted *before* pinning pins the shim
+    itself; that case needs a PATH-shadow scan at install time (see the
+    runtime's ``tools.path_integrity.scan_path_shadows``).
+    """
+    if not isinstance(pin, BinaryPin):
+        return False, "pin is not a BinaryPin"
+    if "/" in pin.name or "\\" in pin.name or "\x00" in pin.name or not pin.name:
+        return False, f"invalid pinned binary name {pin.name!r}"
+    found = shutil.which(pin.name, path=path if path is not None else os.environ.get("PATH"))
+    if found is None:
+        return False, f"tool binary {pin.name!r} no longer resolves on PATH"
+    resolved = os.path.realpath(found)
+    if resolved != pin.path:
+        return (
+            False,
+            f"tool binary {pin.name!r} resolved to {resolved!r}, pinned to "
+            f"{pin.path!r} (PATH shadowing suspected)",
+        )
+    try:
+        digest = _hash_pinned_file(resolved)
+    except (OSError, ValueError) as error:
+        return False, f"could not hash {resolved!r}: {error}"
+    if digest != pin.digest:
+        return (
+            False,
+            f"tool binary {pin.name!r} content digest changed "
+            "(binary replaced after pinning)",
+        )
+    return True, f"tool binary {pin.name!r} matches its pin"
+
+
+def _digest_output(output: dict[str, Any]) -> str:
+    """``sha256:<hex>`` of the canonical JSON of a tool output.
+
+    Same wire format as the runtime's
+    ``tools.path_integrity.digest_output`` (parallel implementation; only
+    the format is shared).
+    """
+    return "sha256:" + hashlib.sha256(_canonical_json(output)).hexdigest()
+
+
+def verify_output_receipt(result: "ToolExecutionResult") -> tuple[bool, str]:
+    """Recompute the output digest and compare with the recorded receipt.
+
+    Detects post-execution forgery of a recorded tool output: if the
+    ``output`` dict was swapped after the receipt was written, the digest no
+    longer matches. Returns ``(ok, reason)``.
+    """
+    if not isinstance(result, ToolExecutionResult):
+        return False, "result is not a ToolExecutionResult"
+    if not result.output_digest:
+        return False, "receipt carries no output digest"
+    actual = _digest_output(result.output)
+    if actual != result.output_digest:
+        return (
+            False,
+            "recorded tool output does not match its receipt digest "
+            "(output forged after execution)",
+        )
+    return True, "recorded tool output matches its receipt digest"
+
+
 @dataclass(frozen=True)
 class ToolSpec:
     name: str
@@ -347,6 +464,7 @@ class ToolSpec:
     resource_kind: str
     risk_level: str
     executor: Callable[[dict[str, Any]], dict[str, Any]]
+    binary_pin: BinaryPin | None = None
 
     def __post_init__(self) -> None:
         _require_id(self.name, "tool name")
@@ -358,6 +476,8 @@ class ToolSpec:
             raise ValueError("risk_level must be low or high")
         if not callable(self.executor):
             raise ValueError("executor must be callable")
+        if self.binary_pin is not None and not isinstance(self.binary_pin, BinaryPin):
+            raise ValueError("binary_pin must be a BinaryPin or None")
 
 
 @dataclass(frozen=True)
@@ -365,6 +485,14 @@ class ToolExecutionResult:
     status: str
     output: dict[str, Any]
     idempotency_key: str
+    #: ``sha256:<hex>`` of the canonical output JSON, bound at execution
+    #: time. ``verify_output_receipt`` re-checks it: a recorded output
+    #: swapped after the fact no longer matches and is detected.
+    output_digest: str = ""
+    #: ``realpath`` of the binary the pin resolved to at execution time, or
+    #: ``None`` for tools without a ``binary_pin``. Makes the receipt
+    #: self-describing: *this output came from this binary*.
+    binary_path: str | None = None
 
 
 class ActionGateway:
@@ -640,6 +768,19 @@ class ActionGateway:
 
         # Genuine miss: reserve the slot before invoking the executor, so a
         # full store fails closed here instead of after a side effect.
+        # Genuine miss: verify the pinned binary (if any) before the executor
+        # runs, so a PATH shim planted after registration fails closed here
+        # and its fabricated output never reaches the model. Then reserve the
+        # slot before invoking the executor, so a full store fails closed
+        # here instead of after a side effect.
+        binary_path: str | None = None
+        if spec.binary_pin is not None:
+            pin_ok, pin_reason = verify_binary_pin(spec.binary_pin)
+            if not pin_ok:
+                raise ValueError(f"tool binary integrity check failed: {pin_reason}")
+            binary_path = os.path.realpath(
+                shutil.which(spec.binary_pin.name) or spec.binary_pin.path
+            )
         self._reserve_idempotency_slot(now)
         try:
             output = spec.executor(arguments)
@@ -651,6 +792,8 @@ class ActionGateway:
             status="ok",
             output=output,
             idempotency_key=call.idempotency_key,
+            output_digest=_digest_output(output),
+            binary_path=binary_path,
         )
         self._results[call.idempotency_key] = (fingerprint, result, valid_until)
         return result
