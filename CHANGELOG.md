@@ -1,5 +1,57 @@
 # Northstar Agent OS — initial public component
 
+## Unreleased (forty-seventh batch) — external audit anchoring (Rekor) + WORM archive packages
+
+(Named forty-seventh because the forty-sixth batch — durable claim-check +
+event schema migration — landed on main while this worktree was in flight.)
+
+Implements audit-line items 2 and 5 from the agent durability/audit report
+(§4.2), all offline-first with network as an explicit opt-in:
+
+- **External head anchoring via Sigstore Rekor** (`audit_rekor.py`, new):
+  `northstar audit anchor-external <feed> --out anchor.json --seed-hex <hex>`
+  submits the head chain hash to the public Rekor transparency log as a
+  DSSE entry (v1 API, `application/vnd.northstar.audit-anchor+json`
+  payload, Ed25519-signed PAE per secure-systems-lab/dsse v1.0.0) and
+  writes the self-contained anchor record (`northstar-rekor-anchor/1`:
+  uuid, log index, integrated time, payload, signature, pubkey). Rekor was
+  chosen over RFC 3161 after live verification on 2026-10-03: the public
+  instance answers with no account/registration, and the JSON API keeps the
+  client dependency-free where RFC 3161 would need hand-rolled ASN.1 DER +
+  CMS verification. Any submission failure exits 4 with a clear message —
+  never a silent non-anchor.
+- **`audit verify --external-anchor`** now checks three layers: local chain
+  continuity, that the anchor pins the feed's current head, the anchor's
+  DSSE signature (offline), then re-fetches the canonical entry from the
+  public log and compares `payloadHash` and the verifier key. Exit 5 means
+  the external anchor could not be confirmed (mismatch, or the log was
+  unreachable) — reported distinctly, never silently passed.
+- **WORM archive packages** (`audit_archive.py`, new;
+  `northstar-audit-archive/1`): `sessions export <id> --chain --archive
+  <dir>` writes `feed.ndjson` + `anchor-manifest.json` (+
+  `external-anchor.json` with `--with-external-anchor`) +
+  `archive-manifest.json` (sha256 of every file, head hash, record count,
+  180-day retention window aligned with EU AI Act Art. 12).
+  `northstar audit verify-archive <dir>` re-checks everything offline;
+  `--online` also re-fetches the Rekor entry.
+  `scripts/s3-worm-upload.sh` uploads a verified package to S3 Object Lock
+  (`COMPLIANCE` mode, retained until the archive's own `retain_until`).
+- **Honest trust documentation**: `docs/concepts/audit-proof-spec.md`
+  §§8–9 spell out what the external anchor does and does not prove
+  (trusts Rekor operators; proves the key holder pinned this head by
+  `integratedTime`, not feed completeness; `integratedTime` is the log's
+  claim, not a qualified timestamp; only hashes enter the public log;
+  pinned to the Rekor v1 API with the v2 migration noted).
+
+**Verification:** 13 new Rekor tests green (fake local Rekor server that
+verifies DSSE signatures for real — hermetic; one env-gated
+`NORTHSTAR_LIVE_REKOR=1` test does a real submission, skipped by default),
+9 new archive tests green (round-trip, tamper/truncation/missing-file
+detection, external-anchor head binding, 180-day retention math);
+`make test` fully green; `make bench` 35/35; `python3 tests/docbuild.py
+verify` OK (regenerated `docs/api/northstar-agent-runtime.md` with the two
+new modules).
+
 ## Unreleased (forty-sixth batch) — durable execution: claim-check blob area, event schema migration
 
 Implements durable-execution hardening items 4–5 from the agent durability
@@ -38,7 +90,6 @@ and `test_tool_ledger.py` now exercise the migration path);
 `python3 tests/docbuild.py verify` OK (`blob_store`, `event_migration`
 added to the docbuild MANIFEST; `docs/api/northstar-durable-run.md`
 regenerated).
-
 ## Unreleased (forty-fifth batch) — durable execution hardening: supervisor takeover, tool-effect ledger, crash benchmark
 
 (Named forty-fifth because the forty-fourth batch — audit tamper-evident

@@ -148,35 +148,88 @@ Result shape: `ok`, `broken_at` (1-based line or null), `records`,
 hash equal, head hash equal, record count equal. This detects the two
 attacks the bare chain cannot see: wholesale rewrite and tail truncation.
 
-**External anchoring (recommended, network-dependent, not in the default
-path):** ship the manifest — or just its `feed_sha256` — to an RFC 3161
-timestamp authority or a transparency log (Sigstore Rekor). The manifest is
-designed so the external step is a dumb timestamp over 32 bytes; no
-Northstar-specific protocol is needed. Until that step runs, the manifest
-is only as trustworthy as its storage: keep it in WORM storage (below) or
-hand it to a second party.
+## 8. External anchoring via Rekor (implemented)
 
-## 8. WORM archiving (design)
+`northstar audit anchor-external <feed> --out anchor.json --seed-hex <hex>`
+submits the head chain hash to the Sigstore Rekor transparency log and
+writes the anchor record (`northstar-rekor-anchor/1`):
 
-For regulated retention (e.g. EU AI Act Art. 12, 6 months): periodically
-(e.g. at run end) package the feed **plus its anchor manifest** and write
-the package to WORM storage — S3 Object Lock (`COMPLIANCE` mode) or any
-equivalent. The package is the "immutable archive point": the manifest
-inside pins the exact bytes, the Object Lock retention pins the manifest.
-No Northstar code writes to S3 in this change; the manifest format (§7) is
-the integration contract an archiving job needs.
+* The anchored statement is canonical JSON — `feed_sha256`,
+  `head_chain_hash`, `records`, `anchored_at` — wrapped in a DSSE envelope
+  (`application/vnd.northstar.audit-anchor+json`) and signed with the
+  operator's Ed25519 key. The PAE follows secure-systems-lab/dsse v1.0.0.
+* The entry is submitted as a Rekor v1 `dsse` entry
+  (`POST /api/v1/log/entries`, no account, no registration). The record
+  keeps `uuid`, `log_index`, `integrated_time`, the payload, its sha256,
+  the signature and the public key — everything a verifier needs.
+* `northstar audit verify --external-anchor anchor.json` checks, in order:
+  the local chain, that the anchor pins the feed's current head, the
+  anchor's DSSE signature (offline), then re-fetches the canonical entry
+  from the public log by log index and compares `payloadHash` and the
+  verifier key. Exit 5 means the external anchor could not be confirmed
+  (mismatch, or the log was unreachable) — never a silent pass.
 
-## 9. CLI reference
+Trust assumptions (read before relying on this):
+
+1. You trust the Sigstore public-good Rekor operators not to equivocate.
+   A compromised log could backdate `integratedTime`; the ecosystem runs
+   witnesses/monitors, but this client does not verify them.
+2. The anchor proves *the key holder* pinned *this head* no later than
+   `integratedTime`. It does **not** prove the feed is complete — an
+   operator can anchor a truncated feed. The archive's record count and
+   the hash chain mitigate that; the log cannot.
+3. `integratedTime` is the log's claim, not a qualified timestamp. Where
+   eIDAS-style legal weight is needed, use an RFC 3161 TSA instead
+   (documented alternative; not implemented — it needs hand-rolled
+   ASN.1 DER and CMS verification, a larger change for the same
+   "existed at T" property).
+4. Only hashes and counts enter the public log — no feed content, no PII.
+5. Pinned to the Rekor **v1** API (verified live 2026-10-03). Sigstore is
+   migrating to a v2 (rekor-tiles) API; if v1 is retired, `audit_rekor.py`
+   needs a v2 port. The anchor record stores `rekor_api: "v1"`.
+
+## 9. WORM archiving (implemented)
+
+`northstar sessions export <id> --chain --archive <dir>` writes a
+`northstar-audit-archive/1` package:
+
+```
+<dir>/
+  feed.ndjson            # the chained audit feed
+  anchor-manifest.json   # offline head anchor (§7)
+  external-anchor.json   # Rekor anchor record (§8), only with --with-external-anchor
+  archive-manifest.json  # sha256 of every file, head hash, record count,
+                         # retention window (default 180 days, EU AI Act Art. 12)
+```
+
+`northstar audit verify-archive <dir>` re-checks file hashes, the feed
+chain, the offline anchor and the external anchor's signature — all
+offline. `--online` additionally re-fetches the Rekor entry.
+
+The package is storage-agnostic. For WORM semantics upload it with
+`scripts/s3-worm-upload.sh <dir> s3://bucket/prefix`, which verifies the
+package first, then `put-object`s every file with S3 Object Lock
+`COMPLIANCE` mode retained until the archive's own `retain_until`
+(manifest uploaded last, so a reader that finds it sees a complete
+package). The bucket must have Object Lock enabled at creation time.
+
+## 10. CLI reference
 
 * `northstar audit verify <feed>` — exit 0 `OK`, 1 `BROKEN`, 2
-  `UNPROTECTED`, 3 `INVALID`. Flags: `--pubkey <hex>`,
-  `--expect-session-id`, `--expect-run-id`, `--anchor <manifest>`, `--json`.
+  `UNPROTECTED`, 3 `INVALID`, 5 external anchor unconfirmed. Flags:
+  `--pubkey <hex>`, `--expect-session-id`, `--expect-run-id`,
+  `--anchor <manifest>`, `--external-anchor <record>`, `--rekor-url`, `--json`.
 * `northstar audit anchor <feed> --out <manifest>` — offline, no network.
+* `northstar audit anchor-external <feed> --out <record> --seed-hex <hex>`
+  — needs network; exit 4 on any failure (never a silent non-anchor).
+* `northstar audit verify-archive <dir> [--online]` — verify a WORM package.
 * `northstar audit keygen [--json]` — mint an Ed25519 pair.
 * `northstar sessions export --session-dir <dir> --chain <id>` — export a
   transcript as a chained feed (genesis anchored to the session).
+* `northstar sessions export --session-dir <dir> --chain --archive <dir> <id>`
+  — write a WORM archive package instead of printing the feed.
 
-## 10. Test vectors
+## 11. Test vectors
 
 The three-line feed below is fixed. A conforming verifier must reproduce
 every hash shown, report `OK` over the 3 records, report `BROKEN at line 3`
@@ -206,7 +259,7 @@ must equal `89b21d68…`.
 Ed25519 vectors: RFC 8032 §7.1 TEST 1–3 (empty message, `0x72`,
 `0xaf82`; see `tests/test_audit_chain.py`).
 
-## 11. Honest limitations
+## 12. Honest limitations
 
 * The chain detects *modification*; without an external anchor it does not
   detect a *wholesale rewrite* (fresh chain, fresh genesis) — §7 exists for

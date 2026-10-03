@@ -16,6 +16,21 @@ storage, a transparency log, an RFC 3161 timestamp over the manifest);
 ``audit verify --anchor manifest.json`` then also detects wholesale
 rewrites and tail truncation, which the bare chain cannot.
 
+``northstar audit anchor-external <feed.ndjson> --out anchor.json --seed-hex <hex>``
+submits the feed's head hash to the Sigstore Rekor transparency log as a
+DSSE entry and writes the anchor record. Needs network; any failure exits 4
+with a clear message instead of pretending the feed is anchored.
+
+``northstar audit verify`` gains ``--external-anchor anchor.json``
+(``--rekor-url`` optional): besides the local chain it checks the anchor
+pins the same head, the anchor's DSSE signature, and re-fetches the entry
+from the public log. Exit 5 means the external anchor could not be
+confirmed (mismatch, or the log was unreachable).
+
+``northstar audit verify-archive <dir>`` verifies a WORM archive package
+(``sessions export --archive``); ``--online`` also re-fetches the Rekor
+entry when the package carries an external anchor.
+
 ``northstar audit keygen`` prints a fresh Ed25519 seed/public-key pair
 (hex). The seed signs feeds offline; only the public key is needed to
 verify. Key handling is the operator's job — this command just mints bits.
@@ -28,6 +43,8 @@ import sys
 from pathlib import Path
 
 USAGE_ERROR = 64
+EXTERNAL_ANCHOR_FAILED = 4
+EXTERNAL_UNVERIFIED = 5
 
 
 def add_audit_arguments(parser: argparse.ArgumentParser) -> None:
@@ -55,6 +72,18 @@ def add_audit_arguments(parser: argparse.ArgumentParser) -> None:
         help="head-anchor manifest JSON (from `audit anchor`); also checks for rewrites/truncation",
     )
     verifying.add_argument("--json", action="store_true", help="emit the result as one JSON object")
+    verifying.add_argument(
+        "--external-anchor",
+        default="",
+        help="Rekor anchor record JSON (from `audit anchor-external`); also checks the "
+        "anchor pins this head, its DSSE signature, and the entry's presence in the "
+        "public log (needs network)",
+    )
+    verifying.add_argument(
+        "--rekor-url",
+        default="",
+        help="transparency log base URL (default: the public Sigstore Rekor)",
+    )
 
     anchoring = sub.add_parser(
         "anchor",
@@ -75,6 +104,40 @@ def add_audit_arguments(parser: argparse.ArgumentParser) -> None:
         description="Prints seed_hex and pubkey_hex. Guard the seed; verifiers only need the public key.",
     )
     keygen.add_argument("--json", action="store_true", help="emit the key pair as one JSON object")
+
+    anchoring_external = sub.add_parser(
+        "anchor-external",
+        help="anchor a feed's head hash in the Sigstore Rekor transparency log",
+        description=(
+            "Submits the head chain hash as a DSSE entry to Rekor and writes the "
+            "anchor record. Needs network; any failure exits 4 with a clear "
+            "message instead of pretending the feed is anchored."
+        ),
+    )
+    anchoring_external.add_argument("feed", help="audit NDJSON feed file to anchor")
+    anchoring_external.add_argument("--out", required=True, help="where to write the anchor record JSON")
+    anchoring_external.add_argument(
+        "--seed-hex", required=True, help="64-hex-char Ed25519 seed signing the anchor statement"
+    )
+    anchoring_external.add_argument(
+        "--rekor-url", default="", help="transparency log base URL (default: the public Sigstore Rekor)"
+    )
+
+    verifying_archive = sub.add_parser(
+        "verify-archive",
+        help="verify a WORM archive package directory (sessions export --archive)",
+        description=(
+            "Offline: file hashes, feed chain, offline head anchor, and the "
+            "external anchor's signature. --online additionally re-fetches the "
+            "Rekor entry when the package carries an external anchor."
+        ),
+    )
+    verifying_archive.add_argument("directory", help="archive package directory to verify")
+    verifying_archive.add_argument("--online", action="store_true", help="also re-fetch the Rekor entry")
+    verifying_archive.add_argument(
+        "--rekor-url", default="", help="transparency log base URL (default: the public Sigstore Rekor)"
+    )
+    verifying_archive.add_argument("--json", action="store_true", help="emit the result as one JSON object")
 
 
 def _load_pubkey(hexkey: str) -> bytes:
@@ -145,6 +208,41 @@ def run_audit(args: argparse.Namespace) -> int:
                 result.ok = False
                 result.reason = anchor_note
                 anchor_failed = True
+        external_note = ""
+        external_state = "not-checked"
+        if args.external_anchor and result.ok:
+            from audit_chain import anchor_manifest as _head_of
+            from audit_rekor import (
+                RekorError,
+                verify_anchor_in_log,
+                verify_anchor_offline,
+            )
+
+            try:
+                external_record = json.loads(Path(args.external_anchor).read_text(encoding="utf-8"))
+            except (OSError, ValueError) as error:
+                print(f"audit: cannot read external anchor record: {error}", file=sys.stderr)
+                return USAGE_ERROR
+            head_now = _head_of(args.feed).get("head_chain_hash")
+            ok, external_note = verify_anchor_offline(external_record, head_chain_hash=head_now)
+            if ok:
+                try:
+                    ok, external_note = verify_anchor_in_log(
+                        external_record,
+                        rekor_url=args.rekor_url or None,
+                    )
+                    external_state = "ok" if ok else "mismatch"
+                except RekorError as error:
+                    # The log is unreachable: existence is unverified. This is
+                    # reported distinctly (exit 5), never silently passed.
+                    print(f"audit: cannot reach transparency log: {error}", file=sys.stderr)
+                    return EXTERNAL_UNVERIFIED
+            else:
+                external_state = "mismatch"
+            if not ok:
+                result.ok = False
+                result.reason = f"external anchor: {external_note}"
+                anchor_failed = True
         if result.ok:
             status = "OK"
         elif result.unprotected:
@@ -164,6 +262,7 @@ def run_audit(args: argparse.Namespace) -> int:
                 "reason": result.reason,
                 "signature_failures": result.signature_failures,
                 "anchor_ok": result.anchor_ok,
+                "external_anchor": {"state": external_state, "note": external_note},
             }))
         else:
             detail = f" ({result.reason})" if result.reason else ""
@@ -171,7 +270,12 @@ def run_audit(args: argparse.Namespace) -> int:
             if result.broken_at is not None:
                 extra = f" at line {result.broken_at}"
             anchor_extra = f"; anchor: {anchor_note}" if args.anchor and result.anchor_ok is not None else ""
-            print(f"audit verify: {status}{extra} — {result.records} records, {result.chained} chained{detail}{anchor_extra}")
+            external_extra = (
+                f"; external anchor: {external_state} ({external_note})"
+                if args.external_anchor
+                else ""
+            )
+            print(f"audit verify: {status}{extra} — {result.records} records, {result.chained} chained{detail}{anchor_extra}{external_extra}")
         if result.ok:
             return 0
         if result.unprotected:
@@ -179,5 +283,66 @@ def run_audit(args: argparse.Namespace) -> int:
         if status == "INVALID":
             return 3
         return 1
-    print("audit: pass a subcommand: verify, anchor or keygen (--help for flags)", file=sys.stderr)
+    if command == "anchor-external":
+        from audit_rekor import REKOR_V1_DEFAULT, RekorError, anchor_feed_head
+
+        feed = Path(args.feed)
+        if not feed.is_file():
+            print(f"audit: no such feed file: {feed}", file=sys.stderr)
+            return USAGE_ERROR
+        try:
+            seed = bytes.fromhex(args.seed_hex)
+        except ValueError:
+            print("audit: --seed-hex is not valid hex", file=sys.stderr)
+            return USAGE_ERROR
+        if len(seed) != 32:
+            print("audit: --seed-hex must be 64 hex chars (32 bytes)", file=sys.stderr)
+            return USAGE_ERROR
+        try:
+            record = anchor_feed_head(
+                feed, seed, rekor_url=args.rekor_url or REKOR_V1_DEFAULT
+            )
+        except (RekorError, ValueError, OSError) as error:
+            # Network/log failure is never silent: the feed is NOT anchored.
+            print(f"audit: external anchoring failed: {error}", file=sys.stderr)
+            return EXTERNAL_ANCHOR_FAILED
+        out = Path(args.out)
+        out.write_text(json.dumps(record, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+        print(
+            f"audit: anchored head {record['payload']['head_chain_hash'][:16]}… "
+            f"at log index {record['log_index']} -> {out}"
+        )
+        return 0
+    if command == "verify-archive":
+        from audit_archive import verify_archive
+
+        result = verify_archive(
+            args.directory,
+            rekor_url=args.rekor_url or None,
+            online=bool(getattr(args, "online", False)),
+        )
+        status = "OK" if result.ok else "BROKEN"
+        if getattr(args, "json", False):
+            print(json.dumps({
+                "status": status,
+                "ok": result.ok,
+                "reason": result.reason,
+                "files": result.files,
+                "records": result.records,
+                "head_chain_hash": result.head_chain_hash,
+                "retain_until": result.retain_until,
+                "external_anchor": result.external_anchor,
+            }))
+        else:
+            extra = f" — {result.reason}" if result.reason else ""
+            print(
+                f"audit verify-archive: {status} — {result.files} files, "
+                f"{result.records} records{extra}"
+            )
+        return 0 if result.ok else 1
+    print(
+        "audit: pass a subcommand: verify, anchor, anchor-external, verify-archive or keygen "
+        "(--help for flags)",
+        file=sys.stderr,
+    )
     return USAGE_ERROR

@@ -118,6 +118,32 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
         help="seal the feed with the tamper-evident hash chain (genesis anchored "
         "to this session); verify later with `northstar audit verify`",
     )
+    exporting.add_argument(
+        "--archive",
+        default="",
+        metavar="DIR",
+        help="instead of printing the feed, write a WORM-ready archive package "
+        "(northstar-audit-archive/1) to DIR: feed + offline head anchor + "
+        "archive manifest with a 180-day retention window; verify later with "
+        "`northstar audit verify-archive` (requires --chain)",
+    )
+    exporting.add_argument(
+        "--with-external-anchor",
+        action="store_true",
+        help="with --archive: also anchor the head hash in the Sigstore Rekor "
+        "transparency log and store the anchor record in the package "
+        "(needs network; requires --seed-hex)",
+    )
+    exporting.add_argument(
+        "--seed-hex",
+        default="",
+        help="64-hex-char Ed25519 seed signing the external anchor statement",
+    )
+    exporting.add_argument(
+        "--rekor-url",
+        default="",
+        help="transparency log base URL (default: the public Sigstore Rekor)",
+    )
 
     searching = sub.add_parser(
         "search",
@@ -183,7 +209,15 @@ def run_sessions(args: argparse.Namespace) -> int:
             except ValueError as error:
                 print(f"sessions: {error}", file=sys.stderr)
                 return USAGE_ERROR
-            return _export_session(directory, session_id, chain=bool(getattr(args, "chain", False)))
+            return _export_session(
+                directory,
+                session_id,
+                chain=bool(getattr(args, "chain", False)),
+                archive_dir=getattr(args, "archive", "") or None,
+                with_external_anchor=bool(getattr(args, "with_external_anchor", False)),
+                seed_hex=getattr(args, "seed_hex", "") or None,
+                rekor_url=getattr(args, "rekor_url", "") or None,
+            )
         if args.session_command == "checkpoints":
             session = getattr(args, "session", "") or ""
             if session:
@@ -336,8 +370,23 @@ def _show_session(directory: Path, session_id: str, *, json_out: bool) -> int:
 # -- exporting (JSONL transcript -> canonical NDJSON audit feed) ------------
 
 
-def _export_session(directory: Path, session_id: str, *, chain: bool = False) -> int:
-    """Write one transcript as audit NDJSON to stdout, one record per line."""
+def _export_session(
+    directory: Path,
+    session_id: str,
+    *,
+    chain: bool = False,
+    archive_dir: str | None = None,
+    with_external_anchor: bool = False,
+    seed_hex: str | None = None,
+    rekor_url: str | None = None,
+) -> int:
+    """Write one transcript as audit NDJSON to stdout, one record per line.
+
+    With ``archive_dir`` set, write a WORM-ready archive package instead
+    (``northstar-audit-archive/1``); the archive pins the feed bytes, the
+    offline head anchor and — when ``with_external_anchor`` is set — the
+    Rekor anchor record.
+    """
     from audit_export import load_jsonl_records, records_to_ndjson
 
     path = directory / f"{session_id}{SESSION_FILE_SUFFIX}"
@@ -345,7 +394,47 @@ def _export_session(directory: Path, session_id: str, *, chain: bool = False) ->
         print(f"sessions: no transcript for session {session_id!r} in {directory}", file=sys.stderr)
         return 1
     records = load_jsonl_records(path)
-    sys.stdout.write(records_to_ndjson(records, chain=chain, session_id=session_id))
+    feed_text = records_to_ndjson(records, chain=chain, session_id=session_id)
+    if not archive_dir:
+        sys.stdout.write(feed_text)
+        return 0
+    if not chain:
+        print("sessions: --archive requires --chain (the archive pins the head chain hash)",
+              file=sys.stderr)
+        return 1
+    if with_external_anchor and not seed_hex:
+        print("sessions: --with-external-anchor requires --seed-hex", file=sys.stderr)
+        return 1
+    from audit_archive import write_archive
+
+    target = Path(archive_dir)
+    feed_path = target / "feed.ndjson"
+    target.mkdir(parents=True, exist_ok=True)
+    feed_path.write_bytes(feed_text.encode("utf-8"))
+    external_anchor = None
+    if with_external_anchor:
+        from audit_rekor import REKOR_V1_DEFAULT, RekorError, anchor_feed_head
+
+        try:
+            seed = bytes.fromhex(seed_hex)
+        except ValueError:
+            print("sessions: --seed-hex is not valid hex", file=sys.stderr)
+            return 1
+        if len(seed) != 32:
+            print("sessions: --seed-hex must be 64 hex chars (32 bytes)", file=sys.stderr)
+            return 1
+        try:
+            external_anchor = anchor_feed_head(
+                feed_path, seed, rekor_url=rekor_url or REKOR_V1_DEFAULT
+            )
+        except (RekorError, ValueError, OSError) as error:
+            print(f"sessions: external anchoring failed, archive not written: {error}",
+                  file=sys.stderr)
+            return 4
+    write_archive(target, feed_path.read_bytes(), session_id=session_id,
+                  external_anchor=external_anchor)
+    print(f"sessions: archived {session_id} -> {target}"
+          + (" (externally anchored)" if external_anchor else ""))
     return 0
 
 
