@@ -368,3 +368,64 @@ Verify a receipt against the observed arguments and result.
 #### `receipt_audit_record(receipt: dict[str, Any], *, seq: int | None=None)`
 
 Render a receipt as an audit v1 record (event ``tool.receipt``).
+
+### `receipt_gate`
+
+Source: `components/northstar-durable-run/receipt_gate.py`
+
+SHA-256 receipt gates: critical operations require a valid receipt first.
+
+#### `canonical_sha256_hex(value: Any)`
+
+SHA-256 hex of the canonical JSON encoding of ``value``.
+
+#### `ReceiptGateError`
+
+A receipt gate refused to let a critical operation proceed.
+
+#### `Receipt`
+
+One SHA-256 receipt binding a gate decision to exact content.
+
+- `to_dict()`
+- `from_dict(data: dict[str, Any])`
+#### `ReceiptGate`
+
+Gate registry: emit, verify, and revoke SHA-256 receipts.
+
+- `emit(*, gate: str, content: Any, role: str='', approved_by: str='', issued_at: int, deps: dict[str, str] | None=None, metadata: dict[str, Any] | None=None)`
+  - Emit a receipt when a gate passes, binding the content digest.
+- `verify(receipt_id: str, content: Any, *, now: int, dep_contents: dict[str, Any] | None=None)`
+  - Verify a receipt against the presented content; fail closed.
+- `require(receipt_id: str, content: Any, *, now: int)`
+  - Alias for :meth:`verify` — the gate a critical operation calls.
+- `revoke(receipt_id: str, *, reason: str, now: int)`
+  - Revoke a receipt. ``reason`` is mandatory — a revocation without a declared cause is noise, not audit (harness-sdlc ADR-004).
+- `get(receipt_id: str)`
+  - Return the receipt, if any (no verification performed).
+- `status()`
+  - List all receipts with their state (operational overview).
+### `governed_memory`
+
+Source: `components/northstar-durable-run/governed_memory.py`
+
+Governed memory: memory writes/reads go through the receipt system.
+
+#### `GovernedMemoryError`
+
+A governed memory operation was refused.
+
+#### `GovernedMemory`
+
+Content-addressed memory where reads verify write receipts.
+
+- `write(key: str, value: Any, *, role: str='', approved_by: str='', issued_at: int)`
+  - Store ``value`` under ``key`` and emit its write receipt.
+- `read(key: str, receipt_id: str, *, now: int)`
+  - Read ``key``, verifying the write receipt first.
+- `revoke(key: str, *, reason: str, now: int)`
+  - Revoke a memory entry with a mandatory reason.
+- `history(key: str | None=None)`
+  - Append-only write history, optionally filtered by key.
+- `receipt_for(key: str)`
+  - Return the current write receipt for ``key``, if any.
