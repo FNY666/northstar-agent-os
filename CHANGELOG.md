@@ -1,5 +1,17 @@
 # Northstar Agent OS — initial public component
 
+## Unreleased (thirty-fifth batch) — close the verifier's lstat→open TOCTOU
+
+`verify_run_completion` lstat-checked each required artifact (rejecting
+symlinks) and then hashed it with a following open: a swap between the two
+syscalls would hash whatever the link pointed at instead. `_file_digest`
+now opens with `O_NOFOLLOW` and re-checks the open fd with `fstat`, so the
+bytes hashed are always the bytes of the file that was opened — the same
+file-handling discipline as the F15 skills-lock write. One new test pins
+that a symlink is refused at the read, not just at the gate.
+
+**Verification:** 74/74 durable-run tests green; full clinic below.
+
 ## Unreleased (thirty-fourth batch) — durable-run lease recovery and heartbeat
 
 The execution lease could not do its job in exactly the situations it exists
