@@ -140,6 +140,7 @@ MANIFEST: dict[str, tuple[str, ...]] = {
         "herd_gate",
         "deployment_registry",
         "scene_bound",
+        "dual_use",
         "tracing",
         "vendor_chain",
         "safety_envelope",

@@ -5819,6 +5819,245 @@ def run_deployment_registry() -> dict[str, Any]:
     }
 
 
+def run_dual_use() -> dict[str, Any]:
+    """Dual-use screen for autonomous science (one-hundred-eleventh batch).
+
+    Absorbs the 2026 AI-for-science thread: ABC-Bench showed LLM agents
+    beating human expert medians at robot-script writing and DNA
+    fragment design, with "bypassing DNA synthesis screening" at 78%;
+    SAFS26-a found models chasing high-score-but-physically-meaningless
+    solutions once constraints were removed; paper-mill forensics put
+    34.84% of 13,502 AI/ML retractions on computer-generated content.
+    This runner exercises ``dual_use`` over 12 deterministic scenarios:
+    valid constraint bindings gate tool calls, the watchlist tripwire
+    escalates dual-use calls to humans, near-hits classify
+    NON_AUTHORITATIVE, claims stay NON_AUTHORITATIVE until replication
+    or expert countersign, result-without-method breakthroughs are
+    terminally ununderstood, mass-unparseable citations taint the
+    document, and the mechanical verifier's rejection is final with no
+    override path. Ground truth is closed: 5 allow / 7 deny.
+    """
+    from dual_use import (
+        CLAIM_AUTHORITATIVE,
+        CLAIM_NON_AUTHORITATIVE,
+        CLAIM_UNUNDERSTOOD,
+        DUAL_USE_HIT_EVENT,
+        DUAL_USE_SCREENED_EVENT,
+        AuthorityRegistry,
+        ClaimRegistry,
+        MechanicalVerifier,
+        ScienceTaskGate,
+        authority_keypair,
+        check_citations,
+        issue_constraint_binding,
+        screen_tool_call,
+        sign_binding_digest,
+        _binding_digest_for_signing,
+    )
+    from canonical_json import jcs_sha256_hex
+
+    _T0 = 1_789_000_000
+    _LIST_DIGEST = jcs_sha256_hex({"constraints": ["no pathogens", "physics only"]})
+
+    def _authority():
+        pub, seed = authority_keypair(b"\x0b" * 32)
+        return AuthorityRegistry({"lab-director": pub}), seed
+
+    def _bound_gate():
+        registry, seed = _authority()
+        kw = dict(task_id="bench-task",
+                  constraint_list_digest=_LIST_DIGEST,
+                  constraint_source="lab-safety-manual-v3",
+                  issued_by="lab-director", issued_at=_T0, prev_hash="")
+        digest = _binding_digest_for_signing(**kw)
+        sig = sign_binding_digest(seed, digest)
+        gate = ScienceTaskGate(registry)
+        gate.register(issue_constraint_binding(registry, signature=sig, **kw))
+        return gate
+
+    scenarios: list[tuple[str, str, Any]] = []
+
+    def _scenario(sid: str, expected: str, thunk: Any) -> None:
+        scenarios.append((sid, expected, thunk))
+
+    def _tool_outcome(task_id, tool_name, args, gate):
+        bv = gate.require_binding(task_id, _T0)
+        if not bv.allowed:
+            return {"verdict": "deny", "reason": bv.reason,
+                    "event": bv.audit_event}
+        sv = screen_tool_call(task_id, tool_name, args, _T0)
+        return {"verdict": "allow" if sv.allowed else "deny",
+                "reason": sv.reason, "event": sv.audit_event}
+
+    # 1: bound task + clean call -> allow.
+    def _s1():
+        gate = _bound_gate()
+        return _tool_outcome("bench-task", "search_papers",
+                             {"query": "perovskite"}, gate)
+
+    _scenario("allow_bound_clean_call", "allow", _s1)
+
+    # 2: claim + matching replication -> authoritative (allow).
+    def _s2():
+        reg = ClaimRegistry()
+        reg.register_claim(claim_id="c1", assertion="alloy X conducts",
+                           produced_by="model-a", method_digest=_LIST_DIGEST,
+                           created_unix=_T0)
+        updated = reg.record_replication("c1", _LIST_DIGEST, _T0)
+        return {"verdict": "allow"
+                if updated.classification == CLAIM_AUTHORITATIVE else "deny",
+                "reason": updated.classification}
+
+    _scenario("allow_replicated_claim", "allow", _s2)
+
+    # 3: claim + expert countersign -> allow.
+    def _s3():
+        reg = ClaimRegistry()
+        reg.register_claim(claim_id="c1", assertion="alloy X conducts",
+                           produced_by="model-a", created_unix=_T0)
+        updated = reg.countersign("c1", "dr-expert", _T0)
+        return {"verdict": "allow"
+                if updated.classification == CLAIM_AUTHORITATIVE else "deny",
+                "reason": updated.classification}
+
+    _scenario("allow_countersigned_claim", "allow", _s3)
+
+    # 4: clean citations -> authoritative document (allow).
+    def _s4():
+        doc = ("[1] Smith et al., Nature 2026. doi:10.1038/s41586-026-12345\n"
+               "[2] arXiv:2608.22118\n")
+        v = check_citations(doc, _T0)
+        return {"verdict": "allow"
+                if v.classification == CLAIM_AUTHORITATIVE else "deny",
+                "reason": v.classification, "event": v.audit_event}
+
+    _scenario("allow_clean_citations", "allow", _s4)
+
+    # 5: verifier accepts -> authorized (allow).
+    def _s5():
+        mv = MechanicalVerifier()
+        mv.declare("g1", "generator-a", "lean-checker", _T0)
+        v = mv.gate("g1", True, _T0)
+        return {"verdict": "allow" if v.allowed else "deny",
+                "reason": v.reason, "event": v.audit_event}
+
+    _scenario("allow_verifier_accept", "allow", _s5)
+
+    # 6: tool call with no binding -> deny science:no_constraints.
+    def _s6():
+        registry, _seed = _authority()
+        gate = ScienceTaskGate(registry)
+        return _tool_outcome("unbound-task", "search_papers",
+                             {"query": "perovskite"}, gate)
+
+    _scenario("deny_no_binding", "deny", _s6)
+
+    # 7: watchlist hit -> escalate (deny) + dual-use hit event.
+    def _s7():
+        gate = _bound_gate()
+        return _tool_outcome("bench-task", "order_reagents",
+                             {"item": "dna synthesis kit"}, gate)
+
+    _scenario("deny_watchlist_hit", "deny", _s7)
+
+    # 8: near-hit -> NON_AUTHORITATIVE (deny).
+    def _s8():
+        gate = _bound_gate()
+        return _tool_outcome("bench-task", "run_sim",
+                             {"target": "crispr off-target model"}, gate)
+
+    _scenario("deny_near_hit", "deny", _s8)
+
+    # 9: registered claim, no evidence -> stays NON_AUTHORITATIVE (deny).
+    def _s9():
+        reg = ClaimRegistry()
+        claim = reg.register_claim(claim_id="c1", assertion="miracle",
+                                   produced_by="model-a",
+                                   method_digest=_LIST_DIGEST,
+                                   created_unix=_T0)
+        return {"verdict": "deny",
+                "reason": claim.classification,
+                "event": {"event": "science.claim_registered",
+                          "allowed": False,
+                          "reason": claim.classification}}
+
+    _scenario("deny_unpromoted_claim", "deny", _s9)
+
+    # 10: result-without-method breakthrough -> ununderstood (deny).
+    def _s10():
+        reg = ClaimRegistry()
+        reg.register_claim(claim_id="c1", assertion="breakthrough!",
+                           produced_by="model-a", created_unix=_T0)
+        claim = reg.mark_ununderstood("c1", _T0)
+        ok = (claim.classification == CLAIM_UNUNDERSTOOD
+              and reg.reusable_conclusions() == ())
+        return {"verdict": "deny" if ok else "allow",
+                "reason": claim.classification,
+                "event": {"event": "science.claim_registered",
+                          "allowed": False,
+                          "reason": claim.classification}}
+
+    _scenario("deny_ununderstood_breakthrough", "deny", _s10)
+
+    # 11: mass-unparseable citations -> document NON_AUTHORITATIVE (deny).
+    def _s11():
+        doc = ("[1] vague mention\n[2] another vague mention\n"
+               "[3] fabricated ref\n[4] Smith et al., Nature 2026\n")
+        v = check_citations(doc, _T0)
+        return {"verdict": "deny"
+                if v.classification == CLAIM_NON_AUTHORITATIVE else "allow",
+                "reason": v.classification, "event": v.audit_event}
+
+    _scenario("deny_bad_citations", "deny", _s11)
+
+    # 12: verifier rejects -> rejected, no override (deny).
+    def _s12():
+        mv = MechanicalVerifier()
+        mv.declare("g1", "generator-a", "lean-checker", _T0)
+        v = mv.gate("g1", False, _T0)
+        return {"verdict": "deny" if not v.allowed else "allow",
+                "reason": v.reason, "event": v.audit_event}
+
+    _scenario("deny_verifier_reject", "deny", _s12)
+
+    mismatches: list[str] = []
+    allowed_ids: list[str] = []
+    warned_ids: list[str] = []
+    denial_reasons: dict[str, str] = {}
+    for sid, expected, thunk in scenarios:
+        try:
+            outcome = thunk()
+        except Exception as error:  # noqa: BLE001 — fail-closed probe
+            outcome = {"verdict": "deny", "reason": f"raised: {error}"}
+        verdict = outcome.get("verdict")
+        if verdict != expected:
+            mismatches.append(
+                f"{sid}: expected {expected}, got {verdict}"
+            )
+        if verdict == "allow":
+            allowed_ids.append(sid)
+        elif verdict == "allow-with-warning":
+            warned_ids.append(sid)
+        else:
+            denial_reasons[sid] = outcome.get("reason", "")
+            ev = outcome.get("event") or {}
+            if ev.get("event") not in (DUAL_USE_HIT_EVENT,
+                                       DUAL_USE_SCREENED_EVENT,
+                                       "science.claim_registered",
+                                       "science.citations_checked",
+                                       "science.verifier_verdict",
+                                       "science.task_denied"):
+                mismatches.append(f"{sid}: denial must emit a known event")
+
+    return {
+        "n_scenarios": len(scenarios),
+        "mismatches": mismatches,
+        "allowed_ids": allowed_ids,
+        "warned_ids": warned_ids,
+        "denial_reasons": denial_reasons,
+    }
+
+
 def run_model_lineage() -> dict[str, Any]:
     """Model lineage receipts (one-hundredth batch).
 
@@ -12681,6 +12920,67 @@ def _case_metrics_scene_bound(h: BenchHarness) -> BenchExpectation:
         ),
     )
 
+def _case_metrics_dual_use(h: BenchHarness) -> BenchExpectation:
+    """Dual-use screen for autonomous science (one-hundred-eleventh batch).
+
+    12 deterministic scenarios, 5 allow / 7 deny: a bound task making a
+    clean tool call allows; a claim with a matching replication receipt
+    promotes to authoritative; an expert-countersigned claim allows; a
+    document with machine-checkable citations allows; an accepted
+    mechanical verifier authorizes the action. Denied: tool calls with
+    no constraint binding, watchlist hits (escalate to human),
+    near-hits (NON_AUTHORITATIVE), unpromoted claims, terminally
+    ununderstood result-without-method breakthroughs,
+    mass-unparseable citations, and verifier rejections (no override).
+    """
+    metrics = run_dual_use()
+
+    def check(exp: BenchExpectation, report: Any) -> tuple[bool, str]:
+        if metrics["n_scenarios"] != 12:
+            return (False, f"expected 12 dual-use scenarios, saw {metrics['n_scenarios']}")
+        if metrics["mismatches"]:
+            return (False, f"scenario(s) disagree with ground truth: {metrics['mismatches']}")
+        if metrics["allowed_ids"] != [
+            "allow_bound_clean_call",
+            "allow_replicated_claim",
+            "allow_countersigned_claim",
+            "allow_clean_citations",
+            "allow_verifier_accept",
+        ]:
+            return (False, f"allowed set drifted: {metrics['allowed_ids']}")
+        reasons = metrics["denial_reasons"]
+        for sid, needle in (
+            ("deny_no_binding", "science:no_constraints"),
+            ("deny_watchlist_hit", "science:dual_use_hit"),
+            ("deny_near_hit", "near_hit"),
+            ("deny_unpromoted_claim", "NON_AUTHORITATIVE"),
+            ("deny_ununderstood_breakthrough", "ununderstood"),
+            ("deny_bad_citations", "NON_AUTHORITATIVE"),
+            ("deny_verifier_reject", "science:verifier_reject"),
+        ):
+            if needle not in reasons.get(sid, ""):
+                return (False, f"{sid}: expected {needle!r} in reason, saw {reasons.get(sid, '')!r}")
+        return (True, "dual-use screen: 12 scenarios, 5 allow / 7 deny, all denial reasons pinned")
+
+    return BenchExpectation(
+        runtime=_noop_runtime(h),
+        expect_subtype="success",
+        post_check=check,
+        metrics=metrics,
+        notes=(
+            "Dual-use screen for autonomous science "
+            "(one-hundred-eleventh batch): 12 deterministic probes — "
+            "constraint bindings gate tool calls, watchlist tripwire "
+            "escalates dual-use calls to humans, near-hits classify "
+            "NON_AUTHORITATIVE, claims promote only by replication or "
+            "expert countersign, result-without-method breakthroughs "
+            "are terminally ununderstood, mass-unparseable citations "
+            "taint the document, and the mechanical verifier's "
+            "rejection is final with no override path."
+        ),
+    )
+
+
 def _case_metrics_deployment_registry(h: BenchHarness) -> BenchExpectation:
     """Deployment registration gate (one-hundred-tenth batch).
 
@@ -14415,6 +14715,7 @@ CASES: tuple[BenchCase, ...] = (
     BenchCase("metrics.safety_envelope", "metrics", "hardware safety-limit binding: authority-signed envelope, no self-issuance/widening (AI-energy absorption)", _case_metrics_safety_envelope),
     BenchCase("metrics.vendor_chain", "metrics", "vendor-chain provenance receipts: hash-chained vendor hops, transitive taint, envelope-gated autonomous action", _case_metrics_vendor_chain),
     BenchCase("metrics.stream_guard", "metrics", "streaming output guard: per-chunk screening, liveness-pinned guards, anti-smuggling overlap, receipt-chained decisions", _case_metrics_stream_guard),
+    BenchCase("metrics.dual_use", "metrics", "dual-use screen for autonomous science: constraint bindings, watchlist tripwire, claim registry, citation integrity, mechanical verifier (AI-for-science absorption)", _case_metrics_dual_use),
     BenchCase("metrics.deployment_registry", "metrics", "deployment registration gate: authority-signed hash-chained registrations, FRIA/explanation for high-risk, retention floor, shadow detection", _case_metrics_deployment_registry),
     BenchCase("metrics.compute_budget", "metrics", "compute-budget receipts: authority-signed budgets, hash-chained spend, fail-closed overspend, tier/evidence/device-class gates, roi_ledger (AI-chips absorption)", _case_metrics_compute_budget),
     BenchCase("metrics.herd_gate", "metrics", "herd-correlation gate: declared signal sources, Jaccard herd-overlap denial, correlated-exposure cap (AI-finance absorption)", _case_metrics_herd_gate),
@@ -15057,6 +15358,7 @@ __all__ = [
     "run_scene_bound",
     "run_vendor_chain",
     "run_deployment_registry",
+    "run_dual_use",
     "run_owasp_asi_coverage",
     "run_policy_axis",
     "run_step_compliance",

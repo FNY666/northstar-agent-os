@@ -1131,6 +1131,10 @@ Revocable consent receipts (one-hundred-fifth batch).
 
 Deployment registration gate (one-hundred-tenth batch).
 
+#### `run_dual_use()`
+
+Dual-use screen for autonomous science (one-hundred-eleventh batch).
+
 #### `run_model_lineage()`
 
 Model lineage receipts (one-hundredth batch).
@@ -3530,6 +3534,105 @@ Outcome of :func:`check_model_invocation`.
 #### `check_model_invocation(registry: Mapping[str, SceneBinding], model_version: str, declaration: SceneDeclaration | None, manifest: Mapping[str, Mapping[str, float]], *, now: int)`
 
 Gate a model invocation on its scene binding.
+
+### `dual_use`
+
+Source: `components/northstar-agent-runtime/dual_use.py`
+
+Dual-use screen for autonomous science (one-hundred-eleventh batch).
+
+#### `DualUseError`
+
+A malformed binding, registry, or screen request — a programming error, not a verdict. Verification *failures* (missing binding, watchlist hit, verifier reject, digest mismatch) return a verdict with ``allowed=False`` instead; malformed input raises here, fail loud, never guess.
+
+#### `AuthorityRegistry`
+
+Maps ``authority_id`` to an Ed25519 public key (32 bytes).
+
+- `public_key_for(authority_id: str)`
+#### `ConstraintBinding`
+
+A constraint binding pins the digest of the task's constraint list (physical laws, biosafety red lines) to the task, signed by a registered authority and chained to the previous binding for the same task. The constraint list itself lives out-of-band; this receipt guarantees it cannot be silently sw…
+
+- `as_dict()`
+#### `issue_constraint_binding(registry: AuthorityRegistry, *, task_id: str, constraint_list_digest: str, constraint_source: str, issued_by: str, issued_at: int, signature: bytes, prev_hash: str='')`
+
+Issue a constraint binding. The signature must come from a registered human authority over the binding digest; anything else fails loud. The agent cannot issue its own binding — ``issued_by`` must be a registered authority, and there is deliberately no agent-key path.
+
+#### `TaskVerdict`
+
+The verdict of the science task gate.
+
+#### `ScienceTaskGate`
+
+Owns constraint bindings per task; the pre-tool-call gate.
+
+- `register(binding: ConstraintBinding)`
+  - Register an authority-signed binding. Chains per task: the binding's ``prev_hash`` must equal the previous binding's digest (empty for genesis); duplicate digests refuse.
+- `require_binding(task_id: str, created_unix: int=0)`
+  - Probe: does this task hold a valid constraint binding? The gate every tool call must pass first.
+- `task_ids()`
+#### `ScreenVerdict`
+
+The verdict of :func:`screen_tool_call`.
+
+#### `screen_tool_call(task_id: str, tool_name: str, args: Any, created_unix: int=0)`
+
+Screen one tool call against the dual-use watchlist.
+
+#### `Claim`
+
+One registered scientific assertion.
+
+- `claim_digest()`
+- `as_dict()`
+#### `ClaimRegistry`
+
+Owns scientific claims and their promotion path.
+
+- `register_claim(*, claim_id: str, assertion: str, produced_by: str, method_digest: str='', created_unix: int=0)`
+  - Register an AI-generated assertion. Classification is always ``NON_AUTHORITATIVE`` at registration. A claim with an assertion but no method (``method_digest`` empty and ``breakthrough`` asserted) is…
+- `mark_ununderstood(claim_id: str, created_unix: int=0)`
+  - Terminal classification for result-without-method "breakthroughs". Irreversible: an ununderstood claim can never be promoted.
+- `record_replication(claim_id: str, reproduce_digest: str, created_unix: int=0)`
+  - Promote on a matching replication receipt: the independent reproduction's digest must equal the claim's method digest. Anything else fails closed — a non-matching receipt is a finding, not a promotio…
+- `countersign(claim_id: str, expert_id: str, created_unix: int=0)`
+  - Expert countersign promotion. The expert must differ from the claim's producer — the model cannot countersign itself.
+- `claim(claim_id: str)`
+- `reusable_conclusions()`
+  - Claims safe to reuse downstream: authoritative only. ``ununderstood`` claims never appear here, by construction.
+#### `CitationVerdict`
+
+The verdict of :func:`check_citations`.
+
+#### `check_citations(doc: str, created_unix: int=0)`
+
+Parse a document's citation slots deterministically.
+
+#### `VerifierDeclaration`
+
+A task's generator/verifier separation declaration.
+
+- `declaration_digest()`
+#### `VerifierVerdict`
+
+The verdict of the mechanical verifier gate.
+
+#### `MechanicalVerifier`
+
+The AlphaProof separation: generator proposes, verifier disposes.
+
+- `declare(gen_task_id: str, generator_id: str, verifier_id: str, created_unix: int=0)`
+  - Declare the separation. Generator and verifier must be different ids — a self-checking generator is not a verifier.
+- `gate(gen_task_id: str, verifier_accepts: bool, created_unix: int=0)`
+  - Apply the verifier's verdict. Accept → authorized; reject → rejected with ``science:verifier_reject``. Unknown task → ``science:unknown_task``.
+#### `authority_keypair(seed: bytes)`
+
+Derive ``(public_key, seed)`` from a 32-byte seed.
+
+#### `sign_binding_digest(seed: bytes, digest: str)`
+
+Sign a constraint-binding digest with an authority seed (test/bench use).
 
 ### `tracing`
 
