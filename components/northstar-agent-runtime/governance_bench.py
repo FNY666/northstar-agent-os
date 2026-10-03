@@ -7574,6 +7574,25 @@ def _case_metrics_step_compliance(h: BenchHarness) -> BenchExpectation:
     )
 
 
+def run_offline_bundle() -> dict[str, Any]:
+    """Signed offline policy bundles (ninety-seventh batch).
+
+    Absorbs the 2026 space-AI sweep: satellites cannot phone home for
+    approval, so policy must be *compiled* into the agent as a signed,
+    expiry-bounded bundle. Generalizes to field robotics and air-gapped
+    factories. The bench replays the module's deterministic corpus:
+    12 scenarios, 4 allow / 8 deny — valid bundle, valid args,
+    newer-version acceptance, and no-registry verification allow;
+    expired, tampered, rolled-back, unknown-signer, stale-policy,
+    digest-mismatched, explicitly-denied, and unknown-tool deny.
+    Ground truth is closed; ``offline_bundle.run_offline_bundle``
+    owns the fixtures.
+    """
+    from offline_bundle import run_offline_bundle as _run
+
+    return _run()
+
+
 def run_pledge_semantics() -> dict[str, Any]:
     """Pledge-style self-restriction semantics, OpenBSD pledge(2) model.
 
@@ -9479,6 +9498,61 @@ def _case_metrics_adversarial_scenarios(h: BenchHarness) -> BenchExpectation:
     )
 
 
+def _case_metrics_offline_bundle(h: BenchHarness) -> BenchExpectation:
+    """Signed offline policy bundles (ninety-seventh batch).
+
+    12 deterministic scenarios, 4 allow / 8 deny: a valid bundle
+    authorizes its allowlisted tools; a newer version is accepted when
+    the agent's newest-seen version tracks it; verification without a
+    live registry still passes (registry pinning is optional). Denied:
+    expired bundle, tampered payload (signature invalid), rollback to
+    an older version, unknown signer, stale policy (staleness ceiling
+    exceeded), tool-definition digest mismatch, explicit deny rule, and
+    unknown tool. Every bundle-layer denial surfaces as "agent must not
+    operate offline" — an unverifiable bundle authorizes nothing.
+    """
+    metrics = run_offline_bundle()
+
+    def check(exp: BenchExpectation, report: Any) -> tuple[bool, str]:
+        if metrics["n_scenarios"] != 12:
+            return (False, f"expected 12 offline-bundle scenarios, saw {metrics['n_scenarios']}")
+        if metrics["mismatches"]:
+            return (False, f"scenario(s) disagree with ground truth: {metrics['mismatches']}")
+        if metrics["allowed_ids"] != [
+            "allow_valid_bundle",
+            "allow_actuator_valid_arg",
+            "allow_newer_version",
+            "allow_no_registry_check",
+        ]:
+            return (False, f"allowed set drifted: {metrics['allowed_ids']}")
+        if "rollback" not in metrics["rollback_detail"]:
+            return (False, f"rollback must be denied: {metrics['rollback_detail']}")
+        if "stale" not in metrics["stale_detail"]:
+            return (False, f"stale policy must be denied: {metrics['stale_detail']}")
+        if "digest mismatch" not in metrics["digest_detail"]:
+            return (False, f"digest mismatch must be denied: {metrics['digest_detail']}")
+        if "unknown signer" not in metrics["signer_detail"]:
+            return (False, f"unknown signer must be denied: {metrics['signer_detail']}")
+        if "expired" not in metrics["expired_detail"]:
+            return (False, f"expiry must be denied: {metrics['expired_detail']}")
+        if "signature invalid" not in metrics["tamper_detail"]:
+            return (False, f"tampering must be denied: {metrics['tamper_detail']}")
+        return (True, "12/12 offline-bundle scenarios match ground truth")
+
+    return BenchExpectation(
+        runtime=_noop_runtime(h),
+        expect_subtype="success",
+        post_check=check,
+        metrics=metrics,
+        notes=(
+            "Offline policy bundles (ninety-seventh batch): 12 "
+            "deterministic probes — signature/expiry/staleness/version/"
+            "digest gates, unknown-signer rejection, explicit-deny and "
+            "default-deny; an unverifiable bundle authorizes nothing."
+        ),
+    )
+
+
 def _case_metrics_attestation_receipts(h: BenchHarness) -> BenchExpectation:
     """TEE attestation as receipt evidence (ninety-second batch).
 
@@ -10799,6 +10873,7 @@ CASES: tuple[BenchCase, ...] = (
     BenchCase("metrics.static_verification", "metrics", "static pre-dispatch policy verification: digest-pinned definitions + Janus rule semantics", _case_metrics_static_verification),
     BenchCase("metrics.approver_separation", "metrics", "no-self-attestation: proposer excluded from approver set + delegation subtree (ERC-8004)", _case_metrics_approver_separation),
     BenchCase("metrics.adversarial_scenarios", "metrics", "adversarial scenarios: multi-agent failures, no-adversary failures, malicious-but-signed", _case_metrics_adversarial_scenarios),
+    BenchCase("metrics.offline_bundle", "metrics", "signed offline policy bundles: signature/expiry/staleness/version/digest gates", _case_metrics_offline_bundle),
     BenchCase("metrics.attestation_receipts", "metrics", "TEE attestation as receipt evidence: forgery/replay/downgrade probes", _case_metrics_attestation_receipts),
     BenchCase("metrics.harness_binding", "metrics", "harness integrity binding: SHA-256 harness hash in audit, quad-only scores", _case_metrics_harness_binding),
     BenchCase("metrics.drift_detection", "metrics", "Livenerf-style drift probe: bootstrap CI + paired permutation test", _case_metrics_drift_detection),
@@ -11422,6 +11497,7 @@ __all__ = [
     "run_static_verification",
     "run_approver_separation",
     "run_adversarial_scenarios",
+    "run_offline_bundle",
     "run_attestation_receipts",
     "run_owasp_asi_coverage",
     "run_policy_axis",
