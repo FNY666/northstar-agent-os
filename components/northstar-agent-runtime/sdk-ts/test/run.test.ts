@@ -37,13 +37,16 @@ function fakeCli(lines: string[], code: number, stderr = ""): string[] {
   return [process.execPath, "-e", body];
 }
 
-/** A child that prints `lines`, then stays alive until it is signalled. */
+/** A child that prints `lines`, then stays alive until it is signalled.
+ * The SIGTERM handler is registered *before* any line is written: the parent
+ * aborts on the first event, so a handler installed after the first write
+ * could miss the signal under load (default SIGTERM action, no receipt). */
 function hangingCli(lines: string[], onSignal = ""): string[] {
   const body = [
     "const W = (s) => process.stdout.write(s + String.fromCharCode(10));",
-    ...lines.map((line) => `W(${JSON.stringify(line)});`),
     "const timer = setInterval(() => {}, 50);",
     `process.on("SIGTERM", () => {${onSignal} clearInterval(timer); process.exit(143); });`,
+    ...lines.map((line) => `W(${JSON.stringify(line)});`),
   ].join("\n");
   return [process.execPath, "-e", body];
 }

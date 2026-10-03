@@ -56,6 +56,7 @@ from doctor import add_arguments as add_doctor_arguments
 from doctor import run_doctor
 from providers.base import ResultMessage
 from session_view import add_arguments as add_session_arguments
+from audit_cli import add_audit_arguments
 from plugin_load import add_plugin_arguments
 from mcp_config import add_mcp_arguments
 from skill_check import add_skills_arguments
@@ -193,6 +194,15 @@ def build_parser() -> argparse.ArgumentParser:
     add_doctor_arguments(doctor)
     sessions = sub.add_parser("sessions", help="inspect persisted session transcripts (read-only)")
     add_session_arguments(sessions)
+    audit = sub.add_parser(
+        "audit",
+        help="verify (and anchor) tamper-evident audit feeds (read-only)",
+        description=(
+            "Recompute an audit.ndjson/1 feed's hash chain from its genesis "
+            "anchor. Never modifies the feed."
+        ),
+    )
+    add_audit_arguments(audit)
     mcp = sub.add_parser(
         "mcp",
         help="inspect the MCP servers this workspace declares (read-only; a run needs --mcp-config to start them)",
@@ -716,6 +726,10 @@ def main(argv: Sequence[str] | None = None) -> int:
             from session_view import run_sessions
 
             return run_sessions(args)
+        if args.command == "audit":
+            from audit_cli import run_audit
+
+            return run_audit(args)
         if args.command == "mcp":
             handler = getattr(args, "handler", None)
             if handler is None:

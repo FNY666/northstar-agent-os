@@ -21,7 +21,12 @@ Envelope v1 (``audit.ndjson/1``):
   UTC, second or millisecond precision, ``Z`` suffix), ``level``
   (``info`` | ``notice`` | ``error``), ``payload`` (object).
 * optional: ``seq`` (non-negative int), ``session_id``/``run_id``/``actor_id``
-  (strings). No other keys are allowed.
+  (strings), and the tamper-evidence extension: ``prev_hash``/``chain_hash``
+  (64 lowercase hex chars), ``genesis`` (anchor object, first chained record
+  only), ``signature`` (128 hex chars, Ed25519), ``key_id`` (string). The
+  chain extension is optional *within* ``audit.ndjson/1`` so legacy feeds
+  without it still validate; see docs/concepts/audit-proof-spec.md. No other
+  keys are allowed.
 """
 from __future__ import annotations
 
@@ -49,7 +54,17 @@ _OPTIONAL: dict[str, type] = {
     "session_id": str,
     "run_id": str,
     "actor_id": str,
+    # Tamper-evidence extension (audit.ndjson/1, optional; see
+    # docs/concepts/audit-proof-spec.md and audit_chain.py).
+    "prev_hash": str,
+    "chain_hash": str,
+    "genesis": dict,
+    "signature": str,
+    "key_id": str,
 }
+
+_HEX64_RE = re.compile(r"^[0-9a-f]{64}$")
+_HEX128_RE = re.compile(r"^[0-9a-f]{128}$")
 
 
 def now_rfc3339(*, now: float | None = None) -> str:
@@ -141,6 +156,19 @@ def validate_record(record: Any) -> tuple[str, ...]:
             not isinstance(record[key], str) or not record[key] or len(record[key]) > 200
         ):
             errors.append(f"audit {key!r} must be a non-empty string of at most 200 characters")
+    for key in ("prev_hash", "chain_hash"):
+        if key in record and (
+            not isinstance(record[key], str) or not _HEX64_RE.match(record[key])
+        ):
+            errors.append(f"audit {key!r} must be 64 lowercase hex characters")
+    if "signature" in record and (
+        not isinstance(record["signature"], str) or not _HEX128_RE.match(record["signature"])
+    ):
+        errors.append("audit 'signature' must be 128 lowercase hex characters (Ed25519)")
+    if "key_id" in record and (
+        not isinstance(record["key_id"], str) or not record["key_id"] or len(record["key_id"]) > 200
+    ):
+        errors.append("audit 'key_id' must be a non-empty string of at most 200 characters")
     return tuple(errors)
 
 

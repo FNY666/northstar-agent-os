@@ -112,6 +112,12 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
         help="session id (the *.jsonl file name without its suffix), or 'latest'; "
         "the feed is written to stdout, one validated audit record per line",
     )
+    exporting.add_argument(
+        "--chain",
+        action="store_true",
+        help="seal the feed with the tamper-evident hash chain (genesis anchored "
+        "to this session); verify later with `northstar audit verify`",
+    )
 
     searching = sub.add_parser(
         "search",
@@ -177,7 +183,7 @@ def run_sessions(args: argparse.Namespace) -> int:
             except ValueError as error:
                 print(f"sessions: {error}", file=sys.stderr)
                 return USAGE_ERROR
-            return _export_session(directory, session_id)
+            return _export_session(directory, session_id, chain=bool(getattr(args, "chain", False)))
         if args.session_command == "checkpoints":
             session = getattr(args, "session", "") or ""
             if session:
@@ -330,15 +336,16 @@ def _show_session(directory: Path, session_id: str, *, json_out: bool) -> int:
 # -- exporting (JSONL transcript -> canonical NDJSON audit feed) ------------
 
 
-def _export_session(directory: Path, session_id: str) -> int:
+def _export_session(directory: Path, session_id: str, *, chain: bool = False) -> int:
     """Write one transcript as audit NDJSON to stdout, one record per line."""
-    from audit_export import transcript_path_to_ndjson
+    from audit_export import load_jsonl_records, records_to_ndjson
 
     path = directory / f"{session_id}{SESSION_FILE_SUFFIX}"
     if not path.is_file():
         print(f"sessions: no transcript for session {session_id!r} in {directory}", file=sys.stderr)
         return 1
-    sys.stdout.write(transcript_path_to_ndjson(path))
+    records = load_jsonl_records(path)
+    sys.stdout.write(records_to_ndjson(records, chain=chain, session_id=session_id))
     return 0
 
 

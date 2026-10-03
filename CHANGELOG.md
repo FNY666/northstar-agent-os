@@ -1,5 +1,47 @@
 # Northstar Agent OS — initial public component
 
+## Unreleased (forty-fourth batch) — tamper-evident audit feed: hash chain, signatures, proof spec
+
+`audit.ndjson/1` grows an optional, backward-compatible integrity layer
+(fifth-round research report, §4.2), taking the feed from "self-reported"
+to "tamper-evident":
+
+- **Hash chain** (`audit_chain.py`): every chained record carries
+  `prev_hash`/`chain_hash` with
+  `chain_hash = sha256(raw(prev_hash) || canonical_json(body))`; the
+  genesis hash anchors the run/session the feed claims to describe and is
+  stored on the first record so verifiers recompute it. Any edit, deletion
+  or reorder breaks every later link. Legacy feeds without chain fields
+  verify as `UNPROTECTED`, never crash.
+- **`northstar audit verify`** (exit 0 OK / 1 BROKEN / 2 UNPROTECTED /
+  3 INVALID): recomputes the chain from genesis and reports the first
+  broken line (`ChainResult(ok, broken_at)` shape); `--pubkey`,
+  `--expect-session-id`/`--expect-run-id`, `--anchor`, `--json`
+  supported. `northstar audit anchor` writes the minimal offline head
+  anchor (file sha256 + head hash + record count) so wholesale rewrites
+  and tail truncation — invisible to the bare chain — are detected when
+  the manifest is kept out of the operator's reach. `northstar audit
+  keygen` mints Ed25519 pairs; `sessions export --chain` seals exports.
+- **Ed25519 signatures** (optional, `ed25519.py` vendored pure-Python RFC
+  8032, pinned by the RFC §7.1 vectors): `signature` covers the chained
+  record, binding it to its chain position. The docs and spec enforce the
+  honest vocabulary: the chain is an *integrity seal*, the signature is
+  *non-repudiation* — never call the chain a digital signature.
+- **Open proof spec** (`docs/concepts/audit-proof-spec.md`): envelope,
+  canonical JSON rules, hash construction, verify algorithm, anchor
+  manifest, and fixed test vectors, written so a third party can build a
+  verifier without reading Northstar code. Includes the honest
+  limitations (no anchor ⇒ wholesale rewrite undetectable; signatures
+  prove origin, not truthfulness) and the WORM-archiving design
+  (S3 Object Lock) plus RFC 3161/Rekor as the documented external-anchor
+  next step — both network-dependent, deliberately out of the default
+  offline path.
+
+**Verification:** 43 new tests green (chain round-trip, tamper/reorder/
+deletion/truncation detection, RFC 8032 vectors, sign/verify, CLI exit
+codes, spec vectors pinned); existing audit suites green
+(runtime 22, CLI 98, contract 41, durable-audit 6).
+
 ## Unreleased (forty-third batch) — academic decision metrics in the governance bench
 
 Absorbed the fourth-round research's metric methodology (agent frameworks +

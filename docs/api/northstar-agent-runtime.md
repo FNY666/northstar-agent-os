@@ -1773,9 +1773,13 @@ Envelope validation errors, mirroring the normative contract validator.
 
 Map one session transcript record to one canonical audit record.
 
-#### `records_to_ndjson(records: Iterable[dict[str, Any]])`
+#### `records_to_ndjson(records: Iterable[dict[str, Any]], *, chain: bool=False, session_id: str | None=None, run_id: str | None=None)`
 
 Canonical NDJSON text for whole transcript records (newline-terminated).
+
+#### `load_jsonl_records(path: Path)`
+
+Transcript records from a ``*.jsonl`` file (torn tail skipped, like the reader).
 
 #### `transcript_path_to_ndjson(path: Path)`
 
@@ -1784,6 +1788,92 @@ Export one transcript file (``*.jsonl``) as canonical NDJSON audit text.
 #### `session_path(directory: Path, session_id: str)`
 
 The transcript file for one session id (mirrors the session_view lookup).
+
+### `audit_chain`
+
+Source: `components/northstar-agent-runtime/audit_chain.py`
+
+Tamper-evident hash chain for the ``audit.ndjson/1`` feed.
+
+#### `canonical_json(obj: Any)`
+
+Canonical JSON bytes: sorted keys, no whitespace, UTF-8.
+
+#### `build_genesis_params(component: str, *, session_id: str | None=None, run_id: str | None=None, started_ts: str | None=None)`
+
+The anchor object stored on the first chained record.
+
+#### `genesis_hash(params: dict[str, Any])`
+
+The genesis hash: ``sha256(canonical_json(genesis_params))`` (hex).
+
+#### `chain_record(record: dict[str, Any], prev_hash: str)`
+
+Return a copy of ``record`` sealed with ``prev_hash``/``chain_hash``.
+
+#### `chain_records(records: list[dict[str, Any]], *, component: str, session_id: str | None=None, run_id: str | None=None, started_ts: str | None=None, key_id: str | None=None)`
+
+Seal a whole record list; the first record carries the genesis anchor.
+
+#### `sign_record(record: dict[str, Any], secret_key: bytes, *, key_id: str | None=None)`
+
+Return a copy of ``record`` with an Ed25519 ``signature``.
+
+#### `verify_signature(record: dict[str, Any], public_key: bytes)`
+
+Check a record's Ed25519 signature; False when absent or invalid.
+
+#### `generate_keypair()`
+
+Fresh (secret_seed, public_key); the seed needs os.urandom, nothing else.
+
+#### `ChainResult`
+
+Outcome of verifying one feed file. Mirrors OrcaI's ChainResult shape.
+
+#### `verify_lines(lines: Iterable[str], *, public_key: bytes | None=None, expect_session_id: str | None=None, expect_run_id: str | None=None)`
+
+Verify a feed's hash chain (and signatures when ``public_key`` is given).
+
+#### `verify_file(path: str | Path, **kwargs: Any)`
+
+Verify a feed file on disk; unreadable files report, never raise.
+
+#### `anchor_manifest(path: str | Path, *, anchored_at: str | None=None)`
+
+Build the minimal offline head anchor for a feed file.
+
+#### `check_anchor(path: str | Path, manifest: dict[str, Any])`
+
+Check a feed file against a previously built anchor manifest.
+
+### `audit_cli`
+
+Source: `components/northstar-agent-runtime/audit_cli.py`
+
+The ``audit`` command: verify (and anchor) tamper-evident audit feeds.
+
+#### `add_audit_arguments(parser: argparse.ArgumentParser)`
+
+#### `run_audit(args: argparse.Namespace)`
+
+### `ed25519`
+
+Source: `components/northstar-agent-runtime/ed25519.py`
+
+Minimal pure-Python Ed25519 (RFC 8032), vendored.
+
+#### `public_key(secret_key: bytes)`
+
+Derive the 32-byte public key from a 32-byte secret seed.
+
+#### `sign(secret_key: bytes, message: bytes)`
+
+Sign a message; returns the 64-byte signature.
+
+#### `verify(public_key_bytes: bytes, message: bytes, signature: bytes)`
+
+Verify a signature; False on any malformed input, never raises.
 
 ### `tools`
 
