@@ -102,6 +102,7 @@ py-modules = [
     "process_receipts",
     "provider_retry",
     "provenance_taint",
+    "quantum_timeline",
     "run_setup",
     "soc_verdicts",
     "plugin_load",

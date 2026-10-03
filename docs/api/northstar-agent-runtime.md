@@ -890,6 +890,10 @@ Process-evidence receipts (ninety-eighth batch).
 
 SOC verdict cards + kill-switch mandate (ninety-ninth batch).
 
+#### `run_quantum_timeline()`
+
+Quantum-threat timeline gates (one-hundred-second batch).
+
 #### `run_adversarial_scenarios()`
 
 Adversarial bench scenarios: multi-agent failures, no-adversary failures, malicious-but-signed.
@@ -2286,6 +2290,44 @@ Decide whether a twin→physical command may execute. Fail closed.
 #### `run_twin_sync()`
 
 Deterministic twin-sync scenarios: 12 scenarios, 3 allow / 9 deny.
+
+### `quantum_timeline`
+
+Source: `components/northstar-agent-runtime/quantum_timeline.py`
+
+Quantum-threat timeline gates (one-hundred-second batch).
+
+#### `QuantumTimelineError`
+
+Raised only for programmer errors (bad types); policy denials are returned as verdict dicts, never raised.
+
+#### `parse_date(value: Any)`
+
+Parse an ISO-8601 date (``YYYY-MM-DD``) or epoch int/float to a date. Returns ``None`` for anything malformed — callers fail closed.
+
+#### `threat_assessment(as_of_date: Any=None)`
+
+Quantum-threat posture of every primitive in use, as of a date.
+
+#### `gate_signing(*, primitive: Any, expires_at: Any, issued_at: Any=None, credential_kind: str='')`
+
+Decide whether a NEW credential may be minted with ``primitive``.
+
+#### `migration_plan()`
+
+Deterministic migration checklist, ordered by deadline then module.
+
+#### `hybrid_sign(*args: Any, **kwargs: Any)`
+
+ML-DSA + Ed25519 hybrid signing — NOT IMPLEMENTED.
+
+#### `timeline_denied_event(*, primitive: str, expires_at: str, reason: str, credential_kind: str='')`
+
+Audit record for a quantum-timeline signing refusal.
+
+#### `timeline_warning_event(*, primitive: str, expires_at: str, reason: str, credential_kind: str='')`
+
+Audit record for a quantum-timeline signing warning (allowed).
 
 ### `product_path`
 

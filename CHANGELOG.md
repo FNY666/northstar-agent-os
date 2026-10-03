@@ -1,3 +1,24 @@
+## Unreleased (one-hundred-second batch) — quantum-threat timeline gates (BSI TR-02102 absorption)
+
+New module `quantum_timeline.py`: a policy gate encoding the 2026
+quantum thread as BSI TR-02102 deadlines (classical asymmetric out end
+of 2031, signatures end of 2035; Google ECDLP-256 in <1,200 logical
+qubits). `threat_assessment()` pins per-primitive postures
+(Ed25519 → `migrate-by-2031`, SHA-256 → `review-2035`,
+HMAC-SHA256 → `acceptable`); `gate_signing()` refuses NEW long-lived
+Ed25519 credentials expiring past 2031 (short-lived tokens allowed with
+a warning; hash/MAC-only usage unaffected; unknown primitives and
+malformed expiries fail closed); every refusal/warning emits an
+`audit.ndjson/1` event (`quantum.timeline_denied` /
+`quantum.timeline_warning`). `migration_plan()` is a deterministic
+checklist of every signing module (passport, offline_bundle,
+agent_identity, delegation_credentials, multisig, audit_chain,
+audit_scitt, audit_rekor) with deadlines; the ML-DSA+Ed25519 hybrid
+signer is stubbed as future work and fail-closes today. New bench track
+`metrics.quantum_timeline` (12 deterministic scenarios, 4 allow / 2
+warn / 6 deny, zero mismatches); bench version bump left for
+integration (sibling batches 100/101 own the v20/v21 bumps).
+
 ## Unreleased (ninety-ninth batch) — SOC verdict cards + kill-switch mandate (AI-cyberdefense absorption)
 
 New module `soc_verdicts.py`: a Verifiable Action Card (84th batch)
