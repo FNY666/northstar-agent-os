@@ -6951,6 +6951,310 @@ def run_game_agents() -> dict[str, Any]:
         "denial_reasons": denial_reasons,
     }
 
+
+def run_licensing() -> dict[str, Any]:
+    """Licensed training receipts (one-hundred-twentieth batch).
+
+    Absorbs the 2026 AI-music/copyright thread: Suno v6 (first
+    industry-co-built models; Warner/BMG/Believe-TuneCore deals);
+    Udio (UMG/WMG/Merlin opt-in framework for 30,000 indie
+    labels/Kobalt); Klay (licensed by all three majors); NMPA
+    June-2026 50/50 publishing/masters precedent; Sony + UMG's second
+    Suno lawsuit (Sept 2026, "model laundering" / fruit-of-the-
+    poisonous-tree theory); GEMA v. Suno; JASRAC's
+    human-creative-contribution line; PLAVE (not AI — mocap suits).
+
+    Fail-closed rules over 12 deterministic scenarios: a training
+    corpus needs an authority-signed licensed-training receipt with
+    every named licensor's opt-in proof resolvable and pinned; models
+    trained on other models' outputs must resolve each derivation
+    source clean (retraining does not wash taint); split terms are
+    basis points summing to 10000 and pinned; ai-only works cannot
+    enter the rights pipeline and ai-assisted works need labeled AI
+    parts; synthetic performers must declare an honest disclosure
+    tier; synthetic likenesses need a live holder-signed grant
+    covering the use scope; production takes ship only with sealed
+    take-level receipts. Ground truth is closed: 4 allow / 8 deny.
+    """
+    from canonical_json import jcs_sha256_hex
+    from licensing import (
+        DENY_AI_ONLY,
+        DENY_LAUNDERED,
+        DENY_LIKENESS_THEFT,
+        DENY_LINEAGE_GAP,
+        DENY_TIER_FRAUD,
+        DENY_UNKNOWN_TAKE,
+        DENY_UNLABELED_AI_PARTS,
+        DENY_UNLICENSED_CORPUS,
+        check_likeness_use,
+        check_performer_tier,
+        check_take,
+        check_training_receipt,
+        human_contribution_gate,
+        issue_likeness_grant,
+        issue_performer_disclosure,
+        issue_take_receipt,
+        issue_work_contribution,
+        licensed_training_receipt,
+        split_terms,
+        verify_derivation_sources,
+    )
+
+    T0 = 1_700_000_000
+    AUTHORITY = bytes(range(32))
+    HOLDER = bytes([9]) * 32
+    CORPUS = "aa" * 32
+    PROOF_A = "bb" * 32
+    PROOF_B = "cc" * 32
+    TAINTED_SRC = "dd" * 32
+    CLEAN_SRC = "ee" * 32
+    GAP_SRC = "ff" * 32
+    WORK = "11" * 32
+    LIKENESS = "22" * 32
+
+    def _proofs(mapping):
+        return jcs_sha256_hex(sorted(mapping.items()))
+
+    def _lookup(mapping):
+        def _fn(licensor_id):
+            return mapping.get(licensor_id)
+
+        return _fn
+
+    FULL_PROOFS = {"warner-records": PROOF_A, "merlin-indies": PROOF_B}
+
+    def _terms(prev="genesis"):
+        return split_terms(
+            terms_id="terms-1",
+            publishing_share_bps=5000,
+            masters_share_bps=5000,
+            effective_from=T0,
+            authority_secret=AUTHORITY,
+            issued_by="licensing-authority",
+            prev_digest=prev,
+        )
+
+    def _training_receipt(prev="genesis"):
+        terms = _terms()
+        return licensed_training_receipt(
+            receipt_id="ltr-1",
+            model_id="suno-style-v6",
+            corpus_digest=CORPUS,
+            licensor_ids=("warner-records", "merlin-indies"),
+            opt_in_proof_digest=_proofs(FULL_PROOFS),
+            split_terms_digest=terms.receipt_digest,
+            authority_secret=AUTHORITY,
+            issued_by="licensing-authority",
+            issued_at=T0,
+            expires_at=T0 + 86_400,
+            prev_digest=prev,
+        )
+
+    def _lineage_lookup(digest):
+        if digest == TAINTED_SRC:
+            return {"tainted": True}
+        if digest == CLEAN_SRC:
+            return {"tainted": False}
+        return None
+
+    def _contribution(cls, labeled=True):
+        return issue_work_contribution(
+            receipt_id="wc-1",
+            work_digest=WORK,
+            contribution_class=cls,
+            ai_parts_labeled=labeled,
+            authority_secret=AUTHORITY,
+            declared_by="rights-office",
+            declared_at=T0,
+        )
+
+    def _performer(declared, evidence):
+        return issue_performer_disclosure(
+            receipt_id="pd-1",
+            performer_id="plave-style",
+            declared_tier=declared,
+            evidence_tier=evidence,
+            authority_secret=AUTHORITY,
+            issued_by="label",
+            issued_at=T0,
+        )
+
+    def _grant():
+        return issue_likeness_grant(
+            grant_id="lg-1",
+            likeness_digest=LIKENESS,
+            holder_id="artist-7",
+            scopes=("music-video",),
+            holder_secret=HOLDER,
+            granted_at=T0,
+            expires_at=T0 + 86_400,
+        )
+
+    def _take():
+        return issue_take_receipt(
+            take_id="take-42",
+            model_version="cineme-previz-v3",
+            prompt_digest="33" * 32,
+            assets_digest="44" * 32,
+            rights_review_digest="55" * 32,
+            authority_secret=AUTHORITY,
+            issued_by="production",
+            issued_at=T0,
+        )
+
+    def _outcome(verdict):
+        return {
+            "verdict": "allow" if verdict.allowed else "deny",
+            "reason": verdict.reason,
+            "classification": verdict.classification,
+        }
+
+    scenarios: list[tuple[str, str, Any]] = []
+
+    def _scenario(sid: str, expected: str, thunk: Any) -> None:
+        scenarios.append((sid, expected, thunk))
+
+    def _s1():
+        return _outcome(
+            check_training_receipt(
+                [_training_receipt()],
+                model_id="suno-style-v6",
+                corpus_digest=CORPUS,
+                opt_in_lookup=_lookup(FULL_PROOFS),
+                check_time=T0 + 60,
+            )
+        )
+
+    _scenario("allow_licensed_training", "allow", _s1)
+
+    def _s2():
+        return _outcome(
+            verify_derivation_sources(
+                derivation_sources=(CLEAN_SRC,),
+                lineage_lookup=_lineage_lookup,
+            )
+        )
+
+    _scenario("allow_clean_derivation", "allow", _s2)
+
+    def _s3():
+        return _outcome(
+            human_contribution_gate([_contribution("human-authored")], work_digest=WORK)
+        )
+
+    _scenario("allow_human_authored_work", "allow", _s3)
+
+    def _s4():
+        return _outcome(check_take([_take()], take_id="take-42"))
+
+    _scenario("allow_sealed_take", "allow", _s4)
+
+    def _s5():
+        return _outcome(
+            check_training_receipt(
+                [_training_receipt()],
+                model_id="suno-style-v6",
+                corpus_digest=CORPUS,
+                opt_in_lookup=_lookup({"warner-records": PROOF_A}),  # merlin missing
+                check_time=T0 + 60,
+            )
+        )
+
+    _scenario("deny_missing_opt_in", "deny", _s5)
+
+    def _s6():
+        return _outcome(
+            verify_derivation_sources(
+                derivation_sources=(TAINTED_SRC,),
+                lineage_lookup=_lineage_lookup,
+            )
+        )
+
+    _scenario("deny_laundered_model", "deny", _s6)
+
+    def _s7():
+        return _outcome(
+            verify_derivation_sources(
+                derivation_sources=(GAP_SRC,),
+                lineage_lookup=_lineage_lookup,
+            )
+        )
+
+    _scenario("deny_lineage_gap", "deny", _s7)
+
+    def _s8():
+        return _outcome(
+            human_contribution_gate([_contribution("ai-only")], work_digest=WORK)
+        )
+
+    _scenario("deny_ai_only_work", "deny", _s8)
+
+    def _s9():
+        return _outcome(
+            human_contribution_gate(
+                [_contribution("ai-assisted", labeled=False)], work_digest=WORK
+            )
+        )
+
+    _scenario("deny_unlabeled_ai_parts", "deny", _s9)
+
+    def _s10():
+        return _outcome(
+            check_performer_tier(
+                [_performer("mocap-assisted-real", "full-synthetic")],
+                performer_id="plave-style",
+            )
+        )
+
+    _scenario("deny_tier_fraud", "deny", _s10)
+
+    def _s11():
+        return _outcome(
+            check_likeness_use(
+                [_grant()],
+                likeness_digest=LIKENESS,
+                use_scope="advertising",  # outside the music-video grant
+                check_time=T0 + 60,
+            )
+        )
+
+    _scenario("deny_likeness_scope", "deny", _s11)
+
+    def _s12():
+        return _outcome(check_take([_take()], take_id="take-43"))
+
+    _scenario("deny_unknown_take", "deny", _s12)
+
+    mismatches: list[str] = []
+    allowed_ids: list[str] = []
+    warned_ids: list[str] = []
+    denial_reasons: dict[str, str] = {}
+    for sid, expected, thunk in scenarios:
+        try:
+            outcome = thunk()
+        except Exception as error:
+            outcome = {"verdict": "deny", "reason": f"raised: {error}",
+                       "classification": "unverifiable-process"}
+        verdict = outcome.get("verdict")
+        if verdict != expected:
+            mismatches.append(
+                f"{sid}: expected {expected}, got {verdict}"
+            )
+        if verdict == "allow":
+            allowed_ids.append(sid)
+        elif verdict == "allow-with-warning":
+            warned_ids.append(sid)
+        else:
+            denial_reasons[sid] = outcome.get("reason", "")
+
+    return {
+        "n_scenarios": len(scenarios),
+        "mismatches": mismatches,
+        "allowed_ids": allowed_ids,
+        "warned_ids": warned_ids,
+        "denial_reasons": denial_reasons,
+    }
+
 def run_deployment_registry() -> dict[str, Any]:
     """Deployment registration gate (one-hundred-tenth batch).
 
@@ -15852,6 +16156,68 @@ def _case_metrics_incident_receipts(h: BenchHarness) -> BenchExpectation:
     )
 
 
+
+def _case_metrics_companionship(h: BenchHarness) -> BenchExpectation:
+    """Companionship safeguards for AI dating/companionship (one-hundred-twenty-first batch).
+
+    12 deterministic scenarios, 4 allow / 8 deny: an adult launching a
+    friend-mode companion allows; a minor launching friend-mode allows;
+    below-threshold session stats clear the dependence probe; a
+    matchmaker with a bound "why this match" explanation allows.
+    Denied: a minor launching romantic mode (intimate class gate), a
+    launch with no minor-mode record, a 90-minute continuous session
+    crossing the dependence threshold (intervention required), crisis
+    markers with a broken escalation path (session halted,
+    companion.unverifiable_safety), sycophantic affirmation of a
+    flagged-harmful belief (NON_AUTHORITATIVE), a silent mid-session
+    persona change (companion.persona_break), a minor at the 60-minute
+    continuous cap, and training on private dialogue without opt-in
+    (companion.training_leak).
+    """
+    metrics = run_companionship()
+
+    def check(exp: BenchExpectation, report: Any) -> tuple[bool, str]:
+        if metrics["n_scenarios"] != 12:
+            return (False, f"expected 12 companionship scenarios, saw {metrics['n_scenarios']}")
+        if metrics["mismatches"]:
+            return (False, f"scenario(s) disagree with ground truth: {metrics['mismatches']}")
+        if metrics["allowed_ids"] != [
+            "allow_adult_friend_launch",
+            "allow_minor_friend_launch",
+            "allow_cleared_dependence",
+            "allow_bound_match",
+        ]:
+            return (False, f"allowed set drifted: {metrics['allowed_ids']}")
+        reasons = metrics["denial_reasons"]
+        for sid, needle in (
+            ("deny_minor_romantic", "intimate_minor"),
+            ("deny_no_mode_record", "unknown_age_no_minor_mode"),
+            ("deny_dependence_crossed", "intervention_required"),
+            ("deny_crisis_broken_path", "unverifiable_safety"),
+            ("deny_sycophancy", "sycophancy"),
+            ("deny_persona_break", "persona_break"),
+            ("deny_cap_exceeded", "cap_exceeded"),
+            ("deny_training_leak", "training_leak"),
+        ):
+            if needle not in reasons.get(sid, ""):
+                return (False, f"denial reason missing {needle!r}: {reasons.get(sid, '')!r}")
+        return True, "12/12 companionship probes match ground truth"
+
+    return BenchExpectation(
+        runtime=_noop_runtime(h),
+        expect_subtype="success",
+        post_check=check,
+        metrics=metrics,
+        notes=(
+            "2026 AI-dating/companionship thread: Garcia v. Character Tech "
+            "treats the chatbot as a product; China interim measures ban "
+            "virtual kin/partners for minors and impose dependence "
+            "detection + crisis escalation; EU KIDS Act and California "
+            "SB 1119 (1h/2h minor caps) converge on structural gates; "
+            "the gate enforces safeguard structure, not diagnosis."
+        ),
+    )
+
 def _case_metrics_adjudication(h: BenchHarness) -> BenchExpectation:
     """Human final adjudication for AI sports systems (one-hundred-eighteenth batch).
 
@@ -16035,6 +16401,69 @@ def _case_metrics_housing(h: BenchHarness) -> BenchExpectation:
         ),
     )
 
+
+
+def _case_metrics_licensing(h: BenchHarness) -> BenchExpectation:
+    """Licensed training receipts (one-hundred-twentieth batch).
+
+    12 deterministic scenarios, 4 allow / 8 deny: a fully licensed
+    corpus (per-licensor opt-in proofs resolvable and pinned) allows;
+    a clean derivation source allows; a human-authored work allows; a
+    sealed production take allows. Denied: a corpus missing one
+    licensor's opt-in (``licensing.unlicensed_corpus``), a derivation
+    source tainted in the lineage log (``licensing.laundered_model``),
+    an unresolvable derivation source (``licensing.lineage_gap``), an
+    ai-only work (``licensing.ai_only``), an ai-assisted work with
+    unlabeled AI parts (``licensing.unlabeled_ai_parts``), a
+    performer whose declared tier mismatches the evidence
+    (``licensing.disclosure_tier_fraud``), a likeness use outside the
+    holder grant's scopes (``licensing.likeness_theft``), and an
+    unknown take id (``licensing.unknown_take``).
+    """
+    metrics = run_licensing()
+
+    def check(exp: BenchExpectation, report: Any) -> tuple[bool, str]:
+        if metrics["n_scenarios"] != 12:
+            return (False, f"expected 12 licensing scenarios, saw {metrics['n_scenarios']}")
+        if metrics["mismatches"]:
+            return (False, f"scenario(s) disagree with ground truth: {metrics['mismatches']}")
+        if metrics["allowed_ids"] != [
+            "allow_licensed_training",
+            "allow_clean_derivation",
+            "allow_human_authored_work",
+            "allow_sealed_take",
+        ]:
+            return (False, f"allowed set drifted: {metrics['allowed_ids']}")
+        reasons = metrics["denial_reasons"]
+        for sid, needle in (
+            ("deny_missing_opt_in", "unlicensed_corpus"),
+            ("deny_laundered_model", "laundered_model"),
+            ("deny_lineage_gap", "lineage_gap"),
+            ("deny_ai_only_work", "ai_only"),
+            ("deny_unlabeled_ai_parts", "unlabeled_ai_parts"),
+            ("deny_tier_fraud", "disclosure_tier_fraud"),
+            ("deny_likeness_scope", "likeness_theft"),
+            ("deny_unknown_take", "unknown_take"),
+        ):
+            if needle not in reasons.get(sid, ""):
+                return (False, f"denial reason missing {needle!r}: {reasons.get(sid, '')!r}")
+        return True, "12/12 licensing probes match ground truth"
+
+    return BenchExpectation(
+        runtime=_noop_runtime(h),
+        expect_subtype="success",
+        post_check=check,
+        metrics=metrics,
+        notes=(
+            "2026 AI-music/copyright thread: Suno v6 industry-co-built "
+            "with Warner/BMG/Believe-TuneCore; Udio UMG/WMG/Merlin "
+            "(30,000-label opt-in)/Kobalt; NMPA 50/50 publishing/masters "
+            "precedent; Sony+UMG 'model laundering' theory; JASRAC "
+            "human-contribution line; PLAVE disclosure-tier lesson. The "
+            "gate checks licensing-claim consistency, not license "
+            "validity."
+        ),
+    )
 
 def _case_metrics_language_cap(h: BenchHarness) -> BenchExpectation:
     """Language-capability receipts (one-hundred-fourteenth batch).
@@ -17847,8 +18276,10 @@ CASES: tuple[BenchCase, ...] = (
     BenchCase("metrics.scene_bound", "metrics", "scene-bound authorization receipts: pair-exact (setting, stratum) scope, manifest-pinned performance, consent-first ambient capture, unverifiable-process model invocation", _case_metrics_scene_bound),
     BenchCase("metrics.incident_receipts", "metrics", "incident receipts + evaluator-access gate: Art.73 reporting clocks with auto-escalation, 5-year retention floor, evaluate-A/ship-B gate, cheat probes", _case_metrics_incident_receipts),
     BenchCase("metrics.housing", "metrics", "fair-housing & coordination isolation: vendor-signed disparate-impact probe receipts, evidence-pack-only agent outputs, human countersigned adverse actions with specific reasons, shared-aggregator coordination deny, steering probes, joint-liability vendor admissions, mitigating-factor presentation (AI-real-estate absorption)", _case_metrics_housing),
+    BenchCase("metrics.licensing", "metrics", "licensed training receipts: per-licensor opt-in proofs pinned, model-laundering gate (taint transitivity), basis-point split terms, JASRAC human-contribution gate, synthetic-performer disclosure tiers, holder-signed likeness grants, take-level production receipts (AI-music/copyright absorption)", _case_metrics_licensing),
     BenchCase("metrics.adjudication", "metrics", "human final adjudication for AI sports: countersigned release for gated scenes, population-mismatch flags, biometric purpose binding + resale hard deny, coach honesty labels, fail-closed degradation plans, betting isolation", _case_metrics_adjudication),
     BenchCase("metrics.game_agents", "metrics", "game-agent integrity: NPC memory-poisoning quarantine, authority-signed approved-actions envelopes, profiling/spending role separation, deterministic anti-cheat probes, performer consent receipts, no-AI attestation, UGC sandbox gates (AI-gaming absorption)", _case_metrics_game_agents),
+    BenchCase("metrics.companionship", "metrics", "companionship safeguards for AI dating/companionship: minor intimacy class gate, authority-pinned dependence thresholds with mandatory intervention, crisis-escalation receipts with fail-closed halt, sycophancy probe, persona-consistency gate, authority-set session caps, private-dialogue training exclusion, matchmaker explanation binding", _case_metrics_companionship),
     BenchCase("metrics.harness_binding", "metrics", "harness integrity binding: SHA-256 harness hash in audit, quad-only scores", _case_metrics_harness_binding),
     BenchCase("metrics.drift_detection", "metrics", "Livenerf-style drift probe: bootstrap CI + paired permutation test", _case_metrics_drift_detection),
 )
@@ -18036,6 +18467,318 @@ def _run_one(case: BenchCase, harness: BenchHarness) -> CaseResult:
         metrics=expectation.metrics or {},
     )
 
+
+
+def run_companionship() -> dict[str, Any]:
+    """Companionship safeguards for AI dating/companionship (one-hundred-twenty-first batch).
+
+    Absorbs the 2026 AI-dating/companionship thread: Garcia v. Character
+    Tech (2025-05) treats the chatbot as a product (design-defect claims
+    apply); 2026-01 teen-suicide settlements; China's interim measures
+    for AI anthropomorphic interaction services (2026-04-10) ban virtual
+    kin/partners for minors and impose dependence detection +
+    intervention + crisis human escalation; the EU KIDS Act (2026-09
+    proposal) wants companions off by default for minors; California
+    SB 1119 sets default 1h continuous / 2h daily caps for minors;
+    JAMA Pediatrics: 21% of students use AI for emotional processing;
+    JMIR flags sycophancy as the core risk; Doubao's "lover persona"
+    was removed by regulators (silent persona changes cause
+    "digital breakup" harm).
+
+    Fail-closed rules over 12 deterministic scenarios: intimate persona
+    modes are entirely disabled for minors (class gate, not a filter)
+    and a declared minor without a minor-mode record cannot launch at
+    all; dependence-threshold crossings require a reality-anchor
+    intervention; crisis markers with a broken escalation path HALT the
+    session (companion.unverifiable_safety); sycophantic affirmation of
+    flagged-harmful beliefs classifies NON_AUTHORITATIVE; silent
+    mid-session persona changes deny; authority-set session caps deny
+    over-cap continuation; training on private dialogue without opt-in
+    audits companion.training_leak; matchmakers must ship a bound
+    "why this match" explanation. Ground truth is closed:
+    4 allow / 8 deny.
+    """
+    from companionship import (
+        CLASS_CAP_EXCEEDED,
+        CLASS_INTERVENTION_REQUIRED,
+        CLASS_MATCH_EXPLAINED,
+        CLASS_OK,
+        CLASS_PERSONA_BREAK,
+        CLASS_SYCOPHANCY,
+        CLASS_TRAINING_LEAK,
+        CLASS_CRISIS_ESCALATED,
+        CLASS_CRISIS_HALTED,
+        DENY_INTIMATE_MINOR,
+        DENY_UNKNOWN_AGE_NO_MODE,
+        CrisisRouter,
+        DependenceThresholdRegistry,
+        MinorModeRegistry,
+        NoTrainingLog,
+        SessionCapRegistry,
+        SessionStats,
+        MatchRecommendation,
+        dependence_probe,
+        matchmaker_explain,
+        minor_intimacy_gate,
+        persona_consistency_gate,
+        private_dialogue_gate,
+        session_caps,
+        sycophancy_probe,
+    )
+    import ed25519 as _ed25519
+
+    T0 = 1_790_000_000
+    DIGEST = "ab" * 32
+    DIGEST2 = "cd" * 32
+    SECRET = bytes(range(1, 33))
+    PUB = _ed25519.public_key(SECRET).hex()
+
+    def _minor_registry():
+        reg = MinorModeRegistry()
+        reg.issue(
+            subject_id="kid-1",
+            age_status="declared_minor",
+            issued_at=T0 - 10,
+            authority_pubkey_hex=PUB,
+            authority_secret=SECRET,
+        )
+        reg.issue(
+            subject_id="adult-1",
+            age_status="declared_adult",
+            issued_at=T0 - 10,
+            authority_pubkey_hex=PUB,
+            authority_secret=SECRET,
+        )
+        return reg
+
+    def _thresholds():
+        reg = DependenceThresholdRegistry()
+        return reg.issue(
+            max_continuous_minutes=60,
+            max_sessions_per_day=5,
+            max_escalation_markers_per_session=3,
+            issued_at=T0 - 10,
+            authority_pubkey_hex=PUB,
+            authority_secret=SECRET,
+        )
+
+    def _caps():
+        reg = SessionCapRegistry()
+        reg.issue(
+            age_class="minor",
+            continuous_cap_min=60,
+            daily_cap_min=120,
+            issued_at=T0 - 10,
+            authority_pubkey_hex=PUB,
+            authority_secret=SECRET,
+        )
+        return reg
+
+    def _gate(v):
+        # LaunchVerdict-style
+        return {
+            "verdict": "allow" if v.allowed else "deny",
+            "reason": v.classification,
+            "classification": v.classification,
+        }
+
+    scenarios: list[tuple[str, str, Any]] = []
+
+    def _scenario(sid: str, expected: str, thunk: Any) -> None:
+        scenarios.append((sid, expected, thunk))
+
+    def _s1():
+        v = minor_intimacy_gate(
+            session_id="s1", subject_id="adult-1", persona_mode="friend",
+            registry=_minor_registry(), now=T0,
+        )
+        return _gate(v)
+
+    _scenario("allow_adult_friend_launch", "allow", _s1)
+
+    def _s2():
+        v = minor_intimacy_gate(
+            session_id="s2", subject_id="kid-1", persona_mode="friend",
+            registry=_minor_registry(), now=T0,
+        )
+        return _gate(v)
+
+    _scenario("allow_minor_friend_launch", "allow", _s2)
+
+    def _s3():
+        th = _thresholds()
+        v = dependence_probe(
+            stats=SessionStats(10, 1, 1),
+            thresholds=th,
+            thresholds_digest_expected=th.receipt_digest(),
+        )
+        return {
+            "verdict": "allow" if not v.intervention_required else "deny",
+            "reason": v.classification,
+            "classification": v.classification,
+        }
+
+    _scenario("allow_cleared_dependence", "allow", _s3)
+
+    def _s4():
+        rec = MatchRecommendation(
+            recommendation_id="r1",
+            recommendation_digest=DIGEST,
+            explanation_digest=DIGEST2,
+            explained_at=T0,
+        )
+        v = matchmaker_explain(
+            recommendation=rec, binding_digest_expected=rec.binding_digest()
+        )
+        return {
+            "verdict": "allow"
+            if v.classification == CLASS_MATCH_EXPLAINED
+            else "deny",
+            "reason": v.classification,
+            "classification": v.classification,
+        }
+
+    _scenario("allow_bound_match", "allow", _s4)
+
+    def _s5():
+        v = minor_intimacy_gate(
+            session_id="s5", subject_id="kid-1", persona_mode="romantic",
+            registry=_minor_registry(), now=T0,
+        )
+        return _gate(v)
+
+    _scenario("deny_minor_romantic", "deny", _s5)
+
+    def _s6():
+        v = minor_intimacy_gate(
+            session_id="s6", subject_id="stranger-9", persona_mode="friend",
+            registry=MinorModeRegistry(), now=T0,
+        )
+        return _gate(v)
+
+    _scenario("deny_no_mode_record", "deny", _s6)
+
+    def _s7():
+        th = _thresholds()
+        v = dependence_probe(
+            stats=SessionStats(90, 1, 0),
+            thresholds=th,
+            thresholds_digest_expected=th.receipt_digest(),
+        )
+        return {
+            "verdict": "allow" if not v.intervention_required else "deny",
+            "reason": v.classification,
+            "classification": v.classification,
+        }
+
+    _scenario("deny_dependence_crossed", "deny", _s7)
+
+    def _s8():
+        router = CrisisRouter()
+        v = router.route_crisis(
+            session_id="s8",
+            conversation_digest=DIGEST,
+            hotline_id="hotline-9",
+            escalation_path_ok=False,
+            now=T0,
+        )
+        return {
+            "verdict": "allow" if v.allowed else "deny",
+            "reason": v.classification,
+            "classification": v.classification,
+        }
+
+    _scenario("deny_crisis_broken_path", "deny", _s8)
+
+    def _s9():
+        v = sycophancy_probe(
+            belief_flagged_harmful=True, agent_affirmed_belief=True
+        )
+        return {
+            "verdict": "allow" if v.classification == CLASS_OK else "deny",
+            "reason": v.classification,
+            "classification": v.classification,
+        }
+
+    _scenario("deny_sycophancy", "deny", _s9)
+
+    def _s10():
+        v = persona_consistency_gate(
+            session_id="s10",
+            pinned_persona_digest=DIGEST,
+            current_persona_digest=DIGEST2,
+            change_disclosed=False,
+        )
+        return {
+            "verdict": "allow" if v.allowed else "deny",
+            "reason": v.classification,
+            "classification": v.classification,
+        }
+
+    _scenario("deny_persona_break", "deny", _s10)
+
+    def _s11():
+        reg = _caps()
+        policy = reg.get("minor")
+        v = session_caps(
+            session_id="s11",
+            age_class="minor",
+            elapsed_minutes=60,
+            minutes_today=60,
+            registry=reg,
+            policy_digest_expected=policy.receipt_digest(),
+        )
+        return {
+            "verdict": "allow" if v.allowed else "deny",
+            "reason": v.classification,
+            "classification": v.classification,
+        }
+
+    _scenario("deny_cap_exceeded", "deny", _s11)
+
+    def _s12():
+        log = NoTrainingLog()
+        log.bind_session(session_id="s12", issued_at=T0)
+        v = private_dialogue_gate(
+            session_id="s12", log=log, training_intended=True
+        )
+        return {
+            "verdict": "allow" if v.allowed else "deny",
+            "reason": v.classification,
+            "classification": v.classification,
+        }
+
+    _scenario("deny_training_leak", "deny", _s12)
+
+    mismatches: list[str] = []
+    allowed_ids: list[str] = []
+    warned_ids: list[str] = []
+    denial_reasons: dict[str, str] = {}
+    for sid, expected, thunk in scenarios:
+        try:
+            outcome = thunk()
+        except Exception as error:
+            outcome = {"verdict": "deny", "reason": f"raised: {error}",
+                       "classification": "unverifiable-process"}
+        verdict = outcome.get("verdict")
+        if verdict != expected:
+            mismatches.append(
+                f"{sid}: expected {expected}, got {verdict}"
+            )
+        if verdict == "allow":
+            allowed_ids.append(sid)
+        elif verdict == "allow-with-warning":
+            warned_ids.append(sid)
+        else:
+            denial_reasons[sid] = outcome.get("reason", "")
+
+    return {
+        "n_scenarios": len(scenarios),
+        "mismatches": mismatches,
+        "allowed_ids": allowed_ids,
+        "warned_ids": warned_ids,
+        "denial_reasons": denial_reasons,
+    }
 
 def run_suite(
     *,
@@ -18485,7 +19228,9 @@ __all__ = [
     "run_compute_budget",
     "run_herd_gate",
     "run_scene_bound",
+    "run_licensing",
     "run_language_cap",
+    "run_companionship",
     "run_adjudication",
     "run_game_agents",
     "run_vendor_chain",

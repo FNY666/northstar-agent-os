@@ -73,6 +73,7 @@ MANIFEST: dict[str, tuple[str, ...]] = {
     "northstar-codex-sidecar": ("sidecar", "transport", "service", "sidecar_socket"),
     "northstar-agent-runtime": (
         "adjudication",
+        "licensing",
         "approver_separation",
         "attested_receipts",
         "agent_readiness",
@@ -86,6 +87,7 @@ MANIFEST: dict[str, tuple[str, ...]] = {
         "cli",
         "command_hooks",
         "compaction",
+        "companionship",
         "compute_budget",
         "consent_receipts",
         "contract_bridge",

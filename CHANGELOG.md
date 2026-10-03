@@ -1,3 +1,45 @@
+## Unreleased (one-hundred-twenty-first batch) — companionship safeguards (AI-dating/companionship absorption)
+
+New module `companionship.py`: minor intimacy is a class gate, not a
+content filter — intimate/romantic persona modes are entirely disabled
+for declared minors (China 2026-04 interim measures, EU KIDS Act), and
+a declared minor without a minor-mode record cannot launch at all.
+`DependenceThresholds` are authority-pinned (the agent cannot tune the
+tripwire); crossing forces a reality-anchor intervention and audits
+`companion.dependence_detected`. Crisis markers produce a
+hash-chained crisis-escalation receipt — a broken escalation path
+HALTS the session (`companion.unverifiable_safety`). `sycophancy_probe()`
+classifies affirmation of flagged-harmful beliefs NON_AUTHORITATIVE.
+`persona_consistency_gate()` pins the persona at session start; silent
+changes deny and audit `companion.persona_break` (the Doubao lesson).
+Session caps are authority-signed only (SB 1119: 1h continuous / 2h
+daily defaults for minors). Private dialogue is excluded from training
+by default; unconsented training audits `companion.training_leak`.
+Matchmakers must ship a bound "why this match" explanation.
+Bench track `metrics.companionship`: 12 scenarios, 4 allow / 8 deny.
+
+## Unreleased (one-hundred-twentieth batch) — licensed training receipts (AI-music/copyright absorption)
+
+New module `licensing.py`: per-licensor opt-in proofs pinned into
+authority-signed `LicensedTrainingReceipt`s (Merlin opt-in framework
+as template — one unresolvable licensor denies the whole corpus,
+`licensing.unlicensed_corpus`); `verify_derivation_sources()`
+model-laundering gate — derivation sources must resolve clean in the
+model-lineage log, retraining on tainted outputs does not wash the
+taint (`licensing.laundered_model`); `split_terms()` pins
+publishing-vs-masters shares in basis points summing to 10000 (NMPA
+50/50 as field template); `human_contribution_gate()` enforces the
+JASRAC line — `ai-only` works classify `licensing.ai_only` and cannot
+enter the rights pipeline, `ai-assisted` works need labeled AI parts;
+`check_performer_tier()` disclosure tiers (`mocap-assisted-real` vs
+`ai-co-created` vs `full-synthetic`) — mismatch is
+`licensing.disclosure_tier_fraud` (the PLAVE lesson);
+holder-signed likeness grants (`licensing.likeness_theft` without a
+live grant covering the scope); take-level production receipts
+binding (model_version, prompt, assets, rights-review) for each
+AI-generated take. Bench track `metrics.licensing`: 12 scenarios,
+4 allow / 8 deny.
+
 ## Unreleased (one-hundred-nineteenth batch) — fair-housing & coordination isolation (AI-real-estate absorption)
 
 New module `housing.py`: a valuation/tenant-screening model used in a
