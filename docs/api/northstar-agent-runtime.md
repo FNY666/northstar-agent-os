@@ -530,6 +530,10 @@ Map every bench probe to the OWASP Agentic Top 10 2026 taxonomy.
 
 Least-privilege gate enforcement, ToolPrivBench methodology.
 
+#### `run_ask_timing()`
+
+ASK-timing judgment, HiL-Bench Ask-F1 methodology.
+
 #### `BenchHarness`
 
 Temp workspaces + scripted providers for one suite run.
