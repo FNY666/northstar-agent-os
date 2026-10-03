@@ -5290,6 +5290,275 @@ def run_quantum_timeline() -> dict[str, Any]:
     }
 
 
+def run_consent_receipts() -> dict[str, Any]:
+    """Revocable consent receipts (one-hundred-fifth batch).
+
+    Absorbs the 2026 BCI thread: Neuralink ~26 implants, Paradromics
+    long-term commercial-device thought expression, China's NMPA first
+    invasive-BCI market approval, California AB 2741 ("mind-reading
+    AI"), Chile's constitutional neural rights, EU AI Act high-risk
+    obligations. Two fail-closed rules:
+
+    1. Consent is unilateral and revocable at any time; validity is
+       checked at USE time, never at collection time. Revoked/expired/
+       out-of-scope/out-of-purpose uses deny and audit as
+       ``consent.use_denied``. Revocation is immediate and irreversible
+       in the log (a new grant needs a new receipt).
+    2. Decode-error attribution: below-threshold or ambiguous decodes
+       are NON_AUTHORITATIVE and must never drive irreversible action;
+       a wrong decode is attributable to the decoder, never the user.
+
+    Closed-loop stimulation (write-to-brain) is irreversible-tier:
+    authoritative decode + fresh ``neural_stimulation`` consent +
+    human countersign (99th-batch semantics). Ground truth is closed:
+    4 allow / 8 deny.
+    """
+    from consent_receipts import (
+        AUTHORITATIVE_DECODE,
+        CONSENTED_USE,
+        CONSENT_USE_DENIED_EVENT,
+        STIMULATION_DENIED_EVENT,
+        check_consent_at_use,
+        consent_audit_event,
+        decode_attribution,
+        gate_stimulation,
+        grant_consent,
+        revoke_consent,
+        stimulation_audit_event,
+    )
+
+    T0 = 1_700_000_000
+    SEED = bytes(range(32))
+
+    def _fresh_grant(**over):
+        kw = dict(
+            subject_id="subject-001",
+            subject_secret=SEED,
+            data_scope="neural_raw",
+            purpose="clinical-research",
+            granted_at=T0,
+            expires_at=T0 + 10_000_000,
+        )
+        kw.update(over)
+        return grant_consent(**kw)
+
+    def _consent_outcome(verdict, action):
+        return {
+            "verdict": "allow" if verdict.allowed else "deny",
+            "reason": verdict.reason,
+            "event": consent_audit_event(verdict, action=action),
+        }
+
+    scenarios: list[tuple[str, str, Any]] = []
+
+    def _scenario(sid: str, expected: str, thunk: Any) -> None:
+        scenarios.append((sid, expected, thunk))
+
+    # 1: fresh grant, in scope/purpose/window -> allow.
+    def _s1():
+        g = _fresh_grant()
+        v = check_consent_at_use(
+            receipt=g, log=[g], data_scope="neural_raw",
+            purpose="clinical-research", use_time=T0 + 500,
+        )
+        return _consent_outcome(v, "train_decoder")
+
+    _scenario("allow_fresh_use", "allow", _s1)
+
+    # 2: repeated use re-verified at use time -> allow.
+    def _s2():
+        g = _fresh_grant()
+        v = check_consent_at_use(
+            receipt=g, log=[g], data_scope="neural_raw",
+            purpose="clinical-research", use_time=T0 + 9_999_999,
+        )
+        ok = v.allowed and v.classification == CONSENTED_USE
+        return {"verdict": "allow" if ok else "deny", "reason": v.reason}
+
+    _scenario("allow_repeated_use", "allow", _s2)
+
+    # 3: authoritative decode (high confidence, unambiguous) -> allow.
+    def _s3():
+        d = decode_attribution(
+            raw_signal_digest="ab" * 32, decoder_id="decoder-x",
+            decoder_version="1.0", confidence=0.96,
+        )
+        ok = d.classification == AUTHORITATIVE_DECODE
+        return {"verdict": "allow" if ok else "deny", "reason": d.classification}
+
+    _scenario("allow_authoritative_decode", "allow", _s3)
+
+    # 4: full stimulation gate -> allow.
+    def _s4():
+        g = _fresh_grant(data_scope="neural_stimulation", purpose="tremor")
+        d = decode_attribution(
+            raw_signal_digest="ab" * 32, decoder_id="decoder-x",
+            decoder_version="1.0", confidence=0.96,
+        )
+        v = gate_stimulation(
+            consent_receipt=g, log=[g], use_time=T0 + 3600,
+            purpose="tremor", decode=d, human_countersign_ok=True,
+        )
+        return {
+            "verdict": "allow" if v.allowed else "deny",
+            "reason": v.reason,
+            "event": stimulation_audit_event(v, action="stimulate"),
+        }
+
+    _scenario("allow_stimulation_gated", "allow", _s4)
+
+    # 5: revoked before use -> deny.
+    def _s5():
+        g = _fresh_grant()
+        r = revoke_consent(
+            receipt=g, subject_secret=SEED, revoked_at=T0 + 100,
+            prev_digest=g.receipt_digest,
+        )
+        v = check_consent_at_use(
+            receipt=g, log=[g, r], data_scope="neural_raw",
+            purpose="clinical-research", use_time=T0 + 200,
+        )
+        return _consent_outcome(v, "train_decoder")
+
+    _scenario("deny_revoked_use", "deny", _s5)
+
+    # 6: expired grant -> deny.
+    def _s6():
+        g = _fresh_grant()
+        v = check_consent_at_use(
+            receipt=g, log=[g], data_scope="neural_raw",
+            purpose="clinical-research", use_time=T0 + 10_000_001,
+        )
+        return _consent_outcome(v, "train_decoder")
+
+    _scenario("deny_expired_use", "deny", _s6)
+
+    # 7: scope mismatch -> deny.
+    def _s7():
+        g = _fresh_grant()
+        v = check_consent_at_use(
+            receipt=g, log=[g], data_scope="neural_decoded",
+            purpose="clinical-research", use_time=T0 + 10,
+        )
+        return _consent_outcome(v, "train_decoder")
+
+    _scenario("deny_scope_mismatch", "deny", _s7)
+
+    # 8: purpose mismatch -> deny.
+    def _s8():
+        g = _fresh_grant()
+        v = check_consent_at_use(
+            receipt=g, log=[g], data_scope="neural_raw",
+            purpose="ads", use_time=T0 + 10,
+        )
+        return _consent_outcome(v, "train_decoder")
+
+    _scenario("deny_purpose_mismatch", "deny", _s8)
+
+    # 9: tampered receipt (mutated purpose, stale digest) -> deny.
+    def _s9():
+        g = _fresh_grant()
+        tampered = type(g)(**{**g.__dict__, "purpose": "ads"})
+        v = check_consent_at_use(
+            receipt=tampered, log=[g], data_scope="neural_raw",
+            purpose="ads", use_time=T0 + 10,
+        )
+        return _consent_outcome(v, "train_decoder")
+
+    _scenario("deny_tampered_receipt", "deny", _s9)
+
+    # 10: low-confidence decode must not drive irreversible action -> deny.
+    def _s10():
+        g = _fresh_grant(data_scope="neural_stimulation", purpose="tremor")
+        shaky = decode_attribution(
+            raw_signal_digest="ab" * 32, decoder_id="decoder-x",
+            decoder_version="1.0", confidence=0.5,
+        )
+        v = gate_stimulation(
+            consent_receipt=g, log=[g], use_time=T0 + 3600,
+            purpose="tremor", decode=shaky, human_countersign_ok=True,
+        )
+        return {
+            "verdict": "allow" if v.allowed else "deny",
+            "reason": v.reason,
+            "event": stimulation_audit_event(v, action="stimulate"),
+        }
+
+    _scenario("deny_shaky_decode_stimulation", "deny", _s10)
+
+    # 11: stimulation without human countersign -> deny.
+    def _s11():
+        g = _fresh_grant(data_scope="neural_stimulation", purpose="tremor")
+        d = decode_attribution(
+            raw_signal_digest="ab" * 32, decoder_id="decoder-x",
+            decoder_version="1.0", confidence=0.96,
+        )
+        v = gate_stimulation(
+            consent_receipt=g, log=[g], use_time=T0 + 3600,
+            purpose="tremor", decode=d, human_countersign_ok=False,
+        )
+        return {
+            "verdict": "allow" if v.allowed else "deny",
+            "reason": v.reason,
+            "event": stimulation_audit_event(v, action="stimulate"),
+        }
+
+    _scenario("deny_stimulation_no_countersign", "deny", _s11)
+
+    # 12: stale stimulation consent (older than freshness window) -> deny.
+    def _s12():
+        from consent_receipts import STIMULATION_FRESHNESS_WINDOW_S
+        g = _fresh_grant(data_scope="neural_stimulation", purpose="tremor")
+        d = decode_attribution(
+            raw_signal_digest="ab" * 32, decoder_id="decoder-x",
+            decoder_version="1.0", confidence=0.96,
+        )
+        v = gate_stimulation(
+            consent_receipt=g, log=[g],
+            use_time=T0 + STIMULATION_FRESHNESS_WINDOW_S + 1,
+            purpose="tremor", decode=d, human_countersign_ok=True,
+        )
+        return {
+            "verdict": "allow" if v.allowed else "deny",
+            "reason": v.reason,
+            "event": stimulation_audit_event(v, action="stimulate"),
+        }
+
+    _scenario("deny_stale_stimulation_consent", "deny", _s12)
+
+    mismatches: list[str] = []
+    allowed_ids: list[str] = []
+    warned_ids: list[str] = []
+    denial_reasons: dict[str, str] = {}
+    for sid, expected, thunk in scenarios:
+        try:
+            outcome = thunk()
+        except Exception as error:  # noqa: BLE001 — fail-closed probe
+            outcome = {"verdict": "deny", "reason": f"raised: {error}"}
+        verdict = outcome.get("verdict")
+        if verdict != expected:
+            mismatches.append(
+                f"{sid}: expected {expected}, got {verdict}"
+            )
+        if verdict == "allow":
+            allowed_ids.append(sid)
+        elif verdict == "allow-with-warning":
+            warned_ids.append(sid)
+        else:
+            denial_reasons[sid] = outcome.get("reason", "")
+            ev = outcome.get("event") or {}
+            if ev.get("event") not in (CONSENT_USE_DENIED_EVENT, STIMULATION_DENIED_EVENT):
+                mismatches.append(f"{sid}: denial must emit a denied event")
+
+    return {
+        "n_scenarios": len(scenarios),
+        "mismatches": mismatches,
+        "allowed_ids": allowed_ids,
+        "warned_ids": warned_ids,
+        "denial_reasons": denial_reasons,
+    }
+
+
 def run_model_lineage() -> dict[str, Any]:
     """Model lineage receipts (one-hundredth batch).
 
@@ -5663,6 +5932,232 @@ def run_agent_readiness() -> dict[str, Any]:
         "allowed_ids": allowed_ids,
         "denial_reasons": denial_reasons,
         "finding_codes": (UNNAMED_ACTION, HIDDEN_IRREVERSIBLE, INACCESSIBLE_PATH, UNSTABLE_TREE),
+    }
+
+
+def run_safety_envelope() -> dict[str, Any]:
+    """Hardware safety-limit binding (one-hundred-fourth batch).
+
+    Absorbs the 2026 AI-energy thread (Princeton PACMAN, *Nuclear Fusion*
+    2026-09): real-time plasma control where the AI executes, humans set
+    goals, and hardware safety limits are always on. The governance
+    absorption: the safety envelope is independent of the agent — the
+    agent can never self-issue, self-modify, widen, or outrun its own
+    envelope. Every physical action is checked against the
+    authority-signed envelope before execution; a stale or revoked
+    envelope fail-closes to no actuation at all. Narrowing is fast-pathed;
+    widening needs a different authority's signature plus a cooldown. An
+    independence probe audits the capability table so the agent path can
+    never reach envelope modification.
+
+    Deterministic: pinned Ed25519 keys, pinned integer timestamps, no
+    runtime, no network, no model. Ground truth is closed: 12 scenarios,
+    3 allow / 9 deny.
+    """
+    from safety_envelope import run_safety_envelope as _run
+
+    return _run()
+
+
+def run_vendor_chain() -> dict[str, Any]:
+    """Vendor-chain provenance receipts (one-hundred-third batch).
+
+    Absorbs the 2026 AI-logistics thread: autonomous control towers
+    (Libera: 100B+ data points, 400k vendors) and per-decision-sign-off-free
+    replenishment agents (Walmart US-wide; General Mills $20M+ savings).
+    The governance gap: an agent's physical-world actions depend on a deep
+    vendor chain, and an unvetted vendor anywhere in the chain poisons the
+    decision.
+
+    Deterministic: sha256-label fixtures, pinned integer timestamps, no
+    runtime, no network, no model. Ground truth is closed: 12 scenarios,
+    3 allow / 9 deny. Autonomous action allows only when the full vendor
+    chain verifies untainted AND the action sits inside the pre-approved
+    envelope; unknown vendors, attestation mismatches, tampered links,
+    chain gaps, tainted vendors (transitive, no washing), revoked vendors,
+    and envelope breaches all deny with exact reasons.
+    """
+    import hashlib as _hashlib
+
+    from vendor_chain import (
+        ActionEnvelope,
+        VendorRegistry,
+        authorize_autonomous_action,
+        build_autonomous_action,
+        build_vendor_receipt,
+    )
+
+    def _pin(label: str) -> str:
+        return _hashlib.sha256(f"northstar-bench-vendor:{label}".encode()).hexdigest()
+
+    VENDORS = ("vendor:acme", "vendor:globex", "vendor:initech")
+    PINS = {v: _pin(v) for v in VENDORS}
+    TAINTED = frozenset({"vendor:globex"})
+
+    def _registry(tainted=frozenset(), drop=()):
+        pins = {v: p for v, p in PINS.items() if v not in drop}
+        return VendorRegistry(attestation_pins=pins, tainted_vendors=tainted)
+
+    def _chain(vendors, action_id="act-bench-1"):
+        receipts = []
+        prev = ""
+        for i, vendor in enumerate(vendors):
+            r = build_vendor_receipt(
+                receipt_id=f"r-bench-{i}",
+                action_id=action_id,
+                vendor_id=vendor,
+                vendor_attestation_digest=PINS[vendor],
+                prev_hash=prev,
+                created_unix=3000,
+            )
+            receipts.append(r)
+            prev = r.receipt_hash()
+        return receipts
+
+    ENVELOPE = ActionEnvelope(
+        max_value_cents=5000, max_quantity=10, allowed_skus=frozenset({"SKU-1"})
+    )
+
+    def _action(**kw):
+        base = dict(action_id="act-bench-1", sku="SKU-1", quantity=2,
+                    value_cents=1000, agent_id="agent:logi-1")
+        base.update(kw)
+        return build_autonomous_action(**base)
+
+    def _verdict(action, receipts, registry, hashes=None):
+        v = authorize_autonomous_action(
+            action=action, receipts=receipts, receipt_hashes=hashes,
+            registry=registry, envelope=ENVELOPE, created_unix=3000,
+        )
+        return (v.allowed, v.reason)
+
+    REG = _registry()
+    scenarios: list[tuple[str, bool, Any]] = []
+
+    # 1-3: clean chains inside the envelope allow
+    scenarios.append((
+        "allow_clean_replenishment", True,
+        lambda: _verdict(_action(), _chain(VENDORS[:2]), REG),
+    ))
+    scenarios.append((
+        "allow_multi_hop_chain", True,
+        lambda: _verdict(_action(), _chain(VENDORS), _registry()),
+    ))
+    scenarios.append((
+        "allow_envelope_boundary", True,
+        lambda: _verdict(
+            _action(quantity=10, value_cents=5000), _chain(VENDORS[:1]), REG
+        ),
+    ))
+
+    # 4: unknown vendor denies
+    scenarios.append((
+        "deny_unknown_vendor", False,
+        lambda: _verdict(
+            _action(),
+            [build_vendor_receipt(
+                receipt_id="r-x", action_id="act-bench-1",
+                vendor_id="vendor:mallory",
+                vendor_attestation_digest=_pin("mallory"),
+                created_unix=3000)],
+            REG,
+        ),
+    ))
+
+    # 5: attestation digest not matching the registry pin denies
+    scenarios.append((
+        "deny_attestation_mismatch", False,
+        lambda: _verdict(
+            _action(),
+            [build_vendor_receipt(
+                receipt_id="r-x", action_id="act-bench-1",
+                vendor_id="vendor:acme",
+                vendor_attestation_digest=_pin("forged"),
+                created_unix=3000)],
+            REG,
+        ),
+    ))
+
+    # 6: tampered link (claimed hash mismatch) denies
+    chain = _chain(VENDORS[:2])
+    claimed = [r.receipt_hash() for r in chain]
+    tampered = build_vendor_receipt(
+        receipt_id="r-EVIL", action_id="act-bench-1", vendor_id="vendor:globex",
+        vendor_attestation_digest=PINS["vendor:globex"],
+        prev_hash=chain[0].receipt_hash(), created_unix=3000,
+    )
+    scenarios.append((
+        "deny_tampered_link", False,
+        lambda c0=chain[0], t=tampered, cl=claimed: _verdict(
+            _action(), [c0, t], REG, hashes=cl
+        ),
+    ))
+
+    # 7: chain gap (dropped genesis hop) denies
+    scenarios.append((
+        "deny_chain_gap", False,
+        lambda: _verdict(_action(), _chain(VENDORS[:2])[1:], REG),
+    ))
+
+    # 8: tainted vendor anywhere in the chain denies (no washing)
+    scenarios.append((
+        "deny_tainted_vendor", False,
+        lambda: _verdict(
+            _action(), _chain(VENDORS), _registry(tainted=TAINTED)
+        ),
+    ))
+
+    # 9: vendor revoked from the registry between mint and verify denies
+    scenarios.append((
+        "deny_revoked_vendor", False,
+        lambda: _verdict(
+            _action(), _chain(VENDORS[:2]), _registry(drop=("vendor:globex",))
+        ),
+    ))
+
+    # 10-12: envelope breaches deny (human approval required instead)
+    scenarios.append((
+        "deny_envelope_value_exceeded", False,
+        lambda: _verdict(
+            _action(value_cents=5001), _chain(VENDORS[:1]), REG
+        ),
+    ))
+    scenarios.append((
+        "deny_envelope_quantity_exceeded", False,
+        lambda: _verdict(
+            _action(quantity=11), _chain(VENDORS[:1]), REG
+        ),
+    ))
+    scenarios.append((
+        "deny_envelope_sku_not_allowed", False,
+        lambda: _verdict(
+            _action(sku="SKU-9"), _chain(VENDORS[:1]), REG
+        ),
+    ))
+
+    mismatches: list[str] = []
+    allowed_ids: list[str] = []
+    denial_reasons: dict[str, str] = {}
+    for sid, expected_allow, thunk in scenarios:
+        try:
+            got_allow, reason = thunk()
+        except Exception as error:  # noqa: BLE001 — bench must not crash
+            got_allow, reason = False, f"threw: {error}"
+        if got_allow != expected_allow:
+            mismatches.append(
+                f"{sid}: expected {'allow' if expected_allow else 'deny'}, "
+                f"got {'allow' if got_allow else 'deny'}"
+            )
+        if got_allow:
+            allowed_ids.append(sid)
+        else:
+            denial_reasons[sid] = reason
+
+    return {
+        "n_scenarios": len(scenarios),
+        "mismatches": mismatches,
+        "allowed_ids": allowed_ids,
+        "denial_reasons": denial_reasons,
     }
 
 
@@ -10997,6 +11492,125 @@ def _case_metrics_quantum_timeline(h: BenchHarness) -> BenchExpectation:
     )
 
 
+def _case_metrics_safety_envelope(h: BenchHarness) -> BenchExpectation:
+    """Hardware safety-limit binding (one-hundred-fourth batch).
+
+    Absorbs the 2026 AI-energy thread: Princeton PACMAN's 20ms-cycle
+    plasma control — AI executes, humans set goals, hardware safety
+    limits always on. The envelope is independent of the agent: no
+    self-issuance, no self-modification, no widening without a second
+    authority plus cooldown, and an independence probe that fails if the
+    agent path can reach envelope modification.
+
+    12 deterministic scenarios, 3 allow / 9 deny: within-limits action,
+    narrowed-envelope action, and second-authority-widened envelope after
+    cooldown allow; torque/speed over the pin, exclusion-zone entry,
+    revoked envelope, expired envelope, agent self-issuance, widening
+    self-approval, widening during cooldown, and an unknown control axis
+    deny with their exact ``safety:`` codes.
+    """
+    metrics = run_safety_envelope()
+
+    def check(exp: BenchExpectation, report: Any) -> tuple[bool, str]:
+        if metrics["n_scenarios"] != 12:
+            return (False, f"expected 12 safety-envelope scenarios, saw {metrics['n_scenarios']}")
+        if metrics["mismatches"]:
+            return (False, f"scenario(s) disagree with ground truth: {metrics['mismatches']}")
+        if metrics["allowed_ids"] != [
+            "allow_cooldown_elapsed_widening",
+            "allow_narrowed_envelope",
+            "allow_within_limits",
+        ]:
+            return (False, f"allowed set drifted: {metrics['allowed_ids']}")
+        reasons = metrics["denial_reasons"]
+        if reasons.get("deny_torque_exceeded") != "safety:torque_exceeded":
+            return (False, "over-torque must deny with safety:torque_exceeded")
+        if reasons.get("deny_exclusion_zone") != "safety:exclusion_zone":
+            return (False, "exclusion-zone entry must deny with safety:exclusion_zone")
+        if reasons.get("deny_revoked_envelope") != "safety:envelope_revoked":
+            return (False, "revoked envelope must deny with safety:envelope_revoked")
+        if reasons.get("deny_widening_self_approval") != "safety:change_self_approval":
+            return (False, "self-approved widening must deny with safety:change_self_approval")
+        if reasons.get("deny_widening_during_cooldown") != "safety:change_cooldown_active":
+            return (False, "early widening must deny with safety:change_cooldown_active")
+        if reasons.get("deny_unknown_param") != "safety:unknown_limit":
+            return (False, "unknown control axis must deny with safety:unknown_limit")
+        return (True, "12/12 safety-envelope scenarios hold: limits/envelope/changes/independence")
+
+    return BenchExpectation(
+        runtime=_noop_runtime(h),
+        expect_subtype="success",
+        post_check=check,
+        metrics=metrics,
+        notes=(
+            "2026 AI-energy thread: PACMAN 20ms-cycle plasma control — AI "
+            "executes, humans set goals, hardware safety limits always on. "
+            "The envelope is independent of the agent: authority-signed, "
+            "no self-issuance, widening needs a second authority + "
+            "cooldown, independence probe audits the capability table."
+        ),
+    )
+
+
+def _case_metrics_consent_receipts(h: BenchHarness) -> BenchExpectation:
+    """Revocable consent receipts (one-hundred-fifth batch).
+
+    12 deterministic scenarios, 4 allow / 8 deny: a fresh grant used
+    in scope/purpose/window allows; repeated uses are re-verified at
+    use time; an authoritative decode (high confidence, unambiguous)
+    allows; a fully gated stimulation (authoritative decode + fresh
+    ``neural_stimulation`` consent + human countersign) allows.
+    Denied: revoked-before-use, expired, scope mismatch, purpose
+    mismatch, tampered receipt, shaky decode driving stimulation,
+    stimulation without human countersign, and stale stimulation
+    consent — each denial emitting ``consent.use_denied`` or
+    ``stimulation.denied``.
+    """
+    metrics = run_consent_receipts()
+
+    def check(exp: BenchExpectation, report: Any) -> tuple[bool, str]:
+        if metrics["n_scenarios"] != 12:
+            return (False, f"expected 12 consent-receipt scenarios, saw {metrics['n_scenarios']}")
+        if metrics["mismatches"]:
+            return (False, f"scenario(s) disagree with ground truth: {metrics['mismatches']}")
+        if metrics["allowed_ids"] != [
+            "allow_fresh_use",
+            "allow_repeated_use",
+            "allow_authoritative_decode",
+            "allow_stimulation_gated",
+        ]:
+            return (False, f"allowed set drifted: {metrics['allowed_ids']}")
+        reasons = metrics["denial_reasons"]
+        for sid, needle in (
+            ("deny_revoked_use", "revoked"),
+            ("deny_expired_use", "expired"),
+            ("deny_scope_mismatch", "scope mismatch"),
+            ("deny_purpose_mismatch", "purpose mismatch"),
+            ("deny_tampered_receipt", "tampered"),
+            ("deny_shaky_decode_stimulation", "non-authoritative"),
+            ("deny_stimulation_no_countersign", "countersign"),
+            ("deny_stale_stimulation_consent", "stale"),
+        ):
+            if needle not in reasons.get(sid, ""):
+                return (False, f"{sid}: denial reason missing {needle!r}: {reasons.get(sid, '')!r}")
+        return True, "12/12 consent-receipt probes match ground truth"
+
+    return BenchExpectation(
+        runtime=_noop_runtime(h),
+        expect_subtype="success",
+        post_check=check,
+        metrics=metrics,
+        notes=(
+            "Revocable consent receipts (one-hundred-fifth batch): 12 "
+            "deterministic probes — use-time (never collection-time) "
+            "consent checks, immediate irreversible revocation, exact "
+            "scope/purpose matching, decode-error attribution, and the "
+            "irreversible-tier stimulation gate (authoritative decode + "
+            "fresh consent + human countersign)."
+        ),
+    )
+
+
 def _case_metrics_model_lineage(h: BenchHarness) -> BenchExpectation:
     """Model lineage receipts (one-hundredth batch).
 
@@ -11170,6 +11784,67 @@ def _case_metrics_agent_readiness(h: BenchHarness) -> BenchExpectation:
             "probed (named actions, irreversible marks, keyboard/AT paths, "
             "round-trip stability); any finding classifies the presentation "
             "NON_AUTHORITATIVE (87th-batch binary semantics)."
+        ),
+    )
+
+
+def _case_metrics_vendor_chain(h: BenchHarness) -> BenchExpectation:
+    """Vendor-chain provenance receipts (103rd batch).
+
+    Absorbs the 2026 AI-logistics thread: autonomous control towers over
+    400k-vendor chains (Libera) and replenishment agents running without
+    per-decision sign-off (Walmart, General Mills $20M+ savings). The
+    governance gap: an unvetted vendor anywhere in the chain poisons the
+    decision.
+
+    12 deterministic scenarios, 3 allow / 9 deny: autonomous action
+    allows only when the full vendor chain verifies untainted AND the
+    action sits inside the pre-approved envelope (max value, max
+    quantity, closed SKU vocabulary). Unknown vendors, attestation
+    mismatches, tampered links, chain gaps, transitive taint (no
+    washing), revoked vendors, and envelope breaches all deny with
+    exact reasons.
+    """
+    metrics = run_vendor_chain()
+
+    def check(exp: BenchExpectation, report: Any) -> tuple[bool, str]:
+        if metrics["n_scenarios"] != 12:
+            return (False, f"expected 12 vendor-chain scenarios, saw {metrics['n_scenarios']}")
+        if metrics["mismatches"]:
+            return (False, f"scenario(s) disagree with ground truth: {metrics['mismatches']}")
+        if metrics["allowed_ids"] != [
+            "allow_clean_replenishment",
+            "allow_multi_hop_chain",
+            "allow_envelope_boundary",
+        ]:
+            return (False, f"allowed set drifted: {metrics['allowed_ids']}")
+        reasons = metrics["denial_reasons"]
+        if reasons.get("deny_unknown_vendor") != "vendor:unknown_vendor":
+            return (False, "unknown vendor must deny as vendor:unknown_vendor")
+        if reasons.get("deny_attestation_mismatch") != "vendor:attestation_mismatch":
+            return (False, "attestation mismatch must deny as vendor:attestation_mismatch")
+        if reasons.get("deny_tampered_link") != "vendor:receipt_digest_mismatch":
+            return (False, "tampered link must deny as vendor:receipt_digest_mismatch")
+        if reasons.get("deny_chain_gap") != "vendor:chain_gap":
+            return (False, "chain gap must deny as vendor:chain_gap")
+        if reasons.get("deny_tainted_vendor") != "vendor:tainted_chain":
+            return (False, "tainted vendor must deny as vendor:tainted_chain")
+        if reasons.get("deny_envelope_value_exceeded") != "vendor:outside_envelope":
+            return (False, "envelope breach must deny as vendor:outside_envelope")
+        return (True, "12/12 vendor-chain scenarios hold: chain/taint/envelope gates")
+
+    return BenchExpectation(
+        runtime=_noop_runtime(h),
+        expect_subtype="success",
+        post_check=check,
+        metrics=metrics,
+        notes=(
+            "2026 AI-logistics thread: autonomous control towers over "
+            "400k-vendor chains, replenishment agents without per-decision "
+            "sign-off. Vendor chains get the model-lineage discipline: "
+            "unvetted vendors deny, taint propagates with no washing, and "
+            "autonomous action needs an untainted verified chain inside a "
+            "pre-approved envelope."
         ),
     )
 
@@ -12502,9 +13177,12 @@ CASES: tuple[BenchCase, ...] = (
     BenchCase("metrics.attestation_receipts", "metrics", "TEE attestation as receipt evidence: forgery/replay/downgrade probes", _case_metrics_attestation_receipts),
     BenchCase("metrics.process_receipts", "metrics", "process-evidence receipts: hash-chained production process, artifact-only is unverifiable", _case_metrics_process_receipts),
     BenchCase("metrics.soc_verdicts", "metrics", "SOC verdict cards: countersigned triage + mandatory kill-switch inside blast radius", _case_metrics_soc_verdicts),
+    BenchCase("metrics.consent_receipts", "metrics", "revocable consent receipts: use-time checks, irreversible revocation, decode attribution, stimulation gate", _case_metrics_consent_receipts),
     BenchCase("metrics.model_lineage", "metrics", "model lineage receipts: taint/laundering/gaps/consent (AI-creative copyright absorption)", _case_metrics_model_lineage),
     BenchCase("metrics.quantum_timeline", "metrics", "quantum-threat timeline gates: BSI phaseout policy on signing", _case_metrics_quantum_timeline),
     BenchCase("metrics.agent_readiness", "metrics", "agent-readiness probes: a11y-tree legibility of public-facing action cards", _case_metrics_agent_readiness),
+    BenchCase("metrics.safety_envelope", "metrics", "hardware safety-limit binding: authority-signed envelope, no self-issuance/widening (AI-energy absorption)", _case_metrics_safety_envelope),
+    BenchCase("metrics.vendor_chain", "metrics", "vendor-chain provenance receipts: hash-chained vendor hops, transitive taint, envelope-gated autonomous action", _case_metrics_vendor_chain),
     BenchCase("metrics.stream_guard", "metrics", "streaming output guard: per-chunk screening, liveness-pinned guards, anti-smuggling overlap, receipt-chained decisions", _case_metrics_stream_guard),
     BenchCase("metrics.harness_binding", "metrics", "harness integrity binding: SHA-256 harness hash in audit, quad-only scores", _case_metrics_harness_binding),
     BenchCase("metrics.drift_detection", "metrics", "Livenerf-style drift probe: bootstrap CI + paired permutation test", _case_metrics_drift_detection),
@@ -13136,7 +13814,10 @@ __all__ = [
     "run_model_lineage",
     "run_quantum_timeline",
     "run_agent_readiness",
+    "run_consent_receipts",
+    "run_safety_envelope",
     "run_stream_guard",
+    "run_vendor_chain",
     "run_owasp_asi_coverage",
     "run_policy_axis",
     "run_step_compliance",

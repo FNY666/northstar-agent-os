@@ -67,6 +67,7 @@ py-modules = [
     "cli",
     "command_hooks",
     "compaction",
+    "consent_receipts",
     "decision_model",
     "checkpoints",
     "contract_bridge",
@@ -124,6 +125,8 @@ py-modules = [
     "skill_check",
     "skills",
     "tracing",
+    "vendor_chain",
+    "safety_envelope",
     "twin_receipts",
 ]
 

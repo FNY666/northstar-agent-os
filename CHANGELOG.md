@@ -1,3 +1,32 @@
+## Unreleased (one-hundred-fifth batch) — revocable consent receipts (BCI absorption)
+
+New module `consent_receipts.py`: hash-chained, subject-signed consent
+grants binding `(subject_id, data_scope, purpose, granted_at,
+expires_at)` — consent is unilateral and revocable at any time, and
+validity is checked at USE time, never at collection time (there is no
+"was once consented" shortcut). `check_consent_at_use()` re-verifies
+chain integrity, subject signature, exact scope/purpose match, the
+time window, and the absence of a revocation as of `use_time`;
+revoked/expired/out-of-scope uses deny and audit as
+`consent.use_denied`. Revocation is immediate and irreversible in the
+log (a new grant needs a new receipt). `decode_attribution()` binds
+every BCI-style decode to `(raw_signal_digest, decoder_id,
+decoder_version, confidence)`; below-threshold or ambiguous decodes
+classify `NON_AUTHORITATIVE` and must never drive irreversible action
+— a wrong decode is attributable to the decoder, never to the user.
+Closed-loop stimulation (write-to-brain) is irreversible-tier:
+authoritative decode + fresh `neural_stimulation` consent (24h
+freshness window) + human countersign, mirroring the 99th batch's
+kill-switch semantics. Absorbs the 2026 BCI thread: Neuralink ~26
+implants, Paradromics long-term commercial-device thought expression,
+China NMPA's first invasive-BCI market approval, California AB 2741
+("mind-reading AI"), Chile's constitutional neural rights, EU AI Act
+high-risk obligations. Honest boundary: verifies claimed
+consent-chain consistency; cannot prove the human understood what
+they signed. New bench track `metrics.consent_receipts` (12
+deterministic scenarios, 4 allow / 8 deny, zero mismatches); rides
+the sibling-owned bench v23 bump.
+
 ## Unreleased (one-hundred-sixth batch) — streaming output guard (open-models guard absorption)
 
 New module `stream_guard.py`: per-chunk screening *before* release, closing
@@ -23,6 +52,47 @@ known-bad shapes (credential prefixes, key headers); novel encodings
 are the documented job of the advisory second opinion. New bench track
 `metrics.stream_guard` (12 deterministic scenarios, 4 allow / 8 deny,
 zero mismatches); bench v22 → v23 (103rd batch owns v21 → v22).
+
+## Unreleased (one-hundred-fourth batch) — hardware safety-limit binding (AI-energy absorption)
+
+New module `safety_envelope.py`: the safety envelope is *independent* of
+the agent — the agent can never self-issue, self-modify, widen, or outrun
+its own envelope (absorbs the 2026 AI-energy thread: Princeton PACMAN's
+20ms-cycle plasma control — AI executes, humans set goals, hardware
+safety limits always on). `SafetyEnvelope` binds
+`(envelope_id, actuator_id, hard_limits, armed_by, armed_at, expires_at)`
+via JCS digest + Ed25519 signature from a registered human authority;
+`check_action_within_envelope()` checks every physical action before
+execution — any parameter outside the pins denies and audits
+`safety.envelope_denied`; a stale (expired) or revoked envelope
+fail-closes to no actuation at all; unknown control axes deny
+(`safety:unknown_limit`) so the agent cannot smuggle a new axis past the
+envelope. `request_envelope_change()` receipts limit changes into the
+hash chain: narrowing is fast-pathed, widening requires a *different*
+authority's signature (self-approval denies) plus a cooldown before the
+widened envelope can arm. `verify_independence()` probes the capability
+table — the agent role holds only `check`, never `envelope:modify` — and
+fails if the gate source can reach envelope modification. New bench
+track `metrics.safety_envelope` (12 deterministic scenarios, 3 allow / 9
+deny, zero mismatches); bench v22 → v23.
+
+## Unreleased (one-hundred-third batch) — vendor-chain provenance receipts (AI-logistics absorption)
+
+New module `vendor_chain.py`: hash-chained `VendorReceipt` binding
+`(action_id | vendor_id | vendor_attestation_digest | prev_hash)` per
+hop of a shipment/replenishment action; a pre-approved `VendorRegistry`
+(curated out-of-band) pins each vendor's attestation digest and names
+tainted vendors. `verify_chain()` fail-closes on unknown vendors,
+attestation mismatches, tampered links, and chain gaps, and propagates
+taint transitively with no laundering (the 100th batch's model-lineage
+discipline, applied to vendors). `authorize_autonomous_action()` lets
+the agent act *without per-decision human sign-off* (the Walmart
+pattern) only when the full chain verifies untainted AND the action
+sits inside a pre-approved `ActionEnvelope` (max value, max quantity,
+closed SKU vocabulary) — outside the envelope, a human must approve.
+Every action emits a `vendor.autonomous_action` audit event. New bench
+track `metrics.vendor_chain` (12 deterministic scenarios, 3 allow / 9
+deny, zero mismatches); bench v21 → v22.
 
 ## Unreleased (one-hundred-first batch) — agent-readiness probes for public-facing agent UI (AI-accessibility absorption)
 

@@ -521,6 +521,72 @@ Summarise a safe prefix of ``transcript``; keep the tail verbatim.
 
 #### `summary_block(outcome: CompactionOutcome)`
 
+### `consent_receipts`
+
+Source: `components/northstar-agent-runtime/consent_receipts.py`
+
+Revocable consent receipts (one-hundred-fifth batch).
+
+#### `ConsentReceiptError`
+
+A malformed receipt/record or a programming error.
+
+#### `ConsentReceipt`
+
+A subject's signed grant of consent.
+
+#### `RevocationRecord`
+
+A subject's unilateral revocation of one grant.
+
+#### `compute_receipt_digest(receipt: ConsentReceipt)`
+
+Recompute a grant's digest over all fields except itself.
+
+#### `compute_revocation_digest(record: RevocationRecord)`
+
+Recompute a revocation's digest over all fields except itself.
+
+#### `grant_consent(*, subject_id: str, subject_secret: bytes, data_scope: str, purpose: str, granted_at: int, expires_at: int, prev_digest: str=_GENESIS)`
+
+Issue a subject-signed consent grant and seal it.
+
+#### `revoke_consent(*, receipt: ConsentReceipt, subject_secret: bytes, revoked_at: int, prev_digest: str=_GENESIS)`
+
+Append a subject-signed revocation for one grant.
+
+#### `ConsentVerdict`
+
+Outcome of checking one data use against the consent log.
+
+#### `check_consent_at_use(*, receipt: ConsentReceipt, log: list[ConsentReceipt | RevocationRecord], data_scope: str, purpose: str, use_time: int)`
+
+Check ONE data use against the consent log. Fail-closed.
+
+#### `consent_audit_event(verdict: ConsentVerdict, *, action: str)`
+
+Shape a use-time verdict as an audit-chain event dict.
+
+#### `DecodeAttribution`
+
+Attribution record for one decoded intent.
+
+#### `decode_attribution(*, raw_signal_digest: str, decoder_id: str, decoder_version: str, confidence: float, ambiguous: bool=False)`
+
+Classify one decoded intent. Fail-closed on uncertainty.
+
+#### `StimulationVerdict`
+
+Outcome of gating one closed-loop stimulation action.
+
+#### `gate_stimulation(*, consent_receipt: ConsentReceipt, log: list[ConsentReceipt | RevocationRecord], use_time: int, purpose: str, decode: DecodeAttribution, human_countersign_ok: bool)`
+
+Gate a write-to-brain stimulation. Irreversible tier.
+
+#### `stimulation_audit_event(verdict: StimulationVerdict, *, action: str)`
+
+Shape a stimulation verdict as an audit-chain event dict.
+
 ### `contract_bridge`
 
 Source: `components/northstar-agent-runtime/contract_bridge.py`
@@ -998,6 +1064,10 @@ SOC verdict cards + kill-switch mandate (ninety-ninth batch).
 
 Quantum-threat timeline gates (one-hundred-second batch).
 
+#### `run_consent_receipts()`
+
+Revocable consent receipts (one-hundred-fifth batch).
+
 #### `run_model_lineage()`
 
 Model lineage receipts (one-hundredth batch).
@@ -1005,6 +1075,18 @@ Model lineage receipts (one-hundredth batch).
 #### `run_agent_readiness()`
 
 Agent-readiness probes for public-facing agent UI (101st batch).
+
+#### `run_safety_envelope()`
+
+Hardware safety-limit binding (one-hundred-fourth batch).
+
+#### `run_vendor_chain()`
+
+Vendor-chain provenance receipts (one-hundred-third batch).
+
+#### `run_stream_guard()`
+
+Streaming output guard (one-hundred-sixth batch).
 
 #### `run_adversarial_scenarios()`
 
@@ -3217,6 +3299,131 @@ Owns the span tree and (optionally) mirrors it into OpenTelemetry.
 #### `otel_available()`
 
 #### `sdk_available()`
+
+### `vendor_chain`
+
+Source: `components/northstar-agent-runtime/vendor_chain.py`
+
+Vendor-chain provenance receipts (one-hundred-third batch).
+
+#### `VendorChainError`
+
+A malformed vendor receipt, registry, or envelope — a programming error, not a verdict. Verification *failures* (unknown vendor, gap, taint, envelope breach) return a verdict with ``allowed=False`` instead; a malformed input raises here, fail loud, never guess.
+
+#### `VendorReceipt`
+
+One vendor hop, hash-chained to its predecessor.
+
+- `receipt_hash()`
+  - Digest binding every field that authorizes the hop.
+- `as_dict()`
+#### `build_vendor_receipt(*, receipt_id: str, action_id: str, vendor_id: str, vendor_attestation_digest: str, prev_hash: str='', created_unix: int=0)`
+
+Construct a vendor receipt from runtime ground truth.
+
+#### `VendorRegistry`
+
+The pre-approved vendor set.
+
+- `is_approved(vendor_id: str)`
+- `is_tainted(vendor_id: str)`
+#### `ChainVerdict`
+
+The verdict of :func:`verify_chain`.
+
+#### `verify_chain(receipts: list[VendorReceipt], registry: VendorRegistry, receipt_hashes: list[str] | None=None)`
+
+Verify a full vendor chain, fail-closed.
+
+#### `ActionEnvelope`
+
+The pre-approved envelope for autonomous actions.
+
+- `contains(sku: str, quantity: int, value_cents: int)`
+#### `AutonomousAction`
+
+One autonomous replenishment/shipment action the agent proposes.
+
+- `action_digest()`
+#### `build_autonomous_action(*, action_id: str, sku: str, quantity: int, value_cents: int, agent_id: str)`
+
+#### `ActionVerdict`
+
+The verdict of :func:`authorize_autonomous_action`.
+
+#### `vendor_action_event(*, action: AutonomousAction, allowed: bool, reason: str, chain_digest: str, created_unix: int=0)`
+
+Audit event for an autonomous vendor-chain action (allowed or denied).
+
+#### `authorize_autonomous_action(*, action: AutonomousAction, receipts: list[VendorReceipt], receipt_hashes: list[str] | None=None, registry: VendorRegistry, envelope: ActionEnvelope, created_unix: int=0)`
+
+Gate an autonomous replenishment/shipment action, fail-closed.
+
+### `safety_envelope`
+
+Source: `components/northstar-agent-runtime/safety_envelope.py`
+
+Hardware safety-limit binding: the agent can never widen its own envelope.
+
+#### `SafetyEnvelopeError`
+
+Malformed envelope or change-request input. Fail loud, never guess.
+
+#### `SafetyEnvelope`
+
+One hardware safety envelope, armed by a human authority.
+
+- `as_dict()`
+#### `AuthorityRegistry`
+
+Registered human authorities (authority_id -> Ed25519 public key).
+
+- `register(authority_id: str, public_key: bytes)`
+- `public_key_for(authority_id: str)`
+#### `EnvelopeRegistry`
+
+Issued envelopes: integrity verification, revocation, freshness.
+
+- `arm_envelope(*, envelope_id: str, actuator_id: str, hard_limits: Mapping[str, Any], armed_by: str, armed_at: int, expires_at: int, signature: bytes, prev_hash: str='')`
+  - Arm an envelope. The signature must come from a registered human authority over the envelope digest; anything else fails closed.
+- `revoke(envelope_id: str)`
+  - Revoke an envelope. Terminal: re-arming reuses the id is refused, so a revoked envelope can never come back.
+- `get(envelope_id: str)`
+- `verify_envelope(envelope: SafetyEnvelope)`
+  - Re-verify digest + signature + chain-link of a stored envelope.
+- `is_fresh(envelope: SafetyEnvelope, *, now: int)`
+  - Freshness: not revoked, not expired, not from the future.
+#### `ActionVerdict`
+
+The gate's answer. ``allowed`` is False for every failure mode.
+
+#### `check_action_within_envelope(*, action: Mapping[str, Any], registry: EnvelopeRegistry, now: int)`
+
+Decide whether a physical action may execute. Fail closed.
+
+#### `envelope_denied_audit_event(*, envelope_id: str, reason: str, action_digest: str)`
+
+Shape the ``safety.envelope_denied`` audit event for audit.ndjson/1.
+
+#### `ChangeRequest`
+
+A proposed limit change, receipted into the envelope hash chain.
+
+#### `request_envelope_change(*, request_id: str, envelope: SafetyEnvelope, proposed_limits: Mapping[str, Any], requested_by: str, requested_at: int, approved_by: str='', approval_signature: bytes=b'', authorities: AuthorityRegistry)`
+
+File a limit-change request. Returns ``(request, disposition)``.
+
+#### `apply_approved_change(*, request: ChangeRequest, registry: EnvelopeRegistry, cooldown_s: int, now: int)`
+
+Apply an approved widening after its cooldown. Returns the new envelope (chained via ``prev_hash``) or ``(None, reason)``.
+
+#### `verify_independence()`
+
+Probe the control-plane separation. Fails if the agent role can reach envelope modification without an authority signature.
+
+#### `run_safety_envelope()`
+
+Deterministic safety-envelope scenarios: 12 scenarios, 3 allow / 9 deny.
 
 ### `audit_export`
 
