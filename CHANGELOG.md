@@ -1,5 +1,27 @@
 # Northstar Agent OS — initial public component
 
+## Unreleased (fortieth batch) — bounded idempotency store in the approval gateway
+
+The approval gateway's idempotency cache was an unbounded in-memory dict:
+every executed idempotency key (with its full tool output) lived for the
+lifetime of the gateway instance. It is now a two-tier bounded store — a hot
+LRU of full results (`max_results`, default 1024) plus a cold FIFO of
+tombstones (`max_tombstones`, default 8192) holding only fingerprints of
+evicted keys. Eviction is provably safe: a replayed tombstoned key fails
+closed ("refusing to re-execute") instead of running the executor again, and
+a key is only forgotten once no live replay can pass the pre-cache gates
+(the deadline is hashed into the fingerprint, so the deadline gate rejects
+same-fingerprint replays; a high-risk replay with a mutated deadline still
+needs an unexpired approval). If both tiers fill with unexpired keys the
+gateway refuses new executions before any side effect rather than risk a
+double execution. Approval v3's at-most-once-per-key semantics are unchanged.
+
+**Verification:** 94/94 durable-run tests green (7 new: LRU eviction +
+tombstone fail-closed replay, LRU recency refresh, tombstone fingerprint
+conflict, high-risk evicted-key replay refusal, store-exhaustion fail-closed
+before execution, expired-record pruning, constructor limit validation; the
+new tests fail against the pre-fix implementation).
+
 ## Unreleased (thirty-ninth batch) — durable-run fencing tokens
 
 The lease could be stolen mid-run and the old holder's writes would still
