@@ -152,6 +152,19 @@ _WORKSPACE_RIGHTS = (
 _SYSTEM_READ_PATHS = ("/usr", "/bin", "/lib", "/lib64", "/sbin")
 
 
+def _runtime_read_paths() -> tuple[str, ...]:
+    """Existing runtime directories only; never widen to their /opt/home parents."""
+    import os
+    import sysconfig
+
+    candidates = [os.path.dirname(os.path.realpath(sys.executable))]
+    for prefix in {sys.prefix, sys.base_prefix}:
+        candidates.extend(os.path.join(prefix, part) for part in ("bin", "lib", "lib64"))
+    candidates.extend(sysconfig.get_path(key) for key in ("stdlib", "platstdlib"))
+    extra = [os.path.realpath(path) for path in candidates if path and os.path.isdir(path)]
+    return tuple(dict.fromkeys([*_SYSTEM_READ_PATHS, *extra]))
+
+
 class LandlockError(ValueError):
     """Invalid Landlock mode or an unsatisfiable Landlock requirement."""
 
@@ -306,7 +319,7 @@ def default_profile(workspace: str) -> dict:
     """
     import os
 
-    read_paths = [p for p in _SYSTEM_READ_PATHS if os.path.isdir(p)]
+    read_paths = [path for path in _runtime_read_paths() if os.path.isdir(path)]
     spec = build_landlock_spec(
         paths_read=read_paths,
         paths_write=[workspace],
