@@ -37,6 +37,8 @@ from tools.os_sandbox import (
     probe_capabilities,
     run_sandboxed,
 )
+from tools.capdrop import CapDropError
+from tools.capdrop import resolve_capdrop as resolve_capdrop_policy
 from tools.seccomp import SeccompError
 from tools.seccomp import resolve_mode as resolve_seccomp_mode
 
@@ -135,6 +137,15 @@ def shell_handler(payload: dict[str, Any], ctx: "ToolContext") -> Any:
             )
         except SeccompError as error:
             return ToolResult.error(str(error))
+        # Capability drop is tighten-only like seccomp: a per-call payload may
+        # narrow the operator's whitelist but never widen it or switch the
+        # launcher off (see tools.capdrop.resolve_capdrop).
+        try:
+            capdrop_whitelist = resolve_capdrop_policy(
+                payload.get("capdrop"), ctx.service("shell_capdrop")
+            )
+        except CapDropError as error:
+            return ToolResult.error(str(error))
         env_payload = payload.get("env")
         env = None
         if env_payload is not None:
@@ -151,6 +162,7 @@ def shell_handler(payload: dict[str, Any], ctx: "ToolContext") -> Any:
             env=env,
             network=bool(payload.get("network", False)),
             seccomp=seccomp,
+            capdrop_whitelist=capdrop_whitelist,
         )
         result = run_sandboxed(request, backend=backend)
     except SandboxError as error:
@@ -213,6 +225,15 @@ def shell_tool_spec():
                     "type": "object",
                     "additionalProperties": {"type": "string"},
                     "description": "Extra env vars (cannot override PATH/HOME/TMPDIR/LD_*).",
+                },
+                "capdrop": {
+                    "description": (
+                        "Linux capability whitelist for the child (list of CAP_* "
+                        "names, or a comma-separated string). Default deny-all. "
+                        "Tighten-only: a call may only narrow the operator's "
+                        "--capdrop whitelist, never widen it or switch the "
+                        "launcher off."
+                    ),
                 },
             },
         },
