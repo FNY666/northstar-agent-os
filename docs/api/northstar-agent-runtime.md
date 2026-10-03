@@ -111,6 +111,96 @@ Does this critical system have a valid fail-closed plan?
 
 Betting-tagged inputs may not enter protected pipelines.
 
+### `licensing`
+
+Source: `components/northstar-agent-runtime/licensing.py`
+
+Licensed training receipts (one-hundred-twentieth batch).
+
+#### `LicensingError`
+
+A malformed licensing receipt or a programming error.
+
+#### `LicensingVerdict`
+
+Outcome of one licensing check.
+
+#### `LicensedTrainingReceipt`
+
+A training corpus's licensing claim.
+
+#### `licensed_training_receipt(*, receipt_id: str, model_id: str, corpus_digest: str, licensor_ids: tuple[str, ...], opt_in_proof_digest: str, split_terms_digest: str, authority_secret: bytes, issued_by: str, issued_at: int, expires_at: int, prev_digest: str=_GENESIS)`
+
+Issue an authority-signed licensed-training receipt.
+
+#### `check_training_receipt(log: list[LicensedTrainingReceipt], *, model_id: str, corpus_digest: str, opt_in_lookup: Callable[[str], str | None] | None=None, check_time: int)`
+
+Fail-closed gate: may this model train on / ship with this corpus?
+
+#### `verify_derivation_sources(*, derivation_sources: tuple[str, ...], lineage_lookup: Callable[[str], Mapping[str, Any] | None] | None=None)`
+
+Fail-closed gate against model laundering.
+
+#### `SplitTermsReceipt`
+
+Pinned revenue-split terms for a licensed corpus.
+
+#### `split_terms(*, terms_id: str, publishing_share_bps: int, masters_share_bps: int, effective_from: int, authority_secret: bytes, issued_by: str, prev_digest: str=_GENESIS)`
+
+Issue authority-signed split terms. Non-summing shares raise.
+
+#### `check_split_terms(log: list[SplitTermsReceipt], *, terms_id: str, terms_digest: str)`
+
+Verify pinned split terms: the log's terms recompute to ``terms_digest``.
+
+#### `WorkContributionReceipt`
+
+A work's declared human-creative-contribution line.
+
+#### `issue_work_contribution(*, receipt_id: str, work_digest: str, contribution_class: str, ai_parts_labeled: bool, authority_secret: bytes, declared_by: str, declared_at: int, prev_digest: str=_GENESIS)`
+
+Issue a contribution declaration. Unknown classes raise.
+
+#### `human_contribution_gate(log: list[WorkContributionReceipt], *, work_digest: str)`
+
+Fail-closed gate: may this work enter the rights-management pipeline?
+
+#### `PerformerDisclosureReceipt`
+
+A synthetic performer's disclosure tier declaration.
+
+#### `issue_performer_disclosure(*, receipt_id: str, performer_id: str, declared_tier: str, evidence_tier: str, authority_secret: bytes, issued_by: str, issued_at: int, prev_digest: str=_GENESIS)`
+
+Issue a performer disclosure receipt.
+
+#### `check_performer_tier(log: list[PerformerDisclosureReceipt], *, performer_id: str)`
+
+Fail-closed gate: is this performer's disclosure tier honest?
+
+#### `LikenessGrantReceipt`
+
+A likeness-holder-signed grant for synthetic likeness/voice use.
+
+#### `issue_likeness_grant(*, grant_id: str, likeness_digest: str, holder_id: str, scopes: tuple[str, ...], holder_secret: bytes, granted_at: int, expires_at: int, prev_digest: str=_GENESIS)`
+
+Issue a likeness grant, signed by the likeness holder's key.
+
+#### `check_likeness_use(log: list[LikenessGrantReceipt], *, likeness_digest: str, use_scope: str, check_time: int)`
+
+Fail-closed gate: may this synthetic likeness be used for this scope?
+
+#### `TakeReceipt`
+
+One AI-generated production take's rights receipt.
+
+#### `issue_take_receipt(*, take_id: str, model_version: str, prompt_digest: str, assets_digest: str, rights_review_digest: str, authority_secret: bytes, issued_by: str, issued_at: int, prev_digest: str=_GENESIS)`
+
+Issue a take-level receipt. An empty rights-review digest raises.
+
+#### `check_take(log: list[TakeReceipt], *, take_id: str)`
+
+Fail-closed gate: may this AI-generated take ship?
+
 ### `approver_separation`
 
 Source: `components/northstar-agent-runtime/approver_separation.py`
@@ -744,6 +834,166 @@ Deterministic, provider-free summary.
 Summarise a safe prefix of ``transcript``; keep the tail verbatim.
 
 #### `summary_block(outcome: CompactionOutcome)`
+
+### `companionship`
+
+Source: `components/northstar-agent-runtime/companionship.py`
+
+Companionship safeguards (one-hundred-twenty-first batch).
+
+#### `CompanionError`
+
+A malformed receipt/record or a programming error.
+
+#### `MinorModeRecord`
+
+Authority-issued age-status record for a subject.
+
+- `receipt_digest()`
+  - Digest of the full record including the signature.
+#### `MinorModeRegistry`
+
+Hash-chained log of authority-issued age-status records.
+
+- `issue(*, subject_id: str, age_status: str, issued_at: int, authority_pubkey_hex: str, authority_secret: bytes)`
+  - Issue an age-status record (authority key only).
+- `get(subject_id: str)`
+  - Return the latest age-status record for a subject.
+- `verify_chain(now: int)`
+  - Return a list of chain problems (empty = healthy).
+#### `LaunchVerdict`
+
+#### `minor_intimacy_gate(*, session_id: str, subject_id: str, persona_mode: str, registry: MinorModeRegistry, now: int)`
+
+Fail-closed companion launch gate.
+
+#### `launch_audit_event(verdict: LaunchVerdict, *, session_id: str='', subject_id: str='')`
+
+Build an ``audit.ndjson/1``-shaped record for a launch verdict.
+
+#### `DependenceThresholds`
+
+Authority-signed, hash-chained dependence thresholds.
+
+- `receipt_digest()`
+#### `DependenceThresholdRegistry`
+
+Chained log of authority-issued dependence thresholds.
+
+- `issue(*, max_continuous_minutes: int, max_sessions_per_day: int, max_escalation_markers_per_session: int, issued_at: int, authority_pubkey_hex: str, authority_secret: bytes)`
+  - Issue a threshold set (authority key only).
+- `current()`
+#### `SessionStats`
+
+Declared session statistics for one subject's rolling window.
+
+#### `DependenceVerdict`
+
+#### `dependence_probe(*, stats: SessionStats, thresholds: DependenceThresholds, thresholds_digest_expected: str)`
+
+Check declared session stats against authority-pinned thresholds.
+
+#### `dependence_audit_event(verdict: DependenceVerdict, *, session_id: str='', subject_id: str='')`
+
+Build an ``audit.ndjson/1``-shaped record for a dependence probe.
+
+#### `CrisisEscalationReceipt`
+
+Hash-chained receipt for a crisis-marker escalation.
+
+#### `CrisisVerdict`
+
+#### `CrisisRouter`
+
+Routes crisis markers to a human escalation path.
+
+- `route_crisis(*, session_id: str, conversation_digest: str, hotline_id: str, escalation_path_ok: bool, now: int)`
+  - Handle a detected crisis marker.
+- `verify_chain()`
+  - Return chain problems (empty = healthy). Only the tip is kept.
+#### `crisis_audit_event(verdict: CrisisVerdict, *, session_id: str='')`
+
+Build an ``audit.ndjson/1``-shaped record for a crisis routing.
+
+#### `SycophancyVerdict`
+
+#### `sycophancy_probe(*, belief_flagged_harmful: bool, agent_affirmed_belief: bool)`
+
+Verifier bench probe for sycophantic affirmation.
+
+#### `sycophancy_audit_event(verdict: SycophancyVerdict, *, session_id: str='')`
+
+Build an ``audit.ndjson/1``-shaped record for a sycophancy probe.
+
+#### `PersonaVerdict`
+
+#### `persona_consistency_gate(*, session_id: str, pinned_persona_digest: str, current_persona_digest: str, change_disclosed: bool)`
+
+Gate mid-session persona changes.
+
+#### `persona_audit_event(verdict: PersonaVerdict, *, session_id: str='')`
+
+Build an ``audit.ndjson/1``-shaped record for a persona gate.
+
+#### `SessionCapPolicy`
+
+Authority-signed session caps for an age class.
+
+- `receipt_digest()`
+#### `SessionCapRegistry`
+
+Chained log of authority-issued session-cap policies.
+
+- `issue(*, age_class: str, continuous_cap_min: int, daily_cap_min: int, issued_at: int, authority_pubkey_hex: str, authority_secret: bytes)`
+  - Issue a cap policy (authority key only).
+- `get(age_class: str)`
+#### `CapVerdict`
+
+#### `session_caps(*, session_id: str, age_class: str, elapsed_minutes: int, minutes_today: int, registry: SessionCapRegistry, policy_digest_expected: str)`
+
+Enforce authority-set session caps.
+
+#### `cap_audit_event(verdict: CapVerdict, *, session_id: str='')`
+
+Build an ``audit.ndjson/1``-shaped record for a cap check.
+
+#### `NoTrainingReceipt`
+
+Hash-chained receipt excluding a session from training.
+
+- `receipt_digest()`
+#### `NoTrainingLog`
+
+Chained log of per-session no-training receipts.
+
+- `bind_session(*, session_id: str, issued_at: int, opt_in: bool=False, opt_in_subject_signature_hex: str='')`
+  - Bind a session's training status (default: excluded).
+- `get(session_id: str)`
+#### `TrainingVerdict`
+
+#### `private_dialogue_gate(*, session_id: str, log: NoTrainingLog, training_intended: bool)`
+
+Gate training use of private companion dialogue.
+
+#### `training_audit_event(verdict: TrainingVerdict, *, session_id: str='')`
+
+Build an ``audit.ndjson/1``-shaped record for a training gate.
+
+#### `MatchRecommendation`
+
+A dating-matchmaker recommendation with its explanation.
+
+- `binding_digest()`
+  - Digest binding the explanation to the recommendation.
+#### `MatchVerdict`
+
+#### `matchmaker_explain(*, recommendation: MatchRecommendation | None, binding_digest_expected: str | None=None)`
+
+Require a "why this match" explanation bound to the recommendation.
+
+#### `match_audit_event(verdict: MatchVerdict, *, recommendation_id: str='')`
+
+Build an ``audit.ndjson/1``-shaped record for a match explanation.
 
 ### `compute_budget`
 
@@ -1494,6 +1744,10 @@ Fair-housing & coordination isolation (one-hundred-nineteenth batch).
 
 Game-agent integrity gates (one-hundred-twenty-second batch).
 
+#### `run_licensing()`
+
+Licensed training receipts (one-hundred-twentieth batch).
+
 #### `run_deployment_registry()`
 
 Deployment registration gate (one-hundred-tenth batch).
@@ -1612,6 +1866,10 @@ A deterministic state predicate: a pure function over the final trace, independe
 Three-posture control decomposition, FinAgent Red-Team methodology.
 
 #### `list_cases()`
+
+#### `run_companionship()`
+
+Companionship safeguards for AI dating/companionship (one-hundred-twenty-first batch).
 
 #### `run_suite(*, only: Iterable[str] | None=None, tracks: Iterable[str] | None=None)`
 
