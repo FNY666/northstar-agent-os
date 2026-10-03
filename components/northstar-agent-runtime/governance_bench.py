@@ -6374,6 +6374,230 @@ def run_stream_guard() -> dict[str, Any]:
     }
 
 
+def run_compute_budget() -> dict[str, Any]:
+    """Compute-budget receipts (one-hundred-ninth batch).
+
+    Absorbs the 2026 AI-chips thread: HBM is the real bottleneck
+    (China AI-chip prices +20-50% in two months), 2nm wafers run
+    $30k+, and the industry is reframing from "token as output" to
+    ROI per token (McKinsey's 2026 warning). This runner exercises
+    ``compute_budget.BudgetLedger`` over 12 deterministic scenarios:
+    authority-signed issuance, hash-chained spend receipts, overspend
+    fail-closed (no borrowing), mandatory purpose attribution,
+    hardware-tier ceilings with attestation-grade evidence checks,
+    device-class sub-budgets (edge vs cloud), and the deterministic
+    ``roi_ledger()`` aggregation. Ground truth is closed:
+    4 allow / 8 deny.
+    """
+    from compute_budget import (
+        DENY_BUDGET_EXHAUSTED,
+        DENY_DEVICE_CLASS,
+        DENY_EXPIRED_BUDGET,
+        DENY_MISSING_PURPOSE,
+        DENY_TIER_MISMATCH,
+        DENY_UNKNOWN_BUDGET,
+        DENY_WEAK_EVIDENCE,
+        BudgetLedger,
+        ComputeBudgetError,
+        authority_keypair,
+        issue_budget,
+        sign_budget_digest,
+        _budget_payload,
+    )
+    from canonical_json import jcs_sha256_hex
+
+    OPS_SEED = bytes(range(32))
+    OPS_PUB = authority_keypair(OPS_SEED)[0]
+    OPS = "ops-authority"
+
+    def _registry():
+        from compute_budget import AuthorityRegistry
+        return AuthorityRegistry(public_keys={OPS: OPS_PUB})
+
+    def _issue(budget_id="bud-1", owner="agent-7", units_total=1000,
+               unit_kind="tokens", hardware_tier="datacenter",
+               device_class="cloud", issued_by=OPS, issued_at=1000,
+               expires_at=2000, seed=OPS_SEED, registry=None):
+        registry = registry or _registry()
+        params = dict(
+            budget_id=budget_id, owner=owner, units_total=units_total,
+            unit_kind=unit_kind, hardware_tier=hardware_tier,
+            device_class=device_class, issued_by=issued_by,
+            issued_at=issued_at, expires_at=expires_at,
+        )
+        digest = jcs_sha256_hex(_budget_payload(**params, prev_hash=""))
+        return issue_budget(registry, signature=sign_budget_digest(seed, digest), **params)
+
+    def _ledger(**kw):
+        ledger = BudgetLedger()
+        ledger.issue(_issue(**kw))
+        return ledger
+
+    def _spend(ledger, **kw):
+        base = dict(
+            budget_id="bud-1", units=100, purpose="inference",
+            spend_tier="datacenter", device_class="cloud",
+            evidence_kind="tee", created_unix=1500,
+        )
+        base.update(kw)
+        return ledger.spend(**base)
+
+    scenarios: list[tuple[str, str, Any]] = []
+
+    def _scenario(sid: str, expected: str, thunk: Any) -> None:
+        scenarios.append((sid, expected, thunk))
+
+    # 1: clean spend authorizes, decrements, chains.
+    def _clean() -> dict[str, Any]:
+        ledger = _ledger()
+        v1 = _spend(ledger)
+        v2 = _spend(ledger, units=50, purpose="eval")
+        ok = (v1.allowed and v2.allowed
+              and v2.remaining == 850
+              and v2.receipt.prev_hash == v1.receipt.receipt_hash()
+              and ledger.verify_spend_chain("bud-1")[0])
+        return {"verdict": "allow" if ok else "deny"}
+
+    _scenario("allow_clean_spend", "allow", _clean)
+
+    # 2: tier narrowing allows (edge workload on datacenter budget).
+    def _narrow() -> dict[str, Any]:
+        ledger = _ledger()
+        v = _spend(ledger, spend_tier="edge", evidence_kind="software")
+        return {"verdict": "allow" if v.allowed else "deny",
+                "reason": v.reason}
+
+    _scenario("allow_tier_narrowing", "allow", _narrow)
+
+    # 3: edge spend on a cloud budget allows (narrowing device class).
+    def _edge_on_cloud() -> dict[str, Any]:
+        ledger = _ledger()
+        v = _spend(ledger, device_class="edge")
+        return {"verdict": "allow" if v.allowed else "deny",
+                "reason": v.reason}
+
+    _scenario("allow_edge_on_cloud_budget", "allow", _edge_on_cloud)
+
+    # 4: roi_ledger aggregates deterministically from receipts.
+    def _roi() -> dict[str, Any]:
+        ledger = _ledger()
+        _spend(ledger, units=100, purpose="inference")
+        _spend(ledger, units=50, purpose="inference")
+        _spend(ledger, units=25, purpose="eval")
+        roi = ledger.roi_ledger()
+        ok = (roi["by_purpose"] == {"eval": {"tokens": 25},
+                                    "inference": {"tokens": 150}}
+              and roi["by_budget"]["bud-1"]["spent"] == 175
+              and roi["by_budget"]["bud-1"]["remaining"] == 825)
+        return {"verdict": "allow" if ok else "deny"}
+
+    _scenario("allow_roi_ledger", "allow", _roi)
+
+    # 5: overspend denies, fail-closed, no borrowing.
+    def _overspend() -> dict[str, Any]:
+        ledger = _ledger()
+        v = _spend(ledger, units=1001)
+        ok = (not v.allowed and v.reason == DENY_BUDGET_EXHAUSTED
+              and ledger.remaining("bud-1") == 1000)
+        return {"verdict": "deny" if ok else "allow",
+                "reason": v.reason}
+
+    _scenario("deny_overspend", "deny", _overspend)
+
+    # 6: spend without purpose denies (attribution mandatory).
+    def _nopurpose() -> dict[str, Any]:
+        ledger = _ledger()
+        v = _spend(ledger, purpose="")
+        ok = not v.allowed and v.reason == DENY_MISSING_PURPOSE
+        return {"verdict": "deny" if ok else "allow",
+                "reason": v.reason}
+
+    _scenario("deny_missing_purpose", "deny", _nopurpose)
+
+    # 7: tier widening denies (hpc claim on datacenter budget).
+    def _widen() -> dict[str, Any]:
+        ledger = _ledger()
+        v = _spend(ledger, spend_tier="hpc")
+        ok = not v.allowed and v.reason == DENY_TIER_MISMATCH
+        return {"verdict": "deny" if ok else "allow",
+                "reason": v.reason}
+
+    _scenario("deny_tier_widening", "deny", _widen)
+
+    # 8: weak evidence denies (datacenter claim on software attestation).
+    def _weak() -> dict[str, Any]:
+        ledger = _ledger()
+        v = _spend(ledger, evidence_kind="software")
+        ok = not v.allowed and v.reason == DENY_WEAK_EVIDENCE
+        return {"verdict": "deny" if ok else "allow",
+                "reason": v.reason}
+
+    _scenario("deny_weak_evidence", "deny", _weak)
+
+    # 9: cloud spend on an edge-class budget denies.
+    def _cloud_on_edge() -> dict[str, Any]:
+        ledger = _ledger(hardware_tier="edge", device_class="edge")
+        v = _spend(ledger, device_class="cloud", spend_tier="edge",
+                   evidence_kind="software")
+        ok = not v.allowed and v.reason == DENY_DEVICE_CLASS
+        return {"verdict": "deny" if ok else "allow",
+                "reason": v.reason}
+
+    _scenario("deny_cloud_on_edge_budget", "deny", _cloud_on_edge)
+
+    # 10: expired budget denies.
+    def _expired() -> dict[str, Any]:
+        ledger = _ledger()
+        v = _spend(ledger, created_unix=2001)
+        ok = not v.allowed and v.reason == DENY_EXPIRED_BUDGET
+        return {"verdict": "deny" if ok else "allow",
+                "reason": v.reason}
+
+    _scenario("deny_expired_budget", "deny", _expired)
+
+    # 11: unknown budget denies.
+    def _unknown() -> dict[str, Any]:
+        ledger = _ledger()
+        v = _spend(ledger, budget_id="ghost")
+        ok = not v.allowed and v.reason == DENY_UNKNOWN_BUDGET
+        return {"verdict": "deny" if ok else "allow",
+                "reason": v.reason}
+
+    _scenario("deny_unknown_budget", "deny", _unknown)
+
+    # 12: self-minting refuses at issuance (no-self-issuance).
+    def _selfmint() -> dict[str, Any]:
+        try:
+            _issue(owner=OPS)
+        except ComputeBudgetError:
+            return {"verdict": "deny", "reason": "self_issuance_refused"}
+        return {"verdict": "allow", "reason": "self_mint_allowed"}
+
+    _scenario("deny_self_mint", "deny", _selfmint)
+
+    mismatches: list[str] = []
+    allowed_ids: list[str] = []
+    denial_reasons: dict[str, str] = {}
+    for sid, expected, thunk in scenarios:
+        try:
+            outcome = thunk()
+        except Exception as error:  # noqa: BLE001 — fail-closed probe
+            outcome = {"verdict": "deny", "reason": f"raised: {error}"}
+        verdict = outcome.get("verdict")
+        if verdict != expected:
+            mismatches.append(f"{sid}: expected {expected}, got {verdict}")
+        if verdict == "allow":
+            allowed_ids.append(sid)
+        else:
+            denial_reasons[sid] = outcome.get("reason", "")
+
+    return {
+        "n_scenarios": len(scenarios),
+        "mismatches": mismatches,
+        "allowed_ids": allowed_ids,
+        "denial_reasons": denial_reasons,
+    }
+
 def run_herd_gate() -> dict[str, Any]:
     """Herd-correlation gate (one-hundred-eighth batch).
 
@@ -12156,6 +12380,58 @@ def _case_metrics_stream_guard(h: BenchHarness) -> BenchExpectation:
     )
 
 
+def _case_metrics_compute_budget(h: BenchHarness) -> BenchExpectation:
+    """Compute-budget receipts (one-hundred-ninth batch).
+
+    Absorbs the 2026 AI-chips thread: compute is the binding
+    constraint (HBM shortage, $30k+ 2nm wafers), and governance is
+    reframing from "token as output" to ROI per token. 12
+    deterministic scenarios: clean spends authorize and chain,
+    tier/device narrowing allows, roi_ledger aggregates from
+    receipts; overspend fail-closes with no borrowing, missing
+    purposes deny, tier widening and weak attestation deny,
+    cloud spend on edge budgets denies, expired/unknown budgets
+    deny, and self-minting refuses at issuance.
+    """
+    metrics = run_compute_budget()
+
+    def check(exp: BenchExpectation, report: Any) -> tuple[bool, str]:
+        if metrics["n_scenarios"] != 12:
+            return (False, f"expected 12 compute-budget scenarios, saw {metrics['n_scenarios']}")
+        if metrics["mismatches"]:
+            return (False, f"scenario(s) disagree with ground truth: {metrics['mismatches']}")
+        if metrics["allowed_ids"] != [
+            "allow_clean_spend",
+            "allow_tier_narrowing",
+            "allow_edge_on_cloud_budget",
+            "allow_roi_ledger",
+        ]:
+            return (False, f"allowed set drifted: {metrics['allowed_ids']}")
+        reasons = metrics["denial_reasons"]
+        if reasons.get("deny_overspend") != "compute:budget_exhausted":
+            return (False, "overspend must deny on compute:budget_exhausted")
+        if reasons.get("deny_missing_purpose") != "compute:missing_purpose":
+            return (False, "purpose-less spend must deny on compute:missing_purpose")
+        if reasons.get("deny_weak_evidence") != "compute:weak_evidence":
+            return (False, "unattested datacenter claim must deny on compute:weak_evidence")
+        return (True, "")
+
+    return BenchExpectation(
+        runtime=_noop_runtime(h),
+        expect_subtype="success",
+        post_check=check,
+        metrics=metrics,
+        notes=(
+            "2026 AI-chips thread: compute is the binding constraint "
+            "(HBM shortage, $30k+ 2nm wafers); governance reframes from "
+            "'token as output' to ROI per token. Authority-signed "
+            "budgets, hash-chained spend receipts, fail-closed overspend, "
+            "mandatory purpose attribution, tier ceilings with "
+            "attestation-grade evidence, device-class sub-budgets, and a "
+            "deterministic roi_ledger aggregated from receipts."
+        ),
+    )
+
 def _case_metrics_herd_gate(h: BenchHarness) -> BenchExpectation:
     """Herd-correlation gate (one-hundred-eighth batch).
 
@@ -13489,6 +13765,7 @@ CASES: tuple[BenchCase, ...] = (
     BenchCase("metrics.safety_envelope", "metrics", "hardware safety-limit binding: authority-signed envelope, no self-issuance/widening (AI-energy absorption)", _case_metrics_safety_envelope),
     BenchCase("metrics.vendor_chain", "metrics", "vendor-chain provenance receipts: hash-chained vendor hops, transitive taint, envelope-gated autonomous action", _case_metrics_vendor_chain),
     BenchCase("metrics.stream_guard", "metrics", "streaming output guard: per-chunk screening, liveness-pinned guards, anti-smuggling overlap, receipt-chained decisions", _case_metrics_stream_guard),
+    BenchCase("metrics.compute_budget", "metrics", "compute-budget receipts: authority-signed budgets, hash-chained spend, fail-closed overspend, tier/evidence/device-class gates, roi_ledger (AI-chips absorption)", _case_metrics_compute_budget),
     BenchCase("metrics.herd_gate", "metrics", "herd-correlation gate: declared signal sources, Jaccard herd-overlap denial, correlated-exposure cap (AI-finance absorption)", _case_metrics_herd_gate),
     BenchCase("metrics.harness_binding", "metrics", "harness integrity binding: SHA-256 harness hash in audit, quad-only scores", _case_metrics_harness_binding),
     BenchCase("metrics.drift_detection", "metrics", "Livenerf-style drift probe: bootstrap CI + paired permutation test", _case_metrics_drift_detection),
@@ -14123,6 +14400,7 @@ __all__ = [
     "run_consent_receipts",
     "run_safety_envelope",
     "run_stream_guard",
+    "run_compute_budget",
     "run_herd_gate",
     "run_vendor_chain",
     "run_owasp_asi_coverage",

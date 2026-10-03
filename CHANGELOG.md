@@ -25,6 +25,34 @@ through the gate. New bench track `metrics.deployment_registry`
 (12 deterministic scenarios, 3 allow / 9 deny, zero mismatches);
 rides the one-hundred-eighth batch's bench v23 → v24 bump.
 
+## Unreleased (one-hundred-ninth batch) — compute-budget receipts (AI-chips absorption)
+
+New module `compute_budget.py`: agent compute is budgeted, metered,
+and receipted. `ComputeBudget` is authority-signed (Ed25519) —
+`issued_by` must be a registered human authority and must differ from
+`owner`: agents cannot self-mint (94th/104th no-self-issuance
+discipline). Closed unit vocabulary tokens/flops/device_seconds;
+`hardware_tier` (edge/datacenter/hpc) and `device_class`
+(edge/cloud) are ceilings — spend may narrow, never widen.
+`BudgetLedger.spend()` appends a hash-chained `SpendReceipt`
+(budget_id | units | purpose | remaining | prev_hash); overspend
+denies with `compute:budget_exhausted` — fail-closed, no borrowing,
+the workload stops. Spend without a purpose denies (attribution is
+mandatory). `check_hardware_tier()` binds spend to the declared
+tier: each tier names a minimum attestation evidence kind
+(`attested_receipts.strength_at_least`) — datacenter/hpc claims on
+unattested hardware deny. A broken spend chain (gap, balance-walk
+mismatch) fail-closes all future spend on that budget.
+`roi_ledger()` deterministically aggregates spend per purpose and
+per budget from the receipts — the "ROI per token" input, computed
+from receipts rather than invented as a metric. Honest boundary:
+the ledger meters *declared* units; real hardware metering needs
+host cooperation, and under-reporting is a host-visibility problem,
+not a budget-integrity problem. New bench track
+`metrics.compute_budget` (12 deterministic scenarios, 4 allow / 8
+deny, zero mismatches); rides the one-hundred-eighth batch's bench
+v23 → v24 bump.
+
 ## Unreleased (one-hundred-eighth batch) — herd-correlation gate (AI-finance absorption)
 
 New module `herd_gate.py`: every autonomous trading strategy must
