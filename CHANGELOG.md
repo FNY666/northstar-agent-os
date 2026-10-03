@@ -1,3 +1,51 @@
+## Unreleased (eighty-eighth batch) — provenance-tracked taint + fail-closed security automata + per-tool budgets (Guardians absorption)
+
+Absorbs the verifier mechanics of `ovidiu-eremia/llm-agent-guardians`
+(MIT) — Erik Meijer's *"Guardians of the Agents"* (CACM, Jan 2026),
+"prompt injection is SQL injection", honestly scoped in
+`provenance_taint.py`. Taint rules fire only on the **conjunction** of
+label overlap with the source's declared labels **and** the source tool
+appearing in the value's transitive provenance (the implementation's own
+extension beyond the paper — label-only impostors do not fire).
+Security automata track nondeterministic state sets over tool-call
+events; reaching an `is_error` state denies the call, and two fail-closed
+rules are ported verbatim: an unparseable transition condition is
+assumed to fire, and a condition over unknown/symbolic arguments is
+assumed to fire — uncertainty can only deny, never allow. `safe_eval`
+is the AST-allowlisted expression evaluator (literals, names, lists,
+comparisons, boolean ops, `len()`; everything else raises, and the
+raise means "fires"). Per-tool call-count budgets deny on exceed;
+malformed limits (non-int, bool, negative, explicit None) fail closed
+rather than leaving the tool unbounded. A tool with no registered taint
+spec cannot be reasoned about, so tainted input to it denies. New bench
+track `metrics.provenance_taint` (12 deterministic taint-escape probes,
+5 allow / 7 deny, conjunction-checked).
+
+## Unreleased (ninetieth batch) — harness integrity binding + drift probe
+
+Absorbs two 2026 eval-methodology findings (mechanism ideas only,
+honestly scoped in `harness_binding.py` / `drift_probe.py`): "a
+benchmark number without a harness is not a benchmark number" (the ARC
+Prize scored the same model 62.7% vs 99.9% on two harnesses) and
+Livenerf (2026-10-01), the first post-release drift-tracking benchmark.
+`harness_binding` pins a SHA-256 of the canonical harness configuration
+(code version, prompt-template digests, tool versions, environment
+facts) into every bench run's audit record (`harness_binding.bound`
+events anchor into `audit.ndjson/1`); scores render *only* as the quad
+(model version + harness hash + effort + $/task) — the bare-score API
+exists solely to refuse. A harness that no longer hashes to its pin
+invalidates the score one-way (invalidated, never revived).
+`drift_probe` re-runs the same model name across time windows, paired by
+task, and returns a statistical verdict: bootstrap percentile CI +
+two-sided paired permutation test (sign-flipping), deterministic in an
+explicit seed, stdlib-only. Drift is flagged only on the conjunction
+(p < alpha AND CI excludes zero AND |effect| >= min_effect); unpaired,
+duplicated, or empty windows fail closed. New bench tracks
+`metrics.harness_binding` (tamper-the-harness → score invalidated) and
+`metrics.drift_detection` (simulated 30-point silent downgrade caught
+with direction="degradation", p < 0.05, CI excluding zero; unchanged
+window stays quiet).
+
 ## Unreleased (eighty-fifth batch) — DID identity + permission combination prohibition
 
 Absorbs three 2026 identity/governance patterns (mechanism ideas only,
