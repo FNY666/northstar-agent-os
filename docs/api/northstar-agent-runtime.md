@@ -9,6 +9,95 @@ Docstring-generated reference over the component's public modules (``ast``-extra
 
 ## Modules
 
+### `approver_separation`
+
+Source: `components/northstar-agent-runtime/approver_separation.py`
+
+No-self-attestation: the proposer is never its own approver.
+
+#### `ApproverSeparationError`
+
+Refused approver-set construction (reserved for callers that want raise-on-misconfiguration; the check path itself returns verdicts).
+
+#### `ApproverVerdict`
+
+The verdict for one (proposer, approver) pair.
+
+- `as_dict()`
+#### `proposer_of(*, agent: str, delegation_chain: Sequence[str]=())`
+
+The proposer identity from runtime provenance.
+
+#### `delegation_subtree(proposer: str, delegation_graph: Mapping[str, Iterable[str]] | None=None)`
+
+Every identity in the proposer's delegation subtree, proposer first.
+
+#### `eligible_approvers(*, proposer: str, approvers: Iterable[str], delegation_graph: Mapping[str, Iterable[str]] | None=None)`
+
+The approvers that may approve the proposer's action.
+
+#### `check_approver(*, proposer: str, approver_identity: str, approvers: Iterable[str] | None=None, delegation_graph: Mapping[str, Iterable[str]] | None=None)`
+
+Verdict for one ``(proposer, approver_identity)`` pair.
+
+#### `self_attestation_denied_event(*, proposer: str, approver_identity: str, failed_rule: str, reason: str, card_id: str='', call_id: str='')`
+
+The audit record for a self-attestation denial.
+
+### `attested_receipts`
+
+Source: `components/northstar-agent-runtime/attested_receipts.py`
+
+TEE attestation as receipt evidence (ninety-second batch).
+
+#### `AttestedReceiptError`
+
+A malformed attestation or an attestation programming error.
+
+#### `kind_rank(evidence_kind: str)`
+
+Return the strength rank of an evidence kind (lower is stronger).
+
+#### `strength_at_least(evidence_kind: str, minimum: str)`
+
+True when ``evidence_kind`` is at least as strong as ``minimum``.
+
+#### `call_binding_digest(arguments_digest: str, result_digest: str)`
+
+Digest binding a quote to one exact tool call.
+
+#### `receipt_binding_digest(receipt: Mapping[str, Any])`
+
+Compute the call binding digest from a tool receipt dict.
+
+#### `SoftwareAttestor`
+
+Deterministic software-emulated quote issuer. **Test use only.**
+
+- `mint(*, measured_config: str, issued_at: int, ttl_seconds: int=300)`
+  - Mint an emulated software attestation for a call binding.
+- `as_verifier()`
+  - Return the verifier counterpart of this attestor (test use).
+#### `QuoteVerifier`
+
+A registered verifier for one evidence kind.
+
+#### `AttestationVerdict`
+
+Outcome of :func:`verify_attestation`.
+
+#### `verify_attestation(receipt: Mapping[str, Any], attestation: Mapping[str, Any], *, verifiers: Mapping[str, QuoteVerifier], now: int, max_age_seconds: int=_DEFAULT_MAX_AGE_SECONDS)`
+
+Verify an attestation against a tool receipt. Fail closed.
+
+#### `attach_attestation(receipt: Mapping[str, Any], attestation: Mapping[str, Any])`
+
+Return a copy of ``receipt`` with the ``attestation`` field set.
+
+#### `attestation_audit_event(verdict: AttestationVerdict, receipt: Mapping[str, Any], attestation: Mapping[str, Any] | None=None)`
+
+Render an attested-receipt audit event (hash-chain friendly).
+
 ### `agents`
 
 Source: `components/northstar-agent-runtime/agents.py`
@@ -758,6 +847,22 @@ Binary evidence tiers + LOG_DROP policy (Tesserae absorption).
 #### `run_provenance_taint()`
 
 Provenance-tracked taint + fail-closed automata + per-tool budgets.
+
+#### `run_static_verification()`
+
+Static pre-dispatch policy verification (ninety-first batch).
+
+#### `run_approver_separation()`
+
+No-self-attestation: the proposer is never its own approver.
+
+#### `run_attestation_receipts()`
+
+TEE attestation as receipt evidence (ninety-second batch).
+
+#### `run_adversarial_scenarios()`
+
+Adversarial bench scenarios: multi-agent failures, no-adversary failures, malicious-but-signed.
 
 #### `BenchHarness`
 
@@ -1570,7 +1675,7 @@ The audit record of one card's resolution.
 
 Re-verify at dispatch that this card authorizes *this* call.
 
-#### `resolve_card(card: ActionCard, *, approver: Callable[[ActionCard], Any] | None)`
+#### `resolve_card(card: ActionCard, *, approver: Callable[[ActionCard], Any] | None, approver_identity: str='', registered_approvers: Sequence[str] | None=None, delegation_graph: Mapping[str, Sequence[str]] | None=None)`
 
 Resolve one card to approve/deny/cancel. Default-deny throughout.
 
