@@ -2,12 +2,16 @@
 
 import unittest
 
+import ed25519
+from canonical_json import jcs_canonical_json
+
 from permit_agents import (
     AppealPathReceipt,
     AuthorityRegistry,
     DisparityProbeReceipt,
     OverrideWindow,
     PermitError,
+    _verify_sig,
     appeal_window_gate,
     automation_bias_clock,
     code_version_pin,
@@ -36,7 +40,8 @@ HEX2 = "cd" * 32
 
 def _authorities():
     reg = AuthorityRegistry()
-    reg.register("city-permit-office", AUTH)
+    # register() takes the 32-byte *public* key; signing uses the secret.
+    reg.register("city-permit-office", ed25519.public_key(AUTH))
     return reg
 
 
@@ -315,6 +320,19 @@ class VendorCostTest(unittest.TestCase):
         )
         v = vendor_cost_receipt(r, reg)
         self.assertFalse(v.allowed)
+
+
+class TamperedSignatureTest(unittest.TestCase):
+    """ed25519.verify returns bool and never raises — the return value must be
+    used. A tampered signature must verify as False, not silently pass."""
+
+    def test_verify_sig_accepts_valid_rejects_tampered(self):
+        seed = b"\x0d" * 32
+        pub_hex = ed25519.public_key(seed).hex()
+        msg = jcs_canonical_json({"application_id": "app-tamper", "outcome": "flag"})
+        sig_hex = ed25519.sign(seed, msg).hex()
+        self.assertTrue(_verify_sig(pub_hex, msg, sig_hex))
+        self.assertFalse(_verify_sig(pub_hex, msg, "00" * 64))
 
 
 if __name__ == "__main__":
