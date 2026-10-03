@@ -51,6 +51,8 @@ Append-only local event history and checkpoint support for durable runs.
 
 Persist one durable run's validated, append-only event history.
 
+- `path` (property)
+  - Absolute path of the JSONL event history file.
 - `append_event(event: EventContract)`
 - `read_history(run_id: str)`
 - `derive_state(run_id: str)`
@@ -109,10 +111,24 @@ A single-owner, expiring local lease with fencing tokens.
 - `check_token(owner_id: str, *, token: int)`
   - Fail closed unless this owner still holds the current fencing epoch.
 - `release(owner_id: str)`
+#### `RunSupervisor`
+
+Orchestrator-side execution-lease holder for one durable run.
+
+- `acquire(*, owner_id: str, now: int)`
+  - Acquire the supervision lease. Returns the lease record (with token).
+- `heartbeat(*, owner_id: str, token: int, now: int)`
+  - Renew the supervision lease inside its fencing epoch.
+- `start_heartbeat(*, owner_id: str, token: int, interval_seconds: float=1.0)`
+  - Heartbeat in a daemon thread until the returned ``stop()`` is called.
+- `supervise(*, owner_id: str, now: int, spawn_worker: Callable[[str, int], Any], heartbeat_interval_seconds: float=1.0, poll_interval_seconds: float=0.05)`
+  - Run one supervision cycle: acquire, heartbeat, watch, report.
 #### `DurableRunner`
 
 Execute planned local steps with durable event and lease boundaries.
 
+- `run_tool(*, step_id: str, tool_call_id: str, fn: Callable[[str], Any], now: int, idempotency_key: str | None=None, receiver: Any | None=None)`
+  - Execute one tool effect with three-state ledger reconcile.
 - `prepare(*, owner_id: str, now: int)`
 - `cancel(*, owner_id: str, now: int)`
 - `execute(plans: list[StepPlan], *, owner_id: str, now: int, finalize: bool=True)`
@@ -178,3 +194,38 @@ Export many events as one canonical NDJSON audit feed text.
 #### `iter_events_audit(events: Iterable[dict[str, Any]])`
 
 Lazily map many events into validated audit records.
+
+### `tool_ledger`
+
+Source: `components/northstar-durable-run/tool_ledger.py`
+
+Three-state tool-effect ledger for durable resume.
+
+#### `SimulatedCrash`
+
+Deterministic stand-in for ``kill -9`` in crash-injection tests.
+
+#### `DedupReceiver`
+
+Receiver-side idempotency for one tool effect.
+
+- `query(idempotency_key: str)`
+  - Return ``(found, result)`` for a past execution of this key.
+- `execute(idempotency_key: str, fn: Callable[[], Any])`
+  - Run ``fn`` at most once per key; return the stored result on replay.
+#### `InMemoryDedupReceiver`
+
+Dict-backed receiver. Single-process / tests only — not durable.
+
+- `query(idempotency_key: str)`
+- `execute(idempotency_key: str, fn: Callable[[], Any])`
+#### `ToolEffectLedger`
+
+Per-tool-effect started/completed/failed ledger backed by the EventStore.
+
+- `state_of(tool_call_id: str)`
+  - Last ledger state for this tool call: started/completed/failed/None.
+- `replay_result(tool_call_id: str)`
+  - Return ``(found, result)`` for a completed tool call's cached result.
+- `run_tool(*, step_id: str, tool_call_id: str, fn: Callable[[str], Any], now: int, idempotency_key: str | None=None, receiver: DedupReceiver | None=None)`
+  - Execute one tool effect with ledger reconcile.

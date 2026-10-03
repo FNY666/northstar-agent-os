@@ -54,6 +54,16 @@ _EVENT_STATUS_BY_TYPE = {
     # a prior lease epoch was superseded without perturbing the new epoch's
     # derived run status.
     "run.fenced": "running",
+    # Tool-effect ledger (see tool_ledger.py): one first-class event per
+    # tool-effect state. State-neutral in derive_state (like run.fenced) —
+    # the ledger, not the run lifecycle, is the authority on tool ordering.
+    # tool.started is appended before the effect runs; tool.completed after
+    # it returns (with the result inline when small); tool.failed when the
+    # effect raises. A later attempt for the same tool_call_id starts a new
+    # started/completed/failed triple; the ledger reads the last one.
+    "tool.started": "running",
+    "tool.completed": "finished",
+    "tool.failed": "failed",
 }
 
 _ALLOWED_TRANSITIONS = frozenset({

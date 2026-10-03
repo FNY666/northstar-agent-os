@@ -12,6 +12,7 @@ import os
 import re
 import tempfile
 import threading
+import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable
@@ -22,6 +23,7 @@ from durable_contract import (
     can_transition,
 )
 from event_store import EventStore
+from tool_ledger import SimulatedCrash, ToolEffectLedger  # noqa: F401 - re-exported
 
 try:  # POSIX only; without it the claim is thread-serial, not process-serial
     import fcntl
@@ -409,6 +411,123 @@ class LeaseManager:
                 raise ValueError("lease could not be released") from error
 
 
+class RunSupervisor:
+    """Orchestrator-side execution-lease holder for one durable run.
+
+    Diagrid pattern: the supervisor — not the worker process — owns the
+    execution lease. It acquires the lease and heartbeats it while the worker
+    is alive. The worker adopts the lease (see
+    ``DurableRunner(adopt_lease=...)``): it fence-checks instead of
+    heartbeating and never releases.
+
+    If the worker dies, the supervisor stops heartbeating and the lease
+    expires on its own. A healthy worker can then acquire the expired lease
+    (a new fencing epoch, recorded as a state-neutral ``run.fenced`` marker)
+    and resume from the EventStore — finished steps are skipped, a step that
+    was started but never finished is re-run under the same action key.
+
+    The lease is a local file, so supervision is single-host by design;
+    cross-host orchestration is out of scope (see the component README).
+    """
+
+    def __init__(
+        self,
+        lease_path: str | Path,
+        *,
+        lease_ttl_seconds: int = 60,
+        clock: Callable[[], int] | None = None,
+    ):
+        if not isinstance(lease_ttl_seconds, int) or isinstance(lease_ttl_seconds, bool) or lease_ttl_seconds <= 0:
+            raise ValueError("lease_ttl_seconds must be a positive integer")
+        if clock is not None and not callable(clock):
+            raise ValueError("clock must be callable")
+        self.lease = LeaseManager(lease_path)
+        self.lease_ttl_seconds = lease_ttl_seconds
+        self._clock = clock if clock is not None else lambda: int(time.time())
+
+    def acquire(self, *, owner_id: str, now: int) -> dict[str, Any]:
+        """Acquire the supervision lease. Returns the lease record (with token)."""
+        return self.lease.acquire(owner_id, now=now, ttl_seconds=self.lease_ttl_seconds)
+
+    def heartbeat(self, *, owner_id: str, token: int, now: int) -> dict[str, Any]:
+        """Renew the supervision lease inside its fencing epoch."""
+        return self.lease.heartbeat(
+            owner_id, token=token, now=now, ttl_seconds=self.lease_ttl_seconds
+        )
+
+    def start_heartbeat(
+        self, *, owner_id: str, token: int, interval_seconds: float = 1.0
+    ) -> Callable[[], None]:
+        """Heartbeat in a daemon thread until the returned ``stop()`` is called.
+
+        ``interval_seconds`` must be well under ``lease_ttl_seconds``. A
+        heartbeat failure (takeover, corruption) stops the loop and is
+        re-raised by ``stop()`` — a supervisor that lost its lease must not
+        keep pretending to supervise.
+        """
+        if not isinstance(interval_seconds, (int, float)) or interval_seconds <= 0:
+            raise ValueError("interval_seconds must be positive")
+        if interval_seconds >= self.lease_ttl_seconds:
+            raise ValueError("interval_seconds must be shorter than lease_ttl_seconds")
+        stop = threading.Event()
+        failures: list[BaseException] = []
+
+        def _loop() -> None:
+            while not stop.wait(interval_seconds):
+                try:
+                    now = self._clock()
+                    if not isinstance(now, int) or isinstance(now, bool) or now <= 0:
+                        raise ValueError("clock must return a positive integer")
+                    self.heartbeat(owner_id=owner_id, token=token, now=now)
+                except BaseException as error:  # noqa: BLE001 - surfaced by stop()
+                    failures.append(error)
+                    return
+
+        thread = threading.Thread(
+            target=_loop, daemon=True, name="northstar-supervisor-heartbeat"
+        )
+        thread.start()
+
+        def _stop() -> None:
+            stop.set()
+            thread.join(timeout=interval_seconds + 5)
+            if failures:
+                raise failures[0]
+
+        return _stop
+
+    def supervise(
+        self,
+        *,
+        owner_id: str,
+        now: int,
+        spawn_worker: Callable[[str, int], Any],
+        heartbeat_interval_seconds: float = 1.0,
+        poll_interval_seconds: float = 0.05,
+    ) -> str:
+        """Run one supervision cycle: acquire, heartbeat, watch, report.
+
+        ``spawn_worker(owner_id, token)`` must start and return a process-like
+        object with ``is_alive()``, ``join(timeout)`` and ``exitcode`` (e.g.
+        ``multiprocessing.Process``). Returns ``"completed"`` when the worker
+        exits 0, ``"worker-died"`` otherwise. On worker death the heartbeat
+        stops, so the lease expires and a later worker can take over via the
+        normal expired-lease acquire path.
+        """
+        lease = self.acquire(owner_id=owner_id, now=now)
+        token = lease["fencing_token"]
+        stop = self.start_heartbeat(
+            owner_id=owner_id, token=token, interval_seconds=heartbeat_interval_seconds
+        )
+        proc = spawn_worker(owner_id, token)
+        try:
+            while proc.is_alive():
+                proc.join(timeout=poll_interval_seconds)
+            return "completed" if proc.exitcode == 0 else "worker-died"
+        finally:
+            stop()
+
+
 class DurableRunner:
     """Execute planned local steps with durable event and lease boundaries."""
 
@@ -421,6 +540,9 @@ class DurableRunner:
         lease_ttl_seconds: int = 60,
         clock: Callable[[], int] | None = None,
         heartbeat_interval_seconds: int | None = None,
+        adopt_lease: tuple[str, int] | None = None,
+        crash_hook: Callable[[str], None] | None = None,
+        ledger_path: str | Path | None = None,
     ):
         if not isinstance(run, RunContract):
             raise ValueError("run must be a RunContract")
@@ -445,6 +567,41 @@ class DurableRunner:
         self.store = store
         self.lease = LeaseManager(lease_path)
         self.lease_ttl_seconds = lease_ttl_seconds
+        # Adopted lease (supervisor pattern): (owner_id, fencing_token) of a
+        # lease held and heartbeated by an external orchestrator. The worker
+        # adopts it instead of acquiring: fence-checks instead of heartbeats,
+        # and never releases. Pass the lease owner's id as owner_id to
+        # execute(); anything else is refused by the fence.
+        if adopt_lease is not None:
+            if (
+                not isinstance(adopt_lease, tuple)
+                or len(adopt_lease) != 2
+                or not isinstance(adopt_lease[1], int)
+                or isinstance(adopt_lease[1], bool)
+                or adopt_lease[1] <= 0
+            ):
+                raise ValueError("adopt_lease must be (owner_id, fencing_token)")
+            _require_id(adopt_lease[0], "adopt_lease owner_id")
+        self._adopt_lease = adopt_lease
+        if crash_hook is not None and not callable(crash_hook):
+            raise ValueError("crash_hook must be callable")
+        # Test-only fault injection: called with a site name at instrumented
+        # points (tool ledger sites and checkpoint sites); may raise
+        # SimulatedCrash to model kill -9. Never set in production.
+        self._crash_hook = crash_hook
+        self._exec_owner: str | None = None
+        resolved_ledger_path = (
+            Path(ledger_path).absolute()
+            if ledger_path is not None
+            else store.path.parent / (store.path.name + ".ledger.json")
+        )
+        self.tool_ledger = ToolEffectLedger(
+            store,
+            run_id=run.run_id,
+            ledger_path=resolved_ledger_path,
+            append=self._ledger_append,
+            crash_hook=crash_hook,
+        )
         # Optional clock (epoch seconds) used to heartbeat the execution
         # lease before each step. Without one, a run that outlasts the TTL
         # loses its lease mid-execution; pass time.time (or a fake in tests)
@@ -548,6 +705,48 @@ class DurableRunner:
         )
         self.store.append_event(event)
 
+    def _ledger_append(self, **kwargs: Any) -> None:
+        """Append a tool-ledger event inside the active execution's fence."""
+        owner_id = self._exec_owner
+        if owner_id is None:
+            raise ValueError("tool effects require an active execute() call")
+        self._append(owner_id=owner_id, **kwargs)
+
+    def _crash(self, site: str) -> None:
+        if self._crash_hook is not None:
+            self._crash_hook(site)
+
+    def run_tool(
+        self,
+        *,
+        step_id: str,
+        tool_call_id: str,
+        fn: Callable[[str], Any],
+        now: int,
+        idempotency_key: str | None = None,
+        receiver: Any | None = None,
+    ) -> Any:
+        """Execute one tool effect with three-state ledger reconcile.
+
+        Intended for use inside step actions: the action calls this per tool
+        invocation instead of invoking the tool directly. ``fn`` receives the
+        idempotency key for this attempt and must route the raw effect
+        through ``receiver.execute(key, ...)`` when a receiver is in play.
+        On resume, completed effects replay their cached result without
+        re-executing; ambiguous (started, never completed) effects are
+        reconciled against ``receiver`` (see :mod:`tool_ledger`). Must be
+        called inside :meth:`execute`.
+        """
+        _require_id(step_id, "step_id")
+        return self.tool_ledger.run_tool(
+            step_id=step_id,
+            tool_call_id=tool_call_id,
+            fn=fn,
+            now=now,
+            idempotency_key=idempotency_key,
+            receiver=receiver,
+        )
+
     def prepare(self, *, owner_id: str, now: int) -> dict[str, Any]:
         _require_id(owner_id, "owner_id")
         if not isinstance(now, int) or isinstance(now, bool):
@@ -573,6 +772,23 @@ class DurableRunner:
         # lease is not valid for this owner. An active foreign lease is still
         # refused by acquire, and a corrupt lease file still fails closed.
         # Returns the fencing token of the epoch this holder now owns.
+        if self._adopt_lease is not None:
+            # Supervisor pattern: the lease is held and heartbeated by an
+            # external orchestrator. Adopt it — assert it is valid for the
+            # adopted owner and that the epoch token matches. No takeover,
+            # no run.fenced marker, no new epoch.
+            adopted_owner, adopted_token = self._adopt_lease
+            if owner_id != adopted_owner:
+                raise FencingError(
+                    "adopted lease requires the lease owner's id"
+                )
+            current = self.lease.assert_valid(adopted_owner, now=now)
+            if current["fencing_token"] != adopted_token:
+                raise FencingError(
+                    "adopted fencing token mismatch: the lease moved on"
+                )
+            self._set_token(adopted_token)
+            return adopted_token
         prior: dict[str, Any] | None = None
         if self.lease.path.exists():
             try:
@@ -621,7 +837,11 @@ class DurableRunner:
 
         If the lease expired mid-run and was taken over, it is no longer
         ours: raising here would destroy the result the run just produced.
+        With an adopted lease the supervisor owns the lifecycle, so the
+        worker never releases.
         """
+        if self._adopt_lease is not None:
+            return
         try:
             self.lease.release(owner_id)
         except ValueError:
@@ -634,7 +854,13 @@ class DurableRunner:
         heartbeat raises (via assert_valid, or FencingError on a token
         mismatch when the lease was taken over), and the outer handler
         records the failure honestly.
+
+        With an adopted lease the supervisor heartbeats; the worker only
+        fence-checks (verify the epoch is still ours, never extend it).
         """
+        if self._adopt_lease is not None:
+            self._check_fence(owner_id)
+            return
         if self._clock is None:
             return
         now = self._clock()
@@ -728,6 +954,12 @@ class DurableRunner:
                 owner_id=owner_id,
             )
 
+    def _write_checkpoint(self, *, owner_id: str) -> None:
+        """Persist a checkpoint, with crash-injection sites around it."""
+        self._crash("before-checkpoint")
+        self.store.create_checkpoint(self.run.run_id)
+        self._crash("after-checkpoint")
+
     def cancel(self, *, owner_id: str, now: int) -> dict[str, Any]:
         state = self.prepare(owner_id=owner_id, now=now)
         if state["status"] in {"finished", "failed", "cancelled"}:
@@ -767,6 +999,9 @@ class DurableRunner:
             raise ValueError("run has already failed")
 
         self._ensure_execution_lease(owner_id, now=now)
+        # Tool effects run inside this execution: bind the ledger's appends
+        # to the fencing epoch's owner for the duration of execute().
+        self._exec_owner = owner_id
         try:
             self._append_run_started(now=now, owner_id=owner_id)
             for plan in plans:
@@ -835,7 +1070,7 @@ class DurableRunner:
                     payload=self.store.derive_state(self.run.run_id),
                     owner_id=owner_id,
                 )
-                self.store.create_checkpoint(self.run.run_id)
+                self._write_checkpoint(owner_id=owner_id)
 
             state = self.store.derive_state(self.run.run_id)
             if finalize and state["status"] == "running":
@@ -848,7 +1083,7 @@ class DurableRunner:
                     payload={"status": "finished"},
                     owner_id=owner_id,
                 )
-                self.store.create_checkpoint(self.run.run_id)
+                self._write_checkpoint(owner_id=owner_id)
             return self.store.derive_state(self.run.run_id)
         except KeyboardInterrupt:
             raise
@@ -890,4 +1125,5 @@ class DurableRunner:
                 )
             return self.store.derive_state(self.run.run_id)
         finally:
+            self._exec_owner = None
             self._release_quietly(owner_id)
