@@ -36,7 +36,7 @@ class GovernanceBenchUnitTests(unittest.TestCase):
         ids = [case.id for case in CASES]
         self.assertEqual(len(ids), len(set(ids)), "case ids must be unique")
         tracks = {case.track for case in CASES}
-        self.assertEqual(tracks, {"denial", "injection", "budget", "metrics"})
+        self.assertEqual(tracks, {"denial", "injection", "budget", "metrics", "redteam"})
 
     def test_list_cases_matches_catalogue(self):
         rows = list_cases()
