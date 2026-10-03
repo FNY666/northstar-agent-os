@@ -48,6 +48,7 @@ py-modules = [
     "_version",
     "agent_files",
     "agents",
+    "akf_export",
     "audit_export",
     "audit_chain",
     "audit_cli",
