@@ -168,6 +168,7 @@ def load_hooks(args: argparse.Namespace, policy: Any, plugins: Any, registry: An
                     declared_hooks,
                     workspace=args.workspace,
                     known_tools=registry.names(),
+                    reviewed_digests=plugins.hook_digests if plugins else {},
                 )
                 from hooks import HookRegistry
 
