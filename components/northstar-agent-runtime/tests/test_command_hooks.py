@@ -171,6 +171,34 @@ class VerdictTests(unittest.TestCase):
         hook = parse_hooks([{"event": "PreToolUse", "script": self.script}], workspace=self.root)[0]
         return build_callback(hook, workspace=self.root, runner=runner)
 
+    def test_registered_hook_refuses_changed_bytes_before_dispatch(self):
+        relative = _script(self.root, "SAFE_HOOK_BYTES\n", name="guard.py")
+        original = self.root / ".northstar" / "hooks" / "guard.py"
+        hook = parse_hooks([{"event": "PreToolUse", "script": relative}], workspace=self.root)[0]
+        seen = []
+        def runner(argv, **kwargs):
+            seen.append(Path(argv[-1]).read_bytes())
+            return _Completed()
+        callback = build_callback(hook, workspace=self.root, runner=runner)
+        original.write_text("UNREVIEWED_HOOK_BYTES\n", encoding="utf-8")
+        result = callback(HookInput(event="PreToolUse", tool_name="Write"))
+        self.assertEqual(result.decision, "deny")
+        self.assertEqual(seen, [], "changed script must never be dispatched")
+
+    def test_direct_exec_hook_keeps_original_path_and_mode(self):
+        relative = _script(self.root, "#!/bin/sh\necho safe\n", name="direct.sh")
+        original = self.root / ".northstar" / "hooks" / "direct.sh"
+        original.chmod(0o755)
+        hook = parse_hooks([{"event": "PreToolUse", "script": relative}], workspace=self.root)[0]
+        seen = []
+        def runner(argv, **kwargs):
+            seen.append(Path(argv[-1]) == original)
+            return _Completed()
+        callback = build_callback(hook, workspace=self.root, runner=runner)
+        callback(HookInput(event="PreToolUse"))
+        self.assertEqual(seen, [True])
+        self.assertEqual(original.stat().st_mode & 0o777, 0o755)
+
     def test_json_verdict_is_coerced(self):
         callback = self._callback(lambda *a, **k: _Completed(stdout=json.dumps({"decision": "deny", "reason": "no"})))
         result = callback(HookInput(event="PreToolUse", tool_name="Write"))

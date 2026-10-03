@@ -34,11 +34,12 @@ script to a callback without changing meaning.
 """
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import signal
 import subprocess
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable, Mapping, Sequence
 
@@ -80,6 +81,7 @@ class CommandHook:
     agent: str | None = None
     timeout_ms: int = DEFAULT_TIMEOUT_MS
     description: str = ""
+    script_digest: str = ""
 
     def as_dict(self) -> dict[str, Any]:
         """Display form only: the resolved absolute script path is never printed."""
@@ -126,6 +128,7 @@ def parse_hooks(
     *,
     workspace: str | Path,
     known_tools: Sequence[str] = (),
+    reviewed_digests: Mapping[str, str] | None = None,
 ) -> tuple[CommandHook, ...]:
     """Validate a raw ``hooks`` list from the policy file. Raises on anything suspect."""
     root = Path(workspace)
@@ -147,6 +150,15 @@ def parse_hooks(
         if not isinstance(event, str) or event not in VETO_EVENTS:
             raise _fail(f"hooks[{index}]: 'event' must be one of {', '.join(VETO_EVENTS)} (only veto-capable events may be declared by a repository file)")
         script = _script_path(root, entry.get("script"), index=index)
+        script_bytes = script.read_bytes()
+        relative_script = script.relative_to(Path(workspace).resolve()).as_posix()
+        expected_digest = (reviewed_digests or {}).get(relative_script)
+        plugin_owned = relative_script.startswith(".northstar/plugins/")
+        if plugin_owned and not expected_digest:
+            raise _fail(f"hooks[{index}]: plugin hook has no reviewed content digest")
+        if expected_digest is not None:
+            if hashlib.sha256(script_bytes).hexdigest() != expected_digest:
+                raise _fail(f"hooks[{index}]: script changed since bundle review; refusing hook")
         interpreter = entry.get("interpreter")
         if interpreter is not None:
             if not isinstance(interpreter, str) or not interpreter.strip():
@@ -189,6 +201,7 @@ def parse_hooks(
                 agent=agent,
                 timeout_ms=int(timeout_ms),
                 description=description.strip()[:600],
+                script_digest=hashlib.sha256(script_bytes).hexdigest(),
             )
         )
     return tuple(hooks)
@@ -207,15 +220,27 @@ def build_callback(
     workspace: str | Path,
     runner: Callable[..., subprocess.CompletedProcess] | None = None,
 ) -> Callable[[HookInput], Any]:
-    """Return the in-process hook that runs ``hook`` as a scrubbed subprocess.
+    """Return the in-process hook that runs a digest-checked script.
 
-    ``runner`` is the test seam (it replaces the whole spawn); production leaves
-    it ``None`` and gets :func:`_run_bounded`.
+    The reviewed bytes are captured at registration. Before each dispatch the script path
+    is re-read and checked against that digest; a changed file is vetoed before reaching
+    the runner. Execution uses the original path/interpreter semantics for compatibility.
+    A hostile same-user writer could still race the final digest read against the OS open in
+    the subprocess; deployments requiring that stronger property should run hooks from an
+    immutable snapshot or an OS-enforced read-only tree.
     """
     root = Path(os.path.realpath(str(workspace)))
 
     def callback(hook_input: HookInput) -> HookResult:
         payload = hook_input.as_dict()
+        try:
+            current = hook.script.read_bytes()
+        except OSError as error:
+            return HookResult.deny(f"{hook.name} script is no longer readable: {error}")
+        if hashlib.sha256(current).hexdigest() != hook.script_digest:
+            return HookResult.deny(f"{hook.name} script changed since registration; refusing dispatch")
+        # Preserve the original path/interpreter semantics after verifying current bytes.
+        # Residual: a same-user adversary can still race this check against the OS open in Popen.
         argv = ([hook.interpreter] if hook.interpreter else []) + [str(hook.script)]
         try:
             completed = (runner or _run_bounded)(

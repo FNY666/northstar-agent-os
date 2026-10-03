@@ -202,7 +202,7 @@ One validated ``[[hooks]]`` entry, ready to be registered.
 
 - `as_dict()`
   - Display form only: the resolved absolute script path is never printed.
-#### `parse_hooks(raw: Sequence[Any], *, workspace: str | Path, known_tools: Sequence[str]=())`
+#### `parse_hooks(raw: Sequence[Any], *, workspace: str | Path, known_tools: Sequence[str]=(), reviewed_digests: Mapping[str, str] | None=None)`
 
 Validate a raw ``hooks`` list from the policy file. Raises on anything suspect.
 
@@ -210,7 +210,7 @@ Validate a raw ``hooks`` list from the policy file. Raises on anything suspect.
 
 #### `build_callback(hook: CommandHook, *, workspace: str | Path, runner: Callable[..., subprocess.CompletedProcess] | None=None)`
 
-Return the in-process hook that runs ``hook`` as a scrubbed subprocess.
+Return the in-process hook that runs a digest-checked script.
 
 #### `register_into(registry: Any, hooks: Sequence[CommandHook], *, workspace: str | Path)`
 

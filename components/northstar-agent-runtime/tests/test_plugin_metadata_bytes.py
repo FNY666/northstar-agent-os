@@ -46,13 +46,24 @@ class PluginMetadataBytesTests(BundleTestCase):
         with self.assertRaises(Exception):
             cli.compose_system_prompt(self.args(), None, None, plugins)
 
-    def test_unreviewed_agent_added_after_bundle_review_is_refused(self):
+    def test_plugin_agent_added_after_bundle_review_is_refused(self):
         self.install()
         plugins = self.contributions()
         self.installed('agents/new-agent.md').write_text(
             '---\nname: new-agent\ndescription: demo\ntools: [Read]\n---\nINJECTED\n')
         with self.assertRaisesRegex(cli.RunConfigurationError, 'review'):
             load_workspace_agents(self.args(), builtin_registry(), build_default_registry(), plugins)
+
+    def test_plugin_hook_changed_after_bundle_review_is_refused(self):
+        from run_setup import load_hooks, RunConfigurationError
+        self.install()
+        plugins = self.contributions()
+        hook_file = self.installed('guard.py')
+        hook_file.write_text('UNREVIEWED_HOOK_BYTES\n', encoding='utf-8')
+        args = self.args()
+        args.enable_workspace_hooks = True
+        with self.assertRaisesRegex(RunConfigurationError, 'changed since bundle review'):
+            load_hooks(args, None, plugins, build_default_registry())
 
     def test_unchanged_plugin_metadata_and_same_byte_replacement_work(self):
         self.install()
