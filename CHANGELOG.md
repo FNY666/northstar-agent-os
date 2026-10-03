@@ -67,6 +67,30 @@ a lying clock can trick expiry (staleness ceiling is the second bound).
 New bench track `metrics.offline_bundle` (12 deterministic scenarios,
 4 allow / 8 deny; BENCH_VERSION bump left for the integration pass).
 
+## Unreleased (ninety-eighth batch) — process-evidence receipts
+
+Absorbs the 2026 AI-education research thread: the detection regime is
+dead (detectors 39.5% on unmodified AI text — worse than a coin flip;
+paraphrased 22%; CHED/California bar detector scores as sole discipline
+basis), and *process evidence* replaced it — show the work, not the
+output (Harvard RCT: guardrailed process doubled learning gains).
+
+New module `process_receipts.py`: a `ProcessReceipt` binds an artifact
+digest to a hash-chained production-process log
+`(seq, step_kind, input_digest, output_digest, actor, timestamp)` over
+the closed vocabulary `draft / revise / tool_call / human_checkpoint /
+finalize`. `verify_process()` replays the chain fail-closed: chain
+digests, no unrecorded edits (input == previous output), human
+checkpoints must have non-agent actors (the oral-defense rule), every
+`tool_call` step must reference a matching 77th-batch tool receipt
+(`tool:<args>:<result>`, output bound to the recorded result), and the
+chain must end in `finalize` on the artifact digest. `classify_process()`
+is binary — a `None` receipt (artifact-only submission) classifies
+`unverifiable-process` by construction, the 87th batch's
+`NON_AUTHORITATIVE` analogue; no partial tier. New bench track
+`metrics.process_receipts` (12 deterministic scenarios, 2 allow /
+10 deny); BENCH_VERSION v15 -> v16.
+
 ## Unreleased (ninety-first batch) — static pre-dispatch policy verification (Janus absorption)
 
 Absorbs the static-verification half of `Agentic-AI-Risk-Mitigation/Janus`
