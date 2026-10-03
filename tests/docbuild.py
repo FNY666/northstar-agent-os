@@ -99,6 +99,7 @@ MANIFEST: dict[str, tuple[str, ...]] = {
         "mcp_admission",
         "session_replay",
         "step_compliance",
+        "static_verify",
         "mcp_elicitation",
         "mcp_negotiate",
         "decision_model",
