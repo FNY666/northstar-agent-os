@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import hmac
 import json
 import shutil
 import sys
@@ -1650,6 +1651,117 @@ def run_ask_timing() -> dict[str, Any]:
             if p.expect_ask and p.id not in asked_ids
         ),
         "by_blocker": by_blocker,
+    }
+
+
+def run_whisper_contrast() -> dict[str, Any]:
+    """Contrast bench: AP2-shaped "sign the transaction" vs "bind the arguments".
+
+    Paper (read in full at https://arxiv.org/html/2609.11757 on 2026-10-03):
+    Louck, Dvir, Stulman, "Signing the Transaction but Not the Decision:
+    Whisper Attacks and a Binding Defense for AP2", arXiv:2609.11757,
+    2026-09-10. This is a pre-print (no peer-reviewed venue at read time);
+    the attack model below is verified against the paper's own text, not
+    second-hand summaries.
+
+    Verified attack model: AP2 signs three mandates (intent, cart, payment)
+    as W3C Verifiable Credentials (ECDSA P-256). Per Section 1, "these
+    signatures bind the transaction itself, but they do not bind the decision
+    that produced it": the intent mandate signs a free-form goal ("buy Nike
+    Pegasus 41 men's size 10"), the cart mandate is signed over merchant
+    entries whose free-text fields the merchant fully controls. Merchant text
+    steers the agent into a cart that passes every protocol check yet no
+    longer matches the user's request. Measured attack rates on the pinned
+    Gemini Flash-Lite builds the AP2 sample agents specify: Vault Whisper
+    90%, Branded Whisper 56%, Selection Whisper 73.3%. The paper's A-VIP
+    defense binds every credential lookup to the session that requested it
+    and every cart line to the listing seen — i.e. the decision content,
+    not just the transaction's existence.
+
+    This bench replays the same structural question one layer down, at the
+    tool-call approval layer, fully deterministically:
+
+    - Design A (vulnerable, AP2-shaped): the mandate signs only the call's
+      identity (intent id + tool name) — exactly like a signature that
+      proves "this transaction happened" without covering the decision
+      content. An attacker who swaps the arguments keeps a valid signature:
+      the attack succeeds while every protocol check stays green.
+    - Design B (Northstar): the approval binds ``digest_arguments(arguments)``
+      (sha256 over canonical JSON, same wire format as the durable
+      ``northstar.approval.v2/v3`` tokens). Any argument swap changes the
+      digest, so the approval cannot replay: fail-closed.
+
+    The bench asserts the expected outcome of BOTH designs: A must let all
+    argument swaps through (demonstrating the hole Whisper Attacks
+    describes), B must block all of them (demonstrating why the
+    arguments_digest binding is necessary). A key-reorder control proves B's
+    canonical JSON does not false-positive on semantically identical
+    arguments.
+
+    Pure and deterministic: HMAC-SHA256 stands in for ECDSA P-256 (the
+    crypto primitive is not under test — the binding scope is).
+    """
+    key = b"whisper-contrast-fixture-key"
+    intent_id = "intent-9f2"
+
+    def sign_design_a(tool: str) -> str:
+        return hmac.new(
+            key, f"{intent_id}:{tool}".encode("utf-8"), hashlib.sha256
+        ).hexdigest()
+
+    def verify_design_a(tool: str, arguments: dict, signature: str) -> bool:
+        # The vulnerable design verifies the signature without consulting
+        # the arguments at all — mirroring a mandate that binds the
+        # transaction's existence but not the decision's content.
+        _ = arguments
+        return hmac.compare_digest(sign_design_a(tool), signature)
+
+    approved_args = {"payee": "merchant-a", "amount": 10.0, "currency": "USD"}
+    mandate_a = sign_design_a("Payment")
+
+    mutations: list[tuple[str, dict]] = [
+        ("value_swap", {"payee": "merchant-a", "amount": 1000.0, "currency": "USD"}),
+        ("recipient_swap", {"payee": "attacker", "amount": 10.0, "currency": "USD"}),
+        (
+            "field_injection",
+            {"payee": "merchant-a", "amount": 10.0, "currency": "USD", "memo": "gift"},
+        ),
+        ("type_coercion", {"payee": "merchant-a", "amount": "10.0", "currency": "USD"}),
+    ]
+    control: tuple[str, dict] = (
+        "key_reorder",
+        {"currency": "USD", "amount": 10.0, "payee": "merchant-a"},
+    )
+
+    approved_digest = digest_arguments(approved_args)
+    results = []
+    for name, mutated in mutations:
+        a_ok = verify_design_a("Payment", mutated, mandate_a)
+        b_ok = hmac.compare_digest(digest_arguments(mutated), approved_digest)
+        results.append(
+            {
+                "mutation": name,
+                "design_a_attack_succeeds": a_ok,
+                "design_b_blocked": not b_ok,
+            }
+        )
+
+    ctrl_name, ctrl_args = control
+    ctrl_blocked = not hmac.compare_digest(
+        digest_arguments(ctrl_args), approved_digest
+    )
+
+    a_success = sum(1 for r in results if r["design_a_attack_succeeds"])
+    b_blocked = sum(1 for r in results if r["design_b_blocked"])
+    return {
+        "n_mutations": len(mutations),
+        "design_a_attack_success": a_success,
+        "design_a_attack_success_rate": round(_rate(a_success, len(mutations)), 4),
+        "design_b_blocked": b_blocked,
+        "design_b_block_rate": round(_rate(b_blocked, len(mutations)), 4),
+        "control_reorder": ctrl_name,
+        "canonical_reorder_blocked": ctrl_blocked,
+        "by_mutation": results,
     }
 
 
@@ -3312,6 +3424,67 @@ def _case_metrics_ask_timing(h: BenchHarness) -> BenchExpectation:
     )
 
 
+def _case_metrics_whisper_contrast(h: BenchHarness) -> BenchExpectation:
+    """Whisper-attacks contrast: signature-over-transaction vs bound-arguments.
+
+    Verifies the paper's lesson at the tool-call layer (Louck et al.,
+    arXiv:2609.11757, read in full 2026-10-03): a signature that proves the
+    transaction happened but does not cover the decision content lets an
+    argument swap sail through with every check green (Design A, expected
+    to be vulnerable — that IS the demonstrated hole), while Northstar's
+    arguments_digest binding stops the same swap fail-closed (Design B).
+    """
+    metrics = run_whisper_contrast()
+
+    def check(exp: BenchExpectation, report: Any) -> tuple[bool, str]:
+        if metrics["design_a_attack_success_rate"] != 1.0:
+            return (
+                False,
+                "design A (identity-only signature, AP2-shaped) must let "
+                f"every argument swap through, saw "
+                f"{metrics['design_a_attack_success']}/"
+                f"{metrics['n_mutations']} — the hole must be demonstrable",
+            )
+        if metrics["design_b_block_rate"] != 1.0:
+            return (
+                False,
+                "design B (arguments_digest binding) must block every "
+                f"argument swap, saw {metrics['design_b_blocked']}/"
+                f"{metrics['n_mutations']}",
+            )
+        if metrics["canonical_reorder_blocked"]:
+            return (
+                False,
+                "canonical JSON must treat key-reordered identical arguments "
+                "as the same call (no false positive)",
+            )
+        return (
+            True,
+            f"A lets {metrics['design_a_attack_success']}/"
+            f"{metrics['n_mutations']} swaps through (valid signature, wrong "
+            f"decision); B blocks {metrics['design_b_blocked']}/"
+            f"{metrics['n_mutations']} with no reorder false positive",
+        )
+
+    return BenchExpectation(
+        runtime=_noop_runtime(h),
+        expect_subtype="success",
+        post_check=check,
+        metrics=metrics,
+        notes=(
+            "contrast bench from Whisper Attacks (arXiv:2609.11757, "
+            "Louck/Dvir/Stulman, 2026-09-10, preprint — attack model verified "
+            "against the paper's own text): AP2's mandate chain signs the "
+            "transaction, not the decision (Vault 90% / Branded 56% / "
+            "Selection 73.3% on pinned Flash-Lite builds). Design A signs "
+            "only (intent, tool) and lets 4/4 argument swaps through; "
+            "design B binds digest_arguments (sha256 canonical JSON, same "
+            "wire format as northstar.approval.v2/v3) and blocks 4/4; the "
+            "key-reorder control stays allowed"
+        ),
+    )
+
+
 CASES: tuple[BenchCase, ...] = (
     BenchCase("denial.disallowed_beats_allow", "denial", "disallowed_tools beats allow + bypass", _case_disallowed_beats_allow),
     BenchCase("denial.plan_mode_blocks_write", "denial", "plan mode refuses Write", _case_plan_mode_blocks_write),
@@ -3353,6 +3526,7 @@ CASES: tuple[BenchCase, ...] = (
     BenchCase("metrics.least_privilege", "metrics", "least-privilege gate enforcement (OPUR-style)", _case_metrics_least_privilege),
     BenchCase("metrics.approval_percall_binding", "metrics", "per-call approval binding + structured denial", _case_metrics_approval_percall_binding),
     BenchCase("metrics.ask_timing", "metrics", "ASK-timing judgment (Ask-F1-style)", _case_metrics_ask_timing),
+    BenchCase("metrics.whisper_contrast", "metrics", "whisper-attacks contrast: signature vs bound arguments", _case_metrics_whisper_contrast),
 )
 
 
@@ -3746,6 +3920,17 @@ def _print_report(report: BenchReport) -> None:
                 f"{askt.get('over_ask_rate', 0):.3f}, under-ask rate "
                 f"{askt.get('under_ask_rate', 0):.3f})"
             )
+        whisper = report.metrics.get("metrics.whisper_contrast", {})
+        if whisper:
+            print(
+                f"  whisper contrast: design A lets "
+                f"{whisper.get('design_a_attack_success', 0)}/"
+                f"{whisper.get('n_mutations', 0)} argument swaps through, "
+                f"design B blocks "
+                f"{whisper.get('design_b_blocked', 0)}/"
+                f"{whisper.get('n_mutations', 0)}, reorder FP="
+                f"{whisper.get('canonical_reorder_blocked', '?')}"
+            )
     if report.ok:
         print("result: PASS — gate decisions match the public scorecard")
     else:
@@ -3773,4 +3958,5 @@ __all__ = [
     "run_owasp_asi_coverage",
     "run_policy_axis",
     "run_suite",
+    "run_whisper_contrast",
 ]

@@ -327,6 +327,50 @@ class AskTimingTests(unittest.TestCase):
         self.assertIn("official HiL-Bench dataset", src)
 
 
+class WhisperContrastTests(unittest.TestCase):
+    def test_whisper_contrast_is_deterministic(self):
+        from governance_bench import run_whisper_contrast
+
+        first = run_whisper_contrast()
+        second = run_whisper_contrast()
+        self.assertEqual(first, second)
+
+    def test_whisper_contrast_expected_outcomes(self):
+        # Design A (identity-only signature, AP2-shaped): all 4 argument
+        # swaps keep a valid signature -> the attack succeeds. Design B
+        # (arguments_digest binding): all 4 swaps blocked fail-closed. The
+        # key-reorder control must not be blocked (canonical JSON).
+        from governance_bench import run_whisper_contrast
+
+        result = run_whisper_contrast()
+        self.assertEqual(result["n_mutations"], 4)
+        self.assertEqual(result["design_a_attack_success"], 4)
+        self.assertEqual(result["design_a_attack_success_rate"], 1.0)
+        self.assertEqual(result["design_b_blocked"], 4)
+        self.assertEqual(result["design_b_block_rate"], 1.0)
+        self.assertFalse(result["canonical_reorder_blocked"])
+        mutations = [r["mutation"] for r in result["by_mutation"]]
+        self.assertEqual(
+            mutations, ["value_swap", "recipient_swap", "field_injection", "type_coercion"]
+        )
+        for r in result["by_mutation"]:
+            self.assertTrue(r["design_a_attack_succeeds"])
+            self.assertTrue(r["design_b_blocked"])
+
+    def test_whisper_contrast_case_is_registered(self):
+        import inspect
+
+        from governance_bench import _case_metrics_whisper_contrast
+
+        case = next(c for c in CASES if c.id == "metrics.whisper_contrast")
+        self.assertEqual(case.track, "metrics")
+        # Honest sourcing: the paper citation and the verified attack model
+        # must live in the case source.
+        src = inspect.getsource(_case_metrics_whisper_contrast)
+        self.assertIn("2609.11757", src)
+        self.assertIn("arXiv", src)
+
+
 class PositionalTaskTests(unittest.TestCase):
     def test_extract_positional_task_pulls_bare_string(self):
         body, task = extract_positional_task(["--workspace", "/tmp/ws", "summarise README"])
