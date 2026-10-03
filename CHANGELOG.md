@@ -1,3 +1,88 @@
+## Unreleased (one-hundred-thirty-fourth batch) — orbital safety receipts (AI-space absorption)
+
+New module `orbital_agents.py`: `conjunction_receipt()` — authority-signed
+conjunction-warning pins binding `(warning_digest, uncertainty_km, warned_at,
+ttl_s)`; maneuvers on stale warnings are `orbital:stale_conjunction`, and
+more than `WARNING_FATIGUE_THRESHOLD` (5) automated maneuvers on the same
+object pair without ground revalidation trip `orbital:warning_fatigue`
+(Starlink-scale auto-maneuver-on-everything lesson).
+`maneuver_authorization_envelope()` — autonomous avoidance binds a Δv
+authority envelope; outside Δv or window is `orbital:envelope_breach`.
+`stm_data_receipt()` — STM data binds freshness + uncertainty; maneuvers on
+unbound data are NON_AUTHORITATIVE (`orbital:unbound_stm`, TraCSS lesson).
+`dual_use_rpo_gate()` — non-cooperative RPO routes through the 111th-batch
+dual-use screen: a watchlist hit is `orbital:rpo_escalation`, and even a
+clean screen stays NON_AUTHORITATIVE (`orbital:rpo_human_review`, SWF
+inherently-dual-use lesson). `megaconstellation_debris_budget()` —
+over-budget constellations are refused registration
+(`orbital:debris_over_budget`). `onboard_model_receipt()` — pinned autonomy
+boundaries from a closed decision-class vocabulary; beyond-boundary
+decisions are `orbital:autonomy_breach` (TakeMe2Space lesson).
+`counterspace_transparency()` — capability declarations feed the
+113th-batch incident-receipts event chain; undeclared capabilities are
+`orbital:undeclared_capability`. `liability_pin()` — failed deorbits pin
+payer + cleanup party; no pin is `orbital:no_liability_pin` (Zero Debris
+Week lesson). Honest scoping: receipts bind declared orbital discipline;
+they don't clear debris or stop militarization. Bench track
+`metrics.orbital_agents`: 12 scenarios, 4 allow / 8 deny.
+
+## Unreleased (one-hundred-thirty-second batch) — mining governance gates (AI-mining absorption)
+
+New module `mining_agents.py`: `fpic_receipt()` / `fpic_gate()` — every
+affected indigenous community needs a live, authority-signed FPIC
+receipt; one missing community denies the whole operation class
+(`mining.no_fpic`; expired/revoked/tampered receipts deny as no
+consent — 2026 Philippines FPIC-guidelines lesson, UNPFII).
+`tailings_monitoring_receipt()` / `tailings_monitor_gate()` — tailings
+dams require live multi-sensor monitoring receipts; missing or stale
+readings deny and emit a `WatchdogIncident` for the 113th-batch
+incident clock (Brumadinho lesson: unwatched data is the incident).
+`exploration_target_receipt()` / `exploration_transparency()` —
+black-box AI exploration targets without a disclosed evidence digest
+are NON_AUTHORITATIVE (`mining.undisclosed_targeting`; KoBold Manono
+lesson). `fleet_envelope_receipt()` / `autonomous_fleet_envelope()` —
+autonomous fleets bind an authority-signed action vocabulary +
+geographic scope; out-of-envelope actions deny, and the fleet can
+never widen its own envelope (104th/126th no-self-widening applied to
+mining). `mixed_traffic_receipt()` / `mixed_fleet_rule()` — mixed
+human/autonomous traffic requires a live safety-protocol receipt.
+`labor_transition_receipt()` / `check_labor_transition()` —
+displacement at/above the bench threshold requires a published
+transition/retraining plan (Fortescue lesson). `sovereignty_receipt()`
+/ `check_data_export()` — cross-border exploration-data transfers
+need a sovereignty receipt (114th-batch sovereignty semantics).
+`green_claim_receipt()` / `green_mining_gate()` — "green mining"
+claims bind the 115th-batch env_cost ledger; unbound claims are
+NON_AUTHORITATIVE (130th-batch evidence-chain rule). Honest scoping:
+receipts bind declared mining discipline; they don't replace mining
+law, real FPIC enforcement, or physical dam engineering. Bench track
+`metrics.mining_agents`: 12 scenarios, 4 allow / 8 deny.
+
+## Unreleased (one-hundred-thirty-third batch) — forest & fisheries evidence gates (AI-forestry/fisheries absorption)
+
+New module `forest_fish.py`: `livelihood_exemption()` — geofence
+anomalies against listed subsistence activity can never become
+automated accusations (`forest.anomaly_is_not_a_person`; the India
+"panoramic forest" lesson). `indigenous_data_receipt()` — FPIC-bound
+data collection on indigenous land, checked at use time; no live
+receipt is `forest.no_fpic`. `eudr_evidence_receipt()` —
+"deforestation-free" certificates must bind evidence digests;
+evidence-free or self-declared-only is NON_AUTHORITATIVE
+(`forest.uncertified_claim`). `dark_vessel_probe()` — IUU detections
+bind (SAR, RF, behavior) digests; complete bindings are investigative
+leads, never accusations; incomplete bindings are
+`fisheries.incomplete_binding`. `em_privacy_receipt()` — onboard EM
+data is purpose-bound at use time (`fisheries.purpose_creep`).
+`aquaculture_data_portability()` — non-portable sensor data must
+disclose lock-in terms (`fisheries.data_lockin`; the Mowi lesson).
+`catch_confidence_gate()` — sub-floor estimates are leads only
+(`fisheries.low_confidence_catch`); the floor is pinned in code.
+`wildfire_experimental_label()` — out-of-region deployments are
+NON_AUTHORITATIVE (`forest.out_of_region_model`). Honest scoping:
+receipts bind declared evidence discipline; they don't stop
+deforestation or IUU fishing. Bench track `metrics.forest_fish`:
+12 scenarios, 4 allow / 8 deny.
+
 ## Unreleased (one-hundred-thirty-first batch) — water infrastructure defense (AI-water absorption)
 
 New module `water_agents.py`: `ot_airgap_receipt()` — signed OT

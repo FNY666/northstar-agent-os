@@ -353,6 +353,127 @@ Check that retired hardware routes through the registry.
 
 Probe a marketing claim for bound environmental evidence.
 
+### `orbital_agents`
+
+Source: `components/northstar-agent-runtime/orbital_agents.py`
+
+Orbital safety receipts (one-hundred-thirty-fourth batch).
+
+#### `OrbitalError`
+
+A malformed receipt, registry, or check request — a programming error, not a verdict. Verification *failures* (stale warning, envelope breach, undeclared capability, digest mismatch) return an :class:`OrbitalVerdict` with ``allowed=False`` instead; malformed input raises here, fail loud, never gues…
+
+#### `OrbitalVerdict`
+
+The verdict of an orbital gate.
+
+#### `orbital_audit_event(*, action: str, allowed: bool, reason: str, created_unix: int, **details: Any)`
+
+Build an audit event shaped to feed the incident-receipts event chain (113th batch).
+
+#### `ConjunctionReceipt`
+
+An authority-signed, hash-chained conjunction warning pin.
+
+#### `conjunction_receipt(*, receipt_id: str, warning_id: str, conjunction_digest: str, uncertainty_km: float, warned_at: int, ttl_s: int, object_pair: str, issued_by: str, authority_pubkey_hex: str, authority_secret: bytes, prev_digest: str=_GENESIS)`
+
+Issue a conjunction-warning pin. The signature must come from the authority whose public key is pinned; the digest binds the warning content.
+
+#### `ConjunctionRegistry`
+
+Owns conjunction-warning pins and the warning-fatigue tripwire.
+
+- `register(receipt: ConjunctionReceipt)`
+  - Register a warning pin. The log must stay hash-chained; duplicate warning ids refuse.
+- `ground_revalidation(object_pair: str)`
+  - Record a ground-station human revalidation of the pair, resetting the fatigue counter.
+- `check_maneuver(*, warning_id: str, dv_ms: float, maneuver_at: int, now: int)`
+  - Check an automated maneuver against a warning pin.
+#### `ManeuverEnvelope`
+
+An authority-signed Δv authorization envelope.
+
+#### `maneuver_authorization_envelope(*, envelope_id: str, max_dv_ms: float, valid_from: int, valid_to: int, issued_by: str, authority_pubkey_hex: str, authority_secret: bytes)`
+
+Issue a Δv authorization envelope.
+
+#### `check_maneuver(envelope: ManeuverEnvelope, *, dv_ms: float, at: int, now: int)`
+
+Check a maneuver against its authorization envelope.
+
+#### `STMDataReceipt`
+
+A space-traffic-management data pin.
+
+#### `stm_data_receipt(*, receipt_id: str, data_id: str, data_digest: str, uncertainty_km: float, observed_at: int, ttl_s: int, source: str, issued_by: str, authority_pubkey_hex: str, authority_secret: bytes, prev_digest: str=_GENESIS)`
+
+Issue an STM data pin.
+
+#### `STMRegistry`
+
+Owns STM data pins; maneuvers must act on a bound snapshot.
+
+- `register(receipt: STMDataReceipt)`
+- `check_bound(*, data_id: str, at: int, now: int)`
+  - Check that a maneuver acts on bound, fresh STM data.
+#### `dual_use_rpo_gate(*, operation_id: str, target_id: str, cooperative: bool, consent_digest: str | None, approach_profile: Mapping[str, Any], created_unix: int)`
+
+Gate a rendezvous/proximity operation.
+
+#### `DebrisBudgetReceipt`
+
+An authority-signed debris budget pin for a constellation.
+
+#### `megaconstellation_debris_budget(*, receipt_id: str, constellation_id: str, max_objects: int, planned_objects: int, expected_debris_objects: int, issued_by: str, authority_pubkey_hex: str, authority_secret: bytes, prev_digest: str=_GENESIS)`
+
+Issue a debris-budget pin for a constellation deployment.
+
+#### `check_debris_budget(receipt: DebrisBudgetReceipt, *, planned_objects: int, now: int)`
+
+Check a deployment plan against its debris budget.
+
+#### `OnboardModelReceipt`
+
+A pinned onboard-AI autonomy boundary.
+
+#### `onboard_model_receipt(*, receipt_id: str, model_id: str, autonomy_boundary: tuple[str, ...] | list[str], issued_by: str, authority_pubkey_hex: str, authority_secret: bytes)`
+
+Pin an onboard model's autonomy boundary.
+
+#### `check_onboard_decision(receipt: OnboardModelReceipt, *, decision_class: str, now: int)`
+
+Check an onboard decision against the pinned boundary.
+
+#### `CapabilityDeclaration`
+
+An authority-signed counterspace capability declaration.
+
+#### `counterspace_transparency(*, receipt_id: str, system_id: str, capability_class: str, declared_at: int, issued_by: str, authority_pubkey_hex: str, authority_secret: bytes, prev_digest: str=_GENESIS)`
+
+Declare an on-orbit capability on the record.
+
+#### `CounterspaceRegistry`
+
+Owns capability declarations; discovered undeclared capabilities are findings, not mysteries.
+
+- `declare(declaration: CapabilityDeclaration)`
+- `check_capability(*, system_id: str, observed_capability_class: str, now: int)`
+  - Check an observed capability against declarations.
+#### `LiabilityReceipt`
+
+An authority-signed liability pin for an orbital object.
+
+#### `liability_pin(*, receipt_id: str, object_id: str, payer: str, cleanup_party: str, deorbit_deadline: int, issued_by: str, authority_pubkey_hex: str, authority_secret: bytes, prev_digest: str=_GENESIS)`
+
+Pin liability for an orbital object before it is dead.
+
+#### `LiabilityRegistry`
+
+Owns liability pins; a dead object past its deadline with no pin is an unowned hazard.
+
+- `register(receipt: LiabilityReceipt)`
+- `check_deorbit(*, object_id: str, at: int, still_in_orbit: bool, now: int)`
+  - Check a deorbit outcome against its liability pin.
 ### `water_agents`
 
 Source: `components/northstar-agent-runtime/water_agents.py`
@@ -654,6 +775,200 @@ Issue a take-level receipt. An empty rights-review digest raises.
 
 Fail-closed gate: may this AI-generated take ship?
 
+### `mining_agents`
+
+Source: `components/northstar-agent-runtime/mining_agents.py`
+
+Mining governance gates (one-hundred-thirty-second batch).
+
+#### `MiningError`
+
+Malformed mining-governance input. Fail loud, never guess.
+
+#### `AuthorityRegistry`
+
+Registered human authorities (authority_id -> Ed25519 public key).
+
+- `register(authority_id: str, public_key: bytes)`
+- `public_key_for(authority_id: str)`
+#### `MiningVerdict`
+
+A gate verdict: fail-closed, with an audit-ready reason.
+
+#### `FPICReceipt`
+
+An FPIC consent receipt bound to a site and a community.
+
+- `body_digest_input()`
+#### `compute_fpic_digest(*, receipt_id: str, site_id: str, community_id: str, process_digest: str, issued_by: str, authority_pubkey_hex: str, issued_at: int, expires_at: int, prev_digest: str)`
+
+#### `fpic_receipt(*, receipt_id: str, site_id: str, community_id: str, process_digest: str, issued_by: str, authority_pubkey_hex: str, authority_secret: bytes, issued_at: int, expires_at: int, prev_digest: str)`
+
+Issue an FPIC consent receipt for one community at one site.
+
+#### `FPICLog`
+
+Hash-chained log of FPIC receipts, with revocation.
+
+- `append(receipt: FPICReceipt)`
+- `revoke(receipt_id: str)`
+- `latest_for(site_id: str, community_id: str)`
+- `is_revoked(receipt_id: str)`
+#### `fpic_gate(*, authorities: AuthorityRegistry, log: FPICLog, site_id: str, affected_communities: tuple[str, ...], now: int)`
+
+The FPIC gate: every affected community needs a live receipt.
+
+#### `TailingsMonitorReceipt`
+
+A live multi-sensor monitoring receipt for a tailings dam.
+
+- `body_digest_input()`
+#### `compute_tailings_digest(*, receipt_id: str, dam_id: str, sensor_set_digest: str, last_reading_at: int, reading_digest: str, issued_by: str, authority_pubkey_hex: str, issued_at: int, prev_digest: str)`
+
+#### `tailings_monitoring_receipt(*, receipt_id: str, dam_id: str, sensor_set_digest: str, last_reading_at: int, reading_digest: str, issued_by: str, authority_pubkey_hex: str, authority_secret: bytes, issued_at: int, prev_digest: str)`
+
+Issue a tailings-dam monitoring receipt for one reading cycle.
+
+#### `TailingsMonitorLog`
+
+Hash-chained log of tailings monitoring receipts.
+
+- `append(receipt: TailingsMonitorReceipt)`
+- `latest_for(dam_id: str)`
+#### `WatchdogIncident`
+
+An auditable watchdog incident for the 113th-batch incident clock.
+
+#### `tailings_monitor_gate(*, authorities: AuthorityRegistry, log: TailingsMonitorLog, dam_id: str, now: int)`
+
+The tailings gate: live multi-sensor monitoring required.
+
+#### `ExplorationTargetReceipt`
+
+An AI exploration target with its disclosed evidence digest.
+
+- `body_digest_input()`
+#### `compute_target_digest(*, receipt_id: str, target_id: str, evidence_digest: str, model_digest: str, issued_by: str, authority_pubkey_hex: str, issued_at: int, prev_digest: str)`
+
+#### `exploration_target_receipt(*, receipt_id: str, target_id: str, evidence_digest: str, model_digest: str, issued_by: str, authority_pubkey_hex: str, authority_secret: bytes, issued_at: int, prev_digest: str)`
+
+Issue an exploration-target receipt with disclosed evidence.
+
+#### `ExplorationLog`
+
+Hash-chained log of exploration-target receipts.
+
+- `append(receipt: ExplorationTargetReceipt)`
+- `latest_for(target_id: str)`
+#### `exploration_transparency(*, authorities: AuthorityRegistry, log: ExplorationLog, target_id: str)`
+
+Exploration-target transparency check.
+
+#### `FleetEnvelopeReceipt`
+
+An authority-signed operating envelope for an autonomous fleet.
+
+- `body_digest_input()`
+#### `compute_fleet_envelope_digest(*, receipt_id: str, fleet_id: str, action_vocabulary: tuple[str, ...], geographic_scope_digest: str, issued_by: str, authority_pubkey_hex: str, issued_at: int, expires_at: int, prev_digest: str)`
+
+#### `fleet_envelope_receipt(*, receipt_id: str, fleet_id: str, action_vocabulary: tuple[str, ...], geographic_scope_digest: str, issued_by: str, authority_pubkey_hex: str, authority_secret: bytes, issued_at: int, expires_at: int, prev_digest: str)`
+
+Issue an authority-signed operating envelope for a fleet.
+
+#### `FleetEnvelopeLog`
+
+Hash-chained log of fleet-envelope receipts.
+
+- `append(receipt: FleetEnvelopeReceipt)`
+- `latest_for(fleet_id: str)`
+#### `autonomous_fleet_envelope(*, authorities: AuthorityRegistry, log: FleetEnvelopeLog, fleet_id: str, action: str, requested_by: str, now: int)`
+
+Check one fleet action against the authority-signed envelope.
+
+#### `MixedTrafficReceipt`
+
+A mixed-traffic safety protocol receipt for a site.
+
+- `body_digest_input()`
+#### `compute_mixed_traffic_digest(*, receipt_id: str, site_id: str, protocol_digest: str, protocol_version: str, issued_by: str, authority_pubkey_hex: str, issued_at: int, expires_at: int, prev_digest: str)`
+
+#### `mixed_traffic_receipt(*, receipt_id: str, site_id: str, protocol_digest: str, protocol_version: str, issued_by: str, authority_pubkey_hex: str, authority_secret: bytes, issued_at: int, expires_at: int, prev_digest: str)`
+
+Issue a mixed-traffic safety protocol receipt for a site.
+
+#### `MixedTrafficLog`
+
+Hash-chained log of mixed-traffic protocol receipts.
+
+- `append(receipt: MixedTrafficReceipt)`
+- `latest_for(site_id: str)`
+#### `mixed_fleet_rule(*, authorities: AuthorityRegistry, log: MixedTrafficLog, site_id: str, mixed_traffic: bool, now: int)`
+
+The mixed-traffic rule: mixing requires a live protocol receipt.
+
+#### `LaborTransitionReceipt`
+
+A published transition/retraining plan for displaced workers.
+
+- `body_digest_input()`
+#### `compute_transition_digest(*, receipt_id: str, site_id: str, displaced_roles: tuple[str, ...], displaced_count: int, plan_digest: str, published_at: int, issued_by: str, authority_pubkey_hex: str, prev_digest: str)`
+
+#### `labor_transition_receipt(*, receipt_id: str, site_id: str, displaced_roles: tuple[str, ...], displaced_count: int, plan_digest: str, published_at: int, issued_by: str, authority_pubkey_hex: str, authority_secret: bytes, prev_digest: str)`
+
+Publish a labor-transition plan for displaced workers.
+
+#### `LaborTransitionLog`
+
+Hash-chained log of labor-transition receipts.
+
+- `append(receipt: LaborTransitionReceipt)`
+- `latest_for(site_id: str)`
+#### `check_labor_transition(*, authorities: AuthorityRegistry, log: LaborTransitionLog, site_id: str, displaced_count: int, now: int)`
+
+The labor-transition check: displace at scale -> publish a plan.
+
+#### `DataSovereigntyReceipt`
+
+A sovereignty receipt for cross-border exploration-data transfer.
+
+- `body_digest_input()`
+#### `compute_sovereignty_digest(*, receipt_id: str, dataset_id: str, host_country: str, export_purpose: str, authorized_by: str, authority_pubkey_hex: str, issued_at: int, expires_at: int, prev_digest: str)`
+
+#### `sovereignty_receipt(*, receipt_id: str, dataset_id: str, host_country: str, export_purpose: str, authorized_by: str, authority_pubkey_hex: str, authority_secret: bytes, issued_at: int, expires_at: int, prev_digest: str)`
+
+Issue a data-sovereignty receipt for a cross-border transfer.
+
+#### `DataSovereigntyLog`
+
+Hash-chained log of data-sovereignty receipts.
+
+- `append(receipt: DataSovereigntyReceipt)`
+- `latest_for(dataset_id: str)`
+#### `check_data_export(*, authorities: AuthorityRegistry, log: DataSovereigntyLog, dataset_id: str, destination_country: str, host_country: str, now: int)`
+
+The data-sovereignty check for exploration-data transfers.
+
+#### `GreenClaimReceipt`
+
+A "green mining" claim bound to the 115th-batch env_cost ledger.
+
+- `body_digest_input()`
+#### `compute_green_claim_digest(*, receipt_id: str, claim_id: str, ledger_digest: str, measured_scope: str, issued_by: str, authority_pubkey_hex: str, issued_at: int, prev_digest: str)`
+
+#### `green_claim_receipt(*, receipt_id: str, claim_id: str, ledger_digest: str, measured_scope: str, issued_by: str, authority_pubkey_hex: str, authority_secret: bytes, issued_at: int, prev_digest: str)`
+
+Issue a green-mining claim receipt bound to the env_cost ledger.
+
+#### `GreenClaimLog`
+
+Hash-chained log of green-mining claim receipts.
+
+- `append(receipt: GreenClaimReceipt)`
+- `latest_for(claim_id: str)`
+#### `green_mining_gate(*, authorities: AuthorityRegistry, log: GreenClaimLog, claim_id: str, ledger_digest: str | None)`
+
+The green-mining gate: environmental claims need bound ledgers.
+
 ### `labor_algo`
 
 Source: `components/northstar-agent-runtime/labor_algo.py`
@@ -784,6 +1099,112 @@ Large-scale automation displacement: disclosed or denied.
 #### `labor_audit_event(event: str, **fields: Any)`
 
 Shape an audit event for the labor-algorithmic-management domain.
+
+### `forest_fish`
+
+Source: `components/northstar-agent-runtime/forest_fish.py`
+
+Forest & fisheries evidence gates (one-hundred-thirty-third batch).
+
+#### `ForestFishError`
+
+A malformed forest/fisheries receipt or a programming error.
+
+#### `ForestFishVerdict`
+
+Outcome of one forest/fisheries check.
+
+#### `LivelihoodAllowlist`
+
+Subsistence-gathering activities a geofence must never auto-criminalize.
+
+#### `issue_livelihood_allowlist(*, receipt_id: str, territory_id: str, community_id: str, activities: tuple[str, ...], issued_by: str, authority_pubkey_hex: str, authority_secret: bytes, issued_at: int, expires_at: int, prev_digest: str=_GENESIS)`
+
+Issue a livelihood allowlist receipt (authority-signed, chained).
+
+#### `livelihood_exemption(*, allowlist_log: list[LivelihoodAllowlist], territory_id: str, activity: str, hit_at: int)`
+
+Block automated accusations against listed livelihood activity.
+
+#### `IndigenousDataReceipt`
+
+FPIC-bound data-collection claim for indigenous land.
+
+#### `issue_indigenous_data_receipt(*, receipt_id: str, territory_id: str, community_id: str, fpic_grant_digest: str, data_scope: str, collector_pubkey_hex: str, issued_by: str, authority_pubkey_hex: str, authority_secret: bytes, issued_at: int, expires_at: int, prev_digest: str=_GENESIS)`
+
+Issue an FPIC-bound indigenous data receipt (authority-signed, chained).
+
+#### `indigenous_data_receipt(*, receipt_log: list[IndigenousDataReceipt], territory_id: str, data_scope: str, use_time: int)`
+
+Check FPIC at use time for indigenous-land data.
+
+#### `EudrCertificate`
+
+A "deforestation-free" claim for an EUDR-regulated shipment.
+
+#### `issue_eudr_certificate(*, receipt_id: str, certificate_id: str, shipment_id: str, deforestation_free_claim: bool, evidence_digest: str, evidence_kind: str, issued_by: str, authority_pubkey_hex: str, authority_secret: bytes, issued_at: int, expires_at: int, prev_digest: str=_GENESIS)`
+
+Issue an EUDR certificate (authority-signed, chained).
+
+#### `eudr_evidence_receipt(*, certificate_log: list[EudrCertificate], certificate_id: str, use_time: int)`
+
+A deforestation-free certificate is only as good as its bound evidence.
+
+#### `DarkVesselLead`
+
+A triple-bound IUU dark-vessel detection.
+
+#### `dark_vessel_probe(*, receipt_id: str, lead_id: str, vessel_id: str, sar_digest: str, rf_digest: str, behavior_digest: str, analyst: str, authority_pubkey_hex: str, authority_secret: bytes, issued_at: int, prev_digest: str=_GENESIS)`
+
+Bind the triple detection and classify the result.
+
+#### `EmPrivacyReceipt`
+
+Purpose-bound receipt for onboard electronic-monitoring data.
+
+#### `issue_em_privacy_receipt(*, receipt_id: str, vessel_id: str, declared_purpose: str, retention_days: int, issued_by: str, authority_pubkey_hex: str, authority_secret: bytes, issued_at: int, expires_at: int, prev_digest: str=_GENESIS)`
+
+Issue a purpose-bound EM privacy receipt (authority-signed, chained).
+
+#### `em_privacy_receipt(*, receipt_log: list[EmPrivacyReceipt], vessel_id: str, use_purpose: str, use_time: int)`
+
+Enforce EM purpose binding at use time.
+
+#### `AquacultureDisclosure`
+
+Sensor-data portability disclosure for an aquaculture operator.
+
+#### `issue_aquaculture_disclosure(*, receipt_id: str, disclosure_id: str, operator_id: str, sensor_data_portable: bool, export_formats: tuple[str, ...]=(), lockin_terms_digest: str='', issued_by: str='', authority_pubkey_hex: str='', authority_secret: bytes=b'', issued_at: int=0, prev_digest: str=_GENESIS)`
+
+Issue an aquaculture portability disclosure (authority-signed, chained).
+
+#### `aquaculture_data_portability(*, disclosure: AquacultureDisclosure)`
+
+Gate undisclosed sensor-data lock-in.
+
+#### `CatchEstimate`
+
+A model-produced catch estimate for a fishery.
+
+#### `issue_catch_estimate(*, receipt_id: str, estimate_id: str, fishery_id: str, estimate_t: float, confidence: float, method_digest: str, issued_by: str, authority_pubkey_hex: str, authority_secret: bytes, issued_at: int, prev_digest: str=_GENESIS)`
+
+Issue a catch estimate (authority-signed, chained).
+
+#### `catch_confidence_gate(*, estimate: CatchEstimate)`
+
+Low-confidence catch estimates are leads only, never evidence.
+
+#### `WildfireModelCard`
+
+A wildfire-prediction model's declared operating regions.
+
+#### `issue_wildfire_model_card(*, receipt_id: str, model_id: str, model_digest: str, training_region: str, validation_regions: tuple[str, ...]=(), issued_by: str='', authority_pubkey_hex: str='', authority_secret: bytes=b'', issued_at: int=0, prev_digest: str=_GENESIS)`
+
+Issue a wildfire model card (authority-signed, chained).
+
+#### `wildfire_experimental_label(*, card: WildfireModelCard, deployment_region: str)`
+
+Label out-of-region wildfire models experimental.
 
 ### `telecom_agents`
 
@@ -2989,9 +3410,21 @@ Telecom AI discipline gates (one-hundred-twenty-ninth batch).
 
 Water-infrastructure defense gates (one-hundred-thirty-first batch).
 
+#### `run_forest_fish()`
+
+Forest & fisheries evidence gates (one-hundred-thirty-third batch).
+
+#### `run_mining_agents()`
+
+Mining governance gates (one-hundred-thirty-second batch).
+
 #### `run_greenwash()`
 
 Greenwashing evidence gates (one-hundred-thirtieth batch).
+
+#### `run_orbital_agents()`
+
+Orbital safety receipts (one-hundred-thirty-fourth batch).
 
 #### `run_suite(*, only: Iterable[str] | None=None, tracks: Iterable[str] | None=None)`
 
