@@ -70,12 +70,18 @@ _OPTIONAL: dict[str, type] = {
     # northstar-run-contract/audit.py exactly, including the
     # externalParameters trust rule.
     "provenance": dict,
+    # Hybrid Logical Clock stamp ("<millis>:<counter>", see hlc.py): the
+    # causal timestamp that survives multi-writer clock skew. Optional and
+    # additive — records written before HLC simply lack it, and the schema
+    # stays audit.ndjson/1.
+    "hlc": str,
 }
 #: Trust values a record may assert for its ``externalParameters``.
 #: Mirrors northstar-run-contract/audit.py exactly.
 _PROVENANCE_TRUST_VALUES = ("untrusted", "verified")
 _HEX64_RE = re.compile(r"^[0-9a-f]{64}$")
 _HEX128_RE = re.compile(r"^[0-9a-f]{128}$")
+_HLC_RE = re.compile(r"^(\d+):(\d+)$")
 
 
 def _record_level(record: dict[str, Any]) -> str:
@@ -178,6 +184,11 @@ def validate_audit_record(record: Any) -> tuple[str, ...]:
                 f"provenance 'invocationId' {invocation_id!r} does not match "
                 f"envelope 'run_id' {record['run_id']!r}"
             )
+    if "hlc" in record and not _valid_hlc_shape(record["hlc"]):
+        errors.append(
+            "audit 'hlc' must be '<millis>:<counter>' with millis in 48 bits "
+            "and counter in 16 bits (e.g. '1727865600000:3')"
+        )
     return tuple(errors)
 
 
@@ -360,6 +371,21 @@ def build_provenance(
     return provenance
 
 
+def _valid_hlc_shape(value: Any) -> bool:
+    """Wire-shape check for an HLC stamp, mirroring hlc.unpack exactly.
+
+    Kept as a verbatim-duplicated shape rule (like every rule above) so the
+    mirror stays in lockstep with northstar-run-contract/audit.py; the
+    normative unpack lives in hlc.py.
+    """
+    if not isinstance(value, str):
+        return False
+    match = _HLC_RE.fullmatch(value)
+    if match is None:
+        return False
+    return int(match.group(1)) <= (1 << 48) - 1 and int(match.group(2)) <= (1 << 16) - 1
+
+
 def record_to_audit(record: dict[str, Any]) -> dict[str, Any]:
     """Map one session transcript record to one canonical audit record.
 
@@ -380,8 +406,16 @@ def record_to_audit(record: dict[str, Any]) -> dict[str, Any]:
         "seq": index,
         "ts": record["ts"],
         "level": _record_level(record),
-        "payload": {key: value for key, value in record.items() if key not in _ENVELOPE_KEYS},
+        "payload": {
+            key: value
+            for key, value in record.items()
+            if key not in _ENVELOPE_KEYS and key != "hlc"
+        },
     }
+    hlc_stamp = record.get("hlc")
+    if isinstance(hlc_stamp, str) and hlc_stamp:
+        # Top-level causal timestamp (optional, additive); validated below.
+        audit["hlc"] = hlc_stamp
     session_id = record.get("session_id")
     if isinstance(session_id, str) and session_id:
         audit["session_id"] = session_id

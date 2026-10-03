@@ -107,6 +107,12 @@ class SessionStore:
     on_write: Callable[[dict[str, Any]], None] | None = None
     _index: int = 0
     _written: int = 0
+    # Hybrid Logical Clock state for this writer's audit stamps (see hlc.py):
+    # ticking it on every append guarantees the "hlc" stamps are
+    # non-decreasing even when the wall clock is not, so multi-writer feeds
+    # can no longer show causally-ordered events with inverted timestamps.
+    _hlc_l: int = 0
+    _hlc_c: int = 0
 
     def __post_init__(self) -> None:
         self.session_id = self.session_id or new_session_id()
@@ -147,9 +153,12 @@ class SessionStore:
         if record_type not in RECORD_TYPES:
             raise ValueError(f"unknown session record type {record_type!r}")
         payload = dict(data or {})
+        from hlc import pack, tick
+        self._hlc_l, self._hlc_c = tick((self._hlc_l, self._hlc_c))
         record: dict[str, Any] = {
             "index": self._index,
             "ts": _timestamp(),
+            "hlc": pack(self._hlc_l, self._hlc_c),
             "session_id": self.session_id,
             "type": record_type,
             **payload,
@@ -164,6 +173,23 @@ class SessionStore:
             return None
         self._write(record)
         return record
+
+    def merge_hlc(self, stamp: object) -> bool:
+        """Merge another writer's HLC stamp into this writer's clock.
+
+        Call this when this session observes another writer's record (e.g. a
+        parallel worker's event) before appending its own: the receive rule
+        makes every stamp issued afterwards strictly greater than the
+        observed one, so causality survives clock skew between writers.
+        Returns False (clock unchanged) for an unparseable stamp.
+        """
+        from hlc import receive, unpack
+
+        parsed = unpack(stamp)
+        if parsed is None:
+            return False
+        self._hlc_l, self._hlc_c = receive((self._hlc_l, self._hlc_c), parsed[0], parsed[1])
+        return True
 
     def _write(self, record: dict[str, Any]) -> None:
         line = json.dumps(record, ensure_ascii=False, sort_keys=True, default=str, separators=(",", ":"))

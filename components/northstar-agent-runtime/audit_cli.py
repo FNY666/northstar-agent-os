@@ -9,6 +9,14 @@ genesis anchor and reports the first broken link, or labels a legacy feed
 * 2 — no chain fields at all: legacy feed (``UNPROTECTED``)
 * 3 — unreadable file or invalid envelope (``INVALID``)
 
+Default ``verify`` also enforces **causal order** via HLC stamps
+(``hlc.py``): for every adjacent parent→child pair that both carry a
+parseable ``"hlc"`` stamp, the child's stamp must not precede the
+parent's — a smaller child stamp is reported as a ``causality-inversion``
+break (exit 1, also in ``--json`` as ``causality_violation``). The check is
+structural and involves no wall clock, so feeds written before HLC keep
+verifying: pairs where either record lacks a parseable stamp are skipped.
+
 ``northstar audit anchor <feed.ndjson> --out manifest.json`` writes the
 minimal offline head anchor (whole-file sha256 + head chain hash + record
 count). Keep the manifest where the feed operator cannot rewrite it (WORM
@@ -389,6 +397,7 @@ def run_audit(args: argparse.Namespace) -> int:
                 "external_anchor": {"state": external_state, "note": external_note},
                 "strict": bool(getattr(args, "strict", False)),
                 "strict_violation": result.strict_violation,
+                "causality_violation": result.causality_violation,
             }))
         else:
             detail = f" ({result.reason})" if result.reason else ""

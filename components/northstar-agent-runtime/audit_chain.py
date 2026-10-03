@@ -426,6 +426,12 @@ class ChainResult:
     #: "unparseable-timestamp" | "timestamp-regression" | "duplicate-nonce" |
     #: "invalid-nonce".
     strict_violation: str = ""
+    #: The causality violation kind when the HLC check failed, else "":
+    #: "causality-inversion". Set by default verify (not strict-only): the
+    #: check is structural — a child's HLC stamp must not precede its
+    #: parent's — and involves no wall clock, so feeds that verify today
+    #: keep verifying (records without a parseable "hlc" stamp are skipped).
+    causality_violation: str = ""
 
     def __bool__(self) -> bool:  # pragma: no cover - trivial
         return self.ok
@@ -456,8 +462,18 @@ def verify_lines(
     labelled. A feed where *some* records lack chain fields is broken at the
     first unchained line: a chain with a hole is not a chain.
 
-    ``strict=True`` is opt-in and changes what counts as verified: on top
-    of the chain it also enforces timestamp monotonicity (a record may
+    On top of the chain, default verify also enforces **causal order** via
+    HLC stamps (see ``hlc.py``): for every adjacent parent→child pair that
+    both carry a parseable ``"hlc"`` stamp, the child's stamp must not be
+    lexicographically smaller than the parent's — a smaller child stamp
+    means the producer's timestamps contradict the causal order the chain
+    records (the multi-writer inversion HLC exists to prevent). Pairs where
+    either record lacks a parseable stamp are skipped, so feeds written
+    before HLC (or by producers that do not stamp) verify exactly as
+    before.
+
+    ``strict=True`` is opt-in and changes what counts as verified: on top of
+    the chain it also enforces timestamp monotonicity (a record may
     regress at most ``clock_skew_seconds`` behind the previous record) and
     nonce deduplication (records carrying a ``nonce`` field must not repeat
     it — the draft-sharif-agent-audit-trail §6.3 rule). Default verify
@@ -483,6 +499,10 @@ def verify_lines(
     prev_chain: str | None = None
     chained = 0
     sig_failures: list[int] = []
+    # Previous record's parsed HLC stamp for the causality check; None
+    # until a record with a parseable stamp is seen.
+    prev_hlc: tuple[int, int] | None = None
+    from hlc import unpack as _hlc_unpack
     # The chain version is a feed-wide property, stamped on every v2
     # record's body and on the genesis anchor; the first record decides.
     canon = _canon_for_version(_version_of_record(records[0][1]))
@@ -526,6 +546,21 @@ def verify_lines(
         if trust_error is not None:
             return ChainResult(ok=False, broken_at=number, records=len(records), chained=chained,
                                reason=f"line {number}: {trust_error}")
+        # Causal-order check (HLC): the child's stamp must not precede the
+        # parent's. Tuples compare lexicographically, which is the HLC
+        # order. Unparseable stamps mean "no HLC information" and skip the
+        # pair — this keeps pre-HLC feeds verifying unchanged.
+        hlc_now = _hlc_unpack(record.get("hlc"))
+        if hlc_now is not None and prev_hlc is not None and hlc_now < prev_hlc:
+            return ChainResult(
+                ok=False, broken_at=number, records=len(records), chained=chained,
+                reason=f"line {number}: causality inversion: hlc stamp "
+                       f"{record['hlc']!r} precedes the previous record's "
+                       f"stamp (timestamps contradict the chain's causal order)",
+                causality_violation="causality-inversion",
+            )
+        if hlc_now is not None:
+            prev_hlc = hlc_now
         if "signature" in record:
             if public_key is None:
                 return ChainResult(ok=False, broken_at=number, records=len(records), chained=chained,
