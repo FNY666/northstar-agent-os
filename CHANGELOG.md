@@ -1,5 +1,37 @@
 # Northstar Agent OS — initial public component
 
+## Unreleased (forty-ninth batch) — strict verifier mode for `audit verify`
+
+Implements the `draft-sharif-agent-audit-trail` §6.3 verifier extras that
+§3.5 of `docs/concepts/ietf-audit-trail-alignment.md` deferred as a
+strict-mode flag (`audit verify --strict`, with `--clock-skew` seconds,
+default 300 = 5 minutes):
+
+- **Timestamp monotonicity**: every record's `ts` must parse as RFC 3339
+  UTC `Z` and may regress at most `--clock-skew` behind the previous
+  record; the first violation fails the feed at that record's line
+  (`strict_violation: "timestamp-regression"`), with the regression size
+  and the allowed skew in the message.
+- **Nonce dedup**: the draft's "nonces must not repeat", checked
+  opportunistically on records carrying a `nonce` field (the
+  `audit.ndjson/1` envelope does not mandate one); the first repeat fails
+  at that record's line and names where the nonce first appeared.
+
+Honest semantics, enforced by construction: `--strict` is opt-in and
+changes what counts as verified — a feed that passes the default
+`verify` can fail `--strict` (clock-skewed timestamps, repeated nonces),
+and that is expected. Default `verify` is untouched: old feeds keep
+verifying exactly as before. The remaining §6.3 rules need nothing new:
+`parent_record_id` linkage is the hash chain itself, tail completeness is
+the head/external anchor, and sequence-gap/heartbeat absence checks stay
+out of band (no offline verifier can do them).
+
+**Verification:** 13 new tests green (regression caught in `--strict` /
+ignored by default, skew boundary at exactly 300.000s vs 300.001s,
+configurable `--clock-skew`, duplicate nonce caught in `--strict` /
+ignored by default, missing/malformed `ts`, CLI exit codes and `--json`
+fields, negative skew rejected); full suites green.
+
 ## Unreleased (forty-eighth batch) — IETF audit-trail alignment: JCS canonicalization as chain v2
 
 Aligns the audit hash chain with `draft-sharif-agent-audit-trail-06`

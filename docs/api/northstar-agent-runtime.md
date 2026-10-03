@@ -1835,7 +1835,7 @@ Fresh (secret_seed, public_key); the seed needs os.urandom, nothing else.
 
 Outcome of verifying one feed file. Mirrors OrcaI's ChainResult shape.
 
-#### `verify_lines(lines: Iterable[str], *, public_key: bytes | None=None, expect_session_id: str | None=None, expect_run_id: str | None=None)`
+#### `verify_lines(lines: Iterable[str], *, public_key: bytes | None=None, expect_session_id: str | None=None, expect_run_id: str | None=None, strict: bool=False, clock_skew_seconds: float=300.0)`
 
 Verify a feed's hash chain (and signatures when ``public_key`` is given).
 
