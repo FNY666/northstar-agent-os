@@ -1127,6 +1127,10 @@ Quantum-threat timeline gates (one-hundred-second batch).
 
 Revocable consent receipts (one-hundred-fifth batch).
 
+#### `run_deployment_registry()`
+
+Deployment registration gate (one-hundred-tenth batch).
+
 #### `run_model_lineage()`
 
 Model lineage receipts (one-hundredth batch).
@@ -1158,81 +1162,6 @@ Herd-correlation gate (one-hundred-eighth batch).
 #### `run_scene_bound()`
 
 Scene-bound authorization receipts (one-hundred-seventh batch).
-
-#### `run_adversarial_scenarios()`
-
-Adversarial bench scenarios: multi-agent failures, no-adversary failures, malicious-but-signed.
-
-#### `BenchHarness`
-
-Temp workspaces + scripted providers for one suite run.
-
-- `close()`
-- `workspace(files: dict[str, str] | None=None)`
-- `provider(turns: Sequence[Any], **kwargs: Any)`
-- `runtime(*, workspace: Path, turns: Sequence[Any], config_kwargs: dict[str, Any] | None=None, tool_limits: ToolLimits | None=None, can_use_tool: Any=None, hooks: HookRegistry | None=None, sessions: Any=None)`
-#### `run_offline_bundle()`
-
-Signed offline policy bundles (ninety-seventh batch).
-
-#### `run_twin_sync()`
-
-Twin-sync receipts: freshness-gated actuation (ninety-sixth batch).
-
-#### `run_pledge_semantics()`
-
-Pledge-style self-restriction semantics, OpenBSD pledge(2) model.
-
-#### `run_attenuation()`
-
-Biscuit-style attenuating delegation credentials, offline verification.
-
-#### `run_path_shim_detection()`
-
-PATH-shim red-team: trustmebro-style fabricated tool output, detected.
-
-#### `run_pretrade_15c3_5()`
-
-SEC 15c3-5-style pre-trade risk semantics on the permission gate.
-
-#### `run_timelock()`
-
-Timelock-delayed execution, OpenZeppelin TimelockController semantics.
-
-#### `run_plugin_claim_evidence()`
-
-Plugin claim-evidence tiering, ERC-8004 validation semantics.
-
-#### `run_merkle_proofs()`
-
-RFC 9162 Merkle inclusion/consistency proofs over the audit chain.
-
-#### `PostureScenario`
-
-One control-isolating red-team scenario (original synthetic situation).
-
-- `to_metric_probe()`
-#### `RedTeamPredicate`
-
-A deterministic state predicate: a pure function over the final trace, independently recomputable by anyone (no judge, no model).
-
-#### `run_posture_decomposition()`
-
-Three-posture control decomposition, FinAgent Red-Team methodology.
-
-#### `list_cases()`
-
-#### `run_suite(*, only: Iterable[str] | None=None, tracks: Iterable[str] | None=None)`
-
-Execute the public suite. Always cleans temp workspaces.
-
-#### `add_bench_arguments(parser: argparse.ArgumentParser)`
-
-#### `run_bench_command(args: argparse.Namespace)`
-
-#### `run_herd_gate()`
-
-Herd-correlation gate (one-hundred-eighth batch).
 
 #### `run_adversarial_scenarios()`
 
@@ -3460,6 +3389,147 @@ Audit event shaped to feed ``audit_chain.chain_record``.
 #### `authorize_trading(*, strategy_id: str, registry: StrategyRegistry, exposure_cap_cents: int, created_unix: int=0)`
 
 Gate an autonomous trading strategy's session, fail-closed.
+
+### `deployment_registry`
+
+Source: `components/northstar-agent-runtime/deployment_registry.py`
+
+Deployment registration gate (one-hundred-tenth batch).
+
+#### `DeploymentRegistryError`
+
+Malformed registration input (construction-time boundary).
+
+#### `RegistrationReceipt`
+
+One registered AI system deployment.
+
+- `payload()`
+- `receipt_digest` (property)
+#### `RetentionChangeReceipt`
+
+A receipted change to a system's log-retention floor.
+
+- `payload()`
+- `receipt_digest` (property)
+#### `DeploymentRegistry`
+
+Append-only registry of deployment registrations.
+
+- `authority_id(pubkey_hex: str)`
+- `register_system(*, authority_secret: bytes, authority_id: str, system_id: str, model_digest: str, risk_class: str, fria_digest: str | None, data_record_digest: str, retention_floor_days: int, expires_at: int, explanation_fields: Mapping[str, str] | None=None)`
+  - Register a system. ``unacceptable`` risk is refused outright.
+- `change_retention_floor(*, authority_secret: bytes, authority_id: str, system_id: str, new_floor_days: int, changed_at: int)`
+  - Receipt a retention-floor change (the floor is a floor, not a target).
+- `verify_registration(receipt: RegistrationReceipt, *, now: int)`
+  - Fail-closed verification of one registration receipt.
+- `verify_chain()`
+  - Replay the whole registry log: consecutive seqs, linked digests.
+- `gate_deployment(*, receipt: RegistrationReceipt | None, intended_use: str, log_retention_days: int, now: int)`
+  - Gate one deployment. ``None`` receipt denies — no grace period.
+- `detect_shadow(*, system_id: str, model_digest: str, now: int)`
+  - Runtime probe: invocation must resolve to a live registration.
+- `explain_decision(*, system_id: str)`
+  - Citizen explanation API: human-readable grounds for a system.
+#### `DeploymentVerdict`
+
+#### `deployment_audit_event(verdict: DeploymentVerdict, *, action: str)`
+
+Shape a deployment verdict as an audit-chain event dict.
+
+#### `shadow_audit_event(verdict: DeploymentVerdict, *, system_id: str)`
+
+Shape a shadow-detection verdict as an audit-chain event dict.
+
+### `scene_bound`
+
+Source: `components/northstar-agent-runtime/scene_bound.py`
+
+Scene-bound authorization receipts (one-hundred-seventh batch).
+
+#### `SceneBoundError`
+
+Malformed binding/declaration/manifest or a programming error.
+
+#### `build_performance_manifest(entries: Mapping[str, Mapping[str, Any]])`
+
+Build a validated performance manifest.
+
+#### `manifest_digest(manifest: Mapping[str, Mapping[str, float]])`
+
+JCS digest pinning a performance manifest.
+
+#### `SceneBinding`
+
+Authorization of a capability for explicit (setting, stratum) pairs.
+
+#### `compute_binding_digest(binding: SceneBinding)`
+
+Recompute the JCS digest a binding claims.
+
+#### `issue_binding(*, binding_id: str, capability_id: str, model_version_digest: str, authorized_pairs: list[tuple[str, str]], manifest: Mapping[str, Mapping[str, float]], authority_secret: bytes, authorized_by: str, authorized_at: int, expires_at: int, prev_digest: str=_GENESIS)`
+
+Issue an authority-signed scene binding and seal it.
+
+#### `SceneDeclaration`
+
+The agent's declared observed scene for one task step.
+
+#### `declare_scene(*, declaration_id: str, binding: SceneBinding, care_setting: str, demographic_stratum: str, declared_at: int, prev_declaration_digest: str=_GENESIS)`
+
+Declare the observed scene under a binding, sealed and chained.
+
+#### `SceneVerdict`
+
+Outcome of :func:`check_scene_authorized`.
+
+#### `check_scene_authorized(binding: SceneBinding, declaration: SceneDeclaration | None, manifest: Mapping[str, Mapping[str, float]], *, now: int)`
+
+Fail-closed gate: is this declared scene authorized for use?
+
+#### `scene_audit_event(verdict: SceneVerdict, *, action: str)`
+
+Shape a scene verdict as an audit event for ``audit_chain``.
+
+#### `RecordingConsent`
+
+Subject-signed grant for ambient capture modalities.
+
+#### `RecordingRevocation`
+
+Unilateral revocation of a recording-consent grant.
+
+#### `grant_recording_consent(*, consent_id: str, subject_id: str, subject_secret: bytes, modalities: list[str], purpose: str, granted_at: int, expires_at: int, prev_digest: str=_GENESIS)`
+
+Issue a subject-signed ambient-capture grant and seal it.
+
+#### `revoke_recording_consent(*, revocation_id: str, consent: RecordingConsent, subject_secret: bytes, revoked_at: int)`
+
+Append a unilateral, subject-signed revocation. Immediate and irreversible in the log — a new grant needs a new receipt.
+
+#### `CaptureVerdict`
+
+Outcome of :func:`authorize_capture`.
+
+#### `authorize_capture(log: list[RecordingConsent | RecordingRevocation], *, subject_id: str, modalities: list[str], purpose: str, use_time: int)`
+
+Fail-closed gate: may ambient capture start for this use?
+
+#### `capture_audit_event(verdict: CaptureVerdict, *, subject_id: str, modalities: list[str])`
+
+Shape a capture verdict as an audit event for ``audit_chain``.
+
+#### `bind_model_to_scene(registry: Mapping[str, SceneBinding], model_version: str, binding: SceneBinding)`
+
+Register ``model_version`` under a scene binding.
+
+#### `ModelInvocationVerdict`
+
+Outcome of :func:`check_model_invocation`.
+
+#### `check_model_invocation(registry: Mapping[str, SceneBinding], model_version: str, declaration: SceneDeclaration | None, manifest: Mapping[str, Mapping[str, float]], *, now: int)`
+
+Gate a model invocation on its scene binding.
 
 ### `tracing`
 

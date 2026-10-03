@@ -5559,6 +5559,266 @@ def run_consent_receipts() -> dict[str, Any]:
     }
 
 
+def run_deployment_registry() -> dict[str, Any]:
+    """Deployment registration gate (one-hundred-tenth batch).
+
+    Absorbs the 2026 AI-govtech thread: EU AI Act Art. 49 (register
+    high-risk AI before deployment), Art. 26 (6-month log retention),
+    Art. 27 (FRIA before deployment); UK DWP's 6 unregistered welfare
+    AI prototypes; Australia's unauthorized Medicare agent access.
+    Fail-closed rules: no registration receipt -> no deployment (no
+    grace period); unacceptable risk can never be registered;
+    high-risk needs FRIA + explanation fields; shadow invocations
+    (unknown system or digest mismatch) classify
+    ``unverifiable-deployment`` and audit ``deployment.shadow_detected``.
+    Ground truth is closed: 3 allow / 9 deny.
+    """
+    from deployment_registry import (
+        DEPLOYMENT_DENIED_EVENT,
+        SHADOW_DETECTED_EVENT,
+        DeploymentRegistry,
+        DeploymentRegistryError,
+        deployment_audit_event,
+        shadow_audit_event,
+    )
+
+    T0 = 1_700_000_000
+    SEED = bytes(range(32))
+    MODEL = "ab" * 32
+    DATA_RECORD = "cd" * 32
+    FRIA = "ef" * 32
+    EXPLAIN = {
+        "decision": "benefit eligibility screening",
+        "grounds": "income below threshold per rule 4.2",
+        "data_used": "declared income, household size",
+        "appeal_path": "request human review within 30 days",
+    }
+
+    def _registry() -> DeploymentRegistry:
+        import ed25519
+        pub = ed25519.public_key(SEED).hex()
+        return DeploymentRegistry({"reg-authority": pub})
+
+    def _register(reg: DeploymentRegistry, **over):
+        kw = dict(
+            authority_secret=SEED,
+            authority_id="reg-authority",
+            system_id="welfare-screener-1",
+            model_digest=MODEL,
+            risk_class="high",
+            fria_digest=FRIA,
+            data_record_digest=DATA_RECORD,
+            retention_floor_days=180,
+            expires_at=T0 + 1_000_000,
+            explanation_fields=dict(EXPLAIN),
+        )
+        kw.update(over)
+        return reg.register_system(**kw)
+
+    def _gate_outcome(verdict, action="deploy"):
+        return {
+            "verdict": "allow" if verdict.allowed else "deny",
+            "reason": verdict.reason,
+            "event": deployment_audit_event(verdict, action=action),
+        }
+
+    scenarios: list[tuple[str, str, Any]] = []
+
+    def _scenario(sid: str, expected: str, thunk: Any) -> None:
+        scenarios.append((sid, expected, thunk))
+
+    # 1: valid high-risk registration, in-class use, floor met -> allow.
+    def _s1():
+        reg = _registry()
+        r = _register(reg)
+        v = reg.gate_deployment(receipt=r, intended_use="high",
+                                log_retention_days=180, now=T0)
+        return _gate_outcome(v)
+
+    _scenario("allow_valid_high_risk", "allow", _s1)
+
+    # 2: minimal-risk registration -> allow.
+    def _s2():
+        reg = _registry()
+        r = _register(reg, system_id="chatbot", risk_class="minimal",
+                      fria_digest=None, explanation_fields={},
+                      retention_floor_days=0)
+        v = reg.gate_deployment(receipt=r, intended_use="minimal",
+                                log_retention_days=0, now=T0)
+        return _gate_outcome(v)
+
+    _scenario("allow_minimal_risk", "allow", _s2)
+
+    # 3: shadow probe with matching live registration -> allow.
+    def _s3():
+        reg = _registry()
+        _register(reg)
+        v = reg.detect_shadow(system_id="welfare-screener-1",
+                              model_digest=MODEL, now=T0)
+        return {
+            "verdict": "allow" if v.allowed else "deny",
+            "reason": v.reason,
+            "event": shadow_audit_event(v, system_id="welfare-screener-1"),
+        }
+
+    _scenario("allow_shadow_probe_match", "allow", _s3)
+
+    # 4: no registration receipt -> deny (no grace period).
+    def _s4():
+        reg = _registry()
+        v = reg.gate_deployment(receipt=None, intended_use="minimal",
+                                log_retention_days=180, now=T0)
+        return _gate_outcome(v)
+
+    _scenario("deny_no_receipt", "deny", _s4)
+
+    # 5: expired registration -> deny.
+    def _s5():
+        reg = _registry()
+        r = _register(reg, expires_at=T0 + 10)
+        v = reg.gate_deployment(receipt=r, intended_use="high",
+                                log_retention_days=180, now=T0 + 11)
+        return _gate_outcome(v)
+
+    _scenario("deny_expired", "deny", _s5)
+
+    # 6: intended use exceeds registered risk class -> deny.
+    def _s6():
+        reg = _registry()
+        r = _register(reg, risk_class="limited", fria_digest=None,
+                      explanation_fields={})
+        v = reg.gate_deployment(receipt=r, intended_use="high",
+                                log_retention_days=180, now=T0)
+        return _gate_outcome(v)
+
+    _scenario("deny_use_exceeds_class", "deny", _s6)
+
+    # 7: log retention below the registered floor -> deny.
+    def _s7():
+        reg = _registry()
+        r = _register(reg)
+        v = reg.gate_deployment(receipt=r, intended_use="high",
+                                log_retention_days=179, now=T0)
+        return _gate_outcome(v)
+
+    _scenario("deny_retention_below_floor", "deny", _s7)
+
+    # 8: tampered receipt (model digest swapped) -> signature invalid -> deny.
+    def _s8():
+        from deployment_registry import RegistrationReceipt
+        reg = _registry()
+        r = _register(reg)
+        tampered = RegistrationReceipt(
+            system_id=r.system_id, model_digest="ff" * 32,
+            risk_class=r.risk_class, fria_digest=r.fria_digest,
+            data_record_digest=r.data_record_digest,
+            retention_floor_days=r.retention_floor_days,
+            registered_by=r.registered_by,
+            authority_sig_hex=r.authority_sig_hex,
+            expires_at=r.expires_at,
+            explanation_fields=dict(r.explanation_fields),
+            prev_hash=r.prev_hash, seq=r.seq)
+        v = reg.gate_deployment(receipt=tampered, intended_use="high",
+                                log_retention_days=180, now=T0)
+        return _gate_outcome(v)
+
+    _scenario("deny_tampered_receipt", "deny", _s8)
+
+    # 9: shadow probe, unknown system_id -> deny + shadow event.
+    def _s9():
+        reg = _registry()
+        _register(reg)
+        v = reg.detect_shadow(system_id="ghost-agent",
+                              model_digest=MODEL, now=T0)
+        return {
+            "verdict": "allow" if v.allowed else "deny",
+            "reason": v.reason,
+            "event": shadow_audit_event(v, system_id="ghost-agent"),
+        }
+
+    _scenario("deny_shadow_unknown_system", "deny", _s9)
+
+    # 10: shadow probe, model digest mismatch -> deny + shadow event.
+    def _s10():
+        reg = _registry()
+        _register(reg)
+        v = reg.detect_shadow(system_id="welfare-screener-1",
+                              model_digest="99" * 32, now=T0)
+        return {
+            "verdict": "allow" if v.allowed else "deny",
+            "reason": v.reason,
+            "event": shadow_audit_event(v, system_id="welfare-screener-1"),
+        }
+
+    _scenario("deny_shadow_digest_mismatch", "deny", _s10)
+
+    # 11: unacceptable risk class refused at registration (fail-closed).
+    def _s11():
+        from deployment_registry import UNVERIFIABLE_DEPLOYMENT
+        reg = _registry()
+        try:
+            _register(reg, risk_class="unacceptable")
+        except DeploymentRegistryError as error:
+            return {
+                "verdict": "deny",
+                "reason": f"refused: {error}",
+                "event": {
+                    "event": DEPLOYMENT_DENIED_EVENT,
+                    "action": "register",
+                    "allowed": False,
+                    "reason": f"refused: {error}",
+                    "classification": UNVERIFIABLE_DEPLOYMENT,
+                    "receipt_digest": None,
+                },
+            }
+        return {"verdict": "allow", "reason": "registered (BAD)"}
+
+    _scenario("deny_unacceptable_registration", "deny", _s11)
+
+    # 12: superseded registration presented -> rollback -> deny.
+    def _s12():
+        reg = _registry()
+        r1 = _register(reg)
+        _register(reg, model_digest="11" * 32)
+        v = reg.gate_deployment(receipt=r1, intended_use="high",
+                                log_retention_days=180, now=T0)
+        return _gate_outcome(v)
+
+    _scenario("deny_superseded_rollback", "deny", _s12)
+
+    mismatches: list[str] = []
+    allowed_ids: list[str] = []
+    warned_ids: list[str] = []
+    denial_reasons: dict[str, str] = {}
+    for sid, expected, thunk in scenarios:
+        try:
+            outcome = thunk()
+        except Exception as error:  # noqa: BLE001 — fail-closed probe
+            outcome = {"verdict": "deny", "reason": f"raised: {error}"}
+        verdict = outcome.get("verdict")
+        if verdict != expected:
+            mismatches.append(
+                f"{sid}: expected {expected}, got {verdict}"
+            )
+        if verdict == "allow":
+            allowed_ids.append(sid)
+        elif verdict == "allow-with-warning":
+            warned_ids.append(sid)
+        else:
+            denial_reasons[sid] = outcome.get("reason", "")
+            ev = outcome.get("event") or {}
+            if ev.get("event") not in (DEPLOYMENT_DENIED_EVENT, SHADOW_DETECTED_EVENT):
+                mismatches.append(f"{sid}: denial must emit a denied event")
+
+    return {
+        "n_scenarios": len(scenarios),
+        "mismatches": mismatches,
+        "allowed_ids": allowed_ids,
+        "warned_ids": warned_ids,
+        "denial_reasons": denial_reasons,
+    }
+
+
 def run_model_lineage() -> dict[str, Any]:
     """Model lineage receipts (one-hundredth batch).
 
@@ -6851,6 +7111,269 @@ def run_herd_gate() -> dict[str, Any]:
         "denial_reasons": denial_reasons,
     }
 
+
+def run_scene_bound() -> dict[str, Any]:
+    """Scene-bound authorization receipts (one-hundred-seventh batch).
+
+    Absorbs the 2026 AI-healthcare thread: brain-aneurysm AI hit 0.846
+    sensitivity vs 0.718 for physicians but was extremely
+    scene-dependent (strong inpatient, heavy false-positive load
+    outpatient); Sutter Health was class-actioned in 2026-04 over
+    ambient recording without patient consent; FDA's 2025-01 guidance
+    only *suggests* demographic performance reporting. This runner
+    exercises ``scene_bound`` over 12 deterministic scenarios:
+    in-scope declarations allow, undeclared scenes deny, out-of-scope
+    (setting, stratum) pairs deny, expired/tampered bindings deny,
+    declarations pinned to another binding deny, ambient capture
+    without a fresh recording-consent receipt denies, revoked consent
+    denies, and a model invoked for an unbound scene classifies
+    ``unverifiable-process``. Ground truth is closed: 3 allow / 9 deny.
+    """
+    import dataclasses
+
+    from scene_bound import (
+        CAPTURE_DENIED_EVENT,
+        DENY_DECLARATION_UNBOUND,
+        DENY_OUT_OF_SCOPE,
+        SCENE_DENIED_EVENT,
+        UNVERIFIABLE_PROCESS,
+        authorize_capture,
+        bind_model_to_scene,
+        build_performance_manifest,
+        capture_audit_event,
+        check_model_invocation,
+        check_scene_authorized,
+        declare_scene,
+        grant_recording_consent,
+        issue_binding,
+        revoke_recording_consent,
+        scene_audit_event,
+    )
+
+    AUTH_SECRET = b"\xa1" * 32
+    SUBJECT_SECRET = b"\xc3" * 32
+    T0 = 1_800_000_000
+
+    MANIFEST = build_performance_manifest(
+        {
+            "adult_18_64": {"sensitivity": 0.846, "specificity": 0.91, "n": 3856},
+            "adult_65_plus": {"sensitivity": 0.80, "specificity": 0.88, "n": 1204},
+        }
+    )
+
+    def _binding(**kw: Any) -> Any:
+        args: dict[str, Any] = dict(
+            binding_id="bench-bind",
+            capability_id="aneurysm-detect",
+            model_version_digest="ab" * 32,
+            authorized_pairs=[
+                ("inpatient", "adult_18_64"),
+                ("outpatient", "adult_65_plus"),
+                ("telehealth", "adult_18_64"),
+            ],
+            manifest=MANIFEST,
+            authority_secret=AUTH_SECRET,
+            authorized_by="dr-chen",
+            authorized_at=T0 - 100,
+            expires_at=T0 + 100_000,
+        )
+        args.update(kw)
+        return issue_binding(**args)
+
+    def _declare(binding: Any, setting: str, stratum: str, at: int = T0) -> Any:
+        return declare_scene(
+            declaration_id="bench-decl",
+            binding=binding,
+            care_setting=setting,
+            demographic_stratum=stratum,
+            declared_at=at,
+        )
+
+    scenarios: list[tuple[str, str, Any]] = []
+
+    def _scenario(sid: str, expected: str, thunk: Any) -> None:
+        scenarios.append((sid, expected, thunk))
+
+    # 1: in-scope inpatient declaration allows.
+    def _clean() -> dict[str, Any]:
+        b = _binding()
+        v = check_scene_authorized(b, _declare(b, "inpatient", "adult_18_64"),
+                                   MANIFEST, now=T0)
+        return {"verdict": "allow" if v.allowed else "deny",
+                "reason": v.reason,
+                "event": scene_audit_event(v, action="aneurysm-detect")}
+
+    _scenario("allow_inpatient_adult", "allow", _clean)
+
+    # 2: another authorized pair (telehealth) allows.
+    def _tele() -> dict[str, Any]:
+        b = _binding()
+        v = check_scene_authorized(b, _declare(b, "telehealth", "adult_18_64"),
+                                   MANIFEST, now=T0)
+        return {"verdict": "allow" if v.allowed else "deny",
+                "reason": v.reason,
+                "event": scene_audit_event(v, action="aneurysm-detect")}
+
+    _scenario("allow_telehealth_adult", "allow", _tele)
+
+    # 3: ambient capture with a fresh recording-consent receipt allows.
+    def _cap_ok() -> dict[str, Any]:
+        g = grant_recording_consent(
+            consent_id="bench-rec", subject_id="patient-7",
+            subject_secret=SUBJECT_SECRET, modalities=["audio"],
+            purpose="clinical-documentation",
+            granted_at=T0 - 50, expires_at=T0 + 10_000)
+        v = authorize_capture([g], subject_id="patient-7",
+                              modalities=["audio"],
+                              purpose="clinical-documentation", use_time=T0)
+        return {"verdict": "allow" if v.allowed else "deny",
+                "reason": v.reason,
+                "event": capture_audit_event(v, subject_id="patient-7",
+                                             modalities=["audio"])}
+
+    _scenario("allow_capture_with_consent", "allow", _cap_ok)
+
+    # 4: no declaration denies.
+    def _undeclared() -> dict[str, Any]:
+        b = _binding()
+        v = check_scene_authorized(b, None, MANIFEST, now=T0)
+        return {"verdict": "allow" if v.allowed else "deny",
+                "reason": v.reason,
+                "event": scene_audit_event(v, action="aneurysm-detect")}
+
+    _scenario("deny_undeclared_scene", "deny", _undeclared)
+
+    # 5: out-of-scope setting (emergency) denies.
+    def _emerg() -> dict[str, Any]:
+        b = _binding()
+        v = check_scene_authorized(b, _declare(b, "emergency", "adult_18_64"),
+                                   MANIFEST, now=T0)
+        return {"verdict": "allow" if v.allowed else "deny",
+                "reason": v.reason,
+                "event": scene_audit_event(v, action="aneurysm-detect")}
+
+    _scenario("deny_out_of_scope_setting", "deny", _emerg)
+
+    # 6: pair (inpatient, adult_65_plus) not authorized even though both
+    # the setting and the stratum appear elsewhere — pairs are exact.
+    def _pair() -> dict[str, Any]:
+        b = _binding()
+        v = check_scene_authorized(b, _declare(b, "inpatient", "adult_65_plus"),
+                                   MANIFEST, now=T0)
+        return {"verdict": "allow" if v.allowed else "deny",
+                "reason": v.reason,
+                "event": scene_audit_event(v, action="aneurysm-detect")}
+
+    _scenario("deny_out_of_scope_pair", "deny", _pair)
+
+    # 7: expired binding denies.
+    def _expired() -> dict[str, Any]:
+        b = _binding(expires_at=T0 - 1)
+        v = check_scene_authorized(b, _declare(b, "inpatient", "adult_18_64"),
+                                   MANIFEST, now=T0)
+        return {"verdict": "allow" if v.allowed else "deny",
+                "reason": v.reason,
+                "event": scene_audit_event(v, action="aneurysm-detect")}
+
+    _scenario("deny_expired_binding", "deny", _expired)
+
+    # 8: tampered binding (mutated after sealing) denies.
+    def _tampered() -> dict[str, Any]:
+        b = _binding()
+        bad = dataclasses.replace(b, authorized_by="mallory")
+        v = check_scene_authorized(bad, _declare(bad, "inpatient", "adult_18_64"),
+                                   MANIFEST, now=T0)
+        return {"verdict": "allow" if v.allowed else "deny",
+                "reason": v.reason,
+                "event": scene_audit_event(v, action="aneurysm-detect")}
+
+    _scenario("deny_tampered_binding", "deny", _tampered)
+
+    # 9: ambient capture without any consent receipt denies.
+    def _cap_none() -> dict[str, Any]:
+        v = authorize_capture([], subject_id="patient-7",
+                              modalities=["audio"],
+                              purpose="clinical-documentation", use_time=T0)
+        return {"verdict": "allow" if v.allowed else "deny",
+                "reason": v.reason,
+                "event": capture_audit_event(v, subject_id="patient-7",
+                                             modalities=["audio"])}
+
+    _scenario("deny_capture_without_consent", "deny", _cap_none)
+
+    # 10: revoked consent denies at use time.
+    def _cap_revoked() -> dict[str, Any]:
+        g = grant_recording_consent(
+            consent_id="bench-rec", subject_id="patient-7",
+            subject_secret=SUBJECT_SECRET, modalities=["audio"],
+            purpose="clinical-documentation",
+            granted_at=T0 - 50, expires_at=T0 + 10_000)
+        r = revoke_recording_consent(revocation_id="bench-rev", consent=g,
+                                     subject_secret=SUBJECT_SECRET,
+                                     revoked_at=T0 - 10)
+        v = authorize_capture([g, r], subject_id="patient-7",
+                              modalities=["audio"],
+                              purpose="clinical-documentation", use_time=T0)
+        return {"verdict": "allow" if v.allowed else "deny",
+                "reason": v.reason,
+                "event": capture_audit_event(v, subject_id="patient-7",
+                                             modalities=["audio"])}
+
+    _scenario("deny_capture_revoked_consent", "deny", _cap_revoked)
+
+    # 11: model invoked for an unbound scene classifies
+    # unverifiable-process.
+    def _model_unbound() -> dict[str, Any]:
+        b = _binding()
+        reg = bind_model_to_scene({}, "aneurysm-v3", b)
+        v = check_model_invocation(reg, "aneurysm-v3",
+                                   _declare(b, "emergency", "adult_18_64"),
+                                   MANIFEST, now=T0)
+        denied = (not v.allowed and v.classification == UNVERIFIABLE_PROCESS
+                  and v.reason == DENY_OUT_OF_SCOPE)
+        return {"verdict": "deny" if denied else "allow", "reason": v.reason,
+                "event": {"event": SCENE_DENIED_EVENT}}
+
+    _scenario("deny_model_unbound_scene", "deny", _model_unbound)
+
+    # 12: declaration pinned to a different binding denies.
+    def _unbound_decl() -> dict[str, Any]:
+        b1 = _binding(binding_id="b1")
+        b2 = _binding(binding_id="b2")
+        v = check_scene_authorized(b1, _declare(b2, "inpatient", "adult_18_64"),
+                                   MANIFEST, now=T0)
+        denied = (not v.allowed and v.reason == DENY_DECLARATION_UNBOUND)
+        return {"verdict": "deny" if denied else "allow", "reason": v.reason,
+                "event": scene_audit_event(v, action="aneurysm-detect")}
+
+    _scenario("deny_declaration_unbound", "deny", _unbound_decl)
+
+    mismatches: list[str] = []
+    allowed_ids: list[str] = []
+    denial_reasons: dict[str, str] = {}
+    for sid, expected, thunk in scenarios:
+        try:
+            outcome = thunk()
+        except Exception as error:  # noqa: BLE001 — fail-closed probe
+            outcome = {"verdict": "deny", "reason": f"raised: {error}"}
+        verdict = outcome.get("verdict")
+        if verdict != expected:
+            mismatches.append(f"{sid}: expected {expected}, got {verdict}")
+        if verdict == "allow":
+            allowed_ids.append(sid)
+        else:
+            denial_reasons[sid] = outcome.get("reason", "")
+            ev = outcome.get("event") or {}
+            if ev and ev.get("event") not in (SCENE_DENIED_EVENT,
+                                              CAPTURE_DENIED_EVENT):
+                mismatches.append(f"{sid}: denial must emit the scene event")
+
+    return {
+        "n_scenarios": len(scenarios),
+        "mismatches": mismatches,
+        "allowed_ids": allowed_ids,
+        "denial_reasons": denial_reasons,
+    }
 
 def run_adversarial_scenarios() -> dict[str, Any]:
     """Adversarial bench scenarios: multi-agent failures, no-adversary failures, malicious-but-signed.
@@ -12089,6 +12612,133 @@ def _case_metrics_consent_receipts(h: BenchHarness) -> BenchExpectation:
     )
 
 
+def _case_metrics_scene_bound(h: BenchHarness) -> BenchExpectation:
+    """Scene-bound authorization receipts (one-hundred-seventh batch).
+
+    Absorbs the 2026 AI-healthcare thread: brain-aneurysm AI reached
+    0.846 sensitivity vs 0.718 for physicians but was extremely
+    scene-dependent (strong inpatient, heavy false-positive load
+    outpatient); Sutter Health was class-actioned in 2026-04 over
+    ambient recording without patient consent; FDA's 2025-01 guidance
+    only suggests demographic performance reporting. 12 deterministic
+    scenarios, 3 allow / 9 deny: in-scope declarations allow, ambient
+    capture with a fresh recording-consent receipt allows, undeclared
+    scenes deny, out-of-scope (setting, stratum) pairs deny (pairs are
+    exact — a covered setting plus a covered stratum is not enough),
+    expired/tampered bindings deny, declarations pinned to another
+    binding deny, capture without consent or with revoked consent
+    denies, and a model invoked for an unbound scene classifies
+    unverifiable-process (no partial tier).
+    """
+    metrics = run_scene_bound()
+
+    def check(exp: BenchExpectation, report: Any) -> tuple[bool, str]:
+        if metrics["n_scenarios"] != 12:
+            return (False, f"expected 12 scene-bound scenarios, saw {metrics['n_scenarios']}")
+        if metrics["mismatches"]:
+            return (False, f"scenario(s) disagree with ground truth: {metrics['mismatches']}")
+        if metrics["allowed_ids"] != [
+            "allow_inpatient_adult",
+            "allow_telehealth_adult",
+            "allow_capture_with_consent",
+        ]:
+            return (False, f"allowed set drifted: {metrics['allowed_ids']}")
+        reasons = metrics["denial_reasons"]
+        if reasons.get("deny_undeclared_scene") != "scene:undeclared_scene":
+            return (False, "undeclared scene must deny on scene:undeclared_scene")
+        if reasons.get("deny_out_of_scope_setting") != "scene:out_of_scope":
+            return (False, "out-of-scope setting must deny on scene:out_of_scope")
+        if reasons.get("deny_out_of_scope_pair") != "scene:out_of_scope":
+            return (False, "out-of-scope pair must deny on scene:out_of_scope")
+        if reasons.get("deny_expired_binding") != "scene:binding_expired":
+            return (False, "expired binding must deny on scene:binding_expired")
+        if reasons.get("deny_tampered_binding") != "scene:binding_tampered":
+            return (False, "tampered binding must deny on scene:binding_tampered")
+        if reasons.get("deny_capture_without_consent") != "scene:capture_no_consent":
+            return (False, "capture without consent must deny on scene:capture_no_consent")
+        if reasons.get("deny_capture_revoked_consent") != "scene:capture_revoked":
+            return (False, "revoked consent must deny on scene:capture_revoked")
+        if reasons.get("deny_model_unbound_scene") != "scene:out_of_scope":
+            return (False, "model invoked for an unbound scene must deny on scene:out_of_scope")
+        if reasons.get("deny_declaration_unbound") != "scene:declaration_unbound":
+            return (False, "declaration for another binding must deny on scene:declaration_unbound")
+        return (True, "12/12 scene-bound scenarios hold: pair-exact scope, consent-first capture, unverifiable-process")
+
+    return BenchExpectation(
+        runtime=_noop_runtime(h),
+        expect_subtype="success",
+        post_check=check,
+        metrics=metrics,
+        notes=(
+            "2026 AI-healthcare thread: aneurysm AI 0.846 vs 0.718 "
+            "sensitivity but scene-dependent; Sutter Health ambient-"
+            "recording class action (2026-04); FDA 2025-01 demographic "
+            "reporting only suggested. Authorization binds (capability, "
+            "model, (setting, stratum) pairs, manifest digest); undeclared "
+            "or out-of-scope use denies; capture needs a fresh subject-"
+            "signed receipt first; unbound model invocation is "
+            "unverifiable-process."
+        ),
+    )
+
+def _case_metrics_deployment_registry(h: BenchHarness) -> BenchExpectation:
+    """Deployment registration gate (one-hundred-tenth batch).
+
+    12 deterministic scenarios, 3 allow / 9 deny: a valid high-risk
+    registration with in-class use and floor-met retention allows; a
+    minimal-risk registration allows; a shadow probe matching the live
+    registration allows. Denied: no receipt (no grace period),
+    expired registration, intended use exceeding the risk class,
+    retention below the floor, tampered receipt, unknown shadow
+    system, shadow digest mismatch, unacceptable risk at registration,
+    and superseded (rollback) receipt — each denial emitting
+    ``deployment.unregistered_denied`` or ``deployment.shadow_detected``.
+    """
+    metrics = run_deployment_registry()
+
+    def check(exp: BenchExpectation, report: Any) -> tuple[bool, str]:
+        if metrics["n_scenarios"] != 12:
+            return (False, f"expected 12 deployment-registry scenarios, saw {metrics['n_scenarios']}")
+        if metrics["mismatches"]:
+            return (False, f"scenario(s) disagree with ground truth: {metrics['mismatches']}")
+        if metrics["allowed_ids"] != [
+            "allow_valid_high_risk",
+            "allow_minimal_risk",
+            "allow_shadow_probe_match",
+        ]:
+            return (False, f"allowed set drifted: {metrics['allowed_ids']}")
+        reasons = metrics["denial_reasons"]
+        for sid, needle in (
+            ("deny_no_receipt", "no registration"),
+            ("deny_expired", "expired"),
+            ("deny_use_exceeds_class", "risk class"),
+            ("deny_retention_below_floor", "below floor"),
+            ("deny_tampered_receipt", "signature"),
+            ("deny_shadow_unknown_system", "unknown system_id"),
+            ("deny_shadow_digest_mismatch", "mismatch"),
+            ("deny_unacceptable_registration", "refused"),
+            ("deny_superseded_rollback", "rollback"),
+        ):
+            if needle not in reasons.get(sid, ""):
+                return (False, f"{sid}: denial reason missing {needle!r}: {reasons.get(sid, '')!r}")
+        return True, "12/12 deployment-registry probes match ground truth"
+
+    return BenchExpectation(
+        runtime=_noop_runtime(h),
+        expect_subtype="success",
+        post_check=check,
+        metrics=metrics,
+        notes=(
+            "Deployment registration gate (one-hundred-tenth batch): 12 "
+            "deterministic probes — no-receipt-no-deployment, "
+            "authority-signed hash-chained registrations, FRIA + "
+            "explanation fields for high-risk, retention-floor "
+            "enforcement, shadow-deployment detection, and the "
+            "unacceptable-risk refusal."
+        ),
+    )
+
+
 def _case_metrics_model_lineage(h: BenchHarness) -> BenchExpectation:
     """Model lineage receipts (one-hundredth batch).
 
@@ -13765,8 +14415,10 @@ CASES: tuple[BenchCase, ...] = (
     BenchCase("metrics.safety_envelope", "metrics", "hardware safety-limit binding: authority-signed envelope, no self-issuance/widening (AI-energy absorption)", _case_metrics_safety_envelope),
     BenchCase("metrics.vendor_chain", "metrics", "vendor-chain provenance receipts: hash-chained vendor hops, transitive taint, envelope-gated autonomous action", _case_metrics_vendor_chain),
     BenchCase("metrics.stream_guard", "metrics", "streaming output guard: per-chunk screening, liveness-pinned guards, anti-smuggling overlap, receipt-chained decisions", _case_metrics_stream_guard),
+    BenchCase("metrics.deployment_registry", "metrics", "deployment registration gate: authority-signed hash-chained registrations, FRIA/explanation for high-risk, retention floor, shadow detection", _case_metrics_deployment_registry),
     BenchCase("metrics.compute_budget", "metrics", "compute-budget receipts: authority-signed budgets, hash-chained spend, fail-closed overspend, tier/evidence/device-class gates, roi_ledger (AI-chips absorption)", _case_metrics_compute_budget),
     BenchCase("metrics.herd_gate", "metrics", "herd-correlation gate: declared signal sources, Jaccard herd-overlap denial, correlated-exposure cap (AI-finance absorption)", _case_metrics_herd_gate),
+    BenchCase("metrics.scene_bound", "metrics", "scene-bound authorization receipts: pair-exact (setting, stratum) scope, manifest-pinned performance, consent-first ambient capture, unverifiable-process model invocation", _case_metrics_scene_bound),
     BenchCase("metrics.harness_binding", "metrics", "harness integrity binding: SHA-256 harness hash in audit, quad-only scores", _case_metrics_harness_binding),
     BenchCase("metrics.drift_detection", "metrics", "Livenerf-style drift probe: bootstrap CI + paired permutation test", _case_metrics_drift_detection),
 )
@@ -14402,7 +15054,9 @@ __all__ = [
     "run_stream_guard",
     "run_compute_budget",
     "run_herd_gate",
+    "run_scene_bound",
     "run_vendor_chain",
+    "run_deployment_registry",
     "run_owasp_asi_coverage",
     "run_policy_axis",
     "run_step_compliance",
