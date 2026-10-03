@@ -13,6 +13,7 @@ import hashlib
 import hmac
 import json
 import re
+from collections import OrderedDict
 from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any
@@ -321,13 +322,44 @@ class ToolExecutionResult:
 
 
 class ActionGateway:
-    """Authorize and dispatch one exact registered tool call at a time."""
+    """Authorize and dispatch one exact registered tool call at a time.
 
-    def __init__(self, *, approval_secret: bytes):
+    Idempotency is enforced by a two-tier bounded store, so a long-lived
+    gateway cannot grow memory without limit:
+
+    * hot tier: an LRU of full results, bounded by ``max_results``;
+    * cold tier: a FIFO of tombstones, bounded by ``max_tombstones``,
+      holding only the fingerprint of each evicted key.
+
+    A replay of a tombstoned key inside its validity window fails closed
+    instead of re-executing (the result is gone, so it cannot be served,
+    and running it again would break at-most-once). Once the window lapses
+    the key is forgotten entirely, which is safe: any replay carrying the
+    same fingerprint shares the same ``deadline_at`` (it is hashed into the
+    fingerprint) and is rejected by the deadline gate before the idempotency
+    lookup, while a high-risk replay with a mutated deadline additionally
+    needs an unexpired approval. If both tiers fill with unexpired keys the
+    gateway refuses new executions rather than risk a double execution.
+
+    Not thread-safe: drive one call at a time per instance.
+    """
+
+    def __init__(
+        self,
+        *,
+        approval_secret: bytes,
+        max_results: int = 1024,
+        max_tombstones: int = 8192,
+    ):
         _require_secret(approval_secret)
         self._approval_secret = approval_secret
+        self._max_results = _require_positive_int(max_results, "max_results")
+        self._max_tombstones = _require_positive_int(max_tombstones, "max_tombstones")
         self._tools: dict[str, ToolSpec] = {}
-        self._results: dict[str, tuple[str, ToolExecutionResult]] = {}
+        self._results: OrderedDict[str, tuple[str, ToolExecutionResult, int]] = (
+            OrderedDict()
+        )
+        self._tombstones: OrderedDict[str, tuple[str, int]] = OrderedDict()
 
     def register(self, spec: ToolSpec) -> None:
         if not isinstance(spec, ToolSpec):
@@ -335,6 +367,42 @@ class ActionGateway:
         if spec.name in self._tools:
             raise ValueError("tool is already registered")
         self._tools[spec.name] = spec
+
+    def _prune_expired_idempotency(self, now: int) -> None:
+        """Drop idempotency records that no live replay can reach.
+
+        A replay carrying the same fingerprint shares the same deadline_at
+        (it is hashed into the fingerprint) and is rejected by the deadline
+        gate before the idempotency lookup; a high-risk replay with a mutated
+        deadline additionally needs an unexpired approval. Past valid_until,
+        forgetting the key cannot cause a re-execution.
+        """
+        for key, (_fingerprint, _result, valid_until) in list(
+            self._results.items()
+        ):
+            if valid_until <= now:
+                del self._results[key]
+        for key, (_fingerprint, valid_until) in list(self._tombstones.items()):
+            if valid_until <= now:
+                del self._tombstones[key]
+
+    def _reserve_idempotency_slot(self, now: int) -> None:
+        """Make room for one new result, demoting the LRU entry to a tombstone.
+
+        Runs before the executor is invoked: if the store is exhausted the
+        call fails closed here, never after a side effect has happened.
+        """
+        self._prune_expired_idempotency(now)
+        if len(self._results) < self._max_results:
+            return
+        # Every remaining tombstone is unexpired (pruned above): dropping one
+        # could let a live replay re-execute, so refuse instead of forgetting.
+        if len(self._tombstones) >= self._max_tombstones:
+            raise ValueError("idempotency store exhausted; refusing to execute")
+        old_key, (fingerprint, _result, valid_until) = self._results.popitem(
+            last=False
+        )
+        self._tombstones[old_key] = (fingerprint, valid_until)
 
     def execute(
         self,
@@ -392,12 +460,14 @@ class ActionGateway:
             raise ValueError("tool scope does not include the required scope")
         if not requested_scope.issubset(set(grant["capabilities"])):
             raise ValueError("tool scope exceeds the authorization grant")
+        approval_expires_at: int | None = None
         if spec.risk_level == "high":
             if approval_token is None:
                 raise ValueError("high-risk tool requires approval")
             approval = _verify_approval(
                 approval_token, self._approval_secret, now=now
             )
+            approval_expires_at = approval["expires_at"]
             for field in (
                 "task_id",
                 "thread_id",
@@ -415,13 +485,35 @@ class ActionGateway:
         fingerprint = hashlib.sha256(
             call.canonical_json() + b"\0" + argument_digest.encode("ascii")
         ).hexdigest()
+        # valid_until bounds the window in which any replay of this key can
+        # still pass the pre-cache gates: a same-fingerprint replay is cut off
+        # by the deadline gate (deadline_at is hashed into the fingerprint),
+        # and a high-risk replay with a mutated deadline additionally needs a
+        # live approval. Forgetting the key past this point is provably safe.
+        valid_until = call.deadline_at
+        if approval_expires_at is not None:
+            valid_until = max(valid_until, approval_expires_at)
+
         cached = self._results.get(call.idempotency_key)
         if cached is not None:
-            old_fingerprint, result = cached
+            self._results.move_to_end(call.idempotency_key)
+            old_fingerprint, result, _valid_until = cached
             if old_fingerprint != fingerprint:
                 raise ValueError("idempotency key conflicts with another tool call")
             return result
+        tombstone = self._tombstones.get(call.idempotency_key)
+        if tombstone is not None:
+            old_fingerprint, _valid_until = tombstone
+            if old_fingerprint != fingerprint:
+                raise ValueError("idempotency key conflicts with another tool call")
+            # The result was evicted but the key is still inside its replay
+            # window: the result is gone so it cannot be served, and running
+            # the executor again would break at-most-once. Fail closed.
+            raise ValueError("idempotency result was evicted; refusing to re-execute")
 
+        # Genuine miss: reserve the slot before invoking the executor, so a
+        # full store fails closed here instead of after a side effect.
+        self._reserve_idempotency_slot(now)
         try:
             output = spec.executor(arguments)
         except Exception as error:
@@ -433,5 +525,5 @@ class ActionGateway:
             output=output,
             idempotency_key=call.idempotency_key,
         )
-        self._results[call.idempotency_key] = (fingerprint, result)
+        self._results[call.idempotency_key] = (fingerprint, result, valid_until)
         return result

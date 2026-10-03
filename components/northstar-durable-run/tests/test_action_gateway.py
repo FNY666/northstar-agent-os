@@ -674,5 +674,251 @@ class ActionGatewayTests(unittest.TestCase):
             )
 
 
+    def _execute_read(self, gateway, run, key, *, now=1_001, deadline=1_900):
+        call = call_for(run, args={"path": "src/main.py"})
+        object.__setattr__(call, "idempotency_key", key)
+        object.__setattr__(call, "deadline_at", deadline)
+        return gateway.execute(
+            call,
+            {"path": "src/main.py"},
+            authorization_token=auth_token(run),
+            authorization_secret=AUTH_SECRET,
+            current_policy_revision="policy-1",
+            now=now,
+        )
+
+    def test_idempotency_cache_evicts_lru_and_tombstones_replay(self):
+        # The result cache is bounded: once full, the least-recently-used
+        # entry is demoted to a tombstone. Replaying a tombstoned key must
+        # fail closed, never re-execute.
+        gateway = ActionGateway(
+            approval_secret=APPROVAL_SECRET, max_results=2, max_tombstones=8
+        )
+        gateway.register(
+            ToolSpec(
+                name="workspace.read_file",
+                required_capability="workspace:read",
+                required_scope="workspace:read",
+                resource_kind="workspace",
+                risk_level="low",
+                executor=self.read_file,
+            )
+        )
+        run = valid_run()
+        self._execute_read(gateway, run, "call-A")
+        self._execute_read(gateway, run, "call-B")
+        self._execute_read(gateway, run, "call-C")
+        self.assertEqual(len(self.invocations), 3)
+        # call-A was evicted to a tombstone: replaying it must not execute.
+        with self.assertRaises(ValueError) as raised:
+            self._execute_read(gateway, run, "call-A", now=1_002)
+        self.assertIn("evicted", str(raised.exception))
+        self.assertEqual(len(self.invocations), 3)
+        # The survivors still serve cached results.
+        self._execute_read(gateway, run, "call-B", now=1_002)
+        self._execute_read(gateway, run, "call-C", now=1_002)
+        self.assertEqual(len(self.invocations), 3)
+
+    def test_lru_hit_refreshes_recency(self):
+        gateway = ActionGateway(
+            approval_secret=APPROVAL_SECRET, max_results=2, max_tombstones=8
+        )
+        gateway.register(
+            ToolSpec(
+                name="workspace.read_file",
+                required_capability="workspace:read",
+                required_scope="workspace:read",
+                resource_kind="workspace",
+                risk_level="low",
+                executor=self.read_file,
+            )
+        )
+        run = valid_run()
+        self._execute_read(gateway, run, "call-A")
+        self._execute_read(gateway, run, "call-B")
+        self._execute_read(gateway, run, "call-A", now=1_002)
+        self._execute_read(gateway, run, "call-C", now=1_003)
+        # call-B is the true LRU victim, not call-A.
+        with self.assertRaises(ValueError) as raised:
+            self._execute_read(gateway, run, "call-B", now=1_004)
+        self.assertIn("evicted", str(raised.exception))
+        self._execute_read(gateway, run, "call-A", now=1_004)
+        self.assertEqual(len(self.invocations), 3)
+
+    def test_tombstone_rejects_fingerprint_mismatch_as_conflict(self):
+        # Reusing an evicted idempotency key for a different call is a key
+        # conflict, exactly as with a live cache entry.
+        gateway = ActionGateway(
+            approval_secret=APPROVAL_SECRET, max_results=1, max_tombstones=8
+        )
+        gateway.register(
+            ToolSpec(
+                name="workspace.read_file",
+                required_capability="workspace:read",
+                required_scope="workspace:read",
+                resource_kind="workspace",
+                risk_level="low",
+                executor=self.read_file,
+            )
+        )
+        run = valid_run()
+        self._execute_read(gateway, run, "call-A")
+        self._execute_read(gateway, run, "call-B")
+        other = call_for(run, args={"path": "other.py"})
+        object.__setattr__(other, "idempotency_key", "call-A")
+        with self.assertRaises(ValueError) as raised:
+            gateway.execute(
+                other,
+                {"path": "other.py"},
+                authorization_token=auth_token(run),
+                authorization_secret=AUTH_SECRET,
+                current_policy_revision="policy-1",
+                now=1_002,
+            )
+        self.assertIn("conflicts", str(raised.exception))
+        self.assertEqual(len(self.invocations), 2)
+
+    def test_evicted_high_risk_key_replay_refuses_without_re_execution(self):
+        # Tombstone safety also holds on the approval path: the evicted key's
+        # approval is still live, so the replay reaches the idempotency tier
+        # and must fail closed instead of running the executor again.
+        gateway = ActionGateway(
+            approval_secret=APPROVAL_SECRET, max_results=1, max_tombstones=8
+        )
+        gateway.register(
+            ToolSpec(
+                name="workspace.write_file",
+                required_capability="workspace:write",
+                required_scope="workspace:write",
+                resource_kind="workspace",
+                risk_level="high",
+                executor=self.write_file,
+            )
+        )
+        run = valid_run("workspace:write")
+        arguments = {"path": "src/main.py", "content": "fixed"}
+        token = auth_token(run)
+
+        def execute_write(key, *, now=1_001):
+            call = call_for(
+                run,
+                tool_name="workspace.write_file",
+                args=arguments,
+                scope=["workspace:write"],
+            )
+            object.__setattr__(call, "idempotency_key", key)
+            approval = self.approval_for(run, call)
+            return gateway.execute(
+                call,
+                arguments,
+                authorization_token=token,
+                authorization_secret=AUTH_SECRET,
+                current_policy_revision="policy-1",
+                approval_token=approval,
+                now=now,
+                run=run,
+            )
+
+        first_call = call_for(
+            run,
+            tool_name="workspace.write_file",
+            args=arguments,
+            scope=["workspace:write"],
+        )
+        object.__setattr__(first_call, "idempotency_key", "call-A")
+        first_approval = self.approval_for(run, first_call)
+        gateway.execute(
+            first_call,
+            arguments,
+            authorization_token=token,
+            authorization_secret=AUTH_SECRET,
+            current_policy_revision="policy-1",
+            approval_token=first_approval,
+            now=1_001,
+            run=run,
+        )
+        execute_write("call-B")
+        self.assertEqual(len(self.invocations), 2)
+        with self.assertRaises(ValueError) as raised:
+            gateway.execute(
+                first_call,
+                arguments,
+                authorization_token=token,
+                authorization_secret=AUTH_SECRET,
+                current_policy_revision="policy-1",
+                approval_token=first_approval,
+                now=1_002,
+                run=run,
+            )
+        self.assertIn("evicted", str(raised.exception))
+        self.assertEqual(len(self.invocations), 2)
+
+    def test_idempotency_store_exhaustion_fails_closed_before_execution(self):
+        # Both tiers full of unexpired keys: the gateway refuses the new
+        # execution instead of forgetting a live key (which could let a
+        # replay re-execute). The refusal happens before any side effect.
+        gateway = ActionGateway(
+            approval_secret=APPROVAL_SECRET, max_results=1, max_tombstones=1
+        )
+        gateway.register(
+            ToolSpec(
+                name="workspace.read_file",
+                required_capability="workspace:read",
+                required_scope="workspace:read",
+                resource_kind="workspace",
+                risk_level="low",
+                executor=self.read_file,
+            )
+        )
+        run = valid_run()
+        self._execute_read(gateway, run, "call-A")
+        self._execute_read(gateway, run, "call-B")
+        with self.assertRaises(ValueError) as raised:
+            self._execute_read(gateway, run, "call-C")
+        self.assertIn("exhausted", str(raised.exception))
+        self.assertEqual(len(self.invocations), 2)
+
+    def test_expired_idempotency_records_are_pruned_safely(self):
+        # Records whose validity window has lapsed are reclaimed, so the
+        # store does not exhaust on churn. A replay past the deadline is
+        # rejected by the deadline gate before the idempotency tier.
+        gateway = ActionGateway(
+            approval_secret=APPROVAL_SECRET, max_results=1, max_tombstones=1
+        )
+        gateway.register(
+            ToolSpec(
+                name="workspace.read_file",
+                required_capability="workspace:read",
+                required_scope="workspace:read",
+                resource_kind="workspace",
+                risk_level="low",
+                executor=self.read_file,
+            )
+        )
+        run = valid_run()
+        self._execute_read(gateway, run, "call-A", deadline=1_100)
+        self._execute_read(gateway, run, "call-B", deadline=1_100)
+        # Past both deadlines the expired records are pruned: no exhaustion,
+        # and the replay is rejected by the deadline gate, not served.
+        self._execute_read(gateway, run, "call-C", now=1_101, deadline=1_900)
+        self.assertEqual(len(self.invocations), 3)
+        with self.assertRaises(ValueError) as raised:
+            self._execute_read(gateway, run, "call-A", now=1_101, deadline=1_100)
+        self.assertIn("deadline has expired", str(raised.exception))
+        self.assertEqual(len(self.invocations), 3)
+
+    def test_constructor_rejects_non_positive_cache_limits(self):
+        for kwargs in (
+            {"max_results": 0},
+            {"max_results": -1},
+            {"max_results": True},
+            {"max_tombstones": 0},
+            {"max_tombstones": -5},
+        ):
+            with self.subTest(kwargs=kwargs):
+                with self.assertRaises(ValueError):
+                    ActionGateway(approval_secret=APPROVAL_SECRET, **kwargs)
+
+
 if __name__ == "__main__":
     unittest.main()
