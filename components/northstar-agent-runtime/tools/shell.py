@@ -43,6 +43,8 @@ from tools.sandbox import LandlockError
 from tools.sandbox import resolve_mode as resolve_landlock_mode
 from tools.seccomp import SeccompError
 from tools.seccomp import resolve_mode as resolve_seccomp_mode
+from tools.pledge import PledgeError
+from tools.pledge import resolve_pledges as resolve_pledge_set
 
 if TYPE_CHECKING:
     from tools import ToolContext
@@ -156,6 +158,16 @@ def shell_handler(payload: dict[str, Any], ctx: "ToolContext") -> Any:
             )
         except LandlockError as error:
             return ToolResult.error(str(error))
+        # Pledge is tighten-only like seccomp: a per-call payload may move
+        # toward a subset of the operator's shell_pledges, never widen it.
+        try:
+            raw_pledges = payload.get("pledges")
+            pledges = resolve_pledge_set(
+                list(raw_pledges) if raw_pledges is not None else None,
+                ctx.service("shell_pledges"),
+            )
+        except PledgeError as error:
+            return ToolResult.error(str(error))
         env_payload = payload.get("env")
         env = None
         if env_payload is not None:
@@ -174,6 +186,7 @@ def shell_handler(payload: dict[str, Any], ctx: "ToolContext") -> Any:
             seccomp=seccomp,
             capdrop_whitelist=capdrop_whitelist,
             landlock=landlock,
+            pledges=pledges,
         )
         result = run_sandboxed(request, backend=backend)
     except SandboxError as error:
@@ -184,6 +197,7 @@ def shell_handler(payload: dict[str, Any], ctx: "ToolContext") -> Any:
     body = result.render()
     data = result.as_dict()
     data["cwd"] = ctx.relative(cwd_path)
+    data["pledges"] = list(pledges)
     # A non-zero exit is a tool *result*, not a tool *crash*: the model must see
     # stdout/stderr to decide what to do next. timed_out is the only case we
     # mark is_error so the loop's PostToolUseFailure hooks can fire.
@@ -244,6 +258,17 @@ def shell_tool_spec():
                         "Tighten-only: a call may only narrow the operator's "
                         "--capdrop whitelist, never widen it or switch the "
                         "launcher off."
+                    ),
+                },
+                "pledges": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": (
+                        "Pledge-style promise set (pledge(2) semantics: declare, "
+                        "tighten-only, never widen). May only be a subset of the "
+                        "operator's shell_pledges. Operations outside the set "
+                        "fail closed. Promises: stdio rpath wpath cpath tmppath "
+                        "dpath unix inet dns proc exec id clock tty."
                     ),
                 },
             },

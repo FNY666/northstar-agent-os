@@ -578,6 +578,10 @@ Temp workspaces + scripted providers for one suite run.
 - `workspace(files: dict[str, str] | None=None)`
 - `provider(turns: Sequence[Any], **kwargs: Any)`
 - `runtime(*, workspace: Path, turns: Sequence[Any], config_kwargs: dict[str, Any] | None=None, tool_limits: ToolLimits | None=None, can_use_tool: Any=None, hooks: HookRegistry | None=None, sessions: Any=None)`
+#### `run_pledge_semantics()`
+
+Pledge-style self-restriction semantics, OpenBSD pledge(2) model.
+
 #### `list_cases()`
 
 #### `run_suite(*, only: Iterable[str] | None=None, tracks: Iterable[str] | None=None)`
@@ -2352,6 +2356,73 @@ Wrap ``target_argv`` so capabilities are dropped before exec.
 #### `bwrap_capability_args(whitelist: Sequence[str])`
 
 bwrap ``--cap-drop``/``--cap-add`` args for a whitelist.
+
+### `tools.pledge`
+
+Source: `components/northstar-agent-runtime/tools/pledge.py`
+
+Pledge-style self-restriction for tool-effect execution.
+
+#### `PledgeError`
+
+Bad pledge call: unknown promise, widening, or use before pledging.
+
+#### `PledgeViolation`
+
+An operation outside the pledged set was attempted: fail closed.
+
+#### `validate_promises(promises: Sequence[str] | None)`
+
+Normalise a promise list; raise :class:`PledgeError` on unknown names.
+
+#### `resolve_pledges(payload_value: Sequence[str] | None, service_value: Sequence[str] | None)`
+
+Merge a per-call payload promise set with the operator's service set.
+
+#### `PledgeEvent`
+
+One auditable pledge decision.
+
+- `as_dict()`
+#### `PledgeContext`
+
+One execution's pledge state: declare → tighten-only → fail-closed.
+
+- `pledge(promises: Sequence[str])`
+  - Declare the promise set before any sensitive operation.
+- `promises` (property)
+- `tighten(promises: Sequence[str])`
+  - Narrow the set. Widening raises :class:`PledgeError` — pledge(2) can only reduce privileges, never increase them.
+- `require(promise: str)`
+  - Check one operation against the declared set.
+- `subcontext(promises: Sequence[str])`
+  - The execpromises analogue: a child execution may only inherit a subset of the parent's promises, never more.
+- `audit_log()`
+#### `LandlockSupport`
+
+Honest capability probe result for Landlock self-restriction.
+
+- `as_dict()`
+#### `landlock_probe(*, force: bool=False)`
+
+Probe whether this kernel lets a process Landlock-restrict itself.
+
+#### `FsRule`
+
+One Landlock PATH_BENEATH rule: path plus allowed access bits.
+
+- `as_dict()`
+#### `filesystem_rules(pledges: frozenset[str], *, workspace: str, tmpdir: str, runtime_roots: Sequence[str]=('/usr', '/bin', '/lib', '/lib64', '/sbin'))`
+
+Map a pledge set to Landlock filesystem rules. Pure and testable.
+
+#### `pledge_loader_argv(rules: Sequence[FsRule], target_argv: Sequence[str], *, python: str='python3')`
+
+Wrap ``target_argv`` so Landlock + seccomp apply before exec.
+
+#### `enforcement_report(pledges: frozenset[str] | None, *, backend: str, landlock: LandlockSupport | None=None)`
+
+Honest report of which enforcement layers apply to a pledge set.
 
 ### `tools.parallel`
 

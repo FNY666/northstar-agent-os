@@ -51,6 +51,15 @@ from tools.sandbox import (
     landlock_supported,
 )
 from tools.seccomp import SECCOMP_MODES, SeccompError, build_default_filter, prctl_loader_argv
+from tools.pledge import (
+    PledgeContext,
+    PledgeError,
+    PledgeViolation,
+    enforcement_report,
+    filesystem_rules,
+    pledge_loader_argv,
+    validate_promises,
+)
 
 #: Hard ceilings a single Shell invocation may not exceed. Operators may only
 #: tighten these (via tool payload or run config), never widen past the runtime.
@@ -112,6 +121,7 @@ class SandboxRequest:
     landlock: str = "auto"  # landlock path allowlist (process backend, Linux):
     # auto (apply when the kernel supports it, degrade loudly to seccomp-only)
     # | on (require; refuse without Landlock) | off. Tighten-only per call.
+    pledges: tuple[str, ...] | None = None  # pledge-style promise set; None = no pledge layer
 
 
 @dataclass(frozen=True)
@@ -344,6 +354,11 @@ def _validate_request(request: SandboxRequest) -> None:
         raise SandboxError(
             f"unknown landlock mode {request.landlock!r}; choose one of {', '.join(LANDLOCK_MODES)}"
         )
+    if request.pledges is not None:
+        try:
+            validate_promises(request.pledges)
+        except PledgeError as error:
+            raise SandboxError(f"invalid pledges: {error}") from error
 
 
 def _read_capped(stream: Any, limit: int) -> tuple[bytes, bool]:
@@ -565,6 +580,13 @@ def _bwrap_argv(
     """Build a conservative bubblewrap command line around the user argv."""
     workspace = Path(os.path.realpath(str(request.workspace)))
     cwd = Path(os.path.realpath(str(request.cwd)))
+    # Pledge enforcement at the mount layer: a declared promise set without
+    # wpath/cpath turns the workspace bind read-only. The semantic layer
+    # (PledgeContext.require) fails closed too; this is defense in depth.
+    pledges = frozenset(request.pledges or ())
+    workspace_bind = "--bind"
+    if request.pledges is not None and not ({"wpath", "cpath"} & pledges):
+        workspace_bind = "--ro-bind"
     # Host paths the child needs to actually execute anything useful. Bound
     # read-only; the workspace is the only writable bind.
     #
@@ -615,7 +637,7 @@ def _bwrap_argv(
         "/run",
         *ro_binds,
         *identity_binds,
-        "--bind",
+        workspace_bind,
         str(workspace),
         str(workspace),
         "--chdir",
@@ -640,6 +662,18 @@ def run_sandboxed(
     cwd = Path(os.path.realpath(str(request.cwd)))
     env = _scrubbed_env(request.env, workspace=workspace)
     seccomp_mode = (request.seccomp or "auto").strip().lower()
+
+    # Pledge semantic layer: declare before anything runs. A Shell execution
+    # inherently spawns and execs, so a pledge set without proc+exec is
+    # refused here — fail closed, before the command exists.
+    pledge_ctx: PledgeContext | None = None
+    if request.pledges is not None:
+        try:
+            pledge_ctx = PledgeContext.pledge(request.pledges)
+            pledge_ctx.require("proc")
+            pledge_ctx.require("exec")
+        except (PledgeError, PledgeViolation) as error:
+            raise SandboxError(f"pledge refused: {error}") from error
 
     if chosen == "bwrap":
         assert caps.bwrap_path  # resolve_backend guaranteed usable
@@ -676,6 +710,8 @@ def run_sandboxed(
             # paths more strongly via read-only mounts, so there is nothing
             # to add here. Stated, not silently assumed.
             detail += "; landlock n/a (bwrap mounts already confine paths)"
+        if pledge_ctx is not None and not ({"wpath", "cpath"} & pledge_ctx.promises):
+            detail = "network namespace unshared; workspace is read-only (pledge: no wpath/cpath)"
         if seccomp_mode != "off":
             # The BPF denylist rides into bwrap on an inherited fd
             # (``bwrap --seccomp FD``). A temp file under the workspace tmp dir
@@ -760,8 +796,27 @@ def run_sandboxed(
         # exec (see tools/seccomp.py: no preexec_fn, so no fork-in-threads
         # hazard). The audit trail keeps the original argv; the wrapper is
         # an implementation detail named in `detail`.
-        exec_argv = prctl_loader_argv(request.argv, python=python)
-        detail = base_detail + "; seccomp denylist active (prctl, EPERM on deny)"
+        python = shutil.which("python3") or sys.executable
+        if pledge_ctx is not None:
+            # Pledge mechanism layer: Landlock self-restriction (filesystem
+            # promises -> PATH_BENEATH rules) + the same seccomp denylist,
+            # applied irreversibly before exec. Reported honestly in `detail`.
+            tmpdir = str(workspace / ".northstar" / "tmp")
+            rules = filesystem_rules(
+                pledge_ctx.promises, workspace=str(workspace), tmpdir=tmpdir
+            )
+            exec_argv = pledge_loader_argv(rules, request.argv, python=python)
+            report = enforcement_report(pledge_ctx.promises, backend="process")
+            landlock_note = (
+                "landlock self-restriction active"
+                if report["landlock"]["available"]
+                else f"landlock unavailable ({report['landlock']['detail']}); "
+                "semantic pledge still fails closed"
+            )
+            detail = base_detail + f"; pledge {sorted(pledge_ctx.promises)}; {landlock_note}"
+        else:
+            exec_argv = prctl_loader_argv(request.argv, python=python)
+            detail = base_detail + "; seccomp denylist active (prctl, EPERM on deny)"
     else:
         detail = base_detail + "; seccomp not applied"
         if seccomp_mode != "off":
