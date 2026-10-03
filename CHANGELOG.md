@@ -1,5 +1,17 @@
 # Northstar Agent OS — initial public component
 
+## Unreleased (thirty-sixth batch) — bind approvals to the exact arguments
+
+A local replay proof showed the gap: a `northstar.approval.v1` token pinned
+the call identity (task/thread/run/step/actor/tool/resource) but not the
+payload, so an approval granted for one set of arguments could be replayed
+for the same step+tool with different arguments. The approval schema is now
+`northstar.approval.v2` with a required `arguments_digest`, checked against
+the ToolCall before any high-risk execution. One new regression test pins
+that a cross-arguments replay is refused.
+
+**Verification:** 75/75 durable-run tests green; full clinic below.
+
 ## Unreleased (thirty-fifth batch) — close the verifier's lstat→open TOCTOU
 
 `verify_run_completion` lstat-checked each required artifact (rejecting
