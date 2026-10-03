@@ -298,6 +298,28 @@ Running cost and usage accumulator with a ceiling check.
 
 Pricing view for the CLI ``--show-pricing`` flag.
 
+### `canonical_json`
+
+Source: `components/northstar-agent-runtime/canonical_json.py`
+
+JSON Canonicalization Scheme (RFC 8785) — the single canonicalizer.
+
+#### `JcsError`
+
+Input that JCS cannot canonicalize (lone surrogate, NaN/Infinity, unsupported type). Raised, never silently worked around: a signature over silently-mangled input is worse than no signature.
+
+#### `jcs_dumps(value: Any)`
+
+Serialize ``value`` to a JCS canonical string (RFC 8785 §3).
+
+#### `jcs_canonical_json(obj: Any)`
+
+JSON Canonicalization Scheme (RFC 8785) bytes, UTF-8 (§3.2.4).
+
+#### `jcs_sha256_hex(obj: Any)`
+
+SHA-256 hex digest over the JCS canonical bytes of ``obj``.
+
 ### `checkpoints`
 
 Source: `components/northstar-agent-runtime/checkpoints.py`
@@ -1424,13 +1446,13 @@ Raised when a re-registration's digest differs from the pinned digest.
 
 #### `canonical_json(value: Any)`
 
-Deterministic JSON encoding for digesting (sorted keys, tight separators).
+Deterministic JSON encoding for digesting: JCS (RFC 8785).
 
 #### `sha256_hex(text: str)`
 
 #### `definition_digest(definition: dict[str, Any])`
 
-SHA-256 over the canonical form of a tool definition.
+SHA-256 over the JCS (RFC 8785) canonical form of a tool definition.
 
 #### `ToolParam`
 

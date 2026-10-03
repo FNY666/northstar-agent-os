@@ -78,6 +78,7 @@ MANIFEST: dict[str, tuple[str, ...]] = {
         "agent_files",
         "agent_identity",
         "budget",
+        "canonical_json",
         "checkpoints",
         "cli",
         "command_hooks",

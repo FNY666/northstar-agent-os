@@ -69,10 +69,11 @@ Fail-closed rules (non-negotiable):
 from __future__ import annotations
 
 import hashlib
-import json
 import re
 from dataclasses import dataclass, field
 from typing import Any
+
+from canonical_json import jcs_canonical_json
 
 # ---------------------------------------------------------------------------
 # Effects and verdicts (Janus vocabulary, ported)
@@ -119,8 +120,15 @@ class DefinitionTamper(Exception):
 
 
 def canonical_json(value: Any) -> str:
-    """Deterministic JSON encoding for digesting (sorted keys, tight separators)."""
-    return json.dumps(value, sort_keys=True, separators=(",", ":"), ensure_ascii=True)
+    """Deterministic JSON encoding for digesting: JCS (RFC 8785).
+
+    Delegates to :mod:`canonical_json` (the ninety-fifth batch's single
+    canonicalizer). Kept under this name so existing callers are
+    unaffected; returns ``str`` (decoded UTF-8) for backward
+    compatibility. New code should call
+    :func:`canonical_json.jcs_canonical_json` directly for bytes.
+    """
+    return jcs_canonical_json(value).decode("utf-8")
 
 
 def sha256_hex(text: str) -> str:
@@ -128,13 +136,17 @@ def sha256_hex(text: str) -> str:
 
 
 def definition_digest(definition: dict[str, Any]) -> str:
-    """SHA-256 over the canonical form of a tool definition.
+    """SHA-256 over the JCS (RFC 8785) canonical form of a tool definition.
 
     The definition is the (name, description, params) triple — the same
     surface Janus's ``ToolDef`` exposes to policy validation
     (``to_janus_tool_spec``). Handler code is deliberately *not* part of
     the digest: the digest pins the *contract* the policy was verified
     against, not the implementation behind it.
+
+    Canonicalization is JCS via :mod:`canonical_json` (ninety-fifth
+    batch); digests minted by the ninety-first batch's hand-rolled
+    ``json.dumps`` form are *not* interchangeable with these.
     """
     canonical = {
         "name": definition["name"],

@@ -8,8 +8,9 @@ read 2026-10-04 — actual code, not docs):
    (unique), ``signature`` over a canonical payload. MCPS signs with
    ECDSA P-256 via the ``cryptography`` package; this repo is stdlib-only
    with a vendored Ed25519, so passports here are Ed25519-signed over
-   :func:`audit_chain.canonical_json` — the same envelope convention as
-   :mod:`agent_identity`.
+   :func:`canonical_json.jcs_canonical_json` (JCS, RFC 8785 — the
+   ninety-fifth batch's single canonicalizer) — the same envelope
+   convention as :mod:`agent_identity`.
 2. **Mandatory intersection on delegation**
    (``DelegationToken.create`` / ``intersect_capabilities``): the delegatee's
    capabilities are computed *at mint time* as
@@ -63,7 +64,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Any, Iterable, Mapping, Sequence
 
 import ed25519
-from audit_chain import canonical_json
+from canonical_json import jcs_canonical_json as canonical_json
 
 #: Wire version of this passport format.
 PASSPORT_VERSION = "northstar.capability-passport/1"

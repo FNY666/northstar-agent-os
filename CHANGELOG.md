@@ -1,3 +1,26 @@
+## Unreleased (ninety-fifth batch) — JCS golden vectors: the single canonicalizer (RFC 8785)
+
+New module `canonical_json.py`: a small, auditable, stdlib-only
+implementation of the JSON Canonicalization Scheme (RFC 8785), written
+directly from the RFC text (checked 2026-10-04) and pinned by golden
+vectors transcribed from the RFC's own Appendix B Table 1 (all 24 IEEE
+754 number samples), §3.2.2.3 (string escapes), and §3.2.3 (UTF-16 code
+unit key ordering), plus the long-standing cyberphone community sample
+as a cross-implementation check.
+
+This batch also fixed a real spec bug the golden vectors caught: the
+JCS copy that lived in `audit_chain` emitted `\u000a` for newline,
+contradicting RFC 8785 §3.2.2.3's mandatory short escapes (\b \t \n \f
+\r) — `audit_chain.jcs_canonical_json` now delegates to the single
+implementation (its signature is unchanged; chain v2 callers are
+unaffected). `static_verify.definition_digest` (ninety-first batch) now
+hashes JCS bytes instead of its hand-rolled `json.dumps` form, and
+`passport` envelopes (eighty-ninth batch) are Ed25519-signed over JCS
+instead of the legacy chain-v1 canonicalization. New tests
+`tests/test_canonical_json.py` (23 tests) include fail-closed adversarial
+inputs: lone surrogates (values and keys), NaN/Infinity, -0, 1e400,
+non-string keys, and unsupported types.
+
 ## Unreleased (ninety-sixth batch) — twin-sync receipts: freshness-gated actuation (digital-twin absorption)
 
 Absorbs the 2026 digital-twins-at-scale research thread (mechanism ideas
