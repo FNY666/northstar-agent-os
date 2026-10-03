@@ -1,3 +1,11 @@
+## Unreleased (eighty-first batch) — DvP if-and-only-if invariant
+
+Atomic settlement as a red-team harness: proves `Approval <=> Execution` —
+neither unilateral execution (no one gets the asset without a matching
+approval) nor withheld settlement (no valid approval is left un-settled).
+DvP is the strictest instance of the iff shape Northstar asserts everywhere:
+`approve(tool, args) iff execute(tool, args)`, `grant(cap) iff use(cap)`.
+
 ## Unreleased (eightieth batch) — three-posture control decomposition
 
 Absorbs the FinAgent red-team methodology (none / advisory / enforced):
