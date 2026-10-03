@@ -137,6 +137,60 @@ class ConsentAblationTests(unittest.TestCase):
         self.assertIn("NOT a human-subject experiment", src)
 
 
+class OwaspAsiCoverageTests(unittest.TestCase):
+    def test_owasp_asi_is_deterministic(self):
+        from governance_bench import run_owasp_asi_coverage
+
+        first = run_owasp_asi_coverage()
+        second = run_owasp_asi_coverage()
+        self.assertEqual(first, second)
+
+    def test_owasp_asi_coverage_numbers(self):
+        from governance_bench import OWASP_ASI, run_owasp_asi_coverage
+
+        coverage = run_owasp_asi_coverage()
+        # Ten entries, cross-verified against independent sources.
+        self.assertEqual(coverage["total"], 10)
+        self.assertEqual(
+            sorted(e["id"] for e in OWASP_ASI),
+            [f"ASI{i:02d}" for i in range(1, 11)],
+        )
+        # 7 covered, 3 residual partials; every gap probe meets its closed
+        # expectation and no mapping points at a case that does not exist.
+        self.assertEqual(coverage["covered"], 7)
+        self.assertEqual(coverage["gaps"], ["ASI04", "ASI07", "ASI10"])
+        self.assertEqual(coverage["gap_probe_mismatches"], [])
+        self.assertEqual(coverage["unknown_case_refs"], [])
+        self.assertEqual(coverage["n_gap_probes"], 4)
+        # The ten titles must match the cross-verified strings.
+        titles = {e["id"]: e["title"] for e in OWASP_ASI}
+        self.assertEqual(titles["ASI01"], "Agent Goal Hijack")
+        self.assertEqual(titles["ASI02"], "Tool Misuse & Exploitation")
+        self.assertEqual(titles["ASI03"], "Identity & Privilege Abuse")
+        self.assertEqual(titles["ASI04"], "Agentic Supply Chain Vulnerabilities")
+        self.assertEqual(titles["ASI05"], "Unexpected Code Execution")
+        self.assertEqual(titles["ASI06"], "Memory & Context Poisoning")
+        self.assertEqual(titles["ASI07"], "Insecure Inter-Agent Communication")
+        self.assertEqual(titles["ASI08"], "Cascading Failures")
+        self.assertEqual(titles["ASI09"], "Human-Agent Trust Exploitation")
+        self.assertEqual(titles["ASI10"], "Rogue Agents")
+
+    def test_owasp_case_is_registered(self):
+        import inspect
+
+        from governance_bench import _case_metrics_owasp_asi_coverage
+
+        case = next(c for c in CASES if c.id == "metrics.owasp_asi_coverage")
+        self.assertEqual(case.track, "metrics")
+        # The honest scoping must live in the case source: offline-gate
+        # coverage, NOT an official OWASP conformance claim, and the PDF
+        # limitation must be stated.
+        src = inspect.getsource(_case_metrics_owasp_asi_coverage)
+        self.assertIn("NOT", src)
+        self.assertIn("official OWASP conformance claim", src)
+        self.assertIn("download form", src)
+
+
 class PositionalTaskTests(unittest.TestCase):
     def test_extract_positional_task_pulls_bare_string(self):
         body, task = extract_positional_task(["--workspace", "/tmp/ws", "summarise README"])

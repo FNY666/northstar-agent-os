@@ -1,5 +1,44 @@
 # Northstar Agent OS — initial public component
 
+## Unreleased (fifty-third batch) — OWASP Agentic Top 10 2026 (ASI01–ASI10) gate coverage
+
+Maps the whole governance bench to the OWASP Top 10 for Agentic Applications
+2026 threat taxonomy (`components/northstar-agent-runtime/governance_bench.py`,
+new metrics-track case `metrics.owasp_asi_coverage`):
+
+- **Coverage: 7/10 covered, 3 residual partials** — each ASI entry reports
+  its mapped bench cases (verified against `CASES` at runtime; a stale
+  mapping fails the case loudly) plus per-entry scope notes.
+- **4 new deterministic gap probes** (`OWASP_GAP_CORPUS`): one for each ASI
+  whose gate-layer decision surface had no closed-expectation coverage —
+  `asi03_role_claim_no_privilege` (role/delegation claims in a payload never
+  move the gate), `asi06_memory_poison_no_effect` (memory-directive claims
+  in a payload never move the gate), `asi07_peer_agent_spoof_no_authority`
+  (spoofed peer-agent approval is not authority), `asi08_denial_text_no_authority`
+  (denial text is not an authority token for the next call). Each asserts
+  deny at tier 3 via a refuse host callback.
+- **Residual partials are honestly scoped**: ASI04 (MCP/skill-registry
+  scanning), ASI07 (authenticated A2A message channels), ASI10 (behavioral
+  drift monitoring) need runtime/multi-agent infrastructure an offline gate
+  bench cannot express.
+- `BENCH_VERSION` v6→v7 (scorecard comments synced); human output and
+  `--json` print the coverage (7/10, rate 0.70, gap list).
+
+**Source honesty:** the official PDF sits behind a download form and was NOT
+read directly. The ten codes/titles were taken from the OWASP-owned
+`OWASP/secure-agent-playbook` repository and corroborated against six
+independent third-party summaries (ctrlrun-docs, chock-threat-intel,
+traceseal, moai-team-llc, brace, invaris-agentsec, vemo) that agree on every
+entry; the fuller "Tool Misuse & Exploitation" wording is used for ASI02.
+Anyone holding the official PDF should verify the ten strings against it.
+This is the *offline gate's* coverage of the taxonomy — NOT an official
+OWASP conformance claim.
+
+**Verification:** `make test` fully green — runtime 1525 (1522 existing +
+3 new test methods), durable-run 154, interop 56, TS 57/57, repo docs 75/75;
+`make bench` 37/37 (36 existing + 1 new);
+`python3 tests/docbuild.py verify` OK.
+
 ## Unreleased (fifty-second batch) — crash-benchmark in-flight metrics + real SIGKILL sites
 
 Upgrades the crash-benchmark suite (`components/northstar-durable-run/tests/test_crash_benchmark.py`)
