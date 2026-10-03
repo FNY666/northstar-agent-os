@@ -73,7 +73,6 @@ py-modules = [
     "contract_bridge",
     "dataflow_policy",
     "delegation_credentials",
-    "deployment_registry",
     "doctor",
     "drift_probe",
     "durable_bridge",
