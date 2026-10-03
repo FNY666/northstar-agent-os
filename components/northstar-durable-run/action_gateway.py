@@ -3,7 +3,10 @@
 The gateway treats model-produced ToolCall data and tool output as untrusted.
 It validates the call, re-verifies a host authorization grant, enforces the
 registered tool's exact capability/scope/resource contract, and only then
-invokes a host-registered executor supplied by the caller.
+invokes a host-registered executor supplied by the caller. When a
+``ToolAllowlist`` is bound, an OpenShell-style pre-execution validation
+(tool name + parameter patterns, fail-closed) runs as the final gate before
+the executor, and every decision is traced in ``enforcement_trace``.
 """
 from __future__ import annotations
 
@@ -20,6 +23,13 @@ from typing import Any
 
 from authorization import verify_authorization
 from contract import _valid_id, validate_run_request
+from tool_allowlist import (
+    ENFORCEMENT_TRACE_MAX,
+    EnforcementDecision,
+    EnforcementGate,
+    ToolAllowlist,
+    make_enforcement_event,
+)
 
 TOOL_CALL_SCHEMA_VERSION = "northstar.tool-call.v1"
 #: v3 binds the approval to the exact approved call identity: v2 approvals
@@ -386,11 +396,30 @@ class ActionGateway:
         approval_secret: bytes,
         max_results: int = 1024,
         max_tombstones: int = 8192,
+        tool_allowlist: ToolAllowlist | None = None,
+        enforcement_failure_policy: str = "fail_closed",
     ):
         _require_secret(approval_secret)
         self._approval_secret = approval_secret
         self._max_results = _require_positive_int(max_results, "max_results")
         self._max_tombstones = _require_positive_int(max_tombstones, "max_tombstones")
+        if tool_allowlist is not None and not isinstance(
+            tool_allowlist, ToolAllowlist
+        ):
+            raise ValueError("tool_allowlist must be a ToolAllowlist or None")
+        # OpenShell-style pre-execution validation (interceptor Validate phase):
+        # when no allowlist is bound the gate is absent and execution is
+        # unchanged; when bound, every call is checked before the executor.
+        self._allowlist = tool_allowlist
+        self._enforcement_gate = (
+            EnforcementGate(
+                tool_allowlist, failure_policy=enforcement_failure_policy
+            )
+            if tool_allowlist is not None
+            else None
+        )
+        self._enforcement_trace: list[dict[str, Any]] = []
+        self._enforcement_seq = 0
         self._tools: dict[str, ToolSpec] = {}
         self._results: OrderedDict[str, tuple[str, ToolExecutionResult, int]] = (
             OrderedDict()
@@ -403,6 +432,40 @@ class ActionGateway:
         if spec.name in self._tools:
             raise ValueError("tool is already registered")
         self._tools[spec.name] = spec
+
+    @property
+    def enforcement_trace(self) -> tuple[dict[str, Any], ...]:
+        """Append-only enforcement events (OCSF action/disposition analogue).
+
+        One event per pre-execution validation, in check order. Empty when no
+        allowlist is bound. Bounded at ``ENFORCEMENT_TRACE_MAX``.
+        """
+        return tuple(self._enforcement_trace)
+
+    def _record_enforcement(
+        self,
+        tool_name: str,
+        argument_digest: str,
+        decision: EnforcementDecision,
+    ) -> None:
+        """Emit one enforcement trace event per validation (never silent)."""
+        gate = self._enforcement_gate
+        assert gate is not None  # only called when an allowlist is bound
+        self._enforcement_seq += 1
+        self._enforcement_trace.append(
+            make_enforcement_event(
+                seq=self._enforcement_seq,
+                tool_name=tool_name,
+                arguments_digest=argument_digest,
+                decision=decision,
+                allowlist_version=gate.allowlist.version,
+                failure_policy=gate.failure_policy,
+            )
+        )
+        if len(self._enforcement_trace) > ENFORCEMENT_TRACE_MAX:
+            del self._enforcement_trace[
+                : len(self._enforcement_trace) - ENFORCEMENT_TRACE_MAX
+            ]
 
     def _prune_expired_idempotency(self, now: int) -> None:
         """Drop idempotency records that no live replay can reach.
@@ -546,6 +609,34 @@ class ActionGateway:
             # window: the result is gone so it cannot be served, and running
             # the executor again would break at-most-once. Fail closed.
             raise ValueError("idempotency result was evicted; refusing to re-execute")
+
+        # OpenShell Validate-phase analogue: pre-execution allowlist check.
+        # Runs after every authorization/approval gate and before the
+        # executor — and before the idempotency slot is reserved, so a denied
+        # call consumes nothing. The decision is always traced, allow or
+        # deny (OpenShell's OCSF action/disposition emission).
+        if self._enforcement_gate is not None:
+            try:
+                decision = self._enforcement_gate.check(
+                    call.tool_name, arguments
+                )
+            except Exception as error:
+                policy = self._enforcement_gate.failure_policy
+                if policy == "fail_open":
+                    decision = EnforcementDecision(
+                        "allow",
+                        f"enforcement gate errored; fail-open: {error}",
+                    )
+                else:
+                    decision = EnforcementDecision(
+                        "deny",
+                        f"enforcement gate errored; fail-closed: {error}",
+                    )
+            self._record_enforcement(call.tool_name, argument_digest, decision)
+            if decision.decision == "deny":
+                raise ValueError(
+                    f"tool allowlist denied execution: {decision.reason}"
+                )
 
         # Genuine miss: reserve the slot before invoking the executor, so a
         # full store fails closed here instead of after a side effect.

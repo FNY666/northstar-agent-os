@@ -1,4 +1,55 @@
-## Unreleased (sixty-sixth batch) — approval-gate adversarial test set, Auto Mode red-team methodology
+## Unreleased (sixty-seventh batch) — OpenShell-style tool allowlist: pre-execution validation + enforcement tracing
+
+Absorbs three mechanisms from NVIDIA OpenShell (Apache 2.0,
+[NVIDIA/OpenShell](https://github.com/NVIDIA/OpenShell), "the safe,
+private runtime for autonomous AI agents", announced 2026-09-28), each
+verified against its actual source before porting — nothing taken on
+announcement faith:
+
+- **Allowlist document** (`crates/openshell-policy-schema/src/lib.rs`):
+  `PolicyDocument` carries per-tool L7 rules — `L7Allow { tool:
+  QueryMatcher` (`Glob` short form or `Any` of globs), `params:
+  Map<String, ParameterMatcher> }` — with `#[serde(deny_unknown_fields)]`
+  strict parsing everywhere, and `parse_mcp_versions` rejecting an
+  *explicitly empty* allowlist as an authoring mistake
+  (`ParseMcpVersionsError::Empty`). New
+  `components/northstar-durable-run/tool_allowlist.py` mirrors this:
+  `ToolAllowlist.from_mapping` strictly parses `{version, tools: {name:
+  {params: {param: [globs]}}}}` (unknown fields rejected; empty `tools`
+  rejected), and `EnforcementGate.check` matches tool name + parameter
+  globs (`fnmatch`, any-of) — unknown tool, unlisted param, glob mismatch
+  or missing ruled param all deny, fail-closed.
+- **Pre-execution validation** (`crates/openshell-gateway-interceptors/
+  src/plan.rs`): the interceptor pipeline runs `Phase::ModifyOperation ->
+  Validate -> PostCommit` with a per-binding `FailurePolicy::{FailClosed,
+  FailOpen}`. `ActionGateway.execute` now runs the gate as its final
+  pre-execution validation — after every authorization/approval gate, before
+  the idempotency slot is reserved and before the executor is invoked — so
+  a denied call consumes nothing and never reaches the executor.
+  `enforcement_failure_policy` mirrors OpenShell's `FailurePolicy`
+  (default `fail_closed`); with no allowlist bound the gate is absent and
+  behavior is unchanged (backward compatible).
+- **Enforcement tracing** (`crates/openshell-ocsf`): every decision is
+  emitted as a structured event carrying `action` (allowed/denied,
+  `ApiActivityEvent.action`) and `disposition`
+  (`ApiActivityEvent.disposition`). The gateway keeps a bounded append-only
+  `enforcement_trace` — one event per check, in order, with `tool_name`,
+  `arguments_digest`, `decision`, `reason`, `allowlist_version` and
+  `failure_policy` (the OCSF action/disposition analogue).
+
+New metrics-track case `metrics.tool_allowlist_enforcement`
+(`components/northstar-agent-runtime/governance_bench.py`): 5 original
+deterministic probes drive the real `ActionGateway.execute` — 1 allow, 4
+denies (unknown tool, glob mismatch, unlisted param, missing ruled param).
+Baseline: block rate 1.00, executor ran exactly 1x (denied calls never
+execute), enforcement trace 5/5 events complete and ordered. `BENCH_VERSION`
+v10 → v11. `tool_allowlist` added to the durable-run packaging manifest and
+the API reference.
+
+Honest scope: OpenShell enforces at a container/network boundary (Landlock,
+L7 proxy, BlueField DPU). Only the *deterministic decision shape* is
+ported here — the container/runtime enforcement is not reproduced.
+
 
 New `redteam` bench track (6 deterministic cases,
 `components/northstar-agent-runtime/governance_bench.py`,
