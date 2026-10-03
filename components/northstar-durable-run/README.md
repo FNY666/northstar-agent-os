@@ -95,15 +95,23 @@ PYTHONPATH=components/northstar-durable-run \
 This is not a production scheduler, sandbox, VM, container runtime, browser
 profile manager, distributed queue, or complete Agent OS. The first prototype
 uses local JSONL and JSON files, caller-registered Python functions, and a
-single-process test harness. It does not prove atomic multi-process claims,
+single-process test harness. It does not prove atomic claims across hosts,
 network isolation, process isolation, native Linux
-signal behavior, secret rotation, or production deployment safety. The
-fencing tokens are enforced on every append and heartbeat, but the lease
-itself is still a read-modify-write JSON file: two processes racing an
-acquire/renew can both believe they hold the lease (no compare-and-swap),
-and the check-then-write between a token check and the following append is
-not atomic. Treat the tokens as a single-writer discipline with loud
-detection, not as a proven distributed lock.
+signal behavior, secret rotation, or production deployment safety.
+The lease read-modify-write (`acquire`/`heartbeat`/`renew`/`release`) is
+serialized with an `flock` on a `<lease>.lock` sidecar file that is never
+renamed or deleted, so cooperating processes on the same POSIX host produce
+exactly one claim winner and the fencing token increments exactly once per
+acquire; a crashed holder's lock is released by the kernel, and writes still
+go through temp-file + fsync + atomic rename, so no half-written lease is
+left behind. Where `fcntl` is unavailable (non-POSIX) the claim degrades
+honestly to thread-serial — `LeaseManager.cross_process_serialized` reports
+the guarantee instead of pretending, and cross-process atomicity there is
+unproven. The fencing tokens are enforced on every append and heartbeat,
+but the token check and the following append are still a check-then-write,
+not an atomic pair. Treat the lock as cooperative single-host arbitration
+and the tokens as a single-writer discipline with loud detection, not as a
+proven distributed lock.
 
 Event history is exportable into the repository's canonical NDJSON audit feed
 (`durable_audit.py`, envelope `audit.ndjson/1` from the run contract), so the

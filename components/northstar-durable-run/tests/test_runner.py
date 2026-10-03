@@ -1,4 +1,5 @@
 import json
+import multiprocessing
 import sys
 import tempfile
 import time
@@ -8,6 +9,7 @@ from pathlib import Path
 COMPONENT_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(COMPONENT_ROOT))
 
+import runner  # noqa: E402  (module itself, for fcntl monkeypatching)
 from durable_contract import RunContract  # noqa: E402
 from event_store import EventStore  # noqa: E402
 from runner import DurableRunner, FencingError, LeaseManager, StepPlan  # noqa: E402
@@ -96,6 +98,184 @@ class LeaseManagerTests(unittest.TestCase):
         self.leases.release("worker-a")
         with self.assertRaises(FencingError):
             self.leases.check_token("worker-a", token=1)
+
+
+def _race_acquire_worker(path_str, owner_id, gate, results, index):
+    """Child target: race an expired lease the moment the gate opens."""
+    gate.wait(15)
+    try:
+        lease = LeaseManager(path_str).acquire(owner_id, now=200, ttl_seconds=60)
+        results.put((index, "won", owner_id, lease["fencing_token"]))
+    except Exception as error:  # noqa: BLE001 - the point is who raised
+        results.put((index, "lost", owner_id, type(error).__name__))
+
+
+def _race_renew_worker(path_str, owner_id, token, gate, results, index):
+    """Child target: renew (re-acquire) an expired lease when the gate opens."""
+    gate.wait(15)
+    try:
+        lease = LeaseManager(path_str).renew(
+            owner_id, token=token, now=200, ttl_seconds=60
+        )
+        results.put((index, "won", owner_id, lease["fencing_token"]))
+    except Exception as error:  # noqa: BLE001 - the point is who raised
+        results.put((index, "lost", owner_id, type(error).__name__))
+
+
+@unittest.skipUnless(runner.fcntl is not None, "POSIX flock required")
+class LeaseClaimAtomicityTests(unittest.TestCase):
+    """The lease claim is atomic across cooperating processes on one host."""
+
+    def setUp(self):
+        self.tempdir = tempfile.TemporaryDirectory()
+        self.path = Path(self.tempdir.name) / "run.lease.json"
+        self.leases = LeaseManager(self.path)
+
+    def tearDown(self):
+        self.tempdir.cleanup()
+
+    def _drain(self, procs, results, count):
+        for proc in procs:
+            proc.join(30)
+        for proc in procs:
+            if proc.is_alive():
+                proc.terminate()
+                proc.join(5)
+        outcomes = []
+        while len(outcomes) < count:
+            outcomes.append(results.get(timeout=10))
+        return outcomes
+
+    def _widen_race_window(self):
+        """Make the read-modify-write race deterministic.
+
+        Every racer's read sleeps before its write, so without the file lock
+        all racers read the same stale lease and all believe they won; with
+        the lock they serialize and exactly one wins. The patch is applied
+        before forking, so children inherit it. Returns a cleanup callable.
+        """
+        original_read = LeaseManager._read
+
+        def slow_read(self):
+            value = original_read(self)
+            time.sleep(0.4)
+            return value
+
+        LeaseManager._read = slow_read
+        return lambda: setattr(LeaseManager, "_read", original_read)
+
+    def test_concurrent_acquire_has_exactly_one_winner(self):
+        # Eight real processes race one expired lease: the flock serializes
+        # the read-increment-write, so exactly one claim lands and the token
+        # moves exactly once (no double increment from a torn read).
+        self.leases.acquire("worker-seed", now=100, ttl_seconds=10)  # expires 110
+        restore = self._widen_race_window()
+        try:
+            gate = multiprocessing.Event()
+            results = multiprocessing.Queue()
+            procs = [
+                multiprocessing.Process(
+                    target=_race_acquire_worker,
+                    args=(str(self.path), f"worker-{i}", gate, results, i),
+                )
+                for i in range(8)
+            ]
+            for proc in procs:
+                proc.start()
+            gate.set()
+            outcomes = self._drain(procs, results, 8)
+        finally:
+            restore()
+        winners = [o for o in outcomes if o[1] == "won"]
+        self.assertEqual(len(winners), 1, f"expected one winner, got {outcomes}")
+        self.assertEqual(winners[0][3], 2)  # seed token 1 -> exactly one increment
+        final = self.leases._read()
+        self.assertEqual(final["owner_id"], winners[0][2])
+        self.assertEqual(final["fencing_token"], 2)
+
+    def test_concurrent_renew_and_acquire_have_exactly_one_holder(self):
+        # The scariest race: the old owner renews (re-acquires) the expired
+        # lease while a rival acquires it. Serialized, exactly one of them
+        # holds the lease afterwards and the file is never torn.
+        self.leases.acquire("worker-a", now=100, ttl_seconds=10)  # expires 110
+        restore = self._widen_race_window()
+        try:
+            gate = multiprocessing.Event()
+            results = multiprocessing.Queue()
+            renew_proc = multiprocessing.Process(
+                target=_race_renew_worker,
+                args=(str(self.path), "worker-a", 1, gate, results, 0),
+            )
+            acquire_proc = multiprocessing.Process(
+                target=_race_acquire_worker,
+                args=(str(self.path), "worker-b", gate, results, 1),
+            )
+            renew_proc.start()
+            acquire_proc.start()
+            gate.set()
+            outcomes = self._drain([renew_proc, acquire_proc], results, 2)
+        finally:
+            restore()
+        winners = [o for o in outcomes if o[1] == "won"]
+        self.assertEqual(len(winners), 1, f"expected one holder, got {outcomes}")
+        final = self.leases._read()
+        self.assertEqual(final["owner_id"], winners[0][2])
+        self.assertEqual(final["fencing_token"], 2)
+
+    def test_lock_file_is_stable_and_never_deleted(self):
+        # The .lock file must keep its inode across operations: deleting or
+        # recreating it would reopen the inode-replacement race the lock
+        # exists to close.
+        lock = Path(str(self.path) + ".lock")
+        self.leases.acquire("worker-a", now=100, ttl_seconds=20)
+        self.assertTrue(lock.exists())
+        inode = lock.stat().st_ino
+        self.leases.heartbeat("worker-a", token=1, now=110, ttl_seconds=20)
+        self.leases.release("worker-a")
+        self.leases.acquire("worker-b", now=200, ttl_seconds=20)
+        self.assertTrue(lock.exists())
+        self.assertEqual(lock.stat().st_ino, inode)
+
+    def test_no_temp_files_leak_from_writes(self):
+        for i in range(5):
+            lease = self.leases.acquire("worker-a", now=1000 + i * 100, ttl_seconds=20)
+            self.leases.heartbeat(
+                "worker-a", token=lease["fencing_token"],
+                now=1010 + i * 100, ttl_seconds=20,
+            )
+            self.leases.release("worker-a")
+        leftovers = [
+            p for p in Path(self.tempdir.name).iterdir()
+            if p.name not in (self.path.name, self.path.name + ".lock")
+        ]
+        self.assertEqual(leftovers, [])
+
+
+class LeaseDegradedPlatformTests(unittest.TestCase):
+    """Where fcntl is absent the claim degrades honestly, never silently."""
+
+    def setUp(self):
+        self.tempdir = tempfile.TemporaryDirectory()
+        self.path = Path(self.tempdir.name) / "run.lease.json"
+
+    def tearDown(self):
+        self.tempdir.cleanup()
+
+    def test_without_fcntl_claim_is_thread_serial_only(self):
+        saved = runner.fcntl
+        runner.fcntl = None
+        self.addCleanup(setattr, runner, "fcntl", saved)
+        leases = LeaseManager(self.path)
+        self.assertFalse(leases.cross_process_serialized)
+        lease = leases.acquire("worker-a", now=100, ttl_seconds=20)
+        self.assertEqual(lease["fencing_token"], 1)
+        leases.heartbeat("worker-a", token=1, now=110, ttl_seconds=20)
+        leases.release("worker-a")
+        self.assertFalse(self.path.exists())
+
+    @unittest.skipUnless(runner.fcntl is not None, "POSIX flock required")
+    def test_posix_reports_cross_process_serialization(self):
+        self.assertTrue(LeaseManager(self.path).cross_process_serialized)
 
 
 class DurableRunnerTests(unittest.TestCase):

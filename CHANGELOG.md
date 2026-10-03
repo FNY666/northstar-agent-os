@@ -1,5 +1,33 @@
 # Northstar Agent OS — initial public component
 
+## Unreleased (forty-second batch) — cooperative atomic lease claim via flock
+
+The durable-run lease's `acquire`/`heartbeat`/`renew`/`release` were plain
+read-modify-write: two processes racing an expired lease could both believe
+they won (the README honestly said multi-process atomicity was unproven).
+The read-modify-write now runs inside a host-local file lock — an
+`flock(LOCK_EX)` on a `<lease>.lock` sidecar file that is never renamed or
+deleted, layered over a `threading.Lock`, held only for the critical section
+(never across an action). On POSIX, cooperating processes on the same host
+produce exactly one claim winner and the fencing token increments exactly
+once per acquire; a crashed holder's lock is released by the kernel, and
+writes still go through temp-file + fsync + atomic rename, so there is no
+half-written lease to recover. Where `fcntl` is unavailable the claim
+degrades honestly to thread-serial — `LeaseManager.cross_process_serialized`
+reports the guarantee instead of silently pretending, and the README states
+the exact scope. The fencing token is untouched and orthogonal: the lock
+decides *who got there first*, the token decides *whose writes are still
+valid*. Cross-host claims remain unproven by design (the lease is a local
+file), as does the check-then-write between a token check and the following
+append.
+
+**Verification:** 100/100 durable-run tests green (6 new: 8-process
+concurrent acquire yields exactly one winner with a single token increment,
+renew-vs-acquire race yields exactly one holder, lock-file inode stability
+across operations, no temp-file leaks, no-fcntl degradation is thread-serial
+and self-reporting; the race tests fail against the pre-fix implementation
+once the race window is widened deterministically).
+
 ## Unreleased (forty-first batch) — thirteen governance bench scenarios from the third-round research
 
 Absorbed 12 support/voice-agent governance scenarios (third-round research
