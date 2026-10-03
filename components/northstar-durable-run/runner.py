@@ -23,6 +23,11 @@ from durable_contract import (
 )
 from event_store import EventStore
 
+try:  # POSIX only; without it the claim is thread-serial, not process-serial
+    import fcntl
+except ImportError:  # pragma: no cover - platform dependent
+    fcntl = None  # type: ignore[assignment]
+
 _ID_RE = re.compile(r"^[^\s/\\]+$")
 _SCOPE_RE = re.compile(r"^[^\s/\\:]+:[^\s/\\:]+$")
 _MAX_INPUT_BYTES = 256_000
@@ -102,6 +107,61 @@ def _require_fencing_token(value: Any) -> int:
     return value
 
 
+class _LeaseFileLock:
+    """Serialize one lease file's read-modify-write on this host.
+
+    The lock file (``<lease path>.lock``) is opened — never renamed and never
+    deleted. Deleting or renaming it would reopen the inode-replacement race
+    the lock exists to close: two processes could then hold locks on different
+    inodes while believing they serialize the same lease. The lock file is
+    never written, so there is nothing to corrupt; if a holder crashes, the
+    kernel releases its ``flock`` and the next contender proceeds.
+
+    Two layers, held only for the duration of the critical section (never
+    across an action, a heartbeat interval, or any caller code):
+
+    - ``threading.Lock``: always held — serializes threads of this process.
+    - ``fcntl.flock(LOCK_EX)``: held only where ``fcntl`` exists (POSIX) —
+      serializes cooperating processes on the same host. Where ``fcntl`` is
+      unavailable the claim degrades honestly to thread-serial; see
+      :meth:`LeaseManager.cross_process_serialized`.
+    """
+
+    def __init__(self, lease_path: Path):
+        self._lock_path = Path(str(lease_path) + ".lock")
+        self._thread_lock = threading.Lock()
+        self._fd: int | None = None
+
+    def __enter__(self) -> "_LeaseFileLock":
+        self._lock_path.parent.mkdir(parents=True, exist_ok=True)
+        self._thread_lock.acquire()
+        try:
+            self._fd = os.open(str(self._lock_path), os.O_RDWR | os.O_CREAT, 0o600)
+        except OSError:
+            self._thread_lock.release()
+            raise
+        if fcntl is not None:
+            try:
+                fcntl.flock(self._fd, fcntl.LOCK_EX)
+            except OSError:
+                os.close(self._fd)
+                self._fd = None
+                self._thread_lock.release()
+                raise
+        return self
+
+    def __exit__(self, *exc: Any) -> bool:
+        try:
+            if fcntl is not None and self._fd is not None:
+                fcntl.flock(self._fd, fcntl.LOCK_UN)
+        finally:
+            if self._fd is not None:
+                os.close(self._fd)
+                self._fd = None
+            self._thread_lock.release()
+        return False
+
+
 @dataclass(frozen=True)
 class StepPlan:
     step_id: str
@@ -139,10 +199,41 @@ class LeaseManager:
     epoch is distinguishable from the current holder even after its TTL has
     lapsed. Heartbeats, renewals, and fenced appends must present the token of
     the epoch they belong to; a mismatch fails closed with :class:`FencingError`.
+
+    Claim atomicity (what "one winner" means here)
+    ---------------------------------------------
+    The read-modify-write of :meth:`acquire`, :meth:`heartbeat`, :meth:`renew`,
+    and :meth:`release` runs inside :class:`_LeaseFileLock`, so on one host:
+
+    - POSIX (``fcntl`` available): cooperating processes are serialized — two
+      processes racing an expired lease produce exactly one winner, and the
+      fencing token increments exactly once per acquire.
+    - without ``fcntl``: only threads of this process are serialized;
+      cross-process atomicity is **unproven** (see
+      :meth:`cross_process_serialized`).
+    - across hosts: never — the lease is a local file; there is no
+      distributed claim here.
+
+    The lock and the fencing token are orthogonal: the lock decides *who got
+    there first* (claim arbitration); the token decides *whose writes are
+    still valid* (stale-holder detection). Neither replaces the other.
     """
 
     def __init__(self, path: str | Path):
         self.path = Path(path).absolute()
+        self._file_lock = _LeaseFileLock(self.path)
+
+    @property
+    def cross_process_serialized(self) -> bool:
+        """Whether mutating lease operations are serialized across processes.
+
+        True on POSIX (``fcntl.flock`` on the ``<lease>.lock`` file). False
+        where ``fcntl`` is unavailable: the critical sections are then only
+        serialized across threads of this process, and two processes racing a
+        claim can still both believe they won. Never silently stronger than
+        this — check it before relying on the claim across processes.
+        """
+        return fcntl is not None
 
     def _read(self) -> dict[str, Any] | None:
         if not self.path.exists():
@@ -190,20 +281,22 @@ class LeaseManager:
             raise ValueError("now must be a positive integer")
         if not isinstance(ttl_seconds, int) or isinstance(ttl_seconds, bool) or ttl_seconds <= 0:
             raise ValueError("ttl_seconds must be a positive integer")
-        current = self._read()
-        if current is not None and now < current["expires_at"]:
-            raise ValueError("lease is held by another active owner")
-        # A new fencing epoch on every acquire: the token only moves forward
-        # per lease file, so an older epoch's holder can never present a
-        # token that matches the current one.
-        token = current["fencing_token"] + 1 if current is not None else 1
-        lease = {
-            "owner_id": owner_id,
-            "expires_at": now + ttl_seconds,
-            "fencing_token": token,
-        }
-        self._write(lease)
-        return lease
+        with self._file_lock:
+            current = self._read()
+            if current is not None and now < current["expires_at"]:
+                raise ValueError("lease is held by another active owner")
+            # A new fencing epoch on every acquire: the token only moves forward
+            # per lease file, so an older epoch's holder can never present a
+            # token that matches the current one. The file lock makes the
+            # read-increment-write atomic across cooperating processes.
+            token = current["fencing_token"] + 1 if current is not None else 1
+            lease = {
+                "owner_id": owner_id,
+                "expires_at": now + ttl_seconds,
+                "fencing_token": token,
+            }
+            self._write(lease)
+            return lease
 
     def assert_valid(self, owner_id: str, *, now: int) -> dict[str, Any]:
         _require_id(owner_id, "owner_id")
@@ -227,24 +320,25 @@ class LeaseManager:
             raise ValueError("now must be an integer")
         if not isinstance(ttl_seconds, int) or isinstance(ttl_seconds, bool) or ttl_seconds <= 0:
             raise ValueError("ttl_seconds must be a positive integer")
-        current = self._read()
-        if current is None:
-            raise ValueError("lease does not exist")
-        if current["owner_id"] != owner_id:
-            raise FencingError("lease owner does not match")
-        if now >= current["expires_at"]:
-            raise ValueError("lease has expired")
-        if current["fencing_token"] != token:
-            raise FencingError(
-                "fencing token mismatch: the lease was taken over by another owner"
-            )
-        lease = {
-            "owner_id": owner_id,
-            "expires_at": now + ttl_seconds,
-            "fencing_token": token,
-        }
-        self._write(lease)
-        return lease
+        with self._file_lock:
+            current = self._read()
+            if current is None:
+                raise ValueError("lease does not exist")
+            if current["owner_id"] != owner_id:
+                raise FencingError("lease owner does not match")
+            if now >= current["expires_at"]:
+                raise ValueError("lease has expired")
+            if current["fencing_token"] != token:
+                raise FencingError(
+                    "fencing token mismatch: the lease was taken over by another owner"
+                )
+            lease = {
+                "owner_id": owner_id,
+                "expires_at": now + ttl_seconds,
+                "fencing_token": token,
+            }
+            self._write(lease)
+            return lease
 
     def renew(
         self, owner_id: str, *, token: int, now: int, ttl_seconds: int
@@ -263,21 +357,22 @@ class LeaseManager:
             raise ValueError("now must be a positive integer")
         if not isinstance(ttl_seconds, int) or isinstance(ttl_seconds, bool) or ttl_seconds <= 0:
             raise ValueError("ttl_seconds must be a positive integer")
-        current = self._read()
-        if current is None:
-            raise FencingError("lease does not exist")
-        if current["owner_id"] != owner_id or current["fencing_token"] != token:
-            raise FencingError(
-                "fencing token mismatch: the lease was taken over by another owner"
-            )
-        new_token = token + 1 if now >= current["expires_at"] else token
-        lease = {
-            "owner_id": owner_id,
-            "expires_at": now + ttl_seconds,
-            "fencing_token": new_token,
-        }
-        self._write(lease)
-        return lease
+        with self._file_lock:
+            current = self._read()
+            if current is None:
+                raise FencingError("lease does not exist")
+            if current["owner_id"] != owner_id or current["fencing_token"] != token:
+                raise FencingError(
+                    "fencing token mismatch: the lease was taken over by another owner"
+                )
+            new_token = token + 1 if now >= current["expires_at"] else token
+            lease = {
+                "owner_id": owner_id,
+                "expires_at": now + ttl_seconds,
+                "fencing_token": new_token,
+            }
+            self._write(lease)
+            return lease
 
     def check_token(self, owner_id: str, *, token: int) -> dict[str, Any]:
         """Fail closed unless this owner still holds the current fencing epoch.
@@ -300,17 +395,18 @@ class LeaseManager:
         return current
 
     def release(self, owner_id: str) -> None:
-        current = self._read()
-        if current is None:
-            return
-        if current["owner_id"] != owner_id:
-            raise ValueError("lease owner does not match")
-        try:
-            self.path.unlink()
-        except FileNotFoundError:
-            return
-        except OSError as error:
-            raise ValueError("lease could not be released") from error
+        with self._file_lock:
+            current = self._read()
+            if current is None:
+                return
+            if current["owner_id"] != owner_id:
+                raise ValueError("lease owner does not match")
+            try:
+                self.path.unlink()
+            except FileNotFoundError:
+                return
+            except OSError as error:
+                raise ValueError("lease could not be released") from error
 
 
 class DurableRunner:

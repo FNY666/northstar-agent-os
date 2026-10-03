@@ -99,6 +99,8 @@ The execution lease's fencing epoch is over for this holder.
 
 A single-owner, expiring local lease with fencing tokens.
 
+- `cross_process_serialized` (property)
+  - Whether mutating lease operations are serialized across processes.
 - `acquire(owner_id: str, *, now: int, ttl_seconds: int)`
 - `assert_valid(owner_id: str, *, now: int)`
 - `heartbeat(owner_id: str, *, token: int, now: int, ttl_seconds: int)`
