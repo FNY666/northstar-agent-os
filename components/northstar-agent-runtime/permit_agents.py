@@ -220,8 +220,7 @@ def _check_decision_kind(value: Any) -> str:
 
 def _verify_sig(pubkey_hex: str, message: bytes, sig_hex: str) -> bool:
     try:
-        ed25519.verify(bytes.fromhex(pubkey_hex), message, bytes.fromhex(sig_hex))
-        return True
+        return bool(ed25519.verify(bytes.fromhex(pubkey_hex), message, bytes.fromhex(sig_hex)))
     except Exception:
         return False
 
