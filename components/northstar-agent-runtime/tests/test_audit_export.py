@@ -3,12 +3,21 @@ import contextlib
 import io
 import json
 import shutil
+import sys
 import tempfile
 import unittest
 from pathlib import Path
 
 import cli
 import support  # noqa: F401
+
+# Test-only parity check against the normative envelope validator. The runtime
+# itself stays dependency-free; only this test imports the contract.
+_CONTRACT_ROOT = Path(__file__).resolve().parents[2] / "northstar-run-contract"
+if str(_CONTRACT_ROOT) not in sys.path:
+    sys.path.insert(0, str(_CONTRACT_ROOT))
+import audit as normative_audit  # noqa: E402
+
 from audit_export import (
     AUDIT_SCHEMA_VERSION,
     COMPONENT,
@@ -16,6 +25,7 @@ from audit_export import (
     records_to_ndjson,
     session_path,
     transcript_path_to_ndjson,
+    validate_audit_record,
 )
 from sessions import SessionStore
 
@@ -116,6 +126,72 @@ class RecordMappingTests(unittest.TestCase):
             record_to_audit({"type": "result"})
         with self.assertRaises(ValueError):
             record_to_audit({})
+
+
+class EnvelopeValidationTests(unittest.TestCase):
+    def test_non_canonical_timestamps_are_rejected(self):
+        for ts in (
+            "2026-09-07T03:04:05.123456Z",  # microsecond precision
+            "2026-09-07T03:04:05.12Z",  # wrong fractional width
+            "2026-09-07T03:04:05+00:00",  # offset instead of Z
+            "2026-09-07 03:04:05",  # not RFC 3339 at all
+        ):
+            with self.subTest(ts=ts):
+                with self.assertRaises(ValueError):
+                    record_to_audit(sample_record("assistant", ts=ts))
+
+    def test_second_precision_timestamps_are_accepted(self):
+        audit = record_to_audit(sample_record("assistant", ts="2026-09-07T03:04:05Z"))
+        self.assertEqual(audit["ts"], "2026-09-07T03:04:05Z")
+
+    def test_non_integer_or_negative_seq_is_rejected(self):
+        for index in (-1, True, "3", 3.0):
+            with self.subTest(index=index):
+                with self.assertRaises(ValueError):
+                    record_to_audit(sample_record("assistant", index=index))
+
+    def test_invalid_event_identifier_is_rejected(self):
+        with self.assertRaises(ValueError):
+            record_to_audit(sample_record("weird type"))
+
+    def test_overlong_session_id_is_rejected(self):
+        with self.assertRaises(ValueError):
+            record_to_audit(sample_record("assistant", session_id="s" * 201))
+
+
+class NormativeParityTests(unittest.TestCase):
+    """The mirror must agree with northstar-run-contract/audit.py exactly."""
+
+    def test_mirror_output_passes_both_validators(self):
+        records = [
+            sample_record("session_start", data={"provider": "scripted"}),
+            sample_record("denial", index=4, tool="Write", reason="no"),
+            sample_record("tool_result", index=7, content=[{"is_error": True}]),
+            sample_record("result", index=9, subtype="error_timeout"),
+            sample_record("assistant", index=12, ts="2026-09-07T03:04:05Z"),
+        ]
+        for record in records:
+            mirror_out = record_to_audit(record)
+            with self.subTest(event=record["type"]):
+                self.assertEqual(validate_audit_record(mirror_out), ())
+                self.assertEqual(normative_audit.validate_record(mirror_out), ())
+
+    def test_canonical_lines_are_byte_identical(self):
+        records = [sample_record("assistant", index=i) for i in range(5)]
+        mirror_text = records_to_ndjson(records)
+        normative_text = normative_audit.to_ndjson(record_to_audit(r) for r in records)
+        self.assertEqual(mirror_text, normative_text)
+
+    def test_both_validators_reject_the_same_bad_records(self):
+        bad = [
+            sample_record("assistant", ts="2026-09-07T03:04:05.123456Z"),
+            sample_record("assistant", index=-1),
+            sample_record("weird type"),
+        ]
+        for record in bad:
+            with self.subTest(record=record["type"]):
+                with self.assertRaises(ValueError):
+                    record_to_audit(record)
 
 
 class NdjsonTextTests(unittest.TestCase):

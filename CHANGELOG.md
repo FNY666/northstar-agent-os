@@ -1,5 +1,23 @@
 # Northstar Agent OS — initial public component
 
+## Unreleased (thirty-seventh batch) — audit export mirror validates the envelope
+
+`components/northstar-agent-runtime/audit_export.py` is a deliberate
+zero-dependency mirror of the normative `audit.ndjson/1` validator in
+`northstar-run-contract/audit.py` — and it had drifted. The mirror never
+validated what it emitted: a hand-built record with microsecond timestamps
+or an offset, a negative/bool/float `seq` (via a bare `int()` cast), or an
+illegal event name would sail through export and only explode downstream
+when `run-evidence` refused to seal the feed. `record_to_audit()` now
+enforces the envelope rules before emitting (new public
+`validate_audit_record()`), failing loudly at export time instead of
+leaking a bad feed. Eight new regression tests pin the rejections, plus a
+`NormativeParityTests` cross-check that runs the mirror's output through
+the contract's own validator and asserts byte-identical canonical lines.
+
+**Verification:** runtime 1395/1395 and run-evidence 51/51 green; full
+clinic below.
+
 ## Unreleased (thirty-sixth batch) — bind approvals to the exact arguments
 
 A local replay proof showed the gap: a `northstar.approval.v1` token pinned
