@@ -1,4 +1,80 @@
-## Unreleased (sixty-eighth batch) — compositional safety: step-compliant sequences that violate in composition
+## Unreleased (sixty-ninth batch) — pledge-style self-restriction for tool execution
+
+Absorbs the OpenBSD `pledge(2)` permission model (man.openbsd.org/pledge.2,
+verified against the man page, not a summary): a process declares the
+promises it needs **before** acting, may only **tighten** (subset — never
+widen), and dies on violation (`SIGABRT`). Ported to tool-effect execution
+as a one-way privilege ratchet, distinct from the per-call permission gate:
+
+- **Semantic layer** (`components/northstar-agent-runtime/tools/pledge.py`):
+  `PledgeContext` — `pledge()` declares, `tighten()` narrows (widening
+  refused with an audit event), `require()` fails closed with
+  `PledgeViolation` on out-of-pledge operations, `subcontext()` is the
+  `execpromises` analogue (child inherits a subset only). Pure Python,
+  always enforced, unit-testable offline. Promise vocabulary is
+  pledge-inspired and tool-scoped: `stdio rpath wpath cpath tmppath dpath
+  unix inet dns proc exec id clock tty`.
+- **Mechanism layer** (same module, deliberately separated): Landlock
+  self-restriction (unprivileged, irreversible — the closest Linux
+  analogue of pledge's one-way ratchet; filesystem promises map to
+  `PATH_BENEATH` rules, verified ABI v1 against a real kernel) plus the
+  existing seccomp-BPF denylist. The `python3 -c` loader applies Landlock,
+  then the seccomp filter, then execs — a mechanism failure exits 126
+  instead of running unrestricted. Every layer reports honestly via
+  `enforcement_report()`; where the kernel cannot self-restrict, the
+  semantic layer still fails closed.
+- **Wiring**: `SandboxRequest.pledges` (tighten-only vs the operator's
+  `shell_pledges`, mirroring the seccomp `resolve_mode` pattern); a Shell
+  pledge without `proc`/`exec` is refused before the command exists. On
+  bwrap, a pledge without `wpath`/`cpath` turns the workspace bind
+  read-only; on the process backend (Linux), the pledge loader applies
+  Landlock + seccomp. The Shell input schema documents the `pledges`
+  field.
+- **New bench track** `metrics.pledge_semantics`
+  (`BENCH_VERSION` v10 → v11, scorecard v11): 6 violation probes
+  (out-of-pledge → blocked + audited), 5 tighten probes (subset accepted,
+  widening refused), 9 legitimate probes (all allowed — not a deny-all),
+  3 execpromises probes, 2 misuse probes. All expectations pinned at
+  1.0. Landlock availability is probed and reported honestly, not
+  asserted, so the bench passes on kernels without Landlock.
+- 28 new tests (`tests/test_pledge.py`), including a real end-to-end:
+  a Landlock-restricted child with a read-only pledge cannot write the
+  workspace (skipped honestly where Landlock is unavailable). API docs
+  regenerated (`tools.pledge` in the docbuild manifest).
+
+New metrics-track case `metrics.ask_timing`
+(`components/northstar-agent-runtime/governance_bench.py`), measuring
+whether the gate asks *when it should* — the HiL-Bench question
+(arXiv:2604.09408, "Do Agents Know When to Ask for Help?", preprint, no
+peer-reviewed venue), honestly scoped to the deterministic engine:
+
+- **Ask-F1, gate analogue**: HiL-Bench defines Precision = |Q_rel|/|Q|
+  (relevant questions over all questions — penalizes over-asking),
+  Recall = |B_addr|/|B| (blockers addressed over all blockers —
+  penalizes under-asking), ASK-F1 = 2·P·R/(P+R). Here each of the 14
+  original synthetic probes is labelled with ground-truth `expect_ask`
+  (information gap present → a careful gate should escalate), and "ask"
+  is the engine consulting the host callback. The 14-probe corpus is
+  original synthetic situations inspired by the method — NOT the
+  official HiL-Bench dataset (300 tasks / 1,131 blockers; official
+  dataset location not verified).
+- **Baseline**: Ask-F1 0.7368 (precision 0.700, recall 0.778; over-ask
+  rate 0.300, under-ask rate 0.222). The confusion matrix is closed
+  ground truth (7 TP / 3 FP / 2 FN / 2 TN): the blanket-ask posture
+  asks every mutating call, so the 3 fully-specified routine ops (plus
+  one explicitly pre-authorized repeat) cost precision — including the
+  deliberate per-call re-ask binding from the fifty-fifth batch, which
+  trades ask-precision for fail-closed safety — while standing
+  authorization (allow-list) and a permissive posture suppress 2
+  warranted asks (the silent-failure analogue). Per-blocker recall
+  follows HiL-Bench's three categories: missing_information 0.75,
+  ambiguous_request 0.667, contradictory_information 1.0.
+- This measures the deterministic gate's escalation *judgment* on
+  labelled situations, NOT model help-seeking behavior (HiL-Bench
+  proper reports e.g. Claude Opus 4.6 at 44% ASK-F1).
+
+`BENCH_VERSION` v9 → v10; `ASK_TIMING_CORPUS` and `run_ask_timing`
+exported; human + `--json` output print the new track.
 
 New metrics-track case `metrics.compositional`
 (`components/northstar-agent-runtime/governance_bench.py`), absorbing the
