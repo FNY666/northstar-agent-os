@@ -1,22 +1,29 @@
 # Northstar Agent OS — initial public component
 
-## Unreleased (thirty-seventh batch) — audit export mirror validates the envelope
+## Unreleased (thirty-ninth batch) — durable-run fencing tokens
 
-`components/northstar-agent-runtime/audit_export.py` is a deliberate
-zero-dependency mirror of the normative `audit.ndjson/1` validator in
-`northstar-run-contract/audit.py` — and it had drifted. The mirror never
-validated what it emitted: a hand-built record with microsecond timestamps
-or an offset, a negative/bool/float `seq` (via a bare `int()` cast), or an
-illegal event name would sail through export and only explode downstream
-when `run-evidence` refused to seal the feed. `record_to_audit()` now
-enforces the envelope rules before emitting (new public
-`validate_audit_record()`), failing loudly at export time instead of
-leaking a bad feed. Eight new regression tests pin the rejections, plus a
-`NormativeParityTests` cross-check that runs the mirror's output through
-the contract's own validator and asserts byte-identical canonical lines.
+The lease could be stolen mid-run and the old holder's writes would still
+land: heartbeats only ran before each step (never during a long action), and
+nothing checked a fencing token before appending events, so an expired
+holder's `step.finished` could interleave with the new holder's event stream.
+`LeaseManager` now issues a monotonically increasing `fencing_token` on every
+acquire; heartbeats, renewals, and every event append must present the current
+token, and a mismatch fails closed with `FencingError` — the stale write is
+refused instead of landing. A `run.fenced` marker (state-neutral, written by
+the new legitimate holder at takeover) records the epoch change without
+perturbing the new run's derived status. `DurableRunner` also accepts
+`heartbeat_interval_seconds` (requires `clock`, must be shorter than the TTL)
+to renew the lease from a background thread while a single step action
+executes, and the action's result is only appended after proving the epoch is
+still held. Honest ceiling, unchanged: the lease file is still
+read-modify-write JSON with no compare-and-swap, so multi-process atomicity
+is not proven — the tokens are a loud single-writer discipline, not a
+distributed lock.
 
-**Verification:** runtime 1395/1395 and run-evidence 51/51 green; full
-clinic below.
+**Verification:** 82/82 durable-run tests green (7 new fencing tests; 2
+stolen-lease tests redefined to expect refusal instead of a landed stale
+write); runtime `test_session_lease` 54/54 green (envelope now carries
+`fencing_token`, ignored by the runtime reader).
 
 ## Unreleased (thirty-eighth batch) — bind approvals to the exact call identity
 
@@ -37,6 +44,24 @@ tests pin the single-execution binding, the cross-identity refusals, the
 risk-upgrade fail-closed behavior, and the forgery rejections.
 
 **Verification:** 80/80 durable-run tests green; component-only scope below.
+
+## Unreleased (thirty-seventh batch) — audit export mirror validates the envelope
+
+`components/northstar-agent-runtime/audit_export.py` is a deliberate
+zero-dependency mirror of the normative `audit.ndjson/1` validator in
+`northstar-run-contract/audit.py` — and it had drifted. The mirror never
+validated what it emitted: a hand-built record with microsecond timestamps
+or an offset, a negative/bool/float `seq` (via a bare `int()` cast), or an
+illegal event name would sail through export and only explode downstream
+when `run-evidence` refused to seal the feed. `record_to_audit()` now
+enforces the envelope rules before emitting (new public
+`validate_audit_record()`), failing loudly at export time instead of
+leaking a bad feed. Eight new regression tests pin the rejections, plus a
+`NormativeParityTests` cross-check that runs the mirror's output through
+the contract's own validator and asserts byte-identical canonical lines.
+
+**Verification:** runtime 1395/1395 and run-evidence 51/51 green; full
+clinic below.
 
 ## Unreleased (thirty-sixth batch) — bind approvals to the exact arguments
 
