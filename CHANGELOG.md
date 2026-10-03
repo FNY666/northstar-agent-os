@@ -1,3 +1,30 @@
+## Unreleased (one-hundred-thirtieth batch) — greenwashing evidence gates (AI-waste/circular-economy absorption)
+
+New module `greenwash.py`: `recycled_content_receipt()` — recycled-content
+claims bind `(test_protocol_digest, batch_scope, measured_sample_n,
+measured_fraction_bps)`; a single-sample claim is
+`greenwash.cherry_picked` (UK ASA lesson). `mass_balance_method_gate()` —
+mass-balance claims must declare their attribution method from a closed
+vocabulary; undeclared is `greenwash.undeclared_attribution` (NGO
+mass-balance loophole lesson). `claim_evidence_chain()` — environmental
+claims bind an evidence chain (sensors / physical watermarks /
+third-party certs); none or self-declared-only is NON_AUTHORITATIVE
+(EU ECGT lesson: no evidence, no claim). `purity_claim_binding()` —
+sorting-purity claims bind test protocol + measured batch;
+vendor-declared purity without a protocol is
+`greenwash.ungraded_purity` (ZenRobotics 99.6% lesson), claims above
+measured + tolerance are `greenwash.purity_overclaim`.
+`battery_second_life_gate()` — redeployment needs a live
+safety-inspection receipt; without it, deny.
+`decommission_path()` — datacenter-retired hardware must route through
+the 110th-batch deployment-registry registration it retires;
+unrouted decommissioning is `greenwash.unrouted_decommission`.
+`greenwash_probe()` — bench probe flagging marketing claims with
+environmental keywords and no bound evidence. Honest boundary:
+receipts bind declared evidence chains; they don't certify actual
+environmental benefit. Bench track `metrics.greenwash`: 12 scenarios,
+4 allow / 8 deny.
+
 ## Unreleased (one-hundred-twenty-seventh batch) — algorithmic-management guards (AI-logistics absorption)
 
 New module `labor_algo.py`: `quota_receipt()` — productivity quotas are

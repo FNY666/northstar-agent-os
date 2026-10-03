@@ -74,6 +74,7 @@ MANIFEST: dict[str, tuple[str, ...]] = {
     "northstar-agent-runtime": (
         "adjudication",
         "embodied",
+        "greenwash",
         "licensing",
         "labor_algo",
         "approver_separation",
