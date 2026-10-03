@@ -499,6 +499,25 @@ What a green case must produce. Checked after the run, never before.
 #### `BenchReport`
 
 - `as_dict()`
+#### `MetricStep`
+
+One ordered evaluation inside a probe (blast-radius needs sequences).
+
+#### `MetricProbe`
+
+One gate-decision probe with closed ground truth.
+
+- `iter_steps()`
+#### `CorpusSample`
+
+#### `run_metric_corpus()`
+
+Evaluate every probe under its declared engine (native run).
+
+#### `run_policy_axis()`
+
+Strict-vs-permissive effect size on the config-portable probe subset.
+
 #### `BenchHarness`
 
 Temp workspaces + scripted providers for one suite run.

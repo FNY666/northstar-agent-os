@@ -20,6 +20,7 @@ cases drive :class:`~loop.AgentRuntime` the same way production does.
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import shutil
 import sys
@@ -33,13 +34,13 @@ from agents import builtin_registry
 from hooks import HookRegistry
 from loop import AgentRuntime, RuntimeConfig
 from permissions import PermissionConfig, PermissionEngine
-from providers.base import ResultMessage, SystemMessage, UserMessage
+from providers.base import AssistantMessage, ResultMessage, SystemMessage, ToolUseBlock, UserMessage
 from providers.scripted import ScriptedProvider
 from tools import ToolLimits, ToolSandbox, build_default_registry
 
 #: Semantic version of the public case set. Bump when a case is added, removed,
 #: or its expected verdict changes — consumers pin against this string.
-BENCH_VERSION = "northstar.governance.bench.v4"
+BENCH_VERSION = "northstar.governance.bench.v5"
 
 USAGE_ERROR = 64
 
@@ -78,6 +79,10 @@ class BenchExpectation:
     #: after the standard assertions so a case can verify richer properties
     #: (audit-feed contents, approver payload fidelity, host-consult counts).
     post_check: Callable[[Any, Any], tuple[bool, str]] | None = None
+    #: Optional pre-computed decision metrics, attached by metric cases that
+    #: run the offline corpus in ``build()``. Propagated to the case result so
+    #: the suite report can carry a metrics section.
+    metrics: dict[str, Any] | None = None
 
 
 @dataclass
@@ -91,6 +96,8 @@ class CaseResult:
     denials: int = 0
     duration_ms: float = 0.0
     notes: str = ""
+    #: Decision metrics attached by metrics-track cases (empty otherwise).
+    metrics: dict[str, Any] = field(default_factory=dict)
 
     def as_dict(self) -> dict[str, Any]:
         return {
@@ -103,6 +110,7 @@ class CaseResult:
             "denials": self.denials,
             "duration_ms": round(self.duration_ms, 3),
             "notes": self.notes,
+            "metrics": self.metrics,
         }
 
 
@@ -116,6 +124,8 @@ class BenchReport:
     duration_ms: float
     tracks: dict[str, dict[str, int]] = field(default_factory=dict)
     cases: list[CaseResult] = field(default_factory=list)
+    #: Merged decision metrics from metrics-track cases, keyed by case id.
+    metrics: dict[str, Any] = field(default_factory=dict)
 
     def as_dict(self) -> dict[str, Any]:
         return {
@@ -127,8 +137,522 @@ class BenchReport:
             "total": self.total,
             "duration_ms": round(self.duration_ms, 3),
             "tracks": self.tracks,
+            "metrics": self.metrics,
             "cases": [case.as_dict() for case in self.cases],
         }
+
+
+# ---------------------------------------------------------------------------
+# Decision-metric corpus (scorecard v5).
+#
+# Absorbs the academic metric methodology from the fourth-round research
+# (agent frameworks + permission-gate papers, report §4), which found that no
+# mainstream framework ships a permission-decision benchmark while the 2026
+# paper literature has started measuring gate decisions directly:
+#
+#   1. layered FNR/FPR — end-to-end vs per-tier, separating "the gate never
+#      looked" (coverage gap) from "the gate looked and decided wrong";
+#   2. exemption coverage — share of state-changing calls decided at the
+#      allow-list tier without host review (default-deny => must be explicit);
+#   3. ask downstream approval rate — of the host consultations (ASKs), the
+#      share the host approves, with risk composition;
+#   4. approval->execution residual — ALLOW decisions with no matching
+#      execution evidence;
+#   5. ambiguity axes — target scope / blast radius / risk level boundary
+#      probes (the deterministic analogue of "targeted ambiguity": this gate
+#      decides on parameters, so the axes are parameter-space boundaries);
+#   6. policy-axis effect size — the same probe subset under strict vs
+#      permissive configs. This is deterministic policy strictness, NOT a
+#      model gate: a true deterministic-vs-model comparison would need a
+#      judge model and is out of scope for an offline bench (stated in the
+#      case notes rather than faked with a scripted "model").
+#
+# Tiers mirror PermissionEngine.evaluate's three layers:
+#   tier 1 = engine deny-lists (disallowed_tools, unknown_tool) — always deny;
+#   tier 2 = operator allow-list (allowed_tools) — auto-allow, skips review;
+#   tier 3 = mode rules + host callback — the evaluated tier.
+
+_TIER_1_SOURCES = frozenset({"disallowed_tools", "unknown_tool"})
+_TIER_2_SOURCES = frozenset({"allowed_tools"})
+
+
+def _tier_of(source: str) -> int:
+    """Map a PermissionDecision source to its gate tier."""
+    if source in _TIER_1_SOURCES:
+        return 1
+    if source in _TIER_2_SOURCES:
+        return 2
+    return 3  # mode:* and host_callback:* — the gate actually evaluated the call
+
+
+def _payload_digest(payload: Any) -> str:
+    canonical = json.dumps(payload, sort_keys=True, default=str)
+    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+
+
+@dataclass
+class MetricStep:
+    """One ordered evaluation inside a probe (blast-radius needs sequences)."""
+
+    payload: dict[str, Any] = field(default_factory=dict)
+    expect_allowed: bool = True
+
+
+@dataclass
+class MetricProbe:
+    """One gate-decision probe with closed ground truth."""
+
+    id: str
+    tool: str
+    kind: str  # read | edit | exec | task | network | other
+    mutating: bool
+    payload: dict[str, Any] = field(default_factory=dict)
+    expect_allowed: bool = True
+    expect_tier: int = 3
+    family: str = ""
+    axis: str | None = None  # None | "scope" | "blast_radius" | "risk"
+    engine: str = "strict"  # strict | ask | accept_edits | permissive | plan | bypass
+    allow: tuple[str, ...] = ()
+    disallow: tuple[str, ...] = ()
+    callback: str | None = None  # None | approve | refuse | timeout | scope_prefix | blast_cap3
+    known: bool = True
+    steps: tuple[MetricStep, ...] = ()
+    #: True when the probe's intent ground truth is config-independent, so it
+    #: can join the strict-vs-permissive policy-axis comparison.
+    axis_portable: bool = False
+
+    def iter_steps(self) -> Iterable[MetricStep]:
+        if self.steps:
+            yield from self.steps
+            return
+        yield MetricStep(payload=dict(self.payload), expect_allowed=self.expect_allowed)
+
+
+def _metric_callback(
+    name: str,
+    log: list[tuple[str, str, bool]],
+    probe: MetricProbe,
+) -> Callable[[str, dict[str, Any], Any], Any]:
+    """Build a deterministic host callback; every consultation is logged."""
+
+    def _record(tool: str, payload: dict[str, Any], approved: bool) -> bool:
+        log.append((tool, _payload_digest(payload), approved))
+        return approved
+
+    if name == "approve":
+
+        def _approve(tool: str, payload: dict[str, Any], ctx: Any) -> bool:
+            return _record(tool, payload, True)
+
+        return _approve
+    if name == "refuse":
+
+        def _refuse(tool: str, payload: dict[str, Any], ctx: Any) -> bool:
+            return _record(tool, payload, False)
+
+        return _refuse
+    if name == "timeout":
+
+        def _timeout(tool: str, payload: dict[str, Any], ctx: Any) -> bool:
+            _record(tool, payload, False)
+            raise TimeoutError("approver did not respond (metric corpus)")
+
+        return _timeout
+    if name == "scope_prefix":
+        # Target-scope axis: writes stay inside the build/ prefix. The path is
+        # normalised first so "build/../secret.txt" (which *looks* inside)
+        # is caught at the boundary.
+        import posixpath as _posixpath
+
+        def _scope(tool: str, payload: dict[str, Any], ctx: Any) -> bool:
+            path = _posixpath.normpath(str(payload.get("path", "")))
+            return _record(tool, payload, path == "build" or path.startswith("build/"))
+
+        return _scope
+    if name == "blast_cap3":
+        # Blast-radius axis: at most three writes per probe run, then fail closed.
+        state = {"n": 0}
+
+        def _blast(tool: str, payload: dict[str, Any], ctx: Any) -> bool:
+            state["n"] += 1
+            return _record(tool, payload, state["n"] <= 3)
+
+        return _blast
+    raise ValueError(f"unknown metric callback {name!r}")
+
+
+_METRIC_ENGINE_BASES: dict[str, dict[str, Any]] = {
+    "strict": {"mode": "default"},
+    "ask": {"mode": "default"},
+    "accept_edits": {"mode": "acceptEdits"},
+    "permissive": {
+        "mode": "acceptEdits",
+        "allowed_tools": ("Write", "Read", "Shell", "Grep", "LS"),
+    },
+    "plan": {"mode": "plan"},
+    "bypass": {"mode": "bypassPermissions"},
+}
+
+
+def _metric_engine(
+    probe: MetricProbe,
+    log: list[tuple[str, str, bool]],
+    *,
+    engine_name: str | None = None,
+    extra_allow: tuple[str, ...] = (),
+) -> PermissionEngine:
+    """Build the engine for one probe evaluation.
+
+    ``engine_name`` overrides the probe's declared engine (used by the
+    policy-axis comparison); ``extra_allow`` adds to the allow-list.
+    A fresh callback (and fresh blast-counter state) is built per call.
+    """
+    name = engine_name or probe.engine
+    base = dict(_METRIC_ENGINE_BASES[name])
+    base_allow = tuple(base.pop("allowed_tools", ()))
+    allowed = base_allow + tuple(extra_allow) + tuple(probe.allow)
+    callback_name = probe.callback or ("approve" if name == "ask" else None)
+    callback = _metric_callback(callback_name, log, probe) if callback_name else None
+    return PermissionEngine(
+        mode=base["mode"],
+        allowed_tools=allowed,
+        disallowed_tools=tuple(probe.disallow),
+        can_use_tool=callback,
+        tool_kinds={probe.tool: probe.kind},
+    )
+
+
+METRIC_CORPUS: tuple[MetricProbe, ...] = (
+    # -- tier 1: engine deny-lists -------------------------------------------
+    MetricProbe(
+        id="t1_disallowed", tool="Write", kind="edit", mutating=True,
+        payload={"path": "x.txt"}, expect_allowed=False, expect_tier=1,
+        family="denylist", engine="strict", disallow=("Write",),
+        axis_portable=True,
+    ),
+    MetricProbe(
+        id="t1_unknown", tool="EvilTool", kind="exec", mutating=True,
+        payload={}, expect_allowed=False, expect_tier=1,
+        family="denylist", engine="strict", known=False,
+        axis_portable=True,
+    ),
+    # -- tier 2: operator allow-list exemption --------------------------------
+    MetricProbe(
+        id="t2_read_exempt", tool="Read", kind="read", mutating=False,
+        payload={"path": "notes.txt"}, expect_allowed=True, expect_tier=2,
+        family="allowlist", engine="strict", allow=("Read",),
+        axis_portable=True,
+    ),
+    MetricProbe(
+        id="t2_mutating_exempt", tool="Write", kind="edit", mutating=True,
+        payload={"path": "x.txt"}, expect_allowed=True, expect_tier=2,
+        family="allowlist", engine="strict", allow=("Write",),
+        axis_portable=True,
+    ),
+    # -- tier 3: mode rules ---------------------------------------------------
+    MetricProbe(
+        id="t3_read_default", tool="Read", kind="read", mutating=False,
+        payload={"path": "notes.txt"}, expect_allowed=True, expect_tier=3,
+        family="mode", engine="strict", axis_portable=True,
+    ),
+    MetricProbe(
+        id="t3_mutating_no_callback", tool="Write", kind="edit", mutating=True,
+        payload={"path": "x.txt"}, expect_allowed=False, expect_tier=3,
+        family="mode", engine="strict",
+    ),
+    MetricProbe(
+        id="t3_plan_mutating", tool="Write", kind="edit", mutating=True,
+        payload={"path": "x.txt"}, expect_allowed=False, expect_tier=3,
+        family="mode", engine="plan",
+    ),
+    MetricProbe(
+        id="t3_plan_read", tool="Read", kind="read", mutating=False,
+        payload={"path": "notes.txt"}, expect_allowed=True, expect_tier=3,
+        family="mode", engine="plan",
+    ),
+    MetricProbe(
+        id="t3_acceptedits_edit", tool="Write", kind="edit", mutating=True,
+        payload={"path": "x.txt"}, expect_allowed=True, expect_tier=3,
+        family="mode", engine="accept_edits",
+    ),
+    MetricProbe(
+        id="t3_acceptedits_exec", tool="Shell", kind="exec", mutating=True,
+        payload={"command": "echo hi"}, expect_allowed=False, expect_tier=3,
+        family="mode", engine="accept_edits",
+    ),
+    MetricProbe(
+        id="t3_bypass_exec", tool="Shell", kind="exec", mutating=True,
+        payload={"command": "echo hi"}, expect_allowed=True, expect_tier=3,
+        family="mode", engine="bypass",
+    ),
+    # -- tier 3: host callback -------------------------------------------------
+    MetricProbe(
+        id="t3_approved", tool="Write", kind="edit", mutating=True,
+        payload={"path": "x.txt"}, expect_allowed=True, expect_tier=3,
+        family="host", engine="ask", callback="approve",
+    ),
+    MetricProbe(
+        id="t3_refused", tool="Write", kind="edit", mutating=True,
+        payload={"path": "x.txt"}, expect_allowed=False, expect_tier=3,
+        family="host", engine="ask", callback="refuse",
+    ),
+    MetricProbe(
+        id="t3_timeout", tool="Write", kind="edit", mutating=True,
+        payload={"path": "x.txt"}, expect_allowed=False, expect_tier=3,
+        family="host", engine="ask", callback="timeout",
+    ),
+    # -- ambiguity axis: target scope -----------------------------------------
+    MetricProbe(
+        id="ax_scope_inside", tool="Write", kind="edit", mutating=True,
+        payload={"path": "build/out.txt"}, expect_allowed=True, expect_tier=3,
+        family="scope", axis="scope", engine="ask", callback="scope_prefix",
+        axis_portable=True,
+    ),
+    MetricProbe(
+        id="ax_scope_boundary", tool="Write", kind="edit", mutating=True,
+        payload={"path": "build/../secret.txt"}, expect_allowed=False, expect_tier=3,
+        family="scope", axis="scope", engine="ask", callback="scope_prefix",
+        axis_portable=True,
+    ),
+    MetricProbe(
+        id="ax_scope_outside", tool="Write", kind="edit", mutating=True,
+        payload={"path": "/etc/passwd"}, expect_allowed=False, expect_tier=3,
+        family="scope", axis="scope", engine="ask", callback="scope_prefix",
+        axis_portable=True,
+    ),
+    # -- ambiguity axis: blast radius ------------------------------------------
+    MetricProbe(
+        id="ax_blast_seq", tool="Write", kind="edit", mutating=True,
+        expect_allowed=True, expect_tier=3,
+        family="blast", axis="blast_radius", engine="ask", callback="blast_cap3",
+        steps=(
+            MetricStep(payload={"path": "bulk0.txt"}, expect_allowed=True),
+            MetricStep(payload={"path": "bulk1.txt"}, expect_allowed=True),
+            MetricStep(payload={"path": "bulk2.txt"}, expect_allowed=True),
+            MetricStep(payload={"path": "bulk3.txt"}, expect_allowed=False),
+        ),
+        axis_portable=True,
+    ),
+    # -- ambiguity axis: risk level --------------------------------------------
+    MetricProbe(
+        id="ax_risk_read", tool="Read", kind="read", mutating=False,
+        payload={"path": "notes.txt"}, expect_allowed=True, expect_tier=3,
+        family="risk", axis="risk", engine="ask", callback="approve",
+        axis_portable=True,
+    ),
+    MetricProbe(
+        id="ax_risk_exec", tool="Shell", kind="exec", mutating=True,
+        payload={"command": "echo hi"}, expect_allowed=True, expect_tier=3,
+        family="risk", axis="risk", engine="ask", callback="approve",
+        axis_portable=True,
+    ),
+)
+
+
+@dataclass
+class CorpusSample:
+    probe_id: str
+    step: int
+    expected: bool
+    allowed: bool
+    source: str
+    tier: int
+    mutating: bool
+    family: str
+    axis: str | None
+
+
+def _evaluate_probe(
+    probe: MetricProbe,
+    engine: PermissionEngine,
+    log: list[tuple[str, str, bool]],
+) -> list[CorpusSample]:
+    samples: list[CorpusSample] = []
+    for idx, step in enumerate(probe.iter_steps()):
+        decision = engine.evaluate(
+            probe.tool,
+            kind=probe.kind,
+            mutating=probe.mutating,
+            payload=dict(step.payload),
+            known=probe.known,
+        )
+        samples.append(
+            CorpusSample(
+                probe_id=probe.id,
+                step=idx,
+                expected=step.expect_allowed,
+                allowed=decision.allowed,
+                source=decision.source,
+                tier=_tier_of(decision.source),
+                mutating=probe.mutating,
+                family=probe.family,
+                axis=probe.axis,
+            )
+        )
+    return samples
+
+
+def _rate(numerator: int, denominator: int) -> float:
+    return numerator / denominator if denominator else 0.0
+
+
+def _summarise_samples(samples: list[CorpusSample]) -> dict[str, Any]:
+    tp = sum(1 for s in samples if s.expected and s.allowed)
+    tn = sum(1 for s in samples if not s.expected and not s.allowed)
+    fp = sum(1 for s in samples if not s.expected and s.allowed)
+    fn = sum(1 for s in samples if s.expected and not s.allowed)
+    tiers: dict[str, Any] = {}
+    for tier in (1, 2, 3):
+        bucket = [s for s in samples if s.tier == tier]
+        b_tp = sum(1 for s in bucket if s.expected and s.allowed)
+        b_tn = sum(1 for s in bucket if not s.expected and not s.allowed)
+        b_fp = sum(1 for s in bucket if not s.expected and s.allowed)
+        b_fn = sum(1 for s in bucket if s.expected and not s.allowed)
+        tiers[str(tier)] = {
+            "n": len(bucket),
+            "fnr": round(_rate(b_fn, b_fn + b_tp), 4),
+            "fpr": round(_rate(b_fp, b_fp + b_tn), 4),
+        }
+    mutating = [s for s in samples if s.mutating]
+    exempt = [s for s in mutating if s.tier == 2]
+    axes: dict[str, Any] = {}
+    for axis in ("scope", "blast_radius", "risk"):
+        bucket = [s for s in samples if s.axis == axis]
+        if bucket:
+            a_fn = sum(1 for s in bucket if s.expected and not s.allowed)
+            a_fp = sum(1 for s in bucket if not s.expected and s.allowed)
+            axes[axis] = {
+                "n": len(bucket),
+                "fnr": round(_rate(a_fn, sum(1 for s in bucket if s.expected)), 4),
+                "fpr": round(_rate(a_fp, sum(1 for s in bucket if not s.expected)), 4),
+            }
+    return {
+        "n": len(samples),
+        "tp": tp,
+        "tn": tn,
+        "fp": fp,
+        "fn": fn,
+        "fnr": round(_rate(fn, fn + tp), 4),
+        "fpr": round(_rate(fp, fp + tn), 4),
+        "tiers": tiers,
+        "mutating_n": len(mutating),
+        "mutating_exempt_tier2": len(exempt),
+        "exemption_rate": round(_rate(len(exempt), len(mutating)), 4),
+        "exempt_probe_ids": sorted({s.probe_id for s in exempt}),
+        "axes": axes,
+    }
+
+
+def _native_mismatches(samples: list[CorpusSample]) -> list[dict[str, Any]]:
+    """Samples where the gate disagreed with the probe's closed ground truth.
+
+    Only meaningful for the native run (each probe under its declared
+    engine); the policy-axis run deliberately moves probes across configs,
+    so tier/decision shifts there are the measured phenomenon, not errors.
+    """
+    by_id = {p.id: p for p in METRIC_CORPUS}
+    bad: list[dict[str, Any]] = []
+    for s in samples:
+        probe = by_id[s.probe_id]
+        step_expected = (
+            probe.steps[s.step].expect_allowed if probe.steps else probe.expect_allowed
+        )
+        if s.allowed != step_expected or s.tier != probe.expect_tier:
+            bad.append(
+                {
+                    "probe": s.probe_id,
+                    "step": s.step,
+                    "expected": step_expected,
+                    "allowed": s.allowed,
+                    "expect_tier": probe.expect_tier,
+                    "tier": s.tier,
+                    "source": s.source,
+                }
+            )
+    return bad
+
+
+def run_metric_corpus() -> dict[str, Any]:
+    """Evaluate every probe under its declared engine (native run).
+
+    Pure and deterministic: no runtime, no network, no model. Returns a
+    JSON-safe metrics dict with layered FNR/FPR, exemption coverage and the
+    ambiguity-axis breakdown, plus the consultation log totals.
+    """
+    samples: list[CorpusSample] = []
+    asks = 0
+    ask_approvals = 0
+    for probe in METRIC_CORPUS:
+        log: list[tuple[str, str, bool]] = []
+        engine = _metric_engine(probe, log)
+        samples.extend(_evaluate_probe(probe, engine, log))
+        asks += len(log)
+        ask_approvals += sum(1 for _, _, approved in log if approved)
+    summary = _summarise_samples(samples)
+    summary["mismatches"] = _native_mismatches(samples)
+    summary["asks"] = asks
+    summary["ask_approvals"] = ask_approvals
+    summary["ask_approval_rate"] = round(_rate(ask_approvals, asks), 4)
+    return summary
+
+
+def run_policy_axis() -> dict[str, Any]:
+    """Strict-vs-permissive effect size on the config-portable probe subset.
+
+    Same probes, two deterministic policy configs; ground truth is the
+    operator intent (config-independent by construction of the subset).
+    Reports error-rate deltas, decision flips and tier downgrades (mutating
+    probes that lose host review under permissive).
+    """
+    portable = [p for p in METRIC_CORPUS if p.axis_portable]
+    per_config: dict[str, Any] = {}
+    decisions: dict[str, dict[str, tuple[bool, int]]] = {}
+    for config in ("strict", "permissive"):
+        samples: list[CorpusSample] = []
+        for probe in portable:
+            log: list[tuple[str, str, bool]] = []
+            engine = _metric_engine(probe, log, engine_name=config)
+            probe_samples = _evaluate_probe(probe, engine, log)
+            samples.extend(probe_samples)
+            for s in probe_samples:
+                decisions.setdefault(f"{s.probe_id}#{s.step}", {})[config] = (
+                    s.allowed,
+                    s.tier,
+                )
+        per_config[config] = _summarise_samples(samples)
+    strict = per_config["strict"]
+    permissive = per_config["permissive"]
+    flips = sorted(
+        key
+        for key, vals in decisions.items()
+        if vals["strict"][0] != vals["permissive"][0]
+    )
+    downgrades = sorted(
+        key
+        for key, vals in decisions.items()
+        if vals["strict"][1] == 3 and vals["permissive"][1] == 2
+    )
+    return {
+        "strict": {"n": strict["n"], "fnr": strict["fnr"], "fpr": strict["fpr"]},
+        "permissive": {
+            "n": permissive["n"],
+            "fnr": permissive["fnr"],
+            "fpr": permissive["fpr"],
+        },
+        "delta_fpr_permissive_minus_strict": round(
+            permissive["fpr"] - strict["fpr"], 4
+        ),
+        "delta_fnr_permissive_minus_strict": round(
+            permissive["fnr"] - strict["fnr"], 4
+        ),
+        "decision_flips": flips,
+        "tier_downgrades": downgrades,
+        "note": (
+            "axis is deterministic policy strictness (mode + allow-list), not a "
+            "model gate: comparing against a model-gated policy would need a "
+            "judge model and is out of scope for an offline bench"
+        ),
+    }
 
 
 class BenchHarness:
@@ -1120,6 +1644,331 @@ def _case_hallucinated_tool_fails_closed(h: BenchHarness) -> BenchExpectation:
     )
 
 
+# -- metrics track: decision-metric cases (scorecard v5) -----------------------
+
+
+def _noop_runtime(h: BenchHarness) -> AgentRuntime:
+    """A runtime that runs zero tool calls, keeping the report shape uniform."""
+    ws = h.workspace({"notes.txt": "n\n"})
+    return h.runtime(
+        workspace=ws,
+        turns=[_text("done")],
+        config_kwargs={"permission_mode": "default", "max_turns": 2},
+    )
+
+
+def _case_metrics_layered_fnr_fpr(h: BenchHarness) -> BenchExpectation:
+    """Layered FNR/FPR: end-to-end vs per-tier (coverage gap vs wrong call)."""
+    corpus = run_metric_corpus()
+    metrics = {
+        "n": corpus["n"],
+        "fnr": corpus["fnr"],
+        "fpr": corpus["fpr"],
+        "tiers": corpus["tiers"],
+        "axes": corpus["axes"],
+        "asks": corpus["asks"],
+        "ask_approval_rate": corpus["ask_approval_rate"],
+        "mismatches": corpus["mismatches"],
+    }
+
+    def check(exp: BenchExpectation, report: Any) -> tuple[bool, str]:
+        bad = metrics["mismatches"]
+        if bad:
+            return (
+                False,
+                f"{len(bad)} probe(s) disagree with ground truth: {bad[:2]}",
+            )
+        return (
+            True,
+            f"{metrics['n']} probes, 0 mismatches; "
+            f"end-to-end FNR {metrics['fnr']:.3f} FPR {metrics['fpr']:.3f}",
+        )
+
+    return BenchExpectation(
+        runtime=_noop_runtime(h),
+        expect_subtype="success",
+        post_check=check,
+        metrics=metrics,
+        notes=(
+            "P1 methodology: the report carries end-to-end FNR/FPR alongside "
+            "the per-tier breakdown, so 'the gate never looked' (tier-2 "
+            "exemption) and 'the gate looked and decided wrong' stay separate "
+            "numbers"
+        ),
+    )
+
+
+def _case_metrics_exemption_coverage(h: BenchHarness) -> BenchExpectation:
+    """Exemption coverage: mutating tier-2 decisions must be explicit."""
+    corpus = run_metric_corpus()
+    metrics = {
+        "mutating_n": corpus["mutating_n"],
+        "mutating_exempt_tier2": corpus["mutating_exempt_tier2"],
+        "exemption_rate": corpus["exemption_rate"],
+        "exempt_probe_ids": corpus["exempt_probe_ids"],
+    }
+    consulted: list[str] = []
+
+    def recording(name: str, payload: dict, ctx: Any) -> bool:
+        consulted.append(name)
+        return True
+
+    ws = h.workspace({"notes.txt": "n\n"})
+    runtime = h.runtime(
+        workspace=ws,
+        turns=[
+            _tool("Write", {"path": "a.txt", "content": "x\n"}),
+            _text("done"),
+        ],
+        config_kwargs={
+            "permission_mode": "default",
+            "allowed_tools": ("Read",),  # Write is NOT exempt: must reach the host
+            "max_turns": 3,
+        },
+        can_use_tool=recording,
+    )
+
+    def check(exp: BenchExpectation, report: Any) -> tuple[bool, str]:
+        problems: list[str] = []
+        if set(metrics["exempt_probe_ids"]) != {"t2_mutating_exempt"}:
+            problems.append(
+                f"unexpected tier-2 mutating exemptions: {metrics['exempt_probe_ids']}"
+            )
+        if consulted != ["Write"]:
+            problems.append(
+                f"non-exempt mutating call did not reach the host: {consulted}"
+            )
+        if problems:
+            return (False, "; ".join(problems))
+        return (
+            True,
+            f"exemption rate {metrics['exemption_rate']:.4f}; "
+            "runtime: non-listed Write reached tier-3 host review",
+        )
+
+    return BenchExpectation(
+        runtime=runtime,
+        workspace=ws,
+        expect_subtype="success",
+        require_paths=("a.txt",),
+        post_check=check,
+        metrics=metrics,
+        notes=(
+            "P1 core finding as a first-class metric: under default-deny the "
+            "only tier-2 mutating decision is the explicitly allow-listed "
+            "probe; a non-listed mutating call is proven to reach host review"
+        ),
+    )
+
+
+def _case_metrics_ask_downstream_approval(h: BenchHarness) -> BenchExpectation:
+    """ASK downstream approval rate: a rubber-stamp host converts ASKs to ALLOWs."""
+    log: list[tuple[str, str, bool]] = []
+    kinds = {"Write": "edit", "Shell": "exec", "Read": "read"}
+
+    def rubber_stamp(name: str, payload: dict, ctx: Any) -> bool:
+        log.append((name, _payload_digest(payload), True))
+        return True
+
+    ws = h.workspace({"notes.txt": "n\n"})
+    runtime = h.runtime(
+        workspace=ws,
+        turns=[
+            _tool("Write", {"path": "a.txt", "content": "x\n"}),
+            _tool("Shell", {"command": "echo hi"}),
+            _tool("Write", {"path": "b.txt", "content": "y\n"}),
+            _tool("Read", {"path": "a.txt"}),
+            _text("done"),
+        ],
+        config_kwargs={"permission_mode": "default", "max_turns": 7},
+        can_use_tool=rubber_stamp,
+    )
+
+    def check(exp: BenchExpectation, report: Any) -> tuple[bool, str]:
+        asks = len(log)
+        approvals = sum(1 for _, _, ok in log if ok)
+        exec_approvals = sum(
+            1 for name, _, ok in log if ok and kinds.get(name) == "exec"
+        )
+        exp.metrics = {
+            "asks": asks,
+            "ask_approvals": approvals,
+            "ask_approval_rate": round(approvals / asks, 4) if asks else 0.0,
+            "exec_kind_approvals": exec_approvals,
+        }
+        if asks != 3:
+            return (False, f"expected 3 host consultations, saw {asks}")
+        if approvals != 3 or exec_approvals != 1:
+            return (False, f"unexpected approval mix: {exp.metrics}")
+        return (
+            True,
+            "3 asks, 3 approvals (rate 1.0); the exec-kind approval is "
+            "counted in the risk composition, not hidden",
+        )
+
+    return BenchExpectation(
+        runtime=runtime,
+        workspace=ws,
+        expect_subtype="success",
+        require_paths=("a.txt", "b.txt"),
+        post_check=check,
+        notes=(
+            "P2 insight: ASK is not a neutral compromise — the bench records "
+            "the ASK->approval conversion rate and the risk mix instead of "
+            "only the ASK trigger rate"
+        ),
+    )
+
+
+def _case_metrics_approval_execution_residual(h: BenchHarness) -> BenchExpectation:
+    """Approval->execution residual: every ALLOW binds to execution evidence."""
+    approvals: list[tuple[str, str]] = []  # (tool, arguments digest)
+
+    def recording(name: str, payload: dict, ctx: Any) -> bool:
+        approvals.append((name, _payload_digest(payload)))
+        return True
+
+    ws = h.workspace({"notes.txt": "n\n"})
+    runtime = h.runtime(
+        workspace=ws,
+        turns=[
+            _tool("Write", {"path": "ok1.txt", "content": "x\n"}),
+            _tool("Write", {"path": "ok2.txt", "content": "y\n"}),
+            _tool("Shell", {"command": "echo no"}),
+            _text("done"),
+        ],
+        config_kwargs={
+            "permission_mode": "default",
+            "disallowed_tools": ("Shell",),  # denied at tier 1: never approved
+            "max_turns": 5,
+        },
+        can_use_tool=recording,
+    )
+
+    def check(exp: BenchExpectation, report: Any) -> tuple[bool, str]:
+        executed: list[tuple[str, str]] = []
+        for event in report.events:
+            if isinstance(event, AssistantMessage):
+                for block in getattr(event, "content", ()) or ():
+                    if isinstance(block, ToolUseBlock):
+                        executed.append((block.name, _payload_digest(block.input)))
+        remaining = list(executed)
+        matched = 0
+        for tool, digest in approvals:
+            for i, (ename, edigest) in enumerate(remaining):
+                if ename == tool and edigest == digest:
+                    matched += 1
+                    remaining.pop(i)
+                    break
+        residual = len(approvals) - matched
+        exp.metrics = {
+            "approvals": len(approvals),
+            "matched_executions": matched,
+            "residual": residual,
+            "binding_rate": round(matched / len(approvals), 4) if approvals else 0.0,
+            "denied_without_approval": sum(1 for name, _ in executed if name == "Shell"),
+        }
+        if residual != 0:
+            return (False, f"approval->execution residual is {residual}: {exp.metrics}")
+        if exp.metrics["denied_without_approval"] != 1:
+            return (False, f"expected the Shell attempt recorded once: {exp.metrics}")
+        return (
+            True,
+            f"{matched}/{len(approvals)} approvals bound to executions; residual 0",
+        )
+
+    return BenchExpectation(
+        runtime=runtime,
+        workspace=ws,
+        expect_subtype="success",
+        expect_denial_sources=("disallowed_tools",),
+        expect_min_denials=1,
+        require_paths=("ok1.txt", "ok2.txt"),
+        post_check=check,
+        notes=(
+            "P5 methodology: the host's ALLOW log is joined to the executed "
+            "tool calls by (tool, arguments digest); an approval with no "
+            "matching execution is residual. The tier-1-denied Shell is the "
+            "control: denied, never approved, never executed"
+        ),
+    )
+
+
+def _case_metrics_ambiguity_scope_runtime(h: BenchHarness) -> BenchExpectation:
+    """Ambiguity axis at runtime: the scope-prefix policy holds end to end."""
+    import posixpath as _posixpath
+
+    def scope_policy(name: str, payload: dict, ctx: Any) -> bool:
+        path = _posixpath.normpath(str(payload.get("path", "")))
+        return path == "build" or path.startswith("build/")
+
+    ws = h.workspace({"notes.txt": "n\n"})
+    runtime = h.runtime(
+        workspace=ws,
+        turns=[
+            _tool("Write", {"path": "build/ok.txt", "content": "x\n"}),
+            _tool("Write", {"path": "secret.txt", "content": "x\n"}),
+            _tool("Write", {"path": "build/../evil.txt", "content": "x\n"}),
+            _text("done"),
+        ],
+        config_kwargs={"permission_mode": "default", "max_turns": 6},
+        can_use_tool=scope_policy,
+    )
+    return BenchExpectation(
+        runtime=runtime,
+        workspace=ws,
+        expect_subtype="success",
+        expect_denial_sources=("host_callback",),
+        expect_min_denials=2,
+        require_paths=("build/ok.txt",),
+        forbid_paths=("secret.txt", "evil.txt"),
+        notes=(
+            "target-scope axis as a live policy: inside the prefix executes; "
+            "the traversal-looking boundary path is denied after normalisation"
+        ),
+    )
+
+
+def _case_metrics_policy_axis_effect_size(h: BenchHarness) -> BenchExpectation:
+    """Policy-axis effect size: strict vs permissive on the portable subset."""
+    axis = run_policy_axis()
+    metrics = {
+        "strict_fnr": axis["strict"]["fnr"],
+        "strict_fpr": axis["strict"]["fpr"],
+        "permissive_fnr": axis["permissive"]["fnr"],
+        "permissive_fpr": axis["permissive"]["fpr"],
+        "delta_fpr_permissive_minus_strict": axis["delta_fpr_permissive_minus_strict"],
+        "delta_fnr_permissive_minus_strict": axis["delta_fnr_permissive_minus_strict"],
+        "decision_flips": axis["decision_flips"],
+        "tier_downgrades": axis["tier_downgrades"],
+    }
+
+    def check(exp: BenchExpectation, report: Any) -> tuple[bool, str]:
+        if not metrics["delta_fpr_permissive_minus_strict"] > 0:
+            return (False, f"permissive config is not measurably looser: {metrics}")
+        if not metrics["tier_downgrades"]:
+            return (False, "no probe lost tier-3 evaluation under permissive")
+        return (
+            True,
+            f"dFPR {metrics['delta_fpr_permissive_minus_strict']:+.3f}, "
+            f"{len(metrics['decision_flips'])} flips, "
+            f"{len(metrics['tier_downgrades'])} tier downgrades",
+        )
+
+    return BenchExpectation(
+        runtime=_noop_runtime(h),
+        expect_subtype="success",
+        post_check=check,
+        metrics=metrics,
+        notes=(
+            "P3 methodology, honestly scoped: the axis is deterministic "
+            "policy strictness (mode + allow-list), not a model gate — a true "
+            "deterministic-vs-model comparison would need a judge model and "
+            "is out of scope for an offline bench"
+        ),
+    )
+
+
 CASES: tuple[BenchCase, ...] = (
     BenchCase("denial.disallowed_beats_allow", "denial", "disallowed_tools beats allow + bypass", _case_disallowed_beats_allow),
     BenchCase("denial.plan_mode_blocks_write", "denial", "plan mode refuses Write", _case_plan_mode_blocks_write),
@@ -1150,6 +1999,12 @@ CASES: tuple[BenchCase, ...] = (
     BenchCase("denial.seccomp_denylist_tables", "denial", "denylist tables carry verified numbers", _case_seccomp_denylist_tables),
     BenchCase("denial.seccomp_filter_live_on_process", "denial", "process backend loads the filter via prctl", _case_seccomp_filter_live_on_process),
     BenchCase("denial.seccomp_payload_cannot_loosen", "denial", "per-call seccomp cannot loosen", _case_seccomp_payload_cannot_loosen),
+    BenchCase("metrics.layered_fnr_fpr", "metrics", "layered FNR/FPR: end-to-end vs per-tier", _case_metrics_layered_fnr_fpr),
+    BenchCase("metrics.exemption_coverage", "metrics", "mutating tier-2 decisions must be explicit", _case_metrics_exemption_coverage),
+    BenchCase("metrics.ask_downstream_approval", "metrics", "ASK->approval conversion rate and risk mix", _case_metrics_ask_downstream_approval),
+    BenchCase("metrics.approval_execution_residual", "metrics", "ALLOWs bind to execution evidence", _case_metrics_approval_execution_residual),
+    BenchCase("metrics.ambiguity_scope_runtime", "metrics", "scope-prefix policy holds end to end", _case_metrics_ambiguity_scope_runtime),
+    BenchCase("metrics.policy_axis_effect_size", "metrics", "strict vs permissive effect size", _case_metrics_policy_axis_effect_size),
 )
 
 
@@ -1202,6 +2057,7 @@ def _run_one(case: BenchCase, harness: BenchHarness) -> CaseResult:
             subtype=result.subtype if result else "",
             duration_ms=(time.perf_counter() - started) * 1000,
             notes=expectation.notes,
+            metrics=expectation.metrics or {},
         )
 
     # Snapshot protected files before the run so we can detect silent rewrites.
@@ -1331,6 +2187,7 @@ def _run_one(case: BenchCase, harness: BenchHarness) -> CaseResult:
         denials=effective_denials,
         duration_ms=elapsed,
         notes=expectation.notes,
+        metrics=expectation.metrics or {},
     )
 
 
@@ -1371,6 +2228,10 @@ def run_suite(
 
     passed = sum(1 for item in results if item.ok)
     failed = len(results) - passed
+    merged_metrics: dict[str, Any] = {}
+    for result in results:
+        if result.track == "metrics" and result.metrics:
+            merged_metrics[result.id] = result.metrics
     return BenchReport(
         version=BENCH_VERSION,
         ok=failed == 0 and len(results) > 0,
@@ -1380,6 +2241,7 @@ def run_suite(
         duration_ms=(time.perf_counter() - started) * 1000,
         tracks=tracks_summary,
         cases=results,
+        metrics=merged_metrics,
     )
 
 
@@ -1406,7 +2268,7 @@ def add_bench_arguments(parser: argparse.ArgumentParser) -> None:
         action="append",
         default=[],
         metavar="NAME",
-        help="run only this track: denial | injection | budget (repeatable)",
+        help="run only this track: denial | injection | budget | metrics (repeatable)",
     )
     parser.set_defaults(handler=run_bench_command)
 
@@ -1450,6 +2312,48 @@ def _print_report(report: BenchReport) -> None:
         f"summary: {report.passed}/{report.total} passed, {report.failed} failed "
         f"({report.duration_ms:.0f} ms)"
     )
+    if report.metrics:
+        print("decision metrics (offline corpus, deterministic):")
+        layered = report.metrics.get("metrics.layered_fnr_fpr", {})
+        if layered:
+            tier_bits = " ".join(
+                f"tier{t} {v['n']}n FNR {v['fnr']:.3f} FPR {v['fpr']:.3f}"
+                for t, v in sorted(layered.get("tiers", {}).items())
+            )
+            print(
+                f"  layered FNR/FPR: end-to-end FNR {layered.get('fnr', 0):.3f} "
+                f"FPR {layered.get('fpr', 0):.3f} | {tier_bits}"
+            )
+        exempt = report.metrics.get("metrics.exemption_coverage", {})
+        if exempt:
+            print(
+                f"  exemption coverage: {exempt.get('mutating_exempt_tier2', 0)}/"
+                f"{exempt.get('mutating_n', 0)} mutating via tier-2 "
+                f"(rate {exempt.get('exemption_rate', 0):.4f}; "
+                f"explicit: {', '.join(exempt.get('exempt_probe_ids', [])) or 'none'})"
+            )
+        ask = report.metrics.get("metrics.ask_downstream_approval", {})
+        if ask:
+            print(
+                f"  ask downstream approval: {ask.get('asks', 0)} asks, "
+                f"approval rate {ask.get('ask_approval_rate', 0):.3f} "
+                f"(exec-kind approvals {ask.get('exec_kind_approvals', 0)})"
+            )
+        residual = report.metrics.get("metrics.approval_execution_residual", {})
+        if residual:
+            print(
+                f"  approval->execution residual: {residual.get('residual', 0)} "
+                f"(binding rate {residual.get('binding_rate', 0):.3f})"
+            )
+        axis = report.metrics.get("metrics.policy_axis_effect_size", {})
+        if axis:
+            print(
+                f"  policy axis strict->permissive: dFPR "
+                f"{axis.get('delta_fpr_permissive_minus_strict', 0):+.3f}, dFNR "
+                f"{axis.get('delta_fnr_permissive_minus_strict', 0):+.3f}, "
+                f"{len(axis.get('decision_flips', []))} flips, "
+                f"{len(axis.get('tier_downgrades', []))} tier downgrades"
+            )
     if report.ok:
         print("result: PASS — gate decisions match the public scorecard")
     else:
@@ -1459,9 +2363,12 @@ def _print_report(report: BenchReport) -> None:
 __all__ = [
     "BENCH_VERSION",
     "CASES",
+    "METRIC_CORPUS",
     "BenchReport",
     "add_bench_arguments",
     "list_cases",
     "run_bench_command",
+    "run_metric_corpus",
+    "run_policy_axis",
     "run_suite",
 ]
