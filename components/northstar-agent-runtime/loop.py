@@ -43,6 +43,7 @@ from permissions import (
     PermissionEngine,
     PermissionMode,
     PermissionRequestContext,
+    digest_arguments,
     normalise_names,
 )
 from providers.base import (
@@ -336,6 +337,34 @@ class Denial:
             "turn_index": self.turn_index,
             "kind": self.kind,
         }
+
+
+def denial_tool_result(
+    *,
+    tool: str,
+    call_id: str,
+    reason: str,
+    tier: str,
+) -> dict[str, Any]:
+    """Structured tool result for a denied call.
+
+    Mirrors byquexo/agent-approval-gate's denial propagation
+    (``ApprovalDeniedError`` fed back as the tool result, ``guardAll``'s
+    per-call ``BatchResult``): the denial is returned *as the tool's result*
+    with ``is_error=True`` so the model can react ("the user declined…")
+    instead of the run crashing. ``tier`` names the refusing layer;
+    ``retryable`` is true only for host-callback denials, where re-asking or
+    rephrasing could change the outcome — policy denials are final.
+    """
+    return {
+        "status": "denied",
+        "tool": tool,
+        "call_id": call_id,
+        "reason": reason,
+        "tier": tier,
+        "retryable": tier == "host_callback",
+        "message": f"{tool} refused by the permission gate: {reason}",
+    }
 
 
 @dataclass(frozen=True)
@@ -1822,6 +1851,11 @@ class AgentRuntime:
                 turn_index=turn_index,
                 workspace=str(self.sandbox.root_real),
                 mode=self.permissions.mode,
+                # Pin the approval to this exact call: the host decides on
+                # this (call id, arguments digest) pair, and the decision is
+                # consumed for this call only — never cached, never replayed.
+                call_id=call.id,
+                arguments_digest=digest_arguments(payload),
             ),
             known=True,
         )
@@ -1938,7 +1972,19 @@ class AgentRuntime:
                 data={"denied": True, "source": decision.source},
             ),
         )
-        block = ToolResultBlock(tool_use_id=call.id, content=reason, is_error=True)
+        block = ToolResultBlock(
+            tool_use_id=call.id,
+            # Structured denial (not a bare string): the model gets the
+            # refusal as its tool result — status, tier and retryability
+            # included — so it can react instead of the run crashing.
+            content=denial_tool_result(
+                tool=spec.name,
+                call_id=call.id,
+                reason=decision.reason,
+                tier=decision.source,
+            ),
+            is_error=True,
+        )
         report = ToolCallReport(
             name=spec.name,
             call_id=call.id,

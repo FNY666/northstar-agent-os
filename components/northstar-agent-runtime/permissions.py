@@ -6,6 +6,14 @@ hook would have approved it. The second layer auto-approves. The third layer is
 ``permission_mode`` plus, when the host supplied one, the ``can_use_tool``
 approval callback.
 
+Approval decisions are never cached and never replayed: every gated call
+re-invokes the host callback with the exact call identity (``call_id`` plus a
+``sha256`` digest of the canonical arguments), so a "yes" is scoped to exactly
+one tool call and can never authorize a later call or different arguments.
+This is the same structural rule as byquexo/agent-approval-gate's
+``ApprovalGate`` ("the gate holds no state between calls", ``gate.ts``): no
+``approveAll``, no session cache, no "remember my choice".
+
 Safety direction: whenever the gate cannot reach a decision - unknown tool, no
 host approval callback in ``default`` mode, a callback that raises - the answer
 is **deny**, not "go ahead". Denying work is recoverable; executing work the
@@ -18,7 +26,9 @@ subagent's declared tool set (:meth:`PermissionEngine.check_delegation`).
 """
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+import hashlib
+import json
+from dataclasses import dataclass, field, replace
 from typing import Any, Callable, Iterable, Literal, Sequence
 
 PermissionMode = Literal["default", "acceptEdits", "plan", "bypassPermissions"]
@@ -72,7 +82,14 @@ class PermissionDecision:
 
 @dataclass(frozen=True)
 class PermissionRequestContext:
-    """What the host approval callback gets to see."""
+    """What the host approval callback gets to see.
+
+    ``call_id`` and ``arguments_digest`` pin the approval to the exact call:
+    the host decides on this (tool, call id, arguments) triple and the
+    decision is consumed for that call only. The engine never caches a
+    decision, so reusing an old approval for new arguments fails closed by
+    construction — the callback is simply asked again.
+    """
 
     session_id: str = ""
     agent: str = "main"
@@ -81,7 +98,30 @@ class PermissionRequestContext:
     workspace: str = ""
     mode: str = "default"
     reason_hint: str = ""
+    call_id: str = ""
+    arguments_digest: str = ""
     data: dict[str, Any] = field(default_factory=dict)
+
+
+def digest_arguments(arguments: Any) -> str:
+    """Canonical ``sha256:<hex>`` digest of tool arguments.
+
+    Same wire format as the durable-run approval tokens
+    (``northstar.approval.v2/v3`` bind approvals to this digest), so a host
+    can compare the digest it approved against the digest of the call being
+    executed and refuse on any mismatch.
+    """
+    try:
+        encoded = json.dumps(
+            arguments if isinstance(arguments, dict) else {},
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+            default=str,
+        ).encode("utf-8")
+    except (TypeError, ValueError) as error:
+        raise ValueError("tool arguments are not JSON-serialisable") from error
+    return "sha256:" + hashlib.sha256(encoded).hexdigest()
 
 
 @dataclass(frozen=True)
@@ -216,6 +256,12 @@ class PermissionEngine:
         ``kind``/``mutating`` normally come from the tool's own
         :class:`~tools.ToolSpec`; the delegation gate passes only names, which is
         why the engine keeps a name→kind map as well.
+
+        The engine keeps no approval state between calls: a gated call always
+        re-invokes the host callback, so an approval granted for one
+        (``call_id``, ``arguments_digest``) pair can never authorize another
+        call. Reusing an old approval for new arguments fails closed because
+        the callback is asked again, not because a cache is consulted.
         """
         resolved_kind = kind or self._kinds.get(tool_name) or "other"
         if resolved_kind not in {"read", "edit", "exec", "task", "network", "other"}:
@@ -300,6 +346,13 @@ class PermissionEngine:
         request = context or PermissionRequestContext(
             mode=self.config.mode, reason_hint=f"{tool_name} is mutating"
         )
+        # The approver must always see the digest of the exact arguments being
+        # decided on: if the caller did not pin it, derive it here so a
+        # decision can never be detached from its arguments.
+        if not request.arguments_digest:
+            request = replace(
+                request, arguments_digest=digest_arguments(payload or {})
+            )
         try:
             verdict = self.config.can_use_tool(tool_name, dict(payload or {}), request)
         except Exception as error:  # noqa: BLE001 - a broken approver must not grant access
@@ -409,6 +462,7 @@ __all__ = [
     "PermissionMode",
     "PermissionRequestContext",
     "ToolKind",
+    "digest_arguments",
     "normalise_names",
     "subtract",
     "validate_mode",

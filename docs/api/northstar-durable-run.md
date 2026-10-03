@@ -71,6 +71,12 @@ Per-call authorization and approval gateway for the durable-run slice.
 
 #### `sign_approval(approval: dict[str, Any], secret: bytes)`
 
+#### `ApprovalDeniedError`
+
+A signed approval whose decision is ``denied``.
+
+- `to_result()`
+  - Structured tool-result payload for the denial.
 #### `digest_arguments(arguments: Any)`
 
 #### `ToolCall`

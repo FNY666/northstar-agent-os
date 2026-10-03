@@ -13,6 +13,7 @@ sys.path.insert(0, str(HOST_ROOT))
 
 from action_gateway import (  # noqa: E402
     ActionGateway,
+    ApprovalDeniedError,
     ToolCall,
     ToolExecutionResult,
     ToolSpec,
@@ -546,6 +547,52 @@ class ActionGatewayTests(unittest.TestCase):
         )
         self.assertEqual(result.status, "ok")
         self.assertEqual(self.invocations, [("write", arguments)])
+
+    def test_denied_approval_raises_structured_denial_error(self):
+        """Deny -> structured tool result (approval-gate ``ApprovalDeniedError``).
+
+        A signed approval with decision="denied" must raise a structured
+        denial carrying tool identity, tier and retryability — the caller
+        returns it as the tool's result so the model can react instead of
+        the run crashing. It stays a ValueError so fail-closed handling is
+        unchanged.
+        """
+        run = valid_run("workspace:write")
+        arguments = {"path": "src/main.py", "content": "fixed"}
+        call = call_for(run, tool_name="workspace.write_file", args=arguments, scope=["workspace:write"])
+        denied = self.approval_for(run, call, decision="denied")
+        with self.assertRaises(ApprovalDeniedError) as raised:
+            self.gateway.execute(
+                call,
+                arguments,
+                authorization_token=auth_token(run, capability="workspace:write"),
+                authorization_secret=AUTH_SECRET,
+                current_policy_revision="policy-1",
+                approval_token=denied,
+                now=1_001,
+            )
+        error = raised.exception
+        self.assertIsInstance(error, ValueError)
+        self.assertEqual(error.tool_name, "workspace.write_file")
+        self.assertEqual(error.call_id, call.step_id)
+        self.assertEqual(error.arguments_digest, call.arguments_digest)
+        self.assertEqual(error.tier, "host_approval")
+        self.assertTrue(error.retryable)
+        result = error.to_result()
+        self.assertEqual(
+            result,
+            {
+                "status": "denied",
+                "tool": "workspace.write_file",
+                "call_id": call.step_id,
+                "arguments_digest": call.arguments_digest,
+                "reason": error.reason,
+                "tier": "host_approval",
+                "retryable": True,
+                "message": str(error),
+            },
+        )
+        self.assertEqual(self.invocations, [])
 
     def test_approval_mismatch_denial_and_expiry_are_rejected(self):
         run = valid_run("workspace:write")

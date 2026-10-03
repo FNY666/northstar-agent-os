@@ -12,6 +12,7 @@ from permissions import (
     PermissionConfig,
     PermissionEngine,
     PermissionRequestContext,
+    digest_arguments,
     normalise_names,
     subtract,
     validate_mode,
@@ -189,6 +190,107 @@ class DelegationGateTests(unittest.TestCase):
         self.assertEqual(verdict.denied[0][0], "Grep")
 
 
+class PerCallApprovalBindingTests(unittest.TestCase):
+    """Per-call approval binding: no caching, no replay.
+
+    Absorbed from byquexo/agent-approval-gate (``gate.ts``): the gate holds
+    no state between calls, every gated call re-invokes the approver with
+    the exact call (id + arguments), and a "yes" is scoped to exactly one
+    tool call. These tests pin that rule on the runtime engine.
+    """
+
+    def make(self, **kwargs) -> PermissionEngine:
+        return PermissionEngine(PermissionConfig(mode="default", **kwargs))
+
+    def test_callback_sees_call_id_and_arguments_digest(self):
+        seen: list[tuple[str, str, str]] = []
+
+        def callback(name: str, payload: dict, ctx: PermissionRequestContext) -> bool:
+            seen.append((name, ctx.call_id, ctx.arguments_digest))
+            return True
+
+        engine = self.make(can_use_tool=callback)
+        payload = {"path": "a.txt", "content": "x"}
+        decision = engine.evaluate(
+            "Write",
+            kind="edit",
+            payload=payload,
+            context=PermissionRequestContext(call_id="call-1"),
+        )
+        self.assertTrue(decision.allowed)
+        self.assertEqual(len(seen), 1)
+        name, call_id, digest = seen[0]
+        self.assertEqual(name, "Write")
+        self.assertEqual(call_id, "call-1")
+        self.assertEqual(digest, digest_arguments(payload))
+        self.assertTrue(digest.startswith("sha256:"))
+
+    def test_digest_is_backfilled_when_caller_did_not_pin_it(self):
+        seen: list[str] = []
+
+        def callback(name: str, payload: dict, ctx: PermissionRequestContext) -> bool:
+            seen.append(ctx.arguments_digest)
+            return True
+
+        engine = self.make(can_use_tool=callback)
+        payload = {"path": "a.txt", "content": "x"}
+        engine.evaluate("Write", kind="edit", payload=payload)
+        self.assertEqual(seen, [digest_arguments(payload)])
+
+    def test_approver_is_reinvoked_per_call_never_cached(self):
+        calls: list[tuple[str, str]] = []
+
+        def callback(name: str, payload: dict, ctx: PermissionRequestContext) -> bool:
+            calls.append((name, ctx.arguments_digest))
+            return len(calls) == 1  # approve only the very first call
+
+        engine = self.make(can_use_tool=callback)
+        first = engine.evaluate(
+            "Write",
+            kind="edit",
+            payload={"path": "a.txt"},
+            context=PermissionRequestContext(call_id="c1"),
+        )
+        second = engine.evaluate(
+            "Write",
+            kind="edit",
+            payload={"path": "b.txt"},
+            context=PermissionRequestContext(call_id="c2"),
+        )
+        self.assertTrue(first.allowed)
+        # The first approval must not replay onto the second call: the
+        # approver is asked again and now says no.
+        self.assertFalse(second.allowed)
+        self.assertEqual(second.source, "host_callback")
+        self.assertEqual(len(calls), 2)
+        self.assertNotEqual(calls[0][1], calls[1][1])
+
+    def test_reused_approval_for_new_arguments_fails_closed(self):
+        approved_digests = {digest_arguments({"path": "a.txt", "content": "1"})}
+
+        def callback(name: str, payload: dict, ctx: PermissionRequestContext) -> bool:
+            # A host grant scoped to one exact arguments digest.
+            return ctx.arguments_digest in approved_digests
+
+        engine = self.make(can_use_tool=callback)
+        granted = engine.evaluate(
+            "Write",
+            kind="edit",
+            payload={"path": "a.txt", "content": "1"},
+            context=PermissionRequestContext(call_id="c1"),
+        )
+        # Same tool, different arguments: the old approval must not carry.
+        replay = engine.evaluate(
+            "Write",
+            kind="edit",
+            payload={"path": "a.txt", "content": "2"},
+            context=PermissionRequestContext(call_id="c2"),
+        )
+        self.assertTrue(granted.allowed)
+        self.assertFalse(replay.allowed)
+        self.assertEqual(replay.source, "host_callback")
+
+
 class EngineAtRuntimeTests(RuntimeTestCase):
     def test_mutating_tool_never_touches_disk_without_approval(self):
         workspace = self.workspace()
@@ -231,6 +333,51 @@ class EngineAtRuntimeTests(RuntimeTestCase):
         self.assertEqual(len(report.denials), 2)
         self.assertEqual({denial.source for denial in report.denials}, {"mode"})
         self.assertEqual([denial.turn_index for denial in report.denials], [1, 2])
+
+    def test_denial_tool_result_is_structured_with_tier_and_retryability(self):
+        provider = self.provider([tool_turn("Write", {"path": "a", "content": "1"}), text_turn("done")])
+        report = self.drive(self.runtime(provider=provider, can_use_tool=lambda *args: False))
+        refusal = report.transcript[2].tool_results[0]
+        self.assertTrue(refusal.is_error)
+        content = refusal.content
+        self.assertIsInstance(content, dict)
+        self.assertEqual(content["status"], "denied")
+        self.assertEqual(content["tool"], "Write")
+        self.assertEqual(content["tier"], "host_callback")
+        self.assertTrue(content["retryable"])
+        self.assertIn("refused by the permission gate", content["message"])
+        # The flattened text the model actually sees still carries the refusal.
+        self.assertIn("refused by the permission gate", refusal.text())
+
+    def test_policy_denial_tool_result_is_not_retryable(self):
+        provider = self.provider([tool_turn("Write", {"path": "a", "content": "1"}), text_turn("done")])
+        report = self.drive(
+            self.runtime(
+                provider=provider,
+                disallowed_tools=("Write",),
+                can_use_tool=lambda *args: True,
+            )
+        )
+        refusal = report.transcript[2].tool_results[0]
+        content = refusal.content
+        self.assertIsInstance(content, dict)
+        self.assertEqual(content["status"], "denied")
+        self.assertEqual(content["tier"], "disallowed_tools")
+        self.assertFalse(content["retryable"])
+
+    def test_host_callback_receives_call_id_and_digest_at_runtime(self):
+        seen: list[tuple[str, str]] = []
+
+        def callback(name: str, payload: dict, ctx: PermissionRequestContext) -> bool:
+            seen.append((ctx.call_id, ctx.arguments_digest))
+            return True
+
+        provider = self.provider([tool_turn("Write", {"path": "a", "content": "1"}), text_turn("done")])
+        self.drive(self.runtime(provider=provider, workspace=self.workspace(), can_use_tool=callback))
+        self.assertEqual(len(seen), 1)
+        call_id, digest = seen[0]
+        self.assertTrue(call_id)
+        self.assertEqual(digest, digest_arguments({"path": "a", "content": "1"}))
 
 
 if __name__ == "__main__":

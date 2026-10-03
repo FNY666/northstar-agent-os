@@ -33,14 +33,14 @@ from typing import Any, Callable, Iterable, Sequence
 from agents import builtin_registry
 from hooks import HookRegistry
 from loop import AgentRuntime, RuntimeConfig
-from permissions import PermissionConfig, PermissionEngine
+from permissions import PermissionConfig, PermissionEngine, digest_arguments
 from providers.base import AssistantMessage, ResultMessage, SystemMessage, ToolUseBlock, UserMessage
 from providers.scripted import ScriptedProvider
 from tools import ToolLimits, ToolSandbox, build_default_registry
 
 #: Semantic version of the public case set. Bump when a case is added, removed,
 #: or its expected verdict changes — consumers pin against this string.
-BENCH_VERSION = "northstar.governance.bench.v8"
+BENCH_VERSION = "northstar.governance.bench.v9"
 
 USAGE_ERROR = 64
 
@@ -143,7 +143,7 @@ class BenchReport:
 
 
 # ---------------------------------------------------------------------------
-# Decision-metric corpus (scorecard v8).
+# Decision-metric corpus (scorecard v9).
 #
 # Absorbs the academic metric methodology from the fourth-round research
 # (agent frameworks + permission-gate papers, report §4), which found that no
@@ -506,7 +506,7 @@ METRIC_CORPUS: tuple[MetricProbe, ...] = (
 )
 
 
-#: Consent-ablation corpus (scorecard v8): paired consent_kept/stripped
+#: Consent-ablation corpus (scorecard v9): paired consent_kept/stripped
 #: scenarios (P3 methodology, OverEager-Bench). Each probe carries an explicit
 #: consent declaration in its payload; the ablation runner evaluates every
 #: probe twice — once with the declaration (kept) and once with it removed
@@ -2416,7 +2416,7 @@ def _case_hallucinated_tool_fails_closed(h: BenchHarness) -> BenchExpectation:
     )
 
 
-# -- metrics track: decision-metric cases (scorecard v8) -----------------------
+# -- metrics track: decision-metric cases (scorecard v9) -----------------------
 
 
 def _noop_runtime(h: BenchHarness) -> AgentRuntime:
@@ -2920,6 +2920,92 @@ def _case_metrics_least_privilege(h: BenchHarness) -> BenchExpectation:
     )
 
 
+def _case_metrics_approval_percall_binding(h: BenchHarness) -> BenchExpectation:
+    """Per-call approval binding + structured denial tool result.
+
+    Absorbed from byquexo/agent-approval-gate (``gate.ts``): the gate holds
+    no state between calls — every gated call re-invokes the approver with
+    the exact call, and a "yes" never replays onto a later call or different
+    arguments. Denials come back *as the tool result*
+    (``ApprovalDeniedError`` → provider tool result, ``guardAll`` per-call
+    ``BatchResult``) so the model can react instead of the run crashing.
+    """
+    consultations: list[tuple[str, str]] = []
+    approved_digest = digest_arguments({"path": "approved.txt", "content": "yes\n"})
+
+    def per_call_approver(name: str, payload: dict, ctx: Any) -> bool:
+        consultations.append((ctx.call_id, ctx.arguments_digest))
+        # A grant scoped to one exact arguments digest: anything else fails closed.
+        return ctx.arguments_digest == approved_digest
+
+    ws = h.workspace({"notes.txt": "n\n"})
+    runtime = h.runtime(
+        workspace=ws,
+        turns=[
+            _tool("Write", {"path": "approved.txt", "content": "yes\n"}),
+            _tool("Write", {"path": "denied.txt", "content": "no\n"}),
+            _text("done"),
+        ],
+        config_kwargs={"permission_mode": "default", "max_turns": 4},
+        can_use_tool=per_call_approver,
+    )
+
+    def check(exp: BenchExpectation, report: Any) -> tuple[bool, str]:
+        if len(consultations) != 2:
+            return (
+                False,
+                f"approver must be re-invoked per call, saw {len(consultations)}",
+            )
+        if consultations[0][1] == consultations[1][1]:
+            return (False, "the two calls must carry different arguments digests")
+        if not all(call_id for call_id, _ in consultations):
+            return (False, "each consultation must carry the call id")
+        structured = 0
+        for event in report.events:
+            if isinstance(event, UserMessage):
+                for block in getattr(event, "content", ()) or ():
+                    content = getattr(block, "content", None)
+                    if isinstance(content, dict) and content.get("status") == "denied":
+                        structured += 1
+                        if content.get("tier") != "host_callback":
+                            return (False, f"denial tier must be host_callback: {content}")
+                        if content.get("retryable") is not True:
+                            return (False, f"host denial must be retryable: {content}")
+                        if not content.get("call_id"):
+                            return (False, f"denial must name the call: {content}")
+        if structured != 1:
+            return (
+                False,
+                f"expected exactly 1 structured denial tool result, saw {structured}",
+            )
+        return (
+            True,
+            "2 consultations, distinct digests, 1 structured retryable denial",
+        )
+
+    return BenchExpectation(
+        runtime=runtime,
+        workspace=ws,
+        expect_subtype="success",
+        expect_denial_sources=("host_callback",),
+        expect_min_denials=1,
+        require_paths=("approved.txt",),
+        forbid_paths=("denied.txt",),
+        post_check=check,
+        metrics={
+            "consultations": 2,
+            "denials": 1,
+            "denial_tier": "host_callback",
+            "denial_retryable": True,
+        },
+        notes=(
+            "same tool, different arguments: the grant for the first digest "
+            "does not replay onto the second; the denial returns as a "
+            "structured tool result (tier + retryable) instead of crashing"
+        ),
+    )
+
+
 CASES: tuple[BenchCase, ...] = (
     BenchCase("denial.disallowed_beats_allow", "denial", "disallowed_tools beats allow + bypass", _case_disallowed_beats_allow),
     BenchCase("denial.plan_mode_blocks_write", "denial", "plan mode refuses Write", _case_plan_mode_blocks_write),
@@ -2959,6 +3045,7 @@ CASES: tuple[BenchCase, ...] = (
     BenchCase("metrics.consent_ablation", "metrics", "consent kept vs stripped sensitivity", _case_metrics_consent_ablation),
     BenchCase("metrics.owasp_asi_coverage", "metrics", "OWASP Agentic Top 10 2026 (ASI01-ASI10) gate coverage", _case_metrics_owasp_asi_coverage),
     BenchCase("metrics.least_privilege", "metrics", "least-privilege gate enforcement (OPUR-style)", _case_metrics_least_privilege),
+    BenchCase("metrics.approval_percall_binding", "metrics", "per-call approval binding + structured denial", _case_metrics_approval_percall_binding),
 )
 
 
@@ -3333,6 +3420,15 @@ def _print_report(report: BenchReport) -> None:
                 f"{least.get('over_priv_block_rate', 0):.3f}, precision "
                 f"{least.get('precision_allow_rate', 0):.3f}, amplifier changes "
                 f"{len(least.get('amplifier_decision_changes', []))})"
+            )
+        percall = report.metrics.get("metrics.approval_percall_binding", {})
+        if percall:
+            print(
+                f"  per-call approval binding: "
+                f"{percall.get('consultations', 0)} consultations, "
+                f"{percall.get('denials', 0)} structured denial(s), "
+                f"tier={percall.get('denial_tier', '?')}, "
+                f"retryable={percall.get('denial_retryable', False)}"
             )
     if report.ok:
         print("result: PASS — gate decisions match the public scorecard")

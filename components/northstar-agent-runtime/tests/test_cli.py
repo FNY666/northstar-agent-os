@@ -163,7 +163,13 @@ class RunHappyPathTests(unittest.TestCase):
         self.assertEqual(code, 0, "a denial is reported to the model, which then answers")
         events = [json.loads(line) for line in out.splitlines()]
         self.assertTrue(events[2]["content"][0]["is_error"])
-        self.assertIn("no host approval callback", events[2]["content"][0]["content"])
+        denial = json.loads(events[2]["content"][0]["content"][0]["text"])
+        self.assertEqual(denial["status"], "denied")
+        self.assertEqual(denial["tool"], "Write")
+        self.assertEqual(denial["tier"], "mode")
+        self.assertFalse(denial["retryable"])
+        self.assertIn("no host approval callback", denial["reason"])
+        self.assertIn("no host approval callback", denial["message"])
         self.assertFalse((self.workspace / "b.txt").exists())
 
     def test_halt_on_denial_exits_5(self):
@@ -180,8 +186,10 @@ class RunHappyPathTests(unittest.TestCase):
         code, out, _ = run_cli(*self.base("--script", str(script), "--prompt", "p", "--read-only", "--json"))
         self.assertEqual(code, 0)
         denial = [json.loads(line) for line in out.splitlines()][2]
-        self.assertIn("refused", denial["content"][0]["content"])
         self.assertEqual(denial["content"][0]["is_error"], True)
+        payload = json.loads(denial["content"][0]["content"][0]["text"])
+        self.assertEqual(payload["status"], "denied")
+        self.assertIn("refused", payload["message"])
 
     def test_plan_mode_is_a_shorthand_for_the_permission_mode(self):
         code, out, _ = run_cli(*self.base("--scripted-text", "planning", "--prompt", "p", "--plan", "--json"))
@@ -216,8 +224,10 @@ class RunHappyPathTests(unittest.TestCase):
         self.assertEqual(code, 0)
         events = [json.loads(line) for line in out.splitlines()]
         denial = events[2]
-        body = denial["content"][0]["content"]
-        self.assertIn("refused", body)
+        body = denial["content"][0]["content"][0]["text"]
+        payload = json.loads(body)
+        self.assertEqual(payload["status"], "denied")
+        self.assertIn("refused", payload["message"])
         self.assertTrue(denial["content"][0]["is_error"])
         # The model *proposed* the argv (visible in the assistant tool_use event);
         # what must not appear is a successful Shell result body.
