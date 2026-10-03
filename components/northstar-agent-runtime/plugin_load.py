@@ -430,7 +430,12 @@ def load_contributions(
         for declaration in plugin.manifest.context_files:
             source = plugin.bundle.relative(declaration)
             if source.is_file():
-                contributions.context_blocks.append((plugin.name, _read_capped(source)))
+                try:
+                    text = _read_verified_context(plugin, declaration, source)
+                except PluginInstallError as error:
+                    contributions.blocked.append(f"{plugin.name}: {error}")
+                    continue
+                contributions.context_blocks.append((plugin.name, text))
         for hook in plugin.manifest.hooks:
             installed = plugin.bundle.relative(hook.script)
             try:
@@ -518,6 +523,23 @@ def _naming_problems(plugin: InstalledPlugin, tools: set[str]) -> list[str]:
 #: plugin contributes (skill root, agent file, hook script) is measured from, and the
 #: one thing a reader can grep for when they want to know how a file got here.
 INSTALLED_PREFIX = PLUGINS_DIRECTORY
+
+
+def _read_verified_context(plugin: InstalledPlugin, declaration: str, source: Path) -> str:
+    import hashlib
+
+    relative = source.relative_to(plugin.bundle.root).as_posix()
+    expected = next((item.sha256 for item in plugin.bundle.files if item.relative_path == relative), None)
+    try:
+        raw = source.read_bytes()
+    except OSError as error:
+        raise PluginInstallError(f"{source}: cannot read ({error})") from error
+    if expected is None or hashlib.sha256(raw).hexdigest() != expected:
+        raise PluginInstallError(f"{declaration}: context changed since review; refusing content")
+    text = raw.decode("utf-8", errors="replace")
+    if len(text) > MAX_CONTEXT_CHARS:
+        return text[:MAX_CONTEXT_CHARS] + "\n[truncated]"
+    return text
 
 
 def _read_capped(path: Path) -> str:

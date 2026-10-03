@@ -13,10 +13,11 @@ without bound.
 """
 from __future__ import annotations
 
+import hashlib
 import re
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Iterable
+from typing import Iterable, Mapping
 
 from frontmatter import FrontmatterError, parse_frontmatter
 
@@ -50,7 +51,7 @@ def skills_directory(workspace: str | Path) -> Path:
     return Path(workspace) / SKILLS_DIRECTORY
 
 
-def discover_skills(workspace: str | Path, *, extra_roots: Iterable[str | Path] = ()) -> tuple[Skill, ...]:
+def discover_skills(workspace: str | Path, *, extra_roots: Iterable[str | Path] = (), reviewed_digests: Mapping[str, str] | None = None) -> tuple[Skill, ...]:
     """Discover skills under the workspace root; errors are operator-facing.
 
     ``extra_roots`` is the seam an installed plugin bundle uses: each entry is a directory
@@ -59,9 +60,13 @@ def discover_skills(workspace: str | Path, *, extra_roots: Iterable[str | Path] 
     root that resolves out of it is refused rather than followed - and a name already
     claimed by the repository (or by an earlier root) is an error, never a shadow: which
     instructions the model sees must not depend on discovery order.
+
+    ``reviewed_digests`` pins workspace skill paths to SHA-256 of the exact bytes
+    parsed here; absent pins or changed bytes are refused. Plugin extra roots keep
+    their separate bundle trust source. This does not pin later tool reads of bodies.
     """
     root = Path(workspace).resolve()
-    skills: list[Skill] = list(_scan(root / SKILLS_DIRECTORY, root))
+    skills: list[Skill] = list(_scan(root / SKILLS_DIRECTORY, root, reviewed_digests))
     for extra in extra_roots:
         directory = Path(extra).resolve(strict=False)
         if not directory.is_relative_to(root):
@@ -81,7 +86,7 @@ def discover_skills(workspace: str | Path, *, extra_roots: Iterable[str | Path] 
     return tuple(sorted(skills, key=lambda skill: skill.name))
 
 
-def _scan(directory: Path, root: Path) -> list[Skill]:
+def _scan(directory: Path, root: Path, reviewed_digests: Mapping[str, str] | None = None) -> list[Skill]:
     """One directory of skill folders, with the symlink refusal the root check requires."""
     if not directory.is_dir():
         return []
@@ -104,15 +109,21 @@ def _scan(directory: Path, root: Path) -> list[Skill]:
                 f"skill file {skill_file} resolves outside the workspace root {root}; "
                 "refusing to follow the symlink"
             )
-        skills.append(_parse_skill(resolved_file))
+        expected_digest = None
+        if reviewed_digests is not None:
+            relative = resolved_file.relative_to(root).as_posix()
+            expected_digest = reviewed_digests.get(relative, "")
+        skills.append(_parse_skill(resolved_file, expected_digest=expected_digest))
     return skills
 
 
-def _parse_skill(skill_file: Path) -> Skill:
+def _parse_skill(skill_file: Path, *, expected_digest: str | None = None) -> Skill:
     try:
         raw = skill_file.read_bytes()
     except OSError as error:
         raise SkillError(f"{skill_file}: cannot read skill: {error}") from error
+    if expected_digest is not None and hashlib.sha256(raw).hexdigest() != expected_digest:
+        raise SkillError(f"{skill_file}: skill changed since review or is unreviewed; refusing metadata")
     try:
         fields, _body = parse_frontmatter(raw.decode("utf-8", errors="replace"))
     except FrontmatterError as error:
