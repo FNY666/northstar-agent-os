@@ -27,11 +27,14 @@ dependencies = ["northstar-run-contract", "northstar-host"]
 [tool.setuptools]
 py-modules = [
     "action_gateway",
+    "blob_store",
     "durable_audit",
     "durable_contract",
     "evaluation",
+    "event_migration",
     "event_store",
     "runner",
+    "tool_ledger",
     "trace_metrics",
     "verifier",
 ]
