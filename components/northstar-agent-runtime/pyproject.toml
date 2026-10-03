@@ -94,6 +94,7 @@ py-modules = [
     "mcp_elicitation",
     "mcp_negotiate",
     "multisig",
+    "offline_bundle",
     "passport",
     "permissions",
     "postconditions",

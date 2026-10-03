@@ -1,3 +1,25 @@
+## Unreleased (ninety-seventh batch) — signed offline policy bundles (space-AI absorption)
+
+Absorbs the 2026 space-AI research thread: satellites cannot phone home
+for approval — policy must be *compiled* into the agent as a signed,
+expiry-bounded bundle. Generalizes to field robotics and air-gapped
+factories. New module `offline_bundle.py`: `compile_bundle()` signs a
+canonical-JSON envelope (Ed25519, vendored; the bundle pins its own
+canonical form inside the envelope) carrying the allowlist policy
+(Janus-style rules, ninety-first batch), pinned tool-definition digests
+(ninety-first batch `definition_digest` semantics), `bundle_version`,
+`issued_at`/`expires_at`, and a staleness ceiling. `verify_bundle()`
+fail-closes in order — claimed issuer must be the expected authority,
+signature over canonical bytes, expiry, staleness ceiling, monotonic
+version (rollback to an older bundle is denied: no silent downgrade to
+weaker policy), pinned digests must match the live registry.
+`offline_check()` gates tool calls against a *verified* bundle only —
+an unverifiable bundle authorizes nothing (no "offline lenient mode").
+Honest scope in the module docstring: key distribution is out-of-band;
+a lying clock can trick expiry (staleness ceiling is the second bound).
+New bench track `metrics.offline_bundle` (12 deterministic scenarios,
+4 allow / 8 deny; BENCH_VERSION bump left for the integration pass).
+
 ## Unreleased (ninety-first batch) — static pre-dispatch policy verification (Janus absorption)
 
 Absorbs the static-verification half of `Agentic-AI-Risk-Mitigation/Janus`

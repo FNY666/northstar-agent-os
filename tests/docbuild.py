@@ -112,6 +112,7 @@ MANIFEST: dict[str, tuple[str, ...]] = {
         "plugin_manifest",
         "policy_file",
         "postconditions",
+        "offline_bundle",
         "product_path",
         "provider_retry",
         "provenance_taint",
