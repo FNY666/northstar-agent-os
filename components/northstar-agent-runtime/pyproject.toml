@@ -54,6 +54,7 @@ py-modules = [
     "audit_cli",
     "audit_rekor",
     "audit_archive",
+    "audit_scitt",
     "trace_export",
     "budget",
     "cli",
