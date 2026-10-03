@@ -805,6 +805,40 @@ Evaluate every probe under its declared engine (native run).
 #### `run_policy_axis()`
 
 Strict-vs-permissive effect size on the config-portable probe subset.
+### `model_lineage`
+
+Source: `components/northstar-agent-runtime/model_lineage.py`
+
+Model lineage receipts (one-hundredth batch).
+
+#### `LineageReceiptError`
+
+A malformed lineage receipt or a programming error.
+
+#### `LineageReceipt`
+
+One model version's lineage claim.
+
+#### `compute_receipt_digest(receipt: LineageReceipt)`
+
+Recompute the receipt digest over all fields except itself.
+
+#### `build_receipt(*, model_id: str, model_digest: str, parent_model_digest: str='', corpus_manifest_digest: str, acquisition_method: str, consent_receipt_ids: tuple[str, ...]=(), tainted: bool=False, timestamp: int, prev_digest: str=_GENESIS)`
+
+Build a receipt and seal it with its digest.
+
+#### `LineageVerdict`
+
+Outcome of verifying one model version's lineage.
+
+#### `verify_lineage(receipts: list[LineageReceipt], *, consent_lookup: Callable[[str], Mapping[str, Any] | None] | None=None)`
+
+Verify a lineage log, fail-closed.
+
+#### `classify_model(receipt: LineageReceipt, registry: list[LineageReceipt], *, consent_lookup: Callable[[str], Mapping[str, Any] | None] | None=None)`
+
+Binary policy tier for one model version.
+
 
 #### `run_consent_ablation()`
 
@@ -998,6 +1032,10 @@ Audit record pinning the harness digest for one bench run.
 Re-hash ``config`` and compare against the pinned digest.
 
 #### `ScoredResult`
+#### `run_model_lineage()`
+
+Model lineage receipts (one-hundredth batch).
+
 
 A benchmark score with its full measurement context.
 

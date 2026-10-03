@@ -1,3 +1,22 @@
+## Unreleased (one-hundredth batch) — model lineage receipts (AI-creative copyright absorption)
+
+New module `model_lineage.py`: hash-chained lineage receipts binding
+`(model_digest | training_corpus_manifest_digest | acquisition_method)`
+to a parent model for every model version. Absorbs the 2026 AI-creative
+copyright thread: Sony+UMG v. Suno's "model laundering" theory
+(retraining on a tainted model's outputs doesn't wash the taint —
+taint propagates transitively), Bartz v. Anthropic's $1.5B split
+(training was fair use, but pirated *acquisition* wasn't — so the
+closed acquisition vocabulary `licensed` / `public-domain` /
+`consent-gated` / `unknown` fail-closes on `unknown`), and GEMA v. Suno
+(memorization = reproduction). The gate fail-closes on lineage gaps
+(unresolvable parent digests), consent-gated corpora without
+resolvable consent receipts, and tainted ancestry. `classify_model()`
+is the binary policy tier (`verified-lineage` /
+`unverifiable-lineage`, no partial tier — the eighty-seventh batch's
+lesson). New bench track `metrics.model_lineage` (12 deterministic
+scenarios, 3 allow / 9 deny, zero mismatches); bench v18 → v19.
+
 ## Unreleased (one-hundred-second batch) — quantum-threat timeline gates (BSI TR-02102 absorption)
 
 New module `quantum_timeline.py`: a policy gate encoding the 2026

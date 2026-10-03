@@ -127,3 +127,4 @@ py-modules = [
 [tool.setuptools.packages.find]
 where = ["."]
 include = ["providers*", "tools*"]
+    "model_lineage",
