@@ -594,6 +594,10 @@ Biscuit-style attenuating delegation credentials, offline verification.
 
 PATH-shim red-team: trustmebro-style fabricated tool output, detected.
 
+#### `run_pretrade_15c3_5()`
+
+SEC 15c3-5-style pre-trade risk semantics on the permission gate.
+
 #### `list_cases()`
 
 #### `run_suite(*, only: Iterable[str] | None=None, tracks: Iterable[str] | None=None)`
@@ -1137,12 +1141,18 @@ Per-tool result of gating a subagent's declared tool set.
   - Names present in both lists; kept for diagnostics, deny always wins.
 #### `validate_mode(mode: str)`
 
+#### `PreTradeRiskConfig`
+
+Host-owned pre-trade risk limits, SEC Rule 15c3-5 (c)(1)(ii) style.
+
 #### `PermissionEngine`
 
-Evaluates one tool call against the three layers.
+Evaluates one tool call against the pre-trade checks then the three layers.
 
 - `multisig_pubkeys` (property)
   - Approver public keys, or None when multisig is not configured.
+- `pretrade_reset()`
+  - Clear pre-trade observation windows (rate counters, duplicate fingerprints).
 - `mode` (property)
 - `knows(tool_name: str)`
 - `register_kind(tool_name: str, kind: str)`

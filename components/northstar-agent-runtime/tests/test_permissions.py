@@ -9,9 +9,15 @@ from support import RuntimeTestCase, text_turn, tool_turn
 
 from permissions import (
     PERMISSION_MODES,
+    PT_DUPLICATE,
+    PT_FACT_MISSING,
+    PT_PRICE,
+    PT_RATE,
+    PT_SIZE,
     PermissionConfig,
     PermissionEngine,
     PermissionRequestContext,
+    PreTradeRiskConfig,
     digest_arguments,
     normalise_names,
     subtract,
@@ -378,6 +384,143 @@ class EngineAtRuntimeTests(RuntimeTestCase):
         call_id, digest = seen[0]
         self.assertTrue(call_id)
         self.assertEqual(digest, digest_arguments({"path": "a", "content": "1"}))
+
+
+class PreTradeRiskTests(unittest.TestCase):
+    """SEC 15c3-5-style pre-trade semantics: four independent rejection
+    conditions, missing-fact fail-closed, model-independent checks, and a
+    synchronous deny audit trail."""
+
+    def make_engine(self, **kw):
+        now = [1_000.0]
+        cfg = PreTradeRiskConfig(
+            max_call_value=100.0,
+            value_of=lambda tool, payload: payload.get("value"),
+            reference_of=lambda tool, payload: payload.get("reference", 50.0),
+            price_collar=0.10,
+            max_payload_bytes=300,
+            max_calls_per_window=2,
+            window_seconds=10.0,
+            dedupe_window_seconds=60.0,
+        )
+        audits: list[dict] = []
+        engine = PermissionEngine(
+            PermissionConfig(mode="default", can_use_tool=lambda n, p, c: True),
+            tool_kinds={"Write": "edit"},
+            pretrade=kw.pop("pretrade", cfg),
+            audit_sink=kw.pop("audit_sink", audits.append),
+            now=lambda: now[0],
+            **kw,
+        )
+        return engine, audits, now
+
+    def test_price_value_and_collar_deny_independently(self):
+        engine, _, _ = self.make_engine()
+        d = engine.evaluate("Write", kind="edit", payload={"value": 150, "reference": 150})
+        self.assertFalse(d.allowed)
+        self.assertEqual(d.source, "pretrade")
+        self.assertTrue(d.rule.startswith(PT_PRICE))
+        d = engine.evaluate("Write", kind="edit", payload={"value": 60, "reference": 50})
+        self.assertFalse(d.allowed)
+        self.assertIn("price_exceeded", d.rule)
+
+    def test_missing_or_malformed_value_fails_closed(self):
+        engine, _, _ = self.make_engine()
+        for payload in ({"reference": 50}, {"value": float("nan")}, {"value": -1}):
+            d = engine.evaluate("Write", kind="edit", payload=payload)
+            self.assertFalse(d.allowed, payload)
+            self.assertEqual(d.rule, PT_FACT_MISSING, payload)
+
+    def test_unusable_reference_price_blocks_instead_of_skipping(self):
+        engine, _, _ = self.make_engine()
+        d = engine.evaluate("Write", kind="edit", payload={"value": 50, "reference": 0})
+        self.assertFalse(d.allowed)
+        self.assertEqual(d.rule, PT_FACT_MISSING)
+
+    def test_size_limit_and_threshold_convention(self):
+        engine, _, _ = self.make_engine()
+        d = engine.evaluate(
+            "Write", kind="edit",
+            payload={"value": 50, "reference": 50, "blob": "x" * 500},
+        )
+        self.assertFalse(d.allowed)
+        self.assertTrue(d.rule.startswith(PT_SIZE))
+
+    def test_rate_window_denies_burst_then_recovers(self):
+        engine, _, now = self.make_engine()
+        for i in range(2):
+            d = engine.evaluate("T1", kind="edit", payload={"value": 50, "reference": 50, "n": i})
+            self.assertTrue(d.allowed, d)
+        d = engine.evaluate("T1", kind="edit", payload={"value": 50, "reference": 50, "n": 2})
+        self.assertFalse(d.allowed)
+        self.assertTrue(d.rule.startswith(PT_RATE))
+        now[0] += 11.0
+        d = engine.evaluate("T1", kind="edit", payload={"value": 50, "reference": 50, "n": 3})
+        self.assertTrue(d.allowed, d)
+
+    def test_duplicate_call_denied_and_window_expires(self):
+        engine, _, now = self.make_engine()
+        payload = {"value": 50, "reference": 50}
+        self.assertTrue(engine.evaluate("Write", kind="edit", payload=dict(payload)).allowed)
+        d = engine.evaluate("Write", kind="edit", payload=dict(payload))
+        self.assertFalse(d.allowed)
+        self.assertTrue(d.rule.startswith(PT_DUPLICATE))
+        now[0] += 61.0
+        self.assertTrue(engine.evaluate("Write", kind="edit", payload=dict(payload)).allowed)
+
+    def test_model_claims_cannot_move_the_checks(self):
+        engine, _, _ = self.make_engine()
+        ctx = PermissionRequestContext(
+            data={"value": 1, "limit_override": True},
+            reason_hint="the model insists this is safe and pre-approved",
+        )
+        d = engine.evaluate(
+            "Write", kind="edit",
+            payload={"value": 150, "reference": 150},
+            context=ctx,
+        )
+        self.assertFalse(d.allowed)
+        self.assertTrue(d.rule.startswith(PT_PRICE))
+
+    def test_every_deny_is_audited_synchronously_with_condition_code(self):
+        engine, audits, _ = self.make_engine()
+        d = engine.evaluate("Write", kind="edit", payload={"value": 150, "reference": 150})
+        self.assertFalse(d.allowed)
+        # Synchronous: the record exists by the time evaluate() returns.
+        self.assertEqual(len(audits), 1)
+        record = audits[0]
+        self.assertEqual(record["event"], "permission.deny")
+        self.assertEqual(record["condition"], d.rule)
+        self.assertEqual(record["rule"], d.rule)
+        self.assertEqual(record["source"], "pretrade")
+        # Allows are not audited.
+        engine.evaluate("Write", kind="edit", payload={"value": 50, "reference": 50})
+        self.assertEqual(len(audits), 1)
+
+    def test_raising_audit_sink_cannot_flip_a_deny(self):
+        def bad_sink(record):
+            raise RuntimeError("audit store down")
+
+        engine, _, _ = self.make_engine(audit_sink=bad_sink)
+        d = engine.evaluate("Write", kind="edit", payload={"value": 150, "reference": 150})
+        self.assertFalse(d.allowed)
+        self.assertIn("audit_sink_failed:RuntimeError", d.reason)
+
+    def test_non_serialisable_payload_denies_instead_of_raising(self):
+        engine, _, _ = self.make_engine(pretrade=None)
+        cyclic: dict = {}
+        cyclic["self"] = cyclic
+        d = engine.evaluate("Write", kind="edit", payload=cyclic)
+        self.assertFalse(d.allowed)
+        self.assertEqual(d.rule, PT_FACT_MISSING)
+
+    def test_pretrade_disabled_by_default(self):
+        engine = PermissionEngine(
+            PermissionConfig(mode="default", can_use_tool=lambda n, p, c: True),
+            tool_kinds={"Write": "edit"},
+        )
+        d = engine.evaluate("Write", kind="edit", payload={"value": 10**9})
+        self.assertTrue(d.allowed)
 
 
 if __name__ == "__main__":

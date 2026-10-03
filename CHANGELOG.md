@@ -1,3 +1,43 @@
+## Unreleased (seventy-third batch) — SEC 15c3-5 pre-trade risk semantics on the permission gate
+
+Absorbs the *pre-trade risk-control semantics* (not a compliance claim) of
+SEC Rule 15c3-5 (17 CFR 240.15c3-5, Release No. 34-63241), verified against
+the rule's clause structure via a third-party Apache-2.0 skill file quoting
+the rule text:
+
+- **Four independent rejection conditions** on every call, as a new layer-0
+  pre-trade stage inside `PermissionEngine.evaluate` (before the three
+  existing layers): `PT-1` price/value (per-call cap plus a collar against a
+  host-owned reference price), `PT-2` size (canonical-JSON byte budget),
+  `PT-3` rate (sliding-window burst over a short period), `PT-4` duplicates
+  (`(tool, arguments_digest)` fingerprint window). Each fires its own
+  condition code (`pretrade:PT-1:value_exceeded`, …), and all firing
+  conditions are reported — none masks another.
+- **Missing fact = block, fail-closed**: a missing, NaN, or negative value,
+  an unusable reference price, a throwing extractor, or a non-serialisable
+  payload all deny with `pretrade:fact_missing` — never raise, never pass
+  silently.
+- **Direct and exclusive control**: the checks read only host-owned config,
+  host-supplied fact extractors, and engine-measured facts (digest,
+  timestamps). Model-supplied context data and reason hints cannot move the
+  verdict — the gate's denial stands even when the model claims approval.
+- **Every deny is audited synchronously**: `evaluate()` reports each denial
+  to the host `audit_sink` with its condition code before returning; a
+  raising sink cannot flip the denial (the failure is made visible in the
+  reason). Allowed calls are not audited.
+- Opt-in via `PreTradeRiskConfig` (default `None` = previous behaviour,
+  zero changes); injected `now` clock for deterministic tests;
+  `pretrade_reset()` clears the sliding windows.
+- New metrics-track case `metrics.pretrade_15c3_5`
+  (`components/northstar-agent-runtime/governance_bench.py`): 26
+  deterministic probes, 15 denies / 11 allows, 15 synchronous audit
+  records; BENCH_VERSION v10 → v11. `tests/test_permissions.py` gains
+  `PreTradeRiskTests` (11 tests).
+- **Honest scope**: mechanism borrowing only. 15c3-5 binds broker-dealers,
+  not agents, and this gate covers only the erroneous-order limb; the rule
+  prescribes no numeric limits, so every threshold here is a host
+  calibration placeholder.
+
 ## Unreleased (seventy-second batch) — m-of-n multisig approval
 
 Absorbs BIP-11 / Gnosis Safe m-of-n semantics into the permission gate
