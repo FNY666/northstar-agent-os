@@ -1,3 +1,29 @@
+## Unreleased (one-hundred-sixth batch) — streaming output guard (open-models guard absorption)
+
+New module `stream_guard.py`: per-chunk screening *before* release, closing
+the final-output-gating gap (a streaming agent can exfiltrate a violating
+prefix long before a final gate sees it). `GuardPolicy` is a deterministic,
+closed-vocabulary screener — literal deny-pattern matchers with risk
+weights and a per-chunk risk budget, no LLM in the hot path (an
+open-weight guard model may run as an optional, advisory-only second
+opinion, never the gate). `screen_stream()` halts the stream on the first
+violating chunk (nothing after is released; the partial prefix classifies
+`unverifiable-stream`, 87th-batch binary semantics) and receipts every
+decision into a tamper-evident hash chain
+`(stream_id, chunk_index, chunk_digest, window_digest, verdict)` so a
+bypassed stream is detectable after the fact via `verify_chain()`
+(gaps, reorders, tampering, narrowed overlap windows, and post-halt
+smuggling all fail closed). `guard_liveness()` pins the expected policy
+digest: a stale/unknown/malformed guard refuses the *entire* stream —
+there is no degraded-mode streaming. Anti-smuggling: each chunk is
+screened together with a bounded overlap window (the tail of released
+chunks), so patterns split across chunk boundaries still match; the
+window itself is receipted. Honest scoping: literal screening catches
+known-bad shapes (credential prefixes, key headers); novel encodings
+are the documented job of the advisory second opinion. New bench track
+`metrics.stream_guard` (12 deterministic scenarios, 4 allow / 8 deny,
+zero mismatches); bench v22 → v23 (103rd batch owns v21 → v22).
+
 ## Unreleased (one-hundred-first batch) — agent-readiness probes for public-facing agent UI (AI-accessibility absorption)
 
 New module `agent_readiness.py`: a deterministic probe harness rendering an

@@ -3107,6 +3107,68 @@ Decide whether the card's recommended action may execute.
 
 Audit record for a denied SOC execution, for audit.ndjson/1.
 
+### `stream_guard`
+
+Source: `components/northstar-agent-runtime/stream_guard.py`
+
+Streaming output guard: per-chunk screening, not final-output gating.
+
+#### `StreamGuardError`
+
+Malformed guard-policy input.
+
+#### `DenyPattern`
+
+One literal deny matcher.
+
+- `definition()`
+#### `GuardPolicy`
+
+Deterministic per-chunk screening policy.
+
+- `validate()`
+  - Return a denial reason if the policy is malformed, else None.
+- `definition()`
+- `digest()`
+  - Policy digest pin — the liveness check compares against this.
+#### `default_policy()`
+
+A closed exemplar policy of known-bad credential/exfil shapes.
+
+#### `guard_liveness(policy: GuardPolicy, expected_policy_digest: str)`
+
+Prove the guard is the pinned policy version.
+
+#### `ChunkVerdict`
+
+The screening outcome for one chunk.
+
+#### `screen_chunk(chunk: str, window: str, policy: GuardPolicy, second_opinion: Callable[[str], Mapping[str, Any]] | None=None)`
+
+Screen one chunk (plus the anti-smuggling overlap window).
+
+#### `ChunkReceipt`
+
+One receipted chunk-screening decision.
+
+- `recompute_digest()`
+#### `ScreenResult`
+
+The outcome of screening a stream.
+
+- `audit_event()`
+#### `screen_stream(chunks: Iterable[str], policy: GuardPolicy, expected_policy_digest: str, stream_label: str='default', second_opinion: Callable[[str], Mapping[str, Any]] | None=None)`
+
+Screen a stream chunk-by-chunk, releasing each chunk before the next.
+
+#### `verify_chain(receipts: Sequence[ChunkReceipt], released_chunks: Sequence[str], policy: GuardPolicy)`
+
+Replay a receipt chain and check for bypass, gap, or tampering.
+
+#### `classify_stream(result: ScreenResult)`
+
+Binary stream tier: verified-stream vs unverifiable-stream.
+
 ### `tracing`
 
 Source: `components/northstar-agent-runtime/tracing.py`
