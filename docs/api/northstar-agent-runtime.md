@@ -522,6 +522,10 @@ Strict-vs-permissive effect size on the config-portable probe subset.
 
 Paired consent ablation: consent_kept vs consent_stripped.
 
+#### `run_owasp_asi_coverage()`
+
+Map every bench probe to the OWASP Agentic Top 10 2026 taxonomy.
+
 #### `BenchHarness`
 
 Temp workspaces + scripted providers for one suite run.
