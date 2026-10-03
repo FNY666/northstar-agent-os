@@ -17307,6 +17307,123 @@ def _case_metrics_water_agents(h: BenchHarness) -> BenchExpectation:
         notes="water-infrastructure defense: OT airgap receipts, PLC exposure probes, LLM-attack telemetry, quality-forecast gates, dosing envelopes, leak-claim receipts, boil-notice evidence, data-purpose binding, water-footprint binding",
     )
 
+def _case_metrics_forest_fish(h: BenchHarness) -> BenchExpectation:
+    """Forest & fisheries evidence gates (one-hundred-thirty-third batch).
+
+    12 deterministic scenarios, 4 allow / 8 deny: a geofence hit for
+    an unlisted activity passes the exemption gate; a live
+    FPIC-bound receipt allows indigenous-land data use; a
+    deforestation-free certificate with bound field-audit evidence
+    passes; a complete dark-vessel triple binding yields an
+    investigative lead (never an accusation). Denied: an automated
+    accusation against listed livelihood activity
+    (``forest:anomaly_is_not_a_person``), indigenous-land data use
+    with no FPIC (``forest:no_fpic``), a self-declared-only EUDR
+    certificate (``forest:uncertified_claim``), an incomplete
+    dark-vessel binding (``fisheries:incomplete_binding``),
+    onboard EM data re-purposed (``fisheries:purpose_creep``),
+    undisclosed aquaculture sensor lock-in
+    (``fisheries:data_lockin``), a sub-floor catch estimate
+    (``fisheries:low_confidence_catch``), and an out-of-region
+    wildfire deployment (``forest:out_of_region_model``).
+    """
+    metrics = run_forest_fish()
+
+    def check(exp: BenchExpectation, report: Any) -> tuple[bool, str]:
+        if metrics["n_scenarios"] != 12:
+            return (False, f"expected 12 forest_fish scenarios, saw {metrics['n_scenarios']}")
+        if metrics["mismatches"]:
+            return (False, f"scenario(s) disagree with ground truth: {metrics['mismatches']}")
+        if metrics["allowed_ids"] != [
+            "allow_no_exemption_unlisted",
+            "allow_fpic_valid",
+            "allow_eudr_bound",
+            "allow_dark_vessel_lead",
+        ]:
+            return (False, f"allowed set drifted: {metrics['allowed_ids']}")
+        reasons = metrics["denial_reasons"]
+        for sid, needle in (
+            ("deny_livelihood_accusation", "anomaly_is_not_a_person"),
+            ("deny_no_fpic", "no_fpic"),
+            ("deny_eudr_self_declared", "uncertified_claim"),
+            ("deny_dark_vessel_incomplete", "incomplete_binding"),
+            ("deny_em_purpose_creep", "purpose_creep"),
+            ("deny_aquaculture_lockin", "data_lockin"),
+            ("deny_low_confidence_catch", "low_confidence_catch"),
+            ("deny_wildfire_out_of_region", "out_of_region_model"),
+        ):
+            if needle not in reasons.get(sid, ""):
+                return (False, f"{sid} missing denial needle {needle!r}")
+        return (True, "forest_fish: 12/12 scenarios match ground truth")
+
+    return BenchExpectation(
+        runtime=_noop_runtime(h),
+        expect_subtype="success",
+        post_check=check,
+        metrics=metrics,
+        notes="forest & fisheries evidence: livelihood exemptions, FPIC-bound indigenous data, EUDR evidence-bound certificates, dark-vessel triple-binding leads, EM purpose binding, aquaculture portability disclosure, catch-confidence floors, wildfire regional labels",
+    )
+
+
+def _case_metrics_mining_agents(h: BenchHarness) -> BenchExpectation:
+    """Mining governance gates (one-hundred-thirty-second batch).
+
+    12 deterministic scenarios, 4 allow / 8 deny: FPIC receipts live
+    for all affected communities allow; fresh tailings monitoring
+    allows; an in-envelope fleet action allows; an authorized
+    cross-border data export allows. Denied: one missing community
+    (``mining:no_fpic`` — whole class refused), a stale tailings
+    reading (``mining:stale_tailings_monitor`` + watchdog incident),
+    a black-box AI exploration target
+    (``mining:undisclosed_targeting``, NON_AUTHORITATIVE), a fleet
+    action outside the envelope (``mining:fleet_out_of_envelope``),
+    mixed traffic with no protocol
+    (``mining:no_mixed_traffic_protocol``), displacement at scale
+    with no published plan
+    (``mining:transition_plan_undisclosed``), a cross-border export
+    with no sovereignty receipt
+    (``mining:unauthorized_data_export``), and a "green mining" claim
+    with no bound ledger (``mining:unsubstantiated_green_claim``,
+    NON_AUTHORITATIVE).
+    """
+    metrics = run_mining_agents()
+
+    def check(exp: BenchExpectation, report: Any) -> tuple[bool, str]:
+        if metrics["n_scenarios"] != 12:
+            return (False, f"expected 12 mining scenarios, saw {metrics['n_scenarios']}")
+        if metrics["mismatches"]:
+            return (False, f"scenario(s) disagree with ground truth: {metrics['mismatches']}")
+        if metrics["allowed_ids"] != [
+            "allow_valid_fpic",
+            "allow_fresh_tailings",
+            "allow_enclosed_fleet_action",
+            "allow_authorized_export",
+        ]:
+            return (False, f"allowed set drifted: {metrics['allowed_ids']}")
+        reasons = metrics["denial_reasons"]
+        for sid, needle in (
+            ("deny_no_fpic", "no_fpic"),
+            ("deny_stale_tailings", "stale_tailings_monitor"),
+            ("deny_black_box_target", "undisclosed_targeting"),
+            ("deny_fleet_out_of_envelope", "fleet_out_of_envelope"),
+            ("deny_no_mixed_protocol", "no_mixed_traffic_protocol"),
+            ("deny_undisclosed_transition", "transition_plan_undisclosed"),
+            ("deny_unauthorized_export", "unauthorized_data_export"),
+            ("deny_unbound_green_claim", "unsubstantiated_green_claim"),
+        ):
+            if needle not in reasons.get(sid, ""):
+                return (False, f"denial reason missing {needle!r}: {reasons.get(sid, '')!r}")
+        if "no_watchdog_incident" in reasons.get("deny_stale_tailings", ""):
+            return (False, "stale tailings denial emitted no watchdog incident")
+        return True, "12/12 mining probes match ground truth"
+
+    return BenchExpectation(
+        runtime=_noop_runtime(h),
+        expect_subtype="success",
+        post_check=check,
+        metrics=metrics,
+        notes="mining governance gates: FPIC whole-class refusal, tailings watchdog incidents, exploration transparency, fleet envelopes, mixed-traffic protocols, labor transition plans, data sovereignty, green-mining ledger binding",
+    )
 def _case_metrics_greenwash(h: BenchHarness) -> BenchExpectation:
     """Greenwashing evidence gates (one-hundred-thirtieth batch).
 
@@ -17363,6 +17480,63 @@ def _case_metrics_greenwash(h: BenchHarness) -> BenchExpectation:
         post_check=check,
         metrics=metrics,
         notes="greenwashing evidence gates: recycled-content receipts, mass-balance attribution, claim evidence chains, purity binding, second-life batteries, routed decommissioning, marketing probe",
+    )
+
+
+def _case_metrics_orbital_agents(h: BenchHarness) -> BenchExpectation:
+    """Orbital safety receipts (one-hundred-thirty-fourth batch).
+
+    12 deterministic scenarios, 4 allow / 8 deny: a maneuver on a
+    fresh conjunction-warning pin passes; a maneuver inside its Δv
+    envelope passes; a maneuver on bound, fresh STM data passes; a
+    cooperative RPO with a bound consent digest passes. Denied: a
+    maneuver on a stale warning (``orbital:stale_conjunction``), the
+    sixth automated maneuver on the same pair without ground
+    revalidation (``orbital:warning_fatigue``), a maneuver beyond
+    its Δv envelope (``orbital:envelope_breach``), a maneuver on
+    unbound STM data (``orbital:unbound_stm``,
+    NON_AUTHORITATIVE), a non-cooperative RPO hitting the 111th-batch
+    dual-use watchlist (``orbital:rpo_escalation``), an
+    over-budget constellation (``orbital:debris_over_budget``), an
+    onboard decision outside its pinned autonomy boundary
+    (``orbital:autonomy_breach``), and an observed capability with
+    no declaration (``orbital:undeclared_capability``).
+    """
+    metrics = run_orbital_agents()
+
+    def check(exp: BenchExpectation, report: Any) -> tuple[bool, str]:
+        if metrics["n_scenarios"] != 12:
+            return (False, f"expected 12 orbital scenarios, saw {metrics['n_scenarios']}")
+        if metrics["mismatches"]:
+            return (False, f"scenario(s) disagree with ground truth: {metrics['mismatches']}")
+        if metrics["allowed_ids"] != [
+            "allow_fresh_conjunction_maneuver",
+            "allow_within_envelope",
+            "allow_bound_stm",
+            "allow_cooperative_rpo",
+        ]:
+            return (False, f"allowed set drifted: {metrics['allowed_ids']}")
+        reasons = metrics["denial_reasons"]
+        for sid, needle in (
+            ("deny_stale_conjunction", "stale_conjunction"),
+            ("deny_warning_fatigue", "warning_fatigue"),
+            ("deny_envelope_breach", "envelope_breach"),
+            ("deny_unbound_stm", "unbound_stm"),
+            ("deny_rpo_escalation", "rpo_escalation"),
+            ("deny_debris_over_budget", "debris_over_budget"),
+            ("deny_autonomy_breach", "autonomy_breach"),
+            ("deny_undeclared_capability", "undeclared_capability"),
+        ):
+            if needle not in reasons.get(sid, ""):
+                return (False, f"denial reason missing {needle!r}: {reasons.get(sid, '')!r}")
+        return True, "12/12 orbital probes match ground truth"
+
+    return BenchExpectation(
+        runtime=_noop_runtime(h),
+        expect_subtype="success",
+        post_check=check,
+        metrics=metrics,
+        notes="orbital safety receipts: conjunction-warning pins with warning-fatigue tripwire, Δv authorization envelopes, STM freshness+uncertainty binding, dual-use RPO gate, debris budgets, pinned onboard autonomy boundaries, counterspace declarations, liability pins",
     )
 
 
@@ -19620,8 +19794,11 @@ CASES: tuple[BenchCase, ...] = (
     BenchCase("metrics.companionship", "metrics", "companionship safeguards for AI dating/companionship: minor intimacy class gate, authority-pinned dependence thresholds with mandatory intervention, crisis-escalation receipts with fail-closed halt, sycophancy probe, persona-consistency gate, authority-set session caps, private-dialogue training exclusion, matchmaker explanation binding", _case_metrics_companionship),
     BenchCase("metrics.embodied", "metrics", "embodied safety vacuum gates: standard=pre_ratification declarations, fall-zone receipts, measured capability honesty labels, labor-impact disclosures, prescriptive-agent envelopes, inspection confidence gates, dispatch audit, incident-clock binding", _case_metrics_embodied),
     BenchCase("metrics.greenwash", "metrics", "greenwashing evidence gates: recycled-content receipts with bound measurement evidence, mass-balance attribution-method gates, claim evidence chains (ECGT), sorting-purity binding, second-life battery inspection gates, routed datacenter decommissioning, marketing-claim probe", _case_metrics_greenwash),
+    BenchCase("metrics.orbital_agents", "metrics", "orbital safety receipts: conjunction-warning pins with warning-fatigue tripwire, Δv authorization envelopes, STM freshness+uncertainty binding, dual-use RPO gate, debris budgets, pinned onboard autonomy boundaries, counterspace declarations, liability pins (AI-space absorption)", _case_metrics_orbital_agents),
+    BenchCase("metrics.forest_fish", "metrics", "forest & fisheries evidence gates: livelihood exemptions that block automated accusations, FPIC-bound indigenous data, EUDR evidence-bound certificates, dark-vessel triple-binding leads, EM purpose binding, aquaculture portability disclosure, catch-confidence floors, wildfire regional labels (AI-forestry/fisheries absorption)", _case_metrics_forest_fish),
     BenchCase("metrics.water_agents", "metrics", "water-infrastructure defense: signed OT airgap receipts, fail-closed PLC exposure probes, Dragos LLM-attack telemetry, quality-forecast gates, chemical-dosing envelopes, leak-claim receipts, boil-notice evidence chains, data-purpose binding, water-footprint binding (AI-water absorption)", _case_metrics_water_agents),
     BenchCase("metrics.labor_algo", "metrics", "algorithmic-management guards: worker-signed quota receipts, human-countersigned algorithmic terminations, authority-pinned fatigue breakers, surveillance proportionality, dispatch rejection fairness, AV safety cases, labor-impact binding (AI-logistics absorption)", _case_metrics_labor_algo),
+    BenchCase("metrics.mining_agents", "metrics", "mining governance gates: FPIC whole-class refusal, tailings watchdog incidents, exploration transparency, fleet envelopes, mixed-traffic protocols, labor transition plans, data sovereignty, green-mining ledger binding", _case_metrics_mining_agents),
     BenchCase("metrics.telecom_agents", "metrics", "telecom AI discipline: visible bot identity disclosure, human-door receipts, spam-flag receipts with appeal, A2P voice consent, network-action envelopes, billing logic separation, signaling purpose binding, outage ETA freshness (AI-telecom absorption)", _case_metrics_telecom_agents),
     BenchCase("metrics.grid_agents", "metrics", "grid control envelopes: safety-component classification, control-room action envelopes, forecast-dispatch binding, workload power screens, emergency curtailment contracts, nuclear advisory-only, blackout evidence chains (AI-energy absorption)", _case_metrics_grid_agents),
     BenchCase("metrics.commerce", "metrics", "agentic commerce terms: machine-readable terms-read receipts bound to the exact product, likeness-creep gate, biometric capture receipts with verifiable deletion, non-authoritative try-on previews, tiered authentication evidence with human review for high-value items, digital passport binding, AI model-substitution disclosure (AI-fashion/retail absorption)", _case_metrics_commerce),
@@ -21702,6 +21879,603 @@ def run_water_agents() -> dict[str, Any]:
         "mismatches": mismatches,
     }
 
+def run_forest_fish() -> dict[str, Any]:
+    """Forest & fisheries evidence gates (one-hundred-thirty-third batch).
+
+    Absorbs the 2026 AI-forestry/fisheries thread: ICEYE SAR
+    deforestation monitoring (vendor claims); Brazil DETER 2,874 km²
+    (-36%) with a +12.1% 2026-08 rebound; China's tree-density map +
+    single-tree segmentation; the Ardid wildfire paper (ML 10–30%
+    better in-region); IUU detection stacks (Global Fishing Watch
+    SAR, HawkEye 360 RF, Windward behavior, FFA Island Chief
+    seizures); TNC Edge AI onboard review; AQUAVIS / Mowi / ZIFISH
+    aquaculture. Risk lines: surveillance double edge, algorithmic
+    judges triggering armed patrols (the India "panoramic forest"
+    critique), eDNA data colonialism, EUDR cost-shifting.
+
+    Fail-closed rules over 12 deterministic scenarios: geofence
+    anomalies against listed livelihood activity can never become
+    automated accusations (``forest.anomaly_is_not_a_person``);
+    indigenous-land data needs a live FPIC-bound receipt
+    (``forest.no_fpic``); deforestation-free certificates without
+    bound evidence are NON_AUTHORITATIVE
+    (``forest.uncertified_claim``); dark-vessel triple bindings are
+    investigative leads, never accusations, and incomplete bindings
+    are not actionable (``fisheries.incomplete_binding``); onboard
+    EM data is purpose-bound (``fisheries.purpose_creep``);
+    undisclosed aquaculture sensor lock-in denies
+    (``fisheries.data_lockin``); sub-floor catch estimates are leads
+    only (``fisheries.low_confidence_catch``); out-of-region wildfire
+    models are NON_AUTHORITATIVE (``forest.out_of_region_model``).
+    Ground truth is closed: 4 allow / 8 deny.
+    """
+    from ed25519 import public_key
+
+    from forest_fish import (
+        aquaculture_data_portability,
+        catch_confidence_gate,
+        dark_vessel_probe,
+        em_privacy_receipt,
+        eudr_evidence_receipt,
+        indigenous_data_receipt,
+        issue_aquaculture_disclosure,
+        issue_catch_estimate,
+        issue_em_privacy_receipt,
+        issue_eudr_certificate,
+        issue_indigenous_data_receipt,
+        issue_livelihood_allowlist,
+        issue_wildfire_model_card,
+        livelihood_exemption,
+        wildfire_experimental_label,
+    )
+
+    T0 = 1_700_000_000
+    SEED = bytes(range(32))
+    AUTH_PUB = public_key(SEED).hex()
+    D1 = "aa" * 32
+    D2 = "bb" * 32
+    D3 = "cc" * 32
+
+    def _allowlist():
+        return issue_livelihood_allowlist(
+            receipt_id="al-1",
+            territory_id="territory-x",
+            community_id="community-x",
+            activities=("mahua_gathering", "firewood_collection"),
+            issued_by="land-authority",
+            authority_pubkey_hex=AUTH_PUB,
+            authority_secret=SEED,
+            issued_at=T0,
+            expires_at=T0 + 10_000,
+        )
+
+    def _fpic(**over):
+        kw = dict(
+            receipt_id="fpic-1",
+            territory_id="territory-x",
+            community_id="community-x",
+            fpic_grant_digest=D1,
+            data_scope="edna_samples",
+            collector_pubkey_hex=AUTH_PUB,
+            issued_by="land-authority",
+            authority_pubkey_hex=AUTH_PUB,
+            authority_secret=SEED,
+            issued_at=T0,
+            expires_at=T0 + 10_000,
+        )
+        kw.update(over)
+        return issue_indigenous_data_receipt(**kw)
+
+    def _eudr(**over):
+        kw = dict(
+            receipt_id="eu-1",
+            certificate_id="cert-1",
+            shipment_id="ship-1",
+            deforestation_free_claim=True,
+            evidence_digest=D1,
+            evidence_kind="field_audit",
+            issued_by="cert-body",
+            authority_pubkey_hex=AUTH_PUB,
+            authority_secret=SEED,
+            issued_at=T0,
+            expires_at=T0 + 10_000,
+        )
+        kw.update(over)
+        return issue_eudr_certificate(**kw)
+
+    scenarios: list[tuple[str, bool, str, Any]] = []
+
+    def _scenario(sid: str, expect_allowed: bool, needle: str, verdict: Any) -> None:
+        scenarios.append((sid, expect_allowed, needle, verdict))
+
+    # -- allow: unlisted activity is not blocked by the exemption gate
+    _scenario(
+        "allow_no_exemption_unlisted",
+        True,
+        "does not block",
+        livelihood_exemption(
+            allowlist_log=[_allowlist()],
+            territory_id="territory-x",
+            activity="medicinal_plants",
+            hit_at=T0 + 100,
+        ),
+    )
+    # -- allow: live FPIC-bound receipt
+    _scenario(
+        "allow_fpic_valid",
+        True,
+        "FPIC-bound",
+        indigenous_data_receipt(
+            receipt_log=[_fpic()],
+            territory_id="territory-x",
+            data_scope="edna_samples",
+            use_time=T0 + 100,
+        ),
+    )
+    # -- allow: bound field-audit evidence
+    _scenario(
+        "allow_eudr_bound",
+        True,
+        "binds",
+        eudr_evidence_receipt(
+            certificate_log=[_eudr()], certificate_id="cert-1", use_time=T0 + 100
+        ),
+    )
+    # -- allow: complete triple binding -> investigative lead, never accusation
+    _scenario(
+        "allow_dark_vessel_lead",
+        True,
+        "lead",
+        dark_vessel_probe(
+            receipt_id="dv-1",
+            lead_id="lead-1",
+            vessel_id="vessel-9",
+            sar_digest=D1,
+            rf_digest=D2,
+            behavior_digest=D3,
+            analyst="analyst-1",
+            authority_pubkey_hex=AUTH_PUB,
+            authority_secret=SEED,
+            issued_at=T0,
+        ),
+    )
+    # -- deny: automated accusation against listed livelihood activity
+    _scenario(
+        "deny_livelihood_accusation",
+        False,
+        "anomaly_is_not_a_person",
+        livelihood_exemption(
+            allowlist_log=[_allowlist()],
+            territory_id="territory-x",
+            activity="mahua_gathering",
+            hit_at=T0 + 100,
+        ),
+    )
+    # -- deny: no FPIC
+    _scenario(
+        "deny_no_fpic",
+        False,
+        "no_fpic",
+        indigenous_data_receipt(
+            receipt_log=[],
+            territory_id="territory-x",
+            data_scope="edna_samples",
+            use_time=T0 + 100,
+        ),
+    )
+    # -- deny: self-declared-only EUDR certificate
+    _scenario(
+        "deny_eudr_self_declared",
+        False,
+        "uncertified_claim",
+        eudr_evidence_receipt(
+            certificate_log=[_eudr(evidence_kind="self_declared")],
+            certificate_id="cert-1",
+            use_time=T0 + 100,
+        ),
+    )
+    # -- deny: incomplete dark-vessel binding
+    _scenario(
+        "deny_dark_vessel_incomplete",
+        False,
+        "incomplete_binding",
+        dark_vessel_probe(
+            receipt_id="dv-2",
+            lead_id="lead-2",
+            vessel_id="vessel-9",
+            sar_digest=D1,
+            rf_digest="",
+            behavior_digest=D3,
+            analyst="analyst-1",
+            authority_pubkey_hex=AUTH_PUB,
+            authority_secret=SEED,
+            issued_at=T0,
+        ),
+    )
+    # -- deny: EM purpose creep
+    _scenario(
+        "deny_em_purpose_creep",
+        False,
+        "purpose_creep",
+        em_privacy_receipt(
+            receipt_log=[
+                issue_em_privacy_receipt(
+                    receipt_id="em-1",
+                    vessel_id="vessel-1",
+                    declared_purpose="stock_assessment",
+                    retention_days=90,
+                    issued_by="fisheries-authority",
+                    authority_pubkey_hex=AUTH_PUB,
+                    authority_secret=SEED,
+                    issued_at=T0,
+                    expires_at=T0 + 10_000,
+                )
+            ],
+            vessel_id="vessel-1",
+            use_purpose="quota_compliance",
+            use_time=T0 + 100,
+        ),
+    )
+    # -- deny: undisclosed aquaculture lock-in
+    _scenario(
+        "deny_aquaculture_lockin",
+        False,
+        "data_lockin",
+        aquaculture_data_portability(
+            disclosure=issue_aquaculture_disclosure(
+                receipt_id="aq-1",
+                disclosure_id="disc-1",
+                operator_id="op-1",
+                sensor_data_portable=False,
+                issued_by="regulator",
+                authority_pubkey_hex=AUTH_PUB,
+                authority_secret=SEED,
+                issued_at=T0,
+            )
+        ),
+    )
+    # -- deny: sub-floor catch estimate
+    _scenario(
+        "deny_low_confidence_catch",
+        False,
+        "low_confidence_catch",
+        catch_confidence_gate(
+            estimate=issue_catch_estimate(
+                receipt_id="ce-1",
+                estimate_id="est-1",
+                fishery_id="fishery-1",
+                estimate_t=1200.0,
+                confidence=0.55,
+                method_digest=D1,
+                issued_by="science-body",
+                authority_pubkey_hex=AUTH_PUB,
+                authority_secret=SEED,
+                issued_at=T0,
+            )
+        ),
+    )
+    # -- deny: out-of-region wildfire deployment
+    _scenario(
+        "deny_wildfire_out_of_region",
+        False,
+        "out_of_region_model",
+        wildfire_experimental_label(
+            card=issue_wildfire_model_card(
+                receipt_id="wf-1",
+                model_id="model-1",
+                model_digest=D1,
+                training_region="au-vic",
+                validation_regions=("au-nsw",),
+                issued_by="fire-agency",
+                authority_pubkey_hex=AUTH_PUB,
+                authority_secret=SEED,
+                issued_at=T0,
+            ),
+            deployment_region="br-amazon",
+        ),
+    )
+
+    allowed_ids: list[str] = []
+    denial_reasons: dict[str, str] = {}
+    mismatches: list[str] = []
+    for sid, expect_allowed, _needle, verdict in scenarios:
+        if verdict.allowed == expect_allowed:
+            if verdict.allowed:
+                allowed_ids.append(sid)
+            else:
+                denial_reasons[sid] = verdict.reason
+        else:
+            mismatches.append(sid)
+            denial_reasons[sid] = verdict.reason
+    return {
+        "n_scenarios": len(scenarios),
+        "allowed_ids": allowed_ids,
+        "denial_reasons": denial_reasons,
+        "mismatches": mismatches,
+    }
+
+
+def run_mining_agents() -> dict[str, Any]:
+    """Mining governance gates (one-hundred-thirty-second batch).
+
+    Absorbs the 2026 AI-mining thread: KoBold Metals AI-guided
+    exploration in DRC Manono (unaudited commercial claims); China's
+    autonomous mining-truck "10,000-unit year" (Zijin Julong 60+
+    unmanned trucks at 5000m+); Volvo autonomous transport past 3M
+    tonnes; Fortescue's "The Hive" coordinating 200+ autonomous
+    trucks; Brumadinho's lesson — monitoring data existed but was
+    ignored (GISTM lifecycle monitoring); the Philippines' 2026
+    revised FPIC guidelines and UNPFII's no-exception FPIC demand;
+    Fortescue's labor displacement (+1800 electrical jobs vs
+    displaced drivers).
+
+    Fail-closed rules over 12 deterministic scenarios: FPIC needs a
+    live authority-signed receipt from *every* affected community —
+    one missing denies the whole class (``mining:no_fpic``);
+    tailings dams need live multi-sensor monitoring — missing or
+    stale denies *and* emits a watchdog incident for the 113th-batch
+    clock; black-box AI exploration targets without disclosed
+    evidence are NON_AUTHORITATIVE
+    (``mining:undisclosed_targeting``); fleet actions outside the
+    authority-signed envelope deny
+    (``mining:fleet_out_of_envelope``), and the fleet can never widen
+    it; mixed human/autonomous traffic without a protocol receipt
+    denies; displacement at/above threshold without a published plan
+    denies; cross-border exploration-data export without a
+    sovereignty receipt denies; "green mining" claims without a bound
+    env_cost ledger receipt are NON_AUTHORITATIVE. Ground truth is
+    closed: 4 allow / 8 deny.
+    """
+    from ed25519 import public_key
+
+    from mining_agents import (
+        AuthorityRegistry,
+        DataSovereigntyLog,
+        ExplorationLog,
+        FPICLog,
+        FleetEnvelopeLog,
+        GreenClaimLog,
+        LaborTransitionLog,
+        MixedTrafficLog,
+        TailingsMonitorLog,
+        autonomous_fleet_envelope,
+        check_data_export,
+        check_labor_transition,
+        exploration_target_receipt,
+        exploration_transparency,
+        fleet_envelope_receipt,
+        fpic_gate,
+        fpic_receipt,
+        green_claim_receipt,
+        green_mining_gate,
+        labor_transition_receipt,
+        mixed_fleet_rule,
+        mixed_traffic_receipt,
+        sovereignty_receipt,
+        tailings_monitor_gate,
+        tailings_monitoring_receipt,
+    )
+
+    T0 = 1_700_000_000
+    SEED = bytes(range(32))
+    AUTH_PUB = public_key(SEED).hex()
+    MODEL = "ab" * 32
+    SCOPE = "cd" * 32
+    OTHER = "01" * 32
+
+    authorities = AuthorityRegistry()
+    authorities.register("gov", public_key(SEED))
+
+    def _fpic(log: FPICLog, rid: str, site: str, community: str,
+              prev: str) -> None:
+        log.append(
+            fpic_receipt(
+                receipt_id=rid, site_id=site, community_id=community,
+                process_digest=MODEL, issued_by="gov",
+                authority_pubkey_hex=AUTH_PUB, authority_secret=SEED,
+                issued_at=T0, expires_at=T0 + 3600, prev_digest=prev,
+            )
+        )
+
+    scenarios: list[tuple[str, str, Any]] = []
+
+    def _scenario(sid: str, expected: str, thunk: Any) -> None:
+        scenarios.append((sid, expected, thunk))
+
+    def _outcome(verdict: Any) -> dict[str, Any]:
+        return {
+            "verdict": "allow" if verdict.allowed else "deny",
+            "reason": verdict.deny_code or "",
+            "classification": verdict.classification,
+        }
+
+    def _s1():
+        log = FPICLog()
+        _fpic(log, "r1", "site-1", "comm-a", "genesis")
+        r1 = log.latest_for("site-1", "comm-a")
+        assert r1 is not None
+        _fpic(log, "r2", "site-1", "comm-b", r1.receipt_digest)
+        verdict = fpic_gate(
+            authorities=authorities, log=log, site_id="site-1",
+            affected_communities=("comm-a", "comm-b"), now=T0)
+        return _outcome(verdict)
+
+    _scenario("allow_valid_fpic", "allow", _s1)
+
+    def _s2():
+        log = TailingsMonitorLog()
+        log.append(
+            tailings_monitoring_receipt(
+                receipt_id="m1", dam_id="dam-1", sensor_set_digest=MODEL,
+                last_reading_at=T0, reading_digest=SCOPE, issued_by="gov",
+                authority_pubkey_hex=AUTH_PUB, authority_secret=SEED,
+                issued_at=T0, prev_digest="genesis",
+            )
+        )
+        verdict, _incident = tailings_monitor_gate(
+            authorities=authorities, log=log, dam_id="dam-1", now=T0)
+        return _outcome(verdict)
+
+    _scenario("allow_fresh_tailings", "allow", _s2)
+
+    def _s3():
+        log = FleetEnvelopeLog()
+        log.append(
+            fleet_envelope_receipt(
+                receipt_id="f1", fleet_id="fleet-1",
+                action_vocabulary=("haul", "dump"),
+                geographic_scope_digest=MODEL, issued_by="gov",
+                authority_pubkey_hex=AUTH_PUB, authority_secret=SEED,
+                issued_at=T0, expires_at=T0 + 3600, prev_digest="genesis",
+            )
+        )
+        verdict = autonomous_fleet_envelope(
+            authorities=authorities, log=log, fleet_id="fleet-1",
+            action="haul", requested_by="dispatch", now=T0)
+        return _outcome(verdict)
+
+    _scenario("allow_enclosed_fleet_action", "allow", _s3)
+
+    def _s4():
+        log = DataSovereigntyLog()
+        log.append(
+            sovereignty_receipt(
+                receipt_id="ds1", dataset_id="geo-1", host_country="CD",
+                export_purpose="model-training", authorized_by="gov",
+                authority_pubkey_hex=AUTH_PUB, authority_secret=SEED,
+                issued_at=T0, expires_at=T0 + 3600, prev_digest="genesis",
+            )
+        )
+        verdict = check_data_export(
+            authorities=authorities, log=log, dataset_id="geo-1",
+            destination_country="US", host_country="CD", now=T0)
+        return _outcome(verdict)
+
+    _scenario("allow_authorized_export", "allow", _s4)
+
+    def _s5():
+        log = FPICLog()
+        _fpic(log, "r1", "site-1", "comm-a", "genesis")
+        verdict = fpic_gate(
+            authorities=authorities, log=log, site_id="site-1",
+            affected_communities=("comm-a", "comm-b"), now=T0)
+        return _outcome(verdict)
+
+    _scenario("deny_no_fpic", "deny", _s5)
+
+    def _s6():
+        log = TailingsMonitorLog()
+        log.append(
+            tailings_monitoring_receipt(
+                receipt_id="m1", dam_id="dam-1", sensor_set_digest=MODEL,
+                last_reading_at=T0 - 7200, reading_digest=SCOPE,
+                issued_by="gov", authority_pubkey_hex=AUTH_PUB,
+                authority_secret=SEED, issued_at=T0 - 7200,
+                prev_digest="genesis",
+            )
+        )
+        verdict, incident = tailings_monitor_gate(
+            authorities=authorities, log=log, dam_id="dam-1", now=T0)
+        outcome = _outcome(verdict)
+        if incident is None:
+            outcome["reason"] += "|no_watchdog_incident"
+        return outcome
+
+    _scenario("deny_stale_tailings", "deny", _s6)
+
+    def _s7():
+        log = ExplorationLog()
+        verdict = exploration_transparency(
+            authorities=authorities, log=log, target_id="target-ghost")
+        return _outcome(verdict)
+
+    _scenario("deny_black_box_target", "deny", _s7)
+
+    def _s8():
+        log = FleetEnvelopeLog()
+        log.append(
+            fleet_envelope_receipt(
+                receipt_id="f1", fleet_id="fleet-1",
+                action_vocabulary=("haul",),
+                geographic_scope_digest=MODEL, issued_by="gov",
+                authority_pubkey_hex=AUTH_PUB, authority_secret=SEED,
+                issued_at=T0, expires_at=T0 + 3600, prev_digest="genesis",
+            )
+        )
+        verdict = autonomous_fleet_envelope(
+            authorities=authorities, log=log, fleet_id="fleet-1",
+            action="dump", requested_by="dispatch", now=T0)
+        return _outcome(verdict)
+
+    _scenario("deny_fleet_out_of_envelope", "deny", _s8)
+
+    def _s9():
+        log = MixedTrafficLog()
+        verdict = mixed_fleet_rule(
+            authorities=authorities, log=log, site_id="site-1",
+            mixed_traffic=True, now=T0)
+        return _outcome(verdict)
+
+    _scenario("deny_no_mixed_protocol", "deny", _s9)
+
+    def _s10():
+        log = LaborTransitionLog()
+        verdict = check_labor_transition(
+            authorities=authorities, log=log, site_id="site-1",
+            displaced_count=40, now=T0)
+        return _outcome(verdict)
+
+    _scenario("deny_undisclosed_transition", "deny", _s10)
+
+    def _s11():
+        log = DataSovereigntyLog()
+        verdict = check_data_export(
+            authorities=authorities, log=log, dataset_id="geo-ghost",
+            destination_country="US", host_country="CD", now=T0)
+        return _outcome(verdict)
+
+    _scenario("deny_unauthorized_export", "deny", _s11)
+
+    def _s12():
+        log = GreenClaimLog()
+        verdict = green_mining_gate(
+            authorities=authorities, log=log, claim_id="green-ghost",
+            ledger_digest=None)
+        return _outcome(verdict)
+
+    _scenario("deny_unbound_green_claim", "deny", _s12)
+
+    results: list[str] = []
+    mismatches: list[str] = []
+    allowed_ids: list[str] = []
+    warned_ids: list[str] = []
+    denial_reasons: dict[str, str] = {}
+    for sid, expected, thunk in scenarios:
+        try:
+            outcome = thunk()
+        except Exception as error:
+            outcome = {"verdict": "deny", "reason": f"raised: {error}",
+                       "classification": "unverifiable-process"}
+        verdict = outcome.get("verdict")
+        if verdict != expected:
+            mismatches.append(
+                f"{sid}: expected {expected}, got {verdict}"
+            )
+        if verdict == "allow":
+            allowed_ids.append(sid)
+        elif verdict == "allow-with-warning":
+            warned_ids.append(sid)
+        else:
+            denial_reasons[sid] = outcome.get("reason", "")
+
+    return {
+        "n_scenarios": len(scenarios),
+        "mismatches": mismatches,
+        "allowed_ids": allowed_ids,
+        "warned_ids": warned_ids,
+        "denial_reasons": denial_reasons,
+    }
+
 def run_greenwash() -> dict[str, Any]:
     """Greenwashing evidence gates (one-hundred-thirtieth batch).
 
@@ -21947,6 +22721,296 @@ def run_greenwash() -> dict[str, Any]:
         return _outcome(verdict)
 
     _scenario("deny_unrouted_decommission", "deny", _s12)
+
+    results: list[str] = []
+    mismatches: list[str] = []
+    allowed_ids: list[str] = []
+    warned_ids: list[str] = []
+    denial_reasons: dict[str, str] = {}
+    for sid, expected, thunk in scenarios:
+        try:
+            outcome = thunk()
+        except Exception as error:
+            outcome = {"verdict": "deny", "reason": f"raised: {error}",
+                       "classification": "unverifiable-process"}
+        verdict = outcome.get("verdict")
+        if verdict != expected:
+            mismatches.append(
+                f"{sid}: expected {expected}, got {verdict}"
+            )
+        if verdict == "allow":
+            allowed_ids.append(sid)
+        elif verdict == "allow-with-warning":
+            warned_ids.append(sid)
+        else:
+            denial_reasons[sid] = outcome.get("reason", "")
+
+    return {
+        "n_scenarios": len(scenarios),
+        "mismatches": mismatches,
+        "allowed_ids": allowed_ids,
+        "warned_ids": warned_ids,
+        "denial_reasons": denial_reasons,
+    }
+
+
+def run_orbital_agents() -> dict[str, Any]:
+    """Orbital safety receipts (one-hundred-thirty-fourth batch).
+
+    Absorbs the 2026 AI-space thread: Starlink automated avoidance at
+    scale (140,000+ maneuvers H1 2025) and the auto-maneuver-on-
+    everything failure mode; China's "Xingyan" space-awareness
+    constellation and "space intelligent driving" (declared autonomy
+    boundaries, nothing machine-checkable); India's TakeMe2Space
+    MOI-1A (upload models, only results downlinked); US TraCSS
+    (70+ operators, 11,345 satellites, fragile freshness-bound STM
+    data); Zero Debris Week Seville 2026-09 ("who pays, who
+    cleans"); counterspace 2026 (US on-orbit weapons admission,
+    Germany's offensive space capabilities, SWF non-kinetic record,
+    inherently dual-use RPO).
+
+    Fail-closed rules over 12 deterministic scenarios: conjunction
+    maneuvers bind a fresh warning pin — stale warnings deny
+    (``orbital:stale_conjunction``) and repeated auto-maneuvers on
+    the same pair without ground revalidation trip
+    ``orbital:warning_fatigue``; maneuvers bind a Δv authorization
+    envelope — outside it is ``orbital:envelope_breach``; maneuvers
+    need bound, fresh STM data — unbound is NON_AUTHORITATIVE
+    (``orbital:unbound_stm``); non-cooperative RPO routes through
+    the 111th-batch dual-use screen — a watchlist hit is
+    ``orbital:rpo_escalation``, and even a clean screen stays
+    NON_AUTHORITATIVE (``orbital:rpo_human_review``); constellation
+    deployments bind a debris budget — over-budget is
+    ``orbital:debris_over_budget``; onboard models bind a pinned
+    autonomy boundary — outside it is
+    ``orbital:autonomy_breach``; observed capabilities need
+    declarations — undeclared is
+    ``orbital:undeclared_capability``. Ground truth is closed:
+    4 allow / 8 deny.
+    """
+    from ed25519 import public_key
+
+    from orbital_agents import (
+        ConjunctionRegistry,
+        CounterspaceRegistry,
+        STMRegistry,
+        check_debris_budget,
+        check_maneuver,
+        check_onboard_decision,
+        conjunction_receipt,
+        counterspace_transparency,
+        dual_use_rpo_gate,
+        maneuver_authorization_envelope,
+        megaconstellation_debris_budget,
+        onboard_model_receipt,
+        stm_data_receipt,
+    )
+
+    T0 = 1_700_000_000
+    SEED = bytes(range(32))
+    AUTH_PUB = public_key(SEED).hex()
+    D1 = "ab" * 32
+    D2 = "cd" * 32
+    D3 = "ef" * 32
+
+    def _conj(warning_id="w-1", pair="SAT-A/SAT-B"):
+        return conjunction_receipt(
+            receipt_id="c-" + warning_id,
+            warning_id=warning_id,
+            conjunction_digest=D1,
+            uncertainty_km=0.5,
+            warned_at=T0,
+            ttl_s=3600,
+            object_pair=pair,
+            issued_by="stm-ops",
+            authority_pubkey_hex=AUTH_PUB,
+            authority_secret=SEED,
+        )
+
+    def _envelope(max_dv=5.0):
+        return maneuver_authorization_envelope(
+            envelope_id="env-1",
+            max_dv_ms=max_dv,
+            valid_from=T0,
+            valid_to=T0 + 7200,
+            issued_by="flight-dynamics",
+            authority_pubkey_hex=AUTH_PUB,
+            authority_secret=SEED,
+        )
+
+    scenarios: list[tuple[str, str, Any]] = []
+
+    def _scenario(sid: str, expected: str, thunk: Any) -> None:
+        scenarios.append((sid, expected, thunk))
+
+    def _outcome(verdict: Any) -> dict[str, Any]:
+        return {
+            "verdict": "allow" if verdict.allowed else "deny",
+            "reason": verdict.reason,
+            "classification": verdict.classification,
+        }
+
+    def _s1():
+        reg = ConjunctionRegistry()
+        reg.register(_conj())
+        return _outcome(
+            reg.check_maneuver(
+                warning_id="w-1", dv_ms=2.0, maneuver_at=T0 + 100, now=T0 + 200
+            )
+        )
+
+    _scenario("allow_fresh_conjunction_maneuver", "allow", _s1)
+
+    def _s2():
+        return _outcome(
+            check_maneuver(_envelope(), dv_ms=3.0, at=T0 + 100, now=T0 + 200)
+        )
+
+    _scenario("allow_within_envelope", "allow", _s2)
+
+    def _s3():
+        reg = STMRegistry()
+        reg.register(
+            stm_data_receipt(
+                receipt_id="s-1",
+                data_id="stm-1",
+                data_digest=D2,
+                uncertainty_km=1.2,
+                observed_at=T0,
+                ttl_s=1800,
+                source="tracss-pilot",
+                issued_by="stm-ops",
+                authority_pubkey_hex=AUTH_PUB,
+                authority_secret=SEED,
+            )
+        )
+        return _outcome(reg.check_bound(data_id="stm-1", at=T0 + 100, now=T0 + 200))
+
+    _scenario("allow_bound_stm", "allow", _s3)
+
+    def _s4():
+        return _outcome(
+            dual_use_rpo_gate(
+                operation_id="op-1",
+                target_id="SAT-FRIENDLY",
+                cooperative=True,
+                consent_digest=D3,
+                approach_profile={"range_km": 2.0},
+                created_unix=T0,
+            )
+        )
+
+    _scenario("allow_cooperative_rpo", "allow", _s4)
+
+    def _s5():
+        reg = ConjunctionRegistry()
+        reg.register(_conj())
+        return _outcome(
+            reg.check_maneuver(
+                warning_id="w-1", dv_ms=2.0, maneuver_at=T0 + 7200, now=T0 + 7300
+            )
+        )
+
+    _scenario("deny_stale_conjunction", "deny", _s5)
+
+    def _s6():
+        reg = ConjunctionRegistry()
+        reg.register(_conj())
+        for _ in range(5):
+            reg.check_maneuver(
+                warning_id="w-1", dv_ms=1.0, maneuver_at=T0 + 10, now=T0 + 20
+            )
+        return _outcome(
+            reg.check_maneuver(
+                warning_id="w-1", dv_ms=1.0, maneuver_at=T0 + 10, now=T0 + 20
+            )
+        )
+
+    _scenario("deny_warning_fatigue", "deny", _s6)
+
+    def _s7():
+        return _outcome(
+            check_maneuver(_envelope(max_dv=5.0), dv_ms=50.0, at=T0 + 100, now=T0 + 200)
+        )
+
+    _scenario("deny_envelope_breach", "deny", _s7)
+
+    def _s8():
+        reg = STMRegistry()
+        return _outcome(reg.check_bound(data_id="stm-ghost", at=T0, now=T0))
+
+    _scenario("deny_unbound_stm", "deny", _s8)
+
+    def _s9():
+        return _outcome(
+            dual_use_rpo_gate(
+                operation_id="op-3",
+                target_id="SAT-UNKNOWN",
+                cooperative=False,
+                consent_digest=None,
+                approach_profile={"payload": "toxin canister deployment"},
+                created_unix=T0,
+            )
+        )
+
+    _scenario("deny_rpo_escalation", "deny", _s9)
+
+    def _s10():
+        budget = megaconstellation_debris_budget(
+            receipt_id="db-1",
+            constellation_id="MEGA-1",
+            max_objects=5000,
+            planned_objects=1000,
+            expected_debris_objects=12,
+            issued_by="licensing",
+            authority_pubkey_hex=AUTH_PUB,
+            authority_secret=SEED,
+        )
+        return _outcome(
+            check_debris_budget(budget, planned_objects=9000, now=T0)
+        )
+
+    _scenario("deny_debris_over_budget", "deny", _s10)
+
+    def _s11():
+        model = onboard_model_receipt(
+            receipt_id="om-1",
+            model_id="moi-1a-nav",
+            autonomy_boundary=("station_keeping", "collision_avoidance"),
+            issued_by="mission-ops",
+            authority_pubkey_hex=AUTH_PUB,
+            authority_secret=SEED,
+        )
+        return _outcome(
+            check_onboard_decision(
+                model, decision_class="rpo_approach", now=T0
+            )
+        )
+
+    _scenario("deny_autonomy_breach", "deny", _s11)
+
+    def _s12():
+        reg = CounterspaceRegistry()
+        reg.declare(
+            counterspace_transparency(
+                receipt_id="cs-1",
+                system_id="SYS-1",
+                capability_class="inspection",
+                declared_at=T0,
+                issued_by="space-command",
+                authority_pubkey_hex=AUTH_PUB,
+                authority_secret=SEED,
+            )
+        )
+        return _outcome(
+            reg.check_capability(
+                system_id="SYS-1",
+                observed_capability_class="electronic_warfare",
+                now=T0,
+            )
+        )
+
+    _scenario("deny_undeclared_capability", "deny", _s12)
 
     results: list[str] = []
     mismatches: list[str] = []
@@ -22434,10 +23498,13 @@ __all__ = [
     "run_companionship",
     "run_embodied",
     "run_greenwash",
+    "run_orbital_agents",
+    "run_forest_fish",
     "run_water_agents",
     "run_telecom_agents",
     "run_grid_agents",
     "run_labor_algo",
+    "run_mining_agents",
     "run_adjudication",
     "run_game_agents",
     "run_commerce",
