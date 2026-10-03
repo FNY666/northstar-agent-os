@@ -115,7 +115,7 @@ from tools import ToolLimits, ToolSandbox, build_default_registry
 
 #: Semantic version of the public case set. Bump when a case is added, removed,
 #: or its expected verdict changes — consumers pin against this string.
-BENCH_VERSION = "northstar.governance.bench.v30"
+BENCH_VERSION = "northstar.governance.bench.v31"
 
 USAGE_ERROR = 64
 
@@ -17595,6 +17595,45 @@ def _case_metrics_pharma_agents(h: BenchHarness) -> BenchExpectation:
     )
 
 
+
+def _case_metrics_housing_ai_agents(h: BenchHarness) -> BenchExpectation:
+    """Housing-market AI discipline (one-hundred-forty-second batch).
+
+    12 deterministic scenarios, 4 allow / 8 deny: a fully compliant
+    screening pipeline (independently-audited probe with voucher-slice
+    coverage, declared voucher policy, live appeal window) passes; a
+    manual rent recommendation on aged isolated data passes; a
+    high-confidence fresh AVM for sale listing passes; a disclosed
+    photo-edit listing passes. Denied: screening with no probe
+    (``housing:no_screening_probe``), a probe that never measured
+    voucher applicants (``housing:voucher_slice_missing``), a
+    self-audited probe (``housing:probe_self_audited``), a screening
+    rule excluding voucher income
+    (``housing:voucher_income_discrimination``), a decision with no
+    appeal window (``housing:no_appeal``), training data with
+    competitor non-public sources (``housing:rent_coordination``), an
+    auto-accept recommendation (``housing:auto_accept``), and a
+    low-confidence mortgage AVM
+    (``housing:avm_human_review_required``).
+    """
+    metrics = run_housing_ai_agents()
+
+    def check(exp: BenchExpectation, report: Any) -> tuple[bool, str]:
+        if metrics["n_scenarios"] != 12:
+            return (False, f"expected 12 housing_ai scenarios, saw {metrics['n_scenarios']}")
+        if metrics["mismatches"]:
+            return (False, f"scenario(s) disagree with ground truth: {metrics['mismatches']}")
+        return (True, "ok")
+
+    return BenchExpectation(
+        runtime=_noop_runtime(h),
+        expect_subtype="success",
+        post_check=check,
+        metrics=metrics,
+        notes="housing market AI discipline: voucher-slice probes, appeal windows, rent-coordination training-data gates, AVM confidence gates, sealed steering probes, listing-truth receipts (AI-real-estate absorption)",
+    )
+
+
 def _case_metrics_procurement_agents(h: BenchHarness) -> BenchExpectation:
     """Procurement accountability gates (one-hundred-thirty-eighth batch).
 
@@ -17707,6 +17746,117 @@ def _case_metrics_underwriting_agents(h: BenchHarness) -> BenchExpectation:
         notes="underwriting & claims discipline: approve-only claim engines, human-review breakers on key content, fairness stress receipts, EU AI Act compliance clock, fraud probes routed to humans, assist-not-decide, NAIC evaluation-tool mapping, vendor evidence binding",
     )
 
+
+def _case_metrics_waste_agents(h: BenchHarness) -> BenchExpectation:
+    """Waste & circular-economy discipline (one-hundred-thirty-ninth batch).
+
+    12 deterministic scenarios, 4 allow / 8 deny: a bound sorting-purity
+    claim passes; a Basel-PIC-bound e-waste movement passes; a
+    battery-passport-pinned decommission passes; an AI workload with
+    declared hardware disposal passes. Denied: a single-sample purity
+    claim (``waste:cherry_picked``), an unbound e-waste movement
+    (``waste:no_pic``), a purity overclaim beyond tolerance
+    (``waste:ungraded_purity``), a >2kWh battery with no passport pin
+    (``waste:no_battery_passport``), a claim with no evidence chain
+    (``waste:no_evidence``), picker-displacing automation with no
+    transition plan (``waste:no_transition_plan``), an unverified
+    dumping alert (``waste:unverified_alert``, lead only), and a
+    battery entering the shredder with no fire triage
+    (``waste:no_fire_triage``).
+    """
+    metrics = run_waste_agents()
+
+    def check(exp: BenchExpectation, report: Any) -> tuple[bool, str]:
+        if metrics["n_scenarios"] != 12:
+            return (False, f"expected 12 waste scenarios, saw {metrics['n_scenarios']}")
+        if metrics["mismatches"]:
+            return (False, f"scenario(s) disagree with ground truth: {metrics['mismatches']}")
+        if metrics["allowed_ids"] != [
+            "allow_purity_bound",
+            "allow_pic_bound",
+            "allow_battery_passport",
+            "allow_hardware_lifecycle",
+        ]:
+            return (False, f"allowed set drifted: {metrics['allowed_ids']}")
+        reasons = metrics["denial_reasons"]
+        for sid, needle in (
+            ("deny_cherry_picked", "cherry_picked"),
+            ("deny_no_pic", "no_pic"),
+            ("deny_ungraded_purity", "ungraded_purity"),
+            ("deny_no_battery_passport", "no_battery_passport"),
+            ("deny_no_evidence", "no_evidence"),
+            ("deny_no_transition_plan", "no_transition_plan"),
+            ("deny_unverified_alert", "unverified_alert"),
+            ("deny_no_fire_triage", "no_fire_triage"),
+        ):
+            if needle not in reasons.get(sid, ""):
+                return (False, f"{sid} missing denial needle {needle!r}")
+        return (True, "waste_agents: 12/12 scenarios match ground truth")
+
+    return BenchExpectation(
+        runtime=_noop_runtime(h),
+        expect_subtype="success",
+        post_check=check,
+        metrics=metrics,
+        notes="waste & circular-economy discipline: bound purity claims, Basel PIC movements, battery-passport pins, claim evidence chains, informal-sector transition plans, AI hardware lifecycle, verified dumping alerts, battery fire triage",
+    )
+
+def _case_metrics_hr_agents(h: BenchHarness) -> BenchExpectation:
+    """HR & workplace AI discipline (one-hundred-forty-first batch).
+
+    12 deterministic scenarios, 4 allow / 8 deny: a model with a live
+    independent third-party bias audit passes; AI scoring with an
+    FCRA-style disclosure passes; an AI-influenced firing with a
+    substantive named-human countersign passes; a vendor pinned as
+    the employer's agent passes. Denied: worker-profile scoring with
+    no disclosure (``hr:secret_scoring``), a countersign without
+    review evidence — a rubber stamp (``hr:rubber_stamp``), an
+    AI-influenced firing with no countersign at all
+    (``hr:no_human_countersign``), AI+biometric emotion prediction —
+    refused whole-class (``hr:emotion_inference``), monitoring data
+    repurposed for employment decisions with no advance notice
+    (``hr:surveillance_repurpose``), a screener whose AI-written
+    resume pass rate exceeds tolerance — quarantined for audit
+    (``hr:homophily_audit``), an AI-involved layoff with no written
+    notice (``hr:no_layoff_notice``), and an unaudited evaluation
+    output feeding a promotion decision (``hr:tainted_input``).
+    """
+    metrics = run_hr_agents()
+
+    def check(exp: BenchExpectation, report: Any) -> tuple[bool, str]:
+        if metrics["n_scenarios"] != 12:
+            return (False, f"expected 12 hr scenarios, saw {metrics['n_scenarios']}")
+        if metrics["mismatches"]:
+            return (False, f"scenario(s) disagree with ground truth: {metrics['mismatches']}")
+        if metrics["allowed_ids"] != [
+            "allow_independent_audit",
+            "allow_disclosed_scoring",
+            "allow_human_countersign",
+            "allow_pinned_vendor",
+        ]:
+            return (False, f"allowed set drifted: {metrics['allowed_ids']}")
+        reasons = metrics["denial_reasons"]
+        for sid, needle in (
+            ("deny_secret_scoring", "secret_scoring"),
+            ("deny_rubber_stamp", "rubber_stamp"),
+            ("deny_no_countersign", "no_human_countersign"),
+            ("deny_emotion_inference", "emotion_inference"),
+            ("deny_surveillance_repurpose", "surveillance_repurpose"),
+            ("deny_homophily", "homophily_audit"),
+            ("deny_layoff_notice", "no_layoff_notice"),
+            ("deny_tainted_input", "tainted_input"),
+        ):
+            if needle not in reasons.get(sid, ""):
+                return (False, f"{sid} missing denial needle {needle!r}")
+        return (True, "hr_agents: 12/12 scenarios match ground truth")
+
+    return BenchExpectation(
+        runtime=_noop_runtime(h),
+        expect_subtype="success",
+        post_check=check,
+        metrics=metrics,
+        notes="HR discipline: independent audits, scoring disclosure, human-final countersigns, emotion-inference ban, repurpose notices, homophily probes, layoff disclosure, tainted-input gates, vendor pins",
+    )
 
 def _case_metrics_orbital_agents(h: BenchHarness) -> BenchExpectation:
     """Orbital safety receipts (one-hundred-thirty-fourth batch).
@@ -20019,7 +20169,10 @@ CASES: tuple[BenchCase, ...] = (
     BenchCase("metrics.path_shim_detection", "metrics", "PATH-shim red-team: fabricated tool output is detected", _case_metrics_path_shim_detection),
     BenchCase("metrics.attenuation", "metrics", "attenuating delegation credentials (biscuit-style)", _case_metrics_attenuation),
     BenchCase("metrics.pledge_semantics", "metrics", "pledge-style self-restriction (declare->tighten-only)", _case_metrics_pledge_semantics),
+    BenchCase("metrics.housing_ai_agents", "metrics", "housing market AI discipline: voucher-slice screening probes, appeal windows, rent-coordination training-data gates, AVM confidence/recency gates, sealed steering probes, AI photo-edit disclosure, appeal-bound adverse actions (AI-real-estate absorption)", _case_metrics_housing_ai_agents),
     BenchCase("metrics.procurement_agents", "metrics", "procurement accountability: advisory-only award gates, source-grounded claims, pre-issuance health checks, collusion leads (never convictions), losing-bid data gates, incumbency-bias probes, algorithm registration, 4-segment award traces (AI-procurement absorption)", _case_metrics_procurement_agents),
+    BenchCase("metrics.hr_agents", "metrics", "HR & workplace AI discipline: independent bias audits, secret-scoring disclosure, human-final countersigns (anti rubber-stamp), emotion-inference ban, surveillance-repurpose notices, homophily probes, layoff AI disclosure, tainted-input gates, vendor agent pins (AI-HR absorption)", _case_metrics_hr_agents),
+    BenchCase("metrics.waste_agents", "metrics", "waste & circular-economy discipline: bound sorting-purity claims, Basel PIC e-waste movements, battery-passport pins, claim evidence chains, informal-sector transition plans, AI hardware lifecycle, verified dumping alerts, battery fire triage (AI-waste absorption)", _case_metrics_waste_agents),
     BenchCase("metrics.underwriting_agents", "metrics", "underwriting & claims discipline: approve-only claim engines, human-review breakers on key content, fairness stress receipts, EU AI Act compliance clock, fraud probes routed to humans, assist-not-decide, NAIC evaluation-tool mapping, vendor evidence binding (AI-insurance absorption)", _case_metrics_underwriting_agents),
     BenchCase("metrics.dataflow_sensitivity", "metrics", "dataflow sensitivity tracking (OpenAPPA-style)", _case_metrics_dataflow_sensitivity),
     BenchCase("metrics.decision_model", "metrics", "structured decision-model approval path", _case_metrics_decision_model),
@@ -23411,6 +23564,492 @@ def run_underwriting_agents() -> dict[str, Any]:
     }
 
 
+def run_waste_agents() -> dict[str, Any]:
+    """Waste & circular-economy discipline (one-hundred-thirty-ninth batch).
+
+    Absorbs the 2026 AI-waste thread: Oakland Aerbits aerial AI for
+    illegal dumping (alerts are leads, never auto-fines); Sharp Group
+    humanoid sorting robot "Alpha" (vendor-declared purity is not
+    lab-certified); Guangzhou Baiyun Helong PPP sorting project;
+    EU Empowering Consumers Directive (enforced 2026-09-27 —
+    offset-based "carbon neutral" claims banned); California SB 343
+    "Truth in Recycling"; AB 2253 per-batch measurement proposal;
+    Volvic/Danone "carbon neutral"+"100% recycled" ruled unlawful;
+    Basel e-waste amendment (mandatory PIC from 2025-01-01);
+    Malaysia's 2026-09-16 e-waste import ban; BAN GPS-tracked
+    e-Stewards recyclers; EU battery passport (>2kWh unique serial
+    from 2026-01-01); India's informal waste pickers (1.5–4M,
+    WIEGO formalization warning); BAN's AI e-waste 617Mt-by-2050
+    warning.
+
+    Fail-closed rules over 12 deterministic scenarios: sorting-purity
+    claims bind ``(test_protocol_digest, batch_id, measured_sample_n,
+    measured_purity_bps)`` — single-sample claims are
+    ``waste:cherry_picked``, vendor-declared purity without a bound
+    protocol or above measured+tolerance is
+    ``waste:ungraded_purity``; cross-border e-waste movements bind a
+    Basel PIC receipt — unbound is ``waste:no_pic``; >2kWh batteries
+    pin their battery-passport digest — unpinned is
+    ``waste:no_battery_passport``; recycled-content claims bind an
+    evidence chain — none is ``waste:no_evidence`` and offset-based
+    claims are unlawful by default (``waste:offset_claim``);
+    picker-displacing automation binds a transition plan — none is
+    ``waste:no_transition_plan``; AI workloads declare hardware
+    end-of-life disposal bound to the 115th-batch ledger — undeclared
+    is ``waste:unrouted_hardware``; dumping alerts bind image +
+    human verification — unverified is a lead
+    (``waste:unverified_alert``); batteries pass fire triage before
+    shredding — missing is ``waste:no_fire_triage``. Ground truth
+    is closed: 4 allow / 8 deny.
+    """
+    from ed25519 import public_key, sign
+
+    from waste_agents import (
+        WASTE_SCHEMA_VERSION,
+        CLASS_AUTHORITATIVE,
+        CLASS_NON_AUTHORITATIVE,
+        PurityLog,
+        PicLog,
+        BatteryPassportLog,
+        ClaimEvidenceLog,
+        TransitionLog,
+        HardwareLifecycleLog,
+        DumpingAlertLog,
+        FireTriageLog,
+        sorting_purity_receipt,
+        basel_pic_binding,
+        battery_passport_pin,
+        claim_evidence_chain,
+        informal_sector_transition,
+        ai_hardware_lifecycle,
+        dumping_alert_binding,
+        battery_fire_triage,
+        check_purity_claim,
+        check_movement,
+        check_battery_decommission,
+        check_claim_evidence,
+        check_transition_plan,
+        check_hardware_lifecycle,
+        check_dumping_alert,
+        check_fire_triage,
+    )
+    from canonical_json import jcs_canonical_json, jcs_sha256_hex
+
+    SEC = b"waste-bench-authority-0000000010"  # 32 bytes
+    assert len(SEC) == 32
+    PUB = public_key(SEC).hex()
+    T0 = 1_800_000_000
+    HEX64 = "ab" * 32
+    HEX64_B = "cd" * 32
+    HEX64_C = "ef" * 32
+
+    def _prev(log):
+        return log[-1].receipt_digest if log else "genesis"
+
+    # --- purity log with one bound claim ---
+    purity_log = PurityLog()
+    purity_log.append(
+        sorting_purity_receipt(
+            receipt_id="pur-bench-1", claim_id="cl-bench-1",
+            test_protocol_digest=HEX64, batch_id="batch-bench",
+            batch_size=100, measured_sample_n=10, measured_purity_bps=9960,
+            issued_by="bench-lab", authority_pubkey_hex=PUB,
+            authority_secret=SEC, issued_at=T0, expires_at=T0 + 3600,
+            prev_digest=_prev(purity_log._log),
+        )
+    )
+
+    # --- pic log with one bound movement ---
+    pic_log = PicLog()
+    pic_log.append(
+        basel_pic_binding(
+            receipt_id="pic-bench-1", movement_id="mv-bench-1",
+            waste_code="A1181", origin="US", destination="KR",
+            pic_receipt_digest=HEX64_B, issued_by="bench-customs",
+            authority_pubkey_hex=PUB, authority_secret=SEC,
+            issued_at=T0, expires_at=T0 + 3600,
+            prev_digest=_prev(pic_log._log),
+        )
+    )
+
+    # --- battery passport log with one pinned battery ---
+    bp_log = BatteryPassportLog()
+    bp_log.append(
+        battery_passport_pin(
+            receipt_id="bp-bench-1", battery_id="bat-bench-1",
+            battery_capacity_wh=5000, passport_digest=HEX64,
+            recovery_plan_digest=HEX64_B, issued_by="bench-decomm",
+            authority_pubkey_hex=PUB, authority_secret=SEC,
+            issued_at=T0, expires_at=T0 + 3600,
+            prev_digest=_prev(bp_log._log),
+        )
+    )
+
+    # --- hardware lifecycle log with one declared workload ---
+    hw_log = HardwareLifecycleLog()
+    hw_log.append(
+        ai_hardware_lifecycle(
+            receipt_id="hw-bench-1", workload_id="wl-bench-1",
+            hardware_units=64, disposal_plan_digest=HEX64,
+            env_ledger_receipt_digest=HEX64_B, issued_by="bench-infra",
+            authority_pubkey_hex=PUB, authority_secret=SEC,
+            issued_at=T0, expires_at=T0 + 3600,
+            prev_digest=_prev(hw_log._log),
+        )
+    )
+
+    # --- purity log with a single-sample (cherry-pick) claim ---
+    cherry_log = PurityLog()
+    cherry_log.append(
+        sorting_purity_receipt(
+            receipt_id="pur-bench-2", claim_id="cl-bench-2",
+            test_protocol_digest=HEX64, batch_id="batch-cherry",
+            batch_size=100, measured_sample_n=1, measured_purity_bps=9990,
+            issued_by="bench-lab", authority_pubkey_hex=PUB,
+            authority_secret=SEC, issued_at=T0, expires_at=T0 + 3600,
+            prev_digest=_prev(cherry_log._log),
+        )
+    )
+
+    # --- claim evidence log with one bound claim ---
+    ce_log = ClaimEvidenceLog()
+    ce_log.append(
+        claim_evidence_chain(
+            receipt_id="ce-bench-1", claim_id="claim-bench-1",
+            claim_text="90% recycled content",
+            evidence_tiers=("third_party_cert",), evidence_digest=HEX64,
+            offset_based=False, issued_by="bench-audit",
+            authority_pubkey_hex=PUB, authority_secret=SEC,
+            issued_at=T0, expires_at=T0 + 3600,
+            prev_digest=_prev(ce_log._log),
+        )
+    )
+
+    # --- dumping alert log: one unverified, one verified ---
+    alert_log = DumpingAlertLog()
+    alert_log.append(
+        dumping_alert_binding(
+            receipt_id="da-bench-1", alert_id="alert-unverified",
+            channel="aerial_ai", image_digest=HEX64, location_id="st-bench",
+            human_verification_digest="", issued_by="bench-city",
+            authority_pubkey_hex=PUB, authority_secret=SEC,
+            issued_at=T0, expires_at=T0 + 3600,
+            prev_digest=_prev(alert_log._log),
+        )
+    )
+    alert_log.append(
+        dumping_alert_binding(
+            receipt_id="da-bench-2", alert_id="alert-verified",
+            channel="aerial_ai", image_digest=HEX64_B, location_id="st-bench-2",
+            human_verification_digest=HEX64_C, issued_by="bench-city",
+            authority_pubkey_hex=PUB, authority_secret=SEC,
+            issued_at=T0, expires_at=T0 + 3600,
+            prev_digest=_prev(alert_log._log),
+        )
+    )
+
+    # --- fire triage log with one cleared battery ---
+    triage_log = FireTriageLog()
+    triage_log.append(
+        battery_fire_triage(
+            receipt_id="ft-bench-1", battery_id="bat-triage-1",
+            triage_grade="low", triage_digest=HEX64,
+            issued_by="bench-safety", authority_pubkey_hex=PUB,
+            authority_secret=SEC, issued_at=T0, expires_at=T0 + 3600,
+            prev_digest=_prev(triage_log._log),
+        )
+    )
+
+    # --- purity log with a lower measured value for the overclaim case ---
+    overclaim_log = PurityLog()
+    overclaim_log.append(
+        sorting_purity_receipt(
+            receipt_id="pur-bench-3", claim_id="cl-bench-3",
+            test_protocol_digest=HEX64, batch_id="batch-over",
+            batch_size=100, measured_sample_n=10, measured_purity_bps=9900,
+            issued_by="bench-lab", authority_pubkey_hex=PUB,
+            authority_secret=SEC, issued_at=T0, expires_at=T0 + 3600,
+            prev_digest=_prev(overclaim_log._log),
+        )
+    )
+
+    scenarios: list[tuple[str, bool, str]] = []
+    results: dict[str, dict[str, Any]] = {}
+
+    def _record(sid, expect_allow, needle, verdict):
+        scenarios.append((sid, expect_allow, needle))
+        results[sid] = {"allowed": verdict.allowed, "reason": verdict.reason}
+
+    _record("allow_purity_bound", True, "",
+            check_purity_claim(log=purity_log, batch_id="batch-bench",
+                               claimed_purity_bps=9960, now=T0))
+    _record("allow_pic_bound", True, "",
+            check_movement(log=pic_log, movement_id="mv-bench-1", now=T0))
+    _record("allow_battery_passport", True, "",
+            check_battery_decommission(log=bp_log, battery_id="bat-bench-1",
+                                       battery_capacity_wh=5000, now=T0))
+    _record("allow_hardware_lifecycle", True, "",
+            check_hardware_lifecycle(log=hw_log, workload_id="wl-bench-1", now=T0))
+    _record("deny_cherry_picked", False, "cherry_picked",
+            check_purity_claim(log=cherry_log, batch_id="batch-cherry",
+                               claimed_purity_bps=9990, now=T0))
+    _record("deny_no_pic", False, "no_pic",
+            check_movement(log=PicLog(), movement_id="mv-ghost", now=T0))
+    _record("deny_ungraded_purity", False, "ungraded_purity",
+            check_purity_claim(log=overclaim_log, batch_id="batch-over",
+                               claimed_purity_bps=9960, now=T0))
+    _record("deny_no_battery_passport", False, "no_battery_passport",
+            check_battery_decommission(log=BatteryPassportLog(),
+                                       battery_id="bat-ghost",
+                                       battery_capacity_wh=5000, now=T0))
+    _record("deny_no_evidence", False, "no_evidence",
+            check_claim_evidence(log=ClaimEvidenceLog(), claim_id="ghost", now=T0))
+    _record("deny_no_transition_plan", False, "no_transition_plan",
+            check_transition_plan(log=TransitionLog(), facility_id="mrf-ghost",
+                                  pickers_displaced=20, now=T0))
+    _record("deny_unverified_alert", False, "unverified_alert",
+            check_dumping_alert(log=alert_log, alert_id="alert-unverified", now=T0))
+    _record("deny_no_fire_triage", False, "no_fire_triage",
+            check_fire_triage(log=FireTriageLog(), battery_id="bat-ghost", now=T0))
+
+    allowed_ids: list[str] = []
+    denial_reasons: dict[str, str] = {}
+    mismatches: list[str] = []
+    for sid, expect_allow, needle in scenarios:
+        r = results[sid]
+        if r["allowed"]:
+            allowed_ids.append(sid)
+        else:
+            denial_reasons[sid] = r["reason"]
+        if r["allowed"] != expect_allow:
+            mismatches.append(f"{sid}: expected allow={expect_allow}, "
+                              f"saw allow={r['allowed']}")
+        elif not expect_allow and needle and needle not in r["reason"]:
+            mismatches.append(f"{sid}: expected needle {needle!r} in "
+                              f"{r['reason']!r}")
+    return {
+        "n_scenarios": len(scenarios),
+        "n_allowed": len(allowed_ids),
+        "n_denied": len(scenarios) - len(allowed_ids),
+        "allowed_ids": allowed_ids,
+        "denial_reasons": denial_reasons,
+        "mismatches": mismatches,
+    }
+
+
+def run_housing_ai_agents() -> dict[str, Any]:
+    """Housing-market AI discipline (one-hundred-forty-second batch).
+
+    Absorbs the 2026 AI-real-estate thread: Louis v. SafeRent $2.275M
+    (no intent needed for disparate impact; SafeRent agreed to stop
+    scoring voucher applicants before fairness was verified); the
+    "algorithm can't be appealed" red line; DOJ v. RealPage (ongoing)
+    and the DOJ-RealPage settlement (no competitor non-public data,
+    no auto-accept, training data 1+ year old); SF 37.10C algorithmic
+    rent ban; Fannie/Freddie early-2026 AI governance frameworks +
+    UAD 3.6 (mandatory 2026-11-02); NYC A.11635 AI photo-edit
+    disclosure.
+
+    Fail-closed rules over 12 deterministic scenarios: a compliant
+    screening run (independently-audited probe with voucher-slice
+    coverage, declared voucher policy, live appeal window) passes; a
+    manual rent recommendation on aged isolated data passes; a
+    high-confidence fresh AVM for sale listing passes; a disclosed
+    photo-edit listing passes. Denied: screening with no probe
+    (``housing:no_screening_probe``), a probe that never measured
+    voucher applicants (``housing:voucher_slice_missing``), a
+    self-audited probe (``housing:probe_self_audited``), a screening
+    rule excluding voucher income (``housing:voucher_income_discrimination``),
+    a decision with no appeal window (``housing:no_appeal``), training
+    data with competitor non-public sources
+    (``housing:rent_coordination``), an auto-accept recommendation
+    (``housing:auto_accept``), and a low-confidence mortgage AVM
+    (``housing:avm_human_review_required``). Ground truth is closed:
+    4 allow / 8 deny.
+    """
+    from ed25519 import public_key
+
+    from housing import issue_fairness_probe
+    from housing_ai_agents import (
+        HOUSING_AI_SCHEMA_VERSION,
+        screening_fairness_probe,
+        voucher_income_gate,
+        issue_appeal_receipt,
+        appeal_window,
+        declare_training_data,
+        rent_coordination_probe,
+        rent_recommendation_gate,
+        avm_confidence_gate,
+        issue_photo_edit_receipt,
+        listing_truth_receipt,
+    )
+
+    SEC = b"housing-ai-bench-authority-00001"  # 32 bytes
+    assert len(SEC) == 32
+    T0 = 1_800_000_000
+    MODEL = "ab" * 32
+    scenarios: list[dict[str, Any]] = []
+
+    def compliant_probe():
+        return issue_fairness_probe(
+            probe_id="bench-probe",
+            model_digest=MODEL,
+            probe_type="disparate_impact",
+            demographic_slices=[
+                "voucher_holders", "race_ethnicity", "familial_status"],
+            probe_digest="cd" * 32,
+            vendor_id="bench-vendor",
+            vendor_secret=SEC,
+            measured_at=T0,
+            expires_at=T0 + 365 * 86400,
+        )
+
+    # 1. allow: fully compliant screening pipeline
+    v1 = screening_fairness_probe(
+        [compliant_probe()], model_digest=MODEL,
+        auditor_id="bench-auditor", check_time=T0 + 100)
+    v2 = voucher_income_gate(
+        voucher_policy_declared=True, accepts_vouchers=True,
+        screening_rules=[{"rule_id": "r1", "treats_voucher_income": "accept"}])
+    v3 = appeal_window(
+        issue_appeal_receipt(
+            appeal_id="a1", decision_digest="aa" * 32, channel="email",
+            contact="a@example.com", window_days=30,
+            human_reviewer_id="rev-1", issuer_secret=SEC, issued_at=T0),
+        decision_digest="aa" * 32, check_time=T0 + 100)
+    scenarios.append({
+        "id": "allow_compliant_screening",
+        "expected": True,
+        "verdict": v1.allowed and v2.allowed and v3.allowed,
+    })
+
+    # 2. allow: manual rent recommendation on aged isolated data
+    td = declare_training_data(
+        receipt_id="td1", model_digest=MODEL,
+        sources=[{"source_id": "s1", "source_digest": "cd" * 32,
+                  "min_age_days": 400, "contains_competitor_nonpublic": False}],
+        declared_by="deployer-1", declared_at=T0)
+    v4 = rent_coordination_probe(td, model_digest=MODEL)
+    v5 = rent_recommendation_gate(
+        rent_value=2500.0, auto_accept=False, basis_digest="cd" * 32)
+    scenarios.append({
+        "id": "allow_manual_rent_recommendation",
+        "expected": True,
+        "verdict": v4.allowed and v5.allowed,
+    })
+
+    # 3. allow: high-confidence fresh AVM for sale listing
+    v6 = avm_confidence_gate(
+        model_digest=MODEL, confidence=0.92, data_as_of=T0 - 30 * 86400,
+        use_kind="sale_listing", check_time=T0)
+    scenarios.append({
+        "id": "allow_high_confidence_avm",
+        "expected": True, "verdict": v6.allowed,
+    })
+
+    # 4. allow: disclosed photo-edit listing
+    pe = issue_photo_edit_receipt(
+        receipt_id="pe1", listing_id="L1", photo_digest="ab" * 32,
+        edits=["staging"], publisher_id="pub-1", published_at=T0)
+    v7 = listing_truth_receipt(
+        listing_id="L1",
+        photos=[{"photo_digest": "ab" * 32, "ai_edited": True}],
+        edit_receipts=[pe])
+    scenarios.append({
+        "id": "allow_disclosed_listing",
+        "expected": True, "verdict": v7.allowed,
+    })
+
+    # 5. deny: screening with no probe
+    v8 = screening_fairness_probe(
+        [], model_digest=MODEL, auditor_id="bench-auditor",
+        check_time=T0 + 100)
+    scenarios.append({
+        "id": "deny_no_probe", "expected": False,
+        "verdict": v8.allowed, "reason": v8.reason,
+    })
+
+    # 6. deny: probe missing voucher slice
+    no_voucher = issue_fairness_probe(
+        probe_id="bench-probe-2", model_digest=MODEL,
+        probe_type="disparate_impact",
+        demographic_slices=["race_ethnicity", "familial_status"],
+        probe_digest="cd" * 32, vendor_id="bench-vendor",
+        vendor_secret=SEC, measured_at=T0, expires_at=T0 + 365 * 86400)
+    v9 = screening_fairness_probe(
+        [no_voucher], model_digest=MODEL, auditor_id="bench-auditor",
+        check_time=T0 + 100)
+    scenarios.append({
+        "id": "deny_voucher_slice_missing", "expected": False,
+        "verdict": v9.allowed, "reason": v9.reason,
+    })
+
+    # 7. deny: self-audited probe
+    v10 = screening_fairness_probe(
+        [compliant_probe()], model_digest=MODEL, auditor_id="bench-vendor",
+        check_time=T0 + 100)
+    scenarios.append({
+        "id": "deny_self_audited", "expected": False,
+        "verdict": v10.allowed, "reason": v10.reason,
+    })
+
+    # 8. deny: rule excluding voucher income
+    v11 = voucher_income_gate(
+        voucher_policy_declared=True, accepts_vouchers=True,
+        screening_rules=[{"rule_id": "r2", "treats_voucher_income": "exclude"}])
+    scenarios.append({
+        "id": "deny_voucher_income", "expected": False,
+        "verdict": v11.allowed, "reason": v11.reason,
+    })
+
+    # 9. deny: decision with no appeal window
+    v12 = appeal_window(None, decision_digest="aa" * 32, check_time=T0 + 100)
+    scenarios.append({
+        "id": "deny_no_appeal", "expected": False,
+        "verdict": v12.allowed, "reason": v12.reason,
+    })
+
+    # 10. deny: competitor non-public training data
+    td_bad = declare_training_data(
+        receipt_id="td2", model_digest=MODEL,
+        sources=[{"source_id": "s1", "source_digest": "cd" * 32,
+                  "min_age_days": 400, "contains_competitor_nonpublic": True}],
+        declared_by="deployer-1", declared_at=T0)
+    v13 = rent_coordination_probe(td_bad, model_digest=MODEL)
+    scenarios.append({
+        "id": "deny_rent_coordination", "expected": False,
+        "verdict": v13.allowed, "reason": v13.reason,
+    })
+
+    # 11. deny: auto-accept recommendation
+    v14 = rent_recommendation_gate(
+        rent_value=2500.0, auto_accept=True, basis_digest="cd" * 32)
+    scenarios.append({
+        "id": "deny_auto_accept", "expected": False,
+        "verdict": v14.allowed, "reason": v14.reason,
+    })
+
+    # 12. deny: low-confidence mortgage AVM
+    v15 = avm_confidence_gate(
+        model_digest=MODEL, confidence=0.75, data_as_of=T0 - 30 * 86400,
+        use_kind="mortgage_lending", check_time=T0)
+    scenarios.append({
+        "id": "deny_avm_low_confidence", "expected": False,
+        "verdict": v15.allowed, "reason": v15.reason,
+    })
+
+    mismatches = [
+        s["id"] for s in scenarios
+        if bool(s["verdict"]) != bool(s["expected"])
+    ]
+    return {
+        "track": "metrics.housing_ai_agents",
+        "n_scenarios": len(scenarios),
+        "mismatches": mismatches,
+        "schema_version": HOUSING_AI_SCHEMA_VERSION,
+    }
+
+
 def run_procurement_agents() -> dict[str, Any]:
     """Procurement accountability gates (one-hundred-thirty-eighth batch).
 
@@ -23597,6 +24236,270 @@ def run_procurement_agents() -> dict[str, Any]:
     broken = AwardTrace(**{**broken.__dict__, "ai_output_digest": None})
     _record("deny_incomplete_trace", False, "incomplete_trace",
             full_trace_award(broken))
+
+    mismatches: list[str] = []
+    allowed_ids: list[str] = []
+    denial_reasons: dict[str, str] = {}
+    for sid, expect_allow, needle in scenarios:
+        r = results[sid]
+        if r["allowed"]:
+            allowed_ids.append(sid)
+        else:
+            denial_reasons[sid] = r["reason"]
+        if r["allowed"] != expect_allow:
+            mismatches.append(f"{sid}: expected allow={expect_allow}, "
+                              f"saw allow={r['allowed']}")
+        elif not expect_allow and needle and needle not in r["reason"]:
+            mismatches.append(f"{sid}: expected needle {needle!r} in "
+                              f"{r['reason']!r}")
+    return {
+        "n_scenarios": len(scenarios),
+        "n_allowed": len(allowed_ids),
+        "n_denied": len(scenarios) - len(allowed_ids),
+        "allowed_ids": allowed_ids,
+        "denial_reasons": denial_reasons,
+        "mismatches": mismatches,
+    }
+
+def run_hr_agents() -> dict[str, Any]:
+    """HR & workplace AI discipline (one-hundred-forty-first batch).
+
+    Absorbs the 2026 AI-HR thread: algorithmic management going
+    white-collar (>50% of companies use AI assisting pay/promotion/
+    layoff decisions, ~20% with no human, 1/3 trained — ResumeBuilder
+    2026); JPMorgan's assist-not-decide review bot; Mobley v. Workday
+    (vendor liable as employer's agent); Kistler v. Eightfold AI
+    (secret 1B+ profile scoring — the cause of action is *secrecy*,
+    FCRA disclosure/access/dispute as the weapon); the hiring "AI
+    doom loop" and Xu's same-model homophily simulation (AI-written
+    resumes pass 23-60% more); Newsom's 2026-09-30 three laws (ban
+    AI+biometric emotion prediction, written notice for AI layoffs,
+    ban pure-AI firings); California CPPA ADMT (monitoring outputs
+    used for employment decisions need advance notice + appeal);
+    Illinois HB 3773 (discriminatory-effect AI and zip-code proxies
+    banned); NYC Local Law 144 (state comptroller found 17 potential
+    violations the city regulator missed — self-audits don't count);
+    EU Omnibus 2026/1744 (Annex III deferred to 2027-12-02).
+
+    Fail-closed rules over 12 deterministic scenarios: HR models
+    need live independent third-party audits — self-audits are
+    NON_AUTHORITATIVE (``hr:self_audit``); worker-profile scoring
+    without FCRA-style disclosure is ``hr:secret_scoring``;
+    AI-influenced hiring/firing/promotion needs a named-human
+    countersign with substantive review evidence — signatures
+    without it are rubber stamps (``hr:rubber_stamp``); AI+biometric
+    emotion inference is refused whole-class
+    (``hr:emotion_inference``); repurposing monitoring data for
+    employment decisions without advance notice + appeal is
+    ``hr:surveillance_repurpose``; screeners preferring AI-written
+    resumes beyond tolerance are quarantined (``hr:homophily_audit``);
+    AI-involved layoffs without written notice are
+    ``hr:no_layoff_notice``; unaudited evaluation outputs feeding
+    downstream decisions are ``hr:tainted_input``; unpinned vendors
+    are ``hr:unpinned_vendor``. Ground truth is closed: 4 allow /
+    8 deny.
+    """
+    from ed25519 import public_key, sign
+
+    from hr_agents import (
+        AuditRegistry,
+        AuthorityRegistry,
+        CountersignRegistry,
+        LayoffNoticeRegistry,
+        RepurposeRegistry,
+        ScoringDisclosureRegistry,
+        VendorPinRegistry,
+        audit_receipt,
+        emotion_inference_ban,
+        human_final_gate,
+        input_bias_inheritance,
+        issue_audit_receipt,
+        issue_homophily_probe,
+        issue_human_countersign,
+        issue_layoff_notice,
+        issue_repurpose_notice,
+        issue_scoring_disclosure,
+        issue_vendor_pin,
+        layoff_ai_disclosure,
+        model_homophily_probe,
+        secret_scoring_probe,
+        surveillance_purpose_receipt,
+        vendor_agent_pin,
+    )
+
+    SEC = b"hr-bench-authority-" + b"0" * 13  # 32 bytes
+    assert len(SEC) == 32
+    AUD = b"hr-bench-auditor-" + b"0" * 15  # 32 bytes
+    assert len(AUD) == 32
+    PUB = public_key(SEC)
+    AUD_PUB = public_key(AUD)
+    T0 = 1_800_000_000
+    HEX64 = "ab" * 32
+    HEX64_B = "cd" * 32
+    HEX64_C = "ef" * 32
+
+    authorities = AuthorityRegistry()
+    authorities.register("bench-hr-op", PUB)
+    authorities.register("bench-hr-auditor", AUD_PUB)
+
+    # --- audit registry: one live independent audit ---
+    audits = AuditRegistry(authorities)
+    audits.record(issue_audit_receipt(
+        audit_id="a-bench-1", model_digest=HEX64,
+        vendor_id="bench-hr-vendor", auditor_id="bench-hr-auditor",
+        issued_at=T0, valid_until=T0 + 86400 * 90,
+        banned_features_checked=("zip_code",),
+        features_used=("tenure", "skills"),
+        auditor_secret=AUD))
+
+    # --- scoring disclosures: one disclosed worker ---
+    disclosures = ScoringDisclosureRegistry()
+    disclosures.record(issue_scoring_disclosure(
+        disclosure_id="d-bench-1", scoring_system_id="screener-1",
+        subject_id="worker-1", disclosed_at=T0,
+        access_path="https://portal.example/access",
+        dispute_path="https://portal.example/dispute",
+        issuer_secret=SEC))
+
+    # --- countersigns: one substantive, one rubber-stamp ---
+    countersigns = CountersignRegistry()
+    countersigns.record(issue_human_countersign(
+        decision_id="dec-bench-1", decision_kind="firing",
+        evidence_digest=HEX64, reviewer_name="R. Okafor",
+        review_minutes=45, review_notes_digest=HEX64_B,
+        countersigned_at=T0, reviewer_secret=SEC))
+    countersigns.record(issue_human_countersign(
+        decision_id="dec-bench-2", decision_kind="promotion",
+        evidence_digest=HEX64_C, reviewer_name="R. Okafor",
+        review_minutes=1, review_notes_digest=HEX64_B,
+        countersigned_at=T0, reviewer_secret=SEC))
+
+    # --- repurpose notices: one live notice ---
+    repurposes = RepurposeRegistry()
+    repurposes.record(issue_repurpose_notice(
+        notice_id="n-bench-1", monitoring_source_digest=HEX64,
+        new_purpose="productivity_scoring", notice_given_at=T0,
+        appeal_receipt_digest=HEX64_B, issuer_secret=SEC))
+
+    # --- layoff notices: one live notice ---
+    layoffs = LayoffNoticeRegistry()
+    layoffs.record(issue_layoff_notice(
+        notice_id="ln-bench-1", layoff_id="lay-bench-1",
+        ai_involvement_digest=HEX64, written_notice_digest=HEX64_B,
+        evidence_chain_digest=HEX64_C, issued_at=T0,
+        issuer_secret=SEC))
+
+    # --- vendor pins: one pinned vendor ---
+    pins = VendorPinRegistry()
+    pins.record(issue_vendor_pin(
+        pin_id="vp-bench-1", vendor_id="vendor-1",
+        employer_id="employer-1", scope="screening",
+        issued_at=T0, issuer_secret=SEC))
+
+    # --- homophily probes: one balanced, one skewed ---
+    probe_ok = issue_homophily_probe(
+        probe_id="p-bench-1", model_digest=HEX64,
+        ai_written_passes=30, ai_written_total=100,
+        human_written_passes=30, human_written_total=100,
+        measured_at=T0, expires_at=T0 + 86400 * 30, issuer_secret=AUD)
+    probe_skewed = issue_homophily_probe(
+        probe_id="p-bench-2", model_digest=HEX64_B,
+        ai_written_passes=60, ai_written_total=100,
+        human_written_passes=30, human_written_total=100,
+        measured_at=T0, expires_at=T0 + 86400 * 30, issuer_secret=AUD)
+
+    scenarios: list[tuple[str, bool, str]] = []
+    results: dict[str, dict[str, Any]] = {}
+
+    def _record(sid, expect_allow, needle, verdict):
+        scenarios.append((sid, expect_allow, needle))
+        results[sid] = {"allowed": verdict.allowed,
+                        "reason": verdict.deny_code or ""}
+
+    # 1. live independent audit -> allow
+    _record("allow_independent_audit", True, "",
+            audit_receipt(audits, model_digest=HEX64, checked_at=T0 + 10))
+
+    # 2. disclosed scoring -> allow
+    _record("allow_disclosed_scoring", True, "",
+            secret_scoring_probe(disclosures, authorities,
+                                 scoring_system_id="screener-1",
+                                 subject_id="worker-1",
+                                 scored_at=T0 + 5,
+                                 issuer_id="bench-hr-op"))
+
+    # 3. substantive human countersign -> allow
+    _record("allow_human_countersign", True, "",
+            human_final_gate(countersigns, authorities,
+                             decision_id="dec-bench-1",
+                             decision_kind="firing",
+                             evidence_digest=HEX64, ai_involved=True,
+                             decided_at=T0 + 10,
+                             reviewer_id="bench-hr-op"))
+
+    # 4. pinned vendor -> allow
+    _record("allow_pinned_vendor", True, "",
+            vendor_agent_pin(pins, authorities, vendor_id="vendor-1",
+                             employer_id="employer-1",
+                             issuer_id="bench-hr-op"))
+
+    # 5. secret scoring -> deny
+    _record("deny_secret_scoring", False, "secret_scoring",
+            secret_scoring_probe(disclosures, authorities,
+                                 scoring_system_id="screener-1",
+                                 subject_id="worker-ghost",
+                                 scored_at=T0 + 5,
+                                 issuer_id="bench-hr-op"))
+
+    # 6. rubber-stamp countersign -> deny
+    _record("deny_rubber_stamp", False, "rubber_stamp",
+            human_final_gate(countersigns, authorities,
+                             decision_id="dec-bench-2",
+                             decision_kind="promotion",
+                             evidence_digest=HEX64_C, ai_involved=True,
+                             decided_at=T0 + 10,
+                             reviewer_id="bench-hr-op"))
+
+    # 7. AI firing with no countersign -> deny
+    _record("deny_no_countersign", False, "no_human_countersign",
+            human_final_gate(countersigns, authorities,
+                             decision_id="dec-ghost",
+                             decision_kind="firing",
+                             evidence_digest=HEX64, ai_involved=True,
+                             decided_at=T0 + 10,
+                             reviewer_id="bench-hr-op"))
+
+    # 8. AI+biometric emotion inference -> deny (whole-class)
+    _record("deny_emotion_inference", False, "emotion_inference",
+            emotion_inference_ban(use_kind="emotion_prediction",
+                                  uses_ai=True, uses_biometrics=True))
+
+    # 9. repurposed monitoring data, no notice -> deny
+    _record("deny_surveillance_repurpose", False, "surveillance_repurpose",
+            surveillance_purpose_receipt(
+                repurposes, authorities,
+                monitoring_source_digest=HEX64_B, employment_use=True,
+                used_at=T0 + 10, issuer_id="bench-hr-op"))
+
+    # 10. skewed homophily probe -> deny (quarantine for audit)
+    _record("deny_homophily", False, "homophily_audit",
+            model_homophily_probe(probe_skewed, authorities,
+                                  issuer_id="bench-hr-auditor",
+                                  checked_at=T0 + 10))
+
+    # 11. AI layoff with no written notice -> deny
+    _record("deny_layoff_notice", False, "no_layoff_notice",
+            layoff_ai_disclosure(layoffs, authorities,
+                                 layoff_id="lay-ghost", ai_involved=True,
+                                 issuer_id="bench-hr-op"))
+
+    # 12. unaudited evaluation output feeding promotion -> deny
+    _record("deny_tainted_input", False, "tainted_input",
+            input_bias_inheritance(audits,
+                                   evaluation_output_digest=HEX64_C,
+                                   source_model_digest=HEX64_B,
+                                   used_for="promotion",
+                                   checked_at=T0 + 10))
 
     mismatches: list[str] = []
     allowed_ids: list[str] = []
@@ -24945,8 +25848,11 @@ __all__ = [
     "run_embodied",
     "run_greenwash",
     "run_procurement_agents",
+    "run_waste_agents",
     "run_underwriting_agents",
     "run_orbital_agents",
+    "run_hr_agents",
+    "run_housing_ai_agents",
     "run_disaster_agents",
     "run_pharma_agents",
     "run_forest_fish",

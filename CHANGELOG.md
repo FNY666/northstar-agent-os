@@ -1,3 +1,98 @@
+## Unreleased (one-hundred-forty-second batch) — housing market AI discipline (AI-real-estate absorption)
+
+New module `housing_ai_agents.py` (extends the 119th-batch `housing.py`):
+`screening_fairness_probe()` — tenant-screening models need an
+independently-audited probe receipt explicitly covering
+`voucher_holders` (SafeRent: no scoring voucher applicants before
+fairness was verified); self-audited probes are
+`housing.probe_self_audited`. `voucher_income_gate()` — the voucher
+policy must be declared; accepted-voucher rules that exclude or
+downgrade voucher income deny (`housing.voucher_income_discrimination`).
+`appeal_window()` — every AI-influenced screening decision binds a
+signed appeal receipt (>= 30-day window, named human reviewer); the
+SafeRent "algorithm can't be appealed" red line is
+`housing.no_appeal`. `rent_coordination_probe()` — rent-pricing models
+bind training sources; competitor non-public data denies
+(`housing.rent_coordination`), sources younger than 365 days deny
+(`housing.recency_violation`, the DOJ-RealPage 1-year rule);
+`rent_recommendation_gate()` refuses auto-accept
+(`housing.auto_accept`). `avm_confidence_gate()` — AVMs bind confidence
++ data-as-of per use-kind; low-confidence or stale valuations refuse
+automated reliance (`housing.avm_human_review_required`, UAD 3.6
+lesson). `steering_probe()` — sealed steering-probe executions binding
+the listing-function digest (reuses the 119th-batch probe engine).
+`listing_truth_receipt()` — AI-edited listing photos must carry an edit
+receipt; undisclosed AI edits deny (`housing.deceptive_listing`, NYC
+A.11635 logic). `adverse_action_receipt()` — adverse actions bind the
+appeal receipt; no live appeal denies
+(`housing.adverse_action_no_appeal`). Honest scoping: receipts bind
+declared market discipline; they don't fix the housing market. Bench
+track `metrics.housing_ai_agents`: 12 scenarios, 4 allow / 8 deny.
+
+## Unreleased (one-hundred-forty-first batch) — HR & workplace AI discipline (AI-HR absorption)
+
+New module `hr_agents.py` (extends the 127th-batch `labor_algo.py`
+blue-collar gates to white-collar/hiring): `audit_receipt()` —
+only independent third-party bias audits count (auditor ≠ vendor;
+self-audits are NON_AUTHORITATIVE, NYC Local Law 144 lesson);
+`secret_scoring_probe()` — worker-profile AI scoring without an
+FCRA-style disclosure/access/dispute receipt is
+`hr:secret_scoring` (Kistler v. Eightfold lesson);
+`human_final_gate()` — AI-influenced hiring/firing/promotion needs
+a named-human countersign with substantive review evidence;
+signatures without it are `hr:rubber_stamp`;
+`emotion_inference_ban()` — AI+biometric emotion prediction is
+refused whole-class (California 2026-09-30 law);
+`surveillance_purpose_receipt()` — monitoring data repurposed for
+employment decisions needs advance notice + a bound appeal receipt
+(CPPA ADMT lesson); `model_homophily_probe()` — screeners preferring
+AI-written resumes beyond tolerance are quarantined for audit
+(Xu simulation lesson); `layoff_ai_disclosure()` — AI-involved
+layoffs bind a written-notice receipt + evidence chain (Newsom
+law); `input_bias_inheritance()` — unaudited evaluation outputs
+may not feed downstream decisions (`hr:tainted_input`,
+pollution-source lesson); `vendor_agent_pin()` — the vendor is
+pinned as the employer's agent (Mobley v. Workday lesson).
+Honest scoping: receipts bind declared HR discipline; they don't
+end workplace discrimination. Bench track `metrics.hr_agents`:
+12 scenarios, 4 allow / 8 deny.
+
+## Unreleased (one-hundred-thirty-ninth batch) — waste & circular-economy discipline (AI-waste absorption)
+
+New module `waste_agents.py`: `sorting_purity_receipt()` —
+sorting-purity claims bind
+`(test_protocol_digest, batch_id, measured_sample_n,
+measured_purity_bps)`; a single measured sample against a batch
+claim is `waste.cherry_picked` (AB 2253 lesson); vendor-declared
+purity with no bound protocol, or above measured + 50bps
+tolerance, is `waste.ungraded_purity` (Sharp Group "Alpha"
+lesson). `basel_pic_binding()` — cross-border e-waste movements
+bind a Basel PIC receipt; unbound → `waste.no_pic` (the
+2025-01-01 amendment as a mechanism); a banned destination is
+rejected at issuance (Malaysia 2026-09-16 lesson).
+`battery_passport_pin()` — retiring a battery >2kWh without
+pinning the EU battery-passport digest is
+`waste.no_battery_passport` (the 2026-01-01 serial rule).
+`claim_evidence_chain()` — recycled-content claims bind an
+evidence chain; offset-based "carbon neutral" claims are
+unlawful by default and rejected at issuance
+(`waste.offset_claim`, the ECGT/Volvic-Danone lesson); no bound
+evidence → `waste.no_evidence` (SB 343 "Truth in Recycling").
+`informal_sector_transition()` — automation displacing pickers
+requires a bound transition plan; without →
+`waste.no_transition_plan` (WIEGO lesson). `ai_hardware_lifecycle()`
+— AI workloads declare hardware end-of-life disposal bound to the
+115th-batch `env_cost` ledger; undeclared →
+`waste.unrouted_hardware` (the 617Mt warning).
+`dumping_alert_binding()` — illegal-dumping alerts bind an image
+digest + human verification; unverified alerts are leads only
+(`waste.unverified_alert`, NON_AUTHORITATIVE); alerts never
+auto-fine (Aerbits lesson). `battery_fire_triage()` — batteries
+entering a shredder pass a fire-risk triage receipt; missing or
+`high` grade → `waste.no_fire_triage`. Honest scoping: receipts
+bind declared waste discipline; they don't stop pollution. Bench
+track `metrics.waste_agents`: 12 scenarios, 4 allow / 8 deny.
+
 ## Unreleased (one-hundred-fortieth batch) — underwriting & claims discipline (AI-insurance absorption)
 
 New module `underwriting_agents.py` (extends the 125th-batch
