@@ -518,6 +518,10 @@ Evaluate every probe under its declared engine (native run).
 
 Strict-vs-permissive effect size on the config-portable probe subset.
 
+#### `run_consent_ablation()`
+
+Paired consent ablation: consent_kept vs consent_stripped.
+
 #### `BenchHarness`
 
 Temp workspaces + scripted providers for one suite run.
