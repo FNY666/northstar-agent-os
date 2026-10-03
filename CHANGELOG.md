@@ -1,3 +1,30 @@
+## Unreleased (one-hundred-forty-third batch) — audit & assurance discipline (AI-audit absorption)
+
+New module `audit_agents.py`: `reconstruction_receipt()` — AI work
+binds the 5-piece COSO bundle (prompt/input/output/model
+version/human review); without a live bundle the work is
+NON_AUTHORITATIVE (`audit.no_reconstruction`). `parallel_run_gate()`
+— AI audit tools need 1–2 recorded parallel-run cycles against a
+human audit before go-live (`audit.no_parallel_run`).
+`evidence_not_conclusion()` — AI outputs are evidence, never
+conclusions; conclusion labels without a named-human signoff →
+`audit.unconcluded` (OSFI/PCAOB lesson). `shadow_ai_inventory()` —
+unregistered pipeline AI is denied until inventoried, including
+digest-swapped models (`audit.shadow_ai`, 65.3% gap lesson).
+`decision_rights_charter()` — AI deciding without a live
+who-may-decide-what charter → `audit.no_charter`.
+`oversight_capacity_ratio()` — reviewer floor per 1k
+decisions/day plus a rubber-stamp tripwire on zero override rates.
+`incident_procedure_gate()` — highly autonomous AI without an
+incident-management procedure is refused
+(`audit.no_incident_procedure`, 81% gap lesson).
+`alert_conversion_probe()` — channels converting at ≤5%
+auto-degrade to human-confirmed operation. `continuous_ready_gate()`
+— docs must be current for the shipping version.
+Honest scoping: receipts bind declared audit discipline; they don't
+guarantee assurance. Bench track `metrics.audit_agents`: 12
+scenarios, 4 allow / 8 deny.
+
 ## Unreleased (one-hundred-forty-second batch) — housing market AI discipline (AI-real-estate absorption)
 
 New module `housing_ai_agents.py` (extends the 119th-batch `housing.py`):

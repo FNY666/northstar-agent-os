@@ -1420,6 +1420,118 @@ Fail-closed check of an adverse-action receipt at use time.
 
 Shape an adverse-action verdict as an audit event.
 
+### `audit_agents`
+
+Source: `components/northstar-agent-runtime/audit_agents.py`
+
+Audit & assurance discipline (one-hundred-forty-third batch).
+
+#### `AuditError`
+
+A malformed audit receipt or a programming error.
+
+#### `AuditVerdict`
+
+Outcome of one audit-discipline gate check.
+
+#### `AuthorityRegistry`
+
+Maps authority ids to Ed25519 public keys (hex).
+
+- `register(authority_id: str, pubkey_hex: str)`
+- `pubkey(authority_id: str)`
+#### `ReconstructionReceipt`
+
+Binds the 5-piece COSO reconstruction bundle.
+
+- `receipt_digest` (property)
+#### `ReconstructionRegistry`
+
+Hash-chained log of reconstruction receipts per authority.
+
+- `issue(receipt_id: str, work_id: str, prompt_digest: str, input_digest: str, output_digest: str, model_version: str, human_reviewer_id: str, reviewed_at: int, authority_id: str, signature: bytes, issued_now: int)`
+- `find(work_id: str)`
+- `revoke(receipt_id: str)`
+#### `reconstruction_receipt(registry: ReconstructionRegistry, work_id: str, now: int, max_review_age_s: int=90 * _DAY_S)`
+
+AI work without a live reconstruction receipt is NON_AUTHORITATIVE.
+
+#### `ParallelRunReceipt`
+
+Records parallel-run cycles of an AI audit tool vs a human audit.
+
+- `receipt_digest` (property)
+#### `ParallelRunRegistry`
+
+Hash-chained log of parallel-run receipts.
+
+- `issue(receipt_id: str, tool_id: str, cycles_run: int, human_audit_digest: str, agreement_rate: float, authority_id: str, signature: bytes, recorded_at: int)`
+- `latest(tool_id: str)`
+#### `parallel_run_gate(registry: ParallelRunRegistry, tool_id: str, now: int, min_cycles: int=PARALLEL_RUN_MIN_CYCLES)`
+
+AI audit tools need 1–2 parallel-run cycles before go-live.
+
+#### `evidence_not_conclusion(output_id: str, output_role: str, human_signed: bool)`
+
+AI outputs are evidence, never conclusions.
+
+#### `InventoryEntry`
+
+Registers one AI component in the audit pipeline.
+
+- `receipt_digest` (property)
+#### `InventoryRegistry`
+
+Hash-chained AI inventory for the audit pipeline.
+
+- `issue(receipt_id: str, component_id: str, component_digest: str, purpose: str, authority_id: str, signature: bytes, registered_at: int)`
+- `find(component_id: str)`
+#### `shadow_ai_inventory(registry: InventoryRegistry, component_id: str, component_digest: str, now: int)`
+
+Unregistered AI in the audit pipeline is denied until inventoried.
+
+#### `CharterReceipt`
+
+Binds who may decide what before the AI decides anything.
+
+- `receipt_digest` (property)
+#### `CharterRegistry`
+
+Hash-chained log of decision-rights charters.
+
+- `issue(receipt_id: str, charter_id: str, decision_rights_digest: str, ai_decision_scope: str, human_decision_scope: str, authority_id: str, signature: bytes, bound_at: int, expires_at: int)`
+- `live(charter_id: str, now: int)`
+#### `decision_rights_charter(registry: CharterRegistry, charter_id: str, ai_made_decision: bool, now: int)`
+
+AI deciding without a live decision-rights charter is refused.
+
+#### `oversight_capacity_ratio(reviewers: int, ai_decisions_per_day: int, override_rate: float)`
+
+Pins the human-oversight capacity ratio and trips rubber stamps.
+
+#### `IncidentProcedureReceipt`
+
+Binds an incident-management procedure to an AI deployment.
+
+- `receipt_digest` (property)
+#### `IncidentProcedureRegistry`
+
+Hash-chained log of incident-procedure receipts.
+
+- `issue(receipt_id: str, deployment_id: str, procedure_digest: str, autonomy_level: str, authority_id: str, signature: bytes, bound_at: int)`
+- `find(deployment_id: str)`
+#### `incident_procedure_gate(registry: IncidentProcedureRegistry, deployment_id: str, autonomy_level: str, now: int)`
+
+Highly autonomous AI without an incident-management procedure is refused.
+
+#### `alert_conversion_probe(channel_id: str, alerts_raised: int, alerts_converted: int)`
+
+Audit alerts converting at or below 5% auto-degrade.
+
+#### `continuous_ready_gate(functionality_version: str, documentation_version: str, docs_updated_for_version: str)`
+
+Documentation must be current before new functionality ships.
+
 ### `permit_agents`
 
 Source: `components/northstar-agent-runtime/permit_agents.py`
@@ -4504,6 +4616,10 @@ Underwriting & claims discipline gates (one-hundred-fortieth batch).
 #### `run_waste_agents()`
 
 Waste & circular-economy discipline (one-hundred-thirty-ninth batch).
+
+#### `run_audit_agents()`
+
+Audit & assurance discipline (one-hundred-forty-third batch).
 
 #### `run_housing_ai_agents()`
 
