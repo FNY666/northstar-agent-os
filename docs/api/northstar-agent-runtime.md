@@ -2746,6 +2746,177 @@ Copy every component into a throwaway tree, keeping the `components/` layout.
 
 #### `main()`
 
+### `tools.sandbox`
+
+Source: `components/northstar-agent-runtime/tools/sandbox.py`
+
+Linux Landlock unprivileged self-sandbox for the process backend.
+
+#### `LandlockError`
+
+Invalid Landlock mode or an unsatisfiable Landlock requirement.
+
+#### `validate_mode(mode: str)`
+
+Normalise an operator/model Landlock mode; raise on unknown values.
+
+#### `resolve_mode(payload_value: str | None, service_value: str | None)`
+
+Merge a per-call payload value with the operator-configured service value.
+
+#### `rights_mask(names: Sequence[str], table: Sequence[tuple[str, int, int]], abi: int)`
+
+OR the bit values of ``names`` that the running ABI actually supports.
+
+#### `landlock_abi_version()`
+
+Kernel Landlock ABI version, or 0 when the kernel lacks Landlock.
+
+#### `reset_abi_cache()`
+
+Tests only: drop the cached ABI probe so a fixture can re-run it.
+
+#### `landlock_supported()`
+
+True when this kernel can enforce a Landlock ruleset.
+
+#### `probe_landlock()`
+
+Operator-facing capability report: supported / ABI / detail.
+
+#### `build_landlock_spec(*, paths_read: Sequence[str], paths_write: Sequence[str], network: bool=False, tcp_ports: Sequence[int]=(), mode: str='auto')`
+
+Build an offline-testable Landlock policy spec.
+
+#### `default_profile(workspace: str)`
+
+The standard tool-effect profile: system read paths + writable workspace.
+
+#### `landlock_loader_argv(inner_argv: Sequence[str], spec: Mapping[str, object], *, python: str='python3')`
+
+Wrap ``inner_argv`` so the Landlock allowlist is installed before exec.
+
+### `audit_merkle`
+
+Source: `components/northstar-agent-runtime/audit_merkle.py`
+
+RFC 9162 Merkle proofs for the ``audit.ndjson/1`` chained feed.
+
+#### `MerkleTree`
+
+A memoized RFC 9162 Merkle tree over an ordered leaf list.
+
+- `size` (property)
+- `subtree(start: int, size: int)`
+  - Root hash of leaves ``[start, start+size)`` (RFC 9162 §2.1).
+- `root` (property)
+  - The tree head hash for all leaves (``MTH({}) = HASH()`` when empty).
+#### `TreeHead`
+
+A signed-tree-head-style log head: ``(tree_size, root_hash)``.
+
+- `to_dict()`
+- `from_dict(doc: Any)`
+- `sign(seed: bytes)`
+  - Return a copy with an Ed25519 signature over the unsigned head.
+- `verify_signature(public_key: bytes)`
+  - Check the head's Ed25519 signature; False when absent or invalid.
+#### `InclusionProof`
+
+RFC 9162 §2.1.1 audit path: leaf ``leaf_index`` is in the tree.
+
+- `to_dict()`
+- `from_dict(doc: Any)`
+- `verify()`
+  - O(log n) check: fold the audit path and compare with ``root``.
+#### `ConsistencyProof`
+
+RFC 9162 §2.1.4.1: the ``new_size`` tree extends the ``old_size`` tree.
+
+- `to_dict()`
+- `from_dict(doc: Any)`
+- `verify()`
+  - O(log n) check: recompute both roots from the proof and compare.
+#### `inclusion_proof_for(leaves: list[bytes], index: int)`
+
+Build the RFC 9162 §2.1.1 audit path for leaf ``index`` (O(n) build).
+
+#### `verify_inclusion(leaf: bytes, index: int, tree_size: int, path: list[bytes], root: bytes)`
+
+O(log n) inclusion check; ``(ok, reason)`` — never raises on bad input.
+
+#### `consistency_proof_for(leaves: list[bytes], old_size: int)`
+
+Build the RFC 9162 §2.1.4.1 proof that the tree extends ``old_size``.
+
+#### `verify_consistency(old_root: bytes, old_size: int, new_root: bytes, new_size: int, path: list[bytes])`
+
+O(log n) consistency check; ``(ok, reason)`` — never raises on bad input.
+
+#### `read_chain_hashes(feed: str | Path)`
+
+Raw ``chain_hash`` hexes of every record in a feed, in order.
+
+#### `leaves_from_chain_hashes(chain_hashes: Iterable[str])`
+
+Leaf data for the tree: raw 32 bytes of each ``chain_hash`` hex.
+
+#### `tree_head_for_feed(feed: str | Path)`
+
+The ``(tree_size, root)`` head of a feed's Merkle tree.
+
+### `dataflow_policy`
+
+Source: `components/northstar-agent-runtime/dataflow_policy.py`
+
+Dataflow sensitivity tracking with a deterministic TOML policy.
+
+#### `DataflowPolicyError`
+
+The TOML policy is malformed. Fail closed: the caller must not run with a policy it could not parse strictly.
+
+#### `SourceRule`
+
+A read whose results carry a sensitivity label into the trajectory.
+
+- `matches(tool_name: str, arguments: Mapping[str, Any])`
+#### `SinkRule`
+
+A destination that may only receive data up to a sensitivity.
+
+- `matches(tool_name: str)`
+- `expand_audience(arguments: Mapping[str, Any])`
+#### `SinkVerdict`
+
+#### `DataflowPolicy`
+
+A compiled, deterministic dataflow policy.
+
+- `rank_index(rank: str)`
+- `rank_name(index: int)`
+- `from_toml(text: str, *, source: str='<string>')`
+  - Parse and strictly validate a TOML policy. Anything the schema does not understand is refused — fail closed, like OpenAPPA's ``deny_unknown_fields``.
+- `from_toml_file(path: str | Path)`
+- `default()`
+  - The versioned, auditable policy shipped with the runtime.
+#### `SessionDataflow`
+
+Per-session trajectory: the sensitivity of data the agent has handled.
+
+- `observe(tool_name: str, arguments: Mapping[str, Any])`
+  - Attach the first matching source rule's label to the trajectory. Returns the rule applied, or None.
+- `check_sink(tool_name: str, arguments: Mapping[str, Any])`
+  - Decide whether this sink call must escalate given the trajectory.
+### `plugin_trust`
+
+Source: `components/northstar-agent-runtime/plugin_trust.py`
+
+Trust tiers for plugin bundles: which claims carry evidence, and what happens when they don't.
+
+#### `trust_tier(*, loadable: bool, pinned: bool, covered_claims: FrozenSet[str])`
+
+The trust tier of one bundle, plus the evidence gaps that capped it.
+
 ### `providers`
 
 Source: `components/northstar-agent-runtime/providers/__init__.py`

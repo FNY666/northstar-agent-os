@@ -57,6 +57,7 @@ MANIFEST: dict[str, tuple[str, ...]] = {
         "event_migration",
         "tool_allowlist",
         "timelock",
+        "tool_receipt",
     ),
     "northstar-agent-interop": (
         "interop_contract",
@@ -134,6 +135,10 @@ MANIFEST: dict[str, tuple[str, ...]] = {
         "tools.shell",
         "tools.skill_scripts",
         "tools.verify_invariants",
+        "tools.sandbox",
+        "audit_merkle",
+        "dataflow_policy",
+        "plugin_trust",
         # The package's own module is the re-export surface embedders import from, so it
         # is documented rather than assumed.
         "providers.__init__",
