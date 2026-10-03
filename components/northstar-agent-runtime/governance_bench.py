@@ -115,7 +115,7 @@ from tools import ToolLimits, ToolSandbox, build_default_registry
 
 #: Semantic version of the public case set. Bump when a case is added, removed,
 #: or its expected verdict changes — consumers pin against this string.
-BENCH_VERSION = "northstar.governance.bench.v27"
+BENCH_VERSION = "northstar.governance.bench.v28"
 
 USAGE_ERROR = 64
 
@@ -6920,6 +6920,804 @@ def run_game_agents() -> dict[str, Any]:
         return _gate_outcome(v)
 
     _scenario("deny_sandbox_escape", "deny", _s12)
+
+    mismatches: list[str] = []
+    allowed_ids: list[str] = []
+    warned_ids: list[str] = []
+    denial_reasons: dict[str, str] = {}
+    for sid, expected, thunk in scenarios:
+        try:
+            outcome = thunk()
+        except Exception as error:
+            outcome = {"verdict": "deny", "reason": f"raised: {error}",
+                       "classification": "unverifiable-process"}
+        verdict = outcome.get("verdict")
+        if verdict != expected:
+            mismatches.append(
+                f"{sid}: expected {expected}, got {verdict}"
+            )
+        if verdict == "allow":
+            allowed_ids.append(sid)
+        elif verdict == "allow-with-warning":
+            warned_ids.append(sid)
+        else:
+            denial_reasons[sid] = outcome.get("reason", "")
+
+    return {
+        "n_scenarios": len(scenarios),
+        "mismatches": mismatches,
+        "allowed_ids": allowed_ids,
+        "warned_ids": warned_ids,
+        "denial_reasons": denial_reasons,
+    }
+
+
+
+def run_booking_agents() -> dict[str, Any]:
+    """Booking-agent transaction receipts (one-hundred-twenty-third batch).
+
+    Absorbs the 2026 AI-hospitality/travel thread: advice -> action
+    inflection (Lola live booking, Meta Muse payment confirmation,
+    Marco spending caps); Skyscanner x JAL 49% unease about AI info
+    accuracy; Delta AI pricing 3% -> 20% (Pallone letter, FTC proposed
+    statement), Ctrip's pulled "price adjustment assistant", Beijing
+    price-discrimination refunds; KLIA static-data-vs-reality failure
+    (8 detained); Air Canada "AI output = company output" case anchor;
+    APAC context-loss churn; Alaska x Volantio overbooking pre-emption
+    and the system-error denied-boarding gap; paid-placement warnings.
+
+    Fail-closed rules over 12 deterministic scenarios: transactions
+    within the pinned price ceiling allow; fixed pricing needs no
+    disclosure; fresh price assertions allow; pre-emptive rebooking
+    before a denied boarding allows. Denied: exceeding the pinned
+    ceiling (``intent_ceiling_breach``), a stale visa assertion
+    (``stale_assertion``), dynamic pricing with no disclosure
+    (``undisclosed_personalized_pricing``), support output drifting
+    from the pinned policy (``policy_drift``), denied boarding with
+    no preceding rebooking (``unverifiable_denial``), a broken
+    session (``context_broken``), undisclosed paid placement
+    (``hidden_commercial_bias``), and no intent at all
+    (``no_matching_intent``). Ground truth is closed: 4 allow / 8
+    deny.
+    """
+    from booking_agents import (
+        DENY_CEILING_BREACH,
+        DENY_CONTEXT_BROKEN,
+        DENY_HIDDEN_COMMERCIAL_BIAS,
+        DENY_NO_INTENT,
+        DENY_POLICY_DRIFT,
+        DENY_STALE_ASSERTION,
+        DENY_UNDISCLOSED_PRICING,
+        DENY_UNVERIFIABLE_DENIAL,
+        AuthorityRegistry,
+        BookingSession,
+        FreshnessRegistry,
+        RebookingLog,
+        authorize_transaction,
+        commercial_bias_gate,
+        issue_intent,
+        issue_policy,
+        issue_pricing_disclosure,
+        policy_consistency_gate,
+        pricing_disclosure_gate,
+    )
+    from ed25519 import public_key as ed_public_key
+
+    T0 = 1_700_000_000
+    AUTH = bytes([9]) * 32
+    MERCHANT = bytes([11]) * 32
+    REGISTRY = AuthorityRegistry(
+        {"platform": ed_public_key(AUTH), "merchant": ed_public_key(MERCHANT)}
+    )
+    ROUTE = "ab" * 32
+    STAY = "cd" * 32
+    QUOTE = "ef" * 32
+
+    def _gate_outcome(verdict):
+        return {
+            "verdict": "allow" if verdict.allowed else "deny",
+            "reason": verdict.reason,
+            "classification": verdict.classification,
+        }
+
+    scenarios: list[tuple[str, str, Any]] = []
+
+    def _scenario(sid: str, expected: str, thunk: Any) -> None:
+        scenarios.append((sid, expected, thunk))
+
+    def _intent(**over):
+        kw = dict(
+            registry=REGISTRY,
+            authority_secret=AUTH,
+            receipt_id="intent-1",
+            agent_id="booking-agent",
+            traveler_id="traveler-1",
+            route_or_stay_digest=ROUTE,
+            purpose="leisure_travel",
+            price_ceiling_minor_units=50000,
+            currency="USD",
+            issued_by="platform",
+            issued_at=T0,
+            expires_at=T0 + 86_400,
+        )
+        kw.update(over)
+        return issue_intent(**kw)
+
+    def _s1():
+        v = authorize_transaction(
+            REGISTRY,
+            [_intent()],
+            agent_id="booking-agent",
+            traveler_id="traveler-1",
+            route_or_stay_digest=ROUTE,
+            total_minor_units=40000,
+            currency="USD",
+            check_time=T0 + 10,
+        )
+        return _gate_outcome(v)
+
+    _scenario("allow_within_ceiling", "allow", _s1)
+
+    def _s2():
+        v = pricing_disclosure_gate(
+            REGISTRY, [], quote_digest=QUOTE, pricing_kind="fixed"
+        )
+        return _gate_outcome(v)
+
+    _scenario("allow_fixed_pricing_no_disclosure", "allow", _s2)
+
+    def _s3():
+        reg = FreshnessRegistry()
+        reg.register(
+            assertion_id="price-1",
+            kind="price",
+            payload_digest=QUOTE,
+            observed_at=T0,
+            ttl_seconds=3600,
+        )
+        v = reg.check_freshness(
+            assertion_id="price-1",
+            kind="price",
+            payload_digest=QUOTE,
+            use_time=T0 + 100,
+        )
+        return _gate_outcome(v)
+
+    _scenario("allow_fresh_price_assertion", "allow", _s3)
+
+    def _s4():
+        log = RebookingLog()
+        log.append(
+            receipt_id="rb-1",
+            passenger_id="pax-1",
+            flight_digest=ROUTE,
+            new_flight_digest=STAY,
+            reason="overbooked",
+            created_at=T0,
+        )
+        v = log.deny_boarding_gate(
+            passenger_id="pax-1", flight_digest=ROUTE, denial_time=T0 + 100
+        )
+        return _gate_outcome(v)
+
+    _scenario("allow_preemptive_rebooking", "allow", _s4)
+
+    def _s5():
+        v = authorize_transaction(
+            REGISTRY,
+            [_intent()],
+            agent_id="booking-agent",
+            traveler_id="traveler-1",
+            route_or_stay_digest=ROUTE,
+            total_minor_units=60000,
+            currency="USD",
+            check_time=T0 + 10,
+        )
+        return _gate_outcome(v)
+
+    _scenario("deny_ceiling_breach", "deny", _s5)
+
+    def _s6():
+        reg = FreshnessRegistry()
+        reg.register(
+            assertion_id="visa-1",
+            kind="visa",
+            payload_digest=QUOTE,
+            observed_at=T0,
+            ttl_seconds=3600,
+        )
+        v = reg.check_freshness(
+            assertion_id="visa-1",
+            kind="visa",
+            payload_digest=QUOTE,
+            use_time=T0 + 7200,
+        )
+        return _gate_outcome(v)
+
+    _scenario("deny_stale_visa_assertion", "deny", _s6)
+
+    def _s7():
+        v = pricing_disclosure_gate(
+            REGISTRY, [], quote_digest=QUOTE, pricing_kind="dynamic"
+        )
+        return _gate_outcome(v)
+
+    _scenario("deny_undisclosed_dynamic_pricing", "deny", _s7)
+
+    def _s8():
+        p = issue_policy(
+            REGISTRY,
+            AUTH,
+            receipt_id="pol-1",
+            policy_digest=QUOTE,
+            issued_by="platform",
+            issued_at=T0,
+        )
+        v = policy_consistency_gate(
+            REGISTRY,
+            [p],
+            output_policy_digest=STAY,
+            check_time=T0 + 10,
+        )
+        return _gate_outcome(v)
+
+    _scenario("deny_policy_drift", "deny", _s8)
+
+    def _s9():
+        log = RebookingLog()
+        v = log.deny_boarding_gate(
+            passenger_id="pax-1", flight_digest=ROUTE, denial_time=T0 + 100
+        )
+        return _gate_outcome(v)
+
+    _scenario("deny_unverifiable_denial", "deny", _s9)
+
+    def _s10():
+        s = BookingSession(
+            session_id="s1", agent_id="booking-agent", traveler_id="traveler-1"
+        )
+        s.append_turn(turn_digest=QUOTE, started_at=T0)
+        s.mark_context_lost()
+        v = s.context_continuity_probe(check_time=T0 + 10)
+        return _gate_outcome(v)
+
+    _scenario("deny_context_broken", "deny", _s10)
+
+    def _s11():
+        v = commercial_bias_gate(
+            REGISTRY,
+            [],
+            recommendation_digest=QUOTE,
+            paid_placement=True,
+        )
+        return _gate_outcome(v)
+
+    _scenario("deny_hidden_commercial_bias", "deny", _s11)
+
+    def _s12():
+        v = authorize_transaction(
+            REGISTRY,
+            [],
+            agent_id="booking-agent",
+            traveler_id="traveler-1",
+            route_or_stay_digest=ROUTE,
+            total_minor_units=100,
+            currency="USD",
+            check_time=T0 + 10,
+        )
+        return _gate_outcome(v)
+
+    _scenario("deny_no_intent", "deny", _s12)
+
+    mismatches: list[str] = []
+    allowed_ids: list[str] = []
+    warned_ids: list[str] = []
+    denial_reasons: dict[str, str] = {}
+    for sid, expected, thunk in scenarios:
+        try:
+            outcome = thunk()
+        except Exception as error:
+            outcome = {"verdict": "deny", "reason": f"raised: {error}",
+                       "classification": "unverifiable-process"}
+        verdict = outcome.get("verdict")
+        if verdict != expected:
+            mismatches.append(
+                f"{sid}: expected {expected}, got {verdict}"
+            )
+        if verdict == "allow":
+            allowed_ids.append(sid)
+        elif verdict == "allow-with-warning":
+            warned_ids.append(sid)
+        else:
+            denial_reasons[sid] = outcome.get("reason", "")
+
+    return {
+        "n_scenarios": len(scenarios),
+        "mismatches": mismatches,
+        "allowed_ids": allowed_ids,
+        "warned_ids": warned_ids,
+        "denial_reasons": denial_reasons,
+    }
+
+
+def run_commerce() -> dict[str, Any]:
+    """Agentic commerce terms (one-hundred-twenty-fourth batch).
+
+    Absorbs the 2026 AI-fashion/retail thread: "try on" buttons
+    (preview only, fit not guaranteed); agentic commerce protocols
+    (ACP/UCP/AP2); only 66% of product pages machine-readable —
+    agents order without seeing the terms; Pujols v. Rainbow USA
+    (existing likeness authorization vs. an AI-generated new
+    likeness); the BIPA wave (facial geometry / body measurements
+    for try-on); EU AI Act virtual-model marking and the ESPR/Aura
+    digital product passports; Entrupy's vendor-declared 99.1%.
+
+    Fail-closed rules over 12 deterministic scenarios: an order
+    without a bound machine-readable terms read denies; a likeness
+    use outside its grant's declared classes denies (likeness
+    creep); biometric capture without a purpose-bound receipt
+    denies, and expired retention without a signed deletion
+    denies; a preview used as a fit decision denies; vendor-
+    declared authentication claims above their confidence ceiling
+    deny, as do high-value items without a human-review path; a
+    listing whose presented passport does not match its bound
+    passport denies; undisclosed AI catalog-model substitution
+    denies. Ground truth is closed: 4 allow / 8 deny.
+    """
+    from commerce import (
+        DENY_DELETION_UNVERIFIED,
+        DENY_FIT_GUARANTEE,
+        DENY_HIDDEN_SUBSTITUTION,
+        DENY_HUMAN_REVIEW_REQUIRED,
+        DENY_LIKENESS_CREEP,
+        DENY_NO_BIOMETRIC_RECEIPT,
+        DENY_PASSPORT_MISMATCH,
+        DENY_UNGRADED_AUTH,
+        DENY_UNVERIFIABLE_TERMS,
+        authentication_evidence,
+        biometric_capture_receipt,
+        biometric_deletion_receipt,
+        check_biometric_collection,
+        check_biometric_deletion,
+        check_model_substitution,
+        check_order_terms,
+        check_passport_binding,
+        check_preview_use,
+        issue_authentication_claim,
+        issue_preview_receipt,
+        likeness_creep_gate,
+        likeness_grant_receipt,
+        model_substitution_disclosure,
+        passport_binding_receipt,
+        terms_read_receipt,
+    )
+
+    T0 = 1_700_000_000
+    AUTH = bytes([9]) * 32
+    D1 = "ab" * 32
+    D2 = "cd" * 32
+    D3 = "ef" * 32
+
+    def _gate_outcome(verdict):
+        return {
+            "verdict": "allow" if verdict.allowed else "deny",
+            "reason": verdict.reason,
+            "classification": verdict.classification,
+        }
+
+    scenarios: list[tuple[str, str, Any]] = []
+
+    def _scenario(sid: str, expected: str, thunk: Any) -> None:
+        scenarios.append((sid, expected, thunk))
+
+    def _s1():
+        receipt = terms_read_receipt(
+            receipt_id="tr-b1", order_id="ord-b1", agent_id="agent-shopper",
+            product_digest=D1, size_chart_digest=D2,
+            return_policy_digest=D3, total_price_cents=5999, fees_cents=499,
+            authority_secret=AUTH, issued_by="store-ops",
+            issued_at=T0, expires_at=T0 + 3600,
+        )
+        v = check_order_terms([receipt], order_id="ord-b1", product_digest=D1,
+                              check_time=T0 + 10)
+        return _gate_outcome(v)
+
+    _scenario("allow_order_with_terms", "allow", _s1)
+
+    def _s2():
+        grant = likeness_grant_receipt(
+            receipt_id="lg-b1", likeness_digest=D1,
+            granted_classes=("catalog-apparel", "virtual-tryon"),
+            grantor="model-agency", authority_secret=AUTH, issued_by="store-ops",
+            issued_at=T0, expires_at=T0 + 3600,
+        )
+        v = likeness_creep_gate([grant], likeness_digest=D1,
+                                use_class="catalog-apparel", check_time=T0 + 10)
+        return _gate_outcome(v)
+
+    _scenario("allow_likeness_reuse", "allow", _s2)
+
+    def _s3():
+        capture = biometric_capture_receipt(
+            receipt_id="bc-b1", subject_id="shopper-b1",
+            purpose="virtual-tryon", biometric_kinds=("body_measurements",),
+            retention_days=7, deletion_mechanism_digest=D2,
+            authority_secret=AUTH, issued_by="store-ops", issued_at=T0,
+        )
+        v = check_biometric_collection(
+            [capture], subject_id="shopper-b1", purpose="virtual-tryon",
+            biometric_kinds=("body_measurements",), check_time=T0 + 10)
+        return _gate_outcome(v)
+
+    _scenario("allow_biometric_capture", "allow", _s3)
+
+    def _s4():
+        claim = issue_authentication_claim(
+            claim_id="ac-b1", item_digest=D1, verdict="authentic",
+            claimed_confidence_bps=9400, evidence_digest=D2,
+            evidence_tier="third-party", value_class="standard",
+            human_review=False, authority_secret=AUTH, issued_by="store-ops",
+            issued_at=T0, expires_at=T0 + 3600,
+        )
+        v = authentication_evidence([claim], item_digest=D1, check_time=T0 + 10)
+        return _gate_outcome(v)
+
+    _scenario("allow_graded_auth", "allow", _s4)
+
+    def _s5():
+        v = check_order_terms([], order_id="ord-b1", product_digest=D1,
+                              check_time=T0 + 10)
+        return _gate_outcome(v)
+
+    _scenario("deny_unverifiable_terms", "deny", _s5)
+
+    def _s6():
+        grant = likeness_grant_receipt(
+            receipt_id="lg-b2", likeness_digest=D1,
+            granted_classes=("studio-portrait",),
+            grantor="model-agency", authority_secret=AUTH, issued_by="store-ops",
+            issued_at=T0, expires_at=T0 + 3600,
+        )
+        v = likeness_creep_gate([grant], likeness_digest=D1,
+                                use_class="sexualized-ad", check_time=T0 + 10)
+        return _gate_outcome(v)
+
+    _scenario("deny_likeness_creep", "deny", _s6)
+
+    def _s7():
+        v = check_biometric_collection(
+            [], subject_id="shopper-b1", purpose="virtual-tryon",
+            biometric_kinds=("facial_geometry",), check_time=T0 + 10)
+        return _gate_outcome(v)
+
+    _scenario("deny_biometric_no_receipt", "deny", _s7)
+
+    def _s8():
+        capture = biometric_capture_receipt(
+            receipt_id="bc-b2", subject_id="shopper-b2",
+            purpose="virtual-tryon", biometric_kinds=("body_measurements",),
+            retention_days=7, deletion_mechanism_digest=D2,
+            authority_secret=AUTH, issued_by="store-ops", issued_at=T0,
+        )
+        v = check_biometric_deletion([capture], [], subject_id="shopper-b2",
+                                    check_time=T0 + 30 * 86400)
+        return _gate_outcome(v)
+
+    _scenario("deny_deletion_unverified", "deny", _s8)
+
+    def _s9():
+        preview = issue_preview_receipt(
+            receipt_id="pv-b1", preview_id="tryon-b1", content_digest=D1,
+            authority_secret=AUTH, issued_by="store-ops", issued_at=T0,
+        )
+        v = check_preview_use(preview, use="fit-decision")
+        return _gate_outcome(v)
+
+    _scenario("deny_fit_guarantee", "deny", _s9)
+
+    def _s10():
+        claim = issue_authentication_claim(
+            claim_id="ac-b2", item_digest=D2, verdict="authentic",
+            claimed_confidence_bps=9400, evidence_digest=D3,
+            evidence_tier="independent-lab", value_class="high",
+            human_review=False, authority_secret=AUTH, issued_by="store-ops",
+            issued_at=T0, expires_at=T0 + 3600,
+        )
+        v = authentication_evidence([claim], item_digest=D2, check_time=T0 + 10)
+        return _gate_outcome(v)
+
+    _scenario("deny_high_value_no_review", "deny", _s10)
+
+    def _s11():
+        binding = passport_binding_receipt(
+            receipt_id="pb-b1", listing_digest=D1, passport_digest=D2,
+            passport_scheme="aura", authority_secret=AUTH, issued_by="store-ops",
+            issued_at=T0, expires_at=T0 + 3600,
+        )
+        v = check_passport_binding([binding], listing_digest=D1,
+                                   passport_digest=D3, check_time=T0 + 10)
+        return _gate_outcome(v)
+
+    _scenario("deny_passport_mismatch", "deny", _s11)
+
+    def _s12():
+        v = check_model_substitution([], catalog_item_digest=D1,
+                                     actual_model_type="ai",
+                                     check_time=T0 + 10)
+        return _gate_outcome(v)
+
+    _scenario("deny_hidden_substitution", "deny", _s12)
+
+    mismatches: list[str] = []
+    allowed_ids: list[str] = []
+    warned_ids: list[str] = []
+    denial_reasons: dict[str, str] = {}
+    for sid, expected, thunk in scenarios:
+        try:
+            outcome = thunk()
+        except Exception as error:
+            outcome = {"verdict": "deny", "reason": f"raised: {error}",
+                       "classification": "unverifiable-process"}
+        verdict = outcome.get("verdict")
+        if verdict != expected:
+            mismatches.append(
+                f"{sid}: expected {expected}, got {verdict}"
+            )
+        if verdict == "allow":
+            allowed_ids.append(sid)
+        elif verdict == "allow-with-warning":
+            warned_ids.append(sid)
+        else:
+            denial_reasons[sid] = outcome.get("reason", "")
+
+    return {
+        "n_scenarios": len(scenarios),
+        "mismatches": mismatches,
+        "allowed_ids": allowed_ids,
+        "warned_ids": warned_ids,
+        "denial_reasons": denial_reasons,
+    }
+
+
+def run_insurance() -> dict[str, Any]:
+    """Insurance denial receipts (one-hundred-twenty-fifth batch).
+
+    Absorbs the 2026 AI-insurance thread: UnitedHealth/naviHealth
+    nH Predict (9/10 AI denials allegedly overturned on appeal —
+    plaintiff allegation); Utah's AI-involvement disclosure + human
+    decisions on denials; NAIC AI Risk Evaluation Supplement,
+    Colorado SB 24-205, NY DFS Circular Letter 7 (proxy
+    discrimination testing); China's Document 8 (underwriting/claims
+    as high-risk AI: committee approval, human supervision,
+    emergency stop); IRDAI dark-pattern elimination.
+
+    Fail-closed rules over 12 deterministic scenarios: a
+    human-countersigned denial stands; disclosed AI involvement
+    allows with the disclosure bound to the decision digest; a live
+    proxy probe allows proxy use; a four-part high-risk admission
+    allows deployment. Denied: a denial with no human countersign,
+    an AI-shaped denial (NON_AUTHORITATIVE — human escalation
+    required), undisclosed AI involvement, a model whose
+    appeal-overturn rate crossed the pinned threshold, an unprobed
+    proxy feature, unadmitted high-risk use, a fraud-score-only
+    denial, and a flow carrying dark-pattern markers. Ground truth
+    is closed: 4 allow / 8 deny.
+    """
+    from insurance import (
+        DENY_AI_ONLY,
+        DENY_DARK_PATTERN,
+        DENY_FRAUD_SCORE_ONLY,
+        DENY_HIDDEN_AI,
+        DENY_HIGH_RISK_UNADMITTED,
+        DENY_NO_COUNTERSIGN,
+        DENY_PROXY,
+        DENY_SUSPENDED,
+        FraudDenialRequest,
+        ai_involvement_disclosure,
+        appeal_overturn_tripwire,
+        dark_pattern_gate,
+        denial_receipt,
+        fraud_signal_gate,
+        high_risk_gate,
+        issue_ai_disclosure,
+        issue_denial_receipt,
+        issue_high_risk_admission,
+        issue_proxy_probe,
+        issue_vendor_admission,
+        proxy_discrimination_probe,
+        record_appeal,
+        vendor_liability,
+    )
+
+    T0 = 1_700_000_000
+    REVIEWER = bytes([21]) * 32
+    AUTHORITY = bytes([23]) * 32
+    MD = "aa" * 32
+    EVIDENCE = "bb" * 32
+
+    scenarios: list[tuple[str, str, Any]] = []
+
+    def _scenario(sid: str, expected: str, thunk: Any) -> None:
+        scenarios.append((sid, expected, thunk))
+
+    def _outcome(verdict: Any) -> dict[str, Any]:
+        return {
+            "verdict": "allow" if verdict.allowed else "deny",
+            "reason": verdict.reason,
+        }
+
+    def _s1():
+        receipt = issue_denial_receipt(
+            denial_id="den-1",
+            claim_id="claim-1",
+            policy_id="pol-1",
+            decision_kind="claims_adjudication",
+            human_reviewer_id="reviewer-7",
+            reviewer_secret=REVIEWER,
+            reasons=["Policy exclusion 4.2: flood not covered"],
+            evidence_pack_digest=EVIDENCE,
+            ai_involved=False,
+            denied_at=T0,
+        )
+        return _outcome(denial_receipt([receipt], claim_id="claim-1", check_time=T0 + 10))
+
+    _scenario("allow_human_denial", "allow", _s1)
+
+    def _s2():
+        disclosure = issue_ai_disclosure(
+            decision_id="dec-1",
+            decision_digest=EVIDENCE,
+            ai_involved=True,
+            disclosed_at=T0,
+        )
+        return _outcome(
+            ai_involvement_disclosure(
+                [disclosure],
+                decision_id="dec-1",
+                decision_digest=EVIDENCE,
+                ai_actually_involved=True,
+                check_time=T0 + 10,
+            )
+        )
+
+    _scenario("allow_disclosed_ai", "allow", _s2)
+
+    def _s3():
+        probe = issue_proxy_probe(
+            probe_id="pp-1",
+            model_digest=MD,
+            feature="zip_code",
+            probe_digest="cc" * 32,
+            authority_id="regulator",
+            authority_secret=AUTHORITY,
+            measured_at=T0,
+            expires_at=T0 + 10_000,
+        )
+        return _outcome(
+            proxy_discrimination_probe(
+                [probe], model_digest=MD, features=["zip_code"], check_time=T0 + 10
+            )
+        )
+
+    _scenario("allow_probed_proxy", "allow", _s3)
+
+    def _s4():
+        admission = issue_high_risk_admission(
+            admission_id="adm-1",
+            model_digest=MD,
+            use_kind="underwriting",
+            committee_approval_digest="dd" * 32,
+            supervision_declaration="human review at every adverse node",
+            filing_digest="ee" * 32,
+            stop_conditions=("kill switch A", "manual override B"),
+            authority_id="regulator",
+            authority_secret=AUTHORITY,
+            admitted_at=T0,
+            expires_at=T0 + 10_000,
+        )
+        return _outcome(
+            high_risk_gate(
+                [admission], model_digest=MD, use_kind="underwriting", check_time=T0 + 10
+            )
+        )
+
+    _scenario("allow_admitted_high_risk", "allow", _s4)
+
+    def _s5():
+        return _outcome(denial_receipt([], claim_id="claim-9", check_time=T0 + 10))
+
+    _scenario("deny_no_countersign", "deny", _s5)
+
+    def _s6():
+        receipt = issue_denial_receipt(
+            denial_id="den-6",
+            claim_id="claim-6",
+            policy_id="pol-1",
+            decision_kind="claims_adjudication",
+            human_reviewer_id="reviewer-7",
+            reviewer_secret=REVIEWER,
+            reasons=["Medical necessity not met per guideline X"],
+            evidence_pack_digest=EVIDENCE,
+            ai_involved=True,
+            denied_at=T0,
+        )
+        return _outcome(denial_receipt([receipt], claim_id="claim-6", check_time=T0 + 10))
+
+    _scenario("deny_ai_only", "deny", _s6)
+
+    def _s7():
+        return _outcome(
+            ai_involvement_disclosure(
+                [],
+                decision_id="dec-7",
+                decision_digest=EVIDENCE,
+                ai_actually_involved=True,
+                check_time=T0 + 10,
+            )
+        )
+
+    _scenario("deny_hidden_ai", "deny", _s7)
+
+    def _s8():
+        records = []
+        prev = "genesis"
+        for i in range(24):
+            r = record_appeal(
+                appeal_id=f"ap-{i}",
+                claim_id=f"cl-{i}",
+                model_digest=MD,
+                overturned=i < 15,
+                decided_at=T0 + i,
+                prev_digest=prev,
+            )
+            records.append(r)
+            prev = r.appeal_digest
+        tw = appeal_overturn_tripwire(records, model_digest=MD)
+        return {
+            "verdict": "deny" if tw.suspended else "allow",
+            "reason": tw.reason,
+        }
+
+    _scenario("deny_suspended_model", "deny", _s8)
+
+    def _s9():
+        return _outcome(
+            proxy_discrimination_probe(
+                [], model_digest=MD, features=["aerial_imagery"], check_time=T0 + 10
+            )
+        )
+
+    _scenario("deny_unprobed_proxy", "deny", _s9)
+
+    def _s10():
+        return _outcome(
+            high_risk_gate(
+                [], model_digest=MD, use_kind="claims_adjudication", check_time=T0 + 10
+            )
+        )
+
+    _scenario("deny_unadmitted_high_risk", "deny", _s10)
+
+    def _s11():
+        req = FraudDenialRequest(
+            request_id="fr-1",
+            claim_id="claim-11",
+            fraud_score_digest="ff" * 32,
+            human_review_digest=None,
+            evidence_digest=None,
+        )
+        return _outcome(fraud_signal_gate(req))
+
+    _scenario("deny_fraud_score_only", "deny", _s11)
+
+    def _s12():
+        v = dark_pattern_gate(["false_urgency", "hidden_opt_out"])
+        return {
+            "verdict": "allow" if v.allowed else "deny",
+            "reason": v.reason,
+        }
+
+    _scenario("deny_dark_pattern", "deny", _s12)
 
     mismatches: list[str] = []
     allowed_ids: list[str] = []
@@ -16218,6 +17016,65 @@ def _case_metrics_companionship(h: BenchHarness) -> BenchExpectation:
         ),
     )
 
+def _case_metrics_embodied(h: BenchHarness) -> BenchExpectation:
+    """Embodied-AI safety vacuum gates (one-hundred-twenty-sixth batch).
+
+    12 deterministic scenarios, 4 allow / 8 deny: a certified
+    deployment passes the vacuum gate; remote actuation needs no
+    fall-zone receipt; a measured capability claim is honest; below-
+    threshold displacement needs no disclosure. Denied: no standard
+    declaration (``embodied:no_standard_declaration``), close-contact
+    actuation with no fall-zone receipt (``embodied:no_fall_zone``),
+    an unmeasured marketing capability claim
+    (``embodied:unsubstantiated_capability``), 40 workers displaced
+    with no disclosed receipt
+    (``embodied:labor_impact_undisclosed``), a prescriptive action
+    outside the envelope
+    (``embodied:prescriptive_out_of_scope``), a 0.90-confidence
+    verdict against a 0.97 threshold
+    (``embodied:low_confidence_release``), a dispatch the ledger
+    cannot show (``embodied:unaudited_dispatch``), and a physical
+    incident whose filing backend failed
+    (``embodied:incident_unreported``).
+    """
+    metrics = run_embodied()
+
+    def check(exp: BenchExpectation, report: Any) -> tuple[bool, str]:
+        if metrics["n_scenarios"] != 12:
+            return (False, f"expected 12 embodied scenarios, saw {metrics['n_scenarios']}")
+        if metrics["mismatches"]:
+            return (False, f"scenario(s) disagree with ground truth: {metrics['mismatches']}")
+        if metrics["allowed_ids"] != [
+            "allow_certified_deployment",
+            "allow_remote_actuation",
+            "allow_measured_capability",
+            "allow_below_threshold_labor",
+        ]:
+            return (False, f"allowed set drifted: {metrics['allowed_ids']}")
+        reasons = metrics["denial_reasons"]
+        for sid, needle in (
+            ("deny_no_standard_declaration", "no_standard_declaration"),
+            ("deny_close_contact_no_fall_zone", "no_fall_zone"),
+            ("deny_unmeasured_capability", "unsubstantiated_capability"),
+            ("deny_labor_impact_undisclosed", "labor_impact_undisclosed"),
+            ("deny_prescriptive_out_of_scope", "prescriptive_out_of_scope"),
+            ("deny_low_confidence_release", "low_confidence_release"),
+            ("deny_unaudited_dispatch", "unaudited_dispatch"),
+            ("deny_incident_unreported", "incident_unreported"),
+        ):
+            if needle not in reasons.get(sid, ""):
+                return (False, f"denial reason missing {needle!r}: {reasons.get(sid, '')!r}")
+        return True, "12/12 embodied probes match ground truth"
+
+    return BenchExpectation(
+        runtime=_noop_runtime(h),
+        expect_subtype="success",
+        post_check=check,
+        metrics=metrics,
+        notes="embodied safety vacuum gates: standard declarations, fall-zone receipts, capability honesty, labor impact, prescriptive envelopes, inspection confidence, dispatch audit, incident binding",
+    )
+
+
 def _case_metrics_adjudication(h: BenchHarness) -> BenchExpectation:
     """Human final adjudication for AI sports systems (one-hundred-eighteenth batch).
 
@@ -16279,6 +17136,70 @@ def _case_metrics_adjudication(h: BenchHarness) -> BenchExpectation:
         ),
     )
 
+
+
+def _case_metrics_booking_agents(h: BenchHarness) -> BenchExpectation:
+    """Booking-agent transaction receipts (one-hundred-twenty-third batch).
+
+    12 deterministic scenarios, 4 allow / 8 deny: a transaction
+    within the pinned price ceiling allows; fixed pricing with no
+    disclosure allows; a fresh price assertion allows; a pre-emptive
+    rebooking before a denied boarding allows. Denied: exceeding the
+    pinned ceiling (``intent_ceiling_breach``), a stale visa
+    assertion (``stale_assertion``), dynamic pricing with no
+    disclosure (``undisclosed_personalized_pricing``), support output
+    drifting from the pinned policy (``policy_drift``), denied
+    boarding with no preceding rebooking
+    (``unverifiable_denial``), a context-broken session
+    (``context_broken``), undisclosed paid placement
+    (``hidden_commercial_bias``), and no intent at all
+    (``no_matching_intent``).
+    """
+    metrics = run_booking_agents()
+
+    def check(exp: BenchExpectation, report: Any) -> tuple[bool, str]:
+        if metrics["n_scenarios"] != 12:
+            return (False, f"expected 12 booking-agent scenarios, saw {metrics['n_scenarios']}")
+        if metrics["mismatches"]:
+            return (False, f"scenario(s) disagree with ground truth: {metrics['mismatches']}")
+        if metrics["allowed_ids"] != [
+            "allow_within_ceiling",
+            "allow_fixed_pricing_no_disclosure",
+            "allow_fresh_price_assertion",
+            "allow_preemptive_rebooking",
+        ]:
+            return (False, f"allowed set drifted: {metrics['allowed_ids']}")
+        reasons = metrics["denial_reasons"]
+        for sid, needle in (
+            ("deny_ceiling_breach", "intent_ceiling_breach"),
+            ("deny_stale_visa_assertion", "stale_assertion"),
+            ("deny_undisclosed_dynamic_pricing", "undisclosed_personalized_pricing"),
+            ("deny_policy_drift", "policy_drift"),
+            ("deny_unverifiable_denial", "unverifiable_denial"),
+            ("deny_context_broken", "context_broken"),
+            ("deny_hidden_commercial_bias", "hidden_commercial_bias"),
+            ("deny_no_intent", "no_matching_intent"),
+        ):
+            if needle not in reasons.get(sid, ""):
+                return (False, f"denial reason missing {needle!r}: {reasons.get(sid, '')!r}")
+        return True, "12/12 booking-agent probes match ground truth"
+
+    return BenchExpectation(
+        runtime=_noop_runtime(h),
+        expect_subtype="success",
+        post_check=check,
+        metrics=metrics,
+        notes=(
+            "2026 AI-hospitality/travel thread: advice -> action "
+            "inflection (live booking, payment confirmation, spending "
+            "caps); Skyscanner x JAL 49% unease about AI info accuracy; "
+            "Delta AI pricing battles, Ctrip's pulled price assistant, "
+            "Beijing price-discrimination refunds; KLIA static-data "
+            "failure; Air Canada 'AI output = company output'; APAC "
+            "context-loss churn; overbooking pre-emption; the gates "
+            "enforce transaction structure, not travel-data correctness."
+        ),
+    )
 
 
 def _case_metrics_game_agents(h: BenchHarness) -> BenchExpectation:
@@ -16343,6 +17264,66 @@ def _case_metrics_game_agents(h: BenchHarness) -> BenchExpectation:
         ),
     )
 
+def _case_metrics_insurance(h: BenchHarness) -> BenchExpectation:
+    """Insurance denial receipts (one-hundred-twenty-fifth batch).
+
+    12 deterministic scenarios, 4 allow / 8 deny: a human-countersigned
+    denial allows; disclosed AI involvement (bound to the decision
+    digest) allows; a live proxy probe allows proxy use; a four-part
+    high-risk admission allows deployment. Denied: a denial with no
+    human countersign, an AI-shaped denial (``ai_only_denial``,
+    NON_AUTHORITATIVE — human escalation required), undisclosed AI
+    involvement (``hidden_ai``), a model whose appeal-overturn rate
+    crossed the pinned threshold (``model_suspended``), an unprobed
+    proxy feature (``proxy_discrimination``), unadmitted high-risk
+    use (``high_risk_unadmitted``), a fraud-score-only denial
+    (``fraud_score_only_denial``), and a flow with dark-pattern
+    markers (``dark_pattern``).
+    """
+    metrics = run_insurance()
+
+    def check(exp: BenchExpectation, report: Any) -> tuple[bool, str]:
+        if metrics["n_scenarios"] != 12:
+            return (False, f"expected 12 insurance scenarios, saw {metrics['n_scenarios']}")
+        if metrics["mismatches"]:
+            return (False, f"scenario(s) disagree with ground truth: {metrics['mismatches']}")
+        if metrics["allowed_ids"] != [
+            "allow_human_denial",
+            "allow_disclosed_ai",
+            "allow_probed_proxy",
+            "allow_admitted_high_risk",
+        ]:
+            return (False, f"allowed set drifted: {metrics['allowed_ids']}")
+        reasons = metrics["denial_reasons"]
+        for sid, needle in (
+            ("deny_no_countersign", "no_human_countersign"),
+            ("deny_ai_only", "ai_only_denial"),
+            ("deny_hidden_ai", "hidden_ai"),
+            ("deny_suspended_model", "model_suspended"),
+            ("deny_unprobed_proxy", "proxy_discrimination"),
+            ("deny_unadmitted_high_risk", "high_risk_unadmitted"),
+            ("deny_fraud_score_only", "fraud_score_only_denial"),
+            ("deny_dark_pattern", "dark_pattern"),
+        ):
+            if needle not in reasons.get(sid, ""):
+                return (False, f"denial reason missing {needle!r}: {reasons.get(sid, '')!r}")
+        return True, "12/12 insurance probes match ground truth"
+
+    return BenchExpectation(
+        runtime=_noop_runtime(h),
+        expect_subtype="success",
+        post_check=check,
+        metrics=metrics,
+        notes=(
+            "2026 AI-insurance thread: nH Predict appeal-overturn suit "
+            "(plaintiff allegation); Utah AI-involvement disclosure + "
+            "human decisions on denials; NAIC/Colorado/NYDFS proxy "
+            "discrimination testing; Document 8 high-risk AI gate; "
+            "IRDAI dark-pattern elimination. The module enforces denial "
+            "structure — it does not certify actuarial fairness."
+        ),
+    )
+
 def _case_metrics_housing(h: BenchHarness) -> BenchExpectation:
     """Fair-housing & coordination isolation (one-hundred-nineteenth batch).
 
@@ -16401,6 +17382,70 @@ def _case_metrics_housing(h: BenchHarness) -> BenchExpectation:
         ),
     )
 
+
+
+def _case_metrics_commerce(h: BenchHarness) -> BenchExpectation:
+    """Agentic commerce terms (one-hundred-twenty-fourth batch).
+
+    12 deterministic scenarios, 4 allow / 8 deny: an order with a
+    bound machine-readable terms read allows; a likeness use inside
+    its grant's classes allows; a purpose-bound biometric capture
+    allows; a graded third-party authentication verdict allows (as
+    non-authoritative evidence). Denied: an order with no terms
+    read (``unverifiable_terms``), a studio-shot grant used for a
+    sexualized ad (``likeness_creep``), biometric capture with no
+    receipt (``no_biometric_receipt``), expired retention with no
+    signed deletion (``deletion_unverified``), a preview used as a
+    fit decision (``fit_guarantee_claim``), a high-value item with
+    no human-review path (``human_review_required``), a listing
+    whose presented passport does not match its bound passport
+    (``passport_mismatch``), and undisclosed AI catalog-model
+    substitution (``hidden_model_substitution``).
+    """
+    metrics = run_commerce()
+
+    def check(exp: BenchExpectation, report: Any) -> tuple[bool, str]:
+        if metrics["n_scenarios"] != 12:
+            return (False, f"expected 12 commerce scenarios, saw {metrics['n_scenarios']}")
+        if metrics["mismatches"]:
+            return (False, f"scenario(s) disagree with ground truth: {metrics['mismatches']}")
+        if metrics["allowed_ids"] != [
+            "allow_order_with_terms",
+            "allow_likeness_reuse",
+            "allow_biometric_capture",
+            "allow_graded_auth",
+        ]:
+            return (False, f"allowed set drifted: {metrics['allowed_ids']}")
+        reasons = metrics["denial_reasons"]
+        for sid, needle in (
+            ("deny_unverifiable_terms", "unverifiable_terms"),
+            ("deny_likeness_creep", "likeness_creep"),
+            ("deny_biometric_no_receipt", "no_biometric_receipt"),
+            ("deny_deletion_unverified", "deletion_unverified"),
+            ("deny_fit_guarantee", "fit_guarantee_claim"),
+            ("deny_high_value_no_review", "human_review_required"),
+            ("deny_passport_mismatch", "passport_mismatch"),
+            ("deny_hidden_substitution", "hidden_model_substitution"),
+        ):
+            if needle not in reasons.get(sid, ""):
+                return (False, f"denial reason missing {needle!r}: {reasons.get(sid, '')!r}")
+        return True, "12/12 commerce probes match ground truth"
+
+    return BenchExpectation(
+        runtime=_noop_runtime(h),
+        expect_subtype="success",
+        post_check=check,
+        metrics=metrics,
+        notes=(
+            "2026 AI-fashion/retail thread: try-on previews are "
+            "non-authoritative by construction; the 66% machine-"
+            "readable lesson (terms reads bound to the exact product); "
+            "Pujols likeness creep; BIPA biometric receipts with "
+            "verifiable deletion; tiered authentication evidence; "
+            "Aura/ESPR passport binding; AI model-substitution "
+            "disclosure."
+        ),
+    )
 
 
 def _case_metrics_licensing(h: BenchHarness) -> BenchExpectation:
@@ -18215,6 +19260,7 @@ CASES: tuple[BenchCase, ...] = (
     BenchCase("metrics.owasp_asi_coverage", "metrics", "OWASP Agentic Top 10 2026 (ASI01-ASI10) gate coverage", _case_metrics_owasp_asi_coverage),
     BenchCase("metrics.least_privilege", "metrics", "least-privilege gate enforcement (OPUR-style)", _case_metrics_least_privilege),
     BenchCase("metrics.approval_percall_binding", "metrics", "per-call approval binding + structured denial", _case_metrics_approval_percall_binding),
+    BenchCase("metrics.insurance", "metrics", "insurance denial receipts: human-countersigned denials, AI-involvement disclosure bound to decision digest, appeal-overturn tripwire with model auto-suspension, proxy-discrimination probes, four-part high-risk admission gate, fraud-score-only denial ban, insurer-pinned vendor liability, dark-pattern gate (AI-insurance absorption)", _case_metrics_insurance),
     BenchCase("metrics.ask_timing", "metrics", "ASK-timing judgment (Ask-F1-style)", _case_metrics_ask_timing),
     BenchCase("metrics.dvp_iff_invariant", "metrics", "DvP if-and-only-if: approval <=> execution", _case_metrics_dvp_iff_invariant),
     BenchCase("metrics.posture_decomposition", "metrics", "three-posture control decomposition (FinAgent methodology)", _case_metrics_posture_decomposition),
@@ -18279,7 +19325,10 @@ CASES: tuple[BenchCase, ...] = (
     BenchCase("metrics.licensing", "metrics", "licensed training receipts: per-licensor opt-in proofs pinned, model-laundering gate (taint transitivity), basis-point split terms, JASRAC human-contribution gate, synthetic-performer disclosure tiers, holder-signed likeness grants, take-level production receipts (AI-music/copyright absorption)", _case_metrics_licensing),
     BenchCase("metrics.adjudication", "metrics", "human final adjudication for AI sports: countersigned release for gated scenes, population-mismatch flags, biometric purpose binding + resale hard deny, coach honesty labels, fail-closed degradation plans, betting isolation", _case_metrics_adjudication),
     BenchCase("metrics.game_agents", "metrics", "game-agent integrity: NPC memory-poisoning quarantine, authority-signed approved-actions envelopes, profiling/spending role separation, deterministic anti-cheat probes, performer consent receipts, no-AI attestation, UGC sandbox gates (AI-gaming absorption)", _case_metrics_game_agents),
+    BenchCase("metrics.booking_agents", "metrics", "booking-agent transaction receipts: pinned price-ceiling intents, TTL-bound freshness assertions, dynamic-pricing disclosure gate, pinned support-policy consistency, pre-emptive rebooking receipts, context-continuity probe, paid-placement disclosure (AI-hospitality absorption)", _case_metrics_booking_agents),
     BenchCase("metrics.companionship", "metrics", "companionship safeguards for AI dating/companionship: minor intimacy class gate, authority-pinned dependence thresholds with mandatory intervention, crisis-escalation receipts with fail-closed halt, sycophancy probe, persona-consistency gate, authority-set session caps, private-dialogue training exclusion, matchmaker explanation binding", _case_metrics_companionship),
+    BenchCase("metrics.embodied", "metrics", "embodied safety vacuum gates: standard=pre_ratification declarations, fall-zone receipts, measured capability honesty labels, labor-impact disclosures, prescriptive-agent envelopes, inspection confidence gates, dispatch audit, incident-clock binding", _case_metrics_embodied),
+    BenchCase("metrics.commerce", "metrics", "agentic commerce terms: machine-readable terms-read receipts bound to the exact product, likeness-creep gate, biometric capture receipts with verifiable deletion, non-authoritative try-on previews, tiered authentication evidence with human review for high-value items, digital passport binding, AI model-substitution disclosure (AI-fashion/retail absorption)", _case_metrics_commerce),
     BenchCase("metrics.harness_binding", "metrics", "harness integrity binding: SHA-256 harness hash in audit, quad-only scores", _case_metrics_harness_binding),
     BenchCase("metrics.drift_detection", "metrics", "Livenerf-style drift probe: bootstrap CI + paired permutation test", _case_metrics_drift_detection),
 )
@@ -18780,6 +19829,381 @@ def run_companionship() -> dict[str, Any]:
         "denial_reasons": denial_reasons,
     }
 
+
+def run_embodied() -> dict[str, Any]:
+    """Embodied-AI safety vacuum gates (one-hundred-twenty-sixth batch).
+
+    Absorbs the 2026 AI-construction/manufacturing thread: ISO 25785-1
+    (humanoid safety) is still draft in 2026 (final 2027) — no certified
+    humanoid safety standard exists, and a Unitree G1 demo injured a
+    child (2026-06-08); Hyundai union (2026-01) demands a labor agreement
+    before any robot enters the factory; Warsaw "robots protest AI"
+    (2026-09-07) points out the EU AI Act barely mentions labor
+    displacement; prescriptive maintenance agents now autonomously
+    generate work orders/parts/schedules; visual inspection escape
+    rates (2.8% -> 0.3%) are measured, not guaranteed; AI adoption
+    stats contradict each other (18%-92%).
+
+    Fail-closed rules over 12 deterministic scenarios: an embodied
+    deployment with no standard declaration at all is
+    ``embodied.unverifiable_safety`` — only a certified standard or an
+    explicit ``standard=pre_ratification`` declaration passes the
+    vacuum gate; actuation near humans needs a fresh, unrevoked
+    fall-zone receipt; capability claims without a pinned measured
+    benchmark are ``embodied.unsubstantiated_capability``;
+    displacement at/above the threshold without a disclosed
+    labor-impact receipt is ``embodied.labor_impact_undisclosed``;
+    prescriptive agents act only inside their authority-signed
+    envelope and can never widen it; below-threshold inspection
+    verdicts cannot auto-release product; dispatch the ledger cannot
+    show is ``embodied.unaudited_dispatch``; a physical incident with
+    no filing linked within the clock escalates as
+    ``embodied.incident_unreported``. Ground truth is closed:
+    4 allow / 8 deny.
+    """
+    from ed25519 import public_key, sign
+
+    from embodied import (
+        AuthorityRegistry,
+        CapabilityRegistry,
+        DispatchLedger,
+        FallZoneRegistry,
+        LaborRegistry,
+        PrescriptiveRegistry,
+        StandardRegistry,
+        compute_dispatch_digest,
+        compute_fall_zone_digest,
+        compute_label_digest,
+        compute_labor_digest,
+        compute_prescriptive_digest,
+        compute_standard_digest,
+        incident_binding,
+        inspection_confidence_gate,
+    )
+
+    T0 = 1_700_000_000
+    SEED = bytes(range(32))
+    MODEL = "ab" * 32
+    SCOPE = "cd" * 32
+    TASK = "ef" * 32
+
+    def _authorities() -> AuthorityRegistry:
+        reg = AuthorityRegistry()
+        reg.register("authority-1", public_key(SEED))
+        return reg
+
+    def _declare_std(reg: StandardRegistry, status: str, dep: str = "dep-1"):
+        digest = compute_standard_digest(
+            deployment_id=dep,
+            standard_id="ISO-25785-1" if status == "pre_ratification" else "ISO-10218",
+            standard_status=status,
+            cert_digest="00" * 32 if status == "pre_ratification" else MODEL,
+            draft_standard_digest=MODEL,
+            citizen_ack_digest=SCOPE,
+            declared_by="authority-1",
+            declared_at=T0,
+        )
+        return reg.declare(
+            deployment_id=dep,
+            standard_id="ISO-25785-1" if status == "pre_ratification" else "ISO-10218",
+            standard_status=status,
+            cert_digest="00" * 32 if status == "pre_ratification" else MODEL,
+            draft_standard_digest=MODEL,
+            citizen_ack_digest=SCOPE,
+            declared_by="authority-1",
+            declared_at=T0,
+            signature=sign(SEED, digest.encode("utf-8")),
+        )
+
+    def _issue_fz(reg: FallZoneRegistry, dep: str = "dep-1"):
+        digest = compute_fall_zone_digest(
+            receipt_id="fz-1",
+            deployment_id=dep,
+            proximity_class="close_contact",
+            fall_zone_m=3.5,
+            computation_digest=MODEL,
+            computed_by="authority-1",
+            computed_at=T0,
+        )
+        return reg.issue(
+            receipt_id="fz-1",
+            deployment_id=dep,
+            proximity_class="close_contact",
+            fall_zone_m=3.5,
+            computation_digest=MODEL,
+            computed_by="authority-1",
+            computed_at=T0,
+            signature=sign(SEED, digest.encode("utf-8")),
+        )
+
+    def _label_cap(reg: CapabilityRegistry, measured: bool):
+        digest = compute_label_digest(
+            label_id="cl-1",
+            deployment_id="dep-1",
+            claim="50% of human speed",
+            measured=measured,
+            benchmark_id="bench-v3",
+            benchmark_digest=MODEL if measured else "00" * 32,
+            labeled_by="authority-1",
+            labeled_at=T0,
+        )
+        return reg.label(
+            label_id="cl-1",
+            deployment_id="dep-1",
+            claim="50% of human speed",
+            measured=measured,
+            benchmark_id="bench-v3",
+            benchmark_digest=MODEL if measured else "00" * 32,
+            labeled_by="authority-1",
+            labeled_at=T0,
+            signature=sign(SEED, digest.encode("utf-8")),
+        )
+
+    def _record_labor(reg: LaborRegistry, disclosed: bool):
+        digest = compute_labor_digest(
+            receipt_id="li-1",
+            deployment_id="dep-1",
+            workers_displaced_estimate=40,
+            retraining_plan_digest=MODEL,
+            labor_agreement_digest="00" * 32,
+            disclosed=disclosed,
+            recorded_by="authority-1",
+            recorded_at=T0,
+        )
+        return reg.record(
+            receipt_id="li-1",
+            deployment_id="dep-1",
+            workers_displaced_estimate=40,
+            retraining_plan_digest=MODEL,
+            labor_agreement_digest="00" * 32,
+            disclosed=disclosed,
+            recorded_by="authority-1",
+            recorded_at=T0,
+            signature=sign(SEED, digest.encode("utf-8")),
+        )
+
+    def _arm_pa(reg: PrescriptiveRegistry):
+        digest = compute_prescriptive_digest(
+            envelope_id="pe-1",
+            agent_id="pa-1",
+            allowed_actions=("create_work_order",),
+            scope_digest=SCOPE,
+            armed_by="authority-1",
+            armed_at=T0,
+            expires_at=T0 + 3600,
+        )
+        return reg.arm(
+            envelope_id="pe-1",
+            agent_id="pa-1",
+            allowed_actions=("create_work_order",),
+            scope_digest=SCOPE,
+            armed_by="authority-1",
+            armed_at=T0,
+            expires_at=T0 + 3600,
+            signature=sign(SEED, digest.encode("utf-8")),
+        )
+
+    def _record_dispatch(ledger: DispatchLedger):
+        digest = compute_dispatch_digest(
+            dispatch_id="d-1",
+            project_id="proj-1",
+            robot_id="r-1",
+            task_digest=TASK,
+            window_start=T0,
+            window_end=T0 + 3600,
+            dispatched_by="authority-1",
+            dispatched_at=T0,
+            prev_hash="genesis",
+        )
+        return ledger.record(
+            dispatch_id="d-1",
+            project_id="proj-1",
+            robot_id="r-1",
+            task_digest=TASK,
+            window_start=T0,
+            window_end=T0 + 3600,
+            dispatched_by="authority-1",
+            dispatched_at=T0,
+            signature=sign(SEED, digest.encode("utf-8")),
+        )
+
+    def _outcome(verdict: Any) -> dict[str, Any]:
+        allowed = bool(getattr(verdict, "allowed", False))
+        code = getattr(verdict, "deny_code", None)
+        if allowed is False and hasattr(verdict, "auto_release"):
+            allowed = bool(getattr(verdict, "auto_release"))
+        if allowed is False and hasattr(verdict, "audited"):
+            allowed = bool(getattr(verdict, "audited"))
+        if allowed is False and hasattr(verdict, "reported"):
+            allowed = bool(getattr(verdict, "reported"))
+        return {
+            "verdict": "allow" if allowed else "deny",
+            "reason": code or "",
+            "classification": getattr(verdict, "classification", ""),
+        }
+
+    scenarios: list[tuple[str, str, Any]] = []
+
+    def _scenario(sid: str, expected: str, thunk: Any) -> None:
+        scenarios.append((sid, expected, thunk))
+
+    def _s1():
+        reg = StandardRegistry(_authorities())
+        _declare_std(reg, "certified")
+        return _outcome(reg.safety_vacuum_gate(deployment_id="dep-1", now=T0))
+
+    _scenario("allow_certified_deployment", "allow", _s1)
+
+    def _s2():
+        reg = FallZoneRegistry(_authorities())
+        return _outcome(
+            reg.check_actuation(
+                deployment_id="dep-1", proximity_class="remote", now=T0
+            )
+        )
+
+    _scenario("allow_remote_actuation", "allow", _s2)
+
+    def _s3():
+        reg = CapabilityRegistry(_authorities())
+        _label_cap(reg, measured=True)
+        return _outcome(reg.capability_honesty_label(label_id="cl-1", now=T0))
+
+    _scenario("allow_measured_capability", "allow", _s3)
+
+    def _s4():
+        reg = LaborRegistry(_authorities())
+        return _outcome(
+            reg.labor_impact_receipt(
+                deployment_id="dep-1", workers_displaced_estimate=5, now=T0
+            )
+        )
+
+    _scenario("allow_below_threshold_labor", "allow", _s4)
+
+    def _s5():
+        reg = StandardRegistry(_authorities())
+        return _outcome(reg.safety_vacuum_gate(deployment_id="dep-x", now=T0))
+
+    _scenario("deny_no_standard_declaration", "deny", _s5)
+
+    def _s6():
+        reg = FallZoneRegistry(_authorities())
+        return _outcome(
+            reg.check_actuation(
+                deployment_id="dep-1", proximity_class="close_contact", now=T0
+            )
+        )
+
+    _scenario("deny_close_contact_no_fall_zone", "deny", _s6)
+
+    def _s7():
+        reg = CapabilityRegistry(_authorities())
+        _label_cap(reg, measured=False)
+        return _outcome(reg.capability_honesty_label(label_id="cl-1", now=T0))
+
+    _scenario("deny_unmeasured_capability", "deny", _s7)
+
+    def _s8():
+        reg = LaborRegistry(_authorities())
+        return _outcome(
+            reg.labor_impact_receipt(
+                deployment_id="dep-1", workers_displaced_estimate=40, now=T0
+            )
+        )
+
+    _scenario("deny_labor_impact_undisclosed", "deny", _s8)
+
+    def _s9():
+        reg = PrescriptiveRegistry(_authorities())
+        _arm_pa(reg)
+        return _outcome(
+            reg.prescriptive_agent_gate(
+                agent_id="pa-1",
+                action="order_parts",
+                scope_digest=SCOPE,
+                now=T0 + 10,
+            )
+        )
+
+    _scenario("deny_prescriptive_out_of_scope", "deny", _s9)
+
+    def _s10():
+        return _outcome(
+            inspection_confidence_gate(
+                inspection_id="i-1",
+                verdict="pass",
+                confidence=0.90,
+                measured=True,
+                confidence_threshold=0.97,
+                now=T0,
+                decided_at=T0,
+            )
+        )
+
+    _scenario("deny_low_confidence_release", "deny", _s10)
+
+    def _s11():
+        ledger = DispatchLedger(_authorities())
+        return _outcome(ledger.dispatch_audit(dispatch_id="ghost", now=T0))
+
+    _scenario("deny_unaudited_dispatch", "deny", _s11)
+
+    class _Boom:
+        def file_incident(self, **kwargs: Any) -> Any:
+            raise RuntimeError("filing backend down")
+
+    def _s12():
+        return _outcome(
+            incident_binding(
+                incident_registry=_Boom(),
+                incident_id="inc-1",
+                system_id="sys-1",
+                severity="serious",
+                death_linked=False,
+                widespread=False,
+                systemic_tier=None,
+                detected_at=T0,
+                reported_at=T0 + 10,
+                summary_digest=MODEL,
+                now=T0 + 20,
+            )
+        )
+
+    _scenario("deny_incident_unreported", "deny", _s12)
+
+    results: list[str] = []
+    mismatches: list[str] = []
+    allowed_ids: list[str] = []
+    warned_ids: list[str] = []
+    denial_reasons: dict[str, str] = {}
+    for sid, expected, thunk in scenarios:
+        try:
+            outcome = thunk()
+        except Exception as error:
+            outcome = {"verdict": "deny", "reason": f"raised: {error}",
+                       "classification": "unverifiable-process"}
+        verdict = outcome.get("verdict")
+        if verdict != expected:
+            mismatches.append(
+                f"{sid}: expected {expected}, got {verdict}"
+            )
+        if verdict == "allow":
+            allowed_ids.append(sid)
+        elif verdict == "allow-with-warning":
+            warned_ids.append(sid)
+        else:
+            denial_reasons[sid] = outcome.get("reason", "")
+
+    return {
+        "n_scenarios": len(scenarios),
+        "mismatches": mismatches,
+        "allowed_ids": allowed_ids,
+        "warned_ids": warned_ids,
+        "denial_reasons": denial_reasons,
+    }
+
+
 def run_suite(
     *,
     only: Iterable[str] | None = None,
@@ -19167,6 +20591,7 @@ def _print_report(report: BenchReport) -> None:
                 f"{dvp.get('denials', 0)} denial(s), "
                 f"iff_holds={dvp.get('iff_holds', False)}"
             )
+    "run_insurance",
     if report.ok:
         print("result: PASS — gate decisions match the public scorecard")
     else:
@@ -19231,8 +20656,11 @@ __all__ = [
     "run_licensing",
     "run_language_cap",
     "run_companionship",
+    "run_embodied",
     "run_adjudication",
     "run_game_agents",
+    "run_commerce",
+    "run_booking_agents",
     "run_vendor_chain",
     "run_deployment_registry",
     "run_incident_receipts",

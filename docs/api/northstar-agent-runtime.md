@@ -111,6 +111,132 @@ Does this critical system have a valid fail-closed plan?
 
 Betting-tagged inputs may not enter protected pipelines.
 
+### `embodied`
+
+Source: `components/northstar-agent-runtime/embodied.py`
+
+Embodied-AI safety vacuum gates (one-hundred-twenty-sixth batch).
+
+#### `EmbodiedError`
+
+Malformed embodied-AI input. Fail loud, never guess.
+
+#### `AuthorityRegistry`
+
+Registered human authorities (authority_id -> Ed25519 public key).
+
+- `register(authority_id: str, public_key: bytes)`
+- `public_key_for(authority_id: str)`
+#### `StandardDeclaration`
+
+A deployment's safety-standard declaration.
+
+- `as_dict()`
+#### `compute_standard_digest(*, deployment_id: str, standard_id: str, standard_status: str, cert_digest: str, draft_standard_digest: str, citizen_ack_digest: str, declared_by: str, declared_at: int)`
+
+#### `StandardVerdict`
+
+#### `StandardRegistry`
+
+Deployment standard declarations: the safety-vacuum gate.
+
+- `declare(*, deployment_id: str, standard_id: str, standard_status: str, cert_digest: str, draft_standard_digest: str, citizen_ack_digest: str, declared_by: str, declared_at: int, signature: bytes)`
+- `safety_vacuum_gate(*, deployment_id: str, now: int)`
+  - The gate: no declaration -> unverifiable safety, fail closed.
+#### `FallZoneReceipt`
+
+A fall-zone/clearance computation bound to a deployment.
+
+- `as_dict()`
+#### `compute_fall_zone_digest(*, receipt_id: str, deployment_id: str, proximity_class: str, fall_zone_m: float, computation_digest: str, computed_by: str, computed_at: int)`
+
+#### `ActuationVerdict`
+
+#### `FallZoneRegistry`
+
+Fall-zone receipts: actuation near humans needs a live receipt.
+
+- `issue(*, receipt_id: str, deployment_id: str, proximity_class: str, fall_zone_m: float, computation_digest: str, computed_by: str, computed_at: int, signature: bytes)`
+- `revoke(receipt_id: str)`
+- `check_actuation(*, deployment_id: str, proximity_class: str, now: int)`
+  - Actuation near humans requires a fresh, unrevoked receipt.
+#### `CapabilityLabel`
+
+A pinned capability claim.
+
+- `as_dict()`
+#### `compute_label_digest(*, label_id: str, deployment_id: str, claim: str, measured: bool, benchmark_id: str, benchmark_digest: str, labeled_by: str, labeled_at: int)`
+
+#### `HonestyVerdict`
+
+#### `CapabilityRegistry`
+
+Capability honesty labels: measured benchmarks pin claims.
+
+- `label(*, label_id: str, deployment_id: str, claim: str, measured: bool, benchmark_id: str, benchmark_digest: str, labeled_by: str, labeled_at: int, signature: bytes)`
+- `capability_honesty_label(*, label_id: str, now: int)`
+  - A claim is honest only if measured: marketing without a pinned benchmark digest is ``embodied.unsubstantiated_capability`` — the 18%-92% contradictory-adoption-stats lesson.
+#### `LaborImpactReceipt`
+
+A labor-impact disclosure for a deployment.
+
+- `as_dict()`
+#### `compute_labor_digest(*, receipt_id: str, deployment_id: str, workers_displaced_estimate: int, retraining_plan_digest: str, labor_agreement_digest: str, disclosed: bool, recorded_by: str, recorded_at: int)`
+
+#### `LaborVerdict`
+
+#### `LaborRegistry`
+
+Labor-impact disclosures: displacement at/above the threshold must be disclosed, even when the deployment is otherwise compliant.
+
+- `record(*, receipt_id: str, deployment_id: str, workers_displaced_estimate: int, retraining_plan_digest: str, labor_agreement_digest: str, disclosed: bool, recorded_by: str, recorded_at: int, signature: bytes)`
+- `labor_impact_receipt(*, deployment_id: str, workers_displaced_estimate: int, now: int)`
+  - Below the threshold: no disclosure required. At/above: a disclosed receipt must exist, else ``embodied.labor_impact_undisclosed`` — the Hyundai/Warsaw lesson: compliance does not erase displacement.
+#### `PrescriptiveEnvelope`
+
+The authority-signed action envelope of a prescriptive agent.
+
+- `as_dict()`
+#### `compute_prescriptive_digest(*, envelope_id: str, agent_id: str, allowed_actions: tuple[str, ...], scope_digest: str, armed_by: str, armed_at: int, expires_at: int)`
+
+#### `PrescriptiveVerdict`
+
+#### `PrescriptiveRegistry`
+
+Prescriptive agents: every action checked against the envelope.
+
+- `arm(*, envelope_id: str, agent_id: str, allowed_actions: tuple[str, ...], scope_digest: str, armed_by: str, armed_at: int, expires_at: int, signature: bytes)`
+- `widen(*, agent_id: str, allowed_actions: tuple[str, ...], approved_by: str, signature: bytes, now: int)`
+  - Widening requires a *different* authority's approval: the agent can never widen its own envelope, and the issuer cannot approve their own widening.
+- `prescriptive_agent_gate(*, agent_id: str, action: str, scope_digest: str, now: int)`
+#### `InspectionVerdict`
+
+#### `inspection_confidence_gate(*, inspection_id: str, verdict: str, confidence: float, measured: bool, confidence_threshold: float, now: int, decided_at: int)`
+
+Below-threshold verdicts cannot auto-release product.
+
+#### `DispatchReceipt`
+
+- `as_dict()`
+#### `compute_dispatch_digest(*, dispatch_id: str, project_id: str, robot_id: str, task_digest: str, window_start: int, window_end: int, dispatched_by: str, dispatched_at: int, prev_hash: str)`
+
+#### `DispatchVerdict`
+
+#### `DispatchLedger`
+
+Hash-chained construction-robot dispatch.
+
+- `record(*, dispatch_id: str, project_id: str, robot_id: str, task_digest: str, window_start: int, window_end: int, dispatched_by: str, dispatched_at: int, signature: bytes)`
+- `dispatch_audit(*, dispatch_id: str, now: int)`
+  - A dispatch the ledger cannot show is unaudited: deny.
+#### `PhysicalIncidentLink`
+
+#### `incident_binding(*, incident_registry: Any, incident_id: str, system_id: str, severity: str, death_linked: bool, widespread: bool, systemic_tier: int | None, detected_at: int, reported_at: int, summary_digest: str, now: int)`
+
+File a physical incident through the 113th-batch incident clock.
+
+#### `embodied_audit_event(event: str, *, deployment_id: str, deny_code: str | None, now: int, details: Mapping[str, Any] | None=None)`
+
 ### `licensing`
 
 Source: `components/northstar-agent-runtime/licensing.py`
@@ -639,6 +765,103 @@ Outcome of :func:`check_smallholder_disclosure`.
 
 Mandatory disclosure, not silent omission.
 
+### `booking_agents`
+
+Source: `components/northstar-agent-runtime/booking_agents.py`
+
+Booking-agent transaction receipts (one-hundred-twenty-third batch).
+
+#### `BookingError`
+
+A malformed receipt, registry, or request — a programming error, not a verdict. Verification *failures* (unknown authority, ceiling breach, stale assertion, policy drift, ...) return a verdict with ``allowed=False`` instead; malformed input raises here, fail loud, never guess.
+
+#### `AuthorityRegistry`
+
+Maps ``authority_id`` to an Ed25519 public key (32 bytes).
+
+- `public_key_for(authority_id: str)`
+#### `BookingIntentReceipt`
+
+Authority-signed booking intent: the pinned price ceiling and route/stay digest for an agent booking on a traveler's behalf.
+
+- `as_dict()`
+#### `issue_intent(registry: AuthorityRegistry, authority_secret: bytes, *, receipt_id: str, agent_id: str, traveler_id: str, route_or_stay_digest: str, purpose: str, price_ceiling_minor_units: int, currency: str, issued_by: str, issued_at: int, expires_at: int, prev_hash: str=GENESIS)`
+
+Mint an authority-signed booking intent receipt.
+
+#### `BookingVerdict`
+
+Verdict of a booking gate.
+
+#### `authorize_transaction(registry: AuthorityRegistry, intents: list[BookingIntentReceipt], *, agent_id: str, traveler_id: str, route_or_stay_digest: str, total_minor_units: int, currency: str, check_time: int)`
+
+Fail-closed: may this transaction be charged?
+
+#### `FreshnessAssertion`
+
+A hash-chained, TTL-bound assertion about price, availability, or visa rules. The assertion records *when* the evidence was observed; the TTL pins how long it stays usable.
+
+#### `FreshnessRegistry`
+
+Registry of freshness assertions. Assertions are appended by the platform (not by the booking agent); the booking gate checks them at use time.
+
+- `register(*, assertion_id: str, kind: str, payload_digest: str, observed_at: int, ttl_seconds: int)`
+- `check_freshness(*, assertion_id: str, kind: str, payload_digest: str, use_time: int)`
+  - Fail-closed freshness check at use time.
+#### `PricingDisclosureReceipt`
+
+Merchant-authority-signed disclosure binding a quote to its pricing kind and to the disclosure text shown to the traveler.
+
+#### `issue_pricing_disclosure(registry: AuthorityRegistry, authority_secret: bytes, *, receipt_id: str, quote_digest: str, pricing_kind: str, disclosure_digest: str, issued_by: str, issued_at: int, prev_hash: str=GENESIS)`
+
+#### `pricing_disclosure_gate(registry: AuthorityRegistry, disclosures: list[PricingDisclosureReceipt], *, quote_digest: str, pricing_kind: str)`
+
+Fail-closed: dynamic/personalized pricing needs a disclosure.
+
+#### `PolicyReceipt`
+
+Authority-signed support-policy pin. Because AI output *is* company output, the policy the agent serves under is pinned.
+
+#### `issue_policy(registry: AuthorityRegistry, authority_secret: bytes, *, receipt_id: str, policy_digest: str, issued_by: str, issued_at: int, prev_hash: str=GENESIS)`
+
+#### `policy_consistency_gate(registry: AuthorityRegistry, policies: list[PolicyReceipt], *, output_policy_digest: str, check_time: int)`
+
+Support outputs must match the pinned policy digest.
+
+#### `RebookingReceipt`
+
+Hash-chained pre-emptive rebooking receipt. The chain proves the carrier negotiated alternatives *before* any denied boarding.
+
+#### `RebookingLog`
+
+Hash-chained log of pre-emptive rebookings.
+
+- `append(*, receipt_id: str, passenger_id: str, flight_digest: str, new_flight_digest: str, reason: str, created_at: int)`
+- `deny_boarding_gate(*, passenger_id: str, flight_digest: str, denial_time: int)`
+  - Fail-closed: denied boarding needs a preceding rebooking.
+#### `SessionTurn`
+
+One hash-chained turn of a booking session. The chain pins the conversation's evolving context; a lost turn breaks the chain.
+
+#### `BookingSession`
+
+Hash-chained session with a context-continuity probe.
+
+- `append_turn(*, turn_digest: str, started_at: int)`
+- `mark_context_lost()`
+  - Record a context-loss marker (e.g. provider restart, memory wipe, model swap mid-conversation).
+- `context_continuity_probe(*, check_time: int)`
+  - Fail-closed probe: a broken session must restart.
+#### `RecommendationDisclosureReceipt`
+
+Merchant-authority-signed neutrality disclosure for a recommendation (e.g. hotel ranking).
+
+#### `issue_recommendation_disclosure(registry: AuthorityRegistry, authority_secret: bytes, *, receipt_id: str, recommendation_digest: str, paid_placement: bool, disclosure_digest: str, issued_by: str, issued_at: int, prev_hash: str=GENESIS)`
+
+#### `commercial_bias_gate(registry: AuthorityRegistry, disclosures: list[RecommendationDisclosureReceipt], *, recommendation_digest: str, paid_placement: bool)`
+
+Fail-closed: paid placement must carry a disclosure.
+
 ### `budget`
 
 Source: `components/northstar-agent-runtime/budget.py`
@@ -737,6 +960,120 @@ The newest checkpoint, or the one at ``record_index``.
 #### `prepare_resume(checkpoint: Checkpoint, transcript: Sequence[Any], *, expected_session_id: str | None=None)`
 
 The prefix a resumed run should start from, verified against the digest.
+
+### `commerce`
+
+Source: `components/northstar-agent-runtime/commerce.py`
+
+Agentic commerce terms (one-hundred-twenty-fourth batch).
+
+#### `CommerceError`
+
+A malformed commerce receipt or a programming error.
+
+#### `CommerceVerdict`
+
+Outcome of one commerce check.
+
+#### `TermsReadReceipt`
+
+An agent's bound claim that it read machine-readable terms.
+
+#### `terms_read_receipt(*, receipt_id: str, order_id: str, agent_id: str, product_digest: str, size_chart_digest: str, return_policy_digest: str, total_price_cents: int, fees_cents: int, authority_secret: bytes, issued_by: str, issued_at: int, expires_at: int, prev_digest: str=_GENESIS)`
+
+Issue an authority-signed terms-read receipt.
+
+#### `check_order_terms(log: list[TermsReadReceipt], *, order_id: str, product_digest: str, check_time: int)`
+
+Fail-closed gate: may this agent place this order?
+
+#### `LikenessGrantReceipt`
+
+A likeness grant bound to its declared use classes.
+
+#### `likeness_grant_receipt(*, receipt_id: str, likeness_digest: str, granted_classes: tuple[str, ...], grantor: str, authority_secret: bytes, issued_by: str, issued_at: int, expires_at: int, prev_digest: str=_GENESIS)`
+
+Issue an authority-signed likeness grant.
+
+#### `likeness_creep_gate(log: list[LikenessGrantReceipt], *, likeness_digest: str, use_class: str, check_time: int)`
+
+Fail-closed gate: is this likeness use within its grant?
+
+#### `BiometricCaptureReceipt`
+
+A biometric capture claim for virtual try-on.
+
+#### `BiometricDeletionReceipt`
+
+A signed claim that captured biometrics were deleted.
+
+#### `biometric_capture_receipt(*, receipt_id: str, subject_id: str, purpose: str, biometric_kinds: tuple[str, ...], retention_days: int, deletion_mechanism_digest: str, authority_secret: bytes, issued_by: str, issued_at: int, prev_digest: str=_GENESIS)`
+
+Issue an authority-signed biometric capture receipt.
+
+#### `biometric_deletion_receipt(*, receipt_id: str, capture: BiometricCaptureReceipt, deletion_method_digest: str, authority_secret: bytes, issued_by: str, deleted_at: int, prev_digest: str=_GENESIS)`
+
+Issue an authority-signed deletion receipt closing a capture.
+
+#### `check_biometric_collection(log: list[BiometricCaptureReceipt], *, subject_id: str, purpose: str, biometric_kinds: tuple[str, ...], check_time: int)`
+
+Fail-closed gate: may biometrics be captured for this purpose?
+
+#### `check_biometric_deletion(capture_log: list[BiometricCaptureReceipt], deletion_log: list[BiometricDeletionReceipt], *, subject_id: str, check_time: int)`
+
+Fail-closed gate: has retained biometric data been deleted?
+
+#### `PreviewReceipt`
+
+A try-on preview receipt.
+
+#### `issue_preview_receipt(*, receipt_id: str, preview_id: str, content_digest: str, authority_secret: bytes, issued_by: str, issued_at: int, prev_digest: str=_GENESIS)`
+
+Issue a try-on preview receipt (always non-authoritative).
+
+#### `check_preview_use(preview: PreviewReceipt, *, use: str)`
+
+Gate downstream use of a try-on preview.
+
+#### `AuthenticationClaim`
+
+A graded counterfeit/authentication verdict.
+
+#### `issue_authentication_claim(*, claim_id: str, item_digest: str, verdict: str, claimed_confidence_bps: int, evidence_digest: str, evidence_tier: str, value_class: str, human_review: bool, authority_secret: bytes, issued_by: str, issued_at: int, expires_at: int, prev_digest: str=_GENESIS)`
+
+Issue a graded authentication claim.
+
+#### `authentication_evidence(log: list[AuthenticationClaim], *, item_digest: str, check_time: int)`
+
+Fail-closed gate over authentication verdicts.
+
+#### `PassportBindingReceipt`
+
+A listing's bound digital product passport.
+
+#### `passport_binding_receipt(*, receipt_id: str, listing_digest: str, passport_digest: str, passport_scheme: str, authority_secret: bytes, issued_by: str, issued_at: int, expires_at: int, prev_digest: str=_GENESIS)`
+
+Issue an authority-signed passport binding.
+
+#### `check_passport_binding(log: list[PassportBindingReceipt], *, listing_digest: str, passport_digest: str, check_time: int)`
+
+Fail-closed gate: does this listing's passport recompute?
+
+#### `ModelSubstitutionDisclosure`
+
+A catalog item's declared model type.
+
+#### `model_substitution_disclosure(*, receipt_id: str, catalog_item_digest: str, model_type: str, authority_secret: bytes, issued_by: str, issued_at: int, expires_at: int, prev_digest: str=_GENESIS)`
+
+Issue an authority-signed model-type disclosure.
+
+#### `check_model_substitution(log: list[ModelSubstitutionDisclosure], *, catalog_item_digest: str, actual_model_type: str, check_time: int)`
+
+Fail-closed gate: is the catalog model honestly disclosed?
+
+#### `commerce_audit_event(code: str, detail: str, receipt_digest: str='')`
+
+Build a ``commerce:*`` audit event payload.
 
 ### `cli`
 
@@ -1585,6 +1922,150 @@ Gate AI-generated UGC out of the sandbox.
 
 Build an ``audit.ndjson/1``-shaped record for a game verdict.
 
+### `insurance`
+
+Source: `components/northstar-agent-runtime/insurance.py`
+
+Insurance denial receipts (one-hundred-twenty-fifth batch).
+
+#### `InsuranceError`
+
+Malformed receipt/probe/admission or a programming error.
+
+#### `DenialReceipt`
+
+Human-countersigned claim denial, hash-chained.
+
+#### `compute_denial_digest(receipt: DenialReceipt)`
+
+Recompute the JCS digest a denial receipt claims.
+
+#### `issue_denial_receipt(*, denial_id: str, claim_id: str, policy_id: str, decision_kind: str, human_reviewer_id: str, reviewer_secret: bytes, reasons: Sequence[str], evidence_pack_digest: str, ai_involved: bool, denied_at: int, prev_digest: str=_GENESIS)`
+
+Issue a human-countersigned denial receipt and seal it.
+
+#### `DenialVerdict`
+
+#### `denial_receipt(denial_receipts: Sequence[DenialReceipt], *, claim_id: str, check_time: int)`
+
+Fail-closed gate: a denial stands only on a live human countersign.
+
+#### `denial_audit_event(verdict: DenialVerdict, *, action: str)`
+
+Shape a denial verdict as an audit event.
+
+#### `AIDisclosure`
+
+Disclosure that AI participated in a decision, bound to the digest.
+
+#### `compute_disclosure_digest(disclosure: AIDisclosure)`
+
+#### `issue_ai_disclosure(*, decision_id: str, decision_digest: str, ai_involved: bool, disclosed_at: int)`
+
+Issue an AI-involvement disclosure bound to the decision digest.
+
+#### `DisclosureVerdict`
+
+#### `ai_involvement_disclosure(disclosures: Sequence[AIDisclosure], *, decision_id: str, decision_digest: str, ai_actually_involved: bool, check_time: int)`
+
+Fail-closed gate: AI involvement must be disclosed, bound to digest.
+
+#### `disclosure_audit_event(verdict: DisclosureVerdict, *, action: str)`
+
+#### `AppealRecord`
+
+One appeal outcome, hash-chained into the appeal log.
+
+#### `compute_appeal_digest(record: AppealRecord)`
+
+#### `record_appeal(*, appeal_id: str, claim_id: str, model_digest: str, overturned: bool, decided_at: int, prev_digest: str=_GENESIS)`
+
+Append an appeal outcome to the hash-chained appeal log.
+
+#### `TripwireVerdict`
+
+#### `appeal_overturn_tripwire(appeal_records: Sequence[AppealRecord], *, model_digest: str)`
+
+Ground-truth tripwire: overturn rate crosses the pinned threshold.
+
+#### `tripwire_audit_event(verdict: TripwireVerdict, *, model_digest: str)`
+
+#### `ProxyProbeReceipt`
+
+Authority-signed proxy-discrimination probe, hash-chained.
+
+#### `compute_proxy_probe_digest(receipt: ProxyProbeReceipt)`
+
+#### `issue_proxy_probe(*, probe_id: str, model_digest: str, feature: str, probe_digest: str, authority_id: str, authority_secret: bytes, measured_at: int, expires_at: int, prev_digest: str=_GENESIS)`
+
+Issue an authority-signed proxy-discrimination probe receipt.
+
+#### `ProxyVerdict`
+
+#### `proxy_discrimination_probe(probe_receipts: Sequence[ProxyProbeReceipt], *, model_digest: str, features: Sequence[str], check_time: int)`
+
+Fail-closed gate: every declared proxy feature needs a live probe.
+
+#### `proxy_audit_event(verdict: ProxyVerdict, *, action: str)`
+
+Shape a proxy verdict as an audit event.
+
+#### `HighRiskAdmission`
+
+Four-part admission for high-risk AI insurance use, hash-chained.
+
+#### `compute_admission_digest(admission: HighRiskAdmission)`
+
+#### `issue_high_risk_admission(*, admission_id: str, model_digest: str, use_kind: str, committee_approval_digest: str, supervision_declaration: str, filing_digest: str, stop_conditions: Sequence[str], authority_id: str, authority_secret: bytes, admitted_at: int, expires_at: int, prev_digest: str=_GENESIS)`
+
+Issue a four-part high-risk admission, authority-signed.
+
+#### `AdmissionVerdict`
+
+#### `high_risk_gate(admissions: Sequence[HighRiskAdmission], *, model_digest: str, use_kind: str, check_time: int)`
+
+Fail-closed gate: high-risk AI use needs all four admission parts.
+
+#### `admission_audit_event(verdict: AdmissionVerdict, *, action: str)`
+
+#### `FraudDenialRequest`
+
+A denial request that cites a fraud score.
+
+#### `FraudVerdict`
+
+#### `fraud_signal_gate(request: FraudDenialRequest)`
+
+A fraud score alone can never deny a claim.
+
+#### `fraud_audit_event(verdict: FraudVerdict, *, action: str)`
+
+#### `VendorAdmission`
+
+Vendor AI admission: audit rights + bias test; insurer pinned liable.
+
+#### `compute_vendor_digest(admission: VendorAdmission)`
+
+#### `issue_vendor_admission(*, vendor_id: str, insurer_id: str, model_digest: str, audit_rights_digest: str, bias_test_digest: str, authority_id: str, authority_secret: bytes, admitted_at: int, expires_at: int, prev_digest: str=_GENESIS)`
+
+Admit vendor AI: audit rights and bias-test evidence are mandatory.
+
+#### `VendorVerdict`
+
+#### `vendor_liability(admissions: Sequence[VendorAdmission], *, vendor_id: str, model_digest: str, check_time: int)`
+
+Fail-closed gate: vendor AI needs audit rights + bias-test evidence.
+
+#### `vendor_audit_event(verdict: VendorVerdict, *, action: str)`
+
+#### `DarkPatternVerdict`
+
+#### `dark_pattern_gate(flow_markers: Sequence[str])`
+
+Customer-facing flows with dark-pattern markers are denied.
+
+#### `dark_pattern_audit_event(verdict: DarkPatternVerdict, *, action: str)`
+
 ### `governance_bench`
 
 Source: `components/northstar-agent-runtime/governance_bench.py`
@@ -1744,6 +2225,18 @@ Fair-housing & coordination isolation (one-hundred-nineteenth batch).
 
 Game-agent integrity gates (one-hundred-twenty-second batch).
 
+#### `run_booking_agents()`
+
+Booking-agent transaction receipts (one-hundred-twenty-third batch).
+
+#### `run_commerce()`
+
+Agentic commerce terms (one-hundred-twenty-fourth batch).
+
+#### `run_insurance()`
+
+Insurance denial receipts (one-hundred-twenty-fifth batch).
+
 #### `run_licensing()`
 
 Licensed training receipts (one-hundred-twentieth batch).
@@ -1870,6 +2363,10 @@ Three-posture control decomposition, FinAgent Red-Team methodology.
 #### `run_companionship()`
 
 Companionship safeguards for AI dating/companionship (one-hundred-twenty-first batch).
+
+#### `run_embodied()`
+
+Embodied-AI safety vacuum gates (one-hundred-twenty-sixth batch).
 
 #### `run_suite(*, only: Iterable[str] | None=None, tracks: Iterable[str] | None=None)`
 
