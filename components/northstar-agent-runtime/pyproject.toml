@@ -99,6 +99,7 @@ py-modules = [
     "passport",
     "permissions",
     "postconditions",
+    "process_receipts",
     "provider_retry",
     "provenance_taint",
     "run_setup",

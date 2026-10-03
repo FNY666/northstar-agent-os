@@ -114,6 +114,7 @@ MANIFEST: dict[str, tuple[str, ...]] = {
         "policy_file",
         "postconditions",
         "offline_bundle",
+        "process_receipts",
         "twin_receipts",
         "product_path",
         "provider_retry",
