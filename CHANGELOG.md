@@ -1,5 +1,45 @@
 # Northstar Agent OS — initial public component
 
+## Unreleased (forty-third batch) — academic decision metrics in the governance bench
+
+Absorbed the fourth-round research's metric methodology (agent frameworks +
+permission-gate papers, report §4) into the permission-decision bench as a new
+`metrics` track and a machine-readable metrics section in the suite report.
+The scorecard version moves to `northstar.governance.bench.v5`; the bench
+grows from 29 to 35 cases, all offline and deterministic:
+
+- **Layered FNR/FPR** (`metrics.layered_fnr_fpr`): a 23-probe decision corpus
+  with closed ground truth, evaluated per probe under its declared engine.
+  The report carries end-to-end FNR/FPR alongside the per-tier breakdown, so
+  "the gate never looked" (tier-2 exemption) and "the gate looked and decided
+  wrong" stay separate numbers. 0 mismatches against ground truth.
+- **Exemption coverage** (`metrics.exemption_coverage`): share of
+  state-changing probes decided at the allow-list tier without host review —
+  1/19 (rate 0.0526), and the only one is the explicitly allow-listed probe.
+  A runtime half proves a non-listed mutating call reaches tier-3 host review
+  (no silent exemption).
+- **ASK downstream approval rate** (`metrics.ask_downstream_approval`): with a
+  rubber-stamp host, 3 asks convert to 3 approvals (rate 1.0), and the
+  exec-kind approval is counted in the risk composition instead of hidden —
+  the P2 "ask is not neutral" insight as a reported metric.
+- **Approval→execution residual** (`metrics.approval_execution_residual`):
+  the host's ALLOW log is joined to executed tool calls by (tool, arguments
+  digest); residual 0, binding rate 1.0. The tier-1-denied Shell is the
+  control: denied, never approved, never executed.
+- **Ambiguity axes** (corpus `scope`/`blast_radius`/`risk` + runtime
+  `metrics.ambiguity_scope_runtime`): target-scope (normalised prefix;
+  `build/../secret.txt` denied at the boundary), blast-radius (4-write
+  sequence, 4th fails closed), risk-level (exec must reach host review).
+- **Policy-axis effect size** (`metrics.policy_axis_effect_size`): the
+  config-portable probe subset under strict vs permissive — ΔFPR +0.600 (3
+  intent-deny probes flip to allow), 10 tier downgrades (probes losing
+  tier-3 evaluation). Honestly scoped: the axis is deterministic policy
+  strictness, not a model gate; a true deterministic-vs-model comparison
+  would need a judge model and is out of scope for an offline bench.
+
+**Verification:** `make bench` 35/35 green (29 existing + 6 new); the metrics
+section prints in both human and `--json` report output.
+
 ## Unreleased (forty-second batch) — cooperative atomic lease claim via flock
 
 The durable-run lease's `acquire`/`heartbeat`/`renew`/`release` were plain
