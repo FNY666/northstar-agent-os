@@ -54,7 +54,17 @@ _OPTIONAL: dict[str, type] = {
     "session_id": str,
     "run_id": str,
     "actor_id": str,
+    # Tamper-evidence extension (audit.ndjson/1, optional; see
+    # docs/concepts/audit-proof-spec.md and audit_chain.py). Mirrors
+    # northstar-run-contract/audit.py exactly.
+    "prev_hash": str,
+    "chain_hash": str,
+    "genesis": dict,
+    "signature": str,
+    "key_id": str,
 }
+_HEX64_RE = re.compile(r"^[0-9a-f]{64}$")
+_HEX128_RE = re.compile(r"^[0-9a-f]{128}$")
 
 
 def _record_level(record: dict[str, Any]) -> str:
@@ -131,6 +141,19 @@ def validate_audit_record(record: Any) -> tuple[str, ...]:
             not isinstance(record[key], str) or not record[key] or len(record[key]) > 200
         ):
             errors.append(f"audit {key!r} must be a non-empty string of at most 200 characters")
+    for key in ("prev_hash", "chain_hash"):
+        if key in record and (
+            not isinstance(record[key], str) or not _HEX64_RE.match(record[key])
+        ):
+            errors.append(f"audit {key!r} must be 64 lowercase hex characters")
+    if "signature" in record and (
+        not isinstance(record["signature"], str) or not _HEX128_RE.match(record["signature"])
+    ):
+        errors.append("audit 'signature' must be 128 lowercase hex characters (Ed25519)")
+    if "key_id" in record and (
+        not isinstance(record["key_id"], str) or not record["key_id"] or len(record["key_id"]) > 200
+    ):
+        errors.append("audit 'key_id' must be a non-empty string of at most 200 characters")
     return tuple(errors)
 
 
@@ -165,18 +188,46 @@ def record_to_audit(record: dict[str, Any]) -> dict[str, Any]:
     return audit
 
 
-def records_to_ndjson(records: Iterable[dict[str, Any]]) -> str:
-    """Canonical NDJSON text for whole transcript records (newline-terminated)."""
+def records_to_ndjson(
+    records: Iterable[dict[str, Any]],
+    *,
+    chain: bool = False,
+    session_id: str | None = None,
+    run_id: str | None = None,
+) -> str:
+    """Canonical NDJSON text for whole transcript records (newline-terminated).
+
+    With ``chain=True`` every record is sealed with the tamper-evident hash
+    chain (``audit_chain.chain_records``) before serialising; the genesis
+    anchor names the session/run the feed claims to describe. Unchained
+    output is byte-identical to previous versions.
+    """
+    audit_records = [record_to_audit(record) for record in records]
+    if chain:
+        from audit_chain import chain_records as _chain_records
+
+        audit_records = _chain_records(
+            audit_records,
+            component=COMPONENT,
+            session_id=session_id,
+            run_id=run_id,
+        )
     return "".join(
         json.dumps(
-            record_to_audit(record),
+            audit_record,
             ensure_ascii=False,
             sort_keys=True,
             separators=(",", ":"),
         )
         + "\n"
-        for record in records
+        for audit_record in audit_records
     )
+
+
+def load_jsonl_records(path: Path) -> list[dict[str, Any]]:
+    """Transcript records from a ``*.jsonl`` file (torn tail skipped, like the reader)."""
+    records, _dropped = load_jsonl(path)
+    return records
 
 
 def transcript_path_to_ndjson(path: Path) -> str:
@@ -185,8 +236,7 @@ def transcript_path_to_ndjson(path: Path) -> str:
     Torn trailing lines are skipped exactly like the transcript reader skips
     them (expected after a crash); earlier corruption raises.
     """
-    records, _dropped = load_jsonl(path)
-    return records_to_ndjson(records)
+    return records_to_ndjson(load_jsonl_records(path))
 
 
 def session_path(directory: Path, session_id: str) -> Path:
