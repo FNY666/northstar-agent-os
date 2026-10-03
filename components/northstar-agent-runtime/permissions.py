@@ -52,6 +52,7 @@ from decision_model import (
     build_decision_audit,
     build_decision_state,
 )
+from multisig import MultisigGate, MultisigPolicy, MultisigSignature
 
 PermissionMode = Literal["default", "acceptEdits", "plan", "bypassPermissions"]
 
@@ -73,6 +74,7 @@ DecisionSource = Literal[
     "mode",
     "host_callback",
     "decision_model",
+    "multisig",
     "unknown_tool",
     "delegation_gate",
     "invalid_mode",
@@ -92,6 +94,11 @@ class PermissionDecision:
     #: input -> output -> verdict chain (state, questions, probabilities,
     #: thresholds), ready to append to the audit feed.
     decision_model_audit: dict[str, Any] | None = None
+    #: Extra structured material for the audit chain. Carries the multisig
+    #: verdict (approver ids + signature hexes) when the multisig tier
+    #: decided; empty otherwise, and omitted from ``as_dict()`` when empty so
+    #: existing outputs are byte-identical.
+    details: dict[str, Any] = field(default_factory=dict)
 
     @property
     def text(self) -> str:
@@ -107,6 +114,8 @@ class PermissionDecision:
         }
         if self.decision_model_audit is not None:
             payload["decision_model_audit"] = self.decision_model_audit
+        if self.details:
+            payload["details"] = self.details
         return payload
 
 
@@ -130,6 +139,11 @@ class PermissionRequestContext:
     reason_hint: str = ""
     call_id: str = ""
     arguments_digest: str = ""
+    #: Signatures presented for the multisig tier. The host collects these
+    #: out of band (m approvers each sign the exact ``(call_id,
+    #: arguments_digest)`` pair) and attaches them to the request; the
+    #: engine verifies them itself and never trusts the callback's word.
+    multisig_signatures: tuple[MultisigSignature, ...] = ()
     data: dict[str, Any] = field(default_factory=dict)
 
 
@@ -222,6 +236,11 @@ class PermissionConfig:
     #: means the deterministic gate path, unchanged.
     decision_model: DecisionModel | None = None
     decision_policy: DecisionPolicy = field(default_factory=DecisionPolicy)
+    #: When set, any mutating call that reaches the host-callback tier is
+    #: additionally gated on m-of-n approver signatures. This upgrades the
+    #: single-approver ASK to multisig: the host callback alone can no longer
+    #: release a high-risk call, so one compromised approver is insufficient.
+    multisig: MultisigPolicy | None = None
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "mode", validate_mode(self.mode))
@@ -233,6 +252,8 @@ class PermissionConfig:
             raise TypeError("decision_model must provide a decide(state, questions) method")
         if not isinstance(self.decision_policy, DecisionPolicy):
             raise TypeError("decision_policy must be a DecisionPolicy")
+        if self.multisig is not None and not isinstance(self.multisig, MultisigPolicy):
+            raise TypeError("multisig must be a MultisigPolicy")
 
     @property
     def overlap(self) -> tuple[str, ...]:
@@ -259,6 +280,7 @@ class PermissionEngine:
         disallowed_tools: Iterable[str] | None = None,
         can_use_tool: Callable[[str, dict[str, Any], PermissionRequestContext], Any] | None = None,
         tool_kinds: dict[str, str] | None = None,
+        multisig_pubkeys: Mapping[str, bytes] | None = None,
     ) -> None:
         if config is None:
             config = PermissionConfig(
@@ -271,6 +293,31 @@ class PermissionEngine:
         # Fallback kind map for callers that evaluate by name only (e.g. the
         # delegation gate, where no ToolSpec object is in hand).
         self._kinds: dict[str, str] = dict(tool_kinds or {})
+        # The multisig tier needs the approver public keys to verify against.
+        # A policy without keys would silently deny everything, so fail loud
+        # at construction instead.
+        if config.multisig is not None:
+            if not multisig_pubkeys:
+                raise ValueError(
+                    "multisig policy is configured but no approver public keys "
+                    "were supplied; refusing to build a gate that denies all"
+                )
+            self._multisig_gate: MultisigGate | None = MultisigGate(
+                config.multisig, multisig_pubkeys
+            )
+        else:
+            self._multisig_gate = None
+        #: Approver public keys the multisig tier verifies against (None when
+        #: no multisig policy is configured). Kept so hosts rebuilding the
+        #: engine (e.g. to attach a late ``can_use_tool``) can carry them over.
+        self._multisig_pubkeys: dict[str, bytes] | None = (
+            dict(multisig_pubkeys) if multisig_pubkeys else None
+        )
+
+    @property
+    def multisig_pubkeys(self) -> Mapping[str, bytes] | None:
+        """Approver public keys, or None when multisig is not configured."""
+        return self._multisig_pubkeys
 
     # -- layer helpers -----------------------------------------------------
     @property
@@ -527,6 +574,8 @@ class PermissionEngine:
             )
         approved, note = _approval_verdict(verdict)
         if approved:
+            if self._multisig_gate is not None:
+                return self._multisig_decision(tool_name, request)
             return PermissionDecision(
                 True,
                 source="host_callback",
@@ -540,6 +589,46 @@ class PermissionEngine:
             reason=note or f"{tool_name} refused by host approval callback",
             rule="host_callback:deny",
             tool=tool_name,
+        )
+
+    def _multisig_decision(
+        self, tool_name: str, request: PermissionRequestContext
+    ) -> PermissionDecision:
+        """Upgrade a single-approver ASK to m-of-n multisig.
+
+        The host callback has already said yes; that is now necessary but not
+        sufficient. The presented signatures are verified here, by the gate
+        itself, against the enrolled approver keys and the exact
+        ``(call_id, arguments_digest)`` pair — the callback's word is never
+        trusted for the signature check. Approver identities and signature
+        hexes ride along in ``details`` so the audit chain records exactly
+        who signed what.
+        """
+        gate = self._multisig_gate
+        assert gate is not None  # noqa: S101 - guarded by the caller
+        verdict = gate.check(
+            request.call_id, request.arguments_digest, request.multisig_signatures
+        )
+        details = verdict.as_dict()
+        details["signatures"] = [
+            sig.as_dict() for sig in request.multisig_signatures or ()
+        ]
+        if verdict.allowed:
+            return PermissionDecision(
+                True,
+                source="multisig",
+                reason=verdict.reason,
+                rule=f"multisig:{gate.policy.threshold}-of-{gate.policy.n}",
+                tool=tool_name,
+                details=details,
+            )
+        return PermissionDecision(
+            False,
+            source="multisig",
+            reason=verdict.reason,
+            rule=f"multisig:{gate.policy.threshold}-of-{gate.policy.n}:not_met",
+            tool=tool_name,
+            details=details,
         )
 
     def evaluate_spec(

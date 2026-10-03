@@ -80,6 +80,7 @@ py-modules = [
     "step_compliance",
     "mcp_elicitation",
     "mcp_negotiate",
+    "multisig",
     "permissions",
     "postconditions",
     "provider_retry",
