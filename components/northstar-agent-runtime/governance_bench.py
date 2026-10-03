@@ -4033,6 +4033,243 @@ def run_provenance_taint() -> dict[str, Any]:
     }
 
 
+def run_static_verification() -> dict[str, Any]:
+    """Static pre-dispatch policy verification (ninety-first batch).
+
+    Absorbs ``Agentic-AI-Risk-Mitigation/Janus`` (read as code:
+    ``janus/policy/{enforcer,validator,loader}.py``,
+    ``janus/tools/registry.py``):
+
+    * **Janus rule semantics** — priority-ordered allow/deny rules;
+      strict allow matching (a condition naming an absent argument does
+      NOT match — omission must not satisfy a rule); deny rules match
+      vacuously on absent args (fail closed); deny-before-allow at equal
+      priority; default-deny when nothing matches.
+    * **The Janus gap, closed** — Janus's ``ToolRegistry.register``
+      silently overwrites a tool definition. Here every definition's
+      canonical digest is pinned at registration; a re-registration with
+      a different digest is a loud ``DefinitionTamper`` and fail-closes
+      all later calls for that tool.
+    * **Deny-before-dispatch** — the (name, args-shape, caller) triple is
+      verified with no execution: unknown tools, arg smuggling, schema
+      violations, missing caller capabilities, and policy denials all
+      return deny verdicts before any handler could run.
+
+    Deterministic: no runtime, no network, no model. Ground truth is
+    closed: 12 scenarios, 2 allow / 10 deny.
+    """
+    from static_verify import (
+        ALLOW,
+        DENY,
+        DefinitionRegistry,
+        DefinitionTamper,
+        PolicyRule,
+        StaticVerifier,
+        ToolDefinition,
+        ToolParam,
+    )
+
+    def fresh() -> StaticVerifier:
+        reg = DefinitionRegistry()
+        reg.register(
+            ToolDefinition(
+                name="read_file",
+                description="Read a file",
+                params=(ToolParam("file_path", "string", required=True),),
+                required_caps=frozenset({"fs.read"}),
+            )
+        )
+        reg.register(
+            ToolDefinition(
+                name="write_file",
+                description="Write a file",
+                params=(
+                    ToolParam("file_path", "string", required=True),
+                    ToolParam("content", "string", required=True),
+                ),
+                required_caps=frozenset({"fs.write"}),
+            )
+        )
+        policy = {
+            "read_file": [
+                PolicyRule(
+                    priority=1,
+                    effect=ALLOW,
+                    conditions={
+                        "file_path": {"type": "string", "pattern": r"^/data/"}
+                    },
+                ),
+            ],
+            "write_file": [
+                PolicyRule(
+                    priority=1,
+                    effect=DENY,
+                    conditions={
+                        "file_path": {"type": "string", "pattern": r"^/etc/"}
+                    },
+                ),
+                PolicyRule(priority=2, effect=ALLOW, conditions={}),
+            ],
+        }
+        return StaticVerifier(reg, policy)
+
+    scenarios: list[tuple[str, bool]] = []
+    mismatches: list[str] = []
+
+    def record(sid: str, allowed: bool, expected: bool) -> None:
+        scenarios.append((sid, allowed))
+        if allowed != expected:
+            mismatches.append(sid)
+
+    # 1. clean call -> allow.
+    v = fresh()
+    d = v.verify_call("read_file", {"file_path": "/data/a.csv"}, {"fs.read"})
+    record("allow_clean_call", d.allowed, True)
+
+    # 2. unknown tool -> deny.
+    v = fresh()
+    d = v.verify_call("exec", {"cmd": "id"}, {"fs.read"})
+    record("deny_unknown_tool", d.allowed, False)
+
+    # 3. renamed/shadow tool (policy names the real tool only) -> deny.
+    v = fresh()
+    v._registry.register(
+        ToolDefinition(
+            name="read_file_",
+            description="Read a file",
+            params=(ToolParam("file_path", "string", required=True),),
+        )
+    )
+    d2 = StaticVerifier(
+        v._registry,
+        {
+            "read_file": [
+                PolicyRule(priority=1, effect=ALLOW, conditions={}),
+            ]
+        },
+    )
+    d = d2.verify_call("read_file_", {"file_path": "/data/a.csv"}, set())
+    record("deny_renamed_tool", d.allowed, False)
+
+    # 4. arg smuggling (extra arg not in pinned schema) -> deny.
+    v = fresh()
+    d = v.verify_call(
+        "read_file", {"file_path": "/data/a.csv", "extra": "x"}, {"fs.read"}
+    )
+    record("deny_arg_smuggling", d.allowed, False)
+
+    # 5. missing required arg -> deny.
+    v = fresh()
+    d = v.verify_call("read_file", {}, {"fs.read"})
+    record("deny_missing_required", d.allowed, False)
+
+    # 6. type mismatch -> deny.
+    v = fresh()
+    d = v.verify_call("read_file", {"file_path": 42}, {"fs.read"})
+    record("deny_type_mismatch", d.allowed, False)
+
+    # 7. tampered definition -> every later call denies fail-closed.
+    reg = DefinitionRegistry()
+    reg.register(
+        ToolDefinition(
+            name="read_file",
+            description="Read a file",
+            params=(ToolParam("file_path", "string", required=True),),
+            required_caps=frozenset({"fs.read"}),
+        )
+    )
+    tampered = False
+    try:
+        reg.register(
+            ToolDefinition(
+                name="read_file",
+                description="Read a file (updated schema)",
+                params=(ToolParam("file_path", "string", required=True),),
+                required_caps=frozenset({"fs.read"}),
+            )
+        )
+    except DefinitionTamper:
+        tampered = True
+    v = StaticVerifier(
+        reg,
+        {
+            "read_file": [
+                PolicyRule(priority=1, effect=ALLOW, conditions={}),
+            ]
+        },
+    )
+    d = v.verify_call("read_file", {"file_path": "/data/a.csv"}, {"fs.read"})
+    record("deny_definition_tamper", d.allowed, False)
+    if not tampered:
+        mismatches.append("deny_definition_tamper(no-tamper-event)")
+
+    # 8. policy deny rule matches (/etc/ path) -> deny.
+    v = fresh()
+    d = v.verify_call(
+        "write_file", {"file_path": "/etc/x", "content": "y"}, {"fs.write"}
+    )
+    record("deny_policy_deny_rule", d.allowed, False)
+
+    # 9. strict allow on absent arg falls through to default-deny.
+    reg = DefinitionRegistry()
+    reg.register(
+        ToolDefinition(
+            name="write_file",
+            description="Write a file",
+            params=(
+                ToolParam("file_path", "string", required=True),
+                ToolParam("content", "string", required=True),
+                ToolParam("mode", "string", required=False),
+            ),
+            required_caps=frozenset({"fs.write"}),
+        )
+    )
+    v = StaticVerifier(
+        reg,
+        {
+            "write_file": [
+                PolicyRule(
+                    priority=1,
+                    effect=ALLOW,
+                    conditions={"mode": {"type": "string"}},
+                )
+            ]
+        },
+    )
+    d = v.verify_call(
+        "write_file",
+        {"file_path": "/data/a", "content": "x"},  # mode omitted
+        {"fs.write"},
+    )
+    record("deny_strict_absent_arg", d.allowed, False)
+
+    # 10. caller lacks required capability -> deny.
+    v = fresh()
+    d = v.verify_call("read_file", {"file_path": "/data/a.csv"}, set())
+    record("deny_missing_capability", d.allowed, False)
+
+    # 11. pattern violation (path outside /data/) -> deny.
+    v = fresh()
+    d = v.verify_call("read_file", {"file_path": "/etc/passwd"}, {"fs.read"})
+    record("deny_pattern_violation", d.allowed, False)
+
+    # 12. policy-allowed write outside the deny scope -> allow.
+    v = fresh()
+    d = v.verify_call(
+        "write_file", {"file_path": "/data/out.txt", "content": "ok"}, {"fs.write"}
+    )
+    record("allow_write_outside_deny_scope", d.allowed, True)
+
+    allowed_ids = [sid for sid, ok in scenarios if ok]
+    return {
+        "n_scenarios": len(scenarios),
+        "n_allowed": len(allowed_ids),
+        "n_denied": len(scenarios) - len(allowed_ids),
+        "allowed_ids": allowed_ids,
+        "mismatches": mismatches,
+    }
+
+
 def run_approver_separation() -> dict[str, Any]:
     """No-self-attestation: the proposer is never its own approver.
 
@@ -8833,6 +9070,59 @@ def _case_metrics_provenance_taint(h: BenchHarness) -> BenchExpectation:
     )
 
 
+def _case_metrics_static_verification(h: BenchHarness) -> BenchExpectation:
+    """Static pre-dispatch policy verification (ninety-first batch).
+
+    Janus absorption (``Agentic-AI-Risk-Mitigation/Janus``, read as code):
+    priority-ordered allow/deny rules with strict allow semantics and
+    default-deny, plus the Janus gap closed — digest-pinned tool
+    definitions so a tampered re-registration fail-closes instead of
+    silently overwriting. 12 deterministic scenarios, 2 allow / 10 deny:
+    clean call, unknown tool, renamed/shadow tool, arg smuggling,
+    missing required arg, type mismatch, definition tamper, policy deny
+    rule, strict-mode absent-arg fall-through, missing caller
+    capability, pattern violation, and an in-scope write.
+    """
+    metrics = run_static_verification()
+
+    def check(exp: BenchExpectation, report: Any) -> tuple[bool, str]:
+        if metrics["n_scenarios"] != 12:
+            return (
+                False,
+                f"expected 12 static-verification scenarios, saw {metrics['n_scenarios']}",
+            )
+        if metrics["mismatches"]:
+            return (
+                False,
+                f"scenario(s) disagree with ground truth: {metrics['mismatches']}",
+            )
+        if metrics["n_allowed"] != 2 or metrics["n_denied"] != 10:
+            return (
+                False,
+                f"expected 2 allow / 10 deny, saw {metrics['n_allowed']} / "
+                f"{metrics['n_denied']}",
+            )
+        return (
+            True,
+            "12 scenarios green: clean call allowed, unknown/renamed tools "
+            "denied, arg smuggling denied, definition tamper fail-closed, "
+            "strict-mode fall-through denies, policy deny rule fires",
+        )
+
+    return BenchExpectation(
+        runtime=_noop_runtime(h),
+        expect_subtype="success",
+        post_check=check,
+        metrics=metrics,
+        notes=(
+            "Janus static verification: (name, args-shape, caller) triple "
+            "verified before dispatch — digest-pinned definitions, strict "
+            "allow semantics, default-deny; 2 allow / 10 deny over 12 "
+            "deterministic bypass probes"
+        ),
+    )
+
+
 def _case_metrics_approver_separation(h: BenchHarness) -> BenchExpectation:
     """No-self-attestation: the proposer is never its own approver.
 
@@ -10237,6 +10527,7 @@ CASES: tuple[BenchCase, ...] = (
     BenchCase("metrics.evidence_tiers", "metrics", "binary evidence tiers + LOG_DROP policy (Tesserae)", _case_metrics_evidence_tiers),
     BenchCase("metrics.memory_write_gates", "metrics", "memory write-time gates (nevertwice/OWASP-AMG)", _case_metrics_memory_write_gates),
     BenchCase("metrics.provenance_taint", "metrics", "provenance-tracked taint + fail-closed security automata + per-tool budgets (Guardians)", _case_metrics_provenance_taint),
+    BenchCase("metrics.static_verification", "metrics", "static pre-dispatch policy verification: digest-pinned definitions + Janus rule semantics", _case_metrics_static_verification),
     BenchCase("metrics.approver_separation", "metrics", "no-self-attestation: proposer excluded from approver set + delegation subtree (ERC-8004)", _case_metrics_approver_separation),
     BenchCase("metrics.adversarial_scenarios", "metrics", "adversarial scenarios: multi-agent failures, no-adversary failures, malicious-but-signed", _case_metrics_adversarial_scenarios),
     BenchCase("metrics.harness_binding", "metrics", "harness integrity binding: SHA-256 harness hash in audit, quad-only scores", _case_metrics_harness_binding),
@@ -10858,6 +11149,7 @@ __all__ = [
     "run_passport_security",
     "run_evidence_tiers",
     "run_provenance_taint",
+    "run_static_verification",
     "run_approver_separation",
     "run_adversarial_scenarios",
     "run_owasp_asi_coverage",

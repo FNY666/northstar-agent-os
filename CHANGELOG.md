@@ -1,3 +1,24 @@
+## Unreleased (ninety-first batch) — static pre-dispatch policy verification (Janus absorption)
+
+Absorbs the static-verification half of `Agentic-AI-Risk-Mitigation/Janus`
+(read as code 2026-10-04: `janus/policy/{enforcer,validator,loader}.py`,
+`janus/tools/registry.py` — mechanism ideas only, honestly scoped in
+`static_verify.py`): Janus priority-ordered allow/deny rules with strict
+allow semantics (a condition naming an absent argument does NOT match —
+omission must not satisfy a rule), deny-before-allow at equal priority,
+and default-deny; plus the Janus gap closed — Janus's
+`ToolRegistry.register` silently overwrites definitions, so here every
+tool definition's canonical digest is pinned at registration and a
+re-registration with a different digest is a loud `DefinitionTamper`
+that fail-closes all later calls (audited `force_reregister` is the only
+replacement path). The `StaticVerifier` gate checks the (name,
+args-shape, caller) triple with zero execution: unknown tools, arg
+smuggling, schema violations, missing caller capabilities, and policy
+denials all return deny verdicts before any handler could run. New bench
+track `metrics.static_verification` (12 deterministic scenarios, 2 allow
+/ 10 deny: clean call, unknown/renamed tools, arg smuggling, tampered
+definition, strict-mode fall-through, policy deny rule).
+
 ## Unreleased (ninety-fourth batch) — no-self-attestation (ERC-8004 absorption)
 
 Absorbs the ERC-8004 no-self-attestation rule (live on mainnet 2026-01-29,

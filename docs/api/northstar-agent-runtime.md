@@ -1295,6 +1295,82 @@ Verify one step's materials/products against its layout rules.
 
 Verify a full trajectory against the layout.
 
+### `static_verify`
+
+Source: `components/northstar-agent-runtime/static_verify.py`
+
+Static pre-dispatch verification of tool-call policies (ninety-first batch).
+
+#### `StaticVerifyError`
+
+Raised for malformed policies, definitions, or restriction specs.
+
+#### `DefinitionTamper`
+
+Raised when a re-registration's digest differs from the pinned digest.
+
+#### `canonical_json(value: Any)`
+
+Deterministic JSON encoding for digesting (sorted keys, tight separators).
+
+#### `sha256_hex(text: str)`
+
+#### `definition_digest(definition: dict[str, Any])`
+
+SHA-256 over the canonical form of a tool definition.
+
+#### `ToolParam`
+
+One parameter of a tool definition (Janus ``ToolParam`` shape).
+
+#### `ToolDefinition`
+
+A tool's static contract: name, description, params, required caps.
+
+- `to_dict()`
+- `digest` (property)
+#### `DefinitionRegistry`
+
+Registers tool definitions with pinned digests.
+
+- `register(definition: ToolDefinition)`
+  - Register a definition, pinning its digest. Returns the digest.
+- `force_reregister(definition: ToolDefinition, *, reason: str)`
+  - Audited replacement of a pinned definition. Requires a reason.
+- `get(name: str)`
+- `pinned_digest(name: str)`
+- `is_tampered(name: str)`
+- `names()`
+- `events()`
+#### `PolicyRule`
+
+One Janus-style rule: (priority, effect, conditions, fallback).
+
+#### `sort_policy(policy: Policy)`
+
+Sort each tool's rules by (priority, -effect): deny before allow at equal priority — the fail-closed tie-break from Janus's ``_sort_policy``.
+
+#### `verify_policy_structure(policy: Policy, registry: DefinitionRegistry)`
+
+Statically cross-validate a policy against registered definitions.
+
+#### `StaticVerdict`
+
+The gate's answer. Denials are values, not exceptions: deny-before- dispatch means the runtime asks and gets an answer, never a throw.
+
+- `allowed` (property)
+#### `StaticVerifier`
+
+Pure static pre-dispatch gate over (name, args-shape, caller).
+
+- `policy` (property)
+- `events()`
+- `verify_call(tool_name: str, args: dict[str, Any], caller_caps: frozenset[str] | set[str]=frozenset())`
+  - Statically verify the (name, args-shape, caller) triple.
+#### `static_verify_audit_events(verifier: StaticVerifier)`
+
+Decision + registry events, shaped for the ``audit.ndjson/1`` chain.
+
 ### `mcp_elicitation`
 
 Source: `components/northstar-agent-runtime/mcp_elicitation.py`
