@@ -41,7 +41,7 @@ from tools import ToolLimits, ToolSandbox, build_default_registry
 
 #: Semantic version of the public case set. Bump when a case is added, removed,
 #: or its expected verdict changes — consumers pin against this string.
-BENCH_VERSION = "northstar.governance.bench.v10"
+BENCH_VERSION = "northstar.governance.bench.v11"
 
 USAGE_ERROR = 64
 
@@ -2245,6 +2245,189 @@ def _case_seccomp_payload_cannot_loosen(h: BenchHarness) -> BenchExpectation:
     )
 
 
+def _capdrop_live(h: BenchHarness, ws, title: str, command: str, marker: str,
+                  notes: str, payload_extra: dict | None = None,
+                  config_extra: dict | None = None) -> BenchExpectation:
+    """Scaffold for Linux-only live capdrop cases.
+
+    On non-Linux the case does not pretend to test capset/prctl: it passes
+    explicitly with ``supported: false`` recorded in the metrics so the gap
+    is visible instead of silent.
+    """
+    if not sys.platform.startswith("linux"):
+        runtime = h.runtime(
+            workspace=ws, turns=[_text("engine-only")], config_kwargs={"max_turns": 1}
+        )
+        return BenchExpectation(
+            runtime=runtime,
+            workspace=ws,
+            expect_subtype="success",
+            notes=notes + " (non-Linux: capset/prctl unavailable, recorded supported=false)",
+            engine_ok=True,
+            metrics={"supported": False},
+        )
+    config_kwargs = {
+        "allowed_tools": ("Shell",),
+        "shell_backend": "process",
+        "shell_capdrop": "on",
+        "max_turns": 3,
+    }
+    config_kwargs.update(config_extra or {})
+    payload = {"command": command}
+    payload.update(payload_extra or {})
+    runtime = h.runtime(
+        workspace=ws,
+        turns=[_tool("Shell", payload), _text("done")],
+        config_kwargs=config_kwargs,
+    )
+    return BenchExpectation(
+        runtime=runtime,
+        workspace=ws,
+        expect_subtype="success",
+        require_paths=(marker,),
+        notes=notes,
+        metrics={"supported": True},
+    )
+
+
+def _case_metrics_capdrop_table_and_policy(h: BenchHarness) -> BenchExpectation:
+    """Pure check + one direct deny-all run: the 41-entry capability table
+    carries the kernel-header numbering, resolve_capdrop is tighten-only, and
+    a real deny-all child yields a complete audit report (four ops all ok,
+    all five sets zero, no errors)."""
+    from tools.capdrop import CAPABILITIES, CapDropError, resolve_capdrop
+
+    ws = h.workspace()
+    table_ok = (
+        len(CAPABILITIES) == 41
+        and sorted(CAPABILITIES.values()) == list(range(41))
+        and CAPABILITIES["CAP_CHOWN"] == 0
+        and CAPABILITIES["CAP_SYS_ADMIN"] == 21
+        and CAPABILITIES["CAP_CHECKPOINT_RESTORE"] == 40
+    )
+    tighten_ok = (
+        resolve_capdrop(None, None) == ()
+        and resolve_capdrop("off", None) == ()  # a payload cannot disable
+        and resolve_capdrop(["CAP_CHOWN"], "off") is None  # service "off" wins
+        and resolve_capdrop("CAP_CHOWN,CAP_KILL", "CAP_CHOWN,CAP_KILL,CAP_SETUID")
+        == ("CAP_CHOWN", "CAP_KILL")  # a payload only narrows
+    )
+    try:
+        resolve_capdrop("CAP_NOPE", None)
+        unknown_rejected = False
+    except CapDropError:
+        unknown_rejected = True
+    tighten_ok = tighten_ok and unknown_rejected
+    supported = sys.platform.startswith("linux")
+    live_ok: bool | None = None
+    if supported:
+        from tools.os_sandbox import SandboxRequest, run_sandboxed
+
+        root = Path(tempfile.mkdtemp(prefix="nsar-capdrop-bench-"))
+        req = SandboxRequest(
+            argv=("true",), cwd=root, workspace=root, capdrop_whitelist=(),
+            seccomp="off",
+        )
+        result = run_sandboxed(req, backend="process")
+        report = result.capdrop or {}
+        ops = report.get("ops", [])
+        after = report.get("after", {})
+        live_ok = (
+            result.exit_code == 0
+            and report.get("whitelist") == []
+            and report.get("errors") == []
+            and len(ops) == 4
+            and all(isinstance(op, dict) and op.get("ok") for op in ops)
+            and all(
+                after.get(field) == "0000000000000000"
+                for field in ("CapInh", "CapPrm", "CapEff", "CapBnd", "CapAmb")
+            )
+        )
+    runtime = h.runtime(
+        workspace=ws, turns=[_text("engine-only")], config_kwargs={"max_turns": 1}
+    )
+    engine_ok = table_ok and tighten_ok and (live_ok if supported else True)
+    return BenchExpectation(
+        runtime=runtime,
+        workspace=ws,
+        expect_subtype="success",
+        notes=(
+            "capdrop table + tighten-only policy + deny-all audit report"
+            + ("" if supported else " (non-Linux: live leg recorded supported=false)")
+        ),
+        engine_ok=engine_ok,
+        metrics={
+            "supported": supported,
+            "table_41_entries": table_ok,
+            "tighten_only": tighten_ok,
+            "deny_all_audit_complete": live_ok,
+        },
+    )
+
+
+def _case_metrics_capdrop_deny_all_live(h: BenchHarness) -> BenchExpectation:
+    # Behavioral proof the launcher really clears the child: only a
+    # zeroed five-set lets the command create the proof file.
+    ws = h.workspace()
+    return _capdrop_live(
+        h,
+        ws,
+        "metrics.capdrop_deny_all_live",
+        "for f in CapInh CapPrm CapEff CapBnd CapAmb; do "
+        "grep -q \"^$f:[[:space:]]*0000000000000000$\" /proc/self/status || exit 1; "
+        "done && touch capdrop_deny_all_ok.txt",
+        "capdrop_deny_all_ok.txt",
+        "deny-all leaves all five capability sets zero in the child",
+    )
+
+
+def _case_metrics_capdrop_escalation_eperm(h: BenchHarness) -> BenchExpectation:
+    # After a deny-all drop the child must not be able to re-raise a
+    # capability: capset(CAP_SYS_ADMIN) must fail EPERM from inside.
+    ws = h.workspace()
+    escalate_py = (
+        "python3 - <<'PYEOF'\n"
+        "import ctypes, platform, sys\n"
+        "libc = ctypes.CDLL(None, use_errno=True)\n"
+        "class Hdr(ctypes.Structure):\n"
+        "    _fields_ = [('version', ctypes.c_uint32), ('pid', ctypes.c_int)]\n"
+        "class Dat(ctypes.Structure):\n"
+        "    _fields_ = [('effective', ctypes.c_uint32), ('permitted', ctypes.c_uint32), ('inheritable', ctypes.c_uint32)]\n"
+        "hdr = Hdr(0x20080522, 0)\n"
+        "dat = (Dat * 2)((Dat(1 << 21, 1 << 21, 0)), (Dat(0, 0, 0)))\n"
+        "nr = 126 if platform.machine() == 'x86_64' else 91\n"
+        "rc = libc.syscall(nr, ctypes.byref(hdr), ctypes.byref(dat))\n"
+        "sys.exit(0 if (rc != 0 and ctypes.get_errno() == 1) else 1)\n"
+        "PYEOF\n"
+        "test $? -eq 0 && touch capdrop_eperm_ok.txt"
+    )
+    return _capdrop_live(
+        h,
+        ws,
+        "metrics.capdrop_escalation_eperm",
+        escalate_py,
+        "capdrop_eperm_ok.txt",
+        "capset(CAP_SYS_ADMIN) after deny-all fails EPERM from inside",
+    )
+
+
+def _case_metrics_capdrop_payload_cannot_loosen(h: BenchHarness) -> BenchExpectation:
+    # Tighten-only, observed behaviorally: with the operator at "on", a
+    # per-call capdrop="off" must still leave the child with zeroed sets.
+    ws = h.workspace()
+    return _capdrop_live(
+        h,
+        ws,
+        "metrics.capdrop_payload_cannot_loosen",
+        "for f in CapInh CapPrm CapEff CapBnd CapAmb; do "
+        "grep -q \"^$f:[[:space:]]*0000000000000000$\" /proc/self/status || exit 1; "
+        "done && touch capdrop_tightened.txt",
+        "capdrop_tightened.txt",
+        "operator --capdrop=on wins over a per-call capdrop=off (tighten-only)",
+        payload_extra={"capdrop": "off"},
+    )
+
+
 def _case_unit_permission_engine_disallowed(h: BenchHarness) -> BenchExpectation:
     """Pure engine check (no loop) so the bench also covers the gate in isolation."""
     ws = h.workspace()
@@ -3527,6 +3710,10 @@ CASES: tuple[BenchCase, ...] = (
     BenchCase("metrics.approval_percall_binding", "metrics", "per-call approval binding + structured denial", _case_metrics_approval_percall_binding),
     BenchCase("metrics.ask_timing", "metrics", "ASK-timing judgment (Ask-F1-style)", _case_metrics_ask_timing),
     BenchCase("metrics.whisper_contrast", "metrics", "whisper-attacks contrast: signature vs bound arguments", _case_metrics_whisper_contrast),
+    BenchCase("metrics.capdrop_table_and_policy", "metrics", "capdrop table + tighten-only + deny-all audit", _case_metrics_capdrop_table_and_policy),
+    BenchCase("metrics.capdrop_deny_all_live", "metrics", "deny-all zeroes all five sets in child", _case_metrics_capdrop_deny_all_live),
+    BenchCase("metrics.capdrop_escalation_eperm", "metrics", "capset after deny-all fails EPERM", _case_metrics_capdrop_escalation_eperm),
+    BenchCase("metrics.capdrop_payload_cannot_loosen", "metrics", "per-call capdrop cannot loosen", _case_metrics_capdrop_payload_cannot_loosen),
 )
 
 
@@ -3931,6 +4118,24 @@ def _print_report(report: BenchReport) -> None:
                 f"{whisper.get('n_mutations', 0)}, reorder FP="
                 f"{whisper.get('canonical_reorder_blocked', '?')}"
             )
+        capdrop = report.metrics.get("metrics.capdrop_table_and_policy", {})
+        if capdrop:
+            live = capdrop.get("deny_all_audit_complete")
+            print(
+                f"  capdrop: table41={capdrop.get('table_41_entries')}, "
+                f"tighten-only={capdrop.get('tighten_only')}, "
+                f"deny-all audit complete={live}, "
+                f"supported={capdrop.get('supported')}"
+            )
+            live_bits = []
+            for cid in (
+                "metrics.capdrop_deny_all_live",
+                "metrics.capdrop_escalation_eperm",
+                "metrics.capdrop_payload_cannot_loosen",
+            ):
+                m = report.metrics.get(cid, {})
+                live_bits.append(f"{cid.split('.')[-1]} supported={m.get('supported')}")
+            print(f"    live legs: {', '.join(live_bits)}")
     if report.ok:
         print("result: PASS — gate decisions match the public scorecard")
     else:

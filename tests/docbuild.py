@@ -119,6 +119,7 @@ MANIFEST: dict[str, tuple[str, ...]] = {
         "tools.__init__",
         "tools.os_sandbox",
         "tools.seccomp",
+        "tools.capdrop",
         "tools.parallel",
         "tools.shell",
         "tools.skill_scripts",

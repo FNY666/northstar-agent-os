@@ -188,6 +188,11 @@ class RuntimeConfig:
     #: filter and refuses the process backend; ``off`` disables it. A per-call
     #: Shell payload may only tighten this, never loosen it.
     shell_seccomp: str = "auto"
+    #: Linux capability drop for tool-effect subprocesses: ``on`` (deny-all,
+    #: the default), ``off`` (disable the launcher — operator escape hatch),
+    #: or a comma-separated ``CAP_*`` whitelist. A per-call Shell payload may
+    #: only narrow this whitelist, never widen it or switch the launcher off.
+    shell_capdrop: str = "on"
     #: How many **parallel-safe** tool handlers may run at once inside one
     #: assistant turn. ``1`` (default) is full serial dispatch. Values >1 only
     #: accelerate a turn whose *every* call is kind=read and non-mutating;
@@ -269,6 +274,15 @@ class RuntimeConfig:
         if seccomp not in {"auto", "on", "off"}:
             fail(f"shell_seccomp must be auto, on, or off; got {self.shell_seccomp!r}")
         object.__setattr__(self, "shell_seccomp", seccomp)
+        capdrop = (self.shell_capdrop or "on").strip()
+        if capdrop.lower() not in {"on", "off"}:
+            from tools.capdrop import CapDropError, parse_whitelist
+
+            try:
+                parse_whitelist(capdrop)
+            except CapDropError as error:
+                fail(f"shell_capdrop must be on, off, or a CAP_* whitelist; got {self.shell_capdrop!r}: {error}")
+        object.__setattr__(self, "shell_capdrop", capdrop)
         if backend == "bwrap":
             # Fail at construction, not mid-tool-call: a run that promised OS
             # isolation and then cannot deliver it is a configuration error.
@@ -309,6 +323,7 @@ class RuntimeConfig:
             "parallel_tools": self.parallel_tools,
             "shell_backend": self.shell_backend,
             "shell_seccomp": self.shell_seccomp,
+            "shell_capdrop": self.shell_capdrop,
             "compaction_threshold_tokens": self.compaction_threshold_tokens,
             "stream": self.stream,
             "retry": self.retry.as_dict() if self.retry is not None else None,
@@ -1149,6 +1164,7 @@ class AgentRuntime:
             "protected_prefixes": list(config.tool_limits.protected_prefixes),
             "shell_backend": config.shell_backend,
             "shell_seccomp": config.shell_seccomp,
+            "shell_capdrop": config.shell_capdrop,
         }
         try:
             from tools.os_sandbox import probe_capabilities, resolve_backend
@@ -2176,6 +2192,7 @@ class AgentRuntime:
             "runtime": self,
             "shell_backend": self.config.shell_backend,
             "shell_seccomp": self.config.shell_seccomp,
+            "shell_capdrop": self.config.shell_capdrop,
         }
 
     def _record_tool_message(self, message: UserMessage) -> None:

@@ -1,4 +1,45 @@
-## Unreleased (fifty-ninth batch) — `audit export --akf` technical spike
+## Unreleased (sixtieth batch) — Linux capability-drop launcher for tool-effect subprocesses
+
+New module `components/northstar-agent-runtime/tools/capdrop.py`: a
+least-privilege launcher that zeroes (or whitelist-narrows) the child's
+Linux capabilities before exec, so a tool process that escapes its command
+still holds no ambient privilege. Semantics verified against
+[man 7 capabilities](https://man7.org/linux/man-pages/man7/capabilities.7.html)
+(read 2026-10-03) and `/usr/include/linux/capability.h`, not memory:
+
+- **41-entry table, bits 0–40** (`CAP_CHOWN` 0 … `CAP_CHECKPOINT_RESTORE` 40)
+  taken from the kernel header; ambient-set clearing via `PR_CAP_AMBIENT`
+  (47) `CLEAR_ALL` (4); bounding-set shrink via `PR_CAPBSET_DROP` (24)
+  (irreversible, needs `CAP_SETPCAP`); securebits locked to `0xCB`
+  (`SECBIT_NOROOT | SECBIT_NOROOT_LOCKED | SECBIT_NO_SETUID_FIXUP |
+  SECBIT_NO_SETUID_FIXUP_LOCKED`); the final permitted/effective/inheritable
+  zeroing via `capset(2)` (x86_64 nr 126, aarch64 nr 91). Raising a dropped
+  capability is never attempted: the whitelist can only be a subset of the
+  launcher's own permitted set, so privilege is never fabricated.
+- **Fail-closed**: a whitelist naming a capability the launcher does not
+  hold exits 126 and the target command never runs. Each op is journaled
+  (`ambient_clear`, `bounding_drop`, `securebits`, `capset`) and the JSON
+  audit report is passed back to the parent over an fd the launcher closes
+  before exec; `run_sandboxed` attaches it as `SandboxResult.capdrop`.
+- **Tighten-only policy** (`resolve_capdrop`): per-call `Shell` payloads may
+  only *narrow* the operator's `--capdrop` whitelist — never widen it and
+  never switch the launcher off. Only the operator's `--capdrop off`
+  disables it (escape hatch, explicit). Non-Linux hosts with an explicit
+  whitelist fail loudly (`SandboxError`); `None` disables silently.
+- **bwrap backend**: `--cap-drop ALL` followed by one `--cap-add` per
+  whitelist entry (order matters per bwrap(1)), probed at startup
+  (`SandboxCapabilities.bwrap_cap_drop`).
+- **CLI**: `--capdrop` (`on` = deny-all default | `off` | comma-separated
+  `CAP_*` list) → `RuntimeConfig.shell_capdrop` → `ctx.service("shell_capdrop")`.
+
+Four new `metrics.capdrop_*` governance-bench cases (BENCH_VERSION v10 →
+v11): capability-table/policy audit, deny-all live zeroing of all five
+sets, post-drop `capset(CAP_SYS_ADMIN)` failing `EPERM` from inside, and
+per-call `capdrop=off` unable to loosen an operator `on`. Non-Linux bench
+legs explicitly record `supported: false` rather than skipping silently.
++24 unit/live tests (`tests/test_capdrop.py`); docbuild API page for
+`tools.capdrop`.
+
 
 Evaluates the [AKF (Agent Knowledge Format)](https://github.com/HMAKT99/AKF)
 (MIT, schema `spec/akf-v1.1.schema.json` @ `e4908d3`) as an interoperability

@@ -434,6 +434,16 @@ def _add_execution_arguments(parser: argparse.ArgumentParser) -> None:
                 "A per-call Shell payload may only tighten this, never loosen it."
             ),
         )
+        execution.add_argument(
+            "--capdrop",
+            default="on",
+            help=(
+                "Linux capability drop for tool-effect subprocesses: on (deny-all; the default), "
+                "off (disable the launcher — operator escape hatch), or a comma-separated "
+                "CAP_* whitelist (e.g. CAP_CHOWN,CAP_DAC_OVERRIDE). A per-call Shell payload "
+                "may only narrow this whitelist, never widen it or switch the launcher off."
+            ),
+        )
 
 def _add_output_arguments(parser: argparse.ArgumentParser) -> None:
         output = parser.add_argument_group("output")
@@ -1307,6 +1317,7 @@ def _run(args: argparse.Namespace) -> int:
         config_kwargs["sidecar_timeout_ms"] = args.sidecar_timeout_ms
     config_kwargs["shell_backend"] = getattr(args, "sandbox", "auto") or "auto"
     config_kwargs["shell_seccomp"] = getattr(args, "seccomp", "auto") or "auto"
+    config_kwargs["shell_capdrop"] = getattr(args, "capdrop", "on") or "on"
     config_kwargs["parallel_tools"] = int(getattr(args, "parallel_tools", 1) or 1)
 
     validate_session_flags(args, ceilings)

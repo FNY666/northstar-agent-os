@@ -2187,6 +2187,50 @@ The denylist table for an arch (``x86_64`` or ``aarch64``).
 
 Wrap ``target_argv`` so the denylist is installed via prctl before exec.
 
+### `tools.capdrop`
+
+Source: `components/northstar-agent-runtime/tools/capdrop.py`
+
+Linux capability minimisation launcher for tool-effect subprocesses.
+
+#### `CapDropError`
+
+Invalid capability policy or an unsatisfiable drop requirement.
+
+#### `CapDropPolicy`
+
+Whitelist of capability names retained across the drop.
+
+- `numbers()`
+  - Whitelist as sorted capability bit numbers (what the loader takes).
+#### `parse_whitelist(spec: object)`
+
+Parse a whitelist from None / "" / comma string / sequence of names.
+
+#### `resolve_capdrop(payload_value: object, service_value: object)`
+
+Merge a per-call payload value with the operator-configured service value.
+
+#### `read_capability_sets()`
+
+Read this thread's five capability sets from /proc/self/status.
+
+#### `capability_sets_zero(sets: dict[str, int])`
+
+True when every capability set in ``sets`` is empty.
+
+#### `summarize_report(report: dict[str, object])`
+
+One-line human/model-facing summary of a loader audit report.
+
+#### `capdrop_loader_argv(target_argv: Sequence[str], whitelist: Sequence[str] | Sequence[int] | CapDropPolicy, *, fd: int, python: str='python3')`
+
+Wrap ``target_argv`` so capabilities are dropped before exec.
+
+#### `bwrap_capability_args(whitelist: Sequence[str])`
+
+bwrap ``--cap-drop``/``--cap-add`` args for a whitelist.
+
 ### `tools.parallel`
 
 Source: `components/northstar-agent-runtime/tools/parallel.py`

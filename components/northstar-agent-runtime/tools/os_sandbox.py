@@ -24,6 +24,7 @@ process backend and the policy surface offline.
 """
 from __future__ import annotations
 
+import json
 import os
 import selectors
 import shutil
@@ -36,6 +37,13 @@ from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any, Mapping, Sequence
 
+from tools.capdrop import (
+    CapDropError,
+    bwrap_capability_args,
+    capdrop_loader_argv,
+    parse_whitelist,
+    summarize_report,
+)
 from tools.seccomp import SECCOMP_MODES, SeccompError, build_default_filter, prctl_loader_argv
 
 #: Hard ceilings a single Shell invocation may not exceed. Operators may only
@@ -62,6 +70,7 @@ class SandboxCapabilities:
     bwrap_path: str | None
     bwrap_usable: bool
     bwrap_detail: str
+    bwrap_cap_drop: bool = False
     process_available: bool = True
     preferred: str = "process"
 
@@ -70,6 +79,7 @@ class SandboxCapabilities:
             "bwrap_path": self.bwrap_path,
             "bwrap_usable": self.bwrap_usable,
             "bwrap_detail": self.bwrap_detail,
+            "bwrap_cap_drop": self.bwrap_cap_drop,
             "process_available": self.process_available,
             "preferred": self.preferred,
             "isolation": "os" if self.preferred == "bwrap" and self.bwrap_usable else "process",
@@ -88,6 +98,11 @@ class SandboxRequest:
     env: Mapping[str, str] | None = None
     network: bool = False  # reserved: bwrap always unshares net today; True is refused
     seccomp: str = "auto"  # seccomp denylist: auto (bwrap only) | on (require) | off
+    #: Linux capability whitelist for the tool-effect child. ``()`` (the
+    #: default) is deny-all; ``None`` disables the launcher entirely
+    #: (operator escape hatch — the Shell tool only passes None when the
+    #: operator configured ``--capdrop off``).
+    capdrop_whitelist: tuple[str, ...] | None = ()
 
 
 @dataclass(frozen=True)
@@ -104,6 +119,10 @@ class SandboxResult:
     duration_ms: int
     truncated: bool = False
     detail: str = ""
+    #: Audit report from the capability-drop launcher (process backend,
+    #: Linux only): whitelist, before/after capability sets, per-operation
+    #: results. ``None`` when the launcher did not run.
+    capdrop: dict[str, Any] | None = None
 
     @property
     def ok(self) -> bool:
@@ -121,6 +140,7 @@ class SandboxResult:
             "duration_ms": self.duration_ms,
             "truncated": self.truncated,
             "detail": self.detail,
+            "capdrop": self.capdrop,
         }
 
     def render(self) -> str:
@@ -198,11 +218,23 @@ def probe_capabilities(*, force: bool = False, bwrap_bin: str | None = None) -> 
                 detail = f"bwrap at {path} failed probe: {(err[-1] if err else 'exit ' + str(completed.returncode))[:200]}"
         except (OSError, subprocess.TimeoutExpired) as error:
             detail = f"bwrap at {path} could not be probed: {error}"
+    cap_drop = False
+    if usable and path:
+        # bwrap(1) --cap-drop/--cap-add exist on modern bubblewrap; probe the
+        # binary's own help rather than assuming the version.
+        try:
+            help_out = subprocess.run(
+                [path, "--help"], capture_output=True, text=True, timeout=5, check=False
+            )
+            cap_drop = "--cap-drop" in (help_out.stdout or "")
+        except (OSError, subprocess.TimeoutExpired):
+            cap_drop = False
     preferred = "bwrap" if usable else "process"
     caps = SandboxCapabilities(
         bwrap_path=path if path else None,
         bwrap_usable=usable,
         bwrap_detail=detail,
+        bwrap_cap_drop=cap_drop,
         preferred=preferred,
     )
     _CAP_CACHE = caps
@@ -288,6 +320,16 @@ def _validate_request(request: SandboxRequest) -> None:
         raise SandboxError(
             f"unknown seccomp mode {request.seccomp!r}; choose one of {', '.join(SECCOMP_MODES)}"
         )
+    if request.capdrop_whitelist is not None:
+        try:
+            whitelist = parse_whitelist(request.capdrop_whitelist)
+        except CapDropError as error:
+            raise SandboxError(f"invalid capdrop whitelist: {error}") from error
+        if whitelist and not sys.platform.startswith("linux"):
+            raise SandboxError(
+                "a capdrop whitelist requires Linux (capset/prctl); "
+                f"this host is {sys.platform}"
+            )
 
 
 def _read_capped(stream: Any, limit: int) -> tuple[bytes, bool]:
@@ -503,6 +545,8 @@ def _bwrap_argv(
     seccomp_fd: int | None = None,
     passwd_path: str | None = None,
     group_path: str | None = None,
+    capdrop_whitelist: tuple[str, ...] | None = None,
+    cap_drop_supported: bool = False,
 ) -> list[str]:
     """Build a conservative bubblewrap command line around the user argv."""
     workspace = Path(os.path.realpath(str(request.workspace)))
@@ -530,6 +574,11 @@ def _bwrap_argv(
         # bwrap reads the BPF program from this fd at exec time; the caller
         # keeps it open via Popen(pass_fds=[...]).
         seccomp_args = ["--seccomp", str(seccomp_fd)]
+    cap_args: list[str] = []
+    if capdrop_whitelist is not None and cap_drop_supported:
+        # --cap-drop ALL then --cap-add per whitelist entry: bwrap(1)
+        # processes the two in command-line order, so the adds survive.
+        cap_args = bwrap_capability_args(capdrop_whitelist)
     argv = [
         bwrap_path,
         "--die-with-parent",
@@ -539,6 +588,7 @@ def _bwrap_argv(
         "--unshare-ipc",
         "--unshare-uts",
         *seccomp_args,
+        *cap_args,
         "--dev",
         "/dev",
         "--proc",
@@ -630,7 +680,15 @@ def run_sandboxed(
                 seccomp_fd=seccomp_fd,
                 passwd_path=passwd_path,
                 group_path=group_path,
+                capdrop_whitelist=request.capdrop_whitelist,
+                cap_drop_supported=caps.bwrap_cap_drop,
             )
+            if request.capdrop_whitelist is not None:
+                if caps.bwrap_cap_drop:
+                    wl = ",".join(sorted(parse_whitelist(request.capdrop_whitelist))) or "deny-all"
+                    detail += f"; capdrop: --cap-drop ALL (+{wl})"
+                else:
+                    detail += "; capdrop not applied: bwrap on this host has no --cap-drop"
             result = _run_popen(
                 wrapped,
                 cwd=cwd,  # bwrap --chdir is authoritative; cwd here is best-effort
@@ -679,6 +737,28 @@ def run_sandboxed(
         detail = base_detail + "; seccomp not applied"
         if seccomp_mode != "off":
             detail += f" ({sys.platform} cannot load a BPF filter)"
+    # Capability drop: outermost wrapper, so the report fd is written and
+    # closed before the next exec and the drop is the last gate the tool
+    # command passes. Linux only; elsewhere the request is refused loudly
+    # only when an explicit whitelist was asked for (validated above).
+    capdrop_report: dict[str, Any] | None = None
+    cap_pipe_r: int | None = None
+    cap_pipe_w: int | None = None
+    capdrop_pass_fds: list[int] = []
+    if request.capdrop_whitelist is not None:
+        if sys.platform.startswith("linux"):
+            python = shutil.which("python3") or sys.executable
+            cap_pipe_r, cap_pipe_w = os.pipe()
+            exec_argv = capdrop_loader_argv(
+                exec_argv,
+                sorted(parse_whitelist(request.capdrop_whitelist)),
+                fd=cap_pipe_w,
+                python=python,
+            )
+            capdrop_pass_fds.append(cap_pipe_w)
+            detail += "; capdrop launcher active (capset zeroing, fail-closed)"
+        else:
+            detail += "; capdrop not applied (non-Linux: no capset/prctl)"
     result = _run_popen(
         exec_argv,
         cwd=cwd,
@@ -688,9 +768,36 @@ def run_sandboxed(
         backend="process",
         isolation="process",
         detail=detail,
+        pass_fds=capdrop_pass_fds,
     )
+    if cap_pipe_r is not None:
+        # The loader closes the write end before exec; the child is reaped
+        # by now, so every write end is gone and the read terminates.
+        assert cap_pipe_w is not None
+        os.close(cap_pipe_w)
+        try:
+            with os.fdopen(cap_pipe_r, "r", encoding="utf-8") as handle:
+                raw_report = handle.read(1 << 20)
+        except OSError:
+            raw_report = ""
+            cap_pipe_r = None
+        if raw_report.strip():
+            try:
+                parsed = json.loads(raw_report)
+                capdrop_report = parsed if isinstance(parsed, dict) else None
+            except json.JSONDecodeError:
+                capdrop_report = None
+        # Append onto the detail _run_popen returned: it may carry
+        # timeout/output-cap notes, which must not be clobbered.
+        final_detail = result.detail
+        if capdrop_report is not None:
+            final_detail = final_detail + "; " + summarize_report(capdrop_report)
+        else:
+            final_detail = final_detail + "; capdrop report unreadable (child killed before reporting?)"
+    else:
+        final_detail = result.detail
     # The audit trail records what the caller asked for, not the wrapper.
-    return replace(result, argv=request.argv)
+    return replace(result, argv=request.argv, capdrop=capdrop_report, detail=final_detail)
 
 
 __all__ = [
