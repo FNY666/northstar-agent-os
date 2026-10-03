@@ -347,3 +347,24 @@ Schedule → wait → execute state machine for irreversible operations.
   - The ``_beforeCall`` analog: allow execution only when ready.
 - `mark_executed(operation_id: str, *, now: int)`
   - The ``_afterCall`` analog: move a ready operation to ``done``.
+### `tool_receipt`
+
+Source: `components/northstar-durable-run/tool_receipt.py`
+
+Per-call tool receipts: ``tool:<args-sha256>:<result-sha256>``.
+
+#### `canonical_sha256_hex(value: Any, *, max_bytes: int=_MAX_RESULT_BYTES)`
+
+SHA-256 hex of the canonical JSON encoding of ``value``.
+
+#### `make_tool_receipt(*, tool_name: str, task_id: str, thread_id: str, run_id: str, call_id: str, actor_id: str, workspace_id: str, idempotency_key: str, arguments: dict[str, Any], result: dict[str, Any], approval: dict[str, Any] | None=None, issued_at: int)`
+
+Mint one tool receipt for a completed tool call.
+
+#### `verify_tool_receipt(receipt: dict[str, Any], arguments: dict[str, Any], result: dict[str, Any], *, approval: dict[str, Any] | None=None)`
+
+Verify a receipt against the observed arguments and result.
+
+#### `receipt_audit_record(receipt: dict[str, Any], *, seq: int | None=None)`
+
+Render a receipt as an audit v1 record (event ``tool.receipt``).
