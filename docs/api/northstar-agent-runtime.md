@@ -566,6 +566,317 @@ An award's 4-segment evidence chain.
 
 An award must bind the 4-segment evidence chain.
 
+### `hr_agents`
+
+Source: `components/northstar-agent-runtime/hr_agents.py`
+
+HR & workplace AI discipline (one-hundred-forty-first batch).
+
+#### `HrAgentsError`
+
+Malformed HR-discipline input. Fail loud, never guess.
+
+#### `AuthorityRegistry`
+
+Registered human authorities (authority_id -> Ed25519 public key).
+
+- `register(authority_id: str, public_key: bytes)`
+- `public_key_for(authority_id: str)`
+#### `HrVerdict`
+
+Outcome of one HR-discipline check.
+
+- `as_dict()`
+#### `AuditReceipt`
+
+An independent third-party bias audit of an HR model.
+
+- `as_dict()`
+#### `issue_audit_receipt(*, audit_id: str, model_digest: str, vendor_id: str, auditor_id: str, issued_at: int, valid_until: int, banned_features_checked: tuple[str, ...]=(), features_used: tuple[str, ...]=(), auditor_secret: bytes)`
+
+Issue an authority-signed bias-audit receipt. Fail-closed at issuance: the auditor may not be the vendor (self-audits are refused at issue time, not just at check time), and a model using a banned proxy feature (Illinois HB 3773 zip-code lesson) cannot be audited clean.
+
+#### `AuditRegistry`
+
+Live third-party bias audits, keyed by model digest.
+
+- `record(receipt: AuditReceipt)`
+- `receipt_for(model_digest: str)`
+#### `audit_receipt(audits: AuditRegistry, *, model_digest: str, checked_at: int)`
+
+Check that an HR model carries a live independent bias audit.
+
+#### `ScoringDisclosure`
+
+FCRA-style disclosure: the worker was told they are scored, can see the profile, and can dispute it.
+
+#### `issue_scoring_disclosure(*, disclosure_id: str, scoring_system_id: str, subject_id: str, disclosed_at: int, access_path: str, dispute_path: str, issuer_secret: bytes)`
+
+#### `ScoringDisclosureRegistry`
+
+Disclosure receipts keyed by (scoring_system_id, subject_id).
+
+- `record(disclosure: ScoringDisclosure)`
+- `disclosure_for(scoring_system_id: str, subject_id: str)`
+#### `secret_scoring_probe(disclosures: ScoringDisclosureRegistry, authorities: AuthorityRegistry, *, scoring_system_id: str, subject_id: str, scored_at: int, issuer_id: str)`
+
+Worker-profile AI scoring without an FCRA-style disclosure is ``hr:secret_scoring``. The disclosure must predate the scoring and carry a valid issuer signature.
+
+#### `HumanCountersign`
+
+A named human's countersign on an AI-influenced employment decision, with substantive-review evidence.
+
+#### `issue_human_countersign(*, decision_id: str, decision_kind: str, evidence_digest: str, reviewer_name: str, review_minutes: int, review_notes_digest: str, countersigned_at: int, reviewer_secret: bytes)`
+
+#### `CountersignRegistry`
+
+Human countersigns keyed by decision id.
+
+- `record(countersign: HumanCountersign)`
+- `sign_for(decision_id: str)`
+#### `human_final_gate(countersigns: CountersignRegistry, authorities: AuthorityRegistry, *, decision_id: str, decision_kind: str, evidence_digest: str, ai_involved: bool, decided_at: int, reviewer_id: str)`
+
+AI-influenced employment decisions require a named-human countersign with substantive-review evidence. A signature without review evidence is a rubber stamp (``hr:rubber_stamp``) — the 127th-batch labor lesson extended to the office.
+
+#### `emotion_inference_ban(*, use_kind: str, uses_ai: bool, uses_biometrics: bool)`
+
+AI+biometric emotion/affect prediction is refused whole-class. There is no receipt that can authorize it.
+
+#### `RepurposeNotice`
+
+Advance notice that monitoring data will feed employment decisions, with a bound appeal receipt.
+
+#### `issue_repurpose_notice(*, notice_id: str, monitoring_source_digest: str, new_purpose: str, notice_given_at: int, appeal_receipt_digest: str, issuer_secret: bytes)`
+
+#### `RepurposeRegistry`
+
+Repurpose notices keyed by monitoring-source digest.
+
+- `record(notice: RepurposeNotice)`
+- `notice_for(monitoring_source_digest: str)`
+#### `surveillance_purpose_receipt(notices: RepurposeRegistry, authorities: AuthorityRegistry, *, monitoring_source_digest: str, employment_use: bool, used_at: int, issuer_id: str, notice_ttl_s: int=86400 * 365)`
+
+Monitoring data repurposed for employment decisions requires a live advance-notice receipt with a bound appeal receipt (CPPA ADMT). Without it: ``hr:surveillance_repurpose``.
+
+#### `HomophilyProbe`
+
+A measured AI-written vs human-written resume pass-rate probe for one screening model.
+
+#### `issue_homophily_probe(*, probe_id: str, model_digest: str, ai_written_passes: int, ai_written_total: int, human_written_passes: int, human_written_total: int, measured_at: int, expires_at: int, issuer_secret: bytes)`
+
+#### `HomophilyVerdict`
+
+- `as_dict()`
+#### `model_homophily_probe(probe: HomophilyProbe, authorities: AuthorityRegistry, *, issuer_id: str, checked_at: int)`
+
+If the AI-written pass rate divided by the human-written pass rate exceeds :data:`HOMOPHILY_RATIO_MAX`, the screener is quarantined for audit (``hr:homophily_audit``).
+
+#### `LayoffNotice`
+
+Written notice + evidence chain for an AI-involved layoff.
+
+#### `issue_layoff_notice(*, notice_id: str, layoff_id: str, ai_involvement_digest: str, written_notice_digest: str, evidence_chain_digest: str, issued_at: int, issuer_secret: bytes)`
+
+#### `LayoffNoticeRegistry`
+
+Layoff notices keyed by layoff id.
+
+- `record(notice: LayoffNotice)`
+- `notice_for(layoff_id: str)`
+#### `layoff_ai_disclosure(notices: LayoffNoticeRegistry, authorities: AuthorityRegistry, *, layoff_id: str, ai_involved: bool, issuer_id: str)`
+
+AI-involved layoffs bind a written-notice receipt plus an evidence chain. Without it: ``hr:no_layoff_notice``.
+
+#### `input_bias_inheritance(audits: AuditRegistry, *, evaluation_output_digest: str, source_model_digest: str, used_for: str, checked_at: int)`
+
+Unaudited evaluation outputs may not feed downstream employment decisions. Performance reviews are the pollution source of all downstream decisions: if the source model lacks a live audit, the downstream use is ``hr:tainted_input``.
+
+#### `VendorPin`
+
+The vendor is pinned as the employer's agent for the declared scope — liability cannot be outsourced to a contract.
+
+#### `issue_vendor_pin(*, pin_id: str, vendor_id: str, employer_id: str, scope: str, issued_at: int, issuer_secret: bytes)`
+
+#### `VendorPinRegistry`
+
+Vendor pins keyed by (vendor_id, employer_id).
+
+- `record(pin: VendorPin)`
+- `pin_for(vendor_id: str, employer_id: str)`
+#### `vendor_agent_pin(pins: VendorPinRegistry, authorities: AuthorityRegistry, *, vendor_id: str, employer_id: str, issuer_id: str)`
+
+The vendor must be pinned as the employer's agent. Unpinned: ``hr:unpinned_vendor`` (Mobley v. Workday — the vendor may be liable as the employer's agent, so the pin is structural).
+
+### `waste_agents`
+
+Source: `components/northstar-agent-runtime/waste_agents.py`
+
+Waste & circular-economy discipline (one-hundred-thirty-ninth batch).
+
+#### `WasteError`
+
+A malformed waste receipt or a programming error.
+
+#### `WasteVerdict`
+
+Outcome of one waste-discipline check.
+
+#### `waste_audit_event(verdict: WasteVerdict, *, action: str)`
+
+Build the audit event for a waste-discipline verdict.
+
+#### `PurityReceipt`
+
+A sorting-purity claim with bound measurement evidence.
+
+#### `sorting_purity_receipt(*, receipt_id: str, claim_id: str, test_protocol_digest: str, batch_id: str, batch_size: int, measured_sample_n: int, measured_purity_bps: int, whole_batch_measured: bool=False, issued_by: str, authority_pubkey_hex: str, authority_secret: bytes, issued_at: int, expires_at: int, prev_digest: str=_GENESIS)`
+
+Issue a sorting-purity receipt with bound measurement evidence.
+
+#### `PurityLog`
+
+Hash-chained log of sorting-purity receipts.
+
+- `append(receipt: PurityReceipt)`
+- `latest_for_batch(batch_id: str)`
+- `verify()`
+#### `check_purity_claim(*, log: PurityLog, batch_id: str, claimed_purity_bps: int, now: int)`
+
+Check a sorting-purity claim against the bound evidence.
+
+#### `PicReceipt`
+
+A cross-border e-waste movement with a bound Basel PIC receipt.
+
+#### `basel_pic_binding(*, receipt_id: str, movement_id: str, waste_code: str, origin: str, destination: str, pic_receipt_digest: str, issued_by: str, authority_pubkey_hex: str, authority_secret: bytes, issued_at: int, expires_at: int, prev_digest: str=_GENESIS)`
+
+Issue a Basel PIC binding for an e-waste movement.
+
+#### `PicLog`
+
+Hash-chained log of Basel PIC bindings.
+
+- `append(receipt: PicReceipt)`
+- `latest_for_movement(movement_id: str)`
+- `verify()`
+#### `check_movement(*, log: PicLog, movement_id: str, now: int)`
+
+Check a cross-border e-waste movement for a live PIC binding.
+
+#### `BatteryPassportReceipt`
+
+A battery decommissioning pinned to the EU battery-passport digest.
+
+#### `battery_passport_pin(*, receipt_id: str, battery_id: str, battery_capacity_wh: int, passport_digest: str, recovery_plan_digest: str, issued_by: str, authority_pubkey_hex: str, authority_secret: bytes, issued_at: int, expires_at: int, prev_digest: str=_GENESIS)`
+
+Pin a battery decommissioning to its EU battery-passport digest.
+
+#### `BatteryPassportLog`
+
+Hash-chained log of battery-passport pins.
+
+- `append(receipt: BatteryPassportReceipt)`
+- `latest_for_battery(battery_id: str)`
+- `verify()`
+#### `check_battery_decommission(*, log: BatteryPassportLog, battery_id: str, battery_capacity_wh: int, now: int)`
+
+Check that a battery retirement pins its battery passport.
+
+#### `ClaimEvidenceReceipt`
+
+A recycled-content claim with a bound evidence chain.
+
+#### `claim_evidence_chain(*, receipt_id: str, claim_id: str, claim_text: str, evidence_tiers: tuple[str, ...], evidence_digest: str, offset_based: bool, issued_by: str, authority_pubkey_hex: str, authority_secret: bytes, issued_at: int, expires_at: int, prev_digest: str=_GENESIS)`
+
+Bind a recycled-content claim to its evidence chain.
+
+#### `ClaimEvidenceLog`
+
+Hash-chained log of claim-evidence receipts.
+
+- `append(receipt: ClaimEvidenceReceipt)`
+- `latest_for_claim(claim_id: str)`
+- `verify()`
+#### `check_claim_evidence(*, log: ClaimEvidenceLog, claim_id: str, now: int)`
+
+Check that a claim binds a real evidence chain.
+
+#### `TransitionReceipt`
+
+A transition plan for workers displaced by waste automation.
+
+#### `informal_sector_transition(*, receipt_id: str, facility_id: str, pickers_displaced: int, transition_plan_digest: str, plan_summary: str, issued_by: str, authority_pubkey_hex: str, authority_secret: bytes, issued_at: int, expires_at: int, prev_digest: str=_GENESIS)`
+
+Publish a transition plan for displaced informal pickers.
+
+#### `TransitionLog`
+
+Hash-chained log of transition-plan receipts.
+
+- `append(receipt: TransitionReceipt)`
+- `latest_for_facility(facility_id: str)`
+- `verify()`
+#### `check_transition_plan(*, log: TransitionLog, facility_id: str, pickers_displaced: int, now: int)`
+
+Check that displacing automation carries a transition plan.
+
+#### `HardwareLifecycleReceipt`
+
+An AI workload's hardware end-of-life disposal declaration.
+
+#### `ai_hardware_lifecycle(*, receipt_id: str, workload_id: str, hardware_units: int, disposal_plan_digest: str, env_ledger_receipt_digest: str, issued_by: str, authority_pubkey_hex: str, authority_secret: bytes, issued_at: int, expires_at: int, prev_digest: str=_GENESIS)`
+
+Declare hardware end-of-life disposal for an AI workload.
+
+#### `HardwareLifecycleLog`
+
+Hash-chained log of hardware-lifecycle receipts.
+
+- `append(receipt: HardwareLifecycleReceipt)`
+- `latest_for_workload(workload_id: str)`
+- `verify()`
+#### `check_hardware_lifecycle(*, log: HardwareLifecycleLog, workload_id: str, now: int)`
+
+Check that an AI workload declares hardware disposal.
+
+#### `DumpingAlert`
+
+An illegal-dumping AI alert with bound image + human verification.
+
+#### `dumping_alert_binding(*, receipt_id: str, alert_id: str, channel: str, image_digest: str, location_id: str, human_verification_digest: str, issued_by: str, authority_pubkey_hex: str, authority_secret: bytes, issued_at: int, expires_at: int, prev_digest: str=_GENESIS)`
+
+Bind an illegal-dumping alert to image evidence.
+
+#### `DumpingAlertLog`
+
+Hash-chained log of dumping alerts.
+
+- `append(receipt: DumpingAlert)`
+- `latest_for_alert(alert_id: str)`
+- `verify()`
+#### `check_dumping_alert(*, log: DumpingAlertLog, alert_id: str, now: int)`
+
+Check an illegal-dumping alert's verification state.
+
+#### `FireTriageReceipt`
+
+A fire-risk triage receipt for batteries entering a shredder.
+
+#### `battery_fire_triage(*, receipt_id: str, battery_id: str, triage_grade: str, triage_digest: str, issued_by: str, authority_pubkey_hex: str, authority_secret: bytes, issued_at: int, expires_at: int, prev_digest: str=_GENESIS)`
+
+Issue a fire-risk triage receipt for a battery entering a shredder.
+
+#### `FireTriageLog`
+
+Hash-chained log of fire-triage receipts.
+
+- `append(receipt: FireTriageReceipt)`
+- `latest_for_battery(battery_id: str)`
+- `verify()`
+#### `check_fire_triage(*, log: FireTriageLog, battery_id: str, now: int)`
+
+Check that a battery passed fire triage before shredding.
+
 ### `underwriting_agents`
 
 Source: `components/northstar-agent-runtime/underwriting_agents.py`
@@ -960,6 +1271,154 @@ Hash-chained log of marketing-claim receipts.
 #### `full_production_gate(*, doc_receipt: GmpDocumentReceipt, countersignature_hex: str, model_receipt: ModelDeploymentReceipt, lineage: ModelLineageReceipt | None, alcoa_attributes: Mapping[str, bool] | None, context_receipt: ContextOfUseReceipt | None, actual_context_digest: str, drift: DriftMonitorReceipt | None, claim: PharmaClaimReceipt | None, claimed_numbers_digest: str, generative_qualified_person: bool, now: int)`
 
 Run every pharma-manufacturing gate over one GMP decision.
+
+### `housing_ai_agents`
+
+Source: `components/northstar-agent-runtime/housing_ai_agents.py`
+
+Housing-market AI discipline (one-hundred-forty-second batch).
+
+#### `HousingAIError`
+
+Malformed receipt/claim or a programming error.
+
+#### `ScreeningProbeVerdict`
+
+#### `screening_fairness_probe(probe_receipts: Sequence[housing.FairnessProbeReceipt], *, model_digest: str, auditor_id: str, check_time: int)`
+
+Fail-closed gate: screening models need an independently-audited probe.
+
+#### `probe_audit_event(verdict: ScreeningProbeVerdict, *, action: str)`
+
+Shape a screening-probe verdict as an audit event.
+
+#### `VoucherVerdict`
+
+#### `voucher_income_gate(*, voucher_policy_declared: bool, accepts_vouchers: bool, screening_rules: Sequence[Mapping[str, Any]])`
+
+Fail-closed voucher-income discrimination gate.
+
+#### `AppealReceipt`
+
+Hash-chained appeal-window receipt for a screening decision.
+
+#### `compute_appeal_digest(appeal: AppealReceipt)`
+
+Recompute the JCS digest an appeal receipt claims.
+
+#### `issue_appeal_receipt(*, appeal_id: str, decision_digest: str, channel: str, contact: str, window_days: int, human_reviewer_id: str, issuer_secret: bytes, issued_at: int, prev_digest: str=_GENESIS)`
+
+Issue a signed appeal-window receipt for a screening decision.
+
+#### `AppealVerdict`
+
+#### `check_appeal(appeal: AppealReceipt | None, *, decision_digest: str, check_time: int)`
+
+Fail-closed check: a screening decision needs a live appeal window.
+
+#### `appeal_window(appeal: AppealReceipt | None, *, decision_digest: str, check_time: int)`
+
+The SafeRent red line as a gate: no appeal window, no decision.
+
+#### `appeal_audit_event(verdict: AppealVerdict, *, action: str)`
+
+Shape an appeal verdict as an audit event.
+
+#### `TrainingSource`
+
+One declared training source for a rent-pricing model.
+
+#### `TrainingDataReceipt`
+
+Sealed training-source binding for a rent-pricing model.
+
+#### `declare_training_data(*, receipt_id: str, model_digest: str, sources: Sequence[Mapping[str, Any]], declared_by: str, declared_at: int)`
+
+Declare the training sources of a rent-pricing model, sealed.
+
+#### `CoordinationVerdict`
+
+#### `rent_coordination_probe(receipt: TrainingDataReceipt | None, *, model_digest: str)`
+
+Fail-closed rent-coordination gate over training data.
+
+#### `RentRecommendationVerdict`
+
+#### `rent_recommendation_gate(*, rent_value: float, auto_accept: bool, basis_digest: str)`
+
+Refuse auto-accept rent recommendations.
+
+#### `coordination_audit_event(verdict: CoordinationVerdict, *, action: str)`
+
+Shape a coordination verdict as an audit event.
+
+#### `AVMVerdict`
+
+#### `avm_confidence_gate(*, model_digest: str, confidence: float, data_as_of: int, use_kind: str, check_time: int)`
+
+Fail-closed AVM gate: confidence and recency pinned per use-kind.
+
+#### `avm_audit_event(verdict: AVMVerdict, *, action: str)`
+
+Shape an AVM verdict as an audit event.
+
+#### `SteeringProbeReceipt`
+
+Sealed steering-probe execution: hash-chained, prober-signed.
+
+#### `SealedSteeringVerdict`
+
+#### `steering_probe(list_listings: Callable[[Mapping[str, str]], Sequence[str]], persona_a: Mapping[str, str], persona_b: Mapping[str, str], *, probe_id: str, prober_id: str, prober_secret: bytes, measured_at: int, prev_digest: str=_GENESIS)`
+
+Run the 119th-batch steering probe and seal the execution.
+
+#### `check_steering_probe_receipt(receipt: SteeringProbeReceipt)`
+
+Fail-closed integrity check of a sealed steering-probe receipt.
+
+#### `steering_audit_event(verdict: SealedSteeringVerdict, *, action: str)`
+
+Shape a sealed steering verdict as an audit event.
+
+#### `PhotoEditReceipt`
+
+Sealed edit-declaration for an AI-edited listing photo.
+
+#### `issue_photo_edit_receipt(*, receipt_id: str, listing_id: str, photo_digest: str, edits: Sequence[str], publisher_id: str, published_at: int)`
+
+Issue a sealed edit-declaration for a listing photo.
+
+#### `ListingVerdict`
+
+#### `listing_truth_receipt(*, listing_id: str, photos: Sequence[Mapping[str, Any]], edit_receipts: Sequence[PhotoEditReceipt])`
+
+Fail-closed listing-truth check over a listing's photos.
+
+#### `listing_audit_event(verdict: ListingVerdict, *, action: str)`
+
+Shape a listing-truth verdict as an audit event.
+
+#### `AdverseActionReceipt`
+
+Adverse action bound to a live appeal-window receipt.
+
+#### `compute_action_digest(action: AdverseActionReceipt)`
+
+Recompute the JCS digest an adverse-action receipt claims.
+
+#### `adverse_action_receipt(*, action_id: str, subject_id: str, reasons: Sequence[str], appeal: AppealReceipt, human_decision_digest: str, acted_at: int)`
+
+Issue an adverse-action receipt bound to an appeal receipt.
+
+#### `ActionVerdict`
+
+#### `check_adverse_action(action: AdverseActionReceipt, appeal: AppealReceipt | None, *, check_time: int)`
+
+Fail-closed check of an adverse-action receipt at use time.
+
+#### `action_audit_event(verdict: ActionVerdict, *, action: str)`
+
+Shape an adverse-action verdict as an audit event.
 
 ### `permit_agents`
 
@@ -4042,9 +4501,21 @@ Greenwashing evidence gates (one-hundred-thirtieth batch).
 
 Underwriting & claims discipline gates (one-hundred-fortieth batch).
 
+#### `run_waste_agents()`
+
+Waste & circular-economy discipline (one-hundred-thirty-ninth batch).
+
+#### `run_housing_ai_agents()`
+
+Housing-market AI discipline (one-hundred-forty-second batch).
+
 #### `run_procurement_agents()`
 
 Procurement accountability gates (one-hundred-thirty-eighth batch).
+
+#### `run_hr_agents()`
+
+HR & workplace AI discipline (one-hundred-forty-first batch).
 
 #### `run_orbital_agents()`
 
