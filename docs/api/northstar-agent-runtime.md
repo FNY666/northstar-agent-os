@@ -542,6 +542,10 @@ ASK-timing judgment, HiL-Bench Ask-F1 methodology.
 
 Contrast bench: AP2-shaped "sign the transaction" vs "bind the arguments".
 
+#### `run_step_compliance()`
+
+in-toto Layout/Link step compliance over deterministic attack scenarios.
+
 #### `BenchHarness`
 
 Temp workspaces + scripted providers for one suite run.
@@ -825,6 +829,44 @@ What a run resumed from ``report`` would still be allowed to spend, and the catc
 #### `fork_preview(records: Sequence[Mapping[str, Any]], *, record_index: int, session_id: str='', dropped_trailing_lines: int=0)`
 
 What a run resumed from the checkpoint at ``record_index`` would start with.
+
+### `step_compliance`
+
+Source: `components/northstar-agent-runtime/step_compliance.py`
+
+in-toto-derived step compliance for multi-step bench tasks (offline).
+
+#### `RuleError`
+
+A rule string is not one of the seven in-toto artifact rules.
+
+#### `Rule`
+
+One parsed in-toto artifact rule.
+
+#### `Link`
+
+Recorded execution of one layout step: materials and products w/ hashes.
+
+#### `StepLayout`
+
+Expected rules for one step of the layout.
+
+#### `StepVerdict`
+
+#### `LayoutVerdict`
+
+#### `parse_rule(text: str)`
+
+Parse one in-toto artifact rule string; raises RuleError on unknown forms.
+
+#### `verify_step(layout_step: StepLayout, link: Link, links_by_step: Mapping[str, Link], step_order: Mapping[str, int])`
+
+Verify one step's materials/products against its layout rules.
+
+#### `verify_layout(steps: tuple[StepLayout, ...] | list[StepLayout], links: tuple[Link, ...] | list[Link])`
+
+Verify a full trajectory against the layout.
 
 ### `mcp_elicitation`
 

@@ -49,6 +49,8 @@ from decision_model import (
 )
 from providers.base import AssistantMessage, ResultMessage, SystemMessage, ToolUseBlock, UserMessage
 from providers.scripted import ScriptedProvider
+from step_compliance import Link as StepLink
+from step_compliance import StepLayout, verify_layout
 from tools import ToolLimits, ToolSandbox, build_default_registry
 
 #: Semantic version of the public case set. Bump when a case is added, removed,
@@ -1957,6 +1959,187 @@ def run_whisper_contrast() -> dict[str, Any]:
         "control_reorder": ctrl_name,
         "canonical_reorder_blocked": ctrl_blocked,
         "by_mutation": results,
+    }
+
+
+#: in-toto step-compliance fixture (scorecard v11): a three-step agent task
+#: (fetch -> transform -> publish) whose artifact flow is pinned by MATCH rules.
+def _step_artifact_digest(text: str) -> str:
+    return hashlib.sha256(text.encode("utf-8")).hexdigest()
+
+
+_STEP_CHAIN_LAYOUT: tuple[StepLayout, ...] = (
+    StepLayout(
+        name="fetch",
+        expected_materials=(),
+        expected_products=("CREATE raw.json", "DISALLOW *"),
+    ),
+    StepLayout(
+        name="transform",
+        expected_materials=("MATCH raw.json WITH PRODUCTS FROM fetch",),
+        expected_products=("CREATE report.txt", "DISALLOW *"),
+    ),
+    StepLayout(
+        name="publish",
+        expected_materials=("MATCH report.txt WITH PRODUCTS FROM transform",),
+        expected_products=("CREATE manifest.json", "DISALLOW *"),
+    ),
+)
+
+
+def run_step_compliance() -> dict[str, Any]:
+    """in-toto Layout/Link step compliance over deterministic attack scenarios.
+
+    Absorbs the artifact-rule mechanism of in-toto spec v1.0.0 (§4.3.2/§4.3.3):
+    seven rules (MATCH/CREATE/DELETE/MODIFY/ALLOW/DISALLOW/REQUIRE) evaluated
+    in order, first-match consumes, MATCH pins the cross-step hash flow. Each
+    scenario declares the expected verdict; a scenario is a *miss* when the
+    engine disagrees. Honestly scoped: signature verification, functionary
+    thresholds, and expiration are NOT absorbed — the bench asserts step order
+    and untampered artifact flow, not who signed what.
+    """
+    h_raw = _step_artifact_digest("raw content v1")
+    h_raw_evil = _step_artifact_digest("raw content EVIL")
+    h_report = _step_artifact_digest("report v1")
+    h_manifest = _step_artifact_digest("manifest v1")
+    h_debug = _step_artifact_digest("debug log")
+
+    honest = (
+        StepLink(name="fetch", products={"raw.json": h_raw}),
+        StepLink(
+            name="transform",
+            materials={"raw.json": h_raw},
+            products={"report.txt": h_report},
+        ),
+        StepLink(
+            name="publish",
+            materials={"report.txt": h_report},
+            products={"manifest.json": h_manifest},
+        ),
+    )
+
+    require_layout = (
+        StepLayout(
+            name="only",
+            expected_materials=(),
+            expected_products=("REQUIRE manifest.json", "ALLOW manifest.json"),
+        ),
+    )
+
+    scenarios: list[dict[str, Any]] = [
+        {
+            "id": "honest_chain",
+            "title": "untampered three-step chain passes",
+            "layout": _STEP_CHAIN_LAYOUT,
+            "links": honest,
+            "expect_pass": True,
+        },
+        {
+            "id": "product_replaced",
+            "title": "upstream product swapped mid-chain is caught by MATCH",
+            "layout": _STEP_CHAIN_LAYOUT,
+            "links": (
+                honest[0],
+                StepLink(
+                    name="transform",
+                    materials={"raw.json": h_raw_evil},
+                    products={"report.txt": h_report},
+                ),
+                honest[2],
+            ),
+            "expect_pass": False,
+        },
+        {
+            "id": "tampered_mid_chain",
+            "title": "downstream material differing from upstream product fails",
+            "layout": _STEP_CHAIN_LAYOUT,
+            "links": (
+                honest[0],
+                honest[1],
+                StepLink(
+                    name="publish",
+                    materials={"report.txt": h_raw},  # masquerading artifact
+                    products={"manifest.json": h_manifest},
+                ),
+            ),
+            "expect_pass": False,
+        },
+        {
+            "id": "step_skipped",
+            "title": "a skipped layout step fails",
+            "layout": _STEP_CHAIN_LAYOUT,
+            "links": (honest[0], honest[2]),
+            "expect_pass": False,
+        },
+        {
+            "id": "step_reordered",
+            "title": "steps run out of layout order fail",
+            "layout": _STEP_CHAIN_LAYOUT,
+            "links": (honest[1], honest[0], honest[2]),
+            "expect_pass": False,
+        },
+        {
+            "id": "undeclared_step",
+            "title": "an extra step not in the layout fails",
+            "layout": _STEP_CHAIN_LAYOUT,
+            "links": honest
+            + (StepLink(name="exfiltrate", products={"loot.txt": h_debug}),),
+            "expect_pass": False,
+        },
+        {
+            "id": "unexpected_artifact",
+            "title": "an unconsumed artifact reaches DISALLOW and fails",
+            "layout": _STEP_CHAIN_LAYOUT,
+            "links": (
+                StepLink(
+                    name="fetch",
+                    products={"raw.json": h_raw, "debug.log": h_debug},
+                ),
+                honest[1],
+                honest[2],
+            ),
+            "expect_pass": False,
+        },
+        {
+            "id": "require_missing",
+            "title": "a missing REQUIREd file fails",
+            "layout": require_layout,
+            "links": (StepLink(name="only", products={}),),
+            "expect_pass": False,
+        },
+        {
+            "id": "require_ok",
+            "title": "a present REQUIREd file passes",
+            "layout": require_layout,
+            "links": (StepLink(name="only", products={"manifest.json": h_manifest}),),
+            "expect_pass": True,
+        },
+    ]
+
+    results: list[dict[str, Any]] = []
+    for scenario in scenarios:
+        verdict = verify_layout(scenario["layout"], scenario["links"])
+        results.append(
+            {
+                "id": scenario["id"],
+                "title": scenario["title"],
+                "expected": "pass" if scenario["expect_pass"] else "fail",
+                "actual": "pass" if verdict.ok else "fail",
+                "reasons": list(verdict.reasons),
+            }
+        )
+    mismatches = [r for r in results if r["expected"] != r["actual"]]
+    attack_n = sum(1 for r in results if r["expected"] == "fail")
+    attack_caught = sum(
+        1 for r in results if r["expected"] == "fail" and r["actual"] == "fail"
+    )
+    return {
+        "n_scenarios": len(results),
+        "expected_pass": sum(1 for r in results if r["expected"] == "pass"),
+        "expected_fail": attack_n,
+        "mismatches": mismatches,
+        "scenarios": results,
+        "detection_rate": (attack_caught / attack_n) if attack_n else 1.0,
     }
 
 
@@ -3886,6 +4069,46 @@ def _case_metrics_whisper_contrast(h: BenchHarness) -> BenchExpectation:
         runtime=_noop_runtime(h),
         expect_subtype="success",
         post_check=check,
+    )
+
+
+def _case_metrics_step_compliance(h: BenchHarness) -> BenchExpectation:
+    """in-toto step compliance: Layout + artifact rules over a multi-step trace.
+
+    Absorbs the artifact-rule mechanism of in-toto spec v1.0.0: seven rules
+    (MATCH/CREATE/DELETE/MODIFY/ALLOW/DISALLOW/REQUIRE) evaluated in order,
+    first match consumes, MATCH pins the cross-step artifact hash flow
+    (upstream product hash == downstream material hash). The 9 deterministic
+    scenarios cover the attacks a layout must catch: product replaced or
+    tampered mid-chain, step skipped / reordered / undeclared, unconsumed
+    artifact reaching DISALLOW, missing REQUIREd file.
+    """
+    metrics = run_step_compliance()
+
+    def check(exp: BenchExpectation, report: Any) -> tuple[bool, str]:
+        if metrics["mismatches"]:
+            shown = metrics["mismatches"][:2]
+            return (
+                False,
+                f"{len(metrics['mismatches'])} scenario(s) disagree with "
+                f"ground truth: {shown}",
+            )
+        if metrics["detection_rate"] != 1.0:
+            return (
+                False,
+                f"detection rate must be 1.0, saw {metrics['detection_rate']}",
+            )
+        return (
+            True,
+            f"{metrics['n_scenarios']} scenarios, all verdicts as expected "
+            f"({metrics['expected_fail']} attacks caught, "
+            f"{metrics['expected_pass']} honest passes)",
+        )
+
+    return BenchExpectation(
+        runtime=_noop_runtime(h),
+        expect_subtype="success",
+        post_check=check,
         metrics=metrics,
         notes=(
             "contrast bench from Whisper Attacks (arXiv:2609.11757, "
@@ -3897,6 +4120,12 @@ def _case_metrics_whisper_contrast(h: BenchHarness) -> BenchExpectation:
             "design B binds digest_arguments (sha256 canonical JSON, same "
             "wire format as northstar.approval.v2/v3) and blocks 4/4; the "
             "key-reorder control stays allowed"
+            "in-toto spec v1.0.0 §4.3.2/§4.3.3 artifact rules, honestly "
+            "scoped: the bench absorbs the RULE ENGINE only — layout "
+            "signature verification, functionary thresholds, and expiration "
+            "are not implemented (an offline bench has no signers). It "
+            "asserts step order and untampered cross-step artifact flow, "
+            "not who authorized what."
         ),
     )
 
@@ -3948,6 +4177,7 @@ CASES: tuple[BenchCase, ...] = (
     BenchCase("metrics.capdrop_deny_all_live", "metrics", "deny-all zeroes all five sets in child", _case_metrics_capdrop_deny_all_live),
     BenchCase("metrics.capdrop_escalation_eperm", "metrics", "capset after deny-all fails EPERM", _case_metrics_capdrop_escalation_eperm),
     BenchCase("metrics.capdrop_payload_cannot_loosen", "metrics", "per-call capdrop cannot loosen", _case_metrics_capdrop_payload_cannot_loosen),
+    BenchCase("metrics.step_compliance", "metrics", "in-toto step compliance: layout + artifact rules over trace", _case_metrics_step_compliance),
 )
 
 
@@ -4341,7 +4571,6 @@ def _print_report(report: BenchReport) -> None:
                 f"{askt.get('over_ask_rate', 0):.3f}, under-ask rate "
                 f"{askt.get('under_ask_rate', 0):.3f})"
             )
-<<<<<<< ours
         whisper = report.metrics.get("metrics.whisper_contrast", {})
         if whisper:
             print(
@@ -4382,6 +4611,15 @@ def _print_report(report: BenchReport) -> None:
                 f"audit_complete={dmodel.get('audit_complete', False)}, "
                 f"fallback_ok={dmodel.get('fallback_ok', False)}"
             )
+        stepc = report.metrics.get("metrics.step_compliance", {})
+        if stepc:
+            print(
+                f"  step compliance (in-toto rules): "
+                f"{stepc.get('n_scenarios', 0)} scenarios, "
+                f"{stepc.get('expected_fail', 0)} attacks caught, "
+                f"detection rate {stepc.get('detection_rate', 0):.3f}, "
+                f"mismatches {len(stepc.get('mismatches', []))}"
+            )
     if report.ok:
         print("result: PASS — gate decisions match the public scorecard")
     else:
@@ -4409,6 +4647,7 @@ __all__ = [
     "run_metric_corpus",
     "run_owasp_asi_coverage",
     "run_policy_axis",
+    "run_step_compliance",
     "run_suite",
     "run_whisper_contrast",
 ]
