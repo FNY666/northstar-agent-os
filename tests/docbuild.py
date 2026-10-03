@@ -58,6 +58,8 @@ MANIFEST: dict[str, tuple[str, ...]] = {
         "tool_allowlist",
         "timelock",
         "tool_receipt",
+        "receipt_gate",
+        "governed_memory",
     ),
     "northstar-agent-interop": (
         "interop_contract",
