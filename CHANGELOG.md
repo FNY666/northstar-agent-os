@@ -1,3 +1,47 @@
+## Unreleased (seventy-fifth batch) — timelock-delayed execution for the irreversible tier
+
+Mechanism absorbed from OpenZeppelin's `TimelockController`
+(`contracts/governance/TimelockController.sol`, MIT), verified against the
+actual contract source: schedule → wait → execute, cancellable while
+pending. New module `components/northstar-durable-run/timelock.py`:
+
+- **State machine** `unset → waiting → ready → done`, with `cancelled` as
+  a persistent terminal sink from `waiting`/`ready`. Deliberate deviation
+  from OZ (which deletes the timestamp back to unset on cancel): a
+  cancelled operation id stays claimed — it can never be silently
+  re-scheduled — and the state itself keeps the full transition trail.
+- **Parameter binding**: the operation id is `sha256` over the exact
+  `(tool_name, arguments_digest, call_ref, nonce)` (the `hashOperation`
+  analog); `authorize_execute` requires `ready` *and* a matching tool name
+  and digest, so tampered parameters are discovered.
+- **Delay enforcement**: `schedule` requires `delay_s >= min_delay_s`
+  (default 300s, configurable); time is an injected integer `now`, never a
+  wall clock, so the engine stays deterministic.
+- **Split execution** (`authorize_execute` / `mark_executed`, the
+  `_beforeCall`/`_afterCall` analogs): the host's executor runs between
+  them — a failed executor leaves the operation `ready` (retryable), a
+  successful one moves it to `done`; `mark_executed` re-checks readiness so
+  a cancel landing in between cannot be papered over.
+- **All transitions audited**: `timelock.scheduled` / `timelock.cancelled`
+  / `timelock.executed` events through an injectable sink for the audit
+  chain.
+
+`ActionGateway` wiring (`action_gateway.py`): `ToolSpec(irreversible=True)`
+declares the irreversible tier (register-time: irreversible requires
+`risk_level="high"`, so the human approval stays mandatory). `execute`
+additionally requires a configured `Timelock` and a `timelock_operation_id`
+whose operation is `ready`; the gate runs after the idempotency lookups so
+a same-key replay returns the cached result while a fresh key against a
+`done` operation is blocked (double-execution hole closed).
+
+New bench case `metrics.timelock_delayed_execution`
+(`governance_bench.py`, `run_timelock` exported): 8/8 deterministic
+scenarios hold — early execute blocked, cancel blocks execute, tampered
+arguments discovered, wrong tool discovered, happy path executes exactly
+once, short delay refused, cancelled id never re-scheduled — with 5 audit
+events chained. Honestly scoped: the deterministic state machine, NOT
+on-chain execution with `block.timestamp` and role-based access control.
+
 ## Unreleased (seventy-fourth batch) — SCITT (RFC 9943) / COSE Receipts (RFC 9942) export spike
 
 **Spike, not a feature.** RFC 9943 ("An Architecture for Trustworthy and

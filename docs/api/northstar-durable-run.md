@@ -108,7 +108,7 @@ Authorize and dispatch one exact registered tool call at a time.
 - `register(spec: ToolSpec)`
 - `enforcement_trace` (property)
   - Append-only enforcement events (OCSF action/disposition analogue).
-- `execute(call: ToolCall, arguments: dict[str, Any], *, authorization_token: str, authorization_secret: bytes, now: int, approval_token: str | None=None, current_policy_revision: str, run: dict[str, Any] | None=None)`
+- `execute(call: ToolCall, arguments: dict[str, Any], *, authorization_token: str, authorization_secret: bytes, now: int, approval_token: str | None=None, current_policy_revision: str, run: dict[str, Any] | None=None, timelock_operation_id: str | None=None)`
 ### `runner`
 
 Source: `components/northstar-durable-run/runner.py`
@@ -314,3 +314,34 @@ OpenShell ``Validate``-phase analogue: check tool + args vs allowlist.
 #### `make_enforcement_event(*, seq: int, tool_name: str, arguments_digest: str, decision: EnforcementDecision, allowlist_version: int, failure_policy: str)`
 
 Build one enforcement trace event (OCSF action/disposition analogue).
+
+### `timelock`
+
+Source: `components/northstar-durable-run/timelock.py`
+
+Timelock-delayed execution for irreversible-tier tool calls.
+
+#### `hash_operation(tool_name: str, arguments_digest: str, call_ref: str, nonce: str)`
+
+Deterministic operation id, the ``hashOperation`` analog.
+
+#### `TimelockOperation`
+
+One scheduled operation. Immutable; the timelock owns the state.
+
+#### `Timelock`
+
+Schedule → wait → execute state machine for irreversible operations.
+
+- `min_delay_s` (property)
+- `state(operation_id: str, *, now: int)`
+  - Current state of an operation (``unset`` when unknown).
+- `get(operation_id: str)`
+- `schedule(*, tool_name: str, arguments_digest: str, call_ref: str, delay_s: int, now: int, nonce: str | None=None)`
+  - Schedule an operation; it becomes ready at ``now + delay_s``.
+- `cancel(operation_id: str, *, now: int, cancelled_by: str)`
+  - Cancel a pending operation (``waiting`` or ``ready``).
+- `authorize_execute(operation_id: str, *, tool_name: str, arguments_digest: str, now: int)`
+  - The ``_beforeCall`` analog: allow execution only when ready.
+- `mark_executed(operation_id: str, *, now: int)`
+  - The ``_afterCall`` analog: move a ready operation to ``done``.

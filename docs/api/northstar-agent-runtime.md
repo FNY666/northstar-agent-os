@@ -598,6 +598,10 @@ PATH-shim red-team: trustmebro-style fabricated tool output, detected.
 
 SEC 15c3-5-style pre-trade risk semantics on the permission gate.
 
+#### `run_timelock()`
+
+Timelock-delayed execution, OpenZeppelin TimelockController semantics.
+
 #### `list_cases()`
 
 #### `run_suite(*, only: Iterable[str] | None=None, tracks: Iterable[str] | None=None)`
