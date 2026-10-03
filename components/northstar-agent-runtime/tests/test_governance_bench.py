@@ -190,6 +190,66 @@ class OwaspAsiCoverageTests(unittest.TestCase):
         self.assertIn("official OWASP conformance claim", src)
         self.assertIn("download form", src)
 
+class LeastPrivilegeTests(unittest.TestCase):
+    def test_least_privilege_is_deterministic(self):
+        from governance_bench import run_least_privilege
+
+        first = run_least_privilege()
+        second = run_least_privilege()
+        self.assertEqual(first, second)
+
+    def test_least_privilege_opur_baseline(self):
+        from governance_bench import run_least_privilege
+
+        result = run_least_privilege()
+        self.assertEqual(result["n_probes"], 23)
+        # 15 over-privileged reaches eligible; the gate must deny them all.
+        self.assertEqual(result["opur_eligible"], 15)
+        self.assertEqual(result["opur_allowed"], 0)
+        self.assertEqual(result["opur"], 0.0)
+        self.assertEqual(result["over_priv_block_rate"], 1.0)
+        # Precision: the 5 sufficient-tool controls stay allowed (not deny-all).
+        self.assertEqual(result["precision_n"], 5)
+        self.assertEqual(result["precision_allow_rate"], 1.0)
+        # The 3 legit high-privilege controls stay allowed, outside the OPUR
+        # denominator.
+        self.assertEqual(result["legit_excluded_n"], 3)
+        self.assertEqual(result["legit_allowed"], 3)
+        # The transient-failure amplifier must not move the deterministic gate.
+        self.assertEqual(result["amplifier_decision_changes"], [])
+        # All five risk patterns and all three PED classes are covered and
+        # fully blocked.
+        self.assertEqual(len(result["by_pattern"]), 5)
+        for stats in result["by_pattern"].values():
+            self.assertEqual(stats["block_rate"], 1.0)
+        for stats in result["by_ped_class"].values():
+            self.assertEqual(stats["block_rate"], 1.0)
+
+    def test_least_privilege_corpus_is_original_synthetic(self):
+        # Methodology-inspired, not dataset-copied: every probe id uses the
+        # lp_ prefix and no probe text comes from the official dataset.
+        from governance_bench import LEAST_PRIV_CORPUS
+
+        self.assertEqual(len(LEAST_PRIV_CORPUS), 23)
+        for probe in LEAST_PRIV_CORPUS:
+            self.assertTrue(probe.id.startswith("lp_"), probe.id)
+            self.assertEqual(probe.callback, "least_priv")
+            self.assertEqual(probe.expect_tier, 3)
+
+    def test_least_privilege_case_is_registered(self):
+        import inspect
+
+        from governance_bench import _case_metrics_least_privilege
+
+        case = next(c for c in CASES if c.id == "metrics.least_privilege")
+        self.assertEqual(case.track, "metrics")
+        # The honest scoping must live in the case source: original
+        # synthetic corpus, NOT the official dataset; enforcement, NOT
+        # model behavior.
+        src = inspect.getsource(_case_metrics_least_privilege)
+        self.assertIn("NOT the", src)
+        self.assertIn("official ToolPrivBench dataset", src)
+
 
 class PositionalTaskTests(unittest.TestCase):
     def test_extract_positional_task_pulls_bare_string(self):

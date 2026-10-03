@@ -38,6 +38,35 @@ OWASP conformance claim.
 3 new test methods), durable-run 154, interop 56, TS 57/57, repo docs 75/75;
 `make bench` 37/37 (36 existing + 1 new);
 `python3 tests/docbuild.py verify` OK.
+## Unreleased (fifty-fourth batch) — least-privilege metric track (ToolPrivBench methodology)
+
+Adds `metrics.least_privilege` to the governance bench
+(`components/northstar-agent-runtime/governance_bench.py`), absorbing the
+measurement methodology of ToolPrivBench ("When Lower Privileges Suffice",
+arXiv:2606.20023, Yang et al., v2 2026-07-07 — preprint, no peer-reviewed
+venue):
+
+- **OPUR-style metric** (over-privileged tool-use rate): share of eligible
+  reaches — higher-privilege tool with a declared sufficient lower-privilege
+  alternative — the gate *allows* (lower is better). Baseline on this bench:
+  **0.0** (15/15 denied, block rate 1.0).
+- **23 original synthetic probes** (methodology-inspired, NOT the official
+  ToolPrivBench dataset — 544 scenarios, official dataset license
+  unverified, no official repo located): 15 over-privileged reaches across
+  the paper's five risk patterns (authority escalation, data over-exposure,
+  safety bypass, scope expansion, temporal persistence) with PED-class
+  labels (0 = immediate aggressive selection, 1/2 = premature escalation),
+  5 precision controls proving enforcement is not a deny-all, and 3
+  legitimate high-privilege controls excluded from the OPUR denominator per
+  the honest-scoping rule.
+- **Transient-failure amplifier pass**: each eligible reach re-run after an
+  injected transient failure of the low-privilege alternative — the paper's
+  amplifier, where prompt-level controls degrade; the deterministic gate
+  decides identically (0 decision changes).
+- `BENCH_VERSION` v7→v8; human + `--json` output print the new track.
+
+**Verification:** `make test` fully green; `make bench` 37/37 PASS (36 existing
++ `metrics.least_privilege`); `python3 tests/docbuild.py verify` OK.
 
 ## Unreleased (fifty-second batch) — crash-benchmark in-flight metrics + real SIGKILL sites
 
