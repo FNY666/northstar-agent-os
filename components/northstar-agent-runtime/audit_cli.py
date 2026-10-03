@@ -193,8 +193,20 @@ def add_audit_arguments(parser: argparse.ArgumentParser) -> None:
     exporting.add_argument(
         "--trace",
         action="store_true",
-        required=True,
-        help="emit the TRACE v0.2 Trust Record shape (the only export shape)",
+        help="emit the TRACE v0.2 Trust Record shape",
+    )
+    exporting.add_argument(
+        "--akf",
+        action="store_true",
+        help="emit an AKF v1.1 unit assembled from the feed (spike: log-import, "
+        "not an AKF conformance claim; exactly one of --trace/--akf is required)",
+    )
+    exporting.add_argument(
+        "--label",
+        default="internal",
+        choices=("public", "internal", "confidential", "highly-confidential", "restricted"),
+        help="AKF classification label for --akf (default: internal; the feed's own "
+        "data classes are not mapped, so a default is honest rather than guessed)",
     )
     exporting.add_argument("--out", default="", help="write the record to this file instead of stdout")
     exporting.add_argument(
@@ -430,9 +442,16 @@ def run_audit(args: argparse.Namespace) -> int:
             )
         return 0 if result.ok else 1
     if command == "export":
-        if not getattr(args, "trace", False):
-            print("audit export: --trace is required (the only export shape)", file=sys.stderr)
+        want_trace = getattr(args, "trace", False)
+        want_akf = getattr(args, "akf", False)
+        if want_trace == want_akf:
+            print(
+                "audit export: exactly one of --trace or --akf is required",
+                file=sys.stderr,
+            )
             return USAGE_ERROR
+        if want_akf:
+            return _run_akf_export(args)
         return _run_audit_export(args)
     print(
         "audit: pass a subcommand: verify, anchor, anchor-external, verify-archive, export or keygen "
@@ -440,6 +459,61 @@ def run_audit(args: argparse.Namespace) -> int:
         file=sys.stderr,
     )
     return USAGE_ERROR
+
+
+def _run_akf_export(args: argparse.Namespace) -> int:
+    """``audit export <feed> --akf``: AKF v1.1 unit export (spike, offline)."""
+    from akf_export import (
+        AKF_SHAPE_LABEL,
+        build_akf_unit,
+        unit_to_json_bytes,
+        validate_akf_unit,
+    )
+
+    feed = Path(args.feed)
+    if not feed.is_file():
+        print(f"audit: no such feed file: {feed}", file=sys.stderr)
+        return USAGE_ERROR
+    try:
+        unit = build_akf_unit(
+            feed,
+            label=args.label,
+            subject=args.subject or None,
+            model_id=args.model_id or None,
+        )
+    except ValueError as error:
+        message = str(error)
+        print(f"audit: cannot export --akf: {message}", file=sys.stderr)
+        # Mirror verify's exit vocabulary: unprotected vs broken feeds.
+        if "UNPROTECTED" in message:
+            return 2
+        return 3
+    problems = validate_akf_unit(unit)
+    if problems:
+        print(
+            f"audit: --akf self-check failed: {'; '.join(problems)}",
+            file=sys.stderr,
+        )
+        return 3
+    out_bytes = unit_to_json_bytes(unit) + b"\n"
+    if args.out:
+        out_path = Path(args.out)
+        try:
+            out_path.write_bytes(out_bytes)
+        except OSError as error:
+            print(f"audit: cannot write {out_path}: {error}", file=sys.stderr)
+            return 3
+        where = str(out_path)
+    else:
+        sys.stdout.buffer.write(out_bytes)
+        where = "stdout"
+    print(
+        f"audit: exported {AKF_SHAPE_LABEL} "
+        f"({len(unit['claims'])} claims; unsigned spike; run `akf audit` for the real check) "
+        f"-> {where}",
+        file=sys.stderr,
+    )
+    return 0
 
 
 def _run_audit_export(args: argparse.Namespace) -> int:

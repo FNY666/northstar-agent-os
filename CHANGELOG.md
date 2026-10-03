@@ -1,3 +1,43 @@
+## Unreleased (fifty-ninth batch) — `audit export --akf` technical spike
+
+Evaluates the [AKF (Agent Knowledge Format)](https://github.com/HMAKT99/AKF)
+(MIT, schema `spec/akf-v1.1.schema.json` @ `e4908d3`) as an interoperability
+shape for the audit feed. Everything below was verified against AKF's
+actual source (`python/akf/compliance.py`, `python/akf/models.py`), not its
+docs — per the project rule.
+
+- **`northstar audit export <feed.ndjson> --akf`** (`akf_export.py`):
+  assembles one AKF v1.1 unit per feed: one claim per record
+  (`id="<event>:<seq>"`, `c` = factual statement of the event,
+  `t=1.0` meaning *record fidelity*, `ai=false`, `src="audit.ndjson/1"`,
+  `src_hash="sha256:<record chain_hash>"`), two prov hops
+  (`northstar-agent-runtime`/`created` on genesis, `northstar-audit-export`/
+  `transformed` on export), `hash=sha256:<feed bytes>`, label via
+  `--label` (default `internal`). Unprotected/broken feeds fail loud
+  (exit 2/3), same as `--trace`.
+- **Honesty rules (enforced)**: no claim `ver`, no unit `reviews`, no
+  signature, no `model` without `--model-id` — omitted, never fabricated.
+  The feed tracks no human review, and the unit says so in
+  `meta.northstar_akf_spike.honest_gaps`.
+- **Validation**: `validate_akf_unit` self-checks the spec's required
+  invariants offline (no `akf` dependency); the export also validates
+  against AKF's own v1.1 JSON schema, and `tests/test_akf_export.py`
+  runs the real `check_regulation(unit, 'eu_ai_act')` when the `akf`
+  package is importable (25 tests green, 1 skip otherwise).
+- **Spike conclusions** (full write-up in `docs/concepts/akf-export.md`):
+  schema fit is high — every required field has an honest mapping; but
+  the EU AI Act score must be read with a caveat (the schema's closed
+  `do` enum forces `"created"` for the feed-production hop, which trips
+  AKF's `("reviewed","created")` human-oversight heuristic on purely
+  machine provenance — 4/4, 1.0, and the green score must not be read as
+  human oversight); verdict: worth keeping as a cheap interoperability
+  shape (~400 lines, offline), not as a conformance target — AKF is a
+  small community format and its compliance heuristics are crude enough
+  to mislead.
+<<<<<<< HEAD
+=======
+>>>>>>> 4f9ee5a (audit export --akf: AKF v1.1 unit technical spike (fifty-ninth batch))
+
 # Northstar Agent OS — initial public component
 
 ## Unreleased (fifty-eighth batch) — whisper-attacks contrast bench: why arguments_digest binding is necessary

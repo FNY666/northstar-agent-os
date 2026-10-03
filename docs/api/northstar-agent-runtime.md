@@ -1821,6 +1821,28 @@ Export one transcript file (``*.jsonl``) as canonical NDJSON audit text.
 
 The transcript file for one session id (mirrors the session_view lookup).
 
+### `akf_export`
+
+Source: `components/northstar-agent-runtime/akf_export.py`
+
+Export a Northstar audit feed as an AKF v1.1 unit (spike).
+
+#### `build_akf_unit(feed: str | Path, *, label: str='internal', subject: str | None=None, model_id: str | None=None, now: str | None=None)`
+
+Assemble one AKF v1.1 unit from a chained audit feed file.
+
+#### `validate_akf_unit(unit: Any)`
+
+Self-check an exported unit against the AKF v1.1 required shape.
+
+#### `unit_to_json_bytes(unit: dict[str, Any])`
+
+JCS canonical bytes of the AKF unit (the digest form).
+
+#### `unit_sha256(unit: dict[str, Any])`
+
+sha256 hex of the unit's JCS canonical form.
+
 ### `audit_chain`
 
 Source: `components/northstar-agent-runtime/audit_chain.py`

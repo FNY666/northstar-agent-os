@@ -109,6 +109,7 @@ MANIFEST: dict[str, tuple[str, ...]] = {
         "skills",
         "tracing",
         "audit_export",
+        "akf_export",
         "audit_chain",
         "audit_cli",
         "audit_rekor",
