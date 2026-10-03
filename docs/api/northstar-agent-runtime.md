@@ -2219,6 +2219,40 @@ Write a complete, self-describing archive package directory.
 
 Verify an archive package. Offline by default; ``online=True`` also re-fetches the Rekor entry. Never raises on malformed input.
 
+### `audit_scitt`
+
+Source: `components/northstar-agent-runtime/audit_scitt.py`
+
+SCITT (RFC 9943) / COSE Receipts (RFC 9942) export spike for audit feeds.
+
+#### `build_statement_payload(feed: str | Path, *, exported_at: str | None=None)`
+
+The statement *about* the feed: our anchor statement as the payload.
+
+#### `build_signed_statement(feed: str | Path, *, key_id: str, seed: bytes | None=None, issuer: str | None=None, exported_at: str | None=None)`
+
+A SCITT Signed Statement *shape* for the feed.
+
+#### `verify_statement_signature(statement: dict[str, Any])`
+
+Verify the JSON-level signature on a signed statement shape.
+
+#### `anchor_record_to_receipt(anchor: dict[str, Any])`
+
+Map our Rekor anchor record onto the COSE Receipt *shape* (RFC 9942 §4).
+
+#### `add_receipts(statement: dict[str, Any], receipts: list[dict[str, Any]])`
+
+Form the Transparent Statement: receipts under unprotected label 394.
+
+#### `build_scitt_bundle(feed: str | Path, *, key_id: str, seed: bytes | None=None, issuer: str | None=None, rekor_anchor: dict[str, Any] | None=None, exported_at: str | None=None)`
+
+The full spike bundle: signed statement, optionally transparent.
+
+#### `bundle_to_json_bytes(bundle: dict[str, Any])`
+
+JCS-canonical JSON bytes of the bundle (deterministic).
+
 ### `trace_export`
 
 Source: `components/northstar-agent-runtime/trace_export.py`

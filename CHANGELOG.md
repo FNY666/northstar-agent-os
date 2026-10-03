@@ -1,3 +1,41 @@
+## Unreleased (seventy-fourth batch) — SCITT (RFC 9943) / COSE Receipts (RFC 9942) export spike
+
+**Spike, not a feature.** RFC 9943 ("An Architecture for Trustworthy and
+Transparent Digital Supply Chains") and RFC 9942 ("COSE Receipts"), both
+Standards Track June 2026, were read in full from rfc-editor.org before
+writing a line — nothing taken on secondary-source faith.
+
+- **New module** `components/northstar-agent-runtime/audit_scitt.py`
+  (stdlib-only, like the rest of the runtime): builds a JSON-diagnostic model
+  of the RFC 9943 §6.1 / RFC 9942 §4 CDDL for an audit feed. Every integer
+  label is the exact registry value — protected `15` (CWT claims `{1: iss,
+  2: sub}`), `1` = `-8` (EdDSA), `3` (cty), `4` (kid — required by §6 when no
+  x5t/x5chain, our exact case), unprotected `394` (receipts), receipt
+  protected `395` = `1` (RFC9162_SHA256) and unprotected `396` → `{-1:
+  [tree_size, leaf_index, inclusion_path]}`.
+- **Field mapping**: the statement payload is our offline anchor manifest
+  (`feed_sha256`, `head_chain_hash`, `records`); `iss` = our key namespace +
+  key id, `sub` = the feed by sha256; a Rekor anchor record maps onto the
+  receipt shape (`leaf_index` = `log_index`, `tree_size` = `log_index + 1`).
+- **Honest gaps, recorded on the artifacts themselves**: no binary
+  CBOR/COSE in the repo, so the "signature" is Ed25519 over JCS-canonical
+  JSON (not a `COSE_Sign1` `Sig_structure`); the receipt is `shape-only`
+  with `proof: incomplete` — Rekor issues no COSE receipts and the v1 submit
+  response carries no Merkle audit path, so `signature` is `None` and
+  `inclusion_path` is empty; issuer identity is self-asserted (no PKI).
+- **`audit export --scitt`**: second export shape alongside `--trace`
+  (exactly one required). `--rekor-anchor <anchor.json>` embeds the receipt
+  shape under unprotected label `394`, forming the Transparent Statement
+  shape; unchained feeds fail loudly like the other shapes.
+- **`docs/scitt-spike.md`**: field-by-field mapping table, the five honest
+  gaps, relationship to existing Rekor anchoring, and the verdict — worth
+  tracking as the long-term standard form of export + anchoring (the mapping
+  is surprisingly clean; our anchor manifest is already the right statement
+  payload), not near-term implementation (gaps are all verifier-side: CBOR
+  codec, TS signatures, Merkle paths, trust anchors).
+- 16 new tests (`tests/test_audit_scitt.py`) pin the RFC labels, the iss/sub
+  binding, the anchor→receipt mapping, and the honesty markers.
+
 ## Unreleased (seventy-third batch) — SEC 15c3-5 pre-trade risk semantics on the permission gate
 
 Absorbs the *pre-trade risk-control semantics* (not a compliance claim) of
@@ -661,9 +699,6 @@ docs — per the project rule.
   shape (~400 lines, offline), not as a conformance target — AKF is a
   small community format and its compliance heuristics are crude enough
   to mislead.
-<<<<<<< HEAD
-=======
->>>>>>> 4f9ee5a (audit export --akf: AKF v1.1 unit technical spike (fifty-ninth batch))
 
 # Northstar Agent OS — initial public component
 

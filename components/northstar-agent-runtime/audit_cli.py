@@ -180,13 +180,19 @@ def add_audit_arguments(parser: argparse.ArgumentParser) -> None:
         help="export a feed's chain head as a TRACE v0.2-shaped Trust Record",
         description=(
             "Offline, deterministic, pure software: reads a chained audit feed and "
-            "emits one TRACE v0.2-shaped Trust Record (JCS JSON) committing the "
-            "chain head by hash (tool_transcript.hash), with a behavior-trace "
-            "reference to the feed digest, policy.enforcement_mode=enforce, and "
-            "origin.kind=log-import / runtime.platform=software-only. This is an "
-            "evidence-shape export, not a TRACE conformance claim: v0.2 is a "
-            "Developer Preview and software-only records are never attested "
-            "evidence. Fails loudly on unchained or broken feeds."
+            "emits one export record. Two shapes: --trace emits a TRACE v0.2-shaped "
+            "Trust Record (JCS JSON) committing the chain head by hash "
+            "(tool_transcript.hash), with a behavior-trace reference to the feed "
+            "digest, policy.enforcement_mode=enforce, and origin.kind=log-import / "
+            "runtime.platform=software-only. This is an evidence-shape export, not a "
+            "TRACE conformance claim: v0.2 is a Developer Preview and software-only "
+            "records are never attested evidence. --scitt emits the SCITT "
+            "(RFC 9943) / COSE Receipts (RFC 9942) spike bundle: a JSON-diagnostic "
+            "model of a Signed Statement about the feed's anchor manifest, "
+            "optionally transparent (a receipt shape mapped from a Rekor anchor "
+            "record under unprotected label 394). The spike is a shape model, "
+            "never a conformant SCITT message. Both shapes fail loudly on "
+            "unchained or broken feeds."
         ),
     )
     exporting.add_argument("feed", help="chained audit NDJSON feed file to export")
@@ -207,6 +213,25 @@ def add_audit_arguments(parser: argparse.ArgumentParser) -> None:
         choices=("public", "internal", "confidential", "highly-confidential", "restricted"),
         help="AKF classification label for --akf (default: internal; the feed's own "
         "data classes are not mapped, so a default is honest rather than guessed)",
+    )
+    exporting.add_argument(
+        "--scitt",
+        action="store_true",
+        help="emit the SCITT (RFC 9943) / COSE Receipts (RFC 9942) spike bundle shape",
+    )
+    exporting.add_argument(
+        "--rekor-anchor",
+        default="",
+        help="with --scitt: path to a Rekor anchor record JSON (from "
+        "`audit anchor-external`); mapped to a receipt shape and embedded "
+        "under unprotected label 394, forming the Transparent Statement shape",
+    )
+    exporting.add_argument(
+        "--key-id",
+        default="",
+        help="with --scitt: issuer key id for the protected header (kid, "
+        "label 4); defaults to the signing key's pubkey hex when --seed-hex "
+        "is given",
     )
     exporting.add_argument("--out", default="", help="write the record to this file instead of stdout")
     exporting.add_argument(
@@ -444,14 +469,18 @@ def run_audit(args: argparse.Namespace) -> int:
     if command == "export":
         want_trace = getattr(args, "trace", False)
         want_akf = getattr(args, "akf", False)
-        if want_trace == want_akf:
+        want_scitt = getattr(args, "scitt", False)
+        shapes = [bool(want_trace), bool(want_akf), bool(want_scitt)]
+        if sum(shapes) != 1:
             print(
-                "audit export: exactly one of --trace or --akf is required",
+                "audit export: pass exactly one of --trace, --akf or --scitt",
                 file=sys.stderr,
             )
             return USAGE_ERROR
         if want_akf:
             return _run_akf_export(args)
+        if want_scitt:
+            return _run_audit_scitt_export(args)
         return _run_audit_export(args)
     print(
         "audit: pass a subcommand: verify, anchor, anchor-external, verify-archive, export or keygen "
@@ -564,6 +593,77 @@ def _run_audit_export(args: argparse.Namespace) -> int:
     signed_note = "signed" if seed is not None else "unsigned (shape only, no conformance claim)"
     print(
         f"audit: exported {TRACE_SHAPE_LABEL} [{signed_note}] -> {where}",
+        file=sys.stderr,
+    )
+    return 0
+
+
+def _run_audit_scitt_export(args: argparse.Namespace) -> int:
+    """``audit export <feed> --scitt``: SCITT/RFC 9943 spike bundle (offline)."""
+    from audit_scitt import SCITT_SPIKE_LABEL, build_scitt_bundle, bundle_to_json_bytes
+
+    feed = Path(args.feed)
+    if not feed.is_file():
+        print(f"audit: no such feed file: {feed}", file=sys.stderr)
+        return USAGE_ERROR
+    try:
+        seed = bytes.fromhex(args.seed_hex) if args.seed_hex else None
+    except ValueError:
+        print("audit: --seed-hex is not valid hex", file=sys.stderr)
+        return USAGE_ERROR
+    if seed is not None and len(seed) != 32:
+        print("audit: --seed-hex must be 64 hex chars (32 bytes)", file=sys.stderr)
+        return USAGE_ERROR
+    key_id = args.key_id or ""
+    if not key_id and seed is not None:
+        from ed25519 import public_key as ed_public_key
+
+        key_id = ed_public_key(seed).hex()
+    if not key_id:
+        print(
+            "audit: --scitt needs --key-id (issuer identity for the protected "
+            "header; defaults to the signing key's pubkey hex with --seed-hex)",
+            file=sys.stderr,
+        )
+        return USAGE_ERROR
+    rekor_anchor = None
+    if args.rekor_anchor:
+        anchor_path = Path(args.rekor_anchor)
+        try:
+            rekor_anchor = json.loads(anchor_path.read_text(encoding="utf-8"))
+        except (OSError, ValueError) as error:
+            print(f"audit: cannot read --rekor-anchor {anchor_path}: {error}", file=sys.stderr)
+            return USAGE_ERROR
+        if not isinstance(rekor_anchor, dict):
+            print("audit: --rekor-anchor must be a JSON object (anchor record)", file=sys.stderr)
+            return USAGE_ERROR
+    try:
+        bundle = build_scitt_bundle(
+            feed, key_id=key_id, seed=seed, rekor_anchor=rekor_anchor
+        )
+    except ValueError as error:
+        message = str(error)
+        print(f"audit: cannot export --scitt: {message}", file=sys.stderr)
+        # Mirror the --trace exit vocabulary: unprotected vs broken feeds.
+        if "no chained head" in message:
+            return 2
+        return 3
+    out_bytes = bundle_to_json_bytes(bundle) + b"\n"
+    if args.out:
+        out_path = Path(args.out)
+        try:
+            out_path.write_bytes(out_bytes)
+        except OSError as error:
+            print(f"audit: cannot write {out_path}: {error}", file=sys.stderr)
+            return 3
+        where = str(out_path)
+    else:
+        sys.stdout.buffer.write(out_bytes)
+        where = "stdout"
+    shape = "transparent-statement" if rekor_anchor is not None else "signed-statement"
+    signed_note = "signed (JSON-level)" if seed is not None else "unsigned (shape only)"
+    print(
+        f"audit: exported {SCITT_SPIKE_LABEL} [{shape}, {signed_note}] -> {where}",
         file=sys.stderr,
     )
     return 0
