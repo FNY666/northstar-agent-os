@@ -610,6 +610,19 @@ Plugin claim-evidence tiering, ERC-8004 validation semantics.
 
 RFC 9162 Merkle inclusion/consistency proofs over the audit chain.
 
+#### `PostureScenario`
+
+One control-isolating red-team scenario (original synthetic situation).
+
+- `to_metric_probe()`
+#### `RedTeamPredicate`
+
+A deterministic state predicate: a pure function over the final trace, independently recomputable by anyone (no judge, no model).
+
+#### `run_posture_decomposition()`
+
+Three-posture control decomposition, FinAgent Red-Team methodology.
+
 #### `list_cases()`
 
 #### `run_suite(*, only: Iterable[str] | None=None, tracks: Iterable[str] | None=None)`
