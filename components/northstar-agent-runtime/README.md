@@ -48,7 +48,15 @@ pip install '.[tracing]'            # + OpenTelemetry span export
 pip install 'northstar-agent-runtime[full]'
 ```
 
-Then run from any directory:
+Then run from any directory. The core remains dependency-free. The full
+`northstar bench` additionally exercises host/contract/durable components;
+install those reviewed local components before the optional benchmark extra:
+
+```sh
+pip install ../northstar-run-contract ../northstar-host ../northstar-durable-run
+pip install '.[bench]'
+# Once the coordinated components are published: pip install 'northstar-agent-runtime[bench]'
+```
 
 ```sh
 northstar-agent-runtime --version
