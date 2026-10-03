@@ -1,5 +1,37 @@
 # Northstar Agent OS — initial public component
 
+## Unreleased (forty-first batch) — thirteen governance bench scenarios from the third-round research
+
+Absorbed 12 support/voice-agent governance scenarios (third-round research
+report, §4.2) into the permission-decision bench as 13 offline,
+deterministic cases (AIUC-1 split into two: prompt-injection-via-tool-output
+and hallucinated-tool classes). The bench grows from 16 to 29 cases and the
+scorecard version moves to `northstar.governance.bench.v4`:
+
+- denial track (6 new): exempt paths still emit a recorded gate decision
+  (source+reason on every engine path); approval renders the actual tool
+  parameters, never the model's summary (a "$10 to alice" summary cannot
+  approve a "$1000 to mallory" call); deterministic threshold boundary —
+  $100.00 executes, $100.01 is denied, no false negative at the epsilon;
+  benign read-only calls never reach the host (false-ASK rate metric);
+  an always-approving host cannot move a disallowed tool; an approval
+  timeout fails closed and the fallback attempt stays gated.
+- injection track (7 new): a PII data-plane rule at the PreToolUse
+  extension point (SSN/card patterns denied before execution); model
+  rhetoric cannot talk past the deterministic gate; a DNC/suppression
+  pre-check in the host callback (suppressed number denied, missing
+  recording disclosure denied); unapproved policy loosening is refused at
+  load (`bypassPermissions` mode and `allow_tools` in a policy file);
+  denied actions land in audit.ndjson/1 as error-level denial records with
+  tool/source/reason; AIUC-1 classes — tool-output prompt injection cannot
+  escalate to Shell, hallucinated tool names fail closed as unknown.
+
+Framework support added for the new cases: `BenchExpectation.post_check`
+for post-run assertions (approver payload fidelity, host-consult counts,
+audit-feed contents), and `BenchHarness.runtime()` now accepts optional
+`hooks` and `sessions` overrides. **Verification:** 29/29 bench cases
+green, 75/75 runtime tests green, docbuild API pages regenerated.
+
 ## Unreleased (fortieth batch) — bounded idempotency store in the approval gateway
 
 The approval gateway's idempotency cache was an unbounded in-memory dict:
