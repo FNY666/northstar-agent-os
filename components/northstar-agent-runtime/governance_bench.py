@@ -17651,6 +17651,63 @@ def _case_metrics_procurement_agents(h: BenchHarness) -> BenchExpectation:
         notes="procurement accountability: advisory-only awards, source-grounded claims, pre-issuance health checks, collusion leads (never convictions), losing-bid data gates, incumbency-bias probes, algorithm registration, 4-segment award traces",
     )
 
+def _case_metrics_underwriting_agents(h: BenchHarness) -> BenchExpectation:
+    """Underwriting & claims discipline gates (one-hundred-fortieth batch).
+
+    12 deterministic scenarios, 4 allow / 8 deny: an approve action
+    passes; a live human-review breaker on a denial passes; a
+    template with a bound, under-threshold stress receipt passes; a
+    fully NAIC-mapped underwriting deployment passes. Denied: a
+    direct AI claim denial (``underwriting.ai_denial``), an expired
+    breaker (``underwriting.breaker_expired``), a template with no
+    stress receipt (``underwriting.untested_template``), a template
+    whose measured disparity exceeds its pinned threshold
+    (``underwriting.untested_template``), a deployment past the
+    Art. 50 deadline without transparency
+    (``underwriting.compliance_lapse``), a fraud probe routed to
+    auto-deny (``underwriting.fraud_auto_deny``), an assistive
+    system that decided (``underwriting.decision_creep``), and a
+    high-risk deployment with no NAIC-mapped items
+    (``underwriting.unmapped_high_risk``).
+    """
+    metrics = run_underwriting_agents()
+
+    def check(exp: BenchExpectation, report: Any) -> tuple[bool, str]:
+        if metrics["n_scenarios"] != 12:
+            return (False, f"expected 12 underwriting scenarios, saw {metrics['n_scenarios']}")
+        if metrics["mismatches"]:
+            return (False, f"scenario(s) disagree with ground truth: {metrics['mismatches']}")
+        if metrics["allowed_ids"] != [
+            "allow_approve",
+            "allow_live_breaker",
+            "allow_stress_bound",
+            "allow_mapped_deployment",
+        ]:
+            return (False, f"allowed set drifted: {metrics['allowed_ids']}")
+        reasons = metrics["denial_reasons"]
+        for sid, needle in (
+            ("deny_ai_denial", "ai_denial"),
+            ("deny_expired_breaker", "breaker_expired"),
+            ("deny_untested_template", "untested_template"),
+            ("deny_disparity_over_threshold", "untested_template"),
+            ("deny_lapsed_art50", "compliance_lapse"),
+            ("deny_fraud_auto_deny", "fraud_auto_deny"),
+            ("deny_decision_creep", "decision_creep"),
+            ("deny_unmapped_high_risk", "unmapped_high_risk"),
+        ):
+            if needle not in reasons.get(sid, ""):
+                return (False, f"{sid} missing denial needle {needle!r}")
+        return (True, "underwriting_agents: 12/12 scenarios match ground truth")
+
+    return BenchExpectation(
+        runtime=_noop_runtime(h),
+        expect_subtype="success",
+        post_check=check,
+        metrics=metrics,
+        notes="underwriting & claims discipline: approve-only claim engines, human-review breakers on key content, fairness stress receipts, EU AI Act compliance clock, fraud probes routed to humans, assist-not-decide, NAIC evaluation-tool mapping, vendor evidence binding",
+    )
+
+
 def _case_metrics_orbital_agents(h: BenchHarness) -> BenchExpectation:
     """Orbital safety receipts (one-hundred-thirty-fourth batch).
 
@@ -19963,6 +20020,7 @@ CASES: tuple[BenchCase, ...] = (
     BenchCase("metrics.attenuation", "metrics", "attenuating delegation credentials (biscuit-style)", _case_metrics_attenuation),
     BenchCase("metrics.pledge_semantics", "metrics", "pledge-style self-restriction (declare->tighten-only)", _case_metrics_pledge_semantics),
     BenchCase("metrics.procurement_agents", "metrics", "procurement accountability: advisory-only award gates, source-grounded claims, pre-issuance health checks, collusion leads (never convictions), losing-bid data gates, incumbency-bias probes, algorithm registration, 4-segment award traces (AI-procurement absorption)", _case_metrics_procurement_agents),
+    BenchCase("metrics.underwriting_agents", "metrics", "underwriting & claims discipline: approve-only claim engines, human-review breakers on key content, fairness stress receipts, EU AI Act compliance clock, fraud probes routed to humans, assist-not-decide, NAIC evaluation-tool mapping, vendor evidence binding (AI-insurance absorption)", _case_metrics_underwriting_agents),
     BenchCase("metrics.dataflow_sensitivity", "metrics", "dataflow sensitivity tracking (OpenAPPA-style)", _case_metrics_dataflow_sensitivity),
     BenchCase("metrics.decision_model", "metrics", "structured decision-model approval path", _case_metrics_decision_model),
     BenchCase("metrics.whisper_contrast", "metrics", "whisper-attacks contrast: signature vs bound arguments", _case_metrics_whisper_contrast),
@@ -23195,6 +23253,164 @@ def run_greenwash() -> dict[str, Any]:
     }
 
 
+def run_underwriting_agents() -> dict[str, Any]:
+    """Underwriting & claims discipline gates (one-hundred-fortieth batch).
+
+    Absorbs the 2026 AI-insurance research thread (new since the
+    125th batch): Zurich×Cytora agentic underwriting (triage time
+    -80%, vendor PR); Aviva AI medical-report summaries
+    (self-reported 99.7% accuracy, explicitly assist-not-decide);
+    China's top-5 insurers' "smart underwriting's first year"
+    (830K+ smart underwriting/day, health underwriting 5 days to
+    17 min, fake-invoice detection 72%→99.1%, all unaudited); the
+    2026-06 Generative AI Insurance Compliance Guidance (human-review
+    circuit breakers, fairness stress tests, explainable/traceable/
+    intervenable); Lemonade's approve engine (55% fully automated,
+    96% FNOL touchless); Hesper AI's 2026-09 NAIC finding that zero
+    large auto insurers reported AI for claim denials; the NAIC AI
+    Evaluation Tool 12-state pilot; the EU AI Act timing conflict
+    (Omnibus 2026/1744 defers Annex III to 2027-12-02, Art. 50 stays
+    2026-08-02).
+
+    Fail-closed rules over 12 deterministic scenarios: claim engines
+    may only approve or route to humans — a direct AI denial is a
+    hard deny (``underwriting.ai_denial``); key content binds live
+    human-review breakers; templates bind authority-signed stress
+    receipts; EU obligations bind pinned deadlines; fraud probes route
+    to humans only; assistive AI that decides crosses the line;
+    high-risk deployments need NAIC-mapped items; vendor accuracy
+    claims bind trial evidence. Ground truth is closed: 4 allow /
+    8 deny.
+    """
+    from ed25519 import public_key
+
+    from underwriting_agents import (
+        ART50_TRANSPARENCY_EPOCH,
+        ai_act_clock,
+        approve_only_engine,
+        assist_not_decide,
+        evaluation_tool_mapping,
+        fairness_stress_receipt,
+        human_circuit_breaker,
+        issue_breaker_receipt,
+        issue_stress_receipt,
+        synthetic_fraud_probe,
+    )
+
+    SEC = b"uw-bench" + b"0" * 24  # 32 bytes
+    assert len(SEC) == 32
+    PUB = public_key(SEC)
+    T0 = 1_800_000_000
+    HEX64 = "ab" * 32
+    HEX64_B = "cd" * 32
+
+    breaker = issue_breaker_receipt(
+        break_id="brk-bench-1", decision_id="dec-bench-1", decision_digest=HEX64,
+        breaker_kind="claim_denial", human_reviewer_id="rev-bench",
+        reviewer_pubkey_hex=PUB.hex(), reviewer_secret=SEC, payout_bps=0,
+        created_at=T0 - 100, expires_at=T0 + 3600)
+    expired_breaker = issue_breaker_receipt(
+        break_id="brk-bench-2", decision_id="dec-bench-2", decision_digest=HEX64,
+        breaker_kind="claim_denial", human_reviewer_id="rev-bench",
+        reviewer_pubkey_hex=PUB.hex(), reviewer_secret=SEC, payout_bps=0,
+        created_at=T0 - 7200, expires_at=T0 - 100)
+    stress = issue_stress_receipt(
+        template_id="tpl-bench-1", template_digest=HEX64, stress_test_digest=HEX64_B,
+        fairness_threshold_bps=200, measured_disparity_bps=100,
+        authority_id="auth-bench", authority_pubkey_hex=PUB.hex(),
+        authority_secret=SEC, tested_at=T0 - 100, expires_at=T0 + 3600)
+    high_disparity = issue_stress_receipt(
+        template_id="tpl-bench-2", template_digest=HEX64, stress_test_digest=HEX64_B,
+        fairness_threshold_bps=200, measured_disparity_bps=300,
+        authority_id="auth-bench", authority_pubkey_hex=PUB.hex(),
+        authority_secret=SEC, tested_at=T0 - 100, expires_at=T0 + 3600)
+
+    scenarios: list[tuple[str, bool, str]] = []
+    results: dict[str, dict[str, Any]] = {}
+
+    def _record(sid, expect_allow, needle, verdict):
+        scenarios.append((sid, expect_allow, needle))
+        results[sid] = {"allowed": verdict.allowed, "reason": verdict.reason}
+
+    # 1. approve action -> allow
+    _record("allow_approve", True, "",
+            approve_only_engine("approve"))
+
+    # 2. live human-review breaker on a denial -> allow
+    _record("allow_live_breaker", True, "",
+            human_circuit_breaker(breaker, expected_kind="claim_denial",
+                                  decision_digest=HEX64, now=T0))
+
+    # 3. template with bound, under-threshold stress receipt -> allow
+    _record("allow_stress_bound", True, "",
+            fairness_stress_receipt(stress, template_digest=HEX64, now=T0))
+
+    # 4. fully NAIC-mapped underwriting deployment -> allow
+    _record("allow_mapped_deployment", True, "",
+            evaluation_tool_mapping("dep-bench-1", deployment_kind="underwriting",
+                                    mapped_items=["human_oversight", "claims_specific_review"]))
+
+    # 5. direct AI claim denial -> deny
+    _record("deny_ai_denial", False, "ai_denial",
+            approve_only_engine("deny"))
+
+    # 6. expired breaker -> deny
+    _record("deny_expired_breaker", False, "breaker_expired",
+            human_circuit_breaker(expired_breaker, expected_kind="claim_denial",
+                                  decision_digest=HEX64, now=T0))
+
+    # 7. template with no stress receipt -> deny
+    _record("deny_untested_template", False, "untested_template",
+            fairness_stress_receipt(None, template_digest=HEX64, now=T0))
+
+    # 8. measured disparity above pinned threshold -> deny
+    _record("deny_disparity_over_threshold", False, "untested_template",
+            fairness_stress_receipt(high_disparity, template_digest=HEX64, now=T0))
+
+    # 9. past Art. 50 deadline without transparency -> deny
+    _record("deny_lapsed_art50", False, "compliance_lapse",
+            ai_act_clock("dep-bench-2", deployment_kind="claims_adjudication",
+                         obligations_met={},
+                         now=ART50_TRANSPARENCY_EPOCH + 1))
+
+    # 10. fraud probe routed to auto-deny -> deny
+    _record("deny_fraud_auto_deny", False, "fraud_auto_deny",
+            synthetic_fraud_probe("fp-bench-1", routed_action="deny"))
+
+    # 11. assistive system that decided -> deny
+    _record("deny_decision_creep", False, "decision_creep",
+            assist_not_decide("sys-bench-1", declared_assistive=True, decision_made=True))
+
+    # 12. high-risk deployment with no NAIC-mapped items -> deny
+    _record("deny_unmapped_high_risk", False, "unmapped_high_risk",
+            evaluation_tool_mapping("dep-bench-3", deployment_kind="pricing",
+                                    mapped_items=[]))
+
+    mismatches: list[str] = []
+    allowed_ids: list[str] = []
+    denial_reasons: dict[str, str] = {}
+    for sid, expect_allow, needle in scenarios:
+        r = results[sid]
+        if r["allowed"]:
+            allowed_ids.append(sid)
+        else:
+            denial_reasons[sid] = r["reason"]
+        if r["allowed"] != expect_allow:
+            mismatches.append(f"{sid}: expected allow={expect_allow}, "
+                              f"saw allow={r['allowed']}")
+        elif not expect_allow and needle and needle not in r["reason"]:
+            mismatches.append(f"{sid}: expected needle {needle!r} in "
+                              f"{r['reason']!r}")
+    return {
+        "n_scenarios": len(scenarios),
+        "n_allowed": len(allowed_ids),
+        "n_denied": len(scenarios) - len(allowed_ids),
+        "allowed_ids": allowed_ids,
+        "denial_reasons": denial_reasons,
+        "mismatches": mismatches,
+    }
+
+
 def run_procurement_agents() -> dict[str, Any]:
     """Procurement accountability gates (one-hundred-thirty-eighth batch).
 
@@ -24729,6 +24945,7 @@ __all__ = [
     "run_embodied",
     "run_greenwash",
     "run_procurement_agents",
+    "run_underwriting_agents",
     "run_orbital_agents",
     "run_disaster_agents",
     "run_pharma_agents",
