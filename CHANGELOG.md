@@ -1,3 +1,23 @@
+## Unreleased (ninety-fourth batch) — no-self-attestation (ERC-8004 absorption)
+
+Absorbs the ERC-8004 no-self-attestation rule (live on mainnet 2026-01-29,
+per the 2026 research sweep): `giveFeedback` forbids the owner as the
+submitter — self-issued feedback is not evidence. Ported to Northstar's
+approval gates (eighty-fourth batch action cards): new module
+`approver_separation.py` — `eligible_approvers()` returns the registered
+approvers minus the proposer minus the proposer's whole delegation subtree
+(BFS with a visited set, so cyclic graphs terminate; sock-puppet approval
+via a delegated sub-agent is self-approval with extra hops), `check_approver()`
+denies `self_approval` / `sock_puppet_delegatee` / `unknown_approver` /
+`malformed_input`, and violations audit as `approval.self_attestation_denied`
+for the `audit.ndjson/1` chain. `action_card.resolve_card()` takes optional
+`approver_identity` / `registered_approvers` / `delegation_graph` and runs
+the separation gate *before* the auto-approve shortcut: when the only
+available approver is the proposer, the card denies — there is no fallback
+to auto-approve. Malformed inputs fail closed (empty eligible set).
+New bench track `metrics.approver_separation` (12 deterministic scenarios,
+3 allow / 9 deny).
+
 ## Unreleased (ninety-third batch) — adversarial bench scenarios
 
 New bench track `metrics.adversarial_scenarios` (12 deterministic
