@@ -526,6 +526,10 @@ Paired consent ablation: consent_kept vs consent_stripped.
 
 Map every bench probe to the OWASP Agentic Top 10 2026 taxonomy.
 
+#### `run_least_privilege()`
+
+Least-privilege gate enforcement, ToolPrivBench methodology.
+
 #### `BenchHarness`
 
 Temp workspaces + scripted providers for one suite run.
