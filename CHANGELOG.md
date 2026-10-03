@@ -1,3 +1,27 @@
+## Unreleased (ninety-sixth batch) — twin-sync receipts: freshness-gated actuation (digital-twin absorption)
+
+Absorbs the 2026 digital-twins-at-scale research thread (mechanism ideas
+only, honestly scoped in `twin_receipts.py`): synchronization drift is
+the critical governance issue — GISEC 2026 ran dedicated sessions on
+manipulated sensor inputs distorting physical assets' virtual
+representations, practitioner taxonomies rank sync drift CRITICAL, and an
+SSRN systematic review (124 studies, peer-reviewed Nov 2025) lists data
+poisoning, drift, and *unsafe actuation* as only partly addressed by
+existing standards. `SyncReceipt` is a hash-chained receipt binding
+`(twin_id, state_digest, observed_at, source_sensor_set,
+staleness_budget)`; `check_freshness()` fail-closes on stale (age >
+budget), future-dated, or sensor-set-changed observations. The pinned
+sensor manifest makes poisoning explicit: any added/removed/swapped
+sensor — or an unpinned twin — classifies the window NON_AUTHORITATIVE
+under the eighty-seventh batch's binary tiers, and actuation is
+high-stakes so it can never authorize on such a window. The
+unsafe-actuation gate requires a Verifiable Action Card (eighty-fourth
+batch) whose bound arguments name the exact receipt; stale receipts deny
+with `twin:stale_state`, cardless with `twin:no_card`, and each receipt
+authorizes exactly one actuation (`twin:receipt_replay` on reuse). New
+bench track `metrics.twin_sync` (12 deterministic scenarios, 3 allow / 9
+deny, BENCH_VERSION v16→v17).
+
 ## Unreleased (ninety-seventh batch) — signed offline policy bundles (space-AI absorption)
 
 Absorbs the 2026 space-AI research thread: satellites cannot phone home

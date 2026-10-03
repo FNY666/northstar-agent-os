@@ -115,7 +115,7 @@ from tools import ToolLimits, ToolSandbox, build_default_registry
 
 #: Semantic version of the public case set. Bump when a case is added, removed,
 #: or its expected verdict changes — consumers pin against this string.
-BENCH_VERSION = "northstar.governance.bench.v15"
+BENCH_VERSION = "northstar.governance.bench.v17"
 
 USAGE_ERROR = 64
 
@@ -7593,6 +7593,28 @@ def run_offline_bundle() -> dict[str, Any]:
     return _run()
 
 
+def run_twin_sync() -> dict[str, Any]:
+    """Twin-sync receipts: freshness-gated actuation (ninety-sixth batch).
+
+    Absorbs the 2026 digital-twins-at-scale research thread (mechanism
+    ideas only, honestly scoped in ``twin_receipts.py``): synchronization
+    drift is the critical governance issue (GISEC 2026 dedicated
+    sessions; practitioner taxonomies rank sync drift CRITICAL), and
+    unsafe actuation — twin→physical commands planned against stale or
+    poisoned twin state — is the failure mode the gate exists to kill.
+
+    Deterministic: pinned integer timestamps, sha256-label fixtures, no
+    runtime, no network, no model. Ground truth is closed: 12
+    scenarios, 3 allow / 9 deny — fresh, boundary-fresh, chained
+    receipts allow; stale, future-dated, sensor-added, sensor-removed,
+    unpinned-twin, cardless, binding-mismatched, replayed, and unknown
+    receipts deny with their exact ``twin:`` codes.
+    """
+    from twin_receipts import run_twin_sync as _run
+
+    return _run()
+
+
 def run_pledge_semantics() -> dict[str, Any]:
     """Pledge-style self-restriction semantics, OpenBSD pledge(2) model.
 
@@ -9553,6 +9575,57 @@ def _case_metrics_offline_bundle(h: BenchHarness) -> BenchExpectation:
     )
 
 
+def _case_metrics_twin_sync(h: BenchHarness) -> BenchExpectation:
+    """Twin-sync receipts: freshness-gated actuation (ninety-sixth batch).
+
+    12 deterministic scenarios, 3 allow / 9 deny: a fresh receipt with
+    clean sensors and a bound Verifiable Action Card authorizes
+    actuation; the boundary (age == budget) is still fresh; a chained
+    next receipt authorizes its own actuation. Denied: stale (one second
+    past budget), future-dated, sensor-added, sensor-removed,
+    unpinned-twin (all ``twin:sensor_mismatch`` with the window
+    NON_AUTHORITATIVE per the eighty-seventh batch binary tiers),
+    cardless, card-binding-mismatched, replayed (single-use), and
+    unknown receipts — each with its exact ``twin:`` denial code.
+    """
+    metrics = run_twin_sync()
+
+    def check(exp: BenchExpectation, report: Any) -> tuple[bool, str]:
+        if metrics["n_scenarios"] != 12:
+            return (False, f"expected 12 twin-sync scenarios, saw {metrics['n_scenarios']}")
+        if metrics["mismatches"]:
+            return (False, f"scenario(s) disagree with ground truth: {metrics['mismatches']}")
+        if metrics["allowed_ids"] != [
+            "allow_boundary_fresh",
+            "allow_fresh_receipt_actuation",
+            "allow_second_receipt_new_chain",
+        ]:
+            return (False, f"allowed set drifted: {metrics['allowed_ids']}")
+        detail = metrics["detail"]
+        if "twin:stale_state" not in detail.get("deny_stale_receipt", ""):
+            return (False, "stale receipt must deny with twin:stale_state")
+        if "twin:no_card" not in detail.get("deny_actuation_without_card", ""):
+            return (False, "cardless actuation must deny with twin:no_card")
+        if "twin:receipt_replay" not in detail.get("deny_receipt_replay", ""):
+            return (False, "replayed receipt must deny with twin:receipt_replay")
+        if "twin:sensor_mismatch" not in detail.get("deny_sensor_added", ""):
+            return (False, "poisoned sensor set must deny with twin:sensor_mismatch")
+        return (True, "12/12 twin-sync scenarios hold: freshness/sensors/card/replay")
+
+    return BenchExpectation(
+        runtime=_noop_runtime(h),
+        expect_subtype="success",
+        post_check=check,
+        metrics=metrics,
+        notes=(
+            "2026 digital-twin thread: sync drift is the CRITICAL failure "
+            "mode (GISEC 2026; SSRN 124-study review on unsafe actuation). "
+            "Actuation needs a bound Action Card + fresh receipt + clean "
+            "sensor manifest; receipts are single-use (replay denies)."
+        ),
+    )
+
+
 def _case_metrics_attestation_receipts(h: BenchHarness) -> BenchExpectation:
     """TEE attestation as receipt evidence (ninety-second batch).
 
@@ -10874,6 +10947,7 @@ CASES: tuple[BenchCase, ...] = (
     BenchCase("metrics.approver_separation", "metrics", "no-self-attestation: proposer excluded from approver set + delegation subtree (ERC-8004)", _case_metrics_approver_separation),
     BenchCase("metrics.adversarial_scenarios", "metrics", "adversarial scenarios: multi-agent failures, no-adversary failures, malicious-but-signed", _case_metrics_adversarial_scenarios),
     BenchCase("metrics.offline_bundle", "metrics", "signed offline policy bundles: signature/expiry/staleness/version/digest gates", _case_metrics_offline_bundle),
+    BenchCase("metrics.twin_sync", "metrics", "twin-sync receipts: freshness-gated actuation, sensor-manifest poisoning, single-use receipts", _case_metrics_twin_sync),
     BenchCase("metrics.attestation_receipts", "metrics", "TEE attestation as receipt evidence: forgery/replay/downgrade probes", _case_metrics_attestation_receipts),
     BenchCase("metrics.harness_binding", "metrics", "harness integrity binding: SHA-256 harness hash in audit, quad-only scores", _case_metrics_harness_binding),
     BenchCase("metrics.drift_detection", "metrics", "Livenerf-style drift probe: bootstrap CI + paired permutation test", _case_metrics_drift_detection),
@@ -11498,6 +11572,7 @@ __all__ = [
     "run_approver_separation",
     "run_adversarial_scenarios",
     "run_offline_bundle",
+    "run_twin_sync",
     "run_attestation_receipts",
     "run_owasp_asi_coverage",
     "run_policy_axis",
