@@ -1,3 +1,22 @@
+## Unreleased (one-hundred-eleventh batch) — dual-use screen for autonomous science (AI-for-science absorption)
+
+New module `dual_use.py`: authority-signed, hash-chained
+`ConstraintBinding` receipts pinning a lab task's constraint list
+(physical laws / biosafety red lines) — no binding means no tool
+calls, `science:no_constraints`. `screen_tool_call()` is a
+deterministic tripwire: the closed `DUAL_USE_WATCHLIST` escalates
+dual-use calls to a human (fail-closed, `science.dual_use_hit`
+audited) and near-hits classify `NON_AUTHORITATIVE`, never
+auto-allowed. `ClaimRegistry`: AI scientific assertions enter
+`NON_AUTHORITATIVE`; promotion only by a matching replication receipt
+or expert countersign; result-without-method "breakthroughs" are
+terminally `ununderstood` and never reusable. `check_citations()`:
+deterministic citation parsing, mass-unparseable citations make the
+document `NON_AUTHORITATIVE`. `MechanicalVerifier`: AlphaProof-style
+generator/verifier separation — verifier reject means action reject,
+no override path. Bench track `metrics.dual_use`: 12 scenarios,
+5 allow / 7 deny.
+
 ## Unreleased (one-hundred-seventh batch) — scene-bound authorization receipts (AI-healthcare absorption)
 
 New module `scene_bound.py`: authority-signed, hash-chained
