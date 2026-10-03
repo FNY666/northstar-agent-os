@@ -111,6 +111,7 @@ def load_workspace_agents(args: argparse.Namespace, agents: Any, registry: Any, 
             args.workspace,
             known_tools=registry.names(),
             extra_paths=[path for _name, path in (plugins.agent_directories if plugins else ())],
+            reviewed_digests=plugins.agent_digests if plugins else {},
         )
     except AgentFileError as error:
         raise RunConfigurationError(str(error)) from error
@@ -385,6 +386,7 @@ def compose_system_prompt(args: argparse.Namespace, definition: Any, policy: Any
                 args.workspace,
                 extra_roots=[path for _name, path in (plugins.skill_roots if plugins else ())],
                 reviewed_digests=reviewed_digests,
+                extra_digests=plugins.skill_digests if plugins else {},
             )
         except SkillError as error:
             raise RunConfigurationError(str(error)) from error
