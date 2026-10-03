@@ -877,6 +877,175 @@ Hash-chained log of fire-triage receipts.
 
 Check that a battery passed fire triage before shredding.
 
+### `energybid_agents`
+
+Source: `components/northstar-agent-runtime/energybid_agents.py`
+
+Energy trading discipline (one-hundred-forty-fifth batch).
+
+#### `EnergyBidError`
+
+A malformed energy-trading receipt or a programming error.
+
+#### `EnergyBidVerdict`
+
+Outcome of one energy-trading discipline check.
+
+#### `energybid_audit_event(verdict: EnergyBidVerdict, *, action: str)`
+
+Build the audit event for an energy-trading discipline verdict.
+
+#### `BidEvidenceReceipt`
+
+A quote bound to its model, input data, and rule versions.
+
+#### `bid_evidence_binding(*, receipt_id: str, quote_id: str, participant_id: str, market: str, model_version: str, input_data_digest: str, rule_version: str, issued_by: str, authority_pubkey_hex: str, authority_secret: bytes, issued_at: int, expires_at: int, prev_digest: str=_GENESIS)`
+
+Issue a quote-evidence receipt binding model/input/rule versions.
+
+#### `BidEvidenceLog`
+
+Hash-chained log of quote-evidence receipts.
+
+- `append(receipt: BidEvidenceReceipt)`
+- `latest_for_quote(quote_id: str)`
+- `verify()`
+#### `check_quote_evidence(*, log: BidEvidenceLog, quote_id: str, now: int)`
+
+Check a quote against bound evidence.
+
+#### `ResourcePinReceipt`
+
+A quote's capacity pinned to a physical-resource registration.
+
+#### `resource_registry_pin(*, receipt_id: str, resource_id: str, participant_id: str, market: str, capacity_mw: int, contract_chain_digest: str, issued_by: str, authority_pubkey_hex: str, authority_secret: bytes, issued_at: int, expires_at: int, prev_digest: str=_GENESIS)`
+
+Pin a resource registration with its contract chain.
+
+#### `ResourcePinLog`
+
+Hash-chained log of resource-pin receipts.
+
+- `append(receipt: ResourcePinReceipt)`
+- `pinned_capacity_mw(*, participant_id: str, market: str, now: int)`
+- `verify()`
+#### `check_resource_pin(*, log: ResourcePinLog, participant_id: str, market: str, capacity_mw: int, now: int)`
+
+Check that quoted capacity is covered by pinned registrations.
+
+#### `CorrelationReceipt`
+
+A declared pairwise model-similarity measurement.
+
+#### `correlation_circuit_breaker(*, receipt_id: str, participant_a: str, participant_b: str, correlation_bps: int, measured_by: str, authority_pubkey_hex: str, authority_secret: bytes, measured_at: int, expires_at: int, prev_digest: str=_GENESIS)`
+
+Record a declared pairwise model-similarity measurement.
+
+#### `CorrelationLog`
+
+Hash-chained log of correlation receipts.
+
+- `append(receipt: CorrelationReceipt)`
+- `max_live_correlation_bps(*, participant_id: str, now: int)`
+- `verify()`
+#### `check_correlation_cap(*, log: CorrelationLog, participant_id: str, position_mw: int, cap_mw: int, threshold_bps: int, now: int)`
+
+Apply the precautionary position cap for correlated models.
+
+#### `PositionCommitment`
+
+A participant-declared committed position in one market.
+
+#### `cross_market_position_limit(*, commitment_id: str, participant_id: str, market: str, committed_mw: int, participant_pubkey_hex: str, participant_secret: bytes, declared_at: int, prev_digest: str=_GENESIS)`
+
+Record a participant-declared committed position in one market.
+
+#### `PositionRegistry`
+
+Merged position view across all markets for each participant.
+
+- `append(commitment: PositionCommitment)`
+- `merged_position_mw(*, participant_id: str)`
+#### `check_position_limit(*, registry: PositionRegistry, participant_id: str, registered_capacity_mw: int)`
+
+Check the merged position against registered capacity.
+
+#### `NegativePriceDeclaration`
+
+An advance declaration of a negative-price bidding strategy.
+
+#### `negative_price_declaration(*, receipt_id: str, declaration_id: str, participant_id: str, market: str, strategy_id: str, issued_by: str, authority_pubkey_hex: str, authority_secret: bytes, issued_at: int, expires_at: int, prev_digest: str=_GENESIS)`
+
+Declare a negative-price bidding strategy in advance.
+
+#### `NegativePriceLog`
+
+Hash-chained log of negative-price declarations.
+
+- `append(receipt: NegativePriceDeclaration)`
+- `live_declaration(*, participant_id: str, market: str, now: int)`
+- `verify()`
+#### `check_negative_price_bid(*, log: NegativePriceLog, participant_id: str, market: str, price_is_negative: bool, now: int)`
+
+Check a bid against negative-price declarations.
+
+#### `AlgorithmRegistration`
+
+A trading algorithm bound to a named responsible person.
+
+#### `algorithm_registry_receipt(*, receipt_id: str, registration_id: str, algorithm_id: str, participant_id: str, model_version: str, responsible_person: str, revoked: bool=False, issued_by: str, authority_pubkey_hex: str, authority_secret: bytes, issued_at: int, expires_at: int, prev_digest: str=_GENESIS)`
+
+Register a trading algorithm with its named responsible person.
+
+#### `AlgorithmRegistry`
+
+Hash-chained log of algorithm registrations.
+
+- `append(receipt: AlgorithmRegistration)`
+- `live_registration(*, algorithm_id: str, now: int)`
+- `verify()`
+#### `check_algorithm(*, log: AlgorithmRegistry, algorithm_id: str, now: int)`
+
+Check that a trading algorithm is registered and live.
+
+#### `ExplainabilityReceipt`
+
+A post-trade explainability receipt bound to an executed trade.
+
+#### `post_trade_explainability(*, receipt_id: str, trade_id: str, quote_digest: str, explainer_model_version: str, narrative_digest: str, issued_by: str, authority_pubkey_hex: str, authority_secret: bytes, issued_at: int, prev_digest: str=_GENESIS)`
+
+Issue a post-trade explainability receipt for an executed trade.
+
+#### `TradeLog`
+
+Hash-chained log of explainability receipts.
+
+- `append(receipt: ExplainabilityReceipt)`
+- `receipt_for_trade(trade_id: str)`
+- `verify()`
+#### `check_trade_explainability(*, log: TradeLog, trade_id: str)`
+
+Check that an executed trade has a bound explainability receipt.
+
+#### `KillSwitchReceipt`
+
+An extreme-event pause receipt bound to authority.
+
+#### `human_kill_switch(*, receipt_id: str, switch_id: str, participant_id: str, test_interval_s: int, last_test_at: int, issued_by: str, authority_pubkey_hex: str, authority_secret: bytes, issued_at: int, prev_digest: str=_GENESIS)`
+
+Issue an authority-bound kill-switch receipt with a test pin.
+
+#### `KillSwitchLog`
+
+Hash-chained log of kill-switch receipts.
+
+- `append(receipt: KillSwitchReceipt)`
+- `latest_for_participant(participant_id: str)`
+- `verify()`
+#### `check_kill_switch(*, log: KillSwitchLog, participant_id: str, now: int)`
+
+Check that a participant's kill switch is live and tested.
+
 ### `underwriting_agents`
 
 Source: `components/northstar-agent-runtime/underwriting_agents.py`
@@ -1272,6 +1441,96 @@ Hash-chained log of marketing-claim receipts.
 
 Run every pharma-manufacturing gate over one GMP decision.
 
+### `legal_agents`
+
+Source: `components/northstar-agent-runtime/legal_agents.py`
+
+Legal practice discipline (one-hundred-forty-sixth batch).
+
+#### `LegalError`
+
+A malformed receipt/record or a programming error.
+
+#### `LegalVerdict`
+
+Outcome of one legal-discipline check.
+
+#### `CitationVerificationReceipt`
+
+A first-level-database existence check for one citation.
+
+#### `citation_verification_receipt(*, receipt_id: str, citation_id: str, database_id: str, existence_digest: str, verified_by: str, authority_secret: bytes, verified_at: int, expires_at: int, prev_digest: str=_GENESIS)`
+
+Issue an authority-signed citation existence verification.
+
+#### `check_citation(*, citation_id: str, database_id: str, verification: CitationVerificationReceipt | None, check_time: int)`
+
+Gate a citation before it is signed into a brief.
+
+#### `AIDisclosureReceipt`
+
+A lawyer's signed disclosure of AI use on a matter.
+
+#### `ai_disclosure_receipt(*, receipt_id: str, matter_id: str, lawyer_id: str, ai_tool_id: str, use_kinds: tuple[str, ...], lawyer_secret: bytes, disclosed_at: int)`
+
+Issue a lawyer-signed AI-use disclosure.
+
+#### `check_ai_use_disclosure(*, matter_id: str, lawyer_id: str, ai_tool_id: str, use_kinds: tuple[str, ...], disclosure: AIDisclosureReceipt | None, check_time: int)`
+
+Gate a lawyer's AI use on a matter against their disclosure.
+
+#### `advisory_only_pin(*, use_kind: str)`
+
+Pin an AI use to the advisory vocabulary.
+
+#### `human_signoff_clock(*, total_cases: int, human_overrides: int, min_observations: int=SIGNOFF_MIN_OBSERVATIONS, max_override_rate: float=SIGNOFF_MAX_OVERRIDE_RATE)`
+
+Audit-trigger for rubber-stamp human supervision.
+
+#### `prompt_injection_screen(*, filing_text: str)`
+
+Screen a filing for hidden instructions.
+
+#### `EvidenceAuthenticationReceipt`
+
+Authentication chain for AI-generated audio/video evidence.
+
+#### `evidence_authentication_receipt(*, receipt_id: str, evidence_id: str, media_kind: str, ai_generated: bool, source_capture_digest: str, provenance_chain_digest: str, authenticated_by: str, authority_secret: bytes, authenticated_at: int, expires_at: int, prev_digest: str=_GENESIS)`
+
+Issue an authority-signed evidence authentication.
+
+#### `ai_evidence_gate(*, evidence_id: str, media_kind: str, ai_generated: bool, authentication: EvidenceAuthenticationReceipt | None, check_time: int)`
+
+Gate AI-generated audio/video evidence.
+
+#### `lip_verification_aid(*, matter_id: str, channel_id: str | None, check_time: int)`
+
+Degrade, don't punish, the self-represented filer.
+
+#### `PerformanceStandardReceipt`
+
+A published performance standard for a court/legal AI system.
+
+#### `performance_standard_receipt(*, receipt_id: str, system_id: str, accuracy_bps: int, hallucination_rate_bps: int, eval_protocol_digest: str, authority_secret: bytes, measured_at: int, expires_at: int, prev_digest: str=_GENESIS)`
+
+Issue an authority-signed performance standard.
+
+#### `performance_standard_pin(*, system_id: str, standard: PerformanceStandardReceipt | None, check_time: int)`
+
+Gate a court/legal AI system on a published performance standard.
+
+#### `ConfidentialityPurposeReceipt`
+
+A lawyer-signed purpose binding for confidential client data.
+
+#### `confidentiality_purpose_receipt(*, receipt_id: str, matter_id: str, data_scope: str, purpose: str, recipient: str, lawyer_id: str, lawyer_secret: bytes, issued_at: int, expires_at: int)`
+
+Issue a lawyer-signed confidentiality purpose receipt.
+
+#### `confidentiality_circuit_breaker(*, matter_id: str, data_scope: str, purpose: str, recipient: str, receipt: ConfidentialityPurposeReceipt | None, check_time: int)`
+
+Gate confidential client data leaving the matter.
+
 ### `housing_ai_agents`
 
 Source: `components/northstar-agent-runtime/housing_ai_agents.py`
@@ -1419,6 +1678,171 @@ Fail-closed check of an adverse-action receipt at use time.
 #### `action_audit_event(verdict: ActionVerdict, *, action: str)`
 
 Shape an adverse-action verdict as an audit event.
+
+### `supplychain_agents`
+
+Source: `components/northstar-agent-runtime/supplychain_agents.py`
+
+Supply-chain AI discipline gates (one-hundred-forty-fourth batch).
+
+#### `SupplyChainAgentsError`
+
+Malformed supply-chain AI input. Fail loud, never guess.
+
+#### `AuthorityRegistry`
+
+Registered human authorities (authority_id -> Ed25519 public key).
+
+- `register(authority_id: str, public_key: bytes)`
+- `public_key_for(authority_id: str)`
+#### `SupplyChainVerdict`
+
+Outcome of one supply-chain AI discipline check.
+
+- `as_dict()`
+#### `DecisionApproval`
+
+A named-human approval of one AI supply-chain decision.
+
+- `as_dict()`
+#### `DecisionRegistry`
+
+Named-human approvals of AI supply-chain decisions.
+
+- `record(approval: DecisionApproval)`
+- `approval_for(decision_id: str)`
+#### `issue_decision_approval(*, decision_id: str, decision_kind: str, ai_decision_digest: str, human_approver_id: str, approved_at: int, approver_secret: bytes)`
+
+Issue a named-human approval of an AI supply-chain decision.
+
+#### `human_final_gate(approvals: DecisionRegistry, authorities: AuthorityRegistry, *, decision_id: str, decision_kind: str, ai_decision_digest: str, decided_at: int, approver_id: str)`
+
+Check that an AI supply-chain decision carries a human approval.
+
+#### `RiskScoreReceipt`
+
+A supplier risk score with a bound evidence chain.
+
+- `as_dict()`
+#### `RiskScoreRegistry`
+
+Supplier risk scores with bound evidence chains.
+
+- `record(receipt: RiskScoreReceipt)`
+- `score_for(score_id: str)`
+#### `issue_risk_score(*, score_id: str, supplier_id: str, score_bps: int, warning_lead_days: int, false_positive_bps: int, evidence_digest: str, measured_at: int, expires_at: int, issuer_id: str, issuer_secret: bytes)`
+
+Issue a risk score bound to its evidence chain.
+
+#### `risk_score_evidence(scores: RiskScoreRegistry, authorities: AuthorityRegistry, *, score_id: str, supplier_id: str, used_at: int, issuer_id: str)`
+
+Check that a supplier risk score binds live evidence.
+
+#### `AlarmBudgetReceipt`
+
+A pinned false-alarm budget for one risk-alert channel.
+
+- `as_dict()`
+#### `AlarmBudgetRegistry`
+
+False-alarm budgets pinned per alert channel.
+
+- `record(receipt: AlarmBudgetReceipt)`
+- `budget_for(channel_id: str)`
+#### `issue_alarm_budget(*, budget_id: str, channel_id: str, budget_bps: int, alerts_total: int, false_alerts: int, window_start: int, window_end: int, issuer_id: str, issuer_secret: bytes)`
+
+Issue a false-alarm budget for one risk-alert channel.
+
+#### `check_alarm_budget(budgets: AlarmBudgetRegistry, authorities: AuthorityRegistry, *, channel_id: str, checked_at: int, issuer_id: str)`
+
+Check that an alert channel is within its false-alarm budget.
+
+#### `LaborProbe`
+
+A signed probe of algorithmic labor-management metrics.
+
+- `as_dict()`
+#### `issue_labor_probe(*, probe_id: str, workforce_id: str, rest_minutes_counted_as_inefficiency: int, scan_rate_penalty_applied: bool, toilet_break_penalized: bool, measured_at: int, expires_at: int, issuer_id: str, issuer_secret: bytes)`
+
+Issue a signed probe of algorithmic labor-management metrics.
+
+#### `algorithmic_labor_probe(probe: LaborProbe, authorities: AuthorityRegistry, *, issuer_id: str, checked_at: int)`
+
+Check an algorithmic labor-management probe for violations.
+
+#### `DeskillingAudit`
+
+A deskilling/resilience audit of one facility.
+
+- `as_dict()`
+#### `DeskillingRegistry`
+
+Deskilling/resilience audits per facility.
+
+- `record(audit: DeskillingAudit)`
+- `audit_for(facility_id: str)`
+#### `issue_deskilling_audit(*, audit_id: str, facility_id: str, resilience_score_bps: int, stress_test_digest: str, measured_at: int, next_audit_due: int, issuer_id: str, issuer_secret: bytes)`
+
+Issue a deskilling/resilience audit for one facility.
+
+#### `deskilling_clock(audits: DeskillingRegistry, authorities: AuthorityRegistry, *, facility_id: str, checked_at: int, issuer_id: str)`
+
+Check a facility's deskilling audit on its clock.
+
+#### `ScenarioReceipt`
+
+A versioned planning-scenario assumption binding.
+
+- `as_dict()`
+#### `ScenarioRegistry`
+
+Versioned tariff/trade scenario bindings.
+
+- `record(receipt: ScenarioReceipt)`
+- `scenario_for(scenario_id: str, scenario_version: str)`
+#### `issue_scenario(*, scenario_id: str, scenario_version: str, assumption_digest: str, valid_from: int, valid_until: int, issuer_id: str, issuer_secret: bytes)`
+
+Issue a versioned planning-scenario assumption binding.
+
+#### `scenario_version_binding(scenarios: ScenarioRegistry, authorities: AuthorityRegistry, *, scenario_id: str, scenario_version: str, used_at: int, issuer_id: str)`
+
+Check that a planning scenario binds a live versioned assumption.
+
+#### `ConcentrationProbe`
+
+A signed single-source concentration measurement.
+
+- `as_dict()`
+#### `issue_concentration_probe(*, probe_id: str, sku_family: str, top_supplier_share_bps: int, tolerance_bps: int, measured_at: int, expires_at: int, issuer_id: str, issuer_secret: bytes)`
+
+Issue a single-source concentration measurement.
+
+#### `concentration_probe(probe: ConcentrationProbe, authorities: AuthorityRegistry, *, issuer_id: str, checked_at: int)`
+
+Check a single-source concentration measurement.
+
+#### `VendorClaimReceipt`
+
+A vendor AI-capability claim with its measurement protocol.
+
+- `as_dict()`
+#### `VendorClaimRegistry`
+
+Vendor AI-capability claims with measurement protocols.
+
+- `record(receipt: VendorClaimReceipt)`
+- `claim_for(claim_id: str)`
+#### `issue_vendor_claim(*, claim_id: str, vendor_id: str, metric_name: str, claimed_value: int, measurement_protocol_digest: str, self_reported: bool, measured_at: int, issuer_id: str, issuer_secret: bytes)`
+
+Issue a vendor AI-capability claim.
+
+#### `vendor_claim_receipt(claims: VendorClaimRegistry, authorities: AuthorityRegistry, *, claim_id: str, vendor_id: str, checked_at: int, issuer_id: str)`
+
+Check a vendor AI-capability claim.
+
+#### `supplychain_audit_event(verdict: SupplyChainVerdict, *, action: str)`
+
+Emit an audit event for a supply-chain AI decision (allowed or denied).
 
 ### `audit_agents`
 
@@ -4613,6 +5037,10 @@ Greenwashing evidence gates (one-hundred-thirtieth batch).
 
 Underwriting & claims discipline gates (one-hundred-fortieth batch).
 
+#### `run_energybid_agents()`
+
+Energy trading discipline (one-hundred-forty-fifth batch).
+
 #### `run_waste_agents()`
 
 Waste & circular-economy discipline (one-hundred-thirty-ninth batch).
@@ -4620,6 +5048,14 @@ Waste & circular-economy discipline (one-hundred-thirty-ninth batch).
 #### `run_audit_agents()`
 
 Audit & assurance discipline (one-hundred-forty-third batch).
+
+#### `run_legal_agents()`
+
+Legal practice discipline (one-hundred-forty-sixth batch).
+
+#### `run_supplychain_agents()`
+
+Supply-chain AI discipline (one-hundred-forty-fourth batch).
 
 #### `run_housing_ai_agents()`
 

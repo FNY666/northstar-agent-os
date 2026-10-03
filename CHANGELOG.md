@@ -1,3 +1,66 @@
+## Unreleased (one-hundred-forty-sixth batch) — legal practice discipline (AI-legal absorption)
+
+New module `legal_agents.py`: `citation_verification_gate()` — every
+citation signed into a brief must bind a first-level-database
+existence verification; unverified, mismatched, expired, or
+badly-signed verifications deny with `legal.fictitious_citation`
+(Charlotin lesson: verification is non-delegable).
+`ai_disclosure_receipt()` — lawyer AI use binds a signed disclosure
+receipt naming the tool and closed-vocabulary use kinds; undisclosed
+use → `legal.undisclosed_ai_use` (India draft lesson).
+`advisory_only_pin()` — `outcome_prediction` and
+`judgment_rendering` refused whole-class; unknown use kinds are a
+programming error, never a maybe. `human_signoff_clock()` —
+override rate ≤ 2% over ≥ 100 cases triggers `legal.rubber_stamp`
+(Korea lesson: zero overrides is an audit signal, not success).
+`prompt_injection_screen()` — hidden unicode, hidden-styling
+markup, and closed-vocabulary instruction patterns deny with
+`legal.hidden_instructions` (Parauapebas/Connecticut lesson).
+`ai_evidence_gate()` — AI-generated audio/video defaults
+inadmissible without a live authentication chain
+(`legal.unverified_evidence`, Arizona lesson).
+`lip_verification_aid()` — filing assistance with no verification
+channel degrades to NON_AUTHORITATIVE (sanction-last-resort).
+`performance_standard_pin()` — unbound systems are
+NON_AUTHORITATIVE (Korea lesson). `confidentiality_circuit_breaker()`
+— confidential data leaving the matter binds a lawyer-signed
+purpose receipt; without → `legal.no_confidentiality_receipt`.
+Honest scoping: receipts bind declared legal discipline; they don't
+guarantee justice. Bench track `metrics.legal_agents`: 12 scenarios,
+4 allow / 8 deny.
+
+## Unreleased (one-hundred-forty-fifth batch) — energy trading discipline (AI-energy-trading absorption)
+
+New module `energybid_agents.py`: `bid_evidence_binding()` — quotes
+bind `(model_version, input_data_digest, rule_version)`; unbound
+quotes are `NON_AUTHORITATIVE` (`energybid.unbound_quote`, the FERC
+v. American Efficient lesson: statistical-estimate bids with no
+verification are manipulation-shaped). `resource_registry_pin()` —
+quoted capacity pins a physical-resource registration with a
+contract-chain digest; uncovered capacity →
+`energybid.no_contract_chain`. `correlation_circuit_breaker()` —
+declared pairwise model-similarity crossing a threshold caps the
+participant's position; over the cap →
+`energybid.correlation_position_cap` (a tripwire, never an
+accusation — similarity is not conspiracy, the Mondaq tacit-
+collusion lesson honestly scoped). `cross_market_position_limit()`
+— a single merged position view across day-ahead/intraday/
+balancing/capacity/carbon markets; committed MW exceeding
+registered capacity → `energybid.double_sold`.
+`negative_price_declaration()` — negative-price strategies declared
+in advance; undeclared → `energybid.undeclared_negative_price`.
+`algorithm_registry_receipt()` — trading algorithms bind
+registration plus a named responsible person; unregistered/expired/
+revoked → `energybid.unregistered_algorithm`.
+`post_trade_explainability()` — executed trades bind an
+explainability receipt; missing →
+`energybid.no_explainability`. `human_kill_switch()` — extreme-event
+pause receipts bound to authority with a pinned test interval; an
+untested switch is `energybid.dead_switch`. Honest scoping:
+receipts bind declared trading discipline; they don't prove
+collusion, verify physical resources, or prevent market shocks.
+Bench track `metrics.energybid_agents`: 12 scenarios, 4 allow / 8 deny.
+
 ## Unreleased (one-hundred-forty-third batch) — audit & assurance discipline (AI-audit absorption)
 
 New module `audit_agents.py`: `reconstruction_receipt()` — AI work
@@ -24,6 +87,36 @@ auto-degrade to human-confirmed operation. `continuous_ready_gate()`
 Honest scoping: receipts bind declared audit discipline; they don't
 guarantee assurance. Bench track `metrics.audit_agents`: 12
 scenarios, 4 allow / 8 deny.
+
+## Unreleased (one-hundred-forty-fourth batch) — supply-chain AI discipline (AI-supply-chain absorption)
+
+New module `supplychain_agents.py`: `human_final_gate()` — AI
+supply-chain decisions (reroute/expedite/supplier switch/PO approval/
+forecast commit) are enforceable only with a named-human approval
+bound to the exact AI-decision digest; no approval →
+`supplychain:autonomous_decision` (RELEX lesson: only 10% trust AI
+alone). `risk_score_evidence()` — supplier risk scores bind an
+evidence chain disclosing warning lead days and false-positive rate;
+evidence-free scores are NON_AUTHORITATIVE
+(`supplychain:no_risk_evidence`, acedit lesson). `check_alarm_budget()`
+— alert channels pin a false-alarm budget; over-budget channels
+auto-degrade to human triage
+(`supplychain:false_alarm_budget_exceeded`); no budget is fail-closed.
+`algorithmic_labor_probe()` — legally-mandated rest counted as
+inefficiency, scan-rate/restroom penalties →
+`supplychain.rest_violation` (paulchenglaw lesson).
+`deskilling_clock()` — deskilling audits on a clock; resilience below
+the pinned floor → `supplychain.brittle` (WID/prism lesson).
+`scenario_version_binding()` — tariff/trade scenarios bind a versioned
+assumption digest; unbound → `supplychain.unbound_scenario` (DMCC
+lesson). `concentration_probe()` — single-source concentration above
+tolerance → `supplychain:concentration_breach` (diversification-audit
+trigger). `vendor_claim_receipt()` — vendor AI capability claims bind
+a measurement protocol; self-reported-only →
+`supplychain.unverified_claim` (Flexport lesson). Honest scoping:
+receipts bind declared supply-chain discipline; they don't make
+supply chains resilient. Bench track `metrics.supplychain_agents`:
+12 scenarios, 4 allow / 8 deny.
 
 ## Unreleased (one-hundred-forty-second batch) — housing market AI discipline (AI-real-estate absorption)
 
@@ -4487,4 +4580,3 @@ production deployment integration remain host-level responsibilities or future
 work.
 
 See [README.md](README.md) for installation and security boundaries.
-
