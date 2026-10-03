@@ -115,7 +115,7 @@ from tools import ToolLimits, ToolSandbox, build_default_registry
 
 #: Semantic version of the public case set. Bump when a case is added, removed,
 #: or its expected verdict changes — consumers pin against this string.
-BENCH_VERSION = "northstar.governance.bench.v18"
+BENCH_VERSION = "northstar.governance.bench.v20"
 
 USAGE_ERROR = 64
 
@@ -4899,6 +4899,223 @@ def run_process_receipts() -> dict[str, Any]:
         "classification_unverifiable": UNVERIFIABLE_PROCESS,
     }
 
+
+
+def run_soc_verdicts() -> dict[str, Any]:
+    """SOC verdict cards + kill-switch mandate (ninety-ninth batch).
+
+    Absorbs the 2026 AI-cyberdefense thread: Sekoia Elevate's "audit-ready
+    verdict in 99s" against the field reality that 57% of orgs still require
+    human review of every AI decision and only 9% can stop an agent's
+    malicious action before completion (the kill-switch gap).
+
+    Deterministic: pinned integer timestamps, sha256-label fixtures, Ed25519
+    countersigns over fixed keys, no runtime, no network, no model. Ground
+    truth is closed: 12 scenarios, 3 allow / 9 deny — "investigate, never
+    the final word": the card is AUTHORITATIVE evidence but execution still
+    requires human countersign or an armed kill-switch inside the
+    blast-radius window. Unreachable endpoints, over-long timeouts,
+    self-countersigns, wrong-card countersigns, and forged cards all deny
+    with exact reasons.
+    """
+    import hashlib as _hashlib
+
+    from ed25519 import public_key as _ed_pubkey
+
+    from soc_verdicts import (
+        Countersign,
+        KillSwitch,
+        VerdictCard,
+        build_verdict_card,
+        gate_execution,
+        issue_countersign,
+    )
+
+    def _secret(label: str) -> bytes:
+        return _hashlib.sha256(f"northstar-bench-soc:{label}".encode()).digest()
+
+    ANALYST_KEYS = {"analyst:chen": _ed_pubkey(_secret("chen"))}
+
+    def _card(**kw):
+        base = dict(
+            alert_id="alert-7",
+            verdict="quarantine",
+            evidence_digest=_hashlib.sha256(b"bench-evidence").hexdigest(),
+            recommended_action="isolate host-7",
+            blast_radius_window_s=60,
+            agent_id="agent:soc-1",
+            card_id="card-bench-1",
+            created_unix=2000,
+        )
+        base.update(kw)
+        return build_verdict_card(**base)
+
+    def _countersign(card, analyst_id="analyst:chen", secret_label="chen"):
+        return issue_countersign(
+            analyst_secret=_secret(secret_label),
+            analyst_id=analyst_id,
+            card=card,
+        )
+
+    def _switch(card, **kw):
+        base = dict(
+            switch_id="ks-bench-1",
+            endpoint_id="ep-bench-1",
+            timeout_s=10,
+            action_digest=card.action_digest,
+        )
+        base.update(kw)
+        return KillSwitch(**base)
+
+    REACHABLE = frozenset({"ep-bench-1"})
+
+    scenarios: list[tuple[str, bool, Any]] = []
+
+    # 1: human countersign allows
+    card = _card()
+    scenarios.append((
+        "allow_human_countersigned", True,
+        lambda c=card: gate_execution(
+            c, countersign=_countersign(c), analyst_keys=ANALYST_KEYS
+        ),
+    ))
+
+    # 2: armed kill-switch allows
+    card = _card()
+    scenarios.append((
+        "allow_killswitch_armed", True,
+        lambda c=card: gate_execution(
+            c, kill_switch=_switch(c), reachable_endpoints=REACHABLE
+        ),
+    ))
+
+    # 3: escalate verdict + kill-switch allows (escalation still gated)
+    card = _card(verdict="escalate", alert_id="alert-8", card_id="card-bench-3")
+    scenarios.append((
+        "allow_escalate_with_killswitch", True,
+        lambda c=card: gate_execution(
+            c, kill_switch=_switch(c), reachable_endpoints=REACHABLE
+        ),
+    ))
+
+    # 4: unreachable kill-switch endpoint denies
+    card = _card()
+    scenarios.append((
+        "deny_unreachable_killswitch", False,
+        lambda c=card: gate_execution(
+            c, kill_switch=_switch(c), reachable_endpoints=frozenset()
+        ),
+    ))
+
+    # 5: kill-switch timeout exceeding the blast-radius window denies
+    card = _card()
+    scenarios.append((
+        "deny_killswitch_timeout_too_long", False,
+        lambda c=card: gate_execution(
+            c, kill_switch=_switch(c, timeout_s=61),
+            reachable_endpoints=REACHABLE,
+        ),
+    ))
+
+    # 6: non-positive kill-switch timeout denies
+    card = _card()
+    scenarios.append((
+        "deny_killswitch_timeout_zero", False,
+        lambda c=card: gate_execution(
+            c, kill_switch=_switch(c, timeout_s=0),
+            reachable_endpoints=REACHABLE,
+        ),
+    ))
+
+    # 7: autonomous execution with no safeguard denies
+    card = _card()
+    scenarios.append((
+        "deny_no_safeguard", False,
+        lambda c=card: gate_execution(c),
+    ))
+
+    # 8: countersign naming a different card denies
+    card = _card()
+    other = _card(alert_id="alert-9", card_id="card-bench-8b")
+    scenarios.append((
+        "deny_countersign_wrong_card", False,
+        lambda c=card, o=other: gate_execution(
+            c, countersign=_countersign(o), analyst_keys=ANALYST_KEYS
+        ),
+    ))
+
+    # 9: agent countersigning its own card denies (no-self-attestation)
+    card = _card(agent_id="analyst:chen")
+    scenarios.append((
+        "deny_countersign_self", False,
+        lambda c=card: gate_execution(
+            c, countersign=_countersign(c), analyst_keys=ANALYST_KEYS
+        ),
+    ))
+
+    # 10: kill-switch registered for a different action denies
+    card = _card()
+    scenarios.append((
+        "deny_killswitch_wrong_action", False,
+        lambda c=card: gate_execution(
+            c,
+            kill_switch=_switch(c, action_digest="0" * 64),
+            reachable_endpoints=REACHABLE,
+        ),
+    ))
+
+    # 11: forged card (built_by != runtime) denies before safeguards
+    card = _card()
+    forged = VerdictCard(
+        card_id=card.card_id, alert_id=card.alert_id, verdict=card.verdict,
+        evidence_digest=card.evidence_digest,
+        recommended_action=card.recommended_action,
+        action_digest=card.action_digest,
+        blast_radius_window_s=card.blast_radius_window_s,
+        agent_id=card.agent_id, built_by="agent", created_unix=2000,
+    )
+    scenarios.append((
+        "deny_forged_card", False,
+        lambda f=forged, c=card: gate_execution(
+            f, countersign=_countersign(c), analyst_keys=ANALYST_KEYS
+        ),
+    ))
+
+    # 12: countersign from an unregistered analyst denies
+    card = _card()
+    scenarios.append((
+        "deny_countersign_unknown_analyst", False,
+        lambda c=card: gate_execution(
+            c,
+            countersign=_countersign(
+                c, analyst_id="analyst:mallory", secret_label="mallory"
+            ),
+            analyst_keys=ANALYST_KEYS,
+        ),
+    ))
+
+    mismatches: list[str] = []
+    allowed_ids: list[str] = []
+    denial_reasons: dict[str, str] = {}
+    for sid, expected_allow, thunk in scenarios:
+        result = thunk()
+        got_allow = bool(result.allowed)
+        if got_allow != expected_allow:
+            mismatches.append(
+                f"{sid}: expected {'allow' if expected_allow else 'deny'}, "
+                f"got {'allow' if got_allow else 'deny'}"
+            )
+        if got_allow:
+            allowed_ids.append(sid)
+        else:
+            denial_reasons[sid] = "; ".join(result.reasons)
+
+    return {
+        "n_scenarios": len(scenarios),
+        "mismatches": mismatches,
+        "allowed_ids": allowed_ids,
+        "denial_reasons": denial_reasons,
+    }
 
 def run_adversarial_scenarios() -> dict[str, Any]:
     """Adversarial bench scenarios: multi-agent failures, no-adversary failures, malicious-but-signed.
@@ -9960,6 +10177,64 @@ def _case_metrics_process_receipts(h: BenchHarness) -> BenchExpectation:
     )
 
 
+
+def _case_metrics_soc_verdicts(h: BenchHarness) -> BenchExpectation:
+    """SOC verdict cards + kill-switch mandate (ninety-ninth batch).
+
+    Absorbs the 2026 AI-cyberdefense thread: Sekoia Elevate's "audit-ready
+    verdict in 99s" against the field reality that 57% of orgs still require
+    human review of every AI decision and only 9% can stop an agent's
+    malicious action before completion (the kill-switch gap).
+
+    12 deterministic scenarios, 3 allow / 9 deny: "investigate, never the
+    final word" — the card is AUTHORITATIVE evidence (87th batch) but
+    execution requires human countersign or an armed kill-switch inside the
+    blast-radius window. Unreachable endpoints, over-long timeouts,
+    non-positive timeouts, wrong-card countersigns, self-countersigns
+    (94th batch no-self-attestation), kill-switches bound to other actions,
+    forged cards, and unknown analysts all deny with exact reasons.
+    """
+    metrics = run_soc_verdicts()
+
+    def check(exp: BenchExpectation, report: Any) -> tuple[bool, str]:
+        if metrics["n_scenarios"] != 12:
+            return (False, f"expected 12 soc-verdict scenarios, saw {metrics['n_scenarios']}")
+        if metrics["mismatches"]:
+            return (False, f"scenario(s) disagree with ground truth: {metrics['mismatches']}")
+        if metrics["allowed_ids"] != [
+            "allow_human_countersigned",
+            "allow_killswitch_armed",
+            "allow_escalate_with_killswitch",
+        ]:
+            return (False, f"allowed set drifted: {metrics['allowed_ids']}")
+        reasons = metrics["denial_reasons"]
+        if reasons.get("deny_no_safeguard") != "no_safeguard":
+            return (False, "autonomous execution without safeguard must deny as no_safeguard")
+        if reasons.get("deny_unreachable_killswitch") != "killswitch_endpoint_unreachable":
+            return (False, "unreachable kill-switch must deny as endpoint unreachable")
+        if reasons.get("deny_killswitch_timeout_too_long") != "killswitch_timeout_exceeds_blast_radius":
+            return (False, "over-long kill-switch timeout must deny as exceeding blast radius")
+        if reasons.get("deny_countersign_self") != "countersign_self":
+            return (False, "self-countersign must deny as countersign_self")
+        if reasons.get("deny_forged_card") != "card_not_runtime_built":
+            return (False, "forged card must deny as not runtime-built")
+        return (True, "12/12 soc-verdict scenarios hold: countersign/kill-switch/gates")
+
+    return BenchExpectation(
+        runtime=_noop_runtime(h),
+        expect_subtype="success",
+        post_check=check,
+        metrics=metrics,
+        notes=(
+            "2026 AI-cyberdefense thread: audit-ready SOC verdicts (Sekoia) "
+            "but only 9% can stop a malicious agent action (Netskope). "
+            "Verifiable Action Cards for triage; every autonomous remediation "
+            "registers a reachable kill-switch inside the blast-radius "
+            "window; execution without human countersign or armed switch "
+            "denies. No third path."
+        ),
+    )
+
 def _case_metrics_harness_binding(h: BenchHarness) -> BenchExpectation:
     """Harness integrity binding (ninetieth batch).
 
@@ -11234,6 +11509,7 @@ CASES: tuple[BenchCase, ...] = (
     BenchCase("metrics.twin_sync", "metrics", "twin-sync receipts: freshness-gated actuation, sensor-manifest poisoning, single-use receipts", _case_metrics_twin_sync),
     BenchCase("metrics.attestation_receipts", "metrics", "TEE attestation as receipt evidence: forgery/replay/downgrade probes", _case_metrics_attestation_receipts),
     BenchCase("metrics.process_receipts", "metrics", "process-evidence receipts: hash-chained production process, artifact-only is unverifiable", _case_metrics_process_receipts),
+    BenchCase("metrics.soc_verdicts", "metrics", "SOC verdict cards: countersigned triage + mandatory kill-switch inside blast radius", _case_metrics_soc_verdicts),
     BenchCase("metrics.harness_binding", "metrics", "harness integrity binding: SHA-256 harness hash in audit, quad-only scores", _case_metrics_harness_binding),
     BenchCase("metrics.drift_detection", "metrics", "Livenerf-style drift probe: bootstrap CI + paired permutation test", _case_metrics_drift_detection),
 )
@@ -11860,6 +12136,7 @@ __all__ = [
     "run_twin_sync",
     "run_attestation_receipts",
     "run_process_receipts",
+    "run_soc_verdicts",
     "run_owasp_asi_coverage",
     "run_policy_axis",
     "run_step_compliance",
