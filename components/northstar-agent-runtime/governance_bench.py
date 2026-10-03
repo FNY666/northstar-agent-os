@@ -17132,6 +17132,65 @@ def _case_metrics_labor_algo(h: BenchHarness) -> BenchExpectation:
     )
 
 
+def _case_metrics_greenwash(h: BenchHarness) -> BenchExpectation:
+    """Greenwashing evidence gates (one-hundred-thirtieth batch).
+
+    12 deterministic scenarios, 4 allow / 8 deny: a recycled-content
+    claim with declared samples passes; a physical-segregation claim
+    needs no attribution method; a second-life battery with a live
+    inspection redeploys; a marketing claim with green keywords and
+    bound sensor evidence passes the probe. Denied: a single-sample
+    cherry-pick (``greenwash:cherry_picked``), an undeclared
+    mass-balance attribution method
+    (``greenwash:undeclared_attribution``), an environmental claim
+    with no bound evidence (``greenwash:no_evidence``), a
+    self-declared-only evidence chain
+    (``greenwash:self_declared_only``), a vendor-declared purity with
+    no bound protocol (``greenwash:ungraded_purity``), a claimed
+    purity above measured + tolerance
+    (``greenwash:purity_overclaim``), a second-life battery with no
+    inspection (``greenwash:no_second_life_inspection``), and
+    datacenter hardware retired with no routed decommission receipt
+    (``greenwash:unrouted_decommission``).
+    """
+    metrics = run_greenwash()
+
+    def check(exp: BenchExpectation, report: Any) -> tuple[bool, str]:
+        if metrics["n_scenarios"] != 12:
+            return (False, f"expected 12 greenwash scenarios, saw {metrics['n_scenarios']}")
+        if metrics["mismatches"]:
+            return (False, f"scenario(s) disagree with ground truth: {metrics['mismatches']}")
+        if metrics["allowed_ids"] != [
+            "allow_valid_recycled_content",
+            "allow_physical_segregation_claim",
+            "allow_inspected_second_life_battery",
+            "allow_probe_with_evidence",
+        ]:
+            return (False, f"allowed set drifted: {metrics['allowed_ids']}")
+        reasons = metrics["denial_reasons"]
+        for sid, needle in (
+            ("deny_cherry_picked", "cherry_picked"),
+            ("deny_undeclared_attribution", "undeclared_attribution"),
+            ("deny_no_evidence_claim", "no_evidence"),
+            ("deny_self_declared_only", "self_declared_only"),
+            ("deny_ungraded_purity", "ungraded_purity"),
+            ("deny_purity_overclaim", "purity_overclaim"),
+            ("deny_no_second_life_inspection", "no_second_life_inspection"),
+            ("deny_unrouted_decommission", "unrouted_decommission"),
+        ):
+            if needle not in reasons.get(sid, ""):
+                return (False, f"denial reason missing {needle!r}: {reasons.get(sid, '')!r}")
+        return True, "12/12 greenwash probes match ground truth"
+
+    return BenchExpectation(
+        runtime=_noop_runtime(h),
+        expect_subtype="success",
+        post_check=check,
+        metrics=metrics,
+        notes="greenwashing evidence gates: recycled-content receipts, mass-balance attribution, claim evidence chains, purity binding, second-life batteries, routed decommissioning, marketing probe",
+    )
+
+
 def _case_metrics_adjudication(h: BenchHarness) -> BenchExpectation:
     """Human final adjudication for AI sports systems (one-hundred-eighteenth batch).
 
@@ -19385,6 +19444,7 @@ CASES: tuple[BenchCase, ...] = (
     BenchCase("metrics.booking_agents", "metrics", "booking-agent transaction receipts: pinned price-ceiling intents, TTL-bound freshness assertions, dynamic-pricing disclosure gate, pinned support-policy consistency, pre-emptive rebooking receipts, context-continuity probe, paid-placement disclosure (AI-hospitality absorption)", _case_metrics_booking_agents),
     BenchCase("metrics.companionship", "metrics", "companionship safeguards for AI dating/companionship: minor intimacy class gate, authority-pinned dependence thresholds with mandatory intervention, crisis-escalation receipts with fail-closed halt, sycophancy probe, persona-consistency gate, authority-set session caps, private-dialogue training exclusion, matchmaker explanation binding", _case_metrics_companionship),
     BenchCase("metrics.embodied", "metrics", "embodied safety vacuum gates: standard=pre_ratification declarations, fall-zone receipts, measured capability honesty labels, labor-impact disclosures, prescriptive-agent envelopes, inspection confidence gates, dispatch audit, incident-clock binding", _case_metrics_embodied),
+    BenchCase("metrics.greenwash", "metrics", "greenwashing evidence gates: recycled-content receipts with bound measurement evidence, mass-balance attribution-method gates, claim evidence chains (ECGT), sorting-purity binding, second-life battery inspection gates, routed datacenter decommissioning, marketing-claim probe", _case_metrics_greenwash),
     BenchCase("metrics.labor_algo", "metrics", "algorithmic-management guards: worker-signed quota receipts, human-countersigned algorithmic terminations, authority-pinned fatigue breakers, surveillance proportionality, dispatch rejection fairness, AV safety cases, labor-impact binding (AI-logistics absorption)", _case_metrics_labor_algo),
     BenchCase("metrics.commerce", "metrics", "agentic commerce terms: machine-readable terms-read receipts bound to the exact product, likeness-creep gate, biometric capture receipts with verifiable deletion, non-authoritative try-on previews, tiered authentication evidence with human review for high-value items, digital passport binding, AI model-substitution disclosure (AI-fashion/retail absorption)", _case_metrics_commerce),
     BenchCase("metrics.harness_binding", "metrics", "harness integrity binding: SHA-256 harness hash in audit, quad-only scores", _case_metrics_harness_binding),
@@ -20651,6 +20711,284 @@ def run_labor_algo() -> dict[str, Any]:
     }
 
 
+def run_greenwash() -> dict[str, Any]:
+    """Greenwashing evidence gates (one-hundred-thirtieth batch).
+
+    Absorbs the 2026 AI-waste/circular-economy thread: AMP Neuron 4.0
+    in 50 US MRFs; ZenRobotics construction-waste purity 99.6% as a
+    *vendor-declared* number; Greyparrot EUR 45M Series C; Fraunhofer
+    FlexCycle autonomous disassembly; battery circularity (AI
+    black-mass sorting, degradation digital twins, Microsoft
+    Circular AI); enforcement — UK ASA AI-ad-monitoring rulings
+    against Adidas/Nike/Uniqlo "recycled" claims, the EU ECGT ban
+    on unsubstantiated environmental claims (from 2026-09-27), EU
+    SUPD chemical recycling with its mass-balance attribution
+    loophole, and California AB 2253 (whole-batch measurement)
+    vetoed by the governor.
+
+    Fail-closed rules over 12 deterministic scenarios: recycled-
+    content claims bind (test protocol, batch scope, measured
+    samples) — a single sample over a batch is
+    ``greenwash.cherry_picked``; mass-balance claims must declare
+    their attribution method (``greenwash.undeclared_attribution``);
+    environmental claims with no bound evidence chain are
+    NON_AUTHORITATIVE (``greenwash.no_evidence``), and self-
+    declared-only evidence stays NON_AUTHORITATIVE
+    (``greenwash.self_declared_only``); sorting-purity claims bind
+    the test protocol + measured batch — vendor-declared purity
+    without a protocol is ``greenwash.ungraded_purity``, and claims
+    above measured + tolerance are ``greenwash.purity_overclaim``;
+    second-life batteries need a live safety-inspection receipt;
+    datacenter-retired hardware needs a retirement receipt routing
+    through the 110th-batch deployment-registry registration —
+    otherwise ``greenwash.unrouted_decommission``. A bench probe
+    flags marketing claims carrying environmental keywords with no
+    bound evidence. Ground truth is closed: 4 allow / 8 deny.
+    """
+    from ed25519 import public_key
+
+    from greenwash import (
+        BatteryInspectionLog,
+        ClaimEvidenceLog,
+        DecommissionLog,
+        PurityClaimLog,
+        RecycledContentLog,
+        battery_inspection_receipt,
+        battery_second_life_gate,
+        claim_evidence_chain,
+        claim_evidence_receipt,
+        decommission_path,
+        greenwash_probe,
+        mass_balance_method_gate,
+        purity_claim_binding,
+        check_purity_claim,
+        check_recycled_content,
+        recycled_content_receipt,
+    )
+
+    T0 = 1_700_000_000
+    SEED = bytes(range(32))
+    AUTH_PUB = public_key(SEED).hex()
+    MODEL = "ab" * 32
+    SCOPE = "cd" * 32
+    TASK = "ef" * 32
+    OTHER = "01" * 32
+
+    def _issue_recycled(sample_n: int):
+        return recycled_content_receipt(
+            receipt_id="rc-1",
+            claim_id="rc-claim",
+            test_protocol_digest=MODEL,
+            batch_id="batch-7",
+            batch_size=1000,
+            measured_sample_n=sample_n,
+            measured_fraction_bps=4200,
+            whole_batch_measured=False,
+            issued_by="lab-ops",
+            authority_pubkey_hex=AUTH_PUB,
+            authority_secret=SEED,
+            issued_at=T0,
+            expires_at=T0 + 3600,
+        )
+
+    scenarios: list[tuple[str, str, Any]] = []
+
+    def _scenario(sid: str, expected: str, thunk: Any) -> None:
+        scenarios.append((sid, expected, thunk))
+
+    def _outcome(verdict: Any) -> dict[str, Any]:
+        return {
+            "verdict": "allow" if verdict.allowed else "deny",
+            "reason": verdict.reason,
+            "classification": verdict.classification,
+        }
+
+    def _s1():
+        log = RecycledContentLog()
+        log.append(_issue_recycled(sample_n=50))
+        return _outcome(check_recycled_content(log=log, claim_id="rc-claim", now=T0))
+
+    _scenario("allow_valid_recycled_content", "allow", _s1)
+
+    def _s2():
+        verdict = mass_balance_method_gate(
+            claim_id="mb-1",
+            claim_type="physical",
+            attribution_method="n/a-physical",
+        )
+        return _outcome(verdict)
+
+    _scenario("allow_physical_segregation_claim", "allow", _s2)
+
+    def _s3():
+        log = BatteryInspectionLog()
+        log.append(
+            battery_inspection_receipt(
+                receipt_id="bat-1",
+                battery_id="bat-1",
+                inspection_digest=MODEL,
+                inspector="inspector-kim",
+                inspected_at=T0,
+                expires_at=T0 + 3600,
+                issued_by="ops",
+                authority_pubkey_hex=AUTH_PUB,
+                authority_secret=SEED,
+            )
+        )
+        return _outcome(
+            battery_second_life_gate(log=log, battery_id="bat-1", redeploy_at=T0 + 100)
+        )
+
+    _scenario("allow_inspected_second_life_battery", "allow", _s3)
+
+    def _s4():
+        verdict = greenwash_probe(
+            claim_text="Sustainable sourcing with recycled content for every batch",
+            evidence_bound=True,
+            evidence_tier="sensor_bound",
+        )
+        return _outcome(verdict)
+
+    _scenario("allow_probe_with_evidence", "allow", _s4)
+
+    def _s5():
+        log = RecycledContentLog()
+        log.append(_issue_recycled(sample_n=1))
+        return _outcome(check_recycled_content(log=log, claim_id="rc-claim", now=T0))
+
+    _scenario("deny_cherry_picked", "deny", _s5)
+
+    def _s6():
+        verdict = mass_balance_method_gate(
+            claim_id="mb-1",
+            claim_type="mass_balance",
+            attribution_method="credit_magic",
+        )
+        return _outcome(verdict)
+
+    _scenario("deny_undeclared_attribution", "deny", _s6)
+
+    def _s7():
+        verdict = claim_evidence_chain(
+            log=ClaimEvidenceLog(), claim_id="ev-claim", now=T0
+        )
+        return _outcome(verdict)
+
+    _scenario("deny_no_evidence_claim", "deny", _s7)
+
+    def _s8():
+        log = ClaimEvidenceLog()
+        log.append(
+            claim_evidence_receipt(
+                receipt_id="ev-1",
+                claim_id="ev-claim",
+                claim_digest=TASK,
+                evidence_chain_digest=OTHER,
+                evidence_tier="self_declared",
+                issued_by="claims-ops",
+                authority_pubkey_hex=AUTH_PUB,
+                authority_secret=SEED,
+                issued_at=T0,
+                expires_at=T0 + 3600,
+            )
+        )
+        verdict = claim_evidence_chain(log=log, claim_id="ev-claim", now=T0)
+        return _outcome(verdict)
+
+    _scenario("deny_self_declared_only", "deny", _s8)
+
+    def _s9():
+        verdict = check_purity_claim(
+            log=PurityClaimLog(),
+            claim_id="pur-claim",
+            claimed_purity_bps=9960,
+            test_protocol_digest=None,
+            now=T0,
+        )
+        return _outcome(verdict)
+
+    _scenario("deny_ungraded_purity", "deny", _s9)
+
+    def _s10():
+        log = PurityClaimLog()
+        log.append(
+            purity_claim_binding(
+                receipt_id="pur-1",
+                claim_id="pur-claim",
+                claimed_purity_bps=9960,
+                test_protocol_digest=SCOPE,
+                batch_id="shift-3",
+                measured_purity_bps=9000,
+                measured_sample_n=40,
+                issued_by="line-ops",
+                authority_pubkey_hex=AUTH_PUB,
+                authority_secret=SEED,
+                issued_at=T0,
+                expires_at=T0 + 3600,
+            )
+        )
+        verdict = check_purity_claim(
+            log=log,
+            claim_id="pur-claim",
+            claimed_purity_bps=9960,
+            test_protocol_digest=SCOPE,
+            now=T0,
+        )
+        return _outcome(verdict)
+
+    _scenario("deny_purity_overclaim", "deny", _s10)
+
+    def _s11():
+        verdict = battery_second_life_gate(
+            log=BatteryInspectionLog(), battery_id="bat-ghost", redeploy_at=T0
+        )
+        return _outcome(verdict)
+
+    _scenario("deny_no_second_life_inspection", "deny", _s11)
+
+    def _s12():
+        verdict = decommission_path(
+            log=DecommissionLog(),
+            system_id="srv-ghost",
+            lookup_registration=lambda digest: True,
+            now=T0,
+        )
+        return _outcome(verdict)
+
+    _scenario("deny_unrouted_decommission", "deny", _s12)
+
+    results: list[str] = []
+    mismatches: list[str] = []
+    allowed_ids: list[str] = []
+    warned_ids: list[str] = []
+    denial_reasons: dict[str, str] = {}
+    for sid, expected, thunk in scenarios:
+        try:
+            outcome = thunk()
+        except Exception as error:
+            outcome = {"verdict": "deny", "reason": f"raised: {error}",
+                       "classification": "unverifiable-process"}
+        verdict = outcome.get("verdict")
+        if verdict != expected:
+            mismatches.append(
+                f"{sid}: expected {expected}, got {verdict}"
+            )
+        if verdict == "allow":
+            allowed_ids.append(sid)
+        elif verdict == "allow-with-warning":
+            warned_ids.append(sid)
+        else:
+            denial_reasons[sid] = outcome.get("reason", "")
+
+    return {
+        "n_scenarios": len(scenarios),
+        "mismatches": mismatches,
+        "allowed_ids": allowed_ids,
+        "warned_ids": warned_ids,
+        "denial_reasons": denial_reasons,
+    }
+
+
 def run_suite(
     *,
     only: Iterable[str] | None = None,
@@ -21104,6 +21442,7 @@ __all__ = [
     "run_language_cap",
     "run_companionship",
     "run_embodied",
+    "run_greenwash",
     "run_labor_algo",
     "run_adjudication",
     "run_game_agents",

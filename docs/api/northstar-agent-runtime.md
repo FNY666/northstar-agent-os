@@ -237,6 +237,122 @@ File a physical incident through the 113th-batch incident clock.
 
 #### `embodied_audit_event(event: str, *, deployment_id: str, deny_code: str | None, now: int, details: Mapping[str, Any] | None=None)`
 
+### `greenwash`
+
+Source: `components/northstar-agent-runtime/greenwash.py`
+
+Greenwashing evidence gates (one-hundred-thirtieth batch).
+
+#### `GreenwashError`
+
+A malformed greenwashing receipt or a programming error.
+
+#### `GreenwashVerdict`
+
+Outcome of one greenwashing check.
+
+#### `greenwash_audit_event(verdict: GreenwashVerdict, *, action: str)`
+
+Build the audit event for a greenwashing verdict.
+
+#### `RecycledContentReceipt`
+
+A recycled-content claim with bound measurement evidence.
+
+#### `recycled_content_receipt(*, receipt_id: str, claim_id: str, test_protocol_digest: str, batch_id: str, batch_size: int, measured_sample_n: int, measured_fraction_bps: int, whole_batch_measured: bool=False, issued_by: str, authority_pubkey_hex: str, authority_secret: bytes, issued_at: int, expires_at: int, prev_digest: str=_GENESIS)`
+
+Issue a recycled-content receipt with bound measurement evidence.
+
+#### `RecycledContentLog`
+
+Hash-chained log of recycled-content receipts.
+
+- `append(receipt: RecycledContentReceipt)`
+- `latest_for_claim(claim_id: str)`
+#### `check_recycled_content(*, log: RecycledContentLog, claim_id: str, now: int)`
+
+Check a recycled-content claim against its bound evidence.
+
+#### `mass_balance_method_gate(*, claim_id: str, claim_type: str, attribution_method: str)`
+
+Require a declared attribution method on mass-balance claims.
+
+#### `ClaimEvidenceReceipt`
+
+An environmental claim bound to its evidence chain.
+
+#### `claim_evidence_receipt(*, receipt_id: str, claim_id: str, claim_digest: str, evidence_chain_digest: str, evidence_tier: str, issued_by: str, authority_pubkey_hex: str, authority_secret: bytes, issued_at: int, expires_at: int, prev_digest: str=_GENESIS)`
+
+Issue a claim-evidence receipt binding claim to evidence chain.
+
+#### `ClaimEvidenceLog`
+
+Hash-chained log of claim-evidence receipts.
+
+- `append(receipt: ClaimEvidenceReceipt)`
+- `latest_for_claim(claim_id: str)`
+#### `claim_evidence_chain(*, log: ClaimEvidenceLog, claim_id: str, now: int)`
+
+Check that an environmental claim carries bound evidence.
+
+#### `PurityClaimReceipt`
+
+A sorting-purity claim bound to a test protocol and batch.
+
+#### `purity_claim_binding(*, receipt_id: str, claim_id: str, claimed_purity_bps: int, test_protocol_digest: str, batch_id: str, measured_purity_bps: int, measured_sample_n: int, issued_by: str, authority_pubkey_hex: str, authority_secret: bytes, issued_at: int, expires_at: int, prev_digest: str=_GENESIS)`
+
+Bind a sorting-purity claim to its test protocol and batch.
+
+#### `PurityClaimLog`
+
+Hash-chained log of purity-claim receipts.
+
+- `append(receipt: PurityClaimReceipt)`
+- `latest_for_claim(claim_id: str)`
+#### `check_purity_claim(*, log: PurityClaimLog, claim_id: str, claimed_purity_bps: int, test_protocol_digest: str | None, now: int)`
+
+Check a sorting-purity claim against its bound evidence.
+
+#### `BatteryInspectionReceipt`
+
+A safety-inspection receipt for second-life battery redeployment.
+
+#### `battery_inspection_receipt(*, receipt_id: str, battery_id: str, inspection_digest: str, inspector: str, inspected_at: int, expires_at: int, issued_by: str, authority_pubkey_hex: str, authority_secret: bytes, prev_digest: str=_GENESIS)`
+
+Issue a second-life battery safety-inspection receipt.
+
+#### `BatteryInspectionLog`
+
+Hash-chained log of battery-inspection receipts.
+
+- `append(receipt: BatteryInspectionReceipt)`
+- `latest_for_battery(battery_id: str)`
+#### `battery_second_life_gate(*, log: BatteryInspectionLog, battery_id: str, redeploy_at: int)`
+
+Gate second-life battery redeployment on a live inspection.
+
+#### `DecommissionReceipt`
+
+A routed decommissioning receipt.
+
+#### `decommission_receipt(*, receipt_id: str, system_id: str, registration_digest: str, recovery_plan_digest: str, retired_at: int, issued_by: str, authority_pubkey_hex: str, authority_secret: bytes, prev_digest: str=_GENESIS)`
+
+Issue a routed decommissioning receipt.
+
+#### `DecommissionLog`
+
+Hash-chained log of decommission receipts.
+
+- `append(receipt: DecommissionReceipt)`
+- `latest_for_system(system_id: str)`
+#### `decommission_path(*, log: DecommissionLog, system_id: str, lookup_registration: Any, now: int)`
+
+Check that retired hardware routes through the registry.
+
+#### `greenwash_probe(*, claim_text: str, evidence_bound: bool, evidence_tier: str | None=None)`
+
+Probe a marketing claim for bound environmental evidence.
+
 ### `licensing`
 
 Source: `components/northstar-agent-runtime/licensing.py`
@@ -2502,6 +2618,10 @@ Embodied-AI safety vacuum gates (one-hundred-twenty-sixth batch).
 #### `run_labor_algo()`
 
 Algorithmic-management guards (one-hundred-twenty-seventh batch).
+
+#### `run_greenwash()`
+
+Greenwashing evidence gates (one-hundred-thirtieth batch).
 
 #### `run_suite(*, only: Iterable[str] | None=None, tracks: Iterable[str] | None=None)`
 
