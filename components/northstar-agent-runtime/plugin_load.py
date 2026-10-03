@@ -325,6 +325,8 @@ class PluginContributions:
 
     skill_roots: list[tuple[str, Path]] = field(default_factory=list)
     agent_directories: list[tuple[str, Path]] = field(default_factory=list)
+    skill_digests: dict[str, str] = field(default_factory=dict)
+    agent_digests: dict[str, str] = field(default_factory=dict)
     hook_tables: list[tuple[str, dict[str, Any]]] = field(default_factory=list)
     mcp_servers: list[dict[str, Any]] = field(default_factory=list)
     context_blocks: list[tuple[str, str]] = field(default_factory=list)
@@ -423,10 +425,18 @@ def load_contributions(
             source = plugin.bundle.relative(declaration)
             if source.is_dir():
                 contributions.skill_roots.append((plugin.name, source))
+                for item in plugin.bundle.files:
+                    if item.relative_path.startswith(declaration.rstrip("/") + "/") and item.relative_path.endswith("/SKILL.md"):
+                        path = source / Path(item.relative_path).relative_to(declaration)
+                        contributions.skill_digests[path.relative_to(Path(workspace).resolve()).as_posix()] = item.sha256
         for declaration in plugin.manifest.agent_dirs:
             source = plugin.bundle.relative(declaration)
             if source.is_dir() or source.is_file():
                 contributions.agent_directories.append((plugin.name, source))
+                for item in plugin.bundle.files:
+                    if item.relative_path.startswith(declaration.rstrip("/") + "/") and item.relative_path.endswith(".md"):
+                        path = source / Path(item.relative_path).relative_to(declaration)
+                        contributions.agent_digests[path.relative_to(Path(workspace).resolve()).as_posix()] = item.sha256
         for declaration in plugin.manifest.context_files:
             source = plugin.bundle.relative(declaration)
             if source.is_file():
