@@ -39,6 +39,17 @@ previous record) and nonce deduplication for records that carry a
 counts as verified: a feed that passes the default ``verify`` can fail
 ``--strict`` — e.g. old feeds with clock-skewed records — and that is
 expected. Default ``verify`` semantics never change.
+``northstar audit export <feed.ndjson> --trace`` emits the feed's chain
+head as a TRACE v0.2-shaped Trust Record (JCS JSON, to stdout or --out):
+``tool_transcript.hash`` commits the head hash, ``references`` gains a
+``behavior-trace`` pointer at the feed digest, ``policy.enforcement_mode``
+is ``enforce``, and ``origin.kind=log-import`` /
+``runtime.platform=software-only`` keep the record honest about having no
+hardware attestation. ``--seed-hex`` adds an embedded Ed25519 signature
+(plus ``cnf.jwk``); without it the record is unsigned. This is an
+evidence-shape export, not a TRACE conformance claim: v0.2 is a Developer
+Preview and software-only records are never attested evidence. Unchained
+or broken feeds are refused loudly (exits 2/3).
 
 ``northstar audit keygen`` prints a fresh Ed25519 seed/public-key pair
 (hex). The seed signs feeds offline; only the public key is needed to
@@ -163,6 +174,52 @@ def add_audit_arguments(parser: argparse.ArgumentParser) -> None:
         "--rekor-url", default="", help="transparency log base URL (default: the public Sigstore Rekor)"
     )
     verifying_archive.add_argument("--json", action="store_true", help="emit the result as one JSON object")
+
+    exporting = sub.add_parser(
+        "export",
+        help="export a feed's chain head as a TRACE v0.2-shaped Trust Record",
+        description=(
+            "Offline, deterministic, pure software: reads a chained audit feed and "
+            "emits one TRACE v0.2-shaped Trust Record (JCS JSON) committing the "
+            "chain head by hash (tool_transcript.hash), with a behavior-trace "
+            "reference to the feed digest, policy.enforcement_mode=enforce, and "
+            "origin.kind=log-import / runtime.platform=software-only. This is an "
+            "evidence-shape export, not a TRACE conformance claim: v0.2 is a "
+            "Developer Preview and software-only records are never attested "
+            "evidence. Fails loudly on unchained or broken feeds."
+        ),
+    )
+    exporting.add_argument("feed", help="chained audit NDJSON feed file to export")
+    exporting.add_argument(
+        "--trace",
+        action="store_true",
+        required=True,
+        help="emit the TRACE v0.2 Trust Record shape (the only export shape)",
+    )
+    exporting.add_argument("--out", default="", help="write the record to this file instead of stdout")
+    exporting.add_argument(
+        "--seed-hex",
+        default="",
+        help="64-hex-char Ed25519 seed: sign the record (embedded profile) and add cnf.jwk; "
+        "without it the record is unsigned",
+    )
+    exporting.add_argument(
+        "--subject", default="", help="record subject (default: did:northstar:run/<run-id> or session)"
+    )
+    exporting.add_argument(
+        "--policy-bundle-hash",
+        default="",
+        help="policy bundle hash as 'sha256:<hex>' (omitted when unknown)",
+    )
+    exporting.add_argument(
+        "--data-class",
+        default="",
+        choices=("", "public", "internal", "confidential", "restricted"),
+        help="highest data class touched (omitted when unknown)",
+    )
+    exporting.add_argument("--model-provider", default="", help="model provider name (omitted when unknown)")
+    exporting.add_argument("--model-id", default="", help="model id (omitted when unknown)")
+
 
 
 def _load_pubkey(hexkey: str) -> bytes:
@@ -372,9 +429,67 @@ def run_audit(args: argparse.Namespace) -> int:
                 f"{result.records} records{extra}"
             )
         return 0 if result.ok else 1
+    if command == "export":
+        if not getattr(args, "trace", False):
+            print("audit export: --trace is required (the only export shape)", file=sys.stderr)
+            return USAGE_ERROR
+        return _run_audit_export(args)
     print(
-        "audit: pass a subcommand: verify, anchor, anchor-external, verify-archive or keygen "
+        "audit: pass a subcommand: verify, anchor, anchor-external, verify-archive, export or keygen "
         "(--help for flags)",
         file=sys.stderr,
     )
     return USAGE_ERROR
+
+
+def _run_audit_export(args: argparse.Namespace) -> int:
+    """``audit export <feed> --trace``: Trust Record shape export (offline)."""
+    from trace_export import TRACE_SHAPE_LABEL, build_trace_record, record_to_json_bytes
+
+    feed = Path(args.feed)
+    if not feed.is_file():
+        print(f"audit: no such feed file: {feed}", file=sys.stderr)
+        return USAGE_ERROR
+    try:
+        seed = bytes.fromhex(args.seed_hex) if args.seed_hex else None
+    except ValueError:
+        print("audit: --seed-hex is not valid hex", file=sys.stderr)
+        return USAGE_ERROR
+    if seed is not None and len(seed) != 32:
+        print("audit: --seed-hex must be 64 hex chars (32 bytes)", file=sys.stderr)
+        return USAGE_ERROR
+    try:
+        record = build_trace_record(
+            feed,
+            policy_bundle_hash=args.policy_bundle_hash or None,
+            data_class=args.data_class or None,
+            subject=args.subject or None,
+            model_provider=args.model_provider or None,
+            model_id=args.model_id or None,
+            seed=seed,
+        )
+    except ValueError as error:
+        message = str(error)
+        print(f"audit: cannot export --trace: {message}", file=sys.stderr)
+        # Mirror verify's exit vocabulary: unprotected vs broken feeds.
+        if "UNPROTECTED" in message:
+            return 2
+        return 3
+    out_bytes = record_to_json_bytes(record) + b"\n"
+    if args.out:
+        out_path = Path(args.out)
+        try:
+            out_path.write_bytes(out_bytes)
+        except OSError as error:
+            print(f"audit: cannot write {out_path}: {error}", file=sys.stderr)
+            return 3
+        where = str(out_path)
+    else:
+        sys.stdout.buffer.write(out_bytes)
+        where = "stdout"
+    signed_note = "signed" if seed is not None else "unsigned (shape only, no conformance claim)"
+    print(
+        f"audit: exported {TRACE_SHAPE_LABEL} [{signed_note}] -> {where}",
+        file=sys.stderr,
+    )
+    return 0

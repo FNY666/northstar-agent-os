@@ -1927,6 +1927,24 @@ Write a complete, self-describing archive package directory.
 
 Verify an archive package. Offline by default; ``online=True`` also re-fetches the Rekor entry. Never raises on malformed input.
 
+### `trace_export`
+
+Source: `components/northstar-agent-runtime/trace_export.py`
+
+Export a Northstar audit chain head as a TRACE v0.2-shaped Trust Record.
+
+#### `build_trace_record(feed: str | Path, *, policy_bundle_hash: str | None=None, data_class: str | None=None, subject: str | None=None, model_provider: str | None=None, model_id: str | None=None, seed: bytes | None=None, iat: int | None=None)`
+
+Build a TRACE v0.2-shaped Trust Record for one audit feed file.
+
+#### `record_to_json_bytes(record: dict[str, Any])`
+
+JCS canonical bytes of the Trust Record (the digest/signing form).
+
+#### `verify_trace_signature(record: dict[str, Any], public_key: bytes)`
+
+Check an embedded Ed25519 signature on an exported Trust Record.
+
 ### `ed25519`
 
 Source: `components/northstar-agent-runtime/ed25519.py`
