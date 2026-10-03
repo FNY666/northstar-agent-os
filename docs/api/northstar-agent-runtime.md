@@ -91,6 +91,81 @@ Compile every ``.northstar/agents/*.md`` into an AgentDefinition.
 
 Discover repository agents and register them; collisions are errors.
 
+### `agent_identity`
+
+Source: `components/northstar-agent-runtime/agent_identity.py`
+
+DID-based agent identity, delegation chains with depth limits, and permission-combination prohibition.
+
+#### `IdentityError`
+
+Raised when an identity or delegation cannot be built (caller bug).
+
+#### `did_of(public_key: bytes)`
+
+Derive the DID for a 32-byte Ed25519 public key.
+
+#### `parse_did(did: str)`
+
+Extract the public key from a ``did:northstar:<hex>`` DID.
+
+#### `AgentIdentity`
+
+One issued agent identity: a DID bound to an Ed25519 key.
+
+- `document()`
+- `as_dict()`
+#### `DelegationRecord`
+
+One delegation hop: delegator DID -> delegatee DID.
+
+- `envelope()`
+- `as_dict()`
+#### `IdentityVerdict`
+
+Result of verifying an identity document or a delegation chain.
+
+- `as_dict()`
+#### `CombinationRule`
+
+One forbidden permission combination.
+
+- `as_dict()`
+#### `combination_rule(name: str, permissions: Iterable[str], *, why: str='')`
+
+Build a combination rule, failing closed on malformed input.
+
+#### `IdentityIssuer`
+
+Root authority: mints agent identities and records delegations.
+
+- `generate()`
+- `root_public_key` (property)
+- `root_did` (property)
+- `issue(agent: str, *, role: str='agent', issued_at: str='', issued_by: str='supervisor')`
+  - Mint an identity: fresh keypair, DID, and the agent's secret.
+- `delegate(delegator_secret: bytes, delegator_did: str, delegatee_did: str, permissions: Iterable[str], *, depth: int, expires_at: str='', purpose: str='')`
+  - Record one delegation hop, signed by the delegator's key.
+#### `verify_identity(identity: AgentIdentity, *, revoked_dids: Iterable[str]=())`
+
+Check an identity document: DID/key binding and revocation.
+
+#### `verify_delegation_chain(chain: Sequence[DelegationRecord], root_did: str, root_permissions: Iterable[str], *, max_depth: int=DEFAULT_MAX_DEPTH, time_iso: str='')`
+
+Verify a whole delegation chain against the root.
+
+#### `check_combination_prohibition(held_permissions: Iterable[str], rules: Sequence[CombinationRule])`
+
+Deny when the held permission set completes a forbidden combination.
+
+#### `evaluate_request(*, identity: AgentIdentity, chain: Sequence[DelegationRecord], root_did: str, root_permissions: Iterable[str], requested_permissions: Iterable[str], combination_rules: Sequence[CombinationRule]=(), max_depth: int=DEFAULT_MAX_DEPTH, time_iso: str='', revoked_dids: Iterable[str]=())`
+
+One-call evaluation: identity + chain + depth + combinations.
+
+#### `identity_audit_events(*, identity: AgentIdentity | None=None, chain: Sequence[DelegationRecord]=(), verdict: IdentityVerdict | None=None, note: str='')`
+
+Audit events for identity issuance/delegation/verification.
+
 ### `budget`
 
 Source: `components/northstar-agent-runtime/budget.py`
@@ -455,6 +530,53 @@ Append clearly delimited memory content to a system prompt.
 
 Create the memory directory (mode 0700) so a first Write has a home.
 
+### `memory_safety`
+
+Source: `components/northstar-agent-runtime/memory_safety.py`
+
+Memory write-time safety gates (eighty-second batch).
+
+#### `looks_injected(text: str)`
+
+True when ``text`` carries injection phrasing (object-anchored).
+
+#### `looks_dangerous(text: str)`
+
+True when ``text`` instructs a dangerous action as an imperative.
+
+#### `looks_unsafe(text: str)`
+
+The write-time poisoning guard: reject extracted knowledge that is injection-shaped (W8 phrasing) OR a bare dangerous imperative (W8 action). One call site, defense-in-depth.
+
+#### `should_quarantine(*, confidence: float, corroborated: bool, supersedes_corroborated: bool)`
+
+Corroboration-gated quarantine decision.
+
+#### `MemoryWriteDecision`
+
+The gate's verdict on one memory write.
+
+- `allowed` (property)
+#### `stamp_provenance(*, writer: str, session_id: str, source: str, content: str, extra: dict[str, Any] | None=None)`
+
+Provenance envelope pinned to a memory write.
+
+#### `gate_memory_write(text: str, *, writer: str='agent', session_id: str='', source: str='session-transcript', confidence: float=0.0, corroborated: bool=False, supersedes_corroborated: bool=False)`
+
+Gate one memory write. Fail-closed.
+
+#### `baseline_memory_file(path: str | Path)`
+
+Record a SHA-256 baseline for a memory file.
+
+#### `verify_memory_baseline(path: str | Path, baseline: dict[str, Any])`
+
+True when ``path`` still matches its recorded baseline.
+
+#### `run_dormancy_probes()`
+
+Run the TrojanHippo-style dormancy probe corpus against the gate.
+
 ### `events`
 
 Source: `components/northstar-agent-runtime/events.py`
@@ -573,6 +695,10 @@ Compositional-safety (step-compliant, sequence-violating) sequences.
 #### `run_multisig()`
 
 m-of-n multisig approval over the exact call.
+
+#### `run_identity_composition()`
+
+DID identity + delegation depth ceiling + combination prohibition.
 
 #### `BenchHarness`
 
@@ -841,6 +967,117 @@ One file, as servers, refusals and notes.
 
 Read every config file this workspace declares, merged with no silent overrides.
 
+### `mcp_admission`
+
+Source: `components/northstar-agent-runtime/mcp_admission.py`
+
+MCP server admission: scan what a config declares, then hold the line.
+
+#### `AdmissionFinding`
+
+One scanner verdict about one server. Pure function of the config.
+
+- `as_dict()`
+#### `AdmissionScan`
+
+What the scanner found across a workspace's MCP configs.
+
+- `ok` (property)
+  - No finding at high or above. Low/medium are advice, not a veto.
+- `worst_for(server: str)`
+  - Worst severity recorded for a server, or None when clean.
+- `as_dict()`
+#### `extract_package_spec(command: str, args: Sequence[str])`
+
+Which package a server command launches, if it launches a package.
+
+#### `scan_server(name: str, settings: Mapping[str, Any])`
+
+Scan one server entry. Pure function: no IO, no network, no model.
+
+#### `scan_document(path: Path)`
+
+Scan one config file's server entries. Malformed JSON scans as empty: ``mcp_config`` already refuses it loudly; the scanner does not double as a parser.
+
+#### `scan_workspace(workspace: str | Path, *, candidates: Sequence[str] | None=None)`
+
+Scan every MCP config file a workspace declares. Read-only.
+
+#### `AdmissionLevel`
+
+Admission levels, strongest protection first.
+
+#### `Classification`
+
+How a proposed policy change affects protection.
+
+#### `classify_change(before: str | None, after: str | None)`
+
+Label a proposed admission change. Ambiguous or mixed -> weaken.
+
+#### `LedgerEntry`
+
+One row of the admission ledger. Append-only, hash-chained.
+
+- `as_dict()`
+#### `verify_ledger(path: Path)`
+
+Check the ledger's hash chain. Returns (ok, reason).
+
+#### `AdmissionPolicy`
+
+The admission policy: server name -> level, plus where it lives.
+
+- `level_for(server: str)`
+- `as_dict()`
+#### `load_policy(workspace: str | Path)`
+
+Load the stored policy file. Unknown levels are kept verbatim so the classifier - not the loader - decides they are a weaken (fail safe).
+
+#### `save_policy(workspace: str | Path, policy: AdmissionPolicy)`
+
+#### `effective_policy(workspace: str | Path)`
+
+The policy to act on: stored file clamped by the ledger (fail closed).
+
+#### `PolicyChange`
+
+A proposed admission change, classified, with its audit trail.
+
+- `as_dict()`
+#### `apply_change(policy: AdmissionPolicy, workspace: str | Path, *, server: str, new_level: str, reason: str, approver: str='')`
+
+The single chokepoint for admission changes (raise-only).
+
+#### `TighteningProposal`
+
+A tighten-only proposal derived from scan findings. Proposals never loosen: they are the raise-only learning half.
+
+- `as_dict()`
+#### `propose_tightening(scan: AdmissionScan, policy: AdmissionPolicy)`
+
+Turn scan findings into tighten-only proposals.
+
+#### `auto_tighten(policy: AdmissionPolicy, workspace: str | Path, scan: AdmissionScan, *, reason_prefix: str='auto-tighten')`
+
+Apply every tightening proposal. Raise-only learning: policies auto-tighten on observed evidence, never silently loosen. Each applied change goes through :func:`apply_change`, so each is ledgered.
+
+#### `apply_admission_policy(servers: Sequence[tuple[str, Any]], policy: AdmissionPolicy)`
+
+Split ``(name, server)`` pairs into admitted and refused.
+
+#### `add_admission_arguments(actions: argparse._SubParsersAction)`
+
+Attach the admission actions to the ``mcp`` verb's subparsers.
+
+#### `run_scan(args: argparse.Namespace)`
+
+Report admission findings; exit 1 when anything at high or above fired.
+
+#### `run_admit(args: argparse.Namespace)`
+
+Record one admission decision through the raise-only gate.
+
 ### `session_replay`
 
 Source: `components/northstar-agent-runtime/session_replay.py`
@@ -1086,6 +1323,67 @@ Deterministic reference model: fixed answers keyed by tool or kind.
 #### `build_decision_audit(*, state: dict[str, Any], questions: dict[str, DecisionQuestion], result: DecisionModelResult, policy: DecisionPolicy, outcome: DecisionOutcome, reason: str, model_error: str | None=None)`
 
 The full input -> output -> verdict chain, ready for the audit feed.
+
+### `action_card`
+
+Source: `components/northstar-agent-runtime/action_card.py`
+
+Verifiable action cards: approval UX the agent cannot forge.
+
+#### `ActionCardError`
+
+A card or approval that refuses to be built or honored.
+
+#### `GateCheck`
+
+One named predicate in the deterministic gate.
+
+- `as_dict()`
+#### `GateDecision`
+
+The deterministic gate's verdict for one action.
+
+- `as_dict()`
+#### `ActionProvenance`
+
+Who asked for the action, from runtime-trusted state.
+
+- `as_dict()`
+#### `ActionCard`
+
+One approval request, built from ground truth.
+
+- `as_dict()`
+- `render_terminal(width: int=70)`
+  - Out-of-band rendering for a terminal.
+#### `evaluate_gate(*, tool: str, risk_tier: str, auto_approve_tiers: Sequence[str]=(), risk_flags: Sequence[str]=(), arguments_digest: str='', provenance: ActionProvenance | None=None, auto_approve_enabled: bool=False, is_demo: bool=False, budget_ok: bool=True)`
+
+Pure deterministic gate: auto-approve or one-tap human approval.
+
+#### `build_action_card(*, tool: str, call_id: str, arguments: Mapping[str, Any] | None, risk_tier: str, provenance: ActionProvenance, gate: GateDecision | None=None, agent_hint: str='', auto_approve_tiers: Sequence[str]=(), risk_flags: Sequence[str]=(), auto_approve_enabled: bool=False, is_demo: bool=False, budget_ok: bool=True, created_unix: float | None=None)`
+
+Build a card from ground truth. The digest is computed here, from the actual arguments object the runtime is about to dispatch - not from any agent-supplied description of them.
+
+#### `CardVerdict`
+
+The audit record of one card's resolution.
+
+- `as_dict()`
+#### `verify_card_binding(card: ActionCard, *, call_id: str, arguments: Mapping[str, Any] | None)`
+
+Re-verify at dispatch that this card authorizes *this* call.
+
+#### `resolve_card(card: ActionCard, *, approver: Callable[[ActionCard], Any] | None)`
+
+Resolve one card to approve/deny/cancel. Default-deny throughout.
+
+#### `make_terminal_card_approver(read_line: Callable[[str], str]=input, *, echo: Callable[[str], None] | None=None, timeout_note: str='')`
+
+One-tap human approval on a terminal, rendered out-of-band.
+
+#### `card_summary(verdict: CardVerdict)`
+
+The record shape written into the session transcript.
 
 ### `multisig`
 

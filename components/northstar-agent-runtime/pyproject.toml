@@ -46,7 +46,9 @@ northstar-agent-runtime = "cli:main"
 # site-packages namespace until the component moves to a proper package layout.
 py-modules = [
     "_version",
+    "action_card",
     "agent_files",
+    "agent_identity",
     "agents",
     "akf_export",
     "audit_export",
@@ -71,6 +73,7 @@ py-modules = [
     "ed25519",
     "interop_bridge",
     "memory",
+    "memory_safety",
     "events",
     "frontmatter",
     "governance_bench",
@@ -79,6 +82,7 @@ py-modules = [
     "loop",
     "mcp_client",
     "mcp_config",
+    "mcp_admission",
     "session_replay",
     "step_compliance",
     "mcp_elicitation",

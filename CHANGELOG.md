@@ -1,3 +1,59 @@
+## Unreleased (eighty-fifth batch) — DID identity + permission combination prohibition
+
+Absorbs three 2026 identity/governance patterns (mechanism ideas only,
+honestly scoped in `agent_identity.py`): RaonSecure's per-agent DID
+issuance + delegation tracking + audit, the Korean agent-gateway
+combination prohibition, and AstraCipher's depth-limited trust chains.
+Every agent gets a self-resolving `did:northstar:<ed25519-pubkey>` bound
+to its key (DID/key mismatch and revocation fail closed); delegation
+records form a signed chain (root → … → subagent) verified per hop for
+signature, continuity, attenuation (a delegatee can never hold more than
+its delegator — amplification is rejected), expiry, and a `max_depth`
+ceiling (default 4, mirroring AstraCipher's Creator→Authorizer→Agent→
+Sub-agent chain) enforced at the exceeding hop with malformed limits
+failing closed. Policy can declare forbidden permission *combinations*
+(`combination_rule`); holding the full set denies the request even when
+each permission was granted individually — the classic
+`read:secrets` + `net:egress` exfiltration shape. `evaluate_request`
+composes the full gate (identity → chain → depth → combination), and
+identity events anchor into `audit.ndjson/1` with the DID, depth, and
+fired rule pinned. New bench track `metrics.identity_composition`
+(12 deterministic scenarios, 4 allow / 8 deny).
+
+## Unreleased (eighty-second batch) — memory write-time gates (nevertwice/OWASP-AMG absorption)
+
+Every memory write passes a fail-closed gate before reaching the store:
+nevertwice's W8 write-time poisoning guard (`_looks_dangerous`
+negation-gated — cautionary lessons pass, the "don't forget to ..."
+flip-bypass is caught) folded into `_looks_unsafe` (injection phrasing OR
+dangerous imperative), always on. W7 corroboration-gated quarantine
+(opt-in via `NORTHSTAR_MEMORY_QUARANTINE=1`): a single-source suspicious
+note is diverted to quarantine — on disk, out of active recall — so one
+uncorroborated actor cannot spoof trust or displace corroborated truth.
+OWASP Agent Memory Guard's SHA-256 baselines detect post-write tampering
+of memory files, and every allowed write is stamped with provenance
+(writer, session, source, content hash). The TrojanHippo dormancy probe
+corpus (dormant payloads activating on finance/health/identity topics) is
+blocked 6/6 with zero false positives on benign controls — a conjunction,
+not a threshold. The "plausible false fact is indistinguishable by form"
+open problem is adopted as honest scope.
+
+## Unreleased (eighty-fourth batch) — verifiable action cards (out-of-band approval UX)
+
+Absorbs the Verifiable Action Card (arXiv:2609.18411) and opsagent's
+deterministic gate (jasondhaki/opsagent CLAUDE.md, read in full). Approval
+requests are reconstructed from ground-truth pending actions (tool, call id,
+arguments digest, runtime-trusted provenance) and rendered out-of-band in
+trusted chrome the agent cannot write to — the terminal renderer prints to
+stderr with a trust banner; `as_dict()` feeds host UIs. The agent's own
+framing is quarantined as explicitly untrusted. A pure deterministic gate
+decides per action: auto-approve only if every named check passes
+(tier allowlisted, no risk flags, digest pinned, provenance trusted, not
+demo, within budget); auto-approve ships OFF with shadow-mode measurement
+(`would_auto_approve` computed even when disabled). Approvals bind to
+`(call_id, arguments_digest)` and `verify_card_binding` re-checks the pin at
+dispatch; default-deny on no answer, error, or timeout.
+
 ## Unreleased (eighty-first batch) — DvP if-and-only-if invariant
 
 Atomic settlement as a red-team harness: proves `Approval <=> Execution` —
