@@ -403,6 +403,53 @@ Compare the workspace policy file with the committed one.
 
 Print the report; return 0 unless a check failed.
 
+### `drift_probe`
+
+Source: `components/northstar-agent-runtime/drift_probe.py`
+
+Post-release drift detection (ninetieth batch).
+
+#### `DriftProbeError`
+
+The drift probe refused to compare the given windows.
+
+#### `DriftSample`
+
+One task outcome in one time window.
+
+#### `pair_windows(baseline: Sequence[DriftSample], current: Sequence[DriftSample])`
+
+Pair two windows by task_id -> ``(task_id, baseline_passed, current_passed)``.
+
+#### `paired_differences(pairs: Sequence[tuple[str, bool, bool]])`
+
+Per-task difference ``current − baseline`` in ``{-1, 0, +1}``.
+
+#### `mean_difference(pairs: Sequence[tuple[str, bool, bool]])`
+
+Mean paired difference: positive = improvement, negative = degradation.
+
+#### `bootstrap_ci(pairs: Sequence[tuple[str, bool, bool]], *, n_resamples: int=_DEFAULT_RESAMPLES, seed: int=_DEFAULT_SEED, alpha: float=0.05)`
+
+Percentile bootstrap CI for the mean paired difference.
+
+#### `paired_permutation_test(pairs: Sequence[tuple[str, bool, bool]], *, n_permutations: int=_DEFAULT_PERMUTATIONS, seed: int=_DEFAULT_SEED)`
+
+Two-sided p-value for "no systematic drift" via sign-flipping.
+
+#### `DriftVerdict`
+
+The statistical verdict for one baseline-vs-current comparison.
+
+- `as_dict()`
+#### `detect_drift(baseline: Sequence[DriftSample], current: Sequence[DriftSample], *, alpha: float=0.05, min_effect: float=0.0, n_resamples: int=_DEFAULT_RESAMPLES, n_permutations: int=_DEFAULT_PERMUTATIONS, seed: int=_DEFAULT_SEED)`
+
+Livenerf-style drift verdict for one model name across two windows.
+
+#### `samples_from_passed(task_ids: Sequence[str], passed_ids: Sequence[str], window: str)`
+
+Build a window: every ``task_id`` passes iff it is in ``passed_ids``.
+
 ### `durable_bridge`
 
 Source: `components/northstar-agent-runtime/durable_bridge.py`
@@ -700,6 +747,10 @@ m-of-n multisig approval over the exact call.
 
 DID identity + delegation depth ceiling + combination prohibition.
 
+#### `run_provenance_taint()`
+
+Provenance-tracked taint + fail-closed automata + per-tool budgets.
+
 #### `BenchHarness`
 
 Temp workspaces + scripted providers for one suite run.
@@ -758,6 +809,68 @@ Execute the public suite. Always cleans temp workspaces.
 #### `add_bench_arguments(parser: argparse.ArgumentParser)`
 
 #### `run_bench_command(args: argparse.Namespace)`
+
+### `harness_binding`
+
+Source: `components/northstar-agent-runtime/harness_binding.py`
+
+Harness integrity binding (ninetieth batch).
+
+#### `HarnessBindingError`
+
+The harness binding refused to present or verify a score.
+
+#### `HarnessConfig`
+
+Everything that can silently move a benchmark number.
+
+- `as_canonical()`
+  - Canonical dict: sorted, JSON-safe, no ambient state.
+#### `canonical_harness_bytes(config: HarnessConfig)`
+
+Canonical JSON bytes of a harness config (JCS-style: sorted keys, compact separators, UTF-8).
+
+#### `harness_hash(config: HarnessConfig)`
+
+SHA-256 hex digest of the canonical harness configuration.
+
+#### `bind_harness_to_audit(config: HarnessConfig, *, model_version: str, note: str='')`
+
+Audit record pinning the harness digest for one bench run.
+
+#### `verify_harness_binding(config: HarnessConfig, pinned_sha256: str)`
+
+Re-hash ``config`` and compare against the pinned digest.
+
+#### `ScoredResult`
+
+A benchmark score with its full measurement context.
+
+- `quad()`
+  - The four measurement axes: model, harness hash, effort, $/task.
+#### `validate_quad(result: ScoredResult)`
+
+Fail-closed validation of the quad. Raises on anything incomplete.
+
+#### `format_quad(result: ScoredResult)`
+
+The only sanctioned score renderer: always the full quad.
+
+#### `emit_bare_score(result: ScoredResult)`
+
+Deliberate refusal: there is no bare-score API.
+
+#### `BoundScore`
+
+A score bound to a pinned harness digest.
+
+#### `bind_score(result: ScoredResult, config: HarnessConfig)`
+
+Pin a score to the digest of the harness that produced it.
+
+#### `invalidate_if_tampered(bound: BoundScore, live_config: HarnessConfig)`
+
+Re-verify the harness; tampering invalidates the score.
 
 ### `hooks`
 
@@ -1834,6 +1947,96 @@ What a retry policy actually cost this turn.
 #### `merge_cli(policy: RetryPolicy | None, *, max_attempts: int | None=None, deadline_ms: int | None=None, retry_on: Iterable[str] | None=None, off: bool=False)`
 
 Apply the CLI's knobs on top of the workspace table, never loosening past it.
+
+### `provenance_taint`
+
+Source: `components/northstar-agent-runtime/provenance_taint.py`
+
+Provenance-tracked taint + fail-closed security automata + per-tool budgets (eighty-eighth batch).
+
+#### `safe_eval(expr: str, env: dict[str, Any])`
+
+Evaluate a simple expression safely against *env*.
+
+#### `expr_names(expr: str)`
+
+Names referenced by an expression (for symbolic detection).
+
+#### `TaintedValue`
+
+A runtime value with taint metadata.
+
+- `copy()`
+#### `find_tainted(val: Any)`
+
+All tainted values nested anywhere inside *val*.
+
+#### `ToolTaintSpec`
+
+Declared taint behavior of one tool (Guardians' ``ToolSpec`` core).
+
+#### `TaintRule`
+
+Data-flow rule: tainted data must not reach a sink.
+
+#### `AutomatonState`
+
+#### `AutomatonTransition`
+
+Transition fired by a tool call.
+
+#### `SecurityAutomaton`
+
+Sequence invariant as a finite automaton (Guardians' ``Policy.automata``).
+
+#### `BudgetLimit`
+
+Per-tool call-count cap. Non-positive / non-int limits are malformed.
+
+#### `GateDecision`
+
+- `as_dict()`
+#### `TaintTracker`
+
+Tracks tainted values across tool calls and checks sink rules.
+
+- `produce(tool_name: str, raw: Any)`
+  - Wrap a tool's output: labels = spec labels, provenance = {tool}.
+- `derive(tool_name: str, raw: Any, inputs: dict[str, Any])`
+  - Wrap a computed value: union of input labels + provenance.
+- `bind(name: str, value: TaintedValue)`
+- `lookup(name: str)`
+- `apply_sanitizers(tool_name: str, value: TaintedValue)`
+  - Mark *value* sanitized for every rule this tool sanitizes.
+- `check_sink(tool_name: str, arguments: dict[str, Any])`
+  - Evaluate taint rules for *tool_name*'s sink parameters.
+#### `AutomatonEngine`
+
+Nondeterministic security-automaton tracker over tool-call events.
+
+- `violated` (property)
+- `observe(tool_name: str, arguments: dict[str, Any])`
+  - Advance automata on a tool-call event; deny on error states.
+- `states()`
+#### `BudgetEnforcer`
+
+Per-tool call-count caps. Exceeding the cap denies, fail-closed.
+
+- `check(tool_name: str)`
+- `record(tool_name: str)`
+  - Count one executed call. Called only after the gate allows.
+- `usage()`
+#### `ProvenanceTaintGate`
+
+One gate composing budget → automaton → taint, first deny wins.
+
+- `evaluate(tool_name: str, arguments: dict[str, Any])`
+  - Pre-call gate: budget, then automaton, then taint sinks.
+- `produce_result(tool_name: str, raw_result: Any, arguments: dict[str, Any])`
+  - Wrap a tool's result with taint metadata + sanitizer marking.
+#### `gate_audit_event(decision: GateDecision, tool_name: str, call_id: str='')`
+
+Audit event for a gate decision (fits ``audit.ndjson/1`` payloads).
 
 ### `run_setup`
 
