@@ -1208,9 +1208,17 @@ def _run(args: argparse.Namespace) -> int:
     except ValueError as error:
         raise RunConfigurationError(str(error)) from error
 
+    args._reviewed_skill_digests = None
     if args.require_skill_lock:
         from skill_check import run_lock_status
+        from skill_audit import load_lock, lock_path_for
 
+        lock_path = lock_path_for(args.workspace)
+        pins = load_lock(lock_path)["skills"] if lock_path.exists() else {}
+        args._reviewed_skill_digests = {
+            key: str(value.get("digest", "")) if isinstance(value, dict) else ""
+            for key, value in pins.items()
+        }
         locked, detail = run_lock_status(args.workspace)
         if not locked:
             raise RunConfigurationError(f"skill review is required and failed: {detail}")

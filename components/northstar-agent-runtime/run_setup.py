@@ -374,11 +374,17 @@ def compose_system_prompt(args: argparse.Namespace, definition: Any, policy: Any
     # only the name/description listing enters the prompt; the model reads the
     # full SKILL.md with the ordinary sandboxed Read tool when a task matches.
     skills: tuple[Any, ...] = ()
+    reviewed_digests = None
+    if getattr(args, "require_skill_lock", False) and not args.no_skills:
+        reviewed_digests = getattr(args, "_reviewed_skill_digests", None)
+        if reviewed_digests is None:
+            raise RunConfigurationError("skill review requires captured pins before prompt composition")
     if not args.no_skills:
         try:
             skills = discover_skills(
                 args.workspace,
                 extra_roots=[path for _name, path in (plugins.skill_roots if plugins else ())],
+                reviewed_digests=reviewed_digests,
             )
         except SkillError as error:
             raise RunConfigurationError(str(error)) from error
