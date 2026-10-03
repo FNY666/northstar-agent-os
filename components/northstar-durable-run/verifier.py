@@ -31,13 +31,31 @@ class VerificationResult:
 
 
 def _file_digest(path: Path) -> str:
+    """Hash a regular file without following symlinks.
+
+    The caller lstat-checks the path first, but a swap between that check
+    and the open would otherwise hash whatever the link points at. Opening
+    with ``O_NOFOLLOW`` and re-checking the open fd closes that TOCTOU: the
+    bytes hashed are always the bytes of the file that was opened.
+    """
     digest = hashlib.sha256()
     try:
-        with path.open("rb") as stream:
-            for block in iter(lambda: stream.read(1024 * 1024), b""):
-                digest.update(block)
+        fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW)
     except OSError as error:
         raise ValueError("artifact could not be read") from error
+    try:
+        stream = os.fdopen(fd, "rb")
+    except OSError as error:
+        os.close(fd)
+        raise ValueError("artifact could not be read") from error
+    with stream:
+        try:
+            if not stat.S_ISREG(os.fstat(stream.fileno()).st_mode):
+                raise ValueError("artifact is not a regular file")
+            for block in iter(lambda: stream.read(1024 * 1024), b""):
+                digest.update(block)
+        except OSError as error:
+            raise ValueError("artifact could not be read") from error
     return _DIGEST_PREFIX + digest.hexdigest()
 
 

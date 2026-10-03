@@ -77,6 +77,19 @@ class VerifierTests(unittest.TestCase):
     def expected_digest(self, path):
         return "sha256:" + hashlib.sha256(path.read_bytes()).hexdigest()
 
+    def test_artifact_hash_does_not_follow_symlinks(self):
+        # Even if a symlink slipped past the lstat gate (TOCTOU), the hash
+        # must refuse to follow it instead of attesting to the target's bytes.
+        from verifier import _file_digest
+
+        target, _state = self.run_success()
+        outside = self.root / "outside"
+        outside.write_text("outside\n", encoding="utf-8")
+        target.unlink()
+        target.symlink_to(outside)
+        with self.assertRaises(ValueError):
+            _file_digest(target)
+
     def test_verified_requires_real_finished_state_file_digest_and_test_exit_zero(self):
         target, state = self.run_success()
         result = verify_run_completion(
