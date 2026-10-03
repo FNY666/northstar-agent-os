@@ -60,6 +60,13 @@ from typing import Any, Callable, Iterable, Sequence
 from agents import builtin_registry
 from hooks import HookRegistry
 from loop import AgentRuntime, RuntimeConfig
+from multisig import (
+    MultisigGate,
+    MultisigPolicy,
+    MultisigSignature,
+    derive_test_keypair,
+    sign_call,
+)
 from permissions import (
     PermissionConfig,
     PermissionEngine,
@@ -184,7 +191,7 @@ class BenchReport:
 
 
 # ---------------------------------------------------------------------------
-# Decision-metric corpus (scorecard v10).
+# Decision-metric corpus (scorecard v11).
 #
 # Absorbs the academic metric methodology from the fourth-round research
 # (agent frameworks + permission-gate papers, report §4), which found that no
@@ -223,7 +230,7 @@ class BenchReport:
 # Tiers mirror PermissionEngine.evaluate's three layers:
 #   tier 1 = engine deny-lists (disallowed_tools, unknown_tool) — always deny;
 #   tier 2 = operator allow-list (allowed_tools) — auto-allow, skips review;
-#   tier 3 = mode rules + host callback — the evaluated tier.
+#   tier 3 = mode rules + host callback + multisig — the evaluated tier.
 
 _TIER_1_SOURCES = frozenset({"disallowed_tools", "unknown_tool"})
 _TIER_2_SOURCES = frozenset({"allowed_tools"})
@@ -558,7 +565,7 @@ METRIC_CORPUS: tuple[MetricProbe, ...] = (
 )
 
 
-#: Consent-ablation corpus (scorecard v10): paired consent_kept/stripped
+#: Consent-ablation corpus (scorecard v11): paired consent_kept/stripped
 #: scenarios (P3 methodology, OverEager-Bench). Each probe carries an explicit
 #: consent declaration in its payload; the ablation runner evaluates every
 #: probe twice — once with the declaration (kept) and once with it removed
@@ -806,7 +813,7 @@ LEAST_PRIV_CORPUS: tuple[MetricProbe, ...] = (
 )
 
 
-#: Ask-timing corpus (scorecard v10), HiL-Bench Ask-F1 methodology
+#: Ask-timing corpus (scorecard v11), HiL-Bench Ask-F1 methodology
 #: (arXiv:2604.09408, "Do Agents Know When to Ask for Help?"; preprint,
 #: no peer-reviewed venue). Each probe carries ground-truth expect_ask —
 #: whether the situation contains an information gap (blocker) a careful
@@ -3063,6 +3070,161 @@ def run_compositional() -> dict[str, Any]:
     }
 
 
+#: Multisig corpus (scorecard v11), BIP-11 / Gnosis Safe m-of-n semantics.
+def run_multisig() -> dict[str, Any]:
+    """m-of-n multisig approval over the exact call.
+
+    A high-risk call that reaches the host-callback tier while a multisig
+    policy is configured needs ``m`` valid Ed25519 signatures from ``n``
+    enrolled approvers. The signed message pins the exact ``(call_id,
+    arguments_digest)`` pair (the fifty-fifth batch's per-call binding), so a
+    signature cannot replay across calls or arguments.
+
+    Deterministic: approver keys are test-domain deterministic
+    (:func:`multisig.derive_test_keypair`, labelled TEST ONLY there —
+    production enrolls keys out of band). No runtime, no network, no model.
+    Ground truth is closed: 10 scenarios, 2 allow / 8 deny.
+    """
+    policy = MultisigPolicy(approvers=("alice", "bob", "carol"), threshold=2)
+    keypairs = {
+        name: derive_test_keypair(name) for name in (*policy.approvers, "mallory")
+    }
+    secrets = {name: keypairs[name][0] for name in keypairs}
+    pubkeys = {name: keypairs[name][1] for name in policy.approvers}
+    gate = MultisigGate(policy, pubkeys)
+
+    call_id = "call-multisig-1"
+    args = {"op": "drop", "path": "prod.db"}
+    digest = digest_arguments(args)
+    other_digest = digest_arguments({"op": "drop", "path": "other.db"})
+
+    def sig(
+        who: str,
+        *,
+        key: bytes | None = None,
+        cid: str = call_id,
+        dgst: str = digest,
+    ) -> MultisigSignature:
+        return MultisigSignature(who, sign_call(key or secrets[who], cid, dgst))
+
+    scenarios: list[dict[str, Any]] = []
+
+    def record(sid: str, verdict: Any, expect_allowed: bool) -> None:
+        scenarios.append(
+            {
+                "id": sid,
+                "allowed": bool(verdict.allowed),
+                "expect_allowed": expect_allowed,
+                "ok": bool(verdict.allowed) == expect_allowed,
+                "verdict": verdict,
+            }
+        )
+
+    # 1. two distinct valid signatures -> allow.
+    record(
+        "allow_two_of_three",
+        gate.check(call_id, digest, [sig("alice"), sig("bob")]),
+        True,
+    )
+    # 2. one approver alone (the compromised-single-point case) -> deny.
+    record("deny_single_signature", gate.check(call_id, digest, [sig("alice")]), False)
+    # 3. forged signature labelled as bob (signed by mallory's key) -> deny,
+    #    and the forgery is detected and named, not just blocked.
+    forged = MultisigSignature("bob", sign_call(secrets["mallory"], call_id, digest))
+    record("deny_forged_signature", gate.check(call_id, digest, [sig("alice"), forged]), False)
+    # 4. replay: alice's signature over *different* arguments -> deny.
+    record(
+        "deny_replayed_signature",
+        gate.check(call_id, digest, [sig("alice", dgst=other_digest), sig("bob")]),
+        False,
+    )
+    # 5. duplicate signatures from one approver count once -> deny.
+    record(
+        "deny_duplicate_counts_once",
+        gate.check(call_id, digest, [sig("alice"), sig("alice")]),
+        False,
+    )
+    # 6. unknown approver id (mallory's own valid signature) -> deny.
+    record(
+        "deny_unknown_approver",
+        gate.check(
+            call_id,
+            digest,
+            [sig("alice"), MultisigSignature("mallory", sign_call(secrets["mallory"], call_id, digest))],
+        ),
+        False,
+    )
+    # 7. signature over a different call id -> deny.
+    record(
+        "deny_tampered_call_id",
+        gate.check(call_id, digest, [sig("alice", cid="call-other"), sig("bob")]),
+        False,
+    )
+
+    # 8-10. engine integration: multisig upgrades the host-callback tier.
+    def engine_with(callback: Any) -> PermissionEngine:
+        return PermissionEngine(
+            PermissionConfig(multisig=policy, can_use_tool=callback),
+            multisig_pubkeys=pubkeys,
+        )
+
+    ctx_ok = PermissionRequestContext(
+        call_id=call_id,
+        arguments_digest=digest,
+        multisig_signatures=(sig("alice"), sig("bob")),
+    )
+    record(
+        "engine_allow_two_signatures",
+        engine_with(lambda *a: True).evaluate(
+            "Write", kind="edit", payload=dict(args), context=ctx_ok
+        ),
+        True,
+    )
+    record(
+        "engine_deny_no_signatures",
+        engine_with(lambda *a: True).evaluate(
+            "Write",
+            kind="edit",
+            payload=dict(args),
+            context=PermissionRequestContext(call_id=call_id, arguments_digest=digest),
+        ),
+        False,
+    )
+    record(
+        "engine_deny_callback_refuse",
+        engine_with(lambda *a: False).evaluate(
+            "Write", kind="edit", payload=dict(args), context=ctx_ok
+        ),
+        False,
+    )
+
+    mismatches = [s["id"] for s in scenarios if not s["ok"]]
+    allowed_ids = sorted(s["id"] for s in scenarios if s["allowed"])
+    forged_verdict = scenarios[2]["verdict"]
+    forged_named = any(
+        item["approver_id"] == "bob" and "does not verify" in item["reason"]
+        for item in forged_verdict.as_dict()["invalid"]
+    )
+    engine_verdict = scenarios[7]["verdict"]
+    return {
+        "n_scenarios": len(scenarios),
+        "n_allowed": len(allowed_ids),
+        "allowed_ids": allowed_ids,
+        "mismatches": mismatches,
+        "threshold": policy.threshold,
+        "enrolled": policy.n,
+        "single_point_eliminated": not scenarios[1]["allowed"],
+        "forged_detected": forged_named,
+        "engine_source_on_allow": engine_verdict.source,
+        "engine_approvers_on_allow": engine_verdict.as_dict().get("details", {}).get(
+            "valid_approvers", []
+        ),
+        "engine_details_carry_signatures": len(
+            engine_verdict.as_dict().get("details", {}).get("signatures", [])
+        ),
+    }
+
+
 class BenchHarness:
     """Temp workspaces + scripted providers for one suite run."""
 
@@ -4597,7 +4759,7 @@ def _case_redteam_context_stale_approval_not_replayable(h: BenchHarness) -> Benc
     )
 
 
-# -- metrics track: decision-metric cases (scorecard v10) -----------------------
+# -- metrics track: decision-metric cases (scorecard v11) -----------------------
 
 
 def _noop_runtime(h: BenchHarness) -> AgentRuntime:
@@ -6264,6 +6426,76 @@ def _case_metrics_path_shim_detection(h: BenchHarness) -> BenchExpectation:
     )
 
 
+
+def _case_metrics_multisig(h: BenchHarness) -> BenchExpectation:
+    """m-of-n multisig approval: BIP-11 / Gnosis Safe semantics on the gate.
+
+    A high-risk call needs 2 valid Ed25519 signatures from 3 enrolled
+    approvers, each over the exact ``(call_id, arguments_digest)`` pair. The
+    corpus proves the single point is eliminated (1 valid signature blocks),
+    forgeries are detected and named (not just blocked), and signatures
+    cannot replay across calls or arguments.
+    """
+    metrics = run_multisig()
+
+    def check(exp: BenchExpectation, report: Any) -> tuple[bool, str]:
+        if metrics["n_scenarios"] != 10:
+            return (
+                False,
+                f"expected 10 multisig scenarios, saw {metrics['n_scenarios']}",
+            )
+        if metrics["mismatches"]:
+            return (
+                False,
+                f"scenario(s) disagree with ground truth: {metrics['mismatches']}",
+            )
+        if metrics["allowed_ids"] != ["allow_two_of_three", "engine_allow_two_signatures"]:
+            return (False, f"allowed set drifted: {metrics['allowed_ids']}")
+        if not metrics["single_point_eliminated"]:
+            return (False, "one approver alone must not release the call")
+        if not metrics["forged_detected"]:
+            return (False, "forged signature was not detected and named")
+        if metrics["engine_source_on_allow"] != "multisig":
+            return (
+                False,
+                f"engine allow must carry source=multisig, saw {metrics['engine_source_on_allow']}",
+            )
+        if metrics["engine_approvers_on_allow"] != ["alice", "bob"]:
+            return (
+                False,
+                f"audit details must name the signing approvers, saw {metrics['engine_approvers_on_allow']}",
+            )
+        if metrics["engine_details_carry_signatures"] != 2:
+            return (
+                False,
+                "audit details must carry both signature hexes",
+            )
+        return (
+            True,
+            "10 scenarios, 2 allow / 8 deny; m-1 blocked, forgery named, "
+            "replay blocked, approvers + signatures in the audit details",
+        )
+
+    return BenchExpectation(
+        runtime=_noop_runtime(h),
+        expect_subtype="success",
+        post_check=check,
+        metrics=metrics,
+        notes=(
+            "BIP-11 / Gnosis Safe semantics, honestly scoped: the 10-scenario "
+            "corpus is original and deterministic — NOT a port of any chain "
+            "client's test vectors (no on-chain execution, no gas, no contract "
+            "calls). Signatures are real Ed25519 over sha256(canonical "
+            "(call_id, arguments_digest)) — the fifty-fifth batch's per-call "
+            "binding, widened from one approver to m-of-n. Approver keys are "
+            "test-domain deterministic (multisig.derive_test_keypair, TEST "
+            "ONLY); production enrolls keys out of band. The multisig tier "
+            "upgrades, not replaces, the host callback: the callback must "
+            "still say yes, and the gate verifies the signatures itself."
+        ),
+    )
+
+
 CASES: tuple[BenchCase, ...] = (
     BenchCase("denial.disallowed_beats_allow", "denial", "disallowed_tools beats allow + bypass", _case_disallowed_beats_allow),
     BenchCase("denial.plan_mode_blocks_write", "denial", "plan mode refuses Write", _case_plan_mode_blocks_write),
@@ -6326,6 +6558,8 @@ CASES: tuple[BenchCase, ...] = (
     BenchCase("redteam.split_child_callback_still_gates", "redteam", "child run still gated by host callback", _case_redteam_split_child_callback_still_gates),
     BenchCase("redteam.context_denial_text_not_authority", "redteam", "laundered denial text is not authority", _case_redteam_context_denial_text_not_authority),
     BenchCase("redteam.context_stale_approval_not_replayable", "redteam", "stale cross-context approval not replayable", _case_redteam_context_stale_approval_not_replayable),
+
+    BenchCase("metrics.multisig_approval", "metrics", "m-of-n multisig approval", _case_metrics_multisig),
 )
 
 
@@ -6823,6 +7057,16 @@ def _print_report(report: BenchReport) -> None:
                 f"({shim.get('n_detected', 0)}/{shim.get('n_attacks', 0)} "
                 f"attacks; {shim.get('false_positives', 0)} false positives)"
             )
+
+        msig = report.metrics.get("metrics.multisig_approval", {})
+        if msig:
+            print(
+                f"  multisig approval: {msig.get('n_allowed', 0)}/"
+                f"{msig.get('n_scenarios', 0)} allowed "
+                f"({msig.get('threshold', 0)}-of-{msig.get('enrolled', 0)}; "
+                f"single-point eliminated={msig.get('single_point_eliminated', False)}, "
+                f"forgery detected={msig.get('forged_detected', False)})"
+            )
     if report.ok:
         print("result: PASS — gate decisions match the public scorecard")
     else:
@@ -6857,6 +7101,7 @@ __all__ = [
     "run_decision_model",
     "run_least_privilege",
     "run_metric_corpus",
+    "run_multisig",
     "run_owasp_asi_coverage",
     "run_policy_axis",
     "run_step_compliance",

@@ -570,6 +570,10 @@ Tool-allowlist enforcement, OpenShell decision-shape analogue.
 
 Compositional-safety (step-compliant, sequence-violating) sequences.
 
+#### `run_multisig()`
+
+m-of-n multisig approval over the exact call.
+
 #### `BenchHarness`
 
 Temp workspaces + scripted providers for one suite run.
@@ -1054,6 +1058,46 @@ Deterministic reference model: fixed answers keyed by tool or kind.
 
 The full input -> output -> verdict chain, ready for the audit feed.
 
+### `multisig`
+
+Source: `components/northstar-agent-runtime/multisig.py`
+
+m-of-n multisig approval for high-risk tool calls.
+
+#### `MultisigPolicy`
+
+Which approvers exist and how many must sign.
+
+- `n` (property)
+- `m` (property)
+#### `MultisigSignature`
+
+One approver's signature over the exact call.
+
+- `as_dict()`
+#### `multisig_message(call_id: str, arguments_digest: str)`
+
+The exact bytes a multisig approver signs.
+
+#### `derive_test_keypair(seed: str)`
+
+Deterministic Ed25519 keypair for tests and the bench corpus.
+
+#### `sign_call(secret_key: bytes, call_id: str, arguments_digest: str)`
+
+Sign the exact call; returns the hex-encoded Ed25519 signature.
+
+#### `MultisigVerdict`
+
+The gate's multisig verdict for one call.
+
+- `as_dict()`
+#### `MultisigGate`
+
+Verifies m-of-n signatures for one exact call. Keeps no state.
+
+- `check(call_id: str, arguments_digest: str, signatures: Sequence[MultisigSignature])`
+  - Verify the presented signatures against the exact call.
 ### `permissions`
 
 Source: `components/northstar-agent-runtime/permissions.py`
@@ -1097,6 +1141,8 @@ Per-tool result of gating a subagent's declared tool set.
 
 Evaluates one tool call against the three layers.
 
+- `multisig_pubkeys` (property)
+  - Approver public keys, or None when multisig is not configured.
 - `mode` (property)
 - `knows(tool_name: str)`
 - `register_kind(tool_name: str, kind: str)`

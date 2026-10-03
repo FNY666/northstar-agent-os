@@ -1,3 +1,38 @@
+## Unreleased (seventy-second batch) — m-of-n multisig approval
+
+Absorbs BIP-11 / Gnosis Safe m-of-n semantics into the permission gate
+(from the cross-domain "cryptoid" sweep; honestly scoped — the mechanism
+is verified against the multisig concept, no chain-client code ported,
+no on-chain execution involved):
+
+- **m-of-n approval tier** (new
+  `components/northstar-agent-runtime/multisig.py`): a high-risk call that
+  reaches the host-callback tier while a `MultisigPolicy` is configured
+  needs `m` valid Ed25519 signatures from `n` enrolled approvers. The
+  signed message is `sha256` over the canonical `(call_id,
+  arguments_digest)` pair — the fifty-fifth batch's per-call binding,
+  widened from one approver to m-of-n — so a signature can never authorize
+  a different call or different arguments.
+- **Single point eliminated**: the host callback must still say yes, but
+  its word alone no longer releases the call — the gate verifies the
+  signatures itself against the enrolled approver keys. `m-1` valid
+  signatures block.
+- **Forgery detected, not just blocked**: a signature that does not verify
+  for this exact call names the approver and the reason in the verdict;
+  unknown approver ids, duplicate signatures (counted once), and malformed
+  signatures all deny.
+- **Audit**: approver identities and signature hexes ride in
+  `PermissionDecision.details`, so the audit chain records exactly who
+  signed what. Multisig denials carry decision source `multisig`
+  (structured-denial tier `multisig`, not retryable — policy-class, same
+  convention as the fifty-fifth batch).
+- Test approver keys are test-domain deterministic
+  (`multisig.derive_test_keypair`, labelled TEST ONLY); production enrolls
+  keys out of band.
+
+New bench track `metrics.multisig_approval` (10 deterministic scenarios,
+2 allow / 8 deny); `BENCH_VERSION` v10 → v11; human + `--json` output print
+
 ## Unreleased (seventy-first batch) — PATH-shim red-team: binary pins + output receipts
 
 Absorbs the red-team methodology of

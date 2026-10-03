@@ -690,7 +690,10 @@ class AgentRuntime:
             )
         )
         if can_use_tool is not None and self.permissions.config.can_use_tool is None:
-            self.permissions = PermissionEngine(replace(self.permissions.config, can_use_tool=can_use_tool))
+            self.permissions = PermissionEngine(
+                replace(self.permissions.config, can_use_tool=can_use_tool),
+                multisig_pubkeys=self.permissions.multisig_pubkeys,
+            )
         for spec in self.tools.specs():
             if not self.permissions.knows(spec.name):
                 self.permissions.register_kind(spec.name, spec.kind)
