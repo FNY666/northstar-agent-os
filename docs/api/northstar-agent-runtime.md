@@ -4100,7 +4100,7 @@ Probe whether this kernel lets a process Landlock-restrict itself.
 One Landlock PATH_BENEATH rule: path plus allowed access bits.
 
 - `as_dict()`
-#### `filesystem_rules(pledges: frozenset[str], *, workspace: str, tmpdir: str, runtime_roots: Sequence[str]=('/usr', '/bin', '/lib', '/lib64', '/sbin'))`
+#### `filesystem_rules(pledges: frozenset[str], *, workspace: str, tmpdir: str, runtime_roots: Sequence[str] | None=None)`
 
 Map a pledge set to Landlock filesystem rules. Pure and testable.
 
