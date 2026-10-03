@@ -93,6 +93,8 @@ A signed approval whose decision is ``denied``.
 Authorize and dispatch one exact registered tool call at a time.
 
 - `register(spec: ToolSpec)`
+- `enforcement_trace` (property)
+  - Append-only enforcement events (OCSF action/disposition analogue).
 - `execute(call: ToolCall, arguments: dict[str, Any], *, authorization_token: str, authorization_secret: bytes, now: int, approval_token: str | None=None, current_policy_revision: str, run: dict[str, Any] | None=None)`
 ### `runner`
 
@@ -268,3 +270,34 @@ Schema migration for the durable-run event history.
 #### `migrate_event_dict(value: Any)`
 
 Migrate a stored event dict to the current event schema revision.
+
+### `tool_allowlist`
+
+Source: `components/northstar-durable-run/tool_allowlist.py`
+
+OpenShell-style tool allowlist: pre-execution validation + enforcement tracing.
+
+#### `ToolRule`
+
+One allowlisted tool: parameter name -> list of glob patterns (any-of).
+
+#### `ToolAllowlist`
+
+Parsed allowlist document: version + tool rules.
+
+- `from_mapping(value: Any)`
+  - Parse and strictly validate an allowlist document.
+#### `EnforcementDecision`
+
+One pre-execution validation verdict: ``allow`` or ``deny`` + reason.
+
+#### `EnforcementGate`
+
+OpenShell ``Validate``-phase analogue: check tool + args vs allowlist.
+
+- `allowlist` (property)
+- `failure_policy` (property)
+- `check(tool_name: str, arguments: dict[str, Any])`
+#### `make_enforcement_event(*, seq: int, tool_name: str, arguments_digest: str, decision: EnforcementDecision, allowlist_version: int, failure_policy: str)`
+
+Build one enforcement trace event (OCSF action/disposition analogue).

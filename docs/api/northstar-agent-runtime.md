@@ -554,6 +554,10 @@ Contrast bench: AP2-shaped "sign the transaction" vs "bind the arguments".
 
 in-toto Layout/Link step compliance over deterministic attack scenarios.
 
+#### `run_tool_allowlist_enforcement()`
+
+Tool-allowlist enforcement, OpenShell decision-shape analogue.
+
 #### `BenchHarness`
 
 Temp workspaces + scripted providers for one suite run.
