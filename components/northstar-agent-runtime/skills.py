@@ -51,7 +51,13 @@ def skills_directory(workspace: str | Path) -> Path:
     return Path(workspace) / SKILLS_DIRECTORY
 
 
-def discover_skills(workspace: str | Path, *, extra_roots: Iterable[str | Path] = (), reviewed_digests: Mapping[str, str] | None = None) -> tuple[Skill, ...]:
+def discover_skills(
+    workspace: str | Path,
+    *,
+    extra_roots: Iterable[str | Path] = (),
+    reviewed_digests: Mapping[str, str] | None = None,
+    extra_digests: Mapping[str, str] | None = None,
+) -> tuple[Skill, ...]:
     """Discover skills under the workspace root; errors are operator-facing.
 
     ``extra_roots`` is the seam an installed plugin bundle uses: each entry is a directory
@@ -75,7 +81,7 @@ def discover_skills(workspace: str | Path, *, extra_roots: Iterable[str | Path] 
                 "contribute skills from somewhere the run is not confined to"
             )
         claimed = {skill.name for skill in skills}
-        for skill in _scan(directory, root):
+        for skill in _scan(directory, root, extra_digests, require_pins=extra_digests is not None):
             if skill.name in claimed:
                 raise SkillError(
                     f"{skill.name}: two installed skill packages claim the same name "
@@ -86,7 +92,13 @@ def discover_skills(workspace: str | Path, *, extra_roots: Iterable[str | Path] 
     return tuple(sorted(skills, key=lambda skill: skill.name))
 
 
-def _scan(directory: Path, root: Path, reviewed_digests: Mapping[str, str] | None = None) -> list[Skill]:
+def _scan(
+    directory: Path,
+    root: Path,
+    reviewed_digests: Mapping[str, str] | None = None,
+    *,
+    require_pins: bool = False,
+) -> list[Skill]:
     """One directory of skill folders, with the symlink refusal the root check requires."""
     if not directory.is_dir():
         return []
@@ -110,9 +122,9 @@ def _scan(directory: Path, root: Path, reviewed_digests: Mapping[str, str] | Non
                 "refusing to follow the symlink"
             )
         expected_digest = None
-        if reviewed_digests is not None:
+        if reviewed_digests is not None or require_pins:
             relative = resolved_file.relative_to(root).as_posix()
-            expected_digest = reviewed_digests.get(relative, "")
+            expected_digest = (reviewed_digests or {}).get(relative, "")
         skills.append(_parse_skill(resolved_file, expected_digest=expected_digest))
     return skills
 

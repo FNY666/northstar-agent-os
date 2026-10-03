@@ -83,11 +83,11 @@ A repository agent file is unusable. Message is operator-facing.
 
 #### `agents_directory(workspace: str | Path)`
 
-#### `discover_agent_files(workspace: str | Path, *, known_tools: Iterable[str] | None=None, extra_paths: Iterable[str | Path]=())`
+#### `discover_agent_files(workspace: str | Path, *, known_tools: Iterable[str] | None=None, extra_paths: Iterable[str | Path]=(), reviewed_digests: Mapping[str, str] | None=None)`
 
 Compile every ``.northstar/agents/*.md`` into an AgentDefinition.
 
-#### `register_workspace_agents(registry: AgentRegistry, workspace: str | Path, *, known_tools: Iterable[str] | None=None, extra_paths: Iterable[str | Path]=())`
+#### `register_workspace_agents(registry: AgentRegistry, workspace: str | Path, *, known_tools: Iterable[str] | None=None, extra_paths: Iterable[str | Path]=(), reviewed_digests: Mapping[str, str] | None=None)`
 
 Discover repository agents and register them; collisions are errors.
 
@@ -1702,7 +1702,7 @@ One discovered skill package: identity plus the path to read.
 
 #### `skills_directory(workspace: str | Path)`
 
-#### `discover_skills(workspace: str | Path, *, extra_roots: Iterable[str | Path]=(), reviewed_digests: Mapping[str, str] | None=None)`
+#### `discover_skills(workspace: str | Path, *, extra_roots: Iterable[str | Path]=(), reviewed_digests: Mapping[str, str] | None=None, extra_digests: Mapping[str, str] | None=None)`
 
 Discover skills under the workspace root; errors are operator-facing.
 

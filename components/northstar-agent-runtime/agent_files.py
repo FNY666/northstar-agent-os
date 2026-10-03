@@ -21,9 +21,10 @@ The markdown body becomes the agent's prompt.
 """
 from __future__ import annotations
 
+import hashlib
 import re
 from pathlib import Path
-from typing import Iterable
+from typing import Iterable, Mapping
 
 from agents import READ_ONLY_TOOLS, AgentDefinition, AgentRegistry
 from frontmatter import FrontmatterError, parse_frontmatter
@@ -62,6 +63,7 @@ def discover_agent_files(
     *,
     known_tools: Iterable[str] | None = None,
     extra_paths: Iterable[str | Path] = (),
+    reviewed_digests: Mapping[str, str] | None = None,
 ) -> tuple[AgentDefinition, ...]:
     """Compile every ``.northstar/agents/*.md`` into an AgentDefinition.
 
@@ -72,22 +74,26 @@ def discover_agent_files(
     root = Path(workspace).resolve()
     directory = root / AGENTS_DIRECTORY
     known = frozenset(known_tools or ())
-    candidates: list[Path] = sorted(directory.glob("*.md")) if directory.is_dir() else []
+    candidates: list[tuple[Path, bool]] = [(path, False) for path in (sorted(directory.glob("*.md")) if directory.is_dir() else [])]
     for extra in extra_paths:
         path = Path(extra)
         if path.is_dir():
-            candidates.extend(sorted(path.glob("*.md")))
+            candidates.extend((item, True) for item in sorted(path.glob("*.md")))
         elif path.is_file():
-            candidates.append(path)
+            candidates.append((path, True))
     definitions: list[AgentDefinition] = []
-    for entry in candidates:
+    for entry, plugin_owned in candidates:
         resolved = entry.resolve(strict=False)
         if not resolved.is_relative_to(root):
             raise AgentFileError(
                 f"agent file {entry} resolves outside the workspace root {root}; "
                 "refusing to follow the symlink"
             )
-        definitions.append(_parse_agent_file(entry, known_tools=known))
+        relative = resolved.relative_to(root).as_posix()
+        expected = (reviewed_digests or {}).get(relative)
+        if plugin_owned and reviewed_digests is not None and not expected:
+            raise AgentFileError(f"plugin agent {entry} has no reviewed content digest")
+        definitions.append(_parse_agent_file(entry, known_tools=known, expected_digest=expected))
     return tuple(definitions)
 
 
@@ -97,13 +103,16 @@ def register_workspace_agents(
     *,
     known_tools: Iterable[str] | None = None,
     extra_paths: Iterable[str | Path] = (),
+    reviewed_digests: Mapping[str, str] | None = None,
 ) -> tuple[AgentDefinition, ...]:
     """Discover repository agents and register them; collisions are errors.
 
     The collision rule is what makes ``extra_paths`` safe: a plugin may add a subagent, and
     may not take over a name a built-in or the repository already uses.
     """
-    definitions = discover_agent_files(workspace, known_tools=known_tools, extra_paths=extra_paths)
+    definitions = discover_agent_files(
+        workspace, known_tools=known_tools, extra_paths=extra_paths, reviewed_digests=reviewed_digests
+    )
     for definition in definitions:
         try:
             registry.register(definition, replace_existing=False)
@@ -115,11 +124,15 @@ def register_workspace_agents(
     return definitions
 
 
-def _parse_agent_file(path: Path, *, known_tools: frozenset[str]) -> AgentDefinition:
+def _parse_agent_file(
+    path: Path, *, known_tools: frozenset[str], expected_digest: str | None = None
+) -> AgentDefinition:
     try:
         raw = path.read_bytes()
     except OSError as error:
         raise AgentFileError(f"{path}: cannot read agent file: {error}") from error
+    if expected_digest is not None and hashlib.sha256(raw).hexdigest() != expected_digest:
+        raise AgentFileError(f"{path}: plugin agent changed since bundle review; refusing definition")
     try:
         fields, body = parse_frontmatter(raw.decode("utf-8", errors="replace"))
     except FrontmatterError as error:
