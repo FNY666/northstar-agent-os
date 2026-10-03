@@ -93,6 +93,7 @@ py-modules = [
     "permissions",
     "postconditions",
     "provider_retry",
+    "provenance_taint",
     "run_setup",
     "plugin_load",
     "plugin_trust",
