@@ -353,6 +353,108 @@ Check that retired hardware routes through the registry.
 
 Probe a marketing claim for bound environmental evidence.
 
+### `grid_agents`
+
+Source: `components/northstar-agent-runtime/grid_agents.py`
+
+Grid control envelopes (one-hundred-twenty-eighth batch).
+
+#### `GridAgentsError`
+
+Malformed grid input (construction-time boundary).
+
+#### `grid_audit_event(code: str, detail: str)`
+
+Shape an audit event for ``audit_chain.chain_record``.
+
+#### `GridVerdict`
+
+Outcome of one grid-agents check.
+
+#### `AuthorityRegistry`
+
+Registered human authorities (authority_id -> Ed25519 public key).
+
+- `register(authority_id: str, public_key: bytes)`
+- `public_key_for(authority_id: str)`
+#### `SafetyClassDeclaration`
+
+A declared safety class for an AI system touching the grid.
+
+#### `SafetyClassRegistry`
+
+Declares and gates the safety class of grid AI systems.
+
+- `declare(*, system_id: str, safety_class: str, declared_boundary_digest: str | None=None, registration_digest: str | None=None, declared_at: int)`
+  - Declare a system's safety class. No default class: the operator must say it out loud, and optimization claims must pin their boundary.
+- `safety_component_gate(system_id: str)`
+  - Fail-closed classification gate (Annex III discipline).
+#### `ControlEnvelope`
+
+A pre-approved control-room envelope for a grid dispatch AI.
+
+#### `ControlEnvelopeRegistry`
+
+Issues and checks control-room envelopes.
+
+- `issue_envelope(*, envelope_id: str, operator_id: str, scope_kinds: tuple[str, ...], autonomy_modes: tuple[str, ...], issued_by: str, issued_at: int, expires_at: int, signature: bytes)`
+- `revoke(envelope_id: str)`
+  - Revocation is terminal: a revoked envelope never un-revokes.
+- `request_widen(*, envelope_id: str, new_scope_kinds: tuple[str, ...], requested_by: str, approved_by: str, signature: bytes, issued_at: int, expires_at: int)`
+  - Widen an envelope. The approver must be a *different* registered authority than the requester — the requester can never approve their own widening (``grid:self_widening`` is a verdict, not an excepti…
+- `check_dispatch(*, envelope_id: str, action_kind: str, mode: str, now: int)`
+  - Check one dispatch action against the envelope.
+#### `ForecastReceipt`
+
+#### `ForecastRegistry`
+
+Forecast receipts that dispatch actions must bind.
+
+- `register_forecast(*, forecast_id: str, forecast_digest: str, horizon_s: int, issued_at: int, issuer: str)`
+- `check_dispatch_binding(*, forecast_id: str | None, now: int)`
+  - A dispatch action must reference a registered, fresh forecast. Unbound → ``grid:unbound_dispatch``; stale → ``grid:stale_forecast``. Acting on a forecast you cannot name is acting on nothing.
+#### `WorkloadScreenReceipt`
+
+#### `WorkloadPowerScreen`
+
+Screens compute workloads before grid connection.
+
+- `screen_workload(*, workload_id: str, peak_mw: int, fluctuation_class: str)`
+#### `CurtailmentContract`
+
+#### `CurtailmentOrder`
+
+An authority-signed grid-emergency curtailment order (the 115th batch's ``CurtailmentReceipt`` semantics, re-bound here so this module stays importable standalone).
+
+- `active_at(unix: int)`
+#### `issue_curtailment_order(registry: AuthorityRegistry, *, order_id: str, grid_region: str, start_unix: int, end_unix: int, issued_by: str, issued_at: int, signature: bytes)`
+
+Issue a grid-emergency curtailment order. Only a registered authority can order the grid to shed load.
+
+#### `CurtailmentContractRegistry`
+
+Binds workloads to curtailment authorities.
+
+- `issue_contract(*, contract_id: str, workload_id: str, curtailment_authority_id: str, cap_rule_digest: str, issued_by: str, issued_at: int, signature: bytes)`
+  - Issue a flexible curtailment contract. The contract binds the workload to a curtailment authority and a pinned cap rule — the capped party cannot move the rule.
+- `check_curtailment(*, workload_id: str, order: CurtailmentOrder, complied: bool, now: int)`
+  - Check a workload against an active curtailment order.
+#### `NuclearGate`
+
+Nuclear-plant AI defaults to advisory-only.
+
+- `grant_control(*, system_id: str, control_scope_digest: str, granted_by: str, granted_at: int, expires_at: int, signature: bytes)`
+  - Grant explicit control-path authority for a nuclear system. The grant is a separate, deliberate act — never implied by an advisory deployment.
+- `check_action(*, system_id: str, mode: str, control_scope_digest: str | None=None, now: int)`
+#### `BlackoutReceipt`
+
+#### `BlackoutVerdict`
+
+#### `BlackoutRegistry`
+
+Hash-chained blackout filings with a machine-enforced clock.
+
+- `file_blackout(*, incident_id: str, system_id: str, timeline_digest: str | None, detected_at: int, reported_at: int, now: int)`
 ### `licensing`
 
 Source: `components/northstar-agent-runtime/licensing.py`
@@ -573,6 +675,153 @@ Large-scale automation displacement: disclosed or denied.
 #### `labor_audit_event(event: str, **fields: Any)`
 
 Shape an audit event for the labor-algorithmic-management domain.
+
+### `telecom_agents`
+
+Source: `components/northstar-agent-runtime/telecom_agents.py`
+
+Telecom AI discipline (one-hundred-twenty-ninth batch).
+
+#### `TelecomError`
+
+A malformed receipt/record or a programming error.
+
+#### `TelecomVerdict`
+
+Outcome of one telecom check.
+
+#### `IdentityDisclosure`
+
+A customer-facing bot's visible AI-identity disclosure.
+
+#### `IdentityRegistry`
+
+Hash-chained log of identity disclosures.
+
+- `issue_disclosure(*, disclosure_id: str, session_id: str, bot_id: str, disclosure_mode: str, disclosed_at: int, authority_pubkey_hex: str, authority_secret: bytes)`
+- `for_session(session_id: str)`
+- `audit_event()`
+#### `identity_disclosure_gate(disclosure: IdentityDisclosure)`
+
+Gate a customer-facing bot session on its AI-identity disclosure.
+
+#### `HumanDoorReceipt`
+
+Proof that a human agent is reachable from the bot session.
+
+#### `HumanDoorRegistry`
+
+Hash-chained log of human-door receipts.
+
+- `issue_door(*, door_id: str, session_id: str, human_channel_id: str, estimated_wait_s: int, door_open: bool, checked_at: int, authority_pubkey_hex: str, authority_secret: bytes)`
+- `for_session(session_id: str)`
+- `audit_event()`
+#### `human_door_receipt(door: HumanDoorReceipt | None)`
+
+Gate a bot session on the human door being present and open.
+
+#### `SpamFlagReceipt`
+
+An authority-signed spam flag on a calling number.
+
+#### `SpamFlagRegistry`
+
+Hash-chained log of spam flags, with revocation and appeals.
+
+- `issue_flag(*, flag_id: str, flagged_number: str, flag_threshold_digest: str, evidence_digest: str, appeal_window_s: int=DEFAULT_APPEAL_WINDOW_S, flagged_at: int, authority_pubkey_hex: str, authority_secret: bytes)`
+- `file_appeal(flag_id: str)`
+  - Record a user appeal against a flag. Appeals are terminal: a disconnect may not proceed while an appeal is pending.
+- `revoke_flag(flag_id: str)`
+  - Revoke a flag (e.g. after a successful appeal / mis-flag). Revocation is terminal: there is no un-revoke.
+- `is_revoked(flag_id: str)`
+- `appeal_pending(flag_id: str)`
+- `audit_event()`
+#### `spam_flag_receipt(flag: SpamFlagReceipt, *, registry: SpamFlagRegistry, threshold_met: bool, now: int)`
+
+Gate a disconnect on a spam flag.
+
+#### `A2PConsentReceipt`
+
+Prior consent for AI voice outbound calls.
+
+#### `A2PConsentRegistry`
+
+Hash-chained log of A2P consent grants, with revocation.
+
+- `issue_consent(*, consent_id: str, caller_id: str, callee_id: str, purpose: str, consented_at: int, expires_at: int, callee_pubkey_hex: str, callee_secret: bytes)`
+- `revoke(consent_id: str)`
+  - Revoke a consent grant. Terminal: there is no un-revoke.
+- `is_revoked(consent_id: str)`
+- `live_for(caller_id: str, callee_id: str, purpose: str, now: int)`
+  - Find a live, unexpired, unrevoked grant for this call.
+#### `a2p_consent_receipt(*, caller_id: str, callee_id: str, purpose: str, registry: A2PConsentRegistry, now: int)`
+
+Gate an AI voice outbound call on prior consent.
+
+#### `NetworkActionEnvelope`
+
+An authority-signed envelope of allowed network actions.
+
+#### `NetworkEnvelopeRegistry`
+
+Issued network-action envelopes: integrity, freshness, revocation.
+
+- `arm_envelope(*, envelope_id: str, network_element_id: str, allowed_actions: tuple[str, ...] | list[str], armed_at: int, expires_at: int, authority_pubkey_hex: str, authority_secret: bytes)`
+- `revoke(envelope_id: str)`
+  - Revoke an envelope. Terminal: there is no un-revoke.
+- `get(envelope_id: str)`
+#### `network_action_envelope(*, envelope: NetworkActionEnvelope | None, action: str, network_element_id: str, now: int)`
+
+Gate a self-driving network action on its authority envelope.
+
+#### `BillingEngineReceipt`
+
+Proof that a bill was computed by a deterministic engine.
+
+#### `BillingRegistry`
+
+Hash-chained log of billing-engine receipts.
+
+- `issue_receipt(*, receipt_id: str, bill_id: str, account_id: str, bill_digest: str, engine_id: str, engine_version: str, computed_at: int, authority_pubkey_hex: str, authority_secret: bytes)`
+- `for_bill(bill_id: str)`
+#### `billing_logic_separation(*, bill_id: str, registry: BillingRegistry, computed_by_llm: bool)`
+
+Gate a bill on deterministic-engine computation.
+
+#### `SignalingPurposeReceipt`
+
+Purpose-bound grant for training on signaling/location data.
+
+#### `SignalingRegistry`
+
+Hash-chained log of signaling-purpose grants, with revocation.
+
+- `issue_grant(*, grant_id: str, subject_id: str, purpose: str, dataset_digest: str, granted_at: int, expires_at: int, subject_pubkey_hex: str, subject_secret: bytes)`
+- `revoke(grant_id: str)`
+  - Revoke a grant. Terminal: there is no un-revoke.
+- `live_grant(subject_id: str, purpose: str, dataset_digest: str, now: int)`
+  - Find a live, unexpired, unrevoked grant for this exact use.
+#### `signaling_purpose_binding(*, subject_id: str, purpose: str, dataset_digest: str, registry: SignalingRegistry, now: int)`
+
+Check signaling/location training use at USE time.
+
+#### `OutageEtaReceipt`
+
+An outage ETA bound to the network state it was computed from.
+
+#### `OutageEtaRegistry`
+
+Hash-chained log of outage ETA receipts.
+
+- `issue_eta(*, eta_id: str, outage_id: str, network_state_digest: str, eta_epoch: int, issued_at: int, ttl_s: int=DEFAULT_ETA_TTL_S, authority_pubkey_hex: str, authority_secret: bytes)`
+- `latest_for(outage_id: str)`
+#### `outage_eta_receipt(eta: OutageEtaReceipt | None, *, expected_state_digest: str | None=None, now: int)`
+
+Gate an outage ETA on freshness and state binding.
+
+#### `telecom_audit_event(event: str, detail: str, receipt_digest: str='')`
+
+Build a ``telecom.*`` audit event dict.
 
 ### `approver_separation`
 
@@ -2618,6 +2867,14 @@ Embodied-AI safety vacuum gates (one-hundred-twenty-sixth batch).
 #### `run_labor_algo()`
 
 Algorithmic-management guards (one-hundred-twenty-seventh batch).
+
+#### `run_grid_agents()`
+
+Grid control envelopes (one-hundred-twenty-eighth batch).
+
+#### `run_telecom_agents()`
+
+Telecom AI discipline gates (one-hundred-twenty-ninth batch).
 
 #### `run_greenwash()`
 

@@ -25,6 +25,60 @@ receipts bind declared evidence chains; they don't certify actual
 environmental benefit. Bench track `metrics.greenwash`: 12 scenarios,
 4 allow / 8 deny.
 
+## Unreleased (one-hundred-twenty-ninth batch) — telecom AI discipline (AI-telecom absorption)
+
+New module `telecom_agents.py`: `identity_disclosure_gate()` —
+customer-facing bots must carry a visible, session-bound AI-identity
+disclosure; terms-and-conditions-only disclosure is
+`telecom.hidden_identity` (EU AI Act Art. 50 / Ofcom lesson).
+`human_door_receipt()` — the path to a human agent must exist and be
+unblocked; AI as the only door is `telecom.no_human_door` (Ofcom
+lesson). `spam_flag_receipt()` — spam flags bind
+`(flag_threshold_digest, evidence_digest, appeal_window)`; disconnecting
+a mis-flagged legitimate number revokes the flag and raises
+`telecom.misflag_harm` (TRAI lesson: thresholds explicit + human
+review). `a2p_consent_receipt()` — AI voice outbound calls require a
+prior consent receipt; without it, `telecom.unconsented_robocall` (TCPA
+$500–1500/call cost structure as mechanism). `network_action_envelope()`
+— self-driving network actions (parameter changes, rerouting) bind an
+authority-signed envelope; out-of-envelope actions deny.
+`billing_logic_separation()` — billing math runs in a deterministic
+engine, never through an LLM; LLM-computed bills are
+`telecom.llm_billing`. `signaling_purpose_binding()` — signaling/location
+data used for training requires a purpose-bound receipt; re-purposing is
+`telecom.signaling_repurpose`. `outage_eta_receipt()` — outage ETAs bind
+the network-state digest they were computed from; expired ETAs degrade
+to NON_AUTHORITATIVE. Honest scoping: receipts bind declared
+discipline; they don't make the network reliable. Bench track
+`metrics.telecom_agents`: 12 scenarios, 4 allow / 8 deny.
+
+## Unreleased (one-hundred-twenty-eighth batch) — grid control envelopes (AI-energy absorption)
+
+New module `grid_agents.py`: `safety_component_gate()` — AI used in
+critical-infrastructure safety components is classified high-risk by
+default (EU AI Act Annex III); a system claiming
+`non_safety_optimization` must bind a declared boundary digest —
+undeclared → `grid.unverifiable_safety_class` (borderline-underreporting
+lesson). `control_room_envelope()` — grid dispatch AI binds a
+pre-approved control-room envelope (Amprion/IJETRM lesson): autonomous
+inside, human-on-the-loop outside; the requester can never widen their
+own envelope (`grid:self_widening`). `forecast_dispatch_binding()` —
+dispatch actions must bind the forecast digest they acted on (深圳灵曦
+lesson); unbound → `grid.unbound_dispatch`, stale →
+`grid.stale_forecast`. `workload_power_screen()` — compute workloads get
+a power-resonance screen before grid connection (Bit2Watt lesson);
+unscreened → quarantine + `grid.power_resonance_risk`.
+`emergency_curtailment_contract()` — flexible contracts binding
+workloads to authority-signed curtailment orders; refusal during an
+active emergency → `grid.curtailment_refusal` (Ceres lesson).
+`nuclear_advisory_only()` — nuclear-plant AI defaults to advisory-only;
+control-path authority is never implied (`grid.nuclear_control`).
+`blackout_evidence_chain()` — blackout incidents feed the 113th-batch
+incident clock with a bound timeline; missing timeline →
+`grid.unreported_blackout`; a missed 2-day clock is recorded and refused.
+Honest scoping: envelopes bind declared control discipline; they don't
+replace grid engineering.
+
 ## Unreleased (one-hundred-twenty-seventh batch) — algorithmic-management guards (AI-logistics absorption)
 
 New module `labor_algo.py`: `quota_receipt()` — productivity quotas are
