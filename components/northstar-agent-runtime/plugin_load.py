@@ -328,6 +328,7 @@ class PluginContributions:
     skill_digests: dict[str, str] = field(default_factory=dict)
     agent_digests: dict[str, str] = field(default_factory=dict)
     hook_tables: list[tuple[str, dict[str, Any]]] = field(default_factory=list)
+    hook_digests: dict[str, str] = field(default_factory=dict)
     mcp_servers: list[dict[str, Any]] = field(default_factory=list)
     context_blocks: list[tuple[str, str]] = field(default_factory=list)
     policy: dict[str, Any] = field(default_factory=dict)
@@ -458,6 +459,13 @@ def load_contributions(
                 )
                 continue
             contributions.hook_tables.append((plugin.name, hook.as_hook_table(script_path=script)))
+            relative_script = Path(workspace).resolve().joinpath(script).relative_to(Path(workspace).resolve()).as_posix()
+            bundled_file = next((item for item in plugin.bundle.files if item.relative_path == hook.script), None)
+            if bundled_file is None:
+                contributions.blocked.append(f"{plugin.name}: hook script {hook.script} is absent from reviewed bundle digest")
+                contributions.hook_tables.pop()
+                continue
+            contributions.hook_digests[relative_script] = bundled_file.sha256
         for server in plugin.manifest.mcp_servers:
             if server.get("env"):
                 # The manifest may *declare* env (other hosts carry it), but this runtime's
