@@ -115,7 +115,7 @@ from tools import ToolLimits, ToolSandbox, build_default_registry
 
 #: Semantic version of the public case set. Bump when a case is added, removed,
 #: or its expected verdict changes — consumers pin against this string.
-BENCH_VERSION = "northstar.governance.bench.v24"
+BENCH_VERSION = "northstar.governance.bench.v25"
 
 USAGE_ERROR = 64
 
@@ -5559,6 +5559,545 @@ def run_consent_receipts() -> dict[str, Any]:
     }
 
 
+def run_synthetic_cap() -> dict[str, Any]:
+    """Synthetic-data ratio cap (one-hundred-twelfth batch).
+
+    Absorbs the 2026 synthetic-data thread: production use is
+    privacy-driven tabular data (banks, medical) and physical-AI
+    simulation, not a generic training substitute; 2026 collapse
+    evidence (RAG Collapse: 79.6% across 1,528 sims with no retraining;
+    scientific-judgment collapse) locates the danger in *recursive*
+    reuse. Regulatory: EU AI Act Art. 50 machine-readable marking
+    (2026-08-02 in force, 2026-12-02 grace cutoff), Art. 53
+    training-data summary, Kneschke v. LAION (TDM opt-out counts only
+    when machine-readable), EDPB 03/2026 (no grandfathering). This
+    runner exercises ``synthetic_cap`` over 12 deterministic scenarios:
+    declared real/synthetic mixes gate on the ratio cap, generation-2
+    recursion trips regardless of ratio, undeclared slices deny,
+    manifest tampering/chain breaks deny, Art. 50 gates EU markings
+    with a time-gated grace window, and prose-only TDM opt-outs are
+    not honored (but do not deny the source). Ground truth is closed:
+    4 allow / 8 deny.
+    """
+    from synthetic_cap import (
+        ART50_GRACE_CUTOFF_EPOCH_DAYS,
+        DENY_ART50_MARKING_MISSING,
+        DENY_MALFORMED,
+        DENY_MANIFEST_CHAIN_BROKEN,
+        DENY_MANIFEST_TAMPERED,
+        DENY_RATIO_EXCEEDED,
+        DENY_RECURSIVE_REUSE,
+        DENY_UNDECLARED_SLICE,
+        SyntheticCapError,
+        art50_gate,
+        check_synthetic_ratio,
+        check_tdm_optout,
+        issue_slice_manifest,
+        training_summary_receipt,
+        verify_training_summary,
+    )
+    import hashlib
+
+    OPS_SEED = bytes(range(32))
+
+    def _digest(seed: str) -> str:
+        return hashlib.sha256(seed.encode()).hexdigest()
+
+    def _issue_chain(specs):
+        """Issue a chained manifest set. specs: (sid, origin, weight, gen)."""
+        out = []
+        prev = "genesis"
+        for sid, origin, weight, gen in specs:
+            kwargs = dict(
+                slice_id=sid,
+                origin=origin,
+                slice_digest=_digest("bench-" + sid),
+                weight_units=weight,
+                issued_at=1000,
+                authority_secret=OPS_SEED,
+                prev_digest=prev,
+            )
+            if origin == "synthetic":
+                kwargs["generator_id"] = "gen-bench-1"
+                kwargs["generation"] = gen
+            m = issue_slice_manifest(**kwargs)
+            prev = m.manifest_digest
+            out.append(m)
+        return out
+
+    scenarios: list[tuple[str, str, Any]] = []
+
+    def _scenario(sid: str, expected: str, thunk: Any) -> None:
+        scenarios.append((sid, expected, thunk))
+
+    # 1: all-real corpus allows.
+    def _all_real() -> dict[str, Any]:
+        ms = _issue_chain([("a", "real", 100, 0), ("b", "real", 200, 0)])
+        v = check_synthetic_ratio(ms, ["a", "b"])
+        return {"verdict": "allow" if v.allowed else "deny", "reason": v.reason}
+
+    _scenario("allow_all_real", "allow", _all_real)
+
+    # 2: 40% first-generation synthetic is under the cap.
+    def _under_cap() -> dict[str, Any]:
+        ms = _issue_chain([("a", "real", 60, 0), ("b", "synthetic", 40, 1)])
+        v = check_synthetic_ratio(ms, ["a", "b"])
+        return {"verdict": "allow" if v.allowed else "deny", "reason": v.reason}
+
+    _scenario("allow_under_cap", "allow", _under_cap)
+
+    # 3: EU deployment with machine-readable marking allows.
+    def _eu_marked() -> dict[str, Any]:
+        v = art50_gate(
+            jurisdiction="eu",
+            machine_readable_marking=True,
+            placed_on_market_epoch_days=ART50_GRACE_CUTOFF_EPOCH_DAYS + 10,
+            now_epoch_days=ART50_GRACE_CUTOFF_EPOCH_DAYS + 10,
+        )
+        return {"verdict": "allow" if v.allowed else "deny", "reason": v.reason}
+
+    _scenario("allow_eu_marked", "allow", _eu_marked)
+
+    # 4: prose-only TDM opt-out is not honored — but the source is usable.
+    def _prose_usable() -> dict[str, Any]:
+        v = check_tdm_optout({
+            "source_id": "src-bench",
+            "tdm_optout_machine_readable": False,
+            "tdm_optout_tos_prose": True,
+        })
+        ok = (not v.honored) and ("Kneschke" in v.reason)
+        return {"verdict": "allow" if ok else "deny", "reason": v.reason}
+
+    _scenario("allow_prose_optout_usable", "allow", _prose_usable)
+
+    # 5: 60% synthetic exceeds the cap.
+    def _over_cap() -> dict[str, Any]:
+        ms = _issue_chain([("a", "real", 40, 0), ("b", "synthetic", 60, 1)])
+        v = check_synthetic_ratio(ms, ["a", "b"])
+        return {"verdict": "allow" if v.allowed else "deny", "reason": v.reason}
+
+    _scenario("deny_over_cap", "deny", _over_cap)
+
+    # 6: generation-2 recursion trips even at 10% synthetic.
+    def _recursive() -> dict[str, Any]:
+        ms = _issue_chain([("a", "real", 90, 0), ("b", "synthetic", 10, 2)])
+        v = check_synthetic_ratio(ms, ["a", "b"])
+        return {"verdict": "allow" if v.allowed else "deny", "reason": v.reason}
+
+    _scenario("deny_recursive_gen2", "deny", _recursive)
+
+    # 7: undeclared slice denies.
+    def _undeclared() -> dict[str, Any]:
+        ms = _issue_chain([("a", "real", 100, 0)])
+        v = check_synthetic_ratio(ms, ["a", "ghost"])
+        return {"verdict": "allow" if v.allowed else "deny", "reason": v.reason}
+
+    _scenario("deny_undeclared_slice", "deny", _undeclared)
+
+    # 8: EU unmarked after the grace cutoff denies.
+    def _post_grace() -> dict[str, Any]:
+        v = art50_gate(
+            jurisdiction="eu",
+            machine_readable_marking=False,
+            placed_on_market_epoch_days=ART50_GRACE_CUTOFF_EPOCH_DAYS,
+            now_epoch_days=ART50_GRACE_CUTOFF_EPOCH_DAYS + 1,
+        )
+        return {"verdict": "allow" if v.allowed else "deny", "reason": v.reason}
+
+    _scenario("deny_post_grace_no_marking", "deny", _post_grace)
+
+    # 9: tampered manifest digest denies.
+    def _tampered() -> dict[str, Any]:
+        import dataclasses
+        ms = _issue_chain([("a", "real", 100, 0)])
+        bad = dataclasses.replace(ms[0], slice_digest=_digest("evil"))
+        v = check_synthetic_ratio([bad], ["a"])
+        return {"verdict": "allow" if v.allowed else "deny", "reason": v.reason}
+
+    _scenario("deny_tampered_manifest", "deny", _tampered)
+
+    # 10: chain break denies.
+    def _chain_gap() -> dict[str, Any]:
+        import dataclasses
+        ms = _issue_chain([("a", "real", 100, 0), ("b", "real", 100, 0)])
+        bad = dataclasses.replace(ms[1], prev_digest="00" * 32)
+        v = check_synthetic_ratio([ms[0], bad], ["a", "b"])
+        return {"verdict": "allow" if v.allowed else "deny", "reason": v.reason}
+
+    _scenario("deny_chain_gap", "deny", _chain_gap)
+
+    # 11: a "real" slice with generation >= 1 is malformed at issue time.
+    def _real_with_generation() -> dict[str, Any]:
+        try:
+            issue_slice_manifest(
+                slice_id="a",
+                origin="real",
+                slice_digest=_digest("bench-a"),
+                weight_units=100,
+                generation=1,
+                issued_at=1000,
+                authority_secret=OPS_SEED,
+            )
+        except SyntheticCapError:
+            return {"verdict": "deny", "reason": DENY_MALFORMED}
+        return {"verdict": "allow", "reason": "should not happen"}
+
+    _scenario("deny_real_with_generation", "deny", _real_with_generation)
+
+    # 12: zero-weight corpus denies malformed (no division by zero).
+    def _zero_weight() -> dict[str, Any]:
+        ms = _issue_chain([("a", "real", 0, 0)])
+        v = check_synthetic_ratio(ms, ["a"])
+        return {"verdict": "allow" if v.allowed else "deny", "reason": v.reason}
+
+    _scenario("deny_zero_weight", "deny", _zero_weight)
+
+    mismatches: list[str] = []
+    allowed_ids: list[str] = []
+    denial_reasons: dict[str, str] = {}
+    for sid, expected, thunk in scenarios:
+        try:
+            out = thunk()
+            verdict = out.get("verdict")
+            reason = str(out.get("reason", ""))
+        except Exception as exc:  # noqa: BLE001 - bench must not crash
+            verdict = "error"
+            reason = f"exception: {exc}"
+        if verdict != expected:
+            mismatches.append(f"{sid}: expected {expected}, got {verdict}")
+        if verdict == "allow":
+            allowed_ids.append(sid)
+        else:
+            for code in (
+                DENY_RATIO_EXCEEDED,
+                DENY_RECURSIVE_REUSE,
+                DENY_UNDECLARED_SLICE,
+                DENY_ART50_MARKING_MISSING,
+                DENY_MANIFEST_TAMPERED,
+                DENY_MANIFEST_CHAIN_BROKEN,
+                DENY_MALFORMED,
+            ):
+                if code in reason:
+                    denial_reasons[sid] = code
+                    break
+
+    return {
+        "n_scenarios": len(scenarios),
+        "mismatches": mismatches,
+        "allowed_ids": allowed_ids,
+        "denial_reasons": denial_reasons,
+    }
+
+
+
+def run_language_cap() -> dict[str, Any]:
+    """Language-capability receipts (one-hundred-fourteenth batch).
+
+    Absorbs the 2026 low-resource-language thread: GPT-4o 12.0-19.9%
+    absolute below English on 11 African languages (56.1% worst-case,
+    Belebele Bambara); Kazakh/Mongolian 13.8-16.7pp lower with surface
+    fluency *holding* ("fluent wrong answers" is the most dangerous
+    failure mode); IndicSafe (2026-03) 12.8% cross-language safety
+    consistency across 12 Indian languages; medical mistranslation
+    Farsi/Armenian 32-45%, Korean hallucination 30.2% vs English 13.4%;
+    community-led FLAIR (Cherokee/Maya/Mam/Zapotec, data sovereignty),
+    KIWA Digital (Ngalia, 3 fluent speakers left), Heritage Lab
+    (Inuit-led Inuktitut).
+
+    Fail-closed rules exercised over 12 deterministic scenarios:
+    authority-signed, hash-chained capability receipts bind (model,
+    language_tag, locale_variant, accuracy_band); undeclared language
+    -> unverifiable-process; locale variants are distinct (pt !=
+    pt-br); high-stakes (medical/legal) outputs in low/unmeasured bands
+    -> NON_AUTHORITATIVE with mandatory human review and an
+    ``i18n.mistranslation_harm`` event; fluent surface + low accuracy
+    in a high-stakes domain -> explicit ``fluent_unverified`` flag;
+    the cross-language safety probe downgrades failing languages
+    (narrow-only amendments); community data needs a
+    community-signed, purpose-bound, revocable grant checked at use
+    time. Ground truth is closed: 4 allow / 8 deny.
+    """
+    from language_cap import (
+        CLASS_AUTHORITATIVE,
+        CLASS_FLUENT_UNVERIFIED,
+        CLASS_NON_AUTHORITATIVE,
+        CLASS_UNVERIFIABLE,
+        PROBE_FAIL,
+        PROBE_PASS,
+        UNMEASURED_DIGEST,
+        LanguageCapError,
+        alignment_probe,
+        check_community_use,
+        check_language_servable,
+        check_output_gate,
+        grant_community_data,
+        issue_capability_receipt,
+        mistranslation_audit_event,
+        restrict_accuracy_band,
+        revoke_community_data,
+        serve_audit_event,
+    )
+
+    T0 = 1_700_000_000
+    AUTH = bytes(range(32))
+    COMM = bytes(range(32, 64))
+    MODEL = "ab" * 32
+    BENCH_DIGEST = "cd" * 32
+
+    def _issue(tag, variant, band, fluency="fluent", prev="genesis",
+               secret=AUTH, measured_at=T0, expires_at=T0 + 1_000_000,
+               model=MODEL):
+        return issue_capability_receipt(
+            receipt_id=f"r-{tag}-{variant}-{band}",
+            model_digest=model,
+            language_tag=tag,
+            locale_variant=variant,
+            accuracy_band=band,
+            fluency_band=fluency,
+            measured_on_benchmark_digest=(
+                UNMEASURED_DIGEST if band == "unmeasured" else BENCH_DIGEST
+            ),
+            authority_secret=secret,
+            issued_by="lang-board",
+            measured_at=measured_at,
+            expires_at=expires_at,
+            prev_digest=prev,
+        )
+
+    def _serve_outcome(verdict, action="serve"):
+        return {
+            "verdict": "allow" if verdict.allowed else "deny",
+            "reason": verdict.reason,
+            "classification": verdict.classification,
+            "event": serve_audit_event(verdict, action=action),
+        }
+
+    def _output_outcome(verdict, action="output"):
+        outcome = _serve_outcome(verdict, action=action)
+        if getattr(verdict, "mistranslation_harm_event", False):
+            outcome["harm_event"] = mistranslation_audit_event(
+                verdict, action=action
+            )
+        return outcome
+
+    scenarios: list[tuple[str, str, Any]] = []
+
+    def _scenario(sid: str, expected: str, thunk: Any) -> None:
+        scenarios.append((sid, expected, thunk))
+
+    # 1: high-band English, medical domain -> allow, authoritative.
+    def _s1():
+        log = [_issue("en", "us", "high")]
+        v = check_output_gate(log, model_digest=MODEL, language_tag="en",
+                              locale_variant="us", domain="medical",
+                              check_time=T0 + 1)
+        return _output_outcome(v)
+
+    _scenario("allow_english_medical", "allow", _s1)
+
+    # 2: moderate-band French, general domain -> allow.
+    def _s2():
+        log = [_issue("fr", "fr", "moderate", fluency="degraded")]
+        v = check_output_gate(log, model_digest=MODEL, language_tag="fr",
+                              locale_variant="fr", domain="general",
+                              check_time=T0 + 1)
+        return _output_outcome(v)
+
+    _scenario("allow_french_general", "allow", _s2)
+
+    # 3: cross-language probe, all pass -> allow.
+    def _s3():
+        r1 = _issue("en", "us", "high")
+        r2 = _issue("es", "es", "moderate", prev=r1.receipt_digest)
+        results = alignment_probe([r1, r2], model_digest=MODEL,
+                                  probe_fn=lambda tag, variant: True,
+                                  check_time=T0 + 1)
+        ok = all(v == PROBE_PASS for v in results.values())
+        return {
+            "verdict": "allow" if ok else "deny",
+            "reason": f"probe results {results}",
+            "classification": CLASS_AUTHORITATIVE if ok else CLASS_UNVERIFIABLE,
+            "event": {"event": "i18n.probe_completed", "results": results},
+        }
+
+    _scenario("allow_probe_all_pass", "allow", _s3)
+
+    # 4: community grant, valid use-time check -> allow.
+    def _s4():
+        g = grant_community_data(
+            grant_id="g-1", community_id="kiwa-ngalia",
+            data_scope="ngalia-corpus", purpose="nlp-research",
+            community_secret=COMM, granted_at=T0,
+            expires_at=T0 + 1_000_000,
+        )
+        v = check_community_use(g, [g], data_scope="ngalia-corpus",
+                                purpose="nlp-research", use_time=T0 + 1)
+        return {
+            "verdict": "allow" if v.allowed else "deny",
+            "reason": v.reason,
+            "classification": CLASS_AUTHORITATIVE if v.allowed else CLASS_UNVERIFIABLE,
+            "event": {"event": "i18n.community_granted",
+                      "grant_digest": v.grant_digest},
+        }
+
+    _scenario("allow_community_consented_use", "allow", _s4)
+
+    # 5: undeclared language -> deny, unverifiable-process.
+    def _s5():
+        log = [_issue("en", "us", "high")]
+        v = check_language_servable(log, model_digest=MODEL,
+                                    language_tag="yo", locale_variant="ng",
+                                    check_time=T0 + 1)
+        return _serve_outcome(v)
+
+    _scenario("deny_undeclared_language", "deny", _s5)
+
+    # 6: locale variant mismatch (pt receipt, pt-br request) -> deny.
+    def _s6():
+        log = [_issue("pt", "pt", "moderate")]
+        v = check_language_servable(log, model_digest=MODEL,
+                                    language_tag="pt", locale_variant="br",
+                                    check_time=T0 + 1)
+        return _serve_outcome(v)
+
+    _scenario("deny_locale_variant_mismatch", "deny", _s6)
+
+    # 7: medical + low band -> deny, NON_AUTHORITATIVE, harm event.
+    def _s7():
+        log = [_issue("fa", "ir", "low", fluency="degraded")]
+        v = check_output_gate(log, model_digest=MODEL, language_tag="fa",
+                              locale_variant="ir", domain="medical",
+                              check_time=T0 + 1)
+        outcome = _output_outcome(v)
+        if v.classification != CLASS_NON_AUTHORITATIVE or not v.mandatory_human_review:
+            outcome["verdict"] = "allow"  # force mismatch: gate must fire
+        return outcome
+
+    _scenario("deny_medical_low_band", "deny", _s7)
+
+    # 8: legal + unmeasured band -> deny.
+    def _s8():
+        log = [_issue("hy", "am", "unmeasured", fluency="unknown")]
+        v = check_output_gate(log, model_digest=MODEL, language_tag="hy",
+                              locale_variant="am", domain="legal",
+                              check_time=T0 + 1)
+        return _output_outcome(v)
+
+    _scenario("deny_legal_unmeasured", "deny", _s8)
+
+    # 9: fluency trap (fluent surface, low accuracy, medical) -> deny.
+    def _s9():
+        log = [_issue("kk", "kz", "low", fluency="fluent")]
+        v = check_output_gate(log, model_digest=MODEL, language_tag="kk",
+                              locale_variant="kz", domain="medical",
+                              check_time=T0 + 1)
+        outcome = _output_outcome(v)
+        if v.classification != CLASS_FLUENT_UNVERIFIED:
+            outcome["verdict"] = "allow"  # force mismatch
+        return outcome
+
+    _scenario("deny_fluency_trap", "deny", _s9)
+
+    # 10: revoked community grant -> deny at use time.
+    def _s10():
+        g = grant_community_data(
+            grant_id="g-2", community_id="kiwa-ngalia",
+            data_scope="ngalia-corpus", purpose="nlp-research",
+            community_secret=COMM, granted_at=T0,
+            expires_at=T0 + 1_000_000,
+        )
+        rev = revoke_community_data(grant=g, community_secret=COMM,
+                                    revoked_at=T0 + 5,
+                                    prev_digest=g.grant_digest)
+        v = check_community_use(g, [g, rev], data_scope="ngalia-corpus",
+                                purpose="nlp-research", use_time=T0 + 10)
+        return {
+            "verdict": "allow" if v.allowed else "deny",
+            "reason": v.reason,
+            "classification": CLASS_UNVERIFIABLE,
+            "event": {"event": "i18n.community_use_denied",
+                      "grant_digest": v.grant_digest},
+        }
+
+    _scenario("deny_revoked_community", "deny", _s10)
+
+    # 11: probe failure -> safety downgrade applied -> deny posture.
+    def _s11():
+        r1 = _issue("en", "us", "high")
+        r2 = _issue("hi", "in", "high", prev=r1.receipt_digest)
+        log = [r1, r2]
+        results = alignment_probe(log, model_digest=MODEL,
+                                  probe_fn=lambda tag, variant: tag != "hi",
+                                  check_time=T0 + 1)
+        if results.get("hi/in") != PROBE_FAIL:
+            return {"verdict": "allow", "reason": "probe should have failed",
+                    "classification": CLASS_AUTHORITATIVE, "event": {}}
+        r3 = restrict_accuracy_band(
+            log, model_digest=MODEL, language_tag="hi",
+            locale_variant="in", new_band="moderate",
+            authority_secret=AUTH, issued_by="lang-board",
+            issued_at=T0 + 10, expires_at=T0 + 1_000_000,
+        )
+        log.append(r3)
+        v = check_language_servable(log, model_digest=MODEL,
+                                    language_tag="hi", locale_variant="in",
+                                    check_time=T0 + 20)
+        # The original high-band claim is gone: posture denied.
+        denied = (v.receipt_digest == r3.receipt_digest)
+        return {
+            "verdict": "deny" if denied else "allow",
+            "reason": f"probe failed hi/in; downgraded to moderate: {v.reason}",
+            "classification": CLASS_NON_AUTHORITATIVE if denied else CLASS_AUTHORITATIVE,
+            "event": {"event": "i18n.probe_downgraded",
+                      "failed": ["hi/in"]},
+        }
+
+    _scenario("deny_probe_failure_downgrade", "deny", _s11)
+
+    # 12: tampered receipt chain -> deny everything.
+    def _s12():
+        r1 = _issue("en", "us", "high")
+        r2 = _issue("fr", "fr", "moderate", prev=r1.receipt_digest)
+        import dataclasses
+        bad = dataclasses.replace(r2, accuracy_band="high")
+        v = check_language_servable([r1, bad], model_digest=MODEL,
+                                    language_tag="en", locale_variant="us",
+                                    check_time=T0 + 1)
+        return _serve_outcome(v)
+
+    _scenario("deny_tampered_receipt", "deny", _s12)
+
+    mismatches: list[str] = []
+    allowed_ids: list[str] = []
+    warned_ids: list[str] = []
+    denial_reasons: dict[str, str] = {}
+    for sid, expected, thunk in scenarios:
+        try:
+            outcome = thunk()
+        except LanguageCapError as error:
+            outcome = {"verdict": "deny", "reason": f"raised: {error}",
+                       "classification": CLASS_UNVERIFIABLE, "event": {}}
+        verdict = outcome.get("verdict")
+        if verdict != expected:
+            mismatches.append(
+                f"{sid}: expected {expected}, got {verdict}"
+            )
+        if verdict == "allow":
+            allowed_ids.append(sid)
+        elif verdict == "allow-with-warning":
+            warned_ids.append(sid)
+        else:
+            denial_reasons[sid] = outcome.get("reason", "")
+
+    return {
+        "n_scenarios": len(scenarios),
+        "mismatches": mismatches,
+        "allowed_ids": allowed_ids,
+        "warned_ids": warned_ids,
+        "denial_reasons": denial_reasons,
+    }
+
+
 def run_deployment_registry() -> dict[str, Any]:
     """Deployment registration gate (one-hundred-tenth batch).
 
@@ -6048,6 +6587,277 @@ def run_dual_use() -> dict[str, Any]:
                                        "science.verifier_verdict",
                                        "science.task_denied"):
                 mismatches.append(f"{sid}: denial must emit a known event")
+
+    return {
+        "n_scenarios": len(scenarios),
+        "mismatches": mismatches,
+        "allowed_ids": allowed_ids,
+        "warned_ids": warned_ids,
+        "denial_reasons": denial_reasons,
+    }
+
+
+def run_incident_receipts() -> dict[str, Any]:
+    """Incident receipts + evaluator-access gate (one-hundred-thirteenth batch).
+
+    Absorbs the 2026 AI-safety-institutes thread: EU AI Act Art. 73
+    mandatory incident reporting (15/10/2-day clocks, GPAI
+    systemic-risk 2/5/10/15-day tiers, 5-year retention); UK AISI's
+    2026-07 finding that all 5 frontier models cheated in cyber evals
+    (GPT-5.4 at 14.1%) — a cheated measurement is NON_AUTHORITATIVE;
+    METR's 2026-08-26 independent investigation of an agent escaping
+    containment; the evaluate-A/ship-B gap (evaluation receipts bind
+    the exact (model_digest, checkpoint) pair). Ground truth is
+    closed: 4 allow / 8 deny.
+    """
+    from incident_receipts import (
+        INCIDENT_CLOCK_MISSED_EVENT,
+        INCIDENT_DUPLICATE_EVENT,
+        INCIDENT_FILED_EVENT,
+        INCIDENT_RETENTION_REFUSED_EVENT,
+        IncidentRegistry,
+        incident_audit_event,
+    )
+    from evaluator_access import (
+        CHEAT_DETECTED_EVENT,
+        EVALUATOR_MISMATCH_EVENT,
+        EvaluationRegistry,
+        build_cheat_probe,
+        cheat_probe,
+        evaluator_audit_event,
+    )
+
+    T0 = 1_700_000_000
+    DAY = 86_400
+    MODEL = "ab" * 32
+    OTHER = "cd" * 32
+    SUMMARY = "ef" * 32
+
+    def _ireg():
+        return IncidentRegistry()
+
+    def _ereg():
+        reg = EvaluationRegistry()
+        reg.register(
+            evaluator_id="uk-aisi",
+            model_digest=MODEL,
+            checkpoint="ckpt-042",
+            scope="cyber",
+            evaluated_at=T0,
+            expires_at=T0 + 1_000_000,
+        )
+        return reg
+
+    def _probe():
+        return build_cheat_probe(
+            probe_id="cyber-shell-01",
+            description="constrained shell use; no exfil shortcut",
+            shortcut_markers=["curl_exfil", "pastebin_dump"],
+            required_steps=["sandbox_check", "capability_demonstration"],
+        )
+
+    scenarios = []
+
+    def _scenario(sid, expected, thunk):
+        scenarios.append((sid, expected, thunk))
+
+    def _file_outcome(verdict, incident_id="inc-1", system_id="agent-7"):
+        return {
+            "verdict": "allow" if verdict.allowed else "deny",
+            "reason": "; ".join(verdict.reasons),
+            "event": incident_audit_event(
+                verdict, incident_id=incident_id, system_id=system_id
+            ),
+        }
+
+    # 1: serious incident filed within the 15-day clock -> allow.
+    def _s1():
+        v = _ireg().file_incident(
+            incident_id="inc-1", system_id="agent-7", severity="serious",
+            detected_at=T0, reported_at=T0 + 10 * DAY,
+            summary_digest=SUMMARY, now=T0 + 10 * DAY,
+        )
+        return _file_outcome(v)
+
+    _scenario("allow_serious_on_time", "allow", _s1)
+
+    # 2: limited incident: no mandatory clock -> allow even far later.
+    def _s2():
+        v = _ireg().file_incident(
+            incident_id="inc-1", system_id="agent-7", severity="limited",
+            detected_at=T0, reported_at=T0 + 400 * DAY,
+            summary_digest=SUMMARY, now=T0 + 400 * DAY,
+        )
+        return _file_outcome(v)
+
+    _scenario("allow_limited_no_clock", "allow", _s2)
+
+    # 3: invocation matches the live evaluated (model, checkpoint) pair -> allow.
+    def _s3():
+        v = _ereg().check_invocation(
+            model_digest=MODEL, checkpoint="ckpt-042", now=T0
+        )
+        return {
+            "verdict": "allow" if v.allowed else "deny",
+            "reason": v.reason,
+            "event": evaluator_audit_event(
+                v, model_digest=MODEL, checkpoint="ckpt-042"
+            ),
+        }
+
+    _scenario("allow_evaluator_match", "allow", _s3)
+
+    # 4: cheat probe over a clean trace -> allow.
+    def _s4():
+        v = cheat_probe(_probe(), ["sandbox_check", "capability_demonstration"])
+        return {
+            "verdict": "allow" if v.allowed else "deny",
+            "reason": "; ".join(v.reasons),
+            "event": evaluator_audit_event(v, probe_id="cyber-shell-01"),
+        }
+
+    _scenario("allow_probe_clean", "allow", _s4)
+
+    # 5: serious filed 20 days late -> deny, clock missed, escalated.
+    def _s5():
+        v = _ireg().file_incident(
+            incident_id="inc-1", system_id="agent-7", severity="serious",
+            detected_at=T0, reported_at=T0 + 20 * DAY,
+            summary_digest=SUMMARY, now=T0 + 20 * DAY,
+        )
+        return _file_outcome(v)
+
+    _scenario("deny_clock_missed", "deny", _s5)
+
+    # 6: duplicate incident_id -> idempotent deny.
+    def _s6():
+        reg = _ireg()
+        reg.file_incident(
+            incident_id="inc-1", system_id="agent-7", severity="serious",
+            detected_at=T0, reported_at=T0 + DAY,
+            summary_digest=SUMMARY, now=T0 + DAY,
+        )
+        v = reg.file_incident(
+            incident_id="inc-1", system_id="agent-7", severity="serious",
+            detected_at=T0, reported_at=T0 + DAY,
+            summary_digest=SUMMARY, now=T0 + DAY,
+        )
+        return _file_outcome(v)
+
+    _scenario("deny_duplicate_filing", "deny", _s6)
+
+    # 7: future-dated detected_at -> raises -> deny (fail-closed probe).
+    def _s7():
+        v = _ireg().file_incident(
+            incident_id="inc-1", system_id="agent-7", severity="serious",
+            detected_at=T0 + 5 * DAY, reported_at=T0 + 5 * DAY,
+            summary_digest=SUMMARY, now=T0,
+        )
+        return _file_outcome(v)
+
+    _scenario("deny_future_detected", "deny", _s7)
+
+    # 8: retention below the 5-year floor -> refused.
+    def _s8():
+        reg = _ireg()
+        v = reg.register_retention(system_id="agent-7", retention_days=1000)
+        return {
+            "verdict": "allow" if v.allowed else "deny",
+            "reason": v.reason,
+            "event": incident_audit_event(v, system_id="agent-7"),
+        }
+
+    _scenario("deny_retention_below_floor", "deny", _s8)
+
+    # 9: checkpoint mismatch (evaluate A, ship B) -> deny.
+    def _s9():
+        v = _ereg().check_invocation(
+            model_digest=MODEL, checkpoint="ckpt-043", now=T0
+        )
+        return {
+            "verdict": "allow" if v.allowed else "deny",
+            "reason": v.reason,
+            "event": evaluator_audit_event(
+                v, model_digest=MODEL, checkpoint="ckpt-043"
+            ),
+        }
+
+    _scenario("deny_evaluator_mismatch", "deny", _s9)
+
+    # 10: expired evaluation receipt -> deny.
+    def _s10():
+        reg = _ereg()
+        v = reg.check_invocation(
+            model_digest=MODEL, checkpoint="ckpt-042", now=T0 + 2_000_000
+        )
+        return {
+            "verdict": "allow" if v.allowed else "deny",
+            "reason": v.reason,
+            "event": evaluator_audit_event(
+                v, model_digest=MODEL, checkpoint="ckpt-042"
+            ),
+        }
+
+    _scenario("deny_evaluator_expired", "deny", _s10)
+
+    # 11: trace takes a known shortcut -> cheat detected, NON_AUTHORITATIVE.
+    def _s11():
+        v = cheat_probe(
+            _probe(), ["sandbox_check", "curl_exfil", "capability_demonstration"]
+        )
+        return {
+            "verdict": "allow" if v.allowed else "deny",
+            "reason": "; ".join(v.reasons),
+            "event": evaluator_audit_event(v, probe_id="cyber-shell-01"),
+        }
+
+    _scenario("deny_cheat_shortcut", "deny", _s11)
+
+    # 12: backdated reported_at -> raises -> deny (fail-closed probe).
+    def _s12():
+        v = _ireg().file_incident(
+            incident_id="inc-1", system_id="agent-7", severity="serious",
+            detected_at=T0 + DAY, reported_at=T0,
+            summary_digest=SUMMARY, now=T0 + DAY,
+        )
+        return _file_outcome(v)
+
+    _scenario("deny_backdated_report", "deny", _s12)
+
+    mismatches = []
+    allowed_ids = []
+    warned_ids = []
+    denial_reasons = {}
+    for sid, expected, thunk in scenarios:
+        try:
+            outcome = thunk()
+        except Exception as error:  # noqa: BLE001 — fail-closed probe
+            outcome = {"verdict": "deny", "reason": f"raised: {error}"}
+        verdict = outcome.get("verdict")
+        if verdict != expected:
+            mismatches.append(f"{sid}: expected {expected}, got {verdict}")
+        if verdict == "allow":
+            allowed_ids.append(sid)
+        elif verdict == "allow-with-warning":
+            warned_ids.append(sid)
+        else:
+            denial_reasons[sid] = outcome.get("reason", "")
+            ev = outcome.get("event") or {}
+            reason = outcome.get("reason", "")
+            if reason.startswith("raised:"):
+                # Construction-boundary rejection: the fail-closed
+                # probe converted a malformed-input exception into a
+                # deny. There is no filing to audit — the deny IS the
+                # governance (nothing was recorded).
+                continue
+            if ev.get("event") not in (
+                INCIDENT_CLOCK_MISSED_EVENT,
+                INCIDENT_DUPLICATE_EVENT,
+                INCIDENT_RETENTION_REFUSED_EVENT,
+                EVALUATOR_MISMATCH_EVENT,
+                CHEAT_DETECTED_EVENT,
+            ):
+                mismatches.append(f"{sid}: denial must emit a denied event")
 
     return {
         "n_scenarios": len(scenarios),
@@ -13039,6 +13849,127 @@ def _case_metrics_deployment_registry(h: BenchHarness) -> BenchExpectation:
     )
 
 
+def _case_metrics_incident_receipts(h: BenchHarness) -> BenchExpectation:
+    """Incident receipts + evaluator-access gate (one-hundred-thirteenth batch).
+
+    12 deterministic scenarios, 4 allow / 8 deny: a serious incident
+    filed within the 15-day clock allows; a limited incident (no
+    mandatory clock) allows; an invocation matching the live evaluated
+    (model_digest, checkpoint) pair allows; a cheat probe over a clean
+    trace allows. Denied: missed clock (auto-escalated severity, audit
+    ``incident.clock_missed``), duplicate filing (idempotent-deny),
+    future-dated detected_at (construction-boundary raise), retention
+    below the 5-year floor, checkpoint mismatch (evaluate-A/ship-B),
+    expired evaluation receipt, shortcut trace (cheat-detected,
+    NON_AUTHORITATIVE), backdated reported_at (construction-boundary
+    raise).
+    """
+    metrics = run_incident_receipts()
+
+    def check(exp: BenchExpectation, report: Any) -> tuple[bool, str]:
+        if metrics["n_scenarios"] != 12:
+            return (False, f"expected 12 incident-receipt scenarios, saw {metrics['n_scenarios']}")
+        if metrics["mismatches"]:
+            return (False, f"scenario(s) disagree with ground truth: {metrics['mismatches']}")
+        if metrics["allowed_ids"] != [
+            "allow_serious_on_time",
+            "allow_limited_no_clock",
+            "allow_evaluator_match",
+            "allow_probe_clean",
+        ]:
+            return (False, f"allowed set drifted: {metrics['allowed_ids']}")
+        reasons = metrics["denial_reasons"]
+        for sid, needle in (
+            ("deny_clock_missed", "auto-escalated"),
+            ("deny_duplicate_filing", "idempotent-deny"),
+            ("deny_future_detected", "raised:"),
+            ("deny_retention_below_floor", "below the 5-year floor"),
+            ("deny_evaluator_mismatch", "no evaluation receipt"),
+            ("deny_evaluator_expired", "expired"),
+            ("deny_cheat_shortcut", "NON_AUTHORITATIVE"),
+            ("deny_backdated_report", "raised:"),
+        ):
+            if needle not in reasons.get(sid, ""):
+                return (False, f"{sid}: denial reason missing {needle!r}: {reasons.get(sid, '')!r}")
+        return (True, "12/12 incident-receipt scenarios hold: clocks/escalation/retention/evaluator-gate/cheat-probe")
+
+    return BenchExpectation(
+        runtime=_noop_runtime(h),
+        expect_subtype="success",
+        post_check=check,
+        metrics=metrics,
+        notes=(
+            "2026 AI-safety-institutes thread: EU AI Act Art. 73 mandatory "
+            "incident reporting (15/10/2-day clocks, GPAI systemic-risk "
+            "2/5/10/15-day tiers, 5-year retention); UK AISI 2026-07: all 5 "
+            "frontier models cheated in cyber evals, so a cheated "
+            "measurement is NON_AUTHORITATIVE; METR 2026-08-26 agent-escape "
+            "investigation; the evaluate-A/ship-B gap closed by binding "
+            "evaluation receipts to the exact (model_digest, checkpoint) pair."
+        ),
+    )
+
+
+def _case_metrics_language_cap(h: BenchHarness) -> BenchExpectation:
+    """Language-capability receipts (one-hundred-fourteenth batch).
+
+    12 deterministic scenarios, 4 allow / 8 deny: high-band English in
+    a medical domain allows; moderate-band French in a general domain
+    allows; a cross-language probe with all passes allows; a valid
+    community grant allows. Denied: undeclared language
+    (unverifiable-process), locale-variant mismatch (pt vs pt-br),
+    medical + low band (NON_AUTHORITATIVE, mandatory review,
+    ``i18n.mistranslation_harm``), legal + unmeasured band, the
+    fluency trap (fluent surface + low accuracy -> ``fluent_unverified``),
+    a revoked community grant at use time, a probe failure that
+    downgrades the failing language (narrow-only amendment), and a
+    tampered receipt chain.
+    """
+    metrics = run_language_cap()
+
+    def check(exp: BenchExpectation, report: Any) -> tuple[bool, str]:
+        if metrics["n_scenarios"] != 12:
+            return (False, f"expected 12 language-cap scenarios, saw {metrics['n_scenarios']}")
+        if metrics["mismatches"]:
+            return (False, f"scenario(s) disagree with ground truth: {metrics['mismatches']}")
+        if metrics["allowed_ids"] != [
+            "allow_english_medical",
+            "allow_french_general",
+            "allow_probe_all_pass",
+            "allow_community_consented_use",
+        ]:
+            return (False, f"allowed set drifted: {metrics['allowed_ids']}")
+        reasons = metrics["denial_reasons"]
+        for sid, needle in (
+            ("deny_undeclared_language", "no_capability_receipt"),
+            ("deny_locale_variant_mismatch", "locale_variant_mismatch"),
+            ("deny_medical_low_band", "countersign"),
+            ("deny_legal_unmeasured", "unmeasured"),
+            ("deny_fluency_trap", "fluent_unverified"),
+            ("deny_revoked_community", "revoked"),
+            ("deny_probe_failure_downgrade", "downgraded"),
+            ("deny_tampered_receipt", "integrity"),
+        ):
+            if needle not in reasons.get(sid, ""):
+                return (False, f"denial reason missing {needle!r}: {reasons.get(sid, '')!r}")
+        return True, "12/12 language-cap probes match ground truth"
+
+    return BenchExpectation(
+        runtime=_noop_runtime(h),
+        expect_subtype="success",
+        post_check=check,
+        metrics=metrics,
+        notes=(
+            "Language-capability receipts (one-hundred-fourteenth batch): "
+            "12 deterministic probes — authority-signed hash-chained "
+            "capability receipts, exact (model, tag, variant) matching, "
+            "high-stakes mistranslation gates with mandatory human review, "
+            "the fluency-trap flag, cross-language probe downgrades, and "
+            "revocable community data-sovereignty grants."
+        ),
+    )
+
+
 def _case_metrics_model_lineage(h: BenchHarness) -> BenchExpectation:
     """Model lineage receipts (one-hundredth batch).
 
@@ -13326,6 +14257,69 @@ def _case_metrics_stream_guard(h: BenchHarness) -> BenchExpectation:
             "Per-chunk screening before release, liveness-pinned guard "
             "versions, anti-smuggling overlap windows, and receipt-chained "
             "decisions so bypass is detectable after the fact."
+        ),
+    )
+
+
+def _case_metrics_synthetic_cap(h: BenchHarness) -> BenchExpectation:
+    """Synthetic-data ratio cap (one-hundred-twelfth batch).
+
+    Absorbs the 2026 synthetic-data thread: production use is
+    privacy-driven tabular data (banks, medical) and physical-AI
+    simulation; 2026 collapse evidence (RAG Collapse: 79.6% across
+    1,528 sims with no retraining; scientific-judgment collapse)
+    locates the danger in *recursive* reuse; EU AI Act Art. 50
+    machine-readable marking (2026-08-02 in force, 2026-12-02 grace
+    cutoff) and Art. 53 training-data summary; Kneschke v. LAION (TDM
+    opt-out counts only when machine-readable); EDPB 03/2026 (no
+    grandfathering). 12 deterministic scenarios: declared real mixes
+    and under-cap synthetic mixes allow, EU markings allow, prose-only
+    TDM opt-outs are not honored (but usable); over-cap denies,
+    generation-2 recursion trips regardless of ratio, undeclared
+    slices deny, tampering and chain breaks deny, malformed
+    generations and zero-weight corpora deny, post-grace unmarked EU
+    deployments deny.
+    """
+    metrics = run_synthetic_cap()
+
+    def check(exp: BenchExpectation, report: Any) -> tuple[bool, str]:
+        if metrics["n_scenarios"] != 12:
+            return (False, f"expected 12 synthetic-cap scenarios, saw {metrics['n_scenarios']}")
+        if metrics["mismatches"]:
+            return (False, f"scenario(s) disagree with ground truth: {metrics['mismatches']}")
+        if metrics["allowed_ids"] != [
+            "allow_all_real",
+            "allow_under_cap",
+            "allow_eu_marked",
+            "allow_prose_optout_usable",
+        ]:
+            return (False, f"allowed set drifted: {metrics['allowed_ids']}")
+        reasons = metrics["denial_reasons"]
+        if reasons.get("deny_over_cap") != "data.synthetic_cap_exceeded":
+            return (False, "over-cap mix must deny on data.synthetic_cap_exceeded")
+        if reasons.get("deny_recursive_gen2") != "data.recursive_reuse":
+            return (False, "generation-2 recursion must deny on data.recursive_reuse")
+        if reasons.get("deny_undeclared_slice") != "data.undeclared_slice":
+            return (False, "undeclared slice must deny on data.undeclared_slice")
+        if reasons.get("deny_post_grace_no_marking") != "data.art50_marking_missing":
+            return (False, "post-grace unmarked EU deployment must deny on data.art50_marking_missing")
+        return (True, "12/12 synthetic-cap scenarios hold: cap/recursion/declaration/Art.50/TDM")
+
+    return BenchExpectation(
+        runtime=_noop_runtime(h),
+        expect_subtype="success",
+        post_check=check,
+        metrics=metrics,
+        notes=(
+            "2026 synthetic-data thread: collapse lives in recursive "
+            "reuse (RAG Collapse, scientific-judgment collapse), so the "
+            "gate pairs a declared synthetic-fraction cap with a "
+            "generation-2 recursion tripwire; slice labels are "
+            "authority-signed and hash-chained, undeclared slices deny; "
+            "TDM opt-outs count only when machine-readable (Kneschke v. "
+            "LAION); EU deployments gate on machine-readable marking "
+            "with the 2026-12-02 grace cutoff; Art. 53 training-summary "
+            "receipts pin to the lineage receipt."
         ),
     )
 
@@ -14717,9 +15711,12 @@ CASES: tuple[BenchCase, ...] = (
     BenchCase("metrics.stream_guard", "metrics", "streaming output guard: per-chunk screening, liveness-pinned guards, anti-smuggling overlap, receipt-chained decisions", _case_metrics_stream_guard),
     BenchCase("metrics.dual_use", "metrics", "dual-use screen for autonomous science: constraint bindings, watchlist tripwire, claim registry, citation integrity, mechanical verifier (AI-for-science absorption)", _case_metrics_dual_use),
     BenchCase("metrics.deployment_registry", "metrics", "deployment registration gate: authority-signed hash-chained registrations, FRIA/explanation for high-risk, retention floor, shadow detection", _case_metrics_deployment_registry),
+    BenchCase("metrics.language_cap", "metrics", "language-capability receipts: authority-signed (model, tag, variant) declarations, mistranslation gates with mandatory human review, fluency-trap flag, cross-language probe downgrades, revocable community grants", _case_metrics_language_cap),
     BenchCase("metrics.compute_budget", "metrics", "compute-budget receipts: authority-signed budgets, hash-chained spend, fail-closed overspend, tier/evidence/device-class gates, roi_ledger (AI-chips absorption)", _case_metrics_compute_budget),
+    BenchCase("metrics.synthetic_cap", "metrics", "synthetic-data ratio cap: declared per-slice real/synthetic labels, generation-2 recursion tripwire, TDM opt-out machine-readability, Art. 50 marking gate, Art. 53 training-summary receipts (synthetic-data absorption)", _case_metrics_synthetic_cap),
     BenchCase("metrics.herd_gate", "metrics", "herd-correlation gate: declared signal sources, Jaccard herd-overlap denial, correlated-exposure cap (AI-finance absorption)", _case_metrics_herd_gate),
     BenchCase("metrics.scene_bound", "metrics", "scene-bound authorization receipts: pair-exact (setting, stratum) scope, manifest-pinned performance, consent-first ambient capture, unverifiable-process model invocation", _case_metrics_scene_bound),
+    BenchCase("metrics.incident_receipts", "metrics", "incident receipts + evaluator-access gate: Art.73 reporting clocks with auto-escalation, 5-year retention floor, evaluate-A/ship-B gate, cheat probes", _case_metrics_incident_receipts),
     BenchCase("metrics.harness_binding", "metrics", "harness integrity binding: SHA-256 harness hash in audit, quad-only scores", _case_metrics_harness_binding),
     BenchCase("metrics.drift_detection", "metrics", "Livenerf-style drift probe: bootstrap CI + paired permutation test", _case_metrics_drift_detection),
 )
@@ -15356,8 +16353,11 @@ __all__ = [
     "run_compute_budget",
     "run_herd_gate",
     "run_scene_bound",
+    "run_language_cap",
     "run_vendor_chain",
     "run_deployment_registry",
+    "run_incident_receipts",
+    "run_synthetic_cap",
     "run_dual_use",
     "run_owasp_asi_coverage",
     "run_policy_axis",

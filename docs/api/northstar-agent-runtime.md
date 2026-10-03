@@ -1127,6 +1127,14 @@ Quantum-threat timeline gates (one-hundred-second batch).
 
 Revocable consent receipts (one-hundred-fifth batch).
 
+#### `run_synthetic_cap()`
+
+Synthetic-data ratio cap (one-hundred-twelfth batch).
+
+#### `run_language_cap()`
+
+Language-capability receipts (one-hundred-fourteenth batch).
+
 #### `run_deployment_registry()`
 
 Deployment registration gate (one-hundred-tenth batch).
@@ -1134,6 +1142,10 @@ Deployment registration gate (one-hundred-tenth batch).
 #### `run_dual_use()`
 
 Dual-use screen for autonomous science (one-hundred-eleventh batch).
+
+#### `run_incident_receipts()`
+
+Incident receipts + evaluator-access gate (one-hundred-thirteenth batch).
 
 #### `run_model_lineage()`
 
@@ -3534,6 +3546,274 @@ Outcome of :func:`check_model_invocation`.
 #### `check_model_invocation(registry: Mapping[str, SceneBinding], model_version: str, declaration: SceneDeclaration | None, manifest: Mapping[str, Mapping[str, float]], *, now: int)`
 
 Gate a model invocation on its scene binding.
+
+### `language_cap`
+
+Source: `components/northstar-agent-runtime/language_cap.py`
+
+Language-capability receipts (one-hundred-fourteenth batch).
+
+#### `LanguageCapError`
+
+Malformed receipt/grant or a programming error.
+
+#### `LanguageCapabilityReceipt`
+
+Declared language capability for one (model, tag, variant).
+
+#### `compute_receipt_digest(receipt: LanguageCapabilityReceipt)`
+
+Recompute the JCS digest a receipt claims.
+
+#### `issue_capability_receipt(*, receipt_id: str, model_digest: str, language_tag: str, locale_variant: str, accuracy_band: str, fluency_band: str, measured_on_benchmark_digest: str, authority_secret: bytes, issued_by: str, measured_at: int, expires_at: int, prev_digest: str=_GENESIS)`
+
+Issue an authority-signed language-capability receipt and seal it.
+
+#### `ServeVerdict`
+
+Verdict of the language-service gate.
+
+#### `check_language_servable(log: list[LanguageCapabilityReceipt], *, model_digest: str, language_tag: str, locale_variant: str, check_time: int)`
+
+Fail-closed gate: is this (model, tag, variant) servable now?
+
+#### `OutputVerdict`
+
+Verdict of the output gate (domain + fluency trap).
+
+#### `check_output_gate(log: list[LanguageCapabilityReceipt], *, model_digest: str, language_tag: str, locale_variant: str, domain: str, check_time: int)`
+
+Gate one model output on (language, domain).
+
+#### `serve_audit_event(verdict: ServeVerdict | OutputVerdict, *, action: str)`
+
+Shape a serve/output verdict as an audit-chain event dict.
+
+#### `mistranslation_audit_event(verdict: OutputVerdict, *, action: str)`
+
+Shape a mistranslation-harm gate fire as an audit-chain event.
+
+#### `restrict_accuracy_band(log: list[LanguageCapabilityReceipt], *, model_digest: str, language_tag: str, locale_variant: str, new_band: str, authority_secret: bytes, issued_by: str, issued_at: int, expires_at: int)`
+
+Append a narrow-only amendment for the exact triple.
+
+#### `alignment_probe(log: list[LanguageCapabilityReceipt], *, model_digest: str, probe_fn: Callable[[str, str], bool], check_time: int)`
+
+Run the same safety test in every declared language, deterministically.
+
+#### `probe_audit_event(results: Mapping[str, str], *, model_digest: str)`
+
+Shape a probe run as an audit-chain event dict.
+
+#### `CommunityGrant`
+
+Community-signed data-sovereignty grant.
+
+#### `CommunityRevocation`
+
+Immediate, irreversible revocation of a community grant.
+
+#### `compute_grant_digest(grant: CommunityGrant)`
+
+Recompute the JCS digest a grant claims.
+
+#### `grant_community_data(*, grant_id: str, community_id: str, data_scope: str, purpose: str, community_secret: bytes, granted_at: int, expires_at: int, prev_digest: str=_GENESIS)`
+
+Issue a community-signed data-sovereignty grant and seal it.
+
+#### `compute_revocation_digest(rev: CommunityRevocation)`
+
+Recompute the JCS digest a revocation claims.
+
+#### `revoke_community_data(*, grant: CommunityGrant, community_secret: bytes, revoked_at: int, prev_digest: str)`
+
+Revoke a community grant. Immediate and irreversible in the log.
+
+#### `CommunityVerdict`
+
+Verdict of one community-data use.
+
+#### `check_community_use(grant: CommunityGrant, log: list[CommunityGrant | CommunityRevocation], *, data_scope: str, purpose: str, use_time: int)`
+
+Check ONE community-data use against the community log. Fail-closed.
+
+#### `community_audit_event(verdict: CommunityVerdict, *, action: str)`
+
+Shape a community-use verdict as an audit-chain event dict.
+
+### `evaluator_access`
+
+Source: `components/northstar-agent-runtime/evaluator_access.py`
+
+Evaluator-access receipts and cheat probes (one-hundred-thirteenth batch).
+
+#### `EvaluatorAccessError`
+
+Malformed evaluation input (construction-time boundary).
+
+#### `compute_evaluation_digest(*, evaluator_id: str, model_digest: str, checkpoint: str, scope: str, evaluated_at: int, expires_at: int, prev_hash: str)`
+
+Compute the chain digest for one evaluation receipt (public so builders and verifiers share exactly one implementation).
+
+#### `EvaluationReceipt`
+
+One evaluation access record: an evaluator evaluated an exact ``(model_digest, checkpoint)`` pair for a scope, valid until ``expires_at`` unless revoked.
+
+#### `InvocationVerdict`
+
+Outcome of :meth:`EvaluationRegistry.check_invocation`.
+
+#### `CheatProbe`
+
+A deterministic evaluation-integrity probe.
+
+#### `CheatVerdict`
+
+Outcome of :func:`cheat_probe`.
+
+#### `EvaluationRegistry`
+
+Hash-chained evaluation registry: the evaluate-A/ship-B gate.
+
+- `register(*, evaluator_id: str, model_digest: str, checkpoint: str, scope: str, evaluated_at: int, expires_at: int)`
+  - Register an evaluation receipt (malformed input raises).
+- `revoke(*, model_digest: str, checkpoint: str)`
+  - Revoke all evaluation receipts for an exact ``(model_digest, checkpoint)`` pair. Returns True if any receipt was live.
+- `check_invocation(*, model_digest: str, checkpoint: str, now: int)`
+  - Gate a runtime model invocation against the evaluation registry. Fail-closed in order: exact pair present -> receipt unexpired -> not revoked. Anything else classifies ``unverifiable-evaluation``: do…
+- `verify_chain()`
+  - Replay the evaluation log (fail-closed on tamper or gap).
+#### `build_cheat_probe(*, probe_id: str, description: str, shortcut_markers: list[str], required_steps: list[str])`
+
+Assemble a :class:`CheatProbe` (malformed input raises).
+
+#### `cheat_probe(probe: CheatProbe, trace: list[str])`
+
+Run the evaluation-integrity probe over a solution trace.
+
+#### `evaluator_audit_event(verdict: InvocationVerdict | CheatVerdict, *, model_digest: str='', checkpoint: str='', probe_id: str='')`
+
+Build an ``audit.ndjson/1``-shaped record for an evaluator verdict (mirrors the 94th batch's ``self_attestation_denied_event`` pattern).
+
+### `incident_receipts`
+
+Source: `components/northstar-agent-runtime/incident_receipts.py`
+
+Incident receipts (one-hundred-thirteenth batch).
+
+#### `IncidentReceiptError`
+
+Malformed incident input (construction-time boundary).
+
+#### `reporting_clock_days(severity: str, *, death_linked: bool=False, widespread: bool=False, systemic_tier: int | None=None)`
+
+Deterministic reporting clock in days for a severity.
+
+#### `IncidentReceipt`
+
+One filed incident, hash-chained into the incident log.
+
+#### `FileVerdict`
+
+Outcome of :meth:`IncidentRegistry.file_incident`.
+
+#### `RetentionVerdict`
+
+Outcome of :meth:`IncidentRegistry.register_retention`.
+
+#### `compute_receipt_digest(*, incident_id: str, system_id: str, severity: str, death_linked: bool, widespread: bool, systemic_tier: int | None, detected_at: int, reported_at: int, summary_digest: str, clock_missed: bool, prev_hash: str)`
+
+Compute the chain digest for one incident receipt (public so builders and verifiers share exactly one implementation).
+
+#### `IncidentRegistry`
+
+Hash-chained incident log with machine-enforced reporting clocks and a 5-year retention floor.
+
+- `check_clock(*, severity: str, detected_at: int, reported_at: int, death_linked: bool=False, widespread: bool=False, systemic_tier: int | None=None)`
+  - Check the reporting clock.
+- `file_incident(*, incident_id: str, system_id: str, severity: str, detected_at: int, reported_at: int, summary_digest: str, death_linked: bool=False, widespread: bool=False, systemic_tier: int | None=None, now: int)`
+  - File an incident receipt.
+- `verify_chain()`
+  - Replay the incident log: digests recompute and link consecutively (fail-closed on tamper or gap).
+- `register_retention(*, system_id: str, retention_days: int)`
+  - Register an incident-record retention policy.
+- `retention_for(system_id: str)`
+  - Return the registered retention days for a system, or None.
+- `get(incident_id: str)`
+  - Return the filed receipt for an incident_id, or None.
+#### `incident_audit_event(verdict: FileVerdict | RetentionVerdict, *, incident_id: str='', system_id: str='')`
+
+Build an ``audit.ndjson/1``-shaped record for an incident filing or retention verdict (mirrors the 94th batch's ``self_attestation_denied_event`` pattern).
+
+### `synthetic_cap`
+
+Source: `components/northstar-agent-runtime/synthetic_cap.py`
+
+Synthetic-data ratio cap (one-hundred-twelfth batch).
+
+#### `SyntheticCapError`
+
+A malformed manifest or a programming error.
+
+#### `DataSliceManifest`
+
+One corpus slice's declared label.
+
+#### `issue_slice_manifest(*, slice_id: str, origin: str, slice_digest: str, weight_units: int, generator_id: str='', generation: int=0, issued_at: int, authority_secret: bytes, prev_digest: str=_GENESIS)`
+
+Issue an authority-signed slice manifest and seal it.
+
+#### `verify_manifest_set(manifests: list[DataSliceManifest])`
+
+Verify a manifest set's integrity, in log order.
+
+#### `RatioVerdict`
+
+Outcome of the synthetic-ratio gate for one training corpus.
+
+#### `check_synthetic_ratio(manifests: list[DataSliceManifest], used_slice_ids: list[str], *, ratio_max: float=SYNTHETIC_RATIO_MAX)`
+
+Gate a training run on declared slice labels. Fail-closed.
+
+#### `manifest_set_digest(manifests: list[DataSliceManifest])`
+
+JCS SHA-256 over the ordered manifest digests.
+
+#### `pin_to_lineage(receipt: Any, manifests: list[DataSliceManifest])`
+
+Bind the slice-manifest set into a model-lineage receipt.
+
+#### `TDMPVerdict`
+
+Outcome of the TDM opt-out check for one source.
+
+#### `check_tdm_optout(source: Mapping[str, Any])`
+
+Honor a TDM opt-out only when it is machine-readable.
+
+#### `Art50Verdict`
+
+Outcome of the Art. 50 marking gate for one deployment.
+
+#### `art50_gate(*, jurisdiction: str, machine_readable_marking: bool, placed_on_market_epoch_days: int, now_epoch_days: int)`
+
+Gate EU deployments on machine-readable AI-output marking.
+
+#### `TrainingSummaryReceipt`
+
+Art. 53-aligned training-data summary, verifiable offline.
+
+#### `training_summary_receipt(*, model_id: str, manifests: list[DataSliceManifest], top_n: int=10, issued_at: int)`
+
+Build the Art. 53 training-data summary receipt.
+
+#### `verify_training_summary(receipt: TrainingSummaryReceipt, manifests: list[DataSliceManifest])`
+
+Recompute the summary receipt's digest and re-check its pins.
+
+#### `synthetic_cap_audit_event(*, kind: str, detail: str, model_id: str='')`
+
+Build the audit payload for a synthetic-cap decision.
 
 ### `dual_use`
 
