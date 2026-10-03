@@ -346,11 +346,6 @@ def _validate_provenance(provenance: Any) -> tuple[str, ...]:
     self_asserted = provenance.get("selfAsserted")
     if self_asserted is not None and not isinstance(self_asserted, bool):
         errors.append("provenance 'selfAsserted' must be a boolean")
-    if "hlc" in record and not _valid_hlc_shape(record["hlc"]):
-        errors.append(
-            "audit 'hlc' must be '<millis>:<counter>' with millis in 48 bits "
-            "and counter in 16 bits (e.g. '1727865600000:3')"
-        )
     return tuple(errors)
 
 

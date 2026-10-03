@@ -719,6 +719,7 @@ class ActionGateway:
         if not requested_scope.issubset(set(grant["capabilities"])):
             raise ValueError("tool scope exceeds the authorization grant")
         approval_expires_at: int | None = None
+        approval: dict[str, Any] | None = None
         if spec.risk_level == "high":
             if approval_token is None:
                 raise ValueError("high-risk tool requires approval")

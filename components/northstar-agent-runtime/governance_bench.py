@@ -31,6 +31,9 @@ import shutil
 import sys
 import tempfile
 import time
+import plugin_load
+import plugin_manifest
+import plugin_trust
 from dataclasses import dataclass, field
 from pathlib import Path
 from tools.path_integrity import (
@@ -8179,6 +8182,24 @@ def _case_metrics_dvp_iff_invariant(h: BenchHarness) -> BenchExpectation:
             "grants never migrate"
         ),
     )
+
+
+_ALL_COVERED: tuple[tuple[str, str], ...] = (
+    ("attestation", "publisher"),
+    ("bench", "compatibility.platforms"),
+    ("review", "policy"),
+)
+
+
+_EVIDENCE_DIGEST = "sha256:" + "ab" * 32  # well-formed commitment; the content is never read
+
+
+_EVIDENCE_MANIFEST_HEAD = (
+    'schema_version = "northstar.plugin.v1"\n'
+    'name = "demo"\n'
+    'version = "0.1.0"\n'
+    'description = "A bundle that does very little."\n'
+)
 
 
 CASES: tuple[BenchCase, ...] = (
