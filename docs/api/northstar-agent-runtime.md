@@ -872,6 +872,14 @@ Temp workspaces + scripted providers for one suite run.
 - `workspace(files: dict[str, str] | None=None)`
 - `provider(turns: Sequence[Any], **kwargs: Any)`
 - `runtime(*, workspace: Path, turns: Sequence[Any], config_kwargs: dict[str, Any] | None=None, tool_limits: ToolLimits | None=None, can_use_tool: Any=None, hooks: HookRegistry | None=None, sessions: Any=None)`
+#### `run_offline_bundle()`
+
+Signed offline policy bundles (ninety-seventh batch).
+
+#### `run_twin_sync()`
+
+Twin-sync receipts: freshness-gated actuation (ninety-sixth batch).
+
 #### `run_pledge_semantics()`
 
 Pledge-style self-restriction semantics, OpenBSD pledge(2) model.
@@ -2106,6 +2114,106 @@ A snapshot-and-compare verifier bound to one workspace.
 #### `summarise(verdicts: Sequence[Verdict])`
 
 The audit shape: a pass/fail roll-up with the structural split made visible.
+
+### `offline_bundle`
+
+Source: `components/northstar-agent-runtime/offline_bundle.py`
+
+Signed offline policy bundles (ninety-seventh batch).
+
+#### `canonical_json(value: Any)`
+
+Deterministic JSON encoding for signing (sorted keys, tight separators).
+
+#### `sha256_hex(text: str)`
+
+#### `BundleEnvelope`
+
+The signed document. ``payload`` excludes ``signature``.
+
+- `to_dict()`
+- `from_dict(doc: Mapping[str, Any])`
+#### `BundleError`
+
+Raised only by compile_bundle on caller mistakes (fail loud at build).
+
+#### `compile_bundle(policy: list[dict[str, Any]], tools: Mapping[str, Mapping[str, Any]], expiry_epoch: int, *, issuer_secret: bytes, bundle_version: int, staleness_ceiling_s: int, issued_at: int)`
+
+Compile and sign an offline policy bundle.
+
+#### `BundleVerdict`
+
+#### `verify_bundle(bundle: Any, *, issuer_pubkey: bytes, now_epoch: int, min_version: int, registry_digests: Mapping[str, str] | None=None)`
+
+Verify a bundle. Returns a verdict; never raises.
+
+#### `offline_check(verdict: BundleVerdict, tool_name: str, args: Mapping[str, Any] | None=None)`
+
+Decide one tool call against a *verified* bundle.
+
+#### `bundle_audit_event(verdict: BundleVerdict, *, tool_name: str='')`
+
+Deterministic audit record for a bundle verification.
+
+#### `run_offline_bundle()`
+
+Deterministic offline-bundle probe corpus (bench support).
+
+### `twin_receipts`
+
+Source: `components/northstar-agent-runtime/twin_receipts.py`
+
+Twin-sync receipts: freshness-gated actuation for digital twins (ninety-sixth batch).
+
+#### `TwinReceiptError`
+
+Malformed twin receipt or registry input. Fail loud, never guess.
+
+#### `SyncReceipt`
+
+One twin observation, hash-chained to its predecessor.
+
+- `receipt_hash()`
+  - The receipt's own hash — what the next receipt chains to.
+- `as_dict()`
+#### `mint_receipt(*, receipt_id: str, twin_id: str, state_digest: str, observed_at: int, source_sensor_set: Sequence[str], staleness_budget: int, prev_hash: str='')`
+
+Mint a receipt, validating every field. Garbage in -> loud error.
+
+#### `check_freshness(receipt: SyncReceipt, *, now: int)`
+
+Freshness gate. Returns ``(True, "fresh")`` or ``(False, reason)``.
+
+#### `SensorManifestRegistry`
+
+Pinned sensor manifests, one per twin.
+
+- `pin(twin_id: str, sensor_digests: Sequence[str])`
+  - Pin (or re-pin) a twin's sensor manifest. Re-pinning is an audited, explicit operation — the caller records it; this registry only stores the current truth.
+- `manifest_for(twin_id: str)`
+- `check_window(receipt: SyncReceipt)`
+  - Classify the observation window. Binary, no middle rung.
+#### `ReceiptRegistry`
+
+Issuance + chain integrity + single-use consumption.
+
+- `issue(receipt: SyncReceipt)`
+- `get(receipt_id: str)`
+- `is_consumed(receipt_id: str)`
+- `consume(receipt_id: str)`
+- `verify_chain(receipts: Sequence[SyncReceipt])`
+  - Verify a hash chain: same twin, linked prev_hash, ordered time.
+#### `ActuationVerdict`
+
+The gate's answer. ``allowed`` is False for every failure mode.
+
+#### `gate_actuation(*, card: ActionCard | None, call_id: str, arguments: Mapping[str, Any], registry: ReceiptRegistry, manifests: SensorManifestRegistry, now: int)`
+
+Decide whether a twin→physical command may execute. Fail closed.
+
+#### `run_twin_sync()`
+
+Deterministic twin-sync scenarios: 12 scenarios, 3 allow / 9 deny.
 
 ### `product_path`
 
