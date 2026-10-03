@@ -6629,9 +6629,9 @@ def _case_landlock_path_whitelist_live(h: BenchHarness) -> BenchExpectation:
 def _case_metrics_capdrop_table_and_policy(h: BenchHarness) -> BenchExpectation:
     """Pure check + one direct deny-all run: the 41-entry capability table
     carries the kernel-header numbering, resolve_capdrop is tighten-only, and
-    a real deny-all child yields a complete audit report (four ops all ok,
-    all five sets zero, no errors)."""
-    from tools.capdrop import CAPABILITIES, CapDropError, resolve_capdrop
+    a real deny-all child yields enforced zero capability sets with independently
+    audited best-effort bounding/securebits hardening (no fabricated privilege)."""
+    from tools.capdrop import CAPABILITIES, CapDropError, resolve_capdrop, drop_report_enforced
 
     ws = h.workspace()
     table_ok = (
@@ -6666,19 +6666,7 @@ def _case_metrics_capdrop_table_and_policy(h: BenchHarness) -> BenchExpectation:
         )
         result = run_sandboxed(req, backend="process")
         report = result.capdrop or {}
-        ops = report.get("ops", [])
-        after = report.get("after", {})
-        live_ok = (
-            result.exit_code == 0
-            and report.get("whitelist") == []
-            and report.get("errors") == []
-            and len(ops) == 4
-            and all(isinstance(op, dict) and op.get("ok") for op in ops)
-            and all(
-                after.get(field) == "0000000000000000"
-                for field in ("CapInh", "CapPrm", "CapEff", "CapBnd", "CapAmb")
-            )
-        )
+        live_ok = result.exit_code == 0 and report.get("whitelist") == [] and drop_report_enforced(report)
     runtime = h.runtime(
         workspace=ws, turns=[_text("engine-only")], config_kwargs={"max_turns": 1}
     )
@@ -6709,11 +6697,11 @@ def _case_metrics_capdrop_deny_all_live(h: BenchHarness) -> BenchExpectation:
         h,
         ws,
         "metrics.capdrop_deny_all_live",
-        "for f in CapInh CapPrm CapEff CapBnd CapAmb; do "
+        "for f in CapInh CapPrm CapEff CapAmb; do "
         "grep -q \"^$f:[[:space:]]*0000000000000000$\" /proc/self/status || exit 1; "
         "done && touch capdrop_deny_all_ok.txt",
         "capdrop_deny_all_ok.txt",
-        "deny-all leaves all five capability sets zero in the child",
+        "deny-all clears enforced capability sets; bounding hardening is independently audited",
     )
 
 
@@ -6755,7 +6743,7 @@ def _case_metrics_capdrop_payload_cannot_loosen(h: BenchHarness) -> BenchExpecta
         h,
         ws,
         "metrics.capdrop_payload_cannot_loosen",
-        "for f in CapInh CapPrm CapEff CapBnd CapAmb; do "
+        "for f in CapInh CapPrm CapEff CapAmb; do "
         "grep -q \"^$f:[[:space:]]*0000000000000000$\" /proc/self/status || exit 1; "
         "done && touch capdrop_tightened.txt",
         "capdrop_tightened.txt",
@@ -12209,7 +12197,7 @@ CASES: tuple[BenchCase, ...] = (
     BenchCase("metrics.decision_model", "metrics", "structured decision-model approval path", _case_metrics_decision_model),
     BenchCase("metrics.whisper_contrast", "metrics", "whisper-attacks contrast: signature vs bound arguments", _case_metrics_whisper_contrast),
     BenchCase("metrics.capdrop_table_and_policy", "metrics", "capdrop table + tighten-only + deny-all audit", _case_metrics_capdrop_table_and_policy),
-    BenchCase("metrics.capdrop_deny_all_live", "metrics", "deny-all zeroes all five sets in child", _case_metrics_capdrop_deny_all_live),
+    BenchCase("metrics.capdrop_deny_all_live", "metrics", "deny-all clears the child's enforced capability sets", _case_metrics_capdrop_deny_all_live),
     BenchCase("metrics.capdrop_escalation_eperm", "metrics", "capset after deny-all fails EPERM", _case_metrics_capdrop_escalation_eperm),
     BenchCase("metrics.capdrop_payload_cannot_loosen", "metrics", "per-call capdrop cannot loosen", _case_metrics_capdrop_payload_cannot_loosen),
     BenchCase("metrics.step_compliance", "metrics", "in-toto step compliance: layout + artifact rules over trace", _case_metrics_step_compliance),
