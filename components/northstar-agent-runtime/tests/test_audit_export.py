@@ -21,6 +21,7 @@ import audit as normative_audit  # noqa: E402
 from audit_export import (
     AUDIT_SCHEMA_VERSION,
     COMPONENT,
+    build_provenance,
     record_to_audit,
     records_to_ndjson,
     session_path,
@@ -269,6 +270,66 @@ class CliExportTests(unittest.TestCase):
         )
         self.assertEqual(code, 1)
         self.assertIn("no transcript", err)
+
+
+class ProvenanceBuilderTests(unittest.TestCase):
+    """SLSA v1.0-style evidence: build, validate, and mirror parity."""
+
+    def test_builder_emits_explicit_trust_marking_by_default(self):
+        prov = build_provenance(
+            invocation_id="run-1",
+            external_parameters={"tool": "Write", "args": {"path": "/tmp/x"}},
+            resolved_dependencies=[{"uri": "tool://Write", "digest": {"sha256": "ab" * 32}}],
+        )
+        # The default is an *explicit* "untrusted", never an implicit one.
+        self.assertEqual(prov["externalParametersTrust"], "untrusted")
+        self.assertEqual(prov["buildType"], "https://northstar.dev/agent-run/v1")
+        self.assertEqual(prov["builder"]["id"], "https://northstar.dev/runtime/northstar-agent-runtime")
+        self.assertEqual(prov["invocationId"], "run-1")
+        self.assertTrue(prov["selfAsserted"])
+
+    def test_builder_verified_trust(self):
+        prov = build_provenance(
+            external_parameters={"q": "checked"},
+            external_parameters_trust="verified",
+            internal_parameters={"approval_tier": 3},
+        )
+        self.assertEqual(prov["externalParametersTrust"], "verified")
+
+    def test_builder_rejects_bad_trust_value(self):
+        with self.assertRaises(ValueError):
+            build_provenance(external_parameters_trust="probably-fine")
+
+    def test_provenance_attaches_to_audit_records_and_passes_both_validators(self):
+        record = sample_record("tool_call", index=2, tool="Write")
+        audit = record_to_audit(record)
+        audit["run_id"] = "run-7"
+        audit["provenance"] = build_provenance(
+            invocation_id="run-7",
+            external_parameters={"tool": "Write"},
+        )
+        self.assertEqual(validate_audit_record(audit), ())
+        self.assertEqual(normative_audit.validate_record(audit), ())
+
+    def test_mirror_and_normative_agree_on_bad_provenance(self):
+        # Both validators must reject unmarked external input identically.
+        audit = record_to_audit(sample_record("tool_call", index=2))
+        bad = build_provenance(external_parameters={"tool": "Write"})
+        del bad["externalParametersTrust"]
+        audit["provenance"] = bad
+        mirror_errors = validate_audit_record(audit)
+        normative_errors = normative_audit.validate_record(audit)
+        self.assertTrue(any("externalParametersTrust" in e for e in mirror_errors))
+        self.assertEqual(mirror_errors, normative_errors)
+
+    def test_mirror_and_normative_agree_on_invocation_mismatch(self):
+        audit = record_to_audit(sample_record("tool_call", index=2))
+        audit["run_id"] = "run-7"
+        audit["provenance"] = build_provenance(invocation_id="run-OTHER")
+        mirror_errors = validate_audit_record(audit)
+        normative_errors = normative_audit.validate_record(audit)
+        self.assertTrue(any("does not match" in e for e in mirror_errors))
+        self.assertEqual(mirror_errors, normative_errors)
 
 
 if __name__ == "__main__":

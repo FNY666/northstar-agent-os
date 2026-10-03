@@ -1793,6 +1793,10 @@ Export session transcripts as the canonical NDJSON audit feed (audit v1).
 
 Envelope validation errors, mirroring the normative contract validator.
 
+#### `build_provenance(*, build_type: str='https://northstar.dev/agent-run/v1', builder_id: str='https://northstar.dev/runtime/northstar-agent-runtime', invocation_id: str | None=None, external_parameters: dict[str, Any] | None=None, external_parameters_trust: str='untrusted', internal_parameters: dict[str, Any] | None=None, resolved_dependencies: list[dict[str, Any]] | None=None, self_asserted: bool=True)`
+
+Build the SLSA v1.0-style ``provenance`` object for an audit record.
+
 #### `record_to_audit(record: dict[str, Any])`
 
 Map one session transcript record to one canonical audit record.

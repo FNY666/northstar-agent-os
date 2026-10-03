@@ -522,6 +522,10 @@ def verify_lines(
                                reason=f"line {number}: chain_hash mismatch (record modified after sealing)")
         prev_chain = chain_hash
         chained += 1
+        trust_error = _check_provenance_trust(record)
+        if trust_error is not None:
+            return ChainResult(ok=False, broken_at=number, records=len(records), chained=chained,
+                               reason=f"line {number}: {trust_error}")
         if "signature" in record:
             if public_key is None:
                 return ChainResult(ok=False, broken_at=number, records=len(records), chained=chained,
@@ -550,6 +554,39 @@ def verify_lines(
 _TS_RE_STRICT = __import__("re").compile(
     r"^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.(\d{3}))?Z$"
 )
+
+
+def _check_provenance_trust(record: dict[str, Any]) -> str | None:
+    """SLSA v1.0's core verifier rule, enforced on the audit feed.
+
+    A record carrying non-empty ``provenance.externalParameters`` (external,
+    unverified inputs) must mark ``externalParametersTrust`` explicitly as
+    "untrusted" or "verified" — unmarked external input is treated as a
+    feed integrity problem, not a silent default. Returns the reason string
+    when the marking is missing or invalid, else None.
+
+    This is deliberately a small standalone check rather than a call into
+    ``audit_export``: ``audit_chain`` stays importable without the export
+    module (no import cycle), and ``verify`` must judge feeds that were
+    hand-crafted or produced by other components, not only records the
+    local ``build_provenance`` helper emitted. The full shape validation
+    still lives in ``audit_export.validate_audit_record`` and the normative
+    ``northstar-run-contract/audit.py::validate_record``.
+    """
+    provenance = record.get("provenance")
+    if not isinstance(provenance, dict):
+        return None
+    external = provenance.get("externalParameters")
+    if not isinstance(external, dict) or not external:
+        return None
+    trust = provenance.get("externalParametersTrust")
+    if trust not in ("untrusted", "verified"):
+        return (
+            "provenance carries non-empty 'externalParameters' without an explicit "
+            "'externalParametersTrust' marking ('untrusted' | 'verified'): "
+            "unmarked external input must fail verification, never pass silently"
+        )
+    return None
 
 
 def _parse_audit_ts(ts: Any) -> float | None:

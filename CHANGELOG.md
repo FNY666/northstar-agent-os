@@ -35,6 +35,41 @@ peer-reviewed venue), honestly scoped to the deterministic engine:
 
 `BENCH_VERSION` v9 → v10; `ASK_TIMING_CORPUS` and `run_ask_timing`
 exported; human + `--json` output print the new track.
+## Unreleased (fifty-seventh batch) — SLSA v1.0 provenance semantics for the audit chain
+
+Absorbs the *field semantics* (not the trust model) of
+[SLSA v1.0 Provenance](https://slsa.dev/spec/v1.0/provenance)
+(predicate type `https://slsa.dev/provenance/v1`, read 2026-10-03) into the
+`audit.ndjson/1` envelope, as proposed by the supply-chain mining line —
+nothing taken on secondary-source faith:
+
+- **Evidence field mapping** (`docs/slsa-provenance-mapping.md`):
+  `buildDefinition.buildType` → `provenance.buildType` (run-type profile
+  URI), `buildDefinition.externalParameters` → `provenance.externalParameters`
+  (externally-controlled inputs), `buildDefinition.internalParameters` →
+  `provenance.internalParameters` (builder-set parameters),
+  `buildDefinition.resolvedDependencies` → `provenance.resolvedDependencies`
+  (`{"uri", "digest"}` resource descriptors), `runDetails.builder.id` →
+  `provenance.builder.id`, `runDetails.metadata.invocationId` →
+  `provenance.invocationId`. The doc is explicit about what is *not*
+  mapped (subject, startedOn/finishedOn, builder.version, byproducts,
+  DSSE envelope) and why.
+- **The core SLSA verifier rule, enforced**: externalParameters are
+  untrusted by definition. A record carrying non-empty `externalParameters`
+  must mark `externalParametersTrust` explicitly (`"untrusted"` |
+  `"verified"`); unmarked external input fails envelope validation *and*
+  `audit verify` (new check in `audit_chain.verify_lines`), never passes
+  silently. `invocationId` must match the envelope `run_id` when both are
+  present.
+- **`audit_export.build_provenance(...)`** constructs the object with the
+  trust marking defaulting to an *explicit* `"untrusted"`; validation is
+  mirrored verbatim in `northstar-run-contract/audit.py::validate_record`
+  (plus a `provenance` parameter on `new_record`), and the parity test pins
+  the two validators against each other.
+- **Honest limitations, stated in the doc and the code**: no SLSA level
+  claim; `builder.id` is self-asserted (`selfAsserted: true`) — integrity
+  comes from the hash chain + optional Ed25519 signature + external anchor,
+  not from a hardened builder.
 
 ## Unreleased (fifty-fifth batch) — per-call approval binding + structured denial tool results
 

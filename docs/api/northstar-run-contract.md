@@ -61,7 +61,7 @@ RFC 3339 UTC timestamp with milliseconds, e.g. ``2026-09-07T03:04:05.123Z``.
 
 Convert an integer epoch-seconds timestamp into the feed's RFC 3339 form.
 
-#### `new_record(component: str, event: str, *, seq: int | None=None, ts: str | None=None, level: str='info', payload: dict[str, Any] | None=None, session_id: str | None=None, run_id: str | None=None, actor_id: str | None=None)`
+#### `new_record(component: str, event: str, *, seq: int | None=None, ts: str | None=None, level: str='info', payload: dict[str, Any] | None=None, session_id: str | None=None, run_id: str | None=None, actor_id: str | None=None, provenance: dict[str, Any] | None=None)`
 
 Build one audit record; raises ``ValueError`` on the first validation error.
 
