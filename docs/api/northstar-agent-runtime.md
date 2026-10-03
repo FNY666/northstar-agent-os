@@ -9,6 +9,108 @@ Docstring-generated reference over the component's public modules (``ast``-extra
 
 ## Modules
 
+### `adjudication`
+
+Source: `components/northstar-agent-runtime/adjudication.py`
+
+Human final adjudication for AI sports systems (one-hundred-eighteenth batch).
+
+#### `AdjudicationError`
+
+Malformed receipt/plan/output or a programming error.
+
+#### `AdjudicationReceipt`
+
+A human adjudicator's countersign on one AI decision.
+
+#### `compute_adjudication_digest(receipt: AdjudicationReceipt)`
+
+Recompute the JCS digest an adjudication receipt claims.
+
+#### `issue_adjudication_receipt(*, receipt_id: str, decision_digest: str, adjudicator_id: str, adjudicator_pubkey_hex: str, qualified_scenes: tuple[str, ...], scene_class: str, authority_secret: bytes, issued_by: str, adjudicated_at: int, expires_at: int, prev_digest: str=_GENESIS)`
+
+Issue an authority-signed adjudication countersign receipt.
+
+#### `AdjudicationVerdict`
+
+Verdict of the final-adjudication gate.
+
+#### `final_adjudication_gate(log: list[AdjudicationReceipt], *, decision_digest: str, scene_class: str, decision_time: int, check_time: int)`
+
+Fail-closed gate: may this AI decision be released?
+
+#### `PopulationFitReceipt`
+
+Authority-signed declaration of the populations a model capability was measured on.
+
+#### `compute_population_digest(receipt: PopulationFitReceipt)`
+
+Recompute the JCS digest a population receipt claims.
+
+#### `issue_population_receipt(*, receipt_id: str, model_digest: str, capability_id: str, measured_populations: tuple[str, ...], authority_secret: bytes, issued_by: str, measured_at: int, expires_at: int, prev_digest: str=_GENESIS)`
+
+Issue an authority-signed measured-population receipt.
+
+#### `PopulationVerdict`
+
+Verdict of the population-fit gate.
+
+#### `check_population_fit(log: list[PopulationFitReceipt], *, model_digest: str, capability_id: str, target_population: str, check_time: int)`
+
+Is this model fit to serve this population for this capability?
+
+#### `BiometricPurposeReceipt`
+
+A data subject's grant for biometric-data use.
+
+#### `compute_biometric_digest(receipt: BiometricPurposeReceipt)`
+
+Recompute the JCS digest a biometric receipt claims.
+
+#### `grant_biometric_use(*, receipt_id: str, subject_id: str, subject_secret: bytes, data_scope: str, purposes: tuple[str, ...], resale_allowed: bool=False, granted_at: int, expires_at: int)`
+
+The subject grants biometric-data use for named purposes.
+
+#### `revoke_biometric_use(receipt: BiometricPurposeReceipt, *, subject_secret: bytes)`
+
+Revoke a biometric grant. Revocation is terminal: a new grant needs a new receipt (105th-batch irreversible-revocation).
+
+#### `BiometricVerdict`
+
+Verdict of the biometric purpose-binding gate.
+
+#### `biometric_purpose_binding(log: list[BiometricPurposeReceipt], *, subject_id: str, data_scope: str, purpose: str, check_time: int)`
+
+Use-time check: may this biometric use proceed?
+
+#### `CoachOutput`
+
+An AI coach's output with its honesty label.
+
+#### `check_coach_output(output: CoachOutput)`
+
+Gate an AI coaching output on its honesty label.
+
+#### `DegradationPlan`
+
+A critical system's fail-closed degradation plan.
+
+#### `compute_degradation_digest(plan: DegradationPlan)`
+
+Recompute the JCS digest a degradation plan claims.
+
+#### `issue_degradation_plan(*, plan_id: str, system_id: str, failure_modes: tuple[str, ...], takeover_procedure_digest: str, authority_secret: bytes, issued_by: str, tested_at: int, expires_at: int, prev_digest: str=_GENESIS)`
+
+Issue an authority-signed fail-closed degradation plan.
+
+#### `check_degradation_plan(log: list[DegradationPlan], *, system_id: str, check_time: int)`
+
+Does this critical system have a valid fail-closed plan?
+
+#### `check_pipeline_mixing(*, pipeline: str, inputs: tuple[Mapping[str, str], ...])`
+
+Betting-tagged inputs may not enter protected pipelines.
+
 ### `approver_separation`
 
 Source: `components/northstar-agent-runtime/approver_separation.py`
@@ -1256,6 +1358,10 @@ Synthetic-data ratio cap (one-hundred-twelfth batch).
 #### `run_language_cap()`
 
 Language-capability receipts (one-hundred-fourteenth batch).
+
+#### `run_adjudication()`
+
+Human final adjudication for AI sports systems (one-hundred-eighteenth batch).
 
 #### `run_deployment_registry()`
 

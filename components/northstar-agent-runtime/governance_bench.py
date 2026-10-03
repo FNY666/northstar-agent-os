@@ -115,7 +115,7 @@ from tools import ToolLimits, ToolSandbox, build_default_registry
 
 #: Semantic version of the public case set. Bump when a case is added, removed,
 #: or its expected verdict changes — consumers pin against this string.
-BENCH_VERSION = "northstar.governance.bench.v25"
+BENCH_VERSION = "northstar.governance.bench.v26"
 
 USAGE_ERROR = 64
 
@@ -6077,6 +6077,311 @@ def run_language_cap() -> dict[str, Any]:
         except LanguageCapError as error:
             outcome = {"verdict": "deny", "reason": f"raised: {error}",
                        "classification": CLASS_UNVERIFIABLE, "event": {}}
+        verdict = outcome.get("verdict")
+        if verdict != expected:
+            mismatches.append(
+                f"{sid}: expected {expected}, got {verdict}"
+            )
+        if verdict == "allow":
+            allowed_ids.append(sid)
+        elif verdict == "allow-with-warning":
+            warned_ids.append(sid)
+        else:
+            denial_reasons[sid] = outcome.get("reason", "")
+
+    return {
+        "n_scenarios": len(scenarios),
+        "mismatches": mismatches,
+        "allowed_ids": allowed_ids,
+        "warned_ids": warned_ids,
+        "denial_reasons": denial_reasons,
+    }
+
+
+def run_adjudication() -> dict[str, Any]:
+    """Human final adjudication for AI sports systems (one-hundred-eighteenth batch).
+
+    Absorbs the 2026 AI-sports thread: FIFA "Football AI" (1248 3D-scanned
+    players, 500Hz IMU smart ball, offside threshold 50cm -> 10cm) keeps
+    human final adjudication for crowded/subjective scenes; Wimbledon 2026
+    qualifiers paused fully-automated line-calling on a heat failure
+    (SPOF); JSAMS 2026-05: concussion AI is clinical assist only and
+    male-pro-trained models fail on women/youth; biometric data ownership
+    is the labor negotiation (no-third-party-resale clauses); AI deepfake
+    betting endorsements are the abuse vector; Spain's 188-paper review:
+    "autonomous coaching is far away".
+
+    Fail-closed rules over 12 deterministic scenarios: AI
+    officiating/medical/fitness decisions in gated scene classes
+    (crowded_scene, subjective_call, medical_advice, youth_athletes,
+    fitness_advice) are NON_AUTHORITATIVE without a registered human
+    adjudicator's countersign bound to the exact
+    (decision_digest, adjudicator_id, scene_class) triple; models
+    serving an unmeasured population flag ``population_mismatch``;
+    biometric use outside the granted purpose denies as purpose creep
+    and resale without an explicit resale grant is a hard deny; AI
+    coaching must carry a capability-boundary honesty label and
+    medical-diagnosis framing denies with a clinical redirect;
+    critical automation without a declared fail-closed degradation
+    plan cannot be registered; betting-tagged inputs may not enter
+    officiating/coaching/adjudication/medical pipelines. Ground truth
+    is closed: 4 allow / 8 deny.
+    """
+    from adjudication import (
+        DENY_BETTING_CONTAMINATION,
+        DENY_COACH_DIAGNOSIS,
+        DENY_NO_ADJUDICATION,
+        DENY_NO_DEGRADATION_PLAN,
+        DENY_POPULATION_MISMATCH,
+        DENY_PURPOSE_CREEP,
+        DENY_RESALE,
+        CoachOutput,
+        biometric_purpose_binding,
+        check_coach_output,
+        check_degradation_plan,
+        check_pipeline_mixing,
+        check_population_fit,
+        final_adjudication_gate,
+        grant_biometric_use,
+        issue_adjudication_receipt,
+        issue_degradation_plan,
+        issue_population_receipt,
+    )
+
+    T0 = 1_700_000_000
+    SEED = bytes(range(32))
+    SUBJECT = bytes([7]) * 32
+    MODEL = "ab" * 32
+    DECISION = "cd" * 32
+    PROCEDURE = "ef" * 32
+    ADJ_PUBKEY = "aa" * 32
+
+    def _countersign(**over):
+        kw = dict(
+            receipt_id="adj-1",
+            decision_digest=DECISION,
+            adjudicator_id="ref-arias",
+            adjudicator_pubkey_hex=ADJ_PUBKEY,
+            qualified_scenes=("crowded_scene", "subjective_call"),
+            scene_class="crowded_scene",
+            authority_secret=SEED,
+            issued_by="competition-authority",
+            adjudicated_at=T0,
+            expires_at=T0 + 86_400,
+        )
+        kw.update(over)
+        return issue_adjudication_receipt(**kw)
+
+    def _gate_outcome(verdict):
+        return {
+            "verdict": "allow" if verdict.allowed else "deny",
+            "reason": verdict.reason,
+            "classification": verdict.classification,
+        }
+
+    scenarios: list[tuple[str, str, Any]] = []
+
+    def _scenario(sid: str, expected: str, thunk: Any) -> None:
+        scenarios.append((sid, expected, thunk))
+
+    def _s1():
+        v = final_adjudication_gate(
+            [],
+            decision_digest=DECISION,
+            scene_class="routine_coaching",
+            decision_time=T0,
+            check_time=T0 + 60,
+        )
+        return _gate_outcome(v)
+
+    _scenario("allow_routine_coaching_tip", "allow", _s1)
+
+    def _s2():
+        v = final_adjudication_gate(
+            [_countersign()],
+            decision_digest=DECISION,
+            scene_class="crowded_scene",
+            decision_time=T0,
+            check_time=T0 + 60,
+        )
+        return _gate_outcome(v)
+
+    _scenario("allow_adjudicated_offside", "allow", _s2)
+
+    def _s3():
+        receipt = issue_population_receipt(
+            receipt_id="pop-1",
+            model_digest=MODEL,
+            capability_id="concussion-assist-v2",
+            measured_populations=("youth_athlete",),
+            authority_secret=SEED,
+            issued_by="sports-medicine-board",
+            measured_at=T0,
+            expires_at=T0 + 86_400,
+        )
+        v = check_population_fit(
+            [receipt],
+            model_digest=MODEL,
+            capability_id="concussion-assist-v2",
+            target_population="youth_athlete",
+            check_time=T0 + 60,
+        )
+        return _gate_outcome(v)
+
+    _scenario("allow_population_matched", "allow", _s3)
+
+    def _s4():
+        grant = grant_biometric_use(
+            receipt_id="bio-1",
+            subject_id="athlete-9",
+            subject_secret=SUBJECT,
+            data_scope="biometric_raw",
+            purposes=("coaching",),
+            granted_at=T0,
+            expires_at=T0 + 86_400,
+        )
+        v = biometric_purpose_binding(
+            [grant],
+            subject_id="athlete-9",
+            data_scope="biometric_raw",
+            purpose="coaching",
+            check_time=T0 + 60,
+        )
+        return _gate_outcome(v)
+
+    _scenario("allow_biometric_coaching_use", "allow", _s4)
+
+    def _s5():
+        v = final_adjudication_gate(
+            [],
+            decision_digest=DECISION,
+            scene_class="crowded_scene",
+            decision_time=T0,
+            check_time=T0 + 60,
+        )
+        return _gate_outcome(v)
+
+    _scenario("deny_no_countersign_crowded", "deny", _s5)
+
+    def _s6():
+        v = final_adjudication_gate(
+            [_countersign()],
+            decision_digest=DECISION,
+            scene_class="crowded_scene",
+            decision_time=T0,
+            check_time=T0 + 86_401,  # past expiry
+        )
+        return _gate_outcome(v)
+
+    _scenario("deny_expired_countersign", "deny", _s6)
+
+    def _s7():
+        receipt = issue_population_receipt(
+            receipt_id="pop-2",
+            model_digest=MODEL,
+            capability_id="concussion-assist-v2",
+            measured_populations=("adult_male_pro",),  # male-pro data...
+            authority_secret=SEED,
+            issued_by="sports-medicine-board",
+            measured_at=T0,
+            expires_at=T0 + 86_400,
+        )
+        v = check_population_fit(
+            [receipt],
+            model_digest=MODEL,
+            capability_id="concussion-assist-v2",
+            target_population="youth_athlete",  # ...on youth athletes
+            check_time=T0 + 60,
+        )
+        return _gate_outcome(v)
+
+    _scenario("deny_population_mismatch", "deny", _s7)
+
+    def _s8():
+        grant = grant_biometric_use(
+            receipt_id="bio-2",
+            subject_id="athlete-9",
+            subject_secret=SUBJECT,
+            data_scope="biometric_raw",
+            purposes=("coaching",),
+            granted_at=T0,
+            expires_at=T0 + 86_400,
+        )
+        v = biometric_purpose_binding(
+            [grant],
+            subject_id="athlete-9",
+            data_scope="biometric_raw",
+            purpose="model_training",
+            check_time=T0 + 60,
+        )
+        return _gate_outcome(v)
+
+    _scenario("deny_purpose_creep_training", "deny", _s8)
+
+    def _s9():
+        grant = grant_biometric_use(
+            receipt_id="bio-3",
+            subject_id="athlete-9",
+            subject_secret=SUBJECT,
+            data_scope="biometric_raw",
+            purposes=("coaching",),
+            granted_at=T0,
+            expires_at=T0 + 86_400,
+        )
+        v = biometric_purpose_binding(
+            [grant],
+            subject_id="athlete-9",
+            data_scope="biometric_raw",
+            purpose="third_party_resale",
+            check_time=T0 + 60,
+        )
+        return _gate_outcome(v)
+
+    _scenario("deny_resale_no_grant", "deny", _s9)
+
+    def _s10():
+        v = check_coach_output(
+            CoachOutput(
+                output_digest="00" * 32,
+                coach_id="coach-ai-3",
+                claimed_capabilities=("technique",),
+                not_qualified_for=("nutrition_general",),
+                framing="medical_diagnosis",
+                topic="knee_pain",
+            )
+        )
+        return _gate_outcome(v)
+
+    _scenario("deny_coach_diagnosis", "deny", _s10)
+
+    def _s11():
+        v = check_degradation_plan([], system_id="auto-lines", check_time=T0 + 60)
+        return _gate_outcome(v)
+
+    _scenario("deny_no_degradation_plan", "deny", _s11)
+
+    def _s12():
+        v = check_pipeline_mixing(
+            pipeline="officiating",
+            inputs=(
+                {"source": "officiating", "feed": "trackers"},
+                {"source": "betting", "feed": "odds"},
+            ),
+        )
+        return _gate_outcome(v)
+
+    _scenario("deny_betting_contamination", "deny", _s12)
+
+    mismatches: list[str] = []
+    allowed_ids: list[str] = []
+    warned_ids: list[str] = []
+    denial_reasons: dict[str, str] = {}
+    for sid, expected, thunk in scenarios:
+        try:
+            outcome = thunk()
+        except Exception as error:
+            outcome = {"verdict": "deny", "reason": f"raised: {error}",
+                       "classification": "unverifiable-process"}
         verdict = outcome.get("verdict")
         if verdict != expected:
             mismatches.append(
@@ -14999,6 +15304,68 @@ def _case_metrics_incident_receipts(h: BenchHarness) -> BenchExpectation:
     )
 
 
+def _case_metrics_adjudication(h: BenchHarness) -> BenchExpectation:
+    """Human final adjudication for AI sports systems (one-hundred-eighteenth batch).
+
+    12 deterministic scenarios, 4 allow / 8 deny: a routine coaching tip
+    in a non-gated scene allows; an offside call in a crowded scene with
+    a valid human countersign allows; a concussion-assist model serving
+    its measured population allows; a purpose-granted biometric coaching
+    use allows. Denied: a crowded-scene call with no countersign
+    (NON_AUTHORITATIVE, assist-only), an expired countersign, a
+    male-pro-measured model serving youth athletes
+    (``population_mismatch``), training a model on a coaching-only
+    biometric grant (purpose creep), third-party resale without an
+    explicit resale grant (hard deny), medical-diagnosis framing from
+    an AI coach (redirected to the clinical path), critical automation
+    with no fail-closed degradation plan (deployment-registry hook),
+    and a betting-tagged input entering the officiating pipeline.
+    """
+    metrics = run_adjudication()
+
+    def check(exp: BenchExpectation, report: Any) -> tuple[bool, str]:
+        if metrics["n_scenarios"] != 12:
+            return (False, f"expected 12 adjudication scenarios, saw {metrics['n_scenarios']}")
+        if metrics["mismatches"]:
+            return (False, f"scenario(s) disagree with ground truth: {metrics['mismatches']}")
+        if metrics["allowed_ids"] != [
+            "allow_routine_coaching_tip",
+            "allow_adjudicated_offside",
+            "allow_population_matched",
+            "allow_biometric_coaching_use",
+        ]:
+            return (False, f"allowed set drifted: {metrics['allowed_ids']}")
+        reasons = metrics["denial_reasons"]
+        for sid, needle in (
+            ("deny_no_countersign_crowded", "no_adjudication"),
+            ("deny_expired_countersign", "expired"),
+            ("deny_population_mismatch", "population_mismatch"),
+            ("deny_purpose_creep_training", "purpose_creep"),
+            ("deny_resale_no_grant", "resale_denied"),
+            ("deny_coach_diagnosis", "diagnosis_denied"),
+            ("deny_no_degradation_plan", "no_degradation_plan"),
+            ("deny_betting_contamination", "betting_contamination"),
+        ):
+            if needle not in reasons.get(sid, ""):
+                return (False, f"denial reason missing {needle!r}: {reasons.get(sid, '')!r}")
+        return True, "12/12 adjudication probes match ground truth"
+
+    return BenchExpectation(
+        runtime=_noop_runtime(h),
+        expect_subtype="success",
+        post_check=check,
+        metrics=metrics,
+        notes=(
+            "2026 AI-sports thread: FIFA Football AI keeps human final "
+            "adjudication for crowded/subjective scenes; Wimbledon 2026 "
+            "heat failure paused fully-automated line-calling (SPOF); "
+            "concussion AI is clinical assist only, male-pro-trained models "
+            "fail on youth; biometric data is the labor negotiation; the "
+            "gate enforces human-in-the-loop structure, not judgment quality."
+        ),
+    )
+
+
 def _case_metrics_language_cap(h: BenchHarness) -> BenchExpectation:
     """Language-capability receipts (one-hundred-fourteenth batch).
 
@@ -16799,6 +17166,8 @@ CASES: tuple[BenchCase, ...] = (
     BenchCase("metrics.vendor_chain", "metrics", "vendor-chain provenance receipts: hash-chained vendor hops, transitive taint, envelope-gated autonomous action", _case_metrics_vendor_chain),
     BenchCase("metrics.stream_guard", "metrics", "streaming output guard: per-chunk screening, liveness-pinned guards, anti-smuggling overlap, receipt-chained decisions", _case_metrics_stream_guard),
     BenchCase("metrics.dual_use", "metrics", "dual-use screen for autonomous science: constraint bindings, watchlist tripwire, claim registry, citation integrity, mechanical verifier (AI-for-science absorption)", _case_metrics_dual_use),
+    BenchCase("metrics.editorial", "metrics", "editorial countersign + publication gates: hash-chained countersigns, disclosure bound to payload, marking resilience, UGC capture attestation, election deepfake hold, slop velocity throttle (AI-media absorption)", _case_metrics_editorial),
+    BenchCase("metrics.env_cost", "metrics", "environmental-cost receipts: (kwh, water, estimated carbon, region) spend receipts, authority-signed curtailment caps, confidence-gated detections, experimental-system labels, physics-constrained extrapolation, open-loop vs confirmed detections, named-platform efficiency claims (AI-climate absorption)", _case_metrics_env_cost),
     BenchCase("metrics.agri", "metrics", "agriculture extension: scene-bound (crop, scale, agroecology) advice, dynamic field-condition envelopes, farmer data sovereignty receipts, advice explainability + language gate, smallholder-access disclosure (AI-agriculture absorption)", _case_metrics_agri),
     BenchCase("metrics.deployment_registry", "metrics", "deployment registration gate: authority-signed hash-chained registrations, FRIA/explanation for high-risk, retention floor, shadow detection", _case_metrics_deployment_registry),
     BenchCase("metrics.language_cap", "metrics", "language-capability receipts: authority-signed (model, tag, variant) declarations, mistranslation gates with mandatory human review, fluency-trap flag, cross-language probe downgrades, revocable community grants", _case_metrics_language_cap),
@@ -16807,6 +17176,7 @@ CASES: tuple[BenchCase, ...] = (
     BenchCase("metrics.herd_gate", "metrics", "herd-correlation gate: declared signal sources, Jaccard herd-overlap denial, correlated-exposure cap (AI-finance absorption)", _case_metrics_herd_gate),
     BenchCase("metrics.scene_bound", "metrics", "scene-bound authorization receipts: pair-exact (setting, stratum) scope, manifest-pinned performance, consent-first ambient capture, unverifiable-process model invocation", _case_metrics_scene_bound),
     BenchCase("metrics.incident_receipts", "metrics", "incident receipts + evaluator-access gate: Art.73 reporting clocks with auto-escalation, 5-year retention floor, evaluate-A/ship-B gate, cheat probes", _case_metrics_incident_receipts),
+    BenchCase("metrics.adjudication", "metrics", "human final adjudication for AI sports: countersigned release for gated scenes, population-mismatch flags, biometric purpose binding + resale hard deny, coach honesty labels, fail-closed degradation plans, betting isolation", _case_metrics_adjudication),
     BenchCase("metrics.harness_binding", "metrics", "harness integrity binding: SHA-256 harness hash in audit, quad-only scores", _case_metrics_harness_binding),
     BenchCase("metrics.drift_detection", "metrics", "Livenerf-style drift probe: bootstrap CI + paired permutation test", _case_metrics_drift_detection),
 )
@@ -17444,6 +17814,7 @@ __all__ = [
     "run_herd_gate",
     "run_scene_bound",
     "run_language_cap",
+    "run_adjudication",
     "run_vendor_chain",
     "run_deployment_registry",
     "run_incident_receipts",
