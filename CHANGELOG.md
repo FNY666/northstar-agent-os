@@ -1,3 +1,93 @@
+## Unreleased (one-hundred-twenty-sixth batch) — embodied safety vacuum gates (AI-construction/manufacturing absorption)
+
+New module `embodied.py`: `safety_vacuum_gate()` — an embodied
+deployment with no standard declaration is
+`embodied.unverifiable_safety`; only a certified standard or an
+explicit `standard=pre_ratification` declaration (ISO 25785-1 draft
+lesson) passes. `fall_zone_receipt()` — actuation near humans needs
+a fresh, unrevoked fall-zone/clearance computation (Unitree G1
+lesson). `capability_honesty_label()` — speed/capability claims bind
+a measured benchmark digest; marketing without measured evidence is
+`embodied.unsubstantiated_capability`. `labor_impact_receipt()` —
+displacement at/above the threshold without a disclosed receipt is
+`embodied.labor_impact_undisclosed` (Hyundai/Warsaw lesson:
+compliance does not erase displacement). `prescriptive_agent_gate()`
+— prescriptive agents act only inside an authority-signed envelope
+they can never widen. `inspection_confidence_gate()` —
+below-threshold verdicts cannot auto-release product (measured
+escape rates are not guarantees). `DispatchLedger` — hash-chained
+command-center dispatch; unaudited dispatch denies.
+`incident_binding()` — physical incidents feed the 113th-batch
+incident clock. Bench track `metrics.embodied`: 12 scenarios,
+4 allow / 8 deny.
+
+## Unreleased (one-hundred-twenty-fifth batch) — insurance denial receipts (AI-insurance absorption)
+
+New module `insurance.py`: human-countersigned, hash-chained claim-denial
+receipts — an AI-shaped denial is `NON_AUTHORITATIVE` until a human takes
+it over (Utah rule as mechanism, `insurance:ai_only_denial`); vague
+reasons like "model output" are rejected at issuance. `ai_involvement_disclosure()`
+binds AI participation to the exact decision digest (`insurance:hidden_ai`).
+`appeal_overturn_tripwire()` auto-suspends a model whose overturn rate crosses
+the authority-pinned 0.50 threshold (nH Predict lesson, min 20 appeals).
+`proxy_discrimination_probe()`: proxy features (ZIP, aerial imagery, social
+signals) need a live authority-signed probe before pricing/underwriting use
+(NAIC/Colorado/NYDFS). `high_risk_gate()`: underwriting/claims/pricing need
+committee approval + supervision declaration + filing + stop conditions
+(Document 8 Art. 16). `fraud_signal_gate()`: a fraud score alone can never
+deny — denial needs score + human review + evidence binding. `vendor_liability()`
+pins liability to the insurer (no shifting field exists); vendor AI needs
+audit rights + bias-test evidence. `dark_pattern_gate()` denies customer flows
+with closed-vocabulary markers. Bench track `metrics.insurance`: 12 scenarios,
+4 allow / 8 deny.
+
+## Unreleased (one-hundred-twenty-fourth batch) — agentic commerce terms (AI-fashion/retail absorption)
+
+New module `commerce.py`: authority-signed, hash-chained receipts for
+the buying pipeline. `terms_read_receipt()` binds a machine-readable
+read of the size chart, return policy, and total price (incl. fees) to
+the *exact* product — ordering without it denies with
+`commerce.unverifiable_terms` (only 66% of product pages are
+machine-readable). `likeness_creep_gate()`: a likeness grant covers
+only its declared use classes; an AI-generated new class (studio
+shot → sexualized ad) needs a new grant, else
+`commerce.likeness_creep` (Pujols v. Rainbow USA). `biometric_capture_receipt()`
+binds purpose, retention, and deletion mechanism for try-on body data;
+expired retention without a signed deletion receipt denies with
+`commerce.deletion_unverified` (BIPA lesson). Try-on previews are
+`non_authoritative` by construction — using one as a fit decision
+denies with `commerce.fit_guarantee_claim`. `authentication_evidence()`
+grades counterfeit/authentication verdicts by evidence tier with
+confidence ceilings (Entrupy's 99.1% is vendor-declared), and
+high-value items without a human-review path deny with
+`commerce.human_review_required`. `check_passport_binding()` binds
+digital product passports (Aura/ESPR) to listings; mismatch denies.
+`check_model_substitution()` denies undisclosed AI catalog-model
+replacement. Bench track `metrics.commerce`: 12 scenarios, 4 allow / 8 deny.
+
+## Unreleased (one-hundred-twenty-third batch) — booking-agent transaction receipts (AI-hospitality absorption)
+
+New module `booking_agents.py`: advice→action transaction structure.
+`BookingIntentReceipt` pins `(price_ceiling, route_or_stay_digest, purpose)`
+— transactions exceeding the ceiling auto-refuse
+(`booking:intent_ceiling_breach`); no-self-issuance, the agent cannot mint
+its own spending permission. `FreshnessRegistry`: TTL-bound
+price/availability/visa assertions — stale assertions used to authorize a
+booking are `NON_AUTHORITATIVE` (`booking:stale_assertion`, the KLIA
+static-data-vs-reality lesson). `pricing_disclosure_gate()`:
+dynamic/personalized pricing without a merchant-signed disclosure binding
+the quote refuses (`booking:undisclosed_personalized_pricing`, the
+Delta/Ctrip lesson). `PolicyReceipt`: support outputs must match the
+pinned policy digest (Air Canada lesson: AI output = company output) —
+drift denies, audits `booking.policy_drift`, routes to a human.
+`RebookingLog`: denied boarding needs a preceding pre-emptive rebooking
+receipt, else `booking:unverifiable_denial`. `BookingSession`:
+context-loss markers → `booking:context_broken`, the session must restart
+with fresh consent. `commercial_bias_gate()`: paid placement without a
+neutrality disclosure bound to the recommendation denies
+(`booking:hidden_commercial_bias`). Bench track `metrics.booking_agents`:
+12 scenarios, 4 allow / 8 deny.
+
 ## Unreleased (one-hundred-twenty-first batch) — companionship safeguards (AI-dating/companionship absorption)
 
 New module `companionship.py`: minor intimacy is a class gate, not a
