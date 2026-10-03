@@ -1,3 +1,34 @@
+## Unreleased (one-hundred-thirty-first batch) — water infrastructure defense (AI-water absorption)
+
+New module `water_agents.py`: `ot_airgap_receipt()` — signed OT
+isolation declaration receipts; agent actions at a utility with no
+valid/fresh/signed receipt are `water-non-authoritative`
+(NY 2026 lesson: where the regulator is absent, the receipt is the
+regulator). `plc_exposure_probe()` — fail-closed PLC exposure check;
+exposed PLCs without MFA *and* isolation are `water:plc_exposure`
+(2026 PLC-wave lesson). `ai_attack_telemetry()` — Dragos TTP markers
+(`llm_scada_recon`, `llm_vnode_gateway_identification`,
+`llm_malicious_script_generation`, `plc_credential_change`, ...) in
+a closed vocabulary; critical markers or 2+ attack markers raise
+`water:ai_assisted_attack`; unknown markers fail closed.
+`quality_forecast_gate()` — predictions default NON_AUTHORITATIVE
+unless bound to a fresh measurement-protocol digest.
+`chemical_dosing_envelope()` — authority-signed dosing envelopes,
+closed action vocabulary, no self-widening (126th-batch
+prescriptive semantics for what goes into the water).
+`leak_claim_receipt()` — vendor leak claims bind a verification
+protocol; unbound claims are `water:unverified_leak_claim`.
+`boil_notice_evidence()` — boil-water notices bind an event
+evidence chain plus a human countersign before release.
+`data_sovereignty_gate()` — network-data export binds a purpose
+receipt; re-purposing is `water:data_repurpose` (Berlin leak
+lesson). `water_footprint_binding()` — workloads declare
+`water_liters` bound to a 115th-batch ledger receipt digest.
+Honest scoping: receipts bind declared infrastructure discipline;
+they don't make water safe, replace OT engineering, or detect
+attacks in progress. Bench track `metrics.water_agents`: 12
+scenarios, 4 allow / 8 deny.
+
 ## Unreleased (one-hundred-thirtieth batch) — greenwashing evidence gates (AI-waste/circular-economy absorption)
 
 New module `greenwash.py`: `recycled_content_receipt()` — recycled-content

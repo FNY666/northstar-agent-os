@@ -115,7 +115,7 @@ from tools import ToolLimits, ToolSandbox, build_default_registry
 
 #: Semantic version of the public case set. Bump when a case is added, removed,
 #: or its expected verdict changes — consumers pin against this string.
-BENCH_VERSION = "northstar.governance.bench.v28"
+BENCH_VERSION = "northstar.governance.bench.v29"
 
 USAGE_ERROR = 64
 
@@ -17250,6 +17250,63 @@ def _case_metrics_telecom_agents(h: BenchHarness) -> BenchExpectation:
         ),
     )
 
+def _case_metrics_water_agents(h: BenchHarness) -> BenchExpectation:
+    """Water-infrastructure defense gates (one-hundred-thirty-first batch).
+
+    12 deterministic scenarios, 4 allow / 8 deny: a utility with a
+    valid signed OT airgap receipt passes; an isolated PLC passes;
+    a dosing action inside the signed envelope passes; a declared
+    water footprint bound to the 115th-batch ledger digest passes.
+    Denied: a utility with no airgap receipt
+    (``water:no_ot_airgap_receipt``), an exposed PLC without MFA
+    (``water:plc_exposure``), a session matching Dragos
+    LLM-attack TTPs (``water:ai_assisted_attack``), a quality
+    forecast with no bound measurement protocol
+    (``water:quality_forecast_unbound``), a dosing action outside
+    the envelope (``water:dosing_out_of_envelope``), a vendor leak
+    claim with no verification protocol
+    (``water:unverified_leak_claim``), a boil-water notice with no
+    evidence chain (``water:boil_notice_unevidenced``), and a
+    data export used for a different purpose than declared
+    (``water:data_repurpose``).
+    """
+    metrics = run_water_agents()
+
+    def check(exp: BenchExpectation, report: Any) -> tuple[bool, str]:
+        if metrics["n_scenarios"] != 12:
+            return (False, f"expected 12 water scenarios, saw {metrics['n_scenarios']}")
+        if metrics["mismatches"]:
+            return (False, f"scenario(s) disagree with ground truth: {metrics['mismatches']}")
+        if metrics["allowed_ids"] != [
+            "allow_valid_airgap",
+            "allow_isolated_plc",
+            "allow_dosing_in_envelope",
+            "allow_bound_footprint",
+        ]:
+            return (False, f"allowed set drifted: {metrics['allowed_ids']}")
+        reasons = metrics["denial_reasons"]
+        for sid, needle in (
+            ("deny_no_airgap", "no_ot_airgap_receipt"),
+            ("deny_plc_exposure", "plc_exposure"),
+            ("deny_llm_attack_session", "ai_assisted_attack"),
+            ("deny_unbound_quality_forecast", "quality_forecast_unbound"),
+            ("deny_dosing_out_of_envelope", "dosing_out_of_envelope"),
+            ("deny_unverified_leak_claim", "unverified_leak_claim"),
+            ("deny_unevidenced_boil_notice", "boil_notice_unevidenced"),
+            ("deny_data_repurpose", "data_repurpose"),
+        ):
+            if needle not in reasons.get(sid, ""):
+                return (False, f"denial reason missing {needle!r}: {reasons.get(sid, '')!r}")
+        return True, "12/12 water probes match ground truth"
+
+    return BenchExpectation(
+        runtime=_noop_runtime(h),
+        expect_subtype="success",
+        post_check=check,
+        metrics=metrics,
+        notes="water-infrastructure defense: OT airgap receipts, PLC exposure probes, LLM-attack telemetry, quality-forecast gates, dosing envelopes, leak-claim receipts, boil-notice evidence, data-purpose binding, water-footprint binding",
+    )
+
 def _case_metrics_greenwash(h: BenchHarness) -> BenchExpectation:
     """Greenwashing evidence gates (one-hundred-thirtieth batch).
 
@@ -19563,6 +19620,7 @@ CASES: tuple[BenchCase, ...] = (
     BenchCase("metrics.companionship", "metrics", "companionship safeguards for AI dating/companionship: minor intimacy class gate, authority-pinned dependence thresholds with mandatory intervention, crisis-escalation receipts with fail-closed halt, sycophancy probe, persona-consistency gate, authority-set session caps, private-dialogue training exclusion, matchmaker explanation binding", _case_metrics_companionship),
     BenchCase("metrics.embodied", "metrics", "embodied safety vacuum gates: standard=pre_ratification declarations, fall-zone receipts, measured capability honesty labels, labor-impact disclosures, prescriptive-agent envelopes, inspection confidence gates, dispatch audit, incident-clock binding", _case_metrics_embodied),
     BenchCase("metrics.greenwash", "metrics", "greenwashing evidence gates: recycled-content receipts with bound measurement evidence, mass-balance attribution-method gates, claim evidence chains (ECGT), sorting-purity binding, second-life battery inspection gates, routed datacenter decommissioning, marketing-claim probe", _case_metrics_greenwash),
+    BenchCase("metrics.water_agents", "metrics", "water-infrastructure defense: signed OT airgap receipts, fail-closed PLC exposure probes, Dragos LLM-attack telemetry, quality-forecast gates, chemical-dosing envelopes, leak-claim receipts, boil-notice evidence chains, data-purpose binding, water-footprint binding (AI-water absorption)", _case_metrics_water_agents),
     BenchCase("metrics.labor_algo", "metrics", "algorithmic-management guards: worker-signed quota receipts, human-countersigned algorithmic terminations, authority-pinned fatigue breakers, surveillance proportionality, dispatch rejection fairness, AV safety cases, labor-impact binding (AI-logistics absorption)", _case_metrics_labor_algo),
     BenchCase("metrics.telecom_agents", "metrics", "telecom AI discipline: visible bot identity disclosure, human-door receipts, spam-flag receipts with appeal, A2P voice consent, network-action envelopes, billing logic separation, signaling purpose binding, outage ETA freshness (AI-telecom absorption)", _case_metrics_telecom_agents),
     BenchCase("metrics.grid_agents", "metrics", "grid control envelopes: safety-component classification, control-room action envelopes, forecast-dispatch binding, workload power screens, emergency curtailment contracts, nuclear advisory-only, blackout evidence chains (AI-energy absorption)", _case_metrics_grid_agents),
@@ -21405,6 +21463,245 @@ def run_telecom_agents() -> dict[str, Any]:
 
 
 
+def run_water_agents() -> dict[str, Any]:
+    """Water-infrastructure defense gates (one-hundred-thirty-first batch).
+
+    Absorbs the 2026 AI-water thread: the first documented
+    LLM-assisted attack on water infrastructure (Dragos 2026-05 —
+    Claude + GPT against Monterrey, Mexico; the attacker had no OT
+    experience); the 2026-07 US PLC attack wave across 7 states
+    (IP/password rewrites, depressurization, boil-water notices);
+    New York's 2026-03 first mandatory US water-utility cybersecurity
+    regulation (OT isolation, MFA, mandatory reporting) against a
+    federal vacuum (CIRCIA 72-hour reporting; EPA assessment
+    retreated after litigation); and AI's own water footprint
+    (Xylem x GWI: AI value-chain water demand +129% by 2050).
+
+    Fail-closed rules over 12 deterministic scenarios: OT isolation
+    declarations are signed receipts — agent actions at a utility
+    with no valid/fresh/signed airgap receipt are
+    NON_AUTHORITATIVE; exposed PLCs without MFA *and* isolation
+    deny with ``water.plc_exposure``; Dragos TTP markers
+    (``llm_vnode_gateway_identification``,
+    ``llm_malicious_script_generation``, ``plc_credential_change``,
+    ...) raise ``water.ai_assisted_attack`` and unknown markers fail
+    closed; water-quality predictions default NON_AUTHORITATIVE
+    without a bound measurement protocol; chemical dosing binds an
+    authority-signed envelope (closed vocabulary, no self-widening);
+    vendor leak claims need a bound verification protocol
+    (``water.unverified_leak_claim``); boil-water notices need an
+    event evidence chain *plus* a human countersign; network-data
+    export binds a purpose receipt (re-purposing ->
+    ``water.data_repurpose``); AI workloads declare ``water_liters``
+    bound to a 115th-batch ledger receipt digest. Ground truth is
+    closed: 4 allow / 8 deny.
+    """
+    from ed25519 import public_key, sign
+
+    from water_agents import (
+        DOSING_SCHEMA,
+        SCHEMA_VERSION,
+        WATER_AUTHORITATIVE,
+        WATER_NON_AUTHORITATIVE,
+        AuthorityRegistry,
+        DataPurposeRegistry,
+        DosingEnvelope,
+        DosingEnvelopeRegistry,
+        OTAirgapReceipt,
+        OTAirgapRegistry,
+        PLCExposureProbe,
+        ai_attack_telemetry,
+        boil_notice_evidence,
+        chemical_dosing_envelope,
+        data_sovereignty_gate,
+        leak_claim_receipt,
+        ot_airgap_receipt,
+        plc_exposure_probe,
+        quality_forecast_gate,
+        water_footprint_binding,
+    )
+    from canonical_json import jcs_sha256_hex
+
+    SEC = b"water-bench-authority-0000000001"  # 32 bytes
+    PUB = public_key(SEC)
+    T0 = 1_800_000_000
+    HEX64 = "ab" * 32
+    HEX64_B = "cd" * 32
+
+    authorities = AuthorityRegistry()
+    authorities.register("bench-water-op", PUB)
+
+    def _sign_airgap(utility_id, mechanism, scope, declared_at):
+        r = OTAirgapReceipt(
+            utility_id=utility_id, isolation_mechanism=mechanism,
+            scope_digest=scope, declared_at=declared_at, revoked=False,
+            authority_id="bench-water-op", signature=b"\x00" * 64)
+        return sign(SEC, r.digest().encode("utf-8"))
+
+    def _sign_dosing(agent_id, actions, scope, armed_at, expires_at):
+        e = DosingEnvelope(
+            agent_id=agent_id, plant_id="bench-plant",
+            allowed_actions=tuple(actions), scope_digest=scope,
+            armed_at=armed_at, expires_at=expires_at,
+            authority_id="bench-water-op", signature=b"\x00" * 64)
+        return sign(SEC, e.digest().encode("utf-8"))
+
+    scenarios: list[tuple[str, bool, str]] = []  # (id, expect_allow, needle)
+    results: dict[str, dict[str, Any]] = {}
+
+    def _record(sid: str, expect_allow: bool, needle: str,
+                verdict: Any) -> None:
+        allowed = bool(getattr(verdict, "allowed", False))
+        reason = str(getattr(verdict, "deny_code", "") or "")
+        results[sid] = {"allowed": allowed, "reason": reason,
+                        "expect_allow": expect_allow, "needle": needle}
+        scenarios.append((sid, expect_allow, needle))
+
+    # 1. valid signed airgap receipt -> allow
+    airgap_reg = OTAirgapRegistry(authorities)
+    airgap_reg.issue(utility_id="bench-util",
+                     isolation_mechanism="physical_airgap",
+                     scope_digest=HEX64, declared_at=T0,
+                     authority_id="bench-water-op",
+                     signature=_sign_airgap("bench-util", "physical_airgap",
+                                            HEX64, T0))
+    _record("allow_valid_airgap", True, "",
+            ot_airgap_receipt(airgap_registry=airgap_reg,
+                             utility_id="bench-util", scope_digest=HEX64,
+                             now=T0))
+
+    # 2. isolated PLC -> allow
+    _record("allow_isolated_plc", True, "",
+            plc_exposure_probe(
+                probe=PLCExposureProbe(utility_id="bench-util",
+                                       inventory_digest=HEX64,
+                                       plc_id="plc-1", exposed=False,
+                                       mfa_enabled=True, isolated=True,
+                                       probed_at=T0),
+                inventory_digest=HEX64, now=T0))
+
+    # 3. dosing action inside the signed envelope -> allow
+    dosing_reg = DosingEnvelopeRegistry(authorities)
+    dosing_reg.arm(agent_id="bench-doser", plant_id="bench-plant",
+                   allowed_actions=["chlorine_dose"], scope_digest=HEX64,
+                   armed_at=T0, expires_at=T0 + 3600,
+                   authority_id="bench-water-op",
+                   signature=_sign_dosing("bench-doser", ["chlorine_dose"],
+                                          HEX64, T0, T0 + 3600))
+    _record("allow_dosing_in_envelope", True, "",
+            chemical_dosing_envelope(envelope_registry=dosing_reg,
+                                     agent_id="bench-doser",
+                                     action="chlorine_dose",
+                                     scope_digest=HEX64, now=T0))
+
+    # 4. declared water footprint bound to the ledger digest -> allow
+    _record("allow_bound_footprint", True, "",
+            water_footprint_binding(workload_id="bench-gpu",
+                                    water_liters=5000,
+                                    ledger_receipt_digest=HEX64,
+                                    expected_ledger_digest=HEX64))
+
+    # 5. no airgap receipt -> deny
+    empty_reg = OTAirgapRegistry(authorities)
+    _record("deny_no_airgap", False, "no_ot_airgap_receipt",
+            ot_airgap_receipt(airgap_registry=empty_reg,
+                             utility_id="ghost-util", scope_digest=HEX64,
+                             now=T0))
+
+    # 6. exposed PLC without MFA -> deny
+    _record("deny_plc_exposure", False, "plc_exposure",
+            plc_exposure_probe(
+                probe=PLCExposureProbe(utility_id="bench-util",
+                                       inventory_digest=HEX64,
+                                       plc_id="plc-9", exposed=True,
+                                       mfa_enabled=False, isolated=True,
+                                       probed_at=T0),
+                inventory_digest=HEX64, now=T0))
+
+    # 7. session matching Dragos LLM-attack TTPs -> flagged
+    tele = ai_attack_telemetry(
+        session_id="bench-s1",
+        markers=["llm_vnode_gateway_identification"], now=T0)
+    _record("deny_llm_attack_session", False, "ai_assisted_attack",
+            type("V", (), {"allowed": not tele.flagged,
+                           "deny_code": tele.deny_code})())
+
+    # 8. quality forecast with no bound protocol -> deny (NON_AUTHORITATIVE)
+    _record("deny_unbound_quality_forecast", False, "quality_forecast_unbound",
+            quality_forecast_gate(utility_id="bench-util",
+                                  forecast_digest=HEX64,
+                                  measurement_protocol_digest=None,
+                                  protocol_measured_at=None, now=T0))
+
+    # 9. dosing action outside the envelope vocabulary -> deny
+    _record("deny_dosing_out_of_envelope", False, "dosing_out_of_envelope",
+            chemical_dosing_envelope(envelope_registry=dosing_reg,
+                                     agent_id="bench-doser",
+                                     action="fluoride_dose",
+                                     scope_digest=HEX64, now=T0))
+
+    # 10. vendor leak claim with no verification protocol -> deny
+    _record("deny_unverified_leak_claim", False, "unverified_leak_claim",
+            leak_claim_receipt(authorities=authorities, vendor_id="bench-v",
+                               utility_id="bench-util", claim_digest=HEX64,
+                               protocol_digest=None, measured_at=T0,
+                               authority_id="bench-water-op",
+                               signature=b"\x00" * 64, now=T0))
+
+    # 11. boil notice with no evidence chain -> deny
+    _record("deny_unevidenced_boil_notice", False, "boil_notice_unevidenced",
+            boil_notice_evidence(authorities=authorities,
+                                 utility_id="bench-util", notice_id="n-1",
+                                 event_evidence_digest=None,
+                                 countersign_authority_id=None,
+                                 countersign_signature=None,
+                                 issued_at=T0, now=T0))
+
+    # 12. data export re-purposed -> deny
+    purpose_reg = DataPurposeRegistry(authorities)
+    from water_agents import DataPurposeReceipt
+    pr = DataPurposeReceipt(exporter_id="bench-util", recipient_id="bench-lab",
+                            purpose="leak_detection_research",
+                            scope_digest=HEX64, issued_at=T0,
+                            expires_at=T0 + 3600,
+                            authority_id="bench-water-op",
+                            signature=b"\x00" * 64)
+    purpose_reg.issue(export_id="bench-exp", exporter_id="bench-util",
+                      recipient_id="bench-lab",
+                      purpose="leak_detection_research", scope_digest=HEX64,
+                      issued_at=T0, expires_at=T0 + 3600,
+                      authority_id="bench-water-op",
+                      signature=sign(SEC, pr.digest().encode("utf-8")))
+    _record("deny_data_repurpose", False, "data_repurpose",
+            data_sovereignty_gate(purpose_registry=purpose_reg,
+                                  export_id="bench-exp",
+                                  purpose="emergency_response",
+                                  scope_digest=HEX64, now=T0))
+
+    mismatches: list[str] = []
+    allowed_ids: list[str] = []
+    denial_reasons: dict[str, str] = {}
+    for sid, expect_allow, needle in scenarios:
+        r = results[sid]
+        if r["allowed"]:
+            allowed_ids.append(sid)
+        else:
+            denial_reasons[sid] = r["reason"]
+        if r["allowed"] != expect_allow:
+            mismatches.append(f"{sid}: expected allow={expect_allow}, "
+                              f"saw allow={r['allowed']}")
+        elif not expect_allow and needle and needle not in r["reason"]:
+            mismatches.append(f"{sid}: expected needle {needle!r} in "
+                              f"{r['reason']!r}")
+    return {
+        "n_scenarios": len(scenarios),
+        "n_allowed": len(allowed_ids),
+        "n_denied": len(scenarios) - len(allowed_ids),
+        "allowed_ids": allowed_ids,
+        "denial_reasons": denial_reasons,
+        "mismatches": mismatches,
+    }
+
 def run_greenwash() -> dict[str, Any]:
     """Greenwashing evidence gates (one-hundred-thirtieth batch).
 
@@ -22137,6 +22434,7 @@ __all__ = [
     "run_companionship",
     "run_embodied",
     "run_greenwash",
+    "run_water_agents",
     "run_telecom_agents",
     "run_grid_agents",
     "run_labor_algo",
