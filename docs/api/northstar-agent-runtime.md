@@ -9606,6 +9606,10 @@ Read this thread's five capability sets from /proc/self/status.
 
 True when every capability set in ``sets`` is empty.
 
+#### `drop_report_enforced(report: object)`
+
+Check enforced sets and account for every best-effort bounding drop.
+
 #### `summarize_report(report: dict[str, object])`
 
 One-line human/model-facing summary of a loader audit report.
