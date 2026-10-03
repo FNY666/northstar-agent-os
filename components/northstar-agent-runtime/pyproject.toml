@@ -103,6 +103,7 @@ py-modules = [
     "provider_retry",
     "provenance_taint",
     "run_setup",
+    "soc_verdicts",
     "plugin_load",
     "plugin_trust",
     "plugin_manifest",

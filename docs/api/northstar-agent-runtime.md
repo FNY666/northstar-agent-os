@@ -886,6 +886,10 @@ TEE attestation as receipt evidence (ninety-second batch).
 
 Process-evidence receipts (ninety-eighth batch).
 
+#### `run_soc_verdicts()`
+
+SOC verdict cards + kill-switch mandate (ninety-ninth batch).
+
 #### `run_adversarial_scenarios()`
 
 Adversarial bench scenarios: multi-agent failures, no-adversary failures, malicious-but-signed.
@@ -2895,6 +2899,59 @@ Discover skills under the workspace root; errors are operator-facing.
 #### `skill_listing(skills: Iterable[Skill], workspace: str | Path)`
 
 Compose the progressive-disclosure section for the system prompt.
+
+### `soc_verdicts`
+
+Source: `components/northstar-agent-runtime/soc_verdicts.py`
+
+SOC verdict cards: audit-ready triage decisions with mandatory kill-switches.
+
+#### `SocVerdictError`
+
+Malformed verdict-card input.
+
+#### `VerdictCard`
+
+One SOC triage verdict, built from runtime ground truth.
+
+- `card_digest()`
+  - Digest binding every field that authorizes execution.
+- `as_dict()`
+#### `build_verdict_card(*, alert_id: str, verdict: Verdict, evidence_digest: str, recommended_action: str, blast_radius_window_s: int, agent_id: str, card_id: str | None=None, agent_note: str='', created_unix: int=0)`
+
+Construct a verdict card from runtime ground truth.
+
+#### `Countersign`
+
+A human analyst's countersignature on a verdict card.
+
+- `as_dict()`
+#### `issue_countersign(*, analyst_secret: bytes, analyst_id: str, card: VerdictCard)`
+
+Sign the card digest as a human analyst. Raises on bad input.
+
+#### `verify_countersign(countersign: Countersign, card: VerdictCard, analyst_keys: Mapping[str, bytes])`
+
+Verify a countersign against the card. Pure function, fail-closed.
+
+#### `KillSwitch`
+
+A registered kill-switch for one autonomous remediation action.
+
+- `as_dict()`
+#### `check_killswitch_reachable(switch: KillSwitch, *, reachable_endpoints: frozenset[str], blast_radius_window_s: int, action_digest: str)`
+
+Check the kill-switch mandate. Pure function, fail-closed.
+
+#### `ExecutionGateResult`
+
+#### `gate_execution(card: VerdictCard, *, countersign: Countersign | None=None, analyst_keys: Mapping[str, bytes] | None=None, kill_switch: KillSwitch | None=None, reachable_endpoints: frozenset[str]=frozenset())`
+
+Decide whether the card's recommended action may execute.
+
+#### `soc_execution_denied_event(card: VerdictCard, reason: str, *, created_unix: int=0)`
+
+Audit record for a denied SOC execution, for audit.ndjson/1.
 
 ### `tracing`
 

@@ -1,3 +1,20 @@
+## Unreleased (ninety-ninth batch) — SOC verdict cards + kill-switch mandate (AI-cyberdefense absorption)
+
+New module `soc_verdicts.py`: a Verifiable Action Card (84th batch)
+specialized for SOC triage decisions — constructed from runtime ground
+truth, closed verdict vocabulary (`allow`/`quarantine`/`escalate`), Ed25519
+analyst countersign binding `(analyst_id, card_digest)` with
+no-self-countersign (94th batch, applied to the analyst slot). Every
+autonomous remediation action must register a reachable kill-switch
+`(endpoint_id, timeout_s)`; `check_killswitch_reachable()` fail-closes on
+unreachable endpoints, non-positive timeouts, or timeouts exceeding the
+action's blast-radius window. "Investigate, never the final word": the
+card is AUTHORITATIVE evidence (87th batch) but execution requires human
+countersign or an armed kill-switch — autonomous execution with neither
+is denied; there is no third path. Denials audit as
+`soc.execution_denied`. New bench track `metrics.soc_verdicts` (12
+deterministic scenarios, 3 allow / 9 deny, zero mismatches); bench v19 → v20.
+
 ## Unreleased (ninety-fifth batch) — JCS golden vectors: the single canonicalizer (RFC 8785)
 
 New module `canonical_json.py`: a small, auditable, stdlib-only
