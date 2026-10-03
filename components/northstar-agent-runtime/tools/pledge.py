@@ -336,7 +336,7 @@ def filesystem_rules(
     *,
     workspace: str,
     tmpdir: str,
-    runtime_roots: Sequence[str] = ("/usr", "/bin", "/lib", "/lib64", "/sbin"),
+    runtime_roots: Sequence[str] | None = None,
 ) -> list[FsRule]:
     """Map a pledge set to Landlock filesystem rules. Pure and testable.
 
@@ -348,6 +348,9 @@ def filesystem_rules(
     TMPDIR (workspace/.northstar/tmp) gets no rule, so temp-file writes
     there fail closed — the pledge declared no temp-file need.
     """
+    if runtime_roots is None:
+        from tools.sandbox import _runtime_read_paths
+        runtime_roots = _runtime_read_paths()
     rules: list[FsRule] = []
     anchors: list[str] = []  # paths that actually got a rule -> need ancestor traversal
     for root in runtime_roots:
