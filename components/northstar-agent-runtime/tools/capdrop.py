@@ -244,6 +244,65 @@ def capability_sets_zero(sets: dict[str, int]) -> bool:
     return all(value == 0 for value in sets.values())
 
 
+def drop_report_enforced(report: object) -> bool:
+    """Check enforced sets and account for every best-effort bounding drop.
+
+    Bounding/securebits EPERM is permitted only when explicitly audited. This
+    is not a claim that all five sets are zero or that arbitrary exec is safe.
+    """
+    if not isinstance(report, dict) or report.get("errors") != []:
+        return False
+    try:
+        whitelist = report["whitelist"]
+        if not isinstance(whitelist, list) or any(type(cap) is not int or not 0 <= cap <= CAP_LAST_BIT for cap in whitelist):
+            return False
+        mask = sum(1 << cap for cap in set(whitelist))
+        before = {key: int(report["before"][key], 16) for key in ("CapInh", "CapPrm", "CapEff", "CapBnd", "CapAmb")}
+        after = {key: int(report["after"][key], 16) for key in before}
+        if any(value < 0 or value >= 1 << 64 for value in (*before.values(), *after.values())):
+            return False
+        if mask & ~before["CapPrm"]:
+            return False
+        if any(after[key] != mask for key in ("CapInh", "CapPrm", "CapEff")) or after["CapAmb"] != 0:
+            return False
+        ops = report["ops"]
+        if not isinstance(ops, list) or not all(isinstance(op, dict) for op in ops):
+            return False
+        if any(op.get("op") not in {"ambient_clear", "capset", "bounding_drop", "securebits"} for op in ops):
+            return False
+        for required in ("capset", "ambient_clear"):
+            matched = [op for op in ops if op.get("op") == required]
+            if len(matched) != 1 or matched[0].get("ok") is not True:
+                return False
+        secure = [op for op in ops if op.get("op") == "securebits"]
+        if len(secure) != 1 or not (secure[0].get("ok") is True or
+            (secure[0].get("ok") is False and str(secure[0].get("detail", "")).startswith("errno 1 "))):
+            return False
+        dropped, denied = set(), set()
+        for op in [op for op in ops if op.get("op") == "bounding_drop"]:
+            detail = str(op.get("detail", ""))
+            if op.get("ok") is True and detail.startswith("dropped="):
+                dest = dropped
+            elif op.get("ok") is False and detail.startswith("eperm="):
+                dest = denied
+            else:
+                return False
+            values = detail.split("=", 1)[1]
+            parsed = [int(value) for value in values.split(",")] if values else []
+            if len(set(parsed)) != len(parsed) or dest.intersection(parsed):
+                return False
+            dest.update(parsed)
+        expected = set(range(CAP_LAST_BIT + 1)) - set(whitelist)
+        if dropped & denied or dropped | denied != expected:
+            return False
+        dropped_mask = sum(1 << cap for cap in dropped)
+        if after["CapBnd"] != before["CapBnd"] & ~dropped_mask:
+            return False
+        return True
+    except (KeyError, TypeError, ValueError):
+        return False
+
+
 def summarize_report(report: dict[str, object]) -> str:
     """One-line human/model-facing summary of a loader audit report."""
     whitelist = report.get("whitelist", [])
@@ -436,6 +495,7 @@ __all__ = [
     "bwrap_capability_args",
     "capability_sets_zero",
     "capdrop_loader_argv",
+    "drop_report_enforced",
     "parse_whitelist",
     "read_capability_sets",
     "resolve_capdrop",
