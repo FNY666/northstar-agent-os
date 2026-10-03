@@ -115,7 +115,7 @@ from tools import ToolLimits, ToolSandbox, build_default_registry
 
 #: Semantic version of the public case set. Bump when a case is added, removed,
 #: or its expected verdict changes — consumers pin against this string.
-BENCH_VERSION = "northstar.governance.bench.v32"
+BENCH_VERSION = "northstar.governance.bench.v33"
 
 USAGE_ERROR = 64
 
@@ -17705,6 +17705,61 @@ def _case_metrics_legal_agents(h: BenchHarness) -> BenchExpectation:
     )
 
 
+def _case_metrics_tax_agents(h: BenchHarness) -> BenchExpectation:
+    """Tax & customs AI discipline (one-hundred-forty-eighth batch).
+
+    12 deterministic scenarios, 4 allow / 8 deny: a fresh flag routed
+    to human review passes; a selection model with clean features and
+    even slice rates passes; an AI proposal disposed by a named
+    officer passes; a fresh pre-arrival score holding a consignment
+    for a named officer passes. Denied: an automatic fraud accusation
+    from a flag (``tax:auto_fraud_accusation``), a selection model
+    using nationality (``tax:banned_feature``), training on
+    historical audits with no debias receipt
+    (``tax:no_training_audit``), an unsigned assessment
+    (``tax:unsigned_assessment``), an assessment with no appeal path
+    (``tax:no_appeal_path``), a selection with no "why me"
+    explanation (``tax:no_explanation``), an unregistered model
+    (``tax:shadow_ai``), and a risk score triggering seizure
+    (``tax:customs_auto_seizure``).
+    """
+    metrics = run_tax_agents()
+
+    def check(exp: BenchExpectation, report: Any) -> tuple[bool, str]:
+        if metrics["n_scenarios"] != 12:
+            return (False, f"expected 12 tax scenarios, saw {metrics['n_scenarios']}")
+        if metrics["mismatches"]:
+            return (False, f"scenario(s) disagree with ground truth: {metrics['mismatches']}")
+        if metrics["allowed_ids"] != [
+            "allow_flag_review",
+            "allow_bias_clean",
+            "allow_officer_decision",
+            "allow_customs_hold",
+        ]:
+            return (False, f"allowed set drifted: {metrics['allowed_ids']}")
+        reasons = metrics["denial_reasons"]
+        for sid, needle in (
+            ("deny_auto_fraud", "auto_fraud_accusation"),
+            ("deny_banned_feature", "banned_feature"),
+            ("deny_no_training_audit", "no_training_audit"),
+            ("deny_unsigned_assessment", "unsigned_assessment"),
+            ("deny_no_appeal_path", "no_appeal_path"),
+            ("deny_no_explanation", "no_explanation"),
+            ("deny_shadow_ai", "shadow_ai"),
+            ("deny_customs_auto_seize", "customs_auto_seizure"),
+        ):
+            if needle not in reasons.get(sid, ""):
+                return (False, f"{sid}: expected needle {needle!r} in {reasons.get(sid, '')!r}")
+        return (True, "ok")
+
+    return BenchExpectation(
+        runtime=_noop_runtime(h),
+        expect_subtype="success",
+        post_check=check,
+        metrics=metrics,
+        notes="tax & customs AI discipline: flag-not-fraud, banned selection features, training-data debias audits, named-human signoffs, appeal windows, why-me explanations, shadow-AI registry, Annex III clock, customs lead-only scores, AI-proposes-officer-disposes (AI-tax absorption)",
+    )
+
 def _case_metrics_moderation_agents(h: BenchHarness) -> BenchExpectation:
     """Content moderation discipline (one-hundred-fiftieth batch).
 
@@ -17760,6 +17815,120 @@ def _case_metrics_moderation_agents(h: BenchHarness) -> BenchExpectation:
         post_check=check,
         metrics=metrics,
         notes="content moderation discipline: statements of reasons, over-removal probe, dialect parity, automation ceiling, non-profiling option, legal-restriction receipts, why-this-content, fact-check non-substitution, AIGC labels, amplification audit clock",
+    )
+
+def _case_metrics_manufacturing_agents(h: BenchHarness) -> BenchExpectation:
+    """Manufacturing AI discipline (one-hundred-fifty-seventh batch).
+
+    12 deterministic scenarios, 4 allow / 8 deny: a robot-cell
+    restart with a live two-person zone clearance signs; a command
+    inside the capability envelope signs; a line stop with a
+    named-human decision pin signs; a disclosed automation
+    introduction signs. Denied: restarts without clearance
+    (``mfg.restart_without_clearance``), out-of-envelope commands
+    (``mfg.envelope_breach``), uncertified humanoid scale-up
+    (``mfg.uncertified_scaleup``), AI-initiated line stops without a
+    pin (``mfg.autonomous_stop``), undisclosed automation
+    introductions (``mfg.silent_displacement``), missing/expired
+    interim safety baselines (``mfg.no_safety_baseline``), desynced
+    digital twins (``mfg.twin_desync``), and self-reported-only
+    quality claims (``mfg.unverified_quality_claim``).
+    """
+    metrics = run_manufacturing_agents()
+
+    def check(exp: BenchExpectation, report: Any) -> tuple[bool, str]:
+        if metrics["n_scenarios"] != 12:
+            return (False, f"expected 12 manufacturing scenarios, saw {metrics['n_scenarios']}")
+        if metrics["mismatches"]:
+            return (False, f"scenario(s) disagree with ground truth: {metrics['mismatches']}")
+        if metrics["allowed_ids"] != [
+            "allow_restart_cleared",
+            "allow_within_envelope",
+            "allow_line_stop_pinned",
+            "allow_disclosed_automation",
+        ]:
+            return (False, f"allowed set drifted: {metrics['allowed_ids']}")
+        reasons = metrics["denial_reasons"]
+        for sid, needle in (
+            ("deny_restart_uncleared", "restart_without_clearance"),
+            ("deny_envelope_breach", "envelope_breach"),
+            ("deny_uncertified_scaleup", "uncertified_scaleup"),
+            ("deny_autonomous_stop", "autonomous_stop"),
+            ("deny_silent_displacement", "silent_displacement"),
+            ("deny_no_safety_baseline", "no_safety_baseline"),
+            ("deny_twin_desync", "twin_desync"),
+            ("deny_unverified_quality_claim", "unverified_quality_claim"),
+        ):
+            if needle not in reasons.get(sid, ""):
+                return (False, f"{sid} reason missing {needle!r}")
+        return (True, "12 scenarios, 4 allow / 8 deny, ground truth pinned")
+
+    return BenchExpectation(
+        runtime=_noop_runtime(h),
+        expect_subtype="success",
+        post_check=check,
+        metrics=metrics,
+        notes="manufacturing discipline: restart clearance, capability envelope, humanoid pilot registry, maintenance decision pin, displacement disclosure, safety baseline clock, twin sync, quality claim evidence",
+    )
+
+
+
+
+
+def _case_metrics_govservices_agents(h: BenchHarness) -> BenchExpectation:
+    """Government-service AI discipline (one-hundred-forty-seventh batch).
+
+    12 deterministic scenarios, 4 allow / 8 deny: a
+    human-countersigned benefit denial signs; a non-adverse grant
+    signs without a human; a service with an in-person channel
+    passes; an exclusion probe within tolerance passes. Denied: an
+    AI-only benefit denial (``govservices.ai_denial``), an
+    over-tolerance exclusion probe (``govservices.exclusion_gap``),
+    a digital-only service (``govservices.digital_only``), AI
+    acting beyond its pinned discretionary role
+    (``govservices.discretion_breach``), identity disclosure beyond
+    pinned necessity (``govservices.identity_overreach``), an
+    unregistered agent (``govservices.unregistered_agent``), an
+    urgency-passed expansion with no scrutiny receipt by the
+    deadline (``govservices.scrutiny_overdue``), and a benefit
+    suspension attempted before the appeal deadline with the appeal
+    pending (``govservices.suspension_before_appeal``).
+    """
+    metrics = run_govservices_agents()
+
+    def check(exp: BenchExpectation, report: Any) -> tuple[bool, str]:
+        if metrics["n_scenarios"] != 12:
+            return (False, f"expected 12 govservices scenarios, saw {metrics['n_scenarios']}")
+        if metrics["mismatches"]:
+            return (False, f"scenario(s) disagree with ground truth: {metrics['mismatches']}")
+        if metrics["allowed_ids"] != [
+            "allow_human_signed_denial",
+            "allow_non_adverse_grant",
+            "allow_channel_with_in_person",
+            "allow_exclusion_within_tolerance",
+        ]:
+            return (False, f"allowed set drifted: {metrics['allowed_ids']}")
+        reasons = metrics["denial_reasons"]
+        for sid, needle in (
+            ("deny_ai_only_denial", "ai_denial"),
+            ("deny_exclusion_gap", "exclusion_gap"),
+            ("deny_digital_only", "digital_only"),
+            ("deny_discretion_breach", "discretion_breach"),
+            ("deny_identity_overreach", "identity_overreach"),
+            ("deny_unregistered_agent", "unregistered_agent"),
+            ("deny_scrutiny_overdue", "scrutiny_overdue"),
+            ("deny_suspension_before_appeal", "suspension_before_appeal"),
+        ):
+            if needle not in reasons.get(sid, ""):
+                return (False, f"{sid} reason missing {needle!r}")
+        return (True, "12 scenarios, 4 allow / 8 deny, ground truth pinned")
+
+    return BenchExpectation(
+        runtime=_noop_runtime(h),
+        expect_subtype="success",
+        post_check=check,
+        metrics=metrics,
+        notes="government-service AI discipline: human-final gates on adverse decisions, exclusion-failure probes, non-digital channel receipts, pinned discretionary boundaries, identity minimality, agent identity registry, urgency scrutiny clocks, appeal-before-suspension benefit clocks",
     )
 
 
@@ -18079,6 +18248,60 @@ def _case_metrics_waste_agents(h: BenchHarness) -> BenchExpectation:
         post_check=check,
         metrics=metrics,
         notes="waste & circular-economy discipline: bound purity claims, Basel PIC movements, battery-passport pins, claim evidence chains, informal-sector transition plans, AI hardware lifecycle, verified dumping alerts, battery fire triage",
+    )
+
+def _case_metrics_adtech_agents(h: BenchHarness) -> BenchExpectation:
+    """Adtech & synthetic-media disclosure discipline (one-hundred-forty-ninth batch).
+
+    12 deterministic scenarios, 4 allow / 8 deny: a bound synthetic
+    performer passes; non-material unlabeled AI content passes; an
+    agentic brief with matched objectives passes; a platform with a
+    joint-liability pin passes. Denied: an unbound synthetic
+    performer (``adtech:no_performer_identity``), an AI persona
+    touting efficacy (``adtech:testimonial_refused``), unlabeled
+    material AI content (``adtech:unlabeled_material``), AI output
+    with no machine-readable marking (``adtech:no_watermark``), a
+    deployment pinned to a stale jurisdiction matrix
+    (``adtech:matrix_mismatch``), an interface with detected dark
+    patterns (``adtech:dark_pattern``), drifted agentic objectives
+    (``adtech:brief_drift``), and a label-fatigue sample below the
+    comprehension floor (``adtech:fatigue_review``).
+    """
+    metrics = run_adtech_agents()
+
+    def check(exp: BenchExpectation, report: Any) -> tuple[bool, str]:
+        if metrics["n_scenarios"] != 12:
+            return (False, f"expected 12 adtech scenarios, saw {metrics['n_scenarios']}")
+        if metrics["mismatches"]:
+            return (False, f"scenario(s) disagree with ground truth: {metrics['mismatches']}")
+        if metrics["allowed_ids"] != [
+            "allow_performer_bound",
+            "allow_nonmaterial_unlabeled",
+            "allow_brief_aligned",
+            "allow_platform_pinned",
+        ]:
+            return (False, f"allowed set drifted: {metrics['allowed_ids']}")
+        reasons = metrics["denial_reasons"]
+        for sid, needle in (
+            ("deny_performer_unbound", "no_performer_identity"),
+            ("deny_testimonial", "testimonial_refused"),
+            ("deny_unlabeled_material", "unlabeled_material"),
+            ("deny_no_watermark", "no_watermark"),
+            ("deny_matrix_mismatch", "matrix_mismatch"),
+            ("deny_dark_pattern", "dark_pattern"),
+            ("deny_brief_drift", "brief_drift"),
+            ("deny_fatigue_review", "fatigue_review"),
+        ):
+            if needle not in reasons.get(sid, ""):
+                return (False, f"{sid} missing denial needle {needle!r}")
+        return (True, "adtech_agents: 12/12 scenarios match ground truth")
+
+    return BenchExpectation(
+        runtime=_noop_runtime(h),
+        expect_subtype="success",
+        post_check=check,
+        metrics=metrics,
+        notes="adtech & synthetic-media disclosure discipline: performer identity bindings, AI-persona testimonial refusal, materiality labeling clocks, machine-readable watermarks, five-jurisdiction matrix, 37-pattern dark-pattern screens, agentic-brief drift tripwires, platform liability pins, label-fatigue review",
     )
 
 def _case_metrics_hr_agents(h: BenchHarness) -> BenchExpectation:
@@ -20455,10 +20678,14 @@ CASES: tuple[BenchCase, ...] = (
     BenchCase("metrics.hr_agents", "metrics", "HR & workplace AI discipline: independent bias audits, secret-scoring disclosure, human-final countersigns (anti rubber-stamp), emotion-inference ban, surveillance-repurpose notices, homophily probes, layoff AI disclosure, tainted-input gates, vendor agent pins (AI-HR absorption)", _case_metrics_hr_agents),
         BenchCase("metrics.energybid_agents", "metrics", "energy trading discipline: quote evidence binding, contract-chain resource pins, correlation position caps, merged cross-market positions, negative-price declarations, algorithm registration, post-trade explainability, tested kill switches (AI-energy-trading absorption)", _case_metrics_energybid_agents),
 BenchCase("metrics.waste_agents", "metrics", "waste & circular-economy discipline: bound sorting-purity claims, Basel PIC e-waste movements, battery-passport pins, claim evidence chains, informal-sector transition plans, AI hardware lifecycle, verified dumping alerts, battery fire triage (AI-waste absorption)", _case_metrics_waste_agents),
+BenchCase("metrics.adtech_agents", "metrics", "adtech & synthetic-media disclosure discipline: performer identity bindings, AI-persona testimonial refusal, materiality labeling clocks, machine-readable watermarks, five-jurisdiction strictest-rule matrix, 37-pattern dark-pattern screens, agentic-brief drift tripwires, platform liability pins, label-fatigue review (AI-adtech absorption)", _case_metrics_adtech_agents),
     BenchCase("metrics.audit_agents", "metrics", "audit & assurance discipline: reconstruction bundles, parallel-run gates, evidence-not-conclusion, shadow-AI inventory, decision-rights charters, oversight capacity, incident procedures, alert-fatigue probes (AI-audit absorption)", _case_metrics_audit_agents),
     BenchCase("metrics.underwriting_agents", "metrics", "underwriting & claims discipline: approve-only claim engines, human-review breakers on key content, fairness stress receipts, EU AI Act compliance clock, fraud probes routed to humans, assist-not-decide, NAIC evaluation-tool mapping, vendor evidence binding (AI-insurance absorption)", _case_metrics_underwriting_agents),
     BenchCase("metrics.legal_agents", "metrics", "legal practice discipline: citation verification, AI-use disclosure, advisory-only pin, signoff clock, injection screen, evidence authentication, LIP channel, performance standards, confidentiality (AI-legal absorption)", _case_metrics_legal_agents),
+    BenchCase("metrics.govservices_agents", "metrics", "government-service AI discipline: human-final gates on adverse decisions, exclusion-failure probes, non-digital channel receipts, pinned discretionary boundaries, identity minimality, agent identity registry, urgency scrutiny clocks, appeal-before-suspension benefit clocks (AI-gov-services absorption)", _case_metrics_govservices_agents),
     BenchCase("metrics.moderation_agents", "metrics", "content moderation discipline: statements of reasons, over-removal probe, dialect parity, automation ceiling, non-profiling option, legal-restriction receipts, why-this-content, fact-check non-substitution, AIGC labels, amplification audit clock (AI-moderation absorption)", _case_metrics_moderation_agents),
+    BenchCase("metrics.manufacturing_agents", "metrics", "manufacturing AI discipline: restart clearance, capability envelope, humanoid pilot registry, maintenance decision pin, displacement disclosure, safety baseline clock, twin sync, quality claim evidence (AI-manufacturing absorption)", _case_metrics_manufacturing_agents),
+    BenchCase("metrics.tax_agents", "metrics", "tax & customs AI discipline: flag-not-fraud, banned selection features, training-data debias audits, named-human signoffs, appeal windows, why-me explanations, shadow-AI registry, Annex III clock, customs lead-only scores, AI-proposes-officer-disposes (AI-tax absorption)", _case_metrics_tax_agents),
     BenchCase("metrics.dataflow_sensitivity", "metrics", "dataflow sensitivity tracking (OpenAPPA-style)", _case_metrics_dataflow_sensitivity),
     BenchCase("metrics.decision_model", "metrics", "structured decision-model approval path", _case_metrics_decision_model),
     BenchCase("metrics.whisper_contrast", "metrics", "whisper-attacks contrast: signature vs bound arguments", _case_metrics_whisper_contrast),
@@ -24392,6 +24619,231 @@ def run_waste_agents() -> dict[str, Any]:
     }
 
 
+def run_adtech_agents() -> dict[str, Any]:
+    """Adtech & synthetic-media disclosure discipline (one-hundred-forty-ninth batch).
+
+    12 deterministic scenarios: synthetic-performer identity bindings,
+    the AI-persona efficacy testimonial refusal, materiality-based
+    labeling clocks, machine-readable watermark bindings, the
+    five-jurisdiction strictest-rule matrix, the 37-pattern dark-pattern
+    screen, agentic-brief objective-drift tripwires, platform
+    joint-liability pins, and label-fatigue review gates (2026
+    AI-adtech research absorption).
+    """
+    from ed25519 import public_key, sign  # noqa: F401
+
+    from adtech_agents import (
+        ADTECH_SCHEMA_VERSION,
+        CLASS_AUTHORITATIVE,
+        CLASS_NON_AUTHORITATIVE,
+        MAX_EXPOSURES_PER_FORMAT,
+        MIN_COMPREHENSION_BPS,
+        BriefLog,
+        DarkPatternLog,
+        FatigueLog,
+        LiabilityLog,
+        MaterialityLog,
+        MatrixLog,
+        PerformerLog,
+        WatermarkLog,
+        agentic_brief_binding,
+        check_interface,
+        check_machine_reading,
+        check_matrix_pin,
+        check_objective_drift,
+        check_performer_disclosure,
+        check_platform_liability,
+        dark_pattern_screen,
+        jurisdiction_matrix_digest,
+        jurisdiction_matrix_pin,
+        label_fatigue_guard,
+        label_fatigue_sample,
+        machine_readable_marking,
+        materiality_assessment_receipt,
+        materiality_label_clock,
+        platform_liability_pin,
+        synthetic_performer_receipt,
+        testimonial_existence_gate,
+    )
+    from canonical_json import jcs_canonical_json, jcs_sha256_hex  # noqa: F401
+
+    SEC = b"adtech-bench-authority-000000010"  # 32 bytes
+    assert len(SEC) == 32
+    PUB = public_key(SEC).hex()
+    T0 = 1_800_000_000
+    HEX64 = "ab" * 32
+    HEX64_B = "cd" * 32
+    HEX64_C = "ef" * 32
+
+    def _prev(log):
+        return log[-1].receipt_digest if log else "genesis"
+
+    # --- performer log with one bound synthetic performer ---
+    performer_log = PerformerLog()
+    performer_log.append(
+        synthetic_performer_receipt(
+            receipt_id="perf-bench-1", performer_id="perf-bench",
+            identity_binding_digest=HEX64, consent_record_digest=HEX64_B,
+            disclosure_receipt_digest=HEX64_C,
+            expires_at=T0 + 3600,
+            authority_pubkey_hex=PUB, authority_secret=SEC,
+            prev_digest=_prev(performer_log._log),
+        )
+    )
+
+    # --- materiality log: one material, one non-material assessment ---
+    mat_log = MaterialityLog()
+    mat_log.append(
+        materiality_assessment_receipt(
+            receipt_id="mat-bench-1", content_id="content-bench-1",
+            materiality="material", evidence_digest=HEX64,
+            assessed_at=T0, expires_at=T0 + 3600,
+            authority_pubkey_hex=PUB, authority_secret=SEC,
+            prev_digest=_prev(mat_log._log),
+        )
+    )
+    mat_log.append(
+        materiality_assessment_receipt(
+            receipt_id="mat-bench-2", content_id="content-bench-2",
+            materiality="non_material", evidence_digest=HEX64_B,
+            assessed_at=T0, expires_at=T0 + 3600,
+            authority_pubkey_hex=PUB, authority_secret=SEC,
+            prev_digest=_prev(mat_log._log),
+        )
+    )
+
+    # --- brief log with one declared-brief binding ---
+    brief_log = BriefLog()
+    brief_log.append(
+        agentic_brief_binding(
+            brief_id="brief-bench", declared_objectives=("promote_product_x",),
+            constraints_digest=HEX64,
+            issued_at=T0, authority_pubkey_hex=PUB, authority_secret=SEC,
+            prev_digest=_prev(brief_log._log),
+        )
+    )
+
+    # --- liability log with one pinned platform ---
+    liability_log = LiabilityLog()
+    liability_log.append(
+        platform_liability_pin(
+            receipt_id="lp-bench-1", platform_id="platform-bench",
+            regimes=("CN_SAMR", "KR_AI_BASIC"), attestation_digest=HEX64,
+            pinned_at=T0, expires_at=T0 + 3600,
+            authority_pubkey_hex=PUB, authority_secret=SEC,
+            prev_digest=_prev(liability_log._log),
+        )
+    )
+
+    # --- matrix log with a STALE pin (wrong digest) ---
+    matrix_log = MatrixLog()
+    matrix_log.append(
+        jurisdiction_matrix_pin(
+            receipt_id="mx-bench-1", deployment_id="dep-bench",
+            matrix_digest=HEX64, pinned_at=T0,
+            authority_pubkey_hex=PUB, authority_secret=SEC,
+            prev_digest=_prev(matrix_log._log),
+        )
+    )
+
+    # --- dark-pattern log: one clean screen, one dirty screen ---
+    dp_log = DarkPatternLog()
+    dp_log.append(
+        dark_pattern_screen(
+            screen_id="dp-bench-1", interface_id="ui-bench-clean",
+            observed_patterns=(), screened_at=T0,
+            authority_pubkey_hex=PUB, authority_secret=SEC,
+            prev_digest=_prev(dp_log._log),
+        )
+    )
+    dp_log.append(
+        dark_pattern_screen(
+            screen_id="dp-bench-2", interface_id="ui-bench-dirty",
+            observed_patterns=("false_urgency", "roach_motel"), screened_at=T0,
+            authority_pubkey_hex=PUB, authority_secret=SEC,
+            prev_digest=_prev(dp_log._log),
+        )
+    )
+
+    # --- fatigue log with one fatigued monitor ---
+    fatigue_log = FatigueLog()
+    fatigue_log.append(
+        label_fatigue_sample(
+            monitor_id="mon-bench", content_id="content-bench-9",
+            exposures=500, distinct_formats=2, comprehension_bps=2000,
+            window_days=7, measured_at=T0,
+            authority_pubkey_hex=PUB, authority_secret=SEC,
+            prev_digest=_prev(fatigue_log._log),
+        )
+    )
+
+    scenarios: list[tuple[str, bool, str]] = []
+    results: dict[str, dict[str, Any]] = {}
+
+    def _record(sid, expect_allow, needle, verdict):
+        scenarios.append((sid, expect_allow, needle))
+        results[sid] = {"allowed": verdict.allowed, "reason": verdict.reason}
+
+    _record("allow_performer_bound", True, "",
+            check_performer_disclosure(log=performer_log, performer_id="perf-bench",
+                                       now=T0))
+    _record("allow_nonmaterial_unlabeled", True, "",
+            materiality_label_clock(log=mat_log, content_id="content-bench-2",
+                                    labeled=False, now=T0))
+    _record("allow_brief_aligned", True, "",
+            check_objective_drift(log=brief_log, brief_id="brief-bench",
+                                  observed_objectives=("promote_product_x",), now=T0))
+    _record("allow_platform_pinned", True, "",
+            check_platform_liability(log=liability_log, platform_id="platform-bench",
+                                     now=T0))
+    _record("deny_performer_unbound", False, "no_performer_identity",
+            check_performer_disclosure(log=PerformerLog(), performer_id="perf-ghost",
+                                       now=T0))
+    _record("deny_testimonial", False, "testimonial_refused",
+            testimonial_existence_gate(persona_kind="ai_persona", claims_efficacy=True,
+                                       evidence_digest=HEX64))
+    _record("deny_unlabeled_material", False, "unlabeled_material",
+            materiality_label_clock(log=mat_log, content_id="content-bench-1",
+                                    labeled=False, now=T0))
+    _record("deny_no_watermark", False, "no_watermark",
+            check_machine_reading(log=WatermarkLog(), content_digest=HEX64, now=T0))
+    _record("deny_matrix_mismatch", False, "matrix_mismatch",
+            check_matrix_pin(log=matrix_log, deployment_id="dep-bench", now=T0))
+    _record("deny_dark_pattern", False, "dark_pattern",
+            check_interface(log=dp_log, interface_id="ui-bench-dirty", now=T0))
+    _record("deny_brief_drift", False, "brief_drift",
+            check_objective_drift(log=brief_log, brief_id="brief-bench",
+                                  observed_objectives=("promote_product_x",
+                                                       "harvest_emails"),
+                                  now=T0))
+    _record("deny_fatigue_review", False, "fatigue_review",
+            label_fatigue_guard(log=fatigue_log, monitor_id="mon-bench", now=T0))
+
+    allowed_ids: list[str] = []
+    denial_reasons: dict[str, str] = {}
+    mismatches: list[str] = []
+    for sid, expect_allow, needle in scenarios:
+        r = results[sid]
+        if r["allowed"]:
+            allowed_ids.append(sid)
+        else:
+            denial_reasons[sid] = r["reason"]
+        if r["allowed"] != expect_allow:
+            mismatches.append(f"{sid}: expected allow={expect_allow}, "
+                              f"saw allow={r['allowed']}")
+        elif not expect_allow and needle and needle not in r["reason"]:
+            mismatches.append(f"{sid}: expected needle {needle!r} in "
+                              f"{r['reason']!r}")
+    return {
+        "n_scenarios": len(scenarios),
+        "n_allowed": len(allowed_ids),
+        "n_denied": len(scenarios) - len(allowed_ids),
+        "allowed_ids": allowed_ids,
+        "denial_reasons": denial_reasons,
+        "mismatches": mismatches,
+    }
+
+
 def run_audit_agents() -> dict[str, Any]:
     """Audit & assurance discipline (one-hundred-forty-third batch).
 
@@ -25010,6 +25462,667 @@ def run_moderation_agents() -> dict[str, Any]:
         "allowed_ids": [s["id"] for s in scenarios if s["verdict"]],
         "denial_reasons": {s["id"]: s["reason"] for s in scenarios if not s["verdict"]},
         "schema_version": MODERATION_SCHEMA_VERSION,
+    }
+
+
+def run_manufacturing_agents() -> dict[str, Any]:
+    """Manufacturing & industrial-automation AI discipline (one-hundred-fifty-seventh batch).
+
+    Absorbs the 2026 AI-manufacturing thread: the Ottogi SF
+    palletizer fatality (reset pressed while a worker was inside the
+    cell, Yonhap Infomax 2026-09-28); the Hyundai Ulsan 4hr/day
+    partial strikes over humanoid robots — the first car-plant
+    stoppage ever over humanoids (~₩200B estimated losses, union
+    demands for prior-consent rights); BMW's staged humanoid
+    pipeline (maturity assessment → lab validation → line testing →
+    pilot, 2026-02-27 press release); Fascia *Industrial AI 2026*
+    (predictive maintenance is the highest-confidence deployment;
+    monolithic "factory AI assistants" burn ~1.0× ROI); the ISO
+    blank for mobile humanoids (no dedicated national law; Humanoid
+    Safety Summit 2026-11-13 Stuttgart); digital-twin-driven line
+    reconfiguration; and AI-vision quality claims (BOE zero-defect
+    manufacturing: efficiency +56%, defect rate −75%, vendor-claimed).
+
+    Fail-closed rules over 12 deterministic scenarios: robot-cell
+    restarts need a live two-person zone clearance; industrial
+    robots bind a capability envelope and refuse out-of-envelope
+    commands up front; humanoid factory stages unlock only with a
+    full evidence ladder; predictive maintenance advises only —
+    line stops and part swaps need a named-human pin; automation
+    introductions bind displacement-scale + retraining-plan
+    disclosures with union notification 30 days ahead; deployments
+    pin an interim safety baseline until ISO lands; control pushes
+    need a fresh in-tolerance twin-sync proof; quality claims bind
+    a reproducible measurement protocol and sample disclosure.
+    Ground truth is closed: 4 allow / 8 deny.
+    """
+    from manufacturing_agents import (
+        MFG_SCHEMA_VERSION,
+        AuthorityRegistry,
+        RestartClearanceRegistry,
+        RestartClearanceReceipt,
+        EnvelopeRegistry,
+        EnvelopeReceipt,
+        PilotRegistry,
+        PilotStageReceipt,
+        MaintenanceAdviceRegistry,
+        MaintenanceAdviceReceipt,
+        MaintenanceDecisionRegistry,
+        MaintenanceDecisionPin,
+        DisplacementRegistry,
+        DisplacementDisclosureReceipt,
+        SafetyBaselineRegistry,
+        SafetyBaselineReceipt,
+        TwinSyncRegistry,
+        TwinSyncReceipt,
+        QualityClaimRegistry,
+        QualityClaimReceipt,
+        restart_clearance_receipt,
+        capability_envelope,
+        humanoid_pilot_registry,
+        maintenance_decision_pin,
+        displacement_disclosure,
+        safety_baseline_clock,
+        twin_sync_integrity,
+        quality_claim_evidence,
+    )
+    from ed25519 import public_key, sign
+    from canonical_json import jcs_canonical_json
+
+    SEC = b"mfg-bench-authority-000000000000"  # 32 bytes
+    assert len(SEC) == 32
+    PUB = public_key(SEC).hex()
+    T0 = 1_800_000_000
+    HEX64 = "ab" * 32
+    HEX64_B = "cd" * 32
+    HEX64_C = "ef" * 32
+
+    authorities = AuthorityRegistry()
+    authorities.register("bench-mfg", PUB)
+
+    def seal(reg, cls, **fields):
+        prev = reg.log[-1].receipt_digest if reg.log else "genesis"
+        tmp = cls(authority_id="bench-mfg", authority_pubkey_hex=PUB,
+                  signature_hex="00" * 64, prev_digest=prev, **fields)
+        sig = sign(SEC, jcs_canonical_json(tmp._payload()))
+        return reg.issue(authority_id="bench-mfg", signature=sig, **fields)
+
+    scenarios: list[dict[str, Any]] = []
+
+    def record(sid, expect_allow, needle, verdict):
+        scenarios.append({
+            "id": sid, "expected": expect_allow,
+            "verdict": verdict.allowed, "reason": verdict.reason,
+        })
+
+    # --- live receipts ---
+    clears = RestartClearanceRegistry(authorities)
+    seal(clears, RestartClearanceReceipt, receipt_id="rc-bench",
+         cell_id="cell-bench", restart_id="rst-ok",
+         confirmer_a_id="op-a", confirmer_b_id="op-b", cleared_at=T0)
+
+    envs = EnvelopeRegistry(authorities)
+    seal(envs, EnvelopeReceipt, receipt_id="env-bench",
+         envelope_id="env-bench", robot_id="arm-bench",
+         max_payload_kg=50.0, max_speed_ms=1.5, max_torque_nm=120.0,
+         allowed_task_kinds=["palletize", "inspect"], issued_at=T0)
+
+    adv = MaintenanceAdviceRegistry(authorities)
+    seal(adv, MaintenanceAdviceReceipt, receipt_id="ma-bench",
+         advice_id="adv-ok", machine_id="cnc-bench", action="shutdown_line",
+         model_version="pm-v3", advice_digest=HEX64_B, issued_at=T0)
+    seal(adv, MaintenanceAdviceReceipt, receipt_id="ma-bench-2",
+         advice_id="adv-nopin", machine_id="cnc-bench", action="shutdown_line",
+         model_version="pm-v3", advice_digest=HEX64_B, issued_at=T0)
+    pins = MaintenanceDecisionRegistry(authorities)
+    seal(pins, MaintenanceDecisionPin, receipt_id="pin-bench",
+         pin_id="pin-bench", advice_id="adv-ok", action="shutdown_line",
+         human_approver_id="mgr-bench", decided_at=T0)
+
+    disps = DisplacementRegistry(authorities)
+    seal(disps, DisplacementDisclosureReceipt, receipt_id="dd-bench",
+         disclosure_id="dd-bench", site_id="site-ok",
+         automation_kind="humanoid", displaced_workers_estimate=40,
+         retraining_plan_digest=HEX64_C, union_notified=True,
+         disclosed_at=T0 - 31 * 86400)
+
+    bases = SafetyBaselineRegistry(authorities)
+    seal(bases, SafetyBaselineReceipt, receipt_id="sb-stale",
+         baseline_id="sb-stale", site_id="site-stale",
+         robot_class="humanoid_mobile", fencing_confirmed=True,
+         max_speed_ms=1.0, max_torque_nm=80.0,
+         max_robots_per_supervisor=4,
+         pinned_at=T0 - 200 * 86400, expires_at=T0 - 20 * 86400)
+
+    syncs = TwinSyncRegistry(authorities)
+    seal(syncs, TwinSyncReceipt, receipt_id="ts-drift", sync_id="ts-drift",
+         cell_id="cell-drift", twin_state_digest=HEX64,
+         physical_state_digest=HEX64_B, drift_bps=800, checked_at=T0)
+
+    claims = QualityClaimRegistry(authorities)
+    seal(claims, QualityClaimReceipt, receipt_id="qc-small",
+         claim_id="qc-small", metric_name="defect_rate_reduction_bps",
+         claimed_value=7500.0, measurement_protocol_digest=HEX64,
+         sample_size=50, third_party_verified=False, measured_at=T0)
+
+    pilots = PilotRegistry(authorities)
+    seal(pilots, PilotStageReceipt, receipt_id="st-assess",
+         stage_id="stage-assess", robot_model_id="hum-bench",
+         stage="maturity_assessment", evidence_digest=HEX64,
+         completed_at=T0)
+
+    NOW = T0 + 100
+
+    # 1. allow: restart with a live two-person zone clearance
+    record("allow_restart_cleared", True, "",
+           restart_clearance_receipt(clears, "rst-ok", NOW))
+    # 2. allow: command inside the capability envelope
+    record("allow_within_envelope", True, "",
+           capability_envelope(envs, "arm-bench", "palletize",
+                               10.0, 1.0, 50.0, NOW))
+    # 3. allow: line stop with a named-human decision pin
+    record("allow_line_stop_pinned", True, "",
+           maintenance_decision_pin(adv, pins, "adv-ok", "shutdown_line", NOW))
+    # 4. allow: disclosed automation introduction (31-day notice)
+    record("allow_disclosed_automation", True, "",
+           displacement_disclosure(disps, "site-ok", NOW))
+    # 5. deny: restart with no zone-clearance receipt
+    record("deny_restart_uncleared", False, "restart_without_clearance",
+           restart_clearance_receipt(clears, "rst-ghost", NOW))
+    # 6. deny: command over the envelope payload limit
+    record("deny_envelope_breach", False, "envelope_breach",
+           capability_envelope(envs, "arm-bench", "palletize",
+                               60.0, 1.0, 50.0, NOW))
+    # 7. deny: entering line_testing without lab_validation
+    record("deny_uncertified_scaleup", False, "uncertified_scaleup",
+           humanoid_pilot_registry(pilots, "hum-bench", "line_testing", NOW))
+    # 8. deny: AI-initiated line stop with no human pin
+    record("deny_autonomous_stop", False, "autonomous_stop",
+           maintenance_decision_pin(adv, pins, "adv-nopin",
+                                    "shutdown_line", NOW))
+    # 9. deny: automation introduction with no disclosure
+    record("deny_silent_displacement", False, "silent_displacement",
+           displacement_disclosure(disps, "site-ghost", NOW))
+    # 10. deny: expired interim safety baseline
+    record("deny_no_safety_baseline", False, "no_safety_baseline",
+           safety_baseline_clock(bases, "site-stale",
+                                 "humanoid_mobile", NOW))
+    # 11. deny: twin drift over tolerance
+    record("deny_twin_desync", False, "twin_desync",
+           twin_sync_integrity(syncs, "cell-drift", NOW))
+    # 12. deny: quality claim with a token sample
+    record("deny_unverified_quality_claim", False,
+           "unverified_quality_claim",
+           quality_claim_evidence(claims, "qc-small", NOW))
+
+    mismatches = [
+        s["id"] for s in scenarios
+        if bool(s["verdict"]) != bool(s["expected"])
+    ]
+    return {
+        "track": "metrics.manufacturing_agents",
+        "n_scenarios": len(scenarios),
+        "mismatches": mismatches,
+        "allowed_ids": [s["id"] for s in scenarios if s["verdict"]],
+        "denial_reasons": {s["id"]: s["reason"] for s in scenarios
+                            if not s["verdict"]},
+        "schema_version": MFG_SCHEMA_VERSION,
+    }
+
+
+def run_tax_agents() -> dict[str, Any]:
+    """Tax & customs AI discipline (one-hundred-forty-eighth batch).
+
+    Absorbs the 2026 AI-tax/customs thread: Japan KSK2 (AI + all-tax
+    data unification, full operation planned 2026-09); Korea "AI
+    대전환" (decades of audit know-how training evasion-suspect
+    extraction; 2028 AI auto-writes returns; ₩300M crypto-analysis
+    system 2026-04→11, pilot November; burden of proof on the
+    taxpayer); China Golden Tax IV ("以数治税", corporate digital
+    portraits, real-time risk warnings; compliant firms mislabeled
+    high-risk); US H.R. 9501 (bill, not law) with TIGTA's
+    historical-audit training recommendation — Bloomberg Law warns of
+    replaying the Dutch disaster (Stanford–Treasury: Black taxpayers
+    audited 4.7x more); UK HMRC's £175M AI plan (lifestyle vs
+    declared-income matching, misidentification risk); Pakistan FBR
+    (2026: "flagged discrepancies need review but do not themselves
+    constitute fraud" — flag≠fraud doctrine); Greece (194,000 AI
+    audits planned 2026); Australia (ATO AI + Airbnb data, but ~3/4
+    of 43 models lacked ethics assessment; Robodebt ruled unlawful);
+    Tunisia (customs model: 96.9M dinars simulated detected, 49.23%
+    detection rate); Burkina Faso (DGI AI + generative-AI ethics
+    charter); US CBP "Detective Border" (pre-release AI risk scoring
+    for transshipment fraud — scores are leads, never seizures);
+    Fuzhou "乐宝" 15-second clearance ("AI for efficiency, humans
+    for responsibility"); Qatar HSsify (AI suggestion, officer final
+    decision); Dubai ACI pre-arrival analysis; Mexico "Coatlicue"
+    SAT×customs fusion; the Dutch Toeslagenaffaire (nationality as
+    risk factor, 2021 cabinet collapse; 2026 €3.7M fine for
+    unregistered tax AI — single source); the EU AI Act Annex III gap
+    (Recital 59 excludes tax-enforcement AI; Omnibus defers Annex III
+    to 2027-12-02).
+
+    Fail-closed rules over 12 deterministic scenarios: flags are
+    leads — automatic fraud accusation from a flag is
+    ``tax.auto_fraud_accusation`` (Pakistan lesson); nationality /
+    zip-code features are banned whole-class
+    (``tax.banned_feature``, Toeslagenaffaire lesson); historical-data
+    debias audits must be receipted before training
+    (``tax.no_training_audit``); assessments need a named-human
+    signature (``tax.unsigned_assessment``); every AI-influenced
+    assessment binds an appeal path (``tax.no_appeal_path``);
+    selections bind "why me" explanation receipts
+    (``tax.no_explanation``); unregistered tax AI is shadow AI
+    (``tax.shadow_ai``, Dutch lesson); pre-arrival scores may only
+    hold for inspection, never auto-seize
+    (``tax.customs_auto_seizure``, CBP lesson); AI proposes, the
+    officer disposes (Fuzhou/Qatar doctrine). Ground truth is
+    closed: 4 allow / 8 deny.
+    """
+    from ed25519 import public_key, sign
+
+    from tax_agents import (
+        AIProposal,
+        AuthorityRegistry,
+        OfficerDecision,
+        PreArrivalScore,
+        ai_proposes_human_disposes,
+        customs_lead_gate,
+        explanation_receipt,
+        ExplanationRegistry,
+        flag_not_fraud_gate,
+        FlagLead,
+        human_final_gate,
+        AssessmentSignoffRegistry,
+        selection_bias_probe,
+        shadow_ai_registry,
+        ModelRegistrationRegistry,
+        training_data_audit,
+        TrainingDataAuditRegistry,
+        appeal_window,
+        AppealBindingRegistry,
+    )
+    from canonical_json import jcs_canonical_json
+
+    SEC = b"tax-bench-auth-" + b"0" * 17  # 32 bytes
+    assert len(SEC) == 32
+    PUB = public_key(SEC)
+    T0 = 1_800_000_000
+    HEX64 = "ab" * 32
+    SCHEMA = "northstar.tax.v1"
+
+    authorities = AuthorityRegistry()
+    authorities.register("bench-tax-op", PUB.hex())
+
+    def _sign_flag(flag):
+        return sign(SEC, jcs_canonical_json({
+            "schema": SCHEMA, "type": "flag_lead",
+            "flag_id": flag.flag_id, "subject_id": flag.subject_id,
+            "model_id": flag.model_id, "raised_at": flag.raised_at,
+            "score": flag.score, "authority_id": flag.authority_id,
+        }))
+
+    def _mk_flag():
+        flag = FlagLead(
+            flag_id="fl-bench-1", subject_id="sub-bench-1",
+            model_id="model-bench-1", raised_at=T0, score=0.8,
+            authority_id="bench-tax-op", authority_pubkey_hex=PUB.hex(),
+            signature_hex="00" * 128)
+        return FlagLead(**{**flag.__dict__,
+                            "signature_hex": _sign_flag(flag).hex()})
+
+    def _sign_score(score):
+        return sign(SEC, jcs_canonical_json({
+            "schema": SCHEMA, "type": "prearrival_score",
+            "consignment_id": score.consignment_id,
+            "model_id": score.model_id, "score": score.score,
+            "scored_at": score.scored_at,
+            "authority_id": score.authority_id,
+        }))
+
+    def _mk_score():
+        score = PreArrivalScore(
+            consignment_id="con-bench-1", model_id="model-bench-1",
+            score=0.75, scored_at=T0, authority_id="bench-tax-op",
+            authority_pubkey_hex=PUB.hex(), signature_hex="00" * 128)
+        return PreArrivalScore(**{**score.__dict__,
+                                   "signature_hex": _sign_score(score).hex()})
+
+    def _sign_proposal(p):
+        return sign(SEC, jcs_canonical_json({
+            "schema": SCHEMA, "type": "ai_proposal",
+            "proposal_id": p.proposal_id,
+            "recommended_action": p.recommended_action,
+            "proposed_at": p.proposed_at, "model_id": p.model_id,
+            "authority_id": p.authority_id,
+        }))
+
+    def _sign_decision(d):
+        return sign(SEC, jcs_canonical_json({
+            "schema": SCHEMA, "type": "officer_decision",
+            "proposal_id": d.proposal_id, "officer_id": d.officer_id,
+            "decision": d.decision, "decided_at": d.decided_at,
+            "reviewed_evidence_digest": d.reviewed_evidence_digest,
+            "authority_id": d.authority_id,
+        }))
+
+    def _mk_proposal():
+        p = AIProposal(
+            proposal_id="pr-bench-1",
+            recommended_action="hold_for_inspection", proposed_at=T0,
+            model_id="model-bench-1", authority_id="bench-tax-op",
+            authority_pubkey_hex=PUB.hex(), signature_hex="00" * 128)
+        return AIProposal(**{**p.__dict__, "signature_hex": _sign_proposal(p).hex()})
+
+    def _mk_decision():
+        d = OfficerDecision(
+            proposal_id="pr-bench-1", officer_id="officer-lin",
+            decision="modify", decided_at=T0 + 100,
+            reviewed_evidence_digest=HEX64,
+            authority_id="bench-tax-op",
+            authority_pubkey_hex=PUB.hex(), signature_hex="00" * 128)
+        return OfficerDecision(**{**d.__dict__, "signature_hex": _sign_decision(d).hex()})
+
+    scenarios: list[tuple[str, bool, str]] = []
+    results: dict[str, dict[str, Any]] = {}
+
+    def _record(sid, expect_allow, needle, verdict):
+        scenarios.append((sid, expect_allow, needle))
+        results[sid] = {"allowed": verdict.allowed, "reason": verdict.reason}
+
+    # 1. fresh flag routed to human review -> allow
+    _record("allow_flag_review", True, "",
+            flag_not_fraud_gate(_mk_flag(), "queue_review", T0 + 10))
+
+    # 2. clean features, even slice rates -> allow
+    _record("allow_bias_clean", True, "",
+            selection_bias_probe(["income_variance", "deduction_ratio"],
+                                 [0.10, 0.12], T0))
+
+    # 3. AI proposal disposed by a named officer -> allow
+    _record("allow_officer_decision", True, "",
+            ai_proposes_human_disposes(_mk_proposal(), _mk_decision()))
+
+    # 4. fresh score holding for a named officer -> allow
+    _record("allow_customs_hold", True, "",
+            customs_lead_gate(_mk_score(), "hold_for_inspection", T0 + 100,
+                              officer_id="officer-lin"))
+
+    # 5. automatic fraud accusation from a flag -> deny
+    _record("deny_auto_fraud", False, "auto_fraud_accusation",
+            flag_not_fraud_gate(_mk_flag(), "accuse_fraud", T0 + 10))
+
+    # 6. nationality as a selection feature -> deny (whole-class ban)
+    _record("deny_banned_feature", False, "banned_feature",
+            selection_bias_probe(["income_variance", "nationality"],
+                                 [0.10, 0.12], T0))
+
+    # 7. training on historical audits with no debias receipt -> deny
+    _record("deny_no_training_audit", False, "no_training_audit",
+            training_data_audit(TrainingDataAuditRegistry(authorities),
+                                "ghost-model", T0))
+
+    # 8. unsigned assessment -> deny
+    _record("deny_unsigned_assessment", False, "unsigned_assessment",
+            human_final_gate(AssessmentSignoffRegistry(authorities),
+                             "assess-ghost", T0))
+
+    # 9. assessment with no appeal path -> deny
+    _record("deny_no_appeal_path", False, "no_appeal_path",
+            appeal_window(AppealBindingRegistry(authorities),
+                          "assess-ghost", T0))
+
+    # 10. selection with no "why me" explanation -> deny
+    _record("deny_no_explanation", False, "no_explanation",
+            explanation_receipt(ExplanationRegistry(authorities),
+                                "sel-ghost", T0))
+
+    # 11. unregistered model -> deny (shadow AI)
+    _record("deny_shadow_ai", False, "shadow_ai",
+            shadow_ai_registry(ModelRegistrationRegistry(authorities),
+                               "ghost-model", HEX64, T0))
+
+    # 12. risk score triggering seizure -> deny
+    _record("deny_customs_auto_seize", False, "customs_auto_seizure",
+            customs_lead_gate(_mk_score(), "seize", T0 + 100))
+
+    mismatches: list[str] = []
+    allowed_ids: list[str] = []
+    denial_reasons: dict[str, str] = {}
+    for sid, expect_allow, needle in scenarios:
+        r = results[sid]
+        if r["allowed"]:
+            allowed_ids.append(sid)
+        else:
+            denial_reasons[sid] = r["reason"]
+        if r["allowed"] != expect_allow:
+            mismatches.append(f"{sid}: expected allow={expect_allow}, "
+                              f"saw allow={r['allowed']}")
+        elif not expect_allow and needle and needle not in r["reason"]:
+            mismatches.append(f"{sid}: expected needle {needle!r} in "
+                              f"{r['reason']!r}")
+    return {
+        "n_scenarios": len(scenarios),
+        "n_allowed": len(allowed_ids),
+        "n_denied": len(scenarios) - len(allowed_ids),
+        "allowed_ids": allowed_ids,
+        "denial_reasons": denial_reasons,
+        "mismatches": mismatches,
+    }
+
+
+
+def run_govservices_agents() -> dict[str, Any]:
+    """Government-service AI discipline (one-hundred-forty-seventh batch).
+
+    Absorbs the 2026 AI-in-public-administration thread: the state
+    digitizes the front door, an AI agent starts standing in it, and
+    the disciplines that keep it from quietly becoming the decider
+    are human finality (NZ urgency-passed welfare automation, the
+    Buenos Aires "decisions are made by civil servants" decree, the
+    Muenster human-responsibility resolution), measured exclusion
+    (the Aadhaar lesson: 6.5% auth failure = tens of millions
+    denied monthly — measure exclusion, not just success), a
+    non-digital door (the UK digital-ID petition lesson), pinned
+    discretion (Bavaria's 2026-06 discretionary-act AI law),
+    identity minimality, registered agent identities (China SAMR
+    2026-06 unified digital identity), scrutiny clocks after
+    urgency-passed expansions, appeal-before-suspension benefit
+    clocks (the Robodebt rule), and fraud flags as leads only.
+
+    Fail-closed rules over 12 deterministic scenarios: a
+    human-countersigned benefit denial passes; a non-adverse grant
+    signs without a human; a service with an in-person channel
+    passes; an exclusion probe within tolerance passes. Denied: an
+    AI-only benefit denial (``govservices.ai_denial``), an
+    over-tolerance exclusion probe
+    (``govservices.exclusion_gap``), a digital-only service
+    (``govservices.digital_only``), AI acting beyond its pinned
+    discretionary role (``govservices.discretion_breach``),
+    identity disclosure beyond pinned necessity
+    (``govservices.identity_overreach``), an unregistered agent
+    acting in a service (``govservices.unregistered_agent``), an
+    urgency-passed automation expansion with no scrutiny receipt
+    by the deadline (``govservices.scrutiny_overdue``), and a
+    benefit suspension attempted before the appeal deadline with
+    the appeal pending (``govservices.suspension_before_appeal``).
+    Ground truth is closed: 4 allow / 8 deny.
+    """
+    from govservices_agents import (
+        GOVSERVICES_SCHEMA_VERSION,
+        AgentIdentityRegistry,
+        alternative_channel_receipt,
+        agent_identity_registry,
+        benefit_clock,
+        digital_only_gate,
+        discretion_pin,
+        exclusion_monitor,
+        human_final_gate,
+        identity_minimality,
+        issue_decision_record,
+        issue_discretion_pin,
+        issue_exclusion_probe,
+        issue_identity_pin,
+        issue_review_notice,
+        issue_urgency_passage,
+        urgency_scrutiny_clock,
+    )
+
+    SEC = b"govservices-bench-authority-0001"  # 32 bytes
+    assert len(SEC) == 32
+    HUMAN = b"govservices-bench-human-signer-1"  # 32 bytes
+    assert len(HUMAN) == 32
+    import ed25519 as _ed
+
+    T0 = 1_800_000_000
+    H64 = "ab" * 32
+    scenarios: list[dict[str, Any]] = []
+
+    def decision(**kw):
+        args = dict(
+            decision_id="d-bench", decision_kind="benefit_denial",
+            beneficiary_ref_digest=H64, ai_recommendation_digest="cd" * 32,
+            decided_at=T0)
+        args.update(kw)
+        return issue_decision_record(**args)
+
+    # 1. allow: human-countersigned benefit denial
+    v1 = human_final_gate(decision(
+        human_signer_id="officer-bench", human_secret=HUMAN,
+        human_pubkey=_ed.public_key(HUMAN)))
+    scenarios.append({
+        "id": "allow_human_signed_denial", "expected": True,
+        "verdict": v1.allowed, "reason": v1.reason,
+    })
+
+    # 2. allow: non-adverse grant signs without a human
+    v2 = human_final_gate(decision(decision_kind="benefit_grant"))
+    scenarios.append({
+        "id": "allow_non_adverse_grant", "expected": True,
+        "verdict": v2.allowed, "reason": v2.reason,
+    })
+
+    # 3. allow: service with a non-digital channel
+    ch = alternative_channel_receipt(
+        receipt_id="cr-bench", service_id="svc-bench",
+        channels=("self_service_web", "in_person"), declared_at=T0,
+        issuer_id="bench-op", issuer_secret=SEC)
+    v3 = digital_only_gate(ch)
+    scenarios.append({
+        "id": "allow_channel_with_in_person", "expected": True,
+        "verdict": v3.allowed, "reason": v3.reason,
+    })
+
+    # 4. allow: exclusion probe within tolerance
+    probe_ok = issue_exclusion_probe(
+        probe_id="p-bench", service_id="svc-bench",
+        attempts_total=10_000, auth_failures=100, tolerance_bps=200,
+        window_start=T0, window_end=T0 + 86_400,
+        issuer_id="bench-op", issuer_secret=SEC)
+    v4 = exclusion_monitor(probe_ok)
+    scenarios.append({
+        "id": "allow_exclusion_within_tolerance", "expected": True,
+        "verdict": v4.allowed, "reason": v4.reason,
+    })
+
+    # 5. deny: AI-only benefit denial
+    v5 = human_final_gate(decision())
+    scenarios.append({
+        "id": "deny_ai_only_denial", "expected": False,
+        "verdict": v5.allowed, "reason": v5.reason + " " + v5.deny_code,
+    })
+
+    # 6. deny: exclusion probe over tolerance (Aadhaar lesson)
+    probe_bad = issue_exclusion_probe(
+        probe_id="p-bench-2", service_id="svc-bench",
+        attempts_total=10_000, auth_failures=700, tolerance_bps=200,
+        window_start=T0, window_end=T0 + 86_400,
+        issuer_id="bench-op", issuer_secret=SEC)
+    v6 = exclusion_monitor(probe_bad)
+    scenarios.append({
+        "id": "deny_exclusion_gap", "expected": False,
+        "verdict": v6.allowed, "reason": v6.reason + " " + v6.deny_code,
+    })
+
+    # 7. deny: digital-only service
+    ch_digital = alternative_channel_receipt(
+        receipt_id="cr-bench-2", service_id="svc-bench",
+        channels=("self_service_web", "mobile_app"), declared_at=T0,
+        issuer_id="bench-op", issuer_secret=SEC)
+    v7 = digital_only_gate(ch_digital)
+    scenarios.append({
+        "id": "deny_digital_only", "expected": False,
+        "verdict": v7.allowed, "reason": v7.reason + " " + v7.deny_code,
+    })
+
+    # 8. deny: AI acting beyond its pinned discretionary role
+    pin = issue_discretion_pin(
+        pin_id="dp-bench", service_id="svc-bench",
+        act_kind="welfare_eligibility_review", ai_role="advisory_only",
+        rationale_digest=H64, pinned_at=T0,
+        issuer_id="bench-op", issuer_secret=SEC)
+    v8 = discretion_pin(pin, acted_as_role="decision_support",
+                        performed_act="welfare_eligibility_review")
+    scenarios.append({
+        "id": "deny_discretion_breach", "expected": False,
+        "verdict": v8.allowed, "reason": v8.reason + " " + v8.deny_code,
+    })
+
+    # 9. deny: identity disclosure beyond pinned necessity
+    ipin = issue_identity_pin(
+        pin_id="ip-bench", service_id="svc-bench",
+        purpose="benefit_claim", needed_fields=("name", "date_of_birth"),
+        pinned_at=T0, issuer_id="bench-op", issuer_secret=SEC)
+    v9 = identity_minimality(ipin, disclosed_fields=("name", "biometric"))
+    scenarios.append({
+        "id": "deny_identity_overreach", "expected": False,
+        "verdict": v9.allowed, "reason": v9.reason + " " + v9.deny_code,
+    })
+
+    # 10. deny: unregistered agent acting in a government service
+    reg = AgentIdentityRegistry()
+    v10 = agent_identity_registry(reg, agent_id="ghost-bench")
+    scenarios.append({
+        "id": "deny_unregistered_agent", "expected": False,
+        "verdict": v10.allowed, "reason": v10.reason + " " + v10.deny_code,
+    })
+
+    # 11. deny: urgency-passed expansion, scrutiny overdue
+    passage = issue_urgency_passage(
+        passage_id="up-bench", law_id="law-bench",
+        automation_expansion=True, passed_at=T0,
+        scrutiny_window_s=86_400 * 90, issuer_id="bench-op",
+        issuer_secret=SEC)
+    v11 = urgency_scrutiny_clock(passage, (), now=T0 + 86_400 * 200)
+    scenarios.append({
+        "id": "deny_scrutiny_overdue", "expected": False,
+        "verdict": v11.allowed, "reason": v11.reason + " " + v11.deny_code,
+    })
+
+    # 12. deny: suspension before the appeal deadline (Robodebt rule)
+    notice = issue_review_notice(
+        notice_id="n-bench", beneficiary_ref_digest=H64,
+        review_kind="benefit_reassessment", notice_issued_at=T0,
+        appeal_deadline=T0 + 86_400 * 28,
+        issuer_id="bench-op", issuer_secret=SEC)
+    v12 = benefit_clock(notice, attempted_at=T0 + 86_400 * 7,
+                        appeal_status="pending")
+    scenarios.append({
+        "id": "deny_suspension_before_appeal", "expected": False,
+        "verdict": v12.allowed, "reason": v12.reason + " " + v12.deny_code,
+    })
+
+    mismatches = [
+        s["id"] for s in scenarios
+        if bool(s["verdict"]) != bool(s["expected"])
+    ]
+    return {
+        "track": "metrics.govservices_agents",
+        "n_scenarios": len(scenarios),
+        "mismatches": mismatches,
+        "allowed_ids": [s["id"] for s in scenarios if s["verdict"]],
+        "denial_reasons": {s["id"]: s["reason"] for s in scenarios if not s["verdict"]},
+        "schema_version": GOVSERVICES_SCHEMA_VERSION,
     }
 
 
@@ -27312,13 +28425,17 @@ __all__ = [
     "run_greenwash",
     "run_procurement_agents",
     "run_waste_agents",
+    "run_adtech_agents",
     "run_energybid_agents",
     "run_underwriting_agents",
     "run_orbital_agents",
     "run_hr_agents",
     "run_supplychain_agents",
     "run_legal_agents",
+    "run_govservices_agents",
     "run_moderation_agents",
+    "run_manufacturing_agents",
+    "run_tax_agents",
     "run_housing_ai_agents",
     "run_audit_agents",
     "run_disaster_agents",
