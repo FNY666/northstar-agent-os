@@ -1,3 +1,66 @@
+## Unreleased (one-hundred-fourteenth batch) — language-capability receipts (low-resource-language absorption)
+
+New module `language_cap.py`: authority-signed, hash-chained
+`LanguageCapabilityReceipt`s binding `(model_digest, language_tag,
+locale_variant, accuracy_band)` — closed accuracy vocabulary
+`high/moderate/low/unmeasured`, JCS digests, Ed25519 authority
+signatures. A model may only serve languages it holds receipts for
+(exact `(tag, variant)` match — `pt` != `pt-br`); undeclared
+languages classify `unverifiable-process`. `check_output_gate()`
+fail-closes medical/legal outputs in `low`/`unmeasured` languages to
+NON_AUTHORITATIVE with mandatory human review, and flags fluent
+surface + low accuracy as `fluent_unverified` (the fluency trap).
+Every high-stakes low-accuracy gate fire emits
+`i18n.mistranslation_harm`. `alignment_probe()` runs the same safety
+test per declared language and downgrades failures via narrow-only
+amendments (IndicSafe-style 12.8% cross-language consistency, as a
+mechanism). `grant_community_data()` / `revoke_community_data()` /
+`check_community_use()` are community-signed, purpose-bound,
+revocable data-sovereignty receipts with use-time checks (105th-batch
+consent discipline, community as subject).
+
+## Unreleased (one-hundred-thirteenth batch) — incident receipts + evaluator-access gate (AI-safety-institutes absorption)
+
+New modules `incident_receipts.py` and `evaluator_access.py`:
+hash-chained `IncidentReceipt`s binding `(incident_id, system_id,
+severity, death_linked, widespread, systemic_tier, detected_at,
+reported_at, summary_digest)` with machine-enforced EU-AI-Act-Art.73
+reporting clocks (serious 15d, death-linked 10d, widespread 2d,
+critical 2d, GPAI systemic-risk 2/5/10/15-day tiers; limited carries
+no mandatory clock). A missed clock auto-escalates the severity and
+audits `incident.clock_missed` — the receipt itself records the miss,
+and `detected_at`/`reported_at` are machine-checked against
+backdating (future-dated detection or report-before-detection raise).
+Duplicate `incident_id` filings are idempotent-denied. Incident
+records are pinned to a 5-year retention floor; registering a shorter
+retention is refused. `EvaluationRegistry` binds evaluation receipts
+to the exact `(model_digest, checkpoint)` pair — runtime invocations
+that do not resolve to a live, unexpired, unrevoked receipt classify
+`unverifiable-evaluation` (the evaluate-A/ship-B gate). `cheat_probe()`
+flags traces containing known shortcut markers as `cheat-detected`
+with the capability claim classified NON_AUTHORITATIVE (UK AISI
+2026-07 lesson); traces missing required steps are `incomplete-trace`.
+Clock figures are bench parameters drawn from the 2026 research
+sweep — verify against EUR-Lex before legal use.
+
+## Unreleased (one-hundred-twelfth batch) — synthetic-data ratio cap (synthetic-data absorption)
+
+New module `synthetic_cap.py`: authority-signed, hash-chained
+`DataSliceManifest` receipts labeling every corpus slice `real` or
+`synthetic` (+ `generator_id`, `generation` for synthetic) — undeclared
+slices deny as `data.undeclared_slice`. `check_synthetic_ratio()`
+fail-closes on the synthetic-fraction cap (`data.synthetic_cap_exceeded`;
+the threshold is a bench-calibrated parameter, not a law of nature)
+and on the generation-2 recursion tripwire (`data.recursive_reuse`,
+the RAG-collapse wire — "accumulate never replace"). `check_tdm_optout()`
+honors TDM opt-outs only when machine-readable (Kneschke v. LAION
+rationale, not legal advice). `art50_gate()`: EU deployments need
+machine-readable AI-output marking — missing marking is
+`non_authoritative` inside the 2026-12-02 grace window, denied after.
+`training_summary_receipt()` is the Art. 53 top-source template,
+pinned into the model-lineage receipt via `pin_to_lineage()`.
+Bench track `metrics.synthetic_cap`: 12 scenarios, 4 allow / 8 deny.
+
 ## Unreleased (one-hundred-eleventh batch) — dual-use screen for autonomous science (AI-for-science absorption)
 
 New module `dual_use.py`: authority-signed, hash-chained
@@ -16,6 +79,7 @@ document `NON_AUTHORITATIVE`. `MechanicalVerifier`: AlphaProof-style
 generator/verifier separation — verifier reject means action reject,
 no override path. Bench track `metrics.dual_use`: 12 scenarios,
 5 allow / 7 deny.
+
 
 ## Unreleased (one-hundred-seventh batch) — scene-bound authorization receipts (AI-healthcare absorption)
 
