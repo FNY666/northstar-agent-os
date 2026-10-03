@@ -114,6 +114,33 @@ tool calls (every raw effect ran exactly once), and exactly one `run.finished`.
 `SIGKILL` mid-step and a healthy process takes over without re-running
 finished steps.
 
+The suite measures two receiver models. With a *surviving* dedup store (the
+default sweep), in-flight tool calls are adopted and nothing re-executes.
+With a *non-surviving* (in-memory) receiver — the honest model for a real
+`kill -9`, since `InMemoryDedupReceiver` is documented as
+single-process/tests-only — the benchmark reports the **in-flight
+re-execution rate**: tool calls whose raw effect executed before the crash
+but never completed must re-execute on resume ("ran but unrecorded" is
+indistinguishable from "never ran"). Per site the rate is exact: 1 of 6
+calls re-executes at `before-tool-completed` sites, 0 elsewhere; 6 duplicate
+executions across the 26-site sweep (6/156 slots = 3.85%). Completed tool
+calls never re-execute under either model. Three representative sites are
+additionally covered by real forked-child `SIGKILL` tests
+(`CrashRealKillTests`), proving the simulated conclusions hold under a true
+kill -9.
+
+Comparison with DCP-2.0 (sdageltc/agent-durability-bench, physical OS
+SIGKILL fault injection, 250-fault matrix, live leaderboard): our assertions
+map to its three leaderboard dimensions — recovery success rate (every
+crash site resumes to `finished`), zero duplicate side effects (completed
+calls never re-execute; in-flight re-execution measured, not hidden), and
+output consistency (byte-identical canonical JSON). DCP-2.0 independently
+reports the same methodology finding (in-flight steps necessarily
+re-execute, ~1.4–2.8% token waste). Honest scope: this is the single-host
+offline version — no cross-engine leaderboard, no 250-fault matrix — and
+DCP-2.0's published numbers (Temporal 99.2% et al.) are author self-reported,
+not independently reproduced.
+
 ### Claim-check: large payloads live in the blob area
 
 Payloads at or above 64 KiB (`blob_store.CLAIM_CHECK_THRESHOLD_BYTES`) never

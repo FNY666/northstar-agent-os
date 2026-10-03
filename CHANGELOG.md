@@ -1,5 +1,41 @@
 # Northstar Agent OS — initial public component
 
+## Unreleased (fifty-second batch) — crash-benchmark in-flight metrics + real SIGKILL sites
+
+Upgrades the crash-benchmark suite (`components/northstar-durable-run/tests/test_crash_benchmark.py`)
+with the measurement dimension DCP-2.0 (sdageltc/agent-durability-bench) made
+standard:
+
+- **In-flight re-execution rate** (`CrashInflightMetricsTests`): with a
+  non-surviving (in-memory) receiver — the honest model for a real `kill -9`,
+  since `InMemoryDedupReceiver` is documented as single-process/tests-only —
+  the suite measures, per crash site, how many in-flight tool calls
+  re-executed their raw effect after resume and the ratio. Deterministic and
+  exact: 1 of 6 calls re-executes at `before-tool-completed` sites (the only
+  sites where the effect ran but completion was never recorded), 0 elsewhere;
+  6 duplicate executions across the 26-site sweep (6/156 slots = 3.85%).
+  Asserts the core safety property per site — `re_executed ⊆ in_flight` —
+  so a completed tool call can never double-apply. Documents the methodology
+  claim "in-flight necessarily re-executes" (DCP-2.0 independently reports
+  ~1.4–2.8% token waste from the same cause).
+- **Real fork+SIGKILL sites** (`CrashRealKillTests`): three representative
+  sites (`before-tool-completed`, `after-tool-started`, `after-tool-completed`)
+  run in a forked child that blocks at the crash site until the parent
+  `SIGKILL`s it; the parent resumes with a fresh runner and fresh receiver.
+  Cross-process assertions (fsync'd effect log + step-output files) prove the
+  SimulatedCrash conclusions — byte-identical outputs, exact in-flight
+  re-execution counts, terminal markers exactly once — hold under a true
+  kill -9. Default-run, no skip marker (3 sites, ~10s).
+- **DCP-2.0 comparison** in the README crash-benchmark section: maps our
+  assertions to its leaderboard dimensions (recovery success rate, zero
+  duplicate side effects, output consistency); honestly scoped as the
+  single-host offline version, and DCP-2.0's published numbers noted as
+  author self-reported, not independently reproduced.
+
+**Verification:** `make test` fully green — durable-run 153/153 (149 existing
++ 4 new test methods), runtime 1505, interop 56, TS 57/57, repo docs 75/75;
+`make bench` 35/35; `python3 tests/docbuild.py verify` OK.
+
 ## Unreleased (fiftieth batch) — `audit export --trace`: TRACE v0.2-shaped Trust Records
 
 Emits a Northstar audit chain head as a TRACE v0.2-shaped Trust Record
