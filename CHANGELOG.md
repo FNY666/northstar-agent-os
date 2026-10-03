@@ -1,5 +1,48 @@
 # Northstar Agent OS — initial public component
 
+## Unreleased (fifty-eighth batch) — whisper-attacks contrast bench: why arguments_digest binding is necessary
+
+Absorbs the lesson of Whisper Attacks (Louck, Dvir, Stulman, "Signing the
+Transaction but Not the Decision: Whisper Attacks and a Binding Defense for
+AP2", arXiv:2609.11757, 2026-09-10). The attack model was verified against
+the paper's own text (read in full at arXiv HTML on 2026-10-03), not
+second-hand summaries: AP2 signs three mandates (intent, cart, payment) as
+W3C Verifiable Credentials (ECDSA P-256), yet "these signatures bind the
+transaction itself, but they do not bind the decision that produced it."
+Merchant-controlled listing text steers the shopping agent into a cart that
+passes every protocol check but no longer matches the user's request —
+measured at Vault Whisper 90%, Branded Whisper 56%, Selection Whisper
+73.3% on the pinned Gemini Flash-Lite builds the AP2 sample agents specify.
+The paper's A-VIP defense binds every credential lookup to the session that
+requested it and every cart line to the listing seen: the decision content,
+not just the transaction's existence.
+
+**Bench:** new `metrics.whisper_contrast` case (track "metrics", scorecard
+v10): a deterministic contrast of two designs on the same four argument
+swaps (value swap, recipient swap, field injection, type coercion) plus a
+key-reorder control —
+
+- Design A (vulnerable, AP2-shaped): the mandate signs only the call's
+  identity (intent id + tool name), never the arguments. All 4 swaps keep a
+  valid signature: the attack succeeds with every protocol check green,
+  demonstrating the hole Whisper Attacks describes.
+- Design B (Northstar): the approval binds `digest_arguments(arguments)`
+  (sha256 over canonical JSON, the same wire format as the durable
+  `northstar.approval.v2/v3` tokens). All 4 swaps change the digest, so the
+  approval cannot replay: fail-closed, 4/4 blocked. The key-reorder
+  control stays allowed, proving canonical JSON has no false positive on
+  semantically identical arguments.
+
+HMAC-SHA256 stands in for ECDSA P-256 in the bench (the crypto primitive
+is not under test — the binding scope is). The paper is a pre-print with
+no peer-reviewed venue at read time; its attack rates are the authors'
+self-reported numbers, not independently reproduced.
+
+**Verification:** `make test` fully green (runtime incl. 3 new whisper
+tests; durable-run 155; interop 56; TS 57/57; repo docs 75/75);
+`make bench` 41/41 incl. the new track (scorecard v10);
+`python3 tests/docbuild.py verify` OK; git clean.
+
 ## Unreleased (fifty-sixth batch) — ASK-timing judgment, HiL-Bench Ask-F1 methodology
 
 New metrics-track case `metrics.ask_timing`

@@ -534,6 +534,10 @@ Least-privilege gate enforcement, ToolPrivBench methodology.
 
 ASK-timing judgment, HiL-Bench Ask-F1 methodology.
 
+#### `run_whisper_contrast()`
+
+Contrast bench: AP2-shaped "sign the transaction" vs "bind the arguments".
+
 #### `BenchHarness`
 
 Temp workspaces + scripted providers for one suite run.
