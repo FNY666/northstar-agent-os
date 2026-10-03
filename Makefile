@@ -8,7 +8,7 @@ help:
 	@echo "               without it the suite is skipped, not failed - the python drift"
 	@echo "               gate in tests/test_typescript_sdk.py covers the same contract)"
 	@echo "  make install install every component into a virtualenv (python3 -m venv .venv)"
-	@echo "  make bench   public governance benchmark (denial / injection / budget)"
+	@echo "  make bench   public governance benchmark (denial / injection / budget / redteam)"
 	@echo "  make install-smoke  clean-venv wheel install + northstar --version + bench"
 	@echo ""
 	@echo "product entry (checkout, no pip):"
