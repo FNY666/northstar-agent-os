@@ -1,3 +1,12 @@
+## Unreleased (seventy-ninth batch) — RFC 9162 Merkle proofs for audit
+
+`audit verify` goes from O(n) to O(log n): strict RFC 9162 §2.1 Merkle tree
+over the sealed hash chain (leaf = record chain_hash bytes), inclusion proofs,
+consistency proofs, and CT-style signed tree heads (Ed25519 over size+root).
+New CLI: `audit tree-head`, `prove`, `prove-consistency`, `verify --proof`,
+`verify-consistency`. Proofs are only issued on an intact chain; a broken chain
+refuses. Complements (not replaces) the hash chain, Rekor anchors, and receipts.
+
 ## Unreleased (seventy-eighth batch) — plugin claim-evidence trust tiering
 
 Absorbs ERC-8004 validation semantics (EIP draft, chain-offline port):

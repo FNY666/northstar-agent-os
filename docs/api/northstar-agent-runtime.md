@@ -606,6 +606,10 @@ Timelock-delayed execution, OpenZeppelin TimelockController semantics.
 
 Plugin claim-evidence tiering, ERC-8004 validation semantics.
 
+#### `run_merkle_proofs()`
+
+RFC 9162 Merkle inclusion/consistency proofs over the audit chain.
+
 #### `list_cases()`
 
 #### `run_suite(*, only: Iterable[str] | None=None, tracks: Iterable[str] | None=None)`
