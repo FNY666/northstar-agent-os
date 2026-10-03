@@ -98,6 +98,76 @@ Return a copy of ``receipt`` with the ``attestation`` field set.
 
 Render an attested-receipt audit event (hash-chain friendly).
 
+### `agent_readiness`
+
+Source: `components/northstar-agent-runtime/agent_readiness.py`
+
+Agent-readiness probes for public-facing agent UI (one-hundred-first batch).
+
+#### `A11yNode`
+
+One node in the simplified accessibility tree.
+
+- `is_actionable()`
+- `walk()`
+  - Depth-first (path, node) pairs; path is the child-index tuple.
+#### `ReadinessFinding`
+
+One probe finding. ``node_path`` is the child-index path from the root, ``/``-joined (``""`` for the root itself).
+
+- `as_dict()`
+#### `TreeParseError`
+
+Raised by ``parse_tree`` on structurally malformed canonical text.
+
+#### `serialize_tree(root: A11yNode)`
+
+Deterministic canonical text form of a tree.
+
+#### `parse_tree(text: str)`
+
+Parse canonical text back into a tree.
+
+#### `probe_named_actions(root: A11yNode)`
+
+Every actionable element must have a non-blank accessible name.
+
+#### `probe_irreversible_marked(root: A11yNode, irreversible_names: Collection[str]=())`
+
+Every action declared irreversible (ground truth from the caller — e.g. the card's risk tier, never the tree itself) must be marked in the tree: ``irreversible`` on the node, or a ``destructive-warning`` on the node or an ancestor.
+
+#### `probe_reachable_paths(root: A11yNode)`
+
+Every actionable element must be reachable via keyboard or AT.
+
+#### `probe_roundtrip(root: A11yNode)`
+
+serialize -> parse -> serialize must be byte-identical.
+
+#### `probe_tree(root: A11yNode, irreversible_names: Collection[str]=())`
+
+Run all four probes; findings in deterministic probe order.
+
+#### `classify_presentation(findings: Sequence[ReadinessFinding])`
+
+Binary presentation trust: any finding -> NON_AUTHORITATIVE.
+
+#### `render_card_tree(card: Any)`
+
+Render an 84th-batch ``ActionCard`` into an accessibility tree.
+
+#### `irreversible_actions_for_card(card: Any)`
+
+Ground-truth irreversible action names for a card (from risk tier).
+
+#### `assess_card_presentation(card: Any)`
+
+Render + probe + classify a card's presentation.
+
+#### `readiness_audit_event(card_id: str, findings: Sequence[ReadinessFinding], tier: EvidenceTier)`
+
+Build an ``audit.ndjson/1``-shaped event for a presentation assessment.
+
 ### `agents`
 
 Source: `components/northstar-agent-runtime/agents.py`
@@ -735,6 +805,40 @@ True when ``path`` still matches its recorded baseline.
 
 Run the TrojanHippo-style dormancy probe corpus against the gate.
 
+### `model_lineage`
+
+Source: `components/northstar-agent-runtime/model_lineage.py`
+
+Model lineage receipts (one-hundredth batch).
+
+#### `LineageReceiptError`
+
+A malformed lineage receipt or a programming error.
+
+#### `LineageReceipt`
+
+One model version's lineage claim.
+
+#### `compute_receipt_digest(receipt: LineageReceipt)`
+
+Recompute the receipt digest over all fields except itself.
+
+#### `build_receipt(*, model_id: str, model_digest: str, parent_model_digest: str='', corpus_manifest_digest: str, acquisition_method: str, consent_receipt_ids: tuple[str, ...]=(), tainted: bool=False, timestamp: int, prev_digest: str=_GENESIS)`
+
+Build a receipt and seal it with its digest.
+
+#### `LineageVerdict`
+
+Outcome of verifying one model version's lineage.
+
+#### `verify_lineage(receipts: list[LineageReceipt], *, consent_lookup: Callable[[str], Mapping[str, Any] | None] | None=None)`
+
+Verify a lineage log, fail-closed.
+
+#### `classify_model(receipt: LineageReceipt, registry: list[LineageReceipt], *, consent_lookup: Callable[[str], Mapping[str, Any] | None] | None=None)`
+
+Binary policy tier for one model version.
+
 ### `events`
 
 Source: `components/northstar-agent-runtime/events.py`
@@ -805,40 +909,6 @@ Evaluate every probe under its declared engine (native run).
 #### `run_policy_axis()`
 
 Strict-vs-permissive effect size on the config-portable probe subset.
-### `model_lineage`
-
-Source: `components/northstar-agent-runtime/model_lineage.py`
-
-Model lineage receipts (one-hundredth batch).
-
-#### `LineageReceiptError`
-
-A malformed lineage receipt or a programming error.
-
-#### `LineageReceipt`
-
-One model version's lineage claim.
-
-#### `compute_receipt_digest(receipt: LineageReceipt)`
-
-Recompute the receipt digest over all fields except itself.
-
-#### `build_receipt(*, model_id: str, model_digest: str, parent_model_digest: str='', corpus_manifest_digest: str, acquisition_method: str, consent_receipt_ids: tuple[str, ...]=(), tainted: bool=False, timestamp: int, prev_digest: str=_GENESIS)`
-
-Build a receipt and seal it with its digest.
-
-#### `LineageVerdict`
-
-Outcome of verifying one model version's lineage.
-
-#### `verify_lineage(receipts: list[LineageReceipt], *, consent_lookup: Callable[[str], Mapping[str, Any] | None] | None=None)`
-
-Verify a lineage log, fail-closed.
-
-#### `classify_model(receipt: LineageReceipt, registry: list[LineageReceipt], *, consent_lookup: Callable[[str], Mapping[str, Any] | None] | None=None)`
-
-Binary policy tier for one model version.
-
 
 #### `run_consent_ablation()`
 
@@ -927,6 +997,14 @@ SOC verdict cards + kill-switch mandate (ninety-ninth batch).
 #### `run_quantum_timeline()`
 
 Quantum-threat timeline gates (one-hundred-second batch).
+
+#### `run_model_lineage()`
+
+Model lineage receipts (one-hundredth batch).
+
+#### `run_agent_readiness()`
+
+Agent-readiness probes for public-facing agent UI (101st batch).
 
 #### `run_adversarial_scenarios()`
 
@@ -1032,10 +1110,6 @@ Audit record pinning the harness digest for one bench run.
 Re-hash ``config`` and compare against the pinned digest.
 
 #### `ScoredResult`
-#### `run_model_lineage()`
-
-Model lineage receipts (one-hundredth batch).
-
 
 A benchmark score with its full measurement context.
 

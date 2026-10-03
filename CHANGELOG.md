@@ -1,3 +1,24 @@
+## Unreleased (one-hundred-first batch) — agent-readiness probes for public-facing agent UI (AI-accessibility absorption)
+
+New module `agent_readiness.py`: a deterministic probe harness rendering an
+84th-batch `ActionCard` into a simplified accessibility tree
+(role / name / states / input paths) and running four fail-closed probes —
+every actionable element has a non-blank accessible name
+(`readiness:unnamed_action`), every ground-truth-declared irreversible
+action is marked in the tree (`readiness:hidden_irreversible`), every
+action is reachable via keyboard or AT, never pointer-only
+(`readiness:inaccessible_path`), and the tree round-trips through its
+canonical text form byte-identically (`readiness:unstable_tree`;
+unrepresentable roles/modalities/states are findings, never silently
+dropped). Absorbs the 2026 AI-accessibility thread: "Agent Readiness" —
+screen readers and AI agents read the *same* accessibility tree, so
+BFSG/EAA compliance is the foundation (EAA enforcement is live, fines up
+to uncapped in Sweden; AI-generated UI routinely fails EN 301 549). Any
+finding classifies the *presentation* `NON_AUTHORITATIVE` — 87th-batch
+binary semantics, no partial tier; the underlying decision is a separate
+axis. New bench track `metrics.agent_readiness` (12 deterministic
+scenarios, 3 allow / 9 deny, zero mismatches); bench v20 → v21.
+
 ## Unreleased (one-hundredth batch) — model lineage receipts (AI-creative copyright absorption)
 
 New module `model_lineage.py`: hash-chained lineage receipts binding
@@ -16,6 +37,23 @@ is the binary policy tier (`verified-lineage` /
 `unverifiable-lineage`, no partial tier — the eighty-seventh batch's
 lesson). New bench track `metrics.model_lineage` (12 deterministic
 scenarios, 3 allow / 9 deny, zero mismatches); bench v18 → v19.
+
+## Unreleased (ninety-ninth batch) — SOC verdict cards + kill-switch mandate (AI-cyberdefense absorption)
+
+New module `soc_verdicts.py`: a Verifiable Action Card (84th batch)
+specialized for SOC triage decisions — constructed from runtime ground
+truth, closed verdict vocabulary (`allow`/`quarantine`/`escalate`), Ed25519
+analyst countersign binding `(analyst_id, card_digest)` with
+no-self-countersign (94th batch, applied to the analyst slot). Every
+autonomous remediation action must register a reachable kill-switch
+`(endpoint_id, timeout_s)`; `check_killswitch_reachable()` fail-closes on
+unreachable endpoints, non-positive timeouts, or timeouts exceeding the
+action's blast-radius window. "Investigate, never the final word": the
+card is AUTHORITATIVE evidence (87th batch) but execution requires human
+countersign or an armed kill-switch — autonomous execution with neither
+is denied; there is no third path. Denials audit as
+`soc.execution_denied`. New bench track `metrics.soc_verdicts` (12
+deterministic scenarios, 3 allow / 9 deny, zero mismatches); bench v19 → v20.
 
 ## Unreleased (one-hundred-second batch) — quantum-threat timeline gates (BSI TR-02102 absorption)
 
@@ -37,23 +75,6 @@ signer is stubbed as future work and fail-closes today. New bench track
 `metrics.quantum_timeline` (12 deterministic scenarios, 4 allow / 2
 warn / 6 deny, zero mismatches); bench version bump left for
 integration (sibling batches 100/101 own the v20/v21 bumps).
-
-## Unreleased (ninety-ninth batch) — SOC verdict cards + kill-switch mandate (AI-cyberdefense absorption)
-
-New module `soc_verdicts.py`: a Verifiable Action Card (84th batch)
-specialized for SOC triage decisions — constructed from runtime ground
-truth, closed verdict vocabulary (`allow`/`quarantine`/`escalate`), Ed25519
-analyst countersign binding `(analyst_id, card_digest)` with
-no-self-countersign (94th batch, applied to the analyst slot). Every
-autonomous remediation action must register a reachable kill-switch
-`(endpoint_id, timeout_s)`; `check_killswitch_reachable()` fail-closes on
-unreachable endpoints, non-positive timeouts, or timeouts exceeding the
-action's blast-radius window. "Investigate, never the final word": the
-card is AUTHORITATIVE evidence (87th batch) but execution requires human
-countersign or an armed kill-switch — autonomous execution with neither
-is denied; there is no third path. Denials audit as
-`soc.execution_denied`. New bench track `metrics.soc_verdicts` (12
-deterministic scenarios, 3 allow / 9 deny, zero mismatches); bench v19 → v20.
 
 ## Unreleased (ninety-fifth batch) — JCS golden vectors: the single canonicalizer (RFC 8785)
 

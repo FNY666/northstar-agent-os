@@ -115,7 +115,7 @@ from tools import ToolLimits, ToolSandbox, build_default_registry
 
 #: Semantic version of the public case set. Bump when a case is added, removed,
 #: or its expected verdict changes — consumers pin against this string.
-BENCH_VERSION = "northstar.governance.bench.v20"
+BENCH_VERSION = "northstar.governance.bench.v21"
 
 USAGE_ERROR = 64
 
@@ -4900,179 +4900,6 @@ def run_process_receipts() -> dict[str, Any]:
     }
 
 
-
-def run_quantum_timeline() -> dict[str, Any]:
-    """Quantum-threat timeline gates (one-hundred-second batch).
-
-    Absorbs the 2026 quantum thread: Google ECDLP-256 in <1,200 logical
-    qubits (~9 min, arXiv:2603.28846 — compression from
-    algorithm/error-correction, not hardware); Germany BSI TR-02102
-    (2026-02-11): classical asymmetric crypto phases out end of 2031,
-    classical signatures end of 2035; RFC 10024 hybrid TLS key exchange.
-
-    The runner exercises ``quantum_timeline.gate_signing`` over 12
-    deterministic scenarios: long-lived Ed25519 mints are denied past
-    the 2031 phaseout, short-lived tokens are allowed with a warning,
-    hash/MAC-only usage is unaffected, unknown primitives and malformed
-    expiries fail closed, the hybrid signer stub fail-closes, and the
-    migration plan covers every signing module. Ground truth is closed:
-    4 allow / 2 allow-with-warning / 6 deny.
-    """
-    from quantum_timeline import (
-        BSI_ASYMMETRIC_PHASEOUT,
-        BSI_SIGNATURE_PHASEOUT,
-        QUANTUM_TIMELINE_DENIED_EVENT,
-        QUANTUM_TIMELINE_WARNING_EVENT,
-        gate_signing,
-        hybrid_sign,
-        migration_plan,
-        threat_assessment,
-    )
-
-    scenarios: list[tuple[str, str, Any]] = []
-
-    def _scenario(sid: str, expected: str, thunk: Any) -> None:
-        scenarios.append((sid, expected, thunk))
-
-    # 1-2: long-lived Ed25519 mints denied past the 2031 phaseout.
-    _scenario(
-        "deny_passport_2032",
-        "deny",
-        lambda: gate_signing(
-            primitive="Ed25519",
-            expires_at="2032-06-01",
-            credential_kind="passport",
-        ),
-    )
-    _scenario(
-        "deny_bundle_2035",
-        "deny",
-        lambda: gate_signing(
-            primitive="Ed25519",
-            expires_at="2035-01-01",
-            credential_kind="offline-bundle",
-        ),
-    )
-    # 3-4: short-lived tokens allowed with warning.
-    _scenario(
-        "warn_session_token",
-        "allow-with-warning",
-        lambda: gate_signing(
-            primitive="Ed25519",
-            expires_at="2026-10-05",
-            credential_kind="session-token",
-        ),
-    )
-    _scenario(
-        "warn_boundary_day",
-        "allow-with-warning",
-        lambda: gate_signing(
-            primitive="Ed25519", expires_at=BSI_ASYMMETRIC_PHASEOUT
-        ),
-    )
-    # 5-6: hash/MAC-only usage unaffected.
-    _scenario(
-        "allow_sha256_2040",
-        "allow",
-        lambda: gate_signing(primitive="SHA-256", expires_at="2040-01-01"),
-    )
-    _scenario(
-        "allow_hmac_2099",
-        "allow",
-        lambda: gate_signing(
-            primitive="HMAC-SHA256", expires_at="2099-12-31"
-        ),
-    )
-    # 7-9: unknown primitive / malformed expiry fail closed.
-    _scenario(
-        "deny_unknown_primitive",
-        "deny",
-        lambda: gate_signing(primitive="RSA-2048", expires_at="2027-01-01"),
-    )
-    _scenario(
-        "deny_malformed_expiry",
-        "deny",
-        lambda: gate_signing(primitive="Ed25519", expires_at="someday"),
-    )
-    _scenario(
-        "deny_missing_expiry",
-        "deny",
-        lambda: gate_signing(primitive="Ed25519", expires_at=None),
-    )
-    # 10: hybrid signer stub fail-closes.
-    _scenario(
-        "deny_hybrid_stub",
-        "deny",
-        lambda: hybrid_sign(b"payload"),
-    )
-    # 11: threat assessment postures are pinned.
-    def _assess() -> dict[str, Any]:
-        a = threat_assessment("2026-10-04")
-        ok = (
-            a["primitives"]["Ed25519"] == "migrate-by-2031"
-            and a["primitives"]["SHA-256"] == "review-2035"
-            and a["primitives"]["HMAC-SHA256"] == "acceptable"
-            and a["overall"] == "migrate-by-2031"
-        )
-        return {"verdict": "allow" if ok else "deny"}
-
-    _scenario("allow_assessment_pinned", "allow", _assess)
-    # 12: migration plan covers every signing module.
-    def _plan() -> dict[str, Any]:
-        plan = migration_plan()
-        modules = {row["module"] for row in plan}
-        ok = {
-            "passport",
-            "offline_bundle",
-            "agent_identity",
-            "delegation_credentials",
-            "multisig",
-            "audit_chain",
-            "audit_scitt",
-        } <= modules and all(
-            row["deadline"] in (BSI_ASYMMETRIC_PHASEOUT, BSI_SIGNATURE_PHASEOUT)
-            or row["deadline"].startswith("no deadline")
-            for row in plan
-        )
-        return {"verdict": "allow" if ok else "deny"}
-
-    _scenario("allow_plan_complete", "allow", _plan)
-
-    mismatches: list[str] = []
-    allowed_ids: list[str] = []
-    warned_ids: list[str] = []
-    denial_reasons: dict[str, str] = {}
-    for sid, expected, thunk in scenarios:
-        try:
-            outcome = thunk()
-        except Exception as error:  # noqa: BLE001 — fail-closed probe
-            outcome = {"verdict": "deny", "reason": f"raised: {error}"}
-        verdict = outcome.get("verdict")
-        if verdict != expected:
-            mismatches.append(
-                f"{sid}: expected {expected}, got {verdict}"
-            )
-        if verdict == "allow":
-            allowed_ids.append(sid)
-        elif verdict == "allow-with-warning":
-            warned_ids.append(sid)
-            ev = outcome.get("event") or {}
-            if ev.get("event") != QUANTUM_TIMELINE_WARNING_EVENT:
-                mismatches.append(f"{sid}: warning must emit the warning event")
-        else:
-            denial_reasons[sid] = outcome.get("reason", "")
-            ev = outcome.get("event") or {}
-            if ev.get("event") != QUANTUM_TIMELINE_DENIED_EVENT:
-                mismatches.append(f"{sid}: denial must emit the denied event")
-
-    return {
-        "n_scenarios": len(scenarios),
-        "mismatches": mismatches,
-        "allowed_ids": allowed_ids,
-        "warned_ids": warned_ids,
-        "denial_reasons": denial_reasons,
-    }
-
 def run_soc_verdicts() -> dict[str, Any]:
     """SOC verdict cards + kill-switch mandate (ninety-ninth batch).
 
@@ -5288,6 +5115,556 @@ def run_soc_verdicts() -> dict[str, Any]:
         "allowed_ids": allowed_ids,
         "denial_reasons": denial_reasons,
     }
+
+
+def run_quantum_timeline() -> dict[str, Any]:
+    """Quantum-threat timeline gates (one-hundred-second batch).
+
+    Absorbs the 2026 quantum thread: Google ECDLP-256 in <1,200 logical
+    qubits (~9 min, arXiv:2603.28846 — compression from
+    algorithm/error-correction, not hardware); Germany BSI TR-02102
+    (2026-02-11): classical asymmetric crypto phases out end of 2031,
+    classical signatures end of 2035; RFC 10024 hybrid TLS key exchange.
+
+    The runner exercises ``quantum_timeline.gate_signing`` over 12
+    deterministic scenarios: long-lived Ed25519 mints are denied past
+    the 2031 phaseout, short-lived tokens are allowed with a warning,
+    hash/MAC-only usage is unaffected, unknown primitives and malformed
+    expiries fail closed, the hybrid signer stub fail-closes, and the
+    migration plan covers every signing module. Ground truth is closed:
+    4 allow / 2 allow-with-warning / 6 deny.
+    """
+    from quantum_timeline import (
+        BSI_ASYMMETRIC_PHASEOUT,
+        BSI_SIGNATURE_PHASEOUT,
+        QUANTUM_TIMELINE_DENIED_EVENT,
+        QUANTUM_TIMELINE_WARNING_EVENT,
+        gate_signing,
+        hybrid_sign,
+        migration_plan,
+        threat_assessment,
+    )
+
+    scenarios: list[tuple[str, str, Any]] = []
+
+    def _scenario(sid: str, expected: str, thunk: Any) -> None:
+        scenarios.append((sid, expected, thunk))
+
+    # 1-2: long-lived Ed25519 mints denied past the 2031 phaseout.
+    _scenario(
+        "deny_passport_2032",
+        "deny",
+        lambda: gate_signing(
+            primitive="Ed25519",
+            expires_at="2032-06-01",
+            credential_kind="passport",
+        ),
+    )
+    _scenario(
+        "deny_bundle_2035",
+        "deny",
+        lambda: gate_signing(
+            primitive="Ed25519",
+            expires_at="2035-01-01",
+            credential_kind="offline-bundle",
+        ),
+    )
+    # 3-4: short-lived tokens allowed with warning.
+    _scenario(
+        "warn_session_token",
+        "allow-with-warning",
+        lambda: gate_signing(
+            primitive="Ed25519",
+            expires_at="2026-10-05",
+            credential_kind="session-token",
+        ),
+    )
+    _scenario(
+        "warn_boundary_day",
+        "allow-with-warning",
+        lambda: gate_signing(
+            primitive="Ed25519", expires_at=BSI_ASYMMETRIC_PHASEOUT
+        ),
+    )
+    # 5-6: hash/MAC-only usage unaffected.
+    _scenario(
+        "allow_sha256_2040",
+        "allow",
+        lambda: gate_signing(primitive="SHA-256", expires_at="2040-01-01"),
+    )
+    _scenario(
+        "allow_hmac_2099",
+        "allow",
+        lambda: gate_signing(
+            primitive="HMAC-SHA256", expires_at="2099-12-31"
+        ),
+    )
+    # 7-9: unknown primitive / malformed expiry fail closed.
+    _scenario(
+        "deny_unknown_primitive",
+        "deny",
+        lambda: gate_signing(primitive="RSA-2048", expires_at="2027-01-01"),
+    )
+    _scenario(
+        "deny_malformed_expiry",
+        "deny",
+        lambda: gate_signing(primitive="Ed25519", expires_at="someday"),
+    )
+    _scenario(
+        "deny_missing_expiry",
+        "deny",
+        lambda: gate_signing(primitive="Ed25519", expires_at=None),
+    )
+    # 10: hybrid signer stub fail-closes.
+    _scenario(
+        "deny_hybrid_stub",
+        "deny",
+        lambda: hybrid_sign(b"payload"),
+    )
+    # 11: threat assessment postures are pinned.
+    def _assess() -> dict[str, Any]:
+        a = threat_assessment("2026-10-04")
+        ok = (
+            a["primitives"]["Ed25519"] == "migrate-by-2031"
+            and a["primitives"]["SHA-256"] == "review-2035"
+            and a["primitives"]["HMAC-SHA256"] == "acceptable"
+            and a["overall"] == "migrate-by-2031"
+        )
+        return {"verdict": "allow" if ok else "deny"}
+
+    _scenario("allow_assessment_pinned", "allow", _assess)
+    # 12: migration plan covers every signing module.
+    def _plan() -> dict[str, Any]:
+        plan = migration_plan()
+        modules = {row["module"] for row in plan}
+        ok = {
+            "passport",
+            "offline_bundle",
+            "agent_identity",
+            "delegation_credentials",
+            "multisig",
+            "audit_chain",
+            "audit_scitt",
+        } <= modules and all(
+            row["deadline"] in (BSI_ASYMMETRIC_PHASEOUT, BSI_SIGNATURE_PHASEOUT)
+            or row["deadline"].startswith("no deadline")
+            for row in plan
+        )
+        return {"verdict": "allow" if ok else "deny"}
+
+    _scenario("allow_plan_complete", "allow", _plan)
+
+    mismatches: list[str] = []
+    allowed_ids: list[str] = []
+    warned_ids: list[str] = []
+    denial_reasons: dict[str, str] = {}
+    for sid, expected, thunk in scenarios:
+        try:
+            outcome = thunk()
+        except Exception as error:  # noqa: BLE001 — fail-closed probe
+            outcome = {"verdict": "deny", "reason": f"raised: {error}"}
+        verdict = outcome.get("verdict")
+        if verdict != expected:
+            mismatches.append(
+                f"{sid}: expected {expected}, got {verdict}"
+            )
+        if verdict == "allow":
+            allowed_ids.append(sid)
+        elif verdict == "allow-with-warning":
+            warned_ids.append(sid)
+            ev = outcome.get("event") or {}
+            if ev.get("event") != QUANTUM_TIMELINE_WARNING_EVENT:
+                mismatches.append(f"{sid}: warning must emit the warning event")
+        else:
+            denial_reasons[sid] = outcome.get("reason", "")
+            ev = outcome.get("event") or {}
+            if ev.get("event") != QUANTUM_TIMELINE_DENIED_EVENT:
+                mismatches.append(f"{sid}: denial must emit the denied event")
+
+    return {
+        "n_scenarios": len(scenarios),
+        "mismatches": mismatches,
+        "allowed_ids": allowed_ids,
+        "warned_ids": warned_ids,
+        "denial_reasons": denial_reasons,
+    }
+
+
+def run_model_lineage() -> dict[str, Any]:
+    """Model lineage receipts (one-hundredth batch).
+
+    Absorbs the 2026 AI-creative copyright thread:
+
+    * Sony Music + UMG v. Suno, second wave (Sept 18, 2026): the
+      "model laundering" / "fruit of the poisonous tree" theory — v6
+      allegedly trained on the earlier infringing model's outputs, so
+      the infringement doesn't wash clean through retraining.
+    * Bartz v. Anthropic ($1.5B, July 2026): training itself was fair
+      use, but the $1.5B was for *pirated acquisition*. Clean training
+      cannot cure dirty acquisition.
+    * GEMA v. Suno (Munich, July 2026): model memorization counts as
+      reproduction; the TDM exception doesn't cover it.
+
+    Each model version carries a ``LineageReceipt`` binding
+    ``(model_digest | training_corpus_manifest_digest |
+    acquisition_method)`` to its parent model, hash-chained into an
+    append-only lineage log. The gate fail-closes on: lineage gaps
+    (unresolvable parent), consent-gated corpora without resolvable
+    consent receipts, ``unknown`` acquisition (unshowable == pirated),
+    and tainted ancestry — taint propagates transitively with no
+    washing step.
+
+    Deterministic: sha256-label fixtures, pinned integer timestamps, no
+    runtime, no network, no model. Ground truth is closed: 12
+    scenarios, 3 allow / 9 deny.
+    """
+    import hashlib as _hashlib
+
+    from model_lineage import (
+        UNVERIFIABLE_LINEAGE,
+        VERIFIED_LINEAGE,
+        build_receipt,
+        classify_model,
+        verify_lineage,
+    )
+
+    def _hex(label: str) -> str:
+        return _hashlib.sha256(f"northstar-bench-model-lineage:{label}".encode()).hexdigest()
+
+    consent_db = {"consent-a": {"granted": True}, "consent-b": {"granted": True}}
+    lookup = consent_db.get
+
+    def _root(model_id: str, method: str, **kw) -> Any:
+        return build_receipt(
+            model_id=model_id,
+            model_digest=_hex(f"weights:{model_id}"),
+            corpus_manifest_digest=_hex(f"corpus:{model_id}"),
+            acquisition_method=method,
+            timestamp=1000,
+            **kw,
+        )
+
+    def _child(model_id: str, parent: Any, method: str, **kw) -> Any:
+        return build_receipt(
+            model_id=model_id,
+            model_digest=_hex(f"weights:{model_id}"),
+            parent_model_digest=parent.model_digest,
+            corpus_manifest_digest=_hex(f"corpus:{model_id}"),
+            acquisition_method=method,
+            timestamp=2000,
+            prev_digest=parent.receipt_digest,
+            **kw,
+        )
+
+    def _verdict_allows(model_id: str, receipts: list) -> Any:
+        return verify_lineage(receipts, consent_lookup=lookup)[model_id]
+
+    # Clean three-generation chain: licensed -> consent-gated -> public-domain.
+    clean_root = _root("clean-v1", "licensed")
+    clean_mid = _child(
+        "clean-v2", clean_root, "consent-gated",
+        consent_receipt_ids=("consent-a", "consent-b"),
+    )
+    clean_leaf = build_receipt(
+        model_id="clean-v3",
+        model_digest=_hex("weights:clean-v3"),
+        parent_model_digest=clean_mid.model_digest,
+        corpus_manifest_digest=_hex("corpus:clean-v3"),
+        acquisition_method="public-domain",
+        timestamp=3000,
+        prev_digest=clean_mid.receipt_digest,
+    )
+    clean_log = [clean_root, clean_mid, clean_leaf]
+
+    # Tainted line: adjudicated root -> child -> grandchild (no washing).
+    taint_root = _root("taint-v1", "licensed", tainted=True)
+    taint_mid = _child("taint-v2", taint_root, "licensed")
+    taint_leaf = build_receipt(
+        model_id="taint-v3",
+        model_digest=_hex("weights:taint-v3"),
+        parent_model_digest=taint_mid.model_digest,
+        corpus_manifest_digest=_hex("corpus:taint-v3"),
+        acquisition_method="licensed",
+        timestamp=3000,
+        prev_digest=taint_mid.receipt_digest,
+    )
+    taint_log = [taint_root, taint_mid, taint_leaf]
+
+    # Unknown-acquisition line (Bartz): poison at the root, inherited.
+    shady_root = _root("shady-v1", "unknown")
+    shady_child = _child("shady-v2", shady_root, "licensed")
+    shady_log = [shady_root, shady_child]
+
+    scenarios: list[tuple[str, bool, Any]] = []
+
+    # 1-3: allows
+    scenarios.append((
+        "allow_clean_three_gen", True,
+        lambda: _verdict_allows("clean-v3", clean_log),
+    ))
+    scenarios.append((
+        "allow_public_domain_root", True,
+        lambda: _verdict_allows("pd-root", [_root("pd-root", "public-domain")]),
+    ))
+    scenarios.append((
+        "allow_licensed_no_consent", True,
+        lambda: _verdict_allows("lic-root", [_root("lic-root", "licensed")]),
+    ))
+
+    # 4-6: taint — adjudicated, inherited, transitive (no washing)
+    scenarios.append((
+        "deny_tainted_adjudicated", False,
+        lambda: _verdict_allows("taint-v1", taint_log),
+    ))
+    scenarios.append((
+        "deny_tainted_child_inherits", False,
+        lambda: _verdict_allows("taint-v2", taint_log),
+    ))
+    scenarios.append((
+        "deny_tainted_grandchild_transitive", False,
+        lambda: _verdict_allows("taint-v3", taint_log),
+    ))
+
+    # 7-8: unknown acquisition (Bartz) — at root and inherited
+    scenarios.append((
+        "deny_unknown_acquisition", False,
+        lambda: _verdict_allows("shady-v1", shady_log),
+    ))
+    scenarios.append((
+        "deny_unknown_poison_child", False,
+        lambda: _verdict_allows("shady-v2", shady_log),
+    ))
+
+    # 9: lineage gap — parent digest resolves to nothing
+    orphan = _root("orphan", "licensed")
+    orphan_gap = build_receipt(
+        model_id="orphan-child",
+        model_digest=_hex("weights:orphan-child"),
+        parent_model_digest=_hex("ghost-parent"),
+        corpus_manifest_digest=_hex("corpus:orphan-child"),
+        acquisition_method="licensed",
+        timestamp=2000,
+        prev_digest=orphan.receipt_digest,
+    )
+    scenarios.append((
+        "deny_lineage_gap", False,
+        lambda: _verdict_allows("orphan-child", [orphan, orphan_gap]),
+    ))
+
+    # 10: consent-gated with no consent receipts
+    cg_empty = _root("cg-empty", "consent-gated", consent_receipt_ids=())
+    scenarios.append((
+        "deny_consent_gated_no_receipts", False,
+        lambda: _verdict_allows("cg-empty", [cg_empty]),
+    ))
+
+    # 11: consent-gated with an unresolvable receipt id
+    cg_ghost = _root(
+        "cg-ghost", "consent-gated", consent_receipt_ids=("consent-ghost",)
+    )
+    scenarios.append((
+        "deny_consent_gated_unresolvable", False,
+        lambda: _verdict_allows("cg-ghost", [cg_ghost]),
+    ))
+
+    # 12: no lineage claim at all classifies unverifiable-lineage
+    scenarios.append((
+        "deny_none_receipt_classification", False,
+        lambda: classify_model(None, []) == VERIFIED_LINEAGE,
+    ))
+
+    mismatches: list[str] = []
+    allowed_ids: list[str] = []
+    denial_reasons: dict[str, str] = {}
+    for sid, expected_allow, thunk in scenarios:
+        try:
+            outcome = thunk()
+        except Exception as error:  # noqa: BLE001 — bench must not crash
+            mismatches.append(f"{sid}: threw {error}")
+            denial_reasons[sid] = f"threw: {error}"
+            continue
+        if isinstance(outcome, bool):
+            got_allow = outcome
+            reason = "classified unverifiable-lineage" if not got_allow else "classified verified-lineage"
+        else:
+            got_allow = bool(outcome.allowed)
+            reason = outcome.reason
+        if got_allow != expected_allow:
+            mismatches.append(f"{sid}: expected {'allow' if expected_allow else 'deny'}, got {'allow' if got_allow else 'deny'}")
+        if got_allow:
+            allowed_ids.append(sid)
+        else:
+            denial_reasons[sid] = reason
+
+    return {
+        "n_scenarios": len(scenarios),
+        "mismatches": mismatches,
+        "allowed_ids": allowed_ids,
+        "denial_reasons": denial_reasons,
+        "classification_unverifiable": UNVERIFIABLE_LINEAGE,
+    }
+
+
+def run_agent_readiness() -> dict[str, Any]:
+    """Agent-readiness probes for public-facing agent UI (101st batch).
+
+    Absorbs the 2026 AI-accessibility thread ("Agent Readiness": screen
+    readers and AI agents read the same accessibility tree; EAA/BFSG
+    enforcement is live). A public-facing action card is rendered into a
+    deterministic accessibility tree and probed: every actionable element
+    named, every declared-irreversible action marked, every action
+    reachable via keyboard or AT (pointer-only fails), and the tree
+    round-trips through its canonical form. Any finding classifies the
+    *presentation* NON_AUTHORITATIVE (87th-batch binary semantics — the
+    decision itself is a separate axis).
+
+    Deterministic: hand-built trees, no runtime, no network, no model.
+    Ground truth is closed: 12 scenarios, 3 allow / 9 deny.
+    """
+    from types import SimpleNamespace as _NS
+
+    from agent_readiness import (
+        A11yNode,
+        EvidenceTier,
+        classify_presentation,
+        probe_tree,
+        render_card_tree,
+        HIDDEN_IRREVERSIBLE,
+        INACCESSIBLE_PATH,
+        UNNAMED_ACTION,
+        UNSTABLE_TREE,
+    )
+
+    def _btn(name, paths=("keyboard", "at"), states=()):
+        return A11yNode(role="button", name=name, states=tuple(states), paths=tuple(paths))
+
+    def _dialog(*children, states=()):
+        return A11yNode(
+            role="dialog", name="Action card for net:egress",
+            states=tuple(states), paths=("keyboard", "at"),
+            children=tuple(children),
+        )
+
+    def _card(risk_tier):
+        return _NS(
+            tool="net:egress", call_id="c1", arguments_digest="ab" * 64,
+            risk_tier=risk_tier, gate=None, agent_hint="",
+        )
+
+    def _verdict(tree, irreversible=()):
+        findings = probe_tree(tree, irreversible)
+        tier = classify_presentation(findings)
+        codes = sorted({f.code for f in findings})
+        ok = tier == EvidenceTier.AUTHORITATIVE
+        return ok, (f"findings={codes}" if codes else "clean")
+
+    scenarios: list[tuple[str, bool, Any]] = []
+
+    # 1-3: allows
+    scenarios.append((
+        "allow_named_full", True,
+        lambda: _verdict(_dialog(_btn("Approve"), _btn("Deny"))),
+    ))
+    scenarios.append((
+        "allow_keyboard_only", True,
+        lambda: _verdict(_dialog(
+            _btn("Approve", paths=("keyboard",)),
+            _btn("Deny", paths=("keyboard",)),
+        )),
+    ))
+    scenarios.append((
+        "allow_reversible_tier2_card", True,
+        lambda: _verdict(render_card_tree(_card("tier2"))),
+    ))
+
+    # 4-6: unnamed actions
+    scenarios.append((
+        "deny_unnamed_approve", False,
+        lambda: _verdict(_dialog(_btn(""), _btn("Deny"))),
+    ))
+    scenarios.append((
+        "deny_whitespace_name", False,
+        lambda: _verdict(_dialog(_btn("Approve"), _btn("   "))),
+    ))
+    scenarios.append((
+        "deny_nested_unnamed", False,
+        lambda: _verdict(_dialog(
+            _btn("Approve"),
+            A11yNode(role="region", name="more", children=(_btn(""),)),
+        )),
+    ))
+
+    # 7: hidden irreversible — tier3 tree with the marks stripped
+    def _stripped_tier3():
+        tree = render_card_tree(_card("tier3"))
+        kids = []
+        for child in tree.children:
+            if child.name == "Approve":
+                child = A11yNode(
+                    role=child.role, name=child.name, states=(),
+                    paths=child.paths, children=child.children,
+                )
+            kids.append(child)
+        return A11yNode(
+            role=tree.role, name=tree.name, states=(),
+            paths=tree.paths, children=tuple(kids),
+        )
+
+    scenarios.append((
+        "deny_hidden_irreversible", False,
+        lambda: _verdict(_stripped_tier3(), irreversible={"Approve"}),
+    ))
+
+    # 8-10: inaccessible paths
+    scenarios.append((
+        "deny_pointer_only_approve", False,
+        lambda: _verdict(_dialog(_btn("Approve", paths=("pointer",)), _btn("Deny"))),
+    ))
+    scenarios.append((
+        "deny_pointer_only_deny", False,
+        lambda: _verdict(_dialog(_btn("Approve"), _btn("Deny", paths=("pointer",)))),
+    ))
+    scenarios.append((
+        "deny_unreachable_deny", False,
+        lambda: _verdict(_dialog(_btn("Approve"), _btn("Deny", paths=()))),
+    ))
+
+    # 11-12: unstable round-trips (unrepresentable content)
+    scenarios.append((
+        "deny_unstable_role", False,
+        lambda: _verdict(_dialog(A11yNode(role="slider", name="x", paths=("keyboard",)))),
+    ))
+    scenarios.append((
+        "deny_unstable_modality", False,
+        lambda: _verdict(_dialog(_btn("Approve", paths=("keyboard", "voice")))),
+    ))
+
+    mismatches: list[str] = []
+    allowed_ids: list[str] = []
+    denial_reasons: dict[str, str] = {}
+    for sid, expected_allow, thunk in scenarios:
+        try:
+            got_allow, reason = thunk()
+        except Exception as error:  # noqa: BLE001 — bench must not crash
+            got_allow, reason = False, f"threw: {error}"
+        if got_allow != expected_allow:
+            mismatches.append(
+                f"{sid}: expected {'allow' if expected_allow else 'deny'}, "
+                f"got {'allow' if got_allow else 'deny'}"
+            )
+        if got_allow:
+            allowed_ids.append(sid)
+        else:
+            denial_reasons[sid] = reason
+
+    return {
+        "n_scenarios": len(scenarios),
+        "mismatches": mismatches,
+        "allowed_ids": allowed_ids,
+        "denial_reasons": denial_reasons,
+        "finding_codes": (UNNAMED_ACTION, HIDDEN_IRREVERSIBLE, INACCESSIBLE_PATH, UNSTABLE_TREE),
+    }
+
 
 def run_adversarial_scenarios() -> dict[str, Any]:
     """Adversarial bench scenarios: multi-agent failures, no-adversary failures, malicious-but-signed.
@@ -10349,7 +10726,6 @@ def _case_metrics_process_receipts(h: BenchHarness) -> BenchExpectation:
     )
 
 
-
 def _case_metrics_quantum_timeline(h: BenchHarness) -> BenchExpectation:
     """Quantum-threat timeline gates (one-hundred-second batch).
 
@@ -10406,6 +10782,67 @@ def _case_metrics_quantum_timeline(h: BenchHarness) -> BenchExpectation:
             "plan covers every signing module."
         ),
     )
+
+
+def _case_metrics_model_lineage(h: BenchHarness) -> BenchExpectation:
+    """Model lineage receipts (one-hundredth batch).
+
+    Absorbs the 2026 AI-creative copyright thread: Sony+UMG v. Suno's
+    "model laundering" theory (retraining on a tainted model's outputs
+    doesn't wash the taint), Bartz v. Anthropic's split ($1.5B for
+    pirated *acquisition* even though training was fair use), and
+    GEMA v. Suno (memorization = reproduction). Each model version
+    carries a hash-chained lineage receipt; the gate fail-closes on
+    lineage gaps, unbacked consent claims, unknown acquisition, and
+    tainted ancestry (transitive, no washing).
+
+    12 deterministic scenarios, 3 allow / 9 deny: a clean
+    licensed->consent-gated->public-domain chain, a public-domain
+    root, and a licensed root allow; adjudicated taint, inherited
+    taint (child and grandchild — the no-washing rule), unknown
+    acquisition at the root and inherited by its child, a lineage gap,
+    consent-gated corpora with no receipts or unresolvable receipts,
+    and a missing lineage claim all deny.
+    """
+    metrics = run_model_lineage()
+
+    def check(exp: BenchExpectation, report: Any) -> tuple[bool, str]:
+        if metrics["n_scenarios"] != 12:
+            return (False, f"expected 12 model-lineage scenarios, saw {metrics['n_scenarios']}")
+        if metrics["mismatches"]:
+            return (False, f"scenario(s) disagree with ground truth: {metrics['mismatches']}")
+        if metrics["allowed_ids"] != [
+            "allow_clean_three_gen",
+            "allow_public_domain_root",
+            "allow_licensed_no_consent",
+        ]:
+            return (False, f"allowed set drifted: {metrics['allowed_ids']}")
+        reasons = metrics["denial_reasons"]
+        if "does not wash" not in reasons.get("deny_tainted_grandchild_transitive", ""):
+            return (False, "tainted grandchild must deny on the no-washing rule")
+        if "Bartz" not in reasons.get("deny_unknown_acquisition", ""):
+            return (False, "unknown acquisition must deny on the Bartz rule")
+        if "lineage gap" not in reasons.get("deny_lineage_gap", ""):
+            return (False, "unresolvable parent must deny as a lineage gap")
+        if reasons.get("deny_none_receipt_classification") != "classified unverifiable-lineage":
+            return (False, "missing lineage claim must classify unverifiable-lineage")
+        return (True, "12/12 model-lineage scenarios hold: taint/laundering/gaps/consent")
+
+    return BenchExpectation(
+        runtime=_noop_runtime(h),
+        expect_subtype="success",
+        post_check=check,
+        metrics=metrics,
+        notes=(
+            "2026 AI-creative copyright thread: model-laundering theory "
+            "(Sony+UMG v. Suno — taint doesn't wash), Bartz v. Anthropic "
+            "($1.5B for pirated acquisition), GEMA v. Suno. Hash-chained "
+            "lineage receipts; taint propagates transitively; unknown "
+            "acquisition fail-closes. No partial tier."
+        ),
+    )
+
+
 def _case_metrics_soc_verdicts(h: BenchHarness) -> BenchExpectation:
     """SOC verdict cards + kill-switch mandate (ninety-ninth batch).
 
@@ -10462,6 +10899,67 @@ def _case_metrics_soc_verdicts(h: BenchHarness) -> BenchExpectation:
             "denies. No third path."
         ),
     )
+
+
+def _case_metrics_agent_readiness(h: BenchHarness) -> BenchExpectation:
+    """Agent-readiness probes for public-facing agent UI (101st batch).
+
+    Absorbs the 2026 AI-accessibility thread: "Agent Readiness" — screen
+    readers and AI agents read the same accessibility tree, so BFSG/EAA
+    compliance is the foundation of legible agent UI. EU Accessibility Act
+    enforcement is live (fines up to uncapped in Sweden); AI-generated UI
+    routinely fails EN 301 549 and automated checkers find only ~1/3 of
+    problems. The governance absorption: a public-facing action card whose
+    accessibility tree is illegible is unverifiable *presentation* — the
+    decision may be fine, but nobody can check it.
+
+    12 deterministic scenarios, 3 allow / 9 deny: a fully named tree, a
+    keyboard-only tree, and a reversible tier-2 card allow; unnamed /
+    whitespace-only / nested-unnamed buttons, a tier-3 approve with its
+    irreversible marks stripped, pointer-only or unreachable approve/deny,
+    and trees carrying unrepresentable roles/modalities deny. Any finding
+    classifies the presentation NON_AUTHORITATIVE (87th-batch binary
+    semantics — no partial tier).
+    """
+    metrics = run_agent_readiness()
+
+    def check(exp: BenchExpectation, report: Any) -> tuple[bool, str]:
+        if metrics["n_scenarios"] != 12:
+            return (False, f"expected 12 readiness scenarios, saw {metrics['n_scenarios']}")
+        if metrics["mismatches"]:
+            return (False, f"scenario(s) disagree with ground truth: {metrics['mismatches']}")
+        if metrics["allowed_ids"] != [
+            "allow_named_full",
+            "allow_keyboard_only",
+            "allow_reversible_tier2_card",
+        ]:
+            return (False, f"allowed set drifted: {metrics['allowed_ids']}")
+        reasons = metrics["denial_reasons"]
+        if "unnamed_action" not in reasons.get("deny_unnamed_approve", ""):
+            return (False, "unnamed approve must deny with readiness:unnamed_action")
+        if "hidden_irreversible" not in reasons.get("deny_hidden_irreversible", ""):
+            return (False, "stripped tier-3 approve must deny with readiness:hidden_irreversible")
+        if "inaccessible_path" not in reasons.get("deny_pointer_only_deny", ""):
+            return (False, "pointer-only deny must deny with readiness:inaccessible_path")
+        if "unstable_tree" not in reasons.get("deny_unstable_role", ""):
+            return (False, "unrepresentable role must deny with readiness:unstable_tree")
+        return (True, "12/12 readiness scenarios hold: names/marks/paths/round-trip")
+
+    return BenchExpectation(
+        runtime=_noop_runtime(h),
+        expect_subtype="success",
+        post_check=check,
+        metrics=metrics,
+        notes=(
+            "2026 AI-accessibility thread: agent readiness — screen readers "
+            "and AI agents read the same accessibility tree. Public-facing "
+            "action cards are rendered into a deterministic a11y tree and "
+            "probed (named actions, irreversible marks, keyboard/AT paths, "
+            "round-trip stability); any finding classifies the presentation "
+            "NON_AUTHORITATIVE (87th-batch binary semantics)."
+        ),
+    )
+
 
 def _case_metrics_harness_binding(h: BenchHarness) -> BenchExpectation:
     """Harness integrity binding (ninetieth batch).
@@ -11737,8 +12235,10 @@ CASES: tuple[BenchCase, ...] = (
     BenchCase("metrics.twin_sync", "metrics", "twin-sync receipts: freshness-gated actuation, sensor-manifest poisoning, single-use receipts", _case_metrics_twin_sync),
     BenchCase("metrics.attestation_receipts", "metrics", "TEE attestation as receipt evidence: forgery/replay/downgrade probes", _case_metrics_attestation_receipts),
     BenchCase("metrics.process_receipts", "metrics", "process-evidence receipts: hash-chained production process, artifact-only is unverifiable", _case_metrics_process_receipts),
-    BenchCase("metrics.quantum_timeline", "metrics", "quantum-threat timeline gates: BSI phaseout policy on signing", _case_metrics_quantum_timeline),
     BenchCase("metrics.soc_verdicts", "metrics", "SOC verdict cards: countersigned triage + mandatory kill-switch inside blast radius", _case_metrics_soc_verdicts),
+    BenchCase("metrics.model_lineage", "metrics", "model lineage receipts: taint/laundering/gaps/consent (AI-creative copyright absorption)", _case_metrics_model_lineage),
+    BenchCase("metrics.quantum_timeline", "metrics", "quantum-threat timeline gates: BSI phaseout policy on signing", _case_metrics_quantum_timeline),
+    BenchCase("metrics.agent_readiness", "metrics", "agent-readiness probes: a11y-tree legibility of public-facing action cards", _case_metrics_agent_readiness),
     BenchCase("metrics.harness_binding", "metrics", "harness integrity binding: SHA-256 harness hash in audit, quad-only scores", _case_metrics_harness_binding),
     BenchCase("metrics.drift_detection", "metrics", "Livenerf-style drift probe: bootstrap CI + paired permutation test", _case_metrics_drift_detection),
 )
@@ -12365,8 +12865,10 @@ __all__ = [
     "run_twin_sync",
     "run_attestation_receipts",
     "run_process_receipts",
-    "run_quantum_timeline",
     "run_soc_verdicts",
+    "run_model_lineage",
+    "run_quantum_timeline",
+    "run_agent_readiness",
     "run_owasp_asi_coverage",
     "run_policy_axis",
     "run_step_compliance",
@@ -12374,275 +12876,3 @@ __all__ = [
     "run_whisper_contrast",
     "run_tool_allowlist_enforcement",
 ]
-def run_model_lineage() -> dict[str, Any]:
-    """Model lineage receipts (one-hundredth batch).
-
-    Absorbs the 2026 AI-creative copyright thread:
-
-    * Sony Music + UMG v. Suno, second wave (Sept 18, 2026): the
-      "model laundering" / "fruit of the poisonous tree" theory — v6
-      allegedly trained on the earlier infringing model's outputs, so
-      the infringement doesn't wash clean through retraining.
-    * Bartz v. Anthropic ($1.5B, July 2026): training itself was fair
-      use, but the $1.5B was for *pirated acquisition*. Clean training
-      cannot cure dirty acquisition.
-    * GEMA v. Suno (Munich, July 2026): model memorization counts as
-      reproduction; the TDM exception doesn't cover it.
-
-    Each model version carries a ``LineageReceipt`` binding
-    ``(model_digest | training_corpus_manifest_digest |
-    acquisition_method)`` to its parent model, hash-chained into an
-    append-only lineage log. The gate fail-closes on: lineage gaps
-    (unresolvable parent), consent-gated corpora without resolvable
-    consent receipts, ``unknown`` acquisition (unshowable == pirated),
-    and tainted ancestry — taint propagates transitively with no
-    washing step.
-
-    Deterministic: sha256-label fixtures, pinned integer timestamps, no
-    runtime, no network, no model. Ground truth is closed: 12
-    scenarios, 3 allow / 9 deny.
-    """
-    import hashlib as _hashlib
-
-    from model_lineage import (
-        UNVERIFIABLE_LINEAGE,
-        VERIFIED_LINEAGE,
-        build_receipt,
-        classify_model,
-        verify_lineage,
-    )
-
-    def _hex(label: str) -> str:
-        return _hashlib.sha256(f"northstar-bench-model-lineage:{label}".encode()).hexdigest()
-
-    consent_db = {"consent-a": {"granted": True}, "consent-b": {"granted": True}}
-    lookup = consent_db.get
-
-    def _root(model_id: str, method: str, **kw) -> Any:
-        return build_receipt(
-            model_id=model_id,
-            model_digest=_hex(f"weights:{model_id}"),
-            corpus_manifest_digest=_hex(f"corpus:{model_id}"),
-            acquisition_method=method,
-            timestamp=1000,
-            **kw,
-        )
-
-    def _child(model_id: str, parent: Any, method: str, **kw) -> Any:
-        return build_receipt(
-            model_id=model_id,
-            model_digest=_hex(f"weights:{model_id}"),
-            parent_model_digest=parent.model_digest,
-            corpus_manifest_digest=_hex(f"corpus:{model_id}"),
-            acquisition_method=method,
-            timestamp=2000,
-            prev_digest=parent.receipt_digest,
-            **kw,
-        )
-
-    def _verdict_allows(model_id: str, receipts: list) -> Any:
-        return verify_lineage(receipts, consent_lookup=lookup)[model_id]
-
-    # Clean three-generation chain: licensed -> consent-gated -> public-domain.
-    clean_root = _root("clean-v1", "licensed")
-    clean_mid = _child(
-        "clean-v2", clean_root, "consent-gated",
-        consent_receipt_ids=("consent-a", "consent-b"),
-    )
-    clean_leaf = build_receipt(
-        model_id="clean-v3",
-        model_digest=_hex("weights:clean-v3"),
-        parent_model_digest=clean_mid.model_digest,
-        corpus_manifest_digest=_hex("corpus:clean-v3"),
-        acquisition_method="public-domain",
-        timestamp=3000,
-        prev_digest=clean_mid.receipt_digest,
-    )
-    clean_log = [clean_root, clean_mid, clean_leaf]
-
-    # Tainted line: adjudicated root -> child -> grandchild (no washing).
-    taint_root = _root("taint-v1", "licensed", tainted=True)
-    taint_mid = _child("taint-v2", taint_root, "licensed")
-    taint_leaf = build_receipt(
-        model_id="taint-v3",
-        model_digest=_hex("weights:taint-v3"),
-        parent_model_digest=taint_mid.model_digest,
-        corpus_manifest_digest=_hex("corpus:taint-v3"),
-        acquisition_method="licensed",
-        timestamp=3000,
-        prev_digest=taint_mid.receipt_digest,
-    )
-    taint_log = [taint_root, taint_mid, taint_leaf]
-
-    # Unknown-acquisition line (Bartz): poison at the root, inherited.
-    shady_root = _root("shady-v1", "unknown")
-    shady_child = _child("shady-v2", shady_root, "licensed")
-    shady_log = [shady_root, shady_child]
-
-    scenarios: list[tuple[str, bool, Any]] = []
-
-    # 1-3: allows
-    scenarios.append((
-        "allow_clean_three_gen", True,
-        lambda: _verdict_allows("clean-v3", clean_log),
-    ))
-    scenarios.append((
-        "allow_public_domain_root", True,
-        lambda: _verdict_allows("pd-root", [_root("pd-root", "public-domain")]),
-    ))
-    scenarios.append((
-        "allow_licensed_no_consent", True,
-        lambda: _verdict_allows("lic-root", [_root("lic-root", "licensed")]),
-    ))
-
-    # 4-6: taint — adjudicated, inherited, transitive (no washing)
-    scenarios.append((
-        "deny_tainted_adjudicated", False,
-        lambda: _verdict_allows("taint-v1", taint_log),
-    ))
-    scenarios.append((
-        "deny_tainted_child_inherits", False,
-        lambda: _verdict_allows("taint-v2", taint_log),
-    ))
-    scenarios.append((
-        "deny_tainted_grandchild_transitive", False,
-        lambda: _verdict_allows("taint-v3", taint_log),
-    ))
-
-    # 7-8: unknown acquisition (Bartz) — at root and inherited
-    scenarios.append((
-        "deny_unknown_acquisition", False,
-        lambda: _verdict_allows("shady-v1", shady_log),
-    ))
-    scenarios.append((
-        "deny_unknown_poison_child", False,
-        lambda: _verdict_allows("shady-v2", shady_log),
-    ))
-
-    # 9: lineage gap — parent digest resolves to nothing
-    orphan = _root("orphan", "licensed")
-    orphan_gap = build_receipt(
-        model_id="orphan-child",
-        model_digest=_hex("weights:orphan-child"),
-        parent_model_digest=_hex("ghost-parent"),
-        corpus_manifest_digest=_hex("corpus:orphan-child"),
-        acquisition_method="licensed",
-        timestamp=2000,
-        prev_digest=orphan.receipt_digest,
-    )
-    scenarios.append((
-        "deny_lineage_gap", False,
-        lambda: _verdict_allows("orphan-child", [orphan, orphan_gap]),
-    ))
-
-    # 10: consent-gated with no consent receipts
-    cg_empty = _root("cg-empty", "consent-gated", consent_receipt_ids=())
-    scenarios.append((
-        "deny_consent_gated_no_receipts", False,
-        lambda: _verdict_allows("cg-empty", [cg_empty]),
-    ))
-
-    # 11: consent-gated with an unresolvable receipt id
-    cg_ghost = _root(
-        "cg-ghost", "consent-gated", consent_receipt_ids=("consent-ghost",)
-    )
-    scenarios.append((
-        "deny_consent_gated_unresolvable", False,
-        lambda: _verdict_allows("cg-ghost", [cg_ghost]),
-    ))
-
-    # 12: no lineage claim at all classifies unverifiable-lineage
-    scenarios.append((
-        "deny_none_receipt_classification", False,
-        lambda: classify_model(None, []) == VERIFIED_LINEAGE,
-    ))
-
-    mismatches: list[str] = []
-    allowed_ids: list[str] = []
-    denial_reasons: dict[str, str] = {}
-    for sid, expected_allow, thunk in scenarios:
-        try:
-            outcome = thunk()
-        except Exception as error:  # noqa: BLE001 — bench must not crash
-            mismatches.append(f"{sid}: threw {error}")
-            denial_reasons[sid] = f"threw: {error}"
-            continue
-        if isinstance(outcome, bool):
-            got_allow = outcome
-            reason = "classified unverifiable-lineage" if not got_allow else "classified verified-lineage"
-        else:
-            got_allow = bool(outcome.allowed)
-            reason = outcome.reason
-        if got_allow != expected_allow:
-            mismatches.append(f"{sid}: expected {'allow' if expected_allow else 'deny'}, got {'allow' if got_allow else 'deny'}")
-        if got_allow:
-            allowed_ids.append(sid)
-        else:
-            denial_reasons[sid] = reason
-
-    return {
-        "n_scenarios": len(scenarios),
-        "mismatches": mismatches,
-        "allowed_ids": allowed_ids,
-        "denial_reasons": denial_reasons,
-        "classification_unverifiable": UNVERIFIABLE_LINEAGE,
-    }
-def _case_metrics_model_lineage(h: BenchHarness) -> BenchExpectation:
-    """Model lineage receipts (one-hundredth batch).
-
-    Absorbs the 2026 AI-creative copyright thread: Sony+UMG v. Suno's
-    "model laundering" theory (retraining on a tainted model's outputs
-    doesn't wash the taint), Bartz v. Anthropic's split ($1.5B for
-    pirated *acquisition* even though training was fair use), and
-    GEMA v. Suno (memorization = reproduction). Each model version
-    carries a hash-chained lineage receipt; the gate fail-closes on
-    lineage gaps, unbacked consent claims, unknown acquisition, and
-    tainted ancestry (transitive, no washing).
-
-    12 deterministic scenarios, 3 allow / 9 deny: a clean
-    licensed->consent-gated->public-domain chain, a public-domain
-    root, and a licensed root allow; adjudicated taint, inherited
-    taint (child and grandchild — the no-washing rule), unknown
-    acquisition at the root and inherited by its child, a lineage gap,
-    consent-gated corpora with no receipts or unresolvable receipts,
-    and a missing lineage claim all deny.
-    """
-    metrics = run_model_lineage()
-
-    def check(exp: BenchExpectation, report: Any) -> tuple[bool, str]:
-        if metrics["n_scenarios"] != 12:
-            return (False, f"expected 12 model-lineage scenarios, saw {metrics['n_scenarios']}")
-        if metrics["mismatches"]:
-            return (False, f"scenario(s) disagree with ground truth: {metrics['mismatches']}")
-        if metrics["allowed_ids"] != [
-            "allow_clean_three_gen",
-            "allow_public_domain_root",
-            "allow_licensed_no_consent",
-        ]:
-            return (False, f"allowed set drifted: {metrics['allowed_ids']}")
-        reasons = metrics["denial_reasons"]
-        if "does not wash" not in reasons.get("deny_tainted_grandchild_transitive", ""):
-            return (False, "tainted grandchild must deny on the no-washing rule")
-        if "Bartz" not in reasons.get("deny_unknown_acquisition", ""):
-            return (False, "unknown acquisition must deny on the Bartz rule")
-        if "lineage gap" not in reasons.get("deny_lineage_gap", ""):
-            return (False, "unresolvable parent must deny as a lineage gap")
-        if reasons.get("deny_none_receipt_classification") != "classified unverifiable-lineage":
-            return (False, "missing lineage claim must classify unverifiable-lineage")
-        return (True, "12/12 model-lineage scenarios hold: taint/laundering/gaps/consent")
-
-    return BenchExpectation(
-        runtime=_noop_runtime(h),
-        expect_subtype="success",
-        post_check=check,
-        metrics=metrics,
-        notes=(
-            "2026 AI-creative copyright thread: model-laundering theory "
-            "(Sony+UMG v. Suno — taint doesn't wash), Bartz v. Anthropic "
-            "($1.5B for pirated acquisition), GEMA v. Suno. Hash-chained "
-            "lineage receipts; taint propagates transitively; unknown "
-            "acquisition fail-closes. No partial tier."
-        ),
-    )
-    BenchCase("metrics.model_lineage", "metrics", "model lineage receipts: taint/laundering/gaps/consent (AI-creative copyright absorption)", _case_metrics_model_lineage),
-    "run_model_lineage",
