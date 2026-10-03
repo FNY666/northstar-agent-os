@@ -17075,6 +17075,63 @@ def _case_metrics_embodied(h: BenchHarness) -> BenchExpectation:
     )
 
 
+def _case_metrics_labor_algo(h: BenchHarness) -> BenchExpectation:
+    """Algorithmic-management guards (one-hundred-twenty-seventh batch).
+
+    12 deterministic scenarios, 4 allow / 8 deny: a disclosed,
+    worker-acknowledged quota enforces; a human-countersigned
+    termination bound to its evidence pack executes; an 8-hour shift
+    under a pinned 12-hour breaker continues; surveillance inside the
+    declared purpose/scope/retention is proportionate. Denied: a secret
+    quota (``labor:hidden_quota``), an algorithmic firing with no
+    countersign (``labor:algorithmic_firing``), a 13-hour shift against
+    the pinned breaker (``labor:fatigue_circuit_break``), scope
+    overreach (``labor:disproportionate_surveillance``), a penalty for
+    a lawful rejection (``labor:rejection_penalty``), a public-road AV
+    with no safety case (``labor:no_safety_case``), 50 workers
+    displaced with no disclosed receipt
+    (``labor:labor_impact_undisclosed``), and safety-camera footage
+    reused for productivity scoring
+    (``labor:surveillance_purpose_mismatch``).
+    """
+    metrics = run_labor_algo()
+
+    def check(exp: BenchExpectation, report: Any) -> tuple[bool, str]:
+        if metrics["n_scenarios"] != 12:
+            return (False, f"expected 12 labor-algo scenarios, saw {metrics['n_scenarios']}")
+        if metrics["mismatches"]:
+            return (False, f"scenario(s) disagree with ground truth: {metrics['mismatches']}")
+        if metrics["allowed_ids"] != [
+            "allow_disclosed_quota",
+            "allow_countersigned_termination",
+            "allow_short_shift",
+            "allow_proportionate_surveillance",
+        ]:
+            return (False, f"allowed set drifted: {metrics['allowed_ids']}")
+        reasons = metrics["denial_reasons"]
+        for sid, needle in (
+            ("deny_hidden_quota", "hidden_quota"),
+            ("deny_algorithmic_firing", "algorithmic_firing"),
+            ("deny_fatigue_break", "fatigue_circuit_break"),
+            ("deny_disproportionate_surveillance", "disproportionate_surveillance"),
+            ("deny_rejection_penalty", "rejection_penalty"),
+            ("deny_no_safety_case", "no_safety_case"),
+            ("deny_impact_undisclosed", "labor_impact_undisclosed"),
+            ("deny_purpose_mismatch", "surveillance_purpose_mismatch"),
+        ):
+            if needle not in reasons.get(sid, ""):
+                return (False, f"denial reason missing {needle!r}: {reasons.get(sid, '')!r}")
+        return True, "12/12 labor-algo probes match ground truth"
+
+    return BenchExpectation(
+        runtime=_noop_runtime(h),
+        expect_subtype="success",
+        post_check=check,
+        metrics=metrics,
+        notes="algorithmic-management guards: quota receipts, human-countersigned terminations, authority-pinned fatigue breakers, surveillance proportionality, dispatch fairness, AV safety cases, labor-impact binding",
+    )
+
+
 def _case_metrics_adjudication(h: BenchHarness) -> BenchExpectation:
     """Human final adjudication for AI sports systems (one-hundred-eighteenth batch).
 
@@ -19328,6 +19385,7 @@ CASES: tuple[BenchCase, ...] = (
     BenchCase("metrics.booking_agents", "metrics", "booking-agent transaction receipts: pinned price-ceiling intents, TTL-bound freshness assertions, dynamic-pricing disclosure gate, pinned support-policy consistency, pre-emptive rebooking receipts, context-continuity probe, paid-placement disclosure (AI-hospitality absorption)", _case_metrics_booking_agents),
     BenchCase("metrics.companionship", "metrics", "companionship safeguards for AI dating/companionship: minor intimacy class gate, authority-pinned dependence thresholds with mandatory intervention, crisis-escalation receipts with fail-closed halt, sycophancy probe, persona-consistency gate, authority-set session caps, private-dialogue training exclusion, matchmaker explanation binding", _case_metrics_companionship),
     BenchCase("metrics.embodied", "metrics", "embodied safety vacuum gates: standard=pre_ratification declarations, fall-zone receipts, measured capability honesty labels, labor-impact disclosures, prescriptive-agent envelopes, inspection confidence gates, dispatch audit, incident-clock binding", _case_metrics_embodied),
+    BenchCase("metrics.labor_algo", "metrics", "algorithmic-management guards: worker-signed quota receipts, human-countersigned algorithmic terminations, authority-pinned fatigue breakers, surveillance proportionality, dispatch rejection fairness, AV safety cases, labor-impact binding (AI-logistics absorption)", _case_metrics_labor_algo),
     BenchCase("metrics.commerce", "metrics", "agentic commerce terms: machine-readable terms-read receipts bound to the exact product, likeness-creep gate, biometric capture receipts with verifiable deletion, non-authoritative try-on previews, tiered authentication evidence with human review for high-value items, digital passport binding, AI model-substitution disclosure (AI-fashion/retail absorption)", _case_metrics_commerce),
     BenchCase("metrics.harness_binding", "metrics", "harness integrity binding: SHA-256 harness hash in audit, quad-only scores", _case_metrics_harness_binding),
     BenchCase("metrics.drift_detection", "metrics", "Livenerf-style drift probe: bootstrap CI + paired permutation test", _case_metrics_drift_detection),
@@ -20204,6 +20262,395 @@ def run_embodied() -> dict[str, Any]:
     }
 
 
+def run_labor_algo() -> dict[str, Any]:
+    """Algorithmic-management guards (one-hundred-twenty-seventh batch).
+
+    Absorbs the 2026 AI-logistics thread: Amazon ADAPT+TOT second-level
+    monitoring and 300-400 items/hour quotas with a single Baltimore
+    warehouse auto-firing 900+ workers (California AB 701 bans secret
+    quotas); China's 2026-01 platform-algorithm negative list (Meituan
+    12-hour forced offline, riders' 4 unconditional daily rejections,
+    Didi 10h service/6h forced offline); DSP driver AI camera
+    surveillance; GPAI "no upper valve" on monitoring intensity; EU AI
+    Act Annex III classifying worker-management AI as high-risk;
+    KBA-style safety cases for autonomous trucks (700K km pilot);
+    Amazon's 600K-jobs automation lesson.
+
+    Fail-closed rules over 12 deterministic scenarios: quotas are
+    unenforceable without a disclosed, worker-acknowledged receipt
+    (``labor:hidden_quota``); algorithmic firings without a human
+    adjudicator's countersign bound to the evidence pack are
+    ``labor:algorithmic_firing``; shifts at/over the authority-pinned
+    fatigue limit are forced offline (``labor:fatigue_circuit_break``);
+    surveillance outside the declared purpose/scope is
+    ``labor:disproportionate_surveillance``; penalizing a lawful
+    rejection is ``labor:rejection_penalty``; public-road AV operation
+    without a live safety case is ``labor:no_safety_case``; at-threshold
+    displacement without a disclosed receipt is
+    ``labor:labor_impact_undisclosed``. Ground truth is closed:
+    4 allow / 8 deny.
+    """
+    from ed25519 import public_key, sign
+
+    from labor_algo import (
+        AuthorityRegistry,
+        AVSafetyRegistry,
+        DispatchRegistry,
+        FatigueBreaker,
+        LaborImpactRegistry,
+        QuotaRegistry,
+        SurveillanceRegistry,
+        TerminationRegistry,
+        compute_av_digest,
+        compute_dispatch_policy_digest,
+        compute_fatigue_policy_digest,
+        compute_impact_digest,
+        compute_quota_digest,
+        compute_surveillance_digest,
+        compute_termination_digest,
+    )
+
+    T0 = 1_700_000_000
+    SEED = bytes(range(32))
+    WSEC = bytes(range(1, 33))
+    HEX64 = "ab" * 32
+
+    def _authorities() -> AuthorityRegistry:
+        reg = AuthorityRegistry()
+        reg.register("authority-1", public_key(SEED))
+        return reg
+
+    def _worker_key() -> bytes:
+        return public_key(WSEC)
+
+    def _quota(reg: QuotaRegistry, quota_id: str = "q-1", ack: bool = True):
+        digest = compute_quota_digest(
+            quota_id=quota_id,
+            quota_value=400,
+            measurement_window_s=3600,
+            appeal_path="/appeal/quota",
+        )
+        reg.register_worker("worker-1", _worker_key())
+        reg.issue_quota_receipt(
+            quota_id=quota_id,
+            quota_value=400,
+            measurement_window_s=3600,
+            appeal_path="/appeal/quota",
+            issued_by="authority-1",
+            issued_at=T0,
+            signature=sign(SEED, digest.encode("utf-8")),
+        )
+        if ack:
+            reg.acknowledge_quota(
+                worker_id="worker-1",
+                quota_id=quota_id,
+                worker_signature=sign(WSEC, digest.encode("utf-8")),
+            )
+
+    def _pack(reg: TerminationRegistry, pack_id: str = "p-1"):
+        return reg.register_evidence_pack(
+            pack_id=pack_id,
+            worker_id="worker-1",
+            evidence_digests=[HEX64, "cd" * 32],
+            recorded_at=T0,
+        )
+
+    def _countersign(
+        reg: TerminationRegistry, termination_id: str = "t-1", pack_id: str = "p-1"
+    ):
+        pack = _pack(reg, pack_id)
+        digest = compute_termination_digest(
+            termination_id=termination_id,
+            pack_digest=pack.pack_digest,
+            adjudicator_id="authority-1",
+            adjudicated_at=T0 + 60,
+        )
+        return reg.countersign_termination(
+            termination_id=termination_id,
+            pack_id=pack_id,
+            adjudicator_id="authority-1",
+            adjudicated_at=T0 + 60,
+            signature=sign(SEED, digest.encode("utf-8")),
+        )
+
+    def _fatigue(brk: FatigueBreaker, hours: int = 12):
+        digest = compute_fatigue_policy_digest(
+            policy_id="fb-1",
+            max_continuous_hours=hours,
+            authority_id="authority-1",
+            pinned_at=T0,
+        )
+        brk.pin_policy(
+            policy_id="fb-1",
+            max_continuous_hours=hours,
+            authority_id="authority-1",
+            pinned_at=T0,
+            signature=sign(SEED, digest.encode("utf-8")),
+        )
+
+    def _surveillance(reg: SurveillanceRegistry, receipt_id: str = "s-1"):
+        digest = compute_surveillance_digest(
+            receipt_id=receipt_id,
+            purpose="yard-safety",
+            scope="dock-3",
+            retention_days=30,
+            biometric=False,
+            authority_id="authority-1",
+            issued_at=T0,
+        )
+        reg.issue_surveillance_receipt(
+            receipt_id=receipt_id,
+            purpose="yard-safety",
+            scope="dock-3",
+            retention_days=30,
+            biometric=False,
+            authority_id="authority-1",
+            issued_at=T0,
+            signature=sign(SEED, digest.encode("utf-8")),
+        )
+
+    def _dispatch(reg: DispatchRegistry, max_rej: int = 4):
+        digest = compute_dispatch_policy_digest(
+            policy_id="d-1",
+            max_rejections_per_day=max_rej,
+            authority_id="authority-1",
+            pinned_at=T0,
+        )
+        reg.pin_dispatch_policy(
+            policy_id="d-1",
+            max_rejections_per_day=max_rej,
+            authority_id="authority-1",
+            pinned_at=T0,
+            signature=sign(SEED, digest.encode("utf-8")),
+        )
+
+    def _av(reg: AVSafetyRegistry, case_id: str = "c-1", vehicle: str = "truck-7"):
+        digest = compute_av_digest(
+            case_id=case_id,
+            vehicle_id=vehicle,
+            operating_domain_digest=HEX64,
+            authority_id="authority-1",
+            issued_at=T0,
+            expires_at=T0 + 365 * 86400,
+        )
+        reg.issue_safety_case(
+            case_id=case_id,
+            vehicle_id=vehicle,
+            operating_domain_digest=HEX64,
+            authority_id="authority-1",
+            issued_at=T0,
+            expires_at=T0 + 365 * 86400,
+            signature=sign(SEED, digest.encode("utf-8")),
+        )
+
+    def _impact(reg: LaborImpactRegistry, dep: str = "dep-1", estimate: int = 50):
+        digest = compute_impact_digest(
+            deployment_id=dep,
+            workers_displaced_estimate=estimate,
+            disclosure_digest=HEX64,
+            authority_id="authority-1",
+            recorded_at=T0,
+        )
+        reg.register_impact_disclosure(
+            deployment_id=dep,
+            workers_displaced_estimate=estimate,
+            disclosure_digest=HEX64,
+            authority_id="authority-1",
+            recorded_at=T0,
+            signature=sign(SEED, digest.encode("utf-8")),
+        )
+
+    def _outcome(verdict: Any) -> dict[str, Any]:
+        allowed = bool(getattr(verdict, "allowed", False))
+        return {
+            "verdict": "allow" if allowed else "deny",
+            "reason": getattr(verdict, "deny_code", None) or "",
+            "classification": getattr(verdict, "classification", ""),
+        }
+
+    scenarios: list[tuple[str, str, Any]] = []
+
+    def _scenario(sid: str, expected: str, thunk: Any) -> None:
+        scenarios.append((sid, expected, thunk))
+
+    def _s1():
+        reg = QuotaRegistry(_authorities())
+        _quota(reg)
+        return _outcome(
+            reg.quota_receipt(
+                quota_id="q-1",
+                declared_value=400,
+                declared_window_s=3600,
+                worker_id="worker-1",
+                now=T0 + 10,
+            )
+        )
+
+    _scenario("allow_disclosed_quota", "allow", _s1)
+
+    def _s2():
+        reg = TerminationRegistry(_authorities())
+        _countersign(reg)
+        return _outcome(
+            reg.algorithmic_termination_gate(
+                termination_id="t-1", pack_id="p-1", now=T0 + 120
+            )
+        )
+
+    _scenario("allow_countersigned_termination", "allow", _s2)
+
+    def _s3():
+        brk = FatigueBreaker(_authorities())
+        _fatigue(brk)
+        return _outcome(
+            brk.fatigue_circuit_breaker(
+                policy_id="fb-1", worker_id="worker-1", continuous_hours=8, now=T0
+            )
+        )
+
+    _scenario("allow_short_shift", "allow", _s3)
+
+    def _s4():
+        reg = SurveillanceRegistry(_authorities())
+        _surveillance(reg)
+        return _outcome(
+            reg.surveillance_proportionality_gate(
+                receipt_id="s-1",
+                declared_purpose="yard-safety",
+                declared_scope="dock-3",
+                declared_biometric=False,
+                now=T0 + 3600,
+            )
+        )
+
+    _scenario("allow_proportionate_surveillance", "allow", _s4)
+
+    def _s5():
+        reg = QuotaRegistry(_authorities())
+        return _outcome(
+            reg.quota_receipt(
+                quota_id="q-ghost",
+                declared_value=400,
+                declared_window_s=3600,
+                worker_id="worker-1",
+                now=T0 + 10,
+            )
+        )
+
+    _scenario("deny_hidden_quota", "deny", _s5)
+
+    def _s6():
+        reg = TerminationRegistry(_authorities())
+        _pack(reg)
+        return _outcome(
+            reg.algorithmic_termination_gate(
+                termination_id="t-1", pack_id="p-1", now=T0 + 120
+            )
+        )
+
+    _scenario("deny_algorithmic_firing", "deny", _s6)
+
+    def _s7():
+        brk = FatigueBreaker(_authorities())
+        _fatigue(brk)
+        return _outcome(
+            brk.fatigue_circuit_breaker(
+                policy_id="fb-1", worker_id="worker-1", continuous_hours=13, now=T0
+            )
+        )
+
+    _scenario("deny_fatigue_break", "deny", _s7)
+
+    def _s8():
+        reg = SurveillanceRegistry(_authorities())
+        _surveillance(reg)
+        return _outcome(
+            reg.surveillance_proportionality_gate(
+                receipt_id="s-1",
+                declared_purpose="yard-safety",
+                declared_scope="all-docks",
+                declared_biometric=False,
+                now=T0 + 3600,
+            )
+        )
+
+    _scenario("deny_disproportionate_surveillance", "deny", _s8)
+
+    def _s9():
+        reg = DispatchRegistry(_authorities())
+        _dispatch(reg)
+        return _outcome(
+            reg.dispatch_fairness_probe(
+                policy_id="d-1",
+                worker_id="worker-1",
+                rejections_today=3,
+                penalty_applied=True,
+                now=T0,
+            )
+        )
+
+    _scenario("deny_rejection_penalty", "deny", _s9)
+
+    def _s10():
+        reg = AVSafetyRegistry(_authorities())
+        return _outcome(reg.av_safety_case_receipt(vehicle_id="truck-ghost", now=T0))
+
+    _scenario("deny_no_safety_case", "deny", _s10)
+
+    def _s11():
+        reg = LaborImpactRegistry(_authorities())
+        return _outcome(
+            reg.labor_impact_binding(
+                deployment_id="dep-1", workers_displaced_estimate=50, now=T0
+            )
+        )
+
+    _scenario("deny_impact_undisclosed", "deny", _s11)
+
+    def _s12():
+        reg = SurveillanceRegistry(_authorities())
+        _surveillance(reg)
+        return _outcome(
+            reg.surveillance_proportionality_gate(
+                receipt_id="s-1",
+                declared_purpose="productivity-scoring",
+                declared_scope="dock-3",
+                declared_biometric=False,
+                now=T0 + 3600,
+            )
+        )
+
+    _scenario("deny_purpose_mismatch", "deny", _s12)
+
+    allowed_ids: list[str] = []
+    warned_ids: list[str] = []
+    denial_reasons: dict[str, str] = {}
+    mismatches: list[str] = []
+
+    for sid, expected, thunk in scenarios:
+        try:
+            outcome = thunk()
+            verdict = outcome.get("verdict", "")
+            if verdict != expected:
+                mismatches.append(f"{sid}: expected {expected}, saw {verdict}")
+            if verdict == "allow":
+                allowed_ids.append(sid)
+            elif verdict == "allow-with-warning":
+                warned_ids.append(sid)
+            else:
+                denial_reasons[sid] = outcome.get("reason", "")
+        except Exception as exc:  # fail-closed: exceptions are mismatches
+            mismatches.append(f"{sid}: raised {type(exc).__name__}: {exc}")
+
+    return {
+        "n_scenarios": len(scenarios),
+        "mismatches": mismatches,
+        "allowed_ids": allowed_ids,
+        "warned_ids": warned_ids,
+        "denial_reasons": denial_reasons,
+    }
+
+
 def run_suite(
     *,
     only: Iterable[str] | None = None,
@@ -20657,6 +21104,7 @@ __all__ = [
     "run_language_cap",
     "run_companionship",
     "run_embodied",
+    "run_labor_algo",
     "run_adjudication",
     "run_game_agents",
     "run_commerce",

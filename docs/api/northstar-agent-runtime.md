@@ -327,6 +327,137 @@ Issue a take-level receipt. An empty rights-review digest raises.
 
 Fail-closed gate: may this AI-generated take ship?
 
+### `labor_algo`
+
+Source: `components/northstar-agent-runtime/labor_algo.py`
+
+Algorithmic-management guards (one-hundred-twenty-seventh batch).
+
+#### `LaborAlgoError`
+
+Malformed algorithmic-management input. Fail loud, never guess.
+
+#### `AuthorityRegistry`
+
+Registered human authorities (authority_id -> Ed25519 public key).
+
+- `register(authority_id: str, public_key: bytes)`
+- `public_key_for(authority_id: str)`
+#### `LaborAlgoVerdict`
+
+Outcome of one algorithmic-management check.
+
+- `as_dict()`
+#### `compute_quota_digest(*, quota_id: str, quota_value: int, measurement_window_s: int, appeal_path: str)`
+
+JCS digest binding the exact disclosed quota terms.
+
+#### `QuotaReceipt`
+
+An authority-signed, worker-acknowledged quota disclosure.
+
+- `as_dict()`
+#### `QuotaRegistry`
+
+Disclosed quotas: authority-signed, worker-acknowledged.
+
+- `register_worker(worker_id: str, public_key: bytes)`
+- `issue_quota_receipt(*, quota_id: str, quota_value: int, measurement_window_s: int, appeal_path: str, issued_by: str, issued_at: int, signature: bytes)`
+  - Issue an authority-signed quota disclosure.
+- `acknowledge_quota(*, worker_id: str, quota_id: str, worker_signature: bytes)`
+  - Record a worker's signed acknowledgment of the quota terms.
+- `quota_receipt(*, quota_id: str, declared_value: int, declared_window_s: int, worker_id: str, now: int)`
+  - Enforce a quota only when it is disclosed and acknowledged.
+#### `compute_pack_digest(*, pack_id: str, worker_id: str, evidence_digests: tuple[str, ...] | list[str], recorded_at: int)`
+
+JCS digest binding an evidence pack for a termination.
+
+#### `compute_termination_digest(*, termination_id: str, pack_digest: str, adjudicator_id: str, adjudicated_at: int)`
+
+JCS digest binding a human adjudicator to an exact evidence pack.
+
+#### `EvidencePack`
+
+- `as_dict()`
+#### `TerminationCountersign`
+
+- `as_dict()`
+#### `TerminationRegistry`
+
+Algorithmic firings: human countersign bound to the evidence pack.
+
+- `register_evidence_pack(*, pack_id: str, worker_id: str, evidence_digests: tuple[str, ...] | list[str], recorded_at: int)`
+- `countersign_termination(*, termination_id: str, pack_id: str, adjudicator_id: str, adjudicated_at: int, signature: bytes)`
+  - A registered human adjudicator signs off on the exact pack.
+- `algorithmic_termination_gate(*, termination_id: str, pack_id: str, now: int)`
+  - A firing executes only with a valid human countersign.
+#### `compute_fatigue_policy_digest(*, policy_id: str, max_continuous_hours: int, authority_id: str, pinned_at: int)`
+
+#### `FatiguePolicy`
+
+- `as_dict()`
+#### `FatigueBreaker`
+
+Forced offline after N continuous hours — pinned by authority.
+
+- `pin_policy(*, policy_id: str, max_continuous_hours: int, authority_id: str, pinned_at: int, signature: bytes)`
+- `fatigue_circuit_breaker(*, policy_id: str, worker_id: str, continuous_hours: int, now: int)`
+  - At/over the pinned limit the worker must be forced offline.
+#### `compute_surveillance_digest(*, receipt_id: str, purpose: str, scope: str, retention_days: int, biometric: bool, authority_id: str, issued_at: int)`
+
+#### `SurveillanceReceipt`
+
+- `as_dict()`
+#### `SurveillanceRegistry`
+
+Worker surveillance: declared purpose, scope, retention — or deny.
+
+- `issue_surveillance_receipt(*, receipt_id: str, purpose: str, scope: str, retention_days: int, biometric: bool, authority_id: str, issued_at: int, signature: bytes)`
+- `surveillance_proportionality_gate(*, receipt_id: str, declared_purpose: str, declared_scope: str, declared_biometric: bool, now: int)`
+  - Surveillance is allowed only under a matching receipt.
+#### `compute_dispatch_policy_digest(*, policy_id: str, max_rejections_per_day: int, authority_id: str, pinned_at: int)`
+
+#### `DispatchPolicy`
+
+- `as_dict()`
+#### `DispatchRegistry`
+
+Dispatch fairness: a daily rejection allowance, penalty-free.
+
+- `pin_dispatch_policy(*, policy_id: str, max_rejections_per_day: int, authority_id: str, pinned_at: int, signature: bytes)`
+- `record_rejection(*, worker_id: str, now: int)`
+  - Record one lawful rejection; returns today's count.
+- `dispatch_fairness_probe(*, policy_id: str, worker_id: str, rejections_today: int, penalty_applied: bool, now: int)`
+  - Penalizing a lawful rejection is denied.
+#### `compute_av_digest(*, case_id: str, vehicle_id: str, operating_domain_digest: str, authority_id: str, issued_at: int, expires_at: int)`
+
+#### `SafetyCaseReceipt`
+
+- `as_dict()`
+#### `AVSafetyRegistry`
+
+Autonomous trucks/robots on public roads need a safety case.
+
+- `issue_safety_case(*, case_id: str, vehicle_id: str, operating_domain_digest: str, authority_id: str, issued_at: int, expires_at: int, signature: bytes)`
+- `revoke_safety_case(case_id: str)`
+- `av_safety_case_receipt(*, vehicle_id: str, now: int)`
+  - Public-road operation needs a live safety case.
+#### `compute_impact_digest(*, deployment_id: str, workers_displaced_estimate: int, disclosure_digest: str, authority_id: str, recorded_at: int)`
+
+#### `LaborImpactReceipt`
+
+- `as_dict()`
+#### `LaborImpactRegistry`
+
+Large-scale automation displacement: disclosed or denied.
+
+- `register_impact_disclosure(*, deployment_id: str, workers_displaced_estimate: int, disclosure_digest: str, authority_id: str, recorded_at: int, signature: bytes)`
+- `labor_impact_binding(*, deployment_id: str, workers_displaced_estimate: int, now: int)`
+  - Displacement at/above the threshold needs a disclosed receipt.
+#### `labor_audit_event(event: str, **fields: Any)`
+
+Shape an audit event for the labor-algorithmic-management domain.
+
 ### `approver_separation`
 
 Source: `components/northstar-agent-runtime/approver_separation.py`
@@ -2367,6 +2498,10 @@ Companionship safeguards for AI dating/companionship (one-hundred-twenty-first b
 #### `run_embodied()`
 
 Embodied-AI safety vacuum gates (one-hundred-twenty-sixth batch).
+
+#### `run_labor_algo()`
+
+Algorithmic-management guards (one-hundred-twenty-seventh batch).
 
 #### `run_suite(*, only: Iterable[str] | None=None, tracks: Iterable[str] | None=None)`
 
