@@ -1683,7 +1683,7 @@ One discovered skill package: identity plus the path to read.
 
 #### `skills_directory(workspace: str | Path)`
 
-#### `discover_skills(workspace: str | Path, *, extra_roots: Iterable[str | Path]=())`
+#### `discover_skills(workspace: str | Path, *, extra_roots: Iterable[str | Path]=(), reviewed_digests: Mapping[str, str] | None=None)`
 
 Discover skills under the workspace root; errors are operator-facing.
 
