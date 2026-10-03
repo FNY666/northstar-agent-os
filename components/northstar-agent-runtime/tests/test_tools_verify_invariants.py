@@ -17,6 +17,23 @@ from tools import verify_invariants as tool  # noqa: E402
 
 
 class PrepareCopiesTheWholeComponentsTree(unittest.TestCase):
+    def test_broken_baseline_reports_failure_details_and_never_passes(self):
+        import contextlib
+        import io
+        from unittest.mock import patch
+        failure = 'FAIL: baseline_sentinel\nAssertionError: synthetic guard baseline failure\nRan 1 test\nFAILED (failures=1)\n'
+        with tempfile.TemporaryDirectory() as td:
+            output = io.StringIO()
+            with patch.object(tool, 'GUARDS', []), \
+                 patch.object(tool, 'prepare', return_value=Path(td)), \
+                 patch.object(tool, 'run', return_value=(1, failure)), \
+                 contextlib.redirect_stdout(output):
+                code = tool.main()
+        self.assertNotEqual(code, 0)
+        self.assertIn('baseline_sentinel', output.getvalue())
+        self.assertIn('synthetic guard baseline failure', output.getvalue())
+        self.assertNotIn('all 0 guards verified', output.getvalue())
+
     def test_guard_registry_covers_supply_chain_boundaries(self) -> None:
         titles = {item[0] for item in tool.GUARDS}
         self.assertIn("plugin digest verification rejects drift", titles)
