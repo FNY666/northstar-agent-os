@@ -193,6 +193,13 @@ class RuntimeConfig:
     #: or a comma-separated ``CAP_*`` whitelist. A per-call Shell payload may
     #: only narrow this whitelist, never widen it or switch the launcher off.
     shell_capdrop: str = "on"
+    #: Linux Landlock path allowlist for the process backend
+    #: (``auto`` | ``on`` | ``off``). ``auto`` applies the allowlist whenever
+    #: the kernel supports Landlock and degrades loudly to seccomp-only
+    #: otherwise; ``on`` requires Landlock and refuses to run without it;
+    #: ``off`` disables it. A per-call Shell payload may only tighten this,
+    #: never loosen it. The bwrap backend ignores it (mounts already confine).
+    shell_landlock: str = "auto"
     #: How many **parallel-safe** tool handlers may run at once inside one
     #: assistant turn. ``1`` (default) is full serial dispatch. Values >1 only
     #: accelerate a turn whose *every* call is kind=read and non-mutating;
@@ -283,6 +290,10 @@ class RuntimeConfig:
             except CapDropError as error:
                 fail(f"shell_capdrop must be on, off, or a CAP_* whitelist; got {self.shell_capdrop!r}: {error}")
         object.__setattr__(self, "shell_capdrop", capdrop)
+        landlock = (self.shell_landlock or "auto").strip().lower()
+        if landlock not in {"auto", "on", "off"}:
+            fail(f"shell_landlock must be auto, on, or off; got {self.shell_landlock!r}")
+        object.__setattr__(self, "shell_landlock", landlock)
         if backend == "bwrap":
             # Fail at construction, not mid-tool-call: a run that promised OS
             # isolation and then cannot deliver it is a configuration error.
@@ -324,6 +335,7 @@ class RuntimeConfig:
             "shell_backend": self.shell_backend,
             "shell_seccomp": self.shell_seccomp,
             "shell_capdrop": self.shell_capdrop,
+            "shell_landlock": self.shell_landlock,
             "compaction_threshold_tokens": self.compaction_threshold_tokens,
             "stream": self.stream,
             "retry": self.retry.as_dict() if self.retry is not None else None,
@@ -1165,6 +1177,7 @@ class AgentRuntime:
             "shell_backend": config.shell_backend,
             "shell_seccomp": config.shell_seccomp,
             "shell_capdrop": config.shell_capdrop,
+            "shell_landlock": config.shell_landlock,
         }
         try:
             from tools.os_sandbox import probe_capabilities, resolve_backend
@@ -2193,6 +2206,7 @@ class AgentRuntime:
             "shell_backend": self.config.shell_backend,
             "shell_seccomp": self.config.shell_seccomp,
             "shell_capdrop": self.config.shell_capdrop,
+            "shell_landlock": self.config.shell_landlock,
         }
 
     def _record_tool_message(self, message: UserMessage) -> None:

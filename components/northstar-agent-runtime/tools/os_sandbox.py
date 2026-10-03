@@ -44,6 +44,12 @@ from tools.capdrop import (
     parse_whitelist,
     summarize_report,
 )
+from tools.sandbox import (
+    LANDLOCK_MODES,
+    default_profile,
+    landlock_loader_argv,
+    landlock_supported,
+)
 from tools.seccomp import SECCOMP_MODES, SeccompError, build_default_filter, prctl_loader_argv
 
 #: Hard ceilings a single Shell invocation may not exceed. Operators may only
@@ -103,6 +109,9 @@ class SandboxRequest:
     #: (operator escape hatch — the Shell tool only passes None when the
     #: operator configured ``--capdrop off``).
     capdrop_whitelist: tuple[str, ...] | None = ()
+    landlock: str = "auto"  # landlock path allowlist (process backend, Linux):
+    # auto (apply when the kernel supports it, degrade loudly to seccomp-only)
+    # | on (require; refuse without Landlock) | off. Tighten-only per call.
 
 
 @dataclass(frozen=True)
@@ -330,6 +339,11 @@ def _validate_request(request: SandboxRequest) -> None:
                 "a capdrop whitelist requires Linux (capset/prctl); "
                 f"this host is {sys.platform}"
             )
+    landlock = (request.landlock or "auto").strip().lower()
+    if landlock not in LANDLOCK_MODES:
+        raise SandboxError(
+            f"unknown landlock mode {request.landlock!r}; choose one of {', '.join(LANDLOCK_MODES)}"
+        )
 
 
 def _read_capped(stream: Any, limit: int) -> tuple[bytes, bool]:
@@ -657,6 +671,11 @@ def run_sandboxed(
             raise
         passwd_path, group_path = identity_paths
         detail = "network namespace unshared; workspace is the only writable bind"
+        if (request.landlock or "auto").strip().lower() != "off":
+            # Landlock is a process-backend mechanism; bwrap already confines
+            # paths more strongly via read-only mounts, so there is nothing
+            # to add here. Stated, not silently assumed.
+            detail += "; landlock n/a (bwrap mounts already confine paths)"
         if seccomp_mode != "off":
             # The BPF denylist rides into bwrap on an inherited fd
             # (``bwrap --seccomp FD``). A temp file under the workspace tmp dir
@@ -720,17 +739,27 @@ def run_sandboxed(
             f"seccomp='on' requires a platform that can load a BPF filter "
             f"(this host is {sys.platform})."
         )
+    landlock_mode = (request.landlock or "auto").strip().lower()
+    if landlock_mode == "on" and not (
+        sys.platform.startswith("linux") and landlock_supported()
+    ):
+        # No silent downgrade either: the operator required the path
+        # allowlist, and this host cannot enforce one.
+        raise SandboxError(
+            "landlock='on' requires a Linux kernel with Landlock "
+            f"(this host: {sys.platform}, landlock_supported={landlock_supported()})."
+        )
     base_detail = (
         "process backend: cwd pinned and env scrubbed, but the host filesystem "
         "and network are still reachable — install bubblewrap for OS isolation"
     )
     exec_argv: Sequence[str] = request.argv
+    python = shutil.which("python3") or sys.executable
     if seccomp_mode != "off" and sys.platform.startswith("linux"):
         # The filter rides in on a python wrapper that prctl()s it before
         # exec (see tools/seccomp.py: no preexec_fn, so no fork-in-threads
         # hazard). The audit trail keeps the original argv; the wrapper is
         # an implementation detail named in `detail`.
-        python = shutil.which("python3") or sys.executable
         exec_argv = prctl_loader_argv(request.argv, python=python)
         detail = base_detail + "; seccomp denylist active (prctl, EPERM on deny)"
     else:
@@ -759,6 +788,17 @@ def run_sandboxed(
             detail += "; capdrop launcher active (capset zeroing, fail-closed)"
         else:
             detail += "; capdrop not applied (non-Linux: no capset/prctl)"
+    if landlock_mode != "off" and sys.platform.startswith("linux") and landlock_supported():
+        # The Landlock allowlist rides in on an outer python wrapper (see
+        # tools/sandbox.py): path layer outside, syscall layer inside.
+        spec = default_profile(str(workspace))
+        spec["mode"] = landlock_mode
+        exec_argv = landlock_loader_argv(exec_argv, spec, python=python)
+        detail += "; landlock path allowlist active (FS deny-by-default, TCP denied)"
+    elif landlock_mode != "off":
+        # Graceful degradation, stated out loud: the loader would also warn
+        # on stderr, but the detail line is what the operator reads.
+        detail += "; landlock not applied (kernel lacks Landlock; seccomp layer still enforced)"
     result = _run_popen(
         exec_argv,
         cwd=cwd,
