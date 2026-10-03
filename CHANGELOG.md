@@ -1,3 +1,49 @@
+## Unreleased (eighty-ninth batch) — MCPS capability passports
+
+Absorbs MCPS (anakintano/langchain-mcp-secure, actual code read
+2026-10-04 — mechanism ideas only, honestly scoped in `passport.py`):
+capability passports (`jti` unique per mint, `exp` enforced, Ed25519
+over the canonical envelope — MCPS uses ECDSA P-256/JWT; this repo is
+stdlib-only), delegation with *mandatory* capability intersection
+(delegatee caps = delegator caps ∩ requested scope, computed at mint so
+escalation is refused before any token exists; constraints merge
+delegator-wins: set intersection for lists, min for numerics, recursive
+for dicts), and the one thing MCPS stubbed out made real —
+passport-level revocation (`revoke_jti` was a no-op there): revoked JTIs
+fail closed at verify time, and revoking a parent JTI invalidates its
+whole delegation subtree. Verification is format → signature → expiry →
+revocation, then chain continuity + depth ceiling + the attenuation
+invariant re-checked per hop; `check_tool_use` is the step-5 analogue (a
+tool the passport does not carry is denied). Wired into the eighty-fifth
+batch: `passport_for_identity` binds an `AgentIdentity` DID/key into a
+passport. New bench track `metrics.passport_security` (12 deterministic
+scenarios, 3 allow / 9 deny: forgery, expiry, revocation, intersection,
+depth).
+
+## Unreleased (eighty-seventh batch) — binary evidence tiers + LOG_DROP policy (Tesserae absorption)
+
+Absorbs the verifier mechanics of `sahiee-dev/Tesserae` (AgentOps
+Replay), read as code (`agentops_sdk/{events,buffer,client}.py`,
+`verifier/verifier_core.py`, `docs/CHAIN_AUTHORITY_INVARIANTS.md`).
+Evidence is classified **binary**: AUTHORITATIVE requires ALL of runtime
+authority, a valid seal, a complete window, no LOG_DROP, and a valid
+chain — everything else (including sealed-with-drops) is
+NON_AUTHORITATIVE, with deliberately no "partial" middle rung (the
+`verifier_core` "no partial footgun" stance; the repo's older four-class
+variant in `agentops_verify.py` is documented and not followed). Lost
+audit events are never silent: an explicit, sequenced, hash-chained
+`evidence.log_drop` record (count, reason, seq range) marks the loss,
+and a sequence gap *without* a LOG_DROP is a chain-integrity violation
+that fails closed. Authority isolation: the agent may never emit
+runtime-authority events (`chain_seal` et al.) — the attempt is an
+authority violation, not a seal. Only agent-claimed informational records
+may be compacted, and only with a hash-chained compaction receipt;
+runtime records, LOG_DROP records, seals, and decision records never are.
+High-stakes decisions (tier3+) require AUTHORITATIVE evidence and deny
+fail-closed otherwise. `trust_assumptions()` is hardcoded, not
+configurable. New bench track `metrics.evidence_tiers` (10 deterministic
+scenarios).
+
 ## Unreleased (eighty-eighth batch) — provenance-tracked taint + fail-closed security automata + per-tool budgets (Guardians absorption)
 
 Absorbs the verifier mechanics of `ovidiu-eremia/llm-agent-guardians`

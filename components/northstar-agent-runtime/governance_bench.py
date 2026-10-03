@@ -57,6 +57,16 @@ from agent_identity import (
     verify_delegation_chain,
     verify_identity,
 )
+from passport import (
+    CapabilityPassport,
+    PassportError,
+    PassportIssuer,
+    RevocationList,
+    check_tool_use,
+    delegate_passport,
+    verify_passport,
+    verify_passport_chain,
+)
 from delegation_credentials import (
     CHECK_DEPTH_AT_MOST,
     CHECK_EXPIRES_BEFORE,
@@ -105,7 +115,7 @@ from tools import ToolLimits, ToolSandbox, build_default_registry
 
 #: Semantic version of the public case set. Bump when a case is added, removed,
 #: or its expected verdict changes — consumers pin against this string.
-BENCH_VERSION = "northstar.governance.bench.v13"
+BENCH_VERSION = "northstar.governance.bench.v14"
 
 USAGE_ERROR = 64
 
@@ -3451,6 +3461,381 @@ def run_identity_composition() -> dict[str, Any]:
         "depth_denied_detail": depth_detail,
         "combination_rule": exfil_rule.name,
         "combination_fired_detail": combo_detail,
+    }
+
+
+def run_passport_security() -> dict[str, Any]:
+    """MCPS passport probes: forgery, expiry, (real) revocation.
+
+    Absorbs MCPS (anakintano/langchain-mcp-secure, code-read 2026-10-04):
+    passport fields (sub/public_key/capabilities/iat/exp/jti/signature),
+    mandatory capability intersection on delegation
+    (DelegationToken.create: delegatee caps = delegator caps ∩ requested),
+    the validator's format → signature → TTL → revocation → chain gate —
+    with the one thing MCPS stubbed out made real: passport-level
+    revocation (their revoke_jti is a no-op / is_jti_revoked always False).
+
+    Deterministic: all keys are test-domain deterministic (sha256 labels);
+    pinned JTIs where the scenario needs them; no runtime, no network, no
+    model. Ground truth is closed: 12 scenarios, 3 allow / 9 deny.
+    """
+    import dataclasses as _dataclasses
+    import ed25519 as _ed25519
+
+    NOW = "2026-10-04T02:30:00Z"
+    PAST = "2026-10-04T00:30:00Z"
+
+    def _tsecret(label: str) -> bytes:
+        return hashlib.sha256(f"northstar-test-passport:{label}".encode()).digest()
+
+    authority = PassportIssuer(_tsecret("authority"))
+
+    def _root_caps() -> dict[str, Any]:
+        return {
+            "database_read": {
+                "allowed": True,
+                "constraints": {"allowed_tables": ["customers", "orders"]},
+            },
+            "files_read": {"allowed": True, "constraints": {"max_rows": 1000}},
+        }
+
+    scenarios: list[dict[str, Any]] = []
+
+    def record(sid: str, allowed: bool, expect_allowed: bool, detail: str = "") -> None:
+        scenarios.append(
+            {
+                "id": sid,
+                "allowed": bool(allowed),
+                "expect_allowed": expect_allowed,
+                "ok": bool(allowed) == expect_allowed,
+                "detail": detail,
+            }
+        )
+
+    root = authority.mint(
+        sub="root-agent",
+        public_key_hex=_ed25519.public_key(_tsecret("root-agent")).hex(),
+        capabilities=_root_caps(),
+        time_iso=NOW,
+        jti="pp-bench-root-0001",
+    )
+
+    # 1. valid passport verifies -> allow.
+    v = verify_passport(root, signer_public_key_hex=authority.public_key_hex, time_iso=NOW)
+    record("allow_valid_passport", v.allowed, True, v.reason)
+
+    # 2. forged signature bytes -> deny.
+    d = {k: v2 for k, v2 in root.as_dict().items() if k not in ("version", "signature")}
+    d["public_key_hex"] = d.pop("public_key")
+    forged = _dataclasses.replace(CapabilityPassport(**d), signature="00" * 64)
+    v = verify_passport(forged, signer_public_key_hex=authority.public_key_hex, time_iso=NOW)
+    record("deny_forged_signature", v.allowed, False, v.failed_rule)
+
+    # 3. tampered capabilities (widened tables) -> signature mismatch -> deny.
+    tampered_caps = {
+        "database_read": {"allowed": True, "constraints": {"allowed_tables": ["customers", "orders", "secrets"]}},
+        "files_read": {"allowed": True, "constraints": {"max_rows": 1000}},
+    }
+    tampered = _dataclasses.replace(root, capabilities=tampered_caps)
+    v = verify_passport(tampered, signer_public_key_hex=authority.public_key_hex, time_iso=NOW)
+    record("deny_tampered_capabilities", v.allowed, False, v.failed_rule)
+
+    # 4. expired passport -> deny.
+    old = authority.mint(
+        sub="old-agent",
+        public_key_hex=_ed25519.public_key(_tsecret("old-agent")).hex(),
+        capabilities=_root_caps(),
+        time_iso=PAST,
+        ttl_seconds=60,
+    )
+    v = verify_passport(old, signer_public_key_hex=authority.public_key_hex, time_iso=NOW)
+    record("deny_expired_passport", v.allowed, False, v.failed_rule)
+
+    # 5. REAL revocation: revoked JTI rejected fail-closed.
+    rl = RevocationList()
+    rl.revoke(root.jti, reason="bench: key rotation", revoked_at=NOW)
+    v = verify_passport(root, signer_public_key_hex=authority.public_key_hex, time_iso=NOW, revocation=rl)
+    record("deny_revoked_passport", v.allowed, False, v.failed_rule)
+
+    # 6. malformed passport (not a CapabilityPassport) -> deny.
+    v = verify_passport({"jti": "pp-junk"}, signer_public_key_hex=authority.public_key_hex, time_iso=NOW)
+    record("deny_malformed_passport", v.allowed, False, v.failed_rule)
+
+    # 7. delegation narrows by mandatory intersection -> allow, caps pinned.
+    child = delegate_passport(
+        root,
+        _tsecret("root-agent"),
+        delegatee_sub="sub-1",
+        delegatee_public_key_hex=_ed25519.public_key(_tsecret("sub-1")).hex(),
+        requested_capabilities={
+            "database_read": {"allowed": True, "constraints": {"allowed_tables": ["customers"]}}
+        },
+        time_iso=NOW,
+        jti="pp-bench-child-0001",
+    )
+    tables = child.capabilities["database_read"]["constraints"]["allowed_tables"]
+    record(
+        "allow_delegation_intersection",
+        tables == ["customers"] and "files_read" not in child.capabilities,
+        True,
+        f"tables={tables}",
+    )
+
+    # 8. escalation at mint (requesting an unheld tool) is refused -> deny.
+    try:
+        delegate_passport(
+            root,
+            _tsecret("root-agent"),
+            delegatee_sub="sub-evil",
+            delegatee_public_key_hex=_ed25519.public_key(_tsecret("sub-evil")).hex(),
+            requested_capabilities={"admin_write": {"allowed": True}},
+            time_iso=NOW,
+        )
+        record("deny_mint_escalation", True, False, "mint did not refuse")
+    except PassportError as exc:
+        record("deny_mint_escalation", False, False, str(exc)[:60])
+
+    # 9. tool use beyond the token's grants -> deny.
+    v = check_tool_use(
+        child, "files_read",
+        signer_public_key_hex=_ed25519.public_key(_tsecret("root-agent")).hex(),
+        time_iso=NOW,
+    )
+    record("deny_tool_not_in_token", v.allowed, False, v.failed_rule)
+
+    # 10. revoked parent JTI invalidates the delegation subtree.
+    rl2 = RevocationList()
+    rl2.revoke(root.jti, reason="bench: parent compromise")
+    v = verify_passport_chain(
+        [root, child], root_signer_key_hex=authority.public_key_hex,
+        time_iso=NOW, revocation=rl2,
+    )
+    record("deny_revoked_parent_kills_child", v.allowed, False, v.failed_rule)
+
+    # 11. chain deeper than max_depth -> deny at the exceeding hop.
+    deep = [root]
+    prev, prev_secret = root, _tsecret("root-agent")
+    for i in range(1, 6):
+        label = f"deep-{i}"
+        nxt = delegate_passport(
+            prev, prev_secret,
+            delegatee_sub=label,
+            delegatee_public_key_hex=_ed25519.public_key(_tsecret(label)).hex(),
+            requested_capabilities={
+                "database_read": {"allowed": True, "constraints": {"allowed_tables": ["customers"]}}
+            },
+            time_iso=NOW,
+        )
+        deep.append(nxt)
+        prev, prev_secret = nxt, _tsecret(label)
+    v = verify_passport_chain(
+        deep, root_signer_key_hex=authority.public_key_hex, time_iso=NOW, max_depth=4
+    )
+    record("deny_chain_depth_exceeded", v.allowed, False, f"{v.failed_rule}@{v.depth}")
+
+    # 12. two mints -> distinct JTIs (uniqueness holds).
+    a = authority.mint(sub="a", public_key_hex=_ed25519.public_key(_tsecret("a")).hex(),
+                       capabilities=_root_caps(), time_iso=NOW)
+    b = authority.mint(sub="b", public_key_hex=_ed25519.public_key(_tsecret("b")).hex(),
+                       capabilities=_root_caps(), time_iso=NOW)
+    record("allow_jti_unique", a.jti != b.jti, True)
+
+    mismatches = [s["id"] for s in scenarios if not s["ok"]]
+    allowed_ids = sorted(s["id"] for s in scenarios if s["allowed"])
+    revoke_detail = next(s["detail"] for s in scenarios if s["id"] == "deny_revoked_passport")
+    return {
+        "n_scenarios": len(scenarios),
+        "n_allowed": len(allowed_ids),
+        "allowed_ids": allowed_ids,
+        "mismatches": mismatches,
+        "revocation_detail": revoke_detail,
+    }
+
+
+def run_evidence_tiers() -> dict[str, Any]:
+    """Binary evidence tiers + LOG_DROP policy (Tesserae absorption).
+
+    Absorbs sahiee-dev/Tesserae's AgentOps Replay mechanisms, read as
+    code (``agentops_sdk/{events,buffer,client}.py``,
+    ``verifier/verifier_core.py``, ``docs/CHAIN_AUTHORITY_INVARIANTS.md``):
+
+    * **Binary evidence classification** — AUTHORITATIVE requires ALL of
+      runtime authority, valid seal, complete window, no LOG_DROP, valid
+      chain; everything else (including sealed-with-drops) is
+      NON_AUTHORITATIVE. No "partial" middle rung.
+    * **LOG_DROP semantics** — lost events are never silent: an explicit,
+      sequenced, hash-chained ``evidence.log_drop`` record (count, reason,
+      seq range) marks the loss; a sequence gap without LOG_DROP is an
+      integrity violation.
+    * **Authority isolation** — the agent may never emit runtime-authority
+      events (``chain_seal`` et al.); the attempt is an authority
+      violation, not a seal.
+    * **High-stakes gate** — tier3+ decisions require AUTHORITATIVE
+      evidence; anything else denies, fail-closed.
+
+    Deterministic: all chains are built in-memory with fixed fixtures; no
+    runtime, no network, no model. Ground truth is closed: 10 scenarios.
+    """
+    import audit_chain as _ac
+    import evidence_tiers as _et
+
+    def _chain(raw):
+        for i, rec in enumerate(raw):
+            rec.setdefault("seq", i + 1)
+        return _ac.chain_records(raw, component="evidence-bench", session_id="s1")
+
+    def _r(etype, producer=_et.PRODUCER_RUNTIME):
+        return {"event_type": etype, "producer": producer, "note": "bench"}
+
+    scenarios: list[dict[str, Any]] = []
+
+    def record(sid: str, ok: bool, detail: str = "") -> None:
+        scenarios.append({"id": sid, "ok": bool(ok), "detail": detail})
+
+    # 1. clean runtime window: authoritative, tier3 gate allows.
+    w1 = _chain([_r("tool_call"), _r("approval"), _r("chain_seal")])
+    c1 = _et.classify_audit_window(w1, genesis_hash=w1[0]["prev_hash"])
+    g1 = _et.require_authoritative(c1, "tier3")
+    record(
+        "authoritative_clean_window",
+        c1.tier is _et.EvidenceTier.AUTHORITATIVE and g1.allowed,
+        f"tier={c1.tier.value} gate_allowed={g1.allowed}",
+    )
+
+    # 2. agent-claimed record in window: non-authoritative, tier3 denies.
+    w2 = _chain([_r("tool_call"), _r("tool_result", _et.PRODUCER_AGENT), _r("chain_seal")])
+    c2 = _et.classify_audit_window(w2, genesis_hash=w2[0]["prev_hash"])
+    g2 = _et.require_authoritative(c2, "tier3")
+    record(
+        "agent_claim_disqualifies",
+        c2.tier is _et.EvidenceTier.NON_AUTHORITATIVE and not g2.allowed,
+        f"tier={c2.tier.value} gate_allowed={g2.allowed}",
+    )
+
+    # 3. sealed window WITH log_drop: NOT partial — non-authoritative,
+    #    tier3 denies, tier1 still allows (low stakes need no seal).
+    drop = _et.emit_log_drop(
+        count=2,
+        reason=_et.LOG_DROP_REASON_BUFFER_OVERFLOW,
+        seq_range_start=4,
+        seq_range_end=5,
+        session_id="s1",
+        seq=99,
+        prev_hash="0" * 64,
+    )
+    drop.pop("seq")
+    drop.pop("prev_hash")
+    w3 = _chain([_r("tool_call"), drop, _r("chain_seal")])
+    c3 = _et.classify_audit_window(w3, genesis_hash=w3[0]["prev_hash"])
+    g3_hi = _et.require_authoritative(c3, "tier3")
+    g3_lo = _et.require_authoritative(c3, "tier1")
+    record(
+        "sealed_with_drops_not_partial",
+        c3.tier is _et.EvidenceTier.NON_AUTHORITATIVE
+        and c3.has_drops
+        and not g3_hi.allowed
+        and g3_lo.allowed,
+        f"tier={c3.tier.value} drops={c3.has_drops}",
+    )
+
+    # 4. tampered chain link: non-authoritative.
+    w4 = _chain([_r("tool_call"), _r("chain_seal")])
+    w4[1]["chain_hash"] = "f" * 64
+    c4 = _et.classify_audit_window(w4, genesis_hash=w4[0]["prev_hash"])
+    record(
+        "tampered_link_rejected",
+        c4.tier is _et.EvidenceTier.NON_AUTHORITATIVE and not c4.chain_valid,
+        "chain_valid=False",
+    )
+
+    # 5. sequence gap without LOG_DROP: integrity violation, not complete.
+    raw5 = [_r("tool_call"), _r("chain_seal")]
+    raw5[0]["seq"] = 1
+    raw5[1]["seq"] = 47
+    w5 = _ac.chain_records(raw5, component="evidence-bench", session_id="s1")
+    c5 = _et.classify_audit_window(w5, genesis_hash=w5[0]["prev_hash"])
+    record(
+        "gap_without_drop_fails_closed",
+        c5.tier is _et.EvidenceTier.NON_AUTHORITATIVE
+        and not c5.complete
+        and c5.chain_valid,
+        "gap is a completeness failure, not silent",
+    )
+
+    # 6. unsealed window: non-authoritative.
+    w6 = _chain([_r("tool_call"), _r("approval")])
+    c6 = _et.classify_audit_window(w6, genesis_hash=w6[0]["prev_hash"])
+    record(
+        "unsealed_window_not_authoritative",
+        c6.tier is _et.EvidenceTier.NON_AUTHORITATIVE and not c6.sealed,
+        "sealed=False",
+    )
+
+    # 7. agent spoofing a runtime-authority event: authority violation.
+    w7 = _chain([_r("chain_seal", _et.PRODUCER_AGENT)])
+    c7 = _et.classify_audit_window(w7, genesis_hash=w7[0]["prev_hash"])
+    v7 = _et.may_compact(w7[0])
+    record(
+        "agent_seal_spoof_rejected",
+        c7.tier is _et.EvidenceTier.NON_AUTHORITATIVE and not v7.allowed,
+        f"tier={c7.tier.value} compact_allowed={v7.allowed}",
+    )
+
+    # 8. compaction policy: agent informational may compact (receipt
+    #    required); runtime records and LOG_DROP records never.
+    ok_agent = _et.may_compact(_r("tool_result", _et.PRODUCER_AGENT)).allowed
+    no_runtime = not _et.may_compact(_r("tool_call")).allowed
+    no_drop = not _et.may_compact(drop).allowed
+    no_seal = not _et.may_compact(_r("chain_seal")).allowed
+    no_approval = not _et.may_compact(_r("approval")).allowed
+    receipt = _et.compaction_receipt(
+        seq_range_start=1,
+        seq_range_end=2,
+        event_count=2,
+        range_digest=_et.digest_compacted_range(["ab" * 32, "cd" * 32]),
+        session_id="s1",
+        seq=3,
+        prev_hash="a" * 64,
+    )
+    record(
+        "compaction_policy_holds",
+        ok_agent and no_runtime and no_drop and no_seal and no_approval
+        and receipt["event_type"] == "evidence.compaction_receipt",
+        "agent-informational only, receipt required",
+    )
+
+    # 9. malformed LOG_DROP fails closed (a lying loss record is refused).
+    closed = 0
+    for bad in (
+        dict(count=0, reason=_et.LOG_DROP_REASON_BUFFER_OVERFLOW,
+             seq_range_start=1, seq_range_end=1),
+        dict(count=1, reason=_et.LOG_DROP_REASON_BUFFER_OVERFLOW,
+             seq_range_start=5, seq_range_end=4),
+        dict(count=1, reason="mystery", seq_range_start=1, seq_range_end=1),
+    ):
+        try:
+            _et.emit_log_drop(session_id="s1", seq=2, prev_hash="a" * 64, **bad)
+        except ValueError:
+            closed += 1
+    record("malformed_log_drop_refused", closed == 3, f"{closed}/3 refused")
+
+    # 10. trust assumptions are hardcoded, not configurable.
+    ta = _et.trust_assumptions()
+    record(
+        "trust_assumptions_hardcoded",
+        ta["byzantine_host_defended"] is False
+        and ta["instrumentation_complete"] == "unknown"
+        and ta["agent_claims_trusted"] is False,
+        "no knobs to weaken",
+    )
+
+    mismatches = [s["id"] for s in scenarios if not s["ok"]]
+    return {
+        "n_scenarios": len(scenarios),
+        "mismatches": mismatches,
+        "authoritative_ids": [
+            s["id"] for s in scenarios if s["id"] == "authoritative_clean_window" and s["ok"]
+        ],
     }
 
 
@@ -7677,6 +8062,104 @@ def _case_metrics_identity_composition(h: BenchHarness) -> BenchExpectation:
     )
 
 
+def _case_metrics_passport_security(h: BenchHarness) -> BenchExpectation:
+    """MCPS capability passports: forgery, expiry, real revocation.
+
+    12 deterministic scenarios, 3 allow / 9 deny: valid passports verify,
+    forged signatures and tampered capabilities are caught, expired
+    passports fail, revoked JTIs fail closed (real revocation — MCPS
+    stubbed this), delegation narrows by mandatory intersection,
+    escalation is refused at mint, revoked parents kill subtrees, and
+    the depth ceiling holds.
+    """
+    metrics = run_passport_security()
+
+    def check(exp: BenchExpectation, report: Any) -> tuple[bool, str]:
+        if metrics["n_scenarios"] != 12:
+            return (False, f"expected 12 passport scenarios, saw {metrics['n_scenarios']}")
+        if metrics["mismatches"]:
+            return (False, f"scenario(s) disagree with ground truth: {metrics['mismatches']}")
+        if metrics["allowed_ids"] != [
+            "allow_delegation_intersection",
+            "allow_jti_unique",
+            "allow_valid_passport",
+        ]:
+            return (False, f"allowed set drifted: {metrics['allowed_ids']}")
+        if metrics["revocation_detail"] != "passport_revoked":
+            return (False, f"revocation must deny with passport_revoked, saw {metrics['revocation_detail']}")
+        return (True, "12/12 passport scenarios hold: forgery/expiry/revocation/intersection/depth")
+
+    return BenchExpectation(
+        runtime=_noop_runtime(h),
+        expect_subtype="success",
+        post_check=check,
+        metrics=metrics,
+        notes=(
+            "MCPS (anakintano/langchain-mcp-secure), read as code: passport "
+            "fields, mandatory capability intersection on delegation, "
+            "format → signature → TTL → revocation → chain gate — with "
+            "passport-level revocation made real (MCPS stubbed it)."
+        ),
+    )
+
+
+def _case_metrics_evidence_tiers(h: BenchHarness) -> BenchExpectation:
+    """Binary evidence tiers + LOG_DROP policy (Tesserae absorption).
+
+    10 deterministic scenarios: a clean runtime window classifies
+    AUTHORITATIVE and passes the tier3 gate; an agent-claimed record, a
+    tampered link, a sequence gap without LOG_DROP, a missing seal, and
+    an agent-spoofed seal all classify NON_AUTHORITATIVE and deny tier3;
+    a sealed window *with* LOG_DROP is NON_AUTHORITATIVE (no "partial"
+    laundering) while tier1 still passes; the compaction policy allows
+    only agent-informational records with a receipt; malformed LOG_DROP
+    records are refused; trust assumptions stay hardcoded.
+    """
+    metrics = run_evidence_tiers()
+
+    def check(exp: BenchExpectation, report: Any) -> tuple[bool, str]:
+        if metrics["n_scenarios"] != 10:
+            return (
+                False,
+                f"expected 10 evidence scenarios, saw {metrics['n_scenarios']}",
+            )
+        if metrics["mismatches"]:
+            return (
+                False,
+                f"scenario(s) disagree with ground truth: {metrics['mismatches']}",
+            )
+        if metrics["authoritative_ids"] != ["authoritative_clean_window"]:
+            return (
+                False,
+                f"exactly one window must classify AUTHORITATIVE, saw "
+                f"{metrics['authoritative_ids']}",
+            )
+        return (
+            True,
+            "10 scenarios green: binary classification holds, sealed-with-drops "
+            "is NON_AUTHORITATIVE (no partial footgun), tier3 gate denies "
+            "non-authoritative evidence, compaction policy and LOG_DROP "
+            "fail-closed rules hold",
+        )
+
+    return BenchExpectation(
+        runtime=_noop_runtime(h),
+        expect_subtype="success",
+        post_check=check,
+        metrics=metrics,
+        notes=(
+            "Tesserae AgentOps Replay mechanisms, read as code: binary "
+            "evidence classification (verifier_core.py — no partial "
+            "footgun), LOG_DROP loss-made-explicit semantics "
+            "(agentops_sdk/client.py), authority isolation "
+            "(CHAIN_AUTHORITY_INVARIANTS.md). Honestly scoped: Northstar is "
+            "single-process, so the runtime is the trust anchor (Tesserae's "
+            "server-authority analogue) and agent-claimed records are "
+            "non-authoritative by construction."
+        ),
+    )
+
+
 def _case_metrics_memory_write_gates(h: BenchHarness) -> BenchExpectation:
     """Memory write-time safety gates (nevertwice / OWASP AMG absorption).
 
@@ -9093,6 +9576,8 @@ CASES: tuple[BenchCase, ...] = (
 
     BenchCase("metrics.multisig_approval", "metrics", "m-of-n multisig approval", _case_metrics_multisig),
     BenchCase("metrics.identity_composition", "metrics", "DID identity + delegation depth ceiling + permission-combination prohibition", _case_metrics_identity_composition),
+    BenchCase("metrics.passport_security", "metrics", "MCPS capability passports: forgery, expiry, real revocation", _case_metrics_passport_security),
+    BenchCase("metrics.evidence_tiers", "metrics", "binary evidence tiers + LOG_DROP policy (Tesserae)", _case_metrics_evidence_tiers),
     BenchCase("metrics.memory_write_gates", "metrics", "memory write-time gates (nevertwice/OWASP-AMG)", _case_metrics_memory_write_gates),
     BenchCase("metrics.provenance_taint", "metrics", "provenance-tracked taint + fail-closed security automata + per-tool budgets (Guardians)", _case_metrics_provenance_taint),
     BenchCase("metrics.harness_binding", "metrics", "harness integrity binding: SHA-256 harness hash in audit, quad-only scores", _case_metrics_harness_binding),
@@ -9711,6 +10196,8 @@ __all__ = [
     "run_metric_corpus",
     "run_multisig",
     "run_identity_composition",
+    "run_passport_security",
+    "run_evidence_tiers",
     "run_provenance_taint",
     "run_owasp_asi_coverage",
     "run_policy_axis",

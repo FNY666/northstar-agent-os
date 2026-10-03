@@ -747,6 +747,14 @@ m-of-n multisig approval over the exact call.
 
 DID identity + delegation depth ceiling + combination prohibition.
 
+#### `run_passport_security()`
+
+MCPS passport probes: forgery, expiry, (real) revocation.
+
+#### `run_evidence_tiers()`
+
+Binary evidence tiers + LOG_DROP policy (Tesserae absorption).
+
 #### `run_provenance_taint()`
 
 Provenance-tracked taint + fail-closed automata + per-tool budgets.
@@ -1538,6 +1546,76 @@ Verifies m-of-n signatures for one exact call. Keeps no state.
 
 - `check(call_id: str, arguments_digest: str, signatures: Sequence[MultisigSignature])`
   - Verify the presented signatures against the exact call.
+### `passport`
+
+Source: `components/northstar-agent-runtime/passport.py`
+
+Capability passports: minting, mandatory-intersection delegation, real revocation.
+
+#### `PassportError`
+
+Raised when a passport cannot be built (caller/policy bug).
+
+#### `intersect_capabilities(delegator_caps: Mapping[str, Any], requested_caps: Mapping[str, Any])`
+
+Mandatory capability intersection: ``requested ∩ delegator``.
+
+#### `capabilities_within(child_caps: Mapping[str, Any], parent_caps: Mapping[str, Any])`
+
+Check the attenuation invariant: child caps ⊆ parent caps.
+
+#### `CapabilityPassport`
+
+One capability passport: identity + capabilities + delegation lineage.
+
+- `envelope()`
+- `as_dict()`
+#### `PassportVerdict`
+
+Result of verifying a passport or a passport chain.
+
+- `as_dict()`
+#### `RevocationEntry`
+
+#### `RevocationList`
+
+Caller-owned revocation list for passport JTIs.
+
+- `revoke(jti: str, *, reason: str='', revoked_at: str='')`
+- `is_revoked(jti: Any)`
+- `entry(jti: str)`
+#### `PassportIssuer`
+
+Root authority: mints root capability passports.
+
+- `generate()`
+- `public_key_hex` (property)
+- `mint(*, sub: str, public_key_hex: str, capabilities: Mapping[str, Any], did: str='', trust_level: int=TRUST_LEVELS['IDENTIFIED'], issued_by: str='supervisor', ttl_seconds: int=DEFAULT_PASSPORT_TTL_SECONDS, time_iso: str='', jti: str='')`
+  - Mint a root capability passport, signed by the authority key.
+#### `delegate_passport(parent: CapabilityPassport, delegator_secret: bytes, *, delegatee_sub: str, delegatee_public_key_hex: str, requested_capabilities: Mapping[str, Any], delegatee_did: str='', trust_level: int=TRUST_LEVELS['IDENTIFIED'], issued_by: str='', ttl_seconds: int=DEFAULT_PASSPORT_TTL_SECONDS, time_iso: str='', purpose: str='', jti: str='')`
+
+Mint a child passport: capabilities = parent ∩ requested (mandatory).
+
+#### `passport_for_identity(identity: Any, issuer: PassportIssuer, capabilities: Mapping[str, Any], *, time_iso: str='', ttl_seconds: int=DEFAULT_PASSPORT_TTL_SECONDS, trust_level: int=TRUST_LEVELS['IDENTIFIED'])`
+
+Bind an :class:`agent_identity.AgentIdentity` to a capability passport.
+
+#### `verify_passport(passport: Any, *, signer_public_key_hex: str, time_iso: str='', revocation: RevocationList | None=None)`
+
+Verify one passport: format → signature → expiry → revocation.
+
+#### `check_tool_use(passport: CapabilityPassport, tool: str, *, signer_public_key_hex: str, time_iso: str='', revocation: RevocationList | None=None)`
+
+Authorise one tool use against a passport (the step-5 analogue).
+
+#### `verify_passport_chain(chain: Sequence[CapabilityPassport], *, root_signer_key_hex: str, time_iso: str='', revocation: RevocationList | None=None, max_depth: int=DEFAULT_MAX_DEPTH)`
+
+Verify a delegation chain of passports, root first.
+
+#### `passport_audit_events(*, passport: CapabilityPassport | None=None, chain: Sequence[CapabilityPassport]=(), verdict: PassportVerdict | None=None, revoked_jti: str='', note: str='')`
+
+Audit events for passport issuance/delegation/verification/revocation.
+
 ### `permissions`
 
 Source: `components/northstar-agent-runtime/permissions.py`
@@ -2857,6 +2935,64 @@ Sign a message; returns the 64-byte signature.
 #### `verify(public_key_bytes: bytes, message: bytes, signature: bytes)`
 
 Verify a signature; False on any malformed input, never raises.
+
+### `evidence_tiers`
+
+Source: `components/northstar-agent-runtime/evidence_tiers.py`
+
+Binary evidence tiers + LOG_DROP policy (eighty-seventh batch).
+
+#### `EvidenceTier`
+
+Binary evidence tier. There is deliberately no middle rung.
+
+#### `EvidenceClassification`
+
+Outcome of classifying one audit window.
+
+#### `classify_evidence(*, authority: str, sealed: bool, complete: bool, has_drops: bool, chain_valid: bool)`
+
+Binary evidence classification — ALL conditions, no middle rung.
+
+#### `trust_assumptions()`
+
+Hardcoded trust-assumptions block. Not configurable.
+
+#### `classify_audit_window(events: Sequence[dict[str, Any]], *, genesis_hash: str)`
+
+Classify a window of audit records with the binary rule.
+
+#### `emit_log_drop(*, count: int, reason: str, seq_range_start: int, seq_range_end: int, session_id: str, seq: int, prev_hash: str, producer: str=PRODUCER_RUNTIME)`
+
+Build an explicit, sequenced, hash-linkable LOG_DROP record.
+
+#### `CompactionVerdict`
+
+Whether one audit record may be compacted away.
+
+#### `may_compact(event: dict[str, Any])`
+
+LOG_DROP *policy*: what may be compacted, and what may never be.
+
+#### `compaction_receipt(*, seq_range_start: int, seq_range_end: int, event_count: int, range_digest: str, session_id: str, seq: int, prev_hash: str)`
+
+Build the compaction receipt that makes a compaction accountable.
+
+#### `digest_compacted_range(chain_hashes: Sequence[str])`
+
+SHA-256 over the canonical concatenation of compacted chain hashes.
+
+#### `EvidenceGateResult`
+
+Outcome of the high-stakes evidence gate.
+
+#### `require_authoritative(classification: EvidenceClassification, risk_tier: str)`
+
+High-stakes decisions require AUTHORITATIVE evidence. Fail closed.
+
+#### `evidence_audit_event(*, kind: str, tier: EvidenceTier, detail: str, session_id: str, seq: int, prev_hash: str)`
+
+Anchor an evidence-tier decision into the audit chain.
 
 ### `tools`
 
