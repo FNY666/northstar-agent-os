@@ -112,6 +112,16 @@ class SessionIdTests(unittest.TestCase):
 
 
 class WriteTests(RuntimeTestCase):
+    def test_append_keeps_all_variable_length_jsonl_records(self):
+        store = SessionStore(self.workspace(), session_id="ns-append-integrity")
+        store.append("session_start", {"data": {"short": True}})
+        store.append("tool_result", {"content": [{"type": "tool_result", "content": "x" * 180, "is_error": False}]})
+        store.append("denial", {"tool": "Write", "reason": "r" * 130})
+        records, dropped = store.read()
+        self.assertEqual(dropped, 0)
+        self.assertEqual([record["type"] for record in records], ["session_start", "tool_result", "denial"])
+        self.assertEqual(records[1]["content"][0]["content"], "x" * 180)
+
     def test_every_append_is_one_line_and_fsynced(self):
         calls: list[int] = []
         root = self.workspace()

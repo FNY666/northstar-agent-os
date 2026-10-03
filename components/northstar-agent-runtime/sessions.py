@@ -76,6 +76,19 @@ def _open_regular_nofollow(path: Path, flags: int, mode: int = 0o600) -> int:
     try:
         if not stat.S_ISREG(os.fstat(fd).st_mode):
             raise SessionIntegrityError(f"{path.name}: transcript target is not a regular file")
+        # Some POSIX-like hosts clear O_APPEND when O_NONBLOCK is combined in
+        # os.open flags. O_NONBLOCK is needed to avoid hanging on a FIFO before
+        # fstat can reject it; restore append mode only after proving this fd is
+        # a regular file. This keeps the safe-open sequence and write invariant.
+        append = getattr(os, "O_APPEND", 0)
+        if append:
+            try:
+                import fcntl as _fcntl
+                current = _fcntl.fcntl(fd, _fcntl.F_GETFL)
+                if not current & append:
+                    _fcntl.fcntl(fd, _fcntl.F_SETFL, current | append)
+            except (ImportError, OSError) as error:
+                raise SessionIntegrityError(f"{path.name}: cannot verify append-only transcript writes: {error}") from error
         return fd
     except Exception:
         os.close(fd)
