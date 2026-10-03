@@ -6801,6 +6801,210 @@ def _case_metrics_pretrade_15c3_5(h: BenchHarness) -> BenchExpectation:
     )
 
 
+def _load_timelock_module():
+    """Import the timelock module from the sibling durable-run component.
+
+    Same rule as tests/support.load_durable: the path is appended, never
+    prepended, so the runtime's own modules win on any name collision, and
+    nothing in the runtime imports it at module load time (the runtime stays
+    importable with no durable checkout present).
+    """
+    import importlib
+
+    durable_dir = str(Path(__file__).resolve().parents[1] / "northstar-durable-run")
+    if durable_dir not in sys.path:
+        sys.path.append(durable_dir)
+    return importlib.import_module("timelock")
+
+
+def run_timelock() -> dict[str, Any]:
+    """Timelock-delayed execution, OpenZeppelin TimelockController semantics.
+
+    Seven deterministic scenarios against the real state machine (schedule
+    → waiting → ready → done, cancellable while pending): executing inside
+    the delay is blocked, executing after cancel is blocked, tampered
+    parameters are discovered (digest binding, the ``hashOperation``
+    analog), a too-short delay is refused, and the happy path executes
+    exactly once. All state transitions land in the audit sink.
+
+    Pure and deterministic: injected integer time, no runtime, no network,
+    no model. Measures the irreversible tier's *delay enforcement*, NOT
+    any on-chain behavior (OZ's TimelockController proper runs on Ethereum
+    with block.timestamp and role-based access control).
+    """
+    timelock_mod = _load_timelock_module()
+    digest_a = "sha256:" + "a" * 64
+    digest_b = "sha256:" + "b" * 64
+    events: list[dict[str, Any]] = []
+    clock = timelock_mod.Timelock(min_delay_s=300, audit=events.append)
+
+    def blocked(fn, label):
+        try:
+            fn()
+        except ValueError:
+            return (label, True)
+        return (label, False)
+
+    outcomes: dict[str, bool] = {}
+
+    # 1. Executing inside the delay is blocked.
+    op1 = clock.schedule(
+        tool_name="workspace.purge", arguments_digest=digest_a,
+        call_ref="step-1", delay_s=3600, now=1_000, nonce="bench-1",
+    )
+    label, ok = blocked(
+        lambda: clock.authorize_execute(
+            op1.operation_id, tool_name="workspace.purge",
+            arguments_digest=digest_a, now=1_001,
+        ),
+        "early_execute_blocked",
+    )
+    outcomes[label] = ok
+
+    # 2. Cancelling while ready blocks the later execute.
+    op2 = clock.schedule(
+        tool_name="workspace.purge", arguments_digest=digest_a,
+        call_ref="step-2", delay_s=3600, now=1_000, nonce="bench-2",
+    )
+    clock.cancel(op2.operation_id, now=5_000, cancelled_by="host-1")
+    label, ok = blocked(
+        lambda: clock.authorize_execute(
+            op2.operation_id, tool_name="workspace.purge",
+            arguments_digest=digest_a, now=5_001,
+        ),
+        "cancel_blocks_execute",
+    )
+    outcomes[label] = ok
+
+    # 3. Tampered parameters are discovered via the digest binding.
+    op3 = clock.schedule(
+        tool_name="workspace.purge", arguments_digest=digest_a,
+        call_ref="step-3", delay_s=3600, now=1_000, nonce="bench-3",
+    )
+    label, ok = blocked(
+        lambda: clock.authorize_execute(
+            op3.operation_id, tool_name="workspace.purge",
+            arguments_digest=digest_b, now=4_600,
+        ),
+        "tampered_arguments_blocked",
+    )
+    outcomes[label] = ok
+
+    # 4. Wrong tool name is discovered via the binding.
+    label, ok = blocked(
+        lambda: clock.authorize_execute(
+            op3.operation_id, tool_name="workspace.other",
+            arguments_digest=digest_a, now=4_600,
+        ),
+        "wrong_tool_blocked",
+    )
+    outcomes[label] = ok
+
+    # 5. Happy path: ready executes exactly once.
+    clock.authorize_execute(
+        op3.operation_id, tool_name="workspace.purge",
+        arguments_digest=digest_a, now=4_600,
+    )
+    clock.mark_executed(op3.operation_id, now=4_601)
+    label, ok = blocked(
+        lambda: clock.authorize_execute(
+            op3.operation_id, tool_name="workspace.purge",
+            arguments_digest=digest_a, now=4_602,
+        ),
+        "replay_after_done_blocked",
+    )
+    outcomes[label] = ok
+    outcomes["happy_path_executed"] = (
+        clock.state(op3.operation_id, now=4_603)
+        == timelock_mod.OPERATION_DONE
+    )
+
+    # 6. A delay below the minimum is refused at schedule time.
+    label, ok = blocked(
+        lambda: clock.schedule(
+            tool_name="workspace.purge", arguments_digest=digest_a,
+            call_ref="step-6", delay_s=299, now=1_000, nonce="bench-6",
+        ),
+        "short_delay_refused",
+    )
+    outcomes[label] = ok
+
+    # 7. A cancelled operation id can never be re-scheduled.
+    label, ok = blocked(
+        lambda: clock.schedule(
+            tool_name="workspace.purge", arguments_digest=digest_a,
+            call_ref="step-2", delay_s=3600, now=6_000, nonce="bench-2",
+        ),
+        "cancelled_id_reschedule_blocked",
+    )
+    outcomes[label] = ok
+
+    return {
+        "n_scenarios": len(outcomes),
+        "outcomes": outcomes,
+        "all_blocked": all(outcomes.values()),
+        "audit_event_types": [event["event_type"] for event in events],
+        "n_audit_events": len(events),
+        "min_delay_s": clock.min_delay_s,
+    }
+
+
+def _case_metrics_timelock_delayed_execution(h: BenchHarness) -> BenchExpectation:
+    """Timelock-delayed execution for the irreversible tier (OZ semantics)."""
+    metrics = run_timelock()
+
+    def check(exp: BenchExpectation, report: Any) -> tuple[bool, str]:
+        if metrics["n_scenarios"] != 8:
+            return (False, f"expected 8 timelock scenarios, saw {metrics['n_scenarios']}")
+        expected_outcomes = {
+            "early_execute_blocked": True,
+            "cancel_blocks_execute": True,
+            "tampered_arguments_blocked": True,
+            "wrong_tool_blocked": True,
+            "replay_after_done_blocked": True,
+            "happy_path_executed": True,
+            "short_delay_refused": True,
+            "cancelled_id_reschedule_blocked": True,
+        }
+        if metrics["outcomes"] != expected_outcomes:
+            return (
+                False,
+                f"timelock outcomes drifted: {metrics['outcomes']}",
+            )
+        if metrics["audit_event_types"] != [
+            "timelock.scheduled",
+            "timelock.scheduled",
+            "timelock.cancelled",
+            "timelock.scheduled",
+            "timelock.executed",
+        ]:
+            return (
+                False,
+                f"timelock audit trail changed: {metrics['audit_event_types']}",
+            )
+        return (
+            True,
+            "8/8 scenarios hold: early execute blocked, cancel blocks "
+            "execute, tampered arguments discovered, wrong tool discovered, "
+            "happy path executes exactly once, short delay refused, "
+            "cancelled id never re-scheduled; 5 audit events chained",
+        )
+
+    return BenchExpectation(
+        runtime=_noop_runtime(h),
+        expect_subtype="success",
+        post_check=check,
+        metrics=metrics,
+        notes=(
+            "OpenZeppelin TimelockController semantics "
+            "(contracts/governance/TimelockController.sol, MIT), honestly "
+            "scoped: the deterministic state machine (injected integer "
+            "time, persistent cancelled state, digest-bound operation id) — "
+            "NOT on-chain execution with block.timestamp and roles."
+        ),
+    )
+
+
 CASES: tuple[BenchCase, ...] = (
     BenchCase("denial.disallowed_beats_allow", "denial", "disallowed_tools beats allow + bypass", _case_disallowed_beats_allow),
     BenchCase("denial.plan_mode_blocks_write", "denial", "plan mode refuses Write", _case_plan_mode_blocks_write),
@@ -6844,6 +7048,7 @@ CASES: tuple[BenchCase, ...] = (
     BenchCase("metrics.least_privilege", "metrics", "least-privilege gate enforcement (OPUR-style)", _case_metrics_least_privilege),
     BenchCase("metrics.approval_percall_binding", "metrics", "per-call approval binding + structured denial", _case_metrics_approval_percall_binding),
     BenchCase("metrics.ask_timing", "metrics", "ASK-timing judgment (Ask-F1-style)", _case_metrics_ask_timing),
+    BenchCase("metrics.timelock_delayed_execution", "metrics", "timelock-delayed execution for the irreversible tier", _case_metrics_timelock_delayed_execution),
     BenchCase("metrics.pretrade_15c3_5", "metrics", "SEC 15c3-5 pre-trade risk semantics (price/size/rate/duplicates)", _case_metrics_pretrade_15c3_5),
     BenchCase("metrics.path_shim_detection", "metrics", "PATH-shim red-team: fabricated tool output is detected", _case_metrics_path_shim_detection),
     BenchCase("metrics.attenuation", "metrics", "attenuating delegation credentials (biscuit-style)", _case_metrics_attenuation),
@@ -7382,6 +7587,14 @@ def _print_report(report: BenchReport) -> None:
                 f"{pretrade.get('audit_records', 0)} synchronous audit records, "
                 f"conditions: {', '.join(pretrade.get('conditions_seen', []))}"
             )
+        timelock = report.metrics.get("metrics.timelock_delayed_execution", {})
+        if timelock:
+            print(
+                f"  timelock delayed execution: "
+                f"{sum(1 for v in timelock.get('outcomes', {}).values() if v)}/"
+                f"{timelock.get('n_scenarios', 0)} scenarios hold, "
+                f"{timelock.get('n_audit_events', 0)} audit events"
+            )
     if report.ok:
         print("result: PASS — gate decisions match the public scorecard")
     else:
@@ -7412,6 +7625,7 @@ __all__ = [
     "run_attenuation",
     "run_path_shim_detection",
     "run_pretrade_15c3_5",
+    "run_timelock",
     "run_bench_command",
     "run_consent_ablation",
     "run_decision_model",

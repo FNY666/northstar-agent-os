@@ -32,6 +32,7 @@ from tool_allowlist import (
     ToolAllowlist,
     make_enforcement_event,
 )
+from timelock import Timelock
 
 TOOL_CALL_SCHEMA_VERSION = "northstar.tool-call.v1"
 #: v3 binds the approval to the exact approved call identity: v2 approvals
@@ -465,6 +466,7 @@ class ToolSpec:
     risk_level: str
     executor: Callable[[dict[str, Any]], dict[str, Any]]
     binary_pin: BinaryPin | None = None
+    irreversible: bool = False
 
     def __post_init__(self) -> None:
         _require_id(self.name, "tool name")
@@ -478,6 +480,15 @@ class ToolSpec:
             raise ValueError("executor must be callable")
         if self.binary_pin is not None and not isinstance(self.binary_pin, BinaryPin):
             raise ValueError("binary_pin must be a BinaryPin or None")
+        if not isinstance(self.irreversible, bool):
+            raise ValueError("irreversible must be a boolean")
+        if self.irreversible and self.risk_level != "high":
+            # The irreversible tier sits above high-risk: the operation is
+            # scheduled (parameters hash-bound), waits out the timelock
+            # delay, and only then executes — cancellable by the host while
+            # pending. It always needs the human approval that high-risk
+            # requires, plus the delay.
+            raise ValueError("irreversible tools must be high-risk")
 
 
 @dataclass(frozen=True)
@@ -515,6 +526,13 @@ class ActionGateway:
     needs an unexpired approval. If both tiers fill with unexpired keys the
     gateway refuses new executions rather than risk a double execution.
 
+    Tools registered with ``irreversible=True`` form the irreversible tier
+    (always high-risk): ``execute`` additionally requires a timelock
+    operation id whose scheduled operation is ready — i.e. the operation
+    was scheduled with its parameter digest bound, the delay elapsed, and
+    the host did not cancel it meanwhile (see ``timelock.py``, absorbed
+    from OpenZeppelin ``TimelockController``).
+
     Not thread-safe: drive one call at a time per instance.
     """
 
@@ -526,6 +544,7 @@ class ActionGateway:
         max_tombstones: int = 8192,
         tool_allowlist: ToolAllowlist | None = None,
         enforcement_failure_policy: str = "fail_closed",
+        timelock: Timelock | None = None,
     ):
         _require_secret(approval_secret)
         self._approval_secret = approval_secret
@@ -548,6 +567,9 @@ class ActionGateway:
         )
         self._enforcement_trace: list[dict[str, Any]] = []
         self._enforcement_seq = 0
+        if timelock is not None and not isinstance(timelock, Timelock):
+            raise ValueError("timelock must be a Timelock or None")
+        self._timelock = timelock
         self._tools: dict[str, ToolSpec] = {}
         self._results: OrderedDict[str, tuple[str, ToolExecutionResult, int]] = (
             OrderedDict()
@@ -642,6 +664,7 @@ class ActionGateway:
         approval_token: str | None = None,
         current_policy_revision: str,
         run: dict[str, Any] | None = None,
+        timelock_operation_id: str | None = None,
     ) -> ToolExecutionResult:
         if not isinstance(call, ToolCall):
             raise ValueError("tool call is invalid")
@@ -765,6 +788,25 @@ class ActionGateway:
                 raise ValueError(
                     f"tool allowlist denied execution: {decision.reason}"
                 )
+        # Genuine miss: for the irreversible tier the timelock must be ready
+        # before any side effect can happen. The check runs after the
+        # idempotency lookups on purpose: a same-key replay returns the
+        # cached result without re-executing (and without touching the
+        # timelock), while a new key for an already-executed operation fails
+        # here because the operation is done, not ready — closing a
+        # double-execution hole. A failed executor leaves the operation
+        # ready (retryable); only a successful one is marked executed below.
+        if spec.irreversible:
+            if self._timelock is None:
+                raise ValueError("irreversible tool requires a configured timelock")
+            if timelock_operation_id is None:
+                raise ValueError("irreversible tool requires a timelock operation id")
+            self._timelock.authorize_execute(
+                timelock_operation_id,
+                tool_name=call.tool_name,
+                arguments_digest=call.arguments_digest,
+                now=now,
+            )
 
         # Genuine miss: reserve the slot before invoking the executor, so a
         # full store fails closed here instead of after a side effect.
@@ -788,6 +830,10 @@ class ActionGateway:
             raise ValueError("tool execution failed") from error
         if not isinstance(output, dict):
             raise ValueError("tool executor must return an object")
+        if spec.irreversible:
+            # The _afterCall analog: mark done only after a successful
+            # executor, re-checking readiness.
+            self._timelock.mark_executed(timelock_operation_id, now=now)
         result = ToolExecutionResult(
             status="ok",
             output=output,
