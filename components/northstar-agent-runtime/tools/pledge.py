@@ -403,6 +403,9 @@ _lib.syscall.restype = _c.c_long
 def _die(msg):
     _o.write(2, ("northstar pledge: " + msg + "\n").encode())
     _o._exit(126)
+# Set NNP before the unprivileged Landlock restriction (not merely before seccomp).
+if _lib.prctl(38, 1, 0, 0, 0) != 0:
+    _die("PR_SET_NO_NEW_PRIVS failed")
 # 1. Landlock: build ruleset, add PATH_BENEATH rules, restrict self.
 _attr = _t.pack("QQQ", 0x1FFF, 0, 0)
 _buf = _c.create_string_buffer(_attr)
