@@ -882,6 +882,10 @@ No-self-attestation: the proposer is never its own approver.
 
 TEE attestation as receipt evidence (ninety-second batch).
 
+#### `run_process_receipts()`
+
+Process-evidence receipts (ninety-eighth batch).
+
 #### `run_adversarial_scenarios()`
 
 Adversarial bench scenarios: multi-agent failures, no-adversary failures, malicious-but-signed.
@@ -2180,6 +2184,48 @@ Deterministic audit record for a bundle verification.
 #### `run_offline_bundle()`
 
 Deterministic offline-bundle probe corpus (bench support).
+
+### `process_receipts`
+
+Source: `components/northstar-agent-runtime/process_receipts.py`
+
+Process-evidence receipts (ninety-eighth batch).
+
+#### `ProcessReceiptError`
+
+A malformed process receipt or a programming error.
+
+#### `ProcessStep`
+
+One production step. ``tool_receipt_id`` is required for ``tool_call`` steps and must be absent (None) for all other kinds.
+
+#### `ProcessReceipt`
+
+Hash-chained production-process log for one artifact.
+
+#### `ProcessVerdict`
+
+Outcome of :func:`verify_process`.
+
+#### `compute_step_digest(*, seq: int, step_kind: str, input_digest: str, output_digest: str, actor: str, timestamp: int, tool_receipt_id: str | None, prev_digest: str)`
+
+Compute the chain digest for one step (public so builders and verifiers share exactly one implementation).
+
+#### `build_receipt(*, artifact_digest: str, seed_digest: str, steps: list[Mapping[str, Any]])`
+
+Assemble a :class:`ProcessReceipt` from raw step dicts, computing the chain digests. Raises :class:`ProcessReceiptError` on malformed input.
+
+#### `verify_process(receipt: Mapping[str, Any] | ProcessReceipt, *, tool_receipt_lookup: Callable[[str], Mapping[str, Any] | None] | None=None, require_human_checkpoint: bool=False)`
+
+Replay a process receipt's chain and verify every rule.
+
+#### `classify_process(receipt: Mapping[str, Any] | ProcessReceipt | None, *, tool_receipt_lookup: Callable[[str], Mapping[str, Any] | None] | None=None, require_human_checkpoint: bool=False)`
+
+Binary tier for policy (the 87th batch's stance, ported).
+
+#### `process_receipt_audit_event(receipt: ProcessReceipt, verdict: ProcessVerdict, *, policy: str='')`
+
+Build an ``audit.ndjson/1``-shaped record for a process-receipt verdict (mirrors the 94th batch's ``self_attestation_denied_event`` pattern).
 
 ### `twin_receipts`
 
