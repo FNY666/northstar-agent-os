@@ -506,7 +506,7 @@ Temp workspaces + scripted providers for one suite run.
 - `close()`
 - `workspace(files: dict[str, str] | None=None)`
 - `provider(turns: Sequence[Any], **kwargs: Any)`
-- `runtime(*, workspace: Path, turns: Sequence[Any], config_kwargs: dict[str, Any] | None=None, tool_limits: ToolLimits | None=None, can_use_tool: Any=None)`
+- `runtime(*, workspace: Path, turns: Sequence[Any], config_kwargs: dict[str, Any] | None=None, tool_limits: ToolLimits | None=None, can_use_tool: Any=None, hooks: HookRegistry | None=None, sessions: Any=None)`
 #### `list_cases()`
 
 #### `run_suite(*, only: Iterable[str] | None=None, tracks: Iterable[str] | None=None)`
