@@ -1,3 +1,14 @@
+## Unreleased (eightieth batch) — three-posture control decomposition
+
+Absorbs the FinAgent red-team methodology (none / advisory / enforced):
+every scenario is replayed in three postures — none (no policy declared,
+measures inherent susceptibility), advisory (policy declared but not
+enforced, measures policy-following uplift), enforced (hard block, measures
+residual risk). Deterministic state predicates (no LLM judge) score each
+replay; the bench re-runs predicates on stored traces and fails on any
+disagreement. Decomposition: policy-following uplift, enforcement uplift,
+residual ASR, utility, over-refusal.
+
 ## Unreleased (seventy-ninth batch) — RFC 9162 Merkle proofs for audit
 
 `audit verify` goes from O(n) to O(log n): strict RFC 9162 §2.1 Merkle tree
