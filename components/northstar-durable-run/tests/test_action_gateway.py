@@ -123,7 +123,7 @@ class ActionGatewayTests(unittest.TestCase):
     def approval_for(self, run, call, *, decision="approved", expires_at=2_000):
         return sign_approval(
             {
-                "schema_version": "northstar.approval.v2",
+                "schema_version": "northstar.approval.v3",
                 "approval_id": "approval-001",
                 "approver_id": "human-001",
                 "task_id": call.task_id,
@@ -134,6 +134,7 @@ class ActionGatewayTests(unittest.TestCase):
                 "tool_name": call.tool_name,
                 "resource_id": call.resource_id,
                 "arguments_digest": call.arguments_digest,
+                "idempotency_key": call.idempotency_key,
                 "decision": decision,
                 "expires_at": expires_at,
             },
@@ -223,6 +224,258 @@ class ActionGatewayTests(unittest.TestCase):
                 run=run,
             )
         self.assertIn("arguments_digest", str(raised.exception))
+        self.assertEqual(self.invocations, [])
+
+    def test_approval_cannot_authorize_a_second_execution_under_a_new_key(self):
+        # The approval binds the idempotency key: reusing one approval token
+        # for the same step+tool+arguments under a fresh idempotency key must
+        # be refused, so the executor runs at most once per approval.
+        run = valid_run("workspace:write")
+        arguments = {"path": "src/main.py", "content": "fixed"}
+        call = call_for(
+            run,
+            tool_name="workspace.write_file",
+            args=arguments,
+            scope=["workspace:write"],
+        )
+        approval = self.approval_for(run, call)
+        token = auth_token(run)
+        first = self.gateway.execute(
+            call,
+            arguments,
+            authorization_token=token,
+            authorization_secret=AUTH_SECRET,
+            current_policy_revision="policy-1",
+            approval_token=approval,
+            now=1_001,
+            run=run,
+        )
+        self.assertEqual(first.status, "ok")
+        second_call = call_for(
+            run,
+            tool_name="workspace.write_file",
+            args=arguments,
+            scope=["workspace:write"],
+        )
+        object.__setattr__(second_call, "idempotency_key", "call-002")
+        with self.assertRaises(ValueError) as raised:
+            self.gateway.execute(
+                second_call,
+                arguments,
+                authorization_token=token,
+                authorization_secret=AUTH_SECRET,
+                current_policy_revision="policy-1",
+                approval_token=approval,
+                now=1_001,
+                run=run,
+            )
+        self.assertIn("idempotency_key", str(raised.exception))
+        self.assertEqual(len(self.invocations), 1)
+
+    def test_approval_replay_with_same_key_returns_cached_result(self):
+        # Re-presenting the same approval for the identical call identity
+        # must not invoke the executor again: the idempotency cache serves
+        # the first result.
+        run = valid_run("workspace:write")
+        arguments = {"path": "src/main.py", "content": "fixed"}
+        call = call_for(
+            run,
+            tool_name="workspace.write_file",
+            args=arguments,
+            scope=["workspace:write"],
+        )
+        approval = self.approval_for(run, call)
+        token = auth_token(run)
+        first = self.gateway.execute(
+            call,
+            arguments,
+            authorization_token=token,
+            authorization_secret=AUTH_SECRET,
+            current_policy_revision="policy-1",
+            approval_token=approval,
+            now=1_001,
+            run=run,
+        )
+        second = self.gateway.execute(
+            call,
+            arguments,
+            authorization_token=token,
+            authorization_secret=AUTH_SECRET,
+            current_policy_revision="policy-1",
+            approval_token=approval,
+            now=1_002,
+            run=run,
+        )
+        self.assertEqual(first, second)
+        self.assertEqual(len(self.invocations), 1)
+
+    def test_approval_is_bound_to_run_thread_task_step_and_actor(self):
+        # An approval minted for one call identity cannot be replayed into a
+        # different run, thread, task, step, or actor, even with identical
+        # tool name and arguments.
+        run = valid_run("workspace:write")
+        arguments = {"path": "src/main.py", "content": "fixed"}
+        call = call_for(
+            run,
+            tool_name="workspace.write_file",
+            args=arguments,
+            scope=["workspace:write"],
+        )
+        approval = self.approval_for(run, call)
+        token = auth_token(run)
+
+        other_run = valid_run("workspace:write")
+        other_run["run_id"] = "run-002"
+        cross_run = call_for(
+            other_run,
+            tool_name="workspace.write_file",
+            args=arguments,
+            scope=["workspace:write"],
+        )
+        with self.assertRaises(ValueError) as raised:
+            self.gateway.execute(
+                cross_run,
+                arguments,
+                authorization_token=auth_token(other_run),
+                authorization_secret=AUTH_SECRET,
+                current_policy_revision="policy-1",
+                approval_token=approval,
+                now=1_001,
+                run=other_run,
+            )
+        self.assertIn("run_id", str(raised.exception))
+
+        for field, value, expected in (
+            ("thread_id", "thread-002", "thread_id"),
+            ("task_id", "task-002", "task_id"),
+            ("step_id", "other-step", "step_id"),
+        ):
+            altered = call_for(
+                run,
+                tool_name="workspace.write_file",
+                args=arguments,
+                scope=["workspace:write"],
+            )
+            object.__setattr__(altered, field, value)
+            object.__setattr__(altered, "idempotency_key", f"call-{value}")
+            with self.subTest(field=field):
+                with self.assertRaises(ValueError) as raised:
+                    self.gateway.execute(
+                        altered,
+                        arguments,
+                        authorization_token=token,
+                        authorization_secret=AUTH_SECRET,
+                        current_policy_revision="policy-1",
+                        approval_token=approval,
+                        now=1_001,
+                        run=run,
+                    )
+                self.assertIn(expected, str(raised.exception))
+        self.assertEqual(self.invocations, [])
+
+    def test_tool_upgraded_from_low_to_high_risk_requires_approval(self):
+        # Risk level is a host registration-time decision. A tool that used to
+        # run without approval fails closed once re-registered as high-risk;
+        # within one gateway the spec cannot be silently downgraded either.
+        run = valid_run("workspace:write")
+        arguments = {"path": "src/main.py", "content": "fixed"}
+        call = call_for(
+            run,
+            tool_name="workspace.write_file",
+            args=arguments,
+            scope=["workspace:write"],
+        )
+        low_gateway = ActionGateway(approval_secret=APPROVAL_SECRET)
+        low_gateway.register(
+            ToolSpec(
+                name="workspace.write_file",
+                required_capability="workspace:write",
+                required_scope="workspace:write",
+                resource_kind="workspace",
+                risk_level="low",
+                executor=self.write_file,
+            )
+        )
+        low_gateway.execute(
+            call,
+            arguments,
+            authorization_token=auth_token(run),
+            authorization_secret=AUTH_SECRET,
+            current_policy_revision="policy-1",
+            now=1_001,
+            run=run,
+        )
+        with self.assertRaises(ValueError) as raised:
+            self.gateway.execute(
+                call,
+                arguments,
+                authorization_token=auth_token(run),
+                authorization_secret=AUTH_SECRET,
+                current_policy_revision="policy-1",
+                now=1_001,
+                run=run,
+            )
+        self.assertIn("requires approval", str(raised.exception))
+        with self.assertRaises(ValueError):
+            self.gateway.register(
+                ToolSpec(
+                    name="workspace.write_file",
+                    required_capability="workspace:write",
+                    required_scope="workspace:write",
+                    resource_kind="workspace",
+                    risk_level="low",
+                    executor=self.write_file,
+                )
+            )
+
+    def test_tampered_and_wrong_secret_approvals_are_rejected(self):
+        # Without the approval secret, an approval cannot be forged: flipping
+        # payload bits or signing with another secret both fail the HMAC.
+        run = valid_run("workspace:write")
+        arguments = {"path": "src/main.py", "content": "fixed"}
+        call = call_for(
+            run,
+            tool_name="workspace.write_file",
+            args=arguments,
+            scope=["workspace:write"],
+        )
+        token = auth_token(run)
+        good = self.approval_for(run, call)
+        payload, signature = good.split(".")
+        tampered = ("A" if payload[0] != "A" else "B") + payload[1:] + "." + signature
+        forged = sign_approval(
+            {
+                "schema_version": "northstar.approval.v3",
+                "approval_id": "approval-001",
+                "approver_id": "human-001",
+                "task_id": call.task_id,
+                "thread_id": call.thread_id,
+                "run_id": run["run_id"],
+                "step_id": call.step_id,
+                "actor_id": run["actor_id"],
+                "tool_name": call.tool_name,
+                "resource_id": call.resource_id,
+                "arguments_digest": call.arguments_digest,
+                "idempotency_key": call.idempotency_key,
+                "decision": "approved",
+                "expires_at": 2_000,
+            },
+            b"wrong-secret",
+        )
+        for bad in (tampered, forged):
+            with self.subTest(bad=bad[:16]):
+                with self.assertRaises(ValueError) as raised:
+                    self.gateway.execute(
+                        call,
+                        arguments,
+                        authorization_token=token,
+                        authorization_secret=AUTH_SECRET,
+                        current_policy_revision="policy-1",
+                        approval_token=bad,
+                        now=1_001,
+                        run=run,
+                    )
+                self.assertIn("signature is invalid", str(raised.exception))
         self.assertEqual(self.invocations, [])
 
     def test_identity_resource_scope_and_arguments_digest_are_bound(self):

@@ -18,6 +18,26 @@ the contract's own validator and asserts byte-identical canonical lines.
 **Verification:** runtime 1395/1395 and run-evidence 51/51 green; full
 clinic below.
 
+## Unreleased (thirty-eighth batch) — bind approvals to the exact call identity
+
+A residual replay proof showed the gap left by v2: a `northstar.approval.v2`
+token pinned the arguments digest but not the idempotency key, so one
+approval token could authorize the same payload to execute again under a
+fresh idempotency key — the executor ran twice on the same approval. The
+approval schema is now `northstar.approval.v3` with a required
+`idempotency_key`, checked against the ToolCall before any high-risk
+execution. A replay under a new key is refused; a replay under the same key
+hits the idempotency cache, so the executor runs at most once per approval.
+The same audit proved the remaining vectors closed: cross run/thread/task/
+step/actor replay is refused (all bound), a tool upgraded from low to
+high risk fails closed without an approval, no parameter path skips the
+high-risk approval gate, and approvals cannot be forged without the
+approval secret (HMAC-SHA256, constant-time compare). Five new regression
+tests pin the single-execution binding, the cross-identity refusals, the
+risk-upgrade fail-closed behavior, and the forgery rejections.
+
+**Verification:** 80/80 durable-run tests green; component-only scope below.
+
 ## Unreleased (thirty-sixth batch) — bind approvals to the exact arguments
 
 A local replay proof showed the gap: a `northstar.approval.v1` token pinned

@@ -21,10 +21,14 @@ from authorization import verify_authorization
 from contract import _valid_id, validate_run_request
 
 TOOL_CALL_SCHEMA_VERSION = "northstar.tool-call.v1"
-#: v2 binds the approval to the exact approved arguments: v1 approvals pinned
-#: the call identity but not the payload, so an approval could be replayed
-#: for the same step+tool with different arguments.
-APPROVAL_SCHEMA_VERSION = "northstar.approval.v2"
+#: v3 binds the approval to the exact approved call identity: v2 approvals
+#: pinned the arguments but not the idempotency key, so one approval token
+#: could authorize the same payload to execute again under a new
+#: idempotency key (the executor ran twice). v3 ties the token to the
+#: single call identity; a replay with a different key is refused, and a
+#: replay with the same key hits the idempotency cache, so the executor
+#: runs at most once per approval.
+APPROVAL_SCHEMA_VERSION = "northstar.approval.v3"
 _ID_RE = re.compile(r"^[^\s/\\]+$")
 _SCOPE_RE = re.compile(r"^[^\s/\\:]+:[^\s/\\:]+$")
 _DIGEST_RE = re.compile(r"^sha256:[0-9a-f]{64}$")
@@ -59,6 +63,7 @@ _APPROVAL_FIELDS = {
     "tool_name",
     "resource_id",
     "arguments_digest",
+    "idempotency_key",
     "decision",
     "expires_at",
 }
@@ -150,6 +155,7 @@ def _validate_approval(value: Any) -> tuple[str, ...]:
         "actor_id",
         "tool_name",
         "resource_id",
+        "idempotency_key",
     ):
         errors.extend(_valid_id(value.get(field), field))
     if value.get("decision") not in {"approved", "denied"}:
@@ -401,6 +407,7 @@ class ActionGateway:
                 "tool_name",
                 "resource_id",
                 "arguments_digest",
+                "idempotency_key",
             ):
                 if approval[field] != getattr(call, field):
                     raise ValueError(f"approval does not match tool call {field}")
