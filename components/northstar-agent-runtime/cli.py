@@ -59,6 +59,7 @@ from session_view import add_arguments as add_session_arguments
 from audit_cli import add_audit_arguments
 from plugin_load import add_plugin_arguments
 from mcp_config import add_mcp_arguments
+from mcp_admission import add_admission_arguments
 from skill_check import add_skills_arguments
 from governance_bench import add_bench_arguments
 from run_setup import (  # noqa: F401 - MUTATING_TOOLS and checkpoint_usage stay importable from cli
@@ -207,7 +208,8 @@ def build_parser() -> argparse.ArgumentParser:
         "mcp",
         help="inspect the MCP servers this workspace declares (read-only; a run needs --mcp-config to start them)",
     )
-    add_mcp_arguments(mcp)
+    mcp_actions = add_mcp_arguments(mcp)
+    add_admission_arguments(mcp_actions)
     skills = sub.add_parser("skills", help="review the workspace's Agent Skills (supply-chain check, read-only)")
     add_skills_arguments(skills)
     plugins = sub.add_parser(
