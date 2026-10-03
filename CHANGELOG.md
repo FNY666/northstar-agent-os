@@ -1,3 +1,28 @@
+## Unreleased (one-hundred-thirty-sixth batch) — permit & planning discipline (AI-urban-planning absorption)
+
+New module `permit_agents.py`: `precheck_advisory_gate()` — AI
+permit pre-checks are advisory-only (the outcome vocabulary has no
+issue/deny); a permit issued on AI say-so alone is
+`permit:unhuman_reviewed` (CivCheck/Clariti lesson: pre-check + human
+final review, never AI-issued). `final_human_signoff()` — a named
+human must countersign every decision; vague reasons ("model
+output", "ai decision") raise at issuance (UK Procurement Act
+accountability lesson). `code_version_pin()` — the code version is
+pinned at review time; citing superseded code degrades to
+NON_AUTHORITATIVE. `normative_source_receipt()` — every AI
+recommendation binds its code citation (Toronto/REVI lesson);
+uncited → `permit:uncited_recommendation`. `disparate_impact_probe()`
+— flag-rate disparity above 2x across neighborhoods/income bands
+triggers `permit:disparate_impact_audit`. `appeal_window_gate()` —
+every auto-influenced decision binds an appeal path with a real
+human reviewer; none → `permit:no_appeal` (SafeRent lesson).
+`automation_bias_clock()` — an override rate at or below 0.02 (or
+too few observations) requires an audit (EU AI Act Art. 14 lesson).
+`vendor_cost_receipt()` — vendor contracts bind a declared 5-year
+total cost *and* exit assistance. Honest scoping: receipts bind
+declared review discipline; they don't make planning fair. Bench
+track `metrics.permit_agents`: 12 scenarios, 4 allow / 8 deny.
+
 ## Unreleased (one-hundred-thirty-fourth batch) — orbital safety receipts (AI-space absorption)
 
 New module `orbital_agents.py`: `conjunction_receipt()` — authority-signed

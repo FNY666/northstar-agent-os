@@ -17250,6 +17250,62 @@ def _case_metrics_telecom_agents(h: BenchHarness) -> BenchExpectation:
         ),
     )
 
+def _case_metrics_permit_agents(h: BenchHarness) -> BenchExpectation:
+    """Permit & planning discipline gates (one-hundred-thirty-sixth batch).
+
+    12 deterministic scenarios, 4 allow / 8 deny: an advisory-only
+    pre-check passes; a decision with a valid named-human countersign
+    passes; a recommendation binding a signed citation to a current
+    code pin passes; a vendor contract with declared 5-year cost and
+    exit assistance passes. Denied: a permit issued on AI say-so
+    alone (``permit:unhuman_reviewed``), a decision with no human
+    countersign (``permit:no_human_countersign``), a citation of a
+    superseded code version (``permit:code_superseded``), a
+    recommendation with no bound citation (``permit:uncited_recommendation``),
+    a flag-rate probe showing >2x disparity (``permit:disparate_impact_audit``),
+    a decision with no appeal path (``permit:no_appeal``), an
+    override window with a zero override rate
+    (``permit:automation_bias_audit``), and an undeclared exit
+    assistance clause (``permit:vendor_cost_undeclared``).
+    """
+    metrics = run_permit_agents()
+
+    def check(exp: BenchExpectation, report: Any) -> tuple[bool, str]:
+        if metrics["n_scenarios"] != 12:
+            return (False, f"expected 12 permit scenarios, saw {metrics['n_scenarios']}")
+        if metrics["mismatches"]:
+            return (False, f"scenario(s) disagree with ground truth: {metrics['mismatches']}")
+        if metrics["allowed_ids"] != [
+            "allow_advisory_precheck",
+            "allow_signed_countersign",
+            "allow_cited_recommendation",
+            "allow_declared_vendor_cost",
+        ]:
+            return (False, f"allowed set drifted: {metrics['allowed_ids']}")
+        reasons = metrics["denial_reasons"]
+        for sid, needle in (
+            ("deny_unhuman_reviewed", "unhuman_reviewed"),
+            ("deny_no_countersign", "no_human_countersign"),
+            ("deny_superseded_code", "code_superseded"),
+            ("deny_uncited", "uncited_recommendation"),
+            ("deny_disparate_impact", "disparate_impact_audit"),
+            ("deny_no_appeal", "no_appeal"),
+            ("deny_automation_bias", "automation_bias_audit"),
+            ("deny_undeclared_exit", "vendor_cost_undeclared"),
+        ):
+            if needle not in reasons.get(sid, ""):
+                return (False, f"denial reason missing {needle!r}: {reasons.get(sid, '')!r}")
+        return True, "12/12 permit probes match ground truth"
+
+    return BenchExpectation(
+        runtime=_noop_runtime(h),
+        expect_subtype="success",
+        post_check=check,
+        metrics=metrics,
+        notes="permit & planning discipline: advisory-only pre-check, human countersigns, code pins, cited recommendations, disparity probes, appeal paths, automation-bias clock, vendor cost receipts",
+    )
+
+
 def _case_metrics_water_agents(h: BenchHarness) -> BenchExpectation:
     """Water-infrastructure defense gates (one-hundred-thirty-first batch).
 
@@ -19796,6 +19852,7 @@ CASES: tuple[BenchCase, ...] = (
     BenchCase("metrics.greenwash", "metrics", "greenwashing evidence gates: recycled-content receipts with bound measurement evidence, mass-balance attribution-method gates, claim evidence chains (ECGT), sorting-purity binding, second-life battery inspection gates, routed datacenter decommissioning, marketing-claim probe", _case_metrics_greenwash),
     BenchCase("metrics.orbital_agents", "metrics", "orbital safety receipts: conjunction-warning pins with warning-fatigue tripwire, Δv authorization envelopes, STM freshness+uncertainty binding, dual-use RPO gate, debris budgets, pinned onboard autonomy boundaries, counterspace declarations, liability pins (AI-space absorption)", _case_metrics_orbital_agents),
     BenchCase("metrics.forest_fish", "metrics", "forest & fisheries evidence gates: livelihood exemptions that block automated accusations, FPIC-bound indigenous data, EUDR evidence-bound certificates, dark-vessel triple-binding leads, EM purpose binding, aquaculture portability disclosure, catch-confidence floors, wildfire regional labels (AI-forestry/fisheries absorption)", _case_metrics_forest_fish),
+    BenchCase("metrics.permit_agents", "metrics", "permit & planning discipline: advisory-only AI pre-checks, named-human countersigns, code-version pins, normative-source receipts, disparate-impact probes, appeal paths, automation-bias clock, vendor-cost receipts (AI-urban-planning absorption)", _case_metrics_permit_agents),
     BenchCase("metrics.water_agents", "metrics", "water-infrastructure defense: signed OT airgap receipts, fail-closed PLC exposure probes, Dragos LLM-attack telemetry, quality-forecast gates, chemical-dosing envelopes, leak-claim receipts, boil-notice evidence chains, data-purpose binding, water-footprint binding (AI-water absorption)", _case_metrics_water_agents),
     BenchCase("metrics.labor_algo", "metrics", "algorithmic-management guards: worker-signed quota receipts, human-countersigned algorithmic terminations, authority-pinned fatigue breakers, surveillance proportionality, dispatch rejection fairness, AV safety cases, labor-impact binding (AI-logistics absorption)", _case_metrics_labor_algo),
     BenchCase("metrics.mining_agents", "metrics", "mining governance gates: FPIC whole-class refusal, tailings watchdog incidents, exploration transparency, fleet envelopes, mixed-traffic protocols, labor transition plans, data sovereignty, green-mining ledger binding", _case_metrics_mining_agents),
@@ -21638,6 +21695,218 @@ def run_telecom_agents() -> dict[str, Any]:
     }
 
 
+
+
+def run_permit_agents() -> dict[str, Any]:
+    """Permit & planning discipline gates (one-hundred-thirty-sixth batch).
+
+    Absorbs the 2026 AI-urban-planning thread: CivCheck/Clariti as
+    the North American standard answer (Honolulu self-reported -70%
+    review time; Denver's 5-year $4.6M contract with human final
+    review retained; Toronto's 2026-09 pilot citing code sections);
+    Taiwan Xinzhuang's AI-assisted building-license review
+    (2026-01-01); Hong Kong "智築目" for public housing planning;
+    Chile REVI's dual-agent Clara/Norman with every recommendation
+    citing LGUC/OGUC; the SafeRent $2.3M settlement ("no appeal, the
+    algorithm cannot be overridden"); EU AI Act Art. 14 automation
+    bias / Art. 86 right to explanation; Colorado SB26-189.
+
+    Fail-closed rules over 12 deterministic scenarios: AI pre-check
+    is advisory-only (a permit issued on AI say-so alone denies
+    ``permit:unhuman_reviewed``); every decision needs a valid
+    named-human countersign (vague reasons raise at issuance);
+    cited code must match a current signed pin (superseded ->
+    ``permit:code_superseded``); recommendations need a bound
+    citation (uncited -> ``permit:uncited_recommendation``);
+    flag-rate disparity above 2x between slices triggers a
+    disparate-impact audit; auto-influenced decisions need a bound
+    appeal path (``permit:no_appeal``); an override rate at or below
+    0.02 triggers an automation-bias audit; vendor contracts need a
+    declared 5-year cost *and* exit assistance
+    (``permit:vendor_cost_undeclared``). Ground truth is closed:
+    4 allow / 8 deny.
+    """
+    from ed25519 import public_key
+
+    from permit_agents import (
+        AuthorityRegistry,
+        OverrideWindow,
+        appeal_window_gate,
+        automation_bias_clock,
+        disparate_impact_probe,
+        final_human_signoff,
+        issue_appeal_path,
+        issue_code_pin,
+        issue_disparity_probe,
+        issue_human_signoff,
+        issue_normative_source,
+        issue_precheck,
+        issue_vendor_cost,
+        normative_source_receipt,
+        precheck_advisory_gate,
+        vendor_cost_receipt,
+    )
+
+    AUTH = b"permit-bench-authority-000000001"  # 32 bytes
+    VENDOR = b"permit-bench-vendor-000000000001"  # 32 bytes
+    T0 = 1_800_000_000
+    HEX64 = "ab" * 32
+    HEX64_B = "cd" * 32
+
+    authorities = AuthorityRegistry()
+    authorities.register("bench-permit-office", public_key(AUTH))
+
+    scenarios: list[tuple[str, bool, str]] = []  # (id, expect_allow, needle)
+    results: dict[str, dict[str, Any]] = {}
+
+    def _record(sid: str, expect_allow: bool, needle: str, verdict: Any) -> None:
+        if hasattr(verdict, "audit_code"):
+            audit = str(getattr(verdict, "audit_code", "") or "")
+            allowed = not audit
+            reason = audit or str(getattr(verdict, "deny_code", "") or "")
+        elif hasattr(verdict, "audit_required"):
+            allowed = not bool(verdict.audit_required)
+            reason = str(getattr(verdict, "audit_code", "") or "")
+        else:
+            allowed = bool(getattr(verdict, "allowed", False))
+            reason = str(getattr(verdict, "deny_code", "") or "")
+        results[sid] = {"allowed": allowed, "reason": reason,
+                        "expect_allow": expect_allow, "needle": needle}
+        scenarios.append((sid, expect_allow, needle))
+
+    # 1. advisory-only pre-check -> allow
+    pc = issue_precheck(
+        precheck_id="b-pc-1", application_id="b-app-1", outcome="flag",
+        ai_model_digest=HEX64, findings_digest=HEX64_B, issued_at=T0,
+        issuer_id="bench-civcheck", issuer_secret=VENDOR)
+    _record("allow_advisory_precheck", True, "",
+            precheck_advisory_gate(pc, decision_was_issued=False, human_reviewed=False))
+
+    # 2. permit issued on AI say-so alone -> deny
+    pc2 = issue_precheck(
+        precheck_id="b-pc-2", application_id="b-app-2", outcome="pass",
+        ai_model_digest=HEX64, findings_digest=HEX64_B, issued_at=T0,
+        issuer_id="bench-civcheck", issuer_secret=VENDOR)
+    _record("deny_unhuman_reviewed", False, "unhuman_reviewed",
+            precheck_advisory_gate(pc2, decision_was_issued=True, human_reviewed=False))
+
+    # 3. valid named-human countersign -> allow
+    so = issue_human_signoff(
+        signoff_id="b-so-1", decision_id="b-dec-1",
+        decision_kind="building_permit", reviewer_name="Bench Officer",
+        review_role="reviewing_officer",
+        reasons="Drawings verified against pinned code sections; egress compliant.",
+        ai_score_digest=HEX64, signed_at=T0,
+        authority_id="bench-permit-office", signer_secret=AUTH)
+    _record("allow_signed_countersign", True, "",
+            final_human_signoff("b-dec-1", "building_permit", so, authorities,
+                                reviewed_at=T0 + 100))
+
+    # 4. decision with no countersign -> deny
+    _record("deny_no_countersign", False, "no_human_countersign",
+            final_human_signoff("b-dec-2", "building_permit", None, authorities,
+                                reviewed_at=T0 + 100))
+
+    # 5. cited recommendation bound to current pin -> allow
+    pin = issue_code_pin(
+        pin_id="b-pin-1", code_name="LGUC", code_version="2026-A",
+        effective_from=T0, issuer_id="bench-permit-office", issuer_secret=AUTH)
+    cit = issue_normative_source(
+        citation_id="b-cit-1", precheck_id="b-pc-1", code_name="LGUC",
+        code_version="2026-A", provision="LGUC Art. 116",
+        quoted_text="All structural drawings must be signed by a licensed engineer.",
+        pin_id="b-pin-1", cited_at=T0, issuer_id="bench-civcheck",
+        issuer_secret=VENDOR)
+    _record("allow_cited_recommendation", True, "",
+            normative_source_receipt("b-rec-1", "b-pc-1", cit, pin))
+
+    # 6. superseded code citation -> degrade
+    pin_old = issue_code_pin(
+        pin_id="b-pin-2", code_name="LGUC", code_version="2025-Z",
+        effective_from=T0 - 100_000, superseded_by="2026-A",
+        issuer_id="bench-permit-office", issuer_secret=AUTH)
+    cit_old = issue_normative_source(
+        citation_id="b-cit-2", precheck_id="b-pc-1", code_name="LGUC",
+        code_version="2025-Z", provision="LGUC Art. 98 (repealed)",
+        quoted_text="old text", pin_id="b-pin-2", cited_at=T0,
+        issuer_id="bench-civcheck", issuer_secret=VENDOR)
+    _record("deny_superseded_code", False, "code_superseded",
+            normative_source_receipt("b-rec-2", "b-pc-1", cit_old, pin_old))
+
+    # 7. uncited recommendation -> degrade
+    _record("deny_uncited", False, "uncited_recommendation",
+            normative_source_receipt("b-rec-3", "b-pc-1", None, pin))
+
+    # 8. skewed flag-rate probe -> disparate-impact audit
+    dp2 = issue_disparity_probe(
+        probe_id="b-dp-2", model_digest=HEX64,
+        slice_labels=["affluent", "low-income"], slice_flag_rates=[0.08, 0.30],
+        measured_at=T0, expires_at=T0 + 10_000,
+        vendor_id="bench-civcheck", vendor_secret=VENDOR)
+    _record("deny_disparate_impact", False, "disparate_impact_audit",
+            disparate_impact_probe(dp2, checked_at=T0 + 100))
+
+    # 9. decision with no appeal path -> deny (a bound path is verified
+    # as authoritative here, then the no-path case is recorded)
+    ap = issue_appeal_path(
+        path_id="b-ap-1", decision_id="b-dec-1",
+        decision_kind="building_permit", appeals_reviewer_name="Bench Reviewer",
+        appeal_deadline=T0 + 30 * 86400, appeal_contact="appeals@bench.gov",
+        issued_at=T0, authority_id="bench-permit-office", issuer_secret=AUTH)
+    assert appeal_window_gate("b-dec-1", ap, checked_at=T0 + 1000).allowed
+    _record("deny_no_appeal", False, "no_appeal",
+            appeal_window_gate("b-dec-9", None, checked_at=T0 + 1000))
+
+    # 10. zero override rate -> automation-bias audit
+    w = OverrideWindow("b-w-1", overridden=0, total=100, observed_at=T0)
+    _record("deny_automation_bias", False, "automation_bias_audit",
+            automation_bias_clock(w))
+
+    # 11. declared vendor cost + exit assistance -> allow
+    vc = issue_vendor_cost(
+        receipt_id="b-vc-1", vendor_id="bench-civcheck", contract_years=5,
+        total_cost_cents=460_000_000, exit_assistance_disclosed=True,
+        contract_digest=HEX64, issued_at=T0,
+        authority_id="bench-permit-office", issuer_secret=AUTH)
+    _record("allow_declared_vendor_cost", True, "",
+            vendor_cost_receipt(vc, authorities))
+
+    # 12. undeclared exit assistance raises at issuance -> modeled as deny
+    try:
+        issue_vendor_cost(
+            receipt_id="b-vc-2", vendor_id="bench-civcheck", contract_years=5,
+            total_cost_cents=460_000_000, exit_assistance_disclosed=False,
+            contract_digest=HEX64, issued_at=T0,
+            authority_id="bench-permit-office", issuer_secret=AUTH)
+        raise AssertionError("issue_vendor_cost should have raised")
+    except AssertionError:
+        raise
+    except Exception:
+        results["deny_undeclared_exit"] = {
+            "allowed": False, "reason": "permit:vendor_cost_undeclared",
+            "expect_allow": False, "needle": "vendor_cost_undeclared"}
+        scenarios.append(("deny_undeclared_exit", False, "vendor_cost_undeclared"))
+
+    mismatches = []
+    allowed_ids = []
+    denial_reasons = {}
+    for sid, expect_allow, needle in scenarios:
+        got = results[sid]
+        if got["allowed"]:
+            allowed_ids.append(sid)
+        else:
+            denial_reasons[sid] = got["reason"]
+        if got["allowed"] != expect_allow:
+            mismatches.append(sid)
+        elif needle and needle not in got["reason"]:
+            mismatches.append(sid + ":reason")
+
+    return {
+        "n_scenarios": len(scenarios),
+        "allowed_ids": allowed_ids,
+        "denial_reasons": denial_reasons,
+        "mismatches": mismatches,
+    }
 
 
 def run_water_agents() -> dict[str, Any]:
@@ -23500,6 +23769,7 @@ __all__ = [
     "run_greenwash",
     "run_orbital_agents",
     "run_forest_fish",
+    "run_permit_agents",
     "run_water_agents",
     "run_telecom_agents",
     "run_grid_agents",

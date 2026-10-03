@@ -474,6 +474,131 @@ Owns liability pins; a dead object past its deadline with no pin is an unowned h
 - `register(receipt: LiabilityReceipt)`
 - `check_deorbit(*, object_id: str, at: int, still_in_orbit: bool, now: int)`
   - Check a deorbit outcome against its liability pin.
+### `permit_agents`
+
+Source: `components/northstar-agent-runtime/permit_agents.py`
+
+Permit & planning discipline gates (one-hundred-thirty-sixth batch).
+
+#### `PermitError`
+
+Raised on malformed input — fail-closed at the API boundary.
+
+#### `AuthorityEntry`
+
+A reviewing-authority identity whose keys pin every receipt.
+
+#### `AuthorityRegistry`
+
+Out-of-band curated authority keys. The repo cannot audit real authorities; it can only pin the keys the deployment trusts.
+
+- `register(authority_id: str, pubkey: bytes)`
+- `pubkey_hex(authority_id: str)`
+- `known(authority_id: str)`
+#### `PrecheckReceipt`
+
+An AI pre-check run. The outcome vocabulary is advisory-only: the AI may flag/recommend/pass, never issue or deny.
+
+#### `issue_precheck(*, precheck_id: str, application_id: str, outcome: str, ai_model_digest: str, findings_digest: str, issued_at: int, issuer_id: str, issuer_secret: bytes)`
+
+Issue a signed AI pre-check receipt. Fail-closed at issuance: the outcome vocabulary excludes issuance/denial, so the AI cannot encode a permit decision even by accident.
+
+#### `PrecheckVerdict`
+
+#### `precheck_advisory_gate(receipt: PrecheckReceipt, *, decision_was_issued: bool, human_reviewed: bool)`
+
+A permit issued on the AI pre-check's say-so alone denies.
+
+#### `HumanSignoffReceipt`
+
+A named human's countersign on a decision. The AI may score; only a human may read, mark, and write reasons.
+
+#### `issue_human_signoff(*, signoff_id: str, decision_id: str, decision_kind: str, reviewer_name: str, review_role: str, reasons: str, ai_score_digest: str, signed_at: int, authority_id: str, signer_secret: bytes)`
+
+Issue a human countersign. Fail-closed at issuance: a vague reason ("model output", "ai decision", ...) raises — the human must write actual reasons, per the UK Procurement Act accountability lesson.
+
+#### `SignoffVerdict`
+
+#### `final_human_signoff(decision_id: str, decision_kind: str, signoff: HumanSignoffReceipt | None, authorities: AuthorityRegistry, *, reviewed_at: int)`
+
+Require a valid named-human countersign bound to this exact decision. No countersign, a countersign for a *different* decision, an unknown authority, or a broken signature denies.
+
+#### `CodeVersionReceipt`
+
+The code/regulation version pinned at review time. The AI may not cite superseded provisions.
+
+#### `issue_code_pin(*, pin_id: str, code_name: str, code_version: str, effective_from: int, superseded_by: str='', issuer_id: str='', issuer_secret: bytes | None=None)`
+
+Pin a code version. Unsigned pins are allowed (a planning office may publish its code book without a key), but they degrade to NON_AUTHORITATIVE at check time.
+
+#### `CodePinVerdict`
+
+#### `code_version_pin(pin: CodeVersionReceipt | None, cited_version: str, *, checked_at: int)`
+
+Check the cited code version against the pin. No pin -> NON_AUTHORITATIVE (probabilistic output may not run ahead of pinned code). Citing a superseded version -> NON_AUTHORITATIVE. A signed, current pin -> AUTHORITATIVE.
+
+#### `NormativeSourceReceipt`
+
+Every AI recommendation binds its code citation: the exact provision, the bound code pin, and the quote digest. The Toronto / REVI lesson: no citation, no authority.
+
+#### `issue_normative_source(*, citation_id: str, precheck_id: str, code_name: str, code_version: str, provision: str, quoted_text: str, pin_id: str, cited_at: int, issuer_id: str, issuer_secret: bytes)`
+
+#### `CitationVerdict`
+
+#### `normative_source_receipt(recommendation_id: str, precheck_id: str, citation: NormativeSourceReceipt | None, pin: CodeVersionReceipt | None)`
+
+A recommendation is authoritative only when it binds a valid, signed citation to a current code pin. No citation -> NON_AUTHORITATIVE; citation for a different pre-check -> NON_AUTHORITATIVE; pin mismatch or superseded code -> NON_AUTHORITATIVE.
+
+#### `DisparityProbeReceipt`
+
+A vendor-signed flag-rate probe over slices (neighborhoods / income bands). Hash-chained like the housing-batch probe.
+
+#### `issue_disparity_probe(*, probe_id: str, model_digest: str, slice_labels: Sequence[str], slice_flag_rates: Sequence[float], measured_at: int, expires_at: int, vendor_id: str, vendor_secret: bytes, prev_digest: str=_GENESIS)`
+
+Issue a vendor-signed disparity probe receipt. Fail-closed at issuance: empty slices raise, mismatched label/rate lengths raise, negative rates raise, ``expires_at <= measured_at`` raises.
+
+#### `DisparityVerdict`
+
+#### `disparate_impact_probe(receipt: DisparityProbeReceipt, *, checked_at: int)`
+
+Check the flag-rate disparity between slices. If the highest slice rate divided by the lowest *nonzero* slice rate exceeds :data:`FLAG_DISPARITY_RATIO_MAX`, the model is quarantined for a disparate-impact audit (``permit:disparate_impact_audit``). An expired probe, an unknown vendor signature, or a…
+
+#### `AppealPathReceipt`
+
+Every auto-influenced decision binds an appeal path with a real human reviewer. The SafeRent lesson, made structural: a decision the machine made and nobody can appeal is a denial of due process.
+
+#### `issue_appeal_path(*, path_id: str, decision_id: str, decision_kind: str, appeals_reviewer_name: str, appeal_deadline: int, appeal_contact: str, issued_at: int, authority_id: str, issuer_secret: bytes)`
+
+#### `AppealVerdict`
+
+#### `appeal_window_gate(decision_id: str, appeal: AppealPathReceipt | None, *, checked_at: int)`
+
+An auto-influenced decision with no bound appeal path denies (``permit:no_appeal``). An appeal path for a different decision, an expired deadline, or a broken signature also denies.
+
+#### `OverrideWindow`
+
+An observed override window: how many AI-influenced decisions a human overrode. ``total == 0`` is fail-closed (no observation is not evidence of compliance).
+
+#### `BiasClockVerdict`
+
+#### `automation_bias_clock(window: OverrideWindow, *, min_total: int=20)`
+
+If the human override rate over the window is at or below :data:`OVERRIDE_FLOOR`, the review is presumed decorative and an automation-bias audit is required (``permit:automation_bias_audit``). Too few observations (< ``min_total``) cannot clear the model — they *require* the audit too, because abse…
+
+#### `VendorCostReceipt`
+
+A vendor contract binds its 5-year total cost plus a declared exit-assistance clause. A contract that hides its total or its exit path is a capture surface.
+
+#### `issue_vendor_cost(*, receipt_id: str, vendor_id: str, contract_years: int, total_cost_cents: int, exit_assistance_disclosed: bool, contract_digest: str, issued_at: int, authority_id: str, issuer_secret: bytes)`
+
+Issue a vendor-cost receipt. Fail-closed at issuance: non-positive cost raises, zero-length contracts raise, and a contract without declared exit assistance raises — the clause must be *declared*, even if the declaration is "none provided" (that still binds the vendor to having said so).
+
+#### `VendorCostVerdict`
+
+#### `vendor_cost_receipt(receipt: VendorCostReceipt, authorities: AuthorityRegistry)`
+
+A vendor contract is enforceable only with a valid signed cost receipt from a known authority. Missing, unsigned, or broken-signature receipts deny.
+
 ### `water_agents`
 
 Source: `components/northstar-agent-runtime/water_agents.py`
@@ -3405,6 +3530,10 @@ Grid control envelopes (one-hundred-twenty-eighth batch).
 #### `run_telecom_agents()`
 
 Telecom AI discipline gates (one-hundred-twenty-ninth batch).
+
+#### `run_permit_agents()`
+
+Permit & planning discipline gates (one-hundred-thirty-sixth batch).
 
 #### `run_water_agents()`
 
