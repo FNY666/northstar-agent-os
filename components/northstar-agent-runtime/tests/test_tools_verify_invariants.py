@@ -86,7 +86,18 @@ class PrepareCopiesTheWholeComponentsTree(unittest.TestCase):
             import shutil
 
             shutil.copytree(COMPONENT, lonely, ignore=shutil.ignore_patterns("__pycache__"))
-            code, output = tool.run(lonely, "test_durable_bridge.py")
+            import subprocess
+            isolated = subprocess.run(
+                [sys.executable, '-I', '-S', '-c',
+                 "import sys,unittest; sys.path.insert(0, %r); "
+                 "sys.path.insert(0, %r); "
+                 "import durable_bridge; durable_bridge._durable_root=lambda:None; "
+                 "suite=unittest.defaultTestLoader.discover('tests', pattern='test_durable_bridge.py'); "
+                 "result=unittest.TextTestRunner().run(suite); sys.exit(not result.wasSuccessful())"
+                 % (str(lonely), str(lonely / 'tests'))],
+                cwd=str(lonely), capture_output=True, text=True, timeout=300,
+            )
+            code, output = isolated.returncode, isolated.stdout + isolated.stderr
             self.assertNotEqual(code, 0, "a runtime-only copy must not look like a usable baseline")
             self.assertIn("test_durable_bridge", output)
 
