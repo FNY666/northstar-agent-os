@@ -353,6 +353,115 @@ Check that retired hardware routes through the registry.
 
 Probe a marketing claim for bound environmental evidence.
 
+### `water_agents`
+
+Source: `components/northstar-agent-runtime/water_agents.py`
+
+Water-infrastructure defense gates (one-hundred-thirty-first batch).
+
+#### `WaterError`
+
+Malformed water-infrastructure input. Fail loud, never guess.
+
+#### `AuthorityRegistry`
+
+Registered human authorities (authority_id -> Ed25519 public key).
+
+- `register(authority_id: str, public_key: bytes)`
+- `public_key_for(authority_id: str)`
+#### `WaterVerdict`
+
+Uniform verdict: allowed / denial code / classification.
+
+#### `OTAirgapReceipt`
+
+A utility's OT isolation declaration.
+
+- `digest_fields()`
+- `digest()`
+#### `OTAirgapRegistry`
+
+Issued OT airgap receipts, keyed by utility.
+
+- `issue(*, utility_id: str, isolation_mechanism: str, scope_digest: str, declared_at: int, authority_id: str, signature: bytes)`
+- `revoke(utility_id: str)`
+- `get(utility_id: str)`
+#### `ot_airgap_receipt(*, airgap_registry: OTAirgapRegistry, utility_id: str, scope_digest: str, now: int)`
+
+Check a utility's OT isolation declaration before agent action.
+
+#### `PLCExposureProbe`
+
+One PLC exposure assessment.
+
+#### `plc_exposure_probe(*, probe: PLCExposureProbe, inventory_digest: str, now: int)`
+
+Fail-closed PLC exposure check.
+
+#### `TelemetryVerdict`
+
+Telemetry classification of one agent session.
+
+#### `ai_attack_telemetry(*, session_id: str, markers: list[str] | tuple[str, ...], now: int)`
+
+Classify a session against the LLM-attack TTP vocabulary.
+
+#### `quality_forecast_gate(*, utility_id: str, forecast_digest: str, measurement_protocol_digest: str | None, protocol_measured_at: int | None, now: int)`
+
+Water-quality predictions need a bound measurement protocol.
+
+#### `DosingEnvelope`
+
+An authority-signed chemical-dosing action envelope.
+
+- `digest_fields()`
+- `digest()`
+#### `DosingEnvelopeRegistry`
+
+Authority-signed dosing envelopes, keyed by agent.
+
+- `arm(*, agent_id: str, plant_id: str, allowed_actions: list[str] | tuple[str, ...], scope_digest: str, armed_at: int, expires_at: int, authority_id: str, signature: bytes)`
+- `get(agent_id: str)`
+#### `chemical_dosing_envelope(*, envelope_registry: DosingEnvelopeRegistry, agent_id: str, action: str, scope_digest: str, now: int)`
+
+Authorize one chemical-dosing action inside the signed envelope.
+
+#### `LeakClaimReceipt`
+
+A leak-detection claim bound to its verification protocol.
+
+- `digest_fields()`
+- `digest()`
+#### `leak_claim_receipt(*, authorities: AuthorityRegistry, vendor_id: str, utility_id: str, claim_digest: str, protocol_digest: str | None, measured_at: int, authority_id: str, signature: bytes, now: int)`
+
+Verify a leak-detection claim's bound protocol and signature.
+
+#### `boil_notice_evidence(*, authorities: AuthorityRegistry, utility_id: str, notice_id: str, event_evidence_digest: str | None, countersign_authority_id: str | None, countersign_signature: bytes | None, issued_at: int, now: int)`
+
+Gate a boil-water notice on evidence and human countersign.
+
+#### `DataPurposeReceipt`
+
+A purpose-bound water-network data export receipt.
+
+- `digest_fields()`
+- `digest()`
+#### `DataPurposeRegistry`
+
+Issued data-purpose receipts, keyed by export id.
+
+- `issue(*, export_id: str, exporter_id: str, recipient_id: str, purpose: str, scope_digest: str, issued_at: int, expires_at: int, authority_id: str, signature: bytes)`
+- `get(export_id: str)`
+#### `data_sovereignty_gate(*, purpose_registry: DataPurposeRegistry, export_id: str, purpose: str, scope_digest: str, now: int)`
+
+Check a data export against its purpose receipt.
+
+#### `water_footprint_binding(*, workload_id: str, water_liters: int | None, ledger_receipt_digest: str | None, expected_ledger_digest: str)`
+
+Bind a workload's declared water use to a 115th-batch receipt.
+
+#### `water_audit_event(event: str, *, utility_id: str, deny_code: str | None, now: int, details: Mapping[str, Any] | None=None)`
+
 ### `grid_agents`
 
 Source: `components/northstar-agent-runtime/grid_agents.py`
@@ -2875,6 +2984,10 @@ Grid control envelopes (one-hundred-twenty-eighth batch).
 #### `run_telecom_agents()`
 
 Telecom AI discipline gates (one-hundred-twenty-ninth batch).
+
+#### `run_water_agents()`
+
+Water-infrastructure defense gates (one-hundred-thirty-first batch).
 
 #### `run_greenwash()`
 
