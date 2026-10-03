@@ -115,7 +115,7 @@ from tools import ToolLimits, ToolSandbox, build_default_registry
 
 #: Semantic version of the public case set. Bump when a case is added, removed,
 #: or its expected verdict changes — consumers pin against this string.
-BENCH_VERSION = "northstar.governance.bench.v17"
+BENCH_VERSION = "northstar.governance.bench.v18"
 
 USAGE_ERROR = 64
 
@@ -4669,6 +4669,234 @@ def run_attestation_receipts() -> dict[str, Any]:
         "mismatches": mismatches,
         "denial_reasons": denial_reasons,
         "ladder": "zkml>opml>tee>software",
+    }
+
+
+def run_process_receipts() -> dict[str, Any]:
+    """Process-evidence receipts (ninety-eighth batch).
+
+    Absorbs the 2026 AI-education thread: the detection regime died
+    (detectors 39.5% on unmodified AI text — worse than a coin flip), and
+    what replaced it is *process evidence*: show the work, not the
+    output. A receipt covering only the final artifact is the governance
+    equivalent of a detector score — an uncheckable claim about an
+    opaque output. This runner verifies hash-chained production-process
+    logs (drafts, revisions, tool calls, human checkpoints) and
+    classifies artifact-only submissions as ``unverifiable-process``,
+    the direct analogue of the 87th batch's ``NON_AUTHORITATIVE`` tier.
+
+    Deterministic: pinned integer timestamps, sha256-label fixtures, no
+    runtime, no network, no model. Ground truth is closed: 12
+    scenarios, 2 allow / 10 deny — broken chain links, unrecorded edits,
+    agent-actor human checkpoints, missing required checkpoints, tool
+    steps without receipts, receipt mismatches, finalize/artifact
+    mismatches, empty chains, unknown step kinds, and artifact-only
+    submissions all deny with exact reasons.
+    """
+    import hashlib as _hashlib
+
+    from process_receipts import (
+        UNVERIFIABLE_PROCESS,
+        VERIFIED_PROCESS,
+        ProcessReceiptError,
+        ProcessStep,
+        build_receipt,
+        classify_process,
+        compute_step_digest,
+        verify_process,
+    )
+
+    def _hex(label: str) -> str:
+        return _hashlib.sha256(f"northstar-bench-process-receipts:{label}".encode()).hexdigest()
+
+    SEED = _hex("seed")
+    ARTIFACT = _hex("artifact")
+
+    def _tool(args_label: str, result_label: str) -> dict[str, Any]:
+        args = _hex(f"args:{args_label}")
+        result = _hex(f"result:{result_label}")
+        return {
+            "receipt_id": f"tool:{args}:{result}",
+            "arguments_digest": args,
+            "result_digest": result,
+        }
+
+    def _chain(tool, human_actor: str = "human:reviewer-7"):
+        d1 = _hex("d1")
+        d2 = _hex("d2")
+        d4 = _hex("d4")
+        steps = [
+            {"seq": 0, "step_kind": "draft", "input_digest": SEED, "output_digest": d1,
+             "actor": "agent:writer-1", "timestamp": 1000},
+            {"seq": 1, "step_kind": "revise", "input_digest": d1, "output_digest": d2,
+             "actor": "agent:writer-1", "timestamp": 1010},
+            {"seq": 2, "step_kind": "tool_call", "input_digest": d2,
+             "output_digest": tool["result_digest"], "actor": "agent:writer-1",
+             "timestamp": 1020, "tool_receipt_id": tool["receipt_id"]},
+            {"seq": 3, "step_kind": "human_checkpoint",
+             "input_digest": tool["result_digest"], "output_digest": d4,
+             "actor": human_actor, "timestamp": 1030},
+            {"seq": 4, "step_kind": "finalize", "input_digest": d4,
+             "output_digest": ARTIFACT, "actor": "agent:writer-1", "timestamp": 1040},
+        ]
+        return build_receipt(artifact_digest=ARTIFACT, seed_digest=SEED, steps=steps)
+
+    def _retamper(receipt, seq, **overrides):
+        steps = []
+        prev = "genesis"
+        for s in receipt.steps:
+            kw = dict(
+                seq=s.seq, step_kind=s.step_kind, input_digest=s.input_digest,
+                output_digest=s.output_digest, actor=s.actor,
+                timestamp=s.timestamp, tool_receipt_id=s.tool_receipt_id,
+            )
+            if s.seq == seq:
+                kw.update(overrides)
+            digest = compute_step_digest(prev_digest=prev, **kw)
+            steps.append(ProcessStep(step_digest=digest, **kw))
+            prev = digest
+        from process_receipts import ProcessReceipt
+        return ProcessReceipt(
+            schema_version=receipt.schema_version,
+            artifact_digest=overrides.get("artifact_digest", receipt.artifact_digest),
+            seed_digest=receipt.seed_digest,
+            steps=tuple(steps),
+        )
+
+    scenarios: list[tuple[str, bool, Any]] = []
+    tool = _tool("t-args", "t-result")
+    lookup = lambda rid: tool if rid == tool["receipt_id"] else None  # noqa: E731
+
+    # 1-2: allows
+    scenarios.append((
+        "allow_valid_full_chain", True,
+        lambda: verify_process(_chain(tool), tool_receipt_lookup=lookup,
+                               require_human_checkpoint=True),
+    ))
+    auto = build_receipt(artifact_digest=ARTIFACT, seed_digest=SEED, steps=[
+        {"seq": 0, "step_kind": "draft", "input_digest": SEED,
+         "output_digest": _hex("auto-d1"), "actor": "agent:pipe", "timestamp": 100},
+        {"seq": 1, "step_kind": "finalize", "input_digest": _hex("auto-d1"),
+         "output_digest": ARTIFACT, "actor": "agent:pipe", "timestamp": 110},
+    ])
+    scenarios.append((
+        "allow_automated_pipeline", True,
+        lambda: verify_process(auto),
+    ))
+
+    # 3: broken chain link (tampered digest on step 1)
+    broken = _chain(tool)
+    bad_steps = tuple(
+        ProcessStep(s.seq, s.step_kind, s.input_digest, s.output_digest,
+                    s.actor, s.timestamp, s.tool_receipt_id,
+                    "0" * 64 if s.seq == 1 else s.step_digest)
+        for s in broken.steps
+    )
+    from process_receipts import ProcessReceipt as _PR
+    broken = _PR(broken.schema_version, broken.artifact_digest, broken.seed_digest, bad_steps)
+    scenarios.append((
+        "deny_broken_chain_link", False,
+        lambda b=broken: verify_process(b, tool_receipt_lookup=lookup),
+    ))
+
+    # 4: unrecorded edit (step 1 input != step 0 output, chain re-signed)
+    evil = _retamper(_chain(tool), 1, input_digest=_hex("evil-unrecorded"))
+    scenarios.append((
+        "deny_unrecorded_edit", False,
+        lambda e=evil: verify_process(e, tool_receipt_lookup=lookup),
+    ))
+
+    # 5: human_checkpoint with an agent actor (oral-defense rule)
+    sock = _retamper(_chain(tool), 3, actor="agent:sock-puppet")
+    scenarios.append((
+        "deny_agent_actor_human_checkpoint", False,
+        lambda s=sock: verify_process(s, tool_receipt_lookup=lookup),
+    ))
+
+    # 6: human checkpoint required but absent
+    scenarios.append((
+        "deny_missing_human_checkpoint_when_required", False,
+        lambda: verify_process(auto, require_human_checkpoint=True),
+    ))
+
+    # 7: tool step with no known receipt
+    scenarios.append((
+        "deny_tool_call_no_receipt", False,
+        lambda: verify_process(_chain(tool), tool_receipt_lookup=lambda rid: None),
+    ))
+
+    # 8: tool receipt result mismatch
+    other = _tool("other-args", "other-result")
+    scenarios.append((
+        "deny_tool_call_receipt_mismatch", False,
+        lambda: verify_process(_chain(tool), tool_receipt_lookup=lambda rid: other),
+    ))
+
+    # 9: finalize output != artifact digest
+    wrong_artifact = _retamper(_chain(tool), -1, artifact_digest=_hex("different"))
+    scenarios.append((
+        "deny_finalize_artifact_mismatch", False,
+        lambda w=wrong_artifact: verify_process(w, tool_receipt_lookup=lookup),
+    ))
+
+    # 10: empty chain
+    empty = build_receipt(artifact_digest=ARTIFACT, seed_digest=SEED, steps=[])
+    scenarios.append((
+        "deny_empty_chain", False,
+        lambda e=empty: verify_process(e),
+    ))
+
+    # 11: unknown step kind (hand-built raw mapping; kind check fires
+    # before digest verification)
+    raw_unknown = {
+        "schema_version": "northstar.process-receipt.v1",
+        "artifact_digest": ARTIFACT,
+        "seed_digest": SEED,
+        "steps": [{
+            "seq": 0, "step_kind": "hallucinate", "input_digest": SEED,
+            "output_digest": ARTIFACT, "actor": "agent:x", "timestamp": 1,
+            "tool_receipt_id": None, "step_digest": "0" * 64,
+        }],
+    }
+    scenarios.append((
+        "deny_unknown_step_kind", False,
+        lambda: classify_process(raw_unknown) == VERIFIED_PROCESS,
+    ))
+
+    # 12: artifact-only submission -> unverifiable-process by construction
+    scenarios.append((
+        "deny_artifact_only", False,
+        lambda: classify_process(None) == VERIFIED_PROCESS,
+    ))
+
+    mismatches: list[str] = []
+    allowed_ids: list[str] = []
+    denial_reasons: dict[str, str] = {}
+    for sid, expected_allow, thunk in scenarios:
+        try:
+            outcome = thunk()
+        except ProcessReceiptError as error:
+            outcome = None
+            denial_reasons[sid] = f"malformed: {error}"
+        if isinstance(outcome, bool):
+            got_allow = outcome
+            reason = "classified verified-process" if got_allow else "classified unverifiable-process"
+        else:
+            got_allow = bool(outcome.allowed)
+            reason = "; ".join(outcome.reasons)
+        if got_allow != expected_allow:
+            mismatches.append(f"{sid}: expected {'allow' if expected_allow else 'deny'}, got {'allow' if got_allow else 'deny'}")
+        if got_allow:
+            allowed_ids.append(sid)
+        else:
+            denial_reasons[sid] = reason
+
+    return {
+        "n_scenarios": len(scenarios),
+        "mismatches": mismatches,
+        "allowed_ids": allowed_ids,
+        "denial_reasons": denial_reasons,
+        "classification_unverifiable": UNVERIFIABLE_PROCESS,
     }
 
 
@@ -9676,6 +9904,62 @@ def _case_metrics_attestation_receipts(h: BenchHarness) -> BenchExpectation:
     )
 
 
+def _case_metrics_process_receipts(h: BenchHarness) -> BenchExpectation:
+    """Process-evidence receipts (ninety-eighth batch).
+
+    Absorbs the 2026 AI-education thread: the detection regime died
+    (detectors at 39.5% on unmodified AI text) and process evidence
+    replaced it — show the work, not the output. A receipt covering
+    only the final artifact is the governance equivalent of a detector
+    score: an uncheckable claim about an opaque output.
+
+    12 deterministic scenarios, 2 allow / 10 deny: a full
+    draft->revise->tool_call->human_checkpoint->finalize chain and an
+    automated pipeline allow; broken chain links, unrecorded edits,
+    agent-actor human checkpoints (the oral-defense rule), missing
+    required checkpoints, tool steps without receipts, receipt
+    mismatches, finalize/artifact mismatches, empty chains, unknown
+    step kinds, and artifact-only submissions deny. Artifact-only
+    classifies ``unverifiable-process`` by construction — the 87th
+    batch's ``NON_AUTHORITATIVE`` analogue.
+    """
+    metrics = run_process_receipts()
+
+    def check(exp: BenchExpectation, report: Any) -> tuple[bool, str]:
+        if metrics["n_scenarios"] != 12:
+            return (False, f"expected 12 process-receipt scenarios, saw {metrics['n_scenarios']}")
+        if metrics["mismatches"]:
+            return (False, f"scenario(s) disagree with ground truth: {metrics['mismatches']}")
+        if metrics["allowed_ids"] != [
+            "allow_valid_full_chain",
+            "allow_automated_pipeline",
+        ]:
+            return (False, f"allowed set drifted: {metrics['allowed_ids']}")
+        reasons = metrics["denial_reasons"]
+        if "unrecorded edit" not in reasons.get("deny_unrecorded_edit", ""):
+            return (False, "unrecorded edit must deny as unrecorded edit")
+        if "oral-defense" not in reasons.get("deny_agent_actor_human_checkpoint", ""):
+            return (False, "agent-actor human checkpoint must deny on the oral-defense rule")
+        if "unknown tool receipt" not in reasons.get("deny_tool_call_no_receipt", ""):
+            return (False, "tool step without receipt must deny as unaccounted mutation")
+        if reasons.get("deny_artifact_only") != "classified unverifiable-process":
+            return (False, "artifact-only submission must classify unverifiable-process")
+        return (True, "12/12 process-receipt scenarios hold: chain/edits/checkpoints/receipts")
+
+    return BenchExpectation(
+        runtime=_noop_runtime(h),
+        expect_subtype="success",
+        post_check=check,
+        metrics=metrics,
+        notes=(
+            "2026 AI-education thread: detection is dead (39.5% detectors), "
+            "process evidence replaced it. Hash-chained production-process "
+            "logs; artifact-only submissions classify unverifiable-process "
+            "(87th-batch NON_AUTHORITATIVE analogue). No partial tier."
+        ),
+    )
+
+
 def _case_metrics_harness_binding(h: BenchHarness) -> BenchExpectation:
     """Harness integrity binding (ninetieth batch).
 
@@ -10949,6 +11233,7 @@ CASES: tuple[BenchCase, ...] = (
     BenchCase("metrics.offline_bundle", "metrics", "signed offline policy bundles: signature/expiry/staleness/version/digest gates", _case_metrics_offline_bundle),
     BenchCase("metrics.twin_sync", "metrics", "twin-sync receipts: freshness-gated actuation, sensor-manifest poisoning, single-use receipts", _case_metrics_twin_sync),
     BenchCase("metrics.attestation_receipts", "metrics", "TEE attestation as receipt evidence: forgery/replay/downgrade probes", _case_metrics_attestation_receipts),
+    BenchCase("metrics.process_receipts", "metrics", "process-evidence receipts: hash-chained production process, artifact-only is unverifiable", _case_metrics_process_receipts),
     BenchCase("metrics.harness_binding", "metrics", "harness integrity binding: SHA-256 harness hash in audit, quad-only scores", _case_metrics_harness_binding),
     BenchCase("metrics.drift_detection", "metrics", "Livenerf-style drift probe: bootstrap CI + paired permutation test", _case_metrics_drift_detection),
 )
@@ -11574,6 +11859,7 @@ __all__ = [
     "run_offline_bundle",
     "run_twin_sync",
     "run_attestation_receipts",
+    "run_process_receipts",
     "run_owasp_asi_coverage",
     "run_policy_axis",
     "run_step_compliance",
