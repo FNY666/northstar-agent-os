@@ -32,11 +32,30 @@ the host callback: model ``allow``/``deny`` decides the call, model
 model configured the gate is exactly the deterministic three layers above.
 Every model-path verdict carries its full input -> output -> verdict chain
 in ``PermissionDecision.decision_model_audit``.
+Optional layer 0 — pre-trade risk checks, SEC Rule 15c3-5 style. When the host
+supplies a :class:`PreTradeRiskConfig`, every call first passes four
+*independent* rejection conditions modelled on 17 CFR 240.15c3-5(c)(1)(ii):
+price/value, size, rate ("over a short period of time"), and duplicates —
+plus structural validation that fails closed *before* any limit comparison
+(a malformed fact is a rejection, not an exception and not a pass). The
+checks embody the rule's paragraph (d), "direct and exclusive control": they
+read only host-owned configuration, host-supplied fact extractors, and
+engine-measured facts (digests, timestamps). Model-supplied claims —
+``PermissionRequestContext.data``, ``reason_hint``, prompt text — can never
+move them, exactly as a broker-dealer may not delegate its risk controls to
+the customer. Every denial is reported to the host's ``audit_sink``
+synchronously with its condition code, the (c)(2)(iv)-style surveillance
+trail. This is a *mechanism* borrowing, not a compliance claim: the rule
+prescribes no numeric limits, binds broker-dealers (not agents), and this
+gate implements only the pre-trade erroneous-order limb.
 """
 from __future__ import annotations
 
 import hashlib
 import json
+import math
+import time
+from collections import deque
 from dataclasses import dataclass, field, replace
 from typing import Any, Callable, Iterable, Literal, Sequence, TYPE_CHECKING
 
@@ -78,6 +97,7 @@ DecisionSource = Literal[
     "unknown_tool",
     "delegation_gate",
     "invalid_mode",
+    "pretrade",
 ]
 
 
@@ -268,8 +288,65 @@ def validate_mode(mode: str) -> PermissionMode:
     return mode  # type: ignore[return-value]
 
 
+#: Pre-trade rejection condition codes (SEC 15c3-5 (c)(1)(ii) mapping).
+#: Each is an independent rejection condition: any one firing denies the
+#: call, and every firing condition is reported — never just the first.
+PT_PRICE = "pretrade:PT-1"  #: value/price parameter exceeded
+PT_SIZE = "pretrade:PT-2"  #: size parameter exceeded
+PT_RATE = "pretrade:PT-3"  #: rate over a short period of time exceeded
+PT_DUPLICATE = "pretrade:PT-4"  #: duplicative call detected
+PT_FACT_MISSING = "pretrade:fact_missing"  #: a fact a check needs is missing/malformed
+
+
+@dataclass(frozen=True)
+class PreTradeRiskConfig:
+    """Host-owned pre-trade risk limits, SEC Rule 15c3-5 (c)(1)(ii) style.
+
+    The four independent rejection conditions map onto tool-call facts:
+
+    - **PT-1 price/value**: ``value_of(tool, payload)`` is the host's own
+      valuation of the call (the broker's notional, not the model's claim).
+      It must be finite and non-negative — a missing, NaN, or negative
+      value is *structural* failure and denies with ``fact_missing`` rather
+      than sliding under every cap. ``max_call_value`` caps a single call;
+      ``reference_of`` + ``price_collar`` is the fat-finger collar: a call
+      whose value strays further than ``price_collar`` from the host's
+      reference is denied, and an *unusable* reference denies too (a data
+      outage must not silently disarm the check).
+    - **PT-2 size**: canonical-JSON payload bytes against
+      ``max_payload_bytes``.
+    - **PT-3 rate**: at most ``max_calls_per_window`` evaluations of one
+      tool per ``window_seconds`` ("over a short period of time"). Rejected
+      calls still consume burst budget — they were messages the gate had
+      to handle.
+    - **PT-4 duplicates**: the same ``(tool, arguments_digest)`` within
+      ``dedupe_window_seconds`` is denied as duplicative. Only calls the
+      gate *allowed* seed the window: a resubmission after a rejection is
+      not a duplicate of anything.
+
+    Threshold convention, applied uniformly: the configured limit is
+    itself permitted; a breach requires *exceeding* it. The rule prescribes
+    no numeric limits — every default here is a host calibration choice,
+    documented as such.
+
+    Direct and exclusive control (15c3-5(d)): ``value_of`` and
+    ``reference_of`` are *host* callables (the broker's own feed). The
+    model being gated supplies neither the limits nor the facts the checks
+    compare against.
+    """
+
+    max_call_value: float | None = None
+    value_of: Callable[[str, dict[str, Any]], float | None] | None = None
+    reference_of: Callable[[str, dict[str, Any]], float | None] | None = None
+    price_collar: float = 0.05
+    max_payload_bytes: int | None = None
+    max_calls_per_window: int | None = None
+    window_seconds: float = 1.0
+    dedupe_window_seconds: float = 60.0
+
+
 class PermissionEngine:
-    """Evaluates one tool call against the three layers."""
+    """Evaluates one tool call against the pre-trade checks then the three layers."""
 
     def __init__(
         self,
@@ -281,6 +358,9 @@ class PermissionEngine:
         can_use_tool: Callable[[str, dict[str, Any], PermissionRequestContext], Any] | None = None,
         tool_kinds: dict[str, str] | None = None,
         multisig_pubkeys: Mapping[str, bytes] | None = None,
+        pretrade: PreTradeRiskConfig | None = None,
+        audit_sink: Callable[[dict[str, Any]], None] | None = None,
+        now: Callable[[], float] | None = None,
     ) -> None:
         if config is None:
             config = PermissionConfig(
@@ -313,11 +393,30 @@ class PermissionEngine:
         self._multisig_pubkeys: dict[str, bytes] | None = (
             dict(multisig_pubkeys) if multisig_pubkeys else None
         )
+        #: Optional SEC 15c3-5-style pre-trade risk checks (layer 0). None
+        #: (the default) disables them: zero behaviour change.
+        self.pretrade = pretrade
+        #: Host audit seam. Every *deny* is reported here synchronously,
+        #: before the decision is returned, carrying its rejection condition
+        #: code — the host wires this to the audit chain.
+        self._audit_sink = audit_sink
+        self._now = now or time.monotonic
+        # Pre-trade observation state: measured facts about calls the gate
+        # has seen — never approval state. Bounded and pruned on every
+        # evaluation. (Approval decisions themselves are still never
+        # cached: see the ``evaluate`` docstring.)
+        self._pt_rate: dict[str, deque[float]] = {}
+        self._pt_seen: dict[tuple[str, str], float] = {}
 
     @property
     def multisig_pubkeys(self) -> Mapping[str, bytes] | None:
         """Approver public keys, or None when multisig is not configured."""
         return self._multisig_pubkeys
+
+    def pretrade_reset(self) -> None:
+        """Clear pre-trade observation windows (rate counters, duplicate fingerprints)."""
+        self._pt_rate.clear()
+        self._pt_seen.clear()
 
     # -- layer helpers -----------------------------------------------------
     @property
@@ -452,7 +551,7 @@ class PermissionEngine:
         context: PermissionRequestContext | None = None,
         known: bool = True,
     ) -> PermissionDecision:
-        """Run the three layers for one call.
+        """Decide one tool call: pre-trade checks, then the three layers.
 
         ``kind``/``mutating`` normally come from the tool's own
         :class:`~tools.ToolSpec`; the delegation gate passes only names, which is
@@ -463,7 +562,47 @@ class PermissionEngine:
         (``call_id``, ``arguments_digest``) pair can never authorize another
         call. Reusing an old approval for new arguments fails closed because
         the callback is asked again, not because a cache is consulted.
+
+        Two post-decision duties live here, not in the layers below: an
+        *allowed* call seeds the pre-trade duplicate window (a resubmission
+        after a rejection is not a duplicate of anything), and every *deny*
+        is reported to the host's ``audit_sink`` synchronously, before the
+        decision is returned.
         """
+        decision = self._evaluate_inner(
+            tool_name,
+            kind=kind,
+            mutating=mutating,
+            payload=payload,
+            context=context,
+            known=known,
+        )
+        if self.pretrade is not None and decision.allowed:
+            try:
+                digest = digest_arguments(payload or {})
+            except ValueError:
+                digest = ""
+            if digest:
+                self._pt_seen[(tool_name, digest)] = self._now()
+        if not decision.allowed:
+            decision = self._audit_deny(decision, context)
+        return decision
+
+    def _evaluate_inner(
+        self,
+        tool_name: str,
+        *,
+        kind: str | None = None,
+        mutating: bool | None = None,
+        payload: dict[str, Any] | None = None,
+        context: PermissionRequestContext | None = None,
+        known: bool = True,
+    ) -> PermissionDecision:
+        """The three layers, preceded by the optional pre-trade checks."""
+        if self.pretrade is not None:
+            pretrade_decision = self._pretrade_check(tool_name, payload or {})
+            if pretrade_decision is not None:
+                return pretrade_decision
         resolved_kind = kind or self._kinds.get(tool_name) or "other"
         if resolved_kind not in {"read", "edit", "exec", "task", "network", "other"}:
             resolved_kind = "other"
@@ -540,9 +679,20 @@ class PermissionEngine:
         # decided on: if the caller did not pin it, derive it here so a
         # decision can never be detached from its arguments.
         if not request.arguments_digest:
-            request = replace(
-                request, arguments_digest=digest_arguments(payload or {})
-            )
+            try:
+                pinned = digest_arguments(payload or {})
+            except ValueError:
+                return PermissionDecision(
+                    False,
+                    source="pretrade",
+                    reason=(
+                        f"{tool_name} denied: call arguments are not "
+                        "JSON-serialisable, so no approval can be bound to them"
+                    ),
+                    rule=PT_FACT_MISSING,
+                    tool=tool_name,
+                )
+            request = replace(request, arguments_digest=pinned)
         if self.config.decision_model is not None:
             model_decision = self._evaluate_with_decision_model(
                 tool_name, resolved_kind, is_mutating, request
@@ -562,6 +712,29 @@ class PermissionEngine:
                 rule=f"mode:{self.config.mode}:no_callback",
                 tool=tool_name,
             )
+        request = context or PermissionRequestContext(
+            mode=self.config.mode, reason_hint=f"{tool_name} is mutating"
+        )
+        # The approver must always see the digest of the exact arguments being
+        # decided on: if the caller did not pin it, derive it here so a
+        # decision can never be detached from its arguments. A missing fact
+        # is a block, not an exception and not a pass: arguments the gate
+        # cannot fingerprint cannot carry a bound approval.
+        if not request.arguments_digest:
+            try:
+                pinned = digest_arguments(payload or {})
+            except ValueError:
+                return PermissionDecision(
+                    False,
+                    source="pretrade",
+                    reason=(
+                        f"{tool_name} denied: call arguments are not "
+                        "JSON-serialisable, so no approval can be bound to them"
+                    ),
+                    rule=PT_FACT_MISSING,
+                    tool=tool_name,
+                )
+            request = replace(request, arguments_digest=pinned)
         try:
             verdict = self.config.can_use_tool(tool_name, dict(payload or {}), request)
         except Exception as error:  # noqa: BLE001 - a broken approver must not grant access
@@ -630,6 +803,219 @@ class PermissionEngine:
             tool=tool_name,
             details=details,
         )
+
+    @staticmethod
+    def _pretrade_deny(tool_name: str, code: str, detail: str) -> PermissionDecision:
+        return PermissionDecision(
+            False,
+            source="pretrade",
+            reason=f"{tool_name} denied by pre-trade risk control [{code}]: {detail}",
+            rule=code,
+            tool=tool_name,
+        )
+
+    def _pretrade_check(
+        self, tool_name: str, payload: dict[str, Any]
+    ) -> PermissionDecision | None:
+        """Run the four independent pre-trade conditions; first deny wins.
+
+        Structural validation runs *before* any limit comparison: a fact a
+        check needs that is missing or malformed denies with
+        ``pretrade:fact_missing`` — never an exception, never a pass. When
+        several conditions fire, all of their codes are reported (no
+        masking). Only host-owned inputs are read here — the config, the
+        host's ``value_of``/``reference_of`` extractors, and engine-measured
+        facts (canonical bytes, digest, timestamps). Nothing model-supplied
+        (``PermissionRequestContext.data``, ``reason_hint``, prompt claims)
+        can move any of these checks: that is the 15c3-5(d) "direct and
+        exclusive control" half of this design.
+        """
+        cfg = self.pretrade
+        assert cfg is not None  # noqa: S101 - guarded by the caller
+        now = self._now()
+
+        # -- structural validation first ------------------------------------
+        try:
+            canonical = json.dumps(
+                payload,
+                ensure_ascii=False,
+                sort_keys=True,
+                separators=(",", ":"),
+                default=str,
+            ).encode("utf-8")
+        except (TypeError, ValueError):
+            return self._pretrade_deny(
+                tool_name,
+                PT_FACT_MISSING,
+                "call arguments are not JSON-serialisable; the gate cannot "
+                "fingerprint the call, so it is denied",
+            )
+        digest = "sha256:" + hashlib.sha256(canonical).hexdigest()
+
+        fired: list[PermissionDecision] = []
+
+        # -- PT-1 price/value ------------------------------------------------
+        if cfg.value_of is not None:
+            try:
+                value = cfg.value_of(tool_name, payload)
+            except Exception:
+                return self._pretrade_deny(
+                    tool_name,
+                    PT_FACT_MISSING,
+                    "host value extractor raised; failing closed",
+                )
+            if (
+                value is None
+                or isinstance(value, bool)
+                or not isinstance(value, (int, float))
+                or not math.isfinite(value)
+                or value < 0
+            ):
+                # NaN / negative / missing values defeat every comparison
+                # they participate in — fail closed, not open.
+                return self._pretrade_deny(
+                    tool_name,
+                    PT_FACT_MISSING,
+                    f"call value fact is missing or malformed ({value!r}); "
+                    "failing closed",
+                )
+            if cfg.max_call_value is not None and value > cfg.max_call_value:
+                fired.append(
+                    self._pretrade_deny(
+                        tool_name,
+                        f"{PT_PRICE}:value_exceeded",
+                        f"call value {value} exceeds max_call_value "
+                        f"{cfg.max_call_value}",
+                    )
+                )
+            if cfg.reference_of is not None:
+                try:
+                    reference = cfg.reference_of(tool_name, payload)
+                except Exception:
+                    return self._pretrade_deny(
+                        tool_name,
+                        PT_FACT_MISSING,
+                        "host reference extractor raised; failing closed",
+                    )
+                if (
+                    reference is None
+                    or isinstance(reference, bool)
+                    or not isinstance(reference, (int, float))
+                    or not math.isfinite(reference)
+                    or reference <= 0
+                ):
+                    # An unusable reference price blocks the call; it never
+                    # skips the collar check (a data outage must not disarm
+                    # the fat-finger control).
+                    return self._pretrade_deny(
+                        tool_name,
+                        PT_FACT_MISSING,
+                        "reference price unavailable or unusable; the collar "
+                        "cannot be evaluated, so the call is denied",
+                    )
+                if abs(value - reference) > cfg.price_collar * reference:
+                    fired.append(
+                        self._pretrade_deny(
+                            tool_name,
+                            f"{PT_PRICE}:price_exceeded",
+                            f"call value {value} strays beyond the "
+                            f"{cfg.price_collar:.0%} collar around reference "
+                            f"{reference}",
+                        )
+                    )
+
+        # -- PT-2 size --------------------------------------------------------
+        if cfg.max_payload_bytes is not None and len(canonical) > cfg.max_payload_bytes:
+            fired.append(
+                self._pretrade_deny(
+                    tool_name,
+                    f"{PT_SIZE}:size_exceeded",
+                    f"payload {len(canonical)} bytes exceeds max_payload_bytes "
+                    f"{cfg.max_payload_bytes}",
+                )
+            )
+
+        # -- PT-3 rate ---------------------------------------------------------
+        if cfg.max_calls_per_window is not None:
+            window = self._pt_rate.setdefault(tool_name, deque())
+            cutoff = now - cfg.window_seconds
+            while window and window[0] <= cutoff:
+                window.popleft()
+            # A rejected call still consumed a message the gate had to
+            # handle, so it counts toward the burst budget.
+            window.append(now)
+            if len(window) > cfg.max_calls_per_window:
+                fired.append(
+                    self._pretrade_deny(
+                        tool_name,
+                        f"{PT_RATE}:rate_exceeded",
+                        f"{len(window)} calls in {cfg.window_seconds:g}s exceeds "
+                        f"max_calls_per_window {cfg.max_calls_per_window}",
+                    )
+                )
+
+        # -- PT-4 duplicates -----------------------------------------------------
+        cutoff = now - cfg.dedupe_window_seconds
+        stale = [key for key, seen_at in self._pt_seen.items() if seen_at <= cutoff]
+        for key in stale:
+            del self._pt_seen[key]
+        if (tool_name, digest) in self._pt_seen:
+            fired.append(
+                self._pretrade_deny(
+                    tool_name,
+                    f"{PT_DUPLICATE}:duplicate",
+                    "identical (tool, arguments_digest) already passed the gate "
+                    f"within {cfg.dedupe_window_seconds:g}s",
+                )
+            )
+        # NOTE: the window is seeded only for allowed calls, in evaluate().
+
+        if not fired:
+            return None
+        if len(fired) == 1:
+            return fired[0]
+        codes = ", ".join(d.rule for d in fired[1:])
+        first = fired[0]
+        return replace(first, reason=f"{first.reason} (also fired: {codes})")
+
+    def _audit_deny(
+        self, decision: PermissionDecision, context: PermissionRequestContext | None
+    ) -> PermissionDecision:
+        """Report every deny to the host's audit sink, synchronously.
+
+        The record carries the rejection condition code (``decision.rule``)
+        so each denial traces to its rule — the surveillance-trail half of
+        the 15c3-5 design ((c)(2)(iv) style). The sink runs *inside*
+        ``evaluate()``, before the decision is returned: when ``evaluate()``
+        hands back a deny, the record is already written. A raising sink
+        cannot flip the denial — the failure is made visible in the reason
+        instead of being silently swallowed.
+        """
+        sink = self._audit_sink
+        if sink is None:
+            return decision
+        ctx = context if context is not None else PermissionRequestContext()
+        record = {
+            "event": "permission.deny",
+            "tool": decision.tool,
+            "source": decision.source,
+            "rule": decision.rule,
+            "condition": decision.rule,
+            "reason": decision.reason,
+            "call_id": ctx.call_id,
+            "arguments_digest": ctx.arguments_digest,
+            "session_id": ctx.session_id,
+            "agent": ctx.agent,
+            "mode": ctx.mode,
+        }
+        try:
+            sink(record)
+        except Exception as error:  # noqa: BLE001 - the denial stands regardless
+            return replace(
+                decision,
+                reason=f"{decision.reason} [audit_sink_failed:{type(error).__name__}]",
+            )
+        return decision
 
     def evaluate_spec(
         self,
@@ -775,11 +1161,17 @@ __all__ = [
     "DelegationVerdict",
     "MUTATING_KINDS",
     "PERMISSION_MODES",
+    "PT_DUPLICATE",
+    "PT_FACT_MISSING",
+    "PT_PRICE",
+    "PT_RATE",
+    "PT_SIZE",
     "PermissionConfig",
     "PermissionDecision",
     "PermissionEngine",
     "PermissionMode",
     "PermissionRequestContext",
+    "PreTradeRiskConfig",
     "ToolKind",
     "digest_arguments",
     "normalise_names",
