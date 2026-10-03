@@ -31,6 +31,15 @@ confirmed (mismatch, or the log was unreachable).
 (``sessions export --archive``); ``--online`` also re-fetches the Rekor
 entry when the package carries an external anchor.
 
+``--strict`` is an opt-in stricter profile for ``verify``: on top of the
+hash chain it also enforces timestamp monotonicity (a record may regress
+at most ``--clock-skew`` seconds, default 300 = 5 minutes, behind the
+previous record) and nonce deduplication for records that carry a
+``nonce`` field (draft-sharif-agent-audit-trail §6.3). It changes what
+counts as verified: a feed that passes the default ``verify`` can fail
+``--strict`` — e.g. old feeds with clock-skewed records — and that is
+expected. Default ``verify`` semantics never change.
+
 ``northstar audit keygen`` prints a fresh Ed25519 seed/public-key pair
 (hex). The seed signs feeds offline; only the public key is needed to
 verify. Key handling is the operator's job — this command just mints bits.
@@ -83,6 +92,22 @@ def add_audit_arguments(parser: argparse.ArgumentParser) -> None:
         "--rekor-url",
         default="",
         help="transparency log base URL (default: the public Sigstore Rekor)",
+    )
+    verifying.add_argument(
+        "--strict",
+        action="store_true",
+        help="opt-in strict profile: on top of the chain also enforce timestamp "
+        "monotonicity (regressions beyond --clock-skew fail, located at the "
+        "offending record) and nonce deduplication. Changes what counts as "
+        "verified: feeds passing the default verify can fail --strict.",
+    )
+    verifying.add_argument(
+        "--clock-skew",
+        type=float,
+        default=300.0,
+        metavar="SECONDS",
+        help="under --strict, how far a record's timestamp may regress behind "
+        "the previous record before failing (default 300 = 5 minutes)",
     )
 
     anchoring = sub.add_parser(
@@ -185,11 +210,16 @@ def run_audit(args: argparse.Namespace) -> int:
             except ValueError as error:
                 print(f"audit: bad --pubkey: {error}", file=sys.stderr)
                 return USAGE_ERROR
+        if args.clock_skew < 0:
+            print("audit: --clock-skew must be >= 0", file=sys.stderr)
+            return USAGE_ERROR
         result = verify_file(
             args.feed,
             public_key=pubkey,
             expect_session_id=args.expect_session_id or None,
             expect_run_id=args.expect_run_id or None,
+            strict=bool(args.strict),
+            clock_skew_seconds=args.clock_skew,
         )
         anchor_note = ""
         anchor_failed = False
@@ -263,6 +293,8 @@ def run_audit(args: argparse.Namespace) -> int:
                 "signature_failures": result.signature_failures,
                 "anchor_ok": result.anchor_ok,
                 "external_anchor": {"state": external_state, "note": external_note},
+                "strict": bool(getattr(args, "strict", False)),
+                "strict_violation": result.strict_violation,
             }))
         else:
             detail = f" ({result.reason})" if result.reason else ""

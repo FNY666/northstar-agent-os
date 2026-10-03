@@ -47,6 +47,7 @@ import hashlib
 import json
 import os
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Iterable, Iterator
 
@@ -419,6 +420,12 @@ class ChainResult:
     reason: str = ""
     signature_failures: list[int] = field(default_factory=list)
     anchor_ok: bool | None = None  # None when no anchor manifest was checked
+    #: True when this result came from a strict-mode run (--strict).
+    strict_mode: bool = False
+    #: The strict violation kind when strict mode failed, else "":
+    #: "unparseable-timestamp" | "timestamp-regression" | "duplicate-nonce" |
+    #: "invalid-nonce".
+    strict_violation: str = ""
 
     def __bool__(self) -> bool:  # pragma: no cover - trivial
         return self.ok
@@ -439,6 +446,8 @@ def verify_lines(
     public_key: bytes | None = None,
     expect_session_id: str | None = None,
     expect_run_id: str | None = None,
+    strict: bool = False,
+    clock_skew_seconds: float = 300.0,
 ) -> ChainResult:
     """Verify a feed's hash chain (and signatures when ``public_key`` is given).
 
@@ -446,7 +455,16 @@ def verify_lines(
     (``ok=False, unprotected=True``) — old exports keep working, loudly
     labelled. A feed where *some* records lack chain fields is broken at the
     first unchained line: a chain with a hole is not a chain.
+
+    ``strict=True`` is opt-in and changes what counts as verified: on top
+    of the chain it also enforces timestamp monotonicity (a record may
+    regress at most ``clock_skew_seconds`` behind the previous record) and
+    nonce deduplication (records carrying a ``nonce`` field must not repeat
+    it — the draft-sharif-agent-audit-trail §6.3 rule). Default verify
+    semantics are untouched; old feeds that pass today still pass.
     """
+    if clock_skew_seconds < 0:
+        raise ValueError("clock_skew_seconds must be >= 0")
     records: list[tuple[int, dict[str, Any]]] = []
     try:
         for number, record in _iter_records(lines):
@@ -516,8 +534,97 @@ def verify_lines(
         return ChainResult(ok=False, broken_at=first, records=len(records), chained=chained,
                            reason=f"line {first}: Ed25519 signature invalid",
                            signature_failures=sig_failures)
+    if strict:
+        hit = _check_strict(records, clock_skew_seconds=clock_skew_seconds)
+        if hit is not None:
+            number, violation, strict_reason = hit
+            return ChainResult(ok=False, broken_at=number, records=len(records),
+                               chained=chained, reason=strict_reason,
+                               strict_mode=True, strict_violation=violation)
     return ChainResult(ok=True, records=len(records), chained=chained,
-                       reason=f"chain intact over {chained} records")
+                       reason=f"chain intact over {chained} records"
+                              + (" (strict mode)" if strict else ""),
+                       strict_mode=strict)
+
+
+_TS_RE_STRICT = __import__("re").compile(
+    r"^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.(\d{3}))?Z$"
+)
+
+
+def _parse_audit_ts(ts: Any) -> float | None:
+    """Epoch seconds for an ``audit.ndjson/1`` ``ts``; None when missing/malformed.
+
+    Accepts exactly the envelope's timestamp shape (RFC 3339 UTC ending in
+    ``Z``, optional millisecond fraction); calendar-invalid values
+    (month 13, …) also return None.
+    """
+    if not isinstance(ts, str):
+        return None
+    match = _TS_RE_STRICT.fullmatch(ts)
+    if match is None:
+        return None
+    parts = [int(match.group(i)) for i in range(1, 7)]
+    millis = int(match.group(7)) if match.group(7) else 0
+    try:
+        moment = datetime(*parts, millis * 1000, tzinfo=timezone.utc)
+    except ValueError:
+        return None
+    return moment.timestamp()
+
+
+def _check_strict(
+    records: list[tuple[int, dict[str, Any]]],
+    *,
+    clock_skew_seconds: float,
+) -> tuple[int, str, str] | None:
+    """Strict-mode verifier extras (opt-in via ``verify --strict``).
+
+    Beyond the hash chain — which already covers the draft's
+    ``parent_record_id`` linkage (``prev_hash``) and, with ``--anchor``,
+    tail completeness — this enforces the remaining §6.3 verifier rules:
+
+    * **timestamp monotonicity**: ``ts`` must be non-decreasing, allowing a
+      regression of at most ``clock_skew_seconds`` for clock skew between
+      the producer's clock and reality;
+    * **nonce deduplication**: the draft's "nonces must not repeat",
+      checked opportunistically on records that carry a ``nonce`` field
+      (the audit.ndjson/1 envelope does not mandate one).
+
+    Returns ``(line_number, violation, reason)`` for the first violation,
+    or None when the feed passes. Everything is offline and deterministic.
+    """
+    prev_epoch: float | None = None
+    prev_ts: str | None = None
+    seen_nonces: dict[Any, int] = {}
+    for number, record in records:
+        ts = record.get("ts")
+        epoch = _parse_audit_ts(ts)
+        if epoch is None:
+            return (number, "unparseable-timestamp",
+                    f"line {number}: strict mode: timestamp {ts!r} is missing or "
+                    f"not a valid RFC 3339 UTC 'Z' timestamp")
+        if prev_epoch is not None and epoch < prev_epoch - clock_skew_seconds:
+            regression = prev_epoch - epoch
+            return (number, "timestamp-regression",
+                    f"line {number}: strict mode: timestamp regressed "
+                    f"{regression:.3f}s ({prev_ts} -> {ts}), exceeding the "
+                    f"allowed clock skew of {clock_skew_seconds:g}s")
+        prev_epoch, prev_ts = epoch, ts
+        nonce = record.get("nonce")
+        if nonce is not None:
+            try:
+                hash(nonce)
+            except TypeError:
+                return (number, "invalid-nonce",
+                        f"line {number}: strict mode: nonce must be a scalar, "
+                        f"got {type(nonce).__name__}")
+            if nonce in seen_nonces:
+                return (number, "duplicate-nonce",
+                        f"line {number}: strict mode: duplicate nonce {nonce!r} "
+                        f"(first seen at line {seen_nonces[nonce]})")
+            seen_nonces[nonce] = number
+    return None
 
 
 def verify_file(path: str | Path, **kwargs: Any) -> ChainResult:

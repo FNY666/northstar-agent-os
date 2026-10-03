@@ -137,6 +137,31 @@ line numbers are used for error positions).
 Result shape: `ok`, `broken_at` (1-based line or null), `records`,
 `chained`, `unprotected`, `reason`.
 
+### 5.1 Strict mode (opt-in, `verify --strict`)
+
+On top of the chain the verifier additionally enforces the
+draft-sharif-agent-audit-trail §6.3 verifier rules that default verify
+deliberately skips:
+   a. **Timestamp monotonicity**: every record's `ts` must parse as an
+      RFC 3339 UTC `Z` timestamp, and must not regress more than
+      `--clock-skew` seconds (default 300 = 5 minutes) behind the
+      previous record. A missing/malformed `ts` fails loudly. The first
+      violation fails the feed at that record's line
+      (`strict_violation: "timestamp-regression"`).
+   b. **Nonce deduplication**: the draft's "nonces must not repeat",
+      checked opportunistically on records that carry a `nonce` field
+      (the `audit.ndjson/1` envelope does not mandate one). The first
+      repeat fails at that record's line
+      (`strict_violation: "duplicate-nonce"`), naming the line where the
+      nonce first appeared.
+   Strict mode changes what counts as verified: a feed that passes the
+   default verify can fail `--strict` (e.g. old feeds with clock-skewed
+   records) — that is expected, not a bug. The draft's remaining §6.3
+   rules are already covered without strict mode: `parent_record_id`
+   linkage is the hash chain itself (steps 4b–4c), and tail completeness
+   needs a head anchor (§7) or an external anchor (§8) — strict mode does
+   not claim to prove absence of tail truncation.
+
 ## 6. Signatures
 
 * Algorithm: Ed25519, pure (no prehash, no context), RFC 8032.
@@ -237,7 +262,8 @@ package). The bucket must have Object Lock enabled at creation time.
 * `northstar audit verify <feed>` — exit 0 `OK`, 1 `BROKEN`, 2
   `UNPROTECTED`, 3 `INVALID`, 5 external anchor unconfirmed. Flags:
   `--pubkey <hex>`, `--expect-session-id`, `--expect-run-id`,
-  `--anchor <manifest>`, `--external-anchor <record>`, `--rekor-url`, `--json`.
+  `--anchor <manifest>`, `--external-anchor <record>`, `--rekor-url`, `--json`,
+  `--strict`, `--clock-skew <seconds>` (default 300).
 * `northstar audit anchor <feed> --out <manifest>` — offline, no network.
 * `northstar audit anchor-external <feed> --out <record> --seed-hex <hex>`
   — needs network; exit 4 on any failure (never a silent non-anchor).
@@ -317,3 +343,7 @@ over the 2 records.
   for online signing oracles.
 * `genesis.session_id`/`run_id` are *claims* by the producer; they only
   bind when the verifier cross-checks them against independent knowledge.
+* `--strict` changes what counts as verified: a feed that passes the
+  default `verify` can fail `--strict` (clock-skewed timestamps, repeated
+  nonces). Old feeds are unaffected unless the operator opts in — run
+  `--strict` only when the feed's producer commits to the stricter profile.

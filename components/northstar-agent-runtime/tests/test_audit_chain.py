@@ -630,5 +630,173 @@ class CliAuditTests(unittest.TestCase):
             self.assertEqual(code, 0, out + _err)
 
 
+def strict_record(seq, ts, nonce=None):
+    """A top-level audit record with an explicit timestamp (and optional nonce)."""
+    record = sample_audit(seq)
+    record["ts"] = ts
+    if nonce is not None:
+        record["nonce"] = nonce
+    return record
+
+
+class StrictModeTests(unittest.TestCase):
+    """`audit verify --strict`: timestamp monotonicity + nonce dedup (opt-in)."""
+
+    def _chained_lines(self, records):
+        return to_lines(chain_records(records, component="northstar-agent-runtime"))
+
+    def test_strict_passes_on_clean_feed(self):
+        records = [strict_record(i, f"2026-10-03T10:00:{i:02d}.000Z") for i in range(3)]
+        result = verify_lines(self._chained_lines(records), strict=True)
+        self.assertTrue(result.ok, result.reason)
+        self.assertTrue(result.strict_mode)
+        self.assertEqual(result.strict_violation, "")
+        self.assertIn("strict mode", result.reason)
+
+    def test_default_verify_ignores_timestamp_regression(self):
+        records = [
+            strict_record(0, "2026-10-03T10:00:00.000Z"),
+            strict_record(1, "2026-10-03T09:53:20.000Z"),  # 400s back, beyond the 300s skew
+        ]
+        lines = self._chained_lines(records)
+        self.assertTrue(verify_lines(lines).ok)  # default: chain only, no time checks
+        result = verify_lines(lines, strict=True)
+        self.assertFalse(result.ok)
+        self.assertEqual(result.broken_at, 2)
+        self.assertEqual(result.strict_violation, "timestamp-regression")
+        self.assertIn("strict mode", result.reason)
+        self.assertIn("400.000s", result.reason)
+
+    def test_regression_within_skew_passes(self):
+        records = [
+            strict_record(0, "2026-10-03T10:00:00.000Z"),
+            strict_record(1, "2026-10-03T09:58:00.000Z"),  # 120s back < 300s skew
+        ]
+        result = verify_lines(self._chained_lines(records), strict=True)
+        self.assertTrue(result.ok, result.reason)
+
+    def test_skew_boundary(self):
+        base = [strict_record(0, "2026-10-03T10:00:00.000Z")]
+        # exactly 300.000s regression is allowed ...
+        ok_records = base + [strict_record(1, "2026-10-03T09:55:00.000Z")]
+        self.assertTrue(
+            verify_lines(self._chained_lines(ok_records), strict=True).ok
+        )
+        # ... 300.001s is not.
+        bad_records = base + [strict_record(1, "2026-10-03T09:54:59.999Z")]
+        bad = verify_lines(self._chained_lines(bad_records), strict=True)
+        self.assertFalse(bad.ok)
+        self.assertEqual(bad.strict_violation, "timestamp-regression")
+        self.assertEqual(bad.broken_at, 2)
+
+    def test_clock_skew_is_configurable(self):
+        records = [
+            strict_record(0, "2026-10-03T10:00:00.000Z"),
+            strict_record(1, "2026-10-03T09:58:00.000Z"),  # 120s back
+        ]
+        lines = self._chained_lines(records)
+        self.assertTrue(verify_lines(lines, strict=True, clock_skew_seconds=300).ok)
+        failed = verify_lines(lines, strict=True, clock_skew_seconds=60)
+        self.assertFalse(failed.ok)
+        self.assertEqual(failed.strict_violation, "timestamp-regression")
+
+    def test_negative_skew_rejected(self):
+        with self.assertRaises(ValueError):
+            verify_lines([], strict=True, clock_skew_seconds=-1)
+
+    def test_duplicate_nonce_detected_in_strict_only(self):
+        records = [
+            strict_record(0, "2026-10-03T10:00:00.000Z", nonce="n1"),
+            strict_record(1, "2026-10-03T10:00:01.000Z", nonce="n2"),
+            strict_record(2, "2026-10-03T10:00:02.000Z", nonce="n1"),
+        ]
+        lines = self._chained_lines(records)
+        self.assertTrue(verify_lines(lines).ok)  # default: nonces unchecked
+        result = verify_lines(lines, strict=True)
+        self.assertFalse(result.ok)
+        self.assertEqual(result.broken_at, 3)
+        self.assertEqual(result.strict_violation, "duplicate-nonce")
+        self.assertIn("first seen at line 1", result.reason)
+
+    def test_unique_nonces_pass(self):
+        records = [
+            strict_record(i, f"2026-10-03T10:00:{i:02d}.000Z", nonce=f"n{i}")
+            for i in range(3)
+        ]
+        result = verify_lines(self._chained_lines(records), strict=True)
+        self.assertTrue(result.ok, result.reason)
+
+    def test_missing_ts_fails_strict_only(self):
+        records = [strict_record(0, "2026-10-03T10:00:00.000Z")]
+        no_ts = strict_record(1, "2026-10-03T10:00:01.000Z")
+        del no_ts["ts"]
+        records.append(no_ts)
+        lines = self._chained_lines(records)
+        self.assertTrue(verify_lines(lines).ok)  # default: ts unchecked
+        result = verify_lines(lines, strict=True)
+        self.assertFalse(result.ok)
+        self.assertEqual(result.broken_at, 2)
+        self.assertEqual(result.strict_violation, "unparseable-timestamp")
+
+    def test_malformed_ts_fails_strict_only(self):
+        records = [
+            strict_record(0, "2026-10-03T10:00:00.000Z"),
+            strict_record(1, "not-a-timestamp"),
+        ]
+        lines = self._chained_lines(records)
+        self.assertTrue(verify_lines(lines).ok)
+        result = verify_lines(lines, strict=True)
+        self.assertFalse(result.ok)
+        self.assertEqual(result.strict_violation, "unparseable-timestamp")
+
+    def test_cli_strict_flag(self):
+        records = [
+            strict_record(0, "2026-10-03T10:00:00.000Z"),
+            strict_record(1, "2026-10-03T09:53:20.000Z"),  # 400s regression
+        ]
+        with tempfile.TemporaryDirectory() as directory:
+            feed = Path(directory) / "f.ndjson"
+            feed.write_text("\n".join(self._chained_lines(records)) + "\n", encoding="utf-8")
+            code, out, _err = run_cli("audit", "verify", str(feed))
+            self.assertEqual(code, 0, out)
+            code, out, _err = run_cli("audit", "verify", str(feed), "--strict")
+            self.assertEqual(code, 1)
+            self.assertIn("BROKEN", out)
+            self.assertIn("strict mode", out)
+            code, out, _err = run_cli("audit", "verify", str(feed), "--strict", "--json")
+            self.assertEqual(code, 1)
+            payload = json.loads(out)
+            self.assertTrue(payload["strict"])
+            self.assertEqual(payload["strict_violation"], "timestamp-regression")
+            self.assertEqual(payload["broken_at"], 2)
+            # a clean feed still exits 0 under --strict
+            clean = [strict_record(i, f"2026-10-03T10:00:{i:02d}.000Z") for i in range(2)]
+            feed.write_text("\n".join(self._chained_lines(clean)) + "\n", encoding="utf-8")
+            code, out, _err = run_cli("audit", "verify", str(feed), "--strict")
+            self.assertEqual(code, 0, out + _err)
+
+    def test_cli_negative_clock_skew_is_usage_error(self):
+        with tempfile.TemporaryDirectory() as directory:
+            feed = Path(directory) / "f.ndjson"
+            feed.write_text("\n".join(self._chained_lines([strict_record(0, "2026-10-03T10:00:00.000Z")])) + "\n",
+                            encoding="utf-8")
+            code, _out, err = run_cli("audit", "verify", str(feed), "--strict", "--clock-skew", "-5")
+            self.assertEqual(code, 64)
+            self.assertIn("--clock-skew", err)
+
+    def test_cli_clock_skew_configurable(self):
+        records = [
+            strict_record(0, "2026-10-03T10:00:00.000Z"),
+            strict_record(1, "2026-10-03T09:58:00.000Z"),  # 120s regression
+        ]
+        with tempfile.TemporaryDirectory() as directory:
+            feed = Path(directory) / "f.ndjson"
+            feed.write_text("\n".join(self._chained_lines(records)) + "\n", encoding="utf-8")
+            code, _out, _err = run_cli("audit", "verify", str(feed), "--strict", "--clock-skew", "60")
+            self.assertEqual(code, 1)
+            code, out, _err = run_cli("audit", "verify", str(feed), "--strict", "--clock-skew", "300")
+            self.assertEqual(code, 0, out + _err)
+
+
 if __name__ == "__main__":
     unittest.main()

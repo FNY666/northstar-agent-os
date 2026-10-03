@@ -88,7 +88,7 @@ escalation, error, lifecycle}`.
 | 6 | Signer identity | `signer_kid` = RFC 7638 JWK thumbprint; SHOULD bind to Agent Passport key under MCPS | `key_id`: free-form string ≤ 200 chars, operator-managed (`audit keygen`) | ❌ Not aligned — different identity model (§3.4) |
 | 7 | External anchor mechanism | Optional Merkle batch (RFC 6962) + root → RFC 3161 TSA **or** WORM **or** append-only transparency log | Offline anchor manifest + Sigstore Rekor (a transparency log) via DSSE + WORM archive packages (S3 Object Lock) | ✅ Compatible — Rekor *is* the draft's "append-only transparency log" option; WORM matches too. Merkle batching itself not implemented (optional in the draft) |
 | 8 | Tail-truncation / wholesale-rewrite detection | close record, heartbeat cadence, or anchored head (§6.3 steps 9–10) | anchor manifest (file hash + head hash + record count); Rekor head anchor; archive manifest | ✅ Same security property, different mechanism |
-| 9 | Verifier extras | monotonic timestamps, `parent_record_id` linkage, nonce dedup, sequence gaps | genesis session/run expectation, chain links, signatures, anchor checks | △ Partial — timestamp monotonicity / nonce dedup not checked (§3.5) |
+| 9 | Verifier extras | monotonic timestamps, `parent_record_id` linkage, nonce dedup, sequence gaps | genesis session/run expectation, chain links, signatures, anchor checks; **`verify --strict` adds timestamp monotonicity (configurable clock-skew) and nonce dedup (§3.5)** | ✓ Aligned (opt-in) — sequence-gap/heartbeat checks remain out of band |
 | 10 | Tombstone deletion (GDPR Art. 17, §9.3) | Specified: tombstone preserves id/timestamp/parent/prev_hash, new signature by deleting authority, `tombstone_hash` for the accepted break | Not implemented | ❌ Not aligned — future work, no chain break semantics yet |
 | 11 | Record envelope / taxonomy | AAT record: `record_id`, `agent_id`, `action_type` taxonomy, `trust_level`, `record_phase`, … | `audit.ndjson/1` envelope (own taxonomy: `schema_version`, `component`, `event`, `payload`, …) | ❌ Different envelope — out of scope; interop would need a translator, not a chain change |
 | 12 | Retention | 12 months recommended for high-risk (Art. 12 minimum is 6) | WORM archive default 180 days (Art. 12 minimum) | △ Minimum met; longer retention is operator policy |
@@ -142,10 +142,14 @@ nothing forbids it. **Not changing.**
 
 ### 3.5 Verifier extras
 
-Monotonic timestamps and nonce deduplication are cheap to add and may
-follow as a strict-mode verifier flag, but they change `verify` semantics
-for existing feeds (a feed with a clock-skewed record would newly fail),
-so they are not part of this batch. **Deferred, not rejected.**
+Monotonic timestamps and nonce deduplication are now implemented as an
+opt-in strict-mode verifier flag (`audit verify --strict`, with
+`--clock-skew` configuring the allowed timestamp regression, default
+300s), exactly as foreshadowed: they change `verify` semantics for
+existing feeds (a feed with a clock-skewed record newly fails), so they
+stay out of the default path. **Implemented, opt-in — not in default
+verify.** Sequence-gap and heartbeat-cadence absence checks remain
+out-of-band by design (they need inputs no offline verifier has).
 
 ## 4. What this batch changed
 
@@ -177,3 +181,21 @@ one to the other, and the JCS alignment means translated records would
 hash identically on both sides. That translator is not built in this
 batch; the draft is still an individual submission and may change before
 any RFC.
+
+## 6. Follow-up: strict verifier mode
+
+The §3.5 deferred items landed as `audit verify --strict`:
+
+* **Timestamp monotonicity** — `ts` must parse as RFC 3339 UTC `Z` and
+  may regress at most `--clock-skew` seconds (default 300) behind the
+  previous record; violations fail at the offending record's line.
+* **Nonce dedup** — the draft's "nonces must not repeat", checked
+  opportunistically on records carrying a `nonce` field (the
+  `audit.ndjson/1` envelope does not mandate one).
+
+Opt-in only: default `verify` semantics are byte-for-byte unchanged, so
+old feeds keep verifying. The remaining §6.3 extras (`parent_record_id`
+linkage = the hash chain itself; tail completeness = head/external
+anchor) were already covered without strict mode; sequence-gap and
+heartbeat absence checks stay out of band — no offline verifier can do
+them.
