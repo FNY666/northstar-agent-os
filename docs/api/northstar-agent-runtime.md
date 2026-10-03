@@ -325,6 +325,128 @@ One-call evaluation: identity + chain + depth + combinations.
 
 Audit events for identity issuance/delegation/verification.
 
+### `agri`
+
+Source: `components/northstar-agent-runtime/agri.py`
+
+Agriculture extension: scene-bound agri advice, field-condition envelopes, farmer data sovereignty, advice explainability, and smallholder access disclosure (one-hundred-sixteenth batch).
+
+#### `AgriBoundError`
+
+Malformed agri binding/declaration/receipt or a programming error.
+
+#### `AgriSceneBinding`
+
+Authorization of an agri capability for an explicit scene.
+
+#### `compute_binding_digest(binding: AgriSceneBinding)`
+
+Recompute the JCS digest a binding claims.
+
+#### `issue_agri_binding(*, binding_id: str, capability_id: str, model_version_digest: str, crop_system: str, farm_scale_class: str, agroecology_digest: str, authority_secret: bytes, authorized_by: str, authorized_at: int, expires_at: int, prev_digest: str=_GENESIS)`
+
+Issue an authority-signed agri scene binding and seal it.
+
+#### `AgriSceneVerdict`
+
+Outcome of :func:`check_agri_scene`.
+
+#### `check_agri_scene(binding: AgriSceneBinding, *, crop_system: str, farm_scale_class: str, agroecology_digest: str, now: int)`
+
+Fail-closed gate: is this observed agri scene within the binding?
+
+#### `agri_scene_audit_event(verdict: AgriSceneVerdict, *, action: str)`
+
+Shape an agri scene verdict as an audit event for ``audit_chain``.
+
+#### `FieldEnvelope`
+
+An authority-armed capability envelope for farm equipment.
+
+#### `arm_field_envelope(*, envelope_id: str, equipment_id: str, limits: Mapping[str, Any], authority_secret: bytes, armed_by: str, armed_at: int, expires_at: int, prev_digest: str=_GENESIS)`
+
+Arm a field envelope. Authority-signed only; there is deliberately no agent-key path (the 104th batch's no-self-issuance discipline).
+
+#### `ConditionDeclaration`
+
+The agent's declared current field conditions, sealed and chained.
+
+#### `declare_conditions(*, declaration_id: str, envelope: FieldEnvelope, soil_state: str, obstacle_state: str, equipment_wear_class: str, soil_moisture_pct: float, slope_pct: float, obstacle_density: float, visibility_m: float, declared_at: int, prev_declaration_digest: str=_GENESIS)`
+
+Declare current field conditions under an envelope, sealed and chained.
+
+#### `ActuationVerdict`
+
+Outcome of :func:`check_actuation`.
+
+#### `check_actuation(*, envelope: FieldEnvelope, declaration: ConditionDeclaration | None, now: int)`
+
+Fail-closed gate: may the equipment actuate under these conditions?
+
+#### `actuation_audit_event(verdict: ActuationVerdict, *, action: str)`
+
+Shape an actuation verdict as an audit event for ``audit_chain``.
+
+#### `verify_envelope_independence()`
+
+Probe the control-plane separation: the actuation gate must never reach envelope arming or mutation. Fails if ``check_actuation``'s source references envelope issuance/revocation entry points.
+
+#### `FarmerDataReceipt`
+
+Farmer-signed grant for farm-data collection and use.
+
+#### `DataRevocation`
+
+Unilateral, farmer-signed revocation of a data grant.
+
+#### `farmer_data_receipt(*, receipt_id: str, farmer_id: str, farmer_secret: bytes, data_scope: str, purpose: str, revenue_share_terms_digest: str, granted_at: int, expires_at: int, prev_digest: str=_GENESIS)`
+
+Issue a farmer-signed data grant and seal it.
+
+#### `revoke_farmer_data(*, revocation_id: str, receipt: FarmerDataReceipt, farmer_secret: bytes, revoked_at: int)`
+
+Append a unilateral farmer-signed revocation. Immediate and irreversible in the log — continued use needs a new receipt.
+
+#### `DataUseVerdict`
+
+Outcome of :func:`check_data_use`.
+
+#### `check_data_use(log: list[FarmerDataReceipt | DataRevocation], *, farmer_id: str, data_scope: str, purpose: str, use_time: int)`
+
+Fail-closed gate: may this farm data be used for this purpose now?
+
+#### `data_use_audit_event(verdict: DataUseVerdict, *, farmer_id: str, purpose: str)`
+
+Shape a data-use verdict as an audit event for ``audit_chain``.
+
+#### `AdviceVerdict`
+
+Outcome of :func:`advice_explainability_gate`.
+
+#### `advice_explainability_gate(advice: Mapping[str, Any], *, farmer_language: str)`
+
+Gate agricultural advice on the four mandatory explainability fields.
+
+#### `record_bad_advice_harm(*, advice_id: str, scene_binding_digest: str, model_version_digest: str, input_digest: str, confidence: float, harm_description: str, recorded_at: int)`
+
+Emit a ``agri.bad_advice_harm`` audit event.
+
+#### `SmallholderAccessDeclaration`
+
+A deployment's declared accessibility posture for smallholders.
+
+#### `declare_smallholder_access(*, declaration_id: str, system_id: str, offline_capable: bool, local_language_supported: bool, low_bandwidth_mode: bool, authority_secret: bytes, declared_at: int, prev_digest: str=_GENESIS)`
+
+Declare an agri system's smallholder accessibility posture.
+
+#### `SmallholderDisclosure`
+
+Outcome of :func:`check_smallholder_disclosure`.
+
+#### `check_smallholder_disclosure(declaration: SmallholderAccessDeclaration | None, *, system_id: str)`
+
+Mandatory disclosure, not silent omission.
+
 ### `budget`
 
 Source: `components/northstar-agent-runtime/budget.py`
@@ -1142,6 +1264,18 @@ Deployment registration gate (one-hundred-tenth batch).
 #### `run_dual_use()`
 
 Dual-use screen for autonomous science (one-hundred-eleventh batch).
+
+#### `run_agri()`
+
+Deterministic agri-extension scenarios: 12 scenarios, 3 allow / 9 deny.
+
+#### `run_editorial()`
+
+Editorial countersign + publication gates (one-hundred-seventeenth batch).
+
+#### `run_env_cost()`
+
+Environmental-cost receipts (one-hundred-fifteenth batch).
 
 #### `run_incident_receipts()`
 
@@ -3913,6 +4047,233 @@ Derive ``(public_key, seed)`` from a 32-byte seed.
 #### `sign_binding_digest(seed: bytes, digest: str)`
 
 Sign a constraint-binding digest with an authority seed (test/bench use).
+
+### `editorial`
+
+Source: `components/northstar-agent-runtime/editorial.py`
+
+Editorial countersign + publication gates (one-hundred-seventeenth batch).
+
+#### `EditorialError`
+
+A malformed receipt/record or a programming error.
+
+#### `EditorRecord`
+
+Registration of one human editor.
+
+#### `EditorRegistry`
+
+The set of editors whose countersigns can authorize publication.
+
+- `register(record: EditorRecord)`
+  - Register (or re-register) an editor. Idempotent by id.
+- `revoke(editor_id: str, revoked_at: int)`
+  - Revoke an editor. Revocation is terminal in the registry.
+- `active_pubkey(editor_id: str, at: int)`
+  - Return the editor's pubkey if registered and not revoked at ``at``.
+#### `EditorialCountersign`
+
+A registered human editor's signed review of one content item.
+
+#### `compute_countersign_digest(countersign: EditorialCountersign)`
+
+Recompute a countersign's digest over all fields except itself.
+
+#### `countersign_content(*, content_digest: str, editor_id: str, editor_secret: bytes, reviewed_at: int, disclosure_digest: str, prev_digest: str=_GENESIS)`
+
+Issue an editor-signed countersign for one content item and seal it.
+
+#### `DisclosureRecord`
+
+A disclosure bound to one content digest.
+
+- `disclosure_digest` (property)
+  - JCS digest of the disclosure payload.
+#### `CaptureAttestation`
+
+Attestation that UGC was captured by a real device/pipeline.
+
+#### `attest_capture(*, capture_digest: str, attestor_id: str, attestor_secret: bytes, captured_at: int)`
+
+Issue a device/pipeline-signed capture attestation.
+
+#### `verify_capture_attestation(attestation: CaptureAttestation)`
+
+Verify a capture attestation's signature. No exceptions.
+
+#### `PublicationVerdict`
+
+Outcome of checking one publication against the editorial gates.
+
+#### `disclosure_gate(*, content_kind: str, disclosure: DisclosureRecord | None, content_digest: str)`
+
+Gate publication on the disclosure duty.
+
+#### `check_marking_resilience(*, claims_ai_generated: bool, marking_payload: str | None, expected_marking_digest: str | None)`
+
+Verify machine-readable marking on content claiming AI origin.
+
+#### `ugc_probe(*, capture_digest: str, attestation: CaptureAttestation | None)`
+
+Probe UGC for republication.
+
+#### `election_deepfake_check(*, content_kind: str, source_attestation: CaptureAttestation | None, human_review: EditorialCountersign | None)`
+
+Election-context hold: both attestation and human review required.
+
+#### `slop_velocity_gate(*, source_id: str, publish_times: list[int], window_start: int, window_end: int)`
+
+Throttle agent sources whose publication velocity screams "slop".
+
+#### `check_publication(*, content_digest: str, content_kind: str, publisher_agent_id: str, publish_time: int, countersign: EditorialCountersign | None, countersign_log: list[EditorialCountersign], registry: EditorRegistry, disclosure: DisclosureRecord | None, claims_ai_generated: bool=True, marking_payload: str | None=None, expected_marking_digest: str | None=None, ugc_capture: bool=False, capture_attestation: CaptureAttestation | None=None, election_source_attestation: CaptureAttestation | None=None)`
+
+Run the full editorial gate stack on one publication. Fail-closed.
+
+#### `editorial_audit_event(verdict: PublicationVerdict, *, action: str)`
+
+Shape a publication verdict as an audit-chain event dict.
+
+### `env_cost`
+
+Source: `components/northstar-agent-runtime/env_cost.py`
+
+Environmental-cost receipts (one-hundred-fifteenth batch).
+
+#### `EnvCostError`
+
+A malformed profile, receipt, registry, or request — a programming error, not a verdict. Verification *failures* (unknown budget, overspend, curtailment breach, low confidence, experimental output, physics gap, unverifiable claim) return a verdict with ``allowed=False`` instead; malformed input rai…
+
+#### `carbon_kg_est(kwh: int, factor_kg_per_kwh: str)`
+
+Modeled carbon for a spend: ``kwh * factor``, decimal, labeled ``_est`` at every call site. This is a *model*, not a measurement — the ledger never presents it as measured.
+
+#### `AuthorityRegistry`
+
+Maps ``authority_id`` to an Ed25519 public key (32 bytes).
+
+- `public_key_for(authority_id: str)`
+#### `EnvProfile`
+
+An authority-signed environmental profile for a compute budget.
+
+- `as_dict()`
+#### `issue_env_profile(registry: AuthorityRegistry, *, budget_id: str, kwh_total: int, baseline_kwh_per_hour: int, grid_region: str, emission_factor_digest: str, emission_factor_kg_per_kwh: str, issued_by: str, issued_at: int, expires_at: int, signature: bytes, prev_hash: str='')`
+
+Mint an env profile. The signature must come from a registered human authority over the profile digest; anything else fails loud. There is deliberately no agent-key issuance path.
+
+#### `CurtailmentReceipt`
+
+An authority-signed grid-emergency curtailment order.
+
+- `active_at(unix: int)`
+- `as_dict()`
+#### `issue_curtailment(registry: AuthorityRegistry, *, curtailment_id: str, grid_region: str, start_unix: int, end_unix: int, reduction_factor_permille: int, issued_by: str, issued_at: int, signature: bytes, prev_hash: str='')`
+
+Issue a curtailment order. Only a registered authority can order the grid to shed load; the agent is the *subject*, never the issuer.
+
+#### `EnvSpendReceipt`
+
+One authorized environmental spend, hash-chained.
+
+- `receipt_hash()`
+- `as_dict()`
+#### `EnvVerdict`
+
+The verdict of a gate call.
+
+#### `EnvironmentalCostLedger`
+
+Owns env profiles, curtailment orders, and spend chains.
+
+- `register_profile(profile: EnvProfile)`
+  - Register an authority-signed env profile. Duplicate budget ids refuse (re-issuance is a new receipt chained via ``prev_hash``, never a silent replace).
+- `register_curtailment(order: CurtailmentReceipt)`
+  - Register an authority-signed curtailment order.
+- `remaining_kwh(budget_id: str)`
+  - Current energy balance. Unknown budgets raise (programmer error — the *gate* returns a verdict instead).
+- `active_curtailment(grid_region: str, unix: int)`
+  - The curtailment order active in ``grid_region`` at ``unix``, or None. Orders are authority-signed; the ledger only reads them.
+- `verify_chain(budget_id: str)`
+  - Balance-walk the spend chain: prev_hash links, receipt hashes, and the remaining_kwh step-down. Tampering is caught here, not trusted.
+- `spend(budget_id: str, *, kwh: int, water_liters: int, purpose: str, created_unix: int)`
+  - Authorize one environmental spend. Fail-closed order: profile present -> profile unexpired -> purpose present -> kwh positive -> curtailment cap -> kwh ceiling. The receipt carries ``(kwh, water_lite…
+- `cost_ledger(budget_id: str)`
+  - Deterministic aggregation of the spend chain: kWh, water, and *estimated* carbon per purpose and totals. No new metrics invented — "cost per outcome" is computed *from* the receipts.
+#### `DetectionClaim`
+
+A detection claim binding ``(detection_id, claim_digest, confidence, fit_evidence_digest, detector_id)``.
+
+- `as_dict()`
+#### `DetectionRegistry`
+
+Owns detection claims and the evidence gate.
+
+- `detection_receipt(*, detection_id: str, claim_digest: str, confidence: float, fit_evidence_digest: str, detector_id: str, detected_unix: int)`
+  - Register a detection claim. Below ``DETECTION_CONFIDENCE_MIN`` the claim registers with ``usable_as_evidence=False`` and the verdict denies — the signal is kept, the authority to act on it is withhel…
+- `claim(detection_id: str)`
+- `authorize_action_on_detection(detection_id: str, action_digest: str, created_unix: int)`
+  - Gate downstream action on a detection: unknown detection denies; a registered-but-below-threshold detection denies (``env:insufficient_confidence``). Detection without sufficient confidence is not a…
+#### `MaturityRecord`
+
+A system's maturity label, pinned to its 110th-batch deployment registration digest. The label travels *with* the registration — the system cannot shed ``experimental`` while the registration says otherwise, and the record cannot be widened by the system itself.
+
+- `as_dict()`
+#### `MaturityRegistry`
+
+Owns maturity labels and the output classification gate.
+
+- `register(*, system_id: str, model_digest: str, maturity: str, deployment_receipt_digest: str, registered_by: str, registered_at: int)`
+  - Pin a maturity label. Only ``production`` is authoritative; pilot and experimental outputs classify NON_AUTHORITATIVE. Labels narrow freely (production -> experimental); widening requires a fresh reg…
+- `classify_output(system_id: str)`
+  - Classify a system's output. Experimental (and pilot) systems default NON_AUTHORITATIVE — the WeatherNext 3 discipline, enforced by receipt rather than by press release.
+#### `PhysicsGate`
+
+Physical-extrapolation gate, reusing 111th-batch ``dual_use.ConstraintBinding`` semantics: a task that extrapolates beyond data must hold an authority-signed, hash-chained constraint pin (physical laws, conservation rules, domain limits). The extrapolation declares which constraints it applied; if…
+
+- `register(binding: ConstraintBinding)`
+- `authorize_extrapolation(task_id: str, applied_constraints_digest: str, created_unix: int)`
+  - Authorize one extrapolation. No binding -> deny; applied constraints digest != pinned list digest -> NON_AUTHORITATIVE (``env:physics_gap``).
+#### `ActionConfirmation`
+
+Links a detection to a confirmed action, hash-chained.
+
+- `confirmation_hash()`
+- `as_dict()`
+#### `ActionLinker`
+
+Owns action confirmations; reports open-loop vs confirmed.
+
+- `confirm_action(detection_id: str, action_digest: str, confirmed_by: str, confirmed_unix: int)`
+  - Confirm an action on a detection. The detection must be registered *and* usable as evidence — confirming action on a below-threshold detection denies (``env:insufficient_confidence``): acting on a si…
+- `link_status(detection_id: str)`
+  - ``confirmed`` if at least one action confirmation chains to the detection, else ``open-loop``. Unknown detections are open-loop too — nobody confirmed anything about them.
+#### `EfficiencyClaimRecord`
+
+A checkable efficiency claim: ``(claim_digest, named_platform, measured_metrics_digest)``. Registration means *checkable*, not *true* — the claim can be audited because the platform is named and the metrics are pinned. A claim without both is an ``unverifiable-claim``, not a fact.
+
+- `as_dict()`
+#### `EfficiencyClaimRegistry`
+
+Owns efficiency claims; enforces the named-platform rule.
+
+- `register_efficiency_claim(*, claim_id: str, claim_digest: str, named_platform: str, measured_metrics_digest: str, claimed_by: str, created_unix: int)`
+  - Register an efficiency claim. Missing named platform or unpinned measured metrics -> ``env:unverifiable_efficiency_claim`` (deny). An efficiency claim without a platform you can point at and numbers…
+#### `authority_keypair(seed: bytes)`
+
+Derive ``(public_key, seed)`` from a 32-byte seed.
+
+#### `sign_digest(seed: bytes, digest: str)`
+
+Sign a JCS digest with the authority seed.
+
+#### `profile_digest_for_signing(*, budget_id: str, kwh_total: int, baseline_kwh_per_hour: int, grid_region: str, emission_factor_digest: str, emission_factor_kg_per_kwh: str, issued_by: str, issued_at: int, expires_at: int, prev_hash: str='')`
+
+The exact digest ``issue_env_profile`` verifies — exposed so tests/bench can sign the same bytes the issuer checks.
+
+#### `curtailment_digest_for_signing(*, curtailment_id: str, grid_region: str, start_unix: int, end_unix: int, reduction_factor_permille: int, issued_by: str, issued_at: int, prev_hash: str='')`
+
+The exact digest ``issue_curtailment`` verifies.
 
 ### `tracing`
 

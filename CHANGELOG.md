@@ -1,3 +1,110 @@
+## Unreleased (one-hundred-sixteenth batch) — agriculture extension (AI-agriculture absorption)
+
+New module `agri.py`: authority-signed, hash-chained `AgriSceneBinding`
+receipts binding `(crop_system, farm_scale_class, agroecology_digest)`
+— a model validated on `industrial_monoculture` / `industrial` invoked
+for `smallholder_mixed` / `smallholder` denies with
+`agri.scene_mismatch` (the US-big-farm -> Africa-smallholder scene
+lesson). `field_envelope`: autonomous farm equipment carries an
+authority-armed `FieldEnvelope` pinning field-condition limits, and the
+agent must DECLARE current conditions (`soil_state`,
+`obstacle_state`, `equipment_wear_class`, moisture/slope/obstacle/
+visibility numbers) as a chained `ConditionDeclaration` before
+actuation; declarations expire after `CONDITION_DECLARATION_FRESHNESS_S`
+(3,600s); out-of-envelope or stale/missing conditions deny — the agent
+cannot silently widen the envelope (the Deere capability-envelope
+critique as a mechanism). `farmer_data_receipt()`: farmer-signed data
+grants binding `(data_scope, purpose, revenue_share_terms_digest)`;
+validity is checked at USE time (105th-batch semantics); data reused
+for a new purpose without a new receipt denies with
+`agri.purpose_creep` (SAGE 2026 data-sovereignty lesson).
+`advice_explainability_gate()`: farmer-facing advice must carry
+`why` / `evidence` / `self_check` / `contact` or it classifies
+`NON_AUTHORITATIVE`; advice in a non-local language is
+`agri.language_mismatch` (FAO finding). `record_bad_advice_harm()`
+emits the `agri.bad_advice_harm` harm-ledger entry pinning model,
+input, confidence, and scene-binding digests for downstream liability
+analysis. `check_smallholder_disclosure()`: undeclared or false
+`offline_capable` / `local_language_supported` / `low_bandwidth_mode`
+postures surface as mandatory `deployment.smallholder_exclusion_risk`
+disclosure, never silent omission. Honest scope: scene bindings are
+declared; the module prevents out-of-scope operation, it doesn't make
+the underlying agronomy correct.
+
+## Unreleased (one-hundred-seventeenth batch) — editorial countersign + publication gates (AI-media absorption)
+
+New module `editorial.py`: hash-chained `EditorialCountersign`
+receipts binding `(content_digest, editor_id, reviewed_at,
+disclosure_digest)` — AI-generated content publishes only with a
+signed countersign from a registered human editor who is not the
+publishing agent (the AP 2026-07 rule as a mechanism; the Blackbook
+Media fake-byline case is why self-countersigning denies as
+`media.editor_is_publisher`). Without a valid countersign, publication
+is refused and the content classifies `NON_AUTHORITATIVE` (87th-batch
+binary semantics). `disclosure_gate()` enforces the disclosure duty:
+public-interest AI content must carry a disclosure that is both visible
+and machine-readable and binds the content digest (the label follows
+the payload, not the page); political/election content without a bound
+disclosure is hard-denied as `media.undisclosed_political` (the 2026
+US-midterms ~70%-undisclosed lesson). `check_marking_resilience()`:
+content claiming AI origin must carry verifiable machine-readable
+marking — stripped/downgraded marking is `media.marking_stripped` and
+the content treats as `unverified-origin` (C2PA lesson from the 112th
+batch: absent manifest never proves forgery, claimed origin without
+evidence is unverified). `ugc_probe()`: UGC ingested for republication
+without a capture attestation (device signature / provenance chain) is
+`unverifiable-capture`, never auto-published. `election_deepfake_check()`:
+election-context content requires both source attestation and human
+review; either missing holds publication as `media.election_context_hold`.
+`slop_velocity_gate()`: publication velocity above `SLOP_VELOCITY_MAX`
+items per window from one agent source throttles the source pending
+human review (the "digital slop" tell — speed is the signal). Honest
+scope: watermarks/labels are declared evidence a determined adversary
+can strip; the gates are a tripwire for the publishing pipeline, not a
+forensic guarantee. New `metrics.editorial` bench track (12 scenarios,
+4 allow / 8 deny, 0 mismatches) and 31 unit tests. EU AI Act Art. 50 /
+SB 942 figures are research parameters drawn from the 2026 sweep —
+verify against the primary texts before legal use.
+
+## Unreleased (one-hundred-fifteenth batch) — environmental-cost receipts (AI-climate absorption)
+
+New module `env_cost.py`: authority-signed `EnvProfile` receipts binding
+`(budget_id, kwh_total, baseline_kwh_per_hour, grid_region,
+emission_factor_digest, emission_factor_kg_per_kwh)` — the ledger's
+answer to compute budgets (109th batch): every spend receipt carries
+`(kwh, water_liters, carbon_kg_est, grid_region)` so an agent's energy
+appetite is attributable, capped, and curtailment-aware. Carbon is
+*modeled* from the pinned decimal emission factor and labeled `_est`
+on every surface — measured kWh, modeled carbon, never confused (the
+ledger attributes cost, it doesn't meter physics). `spend()` fails
+closed: unknown budget, expired profile, missing purpose, and kWh
+overspend all deny; `verify_chain()` balance-walks the hash chain and
+`cost_ledger()` aggregates kWh/water/estimated-carbon per purpose.
+`CurtailmentReceipt`: authority-signed grid-emergency orders
+`(grid_region, start_unix, end_unix, reduction_factor_permille)`; during
+an active curtailment a spend above
+`baseline_kwh_per_hour * factor / 1000` denies with
+`env:curtailment_violation` — the cap is pinned to the budget's own
+baseline, no self-attestation (the May-2026 DOE emergency-order
+lesson). `DetectionRegistry.detection_receipt()` binds
+`(claim_digest, confidence, fit_evidence_digest)`; below
+`DETECTION_CONFIDENCE_MIN` (0.7) the claim registers but is *not
+usable as evidence* — low-confidence detection cannot authorize
+downstream action (the MAPL-EMIT confidence + spectral-fit lesson).
+`MaturityRegistry`: `experimental`/`pilot` systems classify
+`NON_AUTHORITATIVE` by default, the label pinned to the 110th-batch
+deployment registration digest so it can't drift (the WeatherNext 3
+self-labeling discipline). `PhysicsGate`: physical extrapolation must
+hold a `dual_use.ConstraintBinding`; applied constraints diverging
+from the pinned list deny with `env:physics_gap` (the SAFS26-a
+lesson). `ActionLinker`: detections are `open-loop` until an
+`ActionConfirmation` receipt chains to them — dashboards must not
+present unconfirmed detections as resolved (the UN MARS lesson).
+`EfficiencyClaimRegistry`: claims without a named platform AND pinned
+measured-metrics digest classify `unverifiable-claim` (the Green AI
+named-platform rule). Honest scope: kWh/water are declared by the
+host; carbon is modeled from a pinned factor.
+
 ## Unreleased (one-hundred-fourteenth batch) — language-capability receipts (low-resource-language absorption)
 
 New module `language_cap.py`: authority-signed, hash-chained

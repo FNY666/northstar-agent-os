@@ -6597,6 +6597,909 @@ def run_dual_use() -> dict[str, Any]:
     }
 
 
+def run_agri() -> dict[str, Any]:
+    """Deterministic agri-extension scenarios: 12 scenarios, 3 allow / 9 deny.
+
+    Ground truth:
+
+    * allow_smallholder_bound_advice — binding for
+      ``smallholder_mixed`` / ``smallholder`` with a matching observed
+      scene allows.
+    * allow_actuation_in_envelope — fresh conditions declaration with
+      all conditions inside the envelope allows.
+    * allow_data_use_consented — a live farmer receipt for the exact
+      scope and purpose allows use.
+    * deny_industrial_to_smallholder — binding validated on
+      ``industrial_monoculture`` / ``industrial`` invoked for
+      ``smallholder_mixed`` / ``smallholder``: ``agri.scene_mismatch``.
+    * deny_wet_soil_actuation — declared soil moisture above the
+      envelope cap: ``agri.condition_out_of_envelope``.
+    * deny_no_conditions_declared — actuation with no declaration at
+      all: ``agri.no_conditions_declared``.
+    * deny_stale_declaration — a conditions declaration older than the
+      freshness window: ``agri.condition_declaration_stale``.
+    * deny_purpose_creep — yield-prediction data reused for credit
+      scoring without a new receipt: ``agri.purpose_creep``.
+    * deny_revoked_data_receipt — a revoked farmer receipt checked at
+      use time: ``agri.data_receipt_revoked``.
+    * deny_advice_missing_field — advice missing ``self_check``:
+      NON_AUTHORITATIVE.
+    * deny_advice_language_mismatch — advice in English to a farmer
+      whose local language is Swahili: ``agri.language_mismatch``.
+    * deny_undisclosed_smallholder_access — no accessibility
+      declaration at all: mandatory
+      ``deployment.smallholder_exclusion_risk`` disclosure.
+
+    Deterministic: pinned keys (``hashlib.sha256`` seeds), pinned
+    times, ``now`` fixed at 1_700_000_000. No network, no model.
+    """
+    from agri import (
+        AGRI_BAD_ADVICE_HARM_EVENT,
+        AGRI_EXCLUSION_RISK_EVENT,
+        DENY_ADVICE_LANGUAGE_MISMATCH,
+        DENY_CONDITION_DECLARATION_STALE,
+        DENY_CONDITION_OUT_OF_ENVELOPE,
+        DENY_DATA_PURPOSE_CREEP,
+        DENY_DATA_REVOKED,
+        DENY_NO_CONDITIONS_DECLARED,
+        DENY_SCENE_MISMATCH,
+        NON_AUTHORITATIVE_ADVICE,
+        advice_explainability_gate,
+        arm_field_envelope,
+        check_actuation,
+        check_agri_scene,
+        check_data_use,
+        check_smallholder_disclosure,
+        declare_conditions,
+        farmer_data_receipt,
+        issue_agri_binding,
+        record_bad_advice_harm,
+        revoke_farmer_data,
+        verify_envelope_independence,
+    )
+
+    import hashlib as _hashlib
+
+    from ed25519 import public_key as _pub
+
+    NOW = 1_700_000_000
+    scenarios: list[tuple[str, bool, bool, str]] = []
+
+    def record(sid: str, allowed: bool, expect_allow: bool, reason: str) -> None:
+        scenarios.append((sid, allowed, expect_allow, reason))
+
+    auth_sec = _hashlib.sha256(b"agri/authority").digest()
+    _pub(auth_sec)
+    farmer_sec = _hashlib.sha256(b"agri/farmer-1").digest()
+    _pub(farmer_sec)
+
+    agro_iowa = _hashlib.sha256(b"agroecology:iowa-monoculture").hexdigest()
+    agro_kakamega = _hashlib.sha256(b"agroecology:kakamega-mixed").hexdigest()
+    model_d = _hashlib.sha256(b"model:agronomy-v7").hexdigest()
+    terms_d = _hashlib.sha256(b"terms:50pct-revenue-share").hexdigest()
+    bind_iowa_digest = _hashlib.sha256(b"binding:iowa").hexdigest()
+    input_d = _hashlib.sha256(b"input:drone-image-123").hexdigest()
+
+    def make_scene_binding(crop_system: str, scale: str, agro: str) -> AgriSceneBinding:
+        return issue_agri_binding(
+            binding_id=f"agb-{crop_system}-{scale}",
+            capability_id="agri/advice",
+            model_version_digest=model_d,
+            crop_system=crop_system,
+            farm_scale_class=scale,
+            agroecology_digest=agro,
+            authority_secret=auth_sec,
+            authorized_by="agri-board",
+            authorized_at=NOW - 86400,
+            expires_at=NOW + 86400,
+        )
+
+    def make_field_envelope() -> FieldEnvelope:
+        return arm_field_envelope(
+            envelope_id="field-env-1",
+            equipment_id="sprayer/auto-2",
+            limits={
+                "max_soil_moisture_pct": 60.0,
+                "max_slope_pct": 12.0,
+                "max_obstacle_density": 0.3,
+                "min_visibility_m": 50.0,
+                "max_speed_mps": 2.5,
+                "max_pesticide_L_per_ha": 1.5,
+            },
+            authority_secret=auth_sec,
+            armed_by="agri-board",
+            armed_at=NOW - 86400,
+            expires_at=NOW + 86400,
+        )
+
+    def make_conditions(envelope: FieldEnvelope, moisture: float, declared_at: int) -> ConditionDeclaration:
+        return declare_conditions(
+            declaration_id="cond-1",
+            envelope=envelope,
+            soil_state="wet" if moisture > 40 else "moist",
+            obstacle_state="sparse",
+            equipment_wear_class="normal",
+            soil_moisture_pct=moisture,
+            slope_pct=5.0,
+            obstacle_density=0.1,
+            visibility_m=200.0,
+            declared_at=declared_at,
+        )
+
+    # -- A1. Bound smallholder advice --------------------------------------
+    binding = make_scene_binding("smallholder_mixed", "smallholder", agro_kakamega)
+    v = check_agri_scene(
+        binding,
+        crop_system="smallholder_mixed",
+        farm_scale_class="smallholder",
+        agroecology_digest=agro_kakamega,
+        now=NOW,
+    )
+    record("allow_smallholder_bound_advice", v.allowed, True, v.reason)
+
+    # -- A2. Actuation inside the envelope ----------------------------------
+    env = make_field_envelope()
+    decl = make_conditions(env, moisture=35.0, declared_at=NOW - 60)
+    v2 = check_actuation(envelope=env, declaration=decl, now=NOW)
+    record("allow_actuation_in_envelope", v2.allowed, True, v2.reason)
+
+    # -- A3. Consented data use ---------------------------------------------
+    receipt = farmer_data_receipt(
+        receipt_id="fdr-1",
+        farmer_id="farmer-wanjiru",
+        farmer_secret=farmer_sec,
+        data_scope="yield",
+        purpose="yield prediction",
+        revenue_share_terms_digest=terms_d,
+        granted_at=NOW - 86400,
+        expires_at=NOW + 86400,
+    )
+    v3 = check_data_use(
+        [receipt],
+        farmer_id="farmer-wanjiru",
+        data_scope="yield",
+        purpose="yield prediction",
+        use_time=NOW,
+    )
+    record("allow_data_use_consented", v3.allowed, True, v3.reason)
+
+    # -- D1. Industrial-validated model -> smallholder scene ----------------
+    binding = make_scene_binding("industrial_monoculture", "industrial", agro_iowa)
+    v = check_agri_scene(
+        binding,
+        crop_system="smallholder_mixed",
+        farm_scale_class="smallholder",
+        agroecology_digest=agro_kakamega,
+        now=NOW,
+    )
+    record("deny_industrial_to_smallholder", v.allowed, False,
+           v.reason if v.reason == DENY_SCENE_MISMATCH else f"WRONG:{v.reason}")
+
+    # -- D2. Wet soil beyond envelope ---------------------------------------
+    env = make_field_envelope()
+    decl = make_conditions(env, moisture=85.0, declared_at=NOW - 60)
+    v2 = check_actuation(envelope=env, declaration=decl, now=NOW)
+    record("deny_wet_soil_actuation", v2.allowed, False,
+           v2.reason if v2.reason == DENY_CONDITION_OUT_OF_ENVELOPE
+           else f"WRONG:{v2.reason}")
+
+    # -- D3. No conditions declaration --------------------------------------
+    env = make_field_envelope()
+    v2 = check_actuation(envelope=env, declaration=None, now=NOW)
+    record("deny_no_conditions_declared", v2.allowed, False,
+           v2.reason if v2.reason == DENY_NO_CONDITIONS_DECLARED
+           else f"WRONG:{v2.reason}")
+
+    # -- D4. Stale declaration ----------------------------------------------
+    env = make_field_envelope()
+    decl = make_conditions(env, moisture=35.0, declared_at=NOW - 7200)
+    v2 = check_actuation(envelope=env, declaration=decl, now=NOW)
+    record("deny_stale_declaration", v2.allowed, False,
+           v2.reason if v2.reason == DENY_CONDITION_DECLARATION_STALE
+           else f"WRONG:{v2.reason}")
+
+    # -- D5. Purpose creep: yield data reused for credit scoring ------------
+    receipt = farmer_data_receipt(
+        receipt_id="fdr-2",
+        farmer_id="farmer-wanjiru",
+        farmer_secret=farmer_sec,
+        data_scope="yield",
+        purpose="yield prediction",
+        revenue_share_terms_digest=terms_d,
+        granted_at=NOW - 86400,
+        expires_at=NOW + 86400,
+    )
+    v3 = check_data_use(
+        [receipt],
+        farmer_id="farmer-wanjiru",
+        data_scope="yield",
+        purpose="credit scoring",
+        use_time=NOW,
+    )
+    record("deny_purpose_creep", v3.allowed, False,
+           v3.reason if v3.reason == DENY_DATA_PURPOSE_CREEP
+           else f"WRONG:{v3.reason}")
+
+    # -- D6. Revoked receipt checked at use time ----------------------------
+    receipt = farmer_data_receipt(
+        receipt_id="fdr-3",
+        farmer_id="farmer-wanjiru",
+        farmer_secret=farmer_sec,
+        data_scope="soil",
+        purpose="fertilizer recommendation",
+        revenue_share_terms_digest=terms_d,
+        granted_at=NOW - 86400,
+        expires_at=NOW + 86400,
+    )
+    rev = revoke_farmer_data(
+        revocation_id="rev-3",
+        receipt=receipt,
+        farmer_secret=farmer_sec,
+        revoked_at=NOW - 3600,
+    )
+    v3 = check_data_use(
+        [receipt, rev],
+        farmer_id="farmer-wanjiru",
+        data_scope="soil",
+        purpose="fertilizer recommendation",
+        use_time=NOW,
+    )
+    record("deny_revoked_data_receipt", v3.allowed, False,
+           v3.reason if v3.reason == DENY_DATA_REVOKED else f"WRONG:{v3.reason}")
+
+    # -- D7. Advice missing self_check ---------------------------------------
+    av = advice_explainability_gate(
+        {
+            "why": "Leaf yellowing matches nitrogen deficiency in this variety.",
+            "evidence": "Field trials 2024-2025, 3 counties, n=212.",
+            "contact": "Extension officer: +254 700 000 000.",
+            "language": "swahili",
+        },
+        farmer_language="swahili",
+    )
+    record("deny_advice_missing_field", av.allowed, False,
+           av.reason if (av.classification == NON_AUTHORITATIVE_ADVICE
+                         and "self_check" in av.reason)
+           else f"WRONG:{av.reason}")
+
+    # -- D8. Advice in the wrong language ------------------------------------
+    av = advice_explainability_gate(
+        {
+            "why": "Leaf yellowing matches nitrogen deficiency in this variety.",
+            "evidence": "Field trials 2024-2025, 3 counties, n=212.",
+            "self_check": "Check whether the lower leaves yellow first.",
+            "contact": "Extension officer: +254 700 000 000.",
+            "language": "english",
+        },
+        farmer_language="swahili",
+    )
+    record("deny_advice_language_mismatch", av.allowed, False,
+           av.reason if (av.reason == DENY_ADVICE_LANGUAGE_MISMATCH
+                         and av.classification == NON_AUTHORITATIVE_ADVICE)
+           else f"WRONG:{av.reason}")
+
+    # -- D9. No smallholder-access declaration: mandatory disclosure ----------
+    disc = check_smallholder_disclosure(None, system_id="agri/advisor-7")
+    expected = disc.disclosure_event.get("event") == AGRI_EXCLUSION_RISK_EVENT
+    record("deny_undisclosed_smallholder_access",
+           not disc.disclosure_required, False,
+           f"WRONG: disclosure missing" if not expected
+           else (f"WRONG: not required" if not disc.disclosure_required
+                 else f"{disc.disclosure_event['event']}: disclosed {sorted(disc.undisclosed)}"))
+
+    # -- the harm ledger entry always pins its digests -----------------------
+    harm = record_bad_advice_harm(
+        advice_id="adv-9",
+        scene_binding_digest=bind_iowa_digest,
+        model_version_digest=model_d,
+        input_digest=input_d,
+        confidence=0.92,
+        harm_description="Misdiagnosed armyworm as nutrient deficiency; full-season maize loss.",
+        recorded_at=NOW,
+    )
+    harm_ok = (
+        harm["event"] == AGRI_BAD_ADVICE_HARM_EVENT
+        and harm["scene_binding_digest"] == bind_iowa_digest
+        and harm["model_version_digest"] == model_d
+    )
+    if not harm_ok:
+        scenarios.append(("harm_ledger_pins_digests", True, False, "ledger entry malformed"))
+
+    # -- independence probe always holds ------------------------------------
+    ok, probe_reason = verify_envelope_independence()
+    if not ok:
+        scenarios.append(("probe_independence_broken", True, False, probe_reason))
+
+    mismatches = [
+        sid for (sid, allowed, expect_allow, _reason) in scenarios
+        if allowed != expect_allow
+    ]
+    wrong_reasons = [
+        f"{sid}:{reason}"
+        for (sid, allowed, expect_allow, reason) in scenarios
+        if allowed == expect_allow and reason.startswith("WRONG")
+    ]
+    allowed_ids = sorted(sid for (sid, allowed, _e, _r) in scenarios if allowed)
+    detail = {sid: reason for (sid, _a, _e, reason) in scenarios}
+    return {
+        "n_scenarios": len(scenarios),
+        "n_allowed": len(allowed_ids),
+        "n_denied": len(scenarios) - len(allowed_ids),
+        "allowed_ids": allowed_ids,
+        "mismatches": mismatches + wrong_reasons,
+        "detail": detail,
+        "denial_reasons": {
+            sid: reason
+            for (sid, allowed, _e, reason) in scenarios
+            if not allowed
+        },
+    }
+
+
+def run_editorial() -> dict[str, Any]:
+    """Editorial countersign + publication gates (one-hundred-seventeenth batch).
+
+    Absorbs the 2026 AI-media thread: EU AI Act Art. 50 (applicable
+    2026-08-02) and California SB 942 both demand machine-readable
+    AI-output marking; the AP's 2026-07 guidance requires AI output to
+    be journalist-reviewed before publication; the Blackbook Media case
+    showed what happens when "reviewed" is self-asserted (fake bylines,
+    leftover prompt text); ~70% of AI political ads in the US midterms
+    shipped undisclosed. This runner exercises ``editorial`` over 12
+    deterministic scenarios: 4 allow / 8 deny.
+    """
+    from editorial import (
+        DENY_DISCLOSURE_UNBOUND,
+        DENY_EDITOR_IS_PUBLISHER,
+        DENY_ELECTION_HOLD,
+        DENY_MARKING_STRIPPED,
+        DENY_NO_COUNTERSIGN,
+        DENY_SLOP_VELOCITY,
+        DENY_UNDISCLOSED_POLITICAL,
+        DENY_UNVERIFIABLE_CAPTURE,
+        SLOP_VELOCITY_MAX,
+        CaptureAttestation,
+        DisclosureRecord,
+        EditorialCountersign,
+        EditorRecord,
+        EditorRegistry,
+        attest_capture,
+        check_publication,
+        countersign_content,
+        editorial_audit_event,
+        election_deepfake_check,
+        slop_velocity_gate,
+    )
+    from canonical_json import jcs_sha256_hex
+    import ed25519
+
+    _T0 = 1_800_000_000
+
+    def _dg(text: str) -> str:
+        return jcs_sha256_hex({"payload": text})
+
+    def _mk_marking(payload: str) -> tuple[str, str]:
+        return payload, jcs_sha256_hex({"marking_payload": payload})
+
+    def _setup(content_label: str) -> dict[str, Any]:
+        editor_secret = bytes(range(32))
+        pubkey = ed25519.public_key(editor_secret).hex()
+        registry = EditorRegistry()
+        registry.register(
+            EditorRecord(
+                editor_id="desk-editor-7",
+                pubkey_hex=pubkey,
+                registered_at=_T0 - 86_400,
+            )
+        )
+        content_digest = _dg(content_label)
+        disclosure = DisclosureRecord(
+            content_digest=content_digest,
+            visible_text="AI-assisted draft; reviewed by a journalist.",
+            machine_readable_payload='{"ai_generated": true, "label": "eu-art50"}',
+            disclosed_at=_T0 - 3_600,
+        )
+        countersign = countersign_content(
+            content_digest=content_digest,
+            editor_id="desk-editor-7",
+            editor_secret=editor_secret,
+            reviewed_at=_T0 - 3_600,
+            disclosure_digest=disclosure.disclosure_digest,
+        )
+        marking_payload, marking_digest = _mk_marking("watermark:eu-art50:v1")
+        return {
+            "registry": registry,
+            "content_digest": content_digest,
+            "disclosure": disclosure,
+            "countersign": countersign,
+            "log": [countersign],
+            "marking_payload": marking_payload,
+            "marking_digest": marking_digest,
+            "editor_secret": editor_secret,
+        }
+
+    def _publish(s: dict[str, Any], **overrides: Any):
+        kw: dict[str, Any] = {
+            "content_digest": s["content_digest"],
+            "content_kind": "general",
+            "publisher_agent_id": "newsbot-agent-3",
+            "publish_time": _T0,
+            "countersign": s["countersign"],
+            "countersign_log": s["log"],
+            "registry": s["registry"],
+            "disclosure": s["disclosure"],
+            "claims_ai_generated": True,
+            "marking_payload": s["marking_payload"],
+            "expected_marking_digest": s["marking_digest"],
+            "ugc_capture": False,
+            "capture_attestation": None,
+            "election_source_attestation": None,
+        }
+        kw.update(overrides)
+        verdict = check_publication(**kw)
+        return {
+            "verdict": "allow" if verdict.allowed else "deny",
+            "reason": verdict.reason,
+            "classification": verdict.classification,
+            "event": editorial_audit_event(verdict, action="publish"),
+        }
+
+    scenarios: list[tuple[str, str, Any]] = []
+
+    def _scenario(sid: str, expected: str, thunk: Any) -> None:
+        scenarios.append((sid, expected, thunk))
+
+    # 1: fully countersigned general article -> allow.
+    def _s1():
+        return _publish(_setup("bench-article"))
+
+    _scenario("allow_countersigned_general", "allow", _s1)
+
+    # 2: political content with bound disclosure -> allow.
+    def _s2():
+        s = _setup("bench-political-ad")
+        return _publish(s, content_kind="political")
+
+    _scenario("allow_political_disclosed", "allow", _s2)
+
+    # 3: election content with source attestation + human review -> allow.
+    def _s3():
+        s = _setup("bench-election-story")
+        att = attest_capture(
+            capture_digest=s["content_digest"],
+            attestor_id="newsroom-ingest",
+            attestor_secret=bytes(range(96, 128)),
+            captured_at=_T0 - 3_600,
+        )
+        return _publish(
+            s,
+            content_kind="election",
+            election_source_attestation=att,
+        )
+
+    _scenario("allow_election_full", "allow", _s3)
+
+    # 4: UGC republication with capture attestation -> allow.
+    def _s4():
+        s = _setup("bench-ugc-story")
+        att = attest_capture(
+            capture_digest=s["content_digest"],
+            attestor_id="pixel-11-camera",
+            attestor_secret=bytes(range(64, 96)),
+            captured_at=_T0 - 7_200,
+        )
+        return _publish(s, ugc_capture=True, capture_attestation=att)
+
+    _scenario("allow_ugc_attested", "allow", _s4)
+
+    # 5: no countersign -> deny (AP rule), non_authoritative.
+    def _s5():
+        return _publish(_setup("bench-no-review"), countersign=None)
+
+    _scenario("deny_no_countersign", "deny", _s5)
+
+    # 6: political content without disclosure -> hard deny.
+    def _s6():
+        s = _setup("bench-undisclosed-ad")
+        return _publish(s, content_kind="political", disclosure=None)
+
+    _scenario("deny_undisclosed_political", "deny", _s6)
+
+    # 7: disclosure swapped after review -> deny (label must bind).
+    def _s7():
+        s = _setup("bench-swapped-label")
+        swapped = DisclosureRecord(
+            content_digest=s["content_digest"],
+            visible_text="Different disclosure than the one reviewed.",
+            machine_readable_payload='{"ai_generated": true}',
+            disclosed_at=_T0 - 60,
+        )
+        return _publish(s, disclosure=swapped)
+
+    _scenario("deny_disclosure_swapped", "deny", _s7)
+
+    # 8: marking stripped/downgraded in transit -> deny, unverified origin.
+    def _s8():
+        s = _setup("bench-stripped-marking")
+        return _publish(s, marking_payload="tampered-by-transit")
+
+    _scenario("deny_marking_stripped", "deny", _s8)
+
+    # 9: UGC without capture attestation -> never auto-published.
+    def _s9():
+        return _publish(
+            _setup("bench-ugc-unattested"),
+            ugc_capture=True,
+            capture_attestation=None,
+        )
+
+    _scenario("deny_ugc_no_attestation", "deny", _s9)
+
+    # 10: election content without human review -> context hold.
+    def _s10():
+        verdict = election_deepfake_check(
+            content_kind="election",
+            source_attestation=attest_capture(
+                capture_digest=_dg("bench-rally-clip"),
+                attestor_id="newsroom-ingest",
+                attestor_secret=bytes(range(96, 128)),
+                captured_at=_T0 - 3_600,
+            ),
+            human_review=None,
+        )
+        return {
+            "verdict": "deny" if not verdict.allowed else "allow",
+            "reason": verdict.reason,
+            "classification": verdict.classification,
+            "event": editorial_audit_event(verdict, action="publish"),
+        }
+
+    _scenario("deny_election_no_review", "deny", _s10)
+
+    # 11: countersign by the publishing agent itself -> deny (Blackbook lesson).
+    def _s11():
+        s = _setup("bench-self-countersign")
+        agent_secret = bytes(range(32, 64))
+        agent_pubkey = ed25519.public_key(agent_secret).hex()
+        reg = EditorRegistry()
+        reg.register(
+            EditorRecord(
+                editor_id="newsbot-agent-3",
+                pubkey_hex=agent_pubkey,
+                registered_at=_T0 - 86_400,
+            )
+        )
+        sneaky = countersign_content(
+            content_digest=s["content_digest"],
+            editor_id="newsbot-agent-3",
+            editor_secret=agent_secret,
+            reviewed_at=_T0 - 3_600,
+            disclosure_digest=s["disclosure"].disclosure_digest,
+        )
+        return _publish(
+            s,
+            countersign=sneaky,
+            countersign_log=[sneaky],
+            registry=reg,
+        )
+
+    _scenario("deny_editor_is_publisher", "deny", _s11)
+
+    # 12: slop velocity over max -> throttled pending human review.
+    def _s12():
+        verdict = slop_velocity_gate(
+            source_id="slop-farm-9",
+            publish_times=list(range(_T0, _T0 + SLOP_VELOCITY_MAX + 1)),
+            window_start=_T0,
+            window_end=_T0 + 3_600,
+        )
+        return {
+            "verdict": "deny" if not verdict.allowed else "allow",
+            "reason": verdict.reason,
+            "classification": verdict.classification,
+            "event": editorial_audit_event(verdict, action="publish"),
+        }
+
+    _scenario("deny_slop_velocity", "deny", _s12)
+
+    mismatches: list[str] = []
+    allowed_ids: list[str] = []
+    warned_ids: list[str] = []
+    denial_reasons: dict[str, str] = {}
+    for sid, expected, thunk in scenarios:
+        try:
+            outcome = thunk()
+        except Exception as error:  # noqa: BLE001 — fail-closed probe
+            outcome = {"verdict": "deny", "reason": f"raised: {error}"}
+        verdict = outcome.get("verdict")
+        if verdict != expected:
+            mismatches.append(
+                f"{sid}: expected {expected}, got {verdict}"
+            )
+        if verdict == "allow":
+            allowed_ids.append(sid)
+        elif verdict == "allow-with-warning":
+            warned_ids.append(sid)
+        else:
+            denial_reasons[sid] = outcome.get("reason", "")
+            ev = outcome.get("event") or {}
+            if ev.get("event") not in ("editorial.denied", "editorial.allowed"):
+                mismatches.append(f"{sid}: denial must emit a known event")
+
+    return {
+        "n_scenarios": len(scenarios),
+        "mismatches": mismatches,
+        "allowed_ids": allowed_ids,
+        "warned_ids": warned_ids,
+        "denial_reasons": denial_reasons,
+    }
+
+
+def run_env_cost() -> dict[str, Any]:
+    """Environmental-cost receipts (one-hundred-fifteenth batch).
+
+    Absorbs the 2026 AI-climate thread: ~565 TWh of datacenter
+    electricity in 2026 (+26%), AI's share of global generation headed
+    1.8% -> 3.7-4%, a May-2026 US DOE emergency order drafting
+    datacenter generators into PJM, and Google's 10.9B gallons of
+    water (+34%). This runner exercises ``env_cost`` over 12
+    deterministic scenarios: energy spend receipts carrying
+    (kwh, water, estimated carbon, region), authority-signed
+    curtailment caps pinned to the budget's own baseline,
+    confidence-gated detections, experimental-system labeling,
+    physics-constrained extrapolation, open-loop vs confirmed
+    detections, and the named-platform efficiency-claim rule.
+    Ground truth is closed: 4 allow / 8 deny.
+    """
+    from env_cost import (
+        DENY_BUDGET_EXHAUSTED,
+        DENY_CURTAILMENT_VIOLATION,
+        DENY_INSUFFICIENT_CONFIDENCE,
+        DENY_PHYSICS_GAP,
+        DENY_UNVERIFIABLE_EFFICIENCY,
+        ActionLinker,
+        AuthorityRegistry,
+        DetectionRegistry,
+        EfficiencyClaimRegistry,
+        EnvironmentalCostLedger,
+        MaturityRegistry,
+        PhysicsGate,
+        authority_keypair,
+        curtailment_digest_for_signing,
+        issue_curtailment,
+        issue_env_profile,
+        profile_digest_for_signing,
+        sign_digest,
+    )
+    from dual_use import (
+        AuthorityRegistry as DualRegistry,
+        _binding_digest_for_signing,
+        authority_keypair as dual_authority_keypair,
+        issue_constraint_binding,
+        sign_binding_digest,
+    )
+    from canonical_json import jcs_sha256_hex
+
+    _T0 = 1_789_000_000
+    _FACTOR = "0.429"
+    _FACTOR_DIGEST = jcs_sha256_hex({"emission-factor": "PJM-2026-marginal"})
+    _HEX = jcs_sha256_hex({"x": 1})
+
+    def _authority():
+        pub, seed = authority_keypair(b"\x0f" * 32)
+        return AuthorityRegistry({"grid-authority": pub}), seed
+
+    def _profiled_ledger():
+        registry, seed = _authority()
+        kw = dict(budget_id="b1", kwh_total=1_000,
+                  baseline_kwh_per_hour=100, grid_region="PJM",
+                  emission_factor_digest=_FACTOR_DIGEST,
+                  emission_factor_kg_per_kwh=_FACTOR,
+                  issued_by="grid-authority", issued_at=_T0,
+                  expires_at=_T0 + 86_400, prev_hash="")
+        digest = profile_digest_for_signing(**kw)
+        profile = issue_env_profile(registry,
+                                    signature=sign_digest(seed, digest), **kw)
+        ledger = EnvironmentalCostLedger()
+        ledger.register_profile(profile)
+        return ledger, registry, seed
+
+    def _curtail(ledger, registry, seed):
+        kw = dict(curtailment_id="c1", grid_region="PJM",
+                  start_unix=_T0, end_unix=_T0 + 3_600,
+                  reduction_factor_permille=300,
+                  issued_by="grid-authority", issued_at=_T0, prev_hash="")
+        digest = curtailment_digest_for_signing(**kw)
+        ledger.register_curtailment(
+            issue_curtailment(registry, signature=sign_digest(seed, digest),
+                              **kw))
+
+    scenarios: list[tuple[str, str, Any]] = []
+
+    def _scenario(sid: str, expected: str, thunk: Any) -> None:
+        scenarios.append((sid, expected, thunk))
+
+    def _verdict_outcome(v):
+        return {"verdict": "allow" if v.allowed else "deny",
+                "reason": v.reason, "event": v.audit_event}
+
+    # 1: spend within budget, no curtailment active -> allow.
+    def _s1():
+        ledger, _r, _s = _profiled_ledger()
+        v = ledger.spend("b1", kwh=100, water_liters=500, purpose="train",
+                         created_unix=_T0 + 7_200)
+        return _verdict_outcome(v)
+
+    _scenario("allow_spend_within_budget", "allow", _s1)
+
+    # 2: curtailment active, spend at/below the pinned cap -> allow.
+    def _s2():
+        ledger, registry, seed = _profiled_ledger()
+        _curtail(ledger, registry, seed)
+        v = ledger.spend("b1", kwh=30, water_liters=0, purpose="train",
+                         created_unix=_T0 + 100)
+        return _verdict_outcome(v)
+
+    _scenario("allow_spend_within_curtailment_cap", "allow", _s2)
+
+    # 3: high-confidence detection authorizes action -> allow.
+    def _s3():
+        reg = DetectionRegistry()
+        reg.detection_receipt(detection_id="d1", claim_digest=_HEX,
+                              confidence=0.92, fit_evidence_digest=_HEX,
+                              detector_id="mapl-emit-1", detected_unix=_T0)
+        v = reg.authorize_action_on_detection("d1", _HEX, _T0)
+        return _verdict_outcome(v)
+
+    _scenario("allow_confident_detection_action", "allow", _s3)
+
+    # 4: production system output -> authoritative (allow).
+    def _s4():
+        reg = MaturityRegistry()
+        reg.register(system_id="prod1", model_digest=_HEX,
+                     maturity="production", deployment_receipt_digest=_HEX,
+                     registered_by="ops", registered_at=_T0)
+        v = reg.classify_output("prod1")
+        return _verdict_outcome(v)
+
+    _scenario("allow_production_output", "allow", _s4)
+
+    # 5: spend without a profile -> env:unknown_budget (deny).
+    def _s5():
+        ledger = EnvironmentalCostLedger()
+        v = ledger.spend("ghost", kwh=1, water_liters=0, purpose="x",
+                         created_unix=_T0)
+        return _verdict_outcome(v)
+
+    _scenario("deny_no_profile", "deny", _s5)
+
+    # 6: kwh overspend -> env:budget_exhausted (deny).
+    def _s6():
+        ledger, _r, _s = _profiled_ledger()
+        ledger.spend("b1", kwh=1_000, water_liters=0, purpose="train",
+                     created_unix=_T0 + 7_200)
+        v = ledger.spend("b1", kwh=1, water_liters=0, purpose="train",
+                         created_unix=_T0 + 7_201)
+        return _verdict_outcome(v)
+
+    _scenario("deny_kwh_exhausted", "deny", _s6)
+
+    # 7: full-rate burn during curtailment -> env:curtailment_violation.
+    def _s7():
+        ledger, registry, seed = _profiled_ledger()
+        _curtail(ledger, registry, seed)
+        v = ledger.spend("b1", kwh=100, water_liters=0, purpose="train",
+                         created_unix=_T0 + 100)
+        return _verdict_outcome(v)
+
+    _scenario("deny_curtailment_violation", "deny", _s7)
+
+    # 8: low-confidence detection cannot authorize -> deny.
+    def _s8():
+        reg = DetectionRegistry()
+        reg.detection_receipt(detection_id="d2", claim_digest=_HEX,
+                              confidence=0.4, fit_evidence_digest=_HEX,
+                              detector_id="mapl-emit-1", detected_unix=_T0)
+        v = reg.authorize_action_on_detection("d2", _HEX, _T0)
+        return _verdict_outcome(v)
+
+    _scenario("deny_low_confidence", "deny", _s8)
+
+    # 9: experimental system output -> NON_AUTHORITATIVE (deny).
+    def _s9():
+        reg = MaturityRegistry()
+        reg.register(system_id="wx3", model_digest=_HEX,
+                     maturity="experimental", deployment_receipt_digest=_HEX,
+                     registered_by="ops", registered_at=_T0)
+        v = reg.classify_output("wx3")
+        return {"verdict": "deny", "reason": v.classification,
+                "event": v.audit_event}
+
+    _scenario("deny_experimental", "deny", _s9)
+
+    # 10: extrapolation beyond pinned constraints -> env:physics_gap.
+    def _s10():
+        pub, dseed = dual_authority_keypair(b"\x0f" * 32)
+        dreg = DualRegistry({"lab-director": pub})
+        list_digest = jcs_sha256_hex({"constraints": ["navier-stokes"]})
+        digest = _binding_digest_for_signing(
+            task_id="coast-sim", constraint_list_digest=list_digest,
+            constraint_source="physics-handbook-v2",
+            issued_by="lab-director", issued_at=_T0, prev_hash="")
+        binding = issue_constraint_binding(
+            dreg, task_id="coast-sim", constraint_list_digest=list_digest,
+            constraint_source="physics-handbook-v2",
+            issued_by="lab-director", issued_at=_T0,
+            signature=sign_binding_digest(dseed, digest), prev_hash="")
+        gate = PhysicsGate()
+        gate.register(binding)
+        v = gate.authorize_extrapolation("coast-sim", _HEX, _T0)
+        return _verdict_outcome(v)
+
+    _scenario("deny_physics_gap", "deny", _s10)
+
+    # 11: efficiency claim without a named platform -> unverifiable.
+    def _s11():
+        reg = EfficiencyClaimRegistry()
+        _record, v = reg.register_efficiency_claim(
+            claim_id="e1", claim_digest=_HEX, named_platform="",
+            measured_metrics_digest=_HEX, claimed_by="lab",
+            created_unix=_T0)
+        return _verdict_outcome(v)
+
+    _scenario("deny_unverifiable_efficiency", "deny", _s11)
+
+    # 12: confirming action on a below-threshold detection -> deny.
+    def _s12():
+        reg = DetectionRegistry()
+        reg.detection_receipt(detection_id="d3", claim_digest=_HEX,
+                              confidence=0.3, fit_evidence_digest=_HEX,
+                              detector_id="mapl-emit-1", detected_unix=_T0)
+        linker = ActionLinker(reg)
+        _c, v = linker.confirm_action("d3", _HEX, "ops-team", _T0 + 60)
+        return _verdict_outcome(v)
+
+    _scenario("deny_confirm_low_confidence", "deny", _s12)
+
+    mismatches: list[str] = []
+    allowed_ids: list[str] = []
+    warned_ids: list[str] = []
+    denial_reasons: dict[str, str] = {}
+    for sid, expected, thunk in scenarios:
+        try:
+            outcome = thunk()
+        except Exception as error:  # noqa: BLE001 — fail-closed probe
+            outcome = {"verdict": "deny", "reason": f"raised: {error}"}
+        verdict = outcome.get("verdict")
+        if verdict != expected:
+            mismatches.append(
+                f"{sid}: expected {expected}, got {verdict}"
+            )
+        if verdict == "allow":
+            allowed_ids.append(sid)
+        elif verdict == "allow-with-warning":
+            warned_ids.append(sid)
+        else:
+            denial_reasons[sid] = outcome.get("reason", "")
+            ev = outcome.get("event") or {}
+            if ev.get("event") not in ("env.spend", "env.use_denied",
+                                       "env.budget_exhausted",
+                                       "env.curtailment_registered",
+                                       "env.detection_registered",
+                                       "env.detection_rejected",
+                                       "env.action_confirmed",
+                                       "env.efficiency_claim"):
+                mismatches.append(f"{sid}: denial must emit a known event")
+
+    return {
+        "n_scenarios": len(scenarios),
+        "mismatches": mismatches,
+        "allowed_ids": allowed_ids,
+        "warned_ids": warned_ids,
+        "denial_reasons": denial_reasons,
+    }
+
+
 def run_incident_receipts() -> dict[str, Any]:
     """Incident receipts + evaluator-access gate (one-hundred-thirteenth batch).
 
@@ -13791,6 +14694,192 @@ def _case_metrics_dual_use(h: BenchHarness) -> BenchExpectation:
     )
 
 
+def _case_metrics_agri(h: BenchHarness) -> BenchExpectation:
+    """Agriculture extension (one-hundred-sixteenth batch).
+
+    12 deterministic scenarios, 3 allow / 9 deny: advice bound to a
+    matching smallholder scene allows; actuation with fresh
+    in-envelope condition declarations allows; consented data use for
+    the exact granted purpose allows. Denied: industrial-validated
+    advice invoked for a smallholder scene (agri.scene_mismatch),
+    wet-soil actuation above the envelope cap, actuation with no
+    conditions declaration, stale condition declarations,
+    purpose-creep reuse (yield data for credit scoring),
+    revoked-at-use-time data receipts, advice missing a
+    self_check field (NON_AUTHORITATIVE), advice in a non-local
+    language (agri.language_mismatch), and undeclared smallholder
+    access (mandatory deployment.smallholder_exclusion_risk
+    disclosure).
+    """
+    metrics = run_agri()
+
+    def check(exp: BenchExpectation, report: Any) -> tuple[bool, str]:
+        if metrics["n_scenarios"] != 12:
+            return (False, f"expected 12 agri scenarios, saw {metrics['n_scenarios']}")
+        if metrics["mismatches"]:
+            return (False, f"scenario(s) disagree with ground truth: {metrics['mismatches']}")
+        if metrics["allowed_ids"] != [
+            "allow_actuation_in_envelope",
+            "allow_data_use_consented",
+            "allow_smallholder_bound_advice",
+        ]:
+            return (False, f"allowed set drifted: {metrics['allowed_ids']}")
+        reasons = metrics["denial_reasons"]
+        for sid, needle in (
+            ("deny_industrial_to_smallholder", "agri.scene_mismatch"),
+            ("deny_wet_soil_actuation", "agri.condition_out_of_envelope"),
+            ("deny_no_conditions_declared", "agri.no_conditions_declared"),
+            ("deny_stale_declaration", "agri.condition_declaration_stale"),
+            ("deny_purpose_creep", "agri.purpose_creep"),
+            ("deny_revoked_data_receipt", "agri.data_receipt_revoked"),
+            ("deny_advice_missing_field", "agri.explain_missing_field"),
+            ("deny_advice_language_mismatch", "agri.language_mismatch"),
+            ("deny_undisclosed_smallholder_access", "deployment.smallholder_exclusion_risk"),
+        ):
+            if needle not in reasons.get(sid, ""):
+                return (False, f"{sid}: expected {needle!r} in reason, saw {reasons.get(sid, '')!r}")
+        return (True, "agri extension: 12 scenarios, 3 allow / 9 deny, all denial reasons pinned")
+
+    return BenchExpectation(
+        runtime=_noop_runtime(h),
+        expect_subtype="success",
+        post_check=check,
+        metrics=metrics,
+        notes=(
+            "Agriculture extension (one-hundred-sixteenth batch): "
+            "agri scene bindings bind (crop_system, farm_scale_class, "
+            "agroecology_digest) — industrial-validated advice does "
+            "not transfer to smallholder scenes; field envelopes "
+            "require fresh, chained condition declarations before "
+            "actuation and deny on out-of-envelope conditions; farmer "
+            "data receipts are farmer-signed, purpose-bound, and "
+            "checked at use time (purpose creep denies); advice must "
+            "carry why/evidence/self_check/contact in the local "
+            "language or it is NON_AUTHORITATIVE; missing smallholder "
+            "access declarations surface as mandatory disclosure."
+        ),
+    )
+
+
+def _case_metrics_editorial(h: BenchHarness) -> BenchExpectation:
+    """Editorial countersign + publication gates (one-hundred-seventeenth batch).
+
+    12 deterministic scenarios, 4 allow / 8 deny: countersigned general
+    articles, disclosed political content, election content with source
+    attestation + human review, and attested UGC republication allow.
+    Denied: no countersign (AP rule — NON_AUTHORITATIVE), undisclosed
+    political content (hard deny), disclosure swapped after review,
+    marking stripped in transit (unverified origin), unattested UGC
+    (never auto-published), election content without human review
+    (context hold), self-countersigning publisher (Blackbook lesson),
+    and slop velocity over the per-source cap.
+    """
+    metrics = run_editorial()
+
+    def check(exp: BenchExpectation, report: Any) -> tuple[bool, str]:
+        if metrics["n_scenarios"] != 12:
+            return (False, f"expected 12 editorial scenarios, saw {metrics['n_scenarios']}")
+        if metrics["mismatches"]:
+            return (False, f"scenario(s) disagree with ground truth: {metrics['mismatches']}")
+        if metrics["allowed_ids"] != [
+            "allow_countersigned_general",
+            "allow_political_disclosed",
+            "allow_election_full",
+            "allow_ugc_attested",
+        ]:
+            return (False, f"allowed set drifted: {metrics['allowed_ids']}")
+        reasons = metrics["denial_reasons"]
+        for sid, needle in (
+            ("deny_no_countersign", "media:no_editorial_countersign"),
+            ("deny_undisclosed_political", "media:undisclosed_political"),
+            ("deny_disclosure_swapped", "media:disclosure_unbound"),
+            ("deny_marking_stripped", "media:marking_stripped"),
+            ("deny_ugc_no_attestation", "media:unverifiable_capture"),
+            ("deny_election_no_review", "media:election_context_hold"),
+            ("deny_editor_is_publisher", "media:editor_is_publisher"),
+            ("deny_slop_velocity", "media:slop_velocity"),
+        ):
+            if needle not in reasons.get(sid, ""):
+                return (False, f"{sid}: expected {needle!r} in reason, saw {reasons.get(sid, '')!r}")
+        return (True, "editorial countersign: 12 scenarios, 4 allow / 8 deny, all denial reasons pinned")
+
+    return BenchExpectation(
+        runtime=_noop_runtime(h),
+        expect_subtype="success",
+        post_check=check,
+        metrics=metrics,
+        notes=(
+            "Editorial countersign + publication gates "
+            "(one-hundred-seventeenth batch): 12 deterministic probes — "
+            "registered-human-editor countersigns bound to (content, "
+            "review time, disclosure), disclosure bound to the payload, "
+            "marking resilience for claimed AI origin, UGC capture "
+            "attestation, election deepfake hold, and the slop velocity "
+            "throttle."
+        ),
+    )
+
+
+def _case_metrics_env_cost(h: BenchHarness) -> BenchExpectation:
+    """Environmental-cost receipts (one-hundred-fifteenth batch).
+
+    12 deterministic scenarios, 4 allow / 8 deny: in-budget spend with
+    no curtailment, spend at/below the pinned curtailment cap,
+    high-confidence detection authorizing action, and production
+    system output allow. Denied: spend without a profile, kWh
+    overspend, full-rate burn during curtailment, low-confidence
+    detection authorizing action, experimental output
+    (NON_AUTHORITATIVE), extrapolation beyond pinned constraints,
+    platform-less efficiency claim, and action confirmation on a
+    below-threshold detection.
+    """
+    metrics = run_env_cost()
+
+    def check(exp: BenchExpectation, report: Any) -> tuple[bool, str]:
+        if metrics["n_scenarios"] != 12:
+            return (False, f"expected 12 env-cost scenarios, saw {metrics['n_scenarios']}")
+        if metrics["mismatches"]:
+            return (False, f"scenario(s) disagree with ground truth: {metrics['mismatches']}")
+        if metrics["allowed_ids"] != [
+            "allow_spend_within_budget",
+            "allow_spend_within_curtailment_cap",
+            "allow_confident_detection_action",
+            "allow_production_output",
+        ]:
+            return (False, f"allowed set drifted: {metrics['allowed_ids']}")
+        reasons = metrics["denial_reasons"]
+        for sid, needle in (
+            ("deny_no_profile", "env:unknown_budget"),
+            ("deny_kwh_exhausted", "env:budget_exhausted"),
+            ("deny_curtailment_violation", "env:curtailment_violation"),
+            ("deny_low_confidence", "env:insufficient_confidence"),
+            ("deny_experimental", "NON_AUTHORITATIVE"),
+            ("deny_physics_gap", "env:physics_gap"),
+            ("deny_unverifiable_efficiency", "env:unverifiable_efficiency_claim"),
+            ("deny_confirm_low_confidence", "env:insufficient_confidence"),
+        ):
+            if needle not in reasons.get(sid, ""):
+                return (False, f"{sid}: expected {needle!r} in reason, saw {reasons.get(sid, '')!r}")
+        return (True, "env-cost receipts: 12 scenarios, 4 allow / 8 deny, all denial reasons pinned")
+
+    return BenchExpectation(
+        runtime=_noop_runtime(h),
+        expect_subtype="success",
+        post_check=check,
+        metrics=metrics,
+        notes=(
+            "Environmental-cost receipts "
+            "(one-hundred-fifteenth batch): 12 deterministic probes — "
+            "hash-chained (kwh, water, estimated carbon, region) spend "
+            "receipts, authority-signed curtailment caps pinned to the "
+            "budget's own baseline, confidence-gated detections, "
+            "experimental-system labeling, physics-constrained "
+            "extrapolation, open-loop vs confirmed detections, and the "
+            "named-platform efficiency-claim rule."
+        ),
+    )
+
+
 def _case_metrics_deployment_registry(h: BenchHarness) -> BenchExpectation:
     """Deployment registration gate (one-hundred-tenth batch).
 
@@ -16359,6 +17448,9 @@ __all__ = [
     "run_incident_receipts",
     "run_synthetic_cap",
     "run_dual_use",
+    "run_agri",
+    "run_editorial",
+    "run_env_cost",
     "run_owasp_asi_coverage",
     "run_policy_axis",
     "run_step_compliance",
