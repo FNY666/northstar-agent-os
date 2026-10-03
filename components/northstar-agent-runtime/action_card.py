@@ -60,6 +60,12 @@ from typing import Any, Callable, Literal, Mapping, Sequence
 
 from permissions import digest_arguments
 
+from approver_separation import (
+    SELF_ATTESTATION_DENIED_EVENT,
+    eligible_approvers,
+    proposer_of,
+)
+
 #: One-tap answers the card approver understands.
 APPROVE = "approve"
 DENY = "deny"
@@ -411,6 +417,9 @@ def resolve_card(
     card: ActionCard,
     *,
     approver: Callable[[ActionCard], Any] | None,
+    approver_identity: str = "",
+    registered_approvers: Sequence[str] | None = None,
+    delegation_graph: Mapping[str, Sequence[str]] | None = None,
 ) -> CardVerdict:
     """Resolve one card to approve/deny/cancel. Default-deny throughout.
 
@@ -419,7 +428,71 @@ def resolve_card(
     human decision - it receives the card (never agent output) and returns
     ``True`` (approve), ``False``/``None`` (deny), or ``"cancel"``. Any
     exception, timeout-shaped error, or unrecognized answer is a denial.
+
+    No-self-attestation (ERC-8004 rule, ninety-fourth batch): when
+    ``approver_identity`` is given or ``registered_approvers`` is provided,
+    the separation gate runs *before* everything else, including the
+    auto-approve shortcut. The proposer is the card's outermost principal
+    (first hop of the delegation chain, else the acting agent - both
+    runtime-owned). The eligible set is the registered approvers minus the
+    proposer minus the proposer's delegation subtree. When the only
+    available approver is the proposer, the eligible set is empty and the
+    card denies - it does not fall back to auto-approve, and an approver
+    callback whose identity fails the check is never consulted. Denials
+    name the ``approval.self_attestation_denied`` audit event.
     """
+    separation_active = bool(str(approver_identity or "").strip()) or registered_approvers is not None
+    if separation_active:
+        proposer = proposer_of(
+            agent=card.provenance.agent,
+            delegation_chain=card.provenance.delegation_chain,
+        )
+        pool: Sequence[str] = (
+            registered_approvers if registered_approvers is not None
+            else (str(approver_identity or ""),)
+        )
+
+        def _separation_deny(reason: str) -> CardVerdict:
+            return CardVerdict(
+                card_id=card.card_id,
+                tool=card.tool,
+                call_id=card.call_id,
+                arguments_digest=card.arguments_digest,
+                decision=DENY,
+                reason=f"{SELF_ATTESTATION_DENIED_EVENT}: {reason}",
+                gate=card.gate,
+            )
+
+        eligible = eligible_approvers(
+            proposer=proposer,
+            approvers=pool,
+            delegation_graph=delegation_graph,
+        )
+        if not eligible:
+            return _separation_deny(
+                f"no eligible approver for proposer {proposer!r}: the only "
+                "available approver is the proposer itself (or its delegation "
+                "subtree) - an unattended run never self-approves"
+            )
+        me = str(approver_identity or "").strip()
+        if not me:
+            return _separation_deny(
+                "the approver has no identity: an unknown approver is not a "
+                "verified third party"
+            )
+        if me not in eligible:
+            if me == proposer:
+                why = (
+                    f"approver {me!r} is the action's proposer: self-approval "
+                    "is never evidence"
+                )
+            else:
+                why = (
+                    f"approver {me!r} sits in proposer {proposer!r}'s delegation "
+                    "subtree: sock-puppet approval is self-approval with "
+                    "extra hops"
+                )
+            return _separation_deny(why)
     if card.gate.auto_approved:
         return CardVerdict(
             card_id=card.card_id,
