@@ -115,7 +115,7 @@ from tools import ToolLimits, ToolSandbox, build_default_registry
 
 #: Semantic version of the public case set. Bump when a case is added, removed,
 #: or its expected verdict changes — consumers pin against this string.
-BENCH_VERSION = "northstar.governance.bench.v29"
+BENCH_VERSION = "northstar.governance.bench.v30"
 
 USAGE_ERROR = 64
 
@@ -17539,6 +17539,118 @@ def _case_metrics_greenwash(h: BenchHarness) -> BenchExpectation:
     )
 
 
+def _case_metrics_pharma_agents(h: BenchHarness) -> BenchExpectation:
+    """Pharma manufacturing defense gates (one-hundred-thirty-fifth batch).
+
+    12 deterministic scenarios, 4 allow / 8 deny: an AI-drafted batch
+    record with a live quality-unit countersign ships; a human-authored
+    SOP needs no countersign; a static locked model on a critical step
+    passes; a marketing claim with bound trial evidence passes.
+    Denied: an unsigned AI-drafted spec in production
+    (``pharma:undisclosed_judgment``), a dynamic-adaptive model on a
+    critical step (``pharma:dynamic_model``), a generative model on a
+    critical step (``pharma:generative_in_critical``), a generative
+    model in a non-critical step with no qualified person in the loop
+    (``pharma:unreviewed_generation``), a decision with no 4-piece
+    lineage (``pharma:missing_lineage``), an AI rewrite missing ALCOA+
+    attributes (``pharma:alcoa_violation``), a model used outside its
+    declared context (``pharma:context_violation``), and drift beyond
+    tolerance (``pharma:revalidation_required``).
+    """
+    metrics = run_pharma_agents()
+
+    def check(exp: BenchExpectation, report: Any) -> tuple[bool, str]:
+        if metrics["n_scenarios"] != 12:
+            return (False, f"expected 12 pharma scenarios, saw {metrics['n_scenarios']}")
+        if metrics["mismatches"]:
+            return (False, f"scenario(s) disagree with ground truth: {metrics['mismatches']}")
+        if metrics["allowed_ids"] != [
+            "allow_signed_ai_draft_in_production",
+            "allow_human_authored_doc",
+            "allow_static_model_on_critical",
+            "allow_bound_marketing_claim",
+        ]:
+            return (False, f"allowed set drifted: {metrics['allowed_ids']}")
+        reasons = metrics["denial_reasons"]
+        for sid, needle in (
+            ("deny_unsigned_ai_draft_in_production", "undisclosed_judgment"),
+            ("deny_dynamic_model_on_critical", "dynamic_model"),
+            ("deny_generative_in_critical", "generative_in_critical"),
+            ("deny_unreviewed_generation", "unreviewed_generation"),
+            ("deny_missing_lineage", "missing_lineage"),
+            ("deny_alcoa_violation", "alcoa_violation"),
+            ("deny_context_violation", "context_violation"),
+            ("deny_drift_beyond_tolerance", "revalidation_required"),
+        ):
+            if needle not in reasons.get(sid, ""):
+                return (False, f"{sid} reason missing {needle!r}")
+        return (True, "12 scenarios, 4 allow / 8 deny, ground truth pinned")
+
+    return BenchExpectation(
+        runtime=_noop_runtime(h),
+        expect_subtype="success",
+        post_check=check,
+        metrics=metrics,
+        notes="pharma manufacturing defense: quality-unit countersigns, static-model red line, generative exclusion, 4-piece lineage, ALCOA+ gate, context-of-use binding, drift monitors, claim evidence",
+    )
+
+
+def _case_metrics_procurement_agents(h: BenchHarness) -> BenchExpectation:
+    """Procurement accountability gates (one-hundred-thirty-eighth batch).
+
+    12 deterministic scenarios, 4 allow / 8 deny: a fully
+    human-signed award (AI advisory only) passes; a grounded AI
+    claim passes; a screened tender doc passes; a complete 4-segment
+    award trace passes. Denied: an AI-scored award missing
+    human-written reasons (``procurement:ai_concluded``), an
+    ungrounded AI claim (``procurement:ungrounded_claim``), a tender
+    doc with no health check (``procurement:unscreened_doc``), a
+    complete triple-bound collusion probe above threshold — a lead,
+    never a conviction (``procurement:collusion_lead``), a
+    winners-only evaluation (``procurement:missing_losing_bids``), a
+    new-vs-incumbent rejection deviation beyond tolerance
+    (``procurement:incumbency_bias``), a call to an unregistered
+    algorithm (``procurement:unregistered_algorithm``), and an award
+    trace missing an AI segment
+    (``procurement:incomplete_trace``).
+    """
+    metrics = run_procurement_agents()
+
+    def check(exp: BenchExpectation, report: Any) -> tuple[bool, str]:
+        if metrics["n_scenarios"] != 12:
+            return (False, f"expected 12 procurement scenarios, saw {metrics['n_scenarios']}")
+        if metrics["mismatches"]:
+            return (False, f"scenario(s) disagree with ground truth: {metrics['mismatches']}")
+        if metrics["allowed_ids"] != [
+            "allow_human_signed_award",
+            "allow_grounded_claim",
+            "allow_screened_doc",
+            "allow_full_trace",
+        ]:
+            return (False, f"allowed set drifted: {metrics['allowed_ids']}")
+        reasons = metrics["denial_reasons"]
+        for sid, needle in (
+            ("deny_ai_concluded", "ai_concluded"),
+            ("deny_ungrounded_claim", "ungrounded_claim"),
+            ("deny_unscreened_doc", "unscreened_doc"),
+            ("deny_collusion_lead", "collusion_lead"),
+            ("deny_missing_losing_bids", "missing_losing_bids"),
+            ("deny_incumbency_bias", "incumbency_bias"),
+            ("deny_unregistered_algorithm", "unregistered_algorithm"),
+            ("deny_incomplete_trace", "incomplete_trace"),
+        ):
+            if needle not in reasons.get(sid, ""):
+                return (False, f"{sid} missing denial needle {needle!r}")
+        return (True, "procurement_agents: 12/12 scenarios match ground truth")
+
+    return BenchExpectation(
+        runtime=_noop_runtime(h),
+        expect_subtype="success",
+        post_check=check,
+        metrics=metrics,
+        notes="procurement accountability: advisory-only awards, source-grounded claims, pre-issuance health checks, collusion leads (never convictions), losing-bid data gates, incumbency-bias probes, algorithm registration, 4-segment award traces",
+    )
+
 def _case_metrics_orbital_agents(h: BenchHarness) -> BenchExpectation:
     """Orbital safety receipts (one-hundred-thirty-fourth batch).
 
@@ -17593,6 +17705,63 @@ def _case_metrics_orbital_agents(h: BenchHarness) -> BenchExpectation:
         post_check=check,
         metrics=metrics,
         notes="orbital safety receipts: conjunction-warning pins with warning-fatigue tripwire, Δv authorization envelopes, STM freshness+uncertainty binding, dual-use RPO gate, debris budgets, pinned onboard autonomy boundaries, counterspace declarations, liability pins",
+    )
+
+
+def _case_metrics_disaster_agents(h: BenchHarness) -> BenchExpectation:
+    """Emergency-response discipline receipts (one-hundred-thirty-seventh batch).
+
+    12 deterministic scenarios, 4 allow / 8 deny: AI triage under a
+    live activation pin passes; a disclosed AI-involved call passes;
+    a reference to the head warning version passes; a
+    human-countersigned evacuation order passes. Denied: unbound AI
+    triage (``disaster:unauthorized_triage``), an undisclosed
+    AI-involved call (``disaster:hidden_ai``), a reference to a
+    superseded warning version (``disaster:superseded_warning``,
+    NON_AUTHORITATIVE), a channel over its false-alarm budget
+    (``disaster:false_alarm_budget_exceeded``, degraded to human
+    confirmation), a deployment below its coverage equity floor
+    (``disaster:equity_gap``), a warning version with no bound
+    delivery evidence (``disaster:no_delivery_evidence``,
+    NON_AUTHORITATIVE), an AI-signed evacuation order with no human
+    countersign (``disaster:ai_evacuation``), and an emergency
+    notice with no source marker (``disaster:unmarked_notice``).
+    """
+    metrics = run_disaster_agents()
+
+    def check(exp: BenchExpectation, report: Any) -> tuple[bool, str]:
+        if metrics["n_scenarios"] != 12:
+            return (False, f"expected 12 disaster scenarios, saw {metrics['n_scenarios']}")
+        if metrics["mismatches"]:
+            return (False, f"scenario(s) disagree with ground truth: {metrics['mismatches']}")
+        if metrics["allowed_ids"] != [
+            "allow_bound_triage",
+            "allow_disclosed_call",
+            "allow_current_warning_version",
+            "allow_human_signed_evacuation",
+        ]:
+            return (False, f"allowed set drifted: {metrics['allowed_ids']}")
+        reasons = metrics["denial_reasons"]
+        for sid, needle in (
+            ("deny_unauthorized_triage", "unauthorized_triage"),
+            ("deny_hidden_ai", "hidden_ai"),
+            ("deny_superseded_warning", "superseded_warning"),
+            ("deny_false_alarm_over_budget", "false_alarm_budget_exceeded"),
+            ("deny_equity_gap", "equity_gap"),
+            ("deny_no_delivery_evidence", "no_delivery_evidence"),
+            ("deny_ai_evacuation", "ai_evacuation"),
+            ("deny_unmarked_notice", "unmarked_notice"),
+        ):
+            if needle not in reasons.get(sid, ""):
+                return (False, f"denial reason missing {needle!r}: {reasons.get(sid, '')!r}")
+        return True, "12/12 disaster probes match ground truth"
+
+    return BenchExpectation(
+        runtime=_noop_runtime(h),
+        expect_subtype="success",
+        post_check=check,
+        metrics=metrics,
+        notes="emergency-response discipline receipts: AI-triage activation pins, per-session AI-involvement disclosures, hash-chained warning versions, per-channel false-alarm budgets, coverage equity floors, last-mile delivery evidence, human-countersigned evacuation orders, source-marked emergency notices",
     )
 
 
@@ -19793,6 +19962,7 @@ CASES: tuple[BenchCase, ...] = (
     BenchCase("metrics.path_shim_detection", "metrics", "PATH-shim red-team: fabricated tool output is detected", _case_metrics_path_shim_detection),
     BenchCase("metrics.attenuation", "metrics", "attenuating delegation credentials (biscuit-style)", _case_metrics_attenuation),
     BenchCase("metrics.pledge_semantics", "metrics", "pledge-style self-restriction (declare->tighten-only)", _case_metrics_pledge_semantics),
+    BenchCase("metrics.procurement_agents", "metrics", "procurement accountability: advisory-only award gates, source-grounded claims, pre-issuance health checks, collusion leads (never convictions), losing-bid data gates, incumbency-bias probes, algorithm registration, 4-segment award traces (AI-procurement absorption)", _case_metrics_procurement_agents),
     BenchCase("metrics.dataflow_sensitivity", "metrics", "dataflow sensitivity tracking (OpenAPPA-style)", _case_metrics_dataflow_sensitivity),
     BenchCase("metrics.decision_model", "metrics", "structured decision-model approval path", _case_metrics_decision_model),
     BenchCase("metrics.whisper_contrast", "metrics", "whisper-attacks contrast: signature vs bound arguments", _case_metrics_whisper_contrast),
@@ -19850,7 +20020,9 @@ CASES: tuple[BenchCase, ...] = (
     BenchCase("metrics.companionship", "metrics", "companionship safeguards for AI dating/companionship: minor intimacy class gate, authority-pinned dependence thresholds with mandatory intervention, crisis-escalation receipts with fail-closed halt, sycophancy probe, persona-consistency gate, authority-set session caps, private-dialogue training exclusion, matchmaker explanation binding", _case_metrics_companionship),
     BenchCase("metrics.embodied", "metrics", "embodied safety vacuum gates: standard=pre_ratification declarations, fall-zone receipts, measured capability honesty labels, labor-impact disclosures, prescriptive-agent envelopes, inspection confidence gates, dispatch audit, incident-clock binding", _case_metrics_embodied),
     BenchCase("metrics.greenwash", "metrics", "greenwashing evidence gates: recycled-content receipts with bound measurement evidence, mass-balance attribution-method gates, claim evidence chains (ECGT), sorting-purity binding, second-life battery inspection gates, routed datacenter decommissioning, marketing-claim probe", _case_metrics_greenwash),
+    BenchCase("metrics.pharma_agents", "metrics", "pharma manufacturing defense gates: quality-unit countersigns on AI-drafted GMP documents, static-model-only red line, generative exclusion, 4-piece model lineage receipts, ALCOA+ rewrite gate, context-of-use binding, drift-monitor gates, marketing-claim evidence (AI-pharma absorption)", _case_metrics_pharma_agents),
     BenchCase("metrics.orbital_agents", "metrics", "orbital safety receipts: conjunction-warning pins with warning-fatigue tripwire, Δv authorization envelopes, STM freshness+uncertainty binding, dual-use RPO gate, debris budgets, pinned onboard autonomy boundaries, counterspace declarations, liability pins (AI-space absorption)", _case_metrics_orbital_agents),
+    BenchCase("metrics.disaster_agents", "metrics", "emergency-response discipline receipts: AI-triage activation pins, per-session AI-involvement disclosures, hash-chained warning versions, per-channel false-alarm budgets, coverage equity floors, last-mile delivery evidence, human-countersigned evacuation orders, source-marked emergency notices (AI-disaster absorption)", _case_metrics_disaster_agents),
     BenchCase("metrics.forest_fish", "metrics", "forest & fisheries evidence gates: livelihood exemptions that block automated accusations, FPIC-bound indigenous data, EUDR evidence-bound certificates, dark-vessel triple-binding leads, EM purpose binding, aquaculture portability disclosure, catch-confidence floors, wildfire regional labels (AI-forestry/fisheries absorption)", _case_metrics_forest_fish),
     BenchCase("metrics.permit_agents", "metrics", "permit & planning discipline: advisory-only AI pre-checks, named-human countersigns, code-version pins, normative-source receipts, disparate-impact probes, appeal paths, automation-bias clock, vendor-cost receipts (AI-urban-planning absorption)", _case_metrics_permit_agents),
     BenchCase("metrics.water_agents", "metrics", "water-infrastructure defense: signed OT airgap receipts, fail-closed PLC exposure probes, Dragos LLM-attack telemetry, quality-forecast gates, chemical-dosing envelopes, leak-claim receipts, boil-notice evidence chains, data-purpose binding, water-footprint binding (AI-water absorption)", _case_metrics_water_agents),
@@ -23023,6 +23195,217 @@ def run_greenwash() -> dict[str, Any]:
     }
 
 
+def run_procurement_agents() -> dict[str, Any]:
+    """Procurement accountability gates (one-hundred-thirty-eighth batch).
+
+    Absorbs the 2026 AI-procurement thread: China's NDRC "AI+bidding"
+    guidance (pre-issuance health checks, registered/reviewed
+    algorithms, AI never replaces independent judgment); Hefei's
+    production bidding LLM; Korea PPS AI evaluation support (AI
+    analyzes, humans judge; original-text location confirmation);
+    UK CMA BRIT collusion screening (leads, never convictions;
+    losing-bid data bottleneck); South Africa's AI collusion tool;
+    EU CEDAR XAI procurement analytics; US VA scoring transparent AI
+    governance; UK Procurement Act 2023 (named evaluator must
+    personally score, write reasons, sign — software cannot bear
+    accountability).
+
+    Fail-closed rules over 12 deterministic scenarios: AI-scored
+    awards missing any of the three human acts deny
+    (``procurement.ai_concluded``); ungrounded AI claims are
+    NON_AUTHORITATIVE (``procurement.ungrounded_claim``); unpublished
+    health checks deny publication (``procurement.unscreened_doc``);
+    collusion probes raise triple-bound leads, never convictions
+    (``procurement.collusion_lead``), and cannot conclude on partial
+    evidence; winners-only evaluations degrade
+    (``procurement.missing_losing_bids``); new-vs-incumbent rejection
+    deviation beyond tolerance routes to audit
+    (``procurement.incumbency_bias``); unregistered algorithm calls
+    deny (``procurement.unregistered_algorithm``); incomplete 4-segment
+    award traces deny (``procurement.incomplete_trace``). Ground truth
+    is closed: 4 allow / 8 deny.
+    """
+    from ed25519 import public_key, sign
+
+    from procurement_agents import (
+        PROCUREMENT_SCHEMA_VERSION,
+        CLASS_AUTHORITATIVE,
+        CLASS_NON_AUTHORITATIVE,
+        AuthorityRegistry,
+        SourceLocation,
+        GroundedClaimReceipt,
+        ClaimGroundingRegistry,
+        HealthCheckReceipt,
+        HealthCheckRegistry,
+        AlgorithmRegistrationReceipt,
+        AlgorithmRegistry,
+        AwardTrace,
+        advisory_only_gate,
+        source_grounding_receipt,
+        tender_doc_screen,
+        collusion_probe,
+        losing_bid_data_gate,
+        incumbency_bias_probe,
+        algorithm_registry_receipt,
+        full_trace_award,
+    )
+    from canonical_json import jcs_canonical_json, jcs_sha256_hex
+
+    SEC = b"procurement-bench-authority-0001"  # 32 bytes
+    assert len(SEC) == 32
+    PUB = public_key(SEC)
+    T0 = 1_800_000_000
+    HEX64 = "ab" * 32
+    HEX64_B = "cd" * 32
+    HEX64_C = "ef" * 32
+
+    authorities = AuthorityRegistry()
+    authorities.register("bench-proc-op", PUB.hex())
+
+    def _prev(log):
+        return log[-1].receipt_digest if log else "genesis"
+
+    # --- claim grounding registry with one grounded claim ---
+    ground_reg = ClaimGroundingRegistry(authorities)
+    gloc = SourceLocation("tender-7", "section-4.2", HEX64_B)
+    gr = GroundedClaimReceipt(
+        receipt_id="g-bench-1", claim_id="claim-bench-1", claim_digest=HEX64,
+        evaluation_id="eval-bench", locations=(gloc,),
+        authority_id="bench-proc-op", authority_pubkey_hex=PUB.hex(),
+        signature_hex="00" * 64, issued_at=T0, prev_digest=_prev(ground_reg.log))
+    ground_reg.issue(
+        receipt_id="g-bench-1", claim_id="claim-bench-1", claim_digest=HEX64,
+        evaluation_id="eval-bench", locations=(gloc,),
+        authority_id="bench-proc-op",
+        signature=sign(SEC, jcs_canonical_json(gr._payload())), issued_at=T0)
+
+    # --- health-check registry with one screened doc ---
+    health_reg = HealthCheckRegistry(authorities)
+    hr = HealthCheckReceipt(
+        receipt_id="h-bench-1", doc_id="doc-bench-1", doc_digest=HEX64,
+        checks_run=("suspicious_clauses", "consistency"),
+        authority_id="bench-proc-op", authority_pubkey_hex=PUB.hex(),
+        signature_hex="00" * 64, issued_at=T0, expires_at=T0 + 3600,
+        prev_digest=_prev(health_reg.log))
+    health_reg.issue(
+        receipt_id="h-bench-1", doc_id="doc-bench-1", doc_digest=HEX64,
+        checks_run=("suspicious_clauses", "consistency"),
+        authority_id="bench-proc-op",
+        signature=sign(SEC, jcs_canonical_json(hr._payload())),
+        issued_at=T0, expires_at=T0 + 3600)
+
+    # --- algorithm registry with one registered algorithm ---
+    algo_reg = AlgorithmRegistry(authorities)
+    ar = AlgorithmRegistrationReceipt(
+        receipt_id="r-bench-1", algorithm_id="eval-scorer", version="1.4.2",
+        review_digest=HEX64_C, authority_id="bench-proc-op",
+        authority_pubkey_hex=PUB.hex(), signature_hex="00" * 64,
+        registered_at=T0, expires_at=T0 + 3600,
+        prev_digest=_prev(algo_reg.log))
+    algo_reg.issue(
+        receipt_id="r-bench-1", algorithm_id="eval-scorer", version="1.4.2",
+        review_digest=HEX64_C, authority_id="bench-proc-op",
+        signature=sign(SEC, jcs_canonical_json(ar._payload())),
+        registered_at=T0, expires_at=T0 + 3600)
+
+    def _signed_trace():
+        sig_payload = {"award_id": "award-bench-1",
+                       "evaluator_id": "eval-zhang",
+                       "final_reasons_digest": HEX64}
+        return AwardTrace(
+            trace_id="t-bench-1", award_id="award-bench-1",
+            evaluator_id="eval-zhang", ai_input_digest=HEX64,
+            ai_output_digest=HEX64_B, human_edits_digest=HEX64_C,
+            final_reasons_digest=HEX64,
+            reasons_signature_hex=sign(
+                SEC, jcs_canonical_json(sig_payload)).hex(),
+            reasons_pubkey_hex=PUB.hex(), traced_at=T0)
+
+    scenarios: list[tuple[str, bool, str]] = []
+    results: dict[str, dict[str, Any]] = {}
+
+    def _record(sid, expect_allow, needle, verdict):
+        scenarios.append((sid, expect_allow, needle))
+        results[sid] = {"allowed": verdict.allowed, "reason": verdict.reason}
+
+    # 1. fully human-signed award, AI advisory -> allow
+    _record("allow_human_signed_award", True, "",
+            advisory_only_gate("award-bench-1", "eval-zhang", ai_scored=True,
+                               human_scored=True, human_wrote_reasons=True,
+                               human_signed=True))
+
+    # 2. grounded AI claim -> allow
+    _record("allow_grounded_claim", True, "",
+            source_grounding_receipt(ground_reg, "claim-bench-1", HEX64))
+
+    # 3. screened tender doc -> allow
+    _record("allow_screened_doc", True, "",
+            tender_doc_screen(health_reg, "doc-bench-1", HEX64, T0))
+
+    # 4. complete 4-segment award trace -> allow
+    _record("allow_full_trace", True, "", full_trace_award(_signed_trace()))
+
+    # 5. AI-scored award missing human-written reasons -> deny
+    _record("deny_ai_concluded", False, "ai_concluded",
+            advisory_only_gate("award-bench-2", "eval-li", ai_scored=True,
+                               human_scored=True, human_wrote_reasons=False,
+                               human_signed=True))
+
+    # 6. ungrounded AI claim -> deny (NON_AUTHORITATIVE)
+    _record("deny_ungrounded_claim", False, "ungrounded_claim",
+            source_grounding_receipt(ground_reg, "claim-ghost", HEX64_B))
+
+    # 7. tender doc with no health check -> deny
+    _record("deny_unscreened_doc", False, "unscreened_doc",
+            tender_doc_screen(health_reg, "doc-ghost", HEX64, T0))
+
+    # 8. complete triple-bound collusion evidence above threshold ->
+    #    lead (never a conviction) -> deny
+    _record("deny_collusion_lead", False, "collusion_lead",
+            collusion_probe(HEX64, HEX64_B, HEX64_C, 0.85, 0.7))
+
+    # 9. winners-only evaluation data -> deny (confidence degraded)
+    _record("deny_missing_losing_bids", False, "missing_losing_bids",
+            losing_bid_data_gate("eval-bench", 3, 1, 5))
+
+    # 10. new-supplier rejection far above incumbent -> deny (audit route)
+    _record("deny_incumbency_bias", False, "incumbency_bias",
+            incumbency_bias_probe(8, 10, 2, 10, 0.25))
+
+    # 11. call to unregistered algorithm -> deny
+    _record("deny_unregistered_algorithm", False, "unregistered_algorithm",
+            algorithm_registry_receipt(algo_reg, "ghost-scorer", "9.9.9", T0))
+
+    # 12. award trace missing an AI segment -> deny
+    broken = _signed_trace()
+    broken = AwardTrace(**{**broken.__dict__, "ai_output_digest": None})
+    _record("deny_incomplete_trace", False, "incomplete_trace",
+            full_trace_award(broken))
+
+    mismatches: list[str] = []
+    allowed_ids: list[str] = []
+    denial_reasons: dict[str, str] = {}
+    for sid, expect_allow, needle in scenarios:
+        r = results[sid]
+        if r["allowed"]:
+            allowed_ids.append(sid)
+        else:
+            denial_reasons[sid] = r["reason"]
+        if r["allowed"] != expect_allow:
+            mismatches.append(f"{sid}: expected allow={expect_allow}, "
+                              f"saw allow={r['allowed']}")
+        elif not expect_allow and needle and needle not in r["reason"]:
+            mismatches.append(f"{sid}: expected needle {needle!r} in "
+                              f"{r['reason']!r}")
+    return {
+        "n_scenarios": len(scenarios),
+        "n_allowed": len(allowed_ids),
+        "n_denied": len(scenarios) - len(allowed_ids),
+        "allowed_ids": allowed_ids,
+        "denial_reasons": denial_reasons,
+        "mismatches": mismatches,
+    }
+
 def run_orbital_agents() -> dict[str, Any]:
     """Orbital safety receipts (one-hundred-thirty-fourth batch).
 
@@ -23280,6 +23663,584 @@ def run_orbital_agents() -> dict[str, Any]:
         )
 
     _scenario("deny_undeclared_capability", "deny", _s12)
+
+    results: list[str] = []
+    mismatches: list[str] = []
+    allowed_ids: list[str] = []
+    warned_ids: list[str] = []
+    denial_reasons: dict[str, str] = {}
+    for sid, expected, thunk in scenarios:
+        try:
+            outcome = thunk()
+        except Exception as error:
+            outcome = {"verdict": "deny", "reason": f"raised: {error}",
+                       "classification": "unverifiable-process"}
+        verdict = outcome.get("verdict")
+        if verdict != expected:
+            mismatches.append(
+                f"{sid}: expected {expected}, got {verdict}"
+            )
+        if verdict == "allow":
+            allowed_ids.append(sid)
+        elif verdict == "allow-with-warning":
+            warned_ids.append(sid)
+        else:
+            denial_reasons[sid] = outcome.get("reason", "")
+
+    return {
+        "n_scenarios": len(scenarios),
+        "mismatches": mismatches,
+        "allowed_ids": allowed_ids,
+        "warned_ids": warned_ids,
+        "denial_reasons": denial_reasons,
+    }
+
+
+def run_pharma_agents() -> dict[str, Any]:
+    """Pharma manufacturing defense gates (one-hundred-thirty-fifth batch).
+
+    Absorbs the 2026 AI-pharma-manufacturing thread: FDA's first AI
+    warning letter (2026-04) — AI-drafted specs/SOPs/batch records used
+    without quality-unit substantive review (21 CFR 211.22(c)+211.100(a));
+    EU GMP Annex 22 draft red lines (critical GMP permits only static
+    deterministic models; dynamic/continuous-learning excluded;
+    generative AI/LLMs excluded from critical decisions; audits must
+    record model version + data input + decision output); FDA+EMA
+    Jan-2026 10-point Good AI Practice guidance.
+
+    Fail-closed rules over 12 deterministic scenarios: an AI-drafted
+    batch record with a live quality-unit countersign ships
+    (``pharma.unsigned_draft`` absent); a human-authored SOP needs no
+    countersign; a static locked model on a critical step passes; a
+    marketing claim with bound trial evidence passes. Denied: an
+    AI-drafted spec used in production without a countersign
+    (``pharma.undisclosed_judgment``), a dynamic-adaptive model on a
+    critical step (``pharma.dynamic_model``), a generative model on a
+    critical step (``pharma.generative_in_critical``), a generative
+    model in a non-critical step with no qualified person in the loop
+    (``pharma.unreviewed_generation``), a decision with no 4-piece
+    lineage (``pharma.missing_lineage``), an AI rewrite missing ALCOA+
+    attributes (``pharma.alcoa_violation``), a model used outside its
+    declared context (``pharma.context_violation``), and drift beyond
+    tolerance (``pharma.revalidation_required``). Ground truth is
+    closed: 4 allow / 8 deny.
+    """
+    from ed25519 import public_key
+
+    from pharma_agents import (
+        alcoa_probe,
+        check_model_lineage,
+        context_of_use_binding,
+        context_of_use_receipt,
+        drift_monitor_gate,
+        drift_monitor_receipt,
+        generative_exclusion_gate,
+        gmp_document_receipt,
+        model_deployment_receipt,
+        pharma_claim_evidence,
+        pharma_claim_receipt,
+        static_model_only,
+        use_in_production,
+    )
+
+    T0 = 1_800_000_000
+    SEED = bytes(range(32))
+    SEED_C = bytes(32 - i for i in range(32))
+    AUTH_PUB = public_key(SEED).hex()
+    COUNTER_PUB = public_key(SEED_C).hex()
+    DOC = "ab" * 32
+    OTHER = "cd" * 32
+
+    scenarios: list[tuple[str, str, Any]] = []
+
+    def _scenario(sid: str, expected: str, thunk: Any) -> None:
+        scenarios.append((sid, expected, thunk))
+
+    def _outcome(verdict: Any) -> dict[str, Any]:
+        return {
+            "verdict": "allow" if verdict.allowed else "deny",
+            "reason": verdict.reason,
+            "classification": verdict.classification,
+        }
+
+    def _mk_doc(drafted_by_ai: bool, counter_secret: Any, counter_at: int):
+        return gmp_document_receipt(
+            receipt_id="doc-bench",
+            prev_digest="genesis",
+            doc_class="batch_record",
+            doc_digest=DOC,
+            drafted_by_ai=drafted_by_ai,
+            counter_public_hex=COUNTER_PUB,
+            counter_at=counter_at,
+            counter_secret=counter_secret,
+            authority_pubkey_hex=AUTH_PUB,
+            authority_secret=SEED
+        )
+
+    def _mk_model(model_class: str, criticality: str):
+        return model_deployment_receipt(
+            receipt_id="model-bench",
+            prev_digest="genesis",
+            model_id="hplc-qc-7",
+            model_class=model_class,
+            model_version="v2.3.1",
+            model_digest=DOC,
+            locked=True,
+            criticality=criticality,
+            authority_pubkey_hex=AUTH_PUB,
+            authority_secret=SEED
+        )
+
+    def _s1():
+        doc = _mk_doc(True, SEED_C, T0 - 100)
+        return _outcome(use_in_production(doc, doc.countersignature_hex, now=T0))
+
+    _scenario("allow_signed_ai_draft_in_production", "allow", _s1)
+
+    def _s2():
+        doc = _mk_doc(False, None, T0 - 100)
+        return _outcome(use_in_production(doc, "", now=T0))
+
+    _scenario("allow_human_authored_doc", "allow", _s2)
+
+    def _s3():
+        return _outcome(static_model_only(_mk_model("static_deterministic", "critical")))
+
+    _scenario("allow_static_model_on_critical", "allow", _s3)
+
+    def _s4():
+        claim = pharma_claim_receipt(
+            receipt_id="claim-bench",
+            prev_digest="genesis",
+            claim_digest=DOC,
+            evidence_digest=OTHER,
+            authority_pubkey_hex=AUTH_PUB,
+            authority_secret=SEED
+        )
+        return _outcome(pharma_claim_evidence(claim, claimed_numbers_digest=DOC))
+
+    _scenario("allow_bound_marketing_claim", "allow", _s4)
+
+    def _s5():
+        doc = _mk_doc(True, SEED_C, T0 - 100)
+        return _outcome(use_in_production(doc, "", now=T0))
+
+    _scenario("deny_unsigned_ai_draft_in_production", "deny", _s5)
+
+    def _s6():
+        return _outcome(static_model_only(_mk_model("dynamic_adaptive", "critical")))
+
+    _scenario("deny_dynamic_model_on_critical", "deny", _s6)
+
+    def _s7():
+        return _outcome(static_model_only(_mk_model("generative_llm", "critical")))
+
+    _scenario("deny_generative_in_critical", "deny", _s7)
+
+    def _s8():
+        return _outcome(
+            generative_exclusion_gate(
+                _mk_model("generative_llm", "non_critical"), False
+            )
+        )
+
+    _scenario("deny_unreviewed_generation", "deny", _s8)
+
+    def _s9():
+        return _outcome(check_model_lineage(None, model_version="v2.3.1"))
+
+    _scenario("deny_missing_lineage", "deny", _s9)
+
+    def _s10():
+        probe = alcoa_probe({"attributable": True})
+        return {
+            "verdict": "allow" if probe.passed else "deny",
+            "reason": probe.reason,
+            "classification": "non_authoritative",
+        }
+
+    _scenario("deny_alcoa_violation", "deny", _s10)
+
+    def _s11():
+        ctx = context_of_use_receipt(
+            receipt_id="ctx-bench",
+            prev_digest="genesis",
+            model_id="hplc-qc-7",
+            context_digest=DOC,
+            authority_pubkey_hex=AUTH_PUB,
+            authority_secret=SEED
+        )
+        return _outcome(
+            context_of_use_binding(ctx, actual_context_digest=OTHER)
+        )
+
+    _scenario("deny_context_violation", "deny", _s11)
+
+    def _s12():
+        monitor = drift_monitor_receipt(
+            receipt_id="drift-bench",
+            prev_digest="genesis",
+            model_id="hplc-qc-7",
+            drift_metric=0.09,
+            tolerance=0.05,
+            checked_at=T0 - 100,
+            authority_pubkey_hex=AUTH_PUB,
+            authority_secret=SEED
+        )
+        return _outcome(drift_monitor_gate(monitor, now=T0))
+
+    _scenario("deny_drift_beyond_tolerance", "deny", _s12)
+
+    results: list[str] = []
+    mismatches: list[str] = []
+    allowed_ids: list[str] = []
+    warned_ids: list[str] = []
+    denial_reasons: dict[str, str] = {}
+    for sid, expected, thunk in scenarios:
+        try:
+            outcome = thunk()
+        except Exception as error:
+            outcome = {"verdict": "deny", "reason": f"raised: {error}",
+                       "classification": "unverifiable-process"}
+        verdict = outcome.get("verdict")
+        if verdict != expected:
+            mismatches.append(
+                f"{sid}: expected {expected}, got {verdict}"
+            )
+            results.append(f"FAIL {sid}")
+        else:
+            results.append(f"OK {sid}")
+            if verdict == "allow":
+                allowed_ids.append(sid)
+            elif verdict == "allow-with-warning":
+                warned_ids.append(sid)
+            else:
+                denial_reasons[sid] = outcome.get("reason", "")
+
+    return {
+        "n_scenarios": len(scenarios),
+        "mismatches": mismatches,
+        "allowed_ids": allowed_ids,
+        "warned_ids": warned_ids,
+        "denial_reasons": denial_reasons,
+    }
+
+
+def run_disaster_agents() -> dict[str, Any]:
+    """Emergency-response discipline receipts (one-hundred-thirty-seventh batch).
+
+    Absorbs the 2026 AI-disaster thread: AI on 911 (New Orleans /
+    Carbyne constrained activation; Fort Worth 26% non-emergency
+    share; Las Vegas sub-2s 50+ language translation; Seattle's
+    undisclosed Corti AI listening on all 911 medical calls for 2+
+    years); early warning at scale (Google Flood Hub, FireSat,
+    Android earthquake network, China's "Ma Zu", Mexico Cell
+    Broadcast expansion, KIRa-Berg, Korea edge-AI CCTV); false
+    alarms and rumor (Brazil 2026 nationwide false alert into a
+    World Cup broadcast, Nextdoor AI-generated fake alerts, Cal
+    Fire's 6-day-stale chatbot evacuation info, forged evacuation
+    orders); priced coverage (Pano AI $50K/camera/year); RAND
+    (AI detects, does not recommend action); Teodoro/UNDRR
+    (evacuation orders must be human-signed).
+
+    Fail-closed rules over 12 deterministic scenarios: AI triage
+    binds a live activation pin — unbound triage is
+    ``disaster:unauthorized_triage``; AI involvement in a call must
+    be disclosed — undisclosed is ``disaster:hidden_ai``; warnings
+    ride a hash-chained version history — superseded references
+    are NON_AUTHORITATIVE (``disaster:superseded_warning``);
+    channels pin false-alarm budgets — over-budget degrades to
+    human confirmation
+    (``disaster:false_alarm_budget_exceeded``); deployments bind a
+    coverage equity floor — below it refuses go-live
+    (``disaster:equity_gap``); warnings bind delivery evidence —
+    unbound is NON_AUTHORITATIVE
+    (``disaster:no_delivery_evidence``); evacuation orders bind a
+    human countersignature — AI-only is
+    ``disaster:ai_evacuation``; emergency notices carry
+    machine-readable source markers — unmarked is
+    ``disaster:unmarked_notice``. Ground truth is closed:
+    4 allow / 8 deny.
+    """
+    import ed25519 as _ed25519
+
+    from canonical_json import jcs_canonical_json, jcs_sha256_hex
+    from disaster_agents import _marker_payload
+    from disaster_agents import (
+        AlarmBudgetRegistry,
+        DeliveryRegistry,
+        DisclosureRegistry,
+        EvacuationOrder,
+        TriageRegistry,
+        WarningVersionChain,
+        _seal_receipt,
+        ai_involvement_disclosure,
+        check_evacuation_order,
+        equity_probe,
+        equity_receipt,
+        false_alarm_budget,
+        human_final_decision,
+        last_mile_receipt,
+        misinfo_marker_probe,
+        triage_activation_receipt,
+        warning_version,
+    )
+    from ed25519 import public_key
+
+    T0 = 1_700_000_000
+    SEED = bytes(range(32))
+    AUTH_PUB = public_key(SEED).hex()
+    HUMAN_PUB = public_key(bytes(range(32, 64))).hex()
+    D1 = "ab" * 32
+    D2 = "cd" * 32
+    D3 = "ef" * 32
+
+    def _triage():
+        return triage_activation_receipt(
+            receipt_id="t-1",
+            deployment_id="dep-1",
+            channel="voice_911",
+            activation_digest=D1,
+            issued_at=T0,
+            ttl_s=3600,
+            issued_by="psap-ops",
+            authority_pubkey_hex=AUTH_PUB,
+            authority_secret=SEED,
+        )
+
+    def _disclosure(session="s-1"):
+        return ai_involvement_disclosure(
+            receipt_id="d-1",
+            session_id=session,
+            deployment_id="dep-1",
+            modality="triage_routing",
+            disclosed_at=T0,
+            ttl_s=3600,
+            issued_by="psap-ops",
+            authority_pubkey_hex=AUTH_PUB,
+            authority_secret=SEED,
+        )
+
+    def _notice(marked=True):
+        payload = _marker_payload(
+            notice_digest=D1,
+            originator="county-ema",
+            channel="cell_broadcast",
+            created_unix=T0,
+        )
+        notice = {
+            "notice_id": "n-1",
+            "originator": "county-ema",
+            "channel": "cell_broadcast",
+            "created_unix": T0,
+            "notice_digest": D1,
+        }
+        if marked:
+            notice["source_marker"] = {
+                "digest": jcs_sha256_hex(payload),
+                "pubkey_hex": AUTH_PUB,
+                "signature_hex": _ed25519.sign(
+                    SEED, jcs_canonical_json(payload)
+                ).hex(),
+            }
+        return notice
+
+    scenarios: list[tuple[str, str, Any]] = []
+
+    def _scenario(sid: str, expected: str, thunk: Any) -> None:
+        scenarios.append((sid, expected, thunk))
+
+    def _outcome(verdict: Any) -> dict[str, Any]:
+        return {
+            "verdict": "allow" if verdict.allowed else "deny",
+            "reason": verdict.reason,
+            "classification": verdict.classification,
+        }
+
+    def _s1():
+        reg = TriageRegistry()
+        reg.register(_triage())
+        return _outcome(
+            reg.check_activation(
+                deployment_id="dep-1", channel="voice_911", now=T0 + 10
+            )
+        )
+
+    _scenario("allow_bound_triage", "allow", _s1)
+
+    def _s2():
+        reg = DisclosureRegistry()
+        reg.register(_disclosure())
+        return _outcome(reg.check_disclosure(session_id="s-1", now=T0 + 10))
+
+    _scenario("allow_disclosed_call", "allow", _s2)
+
+    def _s3():
+        chain = WarningVersionChain()
+        v1 = chain.publish(
+            warning_version(
+                version_id="v-1",
+                warning_id="w-1",
+                version=1,
+                content_digest=D1,
+                issued_at=T0,
+                issued_by="warning-ops",
+                authority_pubkey_hex=AUTH_PUB,
+                authority_secret=SEED,
+            )
+        )
+        return _outcome(
+            chain.check_reference(version_digest=v1.receipt_digest, now=T0 + 10)
+        )
+
+    _scenario("allow_current_warning_version", "allow", _s3)
+
+    def _s4():
+        order = human_final_decision(
+            order_id="o-1",
+            order_digest=D1,
+            zone="zone-7",
+            issued_at=T0,
+            expires_at=T0 + 7200,
+            issued_by="emergency-ops",
+            human_signer="incident-commander",
+            human_pubkey_hex=HUMAN_PUB,
+            human_secret=bytes(range(32, 64)),
+            authority_pubkey_hex=AUTH_PUB,
+            authority_secret=SEED,
+        )
+        return _outcome(check_evacuation_order(order, now=T0 + 100))
+
+    _scenario("allow_human_signed_evacuation", "allow", _s4)
+
+    def _s5():
+        reg = TriageRegistry()
+        return _outcome(
+            reg.check_activation(
+                deployment_id="ghost", channel="voice_911", now=T0
+            )
+        )
+
+    _scenario("deny_unauthorized_triage", "deny", _s5)
+
+    def _s6():
+        reg = DisclosureRegistry()
+        return _outcome(reg.check_disclosure(session_id="s-9", now=T0))
+
+    _scenario("deny_hidden_ai", "deny", _s6)
+
+    def _s7():
+        chain = WarningVersionChain()
+        v1 = chain.publish(
+            warning_version(
+                version_id="v-1",
+                warning_id="w-1",
+                version=1,
+                content_digest=D1,
+                issued_at=T0,
+                issued_by="warning-ops",
+                authority_pubkey_hex=AUTH_PUB,
+                authority_secret=SEED,
+            )
+        )
+        chain.publish(
+            warning_version(
+                version_id="v-2",
+                warning_id="w-1",
+                version=2,
+                content_digest=D2,
+                issued_at=T0 + 60,
+                issued_by="warning-ops",
+                authority_pubkey_hex=AUTH_PUB,
+                authority_secret=SEED,
+                prev_digest=v1.receipt_digest,
+            )
+        )
+        return _outcome(
+            chain.check_reference(version_digest=v1.receipt_digest, now=T0 + 100)
+        )
+
+    _scenario("deny_superseded_warning", "deny", _s7)
+
+    def _s8():
+        reg = AlarmBudgetRegistry()
+        reg.register(
+            false_alarm_budget(
+                receipt_id="b-1",
+                channel_id="cell_broadcast",
+                max_false_alarm_bps=500,
+                window_s=86400,
+                issued_at=T0,
+                issued_by="warning-ops",
+                authority_pubkey_hex=AUTH_PUB,
+                authority_secret=SEED,
+            )
+        )
+        return _outcome(
+            reg.check_rate(
+                channel_id="cell_broadcast",
+                observed_false_alarm_bps=900,
+                now=T0,
+            )
+        )
+
+    _scenario("deny_false_alarm_over_budget", "deny", _s8)
+
+    def _s9():
+        return _outcome(
+            equity_probe(
+                equity_receipt(
+                    receipt_id="e-1",
+                    deployment_id="dep-1",
+                    coverage_bps=4000,
+                    min_required_bps=7000,
+                    measured_at=T0,
+                    protocol_digest=D2,
+                    issued_by="equity-audit",
+                    authority_pubkey_hex=AUTH_PUB,
+                    authority_secret=SEED,
+                ),
+                now=T0 + 10,
+            )
+        )
+
+    _scenario("deny_equity_gap", "deny", _s9)
+
+    def _s10():
+        reg = DeliveryRegistry()
+        return _outcome(reg.check_authority(warning_version_digest=D2, now=T0))
+
+    _scenario("deny_no_delivery_evidence", "deny", _s10)
+
+    def _s11():
+        order = human_final_decision(
+            order_id="o-1",
+            order_digest=D1,
+            zone="zone-7",
+            issued_at=T0,
+            expires_at=T0 + 7200,
+            issued_by="emergency-ops",
+            human_signer="incident-commander",
+            human_pubkey_hex=HUMAN_PUB,
+            human_secret=bytes(range(32, 64)),
+            authority_pubkey_hex=AUTH_PUB,
+            authority_secret=SEED,
+        )
+        bare = EvacuationOrder(
+            **{**order.__dict__, "human_signature_hex": ""}
+        )
+        digest, sig = _seal_receipt(bare._payload(), SEED)
+        bare = EvacuationOrder(
+            **{**bare.__dict__, "signature_hex": sig, "receipt_digest": digest}
+        )
+        return _outcome(check_evacuation_order(bare, now=T0 + 100))
+
+    _scenario("deny_ai_evacuation", "deny", _s11)
+
+    def _s12():
+        return _outcome(misinfo_marker_probe(_notice(marked=False)))
+
+    _scenario("deny_unmarked_notice", "deny", _s12)
 
     results: list[str] = []
     mismatches: list[str] = []
@@ -23767,7 +24728,10 @@ __all__ = [
     "run_companionship",
     "run_embodied",
     "run_greenwash",
+    "run_procurement_agents",
     "run_orbital_agents",
+    "run_disaster_agents",
+    "run_pharma_agents",
     "run_forest_fish",
     "run_permit_agents",
     "run_water_agents",

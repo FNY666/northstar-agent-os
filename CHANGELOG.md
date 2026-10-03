@@ -1,3 +1,91 @@
+## Unreleased (one-hundred-thirty-eighth batch) — procurement accountability gates (AI-procurement absorption)
+
+New module `procurement_agents.py`: `advisory_only_gate()` — AI may
+assist scoring but never conclude a matter; the named human evaluator
+must personally score, write reasons, and sign — an AI-scored award
+missing any human act denies `procurement.ai_concluded` (UK
+Procurement Act 2023 lesson). `source_grounding_receipt()` — every AI
+evaluation claim binds an original-tender-text location; ungrounded
+claims are NON_AUTHORITATIVE `procurement.ungrounded_claim` (Korea
+PPS lesson). `tender_doc_screen()` — tender docs need a live
+authority-signed pre-issuance health-check receipt (closed check
+vocabulary); without → `procurement.unscreened_doc` (China
+"先体检再发布" lesson). `collusion_probe()` — bid-rigging probes
+produce triple-bound *leads*, never automatic convictions
+(`procurement.collusion_lead`); incomplete evidence cannot conclude
+(UK CMA BRIT lesson). `losing_bid_data_gate()` — winners-only
+evaluations auto-degrade to `procurement.missing_losing_bids`.
+`incumbency_bias_probe()` — new-vs-incumbent rejection deviation
+beyond tolerance routes to audit (`procurement.incumbency_bias`).
+`algorithm_registry_receipt()` — deployed evaluation algorithms bind
+a reviewed registration; unregistered calls deny
+(`procurement.unregistered_algorithm`, China "算法登记审查"
+lesson). `full_trace_award()` — awards bind the 4-segment evidence
+chain (AI input, AI output, human edits, signed final reasons).
+Honest scoping: receipts bind declared procurement discipline; they
+don't end corruption. Bench track `metrics.procurement_agents`:
+12 scenarios, 4 allow / 8 deny.
+
+## Unreleased (one-hundred-thirty-seventh batch) — emergency response discipline (AI-disaster absorption)
+
+New module `disaster_agents.py`: `triage_activation_receipt()` —
+authority-signed AI-triage activation pins binding
+`(deployment_id, channel, activation_digest, issued_at, ttl_s)`;
+unbound AI diverting emergency calls is
+`disaster:unauthorized_triage` (Carbyne constrained-activation
+lesson). `ai_involvement_disclosure()` — per-session AI-involvement
+disclosures from a closed modality vocabulary; undisclosed AI on a
+call is `disaster:hidden_ai` (Seattle Corti lesson).
+`WarningVersionChain` — warnings ride a hash-chained version
+history; referencing a superseded version is NON_AUTHORITATIVE
+(`disaster:superseded_warning`), unknown digests hard-deny (Cal
+Fire stale-info lesson). `false_alarm_budget()` — per-channel
+false-alarm budgets in basis points; over-budget channels degrade
+to human confirmation (`disaster:false_alarm_budget_exceeded`),
+unbudgeted channels fail closed (Brazil lesson). `equity_probe()`
+— coverage-representativeness receipts against a pinned equity
+floor; below-floor deployments refuse go-live
+(`disaster:equity_gap`), stale measurements are
+NON_AUTHORITATIVE (Pano AI cost-is-equity lesson).
+`last_mile_receipt()` — delivery evidence bound to warning
+versions; unbound warnings are NON_AUTHORITATIVE
+(`disaster:no_delivery_evidence`). `human_final_decision()` —
+evacuation orders with human countersignatures; AI-only orders are
+`disaster:ai_evacuation` (Teodoro/UNDRR lesson).
+`misinfo_marker_probe()` — machine-readable source markers binding
+`(notice_digest, originator, channel, created_unix)`; unmarked
+notices are `disaster:unmarked_notice` (fake-evacuation-order
+lesson). Honest scoping: receipts bind declared response
+discipline; they don't stop disasters. Bench track
+`metrics.disaster_agents`: 12 scenarios, 4 allow / 8 deny.
+
+## Unreleased (one-hundred-thirty-fifth batch) — pharma manufacturing defense (AI-pharma absorption)
+
+New module `pharma_agents.py`: `quality_unit_countersign()` —
+AI-drafted GMP documents (specs/SOPs/batch records) without a live
+quality-unit countersign are NON_AUTHORITATIVE; production use is
+`pharma.undisclosed_judgment` (2026-04 FDA warning letter mechanized,
+21 CFR 211.22(c)+211.100(a)). `static_model_only()` — critical GMP
+steps permit only `static_deterministic` models; dynamic and
+continuous-learning models deny with `pharma.dynamic_model` (EU GMP
+Annex 22 red line); generative AI in a critical step is
+`pharma.generative_in_critical`. `generative_exclusion_gate()` —
+non-critical generative use needs a qualified person in the loop,
+else `pharma.unreviewed_generation`. `model_lineage_receipt()` —
+audits bind the 4-piece bundle (model version, training-data digest,
+input digest, output digest); missing → `pharma.missing_lineage`.
+`alcoa_probe()` — AI rewrites of electronic records must bind all 9
+ALCOA+ attributes; any missing attribute is `pharma.alcoa_violation`.
+`context_of_use_binding()` — use outside the declared context-of-use
+auto-degrades to NON_AUTHORITATIVE (`pharma.context_violation`).
+`drift_monitor_gate()` — drift beyond tolerance demands revalidation
+(`pharma.revalidation_required`); no monitor is
+`pharma.drift_unmonitored`. `pharma_claim_evidence()` — AI-pharma
+marketing claims (yield/time/cost numbers) must bind trial evidence;
+otherwise `pharma.unverified_claim`. Honest scoping: receipts bind
+declared manufacturing discipline; they don't make drugs safe. Bench
+track `metrics.pharma_agents`: 12 scenarios, 4 allow / 8 deny.
+
 ## Unreleased (one-hundred-thirty-sixth batch) — permit & planning discipline (AI-urban-planning absorption)
 
 New module `permit_agents.py`: `precheck_advisory_gate()` — AI
