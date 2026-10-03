@@ -143,13 +143,16 @@ class McpImport:
 
 # --------------------------------------------------------------- `mcp list` --
 
-def add_mcp_arguments(verb: argparse.ArgumentParser) -> None:
+def add_mcp_arguments(verb: argparse.ArgumentParser) -> argparse._SubParsersAction:
     """Attach the `mcp` verb's actions to the CLI parser.
 
     One action, and it is read-only on purpose. Whether a declaration should *run* is the
     operator's decision, taken with ``--mcp-config`` on a ``run`` command; the listing exists
     so that decision can be made from what the repository actually says, and so CI can check
     the same thing without a model, a provider key, or a workspace write.
+
+    Returns the subparsers action so sibling modules (``mcp_admission``) can add
+    their own actions to the same ``mcp`` verb.
     """
     actions = verb.add_subparsers(dest="mcp_action")
     listing = actions.add_parser("list", help="show what --mcp-config would start, and what it refuses")
@@ -157,6 +160,7 @@ def add_mcp_arguments(verb: argparse.ArgumentParser) -> None:
     listing.add_argument("--config", default="", metavar="PATH", help="read one file instead of searching")
     listing.add_argument("--json", action="store_true", help="print the parsed report as JSON")
     listing.set_defaults(handler=run_list)
+    return actions
 
 
 def run_list(args: argparse.Namespace) -> int:
