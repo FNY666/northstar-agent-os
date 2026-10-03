@@ -115,7 +115,7 @@ from tools import ToolLimits, ToolSandbox, build_default_registry
 
 #: Semantic version of the public case set. Bump when a case is added, removed,
 #: or its expected verdict changes — consumers pin against this string.
-BENCH_VERSION = "northstar.governance.bench.v26"
+BENCH_VERSION = "northstar.governance.bench.v27"
 
 USAGE_ERROR = 64
 
@@ -6402,6 +6402,554 @@ def run_adjudication() -> dict[str, Any]:
         "denial_reasons": denial_reasons,
     }
 
+
+def run_housing() -> dict[str, Any]:
+    """Fair-housing & coordination isolation (one-hundred-nineteenth batch).
+
+    Absorbs the 2026 AI-real-estate thread: *Louis v. SafeRent*
+    ($2.275M settlement, third-party tenant-score vendor and landlord
+    share FHA liability); RealPage algorithmic rent-manipulation (DOJ
+    antitrust settlements 2026-06~09, shared live-price feeds as the
+    coordination vector); NYC's algorithmic-rent ban preliminarily
+    enjoined 2026-09-29 (First Amendment dispute); Colorado AI Act
+    2026-06 ("reasonable care" against discrimination); ECOA
+    adverse-action notices citing "model output" are non-compliant;
+    iBuyer models quote 8%-14% below median by design.
+
+    Fail-closed rules over 12 deterministic scenarios: a
+    valuation/tenant-screening model needs a vendor-signed
+    disparate-impact probe receipt for the exact model digest covering
+    the required demographic slices; the agent may emit ONLY an
+    evidence pack (any verdict denies); adverse actions need specific
+    human-comprehensible reasons bound to a human deny countersign;
+    rent-setting models with a shared-aggregator live-price feed deny
+    (coordination risk); steering probes over synthetic persona pairs
+    deny on inequivalent listings; third-party vendors need a
+    joint-liability bias-audit admission; suppressed mitigating
+    factors (voucher, co-signer) deny the adverse decision. Ground
+    truth is closed: 4 allow / 8 deny.
+    """
+    from housing import (
+        DENY_AGENT_VERDICT,
+        DENY_COORDINATION,
+        DENY_MITIGATING_SUPPRESSED,
+        DENY_NO_PROBE,
+        DENY_PROBE_EXPIRED,
+        DENY_STEERING,
+        DENY_VAGUE_REASON,
+        DENY_VENDOR_NO_AUDIT,
+        adverse_action_receipt,
+        avm_fairness_receipt,
+        build_evidence_pack,
+        check_adverse_action,
+        check_vendor_admission,
+        coordination_isolation,
+        countersign_decision,
+        declare_source_isolation,
+        human_final_gate,
+        issue_fairness_probe,
+        mitigating_factors,
+        steering_probe,
+        vendor_liability_receipt,
+    )
+
+    T0 = 1_700_000_000
+    VENDOR = bytes(range(32))
+    HUMAN = bytes([3]) * 32
+    MODEL = "ab" * 32
+    PROBE = "cd" * 32
+    AUDIT = "ef" * 32
+
+    def _probe(**over):
+        kw = dict(
+            probe_id="probe-1",
+            model_digest=MODEL,
+            probe_type="disparate_impact",
+            demographic_slices=("black", "latino", "white"),
+            probe_digest=PROBE,
+            vendor_id="score-vendor",
+            vendor_secret=VENDOR,
+            measured_at=T0,
+            expires_at=T0 + 86_400,
+        )
+        kw.update(over)
+        return issue_fairness_probe(**kw)
+
+    def _pack(**over):
+        kw = dict(
+            pack_id="pack-1",
+            subject_id="applicant-9",
+            decision_kind="tenant_screening",
+            factors={"credit_score_band": "620-659", "income_multiple": "3.1x"},
+            evidence_digests=(AUDIT,),
+            emitted_at=T0,
+        )
+        kw.update(over)
+        return build_evidence_pack(**kw)
+
+    def _cs(pack, **over):
+        kw = dict(
+            countersign_id="cs-1",
+            pack=pack,
+            decision="deny",
+            decision_maker_id="manager-1",
+            decision_maker_secret=HUMAN,
+            decided_at=T0 + 120,
+            expires_at=T0 + 86_400,
+        )
+        kw.update(over)
+        return countersign_decision(**kw)
+
+    def _outcome(verdict):
+        return {
+            "verdict": "allow" if verdict.allowed else "deny",
+            "reason": verdict.reason,
+        }
+
+    scenarios: list[tuple[str, str, Any]] = []
+
+    def _scenario(sid: str, expected: str, thunk: Any) -> None:
+        scenarios.append((sid, expected, thunk))
+
+    def _s1():
+        v = avm_fairness_receipt(
+            [_probe()],
+            model_digest=MODEL,
+            decision_kind="tenant_screening",
+            required_slices=("black", "latino"),
+            check_time=T0 + 60,
+        )
+        return _outcome(v)
+
+    _scenario("allow_probe_gated_screening", "allow", _s1)
+
+    def _s2():
+        v = human_final_gate(_pack())
+        return _outcome(v)
+
+    _scenario("allow_evidence_pack_only", "allow", _s2)
+
+    def _s3():
+        proof = declare_source_isolation(
+            proof_id="iso-1",
+            model_digest=MODEL,
+            data_sources=("county-records", "mls-sold"),
+            live_price_feeds=[
+                {"feed_id": "f1", "provider_id": "own-crawler", "shared_aggregator": False}
+            ],
+            declared_by="pricing-team",
+            declared_at=T0,
+        )
+        v = coordination_isolation(proof, model_digest=MODEL)
+        return _outcome(v)
+
+    _scenario("allow_isolated_pricing", "allow", _s3)
+
+    def _s4():
+        admission = vendor_liability_receipt(
+            admission_id="adm-1",
+            vendor_id="score-vendor",
+            landlord_id="landlord-1",
+            audit_digest=AUDIT,
+            auditor_id="independent-auditor",
+            admitted_at=T0,
+            expires_at=T0 + 86_400,
+        )
+        v = check_vendor_admission(
+            admission, vendor_id="score-vendor", check_time=T0 + 60
+        )
+        return _outcome(v)
+
+    _scenario("allow_admitted_vendor", "allow", _s4)
+
+    def _s5():
+        v = avm_fairness_receipt(
+            [],
+            model_digest=MODEL,
+            decision_kind="tenant_screening",
+            required_slices=("black",),
+            check_time=T0 + 60,
+        )
+        return _outcome(v)
+
+    _scenario("deny_no_probe", "deny", _s5)
+
+    def _s6():
+        pack = _pack()
+        bad = pack.__class__(**{**pack.__dict__, "verdict": "deny"})
+        v = human_final_gate(bad)
+        return _outcome(v)
+
+    _scenario("deny_agent_verdict", "deny", _s6)
+
+    def _s7():
+        pack = _pack()
+        cs = _cs(pack)
+        try:
+            adverse_action_receipt(
+                action_id="act-1",
+                subject_id="applicant-9",
+                reasons=["model output"],
+                pack=pack,
+                countersign=cs,
+                acted_at=T0 + 200,
+            )
+        except Exception:
+            return {"verdict": "deny", "reason": DENY_VAGUE_REASON}
+        return {"verdict": "allow", "reason": "unexpected"}
+
+    _scenario("deny_vague_reason", "deny", _s7)
+
+    def _s8():
+        proof = declare_source_isolation(
+            proof_id="iso-2",
+            model_digest=MODEL,
+            data_sources=("county-records",),
+            live_price_feeds=[
+                {
+                    "feed_id": "f1",
+                    "provider_id": "mega-aggregator",
+                    "shared_aggregator": True,
+                }
+            ],
+            declared_by="pricing-team",
+            declared_at=T0,
+        )
+        v = coordination_isolation(proof, model_digest=MODEL)
+        return _outcome(v)
+
+    _scenario("deny_shared_aggregator", "deny", _s8)
+
+    def _s9():
+        def listings(persona):
+            if persona["protected:race"] == "black":
+                return ["unit-c"]
+            return ["unit-a", "unit-b", "unit-c"]
+
+        v = steering_probe(
+            listings,
+            {"income": "80k", "protected:race": "black"},
+            {"income": "80k", "protected:race": "white"},
+        )
+        return _outcome(v)
+
+    _scenario("deny_steering", "deny", _s9)
+
+    def _s10():
+        v = check_vendor_admission(
+            None, vendor_id="score-vendor", check_time=T0 + 60
+        )
+        return _outcome(v)
+
+    _scenario("deny_no_vendor_audit", "deny", _s10)
+
+    def _s11():
+        v = mitigating_factors(
+            {"housing_voucher": "section-8 active"},
+            {},
+        )
+        return _outcome(v)
+
+    _scenario("deny_mitigating_suppressed", "deny", _s11)
+
+    def _s12():
+        v = avm_fairness_receipt(
+            [_probe()],
+            model_digest=MODEL,
+            decision_kind="tenant_screening",
+            required_slices=("black",),
+            check_time=T0 + 86_400,
+        )
+        return _outcome(v)
+
+    _scenario("deny_expired_probe", "deny", _s12)
+
+    mismatches: list[str] = []
+    allowed_ids: list[str] = []
+    warned_ids: list[str] = []
+    denial_reasons: dict[str, str] = {}
+    for sid, expected, thunk in scenarios:
+        try:
+            result = thunk()
+        except Exception as exc:  # noqa: BLE001 - a crashing scenario is a mismatch
+            mismatches.append(f"{sid}: raised {type(exc).__name__}: {exc}")
+            continue
+        actual = result.get("verdict")
+        if actual == expected:
+            if actual == "allow":
+                allowed_ids.append(sid)
+            else:
+                denial_reasons[sid] = str(result.get("reason"))
+        elif actual == "warn" and expected == "allow":
+            warned_ids.append(sid)
+        else:
+            mismatches.append(
+                f"{sid}: expected {expected}, got {actual} "
+                f"(reason={result.get('reason')})"
+            )
+
+    return {
+        "n_scenarios": len(scenarios),
+        "mismatches": mismatches,
+        "allowed_ids": allowed_ids,
+        "warned_ids": warned_ids,
+        "denial_reasons": denial_reasons,
+    }
+
+
+
+def run_game_agents() -> dict[str, Any]:
+    """Game-agent integrity gates (one-hundred-twenty-second batch).
+
+    Absorbs the 2026 AI-gaming thread: the 2026-04 in-production
+    NPC memory-poisoning case (players fed a popular LLM-NPC
+    competitor content); Artificial Agency's Behavior Engine and its
+    approved-actions envelope; KRAFTON x NVIDIA PUBG Ally and the
+    profiling/spending role-separation lesson; 2026 anti-cheat
+    (kernel drivers, deterministic probe semantics from the 113th
+    batch); SAG-AFTRA July 2026 (voiceprint/AI-persona consent);
+    Sega's "no AI" trust claim; GDC 2026 (player-facing generation
+    through the UGC sandbox).
+
+    Fail-closed rules over 12 deterministic scenarios: poisoned NPC
+    memory writes are quarantined, never committed; actions outside
+    the authority-signed approved-actions envelope deny; an NPC
+    holding both profiling and spending roles is a conflict; known
+    cheat markers deny as ``game.cheat_detected`` while incomplete
+    traces go to ``game.anomaly_review``; synthetic performance
+    without a live performer grant denies; unsubstantiated "no AI"
+    claims must not be published; UGC release with unpassed gates
+    is a sandbox escape. Ground truth is closed: 4 allow / 8 deny.
+    """
+    from game_agents import (
+        DENY_ACTION_OUTSIDE_ENVELOPE,
+        DENY_CHEAT_DETECTED,
+        DENY_MEMORY_POISONED,
+        DENY_NO_PERFORMER_CONSENT,
+        DENY_ROLE_CONFLICT,
+        DENY_SANDBOX_ESCAPE,
+        DENY_UNSUBSTANTIATED_NO_AI,
+        MemoryWrite,
+        SandboxContent,
+        check_no_ai_claim,
+        check_npc_action,
+        check_performer_use,
+        game_cheat_probe,
+        issue_envelope_receipt,
+        issue_no_ai_attestation,
+        issue_performer_grant,
+        issue_role_receipt,
+        npc_memory_gate,
+        role_separation,
+        ugc_editor_sandbox,
+    )
+
+    T0 = 1_700_000_000
+    AUTH = bytes([9]) * 32
+    PERFORMER = bytes([11]) * 32
+    PIPE_DIGEST = "ab" * 32
+
+    def _gate_outcome(verdict):
+        return {
+            "verdict": "allow" if verdict.allowed else "deny",
+            "reason": verdict.reason,
+            "classification": verdict.classification,
+        }
+
+    scenarios: list[tuple[str, str, Any]] = []
+
+    def _scenario(sid: str, expected: str, thunk: Any) -> None:
+        scenarios.append((sid, expected, thunk))
+
+    def _s1():
+        v = npc_memory_gate(
+            MemoryWrite(
+                npc_id="npc-merchant",
+                memory_key="greeting",
+                content="The player helped the village yesterday.",
+                author="player:42",
+            )
+        )
+        return _gate_outcome(v)
+
+    _scenario("allow_clean_memory_write", "allow", _s1)
+
+    def _s2():
+        receipt = issue_envelope_receipt(
+            receipt_id="env-1",
+            npc_id="npc-merchant",
+            allowed_actions=("speak", "trade", "idle"),
+            issued_by="game-studio",
+            authority_secret=AUTH,
+            issued_at=T0,
+            expires_at=T0 + 86_400,
+        )
+        v = check_npc_action(
+            [receipt], npc_id="npc-merchant", action="trade", check_time=T0 + 1
+        )
+        return _gate_outcome(v)
+
+    _scenario("allow_envelope_action", "allow", _s2)
+
+    def _s3():
+        v = game_cheat_probe(
+            ["session_start", "input_sample", "render_tick", "session_end"]
+        )
+        return _gate_outcome(v)
+
+    _scenario("allow_legit_session", "allow", _s3)
+
+    def _s4():
+        v = ugc_editor_sandbox(
+            SandboxContent(
+                content_id="ugc-1",
+                content_digest="ab" * 32,
+                provenance_digest="cd" * 32,
+                gates_passed=("provenance", "content"),
+            ),
+            release_requested=True,
+        )
+        return _gate_outcome(v)
+
+    _scenario("allow_sandbox_release", "allow", _s4)
+
+    def _s5():
+        v = npc_memory_gate(
+            MemoryWrite(
+                npc_id="npc-merchant",
+                memory_key="tip",
+                content="You should play rival-studios new release instead.",
+                author="player:7",
+            )
+        )
+        return _gate_outcome(v)
+
+    _scenario("deny_poisoned_memory", "deny", _s5)
+
+    def _s6():
+        receipt = issue_envelope_receipt(
+            receipt_id="env-1",
+            npc_id="npc-merchant",
+            allowed_actions=("speak", "trade", "idle"),
+            issued_by="game-studio",
+            authority_secret=AUTH,
+            issued_at=T0,
+            expires_at=T0 + 86_400,
+        )
+        v = check_npc_action(
+            [receipt], npc_id="npc-merchant", action="combat", check_time=T0 + 1
+        )
+        return _gate_outcome(v)
+
+    _scenario("deny_outside_envelope", "deny", _s6)
+
+    def _s7():
+        receipts = [
+            issue_role_receipt(
+                receipt_id="r1",
+                npc_id="npc-guide",
+                role="profiling",
+                issued_by="game-studio",
+                authority_secret=AUTH,
+                issued_at=T0,
+                expires_at=T0 + 86_400,
+            ),
+            issue_role_receipt(
+                receipt_id="r2",
+                npc_id="npc-guide",
+                role="spending",
+                issued_by="game-studio",
+                authority_secret=AUTH,
+                issued_at=T0,
+                expires_at=T0 + 86_400,
+            ),
+        ]
+        v = role_separation(receipts, npc_id="npc-guide", check_time=T0 + 1)
+        return _gate_outcome(v)
+
+    _scenario("deny_role_conflict", "deny", _s7)
+
+    def _s8():
+        v = game_cheat_probe(
+            ["session_start", "input_sample", "aim_snap", "session_end"]
+        )
+        return _gate_outcome(v)
+
+    _scenario("deny_cheat_detected", "deny", _s8)
+
+    def _s9():
+        v = game_cheat_probe(["session_start", "input_sample"])
+        return _gate_outcome(v)
+
+    _scenario("deny_anomaly_incomplete", "deny", _s9)
+
+    def _s10():
+        v = check_performer_use(
+            [],
+            [],
+            performer_id="va-aria",
+            rights_scope="voice",
+            purpose="npc-dialogue",
+            use_time=T0 + 1,
+        )
+        return _gate_outcome(v)
+
+    _scenario("deny_no_performer_consent", "deny", _s10)
+
+    def _s11():
+        v = check_no_ai_claim(
+            [],
+            product_id="yakuza-like",
+            build_pipeline_digest=PIPE_DIGEST,
+            check_time=T0 + 1,
+        )
+        return _gate_outcome(v)
+
+    _scenario("deny_unsubstantiated_no_ai", "deny", _s11)
+
+    def _s12():
+        v = ugc_editor_sandbox(
+            SandboxContent(
+                content_id="ugc-2",
+                content_digest="ef" * 32,
+                provenance_digest="cd" * 32,
+                gates_passed=("provenance",),
+            ),
+            release_requested=True,
+        )
+        return _gate_outcome(v)
+
+    _scenario("deny_sandbox_escape", "deny", _s12)
+
+    mismatches: list[str] = []
+    allowed_ids: list[str] = []
+    warned_ids: list[str] = []
+    denial_reasons: dict[str, str] = {}
+    for sid, expected, thunk in scenarios:
+        try:
+            outcome = thunk()
+        except Exception as error:
+            outcome = {"verdict": "deny", "reason": f"raised: {error}",
+                       "classification": "unverifiable-process"}
+        verdict = outcome.get("verdict")
+        if verdict != expected:
+            mismatches.append(
+                f"{sid}: expected {expected}, got {verdict}"
+            )
+        if verdict == "allow":
+            allowed_ids.append(sid)
+        elif verdict == "allow-with-warning":
+            warned_ids.append(sid)
+        else:
+            denial_reasons[sid] = outcome.get("reason", "")
+
+    return {
+        "n_scenarios": len(scenarios),
+        "mismatches": mismatches,
+        "allowed_ids": allowed_ids,
+        "warned_ids": warned_ids,
+        "denial_reasons": denial_reasons,
+    }
 
 def run_deployment_registry() -> dict[str, Any]:
     """Deployment registration gate (one-hundred-tenth batch).
@@ -15366,6 +15914,128 @@ def _case_metrics_adjudication(h: BenchHarness) -> BenchExpectation:
     )
 
 
+
+def _case_metrics_game_agents(h: BenchHarness) -> BenchExpectation:
+    """Game-agent integrity gates (one-hundred-twenty-second batch).
+
+    12 deterministic scenarios, 4 allow / 8 deny: a clean NPC memory
+    write allows; an in-envelope trade allows; a legitimate play
+    session trace passes the anti-cheat probe; UGC with all gates
+    passed releases from the sandbox. Denied: a competitor-brand
+    memory write (quarantined, ``memory_poisoned``), an action
+    outside the approved envelope (``action_outside_envelope``), an
+    NPC holding both profiling and spending roles
+    (``role_conflict``), a trace with a known cheat marker
+    (``cheat_detected``), an incomplete trace (``anomaly_review``),
+    synthetic voice use with no performer grant
+    (``performer_rights_violation``), an unsubstantiated "no AI"
+    claim (``unsubstantiated_no_ai``), and a UGC release with
+    unpassed gates (``sandbox_escape``).
+    """
+    metrics = run_game_agents()
+
+    def check(exp: BenchExpectation, report: Any) -> tuple[bool, str]:
+        if metrics["n_scenarios"] != 12:
+            return (False, f"expected 12 game-agent scenarios, saw {metrics['n_scenarios']}")
+        if metrics["mismatches"]:
+            return (False, f"scenario(s) disagree with ground truth: {metrics['mismatches']}")
+        if metrics["allowed_ids"] != [
+            "allow_clean_memory_write",
+            "allow_envelope_action",
+            "allow_legit_session",
+            "allow_sandbox_release",
+        ]:
+            return (False, f"allowed set drifted: {metrics['allowed_ids']}")
+        reasons = metrics["denial_reasons"]
+        for sid, needle in (
+            ("deny_poisoned_memory", "memory_poisoned"),
+            ("deny_outside_envelope", "action_outside_envelope"),
+            ("deny_role_conflict", "role_conflict"),
+            ("deny_cheat_detected", "cheat_detected"),
+            ("deny_anomaly_incomplete", "anomaly_review"),
+            ("deny_no_performer_consent", "performer_rights_violation"),
+            ("deny_unsubstantiated_no_ai", "unsubstantiated_no_ai"),
+            ("deny_sandbox_escape", "sandbox_escape"),
+        ):
+            if needle not in reasons.get(sid, ""):
+                return (False, f"denial reason missing {needle!r}: {reasons.get(sid, '')!r}")
+        return True, "12/12 game-agent probes match ground truth"
+
+    return BenchExpectation(
+        runtime=_noop_runtime(h),
+        expect_subtype="success",
+        post_check=check,
+        metrics=metrics,
+        notes=(
+            "2026 AI-gaming thread: in-production NPC memory poisoning "
+            "(2026-04); Behavior Engine approved-actions envelopes; "
+            "PUBG Ally profiling/spending role separation; kernel-driver "
+            "anti-cheat and deterministic probe semantics; SAG-AFTRA "
+            "voiceprint consent; Sega no-AI trust claims; GDC 2026 UGC "
+            "sandbox. The module enforces pipeline integrity, not game "
+            "design."
+        ),
+    )
+
+def _case_metrics_housing(h: BenchHarness) -> BenchExpectation:
+    """Fair-housing & coordination isolation (one-hundred-nineteenth batch).
+
+    12 deterministic scenarios, 4 allow / 8 deny: a probe-gated tenant
+    screening allows; an evidence-pack-only agent output allows; an
+    isolated-source pricing model allows; an audited third-party
+    vendor admission allows. Denied: no fairness probe, an agent
+    emitting its own verdict, a vague "model output" adverse-action
+    reason, a shared-aggregator live-price feed (coordination risk),
+    steering over synthetic persona pairs, a vendor with no bias
+    audit, a suppressed housing-voucher mitigating factor, and an
+    expired probe receipt.
+    """
+    metrics = run_housing()
+
+    def check(exp: BenchExpectation, report: Any) -> tuple[bool, str]:
+        if metrics["n_scenarios"] != 12:
+            return (False, f"expected 12 housing scenarios, saw {metrics['n_scenarios']}")
+        if metrics["mismatches"]:
+            return (False, f"scenario(s) disagree with ground truth: {metrics['mismatches']}")
+        if metrics["allowed_ids"] != [
+            "allow_probe_gated_screening",
+            "allow_evidence_pack_only",
+            "allow_isolated_pricing",
+            "allow_admitted_vendor",
+        ]:
+            return (False, f"allowed set drifted: {metrics['allowed_ids']}")
+        reasons = metrics["denial_reasons"]
+        for sid, needle in (
+            ("deny_no_probe", "no_fairness_probe"),
+            ("deny_agent_verdict", "verdict_emitted_by_agent"),
+            ("deny_vague_reason", "vague_adverse_action"),
+            ("deny_shared_aggregator", "coordination_risk"),
+            ("deny_steering", "steering_detected"),
+            ("deny_no_vendor_audit", "vendor_no_audit"),
+            ("deny_mitigating_suppressed", "mitigating_suppressed"),
+            ("deny_expired_probe", "probe_expired"),
+        ):
+            if needle not in reasons.get(sid, ""):
+                return (False, f"denial reason missing {needle!r}: {reasons.get(sid, '')!r}")
+        return True, "12/12 housing probes match ground truth"
+
+    return BenchExpectation(
+        runtime=_noop_runtime(h),
+        expect_subtype="success",
+        post_check=check,
+        metrics=metrics,
+        notes=(
+            "2026 AI-real-estate thread: Louis v. SafeRent ($2.275M, "
+            "joint vendor/landlord FHA liability); RealPage algorithmic "
+            "rent-manipulation (DOJ 2026-06~09); NYC rent-ban injunction "
+            "2026-09-29; Colorado AI Act 2026-06 reasonable care; ECOA "
+            '"model output" is not a reason. The gate enforces probes, '
+            "evidence packs, human verdicts, and source isolation — it "
+            "does not certify statistical fairness."
+        ),
+    )
+
+
 def _case_metrics_language_cap(h: BenchHarness) -> BenchExpectation:
     """Language-capability receipts (one-hundred-fourteenth batch).
 
@@ -17176,7 +17846,9 @@ CASES: tuple[BenchCase, ...] = (
     BenchCase("metrics.herd_gate", "metrics", "herd-correlation gate: declared signal sources, Jaccard herd-overlap denial, correlated-exposure cap (AI-finance absorption)", _case_metrics_herd_gate),
     BenchCase("metrics.scene_bound", "metrics", "scene-bound authorization receipts: pair-exact (setting, stratum) scope, manifest-pinned performance, consent-first ambient capture, unverifiable-process model invocation", _case_metrics_scene_bound),
     BenchCase("metrics.incident_receipts", "metrics", "incident receipts + evaluator-access gate: Art.73 reporting clocks with auto-escalation, 5-year retention floor, evaluate-A/ship-B gate, cheat probes", _case_metrics_incident_receipts),
+    BenchCase("metrics.housing", "metrics", "fair-housing & coordination isolation: vendor-signed disparate-impact probe receipts, evidence-pack-only agent outputs, human countersigned adverse actions with specific reasons, shared-aggregator coordination deny, steering probes, joint-liability vendor admissions, mitigating-factor presentation (AI-real-estate absorption)", _case_metrics_housing),
     BenchCase("metrics.adjudication", "metrics", "human final adjudication for AI sports: countersigned release for gated scenes, population-mismatch flags, biometric purpose binding + resale hard deny, coach honesty labels, fail-closed degradation plans, betting isolation", _case_metrics_adjudication),
+    BenchCase("metrics.game_agents", "metrics", "game-agent integrity: NPC memory-poisoning quarantine, authority-signed approved-actions envelopes, profiling/spending role separation, deterministic anti-cheat probes, performer consent receipts, no-AI attestation, UGC sandbox gates (AI-gaming absorption)", _case_metrics_game_agents),
     BenchCase("metrics.harness_binding", "metrics", "harness integrity binding: SHA-256 harness hash in audit, quad-only scores", _case_metrics_harness_binding),
     BenchCase("metrics.drift_detection", "metrics", "Livenerf-style drift probe: bootstrap CI + paired permutation test", _case_metrics_drift_detection),
 )
@@ -17815,6 +18487,7 @@ __all__ = [
     "run_scene_bound",
     "run_language_cap",
     "run_adjudication",
+    "run_game_agents",
     "run_vendor_chain",
     "run_deployment_registry",
     "run_incident_receipts",
@@ -17823,6 +18496,7 @@ __all__ = [
     "run_agri",
     "run_editorial",
     "run_env_cost",
+    "run_housing",
     "run_owasp_asi_coverage",
     "run_policy_axis",
     "run_step_compliance",
