@@ -33,6 +33,7 @@ from tool_allowlist import (
     make_enforcement_event,
 )
 from timelock import Timelock
+from tool_receipt import make_tool_receipt, receipt_audit_record
 
 TOOL_CALL_SCHEMA_VERSION = "northstar.tool-call.v1"
 #: v3 binds the approval to the exact approved call identity: v2 approvals
@@ -545,11 +546,14 @@ class ActionGateway:
         tool_allowlist: ToolAllowlist | None = None,
         enforcement_failure_policy: str = "fail_closed",
         timelock: Timelock | None = None,
+        audit_sink: Callable[[dict[str, Any]], None] | None = None,
     ):
         _require_secret(approval_secret)
         self._approval_secret = approval_secret
         self._max_results = _require_positive_int(max_results, "max_results")
         self._max_tombstones = _require_positive_int(max_tombstones, "max_tombstones")
+        self._receipts: dict[str, dict[str, Any]] = {}
+        self._audit_sink = audit_sink
         if tool_allowlist is not None and not isinstance(
             tool_allowlist, ToolAllowlist
         ):
@@ -652,6 +656,10 @@ class ActionGateway:
             last=False
         )
         self._tombstones[old_key] = (fingerprint, valid_until)
+
+    def receipt_for(self, idempotency_key: str) -> dict[str, Any] | None:
+        """Return the tool receipt for a completed call, if any."""
+        return self._receipts.get(idempotency_key)
 
     def execute(
         self,
@@ -842,4 +850,25 @@ class ActionGateway:
             binary_path=binary_path,
         )
         self._results[call.idempotency_key] = (fingerprint, result, valid_until)
+        # Mint a per-call tool receipt: tamper-evident link between approval,
+        # request, and outcome.
+        receipt = make_tool_receipt(
+            tool_name=call.tool_name,
+            task_id=call.task_id,
+            thread_id=call.thread_id,
+            run_id=call.run_id,
+            call_id=call.step_id,
+            actor_id=call.actor_id,
+            workspace_id=call.workspace_id,
+            idempotency_key=call.idempotency_key,
+            arguments=arguments,
+            result=result.output,
+            approval=approval,
+            issued_at=now,
+        )
+        self._receipts[call.idempotency_key] = receipt
+        while len(self._receipts) > self._max_results:
+            self._receipts.pop(next(iter(self._receipts)))
+        if self._audit_sink is not None:
+            self._audit_sink(receipt_audit_record(receipt))
         return result

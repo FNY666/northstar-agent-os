@@ -108,6 +108,8 @@ Authorize and dispatch one exact registered tool call at a time.
 - `register(spec: ToolSpec)`
 - `enforcement_trace` (property)
   - Append-only enforcement events (OCSF action/disposition analogue).
+- `receipt_for(idempotency_key: str)`
+  - Return the tool receipt for a completed call, if any.
 - `execute(call: ToolCall, arguments: dict[str, Any], *, authorization_token: str, authorization_secret: bytes, now: int, approval_token: str | None=None, current_policy_revision: str, run: dict[str, Any] | None=None, timelock_operation_id: str | None=None)`
 ### `runner`
 
