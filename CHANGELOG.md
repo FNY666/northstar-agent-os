@@ -1,4 +1,50 @@
-## Unreleased (sixty-ninth batch) — pledge-style self-restriction for tool execution
+## Unreleased (seventieth batch) — biscuit-style attenuating delegation credentials
+
+New module `delegation_credentials.py`
+(`components/northstar-agent-runtime/`) plus the metrics-track case
+`metrics.attenuation` (`governance_bench.py`), absorbing the attenuation
+pattern from Eclipse Biscuit — read against the official documentation
+("Introduction", "Per-request attenuation" recipe and "Specifications",
+doc.biscuitsec.org, 2026-10-03), honestly scoped:
+
+- **Authority facts + check-only attenuation**: the root authority
+  (supervisor role, holder of the root Ed25519 key) mints an authority
+  block of `right(tool, operation)` facts for a holder agent. Every
+  delegation hop may only *append* a block carrying **checks**
+  (`tool_in` / `op_in` / `depth_at_most` / `expires_before`); checks are
+  conjunctive, so a hop can narrow rights but never widen them. A block
+  carrying facts outside the authority block is rejected outright — the
+  anti-amplification gate is structural, not signature-deep.
+- **Signature chain with next-key (from the biscuit spec)**: each block
+  carries `next_pub` and is signed by the *previous* key over
+  `canonical(block data) || next_pub`; the token also carries the private
+  key of the last block's `next_pub` (the *proof*), which is what lets a
+  holder attenuate **offline** without the root key. Removing, reordering
+  or editing any block breaks the chain. A `seal()` variant replaces the
+  proof key with a seal signature: verifiable, but no further attenuation.
+- **Offline verification with the root public key only**: chain walk →
+  seal check → holder/rights match → every check evaluated against the
+  request facts (unknown predicates fail closed; no clock reads — expiry
+  evaluates a caller-supplied timestamp fact, keeping verification
+  deterministic like the audit chain).
+- **Audit anchoring**: `attenuation_audit_events()` emits one event per
+  block (issuance / attenuation / sealing), each pinning the block
+  signature; chained into `audit.ndjson/1` via `audit_chain`, so a
+  delegation's rights at each hop are provable from the audit trail.
+- **Attack battery, all blocked (6/6)**: amplification via permissive
+  check (neutralised by conjunctive narrowing), authority-fact smuggling
+  into an attenuation block, forged credential, stripped attenuation
+  block (detected against the audit-anchored chain), reordered blocks,
+  tampered check, tampered seal.
+
+This is a semantic port, not wire compatibility: it does not parse real
+biscuit protobuf tokens and is not Datalog — the borrow is declared here
+and in the module docstring.
+
+`BENCH_VERSION` v10 → v11; `run_attenuation` exported; human + `--json`
+output print the new track. 22 new unit tests
+(`tests/test_delegation_credentials.py`).
+
 
 Absorbs the OpenBSD `pledge(2)` permission model (man.openbsd.org/pledge.2,
 verified against the man page, not a summary): a process declares the
