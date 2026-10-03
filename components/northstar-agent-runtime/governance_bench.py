@@ -17596,6 +17596,62 @@ def _case_metrics_pharma_agents(h: BenchHarness) -> BenchExpectation:
 
 
 
+def _case_metrics_audit_agents(h: BenchHarness) -> BenchExpectation:
+    """Audit & assurance discipline (one-hundred-forty-third batch).
+
+    12 deterministic scenarios, 4 allow / 8 deny: AI work with a fresh
+    reconstruction bundle passes; an AI audit tool with 2 recorded
+    parallel-run cycles passes; an output staying in the "evidence"
+    role passes; docs current for the shipping version passes.
+    Denied: AI work with no reconstruction bundle
+    (``audit:no_reconstruction``), a tool with no parallel-run cycles
+    (``audit:no_parallel_run``), a conclusion label without a human
+    signoff (``audit:unconcluded``), an unregistered pipeline model
+    (``audit:shadow_ai``), an AI decision with no live decision-rights
+    charter (``audit:no_charter``), a zero override rate — supervision
+    is ceremonial (``audit:rubber_stamp``), a highly autonomous
+    deployment with no incident-management procedure
+    (``audit:no_incident_procedure``), and an alert channel converting
+    at 3% — alert fatigue (``audit:alert_fatigue``).
+    """
+    metrics = run_audit_agents()
+
+    def check(exp: BenchExpectation, report: Any) -> tuple[bool, str]:
+        if metrics["n_scenarios"] != 12:
+            return (False, f"expected 12 audit scenarios, saw {metrics['n_scenarios']}")
+        if metrics["mismatches"]:
+            return (False, f"scenario(s) disagree with ground truth: {metrics['mismatches']}")
+        if metrics["allowed_ids"] != [
+            "allow_reconstruction",
+            "allow_parallel_run",
+            "allow_evidence_role",
+            "allow_continuous_ready",
+        ]:
+            return (False, f"allowed set drifted: {metrics['allowed_ids']}")
+        reasons = metrics["denial_reasons"]
+        for sid, needle in (
+            ("deny_no_reconstruction", "no_reconstruction"),
+            ("deny_no_parallel_run", "no_parallel_run"),
+            ("deny_unconcluded", "unconcluded"),
+            ("deny_shadow_ai", "shadow_ai"),
+            ("deny_no_charter", "no_charter"),
+            ("deny_rubber_stamp", "rubber_stamp"),
+            ("deny_no_incident_procedure", "no_incident_procedure"),
+            ("deny_alert_fatigue", "alert_fatigue"),
+        ):
+            if needle not in reasons.get(sid, ""):
+                return (False, f"{sid}: expected needle {needle!r} in {reasons.get(sid, '')!r}")
+        return (True, "ok")
+
+    return BenchExpectation(
+        runtime=_noop_runtime(h),
+        expect_subtype="success",
+        post_check=check,
+        metrics=metrics,
+        notes="audit & assurance discipline: reconstruction bundles, parallel-run gates, evidence-not-conclusion, shadow-AI inventory, decision-rights charters, oversight capacity, incident procedures, alert-fatigue probes (AI-audit absorption)",
+    )
+
+
 def _case_metrics_housing_ai_agents(h: BenchHarness) -> BenchExpectation:
     """Housing-market AI discipline (one-hundred-forty-second batch).
 
@@ -20173,6 +20229,7 @@ CASES: tuple[BenchCase, ...] = (
     BenchCase("metrics.procurement_agents", "metrics", "procurement accountability: advisory-only award gates, source-grounded claims, pre-issuance health checks, collusion leads (never convictions), losing-bid data gates, incumbency-bias probes, algorithm registration, 4-segment award traces (AI-procurement absorption)", _case_metrics_procurement_agents),
     BenchCase("metrics.hr_agents", "metrics", "HR & workplace AI discipline: independent bias audits, secret-scoring disclosure, human-final countersigns (anti rubber-stamp), emotion-inference ban, surveillance-repurpose notices, homophily probes, layoff AI disclosure, tainted-input gates, vendor agent pins (AI-HR absorption)", _case_metrics_hr_agents),
     BenchCase("metrics.waste_agents", "metrics", "waste & circular-economy discipline: bound sorting-purity claims, Basel PIC e-waste movements, battery-passport pins, claim evidence chains, informal-sector transition plans, AI hardware lifecycle, verified dumping alerts, battery fire triage (AI-waste absorption)", _case_metrics_waste_agents),
+    BenchCase("metrics.audit_agents", "metrics", "audit & assurance discipline: reconstruction bundles, parallel-run gates, evidence-not-conclusion, shadow-AI inventory, decision-rights charters, oversight capacity, incident procedures, alert-fatigue probes (AI-audit absorption)", _case_metrics_audit_agents),
     BenchCase("metrics.underwriting_agents", "metrics", "underwriting & claims discipline: approve-only claim engines, human-review breakers on key content, fairness stress receipts, EU AI Act compliance clock, fraud probes routed to humans, assist-not-decide, NAIC evaluation-tool mapping, vendor evidence binding (AI-insurance absorption)", _case_metrics_underwriting_agents),
     BenchCase("metrics.dataflow_sensitivity", "metrics", "dataflow sensitivity tracking (OpenAPPA-style)", _case_metrics_dataflow_sensitivity),
     BenchCase("metrics.decision_model", "metrics", "structured decision-model approval path", _case_metrics_decision_model),
@@ -23837,6 +23894,240 @@ def run_waste_agents() -> dict[str, Any]:
     }
 
 
+def run_audit_agents() -> dict[str, Any]:
+    """Audit & assurance discipline (one-hundred-forty-third batch).
+
+    Absorbs the 2026 AI-audit thread: EY's agentic audit push (1.4
+    trillion journal-entry lines/year, 160,000 engagements, end-to-end
+    audit AI targeted by 2028); KPMG Clara AI (95,000 auditors,
+    140+ countries); FloQast's AI plans/tests/reports; Parker &
+    Lawrence "AI in Risk & Compliance 2026" (72% run highly autonomous
+    AI, 81% of which have no AI incident-management procedure, 70.4%
+    no pre-deployment review, 65.3% no AI inventory); COSO 2026-02-23
+    (audit trails must capture prompt/input/output/model
+    version/human review — enough to reconstruct behavior rationale);
+    PCAOB AS 1105 (AI working papers under information-system
+    evidence standards); OSFI E-23 (AI outputs are decision inputs
+    only, humans accountable); the US 2026-04 OCC/FDIC pivot
+    (generative/agentic AI outside model-risk scope — receipts cannot
+    assume coverage that may not exist); the "done is not provable"
+    gap (governance evidence weakest of 8 activities at 28%).
+
+    Fail-closed rules over 12 deterministic scenarios: AI work
+    without a live reconstruction bundle is NON_AUTHORITATIVE
+    (``audit.no_reconstruction``); AI audit tools need recorded
+    parallel-run cycles before go-live
+    (``audit.no_parallel_run``); AI outputs are evidence, never
+    conclusions — conclusion labels without a named-human signoff are
+    ``audit.unconcluded``; unregistered pipeline AI is shadow AI
+    (``audit.shadow_ai``), including digest-swapped models; AI
+    deciding without a live decision-rights charter is
+    ``audit.no_charter``; zero override rates trip
+    ``audit.rubber_stamp``; highly autonomous deployments without an
+    incident-management procedure are refused
+    (``audit.no_incident_procedure``); alert channels converting at
+    3% auto-degrade (``audit.alert_fatigue``). Ground truth is closed:
+    4 allow / 8 deny.
+    """
+    from ed25519 import public_key, sign
+
+    from audit_agents import (
+        AUDIT_SCHEMA_VERSION,
+        CLASS_AUTHORITATIVE,
+        CLASS_NON_AUTHORITATIVE,
+        AuthorityRegistry,
+        ReconstructionReceipt,
+        ReconstructionRegistry,
+        ParallelRunReceipt,
+        ParallelRunRegistry,
+        InventoryEntry,
+        InventoryRegistry,
+        CharterReceipt,
+        CharterRegistry,
+        IncidentProcedureReceipt,
+        IncidentProcedureRegistry,
+        reconstruction_receipt,
+        parallel_run_gate,
+        evidence_not_conclusion,
+        shadow_ai_inventory,
+        decision_rights_charter,
+        oversight_capacity_ratio,
+        incident_procedure_gate,
+        alert_conversion_probe,
+        continuous_ready_gate,
+    )
+    from canonical_json import jcs_canonical_json, jcs_sha256_hex
+
+    SEC = b"audit-bench-authority-0000000001"  # 32 bytes
+    assert len(SEC) == 32
+    PUB = public_key(SEC)
+    T0 = 1_800_000_000
+    HEX64 = "ab" * 32
+    HEX64_B = "cd" * 32
+    HEX64_C = "ef" * 32
+
+    authorities = AuthorityRegistry()
+    authorities.register("bench-audit-op", PUB.hex())
+
+    def _prev(log):
+        return log[-1].receipt_digest if log else "genesis"
+
+    # --- reconstruction registry with one fresh bundle ---
+    recon_reg = ReconstructionRegistry(authorities)
+    rr = ReconstructionReceipt(
+        receipt_id="rc-bench-1", work_id="work-bench-1",
+        prompt_digest=HEX64, input_digest=HEX64_B, output_digest=HEX64_C,
+        model_version="model-7", human_reviewer_id="rev-chen",
+        reviewed_at=T0, authority_id="bench-audit-op",
+        authority_pubkey_hex=PUB.hex(), signature_hex="00" * 64,
+        prev_digest=_prev(recon_reg.log))
+    recon_reg.issue(
+        receipt_id="rc-bench-1", work_id="work-bench-1",
+        prompt_digest=HEX64, input_digest=HEX64_B, output_digest=HEX64_C,
+        model_version="model-7", human_reviewer_id="rev-chen",
+        reviewed_at=T0, authority_id="bench-audit-op",
+        signature=sign(SEC, jcs_canonical_json(rr._payload())), issued_now=T0)
+
+    # --- parallel-run registry with one 2-cycle tool ---
+    par_reg = ParallelRunRegistry(authorities)
+    pr = ParallelRunReceipt(
+        receipt_id="pr-bench-1", tool_id="tool-bench-1", cycles_run=2,
+        human_audit_digest=HEX64, agreement_rate=0.97,
+        authority_id="bench-audit-op", authority_pubkey_hex=PUB.hex(),
+        signature_hex="00" * 64, recorded_at=T0,
+        prev_digest=_prev(par_reg.log))
+    par_reg.issue(
+        receipt_id="pr-bench-1", tool_id="tool-bench-1", cycles_run=2,
+        human_audit_digest=HEX64, agreement_rate=0.97,
+        authority_id="bench-audit-op",
+        signature=sign(SEC, jcs_canonical_json(pr._payload())),
+        recorded_at=T0)
+
+    # --- inventory registry with one registered component ---
+    inv_reg = InventoryRegistry(authorities)
+    ie = InventoryEntry(
+        receipt_id="in-bench-1", component_id="sampler-bench-1",
+        component_digest=HEX64, purpose="journal sampling",
+        authority_id="bench-audit-op", authority_pubkey_hex=PUB.hex(),
+        signature_hex="00" * 64, registered_at=T0,
+        prev_digest=_prev(inv_reg.log))
+    inv_reg.issue(
+        receipt_id="in-bench-1", component_id="sampler-bench-1",
+        component_digest=HEX64, purpose="journal sampling",
+        authority_id="bench-audit-op",
+        signature=sign(SEC, jcs_canonical_json(ie._payload())),
+        registered_at=T0)
+
+    # --- charter registry with one live charter ---
+    ch_reg = CharterRegistry(authorities)
+    cr = CharterReceipt(
+        receipt_id="ch-bench-1", charter_id="charter-bench-1",
+        decision_rights_digest=HEX64, ai_decision_scope="sampling",
+        human_decision_scope="final opinion", authority_id="bench-audit-op",
+        authority_pubkey_hex=PUB.hex(), signature_hex="00" * 64,
+        bound_at=T0, expires_at=T0 + 3600,
+        prev_digest=_prev(ch_reg.log))
+    ch_reg.issue(
+        receipt_id="ch-bench-1", charter_id="charter-bench-1",
+        decision_rights_digest=HEX64, ai_decision_scope="sampling",
+        human_decision_scope="final opinion", authority_id="bench-audit-op",
+        signature=sign(SEC, jcs_canonical_json(cr._payload())),
+        bound_at=T0, expires_at=T0 + 3600)
+
+    # --- incident-procedure registry with one bound deployment ---
+    ip_reg = IncidentProcedureRegistry(authorities)
+    ip = IncidentProcedureReceipt(
+        receipt_id="ip-bench-1", deployment_id="dep-bench-1",
+        procedure_digest=HEX64, autonomy_level="highly_autonomous",
+        authority_id="bench-audit-op", authority_pubkey_hex=PUB.hex(),
+        signature_hex="00" * 64, bound_at=T0,
+        prev_digest=_prev(ip_reg.log))
+    ip_reg.issue(
+        receipt_id="ip-bench-1", deployment_id="dep-bench-1",
+        procedure_digest=HEX64, autonomy_level="highly_autonomous",
+        authority_id="bench-audit-op",
+        signature=sign(SEC, jcs_canonical_json(ip._payload())),
+        bound_at=T0)
+
+    scenarios: list[tuple[str, bool, str]] = []
+    results: dict[str, dict[str, Any]] = {}
+
+    def _record(sid, expect_allow, needle, verdict):
+        scenarios.append((sid, expect_allow, needle))
+        results[sid] = {"allowed": verdict.allowed, "reason": verdict.reason}
+
+    # 1. AI work with a fresh reconstruction bundle -> allow
+    _record("allow_reconstruction", True, "",
+            reconstruction_receipt(recon_reg, "work-bench-1", T0 + 10))
+
+    # 2. AI audit tool with 2 recorded parallel-run cycles -> allow
+    _record("allow_parallel_run", True, "",
+            parallel_run_gate(par_reg, "tool-bench-1", T0))
+
+    # 3. output staying in the evidence role -> allow
+    _record("allow_evidence_role", True, "",
+            evidence_not_conclusion("out-bench-1", "evidence", False))
+
+    # 4. docs current for the shipping version -> allow
+    _record("allow_continuous_ready", True, "",
+            continuous_ready_gate("2.4.0", "docs-88", "2.4.0"))
+
+    # 5. AI work with no reconstruction bundle -> deny
+    _record("deny_no_reconstruction", False, "no_reconstruction",
+            reconstruction_receipt(recon_reg, "work-ghost", T0))
+
+    # 6. tool with no parallel-run cycles -> deny
+    _record("deny_no_parallel_run", False, "no_parallel_run",
+            parallel_run_gate(par_reg, "tool-ghost", T0))
+
+    # 7. conclusion label without a human signoff -> deny
+    _record("deny_unconcluded", False, "unconcluded",
+            evidence_not_conclusion("out-bench-2", "final-conclusion", False))
+
+    # 8. unregistered pipeline model -> deny (shadow AI)
+    _record("deny_shadow_ai", False, "shadow_ai",
+            shadow_ai_inventory(inv_reg, "ghost-model", HEX64, T0))
+
+    # 9. AI deciding with no live charter -> deny
+    _record("deny_no_charter", False, "no_charter",
+            decision_rights_charter(ch_reg, "charter-ghost", True, T0))
+
+    # 10. zero override rate -> deny (rubber stamp)
+    _record("deny_rubber_stamp", False, "rubber_stamp",
+            oversight_capacity_ratio(5, 2000, 0.0))
+
+    # 11. highly autonomous deployment with no procedure -> deny
+    _record("deny_no_incident_procedure", False, "no_incident_procedure",
+            incident_procedure_gate(ip_reg, "dep-ghost", "highly_autonomous", T0))
+
+    # 12. alert channel converting at 3% -> deny (alert fatigue)
+    _record("deny_alert_fatigue", False, "alert_fatigue",
+            alert_conversion_probe("ch-bench", 100, 3))
+
+    mismatches: list[str] = []
+    allowed_ids: list[str] = []
+    denial_reasons: dict[str, str] = {}
+    for sid, expect_allow, needle in scenarios:
+        r = results[sid]
+        if r["allowed"]:
+            allowed_ids.append(sid)
+        else:
+            denial_reasons[sid] = r["reason"]
+        if r["allowed"] != expect_allow:
+            mismatches.append(f"{sid}: expected allow={expect_allow}, "
+                              f"saw allow={r['allowed']}")
+        elif not expect_allow and needle and needle not in r["reason"]:
+            mismatches.append(f"{sid}: expected needle {needle!r} in "
+                              f"{r['reason']!r}")
+    return {
+        "n_scenarios": len(scenarios),
+        "n_allowed": len(allowed_ids),
+        "n_denied": len(scenarios) - len(allowed_ids),
+        "allowed_ids": allowed_ids,
+        "denial_reasons": denial_reasons,
+        "mismatches": mismatches,
+    }
+
 def run_housing_ai_agents() -> dict[str, Any]:
     """Housing-market AI discipline (one-hundred-forty-second batch).
 
@@ -25853,6 +26144,7 @@ __all__ = [
     "run_orbital_agents",
     "run_hr_agents",
     "run_housing_ai_agents",
+    "run_audit_agents",
     "run_disaster_agents",
     "run_pharma_agents",
     "run_forest_fish",
