@@ -101,6 +101,42 @@ class GovernanceBenchCliTests(unittest.TestCase):
         self.assertIn("bench", out)
 
 
+class ConsentAblationTests(unittest.TestCase):
+    def test_consent_ablation_is_deterministic(self):
+        from governance_bench import run_consent_ablation
+
+        first = run_consent_ablation()
+        second = run_consent_ablation()
+        self.assertEqual(first, second)
+
+    def test_consent_ablation_flip_pattern(self):
+        from governance_bench import run_consent_ablation
+
+        ablation = run_consent_ablation()
+        self.assertEqual(ablation["n_probes"], 6)
+        # The three consent-gated mutating probes flip allow->deny; nothing
+        # may flip deny->allow (stripping consent must never grant access).
+        self.assertEqual(len(ablation["flip_allow_to_deny"]), 3)
+        self.assertEqual(ablation["flip_deny_to_allow"], [])
+        self.assertEqual(set(ablation["flip_tiers"]), {"3"})
+        # Controls: the read probe stays allowed, the disallowed and the
+        # empty-consent probes stay denied in both passes.
+        self.assertEqual(ablation["kept"]["allowed"], 4)
+        self.assertEqual(ablation["stripped"]["allowed"], 1)
+
+    def test_consent_case_is_registered(self):
+        import inspect
+
+        from governance_bench import _case_metrics_consent_ablation
+
+        case = next(c for c in CASES if c.id == "metrics.consent_ablation")
+        self.assertEqual(case.track, "metrics")
+        # The honest scoping must live in the case source: deterministic
+        # engine sensitivity, NOT a human-subject experiment.
+        src = inspect.getsource(_case_metrics_consent_ablation)
+        self.assertIn("NOT a human-subject experiment", src)
+
+
 class PositionalTaskTests(unittest.TestCase):
     def test_extract_positional_task_pulls_bare_string(self):
         body, task = extract_positional_task(["--workspace", "/tmp/ws", "summarise README"])

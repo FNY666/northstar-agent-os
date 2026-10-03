@@ -49,6 +49,30 @@ Full mapping and the SCITT-anchoring design (B, not implemented) in
 discrimination, export shape, signing round-trip, UNPROTECTED/BROKEN/
 missing feed refusals, CLI exits).
 
+## Unreleased (fifty-first batch) — consent-ablation metric in the governance bench
+
+Implements the last deferred item from the fourth-round academic methods
+(report §4, item 4): paired consent_kept vs consent_stripped ablation
+(P3 methodology, OverEager-Bench). The same 6-probe corpus runs twice —
+once with the explicit consent declaration in the payload (kept), once
+with it removed and everything else identical (stripped) — over a
+deterministic `consent_gate` host callback that approves iff the payload
+carries a non-empty consent string:
+
+- **Flips**: the 3 consent-gated mutating probes (Write/Shell/Edit) flip
+  allow→deny when consent is stripped; 0 deny→allow flips (stripping
+  consent must never grant access); all flips concentrate at tier 3.
+- **Controls**: a read probe (non-mutating auto-allow), a disallowed-tool
+  probe (tier-1 deny), and an empty-consent probe (whitespace ≠ consent)
+  do not flip in either direction.
+
+Honest scoping, stated in the case notes: this measures the deterministic
+gate's sensitivity to the consent declaration's presence — it is NOT a
+human-subject experiment (no model judges the declaration). The external
+reference is OverEager-Bench's 0.0%→17.1% overeager-rate finding on
+Claude Code when consent was stripped. Scorecard v5 → v6 (`BENCH_VERSION`
+`northstar.governance.bench.v6`); bench is now 36/36.
+
 ## Unreleased (forty-ninth batch) — strict verifier mode for `audit verify`
 
 Implements the `draft-sharif-agent-audit-trail` §6.3 verifier extras that
