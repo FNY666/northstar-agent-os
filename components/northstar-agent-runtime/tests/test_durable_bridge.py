@@ -262,6 +262,7 @@ class StoreRoundTripTests(RuntimeTestCase):
                 "status": "planned",
                 "idempotency_key": f"{run_id}:created",
                 "payload_digest": "sha256:" + "0" * 64,
+                "blob_ref": None,
             }
             fields.update(overrides)
             return contract.EventContract.from_dict(fields)

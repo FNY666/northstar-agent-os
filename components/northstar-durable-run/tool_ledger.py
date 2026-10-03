@@ -27,6 +27,8 @@ single-process use only.
 Reconcile table (``run_tool`` on resume)
 ----------------------------------------
 - ``completed`` + cached result        -> replay the result, zero re-execution
+- ``completed`` + blob_ref result       -> fetch the result from the blob
+  area on demand (missing/corrupt blob is fail-closed)
 - ``completed`` + receiver query hit   -> return the receiver's result
 - ``completed`` + result unrecoverable  -> fail closed (see below)
 - ``started`` (no ``completed``) + receiver query hit
@@ -39,10 +41,23 @@ Reconcile table (``run_tool`` on resume)
 
 A ``completed`` tool call whose result exceeded the inline cap
 (:data:`MAX_INLINE_RESULT_BYTES`) and has no receiver to ask is
-*unrecoverable*: the event trail proves the effect happened exactly once,
-but its result is gone, so resuming would have to re-run the raw effect and
-risk double application. The ledger refuses loudly instead of guessing.
-Deployments with large tool results must provide a receiver.
+*unrecoverable* — unless the result crossed the claim-check threshold and
+was diverted to the blob area (see below), in which case it is fetched on
+demand. The event trail proves the effect happened exactly once, but an
+unrecoverable result means resuming would have to re-run the raw effect
+and risk double application. The ledger refuses loudly instead of
+guessing. Deployments with large tool results must provide a receiver.
+
+Claim-check for large results
+-----------------------------
+Results at or above ``blob_store.CLAIM_CHECK_THRESHOLD_BYTES`` (64 KiB)
+never go inline into the sidecar JSON: they are stored once in the
+content-addressed blob area next to the event history
+(``<events>.blobs/sha256:<hex>``) and the sidecar entry carries only the
+``blob_ref``. ``replay_result`` fetches the bytes on demand and
+hash-verifies them; a missing or corrupt blob is fail-closed with a
+``ValueError`` naming the ref — the ledger will not silently replay a
+``None`` or re-run the effect behind the caller's back.
 
 Crash sites
 -----------
@@ -62,6 +77,8 @@ import re
 import tempfile
 from pathlib import Path
 from typing import Any, Callable, Protocol
+
+from blob_store import CLAIM_CHECK_THRESHOLD_BYTES
 
 LEDGER_SCHEMA_VERSION = "northstar.tool-ledger.v1"
 #: Canonical JSON results at or under this size are cached inline in the
@@ -201,6 +218,10 @@ class ToolEffectLedger:
         self._run_id = run_id
         self._ledger_path = Path(ledger_path).absolute()
         self._append = append
+        # The blob area lives next to the event history (see blob_store.py);
+        # large results are diverted there by claim-check instead of going
+        # inline into the sidecar.
+        self._blob_store = getattr(store, "blob_store", None)
         if crash_hook is not None and not callable(crash_hook):
             raise ValueError("crash_hook must be callable")
         self._crash_hook = crash_hook
@@ -260,14 +281,31 @@ class ToolEffectLedger:
         self, tool_call_id: str, idempotency_key: str, attempt: int, result: Any
     ) -> None:
         raw = _canonical_json(result)
-        inline = raw if len(raw) <= MAX_INLINE_RESULT_BYTES else None
+        if len(raw) >= CLAIM_CHECK_THRESHOLD_BYTES:
+            # Claim-check: the result is too large for the sidecar JSON.
+            # Store it once in the content-addressed blob area and keep only
+            # the ref — the sidecar stays small no matter how large results
+            # get.
+            if self._blob_store is None:
+                raise ValueError(
+                    "tool result exceeds the claim-check threshold but no "
+                    "blob area is available: refusing to cache it inline"
+                )
+            blob_ref = self._blob_store.put(raw)
+            inline: Any = None
+            is_inline = False
+        else:
+            blob_ref = None
+            inline = raw if len(raw) <= MAX_INLINE_RESULT_BYTES else None
+            is_inline = inline is not None
         results = self._read_sidecar()
         results[tool_call_id] = {
             "idempotency_key": idempotency_key,
             "attempt": attempt,
             "result_digest": _digest(result),
             "result": json.loads(inline.decode("utf-8")) if inline is not None else None,
-            "result_inline": inline is not None,
+            "result_inline": is_inline,
+            "blob_ref": blob_ref,
         }
         _atomic_write_json(
             self._ledger_path,
@@ -279,11 +317,32 @@ class ToolEffectLedger:
         )
 
     def replay_result(self, tool_call_id: str) -> tuple[bool, Any]:
-        """Return ``(found, result)`` for a completed tool call's cached result."""
+        """Return ``(found, result)`` for a completed tool call's cached result.
+
+        Inline results come from the sidecar; claim-checked results are
+        fetched from the blob area on demand. A missing or corrupt blob is
+        fail-closed (``ValueError``), never a silent miss.
+        """
         _require_tool_call_id(tool_call_id)
         entry = self._read_sidecar().get(tool_call_id)
-        if entry is not None and entry.get("result_inline"):
+        if entry is None:
+            return False, None
+        if entry.get("result_inline"):
             return True, entry["result"]
+        blob_ref = entry.get("blob_ref")
+        if blob_ref is not None:
+            if self._blob_store is None:
+                raise ValueError(
+                    f"tool result for {tool_call_id} is claim-checked "
+                    f"({blob_ref}) but no blob area is available"
+                )
+            try:
+                raw = self._blob_store.get(blob_ref)
+            except ValueError as error:
+                raise ValueError(
+                    f"tool result for {tool_call_id} is unrecoverable: {error}"
+                ) from error
+            return True, json.loads(raw.decode("utf-8"))
         return False, None
 
     def _append_ledger_event(

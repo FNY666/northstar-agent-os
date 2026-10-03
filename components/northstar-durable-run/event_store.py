@@ -1,4 +1,12 @@
-"""Append-only local event history and checkpoint support for durable runs."""
+"""Append-only local event history and checkpoint support for durable runs.
+
+Large payloads (at or above ``blob_store.CLAIM_CHECK_THRESHOLD_BYTES``) are
+never embedded in the JSONL history: ``EventStore`` diverts them into the
+content-addressed blob area next to the event file and records only the
+``blob_ref`` on the event. Use :meth:`EventStore.read_blob` to fetch a
+payload on demand during fold/replay; a missing or corrupt blob is
+fail-closed, never silent.
+"""
 from __future__ import annotations
 
 import hashlib
@@ -8,6 +16,7 @@ import tempfile
 from pathlib import Path
 from typing import Any
 
+from blob_store import BlobStore
 from durable_contract import (
     EventContract,
     RunContract,
@@ -176,6 +185,9 @@ class EventStore:
         self._checkpoint_path = self._path.with_name(
             self._path.name + ".checkpoint.json"
         )
+        self._blob_store = BlobStore(
+            self._path.with_name(self._path.name + ".blobs")
+        )
 
     def _events(self) -> list[EventContract]:
         events = _read_lines(self._path)
@@ -186,6 +198,37 @@ class EventStore:
     def path(self) -> Path:
         """Absolute path of the JSONL event history file."""
         return self._path
+
+    @property
+    def blob_store(self) -> BlobStore:
+        """Content-addressed blob area next to the event history file.
+
+        Large payloads diverted by claim-check live here under their
+        ``sha256`` digest; the events themselves carry only ``blob_ref``.
+        """
+        return self._blob_store
+
+    def read_blob(self, event: EventContract) -> bytes | None:
+        """Fetch an event's out-of-band payload, or ``None``.
+
+        Returns ``None`` when the event carries no ``blob_ref`` (small
+        payloads were never stored out-of-band — only their digest is on
+        record). When a ``blob_ref`` is present the blob is fetched and
+        hash-verified; a missing or corrupt blob raises ``ValueError``
+        naming the event and the ref instead of silently returning
+        nothing.
+        """
+        if not isinstance(event, EventContract):
+            raise ValueError("event must be an EventContract")
+        ref = event.blob_ref
+        if ref is None:
+            return None
+        try:
+            return self._blob_store.get(ref)
+        except ValueError as error:
+            raise ValueError(
+                f"event {event.event_id} references an unreadable blob: {error}"
+            ) from error
 
     def append_event(self, event: EventContract) -> EventContract:
         if not isinstance(event, EventContract):

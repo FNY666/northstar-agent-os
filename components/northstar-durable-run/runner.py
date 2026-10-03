@@ -17,7 +17,9 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable
 
+from blob_store import CLAIM_CHECK_THRESHOLD_BYTES
 from durable_contract import (
+    EVENT_SCHEMA_VERSION,
     RunContract,
     assert_transition,
     can_transition,
@@ -651,12 +653,13 @@ class DurableRunner:
         idempotency_key: str,
         occurred_at: int,
         payload_digest: str,
+        blob_ref: str | None,
     ):
         from durable_contract import EventContract
 
         return EventContract.from_dict(
             {
-                "schema_version": "northstar.durable-event.v1",
+                "schema_version": EVENT_SCHEMA_VERSION,
                 "event_id": event_id,
                 "task_id": self.run.task_id,
                 "thread_id": self.run.thread_id,
@@ -669,6 +672,7 @@ class DurableRunner:
                 "idempotency_key": idempotency_key,
                 "trace_id": self.run.trace_id,
                 "payload_digest": payload_digest,
+                "blob_ref": blob_ref,
             }
         )
 
@@ -693,6 +697,16 @@ class DurableRunner:
                 raise ValueError("owner_id is required once a fencing epoch is active")
             self.lease.check_token(owner_id, token=token)
         history = self.store.read_history(self.run.run_id)
+        raw_payload = _canonical_json(payload)
+        # Claim-check: large payloads never go inline into the JSONL
+        # history. They are stored once in the content-addressed blob area
+        # and the event carries only the blob_ref (which equals the payload
+        # digest — the blob is named by what it contains).
+        blob_ref = (
+            self.store.blob_store.put(raw_payload)
+            if len(raw_payload) >= CLAIM_CHECK_THRESHOLD_BYTES
+            else None
+        )
         event = self._event(
             event_id=f"event-{len(history) + 1:06d}",
             sequence=len(history) + 1,
@@ -702,6 +716,7 @@ class DurableRunner:
             idempotency_key=idempotency_key,
             occurred_at=now,
             payload_digest=_digest(payload),
+            blob_ref=blob_ref,
         )
         self.store.append_event(event)
 

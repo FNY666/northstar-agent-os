@@ -38,7 +38,7 @@ STEP = {
 }
 
 EVENT = {
-    "schema_version": "northstar.durable-event.v1",
+    "schema_version": "northstar.durable-event.v2",
     "event_id": "event-001",
     "task_id": "task-001",
     "thread_id": "thread-001",
@@ -51,6 +51,7 @@ EVENT = {
     "idempotency_key": "run-001-planner-planned-1",
     "trace_id": "trace-001",
     "payload_digest": "sha256:" + "2" * 64,
+    "blob_ref": None,
 }
 
 

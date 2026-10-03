@@ -1,5 +1,44 @@
 # Northstar Agent OS — initial public component
 
+## Unreleased (forty-sixth batch) — durable execution: claim-check blob area, event schema migration
+
+Implements durable-execution hardening items 4–5 from the agent durability
+audit (report §4.1), all offline and deterministic:
+
+- **Claim-check large payloads** (`blob_store.py`, new module): payloads at
+  or above 64 KiB (`CLAIM_CHECK_THRESHOLD_BYTES`) never go inline into the
+  JSONL history or the ledger sidecar. They are stored once in a
+  content-addressed `<events>.blobs/` directory next to the event file
+  (`sha256:<hex>` names, atomic temp+fsync+rename writes, lazy directory
+  creation, no GC) and referenced by `blob_ref` on the event (which equals
+  the payload digest — the blob is named by what it contains). The ledger
+  sidecar does the same for large tool results: a completed >64 KiB result
+  now replays from the blob area with no receiver required (previously
+  digest-only and unrecoverable). `EventStore.read_blob(event)` fetches on
+  demand during fold/replay; missing or corrupt blobs raise `ValueError`
+  naming the event and the ref — fail-closed, never silent. The JSONL
+  history stays small no matter how large transcripts or tool results get.
+- **Event schema migration** (`event_migration.py`, new module;
+  `northstar.durable-event.v1` -> `v2`): v2 adds the optional `blob_ref`
+  field (the real field change this revision ships). Every revision carries
+  an upcaster; `EventContract.from_dict` migrates stored dicts to the
+  current revision *before* validation, so v1 histories replay and fold
+  without being rewritten or rejected. Unknown revisions are fail-closed
+  ("no upcaster"). New rule, enforced by tests: any event field change
+  ships a schema revision plus an upcaster — no silent drift.
+
+**Verification:** 25 new tests green (`tests/test_claim_check.py`: blob
+round-trip/idempotency/lazy root, missing/corrupt/invalid-ref fail-closed,
+v1→v2 migration on read with fold, unknown-revision rejection, migration
+not masking invalid content, ≥64 KiB event claim-check with small-payload
+control, boundary at exactly the threshold, ledger blob replay incl.
+no-receiver and missing-blob fail-closed); durable-run 149/149 (124
+existing + 25 new; the pre-existing v1 fixtures in `test_event_store.py`
+and `test_tool_ledger.py` now exercise the migration path);
+`python3 tests/docbuild.py verify` OK (`blob_store`, `event_migration`
+added to the docbuild MANIFEST; `docs/api/northstar-durable-run.md`
+regenerated).
+
 ## Unreleased (forty-fifth batch) — durable execution hardening: supervisor takeover, tool-effect ledger, crash benchmark
 
 (Named forty-fifth because the forty-fourth batch — audit tamper-evident
