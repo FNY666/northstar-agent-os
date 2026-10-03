@@ -56,6 +56,7 @@ from typing import Any, Iterable, Mapping, Sequence
 
 from command_hooks import ALLOWED_INTERPRETERS, DEFAULT_TIMEOUT_MS, MAX_HOOKS, MAX_TIMEOUT_MS, MIN_TIMEOUT_MS
 from hooks import VETO_EVENTS
+from plugin_trust import COVERABLE_CLAIMS, EVIDENCE_KINDS
 
 try:  # same fallback chain as policy_file.py: 3.11+ has it in the standard library
     import tomllib as _toml
@@ -111,6 +112,7 @@ ALLOWED_KEYS = frozenset(
         "policy",
         "compatibility",
         "integrity",
+        "evidence",
     }
 )
 ALLOWED_COMPONENT_KEYS = frozenset({"skills", "agents", "hooks", "mcp_servers", "context"})
@@ -131,6 +133,10 @@ ALLOWED_COMPATIBILITY_KEYS = frozenset({"platforms", "min_python", "requires_flo
 #: workspace's ``plugins.lock`` records the reviewed digest instead (see
 #: :func:`verify_integrity`), and ``verify`` compares the two.
 ALLOWED_INTEGRITY_KEYS = frozenset({"seal", "seal_key_env"})
+#: One ``[[evidence]]`` table binds one manifest claim to one verifiable evidence
+#: pointer. The keys are closed for the same reason the manifest's are: an evidence
+#: field nobody reads is a proof somebody only pretended to give.
+ALLOWED_EVIDENCE_KEYS = frozenset({"kind", "claim", "ref", "digest"})
 
 PLATFORMS = ("any", "posix", "linux", "darwin", "windows")
 
@@ -326,6 +332,28 @@ class HookClaim:
 
 
 @dataclass(frozen=True)
+class EvidenceItem:
+    """One claim-to-evidence binding, in exactly the shape ``[[evidence]]`` uses.
+
+    ``claim`` names the manifest claim this evidence supports (one of
+    :data:`plugin_trust.COVERABLE_CLAIMS`); ``ref`` is the evidence pointer - a URI the
+    runtime never fetches, because a trust decision must not depend on a network read;
+    ``digest`` is a ``sha256:`` commitment to the evidence content, the ERC-8004
+    ``requestHash`` analogue: a commitment, never the payload. An item proves the author
+    *named* their evidence, not that the evidence is true - the lockfile review is what
+    closes that gap, which is why the tier needs both.
+    """
+
+    kind: str
+    claim: str
+    ref: str
+    digest: str
+
+    def as_dict(self) -> dict[str, Any]:
+        return {"kind": self.kind, "claim": self.claim, "ref": self.ref, "digest": self.digest}
+
+
+@dataclass(frozen=True)
 class PluginManifest:
     """The parsed, validated claims of one bundle. Every field here was checked to load."""
 
@@ -349,6 +377,7 @@ class PluginManifest:
     content_digest: str = ""
     seal: str = ""
     seal_key_env: str = ""
+    evidence: tuple[EvidenceItem, ...] = ()
 
     def as_dict(self) -> dict[str, Any]:
         return {
@@ -383,6 +412,7 @@ class PluginManifest:
                 "seal_key_env": self.seal_key_env,
                 "content_digest": self.content_digest,
             },
+            "evidence": [item.as_dict() for item in self.evidence],
             "content_digest": self.content_digest,
         }
 
@@ -598,6 +628,8 @@ def parse_manifest(bundle: Bundle, *, workspace_policy: Mapping[str, Any] | None
     if seal and not key_env:
         raise _fail("integrity.seal needs integrity.seal_key_env naming where the key lives")
 
+    evidence = _parse_evidence(manifest.get("evidence"))
+
     resolved_policy = dict(policy)
     if workspace_policy is not None:
         _check_tighten_only(resolved_policy, workspace_policy)
@@ -623,7 +655,52 @@ def parse_manifest(bundle: Bundle, *, workspace_policy: Mapping[str, Any] | None
         content_digest=bundle.content_digest,
         seal=seal,
         seal_key_env=key_env,
+        evidence=tuple(evidence),
     )
+
+
+def _parse_evidence(raw: Any) -> list[EvidenceItem]:
+    """Parse ``[[evidence]]`` tables into claim-to-evidence bindings.
+
+    Malformed evidence is *refused*, not downgraded: a ``digest`` that is not a
+    commitment, a ``kind`` nobody recognises, or a ``claim`` outside the coverable set
+    is not weak evidence, it is a broken binding, and loading it would let a bundle
+    look evidenced while proving nothing. *Missing* evidence, by contrast, downgrades
+    the trust tier (:func:`plugin_trust.trust_tier`) - a declaration without proof is
+    still a declaration.
+    """
+    if raw is None:
+        return []
+    if not isinstance(raw, list):
+        raise _fail(f"{MANIFEST_NAME}: evidence must be a list of tables ([[evidence]])")
+    items: list[EvidenceItem] = []
+    for index, entry in enumerate(raw):
+        label = f"{MANIFEST_NAME}: evidence[{index}]"
+        if not isinstance(entry, Mapping):
+            raise _fail(f"{label} must be a table")
+        _require_exact_keys(entry, ALLOWED_EVIDENCE_KEYS, label)
+        kind = entry.get("kind")
+        if kind not in EVIDENCE_KINDS:
+            raise _fail(
+                f"{label}: kind must be one of {', '.join(EVIDENCE_KINDS)}, got {kind!r}"
+            )
+        claim = entry.get("claim")
+        if claim not in COVERABLE_CLAIMS:
+            raise _fail(
+                f"{label}: claim must be one of {', '.join(COVERABLE_CLAIMS)}, got {claim!r} "
+                "(only trust-implying claims take evidence; the rest is already checked)"
+            )
+        ref = entry.get("ref")
+        if not isinstance(ref, str) or not ref.strip():
+            raise _fail(f"{label}: ref must be a non-empty evidence pointer (a URI, never fetched)")
+        digest = entry.get("digest")
+        if not isinstance(digest, str) or not _DIGEST_RE.fullmatch(digest):
+            raise _fail(
+                f"{label}: digest must be sha256:<64 hex> - a commitment to the evidence "
+                "content, the ERC-8004 requestHash analogue"
+            )
+        items.append(EvidenceItem(kind=str(kind), claim=str(claim), ref=ref.strip(), digest=digest))
+    return items
 
 
 def _check_tighten_only(claims: Mapping[str, Any], workspace: Mapping[str, Any]) -> None:

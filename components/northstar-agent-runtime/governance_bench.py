@@ -7186,6 +7186,200 @@ def _case_metrics_tool_receipt(h: BenchHarness) -> BenchExpectation:
     )
 
 
+def _evidence_toml(items: Sequence[tuple[str, str]]) -> str:
+    """Render ``[[evidence]]`` tables for the probe corpus (real TOML, real parser)."""
+    lines = []
+    for kind, claim in items:
+        lines += [
+            "[[evidence]]",
+            f'kind = "{kind}"',
+            f'claim = "{claim}"',
+            f'ref = "bench:northstar.governance.bench#{claim}"',
+            f'digest = "{_EVIDENCE_DIGEST}"',
+        ]
+    return "\n".join(lines) + ("\n" if lines else "")
+
+
+def _install_probe_bundle(parent: Path, probe_id: str, publisher: str, evidence: Sequence[tuple[str, str]]) -> Path:
+    """One probe workspace with one installed bundle, via the real loader path."""
+    workspace = parent / probe_id
+    target = workspace / ".northstar" / "plugins" / "demo"
+    target.mkdir(parents=True)
+    manifest = _EVIDENCE_MANIFEST_HEAD + f'publisher = "{publisher}"\n' + _evidence_toml(evidence)
+    (target / "plugin.toml").write_text(manifest, encoding="utf-8")
+    return workspace
+
+
+def _pin_probe_bundle(workspace: Path) -> None:
+    """Pin what is on disk - the reviewer's act, recomputed from disk, not copied."""
+    target = workspace / ".northstar" / "plugins" / "demo"
+    bundle = plugin_manifest.load_bundle(target)
+    plugin_load.write_lock(
+        workspace,
+        {
+            "demo": {
+                "version": "0.1.0",
+                "publisher": plugin_manifest.parse_manifest(bundle).publisher,
+                "content_digest": bundle.content_digest,
+                "source": str(target),
+            }
+        },
+    )
+
+
+def run_plugin_claim_evidence() -> dict[str, Any]:
+    """Plugin claim-evidence tiering, ERC-8004 validation semantics.
+
+    ERC-8004 ("Trustless Agents", EIP draft; Identity and Reputation reference
+    contracts on Ethereum mainnet 2026-01-29) splits trust into three registries:
+    self-asserted identity claims, subjective reputation feedback, and objective
+    validation records - an independent validator's verifiable outcome for a specific
+    piece of work, keyed by a content commitment. The ported rule: a manifest claim
+    that implies trust (``publisher``, ``compatibility.platforms``, ``policy``) without
+    verifiable evidence is a *declaration*, and the trust tier is *downgraded*
+    accordingly - never refused (the registries are separate from execution), but
+    capped: no evidence, no ``evidenced`` tier.
+
+    Pure and deterministic: real bundle parsing (``plugin_manifest``), real loader
+    pinning (``plugin_load.load_installed``), temp workspaces only. The probes are
+    original synthetic bundles - there is no official dataset for this. What is
+    measured is the *tiering rule*, not chain state: ERC-8004's Validation Registry
+    was not deployed on any mainnet chain at the time of writing, so nothing here
+    touches a chain.
+    """
+    parent = Path(tempfile.mkdtemp(prefix="ns-bench-evidence-"))
+    tiers: dict[str, str] = {}
+    gaps: dict[str, list[str]] = {}
+    try:
+        scenarios = (
+            # (probe id, publisher, evidence items, pin?, require_lock)
+            ("full_evidence_pinned", "arena", _ALL_COVERED, True, True),
+            ("no_evidence_pinned", "arena", (), True, True),
+            ("forged_publisher_no_evidence", "northstar-official", (), True, True),
+            ("forged_publisher_partial_evidence", "northstar-official", (("seal", "publisher"),), True, True),
+            ("unpinned_full_evidence", "arena", _ALL_COVERED, False, False),
+        )
+        for probe_id, publisher, evidence, pin, require_lock in scenarios:
+            workspace = _install_probe_bundle(parent, probe_id, publisher, evidence)
+            if pin:
+                _pin_probe_bundle(workspace)
+            plugins, _problems = plugin_load.load_installed(workspace, require_lock=require_lock)
+            assert len(plugins) == 1, f"{probe_id}: expected one plugin, saw {len(plugins)}"
+            tiers[probe_id] = plugins[0].trust_tier
+            gaps[probe_id] = list(plugins[0].evidence_gaps)
+        # Drift after review: the decisive check fails, so the tier is a refusal.
+        workspace = _install_probe_bundle(parent, "drift_refused", "arena", _ALL_COVERED)
+        _pin_probe_bundle(workspace)
+        (workspace / ".northstar" / "plugins" / "demo" / "extra.txt").write_text("tampered\n", encoding="utf-8")
+        plugins, _problems = plugin_load.load_installed(workspace, require_lock=True)
+        tiers["drift_refused"] = plugins[0].trust_tier
+        gaps["drift_refused"] = list(plugins[0].evidence_gaps)
+
+        # Malformed evidence is refused at parse, not downgraded: a broken binding is
+        # not weak evidence, it is no evidence wearing a costume.
+        refusal_cases = {
+            "malformed_digest": _evidence_toml([("bench", "policy")]).replace(_EVIDENCE_DIGEST, "sha256:xyz"),
+            "unknown_kind": _evidence_toml([("vibes", "policy")]),
+            "unknown_claim": _evidence_toml([("bench", "description")]),
+            "unknown_key": _evidence_toml([("bench", "policy")]) + 'witness = "mallory"\n',
+        }
+        parse_refusals: list[str] = []
+        for probe_id, evidence_toml in refusal_cases.items():
+            root = parent / probe_id
+            root.mkdir()
+            (root / "plugin.toml").write_text(
+                _EVIDENCE_MANIFEST_HEAD + 'publisher = "arena"\n' + evidence_toml, encoding="utf-8"
+            )
+            try:
+                plugin_manifest.parse_manifest(plugin_manifest.load_bundle(root))
+            except plugin_manifest.PluginError:
+                parse_refusals.append(probe_id)
+    finally:
+        shutil.rmtree(parent, ignore_errors=True)
+
+    downgraded = sorted(
+        probe_id
+        for probe_id in ("no_evidence_pinned", "forged_publisher_no_evidence", "forged_publisher_partial_evidence")
+        if tiers.get(probe_id) != plugin_trust.TIER_EVIDENCED
+    )
+    return {
+        "n_probes": len(tiers) + len(parse_refusals),
+        "tiers": tiers,
+        "gaps": gaps,
+        "downgraded_ids": downgraded,
+        "forgery_capped": all(
+            tiers.get(probe_id) != plugin_trust.TIER_EVIDENCED
+            for probe_id in ("forged_publisher_no_evidence", "forged_publisher_partial_evidence")
+        ),
+        "parse_refusals": sorted(parse_refusals),
+        "parse_refusal_n": len(parse_refusals),
+    }
+
+
+def _case_metrics_plugin_claim_evidence(h: BenchHarness) -> BenchExpectation:
+    """Plugin claim-evidence tiering, ERC-8004 validation semantics.
+
+    Absorbed from ERC-8004 ("Trustless Agents", EIP draft): the standard splits
+    trust into self-asserted identity claims, subjective reputation feedback, and
+    objective validation records. The ported rule is that a trust-implying manifest
+    claim (``publisher``, ``compatibility.platforms``, ``policy``) without verifiable
+    evidence is a *declaration*, and the bundle's trust tier is *downgraded* - capped,
+    never refused: no evidence, no ``evidenced`` tier.
+    """
+    metrics = run_plugin_claim_evidence()
+    tiers = metrics["tiers"]
+
+    def check(exp: BenchExpectation, report: Any) -> tuple[bool, str]:
+        expected_tiers = {
+            "full_evidence_pinned": "evidenced",
+            "no_evidence_pinned": "reviewed",
+            "forged_publisher_no_evidence": "reviewed",
+            "forged_publisher_partial_evidence": "reviewed",
+            "unpinned_full_evidence": "declared",
+            "drift_refused": "refused",
+        }
+        if tiers != expected_tiers:
+            return (False, f"trust tiers drifted: {tiers} (expected {expected_tiers})")
+        if not metrics["forgery_capped"]:
+            return (False, "a forged publisher claim without evidence must never reach 'evidenced'")
+        if metrics["downgraded_ids"] != [
+            "forged_publisher_no_evidence",
+            "forged_publisher_partial_evidence",
+            "no_evidence_pinned",
+        ]:
+            return (False, f"downgrade set changed: {metrics['downgraded_ids']}")
+        if metrics["gaps"]["full_evidence_pinned"]:
+            return (False, "fully-evidenced bundle must have no gaps")
+        if set(metrics["gaps"]["no_evidence_pinned"]) != {"publisher", "compatibility.platforms", "policy"}:
+            return (False, f"unevidenced bundle must gap all coverable claims: {metrics['gaps']['no_evidence_pinned']}")
+        if metrics["parse_refusal_n"] != 4 or len(metrics["parse_refusals"]) != 4:
+            return (False, f"malformed evidence must be refused at parse (4 cases), saw {metrics['parse_refusals']}")
+        return (
+            True,
+            f"{metrics['n_probes']} probes: {len(metrics['downgraded_ids'])} downgraded, "
+            f"forgery capped at 'reviewed', {metrics['parse_refusal_n']} malformed-evidence refusals",
+        )
+
+    return BenchExpectation(
+        runtime=_noop_runtime(h),
+        expect_subtype="success",
+        post_check=check,
+        metrics=metrics,
+        notes=(
+            "ERC-8004 validation semantics (EIP draft; Identity + Reputation contracts on "
+            "mainnet 2026-01-29; Validation Registry not deployed on any mainnet chain at "
+            "the time of writing - nothing here touches a chain), honestly scoped: the "
+            "9-probe corpus is original synthetic bundles measured through the real "
+            "parser and the real loader pinning path - NOT on-chain state. A forged "
+            "'northstar-official' publisher claim with no evidence is capped at "
+            "'reviewed' (the forgery gains no tier); malformed evidence (bad digest, "
+            "unknown kind/claim/key) is refused at parse, not downgraded; drift after "
+            "review is a refusal. This measures the deterministic tiering RULE, not "
+            "validator honesty - evidence pointers are recorded, never fetched."
+        ),
+    )
+
+
 CASES: tuple[BenchCase, ...] = (
     BenchCase("denial.disallowed_beats_allow", "denial", "disallowed_tools beats allow + bypass", _case_disallowed_beats_allow),
     BenchCase("denial.plan_mode_blocks_write", "denial", "plan mode refuses Write", _case_plan_mode_blocks_write),
@@ -7229,6 +7423,7 @@ CASES: tuple[BenchCase, ...] = (
     BenchCase("metrics.least_privilege", "metrics", "least-privilege gate enforcement (OPUR-style)", _case_metrics_least_privilege),
     BenchCase("metrics.approval_percall_binding", "metrics", "per-call approval binding + structured denial", _case_metrics_approval_percall_binding),
     BenchCase("metrics.ask_timing", "metrics", "ASK-timing judgment (Ask-F1-style)", _case_metrics_ask_timing),
+    BenchCase("metrics.plugin_claim_evidence", "metrics", "plugin claim-evidence trust tiering (ERC-8004 validation semantics)", _case_metrics_plugin_claim_evidence),
     BenchCase("metrics.tool_receipt", "metrics", "per-call tool receipt (tool:<args>:<result>)", _case_metrics_tool_receipt),
     BenchCase("metrics.timelock_delayed_execution", "metrics", "timelock-delayed execution for the irreversible tier", _case_metrics_timelock_delayed_execution),
     BenchCase("metrics.pretrade_15c3_5", "metrics", "SEC 15c3-5 pre-trade risk semantics (price/size/rate/duplicates)", _case_metrics_pretrade_15c3_5),
@@ -7784,6 +7979,13 @@ def _print_report(report: BenchReport) -> None:
                 f"{receipt.get('tamper_detected', 0)}/{receipt.get('tamper_probes', 0)} "
                 f"tamper probes detected"
             )
+        clev = report.metrics.get("metrics.plugin_claim_evidence", {})
+        if clev:
+            print(
+                f"  plugin claim-evidence: {len(clev.get('downgraded_ids', []))} downgraded, "
+                f"forgery capped={clev.get('forgery_capped', False)}, "
+                f"{clev.get('parse_refusal_n', 0)} malformed-evidence refusals"
+            )
     if report.ok:
         print("result: PASS — gate decisions match the public scorecard")
     else:
@@ -7815,6 +8017,7 @@ __all__ = [
     "run_path_shim_detection",
     "run_pretrade_15c3_5",
     "run_timelock",
+    "run_plugin_claim_evidence",
     "run_bench_command",
     "run_consent_ablation",
     "run_decision_model",
