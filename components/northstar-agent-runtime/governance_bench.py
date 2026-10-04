@@ -115,7 +115,7 @@ from tools import ToolLimits, ToolSandbox, build_default_registry
 
 #: Semantic version of the public case set. Bump when a case is added, removed,
 #: or its expected verdict changes — consumers pin against this string.
-BENCH_VERSION = "northstar.governance.bench.v34"
+BENCH_VERSION = "northstar.governance.bench.v35"
 
 USAGE_ERROR = 64
 
@@ -1609,6 +1609,7 @@ OWASP_MAPPING: dict[str, dict[str, Any]] = {
             "denial.engine_disallowed_unit",
             "metrics.exemption_coverage",
             "metrics.layered_fnr_fpr",
+            "metrics.deny_code_coverage",
             "metrics.ask_downstream_approval",
         ],
         "note": "the denial track plus the metric track is this threat's bench",
@@ -13258,6 +13259,77 @@ def _case_metrics_exemption_coverage(h: BenchHarness) -> BenchExpectation:
     )
 
 
+def _case_metrics_deny_code_coverage(h: BenchHarness) -> BenchExpectation:
+    """Deny-code coverage: every gate denial carries a machine-readable code.
+
+    Denial codes are the machine-readable layer of the audit trail: a denial
+    that reaches the audit feed with only free-text reason cannot be
+    classified, counted, or alerted on downstream. This replays the metric
+    corpus through each probe's declared engine and audits that every denied
+    decision carries a well-formed ``denial.*`` code.
+    """
+    import re as _re
+
+    pattern = _re.compile(r"^denial\.[A-Za-z0-9_.-]+$")
+    denied = 0
+    codes: dict[str, int] = {}
+    bad: list[str] = []
+    for probe in METRIC_CORPUS:
+        log: list[tuple[str, str, bool]] = []
+        engine = _metric_engine(probe, log)
+        for idx, step in enumerate(probe.iter_steps()):
+            decision = engine.evaluate(
+                probe.tool,
+                kind=probe.kind,
+                mutating=probe.mutating,
+                payload=dict(step.payload),
+                known=probe.known,
+            )
+            if decision.allowed:
+                continue
+            denied += 1
+            code = getattr(decision, "deny_code", "") or ""
+            if code and pattern.match(code):
+                codes[code] = codes.get(code, 0) + 1
+            else:
+                bad.append(
+                    f"{probe.id}#{idx} source={decision.source} "
+                    f"rule={decision.rule!r} code={code!r}"
+                )
+    metrics = {
+        "denied_n": denied,
+        "coded_n": sum(codes.values()),
+        "coverage_rate": round(_rate(sum(codes.values()), denied), 4),
+        "distinct_codes": len(codes),
+        "codes": dict(sorted(codes.items())),
+        "uncoded": bad,
+    }
+
+    def check(exp: BenchExpectation, report: Any) -> tuple[bool, str]:
+        if bad:
+            return (
+                False,
+                f"{len(bad)} denial(s) without a well-formed deny_code: {bad[:3]}",
+            )
+        return (
+            True,
+            f"{denied} denials, {len(codes)} distinct deny_codes, "
+            f"coverage {metrics['coverage_rate']:.3f}",
+        )
+
+    return BenchExpectation(
+        runtime=_noop_runtime(h),
+        expect_subtype="success",
+        post_check=check,
+        metrics=metrics,
+        notes=(
+            "denial-code precision starts with coverage: a gate denial that "
+            "reaches the audit trail without a machine-readable code cannot "
+            "be classified, counted, or alerted on downstream"
+        ),
+    )
+
+
 def _case_metrics_ask_downstream_approval(h: BenchHarness) -> BenchExpectation:
     """ASK downstream approval rate: a rubber-stamp host converts ASKs to ALLOWs."""
     log: list[tuple[str, str, bool]] = []
@@ -21496,6 +21568,7 @@ CASES: tuple[BenchCase, ...] = (
     BenchCase("budget.max_tool_calls", "budget", "tool-call ceiling subtype", _case_budget_tool_calls),
     BenchCase("budget.max_turns", "budget", "turn ceiling subtype", _case_budget_turns),
     BenchCase("metrics.layered_fnr_fpr", "metrics", "layered FNR/FPR: end-to-end vs per-tier", _case_metrics_layered_fnr_fpr),
+    BenchCase("metrics.deny_code_coverage", "metrics", "every gate denial carries a machine-readable deny_code", _case_metrics_deny_code_coverage),
     BenchCase("metrics.exemption_coverage", "metrics", "mutating tier-2 decisions must be explicit", _case_metrics_exemption_coverage),
     BenchCase("metrics.ask_downstream_approval", "metrics", "ASK->approval conversion rate and risk mix", _case_metrics_ask_downstream_approval),
     BenchCase("metrics.approval_execution_residual", "metrics", "ALLOWs bind to execution evidence", _case_metrics_approval_execution_residual),
@@ -32516,6 +32589,14 @@ def _print_report(report: BenchReport) -> None:
         f"summary: {report.passed}/{report.total} passed, {report.failed} failed "
         f"({report.duration_ms:.0f} ms)"
     )
+    # Worst-track reporting (tail-event audit): the headline pass rate is a mean;
+    # report the minimum over tracks to expose structural weakness.
+    if report.tracks:
+        worst = min(report.tracks.items(), key=lambda kv: kv[1]["passed"] / kv[1]["total"] if kv[1]["total"] else 1.0)
+        wname, w = worst
+        wrate = w["passed"] / w["total"] if w["total"] else 1.0
+        clean = sum(1 for b in report.tracks.values() if b["failed"] == 0)
+        print(f"worst track: {wname} {w['passed']}/{w['total']} ({wrate:.3f}); {clean}/{len(report.tracks)} tracks clean")
     if report.metrics:
         print("decision metrics (offline corpus, deterministic):")
         layered = report.metrics.get("metrics.layered_fnr_fpr", {})
@@ -32535,6 +32616,14 @@ def _print_report(report: BenchReport) -> None:
                 f"{exempt.get('mutating_n', 0)} mutating via tier-2 "
                 f"(rate {exempt.get('exemption_rate', 0):.4f}; "
                 f"explicit: {', '.join(exempt.get('exempt_probe_ids', [])) or 'none'})"
+            )
+        dcc = report.metrics.get("metrics.deny_code_coverage", {})
+        if dcc:
+            print(
+                f"  deny-code coverage: {dcc.get('coded_n', 0)}/"
+                f"{dcc.get('denied_n', 0)} denials coded "
+                f"({dcc.get('distinct_codes', 0)} distinct codes; "
+                f"uncoded: {len(dcc.get('uncoded', []))})"
             )
         ask = report.metrics.get("metrics.ask_downstream_approval", {})
         if ask:
