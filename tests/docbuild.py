@@ -225,6 +225,7 @@ MANIFEST: dict[str, tuple[str, ...]] = {
         "tools.shell",
         "tools.skill_scripts",
         "tools.verify_invariants",
+        "tools.fetch",
         "tools.sandbox",
         "audit_merkle",
         "dataflow_policy",
