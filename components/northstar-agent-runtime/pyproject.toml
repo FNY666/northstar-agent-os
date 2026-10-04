@@ -113,6 +113,8 @@ py-modules = [
     "drift_probe",
     "dual_use",
     "editorial",
+    "egress_client",
+    "egress_enforcer",
     "env_cost",
     "durable_bridge",
     "ed25519",

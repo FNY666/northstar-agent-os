@@ -71,6 +71,7 @@ MANIFEST: dict[str, tuple[str, ...]] = {
         "remote_worker",
     ),
     "northstar-codex-sidecar": ("sidecar", "transport", "service", "sidecar_socket"),
+    "northstar-egress-sidecar": ("egress_sidecar", "egress_socket", "transport"),
     "northstar-agent-runtime": (
         "adjudication",
         "embodied",
@@ -123,6 +124,8 @@ MANIFEST: dict[str, tuple[str, ...]] = {
         "doctor",
         "drift_probe",
         "durable_bridge",
+        "egress_client",
+        "egress_enforcer",
         "interop_bridge",
         "memory",
         "memory_safety",
