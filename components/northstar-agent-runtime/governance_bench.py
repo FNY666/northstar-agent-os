@@ -12303,6 +12303,7 @@ def _case_egress_approval_replay_denied(h: BenchHarness) -> BenchExpectation:
         approver_id="bench-approver",
         approver_seed=seed,
         decided_at=1_780_000_000.0,
+        body=b"{}",
     )
     # Mutated arguments: the receipt's digest no longer matches the request.
     verdict = _egress_decide(

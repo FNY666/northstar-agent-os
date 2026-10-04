@@ -382,7 +382,10 @@ def run_one(value: dict[str, Any], ctx: SidecarContext) -> dict[str, Any]:
             }
         headers["authorization"] = f"Bearer {credential_value}"
     # The Host header names the host; the socket goes to the authorized IP.
-    headers.setdefault("host", request.host)
+    # E7: force, never setdefault — an agent-supplied Host could route a
+    # brokered credential to an attacker vhost on shared-IP/CDN hosting
+    # while TLS still validates request.host.
+    headers["host"] = request.host
     headers["user-agent"] = "northstar-egress-sidecar/1"
     headers.setdefault("connection", "close")
 

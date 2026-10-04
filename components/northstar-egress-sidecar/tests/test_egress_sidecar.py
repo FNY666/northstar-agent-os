@@ -37,7 +37,7 @@ revision = "test.r1"
 
 [destinations.local]
 hosts = ["svc.local"]
-ports = [18090]
+ports = [18090, 18092]
 methods = ["POST"]
 path_prefixes = ["/api"]
 allow_private_ips = true
@@ -166,6 +166,37 @@ class SidecarTests(unittest.TestCase):
         resp = run_one(req, self._ctx())
         self.assertEqual(resp["status"], "denied")
         self.assertEqual(resp["deny_code"], "egress.credentialless_bypass_attempt")
+
+    def test_agent_supplied_host_header_is_overridden(self):
+        """E7: the sidecar forces Host to the authorized request host; an
+        agent-supplied Host must not reach the upstream."""
+        seen = {}
+
+        class HostCaptureHandler(BaseHTTPRequestHandler):
+            def do_POST(self):
+                seen["host"] = self.headers.get("Host", "")
+                self.send_response(200)
+                self.send_header("Content-Type", "application/json")
+                self.end_headers()
+                self.wfile.write(b"{}")
+
+            def log_message(self, *a):
+                pass
+
+        server = HTTPServer(("127.0.0.1", 18092), HostCaptureHandler)
+        threading.Thread(target=server.serve_forever, daemon=True).start()
+        try:
+            req = wire(
+                host="svc.local",
+                port=18092,
+                path="/api/echo",
+                headers={"host": "attacker.example.com"},
+            )
+            resp = run_one(req, self._ctx())
+            self.assertEqual(resp["status"], "ok")
+            self.assertEqual(seen.get("host"), "svc.local")
+        finally:
+            server.shutdown()
 
     def test_malformed_wire_rejected(self):
         resp = run_one({"request_id": "r-bad"}, self._ctx())
