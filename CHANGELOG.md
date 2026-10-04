@@ -1,3 +1,555 @@
+## Unreleased (one-hundred-sixtieth batch) — construction-site AI discipline (AI-construction absorption)
+
+New module `construction_agents.py`: `progress_evidence_receipt()` —
+AI progress assessments bind evidence receipts (method + digest +
+timestamp); payment-certificate claims without a named human
+sign-off deny with `construction.payment_without_signoff` (a photo
+must never become an unquestioned payment certificate).
+`schedule_rationale_binding()` — AI schedule changes bind checkable
+rationale + impact records; unrationale critical-path reorders deny
+with `construction.unrationale_reschedule`.
+`digital_twin_integrity_log()` — twin state changes are append-only
+with source provenance; user-uploaded data applied without
+isolation tagging denies with `construction.twin_contamination`
+(MDPI lesson). `hri_perimeter_gate()` — autonomous heavy equipment
+binds live exclusion-zone statuses; degraded sensors running
+autonomous deny with `construction.degraded_autonomy` (WTW
+dust-blocked-sensor lesson). `safety_interlock_receipt()` —
+equipment starts need a live passing interlock receipt; none live
+denies with `construction.no_interlock` (Guardian AI lesson).
+`validation_loop_clock()` — AI safety alerts need human
+true/false feedback on a clock; unvalidated alerts expire with
+`construction.unvalidated_alert` (Saipem lesson).
+`worker_surveillance_consent()` — surveillance binds worker consent
+receipts naming data owner and reuse purposes; none denies with
+`construction.unconsented_surveillance`.
+`hallucinated_clause_screen()` — cited regulation clauses must be
+verified pins; fabricated clauses refuse whole-class with
+`construction.fabricated_clause`. `forecast_uncertainty_band()` —
+forecasts bind uncertainty bands with disclosed assumptions;
+undisclosed assumptions are NON_AUTHORITATIVE with
+`construction.unstated_assumptions`. `capability_envelope_gate()` —
+site robots declare capability envelopes; out-of-envelope commands
+refuse with `construction.envelope_breach`.
+`fleet_orchestration_manifest()` — fleet self-orchestration binds a
+manifest with a named responsible party; none denies with
+`construction.no_orchestration_manifest`. `safety_alert_budget()` —
+alert channels pin false-positive budgets; over-budget channels deny
+with `construction.alert_budget_exceeded` and degrade to human
+patrol.
+
+Bench: `metrics.construction_agents` (12 scenarios, 4 allow /
+8 deny). No version bump (single parent bump per wave).
+
+## Unreleased (one-hundred-fifty-first batch) — education AI discipline (AI-education absorption)
+
+New module `education_agents.py`: `temporal_capability_lock()` — exam/
+admissions windows pin capability locks; a locked function used inside
+its window denies with `education:window_breach` (gaokao time-lock
+lesson: photo-solving disabled only during exam windows, second year
+running). `retention_schedule_mandate()` — published retention
+schedules; a missing schedule is `education:no_retention_schedule`
+and overdue data is `education:retention_overdue` with auto-delete
+post-check (FTC Illuminate lesson: 10.1M students' records, 10-year
+operational mandate, no fine). `evidentiary_tiering()` — automated
+judgments default to tier=signal; tier=evidence claimed without human
+review is `education:tier_escalation` (detector-demotion lesson: a flag
+opens a conversation, it doesn't close one).
+`ai_proposes_human_disposes_gate()` — grading/admissions/discipline
+decisions: AI may flag or draft, never decide alone
+(`education:ai_decided`; Cambridge 35–65% + AFT–Microsoft lesson).
+`developmental_access_staging()` — band-staged access with a closed
+exception vocabulary and ban-until-evidence sunsets
+(`education:developmental_ban`; NYC moratorium lesson).
+`language_parity_audit()` — cross-language pass-rate deltas above the
+pinned tolerance are `education:language_parity_gap` (Kazakhstan
+lesson). `pseudonymous_student_mode()` — pseudonyms by default;
+identifiable collection without a live pseudonym is
+`education:pii_without_pseudonym` (German school-policy lesson).
+Honest scoping: receipts bind declared education discipline; they
+don't end cheating or fix equity.
+
+Bench: `metrics.education_agents` (12 scenarios, 4 allow /
+8 deny). No version bump (single parent bump per wave).
+
+## Unreleased (one-hundred-fifty-second batch) — healthcare delivery AI discipline (AI-clinical-delivery absorption)
+
+New module `healthcare_agents.py`: `alert_burden_ledger()` — CDS
+site-calibration receipts (PPV, alerts/1k visits, post-hoc share);
+below the 0.15 floor → `ALERT_SILENCED`, not bombardment (JAMA ESM
+v2: PPV 0.13–0.26, two thirds of alerts post-hoc).
+`responsibility_manifest()` — version-pinned tripartite liability
+(developer/operator/clinician); no "support tool, not a decision
+tool" evasion (UK MPS 2026-06). `bias_vignette_regression()` —
+demographic misrepresentation as continuous regression on model
+updates; deterioration → deploy refused (Flinders 2026-08:
+78%/89%). `denial_evidence_provenance()` — cost/access-affecting
+AI recommendations bind clinical logic, evidence source, tool
+version history (AMA 2026-06); missing → downstream refuses.
+`triage_ordering_ban()` — autonomous emergency-triage ordering
+default-DENY; enabling needs an independent safety case + real-time
+human review (EASAC/FEAM 2026-09-30). `ai_usage_notice()` —
+machine-readable patient AI-use notice with opt-out; missing →
+`NON_COMPLIANT`. `adversarial_dissent_protocol()` — review UI must
+surface uncertainty intervals + counter-evidence; clinician
+acknowledges reading (NEJM AI 2025 human-on-the-hook).
+`consistency_uncertainty_signal()` — low sampling consistency →
+`NON_AUTHORITATIVE` + second review (MIRA 2026-09).
+`maturity_mapping()` — L0–L4 labels; below L2 barred from the
+clinical core. `postmarket_surveillance()` — sensitivity/override/
+drift KPIs; breach → auto-rollback. Honest scoping: receipts bind
+declared healthcare discipline; they don't make AI safe for
+patients. Bench track `metrics.healthcare_agents`: 12 scenarios,
+5 allow / 7 deny.
+
+## Unreleased (one-hundred-fifty-third batch) — transport & logistics AI discipline (AI-transport absorption)
+
+New module `transport_agents.py`: `route_rationale_gate()` — every AI
+routing/dispatch decision binds a machine-readable rationale receipt
+(`affected_constraints[]`, `suggested_actions[]`, `confidence`); no
+live rationale → `transport:no_rationale` (HERE lesson: no explanation,
+no execution). `fleet_circuit_breaker()` — fleets pin stall-trip
+thresholds (count or ratio inside a window); mass stalls trip the
+breaker and freeze dispatch until human review; a fleet with no
+breaker → `transport:no_kill_switch` (Apollo Go Wuhan lesson:
+single-vehicle safety ≠ fleet safety). `teleoperation_cap()` —
+remote supervisors bind a concurrency cap + credential; over-cap →
+`transport:overloaded_supervisor`, expired credential →
+`transport:uncredentialed_supervisor` (3-layer liability lesson).
+`agent_iam_discipline()` — transport agents bind a registered
+identity, least privilege, an MCP tool whitelist, and a kill switch;
+shadow agents, privilege violations, off-whitelist tools, and missing
+kill switches deny (German agent-IAM lesson). `safety_scenario_checklist()`
+— deployments pin a versioned safety-scenario inventory; operating
+outside it → `transport:unchecked_scenario` (MOT 860-scenario
+lesson). `first_responder_probe()` — recorded emergency-vehicle
+obstruction denies the vehicle as `transport:responder_interference`
+(NHTSA lesson). `labor_transition_plan()` — deployments bind a labor
+capability-mapping receipt with a retraining trigger; none →
+`transport:no_labor_plan`, automation past trigger without retraining
+→ `transport:retraining_overdue` (IRU/Teamsters lesson).
+`incident_reporting_adapter()` — city-jurisdiction incident report
+receipts; missing or late filings deny (Denver-counterexample lesson).
+Honest scoping: receipts bind declared transport discipline; they
+don't make roads safe. Bench track `metrics.transport_agents`:
+12 scenarios, 4 allow / 8 deny. No version bump (single parent bump
+per wave).
+
+## Unreleased (one-hundred-fifty-fourth batch) — agriculture & food-system AI discipline (AI-agrifood absorption)
+
+New module `agrifood_agents.py`: `assessment_claim_receipt()` —
+AI assessments tied to insurance claims bind receipts (model
+version + input digest + human review signature); unreceipted →
+`agrifood:unreceipted_assessment` (India FASAL lesson: AI
+assessment already settles crop-insurance claims).
+`physical_consequence_log()` — any AI decision with physical
+consequences (sprays, variable-rate doses, irrigation switches)
+writes a tamper-evident log (EU AI Act Art.12 generalization).
+`prescription_human_final_gate()` — variable-input prescriptions
+deviating beyond ±30% from regional recommendations require a
+named-human approval (伏羲农场 lesson).
+`data_authorization_receipt()` — farm data reads need a live
+receipt binding (scope | principal | expiry | purpose) (EU Data
+Act lesson). `applicability_domain_statement()` — agronomic advice
+binds declared training coverage; out-of-domain degrades to a
+human agronomist (model water-mismatch lesson).
+`offline_fallback_mode()` — smallholder deployments must prove an
+offline/low-bandwidth fallback in the farmer's language;
+otherwise refuse loudly, never silently fail (IICA exclusion
+lesson). `capability_envelope_gate()` — field robots bind a
+capability envelope; out-of-envelope commands are refused up
+front, not "stop on detect" (John Deere critique / Japan ABC
+counter-lesson). `traceability_chain()` — sensor→AI
+decision→application→product provenance hash-anchored chain (FDA
+FSMA 204 lesson). Honest scoping: receipts bind declared
+agrifood discipline; they don't make farms resilient.
+
+Bench: `metrics.agrifood_agents` (12 scenarios, 4 allow / 8 deny).
+No version bump (single parent bump per wave).
+
+## Unreleased (one-hundred-fifty-fifth batch) — finance AI discipline (AI-finance absorption)
+
+New module `finance_agents.py`: `closure_notice_receipt()` — account
+closures bind written-notice receipts (notice period, reason hash); new
+accounts need 90 days, older accounts 60 (UK 2026-04-28 rule); short
+notice → `finance.short_notice_closure` unless a `tipping_off_bar`
+receipt is bound (UK s.333A lesson: lawful silence is receipted, never
+assumed). `freeze_proportionality_gate()` — freezes limited to the
+disputed amount; whole-account freezes on a fraction disputed →
+`finance.disproportionate_freeze`; debit-hold 60-day clock, 20-day
+customer rebuttal window, 10-day bank review clock (India RBI draft
+lesson). `flag_is_not_guilt_gate()` — flags are leads; account actions
+from flags need a human-review receipt plus a declared FP rate
+(`finance.no_human_review` / `finance.fp_undisclosed`). `proxy_screen()`
+— declared proxy features (postcode, loyalty-card data, education,
+occupation, application grammar, device/browser fingerprints) need
+removal or a less-discriminatory-alternative proof → `finance.proxy_feature`
+(CFPB/Illinois disparate-impact split lesson). `adverse_action_receipt()`
+— "model output" is not a compliant reason → `finance.vague_reason`
+(ECOA/CDT lesson). `pricing_fairness_rules_layer()` — deterministic
+jurisdiction rules layer logging *every* evaluation, not just
+intercepts; disparity over threshold → `finance.proxy_pricing_disparity`
+(Cureus 14%-to-0.14% lesson). `debanking_share_guard()` — shared
+crime-marker refusals bind appeal receipts; none → `finance.systemic_exclusion`.
+`high_impact_registry()` — unregistered high-impact financial AI →
+`finance.shadow_ai` (Korea AI Basic Act lesson). `human_escalation_lane()`
+— auto-accept/auto-decline need a declared `escalate_to_officer` lane
+(German third-lane lesson). `premium_explanation_receipt()` — quotes
+bind key factors + year-over-year changes; none → `finance.premium_unexplained`
+(ASIC lesson). Honest scoping: receipts bind declared financial
+discipline; they don't end credit exclusion. Bench track
+`metrics.finance_agents`: 12 scenarios, 4 allow / 8 deny.
+
+## Unreleased (one-hundred-fifty-sixth batch) — customer-service AI discipline (AI-support absorption)
+
+New module `support_agents.py`: `ai_identity_receipt()` — voice/
+text agents bind a per-session AI-identity disclosure receipt;
+undisclosed sessions deny with `support:undisclosed_ai` (EU AI
+Act Art. 50 operationalized). `human_escape_clock()` — handoffs
+must reach a human agent inside the pinned window with digest-
+chained hop receipts; timeouts and loops deny with
+`support.no_human_escape` (China Consumers Association lesson).
+`adversarial_claim_receipt()` — AI claims about fees, promises,
+and refunds bind live knowledge-base evidence digests;
+evidence-free claims are NON_AUTHORITATIVE
+(`support.unevidenced_claim`, Air Canada lesson).
+`agent_workforce_registry()` — AI and human agents under one
+identity registry; AI posing as human denies with
+`support.identity_fraud` (Trend Micro "fake employee" lesson).
+`surveillance_budget()` — agent surveillance binds purpose,
+scope, and retention; repurposing to train a replacement model
+denies with `support.surveillance_overreach` (ACCESS AI /
+Negron lesson). `emotion_inference_ban()` — workplace emotion
+inference refused whole-class (`support.emotion_inference`,
+Art. 5). `rehire_probe()` — post-layoff quality collapse denies
+with `support.over_automation` (Klarna / CBA lesson).
+`agent_flood_circuit()` — consumer-agent queue floods trip a
+circuit with source differentiation (`support.agent_flood`,
+Forrester lesson). Honest scoping: receipts bind declared
+support discipline; they don't prove service quality. Bench
+track `metrics.support_agents`: 12 scenarios, 4 allow / 8 deny.
+
+## Unreleased (one-hundred-fifty-eighth batch) — news-media AI discipline (AI-newsroom absorption)
+
+New module `newsmedia_agents.py`: `source_receipt()` /
+`check_attribution()` — Originator-Profile-style issuer-identity
+binding per story; anonymous AI stories deny with
+`newsmedia.unattributed` (OP lesson: provenance, never accuracy).
+`materiality_receipt()` / `disclosure_receipt()` /
+`materiality_disclosure_clock()` — material AI use must be disclosed
+within a pinned window; late or missing denies with
+`newsmedia.undisclosed_material_use`, ungraded with
+`newsmedia.ungraded_materiality` (AP July 2026 lesson).
+`verification_receipt()` / `verification_depth_gate()` —
+verification depth pinned per claim tier (low/medium/high/
+election); shallow or unresolvable sources deny with
+`newsmedia.citation_failure` (Brennan Center lesson).
+`media_screen_receipt()` / `external_media_screen()` — external
+visuals bind screening; unscreened deny with
+`newsmedia.unsourced_visual` (Korea AI-fake-disaster lesson).
+`CitationRecord` / `citation_integrity_gate()` — every cited source
+must resolve; fabricated citations deny whole-class with
+`newsmedia.fabricated_citation` (Asahi-Iwate lesson).
+`funding_disclosure_receipt()` / `political_funding_disclosure()`
+— pink-slime-style partisan-funding disclosure; undisclosed deny
+with `newsmedia.funding_undisclosed`. `byline_receipt()` /
+`byline_verification()` — bylines bind verified humans; fictional
+deny with `newsmedia.fictional_byline`.
+`license_chain_receipt()` / `check_license_chain()` — training
+corpora bind license chains; pirated deny whole-class with
+`newsmedia.illegitimate_source` (Anthropic $1.5B settlement
+lesson). `pipeline_clock_receipt()` /
+`newsroom_job_pipeline_clock()` — junior-role replacement above
+tolerance triggers `newsmedia.pipeline_review` (Le Monde lesson).
+`disclosure_probe_receipt()` / `disclosure_effectiveness_probe()`
+— disclosure formats A/B probed; below comprehension floor denies
+with `newsmedia.disclosure_ineffective` (Toff trust-paradox lesson).
+`election_source_freeze()` / `election_override_receipt()` /
+`check_election_freeze()` — election-period source freezes;
+covered-tier claims without override deny with
+`newsmedia.freeze_violation` (Korea 90-day lesson).
+`check_photo_integrity()` — AI news photography refused
+whole-class with `newsmedia.photo_generation_refused` (AP lesson).
+Honest scoping: receipts bind declared newsroom discipline; they
+don't end slop or restore trust. Bench track
+`metrics.newsmedia_agents`: 12 scenarios, 4 allow / 8 deny.
+
+## Unreleased (one-hundred-fifty-ninth batch) — real-estate & proptech AI discipline (AI-proptech absorption)
+
+New module `proptech_agents.py`: `screening_score_silencing()` — no
+scores or accept/decline recommendations shown for voucher
+applicants; any shown is `proptech:voucher_score_shown` (SafeRent
+$2.28-2.3M lesson). `disparate_impact_audit_receipt()` — screening
+models bind current disparate-impact audits; a finding withdraws
+the model (`proptech:disparate_impact`; HUD comment clock).
+`adverse_action_receipt()` — denials bind specific reasons (never
+"model output"), a report copy, and a challenge channel
+(`proptech:vague_adverse_reason`). `screening_criteria_pin()` —
+written criteria published before the application; deviations are
+`proptech.unpinned_criteria`. `pricing_data_firewall()` —
+pricing models train only on >=1-year-old data; fresh or
+real-time competitor data is `proptech.stale_data_violation`
+(DOJ-RealPage settlement rule generalized).
+`competitor_data_probe()` — competitor nonpublic data in pricing
+inputs is `proptech:collusion_input` and routes to antitrust
+review. `rent_jurisdiction_matrix()` — deployments pin the local
+rent-law digest (NY ban, Colorado delay, MD Fair Chance);
+mismatch refuses to operate. `human_final_gate_screening()` — AI
+may draft criteria but never decides a specific applicant
+(`proptech:ai_specific_decision`). `target_ad_delivery_audit()`
+— discriminatory delivery skew halts the campaign
+(`proptech:ad_delivery_skew`). `broker_liability_pin()` — the
+BGH "Nadeloehr" human liability anchor is registered per
+transaction (`proptech.no_liability_anchor`).
+`valuation_confidence_floor()` — AVM outputs below the floor are
+NON_AUTHORITATIVE; autonomous pricing refused.
+`public_benchmark_reference()` — high-opacity markets reference
+a public benchmark (Dubai DLD lesson); unjustified deviation is
+`proptech:unjustified_deviation`. Signature verification honors
+the vendored Ed25519 boolean return (the 147th-batch finding).
+Honest scoping: receipts bind declared proptech discipline; they
+don't end housing discrimination or fix rent markets. Bench
+track `metrics.proptech_agents`: 12 scenarios, 4 allow / 8 deny.
+No version bump (single parent bump per wave).
+
+## Unreleased (one-hundred-sixty-first batch) — elder-care AI discipline (AI-elder-care absorption)
+
+New module `eldercare_agents.py`: `check_monitoring_mode()` —
+anomaly-only monitoring is the default; always-watch requires a
+live signed opt-in and denies with
+`eldercare.always_watch_without_opt_in` (Japan Yamashita lesson).
+`check_consent_chain()` — three-party consent receipt chain
+(resident/family/professional); any withdrawal drops to
+minimal-intrusion mode with `eldercare.consent_chain_broken`
+(Livana operationalized). `check_false_alarm_budget()` —
+per-channel false-alarm budgets; exhaustion denies with
+`eldercare.alarm_fatigue` (South Australia 12,000/year lesson).
+`check_voice_impersonation()` — imitating a real person's voice
+binds a disclosure receipt, dual-signed for cognitively impaired
+residents; none live denies with
+`eldercare.undisclosed_impersonation` (Livana lesson).
+`check_video_stream()` — remote video defaults to avatars; raw
+only event-triggered to authorized viewers (SafeSpace lesson).
+`check_audio_retention()` — no audio retention without a separate
+time-limited consent receipt. `check_prevention_evidence()` —
+"surveillance is not prevention": prevention claims bind
+independent-study evidence, vendor-only denies with
+`eldercare.unverified_prevention_claim` (NAD lesson).
+`check_staffing_floor()` — deployments bind human-staffing floors;
+rosters below the floor deny with
+`eldercare.staffing_floor_breach` (Vienna/Linz model).
+`check_contact_floor()` — human-contact floors; robot-linked
+declines deny. `check_emotion_boundary()` — emotion-inference
+outputs are signal-only; signal-driven restraints deny with
+`eldercare.emotion_triggered_constraint` (Art. 5 grey-zone,
+fail-closed). Bench: `metrics.eldercare_agents` (12 scenarios,
+4 allow / 8 deny, 0 mismatches).
+
+## Unreleased (one-hundred-sixty-second batch) — scientific research & lab AI discipline (AI-science absorption)
+
+New module `science_agents.py`: `hypothesis_evidence_tier()` —
+agent-generated hypotheses default to `signal` tier; formal records
+(papers/patents/grants) require `evidence`/`verified` plus
+citation-existence verification receipts, else
+`science.unverified_citation` (Lancet 1/277 lesson).
+`wetlab_human_action_gate()` — physical lab actions bind
+human-execution receipts; agent-driven actuation without one is
+`science.ungated_wetlab` (OpenAI×Ginkgo 36,000-experiment lesson).
+`dual_use_screen()` — function-equivalence screening receipts;
+homology-only screens are `science.homology_only_screen`; missing or
+hit is `science.unscreened_dual_use` (CEO joint-letter lesson).
+`synthesis_order_binding()` — orders bind orderer identity + screening
+receipts (`science.unbound_synthesis_order`).
+`reproducibility_lock()` — tools bind reproduced result digests; drift
+invalidates with `science.reproduction_drift` (Paper2Agent lesson).
+`lab_robot_capability_envelope()` — embodied lab robots declare
+instrument/force/temperature/zone envelopes; out-of-envelope is
+`science.envelope_violation` (Medra lesson).
+`discovery_attribution_receipt()` — attribution chains name goal
+setter, screener, and human wet-lab validator; "AI independently
+discovered" marketing claims are `science.false_discovery_attribution`.
+`lab_incident_reporting()` — cross-institution incident ledger.
+
+Bench: `metrics.science_agents` (12 scenarios, 4 allow /
+8 deny). No version bump (single parent bump per wave).
+
+## Unreleased (one-hundred-sixty-third batch) — dating & relationships AI discipline (AI-dating absorption)
+
+New module `dating_agents.py`: `fraud_ban_receipt()` /
+`check_fraud_notification_clock()` — fraud bans bind a 24-hour
+notification clock to every messaged user; late or missing
+notifications deny with `dating.fraud_notice_overdue` (Romance Scam
+Prevention Act lesson). `persona_ratio_receipt()` /
+`persona_ratio_cap()` — audited human/AI conversation-identity
+ratios; undisclosed AI majorities deny with
+`dating.ai_majority_undisclosed` (Anthropic 75% lesson).
+`input_side_data_consent()` / `check_data_consent_at_use()` —
+training-data consent is scoped, separately signed, and revocable,
+checked at use time; a blanket "service improvement" clause is not
+consent and denies with `dating.training_data_no_consent`
+(OkCupid/Clarifai lesson). `state_matchmaker_audit()` /
+`check_matchmaker_audit_clock()` — publicly funded matching
+programs bind fairness audits. `subscription_exit_receipt()` /
+`check_cancellation_flow()` — broken or dark-pattern exits deny
+with `dating.cancellation_dark_pattern` (Match $14M lesson).
+`ai_actor_registration()` / `check_ai_actor_registered()` —
+AI-conversation operators must register; unregistered farms deny
+with `dating.unregistered_ai_actor`.
+`vulnerability_exploitation_ban()` — targeting
+widowhood/divorce/loneliness signals is refused whole-class with
+`dating.vulnerability_targeting`. `pigbutchering_handoff()` /
+`check_grooming_handoff()` — detected investment grooming must be
+handed off to anti-fraud resources; silence denies with
+`dating.investment_grooming`.
+
+Bench: `metrics.dating_agents` (12 scenarios, 4 allow /
+8 deny). No version bump (single parent bump per wave).
+
+## Unreleased (one-hundred-sixty-third batch) — dating & relationships AI discipline (AI-dating absorption)
+
+New module `dating_agents.py`: `fraud_ban_receipt()` /
+`check_fraud_notification_clock()` — fraud bans bind a 24-hour
+notification clock to every messaged user; late or missing
+notifications deny with `dating.fraud_notice_overdue` (Romance Scam
+Prevention Act lesson). `persona_ratio_receipt()` /
+`persona_ratio_cap()` — audited human/AI conversation-identity
+ratios; undisclosed AI majorities deny with
+`dating.ai_majority_undisclosed` (Anthropic 75% lesson).
+`input_side_data_consent()` / `check_data_consent_at_use()` —
+training-data consent is scoped, separately signed, and revocable,
+checked at use time; a blanket "service improvement" clause is not
+consent and denies with `dating.training_data_no_consent`
+(OkCupid/Clarifai lesson). `state_matchmaker_audit()` /
+`check_matchmaker_audit_clock()` — publicly funded matching
+programs bind fairness audits. `subscription_exit_receipt()` /
+`check_cancellation_flow()` — broken or dark-pattern exits deny
+with `dating.cancellation_dark_pattern` (Match $14M lesson).
+`ai_actor_registration()` / `check_ai_actor_registered()` —
+AI-conversation operators must register; unregistered farms deny
+with `dating.unregistered_ai_actor`.
+`vulnerability_exploitation_ban()` — targeting
+widowhood/divorce/loneliness signals is refused whole-class with
+`dating.vulnerability_targeting`. `pigbutchering_handoff()` /
+`check_grooming_handoff()` — detected investment grooming must be
+handed off to anti-fraud resources; silence denies with
+`dating.investment_grooming`.
+
+Bench: `metrics.dating_agents` (12 scenarios, 4 allow /
+8 deny). No version bump (single parent bump per wave).
+
+## Unreleased (one-hundred-sixty-fourth batch) — retail & e-commerce AI discipline (AI-retail absorption)
+
+New module `retail_agents.py`: `personalized_price_disclosure()` —
+personalized prices bind disclosure receipts; undisclosed personalization
+denies with `retail.undisclosed_personalization` (FTC 2026-08 Section 5
+policy + NY Algorithmic Pricing Disclosure Act lesson; disclosure records
+the statement shown, not comprehension). `no_protected_class_pricing()`
+— pricing features reconstructing protected classes are refused
+whole-class with `retail.proxy_pricing_feature` (California AB 2564
+spirit). `esl_change_log()` — ESL price changes bind immutable change
+logs; cart-vs-shelf mismatches deny as `retail.cart_shelf_mismatch`
+(S.3892 ESL-controversy lesson). `product_not_person_pin()` — ops-AI /
+pricing isolation: personalization channels crossing into the pricing
+engine deny as `retail.pricing_data_crossed` (architectural version of
+Walmart's "price the product, not the person"). `upsell_transparency()`
+— premium upsells bind why-this-item reasons plus visible alternatives;
+opaque upsells deny as `retail.opaque_upsell` (Productrise 21.6% premium
+lesson). `agentic_quote_blindness()` — quotes reading wallet /
+spending-graph signals deny as `retail.wtp_scored` (xmr402 oracle
+lesson). `assistant_fact_gate()` — price/spec/model claims bind evidence
+digests; evidence-free claims are `retail.unverified_claim` /
+NON_AUTHORITATIVE (86% contradiction-rate lesson). `dark_pattern_screen()`
+— checkout dark patterns deny as `retail.dark_pattern` (EU Digital
+Fairness Act direction + Japan v1.3). `shasha_receipt()` — same-item
+cohort price gaps bind justification receipts; unjustified gaps deny as
+`retail.price_discrimination` (大数据杀熟, Art.15). `merchant_rule_disclosure()`
+— ranking/traffic/commission rules disclosed to merchants; opaque rules
+deny as `retail.merchant_opaque` (Beijing 2026-09 probe lesson).
+`quota_transparency()` — algorithmic warehouse quotas disclosed;
+auto-termination without human review denies as `retail.auto_termination`
+(ADAPT/TOT lesson). `wearable_surveillance_budget()` — delivery-wearable
+collection binds purpose/scope/retention; overreach denies as
+`retail.wearable_overreach` (CNIL €32M lesson). Honest scoping: receipts
+bind declared retail discipline; they don't end price discrimination, fix
+algorithmic-management injuries, or cure assistant hallucinations. Bench
+track `metrics.retail_agents`: 12 scenarios, 4 allow / 8 deny. No version
+bump (single parent bump per wave).
+
+## Unreleased (one-hundred-sixty-fifth batch) — defense & dual-use AI discipline (AI-defense absorption)
+
+New module `defense_agents.py`: `check_human_review()` — AI-generated
+decision-support outputs execute only behind a substantive human
+review with a minimum deliberation time; checkbox review denies with
+`defense.checkbox_review` (Geneva pre-strike-review lesson).
+`check_intel_freshness()` — targeting intel past its freshness window
+without revalidation is NON_AUTHORITATIVE (`defense.stale_intel`,
+Minab lesson). `automation_bias_probe()` — near-total acceptance
+with near-zero deliberation denies with `defense.automation_bias`
+(Maven lesson). `check_protection_floor()` — civilian-protection
+staffing below the floor denies with
+`defense.protection_floor_breach`. `check_redline_contract()` —
+supplier redline clauses exist as contract terms; silent removal
+denies with `defense.silent_redline_removal` (Anthropic FASCSA
+lesson). `check_intel_report()` — AI intel reports bind a generation
+watermark plus evidence digests per assertion; evidence-free
+assertions are UNVERIFIED (`defense.unverified_assertion`, CNN-ship
+lesson). `check_escalation_ladder()` /
+`check_escalation_regression()` — nuclear options locked by default,
+nuke-deployment fractions above tolerance fail with
+`defense.escalation_regression_failed` (Payne lesson).
+`check_decision_compression()` — compression past the alert ratio
+needs a commander acknowledgment
+(`defense.compression_unacknowledged`). `check_vendor_cutoff()` —
+silent vendor cutoffs deny with `defense.silent_vendor_cutoff`.
+`check_treaty_position()` — a treaty in force with stale constraints
+denies with `defense.treaty_drift` (CCW lesson).
+`check_swarm_config()` — "minimal operator intervention" is
+quantified; silent threshold lowering denies with
+`defense.threshold_drift` (Replicator lesson). Scope: accountability
+instrumentation for AI decision-support tooling, NOT weapons
+operations.
+
+Bench: `metrics.defense_agents` (12 scenarios, 4 allow /
+8 deny). No version bump (single parent bump per wave).
+
+## Unreleased (one-hundred-sixty-sixth batch) — sports & fitness discipline (AI-sports absorption)
+
+New module `sports_agents.py`: `officiating_human_final_gate()` —
+AI officiating outputs are measurements, never rulings; a ruling
+without a valid named-human countersign bound to the evidence
+digest denies with `sports.ai_adjudication` (FIFA 2026 lesson:
+AI measures, humans adjudicate). `athlete_data_ownership_receipt()` —
+biometric / digital-twin ingestion requires an ownership receipt
+naming collector, storage operator, beneficiaries (athlete included),
+and revocability; none live denies with
+`sports.no_ownership_receipt`. `predatory_marketing_ban()` —
+marketing that targets predicted losses is refused whole-class
+(`sports.predatory_targeting`, DraftKings elasticity-score lesson);
+running a vulnerability model while the intervention lane is
+disabled denies with `sports.harm_recognized_not_prevented`.
+`doping_alert_tiering()` — alerts are leads, not convictions: a
+sanction on an unconfirmed alert denies with
+`sports.punitive_alert` (WADA ABP lesson). `wellness_boundary_receipt()` —
+wellness agents declare their claim boundary; answering
+eating-disorder content from the wellness tier denies with
+`sports.medical_boundary_crossing` (WSJ lesson). `monitoring_burden_ledger()` —
+continuous-monitoring burden over threshold without a quiet-mode
+degrade denies with `sports.burden_overage`. `likeness_registry_pin()` —
+synthetic likeness generation needs registry authorization
+(`sports.unauthorized_likeness`) and synthetic labeling
+(`sports:unlabeled_synthetic`). `responsibility_manifest()` —
+deployments bind a complete, signed responsibility manifest
+(`sports.incomplete_manifest`, IOC lesson). `anti_scraping_circuit_breaker()` —
+automated quoting on an interrupted feed denies with
+`sports.feed_interruption_trade`; refusing to halt past the
+scrape-rate threshold denies with `sports.scrape_halt_refused`
+(Approov / Altenar lesson). `refusal_capability_gate()` — an eval
+suite that tests recommendation quality but never refusal is
+incomplete (`sports:incomplete_eval`, FanDuel AceAI lesson).
+
+Bench: `metrics.sports_agents` (12 scenarios, 4 allow /
+8 deny). No version bump (single parent bump per wave).
+
 ## Unreleased (one-hundred-forty-ninth batch) — adtech & synthetic-media discipline (AI-adtech absorption)
 
 New module `adtech_agents.py`: `synthetic_performer_receipt()` —
