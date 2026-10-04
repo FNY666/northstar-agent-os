@@ -336,7 +336,7 @@ def filesystem_rules(
     *,
     workspace: str,
     tmpdir: str,
-    runtime_roots: Sequence[str] = ("/usr", "/bin", "/lib", "/lib64", "/sbin"),
+    runtime_roots: Sequence[str] | None = None,
 ) -> list[FsRule]:
     """Map a pledge set to Landlock filesystem rules. Pure and testable.
 
@@ -348,6 +348,9 @@ def filesystem_rules(
     TMPDIR (workspace/.northstar/tmp) gets no rule, so temp-file writes
     there fail closed — the pledge declared no temp-file need.
     """
+    if runtime_roots is None:
+        from tools.sandbox import _runtime_read_paths
+        runtime_roots = _runtime_read_paths()
     rules: list[FsRule] = []
     anchors: list[str] = []  # paths that actually got a rule -> need ancestor traversal
     for root in runtime_roots:
@@ -400,6 +403,9 @@ _lib.syscall.restype = _c.c_long
 def _die(msg):
     _o.write(2, ("northstar pledge: " + msg + "\n").encode())
     _o._exit(126)
+# Set NNP before the unprivileged Landlock restriction (not merely before seccomp).
+if _lib.prctl(38, 1, 0, 0, 0) != 0:
+    _die("PR_SET_NO_NEW_PRIVS failed")
 # 1. Landlock: build ruleset, add PATH_BENEATH rules, restrict self.
 _attr = _t.pack("QQQ", 0x1FFF, 0, 0)
 _buf = _c.create_string_buffer(_attr)

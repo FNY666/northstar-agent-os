@@ -84,6 +84,32 @@ class TestRightsTables(RuntimeTestCase):
 
 
 class TestSpec(RuntimeTestCase):
+    def test_default_and_pledge_profiles_allow_nonstandard_python_runtime_only(self):
+        from pathlib import Path
+        from unittest.mock import patch
+        from tools.pledge import filesystem_rules
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            prefix = root / 'toolcache' / 'python'
+            (prefix / 'bin').mkdir(parents=True)
+            (prefix / 'lib').mkdir()
+            (root / 'workspace').mkdir()
+            with patch.object(sys, 'prefix', str(prefix)), \
+                 patch.object(sys, 'base_prefix', str(prefix)), \
+                 patch.object(sys, 'executable', str(prefix / 'bin/python3')):
+                spec = default_profile(str(root / 'workspace'))
+                paths = {rule['path']: rule['rights'] for rule in spec['rules']}
+                self.assertIn(str(prefix / 'bin'), paths)
+                self.assertIn(str(prefix / 'lib'), paths)
+                self.assertNotIn(str(root), paths)
+                self.assertNotIn(str(prefix.parent), paths)
+                self.assertNotIn('WRITE_FILE', paths[str(prefix / 'lib')])
+                pledge_paths = {r.path for r in filesystem_rules(
+                    frozenset({'stdio'}), workspace=str(root / 'workspace'), tmpdir=str(root / 'tmp'))}
+                self.assertIn(str(prefix / 'bin'), pledge_paths)
+                self.assertIn(str(prefix / 'lib'), pledge_paths)
+                self.assertNotIn(str(prefix.parent), pledge_paths)
+
     def test_build_spec_rejects_missing_paths(self):
         with self.assertRaises(LandlockError):
             build_landlock_spec(paths_read=["/no/such/dir"], paths_write=["/tmp"])

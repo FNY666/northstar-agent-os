@@ -17,6 +17,23 @@ from tools import verify_invariants as tool  # noqa: E402
 
 
 class PrepareCopiesTheWholeComponentsTree(unittest.TestCase):
+    def test_broken_baseline_reports_failure_details_and_never_passes(self):
+        import contextlib
+        import io
+        from unittest.mock import patch
+        failure = 'FAIL: baseline_sentinel\nAssertionError: synthetic guard baseline failure\nRan 1 test\nFAILED (failures=1)\n'
+        with tempfile.TemporaryDirectory() as td:
+            output = io.StringIO()
+            with patch.object(tool, 'GUARDS', []), \
+                 patch.object(tool, 'prepare', return_value=Path(td)), \
+                 patch.object(tool, 'run', return_value=(1, failure)), \
+                 contextlib.redirect_stdout(output):
+                code = tool.main()
+        self.assertNotEqual(code, 0)
+        self.assertIn('baseline_sentinel', output.getvalue())
+        self.assertIn('synthetic guard baseline failure', output.getvalue())
+        self.assertNotIn('all 0 guards verified', output.getvalue())
+
     def test_guard_registry_covers_supply_chain_boundaries(self) -> None:
         titles = {item[0] for item in tool.GUARDS}
         self.assertIn("plugin digest verification rejects drift", titles)
@@ -69,7 +86,18 @@ class PrepareCopiesTheWholeComponentsTree(unittest.TestCase):
             import shutil
 
             shutil.copytree(COMPONENT, lonely, ignore=shutil.ignore_patterns("__pycache__"))
-            code, output = tool.run(lonely, "test_durable_bridge.py")
+            import subprocess
+            isolated = subprocess.run(
+                [sys.executable, '-I', '-S', '-c',
+                 "import sys,unittest; sys.path.insert(0, %r); "
+                 "sys.path.insert(0, %r); "
+                 "import durable_bridge; durable_bridge._durable_root=lambda:None; "
+                 "suite=unittest.defaultTestLoader.discover('tests', pattern='test_durable_bridge.py'); "
+                 "result=unittest.TextTestRunner().run(suite); sys.exit(not result.wasSuccessful())"
+                 % (str(lonely), str(lonely / 'tests'))],
+                cwd=str(lonely), capture_output=True, text=True, timeout=300,
+            )
+            code, output = isolated.returncode, isolated.stdout + isolated.stderr
             self.assertNotEqual(code, 0, "a runtime-only copy must not look like a usable baseline")
             self.assertIn("test_durable_bridge", output)
 

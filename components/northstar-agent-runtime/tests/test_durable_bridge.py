@@ -458,6 +458,8 @@ class CrossCheckTests(RuntimeTestCase):
         bare = subprocess.run(
             [
                 sys.executable,
+                "-I",  # ignore ambient PYTHONPATH/user site
+                "-S",  # exclude installed optional component wheels from this negative control
                 "-c",
                 "\n".join(
                     [

@@ -185,6 +185,19 @@ class LandlockProbeTest(RuntimeTestCase):
 
 
 class PledgeLoaderTest(RuntimeTestCase):
+    def test_no_new_privileges_is_set_before_landlock_restriction(self):
+        import ast
+        code = pledge_loader_argv([FsRule('/tmp', 0xC)], ['true'])[2]
+        calls = []
+        for node in ast.walk(ast.parse(code)):
+            if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute):
+                if node.func.attr in ('prctl', 'syscall') and node.args and isinstance(node.args[0], ast.Constant):
+                    calls.append((node.lineno, node.func.attr, node.args[0].value))
+        ordered = sorted(calls)
+        nnp_line = next(line for line, kind, number in ordered if kind == 'prctl' and number == 38)
+        restrict_line = next(line for line, kind, number in ordered if kind == 'syscall' and number == 446)
+        self.assertLess(nnp_line, restrict_line, 'unprivileged Landlock needs NNP before restrict_self')
+
     def test_loader_argv_shape(self):
         rules = [FsRule("/ws", 0xC)]
         argv = pledge_loader_argv(rules, ["true"], python="python3")

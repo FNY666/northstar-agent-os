@@ -193,6 +193,8 @@ def main() -> int:
             tail = [line for line in output.splitlines() if line.startswith(("Ran ", "OK", "FAILED"))]
             print(f"\n[baseline copy] {'OK' if code == 0 else 'BROKEN'}: {' | '.join(tail)}")
             if code != 0:
+                print("[baseline failure details]")
+                print(output[-20000:])
                 failures.append("baseline copy of the untouched component is not green")
     if failures or unknowns:
         print("\nGUARD VERIFICATION PROBLEMS:")
