@@ -410,6 +410,7 @@ def _add_mcp_arguments(parser: argparse.ArgumentParser) -> None:
         mcp.add_argument("--mcp-allow-roots", action="store_true", help="let an MCP server list workspace roots; when allowed it is offered exactly one root, the workspace itself")
         mcp.add_argument("--mcp-max-rounds", type=int, default=3, help="how many times one tool call may be re-asked for input before the client gives up")
         mcp.add_argument("--mcp-seccomp", choices=("auto", "on", "off"), default="auto", help="seccomp-BPF denylist for MCP server processes on Linux (same escape-primitive denylist as the Shell process backend): auto applies it where loadable, on refuses to start where it is not, off runs the server command as-is")
+        mcp.add_argument("--mcp-network", choices=("denied", "allowed"), default="denied", help="network for MCP server processes: denied (default) confines the server with Landlock TCP denial like the Shell process backend and refuses to start where that cannot be enforced; allowed runs the server with full host network (explicit opt-in for servers that need it)")
 
 def _add_execution_arguments(parser: argparse.ArgumentParser) -> None:
         execution = parser.add_argument_group("execution delegation")
@@ -1030,6 +1031,7 @@ def _connect_mcp_clients(
             "allow_roots": bool(getattr(args, "mcp_allow_roots", False)),
             "max_input_rounds": getattr(args, "mcp_max_rounds", 3),
             "seccomp": getattr(args, "mcp_seccomp", "auto"),
+            "network": getattr(args, "mcp_network", "denied"),
             "workspace_root": Path(args.workspace).resolve(),
         }
     clients: list[Any] = []
