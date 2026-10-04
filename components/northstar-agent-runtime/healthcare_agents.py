@@ -276,9 +276,10 @@ def _verify_signature(pubkey_hex: str, payload: dict[str, Any], signature_hex: s
     except (ValueError, HealthcareError):
         return False
     try:
-        return bool(ed25519.verify(pubkey, jcs_canonical_json(payload), signature))
+        ed25519.verify(pubkey, jcs_canonical_json(payload), signature)
     except Exception:
         return False
+    return True
 
 
 def _check_chain(log: list[Any], type_name: str) -> None:
