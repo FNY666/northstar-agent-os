@@ -41,6 +41,7 @@ from __future__ import annotations
 
 import hashlib
 import ipaddress
+import json
 import re
 import secrets
 import threading
@@ -65,6 +66,10 @@ except ModuleNotFoundError:  # Python 3.10 has tomllib; keep the import honest.
 #: Schema markers.
 EGRESS_POLICY_SCHEMA = "northstar.egress.v1"
 EGRESS_RECEIPT_KIND = "egress-receipt/1"
+EGRESS_REJECTION_KIND = "egress-rejection-receipt/1"
+
+# Bounds for the rejection receipt's capture of malformed input.
+_MAX_REJECTED_PREVIEW_CHARS = 2_000
 APPROVAL_RECEIPT_KIND = "egress-approval-receipt/1"
 POLICY_FILE_NAME = "northstar-egress.toml"
 
@@ -568,6 +573,74 @@ def _build_receipt(
         "approval_binding": approval_binding,
         "decided_at": now,
     }
+
+
+def build_rejection_receipt(
+    *,
+    raw_value: Any,
+    errors: list[str],
+    request_id: str | None,
+    now: float,
+    policy_revision: str = "",
+    run_id: str = "",
+    enforcer_seed: bytes | None = None,
+    key_id: str | None = None,
+) -> dict[str, Any]:
+    """Build a tamper-evident receipt for a malformed/rejected request.
+
+    For requests that fail validation before an ``EgressRequest`` can be
+    built, there is no verdict and no normal receipt -- but the attempt
+    itself is audit-relevant (probing, fuzzing, malformed clients). This
+    captures what was received (safely bounded) and why it was rejected,
+    then hash-chains it like a normal egress receipt so the rejection feed
+    is tamper-evident too.
+    """
+    if isinstance(raw_value, dict):
+        received_type = "object"
+        try:
+            preview = json.dumps(raw_value, sort_keys=True, ensure_ascii=False)
+        except (TypeError, ValueError):
+            preview = "<unserializable>"
+    elif isinstance(raw_value, list):
+        received_type = "array"
+        preview = f"<array of {len(raw_value)}>"
+    elif isinstance(raw_value, str):
+        received_type = "string"
+        preview = raw_value
+    elif raw_value is None:
+        received_type = "null"
+        preview = "null"
+    else:
+        received_type = type(raw_value).__name__
+        preview = str(raw_value)
+    if len(preview) > _MAX_REJECTED_PREVIEW_CHARS:
+        preview = preview[:_MAX_REJECTED_PREVIEW_CHARS] + "…<truncated>"
+    receipt = {
+        "kind": EGRESS_REJECTION_KIND,
+        "request_id": request_id or "",
+        "run_id": run_id,
+        "received": {
+            "type": received_type,
+            "preview": preview,
+        },
+        "errors": list(errors),
+        "policy_revision": policy_revision,
+        "verdict": "rejected",
+        "decided_at": now,
+    }
+    chained = chain_records(
+        [receipt],
+        component="egress",
+        session_id=run_id or None,
+        run_id=run_id or None,
+        key_id=key_id,
+    )
+    sealed = chained[0]
+    if enforcer_seed is not None:
+        if not isinstance(enforcer_seed, (bytes, bytearray)) or len(enforcer_seed) != 32:
+            raise EgressPolicyError("enforcer_seed must be a 32-byte Ed25519 seed")
+        sealed = sign_record(sealed, bytes(enforcer_seed))
+    return sealed
 
 
 def _seal_receipt(

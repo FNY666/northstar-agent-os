@@ -202,6 +202,32 @@ class SidecarTests(unittest.TestCase):
         resp = run_one({"request_id": "r-bad"}, self._ctx())
         self.assertEqual(resp["status"], "rejected")
 
+    def test_rejected_carries_receipt(self):
+        resp = run_one({"request_id": "r-bad"}, self._ctx())
+        self.assertEqual(resp["status"], "rejected")
+        receipt = resp.get("receipt")
+        self.assertIsNotNone(receipt, "rejected requests must carry a receipt")
+        self.assertEqual(receipt["kind"], "egress-rejection-receipt/1")
+        self.assertEqual(receipt["request_id"], "r-bad")
+        self.assertEqual(receipt["verdict"], "rejected")
+        self.assertTrue(receipt["errors"], "receipt must record why it was rejected")
+        # Tamper-evident: the receipt is hash-chained.
+        self.assertIn("chain_hash", receipt)
+
+    def test_rejection_receipt_bounds_malformed_input(self):
+        from egress_enforcer import build_rejection_receipt
+
+        huge = {"request_id": "r-huge", "blob": "x" * 10_000}
+        receipt = build_rejection_receipt(
+            raw_value=huge,
+            errors=["too big"],
+            request_id="r-huge",
+            now=0.0,
+        )
+        preview = receipt["received"]["preview"]
+        self.assertLessEqual(len(preview), 2_100, "preview must be bounded")
+        self.assertIn("truncated", preview)
+
     def test_missing_credential_refuses_startup(self):
         os.environ.pop("NORTHSTAR_EGRESS_CRED_HOOK_TOKEN", None)
         try:

@@ -5219,6 +5219,10 @@ Per-agent, per-destination byte budgets, bucketed by UTC day.
 - `usage(agent_id: str, destination: str, *, now: float)`
 - `observe(agent_id: str, destination: str, nbytes: int, *, now: float, limit: int | None)`
   - Record ``nbytes`` against the budget. Returns False (and records nothing) when the observation would exceed ``limit``.
+#### `build_rejection_receipt(*, raw_value: Any, errors: list[str], request_id: str | None, now: float, policy_revision: str='', run_id: str='', enforcer_seed: bytes | None=None, key_id: str | None=None)`
+
+Build a tamper-evident receipt for a malformed/rejected request.
+
 #### `authorize_egress(policy: EgressPolicy, request: EgressRequest, *, resolve: Callable[[str], list[str]], now: float, budgets: EgressBudgetLedger | None=None, approver_keys: Mapping[str, bytes] | None=None, enforcer_seed: bytes | None=None, key_id: str | None=None)`
 
 Decide one egress request. Pure: no sockets, no clock reads.
