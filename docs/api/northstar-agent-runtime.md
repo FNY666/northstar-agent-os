@@ -6358,6 +6358,14 @@ MCP transport, protocol, or configuration error. Operator-facing.
 
 #### `RemoteTool`
 
+#### `tool_definition_digest(server: str, name: str, description: str, input_schema: Mapping[str, Any])`
+
+Canonical digest pinning one MCP tool's definition.
+
+#### `ToolDrift`
+
+One tool definition that drifted from the admission baseline.
+
 #### `parse_mcp_flag(value: str)`
 
 Parse ``--mcp-server NAME=COMMAND ARG...`` (command split with shlex).
@@ -6372,6 +6380,10 @@ One MCP server over stdio: modern (per-request metadata) or legacy (handshake).
   - Spawn the server, agree a generation, and list its tools.
 - `tool_names()`
 - `tool(name: str)`
+- `quarantined` (property)
+  - True when tool-definition drift was detected; calls are denied.
+- `refresh_tools()`
+  - Re-list tools and compare against the admission baseline.
 - `call_tool(tool_name: str, arguments: dict[str, Any])`
   - Invoke one remote tool, resolving MRTR input requests through the gate.
 - `close()`

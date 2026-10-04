@@ -31,6 +31,7 @@ reconnection. The live-tool surface of the runtime remains the registry.
 """
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import re
@@ -119,6 +120,38 @@ class RemoteTool:
     description: str
     input_schema: dict[str, Any]
     annotations: dict[str, Any] = field(default_factory=dict)
+
+
+def tool_definition_digest(
+    server: str, name: str, description: str, input_schema: Mapping[str, Any]
+) -> str:
+    """Canonical digest pinning one MCP tool's definition.
+
+    Covers ``(server identity, tool name, description, input_schema)`` with
+    the JCS canonicalization, so any drift -- a renamed tool, a rewritten
+    description, a widened schema -- changes the digest. The admission
+    baseline stores these digests; ``refresh_tools`` recomputes them and
+    quarantines the server on mismatch.
+    """
+    from canonical_json import jcs_canonical_json as _jcs
+
+    payload = {
+        "server": server,
+        "name": name,
+        "description": description,
+        "input_schema": dict(input_schema),
+    }
+    return hashlib.sha256(_jcs(payload)).hexdigest()
+
+
+@dataclass
+class ToolDrift:
+    """One tool definition that drifted from the admission baseline."""
+
+    tool_name: str
+    kind: str  # "added" | "removed" | "changed"
+    expected_digest: str | None
+    observed_digest: str | None
 
 
 def parse_mcp_flag(value: str) -> tuple[str, list[str]]:
@@ -210,6 +243,11 @@ class McpStdioClient:
         self._request_id = 0
         self._last_request_id: int | None = None
         self._tools: dict[str, RemoteTool] = {}
+        # Tool-definition pinning: digests captured at connect() time. Any
+        # drift detected by refresh_tools() quarantines the server.
+        self._tool_digests: dict[str, str] = {}
+        self._quarantined: bool = False
+        self._quarantine_reason: str = ""
         self._info = {"name": "northstar-agent-runtime", "version": __version__}
 
     # -- lifecycle -----------------------------------------------------------
@@ -385,6 +423,26 @@ class McpStdioClient:
                     description=description,
                     input_schema=schema,
                 )
+                self._tool_digests[tool_name] = tool_definition_digest(
+                    self.name, tool_name, description, schema
+                )
+            # Pin against the persistent baseline: the first connect after
+            # admission establishes it; later connects enforce it.
+            baseline = self._load_baseline()
+            if baseline is None:
+                self._save_baseline()
+            elif baseline != self._tool_digests:
+                self._quarantined = True
+                self._quarantine_reason = "tool definitions differ from the admission baseline"
+                if callable(self.audit):
+                    self.audit(
+                        {
+                            "type": "mcp.tool_drift",
+                            "server": self.name,
+                            "at": "connect",
+                            "reason": self._quarantine_reason,
+                        }
+                    )
         except Exception:
             self.close()
             raise
@@ -397,6 +455,111 @@ class McpStdioClient:
             return self._tools[name]
         except KeyError:
             raise McpError(f"mcp server {self.name!r} has no tool {name!r}") from None
+
+    def _baseline_path(self) -> Path | None:
+        """Path to the persistent tool-definition baseline, if a workspace is set."""
+        if not self.workspace_root:
+            return None
+        return Path(self.workspace_root) / ".northstar" / "mcp-tool-baseline.json"
+
+    def _load_baseline(self) -> dict[str, str] | None:
+        """Load the persisted baseline digests for this server, if any."""
+        path = self._baseline_path()
+        if path is None or not path.is_file():
+            return None
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            return None
+        if not isinstance(data, dict):
+            return None
+        server_data = data.get(self.name)
+        if not isinstance(server_data, dict):
+            return None
+        return {str(k): str(v) for k, v in server_data.items()}
+
+    def _save_baseline(self) -> None:
+        """Persist the current digests as the baseline for this server."""
+        path = self._baseline_path()
+        if path is None:
+            return
+        try:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            data: dict[str, Any] = {}
+            if path.is_file():
+                try:
+                    data = json.loads(path.read_text(encoding="utf-8"))
+                except (OSError, ValueError):
+                    data = {}
+            if not isinstance(data, dict):
+                data = {}
+            data[self.name] = dict(self._tool_digests)
+            path.write_text(json.dumps(data, indent=2, sort_keys=True), encoding="utf-8")
+        except OSError:
+            pass  # Baseline persistence is best-effort; in-memory still protects this run.
+
+    @property
+    def quarantined(self) -> bool:
+        """True when tool-definition drift was detected; calls are denied."""
+        return self._quarantined
+
+    def refresh_tools(self) -> tuple[ToolDrift, ...]:
+        """Re-list tools and compare against the admission baseline.
+
+        Returns the drifts found (empty when the surface is unchanged). Any
+        drift -- added, removed, or changed tool definitions -- quarantines
+        the server: subsequent ``call_tool`` calls are denied until the
+        operator re-admits the server. An audit record is emitted when an
+        audit callable is attached.
+        """
+        if not self.connected:
+            raise McpError(f"mcp server {self.name!r} is not connected")
+        listed = self._request("tools/list", {})
+        tools = listed.get("tools") if isinstance(listed, dict) else None
+        if not isinstance(tools, list):
+            raise McpError(f"mcp server {self.name!r}: tools/list must return an array")
+        observed: dict[str, str] = {}
+        for raw in tools:
+            if not isinstance(raw, dict):
+                continue
+            tool_name = _coerce_name_part(str(raw.get("name", "")), "tool", self.name)
+            description = str(raw.get("description", "") or "")[:MAX_DESCRIPTION_CHARS]
+            schema = raw.get("inputSchema") or {}
+            if not isinstance(schema, dict):
+                schema = {}
+            observed[tool_name] = tool_definition_digest(self.name, tool_name, description, schema)
+        drifts: list[ToolDrift] = []
+        for tool_name, expected in self._tool_digests.items():
+            seen = observed.get(tool_name)
+            if seen is None:
+                drifts.append(ToolDrift(tool_name, "removed", expected, None))
+            elif seen != expected:
+                drifts.append(ToolDrift(tool_name, "changed", expected, seen))
+        for tool_name, seen in observed.items():
+            if tool_name not in self._tool_digests:
+                drifts.append(ToolDrift(tool_name, "added", None, seen))
+        if drifts:
+            self._quarantined = True
+            self._quarantine_reason = (
+                f"tool-definition drift: {', '.join(f'{d.kind}:{d.tool_name}' for d in drifts)}"
+            )
+            if callable(self.audit):
+                self.audit(
+                    {
+                        "type": "mcp.tool_drift",
+                        "server": self.name,
+                        "drifts": [
+                            {
+                                "tool": d.tool_name,
+                                "kind": d.kind,
+                                "expected_digest": d.expected_digest,
+                                "observed_digest": d.observed_digest,
+                            }
+                            for d in drifts
+                        ],
+                    }
+                )
+        return tuple(drifts)
 
     # -- calls ---------------------------------------------------------------
 
@@ -411,6 +574,11 @@ class McpStdioClient:
         count is capped: the spec lets a server re-ask until satisfied, and an
         uncapped client would let it keep a human at a prompt forever.
         """
+        if self._quarantined:
+            return ToolResult.error(
+                f"mcp {self.name}/{tool_name}: denied: server is quarantined "
+                f"({self._quarantine_reason}); re-admit the server to clear"
+            )
         try:
             self.tool(tool_name)  # raises McpError for an unknown tool
         except McpError as error:
