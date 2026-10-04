@@ -235,7 +235,7 @@ def _check_sidecar(args: argparse.Namespace, findings: list[Finding]) -> None:
 def _check_egress(args: argparse.Namespace, findings: list[Finding]) -> None:
     """Check the egress enforcement boundary.
 
-    Three properties, all verified rather than asserted:
+    Four properties, all verified rather than asserted:
 
     1. Brokered credentials live in the *sidecar's* environment, never the
        agent's. If this process (the agent side) can see a
@@ -244,6 +244,9 @@ def _check_egress(args: argparse.Namespace, findings: list[Finding]) -> None:
        policy is a finding, not a silent allow.
     3. The sidecar socket (when configured) answers a probe: a live
        ``rejected`` proves the daemon is up; anything else is a failure.
+    4. The agent process itself has no default L3 route: without one, the
+       process cannot route around the sidecar. A present default route is
+       reported as a warning, not hidden.
     """
     import os
 
@@ -303,6 +306,39 @@ def _check_egress(args: argparse.Namespace, findings: list[Finding]) -> None:
                     )
     else:
         findings.append(Finding("egress", "ok", "off - no egress socket configured (pass --egress-socket to enable)"))
+
+    # 4. The agent process itself must have no direct L3 route out. The
+    # sidecar is only "the only network the agent may touch" if the agent
+    # process cannot route around it. This checks /proc/net/route for a
+    # default gateway: no default route => no direct egress possible.
+    # A present default route is a finding, not an assertion of safety.
+    try:
+        has_default_route: bool | None = False
+        with open("/proc/net/route", "r", encoding="ascii") as fh:
+            for line in fh.readlines()[1:]:
+                fields = line.split()
+                if len(fields) >= 2 and fields[1] == "00000000":
+                    has_default_route = True
+                    break
+    except OSError:
+        has_default_route = None
+    if has_default_route is True:
+        findings.append(
+            Finding(
+                "egress",
+                "warn",
+                "agent process has a default route: direct network egress is possible; "
+                "the sidecar boundary relies on operator netns/firewall, not this process",
+            )
+        )
+    elif has_default_route is False:
+        findings.append(
+            Finding("egress", "ok", "agent process has no default route: no direct L3 egress")
+        )
+    else:
+        findings.append(
+            Finding("egress", "warn", "cannot read /proc/net/route: direct-egress posture unverifiable")
+        )
 
 
 def _check_sandbox(args: argparse.Namespace, findings: list[Finding]) -> str | None:

@@ -12343,6 +12343,16 @@ Copy every component into a throwaway tree, keeping the `components/` layout.
 
 #### `main()`
 
+### `tools.fetch`
+
+Source: `components/northstar-agent-runtime/tools/fetch.py`
+
+Agent-facing network tool routed through the egress sidecar.
+
+#### `fetch_tool_spec()`
+
+Schema for the sidecar-routed network tool.
+
 ### `tools.sandbox`
 
 Source: `components/northstar-agent-runtime/tools/sandbox.py`
@@ -12391,7 +12401,7 @@ The standard tool-effect profile: system read paths + writable workspace.
 
 #### `network_deny_profile()`
 
-TCP denial without filesystem confinement.
+Network denial without filesystem confinement.
 
 #### `landlock_loader_argv(inner_argv: Sequence[str], spec: Mapping[str, object], *, python: str='python3')`
 

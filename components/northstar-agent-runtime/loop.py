@@ -179,6 +179,11 @@ class RuntimeConfig:
     tool_limits: ToolLimits = field(default_factory=ToolLimits)
     sidecar_socket: str | None = None
     sidecar_timeout_ms: int = 30_000
+    #: Unix socket of northstar-egress-sidecar. When set, the Fetch tool is
+    #: registered: the agent's only network path, routed through the sidecar.
+    #: Without a socket there is no Fetch tool at all.
+    egress_socket: str | None = None
+    egress_timeout_ms: int = 30_000
     #: Backend for the Shell tool (``auto`` | ``bwrap`` | ``process``). Does not
     #: grant Shell — the permission gate still denies it under ``default`` until
     #: ``--allow-tool Shell``. ``bwrap`` is refused at construction if unusable.
@@ -677,6 +682,18 @@ class AgentRuntime:
             )
         if self.sidecar is not None and "CodexReadOnly" not in self.tools:
             self.tools.register(codex_tool_spec())
+        # The egress sidecar is the agent's only network path, and the Fetch
+        # tool is the only way to reach it. No socket => no Fetch tool.
+        from egress_client import EgressClient
+
+        self.egress = EgressClient(
+            self.config.egress_socket,
+            timeout_ms=int(self.config.egress_timeout_ms),
+        ) if self.config.egress_socket else None
+        if self.egress is not None and "Fetch" not in self.tools:
+            from tools.fetch import fetch_tool_spec
+
+            self.tools.register(fetch_tool_spec())
         if self.config.allow_delegation and self._delegation_allowed(self.config.depth):
             self.tools.register(task_tool_spec(), replace_existing=True)
         else:
@@ -1770,6 +1787,7 @@ class AgentRuntime:
                     agent=self.config.agent,
                     depth=self.config.depth,
                     turn_index=turn_index,
+                    call_id=call.id,
                     sandbox=self.sandbox,
                     limits=self.limits,
                     services=self._services(),
@@ -2200,6 +2218,7 @@ class AgentRuntime:
             agent=self.config.agent,
             depth=self.config.depth,
             turn_index=turn_index,
+            call_id=call.id,
             sandbox=self.sandbox,
             limits=self.limits,
             services=self._services(),
@@ -2249,6 +2268,7 @@ class AgentRuntime:
         return {
             "registry": self.tools,
             "sidecar": self.sidecar,
+            "egress": self.egress,
             "config": self.config,
             "runtime": self,
             "shell_backend": self.config.shell_backend,

@@ -340,16 +340,20 @@ def default_profile(workspace: str) -> dict:
 
 
 def network_deny_profile() -> dict:
-    """TCP denial without filesystem confinement.
+    """Network denial without filesystem confinement.
 
     Grants the whole tree the workspace rights (full read/write/execute,
-    minus device and socket creation) and denies TCP outright. The
-    filesystem posture is unchanged from running unconfined -- the *only*
-    thing this profile takes away is the network. For MCP servers: they are
-    third-party binaries living anywhere on disk (npm/pip installs, fixture
-    scripts outside any workspace), so the tool-effect path allowlist would
-    break them for reasons unrelated to the gap being closed. The gap is
-    egress; this closes exactly the gap.
+    minus device and socket creation) and denies TCP outright (plus UDP on
+    Landlock ABI 10+ kernels). The filesystem posture is unchanged from
+    running unconfined -- the *only* thing this profile takes away is the
+    network. For MCP servers: they are third-party binaries living anywhere
+    on disk (npm/pip installs, fixture scripts outside any workspace), so
+    the tool-effect path allowlist would break them for reasons unrelated
+    to the gap being closed. The gap is egress; this closes exactly the gap.
+
+    Note: AF_UNIX is not restrictable by Landlock; a denied-network process
+    can still connect() to Unix sockets it can see on the filesystem. That
+    residual is documented, not closed, by this profile.
     """
     spec = build_landlock_spec(
         paths_read=[],
@@ -386,7 +390,7 @@ if _abi <= 0:
     _warn("kernel does not support Landlock")
     _o.execvp(_inner[0], _inner)
 _FSR = {"EXECUTE":(1,1),"WRITE_FILE":(2,1),"READ_FILE":(4,1),"READ_DIR":(8,1),"REMOVE_DIR":(16,1),"REMOVE_FILE":(32,1),"MAKE_CHAR":(64,1),"MAKE_DIR":(128,1),"MAKE_REG":(256,1),"MAKE_SOCK":(512,1),"MAKE_FIFO":(1024,1),"MAKE_BLOCK":(2048,1),"MAKE_SYM":(4096,1),"REFER":(8192,2),"TRUNCATE":(16384,3),"IOCTL_DEV":(32768,5)}
-_NETR = {"BIND_TCP":(1,4),"CONNECT_TCP":(2,4)}
+_NETR = {"BIND_TCP":(1,4),"CONNECT_TCP":(2,4),"BIND_UDP":(4,10),"CONNECT_SEND_UDP":(8,10)}
 def _mask(_names, _tab):
     _m = 0
     for _n in _names:
@@ -395,7 +399,7 @@ def _mask(_names, _tab):
             _m |= _bit
     return _m
 _handled_fs = _mask(("EXECUTE","WRITE_FILE","READ_FILE","READ_DIR","REMOVE_DIR","REMOVE_FILE","MAKE_CHAR","MAKE_DIR","MAKE_REG","MAKE_SOCK","MAKE_FIFO","MAKE_BLOCK","MAKE_SYM","REFER","TRUNCATE","IOCTL_DEV"), _FSR)
-_handled_net = _mask(("BIND_TCP","CONNECT_TCP"), _NETR)
+_handled_net = _mask(("BIND_TCP","CONNECT_TCP","BIND_UDP","CONNECT_SEND_UDP"), _NETR)
 _attr = _st.pack("<Q", _handled_fs) if _abi < 4 else _st.pack("<QQ", _handled_fs, _handled_net)
 class _RA(_c.Structure):
     _fields_ = [("attr", _c.c_char_p), ("size", _c.c_size_t), ("flags", _c.c_uint32)]

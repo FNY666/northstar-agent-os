@@ -416,6 +416,8 @@ def _add_execution_arguments(parser: argparse.ArgumentParser) -> None:
         execution = parser.add_argument_group("execution delegation")
         execution.add_argument("--sidecar-socket", default="", help="Unix socket of northstar-codex-sidecar; enables the CodexReadOnly tool")
         execution.add_argument("--sidecar-timeout-ms", type=int, default=30_000, help="sidecar execution deadline")
+        execution.add_argument("--egress-socket", default="", help="Unix socket of northstar-egress-sidecar; enables the Fetch tool (the agent's only network path)")
+        execution.add_argument("--egress-timeout-ms", type=int, default=30_000, help="egress sidecar request deadline")
         execution.add_argument("--probe-sidecar", action="store_true", help="send one health-check prompt to the sidecar and exit")
         execution.add_argument(
             "--sandbox",
@@ -1330,6 +1332,9 @@ def _run(args: argparse.Namespace) -> int:
     if args.sidecar_socket:
         config_kwargs["sidecar_socket"] = args.sidecar_socket
         config_kwargs["sidecar_timeout_ms"] = args.sidecar_timeout_ms
+    if args.egress_socket:
+        config_kwargs["egress_socket"] = args.egress_socket
+        config_kwargs["egress_timeout_ms"] = args.egress_timeout_ms
     config_kwargs["shell_backend"] = getattr(args, "sandbox", "auto") or "auto"
     config_kwargs["shell_seccomp"] = getattr(args, "seccomp", "auto") or "auto"
     config_kwargs["shell_capdrop"] = getattr(args, "capdrop", "on") or "on"
