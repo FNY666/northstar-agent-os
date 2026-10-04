@@ -115,7 +115,7 @@ from tools import ToolLimits, ToolSandbox, build_default_registry
 
 #: Semantic version of the public case set. Bump when a case is added, removed,
 #: or its expected verdict changes — consumers pin against this string.
-BENCH_VERSION = "northstar.governance.bench.v33"
+BENCH_VERSION = "northstar.governance.bench.v34"
 
 USAGE_ERROR = 64
 
@@ -17875,6 +17875,66 @@ def _case_metrics_manufacturing_agents(h: BenchHarness) -> BenchExpectation:
 
 
 
+def _case_metrics_construction_agents(h: BenchHarness) -> BenchExpectation:
+    """Construction-site AI discipline (one-hundred-sixtieth batch).
+
+    12 deterministic scenarios, 4 allow / 8 deny: a bound progress
+    assessment passes; a rationale-bound critical-path reschedule
+    passes; an equipment start with a live passing interlock passes;
+    a fleet operation with a named-responsible manifest passes.
+    Denied: photo-only payment certificates without human sign-off
+    (``construction.payment_without_signoff``), critical-path
+    reschedules with no rationale
+    (``construction.unrationale_reschedule``), user-uploaded twin
+    data applied without isolation (``construction.twin_contamination``),
+    autonomous operation on degraded sensors
+    (``construction.degraded_autonomy``), surveillance without worker
+    consent (``construction.unconsented_surveillance``), documents
+    citing unverified clauses
+    (``construction.fabricated_clause``), alert channels over their
+    false-positive budget (``construction.alert_budget_exceeded``),
+    and commands beyond the declared capability envelope
+    (``construction.envelope_breach``).
+    """
+    metrics = run_construction_agents()
+
+    def check(exp: BenchExpectation, report: Any) -> tuple[bool, str]:
+        if metrics["n_scenarios"] != 12:
+            return (False, f"expected 12 construction scenarios, saw {metrics['n_scenarios']}")
+        if metrics["mismatches"]:
+            return (False, f"scenario(s) disagree with ground truth: {metrics['mismatches']}")
+        if metrics["allowed_ids"] != [
+            "allow_bound_progress",
+            "allow_rationale_reschedule",
+            "allow_interlock_pass",
+            "allow_named_manifest",
+        ]:
+            return (False, f"allowed set drifted: {metrics['allowed_ids']}")
+        reasons = metrics["denial_reasons"]
+        for sid, needle in (
+            ("deny_payment_without_signoff", "payment_without_signoff"),
+            ("deny_unrationale_reschedule", "unrationale_reschedule"),
+            ("deny_twin_contamination", "twin_contamination"),
+            ("deny_degraded_autonomy", "degraded_autonomy"),
+            ("deny_unconsented_surveillance", "unconsented_surveillance"),
+            ("deny_fabricated_clause", "fabricated_clause"),
+            ("deny_alert_budget_exceeded", "alert_budget_exceeded"),
+            ("deny_envelope_breach", "envelope_breach"),
+        ):
+            if needle not in reasons.get(sid, ""):
+                return (False, f"{sid} reason missing {needle!r}")
+        return (True, "12 scenarios, 4 allow / 8 deny, ground truth pinned")
+
+    return BenchExpectation(
+        runtime=_noop_runtime(h),
+        expect_subtype="success",
+        post_check=check,
+        metrics=metrics,
+        notes="construction-site discipline: progress evidence, schedule rationale, twin integrity, HRI perimeter, safety interlocks, validation loop, surveillance consent, clause screening, forecast bands, capability envelopes, fleet manifests, alert budgets",
+    )
+
+
+
 def _case_metrics_govservices_agents(h: BenchHarness) -> BenchExpectation:
     """Government-service AI discipline (one-hundred-forty-seventh batch).
 
@@ -20618,6 +20678,802 @@ _EVIDENCE_MANIFEST_HEAD = (
 )
 
 
+def _case_metrics_education_agents(h: BenchHarness) -> BenchExpectation:
+    """Education AI discipline (one-hundred-fifty-first batch).
+
+    12 deterministic scenarios, 4 allow / 8 deny: an unlocked capability
+    used outside any lock window passes; a live retention schedule
+    passes; a detector output staying in the "signal" tier passes; an
+    AI-flagged grading decision with a human decider passes. Denied:
+    photo-solving used inside the gaokao lock window
+    (``education:window_breach``), data kept past its retention schedule
+    (``education:retention_overdue``), data with no published schedule
+    (``education:no_retention_schedule``), a detector output claimed as
+    evidence without human review (``education:tier_escalation``), a
+    grading/admissions decision made by AI alone
+    (``education:ai_decided``), a companion chatbot served to grades 3-8
+    with no listed exception (``education:developmental_ban``), a
+    Kazakh/Russian pass-rate delta above tolerance
+    (``education:language_parity_gap``), and identifiable student data
+    collected with no live pseudonym
+    (``education:pii_without_pseudonym``).
+    """
+    metrics = run_education_agents()
+
+    def check(exp: BenchExpectation, report: Any) -> tuple[bool, str]:
+        if metrics["n_scenarios"] != 12:
+            return (False, f"expected 12 education scenarios, saw {metrics['n_scenarios']}")
+        if metrics["mismatches"]:
+            return (False, f"scenario(s) disagree with ground truth: {metrics['mismatches']}")
+        if metrics["allowed_ids"] != [
+            "allow_unlocked_capability",
+            "allow_live_retention",
+            "allow_signal_tier",
+            "allow_human_disposes",
+        ]:
+            return (False, f"allowed set drifted: {metrics['allowed_ids']}")
+        reasons = metrics["denial_reasons"]
+        for sid, needle in (
+            ("deny_window_breach", "window_breach"),
+            ("deny_retention_overdue", "retention_overdue"),
+            ("deny_no_retention_schedule", "no_retention_schedule"),
+            ("deny_tier_escalation", "tier_escalation"),
+            ("deny_ai_decided", "ai_decided"),
+            ("deny_developmental_ban", "developmental_ban"),
+            ("deny_language_parity_gap", "language_parity_gap"),
+            ("deny_pii_without_pseudonym", "pii_without_pseudonym"),
+        ):
+            if needle not in reasons.get(sid, ""):
+                return (False, f"{sid}: expected needle {needle!r} in {reasons.get(sid, '')!r}")
+        return (True, "ok")
+
+    return BenchExpectation(
+        runtime=_noop_runtime(h),
+        expect_subtype="success",
+        post_check=check,
+        metrics=metrics,
+        notes="education AI discipline: temporal capability locks, retention-schedule mandates, evidentiary tiering, AI-proposes-human-disposes, developmental access staging, language-parity audits, pseudonymous student mode (AI-education absorption)",
+    )
+
+def _case_metrics_healthcare_agents(h: BenchHarness) -> BenchExpectation:
+    """Healthcare delivery AI discipline (one-hundred-fifty-second batch).
+
+    12 deterministic scenarios, 5 allow / 7 deny: a calibrated CDS
+    tool alerts; a live tripartite responsibility manifest signs;
+    stable bias vignettes pass; a triage safety case with real-time
+    human review enables; a patient AI-use notice with opt-out
+    passes. Denied: PPV below the 0.15 floor
+    (``healthcare.low_ppv_silenced``), no site calibration
+    (``healthcare.no_calibration``), post-hoc alert shares above the
+    cap (``healthcare.posthoc_alerts_silenced``), a lapsed
+    responsibility manifest
+    (``healthcare.stale_responsibility_manifest``), fairness
+    deterioration on model update (``healthcare.fairness_regressed``),
+    a missing patient AI-use notice (``healthcare.no_ai_notice``),
+    and autonomous triage ordering without a safety case
+    (``healthcare.triage_ordering_banned``).
+    """
+    metrics = run_healthcare_agents()
+
+    def check(exp: BenchExpectation, report: Any) -> tuple[bool, str]:
+        if metrics["n_scenarios"] != 12:
+            return (False, f"expected 12 healthcare scenarios, saw {metrics['n_scenarios']}")
+        if metrics["mismatches"]:
+            return (False, f"scenario(s) disagree with ground truth: {metrics['mismatches']}")
+        if metrics["allowed_ids"] != [
+            "allow_calibrated_cds",
+            "allow_manifest",
+            "allow_stable_fairness",
+            "allow_triage_cased",
+            "allow_notice",
+        ]:
+            return (False, f"allowed set drifted: {metrics['allowed_ids']}")
+        reasons = metrics["denial_reasons"]
+        for sid, needle in (
+            ("deny_low_ppv", "low_ppv_silenced"),
+            ("deny_no_calibration", "no_calibration"),
+            ("deny_posthoc", "posthoc_alerts_silenced"),
+            ("deny_stale_manifest", "stale_responsibility_manifest"),
+            ("deny_fairness_regressed", "fairness_regressed"),
+            ("deny_no_notice", "no_ai_notice"),
+            ("deny_triage_default", "triage_ordering_banned"),
+        ):
+            if needle not in reasons.get(sid, ""):
+                return (False, f"{sid} reason missing {needle!r}")
+        return (True, "12 scenarios, 5 allow / 7 deny, ground truth pinned")
+
+    return BenchExpectation(
+        runtime=_noop_runtime(h),
+        expect_subtype="success",
+        post_check=check,
+        metrics=metrics,
+        notes="healthcare delivery discipline: alert burden ledger, responsibility manifest, bias vignette regression, denial evidence provenance, triage ordering ban, AI usage notice, adversarial dissent, consistency signal, maturity mapping, post-market surveillance",
+    )
+
+
+def _case_metrics_transport_agents(h: BenchHarness) -> BenchExpectation:
+    """Transport & logistics AI discipline (one-hundred-fifty-third batch).
+
+    12 deterministic scenarios, 4 allow / 8 deny: a routing decision
+    with a live rationale signs; a healthy fleet dispatches; a
+    supervisor inside the concurrency cap passes; a registered agent
+    acting inside privilege and tool whitelist passes. Denied:
+    decisions without rationales (``transport:no_rationale``),
+    fleet-wide stall trips (``transport:fleet_tripped``),
+    overloaded supervisors (``transport:overloaded_supervisor``),
+    unregistered agents (``transport:unregistered_agent``),
+    scenarios outside the pinned checklist
+    (``transport:unchecked_scenario``), emergency-vehicle
+    interference (``transport:responder_interference``), deployments
+    with no labor plan (``transport:no_labor_plan``), and incidents
+    with no city report (``transport:unreported_incident``).
+    """
+    metrics = run_transport_agents()
+
+    def check(exp: BenchExpectation, report: Any) -> tuple[bool, str]:
+        if metrics["n_scenarios"] != 12:
+            return (False, f"expected 12 transport scenarios, saw {metrics['n_scenarios']}")
+        if metrics["mismatches"]:
+            return (False, f"scenario(s) disagree with ground truth: {metrics['mismatches']}")
+        if metrics["allowed_ids"] != [
+            "allow_route_with_rationale",
+            "allow_healthy_fleet",
+            "allow_supervisor_within_cap",
+            "allow_registered_agent",
+        ]:
+            return (False, f"allowed set drifted: {metrics['allowed_ids']}")
+        reasons = metrics["denial_reasons"]
+        for sid, needle in (
+            ("deny_no_rationale", "no_rationale"),
+            ("deny_fleet_tripped", "fleet_tripped"),
+            ("deny_overloaded_supervisor", "overloaded_supervisor"),
+            ("deny_unregistered_agent", "unregistered_agent"),
+            ("deny_unchecked_scenario", "unchecked_scenario"),
+            ("deny_responder_interference", "responder_interference"),
+            ("deny_no_labor_plan", "no_labor_plan"),
+            ("deny_unreported_incident", "unreported_incident"),
+        ):
+            if needle not in reasons.get(sid, ""):
+                return (False, f"{sid} reason missing {needle!r}")
+        return (True, "12 scenarios, 4 allow / 8 deny, ground truth pinned")
+
+    return BenchExpectation(
+        runtime=_noop_runtime(h),
+        expect_subtype="success",
+        post_check=check,
+        metrics=metrics,
+        notes="transport & logistics discipline: route rationale receipts, fleet circuit breakers, teleoperation caps, agent IAM discipline, safety-scenario checklists, first-responder probes, labor transition plans, city incident reporting",
+    )
+
+
+def _case_metrics_agrifood_agents(h: BenchHarness) -> BenchExpectation:
+    """Agriculture & food-system AI discipline (one-hundred-fifty-fourth batch).
+
+    12 deterministic scenarios, 4 allow / 8 deny: an insurance
+    assessment with a fresh human-reviewed receipt passes; a
+    variable-rate prescription inside the +/-30% agronomic band
+    passes; a product lot resolving through all four traceability
+    stages passes; a field-robot command inside its capability
+    envelope passes. Denied: an insurance assessment with no
+    receipt (``agrifood:unreceipted_assessment``), a pesticide spray
+    with no tamper-evident decision log
+    (``agrifood:no_consequence_log``), a +45% nitrogen prescription
+    with no human approval
+    (``agrifood:unapproved_prescription``), a data read outside the
+    authorized scope (``agrifood:unauthorized_access``), an EU-trained
+    model advising a smallholder farm outside its declared domain
+    (``agrifood:out_of_domain``), an offline deployment with no
+    fallback (``agrifood:silent_failure``), a robot command in
+    waterlogged soil beyond its envelope
+    (``agrifood:envelope_breach``), and a lot with a broken
+    traceability chain (``agrifood:traceability_breach``).
+    """
+    metrics = run_agrifood_agents()
+
+    def check(exp: BenchExpectation, report: Any) -> tuple[bool, str]:
+        if metrics["n_scenarios"] != 12:
+            return (False, f"expected 12 agrifood scenarios, saw {metrics['n_scenarios']}")
+        if metrics["mismatches"]:
+            return (False, f"scenario(s) disagree with ground truth: {metrics['mismatches']}")
+        if metrics["allowed_ids"] != [
+            "allow_assessment",
+            "allow_prescription_band",
+            "allow_traceability",
+            "allow_envelope",
+        ]:
+            return (False, f"allowed set drifted: {metrics['allowed_ids']}")
+        reasons = metrics["denial_reasons"]
+        for sid, needle in (
+            ("deny_unreceipted_assessment", "unreceipted_assessment"),
+            ("deny_no_consequence_log", "no_consequence_log"),
+            ("deny_unapproved_prescription", "unapproved_prescription"),
+            ("deny_unauthorized_access", "unauthorized_access"),
+            ("deny_out_of_domain", "out_of_domain"),
+            ("deny_silent_failure", "silent_failure"),
+            ("deny_envelope_breach", "envelope_breach"),
+            ("deny_traceability_breach", "traceability_breach"),
+        ):
+            if needle not in reasons.get(sid, ""):
+                return (False, f"{sid}: expected needle {needle!r} in {reasons.get(sid, '')!r}")
+        return (True, "ok")
+
+    return BenchExpectation(
+        runtime=_noop_runtime(h),
+        expect_subtype="success",
+        post_check=check,
+        metrics=metrics,
+        notes="agrifood AI discipline: insurance assessment receipts, physical-consequence logs, prescription human-final gates, farm-data authorization receipts, applicability-domain statements, offline fallback, capability envelopes, hash-anchored traceability chains (AI-agrifood absorption)",
+    )
+
+
+def _case_metrics_finance_agents(h: BenchHarness) -> BenchExpectation:
+    """Finance AI discipline (one-hundred-fifty-fifth batch).
+
+    12 deterministic scenarios, 4 allow / 8 deny: a 95-day closure
+    notice passes; a disputed-amount-proportional freeze within its
+    clocks passes; a registered high-impact model passes; a premium
+    quote with key factors and a year-over-year explanation passes.
+    Denied: a 30-day closure notice with no tipping-off bar
+    (``finance:short_notice_closure``), a whole-account freeze on a
+    fraction of the balance (``finance:disproportionate_freeze``),
+    an automatic closure from a flag with no human review
+    (``finance:no_human_review``), a credit model declaring
+    ``postal_code`` with neither removal nor an LDA proof
+    (``finance:proxy_feature``), an adverse action citing "model
+    output" (``finance:vague_reason``), a 15% proxy-pricing
+    disparity on the full evaluation log
+    (``finance:proxy_pricing_disparity``), a shared-marker refusal
+    with no appeal receipt (``finance:systemic_exclusion``), and an
+    auto-decline with no human escalation lane
+    (``finance:no_human_lane``).
+    """
+    metrics = run_finance_agents()
+
+    def check(exp: BenchExpectation, report: Any) -> tuple[bool, str]:
+        if metrics["n_scenarios"] != 12:
+            return (False, f"expected 12 finance scenarios, saw {metrics['n_scenarios']}")
+        if metrics["mismatches"]:
+            return (False, f"scenario(s) disagree with ground truth: {metrics['mismatches']}")
+        if metrics["allowed_ids"] != [
+            "allow_notice_ok",
+            "allow_proportional_freeze",
+            "allow_registered_model",
+            "allow_explained_quote",
+        ]:
+            return (False, f"allowed set drifted: {metrics['allowed_ids']}")
+        reasons = metrics["denial_reasons"]
+        for sid, needle in (
+            ("deny_short_notice", "short_notice_closure"),
+            ("deny_disproportionate", "disproportionate_freeze"),
+            ("deny_no_review", "no_human_review"),
+            ("deny_proxy_feature", "proxy_feature"),
+            ("deny_vague_reason", "vague_reason"),
+            ("deny_pricing_disparity", "proxy_pricing_disparity"),
+            ("deny_systemic_exclusion", "systemic_exclusion"),
+            ("deny_no_lane", "no_human_lane"),
+        ):
+            if needle not in reasons.get(sid, ""):
+                return (False, f"{sid} missing denial needle {needle!r}")
+        return (True, "finance_agents: 12/12 scenarios match ground truth")
+
+    return BenchExpectation(
+        runtime=_noop_runtime(h),
+        expect_subtype="success",
+        post_check=check,
+        metrics=metrics,
+        notes="finance AI discipline: closure-notice receipts with 90-day minimum, tipping-off bar receipts, freeze proportionality with 60-day hold / 20-day rebuttal / 10-day review clocks, flag-is-not-guilt with human review and FP disclosure, proxy-feature screens with LDA proofs, adverse-action specificity, pricing fairness rules layer over the full evaluation log, shared-marker appeal receipts, high-impact registration, human escalation lanes, premium-explanation receipts",
+    )
+
+
+def _case_metrics_support_agents(h: BenchHarness) -> BenchExpectation:
+    """Customer-service AI discipline (one-hundred-fifty-sixth batch).
+
+    12 deterministic scenarios, 4 allow / 8 deny: an AI session
+    with a live identity disclosure signs; a handoff reaching a
+    human inside the window signs; a fee claim bound to live
+    knowledge-base evidence signs; a registered AI agent
+    presenting its true kind signs. Denied: undisclosed AI
+    sessions (``support:undisclosed_ai``), handoff timeouts and
+    handoff loops (``support.no_human_escape``), evidence-free
+    claims (``support.unevidenced_claim``), AI posing as human
+    (``support.identity_fraud``), surveillance repurposed to
+    train replacement models
+    (``support.surveillance_overreach``), workplace emotion
+    inference (``support.emotion_inference``), and post-layoff
+    quality collapse (``support.over_automation``).
+    """
+    metrics = run_support_agents()
+
+    def check(exp: BenchExpectation, report: Any) -> tuple[bool, str]:
+        if metrics["n_scenarios"] != 12:
+            return (False, f"expected 12 support scenarios, saw {metrics['n_scenarios']}")
+        if metrics["mismatches"]:
+            return (False, f"scenario(s) disagree with ground truth: {metrics['mismatches']}")
+        if metrics["allowed_ids"] != [
+            "allow_disclosed_session",
+            "allow_human_handoff",
+            "allow_evidenced_claim",
+            "allow_registered_ai_agent",
+        ]:
+            return (False, f"allowed set drifted: {metrics['allowed_ids']}")
+        reasons = metrics["denial_reasons"]
+        for sid, needle in (
+            ("deny_undisclosed_ai", "undisclosed_ai"),
+            ("deny_handoff_timeout", "no_human_escape"),
+            ("deny_handoff_loop", "no_human_escape"),
+            ("deny_unevidenced_claim", "unevidenced_claim"),
+            ("deny_identity_fraud", "identity_fraud"),
+            ("deny_surveillance_overreach", "surveillance_overreach"),
+            ("deny_emotion_inference", "emotion_inference"),
+            ("deny_over_automation", "over_automation"),
+        ):
+            if needle not in reasons.get(sid, ""):
+                return (False, f"{sid} reason missing {needle!r}")
+        return (True, "12 scenarios, 4 allow / 8 deny, ground truth pinned")
+
+    return BenchExpectation(
+        runtime=_noop_runtime(h),
+        expect_subtype="success",
+        post_check=check,
+        metrics=metrics,
+        notes="customer-service AI discipline: AI identity disclosure, human-escape clock, claim evidence receipts, workforce registry, surveillance budget, emotion-inference ban, rehire probe, agent-flood circuit",
+    )
+
+
+def _case_metrics_newsmedia_agents(h: BenchHarness) -> BenchExpectation:
+    """News-media AI discipline (one-hundred-fifty-eighth batch).
+
+    12 deterministic scenarios, 4 allow / 8 deny: an OP-attributed
+    AI-assisted story passes; a human story with an issuer receipt
+    passes; material AI use disclosed within its window passes; a
+    licensed training corpus passes. Denied: an anonymous AI story
+    (``newsmedia:unattributed``), material AI use disclosed late
+    (``newsmedia:undisclosed_material_use``), a high-tier claim with
+    shallow verification (``newsmedia:citation_failure``), an
+    unscreened external video (``newsmedia:unsourced_visual``), a
+    fabricated citation (``newsmedia:fabricated_citation``), a
+    pink-slime outlet with no funding disclosure
+    (``newsmedia:funding_undisclosed``), a fictional byline
+    (``newsmedia:fictional_byline``), and a pirated training corpus
+    (``newsmedia:illegitimate_source``).
+    """
+    metrics = run_newsmedia_agents()
+
+    def check(exp: BenchExpectation, report: Any) -> tuple[bool, str]:
+        if metrics["n_scenarios"] != 12:
+            return (False, f"expected 12 newsmedia scenarios, saw {metrics['n_scenarios']}")
+        if metrics["mismatches"]:
+            return (False, f"scenario(s) disagree with ground truth: {metrics['mismatches']}")
+        if metrics["allowed_ids"] != [
+            "allow_op_attributed",
+            "allow_human_story",
+            "allow_disclosed_material",
+            "allow_licensed_corpus",
+        ]:
+            return (False, f"allowed set drifted: {metrics['allowed_ids']}")
+        reasons = metrics["denial_reasons"]
+        for sid, needle in (
+            ("deny_unattributed", "unattributed"),
+            ("deny_undisclosed_material", "undisclosed_material_use"),
+            ("deny_citation_failure", "citation_failure"),
+            ("deny_unsourced_visual", "unsourced_visual"),
+            ("deny_fabricated_citation", "fabricated_citation"),
+            ("deny_funding_undisclosed", "funding_undisclosed"),
+            ("deny_fictional_byline", "fictional_byline"),
+            ("deny_illegitimate_source", "illegitimate_source"),
+        ):
+            if needle not in reasons.get(sid, ""):
+                return (False, f"{sid} missing denial needle {needle!r}")
+        return (True, "newsmedia_agents: 12/12 scenarios match ground truth")
+
+    return BenchExpectation(
+        runtime=_noop_runtime(h),
+        expect_subtype="success",
+        post_check=check,
+        metrics=metrics,
+        notes="news-media AI discipline: issuer-identity receipts, materiality disclosure clocks, verification-depth tiers, external-media screening, citation integrity, pink-slime funding disclosure, byline verification, license chains (AI-newsroom absorption)",
+    )
+
+
+def _case_metrics_proptech_agents(h: BenchHarness) -> BenchExpectation:
+    """Real-estate & proptech AI discipline (one-hundred-fifty-ninth batch).
+
+    12 deterministic scenarios, 4 allow / 8 deny: criteria pinned
+    before the application passes; a denial with specific reasons,
+    a report copy, and a challenge channel passes; a pricing model
+    training only on >=1-year-old data passes; a high-confidence
+    AVM valuation passes. Denied: a score or recommendation for a
+    voucher applicant (``proptech:voucher_score_shown``), AI
+    deciding a specific applicant
+    (``proptech:ai_specific_decision``), pricing trained on fresh
+    or real-time competitor data
+    (``proptech.stale_data_violation``), competitor nonpublic data
+    in pricing inputs (``proptech:collusion_input``), a screening
+    model with a disparate-impact finding
+    (``proptech:disparate_impact``), discriminatory ad-delivery
+    skew (``proptech:ad_delivery_skew``), a transaction without a
+    broker liability anchor (``proptech.no_liability_anchor``), and
+    a benchmark deviation beyond tolerance without justification
+    (``proptech:unjustified_deviation``).
+    """
+    metrics = run_proptech_agents()
+
+    def check(exp: BenchExpectation, report: Any) -> tuple[bool, str]:
+        if metrics["n_scenarios"] != 12:
+            return (False, f"expected 12 proptech scenarios, saw {metrics['n_scenarios']}")
+        if metrics["mismatches"]:
+            return (False, f"scenario(s) disagree with ground truth: {metrics['mismatches']}")
+        if metrics["allowed_ids"] != [
+            "allow_criteria_pinned",
+            "allow_adverse_action",
+            "allow_pricing_data_old",
+            "allow_high_confidence_valuation",
+        ]:
+            return (False, f"allowed set drifted: {metrics['allowed_ids']}")
+        reasons = metrics["denial_reasons"]
+        for sid, needle in (
+            ("deny_voucher_score", "voucher_score_shown"),
+            ("deny_ai_specific_decision", "ai_specific_decision"),
+            ("deny_stale_data", "stale_data_violation"),
+            ("deny_collusion_input", "collusion_input"),
+            ("deny_disparate_impact", "disparate_impact"),
+            ("deny_ad_skew", "ad_delivery_skew"),
+            ("deny_no_liability_anchor", "no_liability_anchor"),
+            ("deny_unjustified_deviation", "unjustified_deviation"),
+        ):
+            if needle not in reasons.get(sid, ""):
+                return (False, f"{sid} reason missing {needle!r}")
+        return (True, "12 scenarios, 4 allow / 8 deny, ground truth pinned")
+
+    return BenchExpectation(
+        runtime=_noop_runtime(h),
+        expect_subtype="success",
+        post_check=check,
+        metrics=metrics,
+        notes="real-estate & proptech discipline: voucher score-silencing, criteria pins, adverse-action receipts, disparate-impact audits, >=1-year pricing data, competitor-data probe, jurisdiction matrix, human-final screening, ad-delivery audits, broker liability anchor, AVM confidence floor, public benchmarks",
+    )
+
+
+def _case_metrics_eldercare_agents(h: BenchHarness) -> BenchExpectation:
+    """Elder-care AI discipline (one-hundred-sixty-first batch).
+
+    12 deterministic scenarios, 4 allow / 8 deny: anomaly-only
+    monitoring (the default) passes; an alert channel inside its
+    false-alarm budget passes; avatar-presented video streams pass;
+    a constraint action with an independent human decision passes.
+    Denied: always-watch without a live opt-in
+    (``eldercare:always_watch_without_opt_in``), a broken
+    three-party consent chain (``eldercare:consent_chain_broken``),
+    an exhausted false-alarm budget (``eldercare:alarm_fatigue``),
+    undisclosed real-person voice impersonation
+    (``eldercare:undisclosed_impersonation``), raw video to a vendor
+    (``eldercare:raw_video_without_event_or_authority``), audio
+    retention without a separate consent receipt
+    (``eldercare:audio_retention_without_consent``), a vendor-only
+    prevention claim (``eldercare:unverified_prevention_claim``),
+    and a signal-driven constraint without a human decision
+    (``eldercare:emotion_triggered_constraint``).
+    """
+    metrics = run_eldercare_agents()
+
+    def check(exp: BenchExpectation, report: Any) -> tuple[bool, str]:
+        if metrics["n_scenarios"] != 12:
+            return (False, f"expected 12 eldercare scenarios, saw {metrics['n_scenarios']}")
+        if metrics["mismatches"]:
+            return (False, f"scenario(s) disagree with ground truth: {metrics['mismatches']}")
+        if metrics["allowed_ids"] != [
+            "allow_anomaly_only",
+            "allow_within_budget",
+            "allow_avatar_stream",
+            "allow_human_decided_constraint",
+        ]:
+            return (False, f"allowed set drifted: {metrics['allowed_ids']}")
+        reasons = metrics["denial_reasons"]
+        for sid, needle in (
+            ("deny_always_watch_no_optin", "always_watch_without_opt_in"),
+            ("deny_consent_withdrawn", "consent_chain_broken"),
+            ("deny_alarm_fatigue", "alarm_fatigue"),
+            ("deny_undisclosed_impersonation", "undisclosed_impersonation"),
+            ("deny_raw_video_to_vendor", "raw_video_without_event_or_authority"),
+            ("deny_audio_retention_no_consent", "audio_retention_without_consent"),
+            ("deny_unverified_prevention", "unverified_prevention_claim"),
+            ("deny_emotion_constraint", "emotion_triggered_constraint"),
+        ):
+            if needle not in reasons.get(sid, ""):
+                return (False, f"{sid} reason missing {needle!r}")
+        return (True, "12 scenarios, 4 allow / 8 deny, ground truth pinned")
+
+    return BenchExpectation(
+        runtime=_noop_runtime(h),
+        expect_subtype="success",
+        post_check=check,
+        metrics=metrics,
+        notes="elder-care AI discipline: anomaly-only default, three-party consent chain, false-alarm budgets, voice-impersonation disclosure, avatar-first video, no audio retention, prevention evidence gate, staffing and human-contact floors, emotion-signal boundary (AI-elder-care absorption)",
+    )
+
+
+def _case_metrics_science_agents(h: BenchHarness) -> BenchExpectation:
+    """Scientific research & lab AI discipline (one-hundred-sixty-second batch).
+
+    12 deterministic scenarios, 4 allow / 8 deny: a verified citation
+    at evidence tier enters a paper; a physical action covered by a
+    human-execution receipt proceeds; a bio workflow with a
+    function-equivalence screen clears; a tool matching its
+    reproduction binding validates. Denied: ghost citations
+    (``science:unverified_citation``), signal-tier hypotheses entering
+    papers (``science:unverified_tier``), ungated wetlab actions
+    (``science:ungated_wetlab``), homology-only screening
+    (``science:homology_only_screen``), unbound synthesis orders
+    (``science:unbound_synthesis_order``), reproduction drift
+    (``science:reproduction_drift``), envelope violations
+    (``science:envelope_violation``), and "AI independently discovered"
+    marketing claims (``science:false_discovery_attribution``).
+    """
+    metrics = run_science_agents()
+
+    def check(exp: BenchExpectation, report: Any) -> tuple[bool, str]:
+        if metrics["n_scenarios"] != 12:
+            return (False, f"expected 12 science scenarios, saw {metrics['n_scenarios']}")
+        if metrics["mismatches"]:
+            return (False, f"scenario(s) disagree with ground truth: {metrics['mismatches']}")
+        if metrics["allowed_ids"] != [
+            "allow_cited_hypothesis",
+            "allow_wetlab_execution",
+            "allow_screened_bio",
+            "allow_stable_tool",
+        ]:
+            return (False, f"allowed set drifted: {metrics['allowed_ids']}")
+        reasons = metrics["denial_reasons"]
+        for sid, needle in (
+            ("deny_ghost_citation", "unverified_citation"),
+            ("deny_signal_tier", "unverified_tier"),
+            ("deny_ungated_wetlab", "ungated_wetlab"),
+            ("deny_homology_only", "homology_only_screen"),
+            ("deny_unbound_synthesis", "unbound_synthesis_order"),
+            ("deny_tool_drift", "reproduction_drift"),
+            ("deny_envelope_violation", "envelope_violation"),
+            ("deny_false_attribution", "false_discovery_attribution"),
+        ):
+            if needle not in reasons.get(sid, ""):
+                return (False, f"{sid}: expected needle {needle!r} in {reasons.get(sid, '')!r}")
+        return (True, "ok")
+
+    return BenchExpectation(
+        runtime=_noop_runtime(h),
+        expect_subtype="success",
+        post_check=check,
+        metrics=metrics,
+        notes="scientific research & lab AI discipline: hypothesis evidence tiers, citation-existence verification, wetlab human-action gate, function-equivalence dual-use screening, synthesis-order binding, reproducibility lock, lab-robot capability envelopes, discovery attribution, cross-institution incident ledger (AI-science absorption)",
+    )
+
+def _case_metrics_dating_agents(h: BenchHarness) -> BenchExpectation:
+    """Dating & relationships AI discipline (one-hundred-sixty-third batch).
+
+    12 deterministic scenarios, 4 allow / 8 deny: a fraud-ban
+    notification completed within 24 hours passes; a platform with
+    an audited persona ratio under the cap passes; specific
+    training-data consent at use time passes; detected investment
+    grooming with a receipted anti-fraud handoff passes. Denied: a
+    fraud-ban notification completed late
+    (``dating:fraud_notice_overdue``), an undisclosed AI-persona
+    majority (``dating:ai_majority_undisclosed``), training-data use
+    under a blanket "service improvement" clause
+    (``dating:training_data_no_consent``), a stale public-matchmaker
+    fairness audit (``dating:state_matchmaker_no_audit``), a
+    cancellation flow with a roach-motel step
+    (``dating:cancellation_dark_pattern``), an unregistered
+    AI-conversation operator (``dating:unregistered_ai_actor``),
+    loneliness-signal targeting refused whole-class
+    (``dating:vulnerability_targeting``), and detected grooming with
+    no handoff (``dating:investment_grooming``).
+    """
+    metrics = run_dating_agents()
+
+    def check(exp: BenchExpectation, report: Any) -> tuple[bool, str]:
+        if metrics["n_scenarios"] != 12:
+            return (False, f"expected 12 dating scenarios, saw {metrics['n_scenarios']}")
+        if metrics["mismatches"]:
+            return (False, f"scenario(s) disagree with ground truth: {metrics['mismatches']}")
+        if metrics["allowed_ids"] != [
+            "allow_fraud_notice_on_time",
+            "allow_persona_ratio_bound",
+            "allow_training_consent_specific",
+            "allow_grooming_handoff",
+        ]:
+            return (False, f"allowed set drifted: {metrics['allowed_ids']}")
+        reasons = metrics["denial_reasons"]
+        for sid, needle in (
+            ("deny_fraud_notice_late", "fraud_notice_overdue"),
+            ("deny_ai_majority", "ai_majority_undisclosed"),
+            ("deny_blanket_consent", "training_data_no_consent"),
+            ("deny_matchmaker_stale", "state_matchmaker_no_audit"),
+            ("deny_cancellation_trap", "cancellation_dark_pattern"),
+            ("deny_unregistered_actor", "unregistered_ai_actor"),
+            ("deny_vulnerability_target", "vulnerability_targeting"),
+            ("deny_grooming_silent", "investment_grooming"),
+        ):
+            if needle not in reasons.get(sid, ""):
+                return (False, f"{sid} missing denial needle {needle!r}")
+        return (True, "dating_agents: 12/12 scenarios match ground truth")
+
+    return BenchExpectation(
+        runtime=_noop_runtime(h),
+        expect_subtype="success",
+        post_check=check,
+        metrics=metrics,
+        notes="dating & relationships AI discipline: 24h fraud-ban notification clocks, AI-persona ratio caps, input-side training-data consent, public-matchmaker fairness audits, subscription-exit receipts, AI-actor registration, vulnerability-exploitation refusal, pig-butchering handoffs (AI-dating absorption)",
+    )
+
+
+def _case_metrics_retail_agents(h: BenchHarness) -> BenchExpectation:
+    """Retail & e-commerce AI discipline (one-hundred-sixty-fourth batch).
+
+    12 deterministic scenarios, 4 allow / 8 deny: a personalized price
+    with a live disclosure receipt passes; pricing features with no
+    protected-class proxies pass; an agent quote reading no
+    wallet/spending-graph signals passes; a same-item cohort gap with
+    a bound justification passes. Denied: undisclosed personalized
+    pricing (``retail:undisclosed_personalization``), pricing features
+    reconstructing protected classes
+    (``retail:proxy_pricing_feature``), cart-vs-logged-shelf mismatches
+    (``retail:cart_shelf_mismatch``), personalization channels feeding
+    the pricing engine (``retail:pricing_data_crossed``), premium
+    upsells with no visible alternatives (``retail:opaque_upsell``),
+    quotes reading wallet signals (``retail:wtp_scored``),
+    evidence-free assistant claims (``retail:unverified_claim``), and
+    unjustified same-item cohort gaps
+    (``retail:price_discrimination``, 大数据杀熟).
+    """
+    metrics = run_retail_agents()
+
+    def check(exp: BenchExpectation, report: Any) -> tuple[bool, str]:
+        if metrics["n_scenarios"] != 12:
+            return (False, f"expected 12 retail scenarios, saw {metrics['n_scenarios']}")
+        if metrics["mismatches"]:
+            return (False, f"scenario(s) disagree with ground truth: {metrics['mismatches']}")
+        if metrics["allowed_ids"] != [
+            "allow_disclosed_personalization",
+            "allow_clean_pricing_features",
+            "allow_blind_quote",
+            "allow_justified_shasha",
+        ]:
+            return (False, f"allowed set drifted: {metrics['allowed_ids']}")
+        reasons = metrics["denial_reasons"]
+        for sid, needle in (
+            ("deny_undisclosed_personalization", "undisclosed_personalization"),
+            ("deny_proxy_pricing_feature", "proxy_pricing_feature"),
+            ("deny_cart_shelf_mismatch", "cart_shelf_mismatch"),
+            ("deny_pricing_data_crossed", "pricing_data_crossed"),
+            ("deny_opaque_upsell", "opaque_upsell"),
+            ("deny_wtp_scored", "wtp_scored"),
+            ("deny_unverified_claim", "unverified_claim"),
+            ("deny_price_discrimination", "price_discrimination"),
+        ):
+            if needle not in reasons.get(sid, ""):
+                return (False, f"{sid} missing denial needle {needle!r}")
+        return (True, "retail_agents: 12/12 scenarios match ground truth")
+
+    return BenchExpectation(
+        runtime=_noop_runtime(h),
+        expect_subtype="success",
+        post_check=check,
+        metrics=metrics,
+        notes="retail & e-commerce AI discipline: personalized-price disclosure, protected-class pricing refusal, ESL change logs, product-not-person pin, upsell transparency, agentic quote blindness, assistant fact gates, dark-pattern screens, shasha justifications, merchant rule disclosure, quota transparency, wearable surveillance budgets",
+    )
+
+def _case_metrics_defense_agents(h: BenchHarness) -> BenchExpectation:
+    """Defense & dual-use AI discipline (one-hundred-sixty-fifth batch).
+
+    12 deterministic scenarios, 4 allow / 8 deny: substantive human
+    review with deliberation above the minimum signs; fresh targeting
+    intel signs; intact supplier redline clauses sign; quantified
+    swarm command signs. Denied: checkbox review
+    (``defense:checkbox_review``), stale targeting intel
+    (``defense:stale_intel``), rubber-stamp acceptance patterns
+    (``defense:automation_bias``), civilian-protection staffing below
+    the floor (``defense:protection_floor_breach``), silent redline
+    removal (``defense:silent_redline_removal``), evidence-free AI
+    intel assertions (``defense:unverified_assertion``),
+    escalation-regression nuke fractions above tolerance
+    (``defense:escalation_regression_failed``), and swarm thresholds
+    adjusting without a change log (``defense:threshold_drift``).
+    """
+    metrics = run_defense_agents()
+
+    def check(exp: BenchExpectation, report: Any) -> tuple[bool, str]:
+        if metrics["n_scenarios"] != 12:
+            return (False, f"expected 12 defense scenarios, saw {metrics['n_scenarios']}")
+        if metrics["mismatches"]:
+            return (False, f"scenario(s) disagree with ground truth: {metrics['mismatches']}")
+        if metrics["allowed_ids"] != [
+            "allow_substantive_review",
+            "allow_fresh_intel",
+            "allow_intact_redlines",
+            "allow_quantified_swarm",
+        ]:
+            return (False, f"allowed set drifted: {metrics['allowed_ids']}")
+        reasons = metrics["denial_reasons"]
+        for sid, needle in (
+            ("deny_checkbox_review", "checkbox_review"),
+            ("deny_stale_intel", "stale_intel"),
+            ("deny_automation_bias", "automation_bias"),
+            ("deny_protection_floor", "protection_floor_breach"),
+            ("deny_silent_redline", "silent_redline_removal"),
+            ("deny_unverified_assertion", "unverified_assertion"),
+            ("deny_escalation_regression", "escalation_regression_failed"),
+            ("deny_threshold_drift", "threshold_drift"),
+        ):
+            if needle not in reasons.get(sid, ""):
+                return (False, f"{sid} reason missing {needle!r}")
+        return (True, "12 scenarios, 4 allow / 8 deny, ground truth pinned")
+
+    return BenchExpectation(
+        runtime=_noop_runtime(h),
+        expect_subtype="success",
+        post_check=check,
+        metrics=metrics,
+        notes="defense & dual-use AI discipline: substantive human review, intel freshness, automation-bias probe, protection floor, redline contract clauses, intel-report evidence chains, escalation-ladder lock, decision-compression alert, vendor cutoff notices, treaty drift clock, swarm command quantification",
+    )
+
+
+def _case_metrics_sports_agents(h: BenchHarness) -> BenchExpectation:
+    """Sports & fitness AI discipline (one-hundred-sixty-sixth batch).
+
+    12 deterministic scenarios, 4 allow / 8 deny: a measurement-only
+    officiating output passes without a human; biometric ingestion
+    with an ownership receipt passes; a campaign with a vulnerability
+    model *and* an intervention lane passes; a sanction on a
+    confirmed violation passes. Denied: an AI-only ruling
+    (``sports.ai_adjudication``), ingestion with no ownership
+    receipt (``sports.no_ownership_receipt``), targeting predicted
+    losses (``sports.predatory_targeting``), a sanction on an
+    unconfirmed alert (``sports.punitive_alert``), a wellness agent
+    answering eating-disorder content
+    (``sports.medical_boundary_crossing``), monitoring burden over
+    threshold with no quiet-mode degrade
+    (``sports.burden_overage``), unauthorized synthetic likeness
+    generation (``sports.unauthorized_likeness``), and a deployment
+    with no responsibility manifest
+    (``sports.incomplete_manifest``).
+    """
+    metrics = run_sports_agents()
+
+    def check(exp: BenchExpectation, report: Any) -> tuple[bool, str]:
+        if metrics["n_scenarios"] != 12:
+            return (False, f"expected 12 sports scenarios, saw {metrics['n_scenarios']}")
+        if metrics["mismatches"]:
+            return (False, f"scenario(s) disagree with ground truth: {metrics['mismatches']}")
+        if metrics["allowed_ids"] != [
+            "allow_measurement",
+            "allow_ownership_ingestion",
+            "allow_campaign_with_intervention",
+            "allow_confirmed_violation_sanction",
+        ]:
+            return (False, f"allowed set drifted: {metrics['allowed_ids']}")
+        reasons = metrics["denial_reasons"]
+        for sid, needle in (
+            ("deny_ai_adjudication", "ai_adjudication"),
+            ("deny_no_ownership_receipt", "no_ownership_receipt"),
+            ("deny_predatory_targeting", "predatory_targeting"),
+            ("deny_punitive_alert", "punitive_alert"),
+            ("deny_medical_boundary_crossing", "medical_boundary_crossing"),
+            ("deny_burden_overage", "burden_overage"),
+            ("deny_unauthorized_likeness", "unauthorized_likeness"),
+            ("deny_incomplete_manifest", "incomplete_manifest"),
+        ):
+            if needle not in reasons.get(sid, ""):
+                return (False, f"{sid} missing denial needle {needle!r}")
+        return (True, "sports_agents: 12/12 scenarios match ground truth")
+
+    return BenchExpectation(
+        runtime=_noop_runtime(h),
+        expect_subtype="success",
+        post_check=check,
+        metrics=metrics,
+        notes="Sports discipline: measure-not-adjudicate, ownership receipts, predatory-marketing ban, alert tiering, wellness boundary, burden ledger, likeness registry, responsibility manifests",
+    )
+
+
 CASES: tuple[BenchCase, ...] = (
     BenchCase("denial.disallowed_beats_allow", "denial", "disallowed_tools beats allow + bypass", _case_disallowed_beats_allow),
     BenchCase("metrics.supplychain_agents", "metrics", "supply-chain AI discipline: human-final decision gates, risk-score evidence chains, false-alarm budgets, algorithmic-labor probes, deskilling clocks, tariff-scenario version binding, concentration probes, vendor-claim measurement receipts (AI-supply-chain absorption)", _case_metrics_supplychain_agents),
@@ -20685,6 +21541,7 @@ BenchCase("metrics.adtech_agents", "metrics", "adtech & synthetic-media disclosu
     BenchCase("metrics.govservices_agents", "metrics", "government-service AI discipline: human-final gates on adverse decisions, exclusion-failure probes, non-digital channel receipts, pinned discretionary boundaries, identity minimality, agent identity registry, urgency scrutiny clocks, appeal-before-suspension benefit clocks (AI-gov-services absorption)", _case_metrics_govservices_agents),
     BenchCase("metrics.moderation_agents", "metrics", "content moderation discipline: statements of reasons, over-removal probe, dialect parity, automation ceiling, non-profiling option, legal-restriction receipts, why-this-content, fact-check non-substitution, AIGC labels, amplification audit clock (AI-moderation absorption)", _case_metrics_moderation_agents),
     BenchCase("metrics.manufacturing_agents", "metrics", "manufacturing AI discipline: restart clearance, capability envelope, humanoid pilot registry, maintenance decision pin, displacement disclosure, safety baseline clock, twin sync, quality claim evidence (AI-manufacturing absorption)", _case_metrics_manufacturing_agents),
+    BenchCase("metrics.construction_agents", "metrics", "construction-site AI discipline: progress evidence, schedule rationale, twin integrity, HRI perimeter, safety interlocks, validation loop, surveillance consent, clause screening, forecast bands, capability envelopes, fleet manifests, alert budgets (AI-construction absorption)", _case_metrics_construction_agents),
     BenchCase("metrics.tax_agents", "metrics", "tax & customs AI discipline: flag-not-fraud, banned selection features, training-data debias audits, named-human signoffs, appeal windows, why-me explanations, shadow-AI registry, Annex III clock, customs lead-only scores, AI-proposes-officer-disposes (AI-tax absorption)", _case_metrics_tax_agents),
     BenchCase("metrics.dataflow_sensitivity", "metrics", "dataflow sensitivity tracking (OpenAPPA-style)", _case_metrics_dataflow_sensitivity),
     BenchCase("metrics.decision_model", "metrics", "structured decision-model approval path", _case_metrics_decision_model),
@@ -20756,6 +21613,20 @@ BenchCase("metrics.adtech_agents", "metrics", "adtech & synthetic-media disclosu
     BenchCase("metrics.commerce", "metrics", "agentic commerce terms: machine-readable terms-read receipts bound to the exact product, likeness-creep gate, biometric capture receipts with verifiable deletion, non-authoritative try-on previews, tiered authentication evidence with human review for high-value items, digital passport binding, AI model-substitution disclosure (AI-fashion/retail absorption)", _case_metrics_commerce),
     BenchCase("metrics.harness_binding", "metrics", "harness integrity binding: SHA-256 harness hash in audit, quad-only scores", _case_metrics_harness_binding),
     BenchCase("metrics.drift_detection", "metrics", "Livenerf-style drift probe: bootstrap CI + paired permutation test", _case_metrics_drift_detection),
+    BenchCase("metrics.education_agents", "metrics", "education AI discipline: temporal capability locks, retention-schedule mandates, evidentiary tiering, AI-proposes-human-disposes, developmental access staging, language-parity audits, pseudonymous student mode (AI-education absorption)", _case_metrics_education_agents),
+    BenchCase("metrics.healthcare_agents", "metrics", "healthcare delivery AI discipline: alert burden ledger, version-pinned responsibility manifest, bias vignette regression, denial evidence provenance, triage ordering ban, AI usage notice, adversarial dissent protocol, consistency uncertainty signal, L0-L4 maturity mapping, post-market surveillance (AI-clinical-delivery absorption)", _case_metrics_healthcare_agents),
+    BenchCase("metrics.transport_agents", "metrics", "transport & logistics AI discipline: route rationale receipts, fleet circuit breakers, teleoperation caps, agent IAM discipline, safety-scenario checklists, first-responder probes, labor transition plans, city incident reporting (AI-transport absorption)", _case_metrics_transport_agents),
+    BenchCase("metrics.agrifood_agents", "metrics", "agrifood AI discipline: insurance assessment receipts, physical-consequence logs, prescription human-final gates, farm-data authorization receipts, applicability-domain statements, offline fallback, capability envelopes, hash-anchored traceability chains (AI-agrifood absorption)", _case_metrics_agrifood_agents),
+        BenchCase("metrics.finance_agents", "metrics", "finance AI discipline: closure-notice receipts (90-day minimum, s.333A bar), freeze proportionality (disputed amount only, 60-day hold / 20-day rebuttal / 10-day review), flag-is-not-guilt with human review and FP disclosure, proxy-feature screens with LDA proofs, adverse-action specificity (ECOA), pricing fairness rules layer over the full evaluation log, shared-marker appeal receipts, high-impact registration, human escalation lanes, premium-explanation receipts (AI-finance absorption)", _case_metrics_finance_agents),
+    BenchCase("metrics.support_agents", "metrics", "customer-service AI discipline: AI identity disclosure, human-escape clock, claim evidence receipts, workforce registry, surveillance budget, emotion-inference ban, rehire probe, agent-flood circuit (AI-support absorption)", _case_metrics_support_agents),
+    BenchCase("metrics.newsmedia_agents", "metrics", "news-media AI discipline: issuer-identity receipts, materiality disclosure clocks, verification-depth tiers, external-media screening, citation integrity, pink-slime funding disclosure, byline verification, license chains (AI-newsroom absorption)", _case_metrics_newsmedia_agents),
+    BenchCase("metrics.proptech_agents", "metrics", "real-estate & proptech discipline: voucher score-silencing, criteria pins, adverse-action receipts, disparate-impact audits, >=1-year pricing data, competitor-data probe, jurisdiction matrix, human-final screening, ad-delivery audits, broker liability anchor, AVM confidence floor, public benchmarks (AI-proptech absorption)", _case_metrics_proptech_agents),
+    BenchCase("metrics.eldercare_agents", "metrics", "elder-care AI discipline: anomaly-only default, three-party consent chain, false-alarm budgets, voice-impersonation disclosure, avatar-first video, no audio retention, prevention evidence gate, staffing and human-contact floors, emotion-signal boundary (AI-elder-care absorption)", _case_metrics_eldercare_agents),
+    BenchCase("metrics.science_agents", "metrics", "scientific research & lab AI discipline: hypothesis evidence tiers, citation-existence verification, wetlab human-action gate, function-equivalence dual-use screening, synthesis-order binding, reproducibility lock, lab-robot capability envelopes, discovery attribution, cross-institution incident ledger (AI-science absorption)", _case_metrics_science_agents),
+    BenchCase("metrics.dating_agents", "metrics", "dating & relationships AI discipline: 24h fraud-ban notification clocks, AI-persona ratio caps, input-side training-data consent, public-matchmaker fairness audits, subscription-exit receipts, AI-actor registration, vulnerability-exploitation refusal, pig-butchering handoffs (AI-dating absorption)", _case_metrics_dating_agents),
+    BenchCase("metrics.retail_agents", "metrics", "retail & e-commerce AI discipline: personalized-price disclosure, protected-class pricing refusal, ESL change logs, product-not-person pin, upsell transparency, agentic quote blindness, assistant fact gates, dark-pattern screens, shasha justifications, merchant rule disclosure, quota transparency, wearable surveillance budgets (AI-retail absorption)", _case_metrics_retail_agents),
+    BenchCase("metrics.defense_agents", "metrics", "defense & dual-use AI discipline: substantive human review, intel freshness, automation-bias probe, protection floor, redline contract clauses, intel-report evidence chains, escalation-ladder lock, decision-compression alert, vendor cutoff notices, treaty drift clock, swarm command quantification (AI-defense absorption)", _case_metrics_defense_agents),
+    BenchCase("metrics.sports_agents", "metrics", "sports & fitness AI discipline: measure-not-adjudicate officiating gates, athlete data-ownership receipts, predatory-marketing whole-class ban, doping alert tiering, wellness boundary receipts, monitoring-burden ledger, likeness registry, responsibility manifests (AI-sports absorption)", _case_metrics_sports_agents),
 )
 
 
@@ -26126,6 +26997,248 @@ def run_govservices_agents() -> dict[str, Any]:
     }
 
 
+def run_construction_agents() -> dict[str, Any]:
+    """Construction-site AI discipline (one-hundred-sixtieth batch).
+
+    Absorbs the 2026 AI-construction thread: Bedrock Robotics'
+    first fully autonomous excavators on live US customer sites
+    (Aug 2026, $270M Series B) and its investor's own line — "every
+    hyperscaler is thinking about how to compress schedule"; the
+    上海静安灵石社区 "electronic safety officer" (4000+ violations,
+    95% claimed accuracy) and the other side of 95%: 5% false
+    positives at construction scale; Korea's Hyundai x Samsung
+    unmanned night-shift material transport and Guardian AI's
+    PPE-linked equipment interlocks; LH "늘봄 A-Eye" nationwide
+    CCTV+IoT site control (2026-04); 清水建設's 1.0 m/s humanoid
+    patrols and imitation-learning painting arms; Saipem's human
+    validation loop ("AI itself doesn't make a site safer"); WTW
+    UK's 77 robot-related accidents 2015-2022 with dust-blocked
+    sensors as the typical failure; MDPI's digital-twin
+    contamination taxonomy; the photo-as-payment-certificate trap;
+    Alberta's schedule-hallucination risk brief and the Suffolk/MIT
+    useful-alert checklist (what changed, evidence, milestone,
+    time left, owner, uncertainty remaining).
+
+    Fail-closed rules over 12 deterministic scenarios: AI progress
+    assessments bind evidence receipts and payment-certificate
+    claims need a named human sign-off — a photo never becomes an
+    unquestioned payment certificate
+    (``construction.payment_without_signoff``); critical-path AI
+    reschedules bind rationale + impact records
+    (``construction.unrationale_reschedule``); twin updates carry
+    source provenance and user-uploaded data must be isolated
+    (``construction.twin_contamination``); autonomous machines bind
+    live exclusion-zone statuses and degraded sensors kill autonomy
+    (``construction.degraded_autonomy``); equipment starts need a
+    live passing safety-interlock receipt
+    (``construction.no_interlock``); surveillance binds worker
+    consent naming data owner and reuse purposes
+    (``construction.unconsented_surveillance``); cited regulation
+    clauses must be verified pins or the document is refused
+    whole-class (``construction.fabricated_clause``); alert channels
+    pin false-positive budgets and degrade to human patrol over
+    budget (``construction.alert_budget_exceeded``); site robots
+    declare capability envelopes and out-of-envelope commands are
+    refused up front (``construction.envelope_breach``); fleet
+    self-orchestration binds a manifest with a named responsible
+    party. Ground truth is closed: 4 allow / 8 deny.
+    """
+    from construction_agents import (
+        CONSTRUCTION_SCHEMA_VERSION,
+        AuthorityRegistry,
+        ProgressAssessmentRegistry,
+        ProgressAssessmentReceipt,
+        ScheduleChangeRegistry,
+        ScheduleChangeReceipt,
+        TwinUpdateRegistry,
+        TwinUpdateReceipt,
+        PerimeterRegistry,
+        PerimeterReceipt,
+        InterlockRegistry,
+        InterlockReceipt,
+        SurveillanceConsentRegistry,
+        SurveillanceConsentReceipt,
+        ClausePinRegistry,
+        ClausePinReceipt,
+        AlertBudgetRegistry,
+        AlertBudgetReceipt,
+        ConstructionEnvelopeRegistry,
+        ConstructionEnvelopeReceipt,
+        OrchestrationRegistry,
+        OrchestrationManifest,
+        progress_evidence_receipt,
+        schedule_rationale_binding,
+        digital_twin_integrity_log,
+        hri_perimeter_gate,
+        safety_interlock_receipt,
+        worker_surveillance_consent,
+        hallucinated_clause_screen,
+        safety_alert_budget,
+        capability_envelope_gate,
+        fleet_orchestration_manifest,
+    )
+    from ed25519 import public_key, sign
+    from canonical_json import jcs_canonical_json
+
+    SEC = b"construction-bench-key-00000160!"  # 32 bytes
+    assert len(SEC) == 32
+    PUB = public_key(SEC).hex()
+    T0 = 1_800_000_000
+    HEX64 = "ab" * 32
+    HEX64_B = "cd" * 32
+
+    authorities = AuthorityRegistry()
+    authorities.register("bench-construction", PUB)
+
+    def seal(reg, cls, **fields):
+        prev = reg.log[-1].receipt_digest if reg.log else "genesis"
+        tmp = cls(authority_id="bench-construction", authority_pubkey_hex=PUB,
+                  signature_hex="00" * 64, prev_digest=prev, **fields)
+        sig = sign(SEC, jcs_canonical_json(tmp._payload()))
+        return reg.issue(authority_id="bench-construction", signature=sig, **fields)
+
+    scenarios: list[tuple[str, bool, str]] = []
+    results: dict[str, dict[str, Any]] = {}
+
+    def _record(sid, expect_allow, needle, verdict):
+        scenarios.append((sid, expect_allow, needle))
+        results[sid] = {"allowed": verdict.allowed, "reason": verdict.reason}
+
+    # --- live receipts ---
+    prog = ProgressAssessmentRegistry(authorities)
+    seal(prog, ProgressAssessmentReceipt, receipt_id="pa-ok", claim_id="pc-ok",
+         site_id="site-bench", assessment_method="lidar",
+         evidence_digest=HEX64, captured_at=T0, assessor_id="progress-ai-v4",
+         payment_certificate=False, human_signoff_id="")
+    seal(prog, ProgressAssessmentReceipt, receipt_id="pa-pay",
+         claim_id="pc-pay", site_id="site-bench",
+         assessment_method="photo_cv", evidence_digest=HEX64_B,
+         captured_at=T0, assessor_id="progress-ai-v4",
+         payment_certificate=True, human_signoff_id="")
+
+    sched = ScheduleChangeRegistry(authorities)
+    seal(sched, ScheduleChangeReceipt, receipt_id="sc-ok", change_id="chg-ok",
+         activity_id="pour-foundation", old_start=T0, new_start=T0 + 86_400,
+         rationale_summary="crane outage forces re-sequence",
+         critical_path=True, impact_statement="2-day critical-path slip",
+         recorded_at=T0)
+    seal(sched, ScheduleChangeReceipt, receipt_id="sc-bad",
+         change_id="chg-bad", activity_id="pour-foundation",
+         old_start=T0, new_start=T0 + 86_400, rationale_summary="",
+         critical_path=True, impact_statement="", recorded_at=T0)
+
+    twin = TwinUpdateRegistry(authorities)
+    seal(twin, TwinUpdateReceipt, receipt_id="tw-ok", update_id="tup-ok",
+         twin_section="level-4", state_digest=HEX64, source_kind="sensor",
+         provenance_digest=HEX64_B, isolated=False, issued_at=T0)
+    seal(twin, TwinUpdateReceipt, receipt_id="tw-bad", update_id="tup-bad",
+         twin_section="level-4", state_digest=HEX64, source_kind="user_upload",
+         provenance_digest=HEX64_B, isolated=False, issued_at=T0)
+
+    perim = PerimeterRegistry(authorities)
+    seal(perim, PerimeterReceipt, receipt_id="pm-ok", machine_id="exc-ok",
+         perimeter_radius_m=15.0, sensor_status="nominal",
+         autonomy_mode="autonomous", assessed_at=T0)
+    seal(perim, PerimeterReceipt, receipt_id="pm-bad",
+         machine_id="exc-dusty", perimeter_radius_m=15.0,
+         sensor_status="degraded", autonomy_mode="autonomous",
+         assessed_at=T0)
+
+    inter = InterlockRegistry(authorities)
+    seal(inter, InterlockReceipt, receipt_id="il-ok", machine_id="crane-ok",
+         start_request_id="st-ok", interlock_kind="ppe_gate", event="pass",
+         ppe_evidence_digest=HEX64, recorded_at=T0)
+
+    surv = SurveillanceConsentRegistry(authorities)
+    seal(surv, SurveillanceConsentReceipt, receipt_id="co-ok",
+         site_id="site-bench", worker_id="w-ok", scope="video",
+         data_owner="contractor-bench", reuse_purposes=["safety"],
+         consented_at=T0, expires_at=T0 + 365 * 86_400)
+
+    clause = ClausePinRegistry(authorities)
+    seal(clause, ClausePinReceipt, receipt_id="cp-ok", document_id="spec-ok",
+         clause_reference="OSHA-1926.501", regulation_source="OSHA 29 CFR 1926",
+         pinned_text_digest=HEX64, verified=True, issued_at=T0)
+    seal(clause, ClausePinReceipt, receipt_id="cp-bad",
+         document_id="spec-bad", clause_reference="OSHA-1926.999",
+         regulation_source="OSHA 29 CFR 1926", pinned_text_digest=HEX64,
+         verified=False, issued_at=T0)
+
+    budget = AlertBudgetRegistry(authorities)
+    seal(budget, AlertBudgetReceipt, receipt_id="ab-ok", channel_id="ch-ok",
+         budget_fp_per_day=200.0, measured_fp=180, measured_total=4000,
+         measured_at=T0)
+    seal(budget, AlertBudgetReceipt, receipt_id="ab-bad",
+         channel_id="ch-bad", budget_fp_per_day=200.0, measured_fp=260,
+         measured_total=5000, measured_at=T0)
+
+    envs = ConstructionEnvelopeRegistry(authorities)
+    seal(envs, ConstructionEnvelopeReceipt, receipt_id="ev-ok",
+         machine_id="exc-env", task_kinds=["excavate", "grade"],
+         max_payload_t=20.0, max_speed_ms=2.5,
+         allowed_conditions=["daylight", "dry_soil"],
+         valid_from=T0, valid_until=T0 + 10 * 86_400)
+
+    orch = OrchestrationRegistry(authorities)
+    seal(orch, OrchestrationManifest, receipt_id="om-ok",
+         manifest_id="mf-ok", fleet_id="fleet-ok",
+         machine_ids=["exc-env", "truck-1"],
+         responsible_party="site-manager-bench",
+         window_start=T0, window_end=T0 + 86_400, issued_at=T0)
+
+    _record("allow_bound_progress", True, "",
+            progress_evidence_receipt(prog, "pc-ok", T0 + 100))
+    _record("allow_rationale_reschedule", True, "",
+            schedule_rationale_binding(sched, "chg-ok", T0 + 100))
+    _record("allow_interlock_pass", True, "",
+            safety_interlock_receipt(inter, "crane-ok", "st-ok", T0 + 100))
+    _record("allow_named_manifest", True, "",
+            fleet_orchestration_manifest(orch, "fleet-ok", T0 + 3600))
+    _record("deny_payment_without_signoff", False, "payment_without_signoff",
+            progress_evidence_receipt(prog, "pc-pay", T0 + 100))
+    _record("deny_unrationale_reschedule", False, "unrationale_reschedule",
+            schedule_rationale_binding(sched, "chg-bad", T0 + 100))
+    _record("deny_twin_contamination", False, "twin_contamination",
+            digital_twin_integrity_log(twin, "tup-bad", T0 + 100))
+    _record("deny_degraded_autonomy", False, "degraded_autonomy",
+            hri_perimeter_gate(perim, "exc-dusty", T0 + 60))
+    _record("deny_unconsented_surveillance", False, "unconsented_surveillance",
+            worker_surveillance_consent(surv, "site-bench", "w-ghost",
+                                        "video", T0 + 10))
+    _record("deny_fabricated_clause", False, "fabricated_clause",
+            hallucinated_clause_screen(clause, "spec-bad", "OSHA-1926.999"))
+    _record("deny_alert_budget_exceeded", False, "alert_budget_exceeded",
+            safety_alert_budget(budget, "ch-bad", T0 + 3600))
+    _record("deny_envelope_breach", False, "envelope_breach",
+            capability_envelope_gate(envs, "exc-env", "excavate", 25.0,
+                                     T0 + 100))
+
+    allowed_ids: list[str] = []
+    denial_reasons: dict[str, str] = {}
+    mismatches: list[str] = []
+    for sid, expect_allow, needle in scenarios:
+        r = results[sid]
+        if r["allowed"]:
+            allowed_ids.append(sid)
+        else:
+            denial_reasons[sid] = r["reason"]
+        if r["allowed"] != expect_allow:
+            mismatches.append(f"{sid}: expected allow={expect_allow}, "
+                              f"saw allow={r['allowed']}")
+        elif not expect_allow and needle and needle not in r["reason"]:
+            mismatches.append(f"{sid}: expected needle {needle!r} in "
+                              f"{r['reason']!r}")
+    return {
+        "n_scenarios": len(scenarios),
+        "n_allowed": len(allowed_ids),
+        "n_denied": len(scenarios) - len(allowed_ids),
+        "allowed_ids": allowed_ids,
+        "denial_reasons": denial_reasons,
+        "mismatches": mismatches,
+    }
+
+
+
 def run_supplychain_agents() -> dict[str, Any]:
     """Supply-chain AI discipline (one-hundred-forty-fourth batch).
 
@@ -27969,6 +29082,3331 @@ def run_disaster_agents() -> dict[str, Any]:
     }
 
 
+def run_education_agents() -> dict[str, Any]:
+    """Education AI discipline (one-hundred-fifty-first batch).
+
+    Absorbs the 2026 AI-education thread: gaokao time-locks (exam
+    functions disabled only during exam windows, second year running,
+    at regulator request); FTC vs Illuminate Education (final order
+    2026-06-05: 10.1M students' records exfiltrated — a 10-year
+    operational mandate with no fine: publish retention schedules,
+    delete data no longer needed); universities pulling AI-detector
+    scores out of misconduct evidence (a flag opens a conversation, it
+    doesn't close one); Cambridge (May 2026): frontier models matched
+    human degree classification only 35-65% and reward "style over
+    substance" — AI is a discrepancy flagger, the human decides;
+    AFT-Microsoft (2026): AI may assist but not independently make
+    evaluative decisions; NYC (Sep 2026): 1-year gen-AI moratorium for
+    pre-K-8 with exceptions and a sunset; Kazakhstan (Oct 2026):
+    students trust automated assessment except where Kazakh/Russian
+    items aren't equivalent — language parity is the weak point;
+    German school policy (2026): pseudonymous student access by default.
+
+    Fail-closed rules over 12 deterministic scenarios: a locked
+    capability used inside its window is ``education:window_breach``;
+    data kept past its retention schedule is
+    ``education:retention_overdue`` (auto-delete post-check); a missing
+    schedule is ``education:no_retention_schedule``; an automated
+    judgment claimed as evidence without human review is
+    ``education:tier_escalation``; an evaluative decision made by AI
+    alone is ``education:ai_decided``; a deny-staged capability served
+    without a listed exception is ``education:developmental_ban``; a
+    language parity gap above tolerance is
+    ``education:language_parity_gap``; identifiable data collected
+    without a live pseudonym is ``education:pii_without_pseudonym``.
+    Ground truth is closed: 4 allow / 8 deny.
+    """
+    from ed25519 import public_key, sign
+
+    from education_agents import (
+        AuthorityRegistry,
+        CapabilityLockReceipt,
+        CapabilityLockRegistry,
+        RetentionScheduleReceipt,
+        RetentionScheduleRegistry,
+        StagingPolicyReceipt,
+        StagingPolicyRegistry,
+        ParityProbeReceipt,
+        LanguageParityRegistry,
+        PseudonymReceipt,
+        PseudonymRegistry,
+        temporal_capability_lock,
+        retention_schedule_mandate,
+        evidentiary_tiering,
+        ai_proposes_human_disposes_gate,
+        developmental_access_staging,
+        language_parity_audit,
+        pseudonymous_student_mode,
+    )
+    from canonical_json import jcs_canonical_json
+
+    SEC = b"edu-bench-authority-000000000001"  # 32 bytes
+    assert len(SEC) == 32
+    PUB = public_key(SEC)
+    T0 = 1_800_000_000
+    HEX64 = "ab" * 32
+    HEX64_B = "cd" * 32
+    WINDOW = 86_400
+
+    authorities = AuthorityRegistry()
+    authorities.register("bench-edu-op", PUB.hex())
+
+    def _prev(log):
+        return log[-1].receipt_digest if log else "genesis"
+
+    # --- capability-lock registry: gaokao window locks photo_solve ---
+    lock_reg = CapabilityLockRegistry(authorities)
+    lk = CapabilityLockReceipt(
+        lock_id="lock-bench-1", window_id="gaokao-2026-bench",
+        capability_id="photo_solve", locked_from=T0, locked_until=T0 + WINDOW,
+        authority_id="bench-edu-op", authority_pubkey_hex=PUB.hex(),
+        signature_hex="00" * 64, prev_digest=_prev(lock_reg.log))
+    lock_reg.issue(
+        lock_id="lock-bench-1", window_id="gaokao-2026-bench",
+        capability_id="photo_solve", locked_from=T0, locked_until=T0 + WINDOW,
+        authority_id="bench-edu-op",
+        signature=sign(SEC, jcs_canonical_json(lk._payload())),
+        issued_at=T0)
+
+    # --- retention-schedule registry: one live, one expiring ---
+    ret_reg = RetentionScheduleRegistry(authorities)
+    rs = RetentionScheduleReceipt(
+        schedule_id="sched-bench-live", data_category="tutor_transcripts",
+        retain_until=T0 + WINDOW * 30, authority_id="bench-edu-op",
+        authority_pubkey_hex=PUB.hex(), signature_hex="00" * 64,
+        prev_digest=_prev(ret_reg.log))
+    ret_reg.issue(
+        schedule_id="sched-bench-live", data_category="tutor_transcripts",
+        retain_until=T0 + WINDOW * 30, authority_id="bench-edu-op",
+        signature=sign(SEC, jcs_canonical_json(rs._payload())),
+        issued_at=T0)
+    rs2 = RetentionScheduleReceipt(
+        schedule_id="sched-bench-stale", data_category="exam_proctor_video",
+        retain_until=T0 + 100, authority_id="bench-edu-op",
+        authority_pubkey_hex=PUB.hex(), signature_hex="00" * 64,
+        prev_digest=_prev(ret_reg.log))
+    ret_reg.issue(
+        schedule_id="sched-bench-stale", data_category="exam_proctor_video",
+        retain_until=T0 + 100, authority_id="bench-edu-op",
+        signature=sign(SEC, jcs_canonical_json(rs2._payload())),
+        issued_at=T0)
+
+    # --- staging-policy registry: companion chatbot deny-staged, grades_3_8 ---
+    stg_reg = StagingPolicyRegistry(authorities)
+    sp = StagingPolicyReceipt(
+        policy_id="pol-bench-1", band="grades_3_8",
+        capability="companion_chatbot", access="deny",
+        exceptions=("special_needs", "english_learner", "career_skills"),
+        effective_from=T0, sunset_at=T0 + WINDOW * 365,
+        authority_id="bench-edu-op", authority_pubkey_hex=PUB.hex(),
+        signature_hex="00" * 64, prev_digest=_prev(stg_reg.log))
+    stg_reg.issue(
+        policy_id="pol-bench-1", band="grades_3_8",
+        capability="companion_chatbot", access="deny",
+        exceptions=("special_needs", "english_learner", "career_skills"),
+        effective_from=T0, sunset_at=T0 + WINDOW * 365,
+        authority_id="bench-edu-op",
+        signature=sign(SEC, jcs_canonical_json(sp._payload())),
+        issued_at=T0)
+
+    # --- language-parity registry: kk/ru pair with a gap ---
+    par_reg = LanguageParityRegistry(authorities)
+    pp = ParityProbeReceipt(
+        probe_id="probe-bench-1", pair_id="kk-ru-bench", language_a="kk",
+        language_b="ru", delta_bps=900, tolerance_bps=500, measured_at=T0,
+        authority_id="bench-edu-op", authority_pubkey_hex=PUB.hex(),
+        signature_hex="00" * 64, prev_digest=_prev(par_reg.log))
+    par_reg.issue(
+        probe_id="probe-bench-1", pair_id="kk-ru-bench", language_a="kk",
+        language_b="ru", delta_bps=900, tolerance_bps=500, measured_at=T0,
+        authority_id="bench-edu-op",
+        signature=sign(SEC, jcs_canonical_json(pp._payload())),
+        issued_at=T0)
+
+    # --- pseudonym registry: one live pseudonym ---
+    pse_reg = PseudonymRegistry(authorities)
+    ps = PseudonymReceipt(
+        pseudonym_id="pseudo-bench-1", subject_digest=HEX64_B,
+        issued_at=T0, expires_at=T0 + WINDOW * 30,
+        authority_id="bench-edu-op", authority_pubkey_hex=PUB.hex(),
+        signature_hex="00" * 64, prev_digest=_prev(pse_reg.log))
+    pse_reg.issue(
+        pseudonym_id="pseudo-bench-1", subject_digest=HEX64_B,
+        issued_at=T0, expires_at=T0 + WINDOW * 30,
+        authority_id="bench-edu-op",
+        signature=sign(SEC, jcs_canonical_json(ps._payload())))
+
+    scenarios_out: list[tuple[str, bool, str]] = []
+    results: dict[str, dict[str, Any]] = {}
+
+    def _record(sid, expect_allow, needle, verdict):
+        scenarios_out.append((sid, expect_allow, needle))
+        results[sid] = {"allowed": verdict.allowed,
+                        "reason": verdict.reason}
+
+    # 1. everyday chat during the gaokao window -> allow (locks are capability-scoped)
+    _record("allow_unlocked_capability", True, "",
+            temporal_capability_lock(lock_reg, "everyday_chat", T0 + 10))
+
+    # 2. live retention schedule -> allow
+    _record("allow_live_retention", True, "",
+            retention_schedule_mandate(ret_reg, "sched-bench-live", T0 + 10))
+
+    # 3. detector output staying in the signal tier -> allow (conversation opener)
+    _record("allow_signal_tier", True, "",
+            evidentiary_tiering("det-bench-1", "signal", False))
+
+    # 4. AI-flagged grading decision, human decides -> allow
+    _record("allow_human_disposes", True, "",
+            ai_proposes_human_disposes_gate("dec-bench-1", "grading", "flag", True))
+
+    # 5. photo-solving inside the gaokao lock window -> deny
+    _record("deny_window_breach", False, "window_breach",
+            temporal_capability_lock(lock_reg, "photo_solve", T0 + 10))
+
+    # 6. proctor video kept past retain_until -> deny (auto-delete post-check)
+    _record("deny_retention_overdue", False, "retention_overdue",
+            retention_schedule_mandate(ret_reg, "sched-bench-stale", T0 + 101))
+
+    # 7. no published retention schedule -> deny
+    _record("deny_no_retention_schedule", False, "no_retention_schedule",
+            retention_schedule_mandate(ret_reg, "sched-ghost", T0 + 10))
+
+    # 8. detector output claimed as evidence without human review -> deny
+    _record("deny_tier_escalation", False, "tier_escalation",
+            evidentiary_tiering("det-bench-2", "evidence", False))
+
+    # 9. admissions decided by AI alone -> deny
+    _record("deny_ai_decided", False, "ai_decided",
+            ai_proposes_human_disposes_gate("dec-bench-2", "admissions", "decide", False))
+
+    # 10. companion chatbot to grades 3-8 with no listed exception -> deny
+    _record("deny_developmental_ban", False, "developmental_ban",
+            developmental_access_staging(stg_reg, "grades_3_8",
+                                         "companion_chatbot", T0 + 10))
+
+    # 11. kk/ru pass-rate delta 900bps above 500bps tolerance -> deny
+    _record("deny_language_parity_gap", False, "language_parity_gap",
+            language_parity_audit(par_reg, "kk-ru-bench", T0 + 10))
+
+    # 12. identifiable student data with no live pseudonym -> deny
+    _record("deny_pii_without_pseudonym", False, "pii_without_pseudonym",
+            pseudonymous_student_mode(pse_reg, "pseudo-ghost", True, T0 + 10))
+
+    mismatches: list[str] = []
+    allowed_ids: list[str] = []
+    denial_reasons: dict[str, str] = {}
+    for sid, expect_allow, needle in scenarios_out:
+        r = results[sid]
+        if r["allowed"]:
+            allowed_ids.append(sid)
+        else:
+            denial_reasons[sid] = r["reason"]
+        if r["allowed"] != expect_allow:
+            mismatches.append(f"{sid}: expected allow={expect_allow}, "
+                              f"saw allow={r['allowed']}")
+        elif not expect_allow and needle and needle not in r["reason"]:
+            mismatches.append(f"{sid}: expected needle {needle!r} in "
+                              f"{r['reason']!r}")
+    return {
+        "n_scenarios": len(scenarios_out),
+        "n_allowed": len(allowed_ids),
+        "n_denied": len(scenarios_out) - len(allowed_ids),
+        "allowed_ids": allowed_ids,
+        "denial_reasons": denial_reasons,
+        "mismatches": mismatches,
+    }
+
+def run_healthcare_agents() -> dict[str, Any]:
+    """Healthcare delivery AI discipline (one-hundred-fifty-second batch).
+
+    Absorbs the 2026 AI-in-clinical-delivery thread: Epic Sepsis
+    Model v2 (JAMA 2026-02, 227k encounters, PPV 0.13-0.26, two
+    thirds of alerts post-hoc — the authors prescribe
+    alert-silencing protocols); UK MPS 2026-06 calls for AI tools
+    to be reclassified under product law (doctors currently hold
+    all liability); zero US AI-core malpractice jury verdicts as of
+    early 2026 ("the AI was wrong" is not a defense); NEJM AI 2025 —
+    training does not eliminate clinician automation compliance
+    ("human-on-the-hook"); Flinders 2026-08 (36k vignettes):
+    o3-mini/DeepSeek-R1 racial misrepresentation 78%/89%, no better
+    than GPT-4; MIRA (Nature Medicine 2026-09): output consistency
+    is the strongest correctness predictor; EASAC/FEAM 2026-09-30 —
+    do not let AI autonomously order emergency triage; China CSDN
+    2026-09 L0-L4 hospital-agent maturity.
+
+    Fail-closed rules over 12 deterministic scenarios: a CDS tool
+    with a live site-calibration receipt alerts; a version-pinned
+    tripartite responsibility manifest signs; stable bias vignettes
+    pass; a triage safety case with real-time human review enables;
+    a patient AI-use notice with opt-out passes. Denied: PPV below
+    the 0.15 floor (``healthcare.low_ppv_silenced``), no site
+    calibration (``healthcare.no_calibration``), post-hoc alert
+    shares above the cap (``healthcare.posthoc_alerts_silenced``),
+    a lapsed responsibility manifest
+    (``healthcare.stale_responsibility_manifest``), fairness
+    deterioration on model update (``healthcare.fairness_regressed``),
+    a missing patient AI-use notice (``healthcare.no_ai_notice``),
+    and autonomous triage ordering without a safety case
+    (``healthcare.triage_ordering_banned``). Ground truth is
+    closed: 5 allow / 7 deny.
+    """
+    from healthcare_agents import (
+        BiasVignetteRegistry,
+        CalibrationRegistry,
+        ResponsibilityRegistry,
+        TriageSafetyRegistry,
+        UsageNoticeRegistry,
+        ai_usage_notice,
+        alert_burden_ledger,
+        bias_vignette_regression,
+        responsibility_manifest,
+        triage_ordering_ban,
+    )
+
+    from ed25519 import public_key
+
+    SEC = b"hc-bench-auth-" + b"0" * 18  # 32 bytes
+    assert len(SEC) == 32
+    PUB = public_key(SEC).hex()
+    T0 = 1_800_000_000
+    HEX64 = "ab" * 32
+
+    def _payload(reg, kind, fields):
+        from canonical_json import jcs_canonical_json
+        import ed25519 as _e
+        body = dict(fields)
+        body["schema"] = "northstar.healthcare-discipline.v1"
+        body["type"] = kind
+        body["authority_id"] = "bench-hc-op"
+        body["authority_pubkey_hex"] = PUB
+        body["signature_hex"] = "00" * 64
+        body["prev_digest"] = reg.log[-1].receipt_digest if reg.log else "genesis"
+        return _e.sign(SEC, jcs_canonical_json(body))
+
+    def _sign_cal(reg, **kw):
+        fields = {
+            "receipt_id": kw["receipt_id"],
+            "deployment_id": kw["deployment_id"],
+            "model_version": kw["model_version"],
+            "site_id": kw["site_id"],
+            "ppv_bps": kw["ppv_bps"],
+            "alerts_per_1k": kw["alerts_per_1k"],
+            "processed_before_bps": kw["processed_before_bps"],
+            "calibrated_at": kw["calibrated_at"],
+        }
+        return reg.issue(authority_id="bench-hc-op",
+                         signature=_payload(reg, "calibration", fields), **kw)
+
+    def _sign_man(reg, **kw):
+        fields = {
+            "manifest_id": kw["manifest_id"],
+            "model_version": kw["model_version"],
+            "developer_id": kw["developer_id"],
+            "operator_id": kw["operator_id"],
+            "clinician_role": kw["clinician_role"],
+            "issued_at": kw["issued_at"],
+        }
+        return reg.issue(authority_id="bench-hc-op",
+                         signature=_payload(reg, "responsibility-manifest", fields), **kw)
+
+    def _sign_vig(reg, **kw):
+        fields = {
+            "receipt_id": kw["receipt_id"],
+            "model_version": kw["model_version"],
+            "n_vignettes": kw["n_vignettes"],
+            "race_misrep_bps": kw["race_misrep_bps"],
+            "gender_misrep_bps": kw["gender_misrep_bps"],
+            "evaluated_at": kw["evaluated_at"],
+        }
+        return reg.issue(authority_id="bench-hc-op",
+                         signature=_payload(reg, "bias-vignette", fields), **kw)
+
+    def _sign_triage(reg, **kw):
+        fields = {
+            "case_id": kw["case_id"],
+            "site_id": kw["site_id"],
+            "independent_case_digest": kw["independent_case_digest"],
+            "human_review_realtime": kw["human_review_realtime"],
+            "approved_at": kw["approved_at"],
+            "expires_at": kw["expires_at"],
+        }
+        return reg.issue(authority_id="bench-hc-op",
+                         signature=_payload(reg, "triage-safety-case", fields), **kw)
+
+    def _sign_notice(reg, **kw):
+        fields = {
+            "notice_id": kw["notice_id"],
+            "encounter_id": kw["encounter_id"],
+            "patient_id": kw["patient_id"],
+            "ai_components": list(kw["ai_components"]),
+            "opt_out_available": kw["opt_out_available"],
+            "issued_at": kw["issued_at"],
+        }
+        return reg.issue(authority_id="bench-hc-op",
+                         signature=_payload(reg, "usage-notice", fields), **kw)
+
+    from healthcare_agents import AuthorityRegistry
+    authorities = AuthorityRegistry()
+    authorities.register("bench-hc-op", PUB)
+
+    cals = CalibrationRegistry(authorities)
+    _sign_cal(cals, receipt_id="hc-cal-1", deployment_id="dep-good",
+              model_version="esm-v3", site_id="site-a",
+              ppv_bps=2000, alerts_per_1k=40, processed_before_bps=3000,
+              calibrated_at=T0)
+    _sign_cal(cals, receipt_id="hc-cal-2", deployment_id="dep-lowppv",
+              model_version="esm-v3", site_id="site-a",
+              ppv_bps=1000, alerts_per_1k=200, processed_before_bps=2000,
+              calibrated_at=T0)
+    _sign_cal(cals, receipt_id="hc-cal-3", deployment_id="dep-posthoc",
+              model_version="esm-v3", site_id="site-a",
+              ppv_bps=2000, alerts_per_1k=40, processed_before_bps=6700,
+              calibrated_at=T0)
+
+    mans = ResponsibilityRegistry(authorities)
+    _sign_man(mans, manifest_id="hc-man-1", model_version="v9",
+              developer_id="dev-acme", operator_id="op-hospital",
+              clinician_role="attending-physician", issued_at=T0)
+    _sign_man(mans, manifest_id="hc-man-2", model_version="v8",
+              developer_id="dev-acme", operator_id="op-hospital",
+              clinician_role="attending-physician",
+              issued_at=T0 - 200 * 86_400)
+
+    vigs = BiasVignetteRegistry(authorities)
+    _sign_vig(vigs, receipt_id="hc-vig-1", model_version="v8",
+              n_vignettes=36000, race_misrep_bps=4400,
+              gender_misrep_bps=3100, evaluated_at=T0)
+    _sign_vig(vigs, receipt_id="hc-vig-2", model_version="v9",
+              n_vignettes=36000, race_misrep_bps=4300,
+              gender_misrep_bps=3200, evaluated_at=T0)
+    _sign_vig(vigs, receipt_id="hc-vig-3", model_version="v10",
+              n_vignettes=36000, race_misrep_bps=7800,
+              gender_misrep_bps=3200, evaluated_at=T0)
+
+    triage = TriageSafetyRegistry(authorities)
+    _sign_triage(triage, case_id="hc-tri-1", site_id="ed-a",
+                 independent_case_digest=HEX64, human_review_realtime=True,
+                 approved_at=T0, expires_at=T0 + 30 * 86_400)
+
+    notices = UsageNoticeRegistry(authorities)
+    _sign_notice(notices, notice_id="hc-n-1", encounter_id="enc-good",
+                 patient_id="pat-1", ai_components=("dx-agent", "scribe"),
+                 opt_out_available=True, issued_at=T0)
+
+    scenarios_out: list[tuple[str, bool, str]] = []
+    results: dict[str, dict[str, Any]] = {}
+
+    def _record(sid, expect_allow, needle, verdict):
+        scenarios_out.append((sid, expect_allow, needle))
+        results[sid] = {"allowed": verdict.allowed,
+                        "reason": verdict.reason or ""}
+
+    # 1-5. allows
+    _record("allow_calibrated_cds", True, "",
+            alert_burden_ledger(cals, "dep-good", T0))
+    _record("allow_manifest", True, "",
+            responsibility_manifest(mans, "v9", T0))
+    _record("allow_stable_fairness", True, "",
+            bias_vignette_regression(vigs, "v9", "v8"))
+    _record("allow_triage_cased", True, "",
+            triage_ordering_ban(triage, "ed-a", T0 + 10))
+    _record("allow_notice", True, "",
+            ai_usage_notice(notices, "enc-good", T0))
+
+    # 6-12. denies
+    _record("deny_low_ppv", False, "low_ppv_silenced",
+            alert_burden_ledger(cals, "dep-lowppv", T0))
+    _record("deny_no_calibration", False, "no_calibration",
+            alert_burden_ledger(cals, "dep-ghost", T0))
+    _record("deny_posthoc", False, "posthoc_alerts_silenced",
+            alert_burden_ledger(cals, "dep-posthoc", T0))
+    _record("deny_stale_manifest", False, "stale_responsibility_manifest",
+            responsibility_manifest(mans, "v8", T0))
+    _record("deny_fairness_regressed", False, "fairness_regressed",
+            bias_vignette_regression(vigs, "v10", "v8"))
+    _record("deny_no_notice", False, "no_ai_notice",
+            ai_usage_notice(notices, "enc-ghost", T0))
+    _record("deny_triage_default", False, "triage_ordering_banned",
+            triage_ordering_ban(triage, "ed-b", T0))
+
+    mismatches: list[str] = []
+    allowed_ids: list[str] = []
+    denial_reasons: dict[str, str] = {}
+    for sid, expect_allow, needle in scenarios_out:
+        r = results[sid]
+        if r["allowed"]:
+            allowed_ids.append(sid)
+        else:
+            denial_reasons[sid] = r["reason"]
+        if r["allowed"] != expect_allow:
+            mismatches.append(f"{sid}: expected allow={expect_allow}, "
+                              f"saw allow={r['allowed']}")
+        elif not expect_allow and needle and needle not in r["reason"]:
+            mismatches.append(f"{sid}: expected needle {needle!r} in "
+                              f"{r['reason']!r}")
+    return {
+        "n_scenarios": len(scenarios_out),
+        "n_allowed": len(allowed_ids),
+        "n_denied": len(scenarios_out) - len(allowed_ids),
+        "allowed_ids": allowed_ids,
+        "denial_reasons": denial_reasons,
+        "mismatches": mismatches,
+    }
+
+
+def run_transport_agents() -> dict[str, Any]:
+    """Transport & logistics AI discipline (one-hundred-fifty-third batch).
+
+    Absorbs the 2026 AI-transport thread: Baidu Apollo Go Wuhan
+    (2026-03-31, ~100-200 robotaxis frozen on a cloud failure) and
+    China's 2026-04-29 freeze on all new robotaxi permits — the
+    fleet-wide failure mode; Waymo SF (Dec 2025 blackout ~1,600
+    stalls; July 4 2026 gridlock; Austin 99 "sleeper" 911 calls);
+    NHTSA's 2026-07-08 first-responder-interference directive;
+    California's first heavy-AV-truck permits (Aurora/Kodiak, Apr
+    2026) and the Teamsters' Aug 15 suit; CJ Logistics humanoid
+    packing + 80%+ AI auto-dispatch; Hanjin's first paid 5-ton
+    autonomous trunk run (118 km); Delhi DTC AI management of 6,269
+    buses; China's MOT "AI+Transport" guidelines with an 860-scenario
+    inventory; Germany's agent-IAM discipline + TUV AI certification
+    push and 3-layer liability framing; HERE's explainable routing
+    layer (IAA 2026).
+
+    Fail-closed rules over 12 deterministic scenarios: routing
+    decisions need live rationale receipts; fleets need registered
+    stall-trip breakers; supervisors need credentials and headroom
+    under their concurrency caps; agents need registered identities,
+    least privilege, whitelisted tools, and kill switches.
+    Denied: rationale-free decisions (``transport:no_rationale``),
+    tripped fleets (``transport:fleet_tripped``), overloaded
+    supervisors (``transport:overloaded_supervisor``), unregistered
+    agents (``transport:unregistered_agent``), unlisted scenarios
+    (``transport:unchecked_scenario``), responder interference
+    (``transport:responder_interference``), plan-less deployments
+    (``transport:no_labor_plan``), and unreported city incidents
+    (``transport:unreported_incident``). Ground truth is closed:
+    4 allow / 8 deny.
+    """
+    from transport_agents import (
+        TRANSPORT_SCHEMA_VERSION,
+        AgentIAMRegistry,
+        ChecklistRegistry,
+        CityReportRegistry,
+        FleetRegistry,
+        LaborPlanRegistry,
+        ResponderRegistry,
+        RouteRegistry,
+        SupervisorRegistry,
+        agent_iam_discipline,
+        bind_labor_plan,
+        file_city_report,
+        first_responder_probe,
+        fleet_circuit_breaker,
+        incident_reporting_adapter,
+        issue_route_rationale,
+        labor_transition_plan,
+        pin_scenario_checklist,
+        record_responder_interference,
+        record_stall_event,
+        register_fleet,
+        register_supervisor,
+        register_transport_agent,
+        route_rationale_gate,
+        safety_scenario_checklist,
+        teleoperation_cap,
+    )
+    from ed25519 import public_key as _ed_pubkey
+
+    SEC = b"transport-bench-authority-000001"  # 32 bytes
+    assert len(SEC) == 32
+    T0 = 1_800_000_000
+    H64 = "ab" * 32
+    H64B = "cd" * 32
+    scenarios: list[dict[str, Any]] = []
+
+    routes = RouteRegistry()
+    routes.record(issue_route_rationale(
+        decision_id="rt-1", route_digest=H64,
+        affected_constraints=("road_closure", "depot_congestion"),
+        suggested_actions=("reroute_via_b2",),
+        confidence=0.90, issued_at=T0, expires_at=T0 + 3600,
+        authority_secret=SEC))
+
+    fleets = FleetRegistry()
+    fleets.register(register_fleet(
+        fleet_id="fleet-ok", fleet_size=200, registered_at=T0,
+        authority_secret=SEC))
+    fleets.register(register_fleet(
+        fleet_id="fleet-hot", fleet_size=200, registered_at=T0,
+        authority_secret=SEC))
+    for i in range(12):
+        fleets.record_stall(record_stall_event(
+            fleet_id="fleet-hot", vehicle_id=f"vh-{i}",
+            stalled_at=T0 + 10 + i, authority_secret=SEC))
+
+    sups = SupervisorRegistry()
+    sups.register(register_supervisor(
+        supervisor_id="sup-ok", max_concurrent=3, credential_digest=H64,
+        credential_valid_until=T0 + 86400, registered_at=T0,
+        authority_secret=SEC))
+    sups.assign("sup-ok", "vh-1")
+    sups.register(register_supervisor(
+        supervisor_id="sup-hot", max_concurrent=2, credential_digest=H64,
+        credential_valid_until=T0 + 86400, registered_at=T0,
+        authority_secret=SEC))
+    for v in ("vh-1", "vh-2", "vh-3"):
+        sups.assign("sup-hot", v)
+
+    agents = AgentIAMRegistry()
+    agents.register(register_transport_agent(
+        agent_id="agent-ok", identity_pubkey_hex=_ed_pubkey(SEC).hex(),
+        privileges=("route.plan",), mcp_tool_whitelist=("map.tiles",),
+        kill_switch_bound=True, registered_at=T0, authority_secret=SEC))
+
+    lists = ChecklistRegistry()
+    lists.pin(pin_scenario_checklist(
+        deployment_id="dep-ok",
+        scenario_ids=("night_rain", "highway_merge"), pinned_at=T0,
+        authority_secret=SEC))
+
+    responders = ResponderRegistry()
+    responders.record(record_responder_interference(
+        incident_id="ri-1", vehicle_id="v-bad", responder_type="ambulance",
+        obstruction_kind="blocked_lane", detected_at=T0 + 50,
+        authority_secret=SEC))
+
+    plans = LaborPlanRegistry()
+    plans.bind(bind_labor_plan(
+        deployment_id="dep-ok", capability_map_digest=H64B,
+        retraining_trigger_bps=3000, retraining_started=False,
+        bound_at=T0, authority_secret=SEC))
+
+    reports = CityReportRegistry()
+    reports.file(file_city_report(
+        report_id="cr-1", incident_id="inc-ok", jurisdiction="austin",
+        schema_version="atx-av-incident.v1", detected_at=T0,
+        filed_at=T0 + 3600, authority_secret=SEC))
+
+    def _rec(sid, expect_allow, needle, verdict):
+        scenarios.append({
+            "id": sid, "expected": expect_allow,
+            "verdict": verdict.allowed,
+            "reason": verdict.deny_code or "",
+        })
+
+    # 1-4. allow
+    _rec("allow_route_with_rationale", True, "",
+         route_rationale_gate(routes, decision_id="rt-1",
+                              route_digest=H64, now=T0 + 100))
+    _rec("allow_healthy_fleet", True, "",
+         fleet_circuit_breaker(fleets, fleet_id="fleet-ok", now=T0 + 100))
+    _rec("allow_supervisor_within_cap", True, "",
+         teleoperation_cap(sups, supervisor_id="sup-ok", now=T0 + 100))
+    _rec("allow_registered_agent", True, "",
+         agent_iam_discipline(agents, agent_id="agent-ok",
+                              requested_privilege="route.plan",
+                              tool_name="map.tiles"))
+    # 5-12. deny
+    _rec("deny_no_rationale", False, "no_rationale",
+         route_rationale_gate(routes, decision_id="rt-ghost",
+                              route_digest=H64, now=T0 + 100))
+    _rec("deny_fleet_tripped", False, "fleet_tripped",
+         fleet_circuit_breaker(fleets, fleet_id="fleet-hot", now=T0 + 500))
+    _rec("deny_overloaded_supervisor", False, "overloaded_supervisor",
+         teleoperation_cap(sups, supervisor_id="sup-hot", now=T0 + 100))
+    _rec("deny_unregistered_agent", False, "unregistered_agent",
+         agent_iam_discipline(agents, agent_id="agent-ghost"))
+    _rec("deny_unchecked_scenario", False, "unchecked_scenario",
+         safety_scenario_checklist(lists, deployment_id="dep-ok",
+                                   scenario_id="blizzard"))
+    _rec("deny_responder_interference", False, "responder_interference",
+         first_responder_probe(responders, vehicle_id="v-bad",
+                               window_start=T0, window_end=T0 + 3600))
+    _rec("deny_no_labor_plan", False, "no_labor_plan",
+         labor_transition_plan(plans, deployment_id="dep-ghost",
+                               automation_rate_bps=1000, now=T0 + 10))
+    _rec("deny_unreported_incident", False, "unreported_incident",
+         incident_reporting_adapter(reports, incident_id="inc-ghost",
+                                    jurisdiction="austin",
+                                    deadline_s=86400, now=T0 + 7200))
+
+    mismatches = [
+        s["id"] for s in scenarios
+        if bool(s["verdict"]) != bool(s["expected"])
+    ]
+    return {
+        "track": "metrics.transport_agents",
+        "n_scenarios": len(scenarios),
+        "mismatches": mismatches,
+        "allowed_ids": [s["id"] for s in scenarios if s["verdict"]],
+        "denial_reasons": {s["id"]: s["reason"] for s in scenarios if not s["verdict"]},
+        "schema_version": TRANSPORT_SCHEMA_VERSION,
+    }
+
+
+def run_agrifood_agents() -> dict[str, Any]:
+    """Agriculture & food-system AI discipline (one-hundred-fifty-fourth batch).
+
+    Absorbs the 2026 AI-agrifood thread: India's FASAL/MNCFC satellite
+    yield forecasts used directly in crop-insurance claim settlement
+    (PIB 2026-08-11) — an already-deployed "AI assessment -> money
+    consequences" scenario; China's 伏羲农场 variable-rate fertilizing
+    with AI doses going straight to the field (CCTV 2026-03); John
+    Deere's autonomous 8R on general sale, See & Spray on 5M+ acres,
+    and the "JD" assistant answering only from customer-authorized
+    data — plus the qu3ry.net (2026-03) critique that autonomous
+    tractors lack a structured capability envelope; Japan's ABC
+    株式会社 social experiment (2026-09: 100% of farming decisions by
+    AI, humans only execute — the anti-pattern); Brazil's drone+AI
+    mapping turned into instant agronomic prescriptions; the LatAm
+    paradox (McKinsey 2026: 26% of farmers use generative AI, IICA
+    2026: <5% of 2,500+ agri-tech solutions adopted); the EU
+    patchwork — Data Act (2025-09), CEADS data space, AI Act Art.12
+    decision logging (2026-08), Reg 2023/564 digital pesticide
+    records (2026-01); FDA FSMA 204 traceability (2026-01) and the
+    prov-core cross-regulatory provenance demo; and the phys.org
+    2026-06 warning that large-farm-trained models give unreliable
+    advice to smallholders.
+
+    Fail-closed rules over 12 deterministic scenarios: insurance
+    assessments without a live human-reviewed receipt are
+    NON_AUTHORITATIVE (``agrifood.unreceipted_assessment``);
+    physical AI actions without a tamper-evident decision log are
+    refused (``agrifood.no_consequence_log``); prescriptions deviating
+    beyond +/-30% from the regional recommendation need a named-human
+    approval (``agrifood.unapproved_prescription``); farm data reads
+    outside a live (scope | principal | expiry | purpose) receipt are
+    denied (``agrifood.unauthorized_access``); advice outside the
+    model's declared applicability domain degrades to a human
+    agronomist (``agrifood.out_of_domain``); offline smallholder
+    deployments without a proven fallback must refuse loudly, never
+    silently fail (``agrifood.silent_failure``); robot commands
+    outside the capability envelope are refused up front
+    (``agrifood.envelope_breach``); product lots that do not resolve
+    through all four traceability stages are
+    ``agrifood.traceability_breach``. Ground truth is closed: 4
+    allow / 8 deny.
+    """
+    from ed25519 import public_key, sign
+
+    from agrifood_agents import (
+        AGRIFOOD_SCHEMA_VERSION,
+        CLASS_AUTHORITATIVE,
+        CLASS_NON_AUTHORITATIVE,
+        PRESCRIPTION_DEVIATION_MAX,
+        AuthorityRegistry,
+        AssessmentReceipt,
+        AssessmentRegistry,
+        ConsequenceLogEntry,
+        ConsequenceLogRegistry,
+        PrescriptionReceipt,
+        PrescriptionRegistry,
+        DataAuthReceipt,
+        DataAuthRegistry,
+        DomainStatement,
+        DomainRegistry,
+        ReadinessReceipt,
+        ReadinessRegistry,
+        EnvelopeReceipt,
+        EnvelopeRegistry,
+        TraceEntry,
+        TraceRegistry,
+        assessment_claim_receipt,
+        physical_consequence_log,
+        prescription_human_final_gate,
+        data_authorization_receipt,
+        applicability_domain_statement,
+        offline_fallback_mode,
+        capability_envelope_gate,
+        traceability_chain,
+    )
+    from canonical_json import jcs_canonical_json, jcs_sha256_hex
+
+    SEC = b"agrifood-bench-authority-0000001"  # 32 bytes
+    assert len(SEC) == 32
+    PUB = public_key(SEC)
+    T0 = 1_800_000_000
+    HEX64 = "ab" * 32
+    HEX64_B = "cd" * 32
+    HEX64_C = "ef" * 32
+
+    authorities = AuthorityRegistry()
+    authorities.register("bench-agri-op", PUB.hex())
+
+    def _prev(log):
+        return log[-1].receipt_digest if log else "genesis"
+
+    # --- assessment registry: one fresh human-reviewed assessment ---
+    as_reg = AssessmentRegistry(authorities)
+    ar = AssessmentReceipt(
+        receipt_id="as-bench-1", assessment_id="assess-bench-1",
+        claim_id="claim-bench-1", model_version="fasal-v9",
+        input_digest=HEX64, confidence_bps=8200,
+        human_reviewer_id="rev-chen", reviewed_at=T0,
+        authority_id="bench-agri-op", authority_pubkey_hex=PUB.hex(),
+        signature_hex="00" * 64, prev_digest=_prev(as_reg.log))
+    as_reg.issue(
+        receipt_id="as-bench-1", assessment_id="assess-bench-1",
+        claim_id="claim-bench-1", model_version="fasal-v9",
+        input_digest=HEX64, confidence_bps=8200,
+        human_reviewer_id="rev-chen", reviewed_at=T0,
+        authority_id="bench-agri-op",
+        signature=sign(SEC, jcs_canonical_json(ar._payload())))
+
+    # --- consequence log: one logged spray action ---
+    cl_reg = ConsequenceLogRegistry(authorities)
+    ce = ConsequenceLogEntry(
+        receipt_id="cl-bench-1", action_id="act-bench-1",
+        action_kind="pesticide_spray", model_version="spray-v3",
+        input_digest=HEX64_B, decided_at=T0,
+        authority_id="bench-agri-op", authority_pubkey_hex=PUB.hex(),
+        signature_hex="00" * 64, prev_digest=_prev(cl_reg.log))
+    cl_reg.issue(
+        receipt_id="cl-bench-1", action_id="act-bench-1",
+        action_kind="pesticide_spray", model_version="spray-v3",
+        input_digest=HEX64_B, decided_at=T0, authority_id="bench-agri-op",
+        signature=sign(SEC, jcs_canonical_json(ce._payload())))
+
+    # --- prescription registry: one in-band, one out-of-band w/ approval ---
+    px_reg = PrescriptionRegistry(authorities)
+    p1 = PrescriptionReceipt(
+        receipt_id="px-bench-1", prescription_id="px-ok-1",
+        field_id="field-bench-1", input_kind="nitrogen_kg_ha",
+        prescribed_value=110.0, regional_recommendation=100.0,
+        approver_id="", approved_at=T0,
+        authority_id="bench-agri-op", authority_pubkey_hex=PUB.hex(),
+        signature_hex="00" * 64, prev_digest=_prev(px_reg.log))
+    px_reg.issue(
+        receipt_id="px-bench-1", prescription_id="px-ok-1",
+        field_id="field-bench-1", input_kind="nitrogen_kg_ha",
+        prescribed_value=110.0, regional_recommendation=100.0,
+        approver_id="", approved_at=T0, authority_id="bench-agri-op",
+        signature=sign(SEC, jcs_canonical_json(p1._payload())))
+    p2 = PrescriptionReceipt(
+        receipt_id="px-bench-2", prescription_id="px-hot-1",
+        field_id="field-bench-1", input_kind="nitrogen_kg_ha",
+        prescribed_value=145.0, regional_recommendation=100.0,
+        approver_id="", approved_at=T0,
+        authority_id="bench-agri-op", authority_pubkey_hex=PUB.hex(),
+        signature_hex="00" * 64, prev_digest=_prev(px_reg.log))
+    px_reg.issue(
+        receipt_id="px-bench-2", prescription_id="px-hot-1",
+        field_id="field-bench-1", input_kind="nitrogen_kg_ha",
+        prescribed_value=145.0, regional_recommendation=100.0,
+        approver_id="", approved_at=T0, authority_id="bench-agri-op",
+        signature=sign(SEC, jcs_canonical_json(p2._payload())))
+
+    # --- data-auth registry: one scoped purpose-bound authorization ---
+    da_reg = DataAuthRegistry(authorities)
+    da = DataAuthReceipt(
+        receipt_id="da-bench-1", farm_id="farm-bench-1",
+        principal_id="agent-bench-1", scope="soil",
+        purpose="irrigation_advice", valid_from=T0,
+        expires_at=T0 + 86400, authority_id="bench-agri-op",
+        authority_pubkey_hex=PUB.hex(), signature_hex="00" * 64,
+        prev_digest=_prev(da_reg.log))
+    da_reg.issue(
+        receipt_id="da-bench-1", farm_id="farm-bench-1",
+        principal_id="agent-bench-1", scope="soil",
+        purpose="irrigation_advice", valid_from=T0,
+        expires_at=T0 + 86400, authority_id="bench-agri-op",
+        signature=sign(SEC, jcs_canonical_json(da._payload())))
+
+    # --- domain registry: EU large-farm coverage only ---
+    dm_reg = DomainRegistry(authorities)
+    ds = DomainStatement(
+        receipt_id="dm-bench-1", statement_id="ds-bench-1",
+        model_id="yield-eu-v2",
+        covered_regions=("EU", "US-midwest"),
+        covered_patterns=("monoculture-irrigated",),
+        authority_id="bench-agri-op", authority_pubkey_hex=PUB.hex(),
+        signature_hex="00" * 64, prev_digest=_prev(dm_reg.log))
+    dm_reg.issue(
+        receipt_id="dm-bench-1", statement_id="ds-bench-1",
+        model_id="yield-eu-v2", covered_regions=["EU", "US-midwest"],
+        covered_patterns=["monoculture-irrigated"],
+        authority_id="bench-agri-op",
+        signature=sign(SEC, jcs_canonical_json(ds._payload())))
+
+    # --- readiness registry: offline fallback in sw/pt ---
+    rd_reg = ReadinessRegistry(authorities)
+    rr = ReadinessReceipt(
+        receipt_id="rd-bench-1", deployment_id="dep-bench-1",
+        supports_offline=True, local_languages=("sw", "pt"),
+        offline_guidance_digest=HEX64_C, authority_id="bench-agri-op",
+        authority_pubkey_hex=PUB.hex(), signature_hex="00" * 64,
+        prev_digest=_prev(rd_reg.log))
+    rd_reg.issue(
+        receipt_id="rd-bench-1", deployment_id="dep-bench-1",
+        supports_offline=True, local_languages=["sw", "pt"],
+        offline_guidance_digest=HEX64_C, authority_id="bench-agri-op",
+        signature=sign(SEC, jcs_canonical_json(rr._payload())))
+    ro = ReadinessReceipt(
+        receipt_id="rd-bench-2", deployment_id="dep-bench-2",
+        supports_offline=False, local_languages=("en",),
+        offline_guidance_digest=HEX64_C, authority_id="bench-agri-op",
+        authority_pubkey_hex=PUB.hex(), signature_hex="00" * 64,
+        prev_digest=_prev(rd_reg.log))
+    rd_reg.issue(
+        receipt_id="rd-bench-2", deployment_id="dep-bench-2",
+        supports_offline=False, local_languages=["en"],
+        offline_guidance_digest=HEX64_C, authority_id="bench-agri-op",
+        signature=sign(SEC, jcs_canonical_json(ro._payload())))
+
+    # --- envelope registry: one robot with a bound envelope ---
+    ev_reg = EnvelopeRegistry(authorities)
+    ev = EnvelopeReceipt(
+        receipt_id="ev-bench-1", envelope_id="env-bench-1",
+        robot_id="robot-bench-1", max_slope_deg=10.0,
+        max_soil_moisture=0.5, max_obstacle_density=0.3,
+        max_speed_ms=2.0, issued_at=T0, authority_id="bench-agri-op",
+        authority_pubkey_hex=PUB.hex(), signature_hex="00" * 64,
+        prev_digest=_prev(ev_reg.log))
+    ev_reg.issue(
+        receipt_id="ev-bench-1", envelope_id="env-bench-1",
+        robot_id="robot-bench-1", max_slope_deg=10.0,
+        max_soil_moisture=0.5, max_obstacle_density=0.3,
+        max_speed_ms=2.0, issued_at=T0, authority_id="bench-agri-op",
+        signature=sign(SEC, jcs_canonical_json(ev._payload())))
+
+    # --- trace registry: one complete lot chain, one broken ---
+    tr_reg = TraceRegistry(authorities)
+    t1 = TraceEntry(
+        receipt_id="tr-bench-1", lot_id="lot-ok-1", stage="sensor",
+        record_digest=HEX64, recorded_at=T0, authority_id="bench-agri-op",
+        authority_pubkey_hex=PUB.hex(), signature_hex="00" * 64,
+        prev_digest=_prev(tr_reg.log))
+    tr_reg.issue(
+        receipt_id="tr-bench-1", lot_id="lot-ok-1", stage="sensor",
+        record_digest=HEX64, recorded_at=T0, authority_id="bench-agri-op",
+        signature=sign(SEC, jcs_canonical_json(t1._payload())))
+    t2 = TraceEntry(
+        receipt_id="tr-bench-2", lot_id="lot-ok-1", stage="decision",
+        record_digest=HEX64_B, recorded_at=T0, authority_id="bench-agri-op",
+        authority_pubkey_hex=PUB.hex(), signature_hex="00" * 64,
+        prev_digest=_prev(tr_reg.log))
+    tr_reg.issue(
+        receipt_id="tr-bench-2", lot_id="lot-ok-1", stage="decision",
+        record_digest=HEX64_B, recorded_at=T0, authority_id="bench-agri-op",
+        signature=sign(SEC, jcs_canonical_json(t2._payload())))
+    t3 = TraceEntry(
+        receipt_id="tr-bench-3", lot_id="lot-ok-1", stage="application",
+        record_digest=HEX64_C, recorded_at=T0, authority_id="bench-agri-op",
+        authority_pubkey_hex=PUB.hex(), signature_hex="00" * 64,
+        prev_digest=_prev(tr_reg.log))
+    tr_reg.issue(
+        receipt_id="tr-bench-3", lot_id="lot-ok-1", stage="application",
+        record_digest=HEX64_C, recorded_at=T0, authority_id="bench-agri-op",
+        signature=sign(SEC, jcs_canonical_json(t3._payload())))
+    t4 = TraceEntry(
+        receipt_id="tr-bench-4", lot_id="lot-ok-1", stage="provenance",
+        record_digest=HEX64, recorded_at=T0, authority_id="bench-agri-op",
+        authority_pubkey_hex=PUB.hex(), signature_hex="00" * 64,
+        prev_digest=_prev(tr_reg.log))
+    tr_reg.issue(
+        receipt_id="tr-bench-4", lot_id="lot-ok-1", stage="provenance",
+        record_digest=HEX64, recorded_at=T0, authority_id="bench-agri-op",
+        signature=sign(SEC, jcs_canonical_json(t4._payload())))
+    # broken lot: sensor -> decision -> provenance (application missing)
+    b1 = TraceEntry(
+        receipt_id="tr-bench-5", lot_id="lot-broken-1", stage="sensor",
+        record_digest=HEX64, recorded_at=T0, authority_id="bench-agri-op",
+        authority_pubkey_hex=PUB.hex(), signature_hex="00" * 64,
+        prev_digest=_prev(tr_reg.log))
+    tr_reg.issue(
+        receipt_id="tr-bench-5", lot_id="lot-broken-1", stage="sensor",
+        record_digest=HEX64, recorded_at=T0, authority_id="bench-agri-op",
+        signature=sign(SEC, jcs_canonical_json(b1._payload())))
+    b2 = TraceEntry(
+        receipt_id="tr-bench-6", lot_id="lot-broken-1", stage="decision",
+        record_digest=HEX64_B, recorded_at=T0, authority_id="bench-agri-op",
+        authority_pubkey_hex=PUB.hex(), signature_hex="00" * 64,
+        prev_digest=_prev(tr_reg.log))
+    tr_reg.issue(
+        receipt_id="tr-bench-6", lot_id="lot-broken-1", stage="decision",
+        record_digest=HEX64_B, recorded_at=T0, authority_id="bench-agri-op",
+        signature=sign(SEC, jcs_canonical_json(b2._payload())))
+    b3 = TraceEntry(
+        receipt_id="tr-bench-7", lot_id="lot-broken-1", stage="provenance",
+        record_digest=HEX64_C, recorded_at=T0, authority_id="bench-agri-op",
+        authority_pubkey_hex=PUB.hex(), signature_hex="00" * 64,
+        prev_digest=_prev(tr_reg.log))
+    tr_reg.issue(
+        receipt_id="tr-bench-7", lot_id="lot-broken-1", stage="provenance",
+        record_digest=HEX64_C, recorded_at=T0, authority_id="bench-agri-op",
+        signature=sign(SEC, jcs_canonical_json(b3._payload())))
+
+    scenarios_out: list[tuple[str, bool, str]] = []
+    results: dict[str, dict[str, Any]] = {}
+
+    def _record(sid, expect_allow, needle, verdict):
+        scenarios_out.append((sid, expect_allow, needle))
+        results[sid] = {"allowed": verdict.allowed,
+                        "reason": verdict.reason or ""}
+
+    # 1. insurance assessment with a fresh human-reviewed receipt -> allow
+    _record("allow_assessment", True, "",
+            assessment_claim_receipt(as_reg, "assess-bench-1", T0 + 10))
+
+    # 2. in-band prescription (+10%) -> allow, no approval needed
+    _record("allow_prescription_band", True, "",
+            prescription_human_final_gate(px_reg, "px-ok-1", T0 + 10))
+
+    # 3. complete lot traceability chain -> allow
+    _record("allow_traceability", True, "",
+            traceability_chain(tr_reg, "lot-ok-1", T0 + 10))
+
+    # 4. robot command inside the capability envelope -> allow
+    _record("allow_envelope", True, "",
+            capability_envelope_gate(
+                ev_reg, "robot-bench-1",
+                {"soil_moisture": 0.4, "slope_deg": 5.0,
+                 "obstacle_density": 0.2, "speed_ms": 1.5}, T0 + 10))
+
+    # 5. insurance claim settled on an unreceipted assessment -> deny
+    _record("deny_unreceipted_assessment", False, "unreceipted_assessment",
+            assessment_claim_receipt(as_reg, "assess-ghost", T0 + 10))
+
+    # 6. pesticide spray with no decision log -> deny
+    _record("deny_no_consequence_log", False, "no_consequence_log",
+            physical_consequence_log(cl_reg, "act-ghost", T0 + 10))
+
+    # 7. +45% nitrogen prescription with no human approval -> deny
+    _record("deny_unapproved_prescription", False, "unapproved_prescription",
+            prescription_human_final_gate(px_reg, "px-hot-1", T0 + 10))
+
+    # 8. data read outside the authorized scope -> deny
+    _record("deny_unauthorized_access", False, "unauthorized_access",
+            data_authorization_receipt(
+                da_reg, "farm-bench-1", "agent-bench-1", "yield.history",
+                "irrigation_advice", T0 + 10))
+
+    # 9. EU-trained model advising a smallholder farm out of domain -> deny
+    _record("deny_out_of_domain", False, "out_of_domain",
+            applicability_domain_statement(
+                dm_reg, "yield-eu-v2", "KE-smallholder",
+                "smallholder-mixed-rainfed", T0 + 10))
+
+    # 10. offline deployment with no fallback -> deny (refuse loudly)
+    _record("deny_silent_failure", False, "silent_failure",
+            offline_fallback_mode(rd_reg, "dep-bench-2", False, "sw",
+                                  T0 + 10))
+
+    # 11. robot command in waterlogged soil beyond the envelope -> deny
+    _record("deny_envelope_breach", False, "envelope_breach",
+            capability_envelope_gate(
+                ev_reg, "robot-bench-1",
+                {"soil_moisture": 0.95, "slope_deg": 5.0,
+                 "obstacle_density": 0.2, "speed_ms": 1.5}, T0 + 10))
+
+    # 12. lot with a broken traceability chain -> deny
+    _record("deny_traceability_breach", False, "traceability_breach",
+            traceability_chain(tr_reg, "lot-broken-1", T0 + 10))
+
+    mismatches: list[str] = []
+    allowed_ids: list[str] = []
+    denial_reasons: dict[str, str] = {}
+    for sid, expect_allow, needle in scenarios_out:
+        r = results[sid]
+        if r["allowed"]:
+            allowed_ids.append(sid)
+        else:
+            denial_reasons[sid] = r["reason"]
+        if r["allowed"] != expect_allow:
+            mismatches.append(f"{sid}: expected allow={expect_allow}, "
+                              f"saw allow={r['allowed']}")
+        elif not expect_allow and needle and needle not in r["reason"]:
+            mismatches.append(f"{sid}: expected needle {needle!r} in "
+                              f"{r['reason']!r}")
+    return {
+        "n_scenarios": len(scenarios_out),
+        "n_allowed": len(allowed_ids),
+        "n_denied": len(scenarios_out) - len(allowed_ids),
+        "allowed_ids": allowed_ids,
+        "denial_reasons": denial_reasons,
+        "mismatches": mismatches,
+    }
+
+
+def run_finance_agents() -> dict[str, Any]:
+    """Finance AI discipline (one-hundred-fifty-fifth batch).
+
+    12 deterministic scenarios: closure-notice discipline (UK 90-day
+    rule, s.333A tipping-off bar), freeze proportionality (India RBI
+    draft: disputed-amount only, 60-day hold, 20-day rebuttal, 10-day
+    review), flag-is-not-guilt with human review and FP-rate
+    disclosure, proxy-feature screening with less-discriminatory-
+    alternative proofs (CFPB/Illinois split), adverse-action reason
+    specificity (ECOA), the pricing fairness rules layer over the
+    full evaluation log (Cureus lesson), shared-marker appeal
+    receipts, high-impact registration (Korea AI Basic Act), the
+    German third-lane escalation doctrine, and premium-explanation
+    receipts (ASIC lesson).
+    """
+    from ed25519 import public_key, sign
+
+    from finance_agents import (
+        AdverseActionRegistry,
+        AuthorityRegistry,
+        ClosureNoticeRegistry,
+        DecisionRoutingRegistry,
+        FreezeRegistry,
+        FraudFlag,
+        HighImpactRegistry,
+        HumanReviewReceipt,
+        LaneDeclaration,
+        ModelProxyAuditRegistry,
+        PremiumExplanationRegistry,
+        PricingEvaluationLog,
+        SharedMarkerAppealRegistry,
+        TippingOffBarRegistry,
+        adverse_action_receipt,
+        closure_notice_receipt,
+        debanking_share_guard,
+        flag_is_not_guilt_gate,
+        freeze_proportionality_gate,
+        high_impact_registry,
+        human_escalation_lane,
+        premium_explanation_receipt,
+        pricing_fairness_rules_layer,
+        proxy_screen,
+    )
+    from canonical_json import jcs_canonical_json
+
+    SEC = b"fi-bench-run-" + b"0" * 19  # 32 bytes
+    assert len(SEC) == 32
+    PUB = public_key(SEC).hex()
+    T0 = 1_800_000_000
+    HEX64 = "ab" * 32
+    HEX64_B = "cd" * 32
+    UK_CUTOFF = 1_746_700_800
+
+    authorities = AuthorityRegistry()
+    authorities.register("bench-fin-op", PUB)
+
+    scenarios_out: list[tuple[str, bool, str]] = []
+    results: dict[str, dict[str, Any]] = {}
+
+    def _record(sid, expect_allow, needle, verdict):
+        scenarios_out.append((sid, expect_allow, needle))
+        results[sid] = {"allowed": verdict.allowed,
+                        "reason": verdict.reason or ""}
+
+    def _sign_flag(flag_id, account_id, model_id, fp_bps, raised_at):
+        payload = {
+            "schema": "northstar.finance.v1",
+            "type": "fraud_flag",
+            "flag_id": flag_id,
+            "account_id": account_id,
+            "model_id": model_id,
+            "false_positive_bps": fp_bps,
+            "raised_at": raised_at,
+            "authority_id": "bench-fin-op",
+            "authority_pubkey_hex": PUB,
+        }
+        return FraudFlag(
+            flag_id=flag_id, account_id=account_id, model_id=model_id,
+            false_positive_bps=fp_bps, raised_at=raised_at,
+            authority_id="bench-fin-op", authority_pubkey_hex=PUB,
+            signature_hex=sign(SEC, jcs_canonical_json(payload)).hex(),
+        )
+
+    # 1. 95-day closure notice on a new account -> allow
+    notices = ClosureNoticeRegistry(authorities)
+    bars = TippingOffBarRegistry(authorities)
+    notices.issue("n-1", "acct-1", HEX64, 95, T0, UK_CUTOFF + 100,
+                  "bench-fin-op", SEC)
+    _record("allow_notice_ok", True, "",
+            closure_notice_receipt(notices, bars, "n-1",
+                                   T0 + 95 * 86400, UK_CUTOFF))
+
+    # 2. disputed-amount freeze within all clocks -> allow
+    freezes = FreezeRegistry(authorities)
+    freezes.issue(
+        "fz-1", "acct-2", 50_000, 50_000, 500_000, T0,
+        T0 + 21 * 86400, T0 + 8 * 86400, False, "bench-fin-op", SEC)
+    _record("allow_proportional_freeze", True, "",
+            freeze_proportionality_gate(freezes, "fz-1", T0 + 10 * 86400))
+
+    # 3. registered high-impact model -> allow
+    hireg = HighImpactRegistry(authorities)
+    hireg.issue("c-1", "score-v3", "credit_scoring",
+                ("model-card", "fairness-report"), T0, "bench-fin-op", SEC)
+    _record("allow_registered_model", True, "",
+            high_impact_registry(hireg, "score-v3", "credit_scoring",
+                                 T0 + 10))
+
+    # 4. premium quote with key factors + YoY explanation -> allow
+    premiums = PremiumExplanationRegistry(authorities)
+    premiums.issue("pe-1", "q-1", 120_000,
+                   ("postcode risk band", "vehicle group"),
+                   800, True, T0, "bench-fin-op", SEC)
+    _record("allow_explained_quote", True, "",
+            premium_explanation_receipt(premiums, "pe-1", T0 + 10))
+
+    # 5. 30-day notice, no tipping-off bar -> deny
+    notices.issue("n-2", "acct-3", HEX64, 30, T0, UK_CUTOFF + 100,
+                  "bench-fin-op", SEC)
+    _record("deny_short_notice", False, "short_notice_closure",
+            closure_notice_receipt(notices, bars, "n-2",
+                                   T0 + 30 * 86400, UK_CUTOFF))
+
+    # 6. whole-account freeze on a fraction disputed -> deny
+    freezes.issue(
+        "fz-2", "acct-4", 50_000, 500_000, 500_000, T0,
+        T0 + 21 * 86400, T0 + 8 * 86400, True, "bench-fin-op", SEC)
+    _record("deny_disproportionate", False, "disproportionate_freeze",
+            freeze_proportionality_gate(freezes, "fz-2", T0 + 10 * 86400))
+
+    # 7. auto-closure from a flag without human review -> deny
+    flag = _sign_flag("fl-1", "acct-5", "mule-model-v2", 1200, T0)
+    _record("deny_no_review", False, "no_human_review",
+            flag_is_not_guilt_gate(flag, "close_account", None, T0 + 10))
+
+    # 8. model declaring postal_code, no removal / no LDA -> deny
+    audits = ModelProxyAuditRegistry(authorities)
+    audits.issue("pa-1", "score-v9", "2026.1",
+                 ("income_bps", "postal_code"), False, False,
+                 T0, "bench-fin-op", SEC)
+    _record("deny_proxy_feature", False, "proxy_feature",
+            proxy_screen(audits, "score-v9", "2026.1", T0 + 10))
+
+    # 9. adverse action citing "model output" -> deny
+    actions = AdverseActionRegistry(authorities)
+    actions.issue("aa-1", "appl-1", "decline", ("model output",),
+                  T0, True, "bench-fin-op", SEC)
+    _record("deny_vague_reason", False, "vague_reason",
+            adverse_action_receipt(actions, "aa-1", T0 + 10))
+
+    # 10. 15% proxy-pricing disparity on the full log -> deny
+    evals = PricingEvaluationLog()
+    for i in range(10):
+        evals.record(f"e-b-{i}", "price-v2", "UK", 1200, False, False, T0 + i)
+    for i in range(10):
+        evals.record(f"e-p-{i}", "price-v2", "UK", 1380, True, False,
+                     T0 + 100 + i)
+    _record("deny_pricing_disparity", False, "proxy_pricing_disparity",
+            pricing_fairness_rules_layer(evals, "price-v2", "UK", 1380, 1200))
+
+    # 11. shared-marker refusal with no appeal receipt -> deny
+    appeals = SharedMarkerAppealRegistry(authorities)
+    _record("deny_systemic_exclusion", False, "systemic_exclusion",
+            debanking_share_guard(appeals, "cust-1", "ukf-marker", True))
+
+    # 12. auto-decline with no human escalation lane -> deny
+    routing = DecisionRoutingRegistry(authorities)
+    routing.issue("dr-1", "appl-2", "decline", "auto_decline", T0,
+                  "bench-fin-op", SEC)
+    decl = LaneDeclaration("dep-1", ("auto_accept", "auto_decline"))
+    _record("deny_no_lane", False, "no_human_lane",
+            human_escalation_lane(decl, routing, "dr-1"))
+
+    mismatches: list[str] = []
+    allowed_ids: list[str] = []
+    denial_reasons: dict[str, str] = {}
+    for sid, expect_allow, needle in scenarios_out:
+        r = results[sid]
+        if r["allowed"]:
+            allowed_ids.append(sid)
+        else:
+            denial_reasons[sid] = r["reason"]
+        if r["allowed"] != expect_allow:
+            mismatches.append(f"{sid}: expected allow={expect_allow}, "
+                              f"saw allow={r['allowed']}")
+        elif not expect_allow and needle and needle not in r["reason"]:
+            mismatches.append(f"{sid}: expected needle {needle!r} in "
+                              f"{r['reason']!r}")
+    return {
+        "n_scenarios": len(scenarios_out),
+        "n_allowed": len(allowed_ids),
+        "n_denied": len(scenarios_out) - len(allowed_ids),
+        "allowed_ids": allowed_ids,
+        "denial_reasons": denial_reasons,
+        "mismatches": mismatches,
+    }
+
+
+def run_support_agents() -> dict[str, Any]:
+    """Customer-service AI discipline (one-hundred-fifty-sixth batch).
+
+    Absorbs the 2026 AI-in-customer-service thread: Klarna's
+    reversal (2.3M AI conversations/month, then quality collapse
+    and rehiring); CBA's cut-45-then-reverse within weeks; China
+    Consumers Association H1 2026 (986k complaints, AI-service
+    complaints rising on misleading promises and unreachable
+    humans); Air Canada's chatbot misled a customer on
+    bereavement fares and the airline paid; EU AI Act Art. 50
+    (in force 2026-08-02) mandating "this is AI" disclosure at
+    interaction start; Art. 5 (2026-02-02) banning workplace
+    emotion inference; Ofcom 2026 (operator liability, three
+    complaint channels, no posing as human); FTC vs
+    Pearl/JustAnswer (rampant consumer deception) and vs Cox
+    Media Group ("active listening" was a phantom, USD 930k);
+    Trend Micro's "fake employee" warning; ACCESS AI continuous
+    agent verification; Forrester's 100x consumer-agent flood
+    forecast.
+
+    Fail-closed rules over 12 deterministic scenarios: a
+    session with a live AI-identity disclosure signs; a handoff
+    that reaches a human inside the window signs; a fee claim
+    with live knowledge-base evidence signs; a registered AI
+    agent presenting its true kind signs. Denied: undisclosed
+    AI sessions (``support:undisclosed_ai``), handoff timeouts
+    and handoff loops (``support.no_human_escape``),
+    evidence-free claims (``support.unevidenced_claim``),
+    AI posing as human (``support.identity_fraud``),
+    surveillance repurposed to train replacement models
+    (``support.surveillance_overreach``), workplace emotion
+    inference (``support.emotion_inference``), and post-layoff
+    quality collapse (``support.over_automation``). Ground
+    truth is closed: 4 allow / 8 deny.
+    """
+    from ed25519 import public_key
+
+    from support_agents import (
+        SUPPORT_SCHEMA_VERSION,
+        WorkforceRegistry,
+        Session,
+        adversarial_claim_receipt,
+        agent_workforce_registry,
+        check_identity_disclosure,
+        emotion_inference_ban,
+        human_escape_clock,
+        issue_claim_receipt,
+        issue_collection_budget,
+        issue_handoff_receipt,
+        issue_identity_receipt,
+        issue_quality_probe,
+        rehire_probe,
+        surveillance_budget,
+    )
+
+    SEC = b"support-bench-authority-00000000"  # 32 bytes
+    assert len(SEC) == 32
+    PUB = public_key(SEC)
+    T0 = 1_800_000_000
+    H64 = "ab" * 32
+    H64_B = "cd" * 32
+    H64_C = "ef" * 32
+    scenarios: list[dict[str, Any]] = []
+
+    def reg():
+        r = WorkforceRegistry()
+        r.register(
+            agent_id="agent-voice-1", agent_kind="ai_voice",
+            claimed_kind="ai_voice", registered_at=T0,
+            operator_id="op-bench", issuer_secret=SEC,
+            issuer_pubkey=PUB,
+        )
+        return r
+
+    def disclosed_session():
+        return issue_identity_receipt(
+            receipt_id="idr-bench", session_id="sess-bench",
+            agent_id="agent-voice-1", agent_kind="ai_voice",
+            disclosed_at=T0, disclosure_text_digest=H64,
+            channel="voice", issuer_secret=SEC, issuer_pubkey=PUB,
+        )
+
+    # 1. allow: AI session with a live identity disclosure
+    v1 = check_identity_disclosure(
+        Session(session_id="sess-bench", agent_id="agent-voice-1",
+                started_at=T0),
+        disclosed_session(),
+    )
+    scenarios.append({
+        "id": "allow_disclosed_session", "expected": True,
+        "verdict": v1.allowed, "reason": v1.reason,
+    })
+
+    # 2. allow: handoff reaches a human inside the window
+    hop = issue_handoff_receipt(
+        receipt_id="hop-bench", session_id="sess-bench",
+        requested_at=T0, hopped_at=T0 + 45,
+        from_agent_id="agent-voice-1", to_agent_id="human-7",
+        previous_digest="00" * 32, issuer_secret=SEC,
+        issuer_pubkey=PUB,
+    )
+    v2 = human_escape_clock(
+        session_id="sess-bench", requested_at=T0, now=T0 + 60,
+        hops=(hop,), max_wait_seconds=300,
+        human_agent_ids=frozenset({"human-7"}),
+    )
+    scenarios.append({
+        "id": "allow_human_handoff", "expected": True,
+        "verdict": v2.allowed, "reason": v2.reason,
+    })
+
+    # 3. allow: fee claim bound to live knowledge-base evidence
+    v3 = adversarial_claim_receipt(
+        issue_claim_receipt(
+            claim_id="cl-bench", session_id="sess-bench",
+            claim_category="fee", claim_text_digest=H64,
+            kb_evidence_digest=H64_B, issued_at=T0,
+            expires_at=T0 + 86400, issuer_secret=SEC,
+            issuer_pubkey=PUB,
+        ),
+        kb_live_digests=frozenset({H64_B}), now=T0 + 10,
+    )
+    scenarios.append({
+        "id": "allow_evidenced_claim", "expected": True,
+        "verdict": v3.allowed, "reason": v3.reason,
+    })
+
+    # 4. allow: registered AI agent presenting its true kind
+    v4 = agent_workforce_registry(
+        reg(), agent_id="agent-voice-1", presented_kind="ai_voice")
+    scenarios.append({
+        "id": "allow_registered_ai_agent", "expected": True,
+        "verdict": v4.allowed, "reason": v4.reason,
+    })
+
+    # 5. deny: session with no identity disclosure
+    v5 = check_identity_disclosure(
+        Session(session_id="sess-bench", agent_id="agent-voice-1",
+                started_at=T0),
+        None,
+    )
+    scenarios.append({
+        "id": "deny_undisclosed_ai", "expected": False,
+        "verdict": v5.allowed, "reason": v5.deny_code or v5.reason,
+    })
+
+    # 6. deny: handoff requested but never hops within the window
+    v6 = human_escape_clock(
+        session_id="sess-bench", requested_at=T0, now=T0 + 900,
+        hops=(), max_wait_seconds=300,
+        human_agent_ids=frozenset({"human-7"}),
+    )
+    scenarios.append({
+        "id": "deny_handoff_timeout", "expected": False,
+        "verdict": v6.allowed, "reason": v6.deny_code or v6.reason,
+    })
+
+    # 7. deny: handoff chain loops on the same hop
+    v7 = human_escape_clock(
+        session_id="sess-bench", requested_at=T0, now=T0 + 60,
+        hops=(hop, hop), max_wait_seconds=300,
+        human_agent_ids=frozenset({"human-7"}),
+    )
+    scenarios.append({
+        "id": "deny_handoff_loop", "expected": False,
+        "verdict": v7.allowed, "reason": v7.deny_code or v7.reason,
+    })
+
+    # 8. deny: refund claim whose evidence digest is not live
+    v8 = adversarial_claim_receipt(
+        issue_claim_receipt(
+            claim_id="cl-bench-2", session_id="sess-bench",
+            claim_category="refund", claim_text_digest=H64,
+            kb_evidence_digest=H64_C, issued_at=T0,
+            expires_at=T0 + 86400, issuer_secret=SEC,
+            issuer_pubkey=PUB,
+        ),
+        kb_live_digests=frozenset({H64_B}), now=T0 + 10,
+    )
+    scenarios.append({
+        "id": "deny_unevidenced_claim", "expected": False,
+        "verdict": v8.allowed, "reason": v8.deny_code or v8.reason,
+    })
+
+    # 9. deny: registered AI agent presenting as human
+    v9 = agent_workforce_registry(
+        reg(), agent_id="agent-voice-1", presented_kind="human")
+    scenarios.append({
+        "id": "deny_identity_fraud", "expected": False,
+        "verdict": v9.allowed, "reason": v9.deny_code or v9.reason,
+    })
+
+    # 10. deny: collection repurposed to train a replacement model
+    v10 = surveillance_budget(
+        issue_collection_budget(
+            budget_id="bud-bench",
+            workforce_agent_id="agent-voice-1",
+            purpose="quality_assurance", scope="call-audio",
+            retention_days=90, issued_at=T0,
+            expires_at=T0 + 86400 * 90, issuer_secret=SEC,
+            issuer_pubkey=PUB,
+        ),
+        actual_purpose="quality_assurance",
+        training_replacement_model=True, now=T0 + 10,
+    )
+    scenarios.append({
+        "id": "deny_surveillance_overreach", "expected": False,
+        "verdict": v10.allowed, "reason": v10.deny_code or v10.reason,
+    })
+
+    # 11. deny: workplace emotion inference request
+    v11 = emotion_inference_ban(purpose="emotion_inference")
+    scenarios.append({
+        "id": "deny_emotion_inference", "expected": False,
+        "verdict": v11.allowed, "reason": v11.deny_code or v11.reason,
+    })
+
+    # 12. deny: post-layoff quality collapse
+    v12 = rehire_probe(
+        issue_quality_probe(
+            probe_id="qp-bench", org_id="org-bench",
+            period_start=T0, period_end=T0 + 86400 * 30,
+            ai_resolution_rate_bps=6500, csat_delta_bps=-1500,
+            escalation_delta_bps=2000, layoff_event_digest=H64,
+        ),
+        csat_drop_threshold_bps=1000,
+        escalation_rise_threshold_bps=1000,
+    )
+    scenarios.append({
+        "id": "deny_over_automation", "expected": False,
+        "verdict": v12.allowed, "reason": v12.deny_code or v12.reason,
+    })
+
+    mismatches = [
+        s["id"] for s in scenarios
+        if bool(s["verdict"]) != bool(s["expected"])
+    ]
+    return {
+        "track": "metrics.support_agents",
+        "n_scenarios": len(scenarios),
+        "mismatches": mismatches,
+        "allowed_ids": [s["id"] for s in scenarios if s["verdict"]],
+        "denial_reasons": {s["id"]: s["reason"] for s in scenarios if not s["verdict"]},
+        "schema_version": SUPPORT_SCHEMA_VERSION,
+    }
+
+
+def run_newsmedia_agents() -> dict[str, Any]:
+    """News-media AI discipline (one-hundred-fifty-eighth batch).
+
+    Absorbs the 2026 AI-newsroom thread: AP July 2026 standards (AI
+    cannot replace reporting/sourcing/judgment/verification, full
+    ban on AI news photography, material AI use must be disclosed);
+    Brennan Center Aug 2026 (6 chatbots: ~half answers had citation
+    problems, 1/3 factual errors, all cited nonexistent sources);
+    Korea AI-fake disaster footage broadcast as real (Kamchatka
+    blizzard, Nepal floods); pink-slime sites cited in 48.2% of
+    chatbot answers, 1,179 outlets > 937 US dailies; Anthropic
+    $1.5B settlement (~$3,000/work: legally purchased = fair use,
+    7M pirated books ≠); Japan Originator Profile cryptographic
+    publisher IDs (provenance, not accuracy); Toff trust paradox
+    (readers demand disclosure, trust less after it); Le Monde
+    1,331 media jobs cut since Jan 2026; Korea 90-day AI video
+    electioneering ban.
+
+    Fail-closed rules over 12 deterministic scenarios: stories bind
+    issuer-identity receipts — anonymous AI stories are
+    ``newsmedia.unattributed``; material AI use must be disclosed
+    within its window — late is ``newsmedia.undisclosed_material_use``;
+    claim verification must meet its tier depth — shallow is
+    ``newsmedia.citation_failure``; external visuals bind screening
+    — unscreened is ``newsmedia.unsourced_visual``; cited sources
+    must resolve — fabrications are
+    ``newsmedia.fabricated_citation``; outlets bind funding
+    disclosure — pink-slime anonymity is
+    ``newsmedia.funding_undisclosed``; bylines bind verified humans
+    — fictional bylines are ``newsmedia.fictional_byline``; corpora
+    bind license chains — pirated chains are
+    ``newsmedia.illegitimate_source``. Ground truth is closed:
+    4 allow / 8 deny.
+    """
+    from ed25519 import public_key
+
+    from newsmedia_agents import (
+        AI_ASSISTED,
+        AI_HUMAN,
+        KIND_VIDEO,
+        LIC_LICENSED,
+        LIC_PIRATED,
+        MATERIAL,
+        TIER_HIGH,
+        TIER_MEDIUM,
+        BylineLog,
+        CitationRecord,
+        CitationRegistry,
+        FundingLog,
+        LicenseLog,
+        MaterialityLog,
+        MediaScreenLog,
+        NewsmediaVerdict,
+        SourceLog,
+        VerificationLog,
+        byline_receipt,
+        byline_verification,
+        check_attribution,
+        check_license_chain,
+        citation_integrity_gate,
+        disclosure_receipt,
+        external_media_screen,
+        funding_disclosure_receipt,
+        license_chain_receipt,
+        materiality_disclosure_clock,
+        materiality_receipt,
+        media_screen_receipt,
+        political_funding_disclosure,
+        source_receipt,
+        verification_depth_gate,
+        verification_receipt,
+    )
+
+    SEC = b"nm-bench-auth-" + b"0" * 18  # 32 bytes
+    assert len(SEC) == 32
+    PUB = public_key(SEC).hex()
+    T0 = 1_800_000_000
+    HEX64 = "ab" * 32
+    HEX64_B = "cd" * 32
+    HEX64_C = "ef" * 32
+    HEX64_D = "12" * 32
+
+    def tip(log: Any) -> str:
+        return log._log[-1].receipt_digest if log._log else "genesis"
+
+    # --- source receipts: two attributed stories ---
+    sources = SourceLog()
+    sources.append(
+        source_receipt(
+            receipt_id="nm-src-1", story_id="story-ok", issuer_id="op-publisher-1",
+            issuer_pubkey_hex=PUB, ai_involvement=AI_ASSISTED,
+            expires_at=T0 + 86400, authority_pubkey_hex=PUB,
+            authority_secret=SEC, prev_digest=tip(sources),
+        )
+    )
+    sources.append(
+        source_receipt(
+            receipt_id="nm-src-2", story_id="story-human", issuer_id="op-publisher-1",
+            issuer_pubkey_hex=PUB, ai_involvement=AI_HUMAN,
+            expires_at=T0 + 86400, authority_pubkey_hex=PUB,
+            authority_secret=SEC, prev_digest=tip(sources),
+        )
+    )
+
+    # --- materiality: one disclosed-in-window, one disclosed-late ---
+    material = MaterialityLog()
+    material.append(
+        materiality_receipt(
+            receipt_id="nm-mat-1", story_id="story-disclosed", materiality=MATERIAL,
+            published_at=T0, authority_pubkey_hex=PUB,
+            authority_secret=SEC, prev_digest=tip(material),
+        )
+    )
+    material.append(
+        disclosure_receipt(
+            receipt_id="nm-dis-1", story_id="story-disclosed", disclosed_at=T0 + 3600,
+            disclosure_format="inline_banner", placement_digest=HEX64_B,
+            authority_pubkey_hex=PUB, authority_secret=SEC, prev_digest=tip(material),
+        )
+    )
+    material.append(
+        materiality_receipt(
+            receipt_id="nm-mat-2", story_id="story-late", materiality=MATERIAL,
+            published_at=T0, authority_pubkey_hex=PUB,
+            authority_secret=SEC, prev_digest=tip(material),
+        )
+    )
+    material.append(
+        disclosure_receipt(
+            receipt_id="nm-dis-2", story_id="story-late", disclosed_at=T0 + 200_000,
+            disclosure_format="inline_banner", placement_digest=HEX64_C,
+            authority_pubkey_hex=PUB, authority_secret=SEC, prev_digest=tip(material),
+        )
+    )
+
+    # --- verification: one deep enough, one shallow ---
+    vlog = VerificationLog()
+    vlog.append(
+        verification_receipt(
+            receipt_id="nm-ver-1", claim_id="claim-ok", story_id="story-ok",
+            claim_tier=TIER_MEDIUM, verification_depth=2,
+            source_digests=[HEX64_D], verified_at=T0,
+            authority_pubkey_hex=PUB, authority_secret=SEC, prev_digest=tip(vlog),
+        )
+    )
+    vlog.append(
+        verification_receipt(
+            receipt_id="nm-ver-2", claim_id="claim-shallow", story_id="story-ok",
+            claim_tier=TIER_HIGH, verification_depth=1,
+            source_digests=[HEX64_D], verified_at=T0,
+            authority_pubkey_hex=PUB, authority_secret=SEC, prev_digest=tip(vlog),
+        )
+    )
+    citations = CitationRegistry()
+    citations.register(
+        CitationRecord(
+            record_id="nm-cit-1", claim_id="claim-ok",
+            cited_outlet_id="wire-service", cited_url_digest=HEX64_D,
+            resolved=True, resolution_note="resolves to live article",
+        )
+    )
+    citations.register(
+        CitationRecord(
+            record_id="nm-cit-2", claim_id="claim-ghost",
+            cited_outlet_id="iwate-nippo", cited_url_digest=HEX64_B,
+            resolved=False, resolution_note="outlet denies ever publishing it",
+        )
+    )
+
+    # --- media screening: one screened authentic video ---
+    media = MediaScreenLog()
+    media.append(
+        media_screen_receipt(
+            receipt_id="nm-med-1", media_id="video-ok", story_id="story-ok",
+            media_kind=KIND_VIDEO, external=True, ai_generated=False,
+            screening_method="human_forensic", authentic=True,
+            screened_at=T0, authority_pubkey_hex=PUB,
+            authority_secret=SEC, prev_digest=tip(media),
+        )
+    )
+
+    # --- funding: one disclosed outlet ---
+    funding = FundingLog()
+    funding.append(
+        funding_disclosure_receipt(
+            receipt_id="nm-fun-1", outlet_id="outlet-ok",
+            funders=["civic-trust-foundation"], partisan_alignment="center",
+            disclosed_at=T0, authority_pubkey_hex=PUB,
+            authority_secret=SEC, prev_digest=tip(funding),
+        )
+    )
+
+    # --- bylines: one verified, one fictional ---
+    bylines = BylineLog()
+    bylines.append(
+        byline_receipt(
+            receipt_id="nm-by-1", story_id="story-ok", byline_name="Ada Reporter",
+            human_verified=True, identity_digest=HEX64,
+            authority_pubkey_hex=PUB, authority_secret=SEC, prev_digest=tip(bylines),
+        )
+    )
+    bylines.append(
+        byline_receipt(
+            receipt_id="nm-by-2", story_id="story-fake-byline",
+            byline_name="Dr. X NASA Engineer",
+            human_verified=False, identity_digest=HEX64_B,
+            authority_pubkey_hex=PUB, authority_secret=SEC, prev_digest=tip(bylines),
+        )
+    )
+
+    # --- licenses: one licensed, one pirated ---
+    licenses = LicenseLog()
+    licenses.append(
+        license_chain_receipt(
+            receipt_id="nm-lic-1", corpus_id="corpus-ok",
+            license_source=LIC_LICENSED, chain_digest=HEX64_C,
+            checked_at=T0, authority_pubkey_hex=PUB,
+            authority_secret=SEC, prev_digest=tip(licenses),
+        )
+    )
+    licenses.append(
+        license_chain_receipt(
+            receipt_id="nm-lic-2", corpus_id="corpus-pirated",
+            license_source=LIC_PIRATED, chain_digest=HEX64_D,
+            checked_at=T0, authority_pubkey_hex=PUB,
+            authority_secret=SEC, prev_digest=tip(licenses),
+        )
+    )
+
+    scenarios_out: list[tuple[str, bool, str]] = []
+    results: dict[str, dict[str, Any]] = {}
+
+    def _record(sid: str, expect_allow: bool, needle: str, verdict: NewsmediaVerdict) -> None:
+        scenarios_out.append((sid, expect_allow, needle))
+        results[sid] = {"allowed": verdict.allowed, "reason": verdict.reason}
+
+    # 1. attributed AI-assisted story -> allow
+    _record(
+        "allow_op_attributed", True, "",
+        check_attribution(story_id="story-ok", log=sources, checked_at=T0 + 10),
+    )
+    # 2. human story with issuer receipt -> allow
+    _record(
+        "allow_human_story", True, "",
+        check_attribution(story_id="story-human", log=sources, checked_at=T0 + 10),
+    )
+    # 3. material AI use disclosed within window -> allow
+    _record(
+        "allow_disclosed_material", True, "",
+        materiality_disclosure_clock(story_id="story-disclosed", log=material, checked_at=T0 + 4000),
+    )
+    # 4. licensed corpus -> allow
+    _record(
+        "allow_licensed_corpus", True, "",
+        check_license_chain(corpus_id="corpus-ok", log=licenses),
+    )
+    # 5. anonymous AI story -> deny
+    _record(
+        "deny_unattributed", False, "unattributed",
+        check_attribution(story_id="story-ghost", log=sources, checked_at=T0 + 10),
+    )
+    # 6. material AI use disclosed late -> deny
+    _record(
+        "deny_undisclosed_material", False, "undisclosed_material_use",
+        materiality_disclosure_clock(story_id="story-late", log=material, checked_at=T0 + 200_001),
+    )
+    # 7. high-tier claim with depth 1 -> deny
+    _record(
+        "deny_citation_failure", False, "citation_failure",
+        verification_depth_gate(claim_id="claim-shallow", vlog=vlog, citations=citations),
+    )
+    # 8. external video with no screening -> deny
+    _record(
+        "deny_unsourced_visual", False, "unsourced_visual",
+        external_media_screen(media_id="video-ghost", external=True, log=media),
+    )
+    # 9. fabricated citation -> deny
+    _record(
+        "deny_fabricated_citation", False, "fabricated_citation",
+        citation_integrity_gate(claim_id="claim-ghost", citations=citations),
+    )
+    # 10. pink-slime outlet with no funding disclosure -> deny
+    _record(
+        "deny_funding_undisclosed", False, "funding_undisclosed",
+        political_funding_disclosure(outlet_id="pink-slime-outlet", log=funding),
+    )
+    # 11. fictional byline -> deny
+    _record(
+        "deny_fictional_byline", False, "fictional_byline",
+        byline_verification(story_id="story-fake-byline", log=bylines),
+    )
+    # 12. pirated corpus -> deny
+    _record(
+        "deny_illegitimate_source", False, "illegitimate_source",
+        check_license_chain(corpus_id="corpus-pirated", log=licenses),
+    )
+
+    mismatches: list[str] = []
+    allowed_ids: list[str] = []
+    denial_reasons: dict[str, str] = {}
+    for sid, expect_allow, needle in scenarios_out:
+        r = results[sid]
+        if r["allowed"]:
+            allowed_ids.append(sid)
+        else:
+            denial_reasons[sid] = r["reason"]
+        if r["allowed"] != expect_allow:
+            mismatches.append(
+                f"{sid}: expected allow={expect_allow}, saw allow={r['allowed']}"
+            )
+        elif not expect_allow and needle and needle not in r["reason"]:
+            mismatches.append(f"{sid}: expected needle {needle!r} in {r['reason']!r}")
+    return {
+        "track": "metrics.newsmedia_agents",
+        "n_scenarios": len(scenarios_out),
+        "n_allowed": len(allowed_ids),
+        "n_denied": len(scenarios_out) - len(allowed_ids),
+        "allowed_ids": allowed_ids,
+        "denial_reasons": denial_reasons,
+        "mismatches": mismatches,
+    }
+
+
+def run_proptech_agents() -> dict[str, Any]:
+    """Real-estate & proptech AI discipline (one-hundred-fifty-ninth batch).
+
+    Absorbs the 2026 AI-proptech thread: SafeRent's $2.28-2.3M class
+    settlement (no scores or accept/decline recommendations for
+    housing-voucher applicants for 5 years); HUD's May-2024 dual
+    guidance and its 2026 rollback (disparate-impact rule comments
+    close 2026-10-09); the DOJ-RealPage settlement (pricing
+    algorithms may train only on >=1-year-old data; real-time
+    nonpublic competitor data banned) and 2026 landlord settlements
+    (LivCor $7M, Willow Bridge, Pinnacle, none admitting fault);
+    NY's algorithmic-rent ban preliminarily enjoined (Judge Caproni,
+    First Amendment grounds, Sept 2026); BGH I ZR 129/25 (the broker
+    is the "Nadeloehr" liability anchor for discrimination);
+    Dubai DLD's Smart Rental Index as a public reference; Colorado
+    AI Act delayed to 2027-01-01; Maryland Fair Chance Housing Act
+    (effective 2026-10-01).
+
+    Fail-closed rules over 12 deterministic scenarios: published
+    criteria pinned before the application pass; a denial with
+    specific reasons, a report copy, and a challenge channel passes;
+    pricing models training only on >=1-year-old data pass;
+    high-confidence AVM valuations pass. Denied: scores or
+    recommendations for voucher applicants
+    (``proptech:voucher_score_shown``), AI deciding a specific
+    applicant (``proptech:ai_specific_decision``), pricing trained
+    on fresh or real-time competitor data
+    (``proptech.stale_data_violation``), competitor nonpublic data
+    in pricing inputs (``proptech:collusion_input``), screening
+    models with a disparate-impact finding
+    (``proptech:disparate_impact``), discriminatory ad-delivery skew
+    (``proptech:ad_delivery_skew``), transactions without a broker
+    liability anchor (``proptech.no_liability_anchor``), and
+    benchmark deviations beyond tolerance without justification
+    (``proptech:unjustified_deviation``). Ground truth is closed:
+    4 allow / 8 deny.
+    """
+    from ed25519 import public_key
+    from proptech_agents import (
+        PROPTECH_SCHEMA_VERSION,
+        AdDeliveryAuditRegistry,
+        AdverseActionRegistry,
+        AuthorityRegistry,
+        BenchmarkReferenceRegistry,
+        BrokerLiabilityRegistry,
+        DisparateImpactAuditRegistry,
+        PricingDataRegistry,
+        ScreeningCriteriaRegistry,
+        ScreeningDecisionRegistry,
+        ValuationRegistry,
+        adverse_action_receipt,
+        broker_liability_pin,
+        competitor_data_probe,
+        disparate_impact_audit_receipt,
+        human_final_gate_screening,
+        pricing_data_firewall,
+        public_benchmark_reference,
+        screening_criteria_pin,
+        screening_score_silencing,
+        target_ad_delivery_audit,
+        valuation_confidence_floor,
+    )
+
+    SEC = b"pt-bench-auth-" + b"0" * 18  # 32 bytes
+    assert len(SEC) == 32
+    PUB = public_key(SEC)
+    T0 = 1_800_000_000
+    H64 = "ab" * 32
+    H64B = "cd" * 32
+    ZERO64 = "00" * 32
+    YEAR = 365 * 86_400
+    scenarios: list[dict[str, Any]] = []
+
+    authorities = AuthorityRegistry()
+    authorities.register("pt-bench", PUB.hex())
+
+    criteria = ScreeningCriteriaRegistry(authorities)
+    criteria.issue("crit-bench", "owner-bench", H64, T0, "pt-bench", SEC)
+    decisions = ScreeningDecisionRegistry(authorities)
+    decisions.issue("dec-allow-1", "app-allow-1", False, True, "accept",
+                    "human", "crit-bench", T0 + 10, "pt-bench", SEC)
+    adverse = AdverseActionRegistry(authorities)
+    adverse.issue("aa-bench", "app-allow-1", "dec-allow-1",
+                  ["insufficient verifiable income",
+                   "eviction within 3 years"],
+                  H64B, "appeals@bench.example", T0 + 20, "pt-bench", SEC)
+    pricing = PricingDataRegistry(authorities)
+    pricing.issue("pd-bench", "pricing-bench", T0 - YEAR - 100,
+                  False, 0, T0, "pt-bench", SEC)
+    valuations = ValuationRegistry(authorities)
+    valuations.issue("val-bench", "prop-bench", 500_000_00, 0.85,
+                     "ai", T0, "pt-bench", SEC)
+
+    # 1. allow: criteria pinned before the application
+    v1 = screening_criteria_pin(criteria, decisions, "dec-allow-1")
+    scenarios.append({
+        "id": "allow_criteria_pinned", "expected": True,
+        "verdict": v1.allowed, "reason": v1.reason,
+    })
+
+    # 2. allow: denial with specific reasons, report copy, challenge channel
+    decisions.issue("dec-allow-2", "app-allow-2", False, False, "decline",
+                    "human", "crit-bench", T0 + 10, "pt-bench", SEC)
+    adverse.issue("aa-bench-2", "app-allow-2", "dec-allow-2",
+                  ["insufficient verifiable income"], H64B,
+                  "appeals@bench.example", T0 + 20, "pt-bench", SEC)
+    v2 = adverse_action_receipt(adverse, decisions, "dec-allow-2")
+    scenarios.append({
+        "id": "allow_adverse_action", "expected": True,
+        "verdict": v2.allowed, "reason": v2.reason,
+    })
+
+    # 3. allow: pricing model training only on >=1-year-old data
+    v3 = pricing_data_firewall(pricing, "pricing-bench", T0 + 100)
+    scenarios.append({
+        "id": "allow_pricing_data_old", "expected": True,
+        "verdict": v3.allowed, "reason": v3.reason,
+    })
+
+    # 4. allow: high-confidence AVM valuation
+    v4 = valuation_confidence_floor(valuations, "val-bench")
+    scenarios.append({
+        "id": "allow_high_confidence_valuation", "expected": True,
+        "verdict": v4.allowed, "reason": v4.reason,
+    })
+
+    # 5. deny: score shown for a voucher applicant
+    decisions.issue("dec-deny-1", "app-deny-1", True, True, "no_recommendation",
+                    "human", "crit-bench", T0 + 10, "pt-bench", SEC)
+    v5 = screening_score_silencing(decisions, "dec-deny-1")
+    scenarios.append({
+        "id": "deny_voucher_score", "expected": False,
+        "verdict": v5.allowed, "reason": v5.reason,
+    })
+
+    # 6. deny: AI deciding a specific applicant
+    decisions.issue("dec-deny-2", "app-deny-2", False, False, "decline",
+                    "ai", "crit-bench", T0 + 10, "pt-bench", SEC)
+    v6 = human_final_gate_screening(decisions, "dec-deny-2")
+    scenarios.append({
+        "id": "deny_ai_specific_decision", "expected": False,
+        "verdict": v6.allowed, "reason": v6.reason,
+    })
+
+    # 7. deny: pricing trained on fresh competitor data
+    pricing.issue("pd-bench-2", "pricing-fresh", T0 - YEAR - 100,
+                  True, T0 - 50, T0, "pt-bench", SEC)
+    v7 = pricing_data_firewall(pricing, "pricing-fresh", T0 + 100)
+    scenarios.append({
+        "id": "deny_stale_data", "expected": False,
+        "verdict": v7.allowed, "reason": v7.reason,
+    })
+
+    # 8. deny: competitor nonpublic data in pricing inputs
+    pricing.issue("pd-bench-3", "pricing-collusion", T0 - YEAR - 100,
+                  True, T0 - YEAR - 50, T0, "pt-bench", SEC)
+    v8 = competitor_data_probe(pricing, "pricing-collusion")
+    scenarios.append({
+        "id": "deny_collusion_input", "expected": False,
+        "verdict": v8.allowed, "reason": v8.reason,
+    })
+
+    # 9. deny: screening model with a disparate-impact finding
+    impact = DisparateImpactAuditRegistry(authorities)
+    impact.issue("imp-bench", "model-bench", 0.61, True, T0, "pt-bench", SEC)
+    v9 = disparate_impact_audit_receipt(impact, "model-bench", T0 + 100)
+    scenarios.append({
+        "id": "deny_disparate_impact", "expected": False,
+        "verdict": v9.allowed, "reason": v9.reason,
+    })
+
+    # 10. deny: discriminatory ad-delivery skew
+    ads = AdDeliveryAuditRegistry(authorities)
+    ads.issue("ad-bench", "camp-bench", H64, True, T0, "pt-bench", SEC)
+    v10 = target_ad_delivery_audit(ads, "camp-bench", T0 + 100)
+    scenarios.append({
+        "id": "deny_ad_skew", "expected": False,
+        "verdict": v10.allowed, "reason": v10.reason,
+    })
+
+    # 11. deny: transaction without a broker liability anchor
+    brokers = BrokerLiabilityRegistry(authorities)
+    v11 = broker_liability_pin(brokers, "txn-bench", "broker-bench")
+    scenarios.append({
+        "id": "deny_no_liability_anchor", "expected": False,
+        "verdict": v11.allowed, "reason": v11.reason,
+    })
+
+    # 12. deny: benchmark deviation beyond tolerance without justification
+    benchmarks = BenchmarkReferenceRegistry(authorities)
+    benchmarks.issue("bm-bench", "market-bench", H64, "dld-smart-index",
+                     2500, ZERO64, T0, "pt-bench", SEC)
+    v12 = public_benchmark_reference(benchmarks, "market-bench", T0 + 100)
+    scenarios.append({
+        "id": "deny_unjustified_deviation", "expected": False,
+        "verdict": v12.allowed, "reason": v12.reason,
+    })
+
+    mismatches = [
+        s["id"] for s in scenarios
+        if bool(s["verdict"]) != bool(s["expected"])
+    ]
+    return {
+        "track": "metrics.proptech_agents",
+        "n_scenarios": len(scenarios),
+        "mismatches": mismatches,
+        "allowed_ids": [s["id"] for s in scenarios if s["verdict"]],
+        "denial_reasons": {s["id"]: s["reason"] for s in scenarios if not s["verdict"]},
+        "schema_version": PROPTECH_SCHEMA_VERSION,
+    }
+
+
+def run_eldercare_agents() -> dict[str, Any]:
+    """Elder-care AI discipline (one-hundred-sixty-first batch).
+
+    Absorbs the 2026 AI-elder-care thread: China 5.5M caregiver gap
+    with professional-care robot penetration at only 1.2% (point
+    devices deploy, not humanoids; Yizhuang retired 10+ models in
+    five months); Japan MHLW 2026: 73.8% approve care robots, and
+    the Yamashita survey prefers "notify on anomaly" (76.3%) over
+    "always watch" (47.6%); Korea's Clova CareCall ~50k users;
+    France's Livana pilot (AI imitating a grandchild's voice for
+    Alzheimer's patients, no audio retained); US SafelyYou NAD
+    ruling (single-study claims need disclosure fixes) and
+    SafeSpace avatar rendering; Australia's South Australia pilot
+    (12,000 false alarms/year -> alarm fatigue -> a real fall
+    unanswered); McKnight's "cameras record, they don't prevent".
+
+    Fail-closed rules over 12 deterministic scenarios: anomaly-only
+    monitoring (the default) passes; alert channels inside their
+    false-alarm budgets pass; avatar-presented video passes; a
+    constraint action with an independent human decision passes.
+    Denied: always-watch without a live opt-in, broken three-party
+    consent chains, exhausted false-alarm budgets, undisclosed
+    real-person voice impersonation, raw video to vendors, audio
+    retention without separate consent, vendor-only prevention
+    claims, and signal-driven restraints without a human decision.
+    Ground truth is closed: 4 allow / 8 deny.
+    """
+    import ed25519
+    from eldercare_agents import (
+        AudioRetentionRegistry,
+        ConsentChain,
+        ConsentChainRegistry,
+        ContactFloorReport,
+        ConstraintAction,
+        ELDERCARE_SCHEMA_VERSION,
+        EmotionSignal,
+        FalseAlarmChannel,
+        FalseAlarmRegistry,
+        MonitoringRegistry,
+        PreventionEvidenceRegistry,
+        StaffingFloorRegistry,
+        VideoStreamConfig,
+        VoiceImpersonationRegistry,
+        avatar_anonymization,
+        check_audio_retention,
+        check_consent_chain,
+        check_contact_floor,
+        check_emotion_boundary,
+        check_false_alarm_budget,
+        check_monitoring_mode,
+        check_prevention_evidence,
+        check_staffing_floor,
+        check_video_stream,
+        check_voice_impersonation,
+        MODE_ANOMALY_ONLY,
+        MODE_ALWAYS_WATCH,
+        PARTY_FAMILY,
+        PARTY_PROFESSIONAL,
+        PARTY_RESIDENT,
+        CONSENT_SCOPE_MONITORING,
+    )
+
+    SEC = b"eldercare-bench-authority-000010"  # 32 bytes
+    assert len(SEC) == 32
+    PUB = ed25519.public_key(SEC).hex()
+    T0 = 1_800_000_000
+    H64 = "ab" * 32
+    scenarios: list[dict[str, Any]] = []
+
+    def add(sid: str, expected: bool, verdict: Any) -> None:
+        scenarios.append({
+            "id": sid, "expected": expected,
+            "verdict": verdict.allowed, "reason": verdict.reason,
+        })
+
+    # 1. allow: anomaly-only monitoring is the default (no opt-in needed)
+    mon_reg = MonitoringRegistry([PUB])
+    add("allow_anomaly_only", True, check_monitoring_mode(
+        registry=mon_reg, resident_id="r-bench", mode=MODE_ANOMALY_ONLY,
+        opt_in=None, now=T0))
+
+    # 2. allow: alert channel inside its false-alarm budget
+    fa_reg = FalseAlarmRegistry()
+    fa_reg.register(FalseAlarmChannel(
+        channel_id="ch-bench", facility_id="f-bench",
+        budget_per_year=500, false_alarms=120, window_start=T0))
+    add("allow_within_budget", True, check_false_alarm_budget(
+        registry=fa_reg, channel_id="ch-bench", now=T0))
+
+    # 3. allow: avatar-presented video stream
+    add("allow_avatar_stream", True, check_video_stream(
+        config=VideoStreamConfig("s-bench", "r-bench", avatar_anonymization(),
+                                 False, "family")))
+
+    # 4. allow: constraint action with an independent human decision
+    sig = EmotionSignal("e-bench", "r-bench", "agitation", 8500, T0)
+    act = ConstraintAction("c-bench", "r-bench", "restrict_activity",
+                           driven_by_signal=True, human_decided=True,
+                           decided_at=T0)
+    add("allow_human_decided_constraint", True,
+        check_emotion_boundary(signal=sig, action=act, now=T0))
+
+    # 5. deny: always-watch without a live opt-in
+    add("deny_always_watch_no_optin", False, check_monitoring_mode(
+        registry=mon_reg, resident_id="r-bench", mode=MODE_ALWAYS_WATCH,
+        opt_in=None, now=T0))
+
+    # 6. deny: broken three-party consent chain (family withdrew)
+    cc_reg = ConsentChainRegistry([PUB])
+    receipts = {}
+    for party in (PARTY_RESIDENT, PARTY_FAMILY, PARTY_PROFESSIONAL):
+        receipts[party] = cc_reg.issue(
+            receipt_id=f"cr-bench-{party}", resident_id="r-bench", party=party,
+            scope=CONSENT_SCOPE_MONITORING, data_types=("motion",),
+            retention_days=90, consented_at=T0,
+            proxy=(party == PARTY_RESIDENT), authority_secret=SEC)
+    chain = ConsentChain(resident_id="r-bench", receipts=receipts,
+                         withdrawals={PARTY_FAMILY: T0 + 50})
+    add("deny_consent_withdrawn", False, check_consent_chain(
+        registry=cc_reg, chain=chain, scope=CONSENT_SCOPE_MONITORING,
+        now=T0 + 100))
+
+    # 7. deny: exhausted false-alarm budget (alarm fatigue)
+    fa_reg.register(FalseAlarmChannel(
+        channel_id="ch-tired", facility_id="f-bench",
+        budget_per_year=500, false_alarms=500, window_start=T0))
+    add("deny_alarm_fatigue", False, check_false_alarm_budget(
+        registry=fa_reg, channel_id="ch-tired", now=T0))
+
+    # 8. deny: undisclosed real-person voice impersonation
+    vi_reg = VoiceImpersonationRegistry([PUB])
+    add("deny_undisclosed_impersonation", False, check_voice_impersonation(
+        registry=vi_reg, resident_id="r-bench", impersonates_real_person=True,
+        disclosure=None, resident_cognitively_impaired=True, now=T0))
+
+    # 9. deny: raw video to a vendor
+    add("deny_raw_video_to_vendor", False, check_video_stream(
+        config=VideoStreamConfig("s-raw", "r-bench", "raw", True, "vendor")))
+
+    # 10. deny: audio retention without a separate consent receipt
+    ar_reg = AudioRetentionRegistry([PUB])
+    add("deny_audio_retention_no_consent", False, check_audio_retention(
+        registry=ar_reg, resident_id="r-bench", retains_audio=True,
+        receipt=None, now=T0))
+
+    # 11. deny: vendor-only (non-independent) prevention claim
+    pe_reg = PreventionEvidenceRegistry([PUB])
+    claim = pe_reg.issue(
+        claim_id="pc-bench", claim_text="reduces falls 40%",
+        claimed_reduction_bps=4000, study_digest=H64, independent=False,
+        issued_at=T0, authority_secret=SEC)
+    add("deny_unverified_prevention", False, check_prevention_evidence(
+        registry=pe_reg, claim=claim, claims_prevention=True))
+
+    # 12. deny: signal-driven constraint without a human decision
+    act2 = ConstraintAction("c-bench2", "r-bench", "lock_door",
+                            driven_by_signal=True, human_decided=False,
+                            decided_at=T0)
+    add("deny_emotion_constraint", False,
+        check_emotion_boundary(signal=sig, action=act2, now=T0))
+
+    mismatches = [
+        s["id"] for s in scenarios
+        if bool(s["verdict"]) != bool(s["expected"])
+    ]
+    return {
+        "track": "metrics.eldercare_agents",
+        "n_scenarios": len(scenarios),
+        "mismatches": mismatches,
+        "allowed_ids": [s["id"] for s in scenarios if s["verdict"]],
+        "denial_reasons": {s["id"]: s["reason"] for s in scenarios
+                            if not s["verdict"]},
+        "schema_version": ELDERCARE_SCHEMA_VERSION,
+    }
+
+def run_science_agents() -> dict[str, Any]:
+    """Scientific research & lab AI discipline (one-hundred-sixty-second batch).
+
+    Absorbs the 2026 AI-in-science thread: Co-Scientist (Nature May 2026;
+    Aug 2026 arXiv extended edition cut severe result hallucinations to
+    4% vs 46% ablated vs 90% baseline); Anthropic ART (~950 Claude agents,
+    21h, ~210M tokens, novel phage enzyme system — wet lab done by
+    humans); Medra (robots operate ~70% of common lab instruments
+    without vendor APIs); OpenAI x Ginkgo (GPT-5 autonomously ran
+    36,000 biology experiments, ~40% cost cut); Lancet audit (2.5M
+    biomedical papers: 4,000+ fabricated refs in 2,810 papers, 1/277
+    by early 2026); Anthropic Sept 2026 threat report (5 disrupted
+    bio-misuse cases); June 2026 CEO joint call for mandatory DNA/RNA
+    synthesis screening; sequence-homology screening fundamentally
+    inadequate against AI-designed functionally-dangerous sequences.
+
+    Fail-closed rules over 12 deterministic scenarios: a verified
+    citation at evidence tier enters a paper; a physical action covered
+    by a human-execution receipt proceeds; a bio workflow with a
+    function-equivalence screen clears; a tool matching its
+    reproduction binding validates. Denied: ghost citations
+    (``science:unverified_citation``), signal-tier hypotheses entering
+    papers (``science:unverified_tier``), ungated wetlab actions
+    (``science:ungated_wetlab``), homology-only screening
+    (``science:homology_only_screen``), unbound synthesis orders
+    (``science:unbound_synthesis_order``), reproduction drift
+    (``science:reproduction_drift``), envelope violations
+    (``science:envelope_violation``), and "AI independently discovered"
+    marketing claims (``science:false_discovery_attribution``).
+    Ground truth is closed: 4 allow / 8 deny.
+    """
+    from science_agents import (
+        SCIENCE_SCHEMA_VERSION,
+        AuthorityRegistry,
+        CitationVerificationRegistry,
+        DiscoveryAttributionRegistry,
+        DualUseScreeningRegistry,
+        LabRobotEnvelopeRegistry,
+        ReproductionBindingRegistry,
+        WetlabExecutionRegistry,
+        discovery_attribution_receipt,
+        dual_use_screen,
+        hypothesis_evidence_tier,
+        lab_robot_capability_envelope,
+        reproducibility_lock,
+        synthesis_order_binding,
+        wetlab_human_action_gate,
+    )
+    import ed25519
+
+    SEC = b"science-bench-authority-00000001"  # 32 bytes
+    assert len(SEC) == 32
+    PUB = ed25519.public_key(SEC).hex()
+    T0 = 1_800_000_000
+    H64 = "ab" * 32
+    H64_B = "cd" * 32
+    H64_C = "ef" * 32
+    scenarios: list[dict[str, Any]] = []
+
+    def _sign(payload_bytes: bytes) -> str:
+        return ed25519.sign(SEC, payload_bytes).hex()
+
+    authorities = AuthorityRegistry()
+    authorities.register("bench-sci-op", PUB)
+
+    # --- citation verification: one verified citation ---
+    cits = CitationVerificationRegistry(authorities)
+    cits.issue(
+        receipt_id="cv-bench", citation_id="cite-real",
+        doi="10.1038/real-2026", title="A Real Study",
+        resolved_at=T0, authority_id="bench-sci-op", sign=_sign)
+
+    # --- wetlab execution: one human-signed pipette receipt ---
+    exes = WetlabExecutionRegistry(authorities)
+    exes.issue(
+        receipt_id="we-bench", action="pipette", target="well-bench",
+        executor_id="bench-tech", executed_at=T0,
+        authority_id="bench-sci-op", sign=_sign)
+
+    # --- dual-use screening: full screen + homology-only screen ---
+    scr = DualUseScreeningRegistry(authorities)
+    scr.issue(
+        receipt_id="ds-bench", workflow_id="wf-bench",
+        categories_evaluated=("sequence_homology", "function_equivalence",
+                              "institution_qualification", "end_use_screen"),
+        screen_result="clear", screened_at=T0,
+        institution_id="bench-institute", authority_id="bench-sci-op",
+        sign=_sign)
+    scr.issue(
+        receipt_id="ds-homology", workflow_id="wf-homology",
+        categories_evaluated=("sequence_homology",),
+        screen_result="clear", screened_at=T0,
+        institution_id="bench-institute", authority_id="bench-sci-op",
+        sign=_sign)
+
+    # --- reproducibility binding ---
+    rbs = ReproductionBindingRegistry(authorities)
+    rbs.issue(
+        receipt_id="rb-bench", tool_id="align-bench",
+        tool_version="2.1.0", paper_digest=H64,
+        reproduced_result_digest=H64_B, bound_at=T0,
+        authority_id="bench-sci-op", sign=_sign)
+
+    # --- lab robot envelope ---
+    envs = LabRobotEnvelopeRegistry(authorities)
+    envs.issue(
+        receipt_id="env-bench", robot_id="robot-bench",
+        instrument_allowlist=("pipettor",),
+        max_force_newtons=5.0, max_temperature_celsius=37.0,
+        exclusion_zones=("pathogen-room",), declared_at=T0,
+        authority_id="bench-sci-op", sign=_sign)
+
+    # --- discovery attribution ---
+    das = DiscoveryAttributionRegistry(authorities)
+    das.issue(
+        receipt_id="da-bench", discovery_id="discovery-bench",
+        goal_setter_id="bench-team", candidate_screener_id="ai:bench-art",
+        wetlab_validator_id="bench-scientist", formal_record="paper",
+        discovery_claim="AI-assisted discovery of a novel enzyme system",
+        attributed_at=T0, authority_id="bench-sci-op", sign=_sign)
+
+    # 1. allow: verified citation at evidence tier enters a paper
+    v1 = hypothesis_evidence_tier(
+        hypothesis_id="hyp-bench", tier="evidence", formal_record="paper",
+        citation_ids=("cite-real",), verifications=cits)
+    scenarios.append({
+        "id": "allow_cited_hypothesis", "expected": True,
+        "verdict": v1.allowed, "reason": v1.reason,
+    })
+
+    # 2. allow: physical action covered by a human-execution receipt
+    v2 = wetlab_human_action_gate(
+        action="pipette", target="well-bench",
+        agent_instruction_digest=H64, executions=exes, now=T0 + 100)
+    scenarios.append({
+        "id": "allow_wetlab_execution", "expected": True,
+        "verdict": v2.allowed, "reason": v2.reason,
+    })
+
+    # 3. allow: bio workflow with a function-equivalence screen
+    v3 = dual_use_screen(workflow_id="wf-bench", screenings=scr)
+    scenarios.append({
+        "id": "allow_screened_bio", "expected": True,
+        "verdict": v3.allowed, "reason": v3.reason,
+    })
+
+    # 4. allow: tool whose output matches its reproduction binding
+    v4 = reproducibility_lock(
+        tool_id="align-bench", tool_version="2.1.0",
+        current_result_digest=H64_B, bindings=rbs)
+    scenarios.append({
+        "id": "allow_stable_tool", "expected": True,
+        "verdict": v4.allowed, "reason": v4.reason,
+    })
+
+    # 5. deny: evidence-tier hypothesis with an unverified (ghost) citation
+    v5 = hypothesis_evidence_tier(
+        hypothesis_id="hyp-bench", tier="evidence", formal_record="paper",
+        citation_ids=("ghost-cite",), verifications=cits)
+    scenarios.append({
+        "id": "deny_ghost_citation", "expected": False,
+        "verdict": v5.allowed, "reason": v5.reason,
+    })
+
+    # 6. deny: signal-tier hypothesis entering a formal record
+    v6 = hypothesis_evidence_tier(
+        hypothesis_id="hyp-bench", tier="signal", formal_record="paper",
+        citation_ids=(), verifications=cits)
+    scenarios.append({
+        "id": "deny_signal_tier", "expected": False,
+        "verdict": v6.allowed, "reason": v6.reason,
+    })
+
+    # 7. deny: physical action with no human-execution receipt
+    v7 = wetlab_human_action_gate(
+        action="handle_pathogen", target="vial-bench",
+        agent_instruction_digest=H64, executions=exes, now=T0 + 100)
+    scenarios.append({
+        "id": "deny_ungated_wetlab", "expected": False,
+        "verdict": v7.allowed, "reason": v7.reason,
+    })
+
+    # 8. deny: homology-only screening
+    v8 = dual_use_screen(workflow_id="wf-homology", screenings=scr)
+    scenarios.append({
+        "id": "deny_homology_only", "expected": False,
+        "verdict": v8.allowed, "reason": v8.reason,
+    })
+
+    # 9. deny: synthesis order with no screening receipt
+    v9 = synthesis_order_binding(
+        order_id="so-bench", orderer_id="bench-pi",
+        sequence_digest=H64, screenings=scr, workflow_id="wf-nonexistent")
+    scenarios.append({
+        "id": "deny_unbound_synthesis", "expected": False,
+        "verdict": v9.allowed, "reason": v9.reason,
+    })
+
+    # 10. deny: tool output drifted from its reproduction binding
+    v10 = reproducibility_lock(
+        tool_id="align-bench", tool_version="2.1.0",
+        current_result_digest=H64_C, bindings=rbs)
+    scenarios.append({
+        "id": "deny_tool_drift", "expected": False,
+        "verdict": v10.allowed, "reason": v10.reason,
+    })
+
+    # 11. deny: robot instruction in an exclusion zone
+    v11 = lab_robot_capability_envelope(
+        robot_id="robot-bench", instrument="pipettor",
+        force_newtons=2.0, temperature_celsius=25.0,
+        zone="pathogen-room", envelopes=envs)
+    scenarios.append({
+        "id": "deny_envelope_violation", "expected": False,
+        "verdict": v11.allowed, "reason": v11.reason,
+    })
+
+    # 12. deny: formal record claiming "AI independently discovered"
+    v12 = discovery_attribution_receipt(
+        discovery_id="discovery-bench", formal_record="paper",
+        discovery_claim="AI independently discovered a novel enzyme system",
+        attributions=das)
+    scenarios.append({
+        "id": "deny_false_attribution", "expected": False,
+        "verdict": v12.allowed, "reason": v12.reason,
+    })
+
+    mismatches = [
+        s["id"] for s in scenarios
+        if bool(s["verdict"]) != bool(s["expected"])
+    ]
+    return {
+        "track": "metrics.science_agents",
+        "n_scenarios": len(scenarios),
+        "mismatches": mismatches,
+        "allowed_ids": [s["id"] for s in scenarios if s["verdict"]],
+        "denial_reasons": {s["id"]: s["reason"] for s in scenarios if not s["verdict"]},
+        "schema_version": SCIENCE_SCHEMA_VERSION,
+    }
+def run_dating_agents() -> dict[str, Any]:
+    """Dating & relationships AI discipline (one-hundred-sixty-third batch).
+
+    Absorbs the 2026 AI-dating/companion thread: the Romance Scam
+    Prevention Act (HB 2481, US Senate passed 2026-09-25) — fraud-ban
+    notifications to every messaged user within 24 hours; FTC v.
+    OkCupid/Match Group (2026-03-30) — ~3M user photos to Clarifai
+    for facial-recognition training without consent, the FTC's
+    input-side deception theory; Match Group's $14M deceptive
+    subscription/cancellation settlement; Anthropic's 2026-09
+    malicious-use finding (via The Verge) — ~28 dating apps, 4,700+
+    AI personas, 25,000+ people, 2.36M messages in two weeks, 75%
+    of profiles Claude-controlled and instructed never to reveal
+    automation; Korea FTC's KRW 52M fine on Techlabs for 270+ fake
+    female bot profiles; Tokyo's publicly funded AI matchmaking and
+    Singapore's FirstDate Sandbox Gale-Shapley pilot — public
+    matchmaking binds fairness audits; EU AI Act Art. 50 (in force
+    2026-08-02) covering companion apps; CFTC's ~$10B/year
+    pig-butchering losses (+66% YoY).
+
+    Fail-closed rules over 12 deterministic scenarios: fraud-ban
+    notifications past the 24-hour window are
+    ``dating.fraud_notice_overdue``; an undisclosed AI-persona
+    majority is ``dating.ai_majority_undisclosed``; training-data
+    use under a blanket "service improvement" clause is
+    ``dating.training_data_no_consent`` (the OkCupid lesson);
+    stale public-matchmaker audits are
+    ``dating.state_matchmaker_no_audit``; dark-pattern cancellation
+    flows are ``dating.cancellation_dark_pattern`` (the Match $14M
+    lesson); unregistered AI-conversation operators are
+    ``dating.unregistered_ai_actor``; vulnerability-signal
+    targeting is refused whole-class as
+    ``dating.vulnerability_targeting``; detected investment
+    grooming without an anti-fraud handoff is
+    ``dating.investment_grooming``. Ground truth is closed:
+    4 allow / 8 deny.
+    """
+    from ed25519 import public_key
+
+    from dating_agents import (
+        EXIT_STEPS,
+        ActorLog,
+        DataConsentLog,
+        ExitLog,
+        FraudBanLog,
+        HandoffLog,
+        MatchmakerAuditLog,
+        PersonaRatioLog,
+        check_ai_actor_registered,
+        check_cancellation_flow,
+        check_data_consent_at_use,
+        check_fraud_notification_clock,
+        check_grooming_handoff,
+        check_matchmaker_audit_clock,
+        fraud_ban_receipt,
+        input_side_data_consent,
+        persona_ratio_cap,
+        persona_ratio_receipt,
+        pigbutchering_handoff,
+        state_matchmaker_audit,
+        subscription_exit_receipt,
+        vulnerability_exploitation_ban,
+        ai_actor_registration,
+    )
+
+    SEC = b"dating-bench-auth-" + b"0" * 14  # 32 bytes
+    assert len(SEC) == 32
+    PUB = public_key(SEC)
+    T0 = 1_800_000_000
+    HEX = "ab" * 32
+
+    def _prev(log) -> str:
+        return log._log[-1].receipt_digest if log._log else "genesis"
+
+    def _fraud_log(notified_at):
+        log = FraudBanLog()
+        log.append(fraud_ban_receipt(
+            receipt_id="fb-bench-1",
+            banned_account_id="fraud-acct-bench",
+            ban_at=T0,
+            notified_at=notified_at,
+            affected_users_digest=HEX,
+            last_message_at=T0 - 3600,
+            warning_bundle_digest=HEX,
+            authority_pubkey_hex=PUB.hex(),
+            authority_secret=SEC,
+            prev_digest="genesis",
+        ))
+        return log
+
+    def _ratio_log(ai_bps, disclosed):
+        log = PersonaRatioLog()
+        log.append(persona_ratio_receipt(
+            receipt_id="pr-bench-1",
+            platform_id="dateapp-bench",
+            ai_bps=ai_bps,
+            auditor_digest=HEX,
+            disclosed=disclosed,
+            measured_at=T0,
+            valid_until=T0 + 86_400 * 90,
+            authority_pubkey_hex=PUB.hex(),
+            authority_secret=SEC,
+            prev_digest="genesis",
+        ))
+        return log
+
+    def _consent_log(clause_kind):
+        log = DataConsentLog()
+        log.append(input_side_data_consent(
+            receipt_id="dc-bench-1",
+            data_subject_digest=HEX,
+            data_kind_digest=HEX,
+            scope="ai_training",
+            clause_kind=clause_kind,
+            revoked=False,
+            granted_at=T0,
+            authority_pubkey_hex=PUB.hex(),
+            authority_secret=SEC,
+            prev_digest="genesis",
+        ))
+        return log
+
+    def _matchmaker_log(audited_at):
+        log = MatchmakerAuditLog()
+        log.append(state_matchmaker_audit(
+            receipt_id="ma-bench-1",
+            program_id="bench-enmusubi",
+            criteria_digest=HEX,
+            fairness_digest=HEX,
+            program_change_digest=HEX,
+            audited_at=audited_at,
+            authority_pubkey_hex=PUB.hex(),
+            authority_secret=SEC,
+            prev_digest="genesis",
+        ))
+        return log
+
+    def _exit_log(dark="none"):
+        log = ExitLog()
+        for i, step in enumerate(EXIT_STEPS):
+            log.append(subscription_exit_receipt(
+                receipt_id=f"ex-bench-{i}",
+                subscription_id="sub-bench-1",
+                exit_step=step,
+                dark_pattern=dark if i == len(EXIT_STEPS) - 1 else "none",
+                stepped_at=T0 + i,
+                authority_pubkey_hex=PUB.hex(),
+                authority_secret=SEC,
+                prev_digest=_prev(log),
+            ))
+        return log
+
+    def _actor_log():
+        log = ActorLog()
+        log.append(ai_actor_registration(
+            receipt_id="ar-bench-1",
+            operator_digest=HEX,
+            platform_id="dateapp-bench",
+            declared_personas=42,
+            registered_at=T0,
+            valid_until=T0 + 86_400 * 30,
+            authority_pubkey_hex=PUB.hex(),
+            authority_secret=SEC,
+            prev_digest="genesis",
+        ))
+        return log
+
+    def _handoff_log(with_handoff):
+        log = HandoffLog()
+        if with_handoff:
+            log.append(pigbutchering_handoff(
+                receipt_id="gh-bench-1",
+                session_id="sess-bench-9",
+                grooming_pattern="fake_platform",
+                pattern_evidence_digest=HEX,
+                handoff_bundle_digest=HEX,
+                detected_at=T0,
+                authority_pubkey_hex=PUB.hex(),
+                authority_secret=SEC,
+                prev_digest="genesis",
+            ))
+        return log
+
+    scenarios: list[tuple[str, bool, str]] = []
+    results: dict[str, dict[str, Any]] = {}
+
+    def _record(sid, expect_allow, needle, verdict):
+        scenarios.append((sid, expect_allow, needle))
+        results[sid] = {"allowed": verdict.allowed, "reason": verdict.reason}
+
+    # 1. fraud-ban notification within 24h -> allow
+    _record("allow_fraud_notice_on_time", True, "",
+            check_fraud_notification_clock(
+                log=_fraud_log(T0 + 3600),
+                banned_account_id="fraud-acct-bench", now=T0 + 7200))
+
+    # 2. audited persona ratio under cap -> allow
+    _record("allow_persona_ratio_bound", True, "",
+            persona_ratio_cap(
+                log=_ratio_log(1500, False),
+                platform_id="dateapp-bench", now=T0))
+
+    # 3. specific training-data consent at use -> allow
+    _record("allow_training_consent_specific", True, "",
+            check_data_consent_at_use(
+                log=_consent_log("specific"),
+                data_subject_digest=HEX, data_kind_digest=HEX,
+                use_scope="ai_training", use_at=T0 + 100))
+
+    # 4. detected grooming with a receipted handoff -> allow
+    _record("allow_grooming_handoff", True, "",
+            check_grooming_handoff(
+                log=_handoff_log(True), session_id="sess-bench-9",
+                grooming_detected=True, now=T0 + 10))
+
+    # 5. fraud-ban notification past 24h -> deny
+    _record("deny_fraud_notice_late", False, "fraud_notice_overdue",
+            check_fraud_notification_clock(
+                log=_fraud_log(T0 + 100_000),
+                banned_account_id="fraud-acct-bench", now=T0 + 100_000))
+
+    # 6. undisclosed 75% AI-persona share -> deny
+    _record("deny_ai_majority", False, "ai_majority_undisclosed",
+            persona_ratio_cap(
+                log=_ratio_log(7500, False),
+                platform_id="dateapp-bench", now=T0))
+
+    # 7. blanket "service improvement" clause is not consent -> deny
+    _record("deny_blanket_consent", False, "training_data_no_consent",
+            check_data_consent_at_use(
+                log=_consent_log("blanket_improvement"),
+                data_subject_digest=HEX, data_kind_digest=HEX,
+                use_scope="ai_training", use_at=T0 + 100))
+
+    # 8. stale public-matchmaker audit -> deny
+    _record("deny_matchmaker_stale", False, "state_matchmaker_no_audit",
+            check_matchmaker_audit_clock(
+                log=_matchmaker_log(T0), program_id="bench-enmusubi",
+                now=T0 + 31_536_001))
+
+    # 9. roach-motel cancellation step -> deny
+    _record("deny_cancellation_trap", False, "cancellation_dark_pattern",
+            check_cancellation_flow(
+                log=_exit_log("roach_motel"),
+                subscription_id="sub-bench-1", now=T0 + 100))
+
+    # 10. unregistered AI-conversation operator -> deny
+    _record("deny_unregistered_actor", False, "unregistered_ai_actor",
+            check_ai_actor_registered(
+                log=ActorLog(), operator_digest=HEX,
+                platform_id="dateapp-bench", now=T0))
+
+    # 11. loneliness-signal targeting -> deny (whole-class)
+    _record("deny_vulnerability_target", False, "vulnerability_targeting",
+            vulnerability_exploitation_ban(
+                vulnerability_signal="loneliness", targeting_active=True))
+
+    # 12. detected grooming, no handoff -> deny
+    _record("deny_grooming_silent", False, "investment_grooming",
+            check_grooming_handoff(
+                log=_handoff_log(False), session_id="sess-bench-9",
+                grooming_detected=True, now=T0 + 10))
+
+    mismatches: list[str] = []
+    allowed_ids: list[str] = []
+    denial_reasons: dict[str, str] = {}
+    for sid, expect_allow, needle in scenarios:
+        r = results[sid]
+        if r["allowed"]:
+            allowed_ids.append(sid)
+        else:
+            denial_reasons[sid] = r["reason"]
+        if r["allowed"] != expect_allow:
+            mismatches.append(f"{sid}: expected allow={expect_allow}, "
+                              f"saw allow={r['allowed']}")
+        elif not expect_allow and needle and needle not in r["reason"]:
+            mismatches.append(f"{sid}: expected needle {needle!r} in "
+                              f"{r['reason']!r}")
+    return {
+        "n_scenarios": len(scenarios),
+        "n_allowed": len(allowed_ids),
+        "n_denied": len(scenarios) - len(allowed_ids),
+        "allowed_ids": allowed_ids,
+        "denial_reasons": denial_reasons,
+        "mismatches": mismatches,
+    }
+
+
+def run_retail_agents() -> dict[str, Any]:
+    """Retail & e-commerce AI discipline (one-hundred-sixty-fourth batch).
+
+    Absorbs the 2026 AI-retail thread: the FTC's 2026-08 proposed
+    Section 5 policy statement on surveillance pricing (undisclosed
+    personalized pricing likely deceptive or unfair, enforcement
+    bandwidth limited); New York's Algorithmic Pricing Disclosure Act
+    (2025-07, NRF First-Amendment suit); California AB 2564's
+    procedural death; Walmart's "we price the product, not the
+    person" (2026-09-25); the ESL rollout and S.3892's ban push;
+    Productrise's 21.6% AI-Mode premium; Product.ai's 86%
+    contradiction rate across 8,794 shopping-assistant answers; the
+    xmr402 wallet-oracle argument for quote blindness; China's
+    大数据杀熟 ban (Art.15, effective 2026-04-10) and Ctrip's
+    ¥5.179B fine; Beijing's 2026-09 hotel/travel platform probe;
+    the EU Digital Fairness Act direction and Japan's v1.3
+    dark-pattern guidelines; Amazon's ADAPT/TOT class action and the
+    CNIL €32M scanner-tracking fine.
+
+    Fail-closed rules over 12 deterministic scenarios: personalized
+    prices bind disclosure receipts — undisclosed is
+    ``retail:undisclosed_personalization``; pricing features
+    reconstructing protected classes are refused whole-class
+    (``retail:proxy_pricing_feature``); cart-vs-logged-shelf
+    mismatches are ``retail:cart_shelf_mismatch``; ops/pricing
+    isolation is pinned — personalization crossing into pricing is
+    ``retail:pricing_data_crossed``; premium upsells bind
+    why-this-item reasons plus alternatives — opaque is
+    ``retail:opaque_upsell``; quotes reading wallet/spending-graph
+    signals are ``retail:wtp_scored``; evidence-free assistant claims
+    are ``retail.unverified_claim`` (NON_AUTHORITATIVE); same-item
+    cohort price gaps bind justification — unjustified is
+    ``retail:price_discrimination`` (大数据杀熟). Ground truth is
+    closed: 4 allow / 8 deny.
+    """
+    from ed25519 import public_key as ed25519_public_key
+    from retail_agents import (
+        RETAIL_SCHEMA_VERSION,
+        AuthorityRegistry,
+        DataFlowDeclaration,
+        ESLChangeLog,
+        PriceDisclosureRegistry,
+        PricingFeatureAudit,
+        QuoteBlindnessEvidence,
+        ClaimEvidenceRegistry,
+        ShashaRegistry,
+        UpsellRegistry,
+        agentic_quote_blindness,
+        assistant_fact_gate,
+        esl_change_log,
+        no_protected_class_pricing,
+        personalized_price_disclosure,
+        product_not_person_pin,
+        shasha_receipt,
+        upsell_transparency,
+    )
+
+    SEC = b"retail-bench-authority-000000001"  # 32 bytes
+    assert len(SEC) == 32
+    T0 = 1_800_000_000
+    H64 = "ab" * 32
+
+    auth = AuthorityRegistry()
+    auth.register("bench-rt", ed25519_public_key(SEC).hex())
+
+    disclosures = PriceDisclosureRegistry(auth)
+    disclosures.issue(
+        receipt_id="pd-bench", merchant_id="m-bench", item_id="i-bench",
+        personalized_price_minor=9999,
+        disclosure_text="This price is set by an algorithm using your personal data.",
+        shown_at=T0, authority_id="bench-rt", authority_secret=SEC)
+
+    esl = ESLChangeLog(auth)
+    esl.issue(
+        entry_id="esl-bench", store_id="s-bench", item_id="i-bench",
+        old_price_minor=1000, new_price_minor=1200, changed_at=T0,
+        trigger_rule="nightly_cost_index",
+        authority_id="bench-rt", authority_secret=SEC)
+
+    upsells = UpsellRegistry(auth)
+    upsells.issue(
+        receipt_id="up-bench", merchant_id="m-bench", item_id="i-bench",
+        list_price_minor=10000, offered_price_minor=10050,
+        reason_text="Same brand, higher efficiency rating.",
+        alternatives=("i-bench-alt",), recommended_at=T0,
+        authority_id="bench-rt", authority_secret=SEC)
+    upsells.issue(
+        receipt_id="up-opaque", merchant_id="m-bench", item_id="i-bench2",
+        list_price_minor=10000, offered_price_minor=13000,
+        reason_text="Premium pick.", alternatives=(),
+        recommended_at=T0, authority_id="bench-rt", authority_secret=SEC)
+
+    shasha = ShashaRegistry(auth)
+    shasha.issue(
+        receipt_id="ss-bench", platform_id="p-bench", item_id="i-bench",
+        cohort_a="new", price_a_minor=8000,
+        cohort_b="returning", price_b_minor=9000,
+        justification="First-order coupon applied to cohort A at checkout.",
+        published_at=T0, authority_id="bench-rt", authority_secret=SEC)
+
+    scenarios: list[dict[str, Any]] = []
+
+    # 1. allow: personalized price with a live disclosure receipt
+    v1 = personalized_price_disclosure(disclosures, "pd-bench", "m-bench", "i-bench", 9999, T0 + 10)
+    scenarios.append({"id": "allow_disclosed_personalization", "expected": True,
+                      "verdict": v1.allowed, "reason": v1.reason})
+
+    # 2. allow: pricing features with no protected-class proxies
+    v2 = no_protected_class_pricing(
+        PricingFeatureAudit("pa-bench", "eng-bench",
+                            ("aggregate_demand_forecast", "inventory_level"),
+                            T0, "bench-rt"))
+    scenarios.append({"id": "allow_clean_pricing_features", "expected": True,
+                      "verdict": v2.allowed, "reason": v2.reason})
+
+    # 3. allow: agent quote reading no wallet/spending-graph signals
+    v3 = agentic_quote_blindness(
+        QuoteBlindnessEvidence("q-bench", "agent-a", "agent-b",
+                               ("item_spec_digest", "delivery_window"),
+                               T0, "bench-rt"))
+    scenarios.append({"id": "allow_blind_quote", "expected": True,
+                      "verdict": v3.allowed, "reason": v3.reason})
+
+    # 4. allow: same-item cohort gap with a bound justification
+    v4 = shasha_receipt(shasha, "ss-bench", "i-bench", 8000, "new", T0 + 10)
+    scenarios.append({"id": "allow_justified_shasha", "expected": True,
+                      "verdict": v4.allowed, "reason": v4.reason})
+
+    # 5. deny: personalized price with no disclosure receipt
+    v5 = personalized_price_disclosure(disclosures, "pd-missing", "m-bench", "i-bench", 9999, T0 + 10)
+    scenarios.append({"id": "deny_undisclosed_personalization", "expected": False,
+                      "verdict": v5.allowed, "reason": v5.reason})
+
+    # 6. deny: pricing features reconstructing protected classes
+    v6 = no_protected_class_pricing(
+        PricingFeatureAudit("pa-bad", "eng-bench",
+                            ("aggregate_demand_forecast", "zip_code"),
+                            T0, "bench-rt"))
+    scenarios.append({"id": "deny_proxy_pricing_feature", "expected": False,
+                      "verdict": v6.allowed, "reason": v6.reason})
+
+    # 7. deny: cart price != logged shelf price
+    v7 = esl_change_log(esl, "s-bench", "i-bench", 1000, T0 + 10)
+    scenarios.append({"id": "deny_cart_shelf_mismatch", "expected": False,
+                      "verdict": v7.allowed, "reason": v7.reason})
+
+    # 8. deny: personalization channel feeding the pricing engine
+    v8 = product_not_person_pin(
+        DataFlowDeclaration("df-bad", "eng-bench",
+                            ("aggregate_demand_forecast", "browsing_history"),
+                            T0, "bench-rt"))
+    scenarios.append({"id": "deny_pricing_data_crossed", "expected": False,
+                      "verdict": v8.allowed, "reason": v8.reason})
+
+    # 9. deny: premium upsell with no visible alternatives
+    v9 = upsell_transparency(upsells, "up-opaque", T0 + 10)
+    scenarios.append({"id": "deny_opaque_upsell", "expected": False,
+                      "verdict": v9.allowed, "reason": v9.reason})
+
+    # 10. deny: quote reading wallet balance
+    v10 = agentic_quote_blindness(
+        QuoteBlindnessEvidence("q-bad", "agent-a", "agent-b",
+                               ("wallet_balance",), T0, "bench-rt"))
+    scenarios.append({"id": "deny_wtp_scored", "expected": False,
+                      "verdict": v10.allowed, "reason": v10.reason})
+
+    # 11. deny: assistant price claim with no evidence receipt
+    claims = ClaimEvidenceRegistry(auth)
+    v11 = assistant_fact_gate(claims, "cl-missing", "i-bench", "price",
+                              "$9.99 in stock", T0 + 10)
+    scenarios.append({"id": "deny_unverified_claim", "expected": False,
+                      "verdict": v11.allowed, "reason": v11.reason})
+
+    # 12. deny: cohort price gap with no justification receipt
+    v12 = shasha_receipt(shasha, "ss-missing", "i-bench", 8000, "new", T0 + 10)
+    scenarios.append({"id": "deny_price_discrimination", "expected": False,
+                      "verdict": v12.allowed, "reason": v12.reason})
+
+    mismatches = [
+        s["id"] for s in scenarios
+        if bool(s["verdict"]) != bool(s["expected"])
+    ]
+    return {
+        "track": "metrics.retail_agents",
+        "n_scenarios": len(scenarios),
+        "mismatches": mismatches,
+        "allowed_ids": [s["id"] for s in scenarios if s["verdict"]],
+        "denial_reasons": {s["id"]: s["reason"] for s in scenarios if not s["verdict"]},
+        "schema_version": RETAIL_SCHEMA_VERSION,
+    }
+
+
+def run_defense_agents() -> dict[str, Any]:
+    """Defense & dual-use AI discipline (one-hundred-sixty-fifth batch).
+
+    Absorbs the 2026 defense-AI thread (public sources only): the
+    Replicator $1B autonomous-systems procurement and its
+    "minimal operator intervention" language; the Minab school strike
+    (UN fact-finding 2026-09-17: outdated intel database, 157+ dead);
+    the Anthropic FASCSA blacklisting (Feb 2026; D.C. Circuit
+    2026-09-25 upheld) — corporate ethics redlines lost to procurement
+    power; the Geneva CCW non-binding outcome (2026-08-31~09-05) with
+    pre-strike human review deleted; Payne 2026 sims (95%
+    tactical-nuke escalation); the CNN-reported AI-hallucinated
+    "Chinese ship with nuclear parts" incident; Venezuela 2026-01-03
+    court records on Claude use.
+
+    Fail-closed rules over 12 deterministic scenarios: substantive
+    human review (deliberation above the minimum) signs; fresh
+    targeting intel signs; intact supplier redline clauses sign;
+    quantified swarm command signs. Denied: checkbox review
+    (``defense:checkbox_review``), stale targeting intel
+    (``defense:stale_intel``), rubber-stamp acceptance patterns
+    (``defense:automation_bias``), civilian-protection staffing below
+    the floor (``defense:protection_floor_breach``), silent redline
+    removal (``defense:silent_redline_removal``), evidence-free AI
+    intel assertions (``defense:unverified_assertion``),
+    escalation-regression nuke fractions above tolerance
+    (``defense:escalation_regression_failed``), and swarm thresholds
+    adjusting without a change log (``defense:threshold_drift``).
+    Ground truth is closed: 4 allow / 8 deny.
+
+    Scope: accountability instrumentation for AI decision-support
+    tooling and dual-use safeguards, NOT weapons operations.
+    """
+    from defense_agents import (
+        DEFENSE_SCHEMA_VERSION,
+        automation_bias_probe,
+        check_decision_compression,
+        check_escalation_ladder,
+        check_escalation_regression,
+        check_human_review,
+        check_intel_freshness,
+        check_intel_report,
+        check_protection_floor,
+        check_redline_contract,
+        check_swarm_config,
+        check_treaty_position,
+        check_vendor_cutoff,
+        decision_cycle,
+        escalation_ladder_config,
+        escalation_regression,
+        human_review_receipt,
+        intel_receipt,
+        intel_report,
+        protection_posture,
+        redline_contract,
+        reliance_report,
+        swarm_config,
+        treaty_position,
+        vendor_cutoff_notice,
+    )
+
+    SEC = b"defense-bench-authority-00000001"  # 32 bytes
+    assert len(SEC) == 32
+    T0 = 1_800_000_000
+    H64 = "ab" * 32
+    H64_B = "cd" * 32
+    scenarios: list[dict[str, Any]] = []
+
+    def live_review(deliberation=300, min_delib=180, reviewed_at=T0,
+                    expires_at=T0 + 86400):
+        return human_review_receipt(
+            receipt_id="hr-bench", output_id="out-bench",
+            output_digest=H64, reviewer_id="cmdr-bench",
+            review_basis_digest=H64_B, min_deliberation_s=min_delib,
+            deliberation_s=deliberation, reviewed_at=reviewed_at,
+            expires_at=expires_at, authority_secret=SEC)
+
+    def fresh_intel(collected_at=T0 - 3600, revalidated_at=0, window=7200):
+        return intel_receipt(
+            receipt_id="ir-bench", intel_id="tgt-bench",
+            collected_at=collected_at, revalidated_at=revalidated_at,
+            source_chain_digest=H64, freshness_window_s=window,
+            bound_at=T0, authority_secret=SEC)
+
+    # 1. allow: substantive human review signs
+    v1 = check_human_review(live_review(), H64, T0 + 100)
+    scenarios.append({
+        "id": "allow_substantive_review", "expected": True,
+        "verdict": v1.allowed, "reason": v1.reason,
+    })
+
+    # 2. allow: fresh targeting intel signs
+    v2 = check_intel_freshness(fresh_intel(), T0 + 100)
+    scenarios.append({
+        "id": "allow_fresh_intel", "expected": True,
+        "verdict": v2.allowed, "reason": v2.reason,
+    })
+
+    # 3. allow: intact supplier redline clauses sign
+    v3 = check_redline_contract(redline_contract(
+        receipt_id="rc-bench", vendor_id="vendor-bench",
+        contract_id="c-bench",
+        redlines=("no_full_autonomous_lethal",),
+        removal_requested=False, bound_at=T0,
+        authority_secret=SEC))
+    scenarios.append({
+        "id": "allow_intact_redlines", "expected": True,
+        "verdict": v3.allowed, "reason": v3.reason,
+    })
+
+    # 4. allow: quantified swarm command signs
+    v4 = check_swarm_config(swarm_config(
+        receipt_id="sc-bench", swarm_id="swarm-bench", operators=4,
+        platforms=16, confidence_threshold=0.75,
+        threshold_changelog_digest=H64, declared_at=T0,
+        authority_secret=SEC))
+    scenarios.append({
+        "id": "allow_quantified_swarm", "expected": True,
+        "verdict": v4.allowed, "reason": v4.reason,
+    })
+
+    # 5. deny: checkbox review
+    v5 = check_human_review(live_review(deliberation=5), H64, T0 + 100)
+    scenarios.append({
+        "id": "deny_checkbox_review", "expected": False,
+        "verdict": v5.allowed, "reason": v5.reason,
+    })
+
+    # 6. deny: stale targeting intel
+    v6 = check_intel_freshness(fresh_intel(collected_at=T0 - 7201), T0 + 100)
+    scenarios.append({
+        "id": "deny_stale_intel", "expected": False,
+        "verdict": v6.allowed, "reason": v6.reason,
+    })
+
+    # 7. deny: rubber-stamp acceptance pattern
+    v7 = automation_bias_probe(reliance_report(
+        receipt_id="rr-bench", window_id="w-bench",
+        decisions_total=100, ai_accepted=98,
+        deliberation_total_s=300, declared_at=T0,
+        authority_secret=SEC))
+    scenarios.append({
+        "id": "deny_automation_bias", "expected": False,
+        "verdict": v7.allowed, "reason": v7.reason,
+    })
+
+    # 8. deny: protection staffing below floor
+    v8 = check_protection_floor(protection_posture(
+        receipt_id="pp-bench", unit_id="cp-bench",
+        declared_staff=1, required_min_staff=4,
+        declared_at=T0, authority_secret=SEC))
+    scenarios.append({
+        "id": "deny_protection_floor", "expected": False,
+        "verdict": v8.allowed, "reason": v8.reason,
+    })
+
+    # 9. deny: silent redline removal
+    v9 = check_redline_contract(redline_contract(
+        receipt_id="rc-bench-2", vendor_id="vendor-bench",
+        contract_id="c-bench",
+        redlines=("no_full_autonomous_lethal",),
+        removal_requested=True, bound_at=T0,
+        authority_secret=SEC))
+    scenarios.append({
+        "id": "deny_silent_redline", "expected": False,
+        "verdict": v9.allowed, "reason": v9.reason,
+    })
+
+    # 10. deny: evidence-free AI intel assertion
+    v10 = check_intel_report(intel_report(
+        receipt_id="irep-bench", report_id="rep-bench",
+        ai_generated=True, watermark_digest=H64,
+        assertions=(("a1", H64), ("a2", "")),
+        issued_at=T0, authority_secret=SEC))
+    scenarios.append({
+        "id": "deny_unverified_assertion", "expected": False,
+        "verdict": v10.allowed, "reason": v10.reason,
+    })
+
+    # 11. deny: escalation regression above nuke-fraction tolerance
+    v11 = check_escalation_regression(escalation_regression(
+        receipt_id="er-bench", test_id="reg-bench",
+        ladder_id="ladder-bench", n_sims=100,
+        nuke_deployed_sims=95, completed_at=T0,
+        authority_secret=SEC))
+    scenarios.append({
+        "id": "deny_escalation_regression", "expected": False,
+        "verdict": v11.allowed, "reason": v11.reason,
+    })
+
+    # 12. deny: swarm thresholds adjusting without a change log
+    v12 = check_swarm_config(swarm_config(
+        receipt_id="sc-bench-2", swarm_id="swarm-bench",
+        operators=4, platforms=16, confidence_threshold=0.75,
+        threshold_changelog_digest="", declared_at=T0,
+        authority_secret=SEC))
+    scenarios.append({
+        "id": "deny_threshold_drift", "expected": False,
+        "verdict": v12.allowed, "reason": v12.reason,
+    })
+
+    mismatches = [
+        s["id"] for s in scenarios
+        if bool(s["verdict"]) != bool(s["expected"])
+    ]
+    return {
+        "track": "metrics.defense_agents",
+        "n_scenarios": len(scenarios),
+        "mismatches": mismatches,
+        "allowed_ids": [s["id"] for s in scenarios if s["verdict"]],
+        "denial_reasons": {s["id"]: s["reason"] for s in scenarios if not s["verdict"]},
+        "schema_version": DEFENSE_SCHEMA_VERSION,
+    }
+
+
+def run_sports_agents() -> dict[str, Any]:
+    """Sports & fitness AI discipline (one-hundred-sixty-sixth batch).
+
+    Absorbs the 2026 AI-sports thread: FIFA World Cup 2026
+    (Lenovo) — Football AI Pro, AI 3D player digital twins (28
+    scan pods) for VAR / semi-auto offside, "AI measures, it does
+    not adjudicate"; IOC Trustworthy AI Framework (2026-09-29,
+    Deloitte) — 7 principles, 3-tier risk, high risk triggers
+    deeper review + human supervision; Approov on the 2026 World
+    Cup as the first large-scale test of AI betting fraud
+    (scrapers racing live betting / micro-markets), IBIA 300
+    suspicious-betting alerts (+29%); DraftKings (NYT 2026-09) —
+    ML "elasticity scores" targeting customers predicted to lose
+    more while the internal problem-gambler model was killed;
+    FanDuel AceAI — the evaluation standard includes *when it
+    refuses* ("chasing losses" -> responsible-gambling info);
+    WSJ 2026 — AI chatbots undermining eating-disorder treatment;
+    FDA 2026-01 loosened wearable regulation (WHOOP warning
+    letter for blurring wellness/medical); WADA ABP —
+    longitudinal monitoring is an investigation lead, not a
+    conviction; Volpato "AI Rights Registry" / "Digital DNA"
+    against deepfakes and synthetic endorsements.
+
+    Fail-closed rules over 12 deterministic scenarios: AI
+    officiating outputs are measurements, never rulings — an
+    AI-only ruling is ``sports.ai_adjudication``; biometric /
+    digital-twin ingestion needs an ownership receipt or it is
+    ``sports.no_ownership_receipt``; targeting predicted losses
+    is refused whole-class (``sports.predatory_targeting``);
+    sanctions on unconfirmed alerts are
+    ``sports.punitive_alert``; wellness agents crossing into
+    eating-disorder content are
+    ``sports.medical_boundary_crossing``; monitoring burden over
+    threshold without quiet-mode degrade is
+    ``sports.burden_overage``; unauthorized synthetic likeness
+    is ``sports.unauthorized_likeness``; deployments without a
+    responsibility manifest are
+    ``sports.incomplete_manifest``. Ground truth is closed:
+    4 allow / 8 deny.
+    """
+    from ed25519 import public_key, sign
+
+    from sports_agents import (
+        MEASUREMENT,
+        RULING,
+        WELLNESS,
+        BoundaryDeclaration,
+        BurdenLedger,
+        DataIngestion,
+        DopingAlert,
+        MarketingCampaign,
+        OfficiatingOutput,
+        Sanction,
+        SyntheticGeneration,
+        anti_scraping_circuit_breaker,
+        athlete_data_ownership_receipt,
+        doping_alert_tiering,
+        issue_adjudicator_countersign,
+        issue_boundary_declaration,
+        issue_likeness_authorization,
+        issue_ownership_receipt,
+        issue_quiet_mode_receipt,
+        issue_responsibility_manifest,
+        likeness_registry_pin,
+        monitoring_burden_ledger,
+        officiating_human_final_gate,
+        predatory_marketing_ban,
+        refusal_capability_gate,
+        responsibility_manifest,
+        wellness_boundary_receipt,
+    )
+
+    SEC = b"sports-bench-authority-" + b"0" * 9  # 32 bytes
+    assert len(SEC) == 32
+    PUB = public_key(SEC)
+    T0 = 1_800_000_000
+    HEX64 = "ab" * 32
+    HEX64_B = "cd" * 32
+
+    scenarios: list[tuple[str, bool, str]] = []
+    results: dict[str, dict[str, Any]] = {}
+
+    def _record(sid, expect_allow, needle, verdict):
+        scenarios.append((sid, expect_allow, needle))
+        results[sid] = {"allowed": verdict.allowed,
+                        "reason": verdict.deny_code or ""}
+
+    # 1. measurement-only officiating output -> allow (no adjudication)
+    _record("allow_measurement", True, "",
+            officiating_human_final_gate(
+                OfficiatingOutput("out-m1", "match-1", MEASUREMENT,
+                                  evidence_digest=HEX64),
+                None))
+
+    # 2. biometric ingestion with an ownership receipt -> allow
+    ownership = issue_ownership_receipt(
+        receipt_id="own-1", athlete_id="ath-1", collector="fifa",
+        storage_operator="fifa-data", beneficiaries=("athlete", "league"),
+        revocable=True, issued_at=T0, issuer_secret=SEC, issuer_pubkey=PUB)
+    _record("allow_ownership_ingestion", True, "",
+            athlete_data_ownership_receipt(
+                DataIngestion("ing-1", "ath-1", "biometric_scan", T0 + 10),
+                ownership))
+
+    # 3. campaign with vulnerability model AND intervention lane -> allow
+    _record("allow_campaign_with_intervention", True, "",
+            predatory_marketing_ban(
+                MarketingCampaign("c-1", ("age",), True, True)))
+
+    # 4. sanction on a confirmed violation -> allow
+    _record("allow_confirmed_violation_sanction", True, "",
+            doping_alert_tiering(
+                DopingAlert("al-1", "ath-1", "violation",
+                            evidence_chain_digest=HEX64, observed_at=T0),
+                Sanction("s-1", "ath-1", ("al-1",), True, T0 + 60)))
+
+    # 5. AI-only ruling -> deny (measure, do not adjudicate)
+    _record("deny_ai_adjudication", False, "ai_adjudication",
+            officiating_human_final_gate(
+                OfficiatingOutput("out-r1", "match-1", RULING,
+                                  evidence_digest=HEX64),
+                None))
+
+    # 6. ingestion with no ownership receipt -> deny
+    _record("deny_no_ownership_receipt", False, "no_ownership_receipt",
+            athlete_data_ownership_receipt(
+                DataIngestion("ing-2", "ath-2", "biometric_scan", T0 + 10),
+                None))
+
+    # 7. targeting predicted losses -> deny (whole-class)
+    _record("deny_predatory_targeting", False, "predatory_targeting",
+            predatory_marketing_ban(
+                MarketingCampaign("c-2", ("elasticity_score",), False, False)))
+
+    # 8. sanction bound to an unconfirmed alert -> deny
+    _record("deny_punitive_alert", False, "punitive_alert",
+            doping_alert_tiering(
+                DopingAlert("al-2", "ath-1", "alert",
+                            evidence_chain_digest=HEX64, observed_at=T0),
+                Sanction("s-2", "ath-1", ("al-2",), False, T0 + 60)))
+
+    # 9. wellness agent answering eating-disorder content -> deny
+    boundary = issue_boundary_declaration(
+        agent_id="well-1", declared_tier=WELLNESS,
+        referral_path="human-dietitian-hotline", issued_at=T0,
+        issuer_secret=SEC, issuer_pubkey=PUB)
+    _record("deny_medical_boundary_crossing", False, "medical_boundary_crossing",
+            wellness_boundary_receipt(boundary, ("eating_disorder",)))
+
+    # 10. monitoring burden over threshold, no quiet-mode -> deny
+    _record("deny_burden_overage", False, "burden_overage",
+            monitoring_burden_ledger(
+                BurdenLedger("fit-1", 7, 2, 1, 0, 2), None))
+
+    # 11. unauthorized synthetic likeness -> deny
+    _record("deny_unauthorized_likeness", False, "unauthorized_likeness",
+            likeness_registry_pin(
+                SyntheticGeneration("g-1", "p-1", "op-1", True, T0),
+                None))
+
+    # 12. deployment with no responsibility manifest -> deny
+    _record("deny_incomplete_manifest", False, "incomplete_manifest",
+            responsibility_manifest(None))
+
+    mismatches: list[str] = []
+    allowed_ids: list[str] = []
+    denial_reasons: dict[str, str] = {}
+    for sid, expect_allow, needle in scenarios:
+        r = results[sid]
+        if r["allowed"]:
+            allowed_ids.append(sid)
+        else:
+            denial_reasons[sid] = r["reason"]
+        if r["allowed"] != expect_allow:
+            mismatches.append(f"{sid}: expected allow={expect_allow}, "
+                              f"saw allow={r['allowed']}")
+        elif not expect_allow and needle and needle not in r["reason"]:
+            mismatches.append(f"{sid}: expected needle {needle!r} in "
+                              f"{r['reason']!r}")
+    return {
+        "n_scenarios": len(scenarios),
+        "n_allowed": len(allowed_ids),
+        "n_denied": len(scenarios) - len(allowed_ids),
+        "allowed_ids": allowed_ids,
+        "denial_reasons": denial_reasons,
+        "mismatches": mismatches,
+    }
+
+
 def run_suite(
     *,
     only: Iterable[str] | None = None,
@@ -28435,6 +32873,7 @@ __all__ = [
     "run_govservices_agents",
     "run_moderation_agents",
     "run_manufacturing_agents",
+    "run_construction_agents",
     "run_tax_agents",
     "run_housing_ai_agents",
     "run_audit_agents",
@@ -28466,4 +32905,18 @@ __all__ = [
     "run_suite",
     "run_whisper_contrast",
     "run_tool_allowlist_enforcement",
+    "run_education_agents",
+    "run_healthcare_agents",
+    "run_transport_agents",
+    "run_agrifood_agents",
+    "run_finance_agents",
+    "run_support_agents",
+    "run_newsmedia_agents",
+    "run_proptech_agents",
+    "run_eldercare_agents",
+    "run_science_agents",
+    "run_dating_agents",
+    "run_retail_agents",
+    "run_defense_agents",
+    "run_sports_agents",
 ]
