@@ -693,6 +693,10 @@ class AgentRuntime:
             self.permissions = PermissionEngine(
                 replace(self.permissions.config, can_use_tool=can_use_tool),
                 multisig_pubkeys=self.permissions.multisig_pubkeys,
+                # P2: a late callback attachment must not drop the
+                # pre-trade risk limits or the audit sink.
+                pretrade=self.permissions.pretrade,
+                audit_sink=self.permissions.audit_sink,
             )
         for spec in self.tools.specs():
             if not self.permissions.knows(spec.name):
@@ -1092,6 +1096,22 @@ class AgentRuntime:
             # Ceilings are checked before spending, never after.
             stop = self._ceiling_stop(state)
             if stop is not None:
+                # B5: budget stops must be visible in the denial ledger like
+                # every other refusal, not just a run-subtype string.
+                if stop == "error_max_budget_usd":
+                    reason = (
+                        f"run budget exhausted (${self.budget.total_cost_usd:.6f} >= "
+                        f"${config.max_budget_usd:.6f}), run stopped before turn {turn_index}"
+                    )
+                    state.denials.append(
+                        Denial(
+                            tool="(run)",
+                            source="limit:max_budget_usd",
+                            reason=reason,
+                            agent=config.agent,
+                            turn_index=turn_index,
+                        )
+                    )
                 yield self._finish(state, stop)
                 return
             if should_compact(state.transcript, config.compaction_threshold_tokens):
@@ -1931,6 +1951,31 @@ class AgentRuntime:
             turn_index=turn_index,
             agent=self.config.agent,
         )
+        # P3: hallucinated-tool probing must not be audit-invisible. Record
+        # the refusal in the denial ledger and the session transcript like
+        # every other gate refusal.
+        state.denials.append(
+            Denial(
+                tool=call.name,
+                source="unknown_tool",
+                reason=reason,
+                agent=self.config.agent,
+                turn_index=turn_index,
+            )
+        )
+        self.sessions.append(
+            "denial",
+            {
+                "agent": self.config.agent,
+                **Denial(
+                    tool=call.name,
+                    source="unknown_tool",
+                    reason=reason,
+                    agent=self.config.agent,
+                    turn_index=turn_index,
+                ).as_dict(),
+            },
+        )
         return _Refused(block, report, None)
 
     def _refuse_by_hook(
@@ -2256,9 +2301,19 @@ class AgentRuntime:
         # F3: Stop child delegation when parent budget is exhausted
         if self.config.max_budget_usd is not None and self.budget.exhausted:
             reason = f"parent budget exhausted (${self.budget.total_cost_usd:.6f} >= ${self.config.max_budget_usd:.6f}), cannot spawn child"
+            # B5: record the budget block in the denial ledger.
+            state.denials.append(
+                Denial(
+                    tool=spec.name,
+                    source="limit:max_budget_usd",
+                    reason=reason,
+                    agent=self.config.agent,
+                    turn_index=turn_index,
+                )
+            )
             return (
                 ToolResultBlock(tool_use_id=call.id, content=reason, is_error=True),
-                ToolCallReport(name=spec.name, call_id=call.id, is_error=True, permission_source="budget", turn_index=turn_index, agent=self.config.agent),
+                ToolCallReport(name=spec.name, call_id=call.id, is_error=True, denied=True, permission_source="budget", turn_index=turn_index, agent=self.config.agent),
                 "error_max_budget_usd",
             )
 
@@ -2460,7 +2515,17 @@ class AgentRuntime:
                     allowed_tools=child_allowed,
                     disallowed_tools=child_disallowed,
                     can_use_tool=self.permissions.config.can_use_tool,
-                )
+                    # P1/D1: a child must not escape the parent's enforcement
+                    # posture. Dropping these fields would let a delegated
+                    # agent bypass the parent's m-of-n approval requirement,
+                    # decision model, pre-trade risk limits, and audit sink.
+                    decision_model=self.permissions.config.decision_model,
+                    decision_policy=self.permissions.config.decision_policy,
+                    multisig=self.permissions.config.multisig,
+                ),
+                multisig_pubkeys=self.permissions.multisig_pubkeys,
+                pretrade=self.permissions.pretrade,
+                audit_sink=self.permissions.audit_sink,
             ),
             hooks=self.hooks,
             agents=self.agents,

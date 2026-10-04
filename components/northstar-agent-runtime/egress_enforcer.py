@@ -38,9 +38,11 @@ hash-chained audit feed. Deny codes are stable and dot-namespaced under
 
 from __future__ import annotations
 
+import hashlib
 import ipaddress
 import re
 import secrets
+import threading
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -312,7 +314,10 @@ class ApprovalReceipt:
     arguments_digest: str
     approver_id: str
     decided_at: float
-    signature: str  # hex Ed25519 over the canonical receipt body.
+    # A2: the sha256 of the exact request body the approver saw. Without
+    # this, an approved destination + swapped body still verifies.
+    body_sha256: str = ""
+    signature: str = ""  # hex Ed25519 over the canonical receipt body.
 
     def _signing_body(self) -> dict[str, Any]:
         return {
@@ -322,6 +327,7 @@ class ApprovalReceipt:
             "arguments_digest": self.arguments_digest,
             "approver_id": self.approver_id,
             "decided_at": self.decided_at,
+            "body_sha256": self.body_sha256,
         }
 
     def as_dict(self) -> dict[str, Any]:
@@ -338,9 +344,14 @@ def build_approval_receipt(
     approver_id: str,
     approver_seed: bytes,
     decided_at: float | None = None,
+    body: bytes | None = None,
 ) -> ApprovalReceipt:
     """Sign an approval receipt. Called by the approver's side (which holds
-    the private key), never by the agent."""
+    the private key), never by the agent.
+
+    ``body`` is the exact request body the approver saw; its sha256 is bound
+    into the signature so a swapped body fails closed at the enforcer.
+    """
     for label, value in (
         ("card_id", card_id),
         ("call_id", call_id),
@@ -358,6 +369,7 @@ def build_approval_receipt(
         arguments_digest=str(arguments_digest),
         approver_id=str(approver_id),
         decided_at=ts,
+        body_sha256=hashlib.sha256(body or b"").hexdigest(),
         signature="",
     )
     sig = ed_sign(bytes(approver_seed), jcs_canonical_json(unsigned._signing_body()))
@@ -367,6 +379,7 @@ def build_approval_receipt(
         arguments_digest=unsigned.arguments_digest,
         approver_id=unsigned.approver_id,
         decided_at=unsigned.decided_at,
+        body_sha256=unsigned.body_sha256,
         signature=sig.hex(),
     )
 
@@ -439,6 +452,9 @@ class EgressBudgetLedger:
 
     def __init__(self) -> None:
         self._counters: dict[tuple[str, str, int], int] = {}
+        # B3: the sidecar serves requests on a thread pool; check-and-set
+        # must be atomic or concurrent requests can overshoot the cap.
+        self._lock = threading.Lock()
 
     @staticmethod
     def _bucket(now: float) -> int:
@@ -455,11 +471,12 @@ class EgressBudgetLedger:
         if nbytes < 0:
             return False
         key = (agent_id, destination, self._bucket(now))
-        used = self._counters.get(key, 0)
-        if used + nbytes > limit:
-            return False
-        self._counters[key] = used + nbytes
-        return True
+        with self._lock:
+            used = self._counters.get(key, 0)
+            if used + nbytes > limit:
+                return False
+            self._counters[key] = used + nbytes
+            return True
 
 
 def _ip_permitted(ip_text: str, rule: DestinationRule) -> bool:
@@ -683,6 +700,10 @@ def authorize_egress(
             secrets.compare_digest(str(receipt.card_id or ""), str(card.card_id or ""))
             and secrets.compare_digest(str(receipt.call_id or ""), str(request.call_id or ""))
             and secrets.compare_digest(str(receipt.arguments_digest or ""), str(card.arguments_digest or ""))
+            # A2: the body the approver signed must be the body being sent.
+            and secrets.compare_digest(str(receipt.body_sha256 or ""), hashlib.sha256(body).hexdigest())
+            # D5: the card's agent must be the requesting agent.
+            and secrets.compare_digest(str(request.agent_id or ""), str((card.provenance.agent if card.provenance else "") or ""))
             and verify_card_binding(card, call_id=request.call_id, arguments=request.arguments)
             and str(receipt.approver_id or "") in keys
             and verify_approval_receipt(receipt, keys[str(receipt.approver_id or "")])
@@ -696,12 +717,17 @@ def authorize_egress(
             )
         approval_binding = {"approver_id": receipt.approver_id, "card_id": card.card_id}
 
-    # 7. DLP tripwire on the request body.
+    # 7. DLP tripwire on the request body and headers. Secrets in headers
+    # (Authorization, X-API-Key, Cookie) must not sail through — E4.
+    dlp_texts = []
     if body:
-        text = body.decode("utf-8", errors="replace")
+        dlp_texts.append(("body", body.decode("utf-8", errors="replace")))
+    for hname, hvalue in (request.headers or {}).items():
+        dlp_texts.append((f"header {hname}", f"{hname}: {hvalue}"))
+    for origin, text in dlp_texts:
         for pattern in _compiled_dlp(policy.dlp_patterns):
             if pattern.search(text):
-                return deny(DENY_DLP, f"request body matches DLP tripwire {pattern.pattern!r}", rule, resolved)
+                return deny(DENY_DLP, f"request {origin} matches DLP tripwire {pattern.pattern!r}", rule, resolved)
 
     # 8. Byte budget.
     if budgets is not None and rule.max_bytes_per_day is not None:
@@ -807,6 +833,7 @@ def approval_receipt_from_dict(value: Any) -> ApprovalReceipt:
             arguments_digest=str(value["arguments_digest"]),
             approver_id=str(value["approver_id"]),
             decided_at=float(value["decided_at"]),
+            body_sha256=str(value.get("body_sha256") or ""),
             signature=str(value["signature"]),
         )
     except (KeyError, TypeError, ValueError) as exc:

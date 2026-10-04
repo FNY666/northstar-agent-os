@@ -267,13 +267,15 @@ class ApprovalBindingTests(unittest.TestCase):
             approver_id="op1",
             approver_seed=self.seed,
             decided_at=NOW,
+            body=b"{}",
         )
         self.pol = policy(rule={"require_approval": True, "allow_private_ips": True})
 
     def _req(self, **overrides):
         base = {
             "request_id": "r-1",
-            "agent_id": "a1",
+            # D5: agent_id must match the card's provenance agent ("main").
+            "agent_id": "main",
             "run_id": "run1",
             "host": "rekor.sigstore.dev",
             "port": 443,

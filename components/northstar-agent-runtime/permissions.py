@@ -429,6 +429,16 @@ class PermissionEngine:
         """Approver public keys, or None when multisig is not configured."""
         return self._multisig_pubkeys
 
+    @property
+    def audit_sink(self) -> Callable[[dict[str, Any]], None] | None:
+        """Host audit seam, or None when no sink is wired.
+
+        Kept public so hosts rebuilding the engine (child runtimes, late
+        ``can_use_tool`` attachment) can carry the sink over instead of
+        silently dropping denial reporting.
+        """
+        return self._audit_sink
+
     def pretrade_reset(self) -> None:
         """Clear pre-trade observation windows (rate counters, duplicate fingerprints)."""
         self._pt_rate.clear()

@@ -5195,7 +5195,7 @@ Load and seal an egress policy. Fails closed on any defect.
 A signed binding between an approval decision and one action card.
 
 - `as_dict()`
-#### `build_approval_receipt(*, card_id: str, call_id: str, arguments_digest: str, approver_id: str, approver_seed: bytes, decided_at: float | None=None)`
+#### `build_approval_receipt(*, card_id: str, call_id: str, arguments_digest: str, approver_id: str, approver_seed: bytes, decided_at: float | None=None, body: bytes | None=None)`
 
 Sign an approval receipt. Called by the approver's side (which holds the private key), never by the agent.
 
@@ -7072,6 +7072,8 @@ Evaluates one tool call against the pre-trade checks then the three layers.
 
 - `multisig_pubkeys` (property)
   - Approver public keys, or None when multisig is not configured.
+- `audit_sink` (property)
+  - Host audit seam, or None when no sink is wired.
 - `pretrade_reset()`
   - Clear pre-trade observation windows (rate counters, duplicate fingerprints).
 - `mode` (property)
