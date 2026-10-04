@@ -64,6 +64,7 @@ from egress_enforcer import (  # noqa: E402
     EgressVerdict,
     approval_receipt_from_dict,
     authorize_egress,
+    build_rejection_receipt,
     card_from_dict,
     load_egress_policy,
 )
@@ -334,11 +335,33 @@ def run_one(value: dict[str, Any], ctx: SidecarContext) -> dict[str, Any]:
             "request_id": request_id,
             "status": "rejected",
             "errors": list(validation.errors),
+            "receipt": build_rejection_receipt(
+                raw_value=value,
+                errors=list(validation.errors),
+                request_id=request_id,
+                now=time.time(),
+                policy_revision=ctx.policy.revision,
+                enforcer_seed=ctx.enforcer_seed,
+                key_id=ctx.key_id,
+            ),
         }
     try:
         request = _to_egress_request(value)
     except EgressPolicyError as exc:
-        return {"request_id": request_id, "status": "rejected", "errors": [str(exc)]}
+        return {
+            "request_id": request_id,
+            "status": "rejected",
+            "errors": [str(exc)],
+            "receipt": build_rejection_receipt(
+                raw_value=value,
+                errors=[str(exc)],
+                request_id=request_id,
+                now=time.time(),
+                policy_revision=ctx.policy.revision,
+                enforcer_seed=ctx.enforcer_seed,
+                key_id=ctx.key_id,
+            ),
+        }
 
     now = time.time()
     try:
