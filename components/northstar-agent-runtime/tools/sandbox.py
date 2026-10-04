@@ -314,8 +314,10 @@ def default_profile(workspace: str) -> dict:
     """The standard tool-effect profile: system read paths + writable workspace.
 
     ``/etc`` and ``/proc`` are read-only data; ``/dev`` allows opens (for
-    ``/dev/null`` et al.) but no device creation. TCP is denied outright —
-    the process backend's equivalent of bwrap's always-unshared network.
+    ``/dev/null`` et al.) but no device creation. TCP is denied outright on
+    Landlock ABI 4+ (UDP on ABI 10+) — the process backend's equivalent of
+    bwrap's always-unshared network. Below ABI 4 no network confinement
+    applies; see the module docstring's fail-closed discussion.
     """
     import os
 

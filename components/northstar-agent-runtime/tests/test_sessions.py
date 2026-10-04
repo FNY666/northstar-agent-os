@@ -440,5 +440,64 @@ class RuntimeSessionTests(RuntimeTestCase):
         self.assertEqual((block.tool_use_id, block.is_error, block.text()), ("t1", True, "output"))
 
 
+class WriteTimeChainTests(unittest.TestCase):
+    """AU4: the transcript is sealed at write time, not just at export."""
+
+    def workspace(self):
+        import tempfile
+        from pathlib import Path
+
+        return Path(tempfile.mkdtemp())
+
+    def test_records_are_chained_at_write(self):
+        from audit_chain import verify_lines
+
+        root = self.workspace()
+        store = SessionStore(root, session_id="ns-chain")
+        store.append("session_start", {"content": "a"})
+        store.append("assistant", {"content": "b"})
+        lines = store.path.read_text(encoding="utf-8").strip().split("\n")
+        result = verify_lines(lines)
+        self.assertTrue(result.ok, result.reason)
+        self.assertEqual(result.chained, 2)
+
+    def test_tampering_breaks_the_chain(self):
+        import json
+
+        from audit_chain import verify_lines
+
+        root = self.workspace()
+        store = SessionStore(root, session_id="ns-tamper")
+        store.append("session_start", {"content": "a"})
+        store.append("assistant", {"content": "b"})
+        lines = store.path.read_text(encoding="utf-8").strip().split("\n")
+        rec = json.loads(lines[1])
+        rec["content"] = "EVIL"
+        lines[1] = json.dumps(rec)
+        result = verify_lines(lines)
+        self.assertFalse(result.ok)
+
+    def test_chain_resumes_across_reopens(self):
+        from audit_chain import verify_lines
+
+        root = self.workspace()
+        store = SessionStore(root, session_id="ns-resume")
+        store.append("session_start", {"content": "a"})
+        # Reopen: the new writer picks up the existing chain head.
+        store2 = SessionStore(root, session_id="ns-resume")
+        store2.append("assistant", {"content": "b"})
+        lines = store.path.read_text(encoding="utf-8").strip().split("\n")
+        result = verify_lines(lines)
+        self.assertTrue(result.ok, result.reason)
+        self.assertEqual(result.chained, 2)
+
+    def test_chain_can_be_disabled(self):
+        root = self.workspace()
+        store = SessionStore(root, session_id="ns-nochain", chain=False)
+        store.append("session_start", {"content": "a"})
+        line = store.path.read_text(encoding="utf-8").strip()
+        self.assertNotIn("chain_hash", line)
+
+
 if __name__ == "__main__":
     unittest.main()
