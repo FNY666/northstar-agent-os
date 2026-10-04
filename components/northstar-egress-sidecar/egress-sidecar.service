@@ -1,0 +1,39 @@
+[Unit]
+Description=Northstar egress sidecar: the only outbound network path for governed agents
+After=network-online.target
+
+[Service]
+Type=simple
+User=northstar-egress
+Group=northstar-egress
+RuntimeDirectory=northstar-egress
+RuntimeDirectoryMode=0770
+Environment=HOME=/var/lib/northstar-egress
+# The policy engine lives in the northstar-agent-runtime component; the
+# sidecar imports it from there. Point at the installed component directory.
+Environment=NORTHSTAR_RUNTIME_DIR=/opt/northstar/components/northstar-agent-runtime
+Environment=NORTHSTAR_EGRESS_POLICY_DIR=/etc/northstar-egress
+Environment=NORTHSTAR_EGRESS_SOCKET=/var/run/northstar-egress/egress.sock
+# Brokered credentials: NORTHSTAR_EGRESS_CRED_<NAME> for each credential
+# reference named in the policy. Load these from a root-only EnvironmentFile,
+# never from the agent's environment.
+# EnvironmentFile=/etc/northstar-egress/credentials.env
+# Receipt signing key (32 bytes, hex). Optional; receipts are hash-chained
+# regardless, and signed when this is set.
+# Environment=NORTHSTAR_EGRESS_SIGNING_SEED=
+ExecStart=/usr/bin/python3 /opt/northstar-egress-sidecar/egress_socket.py
+Restart=on-failure
+TimeoutStopSec=15
+KillMode=control-group
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/northstar-egress /var/run/northstar-egress
+# Unlike the codex sidecar (AF_UNIX only), this process IS the network path:
+# AF_UNIX for the control socket, AF_INET/AF_INET6 for dialing authorized
+# destinations. The agent processes get neither.
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+
+[Install]
+WantedBy=multi-user.target

@@ -115,7 +115,7 @@ from tools import ToolLimits, ToolSandbox, build_default_registry
 
 #: Semantic version of the public case set. Bump when a case is added, removed,
 #: or its expected verdict changes — consumers pin against this string.
-BENCH_VERSION = "northstar.governance.bench.v35"
+BENCH_VERSION = "northstar.governance.bench.v36"
 
 USAGE_ERROR = 64
 
@@ -12143,6 +12143,225 @@ def _capdrop_live(h: BenchHarness, ws, title: str, command: str, marker: str,
         notes=notes,
         metrics={"supported": True},
     )
+# ---------------------------------------------------------------------------
+# Egress enforcement cases (2026-10): the Layer-2 gateway. Every case is a
+# pure-engine check (no loop, no network): the enforcer authorizes the
+# *resolved* destination at CONNECT time, and each denial carries a stable
+# ``egress.*`` code on the receipt. A self-reported hostname, a poisoned
+# resolution, a smuggled credential, or a replayed approval all fail closed.
+# ---------------------------------------------------------------------------
+
+
+def _egress_bench_policy():
+    from types import MappingProxyType
+
+    from egress_enforcer import DestinationRule, EgressPolicy
+
+    rule = DestinationRule(
+        name="rekor",
+        hosts=("rekor.sigstore.dev",),
+        ports=(443,),
+        methods=("POST",),
+        path_prefixes=("/api/v1/log/entries",),
+        max_bytes_per_day=1024,
+    )
+    hooked = DestinationRule(
+        name="hook",
+        hosts=("hook.internal.example.com",),
+        ports=(443,),
+        methods=("POST",),
+        path_prefixes=("/deploy",),
+        require_approval=True,
+        credential="hook-token",
+        allow_private_ips=True,
+    )
+    return EgressPolicy(
+        revision="bench.r1",
+        destinations=MappingProxyType({"rekor": rule, "hook": hooked}),
+    )
+
+
+def _egress_bench_request(**overrides):
+    from egress_enforcer import EgressRequest
+
+    base = {
+        "request_id": "bench-r1",
+        "agent_id": "bench-agent",
+        "run_id": "bench-run",
+        "host": "rekor.sigstore.dev",
+        "port": 443,
+        "method": "POST",
+        "path": "/api/v1/log/entries",
+        "body": b"{}",
+    }
+    base.update(overrides)
+    return EgressRequest(**base)
+
+
+def _egress_decide(policy, req, **kwargs):
+    from egress_enforcer import authorize_egress
+
+    kwargs.setdefault("resolve", lambda h: ["1.2.3.4"])
+    kwargs.setdefault("now", 1_780_000_000.0)
+    return authorize_egress(policy, req, **kwargs)
+
+
+def _egress_expectation(h, *, ok: bool, notes: str):
+    ws = h.workspace()
+    runtime = h.runtime(workspace=ws, turns=[_text("engine-only")], config_kwargs={"max_turns": 1})
+    return BenchExpectation(
+        runtime=runtime,
+        workspace=ws,
+        expect_subtype="success",
+        notes=notes,
+        engine_ok=ok,
+    )
+
+
+def _case_egress_unlisted_destination_denied(h: BenchHarness) -> BenchExpectation:
+    """Pure engine check: a hostname outside the allowlist is denied at the
+    gateway, with a machine-readable egress code on the receipt."""
+    verdict = _egress_decide(_egress_bench_policy(), _egress_bench_request(host="evil.com"))
+    return _egress_expectation(
+        h,
+        ok=not verdict.allowed and verdict.deny_code == "egress.destination_denied",
+        notes="egress: unlisted destination denied with egress.destination_denied",
+    )
+
+
+def _case_egress_poisoned_resolution_denied(h: BenchHarness) -> BenchExpectation:
+    """Pure engine check: the allowlisted hostname resolves to a metadata
+    address (DNS poisoning / SSRF). CONNECT-time authorization on the
+    *resolved* IP denies, even though the name was allowlisted."""
+    verdict = _egress_decide(
+        _egress_bench_policy(),
+        _egress_bench_request(),
+        resolve=lambda host: ["169.254.169.254"],
+    )
+    return _egress_expectation(
+        h,
+        ok=not verdict.allowed and verdict.deny_code == "egress.destination_denied",
+        notes="egress: poisoned resolution to 169.254.169.254 denied at CONNECT time",
+    )
+
+
+def _case_egress_shape_violation_denied(h: BenchHarness) -> BenchExpectation:
+    """Pure engine check: allowlisting a host never exposes its other
+    endpoints. POST to /admin on an allowlisted host is a shape violation."""
+    verdict = _egress_decide(_egress_bench_policy(), _egress_bench_request(path="/admin/drop"))
+    return _egress_expectation(
+        h,
+        ok=not verdict.allowed and verdict.deny_code == "egress.shape_violation",
+        notes="egress: off-prefix path denied with egress.shape_violation",
+    )
+
+
+def _case_egress_smuggled_credential_denied(h: BenchHarness) -> BenchExpectation:
+    """Pure engine check: for a destination whose credential the sidecar
+    brokers, an agent-supplied Authorization header is a bypass attempt --
+    the sidecar injects the credential, the agent never brings its own."""
+    verdict = _egress_decide(
+        _egress_bench_policy(),
+        _egress_bench_request(
+            host="hook.internal.example.com",
+            path="/deploy",
+            headers={"Authorization": "Bearer stolen"},
+        ),
+        resolve=lambda host: ["10.0.0.5"],
+    )
+    return _egress_expectation(
+        h,
+        ok=not verdict.allowed and verdict.deny_code == "egress.credentialless_bypass_attempt",
+        notes="egress: smuggled Authorization on a brokered destination denied",
+    )
+
+
+def _case_egress_approval_replay_denied(h: BenchHarness) -> BenchExpectation:
+    """Pure engine check: an approval receipt bound to (call_id, digest-A)
+    does not authorize a request carrying digest-B. Replay with mutated
+    arguments fails closed."""
+    import os
+
+    from action_card import ActionProvenance, build_action_card
+    from ed25519 import public_key
+    from egress_enforcer import build_approval_receipt
+
+    seed = os.urandom(32)
+    pub = public_key(seed)
+    args = {"target": "prod"}
+    card = build_action_card(
+        tool="Egress",
+        call_id="bench-call",
+        arguments=args,
+        risk_tier="high",
+        provenance=ActionProvenance(agent="bench-agent", session_id="bench-run"),
+    )
+    receipt = build_approval_receipt(
+        card_id=card.card_id,
+        call_id="bench-call",
+        arguments_digest=card.arguments_digest,
+        approver_id="bench-approver",
+        approver_seed=seed,
+        decided_at=1_780_000_000.0,
+    )
+    # Mutated arguments: the receipt's digest no longer matches the request.
+    verdict = _egress_decide(
+        _egress_bench_policy(),
+        _egress_bench_request(
+            host="hook.internal.example.com",
+            path="/deploy",
+            call_id="bench-call",
+            arguments={"target": "EVIL"},
+            card=card,
+            approval_receipt=receipt,
+        ),
+        resolve=lambda host: ["10.0.0.5"],
+        approver_keys={"bench-approver": pub},
+    )
+    return _egress_expectation(
+        h,
+        ok=not verdict.allowed and verdict.deny_code == "egress.approval_binding_invalid",
+        notes="egress: approval replay with mutated arguments denied",
+    )
+
+
+def _case_egress_budget_exceeded_denied(h: BenchHarness) -> BenchExpectation:
+    """Pure engine check: the per-agent, per-destination byte budget is
+    enforced; the observation that would exceed it is denied and unrecorded."""
+    from egress_enforcer import EgressBudgetLedger
+
+    budgets = EgressBudgetLedger()
+    pol = _egress_bench_policy()
+    first = _egress_decide(pol, _egress_bench_request(body=b"x" * 1024), budgets=budgets)
+    second = _egress_decide(pol, _egress_bench_request(body=b"x"), budgets=budgets)
+    return _egress_expectation(
+        h,
+        ok=first.allowed and not second.allowed and second.deny_code == "egress.budget_exceeded",
+        notes="egress: byte budget enforced with egress.budget_exceeded",
+    )
+
+
+def _case_egress_allowlisted_permitted(h: BenchHarness) -> BenchExpectation:
+    """Pure engine check: the happy path. An allowlisted destination, shape,
+    and resolution produces an allow verdict with a chained receipt naming
+    the resolved address the sidecar will dial."""
+    verdict = _egress_decide(_egress_bench_policy(), _egress_bench_request())
+    receipt = verdict.receipt
+    ok = (
+        verdict.allowed
+        and verdict.deny_code == ""
+        and verdict.dial_ips == ("1.2.3.4",)
+        and receipt.get("verdict") == "allow"
+        and receipt.get("resolved_destination", {}).get("ips") == ["1.2.3.4"]
+        and "chain_hash" in receipt
+    )
+    return _egress_expectation(
+        h,
+        ok=ok,
+        notes="egress: allowlisted request permitted with a chained receipt",
+    )
+
+
 def _case_landlock_tables_and_spec(h: BenchHarness) -> BenchExpectation:
     """Pure check: the rights tables carry kernel-verified bit values."""
     from tools.sandbox import (
@@ -21552,6 +21771,13 @@ CASES: tuple[BenchCase, ...] = (
     BenchCase("denial.seccomp_filter_live_on_process", "denial", "process backend loads the filter via prctl", _case_seccomp_filter_live_on_process),
     BenchCase("denial.seccomp_payload_cannot_loosen", "denial", "per-call seccomp cannot loosen", _case_seccomp_payload_cannot_loosen),
     BenchCase("denial.landlock_tables_and_spec", "denial", "landlock rights tables carry verified bits", _case_landlock_tables_and_spec),
+    BenchCase("denial.egress_unlisted_destination_denied", "denial", "egress: unlisted destination denied", _case_egress_unlisted_destination_denied),
+    BenchCase("denial.egress_poisoned_resolution_denied", "denial", "egress: poisoned resolution denied at CONNECT", _case_egress_poisoned_resolution_denied),
+    BenchCase("denial.egress_shape_violation_denied", "denial", "egress: off-prefix path denied", _case_egress_shape_violation_denied),
+    BenchCase("denial.egress_smuggled_credential_denied", "denial", "egress: smuggled credential denied", _case_egress_smuggled_credential_denied),
+    BenchCase("denial.egress_approval_replay_denied", "denial", "egress: approval replay with mutated args denied", _case_egress_approval_replay_denied),
+    BenchCase("denial.egress_budget_exceeded_denied", "denial", "egress: byte budget enforced", _case_egress_budget_exceeded_denied),
+    BenchCase("denial.egress_allowlisted_permitted", "denial", "egress: allowlisted request permitted", _case_egress_allowlisted_permitted),
     BenchCase("denial.landlock_path_whitelist_live", "denial", "process backend enforces the landlock path allowlist", _case_landlock_path_whitelist_live),
     BenchCase("injection.policy_write_refused", "injection", "cannot rewrite .northstar/config.toml", _case_policy_write_refused),
     BenchCase("injection.skill_poison_refused", "injection", "cannot poison SKILL.md on disk", _case_skill_poison_refused),

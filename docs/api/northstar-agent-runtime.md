@@ -5139,6 +5139,102 @@ What the mirror concluded about itself. ``ok`` is the only verdict callers read.
 
 Compare this module's mirror against the durable component, if it is importable.
 
+### `egress_client`
+
+Source: `components/northstar-agent-runtime/egress_client.py`
+
+Agent-side client for the egress sidecar.
+
+#### `EgressClientError`
+
+A client-side configuration error. Fails before any socket opens.
+
+#### `EgressResult`
+
+One completed sidecar round-trip. Never raises for expected conditions.
+
+#### `validate_socket_path(value: str | os.PathLike[str])`
+
+#### `EgressClient`
+
+One-connection-per-request Unix socket client for the egress sidecar.
+
+- `new_request_id()`
+- `request(*, agent_id: str, run_id: str, host: str, port: int, method: str, path: str, headers: dict[str, str] | None=None, body: bytes=b'', timeout_ms: int | None=None, call_id: str='', arguments: dict[str, Any] | None=None, card: dict[str, Any] | None=None, approval_receipt: dict[str, Any] | None=None, request_id: str | None=None)`
+  - Send one egress request through the sidecar. Never raises for an expected condition (denial, rejection, transport failure).
+- `probe()`
+  - Health check: a deliberately invalid request; the sidecar must answer ``rejected`` (proving it is alive) rather than time out.
+### `egress_enforcer`
+
+Source: `components/northstar-agent-runtime/egress_enforcer.py`
+
+Deterministic egress policy engine: the enforcement half of the gateway.
+
+#### `EgressPolicyError`
+
+A policy file or request that refuses to be loaded or honored.
+
+#### `DestinationRule`
+
+One allowlisted egress destination.
+
+- `as_dict()`
+#### `EgressPolicy`
+
+Versioned, sealed egress policy. Loaded fail-closed from TOML.
+
+- `destination_for(host: str)`
+  - Exact (case-insensitive) hostname lookup. No wildcards, no suffix matching: ``evil-example.com`` never matches ``example.com``.
+- `as_dict()`
+#### `load_egress_policy(directory: str | Path)`
+
+Load and seal an egress policy. Fails closed on any defect.
+
+#### `ApprovalReceipt`
+
+A signed binding between an approval decision and one action card.
+
+- `as_dict()`
+#### `build_approval_receipt(*, card_id: str, call_id: str, arguments_digest: str, approver_id: str, approver_seed: bytes, decided_at: float | None=None)`
+
+Sign an approval receipt. Called by the approver's side (which holds the private key), never by the agent.
+
+#### `verify_approval_receipt(receipt: ApprovalReceipt, approver_public_key: bytes)`
+
+Verify an approval receipt's signature. False on any defect; never raises.
+
+#### `EgressRequest`
+
+One outbound request as the agent describes it.
+
+- `shape_hash()`
+#### `EgressVerdict`
+
+The engine's decision on one request.
+
+#### `EgressBudgetLedger`
+
+Per-agent, per-destination byte budgets, bucketed by UTC day.
+
+- `usage(agent_id: str, destination: str, *, now: float)`
+- `observe(agent_id: str, destination: str, nbytes: int, *, now: float, limit: int | None)`
+  - Record ``nbytes`` against the budget. Returns False (and records nothing) when the observation would exceed ``limit``.
+#### `authorize_egress(policy: EgressPolicy, request: EgressRequest, *, resolve: Callable[[str], list[str]], now: float, budgets: EgressBudgetLedger | None=None, approver_keys: Mapping[str, bytes] | None=None, enforcer_seed: bytes | None=None, key_id: str | None=None)`
+
+Decide one egress request. Pure: no sockets, no clock reads.
+
+#### `policy_file_path(directory: str | Path)`
+
+Where ``load_egress_policy`` looks.
+
+#### `card_from_dict(value: Any)`
+
+Rebuild an :class:`ActionCard` from its ``as_dict()`` form.
+
+#### `approval_receipt_from_dict(value: Any)`
+
+Rebuild an :class:`ApprovalReceipt` from its ``as_dict()`` form.
+
 ### `interop_bridge`
 
 Source: `components/northstar-agent-runtime/interop_bridge.py`

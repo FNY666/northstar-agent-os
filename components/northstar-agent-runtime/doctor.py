@@ -49,6 +49,16 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--base-url", default="", help="OpenAI-compatible endpoint to report on (default: $OPENAI_BASE_URL)")
     parser.add_argument("--script", default="", help="scripted-provider script to validate (JSON array of turns)")
     parser.add_argument("--sidecar-socket", default="", help="sidecar socket path to check for presence")
+    parser.add_argument(
+        "--egress-socket",
+        default="",
+        help="egress sidecar socket path to probe (default: $NORTHSTAR_EGRESS_SOCKET)",
+    )
+    parser.add_argument(
+        "--egress-policy-dir",
+        default="",
+        help="directory holding northstar-egress.toml to validate (default: $NORTHSTAR_EGRESS_POLICY_DIR)",
+    )
     parser.add_argument("--session-dir", default="", help="session transcript directory to check for creatability")
     parser.add_argument(
         "--sandbox",
@@ -214,6 +224,79 @@ def _check_sidecar(args: argparse.Namespace, findings: list[Finding]) -> None:
             )
     else:
         findings.append(Finding("sidecar", "ok", "off - CodexReadOnly tool is not registered (pass --sidecar-socket to enable)"))
+
+
+def _check_egress(args: argparse.Namespace, findings: list[Finding]) -> None:
+    """Check the egress enforcement boundary.
+
+    Three properties, all verified rather than asserted:
+
+    1. Brokered credentials live in the *sidecar's* environment, never the
+       agent's. If this process (the agent side) can see a
+       ``NORTHSTAR_EGRESS_CRED_*`` value, the privilege separation is broken.
+    2. The egress policy (when configured) loads fail-closed: malformed
+       policy is a finding, not a silent allow.
+    3. The sidecar socket (when configured) answers a probe: a live
+       ``rejected`` proves the daemon is up; anything else is a failure.
+    """
+    import os
+
+    leaked = sorted(k for k in os.environ if k.startswith("NORTHSTAR_EGRESS_CRED_"))
+    if leaked:
+        findings.append(
+            Finding(
+                "egress",
+                "fail",
+                f"brokered credential(s) visible to the agent process ({len(leaked)} env var(s)): "
+                "NORTHSTAR_EGRESS_CRED_* belongs to the sidecar's environment only",
+            )
+        )
+    else:
+        findings.append(Finding("egress", "ok", "no brokered credentials in the agent process environment"))
+
+    policy_dir = args.egress_policy_dir or os.environ.get("NORTHSTAR_EGRESS_POLICY_DIR", "")
+    if policy_dir:
+        try:
+            from egress_enforcer import load_egress_policy
+
+            policy = load_egress_policy(policy_dir)
+            findings.append(
+                Finding(
+                    "egress",
+                    "ok",
+                    f"policy {policy.revision} loads: {len(policy.destinations)} destination(s)",
+                )
+            )
+        except Exception as exc:
+            findings.append(Finding("egress", "fail", f"egress policy failed to load: {exc}"))
+    else:
+        findings.append(Finding("egress", "ok", "off - no egress policy configured (pass --egress-policy-dir to enable)"))
+
+    socket_path = args.egress_socket or os.environ.get("NORTHSTAR_EGRESS_SOCKET", "")
+    if socket_path:
+        path = Path(socket_path)
+        if not path.exists():
+            findings.append(
+                Finding("egress", "fail", f"no socket at {path} - is the egress sidecar installed and running?")
+            )
+        elif not stat.S_ISSOCK(path.stat().st_mode):
+            findings.append(Finding("egress", "fail", f"{path} exists but is not a Unix socket"))
+        else:
+            try:
+                from egress_client import EgressClient
+
+                result = EgressClient(path).probe()
+            except Exception as exc:
+                findings.append(Finding("egress", "fail", f"egress probe failed: {exc}"))
+            else:
+                if result.status == "rejected":
+                    findings.append(Finding("egress", "ok", f"sidecar alive at {path} (probe rejected as expected)"))
+                else:
+                    findings.append(
+                        Finding("egress", "fail", f"egress probe unexpected status: {result.status}")
+                    )
+    else:
+        findings.append(Finding("egress", "ok", "off - no egress socket configured (pass --egress-socket to enable)"))
 
 
 def _check_sandbox(args: argparse.Namespace, findings: list[Finding]) -> str | None:
@@ -700,6 +783,7 @@ def _checks(args: argparse.Namespace) -> list[Finding]:
     _check_workspace(args, findings)
     _check_session_dir(args, findings)
     _check_sidecar(args, findings)
+    _check_egress(args, findings)
     backend = _check_sandbox(args, findings)
     _check_seccomp(args, findings, backend)
     _check_landlock(args, findings, backend)
