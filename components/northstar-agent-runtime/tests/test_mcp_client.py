@@ -352,5 +352,161 @@ class GenerationFlagTests(unittest.TestCase):
         self.assertIn("echo:still fine", out)
 
 
+class ToolPinningTests(unittest.TestCase):
+    """Tool-definition pinning: drift quarantines the server."""
+
+    def connect(self) -> McpStdioClient:
+        from mcp_client import McpStdioClient
+
+        client = McpStdioClient("demo", ["python3", str(FIXTURE)], timeout_ms=4000, env={})
+        client.connect()
+        return client
+
+    def test_refresh_with_no_drift_returns_empty(self):
+        client = self.connect()
+        try:
+            self.assertEqual(client.refresh_tools(), ())
+            self.assertFalse(client.quarantined)
+        finally:
+            client.close()
+
+    def test_changed_definition_quarantines(self):
+        from mcp_client import tool_definition_digest
+
+        client = self.connect()
+        try:
+            # Simulate a server that rewrote a tool description: tamper the
+            # baseline the way a changed tools/list response would.
+            name = client.tool_names()[0]
+            client._tool_digests[name] = "0" * 64
+            drifts = client.refresh_tools()
+            self.assertEqual(len(drifts), 1)
+            self.assertEqual(drifts[0].kind, "changed")
+            self.assertEqual(drifts[0].tool_name, name)
+            self.assertTrue(client.quarantined)
+            # Quarantined servers deny calls.
+            result = client.call_tool(name, {})
+            self.assertTrue(result.is_error)
+            self.assertIn("quarantined", result.text())
+        finally:
+            client.close()
+
+    def test_added_tool_quarantines(self):
+        client = self.connect()
+        try:
+            # Simulate a server that gained a tool: drop one digest so the
+            # re-listed tool looks new.
+            name = client.tool_names()[0]
+            del client._tool_digests[name]
+            drifts = client.refresh_tools()
+            kinds = {d.kind for d in drifts}
+            self.assertIn("added", kinds)
+            self.assertTrue(client.quarantined)
+        finally:
+            client.close()
+
+    def test_removed_tool_quarantines(self):
+        client = self.connect()
+        try:
+            # Simulate a server that dropped a tool: plant a digest for a
+            # tool the re-list will not return.
+            client._tool_digests["ghost_tool"] = "a" * 64
+            drifts = client.refresh_tools()
+            kinds = {(d.kind, d.tool_name) for d in drifts}
+            self.assertIn(("removed", "ghost_tool"), kinds)
+            self.assertTrue(client.quarantined)
+        finally:
+            client.close()
+
+    def test_drift_emits_audit_record(self):
+        client = self.connect()
+        records: list[dict] = []
+        client.audit = records.append
+        try:
+            name = client.tool_names()[0]
+            client._tool_digests[name] = "0" * 64
+            client.refresh_tools()
+            self.assertEqual(len(records), 1)
+            self.assertEqual(records[0]["type"], "mcp.tool_drift")
+            self.assertEqual(records[0]["server"], "demo")
+        finally:
+            client.close()
+
+    def test_digest_is_stable_and_sensitive(self):
+        from mcp_client import tool_definition_digest
+
+        base = tool_definition_digest("s", "t", "desc", {"type": "object"})
+        self.assertEqual(base, tool_definition_digest("s", "t", "desc", {"type": "object"}))
+        # Any definition change flips the digest.
+        self.assertNotEqual(base, tool_definition_digest("s", "t", "DESC", {"type": "object"}))
+        self.assertNotEqual(base, tool_definition_digest("s", "t", "desc", {"type": "string"}))
+        self.assertNotEqual(base, tool_definition_digest("s", "other", "desc", {"type": "object"}))
+
+    def test_baseline_persists_across_reconnects(self):
+        import tempfile
+        from pathlib import Path
+        from mcp_client import McpStdioClient
+
+        with tempfile.TemporaryDirectory() as ws:
+            # First connect establishes the baseline.
+            client1 = McpStdioClient(
+                "demo", ["python3", str(FIXTURE)], timeout_ms=4000, env={}, workspace_root=ws
+            )
+            client1.connect()
+            try:
+                baseline_path = Path(ws) / ".northstar" / "mcp-tool-baseline.json"
+                self.assertTrue(baseline_path.is_file())
+                self.assertFalse(client1.quarantined)
+            finally:
+                client1.close()
+            # Second connect with the same definitions: no quarantine.
+            client2 = McpStdioClient(
+                "demo", ["python3", str(FIXTURE)], timeout_ms=4000, env={}, workspace_root=ws
+            )
+            client2.connect()
+            try:
+                self.assertFalse(client2.quarantined)
+            finally:
+                client2.close()
+
+    def test_tampered_baseline_quarantines_on_connect(self):
+        import json
+        import tempfile
+        from pathlib import Path
+        from mcp_client import McpStdioClient
+
+        with tempfile.TemporaryDirectory() as ws:
+            client1 = McpStdioClient(
+                "demo", ["python3", str(FIXTURE)], timeout_ms=4000, env={}, workspace_root=ws
+            )
+            client1.connect()
+            try:
+                baseline_path = Path(ws) / ".northstar" / "mcp-tool-baseline.json"
+                data = json.loads(baseline_path.read_text(encoding="utf-8"))
+                # Attacker rewrites the baseline to hide their drift.
+                data["demo"] = {"evil_tool": "0" * 64}
+                baseline_path.write_text(json.dumps(data), encoding="utf-8")
+            finally:
+                client1.close()
+            # Reconnect sees the mismatch and quarantines.
+            records: list[dict] = []
+            client2 = McpStdioClient(
+                "demo",
+                ["python3", str(FIXTURE)],
+                timeout_ms=4000,
+                env={},
+                workspace_root=ws,
+                audit=records.append,
+            )
+            client2.connect()
+            try:
+                self.assertTrue(client2.quarantined)
+                self.assertEqual(len(records), 1)
+                self.assertEqual(records[0]["type"], "mcp.tool_drift")
+                self.assertEqual(records[0]["at"], "connect")
+            finally:
+                client2.close()
+
+
 if __name__ == "__main__":
     unittest.main()
