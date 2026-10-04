@@ -11614,6 +11614,10 @@ Canonical JSON bytes: sorted keys, no whitespace, UTF-8.
 
 JSON Canonicalization Scheme (RFC 8785) bytes, UTF-8.
 
+#### `feed_genesis_ids(first_record: dict[str, Any])`
+
+(session_id, run_id, started_ts) from a feed's genesis anchor.
+
 #### `build_genesis_params(component: str, *, session_id: str | None=None, run_id: str | None=None, started_ts: str | None=None, chain_version: str=CHAIN_VERSION_V2)`
 
 The anchor object stored on the first chained record.

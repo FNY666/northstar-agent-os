@@ -176,7 +176,7 @@ def classify_request(value: Any) -> RequestValidation:
         errors.append("host too long")
     port = value.get("port")
     if not isinstance(port, int) or isinstance(port, bool) or not 1 <= port <= 65535:
-        errors.append("port must be an integer 1-65565")
+        errors.append("port must be an integer 1-65535")
     method = need("method", (str,))
     if isinstance(method, str) and (not method.strip() or len(method) > 16):
         errors.append("method malformed")

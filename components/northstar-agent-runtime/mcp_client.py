@@ -19,9 +19,10 @@ Scope is deliberately small and fail-closed:
   operator names them with ``--allow-tool``; everything still flows through the
   existing permission gate and hooks. MCP is a tool *transport*, never a policy
   bypass.
-- Output is bounded: per-line and per-call caps apply on the client side, and a
-  server that stops answering is TERM→KILLed as a process group (``close`` and
-  every timeout path).
+- Output is bounded: per-line and per-call caps apply on the client side. A
+  server that stops answering surfaces a timeout error and stays alive for
+  reuse; the process group is TERM→KILLed on ``close()`` and on connect
+  failure.
 - No third-party dependency: plain ``json`` + ``select`` on POSIX.
 
 Not implemented here (documented limits): MCP sampling/roots/prompts, image and

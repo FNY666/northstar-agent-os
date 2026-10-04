@@ -581,7 +581,10 @@ def _records(directory: str) -> list[dict]:
 
 def _strip(records: list[dict]) -> list[dict]:
     """Drop the fields two runs cannot share (ids, timestamps, durations)."""
-    volatile = {"session_id", "ts", "hlc", "timestamp", "created_at", "duration_ms", "run_id", "message_id", "id", "uuid"}
+    volatile = {"session_id", "ts", "hlc", "timestamp", "created_at", "duration_ms", "run_id", "message_id", "id", "uuid",
+                # The write-time hash chain commits to the volatile fields
+                # above, so its seals differ between runs too.
+                "chain_hash", "prev_hash", "genesis"}
 
     def scrub(value):
         if isinstance(value, dict):

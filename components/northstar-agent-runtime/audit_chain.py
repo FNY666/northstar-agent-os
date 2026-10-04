@@ -146,6 +146,25 @@ def _sha256_hex(data: bytes) -> str:
     return hashlib.sha256(data).hexdigest()
 
 
+def feed_genesis_ids(first_record: dict[str, Any]) -> tuple[str | None, str | None, str | None]:
+    """(session_id, run_id, started_ts) from a feed's genesis anchor.
+
+    Shared by the export modules (trace/akf) so the genesis parsing lives
+    in one place, next to ``build_genesis_params``.
+    """
+    genesis = first_record.get("genesis")
+    if not isinstance(genesis, dict):
+        return None, None, None
+    session_id = genesis.get("session_id")
+    run_id = genesis.get("run_id")
+    started_ts = genesis.get("started_ts")
+    return (
+        session_id if isinstance(session_id, str) and session_id else None,
+        run_id if isinstance(run_id, str) and run_id else None,
+        started_ts if isinstance(started_ts, str) and started_ts else None,
+    )
+
+
 def build_genesis_params(
     component: str,
     *,

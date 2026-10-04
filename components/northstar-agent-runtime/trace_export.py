@@ -112,15 +112,10 @@ def _software_only_measurement() -> str:
 
 def _feed_session_ids(first_record: dict[str, Any]) -> tuple[str | None, str | None]:
     """(session_id, run_id) from the feed's genesis anchor, if present."""
-    genesis = first_record.get("genesis")
-    if not isinstance(genesis, dict):
-        return None, None
-    session_id = genesis.get("session_id")
-    run_id = genesis.get("run_id")
-    return (
-        session_id if isinstance(session_id, str) and session_id else None,
-        run_id if isinstance(run_id, str) and run_id else None,
-    )
+    from audit_chain import feed_genesis_ids
+
+    session_id, run_id, _started_ts = feed_genesis_ids(first_record)
+    return session_id, run_id
 
 
 def build_trace_record(

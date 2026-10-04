@@ -31,9 +31,10 @@ Check order (fail-closed, cheapest first):
 7. DLP tripwire on the request body
 8. per-agent, per-destination byte budget
 
-Every decision -- allow or deny -- emits a signed egress receipt into the
-hash-chained audit feed. Deny codes are stable and dot-namespaced under
-``egress.`` so the governance bench can assert on them machine-readably.
+Every decision -- allow or deny -- emits an egress receipt chained into the
+hash-chained audit feed (signed when an enforcer key is configured).
+Deny codes are stable and dot-namespaced under ``egress.`` so the
+governance bench can assert on them machine-readably.
 """
 
 from __future__ import annotations
@@ -739,7 +740,7 @@ def authorize_egress(
                 resolved,
             )
 
-    # Allow: build, chain, and sign the receipt.
+    # Allow: build and chain the receipt (signed when an enforcer key is set).
     receipt_id = secrets.token_hex(RECEIPT_ID_BYTES)
     receipt = _build_receipt(
         receipt_id=receipt_id,

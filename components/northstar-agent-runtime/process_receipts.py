@@ -122,14 +122,15 @@ class ProcessReceiptError(ValueError):
 
 
 def _canonical_bytes(value: Any) -> bytes:
-    """Canonical JSON bytes: sorted keys, compact separators, UTF-8."""
+    """Canonical JSON bytes: sorted keys, compact separators, UTF-8.
+
+    Delegates to the shared legacy canonicalizer (``audit_chain``); the
+    domain exception is preserved.
+    """
+    from audit_chain import canonical_json
+
     try:
-        return json.dumps(
-            value,
-            ensure_ascii=False,
-            sort_keys=True,
-            separators=(",", ":"),
-        ).encode("utf-8")
+        return canonical_json(value)
     except (TypeError, ValueError) as error:
         raise ProcessReceiptError("value is not canonical JSON") from error
 
