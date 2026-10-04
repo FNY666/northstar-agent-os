@@ -39,6 +39,7 @@ import shutil
 import signal
 import subprocess
 import sys
+import tempfile
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -46,6 +47,7 @@ from typing import Any, Mapping
 
 from _version import __version__
 from tools.seccomp import prctl_loader_argv, validate_mode
+from tools.sandbox import landlock_abi_version, landlock_loader_argv, network_deny_profile
 from mcp_elicitation import (
     ACCEPT,
     CANCEL,
@@ -169,6 +171,7 @@ class McpStdioClient:
         env: Mapping[str, str] | None = None,
         cwd: str | None = None,
         seccomp: str = "auto",
+        network: str = "denied",
     ) -> None:
         if not 100 <= timeout_ms <= MAX_TIMEOUT_MS:
             raise ValueError(f"--mcp-timeout-ms must be between {MIN_TIMEOUT_MS} and {MAX_TIMEOUT_MS}")
@@ -177,6 +180,7 @@ class McpStdioClient:
         if not 1 <= max_input_rounds <= 8:
             raise ValueError("--mcp-max-rounds must be between 1 and 8")
         self.seccomp = validate_mode(seccomp)
+        self.network = self._validate_network_mode(network)
         self.name = name
         self.command = list(command)
         self.timeout_ms = timeout_ms
@@ -262,6 +266,45 @@ class McpStdioClient:
             raise McpError(f"mcp server {self.name!r}: initialize returned a non-object result")
         self._notify("notifications/initialized")
 
+    @staticmethod
+    def _validate_network_mode(mode: str) -> str:
+        normalized = str(mode or "").strip().lower()
+        if normalized not in ("denied", "allowed"):
+            raise ValueError('--mcp-network must be "denied" or "allowed"')
+        return normalized
+
+    def _network_spec(self) -> dict:
+        """Landlock spec denying TCP for this server, fail-closed.
+
+        Filesystem access is unchanged from running unconfined (the server
+        is third-party code living anywhere on disk); the *only* thing taken
+        away is TCP. Mode ``on`` inside the spec: a Landlock failure exits
+        instead of running the server unconfined.
+        """
+        spec = network_deny_profile()
+        spec["mode"] = "on"
+        return spec
+
+    def _apply_network_policy(self, argv: list[str]) -> list[str]:
+        """Wrap the spawn argv with network denial when configured.
+
+        ``denied`` (default) refuses to start where the denial cannot be
+        enforced: TCP denial needs Landlock ABI 4+. Running the server with
+        full host network after a warning would be a lie, so there is no
+        graceful degradation here -- only ``allowed`` opts out, explicitly.
+        """
+        if self.network == "allowed":
+            return argv
+        if not sys.platform.startswith("linux") or landlock_abi_version() < 4:
+            raise McpError(
+                f"mcp server {self.name!r}: --mcp-network denied requires Linux "
+                f"with Landlock ABI 4+ for TCP denial (this host: {sys.platform}, "
+                f"ABI {landlock_abi_version()}); pass --mcp-network allowed to "
+                "opt out explicitly"
+            )
+        python = shutil.which("python3") or sys.executable
+        return landlock_loader_argv(argv, self._network_spec(), python=python)
+
     def _spawn_argv(self) -> list[str]:
         """Command argv with the seccomp-BPF denylist applied per the mode.
 
@@ -299,7 +342,7 @@ class McpStdioClient:
             raise McpError(f"mcp server {self.name!r} is already connected")
         try:
             proc = subprocess.Popen(
-                self._spawn_argv(),
+                self._apply_network_policy(self._spawn_argv()),
                 stdin=subprocess.PIPE,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.DEVNULL,  # server logs never block the client

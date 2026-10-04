@@ -339,6 +339,26 @@ def default_profile(workspace: str) -> dict:
     return spec
 
 
+def network_deny_profile() -> dict:
+    """TCP denial without filesystem confinement.
+
+    Grants the whole tree the workspace rights (full read/write/execute,
+    minus device and socket creation) and denies TCP outright. The
+    filesystem posture is unchanged from running unconfined -- the *only*
+    thing this profile takes away is the network. For MCP servers: they are
+    third-party binaries living anywhere on disk (npm/pip installs, fixture
+    scripts outside any workspace), so the tool-effect path allowlist would
+    break them for reasons unrelated to the gap being closed. The gap is
+    egress; this closes exactly the gap.
+    """
+    spec = build_landlock_spec(
+        paths_read=[],
+        paths_write=["/"],
+        network=False,
+    )
+    return spec
+
+
 #: A ``python3 -c`` loader that installs the Landlock allowlist and then
 #: execs the inner argv (normally the seccomp prctl wrapper). Layout:
 #: ``python3 -c <LOADER> <base64-spec> <inner argv...>``.
@@ -458,6 +478,7 @@ __all__ = [
     "landlock_abi_version",
     "landlock_loader_argv",
     "landlock_supported",
+    "network_deny_profile",
     "probe_landlock",
     "reset_abi_cache",
     "resolve_mode",

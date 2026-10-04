@@ -47,7 +47,7 @@ class SpawnArgvTests(unittest.TestCase):
         return popen.call_args.args[0]
 
     def test_off_passes_the_command_through(self):
-        self.assertEqual(self._popen_argv(seccomp="off"), ["echo", "hi"])
+        self.assertEqual(self._popen_argv(seccomp="off", network="allowed"), ["echo", "hi"])
 
     def test_auto_wraps_on_linux(self):
         if not sys.platform.startswith("linux"):
@@ -84,7 +84,7 @@ class SpawnArgvTests(unittest.TestCase):
 
     def test_auto_degrades_off_linux(self):
         with mock.patch.object(mcp_client.sys, "platform", "darwin"):
-            self.assertEqual(self._popen_argv(seccomp="auto"), ["echo", "hi"])
+            self.assertEqual(self._popen_argv(seccomp="auto", network="allowed"), ["echo", "hi"])
 
 
 class RealKernelTests(unittest.TestCase):

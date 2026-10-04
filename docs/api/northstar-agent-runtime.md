@@ -12387,6 +12387,10 @@ Build an offline-testable Landlock policy spec.
 
 The standard tool-effect profile: system read paths + writable workspace.
 
+#### `network_deny_profile()`
+
+TCP denial without filesystem confinement.
+
 #### `landlock_loader_argv(inner_argv: Sequence[str], spec: Mapping[str, object], *, python: str='python3')`
 
 Wrap ``inner_argv`` so the Landlock allowlist is installed before exec.

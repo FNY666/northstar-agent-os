@@ -78,6 +78,12 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
         default="auto",
         help="seccomp-BPF denylist mode for MCP server processes (default: auto)",
     )
+    parser.add_argument(
+        "--mcp-network",
+        choices=("denied", "allowed"),
+        default="denied",
+        help="network mode for MCP server processes (default: denied)",
+    )
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -587,6 +593,56 @@ def _check_mcp_seccomp(args: argparse.Namespace, findings: list[Finding]) -> Non
     )
 
 
+def _check_mcp_network(args: argparse.Namespace, findings: list[Finding]) -> None:
+    """Report whether MCP server processes will be denied network egress.
+
+    Mirrors ``McpStdioClient._apply_network_policy``: ``denied`` (default)
+    confines the server with Landlock TCP denial and refuses to start where
+    the kernel cannot enforce it (needs ABI 4+); ``allowed`` is the explicit
+    opt-in to full host network. Never claims denial is active when the host
+    cannot enforce it.
+    """
+    import sys as _sys
+
+    mode = str(getattr(args, "mcp_network", "denied") or "denied").strip().lower()
+    if mode not in ("denied", "allowed"):
+        findings.append(Finding("mcp-network", "fail", f"invalid --mcp-network mode: {mode!r}"))
+        return
+    if mode == "allowed":
+        findings.append(
+            Finding(
+                "mcp-network",
+                "warn",
+                "mode=allowed - MCP server processes run with full host network by operator choice",
+            )
+        )
+        return
+    try:
+        from tools.sandbox import landlock_abi_version
+    except Exception as error:  # noqa: BLE001
+        findings.append(Finding("mcp-network", "warn", f"could not load the landlock module: {error}"))
+        return
+    abi = landlock_abi_version()
+    if not _sys.platform.startswith("linux") or abi < 4:
+        findings.append(
+            Finding(
+                "mcp-network",
+                "fail",
+                f"mode=denied requires Linux with Landlock ABI 4+ for TCP denial "
+                f"(this host: {_sys.platform}, ABI {abi}) - an MCP server would refuse to start",
+            )
+        )
+        return
+    findings.append(
+        Finding(
+            "mcp-network",
+            "ok",
+            f"mode=denied - MCP server processes get Landlock TCP denial (ABI {abi}); "
+            "no direct egress outside the sidecar",
+        )
+    )
+
+
 def _check_workspace_config(args: argparse.Namespace, findings: list[Finding]) -> None:
     """Check workspace policy, agents, skills and project context."""
     workspace = Path(args.workspace)
@@ -788,6 +844,7 @@ def _checks(args: argparse.Namespace) -> list[Finding]:
     _check_seccomp(args, findings, backend)
     _check_landlock(args, findings, backend)
     _check_mcp_seccomp(args, findings)
+    _check_mcp_network(args, findings)
     _check_workspace_config(args, findings)
     _check_skill_supply_chain(args, findings)
     _check_plugins(args, findings)
