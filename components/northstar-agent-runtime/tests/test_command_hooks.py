@@ -9,9 +9,12 @@ from __future__ import annotations
 
 import json
 import os
+import signal
+import subprocess
 import sys
 import unittest
 from pathlib import Path
+from unittest.mock import MagicMock, patch
 
 import support  # noqa: F401  (bootstraps sys.path)
 from support import RuntimeTestCase, tool_turn
@@ -301,6 +304,82 @@ class RealSubprocessTests(unittest.TestCase):
         # removed this fails in seconds rather than hanging the suite.
         self.assertLess(elapsed, 2, f"the timeout did not bound the hook: {elapsed:.1f}s")
 
+    def test_raw_output_overflow_is_refused_before_a_verdict(self):
+        for stream, limit in (("stdout", command_hooks.MAX_STDOUT_BYTES), ("stderr", command_hooks.MAX_STDERR_BYTES)):
+            with self.subTest(stream=stream):
+                code = f"import sys;sys.{stream}.write('x'*{limit + 1})"
+                with self.assertRaisesRegex(CommandHookError, "output.*limit"):
+                    command_hooks._run_bounded([sys.executable, "-c", code], cwd=str(self.root), input_text="{}", timeout_s=2)
+
+    def test_output_limits_count_utf8_bytes_not_characters(self):
+        code = "import sys;sys.stdout.buffer.write(('测'*22000).encode('utf-8'))"
+        with self.assertRaisesRegex(CommandHookError, "output.*limit"):
+            command_hooks._run_bounded([sys.executable, "-c", code], cwd=str(self.root), input_text="{}", timeout_s=2)
+
+    def test_stdin_and_output_are_drained_concurrently(self):
+        payload = "x" * 200000
+        code = (
+            "import sys\n"
+            "sys.stderr.write('e'*8000);sys.stderr.flush()\n"
+            "data=sys.stdin.read()\n"
+            "print(len(data))\n"
+        )
+        completed = command_hooks._run_bounded([sys.executable, "-c", code], cwd=str(self.root), input_text=payload, timeout_s=3)
+        self.assertEqual(completed.stdout.strip(), str(len(payload)))
+        self.assertEqual(len(completed.stderr), 8000)
+
+    def test_valid_json_followed_by_excess_whitespace_is_not_accepted(self):
+        body = "import sys;print('{\"decision\":\"allow\"}');sys.stdout.write(' '*64000)"
+        script = _script(self.root, body, name="allow-flood.py")
+        hook = parse_hooks([{"event": "PreToolUse", "script": script, "interpreter": "python3"}], workspace=self.root)[0]
+        with self.assertRaisesRegex(CommandHookError, "output.*limit"):
+            build_callback(hook, workspace=self.root)(HookInput(event="PreToolUse"))
+
+    def test_timeout_keeps_the_original_hook_budget(self):
+        with self.assertRaises(subprocess.TimeoutExpired) as caught:
+            command_hooks._run_bounded([sys.executable, "-c", "import time;time.sleep(10)"], cwd=str(self.root), input_text="{}", timeout_s=.2)
+        self.assertEqual(caught.exception.timeout, .2)
+
+    @unittest.skipUnless(os.name == "posix" and hasattr(os, "killpg"), "requires process groups")
+    def test_term_ignoring_child_is_killed_after_leader_exits(self):
+        pidfile = self.root / "grandchild.pid"
+        child = "import signal,time,sys;signal.signal(signal.SIGTERM,signal.SIG_IGN);print('ready',flush=True);time.sleep(30)"
+        leader = (
+            "import subprocess,sys,pathlib,time\n"
+            "p=subprocess.Popen([sys.executable,'-c',sys.argv[1]],stdout=subprocess.PIPE,text=True)\n"
+            "assert p.stdout.readline().strip() == 'ready'\n"
+            "pathlib.Path(sys.argv[2]).write_text(str(p.pid))\n"
+            "time.sleep(30)\n"
+        )
+        pid = None
+        try:
+            with self.assertRaises(subprocess.TimeoutExpired):
+                command_hooks._run_bounded([sys.executable, "-c", leader, child, str(pidfile)], cwd=str(self.root), input_text="{}", timeout_s=2)
+            self.assertTrue(pidfile.exists(), "grandchild must start before timeout")
+            pid = int(pidfile.read_text())
+            deadline = _monotonic() + 2
+            while _monotonic() < deadline:
+                try:
+                    os.kill(pid, 0)
+                except ProcessLookupError:
+                    break
+                # Linux can retain a zombie after kill until init reaps it.
+                status = Path(f"/proc/{pid}/stat")
+                if status.exists() and status.read_text().split(")", 1)[1].split()[0] == "Z":
+                    break
+                import time
+                time.sleep(.02)
+            else:
+                self.fail("TERM-ignoring grandchild survived leader exit")
+        finally:
+            if pid is None and pidfile.exists():
+                pid = int(pidfile.read_text())
+            if pid is not None:
+                try:
+                    os.kill(pid, signal.SIGKILL)
+                except ProcessLookupError:
+                    pass
+
     @unittest.skipUnless(sys.executable, "needs a python interpreter")
     def test_a_script_that_floods_is_capped(self):
         script = _script(self.root, "print('x' * 4_000_000)\n", name="flood.py")
@@ -312,6 +391,43 @@ class RealSubprocessTests(unittest.TestCase):
         # guessed at - the cap cannot be used to smuggle a permissive verdict.
         with self.assertRaises(CommandHookError):
             build_callback(hook, workspace=self.root)(HookInput(event="PreToolUse"))
+
+
+class CleanupFailureTests(unittest.TestCase):
+    def test_selector_setup_failure_does_not_spawn(self):
+        with patch.object(command_hooks.selectors, "DefaultSelector", side_effect=OSError("selector setup")), patch.object(command_hooks.subprocess, "Popen") as spawn:
+            with self.assertRaisesRegex(OSError, "selector setup"):
+                command_hooks._run_bounded(["dummy"], cwd="/tmp", input_text="{}", timeout_s=1)
+            spawn.assert_not_called()
+
+    def test_spawn_failure_closes_selector(self):
+        selector = MagicMock()
+        with patch.object(command_hooks.selectors, "DefaultSelector", return_value=selector), patch.object(command_hooks.subprocess, "Popen", side_effect=OSError("spawn failed")):
+            with self.assertRaisesRegex(OSError, "spawn failed"):
+                command_hooks._run_bounded(["dummy"], cwd="/tmp", input_text="{}", timeout_s=1)
+        selector.close.assert_called_once()
+
+    def test_cleanup_failures_cannot_skip_termination_or_mask_primary_error(self):
+        selector, process = MagicMock(), MagicMock()
+        selector.register.side_effect = ValueError("primary registration failure")
+        selector.close.side_effect = OSError("selector close failure")
+        process.stdin.closed = process.stdout.closed = process.stderr.closed = False
+        process.stdout.close.side_effect = OSError("pipe close failure")
+        with patch.object(command_hooks.selectors, "DefaultSelector", return_value=selector), patch.object(command_hooks.subprocess, "Popen", return_value=process), patch.object(command_hooks.os, "set_blocking"), patch.object(command_hooks, "_terminate_group", side_effect=OSError("group cleanup failure")) as terminate:
+            with self.assertRaisesRegex(ValueError, "primary registration failure"):
+                command_hooks._run_bounded(["dummy"], cwd="/tmp", input_text="{}", timeout_s=1)
+        terminate.assert_called_once_with(process)
+        process.stdin.close.assert_called_once()
+        process.stderr.close.assert_called_once()
+
+    def test_cleanup_failure_after_success_cannot_return_a_verdict(self):
+        selector, process = MagicMock(), MagicMock()
+        selector.get_map.return_value = {}
+        process.wait.return_value = 0
+        process.stdin.closed = process.stdout.closed = process.stderr.closed = False
+        with patch.object(command_hooks.selectors, "DefaultSelector", return_value=selector), patch.object(command_hooks.subprocess, "Popen", return_value=process), patch.object(command_hooks.os, "set_blocking"), patch.object(command_hooks, "_terminate_group", side_effect=OSError("group cleanup failure")):
+            with self.assertRaisesRegex(CommandHookError, "cleanup failed"):
+                command_hooks._run_bounded(["dummy"], cwd="/tmp", input_text="{}", timeout_s=1)
 
 
 class RegistryAndSummaryTests(unittest.TestCase):
