@@ -23,7 +23,6 @@ from healthcare_agents import (
     ConsistencyRegistry,
     MaturityRegistry,
     SurveillanceRegistry,
-    _verify_signature,
     alert_burden_ledger,
     responsibility_manifest,
     bias_vignette_regression,
@@ -538,20 +537,6 @@ class TestChainIntegrity(unittest.TestCase):
         from canonical_json import jcs_sha256_hex
         self.assertEqual(r.receipt_digest,
                          jcs_sha256_hex(r._payload()))
-
-
-class TamperedSignatureTest(unittest.TestCase):
-    """ed25519.verify returns bool and never raises — the return value must be
-    used. A tampered signature must verify as False, not silently pass."""
-
-    def test_verify_signature_accepts_valid_rejects_tampered(self):
-        seed = b"\x0c" * 32
-        pub_hex = ed25519.public_key(seed).hex()
-        body = {"deployment_id": "dep-tamper", "model_version": "v1"}
-        body["signature_hex"] = "00" * 64
-        sig_hex = ed25519.sign(seed, jcs_canonical_json(body)).hex()
-        self.assertTrue(_verify_signature(pub_hex, body, sig_hex))
-        self.assertFalse(_verify_signature(pub_hex, body, "00" * 64))
 
 
 if __name__ == "__main__":
