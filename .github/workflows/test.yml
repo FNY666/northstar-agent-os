@@ -8,6 +8,24 @@ permissions:
   contents: read
 
 jobs:
+  egress-sidecar:
+    name: Egress sidecar (Linux security contracts)
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    defaults:
+      run:
+        working-directory: components/northstar-egress-sidecar
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Compile egress sidecar
+        run: python -m py_compile *.py tests/test_*.py
+      - name: Egress policy and real HTTP tests
+        # Standard library only; loopback fixtures, no production credentials or endpoints.
+        run: python -m unittest discover -s tests -p 'test_*.py' -v
+
   test:
     name: Sidecar and run contract
     runs-on: ubuntu-latest
