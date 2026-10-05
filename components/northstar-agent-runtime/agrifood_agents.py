@@ -75,6 +75,7 @@ Honest scope:
 """
 
 from __future__ import annotations
+from _domain_base import DomainError
 
 import hashlib
 import hmac
@@ -130,7 +131,7 @@ DATA_AUTH_MAX_TTL_S = 365 * _DAY_S
 TRACE_STAGES = ("sensor", "decision", "application", "provenance")
 
 
-class AgrifoodError(ValueError):
+class AgrifoodError(DomainError):
     """A malformed agrifood receipt or a programming error.
 
     Raised for structural problems (bad digests, unknown checks,

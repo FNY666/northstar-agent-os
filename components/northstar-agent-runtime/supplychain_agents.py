@@ -100,6 +100,7 @@ deterministic; the only clock is the ``now`` the caller injects
 """
 
 from __future__ import annotations
+from _domain_base import DomainError
 
 import hashlib
 import hmac
@@ -167,7 +168,7 @@ SUPPLYCHAIN_NON_AUTHORITATIVE = "supplychain-non-authoritative"
 RESILIENCE_FLOOR_BPS = 5000
 
 
-class SupplyChainAgentsError(ValueError):
+class SupplyChainAgentsError(DomainError):
     """Malformed supply-chain AI input. Fail loud, never guess."""
 
 

@@ -95,6 +95,7 @@ Honest scope:
 """
 
 from __future__ import annotations
+from _domain_base import DomainError
 
 import hashlib
 import hmac
@@ -204,7 +205,7 @@ CUSTOMS_SEIZURE_ACTIONS = frozenset({
 })
 
 
-class TaxError(ValueError):
+class TaxError(DomainError):
     """A malformed tax-discipline receipt or a programming error.
 
     Raised for structural problems (bad digests, unknown registries,

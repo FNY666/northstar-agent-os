@@ -120,6 +120,7 @@ digest comparisons use :func:`hmac.compare_digest`.
 """
 
 from __future__ import annotations
+from _domain_base import DomainError
 
 import hmac
 from dataclasses import dataclass
@@ -198,7 +199,7 @@ INCIDENT_CLASSES: tuple[str, ...] = (
 )
 
 
-class ScienceError(ValueError):
+class ScienceError(DomainError):
     """A malformed science receipt or a programming error.
 
     Raised for structural problems (bad digests, unknown tiers,

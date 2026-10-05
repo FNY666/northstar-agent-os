@@ -72,6 +72,7 @@ boolean return of ``ed25519.verify`` (which never raises).
 """
 
 from __future__ import annotations
+from _domain_base import DomainError
 
 import hashlib
 import hmac
@@ -146,7 +147,7 @@ VAGUE_REASONS = frozenset({
 })
 
 
-class ProptechError(ValueError):
+class ProptechError(DomainError):
     """A malformed proptech-discipline receipt or a programming error.
 
     Raised for structural problems (bad digests, unknown registries,

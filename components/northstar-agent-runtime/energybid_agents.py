@@ -107,6 +107,7 @@ epochs), canonical JCS hashing, constant-time digest comparisons.
 """
 
 from __future__ import annotations
+from _domain_base import DomainError
 
 import hashlib
 import hmac
@@ -162,7 +163,7 @@ DENY_NO_EXPLAINABILITY = "energybid.no_explainability"
 DENY_DEAD_SWITCH = "energybid.dead_switch"
 
 
-class EnergyBidError(ValueError):
+class EnergyBidError(DomainError):
     """A malformed energy-trading receipt or a programming error.
 
     Raised for structural problems (bad digests, unknown codes,

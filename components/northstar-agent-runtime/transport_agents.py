@@ -111,6 +111,7 @@ Honest scope:
 """
 
 from __future__ import annotations
+from _domain_base import DomainError
 
 import hashlib
 import hmac
@@ -175,7 +176,7 @@ _HEX64_LENGTH = 64
 _HEX128_LENGTH = 128
 
 
-class TransportError(ValueError):
+class TransportError(DomainError):
     """A malformed transport receipt/record or a programming error.
 
     Raised for structural problems (bad digests, unknown kinds,

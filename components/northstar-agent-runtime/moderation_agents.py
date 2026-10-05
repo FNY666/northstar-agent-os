@@ -103,6 +103,7 @@ via :func:`hmac.compare_digest`.
 """
 
 from __future__ import annotations
+from _domain_base import DomainError
 
 import hashlib
 import hmac
@@ -209,7 +210,7 @@ _HEX64_LENGTH = 64
 _HEX128_LENGTH = 128
 
 
-class ModerationError(ValueError):
+class ModerationError(DomainError):
     """Raised when a moderation-discipline field or receipt is malformed."""
 
 

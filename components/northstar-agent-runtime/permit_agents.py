@@ -56,6 +56,7 @@ via :func:`hmac.compare_digest`.
 """
 
 from __future__ import annotations
+from _domain_base import DomainError
 
 import hmac
 from dataclasses import dataclass
@@ -75,7 +76,7 @@ AUTHORITATIVE = "authoritative"
 NON_AUTHORITATIVE = "non-authoritative"
 
 
-class PermitError(ValueError):
+class PermitError(DomainError):
     """Raised on malformed input — fail-closed at the API boundary."""
 
 

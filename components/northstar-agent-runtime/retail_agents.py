@@ -108,6 +108,7 @@ Honest scope:
 """
 
 from __future__ import annotations
+from _domain_base import DomainError
 
 import hashlib
 import hmac
@@ -204,7 +205,7 @@ WTP_SIGNALS = frozenset({
 })
 
 
-class RetailError(ValueError):
+class RetailError(DomainError):
     """A malformed retail-discipline receipt or a programming error.
 
     Raised for structural problems (bad digests, broken chains).

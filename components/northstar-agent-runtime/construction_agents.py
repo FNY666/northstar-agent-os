@@ -99,6 +99,7 @@ Honest scope:
 """
 
 from __future__ import annotations
+from _domain_base import DomainError
 
 import hashlib
 import hmac
@@ -179,7 +180,7 @@ SENSOR_STATUSES = ("nominal", "degraded")
 AUTONOMY_MODES = ("autonomous", "supervised", "stopped")
 
 
-class ConstructionError(ValueError):
+class ConstructionError(DomainError):
     """A malformed construction receipt or a programming error.
 
     Raised for structural problems (bad digests, unknown checks,

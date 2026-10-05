@@ -385,7 +385,7 @@ def render_page(component: str) -> str:
 #: exclusion is a recorded decision, not a parking spot: ``_version`` is generated at
 #: build time and has no docstring worth publishing.
 MANIFEST_EXCLUSIONS: dict[str, frozenset[str]] = {
-    "northstar-agent-runtime": frozenset({"_version"}),
+    "northstar-agent-runtime": frozenset({"_version", "_domain_base"}),
 }
 
 

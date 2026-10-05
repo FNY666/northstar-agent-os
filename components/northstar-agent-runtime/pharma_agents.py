@@ -91,6 +91,7 @@ the vendored ``ed25519`` module, and all digest comparisons use
 """
 
 from __future__ import annotations
+from _domain_base import DomainError
 
 import hmac
 from dataclasses import dataclass
@@ -167,7 +168,7 @@ _COUNTERSIGN_MAX_AGE_S = 30 * 86_400
 _DRIFT_MAX_AGE_S = 7 * 86_400
 
 
-class PharmaError(ValueError):
+class PharmaError(DomainError):
     """A malformed pharma receipt or a programming error.
 
     Raised for structural problems (bad digests, unknown classes,

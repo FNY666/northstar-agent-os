@@ -106,6 +106,7 @@ comparisons via :func:`hmac.compare_digest`.
 """
 
 from __future__ import annotations
+from _domain_base import DomainError
 
 import hmac
 from dataclasses import dataclass
@@ -219,7 +220,7 @@ MIN_DISCLOSURE_COMPREHENSION_BPS = 3000
 MAX_JUNIOR_REPLACEMENT_BPS = 2000
 
 
-class NewsmediaError(ValueError):
+class NewsmediaError(DomainError):
     """A malformed newsmedia receipt or a programming error.
 
     Raised for structural problems (bad digests, unknown codes,

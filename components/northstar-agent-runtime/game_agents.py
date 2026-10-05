@@ -66,6 +66,7 @@ Honest scope:
 """
 
 from __future__ import annotations
+from _domain_base import DomainError
 
 import hashlib
 import hmac
@@ -203,7 +204,7 @@ _HEX64_LENGTH = 64
 _MAX_TEXT_LEN = 4096
 
 
-class GameAgentsError(ValueError):
+class GameAgentsError(DomainError):
     """Malformed game-agent input (construction-time boundary).
 
     Raised for structural problems: unknown role/scope/action,

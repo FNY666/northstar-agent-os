@@ -107,6 +107,7 @@ seconds). All digest comparisons use :func:`hmac.compare_digest`.
 """
 
 from __future__ import annotations
+from _domain_base import DomainError
 
 import hashlib
 import hmac
@@ -155,7 +156,7 @@ REFUSAL_TRIGGERS = frozenset(
 )
 
 
-class SportsError(ValueError):
+class SportsError(DomainError):
     """Raised for malformed sports-discipline inputs (fail-closed at issuance)."""
 
 

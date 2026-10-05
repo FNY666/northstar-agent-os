@@ -75,6 +75,7 @@ the only clock is the ``now`` the caller injects (integer epoch
 seconds). All digest comparisons use :func:`hmac.compare_digest`.
 """
 from __future__ import annotations
+from _domain_base import DomainError
 
 import hashlib
 import hmac
@@ -144,7 +145,7 @@ FLEET_ACTION_DENIED_EVENT = "mining.fleet_action_denied"
 _GENESIS = "genesis"
 
 
-class MiningError(ValueError):
+class MiningError(DomainError):
     """Malformed mining-governance input. Fail loud, never guess."""
 
 

@@ -95,6 +95,7 @@ comparisons via :func:`hmac.compare_digest`.
 """
 
 from __future__ import annotations
+from _domain_base import DomainError
 
 from dataclasses import dataclass
 from typing import Any
@@ -189,7 +190,7 @@ _HEX64_LENGTH = 64
 _HEX128_LENGTH = 128
 
 
-class GovServicesError(ValueError):
+class GovServicesError(DomainError):
     """A malformed receipt/record or a programming error.
 
     Raised for structural problems (bad digests, unknown vocabulary,

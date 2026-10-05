@@ -85,6 +85,7 @@ the relevant population. Those need independent evidence.
 """
 
 from __future__ import annotations
+from _domain_base import DomainError
 
 import hmac
 from dataclasses import dataclass
@@ -192,7 +193,7 @@ _HEX64_LENGTH = 64
 _DAY_S = 86_400
 
 
-class HealthcareError(ValueError):
+class HealthcareError(DomainError):
     """A malformed receipt/record or a programming error.
 
     Raised for structural problems (bad digests, bad signatures,
