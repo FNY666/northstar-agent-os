@@ -195,6 +195,55 @@ class DelegationGateTests(unittest.TestCase):
         self.assertFalse(verdict.ok)
         self.assertEqual(verdict.denied[0][0], "Grep")
 
+    def test_stable_identity_accepts_key_fingerprint(self):
+        from permissions import PermissionConfig, PermissionEngine
+
+        engine = PermissionEngine(PermissionConfig(mode="default"))
+        fingerprint = "a" * 64
+        verdict = engine.check_delegation(
+            fingerprint,
+            ("Read",),
+            kinds={"Read": "read"},
+            require_stable_identity=True,
+        )
+        self.assertTrue(verdict.ok)
+
+    def test_stable_identity_accepts_did(self):
+        from permissions import PermissionConfig, PermissionEngine
+
+        engine = PermissionEngine(PermissionConfig(mode="default"))
+        verdict = engine.check_delegation(
+            "did:example:123456",
+            ("Read",),
+            kinds={"Read": "read"},
+            require_stable_identity=True,
+        )
+        self.assertTrue(verdict.ok)
+
+    def test_display_name_rejected_when_stable_required(self):
+        from permissions import PermissionConfig, PermissionEngine
+
+        engine = PermissionEngine(PermissionConfig(mode="default"))
+        verdict = engine.check_delegation(
+            "general",
+            ("Read", "Grep"),
+            kinds={"Read": "read", "Grep": "read"},
+            require_stable_identity=True,
+        )
+        self.assertFalse(verdict.ok)
+        self.assertEqual(len(verdict.denied), 2)
+        self.assertIn("stable cryptographic identity", verdict.denied[0][1])
+
+    def test_display_name_allowed_by_default(self):
+        # Opt-in: without the flag, display names work as before.
+        from permissions import PermissionConfig, PermissionEngine
+
+        engine = PermissionEngine(PermissionConfig(mode="default"))
+        verdict = engine.check_delegation(
+            "general", ("Read",), kinds={"Read": "read"}
+        )
+        self.assertTrue(verdict.ok)
+
 
 class PerCallApprovalBindingTests(unittest.TestCase):
     """Per-call approval binding: no caching, no replay.

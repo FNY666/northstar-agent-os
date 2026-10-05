@@ -7241,7 +7241,7 @@ Evaluates one tool call against the pre-trade checks then the three layers.
 - `evaluate(tool_name: str, *, kind: str | None=None, mutating: bool | None=None, payload: dict[str, Any] | None=None, context: PermissionRequestContext | None=None, known: bool=True, dataflow: SessionDataflow | None=None)`
   - Run the three layers for one call, plus the dataflow dimension.
 - `evaluate_spec(spec: Any, payload: dict[str, Any] | None=None, *, context: PermissionRequestContext | None=None, known: bool=True)`
-- `check_delegation(agent: str, tool_names: Sequence[str], *, kinds: dict[str, str] | None=None, context: PermissionRequestContext | None=None, disallowed_extra: Iterable[str]=())`
+- `check_delegation(agent: str, tool_names: Sequence[str], *, kinds: dict[str, str] | None=None, context: PermissionRequestContext | None=None, disallowed_extra: Iterable[str]=(), require_stable_identity: bool=False)`
   - Gate a subagent by *each tool it declared*, not by the name ``Task``.
 ### `plugin_load`
 
