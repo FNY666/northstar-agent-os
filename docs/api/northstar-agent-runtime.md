@@ -7174,6 +7174,18 @@ The gate's verdict for one tool call.
 
 What the host approval callback gets to see.
 
+#### `ScopeManager`
+
+Tracks permission scopes (epochs) and their lifetime.
+
+- `open_scope(scope_id: str, description: str='')`
+  - Open a scope. Reopening a closed scope is an error (fail closed).
+- `close_scope(scope_id: str)`
+  - Close a scope, revoking its permissions. Returns True if it was open.
+- `is_open(scope_id: str)`
+  - True if the scope exists and hasn't been closed.
+- `was_closed(scope_id: str)`
+  - True if the scope was explicitly closed (vs never opened).
 #### `digest_arguments(arguments: Any)`
 
 Canonical ``sha256:<hex>`` digest of tool arguments.
