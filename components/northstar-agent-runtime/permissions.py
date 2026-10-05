@@ -1341,13 +1341,26 @@ class PermissionEngine:
         kinds: dict[str, str] | None = None,
         context: PermissionRequestContext | None = None,
         disallowed_extra: Iterable[str] = (),
+        require_stable_identity: bool = False,
     ) -> DelegationVerdict:
         """Gate a subagent by *each tool it declared*, not by the name ``Task``.
 
         A delegation is approved only when every tool the subagent may reach is
         approved here. That is what makes "read-only reviewer subagent" a real
         boundary instead of a prompt-level suggestion.
+
+        When ``require_stable_identity`` is set, the ``agent`` identifier must
+        be a stable cryptographic identity (key fingerprint or DID), not a
+        display name -- arXiv:2609.27624: name collisions route delegation
+        to attacker-controlled peers. Off by default for backward compatibility.
         """
+        if require_stable_identity and not _is_stable_agent_identity(agent):
+            return DelegationVerdict(
+                agent=agent,
+                allowed=(),
+                denied=[(t, "delegation target is not a stable cryptographic identity") for t in tool_names],
+                checked=tuple(normalise_names(tool_names)),
+            )
         extra = set(normalise_names(disallowed_extra))
         allowed: list[str] = []
         denied: list[tuple[str, str]] = []
@@ -1364,6 +1377,41 @@ class PermissionEngine:
             else:
                 denied.append((name, decision.reason))
         return DelegationVerdict(agent=agent, allowed=tuple(allowed), denied=tuple(denied), checked=tuple(checked))
+
+
+def _is_stable_agent_identity(agent: str) -> bool:
+    """Check whether an agent identifier is a stable cryptographic identity.
+
+    Delegation targets must be origin-bound identities (key fingerprints,
+    DIDs), never human-readable display names -- arXiv:2609.27624 shows
+    6/7 integrations dispatch to an attacker peer on name collision.
+    Accepted shapes:
+    - 64-hex Ed25519 public key (with or without 0x prefix)
+    - DID (``did:<method>:...``)
+    - ``key:<hex>`` prefixed fingerprints
+    """
+    if not isinstance(agent, str) or not agent:
+        return False
+    text = agent.strip()
+    # DID
+    if text.startswith("did:") and len(text) > 8 and ":" in text[4:]:
+        return True
+    # Hex fingerprint, with or without 0x.
+    hexpart = text[2:] if text.lower().startswith("0x") else text
+    if len(hexpart) == 64:
+        try:
+            bytes.fromhex(hexpart)
+            return True
+        except ValueError:
+            pass
+    # key: prefix
+    if text.startswith("key:") and len(text) > 12:
+        try:
+            bytes.fromhex(text[4:])
+            return True
+        except ValueError:
+            pass
+    return False
 
 
 def _approval_verdict(verdict: Any) -> tuple[bool, str]:
