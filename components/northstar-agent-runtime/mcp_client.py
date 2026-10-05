@@ -627,6 +627,12 @@ class McpStdioClient:
                 f"mcp {self.name}/{tool_name}: denied: server is quarantined "
                 f"({self._quarantine_reason}); re-admit the server to clear"
             )
+        # Drain any buffered notifications before executing: a
+        # notifications/tools/list_changed may already be sitting in the
+        # stdio buffer (arrived after the last _exchange consumed input).
+        # Without this drain, the tool call would go out before we notice
+        # the server changed its toolset -- a live rug-pull window.
+        self._drain_notifications()
         # Drain any pending list_changed notification: the server announced
         # a toolset change, so re-verify pins before executing anything.
         if self._pending_list_changed:
@@ -867,6 +873,26 @@ class McpStdioClient:
             self._proc.stdin.flush()
         except (BrokenPipeError, OSError) as error:
             raise McpError(f"mcp server {self.name!r}: write failed: {error}") from error
+
+    def _drain_notifications(self, max_lines: int = 32) -> None:
+        """Non-blocking drain of buffered server notifications.
+
+        Reads any lines already waiting in the stdio buffer (zero timeout)
+        and flags ``notifications/tools/list_changed``. Bounded so a chatty
+        server can't stall a tool call. This closes the rug-pull window
+        where a notification arrives between exchanges and would otherwise
+        only be noticed after the next tool call goes out.
+        """
+        for _ in range(max_lines):
+            line = self._read_line(time.monotonic())  # zero timeout: don't block
+            if line is None:
+                break
+            try:
+                message = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            if isinstance(message, dict) and message.get("method") == "notifications/tools/list_changed":
+                self._pending_list_changed = True
 
     def _read_line(self, deadline: float) -> str | None:
         """Read one line with a deadline and a byte cap; ``None`` on timeout/EOF."""
