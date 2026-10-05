@@ -7,6 +7,7 @@ silence, E4 DLP header bypass, A2 body-swap bypass, D5 agent-impersonation.
 from __future__ import annotations
 
 import os
+import time
 import unittest
 
 import support  # noqa: F401
@@ -203,7 +204,7 @@ class ApprovalBodyBindingTests(unittest.TestCase):
             arguments_digest=self.card.arguments_digest,
             approver_id="op1",
             approver_seed=self.seed,
-            decided_at=NOW,
+            decided_at=time.time(),
             body=self.body,
         )
         self.pol = _egress_policy(require_approval=True)
