@@ -9,6 +9,16 @@ Docstring-generated reference over the component's public modules (``ast``-extra
 
 ## Modules
 
+### `agb_smoke_corpus`
+
+Source: `components/northstar-agent-runtime/agb_smoke_corpus.py`
+
+AGB smoke corpus: AgentGuardBench-derived offline adversarial probes.
+
+#### `describe()`
+
+Machine-readable manifest for the smoke corpus.
+
 ### `adjudication`
 
 Source: `components/northstar-agent-runtime/adjudication.py`

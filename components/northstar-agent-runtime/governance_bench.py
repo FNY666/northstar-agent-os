@@ -113,6 +113,8 @@ from step_compliance import Link as StepLink
 from step_compliance import StepLayout, verify_layout
 from tools import ToolLimits, ToolSandbox, build_default_registry
 
+from agb_smoke_corpus import AGB_SMOKE_SPECS
+
 #: Semantic version of the public case set. Bump when a case is added, removed,
 #: or its expected verdict changes — consumers pin against this string.
 BENCH_VERSION = "northstar.governance.bench.v37"
@@ -589,6 +591,15 @@ METRIC_CORPUS: tuple[MetricProbe, ...] = (
         family="risk", axis="risk", engine="ask", callback="approve",
         axis_portable=True,
     ),
+)
+
+#: AGB smoke corpus: 30 synthetic adversarial templates (AgentGuardBench, MIT)
+#: compiled to MetricProbe gate-decision probes. Millisecond offline smoke
+#: layer for the metrics track — pure data, zero extra dependencies. See
+#: agb_smoke_corpus.py for the gate-level translation rationale and the MIT
+#: attribution notice.
+METRIC_CORPUS = METRIC_CORPUS + tuple(
+    MetricProbe(**spec) for spec in AGB_SMOKE_SPECS
 )
 
 

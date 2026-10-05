@@ -73,6 +73,7 @@ MANIFEST: dict[str, tuple[str, ...]] = {
     "northstar-codex-sidecar": ("sidecar", "transport", "service", "sidecar_socket"),
     "northstar-egress-sidecar": ("egress_sidecar", "egress_socket", "transport"),
     "northstar-agent-runtime": (
+        "agb_smoke_corpus",
         "adjudication",
         "embodied",
         "greenwash",
