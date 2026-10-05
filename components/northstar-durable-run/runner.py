@@ -15,7 +15,7 @@ import threading
 import time
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Callable
+from typing import TYPE_CHECKING, Any, Callable
 
 from blob_store import CLAIM_CHECK_THRESHOLD_BYTES
 from durable_contract import (
@@ -26,6 +26,9 @@ from durable_contract import (
 )
 from event_store import EventStore
 from tool_ledger import SimulatedCrash, ToolEffectLedger  # noqa: F401 - re-exported
+
+if TYPE_CHECKING:
+    from durable_audit import DurableEvidenceSink
 
 try:  # POSIX only; without it the claim is thread-serial, not process-serial
     import fcntl
@@ -545,6 +548,7 @@ class DurableRunner:
         adopt_lease: tuple[str, int] | None = None,
         crash_hook: Callable[[str], None] | None = None,
         ledger_path: str | Path | None = None,
+        evidence_sink: DurableEvidenceSink | None = None,
     ):
         if not isinstance(run, RunContract):
             raise ValueError("run must be a RunContract")
@@ -567,6 +571,16 @@ class DurableRunner:
                 )
         self.run = run
         self.store = store
+        if evidence_sink is not None:
+            from durable_audit import DurableEvidenceSink
+
+            if not isinstance(evidence_sink, DurableEvidenceSink):
+                raise ValueError("evidence_sink must be a DurableEvidenceSink")
+            if evidence_sink.run_id != run.run_id:
+                raise ValueError("evidence_sink run_id does not match runner run")
+            if evidence_sink.artifact_store is not store.blob_store:
+                raise ValueError("evidence_sink must reference this EventStore's BlobStore")
+        self.evidence_sink = evidence_sink
         self.lease = LeaseManager(lease_path)
         self.lease_ttl_seconds = lease_ttl_seconds
         # Adopted lease (supervisor pattern): (owner_id, fencing_token) of a
@@ -616,6 +630,20 @@ class DurableRunner:
         self._heartbeat_interval = heartbeat_interval_seconds
         self._fence_lock = threading.Lock()
         self._fencing_token: int | None = None
+        if self.evidence_sink is not None:
+            # Recover any event that reached EventStore before a crash but did
+            # not yet reach the evidence ledger. Idempotent source_ids make
+            # replay safe after an uncertain evidence commit.
+            self._sync_evidence_history(self.store.read_history(self.run.run_id))
+
+    def _sync_evidence_history(self, history) -> None:
+        if self.evidence_sink is None:
+            return
+        if self.evidence_sink.last_sequence > len(history):
+            raise ValueError("evidence sink is ahead of the durable event history")
+        for event in history[self.evidence_sink.last_sequence :]:
+            payload_bytes = self.store.read_blob(event)
+            self.evidence_sink.append_event(event, payload_bytes=payload_bytes)
 
     def _get_token(self) -> int | None:
         with self._fence_lock:
@@ -697,14 +725,18 @@ class DurableRunner:
                 raise ValueError("owner_id is required once a fencing epoch is active")
             self.lease.check_token(owner_id, token=token)
         history = self.store.read_history(self.run.run_id)
+        self._sync_evidence_history(history)
         raw_payload = _canonical_json(payload)
         # Claim-check: large payloads never go inline into the JSONL
         # history. They are stored once in the content-addressed blob area
         # and the event carries only the blob_ref (which equals the payload
         # digest — the blob is named by what it contains).
+        # Evidence capture needs a durable artifact reference even for small
+        # payloads. Without an attached sink, preserve the normal claim-check
+        # threshold and storage behavior.
         blob_ref = (
             self.store.blob_store.put(raw_payload)
-            if len(raw_payload) >= CLAIM_CHECK_THRESHOLD_BYTES
+            if self.evidence_sink is not None or len(raw_payload) >= CLAIM_CHECK_THRESHOLD_BYTES
             else None
         )
         event = self._event(
@@ -718,7 +750,10 @@ class DurableRunner:
             payload_digest=_digest(payload),
             blob_ref=blob_ref,
         )
-        self.store.append_event(event)
+        persisted = self.store.append_event(event)
+        if self.evidence_sink is not None:
+            payload_bytes = self.store.read_blob(persisted)
+            self.evidence_sink.append_event(persisted, payload_bytes=payload_bytes)
 
     def _ledger_append(self, **kwargs: Any) -> None:
         """Append a tool-ledger event inside the active execution's fence."""
