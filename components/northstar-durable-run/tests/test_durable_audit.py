@@ -5,8 +5,10 @@ from pathlib import Path
 
 COMPONENT_ROOT = Path(__file__).resolve().parents[1]
 CONTRACT_ROOT = COMPONENT_ROOT.parent / "northstar-run-contract"
+EVIDENCE_ROOT = COMPONENT_ROOT.parent / "northstar-run-evidence"
 sys.path.insert(0, str(COMPONENT_ROOT))
 sys.path.insert(0, str(CONTRACT_ROOT))
+sys.path.insert(0, str(EVIDENCE_ROOT))
 
 from durable_audit import COMPONENT, event_to_audit, events_to_ndjson  # noqa: E402
 

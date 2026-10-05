@@ -109,23 +109,39 @@ Machine-readable result of checking a sealed manifest.
 
 Check a sealed manifest's shape and signature. Never trusts blindly.
 
+#### `EvidenceStoreError`
+
+Operational error while accessing the local evidence store.
+
+#### `EvidenceIntegrityError`
+
+Stored ledger is malformed, non-canonical, or fails chain validation.
+
+#### `EvidenceCommitUncertainError`
+
+Rename succeeded, but directory fsync failed and crash durability is unknown.
+
 #### `EvidenceStore`
 
-One run's evidence chain, persisted as JSONL with a verifiable seal.
+Persist one run's ledger at the configured path.
 
-- `run_id` (property)
 - `path` (property)
+  - Absolute path to the configured evidence JSONL file.
+- `entries` (property)
 - `entry_count` (property)
 - `head_digest` (property)
-- `entries` (property)
-- `append(*, source: str, kind: str, occurred_at: int, subject: Mapping[str, Any] | bytes, refs: tuple[EvidenceRef, ...]=(), source_id: str | None=None)`
-  - Validate, append to the chain, and durably write one JSONL line.
+- `load()`
+  - Load a fully parsed and verified immutable snapshot of this run's ledger.
 - `verify()`
-  - Re-verify the in-memory chain (the file was verified at open).
+  - Return structural integrity results; malformed bytes fail closed.
+- `append(*, source: str, kind: str, occurred_at: int, subject: Mapping[str, Any] | bytes, source_id: str, refs: Iterable[EvidenceRef]=())`
+  - Create and atomically persist an entry; ``source_id`` is required for safe retries.
+- `append_entry(entry: EvidenceEntry | Mapping[str, Any])`
+  - Atomically append a prebuilt entry with a stable idempotency ``source_id``.
 - `seal(signer: SealSigner, *, sealed_at: int | None=None)`
-  - Produce a sealed manifest attesting to the current chain head.
+  - Sign a manifest bound to one verified snapshot of this chain.
 - `verify_seal(manifest: Mapping[str, Any], key_resolver: Mapping[str, SealVerifier])`
-  - Verify a seal *and* bind it to this store's current contents.
+  - Verify signature and bind it to one intact snapshot of this store.
 ### `audit_adapter`
 
 Source: `components/northstar-run-evidence/audit_adapter.py`
