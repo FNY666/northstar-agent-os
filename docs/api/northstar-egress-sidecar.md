@@ -23,6 +23,12 @@ Brokered credentials, held only in the sidecar process.
 
 - `get(reference: str)`
 - `known_values()`
+#### `ReceiptFeed`
+
+Persistent, append-only JSONL feed of egress receipts.
+
+- `append(receipt: dict[str, Any])`
+  - Append one receipt. Returns True on success.
 #### `SidecarContext`
 
 Everything the sidecar needs beyond one request.
@@ -34,9 +40,9 @@ Validate the wire request. Narrow by construction: only the declared fields are 
 
 #### `run_one(value: dict[str, Any], ctx: SidecarContext)`
 
-Handle one validated wire request. Never raises: failures are encoded as ``status: denied | error`` with a receipt when one exists.
+Handle one wire request and persist its receipt.
 
-#### `build_context(*, policy_dir: str | Path, approver_keys: dict[str, bytes] | None=None, enforcer_seed: bytes | None=None, key_id: str | None=None)`
+#### `build_context(*, policy_dir: str | Path, approver_keys: dict[str, bytes] | None=None, enforcer_seed: bytes | None=None, key_id: str | None=None, receipt_feed_path: str | Path | None=None)`
 
 Build the sidecar context from on-disk config + environment.
 

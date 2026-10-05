@@ -118,12 +118,20 @@ def main() -> None:
     enforcer_seed = bytes.fromhex(seed_hex) if seed_hex else None
     if enforcer_seed is not None and len(enforcer_seed) != 32:
         raise ValueError("NORTHSTAR_EGRESS_SIGNING_SEED must be 64 hex chars (32 bytes)")
+    socket_path = os.environ.get("NORTHSTAR_EGRESS_SOCKET", SOCKET_PATH)
+    # The receipt feed lives next to the socket by default; override with
+    # NORTHSTAR_EGRESS_FEED (e.g. to put it on persistent storage -- the
+    # socket dir may be tmpfs).
+    feed_path = os.environ.get("NORTHSTAR_EGRESS_FEED", "").strip() or str(
+        Path(socket_path).parent / "receipts.jsonl"
+    )
     ctx = build_context(
         policy_dir=policy_dir,
         enforcer_seed=enforcer_seed,
         key_id=os.environ.get("NORTHSTAR_EGRESS_KEY_ID") or None,
+        receipt_feed_path=feed_path,
     )
-    serve(ctx, os.environ.get("NORTHSTAR_EGRESS_SOCKET", SOCKET_PATH))
+    serve(ctx, socket_path)
 
 
 if __name__ == "__main__":

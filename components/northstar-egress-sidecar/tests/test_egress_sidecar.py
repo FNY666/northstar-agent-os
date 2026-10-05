@@ -8,6 +8,7 @@ refuses to start when a referenced credential is missing.
 from __future__ import annotations
 
 import base64
+import json
 import os
 import sys
 import tempfile
@@ -235,6 +236,91 @@ class SidecarTests(unittest.TestCase):
                 build_context(policy_dir=self.policy_dir)
         finally:
             os.environ["NORTHSTAR_EGRESS_CRED_HOOK_TOKEN"] = "hook-secret-value"
+
+
+class ReceiptFeedTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.policy_dir = tempfile.mkdtemp()
+        Path(cls.policy_dir, "northstar-egress.toml").write_text(POLICY_TOML)
+        os.environ["NORTHSTAR_EGRESS_CRED_HOOK_TOKEN"] = "hook-secret-value"
+
+    @classmethod
+    def tearDownClass(cls):
+        os.environ.pop("NORTHSTAR_EGRESS_CRED_HOOK_TOKEN", None)
+
+    def _ctx(self):
+        ctx = build_context(policy_dir=self.policy_dir)
+        ctx._resolver = lambda h: ["127.0.0.1"]
+        return ctx
+
+    def test_feed_appends_receipts(self):
+        from pathlib import Path
+
+        from egress_sidecar import ReceiptFeed, build_context, run_one
+
+        with tempfile.TemporaryDirectory() as tmp:
+            feed_path = Path(tmp) / "receipts.jsonl"
+            feed = ReceiptFeed(feed_path)
+            ctx = build_context(policy_dir=self.policy_dir, receipt_feed_path=feed_path)
+            ctx._resolver = lambda h: ["127.0.0.1"]
+            # Rejected request -> receipt persisted.
+            resp = run_one({"request_id": "r-feed-1"}, ctx)
+            self.assertEqual(resp["status"], "rejected")
+            self.assertTrue(feed_path.is_file())
+            lines = feed_path.read_text(encoding="utf-8").strip().splitlines()
+            self.assertEqual(len(lines), 1)
+            record = json.loads(lines[0])
+            self.assertEqual(record["request_id"], "r-feed-1")
+            self.assertEqual(record["kind"], "egress-rejection-receipt/1")
+            self.assertIn("chain_hash", record)
+
+    def test_no_feed_no_persistence(self):
+        # Without a feed path, run_one works but writes nothing.
+        from egress_sidecar import run_one
+
+        ctx = self._ctx()
+        self.assertIsNone(ctx.receipt_feed)
+        resp = run_one({"request_id": "r-nofeed"}, ctx)
+        self.assertEqual(resp["status"], "rejected")
+        self.assertIn("receipt", resp)  # receipt still returned to caller
+
+    def test_feed_is_thread_safe(self):
+        import threading
+        from pathlib import Path
+
+        from egress_sidecar import ReceiptFeed
+
+        with tempfile.TemporaryDirectory() as tmp:
+            feed = ReceiptFeed(Path(tmp) / "r.jsonl")
+            errors: list[str] = []
+
+            def worker(n: int) -> None:
+                try:
+                    for i in range(20):
+                        ok = feed.append({"n": n, "i": i, "chain_hash": "x"})
+                        if not ok:
+                            errors.append(f"worker {n} append failed")
+                except Exception as exc:  # noqa: BLE001
+                    errors.append(str(exc))
+
+            threads = [threading.Thread(target=worker, args=(n,)) for n in range(5)]
+            for t in threads:
+                t.start()
+            for t in threads:
+                t.join()
+            self.assertEqual(errors, [])
+            self.assertEqual(feed.appended, 100)
+
+    def test_feed_survives_unserializable(self):
+        from pathlib import Path
+
+        from egress_sidecar import ReceiptFeed
+
+        with tempfile.TemporaryDirectory() as tmp:
+            feed = ReceiptFeed(Path(tmp) / "r.jsonl")
+            self.assertFalse(feed.append({"bad": object()}))
+            self.assertIsNotNone(feed.last_error)
 
 
 if __name__ == "__main__":
