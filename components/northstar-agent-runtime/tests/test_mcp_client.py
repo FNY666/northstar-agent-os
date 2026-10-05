@@ -542,6 +542,31 @@ class ToolPinningTests(unittest.TestCase):
         finally:
             client.close()
 
+    def test_repeated_flaps_escalate_to_distrust(self):
+        from mcp_client import McpStdioClient
+
+        client = McpStdioClient("demo", ["python3", str(FIXTURE)], timeout_ms=4000, env={})
+        client.connect()
+        try:
+            name = client.tool_names()[0]
+            # Flap 3 times: each quarantine increments the count.
+            for i in range(3):
+                client._quarantined = False  # operator clears, server flaps again
+                client._tool_digests[name] = f"{i}" * 64
+                client.refresh_tools()
+            self.assertTrue(client.quarantined)
+            self.assertTrue(client.distrusted)
+            # Distrusted blocks with a stronger message.
+            result = client.call_tool(name, {})
+            self.assertTrue(result.is_error)
+            self.assertIn("distrusted", result.text())
+            # Explicit re-admission clears.
+            client.re_admit()
+            self.assertFalse(client.quarantined)
+            self.assertFalse(client.distrusted)
+        finally:
+            client.close()
+
 
 if __name__ == "__main__":
     unittest.main()
