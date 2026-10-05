@@ -568,5 +568,46 @@ class ToolPinningTests(unittest.TestCase):
             client.close()
 
 
+class DrainNotificationsTests(unittest.TestCase):
+    """Pre-call drain catches buffered list_changed notifications."""
+
+    def test_drain_flags_list_changed(self):
+        from mcp_client import McpStdioClient
+
+        client = McpStdioClient("demo", ["true"], timeout_ms=1000, env={})
+        # Don't connect; stub _read_line to simulate a buffered notification.
+        lines = [
+            '{"jsonrpc": "2.0", "method": "notifications/tools/list_changed"}',
+            None,  # buffer empty after
+        ]
+        client._read_line = lambda deadline: lines.pop(0)  # type: ignore[method-assign]
+        self.assertFalse(client._pending_list_changed)
+        client._drain_notifications()
+        self.assertTrue(client._pending_list_changed)
+
+    def test_drain_ignores_other_messages(self):
+        from mcp_client import McpStdioClient
+
+        client = McpStdioClient("demo", ["true"], timeout_ms=1000, env={})
+        lines = [
+            '{"jsonrpc": "2.0", "method": "notifications/other"}',
+            '{"jsonrpc": "2.0", "id": 1, "result": {}}',
+            "not json at all",
+            None,
+        ]
+        client._read_line = lambda deadline: lines.pop(0)  # type: ignore[method-assign]
+        client._drain_notifications()
+        self.assertFalse(client._pending_list_changed)
+
+    def test_drain_is_bounded(self):
+        from mcp_client import McpStdioClient
+
+        client = McpStdioClient("demo", ["true"], timeout_ms=1000, env={})
+        # Infinite stream of non-matching lines: drain must stop at max_lines.
+        client._read_line = lambda deadline: '{"jsonrpc": "2.0"}'  # type: ignore[method-assign]
+        client._drain_notifications(max_lines=5)
+        self.assertFalse(client._pending_list_changed)
+
+
 if __name__ == "__main__":
     unittest.main()
