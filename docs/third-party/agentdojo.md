@@ -9,11 +9,13 @@ Luca Beurer-Kellner, Marc Fischer, and Florian Tramèr.
   Mislav Balunovic, Luca Beurer-Kellner, Marc Fischer, and Florian Tramèr
   (full text: https://github.com/ethz-spylab/agentdojo/blob/main/LICENSE).
 - **Pinned commit:** `089ed468cf3ed0322acc66b0211f26d9d90dbf60` (benchmark v1.2.2).
-- **What was adapted:** the *structure* of the workspace suite's 14 injection
-  tasks — each task's attack goal and its `ground_truth()` / `security()`
-  call sequence, converted from "what the agent did" into gate-decision
-  probes ("whether the gate lets the call through"). See
-  `ADJ_CORPUS` in `components/northstar-agent-runtime/governance_bench.py`.
+- **What was adapted:** the *structure* of the injection tasks across all four
+  suites — workspace (14 tasks), banking (9 tasks), slack (5 tasks), travel
+  (7 tasks, 1 excluded) — each task's attack goal and its `ground_truth()` /
+  `security()` call sequence, converted from "what the agent did" into
+  gate-decision probes ("whether the gate lets the call through"). See
+  `ADJ_CORPUS` in `components/northstar-agent-runtime/governance_bench.py`
+  (59 probes: 45 adversarial + 14 benign).
 - **What was NOT copied:** no `environment.yaml` data files, no
   `injection_vectors.yaml` contents, no attack prompt text (the
   `attacks/` jailbreak phrasings), no user-task prompts, no synthetic PII.
