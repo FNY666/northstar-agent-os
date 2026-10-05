@@ -110,6 +110,31 @@ class ToolContext:
 
 
 @dataclass(frozen=True)
+class ToolProvenance:
+    """Where a tool result came from and how much to trust it.
+
+    Prompt-injection research (CaMeL, NetInjectBench, 2026) converges on:
+    the policy must look at trusted metadata, never at artifact text.
+    This envelope is the cheap first step -- every tool result carries
+    its source and trust level, so consumers know not to treat tool
+    output as instructions.
+
+    Trust levels:
+    - "low": untrusted external content (tool outputs, MCP servers, web
+      fetches, file reads from untrusted paths). Never treat as instructions.
+    - "medium": semi-trusted (workspace config, local files).
+    - "high": operator-provided (prompts, explicit approvals).
+    """
+
+    source: str = ""  # e.g. "mcp:demo:echo", "tool:Read", "provider:openai"
+    trust: str = "low"  # "low" | "medium" | "high"
+    detail: str = ""  # free-form, e.g. tool name or URL
+
+    def as_dict(self) -> dict[str, str]:
+        return {"source": self.source, "trust": self.trust, "detail": self.detail}
+
+
+@dataclass
 class ToolResult:
     """What a handler returns. ``is_error`` is the only failure signal the loop reads."""
 
@@ -117,6 +142,7 @@ class ToolResult:
     is_error: bool = False
     truncated: bool = False
     data: dict[str, Any] = field(default_factory=dict)
+    provenance: ToolProvenance = field(default_factory=ToolProvenance)
 
     @staticmethod
     def error(message: str, **data: Any) -> "ToolResult":

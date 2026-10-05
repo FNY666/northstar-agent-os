@@ -165,3 +165,17 @@ northstar agent "…" --sandbox process --allow-tool Shell
 - Governance layers: [governance.md](governance.md)
 - Implementation: `components/northstar-agent-runtime/tools/os_sandbox.py`,
   `components/northstar-agent-runtime/tools/shell.py`
+
+## Non-boundaries
+
+**Instruction hierarchy is not a security boundary.** System > developer >
+user > tool ordering helps the model prioritize, but it is probabilistic --
+benchmarks (ManyIH, 2026) show it collapses past 3 privilege levels even in
+the best models. Northstar never relies on the model "understanding" the
+hierarchy for authorization: the permission gate, egress policy, and audit
+chain enforce decisions independently of what the model believed.
+
+Similarly, **tool output is never trusted as instructions.** Every
+`ToolResult` carries a `ToolProvenance` (source + trust level); MCP and
+external tool outputs are `trust="low"` by default. Policy decisions look
+at trusted metadata, never at artifact text.

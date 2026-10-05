@@ -12113,6 +12113,11 @@ Read-only environment handed to every handler.
 - `relative(path: Path)`
   - Workspace-relative display path; never leaks a resolved absolute path into output.
 - `service(name: str)`
+#### `ToolProvenance`
+
+Where a tool result came from and how much to trust it.
+
+- `as_dict()`
 #### `ToolResult`
 
 What a handler returns. ``is_error`` is the only failure signal the loop reads.
