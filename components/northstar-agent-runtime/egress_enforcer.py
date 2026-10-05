@@ -390,15 +390,34 @@ def build_approval_receipt(
     )
 
 
-def verify_approval_receipt(receipt: ApprovalReceipt, approver_public_key: bytes) -> bool:
-    """Verify an approval receipt's signature. False on any defect; never raises."""
+def verify_approval_receipt(
+    receipt: ApprovalReceipt,
+    approver_public_key: bytes,
+    *,
+    now: float | None = None,
+    max_age_seconds: float = 300.0,
+) -> bool:
+    """Verify an approval receipt's signature and freshness.
+
+    False on any defect; never raises. The ``max_age_seconds`` bounds how
+    long an approval stays valid after ``decided_at`` -- a stolen approval
+    receipt is only useful within this window. The default (5 minutes) is
+    conservative; callers with different latency requirements pass their own.
+    """
     try:
         if not isinstance(approver_public_key, (bytes, bytearray)) or len(approver_public_key) != 32:
             return False
         signature = bytes.fromhex(receipt.signature)
         if len(signature) != 64:
             return False
-        return bool(ed_verify(bytes(approver_public_key), jcs_canonical_json(receipt._signing_body()), signature))
+        if not bool(ed_verify(bytes(approver_public_key), jcs_canonical_json(receipt._signing_body()), signature)):
+            return False
+        # Freshness: the approval must not be older than max_age_seconds.
+        check_now = time.time() if now is None else float(now)
+        age = check_now - float(receipt.decided_at)
+        if age < 0 or age > max_age_seconds:
+            return False
+        return True
     except (ValueError, TypeError):
         return False
 

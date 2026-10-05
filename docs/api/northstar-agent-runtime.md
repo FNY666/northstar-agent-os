@@ -5294,9 +5294,9 @@ A signed binding between an approval decision and one action card.
 
 Sign an approval receipt. Called by the approver's side (which holds the private key), never by the agent.
 
-#### `verify_approval_receipt(receipt: ApprovalReceipt, approver_public_key: bytes)`
+#### `verify_approval_receipt(receipt: ApprovalReceipt, approver_public_key: bytes, *, now: float | None=None, max_age_seconds: float=300.0)`
 
-Verify an approval receipt's signature. False on any defect; never raises.
+Verify an approval receipt's signature and freshness.
 
 #### `EgressRequest`
 

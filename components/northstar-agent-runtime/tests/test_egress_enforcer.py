@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import os
 import tempfile
+import time
 import unittest
 from pathlib import Path
 from types import MappingProxyType
@@ -266,7 +267,7 @@ class ApprovalBindingTests(unittest.TestCase):
             arguments_digest=self.card.arguments_digest,
             approver_id="op1",
             approver_seed=self.seed,
-            decided_at=NOW,
+            decided_at=time.time(),
             body=b"{}",
         )
         self.pol = policy(rule={"require_approval": True, "allow_private_ips": True})
@@ -371,6 +372,77 @@ class ApprovalBindingTests(unittest.TestCase):
     def test_malformed_card_dict_rejected(self):
         with self.assertRaises(EgressPolicyError):
             card_from_dict({"card_id": "x"})
+
+
+class ApprovalReceiptTtlTests(unittest.TestCase):
+    def test_fresh_receipt_verifies(self):
+        from ed25519 import public_key as ed_pubkey
+
+        seed = bytes(32)
+        receipt = build_approval_receipt(
+            card_id="c1",
+            call_id="call-1",
+            arguments_digest="sha256:abc",
+            approver_id="op1",
+            approver_seed=seed,
+            decided_at=1000.0,
+            body=b"{}",
+        )
+        pubkey = ed_pubkey(seed)
+        self.assertTrue(verify_approval_receipt(receipt, pubkey, now=1000.0 + 60.0))
+
+    def test_expired_receipt_rejected(self):
+        from ed25519 import public_key as ed_pubkey
+
+        seed = bytes(32)
+        receipt = build_approval_receipt(
+            card_id="c1",
+            call_id="call-1",
+            arguments_digest="sha256:abc",
+            approver_id="op1",
+            approver_seed=seed,
+            decided_at=1000.0,
+            body=b"{}",
+        )
+        pubkey = ed_pubkey(seed)
+        # 10 minutes later, past the 5-minute default TTL.
+        self.assertFalse(verify_approval_receipt(receipt, pubkey, now=1000.0 + 600.0))
+
+    def test_future_receipt_rejected(self):
+        from ed25519 import public_key as ed_pubkey
+
+        seed = bytes(32)
+        receipt = build_approval_receipt(
+            card_id="c1",
+            call_id="call-1",
+            arguments_digest="sha256:abc",
+            approver_id="op1",
+            approver_seed=seed,
+            decided_at=2000.0,
+            body=b"{}",
+        )
+        pubkey = ed_pubkey(seed)
+        # decided_at is in the future relative to now -> reject (clock skew / replay).
+        self.assertFalse(verify_approval_receipt(receipt, pubkey, now=1000.0))
+
+    def test_custom_ttl(self):
+        from ed25519 import public_key as ed_pubkey
+
+        seed = bytes(32)
+        receipt = build_approval_receipt(
+            card_id="c1",
+            call_id="call-1",
+            arguments_digest="sha256:abc",
+            approver_id="op1",
+            approver_seed=seed,
+            decided_at=1000.0,
+            body=b"{}",
+        )
+        pubkey = ed_pubkey(seed)
+        # With a 1-hour TTL, 10 minutes is fine.
+        self.assertTrue(
+            verify_approval_receipt(receipt, pubkey, now=1000.0 + 600.0, max_age_seconds=3600.0)
+        )
 
 
 if __name__ == "__main__":
