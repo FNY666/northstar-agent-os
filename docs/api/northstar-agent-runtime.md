@@ -6481,6 +6481,14 @@ MCP transport, protocol, or configuration error. Operator-facing.
 
 Canonical digest pinning one MCP tool's definition.
 
+#### `scan_description_coercion(description: str)`
+
+Scan a tool description for selection-coercion patterns.
+
+#### `coercion_severity(hits: list[tuple[str, str]])`
+
+Total severity weight of coercion hits (0 = clean).
+
 #### `ToolDrift`
 
 One tool definition that drifted from the admission baseline.
