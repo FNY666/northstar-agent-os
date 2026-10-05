@@ -7505,6 +7505,10 @@ Postconditions: an independent verdict on whether the work actually happened.
 
 Raised for a malformed, unknown, or out-of-bounds postcondition.
 
+#### `PostConditionLimitError`
+
+A file cannot be verified completely within the configured byte budget.
+
 #### `PostCondition`
 
 One claim about the workspace, evaluated after the run.
