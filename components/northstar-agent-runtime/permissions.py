@@ -277,6 +277,12 @@ class PermissionConfig:
     #: single-approver ASK to multisig: the host callback alone can no longer
     #: release a high-risk call, so one compromised approver is insufficient.
     multisig: MultisigPolicy | None = None
+    #: Optional approver public keys for the signed-approval tier. When set,
+    #: the host callback may return {"allowed": True, "approval_receipt": {...}}
+    #: with an Ed25519-signed receipt; the gate verifies the signature against
+    #: these keys and records the verified approver identity. Plain bool/str
+    #: verdicts still work (unsigned), so this is opt-in and backward compatible.
+    approver_keys: dict[str, bytes] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "mode", validate_mode(self.mode))
@@ -772,13 +778,30 @@ class PermissionEngine:
                 tool=tool_name,
             )
         approved, note = _approval_verdict(verdict)
+        # Signed-approval tier (opt-in): if the callback returned a signed
+        # receipt and approver keys are configured, verify it. A valid
+        # signature binds the approval to a verified identity.
+        verified_approver: str | None = None
+        if approved and isinstance(verdict, dict) and "approval_receipt" in verdict:
+            verified_approver = self._verify_approval_receipt(verdict["approval_receipt"])
+            if verified_approver is None and self.config.approver_keys:
+                return PermissionDecision(
+                    False,
+                    source="host_callback",
+                    reason="signed approval receipt failed verification; failing closed",
+                    rule="host_callback:bad_signature",
+                    tool=tool_name,
+                )
         if approved:
             if self._multisig_gate is not None:
                 return self._multisig_decision(tool_name, request)
+            reason = note or f"{tool_name} approved by host approval callback"
+            if verified_approver:
+                reason = f"{tool_name} approved by verified approver {verified_approver}"
             return PermissionDecision(
                 True,
                 source="host_callback",
-                reason=note or f"{tool_name} approved by host approval callback",
+                reason=reason,
                 rule="host_callback:allow",
                 tool=tool_name,
             )
@@ -789,6 +812,37 @@ class PermissionEngine:
             rule="host_callback:deny",
             tool=tool_name,
         )
+
+    def _verify_approval_receipt(self, receipt_dict: Any) -> str | None:
+        """Verify a signed approval receipt. Returns approver_id or None.
+
+        Returns None when no approver keys are configured (tier disabled)
+        or when verification fails. Never raises.
+        """
+        if not self.config.approver_keys:
+            return None
+        try:
+            from egress_enforcer import ApprovalReceipt, verify_approval_receipt
+
+            if not isinstance(receipt_dict, dict):
+                return None
+            receipt = ApprovalReceipt(
+                card_id=str(receipt_dict.get("card_id", "")),
+                call_id=str(receipt_dict.get("call_id", "")),
+                arguments_digest=str(receipt_dict.get("arguments_digest", "")),
+                approver_id=str(receipt_dict.get("approver_id", "")),
+                decided_at=float(receipt_dict.get("decided_at", 0)),
+                body_sha256=str(receipt_dict.get("body_sha256", "")),
+                signature=str(receipt_dict.get("signature", "")),
+            )
+            pubkey = self.config.approver_keys.get(receipt.approver_id)
+            if pubkey is None:
+                return None
+            if verify_approval_receipt(receipt, pubkey):
+                return receipt.approver_id
+            return None
+        except (ValueError, TypeError, KeyError):
+            return None
 
     def _multisig_decision(
         self, tool_name: str, request: PermissionRequestContext
