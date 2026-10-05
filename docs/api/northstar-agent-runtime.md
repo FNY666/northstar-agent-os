@@ -7172,6 +7172,10 @@ Source: `components/northstar-agent-runtime/permissions.py`
 
 Three-layer permission gate: ``disallowed_tools`` → ``allowed_tools`` → mode.
 
+#### `is_offensive_tool(tool_name: str)`
+
+Check whether a tool name matches offensive-security tooling patterns.
+
 #### `PermissionDecision`
 
 The gate's verdict for one tool call.
@@ -7209,6 +7213,21 @@ Per-tool result of gating a subagent's declared tool set.
 - `ok` (property)
 - `summary` (property)
 - `as_dict()`
+#### `DelegationToken`
+
+A signed, attenuating delegation token (IBCT-style).
+
+- `token_hash()`
+  - SHA-256 of the canonical token (including signature).
+- `as_dict()`
+#### `mint_delegation_token(*, delegator_id: str, delegatee_id: str, tools: Sequence[str], delegator_seed: bytes, ttl_seconds: float=3600.0, parent_token: DelegationToken | None=None, issued_at: float | None=None)`
+
+Mint a signed delegation token.
+
+#### `verify_delegation_token(token: DelegationToken, delegator_public_key: bytes, *, now: float | None=None, expected_parent_hash: str | None=None)`
+
+Verify a delegation token's signature, expiry, and parent binding.
+
 #### `normalise_names(values: Iterable[str] | None)`
 
 #### `subtract(allowed: Iterable[str] | None, denied: Iterable[str] | None)`

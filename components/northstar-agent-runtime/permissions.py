@@ -87,6 +87,54 @@ ToolKind = Literal["read", "edit", "exec", "task", "network", "other"]
 #: Kinds that can change state outside the conversation.
 MUTATING_KINDS: frozenset[str] = frozenset({"edit", "exec", "network", "other"})
 
+#: Tool-name patterns for offensive security tooling. These are deny-by-default:
+#: port scanners, exploit frameworks, credential-stuffing tools, and similar
+#: dual-use offensive software. The Spain AEPD incident (Sept 2026) -- an agent
+#: autonomously running vuln scans -- is the motivating case. Hosts can
+#: explicitly allowlist via ``offensive_allowlist`` in PermissionConfig.
+#: Matching is case-insensitive substring on the normalized tool name.
+OFFENSIVE_TOOL_PATTERNS: tuple[str, ...] = (
+    "nmap",
+    "masscan",
+    "zmap",
+    "metasploit",
+    "msfconsole",
+    "sqlmap",
+    "hydra",
+    "john",
+    "hashcat",
+    "burpsuite",
+    "nessus",
+    "openvas",
+    "nikto",
+    "dirbuster",
+    "gobuster",
+    "wfuzz",
+    "aircrack",
+    "wireshark",
+    "tcpdump",
+    "netcat",
+    "ncrack",
+    "medusa",
+    "patator",
+    "crowbar",
+    "responder",
+    "mimikatz",
+    "bloodhound",
+    "sharphound",
+    "covenant",
+    "empire",
+    "cobaltstrike",
+)
+
+
+def is_offensive_tool(tool_name: str) -> bool:
+    """Check whether a tool name matches offensive-security tooling patterns."""
+    if not tool_name:
+        return False
+    lowered = tool_name.lower()
+    return any(pattern in lowered for pattern in OFFENSIVE_TOOL_PATTERNS)
+
 DecisionSource = Literal[
     "disallowed_tools",
     "allowed_tools",
@@ -98,6 +146,9 @@ DecisionSource = Literal[
     "delegation_gate",
     "invalid_mode",
     "pretrade",
+    "scope",
+    "composition",
+    "offensive",
 ]
 
 
@@ -306,6 +357,128 @@ class DelegationVerdict:
         }
 
 
+@dataclass(frozen=True)
+class DelegationToken:
+    """A signed, attenuating delegation token (IBCT-style).
+
+    Minted by the gate when a delegation is approved. Each hop appends
+    a token whose tool set must be a subset of its parent's -- scope can
+    only shrink, never grow. The downstream verifier checks the signature
+    chain independently, so the token is defense-in-depth even if the gate
+    itself is bypassed.
+
+    ``parent_hash`` is the SHA-256 of the parent token's canonical form;
+    empty for a root delegation (no parent).
+    """
+
+    delegator_id: str
+    delegatee_id: str
+    tools: tuple[str, ...]
+    issued_at: float
+    expires_at: float
+    parent_hash: str = ""
+    signature: str = ""
+
+    def _signing_body(self) -> dict[str, Any]:
+        return {
+            "delegator_id": self.delegator_id,
+            "delegatee_id": self.delegatee_id,
+            "tools": sorted(self.tools),
+            "issued_at": self.issued_at,
+            "expires_at": self.expires_at,
+            "parent_hash": self.parent_hash,
+        }
+
+    def token_hash(self) -> str:
+        """SHA-256 of the canonical token (including signature)."""
+        return hashlib.sha256(
+            json.dumps({**self._signing_body(), "signature": self.signature}, sort_keys=True).encode()
+        ).hexdigest()
+
+    def as_dict(self) -> dict[str, Any]:
+        return {**self._signing_body(), "signature": self.signature}
+
+
+def mint_delegation_token(
+    *,
+    delegator_id: str,
+    delegatee_id: str,
+    tools: Sequence[str],
+    delegator_seed: bytes,
+    ttl_seconds: float = 3600.0,
+    parent_token: DelegationToken | None = None,
+    issued_at: float | None = None,
+) -> DelegationToken:
+    """Mint a signed delegation token.
+
+    ``tools`` must be a subset of the parent token's tools when a parent
+    is given -- attenuation is enforced at mint time, not just verified.
+    """
+    if not delegator_id or not delegatee_id:
+        raise ValueError("delegator_id and delegatee_id must be non-empty")
+    if not isinstance(delegator_seed, (bytes, bytearray)) or len(delegator_seed) != 32:
+        raise ValueError("delegator_seed must be a 32-byte Ed25519 seed")
+    tool_tuple = tuple(sorted(set(tools)))
+    parent_hash = ""
+    if parent_token is not None:
+        parent_tools = set(parent_token.tools)
+        if not set(tool_tuple) <= parent_tools:
+            raise ValueError(
+                f"delegation tools {tool_tuple} exceed parent scope {parent_token.tools}: "
+                "scope can only shrink"
+            )
+        parent_hash = parent_token.token_hash()
+    ts = time.time() if issued_at is None else float(issued_at)
+    unsigned = DelegationToken(
+        delegator_id=delegator_id,
+        delegatee_id=delegatee_id,
+        tools=tool_tuple,
+        issued_at=ts,
+        expires_at=ts + float(ttl_seconds),
+        parent_hash=parent_hash,
+    )
+    try:
+        from ed25519 import sign as ed_sign
+    except ImportError as e:
+        raise RuntimeError("ed25519 module unavailable") from e
+    sig = ed_sign(bytes(delegator_seed), json.dumps(unsigned._signing_body(), sort_keys=True).encode()).hex()
+    return DelegationToken(**{**unsigned.__dict__, "signature": sig})
+
+
+def verify_delegation_token(
+    token: DelegationToken,
+    delegator_public_key: bytes,
+    *,
+    now: float | None = None,
+    expected_parent_hash: str | None = None,
+) -> bool:
+    """Verify a delegation token's signature, expiry, and parent binding.
+
+    False on any defect; never raises.
+    """
+    try:
+        if not isinstance(delegator_public_key, (bytes, bytearray)) or len(delegator_public_key) != 32:
+            return False
+        if len(token.signature) != 128:  # 64 bytes hex
+            return False
+        signature = bytes.fromhex(token.signature)
+        try:
+            from ed25519 import verify as ed_verify
+        except ImportError:
+            return False
+        body = json.dumps(token._signing_body(), sort_keys=True).encode()
+        if not bool(ed_verify(bytes(delegator_public_key), body, signature)):
+            return False
+        ts = time.time() if now is None else float(now)
+        if not (token.issued_at <= ts <= token.expires_at):
+            return False
+        if expected_parent_hash is not None and token.parent_hash != expected_parent_hash:
+            return False
+        return True
+    except (ValueError, TypeError):
+        return False
+
+
 def normalise_names(values: Iterable[str] | None) -> tuple[str, ...]:
     if values is None:
         return ()
@@ -335,6 +508,10 @@ class PermissionConfig:
     mode: PermissionMode = "default"
     allowed_tools: tuple[str, ...] = ()
     disallowed_tools: tuple[str, ...] = ()
+    #: Explicit allowlist for offensive-security tooling. Tools matching
+    #: OFFENSIVE_TOOL_PATTERNS are deny-by-default; listing a tool here
+    #: re-enables it (still subject to all other gate layers).
+    offensive_allowlist: tuple[str, ...] = ()
     can_use_tool: Callable[[str, dict[str, Any], PermissionRequestContext], Any] | None = None
     #: Optional structured decision model (SystemOne-style: state + typed
     #: questions -> options + probabilities). When set, mutating calls that
@@ -595,6 +772,18 @@ class PermissionEngine:
                 rule="scope:closed",
                 tool=tool_name,
             )
+        # Offensive tooling is deny-by-default (Spain AEPD, Sept 2026).
+        # The host can explicitly allowlist via offensive_allowlist.
+        if is_offensive_tool(tool_name):
+            allowed_names = set(normalise_names(self.config.offensive_allowlist))
+            if tool_name not in allowed_names:
+                return PermissionDecision(
+                    False,
+                    source="offensive",
+                    reason=f"{tool_name} matches offensive-security tooling patterns; explicitly allowlist to enable",
+                    rule="offensive:deny_by_default",
+                    tool=tool_name,
+                )
         sink_verdict = (
             dataflow.check_sink(tool_name, payload) if dataflow is not None else None
         )
