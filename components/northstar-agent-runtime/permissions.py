@@ -188,6 +188,31 @@ class PermissionRequestContext:
     data: dict[str, Any] = field(default_factory=dict)
 
 
+@dataclass(frozen=True)
+class CompositionRule:
+    """A forbidden action sequence (composition closure, APC-style).
+
+    Each call is evaluated individually by the gate, but some *sequences*
+    are unsafe even when every step is allowed alone -- the canonical
+    shape is ``read sensitive data`` then ``send externally``
+    (exfiltration). ``sequence`` lists action categories in order; when
+    the recent call history ends with this sequence, the current call is
+    denied.
+
+    Categories are host-defined labels (e.g. "read_sensitive",
+    "external_send"); the engine maps tool names to categories via the
+    ``tool_categories`` mapping. Unmapped tools carry no category and
+    never match a rule.
+    """
+
+    sequence: tuple[str, ...]
+    description: str = ""
+
+    def __post_init__(self) -> None:
+        if len(self.sequence) < 2:
+            raise ValueError("composition rule needs at least 2 categories")
+
+
 @dataclass
 class ScopeManager:
     """Tracks permission scopes (epochs) and their lifetime.
@@ -432,6 +457,8 @@ class PermissionEngine:
         now: Callable[[], float] | None = None,
         scope_manager: ScopeManager | None = None,
         wall_now: Callable[[], float] | None = None,
+        composition_rules: Iterable[CompositionRule] | None = None,
+        tool_categories: Mapping[str, str] | None = None,
     ) -> None:
         if config is None:
             config = PermissionConfig(
@@ -471,6 +498,14 @@ class PermissionEngine:
         #: ``_now`` (monotonic, for durations): receipt ``decided_at`` is a
         #: wall-clock timestamp. Injectable for deterministic tests.
         self._wall_now = wall_now or time.time
+        #: Composition-closure rules (APC-style): forbidden action sequences.
+        #: Empty (the default) disables the check: zero behaviour change.
+        self._composition_rules: tuple[CompositionRule, ...] = tuple(composition_rules or ())
+        #: Maps tool names to action categories for composition rules.
+        self._tool_categories: dict[str, str] = dict(tool_categories or {})
+        #: Recent call history as category labels, for composition checks.
+        #: Bounded; only categories (not arguments) are retained.
+        self._category_history: deque[str] = deque(maxlen=32)
         #: Optional SEC 15c3-5-style pre-trade risk checks (layer 0). None
         #: (the default) disables them: zero behaviour change.
         self.pretrade = pretrade
@@ -571,6 +606,17 @@ class PermissionEngine:
             context=context,
             known=known,
         )
+        # Composition closure (APC-style): an allowed call may still be
+        # forbidden because of what came before it. Checked before the
+        # dataflow early-return so it applies with or without dataflow.
+        # Only allowed calls extend the history -- a denied call never happened.
+        if decision.allowed and self._composition_rules:
+            composition_deny = self._check_composition(tool_name)
+            if composition_deny is not None:
+                return composition_deny
+            category = self._tool_categories.get(tool_name)
+            if category:
+                self._category_history.append(category)
         if dataflow is None or not decision.allowed:
             return decision
         # The call will execute: its result carries the source label, so the
@@ -586,6 +632,38 @@ class PermissionEngine:
                 tool_name, payload, context, sink_verdict
             )
         return decision
+
+    def _check_composition(self, tool_name: str) -> PermissionDecision | None:
+        """Check whether this call completes a forbidden action sequence.
+
+        Returns a denial if the recent history plus this call's category
+        matches a CompositionRule; None otherwise.
+        """
+        category = self._tool_categories.get(tool_name)
+        if not category:
+            return None
+        # The candidate sequence: history tail + this call.
+        for rule in self._composition_rules:
+            seq = rule.sequence
+            if category != seq[-1]:
+                continue
+            # Need len(seq)-1 history entries before this call.
+            need = len(seq) - 1
+            if len(self._category_history) < need:
+                continue
+            tail = list(self._category_history)[-need:] if need else []
+            if tuple(tail) == seq[:-1]:
+                return PermissionDecision(
+                    False,
+                    source="composition",
+                    reason=(
+                        f"forbidden action sequence: {' -> '.join(seq)}"
+                        + (f" ({rule.description})" if rule.description else "")
+                    ),
+                    rule="composition:forbidden_sequence",
+                    tool=tool_name,
+                )
+        return None
 
     def _apply_dataflow_escalation(
         self,
