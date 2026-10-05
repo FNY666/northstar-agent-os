@@ -13,6 +13,7 @@ import json
 import sys
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 import support  # noqa: F401  (bootstraps sys.path)
 from support import RuntimeTestCase
@@ -235,6 +236,253 @@ class InstallTests(BundleTestCase):
         with self.assertRaises(pl.PluginInstallError):
             pl.uninstall("demo", self.workspace)
         self.assertTrue(victim.is_dir() and any(victim.iterdir()), "what the bundle pointed at must survive")
+
+
+class InstallRecoveryTests(BundleTestCase):
+    def snapshot(self):
+        target = self.workspace / pm.PLUGINS_DIRECTORY / "demo"
+        files = {p.relative_to(target).as_posix(): p.read_bytes() for p in target.rglob("*") if p.is_file()} if target.exists() else None
+        lock = pl.lock_path(self.workspace)
+        return files, lock.read_bytes() if lock.exists() else None
+
+    def test_copy_time_drift_is_refused_before_install_or_pin(self):
+        real_copy = pl.shutil.copytree
+        def drifting_copy(source, target, *args, **kwargs):
+            if Path(source) == self.source:
+                (self.source / "NOTES.md").write_text("unreviewed replacement\n")
+            return real_copy(source, target, *args, **kwargs)
+        with patch.object(pl.shutil, "copytree", side_effect=drifting_copy):
+            with self.assertRaisesRegex(pl.PluginInstallError, "changed|review"):
+                self.install()
+        self.assertEqual(self.snapshot(), (None, None))
+
+    def test_failed_copy_preserves_old_bundle_and_pin(self):
+        self.install()
+        before = self.snapshot()
+        (self.source / "NOTES.md").write_text("reviewed upgrade\n")
+        def partial_copy(source, target, *args, **kwargs):
+            Path(target).mkdir(parents=True)
+            (Path(target) / "NOTES.md").write_text("partial data")
+            raise OSError("injected copy failure")
+        with patch.object(pl.shutil, "copytree", side_effect=partial_copy):
+            with self.assertRaises((OSError, pl.PluginInstallError)):
+                self.install(force=True)
+        self.assertEqual(self.snapshot(), before)
+
+    def test_failed_lock_commit_restores_previous_bundle_and_pin(self):
+        self.install()
+        before = self.snapshot()
+        (self.source / "NOTES.md").write_text("reviewed upgrade\n")
+        with patch.object(pl, "write_lock", side_effect=pl.PluginInstallError("injected lock failure")):
+            with self.assertRaisesRegex(pl.PluginInstallError, "lock failure"):
+                self.install(force=True)
+        self.assertEqual(self.snapshot(), before)
+
+    def test_failed_new_install_lock_commit_leaves_no_plugin(self):
+        with patch.object(pl, "write_lock", side_effect=pl.PluginInstallError("injected lock failure")):
+            with self.assertRaises(pl.PluginInstallError):
+                self.install()
+        self.assertEqual(self.snapshot(), (None, None))
+
+    def test_integrity_table_drift_is_not_hidden_by_content_digest(self):
+        real_copy = pl.shutil.copytree
+        def tamper_seal(source, target, *args, **kwargs):
+            if Path(source) == self.source:
+                path = self.source / pm.MANIFEST_NAME
+                path.write_text(path.read_text() + '\n[integrity]\nseal = "' + "0" * 64 + '"\n')
+            return real_copy(source, target, *args, **kwargs)
+        with patch.object(pl.shutil, "copytree", side_effect=tamper_seal):
+            with self.assertRaises(pm.PluginError):
+                self.install()
+        self.assertEqual(self.snapshot(), (None, None))
+
+
+    def test_publish_rename_failure_restores_previous_bundle(self):
+        self.install()
+        before = self.snapshot()
+        (self.source / "NOTES.md").write_text("upgrade\n")
+        real_replace = pl.os.replace
+        def fail_publish(source, target):
+            if Path(source).name == "staged":
+                raise OSError("injected publish failure")
+            return real_replace(source, target)
+        with patch.object(pl.os, "replace", side_effect=fail_publish):
+            with self.assertRaisesRegex(OSError, "publish failure"):
+                self.install(force=True)
+        self.assertEqual(self.snapshot(), before)
+
+    def test_real_lock_replace_failure_restores_old_bytes(self):
+        self.install()
+        before = self.snapshot()
+        (self.source / "NOTES.md").write_text("upgrade\n")
+        real_replace = pl.os.replace
+        def fail_lock(source, target):
+            if Path(target) == pl.lock_path(self.workspace):
+                raise OSError("lock replace failed")
+            return real_replace(source, target)
+        with patch.object(pl.os, "replace", side_effect=fail_lock):
+            with self.assertRaises(pl.PluginInstallError):
+                self.install(force=True)
+        self.assertEqual(self.snapshot(), before)
+
+    def test_rollback_failure_keeps_backup_for_manual_recovery(self):
+        self.install()
+        before = self.snapshot()
+        (self.source / "NOTES.md").write_text("upgrade\n")
+        real_replace = pl.os.replace
+        def fail_restore(source, target):
+            if Path(source).name == "previous":
+                raise OSError("restore failed")
+            return real_replace(source, target)
+        with patch.object(pl.os, "replace", side_effect=fail_restore), patch.object(pl, "write_lock", side_effect=pl.PluginInstallError("lock failed")):
+            with self.assertRaisesRegex(pl.PluginInstallError, "rollback failed.*recovery data"):
+                self.install(force=True)
+        recoveries = list((self.workspace / ".northstar").glob(".plugin-install-*/previous"))
+        self.assertEqual(len(recoveries), 1)
+        self.assertEqual((recoveries[0] / "NOTES.md").read_bytes(), before[0]["NOTES.md"])
+        self.assertEqual(pl.lock_path(self.workspace).read_bytes(), before[1])
+
+    def test_error_after_real_lock_commit_restores_target_and_pin(self):
+        self.install()
+        before = self.snapshot()
+        (self.source / "NOTES.md").write_text("upgrade\n")
+        real_write = pl.write_lock
+        def commit_then_fail(*args, **kwargs):
+            real_write(*args, **kwargs)
+            raise OSError("after lock commit")
+        with patch.object(pl, "write_lock", side_effect=commit_then_fail):
+            with self.assertRaisesRegex(OSError, "after lock commit"):
+                self.install(force=True)
+        self.assertEqual(self.snapshot(), before)
+
+    def test_rollback_interruption_never_deletes_previous_bundle(self):
+        self.install()
+        before = self.snapshot()
+        (self.source / "NOTES.md").write_text("upgrade\n")
+        real_replace = pl.os.replace
+        def interrupt_restore(source, target):
+            if Path(source).name == "previous":
+                raise KeyboardInterrupt("second interrupt")
+            return real_replace(source, target)
+        with patch.object(pl.os, "replace", side_effect=interrupt_restore), patch.object(pl, "write_lock", side_effect=pl.PluginInstallError("lock failed")):
+            with self.assertRaises((KeyboardInterrupt, pl.PluginInstallError)):
+                self.install(force=True)
+        recoveries = list((self.workspace / ".northstar").glob(".plugin-install-*/previous"))
+        self.assertEqual(len(recoveries), 1, "unrestored old bundle must survive an interruption")
+        self.assertEqual((recoveries[0] / "NOTES.md").read_bytes(), before[0]["NOTES.md"])
+
+    def test_old_target_rename_failure_does_not_remove_old_target(self):
+        self.install()
+        before = self.snapshot()
+        (self.source / "NOTES.md").write_text("upgrade\n")
+        real_replace = pl.os.replace
+        def fail_old_rename(source, target):
+            if Path(target).name == "previous":
+                raise OSError("old rename failure")
+            return real_replace(source, target)
+        with patch.object(pl.os, "replace", side_effect=fail_old_rename):
+            with self.assertRaisesRegex(OSError, "old rename failure"):
+                self.install(force=True)
+        self.assertEqual(self.snapshot(), before)
+
+    def test_link_inserted_during_copy_is_rejected_not_dereferenced(self):
+        victim = self.root / "outside.txt"
+        victim.write_text("outside must not be copied")
+        real_copy = pl.shutil.copytree
+        def insert_link(source, target, *args, **kwargs):
+            if Path(source) == self.source:
+                (self.source / "late-link").symlink_to(victim)
+            return real_copy(source, target, *args, **kwargs)
+        with patch.object(pl.shutil, "copytree", side_effect=insert_link):
+            with self.assertRaisesRegex(pm.PluginError, "symlink"):
+                self.install()
+        self.assertEqual(self.snapshot(), (None, None))
+        self.assertEqual(victim.read_text(), "outside must not be copied")
+
+    def test_staged_content_changed_during_audit_is_rejected(self):
+        real_review = pl.review_bundle_skills
+        def alter_stage(plugin):
+            result = real_review(plugin)
+            if plugin.root != self.source:
+                (plugin.root / "NOTES.md").write_text("changed after audit")
+            return result
+        with patch.object(pl, "review_bundle_skills", side_effect=alter_stage):
+            with self.assertRaisesRegex(pl.PluginInstallError, "changed during review"):
+                self.install()
+        self.assertEqual(self.snapshot(), (None, None))
+
+    def test_publish_rename_that_completes_then_raises_is_rolled_back(self):
+        self.install()
+        before = self.snapshot()
+        (self.source / "NOTES.md").write_text("upgrade\n")
+        real_replace = pl.os.replace
+        def publish_then_fail(source, target):
+            real_replace(source, target)
+            if Path(source).name == "staged":
+                raise KeyboardInterrupt("publish interrupt")
+        with patch.object(pl.os, "replace", side_effect=publish_then_fail):
+            with self.assertRaises(KeyboardInterrupt):
+                self.install(force=True)
+        self.assertEqual(self.snapshot(), before)
+
+    def test_new_lock_committed_then_error_restores_absence(self):
+        real_write = pl.write_lock
+        def commit_then_fail(*args, **kwargs):
+            real_write(*args, **kwargs)
+            raise OSError("after new lock commit")
+        with patch.object(pl, "write_lock", side_effect=commit_then_fail):
+            with self.assertRaises(OSError):
+                self.install()
+        self.assertEqual(self.snapshot(), (None, None))
+
+    def test_cleanup_failure_preserves_primary_install_error(self):
+        real_remove = pl.shutil.rmtree
+        def failed_cleanup(path, *args, **kwargs):
+            if Path(path).name.startswith(".plugin-install-"):
+                raise OSError("cleanup failed")
+            return real_remove(path, *args, **kwargs)
+        with patch.object(pl.shutil, "copytree", side_effect=OSError("primary copy failure")), patch.object(pl.shutil, "rmtree", side_effect=failed_cleanup):
+            with self.assertRaisesRegex(OSError, "primary copy failure"):
+                self.install()
+        self.assertEqual(self.snapshot(), (None, None))
+
+    def test_cleanup_error_after_commit_reports_but_keeps_valid_install(self):
+        real_remove = pl.shutil.rmtree
+        def failed_cleanup(path, *args, **kwargs):
+            if Path(path).name.startswith(".plugin-install-"):
+                raise OSError("cleanup failed")
+            return real_remove(path, *args, **kwargs)
+        with patch.object(pl.shutil, "rmtree", side_effect=failed_cleanup):
+            with self.assertRaisesRegex(pl.PluginInstallError, "stage cleanup failed"):
+                self.install()
+        self.assertTrue(pl.load_installed(self.workspace)[0][0].loadable)
+        self.assertEqual(self.installed("NOTES.md").read_text(), NOTES)
+
+    def test_stage_is_private_and_invisible_to_plugin_enumeration(self):
+        import stat
+        real_copy = pl.shutil.copytree
+        def inspect_copy(source, target, *args, **kwargs):
+            if Path(source) == self.source:
+                self.assertEqual(stat.S_IMODE(Path(target).parent.stat().st_mode), 0o700)
+                self.assertNotEqual(Path(target).parent.parent, pl.plugins_directory(self.workspace))
+                self.assertEqual(pl.load_installed(self.workspace), ([], []))
+            return real_copy(source, target, *args, **kwargs)
+        with patch.object(pl.shutil, "copytree", side_effect=inspect_copy):
+            self.install()
+        self.assertEqual(list((self.workspace / ".northstar").glob(".plugin-install-*")), [])
+
+    def test_forced_self_install_and_unpinned_upgrade_preserve_compatibility(self):
+        self.install()
+        target = self.workspace / pm.PLUGINS_DIRECTORY / "demo"
+        before = self.snapshot()
+        self.assertTrue(pl.install(target, self.workspace, force=True).installed)
+        self.assertEqual(self.snapshot()[0], before[0])
+        lock = pl.lock_path(self.workspace).read_bytes()
+        (self.source / "NOTES.md").write_text("upgrade\n")
+        result = self.install(force=True, pin=False)
+        self.assertTrue(result.replaced)
+        self.assertEqual(pl.lock_path(self.workspace).read_bytes(), lock)
+        self.assertFalse(pl.load_installed(self.workspace)[0][0].loadable)
 
 
 class LoadAndPinTests(BundleTestCase):

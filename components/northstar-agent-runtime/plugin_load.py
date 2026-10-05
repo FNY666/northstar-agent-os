@@ -17,9 +17,12 @@ by being inside a plugin: a plugin's ``[[hooks]]`` go through ``command_hooks.pa
 its policy through the tighten-only check, its skills through ``skills.check`` rules, and its
 MCP servers through the ordinary permission gate.
 
-Install is a file copy, and uninstall is a directory removal. Both refuse to touch anything
-outside ``.northstar/plugins/`` - the tool has no business deleting a workspace it was not
-given, and "git revert" remains the way to undo a bundle you no longer want reviewed.
+Install validates a private staged copy under workspace ``.northstar/`` before publishing
+into ``.northstar/plugins/``. Ordinary failures restore the previous bundle and lock;
+failed recovery preserves its private backup with an explicit error. Uninstall is a
+directory removal. Staging and backups stay inside the given workspace. This is not a
+crash-atomic directory-plus-lock transaction or protection against a hostile same-user
+writer; the loader still checks installed bytes against the pin before a run.
 """
 from __future__ import annotations
 
@@ -28,6 +31,7 @@ import json
 import os
 import shutil
 import sys
+import tempfile
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Iterable, Mapping, Sequence
@@ -643,6 +647,11 @@ def install(
 
     ``require_seal`` is what a CI job wants: refuse to land anything whose publisher the
     workspace cannot verify, instead of landing it and trusting the human to notice.
+    A private copy is checked before replacing the visible bundle; copy, validation,
+    publication or lock errors restore the previous target and raw lock bytes. Failed
+    recovery preserves its backup for manual repair. A cleanup failure after commit
+    reports an error but leaves the committed bundle/pin intact. Installation assumes
+    a single cooperative workspace writer; this is not a crash-atomic two-file commit.
     """
     bundle = load_bundle(source)
     policy = _workspace_policy_document(workspace)
@@ -692,18 +701,85 @@ def install(
                 f"{plugin.name} is already installed at {target} and differs from this source; "
                 "re-run with --force to replace it (the lock entry is updated only on success)"
             )
-        _remove_tree(target)
+    had_target = target.exists()
+    source_path = str(Path(source).resolve())
+    entries = read_lock(workspace) if pin else None
+    old_lock = lock_path(workspace)
+    old_lock_bytes = old_lock.read_bytes() if entries is not None and old_lock.exists() else None
     target.parent.mkdir(parents=True, exist_ok=True)
-    shutil.copytree(source, target, symlinks=False)
-    if pin:
-        entries = read_lock(workspace)
-        entries[plugin.name] = {
-            "version": plugin.version,
-            "publisher": plugin.publisher,
-            "content_digest": bundle.content_digest,
-            "source": str(Path(source).resolve()),
-        }
-        write_lock(workspace, entries)
+    transaction = Path(tempfile.mkdtemp(prefix=".plugin-install-", dir=target.parent.parent))
+    staged, backup = transaction / "staged", transaction / "previous"
+    lock_backup = transaction / "previous.lock"
+    publish_started = False
+    lock_attempted = False
+    preserve_recovery = False
+    try:
+        if old_lock_bytes is not None:
+            lock_backup.write_bytes(old_lock_bytes)
+            lock_backup.chmod(0o600)
+        # Preserve symlinks for validation to reject; never follow a post-review link.
+        shutil.copytree(source, staged, symlinks=True)
+        staged_bundle = load_bundle(staged)
+        if staged_bundle.content_digest != bundle.content_digest or staged_bundle.manifest != bundle.manifest:
+            raise PluginInstallError(f"{plugin.name}: bundle changed during copy since review; nothing was installed")
+        staged_plugin = parse_manifest(staged_bundle, workspace_policy=policy)
+        staged_integrity = verify_integrity(staged_plugin, environment=environment)
+        if not staged_integrity["ok"]:
+            raise PluginInstallError(f"{plugin.name}: staged integrity check failed")
+        staged_audits = review_bundle_skills(InstalledPlugin(plugin.name, staged, staged_plugin, staged_bundle, "", "pinned"))
+        if skill_bar_met(staged_audits, fail_on):
+            raise PluginInstallError(f"{plugin.name}: staged skill review failed; nothing was installed")
+        # A reviewer may read files again; bind the published copy to the same bundle.
+        after_review = load_bundle(staged)
+        if after_review.content_digest != bundle.content_digest or after_review.manifest != bundle.manifest:
+            raise PluginInstallError(f"{plugin.name}: staged bundle changed during review")
+        if had_target:
+            _check_removable_tree(target)
+            os.replace(target, backup)
+        publish_started = True
+        os.replace(staged, target)
+        if entries is not None:
+            entries[plugin.name] = {
+                "version": plugin.version,
+                "publisher": plugin.publisher,
+                "content_digest": bundle.content_digest,
+                "source": source_path,
+            }
+            lock_attempted = True
+            write_lock(workspace, entries)
+    except BaseException as primary:
+        # Recovery data must survive any error or second interruption until restoration
+        # is positively complete. Directory and lock publication are not crash-atomic.
+        preserve_recovery = True
+        try:
+            if publish_started and target.exists():
+                _remove_tree(target)
+            if backup.exists():
+                os.replace(backup, target)
+            if lock_attempted:
+                if old_lock_bytes is None:
+                    old_lock.unlink(missing_ok=True)
+                elif not old_lock.exists() or old_lock.read_bytes() != old_lock_bytes:
+                    os.replace(lock_backup, old_lock)
+            preserve_recovery = False
+        except BaseException as recovery:
+            raise PluginInstallError(
+                f"{plugin.name}: install failed and rollback failed; preserve recovery data at {transaction}"
+            ) from recovery
+        raise
+    finally:
+        if not preserve_recovery:
+            primary = sys.exc_info()[1]
+            try:
+                shutil.rmtree(transaction)
+            except Exception as cleanup:
+                detail = f"{plugin.name}: stage cleanup failed; recovery directory at {transaction}"
+                if primary is None:
+                    raise PluginInstallError(detail) from cleanup
+                if hasattr(primary, "add_note"):
+                    primary.add_note(detail)
+                else:
+                    primary.__context__ = cleanup
     note = (
         "installed but NOT pinned: `plugin verify --write-lock` is what makes this loadable"
         if not pin
@@ -734,10 +810,16 @@ def uninstall(name: str, workspace: str | Path, *, keep_lock: bool = False) -> s
     return removed
 
 
-def _remove_tree(target: Path) -> None:
+def _check_removable_tree(target: Path) -> None:
+    if target.is_symlink():
+        raise PluginInstallError(f"{target}: refusing to remove a symlink installed by a plugin")
     for path in sorted(target.rglob("*"), reverse=True):
         if path.is_symlink():
             raise PluginInstallError(f"{path}: refusing to remove a symlink installed by a plugin")
+
+
+def _remove_tree(target: Path) -> None:
+    _check_removable_tree(target)
     shutil.rmtree(target)
 
 
