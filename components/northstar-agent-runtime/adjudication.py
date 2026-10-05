@@ -825,6 +825,14 @@ class BiometricPurposeReceipt:
     consented" shortcut). ``resale_allowed`` defaults to False — the
     labor-negotiation clause: resale to third parties is a hard deny
     without an explicit resale grant.
+
+    Relationship to :class:`consent_receipts.ConsentReceipt`: this is a
+    domain-specific profile, not a duplicate. ConsentReceipt is the
+    general consent primitive (single exact-match purpose, log-based
+    revocation via RevocationRecord, hash-chained). BiometricPurposeReceipt
+    keeps multi-purpose tuples, field-level revocation, and the
+    biometric-specific ``resale_allowed`` labor clause. Do not merge them;
+    collapsing either direction loses semantics.
     """
 
     receipt_id: str

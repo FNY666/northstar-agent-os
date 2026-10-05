@@ -191,6 +191,12 @@ class ConsentReceipt:
     does not cover "product-personalization". The signature covers
     the canonical payload; the receipt is sealed with ``receipt_digest``
     and chained via ``prev_digest``.
+
+    This is the general consent primitive. Domain-specific profiles
+    (e.g. :class:`adjudication.BiometricPurposeReceipt` for athlete
+    biometric data with multi-purpose tuples and a resale clause) build
+    on these semantics but are intentionally separate types — see that
+    class's docstring for why they are not merged.
     """
 
     subject_id: str
