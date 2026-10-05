@@ -96,6 +96,7 @@ the vendored ``ed25519`` module, and all digest comparisons use
 """
 
 from __future__ import annotations
+from _domain_base import DomainError
 
 import hmac
 from dataclasses import dataclass
@@ -140,7 +141,7 @@ HEALTH_CHECKS: tuple[str, ...] = (
 )
 
 
-class ProcurementError(ValueError):
+class ProcurementError(DomainError):
     """A malformed procurement receipt or a programming error.
 
     Raised for structural problems (bad digests, unknown checks,

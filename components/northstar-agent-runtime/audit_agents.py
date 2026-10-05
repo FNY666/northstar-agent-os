@@ -67,6 +67,7 @@ Honest scope:
 """
 
 from __future__ import annotations
+from _domain_base import DomainError
 
 import hashlib
 import hmac
@@ -125,7 +126,7 @@ CHARTER_BOUND_EVENT = "audit.charter_bound"
 PROCEDURE_BOUND_EVENT = "audit.procedure_bound"
 
 
-class AuditError(ValueError):
+class AuditError(DomainError):
     """A malformed audit receipt or a programming error.
 
     Raised for structural problems (bad digests, unknown checks,

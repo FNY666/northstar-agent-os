@@ -59,6 +59,7 @@ canonical JCS hashing, constant-time digest comparisons.
 """
 
 from __future__ import annotations
+from _domain_base import DomainError
 
 import hmac
 from dataclasses import dataclass, field
@@ -112,7 +113,7 @@ GENESIS = "genesis"
 _HEX64_LENGTH = 64
 
 
-class BookingError(ValueError):
+class BookingError(DomainError):
     """A malformed receipt, registry, or request — a programming error,
     not a verdict. Verification *failures* (unknown authority,
     ceiling breach, stale assertion, policy drift, ...) return a

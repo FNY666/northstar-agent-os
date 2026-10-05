@@ -99,6 +99,7 @@ timestamps), JCS canonical hashing, Ed25519 via the vendored
 """
 
 from __future__ import annotations
+from _domain_base import DomainError
 
 import hmac
 import re
@@ -189,7 +190,7 @@ SIGNOFF_MIN_OBSERVATIONS = 100
 SIGNOFF_MAX_OVERRIDE_RATE = 0.02
 
 
-class LegalError(ValueError):
+class LegalError(DomainError):
     """A malformed receipt/record or a programming error.
 
     Raised for structural problems (bad digests, unknown use kinds,

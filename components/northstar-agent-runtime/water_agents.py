@@ -73,6 +73,7 @@ injects (integer epoch seconds). All digest comparisons use
 :func:`hmac.compare_digest`.
 """
 from __future__ import annotations
+from _domain_base import DomainError
 
 import hashlib
 import hmac
@@ -139,7 +140,7 @@ WATER_NON_AUTHORITATIVE = "water-non-authoritative"
 _GENESIS = "genesis"
 
 
-class WaterError(ValueError):
+class WaterError(DomainError):
     """Malformed water-infrastructure input. Fail loud, never guess."""
 
 

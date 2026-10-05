@@ -60,6 +60,7 @@ timestamps), JCS canonical hashing, Ed25519 via the vendored
 """
 
 from __future__ import annotations
+from _domain_base import DomainError
 
 import hmac
 from dataclasses import dataclass
@@ -108,7 +109,7 @@ _GENESIS = "genesis"
 _HEX64_LENGTH = 64
 
 
-class EducationError(ValueError):
+class EducationError(DomainError):
     """A malformed receipt/record or a programming error.
 
     Raised for structural problems (bad digests, bad signature input,

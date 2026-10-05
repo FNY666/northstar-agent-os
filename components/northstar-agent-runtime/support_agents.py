@@ -136,6 +136,7 @@ pattern), digest comparisons via :func:`hmac.compare_digest`.
 """
 
 from __future__ import annotations
+from _domain_base import DomainError
 
 from dataclasses import dataclass, field
 from typing import Any
@@ -203,7 +204,7 @@ _HEX64_LENGTH = 64
 _HEX128_LENGTH = 128
 
 
-class SupportError(ValueError):
+class SupportError(DomainError):
     """Raised for malformed support-discipline inputs (fail-closed at issuance)."""
 
 

@@ -93,6 +93,7 @@ seconds). All digest comparisons use :func:`hmac.compare_digest`.
 """
 
 from __future__ import annotations
+from _domain_base import DomainError
 
 import hashlib
 import hmac
@@ -192,7 +193,7 @@ HR_NON_AUTHORITATIVE = "hr-non-authoritative"
 _GENESIS = "genesis"
 
 
-class HrAgentsError(ValueError):
+class HrAgentsError(DomainError):
     """Malformed HR-discipline input. Fail loud, never guess."""
 
 

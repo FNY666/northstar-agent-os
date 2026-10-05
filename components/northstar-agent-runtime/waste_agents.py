@@ -98,6 +98,7 @@ adjudicator.
 """
 
 from __future__ import annotations
+from _domain_base import DomainError
 
 import hmac
 from dataclasses import dataclass
@@ -149,7 +150,7 @@ WASTE_CODES: tuple[str, ...] = ("A1181", "Y49", "GC020")
 ALERT_CHANNELS: tuple[str, ...] = ("aerial_ai", "civic_report", "sensor")
 
 
-class WasteError(ValueError):
+class WasteError(DomainError):
     """A malformed waste receipt or a programming error.
 
     Raised for structural problems (bad digests, unknown codes,

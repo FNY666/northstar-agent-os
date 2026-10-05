@@ -81,6 +81,7 @@ comparisons.
 """
 
 from __future__ import annotations
+from _domain_base import DomainError
 
 import hmac
 from dataclasses import dataclass, field
@@ -179,7 +180,7 @@ DECISION_CLASSES: tuple[str, ...] = (
 )
 
 
-class OrbitalError(ValueError):
+class OrbitalError(DomainError):
     """A malformed receipt, registry, or check request — a programming
     error, not a verdict. Verification *failures* (stale warning,
     envelope breach, undeclared capability, digest mismatch) return

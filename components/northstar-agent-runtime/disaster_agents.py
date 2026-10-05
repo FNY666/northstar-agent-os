@@ -74,6 +74,7 @@ constant-time digest comparisons.
 """
 
 from __future__ import annotations
+from _domain_base import DomainError
 
 import hmac
 from dataclasses import dataclass, field
@@ -173,7 +174,7 @@ ALARM_CHANNELS: tuple[str, ...] = (
 )
 
 
-class DisasterError(ValueError):
+class DisasterError(DomainError):
     """A malformed receipt, registry, or check request — a programming
     error, not a verdict. Verification *failures* (unbound triage,
     hidden AI, superseded warnings, budget breaches, equity gaps,

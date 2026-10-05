@@ -108,6 +108,7 @@ comparisons via :func:`hmac.compare_digest`.
 """
 
 from __future__ import annotations
+from _domain_base import DomainError
 
 import hmac
 from dataclasses import dataclass
@@ -215,7 +216,7 @@ DARK_PATTERN_CATALOG: tuple[str, ...] = (
 )
 
 
-class AdtechError(ValueError):
+class AdtechError(DomainError):
     """A malformed adtech receipt or a programming error.
 
     Raised for structural problems (bad digests, unknown codes,

@@ -101,6 +101,7 @@ Honest scope:
 """
 
 from __future__ import annotations
+from _domain_base import DomainError
 
 import hashlib
 import hmac
@@ -213,7 +214,7 @@ FLAG_ACCOUNT_ACTIONS = frozenset({
 })
 
 
-class FinanceError(ValueError):
+class FinanceError(DomainError):
     """A malformed finance-discipline receipt or a programming error.
 
     Raised for structural problems (bad digests, unknown registries,

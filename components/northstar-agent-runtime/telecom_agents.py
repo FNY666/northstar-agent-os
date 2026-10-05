@@ -74,6 +74,7 @@ timestamps), JCS canonical hashing, Ed25519 via the vendored
 """
 
 from __future__ import annotations
+from _domain_base import DomainError
 
 import hmac
 from dataclasses import dataclass
@@ -146,7 +147,7 @@ _HEX64_LENGTH = 64
 _HEX128_LENGTH = 128
 
 
-class TelecomError(ValueError):
+class TelecomError(DomainError):
     """A malformed receipt/record or a programming error.
 
     Raised for structural problems (bad digests, bad signature inputs,

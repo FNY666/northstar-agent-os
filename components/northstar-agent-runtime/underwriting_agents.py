@@ -54,6 +54,7 @@ via :func:`hmac.compare_digest`.
 """
 
 from __future__ import annotations
+from _domain_base import DomainError
 
 import hmac
 from dataclasses import dataclass, field
@@ -162,7 +163,7 @@ _HEX64_LENGTH = 64
 _HEX128_LENGTH = 128
 
 
-class UnderwritingError(ValueError):
+class UnderwritingError(DomainError):
     """Malformed receipt/probe/checklist or a programming error.
 
     Raised for structural problems (unknown vocabulary, bad digests,

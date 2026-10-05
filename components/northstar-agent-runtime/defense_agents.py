@@ -108,6 +108,7 @@ boolean return of ``ed25519.verify`` (which never raises — the
 """
 
 from __future__ import annotations
+from _domain_base import DomainError
 
 import hashlib
 import hmac
@@ -167,7 +168,7 @@ COMPRESSION_ALERT_RATIO = 10
 MAX_PLATFORMS_PER_OPERATOR = 8
 
 
-class DefenseError(ValueError):
+class DefenseError(DomainError):
     """A malformed defense receipt or a programming error.
 
     Raised for structural problems (bad digests, unknown clauses,

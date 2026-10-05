@@ -69,6 +69,7 @@ Honest scope:
 """
 
 from __future__ import annotations
+from _domain_base import DomainError
 
 import hashlib
 import hmac
@@ -144,7 +145,7 @@ PILOT_STAGES = (
 PILOT_STAGE_MAX_AGE_S = 180 * _DAY_S
 
 
-class ManufacturingError(ValueError):
+class ManufacturingError(DomainError):
     """A malformed manufacturing receipt or a programming error.
 
     Raised for structural problems (bad digests, unknown checks,

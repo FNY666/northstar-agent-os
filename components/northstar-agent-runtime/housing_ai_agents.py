@@ -87,6 +87,7 @@ via :func:`hmac.compare_digest`.
 """
 
 from __future__ import annotations
+from _domain_base import DomainError
 
 import hmac
 import inspect
@@ -196,7 +197,7 @@ _GENESIS = "genesis"
 _HEX64_LENGTH = 64
 
 
-class HousingAIError(ValueError):
+class HousingAIError(DomainError):
     """Malformed receipt/claim or a programming error.
 
     Raised for structural problems (unknown vocabulary, bad digests,

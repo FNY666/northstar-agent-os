@@ -151,6 +151,7 @@ raising).
 """
 
 from __future__ import annotations
+from _domain_base import DomainError
 
 import hmac
 from dataclasses import dataclass
@@ -265,7 +266,7 @@ EXIT_STEPS: tuple[str, ...] = (
 MATCHMAKER_AUDIT_FRESHNESS_S = 31_536_000
 
 
-class DatingError(ValueError):
+class DatingError(DomainError):
     """A malformed dating receipt or a programming error.
 
     Raised for structural problems (bad digests, unknown codes,

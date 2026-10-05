@@ -93,6 +93,7 @@ comparisons.
 """
 
 from __future__ import annotations
+from _domain_base import DomainError
 
 import hashlib
 import hmac
@@ -173,7 +174,7 @@ GRID_NUCLEAR_EVENT = "grid.nuclear_check"
 GRID_BLACKOUT_EVENT = "grid.blackout_filed"
 
 
-class GridAgentsError(ValueError):
+class GridAgentsError(DomainError):
     """Malformed grid input (construction-time boundary).
 
     Raised for structural problems: unknown classes, bad digests,
