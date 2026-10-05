@@ -742,5 +742,103 @@ class ScopeLifetimeTests(unittest.TestCase):
             mgr.open_scope("s1")
 
 
+class CompositionClosureTests(unittest.TestCase):
+    def _engine(self):
+        from permissions import (
+            CompositionRule,
+            PermissionConfig,
+            PermissionEngine,
+        )
+
+        return PermissionEngine(
+            PermissionConfig(mode="default", can_use_tool=lambda n, p, c: True),
+            tool_kinds={"ReadSecrets": "read", "SendEmail": "send"},
+            composition_rules=[
+                CompositionRule(
+                    sequence=("read_sensitive", "external_send"),
+                    description="exfiltration shape",
+                )
+            ],
+            tool_categories={
+                "ReadSecrets": "read_sensitive",
+                "SendEmail": "external_send",
+            },
+        )
+
+    def test_each_call_individually_allowed(self):
+        engine = self._engine()
+        d1 = engine.evaluate("ReadSecrets", kind="read", payload={})
+        self.assertTrue(d1.allowed)
+        # Fresh engine: send alone is fine.
+        engine2 = self._engine()
+        d2 = engine2.evaluate("SendEmail", kind="send", payload={})
+        self.assertTrue(d2.allowed)
+
+    def test_forbidden_sequence_denied(self):
+        engine = self._engine()
+        d1 = engine.evaluate("ReadSecrets", kind="read", payload={})
+        self.assertTrue(d1.allowed)
+        d2 = engine.evaluate("SendEmail", kind="send", payload={})
+        self.assertFalse(d2.allowed)
+        self.assertEqual(d2.rule, "composition:forbidden_sequence")
+        self.assertIn("read_sensitive -> external_send", d2.reason)
+
+    def test_unrelated_sequence_allowed(self):
+        engine = self._engine()
+        # Send without a preceding sensitive read: allowed.
+        d = engine.evaluate("SendEmail", kind="send", payload={})
+        self.assertTrue(d.allowed)
+        # Read twice: no forbidden pair.
+        d2 = engine.evaluate("ReadSecrets", kind="read", payload={})
+        self.assertTrue(d2.allowed)
+
+    def test_denied_call_does_not_extend_history(self):
+        from permissions import (
+            CompositionRule,
+            PermissionConfig,
+            PermissionEngine,
+        )
+
+        # ReadSecrets is denied via disallowed_tools: it must not enter
+        # history, so a later SendEmail is still allowed.
+        engine = PermissionEngine(
+            PermissionConfig(
+                mode="default",
+                disallowed_tools=("ReadSecrets",),
+                can_use_tool=lambda n, p, c: True,
+            ),
+            tool_kinds={"ReadSecrets": "read", "SendEmail": "read"},
+            composition_rules=[
+                CompositionRule(sequence=("read_sensitive", "external_send"))
+            ],
+            tool_categories={
+                "ReadSecrets": "read_sensitive",
+                "SendEmail": "external_send",
+            },
+        )
+        d1 = engine.evaluate("ReadSecrets", kind="read", payload={})
+        self.assertFalse(d1.allowed)
+        d2 = engine.evaluate("SendEmail", kind="read", payload={})
+        self.assertTrue(d2.allowed)
+
+    def test_no_rules_no_change(self):
+        from permissions import PermissionConfig, PermissionEngine
+
+        engine = PermissionEngine(
+            PermissionConfig(mode="default", can_use_tool=lambda n, p, c: True),
+            tool_kinds={"ReadSecrets": "read", "SendEmail": "send"},
+        )
+        d1 = engine.evaluate("ReadSecrets", kind="read", payload={})
+        d2 = engine.evaluate("SendEmail", kind="send", payload={})
+        self.assertTrue(d1.allowed)
+        self.assertTrue(d2.allowed)
+
+    def test_rule_needs_two_categories(self):
+        from permissions import CompositionRule
+
+        with self.assertRaises(ValueError):
+            CompositionRule(sequence=("only_one",))
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -7182,6 +7182,10 @@ The gate's verdict for one tool call.
 
 What the host approval callback gets to see.
 
+#### `CompositionRule`
+
+A forbidden action sequence (composition closure, APC-style).
+
 #### `ScopeManager`
 
 Tracks permission scopes (epochs) and their lifetime.
