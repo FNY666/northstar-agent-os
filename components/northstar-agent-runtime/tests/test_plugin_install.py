@@ -238,6 +238,134 @@ class InstallTests(BundleTestCase):
         self.assertTrue(victim.is_dir() and any(victim.iterdir()), "what the bundle pointed at must survive")
 
 
+class UninstallContainmentTests(BundleTestCase):
+    def test_absolute_and_traversal_names_cannot_delete_external_directories(self):
+        for name in ("absolute", "traversal"):
+            with self.subTest(name=name):
+                victim = self.root / (name + "-victim")
+                victim.mkdir()
+                sentinel = victim / "sentinel"
+                sentinel.write_text("must survive")
+                pl.plugins_directory(self.workspace).mkdir(parents=True, exist_ok=True)
+                supplied = str(victim) if name == "absolute" else "../../../" + victim.name
+                with self.assertRaises(pl.PluginInstallError):
+                    pl.uninstall(supplied, self.workspace, keep_lock=True)
+                self.assertEqual(sentinel.read_text(), "must survive")
+
+    def test_invalid_names_are_rejected_before_any_mutation(self):
+        self.install()
+        lock = pl.lock_path(self.workspace).read_bytes()
+        for name in ("", ".", "..", "nested/name", "demo/", r"nested\name", "Demo", "a" * 65, None, 7):
+            with self.subTest(name=name), patch.object(pl, "_remove_tree") as remove:
+                with self.assertRaises(pl.PluginInstallError):
+                    pl.uninstall(name, self.workspace)
+                remove.assert_not_called()
+        self.assertEqual(pl.lock_path(self.workspace).read_bytes(), lock)
+        self.assertTrue(self.installed("NOTES.md").exists())
+
+    def test_symlink_management_parent_cannot_redirect_deletion(self):
+        for component in (".northstar", "plugins"):
+            with self.subTest(component=component):
+                workspace = self.root / ("ws-" + component.lstrip("."))
+                workspace.mkdir()
+                outside = self.root / ("outside-" + component.lstrip("."))
+                target = outside / ("plugins/demo" if component == ".northstar" else "demo")
+                target.mkdir(parents=True)
+                (target / "sentinel").write_text("must survive")
+                if component == ".northstar":
+                    (workspace / component).symlink_to(outside, target_is_directory=True)
+                else:
+                    (workspace / ".northstar").mkdir()
+                    (workspace / ".northstar/plugins").symlink_to(outside, target_is_directory=True)
+                with self.assertRaises(pl.PluginInstallError):
+                    pl.uninstall("demo", workspace, keep_lock=True)
+                self.assertEqual((target / "sentinel").read_text(), "must survive")
+
+    def test_target_directory_symlink_is_refused_without_deleting_external_bundle(self):
+        self.install()
+        target = self.workspace / pm.PLUGINS_DIRECTORY / "demo"
+        outside = self.root / "outside-demo"
+        target.rename(outside)
+        target.symlink_to(outside, target_is_directory=True)
+        before = pl.lock_path(self.workspace).read_bytes()
+        with self.assertRaises(pl.PluginInstallError):
+            pl.uninstall("demo", self.workspace)
+        self.assertEqual((outside / "NOTES.md").read_text(), NOTES)
+        self.assertEqual(pl.lock_path(self.workspace).read_bytes(), before)
+        self.assertTrue(target.is_symlink())
+
+    def test_lock_symlink_cannot_redirect_write_after_target_deletion(self):
+        self.install()
+        lock = pl.lock_path(self.workspace)
+        outside = self.root / "outside-lock"
+        outside.write_bytes(lock.read_bytes())
+        lock.unlink()
+        lock.symlink_to(outside)
+        with self.assertRaises(pl.PluginInstallError):
+            pl.uninstall("demo", self.workspace)
+        self.assertTrue(self.installed("NOTES.md").is_file())
+        self.assertTrue(lock.is_symlink())
+
+    def test_lock_temporary_symlink_cannot_truncate_external_file(self):
+        self.install()
+        lock = pl.lock_path(self.workspace)
+        outside = self.root / "external-temp-victim"
+        outside.write_text("must survive")
+        temporary = lock.with_suffix(lock.suffix + ".tmp")
+        temporary.symlink_to(outside)
+        before = lock.read_bytes()
+        with self.assertRaises(pl.PluginInstallError):
+            pl.uninstall("demo", self.workspace)
+        self.assertEqual(outside.read_text(), "must survive")
+        self.assertEqual(lock.read_bytes(), before)
+        self.assertTrue(self.installed("NOTES.md").exists())
+
+    def test_nonregular_lock_is_rejected_before_read_or_delete(self):
+        import os
+        self.install()
+        lock = pl.lock_path(self.workspace)
+        lock.unlink()
+        os.mkfifo(lock)
+        with patch.object(pl, "read_lock") as read, patch.object(pl, "_remove_tree") as remove:
+            with self.assertRaises(pl.PluginInstallError):
+                pl.uninstall("demo", self.workspace)
+            read.assert_not_called()
+            remove.assert_not_called()
+
+    def test_non_directory_management_is_rejected(self):
+        workspace = self.root / "blocked-workspace"
+        workspace.mkdir()
+        (workspace / ".northstar").write_text("ordinary file")
+        with patch.object(pl, "_remove_tree") as remove:
+            with self.assertRaises(pl.PluginInstallError):
+                pl.uninstall("demo", workspace)
+            remove.assert_not_called()
+        self.assertEqual((workspace / ".northstar").read_text(), "ordinary file")
+
+    def test_keep_lock_does_not_read_or_mutate_a_corrupt_lock(self):
+        self.install()
+        lock = pl.lock_path(self.workspace)
+        lock.write_text("intentionally retained bad lock")
+        pl.uninstall("demo", self.workspace, keep_lock=True)
+        self.assertEqual(lock.read_text(), "intentionally retained bad lock")
+        self.assertFalse(self.installed("NOTES.md").exists())
+
+    def test_corrupt_lock_is_refused_before_removing_bundle(self):
+        self.install()
+        pl.lock_path(self.workspace).write_text("{invalid-json")
+        with self.assertRaises(pl.PluginInstallError):
+            pl.uninstall("demo", self.workspace)
+        self.assertTrue(self.installed("NOTES.md").is_file())
+
+    def test_workspace_alias_keeps_normal_uninstall_compatibility(self):
+        self.install()
+        alias = self.root / "workspace-alias"
+        alias.symlink_to(self.workspace, target_is_directory=True)
+        pl.uninstall("demo", alias)
+        self.assertEqual(pl.read_lock(self.workspace), {})
+        self.assertFalse(self.installed("NOTES.md").exists())
+
+
 class InstallRecoveryTests(BundleTestCase):
     def snapshot(self):
         target = self.workspace / pm.PLUGINS_DIRECTORY / "demo"

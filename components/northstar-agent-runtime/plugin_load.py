@@ -29,6 +29,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import shutil
 import sys
 import tempfile
@@ -789,22 +790,46 @@ def install(
 
 
 def uninstall(name: str, workspace: str | Path, *, keep_lock: bool = False) -> str:
-    """Remove one installed bundle, and its lock entry unless ``keep_lock`` says otherwise."""
-    target = plugins_directory(workspace) / name
+    """Remove one named bundle, refusing unsafe management paths before deletion.
+
+    The caller's workspace may be an alias; internal management directories and lock
+    files may not be symlinks. This is admission validation, not an atomic defense
+    against another same-user process swapping paths while uninstall is running.
+    """
+    if not isinstance(name, str) or not re.fullmatch(manifest_module.NAME_PATTERN, name):
+        raise PluginInstallError(f"invalid plugin name: expected {manifest_module.NAME_PATTERN}")
+    root = Path(workspace).resolve()
+    management = root / ".northstar"
+    plugins = management / "plugins"
+    target = plugins / name
+    for directory in (management, plugins, target):
+        if directory.is_symlink():
+            raise PluginInstallError(f"{directory}: refusing a symlink plugin management path")
+        if directory.exists() and not directory.is_dir():
+            raise PluginInstallError(f"{directory}: plugin management path is not a directory")
+    entries = None
+    if not keep_lock:
+        lock = lock_path(root)
+        for file in (lock, lock.with_suffix(lock.suffix + ".tmp")):
+            if file.is_symlink():
+                raise PluginInstallError(f"{file}: refusing a symlink plugin lock path")
+            if file.exists() and not file.is_file():
+                raise PluginInstallError(f"{file}: plugin lock path is not a regular file")
+        # A malformed lock must not destroy a bundle before reporting the error.
+        entries = read_lock(root)
     if not target.is_dir():
         raise PluginInstallError(f"{name}: no plugin installed at {target}")
     _remove_tree(target)
     removed = f"removed {target}"
-    if not keep_lock:
-        entries = read_lock(workspace)
+    if entries is not None:
         if name in entries:
             del entries[name]
-            write_lock(workspace, entries)
-            removed += f"; dropped {name} from {lock_path(workspace).name}"
-        left = [path.name for path in plugins_directory(workspace).iterdir() if path.is_dir()] if plugins_directory(workspace).is_dir() else []
+            write_lock(root, entries)
+            removed += f"; dropped {name} from {lock_path(root).name}"
+        left = [path.name for path in plugins.iterdir() if path.is_dir()]
         if not left:
             try:
-                plugins_directory(workspace).rmdir()
+                plugins.rmdir()
             except OSError:
                 pass
     return removed
