@@ -523,5 +523,89 @@ class PreTradeRiskTests(unittest.TestCase):
         self.assertTrue(d.allowed)
 
 
+class SignedApprovalTests(unittest.TestCase):
+    def test_signed_receipt_verifies_approver(self):
+        import time
+
+        from ed25519 import public_key as ed_pubkey
+        from egress_enforcer import build_approval_receipt
+        from permissions import PermissionConfig, PermissionEngine
+
+        seed = bytes(32)
+        pubkey = ed_pubkey(seed)
+        receipt = build_approval_receipt(
+            card_id="c1",
+            call_id="call-1",
+            arguments_digest="sha256:abc",
+            approver_id="alice",
+            approver_seed=seed,
+            decided_at=time.time(),
+            body=b"{}",
+        )
+
+        def callback(name, payload, ctx):
+            return {"allowed": True, "approval_receipt": receipt.as_dict()}
+
+        engine = PermissionEngine(
+            PermissionConfig(
+                mode="default",
+                can_use_tool=callback,
+                approver_keys={"alice": pubkey},
+            ),
+            tool_kinds={"Write": "edit"},
+        )
+        d = engine.evaluate("Write", kind="edit", payload={})
+        self.assertTrue(d.allowed)
+        self.assertIn("alice", d.reason)
+
+    def test_bad_signature_fails_closed(self):
+        import time
+
+        from ed25519 import public_key as ed_pubkey
+        from egress_enforcer import build_approval_receipt
+        from permissions import PermissionConfig, PermissionEngine
+
+        seed = bytes(32)
+        pubkey = ed_pubkey(seed)
+        receipt = build_approval_receipt(
+            card_id="c1",
+            call_id="call-1",
+            arguments_digest="sha256:abc",
+            approver_id="alice",
+            approver_seed=seed,
+            decided_at=time.time(),
+            body=b"{}",
+        )
+        # Tamper with the receipt after signing.
+        tampered = receipt.as_dict()
+        tampered["card_id"] = "evil-card"
+
+        def callback(name, payload, ctx):
+            return {"allowed": True, "approval_receipt": tampered}
+
+        engine = PermissionEngine(
+            PermissionConfig(
+                mode="default",
+                can_use_tool=callback,
+                approver_keys={"alice": pubkey},
+            ),
+            tool_kinds={"Write": "edit"},
+        )
+        d = engine.evaluate("Write", kind="edit", payload={})
+        self.assertFalse(d.allowed)
+        self.assertEqual(d.rule, "host_callback:bad_signature")
+
+    def test_unsigned_callback_still_works(self):
+        # Opt-in: without approver_keys, plain bool verdicts work as before.
+        from permissions import PermissionConfig, PermissionEngine
+
+        engine = PermissionEngine(
+            PermissionConfig(mode="default", can_use_tool=lambda n, p, c: True),
+            tool_kinds={"Write": "edit"},
+        )
+        d = engine.evaluate("Write", kind="edit", payload={})
+        self.assertTrue(d.allowed)
+
+
 if __name__ == "__main__":
     unittest.main()
