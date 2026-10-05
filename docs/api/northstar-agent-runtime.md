@@ -5780,6 +5780,10 @@ One benign task paired with adversarial probes, for dual scoring.
 
 Dual scoring: benign-task completion x adversarial block rate.
 
+#### `run_agentdojo_corpus()`
+
+FNR/FPR over the AgentDojo-derived adversarial corpus.
+
 #### `run_step_compliance()`
 
 in-toto Layout/Link step compliance over deterministic attack scenarios.
