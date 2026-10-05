@@ -17,8 +17,10 @@ fail-closed version of the idea:
   rule the file tools use: it must live inside the workspace root after
   ``realpath``, be an existing regular file, and not be a symlink. A skill or
   config that points outside the run is refused, never followed.
-- **Bounded and killed.** Output caps, a bounded timeout, and TERM-then-KILL of the
-  whole process group: a hook that hangs or floods cannot outlive its verdict.
+- **Bounded and killed.** Byte-capped pipes, a bounded timeout, and TERM-then-KILL
+  of the hook's process group, including children after the leader exits. Descendants
+  that deliberately leave that group require external OS containment; hooks are not
+  a sandbox.
 - **Nothing is inherited.** The child gets a scrubbed environment (``PATH`` and
   ``LANG`` only) and the workspace as cwd, so model credentials never cross into
   hook code.
@@ -37,8 +39,11 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import selectors
 import signal
 import subprocess
+import sys
+import time
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable, Mapping, Sequence
@@ -296,41 +301,117 @@ def _run_bounded(
         if found is None:
             raise _fail(f"interpreter {argv[0]!r} is not on PATH")
         argv[0] = found
-    process = subprocess.Popen(  # noqa: S603 - argv is validated, no shell
-        argv,
-        cwd=cwd,
-        env=env,
-        stdin=subprocess.PIPE,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        text=True,
-        start_new_session=True,
-    )
+    deadline = time.monotonic() + timeout_s
+    captured = {"stdout": bytearray(), "stderr": bytearray()}
+    limits = {"stdout": MAX_STDOUT_BYTES, "stderr": MAX_STDERR_BYTES}
+    pending = memoryview(input_text.encode("utf-8"))
+    selector = selectors.DefaultSelector()
+    process = None
     try:
-        stdout, stderr = process.communicate(input_text, timeout=timeout_s)
-    except subprocess.TimeoutExpired:
-        _terminate_group(process)
-        stdout, stderr = process.communicate(timeout=KILL_GRACE_SECONDS)
-        raise subprocess.TimeoutExpired(argv, timeout_s, output=stdout, stderr=stderr) from None
+        process = subprocess.Popen(  # noqa: S603 - argv is validated, no shell
+            argv, cwd=cwd, env=env, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE, start_new_session=True,
+        )
+        for name, stream in (("stdout", process.stdout), ("stderr", process.stderr)):
+            os.set_blocking(stream.fileno(), False)
+            selector.register(stream, selectors.EVENT_READ, name)
+        os.set_blocking(process.stdin.fileno(), False)
+        if pending:
+            selector.register(process.stdin, selectors.EVENT_WRITE, "stdin")
+        else:
+            process.stdin.close()
+        while selector.get_map():
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise subprocess.TimeoutExpired(argv, timeout_s)
+            for key, _mask in selector.select(min(.05, remaining)):
+                stream, name = key.fileobj, key.data
+                if name == "stdin":
+                    try:
+                        written = os.write(stream.fileno(), pending[:4096])
+                    except BlockingIOError:
+                        continue
+                    except BrokenPipeError:
+                        pending = pending[:0]
+                    else:
+                        pending = pending[written:]
+                    if not pending:
+                        selector.unregister(stream)
+                        stream.close()
+                    continue
+                try:
+                    chunk = os.read(stream.fileno(), 8192)
+                except BlockingIOError:
+                    continue
+                if not chunk:
+                    selector.unregister(stream)
+                    stream.close()
+                    continue
+                if len(captured[name]) + len(chunk) > limits[name]:
+                    raise _fail(f"hook output {name} exceeds byte limit {limits[name]}; refusing verdict")
+                captured[name].extend(chunk)
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            raise subprocess.TimeoutExpired(argv, timeout_s)
+        try:
+            process.wait(timeout=remaining)
+        except subprocess.TimeoutExpired:
+            raise subprocess.TimeoutExpired(argv, timeout_s) from None
+    finally:
+        primary_error = sys.exc_info()[1]
+        cleanup_errors = []
+        try:
+            selector.close()
+        except Exception as error:
+            cleanup_errors.append(error)
+        if process is not None:
+            # Release full-pipe writers before reaping (iSH can defer pending signals).
+            for stream in (process.stdin, process.stdout, process.stderr):
+                try:
+                    if stream is not None and not stream.closed:
+                        stream.close()
+                except Exception as error:
+                    cleanup_errors.append(error)
+            try:
+                _terminate_group(process)
+            except Exception as error:
+                cleanup_errors.append(error)
+        if cleanup_errors:
+            detail = "hook cleanup failed: " + ", ".join(type(error).__name__ for error in cleanup_errors)
+            if primary_error is None:
+                raise _fail(detail) from cleanup_errors[0]
+            if hasattr(primary_error, "add_note"):
+                primary_error.add_note(detail)
+            else:  # Python 3.10: preserve the original exception, with explicit context.
+                primary_error.__context__ = cleanup_errors[0]
+    stdout = captured["stdout"].decode("utf-8")
+    stderr = captured["stderr"].decode("utf-8")
     return subprocess.CompletedProcess(argv, process.returncode, stdout, stderr)
 
 
 def _terminate_group(process: subprocess.Popen) -> None:
+    # start_new_session=True makes pid the group id even after the leader exits.
+    # wait(leader) returning does not prove its group is empty.
     try:
-        group = os.getpgid(process.pid)
-    except (ProcessLookupError, PermissionError, AttributeError, OSError):
-        process.kill()
-        return
-    for signal_number in (signal.SIGTERM, signal.SIGKILL):
-        try:
-            os.killpg(group, signal_number)
-        except (ProcessLookupError, PermissionError, OSError):
-            return
-        try:
-            process.wait(timeout=KILL_GRACE_SECONDS)
-            return
-        except subprocess.TimeoutExpired:
-            continue
+        os.killpg(process.pid, signal.SIGTERM)
+    except ProcessLookupError:
+        pass
+    except (PermissionError, AttributeError, OSError):
+        if process.poll() is None:
+            process.kill()
+    try:
+        process.wait(timeout=KILL_GRACE_SECONDS)
+    except subprocess.TimeoutExpired:
+        pass
+    try:
+        os.killpg(process.pid, signal.SIGKILL)
+    except ProcessLookupError:
+        pass
+    except (PermissionError, AttributeError, OSError):
+        if process.poll() is None:
+            process.kill()
+    if process.poll() is None:
+        process.wait(timeout=KILL_GRACE_SECONDS)
 
 
 def _which(name: str) -> str | None:

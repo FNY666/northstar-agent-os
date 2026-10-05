@@ -110,6 +110,11 @@ class PermissionDecision:
     reason: str = ""
     rule: str = ""
     tool: str = ""
+    #: Machine-readable denial code in a dotted namespace, e.g.
+    #: ``denial.host_callback.error``. Derived from ``rule`` for denials
+    #: when not set explicitly; empty for allows. Lets audit consumers
+    #: classify denials without parsing free-text reasons.
+    deny_code: str = ""
     #: Set only when the verdict came from the decision-model path: the full
     #: input -> output -> verdict chain (state, questions, probabilities,
     #: thresholds), ready to append to the audit feed.
@@ -124,6 +129,15 @@ class PermissionDecision:
     def text(self) -> str:
         return self.reason or ("allowed" if self.allowed else "denied")
 
+    def __post_init__(self) -> None:
+        # Denials always carry a machine-readable code: derive it from the
+        # already-structured rule namespace when the construction site did
+        # not set one explicitly. Allows keep an empty code.
+        if not self.allowed and not self.deny_code and self.rule:
+            object.__setattr__(
+                self, "deny_code", "denial." + self.rule.replace(":", ".")
+            )
+
     def as_dict(self) -> dict[str, Any]:
         payload = {
             "tool": self.tool,
@@ -132,6 +146,8 @@ class PermissionDecision:
             "reason": self.reason,
             "rule": self.rule,
         }
+        if self.deny_code:
+            payload["deny_code"] = self.deny_code
         if self.decision_model_audit is not None:
             payload["decision_model_audit"] = self.decision_model_audit
         if self.details:
@@ -412,6 +428,16 @@ class PermissionEngine:
     def multisig_pubkeys(self) -> Mapping[str, bytes] | None:
         """Approver public keys, or None when multisig is not configured."""
         return self._multisig_pubkeys
+
+    @property
+    def audit_sink(self) -> Callable[[dict[str, Any]], None] | None:
+        """Host audit seam, or None when no sink is wired.
+
+        Kept public so hosts rebuilding the engine (child runtimes, late
+        ``can_use_tool`` attachment) can carry the sink over instead of
+        silently dropping denial reporting.
+        """
+        return self._audit_sink
 
     def pretrade_reset(self) -> None:
         """Clear pre-trade observation windows (rate counters, duplicate fingerprints)."""

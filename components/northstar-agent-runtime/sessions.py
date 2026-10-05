@@ -76,6 +76,19 @@ def _open_regular_nofollow(path: Path, flags: int, mode: int = 0o600) -> int:
     try:
         if not stat.S_ISREG(os.fstat(fd).st_mode):
             raise SessionIntegrityError(f"{path.name}: transcript target is not a regular file")
+        # Some POSIX-like hosts clear O_APPEND when O_NONBLOCK is combined in
+        # os.open flags. O_NONBLOCK is needed to avoid hanging on a FIFO before
+        # fstat can reject it; restore append mode only after proving this fd is
+        # a regular file. This keeps the safe-open sequence and write invariant.
+        append = getattr(os, "O_APPEND", 0)
+        if append:
+            try:
+                import fcntl as _fcntl
+                current = _fcntl.fcntl(fd, _fcntl.F_GETFL)
+                if not current & append:
+                    _fcntl.fcntl(fd, _fcntl.F_SETFL, current | append)
+            except (ImportError, OSError) as error:
+                raise SessionIntegrityError(f"{path.name}: cannot verify append-only transcript writes: {error}") from error
         return fd
     except Exception:
         os.close(fd)
@@ -97,7 +110,16 @@ def _fsync(fd: int) -> None:  # pragma: no cover - thin wrapper, patched in test
 
 @dataclass
 class SessionStore:
-    """Writer/reader for one session's JSONL transcript."""
+    """Writer/reader for one session's JSONL transcript.
+
+    When ``chain`` is true (the default), every record is sealed at write
+    time with the tamper-evident hash chain (``audit_chain.chain_record``):
+    ``chain_hash = sha256(raw(prev_hash) || canon(body))``. The first
+    record's ``prev_hash`` is the genesis hash bound to this session id.
+    An operator who edits the transcript file breaks the chain, and the
+    break is located by line on verify. This closes the pre-export
+    tampering window: chaining is no longer export-time-only.
+    """
 
     directory: str | os.PathLike[str] | None = None
     session_id: str = ""
@@ -105,8 +127,17 @@ class SessionStore:
     durable: bool = True
     max_record_chars: int = MAX_RECORD_CHARS
     on_write: Callable[[dict[str, Any]], None] | None = None
+    #: Seal every record with the hash chain at write time. Disable only for
+    #: tests or for readers that never write.
+    chain: bool = True
     _index: int = 0
     _written: int = 0
+    # The chain head: the chain_hash of the last record written. Resumed
+    # from the existing file on open; genesis when the file is new.
+    _prev_hash: str | None = None
+    # True until the first record of a fresh chain is written; that record
+    # carries the genesis anchor the verifier requires.
+    _genesis_pending: bool = False
     # Hybrid Logical Clock state for this writer's audit stamps (see hlc.py):
     # ticking it on every append guarantees the "hlc" stamps are
     # non-decreasing even when the wall clock is not, so multi-writer feeds
@@ -126,6 +157,45 @@ class SessionStore:
             # Transcripts can contain user content; keep the directory owner-only.
             os.chmod(path, 0o700)
         self.directory = path
+        if self.chain:
+            self._prev_hash, self._genesis_pending = self._resume_chain_head()
+
+    def _genesis_params(self) -> dict[str, Any]:
+        from audit_chain import build_genesis_params
+
+        return build_genesis_params(component="northstar-session", session_id=self.session_id)
+
+    def _genesis_hash(self) -> str:
+        from audit_chain import genesis_hash
+
+        return genesis_hash(self._genesis_params())
+
+    def _resume_chain_head(self) -> tuple[str, bool]:
+        """Pick up the chain where the existing file left off.
+
+        Returns ``(head_hash, fresh)`` where ``fresh`` is True when this
+        write session starts a new chain (new/empty/legacy file) and the
+        first record must carry the genesis anchor. A corrupt tail does not
+        break the run: we start a new chain rather than refuse to write.
+        """
+        path = self.path
+        if path is None or not path.exists():
+            return self._genesis_hash(), True
+        try:
+            with open(path, "r", encoding="utf-8") as fh:
+                last = ""
+                for line in fh:
+                    if line.strip():
+                        last = line
+                if not last:
+                    return self._genesis_hash(), True
+                record = json.loads(last)
+                head = record.get("chain_hash")
+                if isinstance(head, str) and len(head) == 64:
+                    return head, False
+        except (OSError, ValueError):
+            pass
+        return self._genesis_hash(), True
 
     # -- shape ------------------------------------------------------------
     @property
@@ -164,6 +234,16 @@ class SessionStore:
             **payload,
         }
         self._index += 1
+        if self.chain and self._prev_hash is not None:
+            from audit_chain import chain_record
+
+            if self._genesis_pending:
+                # The verifier requires the first record of a chain to
+                # carry the genesis anchor its prev_hash commits to.
+                record = {**record, "genesis": self._genesis_params()}
+                self._genesis_pending = False
+            record = chain_record(record, self._prev_hash)
+            self._prev_hash = record["chain_hash"]
         if self.on_write is not None:
             try:
                 self.on_write(record)
@@ -194,17 +274,26 @@ class SessionStore:
     def _write(self, record: dict[str, Any]) -> None:
         line = json.dumps(record, ensure_ascii=False, sort_keys=True, default=str, separators=(",", ":"))
         if self.max_record_chars > 0 and len(line) > self.max_record_chars:
+            # Save the chain link before truncation rewrites the body.
+            prev_hash = record.get("prev_hash")
             record = {**record, "truncated": True, "payload": record.get("payload", {})}
             line = json.dumps(record, ensure_ascii=False, sort_keys=True, default=str, separators=(",", ":"))
             line = line[: self.max_record_chars] + ',"note":"' + TRUNCATION_NOTE + '"}'
             try:
-                json.loads(line)
+                record = json.loads(line)
             except json.JSONDecodeError:  # pragma: no cover - keep valid JSON or drop the tail
-                line = json.dumps(
-                    {"index": record["index"], "ts": record["ts"], "session_id": self.session_id,
-                     "type": record["type"], "truncated": True},
-                    ensure_ascii=False, separators=(",", ":"),
-                )
+                record = {
+                    "index": record["index"], "ts": record["ts"], "session_id": self.session_id,
+                    "type": record["type"], "truncated": True,
+                }
+            # Truncation rewrote the body: re-seal over the truncated body
+            # with the saved prev_hash so the written bytes verify and the
+            # chain stays unbroken.
+            if self.chain and isinstance(prev_hash, str):
+                from audit_chain import chain_record
+
+                record = chain_record(record, prev_hash)
+            line = json.dumps(record, ensure_ascii=False, sort_keys=True, default=str, separators=(",", ":"))
         path = self.path
         assert path is not None
         fd = _open_regular_nofollow(path, os.O_WRONLY | os.O_CREAT | os.O_APPEND)
@@ -215,6 +304,9 @@ class SessionStore:
         finally:
             os.close(fd)
         self._written += 1
+        # Keep the in-memory head in sync when _write re-sealed.
+        if self.chain and isinstance(record, dict) and "chain_hash" in record:
+            self._prev_hash = record["chain_hash"]
 
     def record_assistant(self, message: AssistantMessage, *, agent: str = "main") -> dict[str, Any] | None:
         return self.append(

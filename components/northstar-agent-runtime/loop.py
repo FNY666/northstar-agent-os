@@ -179,6 +179,11 @@ class RuntimeConfig:
     tool_limits: ToolLimits = field(default_factory=ToolLimits)
     sidecar_socket: str | None = None
     sidecar_timeout_ms: int = 30_000
+    #: Unix socket of northstar-egress-sidecar. When set, the Fetch tool is
+    #: registered: the agent's only network path, routed through the sidecar.
+    #: Without a socket there is no Fetch tool at all.
+    egress_socket: str | None = None
+    egress_timeout_ms: int = 30_000
     #: Backend for the Shell tool (``auto`` | ``bwrap`` | ``process``). Does not
     #: grant Shell — the permission gate still denies it under ``default`` until
     #: ``--allow-tool Shell``. ``bwrap`` is refused at construction if unusable.
@@ -677,6 +682,18 @@ class AgentRuntime:
             )
         if self.sidecar is not None and "CodexReadOnly" not in self.tools:
             self.tools.register(codex_tool_spec())
+        # The egress sidecar is the agent's only network path, and the Fetch
+        # tool is the only way to reach it. No socket => no Fetch tool.
+        from egress_client import EgressClient
+
+        self.egress = EgressClient(
+            self.config.egress_socket,
+            timeout_ms=int(self.config.egress_timeout_ms),
+        ) if self.config.egress_socket else None
+        if self.egress is not None and "Fetch" not in self.tools:
+            from tools.fetch import fetch_tool_spec
+
+            self.tools.register(fetch_tool_spec())
         if self.config.allow_delegation and self._delegation_allowed(self.config.depth):
             self.tools.register(task_tool_spec(), replace_existing=True)
         else:
@@ -693,6 +710,10 @@ class AgentRuntime:
             self.permissions = PermissionEngine(
                 replace(self.permissions.config, can_use_tool=can_use_tool),
                 multisig_pubkeys=self.permissions.multisig_pubkeys,
+                # P2: a late callback attachment must not drop the
+                # pre-trade risk limits or the audit sink.
+                pretrade=self.permissions.pretrade,
+                audit_sink=self.permissions.audit_sink,
             )
         for spec in self.tools.specs():
             if not self.permissions.knows(spec.name):
@@ -1092,6 +1113,22 @@ class AgentRuntime:
             # Ceilings are checked before spending, never after.
             stop = self._ceiling_stop(state)
             if stop is not None:
+                # B5: budget stops must be visible in the denial ledger like
+                # every other refusal, not just a run-subtype string.
+                if stop == "error_max_budget_usd":
+                    reason = (
+                        f"run budget exhausted (${self.budget.total_cost_usd:.6f} >= "
+                        f"${config.max_budget_usd:.6f}), run stopped before turn {turn_index}"
+                    )
+                    state.denials.append(
+                        Denial(
+                            tool="(run)",
+                            source="limit:max_budget_usd",
+                            reason=reason,
+                            agent=config.agent,
+                            turn_index=turn_index,
+                        )
+                    )
                 yield self._finish(state, stop)
                 return
             if should_compact(state.transcript, config.compaction_threshold_tokens):
@@ -1750,6 +1787,7 @@ class AgentRuntime:
                     agent=self.config.agent,
                     depth=self.config.depth,
                     turn_index=turn_index,
+                    call_id=call.id,
                     sandbox=self.sandbox,
                     limits=self.limits,
                     services=self._services(),
@@ -1930,6 +1968,31 @@ class AgentRuntime:
             permission_source="unknown_tool",
             turn_index=turn_index,
             agent=self.config.agent,
+        )
+        # P3: hallucinated-tool probing must not be audit-invisible. Record
+        # the refusal in the denial ledger and the session transcript like
+        # every other gate refusal.
+        state.denials.append(
+            Denial(
+                tool=call.name,
+                source="unknown_tool",
+                reason=reason,
+                agent=self.config.agent,
+                turn_index=turn_index,
+            )
+        )
+        self.sessions.append(
+            "denial",
+            {
+                "agent": self.config.agent,
+                **Denial(
+                    tool=call.name,
+                    source="unknown_tool",
+                    reason=reason,
+                    agent=self.config.agent,
+                    turn_index=turn_index,
+                ).as_dict(),
+            },
         )
         return _Refused(block, report, None)
 
@@ -2155,6 +2218,7 @@ class AgentRuntime:
             agent=self.config.agent,
             depth=self.config.depth,
             turn_index=turn_index,
+            call_id=call.id,
             sandbox=self.sandbox,
             limits=self.limits,
             services=self._services(),
@@ -2204,6 +2268,7 @@ class AgentRuntime:
         return {
             "registry": self.tools,
             "sidecar": self.sidecar,
+            "egress": self.egress,
             "config": self.config,
             "runtime": self,
             "shell_backend": self.config.shell_backend,
@@ -2256,9 +2321,19 @@ class AgentRuntime:
         # F3: Stop child delegation when parent budget is exhausted
         if self.config.max_budget_usd is not None and self.budget.exhausted:
             reason = f"parent budget exhausted (${self.budget.total_cost_usd:.6f} >= ${self.config.max_budget_usd:.6f}), cannot spawn child"
+            # B5: record the budget block in the denial ledger.
+            state.denials.append(
+                Denial(
+                    tool=spec.name,
+                    source="limit:max_budget_usd",
+                    reason=reason,
+                    agent=self.config.agent,
+                    turn_index=turn_index,
+                )
+            )
             return (
                 ToolResultBlock(tool_use_id=call.id, content=reason, is_error=True),
-                ToolCallReport(name=spec.name, call_id=call.id, is_error=True, permission_source="budget", turn_index=turn_index, agent=self.config.agent),
+                ToolCallReport(name=spec.name, call_id=call.id, is_error=True, denied=True, permission_source="budget", turn_index=turn_index, agent=self.config.agent),
                 "error_max_budget_usd",
             )
 
@@ -2460,7 +2535,17 @@ class AgentRuntime:
                     allowed_tools=child_allowed,
                     disallowed_tools=child_disallowed,
                     can_use_tool=self.permissions.config.can_use_tool,
-                )
+                    # P1/D1: a child must not escape the parent's enforcement
+                    # posture. Dropping these fields would let a delegated
+                    # agent bypass the parent's m-of-n approval requirement,
+                    # decision model, pre-trade risk limits, and audit sink.
+                    decision_model=self.permissions.config.decision_model,
+                    decision_policy=self.permissions.config.decision_policy,
+                    multisig=self.permissions.config.multisig,
+                ),
+                multisig_pubkeys=self.permissions.multisig_pubkeys,
+                pretrade=self.permissions.pretrade,
+                audit_sink=self.permissions.audit_sink,
             ),
             hooks=self.hooks,
             agents=self.agents,

@@ -59,6 +59,7 @@ from session_view import add_arguments as add_session_arguments
 from audit_cli import add_audit_arguments
 from plugin_load import add_plugin_arguments
 from mcp_config import add_mcp_arguments
+from mcp_admission import add_admission_arguments
 from skill_check import add_skills_arguments
 from governance_bench import add_bench_arguments
 from run_setup import (  # noqa: F401 - MUTATING_TOOLS and checkpoint_usage stay importable from cli
@@ -207,7 +208,8 @@ def build_parser() -> argparse.ArgumentParser:
         "mcp",
         help="inspect the MCP servers this workspace declares (read-only; a run needs --mcp-config to start them)",
     )
-    add_mcp_arguments(mcp)
+    mcp_actions = add_mcp_arguments(mcp)
+    add_admission_arguments(mcp_actions)
     skills = sub.add_parser("skills", help="review the workspace's Agent Skills (supply-chain check, read-only)")
     add_skills_arguments(skills)
     plugins = sub.add_parser(
@@ -408,11 +410,14 @@ def _add_mcp_arguments(parser: argparse.ArgumentParser) -> None:
         mcp.add_argument("--mcp-allow-roots", action="store_true", help="let an MCP server list workspace roots; when allowed it is offered exactly one root, the workspace itself")
         mcp.add_argument("--mcp-max-rounds", type=int, default=3, help="how many times one tool call may be re-asked for input before the client gives up")
         mcp.add_argument("--mcp-seccomp", choices=("auto", "on", "off"), default="auto", help="seccomp-BPF denylist for MCP server processes on Linux (same escape-primitive denylist as the Shell process backend): auto applies it where loadable, on refuses to start where it is not, off runs the server command as-is")
+        mcp.add_argument("--mcp-network", choices=("denied", "allowed"), default="denied", help="network for MCP server processes: denied (default) confines the server with Landlock TCP denial like the Shell process backend and refuses to start where that cannot be enforced; allowed runs the server with full host network (explicit opt-in for servers that need it)")
 
 def _add_execution_arguments(parser: argparse.ArgumentParser) -> None:
         execution = parser.add_argument_group("execution delegation")
         execution.add_argument("--sidecar-socket", default="", help="Unix socket of northstar-codex-sidecar; enables the CodexReadOnly tool")
         execution.add_argument("--sidecar-timeout-ms", type=int, default=30_000, help="sidecar execution deadline")
+        execution.add_argument("--egress-socket", default="", help="Unix socket of northstar-egress-sidecar; enables the Fetch tool (the agent's only network path)")
+        execution.add_argument("--egress-timeout-ms", type=int, default=30_000, help="egress sidecar request deadline")
         execution.add_argument("--probe-sidecar", action="store_true", help="send one health-check prompt to the sidecar and exit")
         execution.add_argument(
             "--sandbox",
@@ -1028,6 +1033,7 @@ def _connect_mcp_clients(
             "allow_roots": bool(getattr(args, "mcp_allow_roots", False)),
             "max_input_rounds": getattr(args, "mcp_max_rounds", 3),
             "seccomp": getattr(args, "mcp_seccomp", "auto"),
+            "network": getattr(args, "mcp_network", "denied"),
             "workspace_root": Path(args.workspace).resolve(),
         }
     clients: list[Any] = []
@@ -1326,6 +1332,9 @@ def _run(args: argparse.Namespace) -> int:
     if args.sidecar_socket:
         config_kwargs["sidecar_socket"] = args.sidecar_socket
         config_kwargs["sidecar_timeout_ms"] = args.sidecar_timeout_ms
+    if args.egress_socket:
+        config_kwargs["egress_socket"] = args.egress_socket
+        config_kwargs["egress_timeout_ms"] = args.egress_timeout_ms
     config_kwargs["shell_backend"] = getattr(args, "sandbox", "auto") or "auto"
     config_kwargs["shell_seccomp"] = getattr(args, "seccomp", "auto") or "auto"
     config_kwargs["shell_capdrop"] = getattr(args, "capdrop", "on") or "on"

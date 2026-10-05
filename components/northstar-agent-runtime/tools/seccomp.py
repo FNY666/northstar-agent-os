@@ -33,9 +33,10 @@ import base64
 import struct
 from typing import Sequence
 
-#: Operator-facing modes. ``auto`` applies the denylist whenever the bwrap
-#: backend runs and notes its absence on the process backend; ``on`` requires
-#: bwrap + filter and refuses anything else; ``off`` disables the filter.
+#: Operator-facing modes. ``auto`` applies the denylist via bwrap or the
+#: prctl loader on Linux (both backends enforce it); ``on`` requires the
+#: filter and refuses to run where no backend can apply it (non-Linux);
+#: ``off`` disables the filter.
 SECCOMP_MODES = ("auto", "on", "off")
 
 # Strictness order for the tighten-only rule: a per-call payload may only move

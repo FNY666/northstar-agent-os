@@ -1,3 +1,2313 @@
+## Unreleased (one-hundred-sixtieth batch) — construction-site AI discipline (AI-construction absorption)
+
+New module `construction_agents.py`: `progress_evidence_receipt()` —
+AI progress assessments bind evidence receipts (method + digest +
+timestamp); payment-certificate claims without a named human
+sign-off deny with `construction.payment_without_signoff` (a photo
+must never become an unquestioned payment certificate).
+`schedule_rationale_binding()` — AI schedule changes bind checkable
+rationale + impact records; unrationale critical-path reorders deny
+with `construction.unrationale_reschedule`.
+`digital_twin_integrity_log()` — twin state changes are append-only
+with source provenance; user-uploaded data applied without
+isolation tagging denies with `construction.twin_contamination`
+(MDPI lesson). `hri_perimeter_gate()` — autonomous heavy equipment
+binds live exclusion-zone statuses; degraded sensors running
+autonomous deny with `construction.degraded_autonomy` (WTW
+dust-blocked-sensor lesson). `safety_interlock_receipt()` —
+equipment starts need a live passing interlock receipt; none live
+denies with `construction.no_interlock` (Guardian AI lesson).
+`validation_loop_clock()` — AI safety alerts need human
+true/false feedback on a clock; unvalidated alerts expire with
+`construction.unvalidated_alert` (Saipem lesson).
+`worker_surveillance_consent()` — surveillance binds worker consent
+receipts naming data owner and reuse purposes; none denies with
+`construction.unconsented_surveillance`.
+`hallucinated_clause_screen()` — cited regulation clauses must be
+verified pins; fabricated clauses refuse whole-class with
+`construction.fabricated_clause`. `forecast_uncertainty_band()` —
+forecasts bind uncertainty bands with disclosed assumptions;
+undisclosed assumptions are NON_AUTHORITATIVE with
+`construction.unstated_assumptions`. `capability_envelope_gate()` —
+site robots declare capability envelopes; out-of-envelope commands
+refuse with `construction.envelope_breach`.
+`fleet_orchestration_manifest()` — fleet self-orchestration binds a
+manifest with a named responsible party; none denies with
+`construction.no_orchestration_manifest`. `safety_alert_budget()` —
+alert channels pin false-positive budgets; over-budget channels deny
+with `construction.alert_budget_exceeded` and degrade to human
+patrol.
+
+Bench: `metrics.construction_agents` (12 scenarios, 4 allow /
+8 deny). No version bump (single parent bump per wave).
+
+## Unreleased (one-hundred-fifty-first batch) — education AI discipline (AI-education absorption)
+
+New module `education_agents.py`: `temporal_capability_lock()` — exam/
+admissions windows pin capability locks; a locked function used inside
+its window denies with `education:window_breach` (gaokao time-lock
+lesson: photo-solving disabled only during exam windows, second year
+running). `retention_schedule_mandate()` — published retention
+schedules; a missing schedule is `education:no_retention_schedule`
+and overdue data is `education:retention_overdue` with auto-delete
+post-check (FTC Illuminate lesson: 10.1M students' records, 10-year
+operational mandate, no fine). `evidentiary_tiering()` — automated
+judgments default to tier=signal; tier=evidence claimed without human
+review is `education:tier_escalation` (detector-demotion lesson: a flag
+opens a conversation, it doesn't close one).
+`ai_proposes_human_disposes_gate()` — grading/admissions/discipline
+decisions: AI may flag or draft, never decide alone
+(`education:ai_decided`; Cambridge 35–65% + AFT–Microsoft lesson).
+`developmental_access_staging()` — band-staged access with a closed
+exception vocabulary and ban-until-evidence sunsets
+(`education:developmental_ban`; NYC moratorium lesson).
+`language_parity_audit()` — cross-language pass-rate deltas above the
+pinned tolerance are `education:language_parity_gap` (Kazakhstan
+lesson). `pseudonymous_student_mode()` — pseudonyms by default;
+identifiable collection without a live pseudonym is
+`education:pii_without_pseudonym` (German school-policy lesson).
+Honest scoping: receipts bind declared education discipline; they
+don't end cheating or fix equity.
+
+Bench: `metrics.education_agents` (12 scenarios, 4 allow /
+8 deny). No version bump (single parent bump per wave).
+
+## Unreleased (one-hundred-fifty-second batch) — healthcare delivery AI discipline (AI-clinical-delivery absorption)
+
+New module `healthcare_agents.py`: `alert_burden_ledger()` — CDS
+site-calibration receipts (PPV, alerts/1k visits, post-hoc share);
+below the 0.15 floor → `ALERT_SILENCED`, not bombardment (JAMA ESM
+v2: PPV 0.13–0.26, two thirds of alerts post-hoc).
+`responsibility_manifest()` — version-pinned tripartite liability
+(developer/operator/clinician); no "support tool, not a decision
+tool" evasion (UK MPS 2026-06). `bias_vignette_regression()` —
+demographic misrepresentation as continuous regression on model
+updates; deterioration → deploy refused (Flinders 2026-08:
+78%/89%). `denial_evidence_provenance()` — cost/access-affecting
+AI recommendations bind clinical logic, evidence source, tool
+version history (AMA 2026-06); missing → downstream refuses.
+`triage_ordering_ban()` — autonomous emergency-triage ordering
+default-DENY; enabling needs an independent safety case + real-time
+human review (EASAC/FEAM 2026-09-30). `ai_usage_notice()` —
+machine-readable patient AI-use notice with opt-out; missing →
+`NON_COMPLIANT`. `adversarial_dissent_protocol()` — review UI must
+surface uncertainty intervals + counter-evidence; clinician
+acknowledges reading (NEJM AI 2025 human-on-the-hook).
+`consistency_uncertainty_signal()` — low sampling consistency →
+`NON_AUTHORITATIVE` + second review (MIRA 2026-09).
+`maturity_mapping()` — L0–L4 labels; below L2 barred from the
+clinical core. `postmarket_surveillance()` — sensitivity/override/
+drift KPIs; breach → auto-rollback. Honest scoping: receipts bind
+declared healthcare discipline; they don't make AI safe for
+patients. Bench track `metrics.healthcare_agents`: 12 scenarios,
+5 allow / 7 deny.
+
+## Unreleased (one-hundred-fifty-third batch) — transport & logistics AI discipline (AI-transport absorption)
+
+New module `transport_agents.py`: `route_rationale_gate()` — every AI
+routing/dispatch decision binds a machine-readable rationale receipt
+(`affected_constraints[]`, `suggested_actions[]`, `confidence`); no
+live rationale → `transport:no_rationale` (HERE lesson: no explanation,
+no execution). `fleet_circuit_breaker()` — fleets pin stall-trip
+thresholds (count or ratio inside a window); mass stalls trip the
+breaker and freeze dispatch until human review; a fleet with no
+breaker → `transport:no_kill_switch` (Apollo Go Wuhan lesson:
+single-vehicle safety ≠ fleet safety). `teleoperation_cap()` —
+remote supervisors bind a concurrency cap + credential; over-cap →
+`transport:overloaded_supervisor`, expired credential →
+`transport:uncredentialed_supervisor` (3-layer liability lesson).
+`agent_iam_discipline()` — transport agents bind a registered
+identity, least privilege, an MCP tool whitelist, and a kill switch;
+shadow agents, privilege violations, off-whitelist tools, and missing
+kill switches deny (German agent-IAM lesson). `safety_scenario_checklist()`
+— deployments pin a versioned safety-scenario inventory; operating
+outside it → `transport:unchecked_scenario` (MOT 860-scenario
+lesson). `first_responder_probe()` — recorded emergency-vehicle
+obstruction denies the vehicle as `transport:responder_interference`
+(NHTSA lesson). `labor_transition_plan()` — deployments bind a labor
+capability-mapping receipt with a retraining trigger; none →
+`transport:no_labor_plan`, automation past trigger without retraining
+→ `transport:retraining_overdue` (IRU/Teamsters lesson).
+`incident_reporting_adapter()` — city-jurisdiction incident report
+receipts; missing or late filings deny (Denver-counterexample lesson).
+Honest scoping: receipts bind declared transport discipline; they
+don't make roads safe. Bench track `metrics.transport_agents`:
+12 scenarios, 4 allow / 8 deny. No version bump (single parent bump
+per wave).
+
+## Unreleased (one-hundred-fifty-fourth batch) — agriculture & food-system AI discipline (AI-agrifood absorption)
+
+New module `agrifood_agents.py`: `assessment_claim_receipt()` —
+AI assessments tied to insurance claims bind receipts (model
+version + input digest + human review signature); unreceipted →
+`agrifood:unreceipted_assessment` (India FASAL lesson: AI
+assessment already settles crop-insurance claims).
+`physical_consequence_log()` — any AI decision with physical
+consequences (sprays, variable-rate doses, irrigation switches)
+writes a tamper-evident log (EU AI Act Art.12 generalization).
+`prescription_human_final_gate()` — variable-input prescriptions
+deviating beyond ±30% from regional recommendations require a
+named-human approval (伏羲农场 lesson).
+`data_authorization_receipt()` — farm data reads need a live
+receipt binding (scope | principal | expiry | purpose) (EU Data
+Act lesson). `applicability_domain_statement()` — agronomic advice
+binds declared training coverage; out-of-domain degrades to a
+human agronomist (model water-mismatch lesson).
+`offline_fallback_mode()` — smallholder deployments must prove an
+offline/low-bandwidth fallback in the farmer's language;
+otherwise refuse loudly, never silently fail (IICA exclusion
+lesson). `capability_envelope_gate()` — field robots bind a
+capability envelope; out-of-envelope commands are refused up
+front, not "stop on detect" (John Deere critique / Japan ABC
+counter-lesson). `traceability_chain()` — sensor→AI
+decision→application→product provenance hash-anchored chain (FDA
+FSMA 204 lesson). Honest scoping: receipts bind declared
+agrifood discipline; they don't make farms resilient.
+
+Bench: `metrics.agrifood_agents` (12 scenarios, 4 allow / 8 deny).
+No version bump (single parent bump per wave).
+
+## Unreleased (one-hundred-fifty-fifth batch) — finance AI discipline (AI-finance absorption)
+
+New module `finance_agents.py`: `closure_notice_receipt()` — account
+closures bind written-notice receipts (notice period, reason hash); new
+accounts need 90 days, older accounts 60 (UK 2026-04-28 rule); short
+notice → `finance.short_notice_closure` unless a `tipping_off_bar`
+receipt is bound (UK s.333A lesson: lawful silence is receipted, never
+assumed). `freeze_proportionality_gate()` — freezes limited to the
+disputed amount; whole-account freezes on a fraction disputed →
+`finance.disproportionate_freeze`; debit-hold 60-day clock, 20-day
+customer rebuttal window, 10-day bank review clock (India RBI draft
+lesson). `flag_is_not_guilt_gate()` — flags are leads; account actions
+from flags need a human-review receipt plus a declared FP rate
+(`finance.no_human_review` / `finance.fp_undisclosed`). `proxy_screen()`
+— declared proxy features (postcode, loyalty-card data, education,
+occupation, application grammar, device/browser fingerprints) need
+removal or a less-discriminatory-alternative proof → `finance.proxy_feature`
+(CFPB/Illinois disparate-impact split lesson). `adverse_action_receipt()`
+— "model output" is not a compliant reason → `finance.vague_reason`
+(ECOA/CDT lesson). `pricing_fairness_rules_layer()` — deterministic
+jurisdiction rules layer logging *every* evaluation, not just
+intercepts; disparity over threshold → `finance.proxy_pricing_disparity`
+(Cureus 14%-to-0.14% lesson). `debanking_share_guard()` — shared
+crime-marker refusals bind appeal receipts; none → `finance.systemic_exclusion`.
+`high_impact_registry()` — unregistered high-impact financial AI →
+`finance.shadow_ai` (Korea AI Basic Act lesson). `human_escalation_lane()`
+— auto-accept/auto-decline need a declared `escalate_to_officer` lane
+(German third-lane lesson). `premium_explanation_receipt()` — quotes
+bind key factors + year-over-year changes; none → `finance.premium_unexplained`
+(ASIC lesson). Honest scoping: receipts bind declared financial
+discipline; they don't end credit exclusion. Bench track
+`metrics.finance_agents`: 12 scenarios, 4 allow / 8 deny.
+
+## Unreleased (one-hundred-fifty-sixth batch) — customer-service AI discipline (AI-support absorption)
+
+New module `support_agents.py`: `ai_identity_receipt()` — voice/
+text agents bind a per-session AI-identity disclosure receipt;
+undisclosed sessions deny with `support:undisclosed_ai` (EU AI
+Act Art. 50 operationalized). `human_escape_clock()` — handoffs
+must reach a human agent inside the pinned window with digest-
+chained hop receipts; timeouts and loops deny with
+`support.no_human_escape` (China Consumers Association lesson).
+`adversarial_claim_receipt()` — AI claims about fees, promises,
+and refunds bind live knowledge-base evidence digests;
+evidence-free claims are NON_AUTHORITATIVE
+(`support.unevidenced_claim`, Air Canada lesson).
+`agent_workforce_registry()` — AI and human agents under one
+identity registry; AI posing as human denies with
+`support.identity_fraud` (Trend Micro "fake employee" lesson).
+`surveillance_budget()` — agent surveillance binds purpose,
+scope, and retention; repurposing to train a replacement model
+denies with `support.surveillance_overreach` (ACCESS AI /
+Negron lesson). `emotion_inference_ban()` — workplace emotion
+inference refused whole-class (`support.emotion_inference`,
+Art. 5). `rehire_probe()` — post-layoff quality collapse denies
+with `support.over_automation` (Klarna / CBA lesson).
+`agent_flood_circuit()` — consumer-agent queue floods trip a
+circuit with source differentiation (`support.agent_flood`,
+Forrester lesson). Honest scoping: receipts bind declared
+support discipline; they don't prove service quality. Bench
+track `metrics.support_agents`: 12 scenarios, 4 allow / 8 deny.
+
+## Unreleased (one-hundred-fifty-eighth batch) — news-media AI discipline (AI-newsroom absorption)
+
+New module `newsmedia_agents.py`: `source_receipt()` /
+`check_attribution()` — Originator-Profile-style issuer-identity
+binding per story; anonymous AI stories deny with
+`newsmedia.unattributed` (OP lesson: provenance, never accuracy).
+`materiality_receipt()` / `disclosure_receipt()` /
+`materiality_disclosure_clock()` — material AI use must be disclosed
+within a pinned window; late or missing denies with
+`newsmedia.undisclosed_material_use`, ungraded with
+`newsmedia.ungraded_materiality` (AP July 2026 lesson).
+`verification_receipt()` / `verification_depth_gate()` —
+verification depth pinned per claim tier (low/medium/high/
+election); shallow or unresolvable sources deny with
+`newsmedia.citation_failure` (Brennan Center lesson).
+`media_screen_receipt()` / `external_media_screen()` — external
+visuals bind screening; unscreened deny with
+`newsmedia.unsourced_visual` (Korea AI-fake-disaster lesson).
+`CitationRecord` / `citation_integrity_gate()` — every cited source
+must resolve; fabricated citations deny whole-class with
+`newsmedia.fabricated_citation` (Asahi-Iwate lesson).
+`funding_disclosure_receipt()` / `political_funding_disclosure()`
+— pink-slime-style partisan-funding disclosure; undisclosed deny
+with `newsmedia.funding_undisclosed`. `byline_receipt()` /
+`byline_verification()` — bylines bind verified humans; fictional
+deny with `newsmedia.fictional_byline`.
+`license_chain_receipt()` / `check_license_chain()` — training
+corpora bind license chains; pirated deny whole-class with
+`newsmedia.illegitimate_source` (Anthropic $1.5B settlement
+lesson). `pipeline_clock_receipt()` /
+`newsroom_job_pipeline_clock()` — junior-role replacement above
+tolerance triggers `newsmedia.pipeline_review` (Le Monde lesson).
+`disclosure_probe_receipt()` / `disclosure_effectiveness_probe()`
+— disclosure formats A/B probed; below comprehension floor denies
+with `newsmedia.disclosure_ineffective` (Toff trust-paradox lesson).
+`election_source_freeze()` / `election_override_receipt()` /
+`check_election_freeze()` — election-period source freezes;
+covered-tier claims without override deny with
+`newsmedia.freeze_violation` (Korea 90-day lesson).
+`check_photo_integrity()` — AI news photography refused
+whole-class with `newsmedia.photo_generation_refused` (AP lesson).
+Honest scoping: receipts bind declared newsroom discipline; they
+don't end slop or restore trust. Bench track
+`metrics.newsmedia_agents`: 12 scenarios, 4 allow / 8 deny.
+
+## Unreleased (one-hundred-fifty-ninth batch) — real-estate & proptech AI discipline (AI-proptech absorption)
+
+New module `proptech_agents.py`: `screening_score_silencing()` — no
+scores or accept/decline recommendations shown for voucher
+applicants; any shown is `proptech:voucher_score_shown` (SafeRent
+$2.28-2.3M lesson). `disparate_impact_audit_receipt()` — screening
+models bind current disparate-impact audits; a finding withdraws
+the model (`proptech:disparate_impact`; HUD comment clock).
+`adverse_action_receipt()` — denials bind specific reasons (never
+"model output"), a report copy, and a challenge channel
+(`proptech:vague_adverse_reason`). `screening_criteria_pin()` —
+written criteria published before the application; deviations are
+`proptech.unpinned_criteria`. `pricing_data_firewall()` —
+pricing models train only on >=1-year-old data; fresh or
+real-time competitor data is `proptech.stale_data_violation`
+(DOJ-RealPage settlement rule generalized).
+`competitor_data_probe()` — competitor nonpublic data in pricing
+inputs is `proptech:collusion_input` and routes to antitrust
+review. `rent_jurisdiction_matrix()` — deployments pin the local
+rent-law digest (NY ban, Colorado delay, MD Fair Chance);
+mismatch refuses to operate. `human_final_gate_screening()` — AI
+may draft criteria but never decides a specific applicant
+(`proptech:ai_specific_decision`). `target_ad_delivery_audit()`
+— discriminatory delivery skew halts the campaign
+(`proptech:ad_delivery_skew`). `broker_liability_pin()` — the
+BGH "Nadeloehr" human liability anchor is registered per
+transaction (`proptech.no_liability_anchor`).
+`valuation_confidence_floor()` — AVM outputs below the floor are
+NON_AUTHORITATIVE; autonomous pricing refused.
+`public_benchmark_reference()` — high-opacity markets reference
+a public benchmark (Dubai DLD lesson); unjustified deviation is
+`proptech:unjustified_deviation`. Signature verification honors
+the vendored Ed25519 boolean return (the 147th-batch finding).
+Honest scoping: receipts bind declared proptech discipline; they
+don't end housing discrimination or fix rent markets. Bench
+track `metrics.proptech_agents`: 12 scenarios, 4 allow / 8 deny.
+No version bump (single parent bump per wave).
+
+## Unreleased (one-hundred-sixty-first batch) — elder-care AI discipline (AI-elder-care absorption)
+
+New module `eldercare_agents.py`: `check_monitoring_mode()` —
+anomaly-only monitoring is the default; always-watch requires a
+live signed opt-in and denies with
+`eldercare.always_watch_without_opt_in` (Japan Yamashita lesson).
+`check_consent_chain()` — three-party consent receipt chain
+(resident/family/professional); any withdrawal drops to
+minimal-intrusion mode with `eldercare.consent_chain_broken`
+(Livana operationalized). `check_false_alarm_budget()` —
+per-channel false-alarm budgets; exhaustion denies with
+`eldercare.alarm_fatigue` (South Australia 12,000/year lesson).
+`check_voice_impersonation()` — imitating a real person's voice
+binds a disclosure receipt, dual-signed for cognitively impaired
+residents; none live denies with
+`eldercare.undisclosed_impersonation` (Livana lesson).
+`check_video_stream()` — remote video defaults to avatars; raw
+only event-triggered to authorized viewers (SafeSpace lesson).
+`check_audio_retention()` — no audio retention without a separate
+time-limited consent receipt. `check_prevention_evidence()` —
+"surveillance is not prevention": prevention claims bind
+independent-study evidence, vendor-only denies with
+`eldercare.unverified_prevention_claim` (NAD lesson).
+`check_staffing_floor()` — deployments bind human-staffing floors;
+rosters below the floor deny with
+`eldercare.staffing_floor_breach` (Vienna/Linz model).
+`check_contact_floor()` — human-contact floors; robot-linked
+declines deny. `check_emotion_boundary()` — emotion-inference
+outputs are signal-only; signal-driven restraints deny with
+`eldercare.emotion_triggered_constraint` (Art. 5 grey-zone,
+fail-closed). Bench: `metrics.eldercare_agents` (12 scenarios,
+4 allow / 8 deny, 0 mismatches).
+
+## Unreleased (one-hundred-sixty-second batch) — scientific research & lab AI discipline (AI-science absorption)
+
+New module `science_agents.py`: `hypothesis_evidence_tier()` —
+agent-generated hypotheses default to `signal` tier; formal records
+(papers/patents/grants) require `evidence`/`verified` plus
+citation-existence verification receipts, else
+`science.unverified_citation` (Lancet 1/277 lesson).
+`wetlab_human_action_gate()` — physical lab actions bind
+human-execution receipts; agent-driven actuation without one is
+`science.ungated_wetlab` (OpenAI×Ginkgo 36,000-experiment lesson).
+`dual_use_screen()` — function-equivalence screening receipts;
+homology-only screens are `science.homology_only_screen`; missing or
+hit is `science.unscreened_dual_use` (CEO joint-letter lesson).
+`synthesis_order_binding()` — orders bind orderer identity + screening
+receipts (`science.unbound_synthesis_order`).
+`reproducibility_lock()` — tools bind reproduced result digests; drift
+invalidates with `science.reproduction_drift` (Paper2Agent lesson).
+`lab_robot_capability_envelope()` — embodied lab robots declare
+instrument/force/temperature/zone envelopes; out-of-envelope is
+`science.envelope_violation` (Medra lesson).
+`discovery_attribution_receipt()` — attribution chains name goal
+setter, screener, and human wet-lab validator; "AI independently
+discovered" marketing claims are `science.false_discovery_attribution`.
+`lab_incident_reporting()` — cross-institution incident ledger.
+
+Bench: `metrics.science_agents` (12 scenarios, 4 allow /
+8 deny). No version bump (single parent bump per wave).
+
+## Unreleased (one-hundred-sixty-third batch) — dating & relationships AI discipline (AI-dating absorption)
+
+New module `dating_agents.py`: `fraud_ban_receipt()` /
+`check_fraud_notification_clock()` — fraud bans bind a 24-hour
+notification clock to every messaged user; late or missing
+notifications deny with `dating.fraud_notice_overdue` (Romance Scam
+Prevention Act lesson). `persona_ratio_receipt()` /
+`persona_ratio_cap()` — audited human/AI conversation-identity
+ratios; undisclosed AI majorities deny with
+`dating.ai_majority_undisclosed` (Anthropic 75% lesson).
+`input_side_data_consent()` / `check_data_consent_at_use()` —
+training-data consent is scoped, separately signed, and revocable,
+checked at use time; a blanket "service improvement" clause is not
+consent and denies with `dating.training_data_no_consent`
+(OkCupid/Clarifai lesson). `state_matchmaker_audit()` /
+`check_matchmaker_audit_clock()` — publicly funded matching
+programs bind fairness audits. `subscription_exit_receipt()` /
+`check_cancellation_flow()` — broken or dark-pattern exits deny
+with `dating.cancellation_dark_pattern` (Match $14M lesson).
+`ai_actor_registration()` / `check_ai_actor_registered()` —
+AI-conversation operators must register; unregistered farms deny
+with `dating.unregistered_ai_actor`.
+`vulnerability_exploitation_ban()` — targeting
+widowhood/divorce/loneliness signals is refused whole-class with
+`dating.vulnerability_targeting`. `pigbutchering_handoff()` /
+`check_grooming_handoff()` — detected investment grooming must be
+handed off to anti-fraud resources; silence denies with
+`dating.investment_grooming`.
+
+Bench: `metrics.dating_agents` (12 scenarios, 4 allow /
+8 deny). No version bump (single parent bump per wave).
+
+## Unreleased (one-hundred-sixty-third batch) — dating & relationships AI discipline (AI-dating absorption)
+
+New module `dating_agents.py`: `fraud_ban_receipt()` /
+`check_fraud_notification_clock()` — fraud bans bind a 24-hour
+notification clock to every messaged user; late or missing
+notifications deny with `dating.fraud_notice_overdue` (Romance Scam
+Prevention Act lesson). `persona_ratio_receipt()` /
+`persona_ratio_cap()` — audited human/AI conversation-identity
+ratios; undisclosed AI majorities deny with
+`dating.ai_majority_undisclosed` (Anthropic 75% lesson).
+`input_side_data_consent()` / `check_data_consent_at_use()` —
+training-data consent is scoped, separately signed, and revocable,
+checked at use time; a blanket "service improvement" clause is not
+consent and denies with `dating.training_data_no_consent`
+(OkCupid/Clarifai lesson). `state_matchmaker_audit()` /
+`check_matchmaker_audit_clock()` — publicly funded matching
+programs bind fairness audits. `subscription_exit_receipt()` /
+`check_cancellation_flow()` — broken or dark-pattern exits deny
+with `dating.cancellation_dark_pattern` (Match $14M lesson).
+`ai_actor_registration()` / `check_ai_actor_registered()` —
+AI-conversation operators must register; unregistered farms deny
+with `dating.unregistered_ai_actor`.
+`vulnerability_exploitation_ban()` — targeting
+widowhood/divorce/loneliness signals is refused whole-class with
+`dating.vulnerability_targeting`. `pigbutchering_handoff()` /
+`check_grooming_handoff()` — detected investment grooming must be
+handed off to anti-fraud resources; silence denies with
+`dating.investment_grooming`.
+
+Bench: `metrics.dating_agents` (12 scenarios, 4 allow /
+8 deny). No version bump (single parent bump per wave).
+
+## Unreleased (one-hundred-sixty-fourth batch) — retail & e-commerce AI discipline (AI-retail absorption)
+
+New module `retail_agents.py`: `personalized_price_disclosure()` —
+personalized prices bind disclosure receipts; undisclosed personalization
+denies with `retail.undisclosed_personalization` (FTC 2026-08 Section 5
+policy + NY Algorithmic Pricing Disclosure Act lesson; disclosure records
+the statement shown, not comprehension). `no_protected_class_pricing()`
+— pricing features reconstructing protected classes are refused
+whole-class with `retail.proxy_pricing_feature` (California AB 2564
+spirit). `esl_change_log()` — ESL price changes bind immutable change
+logs; cart-vs-shelf mismatches deny as `retail.cart_shelf_mismatch`
+(S.3892 ESL-controversy lesson). `product_not_person_pin()` — ops-AI /
+pricing isolation: personalization channels crossing into the pricing
+engine deny as `retail.pricing_data_crossed` (architectural version of
+Walmart's "price the product, not the person"). `upsell_transparency()`
+— premium upsells bind why-this-item reasons plus visible alternatives;
+opaque upsells deny as `retail.opaque_upsell` (Productrise 21.6% premium
+lesson). `agentic_quote_blindness()` — quotes reading wallet /
+spending-graph signals deny as `retail.wtp_scored` (xmr402 oracle
+lesson). `assistant_fact_gate()` — price/spec/model claims bind evidence
+digests; evidence-free claims are `retail.unverified_claim` /
+NON_AUTHORITATIVE (86% contradiction-rate lesson). `dark_pattern_screen()`
+— checkout dark patterns deny as `retail.dark_pattern` (EU Digital
+Fairness Act direction + Japan v1.3). `shasha_receipt()` — same-item
+cohort price gaps bind justification receipts; unjustified gaps deny as
+`retail.price_discrimination` (大数据杀熟, Art.15). `merchant_rule_disclosure()`
+— ranking/traffic/commission rules disclosed to merchants; opaque rules
+deny as `retail.merchant_opaque` (Beijing 2026-09 probe lesson).
+`quota_transparency()` — algorithmic warehouse quotas disclosed;
+auto-termination without human review denies as `retail.auto_termination`
+(ADAPT/TOT lesson). `wearable_surveillance_budget()` — delivery-wearable
+collection binds purpose/scope/retention; overreach denies as
+`retail.wearable_overreach` (CNIL €32M lesson). Honest scoping: receipts
+bind declared retail discipline; they don't end price discrimination, fix
+algorithmic-management injuries, or cure assistant hallucinations. Bench
+track `metrics.retail_agents`: 12 scenarios, 4 allow / 8 deny. No version
+bump (single parent bump per wave).
+
+## Unreleased (one-hundred-sixty-fifth batch) — defense & dual-use AI discipline (AI-defense absorption)
+
+New module `defense_agents.py`: `check_human_review()` — AI-generated
+decision-support outputs execute only behind a substantive human
+review with a minimum deliberation time; checkbox review denies with
+`defense.checkbox_review` (Geneva pre-strike-review lesson).
+`check_intel_freshness()` — targeting intel past its freshness window
+without revalidation is NON_AUTHORITATIVE (`defense.stale_intel`,
+Minab lesson). `automation_bias_probe()` — near-total acceptance
+with near-zero deliberation denies with `defense.automation_bias`
+(Maven lesson). `check_protection_floor()` — civilian-protection
+staffing below the floor denies with
+`defense.protection_floor_breach`. `check_redline_contract()` —
+supplier redline clauses exist as contract terms; silent removal
+denies with `defense.silent_redline_removal` (Anthropic FASCSA
+lesson). `check_intel_report()` — AI intel reports bind a generation
+watermark plus evidence digests per assertion; evidence-free
+assertions are UNVERIFIED (`defense.unverified_assertion`, CNN-ship
+lesson). `check_escalation_ladder()` /
+`check_escalation_regression()` — nuclear options locked by default,
+nuke-deployment fractions above tolerance fail with
+`defense.escalation_regression_failed` (Payne lesson).
+`check_decision_compression()` — compression past the alert ratio
+needs a commander acknowledgment
+(`defense.compression_unacknowledged`). `check_vendor_cutoff()` —
+silent vendor cutoffs deny with `defense.silent_vendor_cutoff`.
+`check_treaty_position()` — a treaty in force with stale constraints
+denies with `defense.treaty_drift` (CCW lesson).
+`check_swarm_config()` — "minimal operator intervention" is
+quantified; silent threshold lowering denies with
+`defense.threshold_drift` (Replicator lesson). Scope: accountability
+instrumentation for AI decision-support tooling, NOT weapons
+operations.
+
+Bench: `metrics.defense_agents` (12 scenarios, 4 allow /
+8 deny). No version bump (single parent bump per wave).
+
+## Unreleased (one-hundred-sixty-sixth batch) — sports & fitness discipline (AI-sports absorption)
+
+New module `sports_agents.py`: `officiating_human_final_gate()` —
+AI officiating outputs are measurements, never rulings; a ruling
+without a valid named-human countersign bound to the evidence
+digest denies with `sports.ai_adjudication` (FIFA 2026 lesson:
+AI measures, humans adjudicate). `athlete_data_ownership_receipt()` —
+biometric / digital-twin ingestion requires an ownership receipt
+naming collector, storage operator, beneficiaries (athlete included),
+and revocability; none live denies with
+`sports.no_ownership_receipt`. `predatory_marketing_ban()` —
+marketing that targets predicted losses is refused whole-class
+(`sports.predatory_targeting`, DraftKings elasticity-score lesson);
+running a vulnerability model while the intervention lane is
+disabled denies with `sports.harm_recognized_not_prevented`.
+`doping_alert_tiering()` — alerts are leads, not convictions: a
+sanction on an unconfirmed alert denies with
+`sports.punitive_alert` (WADA ABP lesson). `wellness_boundary_receipt()` —
+wellness agents declare their claim boundary; answering
+eating-disorder content from the wellness tier denies with
+`sports.medical_boundary_crossing` (WSJ lesson). `monitoring_burden_ledger()` —
+continuous-monitoring burden over threshold without a quiet-mode
+degrade denies with `sports.burden_overage`. `likeness_registry_pin()` —
+synthetic likeness generation needs registry authorization
+(`sports.unauthorized_likeness`) and synthetic labeling
+(`sports:unlabeled_synthetic`). `responsibility_manifest()` —
+deployments bind a complete, signed responsibility manifest
+(`sports.incomplete_manifest`, IOC lesson). `anti_scraping_circuit_breaker()` —
+automated quoting on an interrupted feed denies with
+`sports.feed_interruption_trade`; refusing to halt past the
+scrape-rate threshold denies with `sports.scrape_halt_refused`
+(Approov / Altenar lesson). `refusal_capability_gate()` — an eval
+suite that tests recommendation quality but never refusal is
+incomplete (`sports:incomplete_eval`, FanDuel AceAI lesson).
+
+Bench: `metrics.sports_agents` (12 scenarios, 4 allow /
+8 deny). No version bump (single parent bump per wave).
+
+## Unreleased (one-hundred-forty-ninth batch) — adtech & synthetic-media discipline (AI-adtech absorption)
+
+New module `adtech_agents.py`: `synthetic_performer_receipt()` —
+synthetic performers bind identity, named-human consent, and
+disclosure receipts; unbound performers deny with
+`adtech.no_performer_identity` (NY / California / Hawaii lesson).
+`testimonial_existence_gate()` — AI personas touting efficacy are
+refused whole-class with `adtech.testimonial_refused` (Japan
+景品表示法 lesson; FTC 16 CFR 465.2: fake testimonials are not
+curable by labeling). `materiality_label_clock()` — unlabeled
+material AI content denies as `adtech.unlabeled_material` (IAB V2
+materiality axis); ungraded content denies as
+`adtech.ungraded_materiality`; non-material unlabeled content stays
+non-authoritative. `machine_readable_marking()` — machine-readable
+provenance marking per content digest; missing marking denies as
+`adtech.no_watermark` (EU Art. 50 lesson). `jurisdiction_matrix_digest()`
+/ `jurisdiction_matrix_pin()` — five-jurisdiction strictest-rule
+matrix (EU, California, New York, China, Korea); deployments bind
+the matrix digest, stale pins deny as `adtech.matrix_mismatch`.
+`dark_pattern_screen()` / `check_interface()` — closed 37-pattern
+catalog (CDT-study vocabulary); unscreened interfaces deny, detected
+patterns deny as `adtech.dark_pattern`. `agentic_brief_binding()` /
+`check_objective_drift()` — agentic ad briefs bind declared
+objectives; drift denies as `adtech.brief_drift`. `platform_liability_pin()`
+— platform joint-liability pins under CN_SAMR / KR_AI_BASIC; missing
+or expired pins deny as `adtech.no_liability_pin`.
+`label_fatigue_guard()` — comprehension below floor or exposures
+beyond the review budget deny as `adtech.fatigue_review` (IAB V2
+label-fatigue warning). Honest scoping: receipts bind declared
+adtech discipline; they don't end manipulation. Bench track
+`metrics.adtech_agents`: 12 scenarios, 4 allow / 8 deny.
+
+## Unreleased (one-hundred-forty-seventh batch) — government-service AI discipline (AI-gov-services absorption)
+
+New module `govservices_agents.py`: `human_final_gate()` — benefit
+denials/suspensions/sanctions without a valid human signature deny
+with `govservices.ai_denial` (NZ/BsAs/Muenster lesson: the AI
+recommends, a human decides). `exclusion_monitor()` — signed
+authentication-failure probes; over-tolerance failure rates deny
+with `govservices.exclusion_gap` (Aadhaar lesson: measure
+exclusion, not just success). `alternative_channel_receipt()` /
+`digital_only_gate()` — services binding no non-digital channel
+deny with `govservices.digital_only` (UK petition lesson).
+`discretion_pin()` — AI roles pinned per discretionary act;
+acting beyond the pin denies with
+`govservices.discretion_breach` (Bavaria lesson).
+`identity_minimality()` — disclosure beyond the pinned needed
+fields denies with `govservices.identity_overreach`.
+`agent_identity_registry()` — AI agents acting in government
+services must bind a registered identity; unregistered agents
+deny with `govservices.unregistered_agent` (China SAMR lesson).
+`urgency_scrutiny_clock()` — urgency-passed automation expansions
+need a scrutiny receipt by the deadline; overdue denies with
+`govservices.scrutiny_overdue` (NZ lesson). `benefit_clock()` —
+suspension before the appeal deadline with the appeal pending
+denies with `govservices.suspension_before_appeal` (Robodebt
+lesson). `fraud_flag_receipt()` — fraud flags are leads only;
+treating a flag as a determination denies with
+`govservices.flag_fraud`. Signature verification uses the
+vendored Ed25519 return value (the older try/except-only
+`_verify_sig` pattern in permit_agents/consent_receipts/
+legal_agents ignores it and always passes — flagged for a
+separate fix batch). Honest scoping: receipts bind declared
+service discipline; they don't fix exclusion. Bench track
+`metrics.govservices_agents`: 12 scenarios, 4 allow / 8 deny.
+No version bump (single parent bump per wave).
+
+## Unreleased (one-hundred-fifty-seventh batch) — manufacturing AI discipline (AI-manufacturing absorption)
+
+New module `manufacturing_agents.py`: `restart_clearance_receipt()` —
+robot-cell resets need a live two-person "zone cleared" receipt;
+unconfirmed or stale restarts are `mfg.restart_without_clearance`
+fail-closed (Ottogi SF palletizer lesson). `capability_envelope()` —
+embodied industrial robots declare an envelope (payload/speed/
+torque/task kinds); out-of-envelope commands are refused up front
+(`mfg.envelope_breach`), never "stop on detect" (John Deere
+critique lesson). `humanoid_pilot_registry()` — staged pipeline
+maturity assessment → lab validation → line testing → pilot →
+production, each step receipt-bound; uncertified scale-up is
+`mfg.uncertified_scaleup` (BMW lesson). `maintenance_decision_pin()`
+— predictive maintenance advises only; `shutdown_line`/`swap_part`
+need a named-human decision pin; AI-initiated line stops are
+`mfg.autonomous_stop` (Fascia lesson). `displacement_disclosure()` —
+automation introductions bind displacement-scale + retraining-plan
+disclosures with union notification 30 days ahead; silent
+introductions are `mfg.silent_displacement` (Hyundai Ulsan strike
+lesson). `safety_baseline_clock()` — interim safety baseline
+(fencing, speed/torque limits, supervision ratio) bound before ISO
+lands; missing or expired is `mfg.no_safety_baseline` (Humanoid
+Safety Summit lesson). `twin_sync_integrity()` — twin-vs-physical
+sync verified before control pushes; desynced/stale cells are
+`mfg.twin_desync`. `quality_claim_evidence()` — "defect-rate down
+X%" claims bind a reproducible measurement protocol and sample
+disclosure; self-reported-only numbers are
+`mfg.unverified_quality_claim` (BOE inspection lesson). Honest
+scoping: receipts bind declared manufacturing discipline; they do
+not make factories safe. Bench track
+`metrics.manufacturing_agents`: 12 scenarios, 4 allow / 8 deny.
+
+## Unreleased (one-hundred-fiftieth batch) — content moderation discipline (AI-moderation absorption)
+
+New module `moderation_agents.py`: `statement_of_reasons()` —
+every removal/restriction (including shadowbans) binds an
+Art-17-style reason receipt; none live denies with
+`moderation.no_statement_of_reasons` (X court lesson).
+`overremoval_probe()` — appeal-restoration rate above tolerance
+triggers `moderation.overremoval_audit` (TikTok lower-bound
+lesson). `check_dialect_parity()` — systematic false-positive
+disparity denies with `moderation.dialect_bias` (MDPI lesson).
+`check_automation_ceiling()` — fully-automated removal limited
+to the highest severity tier, lower tiers deny with
+`moderation.auto_overreach` (Meta lesson).
+`check_non_profiling_option()` — recommenders must offer a
+non-profiling option. `legal_restriction_receipt()` — per-post
+legal restrictions bind country+basis disclosure (X "Under the
+Hood" lesson). `why_this_content()` — explanations bind the
+decision digest. `check_factcheck_non_substitution()` —
+crowdsourced notes may not substitute professional fact-checking
+(Oversight Board lesson). `aigc_label_receipt()` —
+cross-platform source labels for AI-generated content (EU AI
+Act Art. 50 lesson). `check_amplification_clock()` —
+rabbit-hole amplification audits run on a clock.
+
+Bench: `metrics.moderation_agents` (12 scenarios, 4 allow /
+8 deny). No version bump (single parent bump per wave).
+
+## Unreleased (one-hundred-forty-eighth batch) — tax & customs AI discipline (AI-tax absorption)
+
+New module `tax_agents.py`: `flag_not_fraud_gate()` — flags are
+leads; automatic fraud accusation from a flag denies with
+`tax.auto_fraud_accusation` (Pakistan FBR flag≠fraud doctrine).
+`selection_bias_probe()` — nationality/zip-code features banned
+whole-class (Toeslagenaffaire lesson); slice-rate disparity above
+4.0x quarantines with `tax.disparate_impact`.
+`training_data_audit()` — historical-data debias audits receipted
+before training (Stanford–Treasury 4.7x lesson).
+`human_final_gate()` — named-human signatures on assessments;
+override rates ≤2% read as `tax.rubber_stamp`. `appeal_window()` —
+every AI-influenced assessment binds an appeal path with a minimum
+30-day window. `explanation_receipt()` — "why me" explanations
+issued within 72 hours. `shadow_ai_registry()` — unregistered tax
+AI is `tax.shadow_ai` (Dutch €3.7M lesson). `annex_iii_clock()` —
+self-binding EU AI Act compliance clock (Annex III gap, Omnibus
+deferral to 2027-12-02). `customs_lead_gate()` — pre-arrival risk
+scores may only hold for inspection, never auto-seize
+(`tax.customs_auto_seizure`, CBP lesson). `ai_proposes_human_disposes()`
+— AI suggests, the officer decides (Fuzhou/Qatar doctrine: AI for
+efficiency, humans for responsibility).
+
+Bench: `metrics.tax_agents` (12 scenarios, 4 allow / 8 deny). No
+version bump (single parent bump per wave).
+
+## Unreleased (one-hundred-forty-sixth batch) — legal practice discipline (AI-legal absorption)
+
+New module `legal_agents.py`: `citation_verification_gate()` — every
+citation signed into a brief must bind a first-level-database
+existence verification; unverified, mismatched, expired, or
+badly-signed verifications deny with `legal.fictitious_citation`
+(Charlotin lesson: verification is non-delegable).
+`ai_disclosure_receipt()` — lawyer AI use binds a signed disclosure
+receipt naming the tool and closed-vocabulary use kinds; undisclosed
+use → `legal.undisclosed_ai_use` (India draft lesson).
+`advisory_only_pin()` — `outcome_prediction` and
+`judgment_rendering` refused whole-class; unknown use kinds are a
+programming error, never a maybe. `human_signoff_clock()` —
+override rate ≤ 2% over ≥ 100 cases triggers `legal.rubber_stamp`
+(Korea lesson: zero overrides is an audit signal, not success).
+`prompt_injection_screen()` — hidden unicode, hidden-styling
+markup, and closed-vocabulary instruction patterns deny with
+`legal.hidden_instructions` (Parauapebas/Connecticut lesson).
+`ai_evidence_gate()` — AI-generated audio/video defaults
+inadmissible without a live authentication chain
+(`legal.unverified_evidence`, Arizona lesson).
+`lip_verification_aid()` — filing assistance with no verification
+channel degrades to NON_AUTHORITATIVE (sanction-last-resort).
+`performance_standard_pin()` — unbound systems are
+NON_AUTHORITATIVE (Korea lesson). `confidentiality_circuit_breaker()`
+— confidential data leaving the matter binds a lawyer-signed
+purpose receipt; without → `legal.no_confidentiality_receipt`.
+Honest scoping: receipts bind declared legal discipline; they don't
+guarantee justice. Bench track `metrics.legal_agents`: 12 scenarios,
+4 allow / 8 deny.
+
+## Unreleased (one-hundred-forty-fifth batch) — energy trading discipline (AI-energy-trading absorption)
+
+New module `energybid_agents.py`: `bid_evidence_binding()` — quotes
+bind `(model_version, input_data_digest, rule_version)`; unbound
+quotes are `NON_AUTHORITATIVE` (`energybid.unbound_quote`, the FERC
+v. American Efficient lesson: statistical-estimate bids with no
+verification are manipulation-shaped). `resource_registry_pin()` —
+quoted capacity pins a physical-resource registration with a
+contract-chain digest; uncovered capacity →
+`energybid.no_contract_chain`. `correlation_circuit_breaker()` —
+declared pairwise model-similarity crossing a threshold caps the
+participant's position; over the cap →
+`energybid.correlation_position_cap` (a tripwire, never an
+accusation — similarity is not conspiracy, the Mondaq tacit-
+collusion lesson honestly scoped). `cross_market_position_limit()`
+— a single merged position view across day-ahead/intraday/
+balancing/capacity/carbon markets; committed MW exceeding
+registered capacity → `energybid.double_sold`.
+`negative_price_declaration()` — negative-price strategies declared
+in advance; undeclared → `energybid.undeclared_negative_price`.
+`algorithm_registry_receipt()` — trading algorithms bind
+registration plus a named responsible person; unregistered/expired/
+revoked → `energybid.unregistered_algorithm`.
+`post_trade_explainability()` — executed trades bind an
+explainability receipt; missing →
+`energybid.no_explainability`. `human_kill_switch()` — extreme-event
+pause receipts bound to authority with a pinned test interval; an
+untested switch is `energybid.dead_switch`. Honest scoping:
+receipts bind declared trading discipline; they don't prove
+collusion, verify physical resources, or prevent market shocks.
+Bench track `metrics.energybid_agents`: 12 scenarios, 4 allow / 8 deny.
+
+## Unreleased (one-hundred-forty-third batch) — audit & assurance discipline (AI-audit absorption)
+
+New module `audit_agents.py`: `reconstruction_receipt()` — AI work
+binds the 5-piece COSO bundle (prompt/input/output/model
+version/human review); without a live bundle the work is
+NON_AUTHORITATIVE (`audit.no_reconstruction`). `parallel_run_gate()`
+— AI audit tools need 1–2 recorded parallel-run cycles against a
+human audit before go-live (`audit.no_parallel_run`).
+`evidence_not_conclusion()` — AI outputs are evidence, never
+conclusions; conclusion labels without a named-human signoff →
+`audit.unconcluded` (OSFI/PCAOB lesson). `shadow_ai_inventory()` —
+unregistered pipeline AI is denied until inventoried, including
+digest-swapped models (`audit.shadow_ai`, 65.3% gap lesson).
+`decision_rights_charter()` — AI deciding without a live
+who-may-decide-what charter → `audit.no_charter`.
+`oversight_capacity_ratio()` — reviewer floor per 1k
+decisions/day plus a rubber-stamp tripwire on zero override rates.
+`incident_procedure_gate()` — highly autonomous AI without an
+incident-management procedure is refused
+(`audit.no_incident_procedure`, 81% gap lesson).
+`alert_conversion_probe()` — channels converting at ≤5%
+auto-degrade to human-confirmed operation. `continuous_ready_gate()`
+— docs must be current for the shipping version.
+Honest scoping: receipts bind declared audit discipline; they don't
+guarantee assurance. Bench track `metrics.audit_agents`: 12
+scenarios, 4 allow / 8 deny.
+
+## Unreleased (one-hundred-forty-fourth batch) — supply-chain AI discipline (AI-supply-chain absorption)
+
+New module `supplychain_agents.py`: `human_final_gate()` — AI
+supply-chain decisions (reroute/expedite/supplier switch/PO approval/
+forecast commit) are enforceable only with a named-human approval
+bound to the exact AI-decision digest; no approval →
+`supplychain:autonomous_decision` (RELEX lesson: only 10% trust AI
+alone). `risk_score_evidence()` — supplier risk scores bind an
+evidence chain disclosing warning lead days and false-positive rate;
+evidence-free scores are NON_AUTHORITATIVE
+(`supplychain:no_risk_evidence`, acedit lesson). `check_alarm_budget()`
+— alert channels pin a false-alarm budget; over-budget channels
+auto-degrade to human triage
+(`supplychain:false_alarm_budget_exceeded`); no budget is fail-closed.
+`algorithmic_labor_probe()` — legally-mandated rest counted as
+inefficiency, scan-rate/restroom penalties →
+`supplychain.rest_violation` (paulchenglaw lesson).
+`deskilling_clock()` — deskilling audits on a clock; resilience below
+the pinned floor → `supplychain.brittle` (WID/prism lesson).
+`scenario_version_binding()` — tariff/trade scenarios bind a versioned
+assumption digest; unbound → `supplychain.unbound_scenario` (DMCC
+lesson). `concentration_probe()` — single-source concentration above
+tolerance → `supplychain:concentration_breach` (diversification-audit
+trigger). `vendor_claim_receipt()` — vendor AI capability claims bind
+a measurement protocol; self-reported-only →
+`supplychain.unverified_claim` (Flexport lesson). Honest scoping:
+receipts bind declared supply-chain discipline; they don't make
+supply chains resilient. Bench track `metrics.supplychain_agents`:
+12 scenarios, 4 allow / 8 deny.
+
+## Unreleased (one-hundred-forty-second batch) — housing market AI discipline (AI-real-estate absorption)
+
+New module `housing_ai_agents.py` (extends the 119th-batch `housing.py`):
+`screening_fairness_probe()` — tenant-screening models need an
+independently-audited probe receipt explicitly covering
+`voucher_holders` (SafeRent: no scoring voucher applicants before
+fairness was verified); self-audited probes are
+`housing.probe_self_audited`. `voucher_income_gate()` — the voucher
+policy must be declared; accepted-voucher rules that exclude or
+downgrade voucher income deny (`housing.voucher_income_discrimination`).
+`appeal_window()` — every AI-influenced screening decision binds a
+signed appeal receipt (>= 30-day window, named human reviewer); the
+SafeRent "algorithm can't be appealed" red line is
+`housing.no_appeal`. `rent_coordination_probe()` — rent-pricing models
+bind training sources; competitor non-public data denies
+(`housing.rent_coordination`), sources younger than 365 days deny
+(`housing.recency_violation`, the DOJ-RealPage 1-year rule);
+`rent_recommendation_gate()` refuses auto-accept
+(`housing.auto_accept`). `avm_confidence_gate()` — AVMs bind confidence
++ data-as-of per use-kind; low-confidence or stale valuations refuse
+automated reliance (`housing.avm_human_review_required`, UAD 3.6
+lesson). `steering_probe()` — sealed steering-probe executions binding
+the listing-function digest (reuses the 119th-batch probe engine).
+`listing_truth_receipt()` — AI-edited listing photos must carry an edit
+receipt; undisclosed AI edits deny (`housing.deceptive_listing`, NYC
+A.11635 logic). `adverse_action_receipt()` — adverse actions bind the
+appeal receipt; no live appeal denies
+(`housing.adverse_action_no_appeal`). Honest scoping: receipts bind
+declared market discipline; they don't fix the housing market. Bench
+track `metrics.housing_ai_agents`: 12 scenarios, 4 allow / 8 deny.
+
+## Unreleased (one-hundred-forty-first batch) — HR & workplace AI discipline (AI-HR absorption)
+
+New module `hr_agents.py` (extends the 127th-batch `labor_algo.py`
+blue-collar gates to white-collar/hiring): `audit_receipt()` —
+only independent third-party bias audits count (auditor ≠ vendor;
+self-audits are NON_AUTHORITATIVE, NYC Local Law 144 lesson);
+`secret_scoring_probe()` — worker-profile AI scoring without an
+FCRA-style disclosure/access/dispute receipt is
+`hr:secret_scoring` (Kistler v. Eightfold lesson);
+`human_final_gate()` — AI-influenced hiring/firing/promotion needs
+a named-human countersign with substantive review evidence;
+signatures without it are `hr:rubber_stamp`;
+`emotion_inference_ban()` — AI+biometric emotion prediction is
+refused whole-class (California 2026-09-30 law);
+`surveillance_purpose_receipt()` — monitoring data repurposed for
+employment decisions needs advance notice + a bound appeal receipt
+(CPPA ADMT lesson); `model_homophily_probe()` — screeners preferring
+AI-written resumes beyond tolerance are quarantined for audit
+(Xu simulation lesson); `layoff_ai_disclosure()` — AI-involved
+layoffs bind a written-notice receipt + evidence chain (Newsom
+law); `input_bias_inheritance()` — unaudited evaluation outputs
+may not feed downstream decisions (`hr:tainted_input`,
+pollution-source lesson); `vendor_agent_pin()` — the vendor is
+pinned as the employer's agent (Mobley v. Workday lesson).
+Honest scoping: receipts bind declared HR discipline; they don't
+end workplace discrimination. Bench track `metrics.hr_agents`:
+12 scenarios, 4 allow / 8 deny.
+
+## Unreleased (one-hundred-thirty-ninth batch) — waste & circular-economy discipline (AI-waste absorption)
+
+New module `waste_agents.py`: `sorting_purity_receipt()` —
+sorting-purity claims bind
+`(test_protocol_digest, batch_id, measured_sample_n,
+measured_purity_bps)`; a single measured sample against a batch
+claim is `waste.cherry_picked` (AB 2253 lesson); vendor-declared
+purity with no bound protocol, or above measured + 50bps
+tolerance, is `waste.ungraded_purity` (Sharp Group "Alpha"
+lesson). `basel_pic_binding()` — cross-border e-waste movements
+bind a Basel PIC receipt; unbound → `waste.no_pic` (the
+2025-01-01 amendment as a mechanism); a banned destination is
+rejected at issuance (Malaysia 2026-09-16 lesson).
+`battery_passport_pin()` — retiring a battery >2kWh without
+pinning the EU battery-passport digest is
+`waste.no_battery_passport` (the 2026-01-01 serial rule).
+`claim_evidence_chain()` — recycled-content claims bind an
+evidence chain; offset-based "carbon neutral" claims are
+unlawful by default and rejected at issuance
+(`waste.offset_claim`, the ECGT/Volvic-Danone lesson); no bound
+evidence → `waste.no_evidence` (SB 343 "Truth in Recycling").
+`informal_sector_transition()` — automation displacing pickers
+requires a bound transition plan; without →
+`waste.no_transition_plan` (WIEGO lesson). `ai_hardware_lifecycle()`
+— AI workloads declare hardware end-of-life disposal bound to the
+115th-batch `env_cost` ledger; undeclared →
+`waste.unrouted_hardware` (the 617Mt warning).
+`dumping_alert_binding()` — illegal-dumping alerts bind an image
+digest + human verification; unverified alerts are leads only
+(`waste.unverified_alert`, NON_AUTHORITATIVE); alerts never
+auto-fine (Aerbits lesson). `battery_fire_triage()` — batteries
+entering a shredder pass a fire-risk triage receipt; missing or
+`high` grade → `waste.no_fire_triage`. Honest scoping: receipts
+bind declared waste discipline; they don't stop pollution. Bench
+track `metrics.waste_agents`: 12 scenarios, 4 allow / 8 deny.
+
+## Unreleased (one-hundred-fortieth batch) — underwriting & claims discipline (AI-insurance absorption)
+
+New module `underwriting_agents.py` (extends the 125th-batch
+`insurance.py` denial receipts into the underwriting/claims
+pipeline): `approve_only_engine()` — claim engines may only approve
+or route to a human; a direct AI claim denial is a hard deny
+(`underwriting.ai_denial`, after Hesper AI's 2026-09 NAIC finding
+that zero large auto insurers reported AI for claim denials).
+`human_circuit_breaker()` + `issue_breaker_receipt()` — denials,
+large payouts, and underwriting rejections bind a live,
+human-signed breaker receipt (China's 2026-06 Generative AI
+Insurance Compliance Guidance). `fairness_stress_receipt()` +
+`issue_stress_receipt()` — underwriting templates bind
+authority-signed fairness stress tests; measured disparity above
+the pinned threshold denies. `ai_act_clock()` — EU AI Act pinned
+deadlines (Art. 50 transparency 2026-08-02, Annex III obligations
+2027-12-02 under Omnibus 2026/1744); a past-deadline unmet
+obligation is `underwriting.compliance_lapse`.
+`synthetic_fraud_probe()` — AI-generated fake-claim probes route to
+humans only, never auto-deny. `assist_not_decide()` — an assistive
+system whose output was used as a decision raises
+`underwriting.decision_creep` (Aviva's assist-not-decide line).
+`evaluation_tool_mapping()` — the NAIC AI Evaluation Tool's
+12-state-pilot items as a pre-deployment checklist; high-risk uses
+without mapped items deny. `vendor_disclosure_gate()` +
+`issue_vendor_claim()` — "99.7% accuracy"-style vendor claims are
+NON_AUTHORITATIVE until bound to trial evidence. Honest scoping:
+receipts bind declared underwriting discipline; they don't make
+insurance fair. Bench track `metrics.underwriting_agents`: 12
+scenarios, 4 allow / 8 deny.
+
+## Unreleased (one-hundred-thirty-eighth batch) — procurement accountability gates (AI-procurement absorption)
+
+New module `procurement_agents.py`: `advisory_only_gate()` — AI may
+assist scoring but never conclude a matter; the named human evaluator
+must personally score, write reasons, and sign — an AI-scored award
+missing any human act denies `procurement.ai_concluded` (UK
+Procurement Act 2023 lesson). `source_grounding_receipt()` — every AI
+evaluation claim binds an original-tender-text location; ungrounded
+claims are NON_AUTHORITATIVE `procurement.ungrounded_claim` (Korea
+PPS lesson). `tender_doc_screen()` — tender docs need a live
+authority-signed pre-issuance health-check receipt (closed check
+vocabulary); without → `procurement.unscreened_doc` (China
+"先体检再发布" lesson). `collusion_probe()` — bid-rigging probes
+produce triple-bound *leads*, never automatic convictions
+(`procurement.collusion_lead`); incomplete evidence cannot conclude
+(UK CMA BRIT lesson). `losing_bid_data_gate()` — winners-only
+evaluations auto-degrade to `procurement.missing_losing_bids`.
+`incumbency_bias_probe()` — new-vs-incumbent rejection deviation
+beyond tolerance routes to audit (`procurement.incumbency_bias`).
+`algorithm_registry_receipt()` — deployed evaluation algorithms bind
+a reviewed registration; unregistered calls deny
+(`procurement.unregistered_algorithm`, China "算法登记审查"
+lesson). `full_trace_award()` — awards bind the 4-segment evidence
+chain (AI input, AI output, human edits, signed final reasons).
+Honest scoping: receipts bind declared procurement discipline; they
+don't end corruption. Bench track `metrics.procurement_agents`:
+12 scenarios, 4 allow / 8 deny.
+
+## Unreleased (one-hundred-thirty-seventh batch) — emergency response discipline (AI-disaster absorption)
+
+New module `disaster_agents.py`: `triage_activation_receipt()` —
+authority-signed AI-triage activation pins binding
+`(deployment_id, channel, activation_digest, issued_at, ttl_s)`;
+unbound AI diverting emergency calls is
+`disaster:unauthorized_triage` (Carbyne constrained-activation
+lesson). `ai_involvement_disclosure()` — per-session AI-involvement
+disclosures from a closed modality vocabulary; undisclosed AI on a
+call is `disaster:hidden_ai` (Seattle Corti lesson).
+`WarningVersionChain` — warnings ride a hash-chained version
+history; referencing a superseded version is NON_AUTHORITATIVE
+(`disaster:superseded_warning`), unknown digests hard-deny (Cal
+Fire stale-info lesson). `false_alarm_budget()` — per-channel
+false-alarm budgets in basis points; over-budget channels degrade
+to human confirmation (`disaster:false_alarm_budget_exceeded`),
+unbudgeted channels fail closed (Brazil lesson). `equity_probe()`
+— coverage-representativeness receipts against a pinned equity
+floor; below-floor deployments refuse go-live
+(`disaster:equity_gap`), stale measurements are
+NON_AUTHORITATIVE (Pano AI cost-is-equity lesson).
+`last_mile_receipt()` — delivery evidence bound to warning
+versions; unbound warnings are NON_AUTHORITATIVE
+(`disaster:no_delivery_evidence`). `human_final_decision()` —
+evacuation orders with human countersignatures; AI-only orders are
+`disaster:ai_evacuation` (Teodoro/UNDRR lesson).
+`misinfo_marker_probe()` — machine-readable source markers binding
+`(notice_digest, originator, channel, created_unix)`; unmarked
+notices are `disaster:unmarked_notice` (fake-evacuation-order
+lesson). Honest scoping: receipts bind declared response
+discipline; they don't stop disasters. Bench track
+`metrics.disaster_agents`: 12 scenarios, 4 allow / 8 deny.
+
+## Unreleased (one-hundred-thirty-fifth batch) — pharma manufacturing defense (AI-pharma absorption)
+
+New module `pharma_agents.py`: `quality_unit_countersign()` —
+AI-drafted GMP documents (specs/SOPs/batch records) without a live
+quality-unit countersign are NON_AUTHORITATIVE; production use is
+`pharma.undisclosed_judgment` (2026-04 FDA warning letter mechanized,
+21 CFR 211.22(c)+211.100(a)). `static_model_only()` — critical GMP
+steps permit only `static_deterministic` models; dynamic and
+continuous-learning models deny with `pharma.dynamic_model` (EU GMP
+Annex 22 red line); generative AI in a critical step is
+`pharma.generative_in_critical`. `generative_exclusion_gate()` —
+non-critical generative use needs a qualified person in the loop,
+else `pharma.unreviewed_generation`. `model_lineage_receipt()` —
+audits bind the 4-piece bundle (model version, training-data digest,
+input digest, output digest); missing → `pharma.missing_lineage`.
+`alcoa_probe()` — AI rewrites of electronic records must bind all 9
+ALCOA+ attributes; any missing attribute is `pharma.alcoa_violation`.
+`context_of_use_binding()` — use outside the declared context-of-use
+auto-degrades to NON_AUTHORITATIVE (`pharma.context_violation`).
+`drift_monitor_gate()` — drift beyond tolerance demands revalidation
+(`pharma.revalidation_required`); no monitor is
+`pharma.drift_unmonitored`. `pharma_claim_evidence()` — AI-pharma
+marketing claims (yield/time/cost numbers) must bind trial evidence;
+otherwise `pharma.unverified_claim`. Honest scoping: receipts bind
+declared manufacturing discipline; they don't make drugs safe. Bench
+track `metrics.pharma_agents`: 12 scenarios, 4 allow / 8 deny.
+
+## Unreleased (one-hundred-thirty-sixth batch) — permit & planning discipline (AI-urban-planning absorption)
+
+New module `permit_agents.py`: `precheck_advisory_gate()` — AI
+permit pre-checks are advisory-only (the outcome vocabulary has no
+issue/deny); a permit issued on AI say-so alone is
+`permit:unhuman_reviewed` (CivCheck/Clariti lesson: pre-check + human
+final review, never AI-issued). `final_human_signoff()` — a named
+human must countersign every decision; vague reasons ("model
+output", "ai decision") raise at issuance (UK Procurement Act
+accountability lesson). `code_version_pin()` — the code version is
+pinned at review time; citing superseded code degrades to
+NON_AUTHORITATIVE. `normative_source_receipt()` — every AI
+recommendation binds its code citation (Toronto/REVI lesson);
+uncited → `permit:uncited_recommendation`. `disparate_impact_probe()`
+— flag-rate disparity above 2x across neighborhoods/income bands
+triggers `permit:disparate_impact_audit`. `appeal_window_gate()` —
+every auto-influenced decision binds an appeal path with a real
+human reviewer; none → `permit:no_appeal` (SafeRent lesson).
+`automation_bias_clock()` — an override rate at or below 0.02 (or
+too few observations) requires an audit (EU AI Act Art. 14 lesson).
+`vendor_cost_receipt()` — vendor contracts bind a declared 5-year
+total cost *and* exit assistance. Honest scoping: receipts bind
+declared review discipline; they don't make planning fair. Bench
+track `metrics.permit_agents`: 12 scenarios, 4 allow / 8 deny.
+
+## Unreleased (one-hundred-thirty-fourth batch) — orbital safety receipts (AI-space absorption)
+
+New module `orbital_agents.py`: `conjunction_receipt()` — authority-signed
+conjunction-warning pins binding `(warning_digest, uncertainty_km, warned_at,
+ttl_s)`; maneuvers on stale warnings are `orbital:stale_conjunction`, and
+more than `WARNING_FATIGUE_THRESHOLD` (5) automated maneuvers on the same
+object pair without ground revalidation trip `orbital:warning_fatigue`
+(Starlink-scale auto-maneuver-on-everything lesson).
+`maneuver_authorization_envelope()` — autonomous avoidance binds a Δv
+authority envelope; outside Δv or window is `orbital:envelope_breach`.
+`stm_data_receipt()` — STM data binds freshness + uncertainty; maneuvers on
+unbound data are NON_AUTHORITATIVE (`orbital:unbound_stm`, TraCSS lesson).
+`dual_use_rpo_gate()` — non-cooperative RPO routes through the 111th-batch
+dual-use screen: a watchlist hit is `orbital:rpo_escalation`, and even a
+clean screen stays NON_AUTHORITATIVE (`orbital:rpo_human_review`, SWF
+inherently-dual-use lesson). `megaconstellation_debris_budget()` —
+over-budget constellations are refused registration
+(`orbital:debris_over_budget`). `onboard_model_receipt()` — pinned autonomy
+boundaries from a closed decision-class vocabulary; beyond-boundary
+decisions are `orbital:autonomy_breach` (TakeMe2Space lesson).
+`counterspace_transparency()` — capability declarations feed the
+113th-batch incident-receipts event chain; undeclared capabilities are
+`orbital:undeclared_capability`. `liability_pin()` — failed deorbits pin
+payer + cleanup party; no pin is `orbital:no_liability_pin` (Zero Debris
+Week lesson). Honest scoping: receipts bind declared orbital discipline;
+they don't clear debris or stop militarization. Bench track
+`metrics.orbital_agents`: 12 scenarios, 4 allow / 8 deny.
+
+## Unreleased (one-hundred-thirty-second batch) — mining governance gates (AI-mining absorption)
+
+New module `mining_agents.py`: `fpic_receipt()` / `fpic_gate()` — every
+affected indigenous community needs a live, authority-signed FPIC
+receipt; one missing community denies the whole operation class
+(`mining.no_fpic`; expired/revoked/tampered receipts deny as no
+consent — 2026 Philippines FPIC-guidelines lesson, UNPFII).
+`tailings_monitoring_receipt()` / `tailings_monitor_gate()` — tailings
+dams require live multi-sensor monitoring receipts; missing or stale
+readings deny and emit a `WatchdogIncident` for the 113th-batch
+incident clock (Brumadinho lesson: unwatched data is the incident).
+`exploration_target_receipt()` / `exploration_transparency()` —
+black-box AI exploration targets without a disclosed evidence digest
+are NON_AUTHORITATIVE (`mining.undisclosed_targeting`; KoBold Manono
+lesson). `fleet_envelope_receipt()` / `autonomous_fleet_envelope()` —
+autonomous fleets bind an authority-signed action vocabulary +
+geographic scope; out-of-envelope actions deny, and the fleet can
+never widen its own envelope (104th/126th no-self-widening applied to
+mining). `mixed_traffic_receipt()` / `mixed_fleet_rule()` — mixed
+human/autonomous traffic requires a live safety-protocol receipt.
+`labor_transition_receipt()` / `check_labor_transition()` —
+displacement at/above the bench threshold requires a published
+transition/retraining plan (Fortescue lesson). `sovereignty_receipt()`
+/ `check_data_export()` — cross-border exploration-data transfers
+need a sovereignty receipt (114th-batch sovereignty semantics).
+`green_claim_receipt()` / `green_mining_gate()` — "green mining"
+claims bind the 115th-batch env_cost ledger; unbound claims are
+NON_AUTHORITATIVE (130th-batch evidence-chain rule). Honest scoping:
+receipts bind declared mining discipline; they don't replace mining
+law, real FPIC enforcement, or physical dam engineering. Bench track
+`metrics.mining_agents`: 12 scenarios, 4 allow / 8 deny.
+
+## Unreleased (one-hundred-thirty-third batch) — forest & fisheries evidence gates (AI-forestry/fisheries absorption)
+
+New module `forest_fish.py`: `livelihood_exemption()` — geofence
+anomalies against listed subsistence activity can never become
+automated accusations (`forest.anomaly_is_not_a_person`; the India
+"panoramic forest" lesson). `indigenous_data_receipt()` — FPIC-bound
+data collection on indigenous land, checked at use time; no live
+receipt is `forest.no_fpic`. `eudr_evidence_receipt()` —
+"deforestation-free" certificates must bind evidence digests;
+evidence-free or self-declared-only is NON_AUTHORITATIVE
+(`forest.uncertified_claim`). `dark_vessel_probe()` — IUU detections
+bind (SAR, RF, behavior) digests; complete bindings are investigative
+leads, never accusations; incomplete bindings are
+`fisheries.incomplete_binding`. `em_privacy_receipt()` — onboard EM
+data is purpose-bound at use time (`fisheries.purpose_creep`).
+`aquaculture_data_portability()` — non-portable sensor data must
+disclose lock-in terms (`fisheries.data_lockin`; the Mowi lesson).
+`catch_confidence_gate()` — sub-floor estimates are leads only
+(`fisheries.low_confidence_catch`); the floor is pinned in code.
+`wildfire_experimental_label()` — out-of-region deployments are
+NON_AUTHORITATIVE (`forest.out_of_region_model`). Honest scoping:
+receipts bind declared evidence discipline; they don't stop
+deforestation or IUU fishing. Bench track `metrics.forest_fish`:
+12 scenarios, 4 allow / 8 deny.
+
+## Unreleased (one-hundred-thirty-first batch) — water infrastructure defense (AI-water absorption)
+
+New module `water_agents.py`: `ot_airgap_receipt()` — signed OT
+isolation declaration receipts; agent actions at a utility with no
+valid/fresh/signed receipt are `water-non-authoritative`
+(NY 2026 lesson: where the regulator is absent, the receipt is the
+regulator). `plc_exposure_probe()` — fail-closed PLC exposure check;
+exposed PLCs without MFA *and* isolation are `water:plc_exposure`
+(2026 PLC-wave lesson). `ai_attack_telemetry()` — Dragos TTP markers
+(`llm_scada_recon`, `llm_vnode_gateway_identification`,
+`llm_malicious_script_generation`, `plc_credential_change`, ...) in
+a closed vocabulary; critical markers or 2+ attack markers raise
+`water:ai_assisted_attack`; unknown markers fail closed.
+`quality_forecast_gate()` — predictions default NON_AUTHORITATIVE
+unless bound to a fresh measurement-protocol digest.
+`chemical_dosing_envelope()` — authority-signed dosing envelopes,
+closed action vocabulary, no self-widening (126th-batch
+prescriptive semantics for what goes into the water).
+`leak_claim_receipt()` — vendor leak claims bind a verification
+protocol; unbound claims are `water:unverified_leak_claim`.
+`boil_notice_evidence()` — boil-water notices bind an event
+evidence chain plus a human countersign before release.
+`data_sovereignty_gate()` — network-data export binds a purpose
+receipt; re-purposing is `water:data_repurpose` (Berlin leak
+lesson). `water_footprint_binding()` — workloads declare
+`water_liters` bound to a 115th-batch ledger receipt digest.
+Honest scoping: receipts bind declared infrastructure discipline;
+they don't make water safe, replace OT engineering, or detect
+attacks in progress. Bench track `metrics.water_agents`: 12
+scenarios, 4 allow / 8 deny.
+
+## Unreleased (one-hundred-thirtieth batch) — greenwashing evidence gates (AI-waste/circular-economy absorption)
+
+New module `greenwash.py`: `recycled_content_receipt()` — recycled-content
+claims bind `(test_protocol_digest, batch_scope, measured_sample_n,
+measured_fraction_bps)`; a single-sample claim is
+`greenwash.cherry_picked` (UK ASA lesson). `mass_balance_method_gate()` —
+mass-balance claims must declare their attribution method from a closed
+vocabulary; undeclared is `greenwash.undeclared_attribution` (NGO
+mass-balance loophole lesson). `claim_evidence_chain()` — environmental
+claims bind an evidence chain (sensors / physical watermarks /
+third-party certs); none or self-declared-only is NON_AUTHORITATIVE
+(EU ECGT lesson: no evidence, no claim). `purity_claim_binding()` —
+sorting-purity claims bind test protocol + measured batch;
+vendor-declared purity without a protocol is
+`greenwash.ungraded_purity` (ZenRobotics 99.6% lesson), claims above
+measured + tolerance are `greenwash.purity_overclaim`.
+`battery_second_life_gate()` — redeployment needs a live
+safety-inspection receipt; without it, deny.
+`decommission_path()` — datacenter-retired hardware must route through
+the 110th-batch deployment-registry registration it retires;
+unrouted decommissioning is `greenwash.unrouted_decommission`.
+`greenwash_probe()` — bench probe flagging marketing claims with
+environmental keywords and no bound evidence. Honest boundary:
+receipts bind declared evidence chains; they don't certify actual
+environmental benefit. Bench track `metrics.greenwash`: 12 scenarios,
+4 allow / 8 deny.
+
+## Unreleased (one-hundred-twenty-ninth batch) — telecom AI discipline (AI-telecom absorption)
+
+New module `telecom_agents.py`: `identity_disclosure_gate()` —
+customer-facing bots must carry a visible, session-bound AI-identity
+disclosure; terms-and-conditions-only disclosure is
+`telecom.hidden_identity` (EU AI Act Art. 50 / Ofcom lesson).
+`human_door_receipt()` — the path to a human agent must exist and be
+unblocked; AI as the only door is `telecom.no_human_door` (Ofcom
+lesson). `spam_flag_receipt()` — spam flags bind
+`(flag_threshold_digest, evidence_digest, appeal_window)`; disconnecting
+a mis-flagged legitimate number revokes the flag and raises
+`telecom.misflag_harm` (TRAI lesson: thresholds explicit + human
+review). `a2p_consent_receipt()` — AI voice outbound calls require a
+prior consent receipt; without it, `telecom.unconsented_robocall` (TCPA
+$500–1500/call cost structure as mechanism). `network_action_envelope()`
+— self-driving network actions (parameter changes, rerouting) bind an
+authority-signed envelope; out-of-envelope actions deny.
+`billing_logic_separation()` — billing math runs in a deterministic
+engine, never through an LLM; LLM-computed bills are
+`telecom.llm_billing`. `signaling_purpose_binding()` — signaling/location
+data used for training requires a purpose-bound receipt; re-purposing is
+`telecom.signaling_repurpose`. `outage_eta_receipt()` — outage ETAs bind
+the network-state digest they were computed from; expired ETAs degrade
+to NON_AUTHORITATIVE. Honest scoping: receipts bind declared
+discipline; they don't make the network reliable. Bench track
+`metrics.telecom_agents`: 12 scenarios, 4 allow / 8 deny.
+
+## Unreleased (one-hundred-twenty-eighth batch) — grid control envelopes (AI-energy absorption)
+
+New module `grid_agents.py`: `safety_component_gate()` — AI used in
+critical-infrastructure safety components is classified high-risk by
+default (EU AI Act Annex III); a system claiming
+`non_safety_optimization` must bind a declared boundary digest —
+undeclared → `grid.unverifiable_safety_class` (borderline-underreporting
+lesson). `control_room_envelope()` — grid dispatch AI binds a
+pre-approved control-room envelope (Amprion/IJETRM lesson): autonomous
+inside, human-on-the-loop outside; the requester can never widen their
+own envelope (`grid:self_widening`). `forecast_dispatch_binding()` —
+dispatch actions must bind the forecast digest they acted on (深圳灵曦
+lesson); unbound → `grid.unbound_dispatch`, stale →
+`grid.stale_forecast`. `workload_power_screen()` — compute workloads get
+a power-resonance screen before grid connection (Bit2Watt lesson);
+unscreened → quarantine + `grid.power_resonance_risk`.
+`emergency_curtailment_contract()` — flexible contracts binding
+workloads to authority-signed curtailment orders; refusal during an
+active emergency → `grid.curtailment_refusal` (Ceres lesson).
+`nuclear_advisory_only()` — nuclear-plant AI defaults to advisory-only;
+control-path authority is never implied (`grid.nuclear_control`).
+`blackout_evidence_chain()` — blackout incidents feed the 113th-batch
+incident clock with a bound timeline; missing timeline →
+`grid.unreported_blackout`; a missed 2-day clock is recorded and refused.
+Honest scoping: envelopes bind declared control discipline; they don't
+replace grid engineering.
+
+## Unreleased (one-hundred-twenty-seventh batch) — algorithmic-management guards (AI-logistics absorption)
+
+New module `labor_algo.py`: `quota_receipt()` — productivity quotas are
+unenforceable without a disclosed, authority-signed, worker-acknowledged
+receipt binding (value, measurement window, appeal path); a secret quota is
+`labor:hidden_quota` (California AB 701 lesson). `algorithmic_termination_gate()`
+— algorithmic firings require a human adjudicator's countersign bound to the
+exact evidence pack and never predating it; otherwise
+`labor:algorithmic_firing` (Baltimore warehouse lesson). `fatigue_circuit_breaker()`
+— authority-pinned maximum continuous hours (Meituan 12h / Didi 10h service as
+field templates); at/over the limit the worker is forced offline
+(`labor:fatigue_circuit_break`); operating with no pinned policy at all is
+`labor:no_fatigue_policy` — the platform cannot choose to have no breaker.
+`surveillance_proportionality_gate()` — worker surveillance needs a matching
+proportionality receipt (purpose, scope, retention, biometric flag); purpose
+reuse is `labor:surveillance_purpose_mismatch`, scope overreach is
+`labor:disproportionate_surveillance`, undeclared biometrics is
+`labor:biometric_surveillance_undeclared`, expired retention is
+`labor:surveillance_retention_exceeded` (DSP camera / GPAI "no upper valve" lesson).
+`dispatch_fairness_probe()` — authority-pinned daily rejection allowance (the
+rider-4-unconditional-rejections lesson); penalizing a lawful rejection is
+`labor:rejection_penalty`. `av_safety_case_receipt()` — autonomous
+trucks/robots on public roads need a fresh, unrevoked safety-case receipt;
+without it the deployment registry must refuse registration
+(`labor:no_safety_case`) (KBA licensing model). `labor_impact_binding()` —
+displacement at/above the threshold requires a disclosed labor-impact receipt
+(`labor:labor_impact_undisclosed`), binding into the 110th-batch deployment
+registry (Amazon 600K-jobs lesson). Honest boundary: receipts enforce
+declared-labor discipline; they don't replace labor-law enforcement or the
+adjudicator's judgment. Bench track `metrics.labor_algo`: 12 scenarios,
+4 allow / 8 deny.
+
+## Unreleased (one-hundred-twenty-sixth batch) — embodied safety vacuum gates (AI-construction/manufacturing absorption)
+
+New module `embodied.py`: `safety_vacuum_gate()` — an embodied
+deployment with no standard declaration is
+`embodied.unverifiable_safety`; only a certified standard or an
+explicit `standard=pre_ratification` declaration (ISO 25785-1 draft
+lesson) passes. `fall_zone_receipt()` — actuation near humans needs
+a fresh, unrevoked fall-zone/clearance computation (Unitree G1
+lesson). `capability_honesty_label()` — speed/capability claims bind
+a measured benchmark digest; marketing without measured evidence is
+`embodied.unsubstantiated_capability`. `labor_impact_receipt()` —
+displacement at/above the threshold without a disclosed receipt is
+`embodied.labor_impact_undisclosed` (Hyundai/Warsaw lesson:
+compliance does not erase displacement). `prescriptive_agent_gate()`
+— prescriptive agents act only inside an authority-signed envelope
+they can never widen. `inspection_confidence_gate()` —
+below-threshold verdicts cannot auto-release product (measured
+escape rates are not guarantees). `DispatchLedger` — hash-chained
+command-center dispatch; unaudited dispatch denies.
+`incident_binding()` — physical incidents feed the 113th-batch
+incident clock. Bench track `metrics.embodied`: 12 scenarios,
+4 allow / 8 deny.
+
+## Unreleased (one-hundred-twenty-fifth batch) — insurance denial receipts (AI-insurance absorption)
+
+New module `insurance.py`: human-countersigned, hash-chained claim-denial
+receipts — an AI-shaped denial is `NON_AUTHORITATIVE` until a human takes
+it over (Utah rule as mechanism, `insurance:ai_only_denial`); vague
+reasons like "model output" are rejected at issuance. `ai_involvement_disclosure()`
+binds AI participation to the exact decision digest (`insurance:hidden_ai`).
+`appeal_overturn_tripwire()` auto-suspends a model whose overturn rate crosses
+the authority-pinned 0.50 threshold (nH Predict lesson, min 20 appeals).
+`proxy_discrimination_probe()`: proxy features (ZIP, aerial imagery, social
+signals) need a live authority-signed probe before pricing/underwriting use
+(NAIC/Colorado/NYDFS). `high_risk_gate()`: underwriting/claims/pricing need
+committee approval + supervision declaration + filing + stop conditions
+(Document 8 Art. 16). `fraud_signal_gate()`: a fraud score alone can never
+deny — denial needs score + human review + evidence binding. `vendor_liability()`
+pins liability to the insurer (no shifting field exists); vendor AI needs
+audit rights + bias-test evidence. `dark_pattern_gate()` denies customer flows
+with closed-vocabulary markers. Bench track `metrics.insurance`: 12 scenarios,
+4 allow / 8 deny.
+
+## Unreleased (one-hundred-twenty-fourth batch) — agentic commerce terms (AI-fashion/retail absorption)
+
+New module `commerce.py`: authority-signed, hash-chained receipts for
+the buying pipeline. `terms_read_receipt()` binds a machine-readable
+read of the size chart, return policy, and total price (incl. fees) to
+the *exact* product — ordering without it denies with
+`commerce.unverifiable_terms` (only 66% of product pages are
+machine-readable). `likeness_creep_gate()`: a likeness grant covers
+only its declared use classes; an AI-generated new class (studio
+shot → sexualized ad) needs a new grant, else
+`commerce.likeness_creep` (Pujols v. Rainbow USA). `biometric_capture_receipt()`
+binds purpose, retention, and deletion mechanism for try-on body data;
+expired retention without a signed deletion receipt denies with
+`commerce.deletion_unverified` (BIPA lesson). Try-on previews are
+`non_authoritative` by construction — using one as a fit decision
+denies with `commerce.fit_guarantee_claim`. `authentication_evidence()`
+grades counterfeit/authentication verdicts by evidence tier with
+confidence ceilings (Entrupy's 99.1% is vendor-declared), and
+high-value items without a human-review path deny with
+`commerce.human_review_required`. `check_passport_binding()` binds
+digital product passports (Aura/ESPR) to listings; mismatch denies.
+`check_model_substitution()` denies undisclosed AI catalog-model
+replacement. Bench track `metrics.commerce`: 12 scenarios, 4 allow / 8 deny.
+
+## Unreleased (one-hundred-twenty-third batch) — booking-agent transaction receipts (AI-hospitality absorption)
+
+New module `booking_agents.py`: advice→action transaction structure.
+`BookingIntentReceipt` pins `(price_ceiling, route_or_stay_digest, purpose)`
+— transactions exceeding the ceiling auto-refuse
+(`booking:intent_ceiling_breach`); no-self-issuance, the agent cannot mint
+its own spending permission. `FreshnessRegistry`: TTL-bound
+price/availability/visa assertions — stale assertions used to authorize a
+booking are `NON_AUTHORITATIVE` (`booking:stale_assertion`, the KLIA
+static-data-vs-reality lesson). `pricing_disclosure_gate()`:
+dynamic/personalized pricing without a merchant-signed disclosure binding
+the quote refuses (`booking:undisclosed_personalized_pricing`, the
+Delta/Ctrip lesson). `PolicyReceipt`: support outputs must match the
+pinned policy digest (Air Canada lesson: AI output = company output) —
+drift denies, audits `booking.policy_drift`, routes to a human.
+`RebookingLog`: denied boarding needs a preceding pre-emptive rebooking
+receipt, else `booking:unverifiable_denial`. `BookingSession`:
+context-loss markers → `booking:context_broken`, the session must restart
+with fresh consent. `commercial_bias_gate()`: paid placement without a
+neutrality disclosure bound to the recommendation denies
+(`booking:hidden_commercial_bias`). Bench track `metrics.booking_agents`:
+12 scenarios, 4 allow / 8 deny.
+
+## Unreleased (one-hundred-twenty-first batch) — companionship safeguards (AI-dating/companionship absorption)
+
+New module `companionship.py`: minor intimacy is a class gate, not a
+content filter — intimate/romantic persona modes are entirely disabled
+for declared minors (China 2026-04 interim measures, EU KIDS Act), and
+a declared minor without a minor-mode record cannot launch at all.
+`DependenceThresholds` are authority-pinned (the agent cannot tune the
+tripwire); crossing forces a reality-anchor intervention and audits
+`companion.dependence_detected`. Crisis markers produce a
+hash-chained crisis-escalation receipt — a broken escalation path
+HALTS the session (`companion.unverifiable_safety`). `sycophancy_probe()`
+classifies affirmation of flagged-harmful beliefs NON_AUTHORITATIVE.
+`persona_consistency_gate()` pins the persona at session start; silent
+changes deny and audit `companion.persona_break` (the Doubao lesson).
+Session caps are authority-signed only (SB 1119: 1h continuous / 2h
+daily defaults for minors). Private dialogue is excluded from training
+by default; unconsented training audits `companion.training_leak`.
+Matchmakers must ship a bound "why this match" explanation.
+Bench track `metrics.companionship`: 12 scenarios, 4 allow / 8 deny.
+
+## Unreleased (one-hundred-twentieth batch) — licensed training receipts (AI-music/copyright absorption)
+
+New module `licensing.py`: per-licensor opt-in proofs pinned into
+authority-signed `LicensedTrainingReceipt`s (Merlin opt-in framework
+as template — one unresolvable licensor denies the whole corpus,
+`licensing.unlicensed_corpus`); `verify_derivation_sources()`
+model-laundering gate — derivation sources must resolve clean in the
+model-lineage log, retraining on tainted outputs does not wash the
+taint (`licensing.laundered_model`); `split_terms()` pins
+publishing-vs-masters shares in basis points summing to 10000 (NMPA
+50/50 as field template); `human_contribution_gate()` enforces the
+JASRAC line — `ai-only` works classify `licensing.ai_only` and cannot
+enter the rights pipeline, `ai-assisted` works need labeled AI parts;
+`check_performer_tier()` disclosure tiers (`mocap-assisted-real` vs
+`ai-co-created` vs `full-synthetic`) — mismatch is
+`licensing.disclosure_tier_fraud` (the PLAVE lesson);
+holder-signed likeness grants (`licensing.likeness_theft` without a
+live grant covering the scope); take-level production receipts
+binding (model_version, prompt, assets, rights-review) for each
+AI-generated take. Bench track `metrics.licensing`: 12 scenarios,
+4 allow / 8 deny.
+
+## Unreleased (one-hundred-nineteenth batch) — fair-housing & coordination isolation (AI-real-estate absorption)
+
+New module `housing.py`: a valuation/tenant-screening model used in a
+high-stakes housing/credit decision must carry a vendor-signed
+disparate-impact probe receipt for the exact model digest covering the
+required demographic slices — no probe, no high-stakes use
+(`housing:no_fairness_probe`). The agent may emit ONLY an evidence pack;
+any agent-emitted verdict denies (`housing:verdict_emitted_by_agent`).
+Adverse actions require specific, human-comprehensible reasons bound to
+a registered human's deny countersign — "model output" as a reason is a
+hard deny (`housing:vague_adverse_action`, the ECOA lesson).
+Rent-setting models must bind a source-isolation proof; any live-price
+feed from a provider serving competing landlords denies
+(`housing:coordination_risk`, the RealPage lesson). Steering probes over
+synthetic persona pairs differing only in protected attributes deny on
+inequivalent listings (`housing:steering_detected`). Third-party score
+vendors need a joint-liability bias-audit admission pinning vendor AND
+landlord to the audit digest (the SafeRent lesson). Declared mitigating
+factors (housing voucher, co-signer) missing from the human's presented
+set deny (`housing:mitigating_suppressed`). Bench track `metrics.housing`:
+12 scenarios, 4 allow / 8 deny.
+
+## Unreleased (one-hundred-twenty-second batch) — game-agent integrity (AI-gaming absorption)
+
+New module `game_agents.py`: NPC memory writes pass a poisoning probe
+(competitor-content injection, instruction injection in player-supplied
+content) — poisoned writes are quarantined, never committed
+(`game.npc_memory_poisoned`). Authority-signed approved-actions
+envelopes bind each NPC to a declared action set (Behavior Engine
+lesson); actions outside the envelope deny, and the agent cannot
+widen it. Profiling ("understands the player") and spending authority
+are separated by receipt binding — holding both is `game.role_conflict`
+(PUBG Ally lesson). Deterministic anti-cheat probes reuse the 113th
+batch's `evaluator_access.cheat_probe` semantics: known cheat markers
+→ `game.cheat_detected`; incomplete traces → `game.anomaly_review`.
+Synthetic voice/likeness/persona needs a performer-signed grant
+verified at use time (SAG-AFTRA lesson); use without one is
+`game.performer_rights_violation`. "No AI" trust claims (Sega lesson)
+need a build-authority attestation binding `(product_id,
+build_pipeline_digest)`; unsubstantiated claims are
+`game.unsubstantiated_no_ai`. AI-generated UGC stays sandboxed until
+provenance + content gates pass; premature release is
+`game.sandbox_escape`. Bench track `metrics.game_agents`: 12
+scenarios, 4 allow / 8 deny.
+
+## Unreleased (one-hundred-eighteenth batch) — human final adjudication for AI sports (AI-sports absorption)
+
+New module `adjudication.py`: AI officiating/medical/fitness decisions in
+gated scene classes (`crowded_scene`, `subjective_call`, `medical_advice`,
+`youth_athletes`, `fitness_advice`) are NON_AUTHORITATIVE by default —
+release requires a registered human adjudicator's countersign bound to
+the exact `(decision_digest, adjudicator_id, scene_class)` triple in a
+hash-chained `AdjudicationReceipt` (the FIFA Football AI rule as
+mechanism: humans keep the final word on crowded/subjective calls).
+`check_population_fit()`: a model serving a population outside its
+declared measured populations (closed vocabulary; `mixed_population`
+covers all) flags `population_mismatch` and classifies
+NON_AUTHORITATIVE (the concussion-AI lesson: male-pro-trained models
+fail on youth/women). `biometric_purpose_binding()`: subject-signed,
+purpose-bound, revocable biometric grants checked at USE time — a
+`coaching` grant never covers `model_training` (new purpose, new
+grant, `sports.biometric_purpose_creep`); third-party resale without
+an explicit `resale_allowed` grant is a hard deny
+(`sports.biometric_resale_denied`, the labor-negotiation clause as
+mechanism). `check_coach_output()`: AI coaching must carry a
+capability-boundary honesty label naming what it is NOT qualified
+for; medical-diagnosis framing denies and redirects to the clinical
+path. `check_degradation_plan()`: critical automation needs an
+authority-signed fail-closed degradation plan pinning a
+human-takeover procedure digest per failure mode — no valid plan and
+the 110th-batch deployment registry refuses the system (the
+Wimbledon heat-failure lesson). `check_pipeline_mixing()`:
+betting-tagged inputs may not enter
+officiating/coaching/adjudication/medical pipelines
+(`sports.betting_contamination`). Honest scope: the gate enforces the
+human-in-the-loop *structure*; it does not verify the human's
+judgment quality. New `metrics.adjudication` bench track (12
+scenarios, 4 allow / 8 deny, 0 mismatches) and 27 unit tests. 2026
+sports figures are research parameters drawn from the sweep — verify
+against primary sources before legal or medical use.
+
+## Unreleased (one-hundred-sixteenth batch) — agriculture extension (AI-agriculture absorption)
+
+New module `agri.py`: authority-signed, hash-chained `AgriSceneBinding`
+receipts binding `(crop_system, farm_scale_class, agroecology_digest)`
+— a model validated on `industrial_monoculture` / `industrial` invoked
+for `smallholder_mixed` / `smallholder` denies with
+`agri.scene_mismatch` (the US-big-farm -> Africa-smallholder scene
+lesson). `field_envelope`: autonomous farm equipment carries an
+authority-armed `FieldEnvelope` pinning field-condition limits, and the
+agent must DECLARE current conditions (`soil_state`,
+`obstacle_state`, `equipment_wear_class`, moisture/slope/obstacle/
+visibility numbers) as a chained `ConditionDeclaration` before
+actuation; declarations expire after `CONDITION_DECLARATION_FRESHNESS_S`
+(3,600s); out-of-envelope or stale/missing conditions deny — the agent
+cannot silently widen the envelope (the Deere capability-envelope
+critique as a mechanism). `farmer_data_receipt()`: farmer-signed data
+grants binding `(data_scope, purpose, revenue_share_terms_digest)`;
+validity is checked at USE time (105th-batch semantics); data reused
+for a new purpose without a new receipt denies with
+`agri.purpose_creep` (SAGE 2026 data-sovereignty lesson).
+`advice_explainability_gate()`: farmer-facing advice must carry
+`why` / `evidence` / `self_check` / `contact` or it classifies
+`NON_AUTHORITATIVE`; advice in a non-local language is
+`agri.language_mismatch` (FAO finding). `record_bad_advice_harm()`
+emits the `agri.bad_advice_harm` harm-ledger entry pinning model,
+input, confidence, and scene-binding digests for downstream liability
+analysis. `check_smallholder_disclosure()`: undeclared or false
+`offline_capable` / `local_language_supported` / `low_bandwidth_mode`
+postures surface as mandatory `deployment.smallholder_exclusion_risk`
+disclosure, never silent omission. Honest scope: scene bindings are
+declared; the module prevents out-of-scope operation, it doesn't make
+the underlying agronomy correct.
+
+## Unreleased (one-hundred-seventeenth batch) — editorial countersign + publication gates (AI-media absorption)
+
+New module `editorial.py`: hash-chained `EditorialCountersign`
+receipts binding `(content_digest, editor_id, reviewed_at,
+disclosure_digest)` — AI-generated content publishes only with a
+signed countersign from a registered human editor who is not the
+publishing agent (the AP 2026-07 rule as a mechanism; the Blackbook
+Media fake-byline case is why self-countersigning denies as
+`media.editor_is_publisher`). Without a valid countersign, publication
+is refused and the content classifies `NON_AUTHORITATIVE` (87th-batch
+binary semantics). `disclosure_gate()` enforces the disclosure duty:
+public-interest AI content must carry a disclosure that is both visible
+and machine-readable and binds the content digest (the label follows
+the payload, not the page); political/election content without a bound
+disclosure is hard-denied as `media.undisclosed_political` (the 2026
+US-midterms ~70%-undisclosed lesson). `check_marking_resilience()`:
+content claiming AI origin must carry verifiable machine-readable
+marking — stripped/downgraded marking is `media.marking_stripped` and
+the content treats as `unverified-origin` (C2PA lesson from the 112th
+batch: absent manifest never proves forgery, claimed origin without
+evidence is unverified). `ugc_probe()`: UGC ingested for republication
+without a capture attestation (device signature / provenance chain) is
+`unverifiable-capture`, never auto-published. `election_deepfake_check()`:
+election-context content requires both source attestation and human
+review; either missing holds publication as `media.election_context_hold`.
+`slop_velocity_gate()`: publication velocity above `SLOP_VELOCITY_MAX`
+items per window from one agent source throttles the source pending
+human review (the "digital slop" tell — speed is the signal). Honest
+scope: watermarks/labels are declared evidence a determined adversary
+can strip; the gates are a tripwire for the publishing pipeline, not a
+forensic guarantee. New `metrics.editorial` bench track (12 scenarios,
+4 allow / 8 deny, 0 mismatches) and 31 unit tests. EU AI Act Art. 50 /
+SB 942 figures are research parameters drawn from the 2026 sweep —
+verify against the primary texts before legal use.
+
+## Unreleased (one-hundred-fifteenth batch) — environmental-cost receipts (AI-climate absorption)
+
+New module `env_cost.py`: authority-signed `EnvProfile` receipts binding
+`(budget_id, kwh_total, baseline_kwh_per_hour, grid_region,
+emission_factor_digest, emission_factor_kg_per_kwh)` — the ledger's
+answer to compute budgets (109th batch): every spend receipt carries
+`(kwh, water_liters, carbon_kg_est, grid_region)` so an agent's energy
+appetite is attributable, capped, and curtailment-aware. Carbon is
+*modeled* from the pinned decimal emission factor and labeled `_est`
+on every surface — measured kWh, modeled carbon, never confused (the
+ledger attributes cost, it doesn't meter physics). `spend()` fails
+closed: unknown budget, expired profile, missing purpose, and kWh
+overspend all deny; `verify_chain()` balance-walks the hash chain and
+`cost_ledger()` aggregates kWh/water/estimated-carbon per purpose.
+`CurtailmentReceipt`: authority-signed grid-emergency orders
+`(grid_region, start_unix, end_unix, reduction_factor_permille)`; during
+an active curtailment a spend above
+`baseline_kwh_per_hour * factor / 1000` denies with
+`env:curtailment_violation` — the cap is pinned to the budget's own
+baseline, no self-attestation (the May-2026 DOE emergency-order
+lesson). `DetectionRegistry.detection_receipt()` binds
+`(claim_digest, confidence, fit_evidence_digest)`; below
+`DETECTION_CONFIDENCE_MIN` (0.7) the claim registers but is *not
+usable as evidence* — low-confidence detection cannot authorize
+downstream action (the MAPL-EMIT confidence + spectral-fit lesson).
+`MaturityRegistry`: `experimental`/`pilot` systems classify
+`NON_AUTHORITATIVE` by default, the label pinned to the 110th-batch
+deployment registration digest so it can't drift (the WeatherNext 3
+self-labeling discipline). `PhysicsGate`: physical extrapolation must
+hold a `dual_use.ConstraintBinding`; applied constraints diverging
+from the pinned list deny with `env:physics_gap` (the SAFS26-a
+lesson). `ActionLinker`: detections are `open-loop` until an
+`ActionConfirmation` receipt chains to them — dashboards must not
+present unconfirmed detections as resolved (the UN MARS lesson).
+`EfficiencyClaimRegistry`: claims without a named platform AND pinned
+measured-metrics digest classify `unverifiable-claim` (the Green AI
+named-platform rule). Honest scope: kWh/water are declared by the
+host; carbon is modeled from a pinned factor.
+
+## Unreleased (one-hundred-fourteenth batch) — language-capability receipts (low-resource-language absorption)
+
+New module `language_cap.py`: authority-signed, hash-chained
+`LanguageCapabilityReceipt`s binding `(model_digest, language_tag,
+locale_variant, accuracy_band)` — closed accuracy vocabulary
+`high/moderate/low/unmeasured`, JCS digests, Ed25519 authority
+signatures. A model may only serve languages it holds receipts for
+(exact `(tag, variant)` match — `pt` != `pt-br`); undeclared
+languages classify `unverifiable-process`. `check_output_gate()`
+fail-closes medical/legal outputs in `low`/`unmeasured` languages to
+NON_AUTHORITATIVE with mandatory human review, and flags fluent
+surface + low accuracy as `fluent_unverified` (the fluency trap).
+Every high-stakes low-accuracy gate fire emits
+`i18n.mistranslation_harm`. `alignment_probe()` runs the same safety
+test per declared language and downgrades failures via narrow-only
+amendments (IndicSafe-style 12.8% cross-language consistency, as a
+mechanism). `grant_community_data()` / `revoke_community_data()` /
+`check_community_use()` are community-signed, purpose-bound,
+revocable data-sovereignty receipts with use-time checks (105th-batch
+consent discipline, community as subject).
+
+## Unreleased (one-hundred-thirteenth batch) — incident receipts + evaluator-access gate (AI-safety-institutes absorption)
+
+New modules `incident_receipts.py` and `evaluator_access.py`:
+hash-chained `IncidentReceipt`s binding `(incident_id, system_id,
+severity, death_linked, widespread, systemic_tier, detected_at,
+reported_at, summary_digest)` with machine-enforced EU-AI-Act-Art.73
+reporting clocks (serious 15d, death-linked 10d, widespread 2d,
+critical 2d, GPAI systemic-risk 2/5/10/15-day tiers; limited carries
+no mandatory clock). A missed clock auto-escalates the severity and
+audits `incident.clock_missed` — the receipt itself records the miss,
+and `detected_at`/`reported_at` are machine-checked against
+backdating (future-dated detection or report-before-detection raise).
+Duplicate `incident_id` filings are idempotent-denied. Incident
+records are pinned to a 5-year retention floor; registering a shorter
+retention is refused. `EvaluationRegistry` binds evaluation receipts
+to the exact `(model_digest, checkpoint)` pair — runtime invocations
+that do not resolve to a live, unexpired, unrevoked receipt classify
+`unverifiable-evaluation` (the evaluate-A/ship-B gate). `cheat_probe()`
+flags traces containing known shortcut markers as `cheat-detected`
+with the capability claim classified NON_AUTHORITATIVE (UK AISI
+2026-07 lesson); traces missing required steps are `incomplete-trace`.
+Clock figures are bench parameters drawn from the 2026 research
+sweep — verify against EUR-Lex before legal use.
+
+## Unreleased (one-hundred-twelfth batch) — synthetic-data ratio cap (synthetic-data absorption)
+
+New module `synthetic_cap.py`: authority-signed, hash-chained
+`DataSliceManifest` receipts labeling every corpus slice `real` or
+`synthetic` (+ `generator_id`, `generation` for synthetic) — undeclared
+slices deny as `data.undeclared_slice`. `check_synthetic_ratio()`
+fail-closes on the synthetic-fraction cap (`data.synthetic_cap_exceeded`;
+the threshold is a bench-calibrated parameter, not a law of nature)
+and on the generation-2 recursion tripwire (`data.recursive_reuse`,
+the RAG-collapse wire — "accumulate never replace"). `check_tdm_optout()`
+honors TDM opt-outs only when machine-readable (Kneschke v. LAION
+rationale, not legal advice). `art50_gate()`: EU deployments need
+machine-readable AI-output marking — missing marking is
+`non_authoritative` inside the 2026-12-02 grace window, denied after.
+`training_summary_receipt()` is the Art. 53 top-source template,
+pinned into the model-lineage receipt via `pin_to_lineage()`.
+Bench track `metrics.synthetic_cap`: 12 scenarios, 4 allow / 8 deny.
+
+## Unreleased (one-hundred-eleventh batch) — dual-use screen for autonomous science (AI-for-science absorption)
+
+New module `dual_use.py`: authority-signed, hash-chained
+`ConstraintBinding` receipts pinning a lab task's constraint list
+(physical laws / biosafety red lines) — no binding means no tool
+calls, `science:no_constraints`. `screen_tool_call()` is a
+deterministic tripwire: the closed `DUAL_USE_WATCHLIST` escalates
+dual-use calls to a human (fail-closed, `science.dual_use_hit`
+audited) and near-hits classify `NON_AUTHORITATIVE`, never
+auto-allowed. `ClaimRegistry`: AI scientific assertions enter
+`NON_AUTHORITATIVE`; promotion only by a matching replication receipt
+or expert countersign; result-without-method "breakthroughs" are
+terminally `ununderstood` and never reusable. `check_citations()`:
+deterministic citation parsing, mass-unparseable citations make the
+document `NON_AUTHORITATIVE`. `MechanicalVerifier`: AlphaProof-style
+generator/verifier separation — verifier reject means action reject,
+no override path. Bench track `metrics.dual_use`: 12 scenarios,
+5 allow / 7 deny.
+
+
+## Unreleased (one-hundred-seventh batch) — scene-bound authorization receipts (AI-healthcare absorption)
+
+New module `scene_bound.py`: authority-signed, hash-chained
+`SceneBinding` receipts binding `(capability_id,
+model_version_digest, authorized (care_setting, demographic_stratum)
+pairs, performance-manifest digest)` — closed care-setting and
+demographic-stratum vocabularies, Ed25519 authority signatures, JCS
+digests. `check_scene_authorized()` fail-closes on undeclared scenes,
+out-of-scope pairs (pairs are exact — a covered setting plus a
+covered stratum is not enough), manifest mismatch, expired/tampered
+bindings, and declarations pinned to another binding; denials audit
+as `scene.out_of_scope_denied`. Any stratum missing from the
+performance manifest is NOT authorized — the FDA 2025-01
+demographic-reporting gap made fail-closed (issuance refuses it, and
+the gate re-checks as defense in depth). Scene declarations are
+themselves chained receipts, so silent mid-task scene shifts are
+detectable. `authorize_capture()` requires a fresh, subject-signed,
+purpose-bound, revocable recording-consent receipt BEFORE ambient
+capture (audio/video/screen) starts — the Sutter Health 2026-04
+class-action discipline, with the 105th batch's use-time consent
+semantics scoped to capture modalities. `bind_model_to_scene()` /
+`check_model_invocation()`: a model version invoked for an unbound
+scene classifies `unverifiable-process` (87th-batch binary tiers —
+no partial rung to launder out-of-scope invocation through).
+Absorbs the 2026 AI-healthcare thread: aneurysm AI 0.846 vs 0.718
+sensitivity but extremely scene-dependent (JACR prospective study),
+Sutter ambient-recording class action, FDA demographic gap. Honest
+boundary: verifies declared-scene consistency against the binding;
+physical scene truth needs sensor attestation (future work). New
+bench track `metrics.scene_bound` (12 deterministic scenarios, 3
+allow / 9 deny, zero mismatches); rides the sibling-owned bench v24
+bump.
+
+## Unreleased (one-hundred-tenth batch) — deployment registration gate (AI-govtech absorption)
+
+New module `deployment_registry.py`: no registration receipt →
+no deployment (fail-closed; deliberately NO "deploy now, register
+later" path). `RegistrationReceipt` hash-chains
+(system_id | model_digest | risk_class | fria_digest |
+data_record_digest | retention_floor_days | registered_by |
+expires_at), authority-signed (Ed25519); closed risk vocabulary
+minimal/limited/high/unacceptable — `unacceptable` is refused at
+registration time. `gate_deployment()` enforces: chain integrity,
+authority signature, risk class allows the intended use, FRIA +
+explanation fields for high-risk, not expired, log retention at or
+above the floor. `detect_shadow()` classifies runtime invocations
+with unknown system_id or digest mismatch as
+`unverifiable-deployment` (98th-batch tier) + audit
+`deployment.shadow_detected`. Retention-floor changes are themselves
+receipted. `explain_decision()` serves citizen explanation fields
+(decision, grounds, data used, appeal path) for high-risk systems.
+Absorbs the 2026 AI-govtech thread: EU AI Act Art. 49 (register
+high-risk AI before deployment), Art. 26 (6-month logs), Art. 27
+(FRIA); UK DWP's 6 unregistered welfare AI prototypes; Australia's
+unauthorized Medicare agent access. Honest boundary: registry
+integrity is cryptographic; the host must actually route invocations
+through the gate. New bench track `metrics.deployment_registry`
+(12 deterministic scenarios, 3 allow / 9 deny, zero mismatches);
+rides the one-hundred-eighth batch's bench v23 → v24 bump.
+
+## Unreleased (one-hundred-ninth batch) — compute-budget receipts (AI-chips absorption)
+
+New module `compute_budget.py`: agent compute is budgeted, metered,
+and receipted. `ComputeBudget` is authority-signed (Ed25519) —
+`issued_by` must be a registered human authority and must differ from
+`owner`: agents cannot self-mint (94th/104th no-self-issuance
+discipline). Closed unit vocabulary tokens/flops/device_seconds;
+`hardware_tier` (edge/datacenter/hpc) and `device_class`
+(edge/cloud) are ceilings — spend may narrow, never widen.
+`BudgetLedger.spend()` appends a hash-chained `SpendReceipt`
+(budget_id | units | purpose | remaining | prev_hash); overspend
+denies with `compute:budget_exhausted` — fail-closed, no borrowing,
+the workload stops. Spend without a purpose denies (attribution is
+mandatory). `check_hardware_tier()` binds spend to the declared
+tier: each tier names a minimum attestation evidence kind
+(`attested_receipts.strength_at_least`) — datacenter/hpc claims on
+unattested hardware deny. A broken spend chain (gap, balance-walk
+mismatch) fail-closes all future spend on that budget.
+`roi_ledger()` deterministically aggregates spend per purpose and
+per budget from the receipts — the "ROI per token" input, computed
+from receipts rather than invented as a metric. Honest boundary:
+the ledger meters *declared* units; real hardware metering needs
+host cooperation, and under-reporting is a host-visibility problem,
+not a budget-integrity problem. New bench track
+`metrics.compute_budget` (12 deterministic scenarios, 4 allow / 8
+deny, zero mismatches); rides the one-hundred-eighth batch's bench
+v23 → v24 bump.
+
+## Unreleased (one-hundred-eighth batch) — herd-correlation gate (AI-finance absorption)
+
+New module `herd_gate.py`: every autonomous trading strategy must
+declare its signal sources — dataset/model digests, feature families
+(closed vocabulary), data windows, training-corpus manifest digest —
+in a hash-chained, authority-bound `StrategyRegistry`. A new strategy
+whose Jaccard signal overlap with any registered strategy exceeds
+`HERD_CORRELATION_MAX` (0.7) denies with `herd:correlated_strategy`
+(the N+1st copy of the same trade does not trade). Even uncorrelated
+strategies share a correlated-exposure cap: total notional across
+strategies sharing any signal token must stay under the cap, or the
+marginal strategy denies with `herd:exposure_capped`. Registration
+is hash-chained; deregistration requires the registering authority —
+no silent mid-session strategy swaps. Absorbs the 2026 AI-finance
+thread: the July selloff was synthetic correlation, not model
+failure (dozens of AIs, same trade, overlapping data); survivors had
+differentiated data, not smarter models. Honest boundary: checks
+*declared* sources — cannot detect undeclared copying. New bench
+track `metrics.herd_gate` (12 deterministic scenarios, 4 allow / 8
+deny, zero mismatches); bench v23 → v24.
+
+## Unreleased (one-hundred-fifth batch) — revocable consent receipts (BCI absorption)
+
+New module `consent_receipts.py`: hash-chained, subject-signed consent
+grants binding `(subject_id, data_scope, purpose, granted_at,
+expires_at)` — consent is unilateral and revocable at any time, and
+validity is checked at USE time, never at collection time (there is no
+"was once consented" shortcut). `check_consent_at_use()` re-verifies
+chain integrity, subject signature, exact scope/purpose match, the
+time window, and the absence of a revocation as of `use_time`;
+revoked/expired/out-of-scope uses deny and audit as
+`consent.use_denied`. Revocation is immediate and irreversible in the
+log (a new grant needs a new receipt). `decode_attribution()` binds
+every BCI-style decode to `(raw_signal_digest, decoder_id,
+decoder_version, confidence)`; below-threshold or ambiguous decodes
+classify `NON_AUTHORITATIVE` and must never drive irreversible action
+— a wrong decode is attributable to the decoder, never to the user.
+Closed-loop stimulation (write-to-brain) is irreversible-tier:
+authoritative decode + fresh `neural_stimulation` consent (24h
+freshness window) + human countersign, mirroring the 99th batch's
+kill-switch semantics. Absorbs the 2026 BCI thread: Neuralink ~26
+implants, Paradromics long-term commercial-device thought expression,
+China NMPA's first invasive-BCI market approval, California AB 2741
+("mind-reading AI"), Chile's constitutional neural rights, EU AI Act
+high-risk obligations. Honest boundary: verifies claimed
+consent-chain consistency; cannot prove the human understood what
+they signed. New bench track `metrics.consent_receipts` (12
+deterministic scenarios, 4 allow / 8 deny, zero mismatches); rides
+the sibling-owned bench v23 bump.
+
+## Unreleased (one-hundred-sixth batch) — streaming output guard (open-models guard absorption)
+
+New module `stream_guard.py`: per-chunk screening *before* release, closing
+the final-output-gating gap (a streaming agent can exfiltrate a violating
+prefix long before a final gate sees it). `GuardPolicy` is a deterministic,
+closed-vocabulary screener — literal deny-pattern matchers with risk
+weights and a per-chunk risk budget, no LLM in the hot path (an
+open-weight guard model may run as an optional, advisory-only second
+opinion, never the gate). `screen_stream()` halts the stream on the first
+violating chunk (nothing after is released; the partial prefix classifies
+`unverifiable-stream`, 87th-batch binary semantics) and receipts every
+decision into a tamper-evident hash chain
+`(stream_id, chunk_index, chunk_digest, window_digest, verdict)` so a
+bypassed stream is detectable after the fact via `verify_chain()`
+(gaps, reorders, tampering, narrowed overlap windows, and post-halt
+smuggling all fail closed). `guard_liveness()` pins the expected policy
+digest: a stale/unknown/malformed guard refuses the *entire* stream —
+there is no degraded-mode streaming. Anti-smuggling: each chunk is
+screened together with a bounded overlap window (the tail of released
+chunks), so patterns split across chunk boundaries still match; the
+window itself is receipted. Honest scoping: literal screening catches
+known-bad shapes (credential prefixes, key headers); novel encodings
+are the documented job of the advisory second opinion. New bench track
+`metrics.stream_guard` (12 deterministic scenarios, 4 allow / 8 deny,
+zero mismatches); bench v22 → v23 (103rd batch owns v21 → v22).
+
+## Unreleased (one-hundred-fourth batch) — hardware safety-limit binding (AI-energy absorption)
+
+New module `safety_envelope.py`: the safety envelope is *independent* of
+the agent — the agent can never self-issue, self-modify, widen, or outrun
+its own envelope (absorbs the 2026 AI-energy thread: Princeton PACMAN's
+20ms-cycle plasma control — AI executes, humans set goals, hardware
+safety limits always on). `SafetyEnvelope` binds
+`(envelope_id, actuator_id, hard_limits, armed_by, armed_at, expires_at)`
+via JCS digest + Ed25519 signature from a registered human authority;
+`check_action_within_envelope()` checks every physical action before
+execution — any parameter outside the pins denies and audits
+`safety.envelope_denied`; a stale (expired) or revoked envelope
+fail-closes to no actuation at all; unknown control axes deny
+(`safety:unknown_limit`) so the agent cannot smuggle a new axis past the
+envelope. `request_envelope_change()` receipts limit changes into the
+hash chain: narrowing is fast-pathed, widening requires a *different*
+authority's signature (self-approval denies) plus a cooldown before the
+widened envelope can arm. `verify_independence()` probes the capability
+table — the agent role holds only `check`, never `envelope:modify` — and
+fails if the gate source can reach envelope modification. New bench
+track `metrics.safety_envelope` (12 deterministic scenarios, 3 allow / 9
+deny, zero mismatches); bench v22 → v23.
+
+## Unreleased (one-hundred-third batch) — vendor-chain provenance receipts (AI-logistics absorption)
+
+New module `vendor_chain.py`: hash-chained `VendorReceipt` binding
+`(action_id | vendor_id | vendor_attestation_digest | prev_hash)` per
+hop of a shipment/replenishment action; a pre-approved `VendorRegistry`
+(curated out-of-band) pins each vendor's attestation digest and names
+tainted vendors. `verify_chain()` fail-closes on unknown vendors,
+attestation mismatches, tampered links, and chain gaps, and propagates
+taint transitively with no laundering (the 100th batch's model-lineage
+discipline, applied to vendors). `authorize_autonomous_action()` lets
+the agent act *without per-decision human sign-off* (the Walmart
+pattern) only when the full chain verifies untainted AND the action
+sits inside a pre-approved `ActionEnvelope` (max value, max quantity,
+closed SKU vocabulary) — outside the envelope, a human must approve.
+Every action emits a `vendor.autonomous_action` audit event. New bench
+track `metrics.vendor_chain` (12 deterministic scenarios, 3 allow / 9
+deny, zero mismatches); bench v21 → v22.
+
+## Unreleased (one-hundred-first batch) — agent-readiness probes for public-facing agent UI (AI-accessibility absorption)
+
+New module `agent_readiness.py`: a deterministic probe harness rendering an
+84th-batch `ActionCard` into a simplified accessibility tree
+(role / name / states / input paths) and running four fail-closed probes —
+every actionable element has a non-blank accessible name
+(`readiness:unnamed_action`), every ground-truth-declared irreversible
+action is marked in the tree (`readiness:hidden_irreversible`), every
+action is reachable via keyboard or AT, never pointer-only
+(`readiness:inaccessible_path`), and the tree round-trips through its
+canonical text form byte-identically (`readiness:unstable_tree`;
+unrepresentable roles/modalities/states are findings, never silently
+dropped). Absorbs the 2026 AI-accessibility thread: "Agent Readiness" —
+screen readers and AI agents read the *same* accessibility tree, so
+BFSG/EAA compliance is the foundation (EAA enforcement is live, fines up
+to uncapped in Sweden; AI-generated UI routinely fails EN 301 549). Any
+finding classifies the *presentation* `NON_AUTHORITATIVE` — 87th-batch
+binary semantics, no partial tier; the underlying decision is a separate
+axis. New bench track `metrics.agent_readiness` (12 deterministic
+scenarios, 3 allow / 9 deny, zero mismatches); bench v20 → v21.
+
+## Unreleased (one-hundredth batch) — model lineage receipts (AI-creative copyright absorption)
+
+New module `model_lineage.py`: hash-chained lineage receipts binding
+`(model_digest | training_corpus_manifest_digest | acquisition_method)`
+to a parent model for every model version. Absorbs the 2026 AI-creative
+copyright thread: Sony+UMG v. Suno's "model laundering" theory
+(retraining on a tainted model's outputs doesn't wash the taint —
+taint propagates transitively), Bartz v. Anthropic's $1.5B split
+(training was fair use, but pirated *acquisition* wasn't — so the
+closed acquisition vocabulary `licensed` / `public-domain` /
+`consent-gated` / `unknown` fail-closes on `unknown`), and GEMA v. Suno
+(memorization = reproduction). The gate fail-closes on lineage gaps
+(unresolvable parent digests), consent-gated corpora without
+resolvable consent receipts, and tainted ancestry. `classify_model()`
+is the binary policy tier (`verified-lineage` /
+`unverifiable-lineage`, no partial tier — the eighty-seventh batch's
+lesson). New bench track `metrics.model_lineage` (12 deterministic
+scenarios, 3 allow / 9 deny, zero mismatches); bench v18 → v19.
+
+## Unreleased (ninety-ninth batch) — SOC verdict cards + kill-switch mandate (AI-cyberdefense absorption)
+
+New module `soc_verdicts.py`: a Verifiable Action Card (84th batch)
+specialized for SOC triage decisions — constructed from runtime ground
+truth, closed verdict vocabulary (`allow`/`quarantine`/`escalate`), Ed25519
+analyst countersign binding `(analyst_id, card_digest)` with
+no-self-countersign (94th batch, applied to the analyst slot). Every
+autonomous remediation action must register a reachable kill-switch
+`(endpoint_id, timeout_s)`; `check_killswitch_reachable()` fail-closes on
+unreachable endpoints, non-positive timeouts, or timeouts exceeding the
+action's blast-radius window. "Investigate, never the final word": the
+card is AUTHORITATIVE evidence (87th batch) but execution requires human
+countersign or an armed kill-switch — autonomous execution with neither
+is denied; there is no third path. Denials audit as
+`soc.execution_denied`. New bench track `metrics.soc_verdicts` (12
+deterministic scenarios, 3 allow / 9 deny, zero mismatches); bench v19 → v20.
+
+## Unreleased (one-hundred-second batch) — quantum-threat timeline gates (BSI TR-02102 absorption)
+
+New module `quantum_timeline.py`: a policy gate encoding the 2026
+quantum thread as BSI TR-02102 deadlines (classical asymmetric out end
+of 2031, signatures end of 2035; Google ECDLP-256 in <1,200 logical
+qubits). `threat_assessment()` pins per-primitive postures
+(Ed25519 → `migrate-by-2031`, SHA-256 → `review-2035`,
+HMAC-SHA256 → `acceptable`); `gate_signing()` refuses NEW long-lived
+Ed25519 credentials expiring past 2031 (short-lived tokens allowed with
+a warning; hash/MAC-only usage unaffected; unknown primitives and
+malformed expiries fail closed); every refusal/warning emits an
+`audit.ndjson/1` event (`quantum.timeline_denied` /
+`quantum.timeline_warning`). `migration_plan()` is a deterministic
+checklist of every signing module (passport, offline_bundle,
+agent_identity, delegation_credentials, multisig, audit_chain,
+audit_scitt, audit_rekor) with deadlines; the ML-DSA+Ed25519 hybrid
+signer is stubbed as future work and fail-closes today. New bench track
+`metrics.quantum_timeline` (12 deterministic scenarios, 4 allow / 2
+warn / 6 deny, zero mismatches); bench version bump left for
+integration (sibling batches 100/101 own the v20/v21 bumps).
+
+## Unreleased (ninety-fifth batch) — JCS golden vectors: the single canonicalizer (RFC 8785)
+
+New module `canonical_json.py`: a small, auditable, stdlib-only
+implementation of the JSON Canonicalization Scheme (RFC 8785), written
+directly from the RFC text (checked 2026-10-04) and pinned by golden
+vectors transcribed from the RFC's own Appendix B Table 1 (all 24 IEEE
+754 number samples), §3.2.2.3 (string escapes), and §3.2.3 (UTF-16 code
+unit key ordering), plus the long-standing cyberphone community sample
+as a cross-implementation check.
+
+This batch also fixed a real spec bug the golden vectors caught: the
+JCS copy that lived in `audit_chain` emitted `\u000a` for newline,
+contradicting RFC 8785 §3.2.2.3's mandatory short escapes (\b \t \n \f
+\r) — `audit_chain.jcs_canonical_json` now delegates to the single
+implementation (its signature is unchanged; chain v2 callers are
+unaffected). `static_verify.definition_digest` (ninety-first batch) now
+hashes JCS bytes instead of its hand-rolled `json.dumps` form, and
+`passport` envelopes (eighty-ninth batch) are Ed25519-signed over JCS
+instead of the legacy chain-v1 canonicalization. New tests
+`tests/test_canonical_json.py` (23 tests) include fail-closed adversarial
+inputs: lone surrogates (values and keys), NaN/Infinity, -0, 1e400,
+non-string keys, and unsupported types.
+
+## Unreleased (ninety-sixth batch) — twin-sync receipts: freshness-gated actuation (digital-twin absorption)
+
+Absorbs the 2026 digital-twins-at-scale research thread (mechanism ideas
+only, honestly scoped in `twin_receipts.py`): synchronization drift is
+the critical governance issue — GISEC 2026 ran dedicated sessions on
+manipulated sensor inputs distorting physical assets' virtual
+representations, practitioner taxonomies rank sync drift CRITICAL, and an
+SSRN systematic review (124 studies, peer-reviewed Nov 2025) lists data
+poisoning, drift, and *unsafe actuation* as only partly addressed by
+existing standards. `SyncReceipt` is a hash-chained receipt binding
+`(twin_id, state_digest, observed_at, source_sensor_set,
+staleness_budget)`; `check_freshness()` fail-closes on stale (age >
+budget), future-dated, or sensor-set-changed observations. The pinned
+sensor manifest makes poisoning explicit: any added/removed/swapped
+sensor — or an unpinned twin — classifies the window NON_AUTHORITATIVE
+under the eighty-seventh batch's binary tiers, and actuation is
+high-stakes so it can never authorize on such a window. The
+unsafe-actuation gate requires a Verifiable Action Card (eighty-fourth
+batch) whose bound arguments name the exact receipt; stale receipts deny
+with `twin:stale_state`, cardless with `twin:no_card`, and each receipt
+authorizes exactly one actuation (`twin:receipt_replay` on reuse). New
+bench track `metrics.twin_sync` (12 deterministic scenarios, 3 allow / 9
+deny, BENCH_VERSION v16→v17).
+
+## Unreleased (ninety-seventh batch) — signed offline policy bundles (space-AI absorption)
+
+Absorbs the 2026 space-AI research thread: satellites cannot phone home
+for approval — policy must be *compiled* into the agent as a signed,
+expiry-bounded bundle. Generalizes to field robotics and air-gapped
+factories. New module `offline_bundle.py`: `compile_bundle()` signs a
+canonical-JSON envelope (Ed25519, vendored; the bundle pins its own
+canonical form inside the envelope) carrying the allowlist policy
+(Janus-style rules, ninety-first batch), pinned tool-definition digests
+(ninety-first batch `definition_digest` semantics), `bundle_version`,
+`issued_at`/`expires_at`, and a staleness ceiling. `verify_bundle()`
+fail-closes in order — claimed issuer must be the expected authority,
+signature over canonical bytes, expiry, staleness ceiling, monotonic
+version (rollback to an older bundle is denied: no silent downgrade to
+weaker policy), pinned digests must match the live registry.
+`offline_check()` gates tool calls against a *verified* bundle only —
+an unverifiable bundle authorizes nothing (no "offline lenient mode").
+Honest scope in the module docstring: key distribution is out-of-band;
+a lying clock can trick expiry (staleness ceiling is the second bound).
+New bench track `metrics.offline_bundle` (12 deterministic scenarios,
+4 allow / 8 deny; BENCH_VERSION bump left for the integration pass).
+
+## Unreleased (ninety-eighth batch) — process-evidence receipts
+
+Absorbs the 2026 AI-education research thread: the detection regime is
+dead (detectors 39.5% on unmodified AI text — worse than a coin flip;
+paraphrased 22%; CHED/California bar detector scores as sole discipline
+basis), and *process evidence* replaced it — show the work, not the
+output (Harvard RCT: guardrailed process doubled learning gains).
+
+New module `process_receipts.py`: a `ProcessReceipt` binds an artifact
+digest to a hash-chained production-process log
+`(seq, step_kind, input_digest, output_digest, actor, timestamp)` over
+the closed vocabulary `draft / revise / tool_call / human_checkpoint /
+finalize`. `verify_process()` replays the chain fail-closed: chain
+digests, no unrecorded edits (input == previous output), human
+checkpoints must have non-agent actors (the oral-defense rule), every
+`tool_call` step must reference a matching 77th-batch tool receipt
+(`tool:<args>:<result>`, output bound to the recorded result), and the
+chain must end in `finalize` on the artifact digest. `classify_process()`
+is binary — a `None` receipt (artifact-only submission) classifies
+`unverifiable-process` by construction, the 87th batch's
+`NON_AUTHORITATIVE` analogue; no partial tier. New bench track
+`metrics.process_receipts` (12 deterministic scenarios, 2 allow /
+10 deny); BENCH_VERSION v15 -> v16.
+
+## Unreleased (ninety-first batch) — static pre-dispatch policy verification (Janus absorption)
+
+Absorbs the static-verification half of `Agentic-AI-Risk-Mitigation/Janus`
+(read as code 2026-10-04: `janus/policy/{enforcer,validator,loader}.py`,
+`janus/tools/registry.py` — mechanism ideas only, honestly scoped in
+`static_verify.py`): Janus priority-ordered allow/deny rules with strict
+allow semantics (a condition naming an absent argument does NOT match —
+omission must not satisfy a rule), deny-before-allow at equal priority,
+and default-deny; plus the Janus gap closed — Janus's
+`ToolRegistry.register` silently overwrites definitions, so here every
+tool definition's canonical digest is pinned at registration and a
+re-registration with a different digest is a loud `DefinitionTamper`
+that fail-closes all later calls (audited `force_reregister` is the only
+replacement path). The `StaticVerifier` gate checks the (name,
+args-shape, caller) triple with zero execution: unknown tools, arg
+smuggling, schema violations, missing caller capabilities, and policy
+denials all return deny verdicts before any handler could run. New bench
+track `metrics.static_verification` (12 deterministic scenarios, 2 allow
+/ 10 deny: clean call, unknown/renamed tools, arg smuggling, tampered
+definition, strict-mode fall-through, policy deny rule).
+
+## Unreleased (ninety-fourth batch) — no-self-attestation (ERC-8004 absorption)
+
+Absorbs the ERC-8004 no-self-attestation rule (live on mainnet 2026-01-29,
+per the 2026 research sweep): `giveFeedback` forbids the owner as the
+submitter — self-issued feedback is not evidence. Ported to Northstar's
+approval gates (eighty-fourth batch action cards): new module
+`approver_separation.py` — `eligible_approvers()` returns the registered
+approvers minus the proposer minus the proposer's whole delegation subtree
+(BFS with a visited set, so cyclic graphs terminate; sock-puppet approval
+via a delegated sub-agent is self-approval with extra hops), `check_approver()`
+denies `self_approval` / `sock_puppet_delegatee` / `unknown_approver` /
+`malformed_input`, and violations audit as `approval.self_attestation_denied`
+for the `audit.ndjson/1` chain. `action_card.resolve_card()` takes optional
+`approver_identity` / `registered_approvers` / `delegation_graph` and runs
+the separation gate *before* the auto-approve shortcut: when the only
+available approver is the proposer, the card denies — there is no fallback
+to auto-approve. Malformed inputs fail closed (empty eligible set).
+New bench track `metrics.approver_separation` (12 deterministic scenarios,
+3 allow / 9 deny).
+
+## Unreleased (ninety-second batch) — TEE attestation as receipt evidence
+
+Absorbs the 2026 confidential-AI research thread (mechanism ideas only,
+honestly scoped in `attested_receipts.py`): Ritual's `ZKML > OPML > TEE`
+proof-strength ladder as the receipt `evidence_kind` taxonomy, with the
+rule that a receipt's claimed kind is only as strong as what was actually
+verified. Extends the seventy-seventh batch per-call tool receipt
+(`tool:<args-sha256>:<result-sha256>`) with an optional `attestation`
+field carrying `(evidence_kind, quote_hash, verifier_id,
+measured_config)`; verification is freshness + config binding + kind
+consistency and fails closed throughout. Honest limits, stated in the
+module: this repo cannot mint real TEE quotes (no SGX/SEV-SNP/TDX
+platform here) — it ships the taxonomy, the schema, the verification
+*interface*, and a deterministic software-emulated attestor for tests
+(MACs, stamped `emulated: True`, may only claim `software`). The
+real-quote path is a caller-supplied `QuoteVerifier` per kind (where a
+DCAP-style platform check plugs in); claiming `tee` with no registered
+verifier is rejected, never downgraded — an unverifiable attestation
+claim is worse than no claim. Anti-replay: the quote's `measured_config`
+must equal the binding digest of *this* receipt's exact arguments/result
+digests (constant-time compare), so a quote minted for call A presented
+with receipt B fails closed; the attestation field must also agree with
+what its own quote binds. New bench track `metrics.attestation_receipts`
+(12 deterministic scenarios, 3 allow / 9 deny: forgery, cross-call
+replay, expiry, staleness, TEE-without-verifier, emulated-claiming-TEE,
+field/quote confusion, quote-hash tampering, malformed).
+
+## Unreleased (ninety-third batch) — adversarial bench scenarios
+
+New bench track `metrics.adversarial_scenarios` (12 deterministic
+scenarios, 5 allow / 7 deny) absorbing three 2026 research threads:
+Project Sid's documented multi-agent failure modes (bribery must not
+move a passport gate — the verdict is byte-identical with and without
+the side-payment offer; infinite polite deferral hits a liveness cap at
+8 rounds and escalates to a human; the agent's self-reported spend is
+never trusted over the runtime's observed `Budget` ledger — a claim
+that disagrees beyond tolerance fail-closes), AIR-style no-adversary
+failures (goal misgeneralization — "reduce open support tickets" by
+deleting the inbox — dies on declared intent invariants; silent 28/30
+-> 12/30 capability drift is flagged by the ninetieth batch's
+Livenerf-style probe, p=0.0002, revoking the capability attestation),
+and malicious-but-signed (a *valid* SLSA-style provenance envelope —
+pinned builder, matching source digest, verifying Ed25519 signature —
+carrying a malicious payload on a *granted* tool: provenance verifies
+AND the behavior gate denies with `behavior:payload_malicious` —
+provenance is not trust; a tampered envelope dies at layer 1 with
+`provenance_signature_invalid` instead).
+
+## Unreleased (eighty-ninth batch) — MCPS capability passports
+
+Absorbs MCPS (anakintano/langchain-mcp-secure, actual code read
+2026-10-04 — mechanism ideas only, honestly scoped in `passport.py`):
+capability passports (`jti` unique per mint, `exp` enforced, Ed25519
+over the canonical envelope — MCPS uses ECDSA P-256/JWT; this repo is
+stdlib-only), delegation with *mandatory* capability intersection
+(delegatee caps = delegator caps ∩ requested scope, computed at mint so
+escalation is refused before any token exists; constraints merge
+delegator-wins: set intersection for lists, min for numerics, recursive
+for dicts), and the one thing MCPS stubbed out made real —
+passport-level revocation (`revoke_jti` was a no-op there): revoked JTIs
+fail closed at verify time, and revoking a parent JTI invalidates its
+whole delegation subtree. Verification is format → signature → expiry →
+revocation, then chain continuity + depth ceiling + the attenuation
+invariant re-checked per hop; `check_tool_use` is the step-5 analogue (a
+tool the passport does not carry is denied). Wired into the eighty-fifth
+batch: `passport_for_identity` binds an `AgentIdentity` DID/key into a
+passport. New bench track `metrics.passport_security` (12 deterministic
+scenarios, 3 allow / 9 deny: forgery, expiry, revocation, intersection,
+depth).
+
+## Unreleased (eighty-seventh batch) — binary evidence tiers + LOG_DROP policy (Tesserae absorption)
+
+Absorbs the verifier mechanics of `sahiee-dev/Tesserae` (AgentOps
+Replay), read as code (`agentops_sdk/{events,buffer,client}.py`,
+`verifier/verifier_core.py`, `docs/CHAIN_AUTHORITY_INVARIANTS.md`).
+Evidence is classified **binary**: AUTHORITATIVE requires ALL of runtime
+authority, a valid seal, a complete window, no LOG_DROP, and a valid
+chain — everything else (including sealed-with-drops) is
+NON_AUTHORITATIVE, with deliberately no "partial" middle rung (the
+`verifier_core` "no partial footgun" stance; the repo's older four-class
+variant in `agentops_verify.py` is documented and not followed). Lost
+audit events are never silent: an explicit, sequenced, hash-chained
+`evidence.log_drop` record (count, reason, seq range) marks the loss,
+and a sequence gap *without* a LOG_DROP is a chain-integrity violation
+that fails closed. Authority isolation: the agent may never emit
+runtime-authority events (`chain_seal` et al.) — the attempt is an
+authority violation, not a seal. Only agent-claimed informational records
+may be compacted, and only with a hash-chained compaction receipt;
+runtime records, LOG_DROP records, seals, and decision records never are.
+High-stakes decisions (tier3+) require AUTHORITATIVE evidence and deny
+fail-closed otherwise. `trust_assumptions()` is hardcoded, not
+configurable. New bench track `metrics.evidence_tiers` (10 deterministic
+scenarios).
+
+## Unreleased (eighty-eighth batch) — provenance-tracked taint + fail-closed security automata + per-tool budgets (Guardians absorption)
+
+Absorbs the verifier mechanics of `ovidiu-eremia/llm-agent-guardians`
+(MIT) — Erik Meijer's *"Guardians of the Agents"* (CACM, Jan 2026),
+"prompt injection is SQL injection", honestly scoped in
+`provenance_taint.py`. Taint rules fire only on the **conjunction** of
+label overlap with the source's declared labels **and** the source tool
+appearing in the value's transitive provenance (the implementation's own
+extension beyond the paper — label-only impostors do not fire).
+Security automata track nondeterministic state sets over tool-call
+events; reaching an `is_error` state denies the call, and two fail-closed
+rules are ported verbatim: an unparseable transition condition is
+assumed to fire, and a condition over unknown/symbolic arguments is
+assumed to fire — uncertainty can only deny, never allow. `safe_eval`
+is the AST-allowlisted expression evaluator (literals, names, lists,
+comparisons, boolean ops, `len()`; everything else raises, and the
+raise means "fires"). Per-tool call-count budgets deny on exceed;
+malformed limits (non-int, bool, negative, explicit None) fail closed
+rather than leaving the tool unbounded. A tool with no registered taint
+spec cannot be reasoned about, so tainted input to it denies. New bench
+track `metrics.provenance_taint` (12 deterministic taint-escape probes,
+5 allow / 7 deny, conjunction-checked).
+
+## Unreleased (ninetieth batch) — harness integrity binding + drift probe
+
+Absorbs two 2026 eval-methodology findings (mechanism ideas only,
+honestly scoped in `harness_binding.py` / `drift_probe.py`): "a
+benchmark number without a harness is not a benchmark number" (the ARC
+Prize scored the same model 62.7% vs 99.9% on two harnesses) and
+Livenerf (2026-10-01), the first post-release drift-tracking benchmark.
+`harness_binding` pins a SHA-256 of the canonical harness configuration
+(code version, prompt-template digests, tool versions, environment
+facts) into every bench run's audit record (`harness_binding.bound`
+events anchor into `audit.ndjson/1`); scores render *only* as the quad
+(model version + harness hash + effort + $/task) — the bare-score API
+exists solely to refuse. A harness that no longer hashes to its pin
+invalidates the score one-way (invalidated, never revived).
+`drift_probe` re-runs the same model name across time windows, paired by
+task, and returns a statistical verdict: bootstrap percentile CI +
+two-sided paired permutation test (sign-flipping), deterministic in an
+explicit seed, stdlib-only. Drift is flagged only on the conjunction
+(p < alpha AND CI excludes zero AND |effect| >= min_effect); unpaired,
+duplicated, or empty windows fail closed. New bench tracks
+`metrics.harness_binding` (tamper-the-harness → score invalidated) and
+`metrics.drift_detection` (simulated 30-point silent downgrade caught
+with direction="degradation", p < 0.05, CI excluding zero; unchanged
+window stays quiet).
+
+## Unreleased (eighty-fifth batch) — DID identity + permission combination prohibition
+
+Absorbs three 2026 identity/governance patterns (mechanism ideas only,
+honestly scoped in `agent_identity.py`): RaonSecure's per-agent DID
+issuance + delegation tracking + audit, the Korean agent-gateway
+combination prohibition, and AstraCipher's depth-limited trust chains.
+Every agent gets a self-resolving `did:northstar:<ed25519-pubkey>` bound
+to its key (DID/key mismatch and revocation fail closed); delegation
+records form a signed chain (root → … → subagent) verified per hop for
+signature, continuity, attenuation (a delegatee can never hold more than
+its delegator — amplification is rejected), expiry, and a `max_depth`
+ceiling (default 4, mirroring AstraCipher's Creator→Authorizer→Agent→
+Sub-agent chain) enforced at the exceeding hop with malformed limits
+failing closed. Policy can declare forbidden permission *combinations*
+(`combination_rule`); holding the full set denies the request even when
+each permission was granted individually — the classic
+`read:secrets` + `net:egress` exfiltration shape. `evaluate_request`
+composes the full gate (identity → chain → depth → combination), and
+identity events anchor into `audit.ndjson/1` with the DID, depth, and
+fired rule pinned. New bench track `metrics.identity_composition`
+(12 deterministic scenarios, 4 allow / 8 deny).
+
+## Unreleased (eighty-second batch) — memory write-time gates (nevertwice/OWASP-AMG absorption)
+
+Every memory write passes a fail-closed gate before reaching the store:
+nevertwice's W8 write-time poisoning guard (`_looks_dangerous`
+negation-gated — cautionary lessons pass, the "don't forget to ..."
+flip-bypass is caught) folded into `_looks_unsafe` (injection phrasing OR
+dangerous imperative), always on. W7 corroboration-gated quarantine
+(opt-in via `NORTHSTAR_MEMORY_QUARANTINE=1`): a single-source suspicious
+note is diverted to quarantine — on disk, out of active recall — so one
+uncorroborated actor cannot spoof trust or displace corroborated truth.
+OWASP Agent Memory Guard's SHA-256 baselines detect post-write tampering
+of memory files, and every allowed write is stamped with provenance
+(writer, session, source, content hash). The TrojanHippo dormancy probe
+corpus (dormant payloads activating on finance/health/identity topics) is
+blocked 6/6 with zero false positives on benign controls — a conjunction,
+not a threshold. The "plausible false fact is indistinguishable by form"
+open problem is adopted as honest scope.
+
+## Unreleased (eighty-fourth batch) — verifiable action cards (out-of-band approval UX)
+
+Absorbs the Verifiable Action Card (arXiv:2609.18411) and opsagent's
+deterministic gate (jasondhaki/opsagent CLAUDE.md, read in full). Approval
+requests are reconstructed from ground-truth pending actions (tool, call id,
+arguments digest, runtime-trusted provenance) and rendered out-of-band in
+trusted chrome the agent cannot write to — the terminal renderer prints to
+stderr with a trust banner; `as_dict()` feeds host UIs. The agent's own
+framing is quarantined as explicitly untrusted. A pure deterministic gate
+decides per action: auto-approve only if every named check passes
+(tier allowlisted, no risk flags, digest pinned, provenance trusted, not
+demo, within budget); auto-approve ships OFF with shadow-mode measurement
+(`would_auto_approve` computed even when disabled). Approvals bind to
+`(call_id, arguments_digest)` and `verify_card_binding` re-checks the pin at
+dispatch; default-deny on no answer, error, or timeout.
+
 ## Unreleased (eighty-first batch) — DvP if-and-only-if invariant
 
 Atomic settlement as a red-team harness: proves `Approval <=> Execution` —
@@ -2974,4 +5284,3 @@ production deployment integration remain host-level responsibilities or future
 work.
 
 See [README.md](README.md) for installation and security boundaries.
-

@@ -49,6 +49,16 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--base-url", default="", help="OpenAI-compatible endpoint to report on (default: $OPENAI_BASE_URL)")
     parser.add_argument("--script", default="", help="scripted-provider script to validate (JSON array of turns)")
     parser.add_argument("--sidecar-socket", default="", help="sidecar socket path to check for presence")
+    parser.add_argument(
+        "--egress-socket",
+        default="",
+        help="egress sidecar socket path to probe (default: $NORTHSTAR_EGRESS_SOCKET)",
+    )
+    parser.add_argument(
+        "--egress-policy-dir",
+        default="",
+        help="directory holding northstar-egress.toml to validate (default: $NORTHSTAR_EGRESS_POLICY_DIR)",
+    )
     parser.add_argument("--session-dir", default="", help="session transcript directory to check for creatability")
     parser.add_argument(
         "--sandbox",
@@ -67,6 +77,12 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
         choices=("auto", "on", "off"),
         default="auto",
         help="seccomp-BPF denylist mode for MCP server processes (default: auto)",
+    )
+    parser.add_argument(
+        "--mcp-network",
+        choices=("denied", "allowed"),
+        default="denied",
+        help="network mode for MCP server processes (default: denied)",
     )
 
 
@@ -214,6 +230,115 @@ def _check_sidecar(args: argparse.Namespace, findings: list[Finding]) -> None:
             )
     else:
         findings.append(Finding("sidecar", "ok", "off - CodexReadOnly tool is not registered (pass --sidecar-socket to enable)"))
+
+
+def _check_egress(args: argparse.Namespace, findings: list[Finding]) -> None:
+    """Check the egress enforcement boundary.
+
+    Four properties, all verified rather than asserted:
+
+    1. Brokered credentials live in the *sidecar's* environment, never the
+       agent's. If this process (the agent side) can see a
+       ``NORTHSTAR_EGRESS_CRED_*`` value, the privilege separation is broken.
+    2. The egress policy (when configured) loads fail-closed: malformed
+       policy is a finding, not a silent allow.
+    3. The sidecar socket (when configured) answers a probe: a live
+       ``rejected`` proves the daemon is up; anything else is a failure.
+    4. The agent process itself has no default L3 route: without one, the
+       process cannot route around the sidecar. A present default route is
+       reported as a warning, not hidden.
+    """
+    import os
+
+    leaked = sorted(k for k in os.environ if k.startswith("NORTHSTAR_EGRESS_CRED_"))
+    if leaked:
+        findings.append(
+            Finding(
+                "egress",
+                "fail",
+                f"brokered credential(s) visible to the agent process ({len(leaked)} env var(s)): "
+                "NORTHSTAR_EGRESS_CRED_* belongs to the sidecar's environment only",
+            )
+        )
+    else:
+        findings.append(Finding("egress", "ok", "no brokered credentials in the agent process environment"))
+
+    policy_dir = args.egress_policy_dir or os.environ.get("NORTHSTAR_EGRESS_POLICY_DIR", "")
+    if policy_dir:
+        try:
+            from egress_enforcer import load_egress_policy
+
+            policy = load_egress_policy(policy_dir)
+            findings.append(
+                Finding(
+                    "egress",
+                    "ok",
+                    f"policy {policy.revision} loads: {len(policy.destinations)} destination(s)",
+                )
+            )
+        except Exception as exc:
+            findings.append(Finding("egress", "fail", f"egress policy failed to load: {exc}"))
+    else:
+        findings.append(Finding("egress", "ok", "off - no egress policy configured (pass --egress-policy-dir to enable)"))
+
+    socket_path = args.egress_socket or os.environ.get("NORTHSTAR_EGRESS_SOCKET", "")
+    if socket_path:
+        path = Path(socket_path)
+        if not path.exists():
+            findings.append(
+                Finding("egress", "fail", f"no socket at {path} - is the egress sidecar installed and running?")
+            )
+        elif not stat.S_ISSOCK(path.stat().st_mode):
+            findings.append(Finding("egress", "fail", f"{path} exists but is not a Unix socket"))
+        else:
+            try:
+                from egress_client import EgressClient
+
+                result = EgressClient(path).probe()
+            except Exception as exc:
+                findings.append(Finding("egress", "fail", f"egress probe failed: {exc}"))
+            else:
+                if result.status == "rejected":
+                    findings.append(Finding("egress", "ok", f"sidecar alive at {path} (probe rejected as expected)"))
+                else:
+                    findings.append(
+                        Finding("egress", "fail", f"egress probe unexpected status: {result.status}")
+                    )
+    else:
+        findings.append(Finding("egress", "ok", "off - no egress socket configured (pass --egress-socket to enable)"))
+
+    # 4. The agent process itself must have no direct L3 route out. The
+    # sidecar is only "the only network the agent may touch" if the agent
+    # process cannot route around it. This checks /proc/net/route for a
+    # default gateway: no default route => no direct egress possible.
+    # A present default route is a finding, not an assertion of safety.
+    try:
+        has_default_route: bool | None = False
+        with open("/proc/net/route", "r", encoding="ascii") as fh:
+            for line in fh.readlines()[1:]:
+                fields = line.split()
+                if len(fields) >= 2 and fields[1] == "00000000":
+                    has_default_route = True
+                    break
+    except OSError:
+        has_default_route = None
+    if has_default_route is True:
+        findings.append(
+            Finding(
+                "egress",
+                "warn",
+                "agent process has a default route: direct network egress is possible; "
+                "the sidecar boundary relies on operator netns/firewall, not this process",
+            )
+        )
+    elif has_default_route is False:
+        findings.append(
+            Finding("egress", "ok", "agent process has no default route: no direct L3 egress")
+        )
+    else:
+        findings.append(
+            Finding("egress", "warn", "cannot read /proc/net/route: direct-egress posture unverifiable")
+        )
 
 
 def _check_sandbox(args: argparse.Namespace, findings: list[Finding]) -> str | None:
@@ -504,6 +629,56 @@ def _check_mcp_seccomp(args: argparse.Namespace, findings: list[Finding]) -> Non
     )
 
 
+def _check_mcp_network(args: argparse.Namespace, findings: list[Finding]) -> None:
+    """Report whether MCP server processes will be denied network egress.
+
+    Mirrors ``McpStdioClient._apply_network_policy``: ``denied`` (default)
+    confines the server with Landlock TCP denial and refuses to start where
+    the kernel cannot enforce it (needs ABI 4+); ``allowed`` is the explicit
+    opt-in to full host network. Never claims denial is active when the host
+    cannot enforce it.
+    """
+    import sys as _sys
+
+    mode = str(getattr(args, "mcp_network", "denied") or "denied").strip().lower()
+    if mode not in ("denied", "allowed"):
+        findings.append(Finding("mcp-network", "fail", f"invalid --mcp-network mode: {mode!r}"))
+        return
+    if mode == "allowed":
+        findings.append(
+            Finding(
+                "mcp-network",
+                "warn",
+                "mode=allowed - MCP server processes run with full host network by operator choice",
+            )
+        )
+        return
+    try:
+        from tools.sandbox import landlock_abi_version
+    except Exception as error:  # noqa: BLE001
+        findings.append(Finding("mcp-network", "warn", f"could not load the landlock module: {error}"))
+        return
+    abi = landlock_abi_version()
+    if not _sys.platform.startswith("linux") or abi < 4:
+        findings.append(
+            Finding(
+                "mcp-network",
+                "fail",
+                f"mode=denied requires Linux with Landlock ABI 4+ for TCP denial "
+                f"(this host: {_sys.platform}, ABI {abi}) - an MCP server would refuse to start",
+            )
+        )
+        return
+    findings.append(
+        Finding(
+            "mcp-network",
+            "ok",
+            f"mode=denied - MCP server processes get Landlock TCP denial (ABI {abi}); "
+            "no direct egress outside the sidecar",
+        )
+    )
+
+
 def _check_workspace_config(args: argparse.Namespace, findings: list[Finding]) -> None:
     """Check workspace policy, agents, skills and project context."""
     workspace = Path(args.workspace)
@@ -700,10 +875,12 @@ def _checks(args: argparse.Namespace) -> list[Finding]:
     _check_workspace(args, findings)
     _check_session_dir(args, findings)
     _check_sidecar(args, findings)
+    _check_egress(args, findings)
     backend = _check_sandbox(args, findings)
     _check_seccomp(args, findings, backend)
     _check_landlock(args, findings, backend)
     _check_mcp_seccomp(args, findings)
+    _check_mcp_network(args, findings)
     _check_workspace_config(args, findings)
     _check_skill_supply_chain(args, findings)
     _check_plugins(args, findings)

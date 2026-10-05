@@ -6,9 +6,12 @@ from __future__ import annotations
 import json
 import os
 import stat
+import subprocess
+import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 import support  # noqa: F401
 from support import RuntimeTestCase, text_turn, tool_turn
@@ -19,6 +22,7 @@ from sessions import (
     RECORD_TYPES,
     SessionIntegrityError,
     SessionStore,
+    _open_regular_nofollow,
     load_jsonl,
     new_session_id,
     resolve_session_id,
@@ -112,6 +116,80 @@ class SessionIdTests(unittest.TestCase):
 
 
 class WriteTests(RuntimeTestCase):
+    def test_a_nonblocking_fifo_open_does_not_hang_before_regular_file_check(self):
+        if not all(hasattr(os, name) for name in ("mkfifo", "O_NOFOLLOW", "O_NONBLOCK")):
+            self.skipTest("requires POSIX FIFO and safe-open flags")
+        fifo = self.workspace() / "ns-fifo.jsonl"
+        os.mkfifo(fifo)
+        # A missing O_NONBLOCK must fail within the child timeout, not hang the suite.
+        probe = (
+            "import errno, os, sys\n"
+            "from pathlib import Path\n"
+            "sys.path.insert(0, sys.argv[1])\n"
+            "import sessions\n"
+            "try:\n"
+            "    fd = sessions._open_regular_nofollow(Path(sys.argv[2]), int(sys.argv[3]))\n"
+            "except sessions.SessionIntegrityError:\n"
+            "    print('rejected-nonregular')\n"
+            "except OSError as error:\n"
+            "    assert error.errno == errno.ENXIO, error\n"
+            "    print('rejected-no-reader')\n"
+            "else:\n"
+            "    os.close(fd)\n"
+            "    raise AssertionError('FIFO was accepted')\n"
+        )
+        for flags in (os.O_RDONLY, os.O_WRONLY | os.O_APPEND | os.O_CREAT):
+            with self.subTest(flags=flags):
+                process = subprocess.Popen(
+                    [sys.executable, "-I", "-c", probe, str(Path(sessions.__file__).parent), str(fifo), str(flags)],
+                    stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+                )
+                try:
+                    stdout, stderr = process.communicate(timeout=5)
+                except subprocess.TimeoutExpired:
+                    process.kill()
+                    # iSH may defer a signal during FIFO open; supply a peer to unblock it.
+                    peer = os.open(fifo, os.O_RDWR | os.O_NONBLOCK)
+                    try:
+                        process.communicate(timeout=5)
+                    finally:
+                        os.close(peer)
+                    self.fail("FIFO safe open timed out; O_NONBLOCK must prevent blocking")
+                self.assertEqual(process.returncode, 0, stderr)
+                self.assertIn("rejected-", stdout)
+
+    def test_open_regular_restores_append_flag_after_nonblocking_open(self):
+        import fcntl
+
+        path = self.workspace() / "ns-append-flag.jsonl"
+        path.write_bytes(b"seed\n")
+        real_open = os.open
+
+        def open_without_append(target, flags, mode=0o600):
+            # Model the observed host behavior on every POSIX CI host.
+            return real_open(target, flags & ~os.O_APPEND, mode)
+
+        with patch.object(sessions.os, "open", side_effect=open_without_append):
+            fd = _open_regular_nofollow(path, os.O_WRONLY | os.O_APPEND)
+        try:
+            actual = fcntl.fcntl(fd, fcntl.F_GETFL)
+            self.assertTrue(actual & os.O_APPEND, "safe open must restore append semantics")
+            os.lseek(fd, 0, os.SEEK_SET)
+            self.assertEqual(os.write(fd, b"tail\n"), 5)
+        finally:
+            os.close(fd)
+        self.assertEqual(path.read_bytes(), b"seed\ntail\n")
+
+    def test_append_keeps_all_variable_length_jsonl_records(self):
+        store = SessionStore(self.workspace(), session_id="ns-append-integrity")
+        store.append("session_start", {"data": {"short": True}})
+        store.append("tool_result", {"content": [{"type": "tool_result", "content": "x" * 180, "is_error": False}]})
+        store.append("denial", {"tool": "Write", "reason": "r" * 130})
+        records, dropped = store.read()
+        self.assertEqual(dropped, 0)
+        self.assertEqual([record["type"] for record in records], ["session_start", "tool_result", "denial"])
+        self.assertEqual(records[1]["content"][0]["content"], "x" * 180)
+
     def test_every_append_is_one_line_and_fsynced(self):
         calls: list[int] = []
         root = self.workspace()
@@ -360,6 +438,65 @@ class RuntimeSessionTests(RuntimeTestCase):
         self.assertEqual(len(transcript), 1)
         block = transcript[0].tool_results[0]
         self.assertEqual((block.tool_use_id, block.is_error, block.text()), ("t1", True, "output"))
+
+
+class WriteTimeChainTests(unittest.TestCase):
+    """AU4: the transcript is sealed at write time, not just at export."""
+
+    def workspace(self):
+        import tempfile
+        from pathlib import Path
+
+        return Path(tempfile.mkdtemp())
+
+    def test_records_are_chained_at_write(self):
+        from audit_chain import verify_lines
+
+        root = self.workspace()
+        store = SessionStore(root, session_id="ns-chain")
+        store.append("session_start", {"content": "a"})
+        store.append("assistant", {"content": "b"})
+        lines = store.path.read_text(encoding="utf-8").strip().split("\n")
+        result = verify_lines(lines)
+        self.assertTrue(result.ok, result.reason)
+        self.assertEqual(result.chained, 2)
+
+    def test_tampering_breaks_the_chain(self):
+        import json
+
+        from audit_chain import verify_lines
+
+        root = self.workspace()
+        store = SessionStore(root, session_id="ns-tamper")
+        store.append("session_start", {"content": "a"})
+        store.append("assistant", {"content": "b"})
+        lines = store.path.read_text(encoding="utf-8").strip().split("\n")
+        rec = json.loads(lines[1])
+        rec["content"] = "EVIL"
+        lines[1] = json.dumps(rec)
+        result = verify_lines(lines)
+        self.assertFalse(result.ok)
+
+    def test_chain_resumes_across_reopens(self):
+        from audit_chain import verify_lines
+
+        root = self.workspace()
+        store = SessionStore(root, session_id="ns-resume")
+        store.append("session_start", {"content": "a"})
+        # Reopen: the new writer picks up the existing chain head.
+        store2 = SessionStore(root, session_id="ns-resume")
+        store2.append("assistant", {"content": "b"})
+        lines = store.path.read_text(encoding="utf-8").strip().split("\n")
+        result = verify_lines(lines)
+        self.assertTrue(result.ok, result.reason)
+        self.assertEqual(result.chained, 2)
+
+    def test_chain_can_be_disabled(self):
+        root = self.workspace()
+        store = SessionStore(root, session_id="ns-nochain", chain=False)
+        store.append("session_start", {"content": "a"})
+        line = store.path.read_text(encoding="utf-8").strip()
+        self.assertNotIn("chain_hash", line)
 
 
 if __name__ == "__main__":

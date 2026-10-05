@@ -39,6 +39,8 @@ py-modules = [
     "tool_ledger",
     "tool_allowlist",
     "tool_receipt",
+    "receipt_gate",
+    "governed_memory",
     "timelock",
     "trace_metrics",
     "verifier",

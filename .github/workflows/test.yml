@@ -8,6 +8,24 @@ permissions:
   contents: read
 
 jobs:
+  egress-sidecar:
+    name: Egress sidecar (Linux security contracts)
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    defaults:
+      run:
+        working-directory: components/northstar-egress-sidecar
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Compile egress sidecar
+        run: python -m py_compile *.py tests/test_*.py
+      - name: Egress policy and real HTTP tests
+        # Standard library only; loopback fixtures, no production credentials or endpoints.
+        run: python -m unittest discover -s tests -p 'test_*.py' -v
+
   test:
     name: Sidecar and run contract
     runs-on: ubuntu-latest
@@ -157,8 +175,15 @@ jobs:
           northstar-agent-runtime --version
           northstar --version
           northstar-agent-runtime doctor --workspace /tmp | grep -q "ready to run"
+          python -c "import cli, loop, tools, tools.verify_invariants, governance_bench, memory, product_path; print('northstar-agent-runtime core imports OK')"
+      - name: Installed full benchmark smoke
+        # The optional bench includes durable/host/contract tracks. Resolve their
+        # wheels from this checkout until the coordinated release is published.
+        run: |
+          python -m pip install --quiet --no-deps ../northstar-run-contract ../northstar-host ../northstar-durable-run
+          python -m pip install --quiet --no-deps '.[bench]'
+          cd /tmp
           northstar bench --json | python -c 'import json,sys; r=json.load(sys.stdin); assert r["ok"] and r["failed"]==0, r'
-          python -c "import cli, loop, tools, tools.verify_invariants, governance_bench, memory, product_path; print('northstar-agent-runtime imports OK')"
       - name: Guard verification
         # Reverting each core guard in a throwaway copy must turn its test red;
         # the untouched copy must stay green. ~1-2 minutes.

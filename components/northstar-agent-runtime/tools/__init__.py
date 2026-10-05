@@ -85,6 +85,11 @@ class ToolContext:
     agent: str = "main"
     depth: int = 0
     turn_index: int = 0
+    #: The model-issued tool-use id for this call. Handlers that cross a
+    #: trust boundary (e.g. the egress sidecar) must propagate it so the
+    #: downstream enforcement sees the same call identity the permission
+    #: gate approved.
+    call_id: str = ""
     sandbox: "ToolSandbox | None" = None
     limits: ToolLimits = field(default_factory=ToolLimits)
     services: Mapping[str, Any] = field(default_factory=dict)

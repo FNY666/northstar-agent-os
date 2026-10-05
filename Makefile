@@ -34,7 +34,7 @@ demo:
 
 test:
 	@set -e; \
-	for c in northstar-codex-sidecar northstar-run-contract northstar-run-evidence \
+	for c in northstar-codex-sidecar northstar-egress-sidecar northstar-run-contract northstar-run-evidence \
 	         northstar-host \
 	         northstar-durable-run northstar-agent-interop northstar-agent-runtime; do \
 		echo "== $$c =="; \

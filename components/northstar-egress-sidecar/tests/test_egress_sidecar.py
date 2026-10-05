@@ -1,0 +1,327 @@
+"""Egress sidecar: validation, credential brokering, and the enforcement boundary.
+
+The invariant under test: the sidecar resolves DNS itself, authorizes the
+resolved destination at CONNECT time, injects brokered credentials where the
+agent cannot see them, scrubs credential reflections from responses, and
+refuses to start when a referenced credential is missing.
+"""
+from __future__ import annotations
+
+import base64
+import json
+import os
+import sys
+import tempfile
+import threading
+import unittest
+from http.server import BaseHTTPRequestHandler, HTTPServer
+from pathlib import Path
+from types import MappingProxyType
+
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+os.environ.setdefault("NORTHSTAR_RUNTIME_DIR", str(Path(__file__).resolve().parent.parent.parent / "northstar-agent-runtime"))
+sys.path.insert(0, os.environ["NORTHSTAR_RUNTIME_DIR"])
+
+from egress_sidecar import (  # noqa: E402
+    CredentialStore,
+    SidecarContext,
+    build_context,
+    classify_request,
+    run_one,
+)
+from egress_enforcer import DestinationRule, EgressPolicy  # noqa: E402
+from transport import decode_request, encode_response  # noqa: E402
+
+POLICY_TOML = """\
+schema_version = "northstar.egress.v1"
+revision = "test.r1"
+
+[destinations.local]
+hosts = ["svc.local"]
+ports = [18090, 18092]
+methods = ["POST"]
+path_prefixes = ["/api"]
+allow_private_ips = true
+tls = false
+
+[destinations.hook]
+hosts = ["hook.local"]
+ports = [18091]
+methods = ["POST"]
+path_prefixes = ["/deploy"]
+credential = "hook-token"
+allow_private_ips = true
+tls = false
+"""
+
+
+def wire(**overrides):
+    base = {
+        "request_id": "r-1",
+        "agent_id": "a1",
+        "run_id": "run1",
+        "host": "svc.local",
+        "port": 18090,
+        "method": "POST",
+        "path": "/api/echo",
+        "headers": {"content-type": "application/json"},
+        "body_b64": base64.b64encode(b'{"x":1}').decode(),
+        "timeout_ms": 5000,
+    }
+    base.update(overrides)
+    return base
+
+
+class ValidationTests(unittest.TestCase):
+    def test_valid_request(self):
+        self.assertTrue(classify_request(wire()).ok)
+
+    def test_missing_fields_rejected(self):
+        v = classify_request({"request_id": "r"})
+        self.assertFalse(v.ok)
+        self.assertTrue(v.errors)
+
+    def test_body_b64_bounded(self):
+        v = classify_request(wire(body_b64="A" * 1_900_000))
+        self.assertFalse(v.ok)
+
+    def test_invalid_b64_rejected(self):
+        v = classify_request(wire(body_b64="!!!not-base64!!!"))
+        self.assertFalse(v.ok)
+
+    def test_timeout_bounded(self):
+        self.assertFalse(classify_request(wire(timeout_ms=999)).ok)
+        self.assertFalse(classify_request(wire(timeout_ms=999_999)).ok)
+
+    def test_transport_round_trip(self):
+        line = encode_response({"a": 1})
+        self.assertEqual(decode_request(line.rstrip("\n")), {"a": 1})
+        self.assertIsNone(decode_request("not json"))
+
+
+class SidecarTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.policy_dir = tempfile.mkdtemp()
+        Path(cls.policy_dir, "northstar-egress.toml").write_text(POLICY_TOML)
+        os.environ["NORTHSTAR_EGRESS_CRED_HOOK_TOKEN"] = "hook-secret-value"
+
+        class Handler(BaseHTTPRequestHandler):
+            def do_POST(self):
+                length = int(self.headers.get("Content-Length", 0))
+                body = self.rfile.read(length)
+                # Malicious endpoint: reflects the Authorization header.
+                auth = self.headers.get("Authorization", "")
+                payload = b'{"auth_seen":"' + auth.encode() + b'","len":' + str(len(body)).encode() + b"}"
+                self.send_response(200)
+                self.send_header("Content-Type", "application/json")
+                self.end_headers()
+                self.wfile.write(payload)
+
+            def log_message(self, *a):
+                pass
+
+        cls.server = HTTPServer(("127.0.0.1", 18090), Handler)
+        cls.server2 = HTTPServer(("127.0.0.1", 18091), Handler)
+        threading.Thread(target=cls.server.serve_forever, daemon=True).start()
+        threading.Thread(target=cls.server2.serve_forever, daemon=True).start()
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.server.shutdown()
+        cls.server2.shutdown()
+        os.environ.pop("NORTHSTAR_EGRESS_CRED_HOOK_TOKEN", None)
+
+    def _ctx(self):
+        ctx = build_context(policy_dir=self.policy_dir)
+        ctx._resolver = lambda h: ["127.0.0.1"]
+        return ctx
+
+    def test_allow_end_to_end(self):
+        resp = run_one(wire(), self._ctx())
+        self.assertEqual(resp["status"], "ok")
+        self.assertEqual(resp["http_status"], 200)
+        body = base64.b64decode(resp["body_b64"]).decode()
+        self.assertIn('"len":7', body)
+        self.assertEqual(resp["receipt"]["verdict"], "allow")
+
+    def test_deny_unlisted(self):
+        resp = run_one(wire(host="evil.com"), self._ctx())
+        self.assertEqual(resp["status"], "denied")
+        self.assertEqual(resp["deny_code"], "egress.destination_denied")
+        self.assertIn("deny_code", resp["receipt"])
+
+    def test_credential_injected_server_side(self):
+        req = wire(host="hook.local", port=18091, path="/deploy")
+        resp = run_one(req, self._ctx())
+        self.assertEqual(resp["status"], "ok")
+        body = base64.b64decode(resp["body_b64"]).decode()
+        # The server saw a real bearer token...
+        self.assertIn("Bearer", body)
+        # ...but the agent never sees the value (reflection scrubbed).
+        self.assertNotIn("hook-secret-value", body)
+        self.assertIn("[REDACTED]", body)
+
+    def test_smuggled_auth_denied(self):
+        req = wire(host="hook.local", port=18091, path="/deploy", headers={"Authorization": "Bearer stolen"})
+        resp = run_one(req, self._ctx())
+        self.assertEqual(resp["status"], "denied")
+        self.assertEqual(resp["deny_code"], "egress.credentialless_bypass_attempt")
+
+    def test_agent_supplied_host_header_is_overridden(self):
+        """E7: the sidecar forces Host to the authorized request host; an
+        agent-supplied Host must not reach the upstream."""
+        seen = {}
+
+        class HostCaptureHandler(BaseHTTPRequestHandler):
+            def do_POST(self):
+                seen["host"] = self.headers.get("Host", "")
+                self.send_response(200)
+                self.send_header("Content-Type", "application/json")
+                self.end_headers()
+                self.wfile.write(b"{}")
+
+            def log_message(self, *a):
+                pass
+
+        server = HTTPServer(("127.0.0.1", 18092), HostCaptureHandler)
+        threading.Thread(target=server.serve_forever, daemon=True).start()
+        try:
+            req = wire(
+                host="svc.local",
+                port=18092,
+                path="/api/echo",
+                headers={"host": "attacker.example.com"},
+            )
+            resp = run_one(req, self._ctx())
+            self.assertEqual(resp["status"], "ok")
+            self.assertEqual(seen.get("host"), "svc.local")
+        finally:
+            server.shutdown()
+
+    def test_malformed_wire_rejected(self):
+        resp = run_one({"request_id": "r-bad"}, self._ctx())
+        self.assertEqual(resp["status"], "rejected")
+
+    def test_rejected_carries_receipt(self):
+        resp = run_one({"request_id": "r-bad"}, self._ctx())
+        self.assertEqual(resp["status"], "rejected")
+        receipt = resp.get("receipt")
+        self.assertIsNotNone(receipt, "rejected requests must carry a receipt")
+        self.assertEqual(receipt["kind"], "egress-rejection-receipt/1")
+        self.assertEqual(receipt["request_id"], "r-bad")
+        self.assertEqual(receipt["verdict"], "rejected")
+        self.assertTrue(receipt["errors"], "receipt must record why it was rejected")
+        # Tamper-evident: the receipt is hash-chained.
+        self.assertIn("chain_hash", receipt)
+
+    def test_rejection_receipt_bounds_malformed_input(self):
+        from egress_enforcer import build_rejection_receipt
+
+        huge = {"request_id": "r-huge", "blob": "x" * 10_000}
+        receipt = build_rejection_receipt(
+            raw_value=huge,
+            errors=["too big"],
+            request_id="r-huge",
+            now=0.0,
+        )
+        preview = receipt["received"]["preview"]
+        self.assertLessEqual(len(preview), 2_100, "preview must be bounded")
+        self.assertIn("truncated", preview)
+
+    def test_missing_credential_refuses_startup(self):
+        os.environ.pop("NORTHSTAR_EGRESS_CRED_HOOK_TOKEN", None)
+        try:
+            with self.assertRaises(Exception):
+                build_context(policy_dir=self.policy_dir)
+        finally:
+            os.environ["NORTHSTAR_EGRESS_CRED_HOOK_TOKEN"] = "hook-secret-value"
+
+
+class ReceiptFeedTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.policy_dir = tempfile.mkdtemp()
+        Path(cls.policy_dir, "northstar-egress.toml").write_text(POLICY_TOML)
+        os.environ["NORTHSTAR_EGRESS_CRED_HOOK_TOKEN"] = "hook-secret-value"
+
+    @classmethod
+    def tearDownClass(cls):
+        os.environ.pop("NORTHSTAR_EGRESS_CRED_HOOK_TOKEN", None)
+
+    def _ctx(self):
+        ctx = build_context(policy_dir=self.policy_dir)
+        ctx._resolver = lambda h: ["127.0.0.1"]
+        return ctx
+
+    def test_feed_appends_receipts(self):
+        from pathlib import Path
+
+        from egress_sidecar import ReceiptFeed, build_context, run_one
+
+        with tempfile.TemporaryDirectory() as tmp:
+            feed_path = Path(tmp) / "receipts.jsonl"
+            feed = ReceiptFeed(feed_path)
+            ctx = build_context(policy_dir=self.policy_dir, receipt_feed_path=feed_path)
+            ctx._resolver = lambda h: ["127.0.0.1"]
+            # Rejected request -> receipt persisted.
+            resp = run_one({"request_id": "r-feed-1"}, ctx)
+            self.assertEqual(resp["status"], "rejected")
+            self.assertTrue(feed_path.is_file())
+            lines = feed_path.read_text(encoding="utf-8").strip().splitlines()
+            self.assertEqual(len(lines), 1)
+            record = json.loads(lines[0])
+            self.assertEqual(record["request_id"], "r-feed-1")
+            self.assertEqual(record["kind"], "egress-rejection-receipt/1")
+            self.assertIn("chain_hash", record)
+
+    def test_no_feed_no_persistence(self):
+        # Without a feed path, run_one works but writes nothing.
+        from egress_sidecar import run_one
+
+        ctx = self._ctx()
+        self.assertIsNone(ctx.receipt_feed)
+        resp = run_one({"request_id": "r-nofeed"}, ctx)
+        self.assertEqual(resp["status"], "rejected")
+        self.assertIn("receipt", resp)  # receipt still returned to caller
+
+    def test_feed_is_thread_safe(self):
+        import threading
+        from pathlib import Path
+
+        from egress_sidecar import ReceiptFeed
+
+        with tempfile.TemporaryDirectory() as tmp:
+            feed = ReceiptFeed(Path(tmp) / "r.jsonl")
+            errors: list[str] = []
+
+            def worker(n: int) -> None:
+                try:
+                    for i in range(20):
+                        ok = feed.append({"n": n, "i": i, "chain_hash": "x"})
+                        if not ok:
+                            errors.append(f"worker {n} append failed")
+                except Exception as exc:  # noqa: BLE001
+                    errors.append(str(exc))
+
+            threads = [threading.Thread(target=worker, args=(n,)) for n in range(5)]
+            for t in threads:
+                t.start()
+            for t in threads:
+                t.join()
+            self.assertEqual(errors, [])
+            self.assertEqual(feed.appended, 100)
+
+    def test_feed_survives_unserializable(self):
+        from pathlib import Path
+
+        from egress_sidecar import ReceiptFeed
+
+        with tempfile.TemporaryDirectory() as tmp:
+            feed = ReceiptFeed(Path(tmp) / "r.jsonl")
+            self.assertFalse(feed.append({"bad": object()}))
+            self.assertIsNotNone(feed.last_error)
+
+
+if __name__ == "__main__":
+    unittest.main()

@@ -159,17 +159,9 @@ def _claim_statement(record: dict[str, Any], index: int) -> str:
 
 def _feed_session_ids(first_record: dict[str, Any]) -> tuple[str | None, str | None, str | None]:
     """(session_id, run_id, started_ts) from the feed's genesis anchor."""
-    genesis = first_record.get("genesis")
-    if not isinstance(genesis, dict):
-        return None, None, None
-    session_id = genesis.get("session_id")
-    run_id = genesis.get("run_id")
-    started_ts = genesis.get("started_ts")
-    return (
-        session_id if isinstance(session_id, str) and session_id else None,
-        run_id if isinstance(run_id, str) and run_id else None,
-        started_ts if isinstance(started_ts, str) and started_ts else None,
-    )
+    from audit_chain import feed_genesis_ids
+
+    return feed_genesis_ids(first_record)
 
 
 def build_akf_unit(
