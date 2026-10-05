@@ -179,3 +179,10 @@ Similarly, **tool output is never trusted as instructions.** Every
 `ToolResult` carries a `ToolProvenance` (source + trust level); MCP and
 external tool outputs are `trust="low"` by default. Policy decisions look
 at trusted metadata, never at artifact text.
+
+**TEE attestation does not defend against physical access.** When Northstar
+emits `tee`-grade evidence (TDX/SEV-SNP quotes), it proves *what ran where*
+to a remote verifier -- it defends against a malicious operator or cloud
+provider. It does **not** defend against an attacker with physical access
+to the machine (cf. TEE.Fail, 2025: DDR interposer key extraction). The
+threat model is "distrust the operator", not "distrust physics".
