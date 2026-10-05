@@ -607,5 +607,91 @@ class SignedApprovalTests(unittest.TestCase):
         self.assertTrue(d.allowed)
 
 
+class ScopeLifetimeTests(unittest.TestCase):
+    def test_open_scope_allows(self):
+        from permissions import (
+            PermissionConfig,
+            PermissionEngine,
+            PermissionRequestContext,
+            ScopeManager,
+        )
+
+        mgr = ScopeManager()
+        mgr.open_scope("phase-1", "data gathering")
+        engine = PermissionEngine(
+            PermissionConfig(mode="default", can_use_tool=lambda n, p, c: True),
+            tool_kinds={"Write": "edit"},
+            scope_manager=mgr,
+        )
+        ctx = PermissionRequestContext(scope_id="phase-1")
+        d = engine.evaluate("Write", kind="edit", payload={}, context=ctx)
+        self.assertTrue(d.allowed)
+
+    def test_closed_scope_denies(self):
+        from permissions import (
+            PermissionConfig,
+            PermissionEngine,
+            PermissionRequestContext,
+            ScopeManager,
+        )
+
+        mgr = ScopeManager()
+        mgr.open_scope("phase-1", "data gathering")
+        mgr.close_scope("phase-1")
+        engine = PermissionEngine(
+            PermissionConfig(mode="default", can_use_tool=lambda n, p, c: True),
+            tool_kinds={"Write": "edit"},
+            scope_manager=mgr,
+        )
+        ctx = PermissionRequestContext(scope_id="phase-1")
+        d = engine.evaluate("Write", kind="edit", payload={}, context=ctx)
+        self.assertFalse(d.allowed)
+        self.assertEqual(d.rule, "scope:closed")
+        self.assertIn("phase-1", d.reason)
+
+    def test_unscoped_requests_unaffected(self):
+        # Empty scope_id = no scoping, current behavior.
+        from permissions import (
+            PermissionConfig,
+            PermissionEngine,
+            PermissionRequestContext,
+            ScopeManager,
+        )
+
+        mgr = ScopeManager()
+        engine = PermissionEngine(
+            PermissionConfig(mode="default", can_use_tool=lambda n, p, c: True),
+            tool_kinds={"Write": "edit"},
+            scope_manager=mgr,
+        )
+        d = engine.evaluate("Write", kind="edit", payload={})
+        self.assertTrue(d.allowed)
+
+    def test_no_manager_no_change(self):
+        # Without a scope manager, scope_id is ignored.
+        from permissions import (
+            PermissionConfig,
+            PermissionEngine,
+            PermissionRequestContext,
+        )
+
+        engine = PermissionEngine(
+            PermissionConfig(mode="default", can_use_tool=lambda n, p, c: True),
+            tool_kinds={"Write": "edit"},
+        )
+        ctx = PermissionRequestContext(scope_id="phase-1")
+        d = engine.evaluate("Write", kind="edit", payload={}, context=ctx)
+        self.assertTrue(d.allowed)
+
+    def test_reopen_closed_scope_fails(self):
+        from permissions import ScopeManager
+
+        mgr = ScopeManager()
+        mgr.open_scope("s1")
+        mgr.close_scope("s1")
+        with self.assertRaises(ValueError):
+            mgr.open_scope("s1")
+
+
 if __name__ == "__main__":
     unittest.main()

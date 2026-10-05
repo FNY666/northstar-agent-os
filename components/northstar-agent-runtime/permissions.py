@@ -180,7 +180,54 @@ class PermissionRequestContext:
     #: arguments_digest)`` pair) and attaches them to the request; the
     #: engine verifies them itself and never trusts the callback's word.
     multisig_signatures: tuple[MultisigSignature, ...] = ()
+    #: Scope (epoch) this request belongs to. When set and the scope is
+    #: closed via ScopeManager, the request is denied -- this is the
+    #: permission-lifetime mechanism (PORTICO-style): approvals don't
+    #: linger past their subgoal. Empty means unscoped (current behavior).
+    scope_id: str = ""
     data: dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass
+class ScopeManager:
+    """Tracks permission scopes (epochs) and their lifetime.
+
+    A scope groups approvals for one task phase. When the phase ends,
+    ``close_scope`` revokes the scope: subsequent permission checks with
+    that ``scope_id`` are denied. This closes the "lingering authority"
+    gap where a subgoal's permissions remain usable after the subgoal ends.
+
+    Scopes are identified by string IDs; the manager is deliberately
+    simple (no persistence) -- the runtime creates scopes for task phases
+    and closes them on phase transitions.
+    """
+
+    _open: dict[str, str] = field(default_factory=dict)  # scope_id -> description
+    _closed: set[str] = field(default_factory=set)
+
+    def open_scope(self, scope_id: str, description: str = "") -> None:
+        """Open a scope. Reopening a closed scope is an error (fail closed)."""
+        if not scope_id:
+            raise ValueError("scope_id must not be empty")
+        if scope_id in self._closed:
+            raise ValueError(f"scope {scope_id!r} is closed and cannot be reopened")
+        self._open[scope_id] = description
+
+    def close_scope(self, scope_id: str) -> bool:
+        """Close a scope, revoking its permissions. Returns True if it was open."""
+        if scope_id in self._open:
+            del self._open[scope_id]
+            self._closed.add(scope_id)
+            return True
+        return False
+
+    def is_open(self, scope_id: str) -> bool:
+        """True if the scope exists and hasn't been closed."""
+        return scope_id in self._open
+
+    def was_closed(self, scope_id: str) -> bool:
+        """True if the scope was explicitly closed (vs never opened)."""
+        return scope_id in self._closed
 
 
 def digest_arguments(arguments: Any) -> str:
@@ -383,6 +430,7 @@ class PermissionEngine:
         pretrade: PreTradeRiskConfig | None = None,
         audit_sink: Callable[[dict[str, Any]], None] | None = None,
         now: Callable[[], float] | None = None,
+        scope_manager: ScopeManager | None = None,
     ) -> None:
         if config is None:
             config = PermissionConfig(
@@ -415,6 +463,9 @@ class PermissionEngine:
         self._multisig_pubkeys: dict[str, bytes] | None = (
             dict(multisig_pubkeys) if multisig_pubkeys else None
         )
+        #: Permission scopes (epochs) for lifetime-bound approvals. None
+        #: (the default) disables scope checks: zero behaviour change.
+        self.scope_manager = scope_manager
         #: Optional SEC 15c3-5-style pre-trade risk checks (layer 0). None
         #: (the default) disables them: zero behaviour change.
         self.pretrade = pretrade
@@ -488,6 +539,22 @@ class PermissionEngine:
         asked, and escalation *is* asking the host.
         """
         payload = dict(payload or {})
+        # Permission lifetime: if the request belongs to a scope that has
+        # been closed, deny immediately. This revokes lingering authority
+        # when a subgoal/phase ends (PORTICO-style).
+        if (
+            self.scope_manager is not None
+            and context is not None
+            and context.scope_id
+            and not self.scope_manager.is_open(context.scope_id)
+        ):
+            return PermissionDecision(
+                False,
+                source="scope",
+                reason=f"scope {context.scope_id!r} is closed; permission expired",
+                rule="scope:closed",
+                tool=tool_name,
+            )
         sink_verdict = (
             dataflow.check_sink(tool_name, payload) if dataflow is not None else None
         )
