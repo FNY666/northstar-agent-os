@@ -799,7 +799,7 @@ def authorize_egress(
             and secrets.compare_digest(str(request.agent_id or ""), str((card.provenance.agent if card.provenance else "") or ""))
             and verify_card_binding(card, call_id=request.call_id, arguments=request.arguments)
             and str(receipt.approver_id or "") in keys
-            and verify_approval_receipt(receipt, keys[str(receipt.approver_id or "")])
+            and verify_approval_receipt(receipt, keys[str(receipt.approver_id or "")], now=now)
         )
         if not binding_ok:
             return deny(

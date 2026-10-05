@@ -431,6 +431,7 @@ class PermissionEngine:
         audit_sink: Callable[[dict[str, Any]], None] | None = None,
         now: Callable[[], float] | None = None,
         scope_manager: ScopeManager | None = None,
+        wall_now: Callable[[], float] | None = None,
     ) -> None:
         if config is None:
             config = PermissionConfig(
@@ -466,6 +467,10 @@ class PermissionEngine:
         #: Permission scopes (epochs) for lifetime-bound approvals. None
         #: (the default) disables scope checks: zero behaviour change.
         self.scope_manager = scope_manager
+        #: Wall-clock for approval-receipt freshness checks. Separate from
+        #: ``_now`` (monotonic, for durations): receipt ``decided_at`` is a
+        #: wall-clock timestamp. Injectable for deterministic tests.
+        self._wall_now = wall_now or time.time
         #: Optional SEC 15c3-5-style pre-trade risk checks (layer 0). None
         #: (the default) disables them: zero behaviour change.
         self.pretrade = pretrade
@@ -905,7 +910,7 @@ class PermissionEngine:
             pubkey = self.config.approver_keys.get(receipt.approver_id)
             if pubkey is None:
                 return None
-            if verify_approval_receipt(receipt, pubkey):
+            if verify_approval_receipt(receipt, pubkey, now=self._wall_now()):
                 return receipt.approver_id
             return None
         except (ValueError, TypeError, KeyError):

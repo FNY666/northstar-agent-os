@@ -606,6 +606,55 @@ class SignedApprovalTests(unittest.TestCase):
         d = engine.evaluate("Write", kind="edit", payload={})
         self.assertTrue(d.allowed)
 
+    def test_expired_receipt_rejected_with_injected_clock(self):
+        # The injected wall clock determines freshness, not time.time().
+        from ed25519 import public_key as ed_pubkey
+        from egress_enforcer import build_approval_receipt
+        from permissions import PermissionConfig, PermissionEngine
+
+        seed = bytes(32)
+        pubkey = ed_pubkey(seed)
+        # Receipt decided at t=1000.
+        receipt = build_approval_receipt(
+            card_id="c1",
+            call_id="call-1",
+            arguments_digest="sha256:abc",
+            approver_id="alice",
+            approver_seed=seed,
+            decided_at=1000.0,
+            body=b"{}",
+        )
+
+        def callback(name, payload, ctx):
+            return {"allowed": True, "approval_receipt": receipt.as_dict()}
+
+        # Clock says t=1000+400 > 300s TTL -> expired.
+        engine = PermissionEngine(
+            PermissionConfig(
+                mode="default",
+                can_use_tool=callback,
+                approver_keys={"alice": pubkey},
+            ),
+            tool_kinds={"Write": "edit"},
+            wall_now=lambda: 1400.0,
+        )
+        d = engine.evaluate("Write", kind="edit", payload={})
+        self.assertFalse(d.allowed)
+        self.assertEqual(d.rule, "host_callback:bad_signature")
+
+        # Clock says t=1000+100 within TTL -> allowed.
+        engine2 = PermissionEngine(
+            PermissionConfig(
+                mode="default",
+                can_use_tool=callback,
+                approver_keys={"alice": pubkey},
+            ),
+            tool_kinds={"Write": "edit"},
+            wall_now=lambda: 1100.0,
+        )
+        d2 = engine2.evaluate("Write", kind="edit", payload={})
+        self.assertTrue(d2.allowed)
+
 
 class ScopeLifetimeTests(unittest.TestCase):
     def test_open_scope_allows(self):
