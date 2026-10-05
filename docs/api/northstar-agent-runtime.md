@@ -6503,6 +6503,10 @@ One MCP server over stdio: modern (per-request metadata) or legacy (handshake).
   - True when tool-definition drift was detected; calls are denied.
 - `refresh_tools()`
   - Re-list tools and compare against the admission baseline.
+- `distrusted` (property)
+  - True when repeated quarantines escalated to distrust.
+- `re_admit()`
+  - Explicit operator re-admission after quarantine/distrust.
 - `call_tool(tool_name: str, arguments: dict[str, Any])`
   - Invoke one remote tool, resolving MRTR input requests through the gate.
 - `close()`

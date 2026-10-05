@@ -248,6 +248,15 @@ class McpStdioClient:
         self._tool_digests: dict[str, str] = {}
         self._quarantined: bool = False
         self._quarantine_reason: str = ""
+        # Pin-flap distrust (Keel-style): repeated quarantines escalate.
+        # A server that flaps 3+ times is marked distrusted and needs an
+        # explicit re_admit() -- not just a fresh client -- to recover.
+        self._quarantine_count: int = 0
+        self._distrusted: bool = False
+        # Set when the server pushes notifications/tools/list_changed. The
+        # next call_tool() drains it via refresh_tools() so a live rug-pull
+        # is caught even between manual refreshes.
+        self._pending_list_changed: bool = False
         # Set when the server pushes notifications/tools/list_changed. The
         # next call_tool() drains it via refresh_tools() so a live rug-pull
         # is caught even between manual refreshes.
@@ -436,17 +445,10 @@ class McpStdioClient:
             if baseline is None:
                 self._save_baseline()
             elif baseline != self._tool_digests:
-                self._quarantined = True
-                self._quarantine_reason = "tool definitions differ from the admission baseline"
-                if callable(self.audit):
-                    self.audit(
-                        {
-                            "type": "mcp.tool_drift",
-                            "server": self.name,
-                            "at": "connect",
-                            "reason": self._quarantine_reason,
-                        }
-                    )
+                self._quarantine(
+                    "tool definitions differ from the admission baseline",
+                    at="connect",
+                )
         except Exception:
             self.close()
             raise
@@ -543,27 +545,64 @@ class McpStdioClient:
             if tool_name not in self._tool_digests:
                 drifts.append(ToolDrift(tool_name, "added", None, seen))
         if drifts:
-            self._quarantined = True
-            self._quarantine_reason = (
-                f"tool-definition drift: {', '.join(f'{d.kind}:{d.tool_name}' for d in drifts)}"
+            self._quarantine(
+                f"tool-definition drift: {', '.join(f'{d.kind}:{d.tool_name}' for d in drifts)}",
+                drifts=drifts,
             )
-            if callable(self.audit):
-                self.audit(
-                    {
-                        "type": "mcp.tool_drift",
-                        "server": self.name,
-                        "drifts": [
-                            {
-                                "tool": d.tool_name,
-                                "kind": d.kind,
-                                "expected_digest": d.expected_digest,
-                                "observed_digest": d.observed_digest,
-                            }
-                            for d in drifts
-                        ],
-                    }
-                )
         return tuple(drifts)
+
+    def _quarantine(
+        self,
+        reason: str,
+        drifts: list[ToolDrift] | None = None,
+        at: str | None = None,
+    ) -> None:
+        """Quarantine the server, escalating to distrusted on repeated flaps."""
+        self._quarantined = True
+        self._quarantine_reason = reason
+        self._quarantine_count += 1
+        if self._quarantine_count >= 3:
+            self._distrusted = True
+        if callable(self.audit):
+            record: dict[str, Any] = {
+                "type": "mcp.tool_drift",
+                "server": self.name,
+                "quarantine_count": self._quarantine_count,
+                "distrusted": self._distrusted,
+            }
+            if at is not None:
+                record["at"] = at
+            if drifts is not None:
+                record["drifts"] = [
+                    {
+                        "tool": d.tool_name,
+                        "kind": d.kind,
+                        "expected_digest": d.expected_digest,
+                        "observed_digest": d.observed_digest,
+                    }
+                    for d in drifts
+                ]
+            else:
+                record["reason"] = reason
+            self.audit(record)
+
+    @property
+    def distrusted(self) -> bool:
+        """True when repeated quarantines escalated to distrust."""
+        return self._distrusted
+
+    def re_admit(self) -> None:
+        """Explicit operator re-admission after quarantine/distrust.
+
+        Clears the quarantine and distrust flags. The next connect() will
+        establish a fresh baseline. This is deliberately explicit -- a
+        distrusted server must not recover silently.
+        """
+        self._quarantined = False
+        self._quarantine_reason = ""
+        self._distrusted = False
+        self._quarantine_count = 0
+        self._pending_list_changed = False
 
     # -- calls ---------------------------------------------------------------
 
@@ -578,6 +617,11 @@ class McpStdioClient:
         count is capped: the spec lets a server re-ask until satisfied, and an
         uncapped client would let it keep a human at a prompt forever.
         """
+        if self._distrusted:
+            return ToolResult.error(
+                f"mcp {self.name}/{tool_name}: denied: server is distrusted "
+                f"({self._quarantine_count} quarantines); full re-admission required"
+            )
         if self._quarantined:
             return ToolResult.error(
                 f"mcp {self.name}/{tool_name}: denied: server is quarantined "
