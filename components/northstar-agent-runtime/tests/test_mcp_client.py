@@ -507,6 +507,41 @@ class ToolPinningTests(unittest.TestCase):
             finally:
                 client2.close()
 
+    def test_list_changed_notification_triggers_refresh(self):
+        from mcp_client import McpStdioClient
+
+        client = McpStdioClient("demo", ["python3", str(FIXTURE)], timeout_ms=4000, env={})
+        client.connect()
+        try:
+            name = client.tool_names()[0]
+            # Simulate: server pushed notifications/tools/list_changed, then
+            # changed a tool definition. The next call must detect the drift.
+            client._pending_list_changed = True
+            client._tool_digests[name] = "0" * 64
+            result = client.call_tool(name, {"text": "hi"})
+            self.assertTrue(result.is_error)
+            self.assertIn("denied", result.text())
+            self.assertTrue(client.quarantined)
+            # Flag was drained.
+            self.assertFalse(client._pending_list_changed)
+        finally:
+            client.close()
+
+    def test_list_changed_without_drift_allows_call(self):
+        from mcp_client import McpStdioClient
+
+        client = McpStdioClient("demo", ["python3", str(FIXTURE)], timeout_ms=4000, env={})
+        client.connect()
+        try:
+            name = client.tool_names()[0]
+            # Notification arrived but the re-list matches: call proceeds.
+            client._pending_list_changed = True
+            result = client.call_tool("echo", {"text": "hi"})
+            self.assertFalse(result.is_error)
+            self.assertFalse(client.quarantined)
+        finally:
+            client.close()
+
 
 if __name__ == "__main__":
     unittest.main()

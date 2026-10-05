@@ -248,6 +248,10 @@ class McpStdioClient:
         self._tool_digests: dict[str, str] = {}
         self._quarantined: bool = False
         self._quarantine_reason: str = ""
+        # Set when the server pushes notifications/tools/list_changed. The
+        # next call_tool() drains it via refresh_tools() so a live rug-pull
+        # is caught even between manual refreshes.
+        self._pending_list_changed: bool = False
         self._info = {"name": "northstar-agent-runtime", "version": __version__}
 
     # -- lifecycle -----------------------------------------------------------
@@ -579,6 +583,17 @@ class McpStdioClient:
                 f"mcp {self.name}/{tool_name}: denied: server is quarantined "
                 f"({self._quarantine_reason}); re-admit the server to clear"
             )
+        # Drain any pending list_changed notification: the server announced
+        # a toolset change, so re-verify pins before executing anything.
+        if self._pending_list_changed:
+            self._pending_list_changed = False
+            drifts = self.refresh_tools()
+            if drifts and self._quarantined:
+                return ToolResult.error(
+                    f"mcp {self.name}/{tool_name}: denied: server pushed "
+                    f"notifications/tools/list_changed and the re-list drifted "
+                    f"({self._quarantine_reason}); re-admit the server to clear"
+                )
         try:
             self.tool(tool_name)  # raises McpError for an unknown tool
         except McpError as error:
@@ -764,6 +779,11 @@ class McpStdioClient:
             except json.JSONDecodeError:
                 continue  # a malformed line is not our response; keep waiting
             if not isinstance(message, dict) or message.get("id") != request_id:
+                # Server-pushed notification: the only one we act on is
+                # tools/list_changed (live rug-pull signal). Anything else
+                # is ignored as before.
+                if isinstance(message, dict) and message.get("method") == "notifications/tools/list_changed":
+                    self._pending_list_changed = True
                 continue  # notifications and other ids are ignored
             error = message.get("error")
             if isinstance(error, dict):
