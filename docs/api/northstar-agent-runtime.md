@@ -121,6 +121,34 @@ Does this critical system have a valid fail-closed plan?
 
 Betting-tagged inputs may not enter protected pipelines.
 
+### `capability_warrants`
+
+Source: `components/northstar-agent-runtime/capability_warrants.py`
+
+Tenuo-inspired capability warrants: holder-bound, attenuating, audited.
+
+#### `WarrantError`
+
+Raised for malformed warrants; authorization returns False, never raises.
+
+#### `WarrantVerdict`
+
+#### `issue(*, issuer_secret: bytes, holder_pubkey: bytes, tools: Sequence[str], constraints: Sequence[Mapping[str, Any]] | None=None, clearance: int=1, ttl_seconds: int=3600, max_depth: int=3)`
+
+Issue a root warrant (only the issuer key holder can create one).
+
+#### `attenuate(*, parent_warrant: Mapping[str, Any], holder_secret: bytes, child_holder_pubkey: bytes, tools: Sequence[str] | None=None, constraints: Sequence[Mapping[str, Any]] | None=None, ttl_seconds: int=0)`
+
+Delegate with attenuation (monotonic narrowing only).
+
+#### `authorize(*, warrant: Mapping[str, Any], tool: str, params: Mapping[str, Any], pop_signature: bytes, now: int, prev_receipt_hash: str='')`
+
+Authorize one action under a warrant (verifier side).
+
+#### `pop_sign(*, holder_secret: bytes, warrant_id: str, tool: str, params: Mapping[str, Any], now: int)`
+
+Holder-side: sign a PoP challenge for one call (used by agents).
+
 ### `embodied`
 
 Source: `components/northstar-agent-runtime/embodied.py`
@@ -362,6 +390,42 @@ Check that retired hardware routes through the registry.
 #### `greenwash_probe(*, claim_text: str, evidence_bound: bool, evidence_tier: str | None=None)`
 
 Probe a marketing claim for bound environmental evidence.
+
+### `mandate_credentials`
+
+Source: `components/northstar-agent-runtime/mandate_credentials.py`
+
+AP2-inspired mandate credentials: open/closed two-phase authorization.
+
+#### `MandateError`
+
+Raised for malformed mandates; verification returns False, never raises.
+
+#### `UsageContext`
+
+Verifier-side state for stateful constraints (budgets, recurrence).
+
+#### `MandateVerdict`
+
+#### `issue_open(*, issuer_secret: bytes, delegate_to_did: str, cnf_pubkey: bytes, constraints: Sequence[Mapping[str, Any]], preset_claims: Mapping[str, Any] | None=None, expires_at: int=0)`
+
+Issue an Open mandate (user approves once, in a trusted surface).
+
+#### `close_mandate(*, open_mandate: Mapping[str, Any], cnf_secret: bytes, action: Mapping[str, Any], verifier_id: str, nonce: bytes)`
+
+Bind an open mandate to one action (agent-side, per action).
+
+#### `verify_closed(*, closed_mandate: Mapping[str, Any], open_mandate: Mapping[str, Any], ctx: UsageContext, now: int)`
+
+Verifier-side: check a closed mandate covers the action.
+
+#### `issue_receipt(*, verifier_secret: bytes, closed_mandate: Mapping[str, Any], ok: bool, error_code: str='')`
+
+Issue a signed receipt for a presented closed mandate.
+
+#### `verify_receipt(receipt: Mapping[str, Any], *, verifier_pubkey: bytes)`
+
+Verify a receipt's signature. False on any problem, never raises.
 
 ### `orbital_agents`
 

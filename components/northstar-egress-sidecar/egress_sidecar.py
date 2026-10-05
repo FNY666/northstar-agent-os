@@ -33,11 +33,13 @@ from __future__ import annotations
 import base64
 import binascii
 import http.client
+import json
 import os
 import re
 import socket
 import ssl
 import sys
+import threading
 import time
 from dataclasses import dataclass
 from pathlib import Path
@@ -112,6 +114,54 @@ class CredentialStore:
         return tuple(self._values.values())
 
 
+class ReceiptFeed:
+    """Persistent, append-only JSONL feed of egress receipts.
+
+    Every receipt the sidecar issues -- allowed, denied, rejected, or
+    error -- is appended here, so an auditor can reconstruct the full
+    egress history even across sidecar restarts. Thread-safe: the socket
+    server dispatches requests on a thread pool.
+
+    The receipts themselves are already hash-chained by
+    :mod:`egress_enforcer`; this feed preserves their order on disk and
+    fsyncs each append for durability. On startup it seeks to the end
+    (no chain re-verification here -- that is the auditor's job via
+    ``audit_chain.verify_lines``).
+
+    Failures are best-effort: a feed write error is recorded on the
+    instance (``last_error``) but never breaks request handling -- the
+    receipt is still returned to the caller.
+    """
+
+    def __init__(self, path: str | Path) -> None:
+        self.path = Path(path)
+        self._lock = threading.Lock()
+        self.last_error: str | None = None
+        self.appended = 0
+
+    def append(self, receipt: dict[str, Any]) -> bool:
+        """Append one receipt. Returns True on success."""
+        try:
+            line = json.dumps(receipt, ensure_ascii=False, sort_keys=True) + "\n"
+        except (TypeError, ValueError) as exc:
+            self.last_error = f"serialize: {exc}"
+            return False
+        data = line.encode("utf-8")
+        try:
+            with self._lock:
+                self.path.parent.mkdir(parents=True, exist_ok=True)
+                with open(self.path, "ab") as handle:
+                    handle.write(data)
+                    handle.flush()
+                    os.fsync(handle.fileno())
+                self.appended += 1
+        except OSError as exc:
+            self.last_error = f"write: {exc}"
+            return False
+        self.last_error = None
+        return True
+
+
 class SidecarContext:
     """Everything the sidecar needs beyond one request."""
 
@@ -124,6 +174,7 @@ class SidecarContext:
         enforcer_seed: bytes | None,
         key_id: str | None = None,
         resolver: Any | None = None,
+        receipt_feed: ReceiptFeed | None = None,
     ) -> None:
         self.policy = policy
         self.credentials = credentials
@@ -132,6 +183,7 @@ class SidecarContext:
         self.key_id = key_id
         self.budgets = EgressBudgetLedger()
         self._resolver = resolver or _system_resolver
+        self.receipt_feed = receipt_feed
 
     def resolve(self, host: str) -> list[str]:
         return self._resolver(host)
@@ -325,7 +377,7 @@ def _scrub(value: str, secrets_: tuple[str, ...]) -> str:
     return value
 
 
-def run_one(value: dict[str, Any], ctx: SidecarContext) -> dict[str, Any]:
+def _run_one_inner(value: dict[str, Any], ctx: SidecarContext) -> dict[str, Any]:
     """Handle one validated wire request. Never raises: failures are
     encoded as ``status: denied | error`` with a receipt when one exists."""
     request_id = value.get("request_id") if isinstance(value, dict) else None
@@ -451,14 +503,34 @@ def run_one(value: dict[str, Any], ctx: SidecarContext) -> dict[str, Any]:
     }
 
 
+def run_one(value: dict[str, Any], ctx: SidecarContext) -> dict[str, Any]:
+    """Handle one wire request and persist its receipt.
+
+    Wraps :func:`_run_one_inner`; when the response carries a receipt and
+    the context has a receipt feed configured, the receipt is appended to
+    the persistent feed. Feed failures never break the response.
+    """
+    response = _run_one_inner(value, ctx)
+    feed = ctx.receipt_feed
+    receipt = response.get("receipt")
+    if feed is not None and isinstance(receipt, dict):
+        feed.append(receipt)
+    return response
+
+
 def build_context(
     *,
     policy_dir: str | Path,
     approver_keys: dict[str, bytes] | None = None,
     enforcer_seed: bytes | None = None,
     key_id: str | None = None,
+    receipt_feed_path: str | Path | None = None,
 ) -> SidecarContext:
-    """Build the sidecar context from on-disk config + environment."""
+    """Build the sidecar context from on-disk config + environment.
+
+    ``receipt_feed_path`` enables the persistent receipt feed; when None,
+    receipts are returned to callers but not persisted (useful for tests).
+    """
     policy = load_egress_policy(policy_dir)
     references = {rule.credential for rule in policy.destinations.values() if rule.credential}
     credentials = CredentialStore(references)
@@ -468,10 +540,12 @@ def build_context(
             "sidecar refuses to start: credential(s) not in the environment: "
             + ", ".join(f"NORTHSTAR_EGRESS_CRED_{re.sub(r'[^A-Za-z0-9]', '_', m).upper()}" for m in missing)
         )
+    feed = ReceiptFeed(receipt_feed_path) if receipt_feed_path else None
     return SidecarContext(
         policy=policy,
         credentials=credentials,
         approver_keys=dict(approver_keys or {}),
         enforcer_seed=enforcer_seed,
         key_id=key_id,
+        receipt_feed=feed,
     )
