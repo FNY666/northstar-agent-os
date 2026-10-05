@@ -4170,6 +4170,27 @@ One-call evaluation: identity + chain + depth + combinations.
 
 Audit events for identity issuance/delegation/verification.
 
+#### `IdentityManifest`
+
+Self-hosted identity descriptor (E.1).
+
+- `to_dict()`
+#### `build_manifest(identity: AgentIdentity, *, name: str='', description: str='', keys: Sequence[Mapping[str, Any]]=(), services: Sequence[Mapping[str, Any]]=(), trust: Sequence[str]=())`
+
+Build a self-hosted manifest for an issued identity.
+
+#### `verify_manifest(manifest: IdentityManifest, signature: bytes, *, public_key: bytes)`
+
+Verify a manifest's signature and basic well-formedness.
+
+#### `create_challenge(*, statement_hash: bytes, nonce: bytes, expiry: int)`
+
+Create a structured challenge for Ed25519 challenge-response.
+
+#### `verify_challenge_response(*, public_key: bytes, challenge: bytes, signature: bytes, now: int)`
+
+Verify a challenge-response: signature valid, challenge fresh.
+
 ### `agri`
 
 Source: `components/northstar-agent-runtime/agri.py`
@@ -5783,6 +5804,14 @@ Dual scoring: benign-task completion x adversarial block rate.
 #### `run_agentdojo_corpus()`
 
 FNR/FPR over the AgentDojo-derived adversarial corpus.
+
+#### `run_refusal_quality()`
+
+Refusal timeliness + restraint over multi-step attack chains.
+
+#### `run_substitution_equivalence()`
+
+Equivalent-bypass diagnostic (H line, AmPermBench-inspired).
 
 #### `run_step_compliance()`
 

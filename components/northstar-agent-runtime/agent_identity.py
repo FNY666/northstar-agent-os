@@ -654,14 +654,160 @@ __all__ = [
     "CombinationRule",
     "DelegationRecord",
     "IdentityError",
+    "IdentityManifest",
     "IdentityIssuer",
     "IdentityVerdict",
+    "MANIFEST_VERSION",
+    "build_manifest",
     "check_combination_prohibition",
     "combination_rule",
+    "create_challenge",
     "did_of",
     "evaluate_request",
     "identity_audit_events",
     "parse_did",
+    "verify_challenge_response",
     "verify_delegation_chain",
     "verify_identity",
+    "verify_manifest",
 ]
+
+
+#: Identity Manifest format version (E.1, ERC-8004-inspired).
+MANIFEST_VERSION = "northstar-identity/v1"
+
+#: Domain tag for challenge-response signatures (domain separation, so a
+#: challenge signature cannot be replayed as a warrant/mandate signature).
+_CHALLENGE_DOMAIN = b"northstar-challenge/v1"
+
+
+@dataclass
+class IdentityManifest:
+    """Self-hosted identity descriptor (E.1).
+
+    Borrows ERC-8004's "thin anchor + rich descriptor" pattern: the DID
+    (``did:northstar:<hex(pubkey)>``) is the thin anchor; this manifest is
+    the rich descriptor the agent hosts itself at
+    ``/.well-known/northstar-identity.json``. The manifest is signed by the
+    identity key; verifiers fetch it, check the signature, and use it for
+    capability negotiation (``trust``) and service discovery (``services``).
+    """
+
+    did: str
+    name: str = ""
+    description: str = ""
+    keys: tuple[dict[str, Any], ...] = ()  # [{purpose, pubkey, valid_from, valid_until}]
+    services: tuple[dict[str, Any], ...] = ()  # [{protocol, endpoint, version}]
+    trust: tuple[str, ...] = ()  # supported trust models, e.g. ("action-card", "mandate")
+    active: bool = True
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "format": MANIFEST_VERSION,
+            "did": self.did,
+            "name": self.name,
+            "description": self.description,
+            "keys": [dict(k) for k in self.keys],
+            "services": [dict(s) for s in self.services],
+            "trust": list(self.trust),
+            "active": self.active,
+        }
+
+
+def build_manifest(
+    identity: AgentIdentity,
+    *,
+    name: str = "",
+    description: str = "",
+    keys: Sequence[Mapping[str, Any]] = (),
+    services: Sequence[Mapping[str, Any]] = (),
+    trust: Sequence[str] = (),
+) -> IdentityManifest:
+    """Build a self-hosted manifest for an issued identity."""
+    return IdentityManifest(
+        did=identity.did,
+        name=name,
+        description=description,
+        keys=tuple(dict(k) for k in keys),
+        services=tuple(dict(s) for s in services),
+        trust=tuple(trust),
+        active=True,
+    )
+
+
+def verify_manifest(
+    manifest: IdentityManifest,
+    signature: bytes,
+    *,
+    public_key: bytes,
+) -> bool:
+    """Verify a manifest's signature and basic well-formedness.
+
+    The signature must be over the canonical JSON of the manifest dict by
+    the identity key. Returns False (never raises) on any problem.
+    """
+    if not manifest.active:
+        return False
+    if parse_did(manifest.did) != public_key:
+        return False
+    try:
+        payload = canonical_json(manifest.to_dict())
+    except Exception:
+        return False
+    return ed25519.verify(public_key, payload, signature)
+
+
+def create_challenge(
+    *,
+    statement_hash: bytes,
+    nonce: bytes,
+    expiry: int,
+) -> bytes:
+    """Create a structured challenge for Ed25519 challenge-response.
+
+    The challenge binds a domain tag, a fresh nonce, an expiry timestamp,
+    and a hash of the statement being proven. This is the ERC-8004/EIP-712
+    "structured challenge" pattern adapted to Ed25519: domain separation
+    prevents cross-protocol signature replay.
+    """
+    if len(nonce) != 32:
+        raise IdentityError("nonce must be 32 bytes")
+    if len(statement_hash) != 32:
+        raise IdentityError("statement_hash must be 32 bytes (SHA-256)")
+    return (
+        _CHALLENGE_DOMAIN
+        + nonce
+        + expiry.to_bytes(8, "big")
+        + statement_hash
+    )
+
+
+def verify_challenge_response(
+    *,
+    public_key: bytes,
+    challenge: bytes,
+    signature: bytes,
+    now: int,
+) -> bool:
+    """Verify a challenge-response: signature valid, challenge fresh.
+
+    Checks: (1) the challenge has the right domain tag and length;
+    (2) the expiry is in the future (replay window); (3) the Ed25519
+    signature verifies under the claimed public key. Returns False
+    (never raises) on any failure.
+    """
+
+    expected_len = len(_CHALLENGE_DOMAIN) + 32 + 8 + 32
+    if len(challenge) != expected_len:
+        return False
+    if not challenge.startswith(_CHALLENGE_DOMAIN):
+        return False
+    expiry = int.from_bytes(
+        challenge[len(_CHALLENGE_DOMAIN) + 32 : len(_CHALLENGE_DOMAIN) + 40],
+        "big",
+    )
+    if expiry <= now:
+        return False
+    if len(public_key) != 32 or len(signature) != 64:
+        return False
+    return ed25519.verify(public_key, challenge, signature)
