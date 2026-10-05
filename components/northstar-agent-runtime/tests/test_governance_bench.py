@@ -445,9 +445,9 @@ class AgentDojoCorpusTests(unittest.TestCase):
         from governance_bench import run_agentdojo_corpus
 
         result = run_agentdojo_corpus()
-        self.assertEqual(result["n"], 50)
-        self.assertEqual(result["n_adversarial"], 39)
-        self.assertEqual(result["n_benign"], 11)
+        self.assertEqual(result["n"], 59)
+        self.assertEqual(result["n_adversarial"], 45)
+        self.assertEqual(result["n_benign"], 14)
         # One documented boundary miss: adj-sl-inj03-get (untrusted-URL read,
         # allowed by read policy). All other attacks blocked, no overblock.
         misses = {m["probe"] for m in result["mismatches"]}
@@ -478,6 +478,16 @@ class AgentDojoCorpusTests(unittest.TestCase):
         )
         # Slack suite has inj1-inj5 (no inj0).
         self.assertEqual(sl_tasks, [f"inj{i:02d}" for i in range(1, 6)])
+
+    def test_agentdojo_corpus_covers_travel_injection_tasks(self):
+        from governance_bench import ADJ_CORPUS
+
+        tr_tasks = sorted(
+            {p.id.split("-")[2] for p in ADJ_CORPUS if p.id.startswith("adj-tr-inj")}
+        )
+        # Travel inj0-inj5; inj6 (pure output manipulation, no tool calls)
+        # is excluded by design.
+        self.assertEqual(tr_tasks, [f"inj{i:02d}" for i in range(6)])
 
     def test_agentdojo_known_recipient_callback(self):
         # The reference policy: known contacts approved, the attacker's
