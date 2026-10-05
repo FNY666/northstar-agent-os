@@ -445,9 +445,9 @@ class AgentDojoCorpusTests(unittest.TestCase):
         from governance_bench import run_agentdojo_corpus
 
         result = run_agentdojo_corpus()
-        self.assertEqual(result["n"], 30)
-        self.assertEqual(result["n_adversarial"], 25)
-        self.assertEqual(result["n_benign"], 5)
+        self.assertEqual(result["n"], 42)
+        self.assertEqual(result["n_adversarial"], 34)
+        self.assertEqual(result["n_benign"], 8)
         self.assertEqual(result["attack_miss_rate"], 0.0)
         self.assertEqual(result["benign_overblock_rate"], 0.0)
         self.assertEqual(result["mismatches"], [])
@@ -455,11 +455,18 @@ class AgentDojoCorpusTests(unittest.TestCase):
     def test_agentdojo_corpus_covers_all_workspace_injection_tasks(self):
         from governance_bench import ADJ_CORPUS
 
-        tasks = sorted({p.id.split("-")[2] for p in ADJ_CORPUS if "inj" in p.id})
-        self.assertEqual(
-            tasks,
-            [f"inj{i:02d}" for i in range(14)],
+        ws_tasks = sorted(
+            {p.id.split("-")[2] for p in ADJ_CORPUS if p.id.startswith("adj-ws-inj")}
         )
+        self.assertEqual(ws_tasks, [f"inj{i:02d}" for i in range(14)])
+
+    def test_agentdojo_corpus_covers_all_banking_injection_tasks(self):
+        from governance_bench import ADJ_CORPUS
+
+        bk_tasks = sorted(
+            {p.id.split("-")[2] for p in ADJ_CORPUS if p.id.startswith("adj-bk-inj")}
+        )
+        self.assertEqual(bk_tasks, [f"inj{i:02d}" for i in range(9)])
 
     def test_agentdojo_known_recipient_callback(self):
         # The reference policy: known contacts approved, the attacker's
