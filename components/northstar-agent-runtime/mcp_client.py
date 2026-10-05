@@ -144,6 +144,52 @@ def tool_definition_digest(
     return hashlib.sha256(_jcs(payload)).hexdigest()
 
 
+# Tool-description coercion patterns (ToolHijacker / ToolCommander family).
+# Scanned at admission: a description that coerces tool *selection* is an
+# attack on the layer before any permission gate fires. Each pattern is a
+# (name, regex, severity) triple; severity weights reflect how rarely the
+# phrasing appears in legitimate descriptions.
+_COERCION_PATTERNS: tuple[tuple[str, str, int], ...] = (
+    # Cross-tool shadowing: "before using any other tool..."
+    ("shadowing", r"\bbefore\s+(?:using|calling|invoking|running)\s+(?:any\s+)?(?:other|another|all|every|each)\b", 3),
+    # Authority injection: claims system-level instruction power.
+    ("authority", r"\b(?:system\s+instruction|as\s+an?\s+ai\s+(?:assistant|agent)|you\s+must\s+(?:always|first)|override\s+(?:your|the)\s+(?:instruction|directive))\b", 3),
+    # Instruction embedding: imperative directed at the agent.
+    ("instruction", r"\b(?:ignore\s+(?:previous|prior|all|your)\s+(?:instruction|directive)|do\s+not\s+(?:ask|tell|inform|notify)\s+(?:the\s+)?user)\b", 3),
+    # Concealment: asks to hide behavior.
+    ("concealment", r"\b(?:don'?t\s+tell|hide\s+(?:this|the|from)|keep\s+(?:this\s+)?secret|without\s+(?:informing|telling|notifying))\b", 3),
+    # Exfiltration lure: directs the agent to hunt credentials.
+    ("exfiltration", r"\b(?:ssh\s+keys?|cloud\s+credentials?|api\s+keys?|shell\s+history|environment\s+variables?)\b", 2),
+    # Deprecation claim: "X is deprecated, use me instead".
+    ("deprecation", r"\b(?:deprecated|obsolete|no\s+longer\s+(?:supported|maintained|recommended))\b", 1),
+)
+
+
+def scan_description_coercion(description: str) -> list[tuple[str, str]]:
+    """Scan a tool description for selection-coercion patterns.
+
+    Returns a list of ``(pattern_name, matched_text)`` for each hit.
+    Empty means no coercion signals. This is a heuristic admission
+    screen, not a verdict: hits are surfaced to the operator and
+    recorded in the audit trail; the pinning/quarantine pipeline still
+    enforces integrity at runtime.
+    """
+    hits: list[tuple[str, str]] = []
+    if not description:
+        return hits
+    for name, pattern, _severity in _COERCION_PATTERNS:
+        match = re.search(pattern, description, re.IGNORECASE)
+        if match:
+            hits.append((name, match.group(0)))
+    return hits
+
+
+def coercion_severity(hits: list[tuple[str, str]]) -> int:
+    """Total severity weight of coercion hits (0 = clean)."""
+    weights = {name: sev for name, _pat, sev in _COERCION_PATTERNS}
+    return sum(weights.get(name, 0) for name, _text in hits)
+
+
 @dataclass
 class ToolDrift:
     """One tool definition that drifted from the admission baseline."""
@@ -439,8 +485,27 @@ class McpStdioClient:
                 self._tool_digests[tool_name] = tool_definition_digest(
                     self.name, tool_name, description, schema
                 )
+                # Admission coercion screen: flag descriptions that try to
+                # coerce tool selection (ToolHijacker family). Hits don't
+                # block admission by themselves -- they're surfaced in the
+                # audit trail so the operator can judge. Integrity pinning
+                # still enforces at runtime.
+                coercion_hits = scan_description_coercion(description)
+                if coercion_hits and callable(self.audit):
+                    self.audit(
+                        {
+                            "type": "mcp.coercion_screen",
+                            "server": self.name,
+                            "tool": tool_name,
+                            "hits": [{"pattern": n, "match": t} for n, t in coercion_hits],
+                            "severity": coercion_severity(coercion_hits),
+                        }
+                    )
             # Pin against the persistent baseline: the first connect after
             # admission establishes it; later connects enforce it.
+            # Also restore distrust state: a server that flapped in a
+            # previous session stays distrusted across restarts.
+            self._load_distrust_state()
             baseline = self._load_baseline()
             if baseline is None:
                 self._save_baseline()
@@ -482,7 +547,38 @@ class McpStdioClient:
         server_data = data.get(self.name)
         if not isinstance(server_data, dict):
             return None
+        # New format: {"tools": {...}, "quarantine_count": n, "distrusted": bool}.
+        # Old format: bare {tool: digest} dict. Both supported.
+        tools = server_data.get("tools")
+        if isinstance(tools, dict):
+            return {str(k): str(v) for k, v in tools.items()}
         return {str(k): str(v) for k, v in server_data.items()}
+
+    def _load_distrust_state(self) -> None:
+        """Restore quarantine_count/distrusted from the persistent baseline.
+
+        Closes the Deadbugz evasion: a server that forces a client restart
+        (or waits for one) no longer resets its distrust history.
+        """
+        path = self._baseline_path()
+        if path is None or not path.is_file():
+            return
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            return
+        if not isinstance(data, dict):
+            return
+        server_data = data.get(self.name)
+        if not isinstance(server_data, dict):
+            return
+        count = server_data.get("quarantine_count", 0)
+        if isinstance(count, int) and count > 0:
+            self._quarantine_count = count
+        if server_data.get("distrusted") is True:
+            self._distrusted = True
+            self._quarantined = True
+            self._quarantine_reason = "distrusted in a previous session; re-admit to clear"
 
     def _save_baseline(self) -> None:
         """Persist the current digests as the baseline for this server."""
@@ -499,10 +595,46 @@ class McpStdioClient:
                     data = {}
             if not isinstance(data, dict):
                 data = {}
-            data[self.name] = dict(self._tool_digests)
+            data[self.name] = {
+                "tools": dict(self._tool_digests),
+                "quarantine_count": self._quarantine_count,
+                "distrusted": self._distrusted,
+            }
             path.write_text(json.dumps(data, indent=2, sort_keys=True), encoding="utf-8")
         except OSError:
             pass  # Baseline persistence is best-effort; in-memory still protects this run.
+
+    def _save_distrust_state(self) -> None:
+        """Persist quarantine_count/distrusted without touching tool digests."""
+        path = self._baseline_path()
+        if path is None:
+            return
+        try:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            data: dict[str, Any] = {}
+            if path.is_file():
+                try:
+                    data = json.loads(path.read_text(encoding="utf-8"))
+                except (OSError, ValueError):
+                    data = {}
+            if not isinstance(data, dict):
+                data = {}
+            server_data = data.get(self.name)
+            if not isinstance(server_data, dict):
+                server_data = {"tools": {}}
+            # Preserve the tool digests; only update distrust state.
+            tools = server_data.get("tools")
+            if not isinstance(tools, dict):
+                # Old format: the whole dict was digests.
+                tools = {k: v for k, v in server_data.items() if k not in ("quarantine_count", "distrusted")}
+            data[self.name] = {
+                "tools": tools,
+                "quarantine_count": self._quarantine_count,
+                "distrusted": self._distrusted,
+            }
+            path.write_text(json.dumps(data, indent=2, sort_keys=True), encoding="utf-8")
+        except OSError:
+            pass
 
     @property
     def quarantined(self) -> bool:
@@ -585,6 +717,8 @@ class McpStdioClient:
             else:
                 record["reason"] = reason
             self.audit(record)
+        # Persist distrust state: a restart must not reset the flap count.
+        self._save_distrust_state()
 
     @property
     def distrusted(self) -> bool:
@@ -603,6 +737,9 @@ class McpStdioClient:
         self._distrusted = False
         self._quarantine_count = 0
         self._pending_list_changed = False
+        # Clear the persisted distrust state too, so a fresh client
+        # doesn't re-distrust on load.
+        self._save_distrust_state()
 
     # -- calls ---------------------------------------------------------------
 
