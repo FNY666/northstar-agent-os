@@ -5294,9 +5294,9 @@ A signed binding between an approval decision and one action card.
 
 Sign an approval receipt. Called by the approver's side (which holds the private key), never by the agent.
 
-#### `verify_approval_receipt(receipt: ApprovalReceipt, approver_public_key: bytes)`
+#### `verify_approval_receipt(receipt: ApprovalReceipt, approver_public_key: bytes, *, now: float | None=None, max_age_seconds: float=300.0)`
 
-Verify an approval receipt's signature. False on any defect; never raises.
+Verify an approval receipt's signature and freshness.
 
 #### `EgressRequest`
 
@@ -6503,6 +6503,10 @@ One MCP server over stdio: modern (per-request metadata) or legacy (handshake).
   - True when tool-definition drift was detected; calls are denied.
 - `refresh_tools()`
   - Re-list tools and compare against the admission baseline.
+- `distrusted` (property)
+  - True when repeated quarantines escalated to distrust.
+- `re_admit()`
+  - Explicit operator re-admission after quarantine/distrust.
 - `call_tool(tool_name: str, arguments: dict[str, Any])`
   - Invoke one remote tool, resolving MRTR input requests through the gate.
 - `close()`
