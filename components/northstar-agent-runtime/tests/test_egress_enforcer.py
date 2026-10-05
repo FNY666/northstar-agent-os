@@ -267,7 +267,7 @@ class ApprovalBindingTests(unittest.TestCase):
             arguments_digest=self.card.arguments_digest,
             approver_id="op1",
             approver_seed=self.seed,
-            decided_at=time.time(),
+            decided_at=NOW,
             body=b"{}",
         )
         self.pol = policy(rule={"require_approval": True, "allow_private_ips": True})

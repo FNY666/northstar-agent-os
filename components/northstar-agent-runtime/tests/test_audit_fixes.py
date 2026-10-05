@@ -204,7 +204,7 @@ class ApprovalBodyBindingTests(unittest.TestCase):
             arguments_digest=self.card.arguments_digest,
             approver_id="op1",
             approver_seed=self.seed,
-            decided_at=time.time(),
+            decided_at=NOW,
             body=self.body,
         )
         self.pol = _egress_policy(require_approval=True)
