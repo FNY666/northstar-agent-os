@@ -245,6 +245,170 @@ class DelegationGateTests(unittest.TestCase):
         self.assertTrue(verdict.ok)
 
 
+class OffensiveToolingTests(unittest.TestCase):
+    def test_nmap_denied_by_default(self):
+        from permissions import PermissionConfig, PermissionEngine
+
+        engine = PermissionEngine(
+            PermissionConfig(mode="default", can_use_tool=lambda n, p, c: True),
+            tool_kinds={"nmap_scan": "exec"},
+        )
+        d = engine.evaluate("nmap_scan", kind="exec", payload={})
+        self.assertFalse(d.allowed)
+        self.assertEqual(d.rule, "offensive:deny_by_default")
+
+    def test_metasploit_denied_by_default(self):
+        from permissions import is_offensive_tool
+
+        self.assertTrue(is_offensive_tool("metasploit"))
+        self.assertTrue(is_offensive_tool("MSFConsole"))
+        self.assertTrue(is_offensive_tool("sqlmap"))
+
+    def test_benign_tools_unaffected(self):
+        from permissions import is_offensive_tool
+
+        self.assertFalse(is_offensive_tool("Read"))
+        self.assertFalse(is_offensive_tool("Write"))
+        self.assertFalse(is_offensive_tool("SendEmail"))
+
+    def test_allowlist_re_enables(self):
+        from permissions import PermissionConfig, PermissionEngine
+
+        engine = PermissionEngine(
+            PermissionConfig(
+                mode="default",
+                can_use_tool=lambda n, p, c: True,
+                offensive_allowlist=("nmap_scan",),
+            ),
+            tool_kinds={"nmap_scan": "exec"},
+        )
+        d = engine.evaluate("nmap_scan", kind="exec", payload={})
+        # Allowlisted: passes the offensive gate (other layers still apply).
+        self.assertNotEqual(d.rule, "offensive:deny_by_default")
+
+
+class DelegationTokenTests(unittest.TestCase):
+    def test_mint_and_verify(self):
+        from ed25519 import public_key as ed_pubkey
+        from permissions import mint_delegation_token, verify_delegation_token
+
+        seed = bytes(32)
+        pubkey = ed_pubkey(seed)
+        token = mint_delegation_token(
+            delegator_id="did:example:alice",
+            delegatee_id="did:example:bob",
+            tools=("Read", "Grep"),
+            delegator_seed=seed,
+            issued_at=1000.0,
+        )
+        self.assertTrue(
+            verify_delegation_token(token, pubkey, now=1100.0)
+        )
+
+    def test_expired_token_rejected(self):
+        from ed25519 import public_key as ed_pubkey
+        from permissions import mint_delegation_token, verify_delegation_token
+
+        seed = bytes(32)
+        pubkey = ed_pubkey(seed)
+        token = mint_delegation_token(
+            delegator_id="did:example:alice",
+            delegatee_id="did:example:bob",
+            tools=("Read",),
+            delegator_seed=seed,
+            ttl_seconds=300.0,
+            issued_at=1000.0,
+        )
+        self.assertFalse(
+            verify_delegation_token(token, pubkey, now=1400.0)
+        )
+
+    def test_wrong_key_rejected(self):
+        from ed25519 import public_key as ed_pubkey
+        from permissions import mint_delegation_token, verify_delegation_token
+
+        seed = bytes(32)
+        other_pubkey = ed_pubkey(bytes([1] * 32))
+        token = mint_delegation_token(
+            delegator_id="did:example:alice",
+            delegatee_id="did:example:bob",
+            tools=("Read",),
+            delegator_seed=seed,
+            issued_at=1000.0,
+        )
+        self.assertFalse(
+            verify_delegation_token(token, other_pubkey, now=1100.0)
+        )
+
+    def test_attenuation_enforced(self):
+        from permissions import mint_delegation_token
+
+        seed = bytes(32)
+        parent = mint_delegation_token(
+            delegator_id="did:example:alice",
+            delegatee_id="did:example:bob",
+            tools=("Read", "Grep"),
+            delegator_seed=seed,
+            issued_at=1000.0,
+        )
+        # Child with subset: OK.
+        child = mint_delegation_token(
+            delegator_id="did:example:bob",
+            delegatee_id="did:example:carol",
+            tools=("Read",),
+            delegator_seed=seed,
+            parent_token=parent,
+            issued_at=1000.0,
+        )
+        self.assertEqual(child.parent_hash, parent.token_hash())
+        # Child exceeding parent scope: rejected at mint time.
+        with self.assertRaises(ValueError):
+            mint_delegation_token(
+                delegator_id="did:example:bob",
+                delegatee_id="did:example:carol",
+                tools=("Read", "Write"),
+                delegator_seed=seed,
+                parent_token=parent,
+                issued_at=1000.0,
+            )
+
+    def test_parent_hash_binding(self):
+        from ed25519 import public_key as ed_pubkey
+        from permissions import mint_delegation_token, verify_delegation_token
+
+        seed = bytes(32)
+        pubkey = ed_pubkey(seed)
+        parent = mint_delegation_token(
+            delegator_id="did:example:alice",
+            delegatee_id="did:example:bob",
+            tools=("Read",),
+            delegator_seed=seed,
+            issued_at=1000.0,
+        )
+        child = mint_delegation_token(
+            delegator_id="did:example:bob",
+            delegatee_id="did:example:carol",
+            tools=("Read",),
+            delegator_seed=seed,
+            parent_token=parent,
+            issued_at=1000.0,
+        )
+        # Correct parent hash: verifies.
+        self.assertTrue(
+            verify_delegation_token(
+                child, pubkey, now=1100.0,
+                expected_parent_hash=parent.token_hash(),
+            )
+        )
+        # Wrong parent hash: rejected.
+        self.assertFalse(
+            verify_delegation_token(
+                child, pubkey, now=1100.0,
+                expected_parent_hash="0" * 64,
+            )
+        )
+
+
 class PerCallApprovalBindingTests(unittest.TestCase):
     """Per-call approval binding: no caching, no replay.
 
