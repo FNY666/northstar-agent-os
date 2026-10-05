@@ -222,6 +222,14 @@ Export many events as one canonical NDJSON audit feed text.
 
 Lazily map many events into validated audit records.
 
+#### `DurableEvidenceSink`
+
+Mirror one durable-run event stream into a dedicated evidence ledger.
+
+- `last_sequence` (property)
+  - Highest mirrored durable event sequence; zero means an empty sink.
+- `append_event(event: EventContract, *, payload_bytes: bytes | None=None)`
+  - Append one validated event and bind any durable payload blob by digest.
 ### `tool_ledger`
 
 Source: `components/northstar-durable-run/tool_ledger.py`

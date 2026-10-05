@@ -16,12 +16,12 @@ fixture.
 ## Install (pip)
 
 ```sh
-pip install ../northstar-run-contract ../northstar-host   # declared dependencies
-pip install .                                              # resolves both
+pip install ../northstar-run-contract ../northstar-host ../northstar-run-evidence
+pip install .  # resolves the declared dependencies once published
 ```
 
 The wheel installs the slice modules (`durable_contract`, `event_store`,
-`action_gateway`, `runner`, `verifier`, `trace_metrics`, `evaluation`) as
+`durable_audit`, `action_gateway`, `runner`, `verifier`, `trace_metrics`, `evaluation`) as
 top-level modules; the version (`0.1.0.dev0`, unreleased) is declared in
 `pyproject.toml`.
 
@@ -62,6 +62,27 @@ TTL, requires the clock) to renew the lease from a background thread *while*
 a single step action executes — without it, a run that outlasts the TTL loses
 its lease mid-execution, and a stolen lease raises instead of executing steps
 unowned.
+
+### Hash-linked execution evidence
+
+Evidence mirroring is opt-in. Construct a dedicated `EvidenceStore` for the
+run and bind the sink to the same EventStore blob area:
+`DurableEvidenceSink(evidence_store, artifact_store=event_store.blob_store)`;
+pass it as `DurableRunner(..., evidence_sink=sink)`. The runner mirrors every
+validated event, including the canonical audit projection, into a hash-linked
+entry. With the sink enabled, all event payloads (including small ones) and
+canonical evidence-subject snapshots are stored in EventStore's
+content-addressed blob area; the evidence entry carries typed digest
+references instead of duplicate plaintext payloads. A new runner reconciles
+any events left in EventStore after a crash before the evidence append; retries
+are keyed by durable event sequence and are idempotent. The two local files are
+not a single cross-file transaction, so recovery requires retaining both the
+event store/blobs and the evidence ledger. Use a production `SealSigner` backed
+by trusted key infrastructure; `HmacTestSigner` is test-only.
+Payload and subject blobs are stored as plaintext (the blob files are
+content-addressed, not encrypted). Enable this only where the local storage
+access policy is appropriate; redact or sanitize secrets before they enter the
+run payloads if they must not be persisted.
 
 ### Supervisor pattern: orchestrator-held liveness
 

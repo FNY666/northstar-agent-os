@@ -30,7 +30,7 @@ from collections.abc import Iterable, Mapping
 from datetime import datetime, timezone
 from typing import Any
 
-from evidence_contract import _identifier
+from evidence_contract import _identifier, canonical_json
 from evidence_store import (
     EvidenceStore,
     ManifestVerification,
@@ -118,23 +118,36 @@ def seal_audit_feed(
     re-sealing attests to the new head.
     """
     run_id = _identifier(run_id, "run_id")
-    store = EvidenceStore(store_path, run_id)
-    count = 0
+    prepared: list[tuple[bytes, str, int, str]] = []
+    previous_sequence: int | None = None
     for record in records:
         checked = _check_record(record)
         kind = f"audit.{checked['event']}"
         if not _EVENT_RE.fullmatch(kind):
             raise ValueError(f"audit event {checked['event']!r} is not a safe evidence kind")
+        sequence = checked["seq"]
+        if previous_sequence is not None and sequence <= previous_sequence:
+            raise ValueError("audit feed seq values must be strictly increasing")
+        occurred_at = _epoch(checked.get("ts"), seq=sequence)
+        source_id = _identifier(f"audit:{sequence}", "source_id")
+        # Run the canonical encoder before creating or modifying the store so
+        # unsupported/oversized subjects cannot leave a partially sealed feed.
+        subject_bytes = canonical_json(dict(checked))
+        prepared.append((subject_bytes, kind, occurred_at, source_id))
+        previous_sequence = sequence
+
+    if not prepared:
+        raise ValueError("refusing to seal an empty audit feed")
+
+    store = EvidenceStore(store_path, run_id)
+    for subject_bytes, kind, occurred_at, source_id in prepared:
         store.append(
             source=AUDIT_SOURCE_LABEL,
             kind=kind,
-            occurred_at=_epoch(checked.get("ts"), seq=checked.get("seq")),
-            subject=dict(checked),
-            source_id=f"audit:{checked['seq']}",
+            occurred_at=occurred_at,
+            subject=subject_bytes,
+            source_id=source_id,
         )
-        count += 1
-    if count == 0:
-        raise ValueError("refusing to seal an empty audit feed")
     return store.seal(signer, sealed_at=sealed_at)
 
 

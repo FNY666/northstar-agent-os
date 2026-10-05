@@ -5,14 +5,16 @@ import tempfile
 import unittest
 from contextlib import redirect_stdout
 from pathlib import Path
+from unittest.mock import patch
 
+import evidence_store
 from audit_adapter import (
     parse_audit_feed,
     seal_audit_feed,
     verify_audit_seal,
 )
 from evidence_cli import main as cli_main
-from evidence_store import HmacTestSigner
+from evidence_store import EvidenceStore, HmacTestSigner
 
 
 def _record(seq, event="tool_result", ts="2026-10-03T01:00:00.123Z"):
@@ -79,6 +81,44 @@ class AuditAdapterTests(unittest.TestCase):
         with self.assertRaises(ValueError) as caught:
             seal_audit_feed(records, store_path=self.store, run_id="run-9", signer=_signer())
         self.assertIn("not strict RFC 3339", str(caught.exception))
+
+    def test_invalid_later_record_does_not_partially_persist_feed(self):
+        records = parse_audit_feed(
+            _feed(_record(0), _record(1, ts="yesterday-ish"))
+        )
+        with self.assertRaises(ValueError):
+            seal_audit_feed(
+                records, store_path=self.store, run_id="run-9", signer=_signer()
+            )
+        self.assertFalse(Path(self.store).exists())
+        self.assertFalse(Path(self.store).with_name(".ledger.lock").exists())
+
+    def test_mutating_input_after_preflight_cannot_change_persisted_subject(self):
+        records = parse_audit_feed(_feed(_record(0), _record(1)))
+        original_append = EvidenceStore.append
+        append_count = 0
+
+        def mutate_second_record(store, **kwargs):
+            nonlocal append_count
+            if append_count == 0:
+                records[1]["payload"]["mutated"] = object()
+            append_count += 1
+            return original_append(store, **kwargs)
+
+        with patch.object(evidence_store.EvidenceStore, "append", mutate_second_record):
+            manifest = seal_audit_feed(
+                records, store_path=self.store, run_id="run-9", signer=_signer()
+            )
+        self.assertEqual(manifest["entry_count"], 2)
+        self.assertEqual(EvidenceStore(self.store, "run-9").entry_count, 2)
+
+    def test_non_increasing_feed_sequences_are_rejected_before_persist(self):
+        records = parse_audit_feed(_feed(_record(1), _record(1)))
+        with self.assertRaisesRegex(ValueError, "strictly increasing"):
+            seal_audit_feed(
+                records, store_path=self.store, run_id="run-9", signer=_signer()
+            )
+        self.assertFalse(Path(self.store).exists())
 
     def test_wrong_schema_version_is_refused(self):
         record = _record(0)

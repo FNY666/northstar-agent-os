@@ -142,6 +142,7 @@ class EvidenceStoreTests(unittest.TestCase):
                 kind="session.started",
                 occurred_at=1_800_000_000,
                 subject={},
+                source_id="invalid-source-1",
             )
         self.assertFalse(os.path.exists(self.path))
         self.assertEqual(store.entry_count, 0)
@@ -176,6 +177,31 @@ class EvidenceStoreTests(unittest.TestCase):
         result = verify_manifest(manifest, {})  # resolver trusts nobody
         self.assertFalse(result.ok)
         self.assertEqual(result.authenticity, "unknown-key")
+
+    def test_verifier_identity_and_algorithm_must_match_signed_claim(self):
+        store = self.open_store()
+        self.append_two(store)
+        manifest = store.seal(_signer(), sealed_at=1_800_000_010)
+
+        class PermissiveWrongIdentity:
+            key_id = "different-key"
+            algorithm = "hmac-sha256-test"
+
+            def verify(self, data, signature):
+                return True
+
+        class PermissiveWrongAlgorithm:
+            key_id = "test-key-1"
+            algorithm = "unrelated-algorithm"
+
+            def verify(self, data, signature):
+                return True
+
+        for verifier in (PermissiveWrongIdentity(), PermissiveWrongAlgorithm()):
+            with self.subTest(verifier=verifier.__class__.__name__):
+                result = verify_manifest(manifest, {"test-key-1": verifier})
+                self.assertFalse(result.ok)
+                self.assertEqual(result.authenticity, "bad-signature")
 
     def test_seal_bound_to_store_contents(self):
         store = self.open_store()

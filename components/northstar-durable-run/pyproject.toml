@@ -20,9 +20,11 @@ classifiers = [
     "Topic :: Software Development",
 ]
 # action_gateway.py re-verifies the host authorization grant (northstar-host)
-# over a contract-validated run (northstar-run-contract). Install both from
+# over a contract-validated run (northstar-run-contract); DurableRunner can
+# optionally mirror events into the EvidenceStore (northstar-run-evidence).
+# Install all declared dependencies from
 # this repository first; bare `pip install .` works once they are published.
-dependencies = ["northstar-run-contract", "northstar-host"]
+dependencies = ["northstar-run-contract", "northstar-host", "northstar-run-evidence"]
 
 [tool.setuptools]
 py-modules = [

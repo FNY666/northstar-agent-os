@@ -8,6 +8,7 @@ from pathlib import Path
 
 COMPONENT_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(COMPONENT_ROOT))
+sys.path.insert(0, str(COMPONENT_ROOT.parent / "northstar-run-evidence"))
 
 import runner  # noqa: E402  (module itself, for fcntl monkeypatching)
 from durable_contract import RunContract  # noqa: E402
