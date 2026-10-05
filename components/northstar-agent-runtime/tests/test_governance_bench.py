@@ -369,6 +369,70 @@ class WhisperContrastTests(unittest.TestCase):
         src = inspect.getsource(_case_metrics_whisper_contrast)
         self.assertIn("2609.11757", src)
         self.assertIn("arXiv", src)
+
+
+class UtilityPreservationTests(unittest.TestCase):
+    def test_utility_preservation_is_deterministic(self):
+        from governance_bench import run_utility_preservation
+
+        first = run_utility_preservation()
+        second = run_utility_preservation()
+        self.assertEqual(first, second)
+
+    def test_utility_preservation_dual_relationship(self):
+        # dual_score must equal utility_preservation x block_rate (rounded to
+        # 4dp), recomputed here independently of the runner's own arithmetic.
+        from governance_bench import run_utility_preservation
+
+        result = run_utility_preservation()
+        expected_dual = round(
+            result["utility_preservation"] * result["block_rate"], 4
+        )
+        self.assertEqual(result["dual_score"], expected_dual)
+        self.assertEqual(result["n_scenarios"], 8)
+        self.assertEqual(result["utility_lost_ids"], ["up-08"])
+        self.assertEqual(result["attack_through_ids"], [])
+
+    def test_utility_preservation_negative_control(self):
+        # up-08: the same benign task under a blanket-deny policy must yield
+        # utility 0.0 while still blocking every probe — a refuse-everything
+        # gate scores dual 0 despite block_rate 1.0.
+        from governance_bench import run_utility_preservation
+
+        result = run_utility_preservation()
+        up08 = next(
+            r for r in result["scenario_results"] if r["id"] == "up-08"
+        )
+        self.assertEqual(up08["utility"], 0.0)
+        self.assertEqual(up08["blocked"], up08["probes"])
+        self.assertGreater(up08["probes"], 0)
+
+    def test_utility_preservation_corpus_integrity(self):
+        from governance_bench import UTILITY_PHASES, UTILITY_SCENARIOS
+
+        self.assertEqual(len(UTILITY_SCENARIOS), 8)
+        ids = [sc.id for sc in UTILITY_SCENARIOS]
+        self.assertEqual(ids, [f"up-{i:02d}" for i in range(1, 9)])
+        for sc in UTILITY_SCENARIOS:
+            self.assertIn(sc.phase, UTILITY_PHASES)
+            self.assertTrue(sc.title)
+            self.assertGreater(len(sc.benign), 0)
+            self.assertGreater(len(sc.adversarial), 0)
+
+    def test_utility_preservation_case_is_registered(self):
+        import inspect
+
+        from governance_bench import _case_metrics_utility_preservation
+
+        case = next(c for c in CASES if c.id == "metrics.utility_preservation")
+        self.assertEqual(case.track, "metrics")
+        # Honest sourcing: HarnessRisk attribution must live in the case
+        # source, and the probes must be marked synthetic in-house builds.
+        src = inspect.getsource(_case_metrics_utility_preservation)
+        self.assertIn("2608.17597", src)
+        self.assertIn("synthetic", src)
+
+
 class CompositionalTests(unittest.TestCase):
     def test_compositional_is_deterministic(self):
         from governance_bench import run_compositional

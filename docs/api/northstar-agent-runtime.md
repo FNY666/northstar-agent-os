@@ -5772,6 +5772,14 @@ Dataflow sensitivity tracking, OpenAPPA methodology.
 
 Contrast bench: AP2-shaped "sign the transaction" vs "bind the arguments".
 
+#### `UtilityScenario`
+
+One benign task paired with adversarial probes, for dual scoring.
+
+#### `run_utility_preservation()`
+
+Dual scoring: benign-task completion x adversarial block rate.
+
 #### `run_step_compliance()`
 
 in-toto Layout/Link step compliance over deterministic attack scenarios.
