@@ -7287,7 +7287,7 @@ Copy a bundle into the workspace and pin its digest.
 
 #### `uninstall(name: str, workspace: str | Path, *, keep_lock: bool=False)`
 
-Remove one installed bundle, and its lock entry unless ``keep_lock`` says otherwise.
+Remove one named bundle, refusing unsafe management paths before deletion.
 
 #### `verify_workspace(workspace: str | Path, *, require_lock: bool=True, pin: bool=False, environment: Mapping[str, str] | None=None, workspace_policy: Mapping[str, Any] | None=None, fail_on: str='error')`
 
