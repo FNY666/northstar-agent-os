@@ -20,6 +20,7 @@ from authorization import HostPolicy, authorize_run, verify_authorization  # noq
 from binding import sign_binding, verify_binding  # noqa: E402
 from handoff import authorize_handoff, sign_attestation, verify_attestation, verify_handoff_grant  # noqa: E402
 from interop_contract import AgentAttestation, AgentProfile, AgentRegistry, HandoffRequest  # noqa: E402
+import process_adapter  # noqa: E402
 from process_adapter import ProcessAgentAdapter  # noqa: E402
 
 BINDING_SECRET = b"process-binding-secret"
@@ -139,6 +140,77 @@ def _handoff_token(*, capability="workspace:read", expiry=1_800, deadline=1_700,
         secret=HANDOFF_SECRET,
         grant_ttl_seconds=300,
     )
+
+
+class NonblockingRunnerTests(unittest.TestCase):
+    def run_fixture(self, source, payload=b"context"):
+        with tempfile.TemporaryDirectory(prefix="interop-io-") as tmp:
+            return process_adapter._run_bounded_process(
+                (sys.executable, "-c", source), cwd=Path(tmp), input_bytes=payload,
+                env={"PATH": os.environ.get("PATH", "")}, timeout_seconds=3, max_output_bytes=8192,
+            )
+
+    def test_temporary_stdin_backpressure_retries_the_entire_context(self):
+        original = os.write
+        blocked = []
+        def temporary_block(fd, data):
+            if bytes(data) == b"trusted context" and not blocked:
+                blocked.append(fd)
+                raise BlockingIOError("injected write backpressure")
+            return original(fd, data)
+        with mock.patch.object(process_adapter.os, "write", side_effect=temporary_block):
+            result = self.run_fixture("import sys;sys.stdout.buffer.write(sys.stdin.buffer.read())", b"trusted context")
+        self.assertEqual(len(blocked), 1)
+        self.assertIsNone(result.error_class)
+        self.assertEqual(result.returncode, 0)
+        self.assertEqual(result.output, b"trusted context", "EAGAIN is not permission to truncate context")
+
+    def test_temporary_stdout_unavailability_is_not_eof(self):
+        original = os.read
+        blocked = []
+        def temporary_block(fd, size):
+            if size == 65536 and not blocked:
+                blocked.append(fd)
+                raise BlockingIOError("injected read readiness race")
+            return original(fd, size)
+        with mock.patch.object(process_adapter.os, "read", side_effect=temporary_block):
+            result = self.run_fixture("import sys;sys.stdin.buffer.read();sys.stdout.buffer.write(b'verified output')")
+        self.assertEqual(len(blocked), 1)
+        self.assertIsNone(result.error_class)
+        self.assertEqual(result.output, b"verified output", "EAGAIN must not discard the real backend output")
+
+    def test_partial_write_then_backpressure_keeps_offset_without_duplication(self):
+        original = os.write
+        payload = b"unique-context-0123456789"
+        state = []
+        def partial_then_block(fd, data):
+            if bytes(data) == payload and not state:
+                state.append("partial")
+                return original(fd, data[:5])
+            if bytes(data) == payload[5:] and state == ["partial"]:
+                state.append("blocked")
+                raise BlockingIOError("after partial write")
+            return original(fd, data)
+        with mock.patch.object(process_adapter.os, "write", side_effect=partial_then_block):
+            result = self.run_fixture("import sys;sys.stdout.buffer.write(sys.stdin.buffer.read())", payload)
+        self.assertEqual(state, ["partial", "blocked"])
+        self.assertEqual(result.output, payload)
+        self.assertIsNone(result.error_class)
+
+    def test_actual_eof_with_empty_input_still_finishes(self):
+        result = self.run_fixture("import sys;assert sys.stdin.buffer.read() == b'';print('done')", b"")
+        self.assertIsNone(result.error_class)
+        self.assertEqual(result.returncode, 0)
+        self.assertEqual(result.output, b"done\n")
+
+    def test_permanent_backpressure_is_bounded_by_deadline(self):
+        with tempfile.TemporaryDirectory(prefix="interop-blocked-") as tmp:
+            with mock.patch.object(process_adapter.os, "write", side_effect=BlockingIOError("retry")):
+                result = process_adapter._run_bounded_process(
+                    (sys.executable, "-c", "import sys;sys.stdin.buffer.read()"),
+                    cwd=Path(tmp), input_bytes=b"context", env={}, timeout_seconds=.2, max_output_bytes=8192,
+                )
+        self.assertEqual(result.error_class, "timeout")
 
 
 class ProcessAdapterTests(unittest.TestCase):
