@@ -445,5 +445,46 @@ class ApprovalReceiptTtlTests(unittest.TestCase):
         )
 
 
+class DnsExfiltrationTests(unittest.TestCase):
+    def test_clean_hostname_passes(self):
+        from egress_enforcer import dns_exfiltration_suspected
+
+        self.assertIsNone(dns_exfiltration_suspected("api.example.com"))
+        self.assertIsNone(dns_exfiltration_suspected("example.com"))
+        self.assertIsNone(dns_exfiltration_suspected(""))
+
+    def test_high_entropy_label_flagged(self):
+        from egress_enforcer import dns_exfiltration_suspected
+
+        # Base64-like exfiltrated data in a subdomain.
+        evil = "aGVsbG8td29ybGQtdGhpcy1pcy1leGZpbHRyYXRlZA.attacker.com"
+        reason = dns_exfiltration_suspected(evil)
+        self.assertIsNotNone(reason)
+        self.assertIn("entropy", reason)
+
+    def test_overlong_hostname_flagged(self):
+        from egress_enforcer import dns_exfiltration_suspected
+
+        evil = "a." * 130 + "com"  # > 253 chars
+        reason = dns_exfiltration_suspected(evil)
+        self.assertIsNotNone(reason)
+        self.assertIn("253", reason)
+
+    def test_overlong_label_flagged(self):
+        from egress_enforcer import dns_exfiltration_suspected
+
+        evil = "a" * 70 + ".example.com"  # label > 63 chars
+        reason = dns_exfiltration_suspected(evil)
+        self.assertIsNotNone(reason)
+        self.assertIn("63", reason)
+
+    def test_low_entropy_long_label_passes(self):
+        from egress_enforcer import dns_exfiltration_suspected
+
+        # Long but low-entropy (repetitive) labels are not necessarily exfil.
+        host = "a" * 40 + ".example.com"
+        self.assertIsNone(dns_exfiltration_suspected(host))
+
+
 if __name__ == "__main__":
     unittest.main()
