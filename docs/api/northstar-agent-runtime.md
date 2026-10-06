@@ -1019,6 +1019,106 @@ RogueHandoff-20 route-coverage probes.
 
 All RogueHandoff-20 route-coverage probe names.
 
+### `bitemporal`
+
+Source: `components/northstar-agent-runtime/bitemporal.py`
+
+Bitemporal provenance for the audit trail (``bitemporal.v1``).
+
+#### `classify_provenance_source(source: str)`
+
+Classify one provenance source as ``"trusted"`` or ``"untrusted"``.
+
+#### `stamp_record(record: Mapping[str, Any], *, event_time: str | None=None, source: str='gate', clock: Callable[[], float] | None=None)`
+
+Stamp an existing audit record with the bitemporal envelope.
+
+#### `append_provenance(record: Mapping[str, Any], source: str, *, clock: Callable[[], float] | None=None, replay_of: str | None=None)`
+
+Append a provenance hop to an already-stamped record.
+
+#### `replay(record: Mapping[str, Any], *, source: str='memory-recall', clock: Callable[[], float] | None=None, replay_of: str | None=None)`
+
+Re-enter a record into the trail as a *recalled* episode.
+
+#### `is_replay(record: Mapping[str, Any])`
+
+True when the record is a replayed/recalled episode.
+
+#### `classify_provenance(record: Mapping[str, Any])`
+
+Read-time trust class of a stamped record: ``"trusted"`` or ``"untrusted"``.
+
+#### `is_advisory_only(record: Mapping[str, Any])`
+
+True when the record may inform but never authorize at read time.
+
+#### `check_temporal_consistency(record: Mapping[str, Any], *, late_arrival_seconds: int=LATE_ARRIVAL_SECONDS)`
+
+Temporal anomaly codes for one stamped record (empty when clean).
+
+#### `verify_sequence(records: Iterable[Mapping[str, Any]], *, late_arrival_seconds: int=LATE_ARRIVAL_SECONDS)`
+
+Per-record anomalies for an ordered feed of stamped records.
+
+### `memory_decay`
+
+Source: `components/northstar-agent-runtime/memory_decay.py`
+
+Intelligent decay for memory management: selective forgetting.
+
+#### `DecayPolicy`
+
+The forgetting policy for one decay domain. Fail-closed on invalid.
+
+#### `MemoryItem`
+
+One decay-tracked memory entry.
+
+- `record_access(*, useful: bool, now: float | None=None)`
+  - Record one retrieval of this item.
+- `age_hours_at(now: float)`
+  - Age in hours, clamped at 0 (future timestamps are clock skew, and skew must be retain-biased, never prune-biased).
+- `recency_at(now: float, half_life_hours: float)`
+  - Exponential recency: 1.0 at age 0, 0.5 at one half-life.
+- `utility()`
+  - Fraction of accesses judged useful. Never-accessed items score 0.0 by design: decay favors what gets used.
+#### `composite_score(item: MemoryItem, policy: DecayPolicy, *, now: float | None=None)`
+
+Score one item on the three decay axes.
+
+#### `DecayCandidate`
+
+One item selected for forgetting, with its full score breakdown.
+
+#### `select_forget_candidates(items: list[MemoryItem], policy: DecayPolicy, *, now: float | None=None)`
+
+Select forget candidates for one decay cycle.
+
+#### `forget(item: MemoryItem, candidate: DecayCandidate, *, decided_by: str, now: float | None=None)`
+
+Apply a forget decision: set the retrieval tombstone.
+
+#### `resurrect(item: MemoryItem, *, decided_by: str, now: float | None=None)`
+
+Explicit host resurrection of a tombstoned item.
+
+#### `retrievable(items: list[MemoryItem])`
+
+The read-time view: tombstoned items are invisible to retrieval.
+
+#### `apply_decay_events(ledger: Any, events: list[dict[str, Any]])`
+
+Append decay events (forget / resurrect) to a memory ledger.
+
+#### `decay_cycle(items: list[MemoryItem], policy: DecayPolicy, *, decided_by: str, now: float | None=None, ledger: Any | None=None)`
+
+Run one full decay cycle: select, forget, optionally audit.
+
+#### `probe_names()`
+
+All decay probe names.
+
 ### `asi10_probes`
 
 Source: `components/northstar-agent-runtime/asi10_probes.py`
