@@ -31,6 +31,10 @@ Honest limits, because a verification story without them is marketing
 - Only reading happens: no writes, no execution, no network. Paths must resolve
   inside the workspace, because evidence from outside the sandbox boundary is not
   evidence about this run.
+- Content verification has a 64 MiB byte budget. Oversized startup files are
+  refused; post-run growth beyond the budget produces a failed verdict without a
+  partial content digest. Text checks have the same bound. Reads are not an atomic
+  snapshot against concurrent same-user modifications.
 - A run that ends on a ceiling, a denial, a compaction failure or a provider error
   already carries a failing subtype; the verdict is still recorded for the audit, but
   it does not overwrite the reason the run stopped. Only a would-be ``success`` can
@@ -39,6 +43,7 @@ Honest limits, because a verification story without them is marketing
 from __future__ import annotations
 
 import hashlib
+import os
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Iterable, Mapping, Sequence
@@ -60,6 +65,10 @@ class PostConditionError(ValueError):
     """Raised for a malformed, unknown, or out-of-bounds postcondition."""
 
 
+class PostConditionLimitError(PostConditionError):
+    """A file cannot be verified completely within the configured byte budget."""
+
+
 def _digest(path: Path) -> str | None:
     """Content address of a file, or ``None`` when it does not exist as a file.
 
@@ -77,6 +86,10 @@ def _digest(path: Path) -> str | None:
     digest = hashlib.sha256()
     try:
         with path.open("rb") as handle:
+            def refuse_partial() -> None:
+                raise PostConditionLimitError(f"{path.name}: file exceeds {MAX_DIGEST_BYTES}-byte verification limit; complete digest unavailable")
+            if os.fstat(handle.fileno()).st_size > MAX_DIGEST_BYTES:
+                refuse_partial()
             remaining = MAX_DIGEST_BYTES
             while remaining > 0:
                 chunk = handle.read(min(65536, remaining))
@@ -84,6 +97,10 @@ def _digest(path: Path) -> str | None:
                     break
                 digest.update(chunk)
                 remaining -= len(chunk)
+            # Size can grow after fstat: a one-byte EOF probe prevents a prefix digest
+            # from being reported as complete. It is not a concurrent-write snapshot.
+            if remaining == 0 and handle.read(1):
+                refuse_partial()
     except OSError as error:
         raise PostConditionError(f"cannot read {path.name}: {error}") from error
     return digest.hexdigest()
@@ -216,7 +233,10 @@ class PostConditionSet:
     def _evaluate_one(self, condition: PostCondition) -> Verdict:
         path = self._resolve(condition.path)
         before = (self._before or {}).get(condition.path)
-        after = _digest(path)
+        try:
+            after = _digest(path)
+        except PostConditionLimitError as error:
+            return Verdict(condition=condition, ok=False, detail=str(error), before=before, after=None)
         exists = after is not None
         verdict_ok = False
         detail = ""
@@ -241,7 +261,15 @@ class PostConditionSet:
                 detail = "file missing, so nothing contains the expected text"
             else:
                 try:
-                    body = path.read_text(encoding="utf-8", errors="replace")
+                    with path.open("rb") as handle:
+                        if os.fstat(handle.fileno()).st_size > MAX_DIGEST_BYTES:
+                            raise PostConditionLimitError(f"{path.name}: text exceeds {MAX_DIGEST_BYTES}-byte verification limit")
+                        raw = handle.read(MAX_DIGEST_BYTES + 1)
+                    if len(raw) > MAX_DIGEST_BYTES:
+                        raise PostConditionLimitError(f"{path.name}: text exceeds {MAX_DIGEST_BYTES}-byte verification limit")
+                    body = raw.decode("utf-8", errors="replace")
+                except PostConditionLimitError as error:
+                    return Verdict(condition=condition, ok=False, detail=str(error), before=before, after=None)
                 except OSError as error:  # pragma: no cover - unreadable file
                     detail = f"cannot read: {error}"
                     body = ""

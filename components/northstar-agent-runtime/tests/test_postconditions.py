@@ -14,9 +14,12 @@ import subprocess
 import sys
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 import support  # noqa: F401  (bootstraps sys.path)
 from support import RuntimeTestCase, tool_turn
+
+import postconditions
 
 from cli import main
 from postconditions import (
@@ -184,6 +187,72 @@ class EvaluationTests(unittest.TestCase):
         set_.evaluate()
         self.assertEqual({child: child.stat().st_mtime_ns for child in before}, before, "a verifier that writes is not a verifier")
 
+    def test_snapshot_rejects_files_larger_than_the_digest_budget(self):
+        path = self.root / "large.bin"
+        path.write_bytes(b"prefix!!tail")
+        set_ = PostConditionSet(self.root, [PostCondition(kind="unchanged", path=path.name)])
+        with patch.object(postconditions, "MAX_DIGEST_BYTES", 8):
+            with self.assertRaisesRegex(PostConditionError, "limit|budget"):
+                set_.snapshot()
+        self.assertIsNone(set_._before, "no partial prefix may be recorded as a whole-file digest")
+
+    def test_file_exactly_at_budget_has_a_complete_digest(self):
+        import hashlib
+        path = self.root / "boundary.bin"
+        data = b"eight!!!"
+        path.write_bytes(data)
+        with patch.object(postconditions, "MAX_DIGEST_BYTES", len(data)):
+            self.assertEqual(postconditions._digest(path), hashlib.sha256(data).hexdigest())
+
+    def test_growth_past_budget_cannot_report_unchanged_or_changed_success(self):
+        path = self.root / "growing.bin"
+        path.write_bytes(b"prefix!!")
+        set_ = PostConditionSet(self.root, [PostCondition(kind="unchanged", path=path.name), PostCondition(kind="changed", path=path.name)])
+        with patch.object(postconditions, "MAX_DIGEST_BYTES", 8):
+            set_.snapshot()
+            with path.open("ab") as stream:
+                stream.write(b"tail")
+            verdicts = set_.evaluate()
+        self.assertFalse(any(v.ok for v in verdicts), "an unread suffix is not evidence for either content verdict")
+        self.assertTrue(all(v.after is None for v in verdicts))
+        self.assertTrue(all("limit" in v.detail or "budget" in v.detail for v in verdicts))
+
+    def test_growth_after_size_probe_is_rejected_by_eof_check(self):
+        path = self.root / "grows-during-hash.bin"
+        path.write_bytes(b"prefix!!tail")
+        from types import SimpleNamespace
+        with patch.object(postconditions, "MAX_DIGEST_BYTES", 8), patch.object(os, "fstat", return_value=SimpleNamespace(st_size=8)):
+            with self.assertRaisesRegex(PostConditionError, "limit"):
+                postconditions._digest(path)
+
+    def test_contains_read_also_rejects_growth_after_digest(self):
+        path = self.root / "late-text.txt"
+        path.write_text("needle")
+        set_ = PostConditionSet(self.root, [PostCondition(kind="contains", path=path.name, text="needle")])
+        with patch.object(postconditions, "MAX_DIGEST_BYTES", 8):
+            set_.snapshot()
+            real_digest = postconditions._digest
+            def grow_after_digest(target):
+                result = real_digest(target)
+                target.write_text("needle" + "x" * 20)
+                return result
+            with patch.object(postconditions, "_digest", side_effect=grow_after_digest):
+                verdict = set_.evaluate()[0]
+        self.assertFalse(verdict.ok, "contains must not make an unbounded second read after a bounded hash")
+        self.assertIsNone(verdict.after)
+
+    def test_contains_cannot_bypass_the_bounded_content_verifier(self):
+        path = self.root / "text.txt"
+        path.write_text("needle")
+        set_ = PostConditionSet(self.root, [PostCondition(kind="contains", path=path.name, text="needle")])
+        with patch.object(postconditions, "MAX_DIGEST_BYTES", 8):
+            set_.snapshot()
+            path.write_text("needle" + "x" * 20)
+            with patch.object(Path, "read_text", side_effect=AssertionError("unbounded text read")):
+                verdict = set_.evaluate()[0]
+        self.assertFalse(verdict.ok)
+        self.assertIsNone(verdict.after)
+
     def test_summary_reports_the_structural_split(self):
         set_ = self.build(["unchanged:a.txt", "contains:a.txt:x"], {"a.txt": "x"})
         summary = summarise(set_.evaluate())
@@ -196,6 +265,37 @@ class EvaluationTests(unittest.TestCase):
 
 
 class LoopIntegrationTests(RuntimeTestCase):
+    def test_oversized_startup_artifact_refuses_before_any_model_request(self):
+        root = self.workspace({"large.txt": "x" * 9})
+        provider = ScriptedProvider([{"text": "done"}])
+        runtime = self.runtime(provider=provider, workspace=root,
+            postconditions=[PostCondition(kind="unchanged", path="large.txt")])
+        with patch.object(postconditions, "MAX_DIGEST_BYTES", 8):
+            events = list(runtime.run("go"))
+        from providers.base import ResultMessage
+        results = [event for event in events if isinstance(event, ResultMessage)]
+        self.assertEqual(len(results), 1)
+        self.assertEqual(results[0].subtype, "error_during_execution")
+        self.assertIn("verification limit", " ".join(results[0].errors))
+        self.assertEqual(provider.requests, [])
+
+    def test_postrun_growth_past_digest_limit_yields_failure_not_success(self):
+        root = self.workspace({"keep.txt": "prefix!!"})
+        class GrowingProvider(ScriptedProvider):
+            def generate(self, request):
+                (root / "keep.txt").write_text("prefix!!changed-suffix")
+                return super().generate(request)
+        provider = GrowingProvider([{"text": "All done, nothing changed."}])
+        runtime = self.runtime(provider=provider, workspace=root,
+            postconditions=[PostCondition(kind="unchanged", path="keep.txt")])
+        with patch.object(postconditions, "MAX_DIGEST_BYTES", 8):
+            report = self.drive(runtime)
+        self.assertEqual(report.subtype, "error_postconditions_failed")
+        self.assertExactlyOneResult(report)
+        record = next(event for event in report.events if getattr(event, "subtype", "") == "postconditions")
+        self.assertEqual(record.data["failed"], 1)
+        self.assertIsNone(record.data["results"][0]["digest_after"])
+
     def test_a_claim_of_done_without_the_artifact_ends_red(self):
         root = self.workspace()
         runtime = self.runtime(
