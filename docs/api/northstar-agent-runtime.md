@@ -2439,6 +2439,121 @@ The probe record for *name*; raises ``KeyError`` when unknown.
 
 Probe name -> expected outcome.
 
+### `critic_gated_planning`
+
+Source: `components/northstar-agent-runtime/critic_gated_planning.py`
+
+Critic-gated planning.
+
+#### `CriticFinding`
+
+One critic finding: a claim, never authorization.
+
+- `is_blocking()`
+#### `CriticRound`
+
+One critic round over a proposal revision.
+
+- `verdict()`
+  - ``"revise"`` when any blocking finding is present, else ``"proceed"``. A verdict is evidence of a review, not a gate verdict.
+#### `CriticSession`
+
+A bounded critic loop for one proposal revision.
+
+#### `build_finding(finding_id: str, proposal_id: str, revision: int, severity: str, category: str, detail_digest: str, critic_id: str, *, recorded_at: int)`
+
+Pin a critic finding. Fail-closed on bad vocab or bad digests.
+
+#### `verify_finding_digest(finding: CriticFinding)`
+
+Re-derive the finding digest; constant-time compare.
+
+#### `verify_session_digest(session: CriticSession)`
+
+Re-derive the session digest; constant-time compare.
+
+#### `start_session(proposal: Any, *, critic_id: str, max_rounds: int=3)`
+
+Open a critic session over a proposal revision.
+
+#### `record_round(session: CriticSession, findings: tuple[CriticFinding, ...] | list[CriticFinding])`
+
+Record one critic round; returns a new session.
+
+#### `session_converged(session: CriticSession)`
+
+True when the latest round carries zero blocking findings and the session is not escalated. Convergence is evidence of a review, never a gate verdict.
+
+#### `admit_session(session: CriticSession, proposal: Any, ledger: Any)`
+
+Verifier-gated admission: admit a proposal's actions to the gate queue.
+
+#### `dispatch_admitted(session: CriticSession, proposal_id: str, action_seq: int, gate_fn: Callable[..., Any], *, ledger: Any, arguments_digest: str)`
+
+Admit the session's proposal and gate one proposed action.
+
+#### `probe_names()`
+
+#### `benign_names()`
+
+#### `probes_by_family(family: str)`
+
+#### `probe_by_name(name: str)`
+
+#### `expected_outcomes()`
+
+### `memory_supersession`
+
+Source: `components/northstar-agent-runtime/memory_supersession.py`
+
+Memory supersession invariant: one active record per (subject, type).
+
+#### `MemoryRecord`
+
+One memory record. Immutable; closing is a separate event, never an edit.
+
+- `digest_payload()`
+  - The canonical payload this record's digest is pinned over.
+- `closed_copy(*, valid_to: float, superseded_by: str | None)`
+  - The closed successor of this record (for supersession, never an edit).
+- `is_active` (property)
+#### `SupersedeEvent`
+
+A digest-pinned closing event: record X closed at valid_to, superseded by Y.
+
+- `digest_payload()`
+#### `SupersessionStore`
+
+Host-owned in-process store enforcing the one-active invariant.
+
+- `record(*, subject: str, record_type: str, statement_digest: str, valid_from: float)`
+  - Record a new statement, closing any active record for the same key.
+- `close(*, subject: str, record_type: str, valid_to: float)`
+  - Explicitly close the active record for a key, with no replacement.
+- `active(subject: str, record_type: str)`
+  - The currently active record for a key, or ``None``.
+- `chain(subject: str, record_type: str)`
+  - Full history for a key, oldest ``valid_from`` first.
+- `events()`
+  - All closing events, in append order.
+- `verify()`
+  - Re-derive every digest and check the one-active invariant.
+#### `verify_record(record: MemoryRecord)`
+
+Re-derive a single record's digest (constant-time compare). Never raises.
+
+#### `verify_event(event: SupersedeEvent)`
+
+Re-derive a single closing event's digest (constant-time compare).
+
+#### `probe_names()`
+
+#### `probes_by_family(family: str)`
+
+#### `probe_by_name(name: str)`
+
+#### `expected_outcomes()`
+
 ### `harness_schema_fields`
 
 Source: `components/northstar-agent-runtime/harness_schema_fields.py`
