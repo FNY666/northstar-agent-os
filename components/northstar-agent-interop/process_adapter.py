@@ -207,14 +207,18 @@ def _run_bounded_process(
                         try:
                             written = os.write(stdin_fd, input_bytes[input_offset:])
                             input_offset += written
-                        except (BlockingIOError, BrokenPipeError):
+                        except BlockingIOError:
+                            # Readiness may be stale; keep the remaining context queued.
+                            continue
+                        except BrokenPipeError:
                             selector.unregister(stdin_fd)
                             process.stdin.close()
                 elif key.data == "stdout" and mask & selectors.EVENT_READ:
                     try:
                         chunk = os.read(stdout_fd, 65_536)
                     except BlockingIOError:
-                        chunk = b""
+                        # Only an actual empty read means EOF; retry a readiness race.
+                        continue
                     if not chunk:
                         selector.unregister(stdout_fd)
                         process.stdout.close()
