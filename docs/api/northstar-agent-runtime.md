@@ -660,6 +660,74 @@ Source: `components/northstar-agent-runtime/weaponization_probe.py`
 
 Weaponization probe family: dual-use cyber operations run by a hostile operator.
 
+### `topology_probe`
+
+Source: `components/northstar-agent-runtime/topology_probe.py`
+
+MASLEAK-style topology extraction probe family.
+
+#### `classify_extraction_target(text: str)`
+
+Map a query to the extraction dimension it probes, or None.
+
+#### `looks_like_extraction_query(text: str)`
+
+True when the text probes any extraction dimension.
+
+#### `detect_systematic_extraction(queries: list[str], threshold: int=SYSTEMATIC_THRESHOLD)`
+
+Analyze a session's query history for extraction coverage.
+
+#### `probe_names()`
+
+#### `benign_names()`
+
+### `pqc_inventory`
+
+Source: `components/northstar-agent-runtime/pqc_inventory.py`
+
+Post-quantum migration inventory for Northstar's crypto-agility seam.
+
+#### `PrimitiveEntry`
+
+One cryptographic primitive in use, and where its PQ replacement lands.
+
+#### `ReplacementSlot`
+
+A PQ slot a future Signer/Verifier (or KEM) implementation fills.
+
+#### `HNDLSurface`
+
+A surface harvestable today and decryptable after CRQC.
+
+#### `seam_readiness()`
+
+How ready the signing call sites are for the PQ swap.
+
+#### `inventory()`
+
+The full primitive inventory as dicts (for docs/exports).
+
+#### `replacement_slots()`
+
+The PQ slots future implementations fill.
+
+#### `hndl_surfaces()`
+
+HNDL-vulnerable surfaces, with the discipline pinned.
+
+#### `claim_language(primitive_name: str)`
+
+The honest claim Northstar may make about ``primitive_name``.
+
+#### `primitives_requiring_signature_migration()`
+
+Primitive names whose migration kind is 'signature'.
+
+#### `primitives_requiring_kem_migration()`
+
+Migration entries of kind 'kem' or 'operational' (HNDL surface).
+
 ### `sandbox_escape_probe`
 
 Source: `components/northstar-agent-runtime/sandbox_escape_probe.py`
