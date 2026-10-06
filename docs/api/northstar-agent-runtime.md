@@ -777,6 +777,56 @@ Coordinator: every spend must clear ALL configured dimensions.
 - `spend(tool: str, units: float, tenant: str | None=None)`
   - Spend against all configured dimensions; denied atomically.
 - `all_allowed(verdicts: List[SpendVerdict])`
+### `observation_masking`
+
+Source: `components/northstar-agent-runtime/observation_masking.py`
+
+Observation masking for context compaction.
+
+#### `mask_result_block(block: Any, tool_name: str, *, placeholder: str=DEFAULT_PLACEHOLDER)`
+
+Return a copy of a ToolResultBlock with content replaced by a placeholder.
+
+#### `MaskingOutcome`
+
+What observation masking did, or exactly why it refused.
+
+- `as_dict()`
+#### `mask_observations(transcript: Sequence[Any], *, keep_recent: int=3, delete_noise: bool=True, placeholder: str=DEFAULT_PLACEHOLDER)`
+
+Mask old tool results and delete noise, preserving exchange atomicity.
+
+### `approval_sla`
+
+Source: `components/northstar-agent-runtime/approval_sla.py`
+
+SLA-bound approval queue for governed circuit-breaker resumption.
+
+#### `RequestPriority`
+
+Approval priority. Low-priority requests shed first under pressure.
+
+#### `ApprovalRequest`
+
+One resumption approval request.
+
+#### `ApprovalQueue`
+
+SLA-bound intake queue for breaker resumptions.
+
+- `pending_count()`
+  - Number of undecided requests (pending, not yet breached).
+- `pressure()`
+  - Queue pressure as a fraction in [0, 1]; >= 1 means saturated.
+- `submit(capability: str, requested_by: str, priority: RequestPriority=RequestPriority.NORMAL, sla_seconds: float | None=None)`
+  - Submit a resumption approval request.
+- `decide(request_id: str, approved_by: str, approved: bool)`
+  - Record a human decision on a pending request.
+- `sweep()`
+  - Public entry: degrade breached requests; return what degraded.
+- `get(request_id: str)`
+- `audit_log()`
+  - Append-only intake/decision/breach log (copies).
 ### `session_budget`
 
 Source: `components/northstar-agent-runtime/session_budget.py`
