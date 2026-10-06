@@ -1482,6 +1482,100 @@ Look up any probe (attack or benign) by name.
 
 Map every probe name to its expected outcome.
 
+### `recovery_ladder`
+
+Source: `components/northstar-agent-runtime/recovery_ladder.py`
+
+Structured recovery ladder: retry -> backoff -> checkpoint-resume -> fallback -> re-plan -> human-review.
+
+#### `LadderError`
+
+Raised when the ladder is misconfigured or an outcome fails verification.
+
+#### `RecoveryFailure`
+
+The classified failure entering the ladder.
+
+#### `PlannedStage`
+
+One stage of a recovery plan: which step, with what attempt budget.
+
+#### `RecoveryPlan`
+
+Ordered stages for one failure. Built by :func:`plan_for`.
+
+- `stage_names()`
+#### `StageAttempt`
+
+One recorded attempt inside a stage.
+
+#### `HumanReviewRequest`
+
+The handoff handed to the human at the terminal stage.
+
+#### `RecoveryOutcome`
+
+The final, digest-pinned result of a ladder run.
+
+#### `plan_for(failure: RecoveryFailure, *, max_attempts_per_stage: int=3)`
+
+Build the stage plan for a classified failure.
+
+#### `backoff_delay(attempt_no: int, *, base_s: float=1.0, factor: float=2.0, max_s: float=300.0)`
+
+Exponential backoff delay for the 1-based ``attempt_no``.
+
+#### `RecoveryLadder`
+
+Executes recovery plans against host-supplied hooks.
+
+- `run(failure: RecoveryFailure)`
+  - Drive ``failure`` through its plan. Never raises on action failure.
+#### `verify_outcome(outcome: RecoveryOutcome)`
+
+Re-derive the outcome digest with a constant-time compare.
+
+### `telemetry_export`
+
+Source: `components/northstar-agent-runtime/telemetry_export.py`
+
+OTel-compatible telemetry export with pinned ``gen_ai.*`` vocabulary.
+
+#### `TelemetryExportError`
+
+Raised for malformed spans, attributes, or export operations.
+
+#### `new_trace_id()`
+
+Generate a 128-bit OTLP trace id (32 lowercase hex chars).
+
+#### `new_span_id()`
+
+Generate a 64-bit OTLP span id (16 lowercase hex chars).
+
+#### `Span`
+
+One telemetry span. Immutable; attributes are a frozen mapping.
+
+- `with_operation_attribute()`
+  - Return a copy with ``gen_ai.operation.name`` set from ``operation``.
+#### `TelemetryExporter`
+
+Append-only collector of telemetry spans.
+
+- `emit(span: Span)`
+- `spans()`
+- `span_count()`
+- `to_otlp_json(*, include_content: bool=False)`
+  - Render the collected spans as OTLP/JSON ``{"resourceSpans": [...]}``.
+- `digestable_payload(*, include_content: bool=False)`
+  - The deterministic subset of the export covered by ``digest()``.
+- `digest(*, include_content: bool=False)`
+  - ``sha256:`` digest of the canonical JSON of the digestable payload.
+#### `verify_digest(exporter: TelemetryExporter, digest: str, *, include_content: bool=False)`
+
+Re-derive the exporter's payload digest and compare in constant time.
+
 ### `assurance_case`
 
 Source: `components/northstar-agent-runtime/assurance_case.py`
