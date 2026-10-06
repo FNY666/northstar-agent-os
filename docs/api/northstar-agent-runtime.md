@@ -913,6 +913,93 @@ Pre-gate for edge/physical tool calls.
 
 All edge-gate probe names.
 
+### `stt_injection_probes`
+
+Source: `components/northstar-agent-runtime/stt_injection_probes.py`
+
+STT (speech-to-text) injection probe family: voice as an untrusted channel.
+
+#### `probe_names()`
+
+All STT attack probe names.
+
+#### `benign_names()`
+
+All STT benign control names.
+
+#### `STTTranscript`
+
+One STT transcript wrapped in channel provenance.
+
+- `has_audio_binding` (property)
+  - True when the transcript is bound to real captured audio.
+- `provenance_ok` (property)
+  - Provenance is intact: pinned channel, known attestation state.
+#### `make_transcript(text: str, *, audio_sha256: str | None=None, claimed_speaker_attestation: str='none', language: str='und', asr_confidence: float=0.0, captured_at: str='', session_id: str='', metadata: dict[str, Any] | None=None)`
+
+Build an STT transcript from untrusted capture input.
+
+#### `host_attest_speaker(transcript: STTTranscript)`
+
+Host-side speaker verification: re-verify audio against enrollment.
+
+#### `is_advisory_only(transcript: STTTranscript)`
+
+STT transcripts are always advisory-only.
+
+#### `voice_approval_decision(transcript: STTTranscript)`
+
+The gate's standing answer to 'the voice approved it'.
+
+#### `classify_stt_channel(transcript: STTTranscript)`
+
+Trust class of the STT channel: always ``"untrusted"``.
+
+#### `stt_memory_source()`
+
+The memory-admission source name for STT-derived writes.
+
+### `screen_sanitizer`
+
+Source: `components/northstar-agent-runtime/screen_sanitizer.py`
+
+Screen capture sanitization for the permission gate.
+
+#### `UntrustedText`
+
+OCR text that is explicitly NOT trusted.
+
+- `untrusted` (property)
+- `quoted()`
+  - Render for inclusion in a model prompt or log: framed and labelled.
+#### `sanitize_ocr_text(text: str, *, source: str='ocr')`
+
+Wrap raw OCR output. Never returns a bare trusted string.
+
+#### `quarantine(text: str, *, source: str='ocr')`
+
+One-call variant that returns the framed string directly.
+
+#### `InjectionFinding`
+
+#### `detect_injection_in_text(text: str)`
+
+Scan OCR text for injection shapes. Pure function.
+
+#### `ScreenCapture`
+
+A screen capture as handed to the gate. All fields are claims.
+
+#### `SanitizedCapture`
+
+#### `sanitize_capture(capture: ScreenCapture, *, max_image_bytes: int=DEFAULT_MAX_IMAGE_BYTES)`
+
+Sanitize one screen capture. Fail-closed on unbounded or empty input.
+
+#### `probe_names()`
+
+All screen-sanitizer probe names.
+
 ### `trajectory_corpus`
 
 Source: `components/northstar-agent-runtime/trajectory_corpus.py`
