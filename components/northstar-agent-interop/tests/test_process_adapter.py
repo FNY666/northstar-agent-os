@@ -317,6 +317,94 @@ class RunnerCleanupTests(unittest.TestCase):
                 self.assertFalse(getattr(caller, "__notes__", []), "runner must not annotate an unrelated caller exception")
 
 
+class ProcessGroupTerminationTests(unittest.TestCase):
+    def test_posix_kills_group_even_when_leader_wait_succeeds(self):
+        process = mock.MagicMock(pid=12345)
+        for code in (None, 0):
+            with self.subTest(leader_returncode=code):
+                process.returncode = code
+                with mock.patch.object(process_adapter.os, "name", "posix"), mock.patch.object(process_adapter.os, "killpg") as killpg:
+                    process_adapter._terminate(process)
+                self.assertEqual(killpg.call_args_list, [
+                    mock.call(12345, process_adapter.signal.SIGTERM),
+                    mock.call(12345, process_adapter.signal.SIGKILL),
+                ])
+
+    def test_posix_timeout_and_term_failure_still_attempt_group_kill(self):
+        import subprocess
+        for term_failure in (False, True):
+            process = mock.MagicMock(pid=12345)
+            process.wait.side_effect = [subprocess.TimeoutExpired("fixture", .25), 0]
+            effects = [ProcessLookupError("gone"), None] if term_failure else None
+            with self.subTest(term_failure=term_failure), mock.patch.object(process_adapter.os, "name", "posix"), mock.patch.object(process_adapter.os, "killpg", side_effect=effects) as killpg:
+                process_adapter._terminate(process)
+            self.assertEqual(killpg.call_args_list[-1], mock.call(12345, process_adapter.signal.SIGKILL))
+
+    def test_nonposix_retains_success_and_timeout_behavior(self):
+        import subprocess
+        for timeout in (False, True):
+            process = mock.MagicMock()
+            if timeout:
+                process.wait.side_effect = [subprocess.TimeoutExpired("fixture", .25), 0]
+            with self.subTest(timeout=timeout), mock.patch.object(process_adapter.os, "name", "nt"), mock.patch.object(process_adapter.os, "killpg", create=True) as killpg:
+                process_adapter._terminate(process)
+            process.terminate.assert_called_once()
+            self.assertEqual(process.kill.call_count, int(timeout))
+            killpg.assert_not_called()
+
+    @unittest.skipUnless(os.name == "posix", "process groups require POSIX")
+    def test_owned_term_ignoring_descendant_stops_after_leader_exit(self):
+        import select
+        import subprocess
+        child_code = (
+            "import pathlib,signal,sys,time;signal.signal(signal.SIGTERM,signal.SIG_IGN);"
+            "p=pathlib.Path(sys.argv[1]);p.write_text('ready');end=time.monotonic()+5\n"
+            "while time.monotonic()<end:\n"
+            " with p.open('a') as f: f.write('x');f.flush()\n"
+            " time.sleep(.01)\n"
+        )
+        leader_code = (
+            "import pathlib,subprocess,sys,time; p=pathlib.Path(sys.argv[2]);"
+            "c=subprocess.Popen([sys.executable,'-c',sys.argv[1],str(p)]);"
+            "end=time.monotonic()+3\n"
+            "while not p.exists():\n"
+            " if time.monotonic()>end: raise RuntimeError('child not ready')\n"
+            " time.sleep(.01)\n"
+            "print(c.pid,flush=True)\n"
+            "time.sleep(5) if sys.argv[3]=='alive' else None\n"
+        )
+        for mode in ("alive", "exited"):
+            with self.subTest(leader_mode=mode), tempfile.TemporaryDirectory(prefix="interop-owned-group-") as tmp:
+                heartbeat = Path(tmp) / "heartbeat"
+                process = subprocess.Popen(
+                    (sys.executable, "-c", leader_code, child_code, str(heartbeat), mode),
+                    start_new_session=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                )
+                try:
+                    self.assertTrue(select.select([process.stdout], [], [], 4)[0], "fixture startup timeout")
+                    self.assertTrue(process.stdout.readline().strip().isdigit(), "child readiness missing")
+                    first = heartbeat.stat().st_size
+                    time.sleep(.06)
+                    self.assertGreater(heartbeat.stat().st_size, first, "child must demonstrably run before cleanup")
+                    if mode == "exited":
+                        self.assertEqual(process.wait(timeout=2), 0)
+                    process_adapter._terminate(process)
+                    self.assertIsNotNone(process.returncode, "leader must be reaped")
+                    # Allow signal delivery to settle, then assert continued stability.
+                    time.sleep(.06)
+                    stopped = heartbeat.stat().st_size
+                    time.sleep(.12)
+                    self.assertEqual(heartbeat.stat().st_size, stopped, "owned descendant still executing after group cleanup")
+                finally:
+                    try:
+                        os.killpg(process.pid, process_adapter.signal.SIGKILL)
+                    except ProcessLookupError:
+                        pass
+                    process.wait(timeout=3)
+                    process.stdout.close()
+                    process.stderr.close()
+
+
 class ProcessAdapterTests(unittest.TestCase):
     def setUp(self):
         self.tempdir = tempfile.TemporaryDirectory()
