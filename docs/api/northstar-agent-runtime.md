@@ -1721,6 +1721,119 @@ Gate one proposed action for dispatch.
 
 #### `expected_outcomes()`
 
+### `retirement_watch`
+
+Source: `components/northstar-agent-runtime/retirement_watch.py`
+
+Benchmark-retirement watch for assurance cases.
+
+#### `RetirementWatchError`
+
+A retirement-watch registration, notice, or scan step failed.
+
+#### `RetirementNotice`
+
+A pinned, host-curated retirement announcement.
+
+- `as_dict()`
+#### `NoticeRegistry`
+
+Host-curated set of retirement notices, fail-closed on misuse.
+
+- `register(*, benchmark_id: str, benchmark_version: str, reason: str, issued_by: str, evidence_ref: str, announced_at: str | None=None)`
+  - Register one retirement notice, digest-pinned.
+- `notices()`
+  - All notices, in deterministic (digest) order.
+#### `verify_notice(notice: RetirementNotice)`
+
+Re-derive a notice's digest with a constant-time compare.
+
+#### `detect_retirement(registry: NoticeRegistry, benchmark_id: str, benchmark_version: str, *, version_lte: Callable[[str, str], bool] | None=None)`
+
+Does any registered notice retire ``(benchmark_id, benchmark_version)``?
+
+#### `revalidation_change_for(notice: RetirementNotice)`
+
+Render a notice as a change description for ``needs_revalidation()``.
+
+#### `PairRetirement`
+
+One retirement hit against a case's pair-report evidence.
+
+#### `scan_case(registry: NoticeRegistry, case: AssuranceCase, *, version_lte: Callable[[str, str], bool] | None=None)`
+
+Scan one assurance case for retired benchmark pairs.
+
+#### `CaseScanResult`
+
+The sweep outcome for one assurance case.
+
+#### `sweep_cases(registry: NoticeRegistry, cases: Iterable[AssuranceCase], *, version_lte: Callable[[str, str], bool] | None=None)`
+
+Sweep a batch of assurance cases against the retirement registry.
+
+#### `reason_description(reason: str)`
+
+Human-readable description for a retirement reason.
+
+### `reasoning_budget`
+
+Source: `components/northstar-agent-runtime/reasoning_budget.py`
+
+Reasoning-effort budget: overthinking as a DoS-shaped failure.
+
+#### `ReasoningExhaustionEvent`
+
+The audit event emitted when a reasoning budget is exhausted.
+
+- `as_dict()`
+#### `ThoughtSpendRecord`
+
+One booked reasoning spend, digest-pinned for auditability.
+
+- `as_dict()`
+#### `ReasoningBudget`
+
+Per-session reasoning-effort budget with pre-execution enforcement.
+
+- `spent_tokens` (property)
+- `exhausted` (property)
+- `remaining_tokens` (property)
+- `ledger()`
+- `events()`
+- `authorize(estimated_tokens: Any, purpose: str='')`
+  - Pre-execution gate: refuse when the estimate would reach the ceiling.
+- `record(actual_tokens: Any, purpose: str='')`
+  - Book actual reasoning spend; returns the digest-pinned receipt.
+#### `ThoughtStep`
+
+One observed reasoning step, host-reported.
+
+#### `OverthinkingDetector`
+
+Advisory overthinking detector: observes, never denies.
+
+- `observe(step: ThoughtStep)`
+- `reset()`
+- `steps_observed` (property)
+- `tokens_observed` (property)
+- `verdict()`
+#### `probe_names()`
+
+All reasoning-budget probe names.
+
+#### `probes_by_family(family: str)`
+
+Probes in one family.
+
+#### `probe_by_name(name: str)`
+
+One probe by name; KeyError on unknown names.
+
+#### `expected_outcomes()`
+
+Map every probe name to its expected outcome.
+
 ### `fact_belief`
 
 Source: `components/northstar-agent-runtime/fact_belief.py`
