@@ -1444,6 +1444,104 @@ One probe by name; KeyError on unknown names.
 
 Map every probe name to its expected outcome.
 
+### `context_propagation_probes`
+
+Source: `components/northstar-agent-runtime/context_propagation_probes.py`
+
+Context-propagation probe corpus.
+
+#### `NodeContext`
+
+One side of a node-to-node transfer.
+
+#### `HopClassification`
+
+Result of classifying one node-to-node transfer.
+
+#### `classify_hop(sender: NodeContext, channel: str, *, carries_instruction: bool, schema_valid: bool=False)`
+
+Classify one node-to-node transfer.
+
+#### `probe_names()`
+
+All context-propagation probe names.
+
+#### `benign_names()`
+
+All benign control names.
+
+#### `probes_by_family(family: str)`
+
+Attack probes in one family.
+
+#### `probe_by_name(name: str)`
+
+Look up any probe (attack or benign) by name.
+
+#### `expected_outcomes()`
+
+Map every probe name to its expected outcome.
+
+### `assurance_case`
+
+Source: `components/northstar-agent-runtime/assurance_case.py`
+
+Assurance cases for Northstar agent deployments.
+
+#### `AssuranceError`
+
+An assurance-case build or verification step failed. Raised, never silent.
+
+#### `Evidence`
+
+One pinned piece of evidence feeding an assurance case.
+
+- `as_dict()`
+#### `evidence_audit_trail(records: Iterable[Mapping[str, Any]], *, recorded_at: str | None=None)`
+
+Pin a set of per-decision audit records as case evidence.
+
+#### `evidence_bitemporal_sequence(records: Iterable[Mapping[str, Any]], *, recorded_at: str | None=None)`
+
+Pin a bitemporal-stamped record sequence as standalone evidence.
+
+#### `evidence_worm_chain(store: WormHotStore, *, recorded_at: str | None=None)`
+
+Pin a hot-tier WORM chain verification as case evidence.
+
+#### `evidence_pair_report(report: Mapping[str, Any], entries: Iterable[Mapping[str, Any]], *, recorded_at: str | None=None)`
+
+Pin a ``(harness, corpus)`` pair report as case evidence.
+
+#### `evidence_enforcement_wiring(control_id: str, module: str, gate_path: str, attested_by: str, *, recorded_at: str | None=None)`
+
+Record the host's claim that a control is enforced in the request path.
+
+#### `AssuranceCase`
+
+A complete, digest-pinned assurance case for one deployment scope.
+
+- `as_dict()`
+#### `build_case(*, case_id: str, claim: str, scope: str, control_ids: Iterable[str], threat_paths: Iterable[str], evidence: Iterable[Evidence], assumptions: Iterable[str]=(), known_gaps: Iterable[str]=(), residual_risk: str, reviewer: str, revalidation_triggers: Iterable[str], assessed_at: str | None=None)`
+
+Build and digest-pin an assurance case.
+
+#### `verify_case(case: AssuranceCase)`
+
+Verify a case's integrity, consistency, and recomputed level.
+
+#### `needs_revalidation(case: AssuranceCase, change: str)`
+
+Change-based revalidation: does this change retire the case?
+
+#### `summarize_cases(cases: Iterable[AssuranceCase])`
+
+Per-case levels, reported separately — never combined.
+
+#### `level_name(level: str)`
+
+Human-readable name for a YAL level.
+
 ### `counterfactual`
 
 Source: `components/northstar-agent-runtime/counterfactual.py`
