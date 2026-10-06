@@ -81,6 +81,7 @@ DENY_APPROVAL_BINDING = "egress.approval_binding_invalid"
 DENY_DLP = "egress.dlp_hit"
 DENY_BUDGET = "egress.budget_exceeded"
 DENY_BYPASS = "egress.credentialless_bypass_attempt"
+DENY_DNS_EXFIL = "egress.dns_exfiltration_suspected"
 
 #: Headers the agent must never supply for a destination whose credential the
 #: sidecar brokers. The sidecar injects the credential itself; an agent that
@@ -101,6 +102,51 @@ DEFAULT_DLP_PATTERNS: tuple[str, ...] = (
 MAX_BODY_BYTES = 1_048_576  # 1 MiB cap on a single egress request body.
 MAX_HEADER_CHARS = 8_192
 RECEIPT_ID_BYTES = 16
+
+#: DNS exfiltration heuristics (SalesBleed, Sept 2026). A hostname that looks
+#: like encoded data in a subdomain is flagged before resolution. This is a
+#: tripwire, not a guarantee.
+MAX_HOSTNAME_CHARS = 253  # RFC 1035 limit
+MAX_LABEL_CHARS = 63  # RFC 1035 limit per label
+SUSPICIOUS_LABEL_MIN_ENTROPY = 4.0  # Shannon entropy bits/char; random ~5-6
+SUSPICIOUS_LABEL_MIN_LENGTH = 32  # labels this long with high entropy are suspect
+
+
+def _shannon_entropy(text: str) -> float:
+    """Shannon entropy in bits per character."""
+    if not text:
+        return 0.0
+    from collections import Counter
+    import math
+    counts = Counter(text)
+    length = len(text)
+    return -sum((c / length) * math.log2(c / length) for c in counts.values())
+
+
+def dns_exfiltration_suspected(hostname: str) -> str | None:
+    """Check if a hostname looks like DNS exfiltration (SalesBleed shape).
+
+    Returns a reason string if suspicious, None if clean. Checks:
+    - overall hostname too long (RFC 1035: 253 chars max)
+    - any label too long (RFC 1035: 63 chars max)
+    - any long label with high Shannon entropy (likely encoded data)
+    """
+    host = str(hostname or "").strip().lower()
+    if not host:
+        return None
+    if len(host) > MAX_HOSTNAME_CHARS:
+        return f"hostname {len(host)} chars exceeds RFC 1035 limit ({MAX_HOSTNAME_CHARS})"
+    for label in host.split("."):
+        if len(label) > MAX_LABEL_CHARS:
+            return f"label {label[:20]}... {len(label)} chars exceeds RFC 1035 limit ({MAX_LABEL_CHARS})"
+        if len(label) >= SUSPICIOUS_LABEL_MIN_LENGTH:
+            entropy = _shannon_entropy(label)
+            if entropy >= SUSPICIOUS_LABEL_MIN_ENTROPY:
+                return (
+                    f"label {label[:20]}... has high entropy ({entropy:.1f} bits/char) "
+                    f"suggesting encoded data (DNS exfiltration)"
+                )
+    return None
 
 
 class EgressPolicyError(ValueError):
@@ -732,6 +778,13 @@ def authorize_egress(
         return deny(DENY_DESTINATION_DENIED, f"host {request.host!r} is not in the egress allowlist")
     if request.port not in rule.ports:
         return deny(DENY_DESTINATION_DENIED, f"port {request.port} not allowlisted for {rule.name!r}", rule)
+
+    # 1b. DNS exfiltration heuristic (SalesBleed): flag hostnames that look
+    # like encoded data before we resolve them. The DNS query itself is the
+    # exfiltration channel; we must not send it.
+    dns_suspicion = dns_exfiltration_suspected(request.host)
+    if dns_suspicion is not None:
+        return deny(DENY_DNS_EXFIL, f"DNS exfiltration suspected for {request.host!r}: {dns_suspicion}", rule)
 
     # 2. Resolve via the sidecar's own resolver. Never the agent's address.
     try:
