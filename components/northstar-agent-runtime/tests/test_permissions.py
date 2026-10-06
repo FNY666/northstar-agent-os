@@ -1053,5 +1053,84 @@ class CompositionClosureTests(unittest.TestCase):
             CompositionRule(sequence=("only_one",))
 
 
+class SharedContractTests(unittest.TestCase):
+    """trace_violates_rules(): one spec, two roles (gate + bench)."""
+
+    def test_clean_trace_no_violation(self):
+        from permissions import CompositionRule, trace_violates_rules
+
+        rule = CompositionRule(sequence=("read_sensitive", "external_send"))
+        self.assertIsNone(
+            trace_violates_rules(["read_sensitive"], [rule])
+        )
+        self.assertIsNone(
+            trace_violates_rules(["external_send"], [rule])
+        )
+        self.assertIsNone(
+            trace_violates_rules(["other", "read_sensitive", "other"], [rule])
+        )
+
+    def test_forbidden_sequence_detected(self):
+        from permissions import CompositionRule, trace_violates_rules
+
+        rule = CompositionRule(
+            sequence=("read_sensitive", "external_send"),
+            description="exfiltration",
+        )
+        violated = trace_violates_rules(
+            ["other", "read_sensitive", "external_send"], [rule]
+        )
+        self.assertIsNotNone(violated)
+        self.assertEqual(violated.description, "exfiltration")
+
+    def test_longer_sequence(self):
+        from permissions import CompositionRule, trace_violates_rules
+
+        rule = CompositionRule(sequence=("a", "b", "c"))
+        self.assertIsNone(trace_violates_rules(["a", "b"], [rule]))
+        violated = trace_violates_rules(["x", "a", "b", "c"], [rule])
+        self.assertIsNotNone(violated)
+
+    def test_empty_inputs_safe(self):
+        from permissions import CompositionRule, trace_violates_rules
+
+        rule = CompositionRule(sequence=("a", "b"))
+        self.assertIsNone(trace_violates_rules([], [rule]))
+        self.assertIsNone(trace_violates_rules(["a", "b"], []))
+
+    def test_bench_can_use_gate_rules(self):
+        # The key property: the bench scores a trace with the EXACT same
+        # rules the gate enforces. If the gate would deny, the bench
+        # flags the trace.
+        from permissions import (
+            CompositionRule,
+            PermissionConfig,
+            PermissionEngine,
+            trace_violates_rules,
+        )
+
+        rules = [
+            CompositionRule(sequence=("read_sensitive", "external_send"))
+        ]
+        categories = {"ReadSecrets": "read_sensitive", "SendEmail": "external_send"}
+
+        # Offline: bench checks the trace.
+        trace = ["read_sensitive", "external_send"]
+        self.assertIsNotNone(trace_violates_rules(trace, rules))
+
+        # Online: gate denies the second call.
+        engine = PermissionEngine(
+            PermissionConfig(mode="default", can_use_tool=lambda n, p, c: True),
+            tool_kinds={"ReadSecrets": "read", "SendEmail": "read"},
+            composition_rules=rules,
+            tool_categories=categories,
+        )
+        d1 = engine.evaluate("ReadSecrets", kind="read", payload={})
+        self.assertTrue(d1.allowed)
+        d2 = engine.evaluate("SendEmail", kind="read", payload={})
+        self.assertFalse(d2.allowed)
+        # Both agree: the trace is forbidden.
+
+
 if __name__ == "__main__":
     unittest.main()
