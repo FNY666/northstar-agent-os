@@ -1223,6 +1223,8 @@ class PermissionEngine:
                 self._pt_seen[(tool_name, digest)] = self._now()
         if not decision.allowed:
             decision = self._audit_deny(decision, context)
+        else:
+            decision = self._audit_allow(decision, context)
         return decision
 
     def _evaluate_inner(
@@ -1698,6 +1700,42 @@ class PermissionEngine:
         try:
             sink(record)
         except Exception as error:  # noqa: BLE001 - the denial stands regardless
+            return replace(
+                decision,
+                reason=f"{decision.reason} [audit_sink_failed:{type(error).__name__}]",
+            )
+        return decision
+
+    def _audit_allow(
+        self, decision: PermissionDecision, context: PermissionRequestContext | None
+    ) -> PermissionDecision:
+        """Report every allow to the host's audit sink, synchronously.
+
+        Mirrors ``_audit_deny``: the record is written inside ``evaluate()``,
+        before the decision is returned, so an allow always has a gate-side
+        authorization record — not just the model's own request. This closes
+        the EU AI Act Art. 12 gap where a crash between gate-allow and tool
+        execution left the authorization state unprovable.
+        """
+        sink = self._audit_sink
+        if sink is None:
+            return decision
+        ctx = context if context is not None else PermissionRequestContext()
+        record = {
+            "event": "permission.allow",
+            "tool": decision.tool,
+            "source": decision.source,
+            "rule": decision.rule,
+            "reason": decision.reason,
+            "call_id": ctx.call_id,
+            "arguments_digest": ctx.arguments_digest,
+            "session_id": ctx.session_id,
+            "agent": ctx.agent,
+            "mode": ctx.mode,
+        }
+        try:
+            sink(record)
+        except Exception as error:  # noqa: BLE001 - the allow stands regardless
             return replace(
                 decision,
                 reason=f"{decision.reason} [audit_sink_failed:{type(error).__name__}]",
