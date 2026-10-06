@@ -53,6 +53,8 @@ py-modules = [
     "asi07_corpus",
     "masdrift_corpus",
     "claimed_auth_corpus",
+    "post_dispatch_monitor",
+    "evasion_corpus",
     "adjudication",
     "embodied",
     "greenwash",

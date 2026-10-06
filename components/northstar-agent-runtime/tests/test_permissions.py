@@ -68,7 +68,7 @@ class LayerOrderTests(unittest.TestCase):
 
     def test_an_overlap_is_reported_but_never_raises_because_deny_wins(self):
         config = PermissionConfig(mode="default", allowed_tools=("Read", "Write"), disallowed_tools=("Write",))
-        self.assertEqual(config.overlap, ("Write",))
+        self.assertEqual(config.overlap, ("write",))  # canonical form
         engine = PermissionEngine(config)
         self.assertTrue(engine.evaluate("Read", kind="read").allowed)
         self.assertFalse(engine.evaluate("Write", kind="edit").allowed)
