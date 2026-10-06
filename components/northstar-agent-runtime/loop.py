@@ -1064,6 +1064,7 @@ class AgentRuntime:
                 yield event
             if state.result is not None and not finished:
                 finished = True
+                state.events.append(state.result)
                 yield state.result
         except Exception as error:  # noqa: BLE001 - every expected failure is an event
             state.errors.append(f"unexpected runtime failure: {type(error).__name__}: {error}")
@@ -1072,6 +1073,7 @@ class AgentRuntime:
                 state.result = self._result(state, "error_during_execution")
                 if not finished:
                     finished = True
+                    state.events.append(state.result)
                     yield state.result
         finally:
             self._close_run(state, run_span)

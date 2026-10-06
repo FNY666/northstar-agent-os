@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import json
 import unittest
+from unittest.mock import patch
 
 import support  # noqa: F401
 from support import RuntimeTestCase, text_turn, tool_turn
@@ -158,6 +159,54 @@ class DispatchTests(RuntimeTestCase):
         report = self.drive(self.runtime(provider=provider))
         self.assertEqual([request.turn_index for request in provider.requests], [1, 2, 3])
         self.assertEqual(self.assertExactlyOneResult(report).num_turns, 3)
+
+
+class TerminalEventConsistencyTests(RuntimeTestCase):
+    def test_snapshot_exception_terminal_is_present_in_collected_report_and_store(self):
+        from postconditions import PostCondition, PostConditionError
+        store = self.session_store()
+        provider = self.provider([text_turn("never requested")])
+        runtime = self.runtime(provider=provider, sessions=store,
+            postconditions=[PostCondition(kind="unchanged", path="artifact.txt")])
+        with patch.object(runtime.postconditions, "snapshot", side_effect=PostConditionError("injected snapshot failure")):
+            report = runtime.run_collect("go")
+        result = self.assertExactlyOneResult(report)
+        self.assertIs(result, report.result)
+        self.assertEqual(result.subtype, "error_during_execution")
+        self.assertIn("injected snapshot failure", " ".join(result.errors))
+        self.assertEqual(provider.requests, [])
+        self.assertEqual(runtime.last_report.events, report.events)
+        records, dropped = store.read()
+        self.assertEqual(dropped, 0)
+        self.assertEqual([r["type"] for r in records], ["result", "session_end"])
+        self.assertEqual(records[0]["subtype"], result.subtype)
+
+    def test_exception_after_init_keeps_stream_and_internal_event_list_identical(self):
+        runtime = self.runtime([text_turn("never requested")])
+        with patch.object(runtime, "_open_session", side_effect=RuntimeError("after init failure")):
+            streamed = tuple(runtime.run("go"))
+        self.assertEqual(streamed, runtime.last_report.events)
+        results = [e for e in streamed if isinstance(e, ResultMessage)]
+        self.assertEqual(len(results), 1)
+        self.assertIsInstance(streamed[0], SystemMessage)
+        self.assertEqual(results[0].subtype, "error_during_execution")
+
+    def test_unyielded_existing_result_is_recorded_without_creating_another(self):
+        runtime = self.runtime([])
+        def finish_without_yield(prompt, state, span):
+            runtime._finish(state, "success")
+            return iter(())
+        with patch.object(runtime, "_events", side_effect=finish_without_yield):
+            report = runtime.run_collect("go")
+        result = self.assertExactlyOneResult(report)
+        self.assertIs(result, report.result)
+        self.assertEqual(result.subtype, "success")
+
+    def test_normal_finish_is_not_duplicated(self):
+        runtime = self.runtime([text_turn("done")])
+        streamed = tuple(runtime.run("go"))
+        self.assertEqual(streamed, runtime.last_report.events)
+        self.assertExactlyOneResult(runtime.last_report)
 
 
 class CeilingAndFlowTests(RuntimeTestCase):
