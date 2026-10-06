@@ -654,6 +654,46 @@ All PII-flow attack probe names.
 
 All PII-flow benign control names.
 
+### `weaponization_probe`
+
+Source: `components/northstar-agent-runtime/weaponization_probe.py`
+
+Weaponization probe family: dual-use cyber operations run by a hostile operator.
+
+### `sandbox_escape_probe`
+
+Source: `components/northstar-agent-runtime/sandbox_escape_probe.py`
+
+Sandbox escape probe family: breakout attempts against the sandbox boundary.
+
+### `behavioral_bom`
+
+Source: `components/northstar-agent-runtime/behavioral_bom.py`
+
+Behavioral Bill of Materials (BOM) for agent capabilities.
+
+#### `definition_digest(definition: dict[str, Any])`
+
+Canonical-JSON SHA-256 digest of a tool definition.
+
+#### `CapabilityEntry`
+
+One capability in the BOM: what a single tool is allowed to do.
+
+- `as_dict()`
+- `from_dict(data: dict[str, Any])`
+#### `scan_scope_ceiling(scope_manager: Any, scope_id: str, *, engine: Any=None, tool_definitions: dict[str, dict[str, Any]] | None=None, generated_by: str='')`
+
+Scan a scope's authority ceiling into a behavioral BOM.
+
+#### `validate_bom(bom: dict[str, Any])`
+
+Validate a BOM's schema and digest.
+
+#### `diff_bom(old: dict[str, Any], new: dict[str, Any])`
+
+Diff two BOMs: added/removed capabilities and policy changes.
+
 ### `tdsr_metrics`
 
 Source: `components/northstar-agent-runtime/tdsr_metrics.py`
