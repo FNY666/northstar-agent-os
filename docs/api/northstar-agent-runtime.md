@@ -7281,13 +7281,13 @@ A signed, attenuating delegation token (IBCT-style).
 - `token_hash()`
   - SHA-256 of the canonical token (including signature).
 - `as_dict()`
-#### `mint_delegation_token(*, delegator_id: str, delegatee_id: str, tools: Sequence[str], delegator_seed: bytes, ttl_seconds: float=3600.0, parent_token: DelegationToken | None=None, issued_at: float | None=None)`
+#### `mint_delegation_token(*, delegator_id: str, delegatee_id: str, tools: Sequence[str], delegator_seed: bytes, ttl_seconds: float=3600.0, parent_token: DelegationToken | None=None, issued_at: float | None=None, audience: str='')`
 
 Mint a signed delegation token.
 
-#### `verify_delegation_token(token: DelegationToken, delegator_public_key: bytes, *, now: float | None=None, expected_parent_hash: str | None=None)`
+#### `verify_delegation_token(token: DelegationToken, delegator_public_key: bytes, *, now: float | None=None, expected_parent_hash: str | None=None, expected_audience: str | None=None, revocation_oracle: Callable[[DelegationToken], bool] | None=None, expected_root_hash: str | None=None)`
 
-Verify a delegation token's signature, expiry, and parent binding.
+Verify a delegation token's signature, expiry, parent binding, and more.
 
 #### `normalise_names(values: Iterable[str] | None)`
 
