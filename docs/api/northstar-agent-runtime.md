@@ -1535,6 +1535,151 @@ Executes recovery plans against host-supplied hooks.
 
 Re-derive the outcome digest with a constant-time compare.
 
+### `vendor_evidence`
+
+Source: `components/northstar-agent-runtime/vendor_evidence.py`
+
+Vendor-facing evidence kit for Northstar agent deployments.
+
+#### `VendorEvidenceError`
+
+A kit build or verification step failed. Raised, never silent.
+
+#### `ControlOwner`
+
+One control's ownership claim. One control, exactly one owner.
+
+- `as_dict()`
+#### `ControlRegistry`
+
+Registry binding every control id to its owner. Duplicate control ids fail closed.
+
+- `register(owner: ControlOwner)`
+- `owner_of(control_id: str)`
+- `knows(control_id: str)`
+- `control_ids()`
+- `count()`
+#### `EvidenceItem`
+
+One digest-pinned piece of evidence that a control is running.
+
+- `as_dict()`
+#### `ExceptionRecord`
+
+A declared, time-bounded exception to a control.
+
+- `is_active(now: str)`
+- `as_dict()`
+#### `IncidentRecord`
+
+A class-level incident entry. No free-text payloads: prompts stay out.
+
+- `as_dict()`
+#### `VendorEvidenceKit`
+
+Digest-pinned auditor packet: ownership + evidence + exceptions + incidents.
+
+- `as_dict()`
+#### `build_kit(vendor: str, scope: str, registry: ControlRegistry, evidence: Iterable[EvidenceItem], exceptions: Iterable[ExceptionRecord], incidents: Iterable[IncidentRecord], *, assessed_at: str | None=None)`
+
+Assemble and digest-pin the vendor evidence kit.
+
+#### `verify_kit(kit: VendorEvidenceKit)`
+
+Re-derive the digest and re-check structural consistency.
+
+#### `active_exceptions(kit: VendorEvidenceKit, *, now: str | None=None)`
+
+Exceptions currently in force, per the injected evaluation time.
+
+#### `controls_without_evidence(kit: VendorEvidenceKit)`
+
+Control ids with an owner but no evidence item — the auditor's punch list.
+
+### `tier_controls`
+
+Source: `components/northstar-agent-runtime/tier_controls.py`
+
+Tier 1/2/3 controls matrix mapped onto Northstar risk tiers.
+
+#### `describe_industry_tier(industry_tier: int)`
+
+Human description of an industry governance tier. Fail-closed.
+
+#### `map_industry_to_northstar(industry_tier: int)`
+
+Baseline Northstar tier for an industry tier (1->LOW, 2->MODERATE, 3->HIGH). Tier 3 profiles refine further via ``refine_tier3``.
+
+#### `refine_tier3(profile: RiskProfile)`
+
+A Tier-3 (industry) deployment whose scored profile has any dimension at 4 is CRITICAL; otherwise HIGH. The split is the documented rule for where the industry three-tier model stops and the four-tier taxonomy takes over.
+
+#### `recommend_industry_tier(description: str)`
+
+Advisory keyword heuristic for an industry tier. Documented as advisory: keyword matching cannot see blast radius, and the scored profile is authoritative. Unknown descriptions fail closed to 3 (the conservative default), never to 1.
+
+#### `ControlEntry`
+
+One control in the matrix: id, first mandatory tier, lifecycle phase, evidence artifact, review cadence, assignment rule, source.
+
+#### `control_matrix()`
+
+All matrix entries, ordered by first_tier then control_id.
+
+#### `entry_by_id(control_id: str)`
+
+Look up a matrix entry. Unknown ids fail closed.
+
+#### `assigned_controls(tier: DeploymentTier)`
+
+Cumulative control entries mandatory at ``tier`` (every entry whose first_tier is at or below the tier). The returned ids always equal ``risk_tiering.required_controls(tier)`` -- the matrix cannot drift from the scoring module.
+
+#### `tiers()`
+
+Tiers from lowest to highest.
+
+#### `ControlPlan`
+
+A digest-pinned control assignment for one deployment.
+
+- `as_dict()`
+#### `control_plan(system_id: str, profile: RiskProfile, assessor: str, now: Callable[[], int], industry_tier: int | None=None)`
+
+Build a digest-pinned control plan: score the profile, assign the tier, attach the cumulative control set. Fail-closed on bad inputs. An industry_tier may be supplied as a crosswalk reference; it never overrides the scored tier -- a mismatch is recorded, not resolved.
+
+#### `verify_plan(plan: ControlPlan)`
+
+Re-derive a control plan from its own fields. Constant-time digest compare; also checks derived fields (score/tier/controls) match the profile so a plan whose stored tier was edited without re-scoring fails even if the digest were recomputed.
+
+#### `EscalationEvent`
+
+A digest-pinned record of a tier moving up. Escalation never downgrades: a lower tier requires a fresh signed assessment, not an escalation event.
+
+- `as_dict()`
+#### `escalate(system_id: str, from_tier: DeploymentTier, new_profile: RiskProfile, trigger: str, evidence_ref: str, now: Callable[[], int])`
+
+Record a tier escalation. The new tier is computed from the new profile -- never supplied by the caller. Fail-closed rules:
+
+#### `verify_escalation(event: EscalationEvent)`
+
+Re-derive an escalation event from its own fields.
+
+#### `probe_names()`
+
+All probe names in corpus order.
+
+#### `probes_by_family(family: str)`
+
+Probes in one family. Unknown families return empty.
+
+#### `probe_by_name(name: str)`
+
+One probe by name. Unknown names raise KeyError.
+
+#### `expected_outcomes()`
+
+Probe name -> expected outcome.
+
 ### `telemetry_export`
 
 Source: `components/northstar-agent-runtime/telemetry_export.py`
