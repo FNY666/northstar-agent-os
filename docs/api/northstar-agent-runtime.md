@@ -1355,6 +1355,118 @@ The pre-gate choke point.
 
 All bias-guardrail probe names.
 
+### `trust_health`
+
+Source: `components/northstar-agent-runtime/trust_health.py`
+
+Trust-health metrics for the TRiSM governance pillar.
+
+#### `TrustHealthError`
+
+Raised for malformed trust-health records or invalid operations.
+
+#### `ConfidenceRecord`
+
+One decision's confidence-exposure reading.
+
+#### `CueRecord`
+
+One cue emitted (or omitted) alongside a decision.
+
+#### `AbstainRecord`
+
+One abstain's lifecycle: routed where, resolved how, how long.
+
+#### `confidence_exposure_rate(records: list[ConfidenceRecord])`
+
+Fraction of decisions that exposed their confidence.
+
+#### `mean_exposed_confidence(records: list[ConfidenceRecord])`
+
+Mean self-reported confidence among exposed decisions.
+
+#### `calibration_gap(records: list[ConfidenceRecord])`
+
+Mean exposed confidence minus observed accuracy, over decisions whose outcome is known.
+
+#### `cue_coverage(records: list[CueRecord])`
+
+Fraction of decisions emitting at least one cue.
+
+#### `cue_rate_by_type(records: list[CueRecord])`
+
+Emission rate per cue type. A cue type never recorded reports None.
+
+#### `abstain_rate(abstain_records: list[AbstainRecord], total_decisions: int)`
+
+Fraction of all decisions that ended in abstain.
+
+#### `abstain_resolution_rate(records: list[AbstainRecord])`
+
+Fraction of abstains that reached a human resolution (approved or denied) rather than timing out or being dropped.
+
+#### `mean_abstain_latency(records: list[AbstainRecord])`
+
+Mean seconds to human resolution, over resolved abstains.
+
+#### `HealthSnapshot`
+
+One digest-pinned snapshot of the three trust-health axes.
+
+- `as_dict()`
+- `verify_digest()`
+  - Re-derive the digest and compare in constant time.
+#### `TrustHealthLog`
+
+Append-only store for trust-health records.
+
+- `record_confidence(record: ConfidenceRecord)`
+- `record_cue(record: CueRecord)`
+- `record_abstain(record: AbstainRecord)`
+- `confidence_records()`
+- `cue_records()`
+- `abstain_records()`
+- `snapshot()`
+  - Compute all three axes and digest-pin the result.
+#### `probe_names()`
+
+All trust-health probe names.
+
+#### `probes_by_family(family: str)`
+
+Probes in one family.
+
+#### `probe_by_name(name: str)`
+
+One probe by name; KeyError on unknown names.
+
+#### `expected_outcomes()`
+
+Map every probe name to its expected outcome.
+
+### `counterfactual`
+
+Source: `components/northstar-agent-runtime/counterfactual.py`
+
+Counterfactual denial explanations (GSA Level 4: "Why Not").
+
+#### `Counterfactual`
+
+One 'would have been allowed if ...' statement.
+
+#### `RuleExplanation`
+
+The rendered explanation for one deny-code family.
+
+#### `DenialExplanation`
+
+The full GSA Level 4 explanation for one gate denial.
+
+- `as_dict()`
+#### `explain_denial(decision: Any)`
+
+Render the GSA Level 4 explanation for one gate denial.
+
 ### `ssr_reporting`
 
 Source: `components/northstar-agent-runtime/ssr_reporting.py`
