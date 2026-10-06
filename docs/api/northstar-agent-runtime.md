@@ -441,6 +441,106 @@ Detect invalid scoring processes at the run-report level.
 
 Verify a halt/deny was caused by the gate, not by a crash.
 
+### `unicode_egress`
+
+Source: `components/northstar-agent-runtime/unicode_egress.py`
+
+Unicode normalization for egress text: close the zero-width covert channel.
+
+#### `normalize_nfkc(text: str)`
+
+Apply Unicode NFKC normalization.
+
+#### `strip_zero_width(text: str)`
+
+Remove every character in :data:`ZERO_WIDTH_CHARS` from ``text``.
+
+#### `contains_zero_width(text: str)`
+
+True if ``text`` contains any zero-width/invisible character.
+
+#### `zero_width_count(text: str)`
+
+Number of zero-width/invisible characters in ``text``.
+
+#### `normalize_egress_text(text: str)`
+
+Normalize text before egress checks run.
+
+#### `sanitize_and_report(text: str)`
+
+Normalize ``text`` and report what changed.
+
+### `template_integrity`
+
+Source: `components/northstar-agent-runtime/template_integrity.py`
+
+Load-time template integrity for system prompts and instruction files.
+
+#### `TemplateIntegrityError`
+
+A template failed its load-time integrity check. Message is operator-facing.
+
+#### `digest_bytes(content: bytes)`
+
+SHA-256 hex digest of raw content bytes.
+
+#### `canonical_digest(content: bytes)`
+
+Digest over content with line endings normalized to LF.
+
+#### `TemplatePin`
+
+The reviewed value for one template, held by the operator.
+
+- `seal_payload()`
+#### `TemplateRegistry`
+
+Holds pins for every prompt-shaped file loaded at startup.
+
+- `register(pin: TemplatePin)`
+- `pin_for(name: str)`
+- `verify_bytes(name: str, content: bytes)`
+  - Verify raw bytes against the pin for ``name``. Returns the pin; raises otherwise.
+- `load_verified(name: str, path: str | Path)`
+  - Read ``path`` and verify it against the pin for ``name``.
+- `verify_seal(name: str, verifier)`
+  - Verify the Ed25519 seal on the pin for ``name`` with a ``Verifier``.
+#### `seal_pin(pin: TemplatePin, signer, *, sealed_by: str)`
+
+Attach an Ed25519 seal to a pin. ``signer`` is a ``crypto_agility.Signer``.
+
+#### `mint_canary(namespace: str='template')`
+
+Mint a fresh high-entropy canary token. Never reuse a token across templates.
+
+#### `embed_canary(template_text: str, token: str)`
+
+Plant ``token`` inside the template at a spot the model has no reason to repeat.
+
+#### `scan_output_for_canary(output: str, token: str)`
+
+True iff the canary token appears in ``output`` - the trip condition.
+
+#### `CanaryTripwire`
+
+Holds the live canary tokens and scans untrusted text for trips.
+
+- `arm(template_name: str, token: str)`
+- `disarm(token: str)`
+- `armed` (property)
+- `scan(output: str)`
+  - Return the tokens that tripped in ``output`` (empty = no trip).
+- `scan_redacted(output: str)`
+  - Return template *names* whose canary tripped, without revealing tokens.
+#### `pin_from_file(name: str, path: str | Path)`
+
+Convenience: build a pin from the current on-disk content (the review moment).
+
+#### `pin_from_env(name: str, *, env: Mapping[str, str] | None=None)`
+
+Build a pin from ``NORTHSTAR_TEMPLATE_PIN_<NAME>`` in the environment.
+
 ### `adjudication`
 
 Source: `components/northstar-agent-runtime/adjudication.py`
