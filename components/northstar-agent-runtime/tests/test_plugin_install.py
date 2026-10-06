@@ -238,6 +238,100 @@ class InstallTests(BundleTestCase):
         self.assertTrue(victim.is_dir() and any(victim.iterdir()), "what the bundle pointed at must survive")
 
 
+class InstallContainmentTests(BundleTestCase):
+    def test_management_parent_symlinks_do_not_publish_outside_workspace(self):
+        for component in (".northstar", "plugins"):
+            with self.subTest(component=component):
+                workspace = self.root / ("install-" + component.lstrip("."))
+                workspace.mkdir()
+                outside = self.root / ("outside-" + component.lstrip("."))
+                outside.mkdir()
+                if component == ".northstar":
+                    (workspace / component).symlink_to(outside, target_is_directory=True)
+                else:
+                    (workspace / ".northstar").mkdir()
+                    (workspace / ".northstar/plugins").symlink_to(outside, target_is_directory=True)
+                with self.assertRaises(pl.PluginInstallError):
+                    pl.install(self.source, workspace)
+                self.assertEqual(list(outside.iterdir()), [])
+
+    def test_lock_temporary_symlink_does_not_truncate_external_file(self):
+        (self.workspace / ".northstar").mkdir()
+        victim = self.root / "outside-victim"
+        victim.write_text("must survive")
+        temporary = pl.lock_path(self.workspace).with_suffix(".lock.tmp")
+        temporary.symlink_to(victim)
+        with self.assertRaises(pl.PluginInstallError):
+            self.install()
+        self.assertEqual(victim.read_text(), "must survive")
+        self.assertTrue(temporary.is_symlink())
+        self.assertFalse(self.installed("NOTES.md").exists())
+
+    def test_lock_symlink_is_not_read_before_path_admission(self):
+        (self.workspace / ".northstar").mkdir()
+        victim = self.root / "outside-lock"
+        victim.write_text("not a plugin lock")
+        pl.lock_path(self.workspace).symlink_to(victim)
+        with patch.object(pl, "read_lock") as read:
+            with self.assertRaises(pl.PluginInstallError):
+                self.install()
+            read.assert_not_called()
+        self.assertEqual(victim.read_text(), "not a plugin lock")
+
+    def test_target_symlink_rejected_even_for_identical_noop(self):
+        self.install()
+        target = self.workspace / pm.PLUGINS_DIRECTORY / "demo"
+        outside = self.root / "outside-demo"
+        target.rename(outside)
+        target.symlink_to(outside, target_is_directory=True)
+        with self.assertRaises(pl.PluginInstallError):
+            self.install()
+        self.assertEqual((outside / "NOTES.md").read_text(), NOTES)
+        self.assertTrue(target.is_symlink())
+
+    def test_lock_fifo_refused_before_read(self):
+        import os
+        (self.workspace / ".northstar").mkdir()
+        os.mkfifo(pl.lock_path(self.workspace))
+        real_read = Path.read_bytes
+        def no_fifo_read(path):
+            if path == pl.lock_path(self.workspace):
+                raise AssertionError("FIFO was read before admission")
+            return real_read(path)
+        with patch.object(pl, "read_lock") as read, patch.object(Path, "read_bytes", no_fifo_read):
+            with self.assertRaises(pl.PluginInstallError):
+                self.install()
+            read.assert_not_called()
+
+    def test_pin_false_does_not_follow_existing_lock_symlink(self):
+        self.install()
+        lock = pl.lock_path(self.workspace)
+        outside = self.root / "unpinned-external-lock"
+        outside.write_bytes(lock.read_bytes())
+        lock.unlink()
+        lock.symlink_to(outside)
+        with patch.object(pl, "read_lock") as read:
+            with self.assertRaises(pl.PluginInstallError):
+                self.install(pin=False, force=True)
+            read.assert_not_called()
+        self.assertEqual(self.installed("NOTES.md").read_text(), NOTES)
+
+    def test_non_directory_management_is_refused_before_policy_read(self):
+        (self.workspace / ".northstar").write_text("blocked")
+        with patch.object(pl, "_workspace_policy_document") as policy:
+            with self.assertRaises(pl.PluginInstallError):
+                self.install()
+            policy.assert_not_called()
+        self.assertEqual((self.workspace / ".northstar").read_text(), "blocked")
+
+    def test_workspace_alias_still_accepts_install(self):
+        alias = self.root / "install-alias"
+        alias.symlink_to(self.workspace, target_is_directory=True)
+        result = pl.install(self.source, alias)
+        self.assertTrue(result.installed)
+        self.assertTrue(pl.load_installed(self.workspace)[0][0].loadable)
+
+
 class UninstallContainmentTests(BundleTestCase):
     def test_absolute_and_traversal_names_cannot_delete_external_directories(self):
         for name in ("absolute", "traversal"):

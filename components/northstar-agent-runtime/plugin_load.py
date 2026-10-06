@@ -130,6 +130,27 @@ def lock_path(workspace: str | Path) -> Path:
     return Path(workspace) / ".northstar" / LOCK_NAME
 
 
+def _admit_plugin_paths(workspace: str | Path, name: str | None = None, *, check_lock: bool = True) -> Path:
+    """Anchor the workspace and reject static symlink/nonregular management paths."""
+    root = Path(workspace).resolve()
+    directories = [root / ".northstar", plugins_directory(root)]
+    if name is not None:
+        directories.append(plugins_directory(root) / name)
+    for directory in directories:
+        if directory.is_symlink():
+            raise PluginInstallError(f"{directory}: refusing a symlink plugin management path")
+        if directory.exists() and not directory.is_dir():
+            raise PluginInstallError(f"{directory}: plugin management path is not a directory")
+    if check_lock:
+        lock = lock_path(root)
+        for file in (lock, lock.with_suffix(lock.suffix + ".tmp")):
+            if file.is_symlink():
+                raise PluginInstallError(f"{file}: refusing a symlink plugin lock path")
+            if file.exists() and not file.is_file():
+                raise PluginInstallError(f"{file}: plugin lock path is not a regular file")
+    return root
+
+
 # -- the lockfile -----------------------------------------------------------
 
 
@@ -653,10 +674,15 @@ def install(
     recovery preserves its backup for manual repair. A cleanup failure after commit
     reports an error but leaves the committed bundle/pin intact. Installation assumes
     a single cooperative workspace writer; this is not a crash-atomic two-file commit.
+    Static management-directory and lock-path admission runs before workspace reads;
+    symlinks and unexpected file types are refused, including identical-content no-ops.
+    This admission does not close concurrent same-user path-swapping races.
     """
+    workspace = _admit_plugin_paths(workspace)
     bundle = load_bundle(source)
     policy = _workspace_policy_document(workspace)
     plugin = parse_manifest(bundle, workspace_policy=policy)
+    _admit_plugin_paths(workspace, plugin.name)
     if plugin.name != Path(source).resolve().name:
         # The directory name is the lock key and the path a reader greps for; letting a
         # bundle call itself something else makes `.northstar/plugins/<x>` a lie.
@@ -798,25 +824,11 @@ def uninstall(name: str, workspace: str | Path, *, keep_lock: bool = False) -> s
     """
     if not isinstance(name, str) or not re.fullmatch(manifest_module.NAME_PATTERN, name):
         raise PluginInstallError(f"invalid plugin name: expected {manifest_module.NAME_PATTERN}")
-    root = Path(workspace).resolve()
-    management = root / ".northstar"
-    plugins = management / "plugins"
+    root = _admit_plugin_paths(workspace, name, check_lock=not keep_lock)
+    plugins = plugins_directory(root)
     target = plugins / name
-    for directory in (management, plugins, target):
-        if directory.is_symlink():
-            raise PluginInstallError(f"{directory}: refusing a symlink plugin management path")
-        if directory.exists() and not directory.is_dir():
-            raise PluginInstallError(f"{directory}: plugin management path is not a directory")
-    entries = None
-    if not keep_lock:
-        lock = lock_path(root)
-        for file in (lock, lock.with_suffix(lock.suffix + ".tmp")):
-            if file.is_symlink():
-                raise PluginInstallError(f"{file}: refusing a symlink plugin lock path")
-            if file.exists() and not file.is_file():
-                raise PluginInstallError(f"{file}: plugin lock path is not a regular file")
-        # A malformed lock must not destroy a bundle before reporting the error.
-        entries = read_lock(root)
+    # A malformed lock must not destroy a bundle before reporting the error.
+    entries = read_lock(root) if not keep_lock else None
     if not target.is_dir():
         raise PluginInstallError(f"{name}: no plugin installed at {target}")
     _remove_tree(target)
