@@ -1672,6 +1672,113 @@ Look up any probe (attack or benign) by name.
 
 Map every probe name to its expected outcome.
 
+### `plan_proposal`
+
+Source: `components/northstar-agent-runtime/plan_proposal.py`
+
+Plan-as-proposal doctrine.
+
+#### `ProposedAction`
+
+One action a plan proposes. Digest-only identity.
+
+#### `PlanProposal`
+
+A digest-pinned plan proposal.
+
+#### `DispatchRecord`
+
+A gated dispatch pinned to the proposal revision that proposed it.
+
+#### `ProposalLedger`
+
+Append-only, supersede-only proposal tracking.
+
+- `propose(proposal_id: str, plan_name: str, actions: tuple[ProposedAction, ...] | list[ProposedAction], *, planner_id: str, plan_approval_ref: str='')`
+  - Record a fresh (revision 1) proposal.
+- `replan(new_proposal_id: str, old_proposal_id: str, new_actions: tuple[ProposedAction, ...] | list[ProposedAction], *, planner_id: str, plan_approval_ref: str='')`
+  - Supersede ``old_proposal_id`` and register the new revision.
+- `is_superseded(proposal_id: str)`
+- `get(proposal_id: str)`
+- `dispatches()`
+#### `verify_proposal_digest(proposal: PlanProposal)`
+
+Re-derive the proposal digest; constant-time compare.
+
+#### `engine_gate_fn(engine: Any)`
+
+Adapt a real ``permissions.PermissionEngine`` to a per-action gate.
+
+#### `authorize_dispatch(ledger: ProposalLedger, proposal_id: str, action_seq: int, gate_fn: Callable[..., Any], *, arguments_digest: str)`
+
+Gate one proposed action for dispatch.
+
+#### `probe_names()`
+
+#### `probes_by_family(family: str)`
+
+#### `probe_by_name(name: str)`
+
+#### `expected_outcomes()`
+
+### `fact_belief`
+
+Source: `components/northstar-agent-runtime/fact_belief.py`
+
+Fact-belief separation for agent memory (``fact-belief.v1``).
+
+#### `FactRecord`
+
+A witnessed world-state item. Immutable once recorded.
+
+- `digest_payload()`
+  - The canonical payload this digest was computed over.
+#### `BeliefRecord`
+
+An inference derived from facts. Never a fact; resolved at read time.
+
+- `digest_payload()`
+#### `ReconstructionRecord`
+
+Evidence that a belief was reconstructed, not retrieved.
+
+- `digest_payload()`
+#### `Resolution`
+
+Result of read-time belief resolution.
+
+#### `classify_source(source: str)`
+
+Map a fact source to ``"trusted"`` / ``"untrusted"``.
+
+#### `FactBeliefStore`
+
+Append-only fact ledger plus belief registry with read-time resolution.
+
+- `record_fact(fact_id: str, statement: str, source: str, observed_at: float | None=None)`
+  - Append a witnessed fact. Unknown sources fail closed to untrusted.
+- `supersede_fact(old_fact_id: str, new_fact: FactRecord)`
+  - Supersede a fact by appending a new one (never ledger surgery).
+- `tombstone_fact(fact_id: str)`
+  - Mark a fact forgotten (retrieval-invisible; ledger keeps it).
+- `get_fact(fact_id: str)`
+  - Raw fact lookup — retrieval, not resolution.
+- `record_belief(belief_id: str, statement: str, derived_from: Sequence[str], confidence: float)`
+  - Register an inference. All cited facts must exist at record time.
+- `resolve_belief(belief_id: str)`
+  - Reconstruct a belief against current facts (read-time resolution).
+- `reconstructions()`
+  - Copy-on-read of the reconstruction trail.
+- `verify_reconstruction(rec: ReconstructionRecord)`
+  - Re-derive a reconstruction digest (constant-time compare).
+#### `probe_names()`
+
+#### `probes_by_family(family: str)`
+
+#### `probe_by_name(name: str)`
+
+#### `expected_outcomes()`
+
 ### `tier_controls`
 
 Source: `components/northstar-agent-runtime/tier_controls.py`
