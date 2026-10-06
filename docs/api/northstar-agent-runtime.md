@@ -1009,6 +1009,62 @@ Emit a versioned ``(harness, corpus)`` pair report.
 
 Verify a pair report against the actual corpus content.
 
+### `roguehandoff_probes`
+
+Source: `components/northstar-agent-runtime/roguehandoff_probes.py`
+
+RogueHandoff-20 route-coverage probes.
+
+#### `probe_names()`
+
+All RogueHandoff-20 route-coverage probe names.
+
+### `asi10_probes`
+
+Source: `components/northstar-agent-runtime/asi10_probes.py`
+
+ASI10 probe corpus: rogue-agent probes.
+
+#### `probe_names()`
+
+All ASI10 probe names.
+
+### `asi01_probes`
+
+Source: `components/northstar-agent-runtime/asi01_probes.py`
+
+ASI01 probe corpus: agent goal-hijack probes.
+
+#### `probe_names()`
+
+All ASI01 probe names.
+
+### `mesh_probes`
+
+Source: `components/northstar-agent-runtime/mesh_probes.py`
+
+Mesh-hop security probe corpus: delegation-graph confusion, channel poisoning, Byzantine workers.
+
+#### `probe_names()`
+
+All mesh attack probe names.
+
+#### `benign_names()`
+
+All benign control names.
+
+#### `probes_by_family(family: str)`
+
+Attack probes in one family.
+
+#### `probe_by_name(name: str)`
+
+Look up any mesh probe (attack or benign) by name.
+
+#### `expected_outcomes()`
+
+probe name -> expected gate outcome ('deny' or 'allow').
+
 ### `screen_sanitizer`
 
 Source: `components/northstar-agent-runtime/screen_sanitizer.py`
