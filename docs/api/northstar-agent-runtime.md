@@ -2029,6 +2029,50 @@ Look up a probe by name.
 
 probe name -> expected harness outcome ('changes-outcome' or 'no-change').
 
+### `approval_fatigue_probes`
+
+Source: `components/northstar-agent-runtime/approval_fatigue_probes.py`
+
+Approval-fatigue probe corpus (consent-fatigue HITL bypass).
+
+#### `ApprovalEvent`
+
+One approval-path decision in a trajectory window.
+
+#### `FatigueMonitor`
+
+Sliding-window classifier over approval trajectories.
+
+- `classify(events: tuple[ApprovalEvent, ...], now: float)`
+  - Classify the approval trajectory ending at ``now``.
+- `should_record(events: tuple[ApprovalEvent, ...], now: float)`
+  - Whether approvals in this trajectory may be bound to receipts.
+- `snapshot(events: tuple[ApprovalEvent, ...], now: float)`
+  - Digest-pinned snapshot of a classification for the audit trail.
+#### `verify_snapshot(snapshot: dict[str, Any])`
+
+Re-derive a monitor snapshot digest with constant-time compare.
+
+#### `probe_names()`
+
+All approval-fatigue probe names.
+
+#### `benign_names()`
+
+All benign control names.
+
+#### `probes_by_family(family: str)`
+
+Attack probes in one family.
+
+#### `probe_by_name(name: str)`
+
+Look up any probe (attack or benign) by name.
+
+#### `expected_outcomes()`
+
+Map every probe name to its expected outcome.
+
 ### `belief_poisoning_probes`
 
 Source: `components/northstar-agent-runtime/belief_poisoning_probes.py`
