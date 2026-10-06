@@ -131,18 +131,29 @@ class _ProcessResult:
 
 
 def _terminate(process: subprocess.Popen[bytes]) -> None:
-    try:
-        if os.name == "posix":
+    if os.name == "posix":
+        # Internally spawned with start_new_session=True: PID is the owned PGID.
+        # Reaping the leader is not evidence that its remaining group is empty.
+        try:
             os.killpg(process.pid, signal.SIGTERM)
-        else:
-            process.terminate()
+            process.wait(timeout=0.25)
+        except (OSError, subprocess.TimeoutExpired):
+            pass
+        try:
+            os.killpg(process.pid, signal.SIGKILL)
+        except OSError:
+            pass
+        try:
+            process.wait(timeout=1.0)
+        except subprocess.TimeoutExpired:
+            pass
+        return
+    try:
+        process.terminate()
         process.wait(timeout=0.25)
     except (OSError, subprocess.TimeoutExpired):
         try:
-            if os.name == "posix":
-                os.killpg(process.pid, signal.SIGKILL)
-            else:
-                process.kill()
+            process.kill()
         except OSError:
             pass
         try:
