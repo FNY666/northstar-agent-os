@@ -121,6 +121,20 @@ Does this critical system have a valid fail-closed plan?
 
 Betting-tagged inputs may not enter protected pipelines.
 
+### `asi07_corpus`
+
+Source: `components/northstar-agent-runtime/asi07_corpus.py`
+
+ASI07 probe corpus: multi-agent attack templates for the governance bench.
+
+#### `probe_names()`
+
+All adversarial probe names.
+
+#### `benign_names()`
+
+All benign control names.
+
 ### `capability_warrants`
 
 Source: `components/northstar-agent-runtime/capability_warrants.py`

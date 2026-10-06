@@ -50,6 +50,7 @@ py-modules = [
     "_version",
     "agb_smoke_corpus",
     "action_card",
+    "asi07_corpus",
     "adjudication",
     "embodied",
     "greenwash",
