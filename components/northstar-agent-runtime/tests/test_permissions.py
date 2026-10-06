@@ -1051,6 +1051,94 @@ class AuthorityCeilingTests(unittest.TestCase):
         self.assertIsNone(mgr.ceiling("s1"))
 
 
+class ArgumentPolicyTests(unittest.TestCase):
+    def _engine(self, policies):
+        from permissions import PermissionConfig, PermissionEngine
+
+        return PermissionEngine(
+            PermissionConfig(
+                mode="default",
+                can_use_tool=lambda n, p, c: True,
+                argument_policies=tuple(policies),
+            ),
+            tool_kinds={"Bash": "exec", "SendEmail": "write"},
+        )
+
+    def test_denylist_blocks(self):
+        from permissions import ArgumentPolicy
+
+        engine = self._engine([
+            ArgumentPolicy(tool="Bash", argument="command", denylist=("rm -rf /", "mkfs")),
+        ])
+        d = engine.evaluate("Bash", kind="exec", payload={"command": "rm -rf / tmp"})
+        self.assertFalse(d.allowed)
+        self.assertEqual(d.rule, "argument:policy_violation")
+        self.assertEqual(d.source, "argument")
+
+    def test_denylist_case_insensitive(self):
+        from permissions import ArgumentPolicy
+
+        engine = self._engine([
+            ArgumentPolicy(tool="Bash", argument="command", denylist=("rm -rf /",)),
+        ])
+        d = engine.evaluate("Bash", kind="exec", payload={"command": "RM -RF / data"})
+        self.assertFalse(d.allowed)
+
+    def test_clean_command_passes(self):
+        from permissions import ArgumentPolicy
+
+        engine = self._engine([
+            ArgumentPolicy(tool="Bash", argument="command", denylist=("rm -rf /",)),
+        ])
+        d = engine.evaluate("Bash", kind="exec", payload={"command": "ls -la"})
+        self.assertTrue(d.allowed)
+
+    def test_allowlist_restricts(self):
+        from permissions import ArgumentPolicy
+
+        engine = self._engine([
+            ArgumentPolicy(
+                tool="SendEmail",
+                argument="to",
+                allowlist=("@company.com",),
+                description="only internal recipients",
+            ),
+        ])
+        d1 = engine.evaluate("SendEmail", kind="write", payload={"to": "alice@company.com"})
+        self.assertTrue(d1.allowed)
+        d2 = engine.evaluate("SendEmail", kind="write", payload={"to": "bob@external.com"})
+        self.assertFalse(d2.allowed)
+        self.assertEqual(d2.rule, "argument:policy_violation")
+
+    def test_denylist_beats_allowlist(self):
+        from permissions import ArgumentPolicy
+
+        engine = self._engine([
+            ArgumentPolicy(
+                tool="SendEmail",
+                argument="to",
+                denylist=("blocked@company.com",),
+                allowlist=("@company.com",),
+            ),
+        ])
+        d = engine.evaluate("SendEmail", kind="write", payload={"to": "blocked@company.com"})
+        self.assertFalse(d.allowed)
+
+    def test_wrong_tool_ignored(self):
+        from permissions import ArgumentPolicy
+
+        engine = self._engine([
+            ArgumentPolicy(tool="Bash", argument="command", denylist=("rm",)),
+        ])
+        d = engine.evaluate("SendEmail", kind="write", payload={"to": "rm@x.com"})
+        self.assertTrue(d.allowed)
+
+    def test_no_policies_no_change(self):
+        engine = self._engine([])
+        d = engine.evaluate("Bash", kind="exec", payload={"command": "rm -rf /"})
+        self.assertTrue(d.allowed)
+
+
 class CompositionClosureTests(unittest.TestCase):
     def _engine(self):
         from permissions import (

@@ -149,6 +149,7 @@ DecisionSource = Literal[
     "scope",
     "composition",
     "offensive",
+    "argument",
 ]
 
 
@@ -565,6 +566,49 @@ def subtract(allowed: Iterable[str] | None, denied: Iterable[str] | None) -> tup
 
 
 @dataclass(frozen=True)
+class ArgumentPolicy:
+    """A policy on a critical tool argument (argument-level provenance).
+
+    The gate checks tool *names*; this checks the *values* that matter.
+    Each policy names a tool and one of its arguments, plus either a
+    denylist of forbidden patterns or an allowlist of permitted ones
+    (or both; denylist wins on conflict).
+
+    Patterns are case-insensitive substrings -- simple, auditable, and
+    enough for the common shapes (dangerous shell fragments, unexpected
+    recipients). This is opt-in; no policies means no argument checks.
+
+    Example: ArgumentPolicy(tool="Bash", argument="command",
+             denylist=("rm -rf /", "mkfs", ":(){")) blocks obviously
+    destructive shell commands at the gate, before the tool runs.
+    """
+
+    tool: str
+    argument: str
+    denylist: tuple[str, ...] = ()
+    allowlist: tuple[str, ...] = ()
+    description: str = ""
+
+    def __post_init__(self) -> None:
+        if not self.tool or not self.argument:
+            raise ValueError("argument policy needs a tool and an argument name")
+
+    def check(self, value: Any) -> str | None:
+        """Return a violation reason, or None if the value passes."""
+        text = value if isinstance(value, str) else json.dumps(value, sort_keys=True)
+        lowered = text.lower()
+        for pattern in self.denylist:
+            if pattern.lower() in lowered:
+                return f"argument {self.argument!r} matches denylisted pattern {pattern!r}"
+        if self.allowlist:
+            for pattern in self.allowlist:
+                if pattern.lower() in lowered:
+                    return None
+            return f"argument {self.argument!r} matches no allowlisted pattern"
+        return None
+
+
+@dataclass(frozen=True)
 class PermissionConfig:
     mode: PermissionMode = "default"
     allowed_tools: tuple[str, ...] = ()
@@ -573,6 +617,9 @@ class PermissionConfig:
     #: OFFENSIVE_TOOL_PATTERNS are deny-by-default; listing a tool here
     #: re-enables it (still subject to all other gate layers).
     offensive_allowlist: tuple[str, ...] = ()
+    #: Argument-level policies (opt-in). Checked in evaluate() before the
+    #: normal layers; a violation denies with argument:policy_violation.
+    argument_policies: tuple[ArgumentPolicy, ...] = ()
     can_use_tool: Callable[[str, dict[str, Any], PermissionRequestContext], Any] | None = None
     #: Optional structured decision model (SystemOne-style: state + typed
     #: questions -> options + probabilities). When set, mutating calls that
@@ -856,6 +903,23 @@ class PermissionEngine:
                     rule="offensive:deny_by_default",
                     tool=tool_name,
                 )
+        # Argument-level policies (opt-in): check critical argument values
+        # before the normal layers. A violation denies immediately.
+        if self.config.argument_policies and payload:
+            for policy in self.config.argument_policies:
+                if policy.tool != tool_name:
+                    continue
+                if policy.argument not in payload:
+                    continue
+                violation = policy.check(payload[policy.argument])
+                if violation is not None:
+                    return PermissionDecision(
+                        False,
+                        source="argument",
+                        reason=violation + (f" ({policy.description})" if policy.description else ""),
+                        rule="argument:policy_violation",
+                        tool=tool_name,
+                    )
         sink_verdict = (
             dataflow.check_sink(tool_name, payload) if dataflow is not None else None
         )
