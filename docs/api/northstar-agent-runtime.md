@@ -145,6 +145,14 @@ MasDrift-style authorization-drift corpus for the governance bench.
 
 #### `domain_names()`
 
+### `claimed_auth_corpus`
+
+Source: `components/northstar-agent-runtime/claimed_auth_corpus.py`
+
+Claimed-authorization probe corpus for the governance bench.
+
+#### `probe_names()`
+
 ### `capability_warrants`
 
 Source: `components/northstar-agent-runtime/capability_warrants.py`
