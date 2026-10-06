@@ -435,6 +435,10 @@ class DelegationToken:
 
     ``parent_hash`` is the SHA-256 of the parent token's canonical form;
     empty for a root delegation (no parent).
+
+    ``audience`` binds the token to its intended recipient (mandatum V9):
+    a token minted for agent X cannot be presented by agent Y, even if Y
+    somehow obtains it. Empty means unbound (legacy behavior).
     """
 
     delegator_id: str
@@ -444,6 +448,7 @@ class DelegationToken:
     expires_at: float
     parent_hash: str = ""
     signature: str = ""
+    audience: str = ""
 
     def _signing_body(self) -> dict[str, Any]:
         return {
@@ -453,6 +458,7 @@ class DelegationToken:
             "issued_at": self.issued_at,
             "expires_at": self.expires_at,
             "parent_hash": self.parent_hash,
+            "audience": self.audience,
         }
 
     def token_hash(self) -> str:
@@ -474,11 +480,14 @@ def mint_delegation_token(
     ttl_seconds: float = 3600.0,
     parent_token: DelegationToken | None = None,
     issued_at: float | None = None,
+    audience: str = "",
 ) -> DelegationToken:
     """Mint a signed delegation token.
 
     ``tools`` must be a subset of the parent token's tools when a parent
     is given -- attenuation is enforced at mint time, not just verified.
+
+    ``audience`` binds the token to its intended presenter (mandatum V9).
     """
     if not delegator_id or not delegatee_id:
         raise ValueError("delegator_id and delegatee_id must be non-empty")
@@ -502,6 +511,7 @@ def mint_delegation_token(
         issued_at=ts,
         expires_at=ts + float(ttl_seconds),
         parent_hash=parent_hash,
+        audience=audience,
     )
     try:
         from ed25519 import sign as ed_sign
@@ -517,8 +527,20 @@ def verify_delegation_token(
     *,
     now: float | None = None,
     expected_parent_hash: str | None = None,
+    expected_audience: str | None = None,
+    revocation_oracle: Callable[[DelegationToken], bool] | None = None,
+    expected_root_hash: str | None = None,
 ) -> bool:
-    """Verify a delegation token's signature, expiry, and parent binding.
+    """Verify a delegation token's signature, expiry, parent binding, and more.
+
+    Checks (mandatum V1-V9):
+    - signature: Ed25519 over the canonical body (covers audience too)
+    - time: issued_at <= now <= expires_at
+    - parent binding: parent_hash matches expected_parent_hash (if given)
+    - audience: token.audience matches expected_audience (if given); a token
+      without audience binding passes only when no audience is expected
+    - revocation: revocation_oracle(token) True means revoked (if oracle given)
+    - root: token_hash() matches expected_root_hash for root tokens (if given)
 
     False on any defect; never raises.
     """
@@ -539,6 +561,20 @@ def verify_delegation_token(
         if not (token.issued_at <= ts <= token.expires_at):
             return False
         if expected_parent_hash is not None and token.parent_hash != expected_parent_hash:
+            return False
+        # Audience binding: if the verifier expects an audience, the token
+        # must carry exactly that audience.
+        if expected_audience is not None and token.audience != expected_audience:
+            return False
+        # Revocation: the oracle is authoritative.
+        if revocation_oracle is not None:
+            try:
+                if revocation_oracle(token):
+                    return False
+            except Exception:
+                return False  # oracle failure fails closed
+        # Root consistency: for root tokens, pin the expected root hash.
+        if expected_root_hash is not None and token.token_hash() != expected_root_hash:
             return False
         return True
     except (ValueError, TypeError):

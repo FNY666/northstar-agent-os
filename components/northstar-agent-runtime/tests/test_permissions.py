@@ -340,6 +340,81 @@ class DelegationTokenTests(unittest.TestCase):
             verify_delegation_token(token, other_pubkey, now=1100.0)
         )
 
+    def test_audience_binding(self):
+        # mandatum V9: token bound to audience X cannot be used by Y.
+        from ed25519 import public_key as ed_pubkey
+        from permissions import mint_delegation_token, verify_delegation_token
+
+        seed = bytes(32)
+        pubkey = ed_pubkey(seed)
+        token = mint_delegation_token(
+            delegator_id="did:example:alice",
+            delegatee_id="did:example:bob",
+            tools=("Read",),
+            delegator_seed=seed,
+            issued_at=1000.0,
+            audience="did:example:bob",
+        )
+        self.assertTrue(
+            verify_delegation_token(token, pubkey, now=1100.0, expected_audience="did:example:bob")
+        )
+        self.assertFalse(
+            verify_delegation_token(token, pubkey, now=1100.0, expected_audience="did:example:mallory")
+        )
+        token2 = mint_delegation_token(
+            delegator_id="did:example:alice",
+            delegatee_id="did:example:bob",
+            tools=("Read",),
+            delegator_seed=seed,
+            issued_at=1000.0,
+        )
+        self.assertTrue(verify_delegation_token(token2, pubkey, now=1100.0))
+        self.assertFalse(
+            verify_delegation_token(token2, pubkey, now=1100.0, expected_audience="did:example:bob")
+        )
+
+    def test_revocation_oracle(self):
+        from ed25519 import public_key as ed_pubkey
+        from permissions import mint_delegation_token, verify_delegation_token
+
+        seed = bytes(32)
+        pubkey = ed_pubkey(seed)
+        token = mint_delegation_token(
+            delegator_id="did:example:alice",
+            delegatee_id="did:example:bob",
+            tools=("Read",),
+            delegator_seed=seed,
+            issued_at=1000.0,
+        )
+        revoked = {token.token_hash()}
+        oracle = lambda t: t.token_hash() in revoked
+        self.assertFalse(verify_delegation_token(token, pubkey, now=1100.0, revocation_oracle=oracle))
+        self.assertTrue(verify_delegation_token(token, pubkey, now=1100.0))
+        def bad_oracle(t):
+            raise RuntimeError("oracle down")
+        self.assertFalse(verify_delegation_token(token, pubkey, now=1100.0, revocation_oracle=bad_oracle))
+
+    def test_root_consistency(self):
+        from ed25519 import public_key as ed_pubkey
+        from permissions import mint_delegation_token, verify_delegation_token
+
+        seed = bytes(32)
+        pubkey = ed_pubkey(seed)
+        token = mint_delegation_token(
+            delegator_id="did:example:alice",
+            delegatee_id="did:example:bob",
+            tools=("Read",),
+            delegator_seed=seed,
+            issued_at=1000.0,
+        )
+        root_hash = token.token_hash()
+        self.assertTrue(
+            verify_delegation_token(token, pubkey, now=1100.0, expected_root_hash=root_hash)
+        )
+        self.assertFalse(
+            verify_delegation_token(token, pubkey, now=1100.0, expected_root_hash="0" * 64)
+        )
+
     def test_attenuation_enforced(self):
         from permissions import mint_delegation_token
 
