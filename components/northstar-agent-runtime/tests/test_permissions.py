@@ -781,9 +781,18 @@ class PreTradeRiskTests(unittest.TestCase):
         self.assertEqual(record["condition"], d.rule)
         self.assertEqual(record["rule"], d.rule)
         self.assertEqual(record["source"], "pretrade")
-        # Allows are not audited.
-        engine.evaluate("Write", kind="edit", payload={"value": 50, "reference": 50})
+
+    def test_every_allow_is_audited_synchronously(self):
+        engine, audits, _ = self.make_engine()
+        d = engine.evaluate("Write", kind="edit", payload={"value": 50, "reference": 50})
+        self.assertTrue(d.allowed)
+        # Synchronous: the allow record exists by the time evaluate() returns.
+        # Closes the Art. 12 gap: a crash between gate-allow and tool execution
+        # no longer leaves the authorization unprovable.
         self.assertEqual(len(audits), 1)
+        record = audits[0]
+        self.assertEqual(record["event"], "permission.allow")
+        self.assertEqual(record["tool"], "Write")
 
     def test_raising_audit_sink_cannot_flip_a_deny(self):
         def bad_sink(record):
