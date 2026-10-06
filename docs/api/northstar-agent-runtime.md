@@ -2073,6 +2073,113 @@ Look up any probe (attack or benign) by name.
 
 Map every probe name to its expected outcome.
 
+### `incident_state`
+
+Source: `components/northstar-agent-runtime/incident_state.py`
+
+Digest-pinned incident-state event records: detected -> contained -> closed.
+
+#### `IncidentStateError`
+
+An incident-state record or verification step failed. Raised, never silent.
+
+#### `IncidentStateEvent`
+
+One pinned incident-state transition.
+
+- `as_dict()`
+#### `record_event(log: 'IncidentStateLog', incident_id: str, event: str, *, recorded_at: str, detail: str)`
+
+Append the next lifecycle event for an incident, enforcing order.
+
+#### `verify_event(event: IncidentStateEvent)`
+
+Re-derive an event's digest and compare in constant time.
+
+#### `IncidentStateLog`
+
+Append-only per-incident event log with lifecycle enforcement.
+
+- `append(incident_id: str, event: str, *, recorded_at: str, detail: str)`
+- `events(incident_id: str | None=None)`
+  - Return stored events, optionally filtered to one incident.
+- `state(incident_id: str)`
+  - Current lifecycle state of an incident, or None if unknown.
+- `is_closed(incident_id: str)`
+- `verify_log(incident_id: str | None=None)`
+  - Re-verify every digest and every chain link (optionally one incident).
+- `as_audit_record(event: IncidentStateEvent)`
+  - Render an event as a ``northstar.audit.v1`` audit-trail record.
+#### `probe_names()`
+
+Names of every probe in the corpus.
+
+#### `probes_by_family(family: str)`
+
+Probes belonging to one family. Unknown families raise KeyError.
+
+#### `probe_by_name(name: str)`
+
+One probe by name. Unknown names raise KeyError.
+
+#### `expected_outcomes()`
+
+Map every probe name to its expected outcome.
+
+### `mcp_span_coverage`
+
+Source: `components/northstar-agent-runtime/mcp_span_coverage.py`
+
+MCP span coverage: which MCP protocol surface is traced, and whether the trace context survives the wire (``mcp-span-coverage.v1``).
+
+#### `McpSpan`
+
+One observed MCP-protocol span.
+
+- `as_dict()`
+#### `SpanFinding`
+
+One semconv/coverage finding on a span.
+
+#### `validate_span(span: McpSpan)`
+
+Validate one span against the pinned vocabulary and wire rules.
+
+#### `ObservedRequest`
+
+One MCP request the host observed on the wire.
+
+#### `MethodCoverage`
+
+Per-method coverage row.
+
+- `coverage_gap()`
+#### `CoverageReport`
+
+Digest-pinned per-method coverage table.
+
+- `build(rows: list[MethodCoverage])`
+- `verify()`
+#### `CoverageTracker`
+
+Append-only tracker of observed MCP requests and emitted spans.
+
+- `observe_request(request: ObservedRequest)`
+- `record_span(span: McpSpan)`
+- `coverage_report()`
+- `coverage_gaps()`
+  - Name every gap, one line per (method, gap-kind). Empty = clean.
+- `validate_all()`
+- `requests()`
+- `spans()`
+#### `probe_names()`
+
+#### `probes_by_family()`
+
+#### `probe_by_name(name: str)`
+
+#### `expected_outcomes()`
+
 ### `belief_poisoning_probes`
 
 Source: `components/northstar-agent-runtime/belief_poisoning_probes.py`
