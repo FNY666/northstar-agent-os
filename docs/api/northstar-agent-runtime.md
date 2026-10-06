@@ -682,6 +682,102 @@ Analyze a session's query history for extraction coverage.
 
 #### `benign_names()`
 
+### `probe_assertions`
+
+Source: `components/northstar-agent-runtime/probe_assertions.py`
+
+AgentProbe-style tool-call assertion helpers for probe family tests.
+
+#### `ToolCall`
+
+One recorded ``evaluate()`` invocation.
+
+#### `CallRecorder`
+
+Wrap an engine and record every ``evaluate()`` call.
+
+- `evaluate(tool_name: str, **kwargs: Any)`
+- `calls` (property)
+- `calls_for(tool: str)`
+  - Calls to exactly ``tool`` (byte-exact name, no fuzzy match).
+- `reset()`
+#### `run_scenario(engine_or_recorder: Any, steps: Sequence[Any])`
+
+Run a script of steps through the recorder; return decisions.
+
+#### `assert_tool_called(calls: Sequence[ToolCall], tool: str, *, allowed: bool | None=None, msg: str | None=None)`
+
+At least one call to ``tool`` was recorded.
+
+#### `assert_tool_not_called(calls: Sequence[ToolCall], tool: str, *, msg: str | None=None)`
+
+No call to ``tool`` was recorded.
+
+#### `assert_call_count_bounds(calls: Sequence[ToolCall], tool: str, *, minimum: int | None=None, maximum: int | None=None, msg: str | None=None)`
+
+The number of calls to ``tool`` is within [minimum, maximum].
+
+#### `assert_call_ordering(calls: Sequence[ToolCall], first: str, second: str, *, msg: str | None=None)`
+
+A call to ``first`` precedes a call to ``second``.
+
+#### `assert_no_forbidden_args(calls: Sequence[ToolCall], tool: str, forbidden: ForbiddenSpec, *, msg: str | None=None)`
+
+No recorded call to ``tool`` carried a forbidden argument value.
+
+### `constraint_synthesis`
+
+Source: `components/northstar-agent-runtime/constraint_synthesis.py`
+
+AgentRx-style constraint synthesis for the bench harness.
+
+#### `ToolSchema`
+
+The declared contract of one tool. Constraint synthesis reads this.
+
+#### `CompositionSpec`
+
+A forbidden category sequence (rule id + the forbidden tail).
+
+#### `NormalizedStep`
+
+One canonical trajectory step.
+
+#### `Constraint`
+
+A data-driven, auditable constraint synthesized from a tool schema.
+
+#### `ConstraintViolation`
+
+One violated constraint at one trajectory step -- the audit unit.
+
+#### `StepwiseEvaluation`
+
+The full step-wise evaluation report.
+
+- `valid` (property)
+  - True only when zero constraints were violated.
+- `violated_step_indexes` (property)
+#### `normalize_step(raw: Mapping[str, Any], index: int)`
+
+Fold one raw step dict into a canonical :class:`NormalizedStep`.
+
+#### `normalize_trajectory(raw_steps: Sequence[Mapping[str, Any]])`
+
+Normalize a raw trajectory into canonical steps, index-preserving.
+
+#### `synthesize_constraints(registry: Mapping[str, ToolSchema], composition_specs: Sequence[CompositionSpec]=())`
+
+Synthesize the constraint set from a tool registry.
+
+#### `evaluate_stepwise(steps: Sequence[NormalizedStep], constraints: Sequence[Constraint], registry: Mapping[str, ToolSchema] | None=None)`
+
+Evaluate each normalized step against the constraints, in order.
+
+#### `run_trajectory(raw_steps: Sequence[Mapping[str, Any]], registry: Mapping[str, ToolSchema], composition_specs: Sequence[CompositionSpec]=())`
+
+Normalize, synthesize, and evaluate in one call (bench convenience).
+
 ### `pqc_inventory`
 
 Source: `components/northstar-agent-runtime/pqc_inventory.py`
