@@ -608,6 +608,60 @@ Error-route probe family: fake subordinate errors that reroute execution.
 
 #### `benign_names()`
 
+### `checkpoint_safety`
+
+Source: `components/northstar-agent-runtime/checkpoint_safety.py`
+
+Checkpoint safety: restore must never resurrect what was killed.
+
+#### `CheckpointSafetyError`
+
+Raised only by the capture path when given unusable input.
+
+#### `RestoreVerdict`
+
+The gate's verdict on one checkpoint restore attempt.
+
+- `allow(reason: str='checkpoint clean')`
+- `deny(reason: str, **detail: Any)`
+#### `state_digest(state: Mapping[str, Any])`
+
+SHA-256 over the canonical snapshot body.
+
+#### `capture_checkpoint_state(*, scope_manager: Any, delegation_chains: Sequence[Iterable[str]]=(), extra: Mapping[str, Any] | None=None)`
+
+Capture the security-relevant state a checkpoint must freeze.
+
+#### `validate_restore(record: Mapping[str, Any], *, scope_manager: Any, revoked_dids: Iterable[str]=())`
+
+Validate a checkpoint restore against *current* security state.
+
+#### `validate_restore_strict(record: Mapping[str, Any], *, scope_manager: Any, revoked_dids: Iterable[str]=(), known_scope_ids: Iterable[str] | None=None)`
+
+Stricter variant: additionally require every snapshot scope id to be a known scope (guards against restoring scopes the manager never saw).
+
+### `tdsr_metrics`
+
+Source: `components/northstar-agent-runtime/tdsr_metrics.py`
+
+TDSR / FDSR / SDR decomposition for the governance bench.
+
+#### `decompose_from_scores(scored_groups: list[dict[str, Any]])`
+
+Decompose pre-scored groups into the TDSR/FDSR/SDR report.
+
+#### `compute_tdsr(corpus: Any, gate_fn: Callable[[dict[str, Any]], Any])`
+
+Score a gate on a corpus and decompose DSR into TDSR/FDSR.
+
+#### `compute_frontier_tdsr(gate_configs: list[dict[str, Any]], corpus: Any, gate_fn_factory: Callable[[dict[str, Any]], Callable[[Any, Any], Any]] | None=None)`
+
+Per-rung TDSR/FDSR/SDR points across a strictness ladder.
+
+#### `composite_score(*_args: Any, **_kwargs: Any)`
+
+Refuse to average safety into a composite score.
+
 ### `squatting_probe`
 
 Source: `components/northstar-agent-runtime/squatting_probe.py`
