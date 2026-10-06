@@ -304,6 +304,60 @@ Probes whose expected behavior the gate currently enforces.
 
 Probes documenting confirmed gate gaps (not yet enforced).
 
+### `install_verify_probe`
+
+Source: `components/northstar-agent-runtime/install_verify_probe.py`
+
+Install-verification probes: Plugin4Shell-style pin-vs-content mismatch.
+
+#### `probe_names()`
+
+All install-verification probe names.
+
+#### `canonical_sha40(value: Any)`
+
+Canonical lowercase 40-hex form of *value*, or ``None`` if invalid.
+
+#### `verify_checkout_pin(pinned_sha: Any, resolved_head_sha: Any)`
+
+Verify that the post-checkout HEAD is exactly the pinned object.
+
+#### `resolve_head_sha(repo_dir: str)`
+
+``git rev-parse HEAD`` for *repo_dir*, canonicalized; ``None`` on failure.
+
+#### `authorize_install(pinned_sha: Any, head_sha: Any)`
+
+Policy decision for one install: allow only on verified pin.
+
+### `rugpull_probe`
+
+Source: `components/northstar-agent-runtime/rugpull_probe.py`
+
+Call-gated metadata mutation (rug pull) probes.
+
+#### `probe_names()`
+
+#### `metadata_digest(definition: dict[str, Any])`
+
+Stable digest of a tool definition (description + schema + version).
+
+#### `ToolMetadataRegistry`
+
+Host-side registry of tool definitions.
+
+- `register(tool: str, definition: dict[str, Any])`
+  - Record the definition the host approved against. Returns its digest.
+- `note_list_changed(tool: str, new_definition: dict[str, Any])`
+  - Apply a tools/list_changed notification. Returns the new digest.
+- `current_digest(tool: str)`
+#### `MetadataPinnedHost`
+
+Host approval callback with metadata-pinned approvals.
+
+- `approve(tool: str)`
+  - Explicitly approve the tool's CURRENT definition. Returns the digest.
+- `pinned(tool: str)`
 ### `adjudication`
 
 Source: `components/northstar-agent-runtime/adjudication.py`
