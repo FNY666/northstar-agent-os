@@ -7266,6 +7266,12 @@ Verify a delegation token's signature, expiry, and parent binding.
 
 ``--deny-tool`` semantics: subtract, never co-list.
 
+#### `ArgumentPolicy`
+
+A policy on a critical tool argument (argument-level provenance).
+
+- `check(value: Any)`
+  - Return a violation reason, or None if the value passes.
 #### `PermissionConfig`
 
 - `overlap` (property)
@@ -7514,6 +7520,10 @@ Postconditions: an independent verdict on whether the work actually happened.
 #### `PostConditionError`
 
 Raised for a malformed, unknown, or out-of-bounds postcondition.
+
+#### `PostConditionLimitError`
+
+A file cannot be verified completely within the configured byte budget.
 
 #### `PostCondition`
 
