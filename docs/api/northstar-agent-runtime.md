@@ -872,6 +872,89 @@ Cold tier: external anchors only, never record bodies.
 
 Destroy a warm archive after its retention window expires.
 
+### `edge_gate`
+
+Source: `components/northstar-agent-runtime/edge_gate.py`
+
+Permission gate for edge/physical actions.
+
+#### `EdgeGateError`
+
+A device profile, registry, or approval that refuses to be built.
+
+#### `DeviceProfile`
+
+Host-provisioned capability envelope for one edge device.
+
+#### `EdgeApproval`
+
+One verified human approval, recorded by the host.
+
+#### `EdgeVerdict`
+
+The gate's verdict for one edge tool call.
+
+- `as_dict()`
+#### `EdgeGate`
+
+Pre-gate for edge/physical tool calls.
+
+- `classify(tool: str, arguments: Mapping[str, Any] | None)`
+  - Classify a tool call. Unknown tools fail closed to irreversible.
+- `is_registered(tool: str)`
+- `grant(approval: EdgeApproval)`
+  - Record a host-verified approval. Idempotent on identical pins.
+- `consume(call_id: str, arguments_digest: str)`
+  - Spend a granted approval at dispatch. Returns False if there is no unspent grant for this pin -- the dispatch must not execute.
+- `evaluate(tool: str, arguments: Mapping[str, Any] | None, *, call_id: str='', device: DeviceProfile | None=None)`
+  - Evaluate one edge tool call. Pure: never consumes an approval.
+- `audit_log()`
+#### `probe_names()`
+
+All edge-gate probe names.
+
+### `trajectory_corpus`
+
+Source: `components/northstar-agent-runtime/trajectory_corpus.py`
+
+Trajectory-level injection corpus: AgentDrift-style step-labeled eval set.
+
+#### `trajectory_names()`
+
+All trajectory names in the corpus.
+
+#### `AdmissionResult`
+
+Outcome of verifier-gating a candidate trajectory.
+
+#### `verify_trajectory(candidate: Mapping[str, Any])`
+
+Verifier gate for corpus admission.
+
+#### `admit_trajectories(candidates: list[Mapping[str, Any]])`
+
+Batch verifier-gating: returns (admitted, per-candidate results).
+
+#### `ScoredStep`
+
+One step with the gate verdict the scorer observed.
+
+#### `ScoredTrajectory`
+
+A trajectory with per-step verdicts and a trajectory-level verdict.
+
+#### `score_trajectory(trajectory: Mapping[str, Any], gate_fn: Callable[[Mapping[str, Any]], str] | None=None)`
+
+Score a trajectory step by step.
+
+#### `detect_coherence_collapse(steps: tuple[ScoredStep, ...] | list[ScoredStep], final_outcome: str)`
+
+Detect coherence collapse: success built on a corrupted trajectory.
+
+#### `check_corpus_expected()`
+
+Verify each corpus trajectory scores to its recorded ``expected``.
+
 ### `approval_sla`
 
 Source: `components/northstar-agent-runtime/approval_sla.py`
