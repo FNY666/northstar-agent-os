@@ -598,6 +598,54 @@ Append-only, hash-chained memory ledger. Fail-closed on tamper.
 
 Run the GhostWriter phase-1 corpus against the admission gate.
 
+### `error_route_probe`
+
+Source: `components/northstar-agent-runtime/error_route_probe.py`
+
+Error-route probe family: fake subordinate errors that reroute execution.
+
+#### `probe_names()`
+
+#### `benign_names()`
+
+### `squatting_probe`
+
+Source: `components/northstar-agent-runtime/squatting_probe.py`
+
+Tool squatting probe family: near-name, shadowed, and hallucinated tool identities.
+
+#### `probe_names()`
+
+All squatting attack probe names.
+
+#### `benign_names()`
+
+All squatting benign control names.
+
+#### `ToolNameRegistry`
+
+Host-side registry of tool identities.
+
+- `register(name: str, definition: dict[str, Any], server_id: str)`
+  - Record the exact name a host approved against. Returns its digest.
+- `lookup(name: str)`
+  - Resolve a tool name to its pinned identity -- exact match only.
+- `resolve_digest(name: str)`
+  - Digest for the exact name, or None when unregistered.
+- `resolve_server(name: str)`
+  - Pinned server for the exact name, or None when unregistered.
+#### `NamePinnedHost`
+
+Host approval callback with exact-name + digest + server pins.
+
+- `approve(name: str)`
+  - Explicitly approve the tool's CURRENT exact identity.
+- `pinned(name: str)`
+  - True when the tool's current exact identity has an approved pin.
+#### `resolve_exact(name: str, registry: ToolNameRegistry)`
+
+Resolve a tool name to its pinned identity, exact match only.
+
 ### `adjudication`
 
 Source: `components/northstar-agent-runtime/adjudication.py`
@@ -7158,7 +7206,7 @@ One MCP server over stdio: modern (per-request metadata) or legacy (handshake).
 - `close()`
   - TERM the process group, then KILL after a grace period. Idempotent.
 - `subscribe_list_changed()`
-  - Opt in to ``notifications/tools/list_changed`` (spec: explicit opt-in required).
+  - Opt in to ``notifications/tools/list_changed`` via ``subscriptions/listen``.
 #### `mcp_tool_specs(client: McpStdioClient)`
 
 Build governed ``ToolSpec``s (mutating by default) for one connected server.
