@@ -1061,6 +1061,83 @@ Temporal anomaly codes for one stamped record (empty when clean).
 
 Per-record anomalies for an ordered feed of stamped records.
 
+### `mcp09_probes`
+
+Source: `components/northstar-agent-runtime/mcp09_probes.py`
+
+MCP09 probe corpus: shadow MCP servers.
+
+#### `probe_names()`
+
+All MCP09 probe names.
+
+### `mcp03_probes`
+
+Source: `components/northstar-agent-runtime/mcp03_probes.py`
+
+MCP03 probe corpus: install-time tool poisoning.
+
+#### `probe_names()`
+
+All MCP03 probe names.
+
+### `mcp_drift_monitor`
+
+Source: `components/northstar-agent-runtime/mcp_drift_monitor.py`
+
+Continuous MCP tool-metadata drift monitoring (``mcp-drift-monitor.v1``).
+
+#### `scan_risk_signals(description: str)`
+
+Return the set of rug-pull risk signals present in a description.
+
+#### `DriftMonitorError`
+
+Misuse of the monitor: unpinned server, malformed listing, bad policy.
+
+#### `BaselineError`
+
+Raised when checking a server with no pinned baseline.
+
+#### `description_digest(description: str)`
+
+#### `schema_digest(schema: Mapping[str, Any])`
+
+#### `annotations_digest(annotations: Mapping[str, Any])`
+
+#### `tool_digest(server: str, name: str, description: str, schema: Mapping[str, Any], annotations: Mapping[str, Any])`
+
+Full-tool digest: (server, name, description, schema, annotations).
+
+#### `ToolPin`
+
+The pinned baseline for one tool: field-level digests.
+
+#### `DriftAlert`
+
+One detected drift, with a severity and a human-readable detail.
+
+- `as_dict()`
+#### `DriftReport`
+
+The result of checking one ``tools/list`` observation against the pin.
+
+- `clean` (property)
+- `recommend_quarantine` (property)
+- `as_dict()`
+#### `DriftMonitor`
+
+Continuous metadata-drift monitor for MCP servers.
+
+- `is_pinned(server: str)`
+- `pin_server(server: str, tools: list[Mapping[str, Any]], *, force: bool=False)`
+  - Pin the current listing as the baseline for ``server``.
+- `reset_server(server: str)`
+  - Drop the baseline and history for ``server``.
+- `server_state(server: str)`
+  - Read-only snapshot of a server's monitor state.
+- `check_server(server: str, tools: list[Mapping[str, Any]])`
+  - Compare one ``tools/list`` observation against the pin.
 ### `memory_decay`
 
 Source: `components/northstar-agent-runtime/memory_decay.py`
