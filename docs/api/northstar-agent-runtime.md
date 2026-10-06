@@ -1274,6 +1274,87 @@ Look up any self-modification probe (attack or benign) by name.
 
 probe name -> expected gate outcome ('deny' or 'allow').
 
+### `bias_guardrail`
+
+Source: `components/northstar-agent-runtime/bias_guardrail.py`
+
+Bias guardrail pre-gate.
+
+#### `BiasGuardrailError`
+
+Base class for every fail-closed guardrail error.
+
+#### `UnknownProxyCategoryError`
+
+A proxy rule named a category the registry does not know.
+
+#### `MalformedInputError`
+
+The decision input was not a non-empty mapping.
+
+#### `VerificationError`
+
+An audit record failed integrity or fairness verification.
+
+#### `ProxyRule`
+
+One stripping rule.
+
+#### `ProxyRegistry`
+
+Host-owned stripping configuration.
+
+- `categories()`
+  - Proxy categories covered by this registry, sorted.
+- `field_rules()`
+- `pattern_rules()`
+#### `StrippedSignal`
+
+One removal, with its proxy category pinned.
+
+#### `StripReport`
+
+What was removed from a decision input, and what remains.
+
+- `as_dict()`
+#### `PinnedInput`
+
+A sanitized decision input bound to its digest.
+
+- `as_dict()`
+#### `strip_proxies(decision_id: str, decision_input: dict[str, Any], registry: ProxyRegistry | None=None)`
+
+Strip declared proxies from a decision input.
+
+#### `pin_decision_input(decision_id: str, decision_input: dict[str, Any], registry: ProxyRegistry | None=None)`
+
+Strip proxies and bind the result to a digest.
+
+#### `AuditRecord`
+
+One fairness audit trail entry.
+
+- `as_dict()`
+#### `FairnessAuditTrail`
+
+Append-only per-decision fairness log.
+
+- `append(pinned: PinnedInput, verifier: str, verdict: str)`
+- `records()`
+- `verify()`
+  - Every record's frozen snapshot must still match its live copy.
+#### `verify_pinned_input(pinned: PinnedInput, registry: ProxyRegistry | None=None)`
+
+Verify a pinned decision input.
+
+#### `process(decision_id: str, decision_input: dict[str, Any], trail: FairnessAuditTrail, verifier: str='bias-guardrail.pre-gate', registry: ProxyRegistry | None=None)`
+
+The pre-gate choke point.
+
+#### `probe_names()`
+
+All bias-guardrail probe names.
+
 ### `ssr_reporting`
 
 Source: `components/northstar-agent-runtime/ssr_reporting.py`
