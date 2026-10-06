@@ -725,6 +725,90 @@ A call to ``first`` precedes a call to ``second``.
 
 No recorded call to ``tool`` carried a forbidden argument value.
 
+### `budget_dimensions`
+
+Source: `components/northstar-agent-runtime/budget_dimensions.py`
+
+Four-dimension spend budgets (per-tool / per-run / per-tenant / rolling window).
+
+#### `SpendVerdict`
+
+The outcome of one budget dimension's decision on a spend.
+
+#### `SpendLedger`
+
+One bounded spend ledger.
+
+- `remaining` (property)
+- `check(units: float)`
+  - True if ``units`` more could be spent without exhaustion.
+- `spend(units: float)`
+  - Decrement the ledger; True on success, False on exhaustion.
+#### `ToolBudgets`
+
+Per-tool spend ledgers.
+
+- `check(tool: str, units: float)`
+- `spend(tool: str, units: float)`
+#### `RunBudget`
+
+One ledger for the whole run.
+
+- `check(units: float)`
+- `spend(units: float)`
+#### `TenantBudgets`
+
+Per-tenant spend ledgers with cross-tenant isolation.
+
+- `check(tenant: str, units: float)`
+- `spend(tenant: str, units: float)`
+#### `RollingWindowBudget`
+
+Per-key sliding-window burst cap.
+
+- `check(key: str, units: float)`
+- `spend(key: str, units: float)`
+#### `BudgetDimensions`
+
+Coordinator: every spend must clear ALL configured dimensions.
+
+- `check(tool: str, units: float, tenant: str | None=None)`
+  - Check all configured dimensions without recording spend.
+- `spend(tool: str, units: float, tenant: str | None=None)`
+  - Spend against all configured dimensions; denied atomically.
+- `all_allowed(verdicts: List[SpendVerdict])`
+### `session_budget`
+
+Source: `components/northstar-agent-runtime/session_budget.py`
+
+Per-session dollar budget with hard mid-execution stop and audit events.
+
+#### `BudgetExhaustionEvent`
+
+The audit event emitted when a session budget is exhausted.
+
+- `as_dict()`
+#### `SpendRecord`
+
+One booked spend.
+
+#### `SessionBudget`
+
+A per-session dollar budget with pre-execution hard stops.
+
+- `exhausted` (property)
+  - True once declared spend has reached the ceiling.
+- `remaining_usd` (property)
+- `authorize(estimated_cost_usd: Any=0.0, *, purpose: str='')`
+  - Pre-execution gate: refuse the next spend before it happens.
+- `record(cost_usd: Any, *, purpose: str='')`
+  - Book an actual spend after it happened. Never raises.
+- `observe_usage(usage: Any, model: str, *, purpose: str='')`
+  - Price a provider usage report via budget.py's table, then book it.
+- `events()`
+  - Audit events emitted so far (exhaustion fires at most once).
+- `ledger()`
+- `status()`
 ### `constraint_synthesis`
 
 Source: `components/northstar-agent-runtime/constraint_synthesis.py`
