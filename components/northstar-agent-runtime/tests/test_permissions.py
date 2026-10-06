@@ -955,6 +955,102 @@ class ScopeLifetimeTests(unittest.TestCase):
             mgr.open_scope("s1")
 
 
+class AuthorityCeilingTests(unittest.TestCase):
+    def _engine(self, callback=None):
+        from permissions import (
+            PermissionConfig,
+            PermissionEngine,
+            ScopeManager,
+        )
+
+        mgr = ScopeManager()
+        mgr.open_scope("phase-1", "test", capabilities=("Read", "Grep"))
+        return PermissionEngine(
+            PermissionConfig(
+                mode="default",
+                can_use_tool=callback or (lambda n, p, c: True),
+            ),
+            tool_kinds={"Read": "read", "Grep": "read", "Write": "edit"},
+            scope_manager=mgr,
+        ), mgr
+
+    def test_within_ceiling_allowed(self):
+        from permissions import PermissionRequestContext
+
+        engine, _ = self._engine()
+        ctx = PermissionRequestContext(scope_id="phase-1")
+        d = engine.evaluate("Read", kind="read", payload={}, context=ctx)
+        self.assertTrue(d.allowed)
+
+    def test_outside_ceiling_needs_approval(self):
+        from permissions import PermissionRequestContext
+
+        # Host approves the ascent.
+        engine, _ = self._engine(callback=lambda n, p, c: True)
+        ctx = PermissionRequestContext(scope_id="phase-1")
+        d = engine.evaluate("Write", kind="edit", payload={}, context=ctx)
+        self.assertTrue(d.allowed)
+        self.assertEqual(d.rule, "ceiling:ascent_approved")
+
+    def test_outside_ceiling_denied_without_callback(self):
+        from permissions import (
+            PermissionConfig,
+            PermissionEngine,
+            PermissionRequestContext,
+            ScopeManager,
+        )
+
+        mgr = ScopeManager()
+        mgr.open_scope("phase-1", "test", capabilities=("Read",))
+        engine = PermissionEngine(
+            PermissionConfig(mode="default"),  # no callback
+            tool_kinds={"Write": "edit"},
+            scope_manager=mgr,
+        )
+        ctx = PermissionRequestContext(scope_id="phase-1")
+        d = engine.evaluate("Write", kind="edit", payload={}, context=ctx)
+        self.assertFalse(d.allowed)
+        self.assertEqual(d.rule, "ceiling:needs_approval")
+
+    def test_outside_ceiling_host_can_deny(self):
+        from permissions import PermissionRequestContext
+
+        engine, _ = self._engine(callback=lambda n, p, c: False)
+        ctx = PermissionRequestContext(scope_id="phase-1")
+        d = engine.evaluate("Write", kind="edit", payload={}, context=ctx)
+        self.assertFalse(d.allowed)
+        self.assertEqual(d.rule, "ceiling:ascent_denied")
+
+    def test_no_ceiling_no_change(self):
+        from permissions import (
+            PermissionConfig,
+            PermissionEngine,
+            PermissionRequestContext,
+            ScopeManager,
+        )
+
+        mgr = ScopeManager()
+        mgr.open_scope("phase-1", "test")  # no capabilities = no ceiling
+        engine = PermissionEngine(
+            PermissionConfig(mode="default", can_use_tool=lambda n, p, c: True),
+            tool_kinds={"Write": "edit"},
+            scope_manager=mgr,
+        )
+        ctx = PermissionRequestContext(scope_id="phase-1")
+        d = engine.evaluate("Write", kind="edit", payload={}, context=ctx)
+        # No ceiling: normal gate behavior.
+        self.assertTrue(d.allowed)
+
+    def test_ceiling_cleared_on_close(self):
+        from permissions import ScopeManager
+
+        mgr = ScopeManager()
+        mgr.open_scope("s1", capabilities=("Read",))
+        self.assertEqual(mgr.ceiling("s1"), frozenset({"Read",}))
+        mgr.close_scope("s1")
+        self.assertIsNone(mgr.ceiling("s1"))
+
+
 class CompositionClosureTests(unittest.TestCase):
     def _engine(self):
         from permissions import (

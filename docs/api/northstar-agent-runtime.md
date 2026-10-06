@@ -7212,7 +7212,7 @@ Check whether a category trace contains a forbidden sequence.
 
 Tracks permission scopes (epochs) and their lifetime.
 
-- `open_scope(scope_id: str, description: str='')`
+- `open_scope(scope_id: str, description: str='', capabilities: Iterable[str] | None=None)`
   - Open a scope. Reopening a closed scope is an error (fail closed).
 - `close_scope(scope_id: str)`
   - Close a scope, revoking its permissions. Returns True if it was open.
@@ -7220,6 +7220,10 @@ Tracks permission scopes (epochs) and their lifetime.
   - True if the scope exists and hasn't been closed.
 - `was_closed(scope_id: str)`
   - True if the scope was explicitly closed (vs never opened).
+- `ceiling(scope_id: str)`
+  - The scope's authority ceiling, or None if none was set.
+- `within_ceiling(scope_id: str, tool_name: str)`
+  - True if the tool is within the scope's ceiling (or no ceiling set).
 #### `digest_arguments(arguments: Any)`
 
 Canonical ``sha256:<hex>`` digest of tool arguments.

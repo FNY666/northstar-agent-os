@@ -304,24 +304,46 @@ class ScopeManager:
     Scopes are identified by string IDs; the manager is deliberately
     simple (no persistence) -- the runtime creates scopes for task phases
     and closes them on phase transitions.
+
+    Authority ceiling (arXiv:2607.23586): when a scope is opened with a
+    ``capabilities`` set, that set becomes the immutable ceiling for the
+    scope's lifetime. Within an open scope, authority may contract freely
+    but expand only through explicit host approval (gated ascent) -- no
+    runtime signal can raise the ceiling; only a fresh scope (fresh grant)
+    sets a new one. This answers "the agent acquired a new tool mid-task".
     """
 
     _open: dict[str, str] = field(default_factory=dict)  # scope_id -> description
     _closed: set[str] = field(default_factory=set)
+    _ceilings: dict[str, frozenset[str]] = field(default_factory=dict)  # scope_id -> tool ceiling
 
-    def open_scope(self, scope_id: str, description: str = "") -> None:
-        """Open a scope. Reopening a closed scope is an error (fail closed)."""
+    def open_scope(
+        self,
+        scope_id: str,
+        description: str = "",
+        capabilities: Iterable[str] | None = None,
+    ) -> None:
+        """Open a scope. Reopening a closed scope is an error (fail closed).
+
+        When ``capabilities`` is given, it becomes the scope's immutable
+        authority ceiling: tools outside it need explicit host approval
+        even if they'd normally be auto-allowed.
+        """
         if not scope_id:
             raise ValueError("scope_id must not be empty")
         if scope_id in self._closed:
             raise ValueError(f"scope {scope_id!r} is closed and cannot be reopened")
         self._open[scope_id] = description
+        if capabilities is not None:
+            self._ceilings[scope_id] = frozenset(capabilities)
 
     def close_scope(self, scope_id: str) -> bool:
         """Close a scope, revoking its permissions. Returns True if it was open."""
         if scope_id in self._open:
             del self._open[scope_id]
             self._closed.add(scope_id)
+            # Ceiling goes with the scope; a reopened id gets a fresh ceiling.
+            self._ceilings.pop(scope_id, None)
             return True
         return False
 
@@ -332,6 +354,17 @@ class ScopeManager:
     def was_closed(self, scope_id: str) -> bool:
         """True if the scope was explicitly closed (vs never opened)."""
         return scope_id in self._closed
+
+    def ceiling(self, scope_id: str) -> frozenset[str] | None:
+        """The scope's authority ceiling, or None if none was set."""
+        return self._ceilings.get(scope_id)
+
+    def within_ceiling(self, scope_id: str, tool_name: str) -> bool:
+        """True if the tool is within the scope's ceiling (or no ceiling set)."""
+        cap = self._ceilings.get(scope_id)
+        if cap is None:
+            return True
+        return tool_name in cap
 
 
 def digest_arguments(arguments: Any) -> str:
@@ -800,6 +833,17 @@ class PermissionEngine:
                 rule="scope:closed",
                 tool=tool_name,
             )
+        # Authority ceiling (gated ascent): within an open scope that has a
+        # ceiling, tools outside the ceiling need explicit host approval --
+        # even if they'd normally be auto-allowed. Contraction is free;
+        # expansion needs evidence.
+        if (
+            self.scope_manager is not None
+            and context is not None
+            and context.scope_id
+            and not self.scope_manager.within_ceiling(context.scope_id, tool_name)
+        ):
+            return self._ceiling_ascent_decision(tool_name, payload, context)
         # Offensive tooling is deny-by-default (Spain AEPD, Sept 2026).
         # The host can explicitly allowlist via offensive_allowlist.
         if is_offensive_tool(tool_name):
@@ -849,6 +893,58 @@ class PermissionEngine:
                 tool_name, payload, context, sink_verdict
             )
         return decision
+
+    def _ceiling_ascent_decision(
+        self,
+        tool_name: str,
+        payload: dict[str, Any],
+        context: PermissionRequestContext,
+    ) -> PermissionDecision:
+        """Gated ascent: a tool outside the scope ceiling needs host approval.
+
+        The host callback is consulted directly. An approval here is the
+        "evidence" that justifies expansion; without a callback (or on
+        denial) the call fails closed. Approvals do NOT raise the ceiling --
+        the next call for the same tool will ask again.
+        """
+        callback = self.config.can_use_tool
+        if callback is None:
+            return PermissionDecision(
+                False,
+                source="scope",
+                reason=(
+                    f"{tool_name} is outside the scope {context.scope_id!r} authority "
+                    "ceiling and no host approval callback is configured; failing closed"
+                ),
+                rule="ceiling:needs_approval",
+                tool=tool_name,
+            )
+        try:
+            verdict = callback(tool_name, dict(payload), context)
+        except Exception as error:  # noqa: BLE001 - a broken approver must not grant access
+            return PermissionDecision(
+                False,
+                source="host_callback",
+                reason=f"host approval callback raised {type(error).__name__}; failing closed",
+                rule="host_callback:error",
+                tool=tool_name,
+            )
+        approved, note = _approval_verdict(verdict)
+        if approved:
+            return PermissionDecision(
+                True,
+                source="host_callback",
+                reason=note or f"{tool_name} approved for ceiling ascent by host",
+                rule="ceiling:ascent_approved",
+                tool=tool_name,
+            )
+        return PermissionDecision(
+            False,
+            source="host_callback",
+            reason=note or f"{tool_name} denied for ceiling ascent by host",
+            rule="ceiling:ascent_denied",
+            tool=tool_name,
+        )
 
     def _check_composition(self, tool_name: str) -> PermissionDecision | None:
         """Check whether this call completes a forbidden action sequence.
