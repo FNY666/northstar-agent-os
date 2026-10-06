@@ -1109,6 +1109,117 @@ Look up any probe (attack/detect or benign) by name.
 
 Map every probe name to its expected outcome.
 
+### `identity_disclosure`
+
+Source: `components/northstar-agent-runtime/identity_disclosure.py`
+
+AI-identity disclosure logging for user-facing flows (``identity-disclosure.v1``).
+
+#### `DisclosureError`
+
+Base error for identity-disclosure misuse.
+
+#### `UnknownFlowError`
+
+A flow with no registered policy was used.
+
+#### `InvalidRecordError`
+
+A disclosure record failed structural validation.
+
+#### `DisclosurePolicy`
+
+What Art. 50 requires of one user-facing flow.
+
+#### `DisclosureRecord`
+
+One user-facing interaction's disclosure claim.
+
+- `as_dict()`
+#### `DisclosureVerdict`
+
+The outcome of verifying one record against its flow policy.
+
+#### `make_record(*, flow: str, interaction_id: str, session_id: str, disclosure_made: bool, disclosure_method: str, disclosure_text: str='', machine_marking_present: bool=False, machine_marking_format: str='none', user_data_collected_before_disclosure: bool=False, clock: Callable[[], float] | None=None)`
+
+Build a disclosure record, failing closed on malformed input.
+
+#### `verify_record(record: DisclosureRecord, policy: DisclosurePolicy)`
+
+Verify one record against its flow policy. Fail closed.
+
+#### `gate_verdict(verdict: DisclosureVerdict)`
+
+Single choke point: violation -> "deny", compliant -> "allow".
+
+#### `DisclosureLog`
+
+Append-only log of disclosure records with per-flow policies.
+
+- `register_flow(flow: str, policy: DisclosurePolicy)`
+- `policy_for(flow: str)`
+- `record(record: DisclosureRecord)`
+  - Append a record. Unknown flows are still logged -- the violation is surfaced by ``verify()``, not by dropping evidence.
+- `records()`
+- `verify(record: DisclosureRecord)`
+  - Verify a record against its flow policy.
+- `verify_interaction(interaction_id: str)`
+#### `probe_names()`
+
+All identity-disclosure probe names.
+
+#### `probes_by_family()`
+
+#### `expected_outcomes()`
+
+### `risk_tiering`
+
+Source: `components/northstar-agent-runtime/risk_tiering.py`
+
+CBRA-style deployment risk tiering.
+
+#### `RiskTieringError`
+
+Fail-closed construction error for invalid risk inputs.
+
+#### `DeploymentTier`
+
+Four deployment tiers, ordered. Monotone by construction.
+
+#### `RiskProfile`
+
+The four CBRA dimensions, fail-closed at construction.
+
+- `as_dict()`
+#### `risk_score(profile: RiskProfile)`
+
+Multiplicative CBRA product. Range 1..256.
+
+#### `assign_tier(score: int)`
+
+Deterministic tier bands. Out-of-range scores fail closed.
+
+#### `required_controls(tier: DeploymentTier)`
+
+Cumulative control identifiers for a tier. Higher tiers include every control of the lower tiers.
+
+#### `tier_order()`
+
+Tiers from lowest to highest.
+
+#### `RiskAssessment`
+
+A digest-pinned risk assessment for one deployment.
+
+- `as_dict()`
+#### `assess(system_id: str, profile: RiskProfile, assessor: str, now: Callable[[], int])`
+
+Build a digest-pinned assessment. Fail-closed on bad inputs.
+
+#### `verify_assessment(assessment: RiskAssessment)`
+
+Re-derive the digest from the assessment's own fields. Rejects tampered assessments. Uses constant-time digest comparison. The recorded epoch is replayed (not re-clocked) so verification is deterministic regardless of when it runs.
+
 ### `abstain_threshold`
 
 Source: `components/northstar-agent-runtime/abstain_threshold.py`
