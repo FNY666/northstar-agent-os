@@ -166,6 +166,38 @@ PocketOS-style end-to-end probe: no-attacker self-destruction chain.
 
 All PocketOS probe names.
 
+### `temporal_decoupling_probe`
+
+Source: `components/northstar-agent-runtime/temporal_decoupling_probe.py`
+
+Temporal-decoupling probes: multi-session memory poisoning.
+
+#### `probe_names()`
+
+All temporal-decoupling probe names.
+
+### `rule_of_two_probe`
+
+Source: `components/northstar-agent-runtime/rule_of_two_probe.py`
+
+Rule-of-Two probe corpus for the governance bench.
+
+#### `count_legs(*, untrusted_input: bool=False, sensitive: bool=False, mutating: bool=False, category: str | None=None)`
+
+Count Rule-of-Two legs from deterministic metadata only.
+
+#### `rule_of_two_evaluate(engine: PermissionEngine, tool_name: str, payload: dict[str, Any] | None=None, *, untrusted_input: bool=False, sensitive: bool=False, mutating: bool=False, category: str | None=None, context: PermissionRequestContext | None=None)`
+
+Evaluate one call under the Rule of Two.
+
+#### `probe_names()`
+
+All adversarial probe names.
+
+#### `benign_names()`
+
+All benign control names.
+
 ### `adjudication`
 
 Source: `components/northstar-agent-runtime/adjudication.py`
