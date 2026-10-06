@@ -1902,6 +1902,112 @@ Re-derive the digest with a constant-time compare.
 
 #### `expected_outcomes()`
 
+### `route_stratified`
+
+Source: `components/northstar-agent-runtime/route_stratified.py`
+
+Route-stratified handoff probe reporting.
+
+#### `RouteStratifiedError`
+
+Malformed input to route-stratified reporting. Raised, never silently worked around: a report built on mangled input is worse than no report.
+
+#### `EvaluationRecord`
+
+One probe outcome from an eval run.
+
+#### `stratify_records(records: tuple[EvaluationRecord, ...] | list[EvaluationRecord], known_routes: tuple[str, ...] | None=None)`
+
+Group evaluation records by route.
+
+#### `RouteMetrics`
+
+Per-route metrics for one route of one eval run.
+
+#### `route_metrics(route: str, records: tuple[EvaluationRecord, ...])`
+
+Compute the per-route metrics table entry for one route.
+
+#### `RouteStratifiedReport`
+
+A digest-pinned per-route metrics table.
+
+- `as_dict()`
+  - JSON-serializable rendering. Contains no composite, overall, or average rate -- verified by test.
+#### `make_report(records: tuple[EvaluationRecord, ...] | list[EvaluationRecord], *, corpus_id: str, corpus_version: str, harness_version: str, evaluated_at: str, known_routes: tuple[str, ...] | None=None)`
+
+Build a digest-pinned per-route report from evaluation records.
+
+#### `verify_report(report: RouteStratifiedReport)`
+
+Re-derive a report's digest with a constant-time compare.
+
+#### `composite_resistance(report: RouteStratifiedReport)`
+
+Deliberately unusable: raises on every call.
+
+#### `resistance_range(report: RouteStratifiedReport)`
+
+The (min, max) of per-route resistance rates.
+
+#### `coverage_gaps(report: RouteStratifiedReport)`
+
+Routes with zero evaluated attack probes.
+
+#### `RouteDelta`
+
+Per-route delta between two eval runs of the same corpus.
+
+#### `compare_reports(old: RouteStratifiedReport, new: RouteStratifiedReport)`
+
+Diff two reports of the same corpus, per route.
+
+### `belief_poisoning_probes`
+
+Source: `components/northstar-agent-runtime/belief_poisoning_probes.py`
+
+Belief-poisoning probe corpus (Belief Poisoning Attack, BPA).
+
+#### `IdentityBeliefPin`
+
+A digest-pinned identity belief.
+
+#### `pin_identity(agent_id: str, counterpart_id: str, claims: Mapping[str, Any], attested_by: str, now: float)`
+
+Create a digest-pinned identity belief.
+
+#### `verify_pin(pin: IdentityBeliefPin)`
+
+Re-derive the pin digest with constant-time compare.
+
+#### `BeliefWriteRequest`
+
+A proposed identity-belief write crossing the memory boundary.
+
+#### `admit_belief_write(request: BeliefWriteRequest, source_trust: Callable[[str], str])`
+
+Classify an identity-belief write at the memory boundary.
+
+#### `probe_names()`
+
+All belief-poisoning probe names.
+
+#### `benign_names()`
+
+All benign control names.
+
+#### `probes_by_family(family: str)`
+
+Attack probes in one family.
+
+#### `probe_by_name(name: str)`
+
+Look up any probe (attack or benign) by name.
+
+#### `expected_outcomes()`
+
+Map every probe name to its expected outcome.
+
 ### `skill_containment`
 
 Source: `components/northstar-agent-runtime/skill_containment.py`
