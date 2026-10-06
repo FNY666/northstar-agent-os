@@ -796,6 +796,82 @@ What observation masking did, or exactly why it refused.
 
 Mask old tool results and delete noise, preserving exchange atomicity.
 
+### `audit_retention`
+
+Source: `components/northstar-agent-runtime/audit_retention.py`
+
+WORM retention tiers for the audit trail (``audit-retention.v1``).
+
+#### `WormViolationError`
+
+Raised when WORM semantics are violated or tampering is detected.
+
+#### `RetentionViolationError`
+
+Raised when a retention policy action is refused.
+
+#### `RetentionPolicy`
+
+Retention windows per tier, in days. All windows must be positive.
+
+#### `SealedHotBatch`
+
+An immutable snapshot of a sealed hot tier, ready for warm promotion.
+
+#### `WarmArchiveMeta`
+
+Metadata pinned at warm-archive write time.
+
+#### `DestructionReceipt`
+
+Proof that a warm archive was destroyed lawfully.
+
+#### `WormHotStore`
+
+Append-only hot tier with in-process WORM semantics.
+
+- `append(record: Mapping[str, Any])`
+  - Append one record. Returns its sequence number (0-based).
+- `records()`
+  - Deep copies: callers cannot mutate the store through reads.
+- `head()`
+  - Current head chain hash (genesis hash when empty).
+- `count` (property)
+- `needs_promotion()`
+  - True when the buffer reached capacity and must be promoted.
+- `verify()`
+  - Recompute every chain link.
+- `seal()`
+  - Freeze the store. Further appends raise ``WormViolationError``.
+#### `write_warm_archive(directory: str | Path, batch: SealedHotBatch, *, policy: RetentionPolicy | None=None, now: Callable[[], float] | None=None)`
+
+Promote a sealed hot batch to a warm archive package.
+
+#### `read_warm_manifest(directory: str | Path)`
+
+Load a warm archive's manifest. Malformed manifests fail closed.
+
+#### `verify_warm_archive(directory: str | Path)`
+
+Re-check a warm archive: feed digest, record count, chain continuity.
+
+#### `set_legal_hold(directory: str | Path, *, hold: bool)`
+
+Set or clear the legal hold on a warm archive.
+
+#### `ColdVault`
+
+Cold tier: external anchors only, never record bodies.
+
+- `anchor(meta: WarmArchiveMeta, *, policy: RetentionPolicy | None=None, now: Callable[[], float] | None=None)`
+  - Record the anchor for a warm archive. Returns the anchor record.
+- `contains(head_chain_hash: str)`
+- `get(head_chain_hash: str)`
+- `count` (property)
+#### `destroy_warm_archive(directory: str | Path, *, cold_vault: ColdVault, policy: RetentionPolicy | None=None, now: Callable[[], float] | None=None, authorized_by: str='', reason: str='', hot_store: WormHotStore | None=None)`
+
+Destroy a warm archive after its retention window expires.
+
 ### `approval_sla`
 
 Source: `components/northstar-agent-runtime/approval_sla.py`
