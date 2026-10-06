@@ -264,6 +264,34 @@ class CompositionRule:
             raise ValueError("composition rule needs at least 2 categories")
 
 
+def trace_violates_rules(
+    categories: Sequence[str],
+    rules: Sequence[CompositionRule],
+) -> CompositionRule | None:
+    """Check whether a category trace contains a forbidden sequence.
+
+    This is the shared contract artifact (ContrAgent-style "one spec, two
+    roles"):
+    - **Online**: the permission gate calls this incrementally as each
+      call arrives, with history + the current call's category.
+    - **Offline**: the governance bench calls this on complete traces to
+      score whether the trace *would have* been stopped.
+
+    Returns the first violated rule, or None if the trace is clean.
+    A rule matches when its sequence appears as a contiguous subsequence
+    ending at the last category.
+    """
+    if not categories or not rules:
+        return None
+    for rule in rules:
+        seq = rule.sequence
+        if len(categories) < len(seq):
+            continue
+        if tuple(categories[-len(seq):]) == seq:
+            return rule
+    return None
+
+
 @dataclass
 class ScopeManager:
     """Tracks permission scopes (epochs) and their lifetime.
@@ -826,32 +854,27 @@ class PermissionEngine:
         """Check whether this call completes a forbidden action sequence.
 
         Returns a denial if the recent history plus this call's category
-        matches a CompositionRule; None otherwise.
+        matches a CompositionRule; None otherwise. Uses the shared
+        trace_violates_rules() contract -- the same artifact the bench
+        uses offline.
         """
         category = self._tool_categories.get(tool_name)
         if not category:
             return None
-        # The candidate sequence: history tail + this call.
-        for rule in self._composition_rules:
-            seq = rule.sequence
-            if category != seq[-1]:
-                continue
-            # Need len(seq)-1 history entries before this call.
-            need = len(seq) - 1
-            if len(self._category_history) < need:
-                continue
-            tail = list(self._category_history)[-need:] if need else []
-            if tuple(tail) == seq[:-1]:
-                return PermissionDecision(
-                    False,
-                    source="composition",
-                    reason=(
-                        f"forbidden action sequence: {' -> '.join(seq)}"
-                        + (f" ({rule.description})" if rule.description else "")
-                    ),
-                    rule="composition:forbidden_sequence",
-                    tool=tool_name,
-                )
+        # The candidate trace: history + this call.
+        trace = [*self._category_history, category]
+        rule = trace_violates_rules(trace, self._composition_rules)
+        if rule is not None:
+            return PermissionDecision(
+                False,
+                source="composition",
+                reason=(
+                    f"forbidden action sequence: {' -> '.join(rule.sequence)}"
+                    + (f" ({rule.description})" if rule.description else "")
+                ),
+                rule="composition:forbidden_sequence",
+                tool=tool_name,
+            )
         return None
 
     def _apply_dataflow_escalation(

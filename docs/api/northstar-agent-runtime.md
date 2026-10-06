@@ -7204,6 +7204,10 @@ What the host approval callback gets to see.
 
 A forbidden action sequence (composition closure, APC-style).
 
+#### `trace_violates_rules(categories: Sequence[str], rules: Sequence[CompositionRule])`
+
+Check whether a category trace contains a forbidden sequence.
+
 #### `ScopeManager`
 
 Tracks permission scopes (epochs) and their lifetime.

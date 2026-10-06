@@ -13705,6 +13705,54 @@ def _case_unit_permission_engine_disallowed(h: BenchHarness) -> BenchExpectation
     )
 
 
+def _case_composition_shared_contract(h: BenchHarness) -> BenchExpectation:
+    """Shared contract: the bench scores a trace with the gate's own rules.
+
+    ContrAgent-style "one spec, two roles": the CompositionRule that the
+    online gate enforces is used here offline to score a complete trace.
+    If the gate and bench ever disagree, the contract -- not either
+    implementation -- is the source of truth.
+    """
+    from permissions import CompositionRule, trace_violates_rules
+
+    ws = h.workspace()
+    rules = [CompositionRule(sequence=("read_sensitive", "external_send"), description="exfiltration")]
+
+    # Offline role: score traces against the shared contract.
+    clean_trace = ["read_sensitive", "other", "external_send"]
+    bad_trace = ["other", "read_sensitive", "external_send"]
+    offline_ok = (
+        trace_violates_rules(clean_trace, rules) is None
+        and trace_violates_rules(bad_trace, rules) is not None
+    )
+
+    # Online role: the gate denies the same sequence.
+    engine = PermissionEngine(
+        PermissionConfig(mode="default", can_use_tool=lambda n, p, c: True),
+        tool_kinds={"ReadSecrets": "read", "SendEmail": "read"},
+        composition_rules=rules,
+        tool_categories={"ReadSecrets": "read_sensitive", "SendEmail": "external_send"},
+    )
+    d1 = engine.evaluate("ReadSecrets", kind="read", payload={})
+    d2 = engine.evaluate("SendEmail", kind="read", payload={})
+    online_ok = d1.allowed and not d2.allowed and d2.rule == "composition:forbidden_sequence"
+
+    # The contract agrees with itself across both roles.
+    runtime = h.runtime(workspace=ws, turns=[_text("engine-only")], config_kwargs={"max_turns": 1})
+    return BenchExpectation(
+        runtime=runtime,
+        workspace=ws,
+        expect_subtype="success",
+        notes="shared composition contract: offline trace scoring agrees with online gate",
+        engine_ok=(offline_ok and online_ok),
+        metrics={
+            "offline_clean_flagged": trace_violates_rules(clean_trace, rules) is not None,
+            "offline_bad_flagged": trace_violates_rules(bad_trace, rules) is not None,
+            "online_second_denied": not d2.allowed,
+        },
+    )
+
+
 # ---------------------------------------------------------------------------
 # Third-round scenarios (2026-10): support/voice agent governance, absorbed
 # into the permission-decision bench. Every case stays offline and
@@ -23073,6 +23121,7 @@ CASES: tuple[BenchCase, ...] = (
     BenchCase("denial.read_only_allows_read", "denial", "Read passes default mode", _case_read_only_allows_read),
     BenchCase("denial.host_callback_fail_closed", "denial", "raising host callback denies", _case_host_callback_fail_closed),
     BenchCase("denial.engine_disallowed_unit", "denial", "PermissionEngine unit: deny wins", _case_unit_permission_engine_disallowed),
+    BenchCase("denial.composition_shared_contract", "denial", "shared composition contract: bench and gate agree", _case_composition_shared_contract),
     BenchCase("denial.exemption_path_gets_decision", "denial", "exempt paths still emit a recorded decision", _case_exemption_path_gets_decision),
     BenchCase("denial.approval_renders_actual_params", "denial", "approval renders actual params, not the summary", _case_approval_renders_actual_params),
     BenchCase("denial.threshold_boundary_fnr", "denial", "threshold boundary: no false negative at the epsilon", _case_threshold_boundary_fnr),
