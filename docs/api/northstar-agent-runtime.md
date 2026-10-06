@@ -1248,6 +1248,62 @@ Registry of hierarchical per-subgoal authority ceilings.
   - Hierarchical authorization decision.
 - `needs_host_approval(subgoal_id: str, tool_name: str)`
   - True when the tool is outside the effective ceiling of an active subgoal -- i.e. it may only run after explicit host approval (gated ascent, same model as the scope ceiling in permissions.py).
+### `self_modification_probes`
+
+Source: `components/northstar-agent-runtime/self_modification_probes.py`
+
+Self-modification probe corpus.
+
+#### `probe_names()`
+
+All self-modification attack probe names.
+
+#### `benign_names()`
+
+All benign control names.
+
+#### `probes_by_family(family: str)`
+
+Probes in one family (including 'benign').
+
+#### `probe_by_name(name: str)`
+
+Look up any self-modification probe (attack or benign) by name.
+
+#### `expected_outcomes()`
+
+probe name -> expected gate outcome ('deny' or 'allow').
+
+### `ssr_reporting`
+
+Source: `components/northstar-agent-runtime/ssr_reporting.py`
+
+SSR: task-level safe success rate reporting.
+
+#### `score_tasks(trajectories: Iterable[Mapping[str, Any]], gate_fn: Callable[[Mapping[str, Any]], str] | None=None)`
+
+Score each trajectory as a task, applying the lucky-pass doctrine.
+
+#### `compute_ssr(trajectories: Iterable[Mapping[str, Any]], gate_fn: Callable[[Mapping[str, Any]], str] | None=None)`
+
+Compute the task-level safe success rate over a trajectory corpus.
+
+#### `compute_action_level_accuracy(trajectories: Iterable[Mapping[str, Any]], gate_fn: Callable[[Mapping[str, Any]], str] | None=None)`
+
+Action-level decision accuracy over the corpus's flattened steps.
+
+#### `make_ssr_pair_report(record, ssr_report: Mapping[str, Any], *, accuracy_report: Mapping[str, Any] | None=None, final_eval: bool=True, gate_version: str | None=None)`
+
+Emit a provenance-pinned SSR report for one ``(harness, corpus)`` pair.
+
+#### `verify_ssr_report(report: Mapping[str, Any], entries: Iterable[Mapping[str, Any]])`
+
+Verify an SSR report against the actual corpus content.
+
+#### `evaluate_trajectories(record, trajectories: Iterable[Mapping[str, Any]], *, gate_fn: Callable[[Mapping[str, Any]], str] | None=None, final_eval: bool=True, gate_version: str | None=None)`
+
+End-to-end: SSR + action-level accuracy + pinned pair report.
+
 ### `failure_bundle`
 
 Source: `components/northstar-agent-runtime/failure_bundle.py`
