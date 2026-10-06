@@ -2344,6 +2344,165 @@ The probe record for *name*; raises ``KeyError`` when unknown.
 
 Probe name -> expected verdict (``deny`` / ``allow``).
 
+### `deterministic_prm`
+
+Source: `components/northstar-agent-runtime/deterministic_prm.py`
+
+Deterministic PRM (process reward model) verifier.
+
+#### `Rule`
+
+One deterministic rule: data, not code. The check function is selected by ``rule_id`` from the built-in registry, so the whole ruleset is digest-pinnable and the verdict is reproducible.
+
+#### `RuleSet`
+
+A named, digest-pinned bundle of rules.
+
+- `as_dict()`
+#### `build_ruleset(name: str, rules: Sequence[Rule])`
+
+Build and digest-pin a ruleset. Fail-closed: unknown rule ids, negative weights, missing required params, or non-canonicalizable params raise ``ValueError`` -- a ruleset that cannot be pinned cannot be built.
+
+#### `verify_ruleset(ruleset: RuleSet, digest: str)`
+
+Re-derive the ruleset digest and constant-time compare. False on any tampering (rewritten weights, swapped rules, edited params).
+
+#### `RuleOutcome`
+
+One rule's verdict on one step.
+
+#### `ScoredStep`
+
+A step's deterministic verdict, digest-pinned.
+
+#### `score_step(step: NormalizedStep, ruleset: RuleSet, threshold: float)`
+
+Score one step against the ruleset, deterministically.
+
+#### `verify_scored_step(scored: ScoredStep, ruleset: RuleSet, step: NormalizedStep)`
+
+Re-derive a scored step's digest with constant-time compare.
+
+#### `determinism_check(ruleset: RuleSet, steps: Sequence[NormalizedStep], threshold: float)`
+
+Check that scoring is actually deterministic: score every step with the rules in declared order and in reversed declaration order and require bit-identical per-rule outcomes, aggregates, and verdicts. The canonical ordering inside :func:`score_step` makes this pass; the check exists so the property…
+
+#### `TrajectoryVerdict`
+
+Per-step verdicts plus trajectory-level rule verdicts, pinned.
+
+#### `evaluate_trajectory(steps: Sequence[NormalizedStep], ruleset: RuleSet, threshold: float)`
+
+Score every step, then evaluate trajectory-level rules (e.g. ``trajectory-max-steps``). The trajectory verdict is ``fail`` when any trajectory rule fails or any step fails; ``hold`` when nothing fails but at least one step is held; else ``pass``.
+
+#### `ConvergenceCurve`
+
+Aggregate after adding each rule in canonical order. A converged curve (last |delta| within tolerance) means the score has stabilized under rule growth -- it is not drifting with ruleset size.
+
+#### `convergence_curve(ruleset: RuleSet, step: NormalizedStep, threshold: float, tolerance: float=0.01)`
+
+Build the convergence curve for one step. Deterministic: rules are added in canonical order, so the curve is reproducible.
+
+#### `StepComparison`
+
+One step: deterministic verdict vs the host's neural PRM score.
+
+#### `ConvergenceReport`
+
+Neural-vs-deterministic comparison, digest-pinned.
+
+#### `compare_convergence(scored: Sequence[ScoredStep], host_scores: Mapping[int, float], host_threshold: float, ruleset: RuleSet)`
+
+Compare host-supplied neural PRM scores against deterministic verdicts. Scores outside [0, 1] fail closed (ValueError); a missing score for a step is recorded, not imputed -- the deterministic verdict still stands.
+
+#### `verify_convergence_report(report: ConvergenceReport)`
+
+Re-derive the convergence report digest with constant-time compare. False on any tampering -- including a rewritten authoritative_source or host_threshold.
+
+#### `probe_names()`
+
+All deterministic-PRM probe names.
+
+#### `benign_names()`
+
+Names of the benign control probes.
+
+#### `probes_by_family()`
+
+Probe names grouped by family.
+
+#### `probe_by_name(name: str)`
+
+The probe record for *name*; raises ``KeyError`` when unknown.
+
+#### `expected_outcomes()`
+
+Probe name -> expected outcome.
+
+### `harness_schema_fields`
+
+Source: `components/northstar-agent-runtime/harness_schema_fields.py`
+
+Mandatory harness schema fields: a number without a harness is not a number.
+
+#### `HarnessFieldsError`
+
+A harness-schema-field check failed. Raised, never silent.
+
+#### `HarnessDescriptor`
+
+The pinned identity of the harness that produced an eval number.
+
+- `as_dict()`
+  - The eight mandatory fields as a plain dict, in schema order.
+#### `build_harness(*, harness_id: str, harness_version: str, judge_id: str, judge_version: str, temperature: Any, retry_budget: Any, model_id: str, model_version: str)`
+
+Build and validate a harness descriptor. Fail-closed on any bad field.
+
+#### `descriptor_digest(descriptor: HarnessDescriptor)`
+
+Pin a descriptor: ``sha256:`` over JCS of its field dict.
+
+#### `verify_descriptor_digest(descriptor: HarnessDescriptor, digest: str)`
+
+True only if *digest* is the honest pin of *descriptor*.
+
+#### `require_harness_fields(report: Mapping[str, Any])`
+
+Schema-validate a report mapping's mandatory harness fields.
+
+#### `bind_harness(report: Mapping[str, Any], descriptor: HarnessDescriptor)`
+
+Attach a validated harness block plus its digest pin to a report.
+
+#### `verify_bound_harness(report: Mapping[str, Any])`
+
+Verify a ``bind_harness()`` report: schema pin + digest + fields.
+
+#### `compare_harness(first: HarnessDescriptor, second: HarnessDescriptor)`
+
+Diff two harness descriptors field-by-field.
+
+#### `probe_names()`
+
+All harness-schema-fields probe names.
+
+#### `benign_names()`
+
+Names of the benign control probes.
+
+#### `probes_by_family()`
+
+Probe names grouped by family.
+
+#### `probe_by_name(name: str)`
+
+The probe record for *name*; raises ``KeyError`` when unknown.
+
+#### `expected_outcomes()`
+
+Probe name -> expected verdict (``deny`` / ``allow``).
+
 ### `a2a_handoff_probes`
 
 Source: `components/northstar-agent-runtime/a2a_handoff_probes.py`
