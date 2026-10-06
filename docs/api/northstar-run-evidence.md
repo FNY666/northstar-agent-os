@@ -142,6 +142,49 @@ Persist one run's ledger at the configured path.
   - Sign a manifest bound to one verified snapshot of this chain.
 - `verify_seal(manifest: Mapping[str, Any], key_resolver: Mapping[str, SealVerifier])`
   - Verify signature and bind it to one intact snapshot of this store.
+### `sealed_receipt`
+
+Source: `components/northstar-run-evidence/sealed_receipt.py`
+
+Signed, policy-aware receipt for a completed run evidence snapshot.
+
+#### `CompletionEvidence`
+
+Explicit terminal outcome claim anchored to one ledger entry.
+
+- `to_dict()`
+- `from_dict(value: Any)`
+#### `SourceRoot`
+
+Per-source tail and count derived from the signed ledger snapshot.
+
+- `to_dict()`
+- `from_dict(value: Any)`
+#### `SealedRunReceipt`
+
+Immutable signed summary of one complete, validated evidence snapshot.
+
+- `missing_sources` (property)
+- `body_dict()`
+  - Canonical signed fields; the signature never signs itself.
+- `to_dict()`
+- `canonical_json()`
+  - Serialize the complete signed receipt as canonical UTF-8 JSON.
+- `from_dict(value: Any)`
+#### `RunReceiptVerification`
+
+Layered verification result; only ``run_verdict=verified`` is success.
+
+- `ok` (property)
+- `to_dict()`
+#### `seal_run_receipt(store: EvidenceStore, *, completion: CompletionEvidence, required_sources: Iterable[str], signer: SealSigner, capture_policy_revision: str | None=None, capture_policy_digest: str | None=None, sealed_at: int | None=None)`
+
+Sign a complete receipt bound to one validated ledger snapshot.
+
+#### `verify_run_receipt(receipt: SealedRunReceipt | Mapping[str, Any], key_resolver: Mapping[str, SealVerifier], *, store: EvidenceStore | None=None, expected_run_id: str | None=None)`
+
+Verify receipt shape/signature and optionally bind it to a ledger.
+
 ### `audit_adapter`
 
 Source: `components/northstar-run-evidence/audit_adapter.py`
