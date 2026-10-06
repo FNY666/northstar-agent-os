@@ -6551,6 +6551,8 @@ One MCP server over stdio: modern (per-request metadata) or legacy (handshake).
   - Invoke one remote tool, resolving MRTR input requests through the gate.
 - `close()`
   - TERM the process group, then KILL after a grace period. Idempotent.
+- `subscribe_list_changed()`
+  - Opt in to ``notifications/tools/list_changed`` (spec: explicit opt-in required).
 #### `mcp_tool_specs(client: McpStdioClient)`
 
 Build governed ``ToolSpec``s (mutating by default) for one connected server.

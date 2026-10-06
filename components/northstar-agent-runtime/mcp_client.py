@@ -307,6 +307,10 @@ class McpStdioClient:
         # next call_tool() drains it via refresh_tools() so a live rug-pull
         # is caught even between manual refreshes.
         self._pending_list_changed: bool = False
+        # MCP 2026-07-28: explicit opt-in required for notification types.
+        # Notifications arriving before opt-in are spec violations (untrusted).
+        self._list_changed_subscribed: bool = False
+        self._untrusted_notifications: list[str] = []
         self._info = {"name": "northstar-agent-runtime", "version": __version__}
 
     # -- lifecycle -----------------------------------------------------------
@@ -1019,6 +1023,11 @@ class McpStdioClient:
         server can't stall a tool call. This closes the rug-pull window
         where a notification arrives between exchanges and would otherwise
         only be noticed after the next tool call goes out.
+
+        Spec grounding (MCP 2026-07-28): a server MUST NOT send notification
+        types the client didn't explicitly request via ``subscriptions/listen``.
+        A ``tools/list_changed`` arriving without opt-in is a spec violation --
+        treated as untrusted, not as a legitimate change signal.
         """
         for _ in range(max_lines):
             line = self._read_line(time.monotonic())  # zero timeout: don't block
@@ -1029,7 +1038,22 @@ class McpStdioClient:
             except json.JSONDecodeError:
                 continue
             if isinstance(message, dict) and message.get("method") == "notifications/tools/list_changed":
+                if not self._list_changed_subscribed:
+                    # Spec violation: server sent a notification type we never
+                    # opted into. Don't trust it; record for audit.
+                    self._untrusted_notifications.append(line)
+                    continue
                 self._pending_list_changed = True
+
+    def subscribe_list_changed(self) -> None:
+        """Opt in to ``notifications/tools/list_changed`` (spec: explicit opt-in required).
+
+        Per MCP 2026-07-28, the server MUST NOT send this notification type
+        unless the client requested it via ``subscriptions/listen``. Calling
+        this records the opt-in; notifications arriving before it are treated
+        as spec violations.
+        """
+        self._list_changed_subscribed = True
 
     def _read_line(self, deadline: float) -> str | None:
         """Read one line with a deadline and a byte cap; ``None`` on timeout/EOF."""

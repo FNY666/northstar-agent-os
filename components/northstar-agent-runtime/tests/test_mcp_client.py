@@ -575,6 +575,7 @@ class DrainNotificationsTests(unittest.TestCase):
         from mcp_client import McpStdioClient
 
         client = McpStdioClient("demo", ["true"], timeout_ms=1000, env={})
+        client.subscribe_list_changed()  # opt in per MCP 2026-07-28
         # Don't connect; stub _read_line to simulate a buffered notification.
         lines = [
             '{"jsonrpc": "2.0", "method": "notifications/tools/list_changed"}',
@@ -584,6 +585,22 @@ class DrainNotificationsTests(unittest.TestCase):
         self.assertFalse(client._pending_list_changed)
         client._drain_notifications()
         self.assertTrue(client._pending_list_changed)
+
+    def test_drain_rejects_unsubscribed_notification(self):
+        # MCP 2026-07-28: server MUST NOT send notification types the client
+        # didn't request. Without opt-in, list_changed is a spec violation.
+        from mcp_client import McpStdioClient
+
+        client = McpStdioClient("demo", ["true"], timeout_ms=1000, env={})
+        # No subscribe_list_changed() call.
+        lines = [
+            '{"jsonrpc": "2.0", "method": "notifications/tools/list_changed"}',
+            None,
+        ]
+        client._read_line = lambda deadline: lines.pop(0)  # type: ignore[method-assign]
+        client._drain_notifications()
+        self.assertFalse(client._pending_list_changed)
+        self.assertEqual(len(client._untrusted_notifications), 1)
 
     def test_drain_ignores_other_messages(self):
         from mcp_client import McpStdioClient
