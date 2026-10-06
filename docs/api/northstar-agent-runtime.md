@@ -541,6 +541,63 @@ Convenience: build a pin from the current on-disk content (the review moment).
 
 Build a pin from ``NORTHSTAR_TEMPLATE_PIN_<NAME>`` in the environment.
 
+### `memory_admission`
+
+Source: `components/northstar-agent-runtime/memory_admission.py`
+
+Memory-write admission policy for untrusted sources (GhostWriter defense).
+
+#### `classify_source(source: str)`
+
+Classify a write source as ``"trusted"`` or ``"untrusted"``.
+
+#### `sanitize_text(text: str)`
+
+Conservative hygiene pass. Returns ``(cleaned, report)``.
+
+#### `AdmissionRequest`
+
+One proposed memory write.
+
+#### `AdmissionDecision`
+
+The admission gate's verdict on one write.
+
+- `admitted` (property)
+#### `AdmissionGate`
+
+Source-admission policy for memory writes. Fail-closed.
+
+- `review(request: AdmissionRequest)`
+  - Review one write. Untrusted sources are never auto-admitted.
+- `approve(request: AdmissionRequest, *, approved_by: str)`
+  - Explicit host approval for an untrusted write.
+- `admit_sanitized(request: AdmissionRequest)`
+  - Sanitized admission for an untrusted write.
+#### `MemoryEntry`
+
+One ledger entry: text + provenance + chain links.
+
+- `to_dict()`
+- `from_dict(obj: dict[str, Any])`
+#### `MemoryLedger`
+
+Append-only, hash-chained memory ledger. Fail-closed on tamper.
+
+- `head_hash` (property)
+- `append_text(text: str, provenance: dict[str, Any])`
+  - Append ``text`` with its admission ``provenance`` to the chain.
+- `append_decision(decision: AdmissionDecision, text: str)`
+  - Append an admitted decision's text to the chain.
+- `verify()`
+  - Verify the chain. Returns ``(True, None)`` or ``(False, first_bad_index)``. Fail-closed: any break -> distrust.
+- `to_dict()`
+- `from_dict(obj: dict[str, Any])`
+- `entries()`
+#### `run_ghostwriter_probes(gate: AdmissionGate | None=None)`
+
+Run the GhostWriter phase-1 corpus against the admission gate.
+
 ### `adjudication`
 
 Source: `components/northstar-agent-runtime/adjudication.py`
@@ -4787,7 +4844,7 @@ Root authority: mints agent identities and records delegations.
 
 Check an identity document: DID/key binding and revocation.
 
-#### `verify_delegation_chain(chain: Sequence[DelegationRecord], root_did: str, root_permissions: Iterable[str], *, max_depth: int=DEFAULT_MAX_DEPTH, time_iso: str='')`
+#### `verify_delegation_chain(chain: Sequence[DelegationRecord], root_did: str, root_permissions: Iterable[str], *, max_depth: int=DEFAULT_MAX_DEPTH, time_iso: str='', revoked_dids: Iterable[str]=())`
 
 Verify a whole delegation chain against the root.
 
@@ -7864,6 +7921,8 @@ Evaluates one tool call against the pre-trade checks then the three layers.
 - `register_kind(tool_name: str, kind: str)`
 - `evaluate(tool_name: str, *, kind: str | None=None, mutating: bool | None=None, payload: dict[str, Any] | None=None, context: PermissionRequestContext | None=None, known: bool=True, dataflow: SessionDataflow | None=None)`
   - Run the three layers for one call, plus the dataflow dimension.
+- `close_scope(scope_id: str)`
+  - Close a scope and drop its composition history partition.
 - `evaluate_spec(spec: Any, payload: dict[str, Any] | None=None, *, context: PermissionRequestContext | None=None, known: bool=True)`
 - `check_delegation(agent: str, tool_names: Sequence[str], *, kinds: dict[str, str] | None=None, context: PermissionRequestContext | None=None, disallowed_extra: Iterable[str]=(), require_stable_identity: bool=False)`
   - Gate a subagent by *each tool it declared*, not by the name ``Task``.
