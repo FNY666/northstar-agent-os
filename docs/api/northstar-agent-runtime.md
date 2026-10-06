@@ -1071,6 +1071,97 @@ MCP09 probe corpus: shadow MCP servers.
 
 All MCP09 probe names.
 
+### `grader_aware_probes`
+
+Source: `components/northstar-agent-runtime/grader_aware_probes.py`
+
+Grader-aware attack probe corpus.
+
+#### `GraderContext`
+
+One side of a paired-context comparison.
+
+#### `BehavioralDifferential`
+
+Result of comparing one gate outcome across paired contexts.
+
+#### `compare_outcomes(visible_outcome: str, hidden_outcome: str)`
+
+Compare one gate outcome across grader-visible and grader-hidden runs.
+
+#### `probe_names()`
+
+All grader-aware probe names.
+
+#### `benign_names()`
+
+All benign control names.
+
+#### `probes_by_family(family: str)`
+
+Attack/detect probes in one family.
+
+#### `probe_by_name(name: str)`
+
+Look up any probe (attack/detect or benign) by name.
+
+#### `expected_outcomes()`
+
+Map every probe name to its expected outcome.
+
+### `abstain_threshold`
+
+Source: `components/northstar-agent-runtime/abstain_threshold.py`
+
+Explicit abstain threshold for the decision-model path.
+
+#### `AbstainRoutingError`
+
+Raised when an abstain cannot be safely routed to a human.
+
+#### `AbstainPolicy`
+
+Thresholds with an explicit "not sure" band.
+
+- `from_policy(policy: DecisionPolicy, abstain_threshold: float=0.7)`
+  - Reuse an existing decision policy's thresholds, adding the band.
+- `as_dict()`
+#### `AbstainDecision`
+
+One abstain-aware verdict from the decision-model path.
+
+- `abstained` (property)
+  - Whether the model declined to judge ("not sure" as a real output).
+- `as_dict()`
+#### `AbstainRoutingReceipt`
+
+Proof that an abstain was handed to a human, bound to the exact call.
+
+- `as_dict()`
+#### `classify(result: DecisionModelResult, policy: AbstainPolicy)`
+
+Turn options + probabilities into allow / deny / abstain.
+
+#### `safe_classify(model: DecisionModel, state: dict[str, Any], questions: dict[str, DecisionQuestion], policy: AbstainPolicy)`
+
+Classify, treating any model failure as abstain.
+
+#### `route_to_human(decision: AbstainDecision, *, call_id: str, arguments_digest: str, enqueue: Callable[[dict[str, Any]], str], tool: str='', now: Callable[[], float] | None=None)`
+
+Route an abstain to a human and return the routing receipt.
+
+#### `gate_verdict(decision: AbstainDecision)`
+
+The single choke point: map an abstain-aware decision to a gate verdict.
+
+#### `build_abstain_audit(*, state: dict[str, Any], questions: dict[str, DecisionQuestion], result: DecisionModelResult, decision: AbstainDecision, receipt: AbstainRoutingReceipt | None=None)`
+
+Full input -> output -> abstain-decision -> routing chain for the audit feed.
+
+#### `abstain_case_names()`
+
+All ABSTAIN_CASES scenario names.
+
 ### `mcp03_probes`
 
 Source: `components/northstar-agent-runtime/mcp03_probes.py`
