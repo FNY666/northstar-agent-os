@@ -106,6 +106,14 @@ manifest 至少包含：
 
 签名对 `manifest_without_signature` 的 canonical bytes 计算。**不允许把签名 secret 写进 bundle。** `key_id` 必须由外部可信 key resolver 解释；未知 key、无签名、过期/撤销 key 的状态都不能等同于已认证。
 
+#### SealedRunReceipt v1 实现边界
+
+- 为保持兼容，现有 `northstar.evidence-manifest.v1` 格式不变。`SealedRunReceipt` 使用独立严格 schema `northstar.sealed-run-receipt.v1`，以专属域分离前缀和 canonical bytes 计算签名。
+- Receipt 将终态完成声明绑定到已验证 ledger 快照中实际存在的一条 entry digest；记录完成/验证器/测试状态、显式 capture-policy revision/digest、ledger 首尾摘要及数量、各来源尾摘要，以及 required/observed source 集合。
+- 空账本或无效链、未锚定到 ledger 的完成声明、缺失必需来源均拒绝签封。未提供对应 ledger 时，完整性和总体 run verdict 均为 `unknown`；未知签名 key 不视为已认证。
+- `run_verdict=verified` 必须同时满足链完整性匹配、必需来源齐全、签名受信、终态为 `finished`、独立 verifier 通过，且测试退出码（如有）为 0。Receipt 是对这些声明的签名背书，不证明不可信 signer/verifier 本身诚实。
+- 复用 host 注入的 `SealSigner` / `SealVerifier` 协议。证据组件不生成或持久化生产密钥；密钥生命周期、过期/撤销和可信时间戳由 host/deployment 信任基础设施负责。HMAC 仅用于测试，不具备不可抵赖性。
+
 ### 5.3 分层 verdict
 
 Verifier 返回结构化报告，而不是一个易混淆的布尔值：

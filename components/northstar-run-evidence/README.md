@@ -1,23 +1,76 @@
 # northstar-run-evidence
 
-Dependency-free core data structures and in-memory hash-chain primitives for Northstar run evidence. Python 3.10+.
+Dependency-free core data structures and hash-chain primitives for Northstar run evidence. Python 3.10+.
 
 ## Current scope
 
-This initial component contains:
+This component contains:
 
 - strict, versioned `EvidenceRef` and `EvidenceEntry` data structures;
 - deterministic canonical JSON (ASCII object keys, safe-range integers, no floating-point values) and domain-separated SHA-256 subject/entry digests;
 - an append-only in-memory `EvidenceChain` with sequence, run identity, previous-digest and idempotency checks;
 - `verify_chain()` for structured offline integrity results;
 - `evidence_store.EvidenceStore`: a file-backed JSONL ledger (canonical entries, bounded strict parsing, POSIX `flock`, directory-fd pinning, fsynced same-directory copy-on-write replacement, and full chain verification on open; tampering fails closed);
-- sealed manifests: `EvidenceStore.seal(signer)` attests to the chain head with a host-injected `SealSigner`; `verify_manifest()` / `verify_seal()` check the seal, with unknown `key_id` reported as *unknown authenticity*, never as ok.
-- `audit_adapter`: seals the runtime's canonical audit NDJSON feed (`audit.ndjson/1`) into an evidence store — one entry per audit record, strict RFC 3339 timestamps, idempotent re-seals — without the runtime depending on this component.
+- legacy sealed manifests: `EvidenceStore.seal(signer)` attests to the chain head; `verify_manifest()` / `verify_seal()` remain schema v1 and backward-compatible;
+- `sealed_receipt`: a separate domain-separated `SealedRunReceipt` v1 binding explicit terminal completion claims, capture-policy identity, required/observed evidence sources, and per-source ledger tails to one validated chain snapshot;
+- `verify_run_receipt()` with layered integrity, completeness, authenticity, and run verdicts. Verifying without the corresponding ledger deliberately leaves integrity and the overall run verdict unknown;
+- `audit_adapter`: seals the runtime's canonical audit NDJSON feed (`audit.ndjson/1`) into an evidence store — one entry per audit record, strict RFC 3339 timestamps, idempotent re-seals — without the runtime depending on this component;
 - `evidence_cli`: operator commands `seal` / `verify` over a store file and an HMAC key file (local test-grade sealing; not non-repudiation).
 
-Production key management and direct runtime/host adapters are not implemented yet. The optional `DurableRunner` sink lives in `northstar-durable-run` and mirrors durable events plus content-addressed payload/subject references. The bundled `HmacTestSigner` is test-only: a shared-secret MAC is not non-repudiation, and test keys must never seal real evidence.
+## Sealed run receipt
 
-A valid hash chain only detects inconsistencies relative to its entries. It does **not** prove who created the chain or prevent an attacker from replacing the entire chain. Authenticity requires a trusted external signature over a sealed manifest/head digest.
+A receipt is sealed only when:
+
+1. the evidence ledger loads and verifies as a non-empty chain;
+2. the completion claim points to an entry in that exact snapshot;
+3. all caller-declared required sources are present; and
+4. the host-injected signer successfully signs the canonical receipt body.
+
+The receipt records a terminal status (`finished`, `failed`, or `cancelled`), completion time, independent verifier verdict, optional observed test exit code, capture-policy revision/digest, ledger entry count and roots, and signer key ID/algorithm. The receipt signature uses a dedicated `northstar.sealed-run-receipt.v1` domain separator; the existing manifest v1 format is not changed.
+
+The signed global `head_digest` commits to the ordered chain: every entry digest covers its canonical entry body, including the previous-entry digest, and verification recomputes each entry and link. No separate Merkle root is used. Receipt decoding is bounded to 256 source labels, 16 KiB raw signatures, and 256 KiB canonical JSON; signer key IDs and algorithm labels are ASCII-only.
+
+Verification distinguishes:
+
+- **integrity** — whether the supplied ledger matches the receipt's signed snapshot;
+- **completeness** — whether all required sources are represented;
+- **authenticity** — whether a trusted key resolver verifies the signature; and
+- **run verdict** — verified only when those checks pass, the run finished, and the independent verifier passed.
+
+A valid signature over a receipt does not prove that its signer or the reported verifier was honest. The signer is an attester; production key rotation, expiry/revocation policy, and key storage belong to the host/deployment trust infrastructure. No production signer or key management is included here. The bundled `HmacTestSigner` is test-only: a shared-secret MAC is not non-repudiation, and test keys must never seal real evidence. There is no trusted timestamp: `sealed_at` is signed caller-supplied time.
+
+Example (the host supplies `host_signer` and `trusted_keys`):
+
+```python
+from sealed_receipt import CompletionEvidence, seal_run_receipt, verify_run_receipt
+
+terminal = store.append(
+    source="verifier",
+    kind="run.verified",
+    occurred_at=1_800_000_020,
+    subject={"verdict": "passed"},
+    source_id="verification-1",
+)
+completion = CompletionEvidence(
+    status="finished",
+    completed_at=1_800_000_030,
+    evidence_entry_digest=terminal.entry_digest,
+    verifier_verdict="passed",
+    test_exit_code=0,
+)
+receipt = seal_run_receipt(
+    store,
+    completion=completion,
+    required_sources=("verifier",),
+    signer=host_signer,
+    capture_policy_revision="policy-v1",
+    capture_policy_digest="sha256:" + "a" * 64,
+)
+report = verify_run_receipt(receipt, trusted_keys, store=store)
+assert report.run_verdict == "verified"
+```
+
+A receipt alone, with no ledger supplied to verification, can have verified authenticity but has `integrity="unknown"` and `run_verdict="unknown"`. Unknown keys are never treated as trusted. An incomplete capture cannot be sealed as complete.
 
 ## Concepts, guides and API reference
 

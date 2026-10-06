@@ -22,4 +22,11 @@ classifiers = [
 dependencies = []
 
 [tool.setuptools]
-py-modules = ["evidence_contract", "evidence_chain", "evidence_store", "audit_adapter", "evidence_cli"]
+py-modules = [
+    "evidence_contract",
+    "evidence_chain",
+    "evidence_store",
+    "sealed_receipt",
+    "audit_adapter",
+    "evidence_cli",
+]
