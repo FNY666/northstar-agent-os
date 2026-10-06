@@ -358,6 +358,89 @@ Host approval callback with metadata-pinned approvals.
 - `approve(tool: str)`
   - Explicitly approve the tool's CURRENT definition. Returns the digest.
 - `pinned(tool: str)`
+### `circuit_breaker`
+
+Source: `components/northstar-agent-runtime/circuit_breaker.py`
+
+Capability-scoped circuit breaker with QUARANTINED state.
+
+#### `CapabilityState`
+
+Per-capability circuit state.
+
+#### `CircuitBreaker`
+
+Per-capability circuit breaker with governed resumption.
+
+- `check(capability: str)`
+  - Pre-dispatch check: may this capability be used right now?
+- `state_of(capability: str)`
+- `record_violation(capability: str, reason: str)`
+  - Record one violation; trip the breaker on a streak.
+- `record_success(capability: str)`
+  - A clean call resets the violation streak.
+- `violation_log(capability: str)`
+- `resume(capability: str, approved_by: str)`
+  - Close the circuit -- governed resumption only.
+#### `TokenBucketRateLimiter`
+
+Per-capability token-bucket rate limiter.
+
+- `allow(capability: str)`
+  - Consume one token if available.
+### `process_validity`
+
+Source: `components/northstar-agent-runtime/process_validity.py`
+
+Process validity + halt attribution for the governance bench.
+
+#### `attribute_layer(source: str)`
+
+Classify a decision source to its gate layer.
+
+#### `is_gate_source(source: str)`
+
+True only when the source is a genuine permission-gate decision.
+
+#### `TracedDecision`
+
+One engine evaluation captured for process-validity checking.
+
+#### `evaluate_traced(trace: list[TracedDecision], engine: Any, tool_name: str, **kwargs: Any)`
+
+Evaluate one call through ``engine`` and append the decision to ``trace``.
+
+#### `ProcessValidityVerdict`
+
+The verdict of a process-validity check.
+
+- `as_dict()`
+#### `check_decision_integrity(trace: Sequence[TracedDecision])`
+
+Structural checks on the traced decisions themselves.
+
+#### `verify_process(trace: Sequence[TracedDecision], *, expect_denials: bool, expect_layers: Sequence[str]=(), engine_mode: str='')`
+
+Verify the process behind a claimed defense.
+
+#### `RunClassification`
+
+What stopped a run, separated into gate vs non-gate causes.
+
+- `defended_by_gate` (property)
+  - True only when a genuine gate denial stopped (part of) the run.
+#### `classify_run(report: Any)`
+
+Split a run's denials into gate denials and non-gate stops.
+
+#### `detect_invalid_process(report: Any, *, expect_defense: bool, expect_layers: Sequence[str]=())`
+
+Detect invalid scoring processes at the run-report level.
+
+#### `verify_halt_attribution(report: Any, *, expect_halt: bool)`
+
+Verify a halt/deny was caused by the gate, not by a crash.
+
 ### `adjudication`
 
 Source: `components/northstar-agent-runtime/adjudication.py`
