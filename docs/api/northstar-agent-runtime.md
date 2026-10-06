@@ -2220,6 +2220,129 @@ Machine-readable Art. 28 mandatory-field checklist.
 
 Descriptor for pinning the report as evidence elsewhere.
 
+### `workspace_admission`
+
+Source: `components/northstar-agent-runtime/workspace_admission.py`
+
+Per-write admission for the multi-agent shared workspace + message-bus provenance.
+
+#### `WorkspaceAdmissionError`
+
+A workspace-admission record or verification step failed. Raised, never silent.
+
+#### `canonical_path(raw: str)`
+
+Canonicalize a workspace-relative path. Raises WorkspaceAdmissionError.
+
+#### `ClaimZone`
+
+A namespace prefix owned by one agent.
+
+- `contains(path: str)`
+#### `WorkspacePolicy`
+
+Host-configured policy for one workspace.
+
+- `zone_for(path: str)`
+- `ops_for(agent_id: str)`
+#### `WriteIntent`
+
+One agent's intent to write, before admission.
+
+- `as_dict()`
+#### `AdmissionRecord`
+
+The digest-pinned admission decision for one WriteIntent.
+
+- `as_dict()`
+#### `admit_write(intent: WriteIntent, policy: WorkspacePolicy, *, current_base_digests: dict[str, str] | None=None, write_counter: _WriteCounter | None=None, decided_at: str='')`
+
+Admit one write intent. Returns a digest-pinned AdmissionRecord.
+
+#### `record_admission(record: AdmissionRecord, *, previous_digest: str | None=None)`
+
+Chain-link an admission record into a log. Returns the linked record.
+
+#### `verify_record(record: AdmissionRecord)`
+
+Re-derive the record digest. Constant-time compare. Never raises.
+
+#### `BusEnvelope`
+
+Provenance envelope for one message on the shared message bus.
+
+#### `admit_bus_message(envelope: BusEnvelope, *, known_senders: set[str] | frozenset[str], admitted_channels: tuple[str, ...]=('claims', 'bus', 'coordination'), delivered_digests: set[str] | frozenset[str] | None=None, signature_present: bool=False)`
+
+Admit one bus message. Returns (verdict, reason).
+
+#### `probe_names()`
+
+#### `benign_names()`
+
+#### `probes_by_family(family: str)`
+
+#### `probe_by_name(name: str)`
+
+#### `expected_outcomes()`
+
+### `a2a_handoff_probes`
+
+Source: `components/northstar-agent-runtime/a2a_handoff_probes.py`
+
+A2A handoff probe corpus (agent-to-agent handoff attacks).
+
+#### `AgentCardBinding`
+
+A digest-pinned binding between a fetched Agent Card and its use.
+
+#### `bind_card(card_url: str, agent_id: str, capabilities: tuple[str, ...], card_bytes: bytes, pinned_directory: str)`
+
+Bind a fetched Agent Card to its directory URL and digest pin.
+
+#### `verify_card_binding(binding: AgentCardBinding, card_bytes: bytes)`
+
+Re-derive a card binding's digest at use time (constant-time).
+
+#### `InputLoopMonitor`
+
+Classifier over a Task's working/input-required trajectory.
+
+- `classify(transitions: tuple[str, ...])`
+  - Classify a Task state-transition trajectory.
+- `should_dispatch(transitions: tuple[str, ...])`
+  - Whether the next human prompt may be dispatched.
+#### `ArtifactReceipt`
+
+A task-bound, digest-pinned receipt for an A2A artifact.
+
+#### `issue_artifact_receipt(task_id: str, artifact_id: str, declared_capability: str, part_digests: tuple[str, ...])`
+
+Issue a receipt for an artifact at task completion (fail-closed).
+
+#### `verify_artifact(receipt: ArtifactReceipt, task_id: str, part_digests: tuple[str, ...], declared_capability: str)`
+
+Re-verify an artifact at consumption time (constant-time).
+
+#### `probe_names()`
+
+All A2A handoff probe names.
+
+#### `benign_names()`
+
+All benign control names.
+
+#### `probes_by_family(family: str)`
+
+Attack probes in one family.
+
+#### `probe_by_name(name: str)`
+
+Look up any probe (attack or benign) by name.
+
+#### `expected_outcomes()`
+
+Map every probe name to its expected outcome.
+
 ### `mcp_span_coverage`
 
 Source: `components/northstar-agent-runtime/mcp_span_coverage.py`
