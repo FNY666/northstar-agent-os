@@ -1776,6 +1776,61 @@ Sweep a batch of assurance cases against the retirement registry.
 
 Human-readable description for a retirement reason.
 
+### `proxy_delegation`
+
+Source: `components/northstar-agent-runtime/proxy_delegation.py`
+
+Per-teammate proxy agent delegation (TeamFusion-style proxy agents).
+
+#### `ProxyDelegationError`
+
+Caller-side misuse (bad ids, widening ceiling, teammate jump, ...)
+
+#### `ProxyMandate`
+
+Attested receipt binding one proxy to one teammate.
+
+- `as_dict()`
+#### `issue_mandate(mandate_id: object, teammate_id: object, proxy_id: object, sponsor: object, ceiling: object, issued_at: object, expires_at: object)`
+
+Create and digest-pin a proxy mandate (host authenticated the sponsor).
+
+#### `verify_mandate(mandate: Mapping[str, Any] | ProxyMandate, now: object)`
+
+Re-verify a mandate's digest and expiry; fail closed on any mismatch.
+
+#### `ProxyRegistry`
+
+Registry of live per-teammate proxy mandates with sub-proxy chains.
+
+- `register(mandate: Mapping[str, Any] | ProxyMandate, now: object)`
+  - Verify and register a mandate; enforces per-teammate binding rules.
+- `spawn_subproxy(parent_proxy_id: object, mandate_id: object, proxy_id: object, ceiling: object, issued_at: object, expires_at: object, now: object)`
+  - Spawn a sub-proxy under a live parent proxy.
+- `effective_ceiling(proxy_id: object)`
+  - Intersection of ceilings over the parent chain (never widens).
+- `teammate_of(proxy_id: object)`
+  - Which teammate this proxy speaks for.
+- `is_authorized(proxy_id: object, tool: object)`
+  - Gate-side check: is ``tool`` inside the proxy's effective ceiling?
+- `close_proxy(proxy_id: object)`
+  - Close a proxy; cascade-closes every open sub-proxy. Returns ids.
+- `open_proxies()`
+  - Proxy ids with live mandates, sorted.
+#### `probe_names()`
+
+Names of the attack probes.
+
+#### `benign_names()`
+
+Names of the benign controls.
+
+#### `probes_by_family(family: object)`
+
+#### `probe_by_name(name: object)`
+
+#### `expected_outcomes()`
+
 ### `reasoning_budget`
 
 Source: `components/northstar-agent-runtime/reasoning_budget.py`
