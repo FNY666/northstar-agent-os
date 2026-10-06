@@ -1172,6 +1172,95 @@ All identity-disclosure probe names.
 
 #### `expected_outcomes()`
 
+### `failure_to_probe`
+
+Source: `components/northstar-agent-runtime/failure_to_probe.py`
+
+Failure-to-eval flywheel: production failures become probe candidates.
+
+#### `ProductionFailure`
+
+A frozen, minimal production-failure evidence record.
+
+#### `capture_failure(failure_id: str, failure_class: str, steps: list[Mapping[str, Any]] | tuple[Mapping[str, Any], ...], final_outcome: str, reporter: str, notes: str='', now: Callable[[], float] | None=None)`
+
+Capture a production failure as immutable evidence.
+
+#### `draft_trajectory(failure: ProductionFailure, labels: list[str] | None=None, name: str | None=None)`
+
+Draft a corpus candidate from a captured failure.
+
+#### `Flywheel`
+
+The failure-to-eval flywheel.
+
+- `ingest(draft: Mapping[str, Any])`
+  - Verify-gate a draft. Admitted drafts wait for human promotion.
+- `pending()`
+  - Drafts verified but not yet human-promoted.
+- `rejected()`
+  - Drafts the verifier rejected, with explained violations.
+- `promote(trajectory_name: str, approved_by: str)`
+  - Promote a verified draft to the pending corpus.
+- `registry_digest()`
+  - Digest pin over the pending registry (order-preserving).
+#### `flywheel()`
+
+Create a new flywheel instance.
+
+### `failure_bundle`
+
+Source: `components/northstar-agent-runtime/failure_bundle.py`
+
+Structured failure bundles: trajectory + attribution + recovery in one artifact.
+
+#### `BundleError`
+
+Raised when a bundle is malformed or fails verification.
+
+#### `TrajectoryStep`
+
+One step of the failed trajectory.
+
+- `as_dict()`
+#### `Attribution`
+
+Layer attribution for the failure, in process_validity vocabulary.
+
+- `as_dict()`
+#### `Recovery`
+
+The chosen recovery-ladder step plus the evidence behind it.
+
+- `as_dict()`
+#### `RerunDirective`
+
+A typed, executable rerun directive for a rerun agent or CI.
+
+- `as_dict()`
+#### `bundle_digest(bundle: 'FailureBundle')`
+
+``sha256:`` digest over the canonical JSON of the full bundle payload.
+
+#### `FailureBundle`
+
+One auditable failure artifact: trajectory + attribution + recovery + rerun directive, digest-pinned.
+
+- `seal()`
+  - Return a copy with the digest pinned. Bundles are quoted by digest in the audit trail, so a bundle is only complete once sealed.
+- `as_dict()`
+#### `make_bundle(bundle_id: str, task_id: str, trace_id: str, trajectory: Sequence[TrajectoryStep], attribution: Attribution, recovery: Recovery, rerun: RerunDirective, seal: bool=True)`
+
+Build (and by default seal) a failure bundle. Fail-closed on any malformed leg.
+
+#### `verify_bundle(bundle: FailureBundle)`
+
+Re-derive the digest with a constant-time compare, and re-check the structural invariants (evidence counts, trajectory ordering, layer vocabulary). ``False`` means the bundle must not be quoted or replayed.
+
+#### `probe_names()`
+
+All failure-bundle probe names.
+
 ### `risk_tiering`
 
 Source: `components/northstar-agent-runtime/risk_tiering.py`
