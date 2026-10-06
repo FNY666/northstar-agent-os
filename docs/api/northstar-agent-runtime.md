@@ -2502,6 +2502,95 @@ Admit the session's proposal and gate one proposed action.
 
 #### `expected_outcomes()`
 
+### `per_call_authorization`
+
+Source: `components/northstar-agent-runtime/per_call_authorization.py`
+
+Per-call tool authorization (ALLOW / REQUIRE_CONFIRM / STEP_UP / BLOCK).
+
+#### `PerCallAuthorizationError`
+
+A policy, call, confirmation, or decision that refuses to be built.
+
+#### `ToolCall`
+
+One tool call awaiting per-call authorization.
+
+- `arguments_digest` (property)
+  - ``sha256:`` digest over the canonical arguments.
+#### `PolicyRule`
+
+One per-call policy rule: when it matches, it decides.
+
+#### `ToolPolicy`
+
+Host-owned per-call policy.
+
+- `risk_of(tool_name: str)`
+  - Risk class for a tool; unknown tools are privileged.
+#### `AuthorizationDecision`
+
+One recorded verdict for one call.
+
+- `pinned()`
+  - Return a copy with the digest computed.
+#### `authorize(call: ToolCall, policy: ToolPolicy, *, recorded_at: str)`
+
+Return the per-call verdict for ``call`` under ``policy``.
+
+#### `verify_decision(decision: AuthorizationDecision)`
+
+Re-derive the decision digest with a constant-time compare.
+
+#### `Confirmation`
+
+An explicit, fresh confirmation bound to one exact call.
+
+#### `DecisionLedger`
+
+Binds verdicts to calls and enforces one-shot consumption.
+
+- `register(decision: AuthorizationDecision)`
+- `confirm(confirmation: Confirmation)`
+- `dispatch(call: ToolCall)`
+  - Decide whether ``call`` may dispatch right now.
+#### `AuthorizationAuditRecord`
+
+One structured audit record for a per-call authorization event.
+
+- `pinned()`
+#### `record_verdict(decision: AuthorizationDecision, *, previous_digest: str)`
+
+Render a decision as a ``northstar.audit.v1`` audit record.
+
+#### `record_dispatch(decision: AuthorizationDecision, confirmation: Confirmation, *, previous_digest: str)`
+
+Render a confirmed dispatch as a ``northstar.audit.v1`` audit record.
+
+#### `verify_audit_record(record: AuthorizationAuditRecord)`
+
+Re-derive the audit record digest with a constant-time compare.
+
+#### `probe_names()`
+
+All per-call authorization attack probe names.
+
+#### `benign_names()`
+
+All benign control names.
+
+#### `probes_by_family(family: str)`
+
+Attack probes in one family.
+
+#### `probe_by_name(name: str)`
+
+Look up any probe (attack or benign) by name.
+
+#### `expected_outcomes()`
+
+Map every probe name to its expected outcome.
+
 ### `memory_supersession`
 
 Source: `components/northstar-agent-runtime/memory_supersession.py`
