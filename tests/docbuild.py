@@ -39,6 +39,7 @@ MANIFEST: dict[str, tuple[str, ...]] = {
         "evidence_contract",
         "evidence_chain",
         "evidence_store",
+        "sealed_receipt",
         "audit_adapter",
         "evidence_cli",
     ),

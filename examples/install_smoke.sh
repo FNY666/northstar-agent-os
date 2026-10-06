@@ -18,6 +18,7 @@ done
 
 "$SMOKE_ROOT/venv/bin/northstar" --version | grep -E 'northstar '
 "$SMOKE_ROOT/venv/bin/northstar" tools >/dev/null
+"$SMOKE_ROOT/venv/bin/python" -c "from sealed_receipt import CompletionEvidence, SealedRunReceipt, seal_run_receipt, verify_run_receipt"
 "$SMOKE_ROOT/venv/bin/northstar" bench --json | python3 -c \
   'import json,sys; r=json.load(sys.stdin); assert r["ok"] and r["failed"]==0, r'
 echo "install-smoke: OK (version + tools + governance bench)"
