@@ -236,6 +236,74 @@ Recompute the deny set against the *current* gate and pin it.
 
 Bench-ready check: ``(ok, message)`` for the deny-monotonicity case.
 
+### `decision_accuracy`
+
+Source: `components/northstar-agent-runtime/decision_accuracy.py`
+
+Decision-accuracy metrics for the governance bench (AABB-style).
+
+#### `normalize_decision_items(corpus: Iterable[dict[str, Any]])`
+
+Flatten a corpus into ``(item_id, expected_allow, item)`` triples.
+
+#### `compute_decision_accuracy(corpus: Iterable[dict[str, Any]], gate_fn: Callable[[dict[str, Any]], Any])`
+
+Score gate decisions against a corpus's expected outcomes.
+
+### `frontier_plot`
+
+Source: `components/northstar-agent-runtime/frontier_plot.py`
+
+DSR-TSR frontier plot for the governance bench.
+
+#### `default_gate_fn_factory(config: dict[str, Any])`
+
+Build a ``gate_fn(task, action)`` from a strictness config dict.
+
+#### `strictness_ladder(default_policies: tuple=(), strict_extra_disallowed: tuple=(), strict_extra_policies: tuple=())`
+
+Build the canonical 4-rung strictness ladder.
+
+#### `compute_frontier(gate_configs: list[dict[str, Any]], corpus: Any, gate_fn_factory: Callable[[dict[str, Any]], Callable[[Any, Any], Any]] | None=None)`
+
+Run the corpus through each strictness config; return DSR/TSR points.
+
+#### `render_frontier(points: list[dict[str, Any]], width: int=48, height: int=16)`
+
+Render the DSR-TSR frontier as an ASCII plot.
+
+### `handoff_probes`
+
+Source: `components/northstar-agent-runtime/handoff_probes.py`
+
+Handoff probe family: unsafe intent injected during agent-to-agent handoff.
+
+#### `probe_names()`
+
+All handoff attack probe names.
+
+#### `benign_names()`
+
+All handoff benign control names.
+
+### `heldout_corpus`
+
+Source: `components/northstar-agent-runtime/heldout_corpus.py`
+
+Held-out probe corpus: final-evaluation-only attack shapes.
+
+#### `probe_names()`
+
+All held-out probe names.
+
+#### `enforced_probes()`
+
+Probes whose expected behavior the gate currently enforces.
+
+#### `known_gap_probes()`
+
+Probes documenting confirmed gate gaps (not yet enforced).
+
 ### `adjudication`
 
 Source: `components/northstar-agent-runtime/adjudication.py`
@@ -7510,9 +7578,13 @@ A signed, attenuating delegation token (IBCT-style).
 
 Mint a signed delegation token.
 
-#### `verify_delegation_token(token: DelegationToken, delegator_public_key: bytes, *, now: float | None=None, expected_parent_hash: str | None=None, expected_audience: str | None=None, revocation_oracle: Callable[[DelegationToken], bool] | None=None, expected_root_hash: str | None=None, max_depth: int | None=None)`
+#### `verify_delegation_token(token: DelegationToken, delegator_public_key: bytes, *, now: float | None=None, expected_parent_hash: str | None=None, expected_audience: str | None=None, revocation_oracle: Callable[[DelegationToken], bool] | None=None, expected_root_hash: str | None=None, max_depth: int | None=None, chain_resolver: Callable[[str], DelegationToken | None] | None=None, public_key_for: Callable[[str], bytes | None] | None=None)`
 
 Verify a delegation token's signature, expiry, parent binding, and more.
+
+#### `verify_delegation_chain(token: DelegationToken, *, public_key_for: Callable[[str], bytes | None], chain_resolver: Callable[[str], DelegationToken | None] | None=None, now: float | None=None, expected_parent_hash: str | None=None, expected_audience: str | None=None, revocation_oracle: Callable[[DelegationToken], bool] | None=None, expected_root_hash: str | None=None, max_depth: int | None=None)`
+
+Verify a delegation chain leaf->root with cascade revocation.
 
 #### `normalise_names(values: Iterable[str] | None)`
 
