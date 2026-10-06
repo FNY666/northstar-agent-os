@@ -361,11 +361,15 @@ class ScopeManager:
         return self._ceilings.get(scope_id)
 
     def within_ceiling(self, scope_id: str, tool_name: str) -> bool:
-        """True if the tool is within the scope's ceiling (or no ceiling set)."""
+        """True if the tool is within the scope's ceiling (or no ceiling set).
+
+        Compared on canonical names so spelling variants can't escape the
+        ceiling.
+        """
         cap = self._ceilings.get(scope_id)
         if cap is None:
             return True
-        return tool_name in cap
+        return canonical_tool_name(tool_name) in {canonical_tool_name(c) for c in cap}
 
 
 def digest_arguments(arguments: Any) -> str:
@@ -565,6 +569,19 @@ def subtract(allowed: Iterable[str] | None, denied: Iterable[str] | None) -> tup
     return tuple(name for name in normalise_names(allowed) if name not in denied_set)
 
 
+def canonical_tool_name(name: str) -> str:
+    """Canonical form of a tool name for policy matching.
+
+    Strips whitespace and casefolds, so ``"  Bash "``, ``"bash"`` and
+    ``"BASH"`` all resolve to the same identity. The gate matches policy
+    (disallowed/allowed lists, kind map, argument policies) on canonical
+    names: a forbidden action can't slip through via spelling variants
+    (Agent Security Bench naming-sensitivity finding, ~Oct 2026:
+    neutral renames raised ASR +11-13pp).
+    """
+    return str(name).strip().casefold()
+
+
 @dataclass(frozen=True)
 class ArgumentPolicy:
     """A policy on a critical tool argument (argument-level provenance).
@@ -656,8 +673,14 @@ class PermissionConfig:
 
     @property
     def overlap(self) -> tuple[str, ...]:
-        """Names present in both lists; kept for diagnostics, deny always wins."""
-        both = set(self.allowed_tools) & set(self.disallowed_tools)
+        """Names present in both lists; kept for diagnostics, deny always wins.
+
+        Compared on canonical names so ``"Bash"`` vs ``"bash"`` co-listing
+        is also caught.
+        """
+        allowed_c = {canonical_tool_name(n) for n in self.allowed_tools}
+        denied_c = {canonical_tool_name(n) for n in self.disallowed_tools}
+        both = allowed_c & denied_c
         return tuple(sorted(both))
 
 
@@ -753,9 +776,22 @@ class PermissionEngine:
                 can_use_tool=can_use_tool,
             )
         self.config = config
+        # Canonical (casefolded, stripped) name sets for policy matching, so
+        # spelling variants can't bypass the lists. The config keeps the
+        # original spellings for display; matching uses these.
+        self._disallowed_canonical: frozenset[str] = frozenset(
+            canonical_tool_name(n) for n in config.disallowed_tools
+        )
+        self._allowed_canonical: frozenset[str] = frozenset(
+            canonical_tool_name(n) for n in config.allowed_tools
+        )
         # Fallback kind map for callers that evaluate by name only (e.g. the
         # delegation gate, where no ToolSpec object is in hand).
         self._kinds: dict[str, str] = dict(tool_kinds or {})
+        # Canonical kind map: variant spellings resolve to the same kind.
+        self._kinds_canonical: dict[str, str] = {
+            canonical_tool_name(n): k for n, k in (tool_kinds or {}).items()
+        }
         # The multisig tier needs the approver public keys to verify against.
         # A policy without keys would silently deny everything, so fail loud
         # at construction instead.
@@ -788,6 +824,10 @@ class PermissionEngine:
         self._composition_rules: tuple[CompositionRule, ...] = tuple(composition_rules or ())
         #: Maps tool names to action categories for composition rules.
         self._tool_categories: dict[str, str] = dict(tool_categories or {})
+        # Canonical category map: variant spellings resolve to the same category.
+        self._tool_categories_canonical: dict[str, str] = {
+            canonical_tool_name(n): c for n, c in (tool_categories or {}).items()
+        }
         #: Recent call history as category labels, for composition checks.
         #: Bounded; only categories (not arguments) are retained.
         self._category_history: deque[str] = deque(maxlen=32)
@@ -864,6 +904,13 @@ class PermissionEngine:
         asked, and escalation *is* asking the host.
         """
         payload = dict(payload or {})
+        # Canonicalize the tool name for all policy matching: spelling
+        # variants ("bash", "  Bash  ") resolve to the same identity, so a
+        # forbidden action can't bypass the gate via renaming. The canonical
+        # name is what the decision records.
+        # Note: tool_name is NOT blanket-canonicalized here; policy matching
+        # uses canonical sets (_disallowed_canonical etc.), preserving the
+        # original spelling for callbacks, dataflow, and decision records.
         # Permission lifetime: if the request belongs to a scope that has
         # been closed, deny immediately. This revokes lingering authority
         # when a subgoal/phase ends (PORTICO-style).
@@ -894,7 +941,7 @@ class PermissionEngine:
         # Offensive tooling is deny-by-default (Spain AEPD, Sept 2026).
         # The host can explicitly allowlist via offensive_allowlist.
         if is_offensive_tool(tool_name):
-            allowed_names = set(normalise_names(self.config.offensive_allowlist))
+            allowed_names = {canonical_tool_name(n) for n in self.config.offensive_allowlist}
             if tool_name not in allowed_names:
                 return PermissionDecision(
                     False,
@@ -907,7 +954,7 @@ class PermissionEngine:
         # before the normal layers. A violation denies immediately.
         if self.config.argument_policies and payload:
             for policy in self.config.argument_policies:
-                if policy.tool != tool_name:
+                if canonical_tool_name(policy.tool) != canonical_tool_name(tool_name):
                     continue
                 if policy.argument not in payload:
                     continue
@@ -939,7 +986,7 @@ class PermissionEngine:
             composition_deny = self._check_composition(tool_name)
             if composition_deny is not None:
                 return composition_deny
-            category = self._tool_categories.get(tool_name)
+            category = self._tool_categories_canonical.get(canonical_tool_name(tool_name))
             if category:
                 self._category_history.append(category)
         if dataflow is None or not decision.allowed:
@@ -1018,7 +1065,7 @@ class PermissionEngine:
         trace_violates_rules() contract -- the same artifact the bench
         uses offline.
         """
-        category = self._tool_categories.get(tool_name)
+        category = self._tool_categories_canonical.get(canonical_tool_name(tool_name))
         if not category:
             return None
         # The candidate trace: history + this call.
@@ -1157,12 +1204,14 @@ class PermissionEngine:
             pretrade_decision = self._pretrade_check(tool_name, payload or {})
             if pretrade_decision is not None:
                 return pretrade_decision
-        resolved_kind = kind or self._kinds.get(tool_name) or "other"
+        resolved_kind = kind or self._kinds_canonical.get(canonical_tool_name(tool_name)) or "other"
         if resolved_kind not in {"read", "edit", "exec", "task", "network", "other"}:
             resolved_kind = "other"
         is_mutating = (resolved_kind in MUTATING_KINDS) if mutating is None else bool(mutating)
 
-        if tool_name in set(self.config.disallowed_tools):
+        # Canonical name for policy matching (spelling variants can't bypass).
+        canonical = canonical_tool_name(tool_name)
+        if canonical in self._disallowed_canonical:
             return PermissionDecision(
                 False,
                 source="disallowed_tools",
@@ -1178,7 +1227,7 @@ class PermissionEngine:
                 rule="registered_tools",
                 tool=tool_name,
             )
-        if tool_name in set(self.config.allowed_tools):
+        if canonical in self._allowed_canonical:
             return PermissionDecision(
                 True,
                 source="allowed_tools",

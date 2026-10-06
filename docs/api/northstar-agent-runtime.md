@@ -153,6 +153,21 @@ Claimed-authorization probe corpus for the governance bench.
 
 #### `probe_names()`
 
+### `post_dispatch_monitor`
+
+Source: `components/northstar-agent-runtime/post_dispatch_monitor.py`
+
+Post-dispatch invariant monitoring (Orrery Gate 6 style).
+
+#### `PostDispatchMonitor`
+
+Sliding-window invariant monitor over post-dispatch records.
+
+- `observe(record: dict[str, Any])`
+  - Feed one post-dispatch record; return the current verdict.
+- `halt_reason` (property)
+- `reset()`
+  - Clear the window and the halted state (e.g. after human review).
 ### `capability_warrants`
 
 Source: `components/northstar-agent-runtime/capability_warrants.py`
@@ -5849,6 +5864,10 @@ One labelled sequence: each step is individually compliant, but the composition 
 
 #### `CorpusSample`
 
+#### `compute_orr(tasks: Any, gate_fn: Callable[[Any, Any], Any])`
+
+Over-refusal rate on a benign task corpus (safety-tax metric).
+
 #### `run_metric_corpus()`
 
 Evaluate every probe under its declared engine (native run).
@@ -7275,6 +7294,10 @@ Verify a delegation token's signature, expiry, and parent binding.
 #### `subtract(allowed: Iterable[str] | None, denied: Iterable[str] | None)`
 
 ``--deny-tool`` semantics: subtract, never co-list.
+
+#### `canonical_tool_name(name: str)`
+
+Canonical form of a tool name for policy matching.
 
 #### `ArgumentPolicy`
 
