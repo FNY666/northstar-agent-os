@@ -640,6 +640,20 @@ Validate a checkpoint restore against *current* security state.
 
 Stricter variant: additionally require every snapshot scope id to be a known scope (guards against restoring scopes the manager never saw).
 
+### `pii_flow_probe`
+
+Source: `components/northstar-agent-runtime/pii_flow_probe.py`
+
+PII-flow probe family: the interlocutor effect in agent-to-agent channels.
+
+#### `probe_names()`
+
+All PII-flow attack probe names.
+
+#### `benign_names()`
+
+All PII-flow benign control names.
+
 ### `tdsr_metrics`
 
 Source: `components/northstar-agent-runtime/tdsr_metrics.py`
@@ -6154,7 +6168,11 @@ True when ``text`` instructs a dangerous action as an imperative.
 
 #### `looks_unsafe(text: str)`
 
-The write-time poisoning guard: reject extracted knowledge that is injection-shaped (W8 phrasing) OR a bare dangerous imperative (W8 action). One call site, defense-in-depth.
+The write-time poisoning guard: reject extracted knowledge that is injection-shaped (W8 phrasing) OR a bare dangerous imperative (W8 action) OR a raw credential value (credential-starved doctrine: the agent must never persist a long-lived credential; credentials live in the gateway/host env, not in…
+
+#### `looks_like_secret(text: str)`
+
+True when ``text`` contains a raw credential *value* shape.
 
 #### `should_quarantine(*, confidence: float, corroborated: bool, supersedes_corroborated: bool)`
 
