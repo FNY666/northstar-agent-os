@@ -19,20 +19,6 @@ AGB smoke corpus: AgentGuardBench-derived offline adversarial probes.
 
 Machine-readable manifest for the smoke corpus.
 
-### `a2abreak_probes`
-
-Source: `components/northstar-agent-runtime/a2abreak_probes.py`
-
-A2ABreak-derived probe corpus for the governance bench.
-
-#### `probe_names()`
-
-All adversarial probe names.
-
-#### `benign_names()`
-
-All benign control names.
-
 ### `asi04_probes`
 
 Source: `components/northstar-agent-runtime/asi04_probes.py`
@@ -62,63 +48,6 @@ ASI09 probe corpus: human-agent trust calibration probes.
 #### `probe_names()`
 
 All ASI09 probe names.
-
-### `crypto_agility`
-
-Source: `components/northstar-agent-runtime/crypto_agility.py`
-
-Crypto-agility seam for digital signatures.
-
-#### `UnknownAlgorithmError`
-
-Raised when no Signer/Verifier is registered for an algorithm id.
-
-#### `Signer`
-
-Abstract digital-signature producer. Binds bytes to key holder.
-
-- `algorithm` (property)
-  - Algorithm identifier, e.g. ``"ed25519"``.
-- `public_key_bytes()`
-  - The public key counterpart of the signing key, as bytes.
-- `sign(message: bytes)`
-  - Sign ``message``. Raises on bad input (not fail-closed).
-#### `Verifier`
-
-Abstract signature checker. Fail-closed: never raises.
-
-- `algorithm` (property)
-  - Algorithm identifier, e.g. ``"ed25519"``.
-- `verify(message: bytes, signature: bytes)`
-  - ``True`` iff ``signature`` is valid for ``message`` under this key.
-#### `Ed25519Signer`
-
-Ed25519 (RFC 8032, pure variant) signer. ``seed`` is 32 bytes.
-
-- `algorithm` (property)
-- `public_key_bytes()`
-- `sign(message: bytes)`
-#### `Ed25519Verifier`
-
-Ed25519 (RFC 8032, pure variant) verifier. ``public_key`` is 32 bytes.
-
-- `algorithm` (property)
-- `verify(message: bytes, signature: bytes)`
-#### `register_algorithm(name: str, signer_factory: Callable[[bytes], Signer], verifier_factory: Callable[[bytes], Verifier])`
-
-Register ``name`` -> (signer factory, verifier factory).
-
-#### `supported_algorithms()`
-
-Algorithm identifiers currently registered, sorted.
-
-#### `get_signer(algorithm: str, key_material: bytes)`
-
-Build a ``Signer`` for ``algorithm`` from raw key bytes (seed).
-
-#### `get_verifier(algorithm: str, key_material: bytes)`
-
-Build a ``Verifier`` for ``algorithm`` from raw key bytes (public key).
 
 ### `evasion_corpus`
 
@@ -155,86 +84,6 @@ Replay prevention: remembers seen nonces until they expire.
 #### `verify_message(msg: SignedMessage, sender_pubkey: bytes, *, max_age_seconds: float=300.0, now: float | None=None, nonce_tracker: NonceTracker | None=None)`
 
 Verify a signed inter-agent message.
-
-### `pocketos_probe`
-
-Source: `components/northstar-agent-runtime/pocketos_probe.py`
-
-PocketOS-style end-to-end probe: no-attacker self-destruction chain.
-
-#### `probe_names()`
-
-All PocketOS probe names.
-
-### `temporal_decoupling_probe`
-
-Source: `components/northstar-agent-runtime/temporal_decoupling_probe.py`
-
-Temporal-decoupling probes: multi-session memory poisoning.
-
-#### `probe_names()`
-
-All temporal-decoupling probe names.
-
-### `rule_of_two_probe`
-
-Source: `components/northstar-agent-runtime/rule_of_two_probe.py`
-
-Rule-of-Two probe corpus for the governance bench.
-
-#### `count_legs(*, untrusted_input: bool=False, sensitive: bool=False, mutating: bool=False, category: str | None=None)`
-
-Count Rule-of-Two legs from deterministic metadata only.
-
-#### `rule_of_two_evaluate(engine: PermissionEngine, tool_name: str, payload: dict[str, Any] | None=None, *, untrusted_input: bool=False, sensitive: bool=False, mutating: bool=False, category: str | None=None, context: PermissionRequestContext | None=None)`
-
-Evaluate one call under the Rule of Two.
-
-#### `probe_names()`
-
-All adversarial probe names.
-
-#### `benign_names()`
-
-All benign control names.
-
-### `deny_monotonicity`
-
-Source: `components/northstar-agent-runtime/deny_monotonicity.py`
-
-Deny-monotonicity check for the governance bench.
-
-#### `build_gate_fn()`
-
-Return ``gate_fn(probe) -> PermissionDecision`` for the canary corpus.
-
-#### `compute_deny_set(corpus: tuple[dict[str, Any], ...] | list[dict[str, Any]], gate_fn: Callable[[dict[str, Any]], Any])`
-
-Run the corpus through ``gate_fn``; return denied ``(probe, deny_code)`` pairs.
-
-#### `check_monotonicity(old_deny_set: set[tuple[str, str]], new_deny_set: set[tuple[str, str]])`
-
-True iff ``new`` keeps every denial in ``old``.
-
-#### `baseline_path()`
-
-Filesystem path of the pinned baseline JSON (next to this module).
-
-#### `save_baseline(deny_set: set[tuple[str, str]], path: str | Path | None=None)`
-
-Write the deny set as the pinned baseline. Deliberate, reviewed act.
-
-#### `load_baseline(path: str | Path | None=None)`
-
-Load the pinned baseline. Raises FileNotFoundError when absent.
-
-#### `regenerate_baseline(corpus: tuple[dict[str, Any], ...] | None=None, path: str | Path | None=None)`
-
-Recompute the deny set against the *current* gate and pin it.
-
-#### `deny_monotonicity_check(gate_fn: Callable[[dict[str, Any]], Any] | None=None, corpus: tuple[dict[str, Any], ...] | None=None, baseline: str | Path | None=None)`
-
-Bench-ready check: ``(ok, message)`` for the deny-monotonicity case.
 
 ### `adjudication`
 
