@@ -1962,6 +1962,73 @@ Per-route delta between two eval runs of the same corpus.
 
 Diff two reports of the same corpus, per route.
 
+### `counterfactual_replay`
+
+Source: `components/northstar-agent-runtime/counterfactual_replay.py`
+
+Counterfactual replay harness for mesh/handoff probe verification.
+
+#### `HopMessage`
+
+One message at a mesh hop boundary.
+
+#### `Run`
+
+A frozen, digest-pinned message sequence.
+
+- `verify_digest()`
+  - Re-derive the digest; fail closed on tamper.
+#### `Intervention`
+
+One counterfactual edit to a run.
+
+#### `apply_intervention(run: Run, intervention: Intervention)`
+
+Pure, deterministic counterfactual: same (run, intervention) -> same run.
+
+#### `RunOutcome`
+
+Digest-pinned per-message verdicts plus the aggregate verdict.
+
+- `verify_digest()`
+#### `evaluate_run(run: Run, gate_fn: Callable[[HopMessage], str])`
+
+Replay a run through the host gate, one verdict per message.
+
+#### `ReplayDelta`
+
+Base vs counterfactual outcome comparison.
+
+- `verify_digest()`
+#### `compare(base: RunOutcome, counter: RunOutcome)`
+
+Diff two outcomes; per-message diffs are positional on verdicts.
+
+#### `ReplayReport`
+
+One intervention's full evidence: base + counterfactual + delta.
+
+- `verify()`
+#### `replay(run: Run, intervention: Intervention, gate_fn: Callable[[HopMessage], str])`
+
+End-to-end: base outcome, counterfactual run, counterfactual outcome, delta.
+
+#### `probe_names()`
+
+All counterfactual-replay probe names.
+
+#### `probes_by_family(family: str)`
+
+Probes in one family.
+
+#### `probe_by_name(name: str)`
+
+Look up a probe by name.
+
+#### `expected_outcomes()`
+
+probe name -> expected harness outcome ('changes-outcome' or 'no-change').
+
 ### `belief_poisoning_probes`
 
 Source: `components/northstar-agent-runtime/belief_poisoning_probes.py`
