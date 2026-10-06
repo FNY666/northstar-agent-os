@@ -135,6 +135,16 @@ All adversarial probe names.
 
 All benign control names.
 
+### `masdrift_corpus`
+
+Source: `components/northstar-agent-runtime/masdrift_corpus.py`
+
+MasDrift-style authorization-drift corpus for the governance bench.
+
+#### `task_names()`
+
+#### `domain_names()`
+
 ### `capability_warrants`
 
 Source: `components/northstar-agent-runtime/capability_warrants.py`
@@ -7504,10 +7514,6 @@ Postconditions: an independent verdict on whether the work actually happened.
 #### `PostConditionError`
 
 Raised for a malformed, unknown, or out-of-bounds postcondition.
-
-#### `PostConditionLimitError`
-
-A file cannot be verified completely within the configured byte budget.
 
 #### `PostCondition`
 
