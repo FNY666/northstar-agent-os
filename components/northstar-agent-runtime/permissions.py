@@ -439,6 +439,12 @@ class DelegationToken:
     ``audience`` binds the token to its intended recipient (mandatum V9):
     a token minted for agent X cannot be presented by agent Y, even if Y
     somehow obtains it. Empty means unbound (legacy behavior).
+
+    ``depth`` is the delegation-chain depth: 0 for a root token, parent's
+    depth + 1 for each child. It is part of the signed body, so a token
+    cannot be re-labeled shallower than it was minted. ``verify_delegation_token``
+    enforces ``max_depth`` at verification time (abaxxlabs/agents v0.12.5
+    lesson: issuance-side enforcement alone is bypassable).
     """
 
     delegator_id: str
@@ -449,6 +455,7 @@ class DelegationToken:
     parent_hash: str = ""
     signature: str = ""
     audience: str = ""
+    depth: int = 0
 
     def _signing_body(self) -> dict[str, Any]:
         return {
@@ -459,6 +466,7 @@ class DelegationToken:
             "expires_at": self.expires_at,
             "parent_hash": self.parent_hash,
             "audience": self.audience,
+            "depth": self.depth,
         }
 
     def token_hash(self) -> str:
@@ -481,6 +489,7 @@ def mint_delegation_token(
     parent_token: DelegationToken | None = None,
     issued_at: float | None = None,
     audience: str = "",
+    max_depth: int | None = None,
 ) -> DelegationToken:
     """Mint a signed delegation token.
 
@@ -488,6 +497,12 @@ def mint_delegation_token(
     is given -- attenuation is enforced at mint time, not just verified.
 
     ``audience`` binds the token to its intended presenter (mandatum V9).
+
+    ``depth`` is 0 for a root, parent.depth + 1 for a child, and is
+    signature-bound. When ``max_depth`` is given, minting beyond it raises
+    -- but issuance is only half the story: ``verify_delegation_token``
+    enforces the same limit independently, because an issuance-side check
+    alone can be bypassed (abaxxlabs/agents v0.12.5).
     """
     if not delegator_id or not delegatee_id:
         raise ValueError("delegator_id and delegatee_id must be non-empty")
@@ -495,6 +510,7 @@ def mint_delegation_token(
         raise ValueError("delegator_seed must be a 32-byte Ed25519 seed")
     tool_tuple = tuple(sorted(set(tools)))
     parent_hash = ""
+    depth = 0
     if parent_token is not None:
         parent_tools = set(parent_token.tools)
         if not set(tool_tuple) <= parent_tools:
@@ -502,7 +518,14 @@ def mint_delegation_token(
                 f"delegation tools {tool_tuple} exceed parent scope {parent_token.tools}: "
                 "scope can only shrink"
             )
+        if not isinstance(parent_token.depth, int) or parent_token.depth < 0:
+            raise ValueError("parent token has malformed depth")
         parent_hash = parent_token.token_hash()
+        depth = parent_token.depth + 1
+    if max_depth is not None and depth > max_depth:
+        raise ValueError(
+            f"delegation depth {depth} exceeds max_depth {max_depth}"
+        )
     ts = time.time() if issued_at is None else float(issued_at)
     unsigned = DelegationToken(
         delegator_id=delegator_id,
@@ -512,6 +535,7 @@ def mint_delegation_token(
         expires_at=ts + float(ttl_seconds),
         parent_hash=parent_hash,
         audience=audience,
+        depth=depth,
     )
     try:
         from ed25519 import sign as ed_sign
@@ -530,17 +554,33 @@ def verify_delegation_token(
     expected_audience: str | None = None,
     revocation_oracle: Callable[[DelegationToken], bool] | None = None,
     expected_root_hash: str | None = None,
+    max_depth: int | None = None,
+    chain_resolver: Callable[[str], DelegationToken | None] | None = None,
+    public_key_for: Callable[[str], bytes | None] | None = None,
 ) -> bool:
     """Verify a delegation token's signature, expiry, parent binding, and more.
 
     Checks (mandatum V1-V9):
-    - signature: Ed25519 over the canonical body (covers audience too)
+    - signature: Ed25519 over the canonical body (covers audience and depth)
     - time: issued_at <= now <= expires_at
     - parent binding: parent_hash matches expected_parent_hash (if given)
     - audience: token.audience matches expected_audience (if given); a token
       without audience binding passes only when no audience is expected
     - revocation: revocation_oracle(token) True means revoked (if oracle given)
     - root: token_hash() matches expected_root_hash for root tokens (if given)
+    - depth: token.depth is a non-negative int; when max_depth is given,
+      depth > max_depth is rejected -- the limit is enforced here at
+      verification time, not only at issuance (abaxxlabs/agents v0.12.5:
+      issuance-only enforcement is bypassable)
+
+    Chain escalation: when the token carries a ``parent_hash`` and
+    ``chain_resolver`` is given, verification escalates to
+    ``verify_delegation_chain`` -- the whole chain leaf->root is walked and
+    revocation is checked for EVERY link (cascade revocation). Ancestor
+    delegator keys come from ``public_key_for`` (falling back to
+    ``delegator_public_key`` for the leaf's own delegator); unknown keys
+    fail closed. Without ``chain_resolver`` the legacy single-token
+    behavior is preserved.
 
     False on any defect; never raises.
     """
@@ -556,6 +596,13 @@ def verify_delegation_token(
             return False
         body = json.dumps(token._signing_body(), sort_keys=True).encode()
         if not bool(ed_verify(bytes(delegator_public_key), body, signature)):
+            return False
+        # Depth is signature-bound (part of the body), so a passing signature
+        # means the depth value is the minter's, not a forgery. Reject
+        # malformed depths fail-closed, then enforce the verifier's limit.
+        if not isinstance(token.depth, int) or isinstance(token.depth, bool) or token.depth < 0:
+            return False
+        if max_depth is not None and token.depth > max_depth:
             return False
         ts = time.time() if now is None else float(now)
         if not (token.issued_at <= ts <= token.expires_at):
@@ -574,10 +621,188 @@ def verify_delegation_token(
             except Exception:
                 return False  # oracle failure fails closed
         # Root consistency: for root tokens, pin the expected root hash.
-        if expected_root_hash is not None and token.token_hash() != expected_root_hash:
+        # (In chain mode the walker checks this against the true root found
+        # by the walk, not the leaf.)
+        if (
+            expected_root_hash is not None
+            and not token.parent_hash
+            and token.token_hash() != expected_root_hash
+        ):
             return False
+        # Chain-walk escalation: when the token carries a parent link and the
+        # caller supplied a chain resolver, verify the whole chain leaf->root
+        # (cascade revocation) instead of stopping at the leaf. Without a
+        # resolver the legacy single-token behavior is preserved.
+        if token.parent_hash and chain_resolver is not None:
+            def _keys_for(delegator_id: str) -> bytes | None:
+                if delegator_id == token.delegator_id:
+                    if isinstance(delegator_public_key, (bytes, bytearray)) and len(
+                        delegator_public_key
+                    ) == 32:
+                        return bytes(delegator_public_key)
+                    return None
+                if public_key_for is not None:
+                    try:
+                        key = public_key_for(delegator_id)
+                    except Exception:
+                        return None
+                    if isinstance(key, (bytes, bytearray)) and len(key) == 32:
+                        return bytes(key)
+                    return None
+                return None
+
+            return verify_delegation_chain(
+                token,
+                public_key_for=_keys_for,
+                chain_resolver=chain_resolver,
+                now=now,
+                expected_parent_hash=expected_parent_hash,
+                expected_audience=expected_audience,
+                revocation_oracle=revocation_oracle,
+                expected_root_hash=expected_root_hash,
+                max_depth=max_depth,
+            )
         return True
     except (ValueError, TypeError):
+        return False
+
+
+def verify_delegation_chain(
+    token: DelegationToken,
+    *,
+    public_key_for: Callable[[str], bytes | None],
+    chain_resolver: Callable[[str], DelegationToken | None] | None = None,
+    now: float | None = None,
+    expected_parent_hash: str | None = None,
+    expected_audience: str | None = None,
+    revocation_oracle: Callable[[DelegationToken], bool] | None = None,
+    expected_root_hash: str | None = None,
+    max_depth: int | None = None,
+) -> bool:
+    """Verify a delegation chain leaf->root with cascade revocation.
+
+    Research consensus (mandatum V8, UCAN, adtp): the verifier must walk
+    from the presented token up through ``parent_hash`` links and check
+    revocation for EVERY link, not just the leaf. A revoked ancestor kills
+    the whole subtree -- revocation cascades.
+
+    Per-link checks: Ed25519 signature (with that hop's delegator key from
+    ``public_key_for``), ``issued_at <= now <= expires_at``, well-formed
+    non-negative depth, ``max_depth`` when given, ``child.expires_at <=
+    parent.expires_at`` (a child must not outlive its parent),
+    ``child.depth == parent.depth + 1`` (hop continuity), and
+    ``child.tools <= parent.tools`` (attenuation re-checked at verify time;
+    mint already enforces it, the walk does not trust mint).
+
+    Fail-closed rules: an unresolvable ancestor fails; a resolver that
+    returns the wrong token (``token_hash()`` mismatch) fails; a cycle
+    fails; an oracle error on any link fails; an unknown delegator key
+    fails. The leaf's audience is checked against ``expected_audience``
+    and its ``parent_hash`` against ``expected_parent_hash`` (same
+    semantics as ``verify_delegation_token``); the root must have depth 0
+    and match ``expected_root_hash`` when given.
+
+    False on any defect; never raises.
+    """
+    try:
+        ts = time.time() if now is None else float(now)
+        try:
+            from ed25519 import verify as ed_verify
+        except ImportError:
+            return False
+        seen: set[str] = set()
+        current = token
+        child: DelegationToken | None = None
+        leaf = True
+        while True:
+            # Cycle guard: a hash seen twice means the resolver led us in
+            # a circle.
+            link_hash = current.token_hash()
+            if link_hash in seen:
+                return False
+            seen.add(link_hash)
+            # This hop's delegator key; unknown key fails closed.
+            try:
+                pubkey = public_key_for(current.delegator_id)
+            except Exception:
+                return False
+            if not isinstance(pubkey, (bytes, bytearray)) or len(pubkey) != 32:
+                return False
+            # Signature over the canonical body (covers depth, audience,
+            # parent_hash, tools -- the value is the minter's, not a forgery).
+            if len(current.signature) != 128:
+                return False
+            try:
+                signature = bytes.fromhex(current.signature)
+            except ValueError:
+                return False
+            body = json.dumps(current._signing_body(), sort_keys=True).encode()
+            if not bool(ed_verify(bytes(pubkey), body, signature)):
+                return False
+            # Depth well-formed, then the verifier's own limit.
+            if (
+                not isinstance(current.depth, int)
+                or isinstance(current.depth, bool)
+                or current.depth < 0
+            ):
+                return False
+            if max_depth is not None and current.depth > max_depth:
+                return False
+            # Time window for this link.
+            if not (current.issued_at <= ts <= current.expires_at):
+                return False
+            # Link invariants against the child we descended from.
+            if child is not None:
+                if child.expires_at > current.expires_at:
+                    return False
+                if child.depth != current.depth + 1:
+                    return False
+                if not set(child.tools) <= set(current.tools):
+                    return False
+            # Leaf-only caller assertions.
+            if leaf:
+                if (
+                    expected_parent_hash is not None
+                    and current.parent_hash != expected_parent_hash
+                ):
+                    return False
+                if (
+                    expected_audience is not None
+                    and current.audience != expected_audience
+                ):
+                    return False
+                leaf = False
+            # Revocation: the oracle is authoritative for EVERY link. A
+            # revoked ancestor invalidates the whole chain (cascade); an
+            # oracle error fails closed rather than skipping the link.
+            if revocation_oracle is not None:
+                try:
+                    if revocation_oracle(current):
+                        return False
+                except Exception:
+                    return False
+            # Root reached: empty parent_hash terminates the walk.
+            if not current.parent_hash:
+                if current.depth != 0:
+                    return False
+                if expected_root_hash is not None and current.token_hash() != expected_root_hash:
+                    return False
+                return True
+            # Resolve the ancestor; unresolvable fails closed.
+            if chain_resolver is None:
+                return False
+            try:
+                ancestor = chain_resolver(current.parent_hash)
+            except Exception:
+                return False
+            if ancestor is None:
+                return False
+            # The resolver must return the exact token the hash commits to.
+            if ancestor.token_hash() != current.parent_hash:
+                return False
+            child = current
+            current = ancestor
+    except (ValueError, TypeError, AttributeError):
         return False
 
 
@@ -1726,6 +1951,7 @@ class PermissionEngine:
             "tool": decision.tool,
             "source": decision.source,
             "rule": decision.rule,
+            "condition": decision.rule,
             "reason": decision.reason,
             "call_id": ctx.call_id,
             "arguments_digest": ctx.arguments_digest,
