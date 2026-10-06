@@ -1831,6 +1831,153 @@ Names of the benign controls.
 
 #### `expected_outcomes()`
 
+### `waal_mapping`
+
+Source: `components/northstar-agent-runtime/waal_mapping.py`
+
+WAAL v2.0 coordinates mapping for Northstar (Mind / Hand / Liability).
+
+#### `WaalError`
+
+Fail-closed error: invalid coordinate or inconsistent assessment.
+
+#### `MindJudgment`
+
+The Mind coordinate: who judges, who defines goals.
+
+#### `HandGrant`
+
+The Hand coordinate: which atomic actions the AI may use.
+
+#### `LiabilityClaim`
+
+The Liability coordinate: audit trail + rollback + kill switch.
+
+#### `mind_to_decision_role(mind: MindJudgment)`
+
+Derive the expected ``decision_role`` from the Mind coordinate.
+
+#### `validate_mind(mind: MindJudgment)`
+
+Fail closed on AI goal definition or role inconsistency.
+
+#### `validate_hand(hand: HandGrant)`
+
+Fail closed on self-made or unreviewed hands; check ceiling shape.
+
+#### `hand_authorizes(hand: HandGrant, tool_name: object)`
+
+True when the tool is within the Hand ceiling (or no ceiling set).
+
+#### `validate_liability(liability: LiabilityClaim)`
+
+Fail closed on non-boolean claims (host must state each claim).
+
+#### `upgrade_eligible(liability: LiabilityClaim)`
+
+True only when all three liability surfaces are claimed.
+
+#### `liability_gaps(liability: LiabilityClaim)`
+
+Names of the missing liability surfaces (empty = complete).
+
+#### `WaalAssessment`
+
+Digest-pinned binding of the three WAAL coordinates.
+
+- `as_dict()`
+#### `assess(assessment_id: str, mind: MindJudgment, hand: HandGrant, liability: LiabilityClaim)`
+
+Validate all three coordinates and pin the assessment.
+
+#### `verify_assessment(assessment: WaalAssessment)`
+
+Re-derive the digest with a constant-time compare.
+
+#### `probe_names()`
+
+#### `probes_by_family(family: str)`
+
+#### `probe_by_name(name: str)`
+
+#### `expected_outcomes()`
+
+### `skill_containment`
+
+Source: `components/northstar-agent-runtime/skill_containment.py`
+
+Skill containment check: FORMAL-level admission on top of install verification.
+
+#### `join_effects(*effects: str)`
+
+Least upper bound of effect atoms (the lattice join).
+
+#### `validate_effects(effects: Any)`
+
+Validate a declared capability set; fail closed on garbage.
+
+#### `abstract_effects(source: str)`
+
+Layer-1 abstract interpretation: union of effects over all paths.
+
+#### `covers(declared: tuple[str, ...], observed: set[str])`
+
+Every observed atom is rank-covered by some declared atom.
+
+#### `check_refinement(value: Any, refinement: str)`
+
+Check one argument value against one refinement.
+
+#### `EnvelopeViolation`
+
+One declared tool call whose argument broke its refinement.
+
+#### `verify_envelopes(calls: list[tuple[str, Mapping[str, Any]]], envelopes: Mapping[str, Mapping[str, str]])`
+
+Layer-2 check: every declared call satisfies its envelope.
+
+#### `PathCheck`
+
+Outcome of the bounded path enumeration.
+
+#### `bounded_check(source: str, declared: tuple[str, ...], bound: int=DEFAULT_PATH_BOUND)`
+
+Layer-3: enumerate branch combinations up to ``bound`` paths.
+
+#### `SkillContainmentProof`
+
+Digest-pinned admission record for one skill.
+
+- `verify()`
+  - Re-derive the digest; constant-time compare.
+#### `prove_containment(skill_id: str, declared_effects: Any, source: str, calls: list[tuple[str, Mapping[str, Any]]] | None=None, envelopes: Mapping[str, Mapping[str, str]] | None=None, bound: int=DEFAULT_PATH_BOUND)`
+
+Run all three layers; return the digest-pinned proof artifact.
+
+#### `probe_names()`
+
+All skill-containment attack probe names.
+
+#### `benign_names()`
+
+All benign control names.
+
+#### `family_names()`
+
+All probe families.
+
+#### `probes_by_family(family: str)`
+
+Probes in one family (including 'benign').
+
+#### `probe_by_name(name: str)`
+
+Look up any skill-containment probe (attack or benign) by name.
+
+#### `expected_outcomes()`
+
+probe name -> expected gate outcome ('deny' or 'allow').
+
 ### `reasoning_budget`
 
 Source: `components/northstar-agent-runtime/reasoning_budget.py`
