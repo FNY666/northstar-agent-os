@@ -2126,6 +2126,100 @@ One probe by name. Unknown names raise KeyError.
 
 Map every probe name to its expected outcome.
 
+### `sk_safety_report`
+
+Source: `components/northstar-agent-runtime/sk_safety_report.py`
+
+Machine-readable safety-test report artifact in the South Korea AI Framework Act (Art. 28) shape.
+
+#### `SkSafetyReportError`
+
+A report build, sign-off, or verification step failed. Raised, never silent.
+
+#### `RobustnessScenario`
+
+One adversarial-robustness scenario with its observed pass rate.
+
+- `pass_rate` (property)
+  - Pass rate for this scenario, or None when nothing was attempted.
+- `as_dict()`
+#### `RobustnessSection`
+
+Adversarial robustness: scenarios + per-scenario pass rates.
+
+- `as_dict()`
+#### `ResilienceScenario`
+
+One resilience scenario: recovery behaviour under fault.
+
+- `as_dict()`
+#### `ResilienceSection`
+
+Resilience: recovery scenarios plus the error-budget ledger.
+
+- `as_dict()`
+#### `InjectionDefenceStrategy`
+
+One injection-defence strategy with its observed detection rate.
+
+- `detection_rate` (property)
+  - Detection rate for this strategy, or None when nothing was attempted.
+- `as_dict()`
+#### `InjectionDefenceSection`
+
+Injection defence: active strategies + per-strategy detection rates.
+
+- `as_dict()`
+#### `SloTarget`
+
+One SLO: target vs observed over the measurement window.
+
+- `as_dict()`
+#### `SloSection`
+
+SLO validation: availability, latency, error rate, target vs observed.
+
+- `as_dict()`
+#### `ReviewerSignoff`
+
+The Art. 28 reviewer sign-off.
+
+- `as_dict()`
+#### `SafetyTestReport`
+
+One digest-pinned Art. 28-shaped safety-test report.
+
+- `as_dict()`
+- `is_signed` (property)
+  - Whether the reviewer sign-off is attached.
+#### `build_report(*, report_id: str, agent_id: str, operator: str, assessed_at: str, robustness: RobustnessSection, resilience: ResilienceSection, injection_defence: InjectionDefenceSection, slo: SloSection, retention_years: int=ART28_RETENTION_YEARS)`
+
+Build the unsigned Art. 28 report (draft, no sign-off yet).
+
+#### `sign_report(report: SafetyTestReport, *, reviewer: str, signoff_digest: str, signed_at: str)`
+
+Attach the Art. 28 reviewer sign-off, returning a new pinned report.
+
+#### `verify_report(report: SafetyTestReport, *, require_signoff: bool=True)`
+
+Verify an Art. 28 report's integrity and Art. 28 shape.
+
+#### `retention_until(assessed_at: str, retention_years: int)`
+
+Retention deadline as an ISO date (year-precision shift of the assessment date).
+
+#### `retention_expired(report: SafetyTestReport, now_iso_date: str)`
+
+Whether the report's retention deadline has passed as of ``now_iso_date``.
+
+#### `compliance_checklist()`
+
+Machine-readable Art. 28 mandatory-field checklist.
+
+#### `report_evidence_descriptor(report: SafetyTestReport)`
+
+Descriptor for pinning the report as evidence elsewhere.
+
 ### `mcp_span_coverage`
 
 Source: `components/northstar-agent-runtime/mcp_span_coverage.py`
