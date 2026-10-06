@@ -2285,6 +2285,65 @@ Admit one bus message. Returns (verdict, reason).
 
 #### `expected_outcomes()`
 
+### `verify_what_landed`
+
+Source: `components/northstar-agent-runtime/verify_what_landed.py`
+
+Verify-what-landed probes and receipt-over-claim install verification.
+
+#### `validate_pin(pin: Any)`
+
+Canonical lowercase 40-hex form of *pin*, or ``None`` if invalid.
+
+#### `validate_digest64(value: Any)`
+
+Canonical lowercase 64-hex content digest, or ``None`` if invalid.
+
+#### `pin_matches_review(pinned_sha: Any, reviewed_pin: Any)`
+
+The pinned SHA must be exactly the SHA recorded at review time.
+
+#### `content_digest(content: bytes)`
+
+SHA-256 hex digest of installed file bytes (the landed evidence).
+
+#### `InstallReceipt`
+
+One digest-pinned install receipt.
+
+- `body()`
+#### `build_receipt(*, install_id: str, pinned_sha: Any, landed_head: Any, file_digests: Mapping[str, Any], installer_id: str, recorded_at: str)`
+
+Build and digest-pin an install receipt. Raises on bad inputs.
+
+#### `verify_receipt(receipt: InstallReceipt)`
+
+Re-derive the receipt digest with constant-time comparison.
+
+#### `verify_what_landed(receipt: InstallReceipt, *, reviewed_pin: Any, landed_files: Mapping[str, bytes])`
+
+Verify the receipt against what actually landed on disk.
+
+#### `probe_names()`
+
+All verify-what-landed probe names.
+
+#### `benign_names()`
+
+Names of the benign control probes.
+
+#### `probes_by_family()`
+
+Probe names grouped by family.
+
+#### `probe_by_name(name: str)`
+
+The probe record for *name*; raises ``KeyError`` when unknown.
+
+#### `expected_outcomes()`
+
+Probe name -> expected verdict (``deny`` / ``allow``).
+
 ### `a2a_handoff_probes`
 
 Source: `components/northstar-agent-runtime/a2a_handoff_probes.py`
