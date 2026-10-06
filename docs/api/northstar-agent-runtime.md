@@ -959,6 +959,56 @@ Trust class of the STT channel: always ``"untrusted"``.
 
 The memory-admission source name for STT-derived writes.
 
+### `corpus_provenance`
+
+Source: `components/northstar-agent-runtime/corpus_provenance.py`
+
+Corpus provenance: contamination-resistant probe reporting.
+
+#### `ContaminationError`
+
+A contamination-resistance check failed. Raised, never silent.
+
+#### `CorpusTamperedError`
+
+Corpus content does not match its registered pin.
+
+#### `CorpusRecord`
+
+The pinned identity of one corpus version.
+
+#### `corpus_digest(entries: Iterable[Mapping[str, Any]])`
+
+Pin a corpus: ``sha256:<hex>`` over JCS of the full entry list.
+
+#### `register_corpus(corpus_id: str, corpus_version: str, entries: Iterable[Mapping[str, Any]], *, held_out: bool=False)`
+
+Pin a corpus version to its content digest.
+
+#### `check_corpus_intact(record: CorpusRecord, entries: Iterable[Mapping[str, Any]])`
+
+Fail closed if the corpus no longer matches its registered pin.
+
+#### `check_heldout_exclusion(heldout_item_ids: Iterable[str], dev_item_ids: Iterable[str])`
+
+Assert name-level disjointness between held-out and dev corpora.
+
+#### `check_eval_mode(*, held_out: bool, final_eval: bool)`
+
+Enforce the held-out corpus's final-eval-only discipline.
+
+#### `check_no_training_overlap(scored_item_ids: Iterable[str], training_item_ids: Iterable[str])`
+
+Refuse to report accuracy when eval items appear in training data.
+
+#### `make_pair_report(record: CorpusRecord, accuracy_report: Mapping[str, Any], *, final_eval: bool=True, gate_version: str | None=None)`
+
+Emit a versioned ``(harness, corpus)`` pair report.
+
+#### `verify_pair_report(report: Mapping[str, Any], entries: Iterable[Mapping[str, Any]])`
+
+Verify a pair report against the actual corpus content.
+
 ### `screen_sanitizer`
 
 Source: `components/northstar-agent-runtime/screen_sanitizer.py`
