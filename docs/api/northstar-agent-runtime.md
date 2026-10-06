@@ -1208,6 +1208,46 @@ The failure-to-eval flywheel.
 
 Create a new flywheel instance.
 
+### `subgoal_ceiling`
+
+Source: `components/northstar-agent-runtime/subgoal_ceiling.py`
+
+Per-subgoal authority ceilings: hierarchical authorization for plans.
+
+#### `SubgoalCeilingError`
+
+Fail-closed error: privilege escalation or invalid hierarchy.
+
+#### `Subgoal`
+
+One plan node with its immutable authority ceiling.
+
+#### `SubgoalCeilings`
+
+Registry of hierarchical per-subgoal authority ceilings.
+
+- `open_root(subgoal_id: str, capabilities: object=None, description: str='')`
+  - Open a root subgoal (no parent).
+- `open_subgoal(parent_id: str, subgoal_id: str, capabilities: object=None, description: str='')`
+  - Open a child subgoal under an open parent.
+- `close_subgoal(subgoal_id: str)`
+  - Close a subgoal and its whole subtree (cascade).
+- `is_active(subgoal_id: str)`
+  - True only when the subgoal and every ancestor are open.
+- `effective_ceiling(subgoal_id: str)`
+  - The ceiling actually enforced for a subgoal.
+- `ancestors(subgoal_id: str)`
+  - Ancestor ids from the parent up to the root.
+- `children(subgoal_id: str)`
+  - Direct child ids (open or closed).
+- `depth(subgoal_id: str)`
+  - Nesting depth (root = 0).
+- `status(subgoal_id: str)`
+  - Lifecycle status (``open`` / ``closed``).
+- `authorize(subgoal_id: str, tool_name: str)`
+  - Hierarchical authorization decision.
+- `needs_host_approval(subgoal_id: str, tool_name: str)`
+  - True when the tool is outside the effective ceiling of an active subgoal -- i.e. it may only run after explicit host approval (gated ascent, same model as the scope ceiling in permissions.py).
 ### `failure_bundle`
 
 Source: `components/northstar-agent-runtime/failure_bundle.py`
