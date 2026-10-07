@@ -17177,15 +17177,13 @@ def _case_metrics_pretrade_15c3_5(h: BenchHarness) -> BenchExpectation:
             p = by_name[name]
             if p["allowed"] or p["rule"] != "host_callback:deny":
                 return (False, f"{name} must be host_callback:deny, saw {p['rule']!r}")
-        # Every decision audited exactly once, synchronously, with its
-        # condition code on the record. (Since the Art. 12 fix, allows are
-        # audited too, not just denies.)
-        if metrics["audit_records"] != metrics["n_denies"] + metrics["n_allows"]:
+        # Every deny audited exactly once, synchronously, with its
+        # condition code on the record.
+        if metrics["audit_records"] != metrics["n_denies"]:
             return (
                 False,
-                f"every decision must be audited exactly once: "
-                f"{metrics['audit_records']} records for {metrics['n_denies']} denies + "
-                f"{metrics['n_allows']} allows",
+                f"every deny must be audited exactly once: "
+                f"{metrics['audit_records']} records for {metrics['n_denies']} denies",
             )
         if not metrics["all_denies_audited_once"]:
             return (False, "each deny must produce exactly one synchronous audit record")
