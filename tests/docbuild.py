@@ -73,7 +73,7 @@ MANIFEST: dict[str, tuple[str, ...]] = {
     ),
     "northstar-codex-sidecar": ("sidecar", "transport", "service", "sidecar_socket"),
     "northstar-egress-sidecar": ("egress_sidecar", "egress_socket", "transport"),
-                                                                                                                                                                                                                                                                                "northstar-agent-runtime": (
+                                                                                                                                                                                                                                                                                    "northstar-agent-runtime": (
         "a2a_budget_combo", "a2a_gates", "a2abreak_probes", "ab_testing",
         "abac_engine", "abe_interface", "abstract_interp", "abuse_limits",
         "abuse_reporter", "account_recovery", "action_card", "action_verifier",
@@ -108,7 +108,10 @@ MANIFEST: dict[str, tuple[str, ...]] = {
         "ai_safety_threat", "ai_safety_validation", "ai_safety_verification", "ai_safety_vulnerability",
         "ai_saliency", "ai_sandbox", "ai_security", "ai_standards",
         "ai_stress_testing", "ai_surveillance", "ai_testing", "ai_threat",
-        "ai_throttling", "ai_transparency", "ai_uncertainty", "ai_validation",
+        "ai_throttling", "ai_transparency", "ai_transparency_auditing", "ai_transparency_certification",
+        "ai_transparency_incident", "ai_transparency_mitigation", "ai_transparency_monitoring", "ai_transparency_remediation",
+        "ai_transparency_risk", "ai_transparency_testing", "ai_transparency_threat", "ai_transparency_validation",
+        "ai_transparency_verification", "ai_transparency_vulnerability", "ai_uncertainty", "ai_validation",
         "ai_verification", "ai_visualization", "ai_vulnerability", "akf_export",
         "alert_manager", "aligned_ai", "alignment_eval", "aml_screener",
         "amplification", "amqp_broker", "analytics_tracker", "ansible_playbook",
@@ -310,7 +313,7 @@ MANIFEST: dict[str, tuple[str, ...]] = {
         "wireheading", "witness_enc", "workflow_automation", "workflow_engine",
         "workflow_orchestration", "write_ahead_log", "write_through_cache", "zab_interface",
         "zero_knowledge", "zeromq_patterns", "zk_interface", "zk_verifier",
-    ),,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,
+    ),,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,
 }
 
 GENERATED_HEADER = (
