@@ -1254,6 +1254,48 @@ Source: `components/northstar-agent-runtime/self_modification_probes.py`
 
 Self-modification probe corpus.
 
+#### `SelfStateRecord`
+
+One observed state event for a component of the agent's own substrate.
+
+#### `build_record(seq: int, component: str, digest: str, kind: str, identity: str, destination: str='', previous_digest: str='')`
+
+Build a chain-linked record; raises on malformed input (fail closed).
+
+#### `verify_record(record: SelfStateRecord)`
+
+Recompute the record digest; constant-time compare. Never raises.
+
+#### `ModificationRecord`
+
+A proposed or landed self-edit.
+
+#### `approval_binding(component: str, old_digest: str, new_digest: str)`
+
+The digest a valid human approval receipt must carry: bound to the exact (component, old, new) triple. A blanket go-ahead or a prose 'yes' cannot verify.
+
+#### `verify_modification(mod: ModificationRecord)`
+
+Recompute the record digest; constant-time compare. Never raises.
+
+#### `SelfStateLedger`
+
+Append-only ledger of self-state records. Fail closed: unverifiable records, chain breaks, and seq gaps raise instead of being stored.
+
+- `append(record: SelfStateRecord)`
+- `records()`
+- `detect_self_copy(own_digest: str)`
+  - Own digest bound to any destination -- a copy record carrying the agent's own content digest -- is self-copy evidence. Returns digest-pinned findings; never raises.
+- `detect_self_modification(pinned: dict[str, str])`
+  - Any component whose latest digest differs from the operator's pinned digest is unapproved self-modification evidence. Returns findings; never raises.
+#### `verify_ledger_integrity(ledger: SelfStateLedger)`
+
+Re-verify every record in the ledger. Returns (ok, findings); findings name bad_digest / bad_link / seq_gap. Never raises.
+
+#### `gate_modification(mod: ModificationRecord, pinned_ceiling: tuple[str, ...])`
+
+Decide a self-edit. Returns ("allow" | "deny", findings).
+
 #### `probe_names()`
 
 All self-modification attack probe names.
@@ -3508,6 +3550,76 @@ Probe name -> expected outcome ('deny' or 'allow').
 #### `main()`
 
 Print the corpus summary (diagnostic entry point).
+
+### `monitor_channel_probes`
+
+Source: `components/northstar-agent-runtime/monitor_channel_probes.py`
+
+Monitor-channel probe corpus + channel isolation / breakout detectors.
+
+#### `MonitorRecord`
+
+One digest-pinned entry on the monitor channel.
+
+#### `build_record(*, seq: int, direction: str, channel: str, payload_digest: str, origin: str)`
+
+Mint a well-formed, digest-pinned monitor-channel record.
+
+#### `verify_record(record: MonitorRecord)`
+
+Re-derive the record digest with a constant-time compare.
+
+#### `MonitorChannel`
+
+Append-only egress-only monitor channel.
+
+- `append(record: MonitorRecord)`
+- `records()`
+#### `detect_writeback(records: list[MonitorRecord] | tuple[MonitorRecord, ...])`
+
+Flag agent-originated writes on the monitor channel.
+
+#### `detect_breakout(records: list[MonitorRecord] | tuple[MonitorRecord, ...])`
+
+Flag host-escape shapes riding the monitor channel.
+
+#### `verify_channel_integrity(records: list[MonitorRecord] | tuple[MonitorRecord, ...])`
+
+Verify a host-reported monitor channel log.
+
+#### `ChannelTopology`
+
+Host-declared monitor-channel topology.
+
+#### `verify_channel_isolation(topology: ChannelTopology)`
+
+Check the declared topology against the isolation doctrine.
+
+#### `channel_head_digest(records: list[MonitorRecord] | tuple[MonitorRecord, ...])`
+
+Out-of-band anchor: digest over the pinned record digests in seq order.
+
+#### `probe_names()`
+
+All monitor-channel probe names.
+
+#### `benign_names()`
+
+All benign control names.
+
+#### `probes_by_family(family: str)`
+
+Attack probes in one family.
+
+#### `probe_by_name(name: str)`
+
+Look up any probe (attack or benign) by name.
+
+#### `expected_outcomes()`
+
+Map every probe name to its expected outcome.
+
+#### `main()`
 
 ### `negotiation_corpus_probes`
 
