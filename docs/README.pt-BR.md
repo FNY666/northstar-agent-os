@@ -1,10 +1,10 @@
 # Northstar Agent OS
 
-**Componentes de runtime abertos, confiáveis e governados para colegas de IA autônomos.**
+**Um pequeno runtime para agentes, com portas de permissão, orçamentos e trilha de auditoria.**
 
 [English](../README.md) · [简体中文](README.zh-CN.md) · [繁體中文](README.zh-TW.md) · [日本語](README.ja.md) · [Español](README.es.md) · [한국어](README.ko.md) · [Français](README.fr.md) · [Deutsch](README.de.md) · [Português (Brasil)](README.pt-BR.md) · [Italiano](README.it.md) · [Türkçe](README.tr.md) · [Tiếng Việt](README.vi.md)
 
-**Em uma frase:** Northstar é um projeto independente para montar colegas de IA governados a partir de roteamento explícito de modelos, limites de ferramentas locais, auditabilidade e execução recuperável. **O componente publicado hoje é o Northstar Codex Sidecar, um adaptador local restrito para workers — não uma plataforma completa de agentes autônomos.**
+**Em uma frase:** Northstar é um runtime para agentes pequeno e em construção — uma única entrada (`northstar agent`), limites visíveis, auditabilidade e execução recuperável. O kernel é montado a partir de subsistemas explícitos (runtime, contract, host, durable, sidecar, interop). **Não** é uma plataforma multiagente pronta (sem nuvem hospedada, sem frotas paralelas); o que sai hoje é a base útil para rodar agentes sem surpresas: um **`Shell`** isolado com **negação por padrão** (bubblewrap quando dá, fallback honesto por processo quando não), mais o Northstar Codex Sidecar como adaptador local restrito para workers.
 
 > English is the canonical project entry. Translations mirror its scope and security claims; update them when the canonical README changes.
 

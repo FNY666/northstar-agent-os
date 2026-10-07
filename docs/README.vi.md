@@ -1,10 +1,10 @@
 # Northstar Agent OS
 
-**Các thành phần runtime mở, đáng tin cậy và có quản trị cho đồng nghiệp AI tự chủ.**
+**Một runtime nhỏ cho agent, có cổng phân quyền, giới hạn ngân sách và nhật ký kiểm toán.**
 
 [English](../README.md) · [简体中文](README.zh-CN.md) · [繁體中文](README.zh-TW.md) · [日本語](README.ja.md) · [Español](README.es.md) · [한국어](README.ko.md) · [Français](README.fr.md) · [Deutsch](README.de.md) · [Português (Brasil)](README.pt-BR.md) · [Italiano](README.it.md) · [Türkçe](README.tr.md) · [Tiếng Việt](README.vi.md)
 
-**Tóm tắt trong một câu:** Northstar là dự án được duy trì độc lập để xây dựng các đồng nghiệp AI có quản trị bằng định tuyến mô hình rõ ràng, ranh giới công cụ cục bộ, khả năng kiểm toán và thực thi có thể khôi phục. **Thành phần được phát hành hôm nay là Northstar Codex Sidecar, một bộ điều hợp worker cục bộ bị giới hạn — không phải nền tảng agent tự chủ hoàn chỉnh.**
+**Tóm tắt trong một câu:** Northstar là một runtime nhỏ cho agent, vẫn đang hoàn thiện — một lối vào duy nhất (`northstar agent`), ranh giới rõ ràng, có thể kiểm toán và thực thi khôi phục được. Kernel được lắp từ các hệ con rõ ràng (runtime, contract, host, durable, sidecar, interop). Đây **không phải** nền tảng đa agent hoàn chỉnh (không cloud lưu trữ, không đội agent song song); thứ được phát hành hôm nay là phần hạ tầng hữu ích để chạy agent mà không bất ngờ: **`Shell`** sandbox **từ chối theo mặc định** (dùng bubblewrap khi được, nếu không thì fallback process trung thực), cùng Northstar Codex Sidecar như một bộ điều hợp worker cục bộ bị giới hạn.
 
 > English is the canonical project entry. Translations mirror its scope and security claims; update them when the canonical README changes.
 

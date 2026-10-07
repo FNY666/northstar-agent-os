@@ -1,10 +1,10 @@
 # Northstar Agent OS
 
-**자율 AI 동료를 위한 개방적이고 신뢰할 수 있으며 거버넌스가 적용된 런타임 구성 요소입니다.**
+**권한 게이트, 예산 상한, 감사 로그를 갖춘 작은 agent 런타임.**
 
 [English](../README.md) · [简体中文](README.zh-CN.md) · [繁體中文](README.zh-TW.md) · [日本語](README.ja.md) · [Español](README.es.md) · [한국어](README.ko.md) · [Français](README.fr.md) · [Deutsch](README.de.md) · [Português (Brasil)](README.pt-BR.md) · [Italiano](README.it.md) · [Türkçe](README.tr.md) · [Tiếng Việt](README.vi.md)
 
-**한 문장으로:** Northstar는 명시적 모델 라우팅, 로컬 도구 경계, 감사 가능성, 복구 가능한 실행을 조합해 거버넌스가 적용된 AI 동료 런타임을 만드는 독립 프로젝트입니다. **현재 공개된 구성 요소는 제한된 로컬 worker 어댑터인 Northstar Codex Sidecar이며, 완성된 자율 에이전트 플랫폼이 아닙니다.**
+**한 문장으로:** Northstar는 작고 아직 개발 중인 agent 런타임입니다 — 단일 진입점(`northstar agent`), 보이는 경계, 감사 가능성, 복구 가능한 실행. 커널은 명시적인 서브시스템(runtime, contract, host, durable, sidecar, interop)으로 구성됩니다. 완성된 멀티 에이전트 플랫폼이 **아닙니다**(호스티드 클라우드 없음, 병렬 플릿 없음). 오늘 제공되는 것은 에이전트를 안심하고 돌리기 위한 실용적인 기반입니다: **기본 거부 샌드박스 `Shell`**(가능하면 bubblewrap, 아니면 정직한 프로세스 폴백), 그리고 제한된 로컬 worker 어댑터인 Northstar Codex Sidecar.
 
 > English is the canonical project entry. Translations mirror its scope and security claims; update them when the canonical README changes.
 

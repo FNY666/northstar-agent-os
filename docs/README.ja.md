@@ -1,10 +1,10 @@
 # Northstar Agent OS
 
-**自律型 AI コワーカーのための、オープンで信頼でき、ガバナンスされたランタイムコンポーネント。**
+**権限ゲート、予算上限、監査ログを備えた小さな agent ランタイム。**
 
 [English](../README.md) · [简体中文](README.zh-CN.md) · [繁體中文](README.zh-TW.md) · [日本語](README.ja.md) · [Español](README.es.md) · [한국어](README.ko.md) · [Français](README.fr.md) · [Deutsch](README.de.md) · [Português (Brasil)](README.pt-BR.md) · [Italiano](README.it.md) · [Türkçe](README.tr.md) · [Tiếng Việt](README.vi.md)
 
-**一言で言うと：** Northstar は、明示的なモデルルーティング、ローカルツールの境界、監査可能性、復旧可能な実行を組み合わせ、ガバナンスされた AI コワーカーを構築するための独立プロジェクトです。**現在公開されているコンポーネントは、制限付きのローカル worker アダプターである Northstar Codex Sidecar です。完成した自律型エージェントプラットフォームではありません。**
+**一言で言うと：** Northstar は小さな、まだ開発中の agent ランタイムです — 入口は `northstar agent` 一つ、可視の境界、監査可能性、復旧可能な実行。カーネルは明示的なサブシステム（runtime、contract、host、durable、sidecar、interop）で構成されています。完成したマルチエージェントプラットフォームでは**ありません**（ホスト型クラウドなし、並列フリートなし）。今日提供するのは、agent を安心して動かすための実用的な土台です：**デフォルト拒否のサンドボックス `Shell`**（使える場合は bubblewrap、そうでなければ正直な process フォールバック）、および制限付きローカル worker アダプターである Northstar Codex Sidecar。
 
 > English is the canonical project entry. Translations mirror its scope and security claims; update them when the canonical README changes.
 
