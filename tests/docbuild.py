@@ -151,6 +151,7 @@ MANIFEST: dict[str, tuple[str, ...]] = {
         "benchmark_retirement_probes",
         "commerce_mandate_probes",
         "monitor_channel_probes",
+        "sleeper_agent_probes",
         "negotiation_corpus_probes",
         "refusal_pattern_probes",
         "evidence_compaction_probes",
