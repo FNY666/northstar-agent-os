@@ -14313,6 +14313,2301 @@ Trust tiers for plugin bundles: which claims carry evidence, and what happens wh
 
 The trust tier of one bundle, plus the evidence gaps that capped it.
 
+### `approval_fatigue_probes`
+
+Source: `components/northstar-agent-runtime/approval_fatigue_probes.py`
+
+Approval-fatigue probe corpus (consent-fatigue HITL bypass).
+
+#### `ApprovalEvent`
+
+One approval-path decision in a trajectory window.
+
+#### `FatigueMonitor`
+
+Sliding-window classifier over approval trajectories.
+
+- `classify(events: tuple[ApprovalEvent, ...], now: float)`
+  - Classify the approval trajectory ending at ``now``.
+- `should_record(events: tuple[ApprovalEvent, ...], now: float)`
+  - Whether approvals in this trajectory may be bound to receipts.
+- `snapshot(events: tuple[ApprovalEvent, ...], now: float)`
+  - Digest-pinned snapshot of a classification for the audit trail.
+#### `verify_snapshot(snapshot: dict[str, Any])`
+
+Re-derive a monitor snapshot digest with constant-time compare.
+
+#### `FatigueMeter`
+
+Continuous fatigue measurement over approval trajectories.
+
+- `measure(events: tuple[ApprovalEvent, ...], now: float)`
+  - Measure fatigue over the trajectory ending at ``now``.
+#### `verify_measurement(measurement: dict[str, Any])`
+
+Re-derive a fatigue-measurement digest with constant-time compare.
+
+#### `FatigueResistantGate`
+
+Disposition engine that resists consent fatigue.
+
+- `decide(events: tuple[ApprovalEvent, ...], now: float, risk_tier: str=RISK_LOW, request_ref: str | None=None)`
+  - Return a digest-pinned disposition for the trajectory.
+#### `verify_decision(decision: dict[str, Any])`
+
+Re-derive a gate-decision digest with constant-time compare.
+
+#### `probe_names()`
+
+All approval-fatigue probe names.
+
+#### `benign_names()`
+
+All benign control names.
+
+#### `probes_by_family(family: str)`
+
+Attack probes in one family.
+
+#### `probe_by_name(name: str)`
+
+Look up any probe (attack or benign) by name.
+
+#### `expected_outcomes()`
+
+Map every probe name to its expected outcome.
+
+### `argument_smuggling_probes`
+
+Source: `components/northstar-agent-runtime/argument_smuggling_probes.py`
+
+Argument-smuggling probes: smuggling shapes, schema bypass, downstream meaning.
+
+#### `attack_probe_names()`
+
+All argument-smuggling attack probe names.
+
+#### `benign_probe_names()`
+
+All argument-smuggling benign probe names.
+
+#### `probes_in_family(family: str)`
+
+Attack probes in one family.
+
+#### `probe_by_name(name: str)`
+
+Look up any probe (attack or benign) by name.
+
+#### `expected_outcomes()`
+
+Map every probe name to its expected outcome.
+
+#### `has_confusables(text: str)`
+
+True when NFKC normalization changes the string.
+
+#### `has_mixed_script(text: str)`
+
+True when alphabetic characters span more than one confusable script.
+
+#### `is_nested_json_payload(text: str)`
+
+True when a string parses as a JSON object or array.
+
+#### `is_double_encoded(text: str)`
+
+True when a string is JSON that decodes to another JSON string.
+
+#### `inspect_string_argument(text: str)`
+
+Name the smuggling shapes in one string argument.
+
+#### `ArgumentRecord`
+
+One pinned argument: what the gate validated.
+
+#### `seal_argument(tool: str, parameter: str, value: Any, declared_type: str)`
+
+Pin one argument at validation time.
+
+#### `verify_record(record: ArgumentRecord)`
+
+Re-derive a record's seal; constant-time compare, never raises.
+
+#### `detect_schema_bypass(record: ArgumentRecord)`
+
+Name the schema-bypass shapes in one sealed argument.
+
+#### `undeclared_keys(arguments: Mapping[str, Any], declared: Collection[str])`
+
+Name argument keys the schema never declared.
+
+#### `surface_digest(arguments: Mapping[str, Any])`
+
+Digest what the gate validated: the raw argument surface.
+
+#### `meaning_digest(arguments: Mapping[str, Any])`
+
+Digest what the downstream will execute: the normalized meaning.
+
+#### `MeaningEnvelope`
+
+Binds a validated surface to its derived meaning.
+
+#### `seal_meaning(tool: str, arguments: Mapping[str, Any])`
+
+Pin the surface and meaning of validated arguments.
+
+#### `verify_envelope(envelope: MeaningEnvelope)`
+
+Re-derive an envelope's seal; constant-time compare, never raises.
+
+#### `detect_meaning_gap(envelope: MeaningEnvelope, dispatched_arguments: Mapping[str, Any])`
+
+Compare the meaning the gate sealed against what will execute.
+
+#### `gate_arguments(tool: str, declared_types: Mapping[str, str], arguments: Mapping[str, Any])`
+
+Gate one tool invocation's arguments; fail closed.
+
+#### `main()`
+
+Print a small summary for the CLI.
+
+### `artifact_graph_probes`
+
+Source: `components/northstar-agent-runtime/artifact_graph_probes.py`
+
+Artifact-graph probes: lineage forgery / graph diagnosis / artifact integrity.
+
+#### `ArtifactNode`
+
+One artifact in the lineage graph: content pinned, parents linked.
+
+#### `build_node(artifact_id: str, content_digest: str, parent_digests: tuple[str, ...] | list[str], producer: str, kind: str, provenance_domain: str)`
+
+Build a node and pin its digest over the sealed body.
+
+#### `verify_node(node: ArtifactNode)`
+
+Recompute the node's digest; constant-time compare. Never raises.
+
+#### `ArtifactGraph`
+
+Append-only artifact lineage graph. Fail-closed on bad nodes.
+
+- `add_node(node: ArtifactNode)`
+  - Append a node. Raises on unverifiable nodes or duplicates.
+- `get(digest: str)`
+- `digests()`
+#### `verify_graph_integrity(graph: ArtifactGraph)`
+
+Verify every node and link. Returns (ok, findings). Never raises.
+
+#### `lineage_walk(graph: ArtifactGraph, node_digest: str)`
+
+Transitive ancestors of ``node_digest`` (oldest last), cycle-guarded.
+
+#### `diagnose(graph: ArtifactGraph, outcome_digest: str)`
+
+Graph-based diagnosis of a bad outcome.
+
+#### `graph_head_digest(graph: ArtifactGraph)`
+
+Head digest for out-of-band anchoring of the whole graph.
+
+#### `probe_names()`
+
+All artifact-graph attack probe names.
+
+#### `benign_names()`
+
+All benign control names.
+
+#### `probes_by_family(family: str)`
+
+Attack probes in one family.
+
+#### `probe_by_name(name: str)`
+
+Look up any probe (attack or benign) by name.
+
+#### `expected_outcomes()`
+
+Map every probe name to its expected outcome.
+
+### `ask_or_solve_probes`
+
+Source: `components/northstar-agent-runtime/ask_or_solve_probes.py`
+
+Ask-or-solve probes: first-class questioning under uncertainty.
+
+#### `probe_names()`
+
+All probe names in the corpus.
+
+#### `attack_names()`
+
+Names of the attack probes (expected deny).
+
+#### `benign_names()`
+
+Names of the benign control probes (expected allow).
+
+#### `probe_by_name(name: str)`
+
+Look up one probe by name; raises KeyError fail-closed.
+
+#### `probe_invokes_deny_side(probe: Mapping[str, Any])`
+
+True if the probe's gate_interaction names an active deny-side mechanism.
+
+#### `ClarificationQuestion`
+
+One candidate clarification question, pinned and gateable.
+
+- `verify()`
+  - Recompute the digest; a tampered question fails closed.
+#### `QuestionFinding`
+
+One gate finding over a question.
+
+- `as_dict()`
+#### `check_scope_minimality(question: ClarificationQuestion)`
+
+The question may only request declared-needed fields.
+
+#### `check_axis_binding(question: ClarificationQuestion)`
+
+Every question must name the uncertainty axis it reduces.
+
+#### `check_no_leading(question: ClarificationQuestion)`
+
+The question must not recommend, propose an answer, or confirm a risk.
+
+#### `check_no_silence_consent(question: ClarificationQuestion)`
+
+The question must not frame non-objection as approval.
+
+#### `check_no_confirmation_laundering(question: ClarificationQuestion)`
+
+A question about a risky action must not substitute for the receipt path.
+
+#### `gate_question(question: ClarificationQuestion)`
+
+Run all question gates. Verdict is a conjunction, never a score.
+
+#### `AskDecision`
+
+One pinned ask/solve/abstain decision.
+
+- `verify()`
+- `open_axes` (property)
+  - Declared axes no real answer has closed.
+- `as_dict()`
+#### `AskPolicy`
+
+Confidence bands for the ask decision, in the abstain_threshold spirit.
+
+#### `decide_next(*, decision_id: str, confidence: float, uncertainty_axes: Sequence[str]=(), answered_axes: Sequence[str]=(), questions_asked: int=0, policy: AskPolicy | None=None, reason: str='')`
+
+Route one uncertainty state to solve / ask / abstain. Fail-closed.
+
+#### `DialogueSession`
+
+Append-only record of one ask/solve/abstain dialogue.
+
+- `ask(question: ClarificationQuestion)`
+  - Gate a question and, if it passes, append it. Fail-closed.
+- `record(decision: AskDecision)`
+  - Append a pinned decision to the session.
+- `report()`
+  - Per-question, per-gate evidence. No composite score, ever.
+#### `requires_human_path(decision: AskDecision)`
+
+Whether an AskDecision must take the abstain_threshold human path.
+
+### `benchmark_retirement_probes`
+
+Source: `components/northstar-agent-runtime/benchmark_retirement_probes.py`
+
+Benchmark-retirement probe corpus + retirement detection / revalidation gates.
+
+#### `retirement_triggers()`
+
+The canonical revalidation trigger list for benchmark-backed cases.
+
+#### `check_triggers(triggers: Any)`
+
+Name every canonical trigger missing from the given trigger list.
+
+#### `BenchmarkRecord`
+
+A digest-pinned (benchmark, corpus, harness, task-info, status) tuple.
+
+#### `build_record(benchmark_id: str, corpus_digest: str, harness_digest: str, task_info_digest: str, status: str=STATUS_LIVE)`
+
+Build a digest-pinned benchmark record (fail-closed on bad inputs).
+
+#### `verify_record(record: BenchmarkRecord)`
+
+Constant-time digest verification of a benchmark record.
+
+#### `retire_record(record: BenchmarkRecord)`
+
+Return a new record with status retired (the old digest stays sealed).
+
+#### `detect_retirement(new_record: BenchmarkRecord, old_record: BenchmarkRecord)`
+
+Name every retirement-relevant change between two records.
+
+#### `SaturationReport`
+
+Host-reported saturation check over a score list.
+
+#### `check_saturation(benchmark_id: str, scores: Any, ceiling: float=0.99)`
+
+Saturated iff every reported score meets or exceeds the ceiling.
+
+#### `ContaminationSignal`
+
+A host-reported contamination signal, digest-pinned.
+
+#### `record_contamination(benchmark_id: str, kind: str, detail: str)`
+
+Pin a contamination signal (fail-closed on unknown kinds).
+
+#### `gate_benchmark_claim(record: BenchmarkRecord, saturation: SaturationReport | None=None, contamination: tuple[ContaminationSignal, ...]=())`
+
+Decide whether a benchmark may be cited as evidence.
+
+#### `attack_probe_names()`
+
+Names of the attack probes (expected deny).
+
+#### `benign_probe_names()`
+
+Names of the benign control probes (expected allow).
+
+#### `probes_in_family(family: str)`
+
+All probes (attack + benign) in a corpus family.
+
+#### `probe_by_name(name: str)`
+
+Look up a probe by name (raises KeyError on unknown names).
+
+#### `expected_outcomes()`
+
+Probe name -> expected outcome ('deny' or 'allow').
+
+#### `main()`
+
+Print the corpus summary (diagnostic entry point).
+
+### `commerce_mandate_probes`
+
+Source: `components/northstar-agent-runtime/commerce_mandate_probes.py`
+
+Agentic-commerce mandate probe corpus + forged / replay / amount-switch probes.
+
+#### `CommerceMandate`
+
+A digest-pinned payment mandate.
+
+#### `build_mandate(mandate_id: str, payer_id: str, authorized_agent: str, payee_id: str, amount_minor: int, currency: str, task_digest: str, issuer_id: str, expires_iso: str='')`
+
+Build a digest-pinned commerce mandate (fail-closed on bad inputs).
+
+#### `verify_mandate(mandate: CommerceMandate)`
+
+Constant-time digest verification of a mandate record.
+
+#### `MandateLedger`
+
+Append-only ledger of consumed mandate digests.
+
+- `is_consumed(digest: str)`
+- `consume(digest: str)`
+  - Consume a mandate digest. Returns False if already consumed.
+- `consumed_count()`
+#### `authorize_payment(mandate: CommerceMandate, *, amount_minor: int, currency: str, payee_id: str, task_digest: str, ledger: MandateLedger, now_iso: str, issuer_registry: Any)`
+
+Authorize one payment attempt against one mandate.
+
+#### `attack_probe_names()`
+
+Names of the attack probes (expected deny).
+
+#### `benign_probe_names()`
+
+Names of the benign control probes (expected allow).
+
+#### `probes_in_family(family: str)`
+
+All probes (attack + benign) in a corpus family.
+
+#### `probe_by_name(name: str)`
+
+Look up a probe by name (raises KeyError on unknown names).
+
+#### `expected_outcomes()`
+
+Probe name -> expected outcome ('deny' or 'allow').
+
+#### `main()`
+
+Print the corpus summary (diagnostic entry point).
+
+### `constraint_synthesis_probes`
+
+Source: `components/northstar-agent-runtime/constraint_synthesis_probes.py`
+
+Constraint-synthesis probes: AgentRx-style executable invariants from tool schemas.
+
+#### `attack_probe_names()`
+
+All constraint-synthesis attack probe names.
+
+#### `benign_probe_names()`
+
+All constraint-synthesis benign probe names.
+
+#### `probes_in_family(family: str)`
+
+Attack probes in one family.
+
+#### `probe_by_name(name: str)`
+
+Look up any probe (attack or benign) by name.
+
+#### `expected_outcomes()`
+
+Map every probe name to its expected outcome.
+
+#### `Constraint`
+
+One synthesized, digest-pinned invariant.
+
+#### `build_constraint(kind: str, spec: Mapping[str, Any])`
+
+Mint a digest-pinned constraint.
+
+#### `synthesize_constraints(schema: Mapping[str, Any])`
+
+Compile a schema document into a digest-pinned constraint set.
+
+#### `ConstraintSet`
+
+A synthesized constraint set, bound to one schema digest.
+
+#### `verify_constraint_set(constraint_set: ConstraintSet)`
+
+Constant-time integrity check of a constraint set. Never raises.
+
+#### `expected_constraint_names(schema: Mapping[str, Any])`
+
+Names every constraint a faithful synthesis must emit.
+
+#### `check_completeness(schema: Mapping[str, Any], constraint_set: ConstraintSet)`
+
+Verify the set covers every derivable constraint.
+
+#### `ValidationFinding`
+
+One named finding from argument validation.
+
+#### `validate_arguments(constraint_set: ConstraintSet, arguments: Mapping[str, Any], schema: Mapping[str, Any])`
+
+Run the synthesized conjunction against candidate arguments.
+
+#### `validation_receipt(constraint_set: ConstraintSet, arguments: Mapping[str, Any], schema: Mapping[str, Any])`
+
+Bind a validation outcome to the call and the set as a receipt.
+
+#### `main()`
+
+Print a small summary for the CLI.
+
+### `counterfactual_explanation_probes`
+
+Source: `components/northstar-agent-runtime/counterfactual_explanation_probes.py`
+
+Counterfactual-explanation probes: quality gates for explanation surfaces.
+
+#### `probe_names()`
+
+Names of the attack probes (expected deny).
+
+#### `benign_names()`
+
+Names of the benign control probes (expected allow).
+
+#### `probe_by_name(name: str)`
+
+Look up one probe by name; raises KeyError fail-closed.
+
+#### `probe_invokes_deny_side(probe: Mapping[str, Any])`
+
+True if the probe's gate_interaction names an active deny-side mechanism.
+
+#### `ExplanationClaim`
+
+One checkable claim inside a rendered explanation.
+
+#### `ExplanationRecord`
+
+A rendered explanation, pinned for gate checking.
+
+- `verify_digest()`
+  - Constant-time check that the pinned digest matches the record.
+#### `GateFinding`
+
+One quality-gate outcome, digest-pinned.
+
+#### `check_anchoring(record: ExplanationRecord)`
+
+Every claim anchors to a known audit-record field with matching value.
+
+#### `check_rule_consistency(record: ExplanationRecord, rule_table: Mapping[str, Mapping[str, Any]])`
+
+The rendered counterfactual matches the pinned rule explanation.
+
+#### `check_hard_deny(record: ExplanationRecord, rule_table: Mapping[str, Mapping[str, Any]], hard_deny_codes: Sequence[str]=HARD_DENY_CODES)`
+
+Hard denies carry the no-remediation statement; nothing else.
+
+#### `check_pace(record: ExplanationRecord, immutables: Sequence[str])`
+
+The remediation never proposes changing an immutable attribute.
+
+#### `QualityGateReport`
+
+The full quality-gate outcome for one explanation.
+
+#### `run_quality_gate(record: ExplanationRecord, rule_table: Mapping[str, Mapping[str, Any]], immutables: Sequence[str])`
+
+Run all four deterministic quality gates over one explanation.
+
+#### `CounterfactualQuestion`
+
+One "what would the gate do if ...?" question.
+
+#### `QuestionResult`
+
+Predicted vs actual verdict for one counterfactual question.
+
+#### `SimulatabilityReport`
+
+Per-question simulatability outcome for one explanation.
+
+#### `run_simulatability(record: ExplanationRecord, questions: Sequence[CounterfactualQuestion], predict: Callable[[ExplanationRecord, CounterfactualQuestion], str], threshold: int)`
+
+CHIVE-style simulatability: can the explanation predict the gate?
+
+#### `rule_table_from_counterfactual(rule_explanations: Mapping[str, Any], hard_deny_namespaces: Sequence[str]=('offensive', 'exfiltration', 'mosaic_assembly'))`
+
+Build a rule table from ``counterfactual.py``'s RULE_EXPLANATIONS.
+
+### `destructive_prefix_probes`
+
+Source: `components/northstar-agent-runtime/destructive_prefix_probes.py`
+
+Destructive-prefix probes: the tool name is an attack surface.
+
+#### `classify_name(name: str)`
+
+Return the risk classes signaled by a tool name's prefixes.
+
+#### `detect_prefix_risk(name: str)`
+
+Sorted risk classes for a name; empty tuple when unclassified.
+
+#### `attack_probe_names()`
+
+All destructive-prefix attack probe names.
+
+#### `benign_probe_names()`
+
+All benign control names.
+
+#### `probes_in_family(family: str)`
+
+Attack probes in one family.
+
+#### `probe_by_name(name: str)`
+
+Look up any probe (attack or benign) by name.
+
+#### `expected_outcomes()`
+
+Map every probe name to its expected outcome.
+
+#### `NameRecord`
+
+A pinned tool-naming identity.
+
+#### `seal_name(registered_name: str, display_name: str | None, description: str, declared_risk: tuple[str, ...])`
+
+Pin a tool's naming identity: seal name + label + description + risk.
+
+#### `verify_record(record: NameRecord)`
+
+Constant-time re-derivation check of a name record's seal.
+
+#### `detect_undeclared_risk(record: NameRecord)`
+
+Name the risk classes the name carries that were never declared.
+
+#### `detect_alias_hides_risk(record: NameRecord)`
+
+True when the display label drops every risk class the name carries.
+
+#### `detect_description_contradiction(record: NameRecord)`
+
+True when the description claims safety the name's risk denies.
+
+#### `AliasMapping`
+
+A pinned alias mapping: alias resolves to exactly one registered name.
+
+#### `pin_alias(alias: str, registered_name: str, declared_risk: tuple[str, ...])`
+
+Pin an alias mapping at registration time.
+
+#### `verify_alias(mapping: AliasMapping)`
+
+Constant-time re-derivation check of an alias mapping's seal.
+
+#### `resolve_alias(alias: str, mappings: tuple[AliasMapping, ...])`
+
+Resolve an alias through pinned mappings only. Ad-hoc is not resolved.
+
+#### `NameGateDecision`
+
+A digest-pinned naming-gate decision: disposition + findings.
+
+#### `verify_decision(decision: NameGateDecision)`
+
+Constant-time re-derivation check of a gate decision's seal.
+
+#### `gate_name(record: NameRecord)`
+
+Fail-closed naming gate over a pinned name record.
+
+#### `main()`
+
+Print a small summary for the CLI.
+
+### `enforcement_gap_probes`
+
+Source: `components/northstar-agent-runtime/enforcement_gap_probes.py`
+
+Enforcement-gap probes (formal twin of the P0 wiring rule).
+
+#### `probe_names()`
+
+Names of the attack probes (detected-but-not-acted shapes).
+
+#### `benign_names()`
+
+Names of the benign control probes.
+
+#### `probe_by_name(name: str)`
+
+Return the probe record for ``name``; fail closed on unknown names.
+
+#### `probes_by_family(family: str)`
+
+All probes in ``family``.
+
+#### `deny_side_keywords_ok(text: str)`
+
+True if ``text`` names an active deny-side mechanism.
+
+#### `DetectionRecord`
+
+A mechanical detection record: severity, target identity, digest.
+
+#### `EnforcementDecision`
+
+A controller decision bound to a detection record.
+
+#### `EnforcementVerdict`
+
+Pinned verdict of one detection/decision pair.
+
+- `pinned()`
+  - Return a copy with the JCS digest pin set.
+#### `enforce(record: DetectionRecord, decision: EnforcementDecision | None, *, caller: str)`
+
+Bind a detection record to a controller decision (fail closed).
+
+#### `verify_verdict(verdict: EnforcementVerdict)`
+
+Constant-time check of a verdict's digest pin.
+
+#### `WiringBinding`
+
+One production binding of a capability into a gate path.
+
+#### `WiringReport`
+
+Per-module wiring verdicts. ``ok`` is True iff no gaps found.
+
+- `gap_modules()`
+  - Modules whose claimed capability has at least one gap.
+- `module_ok(module: str)`
+  - True iff ``module`` is wired with no gaps.
+- `module_gaps(module: str)`
+  - Gap reasons for ``module`` (empty tuple if none / unknown).
+#### `validate_wiring(capabilities: Sequence[tuple[str, str]], bindings: Sequence[WiringBinding])`
+
+Validate that every claimed capability is wired into production.
+
+### `evidence_aging_probes`
+
+Source: `components/northstar-agent-runtime/evidence_aging_probes.py`
+
+Evidence-aging probe corpus + freshness / decay detectors + aging gates.
+
+#### `parse_timestamp(ts: Any)`
+
+Epoch seconds for an evidence timestamp; None when missing/malformed.
+
+#### `EvidenceRecord`
+
+One digest-pinned evidence item with its observation time.
+
+#### `build_record(*, evidence_id: str, kind: str, observed_ts: Any, payload_digest: str, issuer: str, max_age_seconds: int)`
+
+Mint a well-formed, digest-pinned evidence record.
+
+#### `verify_record(record: EvidenceRecord)`
+
+Re-derive the record digest with a constant-time compare.
+
+#### `freshness(record: EvidenceRecord, as_of: Any)`
+
+Age and freshness status of ``record`` against ``as_of``.
+
+#### `gate_evidence(record: EvidenceRecord, as_of: Any, *, ceiling_seconds: int | None=None)`
+
+Fail-closed gate verdict for one evidence record.
+
+#### `gate_batch(records: list[EvidenceRecord] | tuple[EvidenceRecord, ...], as_of: Any, *, ceiling_seconds: int | None=None)`
+
+Gate a batch of evidence as a unit.
+
+#### `detect_restamp(old: EvidenceRecord, new: EvidenceRecord)`
+
+Detect timestamp restamping without re-observation.
+
+#### `probe_names()`
+
+All evidence-aging attack probe names.
+
+#### `benign_names()`
+
+All benign control names.
+
+#### `probes_by_family(family: str)`
+
+Probes in one family (attacks plus benign).
+
+#### `probe_by_name(name: str)`
+
+Look up any evidence-aging probe (attack or benign) by name.
+
+#### `expected_outcomes()`
+
+probe name -> expected gate outcome ('deny' or 'allow').
+
+#### `main()`
+
+Print the corpus inventory.
+
+### `evidence_compaction_probes`
+
+Source: `components/northstar-agent-runtime/evidence_compaction_probes.py`
+
+Evidence-compaction probe corpus + payload/evidence separation detectors.
+
+#### `attack_names()`
+
+All evidence-compaction attack probe names.
+
+#### `benign_names()`
+
+All benign control names.
+
+#### `probes_by_family(family: str)`
+
+Attack probes in one family.
+
+#### `probe_by_name(name: str)`
+
+Look up any probe (attack or benign) by name.
+
+#### `expected_outcomes()`
+
+Map every probe name to its expected outcome.
+
+#### `EvidenceItem`
+
+One item in a compacted bundle.
+
+#### `build_item(kind: str, content: str, source_digest: str='', seq: int=0)`
+
+Build a digest-pinned item. Fail-closed on bad kind/empty content.
+
+#### `verify_item(item: EvidenceItem)`
+
+Recompute the item digest with constant-time compare.
+
+#### `CompactionBundle`
+
+An append-only compacted bundle plus its pinned source manifest.
+
+#### `compact(evidence: list[EvidenceItem], payload: list[EvidenceItem], source_manifest: str, dropped_payload: tuple[str, ...]=())`
+
+Build a bundle with evidence/payload separation enforced.
+
+#### `verify_bundle_integrity(bundle: CompactionBundle, expected_evidence_digests: tuple[str, ...]=())`
+
+Verify a compacted bundle. Never raises; returns ``(ok, findings)``.
+
+#### `bundle_head_digest(bundle: CompactionBundle)`
+
+Anchor digest for a bundle, for out-of-band pinning.
+
+#### `main()`
+
+Print a corpus summary (smoke entry point).
+
+### `history_deviation_probes`
+
+Source: `components/northstar-agent-runtime/history_deviation_probes.py`
+
+History-deviation probes: plan tracking / precedent-gap detection.
+
+#### `HistoryEntry`
+
+One entry in the host-reported plan history.
+
+#### `build_entry(kind: str, tool: str, arguments_digest: str, seq: int, revision: int, origin: str, previous_digest: str='sha256:genesis')`
+
+Build a digest-pinned history entry.
+
+#### `verify_entry(entry: HistoryEntry)`
+
+Recompute an entry's digest; constant-time compare.
+
+#### `PlanHistory`
+
+Append-only host-reported plan history.
+
+- `append(entry: HistoryEntry)`
+- `entries()`
+- `digests()`
+#### `verify_history(history: PlanHistory)`
+
+Re-verify a whole history; never raises.
+
+#### `detect_deviation(history: PlanHistory)`
+
+Flag executed actions the plan history cannot account for.
+
+#### `detect_precedent_gap(history: PlanHistory)`
+
+Flag actions with no precedent in the agent's own history.
+
+#### `track_plan(history: PlanHistory)`
+
+Per-step plan conformance report.
+
+#### `history_head_digest(history: PlanHistory)`
+
+Head digest for out-of-band anchoring of the whole history.
+
+#### `probe_names()`
+
+All history-deviation attack probe names.
+
+#### `benign_names()`
+
+All benign control names.
+
+#### `probes_by_family(family: str)`
+
+Attack probes in one family.
+
+#### `probe_by_name(name: str)`
+
+Look up any probe (attack or benign) by name.
+
+#### `expected_outcomes()`
+
+Map every probe name to its expected outcome.
+
+#### `main()`
+
+Print a small summary for the CLI.
+
+### `memory_admission_probes`
+
+Source: `components/northstar-agent-runtime/memory_admission_probes.py`
+
+Memory-admission probe corpus + recalled-content privilege / injection / admission gates.
+
+#### `MemoryAdmissionError`
+
+A memory-admission record or gate step failed. Raised, never silent.
+
+#### `MemoryRecord`
+
+One memory record as admitted (write time) or recalled (read time).
+
+- `as_dict()`
+- `digest()`
+  - JCS-canonical digest of the record itself.
+#### `build_record(record_id: str, content_digest: str, writer_id: str, trust_tier: str, source_channel: str, pinned: bool=False, supersedes: str | None=None)`
+
+Construct a validated MemoryRecord; raises on malformed input.
+
+#### `verify_record(record: MemoryRecord, digest: str)`
+
+Constant-time check that a record matches its pinned digest.
+
+#### `WriteDecision`
+
+The write-time admission verdict for one memory record.
+
+#### `gate_memory_write(record: MemoryRecord)`
+
+Admit (or refuse) a memory write. Fail-closed.
+
+#### `ReadBinding`
+
+The read-time privilege binding for one recalled record.
+
+#### `gate_memory_read(record: MemoryRecord)`
+
+Bind the privilege a recalled record carries into the model context.
+
+#### `MemoryStore`
+
+Append-only memory store with admission on write and privilege binding on read.
+
+- `add(record: MemoryRecord)`
+  - Admit a write; store only on allow. Never raises on gate outcome.
+- `recall(record_id: str)`
+  - Recall one record with its read-time privilege binding.
+- `record_ids()`
+- `decisions()`
+#### `probe_names()`
+
+All memory-admission probe names.
+
+#### `probes_by_family(family: str)`
+
+Probes in one family.
+
+#### `probe_by_name(name: str)`
+
+One probe by name; KeyError on unknown names.
+
+#### `expected_outcomes()`
+
+Map every probe name to its expected outcome.
+
+### `monitor_channel_probes`
+
+Source: `components/northstar-agent-runtime/monitor_channel_probes.py`
+
+Monitor-channel probe corpus + channel isolation / breakout detectors.
+
+#### `MonitorRecord`
+
+One digest-pinned entry on the monitor channel.
+
+#### `build_record(*, seq: int, direction: str, channel: str, payload_digest: str, origin: str)`
+
+Mint a well-formed, digest-pinned monitor-channel record.
+
+#### `verify_record(record: MonitorRecord)`
+
+Re-derive the record digest with a constant-time compare.
+
+#### `MonitorChannel`
+
+Append-only egress-only monitor channel.
+
+- `append(record: MonitorRecord)`
+- `records()`
+#### `detect_writeback(records: list[MonitorRecord] | tuple[MonitorRecord, ...])`
+
+Flag agent-originated writes on the monitor channel.
+
+#### `detect_breakout(records: list[MonitorRecord] | tuple[MonitorRecord, ...])`
+
+Flag host-escape shapes riding the monitor channel.
+
+#### `verify_channel_integrity(records: list[MonitorRecord] | tuple[MonitorRecord, ...])`
+
+Verify a host-reported monitor channel log.
+
+#### `ChannelTopology`
+
+Host-declared monitor-channel topology.
+
+#### `verify_channel_isolation(topology: ChannelTopology)`
+
+Check the declared topology against the isolation doctrine.
+
+#### `channel_head_digest(records: list[MonitorRecord] | tuple[MonitorRecord, ...])`
+
+Out-of-band anchor: digest over the pinned record digests in seq order.
+
+#### `probe_names()`
+
+All monitor-channel probe names.
+
+#### `benign_names()`
+
+All benign control names.
+
+#### `probes_by_family(family: str)`
+
+Attack probes in one family.
+
+#### `probe_by_name(name: str)`
+
+Look up any probe (attack or benign) by name.
+
+#### `expected_outcomes()`
+
+Map every probe name to its expected outcome.
+
+#### `main()`
+
+### `monitor_deafness_probes`
+
+Source: `components/northstar-agent-runtime/monitor_deafness_probes.py`
+
+Monitor-deafness probe corpus + escalation-anomaly / health-gate detectors.
+
+#### `EscalationWindow`
+
+One digest-pinned window of observed activity.
+
+#### `build_window(*, agent_id: str, window_start: int, window_end: int, actions_observed: int, escalations: int)`
+
+Mint a well-formed, digest-pinned escalation window.
+
+#### `verify_window(window: EscalationWindow)`
+
+Re-derive the window digest with a constant-time compare.
+
+#### `detect_zero_escalation(windows: list[EscalationWindow] | tuple[EscalationWindow, ...], *, action_bound: int=ZERO_ESCALATION_ACTION_BOUND)`
+
+Flag windows with enough observed actions but zero escalations.
+
+#### `detect_escalation_collapse(baseline: list[EscalationWindow] | tuple[EscalationWindow, ...], recent: list[EscalationWindow] | tuple[EscalationWindow, ...], *, collapse_ratio: float=ESCALATION_COLLAPSE_RATIO)`
+
+Flag a collapse of the escalation rate against a baseline.
+
+#### `detect_silence_after_storm(windows: list[EscalationWindow] | tuple[EscalationWindow, ...], *, storm_min: int=STORM_MIN_ESCALATIONS)`
+
+Flag a storm window immediately followed by dead silence.
+
+#### `MonitorHealthSignal`
+
+A digest-pinned snapshot of one monitor's liveness.
+
+#### `build_signal(*, monitor_id: str, heartbeat_age_seconds: int, last_canary_trip_age_seconds: int, recent_escalation_count: int, actions_observed_since_heartbeat: int)`
+
+Mint a well-formed, digest-pinned monitor health signal.
+
+#### `verify_signal(signal: MonitorHealthSignal)`
+
+Re-derive the signal digest with a constant-time compare.
+
+#### `gate_monitor_health(signal: MonitorHealthSignal, *, high_stakes: bool, heartbeat_max_age: int=HEARTBEAT_MAX_AGE_SECONDS, canary_max_age: int=CANARY_MAX_AGE_SECONDS)`
+
+Decide whether the monitor is alive enough to observe an action.
+
+#### `HealthLedger`
+
+Append-only log of monitor-health gate decisions.
+
+- `append(signal: MonitorHealthSignal, disposition: str, as_of: int)`
+- `decisions()`
+#### `probe_names()`
+
+All monitor-deafness attack probe names.
+
+#### `benign_names()`
+
+All benign control names.
+
+#### `probes_by_family(family: str)`
+
+Attack probes in one family.
+
+#### `probe_by_name(name: str)`
+
+Look up any probe (attack or benign) by name.
+
+#### `expected_outcomes()`
+
+Map every probe name to its expected outcome.
+
+#### `main()`
+
+### `multi_axis_autonomy_probes`
+
+Source: `components/northstar-agent-runtime/multi_axis_autonomy_probes.py`
+
+Multi-axis autonomy representation probes (per-axis risk reporting, no composite scores).
+
+#### `MultiAxisAutonomyError`
+
+An axis reading, profile, policy, or verdict that refuses to be built.
+
+#### `AxisReading`
+
+One measured risk axis for one action.
+
+- `pinned()`
+  - Return a copy with the digest pin computed.
+- `verify()`
+  - Recompute the pin; constant-time compare, never raises.
+#### `AxisProfile`
+
+The complete per-axis risk profile for one action.
+
+- `reading_for(axis: str)`
+  - The reading for one axis.
+- `pinned()`
+  - Return a copy with the digest pin computed over all readings.
+- `verify()`
+  - Recompute the pin; constant-time compare, never raises.
+#### `AxisPolicy`
+
+Per-axis risk ceilings. Caller-supplied; no defaults that grant.
+
+- `ceiling_for(axis: str)`
+  - The highest tolerable risk on one axis.
+- `pinned()`
+  - Return a copy with the digest pin computed.
+- `verify()`
+  - Recompute the pin; constant-time compare, never raises.
+#### `MultiAxisFinding`
+
+One named finding, always naming the axis it came from.
+
+- `pinned()`
+  - Return a copy with the digest pin computed.
+- `verify()`
+  - Recompute the pin; constant-time compare, never raises.
+#### `PerAxisVerdict`
+
+The gate's verdict: one decision per axis, pinned, no composite.
+
+- `decision_for(axis: str)`
+  - The decision on one axis.
+- `action_decision()`
+  - The action-level outcome: conjunction over axes, never a score.
+- `pinned()`
+  - Return a copy with the digest pin computed.
+- `verify()`
+  - Recompute the pin; constant-time compare, never raises.
+#### `decide_per_axis(profile: AxisProfile, policy: AxisPolicy)`
+
+Decide each axis independently against its ceiling.
+
+#### `refuse_composite_score(action_id: str, claimed_score: Any)`
+
+Deterministically refuse any claimed composite risk score.
+
+#### `attack_probe_names()`
+
+All multi-axis autonomy attack probe names.
+
+#### `benign_probe_names()`
+
+All benign control names.
+
+#### `probes_in_family(family: str)`
+
+Attack probes in one family.
+
+#### `probe_by_name(name: str)`
+
+Look up any probe (attack or benign) by name.
+
+#### `expected_outcomes()`
+
+Map every probe name to its expected outcome.
+
+#### `main()`
+
+Print the corpus summary: attack/benign counts and family listing.
+
+### `negotiation_corpus_probes`
+
+Source: `components/northstar-agent-runtime/negotiation_corpus_probes.py`
+
+Negotiation-corpus probes (reputation attestation forgery, want-registry poisoning, counter-offer laundering).
+
+#### `NegotiationCorpusError`
+
+A negotiation record that refuses to be built.
+
+#### `ReputationAttestation`
+
+One third-party claim about one agent's past behavior.
+
+- `pinned()`
+  - Return a copy with the digest pin computed.
+- `verify()`
+  - Recompute the pin; constant-time compare, never raises.
+#### `WantRegistryEntry`
+
+One offer in the want-registry: agent X offers service Y.
+
+- `pinned()`
+  - Return a copy with the digest pin computed.
+- `verify()`
+  - Recompute the pin; constant-time compare, never raises.
+#### `CounterOfferBinding`
+
+The negotiated counter offer bound to what was actually executed.
+
+- `pinned()`
+  - Return a copy with the digest pin computed.
+- `verify()`
+  - Recompute the pin; constant-time compare, never raises.
+#### `NegotiationFinding`
+
+One named finding, always naming the family it came from.
+
+- `pinned()`
+  - Return a copy with the digest pin computed.
+- `verify()`
+  - Recompute the pin; constant-time compare, never raises.
+#### `detect_attestation_forgery(attestation: ReputationAttestation, expected_subject: str, as_of: str)`
+
+Check a reputation attestation for the forgery shapes.
+
+#### `verify_registry_integrity(entries: tuple[WantRegistryEntry, ...], pinned_head_digest: str)`
+
+Verify every registry entry against the pinned registry head.
+
+#### `verify_counter_offer(binding: CounterOfferBinding)`
+
+Check that executed terms are the negotiated counter terms.
+
+#### `agreement_is_not_authorization(negotiation_record_digest: str)`
+
+Deterministic refusal: a negotiation record is never a gate verdict.
+
+#### `attack_probe_names()`
+
+All negotiation-corpus attack probe names.
+
+#### `benign_probe_names()`
+
+All benign control names.
+
+#### `probes_in_family(family: str)`
+
+Attack probes in one family.
+
+#### `probe_by_name(name: str)`
+
+Look up any probe (attack or benign) by name.
+
+#### `expected_outcomes()`
+
+Map every probe name to its expected outcome.
+
+#### `main()`
+
+Print the corpus summary: attack/benign counts and family listing.
+
+### `per_action_autonomy_probes`
+
+Source: `components/northstar-agent-runtime/per_action_autonomy_probes.py`
+
+Per-action autonomy probes (per-action autonomy levels, immutable-object approval, action-level gates).
+
+#### `PerActionAutonomyError`
+
+An autonomy level, approval, action, or gate record that refuses to be built.
+
+#### `AutonomyAction`
+
+One action submitted to the autonomy gate.
+
+- `immutable_object_digest` (property)
+  - The immutable object the approval must name: tool + arguments.
+#### `ImmutableApproval`
+
+An explicit approval bound to one immutable object.
+
+- `pinned()`
+  - Return a copy with the digest computed.
+#### `verify_approval(approval: ImmutableApproval)`
+
+Re-derive the approval digest with a constant-time compare.
+
+#### `AutonomyVerdict`
+
+One gate verdict for one action: digest-pinned over the action's identity, its assigned level, its ceiling, and the decision.
+
+- `pinned()`
+#### `verify_verdict(verdict: AutonomyVerdict)`
+
+Re-derive the verdict digest with a constant-time compare.
+
+#### `AutonomyGate`
+
+Assigns one verdict per action. Levels are per action; approvals bind immutable objects; standing grants do not exist.
+
+- `approve(approval: ImmutableApproval)`
+- `decide(action: AutonomyAction, *, approval: ImmutableApproval | None=None, level_at_dispatch: str | None=None)`
+  - Return the per-action verdict for ``action``.
+#### `attack_probe_names()`
+
+All per-action autonomy attack probe names.
+
+#### `benign_probe_names()`
+
+All benign control names.
+
+#### `probes_in_family(family: str)`
+
+Attack probes in one family.
+
+#### `probe_by_name(name: str)`
+
+Look up any probe (attack or benign) by name.
+
+#### `expected_outcomes()`
+
+Map every probe name to its expected outcome.
+
+#### `main()`
+
+Print the corpus summary: attack/benign counts and family listing.
+
+### `plan_injection_probes`
+
+Source: `components/northstar-agent-runtime/plan_injection_probes.py`
+
+Plan-injection probes: injected plans, attribution evasion, plan gates.
+
+#### `attack_probe_names()`
+
+All plan-injection attack probe names.
+
+#### `benign_probe_names()`
+
+All benign control names.
+
+#### `probes_in_family(family: str)`
+
+Attack probes in one family.
+
+#### `probe_by_name(name: str)`
+
+Look up any probe (attack or benign) by name.
+
+#### `expected_outcomes()`
+
+Map every probe name to its expected outcome.
+
+#### `PlanRecord`
+
+A digest-pinned plan with declared origin, goal, and sealed steps.
+
+#### `seal_plan(plan_id: str, steps: Sequence[str], goal_digest: str, source: str | None)`
+
+Seal a plan: pin its ordered steps, order, and goal binding.
+
+#### `verify_plan_record(record: PlanRecord, steps: Sequence[str], goal_digest: str)`
+
+Re-derive the seal from claimed steps; constant-time comparison.
+
+#### `detect_unattributed_plan(record: PlanRecord, steps: Sequence[str])`
+
+Name plans the agent cannot attribute to any origin.
+
+#### `detect_goal_substitution(record: PlanRecord, declared_goal_digest: str)`
+
+Name a plan whose bound goal diverges from the authorized goal.
+
+#### `detect_paraphrase_laundering(plan_text: str, untrusted_fragments: Sequence[str], attributed: bool)`
+
+Flag plans that restate untrusted fragments without attribution.
+
+#### `detect_step_binding(record: PlanRecord, steps: Sequence[str], executed_step: str)`
+
+Name executed steps absent from the sealed step list or order.
+
+#### `PlanGateDecision`
+
+A digest-pinned gate decision for one plan execution.
+
+#### `gate_plan(record: PlanRecord, steps: Sequence[str], declared_goal_digest: str, plan_text: str='', untrusted_fragments: Sequence[str]=(), executed_step: str | None=None)`
+
+Fail-closed plan gate; allowed only when every check passes.
+
+#### `verify_gate_decision(decision: PlanGateDecision, record: PlanRecord)`
+
+Re-derive the decision digest; constant-time comparison.
+
+#### `main()`
+
+Print a small summary for the CLI.
+
+### `planner_executor_seam_probes`
+
+Source: `components/northstar-agent-runtime/planner_executor_seam_probes.py`
+
+Planner/executor seam probes: governance is inserted at the split.
+
+#### `probe_names()`
+
+All probe names in the corpus.
+
+#### `attack_names()`
+
+Names of the attack probes (expected deny).
+
+#### `benign_names()`
+
+Names of the benign control probes (expected allow).
+
+#### `probe_by_name(name: str)`
+
+Look up one probe by name; raises KeyError fail-closed.
+
+#### `probe_invokes_deny_side(probe: Mapping[str, Any])`
+
+True if the probe's gate_interaction names an active seam-side mechanism.
+
+#### `PlannedAction`
+
+One action the plan proposed, digest-only identity.
+
+#### `SeamHandoff`
+
+One planner -> executor handoff, pinned at the seam.
+
+- `verify()`
+  - Recompute the digest; a tampered handoff fails closed.
+- `widens_ceiling()`
+  - True if the child ceiling exceeds the parent ceiling.
+#### `SeamFinding`
+
+One integrity finding from a seam sweep; never a verdict.
+
+#### `DispatchAuthorization`
+
+One admitted dispatch under an admitted handoff.
+
+- `verify()`
+#### `SeamGate`
+
+The admission point at the planner/executor split.
+
+- `admit_handoff(handoff: SeamHandoff)`
+  - Admit one handoff; fail closed on any seam violation.
+- `current(proposal_id: str)`
+  - The currently admitted handoff for a proposal, if any.
+- `authorize_dispatch(*, proposal_id: str, revision: int, tool: str, arguments_digest: str, executor_id: str, plan_actions: Sequence[PlannedAction])`
+  - Authorize one dispatch under the admitted handoff.
+- `admitted_count()`
+#### `verify_seam_integrity(handoffs: Sequence[SeamHandoff])`
+
+Sweep a handoff list for seam violations. Never raises.
+
+#### `main()`
+
+### `pre_completion_signal_probes`
+
+Source: `components/northstar-agent-runtime/pre_completion_signal_probes.py`
+
+Pre-completion-signal probe corpus + uncertainty-signal instrumentation gates.
+
+#### `probe_names()`
+
+All probe names in the corpus.
+
+#### `attack_names()`
+
+Names of the attack probes (expected deny).
+
+#### `benign_names()`
+
+Names of the benign control probes (expected allow).
+
+#### `probe_by_name(name: str)`
+
+Look up one probe by name; raises KeyError fail-closed.
+
+#### `probe_invokes_deny_side(probe: Mapping[str, Any])`
+
+True if the probe's gate_interaction names an active deny-side mechanism.
+
+#### `SignalReading`
+
+One pinned pre-completion uncertainty reading.
+
+- `verify()`
+  - Recompute the digest; constant-time compare.
+- `well_formed()`
+  - Structural checks before any semantic use.
+- `bound_to(call_id: str, arguments_digest: str)`
+  - Whether this reading is pinned to the given action.
+- `trips(threshold: float)`
+  - Whether the reading trips the hold threshold.
+- `as_dict()`
+#### `SignalPolicy`
+
+Thresholds and instrumentation for the signal channel.
+
+#### `SignalEvaluation`
+
+The pinned outcome of evaluating one action's signal channel.
+
+- `verify()`
+#### `evaluate(*, policy: SignalPolicy, call_id: str, arguments_digest: str, action_class: str, dispatch_sequence: int, readings: Sequence[SignalReading])`
+
+Evaluate one action's pre-completion signal channel.
+
+#### `requires_abstain_path(evaluation: SignalEvaluation)`
+
+Whether the signal evaluation must take the abstain human path.
+
+#### `main()`
+
+Corpus summary for the docbuild harness.
+
+### `privilege_at_recall_probes`
+
+Source: `components/northstar-agent-runtime/privilege_at_recall_probes.py`
+
+Privilege-at-recall probe corpus + identity-filter-first recall harness.
+
+#### `MemoryRecord`
+
+One recall-shaped memory record, digest-pinned.
+
+#### `build_record(*, record_id: str, payload_digest: str, writer: str, tenant: str, owner_agent: str, trust: str, scope: tuple[str, ...]=(), max_privilege: int=0, grant: tuple[str, ...]=(), authority_version: int=1, seq: int=0, prev_digest: str='sha256:' + '00' * 32)`
+
+Build a digest-pinned memory record.
+
+#### `verify_record(record: MemoryRecord)`
+
+Constant-time digest re-verification of a record.
+
+#### `RecallRequest`
+
+A recall-shaped authorization request, digest-pinned.
+
+#### `build_request(*, caller_agent: str, caller_tenant: str, caller_privilege: int, purpose: str, requires_trusted: bool=True, accepted_authority: int=1)`
+
+Build a digest-pinned recall request.
+
+#### `verify_request(request: RecallRequest)`
+
+Constant-time digest re-verification of a recall request.
+
+#### `authorize_recall(record: MemoryRecord, request: RecallRequest)`
+
+Authorize one record for one recall request.
+
+#### `filter_candidates(records: tuple[MemoryRecord, ...], request: RecallRequest)`
+
+Identity-filter-first recall: drop recall-unauthorized records before any ranking or exposure.
+
+#### `verify_filter_first(filter_before_retrieval: bool, witness_digest: str | None=None)`
+
+Attest that identity filtering ran before retrieval.
+
+#### `probe_names()`
+
+All privilege-at-recall attack probe names.
+
+#### `benign_names()`
+
+All benign control names.
+
+#### `probes_by_family(family: str)`
+
+Probes in one family (attacks plus benign).
+
+#### `probe_by_name(name: str)`
+
+Look up any privilege-at-recall probe (attack or benign) by name.
+
+#### `expected_outcomes()`
+
+probe name -> expected gate outcome ('deny' or 'allow').
+
+#### `main()`
+
+Print the corpus inventory.
+
+### `refusal_pattern_probes`
+
+Source: `components/northstar-agent-runtime/refusal_pattern_probes.py`
+
+Refusal-pattern + reward-hacking-attempt probes (process evaluation shapes).
+
+#### `RefusalPatternError`
+
+Raised for malformed refusal/attempt/verdict records.
+
+#### `RefusalRecord`
+
+A digest-pinned refusal event.
+
+- `pinned()`
+  - Return a copy with the digest pinned (fail-closed inputs).
+- `verify()`
+  - Constant-time digest verification. Never raises.
+#### `gate_refusal(record: 'RefusalRecord | None', expected_layers: tuple[str, ...]=EXPECTED_REFUSAL_LAYERS)`
+
+Gate a claimed refusal.
+
+#### `HackAttempt`
+
+A digest-pinned reward-hacking attempt record.
+
+- `pinned()`
+- `verify()`
+  - Constant-time digest verification. Never raises.
+#### `count_attempts(records: tuple['HackAttempt', ...])`
+
+Per-kind attempt counts. Never a composite score.
+
+#### `gate_attempts(records: tuple['HackAttempt', ...], max_allowed: int=0)`
+
+Gate a run's attempt records.
+
+#### `TrajectoryRecord`
+
+A digest-pinned trajectory outcome.
+
+- `pinned()`
+- `verify()`
+#### `VerdictBinding`
+
+A verdict bound to a pinned trajectory.
+
+- `pinned()`
+- `verify()`
+#### `gate_verdict(binding: VerdictBinding, trajectory: 'TrajectoryRecord | None')`
+
+Gate a verdict against the held trajectory.
+
+#### `attack_probe_names()`
+
+All refusal-pattern attack probe names.
+
+#### `benign_probe_names()`
+
+All benign control names.
+
+#### `probes_in_family(family: str)`
+
+Attack probes in one family.
+
+#### `probe_by_name(name: str)`
+
+Look up any probe (attack or benign) by name.
+
+#### `expected_outcomes()`
+
+Map every probe name to its expected outcome.
+
+#### `main()`
+
+Print the corpus summary: attack/benign counts and family listing.
+
+### `run_assert_eval_probes`
+
+Source: `components/northstar-agent-runtime/run_assert_eval_probes.py`
+
+Run-assert-eval probes: the pre-deployment loop must actually close.
+
+#### `probe_names()`
+
+All probe names in corpus order.
+
+#### `attack_names()`
+
+Names of attack probes (expected: deny).
+
+#### `benign_names()`
+
+Names of benign control probes (expected: allow).
+
+#### `probe_by_name(name: str)`
+
+Return the probe dict for ``name``; raises KeyError if unknown.
+
+#### `probe_invokes_deny_side(probe: Mapping[str, Any])`
+
+True if the probe's gate_interaction names a loop-side mechanism.
+
+#### `EvalSet`
+
+The fixed evaluation set, digest-pinned.
+
+- `verify()`
+  - Recompute the digest; a tampered set record fails closed.
+#### `AxisVerdict`
+
+One axis verdict inside a run record.
+
+#### `RunRecord`
+
+One verification run over the fixed set.
+
+- `verify()`
+  - Recompute the digest; a tampered run fails closed.
+- `all_pass()`
+  - True only when every axis passed -- a conjunction, never a score.
+#### `PolicyAssertion`
+
+One assertion derived from a recorded run.
+
+- `verify()`
+  - Recompute the digest; a tampered assertion fails closed.
+#### `DeployAuthorization`
+
+One authorized deployment, bound to the closing re-eval.
+
+- `verify()`
+#### `LoopFinding`
+
+One integrity finding from a loop sweep; never a verdict.
+
+#### `RunAssertGate`
+
+The run -> assert -> re-eval loop ledger.
+
+- `register_set(eval_set: EvalSet)`
+  - Pin the fixed set. A drifted re-registration fails closed.
+- `record_run(run: RunRecord)`
+  - Record one run; fail closed on any loop violation.
+- `record_assertion(assertion: PolicyAssertion)`
+  - Record one assertion; fail closed on any provenance violation.
+- `request_deploy(policy_digest: str)`
+  - Authorize deployment of one policy digest.
+- `run_count()`
+- `assertion_count()`
+#### `verify_loop_integrity(eval_set: EvalSet, runs: Sequence[RunRecord], assertions: Sequence[PolicyAssertion])`
+
+Sweep a set, runs, and assertions for loop violations.
+
+#### `main()`
+
+### `self_modification_probes`
+
+Source: `components/northstar-agent-runtime/self_modification_probes.py`
+
+Self-modification probe corpus.
+
+#### `SelfStateRecord`
+
+One observed state event for a component of the agent's own substrate.
+
+#### `build_record(seq: int, component: str, digest: str, kind: str, identity: str, destination: str='', previous_digest: str='')`
+
+Build a chain-linked record; raises on malformed input (fail closed).
+
+#### `verify_record(record: SelfStateRecord)`
+
+Recompute the record digest; constant-time compare. Never raises.
+
+#### `ModificationRecord`
+
+A proposed or landed self-edit.
+
+#### `approval_binding(component: str, old_digest: str, new_digest: str)`
+
+The digest a valid human approval receipt must carry: bound to the exact (component, old, new) triple. A blanket go-ahead or a prose 'yes' cannot verify.
+
+#### `verify_modification(mod: ModificationRecord)`
+
+Recompute the record digest; constant-time compare. Never raises.
+
+#### `SelfStateLedger`
+
+Append-only ledger of self-state records. Fail closed: unverifiable records, chain breaks, and seq gaps raise instead of being stored.
+
+- `append(record: SelfStateRecord)`
+- `records()`
+- `detect_self_copy(own_digest: str)`
+  - Own digest bound to any destination -- a copy record carrying the agent's own content digest -- is self-copy evidence. Returns digest-pinned findings; never raises.
+- `detect_self_modification(pinned: dict[str, str])`
+  - Any component whose latest digest differs from the operator's pinned digest is unapproved self-modification evidence. Returns findings; never raises.
+#### `verify_ledger_integrity(ledger: SelfStateLedger)`
+
+Re-verify every record in the ledger. Returns (ok, findings); findings name bad_digest / bad_link / seq_gap. Never raises.
+
+#### `gate_modification(mod: ModificationRecord, pinned_ceiling: tuple[str, ...])`
+
+Decide a self-edit. Returns ("allow" | "deny", findings).
+
+#### `probe_names()`
+
+All self-modification attack probe names.
+
+#### `benign_names()`
+
+All benign control names.
+
+#### `probes_by_family(family: str)`
+
+Probes in one family (including 'benign').
+
+#### `probe_by_name(name: str)`
+
+Look up any self-modification probe (attack or benign) by name.
+
+#### `expected_outcomes()`
+
+probe name -> expected gate outcome ('deny' or 'allow').
+
+### `self_referential_trust_probes`
+
+Source: `components/northstar-agent-runtime/self_referential_trust_probes.py`
+
+Self-referential-trust probe corpus + self-grounding / bootstrap detectors.
+
+#### `SelfReferentialTrustError`
+
+Raised for malformed provenance nodes or invalid graph operations.
+
+#### `EvidenceNode`
+
+One node in the provenance graph.
+
+- `as_dict()`
+- `digest()`
+  - Digest pin over the canonical node record.
+#### `build_node(node_id: str, kind: str, *, agent_id: str | None=None, refs: tuple[str, ...]=(), asserted_confidence: float | None=None, confidence_basis: tuple[str, ...]=())`
+
+Convenience constructor; validation lives in ``EvidenceNode``.
+
+#### `verify_node_digest(node: EvidenceNode, digest: str)`
+
+Constant-time check that a digest pin matches a node.
+
+#### `TrustFinding`
+
+One detector finding: what fired, on which claim, why.
+
+- `verify_digest()`
+#### `EvidenceGraph`
+
+Append-only provenance graph; detectors run over it.
+
+- `add(node: EvidenceNode)`
+- `get(node_id: str)`
+- `node_ids()`
+- `transitive_support(root_id: str)`
+  - All nodes reachable from ``root_id`` via ``refs``.
+- `detect_self_grounding(root_id: str)`
+  - Flag a claim whose support graph contains no external node.
+- `detect_citation_cycle(root_id: str)`
+  - Flag a support chain that loops back to the claim itself.
+- `detect_confidence_bootstrap(root_id: str)`
+  - Flag confidence derived only from the agent's own confidences.
+- `detect_dangling_reference(root_id: str)`
+  - Fail-closed provenance check: every ref must resolve.
+- `findings(root_id: str)`
+  - All detector findings for one claim, in a stable order.
+#### `probe_names()`
+
+All self-referential-trust probe names.
+
+#### `probes_by_family(family: str)`
+
+Probes in one family.
+
+#### `probe_by_name(name: str)`
+
+One probe by name; KeyError on unknown names.
+
+#### `expected_outcomes()`
+
+Map every probe name to its expected outcome.
+
+### `sleeper_agent_probes`
+
+Source: `components/northstar-agent-runtime/sleeper_agent_probes.py`
+
+Sleeper-agent probe corpus.
+
+#### `attack_probe_names()`
+
+All sleeper-attack probe names (expected: deny).
+
+#### `benign_probe_names()`
+
+All benign control probe names (expected: allow).
+
+#### `probes_in_family(family: str)`
+
+Probes in one family (including 'benign').
+
+#### `probe_by_name(name: str)`
+
+Look up any sleeper probe (attack or benign) by name.
+
+#### `expected_outcomes()`
+
+probe name -> expected gate outcome ('deny' or 'allow').
+
+#### `BehaviorRecord`
+
+One observed agent run, digest-pinned and chain-linked.
+
+#### `build_record(*, agent_id: str, model_version: str, context_class: str, run_id: str, behavior_digest: str, canary_present: bool=False, adaptation_digest: str | None=None, context_features_digest: str, prev_digest: str)`
+
+Build a verified behavior record (raises on bad inputs).
+
+#### `verify_record(record: BehaviorRecord)`
+
+Re-verify a record without raising; returns (ok, findings).
+
+#### `BehaviorLedger`
+
+Append-only chain of behavior records; fail-closed on breaks.
+
+- `append(record: BehaviorRecord)`
+- `records()`
+#### `TriggerSpec`
+
+A digest-pinned trigger condition to test records against.
+
+#### `detect_trigger_armed(records: tuple[BehaviorRecord, ...], spec: TriggerSpec)`
+
+Name records whose context features match a pinned trigger condition.
+
+#### `detect_eval_deploy_divergence(records: tuple[BehaviorRecord, ...])`
+
+Flag same agent+model whose behavior differs across context classes.
+
+#### `detect_canary_evasion(records: tuple[BehaviorRecord, ...])`
+
+Flag behavior that changes with canary presence in one context class.
+
+#### `verify_behavioral_consistency(records: tuple[BehaviorRecord, ...])`
+
+Same agent+model+context class must share one behavior digest unless a declared adaptation is attached.
+
+#### `main()`
+
+Print the corpus summary; exit 0.
+
+### `stale_plan_probes`
+
+Source: `components/northstar-agent-runtime/stale_plan_probes.py`
+
+Stale-plan probes: plan freshness gates and invalidation triggers.
+
+#### `attack_probe_names()`
+
+All stale-plan attack probe names.
+
+#### `benign_probe_names()`
+
+All benign control names.
+
+#### `probes_in_family(family: str)`
+
+Attack probes in one family.
+
+#### `probe_by_name(name: str)`
+
+Look up any probe (attack or benign) by name.
+
+#### `expected_outcomes()`
+
+probe name -> expected gate outcome ('deny' or 'allow').
+
+#### `parse_timestamp(ts: Any)`
+
+Parse an epoch number or an RFC3339 string to epoch seconds.
+
+#### `StalePlanRecord`
+
+A plan with its evidence-snapshot freshness metadata.
+
+#### `seal_plan_record(plan_id: str, plan_digest: str, snapshot_time: Any, max_age_seconds: float, evidence_head_digest: str)`
+
+Build a digest-pinned stale-plan record. Fail-closed.
+
+#### `plan_age_seconds(record: StalePlanRecord, as_of: Any)`
+
+Age and freshness status of ``record`` against ``as_of``.
+
+#### `PlanFreshnessDecision`
+
+Digest-pinned disposition from the freshness gate.
+
+#### `gate_plan_freshness(record: StalePlanRecord, as_of: Any, *, ceiling_seconds: float, registered_head_digest: str)`
+
+Fail-closed freshness gate for one plan record.
+
+#### `verify_freshness_decision(decision: PlanFreshnessDecision, record: StalePlanRecord)`
+
+Re-derive the decision digest; constant-time comparison.
+
+#### `detect_snapshot_drift(record: StalePlanRecord, registered_head_digest: str)`
+
+Name plan-evidence-changed when the snapshot no longer resolves to the registered head. Returns None when the head still matches. Never raises.
+
+#### `detect_restamped_plan(old: StalePlanRecord, new: StalePlanRecord)`
+
+Name evidence-restamped when the same plan id + same plan digest carries an advanced snapshot time with no new evidence head.
+
+#### `invalidate_remaining_steps(record: StalePlanRecord, as_of: Any, *, ceiling_seconds: float, registered_head_digest: str)`
+
+Mid-run invalidation: re-run the freshness gate against the current ``as_of`` and current registered head.
+
+#### `main()`
+
+Print a small summary for the CLI.
+
+### `tool_schema_digest_probes`
+
+Source: `components/northstar-agent-runtime/tool_schema_digest_probes.py`
+
+Tool-schema-digest probes: per-invocation digests, drift detection, identity binding.
+
+#### `attack_probe_names()`
+
+All tool-schema-digest attack probe names.
+
+#### `benign_probe_names()`
+
+All tool-schema-digest benign probe names.
+
+#### `probes_in_family(family: str)`
+
+Attack probes in one family.
+
+#### `probe_by_name(name: str)`
+
+Look up any probe (attack or benign) by name.
+
+#### `expected_outcomes()`
+
+Map every probe name to its expected outcome.
+
+#### `schema_digest(schema: Mapping[str, Any])`
+
+Pin a schema document to a ``sha256:`` digest.
+
+#### `ToolSchemaSnapshot`
+
+A pinned tool schema: the contract the gate admitted.
+
+#### `pin_schema(tool: str, schema: Mapping[str, Any], version: str)`
+
+Admit a tool schema: pin its digest under a caller-supplied version.
+
+#### `verify_snapshot(snapshot: ToolSchemaSnapshot)`
+
+Re-derive a snapshot's seal; constant-time compare, never raises.
+
+#### `InvocationBinding`
+
+Binds an admitted schema to one invocation.
+
+#### `bind_invocation(snapshot: ToolSchemaSnapshot, invocation_id: str, arguments_digest: str)`
+
+Mint a per-invocation binding against an admitted snapshot.
+
+#### `verify_binding(binding: InvocationBinding, invocation_id: str)`
+
+Verify a binding for a specific invocation; constant-time, never raises.
+
+#### `drift_details(pinned_schema: Mapping[str, Any], observed_schema: Mapping[str, Any])`
+
+Name the structural drift kinds between two schema documents.
+
+#### `SchemaFinding`
+
+One drift-check outcome, digest-pinned.
+
+#### `SchemaRegistry`
+
+Admitted schema pins, keyed by tool name.
+
+- `register(snapshot: ToolSchemaSnapshot)`
+  - Admit (or re-admit) a tool schema pin. Fail-closed on bad seal.
+- `pinned(tool: str)`
+  - Return the admitted pin for a tool, or ``None`` if unpinned.
+- `check(tool: str, observed_schema: Mapping[str, Any], pinned_schema: Mapping[str, Any] | None=None)`
+  - Compare a live schema against the admitted pin.
+#### `verify_finding(finding: SchemaFinding)`
+
+Re-derive a finding's seal; constant-time compare, never raises.
+
+#### `bind_tool_call(registry: SchemaRegistry, tool: str, live_schema: Mapping[str, Any], invocation_id: str, arguments_digest: str, pinned_schema: Mapping[str, Any] | None=None)`
+
+Bind one invocation, or fail closed.
+
+#### `main()`
+
+Print a small summary for the CLI.
+
+### `trace_tamper_probes`
+
+Source: `components/northstar-agent-runtime/trace_tamper_probes.py`
+
+Trace-tampering probe corpus + deletion / independence / integrity detectors.
+
+#### `TraceRecord`
+
+One host-reported record in an audit trace.
+
+#### `build_record(seq: int, event: str, payload: dict[str, Any], recorded_at: str, *, previous_digest: str='')`
+
+Build and digest-pin one trace record. Fail-closed on bad inputs.
+
+#### `verify_record(record: TraceRecord)`
+
+Re-derive a record's digest with constant-time compare.
+
+#### `AuditTrace`
+
+Append-only host-reported audit trace.
+
+- `append(record: TraceRecord)`
+  - Append one record. Fail-closed on:
+- `records()`
+  - The trace so far, oldest first.
+- `head_digest()`
+  - Digest-pin the whole trace for out-of-band anchoring.
+#### `detect_deletion(records: list[TraceRecord] | tuple[TraceRecord, ...])`
+
+Detect deletion signals in a candidate record list.
+
+#### `verify_trace_integrity(records: list[TraceRecord] | tuple[TraceRecord, ...])`
+
+Verify a whole trace: digests, links, and contiguity.
+
+#### `genesis_anchor(record: TraceRecord)`
+
+Recompute the genesis hash for a first record.
+
+#### `DualChannelAudit`
+
+Primary + witness audit channels with independence cross-check.
+
+- `mirror(record: TraceRecord)`
+  - Append the same record to both channels.
+- `cross_check()`
+#### `probe_names()`
+
+All trace-tampering probe names.
+
+#### `benign_names()`
+
+All benign control names.
+
+#### `probes_by_family(family: str)`
+
+Attack probes in one family.
+
+#### `probe_by_name(name: str)`
+
+Look up any probe (attack or benign) by name.
+
+#### `expected_outcomes()`
+
+Map every probe name to its expected outcome.
+
+### `trust_inversion_probes`
+
+Source: `components/northstar-agent-runtime/trust_inversion_probes.py`
+
+Trust-inversion probe corpus + delegation-culture risk detectors + gate-strength calibration.
+
+#### `TrustInversionError`
+
+Raised for malformed trust-inversion records or calibrations.
+
+#### `attack_probe_names()`
+
+All trust-inversion attack probe names.
+
+#### `benign_probe_names()`
+
+All benign control names.
+
+#### `probes_in_family(family: str)`
+
+Probes in one family (attacks, or 'benign' for controls).
+
+#### `probe_by_name(name: str)`
+
+Look up any trust-inversion probe (attack or benign) by name.
+
+#### `expected_outcomes()`
+
+probe name -> expected gate outcome ('deny' or 'allow').
+
+#### `ComfortSignals`
+
+One observation window's ambient-comfort measurements.
+
+#### `build_signals(window_id: str, delegation_rate: float, scrutiny_rate: float, rubber_stamp_rate: float, approval_median_latency_s: float | None, override_rate: float, agent_tenure_runs: int, success_streak: int)`
+
+Build a digest-pinned ``ComfortSignals`` record (fail-closed).
+
+#### `verify_signals(record: ComfortSignals)`
+
+Re-derive the digest and compare in constant time.
+
+#### `comfort_index(signals: ComfortSignals)`
+
+Ambient comfort in [0, 1]: a measurement, never a verdict.
+
+#### `assess_delegation_culture(signals: ComfortSignals)`
+
+Assess one window's delegation culture.
+
+#### `GateStrengthDecision`
+
+One digest-pinned gate-strength calibration.
+
+#### `calibrate_gate_strength(signals: ComfortSignals, base_strength: float, *, stakes: Literal['low', 'high']='low')`
+
+Apply the inverse-coupling rule: required gate strength rises with ambient comfort.
+
+#### `verify_decision(decision: GateStrengthDecision)`
+
+Re-derive the decision digest and compare in constant time.
+
+#### `main()`
+
+Print corpus summary; exit 0 when the corpus is self-consistent.
+
 ### `providers`
 
 Source: `components/northstar-agent-runtime/providers/__init__.py`
