@@ -197,6 +197,15 @@ class LoadBalancer:
             self._current_weight[backend_id] = 0
             return self._record(backend_id)
 
+    def backend(self, backend_id: str, seq: int, weight: int = 1) -> Backend:
+        """Spec alias: register a backend (delegates to :meth:`add_backend`).
+
+        Simulates the "add upstream" half of an HAProxy/Envoy backend pool:
+        the backend enters the pool healthy, with zero connections and zero
+        load, until :meth:`health` says otherwise.
+        """
+        return self.add_backend(backend_id, seq, weight=weight)
+
     def remove_backend(self, backend_id: str, seq: int) -> None:
         """Deregister a backend (drops its accounting state)."""
         backend_id = _check_str(backend_id, "backend_id")
@@ -292,6 +301,15 @@ class LoadBalancer:
                 seq=seq,
                 digest=_digest(backend_id, algorithm, seq),
             )
+
+    def route(self, algorithm: str, seq: int) -> SelectRecord:
+        """Spec alias: pick one backend for a request (delegates to :meth:`select`).
+
+        Simulates the HAProxy/Envoy routing decision: returns the frozen
+        :class:`SelectRecord` the policy chose at ``seq``. Fails closed
+        with :class:`NoHealthyBackendError` when no healthy backend exists.
+        """
+        return self.select(algorithm, seq)
 
     def _smooth_wrr(self, healthy: list[str]) -> str:
         """Nginx-style smooth weighted round robin (deterministic)."""
