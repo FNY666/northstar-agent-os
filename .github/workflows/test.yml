@@ -147,17 +147,6 @@ jobs:
         # No API key and no network: the scripted provider is the only model, and
         # the sidecar integration test starts a real listener on a Unix socket.
         run: python -m unittest discover -s tests -p 'test_*.py' -v
-      - name: Pytest tests
-        # Six test files use pytest-style fixtures/parametrize that unittest does not collect.
-        # Run them explicitly with pytest after the unittest suite.
-        run: |
-          python -m pytest tests/test_lb_health.py \
-                           tests/test_session_manager.py \
-                           tests/test_cdn_manager.py \
-                           tests/test_data_export.py \
-                           tests/test_password_policy.py \
-                           tests/test_white_label.py \
-                           -v
       - name: Setup Node (TypeScript face)
         # The face is source-only and its suite spawns this component's CLI, so node is a test
         # runner here, not a build tool: no `npm install`, no lockfile, no registry contact.
@@ -218,3 +207,30 @@ jobs:
         # and every internal markdown link must resolve. Pure standard library,
         # so this runs offline with no dependency install.
         run: python3 tests/docbuild.py verify
+
+  agent-runtime-pytest:
+    name: Agent runtime (pytest-style tests)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: components/northstar-agent-runtime
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt -r requirements-tracing.txt
+      - name: Pytest tests
+        # Six test files use pytest-style fixtures/parametrize that unittest does not collect.
+        # Independent job so unittest failures in agent-runtime do not skip these tests.
+        run: |
+          python -m pytest tests/test_lb_health.py \
+                           tests/test_session_manager.py \
+                           tests/test_cdn_manager.py \
+                           tests/test_data_export.py \
+                           tests/test_password_policy.py \
+                           tests/test_white_label.py \
+                           -v
