@@ -1,18 +1,23 @@
-"""API gateway interface: route matching and plugin chaining for agent traffic.
+"""API gateway interface: route matching, plugin chaining, request transforms,
+and throttle policies for agent traffic.
 
-A Kong-shaped gateway (routes + ordered plugins) as a deterministic,
+A Kong/Apigee-shaped gateway (routes + ordered plugins + per-route request
+transforms + per-route sliding-window throttles) as a deterministic,
 single-host state machine. Routes match on method and a path pattern;
 plugins are caller-supplied callables run in priority order and may
 inspect, mutate, or short-circuit a request before it reaches a route
-handler.
+handler; transforms rewrite headers/query/body per route; throttles book
+logical-seq attempts per route and return allow/deny as data.
 
 House style: frozen dataclasses, no wall-clock (caller int seqs), fail-closed
 validation, stdlib-only, version/schema pins, ``main()`` self-check.
 
 Honest scope: pure in-memory bookkeeping over host-reported requests —
-records route registrations and plugin verdicts, cannot enforce network
-policy, cannot prove a denied request was never retried upstream, and
-cannot see traffic the host never reports.
+records route registrations, plugin verdicts, transform applications, and
+throttle decisions; cannot enforce network policy, cannot prove a denied
+request was never retried upstream, and cannot see traffic the host never
+reports. Transforms and throttles are simulated policy bookkeeping: the
+host applies them.
 
 Version pin: api-gateway.v1
 Schema pin: northstar.api-gateway.v1
@@ -52,6 +57,14 @@ class RequestRejectedError(APIGatewayError):
     """A plugin rejected the request (short-circuit)."""
 
 
+class UnknownTransformError(APIGatewayError):
+    """No request/response transform is registered for the route."""
+
+
+class UnknownThrottleError(APIGatewayError):
+    """No throttle policy is registered for the route."""
+
+
 def _check_int(name: str, value, allow_zero: bool = True) -> None:
     if isinstance(value, bool) or not isinstance(value, int):
         raise TypeError(f"{name} must be an int, got {type(value).__name__}")
@@ -71,6 +84,23 @@ def _check_str(name: str, value, allow_empty: bool = False) -> None:
 def _check_mapping(name: str, value) -> None:
     if not isinstance(value, dict):
         raise TypeError(f"{name} must be a dict, got {type(value).__name__}")
+
+
+def _check_header_pairs(name: str, value) -> None:
+    if not isinstance(value, tuple):
+        raise TypeError(f"{name} must be a tuple of (str, str)")
+    for item in value:
+        if not isinstance(item, tuple) or len(item) != 2:
+            raise TypeError(f"{name} entries must be (str, str)")
+        _check_str(f"{name} name", item[0])
+        _check_str(f"{name} value", item[1], allow_empty=True)
+
+
+def _check_str_tuple(name: str, value) -> None:
+    if not isinstance(value, tuple):
+        raise TypeError(f"{name} must be a tuple of str")
+    for item in value:
+        _check_str(f"{name} entry", item)
 
 
 def _canonical(value) -> str:
@@ -283,6 +313,178 @@ class GatewayResponse:
 PluginFn = Callable[[RequestRecord], Tuple[str, Any]]
 
 
+@dataclass(frozen=True)
+class TransformRecord:
+    """A registered request transform for one route (frozen record).
+
+    Kong request-transformer shaped: header add/remove, query param
+    add/remove, optional whole-body replacement. Re-setting a route's
+    transform replaces the previous record (latest wins).
+    """
+
+    route_id: str
+    add_headers: Tuple[Tuple[str, str], ...]
+    remove_headers: Tuple[str, ...]
+    add_query_params: Tuple[Tuple[str, str], ...]
+    remove_query_params: Tuple[str, ...]
+    body_replace: Optional[str]
+    seq: int
+    digest: str
+    schema: str = SCHEMA_PIN
+
+    def __post_init__(self) -> None:
+        _check_str("route_id", self.route_id)
+        _check_header_pairs("add_headers", self.add_headers)
+        _check_str_tuple("remove_headers", self.remove_headers)
+        _check_header_pairs("add_query_params", self.add_query_params)
+        _check_str_tuple("remove_query_params", self.remove_query_params)
+        if self.body_replace is not None and not isinstance(self.body_replace, str):
+            raise TypeError("body_replace must be a str or None")
+        _check_int("seq", self.seq)
+        _check_str("digest", self.digest)
+
+    def as_dict(self) -> Dict[str, Any]:
+        return {
+            "route_id": self.route_id,
+            "add_headers": [list(h) for h in self.add_headers],
+            "remove_headers": list(self.remove_headers),
+            "add_query_params": [list(p) for p in self.add_query_params],
+            "remove_query_params": list(self.remove_query_params),
+            "body_replace": self.body_replace,
+            "seq": self.seq,
+            "digest": self.digest,
+            "schema": self.schema,
+        }
+
+
+@dataclass(frozen=True)
+class TransformedRequest:
+    """A request after the route's transform was applied (frozen record)."""
+
+    route_id: str
+    method: str
+    path: str
+    headers: Tuple[Tuple[str, str], ...]
+    body: str
+    transform_digest: str
+    seq: int
+    digest: str
+    schema: str = SCHEMA_PIN
+
+    def __post_init__(self) -> None:
+        _check_str("route_id", self.route_id)
+        _check_str("method", self.method)
+        if self.method != self.method.upper():
+            raise ValueError("method must be uppercase")
+        _check_str("path", self.path)
+        if not self.path.startswith("/"):
+            raise ValueError("path must start with '/'")
+        _check_header_pairs("headers", self.headers)
+        if not isinstance(self.body, str):
+            raise TypeError("body must be a str")
+        _check_str("transform_digest", self.transform_digest)
+        _check_int("seq", self.seq)
+        _check_str("digest", self.digest)
+
+    def header(self, name: str) -> Optional[str]:
+        for k, v in self.headers:
+            if k.lower() == name.lower():
+                return v
+        return None
+
+    def as_dict(self) -> Dict[str, Any]:
+        return {
+            "route_id": self.route_id,
+            "method": self.method,
+            "path": self.path,
+            "headers": [list(h) for h in self.headers],
+            "transform_digest": self.transform_digest,
+            "seq": self.seq,
+            "digest": self.digest,
+            "schema": self.schema,
+        }
+
+
+@dataclass(frozen=True)
+class ThrottleRecord:
+    """A registered throttle policy for one route (frozen record).
+
+    ``limit`` requests are allowed per ``window`` logical-seq units.
+    Re-setting a route's throttle replaces the previous record; the
+    recorded attempt history is kept (the window math ages it out).
+    """
+
+    route_id: str
+    limit: int
+    window: int
+    seq: int
+    digest: str
+    schema: str = SCHEMA_PIN
+
+    def __post_init__(self) -> None:
+        _check_str("route_id", self.route_id)
+        _check_int("limit", self.limit)
+        if self.limit <= 0:
+            raise ValueError("limit must be positive")
+        _check_int("window", self.window)
+        if self.window <= 0:
+            raise ValueError("window must be positive")
+        _check_int("seq", self.seq)
+        _check_str("digest", self.digest)
+
+    def as_dict(self) -> Dict[str, Any]:
+        return {
+            "route_id": self.route_id,
+            "limit": self.limit,
+            "window": self.window,
+            "seq": self.seq,
+            "digest": self.digest,
+            "schema": self.schema,
+        }
+
+
+@dataclass(frozen=True)
+class ThrottleVerdict:
+    """One throttle check verdict (frozen record). Denial is data.
+
+    ``retry_after_seq`` is the earliest logical seq at which the oldest
+    counted attempt ages out of the window; None when allowed. Advisory
+    only — the host enforces.
+    """
+
+    route_id: str
+    seq: int
+    allowed: bool
+    hits_in_window: int
+    limit: int
+    retry_after_seq: Optional[int]
+    digest: str
+    schema: str = SCHEMA_PIN
+
+    def __post_init__(self) -> None:
+        _check_str("route_id", self.route_id)
+        _check_int("seq", self.seq)
+        if not isinstance(self.allowed, bool):
+            raise TypeError("allowed must be a bool")
+        _check_int("hits_in_window", self.hits_in_window)
+        _check_int("limit", self.limit)
+        if self.retry_after_seq is not None:
+            _check_int("retry_after_seq", self.retry_after_seq)
+        _check_str("digest", self.digest)
+
+    def as_dict(self) -> Dict[str, Any]:
+        return {
+            "route_id": self.route_id,
+            "seq": self.seq,
+            "allowed": self.allowed,
+            "hits_in_window": self.hits_in_window,
+            "limit": self.limit,
+            "retry_after_seq": self.retry_after_seq,
+            "digest": self.digest,
+            "schema": self.schema,
+        }
+
+
 class APIGateway:
     """Kong-shaped gateway: routes + ordered plugins (RLock-guarded)."""
 
@@ -292,6 +494,9 @@ class APIGateway:
         self._plugins: Dict[str, Tuple[PluginRecord, PluginFn]] = {}
         self._route_seq = 0
         self._plugin_seq = 0
+        self._transforms: Dict[str, TransformRecord] = {}
+        self._throttles: Dict[str, ThrottleRecord] = {}
+        self._throttle_hits: Dict[str, list] = {}
 
     def add_route(
         self,
@@ -382,6 +587,214 @@ class APIGateway:
 
     def plugins(self) -> Tuple[PluginRecord, ...]:
         return tuple(r for r, _ in self._plugins.values())
+
+    def set_transform(
+        self,
+        route_id: str,
+        seq: int,
+        add_headers: Tuple[Tuple[str, str], ...] = (),
+        remove_headers: Tuple[str, ...] = (),
+        add_query_params: Tuple[Tuple[str, str], ...] = (),
+        remove_query_params: Tuple[str, ...] = (),
+        body_replace: Optional[str] = None,
+    ) -> TransformRecord:
+        """Register (or replace) the request transform for a route."""
+        _check_str("route_id", route_id)
+        if route_id not in self._routes:
+            raise UnknownRouteError(f"unknown route: {route_id}")
+        _check_header_pairs("add_headers", add_headers)
+        _check_str_tuple("remove_headers", remove_headers)
+        _check_header_pairs("add_query_params", add_query_params)
+        _check_str_tuple("remove_query_params", remove_query_params)
+        if body_replace is not None and not isinstance(body_replace, str):
+            raise TypeError("body_replace must be a str or None")
+        _check_int("seq", seq)
+        digest = _digest(
+            _canonical(
+                {
+                    "route_id": route_id,
+                    "add_headers": [list(h) for h in add_headers],
+                    "remove_headers": list(remove_headers),
+                    "add_query_params": [list(p) for p in add_query_params],
+                    "remove_query_params": list(remove_query_params),
+                    "body_replace": body_replace,
+                    "seq": seq,
+                }
+            )
+        )
+        record = TransformRecord(
+            route_id=route_id,
+            add_headers=add_headers,
+            remove_headers=remove_headers,
+            add_query_params=add_query_params,
+            remove_query_params=remove_query_params,
+            body_replace=body_replace,
+            seq=seq,
+            digest=digest,
+        )
+        self._transforms[route_id] = record
+        return record
+
+    def transform_record(self, route_id: str) -> TransformRecord:
+        _check_str("route_id", route_id)
+        if route_id not in self._transforms:
+            raise UnknownTransformError(
+                f"no transform registered for route: {route_id}"
+            )
+        return self._transforms[route_id]
+
+    def transform(
+        self,
+        route_id: str,
+        method: str,
+        path: str,
+        headers: Tuple[Tuple[str, str], ...] = (),
+        body: str = "",
+        seq: int = 0,
+    ) -> TransformedRequest:
+        """Apply the route's registered transform to a request (simulated).
+
+        Headers: ``remove_headers`` first (case-insensitive), then
+        ``add_headers`` appended. Query: ``remove_query_params`` dropped
+        by name, then ``add_query_params`` appended verbatim. Body is
+        replaced only when ``body_replace`` was registered.
+        """
+        _check_str("route_id", route_id)
+        if route_id not in self._routes:
+            raise UnknownRouteError(f"unknown route: {route_id}")
+        cfg = self._transforms.get(route_id)
+        if cfg is None:
+            raise UnknownTransformError(
+                f"no transform registered for route: {route_id}"
+            )
+        _check_str("method", method)
+        if method != method.upper():
+            raise ValueError("method must be uppercase")
+        _check_str("path", path)
+        if not path.startswith("/"):
+            raise ValueError("path must start with '/'")
+        _check_header_pairs("headers", headers)
+        if not isinstance(body, str):
+            raise TypeError("body must be a str")
+        _check_int("seq", seq)
+
+        drop = {name.lower() for name in cfg.remove_headers}
+        new_headers = tuple(
+            (k, v) for k, v in headers if k.lower() not in drop
+        ) + tuple(cfg.add_headers)
+
+        if "?" in path:
+            base, qs = path.split("?", 1)
+            pairs = [p for p in qs.split("&") if p != ""]
+        else:
+            base, pairs = path, []
+        drop_q = set(cfg.remove_query_params)
+        kept_q = [p for p in pairs if p.split("=", 1)[0] not in drop_q]
+        new_q = kept_q + [f"{k}={v}" for k, v in cfg.add_query_params]
+        new_path = base + ("?" + "&".join(new_q) if new_q else "")
+
+        new_body = cfg.body_replace if cfg.body_replace is not None else body
+        digest = _digest(
+            _canonical(
+                {
+                    "route_id": route_id,
+                    "method": method,
+                    "path": new_path,
+                    "headers": [[k, v] for k, v in new_headers],
+                    "body": new_body,
+                    "transform": cfg.digest,
+                    "seq": seq,
+                }
+            )
+        )
+        return TransformedRequest(
+            route_id=route_id,
+            method=method,
+            path=new_path,
+            headers=new_headers,
+            body=new_body,
+            transform_digest=cfg.digest,
+            seq=seq,
+            digest=digest,
+        )
+
+    def set_throttle(
+        self, route_id: str, limit: int, window: int, seq: int
+    ) -> ThrottleRecord:
+        """Register (or replace) the throttle policy for a route."""
+        _check_str("route_id", route_id)
+        if route_id not in self._routes:
+            raise UnknownRouteError(f"unknown route: {route_id}")
+        _check_int("limit", limit)
+        if limit <= 0:
+            raise ValueError("limit must be positive")
+        _check_int("window", window)
+        if window <= 0:
+            raise ValueError("window must be positive")
+        _check_int("seq", seq)
+        digest = _digest(
+            _canonical(
+                {"route_id": route_id, "limit": limit, "window": window, "seq": seq}
+            )
+        )
+        record = ThrottleRecord(
+            route_id=route_id, limit=limit, window=window, seq=seq, digest=digest
+        )
+        self._throttles[route_id] = record
+        return record
+
+    def throttle_record(self, route_id: str) -> ThrottleRecord:
+        _check_str("route_id", route_id)
+        if route_id not in self._throttles:
+            raise UnknownThrottleError(
+                f"no throttle policy registered for route: {route_id}"
+            )
+        return self._throttles[route_id]
+
+    def throttle(self, route_id: str, seq: int) -> ThrottleVerdict:
+        """Check one request against the route's throttle policy (simulated).
+
+        Sliding window over caller-supplied logical seqs: a request is
+        allowed when fewer than ``limit`` attempts were recorded with a
+        seq in ``(seq - window, seq)``. Denial is returned as data, never
+        raised. Every check records its seq as an attempt (denied checks
+        age out of the window like any other attempt).
+        """
+        _check_str("route_id", route_id)
+        if route_id not in self._routes:
+            raise UnknownRouteError(f"unknown route: {route_id}")
+        cfg = self._throttles.get(route_id)
+        if cfg is None:
+            raise UnknownThrottleError(
+                f"no throttle policy registered for route: {route_id}"
+            )
+        _check_int("seq", seq)
+        hits = self._throttle_hits.setdefault(route_id, [])
+        in_window = [s for s in hits if seq - cfg.window < s < seq]
+        allowed = len(in_window) < cfg.limit
+        hits.append(seq)
+        retry_after = None if allowed else min(in_window) + cfg.window
+        digest = _digest(
+            _canonical(
+                {
+                    "route_id": route_id,
+                    "seq": seq,
+                    "allowed": allowed,
+                    "hits_in_window": len(in_window),
+                    "limit": cfg.limit,
+                    "retry_after_seq": retry_after,
+                }
+            )
+        )
+        return ThrottleVerdict(
+            route_id=route_id,
+            seq=seq,
+            allowed=allowed,
+            hits_in_window=len(in_window),
+            limit=cfg.limit,
+            retry_after_seq=retry_after,
+            digest=digest,
+        )
 
     def _match(
         self, method: str, path: str
@@ -552,6 +965,10 @@ def api_gateway_audit_event(kind: str, seq: int, **detail: Any) -> Dict[str, Any
         "plugin-removed",
         "request-handled",
         "request-rejected",
+        "transform-set",
+        "request-transformed",
+        "throttle-set",
+        "throttle-checked",
     }
     if kind not in allowed:
         raise ValueError(f"unknown audit kind: {kind}")
@@ -589,7 +1006,31 @@ def main() -> None:
     assert resp2.route_params == (("id", "42"),)
     resp3 = gw.handle("GET", "/nope", (("authorization", "Bearer x"),), seq=5)
     assert resp3.status == 404
-    print("api-gateway OK: routes, params, plugin chain, short-circuit")
+    gw.set_transform(
+        "users",
+        seq=6,
+        add_headers=(("x-gateway", "northstar"),),
+        remove_headers=("x-internal",),
+        add_query_params=(("gw", "1"),),
+        remove_query_params=("debug",),
+    )
+    tr = gw.transform(
+        "users",
+        "GET",
+        "/users/42?debug=1",
+        (("x-internal", "secret"), ("accept", "json")),
+        seq=7,
+    )
+    assert tr.header("x-gateway") == "northstar"
+    assert tr.header("x-internal") is None
+    assert tr.path == "/users/42?gw=1"
+    gw.set_throttle("users", limit=2, window=10, seq=8)
+    assert gw.throttle("users", seq=9).allowed is True
+    assert gw.throttle("users", seq=10).allowed is True
+    denied = gw.throttle("users", seq=11)
+    assert denied.allowed is False
+    assert denied.retry_after_seq == 9 + 10
+    print("api-gateway OK: routes, params, plugin chain, short-circuit, transform, throttle")
 
 
 if __name__ == "__main__":
