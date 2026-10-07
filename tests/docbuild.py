@@ -143,6 +143,8 @@ MANIFEST: dict[str, tuple[str, ...]] = {
         "counterfactual_explanation_probes",
         "artifact_graph_probes",
         "history_deviation_probes",
+        "planner_executor_seam_probes",
+        "tool_schema_digest_probes",
         "memory_admission_probes",
         "ask_or_solve_probes",
         "self_referential_trust_probes",

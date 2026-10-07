@@ -3008,6 +3008,154 @@ Map every probe name to its expected outcome.
 
 Print a small summary for the CLI.
 
+### `planner_executor_seam_probes`
+
+Source: `components/northstar-agent-runtime/planner_executor_seam_probes.py`
+
+Planner/executor seam probes: governance is inserted at the split.
+
+#### `probe_names()`
+
+All probe names in the corpus.
+
+#### `attack_names()`
+
+Names of the attack probes (expected deny).
+
+#### `benign_names()`
+
+Names of the benign control probes (expected allow).
+
+#### `probe_by_name(name: str)`
+
+Look up one probe by name; raises KeyError fail-closed.
+
+#### `probe_invokes_deny_side(probe: Mapping[str, Any])`
+
+True if the probe's gate_interaction names an active seam-side mechanism.
+
+#### `PlannedAction`
+
+One action the plan proposed, digest-only identity.
+
+#### `SeamHandoff`
+
+One planner -> executor handoff, pinned at the seam.
+
+- `verify()`
+  - Recompute the digest; a tampered handoff fails closed.
+- `widens_ceiling()`
+  - True if the child ceiling exceeds the parent ceiling.
+#### `SeamFinding`
+
+One integrity finding from a seam sweep; never a verdict.
+
+#### `DispatchAuthorization`
+
+One admitted dispatch under an admitted handoff.
+
+- `verify()`
+#### `SeamGate`
+
+The admission point at the planner/executor split.
+
+- `admit_handoff(handoff: SeamHandoff)`
+  - Admit one handoff; fail closed on any seam violation.
+- `current(proposal_id: str)`
+  - The currently admitted handoff for a proposal, if any.
+- `authorize_dispatch(*, proposal_id: str, revision: int, tool: str, arguments_digest: str, executor_id: str, plan_actions: Sequence[PlannedAction])`
+  - Authorize one dispatch under the admitted handoff.
+- `admitted_count()`
+#### `verify_seam_integrity(handoffs: Sequence[SeamHandoff])`
+
+Sweep a handoff list for seam violations. Never raises.
+
+#### `main()`
+
+### `tool_schema_digest_probes`
+
+Source: `components/northstar-agent-runtime/tool_schema_digest_probes.py`
+
+Tool-schema-digest probes: per-invocation digests, drift detection, identity binding.
+
+#### `attack_probe_names()`
+
+All tool-schema-digest attack probe names.
+
+#### `benign_probe_names()`
+
+All tool-schema-digest benign probe names.
+
+#### `probes_in_family(family: str)`
+
+Attack probes in one family.
+
+#### `probe_by_name(name: str)`
+
+Look up any probe (attack or benign) by name.
+
+#### `expected_outcomes()`
+
+Map every probe name to its expected outcome.
+
+#### `schema_digest(schema: Mapping[str, Any])`
+
+Pin a schema document to a ``sha256:`` digest.
+
+#### `ToolSchemaSnapshot`
+
+A pinned tool schema: the contract the gate admitted.
+
+#### `pin_schema(tool: str, schema: Mapping[str, Any], version: str)`
+
+Admit a tool schema: pin its digest under a caller-supplied version.
+
+#### `verify_snapshot(snapshot: ToolSchemaSnapshot)`
+
+Re-derive a snapshot's seal; constant-time compare, never raises.
+
+#### `InvocationBinding`
+
+Binds an admitted schema to one invocation.
+
+#### `bind_invocation(snapshot: ToolSchemaSnapshot, invocation_id: str, arguments_digest: str)`
+
+Mint a per-invocation binding against an admitted snapshot.
+
+#### `verify_binding(binding: InvocationBinding, invocation_id: str)`
+
+Verify a binding for a specific invocation; constant-time, never raises.
+
+#### `drift_details(pinned_schema: Mapping[str, Any], observed_schema: Mapping[str, Any])`
+
+Name the structural drift kinds between two schema documents.
+
+#### `SchemaFinding`
+
+One drift-check outcome, digest-pinned.
+
+#### `SchemaRegistry`
+
+Admitted schema pins, keyed by tool name.
+
+- `register(snapshot: ToolSchemaSnapshot)`
+  - Admit (or re-admit) a tool schema pin. Fail-closed on bad seal.
+- `pinned(tool: str)`
+  - Return the admitted pin for a tool, or ``None`` if unpinned.
+- `check(tool: str, observed_schema: Mapping[str, Any], pinned_schema: Mapping[str, Any] | None=None)`
+  - Compare a live schema against the admitted pin.
+#### `verify_finding(finding: SchemaFinding)`
+
+Re-derive a finding's seal; constant-time compare, never raises.
+
+#### `bind_tool_call(registry: SchemaRegistry, tool: str, live_schema: Mapping[str, Any], invocation_id: str, arguments_digest: str, pinned_schema: Mapping[str, Any] | None=None)`
+
+Bind one invocation, or fail closed.
+
+#### `main()`
+
+Print a small summary for the CLI.
+
 ### `memory_admission_probes`
 
 Source: `components/northstar-agent-runtime/memory_admission_probes.py`
