@@ -4625,6 +4625,309 @@ The host's emergency brake, persisted to ``path``.
   - WAAL liability chain, oldest first.
 - `verify_liability_chain()`
   - Recompute every liability digest and link. Never raises on well-formed input; returns ``(True, "ok")`` or ``(False, reason)``.
+### `mcp_semantic_diff`
+
+Source: `components/northstar-agent-runtime/mcp_semantic_diff.py`
+
+MCP schema semantic diff: compare what a schema *means*, not its bytes.
+
+#### `SemanticChangeKind`
+
+Fixed vocabulary for one semantic change between two schemas.
+
+#### `SchemaField`
+
+One parsed property of an object schema.
+
+- `constraint_map()`
+#### `ParsedSchema`
+
+A parsed object schema: its fields plus top-level requiredness.
+
+- `field_map()`
+#### `SemanticChange`
+
+One semantic change between two schemas.
+
+#### `SemanticRiskAssessment`
+
+Verdict of the risk policy over a list of semantic changes.
+
+#### `parse_schema(schema: Any)`
+
+Parse a JSON Schema ``inputSchema`` into a ``ParsedSchema``.
+
+#### `semantic_diff(old_schema: Any, new_schema: Any)`
+
+Diff two JSON Schemas field by field; [] means no semantic change.
+
+#### `is_sensitive_tool(name: Any)`
+
+True when the tool name carries a sensitive-capability substring.
+
+#### `assess_semantic_risk(changes: Any, is_sensitive: bool=False)`
+
+Apply the fail-closed policy over a semantic change list.
+
+#### `check_schema_drift(old_schema: Any, new_schema: Any, *, is_sensitive: bool=False)`
+
+One-call convenience: parse, diff, and assess two schemas.
+
+#### `main()`
+
+### `budget_token_bucket`
+
+Source: `components/northstar-agent-runtime/budget_token_bucket.py`
+
+Token-bucket budget: rate-limited alternative to per-call ceilings.
+
+#### `TokenBucketError`
+
+Raised for malformed bucket parameters or inputs.
+
+#### `TokenBucket`
+
+A single token bucket: capacity-bounded burst with linear refill.
+
+- `capacity` (property)
+- `refill_rate_per_seq` (property)
+- `tokens` (property)
+- `refill(current_seq: int)`
+  - Recompute tokens from seqs elapsed since last refill. Idempotent.
+- `consume(cost: float, current_seq: int)`
+  - Try to consume ``cost`` tokens. Refills first, then spends.
+- `time_until_available(cost: float, current_seq: int)`
+  - Seqs the caller must wait before ``cost`` tokens are available.
+#### `BucketRejection`
+
+Frozen record of a refused call.
+
+#### `TokenBucketBudget`
+
+Per-call-type token buckets: rate enforcement across a run.
+
+- `check_and_consume(call_type: str, cost: float, current_seq: int)`
+  - Consume ``cost`` from ``call_type``'s bucket. Returns True/False.
+- `rejections` (property)
+- `tokens_for(call_type: str)`
+- `retry_in_seqs(call_type: str, cost: float, current_seq: int)`
+- `as_dict()`
+#### `main()`
+
+### `memory_capability`
+
+Source: `components/northstar-agent-runtime/memory_capability.py`
+
+Memory write admission with capability tokens.
+
+#### `CapabilityToken`
+
+An issuer-signed memory-write capability.
+
+- `body()`
+- `as_dict()`
+#### `issue_token(categories: Any, expires_seq: int, issuer_key: bytes, token_id: Optional[str]=None)`
+
+Mint a signed capability token.
+
+#### `verify_token(token: Any, issuer_pubkey: bytes)`
+
+Verify a token's issuer signature and structural validity.
+
+#### `AdmissionDecision`
+
+One recorded admit/deny verdict.
+
+#### `CapabilityAdmission`
+
+Write-path admission gate driven by capability tokens.
+
+- `expired(token: CapabilityToken, current_seq: int)`
+  - True when the token is expired at ``current_seq`` (fail closed).
+- `admit_write(category: Any, content: Any, token: Any, current_seq: Any)`
+  - Admit (True) or deny (False) a memory write.
+- `decisions()`
+  - All recorded verdicts, in order (read-only copy).
+- `denied()`
+  - Only the denials, in order.
+- `version()`
+#### `main()`
+
+### `a2a_gates`
+
+Source: `components/northstar-agent-runtime/a2a_gates.py`
+
+A2A handoff gates: sabotage detection and turf-war detection.
+
+#### `A2AError`
+
+Raised for malformed gate inputs that must never be silent.
+
+#### `detect_sabotage(handoff: Mapping[str, Any], history: Iterable[Mapping[str, Any]])`
+
+Detect whether *handoff* sabotages another agent's recorded work.
+
+#### `ResourceRegistry`
+
+Tracks which agent holds which resource. In-memory, fail-closed.
+
+- `claim(agent_id: str, resource: str, seq: int)`
+  - Claim *resource* for *agent_id*.
+- `release(agent_id: str, resource: str)`
+  - Release *resource* held by *agent_id*.
+- `holder(resource: str)`
+  - Return the agent holding *resource*, or None if free.
+- `held_by(agent_id: str)`
+  - Return the resources currently held by *agent_id*, sorted.
+#### `reset_default_registry()`
+
+Replace the module-level default registry with a fresh one.
+
+#### `default_registry()`
+
+Return the module-level default resource registry.
+
+#### `detect_turf_war(agent_id: str, resource_requests: Iterable[str], registry: ResourceRegistry | None=None)`
+
+Detect whether *agent_id*'s resource requests start a turf war.
+
+#### `HandoffRecord`
+
+One accepted handoff, digest-chained into the gate's history.
+
+- `claims_dict()`
+  - Reconstruct the claims mapping from pinned pairs.
+- `as_dict()`
+- `record_digest()`
+  - Digest pinning this record's content (excludes nothing).
+#### `A2AGate`
+
+Checkpoint for agent-to-agent handoffs.
+
+- `gate_id` (property)
+- `registry` (property)
+  - The gate's resource registry (claims happen on allow).
+- `check_handoff(from_agent: str, to_agent: str, payload: Mapping[str, Any])`
+  - Check a handoff from *from_agent* to *to_agent*.
+- `release(agent_id: str, resources: Iterable[str])`
+  - Release resources held by *agent_id*; returns per-resource results.
+- `history()`
+  - Accepted handoffs, oldest first.
+- `verify_chain()`
+  - Verify the history digest chain; True when intact.
+#### `a2a_gate_audit_events(record: HandoffRecord, *, note: str='')`
+
+Audit events for one accepted handoff.
+
+#### `main()`
+
+Self-check: exercise the gate end to end.
+
+### `plan_defense`
+
+Source: `components/northstar-agent-runtime/plan_defense.py`
+
+Plan defense: stale-plan detection, plan-injection defense, scope-drift detection.
+
+#### `PlanDefenseError`
+
+Base class for plan-defense input errors. Never raised directly.
+
+#### `MalformedPlan`
+
+The plan is not shaped the way the detectors require.
+
+#### `detect_stale_plan(plan: Mapping, current_state_seq: int, plan_created_seq: int)`
+
+True when the plan is stale relative to current state.
+
+#### `detect_plan_injection(plan: Mapping, trusted_subgoal_ids: Iterable[str])`
+
+True when the plan contains a subgoal outside the trusted set.
+
+#### `detect_scope_drift(original_goal: str, current_subgoals: Sequence[Mapping])`
+
+True when the subgoals no longer address the original goal.
+
+#### `DefenseReport`
+
+Outcome of :meth:`PlanDefense.check`. Frozen and auditable.
+
+- `as_dict()`
+#### `PlanDefense`
+
+Combines the three plan defenses into one execution-time check.
+
+- `trusted_subgoal_ids` (property)
+- `check(plan: Mapping, original_goal: str, current_state_seq: int, plan_created_seq: int)`
+  - Run all three detectors. Returns ``"clean"`` or the issue list.
+- `check_report(plan: Mapping, original_goal: str, current_state_seq: int, plan_created_seq: int)`
+  - Same as :meth:`check` but returns a frozen :class:`DefenseReport`.
+#### `main()`
+
+### `probe_flywheel`
+
+Source: `components/northstar-agent-runtime/probe_flywheel.py`
+
+Probe flywheel from production failures.
+
+#### `FailurePattern`
+
+One repeated failure shape: (action type, error type) with a count.
+
+- `probe_ready()`
+  - True when the pattern has crossed the probe threshold.
+- `probe_name()`
+  - Deterministic probe name derived from the pattern.
+- `as_dict()`
+#### `Flywheel`
+
+Counts failure patterns and emits probes for repeated ones.
+
+- `record_failure(bundle: Any)`
+  - Fold one failure into its pattern; return the updated pattern.
+- `record_failures(bundles: Iterable[Any])`
+  - Fold many failures; fail-closed on the first malformed bundle.
+- `pattern_for(action_type: str, error_type: str)`
+  - Return the pattern for (action_type, error_type), or None.
+- `patterns()`
+  - All tracked patterns, in deterministic (action, error) order.
+- `generate_probe(pattern: FailurePattern)`
+  - Build the probe dict for one repeated failure pattern.
+- `get_probes()`
+  - All probes for patterns at or above the threshold.
+- `probe_names()`
+  - Names of the currently emitted probes, in order.
+#### `main()`
+
+### `memory_fact_belief`
+
+Source: `components/northstar-agent-runtime/memory_fact_belief.py`
+
+Fact/belief distinction with privilege-at-recall (P0 memory wiring).
+
+#### `MemoryType`
+
+Whether a memory entry is a verifiable fact or an inference.
+
+#### `PrivilegeLevel`
+
+Reader/entry privilege, ordered low to high.
+
+#### `MemoryEntry`
+
+A single memory entry with type, confidence, source, and privilege.
+
+- `is_belief_below_threshold()`
+  - True when this belief is too uncertain to ever recall.
+#### `recall(entry: MemoryEntry, reader_privilege: PrivilegeLevel)`
+
+Decide whether ``entry`` may be surfaced to a reader.
+
+#### `main()`
+
+Self-check smoke: exercise recall across the decision matrix.
+
 ### `skill_wiring`
 
 Source: `components/northstar-agent-runtime/skill_wiring.py`
