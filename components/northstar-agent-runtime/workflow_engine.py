@@ -69,6 +69,9 @@ _AUDIT_KINDS = frozenset(
         "step-failed",
         "run-completed",
         "step-retried",
+        "execution-started",
+        "signaled",
+        "execution-completed",
         "rejected",
     }
 )
@@ -120,6 +123,26 @@ class RunFailed(Exception):
             f"workflow run failed at step {report.failed_step!r}: {step_failure}"
         )
         self.__cause__ = step_failure
+
+
+class ExecutionError(WorkflowError):
+    """Base for execution-lifecycle (Temporal/Cadence-shaped) errors."""
+
+
+class DuplicateExecutionError(ExecutionError):
+    """``start()`` was given an already-used execution id."""
+
+
+class UnknownExecutionError(ExecutionError):
+    """``signal()``/``complete()`` targeted an unknown execution id."""
+
+
+class TerminalExecutionError(ExecutionError):
+    """``signal()``/``complete()`` targeted a terminally finished execution."""
+
+
+class BadSignalError(ExecutionError):
+    """Malformed signal name or un-pinnable signal payload."""
 
 
 def _check_str(value: Any, name: str) -> str:
@@ -281,8 +304,108 @@ class RunReport:
         }
 
 
+@dataclass(frozen=True)
+class ExecutionRecord:
+    """Frozen record of a started workflow execution.
+
+    ``execution_id`` is the unique instance id (Temporal run-id
+    shaped); ``workflow_id`` is the logical workflow name (Temporal
+    workflow-id shaped). ``input_digest`` pins the caller-supplied
+    input, if any; raw input bytes never enter the record.
+    """
+
+    execution_id: str
+    workflow_id: str
+    status: str
+    input_digest: Optional[str]
+    start_seq: int
+    digest: str
+    version: str = WORKFLOW_ENGINE_VERSION
+    schema: str = SCHEMA_PIN
+
+    def __post_init__(self) -> None:
+        if self.version != WORKFLOW_ENGINE_VERSION:
+            raise WorkflowError("version pin mismatch")
+        if self.schema != SCHEMA_PIN:
+            raise WorkflowError("schema pin mismatch")
+
+    def as_dict(self) -> Dict[str, Any]:
+        return {
+            "execution_id": self.execution_id,
+            "workflow_id": self.workflow_id,
+            "status": self.status,
+            "input_digest": self.input_digest,
+            "start_seq": self.start_seq,
+            "digest": self.digest,
+            "version": self.version,
+            "schema": self.schema,
+        }
+
+
+@dataclass(frozen=True)
+class SignalRecord:
+    """Frozen record of a signal booked against an execution."""
+
+    signal_id: str
+    execution_id: str
+    signal_name: str
+    payload_digest: Optional[str]
+    seq: int
+    digest: str
+    version: str = WORKFLOW_ENGINE_VERSION
+    schema: str = SCHEMA_PIN
+
+    def __post_init__(self) -> None:
+        if self.version != WORKFLOW_ENGINE_VERSION:
+            raise WorkflowError("version pin mismatch")
+        if self.schema != SCHEMA_PIN:
+            raise WorkflowError("schema pin mismatch")
+
+    def as_dict(self) -> Dict[str, Any]:
+        return {
+            "signal_id": self.signal_id,
+            "execution_id": self.execution_id,
+            "signal_name": self.signal_name,
+            "payload_digest": self.payload_digest,
+            "seq": self.seq,
+            "digest": self.digest,
+            "version": self.version,
+            "schema": self.schema,
+        }
+
+
+@dataclass(frozen=True)
+class CompletionRecord:
+    """Frozen record of a terminally completed execution."""
+
+    execution_id: str
+    outcome: str
+    result_digest: Optional[str]
+    seq: int
+    digest: str
+    version: str = WORKFLOW_ENGINE_VERSION
+    schema: str = SCHEMA_PIN
+
+    def __post_init__(self) -> None:
+        if self.version != WORKFLOW_ENGINE_VERSION:
+            raise WorkflowError("version pin mismatch")
+        if self.schema != SCHEMA_PIN:
+            raise WorkflowError("schema pin mismatch")
+
+    def as_dict(self) -> Dict[str, Any]:
+        return {
+            "execution_id": self.execution_id,
+            "outcome": self.outcome,
+            "result_digest": self.result_digest,
+            "seq": self.seq,
+            "digest": self.digest,
+            "version": self.version,
+            "schema": self.schema,
+        }
+
+
 class WorkflowEngine:
-    """DAG workflow engine: define, run, retry."""
+    """DAG workflow engine: define, run, retry; plus execution lifecycle."""
 
     def __init__(self) -> None:
         self._steps: Dict[str, StepSpec] = {}
@@ -290,6 +413,12 @@ class WorkflowEngine:
         self._order: Tuple[str, ...] = ()
         self._defined = False
         self._run_counter = 0
+        # -- Temporal/Cadence-shaped execution lifecycle state ----------
+        self._executions: Dict[str, ExecutionRecord] = {}
+        self._exec_signals: Dict[str, List[SignalRecord]] = {}
+        self._exec_seq: int = -1
+        self._signal_counter: int = 0
+        self._exec_audit: List[Dict[str, Any]] = []
 
     # -- definition ---------------------------------------------------
 
@@ -596,6 +725,254 @@ class WorkflowEngine:
             raise RunFailed(report, failure)
         return report
 
+    # -- execution lifecycle (Temporal/Cadence-shaped) ------------------
+
+    def _claim_exec_seq(self, seq: int) -> int:
+        """Claim a strictly-increasing execution-ledger seq.
+
+        Bad shapes and rewinds raise bare (no consumption, no audit);
+        post-claim validation failures consume the claimed seq and book
+        a ``rejected`` audit row via :meth:`_reject_exec`.
+        """
+        _check_seq(seq)
+        if seq <= self._exec_seq:
+            raise WorkflowError(
+                f"seq must be strictly increasing (last {self._exec_seq}), got {seq}"
+            )
+        self._exec_seq = seq
+        return seq
+
+    def _reject_exec(self, exc: ExecutionError, seq: int) -> ExecutionError:
+        """Book a rejected execution mutation and return the error to raise."""
+        self._exec_audit.append(workflow_engine_audit_event("rejected", seq))
+        return exc
+
+    def start(
+        self,
+        execution_id: str,
+        workflow_id: str,
+        seq: int,
+        input: Any = None,
+    ) -> ExecutionRecord:
+        """Start a workflow execution instance.
+
+        ``execution_id`` is the unique instance id (Temporal run-id
+        shaped); ids are never recycled. ``workflow_id`` is the logical
+        workflow name. ``input`` is optional and pinned by digest — raw
+        bytes never enter the record. Duplicate ids are refused
+        fail-closed (seq consumed, ``rejected`` booked).
+        """
+        _check_str(execution_id, "execution_id")
+        self._claim_exec_seq(seq)
+        if execution_id in self._executions:
+            raise self._reject_exec(
+                DuplicateExecutionError(
+                    f"execution id {execution_id!r} already used"
+                ),
+                seq,
+            )
+        _check_str(workflow_id, "workflow_id")
+        input_digest: Optional[str] = None
+        if input is not None:
+            try:
+                input_digest = _digest(_canonical(input))
+            except WorkflowError as exc:
+                raise self._reject_exec(
+                    ExecutionError(f"input is not pinnable: {exc}"), seq
+                ) from exc
+        digest = _digest(
+            _canonical(
+                {
+                    "execution_id": execution_id,
+                    "workflow_id": workflow_id,
+                    "input_digest": input_digest,
+                    "start_seq": seq,
+                }
+            )
+        )
+        record = ExecutionRecord(
+            execution_id=execution_id,
+            workflow_id=workflow_id,
+            status="running",
+            input_digest=input_digest,
+            start_seq=seq,
+            digest=digest,
+        )
+        self._executions[execution_id] = record
+        self._exec_signals[execution_id] = []
+        self._exec_audit.append(
+            workflow_engine_audit_event(
+                "execution-started", seq, execution_id=execution_id
+            )
+        )
+        return record
+
+    def signal(
+        self,
+        execution_id: str,
+        signal_name: str,
+        seq: int,
+        payload: Any = None,
+    ) -> SignalRecord:
+        """Book a signal against a running execution.
+
+        The execution must be ``running``; unknown ids and terminal
+        executions are refused fail-closed. ``payload`` is pinned by
+        digest only — raw bytes never enter the record. Verdicts are
+        bookings, not deliveries: a booked signal means the ledger saw
+        it, not that the workflow consumed it.
+        """
+        _check_str(execution_id, "execution_id")
+        self._claim_exec_seq(seq)
+        record = self._executions.get(execution_id)
+        if record is None:
+            raise self._reject_exec(
+                UnknownExecutionError(f"unknown execution {execution_id!r}"), seq
+            )
+        if record.status != "running":
+            raise self._reject_exec(
+                TerminalExecutionError(
+                    f"execution {execution_id!r} is terminal ({record.status})"
+                ),
+                seq,
+            )
+        try:
+            _check_str(signal_name, "signal_name")
+        except WorkflowError as exc:
+            raise self._reject_exec(
+                BadSignalError(f"bad signal name: {exc}"), seq
+            ) from exc
+        if len(signal_name) > 256:
+            raise self._reject_exec(
+                BadSignalError("signal_name must be <= 256 chars"), seq
+            )
+        payload_digest: Optional[str] = None
+        if payload is not None:
+            try:
+                payload_digest = _digest(_canonical(payload))
+            except WorkflowError as exc:
+                raise self._reject_exec(
+                    BadSignalError(f"payload is not pinnable: {exc}"), seq
+                ) from exc
+        self._signal_counter += 1
+        signal_id = f"sig-{self._signal_counter}"
+        digest = _digest(
+            _canonical(
+                {
+                    "signal_id": signal_id,
+                    "execution_id": execution_id,
+                    "signal_name": signal_name,
+                    "payload_digest": payload_digest,
+                    "seq": seq,
+                }
+            )
+        )
+        srec = SignalRecord(
+            signal_id=signal_id,
+            execution_id=execution_id,
+            signal_name=signal_name,
+            payload_digest=payload_digest,
+            seq=seq,
+            digest=digest,
+        )
+        self._exec_signals[execution_id].append(srec)
+        self._exec_audit.append(
+            workflow_engine_audit_event("signaled", seq, execution_id=execution_id)
+        )
+        return srec
+
+    def complete(
+        self,
+        execution_id: str,
+        seq: int,
+        result: Any = None,
+    ) -> CompletionRecord:
+        """Terminally complete a running execution.
+
+        Unknown ids and already-terminal executions are refused
+        fail-closed. ``result`` is pinned by digest only. Completion is
+        terminal: later ``signal``/``complete`` calls on the id raise.
+        """
+        _check_str(execution_id, "execution_id")
+        self._claim_exec_seq(seq)
+        record = self._executions.get(execution_id)
+        if record is None:
+            raise self._reject_exec(
+                UnknownExecutionError(f"unknown execution {execution_id!r}"), seq
+            )
+        if record.status != "running":
+            raise self._reject_exec(
+                TerminalExecutionError(
+                    f"execution {execution_id!r} is terminal ({record.status})"
+                ),
+                seq,
+            )
+        result_digest: Optional[str] = None
+        if result is not None:
+            try:
+                result_digest = _digest(_canonical(result))
+            except WorkflowError as exc:
+                raise self._reject_exec(
+                    ExecutionError(f"result is not pinnable: {exc}"), seq
+                ) from exc
+        digest = _digest(
+            _canonical(
+                {
+                    "execution_id": execution_id,
+                    "outcome": "completed",
+                    "result_digest": result_digest,
+                    "seq": seq,
+                }
+            )
+        )
+        crec = CompletionRecord(
+            execution_id=execution_id,
+            outcome="completed",
+            result_digest=result_digest,
+            seq=seq,
+            digest=digest,
+        )
+        self._executions[execution_id] = ExecutionRecord(
+            execution_id=record.execution_id,
+            workflow_id=record.workflow_id,
+            status="completed",
+            input_digest=record.input_digest,
+            start_seq=record.start_seq,
+            digest=record.digest,
+        )
+        self._exec_audit.append(
+            workflow_engine_audit_event(
+                "execution-completed", seq, execution_id=execution_id
+            )
+        )
+        return crec
+
+    # -- execution views (pure reads) --------------------------------
+
+    def execution(self, execution_id: str) -> Optional[ExecutionRecord]:
+        """Return the execution record, or None if unknown."""
+        return self._executions.get(_check_str(execution_id, "execution_id"))
+
+    def execution_ids(self) -> Tuple[str, ...]:
+        """Sorted execution ids known to the ledger."""
+        return tuple(sorted(self._executions))
+
+    def status(self, execution_id: str) -> Optional[str]:
+        """Status of an execution, or None if unknown."""
+        record = self.execution(execution_id)
+        return record.status if record is not None else None
+
+    def signals_for(self, execution_id: str) -> Tuple[SignalRecord, ...]:
+        """Signals booked against an execution (chronological)."""
+        _check_str(execution_id, "execution_id")
+        if execution_id not in self._executions:
+            raise UnknownExecutionError(f"unknown execution {execution_id!r}")
+        return tuple(self._exec_signals[execution_id])
+
+    def execution_audit_log(self) -> Tuple[Dict[str, Any], ...]:
+        """Execution-ledger audit rows (booking order)."""
+        return tuple(self._exec_audit)
+
     def _require_defined(self) -> None:
         if not self._defined:
             raise WorkflowError("workflow is not defined; call define() first")
@@ -606,12 +983,14 @@ def workflow_engine_audit_event(
     seq: int,
     step_id: Optional[str] = None,
     run_id: Optional[str] = None,
+    execution_id: Optional[str] = None,
 ) -> Dict[str, Any]:
     """Build an ``audit.ndjson/1``-shaped record for a workflow event.
 
     ``kind`` is one of ``"defined"`` / ``"step-started"`` /
     ``"step-succeeded"`` / ``"step-failed"`` / ``"run-completed"`` /
-    ``"step-retried"`` / ``"rejected"``.
+    ``"step-retried"`` / ``"execution-started"`` / ``"signaled"`` /
+    ``"execution-completed"`` / ``"rejected"``.
     """
     if not isinstance(kind, str) or kind not in _AUDIT_KINDS:
         raise ValueError(f"kind must be one of {sorted(_AUDIT_KINDS)}")
@@ -625,6 +1004,8 @@ def workflow_engine_audit_event(
         record["step_id"] = _check_str(step_id, "step_id")
     if run_id is not None:
         record["run_id"] = _check_str(run_id, "run_id")
+    if execution_id is not None:
+        record["execution_id"] = _check_str(execution_id, "execution_id")
     return record
 
 
@@ -643,7 +1024,16 @@ def main() -> None:
     report = engine.run(seq=1)
     assert report.succeeded and report.step_reports[1].output_digest is not None
     assert report.run_digest.startswith("sha256:")
+    # Temporal/Cadence-shaped execution lifecycle smoke test.
+    exec_rec = engine.start("exec-1", "order-workflow", 2, input={"order": "o-9"})
+    assert exec_rec.status == "running" and exec_rec.digest.startswith("sha256:")
+    sig = engine.signal("exec-1", "cancel-request", 3, payload={"reason": "user"})
+    assert sig.signal_id == "sig-1" and sig.digest.startswith("sha256:")
+    comp = engine.complete("exec-1", 4, result={"done": True})
+    assert comp.outcome == "completed" and engine.status("exec-1") == "completed"
+    assert len(engine.execution_audit_log()) == 3
     print("workflow-engine OK: define, topological run, digests, audit")
+    print("workflow-engine OK: start, signal, complete, execution ledger")
 
 
 if __name__ == "__main__":
