@@ -129,6 +129,8 @@ py-modules = [
     "commerce_mandate_probes",
     "monitor_channel_probes",
     "sleeper_agent_probes",
+    "trust_inversion_probes",
+    "evidence_aging_probes",
     "negotiation_corpus_probes",
     "refusal_pattern_probes",
     "evidence_compaction_probes",

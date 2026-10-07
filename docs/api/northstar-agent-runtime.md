@@ -3709,6 +3709,134 @@ Same agent+model+context class must share one behavior digest unless a declared 
 
 Print the corpus summary; exit 0.
 
+### `trust_inversion_probes`
+
+Source: `components/northstar-agent-runtime/trust_inversion_probes.py`
+
+Trust-inversion probe corpus + delegation-culture risk detectors + gate-strength calibration.
+
+#### `TrustInversionError`
+
+Raised for malformed trust-inversion records or calibrations.
+
+#### `attack_probe_names()`
+
+All trust-inversion attack probe names.
+
+#### `benign_probe_names()`
+
+All benign control names.
+
+#### `probes_in_family(family: str)`
+
+Probes in one family (attacks, or 'benign' for controls).
+
+#### `probe_by_name(name: str)`
+
+Look up any trust-inversion probe (attack or benign) by name.
+
+#### `expected_outcomes()`
+
+probe name -> expected gate outcome ('deny' or 'allow').
+
+#### `ComfortSignals`
+
+One observation window's ambient-comfort measurements.
+
+#### `build_signals(window_id: str, delegation_rate: float, scrutiny_rate: float, rubber_stamp_rate: float, approval_median_latency_s: float | None, override_rate: float, agent_tenure_runs: int, success_streak: int)`
+
+Build a digest-pinned ``ComfortSignals`` record (fail-closed).
+
+#### `verify_signals(record: ComfortSignals)`
+
+Re-derive the digest and compare in constant time.
+
+#### `comfort_index(signals: ComfortSignals)`
+
+Ambient comfort in [0, 1]: a measurement, never a verdict.
+
+#### `assess_delegation_culture(signals: ComfortSignals)`
+
+Assess one window's delegation culture.
+
+#### `GateStrengthDecision`
+
+One digest-pinned gate-strength calibration.
+
+#### `calibrate_gate_strength(signals: ComfortSignals, base_strength: float, *, stakes: Literal['low', 'high']='low')`
+
+Apply the inverse-coupling rule: required gate strength rises with ambient comfort.
+
+#### `verify_decision(decision: GateStrengthDecision)`
+
+Re-derive the decision digest and compare in constant time.
+
+#### `main()`
+
+Print corpus summary; exit 0 when the corpus is self-consistent.
+
+### `evidence_aging_probes`
+
+Source: `components/northstar-agent-runtime/evidence_aging_probes.py`
+
+Evidence-aging probe corpus + freshness / decay detectors + aging gates.
+
+#### `parse_timestamp(ts: Any)`
+
+Epoch seconds for an evidence timestamp; None when missing/malformed.
+
+#### `EvidenceRecord`
+
+One digest-pinned evidence item with its observation time.
+
+#### `build_record(*, evidence_id: str, kind: str, observed_ts: Any, payload_digest: str, issuer: str, max_age_seconds: int)`
+
+Mint a well-formed, digest-pinned evidence record.
+
+#### `verify_record(record: EvidenceRecord)`
+
+Re-derive the record digest with a constant-time compare.
+
+#### `freshness(record: EvidenceRecord, as_of: Any)`
+
+Age and freshness status of ``record`` against ``as_of``.
+
+#### `gate_evidence(record: EvidenceRecord, as_of: Any, *, ceiling_seconds: int | None=None)`
+
+Fail-closed gate verdict for one evidence record.
+
+#### `gate_batch(records: list[EvidenceRecord] | tuple[EvidenceRecord, ...], as_of: Any, *, ceiling_seconds: int | None=None)`
+
+Gate a batch of evidence as a unit.
+
+#### `detect_restamp(old: EvidenceRecord, new: EvidenceRecord)`
+
+Detect timestamp restamping without re-observation.
+
+#### `probe_names()`
+
+All evidence-aging attack probe names.
+
+#### `benign_names()`
+
+All benign control names.
+
+#### `probes_by_family(family: str)`
+
+Probes in one family (attacks plus benign).
+
+#### `probe_by_name(name: str)`
+
+Look up any evidence-aging probe (attack or benign) by name.
+
+#### `expected_outcomes()`
+
+probe name -> expected gate outcome ('deny' or 'allow').
+
+#### `main()`
+
+Print the corpus inventory.
+
 ### `negotiation_corpus_probes`
 
 Source: `components/northstar-agent-runtime/negotiation_corpus_probes.py`
