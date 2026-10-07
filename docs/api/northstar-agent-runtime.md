@@ -14313,6 +14313,24 @@ Trust tiers for plugin bundles: which claims carry evidence, and what happens wh
 
 The trust tier of one bundle, plus the evidence gaps that capped it.
 
+### `counterfactual`
+
+Source: `components/northstar-agent-runtime/counterfactual.py`
+
+Pinned, non-generative explanations for selected runtime denial rules.
+
+#### `Counterfactual`
+
+One pinned condition that would change, or cannot change, a denial.
+
+#### `RuleExplanation`
+
+Immutable pinned explanation for a specific deny code.
+
+#### `render_denial(audit_record: Mapping[str, Any])`
+
+Render a denial using only its audit record and the pinned rule table.
+
 ### `providers`
 
 Source: `components/northstar-agent-runtime/providers/__init__.py`

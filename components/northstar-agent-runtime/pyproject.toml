@@ -243,6 +243,7 @@ py-modules = [
     "transport_agents",
     "healthcare_agents",
     "education_agents",
+    "counterfactual",
 ]
 
 [tool.setuptools.packages.find]

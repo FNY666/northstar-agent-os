@@ -282,6 +282,7 @@ MANIFEST: dict[str, tuple[str, ...]] = {
         "audit_merkle",
         "dataflow_policy",
         "plugin_trust",
+        "counterfactual",
         # The package's own module is the re-export surface embedders import from, so it
         # is documented rather than assumed.
         "providers.__init__",
