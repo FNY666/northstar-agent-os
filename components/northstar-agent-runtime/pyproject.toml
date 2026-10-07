@@ -62,6 +62,7 @@ py-modules = [
     "pocketos_probe",
     "temporal_decoupling_probe",
     "rule_of_two_probe",
+    "deny_monotonicity",
     "crypto_agility",
     "a2abreak_probes",
     "adjudication",

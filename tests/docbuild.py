@@ -85,6 +85,7 @@ MANIFEST: dict[str, tuple[str, ...]] = {
         "pocketos_probe",
         "temporal_decoupling_probe",
         "rule_of_two_probe",
+        "deny_monotonicity",
         "adjudication",
         "asi07_corpus",
         "masdrift_corpus",
