@@ -3943,6 +3943,166 @@ Re-derive the decision digest; constant-time comparison.
 
 Print a small summary for the CLI.
 
+### `stale_plan_probes`
+
+Source: `components/northstar-agent-runtime/stale_plan_probes.py`
+
+Stale-plan probes: plan freshness gates and invalidation triggers.
+
+#### `attack_probe_names()`
+
+All stale-plan attack probe names.
+
+#### `benign_probe_names()`
+
+All benign control names.
+
+#### `probes_in_family(family: str)`
+
+Attack probes in one family.
+
+#### `probe_by_name(name: str)`
+
+Look up any probe (attack or benign) by name.
+
+#### `expected_outcomes()`
+
+probe name -> expected gate outcome ('deny' or 'allow').
+
+#### `parse_timestamp(ts: Any)`
+
+Parse an epoch number or an RFC3339 string to epoch seconds.
+
+#### `StalePlanRecord`
+
+A plan with its evidence-snapshot freshness metadata.
+
+#### `seal_plan_record(plan_id: str, plan_digest: str, snapshot_time: Any, max_age_seconds: float, evidence_head_digest: str)`
+
+Build a digest-pinned stale-plan record. Fail-closed.
+
+#### `plan_age_seconds(record: StalePlanRecord, as_of: Any)`
+
+Age and freshness status of ``record`` against ``as_of``.
+
+#### `PlanFreshnessDecision`
+
+Digest-pinned disposition from the freshness gate.
+
+#### `gate_plan_freshness(record: StalePlanRecord, as_of: Any, *, ceiling_seconds: float, registered_head_digest: str)`
+
+Fail-closed freshness gate for one plan record.
+
+#### `verify_freshness_decision(decision: PlanFreshnessDecision, record: StalePlanRecord)`
+
+Re-derive the decision digest; constant-time comparison.
+
+#### `detect_snapshot_drift(record: StalePlanRecord, registered_head_digest: str)`
+
+Name plan-evidence-changed when the snapshot no longer resolves to the registered head. Returns None when the head still matches. Never raises.
+
+#### `detect_restamped_plan(old: StalePlanRecord, new: StalePlanRecord)`
+
+Name evidence-restamped when the same plan id + same plan digest carries an advanced snapshot time with no new evidence head.
+
+#### `invalidate_remaining_steps(record: StalePlanRecord, as_of: Any, *, ceiling_seconds: float, registered_head_digest: str)`
+
+Mid-run invalidation: re-run the freshness gate against the current ``as_of`` and current registered head.
+
+#### `main()`
+
+Print a small summary for the CLI.
+
+### `destructive_prefix_probes`
+
+Source: `components/northstar-agent-runtime/destructive_prefix_probes.py`
+
+Destructive-prefix probes: the tool name is an attack surface.
+
+#### `classify_name(name: str)`
+
+Return the risk classes signaled by a tool name's prefixes.
+
+#### `detect_prefix_risk(name: str)`
+
+Sorted risk classes for a name; empty tuple when unclassified.
+
+#### `attack_probe_names()`
+
+All destructive-prefix attack probe names.
+
+#### `benign_probe_names()`
+
+All benign control names.
+
+#### `probes_in_family(family: str)`
+
+Attack probes in one family.
+
+#### `probe_by_name(name: str)`
+
+Look up any probe (attack or benign) by name.
+
+#### `expected_outcomes()`
+
+Map every probe name to its expected outcome.
+
+#### `NameRecord`
+
+A pinned tool-naming identity.
+
+#### `seal_name(registered_name: str, display_name: str | None, description: str, declared_risk: tuple[str, ...])`
+
+Pin a tool's naming identity: seal name + label + description + risk.
+
+#### `verify_record(record: NameRecord)`
+
+Constant-time re-derivation check of a name record's seal.
+
+#### `detect_undeclared_risk(record: NameRecord)`
+
+Name the risk classes the name carries that were never declared.
+
+#### `detect_alias_hides_risk(record: NameRecord)`
+
+True when the display label drops every risk class the name carries.
+
+#### `detect_description_contradiction(record: NameRecord)`
+
+True when the description claims safety the name's risk denies.
+
+#### `AliasMapping`
+
+A pinned alias mapping: alias resolves to exactly one registered name.
+
+#### `pin_alias(alias: str, registered_name: str, declared_risk: tuple[str, ...])`
+
+Pin an alias mapping at registration time.
+
+#### `verify_alias(mapping: AliasMapping)`
+
+Constant-time re-derivation check of an alias mapping's seal.
+
+#### `resolve_alias(alias: str, mappings: tuple[AliasMapping, ...])`
+
+Resolve an alias through pinned mappings only. Ad-hoc is not resolved.
+
+#### `NameGateDecision`
+
+A digest-pinned naming-gate decision: disposition + findings.
+
+#### `verify_decision(decision: NameGateDecision)`
+
+Constant-time re-derivation check of a gate decision's seal.
+
+#### `gate_name(record: NameRecord)`
+
+Fail-closed naming gate over a pinned name record.
+
+#### `main()`
+
+Print a small summary for the CLI.
+
 ### `privilege_at_recall_probes`
 
 Source: `components/northstar-agent-runtime/privilege_at_recall_probes.py`
