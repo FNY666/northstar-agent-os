@@ -19,6 +19,153 @@ AGB smoke corpus: AgentGuardBench-derived offline adversarial probes.
 
 Machine-readable manifest for the smoke corpus.
 
+### `a2abreak_probes`
+
+Source: `components/northstar-agent-runtime/a2abreak_probes.py`
+
+A2ABreak-derived probe corpus for the governance bench.
+
+#### `probe_names()`
+
+All adversarial probe names.
+
+#### `benign_names()`
+
+All benign control names.
+
+### `asi04_probes`
+
+Source: `components/northstar-agent-runtime/asi04_probes.py`
+
+ASI04 probe corpus: skill-mediated attack probes.
+
+#### `probe_names()`
+
+All ASI04 probe names.
+
+### `asi08_probes`
+
+Source: `components/northstar-agent-runtime/asi08_probes.py`
+
+ASI08 probe corpus: cascading failure / blast-radius probes.
+
+#### `probe_names()`
+
+All ASI08 probe names.
+
+### `asi09_probes`
+
+Source: `components/northstar-agent-runtime/asi09_probes.py`
+
+ASI09 probe corpus: human-agent trust calibration probes.
+
+#### `probe_names()`
+
+All ASI09 probe names.
+
+### `crypto_agility`
+
+Source: `components/northstar-agent-runtime/crypto_agility.py`
+
+Crypto-agility seam for digital signatures.
+
+#### `UnknownAlgorithmError`
+
+Raised when no Signer/Verifier is registered for an algorithm id.
+
+#### `Signer`
+
+Abstract digital-signature producer. Binds bytes to key holder.
+
+- `algorithm` (property)
+  - Algorithm identifier, e.g. ``"ed25519"``.
+- `public_key_bytes()`
+  - The public key counterpart of the signing key, as bytes.
+- `sign(message: bytes)`
+  - Sign ``message``. Raises on bad input (not fail-closed).
+#### `Verifier`
+
+Abstract signature checker. Fail-closed: never raises.
+
+- `algorithm` (property)
+  - Algorithm identifier, e.g. ``"ed25519"``.
+- `verify(message: bytes, signature: bytes)`
+  - ``True`` iff ``signature`` is valid for ``message`` under this key.
+#### `Ed25519Signer`
+
+Ed25519 (RFC 8032, pure variant) signer. ``seed`` is 32 bytes.
+
+- `algorithm` (property)
+- `public_key_bytes()`
+- `sign(message: bytes)`
+#### `Ed25519Verifier`
+
+Ed25519 (RFC 8032, pure variant) verifier. ``public_key`` is 32 bytes.
+
+- `algorithm` (property)
+- `verify(message: bytes, signature: bytes)`
+#### `register_algorithm(name: str, signer_factory: Callable[[bytes], Signer], verifier_factory: Callable[[bytes], Verifier])`
+
+Register ``name`` -> (signer factory, verifier factory).
+
+#### `supported_algorithms()`
+
+Algorithm identifiers currently registered, sorted.
+
+#### `get_signer(algorithm: str, key_material: bytes)`
+
+Build a ``Signer`` for ``algorithm`` from raw key bytes (seed).
+
+#### `get_verifier(algorithm: str, key_material: bytes)`
+
+Build a ``Verifier`` for ``algorithm`` from raw key bytes (public key).
+
+### `evasion_corpus`
+
+Source: `components/northstar-agent-runtime/evasion_corpus.py`
+
+Evasion probe corpus for the governance bench.
+
+#### `probe_names()`
+
+All evasion probe names.
+
+### `message_signing`
+
+Source: `components/northstar-agent-runtime/message_signing.py`
+
+Inter-agent message signing and provenance (beyond delegation tokens).
+
+#### `SignedMessage`
+
+One signed inter-agent message.
+
+- `as_dict()`
+- `from_dict(doc: dict[str, Any])`
+#### `sign_message(sender_id: str, sender_seed: bytes, recipient_id: str, payload: dict[str, Any], *, timestamp: float | None=None, nonce: str | None=None)`
+
+Sign a message from sender to recipient. Raises on bad inputs.
+
+#### `NonceTracker`
+
+Replay prevention: remembers seen nonces until they expire.
+
+- `check(nonce: str, now: float | None=None)`
+  - True if the nonce is fresh (records it); False if replayed.
+#### `verify_message(msg: SignedMessage, sender_pubkey: bytes, *, max_age_seconds: float=300.0, now: float | None=None, nonce_tracker: NonceTracker | None=None)`
+
+Verify a signed inter-agent message.
+
+### `pocketos_probe`
+
+Source: `components/northstar-agent-runtime/pocketos_probe.py`
+
+PocketOS-style end-to-end probe: no-attacker self-destruction chain.
+
+#### `probe_names()`
+
+All PocketOS probe names.
+
 ### `adjudication`
 
 Source: `components/northstar-agent-runtime/adjudication.py`
@@ -12316,6 +12463,20 @@ The workspace tool set every run starts from.
 Schema for the sidecar-delegated tool (registered only with a socket).
 
 #### `truncate_text(text: str, limit: int=MAX_TOOL_RESULT_CHARS)`
+
+### `tools.effect_envelope`
+
+Source: `components/northstar-agent-runtime/tools/effect_envelope.py`
+
+Effect Envelope: unified path containment (Orrery Gate 2 style).
+
+#### `EffectEnvelopeError`
+
+A path violates the Effect Envelope.
+
+#### `contain(raw: str | os.PathLike[str], root: str | os.PathLike[str], *, allow_absolute: bool=False, reject_symlinks: bool=False)`
+
+Resolve ``raw`` against ``root`` and enforce the Effect Envelope.
 
 ### `tools.os_sandbox`
 
