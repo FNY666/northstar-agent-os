@@ -1041,7 +1041,43 @@ class AgentRuntime:
         finished = False
         # Claimed here, before the first record: the whole point is that not one byte of
         # a transcript is appended by a run that does not own the file.
-        busy = self._claim_session()
+        try:
+            busy = self._claim_session()
+        except Exception as claim_error:
+            # A claim that cannot even be attempted is a configuration or platform fault,
+            # not a run outcome: it never reached the try below, so the span and report
+            # would leak otherwise. Marking the run refused reuses the existing no-write
+            # guard in _close_run (no result record, no SessionEnd), and the original
+            # exception is re-raised bare - only an ordinary cleanup fault below is
+            # attached to it as a diagnostic.
+            state.refused_session = True
+            state.errors.append(f"pre-try claim failure: {type(claim_error).__name__}: {claim_error}")
+            try:
+                self._close_run(state, run_span)
+            except Exception as close_error:
+                diagnostic = f"pre-try close failure: {type(close_error).__name__}: {close_error}"
+                state.errors.append(diagnostic)
+                add_note = getattr(claim_error, "add_note", None)
+                if callable(add_note):
+                    try:
+                        add_note(diagnostic)
+                    except Exception as note_error:
+                        state.errors.append(
+                            f"pre-try close diagnostic not attachable: {type(note_error).__name__}: {note_error}"
+                        )
+                else:
+                    # Python < 3.11: link the cleanup fault as context only. It was
+                    # raised while handling the claim fault, so its context already
+                    # points back at the claim fault; sever it before linking forward
+                    # or the pair would form a cycle. __cause__ is never touched -
+                    # it carries the real lease failure.
+                    # A self-link would cycle: when the cleanup fault IS the claim
+                    # fault (same object re-raised), skip the fallback link and rely
+                    # on the diagnostic already recorded in state.errors.
+                    if close_error is not claim_error:
+                        close_error.__context__ = None
+                        claim_error.__context__ = close_error
+            raise
         try:
             if busy is not None:
                 # Not an execution failure and not the operator's typo: a retryable
