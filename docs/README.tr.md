@@ -1,10 +1,10 @@
 # Northstar Agent OS
 
-**Açık, güvenilir ve yönetişimli otonom yapay zekâ çalışma arkadaşı runtime bileşenleri.**
+**İzin kapıları, bütçe limitleri ve denetim kaydı olan küçük bir agent çalışma ortamı.**
 
 [English](../README.md) · [简体中文](README.zh-CN.md) · [繁體中文](README.zh-TW.md) · [日本語](README.ja.md) · [Español](README.es.md) · [한국어](README.ko.md) · [Français](README.fr.md) · [Deutsch](README.de.md) · [Português (Brasil)](README.pt-BR.md) · [Italiano](README.it.md) · [Türkçe](README.tr.md) · [Tiếng Việt](README.vi.md)
 
-**Tek cümleyle:** Northstar; açık model yönlendirmesi, yerel araç sınırları, denetlenebilirlik ve kurtarılabilir yürütme kullanarak yönetişimli yapay zekâ çalışma arkadaşları oluşturmak için bağımsız olarak sürdürülen bir projedir. **Bugün yayımlanan bileşen, sınırlı bir yerel worker adaptörü olan Northstar Codex Sidecar’dır; tamamlanmış bir otonom ajan platformu değildir.**
+**Tek cümleyle:** Northstar küçük, hâlâ geliştirilmekte olan bir agent çalışma ortamıdır — tek giriş (`northstar agent`), görünür sınırlar, denetlenebilirlik ve kurtarılabilir yürütme. Çekirdek, açık alt sistemlerden (runtime, contract, host, durable, sidecar, interop) oluşur. Tamamlanmış bir çoklu-agent platformu **değildir** (barındırılan bulut yok, paralel filo yok); bugün sunulan, agent'ları sürprizsiz çalıştırmak için işe yarar altyapıdır: **varsayılan-red** korumalı **`Shell`** (mümkünse bubblewrap, değilse dürüst process yedeği) ve kısıtlı yerel worker adaptörü olarak Northstar Codex Sidecar.
 
 > English is the canonical project entry. Translations mirror its scope and security claims; update them when the canonical README changes.
 

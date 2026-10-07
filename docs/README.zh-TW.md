@@ -1,12 +1,12 @@
 # Northstar Agent OS
 
-**面向自主 AI 同事的开放、可靠、可治理运行时组件。**
+**一個帶權限門、預算上限和審計日誌的小型 agent 運行環境。**
 
 > 中文名：北辰智能体系统
 
 [English](../README.md) · [简体中文](README.zh-CN.md) · [繁體中文](README.zh-TW.md) · [日本語](README.ja.md) · [Español](README.es.md) · [한국어](README.ko.md) · [Français](README.fr.md) · [Deutsch](README.de.md) · [Português (Brasil)](README.pt-BR.md) · [Italiano](README.it.md) · [Türkçe](README.tr.md) · [Tiếng Việt](README.vi.md)
 
-**一句話說明：** Northstar 是獨立維護的專案，用來把明確的模型路由、本地工具邊界、可稽核性與可復原執行組合成受治理的 AI 同事執行環境。**目前真正發布的是 Northstar Codex Sidecar——受限制的本地工作器適配器，而不是已完成的自主智能體作業系統。**
+**一句話說明：** Northstar 是一個小型的、還在打磨中的 agent 運行環境：統一入口 `northstar agent`、可見邊界、可審計、可恢復。內核由 runtime / contract / host / durable / sidecar / interop 等子系統組成。**不是**已經完成的多智能體平台（無託管雲、無並行艦隊）；今天交付的是實實在在能用的基礎件：**預設拒絕的沙箱 `Shell`**（有 bubblewrap 時 OS 隔離，否則誠實的 process 回退），以及 **Northstar Codex Sidecar**——一個受限的本地工作器適配器。
 
 > English is the canonical project entry. Translations mirror its scope and security claims; update them when the canonical README changes.
 
