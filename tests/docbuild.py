@@ -149,6 +149,8 @@ MANIFEST: dict[str, tuple[str, ...]] = {
         "multi_axis_autonomy_probes",
         "constraint_synthesis_probes",
         "benchmark_retirement_probes",
+        "commerce_mandate_probes",
+        "negotiation_corpus_probes",
         "refusal_pattern_probes",
         "evidence_compaction_probes",
         "pre_completion_signal_probes",
