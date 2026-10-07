@@ -2797,6 +2797,151 @@ Per-module wiring verdicts. ``ok`` is True iff no gaps found.
 
 Validate that every claimed capability is wired into production.
 
+### `counterfactual_explanation_probes`
+
+Source: `components/northstar-agent-runtime/counterfactual_explanation_probes.py`
+
+Counterfactual-explanation probes: quality gates for explanation surfaces.
+
+#### `probe_names()`
+
+Names of the attack probes (expected deny).
+
+#### `benign_names()`
+
+Names of the benign control probes (expected allow).
+
+#### `probe_by_name(name: str)`
+
+Look up one probe by name; raises KeyError fail-closed.
+
+#### `probe_invokes_deny_side(probe: Mapping[str, Any])`
+
+True if the probe's gate_interaction names an active deny-side mechanism.
+
+#### `ExplanationClaim`
+
+One checkable claim inside a rendered explanation.
+
+#### `ExplanationRecord`
+
+A rendered explanation, pinned for gate checking.
+
+- `verify_digest()`
+  - Constant-time check that the pinned digest matches the record.
+#### `GateFinding`
+
+One quality-gate outcome, digest-pinned.
+
+#### `check_anchoring(record: ExplanationRecord)`
+
+Every claim anchors to a known audit-record field with matching value.
+
+#### `check_rule_consistency(record: ExplanationRecord, rule_table: Mapping[str, Mapping[str, Any]])`
+
+The rendered counterfactual matches the pinned rule explanation.
+
+#### `check_hard_deny(record: ExplanationRecord, rule_table: Mapping[str, Mapping[str, Any]], hard_deny_codes: Sequence[str]=HARD_DENY_CODES)`
+
+Hard denies carry the no-remediation statement; nothing else.
+
+#### `check_pace(record: ExplanationRecord, immutables: Sequence[str])`
+
+The remediation never proposes changing an immutable attribute.
+
+#### `QualityGateReport`
+
+The full quality-gate outcome for one explanation.
+
+#### `run_quality_gate(record: ExplanationRecord, rule_table: Mapping[str, Mapping[str, Any]], immutables: Sequence[str])`
+
+Run all four deterministic quality gates over one explanation.
+
+#### `CounterfactualQuestion`
+
+One "what would the gate do if ...?" question.
+
+#### `QuestionResult`
+
+Predicted vs actual verdict for one counterfactual question.
+
+#### `SimulatabilityReport`
+
+Per-question simulatability outcome for one explanation.
+
+#### `run_simulatability(record: ExplanationRecord, questions: Sequence[CounterfactualQuestion], predict: Callable[[ExplanationRecord, CounterfactualQuestion], str], threshold: int)`
+
+CHIVE-style simulatability: can the explanation predict the gate?
+
+#### `rule_table_from_counterfactual(rule_explanations: Mapping[str, Any], hard_deny_namespaces: Sequence[str]=('offensive', 'exfiltration', 'mosaic_assembly'))`
+
+Build a rule table from ``counterfactual.py``'s RULE_EXPLANATIONS.
+
+### `self_referential_trust_probes`
+
+Source: `components/northstar-agent-runtime/self_referential_trust_probes.py`
+
+Self-referential-trust probe corpus + self-grounding / bootstrap detectors.
+
+#### `SelfReferentialTrustError`
+
+Raised for malformed provenance nodes or invalid graph operations.
+
+#### `EvidenceNode`
+
+One node in the provenance graph.
+
+- `as_dict()`
+- `digest()`
+  - Digest pin over the canonical node record.
+#### `build_node(node_id: str, kind: str, *, agent_id: str | None=None, refs: tuple[str, ...]=(), asserted_confidence: float | None=None, confidence_basis: tuple[str, ...]=())`
+
+Convenience constructor; validation lives in ``EvidenceNode``.
+
+#### `verify_node_digest(node: EvidenceNode, digest: str)`
+
+Constant-time check that a digest pin matches a node.
+
+#### `TrustFinding`
+
+One detector finding: what fired, on which claim, why.
+
+- `verify_digest()`
+#### `EvidenceGraph`
+
+Append-only provenance graph; detectors run over it.
+
+- `add(node: EvidenceNode)`
+- `get(node_id: str)`
+- `node_ids()`
+- `transitive_support(root_id: str)`
+  - All nodes reachable from ``root_id`` via ``refs``.
+- `detect_self_grounding(root_id: str)`
+  - Flag a claim whose support graph contains no external node.
+- `detect_citation_cycle(root_id: str)`
+  - Flag a support chain that loops back to the claim itself.
+- `detect_confidence_bootstrap(root_id: str)`
+  - Flag confidence derived only from the agent's own confidences.
+- `detect_dangling_reference(root_id: str)`
+  - Fail-closed provenance check: every ref must resolve.
+- `findings(root_id: str)`
+  - All detector findings for one claim, in a stable order.
+#### `probe_names()`
+
+All self-referential-trust probe names.
+
+#### `probes_by_family(family: str)`
+
+Probes in one family.
+
+#### `probe_by_name(name: str)`
+
+One probe by name; KeyError on unknown names.
+
+#### `expected_outcomes()`
+
+Map every probe name to its expected outcome.
+
 ### `trace_tamper_probes`
 
 Source: `components/northstar-agent-runtime/trace_tamper_probes.py`
