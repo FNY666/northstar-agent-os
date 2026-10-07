@@ -707,3 +707,290 @@ def check_anchor(path: str | Path, manifest: dict[str, Any]) -> tuple[bool, str]
     if records != manifest.get("records"):
         return False, f"record count {records} != anchored {manifest.get('records')} (truncated or extended)"
     return True, f"anchor matches: {records} records, head {str(head)[:16]}…"
+
+
+# ---------------------------------------------------------------------------
+# Durable append: crash-durability for the audit NDJSON feed.
+#
+# Honest scope: these are *crash-durability* guarantees — fsync so a record
+# that was acknowledged is on stable storage, short-write retry so a
+# partial ``os.write`` never leaves a torn line, corrupt-tail truncation so
+# a crash mid-write does not poison the whole feed on reopen, and restart
+# continuity so the chain resumes with the right ``prev_hash``. They are
+# NOT Byzantine fault tolerance: a hostile operator with write access can
+# still rewrite history and start a fresh chain (that needs an external
+# head anchor — see ``anchor_manifest``).
+# ---------------------------------------------------------------------------
+
+import warnings as _warnings
+
+
+def _write_all(fd: int, data: bytes) -> None:
+    """Write all of ``data`` to ``fd``, retrying on short writes.
+
+    ``os.write`` is allowed to write fewer bytes than requested (partial
+    write); a naive single call can leave a torn NDJSON line on a crash.
+    This loop keeps writing the remainder until every byte is accepted.
+    """
+    view = memoryview(data)
+    while view:
+        written = os.write(fd, view)
+        if written == 0:
+            # Per POSIX, a zero return on a blocking fd should not happen
+            # for a non-empty write; treat it as an error rather than
+            # spinning forever.
+            raise OSError("os.write returned 0 bytes on a blocking file descriptor")
+        view = view[written:]
+
+
+def _verify_prefix(
+    raw: bytes,
+    *,
+    chain_version: str = CHAIN_VERSION_V2,
+) -> tuple[str | None, int, int, str]:
+    """Verify a feed prefix; return (last_chain_hash, valid_bytes, records, error).
+
+    Walks the raw bytes line by line, checking JSON parseability and the
+    hash-chain links exactly like :func:`verify_lines`. ``last_chain_hash``
+    is the ``chain_hash`` of the last valid record (``None`` when no valid
+    chained record exists); ``valid_bytes`` is the byte offset just past the
+    last valid line (the safe truncation point); ``error`` is "" when the
+    whole prefix verified, otherwise a human-readable description of the
+    first bad line.
+    """
+    canon = _canon_for_version(chain_version)
+    last_chain: str | None = None
+    valid_bytes = 0
+    offset = 0
+    records = 0  # count of valid chained records seen
+    position = 0  # count of non-blank lines seen
+    for raw_line in raw.split(b"\n"):
+        # ``split`` drops the trailing newline; reconstruct the line length
+        # including its terminator, except for a final unterminated tail.
+        line = raw_line.strip()
+        line_len = len(raw_line) + 1  # +1 for the "\n" that split() removed
+        is_last = offset + len(raw_line) == len(raw)
+        if is_last:
+            line_len = len(raw_line)  # no trailing newline on the final chunk
+        if not line:
+            # Blank lines are skipped by the verifier; they are still part
+            # of the valid prefix (they carry no chain state).
+            offset += line_len
+            valid_bytes = offset
+            continue
+        try:
+            record = json.loads(line.decode("utf-8"))
+        except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+            return last_chain, valid_bytes, records, f"line is not valid JSON ({exc}); truncating to last valid record"
+        if not isinstance(record, dict):
+            return last_chain, valid_bytes, records, "line is not a JSON object; truncating to last valid record"
+        chain_hash = record.get("chain_hash")
+        prev_hash = record.get("prev_hash")
+        if not isinstance(chain_hash, str) or not _HEX64_RE.match(chain_hash):
+            return last_chain, valid_bytes, records, "missing or malformed chain_hash; truncating to last valid record"
+        if not isinstance(prev_hash, str) or not _HEX64_RE.match(prev_hash):
+            return last_chain, valid_bytes, records, "missing or malformed prev_hash; truncating to last valid record"
+        if position == 0:
+            genesis = record.get("genesis")
+            if not isinstance(genesis, dict):
+                return last_chain, valid_bytes, records, "first chained record lacks the genesis anchor; truncating"
+            if genesis_hash(genesis) != prev_hash:
+                return last_chain, valid_bytes, records, "genesis anchor does not match prev_hash; truncating"
+        elif prev_hash != last_chain:
+            return last_chain, valid_bytes, records, "prev_hash does not link to the previous chain_hash; truncating"
+        body = {k: v for k, v in record.items() if k not in _SEAL_FIELDS}
+        expected = _sha256_hex(bytes.fromhex(prev_hash) + canon(body))
+        if expected != chain_hash:
+            return last_chain, valid_bytes, records, "chain_hash mismatch (record modified after sealing); truncating"
+        last_chain = chain_hash
+        position += 1
+        records += 1
+        offset += line_len
+        valid_bytes = offset
+    return last_chain, valid_bytes, records, ""
+
+
+class DurableAuditWriter:
+    """Append-only, crash-durable writer for a chained audit NDJSON feed.
+
+    On open, an existing file is verified from genesis (unless
+    ``verify_on_open=False``); a corrupt tail — invalid JSON or a broken
+    chain link — is truncated to the last valid record and a warning is
+    emitted. The chain then resumes with the correct ``prev_hash`` from the
+    last valid record (restart continuity): a crash mid-write never poisons
+    the feed, it only loses the torn tail.
+
+    Every :meth:`append` seals the record (``prev_hash``/``chain_hash`` via
+    :func:`chain_record`), writes the full line with a short-write retry
+    loop, and — when ``durable`` — calls :func:`os.fsync` so an
+    acknowledged record is on stable storage before returning. Pass
+    ``durable=False`` only for performance testing; records may then be
+    lost on crash.
+
+    Honest scope: crash-durability, not Byzantine fault tolerance. A
+    hostile operator with write access can still rewrite history wholesale
+    and start a fresh chain; that threat needs an external head anchor
+    (see :func:`anchor_manifest`).
+
+    The writer holds an OS file descriptor; use as a context manager or
+    call :meth:`close`. Not thread-safe.
+    """
+
+    def __init__(
+        self,
+        path: str | Path,
+        *,
+        component: str,
+        session_id: str | None = None,
+        run_id: str | None = None,
+        durable: bool = True,
+        verify_on_open: bool = True,
+        chain_version: str = CHAIN_VERSION_V2,
+    ) -> None:
+        """Open (creating if needed) the audit feed at ``path``.
+
+        ``component``/``session_id``/``run_id`` seed the genesis anchor for
+        a fresh file. ``durable`` controls the default fsync behavior of
+        :meth:`append`. ``verify_on_open`` controls the corrupt-tail scan;
+        disable it only when the caller has already verified the file.
+        """
+        if chain_version not in _CHAIN_VERSIONS:
+            raise ValueError(f"unknown chain version {chain_version!r}")
+        self._path = Path(path)
+        self._component = component
+        self._session_id = session_id
+        self._run_id = run_id
+        self._durable = durable
+        self._chain_version = chain_version
+        self._closed = False
+
+        self._path.parent.mkdir(parents=True, exist_ok=True)
+        # O_APPEND so concurrent writers (if any) never interleave mid-line;
+        # the fd is what fsync operates on.
+        self._fd = os.open(self._path, os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o644)
+
+        self._prev_hash: str | None = None  # chain_hash of the last record
+        self._genesis_anchor: dict[str, Any] | None = None
+        self._record_count = 0
+        if verify_on_open:
+            self._recover_tail()
+        else:
+            self._prev_hash, self._record_count = self._read_tail_hash_unverified()
+
+    # -- open-time recovery ---------------------------------------------
+
+    def _recover_tail(self) -> None:
+        """Verify the existing file; truncate a corrupt tail, warn loudly."""
+        try:
+            raw = self._path.read_bytes()
+        except OSError:
+            raw = b""
+        if not raw:
+            return  # fresh file: genesis will be minted on first append
+        last_chain, valid_bytes, record_count, error = _verify_prefix(raw, chain_version=self._chain_version)
+        if error:
+            _warnings.warn(
+                f"audit feed {self._path}: corrupt tail detected ({error}); "
+                f"truncated to last valid record",
+                UserWarning,
+                stacklevel=3,
+            )
+            # Truncate to the last valid byte offset. Use a separate fd so
+            # the append fd's O_APPEND offset stays consistent.
+            with os.fdopen(os.open(self._path, os.O_WRONLY, 0o644), "wb", closefd=True) as handle:
+                handle.truncate(valid_bytes)
+        self._prev_hash = last_chain
+        self._record_count = record_count
+
+    def _read_tail_hash_unverified(self) -> tuple[str | None, int]:
+        """(last chain_hash, record count) without verification (verify_on_open=False path)."""
+        try:
+            raw = self._path.read_bytes()
+        except OSError:
+            return None, 0
+        last: str | None = None
+        count = 0
+        for raw_line in raw.split(b"\n"):
+            line = raw_line.strip()
+            if not line:
+                continue
+            try:
+                record = json.loads(line.decode("utf-8"))
+            except (UnicodeDecodeError, json.JSONDecodeError):
+                break
+            chain_hash = record.get("chain_hash") if isinstance(record, dict) else None
+            if isinstance(chain_hash, str) and _HEX64_RE.match(chain_hash):
+                last = chain_hash
+                count += 1
+            else:
+                break
+        return last, count
+
+    # -- append ----------------------------------------------------------
+
+    @property
+    def prev_hash(self) -> str | None:
+        """The ``chain_hash`` the next appended record will link to (None on a fresh feed)."""
+        return self._prev_hash
+
+    @property
+    def records(self) -> int:
+        """Number of chained records currently in the file (valid prefix)."""
+        return self._record_count
+
+    def append(self, record: dict[str, Any], *, durable: bool | None = None) -> dict[str, Any]:
+        """Seal ``record`` onto the chain and durably append it.
+
+        ``durable`` overrides the writer default for this call: when true
+        (the default), the line is fsync'd before returning. Returns the
+        sealed record (with ``prev_hash``/``chain_hash``).
+        """
+        if self._closed:
+            raise ValueError("cannot append to a closed DurableAuditWriter")
+        if not isinstance(record, dict):
+            raise TypeError("record must be a dict")
+        do_fsync = self._durable if durable is None else durable
+
+        if self._prev_hash is None:
+            # First record: mint the genesis anchor and seal against it.
+            anchor = build_genesis_params(
+                self._component,
+                session_id=self._session_id,
+                run_id=self._run_id,
+                started_ts=record.get("ts"),
+                chain_version=self._chain_version,
+            )
+            self._genesis_anchor = anchor
+            genesis = genesis_hash(anchor)
+            body_record: dict[str, Any] = {**record, "genesis": anchor}
+            if self._chain_version == CHAIN_VERSION_V2:
+                body_record = {**body_record, "chain": self._chain_version}
+            sealed = chain_record(body_record, genesis, chain_version=self._chain_version)
+        else:
+            sealed = chain_record(record, self._prev_hash, chain_version=self._chain_version)
+
+        line = canonical_json(sealed) + b"\n"
+        _write_all(self._fd, line)
+        if do_fsync:
+            os.fsync(self._fd)
+        self._prev_hash = sealed["chain_hash"]
+        self._record_count += 1
+        return sealed
+
+    def flush(self) -> None:
+        """fsync the file descriptor (durable barrier without appending)."""
+        if self._closed:
+            raise ValueError("cannot flush a closed DurableAuditWriter")
+        os.fsync(self._fd)
+
+    def close(self) -> None:
+        """Close the underlying file descriptor."""
+        if not self._closed:
+            os.close(self._fd)
+            self._closed = True
+
+    def __enter__(self) -> "DurableAuditWriter":
+        return self
+
+    def __exit__(self, *_exc: Any) -> None:
+        self.close()
