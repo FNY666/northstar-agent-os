@@ -160,33 +160,35 @@ def _run_bounded_process(
     timeout_seconds: float,
     max_output_bytes: int,
 ) -> _ProcessResult:
-    try:
-        process = subprocess.Popen(
-            command,
-            cwd=str(cwd),
-            env=env,
-            stdin=subprocess.PIPE,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,
-            shell=False,
-            start_new_session=True,
-        )
-    except (OSError, ValueError):
-        return _ProcessResult(-1, b"", "process_start")
-
-    assert process.stdin is not None and process.stdout is not None
-    selector = selectors.DefaultSelector()
     output = bytearray()
     input_offset = 0
-    stdin_fd = process.stdin.fileno()
-    stdout_fd = process.stdout.fileno()
-    os.set_blocking(stdin_fd, False)
-    os.set_blocking(stdout_fd, False)
-    selector.register(stdin_fd, selectors.EVENT_WRITE, "stdin")
-    selector.register(stdout_fd, selectors.EVENT_READ, "stdout")
-    deadline = time.monotonic() + timeout_seconds
-    failure: str | None = None
+    process = None
+    primary = None
+    selector = selectors.DefaultSelector()
     try:
+        try:
+            process = subprocess.Popen(
+                command,
+                cwd=str(cwd),
+                env=env,
+                stdin=subprocess.PIPE,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                shell=False,
+                start_new_session=True,
+            )
+        except (OSError, ValueError):
+            return _ProcessResult(-1, b"", "process_start")
+
+        assert process.stdin is not None and process.stdout is not None
+        stdin_fd = process.stdin.fileno()
+        stdout_fd = process.stdout.fileno()
+        os.set_blocking(stdin_fd, False)
+        os.set_blocking(stdout_fd, False)
+        selector.register(stdin_fd, selectors.EVENT_WRITE, "stdin")
+        selector.register(stdout_fd, selectors.EVENT_READ, "stdout")
+        deadline = time.monotonic() + timeout_seconds
+        failure: str | None = None
         while selector.get_map():
             remaining = deadline - time.monotonic()
             if remaining <= 0:
@@ -240,18 +242,35 @@ def _run_bounded_process(
             _terminate(process)
             return _ProcessResult(-1, bytes(output[:max_output_bytes]), "timeout")
         return _ProcessResult(returncode, bytes(output), None)
+    except BaseException as error:
+        primary = error
+        raise
     finally:
-        selector.close()
+        cleanup_errors = []
         try:
-            process.stdin.close()
-        except OSError:
-            pass
-        try:
-            process.stdout.close()
-        except OSError:
-            pass
-        if process.poll() is None:
-            _terminate(process)
+            selector.close()
+        except Exception as error:
+            cleanup_errors.append(error)
+        if process is not None:
+            for stream in (process.stdin, process.stdout):
+                try:
+                    if stream is not None:
+                        stream.close()
+                except Exception as error:
+                    cleanup_errors.append(error)
+            try:
+                if process.poll() is None:
+                    _terminate(process)
+            except Exception as error:
+                cleanup_errors.append(error)
+        if cleanup_errors:
+            detail = "process cleanup failed: " + ", ".join(type(error).__name__ for error in cleanup_errors)
+            if primary is None:
+                raise OSError(detail) from cleanup_errors[0]
+            if hasattr(primary, "add_note"):
+                primary.add_note(detail)
+            else:  # Python 3.10: retain the primary exception with cleanup context.
+                primary.__context__ = cleanup_errors[0]
 
 
 class ProcessAgentAdapter:
