@@ -2731,6 +2731,139 @@ Run the canary set against judge verdicts.
 
 #### `expected_outcomes()`
 
+### `enforcement_gap_probes`
+
+Source: `components/northstar-agent-runtime/enforcement_gap_probes.py`
+
+Enforcement-gap probes (formal twin of the P0 wiring rule).
+
+#### `probe_names()`
+
+Names of the attack probes (detected-but-not-acted shapes).
+
+#### `benign_names()`
+
+Names of the benign control probes.
+
+#### `probe_by_name(name: str)`
+
+Return the probe record for ``name``; fail closed on unknown names.
+
+#### `probes_by_family(family: str)`
+
+All probes in ``family``.
+
+#### `deny_side_keywords_ok(text: str)`
+
+True if ``text`` names an active deny-side mechanism.
+
+#### `DetectionRecord`
+
+A mechanical detection record: severity, target identity, digest.
+
+#### `EnforcementDecision`
+
+A controller decision bound to a detection record.
+
+#### `EnforcementVerdict`
+
+Pinned verdict of one detection/decision pair.
+
+- `pinned()`
+  - Return a copy with the JCS digest pin set.
+#### `enforce(record: DetectionRecord, decision: EnforcementDecision | None, *, caller: str)`
+
+Bind a detection record to a controller decision (fail closed).
+
+#### `verify_verdict(verdict: EnforcementVerdict)`
+
+Constant-time check of a verdict's digest pin.
+
+#### `WiringBinding`
+
+One production binding of a capability into a gate path.
+
+#### `WiringReport`
+
+Per-module wiring verdicts. ``ok`` is True iff no gaps found.
+
+- `gap_modules()`
+  - Modules whose claimed capability has at least one gap.
+- `module_ok(module: str)`
+  - True iff ``module`` is wired with no gaps.
+- `module_gaps(module: str)`
+  - Gap reasons for ``module`` (empty tuple if none / unknown).
+#### `validate_wiring(capabilities: Sequence[tuple[str, str]], bindings: Sequence[WiringBinding])`
+
+Validate that every claimed capability is wired into production.
+
+### `trace_tamper_probes`
+
+Source: `components/northstar-agent-runtime/trace_tamper_probes.py`
+
+Trace-tampering probe corpus + deletion / independence / integrity detectors.
+
+#### `TraceRecord`
+
+One host-reported record in an audit trace.
+
+#### `build_record(seq: int, event: str, payload: dict[str, Any], recorded_at: str, *, previous_digest: str='')`
+
+Build and digest-pin one trace record. Fail-closed on bad inputs.
+
+#### `verify_record(record: TraceRecord)`
+
+Re-derive a record's digest with constant-time compare.
+
+#### `AuditTrace`
+
+Append-only host-reported audit trace.
+
+- `append(record: TraceRecord)`
+  - Append one record. Fail-closed on:
+- `records()`
+  - The trace so far, oldest first.
+- `head_digest()`
+  - Digest-pin the whole trace for out-of-band anchoring.
+#### `detect_deletion(records: list[TraceRecord] | tuple[TraceRecord, ...])`
+
+Detect deletion signals in a candidate record list.
+
+#### `verify_trace_integrity(records: list[TraceRecord] | tuple[TraceRecord, ...])`
+
+Verify a whole trace: digests, links, and contiguity.
+
+#### `genesis_anchor(record: TraceRecord)`
+
+Recompute the genesis hash for a first record.
+
+#### `DualChannelAudit`
+
+Primary + witness audit channels with independence cross-check.
+
+- `mirror(record: TraceRecord)`
+  - Append the same record to both channels.
+- `cross_check()`
+#### `probe_names()`
+
+All trace-tampering probe names.
+
+#### `benign_names()`
+
+All benign control names.
+
+#### `probes_by_family(family: str)`
+
+Attack probes in one family.
+
+#### `probe_by_name(name: str)`
+
+Look up any probe (attack or benign) by name.
+
+#### `expected_outcomes()`
+
+Map every probe name to its expected outcome.
+
 ### `self_replication_probes`
 
 Source: `components/northstar-agent-runtime/self_replication_probes.py`
