@@ -3775,6 +3775,178 @@ Re-derive the decision digest and compare in constant time.
 
 Print corpus summary; exit 0 when the corpus is self-consistent.
 
+### `argument_smuggling_probes`
+
+Source: `components/northstar-agent-runtime/argument_smuggling_probes.py`
+
+Argument-smuggling probes: smuggling shapes, schema bypass, downstream meaning.
+
+#### `attack_probe_names()`
+
+All argument-smuggling attack probe names.
+
+#### `benign_probe_names()`
+
+All argument-smuggling benign probe names.
+
+#### `probes_in_family(family: str)`
+
+Attack probes in one family.
+
+#### `probe_by_name(name: str)`
+
+Look up any probe (attack or benign) by name.
+
+#### `expected_outcomes()`
+
+Map every probe name to its expected outcome.
+
+#### `has_confusables(text: str)`
+
+True when NFKC normalization changes the string.
+
+#### `has_mixed_script(text: str)`
+
+True when alphabetic characters span more than one confusable script.
+
+#### `is_nested_json_payload(text: str)`
+
+True when a string parses as a JSON object or array.
+
+#### `is_double_encoded(text: str)`
+
+True when a string is JSON that decodes to another JSON string.
+
+#### `inspect_string_argument(text: str)`
+
+Name the smuggling shapes in one string argument.
+
+#### `ArgumentRecord`
+
+One pinned argument: what the gate validated.
+
+#### `seal_argument(tool: str, parameter: str, value: Any, declared_type: str)`
+
+Pin one argument at validation time.
+
+#### `verify_record(record: ArgumentRecord)`
+
+Re-derive a record's seal; constant-time compare, never raises.
+
+#### `detect_schema_bypass(record: ArgumentRecord)`
+
+Name the schema-bypass shapes in one sealed argument.
+
+#### `undeclared_keys(arguments: Mapping[str, Any], declared: Collection[str])`
+
+Name argument keys the schema never declared.
+
+#### `surface_digest(arguments: Mapping[str, Any])`
+
+Digest what the gate validated: the raw argument surface.
+
+#### `meaning_digest(arguments: Mapping[str, Any])`
+
+Digest what the downstream will execute: the normalized meaning.
+
+#### `MeaningEnvelope`
+
+Binds a validated surface to its derived meaning.
+
+#### `seal_meaning(tool: str, arguments: Mapping[str, Any])`
+
+Pin the surface and meaning of validated arguments.
+
+#### `verify_envelope(envelope: MeaningEnvelope)`
+
+Re-derive an envelope's seal; constant-time compare, never raises.
+
+#### `detect_meaning_gap(envelope: MeaningEnvelope, dispatched_arguments: Mapping[str, Any])`
+
+Compare the meaning the gate sealed against what will execute.
+
+#### `gate_arguments(tool: str, declared_types: Mapping[str, str], arguments: Mapping[str, Any])`
+
+Gate one tool invocation's arguments; fail closed.
+
+#### `main()`
+
+Print a small summary for the CLI.
+
+### `monitor_deafness_probes`
+
+Source: `components/northstar-agent-runtime/monitor_deafness_probes.py`
+
+Monitor-deafness probe corpus + escalation-anomaly / health-gate detectors.
+
+#### `EscalationWindow`
+
+One digest-pinned window of observed activity.
+
+#### `build_window(*, agent_id: str, window_start: int, window_end: int, actions_observed: int, escalations: int)`
+
+Mint a well-formed, digest-pinned escalation window.
+
+#### `verify_window(window: EscalationWindow)`
+
+Re-derive the window digest with a constant-time compare.
+
+#### `detect_zero_escalation(windows: list[EscalationWindow] | tuple[EscalationWindow, ...], *, action_bound: int=ZERO_ESCALATION_ACTION_BOUND)`
+
+Flag windows with enough observed actions but zero escalations.
+
+#### `detect_escalation_collapse(baseline: list[EscalationWindow] | tuple[EscalationWindow, ...], recent: list[EscalationWindow] | tuple[EscalationWindow, ...], *, collapse_ratio: float=ESCALATION_COLLAPSE_RATIO)`
+
+Flag a collapse of the escalation rate against a baseline.
+
+#### `detect_silence_after_storm(windows: list[EscalationWindow] | tuple[EscalationWindow, ...], *, storm_min: int=STORM_MIN_ESCALATIONS)`
+
+Flag a storm window immediately followed by dead silence.
+
+#### `MonitorHealthSignal`
+
+A digest-pinned snapshot of one monitor's liveness.
+
+#### `build_signal(*, monitor_id: str, heartbeat_age_seconds: int, last_canary_trip_age_seconds: int, recent_escalation_count: int, actions_observed_since_heartbeat: int)`
+
+Mint a well-formed, digest-pinned monitor health signal.
+
+#### `verify_signal(signal: MonitorHealthSignal)`
+
+Re-derive the signal digest with a constant-time compare.
+
+#### `gate_monitor_health(signal: MonitorHealthSignal, *, high_stakes: bool, heartbeat_max_age: int=HEARTBEAT_MAX_AGE_SECONDS, canary_max_age: int=CANARY_MAX_AGE_SECONDS)`
+
+Decide whether the monitor is alive enough to observe an action.
+
+#### `HealthLedger`
+
+Append-only log of monitor-health gate decisions.
+
+- `append(signal: MonitorHealthSignal, disposition: str, as_of: int)`
+- `decisions()`
+#### `probe_names()`
+
+All monitor-deafness attack probe names.
+
+#### `benign_names()`
+
+All benign control names.
+
+#### `probes_by_family(family: str)`
+
+Attack probes in one family.
+
+#### `probe_by_name(name: str)`
+
+Look up any probe (attack or benign) by name.
+
+#### `expected_outcomes()`
+
+Map every probe name to its expected outcome.
+
+#### `main()`
+
 ### `evidence_aging_probes`
 
 Source: `components/northstar-agent-runtime/evidence_aging_probes.py`
