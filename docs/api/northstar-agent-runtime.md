@@ -3072,6 +3072,145 @@ Sweep a handoff list for seam violations. Never raises.
 
 #### `main()`
 
+### `run_assert_eval_probes`
+
+Source: `components/northstar-agent-runtime/run_assert_eval_probes.py`
+
+Run-assert-eval probes: the pre-deployment loop must actually close.
+
+#### `probe_names()`
+
+All probe names in corpus order.
+
+#### `attack_names()`
+
+Names of attack probes (expected: deny).
+
+#### `benign_names()`
+
+Names of benign control probes (expected: allow).
+
+#### `probe_by_name(name: str)`
+
+Return the probe dict for ``name``; raises KeyError if unknown.
+
+#### `probe_invokes_deny_side(probe: Mapping[str, Any])`
+
+True if the probe's gate_interaction names a loop-side mechanism.
+
+#### `EvalSet`
+
+The fixed evaluation set, digest-pinned.
+
+- `verify()`
+  - Recompute the digest; a tampered set record fails closed.
+#### `AxisVerdict`
+
+One axis verdict inside a run record.
+
+#### `RunRecord`
+
+One verification run over the fixed set.
+
+- `verify()`
+  - Recompute the digest; a tampered run fails closed.
+- `all_pass()`
+  - True only when every axis passed -- a conjunction, never a score.
+#### `PolicyAssertion`
+
+One assertion derived from a recorded run.
+
+- `verify()`
+  - Recompute the digest; a tampered assertion fails closed.
+#### `DeployAuthorization`
+
+One authorized deployment, bound to the closing re-eval.
+
+- `verify()`
+#### `LoopFinding`
+
+One integrity finding from a loop sweep; never a verdict.
+
+#### `RunAssertGate`
+
+The run -> assert -> re-eval loop ledger.
+
+- `register_set(eval_set: EvalSet)`
+  - Pin the fixed set. A drifted re-registration fails closed.
+- `record_run(run: RunRecord)`
+  - Record one run; fail closed on any loop violation.
+- `record_assertion(assertion: PolicyAssertion)`
+  - Record one assertion; fail closed on any provenance violation.
+- `request_deploy(policy_digest: str)`
+  - Authorize deployment of one policy digest.
+- `run_count()`
+- `assertion_count()`
+#### `verify_loop_integrity(eval_set: EvalSet, runs: Sequence[RunRecord], assertions: Sequence[PolicyAssertion])`
+
+Sweep a set, runs, and assertions for loop violations.
+
+#### `main()`
+
+### `pre_completion_signal_probes`
+
+Source: `components/northstar-agent-runtime/pre_completion_signal_probes.py`
+
+Pre-completion-signal probe corpus + uncertainty-signal instrumentation gates.
+
+#### `probe_names()`
+
+All probe names in the corpus.
+
+#### `attack_names()`
+
+Names of the attack probes (expected deny).
+
+#### `benign_names()`
+
+Names of the benign control probes (expected allow).
+
+#### `probe_by_name(name: str)`
+
+Look up one probe by name; raises KeyError fail-closed.
+
+#### `probe_invokes_deny_side(probe: Mapping[str, Any])`
+
+True if the probe's gate_interaction names an active deny-side mechanism.
+
+#### `SignalReading`
+
+One pinned pre-completion uncertainty reading.
+
+- `verify()`
+  - Recompute the digest; constant-time compare.
+- `well_formed()`
+  - Structural checks before any semantic use.
+- `bound_to(call_id: str, arguments_digest: str)`
+  - Whether this reading is pinned to the given action.
+- `trips(threshold: float)`
+  - Whether the reading trips the hold threshold.
+- `as_dict()`
+#### `SignalPolicy`
+
+Thresholds and instrumentation for the signal channel.
+
+#### `SignalEvaluation`
+
+The pinned outcome of evaluating one action's signal channel.
+
+- `verify()`
+#### `evaluate(*, policy: SignalPolicy, call_id: str, arguments_digest: str, action_class: str, dispatch_sequence: int, readings: Sequence[SignalReading])`
+
+Evaluate one action's pre-completion signal channel.
+
+#### `requires_abstain_path(evaluation: SignalEvaluation)`
+
+Whether the signal evaluation must take the abstain human path.
+
+#### `main()`
+
+Corpus summary for the docbuild harness.
+
 ### `tool_schema_digest_probes`
 
 Source: `components/northstar-agent-runtime/tool_schema_digest_probes.py`
