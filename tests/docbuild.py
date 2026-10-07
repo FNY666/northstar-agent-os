@@ -322,7 +322,7 @@ MANIFEST: dict[str, tuple[str, ...]] = {
         "wireheading", "witness_enc", "workflow_automation", "workflow_engine",
         "workflow_orchestration", "write_ahead_log", "write_through_cache", "zab_interface",
         "zero_knowledge", "zeromq_patterns", "zk_interface", "zk_verifier",
-    ),,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,
+    ),
 }
 
 GENERATED_HEADER = (
