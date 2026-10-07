@@ -3307,6 +3307,134 @@ Map every probe name to its expected outcome.
 
 Print the corpus summary: attack/benign counts and family listing.
 
+### `constraint_synthesis_probes`
+
+Source: `components/northstar-agent-runtime/constraint_synthesis_probes.py`
+
+Constraint-synthesis probes: AgentRx-style executable invariants from tool schemas.
+
+#### `attack_probe_names()`
+
+All constraint-synthesis attack probe names.
+
+#### `benign_probe_names()`
+
+All constraint-synthesis benign probe names.
+
+#### `probes_in_family(family: str)`
+
+Attack probes in one family.
+
+#### `probe_by_name(name: str)`
+
+Look up any probe (attack or benign) by name.
+
+#### `expected_outcomes()`
+
+Map every probe name to its expected outcome.
+
+#### `Constraint`
+
+One synthesized, digest-pinned invariant.
+
+#### `build_constraint(kind: str, spec: Mapping[str, Any])`
+
+Mint a digest-pinned constraint.
+
+#### `synthesize_constraints(schema: Mapping[str, Any])`
+
+Compile a schema document into a digest-pinned constraint set.
+
+#### `ConstraintSet`
+
+A synthesized constraint set, bound to one schema digest.
+
+#### `verify_constraint_set(constraint_set: ConstraintSet)`
+
+Constant-time integrity check of a constraint set. Never raises.
+
+#### `expected_constraint_names(schema: Mapping[str, Any])`
+
+Names every constraint a faithful synthesis must emit.
+
+#### `check_completeness(schema: Mapping[str, Any], constraint_set: ConstraintSet)`
+
+Verify the set covers every derivable constraint.
+
+#### `ValidationFinding`
+
+One named finding from argument validation.
+
+#### `validate_arguments(constraint_set: ConstraintSet, arguments: Mapping[str, Any], schema: Mapping[str, Any])`
+
+Run the synthesized conjunction against candidate arguments.
+
+#### `validation_receipt(constraint_set: ConstraintSet, arguments: Mapping[str, Any], schema: Mapping[str, Any])`
+
+Bind a validation outcome to the call and the set as a receipt.
+
+#### `main()`
+
+Print a small summary for the CLI.
+
+### `evidence_compaction_probes`
+
+Source: `components/northstar-agent-runtime/evidence_compaction_probes.py`
+
+Evidence-compaction probe corpus + payload/evidence separation detectors.
+
+#### `attack_names()`
+
+All evidence-compaction attack probe names.
+
+#### `benign_names()`
+
+All benign control names.
+
+#### `probes_by_family(family: str)`
+
+Attack probes in one family.
+
+#### `probe_by_name(name: str)`
+
+Look up any probe (attack or benign) by name.
+
+#### `expected_outcomes()`
+
+Map every probe name to its expected outcome.
+
+#### `EvidenceItem`
+
+One item in a compacted bundle.
+
+#### `build_item(kind: str, content: str, source_digest: str='', seq: int=0)`
+
+Build a digest-pinned item. Fail-closed on bad kind/empty content.
+
+#### `verify_item(item: EvidenceItem)`
+
+Recompute the item digest with constant-time compare.
+
+#### `CompactionBundle`
+
+An append-only compacted bundle plus its pinned source manifest.
+
+#### `compact(evidence: list[EvidenceItem], payload: list[EvidenceItem], source_manifest: str, dropped_payload: tuple[str, ...]=())`
+
+Build a bundle with evidence/payload separation enforced.
+
+#### `verify_bundle_integrity(bundle: CompactionBundle, expected_evidence_digests: tuple[str, ...]=())`
+
+Verify a compacted bundle. Never raises; returns ``(ok, findings)``.
+
+#### `bundle_head_digest(bundle: CompactionBundle)`
+
+Anchor digest for a bundle, for out-of-band pinning.
+
+#### `main()`
+
+Print a corpus summary (smoke entry point).
+
 ### `pre_completion_signal_probes`
 
 Source: `components/northstar-agent-runtime/pre_completion_signal_probes.py`
