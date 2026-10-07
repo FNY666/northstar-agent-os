@@ -80,7 +80,22 @@ JOIN_INNER = "inner"
 JOIN_LEFT = "left"
 JOIN_TYPES = (JOIN_INNER, JOIN_LEFT)
 
+#: Pinned transform functions (Kafka Streams / Flink topology ops).
+#: ``identity`` copies events unchanged; ``filter`` drops events whose
+#: value mapping does not carry ``options["field"] == options["value"]``;
+#: ``project`` keeps only ``options["fields"]`` of a mapping value.
+TRANSFORM_IDENTITY = "identity"
+TRANSFORM_FILTER = "filter"
+TRANSFORM_PROJECT = "project"
+TRANSFORM_FUNCTIONS = (
+    TRANSFORM_IDENTITY, TRANSFORM_FILTER, TRANSFORM_PROJECT,
+)
+
 _GENESIS = "genesis"
+
+#: Sentinel for transform functions that drop an event (filter no-match,
+#: project on a non-mapping value). Module-private by design.
+_DROP = object()
 
 
 # ---------------------------------------------------------------------------
@@ -142,6 +157,38 @@ class SeqOrderError(StreamProcessingError):
 
 class AuditKindError(StreamProcessingError):
     """Unknown audit event kind."""
+
+
+class BadTopologyError(StreamProcessingError):
+    """Malformed source/sink/transform id or option."""
+
+
+class DuplicateSourceError(StreamProcessingError):
+    """Source id already bound."""
+
+
+class UnknownSourceError(StreamProcessingError):
+    """Source id not bound."""
+
+
+class DuplicateSinkError(StreamProcessingError):
+    """Sink id already bound."""
+
+
+class UnknownSinkError(StreamProcessingError):
+    """Sink id not bound."""
+
+
+class BadTransformError(StreamProcessingError):
+    """Malformed transform spec (function or options)."""
+
+
+class DuplicateTransformError(StreamProcessingError):
+    """Transform id already pinned."""
+
+
+class UnknownTransformError(StreamProcessingError):
+    """Transform id not pinned."""
 
 
 # ---------------------------------------------------------------------------
@@ -361,6 +408,91 @@ class JoinResult:
         )
 
 
+@dataclass(frozen=True)
+class SourceRecord:
+    """One source connector pinned to a stream it feeds (frozen)."""
+
+    source_id: str
+    stream_id: str
+    seq: int
+    digest: str
+    schema: str = STREAM_PROCESSING_SCHEMA
+
+    def verify(self) -> bool:
+        return self.digest == _pin(
+            "source", self.source_id, self.stream_id, self.seq
+        )
+
+
+@dataclass(frozen=True)
+class SinkRecord:
+    """One sink connector pinned to a stream it drains (frozen)."""
+
+    sink_id: str
+    stream_id: str
+    seq: int
+    digest: str
+    schema: str = STREAM_PROCESSING_SCHEMA
+
+    def verify(self) -> bool:
+        return self.digest == _pin(
+            "sink", self.sink_id, self.stream_id, self.seq
+        )
+
+
+@dataclass(frozen=True)
+class TransformRecord:
+    """One topology edge pinned between two streams (frozen).
+
+    ``options`` carries the pinned per-function configuration:
+    ``identity`` -> (); ``filter`` -> (("field", name), ("value", canon));
+    ``project`` -> (("fields", (name, ...)),).
+    """
+
+    transform_id: str
+    input_stream_id: str
+    output_stream_id: str
+    function: str
+    options: Tuple[Tuple[str, Any], ...]
+    seq: int
+    digest: str
+    schema: str = STREAM_PROCESSING_SCHEMA
+
+    def verify(self) -> bool:
+        return self.digest == _pin(
+            "transform", self.transform_id, self.input_stream_id,
+            self.output_stream_id, self.function,
+            [(k, _canon(v)) for k, v in self.options], self.seq,
+        )
+
+
+@dataclass(frozen=True)
+class TransformRunRecord:
+    """One deterministic transform evaluation over booked events (frozen).
+
+    Input event ids and output event ids are sorted by input digest, so
+    two runs over the same ledger produce the same record.
+    """
+
+    run_id: str
+    transform_id: str
+    function: str
+    input_event_ids: Tuple[str, ...]
+    output_event_ids: Tuple[str, ...]
+    input_count: int
+    output_count: int
+    seq: int
+    digest: str
+    schema: str = STREAM_PROCESSING_SCHEMA
+
+    def verify(self) -> bool:
+        return self.digest == _pin(
+            "transform-run", self.run_id, self.transform_id, self.function,
+            list(self.input_event_ids), list(self.output_event_ids),
+            self.input_count, self.output_count, self.seq,
+        )
+
+
 # ---------------------------------------------------------------------------
 # Audit events
 # ---------------------------------------------------------------------------
@@ -372,9 +504,15 @@ KIND_AGGREGATED = "stream.aggregated"
 KIND_JOIN_DEFINED = "stream.join-defined"
 KIND_JOINED = "stream.joined"
 KIND_REJECTED = "stream.rejected"
+KIND_SOURCE_BOUND = "stream.source-bound"
+KIND_SINK_BOUND = "stream.sink-bound"
+KIND_TRANSFORM_BOUND = "stream.transform-bound"
+KIND_TRANSFORM_RUN = "stream.transform-run"
 _KINDS = (
     KIND_STREAM_REGISTERED, KIND_EVENT_INGESTED, KIND_WINDOW_DEFINED,
     KIND_AGGREGATED, KIND_JOIN_DEFINED, KIND_JOINED, KIND_REJECTED,
+    KIND_SOURCE_BOUND, KIND_SINK_BOUND, KIND_TRANSFORM_BOUND,
+    KIND_TRANSFORM_RUN,
 )
 
 # Keys that may never cross the audit boundary: raw values may carry PII.
@@ -428,6 +566,11 @@ class StreamProcessing:
         self._joins: Dict[str, JoinRecord] = {}
         self._join_counter = 0
         self._results: Dict[str, JoinResult] = {}
+        # Source/sink/transform topology (Kafka Streams / Flink shape).
+        self._sources: Dict[str, SourceRecord] = {}
+        self._sinks: Dict[str, SinkRecord] = {}
+        self._transforms: Dict[str, TransformRecord] = {}
+        self._run_counter = 0
         self._audit: List[Dict[str, Any]] = []
         self._prev_digest = _GENESIS
 
@@ -837,6 +980,306 @@ class StreamProcessing:
             )
             return res
 
+    # -- topology (source / sink / transform) -------------------------------
+
+    @staticmethod
+    def _check_transform_options(
+        function: str, options: Any
+    ) -> Tuple[Tuple[str, Any], ...]:
+        """Validate and canonicalize per-function transform options."""
+        if options is None:
+            opts: Mapping[str, Any] = {}
+        elif isinstance(options, Mapping):
+            opts = options
+        else:
+            raise BadTransformError("options must be a mapping or None")
+        if function == TRANSFORM_IDENTITY:
+            if opts:
+                raise BadTransformError("identity takes no options")
+            return ()
+        if function == TRANSFORM_FILTER:
+            try:
+                field = opts["field"]
+                if not isinstance(field, str) or not field.strip():
+                    raise BadTransformError(
+                        "filter options need a non-empty 'field' string"
+                    )
+                target = _canon(opts["value"])
+            except KeyError as exc:
+                raise BadTransformError(
+                    f"filter options missing {exc}"
+                ) from None
+            return (("field", field.strip()), ("value", target))
+        # function == TRANSFORM_PROJECT
+        try:
+            fields_raw = opts["fields"]
+        except KeyError as exc:
+            raise BadTransformError(
+                "project options need a 'fields' list"
+            ) from None
+        if not isinstance(fields_raw, (list, tuple)) or not fields_raw:
+            raise BadTransformError("project 'fields' must be a non-empty list")
+        fields: List[str] = []
+        for f in fields_raw:
+            if not isinstance(f, str) or not f.strip():
+                raise BadTransformError(
+                    "project 'fields' entries must be non-empty strings"
+                )
+            fields.append(f.strip())
+        return (("fields", tuple(sorted(set(fields)))),)
+
+    @staticmethod
+    def _apply_transform(
+        function: str,
+        options: Tuple[Tuple[str, Any], ...],
+        key: Any,
+        value: Any,
+    ) -> Any:
+        """Apply a pinned transform function; ``_DROP`` means the event is
+        filtered out. Never raises on policy."""
+        if function == TRANSFORM_IDENTITY:
+            return value
+        if function == TRANSFORM_FILTER:
+            field = options[0][1]
+            target = options[1][1]
+            if isinstance(value, Mapping) and value.get(field) == target:
+                return value
+            return _DROP
+        # function == TRANSFORM_PROJECT
+        fields = options[0][1]
+        if isinstance(value, Mapping):
+            return {f: value[f] for f in fields if f in value}
+        return _DROP
+
+    def source(self, source_id: str, stream_id: str, seq: int) -> SourceRecord:
+        """Pin a source connector that feeds ``stream_id``."""
+        with self._lock:
+            sid = _check_nonempty_str(source_id, "source_id")
+            stid = _check_nonempty_str(stream_id, "stream_id")
+            seq = self._use_seq(seq)
+            if stid not in self._streams:
+                self._reject_locked(
+                    UnknownStreamError(f"unknown stream: {stid!r}"),
+                    {"source_id": sid}, seq,
+                )
+            if sid in self._sources:
+                self._reject_locked(
+                    DuplicateSourceError(f"source already bound: {sid!r}"),
+                    {"source_id": sid}, seq,
+                )
+            rec = SourceRecord(
+                source_id=sid, stream_id=stid, seq=seq,
+                digest=_pin("source", sid, stid, seq),
+            )
+            self._sources[sid] = rec
+            self._emit(
+                KIND_SOURCE_BOUND,
+                {"source_id": sid, "stream_id": stid}, seq,
+            )
+            return rec
+
+    def source_record(self, source_id: str) -> SourceRecord:
+        with self._lock:
+            try:
+                return self._sources[source_id]
+            except KeyError:
+                raise UnknownSourceError(
+                    f"unknown source: {source_id!r}"
+                ) from None
+
+    def source_ids(self) -> Tuple[str, ...]:
+        with self._lock:
+            return tuple(sorted(self._sources))
+
+    def sink(self, sink_id: str, stream_id: str, seq: int) -> SinkRecord:
+        """Pin a sink connector that drains ``stream_id``."""
+        with self._lock:
+            sid = _check_nonempty_str(sink_id, "sink_id")
+            stid = _check_nonempty_str(stream_id, "stream_id")
+            seq = self._use_seq(seq)
+            if stid not in self._streams:
+                self._reject_locked(
+                    UnknownStreamError(f"unknown stream: {stid!r}"),
+                    {"sink_id": sid}, seq,
+                )
+            if sid in self._sinks:
+                self._reject_locked(
+                    DuplicateSinkError(f"sink already bound: {sid!r}"),
+                    {"sink_id": sid}, seq,
+                )
+            rec = SinkRecord(
+                sink_id=sid, stream_id=stid, seq=seq,
+                digest=_pin("sink", sid, stid, seq),
+            )
+            self._sinks[sid] = rec
+            self._emit(
+                KIND_SINK_BOUND,
+                {"sink_id": sid, "stream_id": stid}, seq,
+            )
+            return rec
+
+    def sink_record(self, sink_id: str) -> SinkRecord:
+        with self._lock:
+            try:
+                return self._sinks[sink_id]
+            except KeyError:
+                raise UnknownSinkError(
+                    f"unknown sink: {sink_id!r}"
+                ) from None
+
+    def sink_ids(self) -> Tuple[str, ...]:
+        with self._lock:
+            return tuple(sorted(self._sinks))
+
+    def transform(
+        self, transform_id: str, input_stream_id: str, output_stream_id: str,
+        seq: int, function: str = TRANSFORM_IDENTITY,
+        options: Optional[Mapping[str, Any]] = None,
+    ) -> TransformRecord:
+        """Pin a topology edge: read ``input_stream_id``, apply the pinned
+        ``function``, write ``output_stream_id`` on ``run_transform``."""
+        with self._lock:
+            tid = _check_nonempty_str(transform_id, "transform_id")
+            iid = _check_nonempty_str(input_stream_id, "input_stream_id")
+            oid = _check_nonempty_str(output_stream_id, "output_stream_id")
+            seq = self._use_seq(seq)
+            if iid not in self._streams:
+                self._reject_locked(
+                    UnknownStreamError(f"unknown stream: {iid!r}"),
+                    {"transform_id": tid}, seq,
+                )
+            if oid not in self._streams:
+                self._reject_locked(
+                    UnknownStreamError(f"unknown stream: {oid!r}"),
+                    {"transform_id": tid}, seq,
+                )
+            try:
+                if function not in TRANSFORM_FUNCTIONS:
+                    raise BadTransformError(
+                        f"function must be one of {TRANSFORM_FUNCTIONS}, "
+                        f"got {function!r}"
+                    )
+                canon_opts = self._check_transform_options(function, options)
+            except StreamProcessingError as exc:
+                self._reject_locked(exc, {"transform_id": tid}, seq)
+            if iid == oid:
+                self._reject_locked(
+                    BadTransformError("input and output streams must differ"),
+                    {"transform_id": tid}, seq,
+                )
+            if tid in self._transforms:
+                self._reject_locked(
+                    DuplicateTransformError(f"transform already pinned: {tid!r}"),
+                    {"transform_id": tid}, seq,
+                )
+            rec = TransformRecord(
+                transform_id=tid, input_stream_id=iid,
+                output_stream_id=oid, function=function,
+                options=canon_opts, seq=seq,
+                digest=_pin(
+                    "transform", tid, iid, oid, function,
+                    [(k, _canon(v)) for k, v in canon_opts], seq,
+                ),
+            )
+            self._transforms[tid] = rec
+            audit_detail: Dict[str, Any] = {
+                "transform_id": tid, "input_stream_id": iid,
+                "output_stream_id": oid, "function": function,
+            }
+            if canon_opts:
+                # Field names only: target values never cross the audit
+                # boundary.
+                audit_detail["option_keys"] = [k for k, _ in canon_opts]
+            self._emit(KIND_TRANSFORM_BOUND, audit_detail, seq)
+            return rec
+
+    def transform_record(self, transform_id: str) -> TransformRecord:
+        with self._lock:
+            try:
+                return self._transforms[transform_id]
+            except KeyError:
+                raise UnknownTransformError(
+                    f"unknown transform: {transform_id!r}"
+                ) from None
+
+    def transform_ids(self) -> Tuple[str, ...]:
+        with self._lock:
+            return tuple(sorted(self._transforms))
+
+    def _book_transform_event(
+        self, stream_id: str, key: Any, value: Any, event_seq: int, seq: int
+    ) -> EventRecord:
+        """Book one transform-output event under an already-bumped seq."""
+        late = event_seq < self._watermarks[stream_id]
+        self._event_counter += 1
+        eid = f"evt-{self._event_counter}"
+        rec = EventRecord(
+            event_id=eid, stream_id=stream_id, key=key, value=value,
+            event_seq=event_seq, late=late, seq=seq,
+            digest=_pin("event", eid, stream_id, key, value, event_seq, late, seq),
+        )
+        self._events[eid] = rec
+        self._events_by_stream[stream_id].append(eid)
+        if event_seq > self._watermarks[stream_id]:
+            self._watermarks[stream_id] = event_seq
+        self._emit(
+            KIND_EVENT_INGESTED,
+            {"event_id": eid, "stream_id": stream_id, "late": late}, seq,
+        )
+        return rec
+
+    def run_transform(self, transform_id: str, seq: int) -> TransformRunRecord:
+        """Evaluate a pinned transform over the input stream's booked events.
+
+        Matching the house discipline of ``evaluate_join``: deterministic,
+        host-reported events in, frozen run record out; output events are
+        booked on the output stream so transforms chain into topologies."""
+        with self._lock:
+            tid = _check_nonempty_str(transform_id, "transform_id")
+            seq = self._use_seq(seq)
+            try:
+                rec = self.transform_record(tid)
+            except StreamProcessingError as exc:
+                self._reject_locked(exc, {"transform_id": tid}, seq)
+            inputs = sorted(
+                (self._events[e]
+                 for e in self._events_by_stream[rec.input_stream_id]),
+                key=lambda e: e.digest,
+            )
+            out_events: List[EventRecord] = []
+            for ev in inputs:
+                result = self._apply_transform(
+                    rec.function, rec.options, ev.key, ev.value
+                )
+                if result is _DROP:
+                    continue
+                out_events.append(
+                    self._book_transform_event(
+                        rec.output_stream_id, ev.key, result, ev.event_seq, seq
+                    )
+                )
+            self._run_counter += 1
+            rid = f"run-{self._run_counter}"
+            res = TransformRunRecord(
+                run_id=rid, transform_id=tid, function=rec.function,
+                input_event_ids=tuple(e.event_id for e in inputs),
+                output_event_ids=tuple(e.event_id for e in out_events),
+                input_count=len(inputs), output_count=len(out_events), seq=seq,
+                digest=_pin(
+                    "transform-run", rid, tid, rec.function,
+                    [e.event_id for e in inputs],
+                    [e.event_id for e in out_events],
+                    len(inputs), len(out_events), seq,
+                ),
+            )
+            self._emit(
+                KIND_TRANSFORM_RUN,
+                {"run_id": rid, "transform_id": tid,
+                 "input_count": len(inputs),
+                 "output_count": len(out_events)}, seq,
+            )
+            return res
+
     # -- views ------------------------------------------------------------
 
     def stats(self, seq: int) -> Dict[str, Any]:
@@ -883,7 +1326,25 @@ def main() -> None:
     sp.join("j1", "w1", "w2", 33, tolerance_seq=3)
     jr = sp.evaluate_join("j1", 34)
     assert jr.matched == 2
-    print("stream-processing OK: stream, window, aggregate, join, pins")
+    # Topology: source -> transform -> sink.
+    sp.source("src-1", "orders", 40)
+    sp.register_stream("enriched", 41)
+    sp.sink("snk-1", "enriched", 42)
+    sp.ingest("orders", {"customer": "b"}, {"amount": 10}, 12, 43)
+    sp.ingest("orders", {"customer": "c"}, {"amount": 99}, 13, 44)
+    tr = sp.transform(
+        "t1", "orders", "enriched", 45, function="filter",
+        options={"field": "amount", "value": 10},
+    )
+    assert tr.verify() and tr.options[0][1] == "amount"
+    run = sp.run_transform("t1", 46)
+    assert run.verify() and run.input_count == 4 and run.output_count == 1
+    outs = sp.events_for("enriched")
+    assert len(outs) == 1 and outs[0].value == {"amount": 10}
+    kinds = [e["kind"] for e in sp.audit_log()]
+    assert KIND_SOURCE_BOUND in kinds and KIND_TRANSFORM_RUN in kinds
+    print("stream-processing OK: stream, window, aggregate, join, pins, "
+          "source, sink, transform")
 
 
 if __name__ == "__main__":

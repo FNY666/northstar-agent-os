@@ -22,13 +22,21 @@ Public API:
   through caller-supplied reducers ``(state, payload) -> state`` to rebuild
   derived state. Unknown event types raise ``ReplayError`` (fail closed --
   a replay that silently drops events would certify a lie).
+- ``SnapshotRecord`` -- frozen pin of derived state at an event seq:
+  ``EventStore.snapshot(state)`` books one through the current head
+  (fail-closed on empty store, duplicate ``at_seq`` refused);
+  ``replay_from(snapshot, handlers)`` / ``replay_from_latest(handlers)``
+  rebuild state by folding only the events *after* the snapshot --
+  snapshots accelerate replay but never replace the log.
 
 Honest scope:
 
 - This is the log-and-replay layer, not a database: no persistence (the
   host owns durability), no concurrency control beyond a lock for
-  append-order atomicity, no snapshotting (callers snapshot by storing
-  ``(seq, state)`` pairs themselves).
+  append-order atomicity.
+- Snapshots pin *host-declared* derived state at a chain head; the module
+  cannot verify the state equals what replay would actually produce --
+  a lying snapshot is a host lie, pinned for the auditor to spot.
 - The hash chain proves *internal consistency* of the log the host hands
   back -- it cannot prove the host didn't withhold a prefix (that needs an
   external head anchor, the host's job).
@@ -79,6 +87,14 @@ class ReplayError(EventSourcingError):
     """Raised when replay cannot proceed deterministically."""
 
 
+class SnapshotError(EventSourcingError):
+    """Raised when a snapshot cannot be booked (empty store, bad state)."""
+
+
+class DuplicateSnapshotError(SnapshotError):
+    """Raised when a snapshot already exists at the same event seq."""
+
+
 def _check_text(value: object, name: str) -> str:
     """Validate a non-empty text field."""
     if not isinstance(value, str):
@@ -121,6 +137,44 @@ def _check_digest(value: object, name: str = "digest") -> str:
     if any(c not in "0123456789abcdef" for c in hexpart):
         raise ValueError(f"{name} hex part must be lowercase hex")
     return value
+
+
+_MAX_SAFE_INT = 2**53 - 1
+
+
+def _check_snapshot_state(value: object) -> Any:
+    """Validate derived snapshot state: JCS-canonicalizable, safe numbers.
+
+    Accepts str/int/float/bool/None/list/tuple/dict (dict keys must be
+    str). ``bool`` is not ``int`` here -- it canonicalizes separately.
+    ``|int| >= 2**53`` and non-finite floats are refused so the digest
+    pin is always reproducible. Returns a normalized copy (tuples become
+    lists, mappings become plain dicts) so the frozen record cannot alias
+    a caller-mutated object.
+    """
+    if value is None or isinstance(value, (bool, str)):
+        return value
+    if isinstance(value, int):
+        if abs(value) > _MAX_SAFE_INT:
+            raise SnapshotError("int state outside safe range")
+        return value
+    if isinstance(value, float):
+        if value != value or value in (float("inf"), float("-inf")):
+            raise SnapshotError("non-finite float state refused")
+        return value
+    if isinstance(value, (list, tuple)):
+        return [_check_snapshot_state(item) for item in value]
+    if isinstance(value, Mapping):
+        out: Dict[str, Any] = {}
+        for key in value.keys():
+            if not isinstance(key, str):
+                raise SnapshotError("state dict keys must be str")
+            out[key] = _check_snapshot_state(value[key])
+        return out
+    raise SnapshotError(
+        f"state must be str/int/float/bool/None/list/dict, "
+        f"got {type(value).__name__}"
+    )
 
 
 @dataclass(frozen=True)
@@ -208,6 +262,7 @@ class EventStore:
     def __init__(self) -> None:
         self._events: list[Event] = []
         self._by_id: Dict[str, Event] = {}
+        self._snapshots: Dict[int, SnapshotRecord] = {}
         self._lock = threading.Lock()
 
     def append(self, event: Event) -> Event:
@@ -283,6 +338,67 @@ class EventStore:
                 prev = event.digest
             return True
 
+    def snapshot(self, state: Any) -> SnapshotRecord:
+        """Book a snapshot of derived state through the current head.
+
+        ``at_seq`` is the seq of the last appended event. Fail closed on
+        an empty store (nothing to pin) and on a duplicate ``at_seq`` (a
+        booked snapshot is never overwritten).
+        """
+        with self._lock:
+            if not self._events:
+                raise SnapshotError("cannot snapshot an empty store")
+            at_seq = self._events[-1].seq
+            head = self._events[-1].digest
+            if at_seq in self._snapshots:
+                raise DuplicateSnapshotError(
+                    f"snapshot already booked at seq {at_seq}")
+            record = SnapshotRecord(at_seq, state, head)
+            self._snapshots[at_seq] = record
+            return record
+
+    def snapshots(self) -> tuple[SnapshotRecord, ...]:
+        """All booked snapshots, ordered by ``at_seq``."""
+        with self._lock:
+            return tuple(self._snapshots[seq]
+                         for seq in sorted(self._snapshots))
+
+    def latest_snapshot(self) -> Any:
+        """The snapshot with the greatest ``at_seq``, or None."""
+        with self._lock:
+            if not self._snapshots:
+                return None
+            return self._snapshots[max(self._snapshots)]
+
+    def replay_from(self, snapshot: SnapshotRecord,
+                    handlers: Mapping[str, Callable[[Any, Mapping[str, Any]],
+                                                   Any]]) -> Any:
+        """Rebuild state from a booked snapshot, folding later events.
+
+        Only events with ``event.seq > snapshot.at_seq`` are folded, with
+        ``snapshot.state`` as the initial value. The snapshot must be one
+        this store booked (unknown, stale, or tampered records raise
+        ``SnapshotError``).
+        """
+        if not isinstance(snapshot, SnapshotRecord):
+            raise TypeError(
+                f"expected SnapshotRecord, got {type(snapshot).__name__}")
+        with self._lock:
+            stored = self._snapshots.get(snapshot.at_seq)
+            if stored is None or stored != snapshot:
+                raise SnapshotError(
+                    "snapshot is not booked by this store")
+            later = [e for e in self._events if e.seq > snapshot.at_seq]
+        return replay(later, handlers, initial=snapshot.state)
+
+    def replay_from_latest(self, handlers: Mapping[
+            str, Callable[[Any, Mapping[str, Any]], Any]]) -> Any:
+        """Replay from the latest booked snapshot (fail closed if none)."""
+        snapshot = self.latest_snapshot()
+        if snapshot is None:
+            raise SnapshotError("no snapshots booked")
+        return self.replay_from(snapshot, handlers)
+
 
 def replay(events: Sequence[Event],
            handlers: Mapping[str, Callable[[Any, Mapping[str, Any]], Any]],
@@ -323,6 +439,76 @@ def replay(events: Sequence[Event],
                 f"handler for {event.event_type!r} is not callable")
         state = handler(state, event.payload)
     return state
+
+
+@dataclass(frozen=True)
+class SnapshotRecord:
+    """One pinned snapshot of derived state at an event seq.
+
+    ``at_seq`` is the last event seq the snapshot covers; ``state`` is the
+    host-declared derived state at that point; ``head_digest`` is the
+    store's chain head when the snapshot was booked, so an auditor can
+    confirm the snapshot covers the same history the log shows.
+    ``state_digest`` pins the canonical ``(at_seq, state, head_digest)``
+    body (tamper-evident). Snapshots are keyed by ``at_seq`` inside a
+    store and never overwritten.
+    """
+
+    at_seq: int
+    state: Any
+    state_digest: str
+    head_digest: str
+
+    def __init__(self, at_seq: object, state: object,
+                 head_digest: object) -> None:
+        at_seq = _check_seq(at_seq, "at_seq")
+        state = _check_snapshot_state(state)
+        head_digest = _check_digest(head_digest, "head_digest")
+        digest = "sha256:" + jcs_sha256_hex({
+            "at_seq": at_seq,
+            "state": state,
+            "head_digest": head_digest,
+        })
+        object.__setattr__(self, "at_seq", at_seq)
+        object.__setattr__(self, "state", state)
+        object.__setattr__(self, "state_digest", digest)
+        object.__setattr__(self, "head_digest", head_digest)
+
+    def as_dict(self) -> Dict[str, Any]:
+        """JSON-safe view with the schema pin."""
+        return {
+            "schema": SCHEMA_PIN,
+            "kind": "snapshot",
+            "at_seq": self.at_seq,
+            "state": self.state,
+            "state_digest": self.state_digest,
+            "head_digest": self.head_digest,
+        }
+
+    def verify(self) -> bool:
+        """Recompute the pin; True iff this record is internally intact."""
+        expected = "sha256:" + jcs_sha256_hex({
+            "at_seq": self.at_seq,
+            "state": self.state,
+            "head_digest": self.head_digest,
+        })
+        return _constant_time_eq(self.state_digest, expected)
+
+
+def snapshot_audit_event(snapshot: SnapshotRecord, seq: int) -> Dict[str, Any]:
+    """Build an ``audit.ndjson/1``-shaped record for a booked snapshot."""
+    if not isinstance(snapshot, SnapshotRecord):
+        raise TypeError(f"expected SnapshotRecord, got {type(snapshot).__name__}")
+    _check_seq(seq, "seq")
+    return {
+        "schema": "audit.ndjson/1",
+        "module": SCHEMA_PIN,
+        "outcome": "snapshotted",
+        "snapshot_at_seq": snapshot.at_seq,
+        "state_digest": snapshot.state_digest,
+        "head_digest": snapshot.head_digest,
+        "audit_seq": seq,
+    }
 
 
 def event_audit_event(event: Event, outcome: str, seq: int) -> Dict[str, Any]:
@@ -429,7 +615,49 @@ def main() -> None:
 
     audit = event_audit_event(e0, "appended", 7)
     assert audit["audit_seq"] == 7 and audit["event_id"] == "e0"
-    print("event-sourcing OK: append, chain, views, replay, fail-closed")
+
+    # Snapshots: pin derived state, replay only the tail.
+    store2 = EventStore()
+    store2.append(e0)
+    store2.append(e1)
+    partial = replay(store2.events(), handlers)
+    assert partial == {"owner": "alice", "balance": 100}, partial
+    snap = store2.snapshot(partial)
+    assert snap.at_seq == 1 and snap.head_digest == store2.head()
+    assert snap.verify()
+    assert store2.latest_snapshot() == snap
+    assert [s.at_seq for s in store2.snapshots()] == [1]
+    # A new event arrives after the snapshot; replay_from folds only it.
+    store2.append(e2)
+    resumed = store2.replay_from(snap, handlers)
+    assert resumed == state, resumed
+    assert store2.replay_from_latest(handlers) == state
+    saudit = snapshot_audit_event(snap, 8)
+    assert saudit["outcome"] == "snapshotted"
+    assert saudit["snapshot_at_seq"] == 1
+    # A snapshot at a newer at_seq is allowed; the same at_seq is not.
+    snap2 = store2.snapshot(state)
+    assert [s.at_seq for s in store2.snapshots()] == [1, 2]
+    assert snap2.verify()
+    try:
+        store2.snapshot(state)
+    except DuplicateSnapshotError:
+        pass
+    else:
+        raise AssertionError("duplicate snapshot must raise")
+    try:
+        store2.replay_from(snap, {"nope": lambda s, p: s})
+    except ReplayError:
+        pass
+    else:
+        raise AssertionError("replay with missing handler must raise")
+    try:
+        EventStore().snapshot({})
+    except SnapshotError:
+        pass
+    else:
+        raise AssertionError("empty-store snapshot must raise")
+    print("event-sourcing OK: append, chain, views, replay, snapshot, fail-closed")
 
 
 if __name__ == "__main__":
