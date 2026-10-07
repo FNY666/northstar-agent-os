@@ -24,6 +24,10 @@ for that practice:
 * **test()** books one declared out-of-distribution probe of a booked
   goal, with the scenario pinned by digest and the verdict
   (``holds`` / ``breaks`` / ``inconclusive``) booked as data.
+* **evaluate()** derives an assessment posture for a goal as data
+  (``untested`` / ``breaks`` / ``misgeneralized`` / ``corrected`` /
+  ``holding``) -- a pure read: seq shape-validated, never consumed, no
+  audit row.
 
 House style throughout: frozen dataclasses, caller-supplied
 strictly-increasing int seqs, no wall-clock, RLock guarding, fail-closed
@@ -100,6 +104,22 @@ VERDICT_HOLDS = "holds"
 VERDICT_BREAKS = "breaks"
 VERDICT_INCONCLUSIVE = "inconclusive"
 _VERDICTS = frozenset({VERDICT_HOLDS, VERDICT_BREAKS, VERDICT_INCONCLUSIVE})
+
+#: Pinned evaluation-posture vocabulary (all derived as data, never proof).
+POSTURE_UNTESTED = "untested"
+POSTURE_BREAKS = "breaks"
+POSTURE_MISGENERALIZED = "misgeneralized"
+POSTURE_CORRECTED = "corrected"
+POSTURE_HOLDING = "holding"
+_POSTURES = frozenset(
+    {
+        POSTURE_UNTESTED,
+        POSTURE_BREAKS,
+        POSTURE_MISGENERALIZED,
+        POSTURE_CORRECTED,
+        POSTURE_HOLDING,
+    }
+)
 
 _MAX_INT = 2**53 - 1
 _DIGEST_PREFIX = "sha256:"
@@ -378,6 +398,46 @@ class TestReport:
         )
 
 
+@dataclass(frozen=True)
+class EvaluationReport:
+    """Derived assessment posture for a goal.
+
+    ``posture`` follows the pinned vocabulary in precedence order:
+    ``untested`` (no detection reports) -> ``breaks`` (any OOD probe
+    verdict ``breaks``) -> ``misgeneralized`` (latest report says
+    misgeneralized and no later correction booked) -> ``corrected`` (a
+    correction decision is on record) -> ``holding`` (all reports clean).
+    All fields are data, never proof of a real goal state.
+    """
+
+    goal_id: str
+    posture: str
+    n_observations: int
+    n_reports: int
+    n_misgeneralized: int
+    n_corrections: int
+    n_tests: int
+    latest_divergence: str
+    digest: str
+    seq: int
+    schema: str = GOAL_MISGENERALIZATION_SCHEMA
+
+    def verify(self) -> bool:
+        return self.digest == _digest_pin(
+            (
+                self.goal_id,
+                self.posture,
+                self.n_observations,
+                self.n_reports,
+                self.n_misgeneralized,
+                self.n_corrections,
+                self.n_tests,
+                self.latest_divergence,
+            ),
+            "evaluation",
+        )
+
+
 # ---------------------------------------------------------------------------
 # Audit events
 # ---------------------------------------------------------------------------
@@ -426,8 +486,8 @@ def goal_misgeneralization_audit_event(kind: str, seq: int, **detail: Any) -> Di
 class GoalMisgeneralization:
     """Goal-misgeneralization detection/correction bookkeeping ledger.
 
-    declare_goal -> observe -> detect -> correct / test. All verdicts are
-    data; nothing here proves anything about a real agent.
+    declare_goal -> observe -> detect -> evaluate (pure read) -> correct / test.
+    All verdicts are data; nothing here proves anything about a real agent.
     """
 
     def __init__(self) -> None:
@@ -755,6 +815,63 @@ class GoalMisgeneralization:
         _check_seq(seq)
         with self._lock:
             return tuple(r for r in self._reports.values() if r.goal_id == goal_id)
+
+    def evaluate(self, goal_id: str, seq: int) -> EvaluationReport:
+        """Pure read: derived assessment posture for a goal.
+
+        seq is shape-validated only -- never consumed, no audit row.
+        Posture precedence (all as data): untested -> breaks -> misgeneralized
+        -> corrected -> holding. Fail-closed on unknown goals.
+        """
+        _check_seq(seq)
+        with self._lock:
+            if goal_id not in self._goals:
+                raise UnknownGoalError(f"unknown goal: {goal_id!r}")
+            obs_ids = self._observations_for[goal_id]
+            reports = [r for r in self._reports.values() if r.goal_id == goal_id]
+            corrections = [
+                c for c in self._corrections.values() if c.goal_id == goal_id
+            ]
+            tests = [t for t in self._tests.values() if t.goal_id == goal_id]
+            n_misgeneralized = sum(1 for r in reports if r.misgeneralized)
+            if not reports:
+                posture = POSTURE_UNTESTED
+            elif any(t.verdict == VERDICT_BREAKS for t in tests):
+                posture = POSTURE_BREAKS
+            else:
+                latest = reports[-1]
+                later_corrections = [c for c in corrections if c.seq >= latest.seq]
+                if latest.misgeneralized and not later_corrections:
+                    posture = POSTURE_MISGENERALIZED
+                elif corrections:
+                    posture = POSTURE_CORRECTED
+                else:
+                    posture = POSTURE_HOLDING
+            latest_divergence = reports[-1].divergence_text if reports else "0/0"
+            return EvaluationReport(
+                goal_id=goal_id,
+                posture=posture,
+                n_observations=len(obs_ids),
+                n_reports=len(reports),
+                n_misgeneralized=n_misgeneralized,
+                n_corrections=len(corrections),
+                n_tests=len(tests),
+                latest_divergence=latest_divergence,
+                digest=_digest_pin(
+                    (
+                        goal_id,
+                        posture,
+                        len(obs_ids),
+                        len(reports),
+                        n_misgeneralized,
+                        len(corrections),
+                        len(tests),
+                        latest_divergence,
+                    ),
+                    "evaluation",
+                ),
+                seq=seq,
+            )
 
     def corrections_for(self, goal_id: str, seq: int) -> Tuple[CorrectionRecord, ...]:
         """Pure read: correction decisions booked for a goal, in seq order."""

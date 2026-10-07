@@ -340,3 +340,101 @@ def test_views_stats_and_cross_instance_determinism():
     assert r.stdout.strip() == (
         "goal-misgeneralization OK: declare, observe, detect, correct, test, pins"
     )
+
+
+# ---------------------------------------------------------------------------
+# evaluate() -- derived assessment posture (pure read)
+# ---------------------------------------------------------------------------
+
+
+def test_evaluate_untested_and_holding():
+    m = ledger_with_goal()
+    rep = m.evaluate("coinrun", 2)
+    assert rep.posture == gm.POSTURE_UNTESTED
+    assert rep.verify() is True
+    assert rep.n_reports == 0
+    assert rep.latest_divergence == "0/0"
+    # all-clean observations -> holding
+    m2 = ledger_with_observations()
+    r2 = m2.detect("coinrun", 6, threshold=0.5)  # 1/4 divergent < 0.5
+    assert r2.misgeneralized is False
+    ev = m2.evaluate("coinrun", 7)
+    assert ev.posture == gm.POSTURE_HOLDING
+    assert ev.verify() is True
+    assert ev.n_observations == 4
+    assert ev.n_reports == 1
+    assert ev.n_misgeneralized == 0
+    assert ev.latest_divergence == "1/4"
+    # frozen record: attribute assignment is refused
+    with pytest.raises(Exception):
+        rep.posture = "holding"  # type: ignore
+
+
+def test_evaluate_misgeneralized_then_corrected():
+    m = ledger_with_observations()
+    m.detect("coinrun", 6, threshold=0.25)  # 1/4 >= 0.25 -> misgeneralized
+    ev = m.evaluate("coinrun", 7)
+    assert ev.posture == gm.POSTURE_MISGENERALIZED
+    assert ev.n_misgeneralized == 1
+    assert ev.verify() is True
+    # booking a correction flips posture to corrected (no proof it worked)
+    cor = m.correct("coinrun", 8, "reward-reshape")
+    assert cor.verify()
+    ev2 = m.evaluate("coinrun", 9)
+    assert ev2.posture == gm.POSTURE_CORRECTED
+    assert ev2.n_corrections == 1
+    assert ev2.verify() is True
+
+
+def test_evaluate_breaks_outranks_and_unknown_goal():
+    m = ledger_with_observations()
+    m.detect("coinrun", 6, threshold=0.25)  # misgeneralized
+    m.correct("coinrun", 7, "monitor")
+    # OOD probe verdict "breaks" dominates as data
+    m.test("coinrun", 8, scenario_digest=OFF_GOAL, verdict="breaks")
+    ev = m.evaluate("coinrun", 9)
+    assert ev.posture == gm.POSTURE_BREAKS
+    assert ev.n_tests == 1
+    assert ev.verify() is True
+    # unknown goal is fail-closed
+    with pytest.raises(gm.UnknownGoalError):
+        m.evaluate("nope", 10)
+    # malformed seqs rejected on the pure read (shape check, no consumption);
+    # note: 0/-1 are shape-valid ints here (no rewind semantics on reads)
+    for bad in (1.5, True, None, "9"):
+        with pytest.raises(gm.SeqOrderError):
+            m.evaluate("coinrun", bad)
+
+
+def test_evaluate_read_purity():
+    m = ledger_with_observations()
+    m.detect("coinrun", 6)
+    before = len(m.audit_log())
+    seq_before = m.stats(7)["last_seq"]
+    e1 = m.evaluate("coinrun", 100)
+    e2 = m.evaluate("coinrun", 100)  # same seq twice: no consumption
+    assert e1 == e2
+    assert e1.digest == e2.digest
+    assert len(m.audit_log()) == before  # no audit row
+    assert m.stats(101)["last_seq"] == seq_before  # seq untouched
+    # cross-instance determinism
+    m2 = ledger_with_observations()
+    m2.detect("coinrun", 6)
+    assert m2.evaluate("coinrun", 100).digest == e1.digest
+    # tamper breaks verify() (posture is "holding" here, so flip it)
+    bad = e1.__class__(**{**e1.__dict__})
+    object.__setattr__(bad, "posture", "breaks")
+    assert bad.verify() is False
+
+
+def test_evaluate_posture_vocabulary_and_schema():
+    assert gm.POSTURE_UNTESTED in gm._POSTURES
+    assert gm.POSTURE_BREAKS in gm._POSTURES
+    assert gm.POSTURE_MISGENERALIZED in gm._POSTURES
+    assert gm.POSTURE_CORRECTED in gm._POSTURES
+    assert gm.POSTURE_HOLDING in gm._POSTURES
+    m = ledger_with_observations()
+    m.detect("coinrun", 6)
+    ev = m.evaluate("coinrun", 7)
+    assert ev.schema == gm.GOAL_MISGENERALIZATION_SCHEMA
+    assert ev.posture in gm._POSTURES
