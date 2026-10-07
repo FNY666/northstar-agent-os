@@ -26,6 +26,10 @@ Public API:
       only for the current holder presenting the current token; a stale
       holder's release is refused (``False``), which is what stops a stale
       holder from releasing *someone else's* lock.
+    - ``renew(lock_id, owner, fencing_token, ttl_seqs, current_seq)``
+      -> the renewed ``LockLease`` (same token, extended expiry) for the
+      live holder; a stale holder, non-holder, or expired lease is refused
+      (``None``) and must re-``acquire``.
     - ``verify_fencing(lock_id, token)`` -> ``True`` iff ``token`` is the
       latest token minted for ``lock_id``.
     - ``is_locked(lock_id, current_seq)``, ``current_holder(lock_id)``,
@@ -72,12 +76,20 @@ DISTRIBUTED_LOCK_SCHEMA = "northstar.distributed-lock.v1"
 #: Audit event kinds.
 EVENT_ACQUIRED = "lock-acquired"
 EVENT_RELEASED = "lock-released"
+EVENT_RENEWED = "lock-renewed"
 EVENT_REFUSED = "lock-refused"
 EVENT_EXPIRED = "lock-expired"
 EVENT_RELEASE_REFUSED = "release-refused"
 
 _EVENT_TYPES = frozenset(
-    {EVENT_ACQUIRED, EVENT_RELEASED, EVENT_REFUSED, EVENT_EXPIRED, EVENT_RELEASE_REFUSED}
+    {
+        EVENT_ACQUIRED,
+        EVENT_RELEASED,
+        EVENT_RENEWED,
+        EVENT_REFUSED,
+        EVENT_EXPIRED,
+        EVENT_RELEASE_REFUSED,
+    }
 )
 
 #: Reasons attached to refused/release-refused events.
@@ -428,6 +440,108 @@ class DistributedLock:
                 )
             )
             return True
+
+    def renew(
+        self,
+        lock_id: str,
+        owner: str,
+        fencing_token: Union[int, FencingToken],
+        ttl_seqs: int,
+        current_seq: int,
+    ) -> Optional[LockLease]:
+        """Extend the lease of ``lock_id`` by ``ttl_seqs`` seqs.
+
+        Returns the renewed ``LockLease`` (same fencing token, new expiry)
+        only when ``owner`` presents the *current* fencing token for a
+        *live* lease. A stale holder, a non-holder, or an expired lease is
+        refused with ``None`` and a ``lock-refused`` event -- the stale
+        holder must re-``acquire`` and take a fresh fencing token. Renewing
+        never mints a new token (the fencing token is per-grant).
+        """
+        lock_id = _check_text(lock_id, "lock_id")
+        owner = _check_text(owner, "owner")
+        if isinstance(fencing_token, FencingToken):
+            if fencing_token.lock_id != lock_id:
+                raise ValueError("fencing token names a different lock")
+            token_value = _check_token(fencing_token.token)
+        else:
+            token_value = _check_token(fencing_token)
+        ttl = _check_ttl(ttl_seqs)
+        now = _check_seq(current_seq, "current_seq")
+        with self._guard:
+            lease = self._leases.get(lock_id)
+            if lease is None:
+                self._record(
+                    LockEvent(
+                        kind=EVENT_REFUSED,
+                        lock_id=lock_id,
+                        owner=owner,
+                        token=token_value,
+                        seq=now,
+                        reason=_REASON_NO_SUCH_LOCK,
+                    )
+                )
+                return None
+            if lease.is_expired(now):
+                del self._leases[lock_id]
+                self._record(
+                    LockEvent(
+                        kind=EVENT_REFUSED,
+                        lock_id=lock_id,
+                        owner=owner,
+                        token=token_value,
+                        seq=now,
+                        reason=_REASON_ALREADY_EXPIRED,
+                    )
+                )
+                return None
+            current = lease.fencing_token.token
+            if token_value != current:
+                self._record(
+                    LockEvent(
+                        kind=EVENT_REFUSED,
+                        lock_id=lock_id,
+                        owner=owner,
+                        token=token_value,
+                        seq=now,
+                        reason=(
+                            _REASON_STALE_TOKEN
+                            if token_value < current
+                            else _REASON_BAD_TOKEN
+                        ),
+                    )
+                )
+                return None
+            if lease.owner != owner:
+                self._record(
+                    LockEvent(
+                        kind=EVENT_REFUSED,
+                        lock_id=lock_id,
+                        owner=owner,
+                        token=token_value,
+                        seq=now,
+                        reason=_REASON_NOT_HOLDER,
+                    )
+                )
+                return None
+            renewed = LockLease(
+                lock_id=lock_id,
+                owner=owner,
+                fencing_token=lease.fencing_token,
+                acquired_seq=lease.acquired_seq,
+                expiry_seq=now + ttl,
+            )
+            self._leases[lock_id] = renewed
+            self._record(
+                LockEvent(
+                    kind=EVENT_RENEWED,
+                    lock_id=lock_id,
+                    owner=owner,
+                    token=token_value,
+                    seq=now,
+                )
+            )
+            return renewed
 
     def is_locked(self, lock_id: str, current_seq: int) -> bool:
         """True when ``lock_id`` is held by an unexpired lease."""
