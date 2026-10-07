@@ -439,6 +439,12 @@ class DelegationToken:
     ``audience`` binds the token to its intended recipient (mandatum V9):
     a token minted for agent X cannot be presented by agent Y, even if Y
     somehow obtains it. Empty means unbound (legacy behavior).
+
+    ``depth`` is the delegation-chain depth: 0 for a root token, parent's
+    depth + 1 for each child. It is part of the signed body, so a token
+    cannot be re-labeled shallower than it was minted. ``verify_delegation_token``
+    enforces ``max_depth`` at verification time (abaxxlabs/agents v0.12.5
+    lesson: issuance-side enforcement alone is bypassable).
     """
 
     delegator_id: str
@@ -449,6 +455,7 @@ class DelegationToken:
     parent_hash: str = ""
     signature: str = ""
     audience: str = ""
+    depth: int = 0
 
     def _signing_body(self) -> dict[str, Any]:
         return {
@@ -459,6 +466,7 @@ class DelegationToken:
             "expires_at": self.expires_at,
             "parent_hash": self.parent_hash,
             "audience": self.audience,
+            "depth": self.depth,
         }
 
     def token_hash(self) -> str:
@@ -481,6 +489,7 @@ def mint_delegation_token(
     parent_token: DelegationToken | None = None,
     issued_at: float | None = None,
     audience: str = "",
+    max_depth: int | None = None,
 ) -> DelegationToken:
     """Mint a signed delegation token.
 
@@ -488,6 +497,12 @@ def mint_delegation_token(
     is given -- attenuation is enforced at mint time, not just verified.
 
     ``audience`` binds the token to its intended presenter (mandatum V9).
+
+    ``depth`` is 0 for a root, parent.depth + 1 for a child, and is
+    signature-bound. When ``max_depth`` is given, minting beyond it raises
+    -- but issuance is only half the story: ``verify_delegation_token``
+    enforces the same limit independently, because an issuance-side check
+    alone can be bypassed (abaxxlabs/agents v0.12.5).
     """
     if not delegator_id or not delegatee_id:
         raise ValueError("delegator_id and delegatee_id must be non-empty")
@@ -495,6 +510,7 @@ def mint_delegation_token(
         raise ValueError("delegator_seed must be a 32-byte Ed25519 seed")
     tool_tuple = tuple(sorted(set(tools)))
     parent_hash = ""
+    depth = 0
     if parent_token is not None:
         parent_tools = set(parent_token.tools)
         if not set(tool_tuple) <= parent_tools:
@@ -502,7 +518,14 @@ def mint_delegation_token(
                 f"delegation tools {tool_tuple} exceed parent scope {parent_token.tools}: "
                 "scope can only shrink"
             )
+        if not isinstance(parent_token.depth, int) or parent_token.depth < 0:
+            raise ValueError("parent token has malformed depth")
         parent_hash = parent_token.token_hash()
+        depth = parent_token.depth + 1
+    if max_depth is not None and depth > max_depth:
+        raise ValueError(
+            f"delegation depth {depth} exceeds max_depth {max_depth}"
+        )
     ts = time.time() if issued_at is None else float(issued_at)
     unsigned = DelegationToken(
         delegator_id=delegator_id,
@@ -512,6 +535,7 @@ def mint_delegation_token(
         expires_at=ts + float(ttl_seconds),
         parent_hash=parent_hash,
         audience=audience,
+        depth=depth,
     )
     try:
         from ed25519 import sign as ed_sign
@@ -530,17 +554,22 @@ def verify_delegation_token(
     expected_audience: str | None = None,
     revocation_oracle: Callable[[DelegationToken], bool] | None = None,
     expected_root_hash: str | None = None,
+    max_depth: int | None = None,
 ) -> bool:
     """Verify a delegation token's signature, expiry, parent binding, and more.
 
     Checks (mandatum V1-V9):
-    - signature: Ed25519 over the canonical body (covers audience too)
+    - signature: Ed25519 over the canonical body (covers audience and depth)
     - time: issued_at <= now <= expires_at
     - parent binding: parent_hash matches expected_parent_hash (if given)
     - audience: token.audience matches expected_audience (if given); a token
       without audience binding passes only when no audience is expected
     - revocation: revocation_oracle(token) True means revoked (if oracle given)
     - root: token_hash() matches expected_root_hash for root tokens (if given)
+    - depth: token.depth is a non-negative int; when max_depth is given,
+      depth > max_depth is rejected -- the limit is enforced here at
+      verification time, not only at issuance (abaxxlabs/agents v0.12.5:
+      issuance-only enforcement is bypassable)
 
     False on any defect; never raises.
     """
@@ -556,6 +585,13 @@ def verify_delegation_token(
             return False
         body = json.dumps(token._signing_body(), sort_keys=True).encode()
         if not bool(ed_verify(bytes(delegator_public_key), body, signature)):
+            return False
+        # Depth is signature-bound (part of the body), so a passing signature
+        # means the depth value is the minter's, not a forgery. Reject
+        # malformed depths fail-closed, then enforce the verifier's limit.
+        if not isinstance(token.depth, int) or isinstance(token.depth, bool) or token.depth < 0:
+            return False
+        if max_depth is not None and token.depth > max_depth:
             return False
         ts = time.time() if now is None else float(now)
         if not (token.issued_at <= ts <= token.expires_at):
