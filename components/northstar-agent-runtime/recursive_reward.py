@@ -10,6 +10,9 @@ a whole from the value of its parts:
 - :class:`RecursiveRewardEstimator` keeps a decomposition tree
   (task -> subtasks) and estimates a parent's reward by aggregating its
   children's estimates, so a human only ever rates leaves.
+- :class:`RecursiveReward` is the noun-API facade over the two above:
+  ``model()`` exposes the reward model, ``recurse()`` books one
+  decomposition step, ``evaluate()`` runs the recursion.
 
 Two honest-scope facts are load-bearing and repeated below:
 
@@ -420,6 +423,114 @@ class RecursiveRewardEstimator:
         )
 
 
+@dataclass(frozen=True)
+class RecursionRecord:
+    """One booked decomposition step: ``task_id`` aggregates ``subtasks``.
+
+    Leaf bindings (subtask id -> :class:`ActionFeatures`) are recorded
+    on the estimator, not here — the record pins the structure of the
+    step only. Subtask order is the caller's declared order.
+    """
+
+    task_id: str
+    subtasks: tuple[str, ...]
+    schema: str = REWARD_SCHEMA
+
+    def as_dict(self) -> dict[str, Any]:
+        return {
+            "task_id": self.task_id,
+            "subtasks": list(self.subtasks),
+            "schema": self.schema,
+        }
+
+
+class RecursiveReward:
+    """Noun-API facade for recursive reward modeling.
+
+    Wraps a :class:`RewardModel` and a :class:`RecursiveRewardEstimator`
+    behind the three verbs the spec asked for:
+
+    - ``model()`` returns the underlying reward model — train it with
+      :meth:`RewardModel.train_step` and :class:`HumanFeedback`;
+    - ``recurse(task_id, subtasks, leaf_features=None)`` books one
+      decomposition step: binds the given leaf subtasks to their
+      :class:`ActionFeatures`, then registers ``task_id`` as their
+      aggregation. Fail-closed on duplicate ids, self-decomposition,
+      cycles, and leaf bindings for ids that are not subtasks of this
+      step;
+    - ``evaluate(task_id)`` returns the recursive
+      :class:`DecompositionEstimate`. Fail-closed on unknown tasks.
+
+    Honest scope, unchanged from the module: this is a mechanical
+    preference ledger. A booked estimate is ledger truth, never an
+    authorization — a high score does not permit anything; gates still
+    decide. Rewards come from caller-supplied feedback and features
+    (GIGO); the recursion only aggregates what it is given.
+    """
+
+    def __init__(self, model: RewardModel | None = None) -> None:
+        if model is None:
+            model = RewardModel()
+        if not isinstance(model, RewardModel):
+            raise RewardError("RecursiveReward needs a RewardModel")
+        self._model = model
+        self._estimator = RecursiveRewardEstimator(model)
+        self._bound_leaves: set[str] = set()
+        self._composites: set[str] = set()
+
+    def model(self) -> RewardModel:
+        """Return the underlying reward model (train it with HumanFeedback)."""
+        return self._model
+
+    def recurse(
+        self,
+        task_id: str,
+        subtasks: Sequence[str],
+        leaf_features: Mapping[str, ActionFeatures] | None = None,
+    ) -> RecursionRecord:
+        """Book one decomposition step. Returns the frozen record."""
+        task_id = _check_id(task_id, "task_id")
+        if isinstance(subtasks, (str, bytes)) or not isinstance(subtasks, Sequence):
+            raise RewardError("subtasks must be a non-empty sequence of ids")
+        subs = tuple(_check_id(s, "subtask") for s in subtasks)
+        if not subs:
+            raise RewardError("recurse needs at least one subtask")
+        if task_id in self._composites or task_id in self._bound_leaves:
+            raise RewardError(f"task already registered: {task_id!r}")
+        leaf_features = leaf_features or {}
+        if not isinstance(leaf_features, Mapping):
+            raise RewardError("leaf_features must map subtask id to ActionFeatures")
+        for sid, feats in leaf_features.items():
+            sid = _check_id(sid, "leaf subtask id")
+            if sid not in subs:
+                raise RewardError(
+                    f"leaf binding {sid!r} is not a subtask of {task_id!r}"
+                )
+            if not isinstance(feats, ActionFeatures):
+                raise RewardError(f"leaf binding {sid!r} needs ActionFeatures")
+            if sid not in self._bound_leaves:
+                self._estimator.register_leaf(sid, feats)
+                self._bound_leaves.add(sid)
+        # Note: if this raises (duplicate subtasks, self-decomposition, a
+        # cycle), the tree is untouched — any leaves bound above remain
+        # legitimate standalone declarations.
+        self._estimator.register_decomposition(task_id, subs)
+        self._composites.add(task_id)
+        return RecursionRecord(task_id=task_id, subtasks=subs)
+
+    def evaluate(self, task_id: str) -> DecompositionEstimate:
+        """Recursive (score, confidence) estimate. Fail-closed on unknown tasks."""
+        return self._estimator.estimate(task_id)
+
+    def bound_leaf_ids(self) -> tuple[str, ...]:
+        """Ids currently bound to leaf features, sorted. Pure view."""
+        return tuple(sorted(self._bound_leaves))
+
+    def composite_ids(self) -> tuple[str, ...]:
+        """Ids currently registered as composites, sorted. Pure view."""
+        return tuple(sorted(self._composites))
+
+
 def reward_audit_event(
     kind: str, task_id: str, score: float, confidence: float, seq: int
 ) -> dict[str, Any]:
@@ -465,6 +576,26 @@ def main() -> None:
     )
     event = reward_audit_event("estimate", "handle-inbox", estimate.score, estimate.confidence, 2)
     assert event["kind"] == "reward.estimate"
+    # Spec noun-API smoke: model / recurse / evaluate.
+    facade = RecursiveReward()
+    facade.model().train_step(
+        HumanFeedback("fb-2", 3, preferred=features_a, other=features_b)
+    )
+    record = facade.recurse(
+        "handle-inbox-2",
+        ("write-email-2", "send-email-2"),
+        {"write-email-2": features_a, "send-email-2": features_b},
+    )
+    assert record.task_id == "handle-inbox-2"
+    assert record.subtasks == ("write-email-2", "send-email-2")
+    assert facade.bound_leaf_ids() == ("send-email-2", "write-email-2")
+    assert facade.composite_ids() == ("handle-inbox-2",)
+    estimate2 = facade.evaluate("handle-inbox-2")
+    assert not estimate2.leaf
+    assert estimate2.confidence == min(
+        facade.evaluate("write-email-2").confidence,
+        facade.evaluate("send-email-2").confidence,
+    )
     print("recursive-reward OK: preference learned, recursion aggregated, confidence min-propagated")
 
 
