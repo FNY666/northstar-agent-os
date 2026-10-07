@@ -322,6 +322,17 @@ MANIFEST: dict[str, tuple[str, ...]] = {
         "wireheading", "witness_enc", "workflow_automation", "workflow_engine",
         "workflow_orchestration", "write_ahead_log", "write_through_cache", "zab_interface",
         "zero_knowledge", "zeromq_patterns", "zk_interface", "zk_verifier",
+        "alerting_rules", "approval_fatigue_probes", "argument_smuggling_probes", "artifact_graph_probes",
+        "ask_or_solve_probes", "benchmark_retirement_probes", "capacity_planning", "chaos_engineering",
+        "commerce_mandate_probes", "constraint_synthesis_probes", "cost_optimization", "counterfactual_explanation_probes",
+        "destructive_prefix_probes", "distributed_tracing", "enforcement_gap_probes", "evidence_aging_probes",
+        "evidence_compaction_probes", "history_deviation_probes", "incident_management", "log_aggregation",
+        "memory_admission_probes", "metrics_collection", "monitor_channel_probes", "monitor_deafness_probes",
+        "multi_axis_autonomy_probes", "negotiation_corpus_probes", "oncall_rotation", "per_action_autonomy_probes",
+        "plan_injection_probes", "planner_executor_seam_probes", "pre_completion_signal_probes", "privilege_at_recall_probes",
+        "refusal_pattern_probes", "resource_tagging", "run_assert_eval_probes", "runbook_automation",
+        "self_modification_probes", "self_referential_trust_probes", "sleeper_agent_probes", "stale_plan_probes",
+        "status_page", "tool_schema_digest_probes", "trace_tamper_probes", "trust_inversion_probes",
     ),
 }
 
