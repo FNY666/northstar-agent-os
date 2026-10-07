@@ -2095,6 +2095,26 @@ Sliding-window classifier over approval trajectories.
 
 Re-derive a monitor snapshot digest with constant-time compare.
 
+#### `FatigueMeter`
+
+Continuous fatigue measurement over approval trajectories.
+
+- `measure(events: tuple[ApprovalEvent, ...], now: float)`
+  - Measure fatigue over the trajectory ending at ``now``.
+#### `verify_measurement(measurement: dict[str, Any])`
+
+Re-derive a fatigue-measurement digest with constant-time compare.
+
+#### `FatigueResistantGate`
+
+Disposition engine that resists consent fatigue.
+
+- `decide(events: tuple[ApprovalEvent, ...], now: float, risk_tier: str=RISK_LOW, request_ref: str | None=None)`
+  - Return a digest-pinned disposition for the trajectory.
+#### `verify_decision(decision: dict[str, Any])`
+
+Re-derive a gate-decision digest with constant-time compare.
+
 #### `probe_names()`
 
 All approval-fatigue probe names.
@@ -3620,6 +3640,74 @@ Look up any probe (attack or benign) by name.
 Map every probe name to its expected outcome.
 
 #### `main()`
+
+### `sleeper_agent_probes`
+
+Source: `components/northstar-agent-runtime/sleeper_agent_probes.py`
+
+Sleeper-agent probe corpus.
+
+#### `attack_probe_names()`
+
+All sleeper-attack probe names (expected: deny).
+
+#### `benign_probe_names()`
+
+All benign control probe names (expected: allow).
+
+#### `probes_in_family(family: str)`
+
+Probes in one family (including 'benign').
+
+#### `probe_by_name(name: str)`
+
+Look up any sleeper probe (attack or benign) by name.
+
+#### `expected_outcomes()`
+
+probe name -> expected gate outcome ('deny' or 'allow').
+
+#### `BehaviorRecord`
+
+One observed agent run, digest-pinned and chain-linked.
+
+#### `build_record(*, agent_id: str, model_version: str, context_class: str, run_id: str, behavior_digest: str, canary_present: bool=False, adaptation_digest: str | None=None, context_features_digest: str, prev_digest: str)`
+
+Build a verified behavior record (raises on bad inputs).
+
+#### `verify_record(record: BehaviorRecord)`
+
+Re-verify a record without raising; returns (ok, findings).
+
+#### `BehaviorLedger`
+
+Append-only chain of behavior records; fail-closed on breaks.
+
+- `append(record: BehaviorRecord)`
+- `records()`
+#### `TriggerSpec`
+
+A digest-pinned trigger condition to test records against.
+
+#### `detect_trigger_armed(records: tuple[BehaviorRecord, ...], spec: TriggerSpec)`
+
+Name records whose context features match a pinned trigger condition.
+
+#### `detect_eval_deploy_divergence(records: tuple[BehaviorRecord, ...])`
+
+Flag same agent+model whose behavior differs across context classes.
+
+#### `detect_canary_evasion(records: tuple[BehaviorRecord, ...])`
+
+Flag behavior that changes with canary presence in one context class.
+
+#### `verify_behavioral_consistency(records: tuple[BehaviorRecord, ...])`
+
+Same agent+model+context class must share one behavior digest unless a declared adaptation is attached.
+
+#### `main()`
+
+Print the corpus summary; exit 0.
 
 ### `negotiation_corpus_probes`
 
