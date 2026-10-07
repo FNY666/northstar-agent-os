@@ -4519,6 +4519,617 @@ Create a structured challenge for Ed25519 challenge-response.
 
 Verify a challenge-response: signature valid, challenge fresh.
 
+### `identity_disclosure`
+
+Source: `components/northstar-agent-runtime/identity_disclosure.py`
+
+Identity disclosure for user-facing agent flows.
+
+#### `DisclosureError`
+
+Raised when a disclosure artifact cannot be built (caller bug).
+
+#### `DisclosureRequirement`
+
+Deployment policy for identity disclosure, per agent or per flow.
+
+#### `must_disclose(context: str)`
+
+Return True when ``context`` is user-facing and disclosure is required.
+
+#### `disclosure_decision(requirement: DisclosureRequirement, context: str, *, on_request: bool=False)`
+
+Combine deployment policy with the context rule into one decision.
+
+#### `IdentityCard`
+
+The disclosable facts about one agent.
+
+- `as_dict()`
+- `digest()`
+  - Content digest of the card (what the log pins).
+#### `format_disclosure(card: IdentityCard)`
+
+Render a human-readable disclosure string for ``card``.
+
+#### `DisclosureRecord`
+
+One disclosure event: what was disclosed, where, in what order.
+
+- `record_digest()`
+  - Digest of this record (what the next record's prev_digest pins).
+- `as_dict()`
+#### `DisclosureLog`
+
+Append-only log of disclosures made.
+
+- `append(record: DisclosureRecord)`
+  - Append one record, enforcing seq order and chain continuity.
+- `disclose(card: IdentityCard, context: str, *, seq: int)`
+  - Make a disclosure: format the string and log the event.
+- `records()`
+- `records_for(agent_name: str)`
+  - All disclosures made for one agent, in log order.
+- `verify_chain()`
+  - Re-verify seq order and hash linkage over the whole log.
+#### `disclosure_audit_events(record: DisclosureRecord, *, note: str='')`
+
+Audit events for one disclosure.
+
+### `kill_switch`
+
+Source: `components/northstar-agent-runtime/kill_switch.py`
+
+Host kill switch with rollback points (WAAL liability).
+
+#### `RollbackPoint`
+
+A content-addressed snapshot of host state.
+
+- `as_dict()`
+#### `RollbackRecord`
+
+One executed rollback: from-state pinned, to-state pinned, chained.
+
+- `as_dict()`
+#### `LiabilityRecord`
+
+WAAL liability entry: who did what to the switch, and the digest of the state that resulted. Chained via ``prev_digest``.
+
+- `as_dict()`
+#### `KillSwitch`
+
+The host's emergency brake, persisted to ``path``.
+
+- `is_armed` (property)
+- `is_triggered` (property)
+- `current_state_hash` (property)
+  - The state hash the switch currently pins (None until the first rollback point is created).
+- `check()`
+  - Gate hook: ``(True, "allow")`` normally, ``(False, "kill-switch-triggered")`` once triggered. Never raises.
+- `arm(reason: str, *, seq: int)`
+  - Arm the switch. Returns True on transition, False if already armed. Refuses (ValueError) while triggered — recovery goes through ``rollback()``.
+- `trigger(*, reason: str='', seq: int=0)`
+  - Slam the brake shut. Idempotent: returns True on the transition, False if already triggered. Works from armed *or* disarmed — an emergency brake must always fire.
+- `disarm(*, reason: str='', seq: int=0)`
+  - Stand the switch down. Returns True on armed -> disarmed, False if already disarmed. Refuses (ValueError) while triggered.
+- `create_rollback_point(state: Mapping[str, Any], *, reason: str, seq: int)`
+  - Snapshot ``state``: pin ``sha256(canonical_json(state))`` as a rollback point. Allowed in any switch state (a snapshot is never an action).
+- `rollback_points()`
+  - All rollback points, oldest first.
+- `rollback(point_id: str, *, reason: str, seq: int)`
+  - Recover from a triggered kill switch by rolling back to ``point_id``.
+- `rollback_log()`
+  - All executed rollbacks, oldest first.
+- `liability_log()`
+  - WAAL liability chain, oldest first.
+- `verify_liability_chain()`
+  - Recompute every liability digest and link. Never raises on well-formed input; returns ``(True, "ok")`` or ``(False, reason)``.
+### `skill_wiring`
+
+Source: `components/northstar-agent-runtime/skill_wiring.py`
+
+Skill and code-mode per-call wiring: authorization + budget in the path.
+
+#### `SkillWiringError`
+
+Base error for skill-wiring misuse (bad policy, unknown skill, ...).
+
+#### `UnauthorizedCall`
+
+The call was denied by the authorization policy.
+
+#### `BudgetExhausted`
+
+The call was denied because the budget is exhausted.
+
+#### `ClosedSession`
+
+An operation was attempted on a closed code-mode session.
+
+#### `SkillCall`
+
+One invocation of a skill, before authorization.
+
+- `as_dict()`
+#### `args_digest(args: Any)`
+
+Deterministic hex digest of canonicalized call arguments.
+
+#### `SkillPolicy`
+
+Per-skill authorization policy.
+
+#### `SkillRegistry`
+
+Maps skill names to their authorization policies.
+
+- `register(policy: SkillPolicy)`
+- `policy_for(skill_name: str)`
+- `known_skills()`
+#### `authorize_skill_call(call: SkillCall, policy: SkillPolicy | None)`
+
+Return True only if the call is authorized.
+
+#### `CallBudget`
+
+Per-session spend envelope for skill and code-mode calls.
+
+- `try_charge(amount_usd: float)`
+  - Charge the budget; return False (deny) if the ceiling would break.
+- `remaining` (property)
+- `exhausted` (property)
+#### `SkillDecision`
+
+Authorized + budgeted decision for one skill call.
+
+#### `decide_skill_call(call: SkillCall, registry: SkillRegistry, budget: CallBudget)`
+
+Authorize then charge; the budget is only touched when authorized.
+
+#### `CodeModeSession`
+
+A code-execution session where every execute() is gated.
+
+- `caller_id` (property)
+- `executed_count` (property)
+- `closed` (property)
+- `execute(code: str)`
+  - Run code through authorization + budget, then the host executor.
+- `close()`
+#### `make_default_registry(skills: Mapping[str, Mapping[str, Any]] | None=None, *, code_mode_callers: tuple[str, ...]=(), code_mode_cost_usd: float=CODE_MODE_COST_USD)`
+
+Build a registry from a plain spec dict.
+
+### `planner_gates`
+
+Source: `components/northstar-agent-runtime/planner_gates.py`
+
+Planner gates: subgoal ceiling, plan proposal, and critic-gated planning.
+
+#### `PlanError`
+
+Base class for plan-construction errors. Never raised directly.
+
+#### `TooManySubgoals`
+
+Raised when a proposal exceeds ``MAX_SUBGOALS``.
+
+#### `InvalidPlan`
+
+Raised when a proposal is structurally invalid.
+
+#### `Subgoal`
+
+One step of a plan.
+
+- `as_dict()`
+#### `PlanProposal`
+
+A planner's proposal: one goal, a bounded list of subgoals, a step estimate.
+
+- `as_dict()`
+- `subgoal_ids()`
+#### `propose_plan(goal: str, subgoals: Iterable[Subgoal], estimated_steps: int)`
+
+Build a validated :class:`PlanProposal`.
+
+#### `CriticVerdict`
+
+The critic's verdict on a plan proposal.
+
+#### `CriticReview`
+
+The critic's verdict plus machine-readable reasons.
+
+- `as_dict()`
+#### `find_cycle(subgoals: Sequence[Subgoal])`
+
+Return one dependency cycle as a tuple of subgoal ids, or ``None``.
+
+#### `Critic`
+
+Structural critic for plan proposals.
+
+- `review(plan: PlanProposal)`
+- `plan_is_runnable(plan: PlanProposal)`
+  - True only when the critic approves the plan outright.
+#### `gate_plan(plan: PlanProposal, critic: Critic | None=None)`
+
+Convenience gate: run the critic and return its review.
+
+### `failure_bundle`
+
+Source: `components/northstar-agent-runtime/failure_bundle.py`
+
+Production failure bundles with incident state and recovery.
+
+#### `IncidentState`
+
+Incident states of a production run. The value is the wire form.
+
+#### `FailureBundleError`
+
+Malformed bundle input or illegal incident-state transition.
+
+#### `FailureBundle`
+
+A frozen, digest-pinned record of one production failure.
+
+- `as_dict()`
+#### `bundle_digest(bundle: FailureBundle)`
+
+Deterministic sha256 hex digest of a bundle (canonical JSON).
+
+#### `verify_bundle_digest(bundle: FailureBundle, expected: str)`
+
+Constant-time check that ``bundle`` pins to ``expected`` digest.
+
+#### `StateTransition`
+
+One append-only entry of the incident state log.
+
+#### `IncidentManager`
+
+Owns the incident state machine for one production run.
+
+- `state` (property)
+- `active_bundle` (property)
+- `transitions()`
+- `archived_bundles()`
+- `degrade(reason: str, *, seq: int)`
+  - Move ``NORMAL`` to ``DEGRADED`` (partial failure, still serving).
+- `report_failure(failed_action: str, error: str, *, state_snapshot_hash: str, stack_context: str='', seq: int)`
+  - Capture a failure bundle and transition to ``FAILED``.
+- `begin_recovery(reason: str, *, seq: int)`
+  - Move ``FAILED``/``DEGRADED`` to ``RECOVERING``.
+- `complete_recovery(reason: str, *, seq: int)`
+  - Move ``RECOVERING`` to ``NORMAL`` and archive the bundle.
+#### `main()`
+
+### `edge_gate`
+
+Source: `components/northstar-agent-runtime/edge_gate.py`
+
+Physical/irreversible dispatch edge gate: a human at the boundary.
+
+#### `ActionRisk`
+
+Risk tier of an action. Ordered by restrictiveness.
+
+#### `classify_action(action: Any)`
+
+Classify an action into a risk tier. Never raises.
+
+#### `action_digest(action: Mapping[str, Any])`
+
+Digest pin binding a confirmation to one specific action.
+
+#### `HumanConfirmation`
+
+A human's decision on one specific action.
+
+- `bind(action: Mapping[str, Any], requested_seq: int, confirmed: bool, confirmed_by: str)`
+  - Build a confirmation with the action digest pin filled in.
+- `as_dict()`
+#### `EdgeDecision`
+
+The gate's verdict on one action, with the reason attached.
+
+- `as_dict()`
+#### `EdgeGate`
+
+Dispatch-time edge gate for physical/irreversible actions.
+
+- `irreversible_allowlist` (property)
+- `check(action: Any, context: Mapping[str, Any] | None=None, *, seq: int=0)`
+  - Dispatch-time verdict: ``"allow"``, ``"deny"``, or ``"require_human"``. Never raises on any input.
+- `check_detailed(action: Any, context: Mapping[str, Any] | None=None, *, seq: int=0)`
+  - Same as :meth:`check` but returns the full decision record.
+- `resolve(action: Mapping[str, Any], confirmation: HumanConfirmation, *, current_seq: int)`
+  - Apply a human confirmation to a gated action. Never raises.
+#### `edge_gate_event(decision: EdgeDecision, *, confirmation: HumanConfirmation | None=None, seq: int=0)`
+
+Audit record for a gate verdict, shaped for ``audit.ndjson/1``.
+
+#### `main()`
+
+### `compaction_masking`
+
+Source: `components/northstar-agent-runtime/compaction_masking.py`
+
+Observation masking for conversation compaction.
+
+#### `mask_observations(text: str)`
+
+Replace sensitive spans in ``text`` with typed redaction markers.
+
+#### `mask_report(text: str)`
+
+Mask ``text`` and return ``(masked_text, counts_by_type)``.
+
+#### `MaskedHistory`
+
+A history approved for compaction, with its transparency record.
+
+- `total_redactions` (property)
+- `as_dict()`
+#### `CompactionGate`
+
+Masks sensitive observations before a history may be compacted.
+
+- `approve_for_compaction(history: Sequence[str])`
+### `memory_bitemporal`
+
+Source: `components/northstar-agent-runtime/memory_bitemporal.py`
+
+Bitemporal memory record model with supersession and decay.
+
+#### `MemoryRecord`
+
+One bitemporal memory record. Immutable once minted.
+
+- `is_current()`
+  - True when the record is still valid and not expired.
+- `valid_at(at_seq: int)`
+  - True when this record's valid interval covers ``at_seq``.
+- `as_dict()`
+#### `MemoryNotFoundError`
+
+Raised when a record id is unknown to the store.
+
+#### `MemorySupersedeError`
+
+Raised when a supersede request is invalid (fail-closed).
+
+#### `BitemporalMemoryStore`
+
+In-memory bitemporal store with supersession and decay.
+
+- `get(record_id: str)`
+  - Return the record, or raise ``MemoryNotFoundError``.
+- `write(content: str, txn_seq: int, *, valid_from_seq: int | None=None)`
+  - Write a new independent record (no supersession link).
+- `supersede(old_id: str, new_content: str, txn_seq: int, *, valid_from_seq: int | None=None)`
+  - Replace ``old_id`` with a new record carrying ``new_content``.
+- `get_valid(at_seq: int)`
+  - All non-expired records whose valid interval covers ``at_seq``.
+- `get_current()`
+  - All records that are still valid and not expired.
+- `history(record_id: str)`
+  - The full supersession chain containing ``record_id``.
+- `access(record_id: str, at_seq: int)`
+  - Record an access: refresh ``last_accessed_seq`` (anti-decay).
+- `apply_decay(current_seq: int, decay_threshold: int)`
+  - Expire current records idle longer than ``decay_threshold``.
+#### `main()`
+
+### `signed_receipt_reflux`
+
+Source: `components/northstar-agent-runtime/signed_receipt_reflux.py`
+
+Signed receipt reflux: closing the approval loop.
+
+#### `ReceiptError`
+
+A malformed receipt or a receipt programming error.
+
+#### `SignedReceipt`
+
+A signed authorization for one queued approval request.
+
+- `as_dict()`
+  - JSON-safe dict (signature hex-encoded).
+#### `issue_receipt(request_id: str, action: str, approver: str, approved_at_seq: int, approver_secret: bytes)`
+
+Mint and sign a receipt for an approved request.
+
+#### `verify_receipt(receipt: Any, approver_pubkey: bytes)`
+
+Verify a receipt's signature. Fail-closed: never raises.
+
+#### `RefluxChannel`
+
+In-memory delivery queue: approver -> decision point.
+
+- `deliver(receipt: SignedReceipt)`
+  - Enqueue a receipt. Returns False (refused) if a receipt for this request id is already queued. Never raises on a well-formed receipt; raises :class:`ReceiptError` on a non-receipt.
+- `peek(request_id: str)`
+  - Inspect the queued receipt without consuming it.
+- `collect(request_id: str)`
+  - Take the receipt for ``request_id``, removing it from the queue. Returns None when nothing is queued.
+- `pending()`
+  - Request ids with undelivered-to-decision-point receipts.
+#### `authorize_action(receipt: Any, approver_pubkey: bytes, expected_request_id: str, expected_action: str)`
+
+Decision-point gate: is this action authorized?
+
+#### `receipt_digest(receipt: SignedReceipt)`
+
+Stable ``sha256:`` hex digest of a receipt's signed body.
+
+#### `main()`
+
+Self-check: mint, deliver, collect, authorize.
+
+### `per_call_budget`
+
+Source: `components/northstar-agent-runtime/per_call_budget.py`
+
+Per-call budget enforcement for model/tool/memory calls.
+
+#### `BudgetExhausted`
+
+Raised when a call does not fit the budget.
+
+#### `CallCharge`
+
+One recorded per-call charge.
+
+#### `PerCallBudget`
+
+Per-call gate over a run :class:`budget.Budget`.
+
+- `check_and_charge(call_type: str, estimated_cost_usd: float)`
+  - Estimate-check a call and charge it when it fits.
+- `observe_model(usage: Any, model: str)`
+  - Reconcile a model call's actual provider-reported cost.
+- `total_spent_usd` (property)
+- `remaining` (property)
+- `exhausted` (property)
+- `charges_for(call_type: str)`
+  - All recorded charges of one call type, in order.
+- `as_dict()`
+### `memory_admission`
+
+Source: `components/northstar-agent-runtime/memory_admission.py`
+
+Memory write admission with consent (cookie-analog).
+
+#### `MemoryAdmissionError`
+
+A consent object or admission step failed validation. Raised, never silent.
+
+#### `check_retention(granted_at: int, retention_days: int, current_seq: int)`
+
+Return True when a consent grant is expired at ``current_seq``.
+
+#### `MemoryConsent`
+
+A revocable, scoped, expiring grant to write to memory.
+
+- `expired(current_seq: int)`
+  - True when this grant is expired at ``current_seq``.
+- `covers(category: str)`
+  - True when ``category`` is inside this grant's scope.
+- `revoke()`
+  - Return a revoked copy of this grant (the original is frozen).
+- `as_dict()`
+#### `AdmissionDecision`
+
+One recorded write-admission verdict.
+
+- `as_dict()`
+#### `MemoryAdmission`
+
+Write-time memory admission under consent. Fail-closed.
+
+- `set_consent(consent: MemoryConsent | None)`
+  - Install (or clear) the default consent used by ``admit_write``.
+- `revoke_consent()`
+  - Revoke the default consent in place and return the revoked grant.
+- `decisions()`
+  - The recorded verdicts, oldest first.
+- `denied()`
+  - The recorded denials, oldest first.
+- `admit_write(category: Any, content: Any, consent: MemoryConsent | None=None, current_seq: int | None=None)`
+  - Admit (True) or refuse (False) a memory write. Fail-closed.
+#### `main()`
+
+### `mcp_drift_monitor`
+
+Source: `components/northstar-agent-runtime/mcp_drift_monitor.py`
+
+MCP tools/list drift monitoring: snapshot the tool surface, diff it every call.
+
+#### `DriftType`
+
+Fixed vocabulary for what changed between two tool snapshots.
+
+#### `ToolPin`
+
+Digest-pinned record of one tool as advertised by ``tools/list``.
+
+- `as_dict()`
+#### `McpToolSnapshot`
+
+Immutable snapshot of one ``tools/list`` response.
+
+- `tool_names()`
+- `pin_for(name: str)`
+- `as_dict()`
+#### `ToolDrift`
+
+One detected difference between two snapshots.
+
+- `as_dict()`
+#### `snapshot_tools(server: str, tools_list: Sequence[Mapping[str, Any]])`
+
+Pin a ``tools/list`` response into an immutable snapshot.
+
+#### `detect_drift(old: McpToolSnapshot, new: McpToolSnapshot)`
+
+Diff two snapshots; empty tuple means the surface is unchanged.
+
+#### `is_sensitive_tool(name: str)`
+
+True when the tool name marks security-sensitive capability.
+
+#### `DriftAssessment`
+
+Fail-closed verdict for one drift check.
+
+- `as_dict()`
+#### `assess_drift(drifts: Sequence[ToolDrift])`
+
+Apply the fail-closed policy to a drift list.
+
+#### `check_tools_list(server: str, baseline: McpToolSnapshot, tools_list: Sequence[Mapping[str, Any]])`
+
+One-call convenience: snapshot the response, diff, assess.
+
+#### `main()`
+
+### `approval_sla`
+
+Source: `components/northstar-agent-runtime/approval_sla.py`
+
+SLA-bound approval queue for abstain-to-human escalation.
+
+#### `ApprovalRequest`
+
+One approval request parked for a human decision.
+
+#### `ApprovalQueue`
+
+SLA-bound intake queue for abstain-to-human escalation.
+
+- `enqueue(action: str, reason: str, sla_seconds: int, current_seq: int)`
+  - Park an action for human approval.
+- `get(request_id: str)`
+  - Return the stored record. Raises ``KeyError`` if unknown.
+- `poll(request_id: str, current_seq: int)`
+  - Observe a request's status at ``current_seq``.
+- `decide(request_id: str, approved: bool, decider: str)`
+  - Record a human decision. Only pending requests can be decided.
+- `pending()`
+  - Requests still awaiting a decision (not yet expired).
+- `expired()`
+  - Requests whose SLA lapsed with no decision (fail closed).
+- `decided()`
+  - Requests with a recorded human decision.
+#### `main()`
+
 ### `agri`
 
 Source: `components/northstar-agent-runtime/agri.py`
@@ -12148,6 +12759,20 @@ Build the minimal offline head anchor for a feed file.
 
 Check a feed file against a previously built anchor manifest.
 
+#### `DurableAuditWriter`
+
+Append-only, crash-durable writer for a chained audit NDJSON feed.
+
+- `prev_hash` (property)
+  - The ``chain_hash`` the next appended record will link to (None on a fresh feed).
+- `records` (property)
+  - Number of chained records currently in the file (valid prefix).
+- `append(record: dict[str, Any], *, durable: bool | None=None)`
+  - Seal ``record`` onto the chain and durably append it.
+- `flush()`
+  - fsync the file descriptor (durable barrier without appending).
+- `close()`
+  - Close the underlying file descriptor.
 ### `delegation_credentials`
 
 Source: `components/northstar-agent-runtime/delegation_credentials.py`
