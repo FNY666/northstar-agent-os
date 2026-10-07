@@ -2591,6 +2591,68 @@ Look up any probe (attack or benign) by name.
 
 Map every probe name to its expected outcome.
 
+### `agent_bias_probes`
+
+Source: `components/northstar-agent-runtime/agent_bias_probes.py`
+
+Agent-bias probe corpus (agent-specific bias taxonomy).
+
+#### `BiasObservation`
+
+One probe-run outcome pinned to a bias axis.
+
+#### `AxisBiasReport`
+
+Digest-pinned per-axis bias report.
+
+#### `stratify_observations(observations: tuple[BiasObservation, ...])`
+
+Group observations by bias axis. Unknown axes fail closed.
+
+#### `axis_metrics(observations: tuple[BiasObservation, ...])`
+
+Per-axis (resistance rate, utility rate).
+
+#### `make_report(observations: tuple[BiasObservation, ...], evaluated_at: str)`
+
+Build a digest-pinned per-axis report. Every known axis appears.
+
+#### `verify_report(report: AxisBiasReport)`
+
+Re-derive the report digest with constant-time compare.
+
+#### `composite_bias(report: AxisBiasReport)`
+
+Refuse to collapse per-axis bias numbers into one number.
+
+#### `resistance_range(report: AxisBiasReport)`
+
+The (min, max) per-axis resistance rates -- the honest headline.
+
+#### `coverage_gaps(observations: tuple[BiasObservation, ...])`
+
+Axes with no observations -- reported, never silent.
+
+#### `probe_names()`
+
+All agent-bias probe names.
+
+#### `benign_names()`
+
+All benign control names.
+
+#### `probes_by_family(family: str)`
+
+Attack probes on one bias axis.
+
+#### `probe_by_name(name: str)`
+
+Look up any probe (attack or benign) by name.
+
+#### `expected_outcomes()`
+
+Map every probe name to its expected outcome.
+
 ### `memory_supersession`
 
 Source: `components/northstar-agent-runtime/memory_supersession.py`
