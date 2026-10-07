@@ -141,6 +141,8 @@ MANIFEST: dict[str, tuple[str, ...]] = {
         "judge_calibration",
         "enforcement_gap_probes",
         "counterfactual_explanation_probes",
+        "artifact_graph_probes",
+        "ask_or_solve_probes",
         "self_referential_trust_probes",
         "trace_tamper_probes",
         "self_replication_probes",

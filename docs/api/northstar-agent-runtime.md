@@ -2877,6 +2877,159 @@ CHIVE-style simulatability: can the explanation predict the gate?
 
 Build a rule table from ``counterfactual.py``'s RULE_EXPLANATIONS.
 
+### `artifact_graph_probes`
+
+Source: `components/northstar-agent-runtime/artifact_graph_probes.py`
+
+Artifact-graph probes: lineage forgery / graph diagnosis / artifact integrity.
+
+#### `ArtifactNode`
+
+One artifact in the lineage graph: content pinned, parents linked.
+
+#### `build_node(artifact_id: str, content_digest: str, parent_digests: tuple[str, ...] | list[str], producer: str, kind: str, provenance_domain: str)`
+
+Build a node and pin its digest over the sealed body.
+
+#### `verify_node(node: ArtifactNode)`
+
+Recompute the node's digest; constant-time compare. Never raises.
+
+#### `ArtifactGraph`
+
+Append-only artifact lineage graph. Fail-closed on bad nodes.
+
+- `add_node(node: ArtifactNode)`
+  - Append a node. Raises on unverifiable nodes or duplicates.
+- `get(digest: str)`
+- `digests()`
+#### `verify_graph_integrity(graph: ArtifactGraph)`
+
+Verify every node and link. Returns (ok, findings). Never raises.
+
+#### `lineage_walk(graph: ArtifactGraph, node_digest: str)`
+
+Transitive ancestors of ``node_digest`` (oldest last), cycle-guarded.
+
+#### `diagnose(graph: ArtifactGraph, outcome_digest: str)`
+
+Graph-based diagnosis of a bad outcome.
+
+#### `graph_head_digest(graph: ArtifactGraph)`
+
+Head digest for out-of-band anchoring of the whole graph.
+
+#### `probe_names()`
+
+All artifact-graph attack probe names.
+
+#### `benign_names()`
+
+All benign control names.
+
+#### `probes_by_family(family: str)`
+
+Attack probes in one family.
+
+#### `probe_by_name(name: str)`
+
+Look up any probe (attack or benign) by name.
+
+#### `expected_outcomes()`
+
+Map every probe name to its expected outcome.
+
+### `ask_or_solve_probes`
+
+Source: `components/northstar-agent-runtime/ask_or_solve_probes.py`
+
+Ask-or-solve probes: first-class questioning under uncertainty.
+
+#### `probe_names()`
+
+All probe names in the corpus.
+
+#### `attack_names()`
+
+Names of the attack probes (expected deny).
+
+#### `benign_names()`
+
+Names of the benign control probes (expected allow).
+
+#### `probe_by_name(name: str)`
+
+Look up one probe by name; raises KeyError fail-closed.
+
+#### `probe_invokes_deny_side(probe: Mapping[str, Any])`
+
+True if the probe's gate_interaction names an active deny-side mechanism.
+
+#### `ClarificationQuestion`
+
+One candidate clarification question, pinned and gateable.
+
+- `verify()`
+  - Recompute the digest; a tampered question fails closed.
+#### `QuestionFinding`
+
+One gate finding over a question.
+
+- `as_dict()`
+#### `check_scope_minimality(question: ClarificationQuestion)`
+
+The question may only request declared-needed fields.
+
+#### `check_axis_binding(question: ClarificationQuestion)`
+
+Every question must name the uncertainty axis it reduces.
+
+#### `check_no_leading(question: ClarificationQuestion)`
+
+The question must not recommend, propose an answer, or confirm a risk.
+
+#### `check_no_silence_consent(question: ClarificationQuestion)`
+
+The question must not frame non-objection as approval.
+
+#### `check_no_confirmation_laundering(question: ClarificationQuestion)`
+
+A question about a risky action must not substitute for the receipt path.
+
+#### `gate_question(question: ClarificationQuestion)`
+
+Run all question gates. Verdict is a conjunction, never a score.
+
+#### `AskDecision`
+
+One pinned ask/solve/abstain decision.
+
+- `verify()`
+- `open_axes` (property)
+  - Declared axes no real answer has closed.
+- `as_dict()`
+#### `AskPolicy`
+
+Confidence bands for the ask decision, in the abstain_threshold spirit.
+
+#### `decide_next(*, decision_id: str, confidence: float, uncertainty_axes: Sequence[str]=(), answered_axes: Sequence[str]=(), questions_asked: int=0, policy: AskPolicy | None=None, reason: str='')`
+
+Route one uncertainty state to solve / ask / abstain. Fail-closed.
+
+#### `DialogueSession`
+
+Append-only record of one ask/solve/abstain dialogue.
+
+- `ask(question: ClarificationQuestion)`
+  - Gate a question and, if it passes, append it. Fail-closed.
+- `record(decision: AskDecision)`
+  - Append a pinned decision to the session.
+- `report()`
+  - Per-question, per-gate evidence. No composite score, ever.
+#### `requires_human_path(decision: AskDecision)`
+
+Whether an AskDecision must take the abstain_threshold human path.
+
 ### `self_referential_trust_probes`
 
 Source: `components/northstar-agent-runtime/self_referential_trust_probes.py`
