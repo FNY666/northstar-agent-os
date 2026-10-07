@@ -3217,6 +3217,96 @@ Map every probe name to its expected outcome.
 
 Print the corpus summary: attack/benign counts and family listing.
 
+### `multi_axis_autonomy_probes`
+
+Source: `components/northstar-agent-runtime/multi_axis_autonomy_probes.py`
+
+Multi-axis autonomy representation probes (per-axis risk reporting, no composite scores).
+
+#### `MultiAxisAutonomyError`
+
+An axis reading, profile, policy, or verdict that refuses to be built.
+
+#### `AxisReading`
+
+One measured risk axis for one action.
+
+- `pinned()`
+  - Return a copy with the digest pin computed.
+- `verify()`
+  - Recompute the pin; constant-time compare, never raises.
+#### `AxisProfile`
+
+The complete per-axis risk profile for one action.
+
+- `reading_for(axis: str)`
+  - The reading for one axis.
+- `pinned()`
+  - Return a copy with the digest pin computed over all readings.
+- `verify()`
+  - Recompute the pin; constant-time compare, never raises.
+#### `AxisPolicy`
+
+Per-axis risk ceilings. Caller-supplied; no defaults that grant.
+
+- `ceiling_for(axis: str)`
+  - The highest tolerable risk on one axis.
+- `pinned()`
+  - Return a copy with the digest pin computed.
+- `verify()`
+  - Recompute the pin; constant-time compare, never raises.
+#### `MultiAxisFinding`
+
+One named finding, always naming the axis it came from.
+
+- `pinned()`
+  - Return a copy with the digest pin computed.
+- `verify()`
+  - Recompute the pin; constant-time compare, never raises.
+#### `PerAxisVerdict`
+
+The gate's verdict: one decision per axis, pinned, no composite.
+
+- `decision_for(axis: str)`
+  - The decision on one axis.
+- `action_decision()`
+  - The action-level outcome: conjunction over axes, never a score.
+- `pinned()`
+  - Return a copy with the digest pin computed.
+- `verify()`
+  - Recompute the pin; constant-time compare, never raises.
+#### `decide_per_axis(profile: AxisProfile, policy: AxisPolicy)`
+
+Decide each axis independently against its ceiling.
+
+#### `refuse_composite_score(action_id: str, claimed_score: Any)`
+
+Deterministically refuse any claimed composite risk score.
+
+#### `attack_probe_names()`
+
+All multi-axis autonomy attack probe names.
+
+#### `benign_probe_names()`
+
+All benign control names.
+
+#### `probes_in_family(family: str)`
+
+Attack probes in one family.
+
+#### `probe_by_name(name: str)`
+
+Look up any probe (attack or benign) by name.
+
+#### `expected_outcomes()`
+
+Map every probe name to its expected outcome.
+
+#### `main()`
+
+Print the corpus summary: attack/benign counts and family listing.
+
 ### `pre_completion_signal_probes`
 
 Source: `components/northstar-agent-runtime/pre_completion_signal_probes.py`
