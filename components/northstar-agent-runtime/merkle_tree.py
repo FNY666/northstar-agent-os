@@ -138,12 +138,21 @@ class MerkleTree:
     The tree is built once; ``root()`` pins it, ``proof(i)`` extracts an
     inclusion proof for leaf ``i``. Rebuilding on append is the host's
     job — this class never mutates after construction.
+
+    ``build(leaves)`` is the spec entry point (classmethod alias for the
+    constructor); ``verify(index, leaf, proof=None)`` replays an
+    inclusion proof against this tree's root and returns a bool.
     """
 
     def __init__(self, leaves) -> None:
         self._leaves = _require_leaves(leaves)
         leaf_digests = [_leaf_hash(leaf) for leaf in self._leaves]
         self._levels = _build_levels(leaf_digests)
+
+    @classmethod
+    def build(cls, leaves) -> "MerkleTree":
+        """Build (pin) a Merkle tree over an ordered leaf sequence."""
+        return cls(leaves)
 
     @property
     def leaf_count(self) -> int:
@@ -187,6 +196,21 @@ class MerkleTree:
             siblings=tuple(siblings),
             root=self.root(),
         )
+
+    def verify(self, index: int, leaf: bytes, proof=None) -> bool:
+        """Replay an inclusion proof against this tree's root.
+
+        ``proof`` defaults to ``self.proof(index)``; a caller-supplied
+        :class:`MerkleProof` is replayed instead. Returns ``True`` iff the
+        leaf is anchored by this tree's root — a mismatch is ``False``,
+        never raised (verify-fail is data).
+        """
+        if isinstance(index, bool) or not isinstance(index, int):
+            raise TypeError("index must be an int")
+        if not (0 <= index < len(self._leaves)):
+            raise ValueError("index out of range")
+        pr = self.proof(index) if proof is None else proof
+        return verify(pr, leaf, self.root())
 
 
 def verify(proof: MerkleProof, leaf: bytes, root: str) -> bool:
@@ -265,6 +289,13 @@ def main() -> None:
     single = MerkleTree([b"only"])
     assert len(single.proof(0).siblings) == 0
     assert verify(single.proof(0), b"only", single.root()) is True
+    # Spec entry points: build() classmethod and verify() method.
+    via_build = MerkleTree.build(leaves)
+    assert via_build.root() == root
+    for i in range(7):
+        assert via_build.verify(i, leaves[i]) is True
+    assert via_build.verify(0, b"tampered") is False
+    assert via_build.verify(0, leaves[0], proof=via_build.proof(0)) is True
     evt = merkle_tree_audit_event(root, 7, audit_seq=0)
     assert evt["audit_seq"] == 0 and evt["leaf_count"] == 7
     print("merkle-tree OK: root, proofs, verify, tamper-evident, audit")

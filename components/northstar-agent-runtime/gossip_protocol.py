@@ -51,12 +51,21 @@ Honest scope:
   *configured* peer sets, never "the whole fleet knows".
 - This is the dissemination *state machine*, not a transport. Timers,
   retries, backpressure, and crash recovery are the host's job.
+
+SWIM-style membership plane (additive extension): real gossip deployments
+pair dissemination with membership -- nodes ``join()``, are ``suspect()`` ed
+on missed probes, refute suspicion with ``alive()`` (incarnation bump), and
+are ``confirm()`` ed dead after the suspicion timeout. ``GossipProtocol``
+pins that decision ledger; ``disseminate()`` books a rumor for piggyback
+dissemination to a deterministic subset of alive members. Probes, timeouts,
+and retries remain the host's job.
 """
 
 from __future__ import annotations
 
 import hashlib
 import hmac
+import threading
 from dataclasses import dataclass
 from typing import Iterable, Mapping, Optional, Sequence
 
@@ -380,6 +389,548 @@ def gossip_audit_event(
     }
 
 
+# ---------------------------------------------------------------------------
+# SWIM-style membership plane (additive extension)
+#
+# The rumor layer above models dissemination without membership: the node
+# set is fixed. Real gossip deployments (SWIM, Consul, Serf) pair
+# dissemination with a membership protocol: nodes join, are suspected on
+# missed probes, refute suspicion by bumping an incarnation number, and are
+# confirmed dead after the suspicion timeout. This section pins that state
+# machine as a deterministic single-host ledger (house style: frozen
+# records, caller-supplied strictly increasing int seqs, no wall-clock,
+# RLock-guarded, fail-closed). It is the *decision ledger*, not a
+# transport: probes, timeouts, and retries are the host's job.
+# ---------------------------------------------------------------------------
+
+#: Membership states (SWIM-shaped).
+MEMBER_ALIVE = "alive"
+MEMBER_SUSPECT = "suspect"
+MEMBER_DEAD = "dead"
+_MEMBER_STATES = (MEMBER_ALIVE, MEMBER_SUSPECT, MEMBER_DEAD)
+
+#: Audit event kinds for the membership plane.
+EVENT_JOINED = "gossip-joined"
+EVENT_SUSPECTED = "gossip-suspected"
+EVENT_CONFIRMED = "gossip-confirmed"
+EVENT_ALIVE = "gossip-alive"
+EVENT_DISSEMINATED = "gossip-disseminated"
+EVENT_MEMBERSHIP_REJECTED = "gossip-membership-rejected"
+_MEMBERSHIP_KINDS = (
+    EVENT_JOINED,
+    EVENT_SUSPECTED,
+    EVENT_CONFIRMED,
+    EVENT_ALIVE,
+    EVENT_DISSEMINATED,
+    EVENT_MEMBERSHIP_REJECTED,
+)
+
+#: Membership-update kinds carried in the piggyback buffer.
+_UPDATE_KINDS = (EVENT_JOINED, EVENT_SUSPECTED, EVENT_CONFIRMED, EVENT_ALIVE)
+
+#: Max membership updates a host piggybacks on one probe round.
+MAX_PIGGYBACK = 5
+
+
+class GossipMembershipError(GossipError):
+    """Membership-plane usage error (fail-closed)."""
+
+
+class DuplicateMemberError(GossipMembershipError):
+    """``join()`` on an already-known member id."""
+
+
+class UnknownMemberError(GossipMembershipError):
+    """Operation on a member id that never joined."""
+
+
+class BadMemberStateError(GossipMembershipError):
+    """State transition not allowed from the member's current state."""
+
+
+class SeqOrderError(GossipMembershipError):
+    """Caller seq did not strictly increase."""
+
+
+def _member_digest(member_id: str, state: str, incarnation: int, seq: int) -> str:
+    body = "\x00".join(
+        [GOSSIP_PROTOCOL_VERSION, member_id, state, str(incarnation), str(seq)]
+    )
+    return "sha256:" + _sha256_hex(body.encode("utf-8"))
+
+
+def _update_digest(
+    update_id: str, kind: str, member_id: str, incarnation: int, seq: int
+) -> str:
+    body = "\x00".join(
+        [GOSSIP_PROTOCOL_VERSION, update_id, kind, member_id, str(incarnation), str(seq)]
+    )
+    return "sha256:" + _sha256_hex(body.encode("utf-8"))
+
+
+@dataclass(frozen=True)
+class MemberRecord:
+    """One frozen membership entry: id, SWIM state, incarnation, seq."""
+
+    member_id: str
+    state: str
+    incarnation: int
+    seq: int
+
+    def __post_init__(self) -> None:
+        _check_str(self.member_id, "member_id")
+        if self.state not in _MEMBER_STATES:
+            raise ValueError(f"state must be one of {_MEMBER_STATES}")
+        if isinstance(self.incarnation, bool) or not isinstance(self.incarnation, int):
+            raise TypeError("incarnation must be an int")
+        if self.incarnation < 0:
+            raise ValueError("incarnation must be non-negative")
+        _check_seq(self.seq, "seq")
+
+    def digest(self) -> str:
+        """Digest pin binding (id, state, incarnation, seq)."""
+        return _member_digest(self.member_id, self.state, self.incarnation, self.seq)
+
+    def verify_digest(self, digest: str) -> bool:
+        if not isinstance(digest, str):
+            raise TypeError("digest must be a str")
+        return hmac.compare_digest(self.digest(), digest)
+
+    def as_dict(self) -> dict:
+        return {
+            "schema": GOSSIP_PROTOCOL_SCHEMA,
+            "version": GOSSIP_PROTOCOL_VERSION,
+            "member_id": self.member_id,
+            "state": self.state,
+            "incarnation": self.incarnation,
+            "seq": self.seq,
+            "digest": self.digest(),
+        }
+
+
+@dataclass(frozen=True)
+class UpdateRecord:
+    """One frozen membership update for the piggyback buffer."""
+
+    update_id: str
+    kind: str
+    member_id: str
+    incarnation: int
+    seq: int
+
+    def __post_init__(self) -> None:
+        _check_str(self.update_id, "update_id")
+        if self.kind not in _UPDATE_KINDS:
+            raise ValueError(f"update kind must be one of {_UPDATE_KINDS}")
+        _check_str(self.member_id, "member_id")
+        if isinstance(self.incarnation, bool) or not isinstance(self.incarnation, int):
+            raise TypeError("incarnation must be an int")
+        if self.incarnation < 0:
+            raise ValueError("incarnation must be non-negative")
+        _check_seq(self.seq, "seq")
+
+    def digest(self) -> str:
+        """Digest pin binding (update id, kind, member, incarnation, seq)."""
+        return _update_digest(
+            self.update_id, self.kind, self.member_id, self.incarnation, self.seq
+        )
+
+    def verify_digest(self, digest: str) -> bool:
+        if not isinstance(digest, str):
+            raise TypeError("digest must be a str")
+        return hmac.compare_digest(self.digest(), digest)
+
+    def as_dict(self) -> dict:
+        return {
+            "schema": GOSSIP_PROTOCOL_SCHEMA,
+            "version": GOSSIP_PROTOCOL_VERSION,
+            "update_id": self.update_id,
+            "kind": self.kind,
+            "member_id": self.member_id,
+            "incarnation": self.incarnation,
+            "seq": self.seq,
+            "digest": self.digest(),
+        }
+
+
+@dataclass(frozen=True)
+class DisseminationReport:
+    """One frozen dissemination decision: rumor pin + deterministic targets."""
+
+    rumor_id: str
+    origin: str
+    seq: int
+    targets: tuple[str, ...]
+    digest: str
+
+    def __post_init__(self) -> None:
+        _check_str(self.rumor_id, "rumor_id")
+        if not isinstance(self.origin, str) or isinstance(self.origin, bool):
+            raise TypeError("origin must be a str")
+        _check_seq(self.seq, "seq")
+        if not isinstance(self.targets, tuple) or not all(
+            isinstance(t, str) and t for t in self.targets
+        ):
+            raise TypeError("targets must be a tuple of non-empty str")
+        _check_str(self.digest, "digest")
+
+    def as_dict(self) -> dict:
+        return {
+            "schema": GOSSIP_PROTOCOL_SCHEMA,
+            "version": GOSSIP_PROTOCOL_VERSION,
+            "rumor_id": self.rumor_id,
+            "origin": self.origin,
+            "seq": self.seq,
+            "targets": list(self.targets),
+            "digest": self.digest,
+        }
+
+
+def membership_audit_event(
+    kind: str,
+    *,
+    member_id: str,
+    seq: int,
+    rumor_id: str = "",
+    detail: Optional[Mapping] = None,
+) -> dict:
+    """``audit.ndjson/1``-shaped record for a membership-plane event."""
+    if kind not in _MEMBERSHIP_KINDS:
+        raise ValueError(f"unknown membership event kind: {kind}")
+    _check_str(member_id, "member_id")
+    if not isinstance(rumor_id, str) or isinstance(rumor_id, bool):
+        raise TypeError("rumor_id must be a str")
+    _check_seq(seq, "seq")
+    if detail is not None:
+        if not isinstance(detail, Mapping):
+            raise TypeError("detail must be a mapping")
+        _canonicalize(detail)
+        if "payload" in detail:
+            raise ValueError("detail must not carry rumor payload")
+    return {
+        "audit": "audit.ndjson/1",
+        "schema": GOSSIP_PROTOCOL_SCHEMA,
+        "version": GOSSIP_PROTOCOL_VERSION,
+        "kind": kind,
+        "node_id": member_id,
+        "rumor_id": rumor_id,
+        "audit_seq": seq,
+        "detail": dict(detail) if detail is not None else {},
+    }
+
+
+class GossipProtocol:
+    """SWIM-style membership + piggyback dissemination ledger.
+
+    Deterministic single-host state machine (house style: caller-supplied
+    strictly increasing int seqs, no wall-clock, RLock-guarded,
+    fail-closed). Failed mutations consume their seq.
+    """
+
+    def __init__(self) -> None:
+        self._lock = threading.RLock()
+        self._members: dict[str, MemberRecord] = {}
+        self._updates: list[UpdateRecord] = []
+        self._reports: list[DisseminationReport] = []
+        self._audit: list[dict] = []
+        self._last_seq = 0
+        self._update_counter = 0
+
+    # -- internals -----------------------------------------------------
+
+    def _consume(self, seq: int) -> int:
+        """Validate seq shape, enforce strict increase, consume it."""
+        _check_seq(seq, "seq")
+        if seq <= self._last_seq:
+            raise SeqOrderError(
+                f"seq must strictly increase (last={self._last_seq}, got={seq})"
+            )
+        self._last_seq = seq
+        return seq
+
+    def _emit(
+        self,
+        kind: str,
+        member_id: str,
+        seq: int,
+        rumor_id: str = "",
+        detail: Optional[Mapping] = None,
+    ) -> None:
+        self._audit.append(
+            membership_audit_event(
+                kind, member_id=member_id, seq=seq, rumor_id=rumor_id, detail=detail
+            )
+        )
+
+    def _reject(self, seq: int, member_id: str, reason: str) -> None:
+        self._emit(
+            EVENT_MEMBERSHIP_REJECTED, member_id, seq, detail={"reason": reason}
+        )
+
+    def _record_update(
+        self, kind: str, member_id: str, incarnation: int, seq: int
+    ) -> UpdateRecord:
+        self._update_counter += 1
+        rec = UpdateRecord(
+            update_id=f"upd-{self._update_counter}",
+            kind=kind,
+            member_id=member_id,
+            incarnation=incarnation,
+            seq=seq,
+        )
+        self._updates.append(rec)
+        return rec
+
+    # -- membership ------------------------------------------------------
+
+    def join(self, node_id: str, seq: int) -> MemberRecord:
+        """Admit a node as alive. Duplicate ids are refused fail-closed."""
+        with self._lock:
+            _check_str(node_id, "node_id")
+            self._consume(seq)
+            if node_id in self._members:
+                self._reject(seq, node_id, "duplicate-member")
+                raise DuplicateMemberError(f"member already joined: {node_id}")
+            rec = MemberRecord(
+                member_id=node_id, state=MEMBER_ALIVE, incarnation=0, seq=seq
+            )
+            self._members[node_id] = rec
+            self._record_update(EVENT_JOINED, node_id, 0, seq)
+            self._emit(EVENT_JOINED, node_id, seq)
+            return rec
+
+    def suspect(self, node_id: str, seq: int) -> MemberRecord:
+        """Mark an alive member suspect (missed probes)."""
+        with self._lock:
+            _check_str(node_id, "node_id")
+            self._consume(seq)
+            cur = self._members.get(node_id)
+            if cur is None:
+                self._reject(seq, node_id, "unknown-member")
+                raise UnknownMemberError(f"unknown member: {node_id}")
+            if cur.state != MEMBER_ALIVE:
+                self._reject(seq, node_id, f"not-alive:{cur.state}")
+                raise BadMemberStateError(
+                    f"cannot suspect member in state {cur.state}"
+                )
+            rec = MemberRecord(
+                member_id=node_id,
+                state=MEMBER_SUSPECT,
+                incarnation=cur.incarnation,
+                seq=seq,
+            )
+            self._members[node_id] = rec
+            self._record_update(EVENT_SUSPECTED, node_id, cur.incarnation, seq)
+            self._emit(
+                EVENT_SUSPECTED,
+                node_id,
+                seq,
+                detail={"incarnation": cur.incarnation},
+            )
+            return rec
+
+    def confirm(self, node_id: str, seq: int) -> MemberRecord:
+        """Confirm a suspect member dead (terminal)."""
+        with self._lock:
+            _check_str(node_id, "node_id")
+            self._consume(seq)
+            cur = self._members.get(node_id)
+            if cur is None:
+                self._reject(seq, node_id, "unknown-member")
+                raise UnknownMemberError(f"unknown member: {node_id}")
+            if cur.state != MEMBER_SUSPECT:
+                self._reject(seq, node_id, f"not-suspect:{cur.state}")
+                raise BadMemberStateError(
+                    f"cannot confirm member in state {cur.state}"
+                )
+            rec = MemberRecord(
+                member_id=node_id,
+                state=MEMBER_DEAD,
+                incarnation=cur.incarnation,
+                seq=seq,
+            )
+            self._members[node_id] = rec
+            self._record_update(EVENT_CONFIRMED, node_id, cur.incarnation, seq)
+            self._emit(EVENT_CONFIRMED, node_id, seq)
+            return rec
+
+    def alive(self, node_id: str, seq: int) -> MemberRecord:
+        """Refute a suspicion: suspect -> alive, incarnation bumps.
+
+        The incarnation bump is what lets the refutation win over stale
+        suspicion rumors still circulating (SWIM semantics).
+        """
+        with self._lock:
+            _check_str(node_id, "node_id")
+            self._consume(seq)
+            cur = self._members.get(node_id)
+            if cur is None:
+                self._reject(seq, node_id, "unknown-member")
+                raise UnknownMemberError(f"unknown member: {node_id}")
+            if cur.state != MEMBER_SUSPECT:
+                self._reject(seq, node_id, f"not-suspect:{cur.state}")
+                raise BadMemberStateError(
+                    f"cannot revive member in state {cur.state}"
+                )
+            rec = MemberRecord(
+                member_id=node_id,
+                state=MEMBER_ALIVE,
+                incarnation=cur.incarnation + 1,
+                seq=seq,
+            )
+            self._members[node_id] = rec
+            self._record_update(EVENT_ALIVE, node_id, cur.incarnation + 1, seq)
+            self._emit(
+                EVENT_ALIVE,
+                node_id,
+                seq,
+                detail={"incarnation": cur.incarnation + 1},
+            )
+            return rec
+
+    # -- dissemination ---------------------------------------------------
+
+    def disseminate(
+        self,
+        rumor_id: str,
+        payload: Mapping,
+        seq: int,
+        fanout: int = DEFAULT_FANOUT,
+        origin: str = "",
+    ) -> DisseminationReport:
+        """Book a rumor for piggyback dissemination.
+
+        Selects up to ``fanout`` alive members (origin excluded) by the
+        same deterministic hash draw the rumor layer uses, lowest draws
+        first. The rumor content is pinned by digest; payload bytes never
+        cross the audit boundary. Empty targets are data, not an error.
+        """
+        with self._lock:
+            _check_str(rumor_id, "rumor_id")
+            if not isinstance(payload, Mapping):
+                raise TypeError(
+                    f"payload must be a mapping, got {type(payload).__name__}"
+                )
+            _canonicalize(payload)
+            if not isinstance(origin, str) or isinstance(origin, bool):
+                raise TypeError("origin must be a str")
+            if isinstance(fanout, bool) or not isinstance(fanout, int):
+                raise TypeError(
+                    f"fanout must be an int, got {type(fanout).__name__}"
+                )
+            if fanout < 1:
+                raise ValueError("fanout must be >= 1")
+            self._consume(seq)
+            eligible = [
+                m
+                for m in self._members
+                if m != origin and self._members[m].state == MEMBER_ALIVE
+            ]
+            ranked = sorted(
+                ((_draw(origin, m, rumor_id, seq), m) for m in eligible),
+                key=lambda t: (t[0], t[1]),
+            )
+            targets = tuple(m for _, m in ranked[:fanout])
+            digest = _rumor_digest(rumor_id, payload, origin or "membership", seq)
+            report = DisseminationReport(
+                rumor_id=rumor_id,
+                origin=origin,
+                seq=seq,
+                targets=targets,
+                digest=digest,
+            )
+            self._reports.append(report)
+            self._emit(
+                EVENT_DISSEMINATED,
+                origin or "membership",
+                seq,
+                rumor_id=rumor_id,
+                detail={"digest": digest, "targets": list(targets)},
+            )
+            return report
+
+    # -- views -----------------------------------------------------------
+
+    def member(self, member_id: str) -> MemberRecord:
+        """Current record for a member (raises ``UnknownMemberError``)."""
+        with self._lock:
+            _check_str(member_id, "member_id")
+            try:
+                return self._members[member_id]
+            except KeyError:
+                raise UnknownMemberError(
+                    f"unknown member: {member_id}"
+                ) from None
+
+    def member_ids(self) -> tuple[str, ...]:
+        with self._lock:
+            return tuple(sorted(self._members))
+
+    def alive_members(self) -> tuple[str, ...]:
+        with self._lock:
+            return tuple(
+                sorted(
+                    m
+                    for m, r in self._members.items()
+                    if r.state == MEMBER_ALIVE
+                )
+            )
+
+    def suspects(self) -> tuple[str, ...]:
+        with self._lock:
+            return tuple(
+                sorted(
+                    m
+                    for m, r in self._members.items()
+                    if r.state == MEMBER_SUSPECT
+                )
+            )
+
+    def dead(self) -> tuple[str, ...]:
+        with self._lock:
+            return tuple(
+                sorted(
+                    m for m, r in self._members.items() if r.state == MEMBER_DEAD
+                )
+            )
+
+    def state_of(self, member_id: str) -> str:
+        """Current SWIM state of a member."""
+        return self.member(member_id).state
+
+    def updates(self, seq: int, limit: int = MAX_PIGGYBACK) -> tuple[UpdateRecord, ...]:
+        """Piggyback buffer: the most recent membership updates.
+
+        Pure view (validates seq shape, consumes nothing): this is what a
+        host would attach to its next probe round.
+        """
+        with self._lock:
+            _check_seq(seq, "seq")
+            if isinstance(limit, bool) or not isinstance(limit, int):
+                raise TypeError("limit must be an int")
+            if limit < 1:
+                raise ValueError("limit must be >= 1")
+            return tuple(self._updates[-limit:])
+
+    def reports(self) -> tuple[DisseminationReport, ...]:
+        with self._lock:
+            return tuple(self._reports)
+
+    def audit_log(self) -> tuple[dict, ...]:
+        with self._lock:
+            return tuple(self._audit)
+
+    def as_dict(self) -> dict:
+        with self._lock:
+            return {
+                "schema": GOSSIP_PROTOCOL_SCHEMA,
+                "version": GOSSIP_PROTOCOL_VERSION,
+                "members": [r.as_dict() for _, r in sorted(self._members.items())],
+                "pending_updates": len(self._updates),
+                "disseminations": len(self._reports),
+            }
+
+
 def main() -> None:
     nodes = [GossipNode(f"n{i}", [f"n{j}" for j in range(5) if j != i]) for i in range(5)]
     net = GossipNetwork(nodes)
@@ -391,6 +942,23 @@ def main() -> None:
         rounds += 1
     assert net.converged("r1"), "gossip did not converge on a 5-node clique"
     print(f"gossip-protocol OK: converged in {rounds} rounds, spread is deterministic")
+    # SWIM membership plane smoke
+    gp = GossipProtocol()
+    for i in range(5):
+        gp.join(f"m{i}", i + 1)
+    gp.suspect("m2", 6)
+    assert gp.state_of("m2") == MEMBER_SUSPECT
+    gp.alive("m2", 7)  # refutation bumps incarnation
+    assert gp.member("m2").incarnation == 1
+    gp.suspect("m3", 8)
+    gp.confirm("m3", 9)
+    assert gp.state_of("m3") == MEMBER_DEAD
+    assert gp.dead() == ("m3",)
+    rep = gp.disseminate("r9", {"cfg": "v2"}, 10, fanout=2)
+    assert rep.targets and len(rep.targets) <= 2
+    assert "m3" not in rep.targets  # dead members never targeted
+    assert gp.updates(11)  # piggyback buffer is non-empty
+    print("gossip-membership OK: join, suspect, refute, confirm, disseminate")
 
 
 if __name__ == "__main__":
