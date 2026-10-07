@@ -3377,6 +3377,161 @@ Bind a validation outcome to the call and the set as a receipt.
 
 Print a small summary for the CLI.
 
+### `benchmark_retirement_probes`
+
+Source: `components/northstar-agent-runtime/benchmark_retirement_probes.py`
+
+Benchmark-retirement probe corpus + retirement detection / revalidation gates.
+
+#### `retirement_triggers()`
+
+The canonical revalidation trigger list for benchmark-backed cases.
+
+#### `check_triggers(triggers: Any)`
+
+Name every canonical trigger missing from the given trigger list.
+
+#### `BenchmarkRecord`
+
+A digest-pinned (benchmark, corpus, harness, task-info, status) tuple.
+
+#### `build_record(benchmark_id: str, corpus_digest: str, harness_digest: str, task_info_digest: str, status: str=STATUS_LIVE)`
+
+Build a digest-pinned benchmark record (fail-closed on bad inputs).
+
+#### `verify_record(record: BenchmarkRecord)`
+
+Constant-time digest verification of a benchmark record.
+
+#### `retire_record(record: BenchmarkRecord)`
+
+Return a new record with status retired (the old digest stays sealed).
+
+#### `detect_retirement(new_record: BenchmarkRecord, old_record: BenchmarkRecord)`
+
+Name every retirement-relevant change between two records.
+
+#### `SaturationReport`
+
+Host-reported saturation check over a score list.
+
+#### `check_saturation(benchmark_id: str, scores: Any, ceiling: float=0.99)`
+
+Saturated iff every reported score meets or exceeds the ceiling.
+
+#### `ContaminationSignal`
+
+A host-reported contamination signal, digest-pinned.
+
+#### `record_contamination(benchmark_id: str, kind: str, detail: str)`
+
+Pin a contamination signal (fail-closed on unknown kinds).
+
+#### `gate_benchmark_claim(record: BenchmarkRecord, saturation: SaturationReport | None=None, contamination: tuple[ContaminationSignal, ...]=())`
+
+Decide whether a benchmark may be cited as evidence.
+
+#### `attack_probe_names()`
+
+Names of the attack probes (expected deny).
+
+#### `benign_probe_names()`
+
+Names of the benign control probes (expected allow).
+
+#### `probes_in_family(family: str)`
+
+All probes (attack + benign) in a corpus family.
+
+#### `probe_by_name(name: str)`
+
+Look up a probe by name (raises KeyError on unknown names).
+
+#### `expected_outcomes()`
+
+Probe name -> expected outcome ('deny' or 'allow').
+
+#### `main()`
+
+Print the corpus summary (diagnostic entry point).
+
+### `refusal_pattern_probes`
+
+Source: `components/northstar-agent-runtime/refusal_pattern_probes.py`
+
+Refusal-pattern + reward-hacking-attempt probes (process evaluation shapes).
+
+#### `RefusalPatternError`
+
+Raised for malformed refusal/attempt/verdict records.
+
+#### `RefusalRecord`
+
+A digest-pinned refusal event.
+
+- `pinned()`
+  - Return a copy with the digest pinned (fail-closed inputs).
+- `verify()`
+  - Constant-time digest verification. Never raises.
+#### `gate_refusal(record: 'RefusalRecord | None', expected_layers: tuple[str, ...]=EXPECTED_REFUSAL_LAYERS)`
+
+Gate a claimed refusal.
+
+#### `HackAttempt`
+
+A digest-pinned reward-hacking attempt record.
+
+- `pinned()`
+- `verify()`
+  - Constant-time digest verification. Never raises.
+#### `count_attempts(records: tuple['HackAttempt', ...])`
+
+Per-kind attempt counts. Never a composite score.
+
+#### `gate_attempts(records: tuple['HackAttempt', ...], max_allowed: int=0)`
+
+Gate a run's attempt records.
+
+#### `TrajectoryRecord`
+
+A digest-pinned trajectory outcome.
+
+- `pinned()`
+- `verify()`
+#### `VerdictBinding`
+
+A verdict bound to a pinned trajectory.
+
+- `pinned()`
+- `verify()`
+#### `gate_verdict(binding: VerdictBinding, trajectory: 'TrajectoryRecord | None')`
+
+Gate a verdict against the held trajectory.
+
+#### `attack_probe_names()`
+
+All refusal-pattern attack probe names.
+
+#### `benign_probe_names()`
+
+All benign control names.
+
+#### `probes_in_family(family: str)`
+
+Attack probes in one family.
+
+#### `probe_by_name(name: str)`
+
+Look up any probe (attack or benign) by name.
+
+#### `expected_outcomes()`
+
+Map every probe name to its expected outcome.
+
+#### `main()`
+
+Print the corpus summary: attack/benign counts and family listing.
+
 ### `evidence_compaction_probes`
 
 Source: `components/northstar-agent-runtime/evidence_compaction_probes.py`
