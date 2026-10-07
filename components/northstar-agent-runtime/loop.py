@@ -2776,57 +2776,132 @@ class AgentRuntime:
         return result
 
     def _close_run(self, state: _RunState, run_span: Any) -> None:
-        if not state.session_end_fired:
+        primary: Exception | None = None
+        close_records = not state.session_end_fired
+        if close_records:
+            # Mark once before the first append so re-entrant cleanup cannot duplicate
+            # the result record. SessionEnd is still attempted independently below.
             state.session_end_fired = True
-            if state.refused_session:
-                # A refused claim is the one outcome that writes nothing at all: a result
-                # record appended here would land in a file another process is holding,
-                # which is the exact corruption the claim exists to prevent. That stream
-                # stays authoritative in the event feed and the trace, not the transcript.
-                pass
+
+        def remember_failure(label: str, error: Exception) -> None:
+            nonlocal primary
+            diagnostic = f"{label} failed: {type(error).__name__}: {error}"
+            state.errors.append(diagnostic)
+            if primary is None:
+                primary = error
             else:
-                subtype = state.result.subtype if state.result is not None else "error_during_execution"
-                if state.result is not None and not self.config.depth:
-                    self.sessions.record_result(state.result)
-                elif state.result is not None:
-                    self.sessions.append("result", {"subtype": subtype, "agent": self.config.agent, "inherited_by_parent": True})
-                self._fire(
-                    state,
-                    "SessionEnd",
-                    HookInput(
-                        event="SessionEnd",
-                        session_id=state.session_id,
-                        agent=self.config.agent,
-                        depth=self.config.depth,
-                        turn_index=state.turns,
-                        data={"subtype": subtype, "total_cost_usd": self.budget.total_cost_usd},
-                    ),
+                add_note = getattr(primary, "add_note", None)
+                if callable(add_note):
+                    try:
+                        add_note(diagnostic)
+                    except Exception as note_error:
+                        state.errors.append(
+                            f"{label} diagnostic attachment failed: {type(note_error).__name__}: {note_error}"
+                        )
+                else:
+                    # Python 3.10 has no add_note. Preserve identity and link the later
+                    # exception as context only when doing so cannot create a cycle.
+                    cursor = error
+                    seen: set[int] = set()
+                    cyclic = error is primary
+                    while cursor is not None and id(cursor) not in seen:
+                        if cursor is primary:
+                            cyclic = True
+                            break
+                        seen.add(id(cursor))
+                        cursor = cursor.__context__
+                    if not cyclic:
+                        primary.__context__ = error
+            try:
+                self.tracer.start_span(
+                    "session.close-step-failed",
+                    attributes={"step": label, "error": f"{type(error).__name__}: {error}"[:200]},
+                ).end()
+            except Exception as trace_error:  # noqa: BLE001 - trace failure cannot block cleanup.
+                state.errors.append(
+                    f"{label} failure trace failed: {type(trace_error).__name__}: {trace_error}"
                 )
-        # Everything the trace needs is written before the span closes, because a
-        # post-end set_attribute is discarded in silence.
-        run_span.set_attributes(
-            {
-                "result.subtype": state.result.subtype if state.result else "error_during_execution",
-                "turn.count": state.turns,
-                "tool.call_count": state.tool_calls,
-                "cost.usd": round(self.budget.total_cost_usd, 10),
-                "usage.total_tokens": self.budget.total_usage.total_tokens,
-                "pricing.estimated": self.budget.pricing_estimated,
-                "denial.count": len(state.denials),
-                "compaction.count": len([item for item in state.compactions if item.get("performed")]),
-                "stop.block_count": state.stop_blocks,
-                "duration_ms": int((time.monotonic() - state.started) * 1000),
-            }
-        )
-        usage_attrs = {f"usage.{key}": value for key, value in self.budget.total_usage.as_dict().items()}
-        for key, value in usage_attrs.items():
-            run_span.set_attribute(key, value)
-        run_span.end()
-        self._last_report = self._report(state.events, state=state)
-        # Released at the very end, after the result record and the SessionEnd hook are on
-        # disk: releasing before the last write is how a "protected" transcript gets a torn
-        # tail that the next writer then appends to.
-        self._release_session()
+
+        def attempt(label: str, operation: Callable[[], None]) -> None:
+            try:
+                operation()
+            except Exception as error:  # noqa: BLE001 - continue cleanup, then re-raise first.
+                remember_failure(label, error)
+
+        def persist_result() -> None:
+            if not close_records or state.refused_session:
+                return
+            subtype = state.result.subtype if state.result is not None else "error_during_execution"
+            if state.result is not None and not self.config.depth:
+                self.sessions.record_result(state.result)
+            elif state.result is not None:
+                self.sessions.append("result", {"subtype": subtype, "agent": self.config.agent, "inherited_by_parent": True})
+
+        def fire_session_end() -> None:
+            if not close_records or state.refused_session:
+                return
+            subtype = state.result.subtype if state.result is not None else "error_during_execution"
+            self._fire(
+                state,
+                "SessionEnd",
+                HookInput(
+                    event="SessionEnd",
+                    session_id=state.session_id,
+                    agent=self.config.agent,
+                    depth=self.config.depth,
+                    turn_index=state.turns,
+                    data={"subtype": subtype, "total_cost_usd": self.budget.total_cost_usd},
+                ),
+            )
+
+        def record_span_attributes() -> None:
+            # Everything the trace needs is written before the span closes, because a
+            # post-end set_attribute is discarded in silence.
+            run_span.set_attributes(
+                {
+                    "result.subtype": state.result.subtype if state.result else "error_during_execution",
+                    "turn.count": state.turns,
+                    "tool.call_count": state.tool_calls,
+                    "cost.usd": round(self.budget.total_cost_usd, 10),
+                    "usage.total_tokens": self.budget.total_usage.total_tokens,
+                    "pricing.estimated": self.budget.pricing_estimated,
+                    "denial.count": len(state.denials),
+                    "compaction.count": len([item for item in state.compactions if item.get("performed")]),
+                    "stop.block_count": state.stop_blocks,
+                    "duration_ms": int((time.monotonic() - state.started) * 1000),
+                }
+            )
+            usage_attrs = {f"usage.{key}": value for key, value in self.budget.total_usage.as_dict().items()}
+            for key, value in usage_attrs.items():
+                run_span.set_attribute(key, value)
+
+        def refresh_report() -> None:
+            self._last_report = self._report(state.events, state=state)
+
+        try:
+            # Preserve the established successful-path order, but isolate each action.
+            attempt("result", persist_result)
+            attempt("SessionEnd", fire_session_end)
+            attempt("span_attributes", record_span_attributes)
+            attempt("span_end", run_span.end)
+            attempt("last_report", refresh_report)
+        finally:
+            # Always make one final release attempt, including when KeyboardInterrupt or
+            # SystemExit bypasses the ordinary-Exception handlers above. Never fake local
+            # release state: _release_session owns the lease reference and release protocol.
+            try:
+                self._release_session()
+            except Exception as error:  # noqa: BLE001 - retain reference and surface failure.
+                remember_failure("lease_release", error)
+            if primary is not None:
+                try:
+                    refresh_report()
+                except Exception as report_error:  # noqa: BLE001 - preserve original failure.
+                    remember_failure("last_report_after_failure", report_error)
+
+        if primary is not None:
+            raise primary
+
 
     def _report(self, events: Sequence[Message], *, state: _RunState) -> RunReport:
         result = state.result
