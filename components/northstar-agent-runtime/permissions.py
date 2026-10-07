@@ -1951,6 +1951,7 @@ class PermissionEngine:
             "tool": decision.tool,
             "source": decision.source,
             "rule": decision.rule,
+            "condition": decision.rule,
             "reason": decision.reason,
             "call_id": ctx.call_id,
             "arguments_digest": ctx.arguments_digest,
