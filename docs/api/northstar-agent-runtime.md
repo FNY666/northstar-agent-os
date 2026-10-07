@@ -3873,6 +3873,142 @@ Gate one tool invocation's arguments; fail closed.
 
 Print a small summary for the CLI.
 
+### `plan_injection_probes`
+
+Source: `components/northstar-agent-runtime/plan_injection_probes.py`
+
+Plan-injection probes: injected plans, attribution evasion, plan gates.
+
+#### `attack_probe_names()`
+
+All plan-injection attack probe names.
+
+#### `benign_probe_names()`
+
+All benign control names.
+
+#### `probes_in_family(family: str)`
+
+Attack probes in one family.
+
+#### `probe_by_name(name: str)`
+
+Look up any probe (attack or benign) by name.
+
+#### `expected_outcomes()`
+
+Map every probe name to its expected outcome.
+
+#### `PlanRecord`
+
+A digest-pinned plan with declared origin, goal, and sealed steps.
+
+#### `seal_plan(plan_id: str, steps: Sequence[str], goal_digest: str, source: str | None)`
+
+Seal a plan: pin its ordered steps, order, and goal binding.
+
+#### `verify_plan_record(record: PlanRecord, steps: Sequence[str], goal_digest: str)`
+
+Re-derive the seal from claimed steps; constant-time comparison.
+
+#### `detect_unattributed_plan(record: PlanRecord, steps: Sequence[str])`
+
+Name plans the agent cannot attribute to any origin.
+
+#### `detect_goal_substitution(record: PlanRecord, declared_goal_digest: str)`
+
+Name a plan whose bound goal diverges from the authorized goal.
+
+#### `detect_paraphrase_laundering(plan_text: str, untrusted_fragments: Sequence[str], attributed: bool)`
+
+Flag plans that restate untrusted fragments without attribution.
+
+#### `detect_step_binding(record: PlanRecord, steps: Sequence[str], executed_step: str)`
+
+Name executed steps absent from the sealed step list or order.
+
+#### `PlanGateDecision`
+
+A digest-pinned gate decision for one plan execution.
+
+#### `gate_plan(record: PlanRecord, steps: Sequence[str], declared_goal_digest: str, plan_text: str='', untrusted_fragments: Sequence[str]=(), executed_step: str | None=None)`
+
+Fail-closed plan gate; allowed only when every check passes.
+
+#### `verify_gate_decision(decision: PlanGateDecision, record: PlanRecord)`
+
+Re-derive the decision digest; constant-time comparison.
+
+#### `main()`
+
+Print a small summary for the CLI.
+
+### `privilege_at_recall_probes`
+
+Source: `components/northstar-agent-runtime/privilege_at_recall_probes.py`
+
+Privilege-at-recall probe corpus + identity-filter-first recall harness.
+
+#### `MemoryRecord`
+
+One recall-shaped memory record, digest-pinned.
+
+#### `build_record(*, record_id: str, payload_digest: str, writer: str, tenant: str, owner_agent: str, trust: str, scope: tuple[str, ...]=(), max_privilege: int=0, grant: tuple[str, ...]=(), authority_version: int=1, seq: int=0, prev_digest: str='sha256:' + '00' * 32)`
+
+Build a digest-pinned memory record.
+
+#### `verify_record(record: MemoryRecord)`
+
+Constant-time digest re-verification of a record.
+
+#### `RecallRequest`
+
+A recall-shaped authorization request, digest-pinned.
+
+#### `build_request(*, caller_agent: str, caller_tenant: str, caller_privilege: int, purpose: str, requires_trusted: bool=True, accepted_authority: int=1)`
+
+Build a digest-pinned recall request.
+
+#### `verify_request(request: RecallRequest)`
+
+Constant-time digest re-verification of a recall request.
+
+#### `authorize_recall(record: MemoryRecord, request: RecallRequest)`
+
+Authorize one record for one recall request.
+
+#### `filter_candidates(records: tuple[MemoryRecord, ...], request: RecallRequest)`
+
+Identity-filter-first recall: drop recall-unauthorized records before any ranking or exposure.
+
+#### `verify_filter_first(filter_before_retrieval: bool, witness_digest: str | None=None)`
+
+Attest that identity filtering ran before retrieval.
+
+#### `probe_names()`
+
+All privilege-at-recall attack probe names.
+
+#### `benign_names()`
+
+All benign control names.
+
+#### `probes_by_family(family: str)`
+
+Probes in one family (attacks plus benign).
+
+#### `probe_by_name(name: str)`
+
+Look up any privilege-at-recall probe (attack or benign) by name.
+
+#### `expected_outcomes()`
+
+probe name -> expected gate outcome ('deny' or 'allow').
+
+#### `main()`
+
+Print the corpus inventory.
+
 ### `monitor_deafness_probes`
 
 Source: `components/northstar-agent-runtime/monitor_deafness_probes.py`
