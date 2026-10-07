@@ -73,7 +73,7 @@ MANIFEST: dict[str, tuple[str, ...]] = {
     ),
     "northstar-codex-sidecar": ("sidecar", "transport", "service", "sidecar_socket"),
     "northstar-egress-sidecar": ("egress_sidecar", "egress_socket", "transport"),
-                                                                                                                                                                                                                                                                                    "northstar-agent-runtime": (
+                                                                                                                                                                                                                                                                                        "northstar-agent-runtime": (
         "a2a_budget_combo", "a2a_gates", "a2abreak_probes", "ab_testing",
         "abac_engine", "abe_interface", "abstract_interp", "abuse_limits",
         "abuse_reporter", "account_recovery", "action_card", "action_verifier",
@@ -81,6 +81,9 @@ MANIFEST: dict[str, tuple[str, ...]] = {
         "adversarial_detector", "adversarial_robustness", "agb_smoke_corpus", "agent_files",
         "agent_identity", "agent_memory", "agent_readiness", "agents",
         "agri", "agrifood_agents", "ai_accident", "ai_accountability",
+        "ai_accountability_auditing", "ai_accountability_certification", "ai_accountability_incident", "ai_accountability_mitigation",
+        "ai_accountability_monitoring", "ai_accountability_remediation", "ai_accountability_risk", "ai_accountability_testing",
+        "ai_accountability_threat", "ai_accountability_validation", "ai_accountability_verification", "ai_accountability_vulnerability",
         "ai_act", "ai_adversarial", "ai_alignment", "ai_assurance",
         "ai_attack", "ai_attestation", "ai_attribution", "ai_audit",
         "ai_benchmarking", "ai_bias", "ai_calibration", "ai_certification",
@@ -313,7 +316,7 @@ MANIFEST: dict[str, tuple[str, ...]] = {
         "wireheading", "witness_enc", "workflow_automation", "workflow_engine",
         "workflow_orchestration", "write_ahead_log", "write_through_cache", "zab_interface",
         "zero_knowledge", "zeromq_patterns", "zk_interface", "zk_verifier",
-    ),,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,
+    ),,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,
 }
 
 GENERATED_HEADER = (
