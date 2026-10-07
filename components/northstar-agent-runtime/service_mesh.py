@@ -487,6 +487,64 @@ class ServiceMesh:
             mtls=mtls, cursor=cursor, seq=seq, digest=digest,
         )
 
+    # -- task API (inject / mtls / traffic) -----------------------------------
+
+    def inject(
+        self,
+        service_id: Any,
+        endpoints: Sequence[Any],
+        seq: Any,
+    ) -> ServiceRecord:
+        """Pin a sidecar proxy onto a service.
+
+        Alias for :meth:`register`: "injection" here is decision
+        bookkeeping — the service's sidecar endpoints are registered
+        and digest-pinned. No proxy is actually deployed; see the
+        module's honest-scope note.
+        """
+        return self.register(service_id, endpoints, seq)
+
+    def mtls(
+        self,
+        service_id: Any,
+        seq: Any,
+        mode: Any = MtlsMode.STRICT,
+    ) -> TrafficPolicy:
+        """Pin the declared mTLS mode for a service.
+
+        Implemented over :meth:`policy`: existing authorization rules,
+        timeouts, retries, and endpoint weights are preserved — only
+        the mTLS mode is replaced. Simulated intent, not a handshake.
+        """
+        try:
+            existing = self.get_policy(service_id)
+        except UnknownServiceError:
+            return self.policy(service_id, seq, mtls=mode)
+        weights = dict(existing.weights) if existing.weights else None
+        return self.policy(
+            service_id,
+            seq,
+            mtls=mode,
+            rules=existing.rules,
+            timeout_ms=existing.timeout_ms,
+            max_retries=existing.max_retries,
+            weights=weights,
+        )
+
+    def traffic(
+        self,
+        src_service_id: Any,
+        dst_service_id: Any,
+        seq: Any,
+    ) -> RouteDecision:
+        """Compute a traffic decision for ``src -> dst``.
+
+        Alias for :meth:`route`: authorization is evaluated first and
+        denials are returned as data (``allowed=False``), never raised.
+        Simulated decision, not a packet.
+        """
+        return self.route(src_service_id, dst_service_id, seq)
+
 
 def service_mesh_audit_event(
     kind: str,
