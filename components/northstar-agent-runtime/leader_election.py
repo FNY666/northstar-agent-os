@@ -293,6 +293,18 @@ class LeaderElector:
         self._lease = renewed
         return renewed
 
+    def resign(self) -> LeaderLease | None:
+        """Resign the current lease without deregistering any candidate.
+
+        Returns the resigned lease, or None when there was no live lease
+        to resign. The term is unchanged -- resignation is a vacancy, not
+        an election. Emits nothing by itself; callers shape the
+        ``EVENT_RESIGNED`` audit record via ``leader_election_audit_event``.
+        """
+        lease = self._lease
+        self._lease = None
+        return lease
+
     def is_leader(self, node_id: str, current_seq: int) -> bool:
         """True iff ``node_id`` holds a live, unexpired lease.
 
@@ -310,6 +322,177 @@ class LeaderElector:
             and lease.leader_id == node
             and not lease.is_expired(seq)
         )
+
+
+# ---------------------------------------------------------------------------
+# Campaign / step-down facade (Raft/ZooKeeper-shaped client interface)
+# ---------------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class CampaignResult:
+    """Outcome of a ``LeaderElection.campaign()`` call (frozen).
+
+    ``outcome`` is data: ``"leader"`` means this node now holds the live
+    lease, ``"follower"`` means another node leads (or won this term's
+    election). Campaigning never raises on policy -- only malformed
+    inputs fail closed.
+    """
+
+    node_id: str
+    outcome: str
+    term: int
+    seq: int
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "node_id", _check_node_id(self.node_id))
+        if self.outcome not in ("leader", "follower"):
+            raise ValueError(
+                f"outcome must be 'leader' or 'follower', got {self.outcome!r}"
+            )
+        object.__setattr__(self, "term", _check_term(self.term))
+        object.__setattr__(self, "seq", _check_seq(self.seq, "seq"))
+
+    def as_dict(self) -> dict:
+        """JSON-safe shape of this campaign outcome."""
+        return {
+            "schema": LEADER_ELECTION_SCHEMA,
+            "version": LEADER_ELECTION_VERSION,
+            "node_id": self.node_id,
+            "outcome": self.outcome,
+            "term": self.term,
+            "seq": self.seq,
+        }
+
+
+@dataclass(frozen=True)
+class StepDownResult:
+    """Outcome of a ``LeaderElection.stepdown()`` call (frozen)."""
+
+    node_id: str
+    resigned_term: int
+    vacated: bool
+    seq: int
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "node_id", _check_node_id(self.node_id))
+        object.__setattr__(self, "resigned_term", _check_term(self.resigned_term))
+        if not isinstance(self.vacated, bool):
+            raise TypeError(f"vacated must be a bool, got {type(self.vacated).__name__}")
+        object.__setattr__(self, "seq", _check_seq(self.seq, "seq"))
+
+    def as_dict(self) -> dict:
+        """JSON-safe shape of this step-down record."""
+        return {
+            "schema": LEADER_ELECTION_SCHEMA,
+            "version": LEADER_ELECTION_VERSION,
+            "node_id": self.node_id,
+            "resigned_term": self.resigned_term,
+            "vacated": self.vacated,
+            "seq": self.seq,
+        }
+
+
+class LeaderElection:
+    """Raft/ZooKeeper-shaped campaign interface over ``LeaderElector``.
+
+    Simulated: no ballots cross a network. ``campaign()`` registers the
+    node (ephemeral-node semantics -- unknown-but-well-formed node ids
+    auto-register) and, when no live lease exists, advances the term and
+    runs the deterministic rule locally; ``stepdown()`` vacates a live
+    lease held by the caller; ``leader()`` is a pure read view.
+
+    Malformed inputs (bad node id, bad priority, bad seq) fail closed
+    with ``TypeError``/``ValueError``. Policy refusals -- stepping down
+    when not the live leader -- raise ``ValueError``; election outcomes
+    themselves are data, never raised.
+    """
+
+    def __init__(self, lease_duration_seqs: int = 10) -> None:
+        self._lease_duration = _check_seq(lease_duration_seqs, "lease_duration_seqs")
+        self._elector: LeaderElector | None = None
+
+    @property
+    def term(self) -> int:
+        """Current term (0 before the first campaign)."""
+        return self._elector.term if self._elector is not None else 0
+
+    def candidate_ids(self) -> tuple[str, ...]:
+        """Registered node ids, in registration order."""
+        return self._elector.candidate_ids() if self._elector is not None else ()
+
+    def _live_lease(self, seq: int) -> LeaderLease | None:
+        """The live lease at ``seq``, or None when vacant/expired."""
+        if self._elector is None:
+            return None
+        lease = self._elector.current_lease()
+        if lease is None or lease.is_expired(seq):
+            return None
+        return lease
+
+    def campaign(
+        self, node_id: str, seq: int, priority: int = 0
+    ) -> CampaignResult:
+        """Campaign for leadership at logical seq ``seq``.
+
+        The node auto-registers with ``priority`` when unknown (first
+        registration wins; later campaigns keep the original priority).
+        When no live lease exists the term advances and the deterministic
+        rule picks the winner; otherwise the live lease stands and the
+        outcome reports the caller's standing as data.
+        """
+        node = _check_node_id(node_id)
+        call_seq = _check_seq(seq, "seq")
+        prio = _check_priority(priority, "priority")
+        if self._elector is None:
+            self._elector = LeaderElector([Candidate(node_id=node, priority=prio)])
+        elif node not in self._elector.candidate_ids():
+            self._elector.add_candidate(Candidate(node_id=node, priority=prio))
+        live = self._live_lease(call_seq)
+        if live is not None:
+            outcome = "leader" if live.leader_id == node else "follower"
+            return CampaignResult(
+                node_id=node, outcome=outcome, term=live.term, seq=call_seq
+            )
+        lease = self._elector.elect_new_term(
+            term=self.term + 1,
+            lease_duration_seqs=self._lease_duration,
+            current_seq=call_seq,
+        )
+        outcome = "leader" if lease.leader_id == node else "follower"
+        return CampaignResult(
+            node_id=node, outcome=outcome, term=lease.term, seq=call_seq
+        )
+
+    def stepdown(self, node_id: str, seq: int) -> StepDownResult:
+        """Vacate a live lease held by ``node_id``.
+
+        Fail-closed: raises ``ValueError`` when there is no live leader
+        at ``seq``, or when ``node_id`` is not the live leader. A
+        successful step-down leaves the term unchanged -- the next
+        ``campaign()`` starts a fresh term.
+        """
+        node = _check_node_id(node_id)
+        call_seq = _check_seq(seq, "seq")
+        live = self._live_lease(call_seq)
+        if live is None:
+            raise ValueError("no live leader to step down")
+        if live.leader_id != node:
+            raise ValueError(f"node {node!r} is not the live leader")
+        resigned = self._elector.resign()
+        assert resigned is not None  # live lease observed above
+        return StepDownResult(
+            node_id=node,
+            resigned_term=resigned.term,
+            vacated=True,
+            seq=call_seq,
+        )
+
+    def leader(self, seq: int) -> LeaderLease | None:
+        """Pure view: the live lease at ``seq``, or None when vacant or
+        expired. Validates ``seq`` but changes no state."""
+        call_seq = _check_seq(seq, "seq")
+        return self._live_lease(call_seq)
 
 
 def leader_election_audit_event(
@@ -361,7 +544,28 @@ def main() -> None:
         pass
     else:
         raise AssertionError("term reuse must fail")
+    # Campaign facade: first node leads, second follows, stepdown vacates.
+    facade = LeaderElection(lease_duration_seqs=5)
+    first = facade.campaign("n1", seq=0)
+    assert first.outcome == "leader" and first.term == 1, first
+    second = facade.campaign("n2", seq=1, priority=1)
+    assert second.outcome == "follower" and second.term == 1, second
+    assert facade.leader(seq=2) is not None
+    assert facade.leader(seq=2).leader_id == "n1"
+    assert facade.leader(seq=6) is None, "lease must expire fail-closed"
+    down = facade.stepdown("n1", seq=2)
+    assert down.vacated and down.resigned_term == 1, down
+    assert facade.leader(seq=3) is None
+    third = facade.campaign("n2", seq=3, priority=1)
+    assert third.outcome == "leader" and third.term == 2, third
+    try:
+        facade.stepdown("n1", seq=4)
+    except ValueError:
+        pass
+    else:
+        raise AssertionError("non-leader stepdown must fail")
     print("leader-election OK: elect, lease, expire, renew, term advance")
+    print("leader-election OK: campaign, follower, stepdown, resign")
 
 
 if __name__ == "__main__":
