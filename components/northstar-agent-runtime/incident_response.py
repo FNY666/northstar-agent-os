@@ -670,6 +670,22 @@ class IncidentResponse:
             )
             return record
 
+    def recover(
+        self,
+        incident_id: str,
+        seq: int,
+        outcome: str = OUTCOME_RESOLVED,
+        resolution_digest: str = "",
+    ) -> ResolutionRecord:
+        """Declare recovery: the terminal step of triage -> contain -> recover.
+
+        Spec alias for :meth:`resolve`. Books the same terminal
+        ``ResolutionRecord`` (outcome pinned: ``resolved`` /
+        ``mitigated`` / ``false-positive``). Like :meth:`resolve` this is
+        terminal: the incident id is retired forever afterwards.
+        """
+        return self.resolve(incident_id, seq, outcome, resolution_digest)
+
     # -- pure-read views --------------------------------------------------
     def _view_seq_ok(self, seq: Any) -> None:
         _check_seq(seq)

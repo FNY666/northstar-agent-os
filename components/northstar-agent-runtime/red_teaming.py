@@ -23,6 +23,14 @@ This module is the *campaign ledger* half of that shape:
   probes into a frozen ``ReportRecord``: success counts, verdict
   distribution, and a verdict *as data* (``resilient`` / ``mixed`` /
   ``vulnerable``), never raised.
+- ``RedTeaming.plan(plan_id, attack_id, seq)`` -- book one campaign
+  plan against a declared attack scenario. Returns a frozen
+  ``PlanRecord``; the objective travels as a digest pin only, never
+  raw text.
+- ``RedTeaming.execute(plan_id, seq)`` -- book one execution of a
+  planned campaign. One-shot: a second execute on the same plan raises
+  ``PlanStateError``. Returns a frozen ``ExecuteRecord`` with a minted
+  ``exe-N`` id and the probe count observed at execution time as data.
 - ``red_teaming_audit_event(kind, ...)`` -- ``audit.ndjson/1``
   records (``attack-declared`` / ``probed`` / ``reported`` /
   ``rejected``); caller-supplied seqs only. Raw attack content and
@@ -89,13 +97,16 @@ AUDIT_SCHEMA = "audit.ndjson/1"
 KIND_ATTACK_DECLARED = "attack-declared"
 KIND_PROBED = "probed"
 KIND_REPORTED = "reported"
+KIND_PLANNED = "planned"
+KIND_EXECUTED = "executed"
 KIND_REJECTED = "rejected"
-_KINDS = (KIND_ATTACK_DECLARED, KIND_PROBED, KIND_REPORTED, KIND_REJECTED)
+_KINDS = (KIND_ATTACK_DECLARED, KIND_PROBED, KIND_REPORTED, KIND_PLANNED,
+          KIND_EXECUTED, KIND_REJECTED)
 
 #: Detail keys banned from the audit boundary (raw content never crosses it).
 _BANNED_DETAIL_KEYS = frozenset(
     {"attack", "scenario", "transcript", "payload", "raw", "evidence",
-     "prompt", "response"})
+     "prompt", "response", "objective"})
 
 #: Max id length.
 _MAX_ID_LEN = 256
@@ -170,6 +181,26 @@ class AuditKindError(RedTeamingError):
     """Raised when an audit event kind is unknown or leaks banned keys."""
 
 
+class BadDigestError(RedTeamingError):
+    """Raised when a digest pin is malformed."""
+
+
+class BadObjectiveError(RedTeamingError):
+    """Raised when a plan objective is not a str."""
+
+
+class DuplicatePlanError(RedTeamingError):
+    """Raised when a plan id is booked twice."""
+
+
+class UnknownPlanError(RedTeamingError):
+    """Raised when a plan id names no planned campaign."""
+
+
+class PlanStateError(RedTeamingError):
+    """Raised when an execute violates the plan state machine."""
+
+
 def _check_seq(value: object, name: str = "seq") -> int:
     """Validate a caller-supplied ordering seq: int, not bool, >= 0."""
     if isinstance(value, bool) or not isinstance(value, int):
@@ -189,6 +220,24 @@ def _check_id(value: object, label: str) -> str:
         raise BadIdError(f"{label} too long (>{_MAX_ID_LEN} chars)")
     if any(ch.isspace() for ch in value):
         raise BadIdError(f"{label} must not contain whitespace")
+    return value
+
+
+_HEX = frozenset("0123456789abcdef")
+
+
+def _check_digest(value: object, label: str) -> str:
+    """Validate an optional digest pin: '' or 'sha256:<64 hex chars>'."""
+    if isinstance(value, bool) or not isinstance(value, str):
+        raise BadDigestError(
+            f"{label} must be str, got {type(value).__name__}")
+    if value == "":
+        return value
+    if not value.startswith("sha256:"):
+        raise BadDigestError(f"{label} must be a 'sha256:<hex>' pin")
+    hexpart = value[len("sha256:"):]
+    if len(hexpart) != 64 or any(c not in _HEX for c in hexpart):
+        raise BadDigestError(f"{label} must be 'sha256:' + 64 hex chars")
     return value
 
 
@@ -268,6 +317,40 @@ class ReportRecord:
             self.seq)
 
 
+@dataclass(frozen=True)
+class PlanRecord:
+    """Frozen record of one booked campaign plan (objective digest-pinned)."""
+    plan_id: str
+    attack_id: str
+    objective_digest: str
+    scenario_digest: str
+    seq: int
+    digest: str
+
+    def verify(self, plan_id: str, attack_id: str) -> bool:
+        """Recompute the pin and compare (True = untampered)."""
+        return self.digest == _pin(
+            "plan", plan_id, attack_id, self.objective_digest,
+            self.scenario_digest, self.seq)
+
+
+@dataclass(frozen=True)
+class ExecuteRecord:
+    """Frozen record of one booked campaign execution (one-shot)."""
+    execute_id: str
+    plan_id: str
+    attack_id: str
+    probes_at_start: int
+    seq: int
+    digest: str
+
+    def verify(self, plan_id: str) -> bool:
+        """Recompute the pin and compare (True = untampered)."""
+        return self.digest == _pin(
+            "execute", self.execute_id, plan_id, self.attack_id,
+            self.probes_at_start, self.seq)
+
+
 class RedTeaming:
     """Red teaming campaign ledger (simulated attacks, booked outcomes)."""
 
@@ -277,8 +360,11 @@ class RedTeaming:
         self._attacks: Dict[str, AttackRecord] = {}
         self._probes: Dict[str, ProbeRecord] = {}
         self._probe_order: Tuple[str, ...] = ()
+        self._plans: Dict[str, PlanRecord] = {}
+        self._executions: Dict[str, ExecuteRecord] = {}
         self._audit: Tuple[Dict[str, object], ...] = ()
         self._probe_seq: int = 0
+        self._exec_seq: int = 0
 
     def _claim(self, seq: int) -> None:
         """Claim a seq (strictly increasing); raise bare on rewind."""
@@ -289,11 +375,14 @@ class RedTeaming:
                     f"seq must be > {self._last_seq}, got {seq}")
             self._last_seq = seq
 
-    def _burn(self, seq: int, attack_id: str = "") -> None:
+    def _burn(self, seq: int, attack_id: str = "",
+              plan_id: str = "") -> None:
         """Book a rejected row after a failed mutation consumed its seq."""
         detail: Dict[str, object] = {}
         if attack_id:
             detail["attack_id"] = attack_id
+        if plan_id:
+            detail["plan_id"] = plan_id
         event = red_teaming_audit_event(KIND_REJECTED, detail, seq)
         with self._lock:
             self._audit = self._audit + (event,)
@@ -428,6 +517,120 @@ class RedTeaming:
                     "breached_count": breached}, seq)
         return record
 
+    def plan(self, plan_id: str, attack_id: str, seq: int,
+             objective: str = "",
+             scenario_digest: str = "") -> PlanRecord:
+        """Book one campaign plan against a declared attack scenario.
+        The objective travels as a digest pin only -- raw objective text
+        never enters a record. Returns the frozen ``PlanRecord``."""
+        self._claim(seq)
+        try:
+            plan_id = _check_id(plan_id, "plan_id")
+            attack_id = _check_id(attack_id, "attack_id")
+            if isinstance(objective, bool) or not isinstance(objective, str):
+                raise BadObjectiveError(
+                    f"objective must be str, "
+                    f"got {type(objective).__name__}")
+            scenario_digest = _check_digest(scenario_digest,
+                                            "scenario_digest")
+            with self._lock:
+                if attack_id not in self._attacks:
+                    raise UnknownAttackError(
+                        f"unknown attack: {attack_id!r}")
+                if plan_id in self._plans:
+                    raise DuplicatePlanError(
+                        f"plan already booked: {plan_id!r}")
+                objective_digest = _pin("objective", plan_id, objective)
+                record = PlanRecord(
+                    plan_id=plan_id,
+                    attack_id=attack_id,
+                    objective_digest=objective_digest,
+                    scenario_digest=scenario_digest,
+                    seq=seq,
+                    digest=_pin("plan", plan_id, attack_id,
+                                objective_digest, scenario_digest, seq),
+                )
+                self._plans[plan_id] = record
+        except RedTeamingError:
+            self._burn(seq, attack_id if isinstance(attack_id, str) else "")
+            raise
+        self._emit(KIND_PLANNED,
+                   {"plan_id": plan_id, "attack_id": attack_id}, seq)
+        return record
+
+    def execute(self, plan_id: str, seq: int) -> ExecuteRecord:
+        """Book one execution of a planned campaign. One-shot: a second
+        execute on the same plan raises ``PlanStateError``. The probe
+        count observed at execution time is booked as data. Returns the
+        frozen ``ExecuteRecord``."""
+        self._claim(seq)
+        minted_id: Optional[str] = None
+        attack_id = ""
+        probes_at_start = 0
+        try:
+            plan_id = _check_id(plan_id, "plan_id")
+            with self._lock:
+                plan = self._plans.get(plan_id)
+                if plan is None:
+                    raise UnknownPlanError(
+                        f"unknown plan: {plan_id!r}")
+                if plan_id in self._executions:
+                    raise PlanStateError(
+                        f"plan already executed: {plan_id!r}")
+                attack_id = plan.attack_id
+                probes_at_start = sum(
+                    1 for pid in self._probe_order
+                    if self._probes[pid].attack_id == attack_id)
+                self._exec_seq += 1
+                minted_id = f"exe-{self._exec_seq}"
+                record = ExecuteRecord(
+                    execute_id=minted_id,
+                    plan_id=plan_id,
+                    attack_id=attack_id,
+                    probes_at_start=probes_at_start,
+                    seq=seq,
+                    digest=_pin("execute", minted_id, plan_id, attack_id,
+                                probes_at_start, seq),
+                )
+                self._executions[plan_id] = record
+        except RedTeamingError:
+            self._burn(seq,
+                       plan_id=plan_id if isinstance(plan_id, str) else "")
+            raise
+        self._emit(KIND_EXECUTED,
+                   {"execute_id": minted_id, "plan_id": plan_id,
+                    "attack_id": attack_id,
+                    "probes_at_start": probes_at_start}, seq)
+        return record
+
+    def plan_record(self, plan_id: str) -> PlanRecord:
+        """Pure read view of one booked plan (no seq, no audit row)."""
+        with self._lock:
+            plan = self._plans.get(plan_id)
+            if plan is None:
+                raise UnknownPlanError(f"unknown plan: {plan_id!r}")
+            return plan
+
+    def execution_record(self, plan_id: str) -> ExecuteRecord:
+        """Pure read view of one booked execution (no seq, no audit row)."""
+        with self._lock:
+            record = self._executions.get(plan_id)
+            if record is None:
+                raise UnknownPlanError(
+                    f"no execution booked for plan: {plan_id!r}")
+            return record
+
+    def plan_ids(self) -> Tuple[str, ...]:
+        """Pure read view of booked plan ids (no seq, no audit row)."""
+        with self._lock:
+            return tuple(self._plans.keys())
+
+    def plans_for_attack(self, attack_id: str) -> Tuple[str, ...]:
+        """Pure read view of plan ids targeting one attack."""
+        with self._lock:
+            return tuple(pid for pid, rec in self._plans.items()
+                         if rec.attack_id == attack_id)
+
     def audit_log(self) -> Tuple[Dict[str, object], ...]:
         """Pure read view of the audit events (no seq, no audit row)."""
         with self._lock:
@@ -439,6 +642,8 @@ class RedTeaming:
             return {
                 "attacks": len(self._attacks),
                 "probes": len(self._probes),
+                "plans": len(self._plans),
+                "executions": len(self._executions),
                 "audit_rows": len(self._audit),
             }
 
@@ -475,7 +680,38 @@ def main() -> None:
             seq += 1
         else:
             raise AssertionError("expected refusal")
-    print("red-teaming OK: attack, probe, report, pins, audit")
+    # Spec API: plan -> execute -> report.
+    rt.attack("inj-plan", CATEGORY_JAILBREAK, seq)
+    plan = rt.plan("plan-1", "inj-plan", seq + 1,
+                   objective="measure refusal rate")
+    assert plan.verify("plan-1", "inj-plan")
+    assert "objective" not in plan.__dict__  # digest pin only, no raw text
+    exe = rt.execute("plan-1", seq + 2)
+    assert exe.verify("plan-1")
+    assert exe.probes_at_start == 0
+    rt.probe("inj-plan", "p-plan-1", seq + 3, VERDICT_BLOCKED)
+    rpt = rt.report("inj-plan", seq + 4)
+    assert rpt.verdict == "resilient"
+    assert rt.stats()["plans"] == 1
+    assert rt.stats()["executions"] == 1
+    seq += 5
+    for thunk in (
+        lambda s: rt.plan("plan-1", "inj-plan", s),            # duplicate plan
+        lambda s: rt.plan("plan-2", "nope", s),                # unknown attack
+        lambda s: rt.plan("plan-2", "inj-plan", s,             # bad objective
+                          objective=42),                       # type: ignore[arg-type]
+        lambda s: rt.plan("plan-2", "inj-plan", s,             # bad digest
+                          scenario_digest="raw-text"),
+        lambda s: rt.execute("plan-1", s),                    # already executed
+        lambda s: rt.execute("nope", s),                      # unknown plan
+    ):
+        try:
+            thunk(seq)
+        except RedTeamingError:
+            seq += 1
+        else:
+            raise AssertionError("expected refusal")
+    print("red-teaming OK: attack, probe, report, plan, execute, pins, audit")
 
 
 if __name__ == "__main__":
