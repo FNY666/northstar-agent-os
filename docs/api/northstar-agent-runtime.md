@@ -2653,6 +2653,140 @@ Look up any probe (attack or benign) by name.
 
 Map every probe name to its expected outcome.
 
+### `judge_calibration`
+
+Source: `components/northstar-agent-runtime/judge_calibration.py`
+
+Judge calibration metric (one-hundred-and-twenty-third batch).
+
+#### `JudgeCalibrationError`
+
+Fail-closed: malformed judge-calibration input.
+
+#### `JudgedSample`
+
+One judge-vs-reference verdict pair (payload-free).
+
+- `as_dict()`
+#### `classify_error(judge_verdict: str, reference_verdict: str)`
+
+Classify one judge/reference disagreement (or agreement).
+
+#### `build_sample(item_id: str, judge_verdict: str, reference_verdict: str, reference_source: str)`
+
+Build one judged sample, fail-closed on bad inputs.
+
+#### `JudgeErrorReport`
+
+Per-category judge-error measurement (digest-pinned).
+
+#### `measure_judge_error(judge_id: str, samples: list[JudgedSample])`
+
+Measure judge-model error per error category.
+
+#### `verify_judge_error_report(report: JudgeErrorReport)`
+
+Re-derive the report digest with constant-time compare.
+
+#### `cohen_kappa(samples: list[JudgedSample])`
+
+Cohen's kappa over judge vs reference verdicts.
+
+#### `CalibrationResult`
+
+Human-labeled calibration of one judge (digest-pinned).
+
+#### `calibrate_judge(judge_id: str, calibration_set_id: str, human_labeled: list[JudgedSample], *, error_tolerance: float=0.1, kappa_floor: float=0.6)`
+
+Calibrate a judge against a human-labeled calibration set.
+
+#### `verify_calibration_result(result: CalibrationResult)`
+
+Re-derive the calibration digest with constant-time compare.
+
+#### `CanaryItem`
+
+One benchmark-contamination canary.
+
+- `as_dict()`
+#### `build_canary(canary_id: str, trap_kind: str, known_label: str, judge_verdict: str)`
+
+#### `ContaminationReport`
+
+Canary-based contamination probe outcome (digest-pinned).
+
+#### `contamination_probe(judge_id: str, canaries: list[CanaryItem], *, suspicion_threshold: int=1)`
+
+Run the canary set against judge verdicts.
+
+#### `verify_contamination_report(report: ContaminationReport)`
+
+#### `probe_names()`
+
+#### `benign_names()`
+
+#### `probes_by_family(family: str)`
+
+#### `probe_by_name(name: str)`
+
+#### `expected_outcomes()`
+
+### `self_replication_probes`
+
+Source: `components/northstar-agent-runtime/self_replication_probes.py`
+
+Self-replication probe corpus + replication-chain detector.
+
+#### `payload_digest(text: str)`
+
+Digest-pin one payload's bytes.
+
+#### `HopRecord`
+
+One host-reported hop in a replication trace.
+
+#### `build_record(seq: int, node_id: str, payload_text: str, channel: str, origin_trust: str, recorded_at: str, *, previous_digest: str='')`
+
+Build and digest-pin one hop record. Fail-closed on bad inputs.
+
+#### `verify_record(record: HopRecord)`
+
+Re-derive a record's digest with constant-time compare.
+
+#### `ReplicationTrace`
+
+Append-only host-reported replication trace.
+
+- `append(record: HopRecord)`
+  - Append one record. Fail-closed on:
+- `records()`
+  - The trace so far, oldest first.
+- `detect_verbatim_chain(payload: str, *, min_hops: int=2)`
+  - Find verbatim replication of one payload.
+- `detect_walk_off(payload: str)`
+  - Find trust-label escalation over a persistent payload.
+- `chain_digest()`
+  - Digest-pin the whole trace for the audit trail.
+#### `probe_names()`
+
+All self-replication probe names.
+
+#### `benign_names()`
+
+All benign control names.
+
+#### `probes_by_family(family: str)`
+
+Attack probes in one family.
+
+#### `probe_by_name(name: str)`
+
+Look up any probe (attack or benign) by name.
+
+#### `expected_outcomes()`
+
+Map every probe name to its expected outcome.
+
 ### `memory_supersession`
 
 Source: `components/northstar-agent-runtime/memory_supersession.py`
