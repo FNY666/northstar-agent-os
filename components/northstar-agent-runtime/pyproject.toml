@@ -60,6 +60,8 @@ py-modules = [
     "asi04_probes",
     "message_signing",
     "pocketos_probe",
+    "temporal_decoupling_probe",
+    "rule_of_two_probe",
     "crypto_agility",
     "a2abreak_probes",
     "adjudication",
