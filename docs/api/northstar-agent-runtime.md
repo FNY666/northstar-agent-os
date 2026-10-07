@@ -4675,6 +4675,358 @@ One-call convenience: parse, diff, and assess two schemas.
 
 #### `main()`
 
+### `cci_detector`
+
+Source: `components/northstar-agent-runtime/cci_detector.py`
+
+Cryptographic Context Injection (CCI) detector.
+
+#### `CciFinding`
+
+One detected CCI-shaped payload.
+
+#### `find_cci_payloads(text: str)`
+
+Return all CCI-shaped payloads in text (may be empty).
+
+#### `detect_cci(text: str)`
+
+True if text contains an encoded payload decoding to instructions.
+
+#### `cci_audit_event(text: str, *, seq: int)`
+
+Build an audit-shaped record for a CCI scan (for audit.ndjson/1).
+
+#### `main()`
+
+### `credential_detector`
+
+Source: `components/northstar-agent-runtime/credential_detector.py`
+
+Hardcoded credential detector for MCP configs and agent surfaces.
+
+#### `CredentialType`
+
+Fixed vocabulary of credential kinds this detector recognizes.
+
+#### `CredentialFinding`
+
+One detected hardcoded credential.
+
+#### `mask_value(raw: str)`
+
+Mask a secret to first-2 + asterisks + last-2.
+
+#### `scan_for_credentials(text: str)`
+
+Scan text for hardcoded credentials.
+
+#### `main()`
+
+### `sycophancy_detector`
+
+Source: `components/northstar-agent-runtime/sycophancy_detector.py`
+
+Sycophancy detector: agreement vs source-deference channels.
+
+#### `SycophancyType`
+
+The two channels of sycophancy.
+
+#### `detect_agreement_sycophancy(response: str, user_opinion: str)`
+
+True when the response agrees with a user opinion flagged as false.
+
+#### `detect_source_deference(response: str, claimed_source: str)`
+
+True when the response defers to a claimed source flagged as false/unverified.
+
+#### `SycophancyFinding`
+
+One detected sycophancy instance.
+
+- `as_dict()`
+#### `SycophancyReport`
+
+Aggregate findings for one response.
+
+- `channels()`
+- `has_channel(channel: SycophancyType)`
+- `as_dict()`
+#### `analyze_response(response: str, *, false_user_opinion: Optional[str]=None, false_claimed_source: Optional[str]=None)`
+
+Run both channel detectors over one response.
+
+#### `main()`
+
+### `deception_detector`
+
+Source: `components/northstar-agent-runtime/deception_detector.py`
+
+Deceptive reasoning detector: false claims, evidence concealment, source fabrication.
+
+#### `DeceptionType`
+
+The three deception failure modes this module detects.
+
+#### `Evidence`
+
+Structured evidence the claim is checked against.
+
+#### `DetectionResult`
+
+Structured verdict of :func:`analyze_deception`.
+
+#### `analyze_deception(claimed: str, evidence: Evidence)`
+
+Analyze a claim against evidence; fixed check order, first hit wins.
+
+#### `detect_deception(claimed: str, evidence: Evidence)`
+
+True when the claim contradicts the evidence in any of the three modes.
+
+#### `classify_deception(claimed: str, evidence: Evidence)`
+
+The deception mode, or None when the claim is clean.
+
+#### `main()`
+
+### `injection_detector`
+
+Source: `components/northstar-agent-runtime/injection_detector.py`
+
+Prompt injection detector: direct, indirect, and jailbreak patterns.
+
+#### `InjectionType`
+
+The three injection families, ordered by severity.
+
+#### `InjectionFinding`
+
+One matched injection pattern.
+
+- `as_dict()`
+#### `InjectionDetectorError`
+
+Base class for injection-detector input errors. Never raised directly.
+
+#### `scan_injection(text: str)`
+
+Return every injection finding in ``text``, in document order.
+
+#### `detect_injection(text: str)`
+
+``True`` when ``text`` contains any known injection pattern.
+
+#### `classify_injection(text: str)`
+
+The most severe injection family in ``text``, or ``None`` if clean.
+
+#### `main()`
+
+Self-check: known-bad samples flag, known-good samples pass.
+
+### `memory_combo`
+
+Source: `components/northstar-agent-runtime/memory_combo.py`
+
+Memory combo gate: consent OR capability admission + fact/belief + bitemporal store.
+
+#### `ComboError`
+
+The combo gate was misconfigured. Raised, never silent.
+
+#### `ComboDecision`
+
+One combo-level write/read verdict, for the audit trail.
+
+#### `MemoryGate`
+
+One write path and one read path over the four memory modules.
+
+- `decisions()`
+  - All combo-level verdicts, in order.
+- `denied()`
+  - Only the denials, in order.
+- `write(content: Any, category: Any, auth: Any, seq: Any, *, mem_type: fb_mod.MemoryType=fb_mod.MemoryType.FACT, confidence: float=1.0, source: str='memory-combo', privilege: fb_mod.PrivilegeLevel=fb_mod.PrivilegeLevel.PRIVATE)`
+  - Write one memory record through admission + typing + store.
+- `read(record_id: Any, reader_privilege: Any, seq: Any)`
+  - Read one record with privilege-at-recall.
+#### `main()`
+
+### `mcp_combo`
+
+Source: `components/northstar-agent-runtime/mcp_combo.py`
+
+MCP tools/list drift check: hash tripwire + semantic classification.
+
+#### `ComboVerdict`
+
+Verdict of the two-stage MCP drift gate.
+
+- `as_dict()`
+#### `check_tools_list(server: str, baseline: McpToolSnapshot, new_list: Sequence[Mapping[str, Any]], baseline_raw: Sequence[Mapping[str, Any]] | None=None)`
+
+Two-stage MCP drift gate: hash tripwire, then semantic classification.
+
+#### `main()`
+
+### `budget_combo`
+
+Source: `components/northstar-agent-runtime/budget_combo.py`
+
+Combined budget: per-call ceiling + token bucket, checked together.
+
+#### `ComboDenied`
+
+Raised when a call is refused by the combined budget.
+
+#### `ComboCharge`
+
+Frozen record of one admitted call.
+
+#### `ComboBudget`
+
+Cost guard + rate guard checked together, atomically.
+
+- `check_and_charge(call_type: str, estimated_cost_usd: float, current_seq: int)`
+  - Check both guards and charge when both pass.
+- `try_charge(call_type: str, estimated_cost_usd: float, current_seq: int)`
+  - Non-raising variant: returns ``(True, charge)`` or ``(False, denial)``. Validation errors (unknown type, malformed inputs) still raise — only guard refusals are returned.
+- `observe_model(usage: Any, model: str)`
+  - Reconcile a model call's actual provider-reported cost.
+- `charges` (property)
+- `bucket_rejections` (property)
+- `total_spent_usd` (property)
+- `remaining` (property)
+- `exhausted` (property)
+- `tokens_for(call_type: str)`
+- `retry_in_seqs(call_type: str, cost: float, current_seq: int)`
+- `as_dict()`
+#### `main()`
+
+### `approval_chain`
+
+Source: `components/northstar-agent-runtime/approval_chain.py`
+
+Approval chain: SLA queue -> signed receipt -> edge gate, wired end to end.
+
+#### `ChainDecision`
+
+Full record of one execute_with_approval verdict.
+
+#### `ApprovalChain`
+
+One object wiring the approval SLA queue, receipt reflux, and edge gate.
+
+- `request_approval(action: str, reason: str, current_seq: int, sla_ticks: int | None=None)`
+  - Park ``action`` in the SLA queue. Returns the request id.
+- `poll(request_id: str, current_seq: int)`
+  - Observe a parked request: pending / approved / denied / expired.
+- `approve(request_id: str, approver: str, current_seq: int, approved: bool=True)`
+  - Record the human decision; on approval mint and deliver a receipt.
+- `collect_receipt(request_id: str)`
+  - Take the delivered receipt for ``request_id`` (consumes it).
+- `execute_with_approval(action: Mapping[str, Any], receipt: Any, *, current_seq: int=0)`
+  - Gate one execution: receipt verification + action binding + edge gate.
+- `execute_detailed(action: Any, receipt: Any, *, current_seq: int=0)`
+  - Same as :meth:`execute_with_approval` with the full record.
+#### `main()`
+
+### `mcp_pivoting_detector`
+
+Source: `components/northstar-agent-runtime/mcp_pivoting_detector.py`
+
+MCP Protocol Pivoting detector: refuse tool calls that reach internal targets.
+
+#### `PivotingAttempt`
+
+Frozen record of one inspected tool call.
+
+- `as_dict()`
+#### `detect_pivoting(tool_call: Mapping[str, Any])`
+
+True when the tool call attempts to reach an internal target.
+
+#### `inspect_tool_call(tool_call: Mapping[str, Any])`
+
+Inspect one tool call and return the frozen attempt record.
+
+#### `check_tool_call(tool_name: str, url: str)`
+
+One-call convenience for the dispatch site.
+
+#### `main()`
+
+Self-check smoke: blocked internals, allowed externals.
+
+### `skill_scanner`
+
+Source: `components/northstar-agent-runtime/skill_scanner.py`
+
+Static supply-chain scanner for agent skill code.
+
+#### `RiskLevel`
+
+Ordered risk levels; string values keep reports JSON-serializable.
+
+#### `Issue`
+
+One scanner finding: which rule fired, how bad, where, and why.
+
+#### `SkillReport`
+
+The verdict for one scanned skill.
+
+- `issue_count` (property)
+- `has_critical` (property)
+- `summary()`
+#### `scan_skill(skill_code: str, skill_name: str='skill')`
+
+Scan skill source and return a frozen :class:`SkillReport`.
+
+#### `classify_report(report: SkillReport)`
+
+Map a report onto ESET's install-time taxonomy.
+
+#### `main()`
+
+Self-check demo: clean vs malicious skill.
+
+### `approval_sla_time`
+
+Source: `components/northstar-agent-runtime/approval_sla_time.py`
+
+SLA-bound approval queue, wall-clock variant.
+
+#### `ApprovalRequest`
+
+One approval request parked for a human decision.
+
+- `deadline` (property)
+  - Wall-clock instant after which the request is expired.
+- `is_expired()`
+  - True when the wall clock has passed the SLA deadline.
+#### `ApprovalQueue`
+
+SLA-bound intake queue with wall-clock deadlines.
+
+- `enqueue(action: str, reason: str, timeout_seconds: float)`
+  - Park an action for human approval.
+- `get(request_id: str)`
+  - Return the stored record. Raises ``KeyError`` if unknown.
+- `poll(request_id: str)`
+  - Observe a request's status against the wall clock.
+- `decide(request_id: str, approved: bool, decider: str)`
+  - Record a human decision. Only pending requests can be decided.
+- `pending()`
+  - Requests still awaiting a decision (not yet observed expired).
+- `expired()`
+  - Requests whose SLA lapsed with no decision (fail closed).
+- `decided()`
+  - Requests with a recorded human decision.
+#### `main()`
+
 ### `budget_token_bucket`
 
 Source: `components/northstar-agent-runtime/budget_token_bucket.py`
