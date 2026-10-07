@@ -1,12 +1,12 @@
 # Northstar Agent OS
 
-**面向自主 AI 同事的开放、可靠、可治理 Agent 操作系统。**
+**一个带权限门、预算上限和审计日志的小型 agent 运行环境。**
 
 > 中文名：北辰智能体系统
 
 [English](../README.md) · [简体中文](README.zh-CN.md) · [繁體中文](README.zh-TW.md) · [日本語](README.ja.md) · [Español](README.es.md) · [한국어](README.ko.md) · [Français](README.fr.md) · [Deutsch](README.de.md) · [Português (Brasil)](README.pt-BR.md) · [Italiano](README.it.md) · [Türkçe](README.tr.md) · [Tiếng Việt](README.vi.md)
 
-**一句话说明：** Northstar 是**次世代 Agent 操作系统**：统一入口 `northstar agent`、可见边界、可审计、可恢复。内核由 runtime / contract / host / durable / sidecar / interop 等子系统组成。**目前还不是已经完成的多智能体平台**（无托管云、无并行舰队）；今天交付的是焊死的产品路径 + 可证明的治理内核、**默认拒绝的沙箱 `Shell`**（有 bubblewrap 时 OS 隔离，否则诚实的 process 回退——见 [concepts/threat-model.md](concepts/threat-model.md)），以及 **Northstar Codex Sidecar**——一个受限的本地工作器适配器（read-only、ephemeral、仅 Unix socket）。
+**一句话说明：** Northstar 是一个小型的、还在打磨中的 agent 运行环境：统一入口 `northstar agent`、可见边界、可审计、可恢复。内核由 runtime / contract / host / durable / sidecar / interop 等子系统组成。**不是**已经完成的多智能体平台（无托管云、无并行舰队）；今天交付的是实实在在能用的基础件：**默认拒绝的沙箱 `Shell`**（有 bubblewrap 时 OS 隔离，否则诚实的 process 回退——见 [concepts/threat-model.md](concepts/threat-model.md)），以及 **Northstar Codex Sidecar**——一个受限的本地工作器适配器（read-only、ephemeral、仅 Unix socket）。
 > English is the canonical project entry. Translations mirror its scope and security claims; update them when the canonical README changes.
 
 ## 它是什么

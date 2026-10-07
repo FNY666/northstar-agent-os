@@ -1,12 +1,12 @@
 # Northstar Agent OS
 
-**Open, reliable, and governed runtime for autonomous AI coworkers.**
+**A small agent runtime with permission gates, budgets, and an audit trail.**
 
 > 中文名：北辰智能体系统
 
 [English](README.md) · [简体中文](docs/README.zh-CN.md) · [繁體中文](docs/README.zh-TW.md) · [日本語](docs/README.ja.md) · [Español](docs/README.es.md) · [한국어](docs/README.ko.md) · [Français](docs/README.fr.md) · [Deutsch](docs/README.de.md) · [Português (Brasil)](docs/README.pt-BR.md) · [Italiano](docs/README.it.md) · [Türkçe](docs/README.tr.md) · [Tiếng Việt](docs/README.vi.md)
 
-**In one sentence:** Northstar is a **next-generation Agent operating system** with a governed kernel — one entry (`northstar agent`), visible boundaries, auditability, and recoverable execution. The kernel is assembled from explicit subsystems (runtime, contract, host, durable, sidecar, interop). **It is not yet a finished multi-agent platform** (no hosted cloud, no parallel fleets); what ships today is a real product path on top of battle-tested governance primitives, a **default-deny sandboxed `Shell`** (bubblewrap when usable, honest process fallback otherwise — see [docs/concepts/threat-model.md](docs/concepts/threat-model.md)), plus the Northstar Codex Sidecar as a restricted local worker adapter.
+**In one sentence:** Northstar is a small, work-in-progress agent runtime — one entry (`northstar agent`), visible boundaries, auditability, and recoverable execution. The kernel is assembled from explicit subsystems (runtime, contract, host, durable, sidecar, interop). It is **not** a finished multi-agent platform (no hosted cloud, no parallel fleets); what ships today is the useful plumbing for running agents without surprises: a **default-deny sandboxed `Shell`** (bubblewrap when usable, honest process fallback otherwise — see [docs/concepts/threat-model.md](docs/concepts/threat-model.md)), plus the Northstar Codex Sidecar as a restricted local worker adapter.
 > English is the canonical project entry. Translations mirror its scope and security claims; update them when this file changes.
 
 ## What it is
@@ -132,7 +132,7 @@ Do not expose the Unix socket through a TCP proxy. Never commit API keys, OAuth 
 
 ## Project status
 
-Northstar is building a **next-gen Agent OS incrementally**. The product entry, governed kernel, default-deny sandboxed `Shell`, checkpoint-fork `resume`, parallel-safe tool batches, and signed handoff bridge are real; hosted cloud and turnkey vendor-CLI fleets remain out of scope. Do not treat this repository as a finished autonomous-agent platform.
+Northstar is a work in progress, built piece by piece. The product entry, governed kernel, default-deny sandboxed `Shell`, checkpoint-fork `resume`, parallel-safe tool batches, and signed handoff bridge are real; hosted cloud and turnkey vendor-CLI fleets remain out of scope. Do not treat this repository as a finished autonomous-agent platform.
 ## Contributing
 
 See [CONTRIBUTING.md](CONTRIBUTING.md). Security reports: [SECURITY.md](SECURITY.md).
