@@ -3151,6 +3151,72 @@ Sweep a set, runs, and assertions for loop violations.
 
 #### `main()`
 
+### `per_action_autonomy_probes`
+
+Source: `components/northstar-agent-runtime/per_action_autonomy_probes.py`
+
+Per-action autonomy probes (per-action autonomy levels, immutable-object approval, action-level gates).
+
+#### `PerActionAutonomyError`
+
+An autonomy level, approval, action, or gate record that refuses to be built.
+
+#### `AutonomyAction`
+
+One action submitted to the autonomy gate.
+
+- `immutable_object_digest` (property)
+  - The immutable object the approval must name: tool + arguments.
+#### `ImmutableApproval`
+
+An explicit approval bound to one immutable object.
+
+- `pinned()`
+  - Return a copy with the digest computed.
+#### `verify_approval(approval: ImmutableApproval)`
+
+Re-derive the approval digest with a constant-time compare.
+
+#### `AutonomyVerdict`
+
+One gate verdict for one action: digest-pinned over the action's identity, its assigned level, its ceiling, and the decision.
+
+- `pinned()`
+#### `verify_verdict(verdict: AutonomyVerdict)`
+
+Re-derive the verdict digest with a constant-time compare.
+
+#### `AutonomyGate`
+
+Assigns one verdict per action. Levels are per action; approvals bind immutable objects; standing grants do not exist.
+
+- `approve(approval: ImmutableApproval)`
+- `decide(action: AutonomyAction, *, approval: ImmutableApproval | None=None, level_at_dispatch: str | None=None)`
+  - Return the per-action verdict for ``action``.
+#### `attack_probe_names()`
+
+All per-action autonomy attack probe names.
+
+#### `benign_probe_names()`
+
+All benign control names.
+
+#### `probes_in_family(family: str)`
+
+Attack probes in one family.
+
+#### `probe_by_name(name: str)`
+
+Look up any probe (attack or benign) by name.
+
+#### `expected_outcomes()`
+
+Map every probe name to its expected outcome.
+
+#### `main()`
+
+Print the corpus summary: attack/benign counts and family listing.
+
 ### `pre_completion_signal_probes`
 
 Source: `components/northstar-agent-runtime/pre_completion_signal_probes.py`
