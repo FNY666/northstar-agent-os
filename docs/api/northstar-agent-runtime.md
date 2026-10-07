@@ -3455,6 +3455,142 @@ Probe name -> expected outcome ('deny' or 'allow').
 
 Print the corpus summary (diagnostic entry point).
 
+### `commerce_mandate_probes`
+
+Source: `components/northstar-agent-runtime/commerce_mandate_probes.py`
+
+Agentic-commerce mandate probe corpus + forged / replay / amount-switch probes.
+
+#### `CommerceMandate`
+
+A digest-pinned payment mandate.
+
+#### `build_mandate(mandate_id: str, payer_id: str, authorized_agent: str, payee_id: str, amount_minor: int, currency: str, task_digest: str, issuer_id: str, expires_iso: str='')`
+
+Build a digest-pinned commerce mandate (fail-closed on bad inputs).
+
+#### `verify_mandate(mandate: CommerceMandate)`
+
+Constant-time digest verification of a mandate record.
+
+#### `MandateLedger`
+
+Append-only ledger of consumed mandate digests.
+
+- `is_consumed(digest: str)`
+- `consume(digest: str)`
+  - Consume a mandate digest. Returns False if already consumed.
+- `consumed_count()`
+#### `authorize_payment(mandate: CommerceMandate, *, amount_minor: int, currency: str, payee_id: str, task_digest: str, ledger: MandateLedger, now_iso: str, issuer_registry: Any)`
+
+Authorize one payment attempt against one mandate.
+
+#### `attack_probe_names()`
+
+Names of the attack probes (expected deny).
+
+#### `benign_probe_names()`
+
+Names of the benign control probes (expected allow).
+
+#### `probes_in_family(family: str)`
+
+All probes (attack + benign) in a corpus family.
+
+#### `probe_by_name(name: str)`
+
+Look up a probe by name (raises KeyError on unknown names).
+
+#### `expected_outcomes()`
+
+Probe name -> expected outcome ('deny' or 'allow').
+
+#### `main()`
+
+Print the corpus summary (diagnostic entry point).
+
+### `negotiation_corpus_probes`
+
+Source: `components/northstar-agent-runtime/negotiation_corpus_probes.py`
+
+Negotiation-corpus probes (reputation attestation forgery, want-registry poisoning, counter-offer laundering).
+
+#### `NegotiationCorpusError`
+
+A negotiation record that refuses to be built.
+
+#### `ReputationAttestation`
+
+One third-party claim about one agent's past behavior.
+
+- `pinned()`
+  - Return a copy with the digest pin computed.
+- `verify()`
+  - Recompute the pin; constant-time compare, never raises.
+#### `WantRegistryEntry`
+
+One offer in the want-registry: agent X offers service Y.
+
+- `pinned()`
+  - Return a copy with the digest pin computed.
+- `verify()`
+  - Recompute the pin; constant-time compare, never raises.
+#### `CounterOfferBinding`
+
+The negotiated counter offer bound to what was actually executed.
+
+- `pinned()`
+  - Return a copy with the digest pin computed.
+- `verify()`
+  - Recompute the pin; constant-time compare, never raises.
+#### `NegotiationFinding`
+
+One named finding, always naming the family it came from.
+
+- `pinned()`
+  - Return a copy with the digest pin computed.
+- `verify()`
+  - Recompute the pin; constant-time compare, never raises.
+#### `detect_attestation_forgery(attestation: ReputationAttestation, expected_subject: str, as_of: str)`
+
+Check a reputation attestation for the forgery shapes.
+
+#### `verify_registry_integrity(entries: tuple[WantRegistryEntry, ...], pinned_head_digest: str)`
+
+Verify every registry entry against the pinned registry head.
+
+#### `verify_counter_offer(binding: CounterOfferBinding)`
+
+Check that executed terms are the negotiated counter terms.
+
+#### `agreement_is_not_authorization(negotiation_record_digest: str)`
+
+Deterministic refusal: a negotiation record is never a gate verdict.
+
+#### `attack_probe_names()`
+
+All negotiation-corpus attack probe names.
+
+#### `benign_probe_names()`
+
+All benign control names.
+
+#### `probes_in_family(family: str)`
+
+Attack probes in one family.
+
+#### `probe_by_name(name: str)`
+
+Look up any probe (attack or benign) by name.
+
+#### `expected_outcomes()`
+
+Map every probe name to its expected outcome.
+
+#### `main()`
+
+Print the corpus summary: attack/benign counts and family listing.
+
 ### `refusal_pattern_probes`
 
 Source: `components/northstar-agent-runtime/refusal_pattern_probes.py`
