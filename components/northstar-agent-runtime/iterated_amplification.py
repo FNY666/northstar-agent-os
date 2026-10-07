@@ -75,6 +75,9 @@ DEFAULT_MAX_DEPTH = 8
 #: Default cap on children per decomposition.
 DEFAULT_MAX_BRANCHING = 16
 
+#: Default cap on full IDA loop iterations per driver.
+DEFAULT_MAX_ROUNDS = 64
+
 
 class AmplificationError(ValueError):
     """Raised for structural amplification violations (fail-closed)."""
@@ -265,6 +268,47 @@ class DistillationPair:
         }
 
 
+@dataclass(frozen=True)
+class DistillationRecord:
+    """One explicitly booked distillation checkpoint.
+
+    Unlike the automatic ``DistillationPair`` appended by ``combine``,
+    a ``DistillationRecord`` is the deliberate *distillation step* of the
+    IDA loop: the host declares that the amplified answer for ``task_id``
+    is now the training target for the weak agent. ``digest`` pins
+    (task_id, combined_digest, leaf_count, seq).
+    """
+
+    task_id: str
+    combined_digest: str
+    leaf_count: int
+    seq: int
+    digest: str
+
+    def __post_init__(self) -> None:
+        _require_non_empty_str(self.task_id, "task_id")
+        if not isinstance(self.combined_digest, str) or not self.combined_digest.startswith(
+            "sha256:"
+        ):
+            raise AmplificationError("combined_digest must be a sha256: pin")
+        _require_int_seq(self.leaf_count, "leaf_count")
+        if self.leaf_count < 1:
+            raise AmplificationError("leaf_count must be >= 1")
+        _require_int_seq(self.seq, "seq")
+        if not isinstance(self.digest, str) or not self.digest.startswith("sha256:"):
+            raise AmplificationError("digest must be a sha256: pin")
+
+    def as_dict(self) -> dict:
+        return {
+            "schema": SCHEMA_PIN,
+            "task_id": self.task_id,
+            "combined_digest": self.combined_digest,
+            "leaf_count": self.leaf_count,
+            "seq": self.seq,
+            "digest": self.digest,
+        }
+
+
 class Amplifier:
     """Owns the decomposition tree and combination bookkeeping.
 
@@ -289,6 +333,7 @@ class Amplifier:
         self._tasks: dict[str, Task] = {}
         self._children: dict[str, tuple[str, ...]] = {}
         self._distillation: list[DistillationPair] = []
+        self._distillations: list[DistillationRecord] = []
 
     @property
     def max_depth(self) -> int:
@@ -556,6 +601,48 @@ class Amplifier:
         """(task, amplified answer) pairs for the distillation loop."""
         return tuple(self._distillation)
 
+    def distill(self, task_id: str, *, seq: int) -> DistillationRecord:
+        """Book an explicit distillation checkpoint for a completed task.
+
+        Fail-closed: unknown task, or no completed combination for the
+        task yet (distillation requires an amplified answer to imitate).
+        The record pins the task's latest ``DistillationPair``.
+        """
+        _require_non_empty_str(task_id, "task_id")
+        if task_id not in self._tasks:
+            raise AmplificationError(f"unknown task: {task_id!r}")
+        seq = _require_int_seq(seq, "seq")
+        pair: DistillationPair | None = None
+        for candidate in reversed(self._distillation):
+            if candidate.task_id == task_id:
+                pair = candidate
+                break
+        if pair is None:
+            raise AmplificationError(
+                f"no completed combination to distill: {task_id!r}"
+            )
+        digest = _digest_pin(
+            "distill", task_id, pair.combined_digest, str(pair.leaf_count), str(seq)
+        )
+        record = DistillationRecord(
+            task_id=task_id,
+            combined_digest=pair.combined_digest,
+            leaf_count=pair.leaf_count,
+            seq=seq,
+            digest=digest,
+        )
+        self._distillations.append(record)
+        return record
+
+    def distillation_records(
+        self, task_id: str | None = None
+    ) -> tuple[DistillationRecord, ...]:
+        """Booked distillation checkpoints, optionally filtered by task."""
+        if task_id is None:
+            return tuple(self._distillations)
+        _require_non_empty_str(task_id, "task_id")
+        return tuple(r for r in self._distillations if r.task_id == task_id)
+
     def amplification_audit_event(self, result: AmplifiedResult, *, seq: int) -> dict:
         """Audit-shaped record for a completed combination."""
         if not isinstance(result, AmplifiedResult):
@@ -563,6 +650,167 @@ class Amplifier:
         event = result.as_dict()
         event["audit_seq"] = _require_int_seq(seq, "seq")
         return event
+
+
+@dataclass(frozen=True)
+class IterationReport:
+    """One completed IDA loop iteration, pinned and frozen.
+
+    ``round`` counts loop iterations on the driving
+    ``IteratedAmplification`` instance. ``digest`` pins
+    (task_id, round, combined_digest, seq).
+    """
+
+    task_id: str
+    round: int
+    leaf_count: int
+    combined_digest: str
+    partial: bool
+    seq: int
+    digest: str
+
+    def __post_init__(self) -> None:
+        _require_non_empty_str(self.task_id, "task_id")
+        _require_int_seq(self.round, "round")
+        if self.round < 1:
+            raise AmplificationError("round must be >= 1")
+        _require_int_seq(self.leaf_count, "leaf_count")
+        if self.leaf_count < 1:
+            raise AmplificationError("leaf_count must be >= 1")
+        if not isinstance(self.combined_digest, str) or not self.combined_digest.startswith(
+            "sha256:"
+        ):
+            raise AmplificationError("combined_digest must be a sha256: pin")
+        if not isinstance(self.partial, bool):
+            raise AmplificationError("partial must be a bool")
+        _require_int_seq(self.seq, "seq")
+        if not isinstance(self.digest, str) or not self.digest.startswith("sha256:"):
+            raise AmplificationError("digest must be a sha256: pin")
+
+    def as_dict(self) -> dict:
+        return {
+            "schema": SCHEMA_PIN,
+            "task_id": self.task_id,
+            "round": self.round,
+            "leaf_count": self.leaf_count,
+            "combined_digest": self.combined_digest,
+            "partial": self.partial,
+            "seq": self.seq,
+            "digest": self.digest,
+        }
+
+
+class IteratedAmplification:
+    """IDA loop driver: the spec API over an ``Amplifier``.
+
+    * ``amplify`` delegates decomposition to the owned amplifier.
+    * ``distill`` books an explicit distillation checkpoint.
+    * ``iterate`` runs one complete loop iteration on a fresh root task
+      (register -> amplify -> combine -> distill) and pins it as a frozen
+      ``IterationReport``. Rounds count loop iterations on this driver;
+      the round cap is fail-closed.
+
+    The driver records structure and pins results. It does not answer
+    the decomposed questions: ``leaf_outputs`` and ``synthesized`` are
+    host-declared, and the module pins their digests only.
+    """
+
+    def __init__(
+        self, amplifier: Amplifier | None = None, *, max_rounds: int = DEFAULT_MAX_ROUNDS
+    ) -> None:
+        if amplifier is not None and not isinstance(amplifier, Amplifier):
+            raise AmplificationError("amplifier must be an Amplifier")
+        if (
+            isinstance(max_rounds, bool)
+            or not isinstance(max_rounds, int)
+            or max_rounds < 1
+        ):
+            raise AmplificationError("max_rounds must be a positive int")
+        self._amp = amplifier if amplifier is not None else Amplifier()
+        self._max_rounds = max_rounds
+        self._round = 0
+        self._iterations: list[IterationReport] = []
+
+    @property
+    def amplifier(self) -> Amplifier:
+        return self._amp
+
+    @property
+    def max_rounds(self) -> int:
+        return self._max_rounds
+
+    @property
+    def round(self) -> int:
+        """Loop iterations completed so far."""
+        return self._round
+
+    def amplify(
+        self, task_id: str, plan: Mapping[str, Iterable[str]], *, depth: int, seq: int
+    ) -> AmplificationTree:
+        """Delegate decomposition to the owned amplifier."""
+        return self._amp.amplify(task_id, plan, depth=depth, seq=seq)
+
+    def distill(self, task_id: str, *, seq: int) -> DistillationRecord:
+        """Delegate the distillation checkpoint to the owned amplifier."""
+        return self._amp.distill(task_id, seq=seq)
+
+    def iterate(
+        self,
+        description: str,
+        task_id: str,
+        plan: Mapping[str, Iterable[str]],
+        leaf_outputs: Mapping[str, str],
+        *,
+        depth: int,
+        synthesized: str,
+        seq: int,
+        allow_partial: bool = False,
+    ) -> IterationReport:
+        """Run one complete IDA loop iteration on a fresh root task.
+
+        Registers ``task_id`` as a root, amplifies per ``plan`` to
+        ``depth`` levels, combines the host-declared ``leaf_outputs``
+        into ``synthesized``, and books the distillation checkpoint.
+        Fail-closed: round cap reached, duplicate task id, or any
+        amplification/combination/distillation violation.
+        """
+        if self._round >= self._max_rounds:
+            raise AmplificationError(f"max_rounds {self._max_rounds} reached")
+        _require_non_empty_str(description, "description")
+        seq = _require_int_seq(seq, "seq")
+        self._amp.register_root(description, task_id=task_id, seq=seq)
+        self._amp.amplify(task_id, plan, depth=depth, seq=seq)
+        result = self._amp.combine(
+            task_id,
+            leaf_outputs,
+            synthesized=synthesized,
+            seq=seq,
+            allow_partial=allow_partial,
+        )
+        self._amp.distill(task_id, seq=seq)
+        self._round += 1
+        report = IterationReport(
+            task_id=task_id,
+            round=self._round,
+            leaf_count=len(result.leaf_ids),
+            combined_digest=result.combined_digest,
+            partial=result.partial,
+            seq=seq,
+            digest=_digest_pin(
+                "iteration", task_id, str(self._round), result.combined_digest, str(seq)
+            ),
+        )
+        self._iterations.append(report)
+        return report
+
+    def iterations(
+        self, task_id: str | None = None
+    ) -> tuple[IterationReport, ...]:
+        """Completed iteration reports, optionally filtered by task."""
+        if task_id is None:
+            return tuple(self._iterations)
+        _require_non_empty_str(task_id, "task_id")
+        return tuple(r for r in self._iterations if r.task_id == task_id)
 
 
 def main() -> None:
@@ -598,6 +846,24 @@ def main() -> None:
         "r", {"r.0": "ok"}, synthesized="half done", seq=3, allow_partial=True
     )
     assert partial.partial is True
+    # Spec API: IteratedAmplification driver with amplify/distill/iterate.
+    ida = IteratedAmplification(max_rounds=4)
+    report = ida.iterate(
+        "check the deploy",
+        "d0",
+        plan={"d0": ["run tests", "check logs"]},
+        leaf_outputs={"d0.0": "tests pass", "d0.1": "logs clean"},
+        depth=1,
+        synthesized="deploy is safe",
+        seq=1,
+    )
+    assert report.round == 1
+    assert report.leaf_count == 2
+    assert report.partial is False
+    assert ida.round == 1
+    assert len(ida.distill("d0", seq=2).as_dict()) == 6
+    assert len(ida.iterations()) == 1
+    assert ida.amplifier.verify_tree("d0")
     print(
         "iterated-amplification OK: decompose -> amplify -> combine -> "
         f"distill (schema {SCHEMA_PIN})"

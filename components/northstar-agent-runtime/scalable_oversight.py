@@ -17,6 +17,9 @@ three verdicts. :meth:`OversightProtocol.oversee` is the dispatch-time gate;
 :meth:`OversightProtocol.escalate` routes a ``needs_review`` action to the
 protocol's stronger method; :meth:`OversightProtocol.review` adjudicates a
 routed action once the stronger method has produced evidence.
+:class:`ScalableOversight` is the spec-named subclass: same protocol with
+:meth:`delegate` (alias of ``escalate``) and :meth:`audit` (alias of
+:func:`oversight_audit_event`).
 
 Decision rule (fixed order, deterministic, pure):
 1. deny-listed action type -> DENIED (policy, no discretion).
@@ -349,6 +352,34 @@ def oversight_audit_event(report: OversightReport, seq: int) -> dict:
     return event
 
 
+class ScalableOversight(OversightProtocol):
+    """Spec-named alias of :class:`OversightProtocol`.
+
+    Same triage protocol and semantics - ``oversee()`` is the dispatch-time
+    gate - with the spec's method names: :meth:`delegate` routes a
+    ``needs_review`` action to the protocol's stronger oversight method (the
+    ``escalate`` spelling), and :meth:`audit` shapes a decision as an audit
+    record (the ``oversight_audit_event`` spelling).
+    """
+
+    def delegate(self, action: OverseenAction) -> OversightReport:
+        """Spec API: delegate a needs_review action to the stronger method.
+
+        Additive alias of :meth:`OversightProtocol.escalate`; zero behavioral
+        change. Records the routing; the host runs the stronger method and
+        feeds the evidence back via :meth:`review`.
+        """
+        return self.escalate(action)
+
+    def audit(self, report: OversightReport, seq: int) -> dict:
+        """Spec API: shape an oversight decision as an audit record.
+
+        Additive alias of :func:`oversight_audit_event`; zero behavioral
+        change.
+        """
+        return oversight_audit_event(report, seq)
+
+
 def main() -> None:
     """Self-check: triage one of each verdict and a full escalate/review cycle."""
     protocol = OversightProtocol(
@@ -374,6 +405,20 @@ def main() -> None:
     assert final.verdict is Verdict.APPROVED, final
     final2 = protocol.review(high, StrongEvidence(OversightMethod.DEBATE, False, 0.9))
     assert final2.verdict is Verdict.DENIED, final2
+
+    # Spec API surface: ScalableOversight / delegate / audit (additive aliases).
+    spec = ScalableOversight(
+        method=OversightMethod.DIRECT,
+        threshold=0.5,
+        escalation_method=OversightMethod.AMPLIFICATION,
+    )
+    assert isinstance(spec, OversightProtocol)
+    routed2 = spec.delegate(high)
+    assert routed2.verdict is Verdict.NEEDS_REVIEW
+    assert routed2.method_used is OversightMethod.AMPLIFICATION
+    event = spec.audit(r1, 3)
+    assert event["event"] == "oversight-decision"
+    assert event["audit_seq"] == 3
 
     print("scalable-oversight OK: approve / route / escalate / review")
 
