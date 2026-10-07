@@ -7510,9 +7510,13 @@ A signed, attenuating delegation token (IBCT-style).
 
 Mint a signed delegation token.
 
-#### `verify_delegation_token(token: DelegationToken, delegator_public_key: bytes, *, now: float | None=None, expected_parent_hash: str | None=None, expected_audience: str | None=None, revocation_oracle: Callable[[DelegationToken], bool] | None=None, expected_root_hash: str | None=None, max_depth: int | None=None)`
+#### `verify_delegation_token(token: DelegationToken, delegator_public_key: bytes, *, now: float | None=None, expected_parent_hash: str | None=None, expected_audience: str | None=None, revocation_oracle: Callable[[DelegationToken], bool] | None=None, expected_root_hash: str | None=None, max_depth: int | None=None, chain_resolver: Callable[[str], DelegationToken | None] | None=None, public_key_for: Callable[[str], bytes | None] | None=None)`
 
 Verify a delegation token's signature, expiry, parent binding, and more.
+
+#### `verify_delegation_chain(token: DelegationToken, *, public_key_for: Callable[[str], bytes | None], chain_resolver: Callable[[str], DelegationToken | None] | None=None, now: float | None=None, expected_parent_hash: str | None=None, expected_audience: str | None=None, revocation_oracle: Callable[[DelegationToken], bool] | None=None, expected_root_hash: str | None=None, max_depth: int | None=None)`
+
+Verify a delegation chain leaf->root with cascade revocation.
 
 #### `normalise_names(values: Iterable[str] | None)`
 
