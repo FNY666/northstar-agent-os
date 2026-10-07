@@ -19,12 +19,23 @@ one audit line:
 """
 from __future__ import annotations
 
+import hashlib
 import json
+import math
 import re
+import threading
+from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Iterable
+from typing import Any, Callable, Iterable, Mapping
 
 from sessions import SESSION_FILE_SUFFIX, load_jsonl, validate_session_id
+
+try:  # the single canonicalizer (SIEM export section below)
+    from canonical_json import jcs_canonical_json
+except Exception:  # pragma: no cover - module must stay importable standalone
+    def jcs_canonical_json(obj: Any) -> bytes:  # type: ignore[no-redef]
+        return json.dumps(obj, sort_keys=True, separators=(",", ":"),
+                          ensure_ascii=True).encode("utf-8")
 
 AUDIT_SCHEMA_VERSION = "audit.ndjson/1"
 COMPONENT = "northstar-agent-runtime"
@@ -480,3 +491,695 @@ def session_path(directory: Path, session_id: str) -> Path:
     """The transcript file for one session id (mirrors the session_view lookup)."""
     validate_session_id(session_id)
     return directory / f"{session_id}{SESSION_FILE_SUFFIX}"
+
+
+# ---------------------------------------------------------------------------
+# SIEM export interface: filter, stream, and render audit records for
+# collectors (Splunk HEC / Elastic bulk / Sentinel shaped envelopes).
+#
+# Research note: production SIEM ingestion wants three things from an export
+# layer, and this section books each of them as deterministic single-host
+# bookkeeping:
+#
+# * **Filtering** — scope an export once (event kinds, severity levels, a
+#   caller-seq window), digest-pin the definition so every later evaluation
+#   reproduces the same record set. A filter is a frozen record, not a
+#   lambda, so it can be audited and re-verified.
+# * **Streaming** — cursor-paginated reads over the ledger in ``(seq,
+#   record_id)`` order, so arbitrarily large ledgers export in bounded pages
+#   with no wall-clock and no skipped or duplicated records. Cursors are
+#   tamper-evident: they carry the pinned filter's digest and are refused if
+#   forged or mixed across filters.
+# * **SIEM rendering** — envelopes collectors actually parse:
+#   newline-delimited JSON, CEF, and LEEF. This books *rendered bundles*,
+#   not deliveries: ``delivered=True`` means "the host sink reported
+#   success", never "the SIEM indexed it". The sink is host-injectable
+#   (``sink(bundle) -> bool``); the default accepts in memory so everything
+#   runs without a network.
+#
+# House style for this section: frozen dataclasses, caller int seqs strictly
+# increasing on mutations (reads validate seq shape only and consume
+# nothing), RLock-guarded, fail-closed, stdlib-only, ``sha256:`` digest pins,
+# ``audit.ndjson/1`` audit events.
+#
+# Honest scope: every record is host-reported; this pins what it was handed.
+# ``kinds`` filters on the payload's ``event`` field and ``severities`` on
+# its ``severity`` field — both host-controlled (GIGO). A rendered CEF/LEEF
+# line is a *claim* the host asked to be formatted, not proof the underlying
+# event happened.
+# ---------------------------------------------------------------------------
+
+#: Module version for the SIEM export section.
+AUDIT_EXPORT_IFACE_VERSION = "audit-export-siem.v1"
+
+#: Schema pin for records produced by the SIEM export section.
+SIEM_SCHEMA_PIN = "northstar.audit-export-siem.v1"
+
+#: Fixed audit vocabulary for the SIEM export section.
+_SIEM_AUDIT_KINDS = (
+    "record-ingested",
+    "filter-defined",
+    "filtered",
+    "streamed",
+    "export-rendered",
+    "rejected",
+)
+
+#: Pinned severity vocabulary (host-reported; used for filter + CEF/LEEF).
+_SIEM_SEVERITIES = ("info", "low", "medium", "high", "critical")
+
+#: CEF numeric severity per level.
+_SIEM_SEVERITY_NUM = {"info": 0, "low": 3, "medium": 5, "high": 8, "critical": 10}
+
+#: Pinned SIEM envelope vocabulary.
+_SIEM_FORMATS = ("json", "cef", "leef")
+
+#: Stream page size bounds.
+_SIEM_MIN_PAGE = 1
+_SIEM_MAX_PAGE = 1000
+
+
+class AuditExportError(Exception):
+    """Base error for the SIEM audit export."""
+
+
+class DuplicateRecordError(AuditExportError):
+    """Raised when a record id is ingested twice."""
+
+
+class UnknownRecordError(AuditExportError):
+    """Raised when a record id is not known."""
+
+
+class UnknownFilterError(AuditExportError):
+    """Raised when a filter id is not known."""
+
+
+class BadFilterError(AuditExportError):
+    """Raised for malformed filter definitions."""
+
+
+class BadCursorError(AuditExportError):
+    """Raised for malformed, forged, or cross-filter cursors."""
+
+
+class BadFormatError(AuditExportError):
+    """Raised for unknown SIEM envelope formats."""
+
+
+class SeqOrderError(AuditExportError):
+    """Raised when a mutation seq is not strictly increasing."""
+
+
+def _siem_check_seq(value: Any, name: str = "seq") -> int:
+    """Validate a caller seq (shape only; reads use this)."""
+    if isinstance(value, bool) or not isinstance(value, int):
+        raise AuditExportError(f"{name} must be an int, got {type(value).__name__}")
+    if value < 0:
+        raise AuditExportError(f"{name} must be non-negative")
+    return value
+
+
+def _siem_check_id(value: Any, name: str) -> str:
+    if not isinstance(value, str) or not value:
+        raise AuditExportError(f"{name} must be a non-empty str")
+    return value
+
+
+def _siem_canonicalize(obj: Any) -> Any:
+    """Canonicalize a payload; fail closed on anything unrepresentable."""
+    if obj is None or isinstance(obj, (bool, str)):
+        return obj
+    if isinstance(obj, int):
+        if abs(obj) > 2 ** 53:
+            raise AuditExportError("int magnitude beyond 2**53 refused (JCS float-loss caveat)")
+        return obj
+    if isinstance(obj, float):
+        if math.isnan(obj) or math.isinf(obj):
+            raise AuditExportError("NaN/inf refused")
+        if obj.is_integer() and abs(obj) > 2 ** 53:
+            raise AuditExportError("integral float magnitude beyond 2**53 refused")
+        return obj
+    if isinstance(obj, (list, tuple)):
+        return [_siem_canonicalize(v) for v in obj]
+    if isinstance(obj, Mapping):
+        for k in obj:
+            if not isinstance(k, str) or not k:
+                raise AuditExportError(f"bad mapping key {k!r}")
+        return {k: _siem_canonicalize(obj[k]) for k in sorted(obj)}
+    raise AuditExportError(f"non-canonicalizable value of type {type(obj).__name__}")
+
+
+def _siem_digest(obj: Any) -> str:
+    return "sha256:" + hashlib.sha256(jcs_canonical_json(obj)).hexdigest()
+
+
+def _cef_token(value: Any) -> str:
+    """Make a string safe for a CEF pipe-delimited header field."""
+    text = str(value)
+    for ch in ("|", "\n", "\r", "\\"):
+        text = text.replace(ch, " ")
+    return text.strip() or "-"
+
+
+@dataclass(frozen=True)
+class StoredRecord:
+    """One ingested audit record with its digest pin."""
+
+    record_id: str
+    payload: Any
+    payload_digest: str
+    seq: int
+    version: str = AUDIT_EXPORT_IFACE_VERSION
+    schema: str = SIEM_SCHEMA_PIN
+
+    def as_dict(self) -> dict[str, Any]:
+        return {
+            "record_id": self.record_id,
+            "payload": self.payload,
+            "payload_digest": self.payload_digest,
+            "seq": self.seq,
+            "version": self.version,
+            "schema": self.schema,
+        }
+
+    def verify(self) -> bool:
+        """Re-derive the digest pin; False on any tamper."""
+        try:
+            return _siem_digest(_siem_canonicalize(self.payload)) == self.payload_digest
+        except AuditExportError:
+            return False
+
+
+@dataclass(frozen=True)
+class FilterSpec:
+    """A pinned filter definition over the ledger."""
+
+    filter_id: str
+    kinds: tuple[str, ...]
+    severities: tuple[str, ...] | None
+    from_seq: int | None
+    to_seq: int | None
+    spec_digest: str
+    seq: int
+    version: str = AUDIT_EXPORT_IFACE_VERSION
+    schema: str = SIEM_SCHEMA_PIN
+
+    def as_dict(self) -> dict[str, Any]:
+        return {
+            "filter_id": self.filter_id,
+            "kinds": list(self.kinds),
+            "severities": list(self.severities) if self.severities is not None else None,
+            "from_seq": self.from_seq,
+            "to_seq": self.to_seq,
+            "spec_digest": self.spec_digest,
+            "seq": self.seq,
+            "version": self.version,
+            "schema": self.schema,
+        }
+
+    def verify(self) -> bool:
+        try:
+            return _siem_digest(_siem_spec_body(self)) == self.spec_digest
+        except AuditExportError:
+            return False
+
+    def matches(self, record: StoredRecord) -> bool:
+        """True iff the record satisfies every pinned criterion.
+
+        ``kinds`` filters on the host-reported ``payload["event"]`` field;
+        ``severities`` on ``payload["severity"]`` (a record with no severity
+        field does not match a severities-restricted filter).
+        """
+        if self.kinds and record.payload.get("event") not in self.kinds:
+            return False
+        if self.severities is not None:
+            if record.payload.get("severity") not in self.severities:
+                return False
+        if self.from_seq is not None and record.seq < self.from_seq:
+            return False
+        if self.to_seq is not None and record.seq > self.to_seq:
+            return False
+        return True
+
+
+def _siem_spec_body(spec: FilterSpec) -> dict[str, Any]:
+    return {
+        "filter_id": spec.filter_id,
+        "kinds": list(spec.kinds),
+        "severities": list(spec.severities) if spec.severities is not None else None,
+        "from_seq": spec.from_seq,
+        "to_seq": spec.to_seq,
+    }
+
+
+@dataclass(frozen=True)
+class StreamPage:
+    """One cursor-paginated page of filter matches."""
+
+    page_id: str
+    filter_id: str
+    records: tuple[StoredRecord, ...]
+    next_cursor: str | None
+    total_matching: int
+    page_digest: str
+    version: str = AUDIT_EXPORT_IFACE_VERSION
+    schema: str = SIEM_SCHEMA_PIN
+
+    def as_dict(self) -> dict[str, Any]:
+        return {
+            "page_id": self.page_id,
+            "filter_id": self.filter_id,
+            "record_ids": [r.record_id for r in self.records],
+            "next_cursor": self.next_cursor,
+            "total_matching": self.total_matching,
+            "page_digest": self.page_digest,
+            "version": self.version,
+            "schema": self.schema,
+        }
+
+    def verify(self) -> bool:
+        try:
+            body = {
+                "page_id": self.page_id,
+                "filter_id": self.filter_id,
+                "record_ids": [r.record_id for r in self.records],
+                "record_digests": [r.payload_digest for r in self.records],
+                "next_cursor": self.next_cursor,
+                "total_matching": self.total_matching,
+            }
+            return _siem_digest(_siem_canonicalize(body)) == self.page_digest
+        except AuditExportError:
+            return False
+
+
+@dataclass(frozen=True)
+class ExportBundle:
+    """A SIEM-rendered bundle of filter matches."""
+
+    export_id: str
+    filter_id: str
+    format: str
+    body: str
+    body_digest: str
+    record_count: int
+    delivered: bool
+    version: str = AUDIT_EXPORT_IFACE_VERSION
+    schema: str = SIEM_SCHEMA_PIN
+
+    def as_dict(self) -> dict[str, Any]:
+        return {
+            "export_id": self.export_id,
+            "filter_id": self.filter_id,
+            "format": self.format,
+            "body_digest": self.body_digest,
+            "record_count": self.record_count,
+            "delivered": self.delivered,
+            "version": self.version,
+            "schema": self.schema,
+        }
+
+    def verify(self) -> bool:
+        try:
+            return "sha256:" + hashlib.sha256(self.body.encode("utf-8")).hexdigest() == self.body_digest
+        except (TypeError, ValueError):
+            return False
+
+
+class AuditExport:
+    """Deterministic audit-log export bookkeeping: ingest, filter, stream, render."""
+
+    def __init__(self, sink: Callable[[ExportBundle], bool] | None = None) -> None:
+        self._lock = threading.RLock()
+        self._records: dict[str, StoredRecord] = {}
+        self._order: list[str] = []  # record ids in seq order
+        self._filters: dict[str, FilterSpec] = {}
+        self._audit_log: list[dict[str, Any]] = []
+        self._sink: Callable[[ExportBundle], bool] = sink if sink is not None else (lambda _b: True)
+        self._seq = -1
+        self._filter_counter = 0
+        self._page_counter = 0
+        self._export_counter = 0
+        self._delivered = 0
+
+    # -- internal ------------------------------------------------------
+
+    def _emit(self, kind: str, seq: int, **detail: Any) -> None:
+        self._audit_log.append(audit_export_audit_event(kind, seq, **detail))
+
+    def _reject(self, seq: int, reason: str) -> None:
+        """Burn the seq (batch-21 discipline) and record the rejection."""
+        self._seq = _siem_check_seq(seq)
+        self._emit("rejected", self._seq, reason=reason)
+
+    def _monotonic(self, seq: int) -> int:
+        seq = _siem_check_seq(seq)
+        if seq <= self._seq:
+            raise SeqOrderError(f"seq must strictly increase (last={self._seq}, got={seq})")
+        self._seq = seq
+        return seq
+
+    def _matches_ordered(self, spec: FilterSpec) -> list[StoredRecord]:
+        return [self._records[rid] for rid in self._order if spec.matches(self._records[rid])]
+
+    # -- mutations ------------------------------------------------------
+
+    def ingest(self, record_id: Any, payload: Any, seq: Any) -> StoredRecord:
+        """Book a host-reported audit record."""
+        with self._lock:
+            try:
+                record_id = _siem_check_id(record_id, "record_id")
+                if not isinstance(payload, Mapping):
+                    raise AuditExportError(f"payload must be a mapping, got {type(payload).__name__}")
+                canon = _siem_canonicalize(payload)
+                if record_id in self._records:
+                    raise DuplicateRecordError(f"duplicate record id {record_id!r}")
+                seq = self._monotonic(seq)
+            except AuditExportError as exc:
+                self._reject(seq if isinstance(seq, int) and not isinstance(seq, bool) else 0,
+                             f"ingest:{type(exc).__name__}")
+                raise
+            rec = StoredRecord(
+                record_id=record_id,
+                payload=canon,
+                payload_digest=_siem_digest(canon),
+                seq=seq,
+            )
+            self._records[record_id] = rec
+            self._order.append(record_id)
+            self._emit("record-ingested", seq, record_id=record_id,
+                       payload_digest=rec.payload_digest)
+            return rec
+
+    def define_filter(
+        self,
+        kinds: Any,
+        seq: Any,
+        severities: Any = None,
+        from_seq: Any = None,
+        to_seq: Any = None,
+    ) -> FilterSpec:
+        """Pin a filter definition; returns the frozen ``FilterSpec``."""
+        with self._lock:
+            try:
+                if not isinstance(kinds, (list, tuple)) or not kinds:
+                    raise BadFilterError("kinds must be a non-empty list/tuple")
+                kinds_t = tuple(kinds)
+                for k in kinds_t:
+                    _siem_check_id(k, "kind")
+                if len(set(kinds_t)) != len(kinds_t):
+                    raise BadFilterError("duplicate kinds refused")
+                sev_t: tuple[str, ...] | None = None
+                if severities is not None:
+                    if not isinstance(severities, (list, tuple)) or not severities:
+                        raise BadFilterError("severities must be a non-empty list/tuple or None")
+                    sev_t = tuple(severities)
+                    for s in sev_t:
+                        if s not in _SIEM_SEVERITIES:
+                            raise BadFilterError(f"unknown severity {s!r}")
+                    if len(set(sev_t)) != len(sev_t):
+                        raise BadFilterError("duplicate severities refused")
+                fseq = _siem_check_seq(from_seq, "from_seq") if from_seq is not None else None
+                tseq = _siem_check_seq(to_seq, "to_seq") if to_seq is not None else None
+                if fseq is not None and tseq is not None and fseq > tseq:
+                    raise BadFilterError("from_seq must not exceed to_seq")
+                seq = self._monotonic(seq)
+            except AuditExportError as exc:
+                self._reject(seq if isinstance(seq, int) and not isinstance(seq, bool) else 0,
+                             f"define_filter:{type(exc).__name__}")
+                raise
+            self._filter_counter += 1
+            filter_id = f"flt-{self._filter_counter}"
+            kinds_sorted = tuple(sorted(kinds_t))
+            spec = FilterSpec(
+                filter_id=filter_id,
+                kinds=kinds_sorted,
+                severities=sev_t,
+                from_seq=fseq,
+                to_seq=tseq,
+                spec_digest=_siem_digest({
+                    "filter_id": filter_id,
+                    "kinds": list(kinds_sorted),
+                    "severities": list(sev_t) if sev_t is not None else None,
+                    "from_seq": fseq,
+                    "to_seq": tseq,
+                }),
+                seq=seq,
+            )
+            self._filters[filter_id] = spec
+            self._emit("filter-defined", seq, filter_id=filter_id,
+                       spec_digest=spec.spec_digest)
+            return spec
+
+    # -- read views (validate seq shape, consume nothing) -----------------
+
+    def filter(self, filter_id: Any, seq: Any) -> tuple[StoredRecord, ...]:
+        """Evaluate a pinned filter; returns all matches in seq order."""
+        with self._lock:
+            seq = _siem_check_seq(seq)
+            spec = self._filters.get(filter_id)
+            if spec is None:
+                raise UnknownFilterError(f"unknown filter {filter_id!r}")
+            matches = self._matches_ordered(spec)
+            self._emit("filtered", seq, filter_id=spec.filter_id,
+                       spec_digest=spec.spec_digest, match_count=len(matches))
+            return tuple(matches)
+
+    def stream(self, filter_id: Any, seq: Any, limit: Any = 100,
+               cursor: Any = None) -> StreamPage:
+        """Return one cursor-paginated page of filter matches."""
+        with self._lock:
+            seq = _siem_check_seq(seq)
+            spec = self._filters.get(filter_id)
+            if spec is None:
+                raise UnknownFilterError(f"unknown filter {filter_id!r}")
+            if isinstance(limit, bool) or not isinstance(limit, int):
+                raise AuditExportError(f"limit must be an int, got {type(limit).__name__}")
+            if not (_SIEM_MIN_PAGE <= limit <= _SIEM_MAX_PAGE):
+                raise AuditExportError(f"limit must be within [{_SIEM_MIN_PAGE}, {_SIEM_MAX_PAGE}]")
+            after = -1
+            if cursor is not None:
+                after = self._parse_cursor(cursor, spec)
+            ordered = self._matches_ordered(spec)
+            matches = [r for r in ordered if r.seq > after]
+            page_records = tuple(matches[:limit])
+            if len(matches) > limit:
+                last = page_records[-1]
+                next_cursor = f"{spec.filter_id}:{last.seq}:{spec.spec_digest[7:23]}"
+            else:
+                next_cursor = None
+            self._page_counter += 1
+            page_id = f"page-{self._page_counter}"
+            page = StreamPage(
+                page_id=page_id,
+                filter_id=spec.filter_id,
+                records=page_records,
+                next_cursor=next_cursor,
+                total_matching=len(ordered),
+                page_digest=_siem_digest(_siem_canonicalize({
+                    "page_id": page_id,
+                    "filter_id": spec.filter_id,
+                    "record_ids": [r.record_id for r in page_records],
+                    "record_digests": [r.payload_digest for r in page_records],
+                    "next_cursor": next_cursor,
+                    "total_matching": len(ordered),
+                })),
+            )
+            self._emit("streamed", seq, filter_id=spec.filter_id, page_id=page_id,
+                       page_digest=page.page_digest,
+                       delivered_count=len(page_records),
+                       has_more=next_cursor is not None)
+            return page
+
+    def _parse_cursor(self, cursor: Any, spec: FilterSpec) -> int:
+        if not isinstance(cursor, str):
+            raise BadCursorError("cursor must be a str")
+        parts = cursor.split(":")
+        if len(parts) != 3 or parts[0] != spec.filter_id:
+            raise BadCursorError("cursor does not belong to this filter")
+        if parts[2] != spec.spec_digest[7:23]:
+            raise BadCursorError("cursor digest does not match the pinned filter")
+        try:
+            after = int(parts[1])
+        except ValueError:
+            raise BadCursorError("cursor carries a bad seq")
+        if after < 0:
+            raise BadCursorError("cursor carries a negative seq")
+        return after
+
+    def siem(self, filter_id: Any, seq: Any, format: Any = "json") -> ExportBundle:
+        """Render all filter matches into a SIEM envelope and hand to the sink.
+
+        ``format`` is pinned to ``json`` / ``cef`` / ``leef``. Delivery is
+        simulated: the host-injectable sink reports success; a raising sink
+        counts as failure (fail-closed). The outcome is data, never raised.
+        """
+        with self._lock:
+            seq = _siem_check_seq(seq)
+            spec = self._filters.get(filter_id)
+            if spec is None:
+                raise UnknownFilterError(f"unknown filter {filter_id!r}")
+            if format not in _SIEM_FORMATS:
+                raise BadFormatError(f"unknown format {format!r}")
+            matches = self._matches_ordered(spec)
+            body = self._render(format, matches)
+            self._export_counter += 1
+            bundle = ExportBundle(
+                export_id=f"exp-{self._export_counter}",
+                filter_id=spec.filter_id,
+                format=format,
+                body=body,
+                body_digest="sha256:" + hashlib.sha256(body.encode("utf-8")).hexdigest(),
+                record_count=len(matches),
+                delivered=False,  # placeholder; replaced below
+            )
+            try:
+                delivered = bool(self._sink(bundle))
+            except Exception:
+                delivered = False
+            bundle = ExportBundle(
+                export_id=bundle.export_id,
+                filter_id=bundle.filter_id,
+                format=bundle.format,
+                body=bundle.body,
+                body_digest=bundle.body_digest,
+                record_count=bundle.record_count,
+                delivered=delivered,
+            )
+            if delivered:
+                self._delivered += 1
+            self._emit("export-rendered", seq, filter_id=spec.filter_id,
+                       export_id=bundle.export_id, format=format,
+                       body_digest=bundle.body_digest,
+                       record_count=bundle.record_count, delivered=delivered)
+            return bundle
+
+    def _render(self, format: str, records: list[StoredRecord]) -> str:
+        if format == "json":
+            lines = []
+            for r in records:
+                lines.append(jcs_canonical_json({
+                    "schema": SIEM_SCHEMA_PIN,
+                    "record": {
+                        "id": r.record_id,
+                        "seq": r.seq,
+                        "digest": r.payload_digest,
+                        "payload": r.payload,
+                    },
+                }).decode("utf-8"))
+            return "\n".join(lines)
+        if format == "cef":
+            lines = []
+            for r in records:
+                event = _cef_token(r.payload.get("event", r.record_id))
+                sev = _SIEM_SEVERITY_NUM.get(str(r.payload.get("severity", "info")), 0)
+                lines.append(
+                    f"CEF:0|Northstar|AuditExport|1.0|{event}|{event}|{sev}|"
+                    f"id={_cef_token(r.record_id)} seq={r.seq} digest={r.payload_digest}"
+                )
+            return "\n".join(lines)
+        # leef
+        lines = []
+        for r in records:
+            event = _cef_token(r.payload.get("event", r.record_id))
+            sev = str(r.payload.get("severity", "info"))
+            lines.append(
+                f"LEEF:2.0|Northstar|AuditExport|1.0|{event}|\t"
+                f"sev={_cef_token(sev)}\tid={_cef_token(r.record_id)}\t"
+                f"seq={r.seq}\tdigest={r.payload_digest}"
+            )
+        return "\n".join(lines)
+
+    # -- views -----------------------------------------------------------
+
+    def stored(self, record_id: Any) -> StoredRecord:
+        with self._lock:
+            rec = self._records.get(record_id)
+            if rec is None:
+                raise UnknownRecordError(f"unknown record {record_id!r}")
+            return rec
+
+    def record_ids(self) -> tuple[str, ...]:
+        with self._lock:
+            return tuple(self._order)
+
+    def filter_ids(self) -> tuple[str, ...]:
+        with self._lock:
+            return tuple(self._filters)
+
+    def audit_log(self) -> tuple[dict[str, Any], ...]:
+        with self._lock:
+            return tuple(self._audit_log)
+
+    def stats(self) -> dict[str, Any]:
+        with self._lock:
+            return {
+                "records": len(self._records),
+                "filters": len(self._filters),
+                "exports": self._export_counter,
+                "delivered": self._delivered,
+            }
+
+
+def audit_export_audit_event(kind: str, seq: int, **detail: Any) -> dict[str, Any]:
+    """Shape an ``audit.ndjson/1`` record for SIEM export activity.
+
+    Payload values never cross this boundary — only ids, digest pins, and
+    counts are carried.
+    """
+    if kind not in _SIEM_AUDIT_KINDS:
+        raise AuditExportError(f"unknown audit kind {kind!r}")
+    seq = _siem_check_seq(seq)
+    event: dict[str, Any] = {
+        "schema": "audit.ndjson/1",
+        "event": kind,
+        "audit_seq": seq,
+        "module_version": AUDIT_EXPORT_IFACE_VERSION,
+        "module_schema": SIEM_SCHEMA_PIN,
+    }
+    event.update({k: _siem_canonicalize(v) for k, v in detail.items()})
+    return event
+
+
+def audit_export_siem_selfcheck() -> None:
+    """Self-check for the SIEM export section: ingest, filter, stream, render."""
+    exp = AuditExport()
+    exp.ingest("r-1", {"event": "granted", "severity": "info"}, 0)
+    exp.ingest("r-2", {"event": "denied", "severity": "high"}, 1)
+    exp.ingest("r-3", {"event": "granted", "severity": "low"}, 2)
+    assert exp.stored("r-1").verify()
+
+    spec = exp.define_filter(["granted"], 3)
+    assert spec.verify()
+    matches = exp.filter(spec.filter_id, 4)
+    assert [r.record_id for r in matches] == ["r-1", "r-3"]
+
+    page = exp.stream(spec.filter_id, 5, limit=1)
+    assert [r.record_id for r in page.records] == ["r-1"]
+    assert page.next_cursor is not None and page.verify()
+    page2 = exp.stream(spec.filter_id, 6, limit=1, cursor=page.next_cursor)
+    assert [r.record_id for r in page2.records] == ["r-3"]
+    assert page2.next_cursor is None
+
+    sev = exp.define_filter(["granted", "denied"], 7, severities=["high"])
+    assert [r.record_id for r in exp.filter(sev.filter_id, 8)] == ["r-2"]
+
+    for fmt, marker in (("json", '"northstar.audit-export-siem.v1"'),
+                        ("cef", "CEF:0|Northstar"), ("leef", "LEEF:2.0|Northstar")):
+        bundle = exp.siem(spec.filter_id, 9, format=fmt)
+        assert marker in bundle.body, fmt
+        assert bundle.verify() and bundle.delivered and bundle.record_count == 2
+
+    # Simulated sink failure is data, not an exception.
+    def _boom(_bundle: ExportBundle) -> bool:
+        raise RuntimeError("collector down")
+
+    flaky = AuditExport(sink=_boom)
+    flaky.ingest("x-1", {"event": "granted"}, 0)
+    fspec = flaky.define_filter(["granted"], 1)
+    failed = flaky.siem(fspec.filter_id, 2)
+    assert failed.delivered is False
+
+    stats = exp.stats()
+    assert stats["records"] == 3 and stats["exports"] == 3 and stats["delivered"] == 3
+    print("audit-export-siem OK: ingest, filter, stream, siem, pins, audit")

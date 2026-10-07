@@ -332,5 +332,277 @@ class ProvenanceBuilderTests(unittest.TestCase):
         self.assertEqual(mirror_errors, normative_errors)
 
 
+# ---------------------------------------------------------------------------
+# SIEM export interface tests (AuditExport: filter / stream / siem).
+# ---------------------------------------------------------------------------
+
+from audit_export import (  # noqa: E402
+    AUDIT_EXPORT_IFACE_VERSION,
+    SIEM_SCHEMA_PIN,
+    AuditExport,
+    AuditExportError,
+    BadCursorError,
+    BadFilterError,
+    BadFormatError,
+    DuplicateRecordError,
+    SeqOrderError,
+    UnknownFilterError,
+    audit_export_audit_event,
+    audit_export_siem_selfcheck,
+)
+
+
+def _siem_exporter():
+    exp = AuditExport()
+    exp.ingest("r-1", {"event": "granted", "severity": "info"}, 0)
+    exp.ingest("r-2", {"event": "denied", "severity": "high"}, 1)
+    exp.ingest("r-3", {"event": "granted", "severity": "low"}, 2)
+    return exp
+
+
+class SiemPinsTests(unittest.TestCase):
+    def test_version_and_schema(self):
+        self.assertEqual(AUDIT_EXPORT_IFACE_VERSION, "audit-export-siem.v1")
+        self.assertEqual(SIEM_SCHEMA_PIN, "northstar.audit-export-siem.v1")
+
+    def test_selfcheck(self):
+        audit_export_siem_selfcheck()
+
+
+class SiemIngestTests(unittest.TestCase):
+    def test_ingest_happy_path(self):
+        exp = AuditExport()
+        rec = exp.ingest("a-1", {"event": "granted"}, 0)
+        self.assertEqual(rec.record_id, "a-1")
+        self.assertTrue(rec.payload_digest.startswith("sha256:"))
+        self.assertTrue(rec.verify())
+        self.assertEqual(exp.record_ids(), ("a-1",))
+
+    def test_ingest_duplicate_refused(self):
+        exp = AuditExport()
+        exp.ingest("a-1", {"event": "x"}, 0)
+        with self.assertRaises(DuplicateRecordError):
+            exp.ingest("a-1", {"event": "x"}, 1)
+
+    def test_ingest_bad_inputs(self):
+        exp = AuditExport()
+        with self.assertRaises(AuditExportError):
+            exp.ingest("", {"event": "x"}, 0)
+        with self.assertRaises(AuditExportError):
+            exp.ingest("a-2", "not-a-mapping", 0)
+        with self.assertRaises(AuditExportError):
+            exp.ingest("a-3", {"v": float("nan")}, 0)
+        with self.assertRaises(AuditExportError):
+            exp.ingest("a-4", {"event": "x"}, True)
+        with self.assertRaises(AuditExportError):
+            exp.ingest("a-5", {"event": "x"}, -1)
+
+    def test_seq_strictly_increasing_and_failed_mutation_consumes_seq(self):
+        exp = AuditExport()
+        exp.ingest("a-1", {"event": "x"}, 5)
+        with self.assertRaises(SeqOrderError):
+            exp.ingest("a-2", {"event": "x"}, 5)
+        # The failed mutation consumed seq 5? No — rewind is rejected before
+        # consuming; a *failed validation* consumes its seq instead:
+        with self.assertRaises(AuditExportError):
+            exp.ingest("a-3", {"bad": float("nan")}, 6)
+        # seq 6 was burned, so 6 is now stale:
+        with self.assertRaises(SeqOrderError):
+            exp.ingest("a-4", {"event": "x"}, 6)
+        exp.ingest("a-5", {"event": "x"}, 7)
+        self.assertEqual(exp.record_ids(), ("a-1", "a-5"))
+
+
+class SiemFilterTests(unittest.TestCase):
+    def test_define_filter_happy_path(self):
+        exp = _siem_exporter()
+        spec = exp.define_filter(["granted"], 3)
+        self.assertEqual(spec.filter_id, "flt-1")
+        self.assertTrue(spec.spec_digest.startswith("sha256:"))
+        self.assertTrue(spec.verify())
+
+    def test_define_filter_bad_inputs(self):
+        exp = AuditExport()
+        with self.assertRaises(BadFilterError):
+            exp.define_filter([], 0)
+        with self.assertRaises(BadFilterError):
+            exp.define_filter(["a", "a"], 1)
+        with self.assertRaises(BadFilterError):
+            exp.define_filter(["a"], 2, severities=["nope"])
+        with self.assertRaises(BadFilterError):
+            exp.define_filter(["a"], 3, from_seq=5, to_seq=2)
+        with self.assertRaises(AuditExportError):
+            exp.define_filter("granted", 4)
+
+    def test_filter_evaluation(self):
+        exp = _siem_exporter()
+        spec = exp.define_filter(["granted"], 3)
+        self.assertEqual([r.record_id for r in exp.filter(spec.filter_id, 4)],
+                         ["r-1", "r-3"])
+        sev = exp.define_filter(["granted", "denied"], 5, severities=["high"])
+        self.assertEqual([r.record_id for r in exp.filter(sev.filter_id, 6)], ["r-2"])
+        window = exp.define_filter(["granted", "denied"], 7, from_seq=1, to_seq=1)
+        self.assertEqual([r.record_id for r in exp.filter(window.filter_id, 8)], ["r-2"])
+        # Record without a severity field does not match a severities filter.
+        exp.ingest("r-4", {"event": "denied"}, 9)
+        self.assertEqual([r.record_id for r in exp.filter(sev.filter_id, 10)], ["r-2"])
+
+    def test_filter_unknown_filter(self):
+        exp = _siem_exporter()
+        with self.assertRaises(UnknownFilterError):
+            exp.filter("flt-99", 3)
+
+
+class SiemStreamTests(unittest.TestCase):
+    def test_stream_pages(self):
+        exp = _siem_exporter()
+        spec = exp.define_filter(["granted", "denied"], 3)
+        page = exp.stream(spec.filter_id, 4, limit=2)
+        self.assertEqual([r.record_id for r in page.records], ["r-1", "r-2"])
+        self.assertEqual(page.total_matching, 3)
+        self.assertIsNotNone(page.next_cursor)
+        self.assertTrue(page.verify())
+        page2 = exp.stream(spec.filter_id, 5, limit=2, cursor=page.next_cursor)
+        self.assertEqual([r.record_id for r in page2.records], ["r-3"])
+        self.assertIsNone(page2.next_cursor)
+        self.assertTrue(page2.verify())
+
+    def test_stream_bad_cursor(self):
+        exp = _siem_exporter()
+        spec = exp.define_filter(["granted"], 3)
+        other = exp.define_filter(["denied"], 4)
+        page = exp.stream(spec.filter_id, 5, limit=1)
+        with self.assertRaises(BadCursorError):
+            exp.stream(spec.filter_id, 6, cursor="garbage")
+        with self.assertRaises(BadCursorError):
+            exp.stream(other.filter_id, 6, cursor=page.next_cursor)  # cross-filter
+        forged = page.next_cursor[:-1] + ("0" if page.next_cursor[-1] != "0" else "1")
+        with self.assertRaises(BadCursorError):
+            exp.stream(spec.filter_id, 6, cursor=forged)  # tampered digest
+        with self.assertRaises(UnknownFilterError):
+            exp.stream("flt-99", 6)
+
+    def test_stream_limit_bounds(self):
+        exp = _siem_exporter()
+        spec = exp.define_filter(["granted"], 3)
+        with self.assertRaises(AuditExportError):
+            exp.stream(spec.filter_id, 4, limit=0)
+        with self.assertRaises(AuditExportError):
+            exp.stream(spec.filter_id, 4, limit=1001)
+        with self.assertRaises(AuditExportError):
+            exp.stream(spec.filter_id, 4, limit=True)
+
+
+class SiemRenderTests(unittest.TestCase):
+    def test_siem_json(self):
+        exp = _siem_exporter()
+        spec = exp.define_filter(["granted"], 3)
+        bundle = exp.siem(spec.filter_id, 4, format="json")
+        self.assertIn('"northstar.audit-export-siem.v1"', bundle.body)
+        self.assertEqual(bundle.record_count, 2)
+        self.assertTrue(bundle.delivered)
+        self.assertTrue(bundle.body_digest.startswith("sha256:"))
+        self.assertTrue(bundle.verify())
+        self.assertNotIn("body", bundle.as_dict())  # body not in the view
+
+    def test_siem_cef_and_leef(self):
+        exp = _siem_exporter()
+        spec = exp.define_filter(["denied"], 3)
+        cef = exp.siem(spec.filter_id, 4, format="cef")
+        self.assertTrue(cef.body.startswith("CEF:0|Northstar|AuditExport|1.0|denied|denied|8|"))
+        self.assertTrue(cef.verify())
+        leef = exp.siem(spec.filter_id, 5, format="leef")
+        self.assertTrue(leef.body.startswith("LEEF:2.0|Northstar|AuditExport|1.0|denied|"))
+        self.assertIn("sev=high", leef.body)
+        self.assertTrue(leef.verify())
+
+    def test_siem_bad_format(self):
+        exp = _siem_exporter()
+        spec = exp.define_filter(["granted"], 3)
+        with self.assertRaises(BadFormatError):
+            exp.siem(spec.filter_id, 4, format="syslog")
+
+    def test_siem_sink_failure_is_data(self):
+        exp = AuditExport(sink=lambda _b: False)
+        exp.ingest("a-1", {"event": "granted"}, 0)
+        spec = exp.define_filter(["granted"], 1)
+        bundle = exp.siem(spec.filter_id, 2)
+        self.assertFalse(bundle.delivered)
+        self.assertEqual(exp.stats()["delivered"], 0)
+
+        def _boom(_bundle):
+            raise RuntimeError("collector down")
+
+        exp2 = AuditExport(sink=_boom)
+        exp2.ingest("a-1", {"event": "granted"}, 0)
+        spec2 = exp2.define_filter(["granted"], 1)
+        bundle2 = exp2.siem(spec2.filter_id, 2)
+        self.assertFalse(bundle2.delivered)  # raising sink counts as failure
+
+    def test_siem_empty_match(self):
+        exp = _siem_exporter()
+        spec = exp.define_filter(["no-such-event"], 3)
+        bundle = exp.siem(spec.filter_id, 4)
+        self.assertEqual(bundle.record_count, 0)
+        self.assertEqual(bundle.body, "")
+        self.assertTrue(bundle.verify())
+
+
+class SiemAuditTests(unittest.TestCase):
+    def test_audit_event_shapes(self):
+        ev = audit_export_audit_event("record-ingested", 0, record_id="r-1")
+        self.assertEqual(ev["schema"], "audit.ndjson/1")
+        self.assertEqual(ev["event"], "record-ingested")
+        self.assertEqual(ev["module_version"], AUDIT_EXPORT_IFACE_VERSION)
+        self.assertEqual(ev["module_schema"], SIEM_SCHEMA_PIN)
+        with self.assertRaises(AuditExportError):
+            audit_export_audit_event("nope", 0)
+
+    def test_audit_boundary_bans_payload_values(self):
+        exp = AuditExport()
+        exp.ingest("r-1", {"event": "granted", "secret": "s3cr3t-value"}, 0)
+        spec = exp.define_filter(["granted"], 1)
+        exp.filter(spec.filter_id, 2)
+        exp.stream(spec.filter_id, 3)
+        exp.siem(spec.filter_id, 4)
+        blob = str(exp.audit_log())
+        self.assertNotIn("s3cr3t-value", blob)
+
+
+class SiemMiscTests(unittest.TestCase):
+    def test_stats_and_views(self):
+        exp = _siem_exporter()
+        spec = exp.define_filter(["granted"], 3)
+        self.assertEqual(exp.stats()["records"], 3)
+        self.assertEqual(exp.filter_ids(), (spec.filter_id,))
+        self.assertTrue(exp.stored("r-1").verify())
+        with self.assertRaises(AuditExportError):
+            exp.stored("nope")
+
+    def test_concurrency_smoke(self):
+        import threading
+
+        exp = AuditExport()
+        errs: list = []
+        counter = [0]
+        clock = threading.Lock()
+
+        def worker(n: int):
+            try:
+                with clock:
+                    counter[0] += 1
+                    exp.ingest(f"c-{n}", {"event": "granted", "n": n}, counter[0])
+            except Exception as exc:  # noqa: BLE001
+                errs.append(exc)
+
+        threads = [threading.Thread(target=worker, args=(i,)) for i in range(8)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+        self.assertEqual(errs, [])
+        self.assertEqual(len(exp.record_ids()), 8)
+
+
 if __name__ == "__main__":
     unittest.main()
