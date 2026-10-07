@@ -73,7 +73,7 @@ MANIFEST: dict[str, tuple[str, ...]] = {
     ),
     "northstar-codex-sidecar": ("sidecar", "transport", "service", "sidecar_socket"),
     "northstar-egress-sidecar": ("egress_sidecar", "egress_socket", "transport"),
-                                                                                                                                                                                                                                                                                            "northstar-agent-runtime": (
+                                                                                                                                                                                                                                                                                                "northstar-agent-runtime": (
         "a2a_budget_combo", "a2a_gates", "a2abreak_probes", "ab_testing",
         "abac_engine", "abe_interface", "abstract_interp", "abuse_limits",
         "abuse_reporter", "account_recovery", "action_card", "action_verifier",
@@ -87,7 +87,10 @@ MANIFEST: dict[str, tuple[str, ...]] = {
         "ai_act", "ai_adversarial", "ai_alignment", "ai_assurance",
         "ai_attack", "ai_attestation", "ai_attribution", "ai_audit",
         "ai_benchmarking", "ai_bias", "ai_calibration", "ai_certification",
-        "ai_charter", "ai_circuit", "ai_compliance", "ai_concept",
+        "ai_charter", "ai_circuit", "ai_compliance", "ai_compliance_auditing",
+        "ai_compliance_certification", "ai_compliance_incident", "ai_compliance_mitigation", "ai_compliance_monitoring",
+        "ai_compliance_remediation", "ai_compliance_risk", "ai_compliance_testing", "ai_compliance_threat",
+        "ai_compliance_validation", "ai_compliance_verification", "ai_compliance_vulnerability", "ai_concept",
         "ai_constitution", "ai_containment", "ai_counterfactual", "ai_defense",
         "ai_detection", "ai_distillation", "ai_distribution_shift", "ai_ensemble",
         "ai_ethics", "ai_ethics_auditing", "ai_ethics_certification", "ai_ethics_incident",
@@ -319,7 +322,7 @@ MANIFEST: dict[str, tuple[str, ...]] = {
         "wireheading", "witness_enc", "workflow_automation", "workflow_engine",
         "workflow_orchestration", "write_ahead_log", "write_through_cache", "zab_interface",
         "zero_knowledge", "zeromq_patterns", "zk_interface", "zk_verifier",
-    ),,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,
+    ),,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,
 }
 
 GENERATED_HEADER = (
