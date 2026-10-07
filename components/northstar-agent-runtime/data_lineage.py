@@ -132,6 +132,34 @@ def _source_digest(name: str, seq: int) -> str:
     return "sha256:" + hashlib.sha256(_DIGEST_DOMAIN + b"source\x00" + body).hexdigest()
 
 
+def _graph_digest(data_id: str, upstream: Tuple[str, ...], downstream: Tuple[str, ...]) -> str:
+    body = json.dumps(
+        {
+            "graph": data_id,
+            "upstream": list(upstream),
+            "downstream": list(downstream),
+        },
+        sort_keys=True,
+        separators=(",", ":"),
+        ensure_ascii=True,
+    ).encode("utf-8")
+    return "sha256:" + hashlib.sha256(_DIGEST_DOMAIN + b"graph\x00" + body).hexdigest()
+
+
+def _impact_digest(data_id: str, affected: Tuple[str, ...], depth_reached: int) -> str:
+    body = json.dumps(
+        {
+            "impact": data_id,
+            "affected": list(affected),
+            "depth_reached": depth_reached,
+        },
+        sort_keys=True,
+        separators=(",", ":"),
+        ensure_ascii=True,
+    ).encode("utf-8")
+    return "sha256:" + hashlib.sha256(_DIGEST_DOMAIN + b"impact\x00" + body).hexdigest()
+
+
 @dataclass(frozen=True)
 class ExternalSource:
     """A declared external origin (bucket prefix, vendor dump, crawl snapshot)."""
@@ -237,6 +265,85 @@ class LineageVerification:
             "ok": self.ok,
             "records_checked": self.records_checked,
             "issues": list(self.issues),
+        }
+
+
+@dataclass(frozen=True)
+class LineageGraph:
+    """Bounded upstream+downstream graph around one dataset.
+
+    ``upstream`` is the ancestor closure (root sources first, same order
+    as :meth:`DataLineage.lineage`); ``downstream`` is the descendant
+    closure in deterministic BFS order starting from ``data_id``'s
+    direct children. Both closures are data, never raised.
+    """
+
+    data_id: str
+    upstream: Tuple[str, ...]
+    downstream: Tuple[str, ...]
+    digest: str
+    schema: str = field(default=DATA_LINEAGE_SCHEMA)
+
+    def __post_init__(self) -> None:
+        _check_name(self.data_id, "data_id")
+        for u in self.upstream:
+            _check_name(u, "upstream entry")
+        for d in self.downstream:
+            _check_name(d, "downstream entry")
+        if not isinstance(self.digest, str) or not self.digest.startswith("sha256:"):
+            raise ValueError("digest must be a sha256: pin")
+        if self.schema != DATA_LINEAGE_SCHEMA:
+            raise ValueError("schema pin mismatch")
+
+    def verify_digest(self) -> bool:
+        import hmac
+
+        expected = _graph_digest(self.data_id, self.upstream, self.downstream)
+        return hmac.compare_digest(expected, self.digest)
+
+    def as_dict(self) -> dict:
+        return {
+            "data_id": self.data_id,
+            "upstream": list(self.upstream),
+            "downstream": list(self.downstream),
+            "digest": self.digest,
+            "schema": self.schema,
+        }
+
+
+@dataclass(frozen=True)
+class ImpactReport:
+    """Downstream blast radius of a dataset change (data, never raised)."""
+
+    data_id: str
+    affected_datasets: Tuple[str, ...]
+    depth_reached: int
+    digest: str
+    schema: str = field(default=DATA_LINEAGE_SCHEMA)
+
+    def __post_init__(self) -> None:
+        _check_name(self.data_id, "data_id")
+        for d in self.affected_datasets:
+            _check_name(d, "affected dataset")
+        _check_seq(self.depth_reached, "depth_reached")
+        if not isinstance(self.digest, str) or not self.digest.startswith("sha256:"):
+            raise ValueError("digest must be a sha256: pin")
+        if self.schema != DATA_LINEAGE_SCHEMA:
+            raise ValueError("schema pin mismatch")
+
+    def verify_digest(self) -> bool:
+        import hmac
+
+        expected = _impact_digest(self.data_id, self.affected_datasets, self.depth_reached)
+        return hmac.compare_digest(expected, self.digest)
+
+    def as_dict(self) -> dict:
+        return {
+            "data_id": self.data_id,
+            "affected_datasets": list(self.affected_datasets),
+            "depth_reached": self.depth_reached,
+            "digest": self.digest,
+            "schema": self.schema,
         }
 
 
@@ -431,6 +538,87 @@ class DataLineage:
             first = report.issues[0]
             raise LineageVerificationError(first)
 
+    def graph(self, data_id: str, max_depth: int = 10) -> LineageGraph:
+        """Bounded upstream+downstream graph around ``data_id`` (pure read view).
+
+        ``upstream`` is the ancestor closure (roots first, same order as
+        :meth:`lineage`); ``downstream`` is the descendant closure in
+        deterministic BFS order. ``max_depth`` bounds the downstream BFS
+        (upstream walks the full ancestor chain). Unknown ids raise
+        ``DataLineageError``; empty graphs are data, never raised.
+        """
+        _check_name(data_id, "data_id")
+        if isinstance(max_depth, bool) or not isinstance(max_depth, int):
+            raise TypeError("max_depth must be an int")
+        if not 1 <= max_depth <= 100:
+            raise ValueError("max_depth must be in [1, 100]")
+        with self._lock:
+            path = self.lineage(data_id)  # raises on unknown id
+            upstream = path.ids()
+            downstream: List[str] = []
+            seen = {data_id}
+            frontier = [data_id]
+            for _ in range(max_depth):
+                nxt: List[str] = []
+                for cur in frontier:
+                    for child in self._records:
+                        rec = self._records[child]
+                        if cur in rec.parents and child not in seen:
+                            seen.add(child)
+                            nxt.append(child)
+                if not nxt:
+                    break
+                nxt_sorted = sorted(nxt, key=lambda d: (self._seqs[d], d))
+                downstream.extend(nxt_sorted)
+                frontier = nxt_sorted
+            return LineageGraph(
+                data_id=data_id,
+                upstream=upstream,
+                downstream=tuple(downstream),
+                digest=_graph_digest(data_id, upstream, tuple(downstream)),
+            )
+
+    def impact(self, data_id: str, max_depth: int = 10) -> ImpactReport:
+        """Downstream blast radius of a ``data_id`` change (pure read view).
+
+        Returns every dataset transitively derived from ``data_id`` in
+        deterministic BFS order plus the deepest layer reached.
+        A dataset with no downstream consumers reports an empty
+        ``affected_datasets`` and ``depth_reached == 0`` — impact is
+        data, never raised.
+        """
+        _check_name(data_id, "data_id")
+        if isinstance(max_depth, bool) or not isinstance(max_depth, int):
+            raise TypeError("max_depth must be an int")
+        if not 1 <= max_depth <= 100:
+            raise ValueError("max_depth must be in [1, 100]")
+        with self._lock:
+            if data_id not in self._records and data_id not in self._sources:
+                raise DataLineageError(f"unknown id: {data_id!r}")
+            affected: List[str] = []
+            seen = {data_id}
+            frontier = [data_id]
+            depth_reached = 0
+            for layer in range(1, max_depth + 1):
+                nxt: List[str] = []
+                for cur in frontier:
+                    for child, rec in self._records.items():
+                        if cur in rec.parents and child not in seen:
+                            seen.add(child)
+                            nxt.append(child)
+                if not nxt:
+                    break
+                depth_reached = layer
+                nxt_sorted = sorted(nxt, key=lambda d: (self._seqs[d], d))
+                affected.extend(nxt_sorted)
+                frontier = nxt_sorted
+            return ImpactReport(
+                data_id=data_id,
+                affected_datasets=tuple(affected),
+                depth_reached=depth_reached,
+                digest=_impact_digest(data_id, tuple(affected), depth_reached),
+            )
+
 
 def data_lineage_audit_event(kind: str, lineage: DataLineage, seq: int) -> dict:
     """Shape a data-lineage lifecycle event as an ``audit.ndjson/1`` record."""
@@ -470,10 +658,24 @@ def main() -> None:
     assert lin.children("cleaned") == ("features",)
     assert lin.verify().ok is True
     lin.verify_strict()
+    g = lin.graph("features")
+    assert g.verify_digest() is True
+    assert g.upstream == path.ids()
+    assert g.downstream == ()
+    g2 = lin.graph("s3://bucket/raw-2026-10")
+    assert g2.downstream == ("cleaned", "features")
+    assert g2.verify_digest() is True
+    imp = lin.impact("cleaned")
+    assert imp.verify_digest() is True
+    assert imp.affected_datasets == ("features",)
+    assert imp.depth_reached == 1
+    imp_leaf = lin.impact("features")
+    assert imp_leaf.affected_datasets == ()
+    assert imp_leaf.depth_reached == 0
     ev = data_lineage_audit_event("tracked", lin, 4)
     assert ev["schema"] == "audit.ndjson/1"
     assert ev["datasets"] == 2
-    print("data-lineage OK: register, track, lineage, verify")
+    print("data-lineage OK: register, track, lineage, graph, impact, verify")
 
 
 if __name__ == "__main__":

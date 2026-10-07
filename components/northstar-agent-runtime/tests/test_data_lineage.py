@@ -12,6 +12,8 @@ from data_lineage import (
     DataLineageError,
     DuplicateIdError,
     ExternalSource,
+    ImpactReport,
+    LineageGraph,
     LineageNode,
     LineagePath,
     LineageRecord,
@@ -241,6 +243,118 @@ class AuditEventTest(unittest.TestCase):
             data_lineage_audit_event("tracked", self.lin, -1)
         with self.assertRaises(TypeError):
             data_lineage_audit_event("tracked", object(), 0)
+
+
+class GraphImpactTest(unittest.TestCase):
+    def setUp(self):
+        self.lin = DataLineage()
+        self.lin.register_source("raw", 0)
+        self.lin.register_source("vendor", 1)
+        self.lin.track("cleaned", ("raw",), 2, transform="filter")
+        self.lin.track("features", ("cleaned", "vendor"), 3, transform="join")
+        self.lin.track("model", ("features",), 4, transform="train")
+
+    def test_graph_happy_path(self):
+        g = self.lin.graph("features")
+        self.assertIsInstance(g, LineageGraph)
+        self.assertEqual(g.data_id, "features")
+        self.assertEqual(g.upstream, ("raw", "vendor", "cleaned", "features"))
+        self.assertEqual(g.downstream, ("model",))
+        self.assertTrue(g.verify_digest())
+
+    def test_graph_of_source(self):
+        g = self.lin.graph("raw")
+        self.assertEqual(g.upstream, ("raw",))
+        self.assertEqual(g.downstream, ("cleaned", "features", "model"))
+        self.assertTrue(g.verify_digest())
+
+    def test_graph_of_leaf(self):
+        g = self.lin.graph("model")
+        self.assertEqual(g.downstream, ())
+        self.assertTrue(g.verify_digest())
+
+    def test_graph_deterministic(self):
+        a = self.lin.graph("features")
+        b = self.lin.graph("features")
+        self.assertEqual(a.digest, b.digest)
+
+    def test_graph_max_depth_bounds_downstream(self):
+        g = self.lin.graph("raw", max_depth=1)
+        self.assertEqual(g.downstream, ("cleaned",))
+        # upstream is not depth-bounded
+        self.assertEqual(g.upstream, ("raw",))
+
+    def test_graph_unknown_id(self):
+        with self.assertRaises(DataLineageError):
+            self.lin.graph("ghost")
+
+    def test_graph_bad_depth(self):
+        with self.assertRaises(ValueError):
+            self.lin.graph("raw", max_depth=0)
+        with self.assertRaises(ValueError):
+            self.lin.graph("raw", max_depth=101)
+        with self.assertRaises(TypeError):
+            self.lin.graph("raw", max_depth=True)
+        with self.assertRaises(ValueError):
+            self.lin.graph("", max_depth=10)
+
+    def test_graph_frozen_and_as_dict(self):
+        g = self.lin.graph("features")
+        with self.assertRaises(Exception):
+            g.data_id = "evil"
+        d = g.as_dict()
+        self.assertEqual(d["data_id"], "features")
+        self.assertEqual(d["upstream"], ["raw", "vendor", "cleaned", "features"])
+        self.assertEqual(d["downstream"], ["model"])
+
+    def test_impact_happy_path(self):
+        imp = self.lin.impact("raw")
+        self.assertIsInstance(imp, ImpactReport)
+        self.assertEqual(imp.affected_datasets, ("cleaned", "features", "model"))
+        self.assertEqual(imp.depth_reached, 3)
+        self.assertTrue(imp.verify_digest())
+
+    def test_impact_of_leaf_is_empty_data(self):
+        imp = self.lin.impact("model")
+        self.assertEqual(imp.affected_datasets, ())
+        self.assertEqual(imp.depth_reached, 0)
+        self.assertTrue(imp.verify_digest())
+
+    def test_impact_max_depth_bounds(self):
+        imp = self.lin.impact("raw", max_depth=1)
+        self.assertEqual(imp.affected_datasets, ("cleaned",))
+        self.assertEqual(imp.depth_reached, 1)
+
+    def test_impact_deterministic(self):
+        a = self.lin.impact("raw")
+        b = self.lin.impact("raw")
+        self.assertEqual(a.digest, b.digest)
+
+    def test_impact_unknown_id(self):
+        with self.assertRaises(DataLineageError):
+            self.lin.impact("ghost")
+
+    def test_impact_bad_depth(self):
+        with self.assertRaises(ValueError):
+            self.lin.impact("raw", max_depth=0)
+        with self.assertRaises(ValueError):
+            self.lin.impact("raw", max_depth=101)
+        with self.assertRaises(TypeError):
+            self.lin.impact("raw", max_depth="2")
+
+    def test_impact_frozen_and_as_dict(self):
+        imp = self.lin.impact("raw")
+        with self.assertRaises(Exception):
+            imp.depth_reached = 99
+        d = imp.as_dict()
+        self.assertEqual(d["data_id"], "raw")
+        self.assertEqual(d["affected_datasets"], ["cleaned", "features", "model"])
+        self.assertEqual(d["depth_reached"], 3)
+
+    def test_diamond_downstream_order_deterministic(self):
+        self.lin.track("model2", ("features",), 5)
+        g = self.lin.graph("features")
+        self.assertEqual(g.downstream, ("model", "model2"))
 
 
 class HouseStyleTest(unittest.TestCase):
