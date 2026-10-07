@@ -73,7 +73,7 @@ MANIFEST: dict[str, tuple[str, ...]] = {
     ),
     "northstar-codex-sidecar": ("sidecar", "transport", "service", "sidecar_socket"),
     "northstar-egress-sidecar": ("egress_sidecar", "egress_socket", "transport"),
-                                                                                                                                                                                                                                                    "northstar-agent-runtime": (
+                                                                                                                                                                                                                                                        "northstar-agent-runtime": (
         "a2a_budget_combo", "a2a_gates", "a2abreak_probes", "ab_testing",
         "abac_engine", "abe_interface", "abstract_interp", "abuse_limits",
         "abuse_reporter", "account_recovery", "action_card", "action_verifier",
@@ -83,13 +83,16 @@ MANIFEST: dict[str, tuple[str, ...]] = {
         "agri", "agrifood_agents", "ai_accident", "ai_accountability",
         "ai_act", "ai_alignment", "ai_assurance", "ai_attack",
         "ai_audit", "ai_bias", "ai_certification", "ai_charter",
-        "ai_constitution", "ai_defense", "ai_ethics", "ai_explainability",
-        "ai_exploit", "ai_failure", "ai_fairness", "ai_governance",
-        "ai_harm", "ai_incident", "ai_interpretability", "ai_liability",
-        "ai_oversight", "ai_policy", "ai_principles", "ai_privacy",
+        "ai_constitution", "ai_containment", "ai_defense", "ai_detection",
+        "ai_ethics", "ai_explainability", "ai_exploit", "ai_failure",
+        "ai_fairness", "ai_gating", "ai_governance", "ai_harm",
+        "ai_incident", "ai_interpretability", "ai_isolation", "ai_liability",
+        "ai_mitigation", "ai_monitoring", "ai_oversight", "ai_policy",
+        "ai_prevention", "ai_principles", "ai_privacy", "ai_quarantine",
         "ai_recourse", "ai_recovery", "ai_redress", "ai_regulation",
-        "ai_resilience", "ai_risk", "ai_robustness", "ai_safety",
-        "ai_security", "ai_standards", "ai_threat", "ai_transparency",
+        "ai_remediation", "ai_resilience", "ai_risk", "ai_robustness",
+        "ai_safety", "ai_sandbox", "ai_security", "ai_standards",
+        "ai_surveillance", "ai_threat", "ai_throttling", "ai_transparency",
         "ai_vulnerability", "akf_export", "alert_manager", "aligned_ai",
         "alignment_eval", "aml_screener", "amplification", "amqp_broker",
         "analytics_tracker", "ansible_playbook", "anti_entropy", "api_analytics",
@@ -291,7 +294,7 @@ MANIFEST: dict[str, tuple[str, ...]] = {
         "workflow_automation", "workflow_engine", "workflow_orchestration", "write_ahead_log",
         "write_through_cache", "zab_interface", "zero_knowledge", "zeromq_patterns",
         "zk_interface", "zk_verifier",
-    ),,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,
+    ),,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,
 }
 
 GENERATED_HEADER = (
