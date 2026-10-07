@@ -313,6 +313,249 @@ def verify_aggregation(result: object, commitments: object) -> bool:
         return False
 
 
+# ---------------------------------------------------------------------------
+# Pairwise-mask protocol layer (Bonawitz-style), additive to the share layer.
+# ---------------------------------------------------------------------------
+
+class SecureAggregationError(Exception):
+    """Base error for the pairwise-mask protocol layer."""
+
+
+class BadMemberError(SecureAggregationError):
+    """Raised for malformed member lists (empty, duplicates, non-strings)."""
+
+
+class UnknownMemberError(SecureAggregationError):
+    """Raised when a masking client is not in the round's member set."""
+
+
+class DuplicateMaskError(SecureAggregationError):
+    """Raised when a client submits two masked inputs to one aggregate."""
+
+
+class RoundMismatchError(SecureAggregationError):
+    """Raised when inputs/aggregates from different rounds are mixed."""
+
+
+class BadRoundError(SecureAggregationError):
+    """Raised for malformed round ids or seeds."""
+
+
+class TamperedInputError(SecureAggregationError):
+    """Raised when a masked input's digest does not verify (fail-closed)."""
+
+
+class MemberMismatchError(SecureAggregationError):
+    """Raised when unmask's member set does not match the aggregate's clients."""
+
+
+def _check_members(members: object) -> tuple:
+    if isinstance(members, (str, bytes)) or not isinstance(members, Sequence):
+        raise BadMemberError("members must be a sequence of client ids")
+    members = list(members)
+    if not members:
+        raise BadMemberError("members must be non-empty")
+    for m in members:
+        if not isinstance(m, str) or not m:
+            raise BadMemberError("every member must be a non-empty str")
+    if len(set(members)) != len(members):
+        raise BadMemberError("members must be unique")
+    return tuple(sorted(members))
+
+
+def _check_round_id(round_id: object) -> str:
+    if not isinstance(round_id, str) or not round_id:
+        raise BadRoundError("round_id must be a non-empty str")
+    return round_id
+
+
+def _check_seed(seed: object) -> bytes:
+    if not isinstance(seed, (bytes, bytearray)) or not seed:
+        raise BadRoundError("seed must be non-empty bytes")
+    return bytes(seed)
+
+
+def _pair_mask(seed: bytes, a: str, b: str) -> int:
+    """Shared pairwise secret for an unordered client pair (deterministic)."""
+    lo, hi = (a, b) if a < b else (b, a)
+    return _expand_seed(seed, "pair:" + lo + ":" + hi, 0)
+
+
+def _self_mask(seed: bytes, client_id: str) -> int:
+    return _expand_seed(seed, "self:" + client_id, 0)
+
+
+@dataclass(frozen=True)
+class MaskedInput:
+    """One client's masked update for a round. The mask hides the value."""
+
+    client_id: str
+    round_id: str
+    masked_value: int
+    digest: str  # sha256 pin over the canonical body (tamper-evident)
+
+    def as_dict(self) -> dict:
+        return {
+            "client_id": self.client_id,
+            "round_id": self.round_id,
+            "masked_value": _hexint(self.masked_value),
+            "digest": self.digest,
+            "schema": SECURE_AGGREGATION_SCHEMA,
+            "version": SECURE_AGGREGATION_VERSION,
+        }
+
+
+def _masked_input_body(client_id: str, round_id: str, masked_value: int) -> dict:
+    return {
+        "client_id": client_id,
+        "round_id": round_id,
+        "masked_value": _hexint(masked_value),
+        "schema": SECURE_AGGREGATION_SCHEMA,
+        "version": SECURE_AGGREGATION_VERSION,
+    }
+
+
+@dataclass(frozen=True)
+class MaskedAggregate:
+    """Sum of a round's masked inputs. Pairwise masks have cancelled."""
+
+    round_id: str
+    masked_total: int
+    client_ids: tuple
+    digest: str  # sha256 pin over the canonical body
+
+    def as_dict(self) -> dict:
+        return {
+            "round_id": self.round_id,
+            "masked_total": _hexint(self.masked_total),
+            "client_ids": list(self.client_ids),
+            "digest": self.digest,
+            "schema": SECURE_AGGREGATION_SCHEMA,
+            "version": SECURE_AGGREGATION_VERSION,
+        }
+
+
+def _masked_aggregate_body(round_id: str, masked_total: int,
+                           client_ids: tuple) -> dict:
+    return {
+        "round_id": round_id,
+        "masked_total": _hexint(masked_total),
+        "client_ids": list(client_ids),
+        "schema": SECURE_AGGREGATION_SCHEMA,
+        "version": SECURE_AGGREGATION_VERSION,
+    }
+
+
+class SecureAggregation:
+    """Bonawitz-style pairwise-mask aggregation round (simulated).
+
+    Distinct from split_update()/aggregate_shares() (additive secret sharing
+    of one client's update): this class owns the *pairwise-mask protocol*
+    layer - mask() books each client's masked input, aggregate() sums them,
+    and unmask() strips the self-masks to reveal the total.
+
+    Protocol: for members sorted as m_0..m_{n-1},
+    y_i = (x_i + sum_{j<i} s(m_j,m_i) - sum_{j>i} s(m_i,m_j) + b_i) mod P,
+    where s(a,b) is the deterministic pairwise secret and b_i the
+    deterministic self-mask, both SHA-256-derived from the caller seed.
+    In the sum over all members every pairwise term appears once with a
+    plus and once with a minus, so aggregate() yields
+    sum(x_i) + sum(b_i); unmask() subtracts sum(b_i) to reveal sum(x_i).
+
+    Simulated: real SecAgg derives pairwise secrets via Diffie-Hellman and
+    recovers dropout self-masks via Shamir shares; here everything is
+    deterministically derived from the caller-supplied seed. No wall-clock,
+    no RNG, no network.
+    """
+
+    def mask(self, client_id: str, value: int, members, round_id: str,
+             seed: bytes) -> MaskedInput:
+        """Mask one client's update for a round (deterministic)."""
+        client_id = _check_client_id(client_id)
+        value = _check_value(value, "value")
+        member_tuple = _check_members(members)
+        round_id = _check_round_id(round_id)
+        seed = _check_seed(seed)
+        if client_id not in member_tuple:
+            raise UnknownMemberError(
+                f"client {client_id!r} is not in the round's member set")
+
+        idx = member_tuple.index(client_id)
+        pair = 0
+        for j, other in enumerate(member_tuple):
+            if j == idx:
+                continue
+            s = _pair_mask(seed, client_id, other)
+            pair = (pair + s) % FIELD_PRIME if j < idx else (pair - s) % FIELD_PRIME
+        masked = (value + pair + _self_mask(seed, client_id)) % FIELD_PRIME
+        body = _masked_input_body(client_id, round_id, masked)
+        return MaskedInput(client_id=client_id, round_id=round_id,
+                           masked_value=masked, digest=_pin(body))
+
+    def aggregate(self, masked_inputs) -> MaskedAggregate:
+        """Sum a round's masked inputs (fail-closed on tampered/mixed inputs)."""
+        if (isinstance(masked_inputs, (str, bytes))
+                or not isinstance(masked_inputs, Sequence)):
+            raise TypeError("masked_inputs must be a sequence of MaskedInput")
+        inputs = list(masked_inputs)
+        if not inputs:
+            raise ValueError("masked_inputs must be non-empty")
+
+        round_id = None
+        seen = set()
+        total = 0
+        for mi in inputs:
+            if not isinstance(mi, MaskedInput):
+                raise TypeError("every input must be a MaskedInput")
+            body = _masked_input_body(mi.client_id, mi.round_id, mi.masked_value)
+            if mi.digest != _pin(body):
+                raise TamperedInputError(
+                    f"masked input digest mismatch for {mi.client_id!r}")
+            if round_id is None:
+                round_id = mi.round_id
+            elif mi.round_id != round_id:
+                raise RoundMismatchError(
+                    "masked inputs from different rounds cannot aggregate")
+            if mi.client_id in seen:
+                raise DuplicateMaskError(
+                    f"duplicate masked input for {mi.client_id!r}")
+            seen.add(mi.client_id)
+            total = (total + mi.masked_value) % FIELD_PRIME
+
+        client_ids = tuple(sorted(seen))
+        agg_body = _masked_aggregate_body(round_id, total, client_ids)
+        return MaskedAggregate(round_id=round_id, masked_total=total,
+                               client_ids=client_ids, digest=_pin(agg_body))
+
+    def unmask(self, masked_aggregate: MaskedAggregate, members,
+               round_id: str, seed: bytes) -> int:
+        """Strip self-masks from an aggregate to reveal the round total.
+
+        Fail-closed: the member set must exactly match the aggregate's
+        clients (a dropout changes the pairwise cancellation - the round is
+        invalid, not "approximately" right) and the round id must match.
+        """
+        if not isinstance(masked_aggregate, MaskedAggregate):
+            raise TypeError("masked_aggregate must be a MaskedAggregate")
+        member_tuple = _check_members(members)
+        round_id = _check_round_id(round_id)
+        seed = _check_seed(seed)
+        body = _masked_aggregate_body(masked_aggregate.round_id,
+                                      masked_aggregate.masked_total,
+                                      masked_aggregate.client_ids)
+        if masked_aggregate.digest != _pin(body):
+            raise TamperedInputError("masked aggregate digest mismatch")
+        if masked_aggregate.round_id != round_id:
+            raise RoundMismatchError("round id does not match the aggregate")
+        if member_tuple != masked_aggregate.client_ids:
+            raise MemberMismatchError(
+                "member set must exactly match the aggregate's clients")
+
+        self_sum = sum(_self_mask(seed, cid)
+                       for cid in masked_aggregate.client_ids) % FIELD_PRIME
+        return (masked_aggregate.masked_total - self_sum) % FIELD_PRIME
+
+
 def main() -> None:
     # End-to-end honest round: 3 clients, split -> aggregate -> commit -> verify.
     clients = [("alice", 100), ("bob", 250), ("carol", 175)]
@@ -332,6 +575,16 @@ def main() -> None:
                               sum(blindings) % FIELD_PRIME, len(clients))
     assert not verify_aggregation(tampered, commitments), "tampered total must fail"
     print("secure-aggregation OK: 3-client round verified, tampered total rejected")
+
+    # Pairwise-mask protocol layer: mask -> aggregate -> unmask.
+    sa = SecureAggregation()
+    members = ("alice", "bob", "carol")
+    masked = [sa.mask(cid, val, members, "round-1", b"protocol-seed")
+              for cid, val in clients]
+    magg = sa.aggregate(masked)
+    assert sa.unmask(magg, members, "round-1", b"protocol-seed") == \
+        sum(v for _, v in clients) % FIELD_PRIME, "unmask must recover the sum"
+    print("secure-aggregation protocol OK: mask, aggregate, unmask round-trip")
 
 
 if __name__ == "__main__":

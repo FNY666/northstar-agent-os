@@ -24,9 +24,20 @@ Public API:
   tuple of contributing client ids), ``total_examples``, ``weights``
   (per-client ``num_examples / total_examples``), ``params`` (the
   weighted average), ``digest``.
+- ``ClientMetric`` -- frozen record: ``client_id``, ``round``,
+  ``num_examples``, ``metrics`` (sorted tuple of ``(name, value)`` pairs
+  with finite, non-bool values), ``digest`` (``sha256:`` pin).
+- ``EvaluationReport`` -- frozen record: ``round``, ``clients`` (sorted),
+  ``total_examples``, ``metric_names`` (sorted), ``weighted_metrics``
+  (example-count-weighted mean per metric, FedAvg weighting),
+  ``model_round`` (the broadcast model round being evaluated, or None),
+  ``digest``.
+- ``FederatedLearning.evaluate(metrics, seq)`` -- books the example-weighted
+  mean of one round's host-reported client metrics; pure bookkeeping
+  (does not advance rounds or mutate the global model).
 - ``federated_learning_audit_event(kind, seq, ...)`` -- shapes
   ``audit.ndjson/1`` records (``model-broadcast`` / ``updates-aggregated``
-  / ``round-completed`` / ``rejected``).
+  / ``round-completed`` / ``evaluation-recorded`` / ``rejected``).
 
 Honest scope:
 
@@ -44,6 +55,10 @@ Honest scope:
 - Digest pins bind *content*, never *correctness*. A ``digest`` proves
   an update has not been modified in transit to the aggregator; it says
   nothing about whether the numbers are honest, fresh, or useful.
+- ``evaluate()`` books *host-reported* metrics: a client can claim any
+  accuracy it likes. The weighted mean is deterministic arithmetic on
+  declared numbers, never proof of model quality. For verified
+  evaluation pair with ``capability_eval`` or ``evaluation_harness``.
 - Integer params larger than 2^53 are rejected fail-closed (the JCS
   float-loss caveat documented in ``secure_aggregation``): digest pins
   must be collision-free, and model weights outside +-2^53 are
@@ -85,8 +100,10 @@ MAX_INT_MAGNITUDE = 2 ** 53
 _KIND_BROADCAST = "model-broadcast"
 _KIND_AGGREGATED = "updates-aggregated"
 _KIND_ROUND = "round-completed"
+_KIND_EVALUATED = "evaluation-recorded"
 _KIND_REJECTED = "rejected"
-_AUDIT_KINDS = (_KIND_BROADCAST, _KIND_AGGREGATED, _KIND_ROUND, _KIND_REJECTED)
+_AUDIT_KINDS = (_KIND_BROADCAST, _KIND_AGGREGATED, _KIND_ROUND,
+                _KIND_EVALUATED, _KIND_REJECTED)
 
 
 class FederatedLearningError(Exception):
@@ -281,6 +298,138 @@ class AggregationResult:
         }
 
 
+@dataclass(frozen=True)
+class ClientMetric:
+    """One client's host-reported metric sample for a round.
+
+    ``num_examples`` is the FedAvg weight; ``metrics`` is stored as a
+    sorted tuple of ``(name, value)`` pairs so digest pins are
+    deterministic. Values are host-reported (GIGO) -- the module books
+    them, it does not verify them.
+    """
+
+    client_id: str
+    round: int
+    num_examples: int
+    metrics: Tuple[Tuple[str, float], ...]
+    digest: str
+
+    def __init__(self, client_id: str, round: int, num_examples: object,
+                 metrics: object) -> None:
+        _check_text(client_id, "client_id")
+        _check_round(round)
+        if isinstance(num_examples, bool) or not isinstance(num_examples, int):
+            raise TypeError("num_examples must be int, "
+                            f"got {type(num_examples).__name__}")
+        if num_examples <= 0:
+            raise ValueError(f"num_examples must be > 0, got {num_examples}")
+        if isinstance(metrics, (str, bytes)) or not isinstance(metrics, dict):
+            raise TypeError("metrics must be a dict of str -> number, "
+                            f"got {type(metrics).__name__}")
+        if not metrics:
+            raise ValueError("metrics must be non-empty")
+        pairs = tuple(sorted(
+            (_check_text(k, "metric name"),
+             _check_metric_value(v, k))
+            for k, v in metrics.items()
+        ))
+        digest = _pin("client-metric", {
+            "client_id": client_id,
+            "round": round,
+            "num_examples": num_examples,
+            "metrics": [[k, v] for k, v in pairs],
+        })
+        object.__setattr__(self, "client_id", client_id)
+        object.__setattr__(self, "round", round)
+        object.__setattr__(self, "num_examples", num_examples)
+        object.__setattr__(self, "metrics", pairs)
+        object.__setattr__(self, "digest", digest)
+
+    @property
+    def metric_names(self) -> Tuple[str, ...]:
+        """Sorted metric names this client reported."""
+        return tuple(k for k, _ in self.metrics)
+
+    def as_dict(self) -> Dict[str, Any]:
+        return {
+            "schema": SCHEMA_PIN,
+            "client_id": self.client_id,
+            "round": self.round,
+            "num_examples": self.num_examples,
+            "metrics": {k: v for k, v in self.metrics},
+            "digest": self.digest,
+        }
+
+
+@dataclass(frozen=True)
+class EvaluationReport:
+    """The example-weighted mean of one round's host-reported metrics.
+
+    ``weighted_metrics`` aligns with ``metric_names``; ``model_round``
+    is the broadcast model round the metrics were reported against (or
+    None when no model has been broadcast yet).
+    """
+
+    round: int
+    clients: Tuple[str, ...]
+    total_examples: int
+    metric_names: Tuple[str, ...]
+    weighted_metrics: Tuple[float, ...]
+    model_round: int | None
+    digest: str
+
+    def __init__(self, round: int, clients: Sequence[str],
+                 total_examples: int, metric_names: Sequence[str],
+                 weighted_metrics: Sequence[float],
+                 model_round: object) -> None:
+        _check_round(round)
+        clients_t = tuple(_check_text(c, "clients[]") for c in clients)
+        if isinstance(total_examples, bool) or not isinstance(total_examples, int):
+            raise TypeError("total_examples must be int")
+        if total_examples <= 0:
+            raise ValueError("total_examples must be > 0")
+        names_t = tuple(_check_text(n, "metric_names[]") for n in metric_names)
+        wm_t = tuple(float(w) for w in weighted_metrics)
+        if len(wm_t) != len(names_t):
+            raise ValueError("weighted_metrics and metric_names must align")
+        if model_round is not None:
+            _check_round(model_round)
+        digest = _pin("evaluation-report", {
+            "round": round,
+            "clients": list(clients_t),
+            "total_examples": total_examples,
+            "metric_names": list(names_t),
+            "weighted_metrics": list(wm_t),
+            "model_round": model_round,
+        })
+        object.__setattr__(self, "round", round)
+        object.__setattr__(self, "clients", clients_t)
+        object.__setattr__(self, "total_examples", total_examples)
+        object.__setattr__(self, "metric_names", names_t)
+        object.__setattr__(self, "weighted_metrics", wm_t)
+        object.__setattr__(self, "model_round", model_round)
+        object.__setattr__(self, "digest", digest)
+
+    def metric(self, name: str) -> float:
+        """Weighted mean of one metric; KeyError on unknown names."""
+        for n, v in zip(self.metric_names, self.weighted_metrics):
+            if n == name:
+                return v
+        raise KeyError(f"unknown metric: {name!r}")
+
+    def as_dict(self) -> Dict[str, Any]:
+        return {
+            "schema": SCHEMA_PIN,
+            "round": self.round,
+            "clients": list(self.clients),
+            "total_examples": self.total_examples,
+            "metric_names": list(self.metric_names),
+            "weighted_metrics": list(self.weighted_metrics),
+            "model_round": self.model_round,
+            "digest": self.digest,
+        }
+
+
 def _validate_update_set(updates: object) -> List[ClientUpdate]:
     """Fail-closed structural checks for one aggregation batch."""
     if isinstance(updates, (str, bytes)) or not isinstance(updates, (list, tuple)):
@@ -306,6 +455,47 @@ def _validate_update_set(updates: object) -> List[ClientUpdate]:
     if len(dims) != 1:
         raise AggregationError(
             f"all updates must share one param dimension, got {sorted(dims)}")
+    return items
+
+
+def _check_metric_value(value: object, name: str) -> float:
+    """Validate one metric value: finite number, not bool, sane ints."""
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        raise TypeError(f"metric {name!r} must be int/float, "
+                        f"got {type(value).__name__}")
+    if not math.isfinite(value):
+        raise ValueError(f"metric {name!r} must be finite, got {value!r}")
+    if isinstance(value, int) and abs(value) > MAX_INT_MAGNITUDE:
+        raise ValueError(f"metric {name!r} exceeds 2^53 (digest safety)")
+    return float(value)
+
+
+def _validate_metric_set(metrics: object) -> List["ClientMetric"]:
+    """Fail-closed structural checks for one evaluation batch."""
+    if isinstance(metrics, (str, bytes)) or not isinstance(metrics, (list, tuple)):
+        raise TypeError("metrics must be a list/tuple of ClientMetric, "
+                        f"got {type(metrics).__name__}")
+    if not metrics:
+        raise AggregationError("cannot evaluate an empty metric set")
+    items: List[ClientMetric] = []
+    for i, m in enumerate(metrics):
+        if not isinstance(m, ClientMetric):
+            raise TypeError(f"metrics[{i}] must be ClientMetric, "
+                            f"got {type(m).__name__}")
+        items.append(m)
+    rounds = {m.round for m in items}
+    if len(rounds) != 1:
+        raise AggregationError(
+            f"all metrics must be from one round, got {sorted(rounds)}")
+    ids = [m.client_id for m in items]
+    if len(set(ids)) != len(ids):
+        dupes = sorted({i for i in ids if ids.count(i) > 1})
+        raise AggregationError(f"duplicate client ids: {dupes}")
+    name_sets = {m.metric_names for m in items}
+    if len(name_sets) != 1:
+        raise AggregationError(
+            "all clients must report the same metric names, got "
+            f"{sorted(set().union(*name_sets))}")
     return items
 
 
@@ -368,6 +558,31 @@ class FederatedLearning:
         result = self.aggregate(updates, seq)
         return self.broadcast(result.params, seq)
 
+    def evaluate(self, metrics: object, seq: int) -> EvaluationReport:
+        """Book the example-weighted mean of one round's metrics.
+
+        Host-reported numbers (GIGO): a client can claim any accuracy.
+        Fail-closed on empty sets, duplicate clients, mixed rounds, and
+        mismatched metric-name sets. Pure bookkeeping -- rounds are not
+        advanced and the global model is untouched. ``model_round`` pins
+        the currently broadcast model round (None before any broadcast).
+        """
+        _check_seq(seq)
+        items = _validate_metric_set(metrics)
+        total = sum(m.num_examples for m in items)
+        names = items[0].metric_names
+        weighted = tuple(
+            math.fsum(
+                (m.num_examples / total) * dict(m.metrics)[name]
+                for m in items
+            )
+            for name in names
+        )
+        clients = tuple(sorted(m.client_id for m in items))
+        model = self._global_model
+        return EvaluationReport(items[0].round, clients, total, names,
+                                weighted, model.round if model else None)
+
     def current_model(self) -> GlobalModel | None:
         """The most recently broadcast model, or None before any broadcast."""
         with self._lock:
@@ -384,6 +599,7 @@ def federated_learning_audit_event(
     seq: int,
     global_model: GlobalModel | None = None,
     result: AggregationResult | None = None,
+    evaluation: EvaluationReport | None = None,
 ) -> Dict[str, Any]:
     """Shape an ``audit.ndjson/1`` record for federated learning decisions."""
     if kind not in _AUDIT_KINDS:
@@ -408,6 +624,15 @@ def federated_learning_audit_event(
         event["agg_round"] = result.round
         event["agg_clients"] = list(result.clients)
         event["agg_digest"] = result.digest
+    if evaluation is not None:
+        if not isinstance(evaluation, EvaluationReport):
+            raise TypeError("expected EvaluationReport, "
+                            f"got {type(evaluation).__name__}")
+        event["eval_round"] = evaluation.round
+        event["eval_clients"] = list(evaluation.clients)
+        event["eval_metrics"] = dict(zip(evaluation.metric_names,
+                                         evaluation.weighted_metrics))
+        event["eval_digest"] = evaluation.digest
     return event
 
 
@@ -440,6 +665,32 @@ def main() -> None:
     m1 = fl.round([a, b], 3)
     assert m1.round == 1 and m1.params == (2.5, 3.5)
 
+    # evaluate(): weighted mean of host-reported metrics; model_round
+    # pins the currently broadcast model. Pure bookkeeping -- rounds
+    # are not advanced.
+    ma = ClientMetric("a", 1, 1, {"accuracy": 0.5, "loss": 1.0})
+    mb = ClientMetric("b", 1, 3, {"accuracy": 1.0, "loss": 0.0})
+    ev_rep = fl.evaluate([ma, mb], 4)
+    assert ev_rep.round == 1
+    assert ev_rep.clients == ("a", "b")
+    assert ev_rep.total_examples == 4
+    assert ev_rep.metric_names == ("accuracy", "loss")
+    assert ev_rep.weighted_metrics == (0.875, 0.25), ev_rep.weighted_metrics
+    assert ev_rep.metric("accuracy") == 0.875
+    assert ev_rep.model_round == 1
+    assert fl.next_round() == 2  # unchanged by evaluate
+    fl2 = FederatedLearning()
+    ev_none = fl2.evaluate([ma, mb], 0)
+    assert ev_none.model_round is None
+    for bad in ([], [ma, ma], [ma, ClientMetric("c", 2, 1, {"accuracy": 1.0})],
+                [ma, ClientMetric("b", 1, 1, {"accuracy": 1.0})]):
+        try:
+            fl.evaluate(bad, 5)
+        except AggregationError:
+            pass
+        else:
+            raise AssertionError(f"evaluate must refuse: {bad!r}")
+
     # Fail-closed batch refusals.
     for bad in ([], [a, a]):
         try:
@@ -468,7 +719,7 @@ def main() -> None:
     else:
         raise AssertionError("unknown kind must raise")
 
-    print("federated-learning OK: broadcast, FedAvg math, round, refusals")
+    print("federated-learning OK: broadcast, FedAvg math, round, evaluate, refusals")
 
 
 if __name__ == "__main__":
