@@ -142,6 +142,8 @@ MANIFEST: dict[str, tuple[str, ...]] = {
         "enforcement_gap_probes",
         "counterfactual_explanation_probes",
         "artifact_graph_probes",
+        "history_deviation_probes",
+        "memory_admission_probes",
         "ask_or_solve_probes",
         "self_referential_trust_probes",
         "trace_tamper_probes",

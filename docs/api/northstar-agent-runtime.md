@@ -2939,6 +2939,142 @@ Look up any probe (attack or benign) by name.
 
 Map every probe name to its expected outcome.
 
+### `history_deviation_probes`
+
+Source: `components/northstar-agent-runtime/history_deviation_probes.py`
+
+History-deviation probes: plan tracking / precedent-gap detection.
+
+#### `HistoryEntry`
+
+One entry in the host-reported plan history.
+
+#### `build_entry(kind: str, tool: str, arguments_digest: str, seq: int, revision: int, origin: str, previous_digest: str='sha256:genesis')`
+
+Build a digest-pinned history entry.
+
+#### `verify_entry(entry: HistoryEntry)`
+
+Recompute an entry's digest; constant-time compare.
+
+#### `PlanHistory`
+
+Append-only host-reported plan history.
+
+- `append(entry: HistoryEntry)`
+- `entries()`
+- `digests()`
+#### `verify_history(history: PlanHistory)`
+
+Re-verify a whole history; never raises.
+
+#### `detect_deviation(history: PlanHistory)`
+
+Flag executed actions the plan history cannot account for.
+
+#### `detect_precedent_gap(history: PlanHistory)`
+
+Flag actions with no precedent in the agent's own history.
+
+#### `track_plan(history: PlanHistory)`
+
+Per-step plan conformance report.
+
+#### `history_head_digest(history: PlanHistory)`
+
+Head digest for out-of-band anchoring of the whole history.
+
+#### `probe_names()`
+
+All history-deviation attack probe names.
+
+#### `benign_names()`
+
+All benign control names.
+
+#### `probes_by_family(family: str)`
+
+Attack probes in one family.
+
+#### `probe_by_name(name: str)`
+
+Look up any probe (attack or benign) by name.
+
+#### `expected_outcomes()`
+
+Map every probe name to its expected outcome.
+
+#### `main()`
+
+Print a small summary for the CLI.
+
+### `memory_admission_probes`
+
+Source: `components/northstar-agent-runtime/memory_admission_probes.py`
+
+Memory-admission probe corpus + recalled-content privilege / injection / admission gates.
+
+#### `MemoryAdmissionError`
+
+A memory-admission record or gate step failed. Raised, never silent.
+
+#### `MemoryRecord`
+
+One memory record as admitted (write time) or recalled (read time).
+
+- `as_dict()`
+- `digest()`
+  - JCS-canonical digest of the record itself.
+#### `build_record(record_id: str, content_digest: str, writer_id: str, trust_tier: str, source_channel: str, pinned: bool=False, supersedes: str | None=None)`
+
+Construct a validated MemoryRecord; raises on malformed input.
+
+#### `verify_record(record: MemoryRecord, digest: str)`
+
+Constant-time check that a record matches its pinned digest.
+
+#### `WriteDecision`
+
+The write-time admission verdict for one memory record.
+
+#### `gate_memory_write(record: MemoryRecord)`
+
+Admit (or refuse) a memory write. Fail-closed.
+
+#### `ReadBinding`
+
+The read-time privilege binding for one recalled record.
+
+#### `gate_memory_read(record: MemoryRecord)`
+
+Bind the privilege a recalled record carries into the model context.
+
+#### `MemoryStore`
+
+Append-only memory store with admission on write and privilege binding on read.
+
+- `add(record: MemoryRecord)`
+  - Admit a write; store only on allow. Never raises on gate outcome.
+- `recall(record_id: str)`
+  - Recall one record with its read-time privilege binding.
+- `record_ids()`
+- `decisions()`
+#### `probe_names()`
+
+All memory-admission probe names.
+
+#### `probes_by_family(family: str)`
+
+Probes in one family.
+
+#### `probe_by_name(name: str)`
+
+One probe by name; KeyError on unknown names.
+
+#### `expected_outcomes()`
+
+Map every probe name to its expected outcome.
+
 ### `ask_or_solve_probes`
 
 Source: `components/northstar-agent-runtime/ask_or_solve_probes.py`
