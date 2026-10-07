@@ -145,6 +145,7 @@ MANIFEST: dict[str, tuple[str, ...]] = {
         "history_deviation_probes",
         "planner_executor_seam_probes",
         "run_assert_eval_probes",
+        "per_action_autonomy_probes",
         "pre_completion_signal_probes",
         "tool_schema_digest_probes",
         "memory_admission_probes",
