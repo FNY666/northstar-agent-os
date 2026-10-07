@@ -27,9 +27,17 @@ so the runtime's experimentation plumbing speaks one dialect:
 - ``ABTesting.results(experiment_id, seq)`` -- frozen ``ResultsReport``
   with per-variant assigned counts plus expected-vs-observed shares
   (allocation balance as data, not as a significance claim).
+- ``ABTesting.variant(experiment_id, variant_id)`` -- frozen
+  ``VariantView``: one variant's declared weight, expected share, and
+  live assignment count. Pure read view (no seq, no audit row).
+- ``ABTesting.analyze(experiment_id, seq)`` -- frozen
+  ``AnalysisReport``: per-variant deviations, a chi-square
+  goodness-of-fit statistic against the declared weights, and a
+  verdict as data (``"no-data"`` / ``"balanced"`` / ``"imbalanced"``).
+  Allocation balance is ledger health, not statistical significance.
 - ``ab_testing_audit_event(kind, ...)`` -- ``audit.ndjson/1`` records
-  (``experiment-created`` / ``subject-assigned`` / ``results-reported``);
-  caller-supplied seqs only.
+  (``experiment-created`` / ``subject-assigned`` / ``results-reported`` /
+  ``analysis-reported``); caller-supplied seqs only.
 
 Fail-closed edges (fail loudly, never guess):
 
@@ -94,7 +102,9 @@ AUDIT_SCHEMA = "audit.ndjson/1"
 KIND_EXPERIMENT_CREATED = "experiment-created"
 KIND_SUBJECT_ASSIGNED = "subject-assigned"
 KIND_RESULTS_REPORTED = "results-reported"
-_KINDS = (KIND_EXPERIMENT_CREATED, KIND_SUBJECT_ASSIGNED, KIND_RESULTS_REPORTED)
+KIND_ANALYSIS_REPORTED = "analysis-reported"
+_KINDS = (KIND_EXPERIMENT_CREATED, KIND_SUBJECT_ASSIGNED,
+          KIND_RESULTS_REPORTED, KIND_ANALYSIS_REPORTED)
 
 
 class ABTestingError(Exception):
@@ -107,6 +117,10 @@ class DuplicateExperimentError(ABTestingError):
 
 class UnknownExperimentError(ABTestingError):
     """Raised when an experiment_id names no declared experiment."""
+
+
+class UnknownVariantError(ABTestingError):
+    """Raised when a variant_id names no variant of the experiment."""
 
 
 class BadExperimentError(ABTestingError):
@@ -246,6 +260,25 @@ def _pin_results(experiment_id: str,
     })
 
 
+def _pin_analysis(experiment_id: str,
+                  counts: Tuple[Tuple[str, int], ...],
+                  verdict: str, seq: int) -> str:
+    """Digest-pin the canonical analysis body."""
+    return "sha256:" + jcs_sha256_hex({
+        "experiment_id": experiment_id,
+        "counts": [[vid, n] for vid, n in counts],
+        "verdict": verdict,
+        "seq": seq,
+    })
+
+
+#: Imbalance verdict tolerance: a variant whose observed share deviates
+#: from its expected share by more than this (absolute) marks the
+#: allocation "imbalanced". This is a ledger health signal, not a
+#: statistical significance claim.
+IMBALANCE_TOLERANCE = 0.05
+
+
 def _bucket(experiment_digest: str, subject_id: str) -> int:
     """Deterministic 256-bit bucket for (experiment, subject)."""
     return int.from_bytes(
@@ -369,6 +402,98 @@ class ResultsReport:
             "experiment_id": self.experiment_id,
             "total_subjects": self.total_subjects,
             "variant_results": [vr.as_dict() for vr in self.variant_results],
+            "seq": self.seq,
+            "digest": self.digest,
+            "version": self.version,
+            "schema": self.schema,
+        }
+
+
+@dataclass(frozen=True)
+class VariantView:
+    """One variant's declared config plus live assignment count (frozen).
+
+    Pure read view: booking nothing, auditing nothing.
+    """
+    experiment_id: str
+    variant_id: str
+    weight: float
+    expected_share: float
+    assigned: int
+    version: str = AB_TESTING_VERSION
+    schema: str = AB_TESTING_SCHEMA
+
+    def as_dict(self) -> dict:
+        return {
+            "experiment_id": self.experiment_id,
+            "variant_id": self.variant_id,
+            "weight": self.weight,
+            "expected_share": self.expected_share,
+            "assigned": self.assigned,
+            "version": self.version,
+            "schema": self.schema,
+        }
+
+
+@dataclass(frozen=True)
+class VariantAnalysis:
+    """Per-variant allocation-balance analysis inside a report (frozen)."""
+    variant_id: str
+    assigned: int
+    expected_share: float
+    observed_share: float
+    deviation: float  # observed_share - expected_share
+
+    def as_dict(self) -> dict:
+        return {
+            "variant_id": self.variant_id,
+            "assigned": self.assigned,
+            "expected_share": self.expected_share,
+            "observed_share": self.observed_share,
+            "deviation": self.deviation,
+        }
+
+
+#: Allocation-balance verdicts (data, never raised).
+VERDICT_NO_DATA = "no-data"
+VERDICT_BALANCED = "balanced"
+VERDICT_IMBALANCED = "imbalanced"
+_ANALYSIS_VERDICTS = (VERDICT_NO_DATA, VERDICT_BALANCED, VERDICT_IMBALANCED)
+
+
+@dataclass(frozen=True)
+class AnalysisReport:
+    """Allocation-balance analysis for one experiment (frozen).
+
+    ``chi_square`` is the goodness-of-fit statistic against the declared
+    allocation weights; ``verdict`` is ledger health as data -- a
+    necessary, not sufficient, condition for a valid experiment.
+    """
+    experiment_id: str
+    total_subjects: int
+    variant_analyses: Tuple[VariantAnalysis, ...]
+    chi_square: float
+    verdict: str
+    seq: int
+    digest: str
+    version: str = AB_TESTING_VERSION
+    schema: str = AB_TESTING_SCHEMA
+
+    def verify(self) -> bool:
+        """Recompute the digest pin; False on any tampering."""
+        counts = tuple((va.variant_id, va.assigned)
+                       for va in self.variant_analyses)
+        return self.digest == _pin_analysis(
+            self.experiment_id, counts, self.verdict, self.seq)
+
+    def as_dict(self) -> dict:
+        return {
+            "experiment_id": self.experiment_id,
+            "total_subjects": self.total_subjects,
+            "variant_analyses": [va.as_dict()
+                                 for va in self.variant_analyses],
+            "chi_square": self.chi_square,
+            "verdict": self.verdict,
             "seq": self.seq,
             "digest": self.digest,
             "version": self.version,
@@ -507,6 +632,72 @@ class ABTesting:
                               experiment_id=experiment_id)
             return report
 
+    def analyze(self, experiment_id: object, seq: object) -> AnalysisReport:
+        """Analyze allocation balance for an experiment (frozen report).
+
+        Books per-variant observed-vs-expected deviations, a chi-square
+        goodness-of-fit statistic against the declared weights, and a
+        verdict as data (``"no-data"`` / ``"balanced"`` /
+        ``"imbalanced"``). Allocation balance is a ledger health signal
+        -- it is not a significance claim about outcomes.
+        """
+        seq = _check_seq(seq)
+        experiment_id = _check_experiment_id(experiment_id)
+        with self._lock:
+            experiment = self._experiments.get(experiment_id)
+            if experiment is None:
+                raise UnknownExperimentError(
+                    f"unknown experiment_id {experiment_id!r}"
+                )
+            counts: Dict[str, int] = {vid: 0 for vid in experiment.variant_ids()}
+            for (eid, _subject), assignment in self._assignments.items():
+                if eid == experiment_id:
+                    counts[assignment.variant_id] += 1
+            total = sum(counts.values())
+            analyses = []
+            chi_square = 0.0
+            max_abs_dev = 0.0
+            for vid in experiment.variant_ids():
+                expected_share = experiment.expected_share(vid)
+                observed_share = (counts[vid] / total) if total else 0.0
+                deviation = observed_share - expected_share
+                max_abs_dev = max(max_abs_dev, abs(deviation))
+                expected_count = total * expected_share
+                if expected_count > 0:
+                    chi_square += ((counts[vid] - expected_count) ** 2
+                                   / expected_count)
+                analyses.append(VariantAnalysis(
+                    variant_id=vid,
+                    assigned=counts[vid],
+                    expected_share=expected_share,
+                    observed_share=observed_share,
+                    deviation=deviation,
+                ))
+            if total == 0:
+                verdict = VERDICT_NO_DATA
+            elif max_abs_dev > IMBALANCE_TOLERANCE:
+                verdict = VERDICT_IMBALANCED
+            else:
+                verdict = VERDICT_BALANCED
+            report = AnalysisReport(
+                experiment_id=experiment_id,
+                total_subjects=total,
+                variant_analyses=tuple(analyses),
+                chi_square=chi_square,
+                verdict=verdict,
+                seq=seq,
+                digest=_pin_analysis(
+                    experiment_id,
+                    tuple((vid, counts[vid])
+                          for vid in experiment.variant_ids()),
+                    verdict,
+                    seq,
+                ),
+            )
+            self._audit_event(KIND_ANALYSIS_REPORTED, seq,
+                              experiment_id=experiment_id)
+            return report
+
     def experiment(self, experiment_id: object) -> ExperimentRecord:
         """Read back one declared experiment."""
         experiment_id = _check_experiment_id(experiment_id)
@@ -525,6 +716,47 @@ class ABTesting:
         subject_id = _check_subject_id(subject_id)
         with self._lock:
             return self._assignments.get((experiment_id, subject_id))
+
+    def variant(self, experiment_id: object,
+                variant_id: object) -> VariantView:
+        """Read back one variant's config plus its live assignment count.
+
+        Pure view: it mutates nothing, consumes no seq, writes no audit
+        row.
+        """
+        experiment_id = _check_experiment_id(experiment_id)
+        if not isinstance(variant_id, str) or not variant_id:
+            raise UnknownVariantError(
+                f"variant_id must be a non-empty str, "
+                f"got {variant_id!r}"
+            )
+        with self._lock:
+            experiment = self._experiments.get(experiment_id)
+            if experiment is None:
+                raise UnknownExperimentError(
+                    f"unknown experiment_id {experiment_id!r}"
+                )
+            weight: Optional[float] = None
+            for vid, w in experiment.variants:
+                if vid == variant_id:
+                    weight = w
+                    break
+            if weight is None:
+                raise UnknownVariantError(
+                    f"unknown variant_id {variant_id!r} "
+                    f"in experiment {experiment_id!r}"
+                )
+            assigned = sum(
+                1 for (eid, _subject), a in self._assignments.items()
+                if eid == experiment_id and a.variant_id == variant_id
+            )
+            return VariantView(
+                experiment_id=experiment_id,
+                variant_id=variant_id,
+                weight=weight,
+                expected_share=experiment.expected_share(variant_id),
+                assigned=assigned,
+            )
 
     def experiment_ids(self) -> Tuple[str, ...]:
         """Sorted ids of declared experiments."""
@@ -576,7 +808,13 @@ def main() -> None:
     report = ab.results(exp.experiment_id, seq=5)
     assert report.total_subjects == 2, report
     assert {a1.variant_id, a2.variant_id} <= set(exp.variant_ids())
-    print("ab-testing OK: create, assign, sticky, results")
+    # Spec API: variant view + allocation-balance analysis.
+    view = ab.variant(exp.experiment_id, a1.variant_id)
+    assert view.assigned >= 1, view
+    analysis = ab.analyze(exp.experiment_id, seq=6)
+    assert analysis.verify(), analysis
+    assert analysis.verdict in ("balanced", "imbalanced", "no-data"), analysis
+    print("ab-testing OK: create, assign, sticky, results, variant, analyze")
 
 
 if __name__ == "__main__":
