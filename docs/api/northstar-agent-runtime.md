@@ -198,6 +198,44 @@ All adversarial probe names.
 
 All benign control names.
 
+### `deny_monotonicity`
+
+Source: `components/northstar-agent-runtime/deny_monotonicity.py`
+
+Deny-monotonicity check for the governance bench.
+
+#### `build_gate_fn()`
+
+Return ``gate_fn(probe) -> PermissionDecision`` for the canary corpus.
+
+#### `compute_deny_set(corpus: tuple[dict[str, Any], ...] | list[dict[str, Any]], gate_fn: Callable[[dict[str, Any]], Any])`
+
+Run the corpus through ``gate_fn``; return denied ``(probe, deny_code)`` pairs.
+
+#### `check_monotonicity(old_deny_set: set[tuple[str, str]], new_deny_set: set[tuple[str, str]])`
+
+True iff ``new`` keeps every denial in ``old``.
+
+#### `baseline_path()`
+
+Filesystem path of the pinned baseline JSON (next to this module).
+
+#### `save_baseline(deny_set: set[tuple[str, str]], path: str | Path | None=None)`
+
+Write the deny set as the pinned baseline. Deliberate, reviewed act.
+
+#### `load_baseline(path: str | Path | None=None)`
+
+Load the pinned baseline. Raises FileNotFoundError when absent.
+
+#### `regenerate_baseline(corpus: tuple[dict[str, Any], ...] | None=None, path: str | Path | None=None)`
+
+Recompute the deny set against the *current* gate and pin it.
+
+#### `deny_monotonicity_check(gate_fn: Callable[[dict[str, Any]], Any] | None=None, corpus: tuple[dict[str, Any], ...] | None=None, baseline: str | Path | None=None)`
+
+Bench-ready check: ``(ok, message)`` for the deny-monotonicity case.
+
 ### `adjudication`
 
 Source: `components/northstar-agent-runtime/adjudication.py`
