@@ -277,6 +277,7 @@ py-modules = [
     "akf_export",
     "alert_manager",
     "aligned_ai",
+    "alignment_check",
     "alignment_eval",
     "aml_screener",
     "amplification",
