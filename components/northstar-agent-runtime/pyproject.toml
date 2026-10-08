@@ -785,6 +785,7 @@ py-modules = [
     "interpretability",
     "interpretability_probe",
     "interruptibility",
+    "invis_remove",
     "invitation_manager",
     "invoice_generator",
     "irl",
