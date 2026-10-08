@@ -1123,6 +1123,7 @@ py-modules = [
     "reflection",
     "refusal_detect",
     "refusal_monitor",
+    "regex_block",
     "regulatory",
     "relational_db",
     "release_manager",
