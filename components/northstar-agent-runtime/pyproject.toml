@@ -279,6 +279,7 @@ py-modules = [
     "aligned_ai",
     "alignment_check",
     "alignment_eval",
+    "allowlist",
     "aml_screener",
     "amplification",
     "amqp_broker",
