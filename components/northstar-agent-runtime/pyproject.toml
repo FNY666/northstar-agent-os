@@ -1020,6 +1020,7 @@ py-modules = [
     "trustworthy_ai",
     "twin_receipts",
     "two_phase_commit",
+    "two_tier_gating",
     "twopset",
     "type_checker",
     "type_checker_iface",
