@@ -125,12 +125,18 @@ class GovernedActionRunner:
         tool: str,
         tool_args: Optional[Dict[str, Any]] = None,
         inputs_digest: str = "",
+        kind: Optional[str] = None,
+        mutating: Optional[bool] = None,
     ) -> GovernedOutcome:
         """Run one governed action through all 4 gates.
 
         Returns GovernedOutcome.  Raises GovernedRunnerError on malformed
         input (fail-closed).  Gate denials return blocked outcomes, not
         exceptions -- the denial is the normal result.
+
+        ``kind`` and ``mutating`` are passed to the permission gate's
+        ``evaluate()`` -- they determine whether the gate allows the
+        action.  If omitted, the gate uses its defaults.
         """
         if not intent or not action or not subject or not tool:
             raise GovernedRunnerError("intent/action/subject/tool required")
@@ -155,7 +161,7 @@ class GovernedActionRunner:
         )
 
         seq = self._next_seq()
-        decision = self._gate.evaluate(tool, kind="read", mutating=False)
+        decision = self._gate.evaluate(tool, kind=kind, mutating=mutating)
         gate_decision = "allow" if decision.allowed else "deny"
         self._safr.authorize(seq, decl_id, gate_decision, "permission-engine", inputs_digest)
         if not decision.allowed:
