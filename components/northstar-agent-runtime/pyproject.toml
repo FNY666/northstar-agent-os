@@ -1441,6 +1441,7 @@ py-modules = [
     "zeromq_patterns",
     "zk_interface",
     "zk_verifier",
+    "zw_remove",
 ]
 
 [tool.setuptools.packages.find]
