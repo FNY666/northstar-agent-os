@@ -26,7 +26,10 @@ reg.register(cr.CommandSpec("read", cr.AutonomyLevel.AUTOMATIC, "read file"))
 reg.register(cr.CommandSpec("write", cr.AutonomyLevel.NOTIFY, "write file"))
 reg.register(cr.CommandSpec("delete", cr.AutonomyLevel.APPROVAL_REQUIRED, "delete file"))
 
-gate = tt.TwoTierGate(lambda t, a: 0.7 if t == "delete" else 0.1, deny_threshold=0.95)
+def tier2(tool, args):
+    return tt.TierVerdict("deny", "tier-2: delete needs approval", 0.8, 2, 1.0)
+
+gate = tt.TwoTierGate(lambda t, a: 0.7 if t == "delete" else 0.1, tier2, deny_threshold=0.95)
 
 def run():
     out = {}
