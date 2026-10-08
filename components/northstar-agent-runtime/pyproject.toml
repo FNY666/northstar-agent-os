@@ -365,6 +365,7 @@ py-modules = [
     "capability_reassembly",
     "capability_warrants",
     "captcha_mock",
+    "case_norm",
     "cci_detector",
     "ccpa",
     "cd_deployer",
