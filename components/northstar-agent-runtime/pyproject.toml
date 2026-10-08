@@ -572,6 +572,7 @@ py-modules = [
     "geocoder",
     "geofence_manager",
     "glba",
+    "goal_comparator",
     "goal_misgeneralization",
     "gossip_protocol",
     "governance",
