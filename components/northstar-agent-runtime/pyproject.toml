@@ -357,6 +357,7 @@ py-modules = [
     "cache_tier",
     "calendar_service",
     "canary_controller",
+    "canary_tokens",
     "canonical_json",
     "capability_eval",
     "capability_reassembly",
