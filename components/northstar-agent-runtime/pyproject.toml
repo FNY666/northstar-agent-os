@@ -1205,6 +1205,7 @@ py-modules = [
     "scheming",
     "science_agents",
     "scim_provisioning",
+    "script_mix",
     "sdk",
     "sdk_generation",
     "seal_merkle_batch",
