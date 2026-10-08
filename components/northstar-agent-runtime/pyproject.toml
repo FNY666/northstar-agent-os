@@ -1071,6 +1071,7 @@ py-modules = [
     "sse_manager",
     "sso_integration",
     "ssrf_detect",
+    "ssti_detect",
     "standards",
     "stark_hash",
     "state_backend",
