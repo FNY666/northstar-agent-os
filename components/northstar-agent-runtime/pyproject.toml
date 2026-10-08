@@ -1401,6 +1401,7 @@ py-modules = [
     "type_checker_iface",
     "uncertainty_mock",
     "underwriting_agents",
+    "unicode_sanit",
     "user_profile",
     "validator_scarcity",
     "value_learning",
