@@ -681,6 +681,7 @@ py-modules = [
     "hipaa",
     "hlc",
     "hoare_logic",
+    "homoglyph_norm",
     "homomorphic_training",
     "honeytokens",
     "hooks",
