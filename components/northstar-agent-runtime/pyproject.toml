@@ -991,6 +991,7 @@ py-modules = [
     "task_manager",
     "task_queue",
     "task_router",
+    "task_snapshot",
     "tax_agents",
     "tax_calculator",
     "team_manager",
