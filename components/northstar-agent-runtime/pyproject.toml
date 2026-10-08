@@ -540,6 +540,7 @@ py-modules = [
     "experiment_tracking",
     "exploit_difficulty",
     "face_detector",
+    "factuality_mock",
     "failure_budget_combo",
     "failure_bundle",
     "failure_detector",
