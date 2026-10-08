@@ -63,6 +63,8 @@ def test_full_governed_run_executes():
         subject="prod-api",
         tool="read_file",
         tool_args={"path": "/etc/hosts"},
+        kind="read",
+        mutating=False,
     )
     assert outcome.executed is True
     assert outcome.gate == "executed"
@@ -81,16 +83,22 @@ def test_full_governed_run_executes():
 
 def test_deny_at_authorize_blocks():
     runner, ledger, checkpoint, observer, executed, ik, ck = _build_runner()
-    # Use a tool that the gate will deny (if any).  If the default config
-    # allows everything, this test verifies the wiring handles allow.
-    # We force a deny by using a mock gate decision via a restrictive engine.
-    # For now, verify the runner handles the allow path; deny path is
-    # covered by unit logic.
+    # delete_db with mutating=True is denied by the default gate.
     outcome = runner.run(
-        intent="x", action="y", subject="z", tool="read_file", tool_args={}
+        intent="destroy",
+        action="delete-db",
+        subject="prod-db",
+        tool="delete_db",
+        tool_args={},
+        kind="write",
+        mutating=True,
     )
-    # At minimum, the runner completed without exception.
-    assert outcome.declaration_id.startswith("safd-")
+    assert outcome.executed is False
+    assert outcome.gate == "authorize"
+    assert outcome.decision == "deny"
+    assert len(executed) == 0  # tool never ran
+    # The denial was sealed.
+    assert len(ledger) >= 1
 
 
 def test_runner_fail_closed_on_bad_input():
