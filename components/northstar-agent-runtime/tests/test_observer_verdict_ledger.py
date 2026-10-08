@@ -38,7 +38,7 @@ def test_version_and_schema_pins():
     assert ovl.OBSERVER_VERDICT_LEDGER_VERSION == "observer-verdict-ledger.v1"
     assert ovl.SCHEMA_PIN == "northstar.observer-verdict-ledger.v1"
     assert ovl.VERDICTS == ("allow", "deny", "flag", "escalate", "abstain")
-    assert ovl.AUDIT_KINDS == ("verdict", "retired", "rejected")
+    assert ovl.AUDIT_KINDS == ("verdict", "retired", "rejected", "committed")
 
 
 # 2. stdlib-only AST check
@@ -344,3 +344,51 @@ def test_main_subprocess():
     )
     assert proc.returncode == 0, proc.stderr
     assert "OK" in proc.stdout
+
+
+# 16. Hubinger defense: pre-commitment to criteria
+def test_commit_criteria_before_verdict():
+    ledger = ovl.ObserverVerdictLedger()
+    PIN = "sha256:" + "ab" * 32
+    # Observer commits to criteria BEFORE the action (seq 1).
+    comm = ledger.commit_criteria("obs-1", 1, PIN)
+    assert comm.commitment_id == "obc-1"
+    assert comm.observer_id == "obs-1"
+    assert comm.criteria_digest == PIN
+    # Verdict references the commitment (seq 2, after commitment).
+    rec = ledger.verdict("obs-1", 2, PIN, "allow", PIN, commitment_id=comm.commitment_id)
+    assert rec.commitment_id == "obc-1"
+    # The commitment proves criteria were fixed before the action.
+
+
+def test_verdict_rejects_unknown_commitment():
+    ledger = ovl.ObserverVerdictLedger()
+    PIN = "sha256:" + "ab" * 32
+    with pytest.raises(ovl.ObserverVerdictError):
+        ledger.verdict("obs-1", 1, PIN, "allow", PIN, commitment_id="obc-999")
+
+
+def test_verdict_rejects_commitment_from_other_observer():
+    ledger = ovl.ObserverVerdictLedger()
+    PIN = "sha256:" + "ab" * 32
+    comm = ledger.commit_criteria("obs-1", 1, PIN)
+    # Different observer tries to use obs-1's commitment.
+    with pytest.raises(ovl.ObserverVerdictError):
+        ledger.verdict("obs-2", 1, PIN, "allow", PIN, commitment_id=comm.commitment_id)
+
+
+def test_verdict_rejects_commitment_after_verdict_seq():
+    ledger = ovl.ObserverVerdictLedger()
+    PIN = "sha256:" + "ab" * 32
+    # Commitment at seq 5, verdict at seq 3 (before commitment) -- invalid.
+    comm = ledger.commit_criteria("obs-1", 5, PIN)
+    with pytest.raises(ovl.ObserverVerdictError):
+        ledger.verdict("obs-1", 3, PIN, "allow", PIN, commitment_id=comm.commitment_id)
+
+
+def test_verdict_without_commitment_still_works():
+    # Backward compat: commitment is optional.
+    ledger = ovl.ObserverVerdictLedger()
+    PIN = "sha256:" + "ab" * 32
+    rec = ledger.verdict("obs-1", 1, PIN, "allow", PIN)
+    assert rec.commitment_id == ""

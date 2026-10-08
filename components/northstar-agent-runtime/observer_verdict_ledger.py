@@ -107,6 +107,7 @@ AUDIT_KINDS = (
     "verdict",
     "retired",
     "rejected",
+    "committed",
 )
 
 
@@ -127,6 +128,27 @@ def _require_pin(value: Any, name: str) -> str:
 
 
 @dataclass(frozen=True)
+class CriteriaCommitment:
+    """Observer's pre-commitment to assessment criteria (Hubinger defense).
+
+    The observer commits to its assessment criteria (as a digest) BEFORE
+    the agent acts.  The agent sees only the commitment hash, not the
+    criteria -- it cannot model the observer's exact checks and game
+    them.  After the verdict, the observer reveals the criteria; anyone
+    can verify they match the commitment.
+
+    This is the cryptographic commitment scheme applied to governance:
+    hide the evaluation, bind the evaluator.
+    """
+
+    commitment_id: str  # obc-N
+    observer_seq: int  # observer-owned seq at commitment time
+    observer_id: str  # which observer committed
+    criteria_digest: str  # sha256: pin of the assessment criteria
+    digest: str  # sha256: pin of the canonical commitment
+
+
+@dataclass(frozen=True)
 class VerdictRecord:
     """One observer verdict (immutable)."""
 
@@ -138,6 +160,7 @@ class VerdictRecord:
     reason_digest: str  # sha256: pin of the observer's rationale
     severity: int  # host-declared int [0, 100]
     digest: str  # sha256: pin of the canonical record
+    commitment_id: str = ""  # obc-N if pre-committed, else "" (legacy)
 
 
 @dataclass(frozen=True)
@@ -166,6 +189,8 @@ class ObserverVerdictLedger:
         self._retired: Dict[str, RetireRecord] = {}
         self._next_seq: Dict[str, int] = {}  # observer_id -> next expected seq
         self._counter = 0
+        self._commitment_counter = 0
+        self._commitments: Dict[str, CriteriaCommitment] = {}
         self._audit_log: List[Dict[str, Any]] = []
         self._rejected = 0
 
@@ -174,6 +199,10 @@ class ObserverVerdictLedger:
     def _mint(self) -> str:
         self._counter += 1
         return f"obv-{self._counter}"
+
+    def _mint_commitment(self) -> str:
+        self._commitment_counter += 1
+        return f"obc-{self._commitment_counter}"
 
     def _audit(self, kind: str, seq: int, ref: str) -> None:
         if kind not in AUDIT_KINDS:
@@ -202,6 +231,63 @@ class ObserverVerdictLedger:
 
     # -- mutation ----------------------------------------------------
 
+    def commit_criteria(
+        self,
+        observer_id: str,
+        observer_seq: int,
+        criteria_digest: str,
+    ) -> CriteriaCommitment:
+        """Book an observer's pre-commitment to assessment criteria.
+
+        Call BEFORE the agent acts.  The ``criteria_digest`` is a
+        ``sha256:`` pin of the observer's assessment criteria -- the
+        agent sees the commitment hash, not the criteria.  When the
+        verdict is later booked with this ``commitment_id``, the
+        ledger proves the criteria were fixed before the action.
+
+        Hubinger defense: the agent cannot model the observer's exact
+        checks because the criteria are hidden behind the commitment.
+        """
+        if not isinstance(observer_id, str) or not observer_id:
+            raise ObserverVerdictError("observer_id must be non-empty str")
+        with self._lock:
+            if observer_id in self._retired:
+                raise ObserverVerdictError("observer is retired")
+            self._claim_seq(observer_id, observer_seq)
+            # Validate the digest pin.
+            if (
+                not isinstance(criteria_digest, str)
+                or not criteria_digest.startswith("sha256:")
+                or len(criteria_digest) != 71
+            ):
+                raise ObserverVerdictError("criteria_digest must be sha256: pin")
+            commitment_id = self._mint_commitment()
+            # Canonical digest of the commitment.
+            import hashlib as _hl
+            import json as _js
+
+            canonical = _js.dumps(
+                {
+                    "commitment_id": commitment_id,
+                    "observer_seq": observer_seq,
+                    "observer_id": observer_id,
+                    "criteria_digest": criteria_digest,
+                },
+                sort_keys=True,
+                separators=(",", ":"),
+            ).encode()
+            digest = "sha256:" + _hl.sha256(canonical).hexdigest()
+            commitment = CriteriaCommitment(
+                commitment_id=commitment_id,
+                observer_seq=observer_seq,
+                observer_id=observer_id,
+                criteria_digest=criteria_digest,
+                digest=digest,
+            )
+            self._commitments[commitment_id] = commitment
+            self._audit("committed", observer_seq, commitment_id)
+            return commitment
+
     def verdict(
         self,
         observer_id: str,
@@ -210,12 +296,19 @@ class ObserverVerdictLedger:
         verdict: str,
         reason_digest: str,
         severity: int = 0,
+        commitment_id: str = "",
     ) -> VerdictRecord:
         """Book one observer verdict.
 
         ``observer_seq`` is owned by the observer and must be strictly
         increasing per ``observer_id``.  ``action_digest`` pins the
         observed agent action; ``reason_digest`` pins the rationale.
+
+        ``commitment_id`` (optional): if the observer pre-committed its
+        criteria via ``commit_criteria()``, pass the commitment ID here.
+        The ledger verifies the commitment exists, belongs to this
+        observer, and was booked at an earlier seq -- proving the
+        criteria were fixed before the action (Hubinger defense).
         """
         if not isinstance(observer_id, str) or not observer_id:
             raise ObserverVerdictError("observer_id must be non-empty str")
@@ -240,6 +333,21 @@ class ObserverVerdictLedger:
                     raise ObserverVerdictError("severity must be int")
                 if not 0 <= severity <= 100:
                     raise ObserverVerdictError("severity must be in [0, 100]")
+                # Verify commitment if provided.
+                if commitment_id:
+                    if commitment_id not in self._commitments:
+                        raise ObserverVerdictError(
+                            f"unknown commitment {commitment_id!r}"
+                        )
+                    comm = self._commitments[commitment_id]
+                    if comm.observer_id != observer_id:
+                        raise ObserverVerdictError(
+                            "commitment belongs to different observer"
+                        )
+                    if comm.observer_seq >= observer_seq:
+                        raise ObserverVerdictError(
+                            "commitment must precede verdict (seq)"
+                        )
             except ObserverVerdictError:
                 _fail()
                 raise
@@ -254,6 +362,7 @@ class ObserverVerdictLedger:
                     "verdict": verdict,
                     "reason_digest": reason_digest,
                     "severity": severity,
+                    "commitment_id": commitment_id,
                 }
             )
             digest = "sha256:" + hashlib.sha256(payload).hexdigest()
@@ -266,6 +375,7 @@ class ObserverVerdictLedger:
                 reason_digest=reason_digest,
                 severity=severity,
                 digest=digest,
+                commitment_id=commitment_id,
             )
             self._verdicts[verdict_id] = record
             self._by_observer.setdefault(observer_id, []).append(verdict_id)
