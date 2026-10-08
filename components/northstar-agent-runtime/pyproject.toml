@@ -692,6 +692,7 @@ py-modules = [
     "hr_agents",
     "hsm",
     "hsm_interface",
+    "html_entity_guard",
     "http_client",
     "human_oversight",
     "hybrid_crypto",
