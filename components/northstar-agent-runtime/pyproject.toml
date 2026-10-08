@@ -296,6 +296,7 @@ py-modules = [
     "approval_sla_time",
     "approver_separation",
     "artifact_publisher",
+    "asi02_probe",
     "asi04_probes",
     "asi07_corpus",
     "asi08_probes",
