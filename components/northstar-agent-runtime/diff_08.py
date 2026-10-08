@@ -1,0 +1,106 @@
+"""Range Decrement Only: difference array example.
+
+Difference array restricted to non-positive updates: a decrement-only ledger that refuses increments fail-closed.
+
+What this IS: a real decrement-only difference array, fail-closed on positive v
+What this IS NOT: a general range-add structure; increments are rejected here
+"""
+
+from __future__ import annotations
+
+import ast
+
+#: Module version.
+DIFF_08_VERSION = "range-decrement-only.v1"
+
+#: Schema pin.
+SCHEMA_PIN = "northstar.diff-range-decrement-only.v1"
+
+
+class DiffError(Exception):
+    """Fail-closed."""
+
+
+class DecrementDiff:
+    """Range decrement ledger. Fail-closed on positive values or bad bounds."""
+
+    def __init__(self, n: int):
+        if n <= 0:
+            raise DiffError("n must be > 0")
+        self.n = n
+        self._diff = [0] * (n + 1)
+
+    def decrement(self, l: int, r: int, v: int) -> None:
+        if v <= 0:
+            raise DiffError("v must be positive (it is subtracted)")
+        if not (0 <= l <= r < self.n):
+            raise DiffError("bounds must satisfy 0 <= l <= r < n")
+        self._diff[l] -= v
+        self._diff[r + 1] += v
+
+    def build(self) -> list:
+        out = []
+        cur = 0
+        for i in range(self.n):
+            cur += self._diff[i]
+            out.append(cur)
+        return out
+
+def test_basic():
+    d = DecrementDiff(4)
+    d.decrement(0, 2, 5)
+    assert d.build() == [-5, -5, -5, 0]
+
+
+def test_overlap():
+    d = DecrementDiff(4)
+    d.decrement(0, 3, 2)
+    d.decrement(1, 2, 3)
+    assert d.build() == [-2, -5, -5, -2]
+
+
+def test_nonpositive_rejected():
+    d = DecrementDiff(4)
+    try:
+        d.decrement(0, 1, 0)
+    except DiffError:
+        return
+    raise AssertionError("expected DiffError")
+
+
+def test_bad_bounds():
+    d = DecrementDiff(4)
+    try:
+        d.decrement(2, 5, 1)
+    except DiffError:
+        return
+    raise AssertionError("expected DiffError")
+
+def stdlib_only() -> bool:
+    """AST check: stdlib only."""
+    import pathlib
+    tree = ast.parse(pathlib.Path(__file__).read_text(encoding="utf-8"), filename=__file__)
+    allowed = {"__future__", "ast", "pathlib"}
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            for alias in node.names:
+                if alias.name.split(".")[0] not in allowed:
+                    return False
+        elif isinstance(node, ast.ImportFrom):
+            if node.module and node.module.split(".")[0] not in allowed:
+                return False
+    return True
+
+
+def main() -> None:
+    """Self-check."""
+    test_basic()
+    test_overlap()
+    test_nonpositive_rejected()
+    test_bad_bounds()
+    assert stdlib_only()
+    print("diff-08 OK: range-decrement-only")
+
+
+if __name__ == "__main__":
+    main()
