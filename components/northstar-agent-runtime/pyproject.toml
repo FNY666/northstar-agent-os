@@ -849,6 +849,7 @@ py-modules = [
     "remote_attestation",
     "replica_manager",
     "resource_accumulation",
+    "resource_defense",
     "responsible_ai",
     "retail_agents",
     "retry_policy",
