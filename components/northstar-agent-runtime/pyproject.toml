@@ -490,6 +490,7 @@ py-modules = [
     "deny_monotonicity",
     "dependency_resolver",
     "deployment_registry",
+    "deser_guard",
     "deterministic_veto",
     "developer_portal",
     "device_manager",
