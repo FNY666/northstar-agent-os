@@ -1082,6 +1082,7 @@ py-modules = [
     "structured_log",
     "structured_output",
     "subscription_manager",
+    "summarization_guard",
     "superalignment",
     "supplychain_agents",
     "support_agents",
