@@ -336,6 +336,7 @@ py-modules = [
     "beneficial_ai",
     "bft_interface",
     "bias_mock",
+    "bidi_remove",
     "bilinear_accumulator",
     "billing_engine",
     "bipia_probe",
