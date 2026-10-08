@@ -569,6 +569,7 @@ py-modules = [
     "email_service",
     "embodied",
     "enclave_interface",
+    "encoding_norm",
     "encryption_at_rest",
     "energybid_agents",
     "env_cost",
