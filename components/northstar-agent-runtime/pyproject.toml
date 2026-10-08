@@ -602,6 +602,7 @@ py-modules = [
     "grpc_gateway",
     "grpc_interface",
     "gset",
+    "hallucination_mock",
     "harness_binding",
     "hash_chain",
     "health_checker",
