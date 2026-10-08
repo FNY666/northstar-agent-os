@@ -1,4 +1,4 @@
-"" "Metrics endpoint exfiltration (attack_extra_17), Simulated.
+"""Metrics endpoint exfiltration (attack_extra_17), Simulated.
 
 Prometheus-style metrics with high-cardinality labels (emails, paths, key fragments) turn an observability endpoint into a data leak.
 

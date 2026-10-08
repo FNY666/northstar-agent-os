@@ -1,4 +1,4 @@
-"" "Cache poisoning for tools (attack_extra_08), Simulated.
+"""Cache poisoning for tools (attack_extra_08), Simulated.
 
 A shared tool-result cache stores attacker-influenced content or keys. Later victims receive the poisoned entry as if it were the tool's own answer.
 

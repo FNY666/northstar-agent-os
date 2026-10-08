@@ -21,9 +21,9 @@ i03 = _load("integration_03")
 
 
 def _layered():
-    veto = dv.DeterministicVeto()
-    veto.add_rule(dv.VetoRule("no_broad", dv.Consequence.IRREVERSIBLE_BROAD))
-    return i03.LayeredVeto(veto, sv.StatefulVeto())
+    lv = i03.LayeredVeto()
+    lv.add_rule("no_broad", dv.Consequence.IRREVERSIBLE_BROAD)
+    return lv
 
 
 def test_vetoed_and_recorded():

@@ -1,4 +1,4 @@
-"" "Subdomain takeover for webhooks (attack_extra_10), Simulated.
+"""Subdomain takeover for webhooks (attack_extra_10), Simulated.
 
 A webhook points at a subdomain whose DNS dangles to an unclaimed service (Heroku, S3, Pages). Whoever claims it receives the webhooks.
 

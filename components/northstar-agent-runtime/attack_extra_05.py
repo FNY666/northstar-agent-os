@@ -1,4 +1,4 @@
-"" "Delegation chain attacks (attack_extra_05), Simulated.
+"""Delegation chain attacks (attack_extra_05), Simulated.
 
 Delegated authority widens (scope creep), is forged by a child, or chains deeper than policy allows. Every hop must narrow scope, never widen it.
 

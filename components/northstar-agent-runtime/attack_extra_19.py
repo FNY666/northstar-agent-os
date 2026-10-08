@@ -1,4 +1,4 @@
-"" "GraphQL introspection abuse (attack_extra_19), Simulated.
+"""GraphQL introspection abuse (attack_extra_19), Simulated.
 
 Introspection queries dump the full schema in production, guiding targeted field-level attacks. Field suggestions leak names too.
 

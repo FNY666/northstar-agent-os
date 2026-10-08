@@ -51,7 +51,7 @@ def test_valid_hop_and_floor():
 
 
 def test_unknown_field_raises():
-    with pytest.raises(hv.HopValidationError):
+    with pytest.raises(i08.HopValidationError):
         _handoff().validate(
             {"task": "do", "evil": 1}, SCHEMA,
             frozenset({"injection"}), frozenset({"rm_rf"}), 70,

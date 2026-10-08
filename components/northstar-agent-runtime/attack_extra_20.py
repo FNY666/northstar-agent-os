@@ -1,4 +1,4 @@
-"" "WebSocket hijacking (attack_extra_20), Simulated.
+"""WebSocket hijacking (attack_extra_20), Simulated.
 
 Missing Origin checks allow cross-site upgrades; tokens in the WS URL leak via logs and proxies. The upgrade must validate origin and use header auth.
 

@@ -1,4 +1,4 @@
-"" "API key leakage via error messages (attack_extra_13), Simulated.
+"""API key leakage via error messages (attack_extra_13), Simulated.
 
 400 bodies, tracebacks, and logs echo back the secret that was just rejected. Errors must never reflect credentials.
 

@@ -1,4 +1,4 @@
-"" "Race conditions in approval (attack_extra_07), Simulated.
+"""Race conditions in approval (attack_extra_07), Simulated.
 
 Two approvals race, or an approval lands after withdrawal. The approval state machine must be atomic: exactly one terminal state per request.
 

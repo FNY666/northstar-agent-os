@@ -49,7 +49,7 @@ def test_step_done_on_max_cycles():
 def test_missing_reasoning_raises():
     comp = gc.GoalComparator("x")
     r = i07.TerminatingRunner(lambda t, a: "ok", comp)
-    with pytest.raises(it.InterleavedError):
+    with pytest.raises(i07.InterleavedError):
         r.run("", "tool", {}, {})
 
 

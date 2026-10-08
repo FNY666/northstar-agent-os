@@ -1,4 +1,4 @@
-"" "Pprof exposure (attack_extra_18), Simulated.
+"""Pprof exposure (attack_extra_18), Simulated.
 
 Reachable /debug/pprof/ exposes goroutine dumps (credentials in stack args), heap profiles, and symbol tables.
 

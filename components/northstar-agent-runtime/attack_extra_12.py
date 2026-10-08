@@ -1,4 +1,4 @@
-"" "OAuth scope escalation (attack_extra_12), Simulated.
+"""OAuth scope escalation (attack_extra_12), Simulated.
 
 The authorization server (or a confused client) grants more scopes than requested: write added to read, offline_access smuggled in, or a wildcard.
 

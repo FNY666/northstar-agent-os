@@ -1,4 +1,4 @@
-"" "Verbose error exfiltration (attack_extra_14), Simulated.
+"""Verbose error exfiltration (attack_extra_14), Simulated.
 
 Stack traces with filesystem paths, environment dumps, and SQL errors hand an attacker a map of the internals. Prod errors must be terse.
 

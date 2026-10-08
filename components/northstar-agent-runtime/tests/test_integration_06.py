@@ -68,7 +68,7 @@ def test_spec_cited_deny_not_allowed():
 
 
 def test_missing_citation_raises():
-    with pytest.raises(ds.DeliberativeError):
+    with pytest.raises(i06.DeliberativeError):
         _gate().decide(
             "read the file", [], "read_file /x",
             "allow", [], "reason",

@@ -1,4 +1,4 @@
-"" "Time-of-check / time-of-use in gates (attack_extra_06), Simulated.
+"""Time-of-check / time-of-use in gates (attack_extra_06), Simulated.
 
 The gate approves one version of the arguments; a different version executes. File swaps, arg mutation, and redirect changes all exploit the check/use gap.
 

@@ -42,6 +42,11 @@ class IntegrationError(Exception):
     """Fail-closed."""
 
 
+#: Re-exported for callers (same class identity as raised internally).
+DeliberativeError = _delib.DeliberativeError
+AlignmentCheckError = _alignment.AlignmentCheckError
+
+
 @dataclass(frozen=True)
 class AlignedSpecDecision:
     """Combined deliberative + alignment verdict."""
