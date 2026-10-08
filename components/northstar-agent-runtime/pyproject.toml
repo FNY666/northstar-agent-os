@@ -1134,6 +1134,7 @@ py-modules = [
     "scalable_oversight_v2",
     "scene_bound",
     "schema_registry",
+    "schema_valid",
     "scheming",
     "science_agents",
     "scim_provisioning",
