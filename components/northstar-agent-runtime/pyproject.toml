@@ -551,6 +551,7 @@ py-modules = [
     "forensics",
     "forest_fish",
     "formal_verif",
+    "forward_seal_ledger",
     "fragile_watermark",
     "fraud_detector",
     "frontmatter",
