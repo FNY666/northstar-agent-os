@@ -1064,6 +1064,7 @@ py-modules = [
     "split_learning",
     "sports_agents",
     "spotlighting",
+    "sqli_detect",
     "sse_interface",
     "sse_manager",
     "sso_integration",
