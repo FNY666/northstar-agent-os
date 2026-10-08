@@ -194,6 +194,17 @@ class ObserverVerdictLedger:
         self._audit_log: List[Dict[str, Any]] = []
         self._rejected = 0
 
+    def __getstate__(self) -> dict:
+        """Support pickle for checkpoint/resume (excludes the lock)."""
+        state = self.__dict__.copy()
+        del state["_lock"]
+        return state
+
+    def __setstate__(self, state: dict) -> None:
+        """Restore after unpickle (recreates the lock)."""
+        self.__dict__.update(state)
+        self._lock = threading.RLock()
+
     # -- internal helpers -------------------------------------------
 
     def _mint(self) -> str:

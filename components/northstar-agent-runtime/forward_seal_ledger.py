@@ -222,6 +222,17 @@ class ForwardSealLedger:
         # Genesis pin: fixed, public, identifies the (empty) chain start.
         self._genesis = _sha256_hex(b"northstar-forward-seal:v1:genesis")
 
+    def __getstate__(self) -> dict:
+        """Support pickle for checkpoint/resume (excludes the lock)."""
+        state = self.__dict__.copy()
+        del state["_lock"]
+        return state
+
+    def __setstate__(self, state: dict) -> None:
+        """Restore after unpickle (recreates the lock)."""
+        self.__dict__.update(state)
+        self._lock = threading.RLock()
+
     # -- introspection (pure reads) ------------------------------------
 
     @property
