@@ -733,6 +733,7 @@ py-modules = [
     "notified_body",
     "oauth2_provider",
     "object_detector",
+    "observer_verdict_ledger",
     "ocr_engine",
     "offline_bundle",
     "oidc_provider",
