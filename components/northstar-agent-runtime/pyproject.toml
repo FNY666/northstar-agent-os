@@ -473,6 +473,7 @@ py-modules = [
     "deny_monotonicity",
     "dependency_resolver",
     "deployment_registry",
+    "deterministic_veto",
     "developer_portal",
     "device_manager",
     "differential_privacy",
