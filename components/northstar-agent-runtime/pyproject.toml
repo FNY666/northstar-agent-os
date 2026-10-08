@@ -1025,6 +1025,7 @@ py-modules = [
     "token_counter",
     "tool_pinning",
     "tool_use",
+    "toxicity_mock",
     "trace_export",
     "traceability_paradox",
     "tracing",
