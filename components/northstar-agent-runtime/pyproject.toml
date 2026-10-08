@@ -382,6 +382,7 @@ py-modules = [
     "citation_verify",
     "claimed_auth_corpus",
     "cli",
+    "cmdi_detect",
     "cmmc",
     "coap_server",
     "code_formatter",
