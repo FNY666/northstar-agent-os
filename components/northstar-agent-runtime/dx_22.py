@@ -78,7 +78,7 @@ def stdlib_only() -> bool:
 def main() -> None:
     cov = CoverageTracker()
     cov.record("a.py", [1, 2, 3, 5], 5)
-    assert cov.percent("a.py") == 60.0
+    assert cov.percent("a.py") == 80.0
     assert cov.uncovered("a.py") == [4]
     cov.record("b.py", [1], 1)
     assert cov.percent("b.py") == 100.0
