@@ -336,6 +336,7 @@ py-modules = [
     "bft_interface",
     "bilinear_accumulator",
     "billing_engine",
+    "bipia_probe",
     "bloom_filter",
     "blue_green_deploy",
     "booking_agents",
