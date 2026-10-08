@@ -376,6 +376,7 @@ MANIFEST: dict[str, tuple[str, ...]] = {
         "tool_schema_digest_probes",
         "trace_tamper_probes",
         "trust_inversion_probes",
+        "counterfactual",
     ),
 }
 

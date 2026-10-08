@@ -1105,6 +1105,7 @@ py-modules = [
     "tool_schema_digest_probes",
     "trace_tamper_probes",
     "trust_inversion_probes",
+    "counterfactual",
 ]
 
 [tool.setuptools.packages.find]

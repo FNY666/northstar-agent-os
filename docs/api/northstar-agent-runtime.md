@@ -89785,3 +89785,21 @@ Re-derive the decision digest and compare in constant time.
 #### `main()`
 
 Print corpus summary; exit 0 when the corpus is self-consistent.
+
+### `counterfactual`
+
+Source: `components/northstar-agent-runtime/counterfactual.py`
+
+Pinned, non-generative explanations for selected runtime denial rules.
+
+#### `Counterfactual`
+
+One pinned condition that would change, or cannot change, a denial.
+
+#### `RuleExplanation`
+
+Immutable pinned explanation for a specific deny code.
+
+#### `render_denial(audit_record: Mapping[str, Any])`
+
+Render a denial using only its audit record and the pinned rule table.
