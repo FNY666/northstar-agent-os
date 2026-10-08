@@ -75,14 +75,18 @@ class NetworkPolicy:
 
 
 def default_policy() -> NetworkPolicy:
-    """Default: allow DNS + HTTPS to anywhere, deny the rest."""
+    """Default: allow DNS + HTTPS to anywhere, deny the rest.
+
+    Deny rules come FIRST so RFC1918/link-local are blocked even on
+    otherwise-allowed ports (first-match wins).
+    """
     return NetworkPolicy(rules=[
-        EgressRule("allow", "0.0.0.0/0", (53,), "dns"),
-        EgressRule("allow", "0.0.0.0/0", (443,), "https"),
         EgressRule("deny", "10.0.0.0/8", (), "no rfc1918"),
         EgressRule("deny", "172.16.0.0/12", (), "no rfc1918"),
         EgressRule("deny", "192.168.0.0/16", (), "no rfc1918"),
         EgressRule("deny", "169.254.0.0/16", (), "no link-local/metadata"),
+        EgressRule("allow", "0.0.0.0/0", (53,), "dns"),
+        EgressRule("allow", "0.0.0.0/0", (443,), "https"),
     ])
 
 

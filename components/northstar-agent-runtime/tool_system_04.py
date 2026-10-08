@@ -13,7 +13,7 @@ from __future__ import annotations
 
 import ast
 from dataclasses import dataclass
-from typing Any, Callable, Dict, List
+from typing import Any, Callable, Dict, List
 
 #: Module version.
 TOOL_SYSTEM_04_VERSION = "tool-system-04.v1"
