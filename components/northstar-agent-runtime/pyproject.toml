@@ -781,6 +781,7 @@ py-modules = [
     "personalization",
     "pharma_agents",
     "phi_detector",
+    "pii_redaction",
     "pii_vault",
     "plan_defense",
     "planner_budget_combo",
