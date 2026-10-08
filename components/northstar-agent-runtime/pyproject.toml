@@ -1205,6 +1205,7 @@ py-modules = [
     "write_ahead_log",
     "write_through_cache",
     "xss_detect",
+    "xxe_detect",
     "zab_interface",
     "zero_knowledge",
     "zeromq_patterns",
