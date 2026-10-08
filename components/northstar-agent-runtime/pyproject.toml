@@ -1010,6 +1010,7 @@ py-modules = [
     "transparency_log",
     "transport_agents",
     "treacherous_turn",
+    "tripwire_guardrails",
     "trojan",
     "trojan_defense",
     "trust_safety",
