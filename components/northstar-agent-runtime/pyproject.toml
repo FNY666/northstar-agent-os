@@ -1047,6 +1047,7 @@ py-modules = [
     "provider_retry",
     "pubsub_broker",
     "pulsar_broker",
+    "punct_norm",
     "push_service",
     "quantum_timeline",
     "query_planner",
