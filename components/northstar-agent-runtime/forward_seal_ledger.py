@@ -116,6 +116,9 @@ _SEAL_TAG = b"northstar-forward-seal:v1:seal"
 #: Domain separation tag for checkpoint sealing.
 _CHECKPOINT_TAG = b"northstar-forward-seal:v1:checkpoint"
 
+#: Domain separation tag for checkpoint key evolution.
+_CHECKPOINT_EVOLUTION_TAG = b"northstar-forward-seal:v1:checkpoint-next"
+
 #: The 8-field event schema (Agent Flight Recorder absorption).
 #: intent -> action -> subject -> authorization -> inputs -> logic ->
 #: execution -> outcome.
@@ -143,14 +146,24 @@ def _evolve_key(key: bytes) -> bytes:
     return hashlib.sha256(_KEY_EVOLUTION_TAG + key).digest()
 
 
+def _evolve_checkpoint_key(key: bytes) -> bytes:
+    """One-way checkpoint-key evolution (separate domain)."""
+    return hashlib.sha256(_CHECKPOINT_EVOLUTION_TAG + key).digest()
+
+
 def _seal(key: bytes, payload: bytes) -> bytes:
-    """HMAC-SHA256 seal of a canonical payload."""
-    return hmac.new(_SEAL_TAG + key, payload, hashlib.sha256).digest()
+    """HMAC-SHA256 seal of a canonical payload.
+
+    Domain separation goes in the *message*, not the key: the key
+    stays a clean uniform random value (which is what HMAC's
+    security proof assumes), and the tag prefixes the payload.
+    """
+    return hmac.new(key, _SEAL_TAG + payload, hashlib.sha256).digest()
 
 
 def _seal_checkpoint(key: bytes, payload: bytes) -> bytes:
     """HMAC-SHA256 seal for checkpoints (separate domain)."""
-    return hmac.new(_CHECKPOINT_TAG + key, payload, hashlib.sha256).digest()
+    return hmac.new(key, _CHECKPOINT_TAG + payload, hashlib.sha256).digest()
 
 
 class ForwardSealError(Exception):
@@ -358,6 +371,16 @@ class ForwardSealLedger:
             seal=seal,
         )
         self._checkpoints.append(cp)
+        # Forward security for checkpoints too: evolve the checkpoint
+        # key so a later compromise cannot forge earlier checkpoints.
+        old_ck = self._checkpoint_key
+        self._checkpoint_key = _evolve_checkpoint_key(old_ck)
+        try:
+            mutable = bytearray(old_ck)
+            for i in range(len(mutable)):
+                mutable[i] = 0
+        except Exception:
+            pass
         return cp
 
     # -- verification (pure reads; need the initial + checkpoint keys) --
@@ -368,9 +391,20 @@ class ForwardSealLedger:
         """Verify the full chain from the initial key (pure read).
 
         Re-derives K_1..K_n from ``initial_key``, checks every record
-        seal and every hash link, then checks every checkpoint seal.
-        Returns a report dict; raises ForwardSealError on any failure
-        (fail-closed).
+        seal and every hash link, then re-derives each checkpoint key
+        and checks every checkpoint seal.  Returns a report dict;
+        raises ForwardSealError on any failure (fail-closed).
+
+        TRUST ASSUMPTION (read carefully): the caller must possess the
+        *initial* keys.  This is a **trusted-auditor** function, not a
+        public-verification function.  Anyone holding K_0 can re-derive
+        the entire key chain and forge an alternate history -- the
+        forward-security guarantee protects against an attacker who
+        compromises the machine *after* K_0 was provisioned, not
+        against a malicious key holder.  Do not distribute K_0 widely;
+        in production, checkpoints should be signed with a public-key
+        scheme (Ed25519/ML-DSA) so verification does not require
+        secret keys.
         """
         with self._lock:
             records = list(self._records)
@@ -432,7 +466,9 @@ class ForwardSealLedger:
             prev_hash = record.record_hash
             key = _evolve_key(key)
 
-        # Checkpoints.
+        # Checkpoints.  The i-th checkpoint (0-indexed) was sealed with
+        # the checkpoint key after i evolutions from the initial key.
+        ck = checkpoint_key
         for cp in checkpoints:
             payload = _jcs_dumps(
                 {
@@ -442,11 +478,12 @@ class ForwardSealLedger:
                     "genesis": genesis,
                 }
             )
-            expected = _seal_checkpoint(checkpoint_key, payload).hex()
+            expected = _seal_checkpoint(ck, payload).hex()
             if not hmac.compare_digest(expected, cp.seal):
                 raise ForwardSealError(
                     f"checkpoint seal mismatch at seq {cp.seq}"
                 )
+            ck = _evolve_checkpoint_key(ck)
             # The checkpoint must name a real record.
             if cp.seq < 1 or cp.seq > len(records):
                 raise ForwardSealError(
