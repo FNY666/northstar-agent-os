@@ -54,7 +54,8 @@ def summarize(results):
 
 
 KEYWORDS = ["evil", "rm -rf", "sudo"]
-CASES = [("exec", {"cmd": "evil run"}), ("sh", {"cmd": "sudo rm -rf /"})]
+CASES = [("exec", {"cmd": "evil run"}), ("sh", {"cmd": "sudo ls"}),
+         ("rm", {"cmd": "rm -rf /tmp/x"})]
 
 
 def _make_gate(kws):

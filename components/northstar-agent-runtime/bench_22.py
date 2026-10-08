@@ -102,7 +102,7 @@ def stdlib_only():
     import ast as _ast
     tree = _ast.parse(
         _Path(__file__).read_text(encoding="utf-8"), filename=__file__)
-    allowed = {"__future__", "ast", "importlib", "pathlib", "sys", "time"}, "threading"
+    allowed = {"__future__", "ast", "importlib", "pathlib", "sys", "time", "threading"}
     for node in _ast.walk(tree):
         if isinstance(node, _ast.Import):
             for alias in node.names:

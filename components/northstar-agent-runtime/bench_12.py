@@ -70,12 +70,16 @@ def run():
         hv.validate_hop({"b": 2}, schema)
     except Exception:
         bad_rejected = True
-    extra_stripped = hv.validate_hop({"a": 1, "zzz": 9}, schema)
+    extra_rejected = False
+    try:
+        hv.validate_hop({"a": 1, "zzz": 9}, schema)
+    except Exception:
+        extra_rejected = True
     return {"pin_same_ok": bool(same),
             "pin_drift_detected": not drifted,
             "hop_good": "a" in good,
             "hop_bad_rejected": bad_rejected,
-            "hop_extra_stripped": "zzz" not in extra_stripped}
+            "hop_extra_rejected": extra_rejected}
 
 
 
@@ -90,7 +94,7 @@ def test_hop_validation():
     s = run()
     assert s["hop_good"] is True
     assert s["hop_bad_rejected"] is True
-    assert s["hop_extra_stripped"] is True
+    assert s["hop_extra_rejected"] is True
 
 
 def test_hash_stable():
