@@ -802,6 +802,7 @@ py-modules = [
     "kms_interface",
     "kyc_verifier",
     "labor_algo",
+    "lang_filter",
     "language_cap",
     "lb_health",
     "leader_election",
