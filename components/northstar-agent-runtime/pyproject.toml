@@ -321,6 +321,7 @@ py-modules = [
     "audit_shipper",
     "auth_dict",
     "automated_alignment",
+    "b64_detect",
     "backdoor",
     "backdoor_detection",
     "backdoor_detector",
