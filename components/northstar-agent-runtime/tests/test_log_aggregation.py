@@ -144,6 +144,24 @@ def test_seq_rewind_and_bool_refused():
         agg.register_source("app-2", -1)
 
 
+
+
+def test_seq_rewind_is_audited_without_consuming_state():
+    agg = LogAggregation()
+    agg.register_source("app-1", 5)
+    with pytest.raises(la.SeqOrderError):
+        agg.register_source("app-2", 5)
+    rejected = [event for event in agg.audit_log()
+                if event["kind"] == la.KIND_REJECTED]
+    assert rejected and rejected[-1]["seq"] == 5
+    assert rejected[-1]["detail"]["reason"] == (
+        "seq must strictly increase (last=5, got=5)"
+    )
+    # The precondition failure does not consume the failed sequence.
+    agg.register_source("app-2", 6)
+    assert agg.source_ids() == ("app-1", "app-2")
+
+
 def test_failed_mutation_consumes_seq_and_audits_rejected():
     agg = LogAggregation()
     agg.register_source("app-1", 1)
