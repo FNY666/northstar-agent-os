@@ -964,6 +964,7 @@ py-modules = [
     "stream_processing",
     "streaming_sql",
     "structured_log",
+    "structured_output",
     "subscription_manager",
     "superalignment",
     "supplychain_agents",
