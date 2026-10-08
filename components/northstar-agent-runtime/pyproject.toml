@@ -1428,6 +1428,7 @@ py-modules = [
     "workflow_orchestration",
     "write_ahead_log",
     "write_through_cache",
+    "ws_norm",
     "xss_detect",
     "xxe_detect",
     "zab_interface",
