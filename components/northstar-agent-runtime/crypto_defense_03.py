@@ -15,7 +15,7 @@ import hashlib
 import json
 import time
 from dataclasses import dataclass
-from typing List, Optional
+from typing import List, Optional
 
 #: Module version.
 CRYPTO_DEFENSE_03_VERSION = "crypto-defense-03.v1"

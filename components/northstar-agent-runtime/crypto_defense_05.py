@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import ast
 import secrets
-from typing List
+from typing import List
 
 #: Module version.
 CRYPTO_DEFENSE_05_VERSION = "crypto-defense-05.v1"

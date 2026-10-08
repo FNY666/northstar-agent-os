@@ -15,7 +15,7 @@ import ast
 import warnings
 from dataclasses import dataclass
 from enum import Enum
-from typing Callable, Dict, Optional
+from typing import Callable, Dict, Optional
 
 #: Module version.
 TOOL_SYSTEM_03_VERSION = "tool-system-03.v1"

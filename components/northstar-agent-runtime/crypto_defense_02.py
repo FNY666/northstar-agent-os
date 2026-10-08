@@ -14,7 +14,7 @@ import ast
 import hashlib
 import hmac
 import secrets
-from typing Dict
+from typing import Dict
 
 #: Module version.
 CRYPTO_DEFENSE_02_VERSION = "crypto-defense-02.v1"

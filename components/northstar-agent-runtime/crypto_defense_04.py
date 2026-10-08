@@ -16,7 +16,7 @@ import hmac
 import secrets
 import time
 from dataclasses import dataclass
-from typing Dict
+from typing import Dict
 
 #: Module version.
 CRYPTO_DEFENSE_04_VERSION = "crypto-defense-04.v1"
