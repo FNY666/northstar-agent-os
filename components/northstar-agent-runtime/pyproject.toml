@@ -416,6 +416,7 @@ py-modules = [
     "contacts_manager",
     "container_registry",
     "content_authenticity",
+    "content_filter",
     "content_moderator",
     "context_window",
     "contract_bridge",
