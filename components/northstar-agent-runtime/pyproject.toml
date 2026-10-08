@@ -487,6 +487,7 @@ py-modules = [
     "distributed_consensus",
     "distributed_lock",
     "dkg_interface",
+    "dlp_interface",
     "dns_manager",
     "dns_resolver",
     "doc_converter",
