@@ -662,6 +662,7 @@ py-modules = [
     "legal_hold",
     "license_checker",
     "licensing",
+    "lifecycle_hooks",
     "linter",
     "load_balancer",
     "load_generator",
