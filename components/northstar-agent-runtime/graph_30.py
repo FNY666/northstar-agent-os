@@ -44,7 +44,8 @@ def tree_diameter(graph: Dict[Hashable, List[Hashable]]) -> Tuple[int, List[Hash
 def test_diameter_path_graph():
     g = {"a": ["b"], "b": ["a", "c"], "c": ["b", "d"], "d": ["c"]}
     length, path = tree_diameter(g)
-    assert length == 3 and path == ["a", "b", "c", "d"]
+    assert length == 3
+    assert len(path) == 4 and {path[0], path[-1]} == {"a", "d"}
 
 
 def test_diameter_star():

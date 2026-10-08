@@ -72,16 +72,12 @@ def test_kuhn_partial():
     assert size == 1
 
 
-def test_kuhn_agrees_with_hopcroft_karp():
-    import sys
-    sys.path.insert(0, __file__.rsplit("/", 1)[0])
-    import graph_17
-
+def test_kuhn_hand_computed():
+    # only 3 right vertices => max matching is 3
     adj = {"a": ["x", "y"], "b": ["y"], "c": ["x", "z"], "d": ["z"]}
-    left = ["a", "b", "c", "d"]
-    _, s1 = kuhn_matching(adj, left)
-    _, s2 = graph_17.hopcroft_karp(adj, left)
-    assert s1 == s2 == 4
+    match, size = kuhn_matching(adj, ["a", "b", "c", "d"])
+    assert size == 3
+    assert len(set(match.values())) == 3
 
 
 def test_konig_cover_size():
@@ -99,7 +95,7 @@ def test_kuhn_empty():
 def main() -> None:
     test_kuhn_basic()
     test_kuhn_partial()
-    test_kuhn_agrees_with_hopcroft_karp()
+    test_kuhn_hand_computed()
     test_konig_cover_size()
     test_kuhn_empty()
     print("graph_19 (Kuhn matching) OK")

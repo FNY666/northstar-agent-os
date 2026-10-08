@@ -44,7 +44,8 @@ def betweenness_centrality(
             if w != s:
                 cb[w] += delta[w]
     if normalized and len(nodes) > 2:
-        scale = 2.0 / ((len(nodes) - 1) * (len(nodes) - 2))
+        # directed-pair normalization (graph treated as directed)
+        scale = 1.0 / ((len(nodes) - 1) * (len(nodes) - 2))
         cb = {u: c * scale for u, c in cb.items()}
     return cb
 
