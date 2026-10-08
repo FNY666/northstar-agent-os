@@ -73,7 +73,7 @@ MANIFEST: dict[str, tuple[str, ...]] = {
     ),
     "northstar-codex-sidecar": ("sidecar", "transport", "service", "sidecar_socket"),
     "northstar-egress-sidecar": ("egress_sidecar", "egress_socket", "transport"),
-                                                                                                                                                                                                                                                                                                "northstar-agent-runtime": (
+                                                                                                                                                                                                                                                                                                    "northstar-agent-runtime": (
         "a2a_budget_combo", "a2a_gates", "a2abreak_probes", "ab_testing",
         "abac_engine", "abe_interface", "abstract_interp", "abuse_limits",
         "abuse_reporter", "account_recovery", "action_card", "action_verifier",
@@ -91,7 +91,10 @@ MANIFEST: dict[str, tuple[str, ...]] = {
         "ai_compliance_certification", "ai_compliance_incident", "ai_compliance_mitigation", "ai_compliance_monitoring",
         "ai_compliance_remediation", "ai_compliance_risk", "ai_compliance_testing", "ai_compliance_threat",
         "ai_compliance_validation", "ai_compliance_verification", "ai_compliance_vulnerability", "ai_concept",
-        "ai_constitution", "ai_containment", "ai_counterfactual", "ai_defense",
+        "ai_constitution", "ai_containment", "ai_contestability_auditing", "ai_contestability_certification",
+        "ai_contestability_incident", "ai_contestability_mitigation", "ai_contestability_monitoring", "ai_contestability_remediation",
+        "ai_contestability_risk", "ai_contestability_testing", "ai_contestability_threat", "ai_contestability_validation",
+        "ai_contestability_verification", "ai_contestability_vulnerability", "ai_counterfactual", "ai_defense",
         "ai_detection", "ai_distillation", "ai_distribution_shift", "ai_ensemble",
         "ai_ethics", "ai_ethics_auditing", "ai_ethics_certification", "ai_ethics_incident",
         "ai_ethics_mitigation", "ai_ethics_monitoring", "ai_ethics_remediation", "ai_ethics_risk",
