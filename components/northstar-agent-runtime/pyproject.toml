@@ -878,6 +878,7 @@ py-modules = [
     "scim_provisioning",
     "sdk",
     "sdk_generation",
+    "seal_merkle_batch",
     "search_engine",
     "search_index",
     "secret_manager",
