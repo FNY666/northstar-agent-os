@@ -413,6 +413,7 @@ py-modules = [
     "config_management",
     "config_server",
     "conformity",
+    "confusable_detect",
     "congestion_control",
     "connection_pool",
     "connector_sdk",
