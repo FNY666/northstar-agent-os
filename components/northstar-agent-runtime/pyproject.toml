@@ -1137,6 +1137,7 @@ py-modules = [
     "traffic_steering",
     "transaction_manager",
     "transactional_messaging",
+    "translation_guard",
     "transparency",
     "transparency_log",
     "transport_agents",
