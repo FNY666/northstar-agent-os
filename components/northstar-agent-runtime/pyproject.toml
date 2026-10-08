@@ -551,6 +551,7 @@ py-modules = [
     "fingerprinting",
     "flag_service",
     "flag_targeting",
+    "floor_settings",
     "flow_control",
     "forensics",
     "forest_fish",
