@@ -993,6 +993,7 @@ py-modules = [
     "poly_commitment",
     "post_dispatch_monitor",
     "postconditions",
+    "pow_mock",
     "power_seeking",
     "pqc_kem",
     "pqc_sig",
