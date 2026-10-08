@@ -73,7 +73,7 @@ MANIFEST: dict[str, tuple[str, ...]] = {
     ),
     "northstar-codex-sidecar": ("sidecar", "transport", "service", "sidecar_socket"),
     "northstar-egress-sidecar": ("egress_sidecar", "egress_socket", "transport"),
-                                                                                                                                                                                                                                                                                                    "northstar-agent-runtime": (
+                                                                                                                                                                                                                                                                                                        "northstar-agent-runtime": (
         "a2a_budget_combo", "a2a_gates", "a2abreak_probes", "ab_testing",
         "abac_engine", "abe_interface", "abstract_interp", "abuse_limits",
         "abuse_reporter", "account_recovery", "action_card", "action_verifier",
@@ -120,7 +120,10 @@ MANIFEST: dict[str, tuple[str, ...]] = {
         "ai_safety_threat", "ai_safety_validation", "ai_safety_verification", "ai_safety_vulnerability",
         "ai_saliency", "ai_sandbox", "ai_security", "ai_standards",
         "ai_stress_testing", "ai_surveillance", "ai_testing", "ai_threat",
-        "ai_throttling", "ai_transparency", "ai_transparency_auditing", "ai_transparency_certification",
+        "ai_throttling", "ai_traceability_auditing", "ai_traceability_certification", "ai_traceability_incident",
+        "ai_traceability_mitigation", "ai_traceability_monitoring", "ai_traceability_remediation", "ai_traceability_risk",
+        "ai_traceability_testing", "ai_traceability_threat", "ai_traceability_validation", "ai_traceability_verification",
+        "ai_traceability_vulnerability", "ai_transparency", "ai_transparency_auditing", "ai_transparency_certification",
         "ai_transparency_incident", "ai_transparency_mitigation", "ai_transparency_monitoring", "ai_transparency_remediation",
         "ai_transparency_risk", "ai_transparency_testing", "ai_transparency_threat", "ai_transparency_validation",
         "ai_transparency_verification", "ai_transparency_vulnerability", "ai_uncertainty", "ai_validation",
