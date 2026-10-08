@@ -598,6 +598,7 @@ py-modules = [
     "hoare_logic",
     "homomorphic_training",
     "hooks",
+    "hop_validation",
     "housing",
     "housing_ai_agents",
     "hr_agents",
