@@ -2,8 +2,9 @@
 
 Mock of the Chandy-Lamport marker algorithm over in-process channels:
 - initiator records local state, sends MARKER on all outgoing channels
-- on first MARKER receipt: record local state, start recording the
-  channel the marker arrived on
+- on first MARKER receipt: record local state, record the arrival
+  channel as empty (FIFO guarantees the marker follows all pre-snapshot
+  messages), start recording all other incoming channels
 - on subsequent MARKERs: stop recording that channel
 
 Each Channel is a FIFO list of messages.  The snapshot captures
@@ -113,16 +114,22 @@ def main() -> None:
     a, b = CLNode("a", "SA"), CLNode("b", "SB")
     a.add_channel("a->b")
     b.add_channel("b->a")
-    # In-flight message before snapshot starts.
-    b.deliver("b->a", "m1")
+    b.add_channel("c->b")  # second incoming channel to b
+    # Pre-snapshot message before b joins -> not recorded.
+    b.deliver("c->b", "m1")
     markers = a.initiate()
     assert markers == ["MARKER:a"]
     assert a.recorded_state == "SA"
-    # b gets first marker -> records state, keeps recording b->a.
+    # b gets first marker -> records state; arrival channel recorded
+    # as empty (CL rule); other channels keep recording.
     first = b.receive_marker("b->a")
     assert first is True and b.recorded_state == "SB"
-    b.deliver("b->a", "m2")  # arrives after marker -> recorded as in-flight
-    assert b.channels["b->a"].recorded == ["m2"]
+    assert b.channels["b->a"].recorded == []
+    b.deliver("c->b", "m2")  # arrives before c->b's marker -> in-flight
+    assert b.channels["c->b"].recorded == ["m2"]
+    # Marker on c->b stops its recording.
+    assert b.receive_marker("c->b") is False
+    assert b.channels["c->b"].recording is False
     # a gets marker back -> stops recording.
     assert a.receive_marker("a->b") is False
     assert a.channels["a->b"].recording is False
