@@ -567,6 +567,7 @@ py-modules = [
     "gossip_protocol",
     "governance",
     "governance_bench",
+    "governed_action_runner",
     "govservices_agents",
     "gpai",
     "graceful_shutdown",
