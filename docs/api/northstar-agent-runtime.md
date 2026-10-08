@@ -16914,6 +16914,1095 @@ AST self-check: the module imports stdlib names only.
 
 Self-check: exercise declare -> throttle -> verify -> evaluate.
 
+### `ai_traceability_auditing`
+
+Source: `components/northstar-agent-runtime/ai_traceability_auditing.py`
+
+AI traceability auditing: traceability-audit execution decision ledger, Simulated.
+
+#### `AITraceabilityAuditingError`
+
+Base class for all ai_traceability_auditing errors (fail-closed).
+
+#### `BadSystemError`
+
+System id is malformed.
+
+#### `BadAuditKindError`
+
+Audit kind is not in the pinned vocabulary.
+
+#### `BadVerdictError`
+
+Audit verdict is not in the pinned vocabulary.
+
+#### `BadDigestError`
+
+Digest is malformed (must be '' or a 'sha256:'-prefixed hex string).
+
+#### `BadSeverityError`
+
+Severity is not an int in [0, 100].
+
+#### `BadReasonError`
+
+Retire reason is not in the pinned vocabulary.
+
+#### `BadSeqError`
+
+Seq is not a non-negative int (or not a valid first claim).
+
+#### `SeqOrderError`
+
+Seq is not strictly increasing (rewind; raised bare, no row).
+
+#### `UnknownAuditError`
+
+Audit id is unknown to this ledger.
+
+#### `UnknownSystemError`
+
+System id is unknown to this ledger.
+
+#### `RetiredSystemError`
+
+System id is retired; mutations are refused.
+
+#### `AuditKindError`
+
+Audit event builder received an unknown kind.
+
+#### `AuditKeyError`
+
+Audit event details contain a banned raw-material key.
+
+#### `AuditRecord`
+
+One declared traceability audit (booked as data, never proof).
+
+- `verify()`
+  - Re-derive the digest pin of this record.
+#### `VerificationReport`
+
+Digest re-derivation report for one audit record (pure read).
+
+- `verify()`
+  - Re-derive this report's own digest pin (trivially true).
+#### `EvaluationReport`
+
+Ledger-rule posture for one system (pure read, booked as data).
+
+- `verify()`
+  - Re-derive this report's own digest pin (trivially true).
+#### `RetireRecord`
+
+Terminal retirement of a system id (booked as data).
+
+- `verify()`
+#### `ai_traceability_auditing_audit_event(kind: str, seq: int, details: Dict[str, Any])`
+
+Build one ``audit.ndjson/1`` event row.
+
+#### `AITraceabilityAuditing`
+
+Declared traceability-audit execution decision ledger, Simulated.
+
+- `audit(system_id: str, seq: int, audit_kind: str='internal-traceability-audit', verdict: str='not-audited', severity: int=0, audit_digest: str='')`
+  - Book one declared traceability audit (minted ``aud-N`` ids).
+- `retire(system_id: str, seq: int, reason: str='manual')`
+  - Terminally retire a system id (ids are never recycled).
+- `verify(audit_id: str, seq: int)`
+  - **Pure read**: re-derive one audit record's digest pin.
+- `evaluate(system_id: str, seq: int)`
+  - **Pure read**: derive one system's audit posture as data.
+- `audit_record(audit_id: str, seq: int)`
+- `retire_record(system_id: str, seq: int)`
+- `audits_for(system_id: str, seq: int)`
+- `system_ids(seq: int)`
+- `audit_ids(seq: int)`
+- `retired_ids(seq: int)`
+- `stats(seq: int)`
+- `audit_log(seq: int)`
+#### `stdlib_only()`
+
+AST self-check: this module must import stdlib only.
+
+#### `main()`
+
+Self-check: audit -> verify -> evaluate -> retire.
+
+### `ai_traceability_certification`
+
+Source: `components/northstar-agent-runtime/ai_traceability_certification.py`
+
+AI traceability certification (certify/verify/evaluate) interface, simulated.
+
+#### `AITraceabilityCertificationError`
+
+Base error for the AI-traceability-certification ledger (programming errors).
+
+#### `BadIdError`
+
+Raised when a system/certification id is malformed.
+
+#### `DuplicateCertificationError`
+
+Raised when a minted certification id somehow collides (never).
+
+#### `UnknownSystemError`
+
+Raised when a system id names no certified system.
+
+#### `UnknownCertificationError`
+
+Raised when a certification id names no booked certification.
+
+#### `RetiredSystemError`
+
+Raised when mutating a retired system.
+
+#### `DoubleRetireError`
+
+Raised when retiring an already-retired system.
+
+#### `BadCertKindError`
+
+Raised when a cert kind is not in the pinned vocabulary.
+
+#### `BadOutcomeError`
+
+Raised when an outcome is not in the pinned vocabulary.
+
+#### `BadDigestError`
+
+Raised when a certification digest is not a sha256: pin.
+
+#### `BadReasonError`
+
+Raised when a retire reason is not in the pinned vocabulary.
+
+#### `SeqOrderError`
+
+Raised when a seq is malformed or not strictly increasing.
+
+#### `AuditKindError`
+
+Raised when an audit event kind is unknown or leaks banned keys.
+
+#### `ai_traceability_certification_audit_event(kind: str, detail: Dict[str, object], seq: object)`
+
+Build one ``audit.ndjson/1`` audit row for the AI-traceability-certification ledger.
+
+#### `stdlib_only()`
+
+Report whether this module imports only the stdlib (plus the canonical_json fallback).
+
+#### `CertificationRecord`
+
+Frozen record of one declared traceability certification (digest-pinned).
+
+- `verify(certification_id: str, system_id: str, cert_kind: str, outcome: str, cert_digest: str)`
+  - Recompute the pin and compare (True = untampered).
+#### `VerificationReport`
+
+Frozen read-only report of a digest re-derivation (verdict as data).
+
+- `verify(certification_id: str, verdict: str)`
+  - Recompute the pin and compare (True = untampered).
+#### `EvaluationReport`
+
+Frozen read-only report of ledger-rule posture (posture as data).
+
+- `verify(system_id: str, posture: str)`
+  - Recompute the pin and compare (True = untampered).
+#### `RetireRecord`
+
+Frozen record of a terminal retirement (ids never recycled).
+
+- `verify(system_id: str, reason: str)`
+  - Recompute the pin and compare (True = untampered).
+#### `AITraceabilityCertification`
+
+AI-traceability-certification ledger (declared traceability sign-offs, derived posture).
+
+- `certify(system_id: str, cert_kind: str, outcome: str, seq: int, cert_digest: str='')`
+  - Book one declared traceability certification. First certify on an id registers the system. Pins the certification digest, never the certification content. Returns the frozen ``CertificationRecord`` (…
+- `verify(certification_id: str, seq: int)`
+  - Pure read: re-derive a certification's digest pin. The ``verified``/``tampered`` verdict is *data* (tamper reported, never raised). Validates seq shape, consumes nothing, writes no audit row. Returns…
+- `evaluate(system_id: str, seq: int)`
+  - Pure read: derive posture from the ledger by rule (precedence: any ``revoked`` -> ``revoked``; any ``suspended`` -> ``suspended``; any ``conditional`` -> ``conditional``; all ``traceability-certified…
+- `retire(system_id: str, seq: int, reason: str=REASON_MANUAL)`
+  - Terminally retire a system. Ids are never recycled; post-retire mutations are refused, reads still work. Returns the frozen ``RetireRecord``.
+- `certification_record(certification_id: str, seq: int)`
+  - Pure read view of one booked certification.
+- `certifications_for(system_id: str, seq: int)`
+  - Pure read view of certification ids for one system, in book order.
+- `system_ids(seq: int)`
+  - Pure read view of all registered system ids, in first-certify order.
+- `retired_ids(seq: int)`
+  - Pure read view of retired system ids.
+- `audit_log()`
+  - Pure read view of the audit events (no seq, no audit row).
+- `stats()`
+  - Pure read view of ledger counters (no seq, no audit row).
+#### `main()`
+
+Self-check: certify, verify, evaluate, retire, pins, audit.
+
+### `ai_traceability_incident`
+
+Source: `components/northstar-agent-runtime/ai_traceability_incident.py`
+
+AI traceability incident: traceability-incident report/investigate decision ledger, Simulated.
+
+#### `AITraceabilityIncidentError`
+
+Base class for all ai-traceability-incident ledger errors.
+
+#### `BadTraceabilityIncidentError`
+
+#### `UnknownTraceabilityIncidentError`
+
+#### `RetiredTraceabilityIncidentError`
+
+#### `BadTraceabilityIncidentKindError`
+
+#### `BadSeverityError`
+
+#### `BadFindingError`
+
+#### `BadDigestError`
+
+#### `BadReasonError`
+
+#### `UnknownRecordError`
+
+#### `SeqOrderError`
+
+#### `AuditKindError`
+
+#### `TraceabilityIncidentReport`
+
+- `verify()`
+#### `InvestigationRecord`
+
+- `verify()`
+#### `RetireRecord`
+
+- `verify()`
+#### `VerificationReport`
+
+- `verify()`
+#### `EvaluationReport`
+
+- `verify()`
+#### `ai_traceability_incident_audit_event(kind: str, seq: int, **detail: Any)`
+
+Build one ``audit.ndjson/1`` row for this module.
+
+#### `AITraceabilityIncident`
+
+AI-traceability-incident report/investigate decision ledger, Simulated.
+
+- `report(traceability_incident_id: str, seq: int, traceability_incident_kind: str='lineage-gap', severity: int=0, report_digest: str='')`
+  - Book one declared traceability-incident report (minted ``cir-N`` id).
+- `investigate(traceability_incident_id: str, seq: int, finding: str='inconclusive', investigation_digest: str='')`
+  - Book one declared investigation (minted ``inv-N`` id).
+- `retire(traceability_incident_id: str, seq: int, reason: str='manual')`
+  - Terminal retirement of a traceability-incident id; ids are never recycled.
+- `verify(record_id: str, seq: int)`
+  - Pure read: re-derive one report or investigation digest pin.
+- `evaluate(traceability_incident_id: str, seq: int)`
+  - Pure read: derive one traceability incident's posture as data.
+- `traceability_incident_record(report_id: str, seq: int)`
+- `investigation_record(investigation_id: str, seq: int)`
+- `reports_for(traceability_incident_id: str, seq: int)`
+- `investigations_for(traceability_incident_id: str, seq: int)`
+- `traceability_incident_ids(seq: int)`
+- `report_ids(seq: int)`
+- `investigation_ids(seq: int)`
+- `retired_ids(seq: int)`
+- `stats(seq: int)`
+- `audit_log(seq: int)`
+#### `stdlib_only()`
+
+AST self-check: the module imports stdlib names only.
+
+#### `main()`
+
+Self-check: exercise report -> investigate -> verify -> evaluate.
+
+### `ai_traceability_mitigation`
+
+Source: `components/northstar-agent-runtime/ai_traceability_mitigation.py`
+
+AI traceability mitigation: declared traceability-hazard mitigation decision ledger, Simulated.
+
+#### `AITraceabilityMitigationError`
+
+Base class for all ai-traceability-mitigation ledger errors.
+
+#### `BadHazardError`
+
+#### `UnknownHazardError`
+
+#### `RetiredHazardError`
+
+#### `BadStrategyError`
+
+#### `BadStatusError`
+
+#### `BadEffectivenessError`
+
+#### `BadTransitionError`
+
+#### `BadDigestError`
+
+#### `BadReasonError`
+
+#### `UnknownMitigationError`
+
+#### `SeqOrderError`
+
+#### `AuditKindError`
+
+#### `MitigationRecord`
+
+- `verify()`
+#### `RetireRecord`
+
+- `verify()`
+#### `VerificationReport`
+
+- `verify()`
+#### `EvaluationReport`
+
+- `verify()`
+#### `ai_traceability_mitigation_audit_event(kind: str, seq: int, **detail: Any)`
+
+Build one ``audit.ndjson/1`` row for this module.
+
+#### `AITraceabilityMitigation`
+
+AI traceability-hazard mitigation decision ledger, Simulated.
+
+- `mitigate(hazard_id: str, seq: int, strategy: str='traceability-assignment', hazard_digest: str='')`
+  - Book one declared mitigation action (minted ``tmm-N`` id).
+- `update(mitigation_id: str, seq: int, status: str, effectiveness: str='unrated')`
+  - Book a declared status/effectiveness transition on one mitigation.
+- `retire(hazard_id: str, seq: int, reason: str='manual')`
+  - Terminal retirement of a hazard id; ids are never recycled.
+- `verify(mitigation_id: str, seq: int)`
+  - Pure read: re-derive one mitigation record's digest pin.
+- `evaluate(hazard_id: str, seq: int)`
+  - Pure read: derive one hazard's residual-traceability posture as data.
+- `mitigation_record(mitigation_id: str, seq: int)`
+- `retire_record(hazard_id: str, seq: int)`
+- `mitigations_for(hazard_id: str, seq: int)`
+- `hazard_ids(seq: int)`
+- `mitigation_ids(seq: int)`
+- `retired_ids(seq: int)`
+- `stats(seq: int)`
+- `audit_log(seq: int)`
+#### `stdlib_only()`
+
+AST self-check: the module imports stdlib names only.
+
+#### `main()`
+
+Self-check: exercise mitigate -> verify -> evaluate.
+
+### `ai_traceability_monitoring`
+
+Source: `components/northstar-agent-runtime/ai_traceability_monitoring.py`
+
+AI traceability monitoring: traceability-signal monitor/alert decision ledger, Simulated.
+
+#### `AITraceabilityMonitoringError`
+
+Base class for all ai-traceability-monitoring ledger errors.
+
+#### `BadTargetError`
+
+#### `UnknownTargetError`
+
+#### `RetiredTargetError`
+
+#### `BadSignalError`
+
+#### `BadCadenceError`
+
+#### `BadThresholdError`
+
+#### `BadConcernKindError`
+
+#### `BadLevelError`
+
+#### `BadStatusError`
+
+#### `BadObservedError`
+
+#### `BadDigestError`
+
+#### `BadReasonError`
+
+#### `UnknownRecordError`
+
+#### `SeqOrderError`
+
+#### `AuditKindError`
+
+#### `TraceabilityWatch`
+
+- `verify()`
+#### `TraceabilityAlert`
+
+- `verify()`
+#### `RetireRecord`
+
+- `verify()`
+#### `VerificationReport`
+
+- `verify()`
+#### `EvaluationReport`
+
+- `verify()`
+#### `ai_traceability_monitoring_audit_event(kind: str, seq: int, **detail: Any)`
+
+Build one ``audit.ndjson/1`` row for this module.
+
+#### `AITraceabilityMonitoring`
+
+AI traceability-monitoring monitor/alert decision ledger, Simulated.
+
+- `monitor(target_id: str, seq: int, traceability_signal: str='lineage-coverage-rate', threshold: float=0.0, cadence: str='minute', config_digest: str='')`
+  - Book one declared traceability watch (minted ``tct-N`` id).
+- `alert(target_id: str, seq: int, concern_kind: str='missing-lineage', level: str='warning', observed_value: float=0.0, status: str='firing', alert_digest: str='')`
+  - Book one declared traceability alert (minted ``trl-N`` id).
+- `retire(target_id: str, seq: int, reason: str='manual')`
+  - Terminal retirement of a traceability-watched target id; ids are never recycled.
+- `verify(record_id: str, seq: int)`
+  - Pure read: re-derive one watch or alert record's digest pin.
+- `evaluate(target_id: str, seq: int)`
+  - Pure read: derive one target's traceability-monitoring posture as data.
+- `watch_record(watch_id: str, seq: int)`
+- `alert_record(alert_id: str, seq: int)`
+- `watches_for(target_id: str, seq: int)`
+- `alerts_for(target_id: str, seq: int)`
+- `target_ids(seq: int)`
+- `watch_ids(seq: int)`
+- `alert_ids(seq: int)`
+- `retired_ids(seq: int)`
+- `stats(seq: int)`
+- `audit_log(seq: int)`
+#### `stdlib_only()`
+
+AST self-check: the module imports stdlib names only.
+
+#### `main()`
+
+Self-check: exercise monitor -> alert -> verify -> evaluate.
+
+### `ai_traceability_remediation`
+
+Source: `components/northstar-agent-runtime/ai_traceability_remediation.py`
+
+AI traceability remediation: traceability-issue remediation decision ledger, Simulated.
+
+#### `AITraceabilityRemediationError`
+
+Base class for all ai-traceability-remediation ledger errors.
+
+#### `BadIssueError`
+
+#### `UnknownIssueError`
+
+#### `RetiredIssueError`
+
+#### `BadKindError`
+
+#### `BadOutcomeError`
+
+#### `BadDigestError`
+
+#### `BadReasonError`
+
+#### `UnknownRemediationError`
+
+#### `UnknownRecordError`
+
+#### `SeqOrderError`
+
+#### `AuditKindError`
+
+#### `TraceabilityRemediationRecord`
+
+- `verify()`
+#### `RetireRecord`
+
+- `verify()`
+#### `VerificationReport`
+
+- `verify()`
+#### `EvaluationReport`
+
+- `verify()`
+#### `ai_traceability_remediation_audit_event(kind: str, seq: int, **detail: Any)`
+
+Build one ``audit.ndjson/1`` row for this module.
+
+#### `AITraceabilityRemediation`
+
+AI-traceability-remediation decision ledger, Simulated.
+
+- `remediate(issue_id: str, seq: int, traceability_remediation_kind: str='no-action', outcome: str='inconclusive', traceability_digest: str='')`
+  - Book one declared traceability remediation (minted ``tcm-N`` id).
+- `retire(issue_id: str, seq: int, reason: str='manual')`
+  - Terminally retire an issue id; ids are never recycled.
+- `verify(record_id: str, seq: int)`
+  - Pure read: re-derive one record's digest pin; verdict as data.
+- `evaluate(issue_id: str, seq: int)`
+  - Pure read: derive one issue's traceability-remediation posture as data.
+- `remediation_record(remediation_id: str, seq: int)`
+- `remediations_for(issue_id: str, seq: int)`
+- `issue_ids(seq: int)`
+- `remediation_ids(seq: int)`
+- `retired_ids(seq: int)`
+- `stats(seq: int)`
+- `audit_log(seq: int)`
+#### `stdlib_only()`
+
+AST self-check: the module imports stdlib names only.
+
+#### `main()`
+
+Self-check: exercise remediate -> verify -> evaluate -> retire.
+
+### `ai_traceability_risk`
+
+Source: `components/northstar-agent-runtime/ai_traceability_risk.py`
+
+AI traceability-risk register as a deterministic single-host decision ledger.
+
+#### `AITraceabilityRiskError`
+
+Base error for the AI traceability-risk ledger.
+
+#### `SeqOrderError`
+
+A seq was not a strictly increasing int, or a rewind was attempted.
+
+#### `BadIdError`
+
+An id was not a usable non-empty string.
+
+#### `BadTraceabilityRiskKindError`
+
+The traceability-risk kind is outside the pinned vocabulary.
+
+#### `BadVerdictError`
+
+The verdict is outside the pinned vocabulary.
+
+#### `BadSeverityError`
+
+Severity is not a host-reported int in [0, 100].
+
+#### `BadDigestError`
+
+A digest pin was not a valid ``sha256:`` hex pin (or empty).
+
+#### `UnknownAssessmentError`
+
+No assessment with that id is booked.
+
+#### `UnknownSystemError`
+
+No system with that id has any booked assessment.
+
+#### `RetiredSystemError`
+
+The system is retired; mutations are refused.
+
+#### `BadStrategyError`
+
+The mitigation strategy is outside the pinned vocabulary.
+
+#### `BadReasonError`
+
+The retire reason is outside the pinned vocabulary.
+
+#### `AuditKindError`
+
+Unknown audit kind.
+
+#### `stdlib_only()`
+
+AST self-check: this module may only import stdlib modules.
+
+#### `AssessmentRecord`
+
+- `verify()`
+#### `MitigationRecord`
+
+- `verify()`
+#### `RetireRecord`
+
+- `verify()`
+#### `VerificationReport`
+
+- `verify()`
+#### `EvaluationReport`
+
+- `verify()`
+#### `ai_traceability_risk_audit_event(kind: str, seq: int, **detail: Any)`
+
+Build one ``audit.ndjson/1`` row for this module.
+
+#### `AITraceabilityRisk`
+
+AI traceability-risk register decision ledger, Simulated.
+
+- `assess(system_id: str, seq: int, traceability_risk_kind: str='provenance-gap', verdict: str='not-assessed', severity: int=0, assessment_digest: str='')`
+  - Book one declared traceability-risk assessment (minted ``trk-N`` id).
+- `mitigate(assessment_id: str, seq: int, strategy: str='provenance-capture', mitigation_digest: str='')`
+  - Book one declared mitigation against an assessment (``mit-N``).
+- `retire(system_id: str, seq: int, reason: str='manual')`
+  - Terminal: retire a system. Ids are never recycled.
+- `verify(record_id: str, seq: int)`
+  - Re-derive the digest pin of an assessment or mitigation record.
+- `evaluate(system_id: str, seq: int)`
+  - Derive the ledger-rule traceability-risk posture for a system. Pure read.
+- `assessment_record(assessment_id: str, seq: int)`
+- `mitigation_record(mitigation_id: str, seq: int)`
+- `assessments_for(system_id: str, seq: int)`
+- `mitigations_for(assessment_id: str, seq: int)`
+- `system_ids(seq: int)`
+- `assessment_ids(seq: int)`
+- `mitigation_ids(seq: int)`
+- `retired_ids(seq: int)`
+- `stats(seq: int)`
+- `audit_log(seq: int)`
+#### `main()`
+
+### `ai_traceability_testing`
+
+Source: `components/northstar-agent-runtime/ai_traceability_testing.py`
+
+AI traceability testing: declared traceability-test-execution decision ledger, Simulated.
+
+#### `AITraceabilityTestingError`
+
+Base class for all ai-traceability-testing ledger errors.
+
+#### `BadSystemError`
+
+#### `UnknownSystemError`
+
+#### `RetiredSystemError`
+
+#### `BadTraceabilityTestKindError`
+
+#### `BadOutcomeError`
+
+#### `BadDigestError`
+
+#### `BadReasonError`
+
+#### `UnknownTraceabilityTestError`
+
+#### `SeqOrderError`
+
+#### `AuditKindError`
+
+#### `TraceabilityTestRecord`
+
+- `verify()`
+#### `RetireRecord`
+
+- `verify()`
+#### `VerificationReport`
+
+- `verify()`
+#### `EvaluationReport`
+
+- `verify()`
+#### `ai_traceability_testing_audit_event(kind: str, seq: int, **detail: Any)`
+
+Build one ``audit.ndjson/1`` row for this module.
+
+#### `AITraceabilityTesting`
+
+AI-traceability-testing declared-execution decision ledger, Simulated.
+
+- `test(system_id: str, seq: int, traceability_test_kind: str='lineage-completeness-test', outcome: str='passed', test_digest: str='')`
+  - Book one declared traceability test execution run (minted ``tpt-N`` id).
+- `retire(system_id: str, seq: int, reason: str='manual')`
+  - Terminal retirement of a system id; ids are never recycled.
+- `verify(test_id: str, seq: int)`
+  - Pure read: re-derive one traceability test record's digest pin.
+- `evaluate(system_id: str, seq: int)`
+  - Pure read: derive one system's traceability-test posture as data.
+- `test_record(test_id: str, seq: int)`
+- `retire_record(system_id: str, seq: int)`
+- `tests_for(system_id: str, seq: int)`
+- `system_ids(seq: int)`
+- `test_ids(seq: int)`
+- `retired_ids(seq: int)`
+- `stats(seq: int)`
+- `audit_log(seq: int)`
+#### `stdlib_only()`
+
+AST self-check: the module imports stdlib names only.
+
+#### `main()`
+
+Self-check: exercise test -> verify -> evaluate.
+
+### `ai_traceability_threat`
+
+Source: `components/northstar-agent-runtime/ai_traceability_threat.py`
+
+AI traceability threat: traceability-threat assessment/mitigation decision ledger, Simulated.
+
+#### `AITraceabilityThreatError`
+
+Base class for all ai-traceability-threat ledger errors.
+
+#### `BadSystemError`
+
+#### `UnknownSystemError`
+
+#### `RetiredSystemError`
+
+#### `BadTraceabilityThreatKindError`
+
+#### `BadVerdictError`
+
+#### `BadSeverityError`
+
+#### `BadDigestError`
+
+#### `BadReasonError`
+
+#### `UnknownAssessmentError`
+
+#### `UnknownMitigationError`
+
+#### `UnknownRecordError`
+
+#### `BadStrategyError`
+
+#### `SeqOrderError`
+
+#### `AuditKindError`
+
+#### `AssessmentRecord`
+
+- `verify()`
+#### `MitigationRecord`
+
+- `verify()`
+#### `RetireRecord`
+
+- `verify()`
+#### `VerificationReport`
+
+- `verify()`
+#### `EvaluationReport`
+
+- `verify()`
+#### `ai_traceability_threat_audit_event(kind: str, seq: int, **detail: Any)`
+
+Build one ``audit.ndjson/1`` row for this module.
+
+#### `AITraceabilityThreat`
+
+AI-traceability-threat assessment/mitigation decision ledger, Simulated.
+
+- `assess(system_id: str, seq: int, traceability_threat_kind: str='provenance-gap', verdict: str='not-assessed', severity: int=0, assessment_digest: str='')`
+  - Book one declared traceability-threat assessment (minted ``tsm-N`` id).
+- `mitigate(assessment_id: str, seq: int, strategy: str='no-action', mitigation_digest: str='')`
+  - Book one declared mitigation against a booked assessment (minted ``mit-N`` id).
+- `retire(system_id: str, seq: int, reason: str='manual')`
+  - Terminally retire a system id; ids are never recycled.
+- `verify(record_id: str, seq: int)`
+  - Pure read: re-derive one record's digest pin; verdict as data.
+- `evaluate(system_id: str, seq: int)`
+  - Pure read: derive one system's traceability-threat posture as data.
+- `assessment_record(assessment_id: str, seq: int)`
+- `mitigation_record(mitigation_id: str, seq: int)`
+- `assessments_for(system_id: str, seq: int)`
+- `mitigations_for(assessment_id: str, seq: int)`
+- `system_ids(seq: int)`
+- `assessment_ids(seq: int)`
+- `mitigation_ids(seq: int)`
+- `retired_ids(seq: int)`
+- `stats(seq: int)`
+- `audit_log(seq: int)`
+#### `stdlib_only()`
+
+AST self-check: the module imports stdlib names only.
+
+#### `main()`
+
+Self-check: exercise assess -> mitigate -> verify -> evaluate.
+
+### `ai_traceability_validation`
+
+Source: `components/northstar-agent-runtime/ai_traceability_validation.py`
+
+AI traceability validation: traceability-validation decision ledger, Simulated.
+
+#### `AITraceabilityValidationError`
+
+Base class for all ai-traceability-validation ledger errors.
+
+#### `BadSystemError`
+
+#### `UnknownSystemError`
+
+#### `RetiredSystemError`
+
+#### `BadValidationKindError`
+
+#### `BadVerdictError`
+
+#### `BadDigestError`
+
+#### `BadReasonError`
+
+#### `UnknownValidationError`
+
+#### `UnknownRecordError`
+
+#### `SeqOrderError`
+
+#### `AuditKindError`
+
+#### `ValidationRecord`
+
+- `verify()`
+#### `RetireRecord`
+
+- `verify()`
+#### `VerificationReport`
+
+- `verify()`
+#### `EvaluationReport`
+
+- `verify()`
+#### `ai_traceability_validation_audit_event(kind: str, seq: int, **detail: Any)`
+
+Build one ``audit.ndjson/1`` row for this module.
+
+#### `AITraceabilityValidation`
+
+AI-traceability-validation decision ledger, Simulated.
+
+- `validate(system_id: str, seq: int, validation_kind: str='data-lineage-validation', verdict: str='not-validated', validation_digest: str='')`
+  - Book one declared traceability-validation engagement (minted ``trv-N`` id).
+- `retire(system_id: str, seq: int, reason: str='manual')`
+  - Terminally retire a system id; ids are never recycled.
+- `verify(validation_id: str, seq: int)`
+  - Pure read: re-derive one validation record's digest pin.
+- `evaluate(system_id: str, seq: int)`
+  - Pure read: derive one system's traceability-validation posture as data.
+- `validation_record(validation_id: str, seq: int)`
+- `validations_for(system_id: str, seq: int)`
+- `system_ids(seq: int)`
+- `validation_ids(seq: int)`
+- `retired_ids(seq: int)`
+- `stats(seq: int)`
+- `audit_log(seq: int)`
+#### `stdlib_only()`
+
+AST self-check: the module imports stdlib names only.
+
+#### `main()`
+
+Self-check: exercise validate -> verify -> evaluate.
+
+### `ai_traceability_verification`
+
+Source: `components/northstar-agent-runtime/ai_traceability_verification.py`
+
+AI traceability verification: declared traceability-check verification decision ledger, Simulated.
+
+#### `AITraceabilityVerificationError`
+
+Base class for all ai-traceability-verification ledger errors.
+
+#### `BadSubjectError`
+
+#### `UnknownSubjectError`
+
+#### `RetiredSubjectError`
+
+#### `BadCheckKindError`
+
+#### `BadVerdictError`
+
+#### `BadSeverityError`
+
+#### `BadDigestError`
+
+#### `BadReasonError`
+
+#### `UnknownVerificationError`
+
+#### `UnknownCertificationError`
+
+#### `UnknownRecordError`
+
+#### `BadCertificationKindError`
+
+#### `BadOutcomeError`
+
+#### `SeqOrderError`
+
+#### `AuditKindError`
+
+#### `VerificationRecord`
+
+- `verify()`
+#### `CertificationRecord`
+
+- `verify()`
+#### `RetireRecord`
+
+- `verify()`
+#### `VerificationReport`
+
+- `verify()`
+#### `EvaluationReport`
+
+- `verify()`
+#### `ai_traceability_verification_audit_event(kind: str, seq: int, **detail: Any)`
+
+Build one ``audit.ndjson/1`` row for this module.
+
+#### `AITraceabilityVerification`
+
+AI-traceability verification decision ledger, Simulated.
+
+- `verify(subject_id: str, seq: int, check_kind: str='data-lineage-review', verdict: str='not-verified', severity: int=0, verification_digest: str='')`
+  - Book one declared traceability verification (minted ``ver-N`` id).
+- `certify(verification_id: str, seq: int, certification_kind: str='independent-review', outcome: str='endorsed', certification_digest: str='')`
+  - Book one declared certification against a booked verification (minted ``crt-N`` id).
+- `retire(subject_id: str, seq: int, reason: str='manual')`
+  - Terminally retire a subject id; ids are never recycled.
+- `verify_report(record_id: str, seq: int)`
+  - Pure read: re-derive one record's digest pin; verdict as data.
+- `evaluate(subject_id: str, seq: int)`
+  - Pure read: derive one subject's traceability-verification posture as data.
+- `verification_record(verification_id: str, seq: int)`
+- `certification_record(certification_id: str, seq: int)`
+- `verifications_for(subject_id: str, seq: int)`
+- `certifications_for(verification_id: str, seq: int)`
+- `subject_ids(seq: int)`
+- `verification_ids(seq: int)`
+- `certification_ids(seq: int)`
+- `retired_ids(seq: int)`
+- `stats(seq: int)`
+- `audit_log(seq: int)`
+#### `stdlib_only()`
+
+AST self-check: the module imports stdlib names only.
+
+#### `main()`
+
+Self-check: exercise verify -> certify -> verify_report -> evaluate.
+
+### `ai_traceability_vulnerability`
+
+Source: `components/northstar-agent-runtime/ai_traceability_vulnerability.py`
+
+AI traceability vulnerability: traceability-weakness detection/mitigation decision ledger, Simulated.
+
+#### `AITraceabilityVulnerabilityError`
+
+Base class for all ai-traceability-vulnerability ledger errors.
+
+#### `BadSystemError`
+
+#### `UnknownSystemError`
+
+#### `RetiredSystemError`
+
+#### `BadTraceabilityVulnerabilityKindError`
+
+#### `BadVerdictError`
+
+#### `BadSeverityError`
+
+#### `BadDigestError`
+
+#### `BadReasonError`
+
+#### `UnknownDetectionError`
+
+#### `UnknownMitigationError`
+
+#### `UnknownRecordError`
+
+#### `BadStrategyError`
+
+#### `SeqOrderError`
+
+#### `AuditKindError`
+
+#### `DetectionRecord`
+
+- `verify()`
+#### `MitigationRecord`
+
+- `verify()`
+#### `RetireRecord`
+
+- `verify()`
+#### `VerificationReport`
+
+- `verify()`
+#### `EvaluationReport`
+
+- `verify()`
+#### `ai_traceability_vulnerability_audit_event(kind: str, seq: int, **detail: Any)`
+
+Build one ``audit.ndjson/1`` row for this module.
+
+#### `AITraceabilityVulnerability`
+
+AI traceability-vulnerability detection/mitigation decision ledger, Simulated.
+
+- `detect(system_id: str, seq: int, traceability_vulnerability_kind: str='provenance-chain-break', verdict: str='not-assessed', severity: int=0, detection_digest: str='')`
+  - Book one declared traceability-vulnerability detection (minted ``det-N`` id).
+- `mitigate(detection_id: str, seq: int, strategy: str='no-action', mitigation_digest: str='')`
+  - Book one declared mitigation against a booked detection (minted ``mit-N`` id).
+- `retire(system_id: str, seq: int, reason: str='manual')`
+  - Terminally retire a system id; ids are never recycled.
+- `verify(record_id: str, seq: int)`
+  - Pure read: re-derive one record's digest pin; verdict as data.
+- `evaluate(system_id: str, seq: int)`
+  - Pure read: derive one system's traceability-vulnerability posture as data.
+- `detection_record(detection_id: str, seq: int)`
+- `mitigation_record(mitigation_id: str, seq: int)`
+- `detections_for(system_id: str, seq: int)`
+- `mitigations_for(detection_id: str, seq: int)`
+- `system_ids(seq: int)`
+- `detection_ids(seq: int)`
+- `mitigation_ids(seq: int)`
+- `retired_ids(seq: int)`
+- `stats(seq: int)`
+- `audit_log(seq: int)`
+#### `stdlib_only()`
+
+AST self-check: the module imports stdlib names only.
+
+#### `main()`
+
+Self-check: exercise detect -> mitigate -> verify -> evaluate.
+
 ### `ai_transparency`
 
 Source: `components/northstar-agent-runtime/ai_transparency.py`
