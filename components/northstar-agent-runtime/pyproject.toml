@@ -625,6 +625,7 @@ py-modules = [
     "instrumental_convergence",
     "insurance",
     "integration_hub",
+    "interleaved_thinking",
     "interop_bridge",
     "interpretability",
     "interpretability_probe",
