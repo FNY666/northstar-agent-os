@@ -385,6 +385,7 @@ py-modules = [
     "cmmc",
     "coap_server",
     "code_formatter",
+    "code_scan",
     "code_signer",
     "column_store",
     "command_hooks",
