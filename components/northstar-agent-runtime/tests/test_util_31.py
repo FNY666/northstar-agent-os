@@ -22,7 +22,7 @@ def test_crc32_vector():
 
 
 def test_adler32_vector():
-    assert m.adler32_hex(b"123456789") == "091e10f5"
+    assert m.adler32_hex(b"123456789") == "091e01de"
 
 
 def test_verify():
