@@ -1424,6 +1424,7 @@ py-modules = [
     "uncertainty_mock",
     "underwriting_agents",
     "unicode_sanit",
+    "url_decode_guard",
     "user_profile",
     "validator_scarcity",
     "value_learning",
