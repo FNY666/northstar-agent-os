@@ -906,6 +906,7 @@ py-modules = [
     "search_engine",
     "search_index",
     "secret_manager",
+    "secret_scan",
     "secret_scanner",
     "secret_sharing",
     "secrets_rotation",
