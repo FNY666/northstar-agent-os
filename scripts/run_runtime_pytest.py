@@ -18,8 +18,15 @@ class NativeTestsOnly:
     def pytest_pycollect_makeitem(self, collector, name, obj):
         # First-result hook: [] declines collection, None delegates to pytest.
         # Actual inheritance handles aliases and indirect TestCase subclasses.
-        if isinstance(obj, type) and issubclass(obj, unittest.TestCase):
-            return []
+        if isinstance(obj, type):
+            if issubclass(obj, unittest.TestCase):
+                return []
+            module_obj = getattr(collector, "obj", None)
+            # Pytest's default class collector also sees imported domain classes
+            # whose names start with Test*. They are not test declarations in
+            # this module; skip only this imported-class case, not local classes.
+            if hasattr(module_obj, "__file__") and obj.__module__ != module_obj.__name__:
+                return []
         return None
 
 

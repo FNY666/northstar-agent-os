@@ -97,6 +97,23 @@ class NativePytestRunnerTests(unittest.TestCase):
         self.write("test_domain.py", "from domain_helper import testimonial_existence_gate\ndef test_real():\n    assert True\n")
         self.assert_passed(self.run_suite(), 1)
 
+    def test_imported_non_testcase_class_is_not_collected(self):
+        self.write("domain_types.py", "class TestImported:\n    def __init__(self):\n        self.value = 1\n    def test_never_collect(self):\n        raise AssertionError('domain class was collected')\n")
+        self.write("test_imported_class.py", "from domain_types import TestImported\ndef test_native():\n    assert True\n")
+        result = self.run_suite()
+        self.assert_passed(result, 1)
+        self.assertNotIn("PytestCollectionWarning", result.output)
+
+    def test_local_plain_test_class_remains_collected(self):
+        self.write("test_local_class.py", "class TestLocal:\n    def test_method(self):\n        assert True\n")
+        self.assert_passed(self.run_suite(), 1)
+
+    def test_local_testcase_remains_filtered(self):
+        marker = self.root / "testcase-ran"
+        self.write("test_local_case.py", f"import unittest\nfrom pathlib import Path\nclass TestCaseLocal(unittest.TestCase):\n    def test_not_native(self):\n        Path({str(marker)!r}).write_text('bad')\n        self.fail('TestCase entered native lane')\ndef test_native():\n    assert True\n")
+        self.assert_passed(self.run_suite(), 1)
+        self.assertFalse(marker.exists())
+
     def test_mixed_module_keeps_native_items_only(self):
         self.write("test_mixed.py", "import unittest\nclass TestUnit(unittest.TestCase):\n    def test_unittest(self):\n        self.fail('duplicate')\nclass TestNative:\n    def test_method(self):\n        assert True\ndef test_function():\n    assert True\n")
         self.assert_passed(self.run_suite(), 2)
