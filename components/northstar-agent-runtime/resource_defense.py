@@ -59,17 +59,27 @@ def check_nesting(
 def check_repetition(
     text: str, max_repeated: int
 ) -> tuple[bool, str]:
-    """Check for excessive repeated function calls."""
-    # Find all function call names.
-    calls = re.findall(r"(\w+)\(", text)
-    if not calls:
-        return True, "ok"
-    # Count occurrences of each.
-    from collections import Counter
-    counts = Counter(calls)
-    for func, count in counts.items():
+    """Check for excessive repeated function calls.
+
+    Linear scan: for each '(' find the identifier immediately before it.
+    (A naive ``re.findall(r"(\\w+)\\(", text)`` is quadratic on paren-less
+    input -- ReDoS inside the exhaustion defense itself.)
+    """
+    counts: Dict[str, int] = {}
+    for match in re.finditer(r"\(", text):
+        end = match.start()
+        start = end
+        while start > 0 and (
+            text[start - 1].isalnum() or text[start - 1] == "_"
+        ):
+            start -= 1
+        word = text[start:end]
+        if not word:
+            continue
+        count = counts.get(word, 0) + 1
+        counts[word] = count
         if count > max_repeated:
-            return False, f"'{func}' repeated {count}x > {max_repeated}"
+            return False, f"'{word}' repeated {count}x > {max_repeated}"
     return True, "ok"
 
 
