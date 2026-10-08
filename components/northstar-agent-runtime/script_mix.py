@@ -1,0 +1,28 @@
+"""Script mixing detection (D-IN-013), Simulated."""
+from __future__ import annotations
+import ast
+VERSION = "script-mix.v1"
+def detect(t: str) -> bool:
+    scripts = set()
+    for c in t:
+        if "a" <= c <= "z": scripts.add("latin")
+        elif "\u0400" <= c <= "\u04ff": scripts.add("cyrillic")
+        elif "\u4e00" <= c <= "\u9fff": scripts.add("han")
+    return len(scripts) > 1
+def stdlib_only() -> bool:
+    import pathlib
+    tree = ast.parse(pathlib.Path(__file__).read_text(encoding="utf-8"), filename=__file__)
+    allowed = {"__future__", "ast", "pathlib", "typing"}
+    for n in ast.walk(tree):
+        if isinstance(n, ast.Import):
+            for a in n.names:
+                if a.name.split(".")[0] not in allowed: return False
+        elif isinstance(n, ast.ImportFrom):
+            if n.module and n.module.split(".")[0] not in allowed: return False
+    return True
+def main() -> None:
+    assert detect("aа")
+    assert not detect("abc")
+    assert stdlib_only()
+    print("script-mix OK")
+if __name__ == "__main__": main()
