@@ -1,4 +1,4 @@
-"" "Debug endpoint exposure (attack_extra_15), Simulated.
+"""Debug endpoint exposure (attack_extra_15), Simulated.
 
 Werkzeug debugger, Django debug toolbar, or DEBUG=True in production gives interactive code execution to anyone who finds it.
 

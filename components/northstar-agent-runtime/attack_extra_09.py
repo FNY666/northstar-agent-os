@@ -1,4 +1,4 @@
-"" "DNS rebinding for tool endpoints (attack_extra_09), Simulated.
+"""DNS rebinding for tool endpoints (attack_extra_09), Simulated.
 
 A hostname passes the allowlist, then DNS re-resolves to an internal IP (or the cloud metadata address). The fetch must re-validate the resolved IP.
 

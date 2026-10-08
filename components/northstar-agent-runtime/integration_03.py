@@ -74,6 +74,28 @@ class LayeredVeto:
         except ValueError:
             raise IntegrationError(f"unknown consequence {raw!r}")
 
+    def add_rule(
+        self,
+        rule_id: str,
+        consequence: Any,
+        unwaivable: bool = True,
+    ) -> None:
+        """Add a veto rule, normalizing the consequence enum.
+
+        Keeps the rule inside this module's enum class (cross-module safe).
+        """
+        cons = self._coerce(consequence)
+        self._veto.add_rule(
+            _dveto.VetoRule(rule_id, cons, unwaivable)
+        )
+
+    def model_escalate(self, rule_id: str, consequence: Any) -> None:
+        """Model escalation (can only add, never remove)."""
+        cons = self._coerce(consequence)
+        self._veto.model_escalate(
+            _dveto.VetoRule(rule_id, cons, unwaivable=False)
+        )
+
     def decide(
         self,
         session_id: str,
@@ -122,11 +144,8 @@ def stdlib_only() -> bool:
 
 def main() -> None:
     """Self-check."""
-    veto = _dveto.DeterministicVeto()
-    veto.add_rule(
-        _dveto.VetoRule("no_broad", _dveto.Consequence.IRREVERSIBLE_BROAD)
-    )
-    lv = LayeredVeto(veto, _sveto.StatefulVeto())
+    lv = LayeredVeto()
+    lv.add_rule("no_broad", _dveto.Consequence.IRREVERSIBLE_BROAD)
 
     # Vetoed, and the denial is recorded as risk.
     allowed, reason = lv.decide(

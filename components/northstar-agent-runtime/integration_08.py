@@ -40,6 +40,11 @@ class IntegrationError(Exception):
     """Fail-closed."""
 
 
+#: Re-exported for callers (same class identity as raised internally).
+HopValidationError = _hop.HopValidationError
+FloorError = _floor.FloorError
+
+
 class FloorValidatedHandoff:
     """Accepts a hop only if schema-valid AND floor-respecting."""
 

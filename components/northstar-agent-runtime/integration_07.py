@@ -41,6 +41,11 @@ class IntegrationError(Exception):
     """Fail-closed."""
 
 
+#: Re-exported for callers (same class identity as raised internally).
+InterleavedError = _interleaved.InterleavedError
+GoalComparatorError = _goalcmp.GoalComparatorError
+
+
 class TerminatingRunner:
     """Enforces reasoning per action; checks termination after each."""
 

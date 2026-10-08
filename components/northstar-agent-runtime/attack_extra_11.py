@@ -1,4 +1,4 @@
-"" "JWT confusion attacks (attack_extra_11), Simulated.
+"""JWT confusion attacks (attack_extra_11), Simulated.
 
 alg=none, RS256-verified-as-HS256 with the public key, and kid path traversal. The verifier must pin alg and key per issuer.
 

@@ -1,4 +1,4 @@
-"" "Health check info leakage (attack_extra_16), Simulated.
+"""Health check info leakage (attack_extra_16), Simulated.
 
 Health endpoints return versions, dependency lists, and internal hostnames. Attackers use them for targeted CVE selection.
 
