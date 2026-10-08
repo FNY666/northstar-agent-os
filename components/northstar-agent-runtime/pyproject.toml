@@ -1001,6 +1001,7 @@ py-modules = [
     "timezone_resolver",
     "tls_terminator",
     "token_counter",
+    "tool_pinning",
     "tool_use",
     "trace_export",
     "traceability_paradox",
