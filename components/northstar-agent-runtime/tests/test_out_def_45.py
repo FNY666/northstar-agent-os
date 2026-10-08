@@ -26,7 +26,7 @@ def _local_header(filename, extra):
 
 def test_eocd_comment_and_extra_zeroed():
     local = _local_header(b"name", b"ABCDEF") + b"filedata"
-    eocd = b"PK\x05\x06" + b"\x00" * 18 + (5).to_bytes(2, "little") + b"hello"
+    eocd = b"PK\x05\x06" + b"\x00" * 16 + (5).to_bytes(2, "little") + b"hello"
     data = local + eocd
     cleaned, zeroed = m45.clean_archive_metadata(data)
     assert zeroed == 2

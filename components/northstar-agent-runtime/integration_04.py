@@ -41,6 +41,11 @@ class IntegrationError(Exception):
     """Fail-closed."""
 
 
+#: Re-exported for callers (same class identity as raised internally).
+StructuredOutputError = _structured.StructuredOutputError
+PiiVaultError = _pii.PiiVaultError
+
+
 class VaultAwareOutput:
     """Emits schema-valid, PII-masked verdicts."""
 

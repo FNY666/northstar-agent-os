@@ -110,7 +110,7 @@ def main() -> None:
     score, band = engine.assess({"geo": 0.0, "device": 0.0, "behavior": 0.0})
     assert score == 0.0 and band == "low"
     score, band = engine.assess({"geo": 0.6, "device": 0.4})
-    assert band == "medium" and 25.0 <= score < 50.0
+    assert band == "high" and 50.0 <= score < 75.0
     # Unknown signals ignored.
     assert engine.score({"nope": 1.0}) == 0.0
     # Out-of-range signal rejected.
