@@ -835,6 +835,7 @@ py-modules = [
     "push_service",
     "quantum_timeline",
     "query_planner",
+    "quota_enforce",
     "raft_interface",
     "raft_log",
     "rag_pipeline",
