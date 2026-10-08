@@ -861,6 +861,7 @@ py-modules = [
     "migration_runner",
     "mining_agents",
     "ml_model_registry",
+    "ml_sidecar",
     "model_attack_01",
     "model_attack_02",
     "model_attack_03",
