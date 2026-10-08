@@ -378,6 +378,7 @@ py-modules = [
     "circuit",
     "circuit_breaker",
     "cirl",
+    "citation_verify",
     "claimed_auth_corpus",
     "cli",
     "cmmc",
