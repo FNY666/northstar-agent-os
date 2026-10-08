@@ -383,6 +383,7 @@ py-modules = [
     "code_signer",
     "column_store",
     "command_hooks",
+    "command_registry",
     "commerce",
     "compaction",
     "compaction_approval_combo",
