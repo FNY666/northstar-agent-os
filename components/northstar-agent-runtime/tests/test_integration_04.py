@@ -39,7 +39,7 @@ def test_emit_masks_pii():
 
 def test_emit_rejects_bad_schema():
     out = i04.VaultAwareOutput(pv.Vault(), "run1")
-    with pytest.raises(so.StructuredOutputError):
+    with pytest.raises(i04.StructuredOutputError):
         out.emit(
             {"verdict": "allow", "reason": "x"},
             so.GATE_VERDICT_SCHEMA,

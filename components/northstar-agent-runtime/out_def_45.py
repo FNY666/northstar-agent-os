@@ -107,7 +107,7 @@ def _local_header(filename: bytes, extra: bytes) -> bytes:
 def main() -> None:
     """Self-check."""
     local = _local_header(b"name", b"ABCDEF") + b"filedata"
-    eocd = _EOCD_SIG + b"\x00" * 18 + (5).to_bytes(2, "little") + b"hello"
+    eocd = _EOCD_SIG + b"\x00" * 16 + (5).to_bytes(2, "little") + b"hello"
     data = local + eocd
     cleaned, zeroed = clean_archive_metadata(data)
     assert zeroed == 2, zeroed
