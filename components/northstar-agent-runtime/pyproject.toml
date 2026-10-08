@@ -604,6 +604,7 @@ py-modules = [
     "hlc",
     "hoare_logic",
     "homomorphic_training",
+    "honeytokens",
     "hooks",
     "hop_validation",
     "housing",
