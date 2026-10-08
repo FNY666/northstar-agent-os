@@ -3,9 +3,10 @@
 Merkle tree over a key-value store for efficient diff:
 - leaves = sha256(key || 0x00 || value), sorted by key
 - internal nodes = sha256(left || right); odd node promoted
-- root(): tree root hash
-- diff(other): walk both trees, return keys whose leaves differ
-  (only differing subtrees are descended — O(d log n))
+- root(): tree root hash (quick equality check)
+- diff(other): compare per-key leaf hashes; returns keys whose leaves
+  differ or exist on only one side.  Correct for any key-set shape;
+  the root check short-circuits the equal case.
 
 Mock: in-process dicts; models the tree-diff protocol.
 
@@ -67,44 +68,20 @@ class MerkleTree:
             return "sha256:" + hashlib.sha256(b"empty").hexdigest()
         return "sha256:" + self.levels[-1][0].hex()
 
-    def _collect(self, other: "MerkleTree", level: int, idx: int,
-                 out: List[str]) -> None:
-        mine = self.levels[level]
-        theirs = other.levels[level]
-        if level == 0:
-            # Leaf level: compare per key index.
-            n = max(len(mine), len(theirs))
-            for i in range(n):
-                a = mine[i] if i < len(mine) else None
-                b = theirs[i] if i < len(theirs) else None
-                if a != b:
-                    key = self.keys[i] if i < len(self.keys) else other.keys[i]
-                    out.append(key)
-            return
-        # Internal level: descend into differing children.
-        n = max(len(mine), len(theirs))
-        for i in range(n):
-            a = mine[i] if i < len(mine) else None
-            b = theirs[i] if i < len(theirs) else None
-            if a != b:
-                self._collect(other, level - 1, i * 2, out)
+    def leaf_map(self) -> Dict[str, bytes]:
+        """key -> leaf hash."""
+        return {k: leaf for k, leaf in zip(self.keys, self.leaves)}
 
     def diff(self, other: "MerkleTree") -> List[str]:
         if not isinstance(other, MerkleTree):
             raise MerkleError("diff requires a MerkleTree")
         if self.root() == other.root():
             return []
-        top = len(self.levels) - 1
-        out: List[str] = []
-        self._collect(other, top, 0, out)
-        # Dedupe while preserving order (structure may double-report).
-        seen = set()
-        uniq = []
-        for k in out:
-            if k not in seen:
-                seen.add(k)
-                uniq.append(k)
-        return sorted(uniq)
+        mine = self.leaf_map()
+        theirs = other.leaf_map()
+        out = [k for k in sorted(set(mine) | set(theirs))
+               if mine.get(k) != theirs.get(k)]
+        return out
 
 
 def stdlib_only() -> bool:

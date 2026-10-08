@@ -113,6 +113,8 @@ class Orchestrator:
         """Topological order; failed task halts dependents (fail-closed)."""
         groups = self.parallel_groups()
         self._results = {}
+        failed: Optional[str] = None
+        cause: Optional[BaseException] = None
         for group in groups:
             for name in group:
                 task = self._tasks[name]
@@ -121,8 +123,11 @@ class Orchestrator:
                 try:
                     self._results[name] = task.fn()
                 except Exception as exc:  # noqa: BLE001 - wrapped in TaskFailed
-                    halted = sorted(self._dependents(name) - {name})
-                    raise TaskFailed(name, exc, halted) from exc
+                    if failed is None:
+                        failed, cause = name, exc
+        if failed is not None:
+            halted = sorted(self._dependents(failed) - {failed})
+            raise TaskFailed(failed, cause, halted)
         return dict(self._results)
 
     def _dependents(self, name: str) -> set:
