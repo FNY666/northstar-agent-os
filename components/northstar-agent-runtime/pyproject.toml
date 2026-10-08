@@ -334,6 +334,7 @@ py-modules = [
     "benchmark_runner",
     "beneficial_ai",
     "bft_interface",
+    "bias_mock",
     "bilinear_accumulator",
     "billing_engine",
     "bipia_probe",
