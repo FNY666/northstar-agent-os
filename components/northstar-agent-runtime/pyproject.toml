@@ -953,6 +953,7 @@ py-modules = [
     "stark_hash",
     "state_backend",
     "state_machine",
+    "stateful_veto",
     "static_verify",
     "steganography",
     "step_compliance",
