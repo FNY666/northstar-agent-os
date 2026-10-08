@@ -862,6 +862,7 @@ py-modules = [
     "safety_case",
     "safety_envelope",
     "safety_eval",
+    "safr_checkpoint",
     "saga_pattern",
     "saml_provider",
     "sandbagging",
