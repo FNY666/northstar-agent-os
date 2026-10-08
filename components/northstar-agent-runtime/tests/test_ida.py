@@ -5,6 +5,7 @@ import hashlib
 import subprocess
 import sys
 import threading
+from pathlib import Path
 
 import pytest
 
@@ -392,7 +393,7 @@ def test_main_self_check():
         [sys.executable, "ida.py"],
         capture_output=True,
         text=True,
-        cwd="/home/hatch/workspace/wt/northstar-pushchain/components/northstar-agent-runtime",
+        cwd=Path(__file__).resolve().parents[1],
         timeout=30,
     )
     assert proc.returncode == 0, proc.stderr

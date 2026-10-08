@@ -144,6 +144,24 @@ def test_seq_rewind_and_bool_refused():
         agg.register_source("app-2", -1)
 
 
+
+
+def test_seq_rewind_is_audited_without_consuming_state():
+    agg = LogAggregation()
+    agg.register_source("app-1", 5)
+    with pytest.raises(la.SeqOrderError):
+        agg.register_source("app-2", 5)
+    rejected = [event for event in agg.audit_log()
+                if event["kind"] == la.KIND_REJECTED]
+    assert rejected and rejected[-1]["seq"] == 5
+    assert rejected[-1]["detail"]["reason"] == (
+        "seq must strictly increase (last=5, got=5)"
+    )
+    # The precondition failure does not consume the failed sequence.
+    agg.register_source("app-2", 6)
+    assert agg.source_ids() == ("app-1", "app-2")
+
+
 def test_failed_mutation_consumes_seq_and_audits_rejected():
     agg = LogAggregation()
     agg.register_source("app-1", 1)
@@ -268,19 +286,36 @@ def test_cross_instance_digest_determinism():
 def test_concurrency_smoke():
     agg = LogAggregation()
     agg.register_source("app", 1)
-    seqs = iter(range(2, 200))
+    # The API requires caller-supplied mutation seqs to be strictly increasing.
+    # Serialize allocation with the call so thread scheduling cannot violate
+    # that contract before the implementation sees the request.
+    seq_lock = threading.Lock()
+    next_seq = 2
+    worker_errors = []
+    results = []
 
     def worker():
+        nonlocal next_seq
+        completed = 0
         while True:
-            try:
-                s = next(seqs)
-            except StopIteration:
-                return
-            agg.collect("app", [_entry(message=f"m{s}")], s)
+            with seq_lock:
+                if next_seq >= 200:
+                    break
+                seq = next_seq
+                next_seq += 1
+                try:
+                    agg.collect("app", [_entry(message=f"m{seq}")], seq)
+                except Exception as exc:  # pragma: no cover - asserted below
+                    worker_errors.append(exc)
+                    break
+                completed += 1
+        results.append(completed)
 
     threads = [threading.Thread(target=worker) for _ in range(4)]
     for t in threads:
         t.start()
     for t in threads:
         t.join()
-    assert agg.stats()["records"] > 0
+    assert worker_errors == []
+    assert sum(results) == 198
+    assert agg.stats()["records"] == 198
