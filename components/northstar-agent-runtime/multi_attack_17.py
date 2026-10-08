@@ -133,7 +133,7 @@ def main() -> None:
         ta, tb = set(a.lower().split()), set(b.lower().split())
         return len(ta & tb) / max(len(ta | tb), 1)
 
-    summary = run_all(CASES, sim)
+    summary = run_all(CASES, sim, threshold=0.4)
     by_id = {r["case_id"]: r for r in summary["results"]}
     assert by_id["rew-001"]["stopped"] is True
     assert by_id["rew-002"]["stopped"] is True
