@@ -1051,6 +1051,7 @@ py-modules = [
     "twopset",
     "type_checker",
     "type_checker_iface",
+    "uncertainty_mock",
     "underwriting_agents",
     "user_profile",
     "validator_scarcity",
