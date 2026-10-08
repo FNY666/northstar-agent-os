@@ -150,7 +150,7 @@ def stdlib_only() -> bool:
     tree = ast.parse(
         pathlib.Path(__file__).read_text(encoding="utf-8"), filename=__file__
     )
-    allowed = {"__future__", "ast", "dataclasses", "time", "typing"}
+    allowed = {"__future__", "ast", "dataclasses", "pathlib", "time", "typing"}
     for node in ast.walk(tree):
         if isinstance(node, ast.Import):
             for alias in node.names:
