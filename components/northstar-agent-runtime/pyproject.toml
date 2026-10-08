@@ -1048,6 +1048,7 @@ py-modules = [
     "raft_interface",
     "raft_log",
     "rag_pipeline",
+    "range_check",
     "rate_adapter",
     "rate_limiter",
     "rate_limiting",
