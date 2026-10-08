@@ -394,6 +394,7 @@ py-modules = [
     "compliance_checker",
     "compliance_reports",
     "compute_budget",
+    "confidence_gate",
     "confidential_compute",
     "confidential_vm",
     "config_management",
