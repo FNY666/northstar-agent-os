@@ -476,6 +476,7 @@ py-modules = [
     "crypto_defense_29",
     "crypto_defense_30",
     "csv_processor",
+    "ctrl_strip",
     "currency_converter",
     "custom_domains",
     "dag_scheduler",
