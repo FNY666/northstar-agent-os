@@ -58,14 +58,15 @@ def run():
     fs = _load("forward_seal_ledger")
     import os as _os
     k1, k2 = _os.urandom(32), _os.urandom(32)
+    pin = "sha256:" + "0" * 64
     ledger = fs.ForwardSealLedger(initial_key=k1, checkpoint_key=k2)
     n = 5
     t0 = time.perf_counter()
     for i in range(n):
         ledger.append(intent="task-%d" % i, action="tool.call",
-                      subject="agent", inputs_digest="sha256:0",
-                      logic_digest="sha256:0", execution_digest="sha256:0",
-                      outcome="ok")
+                      subject="agent", authorization="auth-%d" % i,
+                      inputs_digest=pin, logic_digest=pin,
+                      execution_digest=pin, outcome="ok")
     seal_ms = (time.perf_counter() - t0) * 1000 / n
     v = ledger.verify(k1, k2)
     return {"sealed": n, "avg_seal_ms": seal_ms,
@@ -98,7 +99,7 @@ def stdlib_only():
     import ast as _ast
     tree = _ast.parse(
         _Path(__file__).read_text(encoding="utf-8"), filename=__file__)
-    allowed = {"__future__", "ast", "importlib", "pathlib", "sys", "time"}, "os"
+    allowed = {"__future__", "ast", "importlib", "pathlib", "sys", "time", "os"}
     for node in _ast.walk(tree):
         if isinstance(node, _ast.Import):
             for alias in node.names:

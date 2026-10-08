@@ -65,11 +65,7 @@ def run():
         raise RuntimeError("gate exploded")
 
     g2 = tw.TripwireGuard("p2", boom)
-    fc = False
-    try:
-        g2.check("read", {})
-    except Exception:
-        fc = True
+    fc = g2.check("read", {}).outcome == tw.TripwireOutcome.HALT
     strict = rd.ResourceLimits(max_nesting_depth=2)
     loose = rd.ResourceLimits(max_nesting_depth=50)
     cases = [{"x": "f(" * d} for d in range(1, 8)]
