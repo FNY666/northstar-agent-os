@@ -845,6 +845,7 @@ py-modules = [
     "oversight_board",
     "oversight_evasion",
     "package_manager",
+    "partial_redact",
     "partition_manager",
     "passport",
     "password_hash",
