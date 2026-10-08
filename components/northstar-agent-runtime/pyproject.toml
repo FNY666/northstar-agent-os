@@ -472,6 +472,7 @@ py-modules = [
     "defense_agents",
     "delay_queue",
     "delegation_credentials",
+    "deliberative_spec",
     "deny_monotonicity",
     "dependency_resolver",
     "deployment_registry",
