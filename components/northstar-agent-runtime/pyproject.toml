@@ -670,6 +670,7 @@ py-modules = [
     "image_optimization",
     "image_processor",
     "impact_assessment",
+    "in_len_guard",
     "inbox_pattern",
     "incident_manager",
     "incident_receipts",
