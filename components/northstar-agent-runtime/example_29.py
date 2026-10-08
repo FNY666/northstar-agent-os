@@ -40,6 +40,7 @@ def main():
     r = run()
     assert r["results"][0] == ("42", "allow")
     assert r["results"][1][1] in ("escalate", "deny")
+    assert len(conf.history) == 2
     print("example_29 OK: hop validation + confidence")
 
 if __name__ == "__main__":

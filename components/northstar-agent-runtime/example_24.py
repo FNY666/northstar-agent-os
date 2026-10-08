@@ -34,9 +34,9 @@ def decide(action_confidence, tool_risk="low"):
 
 def run():
     a1, d1 = decide(95)
-    a2, d2 = decide(40)
+    a2, d2 = decide(60)
     a3, d3 = decide(10, tool_risk="high")
-    return {"a1": a1, "a2": a2, "d2": d2, "a3": a3, "d3": d3}
+    return {"a1": a1, "d1": d1, "a2": a2, "d2": d2, "a3": a3, "d3": d3}
 
 def main():
     r = run()

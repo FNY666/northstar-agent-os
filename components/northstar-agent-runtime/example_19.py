@@ -40,6 +40,9 @@ def main():
     r = run()
     assert r["total"] > 0
     assert r["blocked"] >= 1
+    # A benign output is never vetoed.
+    vetoed, _ = veto.check(dv.Consequence.REVERSIBLE_LOW)
+    assert vetoed is False
     print(f"example_19 OK: injection probes {r['blocked']}/{r['total']} vetoed")
 
 if __name__ == "__main__":

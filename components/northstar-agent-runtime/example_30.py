@@ -28,8 +28,8 @@ runner = it.InterleavedRunner(executor=lambda t, a: actions.append((t, a)),
                               log_fn=lambda r: log.append(r))
 
 def run():
-    reasoning = it.require_reasoning("need config value", "read", {"path": "/etc/app.conf"})
-    runner.run(reasoning, "read", {"path": "/etc/app.conf"})
+    # The runner requires raw reasoning text; it validates and logs it.
+    runner.run("need config value", "read", {"path": "/etc/app.conf"})
     d = ds.require_citation("allow", ["S1"], "read-only, per S1", SPEC)
     return {"log": log, "actions": actions, "decision": d}
 

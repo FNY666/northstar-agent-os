@@ -38,6 +38,9 @@ def main():
     assert r["total"] == 8
     # Resource limits catch the recursive bomb at minimum.
     assert r["blocked"] >= 1
+    # Direct check: the asi02-005 bomb shape is caught by these limits.
+    ok, _ = rd.check_resources("expand", {"input": "expand(expand(expand(x)))"}, limits)
+    assert ok is False
     print(f"example_20 OK: asi02 vs resources {r['blocked']}/{r['total']}")
 
 if __name__ == "__main__":

@@ -36,12 +36,13 @@ gate = tt.TwoTierGate(lambda t, a: 0.6, tier2, deny_threshold=0.95)
 def run():
     v1 = gate.check("db", {"q": "drop table users"})
     v2 = gate.check("db", {"q": "select 1"})
-    return {"v1": v1.decision, "v1_tier": v1.tier, "v2": v2.decision}
+    return {"v1": v1.decision, "v1_tier": v1.tier, "v2": v2.decision, "v2_tier": v2.tier}
 
 def main():
     r = run()
     assert r["v1"] == "deny" and r["v1_tier"] == 2
-    assert r["v2"] == "allow"
+    assert r["v2"] == "allow" and r["v2_tier"] == 2
+    assert r["v1"] != r["v2"]
     print("example_23 OK: two-tier + veto")
 
 if __name__ == "__main__":
