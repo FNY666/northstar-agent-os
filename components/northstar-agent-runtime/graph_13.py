@@ -53,19 +53,15 @@ def test_prim_classic():
     assert total == 37.0
 
 
-def test_prim_agrees_with_kruskal_weight():
-    import sys
-    sys.path.insert(0, __file__.rsplit("/", 1)[0])
-    import graph_12
-
-    edges = [("a", "b", 4), ("a", "h", 8), ("b", "c", 8), ("f", "g", 2), ("g", "h", 1)]
+def test_prim_matches_known_mst_weight():
+    # triangle: MST weight is hand-computed 3.0
+    edges = [("a", "b", 1), ("b", "c", 2), ("a", "c", 3)]
     g: Dict[Hashable, List[Tuple[Hashable, float]]] = {}
     for u, v, w in edges:
         g.setdefault(u, []).append((v, w))
         g.setdefault(v, []).append((u, w))
-    _, tp = prim(g, "a")
-    _, tk = graph_12.kruskal(edges)
-    assert tp == tk
+    _, total = prim(g, "a")
+    assert total == 3.0
 
 
 def test_prim_single_node():
@@ -75,7 +71,7 @@ def test_prim_single_node():
 def main() -> None:
     test_prim_basic()
     test_prim_classic()
-    test_prim_agrees_with_kruskal_weight()
+    test_prim_matches_known_mst_weight()
     test_prim_single_node()
     print("graph_13 (Prim) OK")
 

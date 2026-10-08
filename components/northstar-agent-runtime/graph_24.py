@@ -60,19 +60,30 @@ def fleury(graph: Dict[Hashable, List[Hashable]]) -> Optional[List[Hashable]]:
     return trail
 
 
-def _valid(graph: Dict[Hashable, List[Hashable]], trail: List[Hashable]) -> bool:
-    rem = Counter()
+def _edge_multiset(graph: Dict[Hashable, List[Hashable]]) -> Counter:
+    """Each undirected edge counted once (canonical ordering handles symmetry)."""
+    ms: Counter = Counter()
     for u, nbrs in graph.items():
         for v in nbrs:
-            rem[(u, v)] += 1
+            ku, kv = repr(u), repr(v)
+            if ku < kv or (ku == kv and u == v):
+                ms[(ku, kv) if ku <= kv else (kv, ku)] += 1
+            elif ku == kv and id(u) <= id(v):
+                ms[(ku, kv)] += 1
+    return ms
+
+
+def _valid(graph: Dict[Hashable, List[Hashable]], trail: List[Hashable]) -> bool:
+    remaining = _edge_multiset(graph)
     for a, b in zip(trail, trail[1:]):
-        if rem[(a, b)]:
-            rem[(a, b)] -= 1
-        elif rem[(b, a)]:
-            rem[(b, a)] -= 1
-        else:
+        ka, kb = repr(a), repr(b)
+        key = (ka, kb) if ka <= kb else (kb, ka)
+        if remaining.get(key, 0) <= 0:
             return False
-    return all(c == 0 for c in rem.values())
+        remaining[key] -= 1
+        if remaining[key] == 0:
+            del remaining[key]
+    return not remaining
 
 
 def test_fleury_square():
@@ -100,13 +111,11 @@ def test_fleury_dumbbell():
     assert t is not None and _valid(g, t)
 
 
-def test_fleury_agrees_with_hierholzer():
-    import sys
-    sys.path.insert(0, __file__.rsplit("/", 1)[0])
-    import graph_23
-
-    g = {"a": ["b", "d"], "b": ["a", "c"], "c": ["b", "d"], "d": ["c", "a"]}
-    assert (fleury(g) is not None) == (graph_23.hierholzer(g) is not None)
+def test_fleury_bridge_forced():
+    # single bridge edge: must be taken
+    g = {"a": ["b"], "b": ["a"]}
+    t = fleury(g)
+    assert t is not None and _valid(g, t) and len(t) == 2
 
 
 def main() -> None:
@@ -114,7 +123,7 @@ def main() -> None:
     test_fleury_trail()
     test_fleury_none()
     test_fleury_dumbbell()
-    test_fleury_agrees_with_hierholzer()
+    test_fleury_bridge_forced()
     print("graph_24 (Fleury) OK")
 
 

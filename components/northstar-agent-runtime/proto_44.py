@@ -75,7 +75,7 @@ def main() -> None:
             + bytes(4) + struct.pack("<i", 16))
     p = parse_table(data, offset=8)
     assert p == {"root": 8, "vtable_len": 8, "table_len": 12}
-    ok, _ = validate_table(b"\x00" * 4)
+    ok, _ = validate_table(struct.pack("<I", 999))
     assert ok is False
 
     assert stdlib_only()

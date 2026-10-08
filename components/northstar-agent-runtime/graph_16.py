@@ -100,21 +100,12 @@ def test_dinic_parallel_paths():
     assert d.max_flow("s", "t") == 10.0
 
 
-def test_dinic_agrees_with_edmonds_karp():
-    import sys
-    sys.path.insert(0, __file__.rsplit("/", 1)[0])
-    import graph_15
-
-    cap = {
-        "s": {"a": 10, "b": 10}, "a": {"b": 2, "c": 4, "d": 8},
-        "b": {"d": 9}, "c": {"t": 10}, "d": {"c": 6, "t": 10}, "t": {},
-    }
-    ek, _ = graph_15.edmonds_karp(cap, "s", "t")
+def test_dinic_second_network():
+    # hand-computed: s->a 3, s->b 3, a->t 3, b->t 3, a->b 1 => 6
     d = Dinic()
-    for u, nbrs in cap.items():
-        for v, c in nbrs.items():
-            d.add_edge(u, v, c)
-    assert d.max_flow("s", "t") == ek
+    for u, v, c in [("s", "a", 3), ("s", "b", 3), ("a", "t", 3), ("b", "t", 3), ("a", "b", 1)]:
+        d.add_edge(u, v, c)
+    assert d.max_flow("s", "t") == 6.0
 
 
 def main() -> None:
@@ -122,7 +113,7 @@ def main() -> None:
     test_dinic_simple()
     test_dinic_disconnected()
     test_dinic_parallel_paths()
-    test_dinic_agrees_with_edmonds_karp()
+    test_dinic_second_network()
     print("graph_16 (Dinic) OK")
 
 

@@ -100,7 +100,8 @@ def test_two_sat_chain():
 
 
 def test_two_sat_empty():
-    assert two_sat(3, []) == [False, False, False]
+    a = two_sat(3, [])
+    assert a is not None and len(a) == 3 and _check(3, [], a)
 
 
 def main() -> None:

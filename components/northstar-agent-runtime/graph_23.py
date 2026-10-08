@@ -50,21 +50,30 @@ def hierholzer(graph: Dict[Hashable, List[Hashable]]) -> Optional[List[Hashable]
     return circuit
 
 
-def _is_valid_trail(graph: Dict[Hashable, List[Hashable]], trail: List[Hashable]) -> bool:
-    if not trail:
-        return True
-    remaining = Counter()
+def _edge_multiset(graph: Dict[Hashable, List[Hashable]]) -> Counter:
+    """Each undirected edge counted once (canonical ordering handles symmetry)."""
+    ms: Counter = Counter()
     for u, nbrs in graph.items():
         for v in nbrs:
-            remaining[(u, v)] += 1
+            ku, kv = repr(u), repr(v)
+            if ku < kv or (ku == kv and u == v):
+                ms[(ku, kv) if ku <= kv else (kv, ku)] += 1
+            elif ku == kv and id(u) <= id(v):
+                ms[(ku, kv)] += 1
+    return ms
+
+
+def _is_valid_trail(graph: Dict[Hashable, List[Hashable]], trail: List[Hashable]) -> bool:
+    remaining = _edge_multiset(graph)
     for a, b in zip(trail, trail[1:]):
-        if remaining[(a, b)] > 0:
-            remaining[(a, b)] -= 1
-        elif remaining[(b, a)] > 0:
-            remaining[(b, a)] -= 1
-        else:
+        ka, kb = repr(a), repr(b)
+        key = (ka, kb) if ka <= kb else (kb, ka)
+        if remaining.get(key, 0) <= 0:
             return False
-    return all(c == 0 for c in remaining.values())
+        remaining[key] -= 1
+        if remaining[key] == 0:
+            del remaining[key]
+    return not remaining
 
 
 def test_hierholzer_square():

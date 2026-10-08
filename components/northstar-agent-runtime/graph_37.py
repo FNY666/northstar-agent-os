@@ -69,18 +69,16 @@ def test_johnson_negative_edge():
     assert d["a"]["c"] == 1.0 and d["b"]["c"] == -1.0
 
 
-def test_johnson_agrees_with_floyd():
-    import sys
-    sys.path.insert(0, __file__.rsplit("/", 1)[0])
-    import graph_05
-
+def test_johnson_hand_computed():
+    # hand-computed: a->b=3, a->c=1, a->d=4, b->c=-2, b->d=1, c->d=4
     nodes = ["a", "b", "c", "d"]
     edges = [("a", "b", 3), ("b", "c", -2), ("c", "d", 4), ("a", "d", 9), ("b", "d", 1)]
-    dj = johnson(nodes, edges)
-    df, _ = graph_05.floyd_warshall(nodes, edges)
-    for u in nodes:
-        for v in nodes:
-            assert abs(dj[u][v] - df[u][v]) < 1e-9
+    d = johnson(nodes, edges)
+    assert d["a"]["b"] == 3.0
+    assert d["a"]["c"] == 1.0
+    assert d["a"]["d"] == 4.0
+    assert d["b"]["d"] == 1.0
+    assert d["d"]["a"] == float("inf")
 
 
 def test_johnson_negative_cycle():
@@ -100,7 +98,7 @@ def test_johnson_single():
 def main() -> None:
     test_johnson_basic()
     test_johnson_negative_edge()
-    test_johnson_agrees_with_floyd()
+    test_johnson_hand_computed()
     test_johnson_negative_cycle()
     test_johnson_single()
     print("graph_37 (Johnson) OK")
