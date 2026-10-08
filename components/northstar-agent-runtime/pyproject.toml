@@ -676,6 +676,7 @@ py-modules = [
     "healthcare_agents",
     "helm_chart",
     "herd_gate",
+    "hex_detect",
     "hinted_handoff",
     "hipaa",
     "hlc",
