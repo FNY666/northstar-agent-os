@@ -884,6 +884,7 @@ py-modules = [
     "run_setup",
     "sae_interface",
     "safe_ai",
+    "safe_completion",
     "safety_case",
     "safety_envelope",
     "safety_eval",
