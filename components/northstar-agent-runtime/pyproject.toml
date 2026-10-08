@@ -879,6 +879,7 @@ py-modules = [
     "sdk",
     "sdk_generation",
     "seal_merkle_batch",
+    "sealed_attestation",
     "search_engine",
     "search_index",
     "secret_manager",
