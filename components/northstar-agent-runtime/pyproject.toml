@@ -432,6 +432,7 @@ py-modules = [
     "crdt_map",
     "crdt_set",
     "credential_detector",
+    "crescendo_probe",
     "crisis_management",
     "critique_model",
     "cron_scheduler",
