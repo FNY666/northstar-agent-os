@@ -807,6 +807,7 @@ py-modules = [
     "proptech_agents",
     "provenance",
     "provenance_attestor",
+    "provenance_tagging",
     "provenance_taint",
     "provider_retry",
     "pubsub_broker",
