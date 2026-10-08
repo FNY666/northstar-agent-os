@@ -959,6 +959,7 @@ py-modules = [
     "soc",
     "soc2",
     "soc_verdicts",
+    "source_attrib",
     "sox",
     "spam_detector",
     "sparse_merkle",
