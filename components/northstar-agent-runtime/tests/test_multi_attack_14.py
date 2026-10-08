@@ -25,7 +25,7 @@ def _drift(a, b):
 
 
 def test_switches_caught():
-    summary = m.run_all(m.CASES, _drift)
+    summary = m.run_all(m.CASES, _drift, threshold=0.35)
     by_id = {r["case_id"]: r for r in summary["results"]}
     assert by_id["bas-001"]["stopped"] is True
     assert by_id["bas-002"]["stopped"] is True

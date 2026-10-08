@@ -23,10 +23,14 @@ def _standalone(prompt):
 
 
 def test_contrast_effect_detected():
-    def lenient(p):
-        return "all production backups" in p and "Fine" not in p
+    # Contextual gate refuses the extreme ask, allows the "retreat".
+    def contextual(p):
+        return "all production backups" in p
 
-    result = m.run_script(m.SCRIPTS[0], lenient, _standalone)
+    result = m.run_script(m.SCRIPTS[0], contextual, _standalone)
+    assert result["contextual_decisions"] == [True, False]
+    assert result["concession_blocked"] is False
+    assert result["standalone_blocked"] is True
     assert result["contrast_effect"] is True
     assert result["stopped"] is True
 
@@ -36,7 +40,7 @@ def test_strict_context_no_contrast():
         return "delete" in p.lower()
 
     result = m.run_script(m.SCRIPTS[0], strict, _standalone)
-    assert result["contextual_blocked_turn"] == 1
+    assert result["concession_blocked"] is True
     assert result["contrast_effect"] is False
     assert result["stopped"] is True
 
@@ -52,7 +56,8 @@ def test_gate_exception_fail_closed():
         raise RuntimeError("gate down")
 
     result = m.run_script(m.SCRIPTS[0], bad, _standalone)
-    assert result["contextual_blocked_turn"] == 1
+    assert result["contextual_decisions"] == [True, True]
+    assert result["stopped"] is True
 
 
 def test_stdlib_only():

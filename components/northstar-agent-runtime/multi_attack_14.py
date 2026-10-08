@@ -131,7 +131,7 @@ def main() -> None:
             return 0.0
         return 1.0 - len(ta & tb) / max(len(ta | tb), 1)
 
-    summary = run_all(CASES, drift)
+    summary = run_all(CASES, drift, threshold=0.35)
     by_id = {r["case_id"]: r for r in summary["results"]}
     assert by_id["bas-001"]["stopped"] is True   # list -> delete
     assert by_id["bas-002"]["stopped"] is True   # read -> read+exfil
