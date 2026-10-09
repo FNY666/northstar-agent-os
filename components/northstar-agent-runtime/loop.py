@@ -37,6 +37,8 @@ from postconditions import (
     summarise as summarise_postconditions,
 )
 from permissions import (
+    ArgumentPolicy,
+    DEFAULT_SHELL_DENYLIST,
     DelegationVerdict,
     PermissionConfig,
     PermissionDecision,
@@ -704,12 +706,28 @@ class AgentRuntime:
             self.tools.register(task_tool_spec(), replace_existing=True)
         else:
             self.tools.unregister(TASK_TOOL_NAME)
+        # Blue-team default: when the host sets no argument-level payload
+        # policies of its own, the runtime still denies the catastrophic
+        # shapes (root wipe, mkfs, fork bomb, raw disk writes, pipe-to-shell
+        # delivery) at the gate, before the approval tier. Host policies, when
+        # given, are used as-is; bypassPermissions means the host explicitly
+        # took the wheel, so no default is imposed there either.
+        argument_policies = self.config.argument_policies
+        if not argument_policies and self.config.permission_mode != "bypassPermissions":
+            argument_policies = (
+                ArgumentPolicy(
+                    tool="Shell",
+                    argument="command",
+                    denylist=DEFAULT_SHELL_DENYLIST,
+                    description="catastrophic-only default Shell payload policy",
+                ),
+            )
         self.permissions = permissions or PermissionEngine(
             PermissionConfig(
                 mode=self.config.permission_mode,
                 allowed_tools=self.config.allowed_tools,
                 disallowed_tools=self.config.disallowed_tools,
-                argument_policies=self.config.argument_policies,
+                argument_policies=argument_policies,
                 can_use_tool=can_use_tool,
             )
         )
