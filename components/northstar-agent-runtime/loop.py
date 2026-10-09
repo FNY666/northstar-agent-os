@@ -135,6 +135,11 @@ class RuntimeConfig:
     permission_mode: PermissionMode = "default"
     allowed_tools: tuple[str, ...] = ()
     disallowed_tools: tuple[str, ...] = ()
+    #: Argument-level payload policies enforced by the permission gate
+    #: (see permissions.ArgumentPolicy). Opt-in; empty means no payload
+    #: checks. When set, the policies are inherited by delegated child
+    #: runtimes, which must not be able to loosen the host's posture.
+    argument_policies: tuple = ()
     workspace: str | None = None
     session_id: str | None = None
     agent: str = "main"
@@ -316,6 +321,7 @@ class RuntimeConfig:
             fail(str(error))
         object.__setattr__(self, "allowed_tools", normalise_names(self.allowed_tools))
         object.__setattr__(self, "disallowed_tools", normalise_names(self.disallowed_tools))
+        object.__setattr__(self, "argument_policies", tuple(self.argument_policies))
     @property
     def budget_enabled(self) -> bool:
         return self.max_budget_usd is not None
@@ -703,6 +709,7 @@ class AgentRuntime:
                 mode=self.config.permission_mode,
                 allowed_tools=self.config.allowed_tools,
                 disallowed_tools=self.config.disallowed_tools,
+                argument_policies=self.config.argument_policies,
                 can_use_tool=can_use_tool,
             )
         )
@@ -2541,6 +2548,10 @@ class AgentRuntime:
                     # posture. Dropping these fields would let a delegated
                     # agent bypass the parent's m-of-n approval requirement,
                     # decision model, pre-trade risk limits, and audit sink.
+                    # Argument-level payload policies are inherited for the
+                    # same reason: a child that drops them could run the
+                    # destructive payload the parent's gate would have denied.
+                    argument_policies=self.permissions.config.argument_policies,
                     decision_model=self.permissions.config.decision_model,
                     decision_policy=self.permissions.config.decision_policy,
                     multisig=self.permissions.config.multisig,
