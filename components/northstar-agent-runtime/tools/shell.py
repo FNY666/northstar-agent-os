@@ -55,6 +55,15 @@ SHELL_KIND = "exec"
 
 _SH_CANDIDATES = ("/bin/sh", "/usr/bin/sh")
 
+# Session memory: (run session_id, session name) -> {"cwd": str, "env": dict}.
+# Keyed by ctx.session_id so sessions die with the run — no cross-run leakage.
+# A session only remembers the workspace-relative cwd and extra env vars the
+# agent already had the right to pass per-call; it grants no new privilege.
+# cwd is re-resolved through ctx.resolve() on every call, so a deleted
+# directory fails honestly instead of trusting stale state.
+_session_state: dict[tuple[str, str], dict[str, Any]] = {}
+_SESSION_NAME_MAX = 64
+
 
 def _resolve_sh() -> str:
     for candidate in _SH_CANDIDATES:
@@ -127,11 +136,35 @@ def shell_handler(payload: dict[str, Any], ctx: "ToolContext") -> Any:
         raw_cwd = payload.get("cwd", ".") or "."
         if not isinstance(raw_cwd, str):
             raise SandboxError("cwd must be a string")
+        # Session memory: a named session remembers the last cwd and env so a
+        # multi-step programming flow (cd, export, build, test) doesn't have
+        # to re-establish context on every call. Explicit per-call cwd/env
+        # win and update the session. Keyed by the run's session_id — sessions
+        # never cross runs.
+        session_name = payload.get("session")
+        session_key: tuple[str, str] | None = None
+        session_mem: dict[str, Any] | None = None
+        if session_name is not None:
+            if not isinstance(session_name, str) or not session_name.strip():
+                raise SandboxError("session must be a non-empty string")
+            if len(session_name) > _SESSION_NAME_MAX:
+                raise SandboxError(f"session name too long (max {_SESSION_NAME_MAX})")
+            session_key = (ctx.session_id, session_name)
+            session_mem = _session_state.get(session_key)
+            if session_mem is None:
+                session_mem = {"cwd": ".", "env": {}}
+            if "cwd" not in payload:
+                raw_cwd = session_mem["cwd"]
         # must_exist so we don't create cwd via a write-shaped resolve; Shell is
         # not a mkdir tool.
         cwd_path = ctx.resolve(raw_cwd, must_exist=True)
         if not cwd_path.is_dir():
             raise SandboxError(f"cwd is not a directory: {raw_cwd}")
+        if session_mem is not None and session_key is not None:
+            # Remember the cwd that actually resolved (re-resolved every call,
+            # so a deleted directory fails here instead of going stale).
+            session_mem["cwd"] = raw_cwd
+            _session_state[session_key] = session_mem
         backend = str(payload.get("backend") or ctx.service("shell_backend") or "auto")
         # Seccomp is tighten-only: a per-call payload may move toward "on" but
         # never loosen what the operator configured via --seccomp.
@@ -174,6 +207,16 @@ def shell_handler(payload: dict[str, Any], ctx: "ToolContext") -> Any:
             if not isinstance(env_payload, dict):
                 raise SandboxError("env must be an object of string keys to string values")
             env = {str(k): str(v) for k, v in env_payload.items()}
+        if session_mem is not None and session_key is not None:
+            # Session env persists across calls; per-call env wins on conflict.
+            # The sandbox still filters protected vars (PATH/HOME/TMPDIR/LD_*)
+            # downstream, so remembered env grants nothing new.
+            merged = dict(session_mem["env"])
+            if env:
+                merged.update(env)
+            env = merged or None
+            session_mem["env"] = dict(merged)
+            _session_state[session_key] = session_mem
 
         request = SandboxRequest(
             argv=argv,
@@ -250,6 +293,15 @@ def shell_tool_spec():
                     "type": "object",
                     "additionalProperties": {"type": "string"},
                     "description": "Extra env vars (cannot override PATH/HOME/TMPDIR/LD_*).",
+                },
+                "session": {
+                    "type": "string",
+                    "description": (
+                        "Named session: remembers cwd and env across calls so a "
+                        "multi-step flow (cd, export, build, test) keeps context. "
+                        "Explicit per-call cwd/env win and update the session. "
+                        "Sessions are scoped to the current run and never cross runs."
+                    ),
                 },
                 "capdrop": {
                     "description": (
