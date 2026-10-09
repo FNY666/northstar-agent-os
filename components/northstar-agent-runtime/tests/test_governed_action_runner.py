@@ -111,4 +111,4 @@ def test_runner_fail_closed_on_bad_input():
 
 def test_runner_module_self_check():
     assert gar.stdlib_only() is True
-    assert gar.GOVERNED_RUNNER_VERSION == "governed-action-runner.v1"
+    assert gar.GOVERNED_RUNNER_VERSION == "governed-action-runner.v2"

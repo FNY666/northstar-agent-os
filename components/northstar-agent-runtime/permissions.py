@@ -1193,6 +1193,37 @@ class PermissionEngine:
     ) -> PermissionDecision:
         """Run the three layers for one call, plus the dataflow dimension.
 
+        Every decision -- allow or deny, from any layer including the
+        early-return layers (scope, argument policies, dataflow escalation)
+        -- is reported to the host's ``audit_sink`` synchronously before it
+        is returned.  With no sink configured this is a pure pass-through.
+        """
+        decision = self._evaluate_unaudited(
+            tool_name,
+            kind=kind,
+            mutating=mutating,
+            payload=payload,
+            context=context,
+            known=known,
+            dataflow=dataflow,
+        )
+        if not decision.allowed:
+            return self._audit_deny(decision, context)
+        return self._audit_allow(decision, context)
+
+    def _evaluate_unaudited(
+        self,
+        tool_name: str,
+        *,
+        kind: str | None = None,
+        mutating: bool | None = None,
+        payload: dict[str, Any] | None = None,
+        context: PermissionRequestContext | None = None,
+        known: bool = True,
+        dataflow: SessionDataflow | None = None,
+    ) -> PermissionDecision:
+        """Run the three layers for one call, plus the dataflow dimension.
+
         ``dataflow`` is a :class:`dataflow_policy.SessionDataflow` tracking
         this session's data sensitivity (OpenAPPA-style: source ``delta``
         labels, sink ``requires`` checks, from a deterministic TOML policy).
@@ -1488,10 +1519,6 @@ class PermissionEngine:
                 digest = ""
             if digest:
                 self._pt_seen[(tool_name, digest)] = self._now()
-        if not decision.allowed:
-            decision = self._audit_deny(decision, context)
-        else:
-            decision = self._audit_allow(decision, context)
         return decision
 
     def _evaluate_inner(

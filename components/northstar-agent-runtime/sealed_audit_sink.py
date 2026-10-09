@@ -103,6 +103,11 @@ class SealedAuditSink:
         self._ledger = ledger
         self._sealed_count = 0
 
+    @property
+    def ledger(self) -> Any:
+        """The forward-seal ledger this sink appends to (shared-chain wiring)."""
+        return self._ledger
+
     def __call__(self, record: Dict[str, Any]) -> None:
         if not isinstance(record, dict):
             raise SealedAuditSinkError("audit record must be dict")

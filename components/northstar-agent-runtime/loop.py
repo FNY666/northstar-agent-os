@@ -22,6 +22,7 @@ tool, which is registered only when a socket path is supplied.
 """
 from __future__ import annotations
 
+import os
 import time
 from dataclasses import dataclass, field, replace
 from typing import Any, Callable, Generator, Iterable, Iterator, Mapping, Sequence
@@ -29,7 +30,12 @@ from typing import Any, Callable, Generator, Iterable, Iterator, Mapping, Sequen
 from agents import AgentDefinition, AgentRegistry, Verdict, builtin_registry, parse_verdict
 from budget import Budget
 from compaction import CompactionOutcome, compact, should_compact
+from forward_seal_ledger import ForwardSealLedger
+from governed_action_runner import GovernedActionRunner, GovernedRunnerError
 from hooks import HookInput, HookRegistry
+from observer_verdict_ledger import ObserverVerdictLedger
+from safr_checkpoint import SafrCheckpoint
+from sealed_audit_sink import SealedAuditSink
 from checkpoints import CheckpointError, build as build_checkpoint, digest_transcript, prepare_resume
 from postconditions import (
     PostConditionError,
@@ -81,9 +87,7 @@ from session_lease import (
 from sessions import SessionStore, resolve_session_id
 from sidecar_client import SIDECAR_MAX_TIMEOUT_MS, SIDECAR_MIN_TIMEOUT_MS, SidecarClient
 from tools import (
-    ToolAccessError,
     ToolContext,
-    ToolInputError,
     ToolLimits,
     ToolRegistry,
     ToolResult,
@@ -607,6 +611,9 @@ class _Authorized:
     payload: dict[str, Any]
     decision: Any
     rewritten: bool
+    #: Canonical pin of (tool, args) at authorize time.  The governed runner's
+    #: assess gate compares it against the assess-time pin (TOCTOU tripwire).
+    governed_inputs_digest: str = ""
 
 
 @dataclass(frozen=True)
@@ -722,6 +729,13 @@ class AgentRuntime:
                     description="catastrophic-only default Shell payload policy",
                 ),
             )
+        # B: the production audit trail is sealed by default.  Every gate
+        # decision (allow and deny) is appended to a forward-seal ledger,
+        # giving the run's audit trail forward integrity (Schneier-Kelsey):
+        # tampering with any record breaks the chain.  A host that injects
+        # its own engine keeps its own sink; the runner below still seals
+        # to a runtime-owned ledger.
+        default_ledger = ForwardSealLedger(os.urandom(32), os.urandom(32))
         self.permissions = permissions or PermissionEngine(
             PermissionConfig(
                 mode=self.config.permission_mode,
@@ -729,7 +743,17 @@ class AgentRuntime:
                 disallowed_tools=self.config.disallowed_tools,
                 argument_policies=argument_policies,
                 can_use_tool=can_use_tool,
-            )
+            ),
+            audit_sink=SealedAuditSink(default_ledger),
+        )
+        # Share the ledger when the (possibly injected) engine already seals
+        # to one, so parent and child keep a single forward-integrity chain
+        # for the whole run instead of one chain per agent.
+        inherited_ledger = getattr(self.permissions.audit_sink, "ledger", None)
+        self.sealed_ledger: ForwardSealLedger = (
+            inherited_ledger
+            if isinstance(inherited_ledger, ForwardSealLedger)
+            else default_ledger
         )
         if can_use_tool is not None and self.permissions.config.can_use_tool is None:
             self.permissions = PermissionEngine(
@@ -743,6 +767,19 @@ class AgentRuntime:
         for spec in self.tools.specs():
             if not self.permissions.knows(spec.name):
                 self.permissions.register_kind(spec.name, spec.kind)
+        # A: the production governed-action runner.  One per runtime; the
+        # executor is passed per call in _dispatch/_run_handlers_concurrently.
+        # The runner books the SAFR 4-gate trail (declare -> authorize ->
+        # assess -> audit) around the already-authorized production decision
+        # and seals each outcome to the run's forward-seal ledger.  The
+        # observer and SAFR checkpoint are per-agent; the ledger is shared
+        # run-wide (see sealed_ledger above).
+        self._governed_runner = GovernedActionRunner(
+            safr=SafrCheckpoint(),
+            gate=self.permissions,
+            observer=ObserverVerdictLedger(),
+            ledger=self.sealed_ledger,
+        )
         self.session_id = resolve_session_id(self.config.session_id, self.sessions if self.sessions.enabled else None)
         if self.sessions.session_id != self.session_id:
             self.sessions = replace(self.sessions, session_id=self.session_id)
@@ -1738,18 +1775,19 @@ class AgentRuntime:
         turn_index: int,
         span: Any,
     ) -> tuple[
-        list[tuple[ToolUseBlock, Any, dict[str, Any], Any, bool] | None],
+        list[tuple[ToolUseBlock, Any, dict[str, Any], Any, bool, str] | None],
         list[tuple[ToolResultBlock, ToolCallReport, str | None] | None],
         str | None,
     ]:
         """Authorize each call on the main thread, in order, before any handler runs.
 
         Returns ``(prepared, early, halted)``: for every call exactly one of
-        ``prepared[i]`` (approved: call, spec, payload, decision, rewritten) and
+        ``prepared[i]`` (approved: call, spec, payload, decision, rewritten,
+        governed_inputs_digest) and
         ``early[i]`` (refused or not executed: block, report, fatal) is set.
         """
         halted: str | None = None
-        prepared: list[tuple[ToolUseBlock, Any, dict[str, Any], Any, bool] | None] = []
+        prepared: list[tuple[ToolUseBlock, Any, dict[str, Any], Any, bool, str] | None] = []
         early: list[tuple[ToolResultBlock, ToolCallReport, str | None] | None] = []
         for call, spec in zip(calls, specs):
             if halted is not None:
@@ -1780,7 +1818,7 @@ class AgentRuntime:
             # refuses is_delegation specs), so the outcome is authorized or refused.
             assert not isinstance(outcome, _Delegate), "a delegation call reached a parallel batch"
             if isinstance(outcome, _Authorized):
-                prepared.append((call, outcome.spec, outcome.payload, outcome.decision, outcome.rewritten))
+                prepared.append((call, outcome.spec, outcome.payload, outcome.decision, outcome.rewritten, outcome.governed_inputs_digest))
                 early.append(None)
                 state.tool_calls += 1
             else:
@@ -1793,7 +1831,7 @@ class AgentRuntime:
 
     def _execute_parallel_batch(
         self,
-        prepared: Sequence[tuple[ToolUseBlock, Any, dict[str, Any], Any, bool] | None],
+        prepared: Sequence[tuple[ToolUseBlock, Any, dict[str, Any], Any, bool, str] | None],
         state: _RunState,
         *,
         workers: int,
@@ -1806,9 +1844,9 @@ class AgentRuntime:
         indexed = [(index, item) for index, item in enumerate(prepared) if item is not None]
         if indexed:
             def _run_one(
-                item: tuple[ToolUseBlock, Any, dict[str, Any], Any, bool]
+                item: tuple[ToolUseBlock, Any, dict[str, Any], Any, bool, str]
             ) -> tuple[ToolResult, int, str]:
-                call, spec, payload, _decision, _rewritten = item
+                call, spec, payload, decision, _rewritten, governed_digest = item
                 context = ToolContext(
                     session_id=state.session_id,
                     agent=self.config.agent,
@@ -1820,17 +1858,27 @@ class AgentRuntime:
                     services=self._services(),
                 )
                 started = time.monotonic()
-                err_cls = ""
-                try:
-                    raw = spec.handler(payload, context)
-                    result = _coerce_result(raw, spec.name)
-                except (ToolAccessError, ToolInputError, ValueError, KeyError, TypeError, OSError) as error:
-                    err_cls = type(error).__name__
-                    result = ToolResult.error(f"{err_cls}: {error}")
-                except Exception as error:  # noqa: BLE001
-                    err_cls = type(error).__name__
-                    result = ToolResult.error(f"tool {spec.name} failed: {err_cls}")
-                return result, int((time.monotonic() - started) * 1000), err_cls
+                # Same governed execution as the serial path: the runner is
+                # thread-safe (the gate phase is serialized internally, the
+                # handler runs concurrently).
+                governed = self._governed_runner.run(
+                    intent="agent-tool-call",
+                    action=spec.name,
+                    subject=self.config.agent,
+                    tool=spec.name,
+                    tool_args=payload,
+                    decision=decision,
+                    authorized_inputs_digest=governed_digest,
+                    executor=lambda tool, args: spec.handler(args, context),
+                )
+                duration_ms = int((time.monotonic() - started) * 1000)
+                if governed.executed:
+                    result = _coerce_result(governed.result, spec.name)
+                    err_cls = ""
+                else:
+                    err_cls = governed.error_class or "GovernedBlocked"
+                    result = ToolResult.error(governed.reason or f"blocked at {governed.gate}")
+                return result, duration_ms, err_cls
 
             index_by_future_item = {index: item for index, item in indexed}
             with ThreadPoolExecutor(max_workers=min(workers, len(indexed))) as pool:
@@ -1852,7 +1900,7 @@ class AgentRuntime:
     def _assemble_parallel_batch(
         self,
         calls: Sequence[ToolUseBlock],
-        prepared: Sequence[tuple[ToolUseBlock, Any, dict[str, Any], Any, bool] | None],
+        prepared: Sequence[tuple[ToolUseBlock, Any, dict[str, Any], Any, bool, str] | None],
         early: Sequence[tuple[ToolResultBlock, ToolCallReport, str | None] | None],
         handler_results: Mapping[int, tuple[ToolResult, int, str]],
         halted: str | None,
@@ -1873,7 +1921,7 @@ class AgentRuntime:
                 continue
             item = prepared[index]
             assert item is not None
-            call_i, spec, payload, decision, rewritten = item
+            call_i, spec, payload, decision, rewritten, _governed_digest = item
             result, duration_ms, err_cls = handler_results[index]
             block, report = self._finish_tool_result(
                 call_i,
@@ -1957,9 +2005,34 @@ class AgentRuntime:
             known=True,
         )
         if not decision.allowed:
+            # The denial is a gate decision too: book the declare ->
+            # authorize(deny) trail in the runner and seal it, so every
+            # production tool call -- allowed or denied -- has a sealed
+            # 4-gate record.  The executor can never run on this path
+            # (the runner returns at the authorize gate).
+            def _never_execute(tool: str, args: dict) -> object:
+                raise GovernedRunnerError("denied call must not execute")
+
+            self._governed_runner.run(
+                intent="agent-tool-call",
+                action=spec.name,
+                subject=self.config.agent,
+                tool=spec.name,
+                tool_args=payload,
+                decision=decision,
+                executor=_never_execute,
+            )
             return self._refuse_by_gate(call, spec, decision, state, turn_index=turn_index, span=span)
 
-        return _Authorized(spec, payload, decision, rewritten)
+        return _Authorized(
+            spec,
+            payload,
+            decision,
+            rewritten,
+            # Pin (tool, args) for the governed runner's assess gate: the
+            # observer denies if the args differ at assess time (TOCTOU).
+            governed_inputs_digest=GovernedActionRunner.pin({"tool": spec.name, "args": payload}),
+        )
 
     def _refuse_unknown_tool(self, call: ToolUseBlock, state: _RunState, *, turn_index: int) -> _Refused:
         """The model named a tool this agent does not have."""
@@ -2251,17 +2324,32 @@ class AgentRuntime:
             services=self._services(),
         )
         started = time.monotonic()
-        error_class = ""
-        try:
-            raw = spec.handler(payload, context)
-            result = _coerce_result(raw, spec.name)
-        except (ToolAccessError, ToolInputError, ValueError, KeyError, TypeError, OSError) as error:
-            error_class = type(error).__name__
-            result = ToolResult.error(f"{error_class}: {error}")
-        except Exception as error:  # noqa: BLE001 - a broken tool must not kill the run
-            error_class = type(error).__name__
-            result = ToolResult.error(f"tool {spec.name} failed: {error_class}")
+        # A: the authorized call runs through the governed-action runner, so
+        # the SAFR 4-gate trail (declare -> authorize -> assess -> audit) is
+        # booked and sealed for every production tool call.  The production
+        # gate decision is passed in (no re-evaluation: no double-audit, no
+        # double host-approval); the runner's assess gate still verifies the
+        # arguments are unchanged since authorize time.
+        governed = self._governed_runner.run(
+            intent="agent-tool-call",
+            action=spec.name,
+            subject=self.config.agent,
+            tool=spec.name,
+            tool_args=payload,
+            decision=decision,
+            authorized_inputs_digest=outcome.governed_inputs_digest,
+            executor=lambda tool, args: spec.handler(args, context),
+        )
         duration_ms = int((time.monotonic() - started) * 1000)
+        if governed.executed:
+            error_class = ""
+            result = _coerce_result(governed.result, spec.name)
+        else:
+            # Blocked at assess, or the handler raised inside the runner
+            # (governed.error_class keeps the exception type, mirroring the
+            # old direct-dispatch behavior for the tool report/trace).
+            error_class = governed.error_class or "GovernedBlocked"
+            result = ToolResult.error(governed.reason or f"blocked at {governed.gate}")
         block, report = self._finish_tool_result(
             call,
             spec,
