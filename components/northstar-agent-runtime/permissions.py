@@ -54,6 +54,7 @@ from __future__ import annotations
 import hashlib
 import json
 import math
+import re
 import time
 from collections import deque
 from dataclasses import dataclass, field, replace
@@ -843,6 +844,47 @@ def canonical_tool_name(name: str) -> str:
     return str(name).strip().casefold()
 
 
+def _normalize_argument_text(text: str) -> str:
+    """Collapse trivial shell obfuscations before denylist matching.
+
+    ``${IFS}``/``$IFS`` act as whitespace in shell, and any run of
+    whitespace is equivalent to a single space for the shapes this policy
+    matches (``rm  -rf /``, ``rm\\t-rf /``). Matching is still substring
+    based and case-insensitive; this does not try to win an arms race
+    against encoding (base64, charcode tricks) -- those are the sandbox's
+    and the approval gate's job. It just closes the cheapest evasions.
+    """
+    lowered = text.lower()
+    lowered = lowered.replace("${ifs}", " ").replace("$ifs", " ")
+    return re.sub(r"\s+", " ", lowered)
+
+
+#: Catastrophic-only default denylist for the runtime's Shell tool.
+#: Applied by AgentRuntime when the host sets no argument_policies of its
+#: own (and the mode is not bypassPermissions). Deliberately narrow: only
+#: patterns no legitimate command needs -- wiping the root filesystem,
+#: formatting block devices, fork bombs, raw writes to disk devices, and
+#: the classic pipe-to-shell payload delivery. Broader blocking
+#: (curl/wget alone, package installs, chmod) stays opt-in via
+#: RuntimeConfig.argument_policies because those have legitimate uses.
+DEFAULT_SHELL_DENYLIST: tuple[str, ...] = (
+    "rm -rf /",
+    "rm -rf /*",
+    "rm -fr /",
+    "rm -fr /*",
+    "mkfs",
+    ":(){",
+    "of=/dev/",
+    "> /dev/sd",
+    ">/dev/sd",
+    "| sh",
+    "| bash",
+    "| dash",
+    "base64 -d",
+    "base64 --decode",
+)
+
+
 @dataclass(frozen=True)
 class ArgumentPolicy:
     """A policy on a critical tool argument (argument-level provenance).
@@ -874,13 +916,13 @@ class ArgumentPolicy:
     def check(self, value: Any) -> str | None:
         """Return a violation reason, or None if the value passes."""
         text = value if isinstance(value, str) else json.dumps(value, sort_keys=True)
-        lowered = text.lower()
+        normalized = _normalize_argument_text(text)
         for pattern in self.denylist:
-            if pattern.lower() in lowered:
+            if _normalize_argument_text(pattern) in normalized:
                 return f"argument {self.argument!r} matches denylisted pattern {pattern!r}"
         if self.allowlist:
             for pattern in self.allowlist:
-                if pattern.lower() in lowered:
+                if _normalize_argument_text(pattern) in normalized:
                     return None
             return f"argument {self.argument!r} matches no allowlisted pattern"
         return None
