@@ -558,7 +558,13 @@ def _ip_permitted(ip_text: str, rule: DestinationRule) -> bool:
         return False
     if rule.allow_private_ips:
         return True
-    return not (ip.is_private or ip.is_loopback or ip.is_link_local or ip.is_reserved or ip.is_multicast or ip.is_unspecified)
+    # ``is_global`` is the allow-list; the explicit flags stay as defence in depth.  Without it,
+    # shared address space (100.64.0.0/10, which includes the Alibaba metadata IP 100.100.100.200)
+    # is neither private nor reserved and was dialable.  IPv4-mapped IPv6 (::ffff:a.b.c.d) is
+    # handled by the same checks on Python 3.12 and 3.14 (verified), so no separate unwrapping.
+    return bool(ip.is_global) and not (
+        ip.is_private or ip.is_loopback or ip.is_link_local or ip.is_reserved or ip.is_multicast or ip.is_unspecified
+    )
 
 
 def _deny(

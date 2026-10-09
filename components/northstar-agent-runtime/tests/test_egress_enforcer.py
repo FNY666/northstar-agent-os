@@ -179,6 +179,28 @@ class DecisionTests(unittest.TestCase):
             self.assertFalse(v.allowed, ip)
             self.assertEqual(v.deny_code, DENY_DESTINATION_DENIED, ip)
 
+    def test_special_use_ranges_are_not_dialable(self):
+        # R2538: Python marks 100.64.0.0/10 (shared address space, incl. the Alibaba
+        # metadata endpoint 100.100.100.200) as neither private nor global, so the
+        # old private/loopback/link-local test let it through.
+        for ip in ("100.64.0.1", "100.100.100.200", "100.127.255.254",
+                   "::ffff:100.64.0.1", "::ffff:127.0.0.1", "::ffff:10.0.0.5",
+                   "::ffff:169.254.169.254", "64:ff9b::7f00:1"):
+            v = decide(resolve=lambda h, ip=ip: [ip])
+            self.assertFalse(v.allowed, ip)
+            self.assertEqual(v.deny_code, DENY_DESTINATION_DENIED, ip)
+
+    def test_special_use_ranges_filtered_when_mixed_with_public(self):
+        v = decide(resolve=lambda h: ["100.100.100.200", "::ffff:127.0.0.1", "1.2.3.4"])
+        self.assertTrue(v.allowed)
+        self.assertEqual(v.dial_ips, ("1.2.3.4",))
+
+    def test_global_addresses_still_dialable(self):
+        for ip in ("1.2.3.4", "93.184.216.34", "8.8.8.8", "2606:4700:4700::1111"):
+            v = decide(resolve=lambda h, ip=ip: [ip])
+            self.assertTrue(v.allowed, ip)
+            self.assertEqual(v.dial_ips, (ip,), ip)
+
     def test_private_ip_allowed_when_opted_in(self):
         pol = policy(rule={"allow_private_ips": True})
         v = decide(pol=pol, resolve=lambda h: ["10.0.0.5"])
