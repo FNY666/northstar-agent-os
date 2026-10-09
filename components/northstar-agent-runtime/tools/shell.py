@@ -132,7 +132,14 @@ def shell_handler(payload: dict[str, Any], ctx: "ToolContext") -> Any:
         cwd_path = ctx.resolve(raw_cwd, must_exist=True)
         if not cwd_path.is_dir():
             raise SandboxError(f"cwd is not a directory: {raw_cwd}")
-        backend = str(payload.get("backend") or ctx.service("shell_backend") or "auto")
+        # Backend selection is operator authority, not a model-controlled
+        # tool argument. In particular, an extra/unadvertised `backend=process`
+        # must never downgrade an operator-selected bwrap OS sandbox.
+        if "backend" in payload:
+            return ToolResult.error(
+                "Shell backend is operator-controlled; remove model-supplied backend field"
+            )
+        backend = str(ctx.service("shell_backend") or "auto")
         # Seccomp is tighten-only: a per-call payload may move toward "on" but
         # never loosen what the operator configured via --seccomp.
         try:
@@ -272,6 +279,7 @@ def shell_tool_spec():
                     ),
                 },
             },
+            "additionalProperties": False,
         },
         handler=shell_handler,
         kind=SHELL_KIND,  # type: ignore[arg-type]
