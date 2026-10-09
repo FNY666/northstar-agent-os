@@ -160,6 +160,14 @@ def _runtime_read_paths() -> tuple[str, ...]:
     candidates = [os.path.dirname(os.path.realpath(sys.executable))]
     for prefix in {sys.prefix, sys.base_prefix}:
         candidates.extend(os.path.join(prefix, part) for part in ("bin", "lib", "lib64"))
+    if sys.prefix != sys.base_prefix:
+        # Inside a venv, site.py reads <venv>/pyvenv.cfg at start-up. That file
+        # sits in the venv root, not in bin/ or lib/, so without this the
+        # interpreter dies with PermissionError under the Landlock allowlist.
+        # Only the venv's own root (never its parent) and only when actually in
+        # a venv: for a plain install sys.prefix is /usr or an /opt/home tree
+        # that must NOT be widened.
+        candidates.append(sys.prefix)
     candidates.extend(sysconfig.get_path(key) for key in ("stdlib", "platstdlib"))
     extra = [os.path.realpath(path) for path in candidates if path and os.path.isdir(path)]
     return tuple(dict.fromkeys([*_SYSTEM_READ_PATHS, *extra]))
