@@ -19,23 +19,40 @@ from providers.scripted import ScriptedTurn
 
 
 def _stdouts(report):
-    """Map tool_use_id -> stdout text (empty when no output)."""
+    """Map tool_use_id -> stdout text (empty string when no output)."""
     out = {}
     for ev in report.events:
-        if not hasattr(ev, 'content'):
+        # Only process UserMessage with ToolResultBlock content
+        if not isinstance(ev, UserMessage):
             continue
-        # Typed extraction from ToolResultBlock
-        if hasattr(ev.content, '__iter__'):
-            for block in ev.content:
-                if hasattr(block, 'tool_use_id') and hasattr(block, 'content'):
-                    tool_id = block.tool_use_id
-                    if isinstance(block.content, dict) and 'stdout' in block.content:
-                        out[tool_id] = block.content['stdout']
-                    else:
-                        out[tool_id] = ''
+        if not hasattr(ev, 'content') or not hasattr(ev.content, '__iter__'):
+            continue
+        for block in ev.content:
+            # Extract from ToolResultBlock
+            if not hasattr(block, 'tool_use_id') or not hasattr(block, 'content'):
+                continue
+            tool_id = block.tool_use_id
+            content_str = block.content
+            # content is a string with "--- stdout ---\nOUTPUT\n--- stderr ---" structure
+            if not isinstance(content_str, str):
+                out[tool_id] = ''  # Negative control: wrong type
+                continue
+            # Extract stdout: from first "--- stdout ---" to next "--- stderr ---" or end
+            stdout_marker = '--- stdout ---'
+            stderr_marker = '--- stderr ---'
+            if stdout_marker in content_str:
+                start = content_str.index(stdout_marker) + len(stdout_marker)
+                # Find end: next stderr marker or end of string
+                if stderr_marker in content_str[start:]:
+                    end = content_str.index(stderr_marker, start)
+                    stdout_text = content_str[start:end]
+                else:
+                    stdout_text = content_str[start:]
+                out[tool_id] = stdout_text.strip()
+            else:
+                # No stdout marker: empty output or error-only
+                out[tool_id] = ''
     return out
-
-
 class ShellSessionTests(RuntimeTestCase):
     def _drive(self, turns):
         def approve(tool, args, context):
@@ -130,39 +147,20 @@ class ShellSessionTests(RuntimeTestCase):
                       f"session did not adopt per-call env: {stdouts['t3'][:60]}")
 
     def test_stdout_with_triple_dash(self):
-        """Stdout containing --- should not be truncated (R2547/R2548)."""
-        report = self._drive([
-            # Single line with ---
-            self._turn("t1", {"command": "echo 'hello --- world'"}),
-            # Multi-line with --- separator
-            self._turn("t2", {"command": "printf 'line one\\n---\\nline three'"}),
-            # Diff-like headers starting with ---
-            self._turn("t3", {"command": "printf '--- a/file.txt\\n+++ b/file.txt\\n@@ -1 +1 @@'"}),
-        ])
-        stdouts = _stdouts(report)
-        # Should preserve full content, not truncate at ---
-        self.assertIn("hello --- world", stdouts["t1"], "should not truncate single line with ---")
-        self.assertIn("line one", stdouts["t2"])
-        self.assertIn("---", stdouts["t2"], "should preserve --- in middle")
-        self.assertIn("line three", stdouts["t2"], "should not truncate after ---")
-        self.assertIn("--- a/file.txt", stdouts["t3"], "should preserve diff header")
-        self.assertIn("+++ b/file.txt", stdouts["t3"])
-
-    def test_stdout_with_triple_dash(self):
-        """Stdout containing --- should not be truncated (R2549)."""
-        report = self._drive([
-            # Single line with ---
-            self._turn("t1", {"command": "echo 'hello --- world'"}),
-            # Multi-line with --- separator
-            self._turn("t2", {"command": "printf 'line one\\n---\\nline three'"}),
-            # Diff-like headers starting with ---
-            self._turn("t3", {"command": "printf '--- a/file.txt\\n+++ b/file.txt\\n@@ -1 +1 @@'"}),
-        ])
-        stdouts = _stdouts(report)
-        # Should preserve full content, not truncate at ---
-        self.assertIn("hello --- world", stdouts["t1"], "should not truncate single line with ---")
-        self.assertIn("line one", stdouts["t2"])
-        self.assertIn("---", stdouts["t2"], "should preserve --- in middle")
-        self.assertIn("line three", stdouts["t2"], "should not truncate after ---")
-        self.assertIn("--- a/file.txt", stdouts["t3"], "should preserve diff header")
-        self.assertIn("+++ b/file.txt", stdouts["t3"])
+            """Stdout containing --- should not be truncated (R2547/R2548)."""
+            report = self._drive([
+                # Single line with ---
+                self._turn("t1", {"command": "echo 'hello --- world'"}),
+                # Multi-line with --- separator
+                self._turn("t2", {"command": "printf 'line one\\n---\\nline three'"}),
+                # Diff-like headers starting with ---
+                self._turn("t3", {"command": "printf -- '--- a/file.txt\\n+++ b/file.txt\\n@@ -1 +1 @@'"}),
+            ])
+            stdouts = _stdouts(report)
+            # Should preserve full content, not truncate at ---
+            self.assertIn("hello --- world", stdouts["t1"], "should not truncate single line with ---")
+            self.assertIn("line one", stdouts["t2"])
+            self.assertIn("---", stdouts["t2"], "should preserve --- in middle")
+            self.assertIn("line three", stdouts["t2"], "should not truncate after ---")
+            self.assertIn("--- a/file.txt", stdouts["t3"], "should preserve diff header")
+            self.assertIn("+++ b/file.txt", stdouts["t3"])
