@@ -314,8 +314,15 @@ class LiveCapdropTests(unittest.TestCase):
         self.assertEqual(probe["errno"], 1)  # EPERM
 
     def test_whitelist_of_unheld_capability_fails_closed(self):
-        # CAP_SYS_PTRACE (bit 19) is not in this process's permitted set, so
-        # the whitelist cannot be honored: 126 and the target never runs.
+        # CAP_SYS_PTRACE is a useful negative control on ordinary CI runners,
+        # but a root-owned 140 host may grant every known capability. In that
+        # environment it is not an unheld capability, so the premise of this
+        # test does not exist; skip rather than asserting a false failure.
+        sets = read_capability_sets()
+        bit = CAPABILITIES["CAP_SYS_PTRACE"]
+        held = bool(sets["permitted"] & (1 << bit)) and bool(sets["bounding"] & (1 << bit))
+        if held:
+            self.skipTest("CAP_SYS_PTRACE is held and bound on this host; no unheld whitelist negative control")
         proc, _report = _run_loader(["CAP_SYS_PTRACE"], _READ_SETS_PY)
         self.assertEqual(proc.returncode, 126)
         self.assertEqual(proc.stdout, "")
