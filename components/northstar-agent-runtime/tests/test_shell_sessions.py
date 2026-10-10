@@ -8,7 +8,6 @@ still passes the sandbox's protected-var filter).
 """
 from __future__ import annotations
 
-import re
 import sys
 
 sys.path.insert(0, ".")
@@ -20,21 +19,20 @@ from providers.scripted import ScriptedTurn
 
 
 def _stdouts(report):
-    """Map tool_use_id -> stdout text ('' when the call produced no output)."""
+    """Map tool_use_id -> stdout text (empty when no output)."""
     out = {}
     for ev in report.events:
-        if not isinstance(ev, UserMessage):
+        if not hasattr(ev, 'content'):
             continue
-        c = str(ev.content)
-        # c is str() of a repr'd block: tool_use_id=\'t1\', content="...\\n--- stdout ---\\nhi\"..."
-        for m in re.finditer(r"tool_use_id='(\w+)'", c):
-            tid = m.group(1)
-            seg = c[m.start():m.start() + 4000]
-            sm = re.search(r"--- stdout ---(.*?)\", is_error", seg, re.S)
-            if sm:
-                out[tid] = sm.group(1).replace("\\n", "\n").strip()
-            elif "(no output)" in seg:
-                out[tid] = ""
+        # Typed extraction from ToolResultBlock
+        if hasattr(ev.content, '__iter__'):
+            for block in ev.content:
+                if hasattr(block, 'tool_use_id') and hasattr(block, 'content'):
+                    tool_id = block.tool_use_id
+                    if isinstance(block.content, dict) and 'stdout' in block.content:
+                        out[tool_id] = block.content['stdout']
+                    else:
+                        out[tool_id] = ''
     return out
 
 
