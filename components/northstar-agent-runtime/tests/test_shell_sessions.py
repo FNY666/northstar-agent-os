@@ -128,3 +128,41 @@ class ShellSessionTests(RuntimeTestCase):
         self.assertIn("A=two", stdouts["t2"])
         self.assertIn("A=two", stdouts["t3"],
                       f"session did not adopt per-call env: {stdouts['t3'][:60]}")
+
+    def test_stdout_with_triple_dash(self):
+        """Stdout containing --- should not be truncated (R2547/R2548)."""
+        report = self._drive([
+            # Single line with ---
+            self._turn("t1", {"command": "echo 'hello --- world'"}),
+            # Multi-line with --- separator
+            self._turn("t2", {"command": "printf 'line one\\n---\\nline three'"}),
+            # Diff-like headers starting with ---
+            self._turn("t3", {"command": "printf '--- a/file.txt\\n+++ b/file.txt\\n@@ -1 +1 @@'"}),
+        ])
+        stdouts = _stdouts(report)
+        # Should preserve full content, not truncate at ---
+        self.assertIn("hello --- world", stdouts["t1"], "should not truncate single line with ---")
+        self.assertIn("line one", stdouts["t2"])
+        self.assertIn("---", stdouts["t2"], "should preserve --- in middle")
+        self.assertIn("line three", stdouts["t2"], "should not truncate after ---")
+        self.assertIn("--- a/file.txt", stdouts["t3"], "should preserve diff header")
+        self.assertIn("+++ b/file.txt", stdouts["t3"])
+
+    def test_stdout_with_triple_dash(self):
+        """Stdout containing --- should not be truncated (R2549)."""
+        report = self._drive([
+            # Single line with ---
+            self._turn("t1", {"command": "echo 'hello --- world'"}),
+            # Multi-line with --- separator
+            self._turn("t2", {"command": "printf 'line one\\n---\\nline three'"}),
+            # Diff-like headers starting with ---
+            self._turn("t3", {"command": "printf '--- a/file.txt\\n+++ b/file.txt\\n@@ -1 +1 @@'"}),
+        ])
+        stdouts = _stdouts(report)
+        # Should preserve full content, not truncate at ---
+        self.assertIn("hello --- world", stdouts["t1"], "should not truncate single line with ---")
+        self.assertIn("line one", stdouts["t2"])
+        self.assertIn("---", stdouts["t2"], "should preserve --- in middle")
+        self.assertIn("line three", stdouts["t2"], "should not truncate after ---")
+        self.assertIn("--- a/file.txt", stdouts["t3"], "should preserve diff header")
+        self.assertIn("+++ b/file.txt", stdouts["t3"])
