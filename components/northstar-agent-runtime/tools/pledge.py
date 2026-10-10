@@ -31,6 +31,7 @@ from __future__ import annotations
 
 import base64
 import json
+import os
 import struct
 from dataclasses import dataclass, field
 from typing import Any, Mapping, Sequence
@@ -354,6 +355,12 @@ def filesystem_rules(
     rules: list[FsRule] = []
     anchors: list[str] = []  # paths that actually got a rule -> need ancestor traversal
     for root in runtime_roots:
+        # Landlock opens every rule path before restricting. A system root that
+        # does not exist on this host (/lib64 is absent on aarch64 distros, merged
+        # /usr layouts differ) would abort the whole sandbox setup with
+        # FileNotFoundError instead of just granting nothing, so skip it here.
+        if not os.path.exists(root):
+            continue
         rules.append(FsRule(root, _LL_READ | _LL_EXECUTE))
     # /etc: read-only. The interpreter follows symlinks out of /usr/lib
     # (e.g. sitecustomize.py -> /etc/python3.12/...); without this the
