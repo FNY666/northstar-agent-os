@@ -110,6 +110,58 @@ class TestSpec(RuntimeTestCase):
                 self.assertIn(str(prefix / 'lib'), pledge_paths)
                 self.assertNotIn(str(prefix.parent), pledge_paths)
 
+    def test_venv_root_is_readable_but_never_writable_or_widened(self):
+        # R2525: a venv interpreter reads <venv>/pyvenv.cfg at start-up (site.py).
+        # Only <venv>/bin and <venv>/lib were allowed, so every venv-hosted
+        # process-backend command died with PermissionError. Allow the venv root
+        # itself read-only; never its parent, and never write.
+        from pathlib import Path
+        from unittest.mock import patch
+        from tools.pledge import filesystem_rules
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            base = root / "base-python"
+            venv = root / "projects" / "venv"
+            for sub in ("bin", "lib"):
+                (base / sub).mkdir(parents=True)
+                (venv / sub).mkdir(parents=True)
+            (venv / "pyvenv.cfg").write_text("home = %s\n" % (base / "bin"))
+            (root / "workspace").mkdir()
+            with patch.object(sys, "prefix", str(venv)), \
+                 patch.object(sys, "base_prefix", str(base)), \
+                 patch.object(sys, "executable", str(venv / "bin" / "python")):
+                spec = default_profile(str(root / "workspace"))
+                paths = {rule["path"]: rule["rights"] for rule in spec["rules"]}
+                self.assertIn(str(venv), paths, "venv root must be readable so pyvenv.cfg can be read")
+                self.assertNotIn(str(venv.parent), paths)
+                self.assertNotIn(str(root), paths)
+                for right in ("WRITE_FILE", "MAKE_REG", "MAKE_DIR", "REMOVE_FILE"):
+                    self.assertNotIn(right, paths[str(venv)])
+                pledge_paths = {r.path for r in filesystem_rules(
+                    frozenset({"stdio"}), workspace=str(root / "workspace"), tmpdir=str(root / "tmp"))}
+                self.assertIn(str(venv), pledge_paths)
+                self.assertNotIn(str(venv.parent), pledge_paths)
+
+    def test_plain_install_prefix_is_not_widened(self):
+        # Not a venv (prefix == base_prefix): the prefix itself must NOT be allowed,
+        # only its bin/ and lib/ (a prefix like /opt/python or ~/.pyenv is too wide).
+        from pathlib import Path
+        from unittest.mock import patch
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            prefix = root / "toolcache" / "python"
+            for sub in ("bin", "lib"):
+                (prefix / sub).mkdir(parents=True)
+            (root / "workspace").mkdir()
+            with patch.object(sys, "prefix", str(prefix)), \
+                 patch.object(sys, "base_prefix", str(prefix)), \
+                 patch.object(sys, "executable", str(prefix / "bin" / "python3")):
+                spec = default_profile(str(root / "workspace"))
+                paths = {rule["path"] for rule in spec["rules"]}
+                self.assertNotIn(str(prefix), paths)
+                self.assertIn(str(prefix / "bin"), paths)
+                self.assertIn(str(prefix / "lib"), paths)
+
     def test_build_spec_rejects_missing_paths(self):
         with self.assertRaises(LandlockError):
             build_landlock_spec(paths_read=["/no/such/dir"], paths_write=["/tmp"])
