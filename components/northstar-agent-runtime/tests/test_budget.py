@@ -4,6 +4,7 @@ conservative fallback for unknown models, and three ceilings that do not overlap
 from __future__ import annotations
 
 import unittest
+from concurrent.futures import ThreadPoolExecutor
 
 import support  # noqa: F401
 from support import RuntimeTestCase, text_turn, tool_turn
@@ -14,9 +15,10 @@ from budget import (
     CONSERVATIVE_FALLBACK,
     Budget,
     compute_cost,
+    estimate_request_cost,
     price_for,
 )
-from providers.base import AssistantMessage, Usage, UserMessage
+from providers.base import AssistantMessage, GenerationRequest, Usage, UserMessage
 
 
 class PricingTests(unittest.TestCase):
@@ -111,6 +113,54 @@ class BudgetAccumulationTests(unittest.TestCase):
         self.assertIn("mystery-model", parent.models)
         self.assertGreater(parent.total_cost_usd, child.total_cost_usd)
 
+    def test_request_estimate_includes_maximum_output_and_wire_envelope(self):
+        request = GenerationRequest(
+            system="system instructions",
+            messages=({"role": "user", "content": [{"type": "text", "text": "hello"}]},),
+            tools=({"name": "Read", "input_schema": {"type": "object"}},),
+            model="claude-sonnet-4-5",
+            max_tokens=4096,
+        )
+        full = estimate_request_cost(request)
+        no_output = estimate_request_cost(GenerationRequest(
+            system=request.system,
+            messages=request.messages,
+            tools=request.tools,
+            model=request.model,
+            max_tokens=0,
+        ))
+        self.assertGreater(full, no_output)
+        self.assertGreater(no_output, 0.0, "input framing and tools also consume budget")
+
+    def test_concurrent_reservations_cannot_double_spend_remaining_budget(self):
+        budget = Budget(max_budget_usd=1.0)
+        with ThreadPoolExecutor(max_workers=16) as pool:
+            reservations = list(pool.map(lambda _index: budget.reserve(0.11), range(16)))
+        accepted = [reservation for reservation in reservations if reservation is not None]
+        self.assertEqual(len(accepted), 9)
+        self.assertAlmostEqual(budget.reserved_cost_usd, 0.99)
+        self.assertAlmostEqual(budget.remaining(), 0.01)
+        with ThreadPoolExecutor(max_workers=9) as pool:
+            list(pool.map(lambda reservation: reservation.release(), accepted))
+        self.assertAlmostEqual(budget.remaining(), 1.0)
+
+    def test_observation_settles_reservation_atomically(self):
+        budget = Budget(max_budget_usd=1.0)
+        reservation = budget.reserve(0.5)
+        self.assertIsNotNone(reservation)
+        breakdown = budget.observe(Usage(input_tokens=10_000), "claude-sonnet-4-5", reservation=reservation)
+        self.assertAlmostEqual(budget.total_cost_usd, breakdown.total_usd)
+        self.assertEqual(budget.reserved_cost_usd, 0.0)
+
+    def test_unknown_provider_outcome_keeps_estimated_charge(self):
+        budget = Budget(max_budget_usd=1.0)
+        reservation = budget.reserve(0.4)
+        assert reservation is not None
+        reservation.charge_unknown()
+        self.assertAlmostEqual(budget.total_cost_usd, 0.4)
+        self.assertAlmostEqual(budget.unverified_cost_usd, 0.4)
+        self.assertAlmostEqual(budget.remaining(), 0.6)
+
 
 class RuntimeCeilingTests(RuntimeTestCase):
     def test_cost_is_taken_from_reported_usage_not_from_text_length(self):
@@ -134,6 +184,20 @@ class RuntimeCeilingTests(RuntimeTestCase):
         self.assertEqual(provider.cursor, 2, "the loop must not spend a generation it cannot pay for")
         self.assertEqual(report.result.num_turns, len(report.events_of(AssistantMessage)))
         self.assertGreaterEqual(result.total_cost_usd, 6.0 - 1e-9)
+        self.assertTrue(
+            any(denial.tool == "(run)" and denial.source == "limit:max_budget_usd" for denial in report.denials),
+            "the run-level ceiling must stop before request setup; reservation denial is a separate guard",
+        )
+
+    def test_request_reservation_refuses_call_before_provider_dispatch(self):
+        provider = self.provider([text_turn("must not be called")])
+        report = self.drive(
+            self.runtime(provider=provider, max_budget_usd=0.001, max_output_tokens=4096)
+        )
+        result = self.assertExactlyOneResult(report)
+        self.assertEqual(result.subtype, "error_max_budget_usd")
+        self.assertEqual(provider.cursor, 0, "the request envelope must be reserved before the provider call")
+        self.assertEqual(report.denials[0].source, "limit:max_budget_usd")
 
     def test_each_ceiling_owns_its_own_subtype(self):
         # max_turns
@@ -198,7 +262,14 @@ class RuntimeCeilingTests(RuntimeTestCase):
     def test_invalid_ceiling_configuration_fails_at_construction(self):
         from loop import RuntimeConfig, RuntimeConfigurationError
 
-        for kwargs in ({"max_turns": 0}, {"max_budget_usd": 0}, {"max_tool_calls": -1}, {"model": " "}):
+        for kwargs in (
+            {"max_turns": 0},
+            {"max_budget_usd": 0},
+            {"max_budget_usd": float("nan")},
+            {"max_budget_usd": float("inf")},
+            {"max_tool_calls": -1},
+            {"model": " "},
+        ):
             with self.subTest(**kwargs):
                 with self.assertRaises(RuntimeConfigurationError):
                     RuntimeConfig(**kwargs)

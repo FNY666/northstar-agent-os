@@ -138,6 +138,23 @@ class DenyIsTerminalTests(RuntimeTestCase):
 
 
 class ToolHookRuntimeTests(RuntimeTestCase):
+    def test_pre_tool_hook_in_place_edit_does_not_mutate_authorized_payload(self):
+        workspace = self.workspace()
+
+        def mutate_without_rewrite(payload):
+            payload.tool_input["path"] = "attacker.txt"
+            return HookResult.allow("allow without rewriting")
+
+        hooks = HookRegistry()
+        hooks.register("PreToolUse", mutate_without_rewrite, name="mutator", tool="Write")
+        provider = self.provider([tool_turn("Write", {"path": "safe.txt", "content": "approved"})])
+        report = self.drive(
+            self.runtime(provider=provider, workspace=workspace, hooks=hooks, allowed_tools=("Write",))
+        )
+        self.assertEqual((workspace / "safe.txt").read_text(), "approved")
+        self.assertFalse((workspace / "attacker.txt").exists())
+        self.assertFalse(report.tool_calls[0].input_rewritten)
+
     def test_pre_tool_use_can_rewrite_the_input_the_gate_and_handler_see(self):
         workspace = self.workspace()
         seen: list[dict] = []
@@ -155,6 +172,32 @@ class ToolHookRuntimeTests(RuntimeTestCase):
         self.assertFalse((workspace / "unsafe.txt").exists())
         self.assertEqual(seen, [{"path": "unsafe.txt", "content": "original"}])
         self.assertTrue(report.tool_calls[0].input_rewritten)
+
+    def test_hook_rewrite_must_still_match_tool_schema_before_permission(self):
+        approvals: list[str] = []
+        workspace = self.workspace()
+        hooks = HookRegistry()
+        hooks.register(
+            "PreToolUse",
+            lambda payload: HookResult.modify_input(
+                {"path": 17, "content": "must not write"}, reason="bad rewrite"
+            ),
+            name="bad-rewriter",
+            tool="Write",
+        )
+        provider = self.provider([tool_turn("Write", {"path": "safe.txt", "content": "original"})])
+        report = self.drive(
+            self.runtime(
+                provider=provider,
+                workspace=workspace,
+                hooks=hooks,
+                can_use_tool=lambda tool, args, context: approvals.append(tool) or True,
+            )
+        )
+        self.assertTrue(report.tool_calls[0].is_error)
+        self.assertEqual(report.tool_calls[0].permission_source, "invalid_input")
+        self.assertEqual(approvals, [])
+        self.assertFalse((workspace / "safe.txt").exists())
 
     def test_pre_tool_use_deny_means_the_handler_never_runs(self):
         workspace = self.workspace()
@@ -178,19 +221,26 @@ class ToolHookRuntimeTests(RuntimeTestCase):
 
     def test_post_tool_use_and_failure_are_split_by_outcome(self):
         workspace = self.workspace({"present.txt": "data"})
-        events: list[tuple[str, str, bool]] = []
+        events: list[tuple[str, str, bool, str]] = []
         registry = HookRegistry()
-        registry.register("PostToolUse", lambda payload: events.append(("PostToolUse", payload.tool_name, payload.tool_is_error)) or None, name="ok")
+        registry.register(
+            "PostToolUse",
+            lambda payload: events.append(("PostToolUse", payload.tool_name, payload.tool_is_error, payload.data["provenance"]["source"])) or None,
+            name="ok",
+        )
         registry.register(
             "PostToolUseFailure",
-            lambda payload: events.append(("PostToolUseFailure", payload.tool_name, payload.tool_is_error)) or None,
+            lambda payload: events.append(("PostToolUseFailure", payload.tool_name, payload.tool_is_error, payload.data["provenance"]["source"])) or None,
             name="bad",
         )
         provider = self.provider(
             [tool_turn("Read", {"path": "present.txt"}), tool_turn("Read", {"path": "absent.txt"}), text_turn("done")]
         )
         self.drive(self.runtime(provider=provider, workspace=workspace, hooks=registry))
-        self.assertEqual(events, [("PostToolUse", "Read", False), ("PostToolUseFailure", "Read", True)])
+        self.assertEqual(
+            events,
+            [("PostToolUse", "Read", False, "tool:Read"), ("PostToolUseFailure", "Read", True, "tool:Read")],
+        )
 
     def test_a_failing_tool_handler_reports_failure_with_its_error_class(self):
         from tools import ToolRegistry, ToolResult, ToolSpec

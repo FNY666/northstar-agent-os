@@ -51,11 +51,14 @@ gate implements only the pre-trade erroneous-order limb.
 """
 from __future__ import annotations
 
+import copy
 import hashlib
 import json
 import math
 import re
+import shlex
 import time
+import unicodedata
 from collections import deque
 from dataclasses import dataclass, field, replace
 from typing import Any, Callable, Iterable, Literal, Sequence, TYPE_CHECKING
@@ -93,7 +96,9 @@ MUTATING_KINDS: frozenset[str] = frozenset({"edit", "exec", "network", "other"})
 #: dual-use offensive software. The Spain AEPD incident (Sept 2026) -- an agent
 #: autonomously running vuln scans -- is the motivating case. Hosts can
 #: explicitly allowlist via ``offensive_allowlist`` in PermissionConfig.
-#: Matching is case-insensitive substring on the normalized tool name.
+#: Tool-name matching is a case-insensitive substring after presentation
+#: normalization; Shell matching uses exact executable basenames in the
+#: command positions recognized by ``offensive_shell_commands``.
 OFFENSIVE_TOOL_PATTERNS: tuple[str, ...] = (
     "nmap",
     "masscan",
@@ -128,13 +133,423 @@ OFFENSIVE_TOOL_PATTERNS: tuple[str, ...] = (
     "cobaltstrike",
 )
 
+_OFFENSIVE_CONFUSABLES = str.maketrans({
+    # Common Cyrillic and Greek lookalikes found in Latin tool identifiers.
+    "а": "a", "е": "e", "і": "i", "о": "o", "р": "p", "с": "c",
+    "х": "x", "у": "y", "к": "k", "м": "m", "т": "t", "в": "b",
+    "н": "h", "ѕ": "s", "ӏ": "l",
+    "А": "A", "Е": "E", "І": "I", "О": "O", "Р": "P", "С": "C",
+    "Х": "X", "У": "Y", "К": "K", "М": "M", "Т": "T", "В": "B",
+    "Н": "H", "Ѕ": "S", "Ӏ": "I",
+    "Α": "A", "Β": "B", "Ε": "E", "Ι": "I", "Κ": "K", "Μ": "M",
+    "Ν": "N", "Ο": "O", "Ρ": "P", "Τ": "T", "Χ": "X",
+    "α": "a", "β": "b", "ε": "e", "ι": "i", "κ": "k", "μ": "m",
+    "ν": "n", "ο": "o", "ρ": "p", "τ": "t", "χ": "x",
+})
+
+
+def _offensive_tool_identity(tool_name: str) -> str:
+    """Fold presentation obfuscation before matching or allowlisting names."""
+    normalized = unicodedata.normalize("NFKC", tool_name)
+    normalized = "".join(char for char in normalized if unicodedata.category(char) != "Cf")
+    return normalized.translate(_OFFENSIVE_CONFUSABLES).strip().casefold()
+
 
 def is_offensive_tool(tool_name: str) -> bool:
     """Check whether a tool name matches offensive-security tooling patterns."""
     if not tool_name:
         return False
-    lowered = tool_name.lower()
+    lowered = _offensive_tool_identity(tool_name)
     return any(pattern in lowered for pattern in OFFENSIVE_TOOL_PATTERNS)
+
+
+_SHELL_COMMAND_WRAPPERS = frozenset({
+    "command", "exec", "env", "nice", "nohup", "stdbuf", "sudo", "doas", "time", "timeout", "xargs",
+})
+_SHELL_RESERVED_PREFIXES = frozenset({
+    "!", "builtin", "coproc", "do", "elif", "else", "if", "then", "until", "while",
+})
+_SHELL_COMMAND_SEPARATORS = frozenset({";", "&&", "||", "|", "&", "(", ")"})
+_SHELL_INTERPRETER_NAMES = frozenset({"sh", "bash", "dash", "zsh", "ksh", "ash"})
+_SHELL_ASSIGNMENT_RE = re.compile(r"[A-Za-z_][A-Za-z0-9_]*=.*\Z", re.S)
+_OFFENSIVE_EXECUTABLES = frozenset(OFFENSIVE_TOOL_PATTERNS)
+_OFFENSIVE_SCAN_INCOMPLETE = "<shell-scan-incomplete>"
+_WRAPPER_VALUE_OPTIONS = {
+    "sudo": frozenset({"-u", "-g", "-h", "-p", "-C", "-T", "-R", "-D", "--user", "--group", "--host", "--prompt"}),
+    "doas": frozenset({"-u"}),
+    "env": frozenset({"-u", "--unset", "-C", "--chdir"}),
+    "timeout": frozenset({"-k", "--kill-after", "-s", "--signal"}),
+    "nice": frozenset({"-n", "--adjustment"}),
+    "exec": frozenset({"-a"}),
+    "xargs": frozenset({"-a", "-d", "-E", "-I", "-L", "-n", "-P", "-s", "--arg-file", "--delimiter", "--eof", "--replace", "--max-lines", "--max-args", "--max-procs", "--max-chars"}),
+}
+
+
+def _shell_substitution_bodies(command: str) -> tuple[str, ...]:
+    """Extract simple active command/process substitutions with quote awareness.
+
+    This remains a bounded tripwire, not a full shell grammar. It handles
+    balanced ``$(...)``, process substitutions, and backticks while ignoring
+    the same text inside single quotes or behind an escape.
+    """
+    bodies: list[str] = []
+
+    def backtick_end(start: int) -> int | None:
+        index = start + 1
+        while index < len(command):
+            if command[index] == "\\":
+                index += 2
+            elif command[index] == "`":
+                return index
+            else:
+                index += 1
+        return None
+
+    def paren_end(open_index: int) -> int | None:
+        depth = 1
+        quote: str | None = None
+        index = open_index + 1
+        while index < len(command):
+            char = command[index]
+            if quote == "'":
+                if char == "'":
+                    quote = None
+                index += 1
+                continue
+            if char == "\\":
+                index += 2
+                continue
+            if quote == '"':
+                if char == '"':
+                    quote = None
+                elif char == "`":
+                    end = backtick_end(index)
+                    if end is None:
+                        return None
+                    index = end + 1
+                    continue
+                index += 1
+                continue
+            if char in {"'", '"'}:
+                quote = char
+            elif char == "`":
+                end = backtick_end(index)
+                if end is None:
+                    return None
+                index = end + 1
+                continue
+            elif char == "(":
+                depth += 1
+            elif char == ")":
+                depth -= 1
+                if depth == 0:
+                    return index
+            index += 1
+        return None
+
+    quote: str | None = None
+    index = 0
+    while index < len(command):
+        char = command[index]
+        if quote == "'":
+            if char == "'":
+                quote = None
+            index += 1
+            continue
+        if char == "\\":
+            index += 2
+            continue
+        if quote == '"':
+            if char == '"':
+                quote = None
+                index += 1
+                continue
+            if char == "`":
+                end = backtick_end(index)
+                if end is None:
+                    break
+                bodies.append(command[index + 1:end])
+                index = end + 1
+                continue
+            if command.startswith("$(", index) and not command.startswith("$((", index):
+                end = paren_end(index + 1)
+                if end is None:
+                    break
+                bodies.append(command[index + 2:end])
+                index = end + 1
+                continue
+            index += 1
+            continue
+        if char in {"'", '"'}:
+            quote = char
+            index += 1
+            continue
+        if char == "`":
+            end = backtick_end(index)
+            if end is None:
+                break
+            bodies.append(command[index + 1:end])
+            index = end + 1
+            continue
+        if command.startswith("$(", index) and not command.startswith("$((", index):
+            end = paren_end(index + 1)
+            if end is None:
+                break
+            bodies.append(command[index + 2:end])
+            index = end + 1
+            continue
+        if char in "<>" and index + 1 < len(command) and command[index + 1] == "(":
+            end = paren_end(index + 1)
+            if end is None:
+                break
+            bodies.append(command[index + 2:end])
+            index = end + 1
+            continue
+        index += 1
+    return tuple(bodies)
+
+
+def _shell_brace_group_bodies(command: str) -> tuple[tuple[str, ...], bool]:
+    """Extract active ``{ list; }`` bodies, excluding quotes and ``${}`` expansions."""
+    bodies: list[str] = []
+    quote: str | None = None
+    depth = 0
+    body_start = 0
+    index = 0
+    while index < len(command):
+        char = command[index]
+        if quote == "'":
+            if char == "'":
+                quote = None
+            index += 1
+            continue
+        if char == "\\":
+            index += 2
+            continue
+        if quote == '"':
+            if char == '"':
+                quote = None
+            index += 1
+            continue
+        if char in {"'", '"'}:
+            quote = char
+            index += 1
+            continue
+        if char == "`":
+            # Substitution bodies are scanned separately. Skip them here so
+            # braces inside a substitution cannot unbalance an outer group.
+            end = index + 1
+            while end < len(command):
+                if command[end] == "\\":
+                    end += 2
+                elif command[end] == "`":
+                    break
+                else:
+                    end += 1
+            if end >= len(command):
+                return tuple(bodies), True
+            index = end + 1
+            continue
+        if char == "{":
+            previous = command[index - 1] if index else " "
+            following = command[index + 1] if index + 1 < len(command) else ""
+            # Grouping braces are standalone words. This excludes ${name} and
+            # brace expansion such as {one,two}.
+            if previous != "$" and (index == 0 or previous.isspace() or previous in ";|&()") and following.isspace():
+                if depth == 0:
+                    body_start = index + 1
+                depth += 1
+            index += 1
+            continue
+        if char == "}" and depth:
+            previous = command[index - 1] if index else ""
+            following = command[index + 1] if index + 1 < len(command) else " "
+            if (previous.isspace() or previous in ";|&()") and (
+                index + 1 == len(command) or following.isspace() or following in ";|&()"
+            ):
+                depth -= 1
+                if depth == 0:
+                    bodies.append(command[body_start:index])
+            index += 1
+            continue
+        index += 1
+    return tuple(bodies), depth != 0
+
+
+def offensive_shell_commands(command: str, *, _depth: int = 0) -> tuple[str, ...]:
+    """Find direct offensive executable invocations in simple shell syntax.
+
+    This is a pre-approval tripwire for obvious direct launches, not a shell
+    parser or execution sandbox. Dynamic command words, ``eval`` and alias
+    rewriting are refused as incomplete syntax; interpreter-mediated launches
+    and other unrecognized forms must still be contained by host controls.
+    """
+    try:
+        lexer = shlex.shlex(command, posix=True, punctuation_chars=";&|()")
+        lexer.whitespace_split = True
+        tokens = tuple(lexer)
+    except ValueError:
+        # An unterminated quote or escape is not evidence that the command is
+        # harmless; do not let a parser failure silently bypass the tripwire.
+        return (_OFFENSIVE_SCAN_INCOMPLETE,)
+
+    found: list[str] = []
+    substitutions = _shell_substitution_bodies(command)
+    brace_groups, incomplete_braces = _shell_brace_group_bodies(command)
+    if incomplete_braces:
+        found.append(_OFFENSIVE_SCAN_INCOMPLETE)
+    if _depth < 4:
+        # shlex treats quoted command substitutions as ordinary data; inspect
+        # active substitutions separately, preserving single-quote literals.
+        for body in substitutions:
+            found.extend(offensive_shell_commands(body, _depth=_depth + 1))
+        for body in brace_groups:
+            found.extend(offensive_shell_commands(body, _depth=_depth + 1))
+    elif substitutions or brace_groups:
+        # Stop hostile nesting from turning the bounded scanner into an
+        # unbounded parser; report uncertainty as a deny condition.
+        found.append(_OFFENSIVE_SCAN_INCOMPLETE)
+    expect_command = True
+    index = 0
+    while index < len(tokens):
+        token = tokens[index]
+        if token in _SHELL_COMMAND_SEPARATORS:
+            expect_command = True
+            index += 1
+            continue
+        if not expect_command:
+            index += 1
+            continue
+        lowered = token.casefold()
+        if lowered in {"eval", "alias"}:
+            # eval reparses shell source, while alias rewrites later command
+            # names. Neither can be resolved safely by this bounded scanner.
+            found.append(_OFFENSIVE_SCAN_INCOMPLETE)
+            break
+        if lowered in _SHELL_RESERVED_PREFIXES or _SHELL_ASSIGNMENT_RE.fullmatch(token):
+            index += 1
+            continue
+        if lowered in _SHELL_COMMAND_WRAPPERS:
+            index += 1
+            options_with_values = _WRAPPER_VALUE_OPTIONS.get(lowered, frozenset())
+            if lowered == "timeout":
+                # timeout's first positional value is always the duration.
+                while index < len(tokens) and tokens[index].startswith("-"):
+                    option = tokens[index]
+                    index += 1
+                    if option in options_with_values and index < len(tokens):
+                        index += 1
+                if index < len(tokens) and not tokens[index] in _SHELL_COMMAND_SEPARATORS:
+                    index += 1
+            else:
+                while index < len(tokens):
+                    option = tokens[index]
+                    if option == "--":
+                        index += 1
+                        break
+                    if option in _SHELL_COMMAND_SEPARATORS or not option.startswith("-"):
+                        break
+                    if lowered == "env" and (option in {"-S", "--split-string"} or option.startswith("--split-string=")):
+                        if option.startswith("--split-string="):
+                            split_command = option.split("=", 1)[1]
+                            index += 1
+                        elif index + 1 < len(tokens):
+                            split_command = tokens[index + 1]
+                            index += 2
+                        else:
+                            index += 1
+                            continue
+                        found.extend(offensive_shell_commands(split_command, _depth=_depth + 1))
+                        index = len(tokens)
+                        break
+                    if lowered == "command" and option in {"-v", "-V"}:
+                        # `command -v nmap` only resolves a name; it does not
+                        # invoke the offensive executable.
+                        index = len(tokens)
+                        break
+                    index += 1
+                    if option in options_with_values and index < len(tokens):
+                        index += 1
+                while lowered == "env" and index < len(tokens):
+                    if _SHELL_ASSIGNMENT_RE.fullmatch(tokens[index]):
+                        index += 1
+                    else:
+                        break
+            # `nice 10 command` is the historical adjustment syntax.
+            if lowered == "nice" and index < len(tokens) and re.fullmatch(r"[+-]?\d+", tokens[index]):
+                index += 1
+            if lowered == "time" and index < len(tokens) and tokens[index] == "-p":
+                index += 1
+            expect_command = True
+            continue
+        if token.startswith("-"):
+            index += 1
+            continue
+        if token not in {"{", "}"} and any(marker in token for marker in ("$", "`", "*", "?", "[", "{", "}")):
+            # At command position, expansion, globbing or brace generation can
+            # select an executable that is not visible in the lexical token.
+            found.append(_OFFENSIVE_SCAN_INCOMPLETE)
+            break
+        basename = token.rsplit("/", 1)[-1].casefold()
+        if basename in _OFFENSIVE_EXECUTABLES:
+            found.append(basename)
+        if basename in _SHELL_INTERPRETER_NAMES:
+            # Shells accept combined options such as `bash -lc SCRIPT`; inspect
+            # the inline command string instead of treating it as inert argv.
+            argument = index + 1
+            while argument < len(tokens) and tokens[argument] not in _SHELL_COMMAND_SEPARATORS:
+                option = tokens[argument]
+                if option == "--":
+                    break
+                if option == "-c" or option == "--command" or (
+                    option.startswith("-") and not option.startswith("--") and "c" in option[1:]
+                ):
+                    if argument + 1 < len(tokens) and tokens[argument + 1] not in _SHELL_COMMAND_SEPARATORS:
+                        if _depth < 4:
+                            found.extend(offensive_shell_commands(tokens[argument + 1], _depth=_depth + 1))
+                        else:
+                            found.append(_OFFENSIVE_SCAN_INCOMPLETE)
+                    break
+                argument += 1
+        if basename == "find" and _depth < 4:
+            # `find -exec[dir] PROGRAM ... \;` embeds a second command list
+            # inside find's arguments, outside the outer shell separators.
+            end = index + 1
+            while end < len(tokens) and tokens[end] not in _SHELL_COMMAND_SEPARATORS:
+                if tokens[end] in {"-exec", "-execdir"}:
+                    start = end + 1
+                    stop = start
+                    while stop < len(tokens) and tokens[stop] not in {";", "+"}:
+                        stop += 1
+                    if stop > start:
+                        found.extend(offensive_shell_commands(" ".join(tokens[start:stop]), _depth=_depth + 1))
+                    end = stop
+                end += 1
+        expect_command = False
+        index += 1
+    return tuple(dict.fromkeys(found))
+
+
+def _shell_scan_source(payload: dict[str, Any]) -> str | None:
+    """Return a scanner input matching Shell's supported command shapes.
+
+    ``Shell`` accepts command text under ``command`` or its ``cmd`` alias, as
+    well as direct ``argv`` execution. Quote argv elements as inert words so
+    the same bounded scanner can inspect executable positions and known
+    wrappers without interpreting argument metacharacters as shell syntax.
+    Invalid shapes are rejected by the Shell handler before spawn.
+    """
+    if "argv" in payload and payload.get("argv") is not None:
+        argv = payload.get("argv")
+        if (
+            isinstance(argv, (list, tuple))
+            and bool(argv)
+            and all(isinstance(item, str) and item for item in argv)
+        ):
+            return shlex.join(argv)
+        return None
+    command = payload.get("command", payload.get("cmd"))
+    return command if isinstance(command, str) else None
 
 DecisionSource = Literal[
     "disallowed_tools",
@@ -151,6 +566,7 @@ DecisionSource = Literal[
     "composition",
     "offensive",
     "argument",
+    "audit",
 ]
 
 
@@ -855,6 +1271,8 @@ def _normalize_argument_text(text: str) -> str:
     and the approval gate's job. It just closes the cheapest evasions.
     """
     lowered = text.lower()
+    # POSIX shells remove an escaped newline before tokenization.
+    lowered = re.sub(r"\\\r?\n", "", lowered)
     lowered = lowered.replace("${ifs}", " ").replace("$ifs", " ")
     return re.sub(r"\s+", " ", lowered)
 
@@ -872,6 +1290,12 @@ DEFAULT_SHELL_DENYLIST: tuple[str, ...] = (
     "rm -rf /*",
     "rm -fr /",
     "rm -fr /*",
+    # Coreutils accepts reordered options and --no-preserve-root. These
+    # patterns close common lexical variants without treating general `rm`
+    # use as forbidden. This remains a narrow guard, not a shell parser.
+    "rm -f -r /",
+    "rm -r -f /",
+    "--no-preserve-root",
     "mkfs",
     ":(){",
     "of=/dev/",
@@ -1070,6 +1494,7 @@ class PermissionEngine:
         wall_now: Callable[[], float] | None = None,
         composition_rules: Iterable[CompositionRule] | None = None,
         tool_categories: Mapping[str, str] | None = None,
+        composition_history: deque[str] | None = None,
     ) -> None:
         if config is None:
             config = PermissionConfig(
@@ -1133,7 +1558,13 @@ class PermissionEngine:
         }
         #: Recent call history as category labels, for composition checks.
         #: Bounded; only categories (not arguments) are retained.
-        self._category_history: deque[str] = deque(maxlen=32)
+        if composition_history is not None and (
+            not isinstance(composition_history, deque) or composition_history.maxlen != 32
+        ):
+            raise ValueError("composition_history must be a deque with maxlen=32")
+        self._category_history: deque[str] = (
+            composition_history if composition_history is not None else deque(maxlen=32)
+        )
         #: Optional SEC 15c3-5-style pre-trade risk checks (layer 0). None
         #: (the default) disables them: zero behaviour change.
         self.pretrade = pretrade
@@ -1177,6 +1608,34 @@ class PermissionEngine:
     def knows(self, tool_name: str) -> bool:
         return tool_name in self._kinds
 
+    @property
+    def composition_enabled(self) -> bool:
+        return bool(self._composition_rules)
+
+    @property
+    def composition_history(self) -> tuple[str, ...]:
+        return tuple(self._category_history)
+
+    @property
+    def composition_policy_digest(self) -> str:
+        """Stable identity for the sequence policy carried by checkpoints."""
+        payload = {
+            "rules": [
+                {"sequence": list(rule.sequence), "description": rule.description}
+                for rule in self._composition_rules
+            ],
+            "tool_categories": sorted(self._tool_categories.items()),
+        }
+        canonical = json.dumps(payload, sort_keys=True, separators=(",", ":"), ensure_ascii=True)
+        return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+
+    def restore_composition_history(self, history: Sequence[str]) -> None:
+        """Restore the bounded, category-only state from a verified checkpoint."""
+        if len(history) > 32 or any(not isinstance(item, str) or len(item) > 256 for item in history):
+            raise ValueError("composition history must contain at most 32 category labels of at most 256 characters")
+        self._category_history.clear()
+        self._category_history.extend(history)
+
     def register_kind(self, tool_name: str, kind: str) -> None:
         self._kinds[tool_name] = kind
 
@@ -1190,6 +1649,7 @@ class PermissionEngine:
         context: PermissionRequestContext | None = None,
         known: bool = True,
         dataflow: SessionDataflow | None = None,
+        record_composition: bool = True,
     ) -> PermissionDecision:
         """Run the three layers for one call, plus the dataflow dimension.
 
@@ -1206,6 +1666,7 @@ class PermissionEngine:
             context=context,
             known=known,
             dataflow=dataflow,
+            record_composition=record_composition,
         )
         if not decision.allowed:
             return self._audit_deny(decision, context)
@@ -1221,6 +1682,7 @@ class PermissionEngine:
         context: PermissionRequestContext | None = None,
         known: bool = True,
         dataflow: SessionDataflow | None = None,
+        record_composition: bool = True,
     ) -> PermissionDecision:
         """Run the three layers for one call, plus the dataflow dimension.
 
@@ -1275,8 +1737,8 @@ class PermissionEngine:
         # Offensive tooling is deny-by-default (Spain AEPD, Sept 2026).
         # The host can explicitly allowlist via offensive_allowlist.
         if is_offensive_tool(tool_name):
-            allowed_names = {canonical_tool_name(n) for n in self.config.offensive_allowlist}
-            if tool_name not in allowed_names:
+            allowed_names = {_offensive_tool_identity(n) for n in self.config.offensive_allowlist}
+            if _offensive_tool_identity(tool_name) not in allowed_names:
                 return PermissionDecision(
                     False,
                     source="offensive",
@@ -1284,6 +1746,26 @@ class PermissionEngine:
                     rule="offensive:deny_by_default",
                     tool=tool_name,
                 )
+        shell_scan_source = _shell_scan_source(payload) if canonical_tool_name(tool_name) == "shell" else None
+        if shell_scan_source is not None:
+            allowed_names = {_offensive_tool_identity(n) for n in self.config.offensive_allowlist}
+            for executable in offensive_shell_commands(shell_scan_source):
+                if executable == _OFFENSIVE_SCAN_INCOMPLETE:
+                    return PermissionDecision(
+                        False,
+                        source="offensive",
+                        reason="Shell command syntax exceeds the scanner's safe parse boundary; refusing it",
+                        rule="offensive:shell_scan_incomplete",
+                        tool=tool_name,
+                    )
+                if _offensive_tool_identity(executable) not in allowed_names:
+                    return PermissionDecision(
+                        False,
+                        source="offensive",
+                        reason=f"Shell directly invokes offensive-security executable {executable!r}; explicitly allowlist to enable",
+                        rule="offensive:shell_executable_deny_by_default",
+                        tool=tool_name,
+                    )
         # Argument-level policies (opt-in): check critical argument values
         # before the normal layers. A violation denies immediately.
         if self.config.argument_policies and payload:
@@ -1316,7 +1798,7 @@ class PermissionEngine:
         # forbidden because of what came before it. Checked before the
         # dataflow early-return so it applies with or without dataflow.
         # Only allowed calls extend the history -- a denied call never happened.
-        if decision.allowed and self._composition_rules:
+        if decision.allowed and self._composition_rules and record_composition:
             composition_deny = self._check_composition(tool_name)
             if composition_deny is not None:
                 return composition_deny
@@ -1327,15 +1809,34 @@ class PermissionEngine:
             return decision
         # The call will execute: its result carries the source label, so the
         # trajectory learns it now. (A denied call produces no data and
-        # attaches nothing.)
-        dataflow.observe(tool_name, payload)
+        # attaches nothing.) Keep a content-free summary on the decision so
+        # the synchronous audit sink can seal the label transition too.
+        source_rule = dataflow.observe(tool_name, payload)
+        dataflow_evidence: dict[str, Any] = {
+            "trust": dataflow.policy.rank_name(dataflow.trust_index),
+            "audience_labeled": dataflow.audience_labeled,
+            "audience_unknown": dataflow.audience_unknown,
+            "audience_count": len(dataflow.audience),
+        }
+        if source_rule is not None:
+            dataflow_evidence["source_rule"] = source_rule.tool
         if (
             sink_verdict is not None
             and sink_verdict.escalate
             and self.config.mode != "bypassPermissions"
         ):
-            return self._apply_dataflow_escalation(
+            dataflow_evidence["sink_escalated"] = True
+            decision = self._apply_dataflow_escalation(
                 tool_name, payload, context, sink_verdict
+            )
+            return replace(
+                decision,
+                details={**decision.details, "dataflow": dataflow_evidence},
+            )
+        if source_rule is not None:
+            return replace(
+                decision,
+                details={**decision.details, "dataflow": dataflow_evidence},
             )
         return decision
 
@@ -1365,7 +1866,7 @@ class PermissionEngine:
                 tool=tool_name,
             )
         try:
-            verdict = callback(tool_name, dict(payload), context)
+            verdict = callback(tool_name, copy.deepcopy(payload), context)
         except Exception as error:  # noqa: BLE001 - a broken approver must not grant access
             return PermissionDecision(
                 False,
@@ -1446,7 +1947,7 @@ class PermissionEngine:
         if not request.arguments_digest:
             request = replace(request, arguments_digest=digest_arguments(payload))
         try:
-            verdict = self.config.can_use_tool(tool_name, dict(payload), request)
+            verdict = self.config.can_use_tool(tool_name, copy.deepcopy(payload), request)
         except Exception as error:  # noqa: BLE001 - a broken approver must not grant access
             return PermissionDecision(
                 False,
@@ -1671,7 +2172,7 @@ class PermissionEngine:
                 )
             request = replace(request, arguments_digest=pinned)
         try:
-            verdict = self.config.can_use_tool(tool_name, dict(payload or {}), request)
+            verdict = self.config.can_use_tool(tool_name, copy.deepcopy(payload or {}), request)
         except Exception as error:  # noqa: BLE001 - a broken approver must not grant access
             return PermissionDecision(
                 False,
@@ -1840,7 +2341,9 @@ class PermissionEngine:
         # -- PT-1 price/value ------------------------------------------------
         if cfg.value_of is not None:
             try:
-                value = cfg.value_of(tool_name, payload)
+                # Extractors are host code, but they must not be able to
+                # mutate the arguments that later receive approval/execution.
+                value = cfg.value_of(tool_name, copy.deepcopy(payload))
             except Exception:
                 return self._pretrade_deny(
                     tool_name,
@@ -1873,7 +2376,7 @@ class PermissionEngine:
                 )
             if cfg.reference_of is not None:
                 try:
-                    reference = cfg.reference_of(tool_name, payload)
+                    reference = cfg.reference_of(tool_name, copy.deepcopy(payload))
                 except Exception:
                     return self._pretrade_deny(
                         tool_name,
@@ -1991,8 +2494,13 @@ class PermissionEngine:
             "agent": ctx.agent,
             "mode": ctx.mode,
         }
+        if decision.details:
+            record["details"] = decision.details
         try:
-            sink(record)
+            # Audit sinks are extension code. Do not let a logger's in-place
+            # redaction/normalization mutate the decision object returned to
+            # the runtime (notably its structured dataflow evidence).
+            sink(copy.deepcopy(record))
         except Exception as error:  # noqa: BLE001 - the denial stands regardless
             return replace(
                 decision,
@@ -2028,12 +2536,21 @@ class PermissionEngine:
             "agent": ctx.agent,
             "mode": ctx.mode,
         }
+        if decision.details:
+            record["details"] = decision.details
         try:
-            sink(record)
-        except Exception as error:  # noqa: BLE001 - the allow stands regardless
-            return replace(
-                decision,
-                reason=f"{decision.reason} [audit_sink_failed:{type(error).__name__}]",
+            sink(copy.deepcopy(record))
+        except Exception as error:  # noqa: BLE001 - execution requires a confirmed allow record
+            return PermissionDecision(
+                False,
+                source="audit",
+                reason=(
+                    f"authorization audit sink raised {type(error).__name__}; "
+                    "execution is denied because the allow record could not be confirmed"
+                ),
+                rule="audit:write_failed",
+                tool=decision.tool,
+                details=decision.details,
             )
         return decision
 
@@ -2044,6 +2561,7 @@ class PermissionEngine:
         *,
         context: PermissionRequestContext | None = None,
         known: bool = True,
+        dataflow: SessionDataflow | None = None,
     ) -> PermissionDecision:
         return self.evaluate(
             spec.name,
@@ -2052,6 +2570,7 @@ class PermissionEngine:
             payload=payload,
             context=context,
             known=known,
+            dataflow=dataflow,
         )
 
     # -- decision-model path -------------------------------------------------
@@ -2161,7 +2680,15 @@ class PermissionEngine:
                 denied.append((name, "disallowed for subagents by host policy"))
                 continue
             kind = (kinds or self._kinds).get(name, "other")
-            decision = self.evaluate(name, kind=kind, context=context)
+            # This checks the child's declared capabilities, not a tool action
+            # that happened in the current session. Do not let admission
+            # checks consume or trigger composition history.
+            decision = self.evaluate(
+                name,
+                kind=kind,
+                context=context,
+                record_composition=False,
+            )
             if decision.allowed:
                 allowed.append(name)
             else:

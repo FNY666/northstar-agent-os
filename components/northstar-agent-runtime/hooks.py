@@ -21,7 +21,8 @@ Hooks are plain callables. They receive a :class:`HookInput` and return
 """
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+import copy
+from dataclasses import dataclass, field, replace
 from typing import Any, Callable, Iterable, Literal, Sequence
 
 HookEvent = Literal[
@@ -62,7 +63,7 @@ VETO_EVENTS: tuple[HookEvent, ...] = (
 )
 
 #: Events where a rewritten/extra payload is meaningful.
-INPUT_REWRITE_EVENTS: tuple[HookEvent, ...] = ("PreToolUse",)
+INPUT_REWRITE_EVENTS: tuple[HookEvent, ...] = ("PreToolUse", "SubagentStart")
 
 #: Events where injected context is added to the conversation.
 CONTEXT_INJECT_EVENTS: tuple[HookEvent, ...] = ("UserPromptSubmit", "SessionStart", "PreCompact")
@@ -347,7 +348,17 @@ class HookRegistry:
             registrations.append(_Registration(event, hook, f"extra[{position}]", None, None))
         for index, registration in enumerate(registrations):
             try:
-                result = coerce_result(registration.hook(hook_input))
+                # Rewrite-capable hooks may inspect and explicitly replace a
+                # tool input, but in-place edits to the shared authorization
+                # payload must not silently change what the gate sees.
+                hook_view = hook_input
+                if event in INPUT_REWRITE_EVENTS:
+                    hook_view = replace(
+                        hook_input,
+                        tool_input=copy.deepcopy(hook_input.tool_input),
+                        data=copy.deepcopy(hook_input.data),
+                    )
+                result = coerce_result(registration.hook(hook_view))
             except Exception as error:  # noqa: BLE001 - a hook must not kill the run
                 outcome.errors.append(f"{registration.name}: {type(error).__name__}: {error}")
                 if event in VETO_EVENTS:
@@ -372,7 +383,7 @@ class HookRegistry:
                 return outcome
             if result.decision == "modify_input":
                 if event in INPUT_REWRITE_EVENTS and result.updated_input is not None:
-                    outcome.updated_input = dict(result.updated_input)
+                    outcome.updated_input = copy.deepcopy(result.updated_input)
                 else:
                     outcome.ignored.append(f"{registration.name} (input rewrite not applicable)")
                 continue

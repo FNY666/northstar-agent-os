@@ -24,7 +24,7 @@ const INIT =
 const ASSISTANT =
   '{"type":"assistant","content":[{"type":"text","text":"hello"}],"model":"scripted","usage":{"input_tokens":10,"output_tokens":2,"cache_read_input_tokens":1,"cache_creation_input_tokens":0},"stop_reason":"end_turn"}';
 const RESULT =
-  '{"type":"result","subtype":"error_permission_denied","is_error":true,"num_turns":2,"duration_ms":12,"total_cost_usd":0.004,"total_usage":{"input_tokens":5,"output_tokens":2,"cache_read_input_tokens":0,"cache_creation_input_tokens":0},"session_id":"ns-1","pricing_estimated":true,"errors":["Write refused"],"permission_denials":[{"tool":"Write","source":"policy:deny","reason":"refused by the permission gate","agent":"main","turn_index":1,"kind":"tool"}]}';
+  '{"type":"result","subtype":"error_permission_denied","is_error":true,"num_turns":2,"duration_ms":12,"total_cost_usd":0.004,"total_usage":{"input_tokens":5,"output_tokens":2,"cache_read_input_tokens":0,"cache_creation_input_tokens":0},"session_id":"ns-1","pricing_estimated":true,"errors":["Write refused"],"permission_denials":[{"tool":"Write","source":"policy:deny","reason":"refused by the permission gate","agent":"main","turn_index":1,"kind":"tool"}],"tool_call_reports":[{"name":"Write","call_id":"call-write-1","is_error":true,"denied":true,"permission_source":"policy:deny","duration_ms":0,"result_chars":0,"truncated":false,"input_rewritten":false,"result_source":"","result_trust":"","result_detail":"","execution_status":"not_started","execution_gate":"","governance_input_digest":"sha256:abc","permission_details":{"dataflow":{"trust":"confidential","audience_labeled":true,"audience_unknown":false,"audience_count":1,"source_rule":"Read","sink_escalated":true}},"turn_index":1,"agent":"main"}],"subagents":[]}';
 
 test("the exit-code table is the runtime's table, eight subtypes and 64", () => {
   assert.deepEqual(EXIT_CODES, {
@@ -63,6 +63,36 @@ test("a result event keeps every field the CLI writes", () => {
   assert.equal(denial.tool, "Write");
   assert.equal(denial.source, "policy:deny");
   assert.equal(denial.turn_index, 1);
+  assert.equal(event.tool_call_reports[0].call_id, "call-write-1");
+  assert.equal(event.tool_call_reports[0].execution_status, "not_started");
+  assert.equal(event.tool_call_reports[0].denied, true);
+  assert.deepEqual(event.tool_call_reports[0].permission_details, {
+    dataflow: {
+      trust: "confidential",
+      audience_labeled: true,
+      audience_unknown: false,
+      audience_count: 1,
+      source_rule: "Read",
+      sink_escalated: true,
+    },
+  });
+  assert.deepEqual(event.subagents, []);
+});
+
+test("governance seal failure is preserved without rewriting completed execution", () => {
+  const event = parseEventLine(JSON.stringify({
+    type: "result",
+    tool_call_reports: [{
+      name: "Write",
+      execution_status: "completed",
+      execution_gate: "executed",
+      governance_seal_error: "OSError",
+    }],
+  }));
+  assert.equal(event.type, "result");
+  if (event.type !== "result") assert.fail("unreachable");
+  assert.equal(event.tool_call_reports[0].execution_status, "completed");
+  assert.equal(event.tool_call_reports[0].governance_seal_error, "OSError");
 });
 
 test("fields the types promise are there even when an older runtime omitted them", () => {
@@ -72,6 +102,12 @@ test("fields the types promise are there even when an older runtime omitted them
   assert.equal(thin.num_turns, 0);
   assert.deepEqual(thin.errors, []);
   assert.deepEqual(thin.permission_denials, []);
+  assert.deepEqual(thin.tool_call_reports, []);
+  assert.deepEqual(thin.subagents, []);
+  const partialCall = parseEventLine('{"type":"result","tool_call_reports":[{}]}');
+  assert.ok(isResult(partialCall));
+  assert.equal(partialCall.tool_call_reports[0].execution_status, "not_started");
+  assert.equal(partialCall.tool_call_reports[0].permission_details, undefined);
   assert.deepEqual(thin.total_usage, {
     input_tokens: 0,
     output_tokens: 0,
@@ -92,6 +128,24 @@ test("fields the types promise are there even when an older runtime omitted them
     turn_index: 0,
     kind: "tool",
   });
+});
+
+test("delegated reports retain nested execution evidence without transcripts", () => {
+  const event = parseEventLine(JSON.stringify({
+    type: "result",
+    subagents: [{
+      agent: "explorer", subtype: "success", turns: 2, tool_calls: 1,
+      tool_call_reports: [{ name: "Read", call_id: "child-read-1", execution_status: "completed", agent: "explorer" }],
+      subagents: [{
+        agent: "leaf", subtype: "success", depth: 2, tool_calls: 1,
+        tool_call_reports: [{ name: "Grep", call_id: "leaf-grep-1", execution_status: "blocked", agent: "leaf" }],
+      }],
+    }],
+  }));
+  assert.ok(isResult(event));
+  assert.equal(event.subagents[0].tool_call_reports[0].execution_status, "completed");
+  assert.equal(event.subagents[0].subagents[0].tool_call_reports[0].execution_status, "blocked");
+  assert.equal("transcript" in event.subagents[0], false);
 });
 
 test("assistant content is a list of blocks, and a block without a type is not content", () => {

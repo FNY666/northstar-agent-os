@@ -3,11 +3,14 @@
 Three independent ceilings exist in the runtime: ``max_turns``,
 ``max_tool_calls``, and ``max_budget_usd``. Each one owns its own
 ``ResultMessage`` subtype so an operator can tell "the model kept talking" apart
-from "the model kept spending". Cost is never derived from a rough character
-count: it comes from provider-reported usage multiplied by the table below.
+from "the model kept spending". Settled cost comes from provider-reported usage multiplied by the table below;
+request reservations use a conservative preflight estimate before provider calls.
 """
 from __future__ import annotations
 
+import json
+import math
+import threading
 from dataclasses import dataclass, field
 from typing import Any, Iterable, Mapping
 
@@ -137,6 +140,52 @@ class CostBreakdown:
         }
 
 
+class BudgetReservation:
+    """One request's conservative preflight hold against a shared run budget."""
+
+    def __init__(self, budget: "Budget", reservation_id: int, amount_usd: float) -> None:
+        self._budget = budget
+        self._reservation_id = reservation_id
+        self.amount_usd = amount_usd
+        self._closed = False
+
+    def release(self) -> None:
+        """Release a request known not to have reached a billable provider call."""
+        self._budget._close_reservation(self, unknown_cost=False)
+
+    def charge_unknown(self) -> None:
+        """Keep the reserved amount charged when a failed request may be billable."""
+        self._budget._close_reservation(self, unknown_cost=True)
+
+
+def estimate_request_cost(request: Any, model: str | None = None) -> float:
+    """Conservative preflight estimate for a provider request.
+
+    The UTF-8 JSON byte count bounds ordinary byte-oriented tokenizers more
+    conservatively than the transcript's display-oriented ``chars/4`` estimate.
+    Protocol framing receives additional headroom. This is a budget reservation,
+    not an invoice or a formal upper bound for every provider tokenizer.
+    """
+    pricing, _estimated = price_for(model or getattr(request, "model", ""))
+    payload = {
+        "system": getattr(request, "system", ""),
+        "messages": list(getattr(request, "messages", ()) or ()),
+        "tools": list(getattr(request, "tools", ()) or ()),
+    }
+    encoded = json.dumps(payload, ensure_ascii=False, sort_keys=True, default=str).encode("utf-8")
+    messages = payload["messages"]
+    tools = payload["tools"]
+    input_tokens = len(encoded) + 32 * len(messages) + 64 * len(tools) + 64
+    output_tokens = getattr(request, "max_tokens", 0)
+    if isinstance(output_tokens, bool) or not isinstance(output_tokens, int) or output_tokens < 0:
+        raise ValueError("request.max_tokens must be a non-negative integer")
+    # Reserve against the more expensive cache-write rate and do not assume any
+    # prompt-cache discount or provider-specific usage normalization.
+    input_cost = input_tokens * pricing.cache_write_per_mtok / 1_000_000
+    output_cost = output_tokens * pricing.output_per_mtok / 1_000_000
+    return math.nextafter(input_cost + output_cost, math.inf)
+
+
 def compute_cost(usage: Any, model: str) -> CostBreakdown:
     """Price one usage report. Accepts a :class:`Usage` or a mapping."""
     from providers.base import Usage  # local import: keeps budget.py import-cycle free
@@ -170,54 +219,138 @@ class Budget:
     breakdowns: list[CostBreakdown] = field(default_factory=list)
     pricing_estimated: bool = False
     models: tuple[str, ...] = ()
+    unverified_cost_usd: float = 0.0
+    reserved_cost_usd: float = 0.0
+    _lock: Any = field(default_factory=threading.RLock, repr=False, compare=False)
+    _next_reservation_id: int = field(default=1, repr=False, compare=False)
+    _reservations: dict[int, float] = field(default_factory=dict, repr=False, compare=False)
 
-    def observe(self, usage: Any, model: str) -> CostBreakdown:
+    def __post_init__(self) -> None:
+        if self.max_budget_usd is not None and (
+            isinstance(self.max_budget_usd, bool)
+            or not isinstance(self.max_budget_usd, (int, float))
+            or not math.isfinite(float(self.max_budget_usd))
+            or self.max_budget_usd <= 0
+        ):
+            raise ValueError("max_budget_usd must be a finite positive number or None")
+
+    def reserve(self, amount_usd: float) -> BudgetReservation | None:
+        """Atomically reserve request capacity before a provider attempt.
+
+        Returns ``None`` if committed, unknown, and in-flight spend plus this
+        request's envelope would exceed the run ceiling.
+        """
+        if isinstance(amount_usd, bool) or not isinstance(amount_usd, (int, float)):
+            raise ValueError("reservation amount must be a finite non-negative number")
+        amount = float(amount_usd)
+        if not math.isfinite(amount) or amount < 0:
+            raise ValueError("reservation amount must be a finite non-negative number")
+        with self._lock:
+            if self.max_budget_usd is not None:
+                available = self.max_budget_usd - self.total_cost_usd - self.reserved_cost_usd
+                if amount > available:
+                    return None
+            reservation_id = self._next_reservation_id
+            self._next_reservation_id += 1
+            self._reservations[reservation_id] = amount
+            self.reserved_cost_usd = round(self.reserved_cost_usd + amount, 10)
+            return BudgetReservation(self, reservation_id, amount)
+
+    def _close_reservation(
+        self,
+        reservation: BudgetReservation,
+        *,
+        unknown_cost: bool,
+    ) -> None:
+        with self._lock:
+            if reservation._closed:
+                return
+            amount = self._reservations.pop(reservation._reservation_id, None)
+            reservation._closed = True
+            if amount is None:
+                return
+            self.reserved_cost_usd = round(max(0.0, self.reserved_cost_usd - amount), 10)
+            if unknown_cost:
+                self.unverified_cost_usd = round(self.unverified_cost_usd + amount, 10)
+                # A failed transport may have reached billing. Count its
+                # reservation as charged for enforcement and checkpoint carry.
+                self.total_cost_usd = round(self.total_cost_usd + amount, 10)
+                self.pricing_estimated = True
+
+    def _settle_observation(self, reservation: BudgetReservation | None) -> None:
+        if reservation is not None:
+            self._close_reservation(reservation, unknown_cost=False)
+
+    def observe(
+        self,
+        usage: Any,
+        model: str,
+        *,
+        reservation: BudgetReservation | None = None,
+    ) -> CostBreakdown:
         breakdown = compute_cost(usage, model)
-        self.breakdowns.append(breakdown)
-        self.total_cost_usd = round(self.total_cost_usd + breakdown.total_usd, 10)
-        self.total_usage = self.total_usage + _as_usage(usage)
-        self.pricing_estimated = self.pricing_estimated or breakdown.pricing_estimated
-        if model and model not in self.models:
-            self.models = self.models + (model,)
+        with self._lock:
+            self._settle_observation(reservation)
+            self.breakdowns.append(breakdown)
+            self.total_cost_usd = round(self.total_cost_usd + breakdown.total_usd, 10)
+            self.total_usage = self.total_usage + _as_usage(usage)
+            self.pricing_estimated = self.pricing_estimated or breakdown.pricing_estimated
+            if model and model not in self.models:
+                self.models = self.models + (model,)
         return breakdown
 
     def observe_child(self, child: "Budget") -> None:
         """Merge a subagent budget into this one (cost roll-up for governance)."""
         if not isinstance(child, Budget):
             return
-        self.breakdowns.extend(child.breakdowns)
-        self.total_cost_usd = round(self.total_cost_usd + child.total_cost_usd, 10)
-        self.total_usage = self.total_usage + child.total_usage
-        self.pricing_estimated = self.pricing_estimated or child.pricing_estimated
-        for model in child.models:
-            if model not in self.models:
-                self.models = self.models + (model,)
+        with child._lock:
+            child_breakdowns = list(child.breakdowns)
+            child_cost = child.total_cost_usd
+            child_unverified = child.unverified_cost_usd
+            child_usage = child.total_usage
+            child_estimated = child.pricing_estimated
+            child_models = child.models
+        with self._lock:
+            self.breakdowns.extend(child_breakdowns)
+            self.total_cost_usd = round(self.total_cost_usd + child_cost, 10)
+            self.unverified_cost_usd = round(self.unverified_cost_usd + child_unverified, 10)
+            self.total_usage = self.total_usage + child_usage
+            self.pricing_estimated = self.pricing_estimated or child_estimated
+            for model in child_models:
+                if model not in self.models:
+                    self.models = self.models + (model,)
 
     @property
     def exhausted(self) -> bool:
-        if self.max_budget_usd is None:
-            return False
-        return self.total_cost_usd >= self.max_budget_usd
+        with self._lock:
+            if self.max_budget_usd is None:
+                return False
+            return self.total_cost_usd >= self.max_budget_usd
 
     def over_limit(self) -> bool:
         """Strictly over, i.e. the ceiling has been breached rather than reached."""
-        if self.max_budget_usd is None:
-            return False
-        return self.total_cost_usd > self.max_budget_usd
+        with self._lock:
+            if self.max_budget_usd is None:
+                return False
+            return self.total_cost_usd > self.max_budget_usd
 
     def remaining(self) -> float | None:
-        if self.max_budget_usd is None:
-            return None
-        return round(max(0.0, self.max_budget_usd - self.total_cost_usd), 10)
+        with self._lock:
+            if self.max_budget_usd is None:
+                return None
+            return round(max(0.0, self.max_budget_usd - self.total_cost_usd - self.reserved_cost_usd), 10)
 
     def status(self) -> dict[str, Any]:
-        return {
-            "max_budget_usd": self.max_budget_usd,
-            "total_cost_usd": self.total_cost_usd,
-            "remaining_usd": self.remaining(),
-            "pricing_estimated": self.pricing_estimated,
-            "exhausted": self.exhausted,
-        }
+        with self._lock:
+            return {
+                "max_budget_usd": self.max_budget_usd,
+                "total_cost_usd": self.total_cost_usd,
+                "unverified_cost_usd": self.unverified_cost_usd,
+                "reserved_cost_usd": self.reserved_cost_usd,
+                "remaining_usd": self.remaining(),
+                "pricing_estimated": self.pricing_estimated,
+                "exhausted": self.exhausted,
+            }
 
 
 def _zero_usage():

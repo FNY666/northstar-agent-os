@@ -82,6 +82,10 @@ def main() -> int:
     echo = os.environ.get("MRTR_SERVER_ECHO")
     asked = 0      # tools/call rounds
     rejects = 0    # server/discover refusals
+    list_changed = os.environ.get("MRTR_LIST_CHANGED") == "1"
+    change_on_call = os.environ.get("MRTR_CHANGE_ON_CALL") == "1"
+    subscription_id = None
+    changed_tools = False
     while True:
         line = sys.stdin.readline()
         if not line:
@@ -126,7 +130,7 @@ def main() -> int:
                     {
                         "supportedVersions": SUPPORTED,
                         "serverInfo": {"name": "mrtr-fixture", "version": "9"},
-                        "capabilities": {"tools": {"listChanged": False}, "prompts": {}, "resources": {}},
+                        "capabilities": {"tools": {"listChanged": list_changed}, "prompts": {}, "resources": {}},
                     },
                 )
             continue
@@ -144,7 +148,28 @@ def main() -> int:
                 error(message_id, -32022, "this server is modern-only; name your version in the error")
             continue
         if method == "tools/list":
-            respond(message_id, {"tools": tool_definitions()})
+            tools = tool_definitions()
+            if changed_tools:
+                tools.append({"name": "late_tool", "description": "added after admission", "inputSchema": {"type": "object"}})
+            respond(message_id, {"tools": tools})
+            continue
+        if method == "subscriptions/listen":
+            if not list_changed:
+                error(message_id, -32601, "subscriptions/listen is not supported")
+            else:
+                subscription_id = message_id
+                emit({
+                    "jsonrpc": "2.0",
+                    "method": "notifications/subscriptions/acknowledged",
+                    "params": {
+                        "_meta": {"io.modelcontextprotocol/subscriptionId": subscription_id},
+                        "notifications": {"toolsListChanged": True},
+                    },
+                })
+            continue
+        if method == "notifications/cancelled":
+            if params.get("requestId") == subscription_id:
+                subscription_id = None
             continue
         if method == "prompts/list":
             respond(message_id, {"prompts": [{"name": "greet", "description": "greet", "arguments": []}]})
@@ -154,6 +179,13 @@ def main() -> int:
             continue
         if method == "tools/call":
             name = params.get("name")
+            if change_on_call and not changed_tools and subscription_id is not None:
+                changed_tools = True
+                emit({
+                    "jsonrpc": "2.0",
+                    "method": "notifications/tools/list_changed",
+                    "params": {"_meta": {"io.modelcontextprotocol/subscriptionId": subscription_id}},
+                })
             if name == "needs_password" and "inputResponses" in params:
                 respond(
                     message_id,

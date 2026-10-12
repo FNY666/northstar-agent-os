@@ -127,8 +127,14 @@ _BIN_RIGHTS = ("EXECUTE", "READ_FILE", "READ_DIR")
 #: Rights granted on /etc and /proc (read-only data).
 _DATA_RIGHTS = ("READ_FILE", "READ_DIR")
 
-#: Rights granted on /dev (devices are opened, never created, by tools).
-_DEV_RIGHTS = ("READ_FILE", "READ_DIR", "WRITE_FILE")
+#: Keep the process backend's /dev access file-specific. A recursive /dev
+#: grant would also expose shared-memory and pseudo-terminal subtrees.
+_DEV_NODE_RIGHTS = {
+    "/dev/null": ("READ_FILE", "WRITE_FILE"),
+    "/dev/zero": ("READ_FILE",),
+    "/dev/random": ("READ_FILE",),
+    "/dev/urandom": ("READ_FILE",),
+}
 
 #: Rights granted on the workspace: full read/write/execute, minus device
 #: and socket creation (no MAKE_CHAR/MAKE_BLOCK/MAKE_SOCK).
@@ -313,8 +319,10 @@ def _check_dir(path: str, field: str) -> None:
 def default_profile(workspace: str) -> dict:
     """The standard tool-effect profile: system read paths + writable workspace.
 
-    ``/etc`` and ``/proc`` are read-only data; ``/dev`` allows opens (for
-    ``/dev/null`` et al.) but no device creation. TCP is denied outright on
+    ``/etc`` and ``/proc`` are read-only data. Device access is file-specific:
+    ``/dev/null`` is readable/writable; ``zero``, ``random`` and ``urandom``
+    are readable when present. Shared-memory and pseudo-terminal subtrees are
+    not granted. TCP is denied outright on
     Landlock ABI 4+ (UDP on ABI 10+) — the process backend's equivalent of
     bwrap's always-unshared network. Below ABI 4 no network confinement
     applies; see the module docstring's fail-closed discussion.
@@ -327,41 +335,53 @@ def default_profile(workspace: str) -> dict:
         paths_write=[workspace],
         network=False,
     )
-    # Narrow /etc, /proc, /dev from binary rights to their data/device rights.
+    # Narrow /etc and /proc from binary rights to read-only data. Grant only
+    # the small set of conventional character devices tools need; a recursive
+    # /dev rule would also grant access to host /dev/shm and /dev/pts trees.
     narrow = {
         "/etc": _DATA_RIGHTS,
         "/proc": _DATA_RIGHTS,
-        "/dev": _DEV_RIGHTS,
     }
     extra = []
     for path, rights in narrow.items():
         if os.path.isdir(path):
             extra.append({"path": path, "rights": list(rights)})
+    import stat
+
+    for path, rights in _DEV_NODE_RIGHTS.items():
+        try:
+            # Do not follow a host-side replacement symlink for a device node.
+            if stat.S_ISCHR(os.lstat(path).st_mode):
+                extra.append({"path": path, "rights": list(rights)})
+        except OSError:
+            continue
     spec["rules"].extend(extra)
     return spec
 
 
 def network_deny_profile() -> dict:
-    """Network denial without filesystem confinement.
+    """Network and cross-domain Unix-socket denial without FS confinement.
 
     Grants the whole tree the workspace rights (full read/write/execute,
     minus device and socket creation) and denies TCP outright (plus UDP on
     Landlock ABI 10+ kernels). The filesystem posture is unchanged from
-    running unconfined -- the *only* thing this profile takes away is the
-    network. For MCP servers: they are third-party binaries living anywhere
+    running unconfined -- the profile takes away IP egress and cross-domain Unix socket access.
+    For MCP servers: they are third-party binaries living anywhere
     on disk (npm/pip installs, fixture scripts outside any workspace), so
     the tool-effect path allowlist would break them for reasons unrelated
     to the gap being closed. The gap is egress; this closes exactly the gap.
 
-    Note: AF_UNIX is not restrictable by Landlock; a denied-network process
-    can still connect() to Unix sockets it can see on the filesystem. That
-    residual is documented, not closed, by this profile.
+    Where supported, the policy also denies path-based Unix socket resolution
+    (ABI 9+) and connections to abstract Unix sockets outside this Landlock
+    domain (ABI 6+). MCP's stdio pipes are unaffected.
     """
     spec = build_landlock_spec(
         paths_read=[],
         paths_write=["/"],
         network=False,
     )
+    spec["deny_unix_sockets"] = True
+    spec["scoped"] = ["ABSTRACT_UNIX_SOCKET"]
     return spec
 
 
@@ -391,8 +411,9 @@ if _abi <= 0:
         _die("kernel does not support Landlock")
     _warn("kernel does not support Landlock")
     _o.execvp(_inner[0], _inner)
-_FSR = {"EXECUTE":(1,1),"WRITE_FILE":(2,1),"READ_FILE":(4,1),"READ_DIR":(8,1),"REMOVE_DIR":(16,1),"REMOVE_FILE":(32,1),"MAKE_CHAR":(64,1),"MAKE_DIR":(128,1),"MAKE_REG":(256,1),"MAKE_SOCK":(512,1),"MAKE_FIFO":(1024,1),"MAKE_BLOCK":(2048,1),"MAKE_SYM":(4096,1),"REFER":(8192,2),"TRUNCATE":(16384,3),"IOCTL_DEV":(32768,5)}
+_FSR = {"EXECUTE":(1,1),"WRITE_FILE":(2,1),"READ_FILE":(4,1),"READ_DIR":(8,1),"REMOVE_DIR":(16,1),"REMOVE_FILE":(32,1),"MAKE_CHAR":(64,1),"MAKE_DIR":(128,1),"MAKE_REG":(256,1),"MAKE_SOCK":(512,1),"MAKE_FIFO":(1024,1),"MAKE_BLOCK":(2048,1),"MAKE_SYM":(4096,1),"REFER":(8192,2),"TRUNCATE":(16384,3),"IOCTL_DEV":(32768,5),"RESOLVE_UNIX":(65536,9)}
 _NETR = {"BIND_TCP":(1,4),"CONNECT_TCP":(2,4),"BIND_UDP":(4,10),"CONNECT_SEND_UDP":(8,10)}
+_SCOPE = {"ABSTRACT_UNIX_SOCKET":(1,6)}
 def _mask(_names, _tab):
     _m = 0
     for _n in _names:
@@ -400,9 +421,18 @@ def _mask(_names, _tab):
         if _abi >= _min:
             _m |= _bit
     return _m
-_handled_fs = _mask(("EXECUTE","WRITE_FILE","READ_FILE","READ_DIR","REMOVE_DIR","REMOVE_FILE","MAKE_CHAR","MAKE_DIR","MAKE_REG","MAKE_SOCK","MAKE_FIFO","MAKE_BLOCK","MAKE_SYM","REFER","TRUNCATE","IOCTL_DEV"), _FSR)
+_handled_fs_names = ("EXECUTE","WRITE_FILE","READ_FILE","READ_DIR","REMOVE_DIR","REMOVE_FILE","MAKE_CHAR","MAKE_DIR","MAKE_REG","MAKE_SOCK","MAKE_FIFO","MAKE_BLOCK","MAKE_SYM","REFER","TRUNCATE","IOCTL_DEV")
+if _spec.get("deny_unix_sockets"):
+    _handled_fs_names += ("RESOLVE_UNIX",)
+_handled_fs = _mask(_handled_fs_names, _FSR)
 _handled_net = _mask(("BIND_TCP","CONNECT_TCP","BIND_UDP","CONNECT_SEND_UDP"), _NETR)
-_attr = _st.pack("<Q", _handled_fs) if _abi < 4 else _st.pack("<QQ", _handled_fs, _handled_net)
+_handled_scope = _mask(_spec.get("scoped", ()), _SCOPE)
+if _abi >= 6:
+    _attr = _st.pack("<QQQ", _handled_fs, _handled_net, _handled_scope)
+elif _abi >= 4:
+    _attr = _st.pack("<QQ", _handled_fs, _handled_net)
+else:
+    _attr = _st.pack("<Q", _handled_fs)
 class _RA(_c.Structure):
     _fields_ = [("attr", _c.c_char_p), ("size", _c.c_size_t), ("flags", _c.c_uint32)]
 _buf = _c.create_string_buffer(_attr)

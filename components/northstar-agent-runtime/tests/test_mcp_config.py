@@ -370,7 +370,7 @@ class CliImportTests(WorkspaceCase):
         )
         code, _, _ = run_cli(
             "run", "--workspace", str(self.ws), "--prompt", "call", "--script", str(script),
-            "--mcp-config", "auto", "--halt-on-denial", "--quiet",
+            "--mcp-config", "auto", "--mcp-network", "allowed", "--halt-on-denial", "--quiet",
         )
         self.assertEqual(code, 5, "an imported tool is denied by default like any other MCP tool")
 
@@ -394,7 +394,7 @@ class CliImportTests(WorkspaceCase):
         )
         code, out, err = run_cli(
             "run", "--workspace", str(self.ws), "--prompt", "call", "--script", str(script),
-            "--mcp-config", "auto", "--allow-tool", "mcp__demo__echo", "--json",
+            "--mcp-config", "auto", "--mcp-network", "allowed", "--allow-tool", "mcp__demo__echo", "--json",
         )
         self.assertEqual(code, 0, err)
         self.assertIn("echo:hi", out)

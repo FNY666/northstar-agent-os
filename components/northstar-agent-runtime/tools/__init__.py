@@ -16,10 +16,16 @@ out of the sandbox.
 """
 from __future__ import annotations
 
+import copy
 import inspect
+import hashlib
 import json
 import os
 import re
+import errno
+import secrets
+import stat
+from contextlib import contextmanager
 from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any, Callable, Iterable, Literal, Mapping, Sequence
@@ -29,10 +35,91 @@ MAX_GREP_MATCHES = 200
 MAX_LIST_ENTRIES = 500
 MAX_GREP_FILE_BYTES = 2 * 1024 * 1024
 MAX_GREP_FILES = 4000
+MAX_GREP_TREE_ENTRIES = 16_000
 # Slightly above the read cap so Read is bounded by its own documented 256 KB limit
 # rather than by result framing; grep/list caps are far smaller than this.
 MAX_TOOL_RESULT_CHARS = 300_000
+MAX_TOOL_RESULT_NESTING = 128
 MAX_LINE_PREVIEW = 240
+MAX_PROVENANCE_FIELD_CHARS = 256
+MAX_WORKSPACE_XATTR_COUNT = 128
+MAX_WORKSPACE_XATTR_BYTES = 1024 * 1024
+_WORKSPACE_XATTRS_TO_PRESERVE = frozenset({"system.posix_acl_access", "security.selinux"})
+_WORKSPACE_XATTRS_CONTENT_BOUND = frozenset({"security.capability", "security.ima", "security.evm"})
+
+
+def _result_fits_text_budget(value: Any, limit: int, *, text_block_type: type) -> bool:
+    """Bound work before rendering structured tool output into a transcript string."""
+    pending = [(value, 0)]
+    seen: set[int] = set()
+    size = 0
+    nodes = 0
+    while pending:
+        current, depth = pending.pop()
+        nodes += 1
+        if nodes > 50_000 or depth > MAX_TOOL_RESULT_NESTING:
+            return False
+        if isinstance(current, str):
+            addition = _json_string_size(current, limit - size)
+            if addition > limit - size:
+                return False
+            size += addition
+        elif current is None or isinstance(current, (bool, float)):
+            size += 32
+        elif isinstance(current, int):
+            # JSON's decimal rendering of a huge integer can be much larger
+            # than the integer object's fixed overhead. Bound digits before
+            # calling json.dumps; 0.30103 is a slight upper approximation of
+            # log10(2), so this estimate never understates decimal length.
+            bits = current.bit_length()
+            decimal_digits = (bits * 30_103) // 100_000 + 1
+            size += decimal_digits + (1 if current < 0 else 0)
+        elif isinstance(current, text_block_type):
+            size += len(current.text)
+        elif isinstance(current, (list, tuple)):
+            identity = id(current)
+            if identity in seen:
+                return False
+            if nodes + len(current) > 50_000:
+                return False
+            seen.add(identity)
+            size += len(current) + 2
+            pending.extend((child, depth + 1) for child in current)
+        elif isinstance(current, dict):
+            identity = id(current)
+            if identity in seen:
+                return False
+            if nodes + len(current) > 50_000:
+                return False
+            seen.add(identity)
+            size += len(current) * 4 + 2
+            for key, child in current.items():
+                if not isinstance(key, str):
+                    return False
+                addition = _json_string_size(key, limit - size)
+                if addition > limit - size:
+                    return False
+                size += addition
+                pending.append((child, depth + 1))
+        else:
+            # Arbitrary objects can have expensive or side-effecting __str__.
+            return False
+        if size > limit:
+            return False
+    return True
+
+
+def _json_string_size(value: str, remaining: int) -> int:
+    """Conservative character count for one ensure_ascii=False JSON string."""
+    if len(value) + 2 > remaining:
+        return remaining + 1
+    size = 2  # opening and closing quotes
+    for char in value:
+        codepoint = ord(char)
+        size += 6 if codepoint < 0x20 else (2 if char in {'"', "\\"} else 1)
+        if size > remaining:
+            return remaining + 1
+    return size
 
 ToolKind = Literal["read", "edit", "exec", "task", "network", "other"]
 
@@ -71,10 +158,20 @@ class ToolLimits:
     #: governance narrows the set explicitly (``--allow-policy-writes``).
     protected_prefixes: tuple[str, ...] = (".git", ".northstar")
     follow_symlinks: bool = True
+    #: Host-supplied current viewers used by the workspace-memory ACL. Channel
+    #: adapters must authenticate them before constructing this value. Empty
+    #: means that only an explicit public grant may match.
+    memory_viewers: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
         if self.max_read_bytes <= 0 or self.max_grep_matches <= 0 or self.max_list_entries <= 0:
             raise ValueError("tool limits must be positive")
+        if not isinstance(self.memory_viewers, tuple) or any(
+            not isinstance(viewer, str) or not viewer or viewer != viewer.strip()
+            or any(ord(character) < 32 or ord(character) == 127 for character in viewer)
+            for viewer in self.memory_viewers
+        ) or len(set(self.memory_viewers)) != len(self.memory_viewers):
+            raise ValueError("memory_viewers must be a tuple of unique, non-empty viewer identities")
 
 
 @dataclass(frozen=True)
@@ -127,8 +224,20 @@ class ToolProvenance:
     """
 
     source: str = ""  # e.g. "mcp:demo:echo", "tool:Read", "provider:openai"
-    trust: str = "low"  # "low" | "medium" | "high"
+    trust: Literal["low", "medium", "high"] = "low"
     detail: str = ""  # free-form, e.g. tool name or URL
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.trust, str) or self.trust not in {"low", "medium", "high"}:
+            raise ValueError("tool provenance trust must be low, medium, or high")
+        for name in ("source", "detail"):
+            value = getattr(self, name)
+            if not isinstance(value, str):
+                raise TypeError(f"tool provenance {name} must be a string")
+            if len(value) > MAX_PROVENANCE_FIELD_CHARS:
+                raise ValueError(
+                    f"tool provenance {name} exceeds {MAX_PROVENANCE_FIELD_CHARS} characters"
+                )
 
     def as_dict(self) -> dict[str, str]:
         return {"source": self.source, "trust": self.trust, "detail": self.detail}
@@ -145,12 +254,27 @@ class ToolResult:
     provenance: ToolProvenance = field(default_factory=ToolProvenance)
 
     @staticmethod
-    def error(message: str, **data: Any) -> "ToolResult":
-        return ToolResult(content=message, is_error=True, data=dict(data))
+    def error(
+        message: str,
+        *,
+        provenance: ToolProvenance | None = None,
+        **data: Any,
+    ) -> "ToolResult":
+        return ToolResult(
+            content=message,
+            is_error=True,
+            data=dict(data),
+            provenance=provenance or ToolProvenance(),
+        )
 
     @staticmethod
-    def ok(content: Any = "", **data: Any) -> "ToolResult":
-        return ToolResult(content=content, data=dict(data))
+    def ok(
+        content: Any = "",
+        *,
+        provenance: ToolProvenance | None = None,
+        **data: Any,
+    ) -> "ToolResult":
+        return ToolResult(content=content, data=dict(data), provenance=provenance or ToolProvenance())
 
     def text(self) -> str:
         from providers.base import flatten_result_content as _flatten_result_content  # no import cycle
@@ -163,15 +287,81 @@ class ToolResult:
             return json.dumps(self.content, ensure_ascii=False, sort_keys=True, default=str)
         return str(self.content)
 
-    def as_block(self, tool_use_id: str, *, max_chars: int = MAX_TOOL_RESULT_CHARS) -> Any:
-        from providers.base import ToolResultBlock
+    def as_block_with_status(
+        self, tool_use_id: str, *, max_chars: int = MAX_TOOL_RESULT_CHARS
+    ) -> tuple[Any, bool]:
+        """Build the bounded provider block and report truncation/omission."""
+        from providers.base import TextBlock, ToolResultBlock
 
-        text = self.text()
-        truncated = self.truncated
-        if max_chars > 0 and len(text) > max_chars:
-            text = text[:max_chars] + f"\n[truncated {len(text) - max_chars} chars by the runtime result cap]"
+        # Do not flatten/JSON-encode an arbitrarily large plugin result only
+        # to slice it afterwards. Strings can be sliced directly; structured
+        # values are traversed with a node and size ceiling before serialization.
+        effective_cap = min(max_chars if max_chars > 0 else MAX_TOOL_RESULT_CHARS, MAX_TOOL_RESULT_CHARS)
+        structured_omitted = False
+        if isinstance(self.content, str):
+            text = self.content
+        elif _result_fits_text_budget(self.content, effective_cap, text_block_type=TextBlock):
+            text = self.text()
+        else:
+            text = "[structured tool result omitted: runtime result cap exceeded]"
+            structured_omitted = True
+        truncated = self.truncated or structured_omitted
+        provenance = self.provenance
+        # Keep JSON payloads byte-for-byte usable by sidecars and structured tools.
+        # For ordinary prose, make provenance explicit at the model boundary so
+        # untrusted content remains visibly labeled in the conversation.
+        structured = False
+        json_probe_limit = effective_cap
+        if len(text) <= json_probe_limit:
+            try:
+                json.loads(text)
+                structured = True
+            except (TypeError, ValueError):
+                pass
+        header = ""
+        if not structured and (provenance.source or provenance.detail):
+            header = (
+                "[Northstar tool result metadata: "
+                + json.dumps(
+                    {"source": provenance.source, "trust": provenance.trust, "detail": provenance.detail},
+                    ensure_ascii=False,
+                    sort_keys=True,
+                    separators=(",", ":"),
+                )
+                + "]\n"
+            )
+        if len(header) > effective_cap:
+            header = f"[Northstar tool result trust={provenance.trust}]\n"
+            if len(header) > effective_cap:
+                header = header[:effective_cap]
+        content_budget = max(0, effective_cap - len(header))
+        if len(text) > content_budget:
+            original_length = len(text)
+            marker = f"\n[truncated {original_length} chars by the runtime result cap]"
+            if len(marker) > content_budget:
+                text = text[:content_budget]
+            else:
+                retained = content_budget - len(marker)
+                marker = f"\n[truncated {original_length - retained} chars by the runtime result cap]"
+                retained = max(0, content_budget - len(marker))
+                marker = f"\n[truncated {original_length - retained} chars by the runtime result cap]"
+                if len(marker) > content_budget:
+                    text = text[:content_budget]
+                else:
+                    text = text[:retained] + marker
             truncated = True
-        return ToolResultBlock(tool_use_id=tool_use_id, content=text, is_error=self.is_error)
+        return (
+            ToolResultBlock(
+                tool_use_id=tool_use_id,
+                content=header + text,
+                is_error=self.is_error,
+                provenance=(provenance.source, provenance.trust, provenance.detail),
+            ),
+            truncated,
+        )
+
+    def as_block(self, tool_use_id: str, *, max_chars: int = MAX_TOOL_RESULT_CHARS) -> Any:
+        return self.as_block_with_status(tool_use_id, max_chars=max_chars)[0]
 
 
 @dataclass(frozen=True)
@@ -188,10 +378,17 @@ class ToolSpec:
     is_delegation: bool = False
     #: Tools the model may always call regardless of workspace availability.
     needs_workspace: bool = True
+    _schema_snapshot: dict[str, Any] = field(init=False, repr=False, compare=False)
 
     def __post_init__(self) -> None:
         if not self.name or not isinstance(self.name, str):
             raise ValueError("tool name must be a non-empty string")
+        # Keep the caller's schema object from becoming a live mutation handle
+        # after registration. The separate snapshot is the gate's authority;
+        # ``input_schema`` remains a compatibility view for existing callers.
+        schema = copy.deepcopy(self.input_schema)
+        object.__setattr__(self, "input_schema", schema)
+        object.__setattr__(self, "_schema_snapshot", copy.deepcopy(schema))
         if self.is_mutating is None:
             object.__setattr__(self, "is_mutating", self.kind in {"edit", "exec", "network", "other"})
         _validate_handler_signature(self.name, self.handler)
@@ -204,8 +401,12 @@ class ToolSpec:
         return {
             "name": self.name,
             "description": self.description,
-            "input_schema": self.input_schema or {"type": "object", "properties": {}},
+            "input_schema": self.schema_snapshot() or {"type": "object", "properties": {}},
         }
+
+    def schema_snapshot(self) -> dict[str, Any]:
+        """Return an isolated copy of the immutable-at-registration gate schema."""
+        return copy.deepcopy(self._schema_snapshot)
 
     def as_dict(self) -> dict[str, Any]:
         return {
@@ -245,7 +446,7 @@ def _validate_handler_signature(name: str, handler: Any) -> None:
 
 
 class ToolSandbox:
-    """Workspace containment with symlink resolution ahead of the check."""
+    """Workspace containment and memory audience checks for every file tool."""
 
     def __init__(self, workspace: str | os.PathLike[str], *, limits: ToolLimits | None = None) -> None:
         self.limits = limits or ToolLimits()
@@ -253,6 +454,17 @@ class ToolSandbox:
         if not str(self.root):
             raise ValueError("workspace root must not be empty")
         self.root_real = Path(os.path.realpath(str(self.root)))
+        self._memory_access_cache: dict[str, bool] = {}
+        try:
+            from memory import load_memory_audience_manifest
+
+            self._memory_audience_entries = dict(load_memory_audience_manifest(self.root_real))
+            self._memory_audience_error: str | None = None
+        except (OSError, ValueError) as error:
+            # A malformed policy must not make designated memory paths fall back
+            # to ordinary workspace visibility. Resolve will fail closed.
+            self._memory_audience_entries = {}
+            self._memory_audience_error = str(error)
 
     @property
     def exists(self) -> bool:
@@ -275,7 +487,7 @@ class ToolSandbox:
             raise ToolInputError("path contains a NUL byte")
         path = Path(candidate)
         if not path.is_absolute():
-            path = self.root / path
+            path = self.root_real / path
         # Collapse ".." lexically first. Left in place, ".." segments are resolved
         # by the kernel against whatever the components turn out to be, so the
         # containment check and the eventual open() could disagree.
@@ -288,9 +500,145 @@ class ToolSandbox:
             )
         if for_write:
             self._check_protected(resolved)
+            self._check_protected_path_alias(path, resolved)
+        self._check_memory_access(path, resolved)
         if must_exist and not resolved.exists():
             raise ToolInputError(f"no such path inside the workspace: {candidate}")
         return resolved
+
+    def _memory_relative(self, path: Path) -> str | None:
+        try:
+            relative = path.relative_to(self.root_real)
+        except ValueError:
+            return None
+        relative_name = relative.as_posix()
+        from memory import is_memory_write_path
+
+        return relative_name if (
+            is_memory_write_path(relative.parts) or relative_name in self._memory_audience_entries
+        ) else None
+
+    def _memory_allowed(self, path: Path, *, allow_memory_root: bool = False) -> bool:
+        relative = self._memory_relative(path)
+        if relative is None:
+            return self._memory_audience_error is None
+        if self._memory_audience_error is not None:
+            return False
+        if allow_memory_root and relative == ".northstar/memory":
+            return True
+        cached = self._memory_access_cache.get(relative)
+        if cached is not None:
+            return cached
+        try:
+            from memory import audience_grant_allows
+
+            grant = self._memory_audience_entries.get(relative, frozenset())
+            allowed = audience_grant_allows(grant, self.limits.memory_viewers)
+        except (OSError, ValueError):
+            allowed = False
+        self._memory_access_cache[relative] = allowed
+        return allowed
+
+    def _check_memory_access(self, requested: Path, resolved: Path) -> None:
+        """Gate direct Read/Write/Edit paths, including symlink aliases."""
+        if self._memory_audience_error is not None:
+            raise ToolAccessError(f"memory audience policy is invalid: {self._memory_audience_error}")
+        requested_relative = self._memory_relative(requested)
+        if requested_relative is not None:
+            current = self.root_real
+            for part in Path(requested_relative).parts:
+                current = current / part
+                if current.is_symlink():
+                    raise ToolAccessError("symlinks inside workspace memory are refused")
+        if not self._memory_allowed(resolved, allow_memory_root=resolved.is_dir()):
+            raise ToolAccessError("workspace memory audience does not authorize this run")
+
+    def memory_path_allowed(self, path: Path) -> bool:
+        """Whether a listing/search may expose this memory path."""
+        if self._memory_audience_error is not None:
+            return False
+        relative = self._memory_relative(path)
+        if relative is None:
+            return True
+        if path.is_symlink():
+            return False
+        return self._memory_allowed(path, allow_memory_root=path.is_dir())
+
+    def require_shell_memory_access(self) -> None:
+        """Refuse Shell while memory audience rules are active.
+
+        The process sandbox grants workspace-wide read/write access and cannot
+        express this per-file ACL or protect the grant manifest. A command could
+        widen its own audience, so denying Shell is the only sound fallback
+        until private memories live in separate OS workspaces.
+        """
+        if self._memory_audience_error is not None:
+            raise ToolAccessError(f"Shell is refused because memory audience policy is invalid: {self._memory_audience_error}")
+        from memory import MEMORY_AUDIENCE_MANIFEST
+
+        if (self.root_real / MEMORY_AUDIENCE_MANIFEST).exists():
+            raise ToolAccessError(
+                "Shell is refused while a memory audience manifest is active; the process backend can rewrite workspace files"
+            )
+        for relative in self._memory_audience_entries:
+            path = self.root_real / relative
+            if path.exists() and not self._memory_allowed(path):
+                raise ToolAccessError(
+                    "Shell is refused because this workspace contains memory outside the current audience"
+                )
+        governance = self.root_real / ".northstar"
+        memory_root = governance / "memory"
+        if governance.is_symlink() or memory_root.is_symlink():
+            raise ToolAccessError("Shell is refused because the workspace memory tree crosses a symlink")
+        if not memory_root.exists():
+            return
+        pending = [memory_root]
+        visited = 0
+        while pending:
+            current = pending.pop()
+            try:
+                with os.scandir(current) as entries:
+                    for entry in entries:
+                        visited += 1
+                        if visited > MAX_GREP_TREE_ENTRIES:
+                            raise ToolAccessError("cannot authorize Shell: memory tree exceeds the scan limit")
+                        child = Path(entry.path)
+                        if entry.is_dir(follow_symlinks=False):
+                            pending.append(child)
+                        elif not self.memory_path_allowed(child):
+                            raise ToolAccessError(
+                                "Shell is refused because this workspace contains memory outside the current audience"
+                            )
+            except ToolAccessError:
+                raise
+            except OSError as error:
+                raise ToolAccessError(f"cannot authorize Shell memory access: {error}") from error
+
+    def _check_protected_path_alias(self, requested: Path, resolved: Path) -> None:
+        """Do not let a symlink alias enter or leave a protected path boundary."""
+        def relative(path: Path) -> tuple[str, ...] | None:
+            try:
+                return path.relative_to(self.root_real).parts
+            except ValueError:
+                return None
+
+        requested_parts = relative(requested)
+        resolved_parts = relative(resolved)
+        protected_heads = {Path(prefix).parts for prefix in self.limits.protected_prefixes}
+        # .northstar remains a trust boundary even when an operator explicitly
+        # enables policy writes; that switch permits canonical edits, not aliases.
+        protected_heads.add((".northstar",))
+
+        def crosses_boundary(parts: tuple[str, ...] | None) -> bool:
+            return parts is not None and any(
+                len(parts) >= len(head) and parts[: len(head)] == head
+                for head in protected_heads
+            )
+
+        if (crosses_boundary(requested_parts) or crosses_boundary(resolved_parts)) and requested_parts != resolved_parts:
+            raise ToolAccessError(
+                "writes cannot cross a protected-path symlink alias; use the canonical workspace path"
+            )
 
     def _realpath_partial(self, path: Path) -> Path:
         """``realpath`` the nearest existing ancestor, then re-attach the tail.
@@ -319,6 +667,10 @@ class ToolSandbox:
         except ValueError:  # pragma: no cover - containment already ran
             return
         parts = relative.parts
+        from memory import MEMORY_AUDIENCE_MANIFEST
+
+        if parts == Path(MEMORY_AUDIENCE_MANIFEST).parts:
+            raise ToolAccessError("the operator-owned memory audience manifest is immutable to file tools")
         for prefix in self.limits.protected_prefixes:
             head = Path(prefix).parts
             if len(parts) < len(head) or parts[: len(head)] != head:
@@ -345,9 +697,386 @@ class ToolSandbox:
 
     def relative(self, path: Path) -> str:
         try:
-            return str(Path(os.path.realpath(str(path))).relative_to(self.root_real))
-        except ValueError:  # pragma: no cover - defensive
-            return str(path)
+            return str(Path(path).relative_to(self.root_real)) or "."
+        except ValueError:  # pragma: no cover - defensive; never leak an outside absolute path
+            return "<outside workspace>"
+
+
+@contextmanager
+def _workspace_parent_fd(ctx: ToolContext, path: Path, *, create_parents: bool = False):
+    """Open the canonical workspace parent by descriptor, rejecting raced symlinks.
+
+    ``ToolSandbox.resolve`` remains the friendly path-policy check. This second
+    check binds the actual filesystem operation to no-follow directory handles,
+    closing the interval where an attacker could replace a checked parent with a
+    symlink before ``open(path)``.
+    """
+    sandbox = ctx.sandbox
+    if sandbox is None:
+        raise ToolAccessError("this tool context has no workspace sandbox")
+    if (
+        os.open not in os.supports_dir_fd
+        or not hasattr(os, "O_NOFOLLOW")
+        or not hasattr(os, "O_DIRECTORY")
+    ):
+        raise ToolAccessError("this host lacks no-follow directory handles for safe workspace access")
+    try:
+        relative = path.relative_to(sandbox.root_real)
+    except ValueError as error:
+        raise ToolAccessError("resolved path is outside the run workspace") from error
+    parts = relative.parts
+    if not parts or any(part in {"", ".", ".."} for part in parts):
+        raise ToolAccessError("workspace file path is not canonical")
+
+    flags = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | getattr(os, "O_CLOEXEC", 0)
+    current_fd = _open_directory_chain(sandbox.root_real, flags)
+    try:
+        for part in parts[:-1]:
+            try:
+                next_fd = os.open(part, flags, dir_fd=current_fd)
+            except FileNotFoundError:
+                if not create_parents:
+                    raise
+                try:
+                    os.mkdir(part, 0o755, dir_fd=current_fd)
+                except FileExistsError:
+                    pass
+                next_fd = os.open(part, flags, dir_fd=current_fd)
+            except OSError as error:
+                if error.errno in {errno.ELOOP, errno.ENOTDIR}:
+                    raise ToolAccessError("workspace path changed to a symlink or non-directory during access") from error
+                raise
+            os.close(current_fd)
+            current_fd = next_fd
+        yield current_fd, parts[-1]
+    finally:
+        os.close(current_fd)
+
+
+def _open_directory_chain(path: Path, flags: int | None = None) -> int:
+    """Open an absolute directory path one no-follow component at a time.
+
+    ``O_NOFOLLOW`` on one absolute-path ``open`` protects only its final
+    component. Walking from the filesystem root pins every ancestor so a
+    concurrent rename/symlink replacement cannot redirect the workspace root.
+    """
+    if not path.is_absolute():
+        raise ToolAccessError("workspace root must be absolute")
+    directory_flags = flags or (
+        os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | getattr(os, "O_CLOEXEC", 0)
+    )
+    current_fd = os.open(path.anchor, directory_flags)
+    try:
+        for part in path.parts[1:]:
+            try:
+                next_fd = os.open(part, directory_flags, dir_fd=current_fd)
+            except OSError as error:
+                if error.errno in {errno.ELOOP, errno.ENOTDIR}:
+                    raise ToolAccessError(
+                        "workspace root changed to a symlink or non-directory during access"
+                    ) from error
+                raise
+            previous_fd = current_fd
+            current_fd = next_fd
+            os.close(previous_fd)
+        return current_fd
+    except BaseException:
+        os.close(current_fd)
+        raise
+
+
+@contextmanager
+def _open_workspace_file(
+    ctx: ToolContext,
+    path: Path,
+    flags: int,
+    *,
+    mode: int = 0o666,
+    create_parents: bool = False,
+):
+    """Context-manage a file descriptor opened beneath a pinned workspace parent."""
+    with _workspace_parent_fd(ctx, path, create_parents=create_parents) as (parent_fd, name):
+        try:
+            fd = os.open(
+                name,
+                flags | os.O_NOFOLLOW | getattr(os, "O_CLOEXEC", 0),
+                mode,
+                dir_fd=parent_fd,
+            )
+        except OSError as error:
+            if error.errno == errno.ELOOP:
+                raise ToolAccessError("workspace file changed to a symlink during access") from error
+            raise
+        try:
+            yield fd
+        finally:
+            os.close(fd)
+
+
+@contextmanager
+def _open_workspace_directory(ctx: ToolContext, path: Path):
+    """Open a workspace directory without following any path component."""
+    sandbox = ctx.sandbox
+    if sandbox is None:
+        raise ToolAccessError("this tool context has no workspace sandbox")
+    if path == sandbox.root_real:
+        flags = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | getattr(os, "O_CLOEXEC", 0)
+        fd = _open_directory_chain(sandbox.root_real, flags)
+        try:
+            yield fd
+        finally:
+            os.close(fd)
+        return
+    with _workspace_parent_fd(ctx, path) as (parent_fd, name):
+        flags = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | getattr(os, "O_CLOEXEC", 0)
+        try:
+            fd = os.open(name, flags, dir_fd=parent_fd)
+        except OSError as error:
+            if error.errno in {errno.ELOOP, errno.ENOTDIR}:
+                raise ToolAccessError("workspace directory changed during access") from error
+            raise
+        try:
+            yield fd
+        finally:
+            os.close(fd)
+
+
+def _write_workspace_file(ctx: ToolContext, path: Path, text: str, *, append: bool = False) -> None:
+    """Write without following raced symlinks or modifying multiply-linked files.
+
+    Full replacements are staged in the target directory and atomically renamed
+    into place. A failed or interrupted write therefore leaves the previous file
+    intact instead of exposing an empty or partial source file to the next turn.
+    Append remains an in-place operation because its contract is incremental.
+    """
+    raw = text.encode("utf-8")
+    if not append:
+        _atomic_replace_workspace_file(ctx, path, raw, create_parents=True)
+        return
+
+    flags = os.O_WRONLY | os.O_CREAT | os.O_APPEND
+    with _open_workspace_file(ctx, path, flags, create_parents=not append) as fd:
+        metadata = os.fstat(fd)
+        if not stat.S_ISREG(metadata.st_mode):
+            raise ToolAccessError("workspace writes require a regular file")
+        if metadata.st_nlink > 1:
+            raise ToolAccessError("refusing to write a multiply-linked workspace file")
+        _write_fd(fd, raw)
+
+
+def _file_version(metadata: os.stat_result) -> tuple[int, int, int, int, int, int, int]:
+    """Fields that detect a replacement or concurrent edit of a workspace file."""
+    return (
+        metadata.st_dev,
+        metadata.st_ino,
+        metadata.st_mode,
+        metadata.st_nlink,
+        metadata.st_size,
+        metadata.st_mtime_ns,
+        metadata.st_ctime_ns,
+    )
+
+
+def _workspace_target_stat(parent_fd: int, name: str) -> os.stat_result | None:
+    """Inspect a leaf without following it, rejecting non-files and hardlinks."""
+    try:
+        metadata = os.stat(name, dir_fd=parent_fd, follow_symlinks=False)
+    except FileNotFoundError:
+        return None
+    if not stat.S_ISREG(metadata.st_mode):
+        raise ToolAccessError("workspace writes require a regular file")
+    if metadata.st_nlink > 1:
+        raise ToolAccessError("refusing to write a multiply-linked workspace file")
+    if (metadata.st_mode & 0o222) == 0:
+        raise ToolAccessError("refusing to replace a read-only workspace file")
+    return metadata
+
+
+def _workspace_xattrs(fd: int) -> dict[str, bytes]:
+    """Capture metadata whose meaning survives a content replacement.
+
+    ACL and SELinux labels affect access/security and must not silently vanish.
+    Unknown or content-bound attributes fail closed rather than being copied
+    onto different bytes with stale semantics.
+    """
+    if not all(callable(getattr(os, name, None)) for name in ("listxattr", "getxattr")):
+        raise ToolAccessError("this host cannot inspect workspace extended attributes safely")
+    try:
+        names = os.listxattr(fd)
+    except TypeError as error:
+        raise ToolAccessError("this host cannot inspect workspace extended attributes by descriptor") from error
+    except OSError as error:
+        if error.errno in {errno.ENOTSUP, getattr(errno, "EOPNOTSUPP", errno.ENOTSUP)}:
+            return {}
+        raise ToolAccessError("cannot inspect workspace file metadata before replacement") from error
+    if len(names) > MAX_WORKSPACE_XATTR_COUNT:
+        raise ToolAccessError("workspace file has too many extended attributes to replace safely")
+
+    captured: dict[str, bytes] = {}
+    total = 0
+    for name in names:
+        if name in _WORKSPACE_XATTRS_CONTENT_BOUND:
+            raise ToolAccessError(f"refusing to replace a file with content-bound attribute {name!r}")
+        if name not in _WORKSPACE_XATTRS_TO_PRESERVE:
+            raise ToolAccessError(f"refusing to replace a file with unsupported extended attribute {name!r}")
+        try:
+            value = os.getxattr(fd, name)
+        except (OSError, TypeError) as error:
+            raise ToolAccessError(f"cannot preserve workspace file attribute {name!r}") from error
+        total += len(value)
+        if total > MAX_WORKSPACE_XATTR_BYTES:
+            raise ToolAccessError("workspace file extended attributes exceed the replacement limit")
+        captured[name] = value
+    return captured
+
+
+def _atomic_replace_workspace_file(
+    ctx: ToolContext,
+    path: Path,
+    raw: bytes,
+    *,
+    create_parents: bool,
+    expected: os.stat_result | None = None,
+    check_expected: bool = False,
+) -> None:
+    """Stage complete bytes beside the target, then atomically publish them.
+
+    Parent directories stay pinned by descriptor. Existing targets must remain
+    the same singly-linked regular file observed before staging; a detected path
+    swap or concurrent edit refuses the replacement. New files are linked into
+    place with no-overwrite semantics so a concurrent creator is never silently lost.
+    """
+    with _workspace_parent_fd(ctx, path, create_parents=create_parents) as (parent_fd, name):
+        observed = expected if check_expected else _workspace_target_stat(parent_fd, name)
+        source_fd = -1
+        attributes: dict[str, bytes] = {}
+        if observed is not None:
+            if not stat.S_ISREG(observed.st_mode):
+                raise ToolAccessError("workspace writes require a regular file")
+            if observed.st_nlink > 1:
+                raise ToolAccessError("refusing to write a multiply-linked workspace file")
+            if (observed.st_mode & 0o222) == 0:
+                raise ToolAccessError("refusing to replace a read-only workspace file")
+            try:
+                flags = os.O_NONBLOCK | os.O_NOFOLLOW | getattr(os, "O_CLOEXEC", 0)
+                try:
+                    source_fd = os.open(name, os.O_RDONLY | flags, dir_fd=parent_fd)
+                except PermissionError:
+                    # A write-only file may still be replaceable; opening it for
+                    # writing lets us inspect its metadata without reading content.
+                    source_fd = os.open(name, os.O_WRONLY | flags, dir_fd=parent_fd)
+                source_metadata = os.fstat(source_fd)
+                if _file_version(source_metadata) != _file_version(observed):
+                    raise ToolAccessError("workspace target changed while opening it for replacement")
+                observed = source_metadata
+                attributes = _workspace_xattrs(source_fd)
+            except OSError as error:
+                if error.errno == errno.ELOOP:
+                    if source_fd >= 0:
+                        os.close(source_fd)
+                        source_fd = -1
+                    raise ToolAccessError("workspace target changed to a symlink during replacement") from error
+                if source_fd >= 0:
+                    os.close(source_fd)
+                    source_fd = -1
+                raise
+            except BaseException:
+                if source_fd >= 0:
+                    os.close(source_fd)
+                    source_fd = -1
+                raise
+
+        temporary = ""
+        temporary_fd = -1
+        try:
+            for _ in range(16):
+                candidate = f".northstar-write-{secrets.token_hex(16)}"
+                try:
+                    temporary_fd = os.open(
+                        candidate,
+                        os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW
+                        | getattr(os, "O_CLOEXEC", 0),
+                        0o666,
+                        dir_fd=parent_fd,
+                    )
+                    temporary = candidate
+                    break
+                except FileExistsError:
+                    continue
+            else:
+                raise ToolAccessError("could not allocate a unique workspace staging file")
+
+            if observed is not None:
+                temporary_metadata = os.fstat(temporary_fd)
+                if (temporary_metadata.st_uid, temporary_metadata.st_gid) != (observed.st_uid, observed.st_gid):
+                    try:
+                        os.fchown(temporary_fd, observed.st_uid, observed.st_gid)
+                    except OSError as error:
+                        raise ToolAccessError("cannot preserve workspace file ownership during replacement") from error
+                if attributes:
+                    if not callable(getattr(os, "setxattr", None)):
+                        raise ToolAccessError("this host cannot preserve workspace file attributes safely")
+                    try:
+                        for attribute, value in attributes.items():
+                            os.setxattr(temporary_fd, attribute, value)
+                    except (OSError, TypeError) as error:
+                        raise ToolAccessError("cannot preserve workspace file extended attributes") from error
+                # Preserve ordinary read/write/execute bits, but do not carry
+                # setuid/setgid bits onto newly written content.
+                os.fchmod(temporary_fd, stat.S_IMODE(observed.st_mode) & 0o777)
+
+            _write_fd(temporary_fd, raw)
+            os.fsync(temporary_fd)
+            staged = os.fstat(temporary_fd)
+            named_staging = os.stat(temporary, dir_fd=parent_fd, follow_symlinks=False)
+            if (staged.st_dev, staged.st_ino) != (named_staging.st_dev, named_staging.st_ino):
+                raise ToolAccessError("workspace staging file changed during write")
+
+            current = _workspace_target_stat(parent_fd, name)
+            if observed is None:
+                if current is not None:
+                    raise ToolAccessError("workspace target appeared during write; refusing to overwrite it")
+                # link() fails atomically if another writer creates the target
+                # after the check above; both names are in the pinned directory.
+                if (
+                    os.link not in os.supports_dir_fd
+                    or os.link not in os.supports_follow_symlinks
+                ):
+                    raise ToolAccessError("this host lacks safe no-overwrite workspace creation")
+                os.link(
+                    temporary,
+                    name,
+                    src_dir_fd=parent_fd,
+                    dst_dir_fd=parent_fd,
+                    follow_symlinks=False,
+                )
+                os.unlink(temporary, dir_fd=parent_fd)
+                temporary = ""
+            else:
+                if current is None or _file_version(current) != _file_version(observed):
+                    raise ToolAccessError("workspace target changed during write; refusing to discard the newer file")
+                os.replace(temporary, name, src_dir_fd=parent_fd, dst_dir_fd=parent_fd)
+                temporary = ""
+            os.fsync(parent_fd)
+        finally:
+            if temporary_fd >= 0:
+                os.close(temporary_fd)
+            if source_fd >= 0:
+                os.close(source_fd)
+            if temporary:
+                try:
+                    os.unlink(temporary, dir_fd=parent_fd)
+                except FileNotFoundError:
+                    pass
+
+
+def _write_fd(fd: int, raw: bytes) -> None:
+    view = memoryview(raw)
+    while view:
+        written = os.write(fd, view)
+        if written <= 0:
+            raise OSError("workspace write made no progress")
+        view = view[written:]
 
 
 # ---------------------------------------------------------------------------
@@ -455,11 +1184,17 @@ class ToolRegistry:
 # Built-in tools
 # ---------------------------------------------------------------------------
 
-_OBJECT_SCHEMA = {"type": "object", "properties": {}}
+_OBJECT_SCHEMA = {"type": "object", "properties": {}, "additionalProperties": False}
 
 
 def _schema(properties: Mapping[str, Any], required: Sequence[str] = ()) -> dict[str, Any]:
-    payload: dict[str, Any] = {"type": "object", "properties": dict(properties)}
+    # Built-in tool contracts are closed by default. Dynamic maps (for example
+    # Shell env vars or Fetch headers) must opt in through their property schema.
+    payload: dict[str, Any] = {
+        "type": "object",
+        "properties": dict(properties),
+        "additionalProperties": False,
+    }
     if required:
         payload["required"] = list(required)
     return payload
@@ -467,20 +1202,64 @@ def _schema(properties: Mapping[str, Any], required: Sequence[str] = ()) -> dict
 
 def read_file(payload: dict[str, Any], ctx: ToolContext) -> ToolResult:
     """Read at most ``limits.max_read_bytes`` of a workspace file."""
-    path = ctx.resolve(payload.get("path"), must_exist=True)
+    requested = payload.get("path")
+    path = ctx.resolve(requested, must_exist=True)
     limit = int(payload.get("max_bytes") or ctx.limits.max_read_bytes)
     limit = max(1, min(limit, ctx.limits.max_read_bytes))
-    if not path.is_file():
-        return ToolResult.error(f"not a file: {payload.get('path')}")
-    size = path.stat().st_size
-    with open(path, "rb") as handle:
-        raw = handle.read(limit + 1)
+    pins = ctx.service("skill_digests") or {}
+    pin_name = ""
+    if isinstance(requested, str) and ctx.sandbox is not None and isinstance(pins, Mapping):
+        lexical = Path(requested)
+        if not lexical.is_absolute():
+            lexical = ctx.sandbox.root_real / lexical
+        lexical = Path(os.path.normpath(str(lexical)))
+        try:
+            pin_name = lexical.relative_to(ctx.sandbox.root_real).as_posix()
+        except ValueError:
+            pass
+    expected_digest = pins.get(pin_name) if pin_name else None
+    pinned_limit = None
+    if expected_digest is not None:
+        from skills import MAX_SKILL_FILE_BYTES
+        pinned_limit = MAX_SKILL_FILE_BYTES
+    read_limit = pinned_limit if pinned_limit is not None else limit
+    chunks: list[bytes] = []
+    total = 0
+    try:
+        with _open_workspace_file(ctx, path, os.O_RDONLY) as fd:
+            metadata = os.fstat(fd)
+            if not stat.S_ISREG(metadata.st_mode):
+                return ToolResult.error(f"not a file: {payload.get('path')}")
+            if metadata.st_nlink > 1:
+                return ToolResult.error("refusing to read a multiply-linked workspace file")
+            size = metadata.st_size
+            while total <= read_limit:
+                chunk = os.read(fd, min(65536, read_limit + 1 - total))
+                if not chunk:
+                    break
+                chunks.append(chunk)
+                total += len(chunk)
+    except (OSError, ToolAccessError) as error:
+        detail = "pinned skill" if expected_digest is not None else "workspace file"
+        return ToolResult.error(f"cannot safely read {detail}: {error}", skill_integrity="failed" if expected_digest is not None else "unverified")
+    raw = b"".join(chunks)
+    if expected_digest is not None:
+        if total > read_limit or hashlib.sha256(raw).hexdigest() != expected_digest:
+            return ToolResult.error(
+                "skill changed after run setup; refusing unreviewed instructions",
+                skill_integrity="failed",
+            )
+        skill_integrity = "verified"
+        raw = raw[: limit + 1]
+        size = total
+    else:
+        skill_integrity = "unverified"
     truncated = len(raw) > limit or size > limit
     text = raw[:limit].decode("utf-8", "replace")
     if "\x00" in text:
         return ToolResult(
             content=f"[binary file, {size} bytes: {ctx.relative(path)} - not shown]",
-            data={"bytes": 0, "truncated": truncated, "binary": True},
+            data={"bytes": 0, "truncated": truncated, "binary": True, "skill_integrity": skill_integrity},
         )
     content = text
     if truncated:
@@ -495,7 +1274,108 @@ def read_file(payload: dict[str, Any], ctx: ToolContext) -> ToolResult:
     return ToolResult(
         content=content,
         truncated=truncated,
-        data={"path": ctx.relative(path), "bytes": min(limit, size), "size": size, "truncated": truncated},
+        data={
+            "path": ctx.relative(path),
+            "bytes": min(limit, size),
+            "size": size,
+            "truncated": truncated,
+            "skill_integrity": skill_integrity,
+        },
+    )
+
+
+def _is_memory_write_target(path: Path, ctx: ToolContext) -> bool:
+    from memory import is_memory_write_path
+
+    return is_memory_write_path(Path(ctx.relative(path)).parts)
+
+
+def _memory_write_check(path: Path, content: str, ctx: ToolContext) -> tuple[Any | None, ToolResult | None]:
+    """Apply memory poisoning and size gates to the active memory carve-out."""
+    if not _is_memory_write_target(path, ctx):
+        return None, None
+
+    from memory import MAX_MEMORY_BYTES, MAX_MEMORY_CHARS
+    from memory_integrity import MemoryIntegrityError, record_memory_bytes, verify_memory_bytes
+
+    relative = ctx.relative(path)
+    try:
+        current = None
+        try:
+            with _open_workspace_file(ctx, path, os.O_RDONLY) as fd:
+                metadata = os.fstat(fd)
+                if not stat.S_ISREG(metadata.st_mode) or metadata.st_nlink > 1:
+                    return None, ToolResult.error(
+                        "memory target is not a singly-linked regular file",
+                        memory_write_verdict="block",
+                        integrity="failed",
+                    )
+                if metadata.st_size > MAX_MEMORY_BYTES:
+                    return None, ToolResult.error(
+                        f"existing memory file exceeds the active memory limit ({MAX_MEMORY_BYTES} bytes)",
+                        memory_write_verdict="block",
+                        integrity="unchecked_oversize",
+                    )
+                chunks: list[bytes] = []
+                while chunk := os.read(fd, 65536):
+                    chunks.append(chunk)
+                current = b"".join(chunks)
+        except FileNotFoundError:
+            pass
+        verify_memory_bytes(ctx.sandbox.root_real, relative, current)
+    except (MemoryIntegrityError, OSError, ToolAccessError) as error:
+        return None, ToolResult.error(
+            f"memory integrity check refused the write: {error}",
+            memory_write_verdict="block",
+            integrity="failed",
+        )
+
+    if len(content) > MAX_MEMORY_CHARS or len(content.encode("utf-8")) > MAX_MEMORY_BYTES:
+        return None, ToolResult.error(
+            f"memory write exceeds the active memory limit ({MAX_MEMORY_CHARS} chars / {MAX_MEMORY_BYTES} bytes)",
+            memory_write_verdict="block",
+        )
+
+    from memory_safety import gate_memory_write
+
+    decision = gate_memory_write(
+        content,
+        writer="agent",
+        session_id=ctx.session_id,
+        source="tool:memory-write",
+    )
+    rejected = _memory_write_error(decision)
+    if rejected is not None:
+        return decision, rejected
+    try:
+        # Stage the expected digest first. If the subsequent memory write fails
+        # or is partial, the next read detects the mismatch and fails closed.
+        record_memory_bytes(
+            ctx.sandbox.root_real,
+            relative,
+            content.encode("utf-8"),
+            provenance=decision.provenance,
+        )
+    except MemoryIntegrityError as error:
+        return decision, ToolResult.error(
+            f"memory integrity baseline could not be updated: {error}",
+            memory_write_verdict="block",
+            integrity="failed",
+        )
+    return decision, None
+
+
+def _memory_write_error(decision: Any | None) -> ToolResult | None:
+    if decision is None or decision.verdict == "allow":
+        return None
+    if decision.verdict == "quarantine":
+        reason = "quarantine policy is enabled, but this runtime has no quarantine store; write refused"
+    else:
+        reason = "memory write blocked by the poisoning guard"
+    return ToolResult.error(
+        f"{reason}: {decision.reason}",
+        memory_write_verdict=decision.verdict,
+        memory_provenance=decision.provenance,
     )
 
 
@@ -505,16 +1385,77 @@ def write_file(payload: dict[str, Any], ctx: ToolContext) -> ToolResult:
     content = payload.get("content", "")
     if not isinstance(content, str):
         return ToolResult.error("content must be a string")
+    if _is_memory_write_target(path, ctx):
+        from memory_integrity import MemoryIntegrityError, memory_write_lock
+
+        try:
+            with memory_write_lock(ctx.sandbox.root_real):
+                return _write_file_resolved(path, content, payload, ctx)
+        except MemoryIntegrityError as error:
+            return ToolResult.error(
+                f"memory write lock refused the write: {error}",
+                memory_write_verdict="block",
+                integrity="failed",
+            )
+    return _write_file_resolved(path, content, payload, ctx)
+
+
+def _write_file_resolved(path: Path, content: str, payload: dict[str, Any], ctx: ToolContext) -> ToolResult:
+    """Perform a write with any managed-memory transaction lock already held."""
     if payload.get("mode") == "append":
-        with open(path, "a", encoding="utf-8") as handle:
-            handle.write(content)
-        return ToolResult(content=f"appended {len(content)} chars to {ctx.relative(path)}", data={"path": ctx.relative(path), "bytes": len(content)})
-    path.parent.mkdir(parents=True, exist_ok=True)
-    with open(path, "w", encoding="utf-8") as handle:
-        handle.write(content)
+        existing = ""
+        if path.is_file() and _is_memory_write_target(path, ctx):
+            from memory import MAX_MEMORY_BYTES
+            try:
+                with _open_workspace_file(ctx, path, os.O_RDONLY) as fd:
+                    metadata = os.fstat(fd)
+                    if (
+                        not stat.S_ISREG(metadata.st_mode)
+                        or metadata.st_nlink > 1
+                        or metadata.st_size > MAX_MEMORY_BYTES
+                    ):
+                        return ToolResult.error(
+                            f"existing memory file exceeds the active memory limit ({MAX_MEMORY_BYTES} bytes)",
+                            memory_write_verdict="block",
+                        )
+                    chunks: list[bytes] = []
+                    total = 0
+                    while total <= MAX_MEMORY_BYTES:
+                        chunk = os.read(fd, min(65536, MAX_MEMORY_BYTES + 1 - total))
+                        if not chunk:
+                            break
+                        chunks.append(chunk)
+                        total += len(chunk)
+                        if total > MAX_MEMORY_BYTES:
+                            break
+                    existing = b"".join(chunks).decode("utf-8", "replace")
+            except (OSError, ToolAccessError) as error:
+                return ToolResult.error(f"cannot safely read existing memory: {error}", memory_write_verdict="block")
+        decision, rejected = _memory_write_check(path, existing + content, ctx)
+        if rejected is not None:
+            return rejected
+        try:
+            _write_workspace_file(ctx, path, content, append=True)
+        except (OSError, ToolAccessError) as error:
+            return ToolResult.error(f"cannot safely append workspace file: {error}")
+        data = {"path": ctx.relative(path), "bytes": len(content)}
+        if decision is not None:
+            data["memory_provenance"] = decision.provenance
+        return ToolResult(content=f"appended {len(content)} chars to {ctx.relative(path)}", data=data)
+    created = not path.exists()
+    decision, rejected = _memory_write_check(path, content, ctx)
+    if rejected is not None:
+        return rejected
+    try:
+        _write_workspace_file(ctx, path, content)
+    except (OSError, ToolAccessError) as error:
+        return ToolResult.error(f"cannot safely write workspace file: {error}")
+    data = {"path": ctx.relative(path), "bytes": len(content), "created": created}
+    if decision is not None:
+        data["memory_provenance"] = decision.provenance
     return ToolResult(
         content=f"wrote {len(content)} chars to {ctx.relative(path)}",
-        data={"path": ctx.relative(path), "bytes": len(content), "created": not path.is_file()},
+        data=data,
     )
 
 
@@ -527,20 +1468,70 @@ def edit_file(payload: dict[str, Any], ctx: ToolContext) -> ToolResult:
         return ToolResult.error("old_string must be a non-empty string")
     if not isinstance(new, str):
         return ToolResult.error("new_string must be a string")
-    text = path.read_text(encoding="utf-8", errors="replace")
-    count = text.count(old)
-    if count == 0:
-        return ToolResult.error(f"old_string not found in {ctx.relative(path)}")
-    if count > 1 and not payload.get("replace_all", False):
-        return ToolResult.error(
-            f"old_string matches {count} places in {ctx.relative(path)}; make it unique or pass replace_all=true"
-        )
-    updated = text.replace(old, new) if payload.get("replace_all") else text.replace(old, new, 1)
-    with open(path, "w", encoding="utf-8") as handle:
-        handle.write(updated)
+    if _is_memory_write_target(path, ctx):
+        from memory_integrity import MemoryIntegrityError, memory_write_lock
+
+        try:
+            with memory_write_lock(ctx.sandbox.root_real):
+                return _edit_file_resolved(path, old, new, payload, ctx)
+        except MemoryIntegrityError as error:
+            return ToolResult.error(
+                f"memory write lock refused the edit: {error}",
+                memory_write_verdict="block",
+                integrity="failed",
+            )
+    return _edit_file_resolved(path, old, new, payload, ctx)
+
+
+def _edit_file_resolved(
+    path: Path,
+    old: str,
+    new: str,
+    payload: dict[str, Any],
+    ctx: ToolContext,
+) -> ToolResult:
+    """Perform an edit with any managed-memory transaction lock already held."""
+    try:
+        with _open_workspace_file(ctx, path, os.O_RDONLY) as fd:
+            metadata_before = os.fstat(fd)
+            if not stat.S_ISREG(metadata_before.st_mode):
+                return ToolResult.error(f"not a file: {ctx.relative(path)}")
+            if metadata_before.st_nlink > 1:
+                return ToolResult.error("refusing to edit a multiply-linked workspace file")
+            chunks: list[bytes] = []
+            while chunk := os.read(fd, 65536):
+                chunks.append(chunk)
+            metadata = os.fstat(fd)
+            if _file_version(metadata_before) != _file_version(metadata):
+                return ToolResult.error("workspace file changed while it was being read; retry the edit")
+            text = b"".join(chunks).decode("utf-8", "replace")
+            count = text.count(old)
+            if count == 0:
+                return ToolResult.error(f"old_string not found in {ctx.relative(path)}")
+            if count > 1 and not payload.get("replace_all", False):
+                return ToolResult.error(
+                    f"old_string matches {count} places in {ctx.relative(path)}; make it unique or pass replace_all=true"
+                )
+            updated = text.replace(old, new) if payload.get("replace_all") else text.replace(old, new, 1)
+            decision, rejected = _memory_write_check(path, updated, ctx)
+            if rejected is not None:
+                return rejected
+            _atomic_replace_workspace_file(
+                ctx,
+                path,
+                updated.encode("utf-8"),
+                create_parents=False,
+                expected=metadata,
+                check_expected=True,
+            )
+    except (OSError, ToolAccessError) as error:
+        return ToolResult.error(f"cannot safely edit workspace file: {error}")
+    data = {"path": ctx.relative(path), "matches": count}
+    if decision is not None:
+        data["memory_provenance"] = decision.provenance
     return ToolResult(
         content=f"edited {ctx.relative(path)} ({count} match(es), {1 if not payload.get('replace_all') else count} replaced)",
-        data={"path": ctx.relative(path), "matches": count},
+        data=data,
     )
 
 
@@ -548,27 +1539,32 @@ def list_dir(payload: dict[str, Any], ctx: ToolContext) -> ToolResult:
     """List up to ``limits.max_list_entries`` entries of a workspace directory."""
     raw = payload.get("path", ".")
     path = ctx.resolve(raw if raw is not None else ".", must_exist=True)
-    if not path.is_dir():
-        return ToolResult.error(f"not a directory: {raw}")
     cap = ctx.limits.max_list_entries
     limit = int(payload.get("limit") or cap)
     limit = max(1, min(limit, cap))
     entries: list[dict[str, Any]] = []
     truncated = False
     try:
-        with os.scandir(path) as iterator:
-            for entry in iterator:
-                if len(entries) >= limit:
-                    truncated = True
-                    break
-                try:
-                    stat_result = entry.stat(follow_symlinks=False)
-                    kind = "dir" if entry.is_dir(follow_symlinks=False) else ("link" if entry.is_symlink() else "file")
-                    size = stat_result.st_size if kind == "file" else 0
-                except OSError:
-                    kind, size = "unknown", 0
-                entries.append({"name": entry.name, "kind": kind, "bytes": size})
-    except OSError as error:
+        with _open_workspace_directory(ctx, path) as directory_fd:
+            metadata = os.fstat(directory_fd)
+            if not stat.S_ISDIR(metadata.st_mode):
+                return ToolResult.error(f"not a directory: {raw}")
+            with os.scandir(directory_fd) as iterator:
+                for entry in iterator:
+                    child = path / entry.name
+                    if ctx.sandbox is not None and not ctx.sandbox.memory_path_allowed(child):
+                        continue
+                    if len(entries) >= limit:
+                        truncated = True
+                        break
+                    try:
+                        stat_result = entry.stat(follow_symlinks=False)
+                        kind = "dir" if entry.is_dir(follow_symlinks=False) else ("link" if entry.is_symlink() else "file")
+                        size = stat_result.st_size if kind == "file" else 0
+                    except OSError:
+                        kind, size = "unknown", 0
+                    entries.append({"name": entry.name, "kind": kind, "bytes": size})
+    except (OSError, ToolAccessError) as error:
         return ToolResult.error(f"cannot list {raw}: {error}")
     entries.sort(key=lambda item: (item["kind"] != "dir", item["name"]))
     rendered = "\n".join(
@@ -601,18 +1597,52 @@ def grep_files(payload: dict[str, Any], ctx: ToolContext) -> ToolResult:
     matches: list[str] = []
     scanned = 0
     truncated = False
+    collection_truncated = False
+    collection_truncation_reason = ""
     targets: list[Path] = []
     if root.is_file():
         targets = [root]
     elif root.is_dir():
-        for dirpath, dirnames, filenames in os.walk(root, followlinks=False):
-            dirnames[:] = [name for name in sorted(dirnames) if name not in {".git", "__pycache__", "node_modules"}]
-            for filename in sorted(filenames):
-                targets.append(Path(dirpath) / filename)
-                if len(targets) >= ctx.limits.max_grep_files:
-                    truncated = True
-                    break
-            if truncated:
+        pending = [root]
+        visited_entries = 0
+        while pending:
+            current = pending.pop()
+            children: list[os.DirEntry[str]] = []
+            try:
+                with os.scandir(current) as scan:
+                    for entry in scan:
+                        if visited_entries + len(children) >= MAX_GREP_TREE_ENTRIES:
+                            collection_truncated = True
+                            collection_truncation_reason = f"workspace tree entry budget of {MAX_GREP_TREE_ENTRIES}"
+                            break
+                        children.append(entry)
+            except OSError:
+                continue
+            visited_entries += len(children)
+            children.sort(key=lambda entry: entry.name)
+            directories: list[Path] = []
+            for entry in children:
+                try:
+                    child_path = Path(entry.path)
+                    if ctx.sandbox is not None and not ctx.sandbox.memory_path_allowed(child_path):
+                        continue
+                    if entry.is_dir(follow_symlinks=False):
+                        if entry.name not in {".git", "__pycache__", "node_modules"}:
+                            directories.append(child_path)
+                    else:
+                        targets.append(child_path)
+                        if len(targets) >= ctx.limits.max_grep_files:
+                            collection_truncated = True
+                            collection_truncation_reason = f"file scan limit of {ctx.limits.max_grep_files}"
+                            break
+                except OSError:
+                    continue
+            if collection_truncated:
+                break
+            pending.extend(reversed(directories))
+            if visited_entries >= MAX_GREP_TREE_ENTRIES and pending:
+                collection_truncated = True
+                collection_truncation_reason = f"workspace tree entry budget of {MAX_GREP_TREE_ENTRIES}"
                 break
     else:
         return ToolResult.error(f"no such path: {payload.get('path', '.')}")
@@ -623,12 +1653,16 @@ def grep_files(payload: dict[str, Any], ctx: ToolContext) -> ToolResult:
             continue
         scanned += 1
         try:
-            stat_result = target.stat()
-            if stat_result.st_size > ctx.limits.max_grep_file_bytes:
-                continue
-            with open(target, "rb") as handle:
-                raw = handle.read(ctx.limits.max_grep_file_bytes)
-        except OSError:
+            with _open_workspace_file(ctx, target, os.O_RDONLY) as fd:
+                stat_result = os.fstat(fd)
+                if (
+                    not stat.S_ISREG(stat_result.st_mode)
+                    or stat_result.st_nlink > 1
+                    or stat_result.st_size > ctx.limits.max_grep_file_bytes
+                ):
+                    continue
+                raw = os.read(fd, ctx.limits.max_grep_file_bytes)
+        except (OSError, ToolAccessError):
             continue
         if b"\x00" in raw:
             continue
@@ -645,9 +1679,14 @@ def grep_files(payload: dict[str, Any], ctx: ToolContext) -> ToolResult:
             matches.append(f"{relative}:{line_number}: {preview}")
         if truncated:
             break
+    if collection_truncated:
+        truncated = True
     body = "\n".join(matches) if matches else "no matches"
     if truncated:
-        body += f"\n[truncated at {limit} matches by the runtime grep cap]"
+        if collection_truncation_reason:
+            body += f"\n[truncated at {collection_truncation_reason}]"
+        else:
+            body += f"\n[truncated at {limit} matches by the runtime grep cap]"
     return ToolResult(
         content=body,
         truncated=truncated,

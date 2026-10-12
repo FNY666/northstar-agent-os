@@ -54,6 +54,8 @@ def event_to_dict(event: Any) -> dict[str, Any]:
             "pricing_estimated": event.pricing_estimated,
             "errors": list(event.errors),
             "permission_denials": list(event.permission_denials),
+            "tool_call_reports": [dict(row) for row in event.tool_call_reports],
+            "subagents": [dict(row) for row in event.subagents],
         }
     if kind == "SystemMessage":
         return {"type": "system", "subtype": event.subtype, "content": event.content, "data": event.data}
@@ -70,5 +72,11 @@ def event_to_dict(event: Any) -> dict[str, Any]:
         # iterates ``type`` values must be able to ignore it without guessing.
         return event.as_dict()
     if kind == "UserMessage":
-        return {"type": "user", "content": [block.to_api() for block in event.content], "is_meta": event.is_meta}
+        content = []
+        for block in event.content:
+            api = block.to_api()
+            if type(block).__name__ == "ToolResultBlock" and isinstance(block.content, str):
+                api["content"] = block.display_text()
+            content.append(api)
+        return {"type": "user", "content": content, "is_meta": event.is_meta}
     return {"type": kind.lower(), "repr": str(event)[:400]}

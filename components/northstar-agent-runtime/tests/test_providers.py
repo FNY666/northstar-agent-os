@@ -294,6 +294,35 @@ class AnthropicNormaliseTests(unittest.TestCase):
     def test_usage_absent_is_zero_not_crash(self):
         self.assertEqual(AnthropicProvider.normalise(FakeResponse(content=[])).usage, Usage())
 
+    def test_response_text_and_block_count_are_bounded(self):
+        with self.assertRaises(ProviderError):
+            AnthropicProvider.normalise({"content": [{"type": "text", "text": "x" * 1_048_577}]})
+        with self.assertRaises(ProviderError):
+            AnthropicProvider.normalise({"content": [{"type": "unknown"}] * 257})
+
+    def test_tool_count_and_argument_tree_are_bounded(self):
+        too_many = [{"type": "tool_use", "id": str(i), "name": "Read", "input": {}} for i in range(129)]
+        with self.assertRaises(ProviderError):
+            AnthropicProvider.normalise({"content": too_many})
+        with self.assertRaises(ProviderError):
+            AnthropicProvider.normalise({"content": [{"type": "tool_use", "id": "t", "name": "Read", "input": {"x": "x" * 1_048_577}}]})
+
+    def test_expanded_argument_nodes_are_bounded_across_one_response(self):
+        from unittest.mock import patch
+
+        calls = [
+            {"type": "tool_use", "id": str(index), "name": "Read", "input": {"x": 0}}
+            for index in range(2)
+        ]
+        with patch("tool_input_schema.MAX_SCHEMA_TREE_NODES", 3):
+            with self.assertRaisesRegex(ProviderError, "per-response limit"):
+                AnthropicProvider.normalise({"content": calls})
+
+    def test_tool_identifiers_must_be_bounded_strings(self):
+        for field, value in (("id", "x" * 1_025), ("name", 42)):
+            with self.subTest(field=field), self.assertRaises(ProviderError):
+                AnthropicProvider.normalise({"content": [{"type": "tool_use", "id": "t", "name": "Read", field: value, "input": {}}]})
+
     def test_generate_wraps_sdk_failures_as_provider_errors(self):
         secret_body = "x" * 4000
         client = FakeClient([RuntimeError(f"Error code: 400 - {secret_body} api_key=sk-real-secret-value end")])
@@ -354,7 +383,8 @@ class ProviderThroughTheRuntimeTests(RuntimeTestCase):
         report = self.drive(self.runtime(provider=provider, workspace=workspace), "read a.txt")
         self.assertEqual(report.subtype, "success")
         self.assertEqual(report.final_text, "read it")
-        self.assertEqual(report.transcript[2].tool_results[0].text(), "contents\n")
+        self.assertIn("contents\n", report.transcript[2].tool_results[0].text())
+        self.assertIn('"source":"tool:Read"', report.transcript[2].tool_results[0].text())
         self.assertEqual(report.result.total_usage.input_tokens, 1900)
         self.assertAlmostEqual(report.cost_usd, (1900 * 3.0 + 50 * 15.0) / 1e6)
         self.assertEqual(len(client.messages.payloads), 2)

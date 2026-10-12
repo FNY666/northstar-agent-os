@@ -40,9 +40,9 @@ Validate the wire request. Narrow by construction: only the declared fields are 
 
 #### `run_one(value: dict[str, Any], ctx: SidecarContext)`
 
-Handle one wire request and persist its receipt.
+Handle one wire request and persist receipts not already prewritten.
 
-#### `build_context(*, policy_dir: str | Path, approver_keys: dict[str, bytes] | None=None, enforcer_seed: bytes | None=None, key_id: str | None=None, receipt_feed_path: str | Path | None=None)`
+#### `build_context(*, policy_dir: str | Path, approver_keys: dict[str, bytes] | None=None, enforcer_seed: bytes | None=None, key_id: str | None=None, trusted_public_keys: Mapping[str, bytes] | None=None, receipt_feed_path: str | Path | None=None)`
 
 Build the sidecar context from on-disk config + environment.
 
@@ -58,9 +58,25 @@ Private Unix-socket entry point for the egress sidecar.
 
 #### `read_json_line(conn: socket.socket)`
 
+Read one UTF-8 JSONL request, counting the delimiter in the wire cap.
+
 #### `handle_line(line: str, ctx: SidecarContext)`
 
 #### `handle_connection(conn: socket.socket, ctx: SidecarContext)`
+
+#### `submit_connection(pool: Executor, slots: threading.BoundedSemaphore, conn: socket.socket, ctx: SidecarContext)`
+
+Keep accepted sockets and queued work bounded by the worker budget.
+
+#### `signing_seed_from_environment(environ: Mapping[str, str] | None=None)`
+
+Load the mandatory production signing key from the sidecar environment.
+
+#### `key_id_from_environment(environ: Mapping[str, str] | None=None)`
+
+#### `trusted_public_keys_from_file(path: str | Path | None)`
+
+Read the operator-managed key-id -> 32-byte Ed25519 public-key map.
 
 #### `serve(ctx: SidecarContext, path: str=SOCKET_PATH)`
 

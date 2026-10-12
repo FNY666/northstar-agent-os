@@ -512,6 +512,12 @@ def test_runner_audit_event(kind: str, seq: int,
     return event
 
 
+# This is an API helper, not a pytest test. The module name itself matches
+# pytest's discovery pattern, so mark the callable explicitly to prevent
+# collection as a test with fictional `kind` and `seq` fixtures.
+test_runner_audit_event.__test__ = False
+
+
 def main() -> None:
     runner = TestRunner()
     runner.register_test("test_a", "unit", 1, labels=["fast"])

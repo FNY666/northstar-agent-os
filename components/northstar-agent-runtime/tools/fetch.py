@@ -132,7 +132,11 @@ def fetch_tool_spec() -> Any:
                 "port": {"type": "integer", "description": "Destination port, default 443"},
                 "method": {"type": "string", "description": "HTTP method, e.g. GET or POST"},
                 "path": {"type": "string", "description": "Request path, must start with '/'"},
-                "headers": {"type": "object", "description": "Optional request headers"},
+                "headers": {
+                    "type": "object",
+                    "additionalProperties": {"type": "string"},
+                    "description": "Optional request headers with string values",
+                },
                 "body": {"type": "string", "description": "Optional request body as text"},
                 "timeout_ms": {"type": "integer", "description": "Optional timeout in milliseconds"},
             },

@@ -13,6 +13,7 @@ unparseable, unjustified, or contradicted PASS is a FAIL, never a pass.
 """
 from __future__ import annotations
 
+import math
 import re
 from dataclasses import dataclass, field, replace
 from typing import Any, Iterable, Literal, Mapping, Sequence
@@ -29,7 +30,13 @@ READ_ONLY_TOOLS: tuple[str, ...] = ("Read", "Grep", "LS", "DescribeTools")
 
 @dataclass(frozen=True)
 class AgentDefinition:
-    """One delegatable specialist."""
+    """One immutable delegatable specialist definition.
+
+    Sequence-valued configuration is copied into tuples at construction so a
+    caller cannot mutate a registered agent's capabilities after the host has
+    reviewed it. Runtime ceilings and privilege flags are validated here,
+    before the definition can reach delegation admission.
+    """
 
     name: str = DEFAULT_AGENT
     description: str = ""
@@ -52,14 +59,51 @@ class AgentDefinition:
     tags: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
-        if not self.name:
+        if not isinstance(self.name, str) or not self.name.strip():
             raise ValueError("an agent definition needs a name")
-        if self.permission_mode not in PERMISSION_MODES:
+        for field_name in ("description", "prompt", "model", "provider"):
+            if not isinstance(getattr(self, field_name), str):
+                raise TypeError(f"agent {self.name}: {field_name} must be a string")
+        if not isinstance(self.permission_mode, str) or self.permission_mode not in PERMISSION_MODES:
             raise ValueError(f"agent {self.name}: unknown permission mode {self.permission_mode!r}")
-        if self.max_turns < 1:
+        if isinstance(self.max_turns, bool) or not isinstance(self.max_turns, int) or self.max_turns < 1:
             raise ValueError(f"agent {self.name}: max_turns must be positive")
-        if isinstance(self.tools, str):
-            raise TypeError(f"agent {self.name}: tools must be a sequence of names")
+        if self.max_tool_calls is not None and (
+            isinstance(self.max_tool_calls, bool) or not isinstance(self.max_tool_calls, int) or self.max_tool_calls < 1
+        ):
+            raise ValueError(f"agent {self.name}: max_tool_calls must be a positive integer or None")
+        if self.max_budget_usd is not None:
+            invalid_budget = isinstance(self.max_budget_usd, bool) or not isinstance(self.max_budget_usd, (int, float))
+            if not invalid_budget:
+                try:
+                    invalid_budget = not math.isfinite(float(self.max_budget_usd)) or self.max_budget_usd <= 0
+                except (OverflowError, ValueError):
+                    invalid_budget = True
+            if invalid_budget:
+                raise ValueError(f"agent {self.name}: max_budget_usd must be finite and positive or None")
+        for field_name in ("allow_delegation", "require_verdict", "read_only_enforced"):
+            if not isinstance(getattr(self, field_name), bool):
+                raise TypeError(f"agent {self.name}: {field_name} must be a boolean")
+        if self.compaction_threshold_tokens is not None and (
+            isinstance(self.compaction_threshold_tokens, bool)
+            or not isinstance(self.compaction_threshold_tokens, int)
+            or self.compaction_threshold_tokens < 1
+        ):
+            raise ValueError(f"agent {self.name}: compaction_threshold_tokens must be positive or None")
+
+        for field_name in ("tools", "disallowed_tools", "acceptance_criteria", "tags"):
+            raw = getattr(self, field_name)
+            if field_name == "tags" and isinstance(raw, (set, frozenset)):
+                values = tuple(sorted(raw))
+            elif isinstance(raw, Sequence) and not isinstance(raw, (str, bytes)):
+                values = tuple(raw)
+            else:
+                raise TypeError(f"agent {self.name}: {field_name} must be a sequence of strings")
+            if any(not isinstance(value, str) or not value.strip() for value in values):
+                raise ValueError(f"agent {self.name}: {field_name} entries must be non-empty strings")
+            if field_name in {"tools", "disallowed_tools"} and len(set(values)) != len(values):
+                raise ValueError(f"agent {self.name}: {field_name} entries must be unique")
+            object.__setattr__(self, field_name, values)
         if not self.tools:
             raise ValueError(f"agent {self.name}: an agent with no tools cannot do anything")
 

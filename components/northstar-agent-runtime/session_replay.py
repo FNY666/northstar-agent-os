@@ -202,10 +202,12 @@ class Replay:
     truncated_at: int | None = None
     dropped_trailing_lines: int = 0
     inherited_messages: int = 0
+    chain_verified: bool | None = None
+    chain_error: str = ""
 
     @property
     def verified(self) -> bool:
-        return all(report.verified for report in self.checkpoints)
+        return self.chain_verified is not False and all(report.verified for report in self.checkpoints)
 
     @property
     def counts(self) -> dict[str, int]:
@@ -225,7 +227,8 @@ class Replay:
         return (
             f"# {counts['turns']} turn(s), {counts['tool_calls']} tool call(s), {counts['tool_errors']} tool error(s), "
             f"{counts['denials']} denial(s), {checkpoints}, result={self.result.get('subtype', '(no result)')}, "
-            f"sealed={'yes' if self.sealed else 'NO'}"
+            f"sealed={'yes' if self.sealed else 'NO'}, chain="
+            f"{'verified' if self.chain_verified else 'BROKEN' if self.chain_verified is False else 'unsealed'}"
         )
 
     def render(self) -> str:
@@ -241,6 +244,8 @@ class Replay:
                 f"(inherits {self.lineage.get('turns_inherited')} turn(s), "
                 f"{self.lineage.get('tool_calls_inherited')} call(s), ${float(self.lineage.get('cost_usd_inherited') or 0):.6f})"
             )
+        if self.chain_error:
+            lines.append(f"! session chain verification failed: {self.chain_error}")
         if self.truncated_at is not None:
             lines.append(
                 f"# cut at record #{self.truncated_at - 1}: everything after it is history a run resumed here would not see "
@@ -264,6 +269,8 @@ class Replay:
             "counts": self.counts,
             "result": self.result,
             "verified": self.verified,
+            "chain_verified": self.chain_verified,
+            "chain_error": self.chain_error,
         }
 
     def to_json(self) -> str:
@@ -420,6 +427,7 @@ def build_replay(
     is long" and "this is what a resume would see".
     """
     visible = list(records if upto is None else records[:upto])
+    chain_verified, chain_error = _verify_record_chain(visible, session_id=session_id)
     reports = {report.record_index: report for report in checkpoint_reports(visible)}
     frames: list[Frame] = []
     result: dict[str, Any] = {}
@@ -571,7 +579,23 @@ def build_replay(
         # "what the child inherits" has to mean exactly what the transcript contains, and this
         # module is not the owner of that definition.
         inherited_messages=len(transcript_from_records(visible)),
+        chain_verified=chain_verified,
+        chain_error=chain_error,
     )
+
+
+def _verify_record_chain(records: Sequence[Mapping[str, Any]], *, session_id: str = "") -> tuple[bool | None, str]:
+    """Verify a sealed session prefix while keeping unsealed legacy replays inspectable."""
+    if not any(any(key in record for key in ("chain_hash", "prev_hash", "genesis")) for record in records):
+        return None, ""
+    from audit_chain import verify_lines
+
+    lines = (
+        json.dumps(record, ensure_ascii=False, sort_keys=True, separators=(",", ":"), default=str)
+        for record in records
+    )
+    result = verify_lines(lines, expect_session_id=session_id or None)
+    return result.ok, "" if result.ok else result.reason
 
 
 def load_replay(directory: str | Path, session_id: str, *, upto: int | None = None) -> tuple[Replay | None, str]:

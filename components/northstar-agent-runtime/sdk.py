@@ -23,8 +23,8 @@ files. Two entry points share one configuration:
 * :func:`stream_run` — yield those dicts as they happen; the final dict is the
   ``result`` event (see :mod:`events` for the shape and ``EXIT_CODES``).
 
-Deep configuration (policy files, AGENTS.md/context files, skills, MCP
-servers, agent-definition runs) is intentionally left to the CLI: those
+Deep configuration (AGENTS.md/context files, skills, MCP servers,
+agent-definition runs) is intentionally left to the CLI: those
 features are repository-level opinions, while this API is the stable
 embedding contract.
 """
@@ -55,6 +55,7 @@ class RunOptions:
     system_prompt: str | None = None
     scripted_turns: Sequence[Any] | None = None  # scripted provider turns; None -> one text reply
     permission_mode: str = "default"
+    dataflow_policy: Any = None  # a validated dataflow_policy.DataflowPolicy; opt-in
     allowed_tools: Sequence[str] = ()
     disallowed_tools: Sequence[str] = ()
     read_only: bool = False
@@ -68,6 +69,7 @@ class RunOptions:
     compaction_threshold_tokens: int | None = 60_000  # None disables compaction
     max_output_tokens: int = 4096
     redact_tool_output: bool = False  # omit tool output bodies from the transcript
+    redact_session_content: bool = False  # omit conversation bodies; disables transcript resume
     stream: bool = False  # yield stream_delta events while assistant text is produced (transcript unchanged)
     lock_session: bool = True  # claim the session transcript before appending to it; contention ends the run as error_session_busy (exit 7), writing nothing
     retry: Any = None  # a provider_retry.RetryPolicy for the transport; None means one request per turn (no waiting, no re-issues)
@@ -170,6 +172,7 @@ def _build(options: RunOptions, resume: str | None = None) -> tuple[Any, Any, li
         "max_tool_calls": options.max_tool_calls,
         "max_budget_usd": options.max_budget_usd,
         "permission_mode": options.permission_mode,
+        "dataflow_policy": options.dataflow_policy,
         "allowed_tools": allowed,
         "disallowed_tools": denied,
         "workspace": options.workspace,
@@ -180,6 +183,7 @@ def _build(options: RunOptions, resume: str | None = None) -> tuple[Any, Any, li
         "halt_on_denial": options.halt_on_denial,
         "tool_limits": ToolLimits(),
         "record_tool_output_in_session": not options.redact_tool_output,
+        "redact_session_content": options.redact_session_content,
         "stream": options.stream,
     }
     if options.system_prompt is not None:
@@ -219,7 +223,7 @@ def _build(options: RunOptions, resume: str | None = None) -> tuple[Any, Any, li
             total_usage=checkpoint_usage(checkpoint),
         )
         store = SessionStore(options.session_dir or None, session_id=None)
-        resume_transcript = store.transcript(options.resume_from)
+        resume_transcript = store.transcript(options.resume_from, require_integrity=True)
     else:
         store = SessionStore(options.session_dir or None, session_id=resume or None)
         if resume:
@@ -232,7 +236,7 @@ def _build(options: RunOptions, resume: str | None = None) -> tuple[Any, Any, li
                 total_cost_usd=spent,
                 total_usage=usage,
             )
-            resume_transcript = store.transcript(resume)
+            resume_transcript = store.transcript(resume, require_integrity=True)
     if options.checkpoint_turns:
         config_kwargs["checkpoint_turns"] = options.checkpoint_turns
     if getattr(options, "retry", None) is not None:

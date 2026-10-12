@@ -101,6 +101,9 @@ _PAGE = r"""<!doctype html>
     if (value === null || value === undefined) return "";
     try { return JSON.stringify(value, null, 2); } catch (_) { return String(value); }
   }
+  function toolResultText(value) {
+    return String(value || "").replace(/^\[Northstar tool result (?:metadata: [^\n]*|trust=[^\]]*)\]\n/, "");
+  }
   function recordText(record) {
     const pieces = [];
     const content = record && record.content;
@@ -109,7 +112,7 @@ _PAGE = r"""<!doctype html>
         if (!block || typeof block !== "object") { pieces.push(String(block)); continue; }
         if (block.type === "text") pieces.push(block.text || "");
         else if (block.type === "tool_use") pieces.push("→ " + (block.name || "tool") + " " + text(block.input || {}));
-        else if (block.type === "tool_result") pieces.push("← " + text(block.content || ""));
+        else if (block.type === "tool_result") pieces.push("← " + toolResultText(block.content || ""));
         else pieces.push(text(block));
       }
     }
@@ -173,7 +176,7 @@ _PAGE = r"""<!doctype html>
         let isError = false;
         if (kind === "text") { title = "Text"; value = block.text || ""; }
         else if (kind === "tool_use") { title = "Tool call · " + (block.name || "tool"); value = block.input || {}; }
-        else if (kind === "tool_result") { title = block.is_error ? "Tool result · error" : "Tool result · success"; value = block.content ?? block; isError = Boolean(block.is_error); }
+        else if (kind === "tool_result") { title = block.is_error ? "Tool result · error" : "Tool result · success"; value = toolResultText(block.content ?? ""); isError = Boolean(block.is_error); }
         addDetailBlock(title, value, isError);
       }
     }

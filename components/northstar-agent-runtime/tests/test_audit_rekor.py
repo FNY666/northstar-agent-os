@@ -171,6 +171,7 @@ class RekorTests(unittest.TestCase):
     def tearDownClass(cls):
         cls.server.shutdown()
         cls.thread.join()
+        cls.server.server_close()
 
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()

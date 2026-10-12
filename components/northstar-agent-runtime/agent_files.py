@@ -22,7 +22,9 @@ The markdown body becomes the agent's prompt.
 from __future__ import annotations
 
 import hashlib
+import os
 import re
+import stat
 from pathlib import Path
 from typing import Iterable, Mapping
 
@@ -34,6 +36,9 @@ AGENTS_DIRECTORY = ".northstar/agents"
 _NAME_RE = re.compile(r"^[a-z][a-z0-9_-]*$")
 _MAX_DESCRIPTION_CHARS = 600
 _MAX_PROMPT_CHARS = 16_000
+MAX_AGENT_FILES = 40
+MAX_AGENT_DIRECTORY_ENTRIES = 256
+MAX_AGENT_FILE_BYTES = 256 * 1024
 
 _ALLOWED_KEYS = frozenset({
     "name",
@@ -74,13 +79,21 @@ def discover_agent_files(
     root = Path(workspace).resolve()
     directory = root / AGENTS_DIRECTORY
     known = frozenset(known_tools or ())
-    candidates: list[tuple[Path, bool]] = [(path, False) for path in (sorted(directory.glob("*.md")) if directory.is_dir() else [])]
+    candidates: list[tuple[Path, bool]] = []
+    if directory.is_dir():
+        candidates.extend((path, False) for path in _agent_markdown_files(directory))
+    if len(candidates) > MAX_AGENT_FILES:
+        raise AgentFileError(f"workspace agent set exceeds the {MAX_AGENT_FILES}-file limit")
     for extra in extra_paths:
         path = Path(extra)
         if path.is_dir():
-            candidates.extend((item, True) for item in sorted(path.glob("*.md")))
+            candidates.extend((item, True) for item in _agent_markdown_files(path))
         elif path.is_file():
             candidates.append((path, True))
+        else:
+            raise AgentFileError(f"plugin agent path {path} is not a regular file or directory")
+        if len(candidates) > MAX_AGENT_FILES:
+            raise AgentFileError(f"workspace agent set exceeds the {MAX_AGENT_FILES}-file limit")
     definitions: list[AgentDefinition] = []
     for entry, plugin_owned in candidates:
         resolved = entry.resolve(strict=False)
@@ -89,12 +102,65 @@ def discover_agent_files(
                 f"agent file {entry} resolves outside the workspace root {root}; "
                 "refusing to follow the symlink"
             )
+        if entry.is_symlink():
+            raise AgentFileError(f"agent file {entry} is a symlink; refusing to follow it")
         relative = resolved.relative_to(root).as_posix()
         expected = (reviewed_digests or {}).get(relative)
         if plugin_owned and reviewed_digests is not None and not expected:
             raise AgentFileError(f"plugin agent {entry} has no reviewed content digest")
         definitions.append(_parse_agent_file(entry, known_tools=known, expected_digest=expected))
     return tuple(definitions)
+
+
+def _agent_markdown_files(directory: Path) -> tuple[Path, ...]:
+    """Collect direct Markdown definitions without glob materializing an unbounded tree."""
+    if directory.is_symlink():
+        raise AgentFileError(f"agent directory {directory} is a symlink; refusing to follow it")
+    candidates: list[Path] = []
+    try:
+        with os.scandir(directory) as scan:
+            entries = []
+            for entry in scan:
+                entries.append(entry)
+                if len(entries) > MAX_AGENT_DIRECTORY_ENTRIES:
+                    raise AgentFileError(
+                        f"agent directory {directory} exceeds the {MAX_AGENT_DIRECTORY_ENTRIES}-entry scan limit"
+                    )
+    except OSError as error:
+        raise AgentFileError(f"cannot scan agent directory {directory}: {error}") from error
+    for entry in sorted(entries, key=lambda item: item.name):
+        if not entry.name.endswith(".md"):
+            continue
+        try:
+            if entry.is_symlink() or entry.is_file(follow_symlinks=False):
+                candidates.append(Path(entry.path))
+        except OSError as error:
+            raise AgentFileError(f"cannot inspect agent file {entry.path}: {error}") from error
+    return tuple(candidates)
+
+
+def _read_agent_file(path: Path) -> bytes:
+    flags = os.O_RDONLY | getattr(os, "O_CLOEXEC", 0) | getattr(os, "O_NOFOLLOW", 0)
+    try:
+        fd = os.open(path, flags)
+    except OSError as error:
+        raise AgentFileError(f"{path}: cannot open agent file: {error}") from error
+    try:
+        metadata = os.fstat(fd)
+        if not stat.S_ISREG(metadata.st_mode) or metadata.st_nlink > 1:
+            raise AgentFileError(f"{path}: agent file must be a regular single-link file")
+        if metadata.st_size > MAX_AGENT_FILE_BYTES:
+            raise AgentFileError(f"{path}: agent file exceeds the {MAX_AGENT_FILE_BYTES}-byte limit")
+        chunks: list[bytes] = []
+        total = 0
+        while chunk := os.read(fd, min(64 * 1024, MAX_AGENT_FILE_BYTES + 1 - total)):
+            total += len(chunk)
+            if total > MAX_AGENT_FILE_BYTES:
+                raise AgentFileError(f"{path}: agent file grew beyond the {MAX_AGENT_FILE_BYTES}-byte limit")
+            chunks.append(chunk)
+        return b"".join(chunks)
+    finally:
+        os.close(fd)
 
 
 def register_workspace_agents(
@@ -127,10 +193,7 @@ def register_workspace_agents(
 def _parse_agent_file(
     path: Path, *, known_tools: frozenset[str], expected_digest: str | None = None
 ) -> AgentDefinition:
-    try:
-        raw = path.read_bytes()
-    except OSError as error:
-        raise AgentFileError(f"{path}: cannot read agent file: {error}") from error
+    raw = _read_agent_file(path)
     if expected_digest is not None and hashlib.sha256(raw).hexdigest() != expected_digest:
         raise AgentFileError(f"{path}: plugin agent changed since bundle review; refusing definition")
     try:

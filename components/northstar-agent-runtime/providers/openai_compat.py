@@ -40,6 +40,7 @@ without a network, a key, or the SDK installed at all.
 """
 from __future__ import annotations
 
+import copy
 import json
 from typing import Any, Sequence
 
@@ -69,6 +70,11 @@ _FINISH_REASONS = {
 }
 
 DEFAULT_MODEL = "gpt-4.1"
+MAX_PROVIDER_TEXT_CHARS = 1_048_576
+MAX_TOOL_ARGUMENT_CHARS = 1_048_576
+MAX_TOOL_ARGUMENTS_TOTAL_BYTES = 4_194_304
+MAX_TOOL_CALLS_PER_RESPONSE = 128
+DEFAULT_MAX_HTTP_RESPONSE_BYTES = 8_388_608
 
 
 def _is_reasoning_model(model: str) -> bool:
@@ -81,16 +87,28 @@ def _text_of(content: Any) -> str:
     if content is None:
         return ""
     if isinstance(content, str):
+        if len(content) > MAX_PROVIDER_TEXT_CHARS:
+            raise ProviderError(f"provider text exceeds the {MAX_PROVIDER_TEXT_CHARS}-character response limit")
         return content
     if isinstance(content, (list, tuple)):
         parts: list[str] = []
+        total = 0
         for part in content:
             if isinstance(part, str):
-                parts.append(part)
+                text = part
             elif isinstance(part, dict) and part.get("type") in (None, "text"):
-                parts.append(str(part.get("text", "")))
+                text = str(part.get("text", ""))
+            else:
+                continue
+            total += len(text)
+            if total > MAX_PROVIDER_TEXT_CHARS:
+                raise ProviderError(f"provider text exceeds the {MAX_PROVIDER_TEXT_CHARS}-character response limit")
+            parts.append(text)
         return "".join(parts)
-    return str(content)
+    text = str(content)
+    if len(text) > MAX_PROVIDER_TEXT_CHARS:
+        raise ProviderError(f"provider text exceeds the {MAX_PROVIDER_TEXT_CHARS}-character response limit")
+    return text
 
 
 def _field(obj: Any, name: str, default: Any = None) -> Any:
@@ -130,9 +148,12 @@ class OpenAICompatProvider(Provider):
         extra_body: dict[str, Any] | None = None,
         supports_tools: bool = True,
         stream_usage: bool = True,
+        max_response_bytes: int = DEFAULT_MAX_HTTP_RESPONSE_BYTES,
     ) -> None:
         if max_tokens <= 0:
             raise ValueError("max_tokens must be positive")
+        if isinstance(max_response_bytes, bool) or not isinstance(max_response_bytes, int) or max_response_bytes <= 0:
+            raise ValueError("max_response_bytes must be a positive integer")
         if token_limit_field not in {"auto", "max_tokens", "max_completion_tokens", "none"}:
             raise ValueError(
                 "token_limit_field must be 'auto', 'max_tokens', 'max_completion_tokens' or 'none'"
@@ -145,6 +166,8 @@ class OpenAICompatProvider(Provider):
         self.supports_tools = bool(supports_tools)
         self.stream_usage = bool(stream_usage)
         self._client = client
+        self._owns_client = client is None
+        self.max_response_bytes = max_response_bytes
         self._client_kwargs: dict[str, Any] = {"max_retries": max_retries}
         if base_url is not None:
             self._client_kwargs["base_url"] = base_url
@@ -163,13 +186,21 @@ class OpenAICompatProvider(Provider):
     def client(self) -> Any:
         if self._client is None:
             try:
-                from openai import OpenAI
+                import openai as openai_sdk
             except ImportError as error:  # pragma: no cover - depends on host
                 raise ProviderError(
                     "the 'openai' package is required for OpenAICompatProvider "
                     "(pip install openai), or use provider='scripted' for offline runs"
                 ) from error
-            self._client = OpenAI(**self._client_kwargs)
+            from providers.http_response_limits import make_response_limited_http_client
+
+            default_http_client = getattr(openai_sdk, "DefaultHttpx2Client", None)
+            if default_http_client is None:
+                default_http_client = getattr(openai_sdk, "DefaultHttpxClient", None)
+            if not callable(default_http_client):
+                raise ProviderError("the installed openai SDK does not expose a supported synchronous HTTP client")
+            http_client = make_response_limited_http_client(default_http_client, self.max_response_bytes)
+            self._client = openai_sdk.OpenAI(http_client=http_client, **self._client_kwargs)
         return self._client
 
     # -- request building --------------------------------------------------
@@ -189,7 +220,7 @@ class OpenAICompatProvider(Provider):
             if description:
                 function["description"] = description
             schema = tool.get("input_schema") or tool.get("parameters") or {}
-            function["parameters"] = schema
+            function["parameters"] = copy.deepcopy(schema)
             converted.append({"type": "function", "function": function})
         return converted
 
@@ -310,6 +341,8 @@ class OpenAICompatProvider(Provider):
             # exists instead of a silent fallback.
             payload["stream_options"] = {"include_usage": True}
         pieces: list[str] = []
+        total_text_chars = 0
+        total_tool_argument_bytes = 0
         calls: dict[int, dict[str, Any]] = {}
         finish = ""
         usage: dict[str, Any] = {}
@@ -339,17 +372,38 @@ class OpenAICompatProvider(Provider):
                 delta = _field(choice, "delta", {}) or {}
                 text = _text_of(_field(delta, "content"))
                 if text:
+                    total_text_chars += len(text)
+                    if total_text_chars > MAX_PROVIDER_TEXT_CHARS:
+                        raise ProviderError(
+                            f"provider text exceeds the {MAX_PROVIDER_TEXT_CHARS}-character response limit"
+                        )
                     pieces.append(text)
                     yield StreamDelta(text=text, provider=self.name)
                 for fragment in _field(delta, "tool_calls", ()) or ():
-                    slot = calls.setdefault(int(_field(fragment, "index", 0) or 0), {"id": "", "function": {"name": "", "arguments": ""}})
+                    call_index = int(_field(fragment, "index", 0) or 0)
+                    if call_index < 0 or call_index >= MAX_TOOL_CALLS_PER_RESPONSE:
+                        raise ProviderError(
+                            f"provider returned more than {MAX_TOOL_CALLS_PER_RESPONSE} tool calls in one response"
+                        )
+                    slot = calls.setdefault(call_index, {"id": "", "function": {"name": "", "arguments": ""}})
                     call_id = _field(fragment, "id", "")
                     if call_id:
                         slot["id"] = str(call_id)
                     function = _field(fragment, "function", {}) or {}
                     if _field(function, "name", ""):
                         slot["function"]["name"] = str(_field(function, "name"))
-                    slot["function"]["arguments"] += str(_field(function, "arguments", "") or "")
+                    argument_fragment = str(_field(function, "arguments", "") or "")
+                    if len(slot["function"]["arguments"]) + len(argument_fragment) > MAX_TOOL_ARGUMENT_CHARS:
+                        raise ProviderError(
+                            f"tool call {call_index} arguments exceed the "
+                            f"{MAX_TOOL_ARGUMENT_CHARS}-character response limit"
+                        )
+                    total_tool_argument_bytes += len(argument_fragment.encode("utf-8"))
+                    if total_tool_argument_bytes > MAX_TOOL_ARGUMENTS_TOTAL_BYTES:
+                        raise ProviderError(
+                            f"tool arguments exceed the {MAX_TOOL_ARGUMENTS_TOTAL_BYTES}-byte per-response limit"
+                        )
+                    slot["function"]["arguments"] += argument_fragment
                 # ``delta.reasoning_content`` is deliberately unread: it is not part of
                 # the recorded turn, so streaming it would show the operator text that
                 # the transcript cannot vouch for.
@@ -379,17 +433,78 @@ class OpenAICompatProvider(Provider):
         text = _text_of(_field(message, "content"))
         if text:
             blocks.append(TextBlock(text=text))
+        total_tool_argument_bytes = 0
+        total_tool_argument_nodes = 0
         for index, call in enumerate(_field(message, "tool_calls", ()) or ()):
+            if index >= MAX_TOOL_CALLS_PER_RESPONSE:
+                raise ProviderError(
+                    f"provider returned more than {MAX_TOOL_CALLS_PER_RESPONSE} tool calls in one response"
+                )
             function = _field(call, "function", {}) or {}
             name = str(_field(function, "name", "") or "")
             raw_arguments = _field(function, "arguments", "")
             if isinstance(raw_arguments, dict):
+                from tool_input_schema import (
+                    MAX_SCHEMA_TREE_NODES,
+                    ToolInputSchemaError,
+                    check_json_tree_budget_details,
+                )
+
+                try:
+                    tree_bytes, tree_nodes = check_json_tree_budget_details(
+                        raw_arguments, label="tool arguments"
+                    )
+                except ToolInputSchemaError as error:
+                    raise ProviderError(f"tool call {name or index} arguments exceed runtime limits") from error
+                total_tool_argument_nodes += tree_nodes
+                if total_tool_argument_nodes > MAX_SCHEMA_TREE_NODES:
+                    raise ProviderError(
+                        f"provider tool arguments exceed the {MAX_SCHEMA_TREE_NODES}-node response limit"
+                    )
+                total_tool_argument_bytes += tree_bytes
+                if total_tool_argument_bytes > MAX_TOOL_ARGUMENTS_TOTAL_BYTES:
+                    raise ProviderError(
+                        f"tool arguments exceed the {MAX_TOOL_ARGUMENTS_TOTAL_BYTES}-byte per-response limit"
+                    )
                 arguments: dict[str, Any] = dict(raw_arguments)
             else:
+                if isinstance(raw_arguments, str) and len(raw_arguments) > MAX_TOOL_ARGUMENT_CHARS:
+                    raise ProviderError(
+                        f"tool call {name or index} arguments exceed the "
+                        f"{MAX_TOOL_ARGUMENT_CHARS}-character response limit"
+                    )
                 blob = str(raw_arguments or "").strip()
+                total_tool_argument_bytes += len(blob.encode("utf-8"))
+                if total_tool_argument_bytes > MAX_TOOL_ARGUMENTS_TOTAL_BYTES:
+                    raise ProviderError(
+                        f"tool arguments exceed the {MAX_TOOL_ARGUMENTS_TOTAL_BYTES}-byte per-response limit"
+                    )
                 if not blob:
                     arguments = {}
                 else:
+                    if len(blob) > MAX_TOOL_ARGUMENT_CHARS:
+                        raise ProviderError(
+                            f"tool call {name or index} arguments exceed the "
+                            f"{MAX_TOOL_ARGUMENT_CHARS}-character response limit"
+                        )
+                    from tool_input_schema import (
+                        MAX_SCHEMA_TREE_NODES,
+                        ToolInputSchemaError,
+                        check_json_text_node_budget,
+                        check_json_tree_budget_details,
+                    )
+
+                    try:
+                        text_nodes = check_json_text_node_budget(blob, label="tool arguments")
+                    except ToolInputSchemaError as error:
+                        raise ProviderError(
+                            f"tool call {name or index} arguments exceed runtime limits"
+                        ) from error
+                    total_tool_argument_nodes += text_nodes
+                    if total_tool_argument_nodes > MAX_SCHEMA_TREE_NODES:
+                        raise ProviderError(
+                            f"provider tool arguments exceed the {MAX_SCHEMA_TREE_NODES}-node response limit"
+                        )
                     try:
                         parsed = json.loads(blob)
                     except ValueError as error:
@@ -398,6 +513,12 @@ class OpenAICompatProvider(Provider):
                         ) from error
                     if not isinstance(parsed, dict):
                         raise ProviderError(f"tool call {name or index} arguments must decode to an object")
+                    try:
+                        check_json_tree_budget_details(parsed, label="tool arguments")
+                    except ToolInputSchemaError as error:
+                        raise ProviderError(
+                            f"tool call {name or index} arguments exceed runtime limits"
+                        ) from error
                     arguments = parsed
             blocks.append(ToolUseBlock(id=str(_field(call, "id", "") or f"call_{index}"), name=name, input=arguments))
         finish = str(_field(choice, "finish_reason", "") or "")
@@ -413,6 +534,8 @@ class OpenAICompatProvider(Provider):
         )
 
     def close(self) -> None:
+        if not self._owns_client:
+            return
         close = getattr(self._client, "close", None)
         if callable(close):
             close()

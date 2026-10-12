@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import unittest
+import shlex
 
 import support  # noqa: F401
 from support import RuntimeTestCase, text_turn, tool_turn
@@ -108,6 +109,23 @@ class ModeTests(unittest.TestCase):
         self.assertTrue(decision.allowed)
         self.assertEqual(decision.source, "host_callback")
         self.assertEqual(asked, [("Write", {"path": "a.txt"})])
+
+    def test_host_approval_callback_cannot_mutate_nested_authorized_arguments(self):
+        payload = {"options": {"path": "approved.txt"}}
+        seen = []
+
+        def approve(_name, callback_payload, context):
+            seen.append((digest_arguments(callback_payload), context.arguments_digest))
+            callback_payload["options"]["path"] = "unapproved.txt"
+            callback_payload["options"]["extra"] = "injected"
+            return True
+
+        engine = PermissionEngine(PermissionConfig(mode="default", can_use_tool=approve))
+        decision = engine.evaluate("Write", kind="edit", payload=payload)
+
+        self.assertTrue(decision.allowed)
+        self.assertEqual(payload, {"options": {"path": "approved.txt"}})
+        self.assertEqual(seen, [(digest_arguments(payload), digest_arguments(payload))])
 
     def test_a_callback_that_raises_fails_closed(self):
         def explode(name, payload, ctx):
@@ -246,6 +264,156 @@ class DelegationGateTests(unittest.TestCase):
 
 
 class OffensiveToolingTests(unittest.TestCase):
+    def _shell_decision(self, command, *, allowlist=()):
+        return self._shell_payload_decision({"command": command}, allowlist=allowlist)
+
+    def _shell_payload_decision(self, payload, *, allowlist=()):
+        engine = PermissionEngine(
+            PermissionConfig(
+                mode="default",
+                can_use_tool=lambda n, p, c: True,
+                offensive_allowlist=tuple(allowlist),
+            ),
+            tool_kinds={"Shell": "exec"},
+        )
+        return engine.evaluate("Shell", kind="exec", payload=payload)
+
+    def test_shell_direct_offensive_executable_denied(self):
+        decision = self._shell_decision("nmap -sV 192.0.2.10")
+        self.assertFalse(decision.allowed)
+        self.assertEqual(decision.rule, "offensive:shell_executable_deny_by_default")
+
+    def test_shell_denies_absolute_and_chained_offensive_executables(self):
+        for command in (
+            "/usr/bin/nmap host",
+            "echo check; sqlmap -u https://example.invalid",
+            "sudo -u root /usr/bin/nmap host",
+            "env -u PATH A=1 nmap host",
+            "timeout 3s nmap host",
+            "nice -n 5 nmap host",
+            "printf x | xargs -I{} nmap host",
+            "find . -exec nmap {} \\;",
+            "echo `nmap host`",
+            'echo "$(nmap host)"',
+            'cat <(nmap host)',
+            'echo "`nmap host`"',
+            'env -S "nmap host"',
+            "sh -c 'nmap host'",
+            "bash -lc 'echo check; sqlmap -u https://example.invalid'",
+            "/bin/dash -c \"sudo nmap host\"",
+        ):
+            with self.subTest(command=command):
+                decision = self._shell_decision(command)
+                self.assertFalse(decision.allowed)
+                self.assertEqual(decision.rule, "offensive:shell_executable_deny_by_default")
+
+    def test_shell_inline_command_is_scanned_without_blocking_benign_inline_shell(self):
+        self.assertTrue(self._shell_decision("bash -lc 'printf safe'").allowed)
+        self.assertTrue(self._shell_decision("sh ./ordinary-script.sh").allowed)
+
+    def test_shell_inline_scanner_fails_closed_at_recursion_limit(self):
+        from permissions import offensive_shell_commands
+
+        nested = "nmap host"
+        for _ in range(5):
+            nested = f"sh -c {shlex.quote(nested)}"
+        decision = self._shell_decision(nested)
+        self.assertFalse(decision.allowed)
+        self.assertEqual(decision.rule, "offensive:shell_scan_incomplete")
+        self.assertIn("<shell-scan-incomplete>", offensive_shell_commands(nested))
+
+    def test_shell_offensive_name_as_echo_data_is_not_blocked(self):
+        self.assertTrue(self._shell_decision("echo nmap is installed").allowed)
+
+    def test_shell_indirect_command_dispatch_fails_closed(self):
+        for command in (
+            "eval 'nmap host'",
+            "alias scan=nmap; scan host",
+            "tool=nmap; $tool host",
+            'tool=nmap; "$tool" host',
+            "{nmap,echo} host",
+            "n* host",
+        ):
+            with self.subTest(command=command):
+                decision = self._shell_decision(command)
+                self.assertFalse(decision.allowed)
+                self.assertEqual(decision.rule, "offensive:shell_scan_incomplete")
+
+    def test_shell_scans_active_brace_groups_and_function_bodies(self):
+        for command in (
+            "{ nmap host; }",
+            "function scan { nmap host; }; scan",
+            "scan() { nmap host; }; scan",
+        ):
+            with self.subTest(command=command):
+                decision = self._shell_decision(command)
+                self.assertFalse(decision.allowed)
+                self.assertEqual(decision.rule, "offensive:shell_executable_deny_by_default")
+
+    def test_shell_braced_variables_and_quoted_braces_are_still_data(self):
+        for command in (
+            "echo ${nmap}",
+            'echo "${nmap}"',
+            "echo '{ nmap; }'",
+            "echo {nmap,echo}",
+        ):
+            with self.subTest(command=command):
+                self.assertTrue(self._shell_decision(command).allowed)
+
+    def test_shell_single_quoted_substitution_text_is_not_executed_or_blocked(self):
+        for command in (
+            "echo '$(nmap host)'",
+            "echo '`nmap host`'",
+        ):
+            with self.subTest(command=command):
+                self.assertTrue(self._shell_decision(command).allowed)
+
+    def test_shell_scanner_fails_closed_on_malformed_or_deeply_nested_syntax(self):
+        nested = "nmap host"
+        for _ in range(5):
+            nested = f'echo "$(printf x "$( {nested} )")"'
+        for command in (nested, 'echo "$(nmap host)'):
+            with self.subTest(command=command):
+                decision = self._shell_decision(command)
+                self.assertFalse(decision.allowed)
+                self.assertEqual(decision.rule, "offensive:shell_scan_incomplete")
+
+    def test_shell_offensive_allowlist_is_explicit(self):
+        decision = self._shell_decision("nmap host", allowlist=("nmap",))
+        self.assertNotEqual(decision.rule, "offensive:shell_executable_deny_by_default")
+
+    def test_shell_argv_is_scanned_for_offensive_tools_and_wrappers(self):
+        for argv in (
+            ["nmap", "host"],
+            ["/usr/bin/nmap", "host"],
+            ["env", "-u", "PATH", "nmap", "host"],
+            ["timeout", "3s", "nmap", "host"],
+            ["sh", "-c", "nmap host"],
+            ["find", ".", "-exec", "sqlmap", "-u", "https://example.invalid", ";"],
+        ):
+            with self.subTest(argv=argv):
+                decision = self._shell_payload_decision({"argv": argv})
+                self.assertFalse(decision.allowed)
+                self.assertEqual(decision.rule, "offensive:shell_executable_deny_by_default")
+
+    def test_shell_cmd_alias_is_scanned(self):
+        decision = self._shell_payload_decision({"cmd": "nmap host"})
+        self.assertFalse(decision.allowed)
+        self.assertEqual(decision.rule, "offensive:shell_executable_deny_by_default")
+
+    def test_shell_argv_argument_text_is_not_reparsed_as_shell_syntax(self):
+        for argv in (
+            ["echo", "nmap is installed"],
+            ["printf", "nmap; sqlmap"],
+            ["printf", "$(nmap host)"],
+        ):
+            with self.subTest(argv=argv):
+                self.assertTrue(self._shell_payload_decision({"argv": argv}).allowed)
+
+    def test_shell_argv_offensive_allowlist_is_explicit(self):
+        decision = self._shell_payload_decision({"argv": ["nmap", "host"]}, allowlist=("nmap",))
+        self.assertNotEqual(decision.rule, "offensive:shell_executable_deny_by_default")
+
     def test_nmap_denied_by_default(self):
         from permissions import PermissionConfig, PermissionEngine
 
@@ -263,6 +431,25 @@ class OffensiveToolingTests(unittest.TestCase):
         self.assertTrue(is_offensive_tool("metasploit"))
         self.assertTrue(is_offensive_tool("MSFConsole"))
         self.assertTrue(is_offensive_tool("sqlmap"))
+
+    def test_unicode_spoofed_offensive_tool_is_denied_at_the_gate(self):
+        from permissions import PermissionConfig, PermissionEngine
+
+        spoofed_name = "metаsploit"  # Cyrillic small a
+        engine = PermissionEngine(
+            PermissionConfig(mode="default", can_use_tool=lambda n, p, c: True),
+            tool_kinds={spoofed_name: "exec"},
+        )
+        decision = engine.evaluate(spoofed_name, kind="exec", payload={})
+        self.assertFalse(decision.allowed)
+        self.assertEqual(decision.rule, "offensive:deny_by_default")
+
+    def test_offensive_tool_detection_folds_unicode_presentation_obfuscation(self):
+        from permissions import is_offensive_tool
+
+        self.assertTrue(is_offensive_tool("metas\u200bploit"))
+        self.assertTrue(is_offensive_tool("metаsploit"))  # Cyrillic small a
+        self.assertTrue(is_offensive_tool("ＭＥＴＡＳＰＬＯＩＴ"))  # fullwidth
 
     def test_benign_tools_unaffected(self):
         from permissions import is_offensive_tool
@@ -285,6 +472,20 @@ class OffensiveToolingTests(unittest.TestCase):
         d = engine.evaluate("nmap_scan", kind="exec", payload={})
         # Allowlisted: passes the offensive gate (other layers still apply).
         self.assertNotEqual(d.rule, "offensive:deny_by_default")
+
+    def test_offensive_allowlist_uses_the_same_canonical_identity(self):
+        from permissions import PermissionConfig, PermissionEngine
+
+        engine = PermissionEngine(
+            PermissionConfig(
+                mode="default",
+                can_use_tool=lambda n, p, c: True,
+                offensive_allowlist=("  NMAP_SCAN  ",),
+            ),
+            tool_kinds={"nmap_scan": "exec"},
+        )
+        decision = engine.evaluate("NMAP_SCAN", kind="exec", payload={})
+        self.assertNotEqual(decision.rule, "offensive:deny_by_default")
 
 
 class DelegationTokenTests(unittest.TestCase):
@@ -586,6 +787,26 @@ class PerCallApprovalBindingTests(unittest.TestCase):
 
 
 class EngineAtRuntimeTests(RuntimeTestCase):
+    def test_audit_store_failure_blocks_write_before_handler(self):
+        workspace = self.workspace()
+        provider = self.provider([tool_turn("Write", {"path": "note.txt", "content": "must not run"})])
+
+        def broken_audit(_record):
+            raise OSError("audit storage unavailable")
+
+        runtime = self.runtime(provider=provider, workspace=workspace, allowed_tools=("Write",))
+        engine = PermissionEngine(
+            PermissionConfig(mode="default", allowed_tools=("Write",)),
+            audit_sink=broken_audit,
+        )
+        runtime.permissions = engine
+        runtime._governed_runner.gate = engine
+        report = self.drive(runtime, "write it")
+
+        self.assertFalse((workspace / "note.txt").exists())
+        self.assertEqual(report.denials[0].source, "audit")
+        self.assertEqual(report.tool_calls[0].execution_status, "not_started")
+
     def test_mutating_tool_never_touches_disk_without_approval(self):
         workspace = self.workspace()
         provider = self.provider([tool_turn("Write", {"path": "note.txt", "content": "written"})])
@@ -712,6 +933,33 @@ class PreTradeRiskTests(unittest.TestCase):
         self.assertFalse(d.allowed)
         self.assertIn("price_exceeded", d.rule)
 
+    def test_pretrade_extractors_cannot_mutate_nested_authorized_arguments(self):
+        payload = {"options": {"path": "approved.txt"}, "value": 1, "reference": 1}
+        reference_paths = []
+
+        def value_of(_tool, facts):
+            facts["options"]["path"] = "unapproved.txt"
+            facts["options"]["extra"] = "injected"
+            return facts["value"]
+
+        def reference_of(_tool, facts):
+            reference_paths.append(facts["options"]["path"])
+            return facts["reference"]
+
+        engine = PermissionEngine(
+            PermissionConfig(mode="default", can_use_tool=lambda *_args: True),
+            pretrade=PreTradeRiskConfig(
+                value_of=value_of,
+                reference_of=reference_of,
+                price_collar=0.1,
+            ),
+        )
+        decision = engine.evaluate("Write", kind="edit", payload=payload)
+
+        self.assertTrue(decision.allowed)
+        self.assertEqual(reference_paths, ["approved.txt"])
+        self.assertEqual(payload, {"options": {"path": "approved.txt"}, "value": 1, "reference": 1})
+
     def test_missing_or_malformed_value_fails_closed(self):
         engine, _, _ = self.make_engine()
         for payload in ({"reference": 50}, {"value": float("nan")}, {"value": -1}):
@@ -793,6 +1041,17 @@ class PreTradeRiskTests(unittest.TestCase):
         record = audits[0]
         self.assertEqual(record["event"], "permission.allow")
         self.assertEqual(record["tool"], "Write")
+
+    def test_raising_audit_sink_denies_an_otherwise_allowed_action(self):
+        def bad_sink(_record):
+            raise RuntimeError("audit store down")
+
+        engine, _, _ = self.make_engine(audit_sink=bad_sink)
+        decision = engine.evaluate("Write", kind="edit", payload={"value": 50, "reference": 50})
+        self.assertFalse(decision.allowed)
+        self.assertEqual(decision.source, "audit")
+        self.assertEqual(decision.rule, "audit:write_failed")
+        self.assertIn("execution is denied", decision.reason)
 
     def test_raising_audit_sink_cannot_flip_a_deny(self):
         def bad_sink(record):
@@ -1105,6 +1364,24 @@ class AuthorityCeilingTests(unittest.TestCase):
         self.assertFalse(d.allowed)
         self.assertEqual(d.rule, "ceiling:ascent_denied")
 
+    def test_ceiling_approval_callback_cannot_mutate_nested_payload(self):
+        from permissions import PermissionRequestContext
+
+        payload = {"options": {"path": "approved.txt"}}
+
+        def approve(_name, callback_payload, _context):
+            callback_payload["options"]["path"] = "unapproved.txt"
+            return True
+
+        engine, _ = self._engine(callback=approve)
+        decision = engine.evaluate(
+            "Write", kind="edit", payload=payload,
+            context=PermissionRequestContext(scope_id="phase-1"),
+        )
+
+        self.assertTrue(decision.allowed)
+        self.assertEqual(payload, {"options": {"path": "approved.txt"}})
+
     def test_no_ceiling_no_change(self):
         from permissions import (
             PermissionConfig,
@@ -1313,6 +1590,31 @@ class CompositionClosureTests(unittest.TestCase):
         d2 = engine.evaluate("SendEmail", kind="send", payload={})
         self.assertTrue(d1.allowed)
         self.assertTrue(d2.allowed)
+
+    def test_delegation_capability_check_does_not_advance_action_history(self):
+        engine = self._engine()
+
+        verdict = engine.check_delegation("worker", ["SendEmail"])
+
+        self.assertTrue(verdict.ok)
+        self.assertEqual(list(engine._category_history), [])
+
+    def test_composition_history_can_be_shared_with_child_engine(self):
+        from permissions import PermissionConfig, PermissionEngine
+
+        parent = self._engine()
+        self.assertTrue(parent.evaluate("ReadSecrets", kind="read", payload={}).allowed)
+        child = PermissionEngine(
+            PermissionConfig(mode="default", can_use_tool=lambda _n, _p, _c: True),
+            composition_rules=parent._composition_rules,
+            tool_categories=parent._tool_categories,
+            composition_history=parent._category_history,
+        )
+
+        decision = child.evaluate("SendEmail", kind="send", payload={})
+
+        self.assertFalse(decision.allowed)
+        self.assertEqual(decision.rule, "composition:forbidden_sequence")
 
     def test_rule_needs_two_categories(self):
         from permissions import CompositionRule

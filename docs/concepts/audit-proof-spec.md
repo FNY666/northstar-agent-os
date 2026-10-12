@@ -37,6 +37,12 @@ The chain fields are **optional envelope fields within `audit.ndjson/1`**
 | `signature` | string | 128 lowercase hex chars (Ed25519), optional |
 | `key_id` | string | non-empty, ≤ 200 chars; names the signing key |
 
+Signatures remain optional for general audit feeds. A verifier may require
+them by policy; Northstar's production egress feed does. Verifiers supporting
+rotation resolve each signed record's `key_id` against an operator-provisioned
+public-key set and reject unknown IDs. A key ID is covered by the chain and
+signature, so changing it requires resealing and resigning the record.
+
 ## 3. Canonical JSON
 
 Every hash and every signature is computed over **canonical JSON**. Two

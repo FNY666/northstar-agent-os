@@ -8,8 +8,10 @@ refuses to start when a referenced credential is missing.
 from __future__ import annotations
 
 import base64
+from concurrent.futures import ThreadPoolExecutor
 import json
 import os
+import socket
 import sys
 import tempfile
 import threading
@@ -28,9 +30,11 @@ from egress_sidecar import (  # noqa: E402
     build_context,
     classify_request,
     run_one,
+    _scrub_bytes,
 )
-from egress_enforcer import DestinationRule, EgressPolicy  # noqa: E402
+from egress_enforcer import DestinationRule, EgressPolicy, EgressPolicyError  # noqa: E402
 from transport import decode_request, encode_response  # noqa: E402
+import egress_socket  # noqa: E402
 
 POLICY_TOML = """\
 schema_version = "northstar.egress.v1"
@@ -73,6 +77,38 @@ def wire(**overrides):
 
 
 class ValidationTests(unittest.TestCase):
+    def test_production_signing_seed_is_required_and_strictly_parsed(self):
+        self.assertEqual(
+            egress_socket.signing_seed_from_environment({"NORTHSTAR_EGRESS_SIGNING_SEED": "ab" * 32}),
+            bytes.fromhex("ab" * 32),
+        )
+        for environ in (
+            {},
+            {"NORTHSTAR_EGRESS_SIGNING_SEED": "not-hex"},
+            {"NORTHSTAR_EGRESS_SIGNING_SEED": "ab" * 31},
+            {"NORTHSTAR_EGRESS_SIGNING_SEED": "ab " * 32},
+        ):
+            with self.subTest(environ=environ), self.assertRaises(ValueError):
+                egress_socket.signing_seed_from_environment(environ)
+        self.assertEqual(egress_socket.key_id_from_environment({"NORTHSTAR_EGRESS_KEY_ID": "ops-v1"}), "ops-v1")
+        with self.assertRaises(ValueError):
+            egress_socket.key_id_from_environment({})
+
+    def test_trusted_public_key_file_is_bounded_and_validated(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "trusted.json"
+            self.assertEqual(egress_socket.trusted_public_keys_from_file(path), {})
+            path.write_text(json.dumps({"ops-old": "ab" * 32}), encoding="utf-8")
+            self.assertEqual(
+                egress_socket.trusted_public_keys_from_file(path), {"ops-old": bytes.fromhex("ab" * 32)}
+            )
+            path.write_text('{"ops-old":"bad"}', encoding="utf-8")
+            with self.assertRaises(ValueError):
+                egress_socket.trusted_public_keys_from_file(path)
+            path.write_text('{"ops-old":"' + "ab" * 32 + '","ops-old":"' + "cd" * 32 + '"}', encoding="utf-8")
+            with self.assertRaisesRegex(ValueError, "duplicate key IDs"):
+                egress_socket.trusted_public_keys_from_file(path)
+
     def test_valid_request(self):
         self.assertTrue(classify_request(wire()).ok)
 
@@ -85,6 +121,12 @@ class ValidationTests(unittest.TestCase):
         v = classify_request(wire(body_b64="A" * 1_900_000))
         self.assertFalse(v.ok)
 
+    def test_credential_scrubbing_preserves_non_utf8_response_bytes(self):
+        self.assertEqual(
+            _scrub_bytes(b"\x00\xffBearer token\x80", ("Bearer token",)),
+            b"\x00\xff[REDACTED]\x80",
+        )
+
     def test_invalid_b64_rejected(self):
         v = classify_request(wire(body_b64="!!!not-base64!!!"))
         self.assertFalse(v.ok)
@@ -93,10 +135,66 @@ class ValidationTests(unittest.TestCase):
         self.assertFalse(classify_request(wire(timeout_ms=999)).ok)
         self.assertFalse(classify_request(wire(timeout_ms=999_999)).ok)
 
+    def test_http_injection_and_caller_framing_headers_rejected(self):
+        for bad in (
+            wire(path="/api/echo\r\nHost: attacker.example"),
+            wire(path="//attacker.example/api"),
+            wire(path="/api/☃"),
+            wire(host=" svc.local"),
+            wire(host="svc.local/path"),
+            wire(method="POST\r\nGET"),
+            wire(headers={"X-Test\r\nInjected": "yes"}),
+            wire(headers={"X-Test": "ok\r\nInjected: yes"}),
+            wire(headers={"Transfer-Encoding": "chunked"}),
+            wire(headers={"Content-Length": "999"}),
+            wire(headers={"Connection": "keep-alive"}),
+        ):
+            self.assertFalse(classify_request(bad).ok, bad)
+
     def test_transport_round_trip(self):
         line = encode_response({"a": 1})
         self.assertEqual(decode_request(line.rstrip("\n")), {"a": 1})
         self.assertIsNone(decode_request("not json"))
+
+    def test_socket_reader_enforces_wire_cap_including_newline(self):
+        original = egress_socket.MAX_LINE_BYTES
+        egress_socket.MAX_LINE_BYTES = 5
+        try:
+            for payload, expected in ((b"1234\n", "1234"), (b"12345\n", None), (b"12345", None)):
+                with self.subTest(payload=payload):
+                    reader, writer = socket.socketpair()
+                    try:
+                        writer.sendall(payload)
+                        writer.shutdown(socket.SHUT_WR)
+                        self.assertEqual(egress_socket.read_json_line(reader), expected)
+                    finally:
+                        reader.close()
+                        writer.close()
+        finally:
+            egress_socket.MAX_LINE_BYTES = original
+
+    def test_socket_reader_rejects_invalid_utf8(self):
+        reader, writer = socket.socketpair()
+        try:
+            writer.sendall(b'{"x":"' + bytes([0xFF]) + b'"}\n')
+            writer.shutdown(socket.SHUT_WR)
+            self.assertIsNone(egress_socket.read_json_line(reader))
+        finally:
+            reader.close()
+            writer.close()
+
+    def test_socket_server_closes_connections_when_capacity_is_full(self):
+        slots = threading.BoundedSemaphore(1)
+        self.assertTrue(slots.acquire(blocking=False))
+        accepted, peer = socket.socketpair()
+        try:
+            with ThreadPoolExecutor(max_workers=1) as pool:
+                self.assertFalse(egress_socket.submit_connection(pool, slots, accepted, None))
+            self.assertEqual(accepted.fileno(), -1)
+            self.assertEqual(peer.recv(1), b"")
+        finally:
+            peer.close()
+            slots.release()
 
 
 class SidecarTests(unittest.TestCase):
@@ -123,13 +221,19 @@ class SidecarTests(unittest.TestCase):
 
         cls.server = HTTPServer(("127.0.0.1", 18090), Handler)
         cls.server2 = HTTPServer(("127.0.0.1", 18091), Handler)
-        threading.Thread(target=cls.server.serve_forever, daemon=True).start()
-        threading.Thread(target=cls.server2.serve_forever, daemon=True).start()
+        cls.server_thread = threading.Thread(target=cls.server.serve_forever, daemon=True)
+        cls.server2_thread = threading.Thread(target=cls.server2.serve_forever, daemon=True)
+        cls.server_thread.start()
+        cls.server2_thread.start()
 
     @classmethod
     def tearDownClass(cls):
         cls.server.shutdown()
         cls.server2.shutdown()
+        cls.server_thread.join(timeout=2)
+        cls.server2_thread.join(timeout=2)
+        cls.server.server_close()
+        cls.server2.server_close()
         os.environ.pop("NORTHSTAR_EGRESS_CRED_HOOK_TOKEN", None)
 
     def _ctx(self):
@@ -185,7 +289,8 @@ class SidecarTests(unittest.TestCase):
                 pass
 
         server = HTTPServer(("127.0.0.1", 18092), HostCaptureHandler)
-        threading.Thread(target=server.serve_forever, daemon=True).start()
+        server_thread = threading.Thread(target=server.serve_forever, daemon=True)
+        server_thread.start()
         try:
             req = wire(
                 host="svc.local",
@@ -198,6 +303,8 @@ class SidecarTests(unittest.TestCase):
             self.assertEqual(seen.get("host"), "svc.local")
         finally:
             server.shutdown()
+            server_thread.join(timeout=2)
+            server.server_close()
 
     def test_malformed_wire_rejected(self):
         resp = run_one({"request_id": "r-bad"}, self._ctx())
@@ -267,13 +374,147 @@ class ReceiptFeedTests(unittest.TestCase):
             # Rejected request -> receipt persisted.
             resp = run_one({"request_id": "r-feed-1"}, ctx)
             self.assertEqual(resp["status"], "rejected")
+            denied = run_one(wire(host="not-allowlisted.invalid"), ctx)
+            self.assertEqual(denied["status"], "denied")
             self.assertTrue(feed_path.is_file())
             lines = feed_path.read_text(encoding="utf-8").strip().splitlines()
-            self.assertEqual(len(lines), 1)
+            self.assertEqual(len(lines), 2)
             record = json.loads(lines[0])
             self.assertEqual(record["request_id"], "r-feed-1")
             self.assertEqual(record["kind"], "egress-rejection-receipt/1")
             self.assertIn("chain_hash", record)
+            from audit_chain import verify_lines
+
+            self.assertTrue(verify_lines(lines).ok, "the complete receipt feed must form one chain")
+            self.assertEqual(json.loads(lines[0])["chain_hash"], json.loads(lines[1])["prev_hash"])
+
+    def test_legacy_singleton_receipts_are_verified_and_migrated_into_one_chain(self):
+        from audit_chain import verify_lines
+        from egress_enforcer import build_rejection_receipt
+        from egress_sidecar import ReceiptFeed
+
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "legacy.jsonl"
+            legacy = [
+                build_rejection_receipt(
+                    raw_value={"request_id": f"legacy-{i}"}, errors=["legacy"],
+                    request_id=f"legacy-{i}", now=float(i),
+                )
+                for i in range(2)
+            ]
+            path.write_text("".join(json.dumps(item) + "\n" for item in legacy), encoding="utf-8")
+            feed = ReceiptFeed(path)
+            lines = path.read_text(encoding="utf-8").splitlines()
+            self.assertTrue(verify_lines(lines).ok)
+            migrated = [json.loads(line) for line in lines]
+            self.assertEqual([item["receipt"]["request_id"] for item in migrated], ["legacy-0", "legacy-1"])
+            self.assertEqual(feed.appended, 2)
+
+    def test_signed_feed_chain_verifies_and_reloads(self):
+        from audit_chain import verify_lines
+        from ed25519 import public_key
+        from egress_sidecar import ReceiptFeed
+
+        seed = bytes(range(32))
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "signed.jsonl"
+            feed = ReceiptFeed(path, enforcer_seed=seed, key_id="egress-test")
+            self.assertTrue(feed.append({"kind": "test", "request_id": "signed-1"}))
+            self.assertTrue(feed.append({"kind": "test", "request_id": "signed-2"}))
+            lines = path.read_text(encoding="utf-8").splitlines()
+            self.assertTrue(verify_lines(lines, public_key=public_key(seed), expect_session_id=feed._session_id).ok)
+            reloaded = ReceiptFeed(path, enforcer_seed=seed, key_id="egress-test")
+            self.assertEqual(reloaded.appended, 2)
+            unsigned_tail = json.loads(lines[-1])
+            unsigned_tail.pop("signature")
+            lines[-1] = json.dumps(unsigned_tail, sort_keys=True)
+            path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+            with self.assertRaisesRegex(EgressPolicyError, "signature is required"):
+                ReceiptFeed(path, enforcer_seed=seed, key_id="egress-test")
+
+    def test_key_rotation_verifies_old_entries_and_signs_new_entries(self):
+        from audit_chain import verify_lines
+        from ed25519 import public_key
+        from egress_sidecar import ReceiptFeed
+
+        old_seed = bytes(range(32))
+        new_seed = bytes(range(1, 33))
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "rotated.jsonl"
+            old_feed = ReceiptFeed(path, enforcer_seed=old_seed, key_id="ops-old")
+            self.assertTrue(old_feed.append({"kind": "test", "request_id": "before-rotation"}))
+            with self.assertRaises(EgressPolicyError):
+                ReceiptFeed(path, enforcer_seed=new_seed, key_id="ops-new")
+            new_feed = ReceiptFeed(
+                path,
+                enforcer_seed=new_seed,
+                key_id="ops-new",
+                trusted_public_keys={"ops-old": public_key(old_seed)},
+            )
+            self.assertTrue(new_feed.append({"kind": "test", "request_id": "after-rotation"}))
+            lines = path.read_text(encoding="utf-8").splitlines()
+            self.assertTrue(verify_lines(
+                lines,
+                public_key={"ops-old": public_key(old_seed), "ops-new": public_key(new_seed)},
+                require_signatures=True,
+            ).ok)
+            recovered = ReceiptFeed(
+                path,
+                enforcer_seed=new_seed,
+                key_id="ops-new",
+                trusted_public_keys={"ops-old": public_key(old_seed)},
+            )
+            self.assertEqual(recovered.appended, 2)
+
+    def test_production_key_migrates_unsigned_legacy_feed(self):
+        from audit_chain import chain_records
+        from egress_sidecar import ReceiptFeed
+
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "legacy.jsonl"
+            legacy = chain_records([{"kind": "test", "request_id": "legacy"}], component="legacy")
+            path.write_text(json.dumps(legacy[0]) + "\n", encoding="utf-8")
+            feed = ReceiptFeed(path, enforcer_seed=bytes(range(32)), key_id="egress-test")
+            self.assertEqual(feed.appended, 1)
+            migrated = json.loads(path.read_text(encoding="utf-8").splitlines()[0])
+            self.assertIn("signature", migrated)
+
+    def test_allowed_request_is_not_sent_when_receipt_persistence_fails(self):
+        from unittest.mock import patch
+        from egress_sidecar import ReceiptFeed
+
+        with tempfile.TemporaryDirectory() as tmp:
+            blocked_parent = Path(tmp) / "not-a-directory"
+            blocked_parent.write_text("file", encoding="utf-8")
+            feed = ReceiptFeed(blocked_parent / "receipts.jsonl")
+            ctx = self._ctx()
+            ctx.receipt_feed = feed
+            with patch("egress_sidecar._perform_http") as perform:
+                response = run_one(wire(), ctx)
+            self.assertEqual(response["status"], "error")
+            self.assertIn("not sent", response["error"])
+            self.assertFalse(perform.called, "no upstream request may occur without a durable receipt")
+            self.assertEqual(response["receipt"]["verdict"], "allow")
+
+    def test_allowed_receipt_is_persisted_once_before_request(self):
+        from unittest.mock import patch
+        from egress_sidecar import ReceiptFeed
+
+        with tempfile.TemporaryDirectory() as tmp:
+            feed_path = Path(tmp) / "receipts.jsonl"
+            feed = ReceiptFeed(feed_path)
+            # Idempotence must not depend on a bounded in-memory digest
+            # cache: a slow request may finish after many later appends.
+            feed._remember_digest = lambda digest: None
+            ctx = self._ctx()
+            ctx.receipt_feed = feed
+            with patch("egress_sidecar._perform_http", return_value=(200, {}, b"ok", False)) as perform:
+                response = run_one(wire(), ctx)
+            self.assertEqual(response["status"], "ok")
+            self.assertTrue(perform.called)
+            lines = feed_path.read_text(encoding="utf-8").splitlines()
+            self.assertEqual(len(lines), 1, "the wrapper must not duplicate the preflight receipt")
+            self.assertEqual(json.loads(lines[0])["receipt_id"], response["receipt"]["receipt_id"])
 
     def test_no_feed_no_persistence(self):
         # Without a feed path, run_one works but writes nothing.

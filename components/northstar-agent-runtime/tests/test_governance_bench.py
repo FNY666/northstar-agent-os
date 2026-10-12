@@ -59,6 +59,12 @@ class GovernanceBenchUnitTests(unittest.TestCase):
         self.assertTrue(all(c.track == "budget" for c in report.cases))
         self.assertGreaterEqual(report.total, 3)
 
+    def test_shared_argument_tree_redteam_case_uses_runtime_receipt(self):
+        report = run_suite(only=["redteam.shared_argument_tree_budget"])
+        self.assertTrue(report.ok, [case.as_dict() for case in report.cases])
+        self.assertEqual(report.total, 1)
+        self.assertEqual(report.cases[0].track, "redteam")
+
     def test_unknown_only_is_a_configuration_error(self):
         with self.assertRaises(ValueError):
             run_suite(only=["does.not.exist"])

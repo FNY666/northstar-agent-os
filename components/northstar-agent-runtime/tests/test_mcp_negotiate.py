@@ -181,12 +181,23 @@ class MrtrPlanningTests(unittest.TestCase):
 class NegotiationSubprocessTests(unittest.TestCase):
     """What the client actually puts on the wire, read back from the fixture."""
 
-    def connect(self, *, mode: str, fixture: Path = FIXTURE, **kwargs: object) -> McpStdioClient:
+    def connect(
+        self,
+        *,
+        mode: str,
+        fixture: Path = FIXTURE,
+        server_env: dict[str, str] | None = None,
+        **kwargs: object,
+    ) -> McpStdioClient:
         wire = Path(tempfile.mkdtemp(prefix="nsar-mcpwire-")) / "wire.jsonl"
+        # This fixture is an offline protocol peer; network isolation is covered by
+        # test_mcp_network and may be unavailable in minimal CI containers.
+        kwargs.setdefault("network", "allowed")
         saved = dict(os.environ)
-        os.environ.update({"MRTR_SERVER_MODE": mode, "MRTR_SERVER_WIRE": str(wire)})
+        child_env = {"MRTR_SERVER_MODE": mode, "MRTR_SERVER_WIRE": str(wire), **(server_env or {})}
+        os.environ.update(child_env)
         try:
-            client = McpStdioClient("demo", [sys.executable, str(fixture)], timeout_ms=8_000, env={"MRTR_SERVER_MODE": mode, "MRTR_SERVER_WIRE": str(wire)}, **kwargs)  # type: ignore[arg-type]
+            client = McpStdioClient("demo", [sys.executable, str(fixture)], timeout_ms=8_000, env=child_env, **kwargs)  # type: ignore[arg-type]
             client.connect()
         finally:
             os.environ.clear()
@@ -207,6 +218,33 @@ class NegotiationSubprocessTests(unittest.TestCase):
             self.assertEqual(client.era, "modern")
             self.assertEqual(client.protocol_version, MODERN_VERSION)
             self.assertIn("mutually supported version", client.negotiation)
+        finally:
+            client.close()
+
+    def test_modern_list_changed_uses_acknowledged_subscription_and_quarantines_drift(self):
+        client = self.connect(
+            mode="discover",
+            server_env={"MRTR_LIST_CHANGED": "1", "MRTR_CHANGE_ON_CALL": "1"},
+            network="allowed",
+        )
+        try:
+            self.assertTrue(client._list_changed_subscribed)
+            subscription_id = client._subscription_id
+            self.assertIsInstance(subscription_id, int)
+            methods = [entry["method"] for entry in self.wire(client)]
+            self.assertEqual(methods[:3], [DISCOVER_METHOD, "subscriptions/listen", "tools/list"])
+            listen = self.wire(client)[1]
+            self.assertEqual(listen["params"]["notifications"], {"toolsListChanged": True})
+            self.assertIn(META_PROTOCOL_VERSION, listen["meta"])
+
+            first = client.call_tool("echo", {"text": "first"})
+            self.assertFalse(first.is_error, first.text())
+            second = client.call_tool("echo", {"text": "must-not-run"})
+            self.assertTrue(second.is_error)
+            self.assertTrue(client.quarantined)
+            methods = [entry["method"] for entry in self.wire(client)]
+            self.assertEqual(methods.count("tools/call"), 1)
+            self.assertEqual(methods.count("tools/list"), 2)
         finally:
             client.close()
 
@@ -272,7 +310,7 @@ class NegotiationSubprocessTests(unittest.TestCase):
         os.environ.pop("MRTR_SERVER_MODE", None)
         os.environ.pop("MRTR_SERVER_WIRE", None)
         try:
-            client = McpStdioClient("old", [sys.executable, str(LEGACY_FIXTURE)], timeout_ms=8_000)
+            client = McpStdioClient("old", [sys.executable, str(LEGACY_FIXTURE)], timeout_ms=8_000, network="allowed")
             client.connect()
         finally:
             os.environ.clear()
@@ -292,7 +330,7 @@ class NegotiationSubprocessTests(unittest.TestCase):
         saved = dict(os.environ)
         os.environ["MRTR_SERVER_MODE"] = "no-discover"
         try:
-            client = McpStdioClient("demo", [sys.executable, str(FIXTURE)], timeout_ms=8_000)
+            client = McpStdioClient("demo", [sys.executable, str(FIXTURE)], timeout_ms=8_000, network="allowed")
             with self.assertRaises(McpError) as caught:
                 client.connect()
         finally:

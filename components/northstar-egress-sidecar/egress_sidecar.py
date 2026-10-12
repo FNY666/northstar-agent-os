@@ -32,6 +32,7 @@ from __future__ import annotations
 
 import base64
 import binascii
+import hashlib
 import http.client
 import json
 import os
@@ -43,7 +44,7 @@ import threading
 import time
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, Mapping
 
 
 def _runtime_dir() -> Path:
@@ -64,12 +65,23 @@ from egress_enforcer import (  # noqa: E402
     EgressPolicyError,
     EgressRequest,
     EgressVerdict,
+    FORBIDDEN_EGRESS_HEADERS,
+    _HTTP_TOKEN_RE,
+    _valid_egress_hostname,
     approval_receipt_from_dict,
     authorize_egress,
     build_rejection_receipt,
     card_from_dict,
     load_egress_policy,
 )
+from audit_chain import (  # noqa: E402
+    CHAIN_VERSION_V2,
+    chain_record,
+    chain_records,
+    verify_lines,
+)
+from canonical_json import jcs_canonical_json  # noqa: E402
+from ed25519 import public_key as ed25519_public_key  # noqa: E402
 
 # Wire bounds. The engine caps bodies at 1 MiB; the transport caps the line.
 MAX_BODY_B64_CHARS = 1_800_000  # ~1.3 MiB of base64, headroom over the 1 MiB body cap.
@@ -122,39 +134,206 @@ class ReceiptFeed:
     egress history even across sidecar restarts. Thread-safe: the socket
     server dispatches requests on a thread pool.
 
-    The receipts themselves are already hash-chained by
-    :mod:`egress_enforcer`; this feed preserves their order on disk and
-    fsyncs each append for durability. On startup it seeks to the end
-    (no chain re-verification here -- that is the auditor's job via
-    ``audit_chain.verify_lines``).
+    Each inner receipt retains its own engine seal. An outer sidecar-level
+    chain links feed entries in append order, so deleting, reordering, or
+    changing entries breaks ``audit_chain.verify_lines``. Startup verifies
+    the chain and migrates valid legacy singleton receipts before accepting
+    new requests.
 
-    Failures are best-effort: a feed write error is recorded on the
-    instance (``last_error``) but never breaks request handling -- the
-    receipt is still returned to the caller.
+    Append failures are reported to the caller and recorded on the instance
+    (``last_error``). Allowed egress must persist its authorization receipt
+    before opening the upstream connection; feed failure therefore blocks
+    that network side effect.
     """
 
-    def __init__(self, path: str | Path) -> None:
+    def __init__(
+        self,
+        path: str | Path,
+        *,
+        enforcer_seed: bytes | None = None,
+        key_id: str | None = None,
+        trusted_public_keys: Mapping[str, bytes] | None = None,
+    ) -> None:
         self.path = Path(path)
         self._lock = threading.Lock()
+        self._receipt_digests: dict[str, None] = {}
         self.last_error: str | None = None
         self.appended = 0
+        self.enforcer_seed = bytes(enforcer_seed) if enforcer_seed is not None else None
+        self.key_id = key_id
+        self.trusted_public_keys = {str(k): bytes(v) for k, v in (trusted_public_keys or {}).items()}
+        if self.enforcer_seed is not None:
+            current_public_key = ed25519_public_key(self.enforcer_seed)
+            current_lookup_id = key_id or "__legacy_default__"
+            configured = self.trusted_public_keys.get(current_lookup_id)
+            if configured is not None and configured != current_public_key:
+                raise EgressPolicyError(f"trusted public key for {current_lookup_id!r} conflicts with signing seed")
+            self.trusted_public_keys[current_lookup_id] = current_public_key
+        self._session_id = "egress-feed:" + hashlib.sha256(str(self.path.resolve()).encode()).hexdigest()[:24]
+        self._tail_hash: str | None = None
+        self._load_and_verify()
+
+    def _public_keys(self) -> dict[str, bytes] | None:
+        if not self.trusted_public_keys:
+            return None
+        return self.trusted_public_keys
+
+    def _load_and_verify(self) -> None:
+        if not self.path.exists():
+            return
+        try:
+            with self.path.open("rb") as handle:
+                first_line = handle.readline()
+                if not first_line:
+                    return
+                first_record = json.loads(first_line.decode("utf-8"))
+        except EgressPolicyError:
+            raise
+        except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+            raise EgressPolicyError(f"cannot read egress receipt feed: {type(exc).__name__}") from exc
+        if not isinstance(first_record, dict):
+            raise EgressPolicyError("egress receipt feed contains a non-object record")
+        if first_record.get("feed_format") == "northstar.egress-feed/2":
+            try:
+                with self.path.open("rb") as handle:
+                    result = verify_lines(
+                        (line.decode("utf-8", "strict") for line in handle),
+                        public_key=self._public_keys(),
+                        expect_session_id=self._session_id,
+                        require_signatures=self.enforcer_seed is not None,
+                    )
+                    if not result.ok:
+                        raise EgressPolicyError(f"egress receipt feed chain is invalid: {result.reason}")
+                    self.appended = result.chained
+                    handle.seek(0)
+                    last_record = None
+                    for line in handle:
+                        if line.strip():
+                            last_record = json.loads(line.decode("utf-8", "strict"))
+                if not isinstance(last_record, dict):
+                    raise EgressPolicyError("egress receipt feed has no final chained record")
+                self._tail_hash = str(last_record["chain_hash"])
+            except (OSError, UnicodeDecodeError, json.JSONDecodeError, KeyError) as exc:
+                raise EgressPolicyError(f"cannot verify egress receipt feed: {type(exc).__name__}") from exc
+            return
+
+        # Previous versions wrote each receipt as its own singleton chain.
+        # Verify every surviving receipt independently, then preserve it as a
+        # nested object in one newly linked feed. This cannot recover history
+        # already deleted from the legacy file, but it prevents further gaps.
+        self._migrate_legacy()
+
+    def _migrate_legacy(self) -> None:
+        temporary = self.path.with_name(f".{self.path.name}.migrate-{os.getpid()}")
+        self._tail_hash = None
+        self.appended = 0
+        try:
+            with self.path.open("rb") as source, open(temporary, "xb") as target:
+                for index, line in enumerate(source, 1):
+                    if not line.endswith(b"\n"):
+                        raise EgressPolicyError(f"legacy egress receipt {index} is not newline terminated")
+                    try:
+                        receipt = json.loads(line.decode("utf-8", "strict"))
+                    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+                        raise EgressPolicyError(f"legacy egress receipt {index} is malformed") from exc
+                    if not isinstance(receipt, dict):
+                        raise EgressPolicyError(f"legacy egress receipt {index} is not an object")
+                    # Historical deployments could run without a signing
+                    # seed. Preserve their hash-chain integrity during
+                    # migration, while still verifying any signature that is
+                    # present against the configured production key.
+                    legacy_public_keys = self._public_keys() if "signature" in receipt else None
+                    verified = verify_lines([line.decode("utf-8")], public_key=legacy_public_keys)
+                    if not verified.ok:
+                        raise EgressPolicyError(f"legacy egress receipt {index} is invalid: {verified.reason}")
+                    entry = self._make_entry(receipt, sequence=index)
+                    target.write((json.dumps(entry, ensure_ascii=False, sort_keys=True) + "\n").encode("utf-8"))
+                    self._tail_hash = str(entry["chain_hash"])
+                    self.appended += 1
+                    self._remember_digest(entry["receipt_digest"])
+                target.flush()
+                os.fsync(target.fileno())
+            os.chmod(temporary, 0o600)
+            os.replace(temporary, self.path)
+            directory_fd = os.open(self.path.parent, os.O_RDONLY | getattr(os, "O_DIRECTORY", 0))
+            try:
+                os.fsync(directory_fd)
+            finally:
+                os.close(directory_fd)
+        except BaseException:
+            try:
+                temporary.unlink()
+            except OSError:
+                pass
+            self._tail_hash = None
+            self.appended = 0
+            self._receipt_digests.clear()
+            raise
+
+    def _make_entry(
+        self,
+        receipt: dict[str, Any],
+        *,
+        sequence: int,
+    ) -> dict[str, Any]:
+        try:
+            receipt_digest = hashlib.sha256(jcs_canonical_json(receipt)).hexdigest()
+        except (TypeError, ValueError) as exc:
+            raise EgressPolicyError("receipt is not canonical JSON") from exc
+        body: dict[str, Any] = {
+            "feed_format": "northstar.egress-feed/2",
+            "feed_sequence": sequence,
+            "kind": receipt.get("kind", "egress-feed-entry/2"),
+            "request_id": receipt.get("request_id", ""),
+            "receipt_id": receipt.get("receipt_id", ""),
+            "receipt_digest": receipt_digest,
+            "receipt": receipt,
+        }
+        if self._tail_hash is None:
+            entries = chain_records(
+                [body],
+                component="egress-sidecar",
+                session_id=self._session_id,
+                key_id=self.key_id,
+            )
+            chained = entries[0]
+        else:
+            body["chain"] = CHAIN_VERSION_V2
+            if self.key_id is not None:
+                body["key_id"] = self.key_id
+            chained = chain_record(body, self._tail_hash, chain_version=CHAIN_VERSION_V2)
+        if self.enforcer_seed is not None:
+            from audit_chain import sign_record
+
+            chained = sign_record(chained, self.enforcer_seed, key_id=self.key_id)
+        return chained
+
+    def _remember_digest(self, digest: str) -> None:
+        self._receipt_digests[digest] = None
+        if len(self._receipt_digests) > 4096:
+            self._receipt_digests.pop(next(iter(self._receipt_digests)))
 
     def append(self, receipt: dict[str, Any]) -> bool:
         """Append one receipt. Returns True on success."""
         try:
-            line = json.dumps(receipt, ensure_ascii=False, sort_keys=True) + "\n"
+            digest = hashlib.sha256(jcs_canonical_json(receipt)).hexdigest()
         except (TypeError, ValueError) as exc:
             self.last_error = f"serialize: {exc}"
             return False
-        data = line.encode("utf-8")
         try:
             with self._lock:
+                if digest in self._receipt_digests:
+                    return True
                 self.path.parent.mkdir(parents=True, exist_ok=True)
+                entry = self._make_entry(receipt, sequence=self.appended + 1)
+                data = (json.dumps(entry, ensure_ascii=False, sort_keys=True) + "\n").encode("utf-8")
                 with open(self.path, "ab") as handle:
                     handle.write(data)
                     handle.flush()
                     os.fsync(handle.fileno())
                 self.appended += 1
+                self._remember_digest(digest)
+                self._tail_hash = str(entry["chain_hash"])
         except OSError as exc:
             self.last_error = f"write: {exc}"
             return False
@@ -225,16 +404,19 @@ def classify_request(value: Any) -> RequestValidation:
     need("agent_id", (str,))
     need("run_id", (str,))
     host = need("host", (str,))
-    if isinstance(host, str) and len(host) > 253:
-        errors.append("host too long")
+    if isinstance(host, str) and not _valid_egress_hostname(host):
+        errors.append("host must be a canonical DNS-style ASCII hostname")
     port = value.get("port")
     if not isinstance(port, int) or isinstance(port, bool) or not 1 <= port <= 65535:
         errors.append("port must be an integer 1-65535")
     method = need("method", (str,))
-    if isinstance(method, str) and (not method.strip() or len(method) > 16):
+    if isinstance(method, str) and (len(method) > 16 or not _HTTP_TOKEN_RE.fullmatch(method)):
         errors.append("method malformed")
     path = need("path", (str,))
-    if isinstance(path, str) and (not path.startswith("/") or len(path) > 4_096):
+    if isinstance(path, str) and (
+        not path.startswith("/") or path.startswith("//") or len(path) > 4_096
+        or "#" in path or any(ord(char) < 0x21 or ord(char) > 0x7e for char in path)
+    ):
         errors.append("path must start with '/' and stay bounded")
 
     headers = value.get("headers", {})
@@ -249,6 +431,15 @@ def classify_request(value: Any) -> RequestValidation:
                 break
             if len(k) > MAX_HEADER_NAME_CHARS or len(v) > MAX_HEADER_VALUE_CHARS:
                 errors.append("header too long")
+                break
+            if not _HTTP_TOKEN_RE.fullmatch(k):
+                errors.append("header name is malformed")
+                break
+            if k.lower() in FORBIDDEN_EGRESS_HEADERS:
+                errors.append(f"header {k.lower()} is managed by the sidecar")
+                break
+            if any((ord(char) < 0x20 and char != "\t") or ord(char) > 0xff for char in v):
+                errors.append("header value contains a control character")
                 break
 
     body_b64 = value.get("body_b64", "")
@@ -377,6 +568,15 @@ def _scrub(value: str, secrets_: tuple[str, ...]) -> str:
     return value
 
 
+def _scrub_bytes(value: bytes, secrets_: tuple[str, ...]) -> bytes:
+    """Scrub UTF-8 credential reflections without corrupting binary bodies."""
+    for secret in secrets_:
+        encoded = secret.encode("utf-8") if secret else b""
+        if encoded and encoded in value:
+            value = value.replace(encoded, b"[REDACTED]")
+    return value
+
+
 def _run_one_inner(value: dict[str, Any], ctx: SidecarContext) -> dict[str, Any]:
     """Handle one validated wire request. Never raises: failures are
     encoded as ``status: denied | error`` with a receipt when one exists."""
@@ -439,6 +639,17 @@ def _run_one_inner(value: dict[str, Any], ctx: SidecarContext) -> dict[str, Any]
             "receipt": verdict.receipt,
         }
 
+    # The authorization decision is itself security-relevant. Make it
+    # durable before any credential is attached or socket is opened; if the
+    # audit sink is unavailable, do not perform the authorized side effect.
+    if ctx.receipt_feed is not None and not ctx.receipt_feed.append(verdict.receipt):
+        return {
+            "request_id": request_id,
+            "status": "error",
+            "error": "authorization receipt could not be persisted; outbound request was not sent",
+            "receipt": verdict.receipt,
+        }
+
     rule = ctx.policy.destination_for(request.host)
     assert rule is not None  # authorized, so the rule exists.
     headers = dict(request.headers)
@@ -462,7 +673,7 @@ def _run_one_inner(value: dict[str, Any], ctx: SidecarContext) -> dict[str, Any]
     # while TLS still validates request.host.
     headers["host"] = request.host
     headers["user-agent"] = "northstar-egress-sidecar/1"
-    headers.setdefault("connection", "close")
+    headers["connection"] = "close"
 
     timeout_s = min(max(int(value.get("timeout_ms", 30_000)) / 1000.0, 1.0), 120.0)
     try:
@@ -488,9 +699,7 @@ def _run_one_inner(value: dict[str, Any], ctx: SidecarContext) -> dict[str, Any]
     # Credential reflection guard: a malicious endpoint must not be able to
     # bounce the brokered credential back to the agent.
     scrubbed_headers = {k: _scrub(v, ctx.credentials.known_values()) for k, v in resp_headers.items()}
-    body_text = resp_body.decode("utf-8", errors="replace")
-    scrubbed_text = _scrub(body_text, ctx.credentials.known_values())
-    scrubbed_body = scrubbed_text.encode("utf-8", errors="replace")
+    scrubbed_body = _scrub_bytes(resp_body, ctx.credentials.known_values())
 
     return {
         "request_id": request_id,
@@ -504,16 +713,18 @@ def _run_one_inner(value: dict[str, Any], ctx: SidecarContext) -> dict[str, Any]
 
 
 def run_one(value: dict[str, Any], ctx: SidecarContext) -> dict[str, Any]:
-    """Handle one wire request and persist its receipt.
+    """Handle one wire request and persist receipts not already prewritten.
 
-    Wraps :func:`_run_one_inner`; when the response carries a receipt and
-    the context has a receipt feed configured, the receipt is appended to
-    the persistent feed. Feed failures never break the response.
+    Allowed receipts are durably appended inside :func:`_run_one_inner`
+    before network I/O. This wrapper records rejected and denied requests,
+    which have no upstream side effect to guard. Keeping the two paths
+    explicit avoids relying on a bounded digest cache to suppress a second
+    append after slow, concurrent requests.
     """
     response = _run_one_inner(value, ctx)
     feed = ctx.receipt_feed
     receipt = response.get("receipt")
-    if feed is not None and isinstance(receipt, dict):
+    if feed is not None and response.get("status") in {"rejected", "denied"} and isinstance(receipt, dict):
         feed.append(receipt)
     return response
 
@@ -524,6 +735,7 @@ def build_context(
     approver_keys: dict[str, bytes] | None = None,
     enforcer_seed: bytes | None = None,
     key_id: str | None = None,
+    trusted_public_keys: Mapping[str, bytes] | None = None,
     receipt_feed_path: str | Path | None = None,
 ) -> SidecarContext:
     """Build the sidecar context from on-disk config + environment.
@@ -540,7 +752,16 @@ def build_context(
             "sidecar refuses to start: credential(s) not in the environment: "
             + ", ".join(f"NORTHSTAR_EGRESS_CRED_{re.sub(r'[^A-Za-z0-9]', '_', m).upper()}" for m in missing)
         )
-    feed = ReceiptFeed(receipt_feed_path) if receipt_feed_path else None
+    feed = (
+        ReceiptFeed(
+            receipt_feed_path,
+            enforcer_seed=enforcer_seed,
+            key_id=key_id,
+            trusted_public_keys=trusted_public_keys,
+        )
+        if receipt_feed_path
+        else None
+    )
     return SidecarContext(
         policy=policy,
         credentials=credentials,

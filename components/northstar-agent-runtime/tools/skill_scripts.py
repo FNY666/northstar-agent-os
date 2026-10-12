@@ -26,15 +26,18 @@ This module does not register a new tool. Shell already covers execution.
 """
 from __future__ import annotations
 
+import hashlib
 import os
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterable
 
-from skills import SKILL_FILE_NAME, SKILLS_DIRECTORY, Skill, SkillError
+from skills import SKILL_FILE_NAME, SKILLS_DIRECTORY, Skill, SkillError, _read_bounded_regular
 
 SCRIPTS_DIRECTORY = "scripts"
 MAX_SCRIPTS_PER_SKILL = 16
+MAX_SCRIPT_DIRECTORY_ENTRIES = 4_096
+MAX_SCRIPT_BYTES = 1024 * 1024
 MAX_SCRIPT_NAME_CHARS = 128
 MAX_LISTING_CHARS = 4_000
 
@@ -57,6 +60,7 @@ class SkillScript:
     name: str
     relative: str  # workspace-relative path the model can pass to Shell
     path: Path
+    digest: str
 
     def as_dict(self) -> dict[str, str]:
         return {"skill": self.skill, "name": self.name, "path": self.relative}
@@ -74,6 +78,11 @@ def discover_skill_scripts(
         scripts_dir = skill_dir / SCRIPTS_DIRECTORY
         if not scripts_dir.is_dir():
             continue
+        if scripts_dir.is_symlink():
+            raise SkillError(
+                f"skill {skill.name}: scripts/ is a symlink; "
+                "skill scripts must live in the reviewed skill tree"
+            )
         resolved_dir = Path(os.path.realpath(str(scripts_dir)))
         try:
             resolved_dir.relative_to(root)
@@ -82,7 +91,19 @@ def discover_skill_scripts(
                 f"skill {skill.name}: scripts/ resolves outside the workspace root {root}; "
                 "refusing to follow the symlink"
             ) from error
-        entries = sorted(scripts_dir.iterdir(), key=lambda p: p.name)
+        # Bound the directory walk itself, not only the number of scripts we
+        # eventually list. Sorting Path.iterdir() first would allocate every
+        # name in an attacker-controlled skill tree before the later cap.
+        names: list[str] = []
+        with os.scandir(scripts_dir) as iterator:
+            for entry in iterator:
+                if len(names) >= MAX_SCRIPT_DIRECTORY_ENTRIES:
+                    raise SkillError(
+                        f"skill {skill.name}: scripts/ exceeds the "
+                        f"{MAX_SCRIPT_DIRECTORY_ENTRIES}-entry discovery limit"
+                    )
+                names.append(entry.name)
+        entries = [scripts_dir / name for name in sorted(names)]
         count = 0
         for entry in entries:
             if count >= MAX_SCRIPTS_PER_SKILL:
@@ -91,6 +112,11 @@ def discover_skill_scripts(
                 continue
             if entry.suffix.lower() not in SCRIPT_SUFFIXES:
                 continue
+            if entry.is_symlink():
+                raise SkillError(
+                    f"skill {skill.name}: script {entry.name} is a symlink; "
+                    "skill scripts must be regular files so review pins the executed bytes"
+                )
             if len(entry.name) > MAX_SCRIPT_NAME_CHARS or any(ch in entry.name for ch in "/\\\x00"):
                 raise SkillError(f"skill {skill.name}: script name {entry.name!r} is not usable")
             resolved = Path(os.path.realpath(str(entry)))
@@ -105,12 +131,21 @@ def discover_skill_scripts(
                 relative = str(resolved.relative_to(root))
             except ValueError:
                 relative = str(Path(SKILLS_DIRECTORY) / skill.name / SCRIPTS_DIRECTORY / entry.name)
+            try:
+                script_bytes = _read_bounded_regular(resolved, MAX_SCRIPT_BYTES)
+            except OSError as error:
+                raise SkillError(f"skill {skill.name}: cannot pin script {entry.name!r}: {error}") from error
+            if len(script_bytes) > MAX_SCRIPT_BYTES:
+                raise SkillError(
+                    f"skill {skill.name}: script {entry.name!r} exceeds the {MAX_SCRIPT_BYTES}-byte pinning limit"
+                )
             found.append(
                 SkillScript(
                     skill=skill.name,
                     name=entry.name,
                     relative=relative,
                     path=resolved,
+                    digest=hashlib.sha256(script_bytes).hexdigest(),
                 )
             )
             count += 1
@@ -136,6 +171,7 @@ def skill_scripts_listing(scripts: Iterable[SkillScript]) -> str:
 
 __all__ = [
     "MAX_SCRIPTS_PER_SKILL",
+    "MAX_SCRIPT_DIRECTORY_ENTRIES",
     "SCRIPT_SUFFIXES",
     "SCRIPTS_DIRECTORY",
     "SkillScript",

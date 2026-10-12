@@ -229,6 +229,21 @@ class ToolResultBlock:
     tool_use_id: str = ""
     content: Any = ""
     is_error: bool = False
+    # Runtime-only provenance. Deliberately omitted from provider API payloads.
+    provenance: tuple[str, str, str] | None = None
+
+    def display_text(self) -> str:
+        """Return artifact text without the runtime-only model provenance label."""
+        text = self.text()
+        if text.startswith("[Northstar tool result metadata: "):
+            _, separator, rest = text.partition("]\n")
+            if separator:
+                return rest
+        if text.startswith("[Northstar tool result trust="):
+            _, separator, rest = text.partition("]\n")
+            if separator:
+                return rest
+        return text
     kind: BlockKind = "tool_result"
 
     def to_api(self) -> dict[str, Any]:
@@ -405,12 +420,17 @@ class ResultMessage:
     num_turns: int = 0
     duration_ms: int = 0
     total_cost_usd: float = 0.0
+    unverified_cost_usd: float = 0.0
     total_usage: Usage = ZERO_USAGE
     session_id: str = ""
     pricing_estimated: bool = False
     errors: tuple[str, ...] = ()
     permission_denials: tuple[dict[str, Any], ...] = ()
     stop_reason: str = ""
+    # Runtime-owned execution evidence, keyed by call_id; contains no raw args.
+    tool_call_reports: tuple[dict[str, Any], ...] = ()
+    # Delegated execution evidence, recursively summarized without transcripts.
+    subagents: tuple[dict[str, Any], ...] = ()
     role: Literal["result"] = "result"
 
     def __post_init__(self) -> None:
@@ -426,7 +446,8 @@ class ResultMessage:
         return None
 
     def render(self) -> str:
-        return f"[result:{self.subtype}] turns={self.num_turns} cost=${self.total_cost_usd:.6f}"
+        unknown = f" (unverified~${self.unverified_cost_usd:.6f})" if self.unverified_cost_usd else ""
+        return f"[result:{self.subtype}] turns={self.num_turns} cost=${self.total_cost_usd:.6f}{unknown}"
 
 
 Message = Any  # SystemMessage | AssistantMessage | UserMessage | ResultMessage
@@ -735,6 +756,8 @@ def coerce_blocks(values: Iterable[Any] | None) -> tuple[Any, ...]:
                         tool_use_id=str(value.get("tool_use_id", "")),
                         content=value.get("content", ""),
                         is_error=bool(value.get("is_error", False)),
+                        # Serialized/provider-shaped data is not an authority for
+                        # provenance. Only in-process ToolResult construction sets it.
                     )
                 )
             else:

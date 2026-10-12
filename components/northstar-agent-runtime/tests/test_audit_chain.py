@@ -168,6 +168,17 @@ class TamperDetectionTests(unittest.TestCase):
         self.assertFalse(result.ok)
         self.assertEqual(result.broken_at, 2)
 
+    def test_verifier_stops_at_first_broken_link_without_buffering_suffix(self):
+        first = dict(self.chained[0], chain_hash="00" * 32)
+
+        def lines():
+            yield json.dumps(first)
+            raise AssertionError("verifier consumed records after a conclusive chain failure")
+
+        result = verify_lines(lines())
+        self.assertFalse(result.ok)
+        self.assertEqual(result.broken_at, 1)
+
     def test_reorder_detected(self):
         records = [self.chained[0], self.chained[2], self.chained[1], self.chained[3]]
         result = verify_lines(to_lines(records))
@@ -290,6 +301,31 @@ class SignatureTests(unittest.TestCase):
         result = verify_lines(to_lines(signed))
         self.assertFalse(result.ok)
 
+    def test_require_signatures_rejects_unsigned_chain_records(self):
+        records = chain_records([sample_audit(0)], component="c")
+        result = verify_lines(to_lines(records), require_signatures=True)
+        self.assertFalse(result.ok)
+        self.assertIn("signature is required", result.reason)
+
+    def test_keyring_verifies_mixed_key_rotation_in_one_chain(self):
+        from audit_chain import CHAIN_VERSION_V2, chain_record
+
+        old_seed, old_public = generate_keypair()
+        new_seed, new_public = generate_keypair()
+        first = chain_records([sample_audit(0)], component="c", key_id="ops-old")[0]
+        first = sign_record(first, old_seed, key_id="ops-old")
+        next_body = {**sample_audit(1), "key_id": "ops-new", "chain": CHAIN_VERSION_V2}
+        second = chain_record(next_body, first["chain_hash"], chain_version=CHAIN_VERSION_V2)
+        second = sign_record(second, new_seed, key_id="ops-new")
+        result = verify_lines(
+            to_lines([first, second]),
+            public_key={"ops-old": old_public, "ops-new": new_public},
+        )
+        self.assertTrue(result.ok, result.reason)
+        missing_old = verify_lines(to_lines([first, second]), public_key={"ops-new": new_public})
+        self.assertFalse(missing_old.ok)
+        self.assertEqual(missing_old.signature_failures, [1])
+
     def test_key_id_after_chain_is_loud(self):
         records = chain_records([sample_audit(0)], component="c")
         seed, _pubkey = generate_keypair()
@@ -303,6 +339,14 @@ class SignatureTests(unittest.TestCase):
         signed = [sign_record(r, seed, key_id="k") for r in records]
         result = verify_lines(to_lines(signed), public_key=pubkey2)
         self.assertFalse(result.ok)
+
+    def test_signature_verifier_rejects_an_unknown_chain_version(self):
+        self.assertFalse(
+            verify_signature(
+                {"chain": "northstar-audit-chain/9", "signature": "00" * 64},
+                b"\x00" * 32,
+            )
+        )
 
 
 class EnvelopeExtensionTests(unittest.TestCase):
@@ -441,6 +485,28 @@ class ChainV2Tests(unittest.TestCase):
         self.assertTrue(result.ok, result.reason)
         self.assertEqual(result.chained, 3)
 
+    def test_historical_v2_feed_without_per_record_markers_still_verifies(self):
+        current = chain_records([sample_audit(i) for i in range(3)], component="c")
+        previous = current[0]["prev_hash"]
+        historical = []
+        for record in current:
+            body = {
+                key: value for key, value in record.items()
+                if key not in {"chain", "prev_hash", "chain_hash"}
+            }
+            sealed = chain_record(body, previous, chain_version=CHAIN_VERSION_V2)
+            historical.append(sealed)
+            previous = sealed["chain_hash"]
+        result = verify_lines(to_lines(historical))
+        self.assertTrue(result.ok, result.reason)
+
+    def test_historical_durable_v2_feed_with_genesis_record_marker_still_verifies(self):
+        current = chain_records([sample_audit(i) for i in range(2)], component="c")
+        body = {key: value for key, value in current[1].items() if key != "chain"}
+        current[1] = chain_record(body, current[0]["chain_hash"], chain_version=CHAIN_VERSION_V2)
+        result = verify_lines(to_lines(current))
+        self.assertTrue(result.ok, result.reason)
+
     def test_v1_chain_still_verifies(self):
         # Legacy construction, explicitly requested: verifies forever.
         chained = chain_records(
@@ -495,6 +561,33 @@ class ChainV2Tests(unittest.TestCase):
         v2 = chain_records([sample_audit(i) for i in range(2)], component="c", chain_version=CHAIN_VERSION_V2)
         result = verify_lines(to_lines([v1[0], v2[1]]))
         self.assertFalse(result.ok)
+
+    def test_unknown_record_version_is_not_downgraded_to_v1(self):
+        records = chain_records(
+            [{**sample_audit(0), "chain": "northstar-audit-chain/9"}],
+            component="c",
+            chain_version=CHAIN_VERSION,
+        )
+        result = verify_lines(to_lines(records))
+        self.assertFalse(result.ok)
+        self.assertIn("unknown audit chain version", result.reason)
+
+    def test_unknown_genesis_version_is_not_downgraded_to_v1(self):
+        genesis = build_genesis_params("c", chain_version=CHAIN_VERSION)
+        genesis["chain"] = "northstar-audit-chain/9"
+        record = {**sample_audit(0), "genesis": genesis}
+        sealed = chain_record(record, _sha256_hex(canonical_json(genesis)), chain_version=CHAIN_VERSION)
+        result = verify_lines(to_lines([sealed]))
+        self.assertFalse(result.ok)
+        self.assertIn("unknown audit chain version", result.reason)
+
+    def test_v1_feed_cannot_smuggle_a_v2_marker(self):
+        v1 = chain_records([sample_audit(i) for i in range(2)], component="c", chain_version=CHAIN_VERSION)
+        v1[1]["chain"] = CHAIN_VERSION_V2
+        v1[1] = chain_record(v1[1], v1[0]["chain_hash"], chain_version=CHAIN_VERSION)
+        result = verify_lines(to_lines(v1))
+        self.assertFalse(result.ok)
+        self.assertIn("mixed audit chain versions", result.reason)
 
     def test_genesis_hash_dispatches_on_version(self):
         v1p = build_genesis_params("c", chain_version=CHAIN_VERSION)

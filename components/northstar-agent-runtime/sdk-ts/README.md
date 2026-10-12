@@ -50,7 +50,13 @@ not publish packages — see *Publishing* below.
 
 `RunReport` carries `subtype`, `sessionId`, `numTurns`, `durationMs`, `totalCostUsd`, `totalUsage`,
 `pricingEstimated`, `errors`, `permissionDenials`, `toolCalls`, `exitCode`, `processExitCode`,
-`isError`, `events`, `result`, `stderr`.
+`toolCallReports`, `isError`, `events`, `result`, `stderr`. Each tool-call report is keyed by the
+assistant event's `call_id` and carries the runtime's `execution_status`, gate and permission
+source, plus a digest of the governed input. It does not duplicate raw arguments; use the matching
+assistant `tool_use` block for proposed arguments, and the report to determine whether execution
+completed, failed, was blocked, or never started.
+`subagents` carries the same bounded, transcript-free summaries recursively, so delegated child
+calls and nested delegations keep their own execution reports and agent identities.
 
 Two rules are what make this embeddable in a service:
 

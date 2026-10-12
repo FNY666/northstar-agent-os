@@ -97,6 +97,39 @@ class FormatTests(BundleTestCase):
 
 
 class BundleFileTests(BundleTestCase):
+    def test_bundle_tree_entry_scan_is_bounded(self):
+        from unittest.mock import patch
+
+        root = self.bundle(MANIFEST_HEAD, {"a.txt": "a", "b.txt": "b"})
+        with patch.object(pm, "MAX_BUNDLE_ENTRIES", 2):
+            with self.assertRaisesRegex(pm.PluginError, "2-entry scan limit"):
+                pm.load_bundle(root)
+
+    def test_bundle_total_bytes_are_bounded(self):
+        from unittest.mock import patch
+
+        root = self.bundle(MANIFEST_HEAD, {"a.txt": "1234", "b.txt": "5678"})
+        with patch.object(pm, "MAX_BUNDLE_TOTAL_BYTES", 6):
+            with self.assertRaisesRegex(pm.PluginError, "total size limit"):
+                pm.load_bundle(root)
+
+    def test_manifest_size_is_bounded_before_parsing(self):
+        from unittest.mock import patch
+
+        root = self.bundle(MANIFEST_HEAD)
+        with patch.object(pm, "MAX_MANIFEST_BYTES", 8):
+            with self.assertRaisesRegex(pm.PluginError, "plugin.toml.*8-byte limit"):
+                pm.load_bundle(root)
+
+    def test_manifest_symlink_is_not_followed(self):
+        outside = self.root / "outside.toml"
+        outside.write_text(MANIFEST_HEAD, encoding="utf-8")
+        root = self.bundle("")
+        (root / pm.MANIFEST_NAME).unlink()
+        (root / pm.MANIFEST_NAME).symlink_to(outside)
+        with self.assertRaises(pm.PluginError):
+            pm.load_bundle(root)
+
     def test_declared_paths_must_exist_inside_the_bundle(self):
         root = self.bundle(MANIFEST_HEAD + "\n[components]\nskills = [\"skills\"]\n")
         with self.assertRaises(pm.PluginError) as caught:
@@ -180,6 +213,16 @@ class HookClaimTests(BundleTestCase):
         # Not "empty command": the field does not exist, which is the difference between a
         # hook that cannot be given a shell line and one that is merely not using it now.
         self.assertFalse(hasattr(hooks[0], "command"))
+
+    def test_snapshot_execution_mode_survives_bundle_validation(self):
+        root = self.hook(
+            '[[components.hooks]]\nevent = "PreToolUse"\nscript = "guard.py"\n'
+            'interpreter = "python3"\nexecution = "snapshot"\n'
+        )
+        (root / "guard.py").write_text('print("{}")\n', encoding="utf-8")
+        manifest = self.parse(root)
+        self.assertEqual(manifest.hooks[0].execution, "snapshot")
+        self.assertEqual(manifest.hooks[0].as_hook_table()["execution"], "snapshot")
 
     def test_only_veto_capable_events_may_be_declared(self):
         for event in ("PostToolUse", "Stop", "SessionEnd"):

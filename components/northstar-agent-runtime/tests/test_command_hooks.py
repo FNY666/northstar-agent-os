@@ -10,6 +10,7 @@ from __future__ import annotations
 import json
 import os
 import signal
+import shutil
 import subprocess
 import sys
 import unittest
@@ -152,6 +153,20 @@ class ParseTests(unittest.TestCase):
         with self.assertRaises(CommandHookError):
             self._parse([{"event": "PreToolUse", "script": script}] * (command_hooks.MAX_HOOKS + 1))
 
+    def test_oversized_script_is_rejected_during_registration(self):
+        script = _script(self.root, "0123456789", name="large.py")
+        with patch.object(command_hooks, "MAX_HOOK_SCRIPT_BYTES", 8):
+            with self.assertRaisesRegex(CommandHookError, "8-byte limit"):
+                self._parse([{"event": "PreToolUse", "script": script}])
+
+    def test_snapshot_mode_requires_linux_and_an_explicit_interpreter(self):
+        script = _script(self.root, "pass\n")
+        with self.assertRaisesRegex(CommandHookError, "explicit supported interpreter"):
+            self._parse([{"event": "PreToolUse", "script": script, "execution": "snapshot"}])
+        with patch.object(command_hooks.sys, "platform", "darwin"):
+            with self.assertRaisesRegex(CommandHookError, "requires Linux procfs"):
+                self._parse([{"event": "PreToolUse", "script": script, "interpreter": "python3", "execution": "snapshot"}])
+
     def test_the_display_form_never_leaks_the_absolute_path(self):
         script = _script(self.root, "pass\n")
         hooks = self._parse([{"event": "PreToolUse", "script": script}])
@@ -187,6 +202,18 @@ class VerdictTests(unittest.TestCase):
         result = callback(HookInput(event="PreToolUse", tool_name="Write"))
         self.assertEqual(result.decision, "deny")
         self.assertEqual(seen, [], "changed script must never be dispatched")
+
+    def test_script_growth_after_registration_is_bounded_and_denied(self):
+        relative = _script(self.root, "safe\n", name="growing.py")
+        hook = parse_hooks([{"event": "PreToolUse", "script": relative}], workspace=self.root)[0]
+        callback = build_callback(hook, workspace=self.root, runner=lambda *a, **k: self.fail("must not run"))
+        script = self.root / ".northstar" / "hooks" / "growing.py"
+        script.write_bytes(b"x" * 128)
+        with patch.object(command_hooks, "MAX_HOOK_SCRIPT_BYTES", 64):
+            result = callback(HookInput(event="PreToolUse"))
+        self.assertEqual(result.decision, "deny")
+        self.assertIn("64-byte limit", result.reason)
+
 
     def test_direct_exec_hook_keeps_original_path_and_mode(self):
         relative = _script(self.root, "#!/bin/sh\necho safe\n", name="direct.sh")
@@ -251,6 +278,72 @@ class VerdictTests(unittest.TestCase):
         self.assertEqual(seen["payload"]["tool_name"], "Write")
         self.assertEqual(seen["payload"]["tool_input"], {"path": "a.txt"})
         self.assertEqual(Path(seen["cwd"]).resolve(), self.root.resolve())
+
+
+@unittest.skipUnless(sys.platform.startswith("linux") and Path("/proc/self/fd").is_dir(), "Linux sealed snapshots only")
+class SnapshotExecutionTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self.root = Path(support.tempfile.mkdtemp(prefix="nsar-hook-snapshot-"))
+        self.addCleanup(support.shutil.rmtree, self.root, True)
+        (self.root / ".northstar" / "hooks").mkdir(parents=True)
+
+    def test_snapshot_executes_registered_bytes_after_source_replacement(self):
+        script = self.root / ".northstar" / "hooks" / "gate.py"
+        script.write_text('print("{\\\"decision\\\":\\\"allow\\\"}")\n', encoding="utf-8")
+        hook = parse_hooks(
+            [{"event": "PreToolUse", "script": ".northstar/hooks/gate.py", "interpreter": "python3", "execution": "snapshot"}],
+            workspace=self.root,
+        )[0]
+        script.write_text('print("{\\\"decision\\\":\\\"deny\\\"}")\n', encoding="utf-8")
+        result = build_callback(hook, workspace=self.root)(HookInput(event="PreToolUse"))
+        self.assertEqual(result.decision, "allow")
+
+    def test_snapshot_creation_failure_fails_closed_without_path_fallback(self):
+        script = _script(self.root, 'print("{\\\"decision\\\":\\\"allow\\\"}")\n', name="failed.py")
+        hook = parse_hooks(
+            [{"event": "PreToolUse", "script": script, "interpreter": "python3", "execution": "snapshot"}],
+            workspace=self.root,
+        )[0]
+        with patch.object(command_hooks, "_sealed_script_fd", side_effect=OSError("sealing unavailable")):
+            result = build_callback(hook, workspace=self.root, runner=lambda *a, **k: self.fail("path fallback"))(
+                HookInput(event="PreToolUse")
+            )
+        self.assertEqual(result.decision, "deny")
+        self.assertIn("sealing unavailable", result.reason)
+
+    def test_supported_interpreters_run_sealed_content(self):
+        interpreters = ("python3", "python", "node", "sh", "bash")
+        for interpreter in interpreters:
+            if shutil.which(interpreter) is None:
+                continue
+            with self.subTest(interpreter=interpreter):
+                script = self.root / ".northstar" / "hooks" / f"{interpreter}.hook"
+                expected = str(script)
+                if interpreter in {"python", "python3"}:
+                    (script.parent / "helper.py").write_text("VALUE = 'from-helper'\n", encoding="utf-8")
+                    source = (
+                        "import json\nfrom helper import VALUE\n"
+                        f"print(json.dumps({{'decision': 'allow' if __file__ == {expected!r} and VALUE == 'from-helper' else 'deny'}}))\n"
+                    )
+                elif interpreter == "node":
+                    (script.parent / "helper.js").write_text("module.exports = {value: 'from-helper'};\n", encoding="utf-8")
+                    source = (
+                        "const helper=require('./helper');"
+                        f"console.log(JSON.stringify({{decision:__filename==={json.dumps(expected)}&&helper.value==='from-helper'?'allow':'deny'}}));\n"
+                    )
+                else:
+                    source = (
+                        f"if [ \"$0\" = '{expected}' ]; then "
+                        "printf '%s\\n' '{\"decision\":\"allow\"}'; else "
+                        "printf '%s\\n' '{\"decision\":\"deny\"}'; fi\n"
+                    )
+                script.write_text(source, encoding="utf-8")
+                hook = parse_hooks(
+                    [{"event": "PreToolUse", "script": f".northstar/hooks/{script.name}", "interpreter": interpreter, "execution": "snapshot", "timeout_ms": 10_000}],
+                    workspace=self.root,
+                )[0]
+                result = build_callback(hook, workspace=self.root)(HookInput(event="PreToolUse"))
+                self.assertEqual(result.decision, "allow", result.reason)
 
 
 class RealSubprocessTests(unittest.TestCase):

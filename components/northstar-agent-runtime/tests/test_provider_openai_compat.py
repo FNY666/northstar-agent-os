@@ -192,6 +192,82 @@ class NormaliseTests(unittest.TestCase):
             OpenAICompatProvider.normalise(_assistant("", tool_calls=[call], finish="tool_calls"))
         self.assertIn("not valid JSON", str(caught.exception))
 
+    def test_oversized_argument_blob_is_rejected_before_json_parse(self):
+        from unittest.mock import patch
+
+        call = {"id": "c1", "type": "function", "function": {"name": "Read", "arguments": "{" + " " * 1_048_576 + "}"}}
+        with patch("providers.openai_compat.json.loads", side_effect=AssertionError("must reject before parsing")):
+            with self.assertRaisesRegex(ProviderError, "response limit"):
+                OpenAICompatProvider.normalise(_assistant("", tool_calls=[call], finish="tool_calls"))
+
+    def test_expanded_json_nodes_are_rejected_before_json_parse(self):
+        from unittest.mock import patch
+
+        call = {
+            "id": "c1",
+            "type": "function",
+            "function": {"name": "Read", "arguments": '{"items":[' + ",".join(["0"] * 20) + "]}"},
+        }
+        with patch("tool_input_schema.MAX_SCHEMA_TREE_NODES", 8):
+            with patch("providers.openai_compat.json.loads", side_effect=AssertionError("must preflight")) as decode:
+                with self.assertRaisesRegex(ProviderError, "runtime limits"):
+                    OpenAICompatProvider.normalise(_assistant("", tool_calls=[call], finish="tool_calls"))
+                decode.assert_not_called()
+    def test_expanded_json_nodes_are_bounded_across_one_response(self):
+        from unittest.mock import patch
+
+        calls = [
+            {"id": f"c{i}", "type": "function", "function": {"name": "Read", "arguments": "{}"}}
+            for i in range(4)
+        ]
+        with patch("tool_input_schema.MAX_SCHEMA_TREE_NODES", 3):
+            with patch("providers.openai_compat.json.loads", wraps=json.loads) as decode:
+                with self.assertRaisesRegex(ProviderError, "node response limit"):
+                    OpenAICompatProvider.normalise(_assistant("", tool_calls=calls, finish="tool_calls"))
+                self.assertEqual(decode.call_count, 3, "the over-budget fourth call must not be decoded")
+
+    def test_decoded_json_tree_is_rechecked_against_expanded_size_budget(self):
+        from unittest.mock import patch
+
+        call = {
+            "id": "c1",
+            "type": "function",
+            "function": {"name": "Read", "arguments": '{"value":"' + "中" * 200_000 + '"}'},
+        }
+        with patch("providers.openai_compat.json.loads", wraps=json.loads) as decode:
+            with self.assertRaisesRegex(ProviderError, "runtime limits"):
+                OpenAICompatProvider.normalise(_assistant("", tool_calls=[call], finish="tool_calls"))
+            self.assertEqual(decode.call_count, 1)
+
+    def test_excess_provider_tool_calls_fail_closed(self):
+        from providers.openai_compat import MAX_TOOL_CALLS_PER_RESPONSE
+
+        calls = [
+            {"id": f"c{i}", "type": "function", "function": {"name": "Read", "arguments": "{}"}}
+            for i in range(MAX_TOOL_CALLS_PER_RESPONSE + 1)
+        ]
+        with self.assertRaisesRegex(ProviderError, "more than"):
+            OpenAICompatProvider.normalise(_assistant("", tool_calls=calls, finish="tool_calls"))
+
+    def test_aggregate_tool_arguments_are_bounded_before_parsing(self):
+        from unittest.mock import patch
+
+        calls = [
+            {"id": f"c{i}", "type": "function", "function": {"name": "Read", "arguments": "{}"}}
+            for i in range(2)
+        ]
+        with patch("providers.openai_compat.MAX_TOOL_ARGUMENTS_TOTAL_BYTES", 3):
+            with patch("providers.openai_compat.json.loads", wraps=json.loads) as parse_json:
+                with self.assertRaisesRegex(ProviderError, "per-response limit"):
+                    OpenAICompatProvider.normalise(_assistant("", tool_calls=calls, finish="tool_calls"))
+                self.assertEqual(parse_json.call_count, 1, "the over-budget second blob must not be parsed")
+
+    def test_oversized_provider_text_is_rejected(self):
+        from providers.openai_compat import MAX_PROVIDER_TEXT_CHARS
+
+        with self.assertRaisesRegex(ProviderError, "provider text.*response limit"):
+            OpenAICompatProvider.normalise(_assistant("x" * (MAX_PROVIDER_TEXT_CHARS + 1)))
+
     def test_non_object_arguments_fail_closed(self):
         call = {"id": "c1", "type": "function", "function": {"name": "Write", "arguments": "[1,2,3]"}}
         with self.assertRaises(ProviderError):
@@ -251,6 +327,63 @@ class GovernedLoopTests(RuntimeTestCase):
         self.assertTrue(report.denials, "the gate must see the chat model's tool call like any other")
         self.assertEqual(report.denials[0].source, "mode", "denied by permission_mode=default with no approver")
         self.assertFalse((root / "out.txt").exists())
+
+    def test_provider_cannot_mutate_runtime_schema_through_request_payload(self):
+        class MutatingClient:
+            def __init__(self):
+                self.calls = 0
+
+                class _Completions:
+                    def __init__(inner_self):
+                        inner_self.outer = self
+
+                    def create(inner_self, **kwargs):
+                        if inner_self.outer.calls == 0:
+                            write_tool = next(
+                                tool for tool in kwargs["tools"]
+                                if tool["function"]["name"] == "Write"
+                            )
+                            write_tool["function"]["parameters"]["properties"]["path"]["type"] = "integer"
+                            response = _assistant(
+                                "",
+                                tool_calls=[{
+                                    "id": "c-schema",
+                                    "type": "function",
+                                    "function": {"name": "Write", "arguments": '{"path":7,"content":"bad"}'},
+                                }],
+                                finish="tool_calls",
+                            )
+                        else:
+                            response = _assistant("done")
+                        inner_self.outer.calls += 1
+                        return response
+
+                self.chat = type("Chat", (), {"completions": _Completions()})()
+
+        root = self.workspace()
+        provider = OpenAICompatProvider(client=MutatingClient(), model="gpt-4.1")
+        report = self.drive(
+            self.runtime(provider=provider, workspace=root, allowed_tools=("Write",), max_turns=3)
+        )
+        self.assertEqual(report.tool_calls[0].permission_source, "invalid_input")
+        self.assertFalse((root / "7").exists())
+
+    def test_mutable_tool_spec_view_cannot_change_gate_schema(self):
+        call = {
+            "id": "c-internal-schema",
+            "type": "function",
+            "function": {"name": "Write", "arguments": '{"path":7,"content":"bad"}'},
+        }
+        root = self.workspace()
+        provider = OpenAICompatProvider(
+            client=FakeClient([_assistant("", tool_calls=[call], finish="tool_calls"), _assistant("done")]),
+            model="gpt-4.1",
+        )
+        runtime = self.runtime(provider=provider, workspace=root, allowed_tools=("Write",), max_turns=3)
+        runtime.tools.require("Write").input_schema["properties"]["path"]["type"] = "integer"
+        report = self.drive(runtime)
+        self.assertEqual(report.tool_calls[0].permission_source, "invalid_input")
+        self.assertFalse((root / "7").exists())
 
     def test_cost_and_usage_are_recorded_for_an_unpriced_model(self):
         provider = OpenAICompatProvider(client=FakeClient(_assistant("done", usage={"prompt_tokens": 1000, "completion_tokens": 100})), model="gpt-4.1")

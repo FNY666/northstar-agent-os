@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import io
 import json
+import os
 import contextlib
 import stat
 import tempfile
@@ -77,6 +78,13 @@ class ParserTests(unittest.TestCase):
     def test_permission_modes_are_closed(self):
         with self.assertRaises(SystemExit):
             build_parser().parse_args(["run", "--permission-mode", "godmode"])
+
+    def test_dataflow_policy_flag_is_opt_in_and_accepts_default_or_path(self):
+        self.assertIsNone(build_parser().parse_args(["run"]).dataflow_policy)
+        self.assertEqual(
+            build_parser().parse_args(["run", "--dataflow-policy", "default"]).dataflow_policy,
+            "default",
+        )
 
     def test_deny_subtracts_from_the_allow_list(self):
         args = build_parser().parse_args(["run", "--allow-tool", "Write", "--deny-tool", "Write", "--allow-tool", "Read"])
@@ -298,10 +306,45 @@ class RunHappyPathTests(unittest.TestCase):
         self.assertIn("--allow-tool Shell", out)
 
     def test_doctor_reports_sandbox_backend(self):
-        code, out, _ = run_cli("doctor", "--workspace", str(self.workspace), "--sandbox", "process")
+        code, out, _ = run_cli("doctor", "--workspace", str(self.workspace), "--sandbox", "process", "--mcp-network", "allowed")
         self.assertEqual(code, 0)
         self.assertIn("sandbox", out)
         self.assertIn("process", out)
+
+    def test_doctor_fails_bwrap_when_default_capability_drop_probe_fails(self):
+        import doctor
+        from tools.os_sandbox import SandboxCapabilities
+
+        args = doctor.build_parser().parse_args(["--sandbox", "bwrap", "--capdrop", "on"])
+        caps = SandboxCapabilities(
+            bwrap_path="/fake/bwrap", bwrap_usable=True, bwrap_detail="base probe passed",
+            bwrap_cap_drop=False, bwrap_seccomp=True, preferred="bwrap",
+        )
+        findings = []
+        with mock.patch("tools.os_sandbox.probe_capabilities", return_value=caps):
+            selected = doctor._check_sandbox(args, findings)
+        self.assertEqual(selected, "bwrap")
+        capdrop = next(item for item in findings if item.name == "capdrop")
+        self.assertEqual(capdrop.level, "fail")
+        self.assertIn("would refuse to run", capdrop.message)
+
+    def test_doctor_fails_bwrap_when_seccomp_child_probe_fails(self):
+        import doctor
+        from tools.os_sandbox import SandboxCapabilities
+
+        args = doctor.build_parser().parse_args(["--sandbox", "bwrap", "--seccomp", "auto"])
+        caps = SandboxCapabilities(
+            bwrap_path="/fake/bwrap", bwrap_usable=True, bwrap_detail="base probe passed",
+            bwrap_cap_drop=True, bwrap_seccomp=False,
+            bwrap_seccomp_detail="bwrap seccomp child probe failed: kernel rejected filter",
+            preferred="bwrap",
+        )
+        findings = []
+        with mock.patch("tools.os_sandbox.probe_capabilities", return_value=caps):
+            doctor._check_seccomp(args, findings, "bwrap")
+        self.assertEqual(len(findings), 1)
+        self.assertEqual(findings[0].level, "fail")
+        self.assertIn("kernel rejected filter", findings[0].message)
 
     def test_deny_tool_wins_over_allow_tool_on_the_command_line(self):
         script = self.workspace / "s.json"
@@ -512,6 +555,31 @@ class PromptAndSessionTests(unittest.TestCase):
         self.assertNotIn("TOP-SECRET-BODY", body)
         self.assertIn("omitted by configuration", body)
 
+    def test_redact_session_content_omits_prompts_responses_and_tool_payloads(self):
+        prompt_secret = "prompt-canary-91f2"
+        answer_secret = "answer-canary-73b1"
+        tool_secret = "tool-canary-28aa"
+        script = self.workspace / "privacy-script.json"
+        script.write_text(
+            json.dumps([
+                {"tool": {"name": "Read", "input": {"path": "private.txt"}}},
+                {"text": answer_secret},
+            ]),
+            encoding="utf-8",
+        )
+        (self.workspace / "private.txt").write_text(tool_secret, encoding="utf-8")
+        code, out, err = run_cli(
+            "run", "--workspace", str(self.workspace), "--prompt", prompt_secret,
+            "--script", str(script), "--session-dir", str(self.session_dir),
+            "--redact-session-content", "--quiet",
+        )
+        self.assertEqual(code, 0, err)
+        body = "\n".join(path.read_text(encoding="utf-8") for path in self.session_dir.glob("*.jsonl"))
+        for secret in (prompt_secret, answer_secret, tool_secret, "private.txt"):
+            self.assertNotIn(secret, body)
+        self.assertIn('"session_content_mode":"omitted"', body)
+        self.assertIn('"content_redacted":true', body)
+
     def test_resume_continues_a_persisted_session(self):
         first_dir = self.session_dir
         code, out, _ = run_cli(
@@ -666,10 +734,18 @@ class DoctorTests(unittest.TestCase):
         ws = tmp / "ws"
         ws.mkdir()
         code, out, err = run_cli("doctor", "--workspace", str(ws))
-        self.assertEqual(code, 0, err)
+        from tools.sandbox import landlock_abi_version
+        import sys
+        network_supported = sys.platform.startswith("linux") and landlock_abi_version() >= 10
+        self.assertEqual(code, 0 if network_supported else 1, err)
         self.assertIn(f"workspace", out)
+        self.assertIn("tool-schemas", out)
+        self.assertIn("built-in tool schemas are valid and closed", out)
         self.assertIn("[ok]", out)
-        self.assertIn("ready to run", out)
+        if network_supported:
+            self.assertIn("ready to run", out)
+        else:
+            self.assertIn("[fail] mcp-network", out)
 
     def test_doctor_flags_a_missing_workspace_and_exits_1(self):
         code, out, _ = run_cli("doctor", "--workspace", "/nonexistent-northstar-doctor")
@@ -689,19 +765,19 @@ class DoctorTests(unittest.TestCase):
     def test_doctor_reports_missing_optional_sdks_as_warnings(self):
         # The check follows the selected provider: a scripted run needs no model
         # SDK at all, and only the SDK a live provider actually imports is named.
-        code, out, _ = run_cli("doctor")
+        code, out, _ = run_cli("doctor", "--mcp-network", "allowed")
         self.assertEqual(code, 0)  # warnings, not failures
         self.assertIn("model-sdk", out)
         self.assertIn("none required", out)
         self.assertNotIn("anthropic", out, "doctor must not nag about an SDK this provider never imports")
         self.assertIn("session-dir", out)
-        code, out, _ = run_cli("doctor", "--provider", "anthropic")
+        code, out, _ = run_cli("doctor", "--provider", "anthropic", "--mcp-network", "allowed")
         self.assertEqual(code, 0)
         self.assertIn("anthropic", out)
 
     def test_doctor_reports_the_openai_compatible_endpoint_without_touching_it(self):
         tmp = Path(tempfile.mkdtemp(prefix="nsar-doctor-openai-"))
-        code, out, _ = run_cli("doctor", "--workspace", str(tmp), "--provider", "openai", "--model", "gpt-4.1")
+        code, out, _ = run_cli("doctor", "--workspace", str(tmp), "--provider", "openai", "--model", "gpt-4.1", "--mcp-network", "allowed")
         self.assertEqual(code, 0)
         self.assertIn("openai-compatible", out)
         self.assertIn("$OPENAI_API_KEY", out)
@@ -720,7 +796,7 @@ class DoctorTests(unittest.TestCase):
 
     def test_doctor_reports_seccomp_status_for_the_process_backend(self):
         tmp = Path(tempfile.mkdtemp(prefix="nsar-doctor-"))
-        code, out, _ = run_cli("doctor", "--workspace", str(tmp), "--sandbox", "process")
+        code, out, _ = run_cli("doctor", "--workspace", str(tmp), "--sandbox", "process", "--mcp-network", "allowed")
         self.assertEqual(code, 0)
         self.assertIn("seccomp", out)
         self.assertIn("mode=auto", out)
@@ -729,14 +805,14 @@ class DoctorTests(unittest.TestCase):
 
     def test_doctor_reports_seccomp_off_as_a_warning(self):
         tmp = Path(tempfile.mkdtemp(prefix="nsar-doctor-"))
-        code, out, _ = run_cli("doctor", "--workspace", str(tmp), "--sandbox", "process", "--seccomp", "off")
+        code, out, _ = run_cli("doctor", "--workspace", str(tmp), "--sandbox", "process", "--seccomp", "off", "--mcp-network", "allowed")
         self.assertEqual(code, 0)  # warnings, not failures
         self.assertIn("[warn] seccomp", out)
         self.assertIn("mode=off", out)
 
     def test_doctor_reports_seccomp_on_for_the_process_backend(self):
         tmp = Path(tempfile.mkdtemp(prefix="nsar-doctor-"))
-        code, out, _ = run_cli("doctor", "--workspace", str(tmp), "--sandbox", "process", "--seccomp", "on")
+        code, out, _ = run_cli("doctor", "--workspace", str(tmp), "--sandbox", "process", "--seccomp", "on", "--mcp-network", "allowed")
         self.assertEqual(code, 0)
         self.assertIn("[ok]", out)
         self.assertIn("seccomp", out)
@@ -756,7 +832,7 @@ class DoctorTests(unittest.TestCase):
 
     def test_doctor_reports_mcp_seccomp_status(self):
         tmp = Path(tempfile.mkdtemp(prefix="nsar-doctor-"))
-        code, out, _ = run_cli("doctor", "--workspace", str(tmp))
+        code, out, _ = run_cli("doctor", "--workspace", str(tmp), "--mcp-network", "allowed")
         self.assertEqual(code, 0)
         self.assertIn("[ok]", out)
         self.assertIn("mcp-seccomp", out)
@@ -765,7 +841,7 @@ class DoctorTests(unittest.TestCase):
 
     def test_doctor_reports_mcp_seccomp_off_as_a_warning(self):
         tmp = Path(tempfile.mkdtemp(prefix="nsar-doctor-"))
-        code, out, _ = run_cli("doctor", "--workspace", str(tmp), "--mcp-seccomp", "off")
+        code, out, _ = run_cli("doctor", "--workspace", str(tmp), "--mcp-seccomp", "off", "--mcp-network", "allowed")
         self.assertEqual(code, 0)  # warnings, not failures
         self.assertIn("[warn] mcp-seccomp", out)
         self.assertIn("mode=off", out)
@@ -851,6 +927,36 @@ class DryRunTests(unittest.TestCase):
         # Dry run reports, it never runs: no result line, no session id.
         self.assertNotIn("[success]", out)
         self.assertNotIn("session=ns-", out)
+
+    def test_private_injected_memory_seeds_runtime_dataflow_audience(self):
+        memory_dir = self.workspace / ".northstar" / "memory"
+        memory_dir.mkdir(parents=True)
+        (memory_dir / "MEMORY.md").write_text("HR-only notes.\n", encoding="utf-8")
+        (memory_dir.parent / "memory-audience.json").write_text(json.dumps({
+            "schema": "northstar.memory-audience.v1",
+            "entries": {".northstar/memory/MEMORY.md": ["hr@local"]},
+        }), encoding="utf-8")
+
+        from loop import AgentRuntime as RealAgentRuntime
+
+        observed = {}
+
+        def capture_runtime(**kwargs):
+            runtime = RealAgentRuntime(**kwargs)
+            observed["runtime"] = runtime
+            return runtime
+
+        with mock.patch("loop.AgentRuntime", side_effect=capture_runtime):
+            code, _out, err = run_cli(
+                "run", "--workspace", str(self.workspace), "--prompt", "hi",
+                "--scripted-text", "reply", "--memory-viewer", "hr@local",
+                "--dataflow-policy", "default", "--dry-run",
+            )
+        self.assertEqual(code, 0, err)
+        runtime = observed["runtime"]
+        self.assertTrue(runtime.dataflow.audience_labeled)
+        self.assertEqual(runtime.dataflow.audience, frozenset({"hr@local"}))
+        self.assertEqual(runtime.dataflow.events[0]["tool"], "workspace_memory")
 
     def test_dry_run_respects_policy_flags(self):
         code, out, _ = run_cli("run", "--workspace", str(self.workspace), "--prompt", "hi",
@@ -942,6 +1048,66 @@ class SessionViewTests(unittest.TestCase):
     def test_sessions_list_shows_the_transcript(self):
         session = self.find_session()
         self.assertTrue(session.startswith("ns-"), session)
+
+    def test_sessions_retention_reports_only_old_complete_sealed_unlocked_candidates(self):
+        import time
+
+        session = self.find_session()
+        transcript = Path(self.session_dir) / f"{session}.jsonl"
+        old = time.time() - 45 * 86_400
+        os.utime(transcript, (old, old))
+        code, out, err = run_cli(
+            "sessions", "retention", "--session-dir", self.session_dir,
+            "--older-than-days", "30", "--json",
+        )
+        self.assertEqual(code, 0, err)
+        report = json.loads(out.strip())
+        self.assertTrue(report["eligible"], report)
+        self.assertEqual(report["reason"], "expired_complete_sealed_unlocked")
+        self.assertTrue(transcript.exists(), "the retention inventory is read-only")
+
+    def test_sessions_retention_keeps_an_active_session(self):
+        import time
+        from session_lease import SessionLease, lease_path_for
+
+        session = self.find_session()
+        transcript = Path(self.session_dir) / f"{session}.jsonl"
+        old = time.time() - 45 * 86_400
+        os.utime(transcript, (old, old))
+        lease = SessionLease(lease_path_for(self.session_dir, session), owner_id="retention-test")
+        lease.acquire()
+        try:
+            code, out, err = run_cli(
+                "sessions", "retention", "--session-dir", self.session_dir,
+                "--older-than-days", "30", "--json",
+            )
+        finally:
+            lease.release()
+        self.assertEqual(code, 0, err)
+        report = json.loads(out.strip())
+        self.assertFalse(report["eligible"], report)
+        self.assertEqual(report["reason"], "active_session")
+
+    def test_sessions_retention_keeps_a_tampered_chain(self):
+        import time
+
+        session = self.find_session()
+        transcript = Path(self.session_dir) / f"{session}.jsonl"
+        lines = transcript.read_text(encoding="utf-8").splitlines()
+        record = json.loads(lines[1])
+        record["content"] = "tampered"
+        lines[1] = json.dumps(record, sort_keys=True, separators=(",", ":"))
+        transcript.write_text("\n".join(lines) + "\n", encoding="utf-8")
+        old = time.time() - 45 * 86_400
+        os.utime(transcript, (old, old))
+        code, out, err = run_cli(
+            "sessions", "retention", "--session-dir", self.session_dir,
+            "--older-than-days", "30", "--json",
+        )
+        self.assertEqual(code, 0, err)
+        report = json.loads(out.strip())
+        self.assertFalse(report["eligible"], report)
+        self.assertEqual(report["reason"], "invalid_chain")
 
     def test_sessions_show_renders_the_timeline(self):
         session = self.find_session()

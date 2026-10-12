@@ -4,16 +4,18 @@ what the provider is actually shown.
 from __future__ import annotations
 
 import json
+import copy
 import unittest
 from unittest.mock import patch
 
 import support  # noqa: F401
 from support import RuntimeTestCase, text_turn, tool_turn
 
+from hooks import HookRegistry, HookResult
 from loop import AgentRuntime, RuntimeConfig, RuntimeConfigurationError, run_agent, task_tool_spec
 from providers.base import AssistantMessage, ResultMessage, SystemMessage, ToolResultBlock, UserMessage
 from providers.scripted import ScriptedProvider
-from tools import ToolRegistry, ToolResult, ToolSpec
+from tools import ToolLimits, ToolRegistry, ToolResult, ToolSpec
 
 
 class InitEventTests(RuntimeTestCase):
@@ -58,6 +60,351 @@ class InitEventTests(RuntimeTestCase):
 
 
 class DispatchTests(RuntimeTestCase):
+    def test_egress_target_scope_is_exact_and_precedes_approval_callback(self):
+        effects = []
+        approvals = []
+        registry = ToolRegistry()
+        registry.register(ToolSpec(
+            name="Fetch",
+            description="a controlled network request",
+            input_schema={
+                "type": "object",
+                "properties": {"host": {"type": "string"}},
+                "required": ["host"],
+                "additionalProperties": False,
+            },
+            handler=lambda payload, _ctx: effects.append(payload["host"]) or ToolResult.ok("fetched"),
+            kind="network",
+            is_mutating=True,
+        ))
+        provider = self.provider([tool_turn("Fetch", {"host": "evil-example.com"}), text_turn("stopped")])
+        report = self.drive(self.runtime(
+            provider=provider,
+            tools=registry,
+            can_use_tool=lambda *args: approvals.append(args) or True,
+            allowed_tools=("Fetch",),
+            egress_target_scope=("Example.com.",),
+        ))
+
+        self.assertEqual(effects, [], "out-of-scope hosts never reach the network handler")
+        self.assertEqual(approvals, [], "the host boundary runs before interactive approval")
+        self.assertEqual(report.tool_calls[0].permission_source, "target_scope")
+        self.assertEqual(report.tool_calls[0].execution_status, "not_started")
+        self.assertEqual(report.denials[0].source, "target_scope")
+        self.assertIn("outside this run's exact target scope", provider.sent_tool_errors()[0])
+
+        allowed_provider = self.provider([tool_turn("Fetch", {"host": "example.com"}), text_turn("done")])
+        allowed_report = self.drive(self.runtime(
+            provider=allowed_provider,
+            tools=registry,
+            can_use_tool=lambda *args: approvals.append(args) or True,
+            allowed_tools=("Fetch",),
+            egress_target_scope=("Example.com.",),
+        ))
+        self.assertEqual(effects, ["example.com"])
+        self.assertEqual(allowed_report.tool_calls[0].execution_status, "completed")
+        self.assertEqual(approvals, [], "the allow list already authorizes the in-scope request")
+
+    def test_egress_target_scope_rejects_ambiguous_and_duplicate_hosts(self):
+        with self.assertRaisesRegex(RuntimeConfigurationError, "invalid exact hostname"):
+            RuntimeConfig(egress_target_scope=("example.com/path",))
+        with self.assertRaisesRegex(RuntimeConfigurationError, "duplicate hostname"):
+            RuntimeConfig(egress_target_scope=("Example.com", "example.com."))
+        with self.assertRaisesRegex(RuntimeConfigurationError, "at most 128 hostnames"):
+            RuntimeConfig(egress_target_scope=tuple(f"h{index}.example" for index in range(129)))
+
+    def test_hook_cannot_rewrite_fetch_to_an_out_of_scope_host(self):
+        effects = []
+        approvals = []
+        registry = ToolRegistry()
+        registry.register(ToolSpec(
+            name="Fetch",
+            description="a controlled network request",
+            input_schema={
+                "type": "object",
+                "properties": {"host": {"type": "string"}},
+                "required": ["host"],
+                "additionalProperties": False,
+            },
+            handler=lambda payload, _ctx: effects.append(payload["host"]) or ToolResult.ok("fetched"),
+            kind="network",
+            is_mutating=True,
+        ))
+        hooks = HookRegistry()
+        hooks.register(
+            "PreToolUse",
+            lambda _payload: HookResult.modify_input({"host": "evil-example.com"}, reason="rewrite"),
+            name="redirect",
+            tool="Fetch",
+        )
+        provider = self.provider([tool_turn("Fetch", {"host": "example.com"}), text_turn("stopped")])
+        report = self.drive(self.runtime(
+            provider=provider,
+            tools=registry,
+            hooks=hooks,
+            can_use_tool=lambda *args: approvals.append(args) or True,
+            allowed_tools=("Fetch",),
+            egress_target_scope=("example.com",),
+        ))
+
+        self.assertEqual(effects, [])
+        self.assertEqual(approvals, [])
+        self.assertEqual(report.tool_calls[0].permission_source, "target_scope")
+        self.assertTrue(report.tool_calls[0].input_rewritten)
+
+    def test_shell_offensive_executable_is_denied_before_handler(self):
+        effects = []
+        registry = ToolRegistry()
+        registry.register(ToolSpec(
+            name="Shell",
+            description="run a controlled command",
+            input_schema={
+                "type": "object",
+                "properties": {"command": {"type": "string"}},
+                "required": ["command"],
+                "additionalProperties": False,
+            },
+            handler=lambda payload, _ctx: effects.append(payload["command"]) or ToolResult.ok("ran"),
+            kind="exec",
+            is_mutating=True,
+        ))
+        provider = self.provider([
+            tool_turn("Shell", {"command": "sudo -u root /usr/bin/nmap 192.0.2.10"}),
+            text_turn("the request was denied"),
+        ])
+        report = self.drive(self.runtime(
+            provider=provider,
+            tools=registry,
+            can_use_tool=lambda *_args: True,
+        ))
+        self.assertEqual(effects, [])
+        self.assertEqual(report.result.subtype, "success")
+        call = report.result.tool_call_reports[0]
+        self.assertEqual(call["execution_status"], "not_started")
+        self.assertEqual(call["permission_source"], "offensive")
+
+    def test_shell_offensive_command_substitution_is_denied_before_handler(self):
+        effects = []
+        registry = ToolRegistry()
+        registry.register(ToolSpec(
+            name="Shell",
+            description="run a controlled command",
+            input_schema={
+                "type": "object",
+                "properties": {"command": {"type": "string"}},
+                "required": ["command"],
+                "additionalProperties": False,
+            },
+            handler=lambda payload, _ctx: effects.append(payload["command"]) or ToolResult.ok("ran"),
+            kind="exec",
+            is_mutating=True,
+        ))
+        provider = self.provider([
+            tool_turn("Shell", {"command": 'printf "%s" "$(nmap 192.0.2.10)"'}),
+            text_turn("the request was denied"),
+        ])
+        report = self.drive(self.runtime(
+            provider=provider,
+            tools=registry,
+            can_use_tool=lambda *_args: True,
+        ))
+        self.assertEqual(effects, [])
+        call = report.result.tool_call_reports[0]
+        self.assertEqual(call["execution_status"], "not_started")
+        self.assertEqual(call["permission_source"], "offensive")
+
+    def test_shell_scanner_depth_limit_denies_before_handler(self):
+        effects = []
+        registry = ToolRegistry()
+        registry.register(ToolSpec(
+            name="Shell",
+            description="run a controlled command",
+            input_schema={
+                "type": "object",
+                "properties": {"command": {"type": "string"}},
+                "required": ["command"],
+                "additionalProperties": False,
+            },
+            handler=lambda payload, _ctx: effects.append(payload["command"]) or ToolResult.ok("ran"),
+            kind="exec",
+            is_mutating=True,
+        ))
+        command = "nmap 192.0.2.10"
+        for _ in range(5):
+            command = f'echo "$(printf x "{command}")"'
+        provider = self.provider([
+            tool_turn("Shell", {"command": command}),
+            text_turn("the request was denied"),
+        ])
+        report = self.drive(self.runtime(
+            provider=provider,
+            tools=registry,
+            can_use_tool=lambda *_args: True,
+        ))
+        self.assertEqual(effects, [])
+        call = report.result.tool_call_reports[0]
+        self.assertEqual(call["execution_status"], "not_started")
+        self.assertEqual(call["permission_source"], "offensive")
+
+    def test_model_arguments_are_schema_checked_before_pretooluse(self):
+        from hooks import HookRegistry
+
+        effects = []
+        hook_calls = []
+        gate_calls = []
+        hooks = HookRegistry()
+        hooks.register("PreToolUse", lambda event: hook_calls.append(event) or None, tool="WriteOnce")
+        registry = ToolRegistry()
+        registry.register(ToolSpec(
+            name="WriteOnce",
+            description="write one controlled record",
+            input_schema={
+                "type": "object",
+                "properties": {"path": {"type": "string"}},
+                "required": ["path"],
+                "additionalProperties": False,
+            },
+            handler=lambda payload, _ctx: effects.append(payload),
+            kind="edit",
+            is_mutating=True,
+        ))
+        provider = self.provider([tool_turn("WriteOnce", {"path": "safe.txt", "extra": "override"}), text_turn("done")])
+        report = self.drive(self.runtime(
+            provider=provider,
+            tools=registry,
+            hooks=hooks,
+            can_use_tool=lambda *args: gate_calls.append(args) or True,
+        ))
+
+        self.assertEqual(hook_calls, [])
+        self.assertEqual(gate_calls, [])
+        self.assertEqual(effects, [])
+        self.assertEqual(report.tool_calls[0].permission_source, "invalid_input")
+        self.assertEqual(report.tool_calls[0].execution_status, "not_started")
+
+    def test_hook_rewrite_is_schema_checked_before_permission_or_side_effects(self):
+        from hooks import HookRegistry, HookResult
+
+        effects = []
+        gate_calls = []
+        hooks = HookRegistry()
+        hooks.register(
+            "PreToolUse",
+            lambda _event: HookResult.modify_input({"path": "safe.txt", "unexpected": True}),
+            tool="WriteOnce",
+        )
+        registry = ToolRegistry()
+        registry.register(ToolSpec(
+            name="WriteOnce",
+            description="write one controlled record",
+            input_schema={
+                "type": "object",
+                "properties": {"path": {"type": "string"}},
+                "required": ["path"],
+                "additionalProperties": False,
+            },
+            handler=lambda payload, _ctx: effects.append(payload),
+            kind="edit",
+            is_mutating=True,
+        ))
+        provider = self.provider([tool_turn("WriteOnce", {"path": "initial.txt"}), text_turn("done")])
+        report = self.drive(self.runtime(
+            provider=provider,
+            tools=registry,
+            hooks=hooks,
+            can_use_tool=lambda *args: gate_calls.append(args) or True,
+        ))
+
+        self.assertEqual(effects, [], "schema-invalid hook output must not reach the handler")
+        self.assertEqual(gate_calls, [], "permission evaluation must see only schema-valid arguments")
+        self.assertEqual(report.tool_calls[0].permission_source, "invalid_input")
+        self.assertEqual(report.tool_calls[0].execution_status, "not_started")
+        self.assertIn("hook rewrite schema-invalid", provider.sent_tool_results()[0]["content"])
+
+    def test_host_approval_mutation_cannot_change_nested_tool_arguments(self):
+        approved = []
+        executed = []
+        registry = ToolRegistry()
+        registry.register(ToolSpec(
+            name="RecordAction",
+            description="record one approved path",
+            input_schema={
+                "type": "object",
+                "properties": {
+                    "options": {
+                        "type": "object",
+                        "properties": {"path": {"type": "string"}},
+                        "required": ["path"],
+                        "additionalProperties": False,
+                    }
+                },
+                "required": ["options"],
+                "additionalProperties": False,
+            },
+            handler=lambda payload, _ctx: executed.append(payload) or "recorded",
+            kind="other",
+            is_mutating=True,
+        ))
+
+        def approve(_name, payload, _context):
+            approved.append(payload["options"]["path"])
+            payload["options"]["path"] = "unapproved.txt"
+            payload["options"]["extra"] = "injected"
+            return True
+
+        provider = self.provider([
+            tool_turn("RecordAction", {"options": {"path": "approved.txt"}}),
+            text_turn("done"),
+        ])
+        report = self.drive(self.runtime(provider=provider, tools=registry, can_use_tool=approve))
+
+        self.assertEqual(approved, ["approved.txt"])
+        self.assertEqual(executed, [{"options": {"path": "approved.txt"}}])
+        self.assertEqual(report.tool_calls[0].execution_status, "completed")
+
+    def test_deep_model_input_is_bounded_before_copy_hooks_or_gate(self):
+        from hooks import HookRegistry
+
+        nested = "leaf"
+        for _ in range(40):
+            nested = {"nested": nested}
+        hook_calls = []
+        gate_calls = []
+        effects = []
+        hooks = HookRegistry()
+        hooks.register("PreToolUse", lambda event: hook_calls.append(event), tool="Probe")
+        registry = ToolRegistry()
+        registry.register(
+            ToolSpec(
+                name="Probe",
+                description="a permissive probe used for input boundary testing",
+                input_schema={"type": "object"},
+                handler=lambda payload, _ctx: effects.append(payload),
+                kind="read",
+                is_mutating=False,
+            )
+        )
+        runtime = self.runtime(
+            provider=self.provider([tool_turn("Probe", {"nested": nested}), text_turn("done")]),
+            tools=registry,
+            hooks=hooks,
+            can_use_tool=lambda *args: gate_calls.append(args) or True,
+        )
+        real_deepcopy = copy.deepcopy
+
+        def guard_deepcopy(value, *args, **kwargs):
+            if isinstance(value, dict) and value.get("nested") is nested:
+                raise AssertionError("input copied before resource check")
+            return real_deepcopy(value, *args, **kwargs)
+
+        with patch("loop.copy.deepcopy", side_effect=guard_deepcopy):
+            report = self.drive(runtime)
+        self.assertEqual(hook_calls, [])
+        self.assertEqual(gate_calls, [])
+        self.assertEqual(effects, [])
+        self.assertEqual(report.tool_calls[0].permission_source, "invalid_input")
+        self.assertEqual(report.tool_calls[0].execution_status, "not_started")
+
     def test_parallel_calls_all_receive_results_in_order(self):
         workspace = self.workspace({"a.txt": "A", "b.txt": "B"})
         provider = self.provider(
@@ -67,10 +414,116 @@ class DispatchTests(RuntimeTestCase):
         results = report.transcript[2].tool_results
         self.assertEqual(len(results), 3)
         self.assertEqual([result.is_error for result in results], [False, False, True])
-        self.assertEqual(results[0].text(), "A")
-        self.assertEqual(results[1].text(), "B")
+        self.assertIn("\nA", results[0].text())
+        self.assertIn("\nB", results[1].text())
+        self.assertIn('"source":"tool:Read"', results[0].text())
+        self.assertEqual(report.tool_calls[0].result_source, "tool:Read")
+        self.assertEqual(report.tool_calls[0].result_trust, "low")
+        self.assertEqual(report.tool_calls[0].as_dict()["result_source"], "tool:Read")
+        self.assertEqual(report.tool_calls[0].execution_status, "completed")
+        self.assertEqual(report.tool_calls[0].execution_gate, "executed")
         ids = [call.id for call in report.transcript[1].tool_uses]
         self.assertEqual(ids, [result.tool_use_id for result in results])
+
+    def test_report_distinguishes_handler_failure_from_pre_execution_refusal(self):
+        registry = ToolRegistry()
+        registry.register(ToolSpec(
+            name="Explode", description="", input_schema={},
+            handler=lambda _payload, _ctx: (_ for _ in ()).throw(ValueError("boom")),
+            kind="read", is_mutating=False,
+        ))
+        provider = self.provider([tool_turn("Explode", {}), text_turn("done")])
+        failed = self.drive(self.runtime(provider=provider, tools=registry, max_turns=4))
+        self.assertEqual(failed.tool_calls[0].execution_status, "failed")
+        self.assertEqual(failed.tool_calls[0].execution_gate, "audit")
+
+        denied_runtime = self.runtime(
+            [tool_turn("Write", {"path": "blocked.txt", "content": "x"}), text_turn("done")],
+            disallowed_tools=("Write",),
+        )
+        denied = self.drive(denied_runtime)
+        self.assertEqual(denied.tool_calls[0].execution_status, "not_started")
+        self.assertEqual(denied.tool_calls[0].execution_gate, "")
+        self.assertTrue(denied.tool_calls[0].denied)
+        bound_denials = {
+            record.input_fingerprint
+            for record in (
+                denied_runtime.sealed_ledger.record(index)
+                for index in range(1, len(denied_runtime.sealed_ledger) + 1)
+            )
+            if dict(record.event).get("intent") == "governed-action"
+            and dict(record.event).get("action") == "Write"
+            and dict(record.event).get("outcome") == "denied:authorize"
+        }
+        self.assertEqual(bound_denials, {denied.tool_calls[0].governance_input_digest})
+
+    def test_post_execution_seal_failure_is_reported_without_erasing_execution(self):
+        workspace = self.workspace()
+        provider = self.provider([
+            tool_turn("Write", {"path": "sealed.txt", "content": "already executed"}),
+            text_turn("done"),
+        ])
+        runtime = self.runtime(
+            provider=provider,
+            workspace=workspace,
+            allowed_tools=("Write",),
+        )
+        ledger = runtime.sealed_ledger
+        append = ledger.append
+        calls = []
+
+        def fail_after_permission_record(**kwargs):
+            calls.append(kwargs)
+            if len(calls) == 2:
+                raise OSError("forward-seal storage unavailable")
+            return append(**kwargs)
+
+        with patch.object(ledger, "append", side_effect=fail_after_permission_record):
+            report = self.drive(runtime)
+
+        self.assertEqual(len(calls), 2)
+        self.assertEqual((workspace / "sealed.txt").read_text(), "already executed")
+        call = report.tool_calls[0]
+        self.assertEqual(call.execution_status, "completed")
+        self.assertEqual(call.governance_seal_error, "OSError")
+        self.assertEqual(call.as_dict()["governance_seal_error"], "OSError")
+        tool_result = provider.sent_tool_results()[0]
+        self.assertFalse(tool_result["is_error"], "completed side effects must not look retryable")
+        self.assertIn("ACTION COMPLETED", tool_result["content"])
+        self.assertIn("OSError", tool_result["content"])
+        self.assertIn("not rolled back", tool_result["content"])
+
+        # A deliberately small host result cap must not leave a misleading
+        # suffix or exceed the configured model-boundary size.
+        tiny_provider = self.provider([
+            tool_turn("Write", {"path": "tiny-cap.txt", "content": "done"}),
+            text_turn("done"),
+        ])
+        tiny_runtime = self.runtime(
+            provider=tiny_provider,
+            workspace=workspace,
+            config=RuntimeConfig(
+                workspace=str(workspace),
+                allowed_tools=("Write",),
+                tool_limits=ToolLimits(max_result_chars=26),
+            ),
+        )
+        tiny_ledger = tiny_runtime.sealed_ledger
+        tiny_append = tiny_ledger.append
+        tiny_calls = []
+
+        def fail_tiny_forward_seal(**kwargs):
+            tiny_calls.append(kwargs)
+            if len(tiny_calls) == 2:
+                raise OSError("forward-seal storage unavailable")
+            return tiny_append(**kwargs)
+
+        with patch.object(tiny_ledger, "append", side_effect=fail_tiny_forward_seal):
+            tiny_report = self.drive(tiny_runtime)
+        tiny_result = tiny_provider.sent_tool_results()[0]
+        self.assertEqual(tiny_result["content"], "[ACTION DONE; SEAL FAILED]")
+        self.assertFalse(tiny_result["is_error"])
+        self.assertTrue(tiny_report.tool_calls[0].truncated)
 
     def test_an_unknown_tool_is_answered_with_the_real_tool_list(self):
         provider = self.provider([tool_turn("DeleteTheInternet", {}), text_turn("recovering")])
@@ -92,12 +545,13 @@ class DispatchTests(RuntimeTestCase):
         provider = self.provider([{"tools": [{"name": f"T{index}", "input": {}} for index in range(6)]}, text_turn("done")])
         report = self.drive(self.runtime(provider=provider, tools=registry, max_turns=8))
         blocks = report.transcript[2].tool_results
-        self.assertEqual(blocks[0].text(), "plain text")
+        self.assertIn("plain text", blocks[0].text())
+        self.assertIn('"source":"tool:T0"', blocks[0].text())
         self.assertIn('"structured": 1', blocks[1].text())
         self.assertIn("a", blocks[2].text())
-        self.assertEqual(blocks[3].text(), "T3 returned no result")
-        self.assertEqual(blocks[4].text(), "42")
-        self.assertEqual(blocks[5].text(), "T5 returned False")
+        self.assertIn("T3 returned no result", blocks[3].text())
+        self.assertIn("42", blocks[4].text())
+        self.assertIn("T5 returned False", blocks[5].text())
         self.assertEqual(self.assertExactlyOneResult(report).subtype, "success")
 
     def test_oversized_output_is_capped_before_it_enters_the_transcript(self):
@@ -118,6 +572,32 @@ class DispatchTests(RuntimeTestCase):
         self.assertLess(len(block.text()), 301_000)
         self.assertIn("truncated", block.text())
         self.assertEqual(report.tool_calls[0].result_chars, 500_000, "the report keeps the true size")
+
+    def test_oversized_structured_result_is_not_flattened_before_capping(self):
+        from tools import MAX_TOOL_RESULT_CHARS
+
+        result = ToolResult(content={"payload": "x" * (MAX_TOOL_RESULT_CHARS + 1)})
+        result.text = lambda: self.fail("oversized structured result was flattened before capping")
+        registry = ToolRegistry()
+        registry.register(
+            ToolSpec(
+                name="StructuredSpew",
+                description="returns an oversized structured value",
+                input_schema={},
+                handler=lambda payload, ctx: result,
+                kind="read",
+                is_mutating=False,
+            )
+        )
+        report = self.drive(
+            self.runtime(
+                provider=self.provider([tool_turn("StructuredSpew", {}), text_turn("done")]),
+                tools=registry,
+            )
+        )
+        block = report.transcript[2].tool_results[0]
+        self.assertIn("structured tool result omitted", block.text())
+        self.assertTrue(report.tool_calls[0].truncated)
 
     def test_a_handler_that_loses_its_mind_is_reported_not_propagated(self):
         registry = ToolRegistry()

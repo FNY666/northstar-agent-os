@@ -114,6 +114,30 @@ GUARDS: list[tuple[str, str, list[tuple[str, str]], str, str]] = [
         "test_seccomp*",
         "test_tighten_only",
     ),
+    (
+        "untrusted tool input is bounded before deep copy",
+        "loop.py",
+        [("            check_json_tree_budget(call.input)\n            # Detach provider-owned nested values before hooks and policy inspect",
+          "            # MUTATION: copy before the resource check.\n            # Detach provider-owned nested values before hooks and policy inspect")],
+        "test_loop*",
+        "test_deep_model_input_is_bounded_before_copy_hooks_or_gate",
+    ),
+    (
+        "oversized structured tool output is capped before serialization",
+        "tools/__init__.py",
+        [("        elif _result_fits_text_budget(self.content, effective_cap, text_block_type=TextBlock):",
+          "        elif True:  # MUTATION: serialize before checking the result cap")],
+        "test_loop*",
+        "test_oversized_structured_result_is_not_flattened_before_capping",
+    ),
+    (
+        "delegated tool calls retain the host approval callback",
+        "loop.py",
+        [("                    can_use_tool=self.permissions.config.can_use_tool,",
+          "                    can_use_tool=None,  # MUTATION: drop host approval from children")],
+        "test_agents*",
+        "test_child_tool_calls_still_pass_the_hosts_live_approval_callback",
+    ),
 ]
 
 
@@ -133,6 +157,10 @@ def prepare(root: Path) -> Path:
             continue
         target = root / "components" / source.name
         shutil.copytree(source, target, ignore=shutil.ignore_patterns("__pycache__"))
+    # The SDK contract tests resolve their demo workspace relative to the repo
+    # root, outside `components/`; include it so the copied baseline represents
+    # the same checkout shape as CI instead of failing before a guard mutation.
+    shutil.copytree(REPO / "examples", root / "examples", ignore=shutil.ignore_patterns("__pycache__"))
     return root / "components/northstar-agent-runtime"
 
 

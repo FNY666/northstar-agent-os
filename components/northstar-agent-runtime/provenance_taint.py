@@ -56,9 +56,83 @@ Honest scope (deliberately not ported):
 from __future__ import annotations
 
 import ast
+import hashlib
+import math
 import operator
+import threading
+import uuid
 from dataclasses import dataclass, field
+from types import MappingProxyType
 from typing import Any
+
+try:
+    from canonical_json import jcs_canonical_json
+except ImportError:  # pragma: no cover - standalone use
+    import json as _json
+
+    def jcs_canonical_json(value: Any) -> bytes:
+        return _json.dumps(value, ensure_ascii=True, sort_keys=True, separators=(",", ":"), allow_nan=False).encode("utf-8")
+
+
+_MAX_SANITIZER_DIGEST_NODES = 32_768
+_MAX_SANITIZER_DIGEST_DEPTH = 64
+_MAX_SANITIZER_DIGEST_BYTES = 2 * 1024 * 1024
+_MAX_SANITIZER_DIGEST_STRING_CHARS = 1024 * 1024
+
+
+def _content_digest(value: Any) -> str | None:
+    """Fingerprint bounded JSON-shaped data; unsupported data fails closed."""
+    remaining_nodes = [_MAX_SANITIZER_DIGEST_NODES]
+    remaining_bytes = [_MAX_SANITIZER_DIGEST_BYTES]
+    active: set[int] = set()
+
+    def validate(item: Any, depth: int) -> bool:
+        remaining_nodes[0] -= 1
+        if remaining_nodes[0] < 0 or depth > _MAX_SANITIZER_DIGEST_DEPTH:
+            return False
+        item_type = type(item)
+        if item is None or item_type is bool:
+            return True
+        if item_type is int:
+            return item.bit_length() <= 4096
+        if item_type is float:
+            return math.isfinite(item)
+        if item_type is str:
+            if len(item) > _MAX_SANITIZER_DIGEST_STRING_CHARS:
+                return False
+            try:
+                size = len(item.encode("utf-8"))
+            except UnicodeEncodeError:
+                return False
+            remaining_bytes[0] -= size
+            return remaining_bytes[0] >= 0
+        if item_type not in (list, tuple, dict) or len(item) > _MAX_SANITIZER_DIGEST_NODES:
+            return False
+        identity = id(item)
+        if identity in active:
+            return False
+        active.add(identity)
+        try:
+            if item_type is dict:
+                for key, child in item.items():
+                    if type(key) is not str or not validate(key, depth + 1):
+                        return False
+                    if not validate(child, depth + 1):
+                        return False
+            else:
+                for child in item:
+                    if not validate(child, depth + 1):
+                        return False
+            return True
+        finally:
+            active.remove(identity)
+
+    if not validate(value, 0):
+        return None
+    try:
+        return hashlib.sha256(jcs_canonical_json(value)).hexdigest()
+    except (TypeError, ValueError, RecursionError):
+        return None
 
 
 # ---------------------------------------------------------------------------
@@ -66,8 +140,6 @@ from typing import Any
 # ---------------------------------------------------------------------------
 
 _CMP_OPS = {
-    ast.Eq: operator.eq,
-    ast.NotEq: operator.ne,
     ast.Lt: operator.lt,
     ast.LtE: operator.le,
     ast.Gt: operator.gt,
@@ -75,6 +147,104 @@ _CMP_OPS = {
     ast.Is: operator.is_,
     ast.IsNot: operator.is_not,
 }
+
+_MAX_CONDITION_VALUE_DEPTH = 32
+_MAX_CONDITION_VALUE_NODES = 4096
+_MAX_CONDITION_TEXT_CHARS = 65_536
+_MAX_CONDITION_INT_BITS = 256
+_MAPPING_PROXY_TYPE = type(MappingProxyType({}))
+
+
+def _validate_condition_value(value: Any) -> Any:
+    """Accept only bounded, exact JSON-like types before operators touch values."""
+    remaining = [_MAX_CONDITION_VALUE_NODES]
+    active: set[int] = set()
+
+    def visit(item: Any, depth: int) -> Any:
+        remaining[0] -= 1
+        if remaining[0] < 0 or depth > _MAX_CONDITION_VALUE_DEPTH:
+            raise ValueError("condition value exceeds structural limits")
+        item_type = type(item)
+        if item is None or item_type is bool:
+            return item
+        if item_type is int:
+            if item.bit_length() > _MAX_CONDITION_INT_BITS:
+                raise ValueError("condition integer exceeds bit limit")
+            return item
+        if item_type is float:
+            if not math.isfinite(item):
+                raise ValueError("condition float must be finite")
+            return item
+        if item_type is str:
+            if len(item) > _MAX_CONDITION_TEXT_CHARS:
+                raise ValueError("condition string exceeds size limit")
+            return item
+        if item_type not in (list, tuple, dict, _MAPPING_PROXY_TYPE):
+            raise ValueError(f"unsupported condition value type: {item_type.__name__}")
+        if len(item) > _MAX_CONDITION_VALUE_NODES:
+            raise ValueError("condition container exceeds item limit")
+        identity = id(item)
+        if identity in active:
+            raise ValueError("cyclic condition value")
+        active.add(identity)
+        try:
+            if item_type in (dict, _MAPPING_PROXY_TYPE):
+                out = {}
+                for key, child in item.items():
+                    if type(key) is not str or len(key) > _MAX_CONDITION_TEXT_CHARS:
+                        raise ValueError("condition object keys must be bounded strings")
+                    out[key] = visit(child, depth + 1)
+                return out
+            values = [visit(child, depth + 1) for child in item]
+            return values if item_type is list else tuple(values)
+        finally:
+            active.remove(identity)
+
+    return visit(value, 0)
+
+
+def _freeze_condition_value(value: Any) -> Any:
+    """Recursively detach policy constants and make every container immutable."""
+    item_type = type(value)
+    if item_type is dict:
+        return MappingProxyType({key: _freeze_condition_value(child) for key, child in value.items()})
+    if item_type in (list, tuple):
+        return tuple(_freeze_condition_value(child) for child in value)
+    return value
+
+
+def _condition_equal(left: Any, right: Any) -> bool:
+    """JSON-style equality that never conflates booleans with numbers."""
+    left_type, right_type = type(left), type(right)
+    if left_type is bool and right_type in (int, float) or right_type is bool and left_type in (int, float):
+        raise ValueError("condition comparison mixes boolean and numeric types")
+    if left_type is dict and right_type is dict:
+        return left.keys() == right.keys() and all(
+            _condition_equal(left[key], right[key]) for key in left
+        )
+    if left_type in (list, tuple) and right_type is left_type:
+        return len(left) == len(right) and all(
+            _condition_equal(a, b) for a, b in zip(left, right)
+        )
+    if left_type is not right_type and not (
+        left_type in (int, float) and right_type in (int, float)
+    ):
+        return False
+    return operator.eq(left, right)
+
+
+def _condition_contains(container: Any, value: Any) -> bool:
+    if type(container) is str:
+        if type(value) is not str:
+            raise ValueError("string membership requires a string value")
+        return value in container
+    if type(container) is dict:
+        if type(value) is not str:
+            raise ValueError("object membership requires a string key")
+        return value in container
+    if type(container) in (list, tuple):
+        return any(_condition_equal(item, value) for item in container)
+    raise ValueError("membership requires a string, list, tuple, or object")
 
 
 def safe_eval(expr: str, env: dict[str, Any]) -> Any:
@@ -84,16 +254,33 @@ def safe_eval(expr: str, env: dict[str, Any]) -> Any:
     treat the raise as "condition fires" — fail-closed, exactly as in
     Guardians' ``_check_automata``.
     """
-    tree = ast.parse(expr, mode="eval")
+    if not isinstance(expr, str) or len(expr) > 4096:
+        raise ValueError("condition expression is missing or too long")
+    if type(env) is not dict:
+        raise ValueError("condition environment must be a plain dict")
+    try:
+        tree = ast.parse(expr, mode="eval")
+    except (SyntaxError, RecursionError, MemoryError) as error:
+        raise ValueError("condition expression cannot be parsed") from error
+    if sum(1 for _ in ast.walk(tree)) > 1024:
+        raise ValueError("condition expression has too many nodes")
     return _eval_node(tree.body, env)
+
+
+def _eval_condition(expr: str, env: dict[str, Any]) -> bool:
+    """Require a boolean policy result; truthiness is not policy semantics."""
+    result = safe_eval(expr, env)
+    if type(result) is not bool:
+        raise ValueError("condition expression must evaluate to bool")
+    return result
 
 
 def _eval_node(node: ast.expr, env: dict[str, Any]) -> Any:
     if isinstance(node, ast.Constant):
-        return node.value
+        return _validate_condition_value(node.value)
     if isinstance(node, ast.Name):
         try:
-            return env[node.id]
+            return _validate_condition_value(env[node.id])
         except KeyError:
             raise ValueError(f"undefined variable: {node.id!r}")
     if isinstance(node, ast.List):
@@ -123,10 +310,14 @@ def _eval_node(node: ast.expr, env: dict[str, Any]) -> Any:
         for op, comp_node in zip(node.ops, node.comparators):
             comp_val = _eval_node(comp_node, env)
             if isinstance(op, ast.In):
-                if current not in comp_val:
+                if not _condition_contains(comp_val, current):
                     return False
             elif isinstance(op, ast.NotIn):
-                if current in comp_val:
+                if _condition_contains(comp_val, current):
+                    return False
+            elif isinstance(op, (ast.Eq, ast.NotEq)):
+                equal = _condition_equal(current, comp_val)
+                if equal != isinstance(op, ast.Eq):
                     return False
             else:
                 fn = _CMP_OPS.get(type(op))
@@ -134,6 +325,14 @@ def _eval_node(node: ast.expr, env: dict[str, Any]) -> Any:
                     raise ValueError(
                         f"disallowed comparison: {type(op).__name__}"
                     )
+                if type(current) is bool or type(comp_val) is bool:
+                    raise ValueError("ordering comparisons do not accept booleans")
+                if type(current) not in (str, int, float) or type(comp_val) not in (str, int, float):
+                    raise ValueError("ordering comparisons require scalar values")
+                if type(current) is not type(comp_val) and not (
+                    type(current) in (int, float) and type(comp_val) in (int, float)
+                ):
+                    raise ValueError("ordering comparison types do not match")
                 if not fn(current, comp_val):
                     return False
             current = comp_val
@@ -154,9 +353,11 @@ def expr_names(expr: str) -> set[str]:
 
     Excludes the allowlisted builtin ``len`` (it is not a variable).
     """
+    if not isinstance(expr, str) or len(expr) > 4096:
+        return set()
     try:
         tree = ast.parse(expr, mode="eval")
-    except SyntaxError:
+    except (SyntaxError, RecursionError, MemoryError):
         return set()
     return {
         n.id
@@ -184,6 +385,7 @@ class TaintedValue:
     provenance: set[str] = field(default_factory=set)
     source_tool: str = "unknown"
     sanitized_for: set[str] = field(default_factory=set)
+    sanitized_digests: dict[str, str] = field(default_factory=dict)
 
     def copy(self) -> "TaintedValue":
         return TaintedValue(
@@ -192,6 +394,7 @@ class TaintedValue:
             provenance=set(self.provenance),
             source_tool=self.source_tool,
             sanitized_for=set(self.sanitized_for),
+            sanitized_digests=dict(self.sanitized_digests),
         )
 
 
@@ -244,6 +447,19 @@ class ToolTaintSpec:
     sink_params: tuple[str, ...] = ()
     sanitizes: tuple[str, ...] = ()
 
+    def __post_init__(self) -> None:
+        if type(self.name) is not str or not self.name or len(self.name) > 256:
+            raise ValueError("tool taint spec name must be a non-empty string <= 256 characters")
+        for field_name in ("source_labels", "sink_params", "sanitizes"):
+            values = getattr(self, field_name)
+            if type(values) not in (tuple, list) or len(values) > 256:
+                raise ValueError(f"{field_name} must be a bounded list/tuple of names")
+            if any(type(value) is not str or not value or len(value) > 256 for value in values):
+                raise ValueError(f"{field_name} entries must be non-empty strings <= 256 characters")
+            if len(values) != len(set(values)):
+                raise ValueError(f"{field_name} entries must be unique")
+            object.__setattr__(self, field_name, tuple(values))
+
 
 @dataclass(frozen=True)
 class TaintRule:
@@ -263,6 +479,23 @@ class TaintRule:
     sink_param: str
     condition: str | None = None
     sanitizers: tuple[str, ...] = ()
+
+    def __post_init__(self) -> None:
+        for field_name in ("name", "source_tool", "sink_tool", "sink_param"):
+            value = getattr(self, field_name)
+            if type(value) is not str or not value or len(value) > 256:
+                raise ValueError(f"taint rule {field_name} must be a non-empty string <= 256 characters")
+        for field_name in ("source_labels", "sanitizers"):
+            values = getattr(self, field_name)
+            if type(values) not in (tuple, list) or len(values) > 256:
+                raise ValueError(f"taint rule {field_name} must be a bounded list/tuple of names")
+            if any(type(value) is not str or not value or len(value) > 256 for value in values):
+                raise ValueError(f"taint rule {field_name} entries must be non-empty strings <= 256 characters")
+            if len(values) != len(set(values)):
+                raise ValueError(f"taint rule {field_name} entries must be unique")
+            object.__setattr__(self, field_name, tuple(values))
+        if self.condition is not None and (type(self.condition) is not str or len(self.condition) > 4096):
+            raise ValueError("taint rule condition must be text <= 4096 characters")
 
 
 @dataclass(frozen=True)
@@ -295,6 +528,45 @@ class SecurityAutomaton:
     transitions: tuple[AutomatonTransition, ...] = ()
     constants: dict[str, Any] = field(default_factory=dict)
 
+    def __post_init__(self) -> None:
+        if type(self.name) is not str or not self.name or len(self.name) > 128:
+            raise ValueError("automaton name must be a non-empty string <= 128 characters")
+        if type(self.states) is not tuple or not self.states:
+            raise ValueError("automaton states must be a non-empty tuple")
+        names: set[str] = set()
+        for state in self.states:
+            if type(state) is not AutomatonState or type(state.name) is not str or not state.name:
+                raise ValueError("automaton states must have non-empty names")
+            if state.name in names:
+                raise ValueError(f"duplicate automaton state: {state.name!r}")
+            names.add(state.name)
+            if type(state.is_error) is not bool:
+                raise ValueError("automaton state is_error must be bool")
+        if type(self.initial_state) is not str or self.initial_state not in names:
+            raise ValueError("automaton initial_state must name a declared state")
+        if next(state for state in self.states if state.name == self.initial_state).is_error:
+            raise ValueError("automaton initial_state cannot be an error state")
+        if type(self.transitions) is not tuple:
+            raise ValueError("automaton transitions must be a tuple")
+        for transition in self.transitions:
+            if type(transition) is not AutomatonTransition:
+                raise ValueError("automaton transitions must be AutomatonTransition values")
+            if transition.from_state not in names or transition.to_state not in names:
+                raise ValueError("automaton transition references an undeclared state")
+            if type(transition.tool_name) is not str or not transition.tool_name:
+                raise ValueError("automaton transition tool_name must be non-empty")
+            if transition.condition is not None and (
+                type(transition.condition) is not str or len(transition.condition) > 4096
+            ):
+                raise ValueError("automaton condition must be text <= 4096 characters")
+        if type(self.constants) is not dict or any(type(key) is not str for key in self.constants):
+            raise ValueError("automaton constants must be a plain dict with string keys")
+        try:
+            validated_constants = _validate_condition_value(self.constants)
+        except ValueError as error:
+            raise ValueError(f"invalid automaton constants: {error}") from error
+        object.__setattr__(self, "constants", _freeze_condition_value(validated_constants))
+
 
 @dataclass(frozen=True)
 class BudgetLimit:
@@ -315,6 +587,7 @@ class GateDecision:
     reason: str
     check: str  # "budget" | "automaton" | "taint" | "ok"
     detail: dict[str, Any] = field(default_factory=dict)
+    budget_reservation: str = field(default="", repr=False, compare=False)
 
     def as_dict(self) -> dict[str, Any]:
         return {
@@ -356,7 +629,10 @@ def _taint_rule_fires(
         return False
 
     if rule.name in value.sanitized_for:
-        return False
+        pinned = value.sanitized_digests.get(rule.name)
+        current = _content_digest(value.raw)
+        if pinned is not None and current == pinned:
+            return False
 
     if rule.condition:
         eval_env: dict[str, Any] = {}
@@ -367,7 +643,7 @@ def _taint_rule_fires(
         if any(n not in eval_env for n in refs):
             return True
         try:
-            if not safe_eval(rule.condition, eval_env):
+            if not _eval_condition(rule.condition, eval_env):
                 return False
         except Exception:
             return True  # can't evaluate — apply conservatively
@@ -384,9 +660,34 @@ class TaintTracker:
         rules: list[TaintRule] | None = None,
         constants: dict[str, Any] | None = None,
     ) -> None:
-        self._specs = dict(specs or {})
-        self._rules = list(rules or [])
-        self._constants = dict(constants or {})
+        if specs is not None and type(specs) is not dict:
+            raise ValueError("taint specs must be a plain dict")
+        raw_specs = dict(specs or {})
+        if len(raw_specs) > 4096 or any(
+            type(name) is not str or type(spec) is not ToolTaintSpec or spec.name != name
+            for name, spec in raw_specs.items()
+        ):
+            raise ValueError("taint specs must map each tool name to its matching validated spec")
+        if rules is not None and type(rules) not in (list, tuple):
+            raise ValueError("taint rules must be a list or tuple")
+        raw_rules = list(rules or [])
+        if len(raw_rules) > 4096 or any(type(rule) is not TaintRule for rule in raw_rules):
+            raise ValueError("taint rules must contain only validated TaintRule values")
+        rule_names = [rule.name for rule in raw_rules]
+        if len(rule_names) != len(set(rule_names)):
+            raise ValueError("taint rule names must be unique")
+        if constants is not None and type(constants) is not dict:
+            raise ValueError("taint constants must be a plain dict")
+        raw_constants = dict(constants or {})
+        if any(type(key) is not str for key in raw_constants):
+            raise ValueError("taint constant names must be strings")
+        try:
+            frozen_constants = _freeze_condition_value(_validate_condition_value(raw_constants))
+        except ValueError as error:
+            raise ValueError(f"invalid taint constants: {error}") from error
+        self._specs = raw_specs
+        self._rules = raw_rules
+        self._constants = frozen_constants
         self._env: dict[str, TaintedValue] = {}
 
     # -- value lifecycle -------------------------------------------------
@@ -433,13 +734,22 @@ class TaintTracker:
     def apply_sanitizers(self, tool_name: str, value: TaintedValue) -> TaintedValue:
         """Mark *value* sanitized for every rule this tool sanitizes."""
         out = value.copy()
+        newly_sanitized: set[str] = set()
         for rule in self._rules:
             if tool_name in rule.sanitizers:
                 out.sanitized_for.add(rule.name)
+                newly_sanitized.add(rule.name)
         spec = self._specs.get(tool_name)
         if spec:
             for rule_name in spec.sanitizes:
                 out.sanitized_for.add(rule_name)
+                newly_sanitized.add(rule_name)
+        digest = _content_digest(out.raw)
+        if digest is not None:
+            # Never refresh an older sanitizer's pin just because another
+            # sanitizer ran later; that would launder mutations between steps.
+            for rule_name in newly_sanitized:
+                out.sanitized_digests[rule_name] = digest
         return out
 
     # -- sink checking ---------------------------------------------------
@@ -513,8 +823,8 @@ class AutomatonEngine:
     """Nondeterministic security-automaton tracker over tool-call events.
 
     Each automaton holds a *set* of possible current states. On
-    ``observe(tool_name, args)`` the first transition matching
-    ``(from_state, tool_name)`` whose condition holds fires; reaching an
+    ``observe(tool_name, args)`` every transition matching
+    ``(from_state, tool_name)`` whose condition holds fires; reaching any
     ``is_error`` state denies the call. Fail-closed exactly as in
     Guardians: an unparseable condition is assumed to fire, and a
     condition over unknown/symbolic argument values is assumed to fire.
@@ -524,16 +834,27 @@ class AutomatonEngine:
 
     def __init__(self, automata: list[SecurityAutomaton] | None = None) -> None:
         self._automata = list(automata or [])
+        if any(type(automaton) is not SecurityAutomaton for automaton in self._automata):
+            raise ValueError("automata must contain only validated SecurityAutomaton values")
+        names = [automaton.name for automaton in self._automata]
+        if len(names) != len(set(names)):
+            raise ValueError("automaton names must be unique")
         self._states: dict[str, set[str]] = {
             a.name: {a.initial_state} for a in self._automata
         }
         self._violated: dict[str, str] = {}  # automaton -> error state
+        self._lock = threading.RLock()
 
     @property
     def violated(self) -> dict[str, str]:
-        return dict(self._violated)
+        with self._lock:
+            return dict(self._violated)
 
     def observe(self, tool_name: str, arguments: dict[str, Any]) -> GateDecision:
+        with self._lock:
+            return self._observe_locked(tool_name, arguments)
+
+    def _observe_locked(self, tool_name: str, arguments: dict[str, Any]) -> GateDecision:
         """Advance automata on a tool-call event; deny on error states."""
         if self._violated:
             name = sorted(self._violated)[0]
@@ -553,7 +874,7 @@ class AutomatonEngine:
             next_states: set[str] = set()
 
             for current in sorted(current_states):
-                transitioned = False
+                fired = False
                 for trans in automaton.transitions:
                     if trans.from_state != current or trans.tool_name != tool_name:
                         continue
@@ -567,7 +888,7 @@ class AutomatonEngine:
                             fires = True
                         else:
                             try:
-                                fires = bool(safe_eval(trans.condition, eval_env))
+                                fires = _eval_condition(trans.condition, eval_env)
                             except Exception:
                                 fires = True  # fail closed
                         if not fires:
@@ -588,10 +909,9 @@ class AutomatonEngine:
                             },
                         )
                     next_states.add(trans.to_state)
-                    transitioned = True
-                    break
+                    fired = True
 
-                if not transitioned:
+                if not fired:
                     next_states.add(current)
 
             self._states[automaton.name] = next_states
@@ -599,7 +919,8 @@ class AutomatonEngine:
         return GateDecision(True, "no automaton violation", "automaton")
 
     def states(self) -> dict[str, tuple[str, ...]]:
-        return {k: tuple(sorted(v)) for k, v in self._states.items()}
+        with self._lock:
+            return {k: tuple(sorted(v)) for k, v in self._states.items()}
 
 
 # ---------------------------------------------------------------------------
@@ -614,33 +935,46 @@ class BudgetEnforcer:
     exceeded; here each tool gets its own cap (``{"send_email": 3}``).
     Malformed limits (non-int, ``True``/``False``, negative, or an
     explicitly-present ``None``) fail closed: the tool is denied rather
-    than left unbounded. An *absent* key means "no cap".
+    than left unbounded. An *absent* key means "no cap". ``reserve()`` is
+    the atomic pre-execution path; its token is committed with
+    ``record(tool_name, token)`` or returned with ``release(token)``.
     """
 
     _ABSENT: Any = object()
 
     def __init__(self, limits: dict[str, int] | None = None) -> None:
+        if limits is not None and type(limits) is not dict:
+            raise ValueError("budget limits must be a plain dict")
+        if limits is not None and any(type(name) is not str or not name or len(name) > 256 for name in limits):
+            raise ValueError("budget tool names must be non-empty strings <= 256 characters")
         self._limits = dict(limits or {})
         self._used: dict[str, int] = {}
+        self._pending: dict[str, str] = {}  # reservation token -> tool name
+        self._pending_counts: dict[str, int] = {}
+        self._lock = threading.RLock()
 
     def check(self, tool_name: str) -> GateDecision:
+        with self._lock:
+            return self._check_locked(tool_name)
+
+    def _check_locked(self, tool_name: str) -> GateDecision:
+        if type(tool_name) is not str or not tool_name or len(tool_name) > 256:
+            return GateDecision(False, "invalid budget tool name; denying", "budget")
         limit = self._limits.get(tool_name, self._ABSENT)
         if limit is self._ABSENT:
             return GateDecision(True, "no budget limit for tool", "budget")
         # Fail closed on malformed limits: bool is an int subclass, reject it.
         if (
-            limit is None
-            or isinstance(limit, bool)
-            or not isinstance(limit, int)
+            type(limit) is not int
             or limit < 0
         ):
             return GateDecision(
                 False,
                 f"malformed budget limit for tool '{tool_name}'; denying",
                 "budget",
-                {"limit": repr(limit)},
+                {"limit_type": type(limit).__name__},
             )
-        used = self._used.get(tool_name, 0)
+        used = self._used.get(tool_name, 0) + self._pending_counts.get(tool_name, 0)
         if used >= limit:
             return GateDecision(
                 False,
@@ -652,12 +986,64 @@ class BudgetEnforcer:
             True, "within budget", "budget", {"used": used, "limit": limit}
         )
 
-    def record(self, tool_name: str) -> None:
-        """Count one executed call. Called only after the gate allows."""
-        self._used[tool_name] = self._used.get(tool_name, 0) + 1
+    def reserve(self, tool_name: str) -> GateDecision:
+        """Atomically claim one capped call slot before execution."""
+        with self._lock:
+            decision = self._check_locked(tool_name)
+            if not decision.allowed or tool_name not in self._limits:
+                return decision
+            token = uuid.uuid4().hex
+            self._pending[token] = tool_name
+            self._pending_counts[tool_name] = self._pending_counts.get(tool_name, 0) + 1
+            return GateDecision(
+                True, decision.reason, decision.check,
+                {**decision.detail, "reserved": True}, budget_reservation=token,
+            )
+
+    def release(self, reservation: str) -> bool:
+        """Return an uncommitted slot after a later gate rejects the call."""
+        if type(reservation) is not str or len(reservation) != 32 or any(
+            char not in "0123456789abcdef" for char in reservation
+        ):
+            return False
+        with self._lock:
+            tool_name = self._pending.pop(reservation, None)
+            if tool_name is None:
+                return False
+            self._pending_counts[tool_name] -= 1
+            if self._pending_counts[tool_name] == 0:
+                del self._pending_counts[tool_name]
+            return True
+
+    def record(self, tool_name: str, reservation: str | None = None) -> None:
+        """Commit an executed call; pass the gate's reservation token when present."""
+        if type(tool_name) is not str or not tool_name or len(tool_name) > 256:
+            raise ValueError("invalid budget tool name")
+        if reservation is not None and (
+            type(reservation) is not str or len(reservation) != 32
+            or any(char not in "0123456789abcdef" for char in reservation)
+        ):
+            raise ValueError("invalid budget reservation token")
+        with self._lock:
+            if reservation is not None:
+                reserved_tool = self._pending.get(reservation)
+                if reserved_tool != tool_name:
+                    raise ValueError("budget reservation is missing or belongs to another tool")
+                self._pending.pop(reservation)
+                self._pending_counts[tool_name] -= 1
+                if self._pending_counts[tool_name] == 0:
+                    del self._pending_counts[tool_name]
+            else:
+                if self._pending_counts.get(tool_name, 0):
+                    raise ValueError("a reservation token is required while calls are reserved")
+                decision = self._check_locked(tool_name)
+                if not decision.allowed:
+                    raise ValueError(decision.reason)
+            self._used[tool_name] = self._used.get(tool_name, 0) + 1
 
     def usage(self) -> dict[str, int]:
-        return dict(self._used)
+        with self._lock:
+            return dict(self._used)
 
 
 # ---------------------------------------------------------------------------
@@ -669,10 +1055,11 @@ class ProvenanceTaintGate:
     """One gate composing budget → automaton → taint, first deny wins.
 
     Mirrors the order of Guardians' executor: preconditions/automata
-    before the call, budget tick, then execution and taint wrapping.
-    ``evaluate`` runs the pre-call checks; on allow, the caller executes
-    the tool and feeds the raw result to ``produce_result`` for taint
-    wrapping + sanitizer marking, then ``budget.record``.
+    before the call, atomic budget reservation, then execution and taint
+    wrapping. ``evaluate`` returns a reservation token for capped tools;
+    after execution the caller passes it to ``budget.record``. If the call
+    is abandoned, the caller releases it. Later gate denials release it
+    automatically.
     """
 
     def __init__(
@@ -684,18 +1071,31 @@ class ProvenanceTaintGate:
         self.tracker = tracker
         self.automata = automata or AutomatonEngine()
         self.budgets = budgets or BudgetEnforcer()
+        self._lock = threading.RLock()
 
     def evaluate(
         self, tool_name: str, arguments: dict[str, Any]
     ) -> GateDecision:
         """Pre-call gate: budget, then automaton, then taint sinks."""
-        decision = self.budgets.check(tool_name)
-        if not decision.allowed:
-            return decision
-        decision = self.automata.observe(tool_name, arguments)
-        if not decision.allowed:
-            return decision
-        return self.tracker.check_sink(tool_name, arguments)
+        with self._lock:
+            decision = self.budgets.reserve(tool_name)
+            if not decision.allowed:
+                return decision
+            reservation = decision.budget_reservation
+            decision = self.automata.observe(tool_name, arguments)
+            if not decision.allowed:
+                if reservation:
+                    self.budgets.release(reservation)
+                return decision
+            decision = self.tracker.check_sink(tool_name, arguments)
+            if not decision.allowed:
+                if reservation:
+                    self.budgets.release(reservation)
+                return decision
+            return GateDecision(
+                decision.allowed, decision.reason, decision.check, decision.detail,
+                budget_reservation=reservation,
+            )
 
     def produce_result(
         self, tool_name: str, raw_result: Any, arguments: dict[str, Any]

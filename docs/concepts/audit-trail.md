@@ -11,6 +11,11 @@ per session (see `sessions.py`). The transcript is the run's own memory:
 events, tool calls, permission decisions, budget accounting, compaction
 summaries and the final result are all recorded there — including **before**
 the run reports success, so a crash still leaves the decision trail behind.
+Session writes retry short OS writes until the complete JSONL line is accepted.
+If a write or durability barrier fails, that writer refuses further appends;
+reopen verifies the bounded transcript and chain before restoring its head and
+HLC state, so a partial or unverified record cannot become the parent of later
+events.
 
 `cli.py` exposes `sessions` subcommands to list and view transcripts
 read-only. Subagent runs nest as spans and are recorded too, so a delegation
@@ -145,8 +150,11 @@ is the record's original timestamp.
 ## Honest ceiling
 
 Transcripts and stores are a **local audit trail, not a compliance store**:
-no signing, no retention policy, no tamper evidence (stated in the runtime
-README's limitations). The roadmap's P3-1 is delivered in two batches: the
+the runtime does not automatically delete records or enforce an organization-wide
+retention schedule. `sessions retention --older-than-days N` gives host jobs a
+read-only candidate inventory; candidates must be complete, sealed, and currently
+unlocked under a probeable lease. Deletion remains a host operation and must recheck
+the lease at deletion time. The roadmap's P3-1 is delivered in two batches: the
 audit feed above (`audit.ndjson/1`, this batch) and policy schema-isation
 (`northstar-policy.toml` versioning, next batch).
 

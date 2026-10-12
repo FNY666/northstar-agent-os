@@ -7,6 +7,13 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 class EgressCITests(unittest.TestCase):
+    def test_production_service_requires_signing_and_persists_receipts(self):
+        unit = (ROOT / 'components/northstar-egress-sidecar/egress-sidecar.service').read_text()
+        self.assertRegex(unit, r'(?m)^EnvironmentFile=/etc/northstar-egress/signing\.env$')
+        self.assertRegex(unit, r'(?m)^StateDirectory=northstar-egress$')
+        self.assertRegex(unit, r'(?m)^Environment=NORTHSTAR_EGRESS_FEED=/var/lib/northstar-egress/receipts\.jsonl$')
+        self.assertRegex(unit, r'(?m)^Environment=NORTHSTAR_EGRESS_TRUSTED_KEYS=/etc/northstar-egress/trusted-public-keys\.json$')
+
     def test_egress_suite_has_an_independent_linux_job(self):
         workflow = (ROOT / '.github/workflows/test.yml').read_text()
         match = re.search(r'^  egress-sidecar:\n(.*?)(?=^  [\w-]+:\n|\Z)', workflow, re.M | re.S)

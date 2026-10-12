@@ -34,10 +34,15 @@ memory exists" to a point in the store's history.
 from __future__ import annotations
 
 import hashlib
+import base64
+import html
 import json
+import math
 import os
 import re
 import time
+import unicodedata
+from urllib.parse import unquote
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -66,6 +71,95 @@ _INJECTION_RE = re.compile(
     re.IGNORECASE,
 )
 
+_ESCAPED_CODEPOINT_RE = re.compile(r"\\u([0-9a-fA-F]{4})|\\x([0-9a-fA-F]{2})")
+_BASE64_RUN_RE = re.compile(r"[A-Za-z0-9+/_-]{20,}={0,2}")
+_CONFUSABLES = str.maketrans({
+    # Common Latin-lookalikes used to disguise English trigger words.
+    "а": "a", "е": "e", "і": "i", "о": "o", "р": "p", "с": "c",
+    "х": "x", "у": "y", "к": "k", "м": "m", "т": "t", "в": "b",
+    "н": "h", "ѕ": "s", "ӏ": "l",
+    "А": "A", "Е": "E", "І": "I", "О": "O", "Р": "P", "С": "C",
+    "Х": "X", "У": "Y", "К": "K", "М": "M", "Т": "T", "В": "B", "Н": "H",
+    "Α": "A", "Β": "B", "Ε": "E", "Ι": "I", "Κ": "K", "Μ": "M",
+    "Ν": "N", "Ο": "O", "Ρ": "P", "Τ": "T", "Χ": "X",
+    "α": "a", "ι": "i", "κ": "k", "ο": "o", "ρ": "p", "τ": "t", "χ": "x",
+})
+
+
+def _normalize_untrusted_text(text: str) -> str:
+    """Normalize formatting obfuscation before memory safety checks.
+
+    Unicode ``Cf`` characters include zero-width joiners, word joiners,
+    soft hyphens, and bidirectional overrides. They are presentation controls,
+    not meaningful separators in the memory safety phrases this scanner checks.
+    """
+    normalized = unicodedata.normalize("NFKC", text or "")
+    normalized = "".join(
+        char for char in normalized
+        if unicodedata.category(char) != "Cf"
+    )
+    # A line break is often just wrapping in notes. Treat it as whitespace so
+    # an attacker cannot split a dangerous verb from its target across lines.
+    return re.sub(r"\s+", " ", normalized)
+
+
+def _inspection_views(text: str) -> tuple[str, ...]:
+    """Boundedly decode common textual encodings for the poisoning scanner.
+
+    The stored memory is never rewritten. These are inspection-only views for
+    HTML entities, URL escapes, JavaScript/JSON codepoint escapes, common visual
+    homoglyphs, and short printable Base64 runs.
+    """
+    views: list[str] = []
+    seen: set[str] = set()
+
+    def add(value: str) -> None:
+        normalized = _normalize_untrusted_text(value)
+        if normalized and normalized not in seen and len(views) < 32:
+            seen.add(normalized)
+            views.append(normalized)
+
+    add(text)
+    cursor = 0
+    # Decode at most three layers, enough for common entity/percent/escape wrapping
+    # without turning this write-time check into an unbounded recursive decoder.
+    while cursor < len(views) and cursor < 4:
+        current = views[cursor]
+        decoded = html.unescape(current)
+        decoded = unquote(decoded)
+        decoded = _ESCAPED_CODEPOINT_RE.sub(
+            lambda match: chr(int(match.group(1) or match.group(2), 16)), decoded
+        )
+        add(decoded)
+        cursor += 1
+
+    # Keep the original Cyrillic/Greek view for native-language rules; add a
+    # second view that maps visually confusable letters to their Latin forms.
+    for view in tuple(views):
+        mapped = view.translate(_CONFUSABLES)
+        if mapped != view:
+            add(mapped)
+
+    # Model-readable Base64 can hide a complete payload from lexical rules.
+    # Only decode a bounded number of short runs and accept strictly printable
+    # UTF-8, so opaque identifiers and binary blobs do not become scanner text.
+    candidates = 0
+    for view in tuple(views):
+        for match in _BASE64_RUN_RE.finditer(view):
+            candidates += 1
+            if candidates > 32 or len(match.group()) > 4096:
+                break
+            token = match.group().rstrip("=")
+            token += "=" * ((-len(token)) % 4)
+            try:
+                raw = base64.b64decode(token, altchars=b"-_", validate=True)
+                decoded = raw.decode("utf-8")
+            except (ValueError, UnicodeDecodeError):
+                continue
+            if decoded and sum(char.isprintable() or char.isspace() for char in decoded) / len(decoded) >= 0.9:
+                add(decoded)
+    return tuple(views)
+
 
 def looks_injected(text: str) -> bool:
     """True when ``text`` carries injection phrasing (object-anchored).
@@ -74,7 +168,7 @@ def looks_injected(text: str) -> bool:
     anchored to instruction-object verbs (forget / ignore / disregard the
     instructions), not to single trigger words.
     """
-    return bool(_INJECTION_RE.search(text or ""))
+    return any(_INJECTION_RE.search(view) for view in _inspection_views(text))
 
 
 # ---------------------------------------------------------------------------
@@ -128,25 +222,25 @@ def looks_dangerous(text: str) -> bool:
     common shape on a real store, so a danger token preceded by a warning
     marker is NOT flagged — only a bare imperative to perform the harm is.
     """
-    text = text or ""
-    for mt in _DANGER_RE.finditer(text):
-        pre = text[max(0, mt.start() - 36) : mt.start()]  # window before the danger token
-        neg = _NEGATION_RE.search(pre)
-        # A genuine negation governs the danger -> cautionary lesson, skip;
-        # BUT a "forget/fail to ..." after the negation flips it back to a
-        # command -> keep flagging.
-        if neg and not _NEG_FLIP_RE.search(pre[neg.end() :]):
-            continue
-        # Verb-first cautionary shape: "Send the token in the header, never in
-        # the URL" starts WITH the transfer verb, so the pre-window is empty.
-        # Accept a negation in the SAME sentence right after the match
-        # (bounded window, flip-guarded the same way).
-        post = text[mt.end() : mt.end() + 60]
-        post = re.split(r"[.\n]", post, 1)[0]
-        pneg = _NEGATION_RE.search(post)
-        if pneg and not _NEG_FLIP_RE.search(post[: pneg.start()]):
-            continue
-        return True
+    for text in _inspection_views(text):
+        for mt in _DANGER_RE.finditer(text):
+            pre = text[max(0, mt.start() - 36) : mt.start()]  # window before the danger token
+            neg = _NEGATION_RE.search(pre)
+            # A genuine negation governs the danger -> cautionary lesson, skip;
+            # BUT a "forget/fail to ..." after the negation flips it back to a
+            # command -> keep flagging.
+            if neg and not _NEG_FLIP_RE.search(pre[neg.end() :]):
+                continue
+            # Verb-first cautionary shape: "Send the token in the header, never in
+            # the URL" starts WITH the transfer verb, so the pre-window is empty.
+            # Accept a negation in the SAME sentence right after the match
+            # (bounded window, flip-guarded the same way).
+            post = text[mt.end() : mt.end() + 60]
+            post = re.split(r"[.\n]", post, maxsplit=1)[0]
+            pneg = _NEGATION_RE.search(post)
+            if pneg and not _NEG_FLIP_RE.search(post[: pneg.start()]):
+                continue
+            return True
     return False
 
 
@@ -164,11 +258,36 @@ def looks_unsafe(text: str) -> bool:
 #: Set ``NORTHSTAR_MEMORY_QUARANTINE=1`` for multi-tenant / shared-store /
 #: untrusted-content deployments. OFF by default (single-user store owns
 #: every session; the adversarial-session threat does not apply).
-QUARANTINE_MODE = os.environ.get("NORTHSTAR_MEMORY_QUARANTINE", "0") != "0"
+def _parse_quarantine_mode(value: str) -> bool:
+    """Parse an explicit environment boolean; reject typos instead of guessing."""
+    normalized = value.strip().lower()
+    if normalized in {"1", "true", "yes", "on"}:
+        return True
+    if normalized in {"0", "false", "no", "off", ""}:
+        return False
+    raise RuntimeError(
+        "NORTHSTAR_MEMORY_QUARANTINE must be one of 1/0, true/false, yes/no, or on/off"
+    )
+
+
+def _parse_quarantine_confidence(value: str) -> float:
+    """Require a finite probability so NaN cannot disable the threshold check."""
+    try:
+        threshold = float(value)
+    except (TypeError, ValueError, OverflowError) as error:
+        raise RuntimeError("NORTHSTAR_MEMORY_QUARANTINE_CONF must be finite and between 0 and 1") from error
+    if not math.isfinite(threshold) or not 0.0 <= threshold <= 1.0:
+        raise RuntimeError("NORTHSTAR_MEMORY_QUARANTINE_CONF must be finite and between 0 and 1")
+    return threshold
+
+
+QUARANTINE_MODE = _parse_quarantine_mode(os.environ.get("NORTHSTAR_MEMORY_QUARANTINE", "0"))
 
 #: A single-source note whose self-declared confidence is at/above this is
 #: suspicious enough to divert out of active recall when quarantine is on.
-QUARANTINE_CONFIDENCE = float(os.environ.get("NORTHSTAR_MEMORY_QUARANTINE_CONF", "0.95"))
+QUARANTINE_CONFIDENCE = _parse_quarantine_confidence(
+    os.environ.get("NORTHSTAR_MEMORY_QUARANTINE_CONF", "0.95")
+)
 
 
 def should_quarantine(*, confidence: float, corroborated: bool, supersedes_corroborated: bool) -> bool:
@@ -181,11 +300,28 @@ def should_quarantine(*, confidence: float, corroborated: bool, supersedes_corro
     """
     if not QUARANTINE_MODE:
         return False
-    if corroborated:
+    # These fields can cross API/serialization boundaries.  In particular,
+    # non-empty strings such as "false" are truthy in Python and must never
+    # be accepted as proof of independent corroboration.
+    if not isinstance(corroborated, bool) or not isinstance(supersedes_corroborated, bool):
+        return True
+    if corroborated is True:
         return False
+    try:
+        confidence_valid = (
+            not isinstance(confidence, bool)
+            and isinstance(confidence, (int, float))
+            and math.isfinite(float(confidence))
+            and 0.0 <= confidence <= 1.0
+        )
+    except (OverflowError, TypeError, ValueError):
+        confidence_valid = False
+    if not confidence_valid:
+        # An untrusted confidence field is not evidence against quarantine.
+        return True
     if confidence >= QUARANTINE_CONFIDENCE:
         return True
-    return supersedes_corroborated
+    return supersedes_corroborated is True
 
 
 # ---------------------------------------------------------------------------
@@ -229,6 +365,10 @@ def stamp_provenance(
         "written_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
     }
     if extra:
+        reserved = provenance.keys() & extra.keys()
+        if reserved:
+            names = ", ".join(sorted(reserved))
+            raise ValueError(f"memory provenance extra cannot replace reserved fields: {names}")
         provenance.update(extra)
     return provenance
 

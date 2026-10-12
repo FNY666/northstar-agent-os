@@ -24,13 +24,22 @@ supplies the handler and schema so the registry stays a thin list.
 from __future__ import annotations
 
 import os
+import hashlib
+import shlex
 import shutil
+from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from tools.os_sandbox import (
+    DEFAULT_MAX_FILE_SIZE_BYTES,
+    DEFAULT_MAX_MEMORY_BYTES,
     DEFAULT_MAX_OUTPUT_BYTES,
     DEFAULT_TIMEOUT_MS,
+    MAX_CPU_SECONDS,
+    MAX_FILE_SIZE_BYTES,
+    MAX_MEMORY_BYTES,
     MAX_OUTPUT_BYTES,
+    MAX_TASKS,
     MAX_TIMEOUT_MS,
     SandboxError,
     SandboxRequest,
@@ -99,6 +108,20 @@ def _coerce_max_output(value: Any, *, default: int) -> int:
     return min(number, MAX_OUTPUT_BYTES)
 
 
+def _coerce_positive_limit(value: Any, *, name: str, default: int, maximum: int) -> int:
+    if value is None or value == "":
+        return default
+    if isinstance(value, bool) or not isinstance(value, (int, str)):
+        raise SandboxError(f"{name} must be a positive integer")
+    try:
+        number = int(value)
+    except (TypeError, ValueError) as error:
+        raise SandboxError(f"{name} must be a positive integer, got {value!r}") from error
+    if number < 1:
+        raise SandboxError(f"{name} must be >= 1")
+    return min(number, maximum)
+
+
 def parse_shell_argv(payload: dict[str, Any]) -> tuple[str, ...]:
     """Build the argv the sandbox will exec. Prefer ``argv``; ``command`` is sh -c."""
     if "argv" in payload and payload.get("argv") is not None:
@@ -125,14 +148,45 @@ def shell_handler(payload: dict[str, Any], ctx: "ToolContext") -> Any:
     """Run one governed command in the configured OS sandbox backend."""
     # Local import: tools/__init__ registers this handler, so a top-level import
     # of ToolResult from tools would be a cycle.
-    from tools import ToolResult
+    from tools import ToolAccessError, ToolResult
 
     if ctx.sandbox is None:
         return ToolResult.error("Shell requires a workspace sandbox")
     try:
+        ctx.sandbox.require_shell_memory_access()
+    except ToolAccessError as error:
+        return ToolResult.error(f"Shell refused by workspace memory audience policy: {error}")
+    try:
         argv = parse_shell_argv(payload)
         timeout_ms = _coerce_timeout(payload.get("timeout_ms"), default=DEFAULT_TIMEOUT_MS)
         max_output = _coerce_max_output(payload.get("max_output_bytes"), default=DEFAULT_MAX_OUTPUT_BYTES)
+        cpu_limit_seconds = _coerce_positive_limit(
+            payload.get("cpu_limit_seconds"),
+            name="cpu_limit_seconds",
+            default=min(MAX_CPU_SECONDS, max(1, (timeout_ms + 999) // 1000)),
+            maximum=MAX_CPU_SECONDS,
+        )
+        memory_limit_mb = _coerce_positive_limit(
+            payload.get("memory_limit_mb"),
+            name="memory_limit_mb",
+            default=DEFAULT_MAX_MEMORY_BYTES // (1024 * 1024),
+            maximum=MAX_MEMORY_BYTES // (1024 * 1024),
+        )
+        file_size_limit_mb = _coerce_positive_limit(
+            payload.get("file_size_limit_mb"),
+            name="file_size_limit_mb",
+            default=DEFAULT_MAX_FILE_SIZE_BYTES // (1024 * 1024),
+            maximum=MAX_FILE_SIZE_BYTES // (1024 * 1024),
+        )
+        aggregate_resource_scope = str(ctx.service("shell_aggregate_resource_scope") or "off")
+        if "max_tasks" in payload and aggregate_resource_scope == "off":
+            raise SandboxError("max_tasks requires operator-enabled --shell-aggregate-resource-scope systemd")
+        max_tasks = _coerce_positive_limit(
+            payload.get("max_tasks"),
+            name="max_tasks",
+            default=MAX_TASKS,
+            maximum=MAX_TASKS,
+        )
         raw_cwd = payload.get("cwd", ".") or "."
         if not isinstance(raw_cwd, str):
             raise SandboxError("cwd must be a string")
@@ -160,12 +214,54 @@ def shell_handler(payload: dict[str, Any], ctx: "ToolContext") -> Any:
         cwd_path = ctx.resolve(raw_cwd, must_exist=True)
         if not cwd_path.is_dir():
             raise SandboxError(f"cwd is not a directory: {raw_cwd}")
+        # A skill script is reviewed at setup, then executed only through this
+        # governed Shell path. Re-check direct argv references immediately before
+        # spawn so post-setup edits cannot silently replace reviewed script bytes.
+        pins = ctx.service("skill_digests") or {}
+        if pins:
+            candidates = list(argv)
+            if len(argv) >= 3 and argv[1] == "-c":
+                try:
+                    candidates.extend(shlex.split(argv[2]))
+                except ValueError:
+                    pass  # the shell itself will report the malformed command
+            for token in candidates:
+                if not isinstance(token, str) or not token or token.startswith("-"):
+                    continue
+                candidate = Path(token)
+                if not candidate.is_absolute():
+                    candidate = cwd_path / candidate
+                candidate = Path(os.path.normpath(str(candidate)))
+                try:
+                    relative = candidate.relative_to(ctx.sandbox.root_real).as_posix()
+                except ValueError:
+                    continue
+                expected = pins.get(relative)
+                if expected is None:
+                    continue
+                try:
+                    from skills import MAX_SKILL_FILE_BYTES, _read_bounded_regular
+
+                    pinned_bytes = _read_bounded_regular(candidate, MAX_SKILL_FILE_BYTES)
+                except OSError as error:
+                    return ToolResult.error(f"cannot verify pinned skill script: {error}", skill_integrity="failed")
+                if len(pinned_bytes) > MAX_SKILL_FILE_BYTES:
+                    return ToolResult.error("pinned skill script exceeds its byte limit", skill_integrity="failed")
+                actual = hashlib.sha256(pinned_bytes).hexdigest()
+                if actual != expected:
+                    return ToolResult.error(
+                        "skill script changed after run setup; refusing unreviewed code",
+                        skill_integrity="failed",
+                    )
         if session_mem is not None and session_key is not None:
             # Remember the cwd that actually resolved (re-resolved every call,
             # so a deleted directory fails here instead of going stale).
             session_mem["cwd"] = raw_cwd
             _session_state[session_key] = session_mem
-        backend = str(payload.get("backend") or ctx.service("shell_backend") or "auto")
+        # Backend choice is host policy: the model may tighten per-call
+        # controls below, but must not replace a host-selected bwrap backend
+        # with the weaker process backend.
+        backend = str(ctx.service("shell_backend") or "auto")
         # Seccomp is tighten-only: a per-call payload may move toward "on" but
         # never loosen what the operator configured via --seccomp.
         try:
@@ -224,6 +320,11 @@ def shell_handler(payload: dict[str, Any], ctx: "ToolContext") -> Any:
             workspace=ctx.sandbox.root_real,
             timeout_ms=timeout_ms,
             max_output_bytes=max_output,
+            cpu_limit_seconds=cpu_limit_seconds,
+            memory_limit_bytes=memory_limit_mb * 1024 * 1024,
+            file_size_limit_bytes=file_size_limit_mb * 1024 * 1024,
+            aggregate_resource_scope=aggregate_resource_scope,
+            max_tasks=max_tasks,
             env=env,
             network=bool(payload.get("network", False)),
             seccomp=seccomp,
@@ -244,7 +345,7 @@ def shell_handler(payload: dict[str, Any], ctx: "ToolContext") -> Any:
     # A non-zero exit is a tool *result*, not a tool *crash*: the model must see
     # stdout/stderr to decide what to do next. timed_out is the only case we
     # mark is_error so the loop's PostToolUseFailure hooks can fire.
-    if result.timed_out:
+    if result.timed_out or result.aggregate_setup_failed or result.aggregate_cleanup_failed:
         return ToolResult(content=body, is_error=True, truncated=result.truncated, data=data)
     return ToolResult(content=body, is_error=False, truncated=result.truncated, data=data)
 
@@ -265,15 +366,26 @@ def shell_tool_spec():
         ),
         input_schema={
             "type": "object",
+            "additionalProperties": False,
+            "anyOf": [
+                {"required": ["argv"]},
+                {"required": ["command"]},
+                {"required": ["cmd"]},
+            ],
             "properties": {
                 "argv": {
                     "type": "array",
+                    "minItems": 1,
                     "items": {"type": "string"},
                     "description": "Executable + arguments (preferred). No shell interpolation.",
                 },
                 "command": {
                     "type": "string",
                     "description": "Shell command string; runs as sh -c inside the sandbox.",
+                },
+                "cmd": {
+                    "type": "string",
+                    "description": "Compatibility alias for command; runs as sh -c inside the sandbox.",
                 },
                 "cwd": {
                     "type": "string",
@@ -287,7 +399,44 @@ def shell_tool_spec():
                 "max_output_bytes": {
                     "type": "integer",
                     "minimum": 1,
-                    "description": f"Stdout/stderr cap each (default {DEFAULT_MAX_OUTPUT_BYTES}).",
+                    "description": f"Combined stdout+stderr cap (default {DEFAULT_MAX_OUTPUT_BYTES}).",
+                },
+                "cpu_limit_seconds": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": MAX_CPU_SECONDS,
+                    "description": "Per-process CPU seconds (default follows timeout; hard runtime ceiling applies).",
+                },
+                "memory_limit_mb": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": MAX_MEMORY_BYTES // (1024 * 1024),
+                    "description": "Per-process address-space limit in MiB (default and maximum 2048; not a process-tree total).",
+                },
+                "file_size_limit_mb": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": MAX_FILE_SIZE_BYTES // (1024 * 1024),
+                    "description": "Maximum individual file size in MiB (default and maximum 1024; not a workspace quota).",
+                },
+                "seccomp": {
+                    "type": "string",
+                    "enum": ["auto", "on", "off"],
+                    "description": "Tighten-only per-call syscall filter mode; cannot weaken the host setting.",
+                },
+                "landlock": {
+                    "type": "string",
+                    "enum": ["auto", "on", "off"],
+                    "description": "Tighten-only per-call filesystem policy; cannot weaken the host setting.",
+                },
+                "max_tasks": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": MAX_TASKS,
+                    "description": (
+                        "Maximum aggregate processes/threads in the Shell cgroup (default 128); "
+                        "effective only when the operator enables the systemd resource scope."
+                    ),
                 },
                 "env": {
                     "type": "object",
@@ -332,7 +481,7 @@ def shell_tool_spec():
     )
 
 
-def sandbox_status_line(backend: str = "auto") -> str:
+def sandbox_status_line(backend: str = "auto", aggregate_resource_scope: str = "off") -> str:
     """One-line summary for doctor / dry-run."""
     caps = probe_capabilities()
     try:
@@ -341,11 +490,17 @@ def sandbox_status_line(backend: str = "auto") -> str:
         chosen = resolve_backend(backend, capabilities=caps)
     except SandboxError as error:
         return f"sandbox=unavailable ({error})"
+    aggregate_note = (
+        "; aggregate cgroup v2 MemoryMax/TasksMax/CPUQuota required via systemd system scope"
+        if aggregate_resource_scope == "systemd"
+        else ""
+    )
     if chosen == "bwrap":
-        return f"sandbox=bwrap (OS isolation) — {caps.bwrap_detail}"
+        return f"sandbox=bwrap (OS isolation{aggregate_note}) — {caps.bwrap_detail}"
     return (
-        f"sandbox=process (cwd+env only; host FS reachable) — "
-        f"bwrap: {caps.bwrap_detail}"
+        f"sandbox=process (host FS reachable; Linux seccomp blocks socket creation when active) — "
+        f"bwrap: {caps.bwrap_detail}; per-process CPU/memory/file-size ceilings only, "
+        + ("aggregate cgroup v2 quota required" if aggregate_resource_scope == "systemd" else "no runtime-managed aggregate cgroup quota")
     )
 
 

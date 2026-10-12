@@ -82,7 +82,7 @@ sys.stdout.flush()
         passed, which is a genuinely empty child environment.
         """
         with mock.patch.dict(os.environ, {"HOST_SECRET": "leak-me"}, clear=True):
-            client = McpStdioClient("t", ["echo"], timeout_ms=5000)
+            client = McpStdioClient("t", ["echo"], timeout_ms=5000, network="allowed")
             self.assertEqual(client.extra_env, {})
             with mock.patch.object(subprocess, "Popen", side_effect=OSError("boom")) as popen:
                 with self.assertRaises(Exception) as caught:
@@ -104,6 +104,7 @@ sys.stdout.flush()
                     ["python3", str(FIXTURE)],
                     timeout_ms=8000,
                     env={"MCP_SPAWN_REPORT": str(report)},
+                    network="allowed",
                 )
                 try:
                     client.connect()

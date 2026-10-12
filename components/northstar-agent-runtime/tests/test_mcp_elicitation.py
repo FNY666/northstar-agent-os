@@ -305,6 +305,9 @@ class MrtrRoundTripTests(unittest.TestCase):
         saved = dict(os.environ)
         os.environ.update({"MRTR_SERVER_MODE": mode, "MRTR_SERVER_WIRE": str(wire)})
         try:
+            # This local stdio fixture never uses sockets; opt out of host-kernel
+            # Landlock requirements so protocol tests run on older CI kernels.
+            kwargs.setdefault("network", "allowed")
             client = McpStdioClient("demo", [sys.executable, str(FIXTURE)], timeout_ms=8_000, **kwargs)  # type: ignore[arg-type]
             client.connect()
         finally:

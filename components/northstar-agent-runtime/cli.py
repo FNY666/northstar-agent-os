@@ -76,6 +76,7 @@ from run_setup import (  # noqa: F401 - MUTATING_TOOLS and checkpoint_usage stay
     load_workspace_agents,
     resolve_agent,
     resolve_ceilings,
+    resolve_egress_target_scope,
     resolve_permission_mode,
     resolve_session,
     resolve_tool_access,
@@ -304,6 +305,12 @@ def _add_limits_transport_arguments(parser: argparse.ArgumentParser) -> None:
 def _add_policy_arguments(parser: argparse.ArgumentParser) -> None:
         policy = parser.add_argument_group("policy")
         policy.add_argument("--workspace", default=".", help="directory the tools are confined to")
+        policy.add_argument(
+            "--dataflow-policy",
+            default=None,
+            metavar="PATH|default",
+            help="opt in to sensitivity source/sink enforcement using a strict TOML policy (use 'default' for the shipped policy)",
+        )
         policy.add_argument("--permission-mode", choices=("default", "acceptEdits", "plan", "bypassPermissions"), default="default")
         policy.add_argument("--allow-tool", action="append", default=[], metavar="NAME", help="auto-approve a tool (repeatable)")
         policy.add_argument("--deny-tool", action="append", default=[], metavar="NAME", help="always refuse a tool, and remove it from the allow list (repeatable)")
@@ -363,6 +370,13 @@ def _add_policy_arguments(parser: argparse.ArgumentParser) -> None:
             help="inject this memory file instead of the default (must live inside the workspace; no global MEMORY)",
         )
         policy.add_argument(
+            "--memory-viewer",
+            action="append",
+            default=[],
+            metavar="IDENTITY",
+            help="trusted current viewer identity for memory audience checks (repeat for group members; absent means public-only)",
+        )
+        policy.add_argument(
             "--no-plugins",
             action="store_true",
             help="ignore .northstar/plugins/ entirely (installed bundles contribute skills, agents, hooks, MCP servers and ceilings)",
@@ -418,6 +432,7 @@ def _add_execution_arguments(parser: argparse.ArgumentParser) -> None:
         execution.add_argument("--sidecar-timeout-ms", type=int, default=30_000, help="sidecar execution deadline")
         execution.add_argument("--egress-socket", default="", help="Unix socket of northstar-egress-sidecar; enables the Fetch tool (the agent's only network path)")
         execution.add_argument("--egress-timeout-ms", type=int, default=30_000, help="egress sidecar request deadline")
+        execution.add_argument("--egress-target", dest="egress_targets", action="append", default=[], metavar="HOST", help="narrow this run's Fetch calls to an exact hostname; repeatable and inherited by subagents")
         execution.add_argument("--probe-sidecar", action="store_true", help="send one health-check prompt to the sidecar and exit")
         execution.add_argument(
             "--sandbox",
@@ -460,6 +475,16 @@ def _add_execution_arguments(parser: argparse.ArgumentParser) -> None:
                 "A per-call Shell payload may only tighten this, never loosen it."
             ),
         )
+        execution.add_argument(
+            "--shell-aggregate-resource-scope",
+            choices=("off", "systemd"),
+            default="off",
+            help=(
+                "Require aggregate process-tree memory/task/CPU limits in a PID-1-owned systemd "
+                "scope (Linux, non-root runtime, seccomp required); refuse instead of falling "
+                "back when the system manager cannot enforce them."
+            ),
+        )
 
 def _add_output_arguments(parser: argparse.ArgumentParser) -> None:
         output = parser.add_argument_group("output")
@@ -494,6 +519,11 @@ def _add_output_arguments(parser: argparse.ArgumentParser) -> None:
             help="with --resume-from: resume from the checkpoint at this transcript record index (default: the latest)",
         )
         output.add_argument("--redact-tool-output", action="store_true", help="record tool results in the session without output bodies")
+        output.add_argument(
+            "--redact-session-content",
+            action="store_true",
+            help="omit prompts, assistant content, and tool bodies from the chained session; this session cannot be resumed",
+        )
         output.add_argument("--stream", action="store_true", help="print (and, with --json, emit) assistant text as it arrives instead of at end of turn. Presentation only: the transcript, the permission gate, the ceilings and the single result event are unchanged, and a provider that cannot stream is refused rather than silently degraded")
         output.add_argument("--show-pricing", action="store_true", help="print the pricing decision and exit")
         output.add_argument("--dry-run", action="store_true", help="validate the configuration and print what a run would do, then exit without sending any request (provider, model, and sidecar are not touched)")
@@ -637,12 +667,22 @@ def _print_dry_run(
     try:
         from tools.shell import sandbox_status_line
 
-        sandbox_note = sandbox_status_line(getattr(config, "shell_backend", "auto"))
+        sandbox_note = sandbox_status_line(
+            getattr(config, "shell_backend", "auto"),
+            getattr(config, "shell_aggregate_resource_scope", "off"),
+        )
     except Exception:  # noqa: BLE001
         sandbox_note = f"sandbox={getattr(config, 'shell_backend', 'auto')}"
     print(f"sidecar={'on' if config.sidecar_socket else 'off'} "
           f"session_dir={args.session_dir or 'off'} "
           f"halt_on_denial={config.halt_on_denial}")
+    target_scope = config.egress_target_scope
+    target_scope_note = (
+        "sidecar policy only" if target_scope is None else
+        "none (Fetch denied)" if not target_scope else
+        ",".join(target_scope)
+    )
+    print(f"egress={'on' if config.egress_socket else 'off'} target_scope={target_scope_note}")
     print(sandbox_note)
     print(
         "shell=registered, denied until --allow-tool Shell "
@@ -1197,9 +1237,9 @@ def _setup_notes(
 def _stream_events(args: argparse.Namespace, runtime: Any, store: Any, prompt: str) -> int:
     """Run the prompt, print every event as it arrives, then the one-line summary; return the exit code."""
     if args.resume_from:
-        resume = store.transcript(args.resume_from)
+        resume = store.transcript(args.resume_from, require_integrity=True)
     else:
-        resume = store.transcript(args.resume) if args.resume else None
+        resume = store.transcript(args.resume, require_integrity=True) if args.resume else None
     exit_code = 0
     result = None
     stream_open = False
@@ -1312,11 +1352,24 @@ def _run(args: argparse.Namespace) -> int:
         "tool_limits": ToolLimits(
             # The agent's own governance is unwritable unless a human explicitly
             # says otherwise for this run (see tools.ToolLimits for why).
-            protected_prefixes=(".git",) if args.allow_policy_writes else (".git", ".northstar")
+            protected_prefixes=(".git",) if args.allow_policy_writes else (".git", ".northstar"),
+            memory_viewers=tuple(getattr(args, "memory_viewer", ()) or ()),
         ),
         "record_tool_output_in_session": not args.redact_tool_output,
+        "redact_session_content": args.redact_session_content,
         "stream": args.stream,
     }
+    if args.dataflow_policy:
+        try:
+            from dataflow_policy import DataflowPolicy, DataflowPolicyError
+
+            config_kwargs["dataflow_policy"] = (
+                DataflowPolicy.default()
+                if args.dataflow_policy == "default"
+                else DataflowPolicy.from_toml_file(args.dataflow_policy)
+            )
+        except (DataflowPolicyError, OSError) as error:
+            raise RunConfigurationError(f"invalid dataflow policy: {error}") from error
     if postconditions:
         config_kwargs["postconditions"] = postconditions
     if args.run_id:
@@ -1327,6 +1380,7 @@ def _run(args: argparse.Namespace) -> int:
         config_kwargs["agent"] = definition.name
         config_kwargs["allow_delegation"] = definition.allow_delegation and args.max_subagent_depth > 0
     prompt_setup = compose_system_prompt(args, definition, policy, plugins)
+    config_kwargs["skill_digests"] = prompt_setup.skill_digests
     if prompt_setup.system_prompt is not None:
         config_kwargs["system_prompt"] = prompt_setup.system_prompt
     if args.sidecar_socket:
@@ -1335,10 +1389,14 @@ def _run(args: argparse.Namespace) -> int:
     if args.egress_socket:
         config_kwargs["egress_socket"] = args.egress_socket
         config_kwargs["egress_timeout_ms"] = args.egress_timeout_ms
+    egress_target_scope = resolve_egress_target_scope(args.egress_targets, policy)
+    if egress_target_scope is not None:
+        config_kwargs["egress_target_scope"] = egress_target_scope
     config_kwargs["shell_backend"] = getattr(args, "sandbox", "auto") or "auto"
     config_kwargs["shell_seccomp"] = getattr(args, "seccomp", "auto") or "auto"
     config_kwargs["shell_capdrop"] = getattr(args, "capdrop", "on") or "on"
     config_kwargs["shell_landlock"] = getattr(args, "landlock", "auto") or "auto"
+    config_kwargs["shell_aggregate_resource_scope"] = getattr(args, "shell_aggregate_resource_scope", "off") or "off"
     config_kwargs["parallel_tools"] = int(getattr(args, "parallel_tools", 1) or 1)
 
     validate_session_flags(args, ceilings)
@@ -1361,6 +1419,13 @@ def _run(args: argparse.Namespace) -> int:
     )
 
     provider = _build_provider(args)
+    inherited_dataflow = None
+    if config.dataflow_policy is not None and prompt_setup.memory_audience:
+        from dataflow_policy import SessionDataflow
+
+        inherited_dataflow = SessionDataflow.from_memory_audience(
+            config.dataflow_policy, prompt_setup.memory_audience
+        )
     runtime = AgentRuntime(
         provider=provider,
         config=config,
@@ -1369,6 +1434,7 @@ def _run(args: argparse.Namespace) -> int:
         agents=agents,
         hooks=hooks.registry,
         budget=session.resume_budget,
+        dataflow=inherited_dataflow,
     )
 
     if args.show_pricing:
@@ -1450,7 +1516,7 @@ def _print_event(event: Any, *, quiet: bool = False, stream_open: bool = False) 
         for block in event.content:
             if type(block).__name__ == "ToolResultBlock":
                 marker = "error" if block.is_error else "ok"
-                text = " ".join(block.text().split())
+                text = " ".join(block.display_text().split())
                 print(f"← {marker}: {text[:160]}" + ("..." if len(text) > 160 else ""))
         return
     if kind == "ResultMessage":
