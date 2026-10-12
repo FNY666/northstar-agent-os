@@ -366,7 +366,9 @@ class ProviderThroughTheRuntimeTests(RuntimeTestCase):
         client = FakeClient([object(), object()])
         runtime = self.runtime(provider=AnthropicProvider(client=client))
         report = self.drive(runtime, "go")
-        self.assertEqual(report.subtype, "success")
+        result = self.assertExactlyOneResult(report)
+        self.assertEqual(report.subtype, "error_during_execution")
+        self.assertTrue(result.is_error)
         self.assertEqual(report.final_text, "")
         self.assertEqual(report.tool_calls, ())
 
