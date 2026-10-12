@@ -8,11 +8,13 @@ from __future__ import annotations
 import importlib.util
 import sys
 import unittest
+from pathlib import Path
 
 _SPEC = importlib.util.spec_from_file_location(
     "paxos_interface",
-    "/home/hatch/workspace/wt/northstar-pushchain/components/northstar-agent-runtime/paxos_interface.py",
+    Path(__file__).resolve().parents[1] / "paxos_interface.py",
 )
+assert _SPEC is not None and _SPEC.loader is not None
 _mod = importlib.util.module_from_spec(_SPEC)
 sys.modules["paxos_interface"] = _mod
 _SPEC.loader.exec_module(_mod)

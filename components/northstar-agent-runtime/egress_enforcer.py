@@ -88,6 +88,51 @@ DENY_DNS_EXFIL = "egress.dns_exfiltration_suspected"
 #: brings its own is trying to bypass the broker (possibly with a stolen key).
 BROKERED_AUTH_HEADERS = frozenset({"authorization", "proxy-authorization"})
 
+# Let http.client generate request framing itself. Caller-controlled framing
+# and hop-by-hop headers can otherwise disagree with the body we authorize.
+FORBIDDEN_EGRESS_HEADERS = frozenset({
+    "connection", "content-length", "expect", "keep-alive", "proxy-connection",
+    "te", "trailer", "transfer-encoding", "upgrade",
+})
+_HTTP_TOKEN_RE = re.compile(r"[!#$%&'*+.^_`|~0-9A-Za-z-]+\Z")
+_DNS_LABEL_RE = re.compile(r"[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?\Z")
+
+
+def _valid_egress_hostname(value: str) -> bool:
+    """Accept DNS-style HTTP authorities only; IP literals are valid labels too."""
+    host = str(value or "")
+    if not host or len(host) > MAX_HOSTNAME_CHARS or host != host.strip() or host.endswith(".."):
+        return False
+    if any(ord(char) < 0x21 or ord(char) > 0x7e for char in host):
+        return False
+    labels = host.rstrip(".").split(".")
+    return bool(labels) and all(_DNS_LABEL_RE.fullmatch(label) for label in labels)
+
+
+def _http_shape_error(request: "EgressRequest") -> str | None:
+    """Reject ambiguous or injection-capable HTTP/1 request syntax."""
+    host = str(request.host or "")
+    if not _valid_egress_hostname(host):
+        return "host must be a canonical DNS-style ASCII hostname"
+    method = str(request.method or "")
+    if not _HTTP_TOKEN_RE.fullmatch(method):
+        return "method is not a valid HTTP token"
+    path = str(request.path or "")
+    if not path.startswith("/") or path.startswith("//"):
+        return "path must be an origin-form absolute path"
+    if any(ord(char) < 0x21 or ord(char) > 0x7e for char in path) or "#" in path:
+        return "path contains a control, whitespace, non-ASCII, or fragment delimiter"
+    for name, value in (request.headers or {}).items():
+        if not isinstance(name, str) or not isinstance(value, str):
+            return "header names and values must be strings"
+        if not _HTTP_TOKEN_RE.fullmatch(name):
+            return "header name is not a valid HTTP token"
+        if name.lower() in FORBIDDEN_EGRESS_HEADERS:
+            return f"header {name.lower()!r} is managed by the sidecar"
+        if any((ord(char) < 0x20 and char != "\t") or ord(char) > 0xff for char in value):
+            return f"header {name!r} contains a control character"
+    return None
+
 #: DLP tripwire patterns (regex, searched against the request body). This is
 #: a tripwire, not a guarantee: it catches the common exfiltration shapes, it
 #: does not prove a payload is clean.
@@ -284,6 +329,11 @@ def _load_destination_rule(name: str, table: Any, seen_hosts: dict[str, str]) ->
     if not hosts:
         raise EgressPolicyError(f"destination {name!r}: hosts must be non-empty")
     hosts = tuple(h.lower() for h in hosts)
+    invalid_hosts = [h for h in hosts if not _valid_egress_hostname(h)]
+    if invalid_hosts:
+        raise EgressPolicyError(
+            f"destination {name!r}: invalid DNS-style host(s): {invalid_hosts!r}"
+        )
     for marker in ("*",):
         if any(marker in h for h in hosts):
             raise EgressPolicyError(f"destination {name!r}: wildcard hosts are not allowed")
@@ -369,10 +419,13 @@ class ApprovalReceipt:
     # A2: the sha256 of the exact request body the approver saw. Without
     # this, an approved destination + swapped body still verifies.
     body_sha256: str = ""
+    # Present for egress approvals: binds the full destination and HTTP shape.
+    # Optional only for older non-egress approval users; egress requires it.
+    request_shape_hash: str = ""
     signature: str = ""  # hex Ed25519 over the canonical receipt body.
 
     def _signing_body(self) -> dict[str, Any]:
-        return {
+        body = {
             "kind": APPROVAL_RECEIPT_KIND,
             "card_id": self.card_id,
             "call_id": self.call_id,
@@ -381,6 +434,9 @@ class ApprovalReceipt:
             "decided_at": self.decided_at,
             "body_sha256": self.body_sha256,
         }
+        if self.request_shape_hash:
+            body["request_shape_hash"] = self.request_shape_hash
+        return body
 
     def as_dict(self) -> dict[str, Any]:
         body = self._signing_body()
@@ -397,6 +453,7 @@ def build_approval_receipt(
     approver_seed: bytes,
     decided_at: float | None = None,
     body: bytes | None = None,
+    request_shape_hash: str = "",
 ) -> ApprovalReceipt:
     """Sign an approval receipt. Called by the approver's side (which holds
     the private key), never by the agent.
@@ -415,6 +472,9 @@ def build_approval_receipt(
     if not isinstance(approver_seed, (bytes, bytearray)) or len(approver_seed) != 32:
         raise EgressPolicyError("approver_seed must be a 32-byte Ed25519 seed")
     ts = time.time() if decided_at is None else float(decided_at)
+    shape_hash = str(request_shape_hash or "")
+    if shape_hash and not re.fullmatch(r"[0-9a-f]{64}", shape_hash):
+        raise EgressPolicyError("request_shape_hash must be a lowercase SHA-256 hex digest")
     unsigned = ApprovalReceipt(
         card_id=str(card_id),
         call_id=str(call_id),
@@ -422,6 +482,7 @@ def build_approval_receipt(
         approver_id=str(approver_id),
         decided_at=ts,
         body_sha256=hashlib.sha256(body or b"").hexdigest(),
+        request_shape_hash=shape_hash,
         signature="",
     )
     sig = ed_sign(bytes(approver_seed), jcs_canonical_json(unsigned._signing_body()))
@@ -432,6 +493,7 @@ def build_approval_receipt(
         approver_id=unsigned.approver_id,
         decided_at=unsigned.decided_at,
         body_sha256=unsigned.body_sha256,
+        request_shape_hash=unsigned.request_shape_hash,
         signature=sig.hex(),
     )
 
@@ -501,6 +563,23 @@ class EgressRequest:
             }
         )
 
+    def approval_shape_hash(self) -> str:
+        """Digest the exact agent-controlled HTTP request authorized by a person."""
+        headers = sorted(
+            (str(name).lower(), str(value))
+            for name, value in (self.headers or {}).items()
+            # These values are replaced by the sidecar before transmission.
+            if str(name).lower() not in {"host", "user-agent"}
+        )
+        return jcs_sha256_hex({
+            "host": str(self.host or "").lower(),
+            "port": int(self.port),
+            "method": str(self.method or "").upper(),
+            "path": str(self.path or ""),
+            "body_sha256": hashlib.sha256(self.body or b"").hexdigest(),
+            "headers": headers,
+        })
+
 
 @dataclass(frozen=True)
 class EgressVerdict:
@@ -551,14 +630,18 @@ class EgressBudgetLedger:
 
 
 def _ip_permitted(ip_text: str, rule: DestinationRule) -> bool:
-    """SSRF guard: refuse non-public targets unless the rule opts in."""
+    """SSRF guard: require an IANA globally reachable address by default."""
     try:
         ip = ipaddress.ip_address(ip_text)
     except ValueError:
         return False
     if rule.allow_private_ips:
         return True
-    return not (ip.is_private or ip.is_loopback or ip.is_link_local or ip.is_reserved or ip.is_multicast or ip.is_unspecified)
+    # Negative flags are not exhaustive: e.g. 100.64.0.0/10 is neither
+    # private nor reserved in ipaddress, but is shared carrier space and not
+    # globally reachable. Positive classification closes that gap and also
+    # handles IPv4-mapped IPv6 consistently.
+    return ip.is_global
 
 
 def _deny(
@@ -779,6 +862,10 @@ def authorize_egress(
     if request.port not in rule.ports:
         return deny(DENY_DESTINATION_DENIED, f"port {request.port} not allowlisted for {rule.name!r}", rule)
 
+    http_error = _http_shape_error(request)
+    if http_error is not None:
+        return deny(DENY_SHAPE, http_error, rule)
+
     # 1b. DNS exfiltration heuristic (SalesBleed): flag hostnames that look
     # like encoded data before we resolve them. The DNS query itself is the
     # exfiltration channel; we must not send it.
@@ -824,7 +911,7 @@ def authorize_egress(
     if method not in rule.methods:
         return deny(DENY_SHAPE, f"method {method!r} not allowed for {rule.name!r}", rule, resolved)
     path = str(request.path or "")
-    if not path.startswith("/") or not any(path.startswith(p) for p in rule.path_prefixes):
+    if not any(path.startswith(p) for p in rule.path_prefixes):
         return deny(DENY_SHAPE, f"path {path!r} not allowlisted for {rule.name!r}", rule, resolved)
     body = request.body or b""
     if len(body) > MAX_BODY_BYTES:
@@ -848,6 +935,8 @@ def authorize_egress(
             and secrets.compare_digest(str(receipt.arguments_digest or ""), str(card.arguments_digest or ""))
             # A2: the body the approver signed must be the body being sent.
             and secrets.compare_digest(str(receipt.body_sha256 or ""), hashlib.sha256(body).hexdigest())
+            and bool(receipt.request_shape_hash)
+            and secrets.compare_digest(receipt.request_shape_hash, request.approval_shape_hash())
             # D5: the card's agent must be the requesting agent.
             and secrets.compare_digest(str(request.agent_id or ""), str((card.provenance.agent if card.provenance else "") or ""))
             and verify_card_binding(card, call_id=request.call_id, arguments=request.arguments)
@@ -980,6 +1069,7 @@ def approval_receipt_from_dict(value: Any) -> ApprovalReceipt:
             approver_id=str(value["approver_id"]),
             decided_at=float(value["decided_at"]),
             body_sha256=str(value.get("body_sha256") or ""),
+            request_shape_hash=str(value.get("request_shape_hash") or ""),
             signature=str(value["signature"]),
         )
     except (KeyError, TypeError, ValueError) as exc:

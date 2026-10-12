@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import json
 import sys
+import tempfile
 import unittest
 from pathlib import Path
 
@@ -172,7 +173,21 @@ class FrameTests(unittest.TestCase):
         records = [start(), prompt(1, "go"), assistant(2, text="ok"), result(3)]
         payload = json.loads(build_replay(records, session_id="s").to_json())
         self.assertEqual(payload["version"], "northstar.replay.v1")
-        self.assertEqual(sorted(payload), ["checkpoints", "counts", "frames", "inherited_messages", "lineage", "result", "sealed", "session_id", "truncated_at", "verified", "version"])
+        self.assertEqual(sorted(payload), ["chain_error", "chain_verified", "checkpoints", "counts", "frames", "inherited_messages", "lineage", "result", "sealed", "session_id", "truncated_at", "verified", "version"])
+
+    def test_replay_marks_a_modified_session_chain_unverified(self):
+        with tempfile.TemporaryDirectory() as directory:
+            store = SessionStore(directory, session_id="ns-replay-seal")
+            store.append("session_start", {"agent": "main"})
+            store.append("user_prompt", {"agent": "main", "role": "user", "content": [{"type": "text", "text": "safe"}]})
+            records, _ = store.read()
+
+        records[1]["content"][0]["text"] = "tampered"
+        replay = build_replay(records, session_id="ns-replay-seal")
+        self.assertFalse(replay.verified)
+        self.assertFalse(replay.chain_verified)
+        self.assertIn("chain_hash mismatch", replay.chain_error)
+        self.assertIn("chain=BROKEN", replay.summary())
 
     def test_inherited_messages_ignores_file_only_records(self):
         records = [start(), prompt(1, "go"), assistant(2, text="ok"), result(3)]
@@ -391,14 +406,18 @@ class RealRunTests(RuntimeTestCase):
         self.assertEqual(code, 1, "a boundary the file no longer matches has to be loud, not silent")
         self.assertIn("digest-mismatch", out)
 
+        code, replay_out, _ = self.invoke("sessions", "replay", "--session-dir", str(sessions), session)
+        self.assertEqual(code, 1, "replay must not present a tampered sealed transcript as verified")
+        self.assertIn("chain=BROKEN", replay_out)
+        self.assertIn("chain_hash mismatch", replay_out)
+
         # The same verdict, from the command that would have spent a run finding it out.
         code, _out, err = self.invoke(
             "run", "--workspace", str(self.workspace()), "--session-dir", str(sessions), "--resume-from", session,
             "--resume-record", "4", "--prompt", "continue", "--scripted-text", "x",
         )
         self.assertNotEqual(code, 0)
-        self.assertIn("resume refused", err)
-        self.assertIn("does not match the checkpoint digest", err)
+        self.assertIn("session chain verification failed", err)
 
     def test_replay_renders_the_whole_run_and_the_cut_shows_only_the_inheritance(self):
         sessions, session = self.recorded_run()

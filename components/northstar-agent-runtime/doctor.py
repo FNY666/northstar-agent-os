@@ -73,6 +73,11 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
         help="seccomp-BPF denylist mode a run would use (default: auto)",
     )
     parser.add_argument(
+        "--capdrop",
+        default="on",
+        help="Linux capability-drop mode a run would use: on (deny all), off, or a CAP_* whitelist (default: on)",
+    )
+    parser.add_argument(
         "--mcp-seccomp",
         choices=("auto", "on", "off"),
         default="auto",
@@ -355,11 +360,22 @@ def _check_sandbox(args: argparse.Namespace, findings: list[Finding]) -> str | N
         try:
             chosen = resolve_backend(requested, capabilities=caps)
             if chosen == "bwrap":
+                capdrop_setting = getattr(args, "capdrop", "on") or "on"
+                if capdrop_setting == "off":
+                    findings.append(Finding("capdrop", "warn", "bwrap capability drop disabled by operator choice"))
+                elif caps.bwrap_cap_drop:
+                    findings.append(Finding("capdrop", "ok", "bwrap --cap-drop ALL child probe passed"))
+                else:
+                    findings.append(Finding(
+                        "capdrop", "fail",
+                        "capability drop is enabled but bwrap --cap-drop ALL child probe failed; Shell would refuse to run",
+                    ))
                 findings.append(
                     Finding(
                         "sandbox",
                         "ok",
-                        f"backend=bwrap (OS isolation) — {caps.bwrap_detail}; "
+                        f"backend=bwrap (OS isolation) — {caps.bwrap_detail}; Shell resource ceilings "
+                        "are per-process, without runtime-managed aggregate cgroup quotas; "
                         "Shell still denied until --allow-tool Shell",
                     )
                 )
@@ -369,7 +385,9 @@ def _check_sandbox(args: argparse.Namespace, findings: list[Finding]) -> str | N
                         "sandbox",
                         "warn",
                         f"backend=process (cwd+env only; host FS reachable) — {caps.bwrap_detail}. "
-                        "Install bubblewrap for OS isolation. Shell still denied until --allow-tool Shell. "
+                        "Shell enforces per-process CPU/address-space/file-size limits; it does not create "
+                        "aggregate process-tree cgroup quotas. Install bubblewrap for OS isolation. "
+                        "Shell still denied until --allow-tool Shell. "
                         "See docs/concepts/threat-model.md",
                     )
                 )
@@ -465,6 +483,20 @@ def _check_seccomp(args: argparse.Namespace, findings: list[Finding], backend: s
             )
         )
         return
+    if backend == "bwrap":
+        try:
+            from tools.os_sandbox import probe_capabilities
+
+            caps = probe_capabilities()
+        except Exception as error:  # noqa: BLE001
+            findings.append(Finding("seccomp", "fail", f"cannot verify bwrap seccomp support: {error}"))
+            return
+        if not caps.bwrap_seccomp:
+            findings.append(Finding(
+                "seccomp", "fail",
+                f"mode={mode}, backend=bwrap: {caps.bwrap_seccomp_detail}; Shell would refuse to run",
+            ))
+            return
     machine = platform.machine().lower()
     arch = _verified_seccomp_arch()
     if arch is None:
@@ -633,8 +665,8 @@ def _check_mcp_network(args: argparse.Namespace, findings: list[Finding]) -> Non
     """Report whether MCP server processes will be denied network egress.
 
     Mirrors ``McpStdioClient._apply_network_policy``: ``denied`` (default)
-    confines the server with Landlock TCP denial and refuses to start where
-    the kernel cannot enforce it (needs ABI 4+); ``allowed`` is the explicit
+    confines the server with Landlock TCP/UDP denial and Unix-socket isolation,
+    refusing to start where IP denial is incomplete (needs ABI 10+); ``allowed`` is the explicit
     opt-in to full host network. Never claims denial is active when the host
     cannot enforce it.
     """
@@ -659,12 +691,12 @@ def _check_mcp_network(args: argparse.Namespace, findings: list[Finding]) -> Non
         findings.append(Finding("mcp-network", "warn", f"could not load the landlock module: {error}"))
         return
     abi = landlock_abi_version()
-    if not _sys.platform.startswith("linux") or abi < 4:
+    if not _sys.platform.startswith("linux") or abi < 10:
         findings.append(
             Finding(
                 "mcp-network",
                 "fail",
-                f"mode=denied requires Linux with Landlock ABI 4+ for TCP denial "
+                f"mode=denied requires Linux with Landlock ABI 10+ for TCP and UDP denial "
                 f"(this host: {_sys.platform}, ABI {abi}) - an MCP server would refuse to start",
             )
         )
@@ -673,7 +705,7 @@ def _check_mcp_network(args: argparse.Namespace, findings: list[Finding]) -> Non
         Finding(
             "mcp-network",
             "ok",
-            f"mode=denied - MCP server processes get Landlock TCP denial (ABI {abi}); "
+            f"mode=denied - MCP server processes get Landlock TCP/UDP denial plus Unix-socket isolation (ABI {abi}); "
             "no direct egress outside the sidecar",
         )
     )
@@ -758,6 +790,45 @@ def _check_workspace_config(args: argparse.Namespace, findings: list[Finding]) -
                 else:
                     size = f"{len(context.text)} chars" + (" [truncated]" if context.truncated else "")
                     findings.append(Finding("project-context", "ok", f"{context.name} ({size}) will be appended to the system prompt"))
+
+
+def _check_tool_schemas(args: argparse.Namespace, findings: list[Finding]) -> None:
+    """Verify built-in tool contracts are valid and closed at the root."""
+    try:
+        from loop import task_tool_spec
+        from tool_input_schema import ToolInputSchemaError, validate_tool_schema
+        from tools import build_default_registry, codex_tool_spec
+        from tools.fetch import fetch_tool_spec
+
+        registry = build_default_registry()
+        specs = [registry.require(name) for name in registry.names()]
+        specs.extend((task_tool_spec(), fetch_tool_spec(), codex_tool_spec()))
+        problems: list[str] = []
+        for spec in specs:
+            schema = spec.schema_snapshot()
+            try:
+                validate_tool_schema(schema)
+            except ToolInputSchemaError as error:
+                problems.append(f"{spec.name}: invalid schema ({error})")
+                continue
+            if schema.get("additionalProperties") is not False:
+                problems.append(f"{spec.name}: top-level additionalProperties must be false")
+            properties = schema.get("properties", {})
+            if spec.name == "Shell":
+                exposed_host_controls = {"backend", "shell_backend", "aggregate_resource_scope"} & set(properties)
+                if exposed_host_controls:
+                    problems.append(f"Shell: host-owned controls exposed: {sorted(exposed_host_controls)}")
+            for key in ("env", "headers"):
+                nested = properties.get(key)
+                if isinstance(nested, dict) and nested.get("type") == "object":
+                    if nested.get("additionalProperties") != {"type": "string"}:
+                        problems.append(f"{spec.name}.{key}: dynamic values must be declared strings")
+        if problems:
+            findings.append(Finding("tool-schemas", "fail", "; ".join(problems[:8])))
+        else:
+            findings.append(Finding("tool-schemas", "ok", f"{len(specs)} built-in tool schemas are valid and closed"))
+    except (ImportError, AttributeError, TypeError, ValueError) as error:
+        findings.append(Finding("tool-schemas", "fail", f"could not verify built-in tool schemas: {error}"))
 
 
 def _check_skill_supply_chain(args: argparse.Namespace, findings: list[Finding]) -> None:
@@ -881,6 +952,7 @@ def _checks(args: argparse.Namespace) -> list[Finding]:
     _check_landlock(args, findings, backend)
     _check_mcp_seccomp(args, findings)
     _check_mcp_network(args, findings)
+    _check_tool_schemas(args, findings)
     _check_workspace_config(args, findings)
     _check_skill_supply_chain(args, findings)
     _check_plugins(args, findings)

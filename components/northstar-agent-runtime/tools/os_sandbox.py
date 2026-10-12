@@ -3,7 +3,7 @@
 Two backends, one contract:
 
 * **bwrap** (preferred) — bubblewrap with a read-only host view, a writable
-  bind of the workspace, no network namespace, a seccomp-BPF denylist over
+  bind of the workspace, an unshared network namespace, a seccomp-BPF denylist over
   escape primitives (``tools/seccomp.py``), and die-with-parent. This is the
   isolation level the threat model calls a *sandbox*.
 * **process** (fallback) — a scrubbed subprocess with cwd pinned inside the
@@ -52,6 +52,7 @@ from tools.sandbox import (
 )
 from tools.seccomp import SECCOMP_MODES, SeccompError, build_default_filter, prctl_loader_argv
 from tools.pledge import (
+    PROMISES,
     PledgeContext,
     PledgeError,
     PledgeViolation,
@@ -70,6 +71,13 @@ MAX_OUTPUT_BYTES = 512 * 1024
 DEFAULT_MAX_ARGV = 64
 MAX_ARGV_BYTES = 32 * 1024
 DEFAULT_MAX_ENV = 32
+MAX_ENV_BYTES = 32 * 1024
+DEFAULT_MAX_MEMORY_BYTES = 2 * 1024 * 1024 * 1024
+MAX_MEMORY_BYTES = DEFAULT_MAX_MEMORY_BYTES
+DEFAULT_MAX_FILE_SIZE_BYTES = 1024 * 1024 * 1024
+MAX_FILE_SIZE_BYTES = DEFAULT_MAX_FILE_SIZE_BYTES
+MAX_CPU_SECONDS = MAX_TIMEOUT_MS // 1000
+MAX_TASKS = 128
 
 BACKENDS = ("auto", "bwrap", "process")
 
@@ -86,6 +94,8 @@ class SandboxCapabilities:
     bwrap_usable: bool
     bwrap_detail: str
     bwrap_cap_drop: bool = False
+    bwrap_seccomp: bool = False
+    bwrap_seccomp_detail: str = "not probed"
     process_available: bool = True
     preferred: str = "process"
 
@@ -95,6 +105,8 @@ class SandboxCapabilities:
             "bwrap_usable": self.bwrap_usable,
             "bwrap_detail": self.bwrap_detail,
             "bwrap_cap_drop": self.bwrap_cap_drop,
+            "bwrap_seccomp": self.bwrap_seccomp,
+            "bwrap_seccomp_detail": self.bwrap_seccomp_detail,
             "process_available": self.process_available,
             "preferred": self.preferred,
             "isolation": "os" if self.preferred == "bwrap" and self.bwrap_usable else "process",
@@ -110,9 +122,12 @@ class SandboxRequest:
     workspace: Path
     timeout_ms: int = DEFAULT_TIMEOUT_MS
     max_output_bytes: int = DEFAULT_MAX_OUTPUT_BYTES
+    cpu_limit_seconds: int = DEFAULT_TIMEOUT_MS // 1000
+    memory_limit_bytes: int = DEFAULT_MAX_MEMORY_BYTES
+    file_size_limit_bytes: int = DEFAULT_MAX_FILE_SIZE_BYTES
     env: Mapping[str, str] | None = None
     network: bool = False  # reserved: bwrap always unshares net today; True is refused
-    seccomp: str = "auto"  # seccomp denylist: auto (bwrap only) | on (require) | off
+    seccomp: str = "auto"  # auto (apply when supported) | on (require) | off
     #: Linux capability whitelist for the tool-effect child. ``()`` (the
     #: default) is deny-all; ``None`` disables the launcher entirely
     #: (operator escape hatch — the Shell tool only passes None when the
@@ -122,6 +137,8 @@ class SandboxRequest:
     # auto (apply when the kernel supports it, degrade loudly to seccomp-only)
     # | on (require; refuse without Landlock) | off. Tighten-only per call.
     pledges: tuple[str, ...] | None = None  # pledge-style promise set; None = no pledge layer
+    aggregate_resource_scope: str = "off"  # off | systemd (PID-1-owned process-tree limits)
+    max_tasks: int = MAX_TASKS  # aggregate TasksMax; per-call values may only tighten
 
 
 @dataclass(frozen=True)
@@ -142,10 +159,17 @@ class SandboxResult:
     #: Linux only): whitelist, before/after capability sets, per-operation
     #: results. ``None`` when the launcher did not run.
     capdrop: dict[str, Any] | None = None
+    aggregate_setup_failed: bool = False
+    aggregate_cleanup_failed: bool = False
 
     @property
     def ok(self) -> bool:
-        return (not self.timed_out) and self.exit_code == 0
+        return (
+            (not self.timed_out)
+            and (not self.aggregate_setup_failed)
+            and (not self.aggregate_cleanup_failed)
+            and self.exit_code == 0
+        )
 
     def as_dict(self) -> dict[str, Any]:
         return {
@@ -160,6 +184,8 @@ class SandboxResult:
             "truncated": self.truncated,
             "detail": self.detail,
             "capdrop": self.capdrop,
+            "aggregate_cleanup_failed": self.aggregate_cleanup_failed,
+            "aggregate_setup_failed": self.aggregate_setup_failed,
         }
 
     def render(self) -> str:
@@ -185,6 +211,42 @@ class SandboxResult:
 
 
 _CAP_CACHE: SandboxCapabilities | None = None
+
+
+def _probe_bwrap_feature(
+    path: str,
+    *,
+    cap_drop: bool = False,
+    seccomp_fd: int | None = None,
+) -> subprocess.CompletedProcess[str]:
+    """Exercise a bwrap feature by actually starting a disposable child."""
+    argv = [
+        path,
+        "--die-with-parent",
+        "--unshare-pid",
+        "--unshare-net",
+    ]
+    if cap_drop:
+        argv.extend(["--cap-drop", "ALL"])
+    if seccomp_fd is not None:
+        argv.extend(["--seccomp", str(seccomp_fd)])
+    argv.extend([
+        "--ro-bind", "/", "/",
+        "--tmpfs", "/tmp",
+        "--dev", "/dev",
+        "--proc", "/proc",
+        "--chdir", "/",
+        "true",
+    ])
+    kwargs: dict[str, Any] = {
+        "capture_output": True,
+        "text": True,
+        "timeout": 5,
+        "check": False,
+    }
+    if seccomp_fd is not None:
+        kwargs["pass_fds"] = (seccomp_fd,)
+    return subprocess.run(argv, **kwargs)
 
 
 def reset_capabilities_cache() -> None:
@@ -238,22 +300,44 @@ def probe_capabilities(*, force: bool = False, bwrap_bin: str | None = None) -> 
         except (OSError, subprocess.TimeoutExpired) as error:
             detail = f"bwrap at {path} could not be probed: {error}"
     cap_drop = False
+    seccomp_usable = False
+    seccomp_detail = "bwrap unavailable; not probed"
     if usable and path:
-        # bwrap(1) --cap-drop/--cap-add exist on modern bubblewrap; probe the
-        # binary's own help rather than assuming the version.
+        # Probe behavior, not --help output: a flag being present does not prove
+        # this kernel and user namespace can enforce it.
         try:
-            help_out = subprocess.run(
-                [path, "--help"], capture_output=True, text=True, timeout=5, check=False
-            )
-            cap_drop = "--cap-drop" in (help_out.stdout or "")
+            cap_probe = _probe_bwrap_feature(path, cap_drop=True)
+            cap_drop = cap_probe.returncode == 0
         except (OSError, subprocess.TimeoutExpired):
             cap_drop = False
+        try:
+            from tools.seccomp import build_default_filter
+
+            with tempfile.TemporaryFile() as filter_file:
+                filter_file.write(build_default_filter())
+                filter_file.flush()
+                seccomp_probe = _probe_bwrap_feature(path, seccomp_fd=filter_file.fileno())
+            seccomp_usable = seccomp_probe.returncode == 0
+            seccomp_output = (seccomp_probe.stderr or seccomp_probe.stdout or "").strip().splitlines()
+            seccomp_detail = (
+                "bwrap seccomp child probe passed"
+                if seccomp_usable
+                else f"bwrap seccomp child probe failed: {(seccomp_output[-1] if seccomp_output else 'non-zero exit')[:200]}"
+            )
+        except Exception as error:  # noqa: BLE001 - a failed probe never implies support
+            seccomp_detail = f"bwrap seccomp child probe unavailable: {str(error)[:200]}"
+        detail += (
+            f"; cap-drop child probe {'passed' if cap_drop else 'failed'}"
+            f"; {seccomp_detail}"
+        )
     preferred = "bwrap" if usable else "process"
     caps = SandboxCapabilities(
         bwrap_path=path if path else None,
         bwrap_usable=usable,
         bwrap_detail=detail,
         bwrap_cap_drop=cap_drop,
+        bwrap_seccomp=seccomp_usable,
+        bwrap_seccomp_detail=seccomp_detail,
         preferred=preferred,
     )
     _CAP_CACHE = caps
@@ -312,18 +396,57 @@ def _validate_request(request: SandboxRequest) -> None:
     for item in request.argv:
         if not isinstance(item, str) or not item or "\x00" in item:
             raise SandboxError("each argv entry must be a non-empty string without NUL")
-        total += len(item)
+        try:
+            total += len(item.encode("utf-8"))
+        except UnicodeEncodeError as error:
+            raise SandboxError("argv entries must be valid UTF-8 strings") from error
     if total > MAX_ARGV_BYTES:
         raise SandboxError(f"argv total size exceeds {MAX_ARGV_BYTES} bytes")
+    if request.env is not None:
+        if not isinstance(request.env, Mapping):
+            raise SandboxError("env must be a mapping of string keys to string values")
+        if len(request.env) > DEFAULT_MAX_ENV:
+            raise SandboxError(f"env map exceeds {DEFAULT_MAX_ENV} entries")
+        env_bytes = 0
+        for key, value in request.env.items():
+            if not isinstance(key, str) or not key or any(ch in key for ch in "=/\x00"):
+                raise SandboxError(f"invalid env key {key!r}")
+            if not isinstance(value, str) or "\x00" in value:
+                raise SandboxError(f"env {key!r} must be a string without NUL")
+            try:
+                env_bytes += len(key.encode("utf-8")) + 1 + len(value.encode("utf-8"))
+            except UnicodeEncodeError as error:
+                raise SandboxError(f"env {key!r} must contain valid UTF-8 text") from error
+        if env_bytes > MAX_ENV_BYTES:
+            raise SandboxError(f"env total size exceeds {MAX_ENV_BYTES} bytes")
     if request.network:
         raise SandboxError(
             "network=true is not offered yet: the bwrap backend always unshares the network "
             "namespace, and the process backend cannot honestly promise egress control"
         )
-    if not isinstance(request.timeout_ms, int) or not (1 <= request.timeout_ms <= MAX_TIMEOUT_MS):
+    if isinstance(request.timeout_ms, bool) or not isinstance(request.timeout_ms, int) or not (1 <= request.timeout_ms <= MAX_TIMEOUT_MS):
         raise SandboxError(f"timeout_ms must be an integer in 1..{MAX_TIMEOUT_MS}")
-    if not isinstance(request.max_output_bytes, int) or not (1 <= request.max_output_bytes <= MAX_OUTPUT_BYTES):
+    if isinstance(request.max_output_bytes, bool) or not isinstance(request.max_output_bytes, int) or not (1 <= request.max_output_bytes <= MAX_OUTPUT_BYTES):
         raise SandboxError(f"max_output_bytes must be an integer in 1..{MAX_OUTPUT_BYTES}")
+    if isinstance(request.cpu_limit_seconds, bool) or not isinstance(request.cpu_limit_seconds, int) or not (1 <= request.cpu_limit_seconds <= MAX_CPU_SECONDS):
+        raise SandboxError(f"cpu_limit_seconds must be an integer in 1..{MAX_CPU_SECONDS}")
+    if isinstance(request.memory_limit_bytes, bool) or not isinstance(request.memory_limit_bytes, int) or not (1 <= request.memory_limit_bytes <= MAX_MEMORY_BYTES):
+        raise SandboxError(f"memory_limit_bytes must be an integer in 1..{MAX_MEMORY_BYTES}")
+    if isinstance(request.file_size_limit_bytes, bool) or not isinstance(request.file_size_limit_bytes, int) or not (1 <= request.file_size_limit_bytes <= MAX_FILE_SIZE_BYTES):
+        raise SandboxError(f"file_size_limit_bytes must be an integer in 1..{MAX_FILE_SIZE_BYTES}")
+    if request.aggregate_resource_scope not in {"off", "systemd"}:
+        raise SandboxError("aggregate_resource_scope must be off or systemd")
+    if isinstance(request.max_tasks, bool) or not isinstance(request.max_tasks, int) or not (1 <= request.max_tasks <= MAX_TASKS):
+        raise SandboxError(f"max_tasks must be an integer in 1..{MAX_TASKS}")
+    if request.aggregate_resource_scope == "systemd":
+        if (request.seccomp or "auto").strip().lower() == "off":
+            raise SandboxError("aggregate systemd scopes require seccomp to prevent workload access to the user/session control bus")
+        from tools.systemd_scope import SystemdScopeError, validate_systemd_scope_host
+
+        try:
+            validate_systemd_scope_host()
+        except SystemdScopeError as error:
+            raise SandboxError(str(error)) from error
     workspace = Path(os.path.realpath(str(request.workspace)))
     cwd = Path(os.path.realpath(str(request.cwd)))
     try:
@@ -390,6 +513,9 @@ def _run_popen(
         pass
 
     started = time.monotonic()
+    # Create the selector before spawning so an initialization failure cannot
+    # leave a child behind with no cleanup machinery.
+    selector = selectors.DefaultSelector()
     popen_kwargs: dict[str, Any] = {}
     if pass_fds:
         popen_kwargs["pass_fds"] = tuple(pass_fds)
@@ -406,6 +532,7 @@ def _run_popen(
             **popen_kwargs,
         )
     except OSError as error:
+        selector.close()
         return SandboxResult(
             argv=tuple(argv),
             backend=backend,
@@ -417,17 +544,15 @@ def _run_popen(
             duration_ms=int((time.monotonic() - started) * 1000),
             detail=f"failed to start: {error}",
         )
+    except BaseException:
+        selector.close()
+        raise
 
     timed_out = False
     truncated = False
     output_limited = False
     captured = {"stdout": bytearray(), "stderr": bytearray()}
-    selector = selectors.DefaultSelector()
     streams = (("stdout", proc.stdout), ("stderr", proc.stderr))
-    for name, stream in streams:
-        if stream is not None:
-            os.set_blocking(stream.fileno(), False)
-            selector.register(stream, selectors.EVENT_READ, name)
 
     deadline = started + timeout_ms / 1000.0
     stop_reason = ""
@@ -441,7 +566,21 @@ def _run_popen(
         except (ProcessLookupError, PermissionError, OSError):
             pass
 
+    def group_exists() -> bool:
+        try:
+            os.killpg(proc.pid, 0)
+            return True
+        except ProcessLookupError:
+            return False
+        except (PermissionError, OSError):
+            # If presence cannot be disproved, keep the cleanup path fail-safe.
+            return True
+
     try:
+        for name, stream in streams:
+            if stream is not None:
+                os.set_blocking(stream.fileno(), False)
+                selector.register(stream, selectors.EVENT_READ, name)
         while True:
             now = time.monotonic()
             if not stop_reason and now >= deadline:
@@ -457,10 +596,24 @@ def _run_popen(
                 break
 
             if proc.poll() is not None and not selector.get_map():
+                if not stop_reason and group_exists():
+                    # A command may daemonize a same-group child and close its
+                    # inherited pipes. The leader exiting is not completion:
+                    # keep the invocation's process group from outliving it.
+                    stop_reason = "leader_exit"
+                    signal_group(signal.SIGTERM)
+                    term_deadline = now + 0.25
+                    continue
                 if stop_reason and not kill_sent:
                     # The group may still contain a child that closed both pipes
                     # and ignored TERM after the original process exited.
                     signal_group(signal.SIGKILL)
+                    kill_sent = True
+                    kill_deadline = now + 0.1
+                    continue
+                if kill_sent and kill_deadline is not None and now < kill_deadline:
+                    time.sleep(min(0.05, kill_deadline - now))
+                    continue
                 break
             wait_for = 0.05
             if not stop_reason:
@@ -487,7 +640,10 @@ def _run_popen(
                     stream.close()
                     continue
                 buffer = captured[name]
-                remaining = max_output_bytes - len(buffer)
+                # One command gets one combined output budget. Applying the
+                # limit separately to stdout and stderr doubled the promised
+                # memory bound when a child wrote to both streams.
+                remaining = max_output_bytes - sum(len(part) for part in captured.values())
                 if len(chunk) > remaining:
                     if remaining > 0:
                         buffer.extend(chunk[:remaining])
@@ -499,6 +655,21 @@ def _run_popen(
                         term_deadline = time.monotonic() + 2.0
                 else:
                     buffer.extend(chunk)
+    except BaseException:
+        # Parent-side cancellation or pipe/selector failures must not orphan
+        # an already-started command. Kill the whole session even when its
+        # leader has exited and only descendants remain.
+        signal_group(signal.SIGTERM)
+        try:
+            proc.wait(timeout=0.1)
+        except subprocess.TimeoutExpired:
+            pass
+        signal_group(signal.SIGKILL)
+        try:
+            proc.wait(timeout=1.0)
+        except subprocess.TimeoutExpired:
+            pass
+        raise
     finally:
         selector.close()
         for _name, stream in streams:
@@ -522,6 +693,8 @@ def _run_popen(
         note = (note + "; " if note else "") + f"killed after {timeout_ms}ms (process group TERM→KILL)"
     elif output_limited:
         note = (note + "; " if note else "") + "output cap reached; process group terminated (TERM→KILL)"
+    elif stop_reason == "leader_exit":
+        note = (note + "; " if note else "") + "remaining process-group descendants terminated after leader exit"
 
     return SandboxResult(
         argv=tuple(argv),
@@ -534,6 +707,85 @@ def _run_popen(
         duration_ms=int((time.monotonic() - started) * 1000),
         truncated=truncated,
         detail=note,
+    )
+
+
+def _run_scoped_popen(
+    argv: Sequence[str],
+    *,
+    aggregate_resource_scope: str,
+    memory_max_bytes: int,
+    max_tasks: int,
+    **kwargs: Any,
+) -> SandboxResult:
+    """Run under PID-1-owned aggregate limits and tear down the whole scope."""
+    if aggregate_resource_scope == "off":
+        return _run_popen(argv, **kwargs)
+    from tools.systemd_scope import SystemdScopeError, cleanup_systemd_scope, systemd_scope_argv
+
+    marker_read, marker_write = os.pipe()
+    marker_loader = (
+        "import os,sys; fd=int(sys.argv[1]); os.write(fd,b'\\x01'); os.close(fd); "
+        "os.execvp(sys.argv[2],sys.argv[2:])"
+    )
+    marker_command = (sys.executable, "-c", marker_loader, str(marker_write), *argv)
+    try:
+        scoped_argv, unit = systemd_scope_argv(
+            marker_command,
+            memory_max_bytes=memory_max_bytes,
+            tasks_max=max_tasks,
+        )
+    except SystemdScopeError as error:
+        os.close(marker_read)
+        os.close(marker_write)
+        raise SandboxError(str(error)) from error
+    existing_pass_fds = tuple(kwargs.get("pass_fds", ()))
+    kwargs["pass_fds"] = (*existing_pass_fds, marker_write)
+    result: SandboxResult | None = None
+    try:
+        try:
+            result = _run_popen(scoped_argv, **kwargs)
+        finally:
+            os.close(marker_write)
+            marker_write = -1
+            try:
+                marker = os.read(marker_read, 2)
+            except OSError:
+                marker = b""
+            os.close(marker_read)
+            marker_read = -1
+    finally:
+        for fd in (marker_write, marker_read):
+            if fd >= 0:
+                try:
+                    os.close(fd)
+                except OSError:
+                    pass
+        try:
+            cleaned, cleanup_detail = cleanup_systemd_scope(unit)
+        except Exception as error:  # cleanup diagnostics must not hide a child failure
+            cleaned = False
+            cleanup_detail = f"systemd scope cleanup raised {type(error).__name__}; descendants may remain"
+    assert result is not None
+    detail = result.detail
+    if detail:
+        detail += "; "
+    setup_failed = marker != b"\x01"
+    if setup_failed:
+        detail += "; systemd did not start the scoped command; aggregate limits were not established"
+    else:
+        detail += (
+            f"aggregate cgroup enforced by systemd system scope (MemoryMax={memory_max_bytes}, "
+            f"TasksMax={max_tasks}, CPUQuota=100%)"
+        )
+    if cleanup_detail:
+        detail += "; " + cleanup_detail
+    return replace(
+        result,
+        argv=tuple(argv),
+        detail=detail,
+        aggregate_setup_failed=setup_failed,
+        aggregate_cleanup_failed=not cleaned,
     )
 
 
@@ -584,6 +836,7 @@ def _bwrap_argv(
     # wpath/cpath turns the workspace bind read-only. The semantic layer
     # (PledgeContext.require) fails closed too; this is defense in depth.
     pledges = frozenset(request.pledges or ())
+    temporary_writable = request.pledges is None or "tmppath" in pledges
     workspace_bind = "--bind"
     if request.pledges is not None and not ({"wpath", "cpath"} & pledges):
         workspace_bind = "--ro-bind"
@@ -615,6 +868,21 @@ def _bwrap_argv(
         # --cap-drop ALL then --cap-add per whitelist entry: bwrap(1)
         # processes the two in command-line order, so the adds survive.
         cap_args = bwrap_capability_args(capdrop_whitelist)
+    governance_mounts: list[str] = []
+    governance = workspace / ".northstar"
+    if governance.is_symlink():
+        raise SandboxError("workspace .northstar is a symlink; refusing to sandbox governance through an alias")
+    if governance.is_dir():
+        governance_mounts.extend(["--ro-bind", str(governance), str(governance)])
+        sandbox_tmp = governance / "tmp"
+        if sandbox_tmp.is_symlink():
+            raise SandboxError("workspace .northstar/tmp is a symlink; refusing an unsafe sandbox temp mount")
+        if sandbox_tmp.is_dir() and temporary_writable:
+            # Tempfiles used by the runtime are passed by fd. The command gets
+            # an ephemeral tmpfs at the same path, never a writable view of
+            # governance files.
+            governance_mounts.extend(["--tmpfs", str(sandbox_tmp)])
+    tmp_mount_args = ["--tmpfs", "/tmp"] if temporary_writable else ["--dir", "/tmp"]
     argv = [
         bwrap_path,
         "--die-with-parent",
@@ -629,8 +897,7 @@ def _bwrap_argv(
         "/dev",
         "--proc",
         "/proc",
-        "--tmpfs",
-        "/tmp",
+        *tmp_mount_args,
         "--dir",
         "/var",
         "--dir",
@@ -640,6 +907,7 @@ def _bwrap_argv(
         workspace_bind,
         str(workspace),
         str(workspace),
+        *governance_mounts,
         "--chdir",
         str(cwd),
         "--",
@@ -677,6 +945,16 @@ def run_sandboxed(
 
     if chosen == "bwrap":
         assert caps.bwrap_path  # resolve_backend guaranteed usable
+        if request.capdrop_whitelist is not None and not caps.bwrap_cap_drop:
+            raise SandboxError(
+                "bwrap capability drop was requested but its live --cap-drop probe failed; "
+                "refusing to run without the configured capability boundary (set capdrop=off only by operator choice)"
+            )
+        if seccomp_mode != "off" and not caps.bwrap_seccomp:
+            raise SandboxError(
+                "bwrap seccomp was requested but its live filter probe failed; "
+                "refusing to run without the configured syscall boundary (set seccomp=off only by operator choice)"
+            )
         seccomp_fd: int | None = None
         seccomp_file = None
         pass_fds: list[int] = []
@@ -684,6 +962,14 @@ def run_sandboxed(
         # exists inside (see _minimal_identity_files). The temp files live
         # under the workspace tmp dir, next to the seccomp program.
         tmpdir = workspace / ".northstar" / "tmp"
+        governance = workspace / ".northstar"
+        if governance.is_symlink():
+            raise SandboxError("workspace .northstar is a symlink; refusing bwrap governance protection")
+        if governance.exists() and not governance.is_dir():
+            raise SandboxError("workspace .northstar exists but is not a directory")
+        governance.mkdir(parents=True, exist_ok=True, mode=0o700)
+        if tmpdir.is_symlink():
+            raise SandboxError("workspace .northstar/tmp is a symlink; refusing bwrap temp setup")
         tmpdir.mkdir(parents=True, exist_ok=True, mode=0o700)
         passwd_content, group_content = _minimal_identity_files()
         identity_paths: list[str] = []
@@ -704,7 +990,9 @@ def run_sandboxed(
                     pass
             raise
         passwd_path, group_path = identity_paths
-        detail = "network namespace unshared; workspace is the only writable bind"
+        detail = "network namespace unshared; workspace writable, .northstar read-only (ephemeral temp mount)"
+        if request.capdrop_whitelist is None:
+            detail += "; capability drop disabled by operator"
         if (request.landlock or "auto").strip().lower() != "off":
             # Landlock is a process-backend mechanism; bwrap already confines
             # paths more strongly via read-only mounts, so there is nothing
@@ -724,10 +1012,12 @@ def run_sandboxed(
                 seccomp_file.flush()
                 seccomp_fd = seccomp_file.fileno()
                 pass_fds.append(seccomp_fd)
-                detail += "; seccomp denylist active (escape primitives -> EPERM)"
+                detail += "; seccomp denies network socket creation and escape syscalls (EPERM)"
             except Exception:
                 seccomp_file.close()
                 raise
+        else:
+            detail += "; seccomp disabled by operator"
         try:
             wrapped = _bwrap_argv(
                 request,
@@ -738,14 +1028,31 @@ def run_sandboxed(
                 capdrop_whitelist=request.capdrop_whitelist,
                 cap_drop_supported=caps.bwrap_cap_drop,
             )
-            if request.capdrop_whitelist is not None:
-                if caps.bwrap_cap_drop:
-                    wl = ",".join(sorted(parse_whitelist(request.capdrop_whitelist))) or "deny-all"
-                    detail += f"; capdrop: --cap-drop ALL (+{wl})"
-                else:
-                    detail += "; capdrop not applied: bwrap on this host has no --cap-drop"
-            result = _run_popen(
+            from tools.resource_limits import MAX_OPEN_FILES, resource_limits_loader_argv
+
+            wrapped = resource_limits_loader_argv(
                 wrapped,
+                {
+                    "cpu_seconds": request.cpu_limit_seconds,
+                    "memory_bytes": request.memory_limit_bytes,
+                    "file_size_bytes": request.file_size_limit_bytes,
+                    "open_files": MAX_OPEN_FILES,
+                },
+            )
+            detail += (
+                f"; per-process resource ceilings: CPU {request.cpu_limit_seconds}s, "
+                f"address space {request.memory_limit_bytes} bytes, "
+                f"file size {request.file_size_limit_bytes} bytes, "
+                f"open files {MAX_OPEN_FILES}, core dumps disabled (not aggregate quotas)"
+            )
+            if request.capdrop_whitelist is not None:
+                wl = ",".join(sorted(parse_whitelist(request.capdrop_whitelist))) or "deny-all"
+                detail += f"; capdrop: --cap-drop ALL (+{wl})"
+            result = _run_scoped_popen(
+                wrapped,
+                aggregate_resource_scope=request.aggregate_resource_scope,
+                memory_max_bytes=request.memory_limit_bytes,
+                max_tasks=request.max_tasks,
                 cwd=cwd,  # bwrap --chdir is authoritative; cwd here is best-effort
                 env=env,
                 timeout_ms=request.timeout_ms,
@@ -785,19 +1092,36 @@ def run_sandboxed(
             "landlock='on' requires a Linux kernel with Landlock "
             f"(this host: {sys.platform}, landlock_supported={landlock_supported()})."
         )
+    landlock_available = sys.platform.startswith("linux") and landlock_supported()
+    pledge_is_narrowed = (
+        pledge_ctx is not None and pledge_ctx.promises != frozenset(PROMISES)
+    )
+    if pledge_is_narrowed and (landlock_mode == "off" or not landlock_available):
+        detail = "landlock='off'" if landlock_mode == "off" else "Landlock is unavailable"
+        raise SandboxError(
+            f"narrowed Shell pledges require Landlock; {detail}, refusing to run unrestricted"
+        )
+    if pledge_is_narrowed and seccomp_mode == "off":
+        raise SandboxError(
+            "narrowed Shell pledges cannot be enforced with seccomp='off' by the current "
+            "process launcher; refusing to run with weaker controls"
+        )
     base_detail = (
         "process backend: cwd pinned and env scrubbed, but the host filesystem "
-        "and network are still reachable — install bubblewrap for OS isolation"
+        "is still reachable, and governance paths receive no separate "
+        "read-only mount — install bubblewrap for OS isolation"
     )
     exec_argv: Sequence[str] = request.argv
-    python = shutil.which("python3") or sys.executable
+    # This interpreter bootstraps the security wrappers before the target
+    # command. Never resolve it through the (potentially writable) child PATH.
+    python = sys.executable
     if seccomp_mode != "off" and sys.platform.startswith("linux"):
         # The filter rides in on a python wrapper that prctl()s it before
         # exec (see tools/seccomp.py: no preexec_fn, so no fork-in-threads
         # hazard). The audit trail keeps the original argv; the wrapper is
         # an implementation detail named in `detail`.
-        python = shutil.which("python3") or sys.executable
-        if pledge_ctx is not None:
+        python = sys.executable
+        if pledge_ctx is not None and landlock_available and landlock_mode != "off":
             # Pledge mechanism layer: Landlock self-restriction (filesystem
             # promises -> PATH_BENEATH rules) + the same seccomp denylist,
             # applied irreversibly before exec. Reported honestly in `detail`.
@@ -807,20 +1131,45 @@ def run_sandboxed(
             )
             exec_argv = pledge_loader_argv(rules, request.argv, python=python)
             report = enforcement_report(pledge_ctx.promises, backend="process")
-            landlock_note = (
-                "landlock self-restriction active"
-                if report["landlock"]["available"]
-                else f"landlock unavailable ({report['landlock']['detail']}); "
-                "semantic pledge still fails closed"
+            detail = (
+                base_detail
+                + f"; pledge {sorted(pledge_ctx.promises)}; landlock self-restriction active"
+                + "; seccomp denies network socket creation"
             )
-            detail = base_detail + f"; pledge {sorted(pledge_ctx.promises)}; {landlock_note}"
+        elif pledge_ctx is not None:
+            # The default full promise set adds no per-call restrictions. On
+            # hosts where Landlock is unavailable (or explicitly off), keep
+            # the ordinary seccomp process backend usable and report the
+            # missing path layer; narrowed promises were rejected above.
+            exec_argv = prctl_loader_argv(request.argv, python=python)
+            report = enforcement_report(pledge_ctx.promises, backend="process")
+            detail = (
+                base_detail
+                + f"; pledge {sorted(pledge_ctx.promises)}; no narrower pledge requested; "
+                + f"landlock not applied ({report['landlock']['detail']})"
+                + "; seccomp denies network socket creation"
+            )
         else:
             exec_argv = prctl_loader_argv(request.argv, python=python)
-            detail = base_detail + "; seccomp denylist active (prctl, EPERM on deny)"
+            detail = base_detail + "; seccomp denies network socket creation and escape syscalls (prctl, EPERM on deny)"
     else:
-        detail = base_detail + "; seccomp not applied"
+        detail = base_detail + "; network sockets are not confined because seccomp is unavailable or disabled"
         if seccomp_mode != "off":
             detail += f" ({sys.platform} cannot load a BPF filter)"
+        if pledge_ctx is not None and pledge_is_narrowed:
+            # Landlock is the mechanism for narrowed filesystem promises even
+            # when the operator disables the seccomp denylist.
+            rules = filesystem_rules(
+                pledge_ctx.promises,
+                workspace=str(workspace),
+                tmpdir=str(workspace / ".northstar" / "tmp"),
+            )
+            exec_argv = landlock_loader_argv(request.argv, {
+                "mode": "on",
+                "workspace": str(workspace),
+                "rules": [rule.as_dict() for rule in rules],
+            }, python=python)
+            detail += "; pledge path restrictions enforced by Landlock"
     # Capability drop: outermost wrapper, so the report fd is written and
     # closed before the next exec and the drop is the last gate the tool
     # command passes. Linux only; elsewhere the request is refused loudly
@@ -831,7 +1180,7 @@ def run_sandboxed(
     capdrop_pass_fds: list[int] = []
     if request.capdrop_whitelist is not None:
         if sys.platform.startswith("linux"):
-            python = shutil.which("python3") or sys.executable
+            python = sys.executable
             cap_pipe_r, cap_pipe_w = os.pipe()
             exec_argv = capdrop_loader_argv(
                 exec_argv,
@@ -854,8 +1203,29 @@ def run_sandboxed(
         # Graceful degradation, stated out loud: the loader would also warn
         # on stderr, but the detail line is what the operator reads.
         detail += "; landlock not applied (kernel lacks Landlock; seccomp layer still enforced)"
-    result = _run_popen(
+    from tools.resource_limits import MAX_OPEN_FILES, resource_limits_loader_argv
+
+    exec_argv = resource_limits_loader_argv(
         exec_argv,
+        {
+            "cpu_seconds": request.cpu_limit_seconds,
+            "memory_bytes": request.memory_limit_bytes,
+            "file_size_bytes": request.file_size_limit_bytes,
+            "open_files": MAX_OPEN_FILES,
+        },
+        python=python,
+    )
+    detail += (
+        f"; per-process resource ceilings: CPU {request.cpu_limit_seconds}s, "
+        f"address space {request.memory_limit_bytes} bytes, "
+        f"file size {request.file_size_limit_bytes} bytes, "
+        f"open files {MAX_OPEN_FILES}, core dumps disabled (not aggregate quotas)"
+    )
+    result = _run_scoped_popen(
+        exec_argv,
+        aggregate_resource_scope=request.aggregate_resource_scope,
+        memory_max_bytes=request.memory_limit_bytes,
+        max_tasks=request.max_tasks,
         cwd=cwd,
         env=env,
         timeout_ms=request.timeout_ms,
@@ -900,6 +1270,7 @@ __all__ = [
     "DEFAULT_MAX_OUTPUT_BYTES",
     "DEFAULT_TIMEOUT_MS",
     "MAX_OUTPUT_BYTES",
+    "MAX_TASKS",
     "MAX_TIMEOUT_MS",
     "SECCOMP_MODES",
     "SandboxCapabilities",

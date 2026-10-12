@@ -115,9 +115,13 @@ python3 -m cli skills check --root ../downloaded-bundle  # vet a third-party bun
 
 `skill_audit` is deterministic and offline: instruction override, concealment,
 policy self-edit, `curl … | bash`, credential paths, metadata endpoints, invisible
-unicode, and context bloat. Commit `skills.lock`; `doctor` warns when it disagrees
-with the tree. A run cannot rewrite it — `.northstar` is write-protected for the
-agent, so the review record stays outside the reach of what it gates.
+unicode, and context bloat. Runnable files under each skill's `scripts/` directory
+are statically scanned and individually pinned too; changing one makes
+`--require-skill-lock` refuse before the provider runs. Script symlinks are rejected
+so the reviewed bytes stay the executed bytes. Commit `skills.lock`; `doctor` warns
+when it disagrees with the tree. A run cannot rewrite it — `.northstar` is
+write-protected for the agent, so the review record stays outside the reach of what
+it gates.
 
 ## 9. Resume and fork at a turn boundary
 

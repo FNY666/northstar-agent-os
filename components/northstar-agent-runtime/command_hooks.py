@@ -28,6 +28,9 @@ fail-closed version of the idea:
   repository must not mean executing it.
 - **Fail closed.** A timeout, a non-zero exit with no verdict, or unparseable
   output on a veto event is a denial, not a shrug.
+- **Snapshot mode is explicit.** On Linux, ``execution = "snapshot"`` runs the
+  registration-time bytes from a sealed anonymous file. The default ``path`` mode
+  retains the original interpreter/file behavior and its same-user replacement race.
 
 The hook protocol is a JSON request on stdin (``HookInput.as_dict()``) and an
 optional JSON verdict on stdout, coerced by :func:`hooks.coerce_result` - the same
@@ -41,6 +44,7 @@ import json
 import os
 import selectors
 import signal
+import stat
 import subprocess
 import sys
 import time
@@ -57,12 +61,13 @@ ALLOWED_INTERPRETERS: tuple[str, ...] = ("python3", "python", "node", "sh", "bas
 
 #: Keys one ``[[hooks]]`` entry may carry. ``command``/``args``/``env``/``shell``
 #: are absent on purpose; an unknown key is an error, never an ignore.
-_ALLOWED_KEYS = frozenset({"event", "script", "interpreter", "tool", "agent", "timeout_ms", "description"})
+_ALLOWED_KEYS = frozenset({"event", "script", "interpreter", "tool", "agent", "timeout_ms", "description", "execution"})
 
 MIN_TIMEOUT_MS = 100
 MAX_TIMEOUT_MS = 10_000
 DEFAULT_TIMEOUT_MS = 2_000
 MAX_HOOKS = 16
+MAX_HOOK_SCRIPT_BYTES = 1_048_576
 MAX_STDOUT_BYTES = 64_000
 MAX_STDERR_BYTES = 8_000
 KILL_GRACE_SECONDS = 1.0
@@ -87,6 +92,8 @@ class CommandHook:
     timeout_ms: int = DEFAULT_TIMEOUT_MS
     description: str = ""
     script_digest: str = ""
+    execution_mode: str = "path"
+    script_bytes: bytes = field(default=b"", repr=False)
 
     def as_dict(self) -> dict[str, Any]:
         """Display form only: the resolved absolute script path is never printed."""
@@ -98,11 +105,98 @@ class CommandHook:
             "tool": self.tool,
             "agent": self.agent,
             "timeout_ms": self.timeout_ms,
+            "execution_mode": self.execution_mode,
         }
 
 
 def _fail(message: str) -> "CommandHookError":
     return CommandHookError(message)
+
+
+def _read_hook_script(path: Path) -> bytes:
+    """Read a regular, non-symlink hook script without an unbounded allocation."""
+    flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_CLOEXEC", 0)
+    fd = os.open(path, flags)
+    try:
+        metadata = os.fstat(fd)
+        if not stat.S_ISREG(metadata.st_mode):
+            raise OSError("hook script is not a regular file")
+        if metadata.st_size > MAX_HOOK_SCRIPT_BYTES:
+            raise OSError(f"hook script exceeds the {MAX_HOOK_SCRIPT_BYTES}-byte limit")
+        chunks: list[bytes] = []
+        total = 0
+        while total <= MAX_HOOK_SCRIPT_BYTES:
+            chunk = os.read(fd, min(64 * 1024, MAX_HOOK_SCRIPT_BYTES + 1 - total))
+            if not chunk:
+                break
+            total += len(chunk)
+            if total > MAX_HOOK_SCRIPT_BYTES:
+                raise OSError(f"hook script grew beyond the {MAX_HOOK_SCRIPT_BYTES}-byte limit while reading")
+            chunks.append(chunk)
+        return b"".join(chunks)
+    finally:
+        os.close(fd)
+
+
+def _sealed_script_fd(source: bytes) -> int:
+    """Put reviewed bytes in a Linux anonymous file sealed against later writes."""
+    if not sys.platform.startswith("linux") or not Path("/proc/self/fd").is_dir():
+        raise OSError("sealed hook snapshots require Linux procfs")
+    import ctypes
+    import fcntl
+
+    create = getattr(os, "memfd_create", None)
+    if create is None:
+        libc = ctypes.CDLL(None, use_errno=True)
+        create = getattr(libc, "memfd_create", None)
+        if create is None:
+            raise OSError("memfd_create is unavailable")
+        create.argtypes = [ctypes.c_char_p, ctypes.c_uint]
+        create.restype = ctypes.c_int
+        fd = int(create(b"northstar-hook", 0x0002))  # MFD_ALLOW_SEALING
+        if fd < 0:
+            error = ctypes.get_errno()
+            raise OSError(error, os.strerror(error))
+    else:
+        fd = int(create("northstar-hook", flags=0x0002))
+    try:
+        offset = 0
+        while offset < len(source):
+            offset += os.write(fd, source[offset:])
+        os.fchmod(fd, 0o500)
+        # Linux fcntl ABI values from <linux/fcntl.h>. Sealing fails closed if
+        # the kernel or backing filesystem cannot provide immutable contents.
+        fcntl.fcntl(fd, 1033, 0x0001 | 0x0002 | 0x0004 | 0x0008)
+        return fd
+    except Exception:
+        os.close(fd)
+        raise
+
+
+def _snapshot_argv(hook: CommandHook, fd: int) -> list[str]:
+    """Launch a sealed script while preserving interpreter-facing path metadata."""
+    proc_path = f"/proc/self/fd/{fd}"
+    logical_path = str(hook.script)
+    interpreter = hook.interpreter
+    if interpreter in {"python", "python3"}:
+        bootstrap = (
+            "import os,sys; logical,source_path=sys.argv[1:3]; "
+            "sys.argv=[logical]; sys.path.insert(0,os.path.dirname(logical)); "
+            "code=compile(open(source_path,'rb').read(),logical,'exec'); "
+            "exec(code,{'__name__':'__main__','__file__':logical,'__package__':None,'__builtins__':__builtins__})"
+        )
+        return [interpreter, "-c", bootstrap, logical_path, proc_path]
+    if interpreter == "node":
+        bootstrap = (
+            "const fs=require('fs'),M=require('module'),p=require('path');"
+            "const f=process.argv[1],s=process.argv[2];process.argv=process.argv.slice(0,2);"
+            "const m=new M(f,module);m.filename=f;m.paths=M._nodeModulePaths(p.dirname(f));"
+            "m._compile(fs.readFileSync(s,'utf8'),f);"
+        )
+        return [interpreter, "-e", bootstrap, logical_path, proc_path]
+    if interpreter in {"sh", "bash"}:
+        return [interpreter, "-c", 'p=$1; shift; . "$p"', logical_path, proc_path]
+    raise OSError("sealed snapshots require an explicit python, node, sh, or bash interpreter")
 
 
 def _script_path(workspace: Path, raw: Any, *, index: int) -> Path:
@@ -155,7 +249,10 @@ def parse_hooks(
         if not isinstance(event, str) or event not in VETO_EVENTS:
             raise _fail(f"hooks[{index}]: 'event' must be one of {', '.join(VETO_EVENTS)} (only veto-capable events may be declared by a repository file)")
         script = _script_path(root, entry.get("script"), index=index)
-        script_bytes = script.read_bytes()
+        try:
+            script_bytes = _read_hook_script(script)
+        except OSError as error:
+            raise _fail(f"hooks[{index}]: script cannot be safely read ({error})") from error
         relative_script = script.relative_to(Path(workspace).resolve()).as_posix()
         expected_digest = (reviewed_digests or {}).get(relative_script)
         plugin_owned = relative_script.startswith(".northstar/plugins/")
@@ -176,6 +273,14 @@ def parse_hooks(
             interpreter = interpreter.strip()
         else:
             interpreter = None
+        execution_mode = entry.get("execution", "path")
+        if not isinstance(execution_mode, str) or execution_mode not in {"path", "snapshot"}:
+            raise _fail(f"hooks[{index}]: 'execution' must be 'path' or 'snapshot'")
+        if execution_mode == "snapshot":
+            if interpreter not in {"python", "python3", "node", "sh", "bash"}:
+                raise _fail(f"hooks[{index}]: snapshot execution requires an explicit supported interpreter")
+            if not sys.platform.startswith("linux") or not Path("/proc/self/fd").is_dir():
+                raise _fail(f"hooks[{index}]: snapshot execution requires Linux procfs and sealed memfd support")
         tool = entry.get("tool")
         if tool is not None:
             if not isinstance(tool, str) or not tool.strip():
@@ -207,6 +312,8 @@ def parse_hooks(
                 timeout_ms=int(timeout_ms),
                 description=description.strip()[:600],
                 script_digest=hashlib.sha256(script_bytes).hexdigest(),
+                execution_mode=execution_mode,
+                script_bytes=script_bytes if execution_mode == "snapshot" else b"",
             )
         )
     return tuple(hooks)
@@ -227,32 +334,39 @@ def build_callback(
 ) -> Callable[[HookInput], Any]:
     """Return the in-process hook that runs a digest-checked script.
 
-    The reviewed bytes are captured at registration. Before each dispatch the script path
-    is re-read and checked against that digest; a changed file is vetoed before reaching
-    the runner. Execution uses the original path/interpreter semantics for compatibility.
-    A hostile same-user writer could still race the final digest read against the OS open in
-    the subprocess; deployments requiring that stronger property should run hooks from an
-    immutable snapshot or an OS-enforced read-only tree.
+    Path mode re-reads and verifies the original path before dispatch, retaining legacy
+    semantics with a residual same-user replacement race. Snapshot mode launches the
+    registration-time bytes from a sealed Linux memfd and keeps the logical script path
+    metadata for the supported interpreters.
     """
     root = Path(os.path.realpath(str(workspace)))
 
     def callback(hook_input: HookInput) -> HookResult:
         payload = hook_input.as_dict()
-        try:
-            current = hook.script.read_bytes()
-        except OSError as error:
-            return HookResult.deny(f"{hook.name} script is no longer readable: {error}")
-        if hashlib.sha256(current).hexdigest() != hook.script_digest:
-            return HookResult.deny(f"{hook.name} script changed since registration; refusing dispatch")
-        # Preserve the original path/interpreter semantics after verifying current bytes.
-        # Residual: a same-user adversary can still race this check against the OS open in Popen.
-        argv = ([hook.interpreter] if hook.interpreter else []) + [str(hook.script)]
+        snapshot_fd: int | None = None
+        if hook.execution_mode == "snapshot":
+            try:
+                snapshot_fd = _sealed_script_fd(hook.script_bytes)
+                argv = _snapshot_argv(hook, snapshot_fd)
+            except (OSError, ValueError) as error:
+                if snapshot_fd is not None:
+                    os.close(snapshot_fd)
+                return HookResult.deny(f"{hook.name} could not create a sealed script snapshot: {error}")
+        else:
+            try:
+                current = _read_hook_script(hook.script)
+            except OSError as error:
+                return HookResult.deny(f"{hook.name} script is no longer readable: {error}")
+            if hashlib.sha256(current).hexdigest() != hook.script_digest:
+                return HookResult.deny(f"{hook.name} script changed since registration; refusing dispatch")
+            argv = ([hook.interpreter] if hook.interpreter else []) + [str(hook.script)]
         try:
             completed = (runner or _run_bounded)(
                 argv,
                 cwd=str(root),
                 input_text=json.dumps(payload, ensure_ascii=False, sort_keys=True),
                 timeout_s=hook.timeout_ms / 1000,
+                **({"pass_fds": (snapshot_fd,)} if snapshot_fd is not None else {}),
             )
         except subprocess.TimeoutExpired:
             # A hook that will not answer is a veto, not a green light.
@@ -261,6 +375,9 @@ def build_callback(
             )
         except OSError as error:
             raise _fail(f"{hook.name} could not be executed: {error}") from error
+        finally:
+            if snapshot_fd is not None:
+                os.close(snapshot_fd)
         stdout = (completed.stdout or "")[:MAX_STDOUT_BYTES]
         stderr = (completed.stderr or "")[:MAX_STDERR_BYTES]
         code = int(getattr(completed, "returncode", 0) or 0)
@@ -286,6 +403,7 @@ def _run_bounded(
     cwd: str,
     input_text: str,
     timeout_s: float,
+    pass_fds: Sequence[int] = (),
 ) -> subprocess.CompletedProcess:
     """Run ``argv`` with a scrubbed environment, capped output, and group cleanup.
 
@@ -308,9 +426,10 @@ def _run_bounded(
     selector = selectors.DefaultSelector()
     process = None
     try:
+        popen_kwargs = {"pass_fds": tuple(pass_fds)} if pass_fds else {}
         process = subprocess.Popen(  # noqa: S603 - argv is validated, no shell
             argv, cwd=cwd, env=env, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE, start_new_session=True,
+            stderr=subprocess.PIPE, start_new_session=True, **popen_kwargs,
         )
         for name, stream in (("stdout", process.stdout), ("stderr", process.stderr)):
             os.set_blocking(stream.fileno(), False)

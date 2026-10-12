@@ -61,6 +61,7 @@ from skill_audit import summarise as summarise_audits
 from skill_audit import threshold_met as skill_threshold_met
 
 LOCK_SCHEMA_VERSION = "northstar.plugins-lock.v1"
+MAX_INSTALLED_PLUGIN_ENTRIES = 256
 
 #: The lockfile's whole shape. `schema_version` plus a map keyed by plugin name; entries
 #: carry the digest and enough identity to answer "who shipped this, and which version did
@@ -272,9 +273,50 @@ def load_installed(
     entries = read_lock(workspace)
     problems: list[str] = []
     found: list[InstalledPlugin] = []
+    workspace_root = Path(workspace).resolve()
+    try:
+        resolved_root = root.resolve(strict=False)
+        if not resolved_root.is_relative_to(workspace_root):
+            problems.append(f"{root}: plugin root resolves outside the workspace; refusing to scan it")
+            return found, problems
+    except OSError as error:
+        problems.append(f"{root}: cannot resolve plugin root ({error})")
+        return found, problems
+    if root.is_symlink():
+        problems.append(f"{root}: plugin root is a symlink; refusing to scan outside the workspace")
+        return found, problems
     if not root.is_dir():
         return found, problems
-    for candidate in sorted(root.iterdir()):
+    try:
+        candidates: list[Path] = []
+        with os.scandir(root) as scan:
+            for entry in scan:
+                candidates.append(Path(entry.path))
+                if len(candidates) > MAX_INSTALLED_PLUGIN_ENTRIES:
+                    problems.append(
+                        f"{root}: exceeds the {MAX_INSTALLED_PLUGIN_ENTRIES}-entry plugin scan limit; refusing partial scan"
+                    )
+                    return found, problems
+    except OSError as error:
+        problems.append(f"{root}: cannot scan installed plugins ({error})")
+        return found, problems
+    for candidate in sorted(candidates):
+        if candidate.is_symlink():
+            detail = "plugin directory is a symlink; refusing to follow it"
+            problems.append(f"{candidate.name}: {detail}")
+            found.append(
+                InstalledPlugin(
+                    name=candidate.name,
+                    root=candidate,
+                    manifest=None,  # type: ignore[arg-type]
+                    bundle=None,  # type: ignore[arg-type]
+                    pinned_digest=str((entries.get(candidate.name) or {}).get("content_digest") or ""),
+                    status="invalid",
+                    detail=detail,
+                    loadable=False,
+                )
+            )
+            continue
         if not candidate.is_dir():
             continue  # a stray file in the plugins directory is not a plugin
         if not (candidate / MANIFEST_NAME).is_file():

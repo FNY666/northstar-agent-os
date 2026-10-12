@@ -22,7 +22,7 @@
 import { spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { createNdjsonSplitter, exitCodeFor, isResult, parseEventLine } from "./events.ts";
-import type { Denial, ResultEvent, RunEvent, Usage } from "./events.ts";
+import type { Denial, ResultEvent, RunEvent, SubagentReport, ToolCallReport, Usage } from "./events.ts";
 import { ConfigurationError, toArgv } from "./options.ts";
 import type { RunOptions } from "./options.ts";
 
@@ -49,6 +49,10 @@ export type RunReport = {
   pricingEstimated: boolean;
   errors: string[];
   permissionDenials: Denial[];
+  /** call_id-bound execution outcomes from the runtime, distinct from proposed tool calls. */
+  toolCallReports: ToolCallReport[];
+  /** Recursive delegated-run summaries with per-call execution outcomes. */
+  subagents: SubagentReport[];
   /** Tool calls counted from `tool_use` blocks in the assistant events of this stream. */
   toolCalls: number;
   /** The exit code the CLI would have used, derived from `subtype`. */
@@ -298,6 +302,8 @@ export async function run(options: RunOptions, runner: Runner = {}): Promise<Run
     pricingEstimated: result.pricing_estimated,
     errors: result.errors,
     permissionDenials: result.permission_denials,
+    toolCallReports: result.tool_call_reports,
+    subagents: result.subagents,
     toolCalls: countToolCalls(events),
     exitCode: exitCodeFor(result.subtype),
     processExitCode,

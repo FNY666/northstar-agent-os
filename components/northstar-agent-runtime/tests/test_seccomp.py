@@ -54,6 +54,8 @@ def interpret(prog: bytes, arch: int, nr: int) -> int:
         elif cls == 0x05:  # JMP
             if code == 0x15:  # JEQ|K
                 pc += (jt + 1) if acc == k else (jf + 1)
+            elif code == 0x35:  # JGE|K
+                pc += (jt + 1) if acc >= k else (jf + 1)
             elif code == 0x05:  # JA
                 pc += k + 1
             else:
@@ -72,10 +74,10 @@ class FilterAssemblyTests(unittest.TestCase):
         prog = build_default_filter()
         self.assertTrue(len(prog) > 0)
         self.assertEqual(len(prog) % 8, 0)
-        # 9 fixed (3 arch-dispatch + 2x(ld+ja) + ALLOW + DENY) + N + M jeq.
+        # 10 fixed (3 arch-dispatch + x86 ld/guard/ja + arm ld/ja + ALLOW/DENY) + N + M jeq.
         n = len(denied_syscalls("x86_64"))
         m = len(denied_syscalls("aarch64"))
-        self.assertEqual(len(prog) // 8, 9 + n + m)
+        self.assertEqual(len(prog) // 8, 10 + n + m)
 
     def test_denylist_tables_are_nonempty_and_sane(self):
         for arch in ("x86_64", "aarch64"):
@@ -86,6 +88,8 @@ class FilterAssemblyTests(unittest.TestCase):
                 self.assertGreater(nr, 0)
         self.assertIn("ptrace", denied_syscalls("x86_64"))
         self.assertIn("bpf", denied_syscalls("aarch64"))
+        self.assertIn("setpgid", denied_syscalls("x86_64"))
+        self.assertIn("setsid", denied_syscalls("aarch64"))
 
     def test_unknown_arch_raises(self):
         with self.assertRaises(SeccompError):
@@ -121,9 +125,14 @@ class FilterSemanticsTests(unittest.TestCase):
         # aarch64's ptrace number (117) is not x86_64 ptrace — must stay allowed.
         self.assertEqual(interpret(self.prog, _X86_64, 117), _ALLOW)
 
-    def test_unknown_arch_falls_through_to_allow(self):
-        # Documented: better to allow than to apply the wrong table.
-        self.assertEqual(interpret(self.prog, 0xDEADBEEF, 101), _ALLOW)
+    def test_unknown_arch_fails_closed(self):
+        self.assertEqual(interpret(self.prog, 0xDEADBEEF, 101), _ERRNO_EPERM)
+
+    def test_x32_syscall_numbers_fail_closed(self):
+        # x32 carries its ABI bit in the syscall number while using x86_64 arch.
+        for nr in (0x40000000 | 41, 0x40000000 | 53, 0x40000000 | 425):
+            with self.subTest(nr=nr):
+                self.assertEqual(interpret(self.prog, _X86_64, nr), _ERRNO_EPERM)
 
 
 class ModeResolutionTests(unittest.TestCase):

@@ -12,7 +12,7 @@
  */
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { mkdtempSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
@@ -141,6 +141,8 @@ test("a real --json run's payload keys are exactly the keys this SDK reads", { s
       "is_error",
       "num_turns",
       "permission_denials",
+      "tool_call_reports",
+      "subagents",
       "pricing_estimated",
       "session_id",
       "subtype",
@@ -167,6 +169,42 @@ test("a real --json run's payload keys are exactly the keys this SDK reads", { s
   assert.equal(parsed.exitCode, undefined, "an exit code is a terminal convention, not a wire field");
   for (const line of lines) {
     assert.equal(parseEventLine(line).type, (JSON.parse(line) as { type: string }).type);
+  }
+});
+
+test("real dataflow permission evidence survives CLI JSON and TypeScript normalization", { skip }, () => {
+  const dir = mkdtempSync(join(tmpdir(), "northstar-dataflow-parity-"));
+  const policyPath = join(dir, "dataflow.toml");
+  const scriptPath = join(dir, "script.json");
+  writeFileSync(join(dir, "secret.txt"), "classified", "utf8");
+  writeFileSync(policyPath, `[policy]\nversion = 1\ntrust_chain = ["public", "confidential"]\n\n[[policy.source]]\ntool = "Read"\nmatch_args = { path = "secret.txt" }\ndelta = { trust = "confidential" }\n\n[[policy.sink]]\ntool = "Write"\nrequires = { trust = "public" }\n`, "utf8");
+  writeFileSync(scriptPath, JSON.stringify([
+    { tools: [{ name: "Read", input: { path: "secret.txt" } }] },
+    { tools: [{ name: "Write", input: { path: "out.txt", content: "classified" } }] },
+    { text: "done" },
+  ]), "utf8");
+  try {
+    const run = cliRun([
+      "--prompt", "read then write", "--provider", "scripted", "--model", "scripted",
+      "--workspace", dir, "--dataflow-policy", policyPath, "--allow-tool", "Write",
+      "--script", scriptPath, "--no-project-context", "--no-skills", "--no-plugins",
+      "--no-session-lease", "--json",
+    ]);
+    const parsed = run.stdout.split("\n").filter((line) => line.trim() !== "").map(parseEventLine);
+
+    assert.equal(run.code, 0, run.stderr);
+    assert.equal(existsSync(join(dir, "out.txt")), false, "the dataflow sink must be denied before its handler runs");
+    const result = parsed.at(-1);
+    assert.ok(result?.type === "result");
+    if (!result || result.type !== "result") assert.fail("missing result event");
+    const read = result.tool_call_reports.find((row) => row.name === "Read");
+    const write = result.tool_call_reports.find((row) => row.name === "Write");
+    assert.equal(read?.permission_details?.dataflow?.trust, "confidential");
+    assert.equal(read?.permission_details?.dataflow?.source_rule, "Read");
+    assert.equal(write?.permission_details?.dataflow?.sink_escalated, true);
+    assert.equal(JSON.stringify(read?.permission_details).includes("secret.txt"), false);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
   }
 });
 

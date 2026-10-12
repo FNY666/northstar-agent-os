@@ -46,6 +46,59 @@ export type Denial = {
   kind: string;
 };
 
+/** Runtime's call_id-bound execution outcome; never includes raw tool arguments. */
+export type DataflowPermissionDetails = {
+  trust: string;
+  audience_labeled: boolean;
+  audience_unknown: boolean;
+  audience_count: number;
+  source_rule?: string;
+  sink_escalated?: boolean;
+};
+
+export type PermissionDetails = {
+  dataflow?: DataflowPermissionDetails;
+};
+
+export type ToolCallReport = {
+  name: string;
+  call_id: string;
+  is_error: boolean;
+  denied: boolean;
+  permission_source: string;
+  duration_ms: number;
+  result_chars: number;
+  truncated: boolean;
+  input_rewritten: boolean;
+  result_source: string;
+  result_trust: string;
+  result_detail: string;
+  execution_status: string;
+  execution_gate: string;
+  governance_input_digest: string;
+  governance_seal_error?: string;
+  permission_details?: PermissionDetails;
+  turn_index: number;
+  agent: string;
+};
+
+/** A delegated run summary; execution details recurse without embedding transcripts. */
+export type SubagentReport = {
+  agent: string;
+  subtype: string;
+  turns: number;
+  tool_calls: number;
+  cost_usd: number;
+  usage: Usage;
+  verdict: Record<string, unknown> | null;
+  denials: Denial[];
+  final_text_chars: number;
+  permission_gate: Record<string, unknown> | null;
+  depth: number;
+  tool_call_reports: ToolCallReport[];
+  subagents: SubagentReport[];
+};
+
 /** The one event every run ends with (and the only one a caller may summarize a run from). */
 export type ResultEvent = {
   type: "result";
@@ -59,6 +112,8 @@ export type ResultEvent = {
   pricing_estimated: boolean;
   errors: string[];
   permission_denials: Denial[];
+  tool_call_reports: ToolCallReport[];
+  subagents: SubagentReport[];
 };
 
 /** `system` / `init` carries the resolved configuration under `data`; see `initLimits`. */
@@ -154,6 +209,70 @@ function denialOf(value: unknown): Denial {
   };
 }
 
+function toolCallReportOf(value: unknown): ToolCallReport {
+  const row = value && typeof value === "object" ? (value as Record<string, unknown>) : {};
+  const permissionDetails = permissionDetailsOf(row.permission_details);
+  return {
+    name: typeof row.name === "string" ? row.name : "",
+    call_id: typeof row.call_id === "string" ? row.call_id : "",
+    is_error: row.is_error === true,
+    denied: row.denied === true,
+    permission_source: typeof row.permission_source === "string" ? row.permission_source : "",
+    duration_ms: typeof row.duration_ms === "number" ? row.duration_ms : 0,
+    result_chars: typeof row.result_chars === "number" ? row.result_chars : 0,
+    truncated: row.truncated === true,
+    input_rewritten: row.input_rewritten === true,
+    result_source: typeof row.result_source === "string" ? row.result_source : "",
+    result_trust: typeof row.result_trust === "string" ? row.result_trust : "",
+    result_detail: typeof row.result_detail === "string" ? row.result_detail : "",
+    execution_status: typeof row.execution_status === "string" ? row.execution_status : "not_started",
+    execution_gate: typeof row.execution_gate === "string" ? row.execution_gate : "",
+    governance_input_digest: typeof row.governance_input_digest === "string" ? row.governance_input_digest : "",
+    ...(typeof row.governance_seal_error === "string" ? { governance_seal_error: row.governance_seal_error } : {}),
+    ...(permissionDetails ? { permission_details: permissionDetails } : {}),
+    turn_index: typeof row.turn_index === "number" ? row.turn_index : 0,
+    agent: typeof row.agent === "string" ? row.agent : "main",
+  };
+}
+
+function permissionDetailsOf(value: unknown): PermissionDetails | undefined {
+  const outer = objectOrNull(value);
+  const raw = outer ? objectOrNull(outer.dataflow) : null;
+  if (!raw) return undefined;
+  const dataflow: DataflowPermissionDetails = {
+    trust: typeof raw.trust === "string" ? raw.trust : "",
+    audience_labeled: raw.audience_labeled === true,
+    audience_unknown: raw.audience_unknown === true,
+    audience_count: typeof raw.audience_count === "number" ? raw.audience_count : 0,
+    ...(typeof raw.source_rule === "string" ? { source_rule: raw.source_rule } : {}),
+    ...(typeof raw.sink_escalated === "boolean" ? { sink_escalated: raw.sink_escalated } : {}),
+  };
+  return { dataflow };
+}
+
+function objectOrNull(value: unknown): Record<string, unknown> | null {
+  return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : null;
+}
+
+function subagentReportOf(value: unknown): SubagentReport {
+  const row = value && typeof value === "object" ? (value as Record<string, unknown>) : {};
+  return {
+    agent: typeof row.agent === "string" ? row.agent : "",
+    subtype: typeof row.subtype === "string" ? row.subtype : "error_during_execution",
+    turns: typeof row.turns === "number" ? row.turns : 0,
+    tool_calls: typeof row.tool_calls === "number" ? row.tool_calls : 0,
+    cost_usd: typeof row.cost_usd === "number" ? row.cost_usd : 0,
+    usage: usageOf(row.usage),
+    verdict: objectOrNull(row.verdict),
+    denials: Array.isArray(row.denials) ? row.denials.map(denialOf) : [],
+    final_text_chars: typeof row.final_text_chars === "number" ? row.final_text_chars : 0,
+    permission_gate: objectOrNull(row.permission_gate),
+    depth: typeof row.depth === "number" ? row.depth : 1,
+    tool_call_reports: Array.isArray(row.tool_call_reports) ? row.tool_call_reports.map(toolCallReportOf) : [],
+    subagents: Array.isArray(row.subagents) ? row.subagents.map(subagentReportOf) : [],
+  };
+}
+
 function blocksOf(value: unknown): ContentBlock[] {
   if (!Array.isArray(value)) return [];
   return value.filter((block): block is ContentBlock => !!block && typeof block === "object" && typeof (block as ContentBlock).type === "string");
@@ -199,6 +318,8 @@ export function parseEventLine(line: string): RunEvent {
         pricing_estimated: payload.pricing_estimated === true,
         errors: Array.isArray(payload.errors) ? payload.errors.map(String) : [],
         permission_denials: Array.isArray(payload.permission_denials) ? payload.permission_denials.map(denialOf) : [],
+        tool_call_reports: Array.isArray(payload.tool_call_reports) ? payload.tool_call_reports.map(toolCallReportOf) : [],
+        subagents: Array.isArray(payload.subagents) ? payload.subagents.map(subagentReportOf) : [],
       };
     case "system":
       return {

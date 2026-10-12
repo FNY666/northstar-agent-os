@@ -142,7 +142,7 @@ class ScaffoldTests(unittest.TestCase):
 
     def test_scaffolded_project_passes_doctor(self):
         self.scaffold()
-        code, out, _ = run_cli("doctor", "--workspace", str(self.project))
+        code, out, _ = run_cli("doctor", "--workspace", str(self.project), "--mcp-network", "allowed")
         self.assertEqual(code, 0)
         self.assertIn("ready to run", out)
 

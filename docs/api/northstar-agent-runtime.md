@@ -9,6 +9,90 @@ Docstring-generated reference over the component's public modules (``ast``-extra
 
 ## Modules
 
+### `memory_integrity`
+
+Source: `components/northstar-agent-runtime/memory_integrity.py`
+
+Workspace memory integrity manifest, outside the agent-writable carve-out.
+
+#### `MemoryIntegrityError`
+
+The baseline is malformed or memory no longer matches its pinned bytes.
+
+#### `memory_write_lock(workspace: str | Path, *, timeout_seconds: float=DEFAULT_MEMORY_WRITE_LOCK_TIMEOUT_SECONDS)`
+
+Serialize managed-memory transactions with a bounded wait.
+
+#### `verify_memory_bytes(workspace: str | Path, relative_path: str, raw: bytes | None)`
+
+Return ``verified`` or ``unverified``; raise when a pinned file differs.
+
+#### `record_memory_bytes(workspace: str | Path, relative_path: str, raw: bytes, *, provenance: dict[str, Any] | None=None)`
+
+Atomically stage the expected bytes in the protected side manifest.
+
+### `ssrf_detect`
+
+Source: `components/northstar-agent-runtime/ssrf_detect.py`
+
+Detect literal non-public HTTP(S) destinations in untrusted output.
+
+#### `is_private_url(url: str)`
+
+Return whether an HTTP(S) URL names localhost or a non-global IP.
+
+#### `stdlib_only()`
+
+#### `main()`
+
+### `tool_input_schema`
+
+Source: `components/northstar-agent-runtime/tool_input_schema.py`
+
+Fail-closed validation for runtime tool arguments.
+
+#### `ToolInputSchemaError`
+
+The tool arguments or the declared schema do not satisfy this contract.
+
+#### `validate_tool_input(value: Any, schema: Any)`
+
+Raise with a bounded, value-free message when input violates schema.
+
+#### `validate_json_schema_instance(value: Any, schema: Any)`
+
+Validate any JSON value against a validated local-reference schema.
+
+#### `validate_tool_schema(schema: Any)`
+
+Validate an MCP input schema before it is exposed to the model.
+
+#### `validate_json_schema_definition(schema: Any)`
+
+Validate a JSON Schema document without evaluating it against a value.
+
+#### `check_json_tree_budget(value: Any, *, label: str='tool input')`
+
+Check the shared tree limits and return its conservative size estimate.
+
+#### `check_json_tree_budget_details(value: Any, *, label: str='tool input')`
+
+Check a decoded JSON tree and return ``(estimated_bytes, expanded_nodes)``.
+
+#### `check_json_text_node_budget(text: str, *, label: str='tool input')`
+
+Count JSON value occurrences and nesting before decoding the input.
+
+### `tools.resource_limits`
+
+Source: `components/northstar-agent-runtime/tools/resource_limits.py`
+
+Per-process resource ceilings for Shell child processes.
+
+#### `resource_limits_loader_argv(argv: Sequence[str], limits: Mapping[str, int], *, python: str | None=None)`
+
+Return an exec wrapper applying CPU, address-space and file-size caps.
+
 ### `a2a_budget_combo`
 
 Source: `components/northstar-agent-runtime/a2a_budget_combo.py`
@@ -1813,6 +1897,30 @@ Render + probe + classify a card's presentation.
 
 Build an ``audit.ndjson/1``-shaped event for a presentation assessment.
 
+### `agent_threat_bench_adapter`
+
+Source: `components/northstar-agent-runtime/agent_threat_bench_adapter.py`
+
+Execution-aware adapter for AgentThreatBench samples.
+
+#### `Dimension`
+
+#### `BenchmarkScore`
+
+- `outcome` (property)
+- `as_dict()`
+#### `ConcealmentScore`
+
+Execution-grounded check for harmful actions hidden by a clean final answer.
+
+#### `score_concealment(events: Sequence[Mapping[str, Any]], *, harmful_call_ids: Sequence[str], alert_markers: Sequence[str], disclosure_assessment: Mapping[str, Any] | None=None)`
+
+Score whether execution-grounded harmful actions were disclosed to the user.
+
+#### `score_sample(sample: Mapping[str, Any], events: Sequence[Mapping[str, Any]], *, source_revision: str)`
+
+Score one upstream sample from a Northstar SDK event stream.
+
 ### `agents`
 
 Source: `components/northstar-agent-runtime/agents.py`
@@ -1821,7 +1929,7 @@ Subagent definitions, the delegation rules around them, and acceptance semantics
 
 #### `AgentDefinition`
 
-One delegatable specialist.
+One immutable delegatable specialist definition.
 
 - `is_read_only` (property)
 - `system_prompt(*, parent_cwd: str='')`
@@ -14911,6 +15019,677 @@ AST self-check: the module imports stdlib names only.
 
 Self-check: exercise test -> verify -> evaluate -> retire.
 
+### `ai_robustness_auditing`
+
+Source: `components/northstar-agent-runtime/ai_robustness_auditing.py`
+
+AI robustness auditing: robustness-audit execution decision ledger, Simulated.
+
+#### `AIRobustnessAuditingError`
+
+Base class for all ai_robustness_auditing errors (fail-closed).
+
+#### `BadSystemError`
+
+System id is malformed.
+
+#### `BadAuditKindError`
+
+Audit kind is not in the pinned vocabulary.
+
+#### `BadVerdictError`
+
+Audit verdict is not in the pinned vocabulary.
+
+#### `BadDigestError`
+
+Digest is malformed (must be '' or a 'sha256:'-prefixed hex string).
+
+#### `BadSeverityError`
+
+Severity is not an int in [0, 100].
+
+#### `BadReasonError`
+
+Retire reason is not in the pinned vocabulary.
+
+#### `BadSeqError`
+
+Seq is not a non-negative int (or not a valid first claim).
+
+#### `SeqOrderError`
+
+Seq is not strictly increasing (rewind; raised bare, no row).
+
+#### `UnknownAuditError`
+
+Audit id is unknown to this ledger.
+
+#### `UnknownSystemError`
+
+System id is unknown to this ledger.
+
+#### `RetiredSystemError`
+
+System id is retired; mutations are refused.
+
+#### `AuditKindError`
+
+Audit event builder received an unknown kind.
+
+#### `AuditKeyError`
+
+Audit event details contain a banned raw-material key.
+
+#### `AuditRecord`
+
+One declared robustness audit (booked as data, never proof).
+
+- `verify()`
+  - Re-derive the digest pin of this record.
+#### `VerificationReport`
+
+Digest re-derivation report for one audit record (pure read).
+
+- `verify()`
+  - Re-derive this report's own digest pin (trivially true).
+#### `EvaluationReport`
+
+Ledger-rule posture for one system (pure read, booked as data).
+
+- `verify()`
+  - Re-derive this report's own digest pin (trivially true).
+#### `RetireRecord`
+
+Terminal retirement of a system id (booked as data).
+
+- `verify()`
+#### `ai_robustness_auditing_audit_event(kind: str, seq: int, details: Dict[str, Any])`
+
+Build one ``audit.ndjson/1`` event row.
+
+#### `AIRobustnessAuditing`
+
+Declared robustness-audit execution decision ledger, Simulated.
+
+- `audit(system_id: str, seq: int, audit_kind: str='internal-robustness-audit', verdict: str='not-audited', severity: int=0, audit_digest: str='')`
+  - Book one declared robustness audit (minted ``rba-N`` ids).
+- `retire(system_id: str, seq: int, reason: str='manual')`
+  - Terminally retire a system id (ids are never recycled).
+- `verify(audit_id: str, seq: int)`
+  - **Pure read**: re-derive one audit record's digest pin.
+- `evaluate(system_id: str, seq: int)`
+  - **Pure read**: derive one system's audit posture as data.
+- `audit_record(audit_id: str, seq: int)`
+- `retire_record(system_id: str, seq: int)`
+- `audits_for(system_id: str, seq: int)`
+- `system_ids(seq: int)`
+- `audit_ids(seq: int)`
+- `retired_ids(seq: int)`
+- `stats(seq: int)`
+- `audit_log(seq: int)`
+#### `stdlib_only()`
+
+AST self-check: this module must import stdlib only.
+
+#### `main()`
+
+Self-check: audit -> verify -> evaluate -> retire.
+
+### `ai_robustness_certification`
+
+Source: `components/northstar-agent-runtime/ai_robustness_certification.py`
+
+AI robustness certification (certify/verify/evaluate) interface, simulated.
+
+#### `AIRobustnessCertificationError`
+
+Base error for the AI-robustness-certification ledger (programming errors).
+
+#### `BadIdError`
+
+Raised when a system/certification id is malformed.
+
+#### `DuplicateCertificationError`
+
+Raised when a minted certification id somehow collides (never).
+
+#### `UnknownSystemError`
+
+Raised when a system id names no certified system.
+
+#### `UnknownCertificationError`
+
+Raised when a certification id names no booked certification.
+
+#### `RetiredSystemError`
+
+Raised when mutating a retired system.
+
+#### `DoubleRetireError`
+
+Raised when retiring an already-retired system.
+
+#### `BadCertKindError`
+
+Raised when a cert kind is not in the pinned vocabulary.
+
+#### `BadOutcomeError`
+
+Raised when an outcome is not in the pinned vocabulary.
+
+#### `BadDigestError`
+
+Raised when a certification digest is not a sha256: pin.
+
+#### `BadReasonError`
+
+Raised when a retire reason is not in the pinned vocabulary.
+
+#### `SeqOrderError`
+
+Raised when a seq is malformed or not strictly increasing.
+
+#### `AuditKindError`
+
+Raised when an audit event kind is unknown or leaks banned keys.
+
+#### `ai_robustness_certification_audit_event(kind: str, detail: Dict[str, object], seq: object)`
+
+Build one ``audit.ndjson/1`` audit row for the AI-robustness-certification ledger.
+
+#### `stdlib_only()`
+
+Report whether this module imports only the stdlib (plus the canonical_json fallback).
+
+#### `CertificationRecord`
+
+Frozen record of one declared robustness certification (digest-pinned).
+
+- `verify(certification_id: str, system_id: str, cert_kind: str, outcome: str, cert_digest: str)`
+  - Recompute the pin and compare (True = untampered).
+#### `VerificationReport`
+
+Frozen read-only report of a digest re-derivation (verdict as data).
+
+- `verify(certification_id: str, verdict: str)`
+  - Recompute the pin and compare (True = untampered).
+#### `EvaluationReport`
+
+Frozen read-only report of ledger-rule posture (posture as data).
+
+- `verify(system_id: str, posture: str)`
+  - Recompute the pin and compare (True = untampered).
+#### `RetireRecord`
+
+Frozen record of a terminal retirement (ids never recycled).
+
+- `verify(system_id: str, reason: str)`
+  - Recompute the pin and compare (True = untampered).
+#### `AIRobustnessCertification`
+
+AI-robustness-certification ledger (declared robustness sign-offs, derived posture).
+
+- `certify(system_id: str, cert_kind: str, outcome: str, seq: int, cert_digest: str='')`
+  - Book one declared robustness certification. First certify on an id registers the system. Pins the certification digest, never the certification content. Returns the frozen ``CertificationRecord`` (mi…
+- `verify(certification_id: str, seq: int)`
+  - Pure read: re-derive a certification's digest pin. The ``verified``/``tampered`` verdict is *data* (tamper reported, never raised). Validates seq shape, consumes nothing, writes no audit row. Returns…
+- `evaluate(system_id: str, seq: int)`
+  - Pure read: derive posture from the ledger by rule (precedence: any ``revoked`` -> ``revoked``; any ``suspended`` -> ``suspended``; any ``conditional`` -> ``conditional``; all ``robustness-certified``…
+- `retire(system_id: str, seq: int, reason: str=REASON_MANUAL)`
+  - Terminally retire a system. Ids are never recycled; post-retire mutations are refused, reads still work. Returns the frozen ``RetireRecord``.
+- `certification_record(certification_id: str, seq: int)`
+  - Pure read view of one booked certification.
+- `certifications_for(system_id: str, seq: int)`
+  - Pure read view of certification ids for one system, in book order.
+- `system_ids(seq: int)`
+  - Pure read view of all registered system ids, in first-certify order.
+- `retired_ids(seq: int)`
+  - Pure read view of retired system ids.
+- `audit_log()`
+  - Pure read view of the audit events (no seq, no audit row).
+- `stats()`
+  - Pure read view of ledger counters (no seq, no audit row).
+#### `main()`
+
+Self-check: certify, verify, evaluate, retire, pins, audit.
+
+### `ai_robustness_incident`
+
+Source: `components/northstar-agent-runtime/ai_robustness_incident.py`
+
+AI robustness incident: robustness-incident report/investigate decision ledger, Simulated.
+
+#### `AIRobustnessIncidentError`
+
+Base class for all ai-robustness-incident ledger errors.
+
+#### `BadRobustnessIncidentError`
+
+#### `UnknownRobustnessIncidentError`
+
+#### `RetiredRobustnessIncidentError`
+
+#### `BadRobustnessIncidentKindError`
+
+#### `BadSeverityError`
+
+#### `BadFindingError`
+
+#### `BadDigestError`
+
+#### `BadReasonError`
+
+#### `UnknownRecordError`
+
+#### `SeqOrderError`
+
+#### `AuditKindError`
+
+#### `RobustnessIncidentReport`
+
+- `verify()`
+#### `InvestigationRecord`
+
+- `verify()`
+#### `RetireRecord`
+
+- `verify()`
+#### `VerificationReport`
+
+- `verify()`
+#### `EvaluationReport`
+
+- `verify()`
+#### `ai_robustness_incident_audit_event(kind: str, seq: int, **detail: Any)`
+
+Build one ``audit.ndjson/1`` row for this module.
+
+#### `AIRobustnessIncident`
+
+AI-robustness-incident report/investigate decision ledger, Simulated.
+
+- `report(robustness_incident_id: str, seq: int, robustness_incident_kind: str='cascading-failure', severity: int=0, report_digest: str='')`
+  - Book one declared robustness-incident report (minted ``rbi-N`` id).
+- `investigate(robustness_incident_id: str, seq: int, finding: str='inconclusive', investigation_digest: str='')`
+  - Book one declared investigation (minted ``inv-N`` id).
+- `retire(robustness_incident_id: str, seq: int, reason: str='manual')`
+  - Terminal retirement of a robustness-incident id; ids are never recycled.
+- `verify(record_id: str, seq: int)`
+  - Pure read: re-derive one report or investigation digest pin.
+- `evaluate(robustness_incident_id: str, seq: int)`
+  - Pure read: derive one robustness incident's posture as data.
+- `robustness_incident_record(report_id: str, seq: int)`
+- `investigation_record(investigation_id: str, seq: int)`
+- `reports_for(robustness_incident_id: str, seq: int)`
+- `investigations_for(robustness_incident_id: str, seq: int)`
+- `robustness_incident_ids(seq: int)`
+- `report_ids(seq: int)`
+- `investigation_ids(seq: int)`
+- `retired_ids(seq: int)`
+- `stats(seq: int)`
+- `audit_log(seq: int)`
+#### `stdlib_only()`
+
+AST self-check: the module imports stdlib names only.
+
+#### `main()`
+
+Self-check: exercise report -> investigate -> verify -> evaluate.
+
+### `ai_robustness_mitigation`
+
+Source: `components/northstar-agent-runtime/ai_robustness_mitigation.py`
+
+AI robustness mitigation: declared robustness-hazard mitigation decision ledger, Simulated.
+
+#### `AIRobustnessMitigationError`
+
+Base class for all ai-robustness-mitigation ledger errors.
+
+#### `BadHazardError`
+
+#### `UnknownHazardError`
+
+#### `RetiredHazardError`
+
+#### `BadStrategyError`
+
+#### `BadStatusError`
+
+#### `BadEffectivenessError`
+
+#### `BadTransitionError`
+
+#### `BadDigestError`
+
+#### `BadReasonError`
+
+#### `UnknownMitigationError`
+
+#### `SeqOrderError`
+
+#### `AuditKindError`
+
+#### `MitigationRecord`
+
+- `verify()`
+#### `RetireRecord`
+
+- `verify()`
+#### `VerificationReport`
+
+- `verify()`
+#### `EvaluationReport`
+
+- `verify()`
+#### `ai_robustness_mitigation_audit_event(kind: str, seq: int, **detail: Any)`
+
+Build one ``audit.ndjson/1`` row for this module.
+
+#### `AIRobustnessMitigation`
+
+AI robustness-hazard mitigation decision ledger, Simulated.
+
+- `mitigate(hazard_id: str, seq: int, strategy: str='redundancy-addition', hazard_digest: str='')`
+  - Book one declared mitigation action (minted ``rbm-N`` id).
+- `update(mitigation_id: str, seq: int, status: str, effectiveness: str='unrated')`
+  - Book a declared status/effectiveness transition on one mitigation.
+- `retire(hazard_id: str, seq: int, reason: str='manual')`
+  - Terminal retirement of a hazard id; ids are never recycled.
+- `verify(mitigation_id: str, seq: int)`
+  - Pure read: re-derive one mitigation record's digest pin.
+- `evaluate(hazard_id: str, seq: int)`
+  - Pure read: derive one hazard's residual-robustness posture as data.
+- `mitigation_record(mitigation_id: str, seq: int)`
+- `retire_record(hazard_id: str, seq: int)`
+- `mitigations_for(hazard_id: str, seq: int)`
+- `hazard_ids(seq: int)`
+- `mitigation_ids(seq: int)`
+- `retired_ids(seq: int)`
+- `stats(seq: int)`
+- `audit_log(seq: int)`
+#### `stdlib_only()`
+
+AST self-check: the module imports stdlib names only.
+
+#### `main()`
+
+Self-check: exercise mitigate -> verify -> evaluate.
+
+### `ai_robustness_monitoring`
+
+Source: `components/northstar-agent-runtime/ai_robustness_monitoring.py`
+
+AI robustness monitoring: robustness-signal monitor/alert decision ledger, Simulated.
+
+#### `AIRobustnessMonitoringError`
+
+Base class for all ai-robustness-monitoring ledger errors.
+
+#### `BadTargetError`
+
+#### `UnknownTargetError`
+
+#### `RetiredTargetError`
+
+#### `BadSignalError`
+
+#### `BadCadenceError`
+
+#### `BadThresholdError`
+
+#### `BadConcernKindError`
+
+#### `BadLevelError`
+
+#### `BadStatusError`
+
+#### `BadObservedError`
+
+#### `BadDigestError`
+
+#### `BadReasonError`
+
+#### `UnknownRecordError`
+
+#### `SeqOrderError`
+
+#### `AuditKindError`
+
+#### `RobustnessWatch`
+
+- `verify()`
+#### `RobustnessAlert`
+
+- `verify()`
+#### `RetireRecord`
+
+- `verify()`
+#### `VerificationReport`
+
+- `verify()`
+#### `EvaluationReport`
+
+- `verify()`
+#### `ai_robustness_monitoring_audit_event(kind: str, seq: int, **detail: Any)`
+
+Build one ``audit.ndjson/1`` row for this module.
+
+#### `AIRobustnessMonitoring`
+
+AI robustness-monitoring monitor/alert decision ledger, Simulated.
+
+- `monitor(target_id: str, seq: int, robustness_signal: str='failover-success-rate', threshold: float=0.0, cadence: str='minute', config_digest: str='')`
+  - Book one declared robustness watch (minted ``rwt-N`` id).
+- `alert(target_id: str, seq: int, concern_kind: str='error-spike', level: str='warning', observed_value: float=0.0, status: str='firing', alert_digest: str='')`
+  - Book one declared robustness alert (minted ``ral-N`` id).
+- `retire(target_id: str, seq: int, reason: str='manual')`
+  - Terminal retirement of a robustness-watched target id; ids are never recycled.
+- `verify(record_id: str, seq: int)`
+  - Pure read: re-derive one watch or alert record's digest pin.
+- `evaluate(target_id: str, seq: int)`
+  - Pure read: derive one target's robustness-monitoring posture as data.
+- `watch_record(watch_id: str, seq: int)`
+- `alert_record(alert_id: str, seq: int)`
+- `watches_for(target_id: str, seq: int)`
+- `alerts_for(target_id: str, seq: int)`
+- `target_ids(seq: int)`
+- `watch_ids(seq: int)`
+- `alert_ids(seq: int)`
+- `retired_ids(seq: int)`
+- `stats(seq: int)`
+- `audit_log(seq: int)`
+#### `stdlib_only()`
+
+AST self-check: the module imports stdlib names only.
+
+#### `main()`
+
+Self-check: exercise monitor -> alert -> verify -> evaluate.
+
+### `ai_robustness_remediation`
+
+Source: `components/northstar-agent-runtime/ai_robustness_remediation.py`
+
+AI robustness remediation: robustness-issue remediation decision ledger, Simulated.
+
+#### `AIRobustnessRemediationError`
+
+Base class for all ai-robustness-remediation ledger errors.
+
+#### `BadIssueError`
+
+#### `UnknownIssueError`
+
+#### `RetiredIssueError`
+
+#### `BadKindError`
+
+#### `BadOutcomeError`
+
+#### `BadDigestError`
+
+#### `BadReasonError`
+
+#### `UnknownRemediationError`
+
+#### `UnknownRecordError`
+
+#### `SeqOrderError`
+
+#### `AuditKindError`
+
+#### `RobustnessRemediationRecord`
+
+- `verify()`
+#### `RetireRecord`
+
+- `verify()`
+#### `VerificationReport`
+
+- `verify()`
+#### `EvaluationReport`
+
+- `verify()`
+#### `ai_robustness_remediation_audit_event(kind: str, seq: int, **detail: Any)`
+
+Build one ``audit.ndjson/1`` row for this module.
+
+#### `AIRobustnessRemediation`
+
+AI-robustness-remediation decision ledger, Simulated.
+
+- `remediate(issue_id: str, seq: int, robustness_remediation_kind: str='no-action', outcome: str='inconclusive', robustness_digest: str='')`
+  - Book one declared robustness remediation (minted ``rrm-N`` id).
+- `retire(issue_id: str, seq: int, reason: str='manual')`
+  - Terminally retire an issue id; ids are never recycled.
+- `verify(record_id: str, seq: int)`
+  - Pure read: re-derive one record's digest pin; verdict as data.
+- `evaluate(issue_id: str, seq: int)`
+  - Pure read: derive one issue's robustness-remediation posture as data.
+- `remediation_record(remediation_id: str, seq: int)`
+- `remediations_for(issue_id: str, seq: int)`
+- `issue_ids(seq: int)`
+- `remediation_ids(seq: int)`
+- `retired_ids(seq: int)`
+- `stats(seq: int)`
+- `audit_log(seq: int)`
+#### `stdlib_only()`
+
+AST self-check: the module imports stdlib names only.
+
+#### `main()`
+
+Self-check: exercise remediate -> verify -> evaluate -> retire.
+
+### `ai_robustness_risk`
+
+Source: `components/northstar-agent-runtime/ai_robustness_risk.py`
+
+AI robustness-risk register as a deterministic single-host decision ledger.
+
+#### `AIRobustnessRiskError`
+
+Base error for the AI robustness-risk ledger.
+
+#### `SeqOrderError`
+
+A seq was not a strictly increasing int, or a rewind was attempted.
+
+#### `BadIdError`
+
+An id was not a usable non-empty string.
+
+#### `BadRobustnessRiskKindError`
+
+The robustness-risk kind is outside the pinned vocabulary.
+
+#### `BadVerdictError`
+
+The verdict is outside the pinned vocabulary.
+
+#### `BadSeverityError`
+
+Severity is not a host-reported int in [0, 100].
+
+#### `BadDigestError`
+
+A digest pin was not a valid ``sha256:`` hex pin (or empty).
+
+#### `UnknownAssessmentError`
+
+No assessment with that id is booked.
+
+#### `UnknownSystemError`
+
+No system with that id has any booked assessment.
+
+#### `RetiredSystemError`
+
+The system is retired; mutations are refused.
+
+#### `BadStrategyError`
+
+The mitigation strategy is outside the pinned vocabulary.
+
+#### `BadReasonError`
+
+The retire reason is outside the pinned vocabulary.
+
+#### `AuditKindError`
+
+Unknown audit kind.
+
+#### `stdlib_only()`
+
+AST self-check: this module may only import stdlib modules.
+
+#### `AssessmentRecord`
+
+- `verify()`
+#### `MitigationRecord`
+
+- `verify()`
+#### `RetireRecord`
+
+- `verify()`
+#### `VerificationReport`
+
+- `verify()`
+#### `EvaluationReport`
+
+- `verify()`
+#### `ai_robustness_risk_audit_event(kind: str, seq: int, **detail: Any)`
+
+Build one ``audit.ndjson/1`` row for this module.
+
+#### `AIRobustnessRisk`
+
+AI robustness-risk register decision ledger, Simulated.
+
+- `assess(system_id: str, seq: int, robustness_risk_kind: str='adversarial-risk', verdict: str='not-assessed', severity: int=0, assessment_digest: str='')`
+  - Book one declared robustness-risk assessment (minted ``rbk-N`` id).
+- `mitigate(assessment_id: str, seq: int, strategy: str='adversarial-hardening', mitigation_digest: str='')`
+  - Book one declared mitigation against an assessment (``rmt-N``).
+- `retire(system_id: str, seq: int, reason: str='manual')`
+  - Terminal: retire a system. Ids are never recycled.
+- `verify(record_id: str, seq: int)`
+  - Re-derive the digest pin of an assessment or mitigation record.
+- `evaluate(system_id: str, seq: int)`
+  - Derive the ledger-rule robustness-risk posture for a system. Pure read.
+- `assessment_record(assessment_id: str, seq: int)`
+- `mitigation_record(mitigation_id: str, seq: int)`
+- `assessments_for(system_id: str, seq: int)`
+- `mitigations_for(assessment_id: str, seq: int)`
+- `system_ids(seq: int)`
+- `assessment_ids(seq: int)`
+- `mitigation_ids(seq: int)`
+- `retired_ids(seq: int)`
+- `stats(seq: int)`
+- `audit_log(seq: int)`
+#### `main()`
+
 ### `ai_robustness_testing`
 
 Source: `components/northstar-agent-runtime/ai_robustness_testing.py`
@@ -14985,6 +15764,350 @@ AST self-check: the module imports stdlib names only.
 #### `main()`
 
 Self-check: exercise test -> verify -> evaluate.
+
+### `ai_robustness_threat`
+
+Source: `components/northstar-agent-runtime/ai_robustness_threat.py`
+
+AI robustness threat: robustness-threat assessment/mitigation decision ledger, Simulated.
+
+#### `AIRobustnessThreatError`
+
+Base class for all ai-robustness-threat ledger errors.
+
+#### `BadSystemError`
+
+#### `UnknownSystemError`
+
+#### `RetiredSystemError`
+
+#### `BadRobustnessThreatKindError`
+
+#### `BadVerdictError`
+
+#### `BadSeverityError`
+
+#### `BadDigestError`
+
+#### `BadReasonError`
+
+#### `UnknownAssessmentError`
+
+#### `UnknownMitigationError`
+
+#### `UnknownRecordError`
+
+#### `BadStrategyError`
+
+#### `SeqOrderError`
+
+#### `AuditKindError`
+
+#### `AssessmentRecord`
+
+- `verify()`
+#### `MitigationRecord`
+
+- `verify()`
+#### `RetireRecord`
+
+- `verify()`
+#### `VerificationReport`
+
+- `verify()`
+#### `EvaluationReport`
+
+- `verify()`
+#### `ai_robustness_threat_audit_event(kind: str, seq: int, **detail: Any)`
+
+Build one ``audit.ndjson/1`` row for this module.
+
+#### `AIRobustnessThreat`
+
+AI-robustness-threat assessment/mitigation decision ledger, Simulated.
+
+- `assess(system_id: str, seq: int, robustness_threat_kind: str='adversarial-attack', verdict: str='not-assessed', severity: int=0, assessment_digest: str='')`
+  - Book one declared robustness-threat assessment (minted ``rht-N`` id).
+- `mitigate(assessment_id: str, seq: int, strategy: str='no-action', mitigation_digest: str='')`
+  - Book one declared mitigation against a booked assessment (minted ``rhm-N`` id).
+- `retire(system_id: str, seq: int, reason: str='manual')`
+  - Terminally retire a system id; ids are never recycled.
+- `verify(record_id: str, seq: int)`
+  - Pure read: re-derive one record's digest pin; verdict as data.
+- `evaluate(system_id: str, seq: int)`
+  - Pure read: derive one system's robustness-threat posture as data.
+- `assessment_record(assessment_id: str, seq: int)`
+- `mitigation_record(mitigation_id: str, seq: int)`
+- `assessments_for(system_id: str, seq: int)`
+- `mitigations_for(assessment_id: str, seq: int)`
+- `system_ids(seq: int)`
+- `assessment_ids(seq: int)`
+- `mitigation_ids(seq: int)`
+- `retired_ids(seq: int)`
+- `stats(seq: int)`
+- `audit_log(seq: int)`
+#### `stdlib_only()`
+
+AST self-check: the module imports stdlib names only.
+
+#### `main()`
+
+Self-check: exercise assess -> mitigate -> verify -> evaluate.
+
+### `ai_robustness_validation`
+
+Source: `components/northstar-agent-runtime/ai_robustness_validation.py`
+
+AI robustness validation: robustness-validation decision ledger, Simulated.
+
+#### `AIRobustnessValidationError`
+
+Base class for all ai-robustness-validation ledger errors.
+
+#### `BadSystemError`
+
+#### `UnknownSystemError`
+
+#### `RetiredSystemError`
+
+#### `BadValidationKindError`
+
+#### `BadVerdictError`
+
+#### `BadDigestError`
+
+#### `BadReasonError`
+
+#### `UnknownValidationError`
+
+#### `UnknownRecordError`
+
+#### `SeqOrderError`
+
+#### `AuditKindError`
+
+#### `ValidationRecord`
+
+- `verify()`
+#### `RetireRecord`
+
+- `verify()`
+#### `VerificationReport`
+
+- `verify()`
+#### `EvaluationReport`
+
+- `verify()`
+#### `ai_robustness_validation_audit_event(kind: str, seq: int, **detail: Any)`
+
+Build one ``audit.ndjson/1`` row for this module.
+
+#### `AIRobustnessValidation`
+
+AI-robustness-validation decision ledger, Simulated.
+
+- `validate(system_id: str, seq: int, validation_kind: str='adversarial-validation', verdict: str='not-validated', validation_digest: str='')`
+  - Book one declared robustness-validation engagement (minted ``rvl-N`` id).
+- `retire(system_id: str, seq: int, reason: str='manual')`
+  - Terminally retire a system id; ids are never recycled.
+- `verify(validation_id: str, seq: int)`
+  - Pure read: re-derive one validation record's digest pin.
+- `evaluate(system_id: str, seq: int)`
+  - Pure read: derive one system's robustness-validation posture as data.
+- `validation_record(validation_id: str, seq: int)`
+- `validations_for(system_id: str, seq: int)`
+- `system_ids(seq: int)`
+- `validation_ids(seq: int)`
+- `retired_ids(seq: int)`
+- `stats(seq: int)`
+- `audit_log(seq: int)`
+#### `stdlib_only()`
+
+AST self-check: the module imports stdlib names only.
+
+#### `main()`
+
+Self-check: exercise validate -> verify -> evaluate.
+
+### `ai_robustness_verification`
+
+Source: `components/northstar-agent-runtime/ai_robustness_verification.py`
+
+AI robustness verification: declared robustness-check verification decision ledger, Simulated.
+
+#### `AIRobustnessVerificationError`
+
+Base class for all ai-robustness-verification ledger errors.
+
+#### `BadSubjectError`
+
+#### `UnknownSubjectError`
+
+#### `RetiredSubjectError`
+
+#### `BadCheckKindError`
+
+#### `BadVerdictError`
+
+#### `BadSeverityError`
+
+#### `BadDigestError`
+
+#### `BadReasonError`
+
+#### `UnknownVerificationError`
+
+#### `UnknownCertificationError`
+
+#### `UnknownRecordError`
+
+#### `BadCertificationKindError`
+
+#### `BadOutcomeError`
+
+#### `SeqOrderError`
+
+#### `AuditKindError`
+
+#### `VerificationRecord`
+
+- `verify()`
+#### `CertificationRecord`
+
+- `verify()`
+#### `RetireRecord`
+
+- `verify()`
+#### `VerificationReport`
+
+- `verify()`
+#### `EvaluationReport`
+
+- `verify()`
+#### `ai_robustness_verification_audit_event(kind: str, seq: int, **detail: Any)`
+
+Build one ``audit.ndjson/1`` row for this module.
+
+#### `AIRobustnessVerification`
+
+AI-robustness verification decision ledger, Simulated.
+
+- `verify(subject_id: str, seq: int, check_kind: str='adversarial-robustness-review', verdict: str='not-verified', severity: int=0, verification_digest: str='')`
+  - Book one declared robustness verification (minted ``rbv-N`` id).
+- `certify(verification_id: str, seq: int, certification_kind: str='independent-review', outcome: str='endorsed', certification_digest: str='')`
+  - Book one declared certification against a booked verification (minted ``rcf-N`` id).
+- `retire(subject_id: str, seq: int, reason: str='manual')`
+  - Terminally retire a subject id; ids are never recycled.
+- `verify_report(record_id: str, seq: int)`
+  - Pure read: re-derive one record's digest pin; verdict as data.
+- `evaluate(subject_id: str, seq: int)`
+  - Pure read: derive one subject's robustness-verification posture as data.
+- `verification_record(verification_id: str, seq: int)`
+- `certification_record(certification_id: str, seq: int)`
+- `verifications_for(subject_id: str, seq: int)`
+- `certifications_for(verification_id: str, seq: int)`
+- `subject_ids(seq: int)`
+- `verification_ids(seq: int)`
+- `certification_ids(seq: int)`
+- `retired_ids(seq: int)`
+- `stats(seq: int)`
+- `audit_log(seq: int)`
+#### `stdlib_only()`
+
+AST self-check: the module imports stdlib names only.
+
+#### `main()`
+
+Self-check: exercise verify -> certify -> verify_report -> evaluate.
+
+### `ai_robustness_vulnerability`
+
+Source: `components/northstar-agent-runtime/ai_robustness_vulnerability.py`
+
+AI robustness vulnerability: robustness-weakness detection/mitigation decision ledger, Simulated.
+
+#### `AIRobustnessVulnerabilityError`
+
+Base class for all ai-robustness-vulnerability ledger errors.
+
+#### `BadSystemError`
+
+#### `UnknownSystemError`
+
+#### `RetiredSystemError`
+
+#### `BadRobustnessVulnerabilityKindError`
+
+#### `BadVerdictError`
+
+#### `BadSeverityError`
+
+#### `BadDigestError`
+
+#### `BadReasonError`
+
+#### `UnknownDetectionError`
+
+#### `UnknownMitigationError`
+
+#### `UnknownRecordError`
+
+#### `BadStrategyError`
+
+#### `SeqOrderError`
+
+#### `AuditKindError`
+
+#### `DetectionRecord`
+
+- `verify()`
+#### `MitigationRecord`
+
+- `verify()`
+#### `RetireRecord`
+
+- `verify()`
+#### `VerificationReport`
+
+- `verify()`
+#### `EvaluationReport`
+
+- `verify()`
+#### `ai_robustness_vulnerability_audit_event(kind: str, seq: int, **detail: Any)`
+
+Build one ``audit.ndjson/1`` row for this module.
+
+#### `AIRobustnessVulnerability`
+
+AI robustness-vulnerability detection/mitigation decision ledger, Simulated.
+
+- `detect(system_id: str, seq: int, robustness_vulnerability_kind: str='adversarial-blind-spot', verdict: str='not-assessed', severity: int=0, detection_digest: str='')`
+  - Book one declared robustness-vulnerability detection (minted ``rvd-N`` id).
+- `mitigate(detection_id: str, seq: int, strategy: str='no-action', mitigation_digest: str='')`
+  - Book one declared mitigation against a booked detection (minted ``rvm-N`` id).
+- `retire(system_id: str, seq: int, reason: str='manual')`
+  - Terminally retire a system id; ids are never recycled.
+- `verify(record_id: str, seq: int)`
+  - Pure read: re-derive one record's digest pin; verdict as data.
+- `evaluate(system_id: str, seq: int)`
+  - Pure read: derive one system's robustness-vulnerability posture as data.
+- `detection_record(detection_id: str, seq: int)`
+- `mitigation_record(mitigation_id: str, seq: int)`
+- `detections_for(system_id: str, seq: int)`
+- `mitigations_for(detection_id: str, seq: int)`
+- `system_ids(seq: int)`
+- `detection_ids(seq: int)`
+- `mitigation_ids(seq: int)`
+- `retired_ids(seq: int)`
+- `stats(seq: int)`
+- `audit_log(seq: int)`
+#### `stdlib_only()`
+
+AST self-check: the module imports stdlib names only.
+
+#### `main()`
+
+Self-check: exercise detect -> mitigate -> verify -> evaluate.
 
 ### `ai_safety`
 
@@ -21813,7 +22936,7 @@ Fresh (secret_seed, public_key); the seed needs os.urandom, nothing else.
 
 Outcome of verifying one feed file. Mirrors OrcaI's ChainResult shape.
 
-#### `verify_lines(lines: Iterable[str], *, public_key: bytes | None=None, expect_session_id: str | None=None, expect_run_id: str | None=None, strict: bool=False, clock_skew_seconds: float=300.0)`
+#### `verify_lines(lines: Iterable[str], *, public_key: bytes | Mapping[str, bytes] | None=None, expect_session_id: str | None=None, expect_run_id: str | None=None, strict: bool=False, require_signatures: bool=False, clock_skew_seconds: float=300.0)`
 
 Verify a feed's hash chain (and signatures when ``public_key`` is given).
 
@@ -24577,6 +25700,18 @@ Itemised cost for one usage report. Components sum to ``total_usd``.
 
 - `total_usd` (property)
 - `as_dict()`
+#### `BudgetReservation`
+
+One request's conservative preflight hold against a shared run budget.
+
+- `release()`
+  - Release a request known not to have reached a billable provider call.
+- `charge_unknown()`
+  - Keep the reserved amount charged when a failed request may be billable.
+#### `estimate_request_cost(request: Any, model: str | None=None)`
+
+Conservative preflight estimate for a provider request.
+
 #### `compute_cost(usage: Any, model: str)`
 
 Price one usage report. Accepts a :class:`Usage` or a mapping.
@@ -24585,7 +25720,9 @@ Price one usage report. Accepts a :class:`Usage` or a mapping.
 
 Running cost and usage accumulator with a ceiling check.
 
-- `observe(usage: Any, model: str)`
+- `reserve(amount_usd: float)`
+  - Atomically reserve request capacity before a provider attempt.
+- `observe(usage: Any, model: str, *, reservation: BudgetReservation | None=None)`
 - `observe_child(child: 'Budget')`
   - Merge a subagent budget into this one (cost roll-up for governance).
 - `exhausted` (property)
@@ -26762,7 +27899,7 @@ A resumable boundary: how far the transcript had got, and what it cost.
 
 A checkpoint that cannot be trusted as a fork point.
 
-#### `build(*, session_id: str, record_index: int, transcript: Sequence[Any], turns: int, tool_calls: int, cost_usd: float, usage: Mapping[str, Any], model: str, provider: str, permission_mode: str, run_id: str | None=None, policy_revision: str | None=None, denials: int=0)`
+#### `build(*, session_id: str, record_index: int, transcript: Sequence[Any], turns: int, tool_calls: int, cost_usd: float, usage: Mapping[str, Any], model: str, provider: str, permission_mode: str, run_id: str | None=None, policy_revision: str | None=None, denials: int=0, composition_history: Sequence[str] | None=None, composition_policy_digest: str | None=None)`
 
 The record payload appended at a boundary. Read-only: nothing here mutates.
 
@@ -33472,6 +34609,8 @@ A compiled, deterministic dataflow policy.
 
 Per-session trajectory: the sensitivity of data the agent has handled.
 
+- `from_memory_audience(policy: DataflowPolicy, audience: tuple[str, ...] | list[str])`
+  - Start a trajectory with the recipient boundary of injected memory.
 - `observe(tool_name: str, arguments: Mapping[str, Any])`
   - Attach the first matching source rule's label to the trajectory. Returns the rule applied, or None.
 - `check_sink(tool_name: str, arguments: Mapping[str, Any])`
@@ -37376,7 +38515,7 @@ Load and seal an egress policy. Fails closed on any defect.
 A signed binding between an approval decision and one action card.
 
 - `as_dict()`
-#### `build_approval_receipt(*, card_id: str, call_id: str, arguments_digest: str, approver_id: str, approver_seed: bytes, decided_at: float | None=None, body: bytes | None=None)`
+#### `build_approval_receipt(*, card_id: str, call_id: str, arguments_digest: str, approver_id: str, approver_seed: bytes, decided_at: float | None=None, body: bytes | None=None, request_shape_hash: str='')`
 
 Sign an approval receipt. Called by the approver's side (which holds the private key), never by the agent.
 
@@ -37389,6 +38528,8 @@ Verify an approval receipt's signature and freshness.
 One outbound request as the agent describes it.
 
 - `shape_hash()`
+- `approval_shape_hash()`
+  - Digest the exact agent-controlled HTTP request authorized by a person.
 #### `EgressVerdict`
 
 The engine's decision on one request.
@@ -37508,6 +38649,24 @@ Deterministic egress-proxy allowlist/filter ledger.
 #### `main()`
 
 Exercise the happy path; exits non-zero on failure.
+
+### `egress_scope`
+
+Source: `components/northstar-agent-runtime/egress_scope.py`
+
+Canonical, bounded host sets for host-owned per-run egress scope.
+
+#### `canonical_egress_host(value: Any)`
+
+Return an exact ASCII DNS-style host key, or ``None`` for invalid input.
+
+#### `validate_egress_target_scope(values: Any, *, field_name: str='egress_target_scope')`
+
+Validate and canonicalize a bounded sequence; empty means deny all hosts.
+
+#### `intersect_egress_target_scopes(cli_targets: Sequence[str], policy_targets: Sequence[str] | None)`
+
+Combine operator CLI scope with policy scope without widening either.
 
 ### `eldercare_agents`
 
@@ -41530,6 +42689,46 @@ Audit-shaped record for a formal-verification observation.
 
 #### `main()`
 
+### `forward_seal_ledger`
+
+Source: `components/northstar-agent-runtime/forward_seal_ledger.py`
+
+Forward-secure sealed decision ledger, Simulated.
+
+#### `ForwardSealError`
+
+Fail-closed: any integrity failure raises, never returns bad data.
+
+#### `SealedEvent`
+
+One forward-sealed ledger record (immutable).
+
+#### `Checkpoint`
+
+A sealed checkpoint over the chain head (immutable).
+
+#### `ForwardSealLedger`
+
+Single-writer forward-secure sealed ledger.
+
+- `genesis` (property)
+- `record(seq: int)`
+  - Return the sealed record with 1-based ``seq`` (pure read).
+- `checkpoints()`
+- `append(*, intent: str, action: str, subject: str, authorization: str, inputs_digest: str, logic_digest: str, execution_digest: str, outcome: str)`
+  - Seal one 8-field event with triple fingerprints.
+- `checkpoint()`
+  - Seal the current chain head (manual checkpoint).
+- `verify(initial_key: bytes, checkpoint_key: bytes)`
+  - Verify the full chain from the initial key (pure read).
+#### `stdlib_only()`
+
+AST check: this module imports stdlib modules only.
+
+#### `main()`
+
+Self-check: seal 3 events, checkpoint, verify, tamper, re-verify.
+
 ### `fragile_watermark`
 
 Source: `components/northstar-agent-runtime/fragile_watermark.py`
@@ -43040,7 +44239,7 @@ Temp workspaces + scripted providers for one suite run.
 - `close()`
 - `workspace(files: dict[str, str] | None=None)`
 - `provider(turns: Sequence[Any], **kwargs: Any)`
-- `runtime(*, workspace: Path, turns: Sequence[Any], config_kwargs: dict[str, Any] | None=None, tool_limits: ToolLimits | None=None, can_use_tool: Any=None, hooks: HookRegistry | None=None, sessions: Any=None)`
+- `runtime(*, workspace: Path, turns: Sequence[Any], tools: Any=None, config_kwargs: dict[str, Any] | None=None, tool_limits: ToolLimits | None=None, can_use_tool: Any=None, hooks: HookRegistry | None=None, sessions: Any=None)`
 #### `run_offline_bundle()`
 
 Signed offline policy bundles (ninety-seventh batch).
@@ -43267,6 +44466,36 @@ Execute the public suite. Always cleans temp workspaces.
 #### `add_bench_arguments(parser: argparse.ArgumentParser)`
 
 #### `run_bench_command(args: argparse.Namespace)`
+
+### `governed_action_runner`
+
+Source: `components/northstar-agent-runtime/governed_action_runner.py`
+
+Governed action runner: SAFR 4-gate orchestration with real components.
+
+#### `GovernedRunnerError`
+
+Fail-closed: any gate failure or malformed input raises.
+
+#### `GovernedOutcome`
+
+Result of a governed action run.
+
+#### `GovernedActionRunner`
+
+Orchestrates SAFR 4-gate flow with real components.
+
+- `pin(obj: Any)`
+  - Canonical ``sha256:`` pin of ``obj``.
+- `run(*, intent: str, action: str, subject: str, tool: str, tool_args: Optional[Dict[str, Any]]=None, inputs_digest: str='', kind: Optional[str]=None, mutating: Optional[bool]=None, decision: Any=None, authorized_inputs_digest: str='', criteria: Any=None, executor: Optional[Callable[[str, Dict[str, Any]], Any]]=None)`
+  - Run one governed action through all 4 gates.
+#### `stdlib_only()`
+
+AST check: stdlib only.
+
+#### `main()`
+
+Self-check with stub components.
 
 ### `govservices_agents`
 
@@ -47835,6 +49064,40 @@ The most severe injection family in ``text``, or ``None`` if clean.
 #### `main()`
 
 Self-check: known-bad samples flag, known-good samples pass.
+
+### `injection_probe`
+
+Source: `components/northstar-agent-runtime/injection_probe.py`
+
+Injection probe harness (InjecAgent-inspired red team), Simulated.
+
+#### `InjectionProbeError`
+
+Fail-closed: bad probe definitions raise.
+
+#### `Probe`
+
+One injection probe.
+
+#### `ProbeResult`
+
+Result of running one probe.
+
+#### `run_probe(probe: Probe, gate_fn: Callable[[str, str], bool])`
+
+Run one probe through a gate function.
+
+#### `run_all_probes(gate_fn: Callable[[str, str], bool], probes: List[Probe] | None=None)`
+
+Run all probes, return summary.
+
+#### `stdlib_only()`
+
+AST check: stdlib only.
+
+#### `main()`
+
+Self-check with a naive gate (blocks on keywords).
 
 ### `inner_alignment`
 
@@ -52409,7 +53672,7 @@ MCP transport, protocol, or configuration error. Operator-facing.
 
 #### `RemoteTool`
 
-#### `tool_definition_digest(server: str, name: str, description: str, input_schema: Mapping[str, Any])`
+#### `tool_definition_digest(server: str, name: str, description: str, input_schema: Mapping[str, Any], output_schema: Mapping[str, Any] | None=None)`
 
 Canonical digest pinning one MCP tool's definition.
 
@@ -52452,7 +53715,7 @@ One MCP server over stdio: modern (per-request metadata) or legacy (handshake).
 - `close()`
   - TERM the process group, then KILL after a grace period. Idempotent.
 - `subscribe_list_changed()`
-  - Opt in to ``notifications/tools/list_changed`` (spec: explicit opt-in required).
+  - Open a modern subscriptions/listen request or honor legacy capability.
 #### `mcp_tool_specs(client: McpStdioClient)`
 
 Build governed ``ToolSpec``s (mutating by default) for one connected server.
@@ -53118,6 +54381,18 @@ Workspace-scoped agent memory (P4): durable notes inside the run boundary.
 
 A memory path the runtime refuses. Operator-facing.
 
+#### `load_memory_audience_manifest(workspace: str | Path)`
+
+Load operator-owned path grants; absent manifest means no named grants.
+
+#### `audience_grant_allows(grant: frozenset[str], viewers: Sequence[str] | None=None)`
+
+Apply all-viewers-must-match semantics to one immutable grant.
+
+#### `memory_audience_allows(workspace: str | Path, relative: str, viewers: Sequence[str] | None=None)`
+
+Check the operator-owned audience grant for one workspace-relative path.
+
 #### `WorkspaceMemory`
 
 Discovered memory, ready to append to the system prompt.
@@ -53133,7 +54408,7 @@ True when ``relative_parts`` is under the writable memory carve-out.
 
 #### `digest_text(text: str)`
 
-#### `discover_memory(workspace: str | Path, *, configured: str | bool | None=None, explicit: str | Path | None=None)`
+#### `discover_memory(workspace: str | Path, *, configured: str | bool | None=None, explicit: str | Path | None=None, viewers: Sequence[str] | None=None)`
 
 Load workspace memory, or ``None`` when absent / disabled.
 
@@ -57016,6 +58291,52 @@ Shape an ``audit.ndjson/1`` record for this module (validation only).
 
 #### `main()`
 
+### `observer_verdict_ledger`
+
+Source: `components/northstar-agent-runtime/observer_verdict_ledger.py`
+
+Observer verdict ledger: independent oversight as first-class events, Simulated.
+
+#### `ObserverVerdictError`
+
+Fail-closed: bad bookings raise, never produce bad records.
+
+#### `CriteriaCommitment`
+
+Observer's pre-commitment to assessment criteria (Hubinger defense).
+
+#### `VerdictRecord`
+
+One observer verdict (immutable).
+
+#### `RetireRecord`
+
+Terminal retirement of an observer id (immutable).
+
+#### `ObserverVerdictLedger`
+
+Ledger for independent observer verdicts.
+
+- `commit_criteria(observer_id: str, observer_seq: int, criteria_digest: str)`
+  - Book an observer's pre-commitment to assessment criteria.
+- `verdict(observer_id: str, observer_seq: int, action_digest: str, verdict: str, reason_digest: str, severity: int=0, commitment_id: str='')`
+  - Book one observer verdict.
+- `retire(observer_id: str, observer_seq: int, reason: str='manual')`
+  - Terminally retire an observer id.
+- `verdict_record(verdict_id: str)`
+- `verdicts_for(observer_id: str)`
+- `to_sealed_event(verdict_id: str)`
+  - Render a verdict as an 8-field sealed-pipeline event.
+- `stats()`
+- `audit_log()`
+#### `stdlib_only()`
+
+AST check: this module imports stdlib modules only.
+
+#### `main()`
+
+Self-check: verdicts, seq discipline, sealed-event mapping.
+
 ### `ocr_engine`
 
 Source: `components/northstar-agent-runtime/ocr_engine.py`
@@ -59358,6 +60679,10 @@ Three-layer permission gate: ``disallowed_tools`` → ``allowed_tools`` → mode
 
 Check whether a tool name matches offensive-security tooling patterns.
 
+#### `offensive_shell_commands(command: str, *, _depth: int=0)`
+
+Find direct offensive executable invocations in simple shell syntax.
+
 #### `PermissionDecision`
 
 The gate's verdict for one tool call.
@@ -59460,10 +60785,16 @@ Evaluates one tool call against the pre-trade checks then the three layers.
   - Clear pre-trade observation windows (rate counters, duplicate fingerprints).
 - `mode` (property)
 - `knows(tool_name: str)`
+- `composition_enabled` (property)
+- `composition_history` (property)
+- `composition_policy_digest` (property)
+  - Stable identity for the sequence policy carried by checkpoints.
+- `restore_composition_history(history: Sequence[str])`
+  - Restore the bounded, category-only state from a verified checkpoint.
 - `register_kind(tool_name: str, kind: str)`
-- `evaluate(tool_name: str, *, kind: str | None=None, mutating: bool | None=None, payload: dict[str, Any] | None=None, context: PermissionRequestContext | None=None, known: bool=True, dataflow: SessionDataflow | None=None)`
+- `evaluate(tool_name: str, *, kind: str | None=None, mutating: bool | None=None, payload: dict[str, Any] | None=None, context: PermissionRequestContext | None=None, known: bool=True, dataflow: SessionDataflow | None=None, record_composition: bool=True)`
   - Run the three layers for one call, plus the dataflow dimension.
-- `evaluate_spec(spec: Any, payload: dict[str, Any] | None=None, *, context: PermissionRequestContext | None=None, known: bool=True)`
+- `evaluate_spec(spec: Any, payload: dict[str, Any] | None=None, *, context: PermissionRequestContext | None=None, known: bool=True, dataflow: SessionDataflow | None=None)`
 - `check_delegation(agent: str, tool_names: Sequence[str], *, kinds: dict[str, str] | None=None, context: PermissionRequestContext | None=None, disallowed_extra: Iterable[str]=(), require_stable_identity: bool=False)`
   - Gate a subagent by *each tool it declared*, not by the name ``Task``.
 ### `permit_agents`
@@ -62907,6 +64238,44 @@ Shape an ``audit.ndjson/1`` record for attestor activity.
 
 #### `main()`
 
+### `provenance_tagging`
+
+Source: `components/northstar-agent-runtime/provenance_tagging.py`
+
+Per-value provenance tagging (CaMeL-inspired), Simulated.
+
+#### `ProvenanceError`
+
+Fail-closed: malformed tags or policy violations raise.
+
+#### `TaggedValue`
+
+A value with its capability tag.
+
+#### `tag_user(value: Any, readers: Optional[FrozenSet[str]]=None)`
+
+Tag a user-provided (trusted) value.
+
+#### `tag_tool_output(value: Any, tool_id: str, readers: Optional[FrozenSet[str]]=None)`
+
+Tag a tool's output with the tool's ID as provenance.
+
+#### `combine(*tagged: TaggedValue)`
+
+Combine values: readers intersect, provenance unions.
+
+#### `check_policy(tool_name: str, args: Dict[str, TaggedValue], policy: Dict[str, Any])`
+
+Check if a tool call is allowed given tagged arguments.
+
+#### `stdlib_only()`
+
+AST check: stdlib only.
+
+#### `main()`
+
+Self-check.
+
 ### `provenance_taint`
 
 Source: `components/northstar-agent-runtime/provenance_taint.py`
@@ -62975,15 +64344,18 @@ Nondeterministic security-automaton tracker over tool-call events.
 
 - `violated` (property)
 - `observe(tool_name: str, arguments: dict[str, Any])`
-  - Advance automata on a tool-call event; deny on error states.
 - `states()`
 #### `BudgetEnforcer`
 
 Per-tool call-count caps. Exceeding the cap denies, fail-closed.
 
 - `check(tool_name: str)`
-- `record(tool_name: str)`
-  - Count one executed call. Called only after the gate allows.
+- `reserve(tool_name: str)`
+  - Atomically claim one capped call slot before execution.
+- `release(reservation: str)`
+  - Return an uncommitted slot after a later gate rejects the call.
+- `record(tool_name: str, reservation: str | None=None)`
+  - Commit an executed call; pass the gate's reservation token when present.
 - `usage()`
 #### `ProvenanceTaintGate`
 
@@ -63124,6 +64496,8 @@ Token counts in the shape the Anthropic Messages API reports them.
 - `render()`
 #### `ToolResultBlock`
 
+- `display_text()`
+  - Return artifact text without the runtime-only model provenance label.
 - `to_api()`
 - `render()`
 - `text()`
@@ -67805,6 +69179,10 @@ Register repository-defined subagents (.northstar/agents/*.md) into ``agents``.
 
 The workspace policy file (.northstar/config.toml), or None.
 
+#### `resolve_egress_target_scope(cli_targets: Any, policy: Any)`
+
+Intersect CLI and workspace host scopes; neither source can widen the other.
+
 #### `HookSetup`
 
 What `load_hooks()` decided: the registry to run (or None) and what fed it.
@@ -68344,6 +69722,58 @@ Deterministic safety-benchmark decision ledger.
 #### `main()`
 
 Self-check: register, check, score, certify.
+
+### `safr_checkpoint`
+
+Source: `components/northstar-agent-runtime/safr_checkpoint.py`
+
+SAFR checkpoints: declare -> authorize -> assess -> audit, Simulated.
+
+#### `SafrCheckpointError`
+
+Fail-closed: bad gate transitions raise, never produce bad records.
+
+#### `DeclarationRecord`
+
+Gate 1: the agent declares intent (immutable).
+
+#### `AuthorizationRecord`
+
+Gate 2: the authorizer decides (immutable).
+
+#### `AssessmentRecord`
+
+Gate 3: controls are assessed (immutable).
+
+#### `AuditRecord`
+
+Gate 4: the outcome is booked (immutable, terminal).
+
+#### `SafrCheckpoint`
+
+Four-gate SAFR checkpoint ledger.
+
+- `declare(seq: int, intent: str, action: str, subject: str, inputs_digest: str)`
+  - Gate 1: book the agent's declared intent.
+- `authorize(seq: int, declaration_id: str, decision: str, authorizer_id: str, conditions_digest: str)`
+  - Gate 2: book the authorizer's decision (needs a declaration).
+- `assess(seq: int, declaration_id: str, finding: str, assessment_digest: str)`
+  - Gate 3: book the control assessment (needs allow/conditional).
+- `audit(seq: int, declaration_id: str, outcome: str, outcome_digest: str)`
+  - Gate 4: book the terminal outcome (needs an assessment).
+- `posture(declaration_id: str)`
+  - Derive the declaration's posture (pure read, as data).
+- `to_sealed_event(declaration_id: str)`
+  - Render the full gate chain as an 8-field sealed event.
+- `stats()`
+- `audit_log()`
+#### `stdlib_only()`
+
+AST check: this module imports stdlib modules only.
+
+#### `main()`
+
+Self-check: full four-gate lifecycle + terminal transitions.
 
 ### `saga_pattern`
 
@@ -69766,6 +71196,144 @@ Deterministic SDK generation/publication/version ledger.
 - `audit_log()`
   - Pure view of the audit rows booked so far.
 #### `main()`
+
+### `seal_merkle_batch`
+
+Source: `components/northstar-agent-runtime/seal_merkle_batch.py`
+
+Merkle batch checkpoints for sealed ledgers, Simulated.
+
+#### `MerkleBatchError`
+
+Fail-closed: bad batch arguments raise, never produce bad roots.
+
+#### `MerkleProof`
+
+O(log n) inclusion proof for one leaf (immutable).
+
+#### `MerkleBatch`
+
+A sealed batch: Merkle tree over a contiguous record run.
+
+- `proof(index: int)`
+  - Return the inclusion proof for the 0-based ``index``.
+#### `seal_batch(record_hashes: Sequence[str], first_seq: int=1)`
+
+Seal a contiguous run of record hashes into a Merkle batch.
+
+#### `verify_proof(record_hash: str, proof: MerkleProof, root: str)`
+
+Verify an inclusion proof against ``root`` (pure function).
+
+#### `stdlib_only()`
+
+AST check: this module imports stdlib modules only.
+
+#### `main()`
+
+Self-check: seal a batch, prove each leaf, verify, tamper, fail.
+
+### `sealed_attestation`
+
+Source: `components/northstar-agent-runtime/sealed_attestation.py`
+
+in-toto attestation envelopes for sealed records, Simulated.
+
+#### `AttestationError`
+
+Fail-closed: malformed envelopes raise, never produce bad output.
+
+#### `Attestation`
+
+A frozen in-toto envelope over sealed-ledger material.
+
+- `to_dict()`
+  - Render as the standard in-toto JSON shape.
+#### `attest_sealed_record(*, record_hash: str, seq: int, event: Dict[str, str], input_fingerprint: str, logic_fingerprint: str, execution_fingerprint: str, seal: str, prev_hash: str, merkle_proof: Dict[str, Any] | None=None)`
+
+Wrap one forward-seal record in an in-toto envelope.
+
+#### `attest_sealed_batch(*, batch_root: str, first_seq: int, record_count: int, batch_depth: int)`
+
+Wrap one Merkle batch root in an in-toto envelope.
+
+#### `attest_checkpoint(*, checkpoint_seq: int, head_hash: str, records_sealed: int, checkpoint_seal: str)`
+
+Wrap one forward-seal checkpoint in an in-toto envelope.
+
+#### `verify_envelope(att: Attestation)`
+
+Check an envelope's structural integrity (pure read).
+
+#### `stdlib_only()`
+
+AST check: this module imports stdlib modules only.
+
+#### `main()`
+
+Self-check: attest a record, a batch, a checkpoint; verify all.
+
+### `sealed_audit_sink`
+
+Source: `components/northstar-agent-runtime/sealed_audit_sink.py`
+
+Sealed audit sink: permission-gate audit -> forward-seal ledger, Simulated.
+
+#### `SealedAuditSinkError`
+
+Fail-closed: malformed audit records raise, never seal garbage.
+
+#### `SealedAuditSink`
+
+Callable adapter: gate audit dict -> sealed ledger append.
+
+- `ledger` (property)
+  - The forward-seal ledger this sink appends to (shared-chain wiring).
+- `sealed_count` (property)
+  - How many audit records have been sealed.
+#### `stdlib_only()`
+
+AST check: this module imports stdlib modules only.
+
+#### `main()`
+
+Self-check with a stub ledger (no sibling imports).
+
+### `sealed_pipeline`
+
+Source: `components/northstar-agent-runtime/sealed_pipeline.py`
+
+Sealed pipeline: ledger + Merkle batches + attestations, Simulated.
+
+#### `SealedPipelineError`
+
+Fail-closed: pipeline misuse raises, never silently misorders.
+
+#### `BatchRecord`
+
+One sealed batch within the pipeline (immutable).
+
+#### `SealedPipeline`
+
+Coordinate ledger + Merkle batches + attestations.
+
+- `append(**event_fields: Any)`
+  - Append one event via the ledger; auto-batch at the interval.
+- `flush()`
+  - Seal any pending partial batch (manual; idempotent).
+- `batches()`
+- `pending_count()`
+- `record_attestation(seq: int)`
+  - Build an in-toto record attestation with Merkle proof.
+- `verify_pipeline(initial_key: bytes, checkpoint_key: bytes)`
+  - Verify ledger chain + all batch roots (pure read).
+#### `stdlib_only()`
+
+AST check: this module imports stdlib modules only.
+
+#### `main()`
+
+Self-check with stub collaborators (no sibling imports).
 
 ### `search_engine`
 
@@ -71299,7 +72867,7 @@ Writer/reader for one session's JSONL transcript.
 - `record_system(message: SystemMessage, *, agent: str='main')`
 - `record_result(message: ResultMessage)`
 - `read(session_id: str | None=None, *, strict: bool=True)`
-- `transcript(session_id: str | None=None)`
+- `transcript(session_id: str | None=None, *, require_integrity: bool=False)`
 - `list_sessions()`
 #### `load_jsonl(path: str | os.PathLike[str], *, strict: bool=True)`
 
@@ -71311,7 +72879,7 @@ Aggregate completed and trailing interrupted-run spend from a transcript.
 
 #### `transcript_from_records(records: Sequence[dict[str, Any]])`
 
-Rebuild a provider-ready transcript from stored records.
+Rebuild the root agent's current provider transcript from append-only records.
 
 #### `summarise(records: Iterable[dict[str, Any]])`
 
@@ -72093,7 +73661,11 @@ Discover skills under the workspace root; errors are operator-facing.
 
 #### `skill_listing(skills: Iterable[Skill], workspace: str | Path)`
 
-Compose the progressive-disclosure section for the system prompt.
+Compose a bounded, source-labelled data catalogue for the system prompt.
+
+#### `discover_skill_resource_digests(workspace: str | Path, skills: Iterable[Skill])`
+
+Pin bounded text resources linked from skills for later Read checks.
 
 ### `sleeper_agent`
 
@@ -73830,6 +75402,44 @@ An evaluation suite for a recommender deployment.
 #### `refusal_capability_gate(deployment: RecommenderDeployment, suite: EvalSuite)`
 
 A recommender without refusal triggers denies with ``sports.no_refusal_trigger``; an eval suite that tests recommendation quality but never tests refusal is incomplete (``sports:incomplete_eval``). The standard is not "does it recommend well" but "does it know when to refuse" (FanDuel AceAI lesson).
+
+### `spotlighting`
+
+Source: `components/northstar-agent-runtime/spotlighting.py`
+
+Spotlighting: tool-result boundary marking (Microsoft Research), Simulated.
+
+#### `SpotlightingError`
+
+Fail-closed: bad inputs raise.
+
+#### `generate_nonce(nbytes: int=8)`
+
+Generate an unguessable nonce for this call.
+
+#### `delimit(data: str, nonce: str)`
+
+Wrap data in unguessable delimiters.
+
+#### `datamark(data: str, nonce: str)`
+
+Interleave nonce tokens in whitespace (datamarking).
+
+#### `encode_b64(data: str, nonce: str)`
+
+Base64-encode high-risk tool output.
+
+#### `spotlight(data: str, *, level: str='delimit', nonce: str | None=None)`
+
+Apply spotlighting at the requested level.
+
+#### `stdlib_only()`
+
+AST check: stdlib only.
+
+#### `main()`
+
+Self-check.
 
 ### `sse_interface`
 
@@ -78855,9 +80465,11 @@ Where a tool result came from and how much to trust it.
 
 What a handler returns. ``is_error`` is the only failure signal the loop reads.
 
-- `error(message: str, **data: Any)`
-- `ok(content: Any='', **data: Any)`
+- `error(message: str, *, provenance: ToolProvenance | None=None, **data: Any)`
+- `ok(content: Any='', *, provenance: ToolProvenance | None=None, **data: Any)`
 - `text()`
+- `as_block_with_status(tool_use_id: str, *, max_chars: int=MAX_TOOL_RESULT_CHARS)`
+  - Build the bounded provider block and report truncation/omission.
 - `as_block(tool_use_id: str, *, max_chars: int=MAX_TOOL_RESULT_CHARS)`
 #### `ToolSpec`
 
@@ -78865,13 +80477,19 @@ One callable capability.
 
 - `read_only` (property)
 - `to_api()`
+- `schema_snapshot()`
+  - Return an isolated copy of the immutable-at-registration gate schema.
 - `as_dict()`
 #### `ToolSandbox`
 
-Workspace containment with symlink resolution ahead of the check.
+Workspace containment and memory audience checks for every file tool.
 
 - `exists` (property)
 - `resolve(raw: Any, *, for_write: bool=False, must_exist: bool=False)`
+- `memory_path_allowed(path: Path)`
+  - Whether a listing/search may expose this memory path.
+- `require_shell_memory_access()`
+  - Refuse Shell while memory audience rules are active.
 - `relative(path: Path)`
 #### `ToolRegistry`
 
@@ -79207,7 +80825,7 @@ The standard tool-effect profile: system read paths + writable workspace.
 
 #### `network_deny_profile()`
 
-Network denial without filesystem confinement.
+Network and cross-domain Unix-socket denial without FS confinement.
 
 #### `landlock_loader_argv(inner_argv: Sequence[str], spec: Mapping[str, object], *, python: str='python3')`
 
@@ -79261,7 +80879,7 @@ Run one governed command in the configured OS sandbox backend.
 
 Build the :class:`ToolSpec` for Shell (lazy import to keep tools package light).
 
-#### `sandbox_status_line(backend: str='auto')`
+#### `sandbox_status_line(backend: str='auto', aggregate_resource_scope: str='off')`
 
 One-line summary for doctor / dry-run.
 
@@ -80162,6 +81780,49 @@ Treacherous-turn decision ledger: test -> detect -> mitigate -> report.
 - `stdlib_only()`
   - AST self-check: only stdlib imports (+ the in-repo sibling).
 #### `main()`
+
+### `tripwire_guardrails`
+
+Source: `components/northstar-agent-runtime/tripwire_guardrails.py`
+
+Tripwire guardrails: three-valued gate outcomes (OpenAI Agents SDK), Simulated.
+
+#### `TripwireOutcome`
+
+Three-valued gate outcome.
+
+#### `TripwireScope`
+
+When the guardrail fires.
+
+#### `TripwireMode`
+
+Enforcement mode.
+
+#### `GuardrailResult`
+
+Result of a tripwire guardrail check.
+
+#### `TripwireError`
+
+Fail-closed: bad guardrail config raises.
+
+#### `TripwireGuard`
+
+A single tripwire guardrail.
+
+- `name` (property)
+- `scope` (property)
+- `check(tool_name: str, args: Dict[str, Any])`
+  - Run the guardrail check.
+- `fired_count` (property)
+#### `stdlib_only()`
+
+AST check: stdlib only.
+
+#### `main()`
+
+Self-check.
 
 ### `trojan`
 
