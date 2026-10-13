@@ -38,6 +38,11 @@ from adtech_agents import (
     testimonial_existence_gate,
 )
 
+# The imported gate's name starts with "test", so pytest would collect the
+# production function itself as a test item (and fail on its parameters as
+# missing fixtures). It is a helper under test, not a test.
+testimonial_existence_gate.__test__ = False
+
 _SEED = bytes(range(32))
 _PUBKEY = ed25519.public_key(_SEED).hex()
 _T0 = 1_800_000_000
