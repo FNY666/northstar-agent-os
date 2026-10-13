@@ -27,6 +27,7 @@ from typing import Any
 #: command"; 7 means "the command was fine, another run owns the session - wait, retry".
 EXIT_CODES: dict[str, int] = {
     "success": 0,
+    "success_unverified": 0,
     "error_during_execution": 1,
     "error_max_turns": 2,
     "error_max_tool_calls": 3,

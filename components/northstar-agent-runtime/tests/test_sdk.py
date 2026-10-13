@@ -1,13 +1,15 @@
 """The Python API (sdk.py): embed one governed run, no subprocess."""
 import json
 import shutil
+import subprocess
 import tempfile
 import unittest
 from pathlib import Path
 
 import sdk
 from events import EXIT_CODES, event_to_dict
-from sdk import RunOptions, RunReport, run, stream_run
+from code_task import CodeTask
+from sdk import RunOptions, RunReport, run, run_code, stream_run
 
 
 DEMO_WORKSPACE = Path(__file__).resolve().parents[3] / "examples/demo/workspace"
@@ -95,6 +97,74 @@ class RunReportTests(unittest.TestCase):
         report = run(RunOptions(prompt="Hi", provider=provider))
         self.assertEqual(report.subtype, "success")
         self.assertIn("custom provider reply", str(report.events))
+
+    def test_run_code_uses_isolated_worktree_and_returns_evidence(self):
+        with tempfile.TemporaryDirectory() as directory:
+            parent = Path(directory)
+            repository = parent / "repo"
+            repository.mkdir()
+            subprocess.run(["git", "-C", str(repository), "init"], check=True, capture_output=True)
+            subprocess.run(
+                ["git", "-C", str(repository), "config", "user.email", "northstar-tests@example.invalid"],
+                check=True,
+            )
+            subprocess.run(
+                ["git", "-C", str(repository), "config", "user.name", "Northstar Tests"],
+                check=True,
+            )
+            (repository / "old.txt").write_text("old\n", encoding="utf-8")
+            subprocess.run(["git", "-C", str(repository), "add", "old.txt"], check=True)
+            subprocess.run(["git", "-C", str(repository), "commit", "-m", "initial"], check=True, capture_output=True)
+
+            report = run_code(
+                CodeTask(
+                    goal="write result",
+                    workspace=str(repository),
+                    checks=("test -f result.txt",),
+                ),
+                options=RunOptions(
+                    scripted_turns=[
+                        {
+                            "tool": {
+                                "name": "SubmitPlan",
+                                "input": {
+                                    "summary": "create the requested result file",
+                                    "files": ["result.txt"],
+                                    "steps": ["write result.txt"],
+                                    "risks": [],
+                                    "check_indices": [0],
+                                },
+                            }
+                        },
+                        {"tool": {"name": "Write", "input": {"path": "result.txt", "content": "done\n"}}},
+                        {"text": "done"},
+                    ],
+                ),
+                evidence_dir=str(parent / "evidence"),
+            )
+
+            self.assertTrue(report.ok)
+            self.assertEqual(report.subtype, "success")
+            self.assertIsNone(report.worktree)
+            self.assertFalse((repository / "result.txt").exists())
+            self.assertIn("result.txt", Path(report.patch_path).read_text(encoding="utf-8"))
+            self.assertTrue(Path(report.verification_path).is_file())
+            self.assertTrue(Path(report.phase_path).is_file())
+            replay = json.loads(Path(report.patch_replay_path).read_text(encoding="utf-8"))
+            self.assertTrue(replay["ok"])
+            audit = json.loads(Path(report.patch_audit_path).read_text(encoding="utf-8"))
+            self.assertTrue(audit["ok"])
+            delivery = json.loads(Path(report.delivery_seal_path).read_text(encoding="utf-8"))
+            self.assertTrue(delivery["ok"])
+            phases = json.loads(Path(report.phase_path).read_text(encoding="utf-8"))
+            self.assertEqual(
+                [(effect["tool"], effect["status"]) for effect in phases["effects"]],
+                [("Write", "completed"), ("HostCheck", "completed")],
+            )
+            reconcile = sdk.reconcile_code_run(report.evidence_dir)
+            self.assertEqual(reconcile["classification"], "terminal")
+            self.assertEqual(reconcile["phase_seal"], "valid")
+            self.assertFalse(reconcile["automatic_tool_replay"])
 
 
 class PermissionGatingTests(unittest.TestCase):

@@ -6,14 +6,15 @@
 
 [English](../README.md) · [简体中文](README.zh-CN.md) · [繁體中文](README.zh-TW.md) · [日本語](README.ja.md) · [Español](README.es.md) · [한국어](README.ko.md) · [Français](README.fr.md) · [Deutsch](README.de.md) · [Português (Brasil)](README.pt-BR.md) · [Italiano](README.it.md) · [Türkçe](README.tr.md) · [Tiếng Việt](README.vi.md)
 
-**一句话说明：** Northstar 是一个小型的、还在打磨中的 agent 运行环境：统一入口 `northstar agent`、可见边界、可审计、可恢复。内核由 runtime / contract / host / durable / sidecar / interop 等子系统组成。**不是**已经完成的多智能体平台（无托管云、无并行舰队）；今天交付的是实实在在能用的基础件：**默认拒绝的沙箱 `Shell`**（有 bubblewrap 时 OS 隔离，否则诚实的 process 回退——见 [concepts/threat-model.md](concepts/threat-model.md)），以及 **Northstar Codex Sidecar**——一个受限的本地工作器适配器（read-only、ephemeral、仅 Unix socket）。
+**一句话说明：** Northstar 是仍在打磨中的受治理编程 Agent 运行时：`northstar code` 在隔离 Git worktree 中完成仓库任务，交付补丁、宿主声明的验证回执和审计轨迹；`agent` 与 `run` 继续承载通用受治理任务。
 > English is the canonical project entry. Translations mirror its scope and security claims; update them when the canonical README changes.
 
 ## 它是什么
 
 Northstar 面向希望**把活交给 AI 同事**、并要求其在明确边界内运行的人——而不是不受约束的「提示词加工具」循环，也不是需要手工拼装的零件目录。
 
-- **产品路径：** `northstar agent "…"` — 默认开启会话落盘与每 turn 检查点  
+- **编程路径：** `northstar code "…" --check "…"` — 隔离 worktree、宿主强制的 `SubmitPlan` 阶段闸门、结构化代码工具、完成检查、补丁与证据包
+- **通用产品路径：** `northstar agent "…"` — 默认开启会话落盘与每 turn 检查点
 - **内核路径：** `northstar run …` — 每个默认都显式（嵌入、CI、高阶用法）  
 - **不变量：** 每次工具调用穿过权限门、hooks、预算天花板与审计；策略只能收紧  
 
@@ -22,9 +23,9 @@ Northstar 面向希望**把活交给 AI 同事**、并要求其在明确边界�
 
 ## 当前发布了什么
 
-- **产品入口** `northstar` / `bin/northstar` — Agent OS CLI（`agent` / `resume` + 内核命令）  
+- **产品入口** `northstar` / `bin/northstar` — Agent OS CLI（`code` / `agent` / `resume` + 内核命令）
 - `../components/northstar-agent-runtime/` — 受治理智能体循环（事件、hooks、三层权限门、预算、子智能体、仅追加会话、MCP、skills、插件）  
-- `../components/northstar-codex-sidecar/` — 本地 Unix socket 服务：校验请求，以 read-only 模式运行 Codex，限制 I/O，脱敏错误，清理超时进程组  
+- `../components/northstar-codex-sidecar/` — **Northstar Codex Sidecar**，本地 Unix socket 服务：校验请求，以 read-only 模式运行 Codex，限制 I/O，脱敏错误，清理超时进程组
 - `../components/northstar-run-contract/` — 版本化 Run Request/Receipt、HMAC Run Binding、严格适配边界  
 - 以及 host / durable-run / agent-interop 等内核子系统（见英文 README 全表）
 
@@ -58,6 +59,7 @@ make demo
 
 ```sh
 bin/northstar --version
+bin/northstar code "修复失败测试" --workspace . --check "python3 -m unittest" --dry-run
 bin/northstar agent --workspace . --provider scripted --scripted-text "ok" --prompt "hello"
 bin/northstar resume latest --workspace . --prompt "continue" --scripted-text "ok"
 bin/northstar sessions list --workspace .

@@ -190,20 +190,30 @@ jobs:
         # the untouched copy must stay green. ~1-2 minutes.
         run: python3 tools/verify_invariants.py
   documentation:
-    name: Repository documentation (structure + build + links)
+    name: Repository checks (documentation + offline code tasks)
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
+      - name: Setup Node for offline TypeScript fixtures
+        uses: actions/setup-node@v4
+        with:
+          node-version: '24'
       - name: Structure tests
         # Component README "Concepts, guides and API reference" link targets,
         # examples index coverage, API page headers/module lists, plus the
-        # pre-existing documentation structure tests.
+        # pre-existing documentation structure tests, offline task-pack checks,
+        # and conservative runtime module inventory tests. Fixtures need no npm install.
         run: python -m unittest discover -s tests -p 'test_*.py' -v
       - name: Build and link check
         # Docstring API pages must be byte-fresh against the committed ones,
         # and every internal markdown link must resolve. Pure standard library,
         # so this runs offline with no dependency install.
         run: python3 tests/docbuild.py verify
+      - name: Offline task fixture controls
+        # Reject all 24 untouched fixtures, then replay every reference patch on
+        # a clean initial commit. This proves fixtures, not real-model accuracy.
+        run: python3 scripts/check-code-task-pack.py --write /tmp/northstar-code-task-controls.json

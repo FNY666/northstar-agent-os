@@ -16,7 +16,7 @@ prompt ──► AgentRuntime ──► provider (Anthropic Messages API, or scr
                  ├─ hooks (10 lifecycle events, veto-capable)
                  ├─ permission gate (disallowed → allowed → mode + host callback)
                  ├─ ceilings (turns / tool calls / USD)
-                 ├─ tools (Read, Grep, LS, Write, Edit, DescribeTools, Shell, Task)
+                 ├─ tools (kernel: Read/Grep/Write/Edit/Shell; code: RepoMap/SearchCode/GitInspect/SubmitPlan/ApplyPatch/RunCheck)
                  │        └── CodexReadOnly ──Unix socket──► northstar-codex-sidecar ──► codex --sandbox read-only
                  ├─ subagents (own context, tool subset, ceilings, provider)
                  ├─ compaction (safe boundaries only)
@@ -69,6 +69,45 @@ The installed names mirror the in-tree layout (`python -m cli run ...` works
 identically from a checkout). The version has one source of truth (`_version.py`)
 and the test suite asserts it equals the `pyproject.toml` version, so an
 installed wheel and a source checkout can never disagree.
+
+## Programming tasks
+
+`northstar code` is the programming product profile. It records the exact
+starting commit, creates a detached Git worktree, adds five bounded repository
+tools plus the host-owned `SubmitPlan` phase gate, runs host-declared checks independently
+when the model stops, and writes `task.json`, `repository-snapshot.json`, `phases.json`,
+`verification.json`, `changes.patch`, `git-status.txt`, and a
+hash-bearing `manifest.json` to one evidence directory. It never commits or
+pushes, and it removes only the disposable worktree after success.
+
+Before declared checks run, the host independently proves that the patch
+replays from the recorded start commit and audits the final diff for protected
+governance paths, special files, generated artifacts, oversized changes, and
+high-confidence credential patterns. Receipts are stored as
+`patch-replay.json` and `patch-audit.json`.
+
+After host checks, `delivery-seal.json` confirms that the delivered patch is
+unchanged from the one checked before verification. A check that rewrites source
+cannot return a successful code outcome, even when its own exit code is zero.
+
+If the process is interrupted, `northstar code-reconcile EVIDENCE_DIR` inspects
+the durable phase/effect journal and referenced artifact hashes. A mutating tool
+or host check with a start record and no completion record, or a handler that
+raised after it may have changed state, is classified `manual_review_required`.
+The command never replays it. Python callers can use `reconcile_code_run()` for
+the same receipt. See the [code recovery guide](../../docs/guides/code-recovery.md)
+for classification and exit-code semantics.
+
+```sh
+northstar code "fix the parser regression" --workspace . \
+  --check "python3 -m unittest discover -s tests" \
+  --provider anthropic --model claude-sonnet-4-5
+```
+
+Network access remains denied unless the host configures the governed egress
+sidecar and exact targets. A run with no `--check` finishes as
+`success_unverified`; a failed completion check becomes
+`error_postconditions_failed`.
 
 ## Quick start (offline, no API key)
 

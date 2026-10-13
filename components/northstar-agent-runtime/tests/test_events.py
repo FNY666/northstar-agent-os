@@ -27,9 +27,12 @@ from providers.base import (
 
 class EventTypeTests(unittest.TestCase):
     def test_system_message_accepts_the_documented_subtypes(self):
-        for subtype in ("init", "compact_boundary", "informational", "postconditions"):
+        for subtype in ("init", "compact_boundary", "informational", "postconditions", "verification"):
             self.assertEqual(SystemMessage(subtype=subtype, content="x").subtype, subtype)
-        self.assertEqual(SYSTEM_SUBTYPES, ("init", "compact_boundary", "informational", "postconditions"))
+        self.assertEqual(
+            SYSTEM_SUBTYPES,
+            ("init", "compact_boundary", "informational", "postconditions", "verification"),
+        )
 
     def test_system_message_rejects_an_unknown_subtype(self):
         with self.assertRaises(ValueError):
@@ -40,6 +43,7 @@ class EventTypeTests(unittest.TestCase):
             RESULT_SUBTYPES,
             (
                 "success",
+                "success_unverified",
                 "error_max_turns",
                 "error_max_tool_calls",
                 "error_max_budget_usd",
@@ -54,7 +58,10 @@ class EventTypeTests(unittest.TestCase):
         self.assertEqual(set(RESULT_SUBTYPES), set(EXIT_CODES))
         for subtype in RESULT_SUBTYPES:
             message = ResultMessage(subtype=subtype)
-            self.assertEqual(message.is_error, subtype != "success")
+            self.assertEqual(
+                message.is_error,
+                subtype not in {"success", "success_unverified"},
+            )
 
     def test_result_message_rejects_an_invented_subtype(self):
         with self.assertRaises(ValueError):
