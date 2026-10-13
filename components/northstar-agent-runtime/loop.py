@@ -46,6 +46,12 @@ from postconditions import (
     PostConditionSet,
     summarise as summarise_postconditions,
 )
+from verification import (
+    VerificationError,
+    run_commands as run_verification_commands,
+    summarise as summarise_verification,
+    validate_commands as validate_verification_commands,
+)
 from permissions import (
     ArgumentPolicy,
     DEFAULT_SHELL_DENYLIST,
@@ -174,6 +180,17 @@ class RuntimeConfig:
     #: Workspace claims checked after the run by an independent evaluator, so a
     #: model saying "done" is not the evidence that it is. See postconditions.py.
     postconditions: Any = ()
+    #: Host-declared test/build/lint commands run after the model asks to finish.
+    #: They are never added to provider context and execute with network denied in
+    #: the same sandbox envelope as Shell. A failure demotes success.
+    verification_commands: tuple[str, ...] = ()
+    #: When true, a would-be success without any host-owned check is reported as
+    #: success_unverified. The programming product enables this; the generic
+    #: agent loop preserves its existing success semantics.
+    require_verification: bool = False
+    #: Optional host-owned phase gate used by ``northstar code``. It persists
+    #: transitions beside the code evidence and controls effectful tools.
+    code_phase_machine: Any = None
     #: Append one checkpoint transcript record every N turn boundaries (0 = off).
     #: Off by default because a new record type in every transcript is a format
     #: change, and a format change should be chosen, not inherited.
@@ -263,6 +280,15 @@ class RuntimeConfig:
         def fail(message: str) -> None:
             raise RuntimeConfigurationError(message)
 
+        try:
+            object.__setattr__(
+                self,
+                "verification_commands",
+                validate_verification_commands(self.verification_commands),
+            )
+        except VerificationError as error:
+            fail(f"verification: {error}")
+
         if not isinstance(self.model, str) or not self.model.strip():
             fail("model must be a non-empty string")
         if isinstance(self.max_turns, bool) or not isinstance(self.max_turns, int) or self.max_turns < 1:
@@ -296,6 +322,16 @@ class RuntimeConfig:
             fail("max_output_tokens must be positive")
         if not isinstance(self.stream, bool):
             fail("stream must be a boolean")
+        if not isinstance(self.require_verification, bool):
+            fail("require_verification must be a boolean")
+        if self.code_phase_machine is not None and any(
+            not callable(getattr(self.code_phase_machine, name, None))
+            for name in (
+                "submit_plan", "begin_execution", "complete_execution", "begin_check",
+                "begin_verification", "seal_verification", "finish",
+            )
+        ):
+            fail("code_phase_machine does not implement the programming phase protocol")
         if not isinstance(self.lock_session, bool):
             fail("lock_session must be a boolean")
         if self.lock_session:
@@ -401,6 +437,9 @@ class RuntimeConfig:
             "shell_aggregate_resource_scope": self.shell_aggregate_resource_scope,
             "compaction_threshold_tokens": self.compaction_threshold_tokens,
             "stream": self.stream,
+            "verification_commands": len(self.verification_commands),
+            "require_verification": self.require_verification,
+            "code_phase_gate": self.code_phase_machine is not None,
             "retry": self.retry.as_dict() if self.retry is not None else None,
             "lock_session": self.lock_session,
             "sidecar": bool(self.sidecar_socket),
@@ -1433,6 +1472,10 @@ class AgentRuntime:
             init_data["sandbox"] = {"backend": config.shell_backend, "isolation": "unknown"}
         if self.postconditions:
             init_data["postconditions"] = [condition.as_dict() for condition in self.postconditions.conditions]
+        if config.verification_commands:
+            # The checks are host configuration and are not injected into the
+            # provider context. Full commands appear only with executor receipts.
+            init_data["verification_checks"] = len(config.verification_commands)
         if state.resumed_from is not None:
             init_data["resumed_from"] = state.resumed_from
         if config.parent_session and state.resumed_from is None:
@@ -1730,6 +1773,49 @@ class AgentRuntime:
         state.final_text = assistant.text
         self._checkpoint(state, boundary="after_text")
         subtype = "success"
+        if config.code_phase_machine is not None and config.depth == 0:
+            try:
+                config.code_phase_machine.begin_verification()
+            except (TypeError, ValueError) as error:
+                state.errors.append(f"code phase protocol: {error}")
+                subtype = "error_postconditions_failed"
+        if config.verification_commands and subtype == "success":
+            verification_context = ToolContext(
+                session_id=state.session_id,
+                agent=config.agent,
+                depth=config.depth,
+                turn_index=turn_index,
+                call_id=f"verification-{turn_index}",
+                sandbox=self.sandbox,
+                limits=self.limits,
+                services=self._services(),
+            )
+            receipts = run_verification_commands(
+                config.verification_commands,
+                context=verification_context,
+            )
+            verification_summary = summarise_verification(
+                config.verification_commands,
+                receipts,
+            )
+            verification_record = SystemMessage(
+                subtype="verification",
+                content=(
+                    f"verification: {verification_summary['passed']}/"
+                    f"{verification_summary['declared']} passed"
+                    if verification_summary["ok"]
+                    else (
+                        "verification: "
+                        f"{verification_summary['failed']} failed, "
+                        f"{verification_summary['skipped']} skipped"
+                    )
+                ),
+                data=verification_summary,
+            )
+            self.sessions.record_system(verification_record, agent=config.agent)
+            yield verification_record
+            if not verification_summary["ok"]:
+                subtype = "error_postconditions_failed"
         if self.postconditions:
             summary = summarise_postconditions(self.postconditions.evaluate())
             record = SystemMessage(
@@ -1747,6 +1833,19 @@ class AgentRuntime:
                 # The model asked to stop and the workspace disagrees.
                 # "It said it was done" is not the evidence we accept.
                 subtype = "error_postconditions_failed"
+        if config.code_phase_machine is not None and config.depth == 0 and config.code_phase_machine.state in {"planned", "verifying"}:
+            try:
+                config.code_phase_machine.seal_verification()
+            except (OSError, TypeError, ValueError) as error:
+                state.errors.append(f"code delivery seal: {error}")
+                subtype = "error_postconditions_failed"
+        if (
+            subtype == "success"
+            and config.require_verification
+            and not config.verification_commands
+            and not self.postconditions
+        ):
+            subtype = "success_unverified"
         yield self._finish(state, subtype)
         return True
 
@@ -2056,7 +2155,9 @@ class AgentRuntime:
                     ),
                     decision=decision,
                     authorized_inputs_digest=governed_digest,
-                    executor=lambda tool, args: spec.handler(args, context),
+                    executor=lambda tool, args: self._execute_tool_handler(
+                        spec, args, context, call_id=call.id
+                    ),
                 )
                 duration_ms = int((time.monotonic() - started) * 1000)
                 if governed.executed:
@@ -2779,7 +2880,9 @@ class AgentRuntime:
             ),
             decision=decision,
             authorized_inputs_digest=outcome.governed_inputs_digest,
-            executor=lambda tool, args: spec.handler(args, context),
+            executor=lambda tool, args: self._execute_tool_handler(
+                spec, args, context, call_id=call.id
+            ),
         )
         duration_ms = int((time.monotonic() - started) * 1000)
         if governed.executed:
@@ -2831,6 +2934,7 @@ class AgentRuntime:
             "sidecar": self.sidecar,
             "egress": self.egress,
             "config": self.config,
+            "code_phase_machine": self.config.code_phase_machine,
             "skill_digests": self.config.skill_digests,
             "runtime": self,
             "shell_backend": self.config.shell_backend,
@@ -2839,6 +2943,33 @@ class AgentRuntime:
             "shell_landlock": self.config.shell_landlock,
             "shell_aggregate_resource_scope": self.config.shell_aggregate_resource_scope,
         }
+
+    def _execute_tool_handler(
+        self,
+        spec: Any,
+        payload: dict[str, Any],
+        context: ToolContext,
+        *,
+        call_id: str,
+    ) -> Any:
+        """Enter Execute immediately before an approved effect reaches its handler."""
+        phases = self.config.code_phase_machine
+        effect_id = None
+        if phases is not None and bool(spec.is_mutating):
+            effect_id = phases.begin_execution(tool=spec.name, call_id=call_id)
+        try:
+            result = spec.handler(payload, context)
+        except BaseException as error:
+            if effect_id is not None:
+                phases.complete_execution(
+                    effect_id,
+                    status="unknown",
+                    error_class=type(error).__name__,
+                )
+            raise
+        if effect_id is not None:
+            phases.complete_execution(effect_id, status="completed")
+        return result
 
     def _record_tool_message(self, message: UserMessage) -> None:
         """Write the tool_result turn, optionally without output bodies.
@@ -3168,6 +3299,7 @@ class AgentRuntime:
             egress_target_scope=self.config.egress_target_scope,
             include_describe_tool=False,
             dataflow_policy=self.config.dataflow_policy,
+            code_phase_machine=self.config.code_phase_machine,
         )
         child = AgentRuntime(
             provider=child_provider,

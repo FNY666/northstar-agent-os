@@ -1,0 +1,11 @@
+{
+  "name": "northstar-fixture-ts-build-001",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./missing.ts"
+  },
+  "scripts": {
+    "test": "node --test tests/contract.test.ts"
+  }
+}

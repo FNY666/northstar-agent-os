@@ -1,0 +1,3 @@
+{
+  "names.py": "\"\"\"Normalize names by case-folding and collapsing Unicode whitespace.\"\"\"\ndef normalize_names(names, limit=100):\n    if not isinstance(limit, int) or isinstance(limit, bool) or limit < 0:\n        raise ValueError(\"invalid batch limit\")\n    result = []\n    for name in names:\n        if len(result) >= limit:\n            raise ValueError(\"batch limit exceeded\")\n        if not isinstance(name, str):\n            raise TypeError(\"name must be text\")\n        result.append(\" \".join(name.split()).casefold())\n    return result\n"
+}

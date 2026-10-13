@@ -1,0 +1,3 @@
+{
+  "timestamps.py": "\"\"\"Public message stamps retain their message and numeric creation time.\"\"\"\nimport time\n\ndef stamp(message, *, clock=None):\n    current_clock = time.time if clock is None else clock\n    return {\"message\": message, \"created_at\": current_clock()}\n"
+}

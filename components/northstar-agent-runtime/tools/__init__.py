@@ -1835,6 +1835,22 @@ def build_default_registry(include_describe: bool = True) -> ToolRegistry:
     return registry
 
 
+def build_code_registry(include_describe: bool = True) -> ToolRegistry:
+    """Default tools plus the structured programming profile.
+
+    The generic ``run`` and ``agent`` surfaces keep their stable seven-tool
+    kernel.  ``code`` opts into repository-specific capabilities explicitly,
+    which also makes policy files and audit logs able to distinguish the two
+    product profiles.
+    """
+    from tools.code import code_tool_specs
+
+    registry = build_default_registry(include_describe=include_describe)
+    for spec in code_tool_specs():
+        registry.register(spec)
+    return registry
+
+
 def codex_tool_spec() -> ToolSpec:
     """Schema for the sidecar-delegated tool (registered only with a socket)."""
     from sidecar_client import SIDECAR_MAX_PROMPT_CHARS, SIDECAR_MIN_TIMEOUT_MS
@@ -1893,6 +1909,7 @@ __all__ = [
     "ToolResult",
     "ToolSandbox",
     "ToolSpec",
+    "build_code_registry",
     "build_default_registry",
     "codex_tool_spec",
     "describe_tools",

@@ -9,6 +9,115 @@ Docstring-generated reference over the component's public modules (``ast``-extra
 
 ## Modules
 
+### `code_task`
+
+Source: `components/northstar-agent-runtime/code_task.py`
+
+Isolated Git workspaces and evidence artifacts for ``northstar code``.
+
+#### `append_code_protocol(system_prompt: str, *, checks: Sequence[str]=(), plan_only: bool=False)`
+
+Append the host-owned programming workflow to an existing system prompt.
+
+#### `CodeTaskError`
+
+The requested code workspace cannot be prepared or evidenced safely.
+
+#### `CodePhaseMachine`
+
+Host-owned phase gate with a durable, atomic transition journal.
+
+- `state` (property)
+- `outcome` (property)
+- `plan_submitted` (property)
+- `start()`
+- `submit_plan(plan: dict[str, Any])`
+- `begin_execution(*, tool: str, call_id: str='')`
+  - Durably record an approved effect immediately before its handler runs.
+- `begin_check(*, index: int)`
+  - Record a host verification command before entering the sandbox.
+- `complete_execution(effect_id: str, *, status: str, error_class: str='')`
+  - Close one effect receipt; a crash before this call leaves it unknown.
+- `begin_verification()`
+- `seal_verification()`
+  - Prove host checks did not change the audited delivery patch.
+- `finish(outcome: str, *, reason: str='runtime terminal result')`
+- `as_dict()`
+#### `validate_patch_replay(worktree: str | Path, *, start_commit: str, evidence_dir: str | Path)`
+
+Check the final patch against a temporary index seeded from start_commit.
+
+#### `audit_delivery_patch(worktree: str | Path, *, evidence_dir: str | Path)`
+
+Reject high-confidence delivery hazards after every model tool has stopped.
+
+#### `reconcile_code_evidence(evidence_dir: str | Path)`
+
+Classify an interrupted code run without replaying any tool effect.
+
+#### `default_state_root()`
+
+Host state directory used when the caller did not choose an evidence path.
+
+#### `CodeTask`
+
+The host-owned task contract for one programming run.
+
+- `as_dict()`
+#### `IsolatedCodeWorkspace`
+
+Lifecycle of a detached task worktree and its durable evidence directory.
+
+- `prepare()`
+- `execution_root` (property)
+  - Workspace equivalent to the caller's path inside the detached tree.
+- `session_dir` (property)
+- `record_repository_snapshot()`
+  - Persist a bounded map of the exact clean tree handed to the agent.
+- `record_task(task: CodeTask)`
+  - Persist the immutable host task beside the run manifest.
+- `record_verification(summaries: Sequence[dict[str, Any]])`
+  - Persist independent completion receipts, including an explicit empty plan.
+- `record_phases(phases: CodePhaseMachine)`
+  - Seal the latest phase journal into the top-level evidence manifest.
+- `capture(*, exit_code: int, terminal: str)`
+  - Capture tracked and untracked changes as one binary-capable patch.
+- `cleanup()`
+  - Remove only the disposable worktree; evidence is never removed here.
+- `preserve(*, reason: str)`
+#### `CodeRunReport`
+
+Public summary produced by a ``northstar code`` orchestration.
+
+- `ok` (property)
+- `as_dict()`
+### `verification`
+
+Source: `components/northstar-agent-runtime/verification.py`
+
+Host-declared command checks for the programming-agent completion boundary.
+
+#### `VerificationError`
+
+A host-declared verification command is malformed or unbounded.
+
+#### `validate_commands(commands: Iterable[str])`
+
+Return a stable, validated command tuple.
+
+#### `VerificationReceipt`
+
+One check result obtained from the sandbox executor.
+
+- `as_dict()`
+#### `run_commands(commands: Sequence[str], *, context: ToolContext, timeout_ms: int=120000)`
+
+Run host-owned checks serially and return receipts for every attempted check.
+
+#### `summarise(commands: Sequence[str], receipts: Sequence[VerificationReceipt])`
+
+Stable audit payload for a verification run.
+
 ### `memory_integrity`
 
 Source: `components/northstar-agent-runtime/memory_integrity.py`
@@ -83,6 +192,54 @@ Check a decoded JSON tree and return ``(estimated_bytes, expanded_nodes)``.
 
 Count JSON value occurrences and nesting before decoding the input.
 
+### `providers.http_response_limits`
+
+Source: `components/northstar-agent-runtime/providers/http_response_limits.py`
+
+Response-body limits for provider-owned synchronous SDK HTTP clients.
+
+#### `HTTPResponseLimitError`
+
+An upstream HTTP response exceeded the configured body ceiling.
+
+#### `make_response_limited_http_client(base_client: Callable[..., Any], max_response_bytes: int)`
+
+Create a default-SDK-compatible HTTP client with a hard response cap.
+
+### `tools.code`
+
+Source: `components/northstar-agent-runtime/tools/code.py`
+
+Structured repository tools for the ``northstar code`` product path.
+
+#### `repo_map(payload: dict[str, Any], ctx: ToolContext)`
+
+Return a bounded, deterministic map of tracked and relevant untracked files.
+
+#### `search_code(payload: dict[str, Any], ctx: ToolContext)`
+
+Search source text, using literal matching unless regex=true is explicit.
+
+#### `git_inspect(payload: dict[str, Any], ctx: ToolContext)`
+
+Inspect worktree status or its patch against the immutable starting commit.
+
+#### `submit_plan(payload: dict[str, Any], ctx: ToolContext)`
+
+Cross the host-owned plan gate before any code-task effect may run.
+
+#### `apply_patch(payload: dict[str, Any], ctx: ToolContext)`
+
+Apply one bounded text patch after every target crosses workspace policy.
+
+#### `run_check(payload: dict[str, Any], ctx: ToolContext)`
+
+Run one host-declared verification command by index, never model-authored text.
+
+#### `code_tool_specs()`
+
+Tool specifications added only for the programming product profile.
+
 ### `tools.resource_limits`
 
 Source: `components/northstar-agent-runtime/tools/resource_limits.py`
@@ -92,6 +249,28 @@ Per-process resource ceilings for Shell child processes.
 #### `resource_limits_loader_argv(argv: Sequence[str], limits: Mapping[str, int], *, python: str | None=None)`
 
 Return an exec wrapper applying CPU, address-space and file-size caps.
+
+### `tools.systemd_scope`
+
+Source: `components/northstar-agent-runtime/tools/systemd_scope.py`
+
+Root-managed systemd scopes for aggregate Shell process-tree limits.
+
+#### `SystemdScopeError`
+
+The requested aggregate resource boundary cannot be established.
+
+#### `validate_systemd_scope_host()`
+
+Refuse hosts without the protected system cgroup-v2 control plane.
+
+#### `systemd_scope_argv(argv: Sequence[str], *, memory_max_bytes: int, tasks_max: int, systemd_run: str | None=None, unit_name: str | None=None)`
+
+Wrap argv in a PID-1-owned scope with aggregate memory/task/CPU limits.
+
+#### `cleanup_systemd_scope(unit_name: str, *, systemctl: str | None=None, timeout_seconds: float=2.0)`
+
+Kill all scope members and wait for systemd to deactivate the scope.
 
 ### `a2a_budget_combo`
 
@@ -64531,7 +64710,7 @@ A user turn, or the tool_result carrier for a batch of tool calls.
 Exactly one per run. Any expected failure is this event, never an exception.
 
 - `is_error` (property)
-  - Derived, never supplied: every non-success subtype is an error.
+  - Derived, never supplied: verified and explicitly unverified completion are non-errors.
 - `to_api()`
 - `render()`
 #### `transcript_to_api(messages: Iterable[Message])`
@@ -71089,6 +71268,14 @@ Run one governed loop, yielding each event as a plain dict.
 #### `run(options: RunOptions, resume: str | None=None)`
 
 Run one governed loop to completion and return its :class:`RunReport`.
+
+#### `run_code(task: CodeTask, *, options: RunOptions | None=None, evidence_dir: str | None=None, keep_worktree: bool=False)`
+
+Run one programming task in an isolated Git worktree.
+
+#### `reconcile_code_run(evidence_dir: str | Path)`
+
+Classify an interrupted code run; never replay an unreceipted effect.
 
 ### `sdk_generation`
 
@@ -80535,6 +80722,10 @@ Self-inspection tool: what may I call, and how is it governed?
 #### `build_default_registry(include_describe: bool=True)`
 
 The workspace tool set every run starts from.
+
+#### `build_code_registry(include_describe: bool=True)`
+
+Default tools plus the structured programming profile.
 
 #### `codex_tool_spec()`
 

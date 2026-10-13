@@ -1,0 +1,3 @@
+{
+  "pyproject.toml": "[build-system]\nrequires = []\nbuild-backend = \"backend\"\nbackend-path = [\".\"]\n\n[project]\nname = \"demo-templates\"\nversion = \"1.0.0\"\n\n[tool.demo]\ninclude-templates = true\n"
+}

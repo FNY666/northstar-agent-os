@@ -20,10 +20,13 @@ from typing import Any, Iterable, Iterator, Literal, Sequence
 #: ``postconditions`` is the verdict of the independent end-of-run check
 #: (postconditions.py); it is a distinct subtype rather than ``informational`` so a
 #: consumer can require it in a transcript without grepping text.
-SystemSubtype = Literal["init", "compact_boundary", "informational", "postconditions"]
+SystemSubtype = Literal[
+    "init", "compact_boundary", "informational", "postconditions", "verification"
+]
 
 ResultSubtype = Literal[
     "success",
+    "success_unverified",
     "error_max_turns",
     "error_max_tool_calls",
     "error_max_budget_usd",
@@ -39,6 +42,7 @@ ResultSubtype = Literal[
 
 RESULT_SUBTYPES: tuple[str, ...] = (
     "success",
+    "success_unverified",
     "error_max_turns",
     "error_max_tool_calls",
     "error_max_budget_usd",
@@ -48,7 +52,9 @@ RESULT_SUBTYPES: tuple[str, ...] = (
     "error_session_busy",
 )
 
-SYSTEM_SUBTYPES: tuple[str, ...] = ("init", "compact_boundary", "informational", "postconditions")
+SYSTEM_SUBTYPES: tuple[str, ...] = (
+    "init", "compact_boundary", "informational", "postconditions", "verification"
+)
 
 BlockKind = Literal["text", "tool_use", "tool_result", "thinking"]
 
@@ -439,8 +445,8 @@ class ResultMessage:
 
     @property
     def is_error(self) -> bool:
-        """Derived, never supplied: every non-success subtype is an error."""
-        return self.subtype != "success"
+        """Derived, never supplied: verified and explicitly unverified completion are non-errors."""
+        return self.subtype not in {"success", "success_unverified"}
 
     def to_api(self) -> dict[str, Any] | None:
         return None

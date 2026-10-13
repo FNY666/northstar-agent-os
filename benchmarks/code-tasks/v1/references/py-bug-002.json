@@ -1,0 +1,3 @@
+{
+  "cache.py": "\"\"\"A TTL cache; clock values are monotonic seconds.\"\"\"\nimport time\n\nclass Cache:\n    def __init__(self, clock=None):\n        self.clock = clock if clock is not None else time.monotonic\n        self.entries = {}\n\n    def set(self, key, value, ttl):\n        if ttl < 0:\n            raise ValueError(\"ttl must be non-negative\")\n        self.entries[key] = (value, self.clock() + ttl)\n\n    def get(self, key):\n        value, expires = self.entries[key]\n        if self.clock() >= expires:\n            del self.entries[key]\n            raise KeyError(key)\n        return value\n"
+}

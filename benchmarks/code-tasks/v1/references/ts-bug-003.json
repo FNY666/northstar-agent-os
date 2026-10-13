@@ -1,0 +1,3 @@
+{
+  "query.ts": "export function buildQuery(params: Record<string, string | readonly string[] | undefined>): string {\n  const query = new URLSearchParams();\n  for (const [key, value] of Object.entries(params)) {\n    if (value === undefined) continue;\n    if (Array.isArray(value)) {\n      for (const item of value) query.append(key, item);\n    } else {\n      query.append(key, value as string);\n    }\n  }\n  return query.toString();\n}\n"
+}

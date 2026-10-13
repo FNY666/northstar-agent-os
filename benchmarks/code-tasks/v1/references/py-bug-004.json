@@ -1,0 +1,3 @@
+{
+  "pagination.py": "\"\"\"Collect pages from fetch(cursor) returning items and next_cursor.\"\"\"\ndef collect(fetch):\n    cursor = None\n    items = []\n    seen = set()\n    while True:\n        if cursor in seen:\n            raise ValueError(\"repeated pagination cursor\")\n        seen.add(cursor)\n        page = fetch(cursor)\n        rows = page[\"items\"]\n        if not rows:\n            return items\n        items.extend(rows)\n        cursor = page[\"next_cursor\"]\n        if cursor is None:\n            return items\n"
+}

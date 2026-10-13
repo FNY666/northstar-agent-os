@@ -1,0 +1,3 @@
+{
+  "redaction.ts": "export function redact<T>(value: T, paths: readonly string[], replacement: unknown = \"***\"): T {\n  const selected = new Set(paths);\n  function visit(node: unknown, prefix: string): unknown {\n    if (Array.isArray(node)) return node.map(item => visit(item, prefix));\n    if (node !== null && typeof node === \"object\") {\n      return Object.fromEntries(Object.entries(node).map(([key, child]) => {\n        const path = prefix ? prefix + \".\" + key : key;\n        return [key, selected.has(path) ? structuredClone(replacement) : visit(child, path)];\n      }));\n    }\n    return node;\n  }\n  return visit(value, \"\") as T;\n}\n"
+}

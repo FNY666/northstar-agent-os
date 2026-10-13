@@ -30,10 +30,12 @@ embedding contract.
 """
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
+from pathlib import Path
 from typing import Any, Iterator, Sequence
 
 from events import EXIT_CODES, event_to_dict
+from code_task import CodeRunReport, CodeTask, IsolatedCodeWorkspace, reconcile_code_evidence
 
 DEFAULT_MODEL = "claude-sonnet-4-5"
 _READ_ONLY_KINDS = ("edit", "write")
@@ -77,6 +79,10 @@ class RunOptions:
     workspace_agents: bool = True  # register .northstar/agents/*.md definitions
     checkpoint_turns: int = 0  # append a resumable boundary record every N turns (0 = off)
     resume_from: str | None = None  # session id to fork from its latest checkpoint; the parent file is never written
+    verification_commands: Sequence[str] = ()  # host-owned checks run after the model stops
+    require_verification: bool = False  # report success_unverified when no host-owned check exists
+    code_tools: bool = False  # add the structured repository tool profile
+    code_phase_machine: Any = None  # internal host-owned phase gate for run_code
 
 
 @dataclass
@@ -97,7 +103,7 @@ class RunReport:
 
     @property
     def is_error(self) -> bool:
-        return self.subtype != "success"
+        return self.subtype not in {"success", "success_unverified"}
 
     @property
     def exit_code(self) -> int:
@@ -152,12 +158,12 @@ def _build(options: RunOptions, resume: str | None = None) -> tuple[Any, Any, li
     from loop import AgentRuntime, RuntimeConfig
     from permissions import subtract
     from sessions import SessionStore
-    from tools import ToolLimits, build_default_registry
+    from tools import ToolLimits, build_code_registry, build_default_registry
 
     if not options.prompt.strip():
         raise ValueError("prompt must be non-empty text")
 
-    registry = build_default_registry()
+    registry = build_code_registry() if options.code_tools else build_default_registry()
     denied = _apply_read_only(registry, list(options.disallowed_tools)) if options.read_only else list(options.disallowed_tools)
     allowed = subtract(list(options.allowed_tools), denied)
     denied = tuple(dict.fromkeys(denied))
@@ -185,9 +191,21 @@ def _build(options: RunOptions, resume: str | None = None) -> tuple[Any, Any, li
         "record_tool_output_in_session": not options.redact_tool_output,
         "redact_session_content": options.redact_session_content,
         "stream": options.stream,
+        "verification_commands": tuple(options.verification_commands),
+        "require_verification": options.require_verification,
+        "code_phase_machine": options.code_phase_machine,
     }
     if options.system_prompt is not None:
         config_kwargs["system_prompt"] = options.system_prompt
+    if options.code_tools:
+        from code_task import append_code_protocol
+        from loop import DEFAULT_SYSTEM_PROMPT
+
+        config_kwargs["system_prompt"] = append_code_protocol(
+            str(config_kwargs.get("system_prompt", DEFAULT_SYSTEM_PROMPT)),
+            checks=tuple(options.verification_commands),
+            plan_only=options.permission_mode == "plan" or options.read_only,
+        )
     provider = _build_provider(options)
 
     # A checkpoint resume forks: new session id, new file, counters and cost carried
@@ -306,3 +324,126 @@ def run(options: RunOptions, resume: str | None = None) -> RunReport:
         permission_denials=list(result.get("permission_denials", [])) if result else [],
         events=events,
     )
+
+
+def run_code(
+    task: CodeTask,
+    *,
+    options: RunOptions | None = None,
+    evidence_dir: str | None = None,
+    keep_worktree: bool = False,
+) -> CodeRunReport:
+    """Run one programming task in an isolated Git worktree.
+
+    ``options`` selects the provider and ceilings. The task owns the goal,
+    source workspace and host-declared checks. Successful runs capture a patch
+    and remove the disposable worktree unless ``keep_worktree`` is true; failed
+    runs preserve it for reconciliation.
+    """
+    if not isinstance(task, CodeTask):
+        raise TypeError("task must be a code_task.CodeTask")
+    base = options or RunOptions()
+    if base.prompt.strip() and base.prompt.strip() != task.goal:
+        raise ValueError("RunOptions.prompt conflicts with CodeTask.goal")
+    isolated = IsolatedCodeWorkspace(
+        task.workspace,
+        evidence_root=evidence_dir,
+    ).prepare()
+    assert isolated.worktree is not None
+    assert isolated.evidence_dir is not None
+    isolated.record_task(task)
+    from code_task import CodePhaseMachine
+
+    phases = CodePhaseMachine(
+        run_id=isolated.run_id,
+        evidence_dir=isolated.evidence_dir,
+        plan_only=task.plan_only,
+        worktree=isolated.worktree,
+        start_commit=isolated.start_commit,
+    )
+    phases.start()
+
+    allowed = tuple(base.allowed_tools)
+    permission_mode = base.permission_mode
+    read_only = base.read_only
+    checks: Sequence[str] = task.checks
+    require_verification = not task.plan_only
+    if task.plan_only:
+        permission_mode = "plan"
+        read_only = True
+        checks = ()
+        require_verification = False
+    else:
+        if permission_mode == "default":
+            permission_mode = "acceptEdits"
+        for tool_name in ("Shell", "RunCheck"):
+            if tool_name not in allowed and tool_name not in base.disallowed_tools:
+                allowed = (*allowed, tool_name)
+
+    configured = replace(
+        base,
+        prompt=task.goal,
+        workspace=str(isolated.execution_root),
+        permission_mode=permission_mode,
+        allowed_tools=allowed,
+        read_only=read_only,
+        session_dir=str(isolated.session_dir),
+        checkpoint_turns=base.checkpoint_turns or 1,
+        verification_commands=tuple(checks),
+        require_verification=require_verification,
+        code_tools=True,
+        code_phase_machine=phases,
+    )
+    report: RunReport | None = None
+    patch_path = None
+    verification_path = None
+    phase_path = None
+    verification_events: tuple[dict[str, Any], ...] = ()
+    try:
+        report = run(configured)
+        verification_events = tuple(
+            dict(event.get("data") or {})
+            for event in report.events
+            if event.get("type") == "system" and event.get("subtype") == "verification"
+        )
+        verification_path = isolated.record_verification(verification_events)
+        phases.finish(report.subtype)
+        phase_path = isolated.record_phases(phases)
+        patch_path = isolated.capture(exit_code=report.exit_code, terminal=report.subtype)
+        if report.exit_code == 0 and not keep_worktree:
+            isolated.cleanup()
+        else:
+            isolated.preserve(
+                reason=("operator requested keep_worktree" if report.exit_code == 0 else report.subtype)
+            )
+    except Exception:
+        if phases.outcome is None:
+            phases.finish("error_during_execution", reason="SDK orchestration raised")
+        isolated.record_phases(phases)
+        isolated.preserve(reason="SDK orchestration or evidence capture failed")
+        raise
+
+    return CodeRunReport(
+        run_id=isolated.run_id,
+        subtype=report.subtype,
+        start_commit=isolated.start_commit,
+        evidence_dir=str(isolated.evidence_dir),
+        patch_path=str(patch_path),
+        worktree=(
+            None
+            if report.exit_code == 0 and not keep_worktree
+            else str(isolated.worktree)
+        ),
+        exit_code=report.exit_code,
+        checks=verification_events,
+        verification_path=str(verification_path),
+        phase_path=str(phase_path),
+        patch_replay_path=str(isolated.evidence_dir / "patch-replay.json") if (isolated.evidence_dir / "patch-replay.json").is_file() else "",
+        patch_audit_path=str(isolated.evidence_dir / "patch-audit.json") if (isolated.evidence_dir / "patch-audit.json").is_file() else "",
+        delivery_seal_path=str(isolated.evidence_dir / "delivery-seal.json") if (isolated.evidence_dir / "delivery-seal.json").is_file() else "",
+    )
+
+
+def reconcile_code_run(evidence_dir: str | Path) -> dict[str, Any]:
+    """Classify an interrupted code run; never replay an unreceipted effect."""
+    return reconcile_code_evidence(evidence_dir)

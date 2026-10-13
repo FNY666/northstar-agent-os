@@ -1,0 +1,8 @@
+{
+  "name": "northstar-fixture-ts-sec-002",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node --test tests/contract.test.ts"
+  }
+}

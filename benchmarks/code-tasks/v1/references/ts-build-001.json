@@ -1,0 +1,3 @@
+{
+  "package.json": "{\n  \"name\": \"northstar-fixture-ts-build-001\",\n  \"private\": true,\n  \"type\": \"module\",\n  \"exports\": {\n    \".\": \"./index.ts\",\n    \"./utils\": \"./utils.ts\"\n  },\n  \"scripts\": {\n    \"test\": \"node --test tests/contract.test.ts\"\n  }\n}\n"
+}

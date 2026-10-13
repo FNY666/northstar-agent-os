@@ -1,0 +1,3 @@
+{
+  "allowlist.ts": "export function isAllowedUrl(raw: string, origins: readonly string[]): boolean {\n  try {\n    const url = new URL(raw);\n    if (url.protocol !== \"https:\" || url.username || url.password) return false;\n    return origins.some(origin => {\n      try {\n        const allowed = new URL(origin);\n        return allowed.protocol === \"https:\" && !allowed.username && !allowed.password && url.origin === allowed.origin;\n      } catch { return false; }\n    });\n  } catch { return false; }\n}\n"
+}

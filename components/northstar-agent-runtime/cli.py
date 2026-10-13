@@ -102,6 +102,8 @@ def build_parser() -> argparse.ArgumentParser:
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog=(
             "examples:\n"
+            "  northstar code --workspace . 'fix the failing parser test' --check 'pytest -q'\n"
+            "  northstar code-reconcile ~/.local/state/northstar/code-runs/code-...\n"
             "  northstar agent --workspace . --prompt 'summarise README' --provider scripted --scripted-text ok\n"
             "  northstar resume latest --workspace . --prompt 'continue' --scripted-text ok\n"
             "  northstar resume ns-20260909T000000Z-abcd1234 --workspace . --prompt 'continue' --scripted-text ok\n"
@@ -149,6 +151,63 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="product opt-out: do not write per-turn checkpoints (kernel `run` default)",
     )
+
+    code = sub.add_parser(
+        "code",
+        help="programming path: solve a repository task in an isolated Git worktree",
+        description=(
+            "Create a detached worktree from the exact current HEAD, run the governed "
+            "agent there, execute host-declared checks inside the Shell sandbox, and "
+            "deliver a patch plus evidence. The caller's checkout is never edited and "
+            "no commit or push is created."
+        ),
+    )
+    code.add_argument(
+        "task",
+        nargs="?",
+        default="",
+        help="software-engineering task (shorthand for --prompt)",
+    )
+    _add_run_arguments(code)
+    code_group = code.add_argument_group("code task")
+    code_group.add_argument(
+        "--check",
+        dest="checks",
+        action="append",
+        default=[],
+        metavar="COMMAND",
+        help=(
+            "host-declared test/build/lint command; repeatable. Runs after the model "
+            "stops, with network denied, and a failure demotes the run"
+        ),
+    )
+    code_group.add_argument(
+        "--plan-only",
+        action="store_true",
+        help="understand and plan without allowing file edits or Shell execution",
+    )
+    code_group.add_argument(
+        "--evidence-dir",
+        default="",
+        metavar="PATH",
+        help="base directory for patches, sessions and manifests (default: XDG state directory)",
+    )
+    code_group.add_argument(
+        "--keep-worktree",
+        action="store_true",
+        help="keep the isolated worktree after a successful run (failed runs are always kept)",
+    )
+
+    code_reconcile = sub.add_parser(
+        "code-reconcile",
+        help="classify an interrupted code run without replaying tool effects",
+        description=(
+            "Inspect manifest.json and phases.json in a code evidence directory. "
+            "An effect with a start record but no completion record is reported "
+            "for manual review and is never executed again by this command."
+        ),
+    )
+    code_reconcile.add_argument("evidence_dir", help="one northstar code run evidence directory")
 
     resume = sub.add_parser(
         "resume",
@@ -432,7 +491,7 @@ def _add_execution_arguments(parser: argparse.ArgumentParser) -> None:
         execution.add_argument("--sidecar-timeout-ms", type=int, default=30_000, help="sidecar execution deadline")
         execution.add_argument("--egress-socket", default="", help="Unix socket of northstar-egress-sidecar; enables the Fetch tool (the agent's only network path)")
         execution.add_argument("--egress-timeout-ms", type=int, default=30_000, help="egress sidecar request deadline")
-        execution.add_argument("--egress-target", dest="egress_targets", action="append", default=[], metavar="HOST", help="narrow this run's Fetch calls to an exact hostname; repeatable and inherited by subagents")
+        execution.add_argument("--egress-target", "--network-target", dest="egress_targets", action="append", default=[], metavar="HOST", help="narrow this run's Fetch calls to an exact hostname; repeatable and inherited by subagents")
         execution.add_argument("--probe-sidecar", action="store_true", help="send one health-check prompt to the sidecar and exit")
         execution.add_argument(
             "--sandbox",
@@ -730,6 +789,141 @@ def _product_argv(command: str, argv: Sequence[str]) -> list[str]:
     raise ValueError(f"unknown product command {command!r}")
 
 
+def _run_code(args: argparse.Namespace) -> int:
+    """Run the programming product path in a detached worktree.
+
+    The generic runtime remains the only agent loop. This wrapper owns the
+    repository lifecycle and evidence artifacts, then delegates to :func:`_run`.
+    """
+    from code_task import CodePhaseMachine, CodeTask, IsolatedCodeWorkspace
+    from verification import validate_commands
+
+    task_text = _read_prompt(args)
+    if not task_text.strip():
+        print(
+            "no code task: pass a task string, --prompt, or --prompt-file",
+            file=sys.stderr,
+        )
+        return USAGE_ERROR
+    checks = validate_commands(tuple(getattr(args, "checks", ()) or ()))
+    task = CodeTask(
+        goal=task_text.strip(),
+        workspace=args.workspace,
+        checks=checks,
+        plan_only=bool(getattr(args, "plan_only", False)),
+        network_targets=tuple(getattr(args, "egress_targets", ()) or ()),
+    )
+
+    # Dry-run is intentionally read-only: validate the generic configuration
+    # against the source checkout and describe isolation without creating Git
+    # worktree metadata or an evidence directory.
+    if args.dry_run:
+        args.prompt = task.goal
+        args.checks = list(task.checks)
+        args._code_requires_verification = not task.plan_only
+        args._code_default_accept_edits = not task.plan_only
+        if task.plan_only:
+            args.plan = True
+            args.read_only = True
+            args.permission_mode = "plan"
+        print("code_workspace=isolated Git worktree (not created in dry-run)")
+        return _run(args)
+
+    workspace = IsolatedCodeWorkspace(
+        task.workspace,
+        evidence_root=(args.evidence_dir or None),
+    ).prepare()
+    assert workspace.worktree is not None
+    assert workspace.evidence_dir is not None
+    workspace.record_task(task)
+    phases = CodePhaseMachine(
+        run_id=workspace.run_id,
+        evidence_dir=workspace.evidence_dir,
+        plan_only=task.plan_only,
+        worktree=workspace.worktree,
+        start_commit=workspace.start_commit,
+    )
+    phases.start()
+
+    args.prompt = task.goal
+    args.task = ""
+    args.workspace = str(workspace.execution_root)
+    args.checks = list(task.checks)
+    args._code_requires_verification = not task.plan_only
+    args._code_default_accept_edits = not task.plan_only
+    args._code_phase_machine = phases
+    if not args.session_dir:
+        args.session_dir = str(workspace.session_dir)
+    if not args.checkpoint_turns:
+        args.checkpoint_turns = 1
+
+    if task.plan_only:
+        args.plan = True
+        args.read_only = True
+        args.permission_mode = "plan"
+        args.checks = []
+    else:
+        # Invoking the programming product is the host's authorization to edit
+        # its disposable worktree and execute sandboxed build/test commands. It
+        # does not grant network, policy writes, or access outside the sandbox.
+        for tool_name in ("Shell", "RunCheck"):
+            if tool_name not in args.allow_tool and tool_name not in args.deny_tool:
+                args.allow_tool.append(tool_name)
+
+    exit_code = USAGE_ERROR
+    patch_path: Path | None = None
+    try:
+        exit_code = _run(args)
+        workspace.record_verification(
+            tuple(getattr(args, "_verification_summaries", ()) or ())
+        )
+        terminal = str(
+            getattr(
+                args,
+                "_terminal_subtype",
+                "success" if exit_code == 0 else "failed",
+            )
+        )
+        phases.finish(terminal)
+        workspace.record_phases(phases)
+        patch_path = workspace.capture(exit_code=exit_code, terminal=terminal)
+        if exit_code == 0 and not args.keep_worktree:
+            workspace.cleanup()
+        else:
+            workspace.preserve(
+                reason=("operator requested --keep-worktree" if exit_code == 0 else "run did not succeed")
+            )
+    except Exception:
+        if phases.outcome is None:
+            phases.finish("error_during_execution", reason="CLI orchestration raised")
+        workspace.record_phases(phases)
+        workspace.preserve(reason="orchestration or evidence capture failed")
+        raise
+
+    destination = sys.stderr if args.json else sys.stdout
+    print(
+        f"[code] evidence={workspace.evidence_dir} patch={patch_path} "
+        f"start={workspace.start_commit[:12]} "
+        + (
+            "worktree=removed"
+            if exit_code == 0 and not args.keep_worktree
+            else f"worktree={workspace.worktree}"
+        ),
+        file=destination,
+    )
+    return exit_code
+
+
+def _run_code_reconcile(args: argparse.Namespace) -> int:
+    from code_task import reconcile_code_evidence
+
+    receipt = reconcile_code_evidence(args.evidence_dir)
+    print(json.dumps(receipt, ensure_ascii=False, sort_keys=True, indent=2))
+    return 0 if receipt["classification"] in {
+        "terminal", "interrupted_before_effects", "interrupted_after_receipted_effects"
+    } else 2
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     raw = list(argv) if argv is not None else None
     # Product verbs are rewritten before argparse so the rest of the CLI only
@@ -785,6 +979,24 @@ def main(argv: Sequence[str] | None = None) -> int:
             print(f"created {path}")
         print(f"governed project scaffolded; start with `{PROG_NAME} doctor --workspace <dir>`")
         return 0
+    if args.command == "code":
+        try:
+            return _run_code(args)
+        except ValueError as error:
+            print(f"configuration error: {error}", file=sys.stderr)
+            return USAGE_ERROR
+        except FileNotFoundError as error:
+            print(f"file not found: {error}", file=sys.stderr)
+            return USAGE_ERROR
+        except OSError as error:  # pragma: no cover - host-level failure
+            print(f"cannot run: {error}", file=sys.stderr)
+            return USAGE_ERROR
+    if args.command == "code-reconcile":
+        try:
+            return _run_code_reconcile(args)
+        except (ValueError, OSError) as error:
+            print(f"cannot reconcile: {error}", file=sys.stderr)
+            return USAGE_ERROR
     if args.command != "run":
         if args.command == "doctor":
             return run_doctor(args)
@@ -1243,6 +1455,7 @@ def _stream_events(args: argparse.Namespace, runtime: Any, store: Any, prompt: s
     exit_code = 0
     result = None
     stream_open = False
+    args._verification_summaries = []
     for event in runtime.run(prompt, resume=resume):
         if args.json:
             print(json.dumps(event_to_dict(event), ensure_ascii=False, sort_keys=True))
@@ -1253,8 +1466,11 @@ def _stream_events(args: argparse.Namespace, runtime: Any, store: Any, prompt: s
         # "did the previous event stream" is the whole rule, and it lives here rather
         # than in the printer so the printer stays a pure function of one event.
         stream_open = type(event).__name__ == "StreamDelta"
+        if type(event).__name__ == "SystemMessage" and event.subtype == "verification":
+            args._verification_summaries.append(dict(event.data or {}))
         if isinstance(event, ResultMessage):
             result = event
+            args._terminal_subtype = event.subtype
             exit_code = EXIT_CODES.get(event.subtype, 1)
     if args.trace:
         print(runtime.tracer.tree())
@@ -1282,7 +1498,7 @@ def _stream_events(args: argparse.Namespace, runtime: Any, store: Any, prompt: s
 def _run(args: argparse.Namespace) -> int:
     from agents import builtin_registry
     from loop import AgentRuntime, RuntimeConfig, RuntimeConfigurationError
-    from tools import ToolLimits, build_default_registry
+    from tools import ToolLimits, build_code_registry, build_default_registry
 
     try:
         args.model = resolve_model(args.provider, args.model)
@@ -1313,7 +1529,11 @@ def _run(args: argparse.Namespace) -> int:
         )
         return USAGE_ERROR
 
-    registry = build_default_registry()
+    registry = (
+        build_code_registry()
+        if getattr(args, "command", "") == "code"
+        else build_default_registry()
+    )
     agents = builtin_registry()
     plugins = load_plugins(args, registry)
     workspace_agents = load_workspace_agents(args, agents, registry, plugins)
@@ -1322,6 +1542,11 @@ def _run(args: argparse.Namespace) -> int:
     postconditions = load_postconditions(args, policy)
 
     mode = resolve_permission_mode(args, policy, plugins)
+    # `acceptEdits` is a product default, not an explicit operator override.
+    # Apply it only after workspace policy and plugins have had the chance to
+    # tighten the run to plan mode.
+    if bool(getattr(args, "_code_default_accept_edits", False)) and mode == "default":
+        mode = "acceptEdits"
     allowed, denied = resolve_tool_access(args, registry, policy, plugins)
     definition, registry, allowed = resolve_agent(args, policy, agents, registry, allowed)
     mcp_servers, mcp_launch, mcp_report = _resolve_mcp_servers(args, plugins, definition)
@@ -1358,6 +1583,9 @@ def _run(args: argparse.Namespace) -> int:
         "record_tool_output_in_session": not args.redact_tool_output,
         "redact_session_content": args.redact_session_content,
         "stream": args.stream,
+        "verification_commands": tuple(getattr(args, "checks", ()) or ()),
+        "require_verification": bool(getattr(args, "_code_requires_verification", False)),
+        "code_phase_machine": getattr(args, "_code_phase_machine", None),
     }
     if args.dataflow_policy:
         try:
@@ -1383,6 +1611,15 @@ def _run(args: argparse.Namespace) -> int:
     config_kwargs["skill_digests"] = prompt_setup.skill_digests
     if prompt_setup.system_prompt is not None:
         config_kwargs["system_prompt"] = prompt_setup.system_prompt
+    if getattr(args, "command", "") == "code":
+        from code_task import append_code_protocol
+        from loop import DEFAULT_SYSTEM_PROMPT
+
+        config_kwargs["system_prompt"] = append_code_protocol(
+            str(config_kwargs.get("system_prompt", DEFAULT_SYSTEM_PROMPT)),
+            checks=tuple(getattr(args, "checks", ()) or ()),
+            plan_only=bool(getattr(args, "plan_only", False)),
+        )
     if args.sidecar_socket:
         config_kwargs["sidecar_socket"] = args.sidecar_socket
         config_kwargs["sidecar_timeout_ms"] = args.sidecar_timeout_ms

@@ -1,0 +1,3 @@
+{
+  "formats.py": "\"\"\"Parse json or csv; unknown formats keep a stable error message.\"\"\"\nimport csv\nimport io\nimport json\n\n_PARSERS = {\"json\": json.loads, \"csv\": lambda text: list(csv.reader(io.StringIO(text)))}\n\ndef parse(fmt, text):\n    if fmt not in _PARSERS:\n        raise ValueError(f\"unknown format: {fmt}\")\n    return _PARSERS[fmt](text)\n\ndef register_parser(fmt, parser):\n    if not isinstance(fmt, str) or not fmt or not callable(parser):\n        raise ValueError(\"invalid parser registration\")\n    if fmt in _PARSERS:\n        raise ValueError(\"parser already registered\")\n    _PARSERS[fmt] = parser\n"
+}
