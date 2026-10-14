@@ -209,6 +209,102 @@ class TerminalEventConsistencyTests(RuntimeTestCase):
         self.assertExactlyOneResult(runtime.last_report)
 
 
+class PreTryClaimFailureTests(RuntimeTestCase):
+    def test_claim_lease_error_closes_the_run_and_keeps_the_original_error(self):
+        from session_lease import LeaseError, SessionLease
+        store = self.session_store()
+        runtime = self.runtime(provider=self.provider([text_turn("done")]), sessions=store)
+        with patch.object(SessionLease, "acquire", side_effect=LeaseError("injected platform fault")):
+            with self.assertRaises(RuntimeConfigurationError) as raised:
+                runtime.run_collect("go")
+        # The claim fault propagates bare: identity and cause chain untouched.
+        self.assertIsInstance(raised.exception.__cause__, LeaseError)
+        self.assertEqual(str(raised.exception.__cause__), "injected platform fault")
+        self.assertEqual([span.name for span in runtime.tracer.open_spans], [])
+        # The internal report carries the diagnostic but no terminal result.
+        report = runtime.last_report
+        self.assertIsNotNone(report)
+        self.assertIsNone(report.result)
+        self.assertIn("pre-try claim failure", " ".join(report.errors))
+        # A run that never owned the file wrote no transcript at all.
+        records, dropped = store.read()
+        self.assertEqual(0, dropped)
+        self.assertEqual(0, sum(record["type"] in {"result", "session_end"} for record in records))
+        self.assertEqual(runtime.provider.requests, [])
+
+    def test_real_busy_owner_is_unaffected_by_the_pre_try_handler(self):
+        from session_lease import SessionLease, lease_path_for
+        store = self.session_store()
+        holder = SessionLease(lease_path_for(store.directory, store.session_id), owner_id="real-busy-owner")
+        holder.acquire()
+        try:
+            runtime = self.runtime(provider=self.provider([text_turn("done")]), sessions=store)
+            report = runtime.run_collect("go")
+            self.assertEqual("error_session_busy", report.result.subtype)
+            self.assertEqual(holder.status().owner_id, "real-busy-owner")
+            self.assertEqual([span.name for span in runtime.tracer.open_spans], [])
+            records, dropped = store.read()
+            self.assertEqual(0, dropped)
+            self.assertEqual(0, sum(record["type"] in {"result", "session_end"} for record in records))
+            self.assertEqual(runtime.provider.requests, [])
+        finally:
+            holder.release()
+
+    def test_successful_run_still_keeps_one_terminal_result_and_releases_the_lease(self):
+        store = self.session_store()
+        runtime = self.runtime(provider=self.provider([text_turn("done")]), sessions=store)
+        report = runtime.run_collect("go")
+        self.assertIsNone(runtime._session_lease)
+        self.assertEqual([span.name for span in runtime.tracer.open_spans], [])
+        self.assertEqual("success", self.assertExactlyOneResult(report).subtype)
+        records, dropped = store.read()
+        self.assertEqual(0, dropped)
+        self.assertEqual(1, sum(record["type"] == "result" for record in records))
+        self.assertEqual(1, sum(record["type"] == "session_end" for record in records))
+
+    def test_pre_try_fallback_links_distinct_close_error_and_keeps_cause(self):
+        from session_lease import SessionLease
+        # Force the pre-3.11 fallback: no add_note available.
+        class NoNote(RuntimeConfigurationError):
+            add_note = None
+
+        store = self.session_store()
+        runtime = self.runtime(provider=self.provider([text_turn("done")]), sessions=store)
+        claim_exc = NoNote("injected claim fault")
+        close_exc = OSError("injected close fault")
+        with patch.object(SessionLease, "acquire", side_effect=claim_exc), \
+             patch.object(runtime, "_close_run", side_effect=close_exc):
+            with self.assertRaises(RuntimeConfigurationError) as raised:
+                runtime.run_collect("go")
+        self.assertIs(raised.exception, claim_exc)
+        # Fallback linked the close fault as context, and __cause__ is untouched.
+        self.assertIs(claim_exc.__context__, close_exc)
+        self.assertIsNone(claim_exc.__cause__)
+        self.assertIsNone(close_exc.__context__)
+        self.assertIn("pre-try close failure", " ".join(runtime.last_report.errors))
+
+    def test_pre_try_fallback_same_object_does_not_self_cycle(self):
+        from session_lease import SessionLease
+        # The cleanup fault re-raises the very claim fault: identity and cause
+        # must survive, and the fallback link must not point at itself.
+        class NoNote(RuntimeConfigurationError):
+            add_note = None
+
+        store = self.session_store()
+        runtime = self.runtime(provider=self.provider([text_turn("done")]), sessions=store)
+        same = NoNote("claim and close fault")
+        with patch.object(SessionLease, "acquire", side_effect=same), \
+             patch.object(runtime, "_close_run", side_effect=same):
+            with self.assertRaises(RuntimeConfigurationError) as raised:
+                runtime.run_collect("go")
+        self.assertIs(raised.exception, same)
+        self.assertIsNot(same.__context__, same, "fallback must not self-cycle")
+        self.assertIsNone(same.__cause__)
+        diagnostics = " ".join(runtime.last_report.errors)
+        self.assertIn("pre-try claim failure", diagnostics)
+        self.assertIn("pre-try close failure", diagnostics)
+
+
 class CeilingAndFlowTests(RuntimeTestCase):
     def test_max_turns_stops_a_model_that_will_not_finish(self):
         provider = self.provider([tool_turn("Read", {"path": "x"}) for _ in range(6)], on_exhausted="repeat_last")
