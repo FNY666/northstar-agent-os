@@ -162,6 +162,162 @@ class DispatchTests(RuntimeTestCase):
 
 
 class TerminalEventConsistencyTests(RuntimeTestCase):
+    def test_result_persistence_failure_still_releases_the_session_lease(self):
+        store = self.session_store()
+        runtime = self.runtime(provider=self.provider([text_turn("done")]), sessions=store)
+        with patch.object(store, "record_result", side_effect=OSError("injected result persistence failure")):
+            with self.assertRaises(OSError) as raised:
+                runtime.run_collect("go")
+        self.assertEqual(str(raised.exception), "injected result persistence failure")
+        self.assertIsNone(runtime._session_lease)
+        lease = None
+        try:
+            from session_lease import SessionLease, lease_path_for
+            lease = SessionLease(lease_path_for(store.directory, store.session_id), owner_id="close-failure-test")
+            lease.acquire()
+        finally:
+            if lease is not None:
+                lease.release()
+        self.assertIn("result persistence failure", " ".join(runtime.last_report.errors))
+
+    def test_session_end_failure_still_releases_the_session_lease(self):
+        store = self.session_store()
+        runtime = self.runtime(provider=self.provider([text_turn("done")]), sessions=store)
+        original_fire = runtime._fire
+        def fail_only_session_end(state, event, payload):
+            if event == "SessionEnd":
+                raise OSError("injected session-end failure")
+            return original_fire(state, event, payload)
+        with patch.object(runtime, "_fire", side_effect=fail_only_session_end):
+            with self.assertRaises(OSError) as raised:
+                runtime.run_collect("go")
+        self.assertEqual(str(raised.exception), "injected session-end failure")
+        self.assertIsNone(runtime._session_lease)
+        self.assertIn("session-end failure", " ".join(runtime.last_report.errors))
+
+    def test_lease_release_failure_preserves_the_first_error_without_retry(self):
+        store = self.session_store()
+        runtime = self.runtime(provider=self.provider([text_turn("done")]), sessions=store)
+        leases = []
+        original_release = runtime._release_session
+        def release_then_fail():
+            leases.append(runtime._session_lease)
+            original_release()
+            raise OSError("injected release failure")
+        with patch.object(runtime, "_release_session", side_effect=release_then_fail):
+            with self.assertRaises(OSError) as raised:
+                runtime.run_collect("go")
+        self.assertEqual(str(raised.exception), "injected release failure")
+        self.assertIsNone(runtime._session_lease)
+        lease = leases[0]
+        self.assertIsNotNone(lease)
+        self.assertFalse(lease.status().locked)
+        from session_lease import SessionLease, lease_path_for
+        reacquired = SessionLease(lease_path_for(store.directory, store.session_id), owner_id="release-reacquire-check")
+        reacquired.acquire()
+        reacquired.release()
+        self.assertIn("lease_release", " ".join(runtime.last_report.errors))
+
+    def test_release_exception_keeps_still_held_lease_reference(self):
+        store = self.session_store()
+        runtime = self.runtime(provider=self.provider([text_turn("done")]), sessions=store)
+        original_release = runtime._release_session
+        lease_box = []
+        def fail_without_releasing():
+            lease_box.append(runtime._session_lease)
+            raise OSError("injected low-level release failure")
+        with patch.object(runtime, "_release_session", side_effect=fail_without_releasing) as mocked_release:
+            with self.assertRaisesRegex(OSError, "low-level release failure"):
+                runtime.run_collect("go")
+        self.assertEqual(mocked_release.call_count, 1)
+        lease = lease_box[0]
+        self.assertIs(runtime._session_lease, lease)
+        self.assertTrue(lease.status().locked)
+        self.assertIn("lease_release", " ".join(runtime.last_report.errors))
+        original_release()
+
+    def test_keyboard_interrupt_during_result_write_still_attempts_release(self):
+        store = self.session_store()
+        runtime = self.runtime(provider=self.provider([text_turn("done")]), sessions=store)
+        original_release = runtime._release_session
+        released = []
+        def observed_release():
+            released.append(True)
+            return original_release()
+        with patch.object(store, "record_result", side_effect=KeyboardInterrupt("interrupt close")), patch.object(
+            runtime, "_release_session", side_effect=observed_release
+        ):
+            with self.assertRaises(KeyboardInterrupt):
+                runtime.run_collect("go")
+        self.assertEqual(released, [True])
+        self.assertIsNone(runtime._session_lease)
+        from session_lease import SessionLease, lease_path_for
+        lease = SessionLease(lease_path_for(store.directory, store.session_id), owner_id="interrupt-reacquire")
+        lease.acquire()
+        lease.release()
+
+    def test_result_and_session_end_failures_keep_first_error_identity_and_both_diagnostics(self):
+        store = self.session_store()
+        runtime = self.runtime(provider=self.provider([text_turn("done")]), sessions=store)
+        first = OSError("first result write failure")
+        original_fire = runtime._fire
+        def fail_session_end(state, event, payload):
+            if event == "SessionEnd":
+                raise OSError("second SessionEnd failure")
+            return original_fire(state, event, payload)
+        with patch.object(store, "record_result", side_effect=first), patch.object(
+            runtime, "_fire", side_effect=fail_session_end
+        ):
+            with self.assertRaises(OSError) as raised:
+                runtime.run_collect("go")
+        self.assertIs(raised.exception, first)
+        self.assertTrue(any("SessionEnd" in note for note in getattr(first, "__notes__", ())))
+        diagnostics = " ".join(runtime.last_report.errors)
+        self.assertIn("result", diagnostics)
+        self.assertIn("SessionEnd", diagnostics)
+        self.assertIsNone(runtime._session_lease)
+
+    def test_refused_session_preserves_real_busy_owner_and_never_writes(self):
+        from session_lease import SessionLease, lease_path_for
+        store = self.session_store()
+        holder = SessionLease(lease_path_for(store.directory, store.session_id), owner_id="real-busy-owner")
+        holder.acquire()
+        try:
+            runtime = self.runtime(provider=self.provider([text_turn("done")]), sessions=store)
+            report = runtime.run_collect("go")
+            self.assertEqual("error_session_busy", report.result.subtype)
+            self.assertEqual("real-busy-owner", holder.status().owner_id)
+            records, dropped = store.read()
+            self.assertEqual(0, dropped)
+            self.assertEqual(0, sum(record["type"] == "result" for record in records))
+            self.assertEqual(0, sum(record["type"] == "session_end" for record in records))
+        finally:
+            holder.release()
+
+    def test_refused_session_result_failure_does_not_write_another_session(self):
+        from session_lease import SessionBusyError
+        store = self.session_store()
+        runtime = self.runtime(provider=self.provider([text_turn("done")]), sessions=store)
+        with patch.object(runtime, "_claim_session", return_value="owned by another process"):
+            report = runtime.run_collect("go")
+        self.assertEqual("error_session_busy", report.result.subtype)
+        records, dropped = store.read()
+        self.assertEqual(0, dropped)
+        self.assertEqual(0, sum(record["type"] == "result" for record in records))
+        self.assertEqual(0, sum(record["type"] == "session_end" for record in records))
+
+    def test_successful_close_releases_lease_and_writes_one_terminal_result(self):
+        store = self.session_store()
+        runtime = self.runtime(provider=self.provider([text_turn("done")]), sessions=store)
+        self.assertIsNone(runtime._session_lease)
+        report = runtime.run_collect("go")
+        self.assertIsNone(runtime._session_lease)
+        self.assertEqual("success", self.assertExactlyOneResult(report).subtype)
+        records, dropped = store.read()
+        self.assertEqual(0, dropped)
+        self.assertEqual(1, sum(record["type"] == "result" for record in records))
+        self.assertEqual(1, sum(record["type"] == "session_end" for record in records))
+
     def test_snapshot_exception_terminal_is_present_in_collected_report_and_store(self):
         from postconditions import PostCondition, PostConditionError
         store = self.session_store()
