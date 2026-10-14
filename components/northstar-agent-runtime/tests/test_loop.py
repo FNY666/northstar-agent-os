@@ -162,6 +162,65 @@ class DispatchTests(RuntimeTestCase):
 
 
 class TerminalEventConsistencyTests(RuntimeTestCase):
+    def test_consumer_close_after_init_records_internal_terminal_result(self):
+        runtime = self.runtime(provider=self.provider([text_turn("done")]))
+        stream = runtime.run("go")
+        first = next(stream)
+        self.assertIsInstance(first, SystemMessage)
+
+        stream.close()
+
+        report = runtime.last_report
+        self.assertIsNotNone(report)
+        result = self.assertExactlyOneResult(report)
+        self.assertIs(result, report.result)
+        self.assertEqual(result.subtype, "error_during_execution")
+        self.assertIn("stream closed", " ".join(result.errors).lower())
+
+    def test_close_before_start_does_not_create_a_run_result(self):
+        runtime = self.runtime(provider=self.provider([text_turn("done")]))
+        stream = runtime.run("go")
+        stream.close()
+        self.assertIsNone(runtime.last_report)
+
+    def test_session_busy_result_is_not_duplicated_by_close(self):
+        runtime = self.runtime(provider=self.provider([text_turn("done")]))
+        with patch.object(runtime, "_claim_session", return_value="already owned"):
+            stream = runtime.run("go")
+            result = next(stream)
+            self.assertEqual("error_session_busy", result.subtype)
+            stream.close()
+        self.assertEqual(1, sum(isinstance(event, ResultMessage) for event in runtime.last_report.events))
+        self.assertEqual("error_session_busy", runtime.last_report.result.subtype)
+
+    def test_close_after_existing_terminal_result_does_not_duplicate(self):
+        runtime = self.runtime(provider=self.provider([text_turn("done")]))
+        stream = runtime.run("go")
+        for event in stream:
+            if isinstance(event, ResultMessage):
+                break
+        stream.close()
+        self.assertExactlyOneResult(runtime.last_report)
+        self.assertEqual("success", runtime.last_report.result.subtype)
+
+    def test_close_persists_one_result_and_session_end_and_releases_lease(self):
+        store = self.session_store()
+        runtime = self.runtime(provider=self.provider([text_turn("done")]), sessions=store)
+        stream = runtime.run("go")
+        self.assertIsInstance(next(stream), SystemMessage)
+        stream.close()
+        records, dropped = store.read()
+        self.assertEqual(0, dropped)
+        self.assertEqual(1, sum(record["type"] == "result" for record in records))
+        self.assertEqual(1, sum(record["type"] == "session_end" for record in records))
+        self.assertIsNone(runtime._session_lease)
+
+    def test_normal_run_collect_still_has_one_success_result(self):
+        runtime = self.runtime(provider=self.provider([text_turn("done")]))
+        report = runtime.run_collect("go")
+        self.assertExactlyOneResult(report)
+        self.assertEqual("success", report.result.subtype)
+
     def test_snapshot_exception_terminal_is_present_in_collected_report_and_store(self):
         from postconditions import PostCondition, PostConditionError
         store = self.session_store()
