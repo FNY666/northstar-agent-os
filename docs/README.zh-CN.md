@@ -60,13 +60,13 @@ make demo
 bin/northstar --version
 bin/northstar agent --workspace . --provider scripted --scripted-text "ok" --prompt "hello"
 bin/northstar resume latest --workspace . --prompt "continue" --scripted-text "ok"
-bin/northstar security scan --workspace .     # 本地密钥与 Python SAST 启发式检查
+bin/northstar security scan --workspace .     # 密钥、Python SAST、依赖与部分部署配置检查
 bin/northstar security probe                  # 临时沙箱内验证 runtime 默认拒绝边界
 bin/northstar sessions list --workspace .
 bin/northstar bench                  # 公开治理基准（离线）
 ```
 
-独立 `security` 命令由操作者手动启动。agent 运行也可通过 `--enable-security-tools` 显式注册本地工具：`SecurityScan` 只读当前工作区；`SecurityProbe` 还必须出现在 `--allow-tool` 中，且只在临时目录验证 Northstar 自身的默认权限边界。探针不连接公网或扫描任意目标，也不是通用渗透测试器。扫描结果不打印密钥值，但属于启发式检查，不能证明项目安全；这两个工具都不会自动修复文件。
+独立 `security` 命令由操作者手动启动。agent 运行也可通过 `--enable-security-tools` 显式注册本地工具：`SecurityScan` 只读当前工作区；`SecurityProbe` 还必须出现在 `--allow-tool` 中，且只在临时目录验证 Northstar 自身的默认权限边界。探针不连接公网或扫描任意目标，也不是通用渗透测试器。扫描覆盖密钥、Python SAST、依赖固定 / 来源和部分容器 / CI / Terraform 配置，finding 按严重级别排序并附修复建议；它不查询 CVE 数据库，也不会自动修改文件。规则可能漏报或误报，干净结果不能证明项目安全。
 
 ```sh
 # 让 agent 检查当前工作区；只注册只读扫描器
@@ -79,7 +79,7 @@ bin/northstar agent --workspace . --enable-security-tools \
   --prompt "调用 SecurityProbe 验证 Northstar 默认权限边界"
 ```
 
-agent 扫描每次最多读取 1,000 个文本文件、每个文件 256 KiB，最多返回 100 条 finding；模型不能传入目录或 URL。`--read-only` 会拒绝 `SecurityProbe`。
+agent 扫描每次最多读取 1,000 个文本文件、每个文件 256 KiB，最多返回 100 条 finding；CLI 最多输出 1,000 条 finding 明细。模型不能传入目录或 URL。`--read-only` 会拒绝 `SecurityProbe`。
 
 编程任务可使用 `--coding-mode` 引导 agent 按“检查仓库 → 制定计划 → 修改 → 运行已授权的检查 → 审阅 diff”工作。它不会自动授予文件写入或 Shell 权限；请只放行本次需要的工具：
 

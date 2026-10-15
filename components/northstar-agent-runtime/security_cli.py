@@ -1,6 +1,8 @@
 """Local security scans and bounded runtime red-team probes.
 
-The workspace scan is read-only, offline, and heuristic. The runtime probe
+The workspace scan is read-only, offline, and heuristic. It includes secret,
+Python SAST, dependency-source/pinning, and selected deployment-config rules.
+It does not query vulnerability databases. The runtime probe
 feeds a compromised-model-shaped tool-call sequence into a fresh Northstar
 runtime backed by a temporary workspace, then checks that default policy
 denies file writes, Shell, and an unregistered Shell alias before execution.
@@ -10,6 +12,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import sys
 import tempfile
 from pathlib import Path
@@ -20,6 +23,7 @@ from tools import ToolAccessError, ToolSandbox
 MAX_SCAN_FILES = 10_000
 MAX_SCAN_FILE_BYTES = 1024 * 1024
 DEFAULT_SCAN_FILES = 4_000
+MAX_CLI_SCAN_FINDINGS = 1_000
 AGENT_SCAN_FILES = 1_000
 AGENT_SCAN_FILE_BYTES = 256 * 1024
 AGENT_SCAN_FINDINGS = 100
@@ -34,7 +38,7 @@ TEXT_SUFFIXES = frozenset({
     ".properties", ".ps1", ".py", ".rb", ".rs", ".sh", ".sql", ".swift",
     ".tf", ".toml", ".ts", ".tsx", ".txt", ".xml", ".yaml", ".yml", ".zsh",
 })
-SPECIAL_TEXT_NAMES = frozenset({"Dockerfile", "Makefile", "Justfile"})
+SPECIAL_TEXT_NAMES = frozenset({"Dockerfile", "Containerfile", "Makefile", "Justfile"})
 SEVERITY_RANK = {"critical": 4, "high": 3, "medium": 2, "low": 1, "none": 0}
 
 
@@ -42,9 +46,216 @@ def _is_text_candidate(path: Path) -> bool:
     name = path.name
     return (
         name in SPECIAL_TEXT_NAMES
+        or name.startswith("Dockerfile.")
         or name.startswith(".env")
         or path.suffix.lower() in TEXT_SUFFIXES
     )
+
+
+def _dependency_config_findings(relative: str, text: str) -> list[dict[str, Any]]:
+    """Small offline supply-chain and deployment-config rule set.
+
+    These checks report policy risks (for example, floating dependency
+    constraints), not known-vulnerable package versions. No network is used.
+    """
+    findings: list[dict[str, Any]] = []
+    path = Path(relative)
+    name = path.name.casefold()
+    lower_path = relative.casefold()
+
+    def add(line: int, rule: str, severity: str, message: str, remediation: str) -> None:
+        findings.append({
+            "path": relative,
+            "line": line,
+            "column": 1,
+            "tool": "dependency-config-scanner",
+            "rule": rule,
+            "severity": severity,
+            "message": message,
+            "remediation": remediation,
+        })
+
+    def check_requirement(spec: str, line: int) -> None:
+        value = spec.strip().strip("\"'")
+        if not value or value.startswith("#"):
+            return
+        if value.startswith("-e "):
+            value = value[3:].strip()
+        if value.startswith(("git+", "git://", "ssh://", "hg+", "svn+", "bzr+", "http://", "https://", "file:")) or " @ " in value:
+            add(
+                line,
+                "DEP002_DIRECT_SOURCE",
+                "medium",
+                "dependency is installed from a direct URL or source-control reference",
+                "Review the source and pin an immutable commit or artifact digest; prefer a vetted package registry.",
+            )
+            return
+        match = re.match(r"^[A-Za-z0-9_.-]+(?:\[[^\]]+\])?(.*)$", value)
+        if match is None:
+            return
+        constraint = match.group(1)
+        pin = re.search(r"(?:===|==)\s*([^,;\s]+)", constraint)
+        if pin and "*" not in pin.group(1):
+            return
+        add(
+            line,
+            "DEP001_UNPINNED",
+            "low",
+            "dependency does not have an exact version pin",
+            "For repeatable release builds, use a reviewed lockfile or exact pins with verified hashes.",
+        )
+
+    if name.startswith("requirements") and name.endswith(".txt"):
+        for line_no, raw in enumerate(text.splitlines(), start=1):
+            value = raw.strip()
+            if not value or value.startswith("#") or value.startswith(("--", "-r ", "-c ")):
+                continue
+            if " # " in value:
+                value = value.split(" # ", 1)[0].rstrip()
+            check_requirement(value, line_no)
+    elif name == "pyproject.toml":
+        optional_dependencies = False
+        requirement_array = False
+        for line_no, raw in enumerate(text.splitlines(), start=1):
+            if raw.lstrip().startswith("#"):
+                continue
+            section = re.match(r"^\s*\[([^\]]+)\]", raw)
+            if section:
+                optional_dependencies = section.group(1).strip().casefold() == "project.optional-dependencies"
+                requirement_array = False
+            assignment = re.match(r"^\s*([A-Za-z0-9_.-]+)\s*=\s*(.*)$", raw)
+            if assignment and (
+                assignment.group(1).casefold() in {"dependencies", "requires"}
+                or optional_dependencies
+            ):
+                requirement_array = "[" in assignment.group(2)
+                values = assignment.group(2)
+            elif requirement_array:
+                values = raw
+            else:
+                continue
+            for match in re.finditer(r"['\"]([^'\"]+)['\"]", values):
+                spec = match.group(1).strip()
+                if re.match(r"^[A-Za-z0-9_.-]+(?:\[[^\]]+\])?(?:\s*(?:===|==|~=|>=|<=|!=|>|<|@).*)?$", spec):
+                    check_requirement(spec, line_no)
+            if values.rstrip().endswith("]"):
+                requirement_array = False
+    elif name == "package.json":
+        try:
+            manifest = json.loads(text)
+        except (json.JSONDecodeError, TypeError):
+            manifest = {}
+        if isinstance(manifest, dict):
+            package_lines: dict[str, int] = {}
+            for line_no, raw in enumerate(text.splitlines(), start=1):
+                key_match = re.match(r'^\s*"([^"\\]+)"\s*:', raw)
+                if key_match:
+                    package_lines.setdefault(key_match.group(1), line_no)
+            for section in ("dependencies", "devDependencies", "optionalDependencies"):
+                packages = manifest.get(section, {})
+                if not isinstance(packages, dict):
+                    continue
+                for package, spec in packages.items():
+                    if not isinstance(package, str) or not isinstance(spec, str):
+                        continue
+                    line_no = package_lines.get(package, 1)
+                    if spec.startswith(("git+", "git://", "ssh://", "http://", "https://", "file:")):
+                        add(
+                            line_no,
+                            "DEP002_DIRECT_SOURCE",
+                            "medium",
+                            "dependency is installed from a direct URL or source-control reference",
+                            "Review the source and pin an immutable commit or artifact digest; prefer a vetted package registry.",
+                        )
+                    elif not re.fullmatch(r"\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?", spec):
+                        add(
+                            line_no,
+                            "DEP001_UNPINNED",
+                            "low",
+                            "dependency does not have an exact version pin",
+                            "For repeatable release builds, commit and review a lockfile or pin an exact version.",
+                        )
+
+    for line_no, raw in enumerate(text.splitlines(), start=1):
+        stripped = raw.strip()
+        if not stripped or stripped.startswith("#"):
+            continue
+        if name.startswith("dockerfile") or name == "containerfile":
+            if re.match(r"(?i)^FROM\s+(?:--platform=\S+\s+)?\S+:latest(?:\s|$)", stripped):
+                add(
+                    line_no,
+                    "CFG001_DOCKER_LATEST",
+                    "medium",
+                    "container base image uses the floating latest tag",
+                    "Choose a reviewed version tag and pin the image digest for repeatable builds.",
+                )
+            if re.match(r"(?i)^USER\s+(?:root(?::root)?|0(?::0)?)(?:\s|$)", stripped):
+                add(
+                    line_no,
+                    "CFG002_DOCKER_ROOT",
+                    "medium",
+                    "container explicitly runs as root",
+                    "Create and select a dedicated unprivileged user unless root access is required.",
+                )
+        if ".github/workflows/" in f"/{lower_path}/" or lower_path.startswith(".github/workflows/"):
+            if re.match(r"(?i)^permissions\s*:\s*write-all\s*$", stripped):
+                add(
+                    line_no,
+                    "CFG005_ACTION_WRITE_ALL",
+                    "high",
+                    "workflow grants write access to every token permission",
+                    "Set only the required token permissions, preferably at the individual job level.",
+                )
+            action = re.match(r"(?i)^uses\s*:\s*([^\s#]+)@([^\s#]+)", stripped)
+            if action and not re.fullmatch(r"[0-9a-fA-F]{40}", action.group(2)):
+                add(
+                    line_no,
+                    "CFG006_ACTION_MUTABLE_REF",
+                    "medium",
+                    "workflow action is referenced by a mutable tag or branch instead of a commit SHA",
+                    "Pin the action to a reviewed full commit SHA and update it through a reviewed change.",
+                )
+        if name.endswith((".yaml", ".yml")) and ("compose" in name or name.startswith("docker-compose")):
+            if re.match(r"(?i)^privileged\s*:\s*(?:true|yes|on|1)\s*(?:#.*)?$", stripped):
+                add(
+                    line_no,
+                    "CFG003_COMPOSE_PRIVILEGED",
+                    "high",
+                    "container requests privileged mode",
+                    "Remove privileged mode and grant only the specific device or capability the service needs.",
+                )
+            if re.match(r"(?i)^network_mode\s*:\s*['\"]?host['\"]?\s*(?:#.*)?$", stripped):
+                add(
+                    line_no,
+                    "CFG004_COMPOSE_HOST_NETWORK",
+                    "medium",
+                    "container shares the host network namespace",
+                    "Use an isolated bridge network and publish only the required ports.",
+                )
+        if name.endswith(".tf") and "0.0.0.0/0" in stripped:
+            add(
+                line_no,
+                "CFG007_TERRAFORM_WIDE_INGRESS",
+                "high",
+                "infrastructure configuration contains a world-open IPv4 CIDR",
+                "Restrict ingress to required ports and trusted source CIDRs; verify exposure before deployment.",
+            )
+    return findings
+
+
+def _remediation(tool: str, rule: str) -> str:
+    if tool == "secret-scanner":
+        return "Remove the secret from source and rotate it if exposed; load it from an environment or secret manager."
+    return {
+        "PY001": "Replace dynamic evaluation with a constrained parser or explicit operation mapping.",
+        "PY002": "Avoid shell=True and shell command helpers; pass an argument vector and validate inputs.",
+        "PY003": "Avoid unsafe deserialization; use a safe format or load only authenticated trusted data.",
+        "PY004": "Use parameterized SQL and keep user-controlled values out of query text.",
+        "PY005": "Load credentials from a secret manager or environment and rotate exposed values.",
+        "PY006": "Use a cryptographic primitive from secrets or hashlib with a modern digest.",
+        "PY009": "Set an explicit, bounded network timeout and handle timeout failures.",
+        "PY010": "Use a secure temporary-file API and avoid predictable paths.",
+    }.get(rule, "Review the flagged code path and apply the least-privilege safe API for this operation.")
 
 
 def _workspace_files(root: Path, limit: int) -> tuple[list[Path], bool]:
@@ -98,13 +309,27 @@ def _scan_root(
     skipped = 0
     files_scanned = 0
 
+    def finding_order(item: dict[str, Any]) -> tuple[Any, ...]:
+        return (
+            -SEVERITY_RANK[item["severity"]],
+            item["path"],
+            item["line"],
+            item["tool"],
+            item["rule"],
+        )
+
     def add_finding(item: dict[str, Any]) -> None:
         nonlocal findings_count, threshold_hits
         findings_count += 1
         if fail_on != "none" and SEVERITY_RANK[item["severity"]] >= SEVERITY_RANK[fail_on]:
             threshold_hits += 1
-        if max_findings is None or len(findings) < max_findings:
+        if max_findings is None:
             findings.append(item)
+            return
+        findings.append(item)
+        findings.sort(key=finding_order)
+        if len(findings) > max_findings:
+            findings.pop()
 
     for candidate in candidates:
         relative = candidate.relative_to(root).as_posix()
@@ -140,6 +365,7 @@ def _scan_root(
                     "rule": item.pattern_id,
                     "severity": rule.severity,
                     "message": rule.description,
+                    "remediation": _remediation("secret-scanner", item.pattern_id),
                 })
         if safe_path.suffix.lower() == ".py":
             report = sast_scanner.scan(text, files_scanned)
@@ -152,9 +378,12 @@ def _scan_root(
                     "rule": item.rule_id,
                     "severity": item.severity,
                     "message": item.message,
+                    "remediation": _remediation("sast-scanner", item.rule_id),
                 })
+        for item in _dependency_config_findings(relative, text):
+            add_finding(item)
 
-    findings.sort(key=lambda item: (item["path"], item["line"], item["tool"], item["rule"]))
+    findings.sort(key=finding_order)
     return {
         "mode": "read-only, offline heuristic scan",
         "workspace": ".",
@@ -168,6 +397,8 @@ def _scan_root(
         "threshold_findings": threshold_hits,
         "limitations": [
             "rules are heuristic and may miss issues or report false positives",
+            "dependency checks do not compare package versions with CVE or advisory databases",
+            "remediation text is guidance only; no files are changed",
             "a clean result does not prove the workspace is secure",
             "no files are changed and no network is used",
         ],
@@ -193,6 +424,7 @@ def scan_workspace(args: Any) -> int:
             max_files=args.max_files,
             max_file_bytes=args.max_file_bytes,
             fail_on=args.fail_on,
+            max_findings=MAX_CLI_SCAN_FINDINGS,
         )
     except ValueError as error:
         print(f"configuration error: {error}", file=sys.stderr)
@@ -208,10 +440,13 @@ def scan_workspace(args: Any) -> int:
         )
         if summary["file_limit_reached"]:
             print(f"file_limit_reached={args.max_files}")
+        if summary["findings_truncated"]:
+            print(f"finding_details_limited={MAX_CLI_SCAN_FINDINGS} (highest severity first)")
         for item in summary["findings"]:
             print(
                 f"{item['severity']:<8} {item['path']}:{item['line']}:{item['column']} "
-                f"[{item['tool']}:{item['rule']}] {item['message']}"
+                f"[{item['tool']}:{item['rule']}] {item['message']} "
+                f"Remediation: {item['remediation']}"
             )
         print("Heuristic results only: clean output does not prove security.")
     return 1 if summary["threshold_findings"] else 0
@@ -359,8 +594,9 @@ def security_tool_specs() -> tuple[Any, Any]:
         ToolSpec(
             name="SecurityScan",
             description=(
-                "Read-only offline heuristic scan of the current run workspace for likely secrets and Python SAST issues. "
-                "No path or URL is accepted; findings omit secret values. Results are bounded and do not prove security."
+                "Read-only offline heuristic scan of the current run workspace for likely secrets, Python SAST issues, "
+                "dependency pinning/source risks, and selected deployment misconfigurations. No path or URL is accepted; "
+                "findings omit secret values and include remediation guidance. No CVE database is queried."
             ),
             input_schema={
                 "type": "object",
