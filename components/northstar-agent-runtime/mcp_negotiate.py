@@ -44,20 +44,29 @@ from typing import Any, Iterable, Mapping, Sequence
 #: The per-request-metadata generation introduced by revision 2026-07-28.
 MODERN_VERSION = "2026-07-28"
 
-#: Handshake-based generations, newest first. Kept because the installed base is
-#: enormous and because falling back is the only way to reach them.
-LEGACY_VERSIONS: tuple[str, ...] = ("2025-11-25", "2024-11-05")
+#: Handshake-based generations, newest first. These revisions share the legacy
+#: initialize-era wire behavior in the official SDKs.
+LEGACY_VERSIONS: tuple[str, ...] = (
+    "2025-11-25",
+    "2025-06-18",
+    "2025-03-26",
+    "2024-11-05",
+    "2024-10-07",
+)
 
-SUPPORTED_VERSIONS: tuple[str, ...] = (MODERN_VERSION, *LEGACY_VERSIONS)
+#: Protocol revisions that use per-request metadata rather than initialize.
+MODERN_VERSIONS: tuple[str, ...] = (MODERN_VERSION,)
+
+SUPPORTED_VERSIONS: tuple[str, ...] = (*MODERN_VERSIONS, *LEGACY_VERSIONS)
 
 #: ``_meta`` keys, per the spec's namespaced-key rule.
 META_PROTOCOL_VERSION = "io.modelcontextprotocol/protocolVersion"
 META_CLIENT_INFO = "io.modelcontextprotocol/clientInfo"
 META_CLIENT_CAPABILITIES = "io.modelcontextprotocol/clientCapabilities"
 
-#: JSON-RPC error codes that only a *modern* server can produce, because the code
-#: itself was introduced with per-request versioning.
-MODERN_ERROR_CODES: frozenset[int] = frozenset({-32022})
+#: JSON-RPC error codes reserved by the 2026-07-28 protocol. They distinguish a
+#: modern peer from a legacy server that rejects ``server/discover``.
+MODERN_ERROR_CODES: frozenset[int] = frozenset({-32020, -32021, -32022})
 
 #: The method every modern server implements, and the only safe stdio probe.
 DISCOVER_METHOD = "server/discover"
@@ -118,7 +127,7 @@ class EraDecision:
     """
 
     era: str
-    version: str
+    version: str | None
     reason: str
 
     @property
@@ -157,13 +166,13 @@ def decide_era(
         return EraDecision("legacy", LEGACY_VERSIONS[0], f"{DISCOVER_METHOD} timed out: no modern framing in sight")
     if isinstance(discover_result, Mapping):
         offered = discover_result.get("supportedVersions") or discover_result.get("protocolVersions") or ()
-        version = select_version(offered)
+        version = select_version(offered, prefer=MODERN_VERSIONS)
         if version is None:
             reported = ", ".join(str(item) for item in offered) or "(none)"
             return EraDecision(
                 "modern",
-                MODERN_VERSION,
-                f"{DISCOVER_METHOD} answered but offered no mutually supported version (server offered: {reported})",
+                None,
+                f"{DISCOVER_METHOD} answered but offered no mutually supported modern version (server offered: {reported})",
             )
         # capabilities and serverInfo are read for display only: the spec says a
         # client MUST NOT rely on serverInfo for security decisions, and self-reported
@@ -173,13 +182,14 @@ def decide_era(
         code = discover_error.get("code")
         if isinstance(code, int) and code in MODERN_ERROR_CODES:
             data = discover_error.get("data") if isinstance(discover_error.get("data"), Mapping) else {}
-            version = select_version(data.get("supported") or ())
-            if version is not None:
+            version = select_version(data.get("supported") or (), prefer=MODERN_VERSIONS)
+            if code == -32022 and version is not None:
                 return EraDecision("modern", version, f"server reported a modern error and named {version} as supported")
             return EraDecision(
                 "modern",
-                MODERN_VERSION,
-                f"server speaks a modern error code ({code}) but offered no version we support",
+                None,
+                f"server speaks a modern error code ({code}) but the probe cannot continue safely; "
+                "no mutually supported modern version was selected",
             )
         detail = str(discover_error.get("message") or "unknown error")
         return EraDecision("legacy", LEGACY_VERSIONS[0], f"{DISCOVER_METHOD} answered with a non-modern error ({code!r}: {detail}): legacy server")
@@ -187,16 +197,16 @@ def decide_era(
 
 
 def result_type(result: Mapping[str, Any] | None) -> str:
-    """``resultType`` with the legacy-era default spelled out.
+    """Return the wire ``resultType``, defaulting an absent field to ``complete``.
 
     Generations before 2026-07-28 have no ``resultType`` field at all, so a missing one
-    is "complete", not "unknown" - inferring otherwise would treat every legacy
-    server as mid-round-trip forever.
+    is "complete", not "unknown". Unknown string variants are preserved so callers
+    can reject result kinds they do not implement instead of treating them as success.
     """
     if not isinstance(result, Mapping):
         return RESULT_COMPLETE
     value = result.get("resultType")
-    return str(value) if value in (RESULT_COMPLETE, RESULT_INPUT_REQUIRED) else RESULT_COMPLETE
+    return value if isinstance(value, str) else RESULT_COMPLETE
 
 
 def input_requests(result: Mapping[str, Any]) -> dict[str, dict[str, Any]]:
@@ -281,6 +291,7 @@ __all__ = [
     "META_PROTOCOL_VERSION",
     "MODERN_ERROR_CODES",
     "MODERN_VERSION",
+    "MODERN_VERSIONS",
     "RESULT_COMPLETE",
     "RESULT_INPUT_REQUIRED",
     "ROOTS_METHOD",

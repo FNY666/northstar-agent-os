@@ -26,6 +26,7 @@ from mcp_negotiate import (
     META_CLIENT_INFO,
     META_PROTOCOL_VERSION,
     MODERN_VERSION,
+    MODERN_VERSIONS,
     RESULT_COMPLETE,
     RESULT_INPUT_REQUIRED,
     EraDecision,
@@ -47,6 +48,9 @@ class SelectVersionTests(unittest.TestCase):
     def test_the_newest_mutual_version_wins_in_our_order(self):
         self.assertEqual(select_version([LEGACY_VERSIONS[1], MODERN_VERSION, LEGACY_VERSIONS[0]]), MODERN_VERSION)
         self.assertEqual(select_version(["2024-11-05", "2025-11-25"]), "2025-11-25")
+        self.assertEqual(LEGACY_VERSIONS, (
+            "2025-11-25", "2025-06-18", "2025-03-26", "2024-11-05", "2024-10-07"
+        ))
 
     def test_nothing_in_common_is_none_rather_than_a_favourite_date(self):
         # A client that "tries its newest anyway" turns an incompatibility into a
@@ -96,16 +100,29 @@ class DecideEraTests(unittest.TestCase):
     def test_a_modern_error_with_a_named_version_adopts_it(self):
         decision = decide_era(
             None,
-            {"code": -32022, "message": "unsupported", "data": {"supported": [LEGACY_VERSIONS[0]]}},
+            {"code": -32022, "message": "unsupported", "data": {"supported": [MODERN_VERSION]}},
         )
         self.assertTrue(decision.modern, "only a modern server can produce -32022")
-        self.assertEqual(decision.version, LEGACY_VERSIONS[0])
-
-    def test_a_modern_error_without_one_we_share_stays_modern_and_says_so(self):
-        decision = decide_era(None, {"code": -32022, "data": {"supported": ["2099-01-01"]}})
-        self.assertTrue(decision.modern)
         self.assertEqual(decision.version, MODERN_VERSION)
-        self.assertIn("no version we support", decision.reason)
+
+    def test_a_modern_error_with_only_legacy_versions_has_no_modern_fallback(self):
+        decision = decide_era(None, {"code": -32022, "data": {"supported": [*LEGACY_VERSIONS]}})
+        self.assertTrue(decision.modern)
+        self.assertIsNone(decision.version)
+        self.assertIn("no mutually supported modern version", decision.reason)
+
+    def test_a_discover_result_with_only_legacy_versions_is_not_a_legacy_handshake_signal(self):
+        decision = decide_era({"supportedVersions": list(LEGACY_VERSIONS)}, None)
+        self.assertTrue(decision.modern)
+        self.assertIsNone(decision.version)
+        self.assertIn("no mutually supported modern version", decision.reason)
+
+    def test_all_reserved_modern_errors_block_downgrade(self):
+        for code in (-32020, -32021, -32022):
+            with self.subTest(code=code):
+                decision = decide_era(None, {"code": code, "message": "modern refusal"})
+                self.assertTrue(decision.modern)
+                self.assertIsNone(decision.version)
 
     def test_method_not_found_is_the_legacy_signal(self):
         decision = decide_era(None, {"code": -32601, "message": "method not found"})
@@ -143,7 +160,7 @@ class MrtrPlanningTests(unittest.TestCase):
     def test_a_missing_result_type_is_complete(self):
         self.assertEqual(result_type({}), RESULT_COMPLETE)
         self.assertEqual(result_type(None), RESULT_COMPLETE)
-        self.assertEqual(result_type({"resultType": "nonsense"}), RESULT_COMPLETE)
+        self.assertEqual(result_type({"resultType": "task"}), "task")
         self.assertEqual(result_type({"resultType": RESULT_INPUT_REQUIRED}), RESULT_INPUT_REQUIRED)
 
     def test_only_well_formed_requests_survive(self):
@@ -186,7 +203,15 @@ class NegotiationSubprocessTests(unittest.TestCase):
         saved = dict(os.environ)
         os.environ.update({"MRTR_SERVER_MODE": mode, "MRTR_SERVER_WIRE": str(wire)})
         try:
-            client = McpStdioClient("demo", [sys.executable, str(fixture)], timeout_ms=8_000, env={"MRTR_SERVER_MODE": mode, "MRTR_SERVER_WIRE": str(wire)}, **kwargs)  # type: ignore[arg-type]
+            client = McpStdioClient(
+                "demo",
+                [sys.executable, str(fixture)],
+                timeout_ms=8_000,
+                env={"MRTR_SERVER_MODE": mode, "MRTR_SERVER_WIRE": str(wire)},
+                network="allowed",
+                seccomp="off",
+                **kwargs,  # type: ignore[arg-type]
+            )
             client.connect()
         finally:
             os.environ.clear()
@@ -207,6 +232,7 @@ class NegotiationSubprocessTests(unittest.TestCase):
             self.assertEqual(client.era, "modern")
             self.assertEqual(client.protocol_version, MODERN_VERSION)
             self.assertIn("mutually supported version", client.negotiation)
+            self.assertEqual(client.discovery["server_info"], {"name": "mrtr-fixture", "version": "9"})
         finally:
             client.close()
 
@@ -222,24 +248,86 @@ class NegotiationSubprocessTests(unittest.TestCase):
         finally:
             client.close()
 
-    def test_a_refused_version_is_adopted_instead_of_retried(self):
-        client = self.connect(mode="reject-then-discover")
+    def test_mrtr_retry_uses_a_fresh_id_echoes_state_and_keeps_request_metadata(self):
+        client = self.connect(mode="discover", elicitor=lambda _request: {"approved": True})
         try:
-            self.assertEqual(client.era, "modern")
-            self.assertEqual(client.protocol_version, LEGACY_VERSIONS[0])
-            self.assertIn("modern error", client.negotiation)
-            # The correction applies to the work, not to the probe: every later request
-            # names the version the server said it speaks.
-            for entry in self.wire(client)[1:]:
-                self.assertEqual(entry["meta"][META_PROTOCOL_VERSION], LEGACY_VERSIONS[0])
+            result = client.call_tool("needs_input", {})
+            self.assertFalse(result.is_error, result.text())
+            calls = [entry for entry in self.wire(client) if entry["method"] == "tools/call"]
+            self.assertEqual(len(calls), 2)
+            first, retry = calls
+            self.assertNotEqual(first["id"], retry["id"])
+            self.assertEqual(retry["params"]["name"], "needs_input")
+            self.assertEqual(retry["params"]["arguments"], {})
+            self.assertEqual(retry["params"]["requestState"], "state-1")
+            self.assertEqual(set(retry["params"]["inputResponses"]), {"confirm", "ask_model"})
+            self.assertEqual(first["meta"], retry["meta"])
+            self.assertEqual(retry["meta"][META_PROTOCOL_VERSION], MODERN_VERSION)
         finally:
             client.close()
+
+    def test_refusing_an_mrtr_result_does_not_cancel_a_completed_request(self):
+        client = self.connect(mode="discover")
+        try:
+            result = client.call_tool("needs_input", {})
+            self.assertTrue(result.is_error)
+            methods = [entry["method"] for entry in self.wire(client)]
+            self.assertEqual(methods.count("tools/call"), 1)
+            self.assertNotIn("notifications/cancelled", methods)
+        finally:
+            client.close()
+
+    def test_modern_tool_results_require_a_supported_result_type(self):
+        client = self.connect(mode="discover")
+        try:
+            unknown = client.call_tool("unknown_result_type", {})
+            missing = client.call_tool("missing_result_type", {})
+            self.assertTrue(unknown.is_error)
+            self.assertIn("unsupported resultType 'task'", unknown.text())
+            self.assertTrue(missing.is_error)
+            self.assertIn("omitted its required resultType", missing.text())
+        finally:
+            client.close()
+
+    def test_a_modern_error_listing_only_legacy_versions_fails_without_downgrade(self):
+        wire = Path(tempfile.mkdtemp(prefix="nsar-mcpwire-") ) / "wire.jsonl"
+        client = McpStdioClient(
+            "demo",
+            [sys.executable, str(FIXTURE)],
+            timeout_ms=8_000,
+            env={"MRTR_SERVER_MODE": "modern-error-legacy-only", "MRTR_SERVER_WIRE": str(wire)},
+            network="allowed",
+            seccomp="off",
+        )
+        with self.assertRaises(McpError) as caught:
+            client.connect()
+        methods = [json.loads(line)["method"] for line in wire.read_text(encoding="utf-8").splitlines()]
+        self.assertEqual(methods, [DISCOVER_METHOD])
+        self.assertIn("no mutually supported modern version", str(caught.exception))
+        self.assertIsNone(client._proc, "a failed negotiation closes its child")
+
+    def test_a_discover_result_listing_only_legacy_versions_fails_without_downgrade(self):
+        wire = Path(tempfile.mkdtemp(prefix="nsar-mcpwire-") ) / "wire.jsonl"
+        client = McpStdioClient(
+            "demo",
+            [sys.executable, str(FIXTURE)],
+            timeout_ms=8_000,
+            env={"MRTR_SERVER_MODE": "discover-legacy-only", "MRTR_SERVER_WIRE": str(wire)},
+            network="allowed",
+            seccomp="off",
+        )
+        with self.assertRaises(McpError) as caught:
+            client.connect()
+        methods = [json.loads(line)["method"] for line in wire.read_text(encoding="utf-8").splitlines()]
+        self.assertEqual(methods, [DISCOVER_METHOD])
+        self.assertIn("no mutually supported modern version", str(caught.exception))
+        self.assertIsNone(client._proc, "a failed negotiation closes its child")
 
     def test_an_unanswered_probe_falls_back_to_the_handshake(self):
         client = self.connect(mode="legacy-only")
         try:
             self.assertEqual(client.era, "legacy")
-            self.assertEqual(client.protocol_version, LEGACY_VERSIONS[0])
+            self.assertEqual(client.protocol_version, "2024-11-05")
             self.assertIn("legacy server", client.negotiation)
             methods = [entry["method"] for entry in self.wire(client)]
             # The probe still happens - that is what "fallback" means - and it is the
@@ -247,7 +335,14 @@ class NegotiationSubprocessTests(unittest.TestCase):
             self.assertEqual(methods[0], DISCOVER_METHOD)
             self.assertEqual(methods[1], "initialize")
             self.assertIn("notifications/initialized", methods)
-            self.assertEqual(client.tool_names(), ("echo", "needs_input", "needs_password"))
+            entries = self.wire(client)
+            init = next(entry for entry in entries if entry["method"] == "initialize")
+            self.assertEqual(init["params"]["protocolVersion"], LEGACY_VERSIONS[0])
+            self.assertNotIn("_meta", init["params"])
+            self.assertEqual(
+                client.tool_names(),
+                ("echo", "missing_result_type", "needs_input", "needs_password", "unknown_result_type"),
+            )
         finally:
             client.close()
 
@@ -272,13 +367,16 @@ class NegotiationSubprocessTests(unittest.TestCase):
         os.environ.pop("MRTR_SERVER_MODE", None)
         os.environ.pop("MRTR_SERVER_WIRE", None)
         try:
-            client = McpStdioClient("old", [sys.executable, str(LEGACY_FIXTURE)], timeout_ms=8_000)
+            client = McpStdioClient(
+                "old", [sys.executable, str(LEGACY_FIXTURE)], timeout_ms=8_000, network="allowed", seccomp="off"
+            )
             client.connect()
         finally:
             os.environ.clear()
             os.environ.update(saved)
         try:
             self.assertEqual(client.era, "legacy")
+            self.assertEqual(client.protocol_version, "2024-11-05")
             result = client.call_tool("echo", {"text": "still fine"})
             self.assertFalse(result.is_error)
             self.assertEqual(result.text(), "echo:still fine")
@@ -292,7 +390,9 @@ class NegotiationSubprocessTests(unittest.TestCase):
         saved = dict(os.environ)
         os.environ["MRTR_SERVER_MODE"] = "no-discover"
         try:
-            client = McpStdioClient("demo", [sys.executable, str(FIXTURE)], timeout_ms=8_000)
+            client = McpStdioClient(
+                "demo", [sys.executable, str(FIXTURE)], timeout_ms=8_000, network="allowed", seccomp="off"
+            )
             with self.assertRaises(McpError) as caught:
                 client.connect()
         finally:

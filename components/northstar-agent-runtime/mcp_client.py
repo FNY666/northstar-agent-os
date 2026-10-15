@@ -61,7 +61,9 @@ from mcp_negotiate import (
     DISCOVER_METHOD,
     LEGACY_VERSIONS,
     MAX_INPUT_ROUNDS,
+    MODERN_ERROR_CODES,
     MODERN_VERSION,
+    RESULT_COMPLETE,
     RESULT_INPUT_REQUIRED,
     client_capabilities,
     decide_era,
@@ -287,7 +289,6 @@ class McpStdioClient:
         self.elicitation_log: list[dict[str, Any]] = []
         self._proc: subprocess.Popen[bytes] | None = None
         self._request_id = 0
-        self._last_request_id: int | None = None
         self._tools: dict[str, RemoteTool] = {}
         # Tool-definition pinning: digests captured at connect() time. Any
         # drift detected by refresh_tools() quarantines the server.
@@ -349,14 +350,39 @@ class McpStdioClient:
             self.era, self.protocol_version = "modern", MODERN_VERSION
             self.negotiation = "--mcp-protocol modern: per-request metadata, no handshake"
             return
-        result, error, timed_out = self._exchange(DISCOVER_METHOD, None, force_meta=True)
-        if isinstance(result, dict):
-            self.discovery = discover_summary(result)
-        decision = decide_era(result if isinstance(result, dict) else None, error, timed_out=timed_out)
-        self.era, self.protocol_version = decision.era, decision.version
-        self.negotiation = decision.reason
-        if not decision.modern:
+        probe_version = MODERN_VERSION
+        attempted = {probe_version}
+        while True:
+            self.protocol_version = probe_version
+            result, error, timed_out = self._exchange(DISCOVER_METHOD, None, force_meta=True)
+            if isinstance(result, dict):
+                self.discovery = discover_summary(result)
+                decision = decide_era(result, None)
+                if decision.version is None:
+                    raise McpError(f"mcp server {self.name!r}: {decision.reason}")
+                self.era, self.protocol_version = decision.era, decision.version
+                self.negotiation = decision.reason
+                return
+
+            decision = decide_era(None, error, timed_out=timed_out)
+            if decision.modern:
+                self.negotiation = decision.reason
+                code = error.get("code") if isinstance(error, dict) else None
+                if (
+                    isinstance(code, int)
+                    and code in MODERN_ERROR_CODES
+                    and decision.version is not None
+                    and decision.version not in attempted
+                ):
+                    attempted.add(decision.version)
+                    probe_version = decision.version
+                    continue
+                raise McpError(f"mcp server {self.name!r}: {decision.reason}")
+
+            self.era, self.protocol_version = decision.era, decision.version or LEGACY_VERSIONS[0]
+            self.negotiation = decision.reason
             self._legacy_handshake()
+            return
 
     def _legacy_handshake(self) -> None:
         result = self._request("initialize", {
@@ -366,6 +392,13 @@ class McpStdioClient:
         })
         if not isinstance(result, dict):
             raise McpError(f"mcp server {self.name!r}: initialize returned a non-object result")
+        server_version = result.get("protocolVersion")
+        if not isinstance(server_version, str) or server_version not in LEGACY_VERSIONS:
+            raise McpError(
+                f"mcp server {self.name!r}: initialize selected unsupported legacy protocol version "
+                f"{server_version!r}"
+            )
+        self.protocol_version = server_version
         self._notify("notifications/initialized")
 
     @staticmethod
@@ -799,7 +832,18 @@ class McpStdioClient:
                 return ToolResult.error(f"mcp {self.name}/{tool_name}: {error}")
             if not isinstance(result, dict):
                 return ToolResult.error(f"mcp {self.name}/{tool_name}: tools/call returned a non-object result")
-            if result_type(result) != RESULT_INPUT_REQUIRED:
+            wire_result_type = result.get("resultType")
+            if self.modern and not isinstance(wire_result_type, str):
+                return ToolResult.error(
+                    f"mcp {self.name}/{tool_name}: modern tools/call result omitted its required resultType"
+                )
+            kind = result_type(result)
+            if kind not in (RESULT_COMPLETE, RESULT_INPUT_REQUIRED):
+                return ToolResult.error(
+                    f"mcp {self.name}/{tool_name}: unsupported resultType {kind!r}; "
+                    "this client supports complete and input_required"
+                )
+            if kind != RESULT_INPUT_REQUIRED:
                 break
             rounds += 1
             if rounds > self.max_input_rounds:
@@ -848,12 +892,9 @@ class McpStdioClient:
                     f"mcp {self.name}/{tool_name}: the approver cancelled this call; " + "; ".join(notes)
                 )
             if not any(verdict.action == ACCEPT for verdict in verdicts):
-                # Every request was refused by policy, so the server has nothing new to
-                # work with. Re-sending the same refusals until the round cap is reached
-                # would be a negotiation with a wall; instead the in-flight request is
-                # cancelled the way the spec asks a client to behave when it cannot
-                # answer, and the refusal is what the model sees.
-                self._cancel_in_flight("the run refused every input request this call made")
+                # The InputRequiredResult has already completed this JSON-RPC request.
+                # A cancellation notification is only for a request still in flight;
+                # do not send one after the response. Refusal ends the local retry loop.
                 return ToolResult.error(
                     f"mcp {self.name}/{tool_name}: declined without calling the tool, because this run answers "
                     f"no remote input requests and the server needed one; " + "; ".join(notes)
@@ -961,7 +1002,6 @@ class McpStdioClient:
             raise McpError(f"mcp server {self.name!r} is not running")
         self._request_id += 1
         request_id = self._request_id
-        self._last_request_id = request_id
         # The id is a string prefix so a probe id can never collide with a tool-call id
         # a server echoes back after a timeout and a later reply is misattributed.
         self._send(
@@ -990,20 +1030,6 @@ class McpStdioClient:
                 return None, {"message": str(message.get("error"))}, False
             result = message.get("result")
             return (result if isinstance(result, dict) else None), None, False
-
-    def _cancel_in_flight(self, reason: str) -> None:
-        """Tell the server we are abandoning the request we are waiting on.
-
-        Best effort by construction: a server that already gave up on the request will
-        ignore this, and a write to a half-dead pipe must not turn a clean refusal into a
-        second error that hides the first one.
-        """
-        if self._last_request_id is None:
-            return
-        try:
-            self._notify("notifications/cancelled", {"requestId": self._last_request_id, "reason": reason[:400]})
-        except McpError:
-            pass
 
     def _send(self, message: dict[str, Any]) -> None:
         if not self.connected or self._proc is None or self._proc.stdin is None:

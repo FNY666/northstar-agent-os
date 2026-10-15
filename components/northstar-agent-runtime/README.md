@@ -286,19 +286,24 @@ python3 -m cli run --workspace . --prompt "summarise the files" \
   per-request deadline (`--mcp-timeout-ms`, default 15 s); a server that stops
   answering is TERM→KILLed as a process group.
 - **Two protocol generations, one probe.** `--mcp-protocol auto` (the default)
-  opens with `server/discover` — the request the 2026-07-28 revision made
-  mandatory — and only falls back to the older `initialize` handshake when that
-  probe is refused by something that is not a recognizably modern error. A
-  `-32022` refusal is *itself* the modern signal, so it selects the modern
-  generation and adopts the version the server named rather than trying a
-  favourite date. `legacy`/`modern` pin the answer when the operator already
-  knows. The verdict is decided once per server process and printed to stderr,
-  with the reason, so a CI log says which dialect was used.
+  opens with `server/discover`, which modern servers MUST implement. A valid
+  discovery result selects a mutually supported modern revision. A recognized
+  modern error such as `-32022` also identifies a modern peer; the client retries
+  only when that error names another modern revision it supports, and otherwise
+  fails with the mismatch. It never turns a modern refusal into a legacy handshake.
+  A non-modern error or timeout falls back to `initialize`. The client supports
+  `2026-07-28` in the modern era and the `2024-10-07` through `2025-11-25`
+  initialize-era versions. The server's version in `initialize` is authoritative.
+  `legacy`/`modern` pin the behavior when the operator already knows. The verdict
+  is decided once per server process and printed to stderr, with the reason.
 - On the modern generation there is **no handshake and no session id**: the
-  version, `clientInfo` and capabilities ride in `params._meta` on every
-  request, including the probe and notifications. On the legacy generation
-  nothing extra is attached, because unknown keys in a 2024 payload is how a
-  strict server ends the conversation.
+  version and client capabilities ride in namespaced `params._meta` on every
+  request. `clientInfo` is included as recommended by the spec. The discovery
+  result puts self-reported `serverInfo` in its own `_meta`, for display only.
+  Modern results require `resultType`; tool calls support `complete` and
+  `input_required`, and unsupported result types fail clearly. On the legacy
+  generation nothing extra is attached, because unknown keys in an old payload
+  can end the conversation.
 - Every remote tool appears as `mcp__<server>__<tool>` and is **mutating by
   default**: under the runtime's `default` permission mode it is denied until an
   operator names it with `--allow-tool` (or a policy file denies it, which
@@ -328,9 +333,12 @@ python3 -m cli run --workspace . --prompt "summarise the files" \
     `requestState` verbatim; the client never reads that state, and
     `--mcp-max-rounds` (default 3, 1–8) bounds how long a server may keep
     re-asking;
-  - when every request in a round is refused, the in-flight call is cancelled
-    (`notifications/cancelled`) and the tool returns an error the model can see.
-    Declining is final, not a negotiation.
+  - each retry has a fresh JSON-RPC id and keeps the same per-request metadata;
+  - if every request is refused, the client stops locally and returns an error.
+    The `input_required` response already completed that JSON-RPC request, so the
+    client does not send `notifications/cancelled`; that notification is for a
+    request that is still in flight. This synchronous stdio client does not expose
+    an API for cancelling a pending request.
 - Verdicts are audited as field **names**, never values: `client.elicitation_log`
   and the `audit=` callback (embedders) record
   `{"kind": "mcp-elicitation", "server", "tool", "method", "action", "reason",

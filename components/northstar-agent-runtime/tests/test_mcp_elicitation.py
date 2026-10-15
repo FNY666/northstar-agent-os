@@ -13,7 +13,6 @@ import json
 import os
 import sys
 import tempfile
-import time
 import unittest
 from pathlib import Path
 
@@ -305,7 +304,14 @@ class MrtrRoundTripTests(unittest.TestCase):
         saved = dict(os.environ)
         os.environ.update({"MRTR_SERVER_MODE": mode, "MRTR_SERVER_WIRE": str(wire)})
         try:
-            client = McpStdioClient("demo", [sys.executable, str(FIXTURE)], timeout_ms=8_000, **kwargs)  # type: ignore[arg-type]
+            client = McpStdioClient(
+                "demo",
+                [sys.executable, str(FIXTURE)],
+                timeout_ms=8_000,
+                network="allowed",
+                seccomp="off",
+                **kwargs,  # type: ignore[arg-type]
+            )
             client.connect()
         finally:
             os.environ.clear()
@@ -316,23 +322,7 @@ class MrtrRoundTripTests(unittest.TestCase):
     def wire(self, client: McpStdioClient) -> list[dict]:
         return [json.loads(line) for line in Path(client._wire_path).read_text(encoding="utf-8").splitlines() if line]
 
-    def wait_for_wire(self, client: McpStdioClient, method: str, timeout_s: float = 5.0) -> list[str]:
-        """Poll the server-side wire log until ``method`` lands or the deadline passes.
-
-        ``call_tool`` returns once the cancel notification is flushed into the
-        pipe; the fixture server logs it only after it is scheduled to read
-        stdin. Asserting immediately is a race under load — wait for the
-        asynchronous side effect instead.
-        """
-        deadline = time.monotonic() + timeout_s
-        methods: list[str] = []
-        while True:
-            methods = [entry["method"] for entry in self.wire(client)]
-            if method in methods or time.monotonic() >= deadline:
-                return methods
-            time.sleep(0.02)
-
-    def test_unattended_run_refuses_the_request_and_cancels_the_call(self):
+    def test_unattended_run_refuses_the_request_without_cancelling_a_completed_call(self):
         client = self.connect()
         try:
             result = client.call_tool("needs_input", {})
@@ -341,8 +331,8 @@ class MrtrRoundTripTests(unittest.TestCase):
             self.assertIn("no approver attached", result.text())
             calls = [entry for entry in self.wire(client) if entry["method"] == "tools/call"]
             self.assertEqual(len(calls), 1, "a refusal is final: no retry loop until the round cap")
-            methods = self.wait_for_wire(client, "notifications/cancelled")
-            self.assertIn("notifications/cancelled", methods)
+            methods = [entry["method"] for entry in self.wire(client)]
+            self.assertNotIn("notifications/cancelled", methods)
         finally:
             client.close()
 
