@@ -549,7 +549,7 @@ class ToolPinningTests(unittest.TestCase):
             client.close()
 
     def test_digest_is_stable_and_sensitive(self):
-        from mcp_client import tool_definition_digest
+        from mcp_client import _tool_definition_digest, tool_definition_digest
 
         base = tool_definition_digest("s", "t", "desc", {"type": "object"})
         self.assertEqual(base, tool_definition_digest("s", "t", "desc", {"type": "object"}))
@@ -559,13 +559,15 @@ class ToolPinningTests(unittest.TestCase):
         self.assertNotEqual(base, tool_definition_digest("s", "other", "desc", {"type": "object"}))
         self.assertEqual(
             base,
-            tool_definition_digest("s", "t", "desc", {"type": "object"}, output_schema=None),
+            _tool_definition_digest("s", "t", "desc", {"type": "object"}, output_schema=None),
             "input-only pins keep their existing digest",
         )
         output_schema = {"type": "object", "properties": {"result": {"type": "string"}}}
         self.assertNotEqual(
             base,
-            tool_definition_digest("s", "t", "desc", {"type": "object"}, output_schema=output_schema),
+            _tool_definition_digest(
+                "s", "t", "desc", {"type": "object"}, output_schema=output_schema
+            ),
         )
 
     def test_baseline_persists_across_reconnects(self):
