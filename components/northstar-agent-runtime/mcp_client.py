@@ -78,7 +78,7 @@ from tools import ToolProvenance, ToolResult, ToolSpec, ToolContext
 MCP_NAME_RE = "mcp__"
 #: Guardrails for hostile or broken servers.
 MAX_LINE_BYTES = 1_000_000          # one JSON-RPC line
-MAX_SCHEMA_CHARS = 30_000           # one inputSchema
+MAX_SCHEMA_CHARS = 30_000           # one inputSchema or outputSchema
 MAX_TOOLS_PER_SERVER = 25
 MAX_DESCRIPTION_CHARS = 600
 MIN_TIMEOUT_MS = 100
@@ -123,25 +123,57 @@ class RemoteTool:
 
 
 def tool_definition_digest(
-    server: str, name: str, description: str, input_schema: Mapping[str, Any]
+    server: str,
+    name: str,
+    description: str,
+    input_schema: Mapping[str, Any],
+    output_schema: Mapping[str, Any] | None = None,
 ) -> str:
     """Canonical digest pinning one MCP tool's definition.
 
-    Covers ``(server identity, tool name, description, input_schema)`` with
-    the JCS canonicalization, so any drift -- a renamed tool, a rewritten
-    description, a widened schema -- changes the digest. The admission
+    Covers ``(server identity, tool name, description, input_schema)`` and,
+    when present, ``output_schema`` with JCS canonicalization. Omitting the
+    optional schema keeps existing input-only digests stable. The admission
     baseline stores these digests; ``refresh_tools`` recomputes them and
     quarantines the server on mismatch.
     """
     from canonical_json import jcs_canonical_json as _jcs
 
-    payload = {
+    payload: dict[str, Any] = {
         "server": server,
         "name": name,
         "description": description,
         "input_schema": dict(input_schema),
     }
+    if output_schema is not None:
+        payload["output_schema"] = dict(output_schema)
     return hashlib.sha256(_jcs(payload)).hexdigest()
+
+
+def _validated_output_schema(
+    raw_tool: Mapping[str, Any],
+    *,
+    server: str,
+    tool_name: str,
+    during_revalidation: bool = False,
+) -> dict[str, Any] | None:
+    """Validate and bound MCP's optional output schema before pinning it."""
+    if "outputSchema" not in raw_tool:
+        return None
+    schema = raw_tool["outputSchema"]
+    context = " during revalidation" if during_revalidation else ""
+    if not isinstance(schema, dict):
+        raise McpError(
+            f"mcp server {server!r}: tool {tool_name!r} outputSchema "
+            f"is not an object{context}"
+        )
+    encoded = json.dumps(schema, sort_keys=True)
+    if len(encoded) > MAX_SCHEMA_CHARS:
+        raise McpError(
+            f"mcp server {server!r}: tool {tool_name!r} outputSchema "
+            f"is {len(encoded)} chars{context} (cap {MAX_SCHEMA_CHARS})"
+        )
+    return schema
 
 
 # Tool-description coercion patterns (ToolHijacker / ToolCommander family).
@@ -481,13 +513,16 @@ class McpStdioClient:
                         f"mcp server {self.name!r}: tool {tool_name!r} inputSchema is "
                         f"{len(encoded)} chars (cap {MAX_SCHEMA_CHARS})"
                     )
+                output_schema = _validated_output_schema(
+                    raw, server=self.name, tool_name=tool_name
+                )
                 self._tools[tool_name] = RemoteTool(
                     name=tool_name,
                     description=description,
                     input_schema=schema,
                 )
                 self._tool_digests[tool_name] = tool_definition_digest(
-                    self.name, tool_name, description, schema
+                    self.name, tool_name, description, schema, output_schema
                 )
                 # Admission coercion screen: flag descriptions that try to
                 # coerce tool selection (ToolHijacker family). Hits don't
@@ -683,7 +718,15 @@ class McpStdioClient:
                     f"mcp server {self.name!r}: tool {tool_name!r} inputSchema "
                     f"is {len(encoded)} chars during revalidation (cap {MAX_SCHEMA_CHARS})"
                 )
-            observed[tool_name] = tool_definition_digest(self.name, tool_name, description, schema)
+            output_schema = _validated_output_schema(
+                raw,
+                server=self.name,
+                tool_name=tool_name,
+                during_revalidation=True,
+            )
+            observed[tool_name] = tool_definition_digest(
+                self.name, tool_name, description, schema, output_schema
+            )
         drifts: list[ToolDrift] = []
         for tool_name, expected in self._tool_digests.items():
             seen = observed.get(tool_name)
