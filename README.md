@@ -19,6 +19,7 @@ Northstar is for people who want to **hand work to an AI coworker** that operate
 
 Product spine and roadmap: [docs/next-gen-agent-os.zh-CN.md](docs/next-gen-agent-os.zh-CN.md).  
 Capability benchmark vs top agents: [docs/benchmark-top-agents-2026-09.zh-CN.md](docs/benchmark-top-agents-2026-09.zh-CN.md).  
+Current ecosystem scan (2026-10-15): [AI agent runtimes, protocols, and Northstar priorities](research/agent-ecosystem-2026-10-15.md).  
 Absorb / refuse rules: [docs/next-gen-agent-blueprint.zh-CN.md](docs/next-gen-agent-blueprint.zh-CN.md).
 
 ## What ships today
