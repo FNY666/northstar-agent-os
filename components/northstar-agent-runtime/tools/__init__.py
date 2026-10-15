@@ -79,9 +79,11 @@ class ToolLimits:
 
 @dataclass(frozen=True)
 class ToolContext:
-    """Read-only environment handed to every handler."""
+    """Environment and run-local tool state handed to every handler."""
 
     session_id: str = ""
+    #: Shared only by Shell calls in this run; discarded when the run ends.
+    shell_sessions: dict[str, dict[str, Any]] = field(default_factory=dict)
     agent: str = "main"
     depth: int = 0
     turn_index: int = 0
