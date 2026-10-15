@@ -22,6 +22,7 @@ tool, which is registered only when a socket path is supplied.
 """
 from __future__ import annotations
 
+import math
 import os
 import time
 from dataclasses import dataclass, field, replace
@@ -245,9 +246,14 @@ class RuntimeConfig:
                 fail("max_tool_calls must be a non-negative integer or None")
         if self.max_budget_usd is not None:
             if isinstance(self.max_budget_usd, bool) or not isinstance(self.max_budget_usd, (int, float)):
-                fail("max_budget_usd must be a number or None")
-            elif self.max_budget_usd <= 0:
-                fail("max_budget_usd must be positive when set; use None for no ceiling")
+                fail("max_budget_usd must be a positive finite number or None")
+            try:
+                budget_usd = float(self.max_budget_usd)
+            except OverflowError:
+                fail("max_budget_usd must be a positive finite number or None")
+            if not math.isfinite(budget_usd) or budget_usd <= 0:
+                fail("max_budget_usd must be a positive finite number or None")
+            object.__setattr__(self, "max_budget_usd", budget_usd)
         if self.compaction_threshold_tokens is not None:
             if isinstance(self.compaction_threshold_tokens, bool) or not isinstance(self.compaction_threshold_tokens, int):
                 fail("compaction_threshold_tokens must be an integer or None")
