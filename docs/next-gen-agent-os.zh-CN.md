@@ -92,7 +92,7 @@ northstar agent "…"          ← 唯一推荐入口
 
 | 顺序 | 产品能力 | 当前底座与交付验收 |
 |---|---|---|
-| **1** | 编程任务闭环（最高优先级） | 已有 `Read` / `Write` / `Edit` / `LS` / `Grep` / 受沙箱约束的 `Shell`；`--coding-mode` 提供工作流指引，并由 CLI 独立比较运行前后的 Git 状态、脏文件内容、暂存区和 HEAD，输出 `coding_evidence` 收据。继续补强机器可判定的检查证据与审阅体验；该模式不授予任何工具权限，写入和执行仍经过权限门。 |
+| **1** | 编程任务闭环（最高优先级） | 已有 `Read` / `Write` / `Edit` / `LS` / `Grep` / 受沙箱约束的 `Shell`；`--coding-mode` 提供工作流指引，CLI 独立记录 Git 净变化和主 agent Shell 执行结果，输出 `coding_evidence` 收据。继续补强机器可判定的检查证据与审阅体验；该模式不授予任何工具权限，写入和执行仍经过权限门。 |
 | **2** | 攻击测试 + 防护工具（成对建设） | 已有手动 CLI，并可通过 `--enable-security-tools` 在单次 agent 运行中注册本地 `SecurityScan`；临时 runtime 探针 `SecurityProbe` 还要求显式 `--allow-tool SecurityProbe`。扫描器固定当前工作区、只读离线，覆盖密钥 / Python SAST、依赖固定与来源、部分容器 / CI / Terraform 配置；finding 按严重度排序并附修复建议，不查询 CVE 库也不自动改文件。agent 可保存 run-local 基线并比较修复前后结果；文件变更仍须单独授权 `Write` / `Edit`。探针使用临时靶场覆盖默认权限、目录穿越、符号链接、治理文件写保护及 Shell 的工作区和治理目录边界；canary 全在临时目录并自动清理。bwrap 会将 `.northstar` 重新挂载为只读，process 回退会明确报告无法隔离工作区子目录。后续扩展配置规则和修复策略校验；真实攻击测试限定隔离靶场或显式 allowlist，并绑定目标、权限、预算和审计。 |
 | **3** | 多模态输入与理解 | 编程闭环与攻防工具形成稳定体验后再扩展图片、音频和视频输入；媒体内容仍视为不可信输入，保留来源、文件范围和处理结果的审计信息。 |
 

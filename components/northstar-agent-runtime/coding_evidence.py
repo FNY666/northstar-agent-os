@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import hashlib
 import os
+import re
 import stat
 import subprocess
 from dataclasses import dataclass
@@ -399,3 +400,60 @@ def compare_snapshots(before: WorkspaceSnapshot, after: WorkspaceSnapshot) -> di
         "coverage_notes": coverage_notes,
         "coverage": "partial" if unverifiable or coverage_notes else "complete",
     }
+
+
+_SHELL_EXIT_LINE = re.compile(r"^exit=(n/a|-?\d+)(?: timed_out=(true|false))?$")
+_SHELL_BACKEND_LINE = re.compile(r"^backend=([^\s]+) isolation=([^\s]+)$")
+
+
+def shell_execution_evidence(run_report: Any) -> list[dict[str, Any]]:
+    """Summarize top-level Shell outcomes without copying command or output text."""
+    if run_report is None:
+        return []
+    results: dict[str, Any] = {}
+    for event in getattr(run_report, "events", ()):
+        if type(event).__name__ != "UserMessage":
+            continue
+        for block in getattr(event, "content", ()):
+            if type(block).__name__ == "ToolResultBlock":
+                results[str(getattr(block, "tool_use_id", ""))] = block
+
+    evidence: list[dict[str, Any]] = []
+    calls = [call for call in getattr(run_report, "tool_calls", ()) if getattr(call, "name", "") == "Shell"]
+    for call in sorted(calls, key=lambda item: (item.turn_index, item.call_id)):
+        result = results.get(call.call_id)
+        result_text = result.text() if result is not None and callable(getattr(result, "text", None)) else ""
+        lines = result_text.splitlines()
+        exit_match = _SHELL_EXIT_LINE.fullmatch(lines[0]) if lines else None
+        backend_match = _SHELL_BACKEND_LINE.fullmatch(lines[1]) if len(lines) > 1 else None
+        executed = exit_match is not None and backend_match is not None
+        if call.denied:
+            status = "denied"
+        elif executed:
+            status = "executed"
+        elif call.is_error:
+            status = "error"
+        else:
+            status = "unconfirmed"
+        exit_text = exit_match.group(1) if exit_match else "n/a"
+        timeout_text = exit_match.group(2) if exit_match else None
+        record: dict[str, Any] = {
+            "call_id": call.call_id,
+            "turn_index": call.turn_index,
+            "agent": call.agent,
+            "status": status,
+            "executed": executed,
+            "denied": bool(call.denied),
+            "permission_source": call.permission_source,
+            "tool_error": bool(call.is_error),
+            "duration_ms": call.duration_ms,
+            "truncated": bool(call.truncated),
+        }
+        if exit_match:
+            record["exit_code"] = int(exit_text) if exit_text != "n/a" else None
+            record["timed_out"] = timeout_text == "true"
+        if backend_match:
+            record["backend"] = backend_match.group(1)
+            record["isolation"] = backend_match.group(2)
+        evidence.append(record)
+    return evidence

@@ -1048,13 +1048,18 @@ and what held - independently of anything the assistant said.
 `northstar agent --coding-mode` adds workflow instructions and, after the run-owned
 MCP clients have closed, prints a CLI receipt comparing Git snapshots from before
 and after the run. The receipt reports net changed paths, HEAD changes, staged-index
-changes, and whether bounded file hashing covered every changed path. It detects
-changes to files that were already dirty before the run by hashing those paths at
-both boundaries. Git ignore rules still apply. It invokes fixed read-only Git commands; it does not run hooks,
+changes, whether bounded file hashing covered every changed path, and the main
+agent's Shell outcomes (execution status, exit code, timeout, backend, and isolation).
+Command text and command output are omitted from this summary; use each `call_id` to
+find the full call in the session transcript. Shell calls made inside Task subagents
+are not yet expanded into this summary. The receipt detects changes to files that were
+already dirty before the run by hashing those paths at both boundaries. Git ignore
+rules still apply. It invokes fixed read-only Git commands; it does not run hooks,
 tests, formatters, or anything from the repository.
 
 With `--json`, one final `{"type":"coding_evidence", ...}` line follows the runtime
-event lines. `status=unavailable` means a Git comparison could not be made;
+event lines. It includes top-level `shell_executions` even when the workspace is not
+a Git worktree. `status=unavailable` means a Git comparison could not be made;
 `coverage=partial` names paths that exceeded the evidence bounds or could not be
 read safely. This is evidence of a net workspace change, not evidence that the
 change is correct, and it cannot identify which process made it. The mode still

@@ -1295,11 +1295,13 @@ def _stream_events(
     return exit_code
 
 
-def _print_coding_evidence(args: argparse.Namespace, before: Any) -> None:
+def _print_coding_evidence(args: argparse.Namespace, before: Any, run_report: Any) -> None:
     """Print a host-observed workspace receipt after all run-owned clients stop."""
-    from coding_evidence import compare_snapshots, snapshot_workspace
+    from coding_evidence import compare_snapshots, shell_execution_evidence, snapshot_workspace
 
     evidence = compare_snapshots(before, snapshot_workspace(args.workspace))
+    evidence["shell_execution_scope"] = "top_level"
+    evidence["shell_executions"] = shell_execution_evidence(run_report)
     if args.json:
         # A CLI receipt follows the runtime event stream. It is separate from
         # model-authored text and keeps --json usable by automation.
@@ -1332,6 +1334,20 @@ def _print_coding_evidence(args: argparse.Namespace, before: Any) -> None:
         print("  unverifiable: " + json.dumps(evidence["unverifiable_paths"], ensure_ascii=True))
     for note in evidence.get("coverage_notes", []):
         print(f"  coverage note: {note}")
+    shell_executions = evidence["shell_executions"]
+    print(f"  shell_executions={len(shell_executions)} (top-level calls; commands and output omitted)")
+    for item in shell_executions:
+        fields = [
+            f"turn={item['turn_index']}",
+            f"status={item['status']}",
+            f"call_id={item['call_id']}",
+        ]
+        if "exit_code" in item:
+            fields.append(f"exit={item['exit_code'] if item['exit_code'] is not None else 'n/a'}")
+            fields.append(f"timed_out={str(item['timed_out']).lower()}")
+        if "backend" in item:
+            fields.append(f"backend={item['backend']}/{item['isolation']}")
+        print("    " + " ".join(fields))
 
 
 def _run(args: argparse.Namespace) -> int:
@@ -1518,7 +1534,7 @@ def _run(args: argparse.Namespace) -> int:
         for client in mcp_clients:
             client.close()
     if coding_snapshot is not None:
-        _print_coding_evidence(args, coding_snapshot)
+        _print_coding_evidence(args, coding_snapshot, runtime.last_report)
     return exit_code
 
 

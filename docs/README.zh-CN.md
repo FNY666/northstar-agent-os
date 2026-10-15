@@ -89,7 +89,7 @@ bin/northstar agent --workspace . --coding-mode --enable-security-tools \
   --prompt "先调用 SecurityScan 并保存 baseline_id；审阅发现后修复明确的问题，再用 compare_to 对该基线复测并汇报新增、消失和残留项"
 ```
 
-编程任务可使用 `--coding-mode` 引导 agent 按“检查仓库 → 制定计划 → 修改 → 运行已授权的检查 → 审阅 diff”工作。运行前后，CLI 还会独立比较 Git 工作区状态和脏文件内容，报告净改动文件、HEAD 与暂存区变化；它不依赖模型自述，也不执行仓库脚本。Git 忽略规则仍然生效；文件数和哈希读取有上限，超出时会标记 `coverage=partial`；非 Git 工作区会标记 `unavailable`。`--json` 在运行结果后追加一条 `type=coding_evidence` 记录。此模式不会自动授予文件写入或 Shell 权限；请只放行本次需要的工具：
+编程任务可使用 `--coding-mode` 引导 agent 按“检查仓库 → 制定计划 → 修改 → 运行已授权的检查 → 审阅 diff”工作。运行前后，CLI 会独立比较 Git 工作区状态和脏文件内容，报告净改动文件、HEAD 与暂存区变化；还会汇总主 agent 的 Shell 调用结果、退出码、超时和隔离后端，不复制命令或输出。它不依赖模型自述，也不执行仓库脚本。Git 忽略规则仍然生效；文件数和哈希读取有上限，超出时会标记 `coverage=partial`；非 Git 工作区会标记 `unavailable`。`--json` 在运行结果后追加一条 `type=coding_evidence` 记录。此模式不会自动授予文件写入或 Shell 权限；请只放行本次需要的工具：
 
 ```sh
 bin/northstar agent --workspace . --coding-mode \
