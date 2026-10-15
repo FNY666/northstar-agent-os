@@ -1,0 +1,2 @@
+# Test runner for the runtime suite (kept separate from runtime dependencies).
+pytest>=8,<10
