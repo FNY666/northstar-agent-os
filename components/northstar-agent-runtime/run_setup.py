@@ -275,8 +275,8 @@ def resolve_agent(
     return definition, registry, allowed
 
 
-def tighten(cli_value: int | None, file_value: int | None) -> int | None:
-    """Policy-file ceilings may only lower; when both are set, the lower wins."""
+def tighten(cli_value: int | float | None, file_value: int | float | None) -> int | float | None:
+    """Configuration ceilings may only lower; when multiple are set, the lower wins."""
     candidates = [value for value in (cli_value, file_value) if value is not None]
     return min(candidates) if candidates else None
 
@@ -305,7 +305,11 @@ def resolve_ceilings(args: argparse.Namespace, definition: Any, policy: Any, plu
         tighten(base_tool_calls, policy.max_tool_calls if policy is not None else None), plugin_policy.get("max_tool_calls")
     )
     max_budget_usd = tighten(
-        tighten(args.max_budget_usd, policy.max_budget_usd if policy is not None else None), plugin_policy.get("max_budget_usd")
+        tighten(
+            tighten(args.max_budget_usd, definition.max_budget_usd if definition is not None else None),
+            policy.max_budget_usd if policy is not None else None,
+        ),
+        plugin_policy.get("max_budget_usd"),
     )
     compaction_threshold = tighten(
         args.compaction_threshold_tokens,
