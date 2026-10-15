@@ -213,6 +213,110 @@ class NonblockingRunnerTests(unittest.TestCase):
         self.assertEqual(result.error_class, "timeout")
 
 
+class RunnerCleanupTests(unittest.TestCase):
+    def invoke(self):
+        return process_adapter._run_bounded_process(
+            ("fixture",), cwd=Path("/tmp"), input_bytes=b"context", env={},
+            timeout_seconds=1, max_output_bytes=8192,
+        )
+
+    def test_selector_creation_failure_does_not_spawn(self):
+        with mock.patch.object(process_adapter.selectors, "DefaultSelector", side_effect=OSError("selector setup")), mock.patch.object(process_adapter.subprocess, "Popen") as spawn:
+            with self.assertRaisesRegex(OSError, "selector setup"):
+                self.invoke()
+            spawn.assert_not_called()
+
+    def test_spawn_failure_releases_preallocated_selector(self):
+        selector = mock.MagicMock()
+        with mock.patch.object(process_adapter.selectors, "DefaultSelector", return_value=selector), mock.patch.object(process_adapter.subprocess, "Popen", side_effect=OSError("spawn failure")):
+            result = self.invoke()
+        self.assertEqual(result.error_class, "process_start")
+        selector.close.assert_called_once()
+
+    def test_registration_failure_closes_pipes_and_terminates_child(self):
+        selector, process = mock.MagicMock(), mock.MagicMock()
+        process.poll.return_value = None
+        selector.register.side_effect = ValueError("registration failed")
+        with mock.patch.object(process_adapter.selectors, "DefaultSelector", return_value=selector), mock.patch.object(process_adapter.subprocess, "Popen", return_value=process), mock.patch.object(process_adapter.os, "set_blocking"), mock.patch.object(process_adapter, "_terminate") as terminate:
+            with self.assertRaisesRegex(ValueError, "registration failed"):
+                self.invoke()
+        selector.close.assert_called_once()
+        process.stdin.close.assert_called_once()
+        process.stdout.close.assert_called_once()
+        terminate.assert_called_once_with(process)
+
+    def test_cleanup_errors_do_not_mask_primary_or_skip_other_resources(self):
+        selector, process = mock.MagicMock(), mock.MagicMock()
+        process.poll.return_value = None
+        selector.register.side_effect = ValueError("primary failure")
+        selector.close.side_effect = OSError("selector close")
+        process.stdin.close.side_effect = OSError("stdin close")
+        with mock.patch.object(process_adapter.selectors, "DefaultSelector", return_value=selector), mock.patch.object(process_adapter.subprocess, "Popen", return_value=process), mock.patch.object(process_adapter.os, "set_blocking"), mock.patch.object(process_adapter, "_terminate", side_effect=OSError("terminate failed")) as terminate:
+            with self.assertRaisesRegex(ValueError, "primary failure") as caught:
+                self.invoke()
+        process.stdout.close.assert_called_once()
+        terminate.assert_called_once_with(process)
+        if hasattr(caught.exception, "__notes__"):
+            self.assertIn("cleanup", " ".join(caught.exception.__notes__))
+
+    def test_real_child_is_reaped_when_nonblocking_setup_fails(self):
+        import subprocess
+        started = []
+        real_spawn = subprocess.Popen
+        def capture_spawn(*args, **kwargs):
+            process = real_spawn(*args, **kwargs)
+            started.append(process)
+            return process
+        with tempfile.TemporaryDirectory(prefix="interop-setup-fault-") as tmp:
+            try:
+                with mock.patch.object(process_adapter.subprocess, "Popen", side_effect=capture_spawn), mock.patch.object(process_adapter.os, "set_blocking", side_effect=OSError("injected fd setup failure")):
+                    with self.assertRaisesRegex(OSError, "injected fd setup failure"):
+                        process_adapter._run_bounded_process(
+                            (sys.executable, "-c", "import time;time.sleep(10)"), cwd=Path(tmp),
+                            input_bytes=b"context", env={}, timeout_seconds=1, max_output_bytes=8192,
+                        )
+                self.assertEqual(len(started), 1)
+                process = started[0]
+                self.assertIsNotNone(process.returncode, "runner must reap its spawned child before returning the setup error")
+                self.assertTrue(process.stdin.closed)
+                self.assertTrue(process.stdout.closed)
+            finally:
+                # Test fallback is after assertions, never the cause of a passing result.
+                for process in started:
+                    if process.poll() is None:
+                        process.kill()
+                    process.wait(timeout=3)
+                    process.stdin.close()
+                    process.stdout.close()
+
+    def test_cleanup_failure_after_success_cannot_return_success(self):
+        selector, process = mock.MagicMock(), mock.MagicMock()
+        selector.get_map.return_value = {}
+        process.wait.return_value = 0
+        process.poll.return_value = 0
+        selector.close.side_effect = OSError("selector close")
+        with mock.patch.object(process_adapter.selectors, "DefaultSelector", return_value=selector), mock.patch.object(process_adapter.subprocess, "Popen", return_value=process), mock.patch.object(process_adapter.os, "set_blocking"):
+            with self.assertRaisesRegex(OSError, "cleanup"):
+                self.invoke()
+        process.stdin.close.assert_called_once()
+        process.stdout.close.assert_called_once()
+
+
+    def test_caller_except_does_not_hide_runner_cleanup_failure(self):
+        selector, process = mock.MagicMock(), mock.MagicMock()
+        selector.get_map.return_value = {}
+        process.wait.return_value = 0
+        process.poll.return_value = 0
+        selector.close.side_effect = OSError("selector close")
+        with mock.patch.object(process_adapter.selectors, "DefaultSelector", return_value=selector), mock.patch.object(process_adapter.subprocess, "Popen", return_value=process), mock.patch.object(process_adapter.os, "set_blocking"):
+            try:
+                raise RuntimeError("caller failure")
+            except RuntimeError as caller:
+                with self.assertRaisesRegex(OSError, "cleanup"):
+                    self.invoke()
+                self.assertFalse(getattr(caller, "__notes__", []), "runner must not annotate an unrelated caller exception")
+
+
 class ProcessAdapterTests(unittest.TestCase):
     def setUp(self):
         self.tempdir = tempfile.TemporaryDirectory()
