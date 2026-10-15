@@ -378,15 +378,21 @@ class RetryPolicy:
         )
 
     def planned_wait_ms(self) -> int:
-        """The most this policy can make a single turn wait, jitter at its ceiling.
+        """A safe upper bound for one turn's retry waiting budget.
 
-        Printed by ``--dry-run``: an operator approving a run should see that a policy of
-        eight attempts with a 20 s ceiling can cost two minutes per turn before any model
-        time is counted.
+        Jitter never exceeds the policy ceiling, while ``retry_after_ms`` can replace that
+        ceiling up to ``max_delay_ms`` when it is respected.  ``plan`` also refuses a wait
+        that would exceed the remaining waiting deadline, so the reported bound is the
+        smaller of those limits.  This is intentionally an upper bound, not a promise that
+        every turn will spend that much time.
         """
         if not self.enabled:
             return 0
-        return sum(self._ceiling(attempt) for attempt in range(1, self.max_attempts))
+        if self.respect_retry_after:
+            schedule_upper = (self.max_attempts - 1) * self.max_delay_ms
+        else:
+            schedule_upper = sum(self._ceiling(attempt) for attempt in range(1, self.max_attempts))
+        return min(self.deadline_ms, schedule_upper)
 
     def describe(self) -> str:
         """One line, for ``--dry-run`` and ``doctor``."""
@@ -396,7 +402,7 @@ class RetryPolicy:
         return (
             f"retry={self.max_attempts - 1} additional attempt(s) on {', '.join(self.retry_on)}; "
             f"base {self.base_delay_ms} ms x{self.multiplier:g} up to {self.max_delay_ms} ms, "
-            f"{jitter}, deadline {self.deadline_ms} ms (worst case {self.planned_wait_ms()} ms/turn)"
+            f"{jitter}, deadline {self.deadline_ms} ms (safe wait upper bound {self.planned_wait_ms()} ms/turn)"
         )
 
     def as_dict(self) -> dict[str, Any]:
