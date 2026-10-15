@@ -1,3 +1,12 @@
+## Unreleased — delegation expiry uses timezone-aware instants
+
+`agent_identity.verify_delegation_chain()` now parses expiry and reference
+timestamps as timezone-aware ISO 8601 instants and compares their UTC values.
+Naive or malformed timestamps fail closed. This prevents offset-bearing
+timestamps from passing or failing expiry checks based on lexical order.
+The identity suite covers an equal instant written with a different offset
+and an expiry timestamp without a timezone.
+
 ## Unreleased (one-hundred-sixtieth batch) — construction-site AI discipline (AI-construction absorption)
 
 New module `construction_agents.py`: `progress_evidence_receipt()` —
