@@ -421,6 +421,7 @@ py-modules = [
     "code_formatter",
     "code_scan",
     "code_signer",
+    "coding_evidence",
     "coerce_guard",
     "column_store",
     "command_hooks",

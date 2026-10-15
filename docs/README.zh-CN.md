@@ -89,13 +89,15 @@ bin/northstar agent --workspace . --coding-mode --enable-security-tools \
   --prompt "先调用 SecurityScan 并保存 baseline_id；审阅发现后修复明确的问题，再用 compare_to 对该基线复测并汇报新增、消失和残留项"
 ```
 
-编程任务可使用 `--coding-mode` 引导 agent 按“检查仓库 → 制定计划 → 修改 → 运行已授权的检查 → 审阅 diff”工作。它不会自动授予文件写入或 Shell 权限；请只放行本次需要的工具：
+编程任务可使用 `--coding-mode` 引导 agent 按“检查仓库 → 制定计划 → 修改 → 运行已授权的检查 → 审阅 diff”工作。运行前后，CLI 还会独立比较 Git 工作区状态和脏文件内容，报告净改动文件、HEAD 与暂存区变化；它不依赖模型自述，也不执行仓库脚本。Git 忽略规则仍然生效；文件数和哈希读取有上限，超出时会标记 `coverage=partial`；非 Git 工作区会标记 `unavailable`。`--json` 在运行结果后追加一条 `type=coding_evidence` 记录。此模式不会自动授予文件写入或 Shell 权限；请只放行本次需要的工具：
 
 ```sh
 bin/northstar agent --workspace . --coding-mode \
   --allow-tool Write --allow-tool Edit --allow-tool Shell \
   --prompt "修复这个问题，运行相关检查，并汇报 diff"
 ```
+
+只读的编程审查可以使用 `--coding-mode --read-only`；它仍会输出工作区变化收据，正常情况下应显示 `changed_files=0`。这份收据只说明运行前后的 Git 可见净变化，不证明代码正确，也不证明检查通过；请结合 agent 汇报和实际检查结果审阅。
 
 Sidecar 本地验证：
 

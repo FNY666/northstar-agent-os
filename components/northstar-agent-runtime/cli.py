@@ -333,8 +333,8 @@ def _add_policy_arguments(parser: argparse.ArgumentParser) -> None:
             "--coding-mode",
             action="store_true",
             help=(
-                "guide coding tasks through repository inspection, a focused patch, approved checks, "
-                "diff review, and evidence reporting; does not grant tools"
+                "guide coding tasks and emit independent Git workspace-change evidence; "
+                "permissions remain unchanged"
             ),
         )
         policy.add_argument(
@@ -660,7 +660,7 @@ def _print_dry_run(
     print(f"provider={args.provider} model={config.model}{agent_suffix}")
     print(f"permission_mode={config.permission_mode}")
     if getattr(args, "coding_mode", False):
-        print("coding_mode=on (workflow instructions only; permissions unchanged)")
+        print("coding_mode=on (workflow instructions + post-run Git evidence; permissions unchanged)")
     print(f"tools={','.join(tool_names) or '(none)'}")
     print(f"allowed_tools={','.join(config.allowed_tools) or '(none)'}  "
           f"disallowed_tools={','.join(config.disallowed_tools) or '(none)'}")
@@ -1245,7 +1245,12 @@ def _setup_notes(
     }
 
 
-def _stream_events(args: argparse.Namespace, runtime: Any, store: Any, prompt: str) -> int:
+def _stream_events(
+    args: argparse.Namespace,
+    runtime: Any,
+    store: Any,
+    prompt: str,
+) -> int:
     """Run the prompt, print every event as it arrives, then the one-line summary; return the exit code."""
     if args.resume_from:
         resume = store.transcript(args.resume_from)
@@ -1288,6 +1293,45 @@ def _stream_events(args: argparse.Namespace, runtime: Any, store: Any, prompt: s
             name = denial.get("tool", "?") if isinstance(denial, dict) else getattr(denial, "tool", "?")
             print(f"  ! refused: {name}", file=sys.stderr)
     return exit_code
+
+
+def _print_coding_evidence(args: argparse.Namespace, before: Any) -> None:
+    """Print a host-observed workspace receipt after all run-owned clients stop."""
+    from coding_evidence import compare_snapshots, snapshot_workspace
+
+    evidence = compare_snapshots(before, snapshot_workspace(args.workspace))
+    if args.json:
+        # A CLI receipt follows the runtime event stream. It is separate from
+        # model-authored text and keeps --json usable by automation.
+        print(json.dumps(evidence, ensure_ascii=True, sort_keys=True))
+        return
+    changed = evidence.get("changed_files", [])
+    print(
+        f"\n[coding_evidence] status={evidence['status']} "
+        f"changed_files={len(changed)} coverage={evidence['coverage']}"
+    )
+    if evidence.get("reason"):
+        print(f"  reason: {evidence['reason']}")
+    for item in changed:
+        before_status = item.get("before_status", "clean")
+        after_status = item.get("after_status", "clean")
+        display_path = json.dumps(item["path"], ensure_ascii=True)
+        committed = " [committed]" if item.get("committed") else ""
+        staged = " [staged]" if item.get("staged") else ""
+        print(
+            f"  {item['change']}: {display_path} "
+            f"({before_status} -> {after_status}){committed}{staged}"
+        )
+    if evidence.get("head_changed"):
+        before_head = evidence.get("head_before") or "(unborn)"
+        after_head = evidence.get("head_after") or "(unborn)"
+        print(f"  HEAD: {before_head} -> {after_head}")
+    if evidence.get("index_changed"):
+        print("  staged index changed")
+    if evidence.get("unverifiable_paths"):
+        print("  unverifiable: " + json.dumps(evidence["unverifiable_paths"], ensure_ascii=True))
+    for note in evidence.get("coverage_notes", []):
+        print(f"  coverage note: {note}")
 
 
 def _run(args: argparse.Namespace) -> int:
@@ -1456,6 +1500,12 @@ def _run(args: argparse.Namespace) -> int:
     # Connect MCP servers only now (never for --dry-run/--show-pricing/--probe):
     # each remote tool lands in the run's registry as a mutating-by-default
     # mcp__<server>__<tool> spec and still crosses the permission gate and hooks.
+    coding_snapshot = None
+    if getattr(args, "coding_mode", False):
+        from coding_evidence import snapshot_workspace
+
+        coding_snapshot = snapshot_workspace(args.workspace)
+
     mcp_clients: list[Any] = []
     if mcp_servers:
         try:
@@ -1463,10 +1513,13 @@ def _run(args: argparse.Namespace) -> int:
         except ValueError as error:
             raise RunConfigurationError(str(error)) from error
     try:
-        return _stream_events(args, runtime, session.store, prompt)
+        exit_code = _stream_events(args, runtime, session.store, prompt)
     finally:
         for client in mcp_clients:
             client.close()
+    if coding_snapshot is not None:
+        _print_coding_evidence(args, coding_snapshot)
+    return exit_code
 
 
 def _print_event(event: Any, *, quiet: bool = False, stream_open: bool = False) -> None:
