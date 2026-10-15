@@ -30,6 +30,10 @@ EXPECTED_ROLE_BUDGETS = {
 }
 
 
+@unittest.skipUnless(
+    TEAM_WORKSPACE.is_dir(),
+    "repository example fixtures are absent from the component-only guard copy",
+)
 class SixAgentTeamExampleTests(unittest.TestCase):
     def test_all_profiles_compile_with_known_tools_and_narrow_grants(self):
         profiles = discover_agent_files(
