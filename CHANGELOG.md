@@ -1,3 +1,9 @@
+## Unreleased — complete runtime API reference coverage
+
+The runtime API manifest and generated reference now include the 518 public
+modules that were missing from the catalog. The existing generated/internal
+exclusions remain explicit.
+
 ## Unreleased — delegation expiry uses timezone-aware instants
 
 `agent_identity.verify_delegation_chain()` now parses expiry and reference
