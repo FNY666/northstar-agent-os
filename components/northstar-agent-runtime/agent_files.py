@@ -22,6 +22,7 @@ The markdown body becomes the agent's prompt.
 from __future__ import annotations
 
 import hashlib
+import math
 import re
 from pathlib import Path
 from typing import Iterable, Mapping
@@ -44,6 +45,7 @@ _ALLOWED_KEYS = frozenset({
     "model",
     "max_turns",
     "max_tool_calls",
+    "max_budget_usd",
     "allow_delegation",
     "require_verdict",
 })
@@ -194,6 +196,17 @@ def _parse_agent_file(
     ):
         fail(f"max_tool_calls must be an integer between 1 and {DEFAULT_MAX_TOOL_CALLS} (may only tighten)")
 
+    max_budget_usd = fields.get("max_budget_usd")
+    if max_budget_usd is not None:
+        if isinstance(max_budget_usd, bool) or not isinstance(max_budget_usd, (int, float)):
+            fail("max_budget_usd must be a positive finite number")
+        try:
+            max_budget_usd = float(max_budget_usd)
+        except OverflowError:
+            fail("max_budget_usd must be a positive finite number")
+        if not math.isfinite(max_budget_usd) or max_budget_usd <= 0:
+            fail("max_budget_usd must be a positive finite number")
+
     allow_delegation = fields.get("allow_delegation", False)
     if not isinstance(allow_delegation, bool):
         fail("allow_delegation must be a boolean")
@@ -215,6 +228,7 @@ def _parse_agent_file(
         model=model,
         max_turns=max_turns,
         max_tool_calls=max_tool_calls,
+        max_budget_usd=max_budget_usd,
         allow_delegation=allow_delegation,
         require_verdict=require_verdict,
         read_only_enforced=read_only,
