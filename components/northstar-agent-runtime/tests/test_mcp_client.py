@@ -398,6 +398,69 @@ class ToolPinningTests(unittest.TestCase):
         finally:
             client.close()
 
+    def test_call_revalidates_output_schema_before_invocation(self):
+        client = self.connect()
+        records: list[dict] = []
+        client.audit = records.append
+        try:
+            original_request = client._request
+            remote_calls = []
+
+            def output_schema_changed(method, params=None):
+                result = original_request(method, params)
+                if method == "tools/list":
+                    result["tools"][0]["outputSchema"] = {
+                        "type": "object",
+                        "properties": {"result": {"type": "string"}},
+                        "required": ["result"],
+                    }
+                elif method == "tools/call":
+                    remote_calls.append(params)
+                return result
+
+            # The admission pin had no outputSchema. Adding one changes the
+            # protocol contract and must be quarantined before remote work.
+            client._request = output_schema_changed
+            result = client.call_tool(client.tool_names()[0], {"text": "hi"})
+
+            self.assertTrue(result.is_error)
+            self.assertIn("tool-definition drift", result.text())
+            self.assertTrue(client.quarantined)
+            self.assertEqual(remote_calls, [], "output-schema drift must be denied before tools/call")
+            self.assertEqual(records[0]["type"], "mcp.tool_drift")
+            self.assertEqual(records[0]["drifts"][0]["kind"], "changed")
+        finally:
+            client.close()
+
+    def test_call_refuses_oversized_output_schema_during_revalidation(self):
+        from mcp_client import MAX_SCHEMA_CHARS
+
+        client = self.connect()
+        try:
+            original_request = client._request
+            remote_calls = []
+
+            def oversized_schema(method, params=None):
+                result = original_request(method, params)
+                if method == "tools/list":
+                    result["tools"][0]["outputSchema"] = {
+                        "type": "string",
+                        "description": "x" * MAX_SCHEMA_CHARS,
+                    }
+                elif method == "tools/call":
+                    remote_calls.append(params)
+                return result
+
+            client._request = oversized_schema
+            result = client.call_tool(client.tool_names()[0], {})
+
+            self.assertTrue(result.is_error)
+            self.assertIn("could not verify current tool definitions", result.text())
+            self.assertIn("outputSchema", result.text())
+            self.assertEqual(remote_calls, [], "an over-limit schema must be denied before tools/call")
+        finally:
+            client.close()
+
     def test_call_refuses_oversized_tool_list_during_revalidation(self):
         from mcp_client import MAX_TOOLS_PER_SERVER
 
@@ -494,6 +557,16 @@ class ToolPinningTests(unittest.TestCase):
         self.assertNotEqual(base, tool_definition_digest("s", "t", "DESC", {"type": "object"}))
         self.assertNotEqual(base, tool_definition_digest("s", "t", "desc", {"type": "string"}))
         self.assertNotEqual(base, tool_definition_digest("s", "other", "desc", {"type": "object"}))
+        self.assertEqual(
+            base,
+            tool_definition_digest("s", "t", "desc", {"type": "object"}, output_schema=None),
+            "input-only pins keep their existing digest",
+        )
+        output_schema = {"type": "object", "properties": {"result": {"type": "string"}}}
+        self.assertNotEqual(
+            base,
+            tool_definition_digest("s", "t", "desc", {"type": "object"}, output_schema=output_schema),
+        )
 
     def test_baseline_persists_across_reconnects(self):
         import tempfile
