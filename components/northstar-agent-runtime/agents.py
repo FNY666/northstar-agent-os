@@ -13,6 +13,7 @@ unparseable, unjustified, or contradicted PASS is a FAIL, never a pass.
 """
 from __future__ import annotations
 
+import math
 import re
 from dataclasses import dataclass, field, replace
 from typing import Any, Iterable, Literal, Mapping, Sequence
@@ -62,6 +63,15 @@ class AgentDefinition:
             raise TypeError(f"agent {self.name}: tools must be a sequence of names")
         if not self.tools:
             raise ValueError(f"agent {self.name}: an agent with no tools cannot do anything")
+        if self.max_budget_usd is not None:
+            if isinstance(self.max_budget_usd, bool) or not isinstance(self.max_budget_usd, (int, float)):
+                raise ValueError("max_budget_usd must be a positive finite number")
+            try:
+                budget = float(self.max_budget_usd)
+            except OverflowError:
+                budget = math.inf
+            if not math.isfinite(budget) or budget <= 0:
+                raise ValueError("max_budget_usd must be a positive finite number")
 
     @property
     def is_read_only(self) -> bool:
