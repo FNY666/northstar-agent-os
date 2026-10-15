@@ -9,6 +9,7 @@ import unittest
 import support  # noqa: F401  (installs the sys.path shim)
 from support import RuntimeTestCase, text_turn, tool_turn
 
+from budget import Budget
 from events import EXIT_CODES  # the terminal convention lives with the event feed
 from providers.base import (
     RESULT_SUBTYPES,
@@ -20,6 +21,7 @@ from providers.base import (
     ToolResultBlock,
     ToolUseBlock,
     Usage,
+    ProviderError,
     UserMessage,
     transcript_to_api,
 )
@@ -93,6 +95,29 @@ class EventTypeTests(unittest.TestCase):
         )
         self.assertEqual(total.total_tokens, 25)
         self.assertEqual(Usage.from_mapping({"input_tokens": "nope", "output_tokens": 4}).output_tokens, 4)
+
+
+class UsageBillingValidationTests(unittest.TestCase):
+    def test_budget_rejects_malformed_provider_usage_without_recording_cost(self):
+        malformed = (
+            {"input_tokens": "secret-count"},
+            {"input_tokens": True},
+            {"input_tokens": 1.5},
+            {"input_tokens": float("nan")},
+            {"input_tokens": float("inf")},
+            {"input_tokens": -1},
+            [],
+        )
+        for usage in malformed:
+            with self.subTest(value_type=type(usage).__name__):
+                budget = Budget(max_budget_usd=0.25)
+                with self.assertRaises(ProviderError):
+                    budget.observe(usage, "gpt-5")
+                self.assertEqual(budget.total_cost_usd, 0.0)
+                self.assertEqual(budget.breakdowns, [])
+
+        # Disk/session readers retain their tolerant legacy semantics.
+        self.assertEqual(Usage.from_mapping({"input_tokens": "nope"}), Usage())
 
 
 class ExactlyOneResultTests(RuntimeTestCase):

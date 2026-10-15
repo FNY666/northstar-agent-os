@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass, field
-from typing import Any, Iterable, Iterator, Literal, Sequence
+from typing import Any, Iterable, Iterator, Literal, Mapping, Sequence
 
 # --------------------------------------------------------------------------
 # Closed vocabularies
@@ -81,6 +81,31 @@ class ProviderError(RuntimeError):
         self.failure_kind = failure_kind
         self.status_code = status_code if isinstance(status_code, int) and not isinstance(status_code, bool) else None
         self.retry_after_ms = retry_after_ms if isinstance(retry_after_ms, int) and not isinstance(retry_after_ms, bool) else None
+
+
+def _checked_usage_count(value: Any, field_name: str) -> int:
+    """Validate a present count supplied by a live provider before billing."""
+    if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+        raise ProviderError(
+            f"provider returned invalid {field_name}: expected a non-negative integer"
+        )
+    return value
+
+
+_PROVIDER_USAGE_MISSING = object()
+
+
+def _provider_usage_count(
+    value: Any, key: str, field_name: str, *, optional_null: bool = False
+) -> int | None:
+    """Return None for an absent optional field; reject malformed present counts."""
+    if isinstance(value, Mapping):
+        raw = value.get(key, _PROVIDER_USAGE_MISSING)
+    else:
+        raw = getattr(value, key, _PROVIDER_USAGE_MISSING)
+    if raw is _PROVIDER_USAGE_MISSING or (optional_null and raw is None):
+        return None
+    return _checked_usage_count(raw, field_name)
 
 
 # --------------------------------------------------------------------------
@@ -172,6 +197,30 @@ class Usage:
             cache_read_input_tokens=number("cache_read_input_tokens"),
             cache_creation_input_tokens=number("cache_creation_input_tokens"),
         )
+
+
+def _usage_from_provider_value(value: Any) -> Usage:
+    """Read live metering data strictly; historical records use the tolerant reader."""
+    if value is None:
+        return Usage()
+    if isinstance(value, Usage):
+        return value
+    if not isinstance(value, Mapping):
+        raise ProviderError("provider returned a malformed usage object")
+    input_tokens = _provider_usage_count(value, "input_tokens", "usage.input_tokens")
+    output_tokens = _provider_usage_count(value, "output_tokens", "usage.output_tokens")
+    cache_read = _provider_usage_count(
+        value, "cache_read_input_tokens", "usage.cache_read_input_tokens", optional_null=True
+    )
+    cache_creation = _provider_usage_count(
+        value, "cache_creation_input_tokens", "usage.cache_creation_input_tokens", optional_null=True
+    )
+    return Usage(
+        input_tokens=0 if input_tokens is None else input_tokens,
+        output_tokens=0 if output_tokens is None else output_tokens,
+        cache_read_input_tokens=0 if cache_read is None else cache_read,
+        cache_creation_input_tokens=0 if cache_creation is None else cache_creation,
+    )
 
 
 ZERO_USAGE = Usage()

@@ -174,6 +174,19 @@ class NormaliseTests(unittest.TestCase):
         self.assertEqual(usage.cache_read_input_tokens, 40, "server-side prefix caching must stay visible to the budget")
         self.assertEqual(usage.cache_creation_input_tokens, 0)
 
+    def test_malformed_provider_usage_fails_closed(self):
+        for value in ("not-a-count", True, 1.5, -1):
+            with self.subTest(value=type(value).__name__):
+                with self.assertRaises(ProviderError):
+                    OpenAICompatProvider.normalise(_assistant("x", usage={"prompt_tokens": value}))
+
+        with self.assertRaises(ProviderError):
+            OpenAICompatProvider.normalise(
+                _assistant("x", usage={"prompt_tokens_details": {"cached_tokens": "secret-count"}})
+            )
+        with self.assertRaises(ProviderError):
+            OpenAICompatProvider.normalise(_assistant("x", usage="malformed"))
+
     def test_finish_reason_mapping(self):
         for finish, expected in (("stop", "end_turn"), ("tool_calls", "tool_use"), ("length", "max_tokens"), ("content_filter", "refusal")):
             with self.subTest(finish=finish):
