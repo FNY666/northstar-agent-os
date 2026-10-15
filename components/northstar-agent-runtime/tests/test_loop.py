@@ -16,6 +16,14 @@ from providers.scripted import ScriptedProvider
 from tools import ToolRegistry, ToolResult, ToolSpec
 
 
+class RuntimeBudgetValidationTests(unittest.TestCase):
+    def test_non_finite_and_invalid_run_ceilings_are_rejected(self):
+        for value in (0, -1, float("nan"), float("inf"), float("-inf"), 10**1000, True, "1.0"):
+            with self.subTest(value=repr(value)):
+                with self.assertRaises(RuntimeConfigurationError):
+                    RuntimeConfig(max_budget_usd=value)
+
+
 class InitEventTests(RuntimeTestCase):
     def test_the_init_event_describes_the_governed_run(self):
         workspace = self.workspace({"a": "1"})
