@@ -307,8 +307,8 @@ class McpStdioClient:
         # next call_tool() drains it via refresh_tools() so a live rug-pull
         # is caught even between manual refreshes.
         self._pending_list_changed: bool = False
-        # MCP 2026-07-28: explicit opt-in required for notification types.
-        # Notifications arriving before opt-in are spec violations (untrusted).
+        # Local permission to treat a list_changed notification as an early
+        # refresh cue. This is not a wire-level subscriptions/listen request.
         self._list_changed_subscribed: bool = False
         self._untrusted_notifications: list[str] = []
         self._info = {"name": "northstar-agent-runtime", "version": __version__}
@@ -660,15 +660,29 @@ class McpStdioClient:
         tools = listed.get("tools") if isinstance(listed, dict) else None
         if not isinstance(tools, list):
             raise McpError(f"mcp server {self.name!r}: tools/list must return an array")
+        if len(tools) > MAX_TOOLS_PER_SERVER:
+            raise McpError(
+                f"mcp server {self.name!r}: tools/list returned more than "
+                f"{MAX_TOOLS_PER_SERVER} tools during revalidation"
+            )
         observed: dict[str, str] = {}
         for raw in tools:
             if not isinstance(raw, dict):
-                continue
+                raise McpError(f"mcp server {self.name!r}: a tool entry is not an object during revalidation")
             tool_name = _coerce_name_part(str(raw.get("name", "")), "tool", self.name)
             description = str(raw.get("description", "") or "")[:MAX_DESCRIPTION_CHARS]
             schema = raw.get("inputSchema") or {}
             if not isinstance(schema, dict):
-                schema = {}
+                raise McpError(
+                    f"mcp server {self.name!r}: tool {tool_name!r} inputSchema "
+                    "is not an object during revalidation"
+                )
+            encoded = json.dumps(schema, sort_keys=True)
+            if len(encoded) > MAX_SCHEMA_CHARS:
+                raise McpError(
+                    f"mcp server {self.name!r}: tool {tool_name!r} inputSchema "
+                    f"is {len(encoded)} chars during revalidation (cap {MAX_SCHEMA_CHARS})"
+                )
             observed[tool_name] = tool_definition_digest(self.name, tool_name, description, schema)
         drifts: list[ToolDrift] = []
         for tool_name, expected in self._tool_digests.items():
@@ -768,23 +782,24 @@ class McpStdioClient:
                 f"mcp {self.name}/{tool_name}: denied: server is quarantined "
                 f"({self._quarantine_reason}); re-admit the server to clear"
             )
-        # Drain any buffered notifications before executing: a
-        # notifications/tools/list_changed may already be sitting in the
-        # stdio buffer (arrived after the last _exchange consumed input).
-        # Without this drain, the tool call would go out before we notice
-        # the server changed its toolset -- a live rug-pull window.
+        # A buffered list_changed notification is only a cue to refetch. This
+        # stdio client does not hold the long-lived subscriptions/listen stream
+        # required by MCP 2026-07-28, so notification delivery alone cannot
+        # protect the call boundary. Re-list and compare the pinned definitions
+        # before every invocation, whether or not a notification arrived.
         self._drain_notifications()
-        # Drain any pending list_changed notification: the server announced
-        # a toolset change, so re-verify pins before executing anything.
-        if self._pending_list_changed:
-            self._pending_list_changed = False
+        self._pending_list_changed = False
+        try:
             drifts = self.refresh_tools()
-            if drifts and self._quarantined:
-                return ToolResult.error(
-                    f"mcp {self.name}/{tool_name}: denied: server pushed "
-                    f"notifications/tools/list_changed and the re-list drifted "
-                    f"({self._quarantine_reason}); re-admit the server to clear"
-                )
+        except McpError as error:
+            return ToolResult.error(
+                f"mcp {self.name}/{tool_name}: denied: could not verify current tool definitions: {error}"
+            )
+        if drifts and self._quarantined:
+            return ToolResult.error(
+                f"mcp {self.name}/{tool_name}: denied: tool-definition drift detected "
+                f"({self._quarantine_reason}); re-admit the server to clear"
+            )
         try:
             self.tool(tool_name)  # raises McpError for an unknown tool
         except McpError as error:
@@ -1053,6 +1068,8 @@ class McpStdioClient:
         this records the opt-in; notifications arriving before it are treated
         as spec violations.
         """
+        # This is local filtering only: it does not send a subscriptions/listen
+        # request. Per-call revalidation remains authoritative.
         self._list_changed_subscribed = True
 
     def _read_line(self, deadline: float) -> str | None:
