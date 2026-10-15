@@ -58,6 +58,13 @@ class EstimateValidationTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             gate.check_and_charge("tool", "0.001")
 
+    def test_non_finite_estimates_are_rejected(self):
+        gate = PerCallBudget()
+        for estimate in (float("nan"), float("inf"), float("-inf"), 10**1000):
+            with self.subTest(estimate=repr(estimate)):
+                with self.assertRaises(ValueError):
+                    gate.check_and_charge("tool", estimate)
+
     def test_zero_cost_call_allowed(self):
         gate = PerCallBudget(max_budget_usd=1.0)
         remaining = gate.check_and_charge("memory_read", 0.0)
@@ -95,6 +102,12 @@ class PerCallCeilingTests(unittest.TestCase):
         self.assertAlmostEqual(exc.needed, 0.002)
         self.assertAlmostEqual(exc.available, 5.0 - 0.005)
         self.assertEqual(exc.ceiling, CEILING_PER_CALL)
+
+    def test_non_finite_custom_ceilings_rejected(self):
+        for ceiling in (float("nan"), float("inf"), float("-inf"), 10**1000):
+            with self.subTest(ceiling=repr(ceiling)):
+                with self.assertRaises(ValueError):
+                    PerCallBudget(per_call_ceilings={"tool": ceiling})
 
     def test_custom_per_call_ceilings(self):
         gate = PerCallBudget(
@@ -214,12 +227,10 @@ class AccountingTests(unittest.TestCase):
         self.assertAlmostEqual(gate.total_spent_usd, 0.0028)
 
     def test_invalid_max_budget_rejected(self):
-        with self.assertRaises(ValueError):
-            PerCallBudget(max_budget_usd=0)
-        with self.assertRaises(ValueError):
-            PerCallBudget(max_budget_usd=-5.0)
-        with self.assertRaises(ValueError):
-            PerCallBudget(max_budget_usd=True)
+        for value in (0, -5.0, float("nan"), float("inf"), float("-inf"), 10**1000, True, "1.0"):
+            with self.subTest(value=repr(value)):
+                with self.assertRaises(ValueError):
+                    PerCallBudget(max_budget_usd=value)
 
 
 if __name__ == "__main__":
