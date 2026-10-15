@@ -76,6 +76,14 @@ def _all_pricing():
     return list(PRICE_TABLE.values())
 
 
+class BudgetInputValidationTests(unittest.TestCase):
+    def test_non_finite_and_invalid_ceilings_are_rejected(self):
+        for value in (0, -1, float("nan"), float("inf"), float("-inf"), 10**1000, True, "1.0"):
+            with self.subTest(value=repr(value)):
+                with self.assertRaises(ValueError):
+                    Budget(max_budget_usd=value)
+
+
 class BudgetAccumulationTests(unittest.TestCase):
     def test_totals_accumulate_across_turns(self):
         budget = Budget()

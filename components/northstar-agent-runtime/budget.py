@@ -8,6 +8,7 @@ count: it comes from provider-reported usage multiplied by the table below.
 """
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass, field
 from typing import Any, Iterable, Mapping
 
@@ -170,6 +171,21 @@ class Budget:
     breakdowns: list[CostBreakdown] = field(default_factory=list)
     pricing_estimated: bool = False
     models: tuple[str, ...] = ()
+
+    def __post_init__(self) -> None:
+        if self.max_budget_usd is None:
+            return
+        if isinstance(self.max_budget_usd, bool) or not isinstance(
+            self.max_budget_usd, (int, float)
+        ):
+            raise ValueError("max_budget_usd must be a positive finite number or None")
+        try:
+            ceiling = float(self.max_budget_usd)
+        except OverflowError as error:
+            raise ValueError("max_budget_usd must be a positive finite number or None") from error
+        if not math.isfinite(ceiling) or ceiling <= 0:
+            raise ValueError("max_budget_usd must be a positive finite number or None")
+        self.max_budget_usd = ceiling
 
     def observe(self, usage: Any, model: str) -> CostBreakdown:
         breakdown = compute_cost(usage, model)
